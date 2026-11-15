@@ -4886,7 +4886,7 @@ $ ./build/ripwire-merged . --no-ignore --top-k=3
 
 **Answers:** read files larger than N bytes lexically;
 
-default 64MB files over N bytes are still indexed, read lexically instead of parsed: defs by line shape, calls by name( (default 64MB; suffix = 1024^n). Every file is also parsed under a time budget (4 s + 1 s/MiB, env RIPWIRE_PARSE_BUDGET=<scale>); one that runs past it is read lexically too. .json over 256KB / .yaml over 512KB index their first 256 top-level keys (env RIPWIRE_DATA_KEYS=N). Only a file over 1GB is dropped. Each event warns on stderr; the header counts them (lexical_files=, keys_cut=, skipped_oversize=) and the skipped verb rows them
+default 64MB files over N bytes are still indexed, read lexically instead of parsed: defs by line shape, calls by name( (default 64MB; suffix = 1024^n). Every file is also parsed under a work budget, in parser steps per MiB: the same on every machine (env RIPWIRE_PARSE_BUDGET=<scale>), with a wall-clock and memory backstop behind it; one that runs past either is read lexically too. .json over 256KB / .yaml over 512KB index their first 256 top-level keys (env RIPWIRE_DATA_KEYS=N). Only a file over 1GB is dropped. Each event warns on stderr; the header counts them (lexical_files=, keys_cut=, skipped_oversize=) and the skipped verb rows them
 
 **Try it**
 

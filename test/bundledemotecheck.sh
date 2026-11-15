@@ -22,9 +22,8 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home"; mkdir -p "$HOME"
-# A loaded machine must not push the 3-5 MiB fixtures past their parse budget (a lexical read is bundle-shaped by itself, so
-# arm (c) would see a demotion and (c2) a stderr warning): the budget scale is raised well past any measured parse time.
-export RIPWIRE_PARSE_BUDGET=20
+# The 3-5 MiB fixtures sit far under their parse budget, which counts parser steps, not seconds (PARSE-BUDGET-DETERMINISTIC):
+# a loaded machine cannot push them into a lexical read, so no RIPWIRE_PARSE_BUDGET scale is needed here.
 fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }

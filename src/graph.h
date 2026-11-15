@@ -9718,8 +9718,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     for( const UnindexedExt& ue : ing.crawlSkips.unindexedExts ) { g.unindexedFiles += ue.files; }
     for( const FileHealth& health : ing.fileHealth )   // NO-SKIP-INGEST: the lexically read code files (graph_lexical=)
     {
-        const FileIndexMode mode = FileIndexMode( health.indexMode );
-        g.lexicalFiles += ( mode == FileIndexMode::LexicalOverSize || mode == FileIndexMode::LexicalOverBudget ) ? 1u : 0u;
+        g.lexicalFiles += isLexicalCodeMode( FileIndexMode( health.indexMode ) ) ? 1u : 0u;
     }
 
     // S6-C canonical ids: `path::scope::name` per symbol (bare name when no scope). Computed once here so the

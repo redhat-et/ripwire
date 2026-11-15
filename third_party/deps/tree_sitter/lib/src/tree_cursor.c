@@ -503,7 +503,8 @@ void ts_tree_cursor_current_status(
   bool *has_later_named_siblings,
   bool *can_have_later_siblings_with_this_field,
   TSSymbol *supertypes,
-  unsigned *supertype_count
+  unsigned *supertype_count,
+  unsigned *walk_steps // RIPWIRE_VENDOR_PATCH(tree_sitter/002-query-progress-counts-status-walk): ancestors and siblings visited
 ) {
   const TreeCursor *self = (const TreeCursor *)_self;
   unsigned max_supertypes = *supertype_count;
@@ -518,6 +519,7 @@ void ts_tree_cursor_current_status(
   for (unsigned i = self->stack.size - 1; i > 0; i--) {
     TreeCursorEntry *entry = array_get(&self->stack, i);
     TreeCursorEntry *parent_entry = array_get(&self->stack, i - 1);
+    (*walk_steps)++; // RIPWIRE_VENDOR_PATCH(tree_sitter/002-query-progress-counts-status-walk)
 
     const TSSymbol *alias_sequence = ts_language_alias_sequence(
       self->tree->language,
@@ -556,6 +558,7 @@ void ts_tree_cursor_current_status(
       unsigned structural_child_index = entry->structural_child_index;
       if (!ts_subtree_extra(*entry->subtree)) structural_child_index++;
       for (unsigned j = entry->child_index + 1; j < sibling_count; j++) {
+        (*walk_steps)++; // RIPWIRE_VENDOR_PATCH(tree_sitter/002-query-progress-counts-status-walk)
         Subtree sibling = ts_subtree_children(*parent_entry->subtree)[j];
         TSSymbolMetadata sibling_metadata = ts_language_symbol_metadata(
           self->tree->language,

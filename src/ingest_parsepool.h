@@ -137,7 +137,7 @@ struct RawFacts
 };
 
 // NO-SKIP-INGEST: the size of every fact family before one file's extraction, so a file whose extraction ran past its
-// budget part-way through the tags pass leaves nothing behind before it is read lexically (rollBackFacts).
+// budget part-way through the tags pass leaves nothing behind before it is read lexically (rollBackFileFacts).
 struct RawFactsMark
 {
     std::size_t defs, refs, incs, binds, ffis, routeDefs, routeUses, constOpens, constructs;
@@ -148,17 +148,26 @@ inline RawFactsMark markFacts( const RawFacts& f ) noexcept
     return { f.defs.size(), f.refs.size(), f.incs.size(), f.binds.size(), f.ffis.size(), f.routeDefs.size(), f.routeUses.size(), f.constOpens.size(), f.constructs.size() };
 }
 
-inline void rollBackFacts( RawFacts& f, const RawFactsMark& m )
+// Drop one file's rows from every family, from its mark on. PARSE-BUDGET-DETERMINISTIC: a queued file's tags pass runs
+// after later files have appended their own rows, so the drop keeps theirs (for an inline file it is a plain truncate).
+template<class Row>
+inline void dropFileRowsFrom( std::vector<Row>& rows, std::size_t mark, std::uint32_t fileId )
 {
-    f.defs.resize( m.defs );
-    f.refs.resize( m.refs );
-    f.incs.resize( m.incs );
-    f.binds.resize( m.binds );
-    f.ffis.resize( m.ffis );
-    f.routeDefs.resize( m.routeDefs );
-    f.routeUses.resize( m.routeUses );
-    f.constOpens.resize( m.constOpens );
-    f.constructs.resize( m.constructs );
+    const auto tail = std::remove_if( rows.begin() + std::ptrdiff_t( mark ), rows.end(), [ fileId ]( const Row& row ) { return row.fileId == fileId; } );
+    rows.erase( tail, rows.end() );
+}
+
+inline void rollBackFileFacts( RawFacts& f, const RawFactsMark& m, std::uint32_t fileId )
+{
+    dropFileRowsFrom( f.defs, m.defs, fileId );
+    dropFileRowsFrom( f.refs, m.refs, fileId );
+    dropFileRowsFrom( f.incs, m.incs, fileId );
+    dropFileRowsFrom( f.binds, m.binds, fileId );
+    dropFileRowsFrom( f.ffis, m.ffis, fileId );
+    dropFileRowsFrom( f.routeDefs, m.routeDefs, fileId );
+    dropFileRowsFrom( f.routeUses, m.routeUses, fileId );
+    dropFileRowsFrom( f.constOpens, m.constOpens, fileId );
+    dropFileRowsFrom( f.constructs, m.constructs, fileId );
 }
 
 // A parsed-but-unqueried file waiting for the tags-query gate: owns its bytes and its TSTree until
@@ -175,15 +184,20 @@ struct PendingParsedFile
     std::string     bytes;
     TSTree*         tree   = nullptr;
     std::vector<PreprocDeadRange> ppDead;
+    RawFactsMark    factsMark{};   // PARSE-BUDGET-DETERMINISTIC: where this file's rows start, and the steps its parse
+    ParseDeadline   deadline{};    // spent: the tags pass at the flush resumes the same budget the inline pass would have
 
-    PendingParsedFile( std::uint32_t fileIdIn, const LangEntry* leIn, std::string&& bytesIn, TSTree* treeIn, std::vector<PreprocDeadRange>&& ppDeadIn )
-        : fileId( fileIdIn ), le( leIn ), bytes( std::move( bytesIn ) ), tree( treeIn ), ppDead( std::move( ppDeadIn ) )
+    PendingParsedFile( std::uint32_t fileIdIn, const LangEntry* leIn, std::string&& bytesIn, TSTree* treeIn, std::vector<PreprocDeadRange>&& ppDeadIn,
+                       const RawFactsMark& factsMarkIn, const ParseDeadline& deadlineIn )
+        : fileId( fileIdIn ), le( leIn ), bytes( std::move( bytesIn ) ), tree( treeIn ), ppDead( std::move( ppDeadIn ) ), factsMark( factsMarkIn ),
+          deadline( deadlineIn )
     {
     }
     PendingParsedFile( const PendingParsedFile& ) = delete;
     PendingParsedFile& operator=( const PendingParsedFile& ) = delete;
     PendingParsedFile( PendingParsedFile&& other ) noexcept
-        : fileId( other.fileId ), le( other.le ), bytes( std::move( other.bytes ) ), tree( other.tree ), ppDead( std::move( other.ppDead ) )
+        : fileId( other.fileId ), le( other.le ), bytes( std::move( other.bytes ) ), tree( other.tree ), ppDead( std::move( other.ppDead ) ),
+          factsMark( other.factsMark ), deadline( other.deadline )
     {
         other.tree = nullptr;
     }
@@ -200,6 +214,8 @@ struct PendingParsedFile
             bytes  = std::move( other.bytes );
             tree   = other.tree;
             ppDead = std::move( other.ppDead );
+            factsMark  = other.factsMark;
+            deadline   = other.deadline;
             other.tree = nullptr;
         }
         return *this;
@@ -366,6 +382,8 @@ struct ParsePoolShared
 // NO-SKIP-INGEST: a cached record whose index mode this run would not choose is re-extracted (as a late miss, so its
 // grammar is installed first): a file that now fits --max-file-size, or has grown past it, a lexical-budget record under
 // a RIPWIRE_PARSE_BUDGET scale (a raised budget retries the parse), and a cut data record under a RIPWIRE_DATA_KEYS cap.
+// PARSE-BUDGET-DETERMINISTIC: a backstop record (wall clock or memory) is ALWAYS retried — it says how loaded the machine
+// was, not what the file is, so a quiet run must not inherit it.
 inline bool cachedIndexModeStale( const CachedRecordHead* hit, const LangEntry& le, std::size_t maxFileBytes )
 {
     if( hit == nullptr )
@@ -376,6 +394,10 @@ inline bool cachedIndexModeStale( const CachedRecordHead* hit, const LangEntry& 
     const FileIndexMode mode    = FileIndexMode( rec.health.indexMode );
     const bool          overNow = !isDataKeysLang( le.lang ) && rec.sizeBytes >= 0 && std::size_t( rec.sizeBytes ) > maxFileBytes;
     if( overNow != ( mode == FileIndexMode::LexicalOverSize ) )
+    {
+        return true;
+    }
+    if( mode == FileIndexMode::LexicalWallBackstop || mode == FileIndexMode::LexicalMemoryBackstop )
     {
         return true;
     }
@@ -483,13 +505,14 @@ inline bool canQueueParsedFile( std::size_t fileBytes, bool prewarmReady, std::s
         && pendingBytes + fileBytes <= kMaxPendingParsedBytes;
 }
 
-// A parse that returned no tree: read the file lexically only when its budget, not an error, stopped it.
+// A parse that returned no tree: read the file lexically only when its budget or a backstop, not an error, stopped it —
+// under the mode that names which (model.h FileIndexMode).
 template <class IndexLexically>
-inline void whenOverBudget( bool overBudget, IndexLexically& indexLexically )
+inline void whenOverBudget( ParseCut cut, IndexLexically& indexLexically )
 {
-    if( overBudget )
+    if( cut != ParseCut::None )
     {
-        indexLexically( FileIndexMode::LexicalOverBudget );
+        indexLexically( indexModeForCut( cut ) );
     }
 }
 
@@ -643,6 +666,23 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
         }
     };
 
+    // NO-SKIP-INGEST: one file read lexically — its definitions and calls, its lexical stats (a lexical span, bodyByte =
+    // endByte, has no clone key) and its FileHealth mode.
+    const auto readLexically = [ & ]( std::uint32_t fileId, const LangEntry& le, const std::string& fileBytes, FileIndexMode mode )
+    {
+        const std::size_t firstNewDefIndex = out.defs.size();
+        indexFileLexically( fileId, le, fileBytes, mode, out.defs, out.refs, scan.health[ fileId ] );
+        finishNewDefs( out.defs, firstNewDefIndex, fileBytes );
+    };
+    // PARSE-BUDGET-DETERMINISTIC: a queued file whose resumed tags pass ran past its budget gets the inline pass's rollback
+    // and lexical read, keeping the rows later files appended meanwhile.
+    const auto indexQueuedFileLexically = [ & ]( const PendingParsedFile& pending, FileIndexMode mode )
+    {
+        rollBackFileFacts( out, pending.factsMark, pending.fileId );
+        scan.extractPartial[ pending.fileId ] = 0;   // the lexical read is the whole of this file's facts, disclosed as such
+        readLexically( pending.fileId, *pending.le, pending.bytes, mode );
+    };
+
     std::vector<PendingParsedFile> pendingParsed;
     pendingParsed.reserve( kMaxPendingParsedFiles );
     std::size_t pendingParsedBytes = 0;
@@ -665,13 +705,22 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                 const TSNode root = ts_tree_root_node( pending.tree );
                 const std::size_t firstNewDefIndex = out.defs.size();
                 ExtractShortfall  tagsShortfall;
+                ExtractDeadlineScope resumed( pending.deadline );   // the parse's steps so far: the same budget as inline
                 underExtractScope<ExtractPhase::TagsFacts>( pending.le->lang, [ & ]
                 {
                     captureTagsFacts( cursor, *pending.le, pending.fileId, pending.bytes, root, out.defs, out.refs, out.binds, out.incs, pending.ppDead, tagsShortfall,
                                       TagsCapture::Full, cjsExportStem( pending.le->lang, sh.files[ pending.fileId ] ) );
                 } );
-                notePartialExtract( scan, pending.fileId, tagsShortfall, pending.bytes.size() );
-                finishNewDefs( out.defs, firstNewDefIndex, pending.bytes );   // B0.2: bytes still in memory
+                noteParseSteps( sh.files[ pending.fileId ], pending.bytes.size(), resumed.deadline );
+                if( resumed.hit() )
+                {
+                    indexQueuedFileLexically( pending, indexModeForCut( resumed.cut() ) );
+                }
+                else
+                {
+                    notePartialExtract( scan, pending.fileId, tagsShortfall, pending.bytes.size() );
+                    finishNewDefs( out.defs, firstNewDefIndex, pending.bytes );   // B0.2: bytes still in memory
+                }
                 ts_tree_delete( pending.tree );
                 pending.tree = nullptr;
             }
@@ -836,12 +885,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
             // NO-SKIP-INGEST: a file the parse should not take — over --max-file-size, or a .json/.yml past its full-index
             // ceiling — is read lexically here, before any prescan or parse (both readers are linear and nesting-blind).
             // A reST file keeps its own flat reader, which bounds itself.
-            const auto indexLexically = [ & ]( FileIndexMode mode )
-            {
-                const std::size_t firstNewDefIndex = out.defs.size();
-                indexFileLexically( static_cast<std::uint32_t>( fileId ), *le, bytes, mode, out.defs, out.refs, scan.health[ fileId ] );
-                finishNewDefs( out.defs, firstNewDefIndex, bytes );   // lexical stats; a lexical span (bodyByte = endByte) has no clone key
-            };
+            const auto indexLexically = [ & ]( FileIndexMode mode ) { readLexically( static_cast<std::uint32_t>( fileId ), *le, bytes, mode ); };
             if( const FileIndexMode preMode = preParseIndexMode( le->lang, bytes.size(), sh.maxFileBytes, isRest ); preMode != FileIndexMode::Parsed )
             {
                 markMissDirty( sh );
@@ -870,11 +914,13 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                 {
                     continue;
                 }
-                bool      overBudget = false;
-                TreeGuard mdTree( underExtractScope<ExtractPhase::Parse>( le->lang, [ & ] { return parseTree( pg.p, bytes, &overBudget ); } ) );
+                ExtractDeadlineScope docDeadline( bytes.size() );
+                ParseCut  cut = ParseCut::None;
+                TreeGuard mdTree( underExtractScope<ExtractPhase::Parse>( le->lang, [ & ] { return parseTree( pg.p, bytes, &cut ); } ) );
+                noteParseSteps( path, bytes.size(), docDeadline.deadline );
                 if( mdTree.get() == nullptr )
                 {
-                    whenOverBudget( overBudget, indexLexically );   // a doc keeps its file, with no symbols, disclosed
+                    whenOverBudget( cut, indexLexically );   // a doc keeps its file, with no symbols, disclosed
                     continue;
                 }
                 scan.health[ fileId ] = measureFileHealth( ts_tree_root_node( mdTree.get() ), bytes );
@@ -913,11 +959,12 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                 // ExtractDeadlineScope). A file past it is rolled back to the mark and read lexically.
                 const RawFactsMark   factsMark = markFacts( out );
                 ExtractDeadlineScope extractDeadline( bytes.size() );
-                bool      overBudget = false;
-                TreeGuard tree( underExtractScope<ExtractPhase::Parse>( le->lang, [ & ] { return parseTree( pg.p, bytes, &overBudget ); } ) );
+                ParseCut  cut = ParseCut::None;
+                TreeGuard tree( underExtractScope<ExtractPhase::Parse>( le->lang, [ & ] { return parseTree( pg.p, bytes, &cut ); } ) );
                 if( tree.get() == nullptr )
                 {
-                    whenOverBudget( overBudget, indexLexically );   // the parse ran past its budget: cancelled, read lexically
+                    noteParseSteps( path, bytes.size(), extractDeadline.deadline );
+                    whenOverBudget( cut, indexLexically );   // the parse ran past its budget: cancelled, read lexically
                     continue;
                 }
                 // QD-CONSTRUCTS-AT-INGEST: from THIS tree, before the member-macro re-parse below can swap it — the tree
@@ -945,7 +992,8 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                 if( canQueueParsed )
                 {
                     pendingParsedBytes += bytes.size();
-                    pendingParsed.emplace_back( static_cast<std::uint32_t>( fileId ), le, std::move( bytes ), tree.release(), std::move( ppDead ) );
+                    pendingParsed.emplace_back( static_cast<std::uint32_t>( fileId ), le, std::move( bytes ), tree.release(), std::move( ppDead ), factsMark,
+                                                extractDeadline.deadline );
                     bytes.clear();   // moved-from is "valid but unspecified": make it empty. Every path refills it (readFile) before a read
                     continue;
                 }
@@ -960,11 +1008,12 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                     captureTagsFacts( cursor, *le, static_cast<std::uint32_t>( fileId ), bytes, root, out.defs, out.refs, out.binds, out.incs, ppDead, shortfall,
                                       TagsCapture::Full, cjsExportStem( le->lang, path ) );
                 } );
+                noteParseSteps( path, bytes.size(), extractDeadline.deadline );
                 if( extractDeadline.hit() )
                 {
-                    rollBackFacts( out, factsMark );
+                    rollBackFileFacts( out, factsMark, static_cast<std::uint32_t>( fileId ) );
                     scan.extractPartial[ fileId ] = 0;   // the lexical read below is the whole of this file's facts, disclosed as such
-                    indexLexically( FileIndexMode::LexicalOverBudget );
+                    indexLexically( indexModeForCut( extractDeadline.cut() ) );
                     continue;
                 }
                 notePartialExtract( scan, fileId, shortfall, bytes.size() );

@@ -34,6 +34,9 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-15, lane parse-budget-det (on no-skip-ingest 506afce6f; PLACEHOLDER, the train renumbers): RE-PINNED with UPDATE_GOLDEN=1.
+#   Watched text: kParserVer 311 -> 313 (the parse budget counts steps, not seconds; backstop cuts get their own index modes),
+#   mirrored in quality.h. kCacheVersion and kQSnapCacheScheme stay: no record changes shape and no watched function moved.
 # 2026-11-14, lane no-skip-ingest merge of main 67b08d46b: RE-PINNED with UPDATE_GOLDEN=1 on the merged tree. Watched text:
 #   kCacheVersion 51 -> 52 (the lane's FileHealth indexMode + keysCut, its placeholder 51, above main's qd-constructs 51) and
 #   kParserVer 309 -> 311 (lexical reads of oversize / over-budget files), mirrored in quality.h. kQSnapCacheScheme stays: the parser

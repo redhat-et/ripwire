@@ -1244,11 +1244,13 @@ decltype( auto ) underExtractScope( Lang lang, Work&& work )
     return inExtractScope<Phase, ExtractFamily::DocsData>( work );
 }
 
-// NO-SKIP-INGEST: every ingest parse runs under the parse budget (ingest.h kParseBudget*). tree-sitter calls the progress
-// callback every ~100 parser operations; past the deadline it returns true, the parse is cancelled, and the caller sees a
-// null tree with *overBudget set — the file is then read lexically (FileIndexMode::LexicalOverBudget). A cancelled parser
-// keeps resumable state, so it is reset before it can see another file. RIPWIRE_PARSE_BUDGET=<scale> multiplies the
-// budget (read once; a value <= 0 or unparseable keeps 1).
+// NO-SKIP-INGEST / PARSE-BUDGET-DETERMINISTIC: every ingest extraction runs under the parse budget (ingest.h kParseBudget*).
+// tree-sitter calls the progress callback once per ~100 parser operations, and the tags query cursor once per ~100 of its
+// own; each call is one STEP. Past the file's step budget the callback returns true, the parse (or the query) is
+// cancelled, and the caller sees a null tree with the cut set — the file is then read lexically
+// (FileIndexMode::LexicalOverBudget). The step count is a function of the bytes and the grammar, so the cut is the same on
+// every machine at every load. A cancelled parser keeps resumable state, so it is reset before it can see another file.
+// RIPWIRE_PARSE_BUDGET=<scale> multiplies the budget and its backstop (read once; a value <= 0 or unparseable keeps 1).
 inline double parseBudgetScale()
 {
     static const double scale = []
@@ -1260,46 +1262,135 @@ inline double parseBudgetScale()
     return scale;
 }
 
-inline double parseBudgetSecondsFor( std::size_t bytes )
+inline double mebibytes( std::uint64_t bytes ) noexcept
 {
-    return parseBudgetScale() * ( kParseBudgetFloorSeconds + kParseBudgetSecondsPerMiB * double( bytes ) / ( 1024.0 * 1024.0 ) );
+    return double( bytes ) / ( 1024.0 * 1024.0 );
+}
+
+inline std::uint64_t parseBudgetStepsFor( std::size_t bytes )
+{
+    return std::uint64_t( parseBudgetScale() * ( double( kParseBudgetFloorSteps ) + double( kParseBudgetStepsPerMiB ) * mebibytes( bytes ) ) );
+}
+
+inline double parseBackstopSecondsFor( std::size_t bytes )
+{
+    return parseBudgetScale() * ( kParseBackstopFloorSeconds + kParseBackstopSecondsPerMiB * mebibytes( bytes ) );
+}
+
+// Which edge cut an extraction: the deterministic work budget, or one of the two load-dependent backstops behind it.
+enum class ParseCut : std::uint8_t { None, Work, WallBackstop, MemoryBackstop };
+
+inline FileIndexMode indexModeForCut( ParseCut cut ) noexcept
+{
+    switch( cut )
+    {
+        case ParseCut::WallBackstop:   return FileIndexMode::LexicalWallBackstop;
+        case ParseCut::MemoryBackstop: return FileIndexMode::LexicalMemoryBackstop;
+        case ParseCut::Work:           return FileIndexMode::LexicalOverBudget;
+        case ParseCut::None:           break;
+    }
+    return FileIndexMode::Parsed;
+}
+
+// TEST KNOB (test-only; documented here and in test/parsebudgetdetcheck.sh): RIPWIRE_TEST_PARSE=slow:<us> sleeps that many
+// microseconds in every progress step — a loaded machine on a small fixture, under which the output must not move;
+// RIPWIRE_TEST_PARSE=wall or =memory makes that backstop read as tripped at its first reading (step 64), so a gate can see
+// each backstop's own disclosure. Read once; a malformed value is no knob at all. It can only slow or cut a parse.
+struct ParseTestKnob
+{
+    std::uint32_t slowMicros = 0;
+    ParseCut      forceBackstop = ParseCut::None;
+};
+
+inline const ParseTestKnob& parseTestKnob()
+{
+    static const ParseTestKnob knob = []
+    {
+        ParseTestKnob          k;
+        const char* const      env = std::getenv( "RIPWIRE_TEST_PARSE" );
+        const std::string_view v   = env != nullptr ? std::string_view( env ) : std::string_view{};
+        if( v == "wall" || v == "memory" )
+        {
+            k.forceBackstop = v == "wall" ? ParseCut::WallBackstop : ParseCut::MemoryBackstop;
+        }
+        else if( v.starts_with( "slow:" ) )
+        {
+            const long micros = std::strtol( env + 5, nullptr, 10 );
+            if( VALIDATE( micros > 0 && micros <= 1'000'000, "RIPWIRE_TEST_PARSE=slow:<us> is a test knob in 1..1000000 us" ) )
+            {
+                k.slowMicros = std::uint32_t( micros );
+            }
+        }
+        return k;
+    }();
+    return knob;
 }
 
 struct ParseDeadline
 {
-    std::chrono::steady_clock::time_point at;
-    bool                                  hit    = false;
-    std::uint32_t                         checks = 0;   // progress callbacks so far: every 64th also reads the footprint
+    std::uint64_t                         budgetSteps = 0;
+    std::chrono::steady_clock::time_point backstopAt;
+    std::uint64_t                         steps      = 0;   // progress callbacks so far, parse and tags query together
+    std::uint64_t                         parseSteps = 0;   // of which the parse (RIPWIRE_PARSE_STEPS_LOG)
+    ParseCut                              cut        = ParseCut::None;
+    std::chrono::steady_clock::time_point start;          // RIPWIRE_PARSE_STEPS_LOG's timings
+    std::chrono::steady_clock::duration   parseTime{};
 
-    // Past the wall budget, or — every 64 checks — past the memory guard's soft line (memguard.h: half the limit,
-    // --max-memory): a degenerate parse also grows fast (4 MiB of `{` held 1.6 GB at its 8 s budget), so memory is the
-    // budget's second edge, read from the same footprint the guard itself reads.
+    static ParseDeadline forBytes( std::size_t bytes )
+    {
+        const auto now = std::chrono::steady_clock::now();
+        return ParseDeadline{ parseBudgetStepsFor( bytes ),
+                              now + std::chrono::duration_cast<std::chrono::steady_clock::duration>( std::chrono::duration<double>( parseBackstopSecondsFor( bytes ) ) ),
+                              0, 0, ParseCut::None, now };
+    }
+
+    bool hit() const noexcept { return cut != ParseCut::None; }
+
+    // One progress step: past the work budget, or — every 64 steps — past a backstop.
     bool expired()
     {
-        if( !hit && std::chrono::steady_clock::now() >= at )
+        if( cut == ParseCut::None )
         {
-            hit = true;
+            if( parseTestKnob().slowMicros != 0 )
+            {
+                std::this_thread::sleep_for( std::chrono::microseconds( parseTestKnob().slowMicros ) );
+            }
+            if( ++steps > budgetSteps )
+            {
+                cut = ParseCut::Work;
+            }
+            else if( ( steps & 63u ) == 0 )
+            {
+                cut = backstopCut();
+            }
         }
-        if( !hit && ( ++checks & 63u ) == 0 )
+        return hit();
+    }
+
+    // The backstops: the wall-clock edge, then the memory guard's soft line (memguard.h: half the limit, --max-memory) — a
+    // degenerate parse also grows fast (4 MiB of `{` held 1.6 GB), read from the same footprint the guard itself reads.
+    ParseCut backstopCut() const
+    {
+        if( parseTestKnob().forceBackstop != ParseCut::None )
         {
-            const std::uint64_t hard = memguard::limits().hardBytes;
-            const std::uint64_t used = memguard::measuredFootprint();
-            hit = hard != 0 && used != 0 && used >= hard / 2;
+            return parseTestKnob().forceBackstop;
         }
-        return hit;
+        if( std::chrono::steady_clock::now() >= backstopAt )
+        {
+            return ParseCut::WallBackstop;
+        }
+        const std::uint64_t hard = memguard::limits().hardBytes;
+        const std::uint64_t used = memguard::measuredFootprint();
+        return hard != 0 && used != 0 && used >= hard / 2 ? ParseCut::MemoryBackstop : ParseCut::None;
     }
 };
-
-inline std::chrono::steady_clock::time_point parseDeadlineFor( std::size_t bytes )
-{
-    return std::chrono::steady_clock::now()
-         + std::chrono::duration_cast<std::chrono::steady_clock::duration>( std::chrono::duration<double>( parseBudgetSecondsFor( bytes ) ) );
-}
 
 // The budget covers a file's whole EXTRACTION, not the parse alone: on a degenerate tree (4 MiB of `{`) the parse may
 // finish inside its budget and the tags query cursor then goes quadratic walking it (measured 2026-11-14: > 3 min).
 // The parse worker opens one deadline per file; while it is open, parseTree and the tags query (execTagsQuery) both
-// check it, and the worker reads hit() after the tags pass to roll the file's facts back and read it lexically.
+// count against it, and the worker reads hit() after the tags pass to roll the file's facts back and read it lexically.
+// A file whose tags pass waits in the parsed-tree queue carries its deadline there and resumes it (ingest_parsepool.h),
+// so where the tags pass ran never changes the steps it is allowed.
 inline thread_local ParseDeadline* tlsExtractDeadline = nullptr;
 
 struct ExtractDeadlineScope
@@ -1307,15 +1398,52 @@ struct ExtractDeadlineScope
     ParseDeadline  deadline;
     ParseDeadline* previous;
 
-    explicit ExtractDeadlineScope( std::size_t bytes ) : deadline{ parseDeadlineFor( bytes ) }, previous( tlsExtractDeadline )
+    explicit ExtractDeadlineScope( std::size_t bytes ) : ExtractDeadlineScope( ParseDeadline::forBytes( bytes ) ) {}
+    explicit ExtractDeadlineScope( const ParseDeadline& resumed ) : deadline( resumed ), previous( tlsExtractDeadline )
     {
         tlsExtractDeadline = &deadline;
     }
     ExtractDeadlineScope( const ExtractDeadlineScope& ) = delete;
     ExtractDeadlineScope& operator=( const ExtractDeadlineScope& ) = delete;
     ~ExtractDeadlineScope() { tlsExtractDeadline = previous; }
-    bool hit() const noexcept { return deadline.hit; }
+    bool     hit() const noexcept { return deadline.hit(); }
+    ParseCut cut() const noexcept { return deadline.cut; }
 };
+
+// RIPWIRE_PARSE_STEPS_LOG=<file> appends one `steps<TAB>parse_steps<TAB>bytes<TAB>cut<TAB>parse_ms<TAB>total_ms<TAB>path` line
+// per extracted file — the measurement the budget constants are sized from (ingest.h): the steps decide, the times only show
+// that steps track the work. Off unless set; it never touches stdout.
+struct ParseStepsLog
+{
+    std::mutex mutex;
+    OwnedFile  file;
+};
+
+inline ParseStepsLog* parseStepsLog()
+{
+    static ParseStepsLog* const log = []() -> ParseStepsLog*
+    {
+        const char* const path = std::getenv( "RIPWIRE_PARSE_STEPS_LOG" );
+        if( path == nullptr || *path == '\0' )
+        {
+            return nullptr;
+        }
+        static ParseStepsLog state{ {}, openOwnedFile( path, "a" ) };
+        return state.file ? &state : nullptr;
+    }();
+    return log;
+}
+
+inline void noteParseSteps( std::string_view path, std::size_t bytes, const ParseDeadline& deadline )
+{
+    if( ParseStepsLog* const log = parseStepsLog() )
+    {
+        const std::lock_guard<std::mutex> lock( log->mutex );
+        using Ms = std::chrono::duration<double, std::milli>;
+        emitTo( log->file.file, "{}\t{}\t{}\t{}\t{:.2f}\t{:.2f}\t{}\n", deadline.steps, deadline.parseSteps, bytes, unsigned( deadline.cut ),
+                Ms( deadline.parseTime ).count(), Ms( std::chrono::steady_clock::now() - deadline.start ).count(), path );
+    }
+}
 
 struct ParseSource
 {
@@ -1359,18 +1487,25 @@ inline void execTagsQuery( TSQueryCursor* cursor, const TSQuery* query, TSNode r
     ts_query_cursor_exec_with_options( cursor, query, root, &options );
 }
 
-TSTree* parseTree( TSParser* parser, std::string_view src, bool* overBudget = nullptr )
+// One parse under the open extraction deadline, or under its own when none is open. A cut parse returns null; *cut (when
+// given) says which edge cut it — ParseCut::None for a parse that finished, or failed for another reason.
+TSTree* parseTree( TSParser* parser, std::string_view src, ParseCut* cut = nullptr )
 {
     TSTree* tree = nullptr;
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/extractFile: tree-sitter parse" );
-        ParseSource    in{ src.data(), static_cast<std::uint32_t>( src.size() ) };
-        ParseDeadline  ownDeadline{ tlsExtractDeadline == nullptr ? parseDeadlineFor( src.size() ) : std::chrono::steady_clock::time_point{} };
-        ParseDeadline& deadline = tlsExtractDeadline != nullptr ? *tlsExtractDeadline : ownDeadline;
+        ParseSource          in{ src.data(), static_cast<std::uint32_t>( src.size() ) };
+        ParseDeadline        ownDeadline = tlsExtractDeadline == nullptr ? ParseDeadline::forBytes( src.size() ) : ParseDeadline{};
+        ParseDeadline&       deadline    = tlsExtractDeadline != nullptr ? *tlsExtractDeadline : ownDeadline;
         const TSInput        input{ &in, &readParseSource, TSInputEncodingUTF8, nullptr };
         const TSParseOptions options{ &deadline, &parsePastDeadline };
         tree = ts_parser_parse_with_options( parser, nullptr, input, options );
-        if( deadline.hit )
+        deadline.parseSteps = deadline.steps;
+        if( parseStepsLog() != nullptr )
+        {
+            deadline.parseTime = std::chrono::steady_clock::now() - deadline.start;
+        }
+        if( deadline.hit() )
         {
             if( tree != nullptr )
             {
@@ -1379,9 +1514,9 @@ TSTree* parseTree( TSParser* parser, std::string_view src, bool* overBudget = nu
             }
             ts_parser_reset( parser );
         }
-        if( overBudget != nullptr )
+        if( cut != nullptr )
         {
-            *overBudget = deadline.hit;
+            *cut = deadline.cut;
         }
     }
     return tree;

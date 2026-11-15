@@ -2277,13 +2277,21 @@ struct CrawlSkips
 // NO-SKIP-INGEST (owner 11-14: "we should not be skipping files"): every crawled file is indexed; a file a full parse
 // cannot or should not take is indexed LEXICALLY instead, and says so. FileHealth::indexMode holds which (0 = parsed):
 //   LexicalOverSize   — larger than --max-file-size: never handed to the parser; definitions by line shape, calls by `name(`;
-//   LexicalOverBudget — the parse ran past its time budget (kParseBudget*, ingest.h) and was cancelled: the same lexical facts;
+//   LexicalOverBudget — the extraction ran past its WORK budget (kParseBudget*, ingest.h: parser + tags-query steps, a
+//                       function of the file alone) and was cancelled: the same lexical facts;
 //   DataKeysBounded   — a .json/.yml/.yaml above its full-index ceiling: its top- and second-level keys, at most
 //                       kDataFileKeyCap of them (keysCut counts the rest), read without a parse;
-//   LexicalNestRefused — the nesting guard refused the parse (ingest.h kMax*NestDepth): the same bounded keys.
+//   LexicalNestRefused — the nesting guard refused the parse (ingest.h kMax*NestDepth): the same bounded keys;
+//   LexicalWallBackstop / LexicalMemoryBackstop — PARSE-BUDGET-DETERMINISTIC: the work budget had not tripped, but the
+//                       wall-clock or memory BACKSTOP did (kParseBackstop*, ingest.h). The same lexical facts, under their
+//                       own mode because they depend on the machine's load, not the file; retried on the next run.
 // The map header counts them (lexical_files= / keys_cut=), --skipped rows them, and stderr warns once per file.
-enum class FileIndexMode : std::uint8_t { Parsed = 0, LexicalOverSize = 1, LexicalOverBudget = 2, DataKeysBounded = 3, LexicalNestRefused = 4 };
-inline constexpr std::uint32_t kFileIndexModeCount = 5;
+enum class FileIndexMode : std::uint8_t
+{
+    Parsed = 0, LexicalOverSize = 1, LexicalOverBudget = 2, DataKeysBounded = 3, LexicalNestRefused = 4, LexicalWallBackstop = 5,
+    LexicalMemoryBackstop = 6
+};
+inline constexpr std::uint32_t kFileIndexModeCount = 7;
 
 struct FileHealth
 {
@@ -2324,10 +2332,20 @@ inline bool isBundleShapedFile( const FileHealth& health ) noexcept
     return isLexicallyIndexed( health ) || health.fileBytes >= kBundleShapedFileBytes;
 }
 
-// The --skipped / warning word for a mode: lexical-size, lexical-budget, keys-bounded, lexical-nest ("" for Parsed).
+// A CODE file read lexically in place of its parse — over the size ceiling, past the work budget, or cut by a backstop
+// (the graph's graph_lexical= gauge); the data and nest modes are bounded key reads, not code.
+inline bool isLexicalCodeMode( FileIndexMode mode ) noexcept
+{
+    return mode == FileIndexMode::LexicalOverSize || mode == FileIndexMode::LexicalOverBudget || mode == FileIndexMode::LexicalWallBackstop
+        || mode == FileIndexMode::LexicalMemoryBackstop;
+}
+
+// The --skipped / warning word for a mode: lexical-size, lexical-budget, keys-bounded, lexical-nest, lexical-wall,
+// lexical-memory ("" for Parsed).
 inline std::string_view fileIndexModeWord( std::uint32_t mode ) noexcept
 {
-    static constexpr std::string_view kWords[ kFileIndexModeCount ] = { "", "lexical-size", "lexical-budget", "keys-bounded", "lexical-nest" };
+    static constexpr std::string_view kWords[ kFileIndexModeCount ] = { "", "lexical-size", "lexical-budget", "keys-bounded", "lexical-nest",
+                                                                        "lexical-wall", "lexical-memory" };
     return mode < kFileIndexModeCount ? kWords[ mode ] : std::string_view{};
 }
 

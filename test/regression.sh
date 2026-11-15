@@ -814,6 +814,7 @@ for _g in \
     panellegendcheck \
     parentcachecheck \
     pargatescheck \
+    parsebudgetdetcheck \
     parsehealthcheck \
     partitioncheck \
     pathfewestcheck \

@@ -478,11 +478,6 @@ inline LimitWarnings& limitWarnings()
     return state;
 }
 
-inline double mebibytes( std::uint64_t bytes ) noexcept
-{
-    return double( bytes ) / ( 1024.0 * 1024.0 );
-}
-
 // "82.0 MiB", or "8.0 KiB" under one MiB (a --max-file-size=8K ceiling must not print as 0.0 MiB)
 inline std::string sizeSpelling( std::uint64_t bytes )
 {
@@ -498,8 +493,18 @@ inline std::string limitWarningLine( const std::string& path, const FileHealth& 
             return std::format( "ripwire: warning: {} ({}) exceeds --max-file-size {}; indexed lexically (raise with --max-file-size=N)\n",
                                 path, size, sizeSpelling( maxFileBytes ) );
         case FileIndexMode::LexicalOverBudget:
-            return std::format( "ripwire: warning: {} ({}) ran past its parse budget of {:.1f} s; indexed lexically (raise with RIPWIRE_PARSE_BUDGET=<scale>)\n",
-                                path, size, parseBudgetSecondsFor( health.fileBytes ) );
+            return std::format( "ripwire: warning: {} ({}) ran past its parse budget of {:.1f}M steps; indexed lexically (raise with RIPWIRE_PARSE_BUDGET=<scale>)\n",
+                                path, size, double( parseBudgetStepsFor( health.fileBytes ) ) / 1e6 );
+        // PARSE-BUDGET-DETERMINISTIC: a backstop cut depends on the machine, not the file — the warning says so, and the
+        // record is retried on the next run (ingest_parsepool.h cachedIndexModeStale).
+        case FileIndexMode::LexicalWallBackstop:
+            return std::format( "ripwire: warning: {} ({}) hit the {:.0f} s wall-clock backstop before its parse budget (this machine is slow or loaded: the "
+                                "result depends on load); indexed lexically, retried next run (raise with RIPWIRE_PARSE_BUDGET=<scale>)\n",
+                                path, size, parseBackstopSecondsFor( health.fileBytes ) );
+        case FileIndexMode::LexicalMemoryBackstop:
+            return std::format( "ripwire: warning: {} ({}) reached half the memory limit before its parse budget (the result depends on memory "
+                                "pressure); indexed lexically, retried next run (raise with --max-memory=N)\n",
+                                path, size );
         case FileIndexMode::DataKeysBounded:
         {
             // The key cap is the limit that loses data; a data file past its full-index ceiling whose top-level keys all fit

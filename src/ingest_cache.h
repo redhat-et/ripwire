@@ -380,7 +380,11 @@ constexpr std::uint32_t kCacheVersion = 52;           // 52: lane no-skip-ingest
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 311;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 313;          // bump on any grammar/.scm/extraction change
+                                                      // 313 = 2026-11-15 (lane parse-budget-det, PLACEHOLDER: the train renumbers; above no-skip-ingest's
+                                                      //   311/312): the parse budget is a deterministic STEP budget, and a wall-clock or memory backstop
+                                                      //   cut is its own FileIndexMode (5/6), so a record written under the old wall budget is re-made.
+                                                      //   Rich file tag 314. kCacheVersion unchanged: no record changes shape.
                                                       // 311 = 2026-11-14 (lane no-skip-ingest, PLACEHOLDER: the train renumbers; above main's 309/310): no crawled file is
                                                       //   skipped for size — a file over --max-file-size or past its parse budget is read lexically, a
                                                       //   .json/.yml over its full-index ceiling yields at most kDataFileKeyCap keys. Rich file tag 312. kCacheVersion 52.

@@ -6,7 +6,8 @@
 # from the index, its symbols unreachable (--callers=huge_target count=0 beside ~110k call sites in the skipped file,
 # --callees=filler_7 found nothing), with only the map's skipped_oversize= to say so. Now every crawled file is indexed:
 #   * a file over --max-file-size (default 64 MiB) is read LEXICALLY (definitions by line shape, calls by `name(`);
-#   * a parse past its budget (4 s + 1 s/MiB, RIPWIRE_PARSE_BUDGET scales it) is cancelled and read lexically;
+#   * an extraction past its work budget (parser + tags-query steps per MiB, RIPWIRE_PARSE_BUDGET scales it; deterministic
+#     since PARSE-BUDGET-DETERMINISTIC, test/parsebudgetdetcheck.sh) is cancelled and read lexically;
 #   * a .json/.yml past its full-index ceiling yields at most 256 keys (RIPWIRE_DATA_KEYS raises it), keys_cut= the rest;
 # and each such file is disclosed in the answer (lexical_files= / keys_cut= / graph_lexical= / --skipped <h> rows) and
 # WARNED once on stderr — never on stdout (a data file warns only when keys were cut: arm 7). Every arm builds its own fixture at test time (nothing large is committed
@@ -101,7 +102,7 @@ RIPWIRE_PARSE_BUDGET=0.25 perl -e 'alarm 90; exec @ARGV' "$BIN" "$TMP/patho" --n
 t1=$( date +%s )
 if [ $(( t1 - t0 )) -le 60 ]; then ok "2: degenerate 1 MiB file finished in $(( t1 - t0 )) s (main: quadratic, minutes)"; else no "2: took $(( t1 - t0 )) s"; fi
 if [ "$( attr "$TMP/2.map" lexical_files )" = 1 ]; then ok "2: lexical_files=1"; else no "2: $( hdr "$TMP/2.map" )"; fi
-grep -q 'ran past its parse budget of .* s; indexed lexically (raise with RIPWIRE_PARSE_BUDGET=<scale>)' "$TMP/2.err" \
+grep -qE 'ran past its parse budget of [0-9.]+M steps; indexed lexically \(raise with RIPWIRE_PARSE_BUDGET=<scale>\)' "$TMP/2.err" \
     && ok "2: the budget warning names the knob" || no "2: no budget warning ($( head -2 "$TMP/2.err" ))"
 if grep -q 'n="deep_entry"' "$TMP/2.map"; then ok "2: deep_entry still indexed (lexical definition)"; else no "2: deep_entry missing"; fi
 RIPWIRE_PARSE_BUDGET=0.25 perl -e 'alarm 90; exec @ARGV' "$BIN" "$TMP/patho" --no-cache --skipped >"$TMP/2.sk" 2>/dev/null

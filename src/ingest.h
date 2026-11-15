@@ -50,17 +50,34 @@ constexpr std::size_t kDefaultMaxFileBytes = 64u * 1024u * 1024u;   // 64 MiB (a
 // a file over 100 MB). The one size at which a crawled file is still dropped.
 constexpr std::size_t kHardMaxFileBytes = std::size_t( 1024u ) * 1024u * 1024u;   // 1 GiB
 
-// THE PARSE BUDGET (NO-SKIP-INGEST). tree-sitter's error recovery goes quadratic on degenerate input — measured
-// 2026-11-14 on this build: 100 KB of `{` parses in 20 s and 200 KB in 80 s (~2000 s/MiB^2), so the old 4 MB skip
-// bounded nothing for such a file. Every ingest parse now runs under a wall-clock budget of
-// kParseBudgetFloorSeconds + kParseBudgetSecondsPerMiB x MiB; a parse past it is cancelled and the file is indexed
-// lexically (FileIndexMode::LexicalOverBudget). Sized from measurement: real code parses at <= 1.35 s/MiB with a
-// whole 8-thread pool busy (worst single file 0.94 s for 1.3 MiB), so a real file sits >= 3x under the budget at
-// every size; a 64 MiB pathological file is cut at 68 s. RIPWIRE_PARSE_BUDGET=<scale> multiplies it (the warning
-// names it). A WALL budget is not deterministic at its edge; the cache record keeps the outcome, and no measured
-// real file comes within 3x of it.
-inline constexpr double kParseBudgetFloorSeconds  = 4.0;
-inline constexpr double kParseBudgetSecondsPerMiB = 1.0;
+// THE PARSE BUDGET (NO-SKIP-INGEST; deterministic since PARSE-BUDGET-DETERMINISTIC). tree-sitter's error recovery goes
+// quadratic on degenerate input — measured 2026-11-14: 100 KB of `{` parses in 20 s and 200 KB in 80 s (~2000 s/MiB^2), so
+// the old 4 MB skip bounded nothing for such a file. Every ingest extraction (the parse and the tags query) now runs under a
+// WORK budget of kParseBudgetFloorSteps + kParseBudgetStepsPerMiB x MiB progress steps — tree-sitter calls the progress
+// callback once per ~100 parser or query-cursor operations, a count fixed by the bytes and the grammar alone — and a file
+// past it is cancelled and indexed lexically (FileIndexMode::LexicalOverBudget). The cut is a function of the file, never
+// of the machine's speed or load (CLAUDE.md non-negotiable 2: until 2026-11-15 this was a 4 s + 1 s/MiB WALL budget, and a
+// file near its edge indexed differently on a loaded machine — ld-zed-06, vscode's md5 needing RIPWIRE_PARSE_BUDGET=20).
+// The query half counts real work since tree-sitter patch 002 (third_party/patches/tree_sitter): the cursor's status walk
+// scans every later sibling of a node whose siblings are all anonymous — a run of `{` — and that scan, the quadratic the
+// budget exists for, used to count as one operation (100 KB of `{` took 11 s in 3072 steps).
+// Sized from measurement (PARSE-BUDGET-DETERMINISTIC, 2026-11-15, RIPWIRE_PARSE_STEPS_LOG over all 70,221 extracted files of
+// the large-dev repos — envoy, cockroach, vscode, cpython, zed, nushell, terraform — plus angular, django, nest and this
+// repo): steps/MiB median 20,456, p99 43,294, max 203,188 (cpython Modules/cjkcodecs/mappings_hk.h, a generated table);
+// the most steps in one file 194,079 (cpython Modules/unicodename_db.h, 1.3 MiB), and 5,234 under 64 KiB. Every measured
+// file sits >= 9.3x under its budget (unicodename_db.h the closest), and the densest table's rate stays 4.9x under the
+// per-MiB slope at any size. Degenerate input is cut fast: 100 KB of `{` in 0.2 s, 4 MiB in ~2 s (M2).
+// RIPWIRE_PARSE_BUDGET=<scale> multiplies it (the warning names it).
+inline constexpr std::uint64_t kParseBudgetFloorSteps  = 500'000;
+inline constexpr std::uint64_t kParseBudgetStepsPerMiB = 1'000'000;
+
+// The SAFETY BACKSTOP behind the work budget, for a machine so slow (or so loaded, or so short of memory) that the work
+// budget never trips first: a wall-clock edge 10x the old wall budget, and the memory guard's soft line (half the limit,
+// --max-memory) read every 64 steps. Neither trips on any real file of the measured set at any load seen; when one does,
+// the file is indexed lexically under its OWN mode (LexicalWallBackstop / LexicalMemoryBackstop), its warning says the
+// result depended on the machine, and its cache record is retried on the next run instead of being kept.
+inline constexpr double kParseBackstopFloorSeconds  = 40.0;
+inline constexpr double kParseBackstopSecondsPerMiB = 10.0;
 
 // A .json / .yml / .yaml above its full-index ceiling (kMaxJsonConfigBytes / kMaxYamlConfigBytes below) is DATA: it
 // is indexed WITHOUT a parse, its top- and second-level keys read lexically, at most this many of them in file order
