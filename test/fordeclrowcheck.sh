@@ -217,6 +217,7 @@ if [ -n "$( grep -o '<decl_rows.*</decl_rows>' "$TMP/w1.xml" )" ] && [ "$( grep 
 then ok "(x1) MCP for: the same element bytes"; else no "(x1) MCP: $( grep -o '<decl_rows.*' "$TMP/x1.xml" | head -c 300 )"; fi
 printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"%s","task":"add a new argument to run_it","budget_tokens":4000}}}\n' "$FX" \
   | ( cd "$FX" || exit 1; "$BIN" --mcp 2>/dev/null ) >"$TMP/x2.json"
-if grep -q '<ctx' "$TMP/x2.json" && grep -q 'held=\\"budget\\" next=\\"--for=&apos;add a new argument to run_it&apos;\\"/>' "$TMP/x2.json"; then ok "(x2) MCP budget_tokens: held=\"budget\" and next=, no rows"; else no "(x2) MCP budget: $( grep -o 'decl_rows.\{0,200\}' "$TMP/x2.json" | head -c 300 )"; fi
+# RE-PIN (NEXT-APOS-RAW, 2026-11-15): next= reads --for='…' (was &apos;…&apos;): nextverb.h leaves ' raw in a "-delimited attribute
+if grep -q '<ctx' "$TMP/x2.json" && grep -q 'held=\\"budget\\" next=\\"--for='\''add a new argument to run_it'\''\\"/>' "$TMP/x2.json"; then ok "(x2) MCP budget_tokens: held=\"budget\" and next=, no rows"; else no "(x2) MCP budget: $( grep -o 'decl_rows.\{0,200\}' "$TMP/x2.json" | head -c 300 )"; fi
 [ "$fail" = 0 ] && echo "fordeclrowcheck: PASS" || echo "fordeclrowcheck: FAIL"
 exit "$fail"
