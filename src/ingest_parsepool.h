@@ -150,23 +150,18 @@ inline RawFactsMark markFacts( const RawFacts& f ) noexcept
 
 // Drop one file's rows from every family, from its mark on. PARSE-BUDGET-DETERMINISTIC: a queued file's tags pass runs
 // after later files have appended their own rows, so the drop keeps theirs (for an inline file it is a plain truncate).
-template<class Row>
-inline void dropFileRowsFrom( std::vector<Row>& rows, std::size_t mark, std::uint32_t fileId )
-{
-    dropRowsFrom( rows, mark, [ fileId ]( const Row& row ) { return row.fileId == fileId; } );
-}
-
 inline void rollBackFileFacts( RawFacts& f, const RawFactsMark& m, std::uint32_t fileId )
 {
-    dropFileRowsFrom( f.defs, m.defs, fileId );
-    dropFileRowsFrom( f.refs, m.refs, fileId );
-    dropFileRowsFrom( f.incs, m.incs, fileId );
-    dropFileRowsFrom( f.binds, m.binds, fileId );
-    dropFileRowsFrom( f.ffis, m.ffis, fileId );
-    dropFileRowsFrom( f.routeDefs, m.routeDefs, fileId );
-    dropFileRowsFrom( f.routeUses, m.routeUses, fileId );
-    dropFileRowsFrom( f.constOpens, m.constOpens, fileId );
-    dropFileRowsFrom( f.constructs, m.constructs, fileId );
+    const auto ofFile = [ fileId ]( const auto& row ) { return row.fileId == fileId; };
+    dropRowsFrom( f.defs, m.defs, ofFile );
+    dropRowsFrom( f.refs, m.refs, ofFile );
+    dropRowsFrom( f.incs, m.incs, ofFile );
+    dropRowsFrom( f.binds, m.binds, ofFile );
+    dropRowsFrom( f.ffis, m.ffis, ofFile );
+    dropRowsFrom( f.routeDefs, m.routeDefs, ofFile );
+    dropRowsFrom( f.routeUses, m.routeUses, ofFile );
+    dropRowsFrom( f.constOpens, m.constOpens, ofFile );
+    dropRowsFrom( f.constructs, m.constructs, ofFile );
 }
 
 // A parsed-but-unqueried file waiting for the tags-query gate: owns its bytes and its TSTree until
