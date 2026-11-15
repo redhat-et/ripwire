@@ -14547,3 +14547,168 @@ v0.6.9 on envoy, cockroach and vscode.
 median is quoted. Dev builds, not release builds. One verb (`--deps`); other verbs have other peaks. The per-step
 mechanisms and their own measurements are in CHANGELOG.md [0.6.10] (#497, #505, #556) and, for main since 0.6.10, in
 `changelog.d/mem-ref-shrink.md` and the other `changelog.d/` fragments.
+
+## The warm path is graph rebuild, not ranking — graph-section cache, PRE-REGISTERED 2026-11-14 (before any implementation number)
+
+**What this registers.** A cache that stores the RESOLVED graph, not only the parse, so a warm run
+loads it instead of rebuilding it. The bands below are written before a line of the implementation
+exists, and each one names what would refute it.
+
+### The measurement that motivated it
+
+Taken with this repository's own `PROFILE_SCOPE` instrument
+(`cmake -S . -B build_prof -DRIPWIRE_NATIVE=ON -DRIPWIRE_PROFILE=ON`), steady-warm run, binary
+`d624cff5f`, `--cache=` blobs retained from a prior cold run. **Shares, not absolute ms, are the
+result**: the instrumented binary carries ~1.48x overhead, measured consistently on both repos
+(2,145 ms profiled against 1,460 ms shipped on envoy; 5,048 against 3,380 on vscode), which is the
+check that the overhead is uniform rather than concentrated in one phase.
+
+| scope | envoy (661k LOC) | vscode (3,848k LOC) |
+|---|---|---|
+| `buildGraph` — resolve refs + build CSR (`graph.h:9702`) | 894 ms, **41.7 %** | 2,746 ms, **54.4 %** |
+| …the resolve loop alone (`graph.h:11299`) | 456 ms, 21.3 % | 2,015 ms, 39.9 % |
+| decode cache records, on pool threads (`ingest_cache.h:3172`) | 545 ms, 25.4 % | 1,330 ms, 26.4 % |
+| `ingest` total (crawl + pool + model) | 369 ms, 17.2 % | 508 ms, 10.1 % |
+| `rankGraphTeleport` — PageRank | 45 ms, **2.1 %** | 116 ms, **2.3 %** |
+| query + emit, the verb after the graph | 77 ms, **3.6 %** | 154 ms, **3.1 %** |
+
+Answering the question — rank, select, emit — is **under 7 % of a warm run on envoy and under 6 % on
+vscode**. The rest reconstructs state that is a deterministic function of what the blob already holds:
+`ingest_cache.h` stores pre-id-assignment raw facts (`FileFacts` of `RawDef`/`RawRef`/`RawBind`/
+includes/routes), so a warm run skips tree-sitter and then redoes id assignment, the symbol/reference
+model, name resolution, the Rule-2/2b side tables and the CSR flatten. `buildGraph` is one serial call
+in a tool whose cold path uses a 21-thread pool, and the share GROWS with repo size.
+
+`RIPWIRE_STATS=1` on the same runs gives the per-phase RSS curve:
+
+| phase | envoy cur / peak (MiB) | vscode cur / peak (MiB) |
+|---|---|---|
+| model (dedup + symbols/refs) | 165.4 / **296.6** | 275.3 / **460.5** |
+| graph-tables (resolve-only tables allocated) | 349.5 / 349.5 | 552.2 / 565.8 |
+| graph-resolved | 362.6 / **371.5** | 578.3 / **596.9** |
+| graph-end (`3z` released the resolve-only tables) | **252.8** / 371.5 | **423.0** / 596.9 |
+
+The peak is set by graph building and a third of it is discarded immediately: 118.7 MiB (32 %) on
+envoy, 173.9 MiB (29 %) on vscode. envoy holds 223,209 symbols and 284,133 edges; vscode 275,083 and
+643,295. So the out+in CSR is only **3.9 MiB / 7.0 MiB**, while the families that exist only to be
+resolved are large: `references` 71.2 / 122.9 MiB and `bindings` 17.8 / 52.7 MiB.
+
+### Band 1 — CPU. Registered projection, and what refutes it
+
+Arithmetic on the shares above, with the freshness crawl also removed: **envoy warm 1.46 s ->
+0.23-0.29 s; vscode 3.38 s -> 0.36-0.47 s.**
+
+*Refuted if* measured warm user CPU exceeds **0.50 s on envoy** or **0.80 s on vscode** — that would
+mean the shares did not translate into wall time and the phase accounting is wrong, which is a more
+valuable finding than the speedup. A result inside the band is recorded as the band it fell in, not as
+"as projected".
+
+### Band 2 — memory. A CEILING, not a no-rise rule (AMENDED 2026-11-14, before any implementation number)
+
+**Amendment, and why it is legitimate.** This band first read "peak RSS must **not rise**", with any
+rise counted as a refutation. The owner's ruling the same day is that memory may go up a reasonable
+amount for a speed improvement — the memory/speed trade is ordinary engineering, and ripwire's margin
+on this axis is large enough to spend. A band that would refute a result the owner would ship is a
+badly chosen band, so it is replaced with a ceiling that can still fail. **This amendment is made
+before any implementation exists and before any measurement of it**; amending a band after seeing its
+data would void the registration, and nothing here is permitted to move again once a number arrives.
+
+The expectation is still that peak FALLS, because a third of today's warm peak is transient resolve
+state: envoy 371.5 -> 252.8 MiB resident, vscode 596.9 -> 423.0. Target remains envoy ~300 MiB,
+vscode ~465 MiB, with the model phase becoming the peak-setter.
+
+But a rise is permitted up to a ceiling derived from what the memory claim is FOR, not from today's
+number:
+
+1. **ripwire must remain the lowest-peak tool measured, with at least 1.5x of margin.** On vscode the
+   lowest-peak peer is crg at 3,246 MB, so ripwire's cold peak must stay **under 2,048 MB** (it is
+   1,023 MB today). codegraph is 11,815 MB on the same repo.
+2. **The 8 GB-laptop claim must survive**: cold peak under **half** the smallest box in the goal, so a
+   large repo still leaves an agent and the OS the larger share.
+3. **Every rise is reported as a trade**, with the measured disk and RSS cost printed beside the CPU
+   win, in the same cell — never as an unqualified speedup.
+
+*Refuted if* cold peak exceeds either ceiling on any repo in the ladder, or if a rise is published
+without its cost beside it. A rise that stays inside the ceilings and is reported as a trade is a
+PASS, recorded with the trade stated — not a tolerated miss.
+
+### Band 3 — disk. A CEILING anchored on the peers' own index sizes (AMENDED 2026-11-14, before any implementation number)
+
+**Amendment, and why.** This band first required only that the real figure be "measured and
+published, not that it lands under the projection" — a band with no failure condition, which this
+project's own first non-negotiable forbids: a metric that cannot fail measures nothing. Band 2 was
+given a ceiling the same day and this one was left without. Corrected here, **before any
+implementation exists and before any measurement of it**, on Band 2's terms: nothing in it may move
+again once a number arrives.
+
+The projection stands: the full section adds **+33.9 MB to envoy's 147.6 MB blob** and **+44.1 MB to
+vscode's 271.3 MB**; the CSR-only variant adds +2.5 %. A directly mappable POD layout — chosen
+precisely to remove the 25 % of warm CPU spent in per-record decode — will be larger than a compact
+encoding, and that is an accepted trade, not a regression.
+
+The ceiling is anchored on what the on-disk claim is FOR. ripwire's index is already the smallest
+measured, by the harness's own `index_on_disk_bytes` on the cold cells:
+
+| repo | ripwire | smallest peer index | margin today |
+|---|---|---|---|
+| cpython | **144.5 MB** | graphify 405.1 MB | 2.8x |
+| envoy | **147.6 MB** | graft 499.9 MB | 3.4x |
+| vscode | **271.3 MB** | graphify 584.2 MB | 2.2x |
+
+codegraph is 507.9 / 765.9 / 2,075.2 MB on the same repos. crg and cbm keep their indexes outside the
+checkout and are excluded from this comparison rather than assumed comparable.
+
+**Registered ceiling: ripwire's blob must remain the smallest on-disk index measured, with at least
+1.5x of margin** — under **270 MB on cpython, 333 MB on envoy, 389 MB on vscode**. The binding
+constraint is vscode at **+118 MB, i.e. +43 %**, about 2.7x the projected section.
+
+*Refuted if* the blob exceeds that ceiling on any repo in the ladder, or if the measured growth is
+published without the figure. Growth inside the ceiling is a **PASS**, recorded with the trade stated:
+the section is permitted to be fat where fat buys CPU.
+
+### Band 3b — the COLD path is deliberately out of scope (owner ruling 2026-11-14)
+
+Registered so that no later reading mistakes silence for an oversight. A cold run is
+**tree-sitter-bound**, and the profile says so: on envoy, `ingest/extractFile: tree-sitter parse` is
+**41.5 %** of cold CPU and `tags query exec+captures` another **34.5 %**, both on pool threads across
+19 threads, while `buildGraph` is **2.0 %**. The owner's ruling is that this is mostly tree-sitter and
+not worth rewriting, and this registration adopts it: **no band here claims a cold improvement, and
+none is sought.**
+
+One consequence worth stating because it would otherwise look like a missed win. Parallelising the
+serial resolve loop would cut cold **wall** time by roughly a fifth (972 ms of a 4.29 s profiled run,
+serial while everything around it is parallel) — but the comparison table's cold column is **user
+CPU**, where the same change moves ~2 % and may even increase the total. A lane that advertised "20 %
+faster cold" from that measurement would be quoting the wall figure against a published column that
+reports CPU. The two are not interchangeable and no claim here mixes them.
+
+### Band 4 — correctness, which is the ship/no-ship gate
+
+Two assertions, and failing either means the lane does not land in any form:
+
+1. **A run that LOADS the graph emits stdout byte-identical to a run that BUILDS it** — no modulo, no
+   normalisation, across several repos and languages. This is not a new contract: warm output is
+   already asserted byte-identical to cold, and `est_tokens=` prices the emitted head through a
+   fixpoint, so a single varying byte moves the answer. The gate is written before the code and must
+   be red first, with a vacuity guard that refuses to count "no section present, therefore trivially
+   identical" as a pass.
+2. **A stale or version-mismatched section is REFUSED and rebuilt, never served.** A stale parse cache
+   costs time; a stale graph cache returns a **wrong answer at exit 0**, which is the one failure mode
+   this tool's honesty rules do not tolerate. Invalidation must therefore be strictly coarser than the
+   parse cache's: any changed file invalidates the whole section, because one new reference can
+   retarget edges anywhere. Arms must cover a file added, deleted, modified in place at the same size,
+   added inside a new subdirectory, and a changed `.gitignore`.
+
+### What this registration does NOT claim
+
+No ranking effect and no answer-quality effect: the section stores what resolution already produced,
+so if any ranked row, score or selected body differs, Band 4 has failed and the cause is a bug, not an
+improvement. No claim about the peers' warm numbers is registered here — those are measured in the
+0.7.0 comparison run and are a separate artifact.
+
+### The honest failure mode, registered in advance
+
+If the resolve loop's output cannot be serialized without also serializing the resolve-only tables
+(`varType`, `localNameSet`, `localShadowSpans`, `acc`), the section grows past Band 3 and the lane
+reduces to the CSR-only variant. That is a legitimate outcome, to be recorded as a narrowing with the
+measured reason, not retried until it passes.

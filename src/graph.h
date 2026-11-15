@@ -16244,15 +16244,25 @@ inline std::string memberOwnerRefusal( const IngestResult& ing, std::span<const 
     return msg;
 }
 
-// A member selector whose OWNER resolves to a type in a language that extracts no fields refuses BY LANGUAGE
-// NAME — an empty answer there would read as "no uses", which is the zero-means-none-exists lie. "" when the
-// spec is not a member selector or the owner is not an indexed unserved type.
+// The owner SHAPE, named so the served and unserved sides below can share one spelling of it.
+inline bool classLikeOwner( const Symbol& s ) noexcept
+{
+    return s.kind == SymKind::Class || isStructOrNamedType( s.kind ) || s.kind == SymKind::Interface;
+}
+
 // An owner whose members the index never extracts: a class-like definition in a language with no field capture.
 inline bool fieldsUnservedOwner( const Symbol& s ) noexcept
 {
-    const bool classLike  = s.kind == SymKind::Class || isStructOrNamedType( s.kind ) || s.kind == SymKind::Interface;
     const bool fieldsLang = s.lang == Lang::Cpp || s.lang == Lang::C || s.lang == Lang::Python;   // queries/{c,cpp,python}/tags.scm carry @definition.field
-    return classLike && !fieldsLang;
+    return classLikeOwner( s ) && !fieldsLang;
+}
+
+// An owner whose members the index DOES extract — the veto on the refusal below. The complement is taken INSIDE the
+// class-like shape on purpose: "not unserved" alone would also admit every non-owner symbol of that name (a function,
+// a variable), and one of those must not speak for the owner either way. One language list, read from one place.
+inline bool fieldsServedOwner( const Symbol& s ) noexcept
+{
+    return classLikeOwner( s ) && !fieldsUnservedOwner( s );
 }
 
 // THE sentence for a member of an unserved owner — the qualified selector's refusal, and (B31 USES-FIELD-EXTERNAL) the bare
@@ -16264,6 +16274,10 @@ inline std::string memberUnservedSentence( const IngestResult& ing, std::string_
          + "), so its members are not indexed and their use-sites cannot be resolved";
 }
 
+// A member selector whose OWNER resolves to a type in a language that extracts no fields refuses BY LANGUAGE
+// NAME — an empty answer there would read as "no uses", which is the zero-means-none-exists lie. "" when the
+// spec is not a member selector, when no indexed owner of that name is unserved, or when a SERVED owner of that
+// name also exists — the normal path answers that one, and a refusal would speak over an available answer.
 inline std::string memberSelectorUnservedRefusal( const IngestResult& ing, std::string_view spec )
 {
     if( !looksLikeMemberSelector( spec ) )
@@ -16272,14 +16286,29 @@ inline std::string memberSelectorUnservedRefusal( const IngestResult& ing, std::
     }
     const std::size_t      dot   = spec.find( '.' );
     const std::string_view owner = spec.substr( 0, dot );
-    for( const Symbol& s : ing.symbols )
+    // The refusal is about the QUESTION, not about one symbol: a SERVED owner of that name means the normal path can
+    // answer the selector, so refusing by a namesake's language would be a confident no over an available answer (the
+    // scan used to return on the first unserved namesake and never ask). One pass in symbol id order — any served
+    // namesake vetoes, and the sentence names the LOWEST-id unserved one (crawl order: path, then line), so the pick
+    // is deterministic and independent of --limit, which narrows the answer and never the index this reads.
+    NodeId unservedPick = kNoNode;
+    for( NodeId id = 0; id < ing.symbols.size(); ++id )
     {
-        if( s.name == owner && fieldsUnservedOwner( s ) )
+        const Symbol& s = ing.symbols[ id ];
+        if( s.name != owner )
         {
-            return memberUnservedSentence( ing, spec, s );
+            continue;
+        }
+        if( fieldsServedOwner( s ) )
+        {
+            return {};
+        }
+        if( unservedPick == kNoNode && fieldsUnservedOwner( s ) )
+        {
+            unservedPick = id;
         }
     }
-    return {};
+    return unservedPick == kNoNode ? std::string{} : memberUnservedSentence( ing, spec, ing.symbols[ unservedPick ] );
 }
 
 // resolve a --around/--lego/--connect spec to ONE matching symbol; kNoNode if none. A PROJECTION of
@@ -19021,11 +19050,23 @@ inline ConnectPicks joinTerminalPicks( const IngestResult& ing, const Graph& g, 
     return out;
 }
 
-// The lowest-id test-class intermediary on a shortest path, inside the group's own edges, between the two ends of a leg that
-// `crosses` (kNoNode when none): the leg's own intermediaries, which the group's flat steiner list does not record. Each leg is
-// two BFS over the group's nodes (terminals and steiner, a few dozen), never over the graph.
-template<class Crosses>
-inline NodeId lowestTestOnCrossingLegs( const ConnectGroup& grp, std::span<const char> inTests, Crosses crosses )
+// A symbol's canonical content key: (path, line, name), then the source byte range — two definitions on one line in different
+// scopes must not tie (CodeRabbit 4570577964; sigStartByte alone is no total order). A tie-break that names one of several
+// candidates keys on this, not on NodeId, so the choice is a fact about the code, not about how ids were handed out
+// (CodeRabbit #625 4546683506).
+inline auto symbolContentKey( const IngestResult& ing, NodeId id )
+{
+    const Symbol& s = ing.symbols[ id ];
+    return std::tuple<std::string_view, std::uint32_t, std::string_view, std::uint32_t, std::uint32_t>( ing.files[ s.fileId ], s.line, s.name,
+                                                                                                        s.sigStartByte, s.endByte );
+}
+
+// The first test-class intermediary in `before` order (CONNECT-TESTJOINT-CONTENT-KEY: symbolContentKey, NodeId last) on a
+// shortest path, inside the group's own edges, between the two ends of a leg that `crosses` (kNoNode when none): the leg's own
+// intermediaries, which the group's flat steiner list does not record. Each leg is two BFS over the group's nodes (terminals and
+// steiner, a few dozen), never over the graph.
+template<class Crosses, class Before>
+inline NodeId firstTestOnCrossingLegs( const ConnectGroup& grp, std::span<const char> inTests, Crosses crosses, Before before )
 {
     std::vector<NodeId> nodes( grp.terminals );
     nodes.insert( nodes.end(), grp.steiner.begin(), grp.steiner.end() );
@@ -19076,7 +19117,7 @@ inline NodeId lowestTestOnCrossingLegs( const ConnectGroup& grp, std::span<const
         {
             const NodeId v = nodes[ k ];
             if( v < inTests.size() && inTests[ v ] != 0 && da[ k ] != UINT32_MAX && db[ k ] != UINT32_MAX && da[ k ] + db[ k ] == da[ b ]
-                && v != leg.termA && v != leg.termB && ( best == kNoNode || v < best ) )
+                && v != leg.termA && v != leg.termB && ( best == kNoNode || before( v, best ) ) )
             {
                 best = v;
             }
@@ -19090,7 +19131,7 @@ inline NodeId lowestTestOnCrossingLegs( const ConnectGroup& grp, std::span<const
 // common caller, unhedged; and §2.4a's tie-break (fewer connects wins) hands an equal-distance join to a test, which usually
 // connects few. So when no terminal is test-class (filter.h pathDefInTests), the search never walks through a test-class
 // node. When that leaves apart terminals the unrestricted search joins, the result names the first test-class intermediary
-// (id order) of an unrestricted group that joins terminals the source search left apart as testJoint: test-only evidence,
+// (symbolContentKey order: path, line, name) of an unrestricted group that joins terminals the source search left apart as testJoint: test-only evidence,
 // disclosed by the emitter, never printed as a joint. A test
 // terminal keeps today's search unchanged (a test's own helpers are its honest joints).
 inline ConnectResult connectSourceJoint( const IngestResult& ing, const Graph& g, const std::vector<NodeId>& terminals, std::uint32_t radius )
@@ -19119,10 +19160,12 @@ inline ConnectResult connectSourceJoint( const IngestResult& ing, const Graph& g
     };
     // Per LEG, not per group: one group can hold a source-joined pair with a shorter test path beside it AND a test that joins
     // a third terminal, so only the tests on a leg whose two ends lie in different source components count (CodeRabbit #636).
+    // CONNECT-TESTJOINT-CONTENT-KEY: of several qualifying tests, the first by content (path, line, name), NodeId only on a full tie
+    const auto before = [ & ]( NodeId a, NodeId b ) { return std::pair( symbolContentKey( ing, a ), a ) < std::pair( symbolContentKey( ing, b ), b ); };
     for( const ConnectGroup& grp : any.groups )
     {
-        const NodeId hit = lowestTestOnCrossingLegs( grp, inTests, [ & ]( NodeId a, NodeId b ) { return sourceComponentOf( a ) != sourceComponentOf( b ); } );
-        if( hit != kNoNode && ( res.testJoint == kNoNode || hit < res.testJoint ) )
+        const NodeId hit = firstTestOnCrossingLegs( grp, inTests, [ & ]( NodeId a, NodeId b ) { return sourceComponentOf( a ) != sourceComponentOf( b ); }, before );
+        if( hit != kNoNode && ( res.testJoint == kNoNode || before( hit, res.testJoint ) ) )
         {
             res.testJoint = hit;
         }

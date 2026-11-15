@@ -672,6 +672,33 @@ inline bool commonDefsName( const rw::IngestResult& ing, std::span<const rw::Nod
     }
     return true;
 }
+// Which SCOPE-QUALIFIED spellings narrow like a file:name selector. "::" is the canonical id's own separator and no
+// indexed name holds it, so a common defs name is proof enough. A DOT is a member separator too — langfacts.h
+// memberSeparator defaults to "." (Python, JS/TS, Java, Kotlin, Go, Swift, C#) — and the dotted form is the one
+// --impact rows and --callers' own next= hand the reader. Pre-fix it fell to the whole-spelling key below, so no
+// reference (names are always bare) could carry it and every site vanished into a silent count="0": --uses=Widget.arrange
+// answered count="0" where --uses=Widget::arrange answered count="9", and --safe-delete printed callers="13" uses="0" in
+// one element. That is the defect the @-spec arm's own comment records (atcheck (13b)), in the arm next door.
+// "HOLDS A DOT" IS NOT THE GUARD. A dot also lives inside plain NAMES: a flat JSON config key is indexed as
+// `lodash.merge` and an Elixir module as `Outer.Inner` (measured on test/jsonfix and test/elixirnamearityfix — both
+// RESOLVE, so a bare-dot guard would have added the narrowing disclosure, and the call-role narrowing, to two answers
+// that are already right). So a dot narrows only when it ACTED as the separator in THIS resolution: the defs' shared
+// name is the spelling's last dot-separated segment. A name that IS the whole spelling keeps the plain-key arm, bytes
+// included. Read off the RESOLVED defs, never off the spelling, so a wrong scope (Nope::ctwin, Nope.ctwin) and a member
+// spelling backed by no symbol both leave the flag clear and are served exactly as before. `nameOut` is meaningful only
+// on a true return — the caller's else arm overwrites it with the whole spelling, which the "::" arm has always relied on.
+inline bool usesScopeSpellingNarrows( const rw::IngestResult& ing, std::string_view sym, std::span<const rw::NodeId> defs,
+                                      bool allDefsElixir, std::string_view& nameOut )
+{
+    const bool        hasColonScope = sym.find( "::" ) != std::string_view::npos;
+    const std::size_t dot           = sym.rfind( '.' );
+    const bool        hasDotScope   = dot != std::string_view::npos && dot > 0 && dot + 1 < sym.size();
+    if( ( !hasColonScope && !hasDotScope ) || allDefsElixir || !commonDefsName( ing, defs, nameOut ) )
+    {
+        return false;
+    }
+    return hasColonScope || sym.substr( dot + 1 ) == nameOut;
+}
 inline UsesSelector resolveUsesSelector( const rw::IngestResult& ing, std::string_view sym, std::span<const rw::NodeId> defs )
 {
     UsesSelector u{};   // both narrowing flags start false; every arm below sets what it means
@@ -713,11 +740,12 @@ inline UsesSelector resolveUsesSelector( const rw::IngestResult& ing, std::strin
     {
         rw::splitQualifiedSpec( sym, file, u.siteMatchName );
     }
-    else if( sym.find( "::" ) != std::string_view::npos && !allDefsElixir && commonDefsName( ing, defs, u.siteMatchName ) )
+    else if( usesScopeSpellingNarrows( ing, sym, defs, allDefsElixir, u.siteMatchName ) )
     {
-        // A "::" spelling whose defs share one name narrows exactly like a file:name selector: the site
-        // scan matches that name, and the call role narrows to the defs through usesChosenCallers. Set
-        // only on a non-empty, single-named resolution, so a wrong scope (Nope::ctwin) keeps the
+        // A "::" spelling — or a DOT-qualified member spelling whose dot acted as the separator
+        // (usesScopeSpellingNarrows) — whose defs share one name narrows exactly like a file:name selector:
+        // the site scan matches that name, and the call role narrows to the defs through usesChosenCallers. Set
+        // only on a non-empty, single-named resolution, so a wrong scope (Nope::ctwin, Nope.ctwin) keeps the
         // whole-spelling key and the generic refusal's bytes. A member spelling backed by no symbol
         // (empty defs) never sets the flag, so memberUsesArm still serves it upstream exactly as today.
         // An all-Elixir resolution is excluded (see allDefsElixir above) and falls to the plain-key arm
