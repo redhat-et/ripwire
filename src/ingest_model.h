@@ -511,12 +511,25 @@ inline void assignSymbols( IngestResult& result, std::vector<RawDef>& rawDefs, b
 
 // NOSKIP-BUNDLE-DEMOTE: a code definition in a bundle-shaped file (model.h isBundleShapedFile) whose name a code definition in
 // a NON-bundle file also has is a copy of that source, and takes kRankFlagBundleCopy (model.h): the rankers put it below the
-// source copy; every definition in such a file takes kRankFlagInBundle. Demote, never drop: the def stays in every listing, and a name defined only in bundles is no copy and keeps
+// source copy (also under a bundler's numeric rename, bundleRenameBase); every definition in such a file takes kRankFlagInBundle. Demote, never drop: the def stays in every listing, and a name defined only in bundles is no copy and keeps
 // its rank. Runs on every load after assignSymbols (rankFlags are never cached); without a bundle-shaped file it reads one
 // FileHealth word per file and returns, so such an index is unchanged.
 inline bool isBundleCopyCandidate( const Symbol& s ) noexcept
 {
     return s.kind != SymKind::Section && s.kind != SymKind::ModuleScope && !langFacts( s.lang ).notCode && !notNamed( s );
+}
+
+// A bundler renames the second definition of a name it concatenates by a numeric suffix (esbuild: `doChange` -> `doChange27`), so
+// a copy may carry the source name plus digits. The name without them, when at least kBundleRenameMinBase bytes remain; else empty.
+inline constexpr std::size_t kBundleRenameMinBase = 3;
+inline std::string_view bundleRenameBase( std::string_view name ) noexcept
+{
+    std::size_t end = name.size();
+    while( end > 0 && name[end - 1] >= '0' && name[end - 1] <= '9' )
+    {
+        --end;
+    }
+    return end < name.size() && end >= kBundleRenameMinBase ? name.substr( 0, end ) : std::string_view();
 }
 
 inline void markBundleCopies( IngestResult& result )
@@ -546,6 +559,7 @@ inline void markBundleCopies( IngestResult& result )
     }
     std::ranges::sort( sourceNames );
     sourceNames.erase( std::ranges::unique( sourceNames ).begin(), sourceNames.end() );
+    const auto fromSource = [ &sourceNames ]( std::string_view n ) { return !n.empty() && std::ranges::binary_search( sourceNames, n ); };
     for( Symbol& s : result.symbols )
     {
         if( !inBundle( s ) )
@@ -553,7 +567,7 @@ inline void markBundleCopies( IngestResult& result )
             continue;
         }
         s.rankFlags |= kRankFlagInBundle;
-        if( isBundleCopyCandidate( s ) && std::ranges::binary_search( sourceNames, std::string_view( s.name ) ) )
+        if( isBundleCopyCandidate( s ) && ( fromSource( s.name ) || fromSource( bundleRenameBase( s.name ) ) ) )
         {
             s.rankFlags |= kRankFlagBundleCopy;
         }

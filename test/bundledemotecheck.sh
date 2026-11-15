@@ -42,6 +42,7 @@ def w(p, s):
     os.makedirs(os.path.dirname(p), exist_ok=True); open(p, "w").write(s)
 def bundle(limit):
     head = ("function transformWidgets(nodes, ctx) {\n    return nodes.map(function (n) { return visitWidget(n, ctx); });\n}\n\n"
+            "function transformWidgets2(nodes, ctx) {\n    return nodes.map(function (n) { return visitWidget(n, ctx); });\n}\n\n"
             "function bundleOnlyHelper(table, key) {\n    return table[key] === undefined ? null : table[key];\n}\n\n")
     parts, n, i = [head], len(head), 0
     while n < limit:
@@ -129,6 +130,18 @@ if [ "$fdefs" = ' defs="1"' ] && [ "${fbun:-0}" = 0 ] && [ "${femit:-0}" -ge 1 ]
     ok "(f) --callers=$F unions the source only (emitWidgets, no bundle row); --callers=lib/bundle.js:$F still lists the bundle's $f2bun"
 else
     no "(f) --callers=$F:${fdefs:- no defs=} bundle rows ${fbun:-?} emitWidgets ${femit:-?}; file-qualified bundle rows ${f2bun:-?}"
+fi
+
+# ── (g) a bundler's numeric rename (esbuild: transformWidgets -> transformWidgets2) is a copy too (ingest_model.h bundleRenameBase) ─
+# read from the ranker's own row dump (forrowfeatures.h RIPWIRE_ROW_FEATURES, the answer unchanged): the renamed copy takes the tier
+# factor the exact copy takes, on the plain-word task of (a2) (a task that SPELLS the renamed name still finds it, as any other)
+RIPWIRE_ROW_FEATURES="$TMP/g.tsv" "$BIN" "$TMP/big" --no-cache "--for=transform widgets nodes visit" --legend=compact >/dev/null 2>&1   # status: the dump below is the verdict
+gtier(){ awk -F'\t' -v n="$1" 'NR == 2 { for( i = 1; i <= NF; ++i ) { c[$i] = i } } NR > 2 && $c["name"] == n && $c["file"] == "lib/bundle.js" { print $c["tier"]; exit }' "$TMP/g.tsv" 2>/dev/null; }
+gren="$( gtier "${F}2" )"; gcopy="$( gtier "$F" )"
+if [ -n "$gren" ] && [ -n "$gcopy" ] && [ "$gren" = "$gcopy" ] && [ "$gren" != 1 ]; then
+    ok "(g) the renamed copy ${F}2 takes the exact copy's tier factor ($gren)"
+else
+    no "(g) tier factor: renamed ${F}2 ${gren:-absent}, exact copy ${gcopy:-absent} (want equal and below 1)"
 fi
 
 # ── (c) negative: a 3 MiB copy is no bundle — nothing is demoted, the file-order lift stands ─────────────────────────
