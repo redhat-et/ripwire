@@ -39,6 +39,7 @@
 #include "nextverb.h"  // nextAttrXml — the cut element's next=
 #include "forpage.h"   // shedRowAttrs, kForPageShedRungMetrics — the one-row page's attribute shed, the same attributes here
 #include "serialize.h" // pricedRootAttrTokens, tokensForEmittedBytes, kBytesPerTokenDefault / kBytesPerTokenBody, attrOf
+#include "graphlegend.h" // kForCompactSplitClause / kForSplitClause — the present-only split reading a shed may leave rowless
 
 #include <algorithm>
 #include <cstddef>
@@ -373,6 +374,7 @@ public:
             droppedValEnd_ = answer.find( '"', droppedValAt_ );
             droppedHad_    = attrNumber( answer.substr( keyAt - 1, droppedValEnd_ + 1 - ( keyAt - 1 ) ), "dropped_positive" );
         }
+        findSplitReading();
     }
 
     bool parsed() const noexcept { return parsed_; }
@@ -422,7 +424,12 @@ public:
         std::size_t       at    = rootEnd_;
         if( legendEnd_ != std::string_view::npos && ( swaps.empty() || legendEnd_ < swaps.front().at ) )
         {
+            const std::size_t legendAt = out.size();
             out.append( answer_.substr( rootEnd_, legendEnd_ - rootEnd_ ) );
+            if( splitReadingShed( swaps ) )
+            {
+                out.erase( legendAt + ( splitClauseAt_ - rootEnd_ ), splitClauseLen_ );
+            }
             out += clausesFor( st, over );
             at = legendEnd_;
         }
@@ -757,6 +764,7 @@ private:
     {
         std::ptrdiff_t bytes = std::ptrdiff_t( rootFor( st, over ).size() ) - std::ptrdiff_t( rootTag_.size() );
         bytes += legendEnd_ != std::string_view::npos ? std::ptrdiff_t( clausesFor( st, over ).size() ) : 0;
+        bytes -= splitClauseLen_ > 0 && splitReadingShed( swapsFor( st ) ) ? std::ptrdiff_t( splitClauseLen_ ) : 0;
         bytes += droppedValAt_ != 0 && st.rowCut > 0 ? std::ptrdiff_t( droppedValueFor( st ).size() ) - std::ptrdiff_t( droppedValEnd_ - droppedValAt_ ) : 0;
         return bytes;
     }
@@ -795,6 +803,53 @@ private:
         return swaps;
     }
 
+    // The split reading (attrib-multidef Q1, kForCompactSplitClause / kForSplitClause) is present-only: U's legend carries it
+    // beside its prov="split" rows. A shed that removes every one of them (they ride <hops>, <tail>, <fold> and <bodies>) takes
+    // the reading out of the legend too (attribmultidefcheck [S2]). Only when U printed such a row: a U whose legend defines it
+    // on the over-approximated bit with no row keeps U's legend, as the unbudgeted answer does.
+    static std::size_t splitRowsIn( std::string_view xml ) noexcept
+    {
+        constexpr std::string_view kMark = "prov=\"split\"";
+        std::size_t                n     = 0;
+        for( std::size_t at = xml.find( kMark ); at != std::string_view::npos; at = xml.find( kMark, at + kMark.size() ) )
+        {
+            ++n;
+        }
+        return n;
+    }
+    void findSplitReading()
+    {
+        if( legendEnd_ == std::string_view::npos )
+        {
+            return;
+        }
+        const std::string_view legend = answer_.substr( rootEnd_, legendEnd_ - rootEnd_ );
+        for( const std::string_view clause : { kForCompactSplitClause, kForSplitClause } )
+        {
+            if( const std::size_t at = legend.find( clause ); at != std::string_view::npos )
+            {
+                splitClauseAt_  = rootEnd_ + at;
+                splitClauseLen_ = clause.size();
+                break;
+            }
+        }
+        splitRowsU_ = splitClauseLen_ > 0 ? splitRowsIn( answer_.substr( legendEnd_ ) ) : 0;
+    }
+    // the state's swaps leave no prov="split" row of U's (render keeps the legend only when it precedes every swap)
+    bool splitReadingShed( const std::vector<Swap>& swaps ) const
+    {
+        if( splitClauseLen_ == 0 || splitRowsU_ == 0 || ( !swaps.empty() && swaps.front().at < legendEnd_ ) )
+        {
+            return false;
+        }
+        std::size_t left = splitRowsU_;
+        for( const Swap& s : swaps )
+        {
+            left = left - std::min( left, splitRowsIn( answer_.substr( s.at, s.end - s.at ) ) ) + splitRowsIn( s.xml );
+        }
+        return left == 0;
+    }
+
     std::string_view       answer_;
     const ForBudgetAsk&    ask_;
     const ForAnswerLedger& ledger_;
@@ -810,6 +865,7 @@ private:
     std::size_t            docRows_ = 0;   // the <sigs> rows that print a <doc>
     std::size_t            sigRows_ = 0, tailRows_ = 0, hopRows_ = 0, detailRows_ = 0;
     std::size_t            droppedValAt_ = 0, droppedValEnd_ = 0, droppedHad_ = 0;   // U's own dropped_positive= value (0: none)
+    std::size_t            splitClauseAt_ = 0, splitClauseLen_ = 0, splitRowsU_ = 0;   // U's split reading in its legend, and its prov="split" rows
 };
 }   // namespace budgetfit_detail
 

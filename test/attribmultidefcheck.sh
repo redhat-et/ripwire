@@ -724,8 +724,12 @@ fi
 # budget sheds the unbudgeted answer, hops before rows, so a spent target (100) serves the hops cut marker while the split rows
 # outside <hops> (the answer's own rows) still ride, and the reading with them (it used to leave with the hops: no split row, no
 # reading); 500 is the control.
+# Train 1111i: on this fixture all of U's split rows ride <tail> and <hops>, and every budget under U's price (compact 1600 /
+# full 2716 est_tokens, measured on the composed binary) sheds both, so 100..1500 serve one shed answer with no split row. The
+# reading now leaves the legend with the last of them (forbudgetfit.h splitReadingShed; before, it rode rowless at 100 and 500,
+# which this arm caught). The control moves to 3000, a budget U fits whole: U's own rows and reading, byte for byte.
 for lg in compact full; do
-    for n in 100 500; do
+    for n in 100 3000; do
         ( cd "$FIX/cpp" && "$BIN" . --no-cache --for="how does ManifestParser ParseDefault work" --token-budget=$n --legend=$lg ) >"$DIR/s2_${n}_$lg.out" 2>/dev/null; s2_rc=$?
         s2="$( python3 -c '
 import re, sys
@@ -741,8 +745,8 @@ print( rows, clause, marker )' "$DIR/s2_${n}_$lg.out" )"
             if [ "$k2" = 1 ] && { { [ "$r2" -ge 1 ] && [ "$c2" = 1 ]; } || { [ "$r2" = 0 ] && [ "$c2" = 0 ]; }; }; then ok "[S2] $lg @100: the hops cut marker; $r2 split row(s) left and the reading rides exactly with them ($c2)"
             else no "[S2] $lg @100: marker=$k2 split rows=$r2 split reading=$c2 (want the marker, and the reading exactly when a split row rides)"; fi
         else
-            if [ "$r2" -ge 1 ] && [ "$c2" = 1 ]; then ok "[S2] $lg @500 control: $r2 split row(s) and the reading ride"
-            else no "[S2] $lg @500 control: split rows=$r2 reading=$c2 (want >=1 and 1)"; fi
+            if [ "$r2" -ge 1 ] && [ "$c2" = 1 ]; then ok "[S2] $lg @$n control: $r2 split row(s) and the reading ride"
+            else no "[S2] $lg @$n control: split rows=$r2 reading=$c2 (want >=1 and 1)"; fi
         fi
     done
 done
