@@ -696,6 +696,12 @@ inline std::vector<float> rankTierSymbolMultipliersShaped( const IngestResult& i
         {
             mul[i] = std::min( mul[i], kRankTierTestMul );
         }
+        // NOSKIP-BUNDLE-DEMOTE: a bundle's copy of a source definition (model.h kRankFlagBundleCopy) takes the generated tier,
+        // so the source copy outranks it; min(), never a lift. One flag bit per symbol, set at load: no path test here.
+        if( bundleCopy( ing.symbols[i] ) )
+        {
+            mul[i] = std::min( mul[i], kRankTierDemoMul );
+        }
     }
     return mul;
 }

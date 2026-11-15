@@ -335,6 +335,7 @@ for _g in \
     budgetpolicycheck \
     buildtypestampcheck \
     builtinbindcheck \
+    bundledemotecheck \
     bundleidcheck \
     cachefuzzcheck \
     cachehashcheck \

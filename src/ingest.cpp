@@ -483,6 +483,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
 
     // 3b) assign Symbol ids in (fileId, line, name) order + the rich-ingest lex-stats CSR (ingest_model.h)
     assignSymbols( result, raw.defs, captureValueUses );
+    markBundleCopies( result );   // NOSKIP-BUNDLE-DEMOTE: bundle copies of a source definition rank below it (ingest_model.h)
 
     // 4) attribute each reference to its enclosing definition (innermost span containing it) — the
     //    per-file DefSpanIndex + DefSweep cursor every fact family below shares (ingest_model.h).

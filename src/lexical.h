@@ -2237,9 +2237,10 @@ inline HashMap<std::string, NameAnchor> buildLowerNameIndex( const IngestResult&
     std::vector<std::string> parts;
     for( const Symbol& s : ing.symbols )
     {
-        if( notLexRanked( s ) )
+        if( notLexRanked( s ) || bundleCopy( s ) )
         {
-            continue;   // a unit no lexical lens ranks names no route (model.h kRankFlagNotLexRanked)
+            continue;   // a unit no lexical lens ranks names no route (model.h kRankFlagNotLexRanked); a bundle's copy of a
+                        // source definition (kRankFlagBundleCopy) is no extra definition, no carrier and never the anchor's file
         }
         noteWholeNameDef( names, s );
         parts.clear();

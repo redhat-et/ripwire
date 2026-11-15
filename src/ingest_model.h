@@ -509,6 +509,52 @@ inline void assignSymbols( IngestResult& result, std::vector<RawDef>& rawDefs, b
     }
 }
 
+// NOSKIP-BUNDLE-DEMOTE: a code definition in a bundle-shaped file (model.h isBundleShapedFile) whose name a code definition in
+// a NON-bundle file also has is a copy of that source, and takes kRankFlagBundleCopy (model.h): the rankers put it below the
+// source copy. Demote, never drop: the def stays in every listing, and a name defined only in bundles is no copy and keeps
+// its rank. Runs on every load after assignSymbols (rankFlags are never cached); without a bundle-shaped file it reads one
+// FileHealth word per file and returns, so such an index is unchanged.
+inline bool isBundleCopyCandidate( const Symbol& s ) noexcept
+{
+    return s.kind != SymKind::Section && s.kind != SymKind::ModuleScope && !langFacts( s.lang ).notCode && !notNamed( s );
+}
+
+inline void markBundleCopies( IngestResult& result )
+{
+    std::vector<std::uint8_t> bundleFile( result.files.size(), 0u );
+    bool                      anyBundle = false;
+    for( std::size_t f = 0; f < result.files.size() && f < result.fileHealth.size(); ++f )
+    {
+        if( isBundleShapedFile( result.fileHealth[f] ) )
+        {
+            bundleFile[f] = 1u;
+            anyBundle     = true;
+        }
+    }
+    if( !anyBundle )
+    {
+        return;
+    }
+    const auto inBundle = [ &bundleFile ]( const Symbol& s ) noexcept { return s.fileId < bundleFile.size() && bundleFile[ s.fileId ] != 0; };
+    std::vector<std::string_view> sourceNames;   // sorted: the names a non-bundle file defines (views into result.symbols)
+    for( const Symbol& s : result.symbols )
+    {
+        if( !inBundle( s ) && isBundleCopyCandidate( s ) )
+        {
+            sourceNames.push_back( s.name );
+        }
+    }
+    std::ranges::sort( sourceNames );
+    sourceNames.erase( std::ranges::unique( sourceNames ).begin(), sourceNames.end() );
+    for( Symbol& s : result.symbols )
+    {
+        if( inBundle( s ) && isBundleCopyCandidate( s ) && std::ranges::binary_search( sourceNames, std::string_view( s.name ) ) )
+        {
+            s.rankFlags |= kRankFlagBundleCopy;
+        }
+    }
+}
+
 // 4) attribute each reference to its enclosing definition (innermost span containing it).
 //    Per file: the enclosing def is the one with the latest startByte <= ref.startByte
 //    whose endByte > ref.startByte. We index defs by file via a sorted view.

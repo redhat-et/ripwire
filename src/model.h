@@ -1033,8 +1033,13 @@ static_assert( sizeof( Symbol ) == 64 + 2 * sizeof( std::string ),
 //   kRankFlagNotNamed: no name binds it: no call edge (graph.h byName), no bare-name resolution (resolveAllByName/Qualified: --callers,
 //     --defs, the --for caller hop; a file-qualified selector still reaches it), no markdown-link heading target, no PageRank prior,
 //     and the map's symbols= does not count it.
+//   kRankFlagBundleCopy (NOSKIP-BUNDLE-DEMOTE; ingest_model.h markBundleCopies, every load): a definition in a bundle-shaped
+//     file (isBundleShapedFile) whose name a code definition in a non-bundle file also has. It ranks below that source copy:
+//     the lexical tier factor (filter.h), no mention lift and no place in the mention ambiguity count (mention.h), no
+//     source-class anchor (subjectanchor.h). Still a definition every verb lists. A name defined ONLY in bundles is no copy.
 inline constexpr std::uint8_t kRankFlagNotLexRanked = 1u << 0;
 inline constexpr std::uint8_t kRankFlagNotNamed     = 1u << 1;
+inline constexpr std::uint8_t kRankFlagBundleCopy   = 1u << 2;
 inline constexpr std::uint8_t kRankFlagRecallOnly   = kRankFlagNotLexRanked | kRankFlagNotNamed;
 inline bool notLexRanked( const Symbol& s ) noexcept
 {
@@ -1043,6 +1048,10 @@ inline bool notLexRanked( const Symbol& s ) noexcept
 inline bool notNamed( const Symbol& s ) noexcept
 {
     return ( s.rankFlags & kRankFlagNotNamed ) != 0;
+}
+inline bool bundleCopy( const Symbol& s ) noexcept
+{
+    return ( s.rankFlags & kRankFlagBundleCopy ) != 0;
 }
 
 // INDEX-ALIAS-CONST (src/aliasdef.h): where an alias definition's WRITTEN TARGET starts, when the target ends the declaration —
@@ -2292,6 +2301,19 @@ struct FileHealth
 inline bool isLexicallyIndexed( const FileHealth& health ) noexcept
 {
     return health.indexMode != std::uint32_t( FileIndexMode::Parsed );
+}
+
+// NOSKIP-BUNDLE-DEMOTE: at or above this many parsed bytes a file is bundle-shaped. It is the --max-file-size default
+// that skipped such files until NO-SKIP-INGEST (4 MiB), so the demotion below covers exactly the files that lane
+// newly admitted: a build output that concatenates the sources (TypeScript's lib/_tsc.js, 6 MB), an amalgamation,
+// a generated table. No hand-written source file in the measured corpora reaches it (TypeScript's checker.ts is 3 MB).
+inline constexpr std::uint32_t kBundleShapedFileBytes = 4u * 1024u * 1024u;
+
+// A bundle-shaped file: read lexically (too large, past its parse budget, or a bounded data file), or parsed at
+// kBundleShapedFileBytes or more. Its definitions that a source file also defines are COPIES (kRankFlagBundleCopy).
+inline bool isBundleShapedFile( const FileHealth& health ) noexcept
+{
+    return isLexicallyIndexed( health ) || health.fileBytes >= kBundleShapedFileBytes;
 }
 
 // The --skipped / warning word for a mode: lexical-size, lexical-budget, keys-bounded, lexical-nest ("" for Parsed).
