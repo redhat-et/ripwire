@@ -34,6 +34,8 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-15, lane land-499-500 (main 0217049f2 + #499 merged): RE-PINNED with UPDATE_GOLDEN=1 on the merged tree. #499's
+#   kQSnapCacheScheme bump lands as main's number + 1 = 32 (quality.h's v32 note). Its 2026-11-02 entry is kept below.
 # 2026-11-14, TRAIN-1111h, member 5 (lane failure-default): RE-PINNED with UPDATE_GOLDEN=1 on the merged tree. The lane bumped
 #   kQSnapCacheScheme 29 -> 30 against main; qd-rename-identity already took 30 in this train, so failure-default lands as 30 -> 31
 #   (main's number + 1 after the earlier member). kCacheVersion 51 -> 52 is kept as the lane made it (main is 51). Both lanes' log entries
@@ -102,6 +104,11 @@ PIN="$ROOT/test/qschemetrip.hash"
 #   (rich 292): both sides bumped (the lane's reST tier 287/288, main's namespace re-export 289/290), so the merged value goes above both and
 #   a cache built on main at 289 re-indexes the reST .txt docs. quality.h's kIngestParserVerMirror with it. kCacheVersion 48 and
 #   kQSnapCacheScheme stay: no record changes shape and no watched quality.h function moved. Supersedes the 2026-11-03 NOT-re-pinned entry below.
+# 2026-11-02, PR fix/rust-test-harness-dead-code (#493, maintainer review of #499): RE-PINNED with UPDATE_GOLDEN=1 after merging main
+#   (main then held kQSnapCacheScheme 25). Watched text: registeredMacroSymbolIds now reads registersItself (a Rust #[test] / #[tokio::test]
+#   attribute above a definition exempts it); rustTestAttributed reads an attribute line only when it starts with `#[`; the manifest
+#   now lists registersItself, rustTestAttributed, isRustTestAttribute and rustCodeOfAttributeLine. kQSnapCacheScheme 25 -> 26 (v26)
+#   (landed as 31 -> 32 in lane land-499-500; quality.h's v32 note). kParserVer and kCacheVersion stay: no extraction change, no record shape change.
 # 2026-11-02, lane rule3-member-guard fix 4 (base main 00a16550; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1.
 #   Watched text: kParserVer 283 -> 285 (rich 286; 284 is 283's rich tag): a Rust path call whose qualifier has more than one segment keeps
 #   it whole in Reference::fieldName; quality.h's kIngestParserVerMirror with it. kCacheVersion stays 48 and kQSnapCacheScheme stays 24:

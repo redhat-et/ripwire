@@ -421,6 +421,10 @@ struct LangFacts
     /// literal or is a Rust lifetime, so the member brace walk skips just the char-literal shape (fielduses.h OwnerBraceWalk).
     /// clones.h kSingleQuoteStringLangMask is a narrower consumer set on purpose: the clone/readability streams keep their bytes.
     bool singleQuoteStrings = false;
+
+    /// Rust: a `#[test]` or `#[tokio::test]` attribute registers the function with the test harness, which calls it by name
+    /// without any call in the tree (issue #493). quality.h's registersItself reads this column; nothing else does.
+    bool attributeRegistersTests = false;
 };
 
 /// The Rust prelude's bare-callable items (std::prelude::v1, every edition): the Option and Result variants a call constructs, and
@@ -448,7 +452,7 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
       .testRunnerEntry = TestRunnerEntry::GoTestName, .memberDecl = MemberDecl::NameThenType },
     { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .rule3NameProof = Rule3NameProof::RustUse, .preludeCalls = kRustPreludeCalls, .bangMacros = true, .returnTypedDispatchLet = true, .constructorMethod = "new", .memberSeparator = "::", .baseImportEvidence = BaseImportEvidence::RustUse,
       .selectorPathKeywords = true, .instanceReceiver = "self", .memberNeverReachesFreeFunction = true, .fileEdges = FileEdges::Resolved, .localBraceNotData = true, .armOpeners = ArmOpeners::FatArrow,
-      .testRunnerEntry = TestRunnerEntry::RustTestAttr },
+      .testRunnerEntry = TestRunnerEntry::RustTestAttr, .attributeRegistersTests = true },
     { .lang = Lang::Swift, .writtenModule = WrittenModuleRule::DirsOnly, .instanceReceiver = "self",
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .localBraceNotData = true },
     { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true, .staticLinkage = true, .fileEdges = FileEdges::Resolved,
