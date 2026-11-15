@@ -49,7 +49,7 @@ e4bd12b94 0
 1d604ab41 3
 bae4d12f6 1
 c5b45f163 1
-1a009c9f7 10
+1a009c9f7 6
 dd29aa8c2 1
 760a433c7 2
 3b7931830 14"
@@ -113,7 +113,16 @@ gates 760a433c7 recallBytesForTokens ceilingAllowanceBytes 'kind="new-clone-of-r
 gates dd29aa8c2 qualifiedName        callerHopSelector
 gates bae4d12f6 containsAny          isKeyFileToken
 gates c5b45f163 isCQuoteRootProbe    isBareTsSpecifier
-gates 1a009c9f7 pathDirOf            includerDir
+# 1a009c9f7 replayed reversed: its parent fbe6d9b82 MOVED siblift_detail::dirOf's body (already a clone of includerDir
+# and stripExt at the baseline) into model.h::pathDirOf and made dirOf forward to it. Since QD-RENAME-IDENTITY
+# (ContentMoves, TRAIN-1111h) a body that left its key for one new key is the same function, so the pre-existing
+# clone group is held, not reported as new duplication: the pathDirOf rows (2 duplication + 2 new-clone) are gone,
+# 10 -> 6 gating. Premise: the baseline's dirOf really holds the moved body; without it this arm would pass blind.
+if git -C "$REPO" show 1a009c9f7:src/siblift.h | grep -A3 'inline std::string_view dirOf' | grep -q "rfind( '/' )"; then
+    ok "1a009c9f7 premise: the baseline's siblift dirOf holds the body fbe6d9b82 moved into pathDirOf"
+    if [ -z "$( rows 1a009c9f7 | grep -F '::pathDirOf' )" ]; then ok "1a009c9f7: pathDirOf's moved clone group is held as pre-existing (ContentMoves), no row"
+    else no "1a009c9f7: a moved body's pre-existing clone group reads as new: $( rows 1a009c9f7 | grep -F '::pathDirOf' | head -2 )"; fi
+else no "1a009c9f7 premise: the baseline's siblift dirOf no longer holds the rfind body — re-derive this arm"; fi
 # every row of the afterLast fix: its members are two statements each, so none of them is this idiom
 n3b="$( rows 3b7931830 | wc -l | tr -d ' ' )"; g3b="$( rows 3b7931830 | grep -c 'gating="1"' )"
 if [ "$n3b" -gt 0 ] && [ "$n3b" = "$g3b" ]; then ok "3b7931830: all $n3b afterLast-family rows still gate"; else no "3b7931830: $g3b of $n3b rows gate"; fi

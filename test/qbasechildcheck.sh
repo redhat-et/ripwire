@@ -177,7 +177,12 @@ for cell in "nest:$FU:" "partial:$FX:RIPWIRE_TEST_EXTRACT_THROW=rw-throw-here"; 
         if same "$t-in" "$t" && [ "$( blobs "$WORK/t-$t-in" )" = 0 ]; then ok "(U) $c ${nc_:-cached}: byte-identical to in-process, which stores none either"; else no "(U) $c ${nc_:-cached}: differs from in-process (or in-process stored $( blobs "$WORK/t-$t-in" ) blob(s))"; diff <( answer_err "$t-in" ) <( answer_err "$t" ) | head -6 | sed 's/^/    /'; fi
     done
     # the premise: the base really was weakened, so the run said so (a nest-refusal line, or the extract-partial disclosure)
-    if grep -q -e 'json nesting > 512 levels' -e 'RIPWIRE_TEST_EXTRACT_THROW' -e 'extract-partial' "$WORK/u-$c.err"; then ok "(U) $c premise: the weakened base was disclosed"; else no "(U) $c premise: no nest-refusal or extract-partial line — the fixture no longer weakens the base"; fi
+    # The extract-partial line is a DISCLOSE trace, which an NDEBUG (Release) build compiles out, so the partial cell also
+    # accepts a build-independent premise: the marker alone keeps the base out of the cache — the same fixture without it
+    # stored one blob in (P), and the in-process run with it stores none. (The nest line is a plain notice in every build.)
+    if grep -q -e 'json nesting > 512 levels' -e 'RIPWIRE_TEST_EXTRACT_THROW' -e 'extract-partial' "$WORK/u-$c.err"; then ok "(U) $c premise: the weakened base was disclosed"
+    elif [ "$c" = partial ] && [ "$( blobs "$WORK/t-cold" )" = 1 ] && [ "$( blobs "$WORK/t-u-partial-in" )" = 0 ]; then ok "(U) partial premise: the marker alone keeps the base out of the cache (1 blob without it in (P), 0 with it in-process; the extract-partial trace is compiled out of this build)"
+    else no "(U) $c premise: no nest-refusal or extract-partial line, and no storability contrast — the fixture no longer weakens the base"; fi
     runu "u-$c-2" "$dir" "$WORK/t-u-$c" RIPWIRE_TEST_QBASE_CHILD=force ${ue[@]+"${ue[@]}"} -- "$PAIR"
     if [ "$( outcome "u-$c-2" )" = "child -;" ] && same "u-$c" "u-$c-2"; then ok "(U) $c: the repeat finds no blob, spawns again, same answer"; else no "(U) $c repeat: outcome '$( outcome "u-$c-2" )'"; fi
 done
