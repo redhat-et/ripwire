@@ -16574,3 +16574,105 @@ round's object is to keep that completeness at fewer bytes — not to argue the 
 specific claim under test is narrower and falsifiable: **that a nameable share of the growth is attributable
 to sections with zero completeness contribution at both bounds.** And no saving figure is registered in
 advance, because the offline method in G3 returns one without a build and there is no reason to guess it.
+
+## READOUT — ITEM G, the offline cut ladder: one cut is free, the registered cap height is not, and two peer figures do not reproduce
+
+Run 2026-11-16 on the 320-cell `--for` store `cd04d477e/fire321` (7,432,873 B), graded by
+`harness/anchor_grade.py` over **449 cell×bound pairs** across all three grains (item 157 × 2 bounds,
+symbol 129, file 6). Tools: `harness/cut_ladder.py` + `harness/cut_readout.py`. Whole ladder: **2.3 s**,
+no build, exactly as Band G3 adopted.
+
+### Band G3 — the control, which fired twice before any cost was read
+
+Three arms, all PASS, and the second and third exist because the first alone is too weak:
+
+1. **identity** — grading the copy reproduces grading the original, excluding exactly one field,
+   `answers_dir`, which records *where the answers were read from* and must differ.
+2. **bytes** — the unedited copy is byte-identical (7,432,873 → 7,432,873).
+3. **negative** — a planted blanking of one credited answer IS caught. Registered because excluding a
+   field to make arm 1 pass could equally excuse every real disagreement; arm 3 proves the loosened
+   comparison still fires.
+
+### Band G2 — the positive controls fire
+
+`section:sigs` costs **134** items and `section:bodies` **2**, on the same run that reports zero for the
+legend. "Gained nothing" is therefore a statement about those rows, not about the instrument.
+
+### The ladder
+
+| cut | bytes after | Δ | item/lenient | item/strict | symbol | file |
+| --- | ---: | ---: | --- | --- | --- | --- |
+| none (control) | 7,432,873 | 0.00 % | 0 (0) | 0 (0) | 0 (0) | 0 (0) |
+| **legend** | 6,331,601 | **−14.82 %** | **0 (0)** | **0 (0)** | **0 (0)** | **0 (0)** |
+| tail-pathonly | 7,417,430 | −0.21 % | 0 (0) | 0 (0) | 0 (0) | 0 (0) |
+| section:inv | 7,399,370 | −0.45 % | 0 (0) | 0 (0) | 1 (1) | 0 (0) |
+| section:ls | 7,361,021 | −0.97 % | 2 (2) | 3 (1) | 1 (1) | 0 (0) |
+| section:lit | 7,345,909 | −1.17 % | 16 (5) | 23 (4) | 0 (0) | 0 (0) |
+| section:bodies | 7,324,347 | −1.46 % | 1 (1) | 1 (1) | 0 (0) | 0 (0) |
+| section:hops | 7,236,209 | −2.65 % | 2 (1) | 4 (2) | 0 (0) | 0 (0) |
+| section:sigs | 5,998,469 | −19.30 % | 52 (20) | 81 (19) | 1 (1) | 0 (0) |
+| **tail-cap:64** | 5,732,549 | −22.88 % | **17 (4)** | 0 (0) | **9 (7)** | 0 (0) |
+| tail-cap:24 | 4,971,881 | −33.11 % | 34 (9) | 0 (0)† | 14 (11) | 0 (0) |
+| tail (removal) | 4,493,579 | −39.54 % | 64 (19) | 0 (0) | 32 (17) | 0 (0) |
+
+Cells in parentheses are cells that stopped being Complete. † strict reads 0 for every tail cut **by
+construction** — the strict bound is defined as evidence outside `<tail>` — which is the circularity
+Item K was registered to escape and the reason the symbol-grain column decides these rows, not strict.
+
+### The result that answers the round's question
+
+**The legend is 14.82 % of bytes at zero measured completeness cost, across all 449 pairs.** It is the
+only cut in the ladder that takes more than a percent and costs nothing, and the same instrument found
+134 items for `sigs` on the same run.
+
+**Two limits, both of which bound that number and neither of which is a reason to discard it:**
+
+- **The rubric grades evidence about the CODE, not the answer's own interpretability.** A legend-free
+  answer can still carry every anchor while being harder for an agent to read. This instrument cannot
+  see that cost and does not claim to, so the legend's fate is an owner call about self-explaining
+  answers, not a measurement this card can close.
+- **The store predates #668.** `cd04d477e` is 2026-11-13; #668 (present-only legends) merged
+  2026-11-15, so part of this share is already taken. Measured on today's binary, indicatively
+  (n=2 queries, this repo only, NOT the graded population): legends are **11.45 %** and **13.83 %**.
+  Today's remaining headroom is therefore nearer 12 % than 14.8 %, and the exact figure needs a
+  re-collection this readout does not have.
+
+### Band K1 FAILS at the registered height of 64 — reported as the registration requires
+
+`tail-cap:64` loses **17 item-grain anchors across 4 cells** and **9 symbol-grain anchors across 7
+cells**. K1 admits no loss at all, so **Item K as registered FAILS**, and K3's rule applies: the
+response is an ordering test over the cut rows' rank positions, **not** a higher cap. The cost is not
+uniform — per repo, angular loses 4 and kysely 4 while 11 repos lose exactly 1 — which is what G5's
+per-repo rule exists to show and what a pooled figure would have hidden.
+
+### Two peer figures do not reproduce on this corpus
+
+`ideas-rank-bytes-1116.md` §B.1 reports that **41 % of tail bytes are path-only rows**. Counted
+directly here over all 217 tails and 29,377 `<t>` rows: **354 rows carry no `sym=` (1.2 % of rows,
+0.5 % of tail bytes)**, and the emitter's own `p_only=` attribute sums to **177 of 29,377 shown rows
+(0.6 %)**. Cutting that class is worth **−0.21 %** of the document, not a third of the tail. Their
+mechanism is real and the cut is free — it just is not a lever. Taken with the withdrawn 50-row cap,
+two of §B.1's three load-bearing numbers do not survive contact with this corpus; §B.2's offline
+method, by contrast, is adopted wholesale and is what produced this table.
+
+### Two defects in my own instrument, both caught by cross-checks before publication
+
+Recorded because each produced a confident wrong table first, and neither was visible in its own output:
+
+1. **135 of 320 cells were silently dropped.** The item grain nests its bounds under `lenient`/`strict`;
+   the symbol and file grains report `hit`/`total` at the top level. The first reader looked only for the
+   nested shape, so it graded 157 cells and printed a verdict for all of them — 42 % of the population
+   missing, with no row saying so. On the corrected ladder the hidden column is where the tail cuts do
+   much of their damage: `tail-cap:64` costs 9 symbol-grain anchors across 7 cells on top of its 17
+   item-grain ones, and `tail` costs 32 across 17 cells. The broken reader would have **understated the
+   K1 failure by a third** and reported `tail` as costing nothing outside one grain. This is the
+   population-belongs-to-the-instrument shape: the cells it dropped were disproportionately the ones
+   the cut actually hurt.
+2. **A section regex matched inside the legend, then over-corrected.** 14 of 320 legends contain a
+   literal `<inv` and 14 contain `<ls`, so `<inv\b[^>]*>.*?</inv>` opened inside the comment and closed
+   at the first real `</inv>` — a **330 KB** cut of a **33.5 KB** section, with a fabricated item cost.
+   Splitting the document on comments fixed that and broke the opposite case, because comments also sit
+   INSIDE elements (`<!-- demote: a <t> in sigs … -->`): `section:sigs` collapsed from 19.30 % to
+   0.17 %, which would have quietly retired the G2 positive control. **Masking** gets both right. The
+   proof it is now correct is external: `section:inv` cuts **33,503 B**, which is byte-for-byte the
+   independent element-span measurement of `<inv>` across the store.
