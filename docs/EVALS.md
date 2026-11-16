@@ -15332,3 +15332,146 @@ carrying 1,998 filenames, vscode's tier spends roughly **54 KB repeating directo
 every row. Path-prefix compression (or nesting the rows under a shared prefix) is a schema change with its
 own band and is explicitly out of this lane; it is recorded here with its measured size so the next round
 starts from the number rather than from the idea.
+
+## The `<ls>` row ceiling and the name allocator, MEASURED 2026-11-15 against both band sets: **both SHIP** — every band passes, and Band 1 earned its keep by catching a real defect
+
+Three binaries, as Band 8 requires, so neither change can take credit for the other's bytes.
+**B0** = shipped `origin/main` `d68b57456`. **B1** = the row ceiling only, name allocation left in path
+order. **B2** = both (the lane, `5f540a6aa` plus the fix below). Instrument: the run kit's
+`harness/ls_tier_decompose.py`, which asserts legend + ranked rows + `<inv>` account for the whole
+document before reading any figure, and reads Band 1 as a **set difference over named code files**, not
+as a count.
+
+| repo | arm | map B | Δ map | `<ls>` rows | dirs naming a file | names printed | named dirs in largest tree | `dirs_capped` | `dirs_total` | `dirs_next` |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| vscode | B0 | 233,564 | — | 2,534 | 432 | 1,998 | `src` **0** | — | — | — |
+| | B1 | 113,650 | **−51.3 %** | 464 | 432 | 1,998 | `src` 0 | 1 | 2,534 | yes |
+| | B2 | 164,113 | −29.7 % | 1,239 | **1,207** | 1,998 | `src` **806** | 1 | 2,534 | yes |
+| cockroach | B0 | 153,468 | — | 1,718 | 538 | 1,995 | `pkg` 535 | — | — | — |
+| | B1 | 99,365 | **−35.3 %** | 570 | 538 | 1,995 | `pkg` 535 | 1 | 1,718 | yes |
+| | B2 | 134,344 | −12.5 % | 1,243 | **1,211** | 1,998 | `pkg` **1,206** | 1 | 1,718 | yes |
+| angular | B0 | 151,804 | — | 1,301 | 669 | 2,000 | `packages` 227 | — | — | — |
+| | B1 | 119,520 | **−21.3 %** | 701 | 669 | 2,000 | `packages` 227 | 1 | 1,301 | yes |
+| | B2 | 123,847 | −18.4 % | 801 | **769** | 1,990 | `packages` **315** | 1 | 1,301 | yes |
+| envoy | B0 | 149,018 | — | 1,349 | 707 | 2,000 | `api` 538 | — | — | — |
+| | B1 | 115,415 | **−22.5 %** | 739 | 707 | 2,000 | `api` 538 | 1 | 1,349 | yes |
+| | B2 | 130,600 | −12.4 % | 1,044 | **1,012** | 1,997 | `api` 527 | 1 | 1,349 | yes |
+
+### Band 1 — PASS on B1, and it is the band that found the bug
+
+B1 against B0, named-code-file sets differenced per repo: **0 lost, 0 gained on all four**.
+
+**It did not read that way the first time, and the defect was real.** The first decomposition read
+*vscode: lost 1*, *angular: lost 2*, both from the repository ROOT row. The cause was in the survivor
+compaction: `inv.dirs[ write++ ] = std::move( inv.dirs[ read ] )` **self-move-assigns when `write ==
+read`**, and libc++ leaves a moved-from `std::string`/`std::vector` empty. The first kept row is always
+at index 0 when it survives, so vscode's root row shipped as `<ls p="" n="14"/>` — path gone, its one
+named file gone — through a map that was otherwise correct. Fixed by skipping the self-assignment.
+
+The decision rule registered for a Band 1 FAIL was **REJECT, do not re-tune**, and that is what made this
+findable: a band that said "lose a few names, that is the cost of a cut" would have shipped an empty `p=`.
+Note what did *not* catch it — the gate was green. Its fixture's first path-order row was a row the cut
+*removes*, so `write == read` never occurred: a fixture can cover a branch and still never reach the one
+state that breaks it. Arm **(I)** now forces it (a root-level named row, which always survives) and arm
+**(I2)** rejects any empty `p=` outright; an adversary build with the self-move restored turns both red.
+
+**Band 1 does not apply to B2, and that is a defect in the registration, not in the change.** On B2 the
+reading is vscode 1,394 lost / 1,394 gained, cockroach 1,244 / 1,247, envoy 1,088 / 1,085 — a *swap*, not
+a loss, because changing the allocator changes which directories hold the budget, which is the entire
+point. Band 1 was written for card 1 (the row ceiling) before card 2 existed, and "retained exactly" is
+the wrong criterion for an allocator. Band 6 governs B2, and the matched-count swap is reported here so
+nobody reads "1,394 lost" as a regression.
+
+### Band 6 — PASS on all four, read per repo and never pooled
+
+| clause | vscode | cockroach | angular | envoy |
+| --- | --- | --- | --- | --- |
+| directories naming a file must not fall | 432 → **1,207** | 538 → **1,211** | 669 → **769** | 707 → **1,012** |
+| largest tree's absolute count, ≥ −5 % | `src` 0 → **806** | `pkg` 535 → **1,206** | `packages` 227 → **315** | `api` 538 → 527 (**−2.0 %**) |
+| vscode `src/` rows naming a file > 0 | **0 → 806** | n/a | n/a | n/a |
+| `names_total` unchanged | 9,831 | 6,366 | 2,745 | 5,308 |
+
+envoy is the only repo that spends anything: 11 fewer named directories in `api/` (−2.0 %, inside the
+registered margin) buying 305 more named directories overall, with `source/` — envoy's own C++ tree —
+going from ~0 to 358. The amendment's reason for dropping the SHARE unit holds exactly as predicted: by
+share `api/` falls 76 % → 52 % and the registered-as-written band would have failed this.
+
+### Band 7 — PASS. The name count did not move, so Band 4's bytes stay attributable
+
+Names printed, B0 → B2: vscode 1,998 → 1,998, cockroach 1,995 → 1,998, angular 2,000 → 1,990, envoy
+2,000 → 1,997. Every arm is within the 2,000 ceiling and the largest deviation is **+3 / −10 names**. The
+allocator moved the budget; it did not widen it.
+
+### Band 8 — PASS. The name change is provably inert where its ceiling never fires
+
+B1 against B2, byte comparison, on all 11 repos where `names_capped` does not fire: **byte-identical on
+11 of 11** (zed, cpython, terraform, tmux, htop, textual, hono, django, nushell, axum, starlette). The row
+cut's own effect on those repos is small and disclosed: **0.0 %** on the five with fewer count-only rows
+than the allowance (tmux, htop, textual, axum, starlette — no cut fires, no vocabulary emitted), and
+−0.0 % to −11.2 % on the six where it does (django −0.0 %, hono −0.3 %, cpython −1.2 %, nushell −2.4 %,
+terraform −5.3 %, zed −11.2 %).
+
+### Band 2 and Band 3 — PASS, with per-arm firing evidence rather than a green run
+
+`test/lstiercapcheck.sh`, 23 arms, and because a clause that only ever fires beside another has no
+independent evidence, **nine adversary builds** were built and the gate run against each. Which arms each
+turns red:
+
+| adversary | arms turned red |
+| --- | --- |
+| both ceilings walk path order again | (B), (B2) |
+| cut, but no vocabulary in either dialect | (A3), (A4), (E), (F) |
+| disclosed cut, empty `dirs_next=` | **(E) alone** |
+| the row ceiling is never applied | (A2), (A3), (A4), (B), (B2b), (E), (F) |
+| `kInventoryDirCap` = 4, so the backstop reaches named rows | (B), (B2), **(C)**, (H) |
+| survivors emitted in rank order | **(B3) alone** |
+| the cut decrements `unlisted`, Release build | **(D) alone** |
+| the `compactlegend.h` dictionary row deleted | **(G) alone** |
+| the `std::move` self-assignment restored | (A2), (B), **(I)**, (I2) |
+
+Five arms fire alone; (C) and (I) fire only under the adversary written for them. Two of the nine
+adversaries were built because the arm they test had passed something it should have failed:
+
+- **(D)** could not fire in a dev build at all: the accounting adversary is killed by the *existing*
+  `ENSURES( inv.listed + inv.unlisted == F )` in `computeMapInventory` before it can print. It was rebuilt
+  with `-DCMAKE_BUILD_TYPE=Release`, where that contract is compiled out — and (D) fires there, alone.
+  That is the arm's whole reason to exist, now with evidence: in Release the gate is the only net.
+- **(G)** was defective and the adversary proved it. The map is one minified line, so
+  `grep -o '<!--.*-->'` is greedy and spans the whole document *including the attribute it is looking
+  for*; the build with the dictionary row deleted passed. The compact dialect also carries a generic
+  fallback that glosses any `*_capped` attribute as "1 = cut", so `dirs_capped` appears in the legend
+  whether or not a row is registered. The arm now reads the comment run **before** the root element and
+  demands all three names: `dirs_total=` and `dirs_next=` are documented **only** by the
+  `compactlegend.h` row, and they are what prove the registration.
+
+Also passing unchanged: `test/mapinventorycheck.sh` (64 arms, the tier's existing contract),
+`gateexitcheck`, `manifestcheck`, and `xmllint` on both legend dialects.
+
+### Band 4 — bytes, reported. The row-ceiling prediction was right; the combined one was conservative
+
+The registered prediction for the ROW CEILING ALONE, against B1 measured: vscode −51 % predicted /
+**−51.3 %** measured, cockroach −35 % / **−35.3 %**, angular −22 % / **−21.3 %**, envoy −22 % /
+**−22.5 %** — within one point on four of four. The predicted vscode `<ls>` figure of ~72,400 B against a
+map of ~113,500 B reads as 113,650 B measured.
+
+The amended COMBINED estimate was −25 % on vscode; measured **−29.7 %**. It was conservative because the
+name allocator's extra rows are mostly small directories naming one or two files, not the ~110 B/row the
+amendment assumed.
+
+### Band 5 — still not claimed
+
+No terminality number, in either direction, for either change. The instrument is observational and this
+run has no deployed sessions; the reasoning that justifies both changes is §9 principle 1's *constraint*
+and §9.1's ordering rule, both mechanically checked above, plus Band 1's zero-loss set difference. The
+aggressive variant — ranking and cutting NAMED rows — remains deferred and was not implemented.
+
+### What the decomposition says is left, with its size
+
+**vscode's tier is still 164,113 B, and the row count is still corpus-bound**: 1,239 rows, of which 1,207
+name a file. The bill is not the names — it is the **paths, repeated in full on every row**. At ~45 chars
+of path per row that is roughly **54 KB of directory strings to deliver 1,998 filenames**, and no ceiling
+in this lane touches it. Path-prefix compression, or nesting rows under a shared prefix, is a schema
+change with its own band and is deliberately out of scope here; it is recorded with its measured size so
+the next round starts from the number. It is also the honest answer to "an answer should be bounded by the
+question, not the corpus": this lane bounded the *count-only* tail and fixed *where* the names go, and the
+remaining growth term is a schema that spells every ancestor directory once per row.

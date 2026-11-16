@@ -442,10 +442,16 @@ inline void applyInventoryDirCeiling( MapInventory& inv, std::size_t fileCount )
     std::size_t write = 0;
     for( std::size_t read = 0; read < inv.dirs.size(); ++read )
     {
-        if( keep[ read ] != 0 )
+        if( keep[ read ] == 0 )
         {
-            inv.dirs[ write++ ] = std::move( inv.dirs[ read ] );
+            continue;
         }
+        if( write != read )   // NEVER self-move-assign: libc++ leaves a moved-from std::string/vector EMPTY, so a
+        {                     // kept FIRST row would silently lose its p= and its f= (caught by Band 1, 2026-11-15:
+                              // vscode's root row shipped as <ls p="" n="14"/>, its one named file gone)
+            inv.dirs[ write ] = std::move( inv.dirs[ read ] );
+        }
+        ++write;
     }
     inv.dirs.resize( write );
     inv.dirsCapped = true;

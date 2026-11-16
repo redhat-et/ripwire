@@ -26,7 +26,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 FAILED=0
 fail() { printf '  FAIL  %s\n' "$*"; FAILED=$(( FAILED + 1 )); }
-ok()   { if printf '  PASS  %s\n' "$*"; then return 0; else FAILED=$(( FAILED + 1 )); printf '  FAIL  could not write the PASS line for: %s\n' "$*"; return 0; fi; }
+ok()   { printf '  PASS  %s\n' "$*" || { FAILED=$(( FAILED + 1 )); printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 [ -x "$BIN" ] || { echo "lstiercapcheck: no binary at $BIN — build first"; exit 2; }
 echo "lstiercapcheck: BIN=$BIN"
 
@@ -58,6 +58,10 @@ while [ "$i" -le "$NCO" ]; do
     while [ "$j" -le "$i" ]; do printf 'doc %d\n' "$j" > "$d/note_$j.md"; j=$(( j + 1 )); done
     i=$(( i + 1 ))
 done
+# A ROOT-level named row, which sorts FIRST in path order and is always kept: that makes the survivor compaction
+# write to the same index it reads from, the one case where a std::move self-assignment silently empties a row.
+printf 'int rootfn(void){ return 7; }\n' > "$FIX/root_mod.c"
+printf 'doc\n' > "$FIX/ROOTNOTE.md"
 # 5 NAMED directories (code files, alphabetically late) and one ranked-into file at the root so the tier arms
 mkdir -p "$FIX/src"
 printf 'int top(void);\nint top(void){ return helper_a() + helper_b(); }\nint helper_a(void){ return 1; }\nint helper_b(void){ return 2; }\n' > "$FIX/src/top.c"
@@ -70,7 +74,7 @@ done
 # The directory rows the tier CAN print: one per directory holding an UNSHOWN file. At --top-k=1 exactly one file
 # is shown (src/top.c, the only file in src/), so src/ holds no unshown file and contributes no row: 60 + 5 + 1 - 1.
 # The premise is asserted below from the answer's own listed= rather than assumed.
-NDIRS=$(( NCO + 5 + 1 - 1 ))
+NDIRS=$(( NCO + 5 + 1 - 1 + 1 ))        # ... plus the root "." row (root_mod.c + ROOTNOTE.md)
 run() { "$BIN" "$FIX" --no-cache --top-k=1 "$@" 2>"$TMP/err"; }
 run >"$TMP/map"; rc=$?
 run --legend=full >"$TMP/mapfull" 2>/dev/null   # files= carries a VALUE only in the full dialect (arm D)
@@ -121,6 +125,18 @@ for n in 1 2 3 4 5; do
 done
 if [ -z "$MISSING" ]; then ok "(C) every named-code directory survives the cut (Band 1: zero named files lost)"; else fail "(C) named directories lost to the cut:$MISSING"; fi
 
+# (I) the FIRST row in path order survives with its path and its names intact. It is a named row, so the cut always
+# keeps it, and keeping it means the compaction's write index equals its read index -- a std::move self-assignment
+# there leaves a libc++ string/vector EMPTY, which ships as <ls p="" n="N"/> with f= gone. That is not a
+# hypothetical: it is what this lane did to vscode's root row until Band 1's zero-loss readout caught it.
+FIRSTROW="$( printf '%s\n' "$LSROWS" | head -1 )"
+if printf '%s' "$FIRSTROW" | grep -q '<ls p="\." n="[0-9]*" f="[^"]*root_mod\.c'; then
+    ok "(I) the first path-order row keeps its p= and its f= through the compaction"
+else
+    fail "(I) the first path-order row is [$FIRSTROW] — want p=\".\" naming root_mod.c (a self-move emptied it?)"
+fi
+if printf '%s\n' "$LSROWS" | grep -q '<ls p=""'; then fail "(I2) a row shipped with an EMPTY p= — a moved-from directory name"; else ok "(I2) no row has an empty p="; fi
+
 # (D) the accounting invariant holds through a cut: the cut removes ROWS, never files from listed+unlisted.
 # Read from the FULL dialect: files= carries a value only there (in the compact map it survives as legend prose
 # with no value, so the compact <inv>'s own "sum = files=" clause cannot be checked against the same answer).
@@ -155,10 +171,26 @@ if [ "${JROWS:-0}" -ge "$NROWS" ]; then ok "(F2) the JSON tier carries at least 
 
 # (G) the attribute is DOCUMENTED where the reader meets it — a clause written only into the emitter ships
 # undocumented, which is how implementors= nearly shipped silently (2026-11-12)
+# The map is ONE minified line, so `grep -o '<!--.*-->'` is greedy and spans the whole document INCLUDING the
+# attribute it is meant to be looking for — an arm that cannot fail. (Proved: an adversary build with the
+# compactlegend.h dictionary row deleted passed it.) The legend is the comment run BEFORE the root element, so
+# that is what this reads: everything up to the first "<r ".
+sed 's/<r .*$//' "$TMP/map" >"$TMP/legendonly"
+# And it reads all THREE names, not just dirs_capped: the compact dialect carries a GENERIC fallback that glosses
+# any *_capped attribute as "1 = cut", so dirs_capped alone appears in the legend whether or not a dictionary row
+# exists (proved: the adversary with the row deleted still printed it). dirs_total= and dirs_next= are documented
+# ONLY by the compactlegend.h row, so they are what prove the registration.
 if grep -q 'dirs_capped' "$TMP/map"; then
-    if grep -o '<!--.*-->' "$TMP/map" | grep -q 'dirs_capped'; then ok "(G) the default (compact) legend documents dirs_capped"; else fail "(G) dirs_capped is emitted but absent from the compact legend — register the row in src/compactlegend.h, not only in the emitter"; fi
+    MISSDOC=
+    for k in dirs_capped dirs_total dirs_next; do grep -q "$k" "$TMP/legendonly" || MISSDOC="$MISSDOC $k"; done
+    if [ -z "$MISSDOC" ]; then ok "(G) the default (compact) legend documents dirs_capped, dirs_total and dirs_next"; else fail "(G) emitted but absent from the compact legend:$MISSDOC — register the row in src/compactlegend.h's dictionary, not only in the emitter"; fi
+else
+    fail "(G) the capped fixture emitted no dirs_capped at all, so the legend arm has nothing to read"
 fi
-if grep -q 'dirs_capped' "$TMP/full"; then ok "(G2) the full legend documents dirs_capped"; else fail "(G2) dirs_capped is absent from --legend=full"; fi
+sed 's/<r .*$//' "$TMP/full" >"$TMP/fulllegendonly"
+MISSFULL=
+for k in dirs_capped dirs_total dirs_next; do grep -q "$k" "$TMP/fulllegendonly" || MISSFULL="$MISSFULL $k"; done
+if [ -z "$MISSFULL" ]; then ok "(G2) the full legend documents dirs_capped, dirs_total and dirs_next"; else fail "(G2) absent from --legend=full's legend:$MISSFULL"; fi
 
 # (H) NO CUT, NO VOCABULARY: a tier under both caps must carry none of the three attributes
 if "$BIN" "$ROOT/test/mapinvfix" --no-cache --top-k=3 >"$TMP/small" 2>/dev/null; then
