@@ -5371,6 +5371,21 @@ inline std::vector<std::size_t> headRoundRobinOrder( std::size_t n, FileOf&& fil
     return order;
 }
 
+// May a shown row open a file in the head round-robin? Not a doc row the docs reorder moves below the code rows anyway
+// (`docMovesLast`), and not a row from a bundle-shaped file (model.h kRankFlagInBundle, NOSKIP-RANK) unless it is the first
+// shown row: such a file restates sources or holds a data file's keys, so it keeps the place its (generated-tier) score gave
+// it rather than taking a head slot from a parsed source file. The first row stands, as headRoundRobinOrder promises.
+template< class EntryT >
+inline NodeId firstShownRowId( const std::vector<EntryT>& entries ) noexcept
+{
+    const auto it = std::ranges::find_if( entries, []( const EntryT& e ) { return !e.dropped; } );
+    return it == entries.end() ? kNoNode : it->id;
+}
+inline bool headRowMayOpenFile( const IngestResult& ing, NodeId id, NodeId firstShown, bool docMovesLast ) noexcept
+{
+    return !docMovesLast && ( id == firstShown || !inBundleFile( ing.symbols[ id ] ) );
+}
+
 // The rendered rows' reorder, after the ladder (the shown set is final): returns how many shown rows changed rank (0 ⇒ the
 // head already named distinct files — byte-identical). Runs BEFORE reorderDocsAfterCode, which then moves any doc row below
 // the code rows and keeps the code rows' round-robin order.
@@ -6573,10 +6588,11 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
         const auto isDocRow = [ & ]( const SigEntry& e ) { return isDocsAfterCodeRow( ing, e.id ); };   // both reorders' one doc test
         if( hasSigLensRule( lensRules, SigLensRules::HeadRoundRobin ) )
         {
-            const bool docsLast = hasSigLensRule( lensRules, SigLensRules::DocsAfterCode );
+            const bool   docsLast = hasSigLensRule( lensRules, SigLensRules::DocsAfterCode );
+            const NodeId first    = firstShownRowId( entries );
             cut.filesFirst = reorderHeadRoundRobin( entries, [ & ]( const SigEntry& e ) { return ing.symbols[ e.id ].fileId; },
                                                     [ & ]( const SigEntry& e ) { return std::string_view( ing.symbols[ e.id ].name ); },
-                                                    [ & ]( const SigEntry& e ) { return !docsLast || !isDocRow( e ); }, reheadXml );
+                                                    [ & ]( const SigEntry& e ) { return headRowMayOpenFile( ing, e.id, first, docsLast && isDocRow( e ) ); }, reheadXml );
         }
         if( hasSigLensRule( lensRules, SigLensRules::DocsAfterCode ) )
         {
@@ -12171,9 +12187,10 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
         const auto isDocRow = [ & ]( const JsonSigEntry& e ) { return isDocsAfterCodeRow( ing, e.id ); };   // both reorders' one doc test
         if( lens.headRoundRobin )
         {
+            const NodeId first = firstShownRowId( entries );
             cut.filesFirst = reorderHeadRoundRobin( entries, [ & ]( const JsonSigEntry& e ) { return ing.symbols[ e.id ].fileId; },
                                                     [ & ]( const JsonSigEntry& e ) { return std::string_view( ing.symbols[ e.id ].name ); },
-                                                    [ & ]( const JsonSigEntry& e ) { return !lens.docsAfterCode || !isDocRow( e ); }, reheadJson );
+                                                    [ & ]( const JsonSigEntry& e ) { return headRowMayOpenFile( ing, e.id, first, lens.docsAfterCode && isDocRow( e ) ); }, reheadJson );
         }
         if( lens.docsAfterCode )
         {

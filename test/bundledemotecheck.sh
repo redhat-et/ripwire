@@ -14,7 +14,7 @@
 # Every fixture is generated here (nothing large is committed where whole-repo runs would see it); each arm counts its
 # premise and FAILS on zero.
 #
-#   bash test/bundledemotecheck.sh [BIN]          # lane no-skip-ingest ff0664260 FAILS arm (a); 506afce6f FAILS (h1) (h2)
+#   bash test/bundledemotecheck.sh [BIN]          # lane no-skip-ingest ff0664260 FAILS arm (a); 506afce6f FAILS (h1) (h2); 2fa78ec4f FAILS (i1) (i2)
 #   BASE_BIN=<binary before the rule> bash test/bundledemotecheck.sh BIN   # adds arm (c2): no bundle, byte-identical output
 
 set -u
@@ -175,6 +175,46 @@ for h in "h1 protolex --max-file-size=16K" "h2 protobig"; do
         no "($arm) --defs=widget_step [$hdefs]; ${hroot:-no <callees>}; leaf_work rows ${hleaf:-0}"
     fi
 done
+
+# ── (i) NOSKIP-RANK: a bundle-shaped file of names NO source defines (no copies) leaves the source rows where they were ─────────
+# Every definition in a bundle-shaped file takes the generated tier and is no document of the BM25 statistics (filter.h
+# symbolOwnTierMultiplier, lexical.h mergedStatsOut), and a bundle row opens no file in the head round-robin unless it is the
+# first row (serialize.h headRowMayOpenFile). Before the rule, 5 MiB of widget_filler_N functions cut the idf of "widget", the
+# transform* rows jumped the widget* rows, and the round-robin lifted a filler into row 2 (red on the merged lane 2fa78ec4f).
+python3 - "$TMP" <<'EOF'
+import os, sys
+t = sys.argv[1]
+def w(p, s):
+    os.makedirs(os.path.dirname(p), exist_ok=True); open(p, "w").write(s)
+src = "".join(f"export function {n}(a: number): number {{\n    return a + {k};\n}}\n\n"
+              for k, n in enumerate(("widgetAlpha", "widgetGamma", "transformBeta", "transformDelta", "transformEpsilon")))
+for tree in ("statsplain", "statsbundle"):
+    w(f"{t}/{tree}/src/core.ts", src)
+    w(f"{t}/{tree}/src/other.ts", "export function unrelatedThing(): void {}\n")
+parts, n, i = [], 0, 0
+while n < 5 * 1024 * 1024:
+    f = f"function widget_filler_{i}(x) {{\n    return x + {i};\n}}\n\n"
+    parts.append(f); n += len(f); i += 1
+w(f"{t}/statsbundle/lib/bundle.js", "".join(parts))
+EOF
+for tree in statsplain statsbundle; do
+    "$BIN" "$TMP/$tree" --no-cache "--for=widget transform" --legend=compact >"$TMP/i.$tree" 2>/dev/null   # status: --for exits 0 on any corpus; the rows read below are the verdict
+done
+isrc_plain="$( drows "$TMP/i.statsplain" | grep '^src/' | paste -sd'|' - )"
+isrc_bun="$( drows "$TMP/i.statsbundle" | grep '^src/' | paste -sd'|' - )"
+ibun="$( drows "$TMP/i.statsbundle" | grep -c '^lib/bundle.js ' )"
+if [ "${ibun:-0}" -ge 1 ] && [ -n "$isrc_plain" ] && [ "$isrc_plain" = "$isrc_bun" ]; then
+    ok "(i1) the bundle's own names ($ibun rows) leave the source rows in their order: $isrc_bun"
+else
+    no "(i1) source rows moved when the bundle was indexed (bundle rows ${ibun:-0}): without [$isrc_plain] with [$isrc_bun]"
+fi
+ilast_src="$( drows "$TMP/i.statsbundle" | grep -n '^src/' | tail -1 | cut -d: -f1 )"
+ifirst_bun="$( drows "$TMP/i.statsbundle" | grep -n '^lib/bundle.js ' | head -1 | cut -d: -f1 )"
+if [ -n "$ilast_src" ] && [ -n "$ifirst_bun" ] && [ "$ifirst_bun" -gt "$ilast_src" ]; then
+    ok "(i2) every source row ranks above the first bundle row (last source row $ilast_src, first bundle row $ifirst_bun)"
+else
+    no "(i2) a bundle row ranks among the source rows: first bundle row ${ifirst_bun:-absent}, last source row ${ilast_src:-absent}"
+fi
 
 # ── (c) negative: a 3 MiB copy is no bundle — nothing is demoted, the file-order lift stands ─────────────────────────
 "$BIN" "$TMP/under" --no-cache "$FOR_F" --legend=compact >"$TMP/c.out" 2>"$TMP/c.err"; crc=$?   # status: rc kept for (c2)

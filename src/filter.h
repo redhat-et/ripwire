@@ -647,12 +647,13 @@ inline const char* shapeDocTierTag( const queryshape::Verdict& shape ) noexcept
 // The tiers a symbol carries itself, on top of its file's factor `fileMul`; min() each, never a lift.
 //   L8: an in-file test symbol earns the SAME tier factor its path-classified twin already gets — the file it lives in is
 //   production, so its file factor is 1.0; a file ALREADY down-weighted (a fixture, a deck) is never lifted back up.
-//   NOSKIP-BUNDLE-DEMOTE: a bundle's copy of a source definition (model.h kRankFlagBundleCopy) takes the generated tier, so the
-//   source copy outranks it. One flag bit per symbol, set at load: no path test in this loop.
+//   NOSKIP-RANK: every definition in a bundle-shaped file (model.h kRankFlagInBundle: read lexically, or parsed at the size the
+//   crawl once skipped) takes the generated tier, so parsed source outranks it; a task that names the file still lifts it (the
+//   mention anchor reads past the tier). One flag bit per symbol, set at load: no path test in this loop.
 inline float symbolOwnTierMultiplier( const Symbol& s, float fileMul ) noexcept
 {
     const float testMul   = s.testScope != 0 ? kRankTierTestMul : 1.f;
-    const float bundleMul = bundleCopy( s ) ? kRankTierDemoMul : 1.f;
+    const float bundleMul = inBundleFile( s ) ? kRankTierDemoMul : 1.f;
     return std::min( { fileMul, testMul, bundleMul } );
 }
 

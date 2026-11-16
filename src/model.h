@@ -1034,9 +1034,11 @@ static_assert( sizeof( Symbol ) == 64 + 2 * sizeof( std::string ),
 //     --defs, the --for caller hop; a file-qualified selector still reaches it), no markdown-link heading target, no PageRank prior,
 //     and the map's symbols= does not count it.
 //   kRankFlagInBundle (NOSKIP-BUNDLE-DEMOTE; ingest_model.h markBundleCopies, every load): a definition in a bundle-shaped file
-//     (isBundleShapedFile: a build output, an amalgamation, a file read lexically). Ranked as any definition, but no carrier
-//     in the route's name index and outside its carrier cap (lexical.h): its names restate sources. No source-class anchor
-//     (subjectanchor.h).
+//     (isBundleShapedFile: a build output, an amalgamation, a file read lexically). NOSKIP-RANK: it ranks below parsed source —
+//     the generated tier factor (filter.h), a GUEST of the BM25 statistics (scored against the counted corpus, no document of it:
+//     lexical.h), and no file of its own in the head round-robin unless it is the first row (serialize.h headRowMayOpenFile).
+//     No carrier in the route's name index and outside its carrier cap (lexical.h): its names restate sources. No source-class
+//     anchor (subjectanchor.h). Every verb still lists it (--defs, --callers, --grep).
 //   kRankFlagBundleCopy: an InBundle definition whose name a code definition in a non-bundle file also has. It ranks below that
 //     source copy: the lexical tier factor (filter.h), no mention lift and no place in the mention ambiguity count (mention.h),
 //     no route-name definition (lexical.h). Still a definition every verb lists. A name defined ONLY in bundles is no copy.
