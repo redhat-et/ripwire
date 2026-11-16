@@ -16238,3 +16238,38 @@ joined path and this 87 % figure is published beside the byte saving.
 Band M has paid for itself on its first run, which is the argument for building Bands T and R the same way:
 the cheap instrument found, in one afternoon, a cost that five pre-registered bands and a passing gate
 suite did not.
+
+### AMENDMENT 2026-11-16 — Item R's premise is untested in BOTH directions, and the figure that seemed to settle it was retracted at source
+
+A peer machine's ideas note recommended *"route inside `--for` before splitting it"* on the strength of a
+route census reading **114 of 120 natural calls reach plain `--for`** — i.e. that agents rarely pick a
+specialised verb on their own. Taken at face value that is strong evidence for Item R's framing, and it was
+about to be cited here as such.
+
+**Its author retracted it the same day.** The 114 of 120 is the route `--for` takes *internally* — plain
+subtoken+body against name-exact — on calls that were **already `--for`**. It says nothing whatever about an
+agent choosing `--for` over a specialised verb. Their words: *"I have no agent verb-choice data at all."*
+
+Recorded here rather than quietly dropped, for three reasons:
+
+1. **This card never cited it** (Item R rests only on `harness/collect_answers.py`'s own note about the
+   unapplied expert verb map), so nothing registered above needs correcting. The figure reached a handoff
+   and a verbal summary, not a band.
+2. **Item R's premise is now untested in both directions.** There is no evidence that agents fail to pick
+   the right verb, and none that they succeed. R1–R4 stay exactly as registered — they are an experiment,
+   not a claim — but no one should read the card as resting on an observed routing failure.
+3. **The instrument that would settle it does not exist.** The census reads the route label each answer
+   prints, so it has no gold-label leak and is not a router either. Band R2 needs an agent-level
+   observation: which verb an agent picks, unprompted, for a question of known class. Until that exists,
+   R1 measures whether routing *would* pay, not whether anything is currently going wrong.
+
+What the census does support, and what is worth more than the retracted claim: **whether the task names an
+indexed symbol explains most item loss — Complete 71 % when it does against 34 % when it does not, and the
+unnamed calls hold 75 % of the missing items.** That is an anchoring finding, not a routing one, and it
+belongs to the ranking work rather than to this card.
+
+**A live collision, recorded before it becomes a merge problem.** A peer lane, TAIL-SYM-TERMS, adds terms to
+the `<tail>` section and is running now; it was previously held at +5.4 % bytes and +1 Wrong. Item T makes
+`<tail>` a decision and may remove it from the default. The two lanes touch the same section with opposite
+intent, so whichever lands second must be re-measured against the other's result rather than against the
+baseline either one started from — on the same cells, in expected tokens.
