@@ -5375,21 +5375,10 @@ inline std::vector<std::size_t> headRoundRobinOrder( std::size_t n, FileOf&& fil
 // (`docMovesLast`), and not a row from a bundle-shaped file (model.h kRankFlagInBundle, NOSKIP-RANK) unless it is the first
 // shown row: such a file restates sources or holds a data file's keys, so it keeps the place its (generated-tier) score gave
 // it rather than taking a head slot from a parsed source file. The first row stands, as headRoundRobinOrder promises.
-template< class EntryT >
-inline NodeId firstShownRowId( const std::vector<EntryT>& entries ) noexcept
+// `firstShown`: the row is the first shown one.
+inline bool headRowMayOpenFile( const IngestResult& ing, NodeId id, bool firstShown, bool docMovesLast ) noexcept
 {
-    for( const EntryT& e : entries )
-    {
-        if( !e.dropped )
-        {
-            return e.id;
-        }
-    }
-    return kNoNode;
-}
-inline bool headRowMayOpenFile( const IngestResult& ing, NodeId id, NodeId firstShown, bool docMovesLast ) noexcept
-{
-    return !docMovesLast && ( id == firstShown || !inBundleFile( ing.symbols[ id ] ) );
+    return !docMovesLast && ( firstShown || !inBundleFile( ing.symbols[ id ] ) );
 }
 
 // The rendered rows' reorder, after the ladder (the shown set is final): returns how many shown rows changed rank (0 ⇒ the
@@ -5408,7 +5397,7 @@ inline std::size_t reorderHeadRoundRobin( std::vector<EntryT>& entries, FileOf&&
     }
     const std::vector<std::size_t> pos = headRoundRobinOrder( live.size(), [ & ]( std::size_t k ) { return fileOf( entries[ live[k] ] ); },
                                                               [ & ]( std::size_t k ) { return nameOf( entries[ live[k] ] ); },
-                                                              [ & ]( std::size_t k ) { return mayOpen( entries[ live[k] ] ); } );
+                                                              [ & ]( std::size_t k ) { return mayOpen( entries[ live[k] ], k == 0 ); } );
     std::size_t              moved = 0;
     std::vector<std::size_t> newOrder;
     newOrder.reserve( pos.size() );
@@ -6594,11 +6583,10 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
         const auto isDocRow = [ & ]( const SigEntry& e ) { return isDocsAfterCodeRow( ing, e.id ); };   // both reorders' one doc test
         if( hasSigLensRule( lensRules, SigLensRules::HeadRoundRobin ) )
         {
-            const bool   docsLast = hasSigLensRule( lensRules, SigLensRules::DocsAfterCode );
-            const NodeId first    = firstShownRowId( entries );
+            const bool docsLast = hasSigLensRule( lensRules, SigLensRules::DocsAfterCode );
             cut.filesFirst = reorderHeadRoundRobin( entries, [ & ]( const SigEntry& e ) { return ing.symbols[ e.id ].fileId; },
                                                     [ & ]( const SigEntry& e ) { return std::string_view( ing.symbols[ e.id ].name ); },
-                                                    [ & ]( const SigEntry& e ) { return headRowMayOpenFile( ing, e.id, first, docsLast && isDocRow( e ) ); }, reheadXml );
+                                                    [ & ]( const SigEntry& e, bool first ) { return headRowMayOpenFile( ing, e.id, first, docsLast && isDocRow( e ) ); }, reheadXml );
         }
         if( hasSigLensRule( lensRules, SigLensRules::DocsAfterCode ) )
         {
@@ -12193,10 +12181,9 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
         const auto isDocRow = [ & ]( const JsonSigEntry& e ) { return isDocsAfterCodeRow( ing, e.id ); };   // both reorders' one doc test
         if( lens.headRoundRobin )
         {
-            const NodeId first = firstShownRowId( entries );
             cut.filesFirst = reorderHeadRoundRobin( entries, [ & ]( const JsonSigEntry& e ) { return ing.symbols[ e.id ].fileId; },
                                                     [ & ]( const JsonSigEntry& e ) { return std::string_view( ing.symbols[ e.id ].name ); },
-                                                    [ & ]( const JsonSigEntry& e ) { return headRowMayOpenFile( ing, e.id, first, lens.docsAfterCode && isDocRow( e ) ); }, reheadJson );
+                                                    [ & ]( const JsonSigEntry& e, bool first ) { return headRowMayOpenFile( ing, e.id, first, lens.docsAfterCode && isDocRow( e ) ); }, reheadJson );
         }
         if( lens.docsAfterCode )
         {

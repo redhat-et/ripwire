@@ -5762,7 +5762,14 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
             }
             if( !commits.empty() )
             {
-                // co-change degree per file = # of OTHER files that share ≥1 commit with it (file-level).
+                // co-change degree per file = # of OTHER files that share ≥1 commit with it (file-level). NOSKIP-RANK: a bundle-shaped
+                // file (model.h isBundleShapedFile: a lockfile's or a data file's bounded keys, a build output) is no partner of a source
+                // file, nor is a source file one of its: such a file rides along in commits, it is not coupling the change has to touch.
+                std::vector<char> partnerFile( ing.files.size(), 1 );
+                for( std::size_t f = 0; f < partnerFile.size() && f < ing.fileHealth.size(); ++f )
+                {
+                    partnerFile[f] = char( !isBundleShapedFile( ing.fileHealth[f] ) );
+                }
                 std::vector<HashSet<std::uint32_t>> partners( ing.files.size() );
                 for( const std::vector<std::uint32_t>& c : commits )
                 {
@@ -5771,7 +5778,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
                         for( std::size_t j = i + 1; j < c.size(); ++j )
                         {
                             const std::uint32_t a = c[i], b = c[j];
-                            if( a < ing.files.size() && b < ing.files.size() ) { partners[a].insert( b ); partners[b].insert( a ); }
+                            if( a < ing.files.size() && b < ing.files.size() && partnerFile[a] != 0 && partnerFile[b] != 0 ) { partners[a].insert( b ); partners[b].insert( a ); }
                         }
                     }
                 }

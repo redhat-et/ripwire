@@ -51,6 +51,7 @@ struct GraphSubjectArgs
     std::size_t              tried = 0;   // combinations tried before this one resolved (1 = the first)
     std::vector<std::string> unresolved;  // the spellings the resolver did NOT find on the way (tried > 1 only), first-tried first
     std::vector<std::string> narrowed;    // GV-ASSEMBLY M1: the task spellings refused over several definitions that bound their ONE source definition
+    bool                     bundleNarrowed = false;   // NOSKIP-RANK: one of them was narrowed past a bundle's copies (the legend says so only then)
 };
 
 // The spelling that binds definition `pick` alone: its file:name, else its @file:line seed, each re-resolved to prove it (any other
@@ -228,6 +229,7 @@ public:
     {
         std::string spelling;   // the task's
         std::string bound;      // what the verb runs with ("" = not resolved)
+        bool        viaBundle = false;   // bound to the source definition past a bundle's copies (withoutBundleCopiesSpelling)
     };
     GraphSubjectSpellings( const IngestResult& ing, GraphSubjectForm form ) : m_ing( ing ), m_form( form ) {}
 
@@ -237,11 +239,17 @@ public:
         {
             return seen->bound;   // resolved once already
         }
-        std::string bound = bind( spec );
-        m_memo.push_back( Resolved{ spec, std::move( bound ) } );
+        Resolved r{ spec, bind( spec ) };
+        r.viaBundle = r.bound != spec && graphFormResolves( m_ing, m_form, spec );   // resolved as written, so only the bundle step rebinds it
+        m_memo.push_back( std::move( r ) );
         return m_memo.back().bound;
     }
     const std::vector<Resolved>& tried() const noexcept { return m_memo; }
+    bool viaBundle( const std::string& spec ) const noexcept
+    {
+        const auto seen = std::ranges::find( m_memo, spec, &Resolved::spelling );
+        return seen != m_memo.end() && seen->viaBundle;
+    }
 
 private:
     std::string bind( const std::string& spec ) const
@@ -279,6 +287,7 @@ inline std::optional<GraphSubjectArgs> chooseGraphSubjectArgs( const IngestResul
             {
                 a.endpoints.push_back( names.boundOf( e ) );
                 if( a.endpoints.back() != e ) { a.narrowed.push_back( e ); }
+                a.bundleNarrowed = a.bundleNarrowed || names.viaBundle( e );
             }
             for( const GraphSubjectSpellings::Resolved& r : names.tried() )
             {
@@ -370,9 +379,12 @@ inline std::string graphSubjectOpenXml( const GraphSubjectArgs& a, const GraphSu
     out += a.tried > 1 ? "; tried= combinations of the words were tried, the first that resolves ran; unresolved= names the spellings that did not resolve" : "";
     out += o.jsonDialect ? "; dialect=\"json\": this surface answers the verb as JSON, carried as CDATA text, not as XML rows" : "";
     out += o.nameTestHops > 0 ? "; name_test_hops=N: N path hops were matched by name alone to a definition in a test or fixture path, so they may not be the call the source makes" : "";
-    out += a.narrowed.empty() ? "" : "; narrowed= names the task spellings several definitions fit (refused as written, or bound together with a bundle's copies "
-                                     "of the function): the ones in a test or fixture path, the bodyless ones and the bundle copies (a build output or a file "
-                                     "read lexically) were dropped, and verb= names the ONE source definition left by its own spelling";
+    // the bundle clause only when a bundle's copies were dropped (NOSKIP-RANK: the sentence before NOSKIP-BUNDLE-DEMOTE otherwise)
+    const std::string_view narrowedWhy = a.bundleNarrowed ? "refused as written, or bound together with a bundle's copies of the function): the ones in a test or "
+                                                            "fixture path, the bodyless ones and the bundle copies (a build output or a file read lexically) were dropped"
+                                                          : "refused as written): the ones in a test or fixture path and the bodyless ones were dropped";
+    out += a.narrowed.empty() ? "" : "; narrowed= names the task spellings several definitions fit (" + std::string( narrowedWhy )
+                                     + ", and verb= names the ONE source definition left by its own spelling";
     out += o.held ? "; held=\"budget\": a token budget is set, so the verb did NOT run here: verb= is the one call to run; the answer above is unchanged --><graph_verb endpoints=\"subject\""
                   : "; the verb's own legend follows; the answer above is unchanged, and these bytes are not in est_tokens --><graph_verb endpoints=\"subject\"";
     const auto [ flag, value ] = graphSubjectVerbFlag( a );

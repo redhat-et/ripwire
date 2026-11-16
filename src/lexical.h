@@ -524,14 +524,6 @@ inline int unitTermDf( bool guest, bool out, int dfCounted, int dfOut ) noexcept
     }
     return out ? dfCounted + dfOut : dfCounted;
 }
-// One unit's term presence into a per-term document count.
-inline void addTermDocs( std::vector<int>& df, const int* tfRow ) noexcept
-{
-    for( std::size_t u = 0; u < df.size(); ++u )
-    {
-        df[u] += tfRow[u] > 0 ? 1 : 0;
-    }
-}
 
 // The units a BM25 pass keeps out of its corpus statistics: the caller's `statsOut` (may be null), every unranked unit, and every
 // definition in a bundle-shaped file (NOSKIP-RANK, model.h kRankFlagInBundle, which every kRankFlagBundleCopy carries): such a unit
@@ -1368,7 +1360,14 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     avgdlAll /= double( allS ? allS : 1 );
     std::vector<int> dfOut( uniqueCount, 0 );   // per term, the OUT units carrying it (all 0 with no statsOut)
     std::vector<int> dfGuest( uniqueCount, 0 ); // per term, the guests carrying it (the pruned branch's bound only)
-    const auto       countOut = [ & ]( std::size_t i, const int* tfRow ) { addTermDocs( isGuest( i ) ? dfGuest : dfOut, tfRow ); };
+    const auto       countOut = [ & ]( std::size_t i, const int* tfRow )   // an OUT unit's terms; a guest's go to dfGuest
+    {
+        std::vector<int>& df = isGuest( i ) ? dfGuest : dfOut;
+        for( std::size_t u = 0; u < uniqueCount; ++u )
+        {
+            df[u] += tfRow[u] > 0 ? 1 : 0;
+        }
+    };
 
     const Bm25Params    bm25Params = resolveBm25Params();       // A4: the ONE definition — see above
     const double        k1 = bm25Params.k1, b = bm25Params.b;
