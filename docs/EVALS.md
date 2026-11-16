@@ -16676,3 +16676,138 @@ Recorded because each produced a confident wrong table first, and neither was vi
    0.17 %, which would have quietly retired the G2 positive control. **Masking** gets both right. The
    proof it is now correct is external: `section:inv` cuts **33,503 B**, which is byte-for-byte the
    independent element-span measurement of `<inv>` across the store.
+
+## READOUT — ITEM K, Band K3: the ordering is NOT the defect, so Item K is abandoned rather than retuned
+
+K1 failed at the registered height of 64, and K3 registered the response in advance: an ordering test
+over the cut rows' rank positions, explicitly **not** a higher cap. `harness/k3_ordering.py` reads each
+gold's own per-item anchors, finds every anchor whose ONLY evidence is a `<t>` row, and reports the
+index of the row carrying it. 64 such anchors exist; 17 (26.6 %) sit at index ≥ 64.
+
+| percentile | row index carrying the only evidence |
+| --- | ---: |
+| p10 | 4 |
+| p25 | 12 |
+| **p50** | **25** |
+| p75 | 64 |
+| p90 | 117 |
+| p95 | 140 |
+| p100 | 157 |
+
+Decile occupancy of the tail: **22 of 64 anchors in the first decile, 35 of 64 (55 %) in the first
+two**, falling monotonically to 1–3 per decile past the halfway mark.
+
+**The evidence is front-loaded, not back-loaded, so the ordering is already doing its job.** K3 named
+the two outcomes and their consequences in advance: gold rows late ⇒ reorder and keep both the bytes and
+the answers; gold rows spread ⇒ no cap height works and Item K should be abandoned rather than retuned.
+The measurement is the second case in substance — the 17 survivors sit at indices 65–157 inside tails of
+147–252 rows, i.e. genuinely deep, not merely mis-sorted — so **Item K is abandoned as a default.** The
+rows it would cut are a thin, deep minority that no reordering reaches and no height spares, and K3
+forbids the one move that would make the band pass. Recorded as a failed band, superseded in place, with
+its arithmetic intact.
+
+What survives: the cap remains available as an EXPLICIT posture, which is what it already is — the
+budget caller's `shownCap` path is untouched by this and continues to disclose `capped=`/`next=`.
+
+## READOUT — ITEM G, stage 2: the legend is a FIXED per-answer tax, which couples it to routing
+
+### First, a correction to stage 1's denominator
+
+Stage 1 reported every byte share over one 7,432,873 B population. **That store is eleven populations.**
+Measured by each answer's own `schema=`:
+
+| verb | cells | B / answer | legend B / answer | legend share |
+| --- | ---: | ---: | ---: | ---: |
+| `whereis` | 9 | 1,562 | 977 | **62.6 %** |
+| `lego` | 12 | 1,637 | 531 | 32.4 % |
+| `callees` | 10 | 3,264 | 1,479 | 45.3 % |
+| `grep` | 7 | 4,092 | 2,089 | 51.1 % |
+| `callers` | 21 | 4,780 | 1,350 | 28.2 % |
+| `path` | 15 | 5,934 | 1,985 | 33.5 % |
+| `impact` | 6 | 9,237 | 2,410 | 26.1 % |
+| `affected` | 2 | 17,700 | 1,606 | 9.1 % |
+| `map` | 15 | 23,453 | 2,657 | 11.3 % |
+| `for` | 217 | 30,849 | 4,305 | 14.0 % |
+
+15 of those cells are **flagless default-map** answers and are **ungraded** here, because their `#0`
+qid matches no gold file — so stage 1's pooled share mixed a graded population with an ungraded one.
+The completeness costs in stage 1 are unaffected (they were only ever computed on graded cells); the
+byte shares are now reported per verb, which is where they belonged.
+
+### The structural fact
+
+**Legend bytes per answer: min 531, median 1,796, max 4,305.** It is very nearly a FIXED tax, so its
+share is inverse to answer size: it is 14.0 % of a `--for` bundle and **62.6 % of a `--whereis`
+answer**, where the legend costs 1.7× the answer it documents.
+
+### Why that couples the legend to the routing question
+
+Routing's whole premise is answering a question with a cheaper verb. But the cheap verbs are exactly
+where the fixed legend tax dominates, so routing pays it in full and its payoff is capped:
+
+| route `--for` → | saves today | saves with the legend fixed |
+| --- | ---: | ---: |
+| `whereis` | 19.8× | **45.4×** |
+| `lego` | 18.8× | 24.0× |
+| `callees` | 9.5× | 14.9× |
+| `grep` | 7.5× | 13.3× |
+| `callers` | 6.5× | 7.7× |
+| `path` | 5.2× | 6.7× |
+| `impact` | 3.3× | 3.9× |
+| `map` | 1.3× | 1.3× |
+
+**Fixing the legend roughly doubles routing's payoff on the verbs a router would most want to reach**,
+and does nothing for the expensive ones. The two levers are not independent and should not be decided
+separately: the legend fix is a precondition for routing being worth what it looks like it is worth.
+
+## READOUT — the legend OPTIMUM: 89.6 % of it is recoverable at ZERO interpretive cost
+
+The question was whether most of the benefit is available for a fraction of the cost. It is, and the
+reason is that the waste is **repetition**, not content. `harness/legend_optimum.py` splits every
+answer's legend into clauses, hashes each, and counts how many answers carry it: **783 distinct clauses
+across 11,533 emissions — 93 % of every legend clause emitted has already been sent to the reader.**
+
+| clauses appearing in | share of emitted legend bytes |
+| --- | ---: |
+| 1 answer | 4.4 % |
+| 2–9 answers | 18.8 % |
+| 10–99 answers | 32.0 % |
+| **100+ answers** | **44.8 %** |
+
+Pricing a policy that sends each clause **once, on first need** — the reader is still told everything,
+exactly once, so **nothing interpretive is lost**:
+
+| session length N | legend bytes now | with the policy | saving |
+| ---: | ---: | ---: | ---: |
+| 2 | 9,379 | 6,480 | 30.9 % |
+| 3 | 15,494 | 7,689 | 50.4 % |
+| 5 | 22,016 | 8,137 | 63.0 % |
+| 10 | 46,547 | 14,680 | 68.5 % |
+| 20 | 84,985 | 19,095 | 77.5 % |
+| 100 | 473,941 | 54,507 | 88.5 % |
+| 321 (limit) | 1,100,980 | 113,996 | **89.6 %** |
+
+**89.6 % of the legend is 13.28 % of the whole corpus**, and even a three-call session recovers half of
+it. This is strictly better than any content cut measured in this round: stage 1's legend row took
+14.82 % with an *unmeasurable* interpretive cost, and this takes 13.28 % with a *provably zero* one.
+
+### The mechanism is already shipped — on one transport
+
+`--help` records that the MCP server already does exactly this and that it is the DEFAULT
+(`--mcp-legend=WHEN`, "session (the default) or inline"): the first answer defines its attributes
+inline, later answers carry each definition once per session and end with
+`<about legend="ref" dict= dictv=/>`, with `ripwire://legend-dict/full` holding every definition.
+`--legend-dict[=roster]` prints that dictionary from the CLI.
+
+And the CLI's refusal is deliberate and documented: *"A CLI run has no session to hold a definition, so
+`--legend=ref` refuses."* That is the right call for a once-per-session posture, because output that
+depends on whether an earlier invocation happened is not reproducible, and determinism is a contract
+here, not a preference.
+
+**But "once per session" is not the only shape.** An ALWAYS-ref posture is history-independent and
+therefore fully deterministic: every CLI answer carries `<about legend="ref" dictv=…/>` and nothing
+else, and the agent resolves the dictionary once with `--legend-dict`. It reaches the same 13.28 %
+floor, breaks no contract, and is a different option from the one `--legend=ref` currently refuses.
+Registering the decision rule before measuring it: **an always-ref posture may become a DEFAULT only if
+completeness is unchanged on every graded cell at both bounds, and it must remain opt-out**, since an
+agent that cannot resolve the reference would otherwise lose the schema entirely.
