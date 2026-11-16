@@ -66,6 +66,19 @@ namespace landingplan
 // bounding a runaway branch count (kMaxRefs=512 is --stray-content's OWN ref window — 512 arms through
 // merge-scout would be a different order of cost problem entirely). --detail overrides it to unbounded.
 constexpr std::size_t kMaxPlanScout = 12;
+// REF-WINDOW-COST (LARGE-PARTIAL-1): a scouted arm costs a git-archive plus a full ingest of its tree, so the arm count is
+// bounded by WORK too: arms × indexed files at most kPlanScoutFileBudget. Measured on an M2 under load: 12 arms of a one-file
+// repo take ~8 s of an 8.4 s --plan; one arm of cockroach (11,324 indexed files) ~21 s, and its 12 took 343 s. So a repo of
+// 682 indexed files or fewer keeps all 12 and cockroach scouts none (its unmerged branches are still listed and ordered by
+// stray size, scouted="0").
+// --detail lifts both; a cut prints one stderr warning (rw::warnLimitReached).
+constexpr std::size_t kPlanScoutFileBudget = 8192;
+
+// The scout bound for this repo: kMaxPlanScout, lowered by kPlanScoutFileBudget at `indexedFiles`.
+inline std::size_t planScoutCap( std::size_t indexedFiles ) noexcept
+{
+    return std::min( kMaxPlanScout, kPlanScoutFileBudget / std::max<std::size_t>( 1, indexedFiles ) );
+}
 
 struct PlanResult
 {
@@ -115,11 +128,11 @@ inline std::string joinRefNames( const std::vector<crossref::RefRow>& refs, cons
 // function of its inputs, no cfg.detail reach-in.
 inline PlanResult computePlan( const std::string& root, std::string_view filter, const IngestResult& workingIng,
                                const std::vector<std::string>& excludes, std::size_t maxFileBytes,
-                               std::size_t scoutCap = kMaxPlanScout )
+                               std::size_t scoutCap = kMaxPlanScout, std::size_t maxRefs = crossref::kMaxRefs )
 {
     PlanResult result;
     result.atStamp = gitstamp::stampAt( root );   // r26-stamp Task A: set up front so every return path carries it
-    result.stray    = crossref::computeStrayContent( root, filter );
+    result.stray    = crossref::computeStrayContent( root, filter, { .maxRefs = maxRefs } );
     if( !result.stray.ok )
     {
         result.ok          = false;
@@ -153,6 +166,12 @@ inline PlanResult computePlan( const std::string& root, std::string_view filter,
     for( std::size_t rank = 0; rank < unmergedIdx.size(); ++rank )
     {
         ( rank < scoutCap ? result.scouted : result.bounded ).push_back( unmergedIdx[rank] );
+    }
+    if( !result.bounded.empty() )
+    {
+        warnLimitReached( std::format( "--plan scouted {} of {} unmerged branches for conflicts and landing order (limit: {} arms, and {} indexed files "
+                                       "across the arms)", result.scouted.size(), unmergedIdx.size(), kMaxPlanScout, kPlanScoutFileBudget ),
+                          "pass --detail=1 to scout every unmerged branch" );
     }
 
     if( result.scouted.empty() )
@@ -225,8 +244,8 @@ inline void writePlan( std::FILE* out, const PlanResult& p )
                        "which were already re-implemented on the live line (v=\"superseded\", EXCLUDED below — landing "
                        "them re-does work that is already done) or are already merged (omitted entirely, counted in "
                        "merged= on the root element), and the fewest-conflicts-first order to land what remains. "
-                       "scouted=\"0\" on an unmerged ref means it was NOT fed to merge-scout this run (the cost bound, "
-                       "not a verdict) — it is still real, unscouted work; bounded= on the root element counts them "
+                       "scouted=\"0\" on an unmerged ref means it was NOT fed to merge-scout this run (the cost bound: at most 12 arms, "
+                       "fewer on a large repo, 8192 indexed files across the arms; not a verdict) — it is still real, unscouted work; bounded= on the root element counts them "
                        "and detail lifts the bound. merge-scout is the EXPENSIVE step here (git-archive + full "
                        "ingest per arm) — stray-content's own sweep is the cheap one. An undetermined row is a ref that "
                        "could NOT be analysed at all (no merge base with HEAD, which on a SHALLOW clone is every ref): it "
@@ -241,7 +260,7 @@ inline void writePlan( std::FILE* out, const PlanResult& p )
                        "NOT read (a tip that is not an object name): they are in none of the counts and none of the rows. "
                        "refs_omitted= (present only when non-zero) is the sweep's REF WINDOW: past 512 local branches the newest 512 by "
                        "committer date are read and this many older ones are not (in no count or row); the stray-content=SUBSTR ref filter picks "
-                       "which branches fill it. -->" );
+                       "which branches fill it, and the detail flag reads every branch. -->" );
     // r26-stamp Task A: head= (pre-existing, bare 9-char sha, unchanged) and at= (this round's sha[+dirty]
     // anchor) are BOTH kept here rather than converged onto one: head= is an established attribute name this
     // verb already shipped and other callers may already key off, so it stays byte-for-byte what it was;

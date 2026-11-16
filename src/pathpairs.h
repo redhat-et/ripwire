@@ -99,6 +99,10 @@ struct PathPairs
     // N4 (rv-trace-ep): to= groups past kPathPairMaxDstGroups are not walked; the answer says so (pairs_unlisted= + next=) instead of
     // printing today's one chain as if it were the only pair. 0 = not capped. nextFrom/nextTo: the continuation's endpoints.
     std::size_t unlistedDstGroups = 0;
+    // PATH-AMBIG-VERDICT (nushell `--path=eval_call,run`: reachable="1" hops="1" beside pairs_unlisted="833"): on that unwalked
+    // answer the root's verdict is the NEAREST pair's (shortestPathAny: fewest hops over every from=/to= definition pair), not the
+    // pair the reader meant, so the root says so: nearest_of=K, K = from= groups x to= groups (site twins folded). 0 = walked.
+    std::size_t nearestOfPairs = 0;
     // to= groups no chain reaches past the kPathPairBridgeSearches searched: they got no bridge search, and the answer counts them
     // (bridges_unsearched=) instead of reading as if every unreached group had been tried. 0 = every unreached group was searched.
     std::size_t bridgesUnsearched = 0;
@@ -264,6 +268,7 @@ inline PathPairs pathReachingPairs( const IngestResult& ing, const Graph& g, std
     {
         // past the walk bound: today's answer, DISCLOSED (N4) — the first to= definition of another group is the continuation
         out.unlistedDstGroups = dstG.size();
+        out.nearestOfPairs    = srcG.size() * dstG.size();
         out.nextFrom          = today.front();
         for( std::size_t i = 0; i < dstDefs.size() && out.nextTo == kNoNode; ++i )
         {
@@ -465,7 +470,10 @@ inline constexpr std::string_view kPathPairBridgeCapLegend =
     "exist; qualify to= as file:name to search one. ";
 inline constexpr std::string_view kPathPairUnlistedLegend =
     "pairs_unlisted=G: to= names G definition groups, more than the 16 this answer walks, so only the one chain found is printed and "
-    "other reaching pairs are NOT listed; next= runs the same from= to another to= definition, or qualify to= as file:name. ";
+    "other reaching pairs are NOT listed; next= runs the same from= to another to= definition, or qualify to= as file:name. "
+    "nearest_of=K: so reachable=/hops=/from_p=/to_p= describe ONE of K from=/to= definition pairs, not a chosen one: the nearest one a single "
+    "search over all of them found, or the route a route_hedged= verdict prints in its place; whether the pair you mean reaches is NOT "
+    "answered; qualify both ends as file:name. ";
 // P1 PATH-ORDER: present only when a listed pair carries qword= (the ordering departed from the reach rank above)
 inline constexpr std::string_view kPathPairQwordLegend =
     "qword=WORD: that pair's from= owner equals a word of the path argument (FROM,TO as typed), else its to= owner when no pair's from= owner "
@@ -583,7 +591,7 @@ inline PathPairsXml pathPairsRootAttrs( const IngestResult& ing, const PathPairs
     PathPairsXml out;
     if( pp.unlisted() )
     {
-        out.rootAttrs = " pairs_unlisted=\"" + std::to_string( pp.unlistedDstGroups ) + "\"";
+        out.rootAttrs = " nearest_of=\"" + std::to_string( pp.nearestOfPairs ) + "\" pairs_unlisted=\"" + std::to_string( pp.unlistedDstGroups ) + "\"";
         if( pp.nextTo != kNoNode )
         {
             out.rootAttrs += nextAttrXml( nextFlag( "--path=", pathPairSelector( ing, pp.nextFrom, singleRoot, rootPrefix ) + ","

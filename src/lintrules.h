@@ -1450,8 +1450,13 @@ inline bool handlerShapeGates( std::string_view shape, Lang lang ) noexcept
 }
 
 // Is this error-masking hit one of the classic always-gating rows, or a widened shape that gates in `lang`?
+// failure-default gates in no language: its hand-read precision as a defect is under the 0.8 bar everywhere.
 inline bool errorMaskHitGates( std::string_view id, Lang lang ) noexcept
 {
+    if( id == kShapeFailureDefault )
+    {
+        return false;
+    }
     return !( id == kShapeLogOnly || id == kShapeRethrowOnly ) || handlerShapeGates( id, lang );
 }
 
@@ -1517,9 +1522,11 @@ inline void keepErrorMaskQueryRows( const IngestResult& ing, const std::vector<A
 }
 
 // ── QD-CONSTRUCTS-AT-INGEST: the construct-tag byte a model.h ConstructHit carries ──────────────────────────────
-// 0 .. kErrorMaskRules.size()-1 name a query row; the four walk shapes follow. The order is part of the ingest cache
-// record (ingest_cache.h kCacheVersion 51): appending is safe, reordering needs a version bump.
-inline constexpr std::array<std::string_view, 4> kConstructShapeTags = { kShapeLogOnly, kShapeRethrowOnly, kShapeStub, kShapeTodo };
+// 0 .. kErrorMaskRules.size()-1 name a query row; the five walk shapes follow. The order is part of the ingest cache
+// record (ingest_cache.h kCacheVersion 52): appending is safe, reordering needs a version bump. failure-default was
+// appended in 52, which a bump still needed: a record an older build wrote carries no failure-default hits.
+inline constexpr std::array<std::string_view, 5> kConstructShapeTags = { kShapeLogOnly, kShapeRethrowOnly, kShapeStub, kShapeTodo,
+                                                                         kShapeFailureDefault };
 inline constexpr std::size_t kConstructTagCount = kErrorMaskRules.size() + kConstructShapeTags.size();
 static_assert( kConstructTagCount <= 0xFF, "a construct tag is one byte, and 0xFF stays free as the unknown answer" );
 
@@ -1542,7 +1549,7 @@ inline constexpr std::uint8_t constructTagOf( std::string_view id ) noexcept
     }
     return 0xFF;
 }
-static_assert( constructTagOf( kShapeTodo ) == kConstructTagCount - 1 && constructTagOf( kErrorMaskRules[0].id ) == 0,
+static_assert( constructTagOf( kShapeFailureDefault ) == kConstructTagCount - 1 && constructTagOf( kErrorMaskRules[0].id ) == 0,
                "the tag table round-trips its first and last entries" );
 
 // The two groups findQualityConstructs hands the shared walk — the kErrorMaskRules specs and the HandlerShapes walk —

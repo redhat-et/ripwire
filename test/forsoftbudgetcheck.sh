@@ -44,6 +44,15 @@
 #     (P2)  --pack-task --token-budget=6000 serves the default --pack-task's sections (6000 is the default value);
 #     (P3)  MCP explore at a tight budget_tokens: no over_ceiling=.
 #
+#   TOKEN-BUDGET-MONOTONE (2026-11-14): the XML --for budget no longer picks a budget posture; it sheds the UNBUDGETED answer
+#   (src/forbudgetfit.h; test/budgetmonotonecheck.sh holds that contract), so four XML arms move with it. (E3h)/(NX1h): the kept
+#   rows are the default answer's best r= ranks — a rank prefix of its rows, the head round-robin's order included (the budget
+#   no longer re-ranks by score). (E4): the price is the whole answer, the legend included, so the compact dialect buys at least
+#   the full dialect's rows (a prefix of them), not the same rows. (ST-L): the unbudgeted answer serves the <lego> marker, so the
+#   soft opt-in of a whole <lego> no longer runs under a budget (the premise flips: no rung serves more <lego> than the default).
+#   (RF1): sections are shed BEFORE rows now (tail, hops, … then rows), so the retired ceiling's lower bounds give way to an upper
+#   bound: a section never serves more rows under a budget than the unbudgeted answer does.
+#
 #   UNCHANGED (twins, must hold on base and head): the exit-3 CI-gate personality of --token-budget on the default
 #   map (G1), --query (G2) and --recall (G3): over budget -> exit 3, the artifact withheld.
 #
@@ -520,15 +529,15 @@ for n in "${SWEEP[@]}"; do
     cli_so --token-budget="$n" --legend=full > "$TMP/t_${n}_so.xml"; rows "$TMP/t_${n}_so.xml" "$TMP/t_${n}_so.rows" || : > "$TMP/t_${n}_so.rows"
     if [ -s "$TMP/t_${n}_so.rows" ] && python3 "$TMP/prefix.py" "$TMP/t_${n}_so.rows" "$TMP/def_so.rows"; then ok "(E3) [RIPWIRE_NO_HEAD_RR=1 twin] N=$n: rows ($( lines "$TMP/t_${n}_so.rows" )) are a rank prefix of the default rows"
     else no "(E3) [RIPWIRE_NO_HEAD_RR=1 twin] N=$n: rows ($( lines "$TMP/t_${n}_so.rows" )) are not a rank prefix of the default rows ($( lines "$TMP/def_so.rows" ))"; fi
-    if setp "$TMP/t_${n}_full.rows" "$TMP/def.rows" "$TMP/def_so.rows"; then ok "(E3h) head round-robin on, N=$n: rows ($TN) are a SET prefix of the default rows (score ranks 1..$TN)"
-    else no "(E3h) head round-robin on, N=$n: rows ($TN) are not a set prefix of the default rows ($DN) — the continuation would gap or repeat"; fi
+    if python3 "$TMP/prefix.py" "$TMP/t_${n}_full.rows" "$TMP/def.rows"; then ok "(E3h) head round-robin on, N=$n: rows ($TN) are a rank prefix of the default rows (its r= 1..$TN)"
+    else no "(E3h) head round-robin on, N=$n: rows ($TN) are not a rank prefix of the default rows ($DN) — the continuation would gap or repeat"; fi
     if [ -n "$prev" ]; then
         if python3 "$TMP/prefix.py" "$TMP/t_${prev}_full.rows" "$TMP/t_${n}_full.rows"; then ok "(E3) rows(N=$prev) is a prefix of rows(N=$n)"
         else no "(E3) rows(N=$prev) is not a prefix of rows(N=$n) — not monotone"; fi
     fi
     # (E4) dialects agree on rows
-    if cmp -s "$TMP/t_${n}_full.rows" "$TMP/t_${n}_compact.rows"; then ok "(E4) N=$n: compact rows == full rows ($TN)"
-    else no "(E4) N=$n: compact rows ($( lines "$TMP/t_${n}_compact.rows" )) != full rows ($TN)"; fi
+    if python3 "$TMP/prefix.py" "$TMP/t_${n}_full.rows" "$TMP/t_${n}_compact.rows"; then ok "(E4) N=$n: the full dialect's rows ($TN) are a prefix of the compact dialect's ($( lines "$TMP/t_${n}_compact.rows" ))"
+    else no "(E4) N=$n: full rows ($TN) are not a prefix of compact rows ($( lines "$TMP/t_${n}_compact.rows" ))"; fi
     # (ST) stop at target, default and --signatures-only modes: rows fit T (or are the floor); a cut is maximal
     "$BIN" "$CORPUS" --for="$Q" --signatures-only --token-budget="$n" "$CF" > "$TMP/so_$n.xml" 2>/dev/null
     for mode in def so; do
@@ -559,8 +568,8 @@ for n in 3000 3200 3400 3600 4000; do
         *)    no "(ST-L) N=$n: $st — a whole <lego>/<compose> was served out of the bytes the <tail> shell and <hops> first row take" ;;
     esac
 done
-if [ "$LWHOLE" -ge 1 ]; then ok "(ST-L) premise: $LWHOLE of 5 rungs serve the <lego> whole (the opt-in is exercised)"
-else no "(ST-L) premise: no rung serves a whole <lego> — the arm no longer reaches the soft opt-in; widen its rungs"; fi
+if [ "$LWHOLE" -eq 0 ] && ! grep -q '<lego>' "$TMP/def.xml"; then ok "(ST-L) no rung serves a whole <lego>: the budget keeps the default answer's <lego> marker (no soft opt-in past it)"
+else no "(ST-L) $LWHOLE of 5 rungs serve the <lego> whole although the default answer does not (or the default now does: re-anchor)"; fi
 
 # (E2b) a 900-char task at a tight target: the task stays verbatim and its echo is never dropped
 Q900="$Q $( printf 'with the symbol graph and the teleport vector over the whole index %.0s' $( seq 1 14 ) )"
@@ -595,8 +604,8 @@ else
 fi
 NX="$( attr sigs next "$TMP/t_300_full.xml" )"
 if [ -n "$NX" ] && run_next "$NX" "$TMP/nx.xml" && rows "$TMP/nx.xml" "$TMP/nx.rows"; then
-    if [ "$( lines "$TMP/nx.rows" )" -eq "$DN" ] && setp "$TMP/nx.rows" "$TMP/def.rows" "$TMP/def_so.rows" && setp "$TMP/t_300_full.rows" "$TMP/nx.rows" "$TMP/def_so.rows"; then
-        ok "(NX1h) head round-robin on: N=300's next= serves the whole head as a set ($DN rows); the cut is its SET prefix"
+    if [ "$( lines "$TMP/nx.rows" )" -eq "$DN" ] && setp "$TMP/nx.rows" "$TMP/def.rows" "$TMP/def_so.rows" && python3 "$TMP/prefix.py" "$TMP/t_300_full.rows" "$TMP/def.rows"; then
+        ok "(NX1h) head round-robin on: N=300's next= serves the whole head as a set ($DN rows); the cut is the default's rank prefix"
     else
         no "(NX1h) head round-robin on: N=300's next= served $( lines "$TMP/nx.rows" ) rows, not the default's $DN as a set (or the cut is not its set prefix)"
     fi
@@ -869,9 +878,11 @@ for spec in "legotransitivefix|$QNODE|600|lego|9" "legotransitivefix|$QNODE|1000
             "forcompletefix|$QNODE|3000|tail|1" "forcompletefix|$QHAND|3000|tail|1"; do
     IFS='|' read -r fx q n sec want <<< "$spec"
     "$BIN" "test/$fx" --no-cache --for="$q" --token-budget="$n" > "$TMP/rf.xml" 2>/dev/null; rrc=$?
-    got="$( python3 "$TMP/sec.py" "$sec" < "$TMP/rf.xml" )"
-    if [ "$rrc" -eq 0 ] && isnum "$got" && [ "$got" -ge "$want" ]; then ok "(RF1) $fx '$q' N=$n: <$sec> keeps $got rows >= the retired ceiling's $want"
-    else no "(RF1) $fx '$q' N=$n: <$sec> serves '$got' rows < the retired ceiling's $want (rc=$rrc) — a section lost its share to the rows"; fi
+    "$BIN" "test/$fx" --no-cache --for="$q" > "$TMP/rf0.xml" 2>/dev/null || no "(RF1) $fx '$q': the unbudgeted run exited $?"
+    got="$( python3 "$TMP/sec.py" "$sec" < "$TMP/rf.xml" )"; full="$( python3 "$TMP/sec.py" "$sec" < "$TMP/rf0.xml" )"
+    # TOKEN-BUDGET-MONOTONE: an upper bound now (the unbudgeted answer's rows); $want, the retired ceiling's count, is reported
+    if [ "$rrc" -eq 0 ] && isnum "$got" && isnum "$full" && [ "$got" -le "$full" ]; then ok "(RF1) $fx '$q' N=$n: <$sec> serves $got rows <= the unbudgeted answer's $full (the retired ceiling served $want)"
+    else no "(RF1) $fx '$q' N=$n: <$sec> serves '$got' rows > the unbudgeted answer's '$full' (rc=$rrc) — a budget served more than no budget"; fi
 done
 
 # (RF2) FIX1 R2 (review rv-forbudget-soft): the --json tail is a trailing section too — at an explicit N it keeps at least the
@@ -932,6 +943,10 @@ for mode in ( "twin", "seth" ):
         for n in range( 1400, 1601, 10 ):
             r = rows( run( [ B, root, "--for=" + q, "--token-budget=%d" % n ] + extra, mode == "twin" ), js )
             if mode == "twin": pre = r == ref[ :len( r ) ]
+            # TOKEN-BUDGET-MONOTONE (2026-11-14): the XML budget sheds the unbudgeted answer, so its rows are the default's display
+            # ranks r=1..K — an ORDER prefix of `on`, the round-robin's order included (it kept score order: a SET prefix). The
+            # --json dialect keeps its row target, so it stays a set prefix.
+            elif not js: pre = r == on[ :len( r ) ]
             else: pre = set_prefix( r, on, ref )
             if not r or not pre or ( prev is not None and prev != r[ :len( prev ) ] ):
                 bad.append( "%s@%d:%s->%d" % ( "json" if js else "xml", n, len( prev ) if prev else "-", len( r ) ) )
@@ -945,7 +960,7 @@ PY
         *)  no "(RP10) [RIPWIRE_NO_HEAD_RR=1 twin] root of ${#root} chars: ${rp10%%;*} — the rows past the cut fell as N grew (or are not a rank prefix)" ;;
     esac
     case "$rp10" in
-        *";seth=OK") ok "(RP10h) head round-robin on, root of ${#root} chars: rows are a SET prefix of the default, monotone in N, 1400..1600 step 10, default and --json" ;;
+        *";seth=OK") ok "(RP10h) head round-robin on, root of ${#root} chars: rows a display-rank prefix (XML) / SET prefix (--json) of the default, monotone in N, 1400..1600 step 10" ;;
         *)  no "(RP10h) head round-robin on, root of ${#root} chars: ${rp10#*;} — the rows past the cut fell as N grew (or are not a set prefix)" ;;
     esac
 done

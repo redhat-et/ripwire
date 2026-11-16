@@ -547,10 +547,23 @@ comments "$( cd "$W/pc" && RIPWIRE_TEST_MEMGUARD=hard:3 "$BIN" . --no-cache --gr
 case "$OUT_P" in *reads_skipped*) no "(P/mem) near miss: an unstopped answer carries reads_skipped" ;; *) ok "(P/mem) near miss: an unstopped answer carries no reads_skipped (nor its legend)" ;; esac
 
 # P/cache (fix N5): an explicit --cache=F is honoured — the second ingest writes no rich auto-cache under TMPDIR.
+# The WARM SNAPSHOT (ripwire-warmsnap-*, src/warmsnap.h) is the one artifact that MAY appear here, and it appears
+# precisely because of the rule this arm exists to protect: owner ruling 2026-11-15 (ingest_cache.h, "the blob's
+# IDENTITY") puts the snapshot in ripwire's OWN cache directory exactly so that nothing is written beside the user's
+# --cache=PATH (cacheidentitycheck (D3)) and nothing is written into it (portablecachecheck (a)). XDG_CACHE_HOME is
+# redirected into $W/tmpd above, so ripwire's own cache dir IS under TMPDIR for this call by construction. So the
+# arm names the family instead of counting files: anything that is NOT that family is the hidden auto-cache N5 was
+# about, and the control below proves the arm still fires on one.
 mkdir -p "$W/tmpd"
 OUT_PK="$( cd "$W/pc" && TMPDIR="$W/tmpd" XDG_CACHE_HOME="$W/tmpd" "$BIN" . --cache="$W/named.bin" --grep=PC_NAMED_MARK 2>/dev/null )"
 [ "$( attr "$( enc_row "$OUT_PK" NAMED )" reads )" = 3 ] || no "(P/cache) premise: reads=\"3\" under --cache= (the second ingest ran)"
-if [ -z "$( find "$W/tmpd" -type f 2>/dev/null )" ] && [ -f "$W/named.bin" ]; then ok "(P/cache) --cache=F: F written, no hidden rich auto-cache under TMPDIR"; else no "(P/cache) files under TMPDIR: $( find "$W/tmpd" -type f | tr '\n' ' ' )"; fi
+STRAY_PK="$( find "$W/tmpd" -type f ! -name 'ripwire-warmsnap-*' 2>/dev/null | tr '\n' ' ' )"
+if [ -z "$STRAY_PK" ] && [ -f "$W/named.bin" ]; then ok "(P/cache) --cache=F: F written, and nothing under TMPDIR but the warm-snapshot family"; else no "(P/cache) files under TMPDIR that are not a warm snapshot: $STRAY_PK (named.bin present: $( [ -f "$W/named.bin" ] && echo yes || echo no ))"; fi
+# Control: the exemption is a NAME, so a differently-named artifact must still be caught. Without this, narrowing
+# the predicate above could have quietly turned the arm into a no-op for every future cache family.
+: > "$W/tmpd/ripwire-rich-planted.bin"
+if [ -n "$( find "$W/tmpd" -type f ! -name 'ripwire-warmsnap-*' 2>/dev/null )" ]; then ok "(P/cache) control: a planted non-snapshot artifact under TMPDIR is still reported (the arm can fail)"; else no "(P/cache) control: a planted ripwire-rich-planted.bin was NOT reported — the exemption swallows everything"; fi
+rm -f "$W/tmpd/ripwire-rich-planted.bin"
 OUT_PK2="$( cd "$W/pc" && TMPDIR="$W/tmpd" XDG_CACHE_HOME="$W/tmpd" "$BIN" . --cache="$W/named.bin" --grep=PC_NAMED_MARK 2>/dev/null )"
 if [ "$OUT_PK" = "$OUT_PK2" ]; then ok "(P/cache) warm == cold under --cache=F"; else no "(P/cache) warm and cold answers differ under --cache=F"; fi
 

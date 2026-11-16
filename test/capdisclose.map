@@ -17,128 +17,184 @@ kReaderCallerReaders	sink:readersMore
 kAliasHopChains	sink:cut,shown
 kAliasHopMemberNames	sink:cut,shown
 kAliasHopSigBytes	sink:cut,truncateUtf8WithEllipsis
-kCallPathSeeds	pending:B43 no disclosure identifier in the cap site's function (src/forsiblingdemote.h:430); audit: cut or work bound
-kCloneKeyTokenBits	pending:B43 no disclosure identifier in the cap site's function (src/clones.h:397); audit: cut or work bound
+kCallPathSeeds	none:K4 keep-guard seed window: which seeds the guard tries, no answer row is cut (LARGE-PARTIAL Stage 0 audit)
+kCloneKeyTokenBits	none:a saturating key field width, re-verified: a wider key changes no row (Stage 0 audit)
 kDeadExportedRowsShown	sink:shown,walkSkipped
-kEvidenceCap	pending:B43 no disclosure identifier in the cap site's function (src/verbs_navigate.h:2243 (no cap site)); audit: cut or work bound
+kEvidenceCap	pending:B43 disclosed elsewhere: pageTailOf emits shown= capped= for every pageWindow (verbs_navigate.h); the cap is used through a window, so the lint finds no cap site to tie
 kForBareFlagMaxSites	none:a shape test, not a cut: a bare kebab token with more source sites is prose, so no <lit shape="flag"> is claimed (WHOLE-TOKEN; read by hand at train 1111c)
 kForBodyFoldBudgetBytes	sink:cut,firstCutNext
-kForBodyFoldRows	pending:B43 no disclosure identifier in the cap site's function (src/forfold.h:77); audit: cut or work bound
+kForBodyFoldRows	none:the scope of an additive fold: rows past it are printed unfolded, none dropped (Stage 0 audit)
 kForBodySlotMaxBytes	legend
+kForBudgetRowFloor	none:a keep floor, not a cut: the best-ranked <sigs> rows it keeps are never shed; an answer still over --token-budget at the floor prices more than the budget names (est_tokens= above it), and --max-tokens says over_ceiling= (TOKEN-BUDGET-MONOTONE; read by hand at train 1111i)
 kForCallerHopDepth2Rows	sink:firstShown,secondShown
 kForCallerHopRows	sink:firstShown,secondShown
 kForDeclRowsCap	sink:shown
-kForDeclSubjectTries	pending:B43 no disclosure identifier in the cap site's function (src/fordeclrow.h:431); audit: cut or work bound
-kForDetailFloorShareDivisor	pending:B43 no disclosure identifier in the cap site's function (src/verbs_for.h:2080); audit: cut or work bound
+kForDeclSubjectTries	pending:B43 SILENT CUT, follow-up card: 0 fires
+kForDetailFloorShareDivisor	none:a budget floor split; the cut it sizes is disclosed at the serializer (serialize.h budget cut) (Stage 0 audit)
 kForDispatchCtorRows	sink:shown,isFloor
 kForDispatchHopRows	sink:shown,isFloor
 kForDispatchHeldRows	sink:heldShown
 kForDispatchHeldText	sink:cut
-kForDocBodyBytes	pending:B43 no disclosure identifier in the cap site's function (src/fordocbody.h:892); audit: cut or work bound
+kForDocBodyBytes	sink:unserved
 kForDocBodyFiles	sink:shown,shownSigIds
 kForDocBodyTriggerDocs	sink:shown,shownSigIds
 kForDocBodyTriggerRows	sink:shown,shownSigIds
 kForDottedLoaderNamedMax	sink:loadersFloor
 kForDottedStringRows	sink:shown,shownRows
 kForDottedTemplateFillsListed	sink:firstShown,firstShownOf
-kForFilePageCallerFiles	pending:B43 no disclosure identifier in the cap site's function (src/forfilepage.h:461, src/forfilepage.h:467); audit: cut or work bound
-kForFilePageDefRows	pending:B43 no disclosure identifier in the cap site's function (src/forfilepage.h:554, src/forfilepage.h:595); audit: cut or work bound
-kForFilePageDirFiles	pending:B43 no disclosure identifier in the cap site's function (src/forfilepage.h:641, src/forfilepage.h:739); audit: cut or work bound
-kForFilePageListFiles	pending:B43 no disclosure identifier in the cap site's function (src/forfilepage.h:131, src/forfilepage.h:167); audit: cut or work bound
-kForFilePageMaxAnchors	pending:B43 no disclosure identifier in the cap site's function (src/forfilepage.h:631, src/forfilepage.h:734); audit: cut or work bound
+kForFilePageCallerFiles	pending:B43 disclosed elsewhere: the by_total= string literal (the lint cannot see it; a named bool would make it a sink)
+kForFilePageDefRows	pending:B43 disclosed elsewhere: in the callee appendFileOpenTag
+kForFilePageDirFiles	pending:B43 disclosed elsewhere: the render discloses; this lift site only scopes the rank
+kForFilePageListFiles	sink:total
+kForFilePageMaxAnchors	pending:B43 disclosed elsewhere: the render discloses; this lift site only scopes the rank
 kForFilePageMaxBytes	sink:bytesCut,shown
-kForFilePageNextDepth	pending:B43 no disclosure identifier in the cap site's function (src/forfilepage.h:56 (no cap site)); audit: cut or work bound
+kForFilePageNextDepth	none:the depth inside a printed next= follow-up, not a cut of this answer (Stage 0 audit)
 kForFilePageTopBytes	sink:shownLines,shownBytes
 kForFilePageTopLines	sink:shownLines,shownBytes
-kForFileSymsBindPerHead	pending:B43 no disclosure identifier in the cap site's function (src/forfilesyms.h:1201); audit: cut or work bound
+kForFileSymsBindPerHead	pending:B43 disclosed elsewhere: counted in bind_total= (static_assert at forfilesyms.h:174 is not the lint's == N shape); a reviewer confirms
 kForFileSymsFiles	sink:shownAt,ShownFiles
-kForFileSymsHeadRows	pending:B43 no disclosure identifier in the cap site's function (src/forfilesyms.h:544); audit: cut or work bound
+kForFileSymsHeadRows	pending:B43 disclosed elsewhere: the legend states it (static_assert at forfilesyms.h:161 is not the lint's == N shape); a reviewer confirms
 kForFileSymsInitHeadRows	legend
 kForFileSymsInitSpan	sink:InitWindowCut,pastWindow
 kForFileSymsRowsPerRule	sink:cut
-kForFlagDefaultMaxBytes	pending:B43 no disclosure identifier in the cap site's function (src/forliteral.h:177 (no cap site)); audit: cut or work bound
-kForFlagOwnerMaxLines	pending:B43 no disclosure identifier in the cap site's function (src/forliteral.h:3832); audit: cut or work bound
+kForFlagDefaultMaxBytes	pending:B43 disclosed elsewhere: truncateUtf8WithEllipsis marks the cut value (forliteral.h); the lint finds no cap site to tie
+kForFlagOwnerMaxLines	none:the owner-match window of a shape test, not a row cut (Stage 0 audit)
 kForFlagWriteHits	sink:floor
 kForFlagWriteRows	sink:writesFloor,floor
 kForLiteralArmLines	legend
 kForLiteralBodies	sink:cut,shownRowCount
 kForLiteralBodyCapBytes	sink:cut,shownRowCount
-kForLiteralCandidates	pending:B43 no disclosure identifier in the cap site's function (src/forliteral.h:4728, src/forliteral.h:4848); audit: cut or work bound
+kForLiteralCandidates	pending:B43 disclosed elsewhere: the answer sites disclose through lit_capped; the prefetch-plan sites are work
 kForLiteralContextLines	sink:cut,shownRowCount
-kForLiteralExcerptAfter	pending:B43 no disclosure identifier in the cap site's function (src/forliteral.h:3288); audit: cut or work bound
-kForLiteralExcerptBefore	pending:B43 no disclosure identifier in the cap site's function (src/forliteral.h:3277, src/forliteral.h:3519); audit: cut or work bound
-kForLiteralFileMaxSegments	pending:B43 no disclosure identifier in the cap site's function (src/forliteral.h:477); audit: cut or work bound
+kForLiteralExcerptAfter	none:excerpt context lines around a printed row, not a cut (Stage 0 audit)
+kForLiteralExcerptBefore	none:excerpt context lines around a printed row, not a cut (Stage 0 audit)
+kForLiteralFileMaxSegments	none:a shape threshold of the literal test, not a cut (Stage 0 audit)
 kForLiteralKeyLead	sink:truncateUtf8WithEllipsis
-kForLiteralMessageContent	pending:B43 no disclosure identifier in the cap site's function (src/forliteral.h:657); audit: cut or work bound
-kForLiteralMessageTries	pending:B43 no disclosure identifier in the cap site's function (src/forliteral.h:663); audit: cut or work bound
-kForLiteralMessageWords	pending:B43 no disclosure identifier in the cap site's function (src/forliteral.h:531, src/forliteral.h:574); audit: cut or work bound
+kForLiteralMessageContent	none:a shape threshold of the literal test, not a cut (Stage 0 audit)
+kForLiteralMessageTries	pending:B43 SILENT CUT, follow-up card: fired 4 of 140; 0 of 4 changed when lifted
+kForLiteralMessageWords	none:a shape threshold of the literal test, not a cut (Stage 0 audit)
 kForLiteralTierFiles	sink:floor
 kForLiteralWholeBodyLines	sink:cut,shownRowCount
-kForLiteralWholeContent	pending:B43 no disclosure identifier in the cap site's function (src/forliteral.h:655); audit: cut or work bound
+kForLiteralWholeContent	none:a shape threshold of the literal test, not a cut (Stage 0 audit)
 kForOwnerHopRows	sink:capCut,firstCapCut
 kForPageSpliceReserve	sink:forCut,shownIds
-kForPageSymNameCount	pending:B43 no disclosure identifier in the cap site's function (src/forpage.h:591, src/forpage.h:722); audit: cut or work bound
-kForPageUnionSymbolCap	pending:B43 no disclosure identifier in the cap site's function (src/forpage.h:579); audit: cut or work bound
+kForPageSymNameCount	pending:B43 disclosed elsewhere: n= (the tail callers are unverified)
+kForPageUnionSymbolCap	none:part of the definition of the page score, not a cut of rows (Stage 0 audit)
 kForRankedHopHeadRows	legend
 kForRankedHopMaxCallers	legend
-kForRankedMessageWords	pending:B43 no disclosure identifier in the cap site's function (src/forcallerhop.h:294, src/forcallerhop.h:385); audit: cut or work bound
+kForRankedMessageWords	none:a shape threshold of the literal test, not a cut (Stage 0 audit)
 kForRegCallBytes	legend
 kForRegCallLines	legend
-kForRegIdentBytes	pending:B43 no disclosure identifier in the cap site's function (src/forliteral.h:2512, src/forliteral.h:2520); audit: cut or work bound
+kForRegIdentBytes	none:a shape threshold of the identifier test, not a cut (Stage 0 audit)
 kForRegLineHits	sink:cut,shownRowCount
-kForSelfHookCandidateRows	pending:B43 no disclosure identifier in the cap site's function (src/forselfhook.h:1199); audit: cut or work bound
+kForSelfHookCandidateRows	pending:B43 SILENT CUT, follow-up card: 0 fires
 kForSelfHookMethodRows	sink:shown,partial
 kForSelfHookSiteRows	sink:skipped
 kForTableAnchors	sink:cutLegend
 kForTableByteCap	sink:cutLegend
 kForTableElementBytes	sink:cutLegend
-kForTableMaxAnchor	pending:B43 no disclosure identifier in the cap site's function (src/forliteral.h:858); audit: cut or work bound
-kForTableOpenerLines	pending:B43 no disclosure identifier in the cap site's function (src/forliteral.h:2106); audit: cut or work bound
+kForTableMaxAnchor	none:a shape threshold of the table test, not a cut (Stage 0 audit)
+kForTableOpenerLines	pending:B43 SILENT CUT (audit unsure), follow-up card: 0 fires
 kForTableReaderFiles	sink:floor
 kForTableReaderRows	sink:shown,floor
-kForTableSiblingLines	pending:B43 no disclosure identifier in the cap site's function (src/forliteral.h:1732, src/forliteral.h:2147); audit: cut or work bound
-kForThinCoveragePct	pending:B43 no disclosure identifier in the cap site's function (src/forpage.h:142); audit: cut or work bound
-kForUnusedDirFiles	pending:B43 no disclosure identifier in the cap site's function (src/forunused.h:3222); audit: cut or work bound
-kForUnusedExtraFiles	pending:B43 no disclosure identifier in the cap site's function (src/forunused.h:2313); audit: cut or work bound
-kForUnusedMaxBytes	pending:B43 no disclosure identifier in the cap site's function (src/forunused.h:3254); audit: cut or work bound
+kForTableSiblingLines	pending:B43 SILENT CUT (audit unsure), follow-up card: 0 fires
+kForThinCoveragePct	none:a threshold the legend states (coverage= on a THIN answer), not a cut (Stage 0 audit)
+kForUnusedDirFiles	sink:dirTotal
+kForUnusedExtraFiles	sink:miss
+kForUnusedMaxBytes	pending:B43 disclosed elsewhere: only the literal <unused_cut bytes_capped>
 kForUnusedRowsPerFile	sink:shownRows,graphCountFloorAttrXml
-kForUnusedSitesShown	pending:B43 no disclosure identifier in the cap site's function (src/forunused.h:665); audit: cut or work bound
+kForUnusedSitesShown	pending:B43 disclosed elsewhere: the row totals are its counts
 kForVerbatimMaxSites	none:a shape test, not a cut: a cue-less whole text with more confirmed string sites is no single message, so no <lit shape="message"> is claimed (MSG-VERBATIM; read by hand at train 1111c)
 kFpGram	none:the k-gram width of a fingerprint (a parameter, not a cut; read by hand after #615 moved it)
-kGraphSubjectAttempts	pending:B43 no disclosure identifier in the cap site's function (src/forgraphverb.h:181, src/forgraphverb.h:189); audit: cut or work bound
-kGraphSubjectSlotCands	pending:B43 no disclosure identifier in the cap site's function (src/forgraphverb.h:187, src/forgraphverb.h:188); audit: cut or work bound
-kGrepHitRefsMax	pending:B43 no disclosure identifier in the cap site's function (src/verbs_grep.h:946); audit: cut or work bound
+kGraphSubjectAttempts	pending:B43 SILENT CUT, follow-up card: 0 fires
+kGraphSubjectSlotCands	pending:B43 SILENT CUT, follow-up card: 0 fires
+kGrepHitRefsMax	pending:B43 SILENT CUT, follow-up card: 0 fires in 140 large-repo calls
 kImportSpecMaxStates	sink:cutDepth
-kJsonEnvelopeDigitsMax	pending:B43 no disclosure identifier in the cap site's function (src/verbs_for.h:1661 (no cap site)); audit: cut or work bound
-kKeep	pending:B43 no disclosure identifier in the cap site's function (src/forselfhook.h:541); audit: cut or work bound
-kLineStartReach	pending:B43 no disclosure identifier in the cap site's function (src/fordocbody.h:402); audit: cut or work bound
+kJsonEnvelopeDigitsMax	none:a byte reservation for the JSON envelope, not a cut (Stage 0 audit)
+kKeep	none:parse-cache eviction count: a work bound, the bytes are unchanged (Stage 0 audit)
+kLineStartReach	none:the snap window of a line-start search, not a cut (Stage 0 audit)
 kLintDefaultPayloadBytes	sink:saturatedRules,lintDefaultShown
-kLitHubFanIn	pending:B43 no disclosure identifier in the cap site's function (src/forliteral.h:1061); audit: cut or work bound
+kLitHubFanIn	none:a rank threshold, not a cut (Stage 0 audit)
 kMatchMaxHits	sink:saturatedRules,lintDefaultShown
-kMaxLinesUp	pending:B43 no disclosure identifier in the cap site's function (src/forunused.h:528, src/forunused.h:785); audit: cut or work bound
-kOneSideMaxEndpointDefs	pending:B43 no disclosure identifier in the cap site's function (src/foronesidereach.h:100); audit: cut or work bound
-kOneSideRootPathMaxHops	pending:B43 no disclosure identifier in the cap site's function (src/foronesidereach.h:421, src/foronesidereach.h:426); audit: cut or work bound
-kOwnerNearRows	pending:B43 no disclosure identifier in the cap site's function (src/forsiblingdemote.h:225); audit: cut or work bound
-kPathDeclinedLastCands	pending:B43 no disclosure identifier in the cap site's function (src/pathroute.h:315); audit: cut or work bound
+kMaxLinesUp	none:shape windows (two locals share the name), not a cut (Stage 0 audit)
+kOneSideMaxEndpointDefs	none:a rule gate deciding whether the one-side rule applies, not a cut (Stage 0 audit)
+kOneSideRootPathMaxHops	none:a classification threshold, not a cut (Stage 0 audit)
+kOwnerNearRows	none:the K3 window; the demotion it bounds is disclosed (Stage 0 audit)
+kPathDeclinedLastCands	none:a precision gate on a declined path, not a cut (Stage 0 audit)
 kPathFromReachMaxNodes	sink:floorScore
-kPathRouteCandsCeiling	pending:B43 no disclosure identifier in the cap site's function (src/pathroute.h:121, src/pathroute.h:567); audit: cut or work bound
-kPathRouteHedgeNameHops	pending:B43 no disclosure identifier in the cap site's function (src/pathroute.h:494); audit: cut or work bound
-kPathRouteRefuseCandsThreshold	pending:B43 no disclosure identifier in the cap site's function (src/pathroute.h:507); audit: cut or work bound
-kPathRouteRefuseNameHops	pending:B43 no disclosure identifier in the cap site's function (src/pathroute.h:507, src/pathroute.h:566); audit: cut or work bound
+kPathRouteCandsCeiling	none:saturating, and disclosed by the literal route_cands_capped=1 the lint cannot see (fired once in 140 large-repo calls, cpython-02) (Stage 0 audit)
+kPathRouteHedgeNameHops	none:a threshold disclosed by route_hedged= (Stage 0 audit)
+kPathRouteRefuseCandsThreshold	none:a threshold disclosed by route_hedged= (Stage 0 audit)
+kPathRouteRefuseNameHops	none:a threshold disclosed by route_hedged= (Stage 0 audit)
 kReaderCallerFanIn	sink:hub
 kReaderCallerRows	sink:more
-kReexportDefCap	pending:B43 no disclosure identifier in the cap site's function (src/forreexport.h:1438); audit: cut or work bound
-kReexportNameCap	pending:B43 no disclosure identifier in the cap site's function (src/forreexport.h:1011); audit: cut or work bound
+kReexportDefCap	pending:B43 SILENT CUT, follow-up card: 0 fires
+kReexportNameCap	pending:B43 SILENT CUT, follow-up card: fired 32 of 140 large-repo calls; 0 of 14 changed when lifted to 1000
 kReexportRowCap	legend
 kReexportSpellingCap	sink:capped
-kReexportUseCap	pending:B43 no disclosure identifier in the cap site's function (src/forreexport.h:788, src/forreexport.h:801); audit: cut or work bound
-kRowFeaturesMaxHops	pending:B43 no disclosure identifier in the cap site's function (src/forrowfeatures.h:254, src/forrowfeatures.h:482); audit: cut or work bound
+kReexportUseCap	pending:B43 SILENT CUT, follow-up card: 0 fires
+kRowFeaturesMaxHops	none:a dev-only TSV dump (RIPWIRE_ROW_FEATURES), never an answer (Stage 0 audit)
 kRowFeaturesMaxPath	sink:DISCLOSE
 kRunTraceRelevantLinesCap	sink:isCapped
 kShortKeyBodyBytes	legend
 kShortKeyRows	legend
 kShown	sink:truncated,selfExecutablePath
-kSketchHashes	pending:B43 no disclosure identifier in the cap site's function (src/clones.h:768, src/clones.h:770); audit: cut or work bound
-kSupport	pending:B43 no disclosure identifier in the cap site's function (src/gitmine.h:3477, src/verbs_report.h:1776); audit: cut or work bound
-kType3MaxBucket	pending:B43 the stop-gram cut skips a bucket with no attribute; the drafted sink:DISCLOSE was the pair cap's, one function over (read by hand after #615)
-kType3MaxTokensForLcs	pending:B43 the LCS reads a body's first 4096 tokens with no attribute; the drafted sink:DISCLOSE was the pair cap's (read by hand after #615)
+kSketchHashes	none:the minhash sketch width, not a cut (Stage 0 audit)
+kSupport	none:a minimum-commits threshold, not a cut (Stage 0 audit)
+kType3MaxBucket	pending:B43 SILENT CUT by design (quadratic bucket), follow-up card: fires on every clones run
+kType3MaxTokensForLcs	pending:B43 SILENT CUT, follow-up card: fired on 6 of 7 large repos; type3 total +0.15% lifted, shown rows unchanged
+# LARGE-PARTIAL-1 (2026-11-14): the lint scope now also reads src/crossref.h, src/ingest*.h, src/search.h and src/binstale.h;
+# the rows below are the caps it then found (sink rows as --draft proposed them, the rest classified by hand).
+kBaseScopeScanCap	sink:cut
+kBinaryProbe	none:the binary sniff window: a classification of a blob, not a cut of rows
+kBinarySniffCap	none:the binary sniff window: a classification of a file, not a cut of rows
+kCacheHeaderBytes	sink:DISCLOSE,Truncated
+kCapPerThread	sink:bit_floor
+kDiffTreeSlices	none:how many diff-tree processes share the pairs (LARGE-PARTIAL-1), a work split; every pair is diffed
+kExtendChainCap	sink:cut
+kGrepLiftCodeFloor	pending:B43 grep lift floor, not audited yet (LARGE-PARTIAL-1 scope widening)
+kGrepLiftRowCap	pending:B43 grep lift row cap, not audited yet (LARGE-PARTIAL-1 scope widening)
+kGrepMatchedLineMaxBytes	sink:cut
+kGrepRefSitesScanned	pending:B43 grep ref-site scan bound, not audited yet (LARGE-PARTIAL-1 scope widening)
+kGrepTierFileBudget	pending:B43 disclosed elsewhere: tier_budget= / tier_partial= on the grep root (Stage 0 row 10)
+kHeadDefLineAbove	none:a shape window of the whereis def-line test, not a cut
+kHealthWsSampleBytes	none:a sample size for the file-health whitespace heuristic, not a cut
+kHeldAskedHitsMax	pending:B43 grep held-row bound, not audited yet (LARGE-PARTIAL-1 scope widening)
+kMaxAffixSet	pending:B43 search affix-set bound, not audited yet (LARGE-PARTIAL-1 scope widening)
+kMaxAstQueryNesting	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
+kMaxEditDistance	none:the did-you-mean edit-distance threshold, a suggestion and never an answer row
+kMaxExactLen	pending:B43 search exact-set bound, not audited yet (LARGE-PARTIAL-1 scope widening)
+kMaxExactSet	pending:B43 search exact-set bound, not audited yet (LARGE-PARTIAL-1 scope widening)
+kMaxGitWorkers	sink:DISCLOSE
+kMaxImportContainerDepth	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
+kMaxJsonNestDepth	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
+kMaxKotlinStringNestDepth	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
+kMaxMdBlockDepth	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
+kMaxPendingParsedFiles	sink:notePartialExtract,DISCLOSE
+kMaxQualifierHops	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
+kMaxRefs	pending:B43 disclosed elsewhere: refs_omitted= (refsOmittedAttr, which the lint cannot tie to the cap) and a stderr warning (LARGE-PARTIAL-1)
+kMaxRenameProbeFiles	none:a rename hint is never a claim (Stage 0 class d)
+kMaxRestDepth	sink:noteCapped
+kMaxRestName	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
+kMaxRestUnits	sink:noteCapped
+kMaxRoleBytes	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
+kMaxSkipRowsPerClass	pending:B43 disclosed elsewhere: the --skipped rows and grep unindexed_candidates_capped= state the row cap
+kMaxTrackedFiles	sink:truncated
+kMaxWorktreePaths	sink:DISCLOSE
+kMaxYamlNestDepth	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
+kRadixThreshold	none:an algorithm switch (radix vs comparison sort), the bytes are identical
+kRubyMatcherChainLinks	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
+kScanCap	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
+kShingleTokens	none:the stray-content shingle width, part of the sketch definition
+kSideDepthStd	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
+kSideDepthUses	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
+kSketchSize	none:the stray-content sketch width, part of the sketch definition
+kUnreachableMaxHits	pending:B43 not audited yet (LARGE-PARTIAL-1 scope widening)
+kVerdictCount	none:an enum count, not a bound
+kVrDottedFlowMaxBytes	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
+kVrDottedStringMaxBytes	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
+kVrMaxDepth	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
+kVrTextCap	sink:cut
+kWhereisParseMaxBlobs	pending:B43 disclosed elsewhere: <unparsed blobs= rows= next=> on the whereis answer
+kWhereisTextPreviewCapBytes	sink:cutAttr,shownCount
+kWhereisTextWholeMaxBytes	none:the whole-line threshold of the t= preview; the cut itself is disclosed by t_bytes= and <t_cut>

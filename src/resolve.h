@@ -56,6 +56,7 @@
 #include "infra/fileSetStore.h"   // FileAdjacency, FileSetStore, buildFileClosure — the file graph's stores
 #include "memguard.h"                 // guardedFileClosure
 #include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
+#include "infra/depwatch.h"     // readConfigBytes and hasEntry report to the warm snapshot's dependency log when one is armed
 #include "infra/os.h"           // os::realpath / os::stat — the ancestor-config walk (#220: configs above the crawl root)
 #include "infra/sharedOnce.h"   // sharedOnce — rustCrateRootsOf
 #include "infra/Diagnostics.h"   // ASSUME — buildScopedRecvDecls' index-range precondition
@@ -1087,6 +1088,7 @@ inline std::string readConfigBytes( const std::string& path )
     std::FILE*  f = std::fopen( path.c_str(), "rb" );
     if( !f )
     {
+        depwatch::note( depwatch::Seam::ConfigBytes, path, &out );   // unreadable reads as empty, here and when the warm snapshot repeats the read
         return out;
     }
     std::fseek( f, 0, SEEK_END );
@@ -1099,6 +1101,7 @@ inline std::string readConfigBytes( const std::string& path )
         out.resize( n );
     }
     std::fclose( f );
+    depwatch::note( depwatch::Seam::ConfigBytes, path, &out );
     return out;
 }
 
@@ -4736,7 +4739,7 @@ private:
     {
         const std::string at = dir + std::string( name );
         os::stat_t        st;
-        return os::stat( at.c_str(), &st ) == 0;
+        return depwatch::noted( depwatch::Seam::StatExists, at, os::stat( at.c_str(), &st ) == 0 );
     }
 
     // The directories strictly above `crawlRoot`, nearest first, up to and including the git top-level; empty when the

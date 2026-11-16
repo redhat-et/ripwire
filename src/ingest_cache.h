@@ -8,6 +8,7 @@
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 #include <bit>               // std::endian — the cache blob's arch tag, without a compiler-specific macro
 #include <memory>            // std::unique_ptr — CacheRecords holds its open frame
+#include <optional>          // std::optional — cacheBlobIdentity: "this blob's identity" vs "there is no blob to identify"
 
 // ingest_cache.h — the raw-facts model + incremental cache, moved VERBATIM from ingest.cpp in the
 // 2026-08-29 split: RawDef (the pre-id-assignment definition record), the extraction identity
@@ -155,7 +156,9 @@ constexpr std::uint32_t kCacheMagic   = 0x4b505443;   // "CTPK"
 // lane rust-degraded's placeholder 42.
 // 44 (train 37b, lane rust-degraded; its placeholder was 42): the FILE record gains a sixth FileHealth u32, useBoundsBlanked
 // (the Rust precise-capture re-parse, src/rustusebounds.h), so an older cache must be rejected. 44 is above train 36's 43.
-constexpr std::uint32_t kCacheVersion = 51;           // 51: lane qd-constructs — the FILE record gains a ninth family, the --quality-delta
+constexpr std::uint32_t kCacheVersion = 52;           // 52: lane failure-default — the construct hits gain the failure-default shape tag
+                                                      //    (lintrules.h kConstructShapeTags, appended); an older record lacks those hits.
+                                                      // 51: lane qd-constructs — the FILE record gains a ninth family, the --quality-delta
                                                       //    construct hits (ConstructHit: startByte, line, tag byte), with its head count.
                                                       // 50: lane clones-persist — a def record ends with a clone-key presence u8 (+ the u64 key).
                                                       // 49: lane warm-direct — the FILE record's head gains the eight family counts
@@ -2177,6 +2180,10 @@ struct CacheFrame
     bool                    ok          = false;
     CacheReject             reason      = CacheReject::Absent;   // meaningful only while ok == false
     std::uint32_t           foundStamp  = 0; // FormatVersion: the blob's kCacheVersion; ParserVersion: its parserVer
+    // The trailer's tableSum: the digest of this blob's HEADER and its WHOLE offset table, which carries every
+    // record's own recSum. It is read and verified below on every open; `cacheBlobIdentity` publishes it as the
+    // blob's identity, and nothing else reads it.
+    std::uint64_t           tableSum    = 0;
 };
 
 // pread the whole of [ off, off+n ) into `dst`. Short reads are retried (a pread on a regular file can
@@ -2355,6 +2362,7 @@ inline CacheFrame openCacheFrame( const std::string& path, bool captureValueUses
     }
 
     frame.tableOffset = tableOffset;
+    frame.tableSum    = tableSum;
     // F3/X5: the racy-rule reference is THIS blob's own on-disk mtime, from the fd we already hold — the
     // same stat() domain and granularity every per-file mtime is compared against.
     frame.mtimeNs = statSizeTimes( path ).mtimeNs;
@@ -2377,6 +2385,36 @@ inline CacheFrame openCacheFrame( const std::string& path, bool captureValueUses
 inline CacheReject inspectCacheArtifact( const std::string& path, bool captureValueUses )
 {
     return openCacheFrame( path, captureValueUses ).reason;
+}
+
+// ── the blob's IDENTITY, for the warm snapshot that is derived from it (src/warmsnap.h) ───────────────────────────
+//
+// WHY THE BLOB NEEDS AN IDENTITY AT ALL. The warm snapshot stores the OUTCOME of stages a warm run would otherwise
+// repeat — the crawl, the assembled model, the resolved graph — and it is only valid for the records it was built
+// from. It lives in ripwire's own cache directory, NOT beside the blob and NOT inside it (owner ruling 2026-11-15,
+// superseding the in-blob design on this point): writing anything beside the user's `--cache=PATH` breaks
+// test/cacheidentitycheck.sh arm (D3), and writing INTO that file breaks test/portablecachecheck.sh arm (a) —
+// a committed blob is read-shared by many checkouts and a consuming run must not mutate the artifact another
+// checkout owns. So the binding to the blob is made by NAME instead: the snapshot's filename carries this
+// identity, and a blob that is rewritten, replaced or deleted names a different artifact or none.
+//
+// WHAT THE IDENTITY IS. The trailer's `tableSum` — the digest over this blob's header and its whole offset table,
+// which holds every record's own `recSum`. One re-parsed file moves that record's recSum, and the header carries
+// the write stamp besides, so any rewrite of the blob moves the identity. It is verified on every open before this
+// returns it, so it is never read out of a blob this build would refuse.
+//
+// Nothing (0 of 2^64 values aside) when there is no blob at `path` this build can read — absent, another format,
+// another parser family, truncated or corrupt. A blob whose tableSum is exactly 0 is indistinguishable from that
+// and simply never carries a snapshot: the cost is one unstored run, and the answer is the same either way.
+inline std::optional<std::uint64_t> cacheBlobIdentity( const std::string& path, bool captureValueUses )
+{
+    PROFILE_SCOPE_DESCRIBE( "ingest/cache: the blob's identity (trailer tableSum), for the warm snapshot's name" );
+    const CacheFrame frame = openCacheFrame( path, captureValueUses );
+    if( !frame.ok || frame.tableSum == 0 )
+    {
+        return std::nullopt;
+    }
+    return frame.tableSum;
 }
 
 // The half-open [ first, last ) span of table entries carrying `pathHash`. A u64 FNV collision across a

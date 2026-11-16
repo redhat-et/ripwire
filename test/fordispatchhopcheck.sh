@@ -252,11 +252,15 @@ grep -q 'route="name-exact(' "$TMP/n1w" && run "$F/cppwrap" --callees=CachedSour
 verdict $? "(N1pre) the wrapper routes name-exact and its call IS iface-declined (the guard, not the premise, holds it)" "(N1pre) the wrapper fixture's premise failed (route or the iface decline)"
 
 # ── N2 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-for flag in --json --signatures-only --token-budget=3000; do
+for flag in --json --signatures-only; do
     run "$F/cpp" "--for=Loader::Load src_->Fetch" "$flag" >"$TMP/n2a"; off "$F/cpp" "--for=Loader::Load src_->Fetch" "$flag" >"$TMP/n2b"
     if [ -s "$TMP/n2a" ] && cmp -s "$TMP/n2a" "$TMP/n2b"; then ok "(N2) $flag: byte-identical to RIPWIRE_NO_DISPATCH_HOP=1"
     else no "(N2) $flag differs from the hop-off answer"; fi
 done
+# (N2t) TOKEN-BUDGET-MONOTONE (rule 4, 2026-11-14): a budget the answer fits returns the unbudgeted answer (hop included) byte for byte
+run "$F/cpp" "--for=Loader::Load src_->Fetch" --token-budget=3000 >"$TMP/n2ta" || no "(N2t) the budgeted run exited $?"; run "$F/cpp" "--for=Loader::Load src_->Fetch" >"$TMP/n2tb" || no "(N2t) the unbudgeted run exited $?"
+if [ -s "$TMP/n2ta" ] && cmp -s "$TMP/n2ta" "$TMP/n2tb"; then ok "(N2t) --token-budget=3000: the unbudgeted answer byte for byte"
+else no "(N2t) --token-budget=3000 is not the unbudgeted answer"; fi
 
 # ── M1 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 mcp_for(){ printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"%s","task":"%s"}}}\n' "$ROOT/$1" "$2" \

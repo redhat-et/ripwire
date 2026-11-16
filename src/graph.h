@@ -7544,7 +7544,7 @@ struct CargoNames
 inline std::optional<std::string> readTextIfPresent( const std::string& path, bool& unreadable )
 {
     std::error_code ec;
-    if( !std::filesystem::exists( path, ec ) )
+    if( !depwatch::noted( depwatch::Seam::FsExists, path, std::filesystem::exists( path, ec ) ) )   // infra/depwatch.h: the warm snapshot's log
     {
         return std::nullopt;
     }
@@ -16505,6 +16505,49 @@ inline std::size_t countTestedIn( const IngestResult& ing, const std::vector<cha
     return n;
 }
 
+// IMPACT-TEST-TIER: the transitive radius in THREE tiers, not two. isTestedByReach never counts a test symbol (a test is a
+// seed, never a covered row), so `untested = reach - tested` used to put every TEST that calls the target into the untested
+// production count: textual --impact=Widget.arrange read radius_untested="190" of reaches="221" with 172 test definitions
+// among them, and better coverage made a symbol look MORE dangerous to change. Tests are dependents too (a gold may require
+// the test file), so they stay in the reach and in the listing; they are COUNTED apart, by the same isTestSymbol predicate
+// --ignore-tests drops (filter.h applyIgnoreTests). tested + untested + tests == nodes.size().
+struct RadiusTiers
+{
+    std::size_t tested   = 0;   // production rows an indexed test transitively reaches (isTestedByReach)
+    std::size_t untested = 0;   // production rows no indexed test reaches
+    std::size_t tests    = 0;   // test definitions (isTestSymbol) in the set: their own tier, never untested production
+};
+
+inline RadiusTiers radiusTiers( const IngestResult& ing, const std::vector<char>& testReach, const std::vector<NodeId>& nodes )
+{
+    RadiusTiers t;
+    for( const NodeId x : nodes )
+    {
+        if( isTestSymbol( ing, x ) )
+        {
+            ++t.tests;
+        }
+        else if( x < testReach.size() && testReach[ x ] != 0 )
+        {
+            ++t.tested;
+        }
+    }
+    t.untested = nodes.size() - t.tested - t.tests;
+    return t;
+}
+
+// The per-row half of the same three tiers on an --impact XML row (CLI and MCP twin): tested="1" on a covered production row,
+// test="1" on a test definition (radius_tests= counts them), nothing on an untested production row. The two never co-occur:
+// isTestedByReach excludes a test symbol.
+inline const char* radiusTierRowAttrXml( const IngestResult& ing, const std::vector<char>& testReach, NodeId n ) noexcept
+{
+    if( isTestSymbol( ing, n ) )
+    {
+        return " test=\"1\"";
+    }
+    return isTestedByReach( ing, testReach, n ) ? " tested=\"1\"" : "";
+}
+
 // cut-fix C (2026-09-23): the RELEVANCE WEIGHT the navigation lists rank by before a cap (filter.h rankBeforeCap) — a
 // symbol's resolved in-degree, the --metrics fan-in: how much else already depends on this row. Integer-exact,
 // free (one CSR row length) and identical on every surface that holds the graph, so the CLI and MCP twins cannot
@@ -19050,11 +19093,23 @@ inline ConnectPicks joinTerminalPicks( const IngestResult& ing, const Graph& g, 
     return out;
 }
 
-// The lowest-id test-class intermediary on a shortest path, inside the group's own edges, between the two ends of a leg that
-// `crosses` (kNoNode when none): the leg's own intermediaries, which the group's flat steiner list does not record. Each leg is
-// two BFS over the group's nodes (terminals and steiner, a few dozen), never over the graph.
-template<class Crosses>
-inline NodeId lowestTestOnCrossingLegs( const ConnectGroup& grp, std::span<const char> inTests, Crosses crosses )
+// A symbol's canonical content key: (path, line, name), then the source byte range — two definitions on one line in different
+// scopes must not tie (CodeRabbit 4570577964; sigStartByte alone is no total order). A tie-break that names one of several
+// candidates keys on this, not on NodeId, so the choice is a fact about the code, not about how ids were handed out
+// (CodeRabbit #625 4546683506).
+inline auto symbolContentKey( const IngestResult& ing, NodeId id )
+{
+    const Symbol& s = ing.symbols[ id ];
+    return std::tuple<std::string_view, std::uint32_t, std::string_view, std::uint32_t, std::uint32_t>( ing.files[ s.fileId ], s.line, s.name,
+                                                                                                        s.sigStartByte, s.endByte );
+}
+
+// The first test-class intermediary in `before` order (CONNECT-TESTJOINT-CONTENT-KEY: symbolContentKey, NodeId last) on a
+// shortest path, inside the group's own edges, between the two ends of a leg that `crosses` (kNoNode when none): the leg's own
+// intermediaries, which the group's flat steiner list does not record. Each leg is two BFS over the group's nodes (terminals and
+// steiner, a few dozen), never over the graph.
+template<class Crosses, class Before>
+inline NodeId firstTestOnCrossingLegs( const ConnectGroup& grp, std::span<const char> inTests, Crosses crosses, Before before )
 {
     std::vector<NodeId> nodes( grp.terminals );
     nodes.insert( nodes.end(), grp.steiner.begin(), grp.steiner.end() );
@@ -19105,7 +19160,7 @@ inline NodeId lowestTestOnCrossingLegs( const ConnectGroup& grp, std::span<const
         {
             const NodeId v = nodes[ k ];
             if( v < inTests.size() && inTests[ v ] != 0 && da[ k ] != UINT32_MAX && db[ k ] != UINT32_MAX && da[ k ] + db[ k ] == da[ b ]
-                && v != leg.termA && v != leg.termB && ( best == kNoNode || v < best ) )
+                && v != leg.termA && v != leg.termB && ( best == kNoNode || before( v, best ) ) )
             {
                 best = v;
             }
@@ -19119,7 +19174,7 @@ inline NodeId lowestTestOnCrossingLegs( const ConnectGroup& grp, std::span<const
 // common caller, unhedged; and §2.4a's tie-break (fewer connects wins) hands an equal-distance join to a test, which usually
 // connects few. So when no terminal is test-class (filter.h pathDefInTests), the search never walks through a test-class
 // node. When that leaves apart terminals the unrestricted search joins, the result names the first test-class intermediary
-// (id order) of an unrestricted group that joins terminals the source search left apart as testJoint: test-only evidence,
+// (symbolContentKey order: path, line, name) of an unrestricted group that joins terminals the source search left apart as testJoint: test-only evidence,
 // disclosed by the emitter, never printed as a joint. A test
 // terminal keeps today's search unchanged (a test's own helpers are its honest joints).
 inline ConnectResult connectSourceJoint( const IngestResult& ing, const Graph& g, const std::vector<NodeId>& terminals, std::uint32_t radius )
@@ -19148,10 +19203,12 @@ inline ConnectResult connectSourceJoint( const IngestResult& ing, const Graph& g
     };
     // Per LEG, not per group: one group can hold a source-joined pair with a shorter test path beside it AND a test that joins
     // a third terminal, so only the tests on a leg whose two ends lie in different source components count (CodeRabbit #636).
+    // CONNECT-TESTJOINT-CONTENT-KEY: of several qualifying tests, the first by content (path, line, name), NodeId only on a full tie
+    const auto before = [ & ]( NodeId a, NodeId b ) { return std::pair( symbolContentKey( ing, a ), a ) < std::pair( symbolContentKey( ing, b ), b ); };
     for( const ConnectGroup& grp : any.groups )
     {
-        const NodeId hit = lowestTestOnCrossingLegs( grp, inTests, [ & ]( NodeId a, NodeId b ) { return sourceComponentOf( a ) != sourceComponentOf( b ); } );
-        if( hit != kNoNode && ( res.testJoint == kNoNode || hit < res.testJoint ) )
+        const NodeId hit = firstTestOnCrossingLegs( grp, inTests, [ & ]( NodeId a, NodeId b ) { return sourceComponentOf( a ) != sourceComponentOf( b ); }, before );
+        if( hit != kNoNode && ( res.testJoint == kNoNode || before( hit, res.testJoint ) ) )
         {
             res.testJoint = hit;
         }

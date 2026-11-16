@@ -1726,6 +1726,8 @@ struct FileSymsArgs
     bool uncaptured = false; // the CLI could not buffer the emitted bytes: the tag says so, no rows (`answer` is empty)
     std::string* answerOut = nullptr; // set: receives `answer` with the head files' tail-row names the block prints cut ("" when none is);
                                       // the cut is priced markup, so the caller re-prices the root on its final bytes (repriceRootAfterCut)
+    bool cutWhenHeld = false; // TOKEN-BUDGET-MONOTONE (the --for budget's held re-render): the answer is cut as if the block printed,
+                              // so its code part stays the unbudgeted answer's; the names cut ride the held block's next=
 };
 // The block for one answer: "" when no candidate scores.
 inline std::string renderForFileSyms( const IngestResult& ing, const Graph& g, const FileSymsArgs& a )
@@ -1768,13 +1770,13 @@ inline std::string renderForFileSyms( const IngestResult& ing, const Graph& g, c
     {
         return {};
     }
+    if( a.answerOut != nullptr && ( !headTail.empty() || !termMask.empty() ) && ( !a.held || a.cutWhenHeld ) )
+    {
+        *a.answerOut = fd::tailRowsWithoutPicks( ing, a.answer, rows, headTail, picks );
+    }
     if( a.held )
     {
         return std::string( kForFileSymsHeldLegend ) + "<syms held=\"budget\"" + nextAttrXml( nextFlag( "--for=", a.task ) + std::string( a.heldFlags ) ) + "/>";
-    }
-    if( a.answerOut != nullptr && ( !headTail.empty() || !termMask.empty() ) )
-    {
-        *a.answerOut = fd::tailRowsWithoutPicks( ing, a.answer, rows, headTail, picks );
     }
     return fd::blockXml( ing, sf, head, picks, a.compactLegend );
 }

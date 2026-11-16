@@ -193,3 +193,36 @@ if __name__ == "__main__":   # python3 softbudget.py setprefix A ON OFF  (rows f
         sys.exit( 1 if bad else 0 )
     if len( sys.argv ) != 5 or sys.argv[ 1 ] != "setprefix": sys.exit( 2 )
     sys.exit( 0 if set_prefix( *( _row_lines( p ) for p in sys.argv[ 2:5 ] ) ) else 1 )
+
+
+# TOKEN-BUDGET-MONOTONE: the whole price a budget is compared with (budgetmonotonecheck, budgetpolicycheck).
+def whole_price( path ):
+  """A --for answer's whole price, as src/forbudgetfit.h charges it: the root's est_tokens plus the held blocks (kForHeldBlocks)
+  outside it, each with the legend comment right before it that names it (heldLegendAt); <doc_body> by its own est_tokens=,
+  the rest at 2.5 B/token. None without a root est_tokens."""
+  s = open( path, 'rb' ).read().decode( 'latin-1' )   # byte offsets, as the binary counts them
+  m = re.search( r'<ctx [^>]*?\best_tokens="(\d+)"', s )
+  if not m: return None
+  held = ( "syms", "doc_body", "decl_rows", "exemplar_family", "graph_verb", "reexports", "shortkey", "aliases" )
+  masked = re.sub( r'<!\[CDATA\[.*?\]\]>|<!--.*?-->', lambda x: ' ' * len( x.group( 0 ) ), s, flags = re.S )
+  def legend_at( at, name ):
+      # the block's own legend, the comment right before it that names it (forbudgetfit.h heldLegendAt): priced with the block
+      if not s[ :at ].endswith( "-->" ): return at
+      o = s.rfind( "<!-- ", 0, at )
+      return o if o >= 0 and s[ o + 5: ].startswith( name ) and s[ o + 5 + len( name ) ] in ": " else at
+  depth, heldp, open_at, open_tag, leg = 0, 0, None, None, 0
+  for t in re.finditer( r'<(/?)([A-Za-z_][\w-]*)([^>]*?)(/?)>', masked ):
+      close, name, attrs, selfc = t.groups()
+      if close:
+          depth -= 1
+          if depth == 1 and open_at is not None:
+              e = re.search( r'\best_tokens="(\d+)"', open_tag ) if name == "doc_body" else None
+              heldp += int( e.group( 1 ) ) + ( int( leg / 2.5 + 0.5 ) if leg else 0 ) if e and int( e.group( 1 ) ) > 0 else int( ( t.end() - open_at + leg ) / 2.5 + 0.5 )
+              open_at = None
+          continue
+      if depth == 1 and name in held:
+          leg = t.start() - legend_at( t.start(), name )
+          if selfc: heldp += int( ( t.end() - t.start() + leg ) / 2.5 + 0.5 )
+          else: open_at, open_tag = t.start(), t.group( 0 )
+      if not selfc: depth += 1
+  return int( m.group( 1 ) ) + heldp

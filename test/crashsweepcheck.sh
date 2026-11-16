@@ -295,7 +295,9 @@ ccjson.h	ccCountLoc	fopen	1	closes	the only early exit is the failed open; nothi
 clones.h	readCloneSourceFile	fopen	1	closes	the one read both clone passes share: false on a failed open; fclose right after the sized read
 crossref.h	catFileBatch	fopen	1	closes	returns only on a failed open; fclose after the list is written
 crossref.h	catFileBatch	popen	1	closes	the read loop leaves by break or its own condition only; pclose then unlink
+crossref.h	diffTreeSlice	fopen	1	closes	returns only on a failed open; fclose after the list is written
 crossref.h	evalStray	fopen	1	closes	returns only on a failed open; fclose after the read loop
+crossref.h	mergeBasesByOneWalk	fopen	1	closes	returns only on a failed open; fclose after the list is written
 crossref.h	streamBlobs	fopen	1	closes	returns only on a failed open; fclose after the list is written
 crossref.h	streamBlobs	popen	1	closes	the read loop leaves by break/continue only; pclose then unlink
 darkflags.h	readWhole	fopen	1	closes	fclose before the size-cap return and before the final return
@@ -365,6 +367,7 @@ verbs_lint.h	parseProfTsv	fopen	1	closes	returns only on a failed open; fclose a
 verbs_navigate.h	runSafeDelete	fopen	1	closes	if-scoped; fclose after the sized read
 verbs_navigate.h	runSlice	fopen	1	closes	if-scoped; fclose after the read loop
 verbs_quality.h	runQualityViews	fopen	1	closes	returns on a failed open; fclose before the other return
+warmsnap.h	collectGitInputs	popen	1	closes	no return between the popen and the pclose: the read loop leaves by its own condition, and a non-null pipe is always closed on the next line
 REGISTRY
 
 # The allocations S1 reports inside a reader function whose size is NOT a decoded count, with why.

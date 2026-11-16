@@ -15,7 +15,7 @@
 #        (the decl-twin ranks are the XML rows the decl-twin legend covers); (j2) each pointer's p / r are the off twin's row at that r,
 #        its sym the XML row's n= there, and every other row object is byte-identical to the off twin's
 #   (b)  --token-budget sweep N = 1000 1300 1600 2000, each against its RIPWIRE_NO_SIBLING_DEMOTE=1 RIPWIRE_NO_DECL_TWIN=1 twin:
-#        (bp) the ranked entries (<d> rows and <t r=> pointers) are r = 1..K (a rank prefix, score order), (b>=) K >= the twin's rows,
+#        (bp) the ranked entries (<d> rows and <t r=> pointers) are r = 1..K (a rank prefix, score order), (b>=, retired 2026-11-14: see the arm),
 #        (bm) K never falls as N grows; (b+) at some N the freed bytes buy rows: K > the twin's rows; (bw) well formed
 #   (jb) --json --token-budget=1300: pointer objects present, rows + pointers >= the twin's rows, r = 1..K
 #   (xb) MCP budget_tokens=1300: pointers present, r = 1..K, K >= its twin's rows, and a rank both MCP and the CLI (--token-budget=1300)
@@ -27,7 +27,7 @@
 #        (it excludes the rows the block shows, no more): variants 01..K in <sigs> + tail, no gap. Premise, counted: the seam answer
 #        shows fewer rows than the no-seam answer (a refill was tried and failed) and its tail lists >= 1 variant; FAILS on zero.
 #        Red before: dropped_positive 4 against 26 - 19 = 7, and the tail skipped variants 10..12 the failed render had shown.
-#   (k8) TERM-HIT (K8, B26-FIX): under a budget, a row a question term hits (K4's taskNames; an identifier token of the row's name, sc=
+#   (k8) TERM-HIT (K8, B26-FIX; MCP only since TOKEN-BUDGET-MONOTONE, (k8c) for the CLI): under a budget, a row a question term hits (K4's taskNames; an identifier token of the row's name, sc=
 #        or printed signature) stays whole. TASK_K8 names zorbQuux, the parameter of variants 05..16: under --token-budget=2000 and MCP
 #        budget_tokens=2000 every hit variant past <d> rank 10 is a <d> row (>= 1 such, counted); (k8n) premise: the variants no term
 #        hits (01..04) past rank 10 are still pointers in those answers (counted; FAILS on zero); (k8d) no budget: K8 does not run, a
@@ -168,13 +168,16 @@ for N in 1000 1300 1600 2000; do
     ent="$( echo "$on" | awk '{ print $2 }' )"; offrows="$( echo "$of" | awk '{ print $1 }' )"
     list="$( echo "$on" | awk '{ for( i = 3; i <= NF; ++i ) if( $i !~ /:/ ) printf "%s ", $i }' )"
     [ "$( prefix "$list" )" = yes ] || { no "(bp) N=$N: the ranked entries are not r = 1..K: $list"; bok=0; }
-    [ "$ent" -ge "$offrows" ] || { no "(b>=) N=$N: $ent ranked entries < the twin's $offrows rows"; bok=0; }
+    # (b>=) retired by TOKEN-BUDGET-MONOTONE (2026-11-14): it held the soft target's refill, which spent the bytes the pointers
+    # free on more rows. The budget now sheds the unbudgeted answer, worst rank first; the demoted answer's own legend clauses can
+    # outweigh what its pointers save at a given N (N=1600: 5 entries against the twin's 7), so only (b+) — at some N the
+    # pointers buy rows — and the rank prefix / monotone arms stay.
     [ "$ent" -ge "$prev" ] || { no "(bm) N=$N: $ent ranked entries < $prev at the smaller N"; bok=0; }
     [ "$ent" -gt "$offrows" ] && plus="$plus N=$N:$offrows->$ent"
     if command -v xmllint >/dev/null 2>&1; then xmllint --noout "$TMP/b$N.xml" 2>/dev/null || { no "(bw) N=$N is not well formed"; bok=0; }; fi
     prev="$ent"
 done
-[ "$bok" = 1 ] && ok "(bp/b>=/bm/bw) --token-budget 1000..2000: rank prefixes, never fewer than the twin's rows, monotone in N, well formed"
+[ "$bok" = 1 ] && ok "(bp/bm/bw) --token-budget 1000..2000: rank prefixes, monotone in N, well formed"
 if [ -n "$plus" ]; then ok "(b+) the freed bytes buy rows:$plus"; else no "(b+) no budget served more ranked entries than its undemoted twin"; fi
 
 # (jb) --json under a soft target
@@ -249,11 +252,26 @@ PY
 ( cd "$TMP/t" && "$BIN" . --no-cache "--for=$TASK_K8" ) >"$TMP/k8d.xml"
 MCPTASK="$TASK_K8" mcp "$TMP/k8m.xml" 2000 env
 read -r k8r k8h k8u <<<"$( k8 "$TMP/k8.xml" )"; read -r k8mr k8mh k8mu <<<"$( k8 "$TMP/k8m.xml" )"; read -r _ k8dh _ <<<"$( k8 "$TMP/k8d.xml" )"
-if [ "$k8r" -ge 1 ] && [ "$k8h" = 0 ] && [ "$k8mr" -ge 1 ] && [ "$k8mh" = 0 ]; then
-    ok "(k8) --token-budget=2000 / MCP budget_tokens=2000: every variant zorbQuux hits stays a row ($k8r / $k8mr of them past rank 10), none is a pointer"
-else no "(k8) a term-hit variant was pointed under a budget: CLI rows past r10 $k8r, pointers $k8h; MCP rows past r10 $k8mr, pointers $k8mh"; fi
-if [ "$k8u" -ge 1 ] && [ "$k8mu" -ge 1 ]; then ok "(k8n) premise: the same budgeted answers still point $k8u (CLI) / $k8mu (MCP) variants no term hits"
-else no "(k8n) premise: no pointer among the variants no term hits (CLI $k8u, MCP $k8mu) — the arm proves nothing"; fi
+# TOKEN-BUDGET-MONOTONE (2026-11-14): K8 is a budget-only regime (it runs only under a budget). The CLI's XML --for no longer
+# re-decides its answer under --token-budget: it trims the default answer (test/budgetmonotonecheck.sh), so there K8 does not
+# run and every ranked entry it keeps is the default answer's entry at that rank, pointer or row (k8c). MCP budget_tokens= keeps
+# its own budget path, and K8 with it (k8 / k8n on the MCP answer, as before).
+k8same(){ python3 - "$1" "$2" <<'PY'
+import re, sys
+ent = lambda p: { m.group( 3 ): m.group( 1 ) + ":" + m.group( 2 ) for m in re.finditer( r'<(d|t) [^>]*?(?:n|sym)="([^"]*)"[^>]*?\br="(\d+)"', ( lambda s: s[ s.find( "<sigs" ):s.find( "</sigs>" ) ] )( open( p ).read() ) ) }
+a, d = ent( sys.argv[ 1 ] ), ent( sys.argv[ 2 ] )
+bad = [ r for r in a if d.get( r ) != a[ r ] ]
+print( "ok %d" % len( a ) if a and not bad else "bad ranks %s (of %d kept)" % ( ",".join( bad[ :6 ] ), len( a ) ) )
+PY
+}
+k8c="$( k8same "$TMP/k8.xml" "$TMP/k8d.xml" )"
+if [ "${k8c%% *}" = ok ]; then ok "(k8c) --token-budget=2000 (CLI XML): every kept ranked entry is the default answer's at that rank (${k8c#ok } kept): no budget-only regime"
+else no "(k8c) the CLI budgeted answer is not the default one trimmed: $k8c"; fi
+if [ "$k8mr" -ge 1 ] && [ "$k8mh" = 0 ]; then
+    ok "(k8) MCP budget_tokens=2000: every variant zorbQuux hits stays a row ($k8mr of them past rank 10), none is a pointer"
+else no "(k8) a term-hit variant was pointed under an MCP budget: rows past r10 $k8mr, pointers $k8mh"; fi
+if [ "$k8mu" -ge 1 ]; then ok "(k8n) premise: the same MCP budgeted answer still points $k8mu variants no term hits"
+else no "(k8n) premise: no pointer among the variants no term hits (MCP $k8mu) — the arm proves nothing"; fi
 if [ "$k8dh" -ge 1 ]; then ok "(k8d) no budget: K8 does not run — $k8dh hit variant(s) past rank 10 are pointers in the default answer"
 else no "(k8d) no hit variant is a pointer in the default answer ($k8dh): K8 ran without a budget, or the premise is gone"; fi
 

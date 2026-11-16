@@ -1769,6 +1769,11 @@ std::string rebased_path( const char* path )
     return rebased.empty() ? std::string( path ) : rebased;
 }
 
+char** environment() noexcept
+{
+    return _environ;   // the CRT's narrow environment block, the same strings getenv reads
+}
+
 char* getcwd( char* buf, std::size_t size )
 {
     if( buf == nullptr || size == 0 )
@@ -2269,6 +2274,12 @@ pid_t spawn_sh( const std::string& command, const int pipeFds[ 2 ] )
 // signal is recorded so waitpid reports the death as that signal.
 // fork_session: Windows has no fork. The one caller (--help-task --deadline-ms) answers synchronously on -1.
 pid_t fork_session() { return fail( ENOSYS ); }
+
+// spawn_self: no re-exec of the program on Windows — -1 with ENOSYS, and the one caller (the range form's base phase)
+// runs that phase in-process, the answer it always gave. getppid answers the same way, so no process here ever takes
+// itself for a spawn_self child.
+pid_t spawn_self( const char* const*, const std::string&, int ) { return fail( ENOSYS ); }
+pid_t getppid() { return fail( ENOSYS ); }
 
 int kill( pid_t pid, int sig )
 {
