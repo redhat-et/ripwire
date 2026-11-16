@@ -58,6 +58,7 @@
 #include "hopbody.h"       // PATH-HOP-BODY: the middle hops' bodies of a reached path_between
 #include "pathpairs.h"     // TRACE-EP: the reaching definition pairs of --path / path_between
 #include "pathroute.h"     // PATH-ROUTE v2: the route verdict, the CLI --path's own predicate
+#include "pathanswer.h"    // PATH-ANSWER: the CLI --path's own answer writer
 #include "defslookup.h"    // D2 part 5: pathAltsOf — path_between's inline alternatives, as on the CLI
 
 #include <filesystem>      // §B6 M3: the shared root-path existence/directory check (mcpRootRefusal below)
@@ -3977,7 +3978,7 @@ inline McpAffectedResult affectedText( const std::string& root, std::string_view
 // resolveFocus + shortestPath, exactly as the CLI --path=A,B. Returns the <path>…</path> XML fragment (with
 // reachable="0" hops="0" and no <s> children when B is NOT reachable from A — a valid answer, not an error),
 // or "" (caller → not-found error) when EITHER endpoint fails to resolve.
-inline std::optional<std::string> pathText( const std::string& root, const std::string& from, const std::string& to, RedactCounts* redact, bool inForBlock )
+inline std::optional<std::string> pathText( const std::string& root, const std::string& fromTyped, const std::string& toTyped, RedactCounts* redact, bool inForBlock )
 {
     const McpIndex&     ix  = getIndex( root );
     const IngestResult& ing = ix.ing;
@@ -3987,127 +3988,34 @@ inline std::optional<std::string> pathText( const std::string& root, const std::
     // exactly as the CLI --path now does. Binding `from` to the lowest-NodeId def reported reachable="0" for
     // paths that plainly exist, and the answer never said which def it had picked.
     // H1: each endpoint's decl→def residue, summed onto the root exactly as the CLI --path sums it.
-    std::size_t               srcUnprovenDefs = 0;
-    std::size_t               dstUnprovenDefs = 0;
-    bool                      srcGlob         = false;   // ix2-slice (IX-2 P4): a `*` endpoint, as on the CLI
-    bool                      dstGlob         = false;
-    std::vector<NodeId>       srcDefs         = resolvePathEndpoint( ing, from, &srcUnprovenDefs, &srcGlob );
-    std::vector<NodeId>       dstDefs         = resolvePathEndpoint( ing, to, &dstUnprovenDefs, &dstGlob );
-    const PathContracts       ptContracts     = widenPathContracts( ing, g, srcDefs, dstDefs );   // BODILESS-SEED, as on the CLI
-    const std::size_t         unprovenDefs    = srcUnprovenDefs + dstUnprovenDefs;
-    if( srcDefs.empty() || dstDefs.empty() )
+    // ix2-slice (IX-2 P4): a `*` endpoint, as on the CLI. GV-PATH-BIND + PATH-AMBIG-VC: the CLI's endpoint binder (forgraphverb.h
+    // bindPathEndpoints): a spelling refused over several fitting definitions narrows to its ONE source definition (narrowed=), else
+    // binds the fitting Owner.method definitions; from/to are the spellings the answer runs with (as typed while either is refused).
+    const PathEndpointsBound ptEp = bindPathEndpoints( ing, fromTyped, toTyped );
+    if( ptEp.srcDefs.empty() || ptEp.dstDefs.empty() )
     {
         return std::string{}; // an endpoint not found → caller reports not-found
     }
 
-    const std::vector<NodeId> pth     = shortestPathAny( g, srcDefs, dstDefs );
-
-    std::vector<char> esc;
-    const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
-    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h) — the
-    // CLI twin (main.cpp runPath) computes the identical condition so the two dialects cannot diverge.
-    const bool         ptSingleRoot = ing.realPaths.empty();
-    const std::string  ptRootPrefix = ptSingleRoot ? sarif::rootPrefixOf( root ) : std::string();
-    const auto loc = [ & ]( NodeId n ) -> std::string
-    { const Symbol& s = ing.symbols[n];
-      const std::string_view rp = ptSingleRoot ? sarif::rootRelativeUri( ing.files[ s.fileId ], ptRootPrefix ) : std::string_view( ing.files[ s.fileId ] );
-      return ex( rp ) + ":" + std::to_string( s.line ); };
-
-    rw::MemoryStream stream;
-    std::FILE* const mem = stream.open();
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
+    const bool        ptSingleRoot = ing.realPaths.empty();
+    const std::string ptRootPrefix = ptSingleRoot ? sarif::rootPrefixOf( root ) : std::string();
+    rw::MemoryStream  stream;
+    std::FILE* const  mem = stream.open();
     if( !mem )
     {
         return std::nullopt;   // the answer buffer could not be opened: an internal error, never "not found"
     }
-    const std::string ptRootAttr = ptSingleRoot ? ( " root=\"" + ex( root ) + "\"" ) : std::string();
-    // R-E fix (2026-08-19): the same shared root-relative clause the CLI --path twin now leads with — this
-    // verb has no legend of its own either, and the two dialects must not differ on what they explain.
-    // H5: the same brief floor legend + marker the CLI --path prints (verbs_navigate.h) — one wording, two transports.
-    // Reference-as-value round: the CLI --path's to_value_refs=, by the same call.
-    const ToValueRefs ptToValueRefs = toValueRefs( ing, pth.empty(), dstDefs, &valueRefIndexOf( ix ) );
-    // PATH-GAP: the CLI --path's gap clause, by the same analysis and emitter (src/pathgaps.h).
-    const PathSearchGaps ptGaps = pth.empty() ? pathSearchGaps( ing, g, srcDefs, valueRefIndexOf( ix ) ) : PathSearchGaps{};
-    std::optional<BackwardHops> ptBackHops;   // HOP1: the CLI's one backward hop provider, as on the CLI
-    if( pth.empty() )
-    {
-        ptBackHops.emplace( ing, g, valueRefIndexOf( ix ) );
-    }
-    const PathNearSink        ptNear       = pth.empty() ? pathNearSink( ing, g, dstDefs, ptGaps.cone, valueRefIndexOf( ix ), ptBackHops->names() ) : PathNearSink{};   // ix2-slice, as on the CLI
-    const PathHandlerRule     ptHandler    = pth.empty() ? pathHandlerRule( ing, ptBackHops->names(), srcDefs, dstDefs ) : PathHandlerRule{};   // ON-NAME-HANDLERS-V2, as on the CLI
-    // TRACE-EP: the CLI's reaching definition pairs, by the same call (src/pathpairs.h)
-    const PathPairs ptPairs = pth.empty() || srcGlob || dstGlob ? PathPairs{}
-        : pathReachingPairs( ing, g, srcDefs, dstDefs, pth, std::string( from ) + "," + std::string( to ), [ & ]( std::span<const NodeId> dstMembers )
-          {
-              if( !ptBackHops )
-              {
-                  ptBackHops.emplace( ing, g, valueRefIndexOf( ix ) );
-              }
-              return pathBridge( ing, g, srcDefs, dstMembers, valueRefIndexOf( ix ), *ptBackHops );
-          } );
-    const PathRouteChains      ptChains = pathRouteChains( ing, g, ptPairs, pth, srcDefs, dstDefs );   // PATH-ROUTE v2, as on the CLI
-    const PathRouteVerdict&    ptRoute  = ptChains.verdict;
-    const std::vector<NodeId>& ptRows   = ptChains.rows;
-    const std::vector<NodeId>& ptShown  = ptChains.shown;
-    const std::vector<NodeId>& ptBind   = ptChains.bind;
-    const NodeId               srcUsed  = ptChains.from;
-    const NodeId               dstUsed  = ptChains.to;
-    const HopFacts             ptHops   = pathHopFacts( ing, g, ptPairs, ptRows, redact, ptRoute.declinedRef );   // HOP-CONTEXT-1, as on the CLI
-    const PathBridge          ptBridge     = pth.empty() ? pathBridge( ing, g, srcDefs, dstDefs, valueRefIndexOf( ix ), *ptBackHops ) : PathBridge{};      // ix2-slice, as on the CLI
-    const std::string         ptSinkCallers = pth.empty() && ptGaps.any() && !dstGlob ? pathSinkCallersSelector( ing, *ptBackHops, dstDefs, to, ptSingleRoot, ptRootPrefix ) : std::string();   // HOP1 #6, as on the CLI
-    const PathShownMarks      ptMarks      = pathShownMarks( ing, g, ptPairs, ptRows, ptRoute.declinedCands > 0 );   // TRACE-EP: the CLI's legend marks, by the same call
-    const std::string         ptKindLegend = std::string( viaNameLegend( ptMarks.via ) ) + viaLinkLegend( ptMarks.link ) + anchorMissLegend( ptMarks.miss );
-    const PathEndpointBinding ptBound      = pathEndpointBinding( g, endpointDefinitionCount( ing, srcDefs ), endpointDefinitionCount( ing, dstDefs ), ptBind );   // attrib-multidef, as on the CLI
-    const bool                ptHasSplit = ptMarks.split;
-    const PathTestTwin        ptTwin     = srcGlob || dstGlob ? PathTestTwin{} : pathTestTwins( ing, g, { srcDefs, from, ptBound.from }, { dstDefs, to, ptBound.to }, ptBind );   // zed-03, as on the CLI
-    const std::vector<std::string_view> ptOwners = pathHopOwners( ing, ptRows );   // PATH-OWNERS, as on the CLI
-    const bool                ptHasOwner = ptMarks.owner;
-    // PATH-HOP-BODY (src/hopbody.h), as on the CLI
-    const std::string_view    ptBodyRoot  = ptSingleRoot ? std::string_view( root ) : std::string_view();
-    const bool                ptBodiesOn  = !ptRows.empty() && hopBodiesOn();
-    // F8: no served set here — the MCP `for` answer's graph-verb block calls this twin by name only, so a middle hop that `for`
-    // answer already carries prints a second copy on MCP (the CLI passes its served bodies: runPathServed); a known, bounded divergence
-    const RouteBodiesXml      ptHopBodyEl = ptBodiesOn ? pathHopBodiesXml( ing, pathMiddleHops( ing, g, ptShown, {} ), ptBodyRoot ) : RouteBodiesXml{};
-    const RouteBodiesXml      ptRouteEl   = pth.empty() && !inForBlock && hopBodiesOn() ? pathRouteBodies( ing, g, ptBridge, ptHandler, ptBodyRoot ) : RouteBodiesXml{};   // BODY-ON-ROUTE, as on the CLI
-    const std::string&        ptHopBodies = ptHopBodyEl.xml;
-    std::vector<NodeId>       ptBodyIds   = ptHopBodyEl.ids;   // D2 part 5, as on the CLI: <alts> after the bodies, never listing a definition they printed
-    ptBodyIds.insert( ptBodyIds.end(), ptRouteEl.ids.begin(), ptRouteEl.ids.end() );
-    const PathAlts            ptAlts      = pathAltsOf( ing, g, from, to, srcGlob, dstGlob, ptBound.from ? srcUsed : kNoNode, ptBound.to ? dstUsed : kNoNode, ptPairs, ptBodyIds );
-    std::string               ptRootAttrs = pathTestTwinRootAttrs( ing, pathPairsRootAttrs( ing, ptPairs, ptSingleRoot, ptRootPrefix ).rootAttrs, ptTwin, ptSingleRoot, ptRootPrefix );
-    const std::string         ptHopNext   = ptBodiesOn && ptRootAttrs.find( " next=\"" ) == std::string::npos ? pathMiddleHopNext( ing, ptShown, ptBodyRoot ) : std::string();
-    ptRootAttrs += ptHopNext.empty() ? std::string() : nextAttrXml( ptHopNext );
-    ptRootAttrs += pathRouteRootAttrs( ing, ptRoute, srcUsed, ptRootAttrs.find( " next=\"" ) != std::string::npos, ptSingleRoot, ptRootPrefix );
-    rw::emitTo( mem, "<!-- ripwire path: one DIRECTED call path from= to to= (each <s> a hop); reachable= is 0 and hops= 0 when the "
-                       "graph holds none. {}{}{}{}-->{}", ( defAltsLegend( ptAlts ) + unprovenDefsVerbLegend( UnprovenDefsVerb::Path, unprovenDefs > 0 ) + ptKindLegend
-                                                           + splitArmLegend( ptHasSplit ) + pathUnboundLegend( !ptBound.from || !ptBound.to )
-                                                           + memberOwnerLegend( ptHasOwner ) + memberOwnerContainedLegend( ptMarks.ownerContained ) + std::string( pathPairsLegend( ptPairs ) ) + pathOrderLegend( ptPairs, ptTwin )
-                                                           + std::string( pathHopBodiesLegend( !ptHopBodies.empty() ) ) + std::string( pathHopNextLegend( !ptHopNext.empty() ) )
-                                                           + std::string( routeBodyHedgeLegend( ptHopBodyEl.hedged || ptRouteEl.hedged ) ) + std::string( pathRouteLegend( ptRoute ) )
-                                                           + hopLegend( ptHops, "s" ) ).c_str(),
-                  ( std::string( toValueRefsLegend( ptToValueRefs.count > 0 ) ) + valueRefsDepthLegend( ptToValueRefs.depthCut.files > 0 ) ).c_str(),
-                  ( pathGapsLegend( ptGaps.any(), !ptSinkCallers.empty() ) + pathBridgeLegend( ptBridge )
-                    + nearSinkLegend( ptNear ) + std::string( pathHandlerRuleLegend( ptHandler ) ) + std::string( pathRouteBodiesLegend( !ptRouteEl.xml.empty() ) )
-                    + std::string( pathGlobLegend( srcGlob || dstGlob ) ) + ptContracts.legend() ).c_str(),
-                  graphCountFloorBrief( rw::graphGaugeClauses( g ) ).c_str(), rootRelPathsLegend( ptSingleRoot ) );
-    rw::emitTo( mem, "<path from=\"{}\" to=\"{}\"{}{} from_defs=\"{}\" to_defs=\"{}\"{} reachable=\"{}\" hops=\"{}\"{}{}",
-                  ex( from ).c_str(), ex( to ).c_str(), ptBound.from ? " from_p=\"" + loc( srcUsed ) + "\"" : std::string(),
-                  ptBound.to ? " to_p=\"" + loc( dstUsed ) + "\"" : std::string(),
-                  srcDefs.size(), dstDefs.size(), ( unprovenDefsAttrXml( unprovenDefs ) + pathGlobAttrXml( srcGlob, dstGlob ) + ptContracts.attrXml() ).c_str(),   // H1: as the CLI root carries it; ix2-slice: a glob endpoint
-                  ptRows.empty() ? 0 : 1, ptShown.empty() ? std::size_t( 0 ) : ptShown.size() - 1,
-                  ( ptRootAttrs + hopRootAttrsXml( ptHops ) + ptRootAttr ).c_str(),
-                  graphCountFloorAttrXml( g ).c_str()  );   // M15: gauge + marker
-    rw::emitTo( mem, "{}{}", countAttrXmlOrEmpty( "to_value_refs", ptToValueRefs.count ),   // absent at zero, as on the CLI
-                  valueRefsDepthAttrXml( ing, ptToValueRefs.depthCut, VrRender{ ptSingleRoot, ptRootPrefix } ).c_str() );   // + the depth cut, as the CLI
-    const PathGapsXml ptUnreached = pth.empty()
-        ? pathUnreachedXml( ing, ptGaps, ptSingleRoot, ptRootPrefix, { "the connect verb on " + from + "," + to, "uses/impact", "", pathDocEndpoints( ing, srcDefs, dstDefs ) }, ptSinkCallers )
-        : PathGapsXml{};
-    rw::emitTo( mem, "{}>{}{}{}{}", ptUnreached.rootAttrs, ptUnreached.rows, pathBridgeXml( ing, g, ptBridge, ptSingleRoot, ptRootPrefix ),
-                  pathNearSinkXml( ing, ptNear, ptSingleRoot, ptRootPrefix ),
-                  pth.empty() ? pathHandlerRuleXml( ing, ptBackHops->names(), ptHandler, ptSingleRoot, ptRootPrefix ) : std::string() );
-    emitPathAnswerRows( mem, ing, g, ptPairs, ptRows, ptOwners, ptSingleRoot, ptRootPrefix, ptHops, ptRoute.declinedCands );   // the CLI's own row emitter (pathpairs.h / defattrib.h)
-    rw::emitRaw( mem, ptHopBodies.c_str() );      // PATH-HOP-BODY, as on the CLI
-    rw::emitRaw( mem, ptRouteEl.xml.c_str() );    // BODY-ON-ROUTE, as on the CLI
-    rw::emitRaw( mem, ptAlts.xml.c_str() );   // D2 part 5, as on the CLI
-    rw::emitRaw( mem, "</path>" );
+    std::vector<char> esc;
+    const std::string ptRootAttr = ptSingleRoot ? ( " root=\"" + std::string( escapeXml( root, esc ) ) + "\"" ) : std::string();
+    // PATH-ANSWER (src/pathanswer.h): the CLI --path's own writer. F8: no served set here — the MCP `for` answer's graph-verb block
+    // calls this twin by name only, so a middle hop that `for` answer already carries prints a second copy on MCP (the CLI passes its
+    // served bodies: runPathServed); a known, bounded divergence
+    writePathAnswer( mem, ing, g, ptEp,
+                     PathAnswerSurface{ .singleRoot = ptSingleRoot, .rootPrefix = ptRootPrefix, .rootAttr = ptRootAttr,
+                                        .bodyRoot = ptSingleRoot ? std::string_view( root ) : std::string_view(), .redact = redact,
+                                        .inForBlock = inForBlock, .mcp = true },
+                     [ & ]() -> const ValueRefIndex& { return valueRefIndexOf( ix ); } );
     return mcpAnswerText( stream );   // nullopt = the buffer lost bytes (dispatch answers -32603), "" stays not-found
 }
 
@@ -4424,7 +4332,7 @@ inline void packConnect( std::FILE* out, const IngestResult& ing, const Graph& g
                                                            // Shared by CLI --connect and the MCP connect verb.
                          std::size_t unprovenDefs = 0,     // H1: the terminals' decl→def residue, SUMMED by the caller
                          const ConnectPicks& picks = ConnectPicks{},   // 0.6.6 D1 tied names + XF-QUALIFIED-ENDPOINTS searched defs
-                         std::span<const std::string> narrowed = {} )  // GV-PATH-BIND: the terminals as typed that M1 narrowed (CLI only)
+                         std::span<const std::string> narrowed = {} )  // GV-PATH-BIND: the terminals as typed that M1 narrowed (CLI and MCP)
 {
     const std::string_view ambiguousTerminals = picks.ambiguous;
     // a terminal whose spec was qualified (graph.h selectorIsBareName) reports the definitions its spelling searched; a bare
@@ -4765,25 +4673,26 @@ inline std::string connectText( const std::string& root, const std::vector<std::
     if( symbolSpecs.size() < 2 || symbolSpecs.size() > connectcfg::kMaxTerminals )
     { err = "connect needs 2..16 symbols (got " + std::to_string( symbolSpecs.size() ) + ")"; return {}; }
 
-    std::vector<NodeId> terminals;
-    std::size_t         unprovenDefs = 0;   // H1: summed over the terminals, exactly as the CLI --connect sums them
-    for( const std::string& spec : symbolSpecs )
+    std::vector<NodeId>           terminals;
+    // H1: unprovenDefs summed over the terminals, exactly as the CLI --connect sums them. GV-PATH-BIND + PATH-AMBIG-VC: the CLI's
+    // terminal binder (forgraphverb.h ConnectTerminalSpellings): the M1 narrowing (narrowed=), then a fitted Owner.method's definitions
+    ConnectTerminalSpellings      cnSpell;
+    std::vector<std::string_view> specs( symbolSpecs.begin(), symbolSpecs.end() );
+    for( std::string_view& spec : specs )
     {
-        std::size_t  termUnprovenDefs = 0;
-        const NodeId id               = resolveFocus( ing, spec, &termUnprovenDefs );
-        if( id == kNoNode ) { err = "symbol not found: " + spec + mcprefuse::atSeedClause( ing, spec ); return {}; }   // the @-clause is "" for a plain name
+        const NodeId id = cnSpell.resolve( ing, spec );
+        if( id == kNoNode ) { err = "symbol not found: " + std::string( spec ) + mcprefuse::atSeedClause( ing, spec ); return {}; }   // the @-clause is "" for a plain name
         terminals.push_back( id );
-        unprovenDefs += termUnprovenDefs;
     }
 
-    const ConnectPicks  picks = joinTerminalPicks( ing, g, symbolSpecs, terminals, radius );   // 0.6.6 D1: the CLI's pick, same call
+    const ConnectPicks  picks = joinTerminalPicks( ing, g, specs, terminals, radius );   // 0.6.6 D1: the CLI's pick, same call
     const ConnectResult res = connectDeclinedJoints( ing, g, connectSourceJoint( ing, g, terminals, radius ) );   // CONNECT-SOURCE-JOINT (a) + (b), the CLI's core
     rw::MemoryStream stream;
     std::FILE* const mem = stream.open();
     if( !mem ) { err = "internal error"; return {}; }
     // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
     packConnect( mem, ing, g, res, redact, /*maxTokens=*/0, ing.realPaths.empty() ? std::string_view( root ) : std::string_view(),
-                 unprovenDefs, picks );
+                 cnSpell.unprovenDefs, picks, cnSpell.narrowed );
     std::optional<std::string> answer = mcpAnswerText( stream );
     if( !answer )
     {
