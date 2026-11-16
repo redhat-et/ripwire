@@ -701,7 +701,7 @@ grep -q 'set(RIPWIRE_FUZZ_READERS' "$READERS_DIR/run.sh" && grep -q 'executed 0 
 # arm can fail.
 LABELTMP="$( mktemp -d )"; trap 'rm -rf "${TMP:-}" "$LABELTMP"' EXIT   # keeps the earlier trap's $TMP cleanup
 cat > "$LABELTMP/labels.py" <<'LABELPY'
-import os, re, sys
+import os, re, shlex, sys
 d = sys.argv[1]
 n, bad = 0, []
 for f in sorted(os.listdir(d)):
@@ -719,7 +719,11 @@ for f in sorted(os.listdir(d)):
         if not desc: bad.append(f"{where}: no --description")
         elif len(desc.group(1)) > 100: bad.append(f"{where}: description {len(desc.group(1))} chars > 100")
         if not color or not re.fullmatch(r"[0-9A-Fa-f]{6}", color.group(1)): bad.append(f"{where}: --color is not 6 hex digits")
-        if "--force" not in cmd: bad.append(f"{where}: no --force (not idempotent)")
+        try:
+            tokens = shlex.split(cmd, comments=True)   # an option is a TOKEN: "--force" inside a quoted value is not one
+        except ValueError:
+            tokens = []
+        if "--force" not in tokens: bad.append(f"{where}: no --force (not idempotent)")
 print(n)
 print("; ".join(bad))
 LABELPY
@@ -739,6 +743,14 @@ ctlOut="$( python3 "$LABELTMP/labels.py" "$LABELTMP/wf" )"
 case "$ctlOut" in
     1*"101 chars > 100"*"no --force"*) ok "workflow labels control: a 101-char description without --force is flagged twice (the arm can fail)" ;;
     *) no "workflow labels control: the 101-char create was not flagged as expected: $( printf '%s' "$ctlOut" | tr '\n' '|' )" ;;
+esac
+# control (CodeRabbit #676): --force named only INSIDE the quoted description is no --force option
+mkdir -p "$LABELTMP/wf2"
+printf '          gh label create "$x" --repo "$R" --color FBCA04 --description "Use --force for updates"\n' > "$LABELTMP/wf2/ctl.yml"
+ctl2Out="$( python3 "$LABELTMP/labels.py" "$LABELTMP/wf2" )"
+case "$ctl2Out" in
+    1*"no --force"*) ok "workflow labels control: --force inside a quoted --description does not count as the option" ;;
+    *) no "workflow labels control: a quoted '--force' in the description passed as the option: $( printf '%s' "$ctl2Out" | tr '\n' '|' )" ;;
 esac
 
 [ "$fail" = 0 ] && printf 'ALL PASS\n' || printf 'FAILURES ABOVE\n'

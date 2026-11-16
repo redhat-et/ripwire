@@ -1003,7 +1003,7 @@ jobs:
       - name: The binary runs — --version and --help
         run: |
           ./build/ripwire.exe --version | tee version.txt
-          grep -qE '^ripwire [0-9]+\.[0-9]+\.[0-9]+ \(' version.txt
+          grep -qE '^ripwire [0-9]+\.[0-9]+\.[0-9]+(\+dirty|-dev(\.[0-9]+)?(\+g[0-9a-f]{7,40}(\.dirty)?)?)? \(' version.txt   # the label shapes cmake/version_stamp.cmake stamps (tag, +dirty, -dev.N+g<sha>, -dev+g<sha>, -dev)
           grep -q 'emit=' version.txt
           grep -q 'built_from=' version.txt
           test "$( ./build/ripwire.exe --help | wc -c )" -gt 1000

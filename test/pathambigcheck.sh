@@ -255,7 +255,8 @@ calls = [ ( "path_between", "own", { "from": "_make", "to": "sink" } ),         
           ( "path_between", "uniq", { "from": "top", "to": "leaf" } ),            # 8 negative: single definitions
           ( "path_between", "own", { "from": "boot", "to": "sink" } ),            # 9 negative
           ( "connect", "uniq", { "symbols": [ "top", "leaf" ] } ),                # 10 negative
-          ( "connect", "own", { "symbols": [ "Other._make", "sink" ] } ) ]        # 11 negative: a single-entity owner
+          ( "connect", "own", { "symbols": [ "Other._make", "sink" ] } ),         # 11 negative: a single-entity owner
+          ( "path_between", "own", { "from": "Svc._make", "to": "NoSuchSym_zz" } ) ]   # 12 refusal names only the unbound end
 reqs = [ { "jsonrpc": "2.0", "id": 0, "method": "initialize", "params": { "protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": { "name": "g", "version": "1" } } } ]
 for i, ( verb, d, a ) in enumerate( calls ):
     a = dict( a ); a[ "path" ] = tmp + "/" + d
@@ -310,6 +311,10 @@ if [ "$( mline 6 | cut -d' ' -f1 )" = ok ] && mline 6 | grep -qE '<t n="_make"[^
 else no "(f) MCP connect Svc._make binds, never refuses: $( mline 6 | head -c 400 )"; fi
 if [ "$( mline 7 | cut -d' ' -f1 )" = err ] && mline 7 | grep -q 'Nope._make'; then ok "(f) MCP connect: a wrong owner (Nope._make) still refuses"
 else no "(f) MCP connect: a wrong owner still refuses: $( mline 7 | head -c 300 )"; fi
+# CodeRabbit #676: the refusal diagnoses with the binder pathText ran, so a two-copy Svc._make that binds is never named as missing
+if [ "$premF" = 1 ] && [ "$( mline 12 | cut -d' ' -f1 )" = err ] && mline 12 | grep -qF "to='NoSuchSym_zz'" && ! mline 12 | grep -qF "from='Svc._make'"; then
+    ok "(f) MCP path_between Svc._make -> NoSuchSym_zz: the refusal names to= only (the bound two-copy from= is not called missing)"
+else no "(f) MCP path_between refusal names only the unbound endpoint: $( mline 12 | head -c 400 )"; fi
 
 # ── (g) single definitions: unchanged ──
 premG=0

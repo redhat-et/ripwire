@@ -4027,10 +4027,12 @@ inline std::optional<std::string> pathText( const std::string& root, const std::
 // returns nothing.
 inline std::string pathEndpointRefusal( const IngestResult& ing, const std::string& from, const std::string& to )
 {
-    std::size_t unused = 0;
-    bool        glob   = false;   // ix2-slice: a `*` endpoint that matches resolves, exactly as pathText resolves it
-    const bool fromOk = !resolvePathEndpoint( ing, from, &unused, &glob ).empty();
-    const bool toOk   = !resolvePathEndpoint( ing, to, &unused, &glob ).empty();
+    // The binder pathText ran (forgraphverb.h bindPathEndpoints: a `*` glob, an M1 narrowing, the fitting definitions of a two-copy
+    // Owner.method), so the refusal names only the endpoint that answer refused (CodeRabbit #676: resolvePathEndpoint alone also
+    // named a two-copy `Svc._make` that bound fine).
+    const PathEndpointsBound ep     = bindPathEndpoints( ing, from, to );
+    const bool               fromOk = !ep.srcDefs.empty();
+    const bool               toOk   = !ep.dstDefs.empty();
     if( fromOk && toOk )
     {
         return {};

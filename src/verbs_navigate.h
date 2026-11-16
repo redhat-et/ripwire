@@ -1447,7 +1447,7 @@ inline constexpr SafeDeleteRiskReading kSafeDeleteRiskReadings[] = {
     { "uses-exist",      "uses-exist: callers or uses exist, and at least part of the radius is test-covered. " },
     // TIER-FOLLOWUP: a radius of test definitions only is not "untested" (isTestedByReach never counts a test, so it read as one)
     { "tests-only",      "tests-only: callers or uses exist, and EVERY symbol in the transitive blast radius is a test definition "
-                         "(radius_tests=): no production symbol calls it, directly or transitively. uses= may still count production "
+                         "(radius_tests=): no production caller was found in the resolved graph, directly or transitively. uses= may still count production "
                          "reads, imports or value uses. " },
     { "unmodelled",      "unmodelled: zero callers AND zero uses were READ, but this kind is used by reading or naming it and those "
                          "counts cannot see that — no reading either way, never a none-found. " },

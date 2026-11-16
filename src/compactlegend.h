@@ -1164,7 +1164,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "uses_floor", "uses_floor=1: this kind's reads and type mentions are not indexed in this run; uses= does not count them", false, {}, MapHeaderRead::No, {}, "safe-delete" },
     { "risk", "risk=unmodelled: nothing found, but the counts cannot see this kind's uses; next= lists them", false, "safe-delete", MapHeaderRead::No, "unmodelled", "safe-delete" },
     // TIER-FOLLOWUP: the value whose meaning a reader cannot guess from untested-radius beside it
-    { "risk", "risk=tests-only: every symbol in the transitive radius is a test definition (radius_tests=); no production symbol calls it", false, "safe-delete", MapHeaderRead::No, "tests-only", "safe-delete" },
+    { "risk", "risk=tests-only: every symbol in the transitive radius is a test definition (radius_tests=); no production caller was found in the resolved graph", false, "safe-delete", MapHeaderRead::No, "tests-only", "safe-delete" },
     // CALLSITE-AT (2026-10-09): sites_l= became sites_at= (pasteable file:line tokens); the callers verb's s rows carry the same pair.
     { "sites_at", "c sites_at=: its calls of the leaf name, any receiver, as file:line (p= is its def line); not proof each binds", true, "c", MapHeaderRead::No, {}, "safe-delete" },
     { "sites_total", "c sites_total=N: N sites, sites_at= lists the first 16; the uses verb lists all", true, "c", MapHeaderRead::No, {}, "safe-delete" },
