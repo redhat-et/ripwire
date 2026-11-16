@@ -32,6 +32,7 @@
 //     rather than in path order — both measured, both disclosed, see the constants below.
 #include <algorithm>
 #include <cstdint>
+#include <numeric>   // std::iota — the house index-permutation idiom
 #include <string>
 #include <string_view>
 #include <vector>
@@ -330,19 +331,17 @@ inline void collectInventoryDirs( MapInventory& inv, const IngestResult& ing, co
 //   fewest-code-first    : vscode 1,207 named and src/ 0 -> 806; cockroach pkg/ 535 -> 1,206; envoy source/ ~0
 //                          -> 358. Maximises how many directories get named under the budget. ADOPTED.
 // docs/EVALS.md, "the inventory tier's NAME ceiling spends its budget in path order", with its amendment.
+// Each order is an index permutation under its own comparator, written in the house idiom (std::iota then
+// std::sort over the indices, as src/declinedsites.h, src/forpage.h and src/forslots.h do) rather than behind a
+// shared wrapper: the wrapper was a 119-token clone of src/eval.h's rankFiles, which --quality-delta gated.
 inline std::vector<std::uint32_t> inventoryNameOrder( const std::vector<MapInventoryDir>& dirs )
 {
     std::vector<std::uint32_t> order( dirs.size() );
-    for( std::size_t i = 0; i < order.size(); ++i )
-    {
-        order[ i ] = static_cast<std::uint32_t>( i );
-    }
+    std::iota( order.begin(), order.end(), std::uint32_t( 0 ) );
     std::sort( order.begin(), order.end(), [ &dirs ]( std::uint32_t a, std::uint32_t b ) noexcept
     {
-        const MapInventoryDir& x = dirs[ a ];
-        const MapInventoryDir& y = dirs[ b ];
-        if( x.named.size() != y.named.size() ) { return x.named.size() < y.named.size(); }
-        return x.dir < y.dir;                       // a total order, so two runs cannot disagree
+        if( dirs[ a ].named.size() != dirs[ b ].named.size() ) { return dirs[ a ].named.size() < dirs[ b ].named.size(); }
+        return dirs[ a ].dir < dirs[ b ].dir;       // a total order, so two runs cannot disagree
     } );
     return order;
 }
@@ -353,17 +352,12 @@ inline std::vector<std::uint32_t> inventoryNameOrder( const std::vector<MapInven
 inline std::vector<std::uint32_t> inventoryRowOrder( const std::vector<MapInventoryDir>& dirs )
 {
     std::vector<std::uint32_t> order( dirs.size() );
-    for( std::size_t i = 0; i < order.size(); ++i )
-    {
-        order[ i ] = static_cast<std::uint32_t>( i );
-    }
+    std::iota( order.begin(), order.end(), std::uint32_t( 0 ) );
     std::sort( order.begin(), order.end(), [ &dirs ]( std::uint32_t a, std::uint32_t b ) noexcept
     {
-        const MapInventoryDir& x = dirs[ a ];
-        const MapInventoryDir& y = dirs[ b ];
-        if( x.named.empty() != y.named.empty() ) { return y.named.empty(); }   // named rows first
-        if( x.total != y.total )                 { return x.total > y.total; }
-        return x.dir < y.dir;
+        if( dirs[ a ].named.empty() != dirs[ b ].named.empty() ) { return dirs[ b ].named.empty(); }   // named rows first
+        if( dirs[ a ].total != dirs[ b ].total )                 { return dirs[ a ].total > dirs[ b ].total; }
+        return dirs[ a ].dir < dirs[ b ].dir;
     } );
     return order;
 }
