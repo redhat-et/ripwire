@@ -39,8 +39,13 @@
 # Usage: test/spinlockcheck.sh    (an argument is accepted and IGNORED — pargates passes every gate the
 # binary under test, and this gate binds none: its subject is src/infra/spinlock.h, the compiler's output
 # for it, and the shard layout in src/infra/internedtext.h. Nothing here executes build/ripwire, which is
-# why test/binoverridecheck.sh carries a pinned exemption row for this gate; that row's reason cites the
-# ABSENCE of RIPWIRE_BIN and $BIN from this file, so do not reintroduce either without updating it.)
+# why test/binoverridecheck.sh carries a pinned exemption row for this gate.
+#
+# THAT ROW RESTS ON THE ABSENCE OF THE TWO BINARY-BINDING SPELLINGS FROM THIS FILE — the override
+# environment variable and the positional-argument variable that every other gate uses to reach the binary
+# under test. Arm (2b) of binoverridecheck greps exempted gates for exactly those two names, so neither may
+# appear here even inside a comment: writing them in this note is what made that arm fire while the
+# exemption it documents was correct. If a future arm here needs the binary, drop the exemption row first.)
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 fail=0
