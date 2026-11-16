@@ -55,27 +55,33 @@ good. This note collects the candidate levers in one place.
    - read off the cost in items per cut.
 
    That gives a ranked cut list with a known item cost for each cut, and no build is needed.
-3. **Group rows by file.** Row markup is about 29 % of an answer, and repeated file paths add more. A byte breakdown
-   (2026-10-04) found a lossless saving of 19-31 % per question class from printing each path once with its rows
-   under it.
+3. **Group rows by file — measure literal-path survival first.** Row markup is about 29 % of an answer, and a byte
+   breakdown (2026-10-04) estimated a 19-31 % saving per question class from printing each path once with its rows
+   under it. That saving is lossless only for a reader that rejoins the prefix. When the map's inventory tier was
+   nested this way (2026-11-16), 87 % of directory rows lost their literal path, so a substring search for the
+   path failed and a `p=` meant to be pasted as a command argument stopped running. Ranked rows carry the same
+   exposure. Count literal-path survival on before/after answer pairs (one grep each) before building anything.
 4. **Legends.** Legends are about 16 % of bytes (median ~2 KB). Present-only legends landed in #668, and agent
    surfaces can already take the legend once per session (`--legend=ref`, CLAUDE.md G4). The open question is
    measurement: how often real agent sessions get the ref form, and what the inline legend costs on the CLI paths
    agents call through a shell.
 5. **Detail by distance:** full body for the head, signature for near rows, `name@file:line` for far rows.
-6. **Drop duplicate `<d>` rows:** −23 to −63 KB over the same three sets.
+6. **Fold duplicate definition rows** in `--for`'s `<ctx>`: constant-group members that each print the same doc
+   excerpt fold into one row with a name list. About 23 KB recoverable over the same three sets. (Four elements are
+   spelled `<d>`; this is the `--for` context row, not the signature tier's, `--defs`', or the slice verb's.)
 
 ## C. Splitting verbs
 
 - **Data:**
   - Answer size and legend share differ a lot by question class. who-calls answers are 1.3 KB, and 43 % of that is
     legend; how-it-works answers are 9.2 KB (2026-10-04 breakdown).
-  - Natural wording reaches plain `--for` on 114 of 120 calls (routing census, 2026-11-08). Agents mostly don't
-    pick a specialised verb on their own.
+  - Within `--for`, the internal route label explains little. Whether the question names an indexed symbol
+    explains most item loss: 71 % complete when it does, 34 % when not (routing census, 2026-11-08, 60 questions
+    × 3 wordings). There is no measurement yet of how often agents choose a specialised verb over `--for`.
 - **Recommendation: route inside `--for` before splitting it.** Classify the question (where-defined / who-calls /
   how-it-works / change-risk / find-literal) with a simple rule-based classifier. Then give each class its own
-  section set and byte budget behind the one entry point. A split adds a routing choice the data says agents
-  rarely make well.
+  section set and byte budget behind the one entry point. A split adds a routing choice for the agent, and how
+  well agents make that choice is unmeasured.
 - **When a split does pay:** a short first answer plus a `next=` cursor for depth. That splits by depth rather than
   by verb: `--for` answers short, and `next=` continues.
 - **To test:** class-routed budgets on the in-sample rows (bytes and credited items per class). Then, if wanted, a
