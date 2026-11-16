@@ -16,6 +16,7 @@
 #include "ingest.h"
 #include "workspace.h"             // multi-root workspaces: root hygiene + labels + the id-offset merge
 #include "graph.h"
+#include "warmsnap_graph.h"        // the warm snapshot: the crawl replayed, the resolved graph loaded instead of rebuilt
 #include "scip.h"                  // SCIP precision overlay (--scip=index.scip)
 #include "serialize.h"
 #include "pageview.h"              // §P8: the ONE --limit/--offset window + root-element shown=/capped= disclosure
@@ -1901,7 +1902,7 @@ int runDefaultMap( const MainDispatch& d )
     }
     else
     {
-        rank = rw::takeRank( rankGraph( g ), rankDisclosure );
+        rank = rw::takeRank( rw::warmsnap::defaultRank( g ), rankDisclosure );   // the stored rank when the warm snapshot served this graph, else rankGraph( g )
     }
 
     // HITS: surface hubs (entrypoints/orchestrators) or authorities (core APIs) instead of the default
@@ -3136,6 +3137,40 @@ VerbPrecedence scanReportVerbPrecedence( const rw::Config& c )
 // --exemplar fold the in-edge CSR into fanIn and computeQMetrics; the signature emitters run computeImpure over it. Any of
 // those keeps the build, so a combination answers exactly as before. Everything else that outranks --deps/--arch is a verb
 // row above them in the precedence table, so it would have been the winner.
+// The graph for a run with a warm snapshot armed: the stored one when every guard in warmsnap.h holds, else a build whose
+// outcome becomes the next run's stored one.
+static rw::Graph graphFromWarmSnapshot( rw::warmsnap::Session& snap, const rw::IngestResult& ing )
+{
+    if( std::optional<rw::Graph> stored = rw::warmsnap::readGraph( snap, ing ) )
+    {
+        rw::memstats::mark( "graph-end" );   // the same reading a build ends on, so a stats consumer always finds its line
+        return std::move( *stored );
+    }
+    return rw::warmsnap::buildGraphRecorded( snap, ing );
+}
+
+// Write what this run learned, and — under RIPWIRE_SNAPSHOT_STATS — say which stages it did not repeat. stderr only,
+// env-gated, and its own variable: RIPWIRE_CACHE_STATS consumers compare that stream between cached and uncached runs.
+static void finishWarmSnapshot( rw::warmsnap::Session& snap )
+{
+    if( !snap.on() )
+    {
+        return;
+    }
+    rw::warmsnap::saveSnapshot( snap );
+    snap.treeSection = snap.modelSection = snap.graphSection = {};   // the file's bytes and this run's sections are not read again: give them back
+    std::string().swap( snap.file );
+    std::string().swap( snap.treeOut );
+    std::string().swap( snap.modelOut );
+    std::string().swap( snap.graphOut );
+    if( std::getenv( "RIPWIRE_SNAPSHOT_STATS" ) != nullptr )
+    {
+        rw::emitTo( stderr, "ripwire: snapshot-stats tree={} model={} graph={} why={} model_why={} graph_why={} saved={}\n", snap.treeReplayed ? "replayed" : "walked",
+                    snap.modelLoaded ? "loaded" : "built", snap.graphLoaded ? "loaded" : "built", rw::warmsnap::kWhyNames[ std::size_t( snap.why ) ],
+                    rw::warmsnap::kWhyNames[ std::size_t( snap.modelWhy ) ], rw::warmsnap::kWhyNames[ std::size_t( snap.graphWhy ) ], snap.saved ? 1 : 0 );
+    }
+}
+
 bool graphUnreadByWinner( const rw::Config& c, const char* winner )
 {
     const bool archWins = winner != nullptr && ( std::strcmp( winner, "--deps" ) == 0 || std::strcmp( winner, "--arch" ) == 0 );
@@ -5397,6 +5432,12 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
         ~AbandonWalksOnUnwind() { if( std::uncaught_exceptions() > uncaught ) { rw::abandonGitWalks(); } }
     } abandonWalksOnUnwind;
     IngestResult ing;
+    // The warm snapshot (warmsnap.h) serves the one ingest a single-root run makes. Not armed for a multi-root merge (each
+    // root has its own blob and the graph is the merge's), under --scip or --pin-census (the graph then holds an overlay or
+    // a census this file does not store), under --max-memory (the guard watches the crawl and the parse a load would skip:
+    // a run asked to stop at a limit must do the work the limit is about), or when RIPWIRE_NO_WARMSNAP is set.
+    rw::warmsnap::Session warmSnap;
+    const bool warmSnapArmed = !multiRoot && cfg.scipIndex.empty() && cfg.pinCensus.empty() && cfg.maxMemoryBytes == 0 && std::getenv( "RIPWIRE_NO_WARMSNAP" ) == nullptr;
     if( multiRoot )
     {
         // Multi-root ingest: ONE existing per-root cache blob per root (the exact
@@ -5437,6 +5478,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
             autoCache = defaultCachePath( root, needsValueUses );
             cacheArg  = autoCache;
         }
+        const rw::warmsnap::Armed armed( warmSnapArmed ? &warmSnap : nullptr );
         ing = ingest( root.c_str(), cfg.excludes, cacheArg, cfg.maxFileBytes, needsValueUses,
                       /*excludeLabel=*/{}, /*respectGitignore=*/!cfg.noIgnore );
     }
@@ -5571,7 +5613,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
     {
         try   // a failed build (fileGraphStop.h) unwinds past a joinable worker, which would std::terminate: join it, then let the stop go on
         {
-            Graph built = graphUnread ? Graph{} : buildGraph( ing, scipPtr, !cfg.pinCensus.empty() );
+            Graph built = graphUnread ? Graph{} : warmSnap.on() ? graphFromWarmSnapshot( warmSnap, ing ) : buildGraph( ing, scipPtr, !cfg.pinCensus.empty() );
             joinGrepScanPrefetch( grepPhaseWorker );
             return built;
         }
@@ -5581,6 +5623,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
             throw;
         }
     }();
+    finishWarmSnapshot( warmSnap );
     if( rw::memguard::overHardLimit() )   // #350: the hard line between the graph build (or, for --deps/--arch, the ingest) and the verbs
     {
         DISCLOSE( Diagnostics::answerRefused, "main: over the memory guard's hard limit after the graph build (--deps/--arch: after the ingest) — exit 5, one stderr line" );

@@ -1926,8 +1926,13 @@ private:
 
 CrawlResult collectSources( const char* rootDir, const std::vector<std::string>& excludeSubstr,
                             std::size_t maxFileBytes, std::string_view excludeLabel = {}, bool respectGitignore = true,
-                            memguard::Watch* memWatch = nullptr, IgnoreProbeSpeculation* ignoreSpeculation = nullptr )
+                            memguard::Watch* memWatch = nullptr, IgnoreProbeSpeculation* ignoreSpeculation = nullptr,
+                            warmsnap::TreeCapture* capture = nullptr )
 {
+    // `capture` (the warm snapshot's, warmsnap.h): every path this walk LOOKS at is handed over, so a later run can tell
+    // from their stat signatures alone that the walk would answer the same. A walk a replay cannot stand for says so.
+    warmsnap::TreeCapture  nobody;                                          // off: every seen.* call below is a test and a return
+    warmsnap::TreeCapture& seen = capture != nullptr ? *capture : nobody;
     std::vector<std::string>     out;
     std::vector<SkippedOversize> skipped;
     CrawlSkips                   skips;
@@ -1948,6 +1953,7 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
     // If the root is a regular file, index just that one file instead of refusing.
     if( fs::is_regular_file( root, ec ) && !ec )
     {
+        seen.unreplayable();   // a single-file root has no walk to replay
         // Process this single file through the same validation pipeline as directory walk would.
         const std::string name = root.filename().string();
         if( !isDenylistedName( name ) )
@@ -1981,11 +1987,13 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
     if( ec )
     {
         DISCLOSE( "ingest: cannot open root directory — empty result" );
+        seen.unreplayable();
         return { std::move( out ), std::move( skipped ), std::move( skips ) };
     }
 
     const GitIgnoreSet ignoreSet = probeIgnoreSet( rootDir, respectGitignore, skips.ignoreMode, ignoreSpeculation, rootReal );   // §N6-C
     SphinxTxtRoots     sphinxTxtRoots( os::program_path( root ) );
+    seen.root( os::program_path( root ) );
 
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/crawl: directory walk (stat + classify)" );
@@ -1994,10 +2002,12 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
         {
             if( memWatch != nullptr && memWatch->crawlShouldStop( entryCount++ ) )
             {
+                seen.unreplayable();
                 break;   // #350: the memory guard's crawl line — ingest() records the stop from the watch
             }
             if( ec )
             {
+                seen.unreplayable();
                 ec.clear();
                 continue;
             }
@@ -2039,6 +2049,7 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
             // prune noise/vendor/build subtrees entirely (a .gitignore-lite default denylist)
             if( it->is_directory( ec ) )
             {
+                seen.entry( *it, fullPath, /*follow=*/0 );
                 // The denylist itself now lives in ingest.h (kCrawlSkipDirs / isSkippedCrawlDir) so darkflags.h's
                 // CMake walk prunes exactly the same subtrees — see the note there.
                 bool skip = excluded;
@@ -2068,11 +2079,13 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
                 if( skip )
                 {
                     it.disable_recursion_pending();
+                    seen.ignoredDir( ignoredDir, fullPath );
                     recordDirPrune( skips, excluded, ignoredDir, *it, fullPath );   // §L1/§N6-C: see its header
                 }
                 continue;
             }
 
+            seen.entry( *it, fullPath, /*follow=*/1 );
             if( !it->is_regular_file( ec ) )
             {
                 continue;

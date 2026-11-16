@@ -1099,6 +1099,7 @@ for _g in \
     w3fixbudgetcheck \
     w3fixlegendcheck \
     warmpeakcheck \
+    warmsnapcheck \
     weaksignalcheck \
     withgraphcheck \
     withprofilecheck \

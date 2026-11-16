@@ -1565,3 +1565,11 @@ Discloses: `capped`
 | --- | --- | --- | --- |
 | `kDeadExportedRowsShown` | `100` | — | exported rows printed (shown= capped=1; total= stays whole) |
 
+### `src/warmsnap_model.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kRowsPerChunk` | `4096` | — | — |
+

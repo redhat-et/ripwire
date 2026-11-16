@@ -14713,6 +14713,522 @@ If the resolve loop's output cannot be serialized without also serializing the r
 reduces to the CSR-only variant. That is a legitimate outcome, to be recorded as a narrowing with the
 measured reason, not retried until it passes.
 
+### RESULT — the warm snapshot, measured 2026-11-14 and RE-MEASURED TWICE on 2026-11-15 against the bands above
+
+Three placements of one artifact, three measurement rounds. First at implementation `a23dc3982` on
+`67b08d46b`, with the stored state in a `<cache>.snap` sidecar beside the blob. Then at `6c2d9854b` on
+`0217049f2`, with it moved INSIDE the blob as a section on the owner's ruling. Finally at `cfde2761b`,
+with it moved OUT of the blob again — into ripwire's own cache directory, named after the blob's identity
+— on the owner's **second** ruling of the same day, which is the placement that ships. **The last set of
+figures is the live one and supersedes the other two in place**; the earlier sets are kept only where they
+are the comparison that prices a move.
+
+Every figure below is in **bytes** or in **instructions retired**; the unit defect disclosed under
+Band 3 is the reason this section refuses round "MB". Instrument for CPU is `instructions retired` from
+`/usr/bin/time -l`, which is contention-invariant, plus user CPU, which is what the bands' thresholds
+are stated in. Where a run's machine was not quiet, the load is given beside the number.
+
+Numbers marked **(v)** in the superseded 2026-11-14 text were re-measured independently of the
+implementing agent. Every figure in the 2026-11-15 re-measurement below takes its A/B on **one binary**
+(`RIPWIRE_NO_WARMSNAP=1` versus the section served), which removes the binary-provenance confound from
+the comparison entirely, and each cell is a median of 5 warm runs (3 for the cold-peak arms).
+
+#### SUPERSEDED 2026-11-15 (the FIRST ruling of that day) — the sidecar is withdrawn; the state went INSIDE the blob
+
+**Read this subsection as history, not as the shipped design.** Its "now" is the in-blob section, which
+the second ruling of the same day moved out again — see the subsection immediately after it. In
+particular **`kCacheVersion` never shipped at 53**: the format that ships is v52, unchanged. Both rounds
+are kept because the pattern across the three placements is the finding.
+
+The text this replaces accepted a **sidecar file beside the blob** (`<cache>.snap`) as a deviation from
+the registered "section", on three grounds. It is kept here as the record of what was argued, because
+one of its three grounds was simply **wrong**, and the way it was wrong is the lesson:
+
+> 1. **Structural.** `saveCache` publishes the blob from inside the parse pool, before the model exists;
+>    the graph exists only after `buildGraph`. An in-blob section would require a second whole-blob
+>    rewrite — 154,596,199 B on envoy, 284,593,343 B on vscode — charged to the recording run.
+> 2. **The sidecar adds no cache invalidation at all.** `kCacheVersion` stays **51** and
+>    `kIngestParserVerMirror` stays **309** [...] An in-blob section would have had to bump
+>    `kCacheVersion`, invalidating every existing blob — a strictly worse migration than the one the
+>    card imagined it was choosing.
+> 3. **The refusal direction holds under an adversarial case no gate arm covers (v).**
+
+**What the deviation cost, and what forced the correction.** The sidecar failed the lane's own sibling
+gate. `test/cacheidentitycheck.sh` arm (D3) asserts that `--cache=PATH` writes exactly the file the user
+named **and nothing whose name starts with it** — the #334 contract that an explicit path never gets a
+build tag appended. `<cache>.snap` is exactly such a file. The arm went red on four of the PR's five
+checks (macOS Release, macOS plain, Ubuntu plain gcc, Ubuntu plain clang). A deviation that breaks a
+committed contract is not a deviation; it is a defect with a rationale attached.
+
+**The owner's ruling, 2026-11-15, after being shown three options with their costs:** put the snapshot
+inside the blob as a section. The deciding facts were that `loadCache`'s guard already rejects a blob
+unless magic, `kCacheVersion` and `parserVer` all match — there is no unknown-section skipping, so a
+format change invalidates every existing blob exactly **once** — that this project has bumped
+`kCacheVersion` 52 times and treats that cost as routine, and that the third option, restricting the
+sidecar to the automatic path, would have killed the warm win for `--cache=BASE.lean.ripwirecache` in a
+PR job, which is ripwire's own documented CI workflow.
+
+**Ground 2 was wrong, and that is the finding worth keeping.** It read a `kCacheVersion` bump as the
+expensive side of the trade. It is the *cheap* side: one re-index, once, on a tool that has charged that
+same cost 52 times before. What the sidecar bought with it was a second artifact — and a second artifact
+is not free, because the blob's contract then has to be restated for it everywhere the blob has one.
+Three places had already paid: arm (D3) went red, `--doctor` had to learn to subtract `.snap` from the
+retained-blob count (the windows-package release gate read a warm run taking that count 4 -> 5 as "wrote
+a new blob instead of reusing one"), and the model section had to **assert** its binding to the records
+it was assembled from by storing the blob's stat signature and comparing it. The in-blob design deletes
+all three. **The general form: when a cheap-looking option needs the invariants of an existing artifact
+restated for a new one, count the restatements before calling it cheap.**
+
+**Ground 1 was true, measured, and is now priced rather than avoided** — see Band 2's trade below. The
+recording run does rewrite the blob. It does not re-serialise the records: they are copied forward by fd
+at the offsets they already hold, so the entry table is reused verbatim, the publish is tmp-then-rename
+like every other, and no published blob is ever modified in place. One further consequence removes the
+double-write ground 1 feared: **a run that re-parsed anything records nothing**, because `saveCache` has
+already republished the blob for that run. No run is charged both writes.
+
+**Ground 3 no longer has a case to answer.** It described a foreign build rewriting the blob underneath a
+live sidecar, and the sidecar correctly refusing. That adversary cannot be constructed any more: the
+section lives in the blob, so a foreign build's rewrite takes the section with it, and `saveCache` writes
+no section at all. The binding became structural rather than asserted, which is why
+`warmsnap_model.h` drops `BlobFacts::sig` (section `kVersion` 1 -> 2) and `test/warmsnapcheck.sh` arm
+(S6) now gates that directly.
+
+**What moved in the format.** `kCacheVersion` **52 -> 53**, with the reason stated as the mechanism
+rather than as "a format change": the blob HEADER grows from 25 to 41 bytes to carry a u64 `snapOffset`
+and a u64 `snapLength`. Every record offset therefore moves by 16 bytes, so this build reading a v52 blob
+would decode the header's own bytes as a record — older blobs **must** be rejected, which the version
+guard does. The section sits between the records and the offset table and its span lives in the header, so
+the trailer's `tableSum` checksums **where** it lies, not only the table.
+
+**What moved in the format: WITHDRAWN.** The paragraph above is superseded by the next subsection. Nothing
+in the blob grows in the shipped design, so `kCacheVersion` stays **52** and no user re-indexes.
+
+**No band moved, and none is re-opened.** All four thresholds below are the ones registered on
+2026-11-14, before any implementation existed.
+
+#### SUPERSEDED AGAIN 2026-11-15 (a second ruling, the same day) — the state moves OUT of the blob, into ripwire's own cache directory
+
+Everything above, and the four readings that follow it, were taken with the state **inside the blob**.
+That placement broke a *second* committed contract — found, again, by a sibling gate rather than by
+reasoning about the design — and the owner's second ruling of 2026-11-15 moved the state out of the blob
+into the per-user cache directory, keyed by the blob's identity and the options key. Implementation
+`cfde2761b`. Both rulings and both refusals are kept here, because the **pattern** is worth more than
+either placement.
+
+**What broke.** `test/portablecachecheck.sh` arm (a): *"reading the committed cache under path B mutated
+it in place"*. A committed `repo.ripwirecache` is read-shared by many checkouts, and a consuming run must
+not mutate the artifact another checkout owns. An in-blob section breaks that by construction — recording
+*is* republishing the blob. Worse, `optionsKeyOf` folds in the root spelling, its realpath and the cwd, so
+two checkouts can never agree on one section; measured on the in-blob build at `71306e761`, two checkouts
+sharing one blob refused and rewrote each other's section on **every** run, forever:
+
+    A run 2:  reparsed=0 reused=3                saved=1   (A records its section)
+    B:        reparsed=0 reused=3  why=options   saved=1   (B refuses A's, writes its own)
+    A again:  reparsed=0 reused=3  why=options   saved=1   (A refuses B's, writes its own)
+
+That is #334's refuse-and-rewrite thrash in a new place, and for a team that commits the artifact the
+visible symptom is worse than the cost: the first warm run in any checkout shows a committed file as
+modified in `git status`.
+
+**Why the cache directory is not the sidecar coming back.** What broke arm (D3) was a file written
+**beside the user's named path**, not the existence of a second artifact. Nothing is written next to the
+user's file now. The full warm win for `--cache=BASE.lean.ripwirecache` in a PR job is kept — the third
+option the owner was shown, restricting the snapshot to the automatic path, would have killed it — and the
+artifact lands somewhere already swept and already in `--doctor`'s accounting.
+
+**What the two rejected placements bought was a STRUCTURAL binding to the records the model was assembled
+from. The name buys the same thing.** The snapshot is
+`<cacheDir>/ripwire-warmsnap-<rootKey>-<optionsKey>-<blobIdentity>.bin`, and `blobIdentity` is the blob's
+own trailer digest over its header and its whole offset table — which carries every record's `recSum`.
+Rewrite the blob and the run resolves a different name; delete it and it resolves none. So
+`warmsnap_model.h` still stores no stat signature of the blob (section `kVersion` stays **2**): there is no
+field left that could be wrong about it. `warmsnapcheck` arm (S6) is now the *stronger* form of that
+claim — the snapshot is still on disk, and is not even reached.
+
+**`kCacheVersion` is back to 52, and that is a decision, not an omission.** The blob format is v52 **byte
+for byte**: `src/ingest_cache.h` is reverted to `origin/main` and gains two things that change nothing on
+disk — `CacheFrame` publishes the `tableSum` it already read and verified, and `cacheBlobIdentity()`
+returns it. Nothing in the blob grows, so a bump would invalidate every existing blob for nothing. The
+one-time re-index the in-blob design charged every user is **withdrawn**. The 2026-11-15 finding that a
+`kCacheVersion` bump is the *cheap* side of a trade still stands; it just is not a cost that has to be
+paid here.
+
+**THE PATTERN, which is the finding this round should be remembered for.** Three placements, three red
+sibling gates, every one of them found by a gate and not by reasoning about the design:
+
+| placement | gate that refused it | the contract, in the gate's own words |
+|---|---|---|
+| `<cache>.snap` beside the blob | `cacheidentitycheck` (D3) | `--cache=PATH` writes exactly the file the user named, and nothing whose name starts with it |
+| a section inside the blob | `portablecachecheck` (a) | reading the committed cache under another path must not mutate it in place |
+| `ripwire-warmsnap-<optionsKey>-…` in the cache dir | `evictioncheck` (k)/(l) | every family's filename carries the root key as its **first** 16-hex field, so the byte-budget sweep can pin one root's whole family |
+
+A fourth was caught by reading the CI workflows rather than by a red check: two steps assert that a warm
+run does not change `--doctor`'s `blobs=` count, and the first warm run of a configuration now records one
+derived artifact in that same directory.
+
+The blob's committed invariants were nowhere written down in one place, so each placement discovered one
+by violating it. They are written down now, in `src/warmsnap.h`'s own header. **The general form: before
+placing a derived artifact, enumerate the contracts the artifact it derives from already carries — the
+count of those contracts, not the size of the diff, is what the placement costs.** This is the same shape
+as the ground-2 finding above ("when a cheap-looking option needs the invariants of an existing artifact
+restated for a new one, count the restatements before calling it cheap") arriving a second and a third
+time, which is why it is promoted here from a remark to the round's headline.
+
+**What that means for the readings below.** All four bands are re-measured on the cache-dir tree at
+`cfde2761b` and **supersede** both earlier sets in place. **No band moved and none is re-opened**: all
+four thresholds are the ones registered on 2026-11-14, before any implementation existed. Three of the
+four verdicts are unchanged in direction; what moves materially is Band 2's recording-run trade and
+Band 3's disk arithmetic, because the recording run no longer rewrites the blob — and Band 2's cold-peak
+reading, which is withdrawn as unreproducible and re-taken on an arm with a control.
+
+#### Band 1 — CPU: PASS, re-measured median-of-5 on the cache-dir tree, with the published baseline as a control
+
+**The band's registered verb, settled 2026-11-14 and unchanged.** An intermediate version of this
+section recorded the band as NOT ESTABLISHED, reading the baselines as belonging to a `--for` query,
+taken from the comparison table's prose line ("warm query, identical for every tool: ..."). The
+harness's own recorded `cmd` field settles it and says otherwise:
+
+    ripwire . --cache=<...>/lean.ripwirecache
+
+ripwire's warm cell is the **flagless map against the lean blob**, with `cwd` at the repo and the root
+spelled `.`. No ripwire warm row in the curve uses `--for` anywhere; the prose line describes the
+question handed to the **peers**, each of which takes a natural-language query, and ripwire is never
+given it. The lesson is kept as a fix item: read the argv from the recorded `cmd`, never from the prose
+describing the run.
+
+Re-measured on the cache-dir tree at `cfde2761b`, median of 5 per cell, two arms on **one binary** — the
+lane with the snapshot served, and the same binary under `RIPWIRE_NO_WARMSNAP=1`:
+
+| repo | OFF (lane, disabled) | ON (lane, snapshot served) | user ratio | instruction ratio |
+|---|---|---|---|---|
+| envoy | 1.35 s / 20,210,088,683 | **0.18 s / 2,356,266,015** | 7.5x | **8.58x** |
+| vscode | 3.55 s / 53,554,846,543 | **0.35 s / 4,102,840,356** | 10.1x | **13.05x** |
+| cpython | 1.48 s / 21,805,539,716 | **0.26 s / 2,657,443,551** | 5.7x | **8.21x** |
+
+**Verdict: PASS.** The registered thresholds are 0.50 s on envoy and 0.80 s on vscode; measured 0.18 s
+and 0.35 s — **2.8x and 2.3x under**. The five ON runs of a cell spread 0.358 % (envoy), 0.120 %
+(vscode) and 0.256 % (cpython) in instructions, so the medians are not carrying a single lucky run.
+cpython is measured but is **not a registered Band 1 cell** and no threshold is claimed for it.
+
+**The control, which is what licenses the result.** The published curve's baseline binary is
+`d624cff5f`, and its two cells are 1.34 s / 20,325,625,367 (envoy) and 3.45 s / 53,670,869,501
+(vscode). This tree's OFF arm — a different binary, a different day — reproduces them on the
+contention-invariant instrument to **−0.57 %** and **−0.22 %**. User CPU agrees to +0.7 % on envoy and
++2.9 % on vscode; the vscode disagreement runs *against* the lane (OFF measured slower than the
+published baseline), so it cannot be inflating the ON arm by the 2.3x the verdict has in hand.
+
+**Three placements, three readings of the same cell, and the third is evidence for a mechanism the
+second could only assert.** Warm ON instructions, same verb, same corpora:
+
+| placement | envoy | ratio | vscode | ratio |
+|---|---|---|---|---|
+| `<cache>.snap` sidecar | 2,369,886,135 | 8.55x | 4,110,758,623 | 13.05x |
+| a section inside the blob | 2,283,115,909 | 8.87x | 3,941,402,817 | 13.62x |
+| **this round — a file in the cache dir** | **2,356,266,015** | **8.58x** | **4,102,840,356** | **13.05x** |
+
+The in-blob reading noted that it was 3.7 % and 4.1 % cheaper than the sidecar and proposed a cause —
+a `pread` out of a blob already being opened and validated, against opening a *second* file through
+`readRegularFileNoFollow`'s own shape and link checks — while stating plainly that it was **not
+isolated by experiment**. Moving back to a separate file gives that edge back and lands within
+**+0.6 %** and **−0.2 %** of the sidecar's cells, which is the prediction that mechanism makes. It is
+now a two-way, three-point result rather than a one-way difference, and still not an isolated cause;
+the honest form is that the payload's *location* costs about one file open per run, ~85e6 instructions
+on envoy, and that this is what the no-mutation contract buys with.
+
+**What it does and does not buy competitively.** Unchanged in direction. On this verb the lane makes
+ripwire the fastest warm tool at envoy scale — 0.18 s against crg's 0.23 s — and it does **not** at
+vscode scale, where crg stays ahead at 0.26 s against 0.35 s. The durable gain is the break-even: on
+**envoy every peer measured moves to "never"**, crg included, because ripwire is cheaper on both the
+index and the query; on **vscode** codegraph, graphify and graft move to "never" as well, and crg — the
+one tool still cheaper per query — goes from breaking even at **100 questions** to past **3,400**, which
+is beyond any plausible session against an unchanged tree. The peer cells are carried forward from the
+published curve and were **not** re-measured this round.
+
+**One measurement is discarded and recorded as discarded.** An earlier `--for` A/B reported 3.13x and
+4.41x. It was run against the **lean** blob, and `--for` reads the **rich** artifact
+(`harness/wp3_ladder.py:224`); the harness asserts against exactly this mismatch (`assert_warm_owner`:
+"the {verb} run would parse cold") and the run was hand-rolled around that guard. Those ratios therefore
+measure a partly-cold path, not a warm `--for`, and no claim rests on them. What a true warm `--for`
+costs after this lane is **not measured** — stored PageRank is the uniform-teleport default only and
+`--for` personalizes the teleport, so some of the saving provably does not transfer, and the honest
+statement is that the size of that gap is unknown.
+
+#### Band 2 — memory: PASS — warm peak FELL ~23 %, the cold peak does NOT move, and the superseded cold reading is withdrawn as unreproducible
+
+**Warm peak footprint, median of 5, one binary, `RIPWIRE_NO_WARMSNAP=1` against the snapshot served:**
+
+| repo | OFF | ON | change |
+|---|---|---|---|
+| envoy | 355,467,264 | **272,908,288** | −82,558,976 B (−23.2 %) |
+| vscode | 623,591,424 | **482,689,024** | −140,902,400 B (−22.6 %) |
+| cpython | 404,881,408 | **314,228,736** | −90,652,672 B (−22.4 %) |
+
+Warm peak fell on every repo, as the band expected, and by the same ~22-23 % both earlier placements
+measured. Nothing about the placement touches this: it is transient resolve state that is no longer
+built.
+
+**COLD peak: no measurable change, and the arm is defined here because the superseded one cannot be
+reproduced from what it recorded.** A cold cell in this round is a **true cold fill** — the blob and the
+whole cache directory are removed before the run, so the run crawls, parses every file, resolves, and
+writes the blob — median of 3 per arm:
+
+| repo | COLD peak OFF | COLD peak ON | change | COLD instructions OFF -> ON |
+|---|---|---|---|---|
+| envoy | 633,389,056 | 633,667,584 | +278,528 B (**+0.04 %**) | 315,875,456,514 -> 316,117,405,988 (+0.077 %) |
+| vscode | 1,103,953,920 | 1,057,275,904 | −46,678,016 B (**−4.2 %**) | 817,839,274,618 -> 817,956,607,281 (+0.014 %) |
+| cpython | 835,780,608 | 825,507,840 | −10,272,768 B (**−1.2 %**) | 324,702,554,013 -> 324,697,092,870 (−0.002 %) |
+
+Every ON-OFF difference is **inside the OFF arm's own run-to-run spread** — envoy OFF spans
+630,161,408 to 640,614,400 against ON's 626,212,864 to 634,175,488; vscode OFF 1,070,678,016 to
+1,148,977,152 against ON's 1,023,721,472 to 1,058,537,472 — so the right reading is "no measurable
+effect", not "a small improvement". Cold CPU is untouched to a tenth of a percent, as both earlier
+rounds also found.
+
+**The superseded reading's +37.6 % envoy cold rise is withdrawn, and the reason is a recipe, not a
+number.** That table reported envoy cold peak OFF at 350,520,136 B and said the worst cold peak measured
+anywhere was 804,668,592 B (vscode). Two things are wrong with those as *cold fills*. Its envoy OFF cold
+figure (350,520,136) is within 0.1 % of its own envoy **warm** OFF figure (350,978,720) — a run that
+parses 11,036 files and serialises a 154 MB blob does not peak where a run that parses nothing peaks.
+And its vscode figure is **21 % below the baseline this band registered for exactly that cell** ("cold
+peak ... it is 1,023 MB today"), while this round's OFF arm reproduces that baseline to **+2.9 %**
+(1,103,953,920 B against 1,072,693,248). Whatever that arm was, it was not the arm the band's ceiling is
+written against; its recipe is not recorded in enough detail to say what it was, so it is **superseded
+as unreproducible rather than contradicted**. The lesson is the registered one arriving again: a
+measured number is only as good as the recipe recorded beside it, and a cold arm whose number equals the
+warm arm's is the tell.
+
+**Verdict: PASS, on the band's unit-invariant primary sentence.** Clause 1 is "ripwire must remain the
+lowest-peak tool measured, with at least 1.5x of margin"; the lowest-peak peer on vscode is crg at
+3,246 in the harness's own field. The worst ON cold peak measured anywhere in this round is
+1,058,537,472 B (vscode) = 1,009.5 MiB = 1,058.5 MB, which is **3.07x** under crg's figure read as
+decimal MB and **3.22x** read as MiB — above the 1.5x requirement under either reading. The derived
+2,048 MB ceiling is cleared by **1.93x** (decimal) to **2.03x** (MiB). Clause 2, half of an 8 GB box, is
+cleared by 3.8x. The peer side of clause 1 is carried forward from the registration and was **not**
+re-measured this round.
+
+**What it is a trade against, stated per clause 3 — and this is where the placement pays.** The one run
+that *records* costs this, against a plain warm OFF run:
+
+| repo | recording run | plain warm OFF run | delta | bytes it writes |
+|---|---|---|---|---|
+| envoy | 21,093,971,805 instr / 404,652,032 B / 1.38 s | 20,210,088,683 / 355,467,264 / 1.35 s | +4.4 % instr, +13.8 % peak | **62,823,808** |
+| vscode | 55,628,474,890 / 708,083,712 / 3.52 s | 53,554,846,543 / 623,591,424 / 3.55 s | +3.9 % instr, +13.5 % peak | **112,597,552** |
+| cpython | 23,534,028,949 / 458,391,552 / 1.46 s | 21,805,539,716 / 404,881,408 / 1.48 s | +7.9 % instr, +13.2 % peak | **76,839,248** |
+
+**The in-blob placement's one real cost is reversed, by 3.46x.** Its recording run rewrote the whole
+blob — 217,420,007 B on envoy — because the section lived inside it. This one writes the snapshot and
+nothing else; the snapshot mechanism never writes the blob, and a **serving** run leaves it
+byte-identical, which `test/warmsnapcheck.sh` arms V3, S9 and S10 assert directly rather than infer.
+Where a warm run rewrites the blob at all it is `saveCache`'s own pre-existing record-growth path
+(`warm_growths=` on the cache-stats line), which predates this lane and is why those arms assert on a
+run that reports none. On the same cell the
+recording run is also **5.2 %** cheaper in instructions than the in-blob one (21,093,971,805 against
+22,243,509,001), which is the record-copy loop no longer existing. What any of these writes costs in
+wall-clock I/O is still **not measured**: `/usr/bin/time -l`'s `block output operations` counter reports
+**0** for every run on this APFS volume, a 217 MB write included, so it measures nothing here and no I/O
+figure is quoted from it.
+
+Two facts bound how often the write happens: a **serving** run writes nothing at all (`saved=0`,
+asserted by arms S8 and S9), and a run that re-parsed stores only the crawl, not the model or the graph
+(`ingest.cpp recordWarmModel` and `warmsnap_graph.h buildGraphRecorded` both stop on
+`reparsedFiles != 0`, unchanged by this rework) — so an edit loop pays a small write, not a large one,
+and gets the crawl replay back on the very next run (arm S8b).
+
+#### Band 3 — disk: PASS, the committable index is now UNCHANGED by the lane, and the ceiling's FIT is the live question
+
+**What changed under this band is not a number.** For the two earlier placements the registered ceiling
+— *"ripwire's blob must remain the smallest on-disk index measured, with at least 1.5x of margin"* — had
+an awkward relationship with the thing being measured. Under a sidecar it passed **vacuously** if read
+literally, because a sidecar leaves blob growth at exactly zero. Under an in-blob section it applied
+literally, which was that reading's honest improvement. The snapshot is a separate file again, so the
+literal reading would go vacuous a second time, and it is **not** taken that way here.
+
+**Both halves are reported, because they answer two different questions a reader actually has, and the
+verdict is taken on the total** — the only non-vacuous reading:
+
+| repo | the INDEX (blob: what a team commits) | the SNAPSHOT (cache dir: derived, swept) | TOTAL ripwire writes | smallest peer index | ratio on the TOTAL | ratio on the INDEX | required |
+|---|---|---|---|---|---|---|---|
+| envoy | **154,596,199** (unchanged) | 62,823,808 | 217,420,007 | graft 524,177,408 | **2.411x** | 3.391x | 1.5x |
+| cpython | **151,559,415** (unchanged) | 76,839,248 | 228,398,663 | graphify 424,792,064 | **1.860x** | 2.802x | 1.5x |
+| vscode | **284,593,343** (unchanged) | 112,597,552 | 397,190,895 | graphify 612,589,568 | **1.542x** | 2.153x | 1.5x |
+
+"Unchanged" is measured, not asserted: the blob is **the same size to the byte in both arms** of every
+cell, and vscode's 284,593,343 B is within **0.05 %** of the 284,452,991 B this band's registration
+measured for that cell (the difference is unrelated parser work between the two binaries, not this lane).
+**The lane adds nothing at all to the artifact the ceiling was written about.** That the blob's *content*
+is also untouched by a serving run is gated rather than measured here — `warmsnapcheck` arms V3 and S9.
+The in-blob placement grew it by 40.6 % / 50.7 % / 39.6 % on these three repos; that growth is withdrawn.
+
+**Against the card's derived MB figures** ("under 270 MB on cpython, 333 MB on envoy, 389 MB on vscode"):
+
+* the **INDEX** passes on all three under either unit reading, with 178 MB (envoy), 118 MB (cpython) and
+  104 MB (vscode) of room — and it is, to 0.05 %, the same number the ceiling was derived from, so this
+  reading cannot lose margin to the lane at all.
+* the **TOTAL** passes on envoy (217.4 decimal MB / 207.3 MiB against 333) and cpython (228.4 / 217.8
+  against 270), and on vscode **passes as MiB (378.8) and fails as decimal MB (397.2)** against 389.
+  That is the unit defect disclosed on 2026-11-14 and it is unchanged: every value in the card's index
+  table is labelled MB and is in fact **MiB** (verified against the harness's own `index_on_disk_bytes`
+  — 284,452,991 B is the 271.3 the card prints). The ambiguity is 4.9 % and the margin is 2.8 %, so the
+  reading decides the outcome.
+
+**The verdict is therefore taken on the band's primary registered sentence** — "the smallest on-disk
+index measured, with at least 1.5x of margin" — which is unit-invariant, is the constraint the MB
+figures were *derived from*, and takes both sides of the ratio from the same harness field. **PASS on all
+three, binding at vscode with 2.8 % of margin on the total.** The peer column is carried forward from the
+registration and was not re-measured this round.
+
+**Is the registered ceiling the right ceiling for the snapshot at all? Partly — and the part that does
+not fit is worth stating, because the owner asked for it rather than for an assumption.** It fits in the
+way that matters for the comparison: a peer's index and ripwire's snapshot are both on-disk state written
+to make later queries cheaper, measured by the same field, so one scale is apples to apples. Two things
+on ripwire's side have no counterpart on the peers', and both make its bytes cheaper than the ratio says:
+
+* **It is bounded by ripwire itself.** The snapshot lives under the cache directory's own 2 GiB
+  low-water sweep, its 30-day age pass, and a `keep 1` eviction per (root, configuration) family — so
+  one root under one configuration retains exactly one, and an edit loop leaves no orphans. A peer's
+  index is permanent until a user deletes it. "The smallest index measured" compares a floor ripwire
+  enforces against numbers nobody enforces.
+* **It is not the artifact a team ships.** The ceiling exists because the index is what a CI job
+  downloads or a repository carries. That is still the blob, and the blob is unchanged. The snapshot is
+  per-machine, per-root-spelling state that nobody commits — and cannot be, since `optionsKeyOf` folds
+  in the root spelling, its realpath and the cwd.
+
+So the ceiling is the right **scale** for the total and the right **constraint** on the index; what it
+cannot express is that one of the two artifacts on ripwire's side is self-bounding and local. That is
+recorded rather than resolved: changing a registered band's shape after seeing its numbers is what the
+methodology forbids. **The owner call for before the next round** — not retroactively — is whether this
+band should become two constraints, a hard one on the committable index and a swept-bytes one on derived
+caches, rather than one ceiling over their sum. The previously open call stands too: a 1.5x requirement
+met at 1.542x will not survive the next large repo.
+
+**This placement is the cheapest of the three on disk, and the arithmetic is nearly exact.** Totals:
+sidecar 217,420,031 (envoy) and 397,190,927 (vscode); in-blob 217,420,007 and 397,190,903; this round
+217,420,007 and 397,190,895. Against the sidecar the saving is the 40-byte `StatSig` that no longer has
+to be stored, now that the binding is the artifact's name; against the in-blob section it is the 16-byte
+header the blob no longer carries. **One residual is disclosed rather than smoothed:** the snapshot
+payload measures 16 B larger than the in-blob section on envoy and 8 B larger on vscode, where the format
+is byte-identical and the difference should be zero. Both are multiples of 8, which is the sub-section
+padding quantum, so a byte or two of content moved between rounds; at 0.00003 % of the payload the band's
+verdict does not turn on it and it was not chased. cpython's section was already recorded as 34,576 B
+adrift between the first two rounds for the same unexplained reason.
+
+#### Band 4 — correctness: PASS, the ship/no-ship gate, and the digests are the same three as both earlier placements
+
+**Byte identity, on three repos and three languages' worth of resolve rules.** Asserted not merely
+load-versus-build but against a `--no-cache` run that reads no blob at all. Per repo and per arm,
+**twelve runs share one stdout sha256**: eleven warm runs plus the from-scratch `--no-cache` build — and
+the ON arm's digest equals the OFF arm's:
+
+| repo | runs compared per arm | distinct stdout digests across BOTH arms | digest |
+|---|---|---|---|
+| envoy | 12 | **1** | `b187c78618c608534b33e78ea6a25f97a31843e61a8df0a2505c95ac280081eb` |
+| vscode | 12 | **1** | `491fe087d4b7dfaa1b327141301f02141453db83678ca8832ab69d0cade6a4c8` |
+| cpython | 12 | **1** | `9291e0b06d32f96a66c4882dec28b0b70405cd8bfab4dc7ca3bd923d28a70789` |
+
+These are the **same three digests** the sidecar and in-blob rounds recorded. Three placements of the
+stored state, three measurement rounds, and the bytes a user sees have never moved.
+
+**The vacuity guard holds, and it is machine-checked this round rather than eyeballed.** Every ON run in
+the measurement carried `RIPWIRE_SNAPSHOT_STATS=1` (an observer variable, excluded from the options key,
+so it cannot change what a run resolves). Of the **18** ON warm runs whose stats line was recorded
+individually — the five timed cells per repo plus one per repo from the correctness sweep — **0** failed
+to report `tree=replayed model=loaded graph=loaded why=ok`, and of the OFF runs, **0** printed a
+snapshot-stats line at all. So no ON cell was secretly a build and no OFF cell was secretly served. The
+remaining ten runs per repo in the correctness sweep were checked for digest equality only, not for their
+stats line.
+
+**Refusal, which is the half that matters more.** `test/warmsnapcheck.sh` is **159 PASS / 0 FAIL on both
+the dev build and the ASan/UBSan build** (`-fno-sanitize-recover=all`, LeakSanitizer against the
+committed `lsan_suppressions.txt`), with no sanitizer report, reworked for a cache-dir artifact. Counted
+as lines matching `^  PASS`; a `grep -c PASS` also matches the gate's own trailing `ALL PASS` line and
+reads one higher, which is how an arm count in this card has been off by one before.
+
+The damage arms lost one capability and gained three. Lost: the in-blob round could cut a section inside
+a blob whose header span, table offsets and trailer checksum were all rewritten to stay valid, which
+needed a second copy of `blobChecksum` in the gate and a control arm to keep that copy from drifting.
+Truncating a file needs none of that, so the copy and its control are gone. Gained:
+
+* **V3 / S9** — a serving run leaves the blob **byte-identical** and writes nothing at all (`saved=0`,
+  the snapshot it read unchanged, nothing beside the blob). Neither earlier placement could have this
+  arm: for the in-blob one, recording *was* rewriting the blob. Both arms assert on a run that reports
+  `warm_growths=0`, because record growth legitimately republishes the blob through `saveCache` and has
+  nothing to do with this lane.
+* **S10** — the case that decided the placement: two checkouts at different paths consuming **one
+  committed blob**. Each is served from its own snapshot, the blob's snapshot count goes 1 -> 2, neither
+  refuses what the other recorded when the two alternate, and the committed blob is byte-identical after
+  both.
+* **S8b** — a re-parsing run outside the racy window records the crawl under the name of the blob it has
+  just republished, so the next run replays the walk; the model and graph are deliberately not stored by
+  such a run, and the arm pins that too rather than contradicting it.
+
+Stronger than before: **S6** removes the blob and asserts the refusal is `why=absent` *while a snapshot
+of the removed blob is sitting on disk* — the binding is the name, which no blob now resolves, and not a
+stored field that could be wrong. **S8** asserts the structural invalidation on the artifacts themselves:
+after an edit the republished blob has a **new identity**, the run one moment later stores nothing
+(the racy rule refuses to vouch for a tree that changed inside the timestamp granule), the first run
+outside that window records under the new name, and the snapshot named after the old blob is **gone**
+— one per configuration, the rest evicted. **S7** no longer checks a `why=options` string: another
+`--exclude` set resolves a name of its own, finds nothing (`why=absent`), records its own snapshot, and
+the first configuration is **still served afterwards** — coexistence, which is the anti-thrash property
+itself rather than a proxy for it.
+
+Unchanged and still passing: S1 (a changed file), S2 (a patched version field, with `reparsed=0` proving
+the records were still served), S3 (a byte flipped at 30/50/70/90 %), S4 (truncated inside a field),
+S5 (a changed `go.mod`, refused by the dependency log and not the tree key), and L(a)-(f) — a file
+added with and without a pause after the recording run, deleted, modified in place at the same size
+plainly and with its mtime restored, added inside a new subdirectory, a changed `.gitignore`, and a file
+added under a directory git reported ignored as a whole.
+
+**And the two contracts this rework exists to satisfy are green with their arms byte-untouched.**
+`test/cacheidentitycheck.sh` arm (D3) and `test/portablecachecheck.sh` arm (a) do not appear in this
+lane's diff at all. `test/evictioncheck.sh` arms (k)/(l) — which refused the first cache-dir name — are
+untouched as well.
+
+#### The registered honest failure mode did NOT occur
+
+The card predicted the stored state might grow past Band 3 if the resolve-only tables (`varType`,
+`localNameSet`, `localShadowSpans`, `acc`) had to be serialized with it. They did not: only resolve
+*outcomes* are stored. What did bind was the row layout — a fixed-row encoding put vscode's payload at
+251.9 MB and over the ceiling, and it took a delta+varint row stream, sparse per-symbol arrays and
+front-coded path lists to reach the 112,597,552 B the snapshot measures now.
+
+#### Correction to the analysis that MOTIVATED this registration
+
+The phase shares quoted in the registration above (`buildGraph` 41.7 % of a warm envoy run, 54.4 % on
+vscode; "19.6k records") were profiled on a **contaminated checkout** — 34.2 GB of peer indexes across
+15 of 28 corpus trees, found and removed the same day. envoy indexes **11,036** files on the restored
+tree **(v)**, not the ~19.6k those shares were computed over, and its warm baseline is 1.23 s, not the
+1.46 s the Band 1 projection was built on. The *conclusion* survived re-measurement on the clean tree
+and the direction held or strengthened; the *shares themselves* are superseded and should not be
+re-quoted. The registration's bands are unaffected: all four were adjudicated above on numbers taken
+after the restore.
+
+#### Not measured, and therefore not claimed
+
+Linux; Release builds; verbs other than the flagless map on the large repos (the rich `--for` class is
+in the gate but not timed). Cold **CPU** is out of scope by Band 3b's owner ruling and was measured only
+as a control beside the cold-peak arm; cold **peak** is in scope and does not move. Multi-root, `--scip`,
+`--pin-census`, `--max-memory` and single-file roots are not served by the snapshot at all. Stored
+PageRank is the uniform-teleport default only. The peer columns under Bands 1, 2 and 3 are carried
+forward from the published curve and were not re-measured in any of the three rounds.
+
+What a recording run's write costs in wall-clock I/O is **not measured** for any of the three
+placements: `/usr/bin/time -l`'s `block output operations` counter reads 0 for every run on this APFS
+volume, a 217 MB write included, so no instrument here can price it. What this placement writes is the
+snapshot alone (62.8 MB on envoy against the in-blob section's whole-blob 217.4 MB), so the exposure is
+3.46x smaller than the figure that could not be priced.
+
+Two loose ends carried forward rather than dropped. One envoy run in one batch of nine, during the
+sidecar measurement, refused part of the snapshot and did not reproduce in 25 consecutive attempts;
+refusal is the safe direction, but the cause was not found, and neither re-measurement reproduced it
+(15 warm runs per round across three repos, every one `why=ok`) — which is not the same as having
+explained it. And the **+37.6 % envoy cold-peak rise** the in-blob round reported is withdrawn as
+unreproducible, for the recipe reasons under Band 2 — which leaves the question it was asked about
+(does recording the crawl capture cost cold peak?) answered by this round as "not measurably", on an arm
+that reproduces the band's own registered baseline. The 2026-11-14 reading's unmeasured claim that the
+lane "does not touch cold peak" was still wrong to assert without measuring, and that remains the
+finding; it just turns out to have been right.
+
 ## `--impact`'s inline importer ring, gated on two fields the header already prints — PRE-REGISTERED 2026-11-15 (before any `src/` change and before the readout below exists)
 
 **What this registers.** `--impact` prints the `<f>` importer ring — "files that `#include`/`import`

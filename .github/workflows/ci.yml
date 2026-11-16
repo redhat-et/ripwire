@@ -1051,13 +1051,28 @@ jobs:
           [ -n "$blobs1" ] && [ "$blobs1" -ge 1 ] \
             || { echo "ci: #326 regressed — cache-dir row reports blobs=$blobs1 right after a crawl that just wrote there: $row" >&2; exit 1; }
 
-          # a second identical crawl must reuse the SAME blob (resolveCacheBlobPath), not write a new one.
-          ./build/ripwire.exe test/fixture > populate2.xml || { echo "ci: the warm crawl itself failed" >&2; exit 1; }
+          # a second identical crawl must reuse the SAME blob (resolveCacheBlobPath), not write a new one. What proves
+          # the reuse is the crawl's OWN cache-stats line: blobs= counts every artifact in the cache directory and
+          # cannot tell a re-written parse blob from a newly recorded warm snapshot (src/warmsnap.h), which the first
+          # warm run of a configuration also stores there. So the count is held to what it can say — at most that one
+          # extra artifact across BOTH warm runs, never one per run — and reparsed=0 says the lookup hit.
+          RIPWIRE_CACHE_STATS=1 ./build/ripwire.exe test/fixture > populate2.xml 2> warm.err || { echo "ci: the warm crawl itself failed" >&2; exit 1; }
+          cat warm.err
           cmp populate.xml populate2.xml || { echo "ci: cold and warm crawls of the same tree produced different bytes" >&2; exit 1; }
+          stats="$( grep -o 'cache-stats reparsed=[0-9]* reused=[0-9]* files=[0-9]*' warm.err || true )"
+          reparsed="$( printf '%s' "$stats" | sed -n 's/.*reparsed=\([0-9]*\).*/\1/p' )"
+          reused="$( printf '%s' "$stats" | sed -n 's/.*reused=\([0-9]*\).*/\1/p' )"
+          nfiles="$( printf '%s' "$stats" | sed -n 's/.*files=\([0-9]*\).*/\1/p' )"
+          { [ "$reparsed" = 0 ] && [ -n "$reused" ] && [ "$reused" -ge 1 ] && [ "$reused" = "$nfiles" ]; } \
+            || { echo "ci: #326 regressed — the warm crawl was not a cache hit: '$stats'" >&2; exit 1; }
           row2="$( bash scripts/ci-windows-doctor-row.sh ./build/ripwire.exe doctor2.xml )"
           blobs2="$( printf '%s' "$row2" | grep -o 'blobs="[0-9]*"' | grep -o '[0-9]*' || true )"
-          [ -n "$blobs2" ] && [ "$blobs2" -eq "$blobs1" ] \
-            || { echo "ci: #326 regressed — a warm, identical crawl changed blobs= from $blobs1 to $blobs2 (a cache miss/duplicate write, not a reuse)" >&2; exit 1; }
+          ./build/ripwire.exe test/fixture > populate3.xml || { echo "ci: the second warm crawl itself failed" >&2; exit 1; }
+          cmp populate.xml populate3.xml || { echo "ci: cold and second-warm crawls of the same tree produced different bytes" >&2; exit 1; }
+          row3="$( bash scripts/ci-windows-doctor-row.sh ./build/ripwire.exe doctor3.xml )"
+          blobs3="$( printf '%s' "$row3" | grep -o 'blobs="[0-9]*"' | grep -o '[0-9]*' || true )"
+          [ -n "$blobs2" ] && [ -n "$blobs3" ] && [ "$blobs3" -ge "$blobs2" ] && [ "$blobs2" -ge "$blobs1" ] && [ "$blobs3" -le "$((blobs1 + 1))" ] \
+            || { echo "ci: #326 regressed — the warm crawls kept adding cache-dir artifacts (blobs= $blobs1 -> $blobs2 -> $blobs3): a duplicate write per run, not a reuse plus one warm snapshot" >&2; exit 1; }
 
       # #326's sibling: the eviction sweep walked cacheDirLadder()'s un-rebased "/tmp/ripwire-<uid>" with
       # std::filesystem and so evicted nothing on Windows, ever. The script seeds the REAL cache directory (from

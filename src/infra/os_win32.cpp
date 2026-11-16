@@ -1769,6 +1769,11 @@ std::string rebased_path( const char* path )
     return rebased.empty() ? std::string( path ) : rebased;
 }
 
+char** environment() noexcept
+{
+    return _environ;   // the CRT's narrow environment block, the same strings getenv reads
+}
+
 char* getcwd( char* buf, std::size_t size )
 {
     if( buf == nullptr || size == 0 )
