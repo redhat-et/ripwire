@@ -16811,3 +16811,57 @@ floor, breaks no contract, and is a different option from the one `--legend=ref`
 Registering the decision rule before measuring it: **an always-ref posture may become a DEFAULT only if
 completeness is unchanged on every graded cell at both bounds, and it must remain opt-out**, since an
 agent that cannot resolve the reference would otherwise lose the schema entirely.
+
+## READOUT — the re-collection, which WITHDRAWS stage 1's staleness caveat
+
+Stage 1 bounded its headline figure twice. One of those bounds was wrong, and the re-collection is what
+found it. `harness/recollect_fire321.py` replayed every recorded invocation against today's binary
+(`0.6.10`, `built_from=1786290c1`) with the corpus held fixed — every local checkout's HEAD matches the
+`at=` recorded in the stored answer — so a delta here is the binary's and not the corpus's.
+**311 of 321 cells collected, 0 failures.** No timing from this run is valid or quoted: it ran alongside
+other analysis, which the one-measurement-at-a-time rule forbids; answer content and bytes are
+deterministic and are the only things it collects.
+
+### Bytes and legend, matched on 311 cells, both binaries
+
+| verb | n | B 2026-11-13 | B today | Δ | legend 11-13 | legend today | Δ |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `for` | 216 | 6,677,542 | 6,674,800 | −0.04 % | 931,748 | 935,171 | **+0.37 %** |
+| `map` | 15 | 351,789 | 351,171 | −0.18 % | 39,846 | 40,099 | +0.63 % |
+| `callers` | 21 | 100,374 | 99,645 | −0.73 % | 28,347 | 28,347 | 0.00 % |
+| `path` | 15 | 88,978 | 88,435 | −0.61 % | 29,779 | 29,779 | 0.00 % |
+| `impact` | 6 | 55,417 | 56,450 | **+1.86 %** | 14,451 | 15,251 | **+5.54 %** |
+| `callees` | 10 | 32,642 | 32,272 | −1.13 % | 14,792 | 14,792 | 0.00 % |
+| `lego` | 12 | 19,643 | 19,199 | −2.26 % | 6,369 | 6,369 | 0.00 % |
+| **TOTAL** | **311** | **7,402,074** | **7,397,208** | **−0.07 %** | **1,089,987** | **1,094,538** | **+0.42 %** |
+
+### Completeness, matched on the 291 cells graded in both
+
+| bound | 2026-11-13 | today | of matched |
+| --- | ---: | ---: | ---: |
+| lenient | 97 | 98 | 156 |
+| strict | 78 | 79 | 156 |
+| counted (symbol/file) | 116 | 116 | 135 |
+
+Exactly **one** cell moved: `ld2.ld2-angular-15`, partial → complete.
+
+### The caveat that is withdrawn, and why it was wrong
+
+Stage 1 said: *"the store predates #668 (present-only legends), so part of this share is already taken
+… today's remaining headroom is therefore nearer 12 % than 14.8 %."* That was inferred from an
+indicative n=2 measurement on **this repository's own source**, which returned 11.45 % and 13.83 %.
+
+Matched on the same 311 questions and the same corpus commits, **the legend did not shrink — it grew
+0.42 %**, and today's legend share is 1,094,538 / 7,397,208 = **14.80 %**, against the old store's
+14.82 %. The 11–14 % I measured was a **repository difference, not a version difference**: ripwire's own
+source produces different answers than vscode, django and angular do. Attributing it to #668 was a
+confound, and a two-cell sample on a different corpus was never evidence about this one.
+
+**So the headline figure is current, not stale: the legend is 14.8 % of these answers on today's
+binary.** Superseded in place; stage 1's arithmetic stands and only its caveat is wrong.
+
+The broader finding is that **this window moved almost nothing**: −0.07 % of bytes and +1 complete cell
+across 311 cells. Whatever the 0.6.9→0.6.10 growth was, it had already landed by 2026-11-13, so the
+G1 attribution needs a 0.6.9 binary to be measured properly and is **NOT-ESTABLISHED** from this pair.
+The one verb that grew is `impact` (+1.86 % bytes, +5.54 % legend) on n=6, which is too small to call
+and is recorded as a lead, not a finding.
