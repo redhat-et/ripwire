@@ -16273,3 +16273,95 @@ the `<tail>` section and is running now; it was previously held at +5.4 % bytes 
 `<tail>` a decision and may remove it from the default. The two lanes touch the same section with opposite
 intent, so whichever lands second must be re-measured against the other's result rather than against the
 baseline either one started from — on the same cells, in expected tokens.
+
+## READOUT — ITEM T, stage 1: the pooled figure says PASS and the registered per-repo rule says **FAIL on 7 of 27 repos**
+
+Computed 2026-11-16 over the 285 gradable cells of the `--for` store, on the shipped binary.
+
+### First, what stage 1 can and cannot establish — because one registered band is untestable this way
+
+The peer machine's method (*"edit copies of the stored answers, re-grade, read the cost in items per cut"*)
+is the right method for most cuts and is **circular for this one**. The grader's strict bound is *defined*
+as the answer with `<tail>` and `<inv>` removed, so deleting `<tail>` from a stored answer and grading it
+lenient reproduces the strict rate **exactly, by construction**. Re-grading edited copies would have
+produced a confident number that tested nothing.
+
+So stage 1 computes the prediction exactly from the grades already in hand, and **Band T3 — a tail-free
+build's lenient rate must equal the baseline's strict rate within 2 points — cannot be evaluated until a
+build exists.** That band is the one that asks whether a real tail-free binary produces the same non-tail
+content, which an offline deletion assumes rather than shows.
+
+### The tail, measured
+
+`<tail>` is present in **319 of 319** answers and is **4.4 MB of the store's 10.1 MB (43.1 %)**.
+
+### T1 pooled — and this is the number that would have shipped it
+
+| rate | base, lenient | base, strict | tail-free (both bounds) | vs L | vs S |
+| --- | --- | --- | --- | --- | --- |
+| dense 2.44 B/tok | 19,917 | 21,919 | 16,197 | **−18.7 %** | **−26.1 %** |
+| prose 4.66 B/tok | 13,580 | 15,582 | 12,586 | **−7.3 %** | **−19.2 %** |
+
+Every cell clears the registered 5 % floor. Pooled, Item T is a clean PASS.
+
+### T1 per repo, which is what the band actually requires — FAIL
+
+Reported at the worst of the two rates, as the band's "both bounds" wording requires:
+
+| repo | n | vs lenient | vs strict | |
+| --- | --- | --- | --- | --- |
+| terraform | 8 | **+72.2 %** | −17.1 % | FAIL |
+| nushell | 8 | **+46.8 %** | −17.3 % | FAIL |
+| pydantic | 11 | **+36.8 %** | −18.5 % | FAIL |
+| axum | 10 | **+10.4 %** | −14.2 % | FAIL |
+| django | 16 | +1.4 % | −18.9 % | FAIL |
+| angular | 15 | −0.5 % | −23.2 % | FAIL |
+| htop | 9 | −3.1 % | −25.7 % | FAIL |
+| the other 20 repos | 227 | −6.4 % to −34.4 % | same | PASS |
+
+**T1 FAILS. Its rule is "FAIL if expected tokens RISE at either bound, whatever the byte saving", and they
+rise on four repos — by 72 % on terraform.** Three more clear the sign test and miss the 5 % floor.
+
+The mechanism is not subtle once it is per repo: on terraform **4 of 8 cells** are complete only because of
+the tail, so removing it costs 0.5 × 24,808 ≈ 12,400 expected tokens against a byte saving worth ≈ 4,100 at
+the prose rate. The pooled average hides it because twenty repos where the tail carries little gold pay for
+the seven where it carries most.
+
+**The registered no-pooling rule is the only reason this was seen.** It was written before the data, for
+exactly this shape, and it changed the verdict from PASS to FAIL. A pooled reading would have shipped a
+change that makes terraform's answers 72 % more expensive to get a complete answer out of.
+
+### T2 — the cells that lose, and their recovery
+
+**23 of 285 cells** lose completeness when the tail goes: pydantic 4, terraform 4, nushell 3, angular 3,
+django 3, axum 2, and one each in cpython, htop, tmux and nest.
+
+T2 is **satisfiable, and the tier already has the vocabulary**. A tail today opens with its own disclosure:
+
+```
+<tail total="2237" shown="168" capped="1" next="--for='…'">
+```
+
+So §9's `total=`/`shown=`/`capped=`/`next=` pattern is already in place, and an omitted tail can disclose
+itself the same way and name the argv that restores it. T2 does not block Item T; it constrains how the
+omission is spelled.
+
+### T4 — the decision, taken by the rule registered in advance
+
+T4: *"If T1 passes at both bounds the tail becomes opt-in, and if it passes at one bound only it stays
+default with an opt-OUT."* T1 passes at the **strict** bound on every repo and fails at the **lenient**
+bound on seven. By the registered rule the tail therefore **stays default and gains an opt-out**, which is a
+far more modest change than the one the pooled number invited. Fixing T4 in advance is what kept the result
+from choosing its own framing.
+
+### What this says about the peer machine's §B.1
+
+Their note has `<tail>` as the biggest byte lever (58 % of the 0.6.9→0.6.10 growth; −318 to −537 KB over
+three slices) and proposes **restoring the 0.6.9 cap of 50 rows with `next=`** rather than removing the
+section. The byte half of that is confirmed here independently at 43.1 % of the store. The expected-token
+half is where it turns: **removing the tail fails on a quarter of the repos measured.**
+
+Their cap is the middle option **neither card registered**, and on this evidence it is the better one: a
+capped tail keeps the rows that carry the gold, keeps recoverability by construction through the `next=`
+the tier already emits, and takes most of the bytes. It needs its own band — a cap is a cut, so it owes
+§9 disclosure and a per-repo expected-token readout of its own, at a cap height chosen before the data.
