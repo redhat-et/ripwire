@@ -170,7 +170,7 @@ kMaxImportContainerDepth	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 wi
 kMaxJsonNestDepth	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
 kMaxKotlinStringNestDepth	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
 kMaxMdBlockDepth	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
-kMaxPendingParsedFiles	sink:notePartialExtract,DISCLOSE
+kMaxPendingParsedFiles	none:a scheduling bound, not a cut: a file the parsed-tree queue cannot take runs its tags pass inline under its own budget (NO-SKIP-INGEST canQueueParsedFile; TRAIN-1111j)
 kMaxQualifierHops	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
 kMaxRefs	pending:B43 disclosed elsewhere: refs_omitted= (refsOmittedAttr, which the lint cannot tie to the cap) and a stderr warning (LARGE-PARTIAL-1)
 kMaxRenameProbeFiles	none:a rename hint is never a claim (Stage 0 class d)
@@ -198,3 +198,9 @@ kVrTextCap	sink:cut
 kWhereisParseMaxBlobs	pending:B43 disclosed elsewhere: <unparsed blobs= rows= next=> on the whereis answer
 kWhereisTextPreviewCapBytes	sink:cutAttr,shownCount
 kWhereisTextWholeMaxBytes	none:the whole-line threshold of the t= preview; the cut itself is disclosed by t_bytes= and <t_cut>
+kDataFileKeyCap	pending:B43 disclosed elsewhere: read through dataFileKeyCap() (RIPWIRE_DATA_KEYS raises it), so the lint finds no cap site; the keys past it are counted in FileHealth keysCut, printed as keys_cut= on the map header and the --skipped rows (NO-SKIP-INGEST, TRAIN-1111j)
+kLexicalDefLineBytes	pending:B43 a per-line work bound inside the lexical read of a file the answer already discloses as lexical (lexical_files=, --skipped why=lexical-*): a def on a line over it is not tested; no per-cut count (NO-SKIP-INGEST, TRAIN-1111j audit)
+kLexicalDefTestsPerLine	pending:B43 a per-line work bound inside the lexical read of a file the answer already discloses as lexical (lexical_files=, --skipped why=lexical-*): past 8 tested names a line's later defs are not tested; no per-cut count (NO-SKIP-INGEST, TRAIN-1111j audit)
+kLexicalNamesPerLine	pending:B43 a per-line work bound inside the lexical read of a file the answer already discloses as lexical (lexical_files=, --skipped why=lexical-*): names past 512 on one line are not read; no per-cut count (NO-SKIP-INGEST, TRAIN-1111j audit)
+kLimitWarningLines	sink:more
+kTailSymTermNames	legend

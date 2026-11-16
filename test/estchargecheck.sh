@@ -1289,7 +1289,7 @@ hd_tag="$( grep -aoE '<hops [^>]*>' "$A7R/n0.xml" | head -1 )"
 hd_shown="$( printf '%s' "$hd_tag" | sed -nE 's/<hops shown="([0-9]+)".*/\1/p' )"; hd_tot="$( printf '%s' "$hd_tag" | sed -nE 's/.* total="([0-9]+)".*/\1/p' )"
 # TOKEN-BUDGET-MONOTONE (rule 4): the marker is the budget's hops:N shed of the unbudgeted <hops> (src/forbudgetfit.h), so it keeps
 # U's other attributes (noedge=) and is defined by the budget's one clause (hops:N) instead of the old hops-only clause
-h_hasnext=0; [ "${h_tag#* next=\"--for='$A7R_Q'\"}" != "$h_tag" ] && h_hasnext=1
+h_hasnext=0; printf '%s' "$h_tag" | grep -qF " next=\"--for='$A7R_Q'\"" && h_hasnext=1   # grep -F: bash strips the ' inside a ${x#pattern}
 { [ "${h_tag#<hops shown=\"0\" total=\"$h_tot\"}" != "$h_tag" ] && [ "${h_tag#* capped=\"1\"}" != "$h_tag" ] && [ "$h_hasnext" = 1 ] && [ "${h_tag%/>}" != "$h_tag" ] && [ "${h_tot:-0}" -ge 1 ] 2>/dev/null \
   && grep -aqF 'hops:N (the last N hops rows)' "$A7R/h.xml" && [ "${h_root#* over_ceiling=}" = "$h_root" ] \
   && [ -n "$h_root" ] && [ -n "$hd_shown" ] && [ "$hd_shown" = "$h_tot" ] && [ "$hd_tot" = "$h_tot" ]; } \
@@ -1312,7 +1312,7 @@ a7r_out --token-budget=4150 >"$A7R/hp.xml"
 hp_tag="$( grep -aoE '<hops [^>]*>' "$A7R/hp.xml" | head -1 )"
 hp_sh="$( printf '%s' "$hp_tag" | sed -nE 's/<hops shown="([0-9]+)".*/\1/p' )"; hp_tot="$( printf '%s' "$hp_tag" | sed -nE 's/.* total="([0-9]+)".*/\1/p' )"
 { [ -n "$hp_sh" ] && [ -n "$hp_tot" ] && [ "$hp_sh" -ge 1 ] && [ "$hp_sh" -lt "$hp_tot" ] && [ "${hp_tag#* capped=\"1\"}" != "$hp_tag" ] \
-  && [ "${hp_tag#* next=\"--for='$A7R_Q'\"}" != "$hp_tag" ]; } 2>/dev/null \
+  && printf '%s' "$hp_tag" | grep -qF " next=\"--for='$A7R_Q'\""; } 2>/dev/null \
     && ok "#11 A7D partial hops cut at 4150 tokens carries next= ($hp_tag)" \
     || no "#11 A7D partial hops cut at 4150 tokens: not a partial cut with next= (got '${hp_tag:-none}')"
 # A7D-W (forbudget-soft, replaces the old 5000-token partial cut): a target wide enough for the rows AND the hop rows serves the
