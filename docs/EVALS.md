@@ -15046,10 +15046,19 @@ under a directory. The first rows in emitted order are `.agents/skills/launch/pl
 ceiling carry **no names at all** — the existing guard caps the informative part of a row and leaves
 the path string uncapped.
 
-**llvm-project is NOT in the table.** The default map there exits `-9` (SIGKILL) under the instrument.
-That is unexplained as of this registration and is a disclosed hole in the readout set, not an omitted
-row; §9.1's largest rung is re-measured as part of the readout below, and if the cause is this tier
-the finding is reported whichever way the bands fall.
+**llvm-project is NOT in the table, and the reason is NOT this tier.** The default map there is killed:
+`/usr/bin/time -l`, one run, **peak RSS 34.99 GB**, killed after 337.98 s wall having spent only 87 s of
+CPU (31.15 user + 56.24 sys) — it was swapping, on a 48 GB box with ~3.5 GB of swap already in use. The
+same corpus completed at **34.51 GB** peak in this run's W2 CPU rung, so ~35 GB is llvm's known default-map
+envelope and today's kill is headroom on this box, not a new defect. **It is not this tier**: stdout
+received **0 bytes**, so the process died before `serialize`, and the inventory is appended after the
+ranked rows. llvm is therefore excluded from Bands 1–4 as *unreachable on this host*, which is a
+different statement than a measured zero, and the exclusion is not allowed to move any band's verdict.
+
+*One figure from that run must not be reused.* `time -l` also printed `peak memory footprint
+178,708,854,304`. That is macOS's **cumulative** footprint counter, not a simultaneous resident peak;
+the resident peak is the 34.99 GB `maximum resident set size` above. Publishing the 178 GB field as a
+peak would overstate it 5.1x, and it is recorded here only so the next reader of that stderr does not.
 
 ### What this is a violation of, named precisely
 
