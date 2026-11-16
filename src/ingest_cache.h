@@ -159,7 +159,7 @@ constexpr std::uint32_t kCacheVersion = 53;           // 53: TRAIN-1111j renumbe
                                                       //    52 (max + 1) — the FILE record's FileHealth gains indexMode + keysCut (how a file too
                                                       //    large / too slow / too data-shaped to parse was indexed), so a warm run keeps the lexical
                                                       //    read's disclosure; an older record must be rejected.
-constexpr std::uint32_t kCacheVersion = 52;           // 52: lane failure-default — the construct hits gain the failure-default shape tag
+                                                      // 52: lane failure-default — the construct hits gain the failure-default shape tag
                                                       //    (lintrules.h kConstructShapeTags, appended); an older record lacks those hits.
                                                       // 51: lane qd-constructs — the FILE record gains a ninth family, the --quality-delta
                                                       //    construct hits (ConstructHit: startByte, line, tag byte), with its head count.
