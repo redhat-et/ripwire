@@ -49,23 +49,20 @@
 // NO PERFORMANCE CLAIM IS MADE HERE. The structural facts above are asserted; a throughput number for
 // the interning path needs its own measurement on an llvm-sized corpus and is not in this header.
 
-#include "os.h"   // rw::os::nanosleep — the one spelling of the sleep, per the POSIX-seam rule
+#include "os.h"         // rw::os::nanosleep — the one spelling of the sleep, per the POSIX-seam rule
+#include "platform.h"   // ALWAYS_INLINE, RW_SPIN_PAUSE — the compiler-extension seam (osswitchcheck (H))
 
-#if defined( __aarch64__ ) || defined( __arm64__ )
-  #include <arm_acle.h>   // __builtin_arm_yield / __builtin_arm_isb — the CPU hints, a few cycles each
-#elif defined( __x86_64__ ) || defined( _M_X64 )
-  #include <immintrin.h>  // _mm_pause
-#endif
-
-#include "Diagnostics.h"   // DASSERT — the re-entrancy tripwire, dev builds only
+// NAMING, and it is load-bearing: infraportcheck arm (C) scans every file under src/infra/ for the host
+// project's name, case-insensitively and as a PLAIN substring on purpose, so that no spelling can evade
+// it. The obvious English word for a dev-build alarm ends in exactly those seven letters, so it cannot
+// appear here at all — not even in a comment, and not even in a comment explaining this. Say "guard".
+#include "Diagnostics.h"   // DASSERT — the re-entrancy guard, dev builds only
 
 #include <atomic>
 #include <cstdint>
 #include <ctime>
-#ifndef NDEBUG
-  #include <functional>   // std::hash<std::thread::id> — the owner record is a u64, see below
-  #include <thread>
-#endif
+// No <thread>/<functional>: the owner record is a per-thread serial number, not a hashed thread id
+// (selfTag below says why), so this header pulls in neither for its dev-build guard.
 
 namespace rw
 {
@@ -75,13 +72,14 @@ namespace rw
 // speculating down the loop and (on ARM) let the other hardware thread have the pipeline. It costs a
 // few cycles against the 2,667 ns a nanosleep costs — measured below — which is why the ladder must
 // pass through here and through a yield before it ever reaches a syscall.
-[[gnu::always_inline]] inline void spinPause() noexcept
+//
+// The hint itself is spelled ONCE, in platform.h: this header used to write __builtin_arm_yield and
+// _mm_pause inline behind its own architecture #if, which osswitchcheck arm (H) refuses outside the
+// seam — a cl.exe build has to compile this caller, and that is the arm's whole point. The same goes
+// for ALWAYS_INLINE in place of [[gnu::always_inline]], whose MSVC spelling is [[msvc::forceinline]].
+ALWAYS_INLINE void spinPause() noexcept
 {
-#if defined( __aarch64__ ) || defined( __arm64__ )
-    __builtin_arm_yield();
-#elif defined( __x86_64__ ) || defined( _M_X64 )
-    _mm_pause();
-#endif
+    RW_SPIN_PAUSE();
 }
 
 // The backoff ladder, as a PURE FUNCTION so a gate can assert its shape without a stopwatch.
@@ -222,10 +220,19 @@ class Spinlock
     }
 
 #ifndef NDEBUG
+    // A per-thread SERIAL NUMBER, not a hash of std::thread::id. The hash was a real abort, not a
+    // style point: libc++'s hash<thread::id> runs __murmur2_or_cityhash, whose unsigned wraparound
+    // is well-defined C++ but IS reported by -fsanitize=integer, and G1 compiles with
+    // -fno-sanitize-recover=all — so the asan job died inside the parse pool
+    // ("left shift of 1808691200 by 3 places cannot be represented in type 'uint32_t'",
+    // hash.h:169, under TextPool::intern). A counter is also strictly better than the hash it
+    // replaces: it never collides, so the guard can no longer assert on two different threads
+    // that happened to hash alike, and it costs one TLS read instead of a hash per attempt.
     static std::uint64_t selfTag() noexcept
     {
-        const std::uint64_t h = std::uint64_t( std::hash<std::thread::id>{}( std::this_thread::get_id() ) );
-        return h == 0 ? 1 : h;   // 0 means UNHELD, so no thread may tag itself 0
+        static std::atomic<std::uint64_t> nextTag{ 1 };   // 0 means UNHELD, so no thread may tag itself 0
+        static thread_local const std::uint64_t tag = nextTag.fetch_add( 1, std::memory_order_relaxed );
+        return tag;
     }
 #endif
 
@@ -233,8 +240,8 @@ class Spinlock
 #ifndef NDEBUG
     // A u64 and not a std::thread::id: std::atomic<std::thread::id> has no constexpr constructor, so a
     // Spinlock member made every constant-initialized object holding one (src/refnames.h:43) fail to
-    // compile with "variable does not have a constant initializer". The hash is only ever compared for
-    // equality with itself, so a collision costs a spurious assert in a dev build and nothing else.
+    // compile with "variable does not have a constant initializer". selfTag's serial numbers are
+    // unique per thread, so an equality hit here is the re-entrancy it claims and never a collision.
     std::atomic<std::uint64_t> owner_{ 0 };   // dev builds only: whose hold is this? (rule (1) above)
 #endif
 };
@@ -242,7 +249,7 @@ class Spinlock
 #ifdef NDEBUG
 static_assert( sizeof( Spinlock ) == 4, "the size claim arm (D) and internedtext.h's shard layout both read this" );
 #else
-static_assert( sizeof( Spinlock ) <= 16, "a dev build carries the owning-thread record for the re-entrancy tripwire; release is 4" );
+static_assert( sizeof( Spinlock ) <= 16, "a dev build carries the owning-thread record for the re-entrancy guard; release is 4" );
 #endif
 static_assert( std::atomic<std::uint32_t>::is_always_lock_free, "a spinlock whose flag is itself locked is a deadlock waiting to be found" );
 

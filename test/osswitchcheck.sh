@@ -594,7 +594,7 @@ else:
 # row cannot outlive the sites that justified it.
 EXEMPT_COUNTS = {
     ( "src/infra/Diagnostics.h",  "H" ): 11,
-    ( "src/infra/platform.h",     "H" ): 11,   # +1 addWithCarry64's Wide (QD-LCS, 2026-11-13)
+    ( "src/infra/platform.h",     "H" ): 12,   # +1 addWithCarry64's Wide (QD-LCS, 2026-11-13); +1 RW_SPIN_PAUSE's __builtin_arm_yield (spinlock.h's cheapest rung, 2026-11-16)
     ( "src/infra/profileScope.h", "H" ): 3,
     ( "src/infra/enumcount.h",    "H" ): 1,
     ( "src/infra/radixSort.h",    "H" ): 3,

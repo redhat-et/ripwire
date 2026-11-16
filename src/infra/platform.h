@@ -161,6 +161,41 @@
 #define RW_PREFETCH_READ_NT(addr)  ( (void)0 )
 #endif
 
+// --------------------------------------------------------------------------
+// Spin-wait hint
+// --------------------------------------------------------------------------
+// RW_SPIN_PAUSE() — tell the core that this loop is a spin-wait, so it stops speculating down the loop and
+// (on ARM) lets the other hardware thread have the pipeline. spinlock.h's backoff ladder is the only caller:
+// this is its cheapest rung, a few cycles against the ~2,667 ns floor that header measured for nanosleep.
+//
+// It lives here for the same reason RW_PREFETCH_READ_NT does, and arm (H) of test/osswitchcheck.sh is what
+// says so: __builtin_arm_yield outside this seam is a FAIL, because a cl.exe build must still compile the
+// caller. ARCHITECTURE, not OS, decides the spelling — __builtin_arm_yield is AArch64's YIELD hint and
+// _mm_pause x86's PAUSE; MSVC spells the ARM64 one __yield. Anything else expands to nothing: a dropped
+// hint costs only the cycles it would have saved, so an unknown architecture spins correctly, just hotter.
+// The inner split is COMPILER IDENTITY, spelled the house way — `__clang__ || __GNUC__` first, #else is
+// cl.exe — and never `_MSC_VER`, which osswitchcheck arm (A) reads as an OS-conditional name in a
+// directive. clang-cl therefore takes the GNU arm, which is correct and is why it is the primary Windows
+// front end: it has the GNU spellings and <immintrin.h>.
+#if defined(__aarch64__) || defined(__arm64__) || defined(_M_ARM64)
+  #if defined(__clang__) || defined(__GNUC__)
+  #include <arm_acle.h>                                 // __builtin_arm_yield — the ACLE hint header
+  #define RW_SPIN_PAUSE()  __builtin_arm_yield()
+  #else
+  #include <intrin.h>                                   // __yield — a compiler intrinsic header, not a system header
+  #define RW_SPIN_PAUSE()  __yield()
+  #endif
+#elif defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+  #if defined(__clang__) || defined(__GNUC__)
+  #include <immintrin.h>                                // _mm_pause
+  #else
+  #include <intrin.h>
+  #endif
+  #define RW_SPIN_PAUSE()  _mm_pause()
+#else
+  #define RW_SPIN_PAUSE()  ( (void)0 )
+#endif
+
 // Diagnostics.h provides ASSUME, EXPECTS, ENSURES, DASSERT, UNREACHABLE, VALIDATE, PANIC, and
 // DISCLOSE. Included here, not merely alongside, because this header is
 // the one every infra consumer already takes for the attribute macros and the
