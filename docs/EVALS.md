@@ -15257,3 +15257,78 @@ is in the index and relevance is in the rank vector this tier is contractually f
 the deferred terminality arm ever shows that an orient answer wanted `extensions/`, Band 6 is the band
 that was wrong, and the honest reading is that the fix moved the budget from one arbitrary allocation
 to a differently arbitrary one.
+
+### AMENDMENT 2026-11-15, same day — the probe REJECTS the allocation order this card registered, and Band 6's unit was wrong
+
+Registered above: allocate the name budget "most unshown code files first". Before writing it, a probe
+binary with `kInventoryNameCeiling` lifted to 10^8 dumped the **uncapped** per-directory name counts, and
+the three candidate orders were replayed offline against the real distributions at the shipped budget of
+2,000 names and the shipped stopping rule (whole directories, stop at the first that does not fit).
+
+| repo | nameable code files | per-dir count max / p90 / median | order | dirs named | names used | named dirs in the largest tree |
+| --- | --- | --- | --- | --- | --- | --- |
+| vscode | 9,831 | 786 / 11 / 2 | path (shipped) | 432 | 1,998 | `src` **0** |
+| | | | **size DESC** (registered) | **11** | 1,960 | `src` 11 |
+| | | | **size ASC** | **1,207** | 1,998 | `src` **806** |
+| angular | 2,745 | 74 / 7 / 2 | path (shipped) | 669 | 2,000 | `packages` 227 |
+| | | | size DESC | 264 | 2,000 | `packages` 184 |
+| | | | size ASC | 769 | 1,990 | `packages` 315 |
+| envoy | 5,308 | 204 / 9 / 2 | path (shipped) | 707 | 2,000 | `api` 538 |
+| | | | size DESC | 65 | 1,993 | `api` **1** |
+| | | | size ASC | 1,012 | 1,997 | `api` 527 |
+| cockroach | 6,366 | 300 / 8 / 2 | path (shipped) | 538 | 1,995 | `pkg` 535 |
+| | | | size DESC | 43 | 1,996 | `pkg` 43 |
+| | | | size ASC | 1,211 | 1,998 | `pkg` 1,206 |
+
+**The order this card registered is rejected.** "Most code first" spends the whole budget on a handful of
+giant directories — **11 directories on vscode**, one of which holds 786 nameable files — and on envoy it
+drives `api/` from 538 named directories to **1**. The distribution is why: the median directory holds
+**2** nameable code files and the maximum holds 300–786, so a size-descending greedy is a budget handed to
+the outliers. A list of 786 filenames in one directory is not an orient answer.
+
+**The amended order is FEWEST named files first, ties by path** — the greedy that maximises how many
+directories get named under the budget. It is better than path order on all four repos and better than
+size DESC on all four: vscode 432 → 1,207 directories and `src/` **0 → 806**, cockroach 538 → 1,211 and
+`pkg/` 535 → 1,206, angular 669 → 769 and `packages/` 227 → 315, envoy 707 → 1,012 with `source/`
+(envoy's own C++ tree) going from ~0 to 358.
+
+**Band 6's criterion is amended, and the unit it used was the error.** As registered it read "the share of
+the budget landing in the largest code tree does not fall". On envoy, size ASC moves `api/` from 538 of
+707 named directories (76 %) to 527 of 1,012 (52 %): the **share falls** while the absolute count moves
+−11 and total coverage rises +305. The registered band would therefore have FAILED a change that is
+plainly better on that repo — a share is the wrong unit when the denominator is the thing being improved.
+Band 6 now reads:
+
+- **PASS** ⇔ on each of the 4 repos where the ceiling fires, the **number of directories that name a file**
+  does not fall; **and** the largest tree's **absolute** named-directory count falls by no more than **5 %**;
+  **and** on vscode the count of `src/` rows naming a file goes from 0 to more than 0.
+- **FAIL** ⇔ any of the three clauses fails on any of the 4, read per repo and never pooled.
+
+This amendment is informed by the probe's numbers, which is what a probe is for, and it is written before
+any number from the implementation exists. It is recorded rather than applied silently because the
+rejected order is this card's own registration: the finding is that the order I pre-registered was the
+worst of the three, and the band that was going to catch it named the wrong repo (it named cockroach; the
+failure is envoy).
+
+### Consequences for the row ceiling registered in the card above
+
+Two constants move, both before implementation and both forced by the amendment:
+
+1. **`kInventoryDirCap` 1024 → 2048.** Fewest-first names ~1,207 directories on vscode and ~1,211 on
+   cockroach, so a 1,024-row backstop would cut NAMED rows and fail Band 1 by construction. The backstop
+   must stay what the owner's standing rule says a cap is — a blow-up guard, not a tuning knob — so it is
+   set above every measured named-row count with room, and the count-only allowance does the bounding.
+2. **Band 4's byte prediction is superseded, in the direction that costs us.** It predicted vscode `<ls>`
+   192,484 → ~72,400 B on 432 named rows. Fewest-first produces ~1,207 named rows, so the name fix
+   **raises** bytes against that prediction: the revised estimate is `<ls>` ~135 KB and the map ~176 KB,
+   **−25 % rather than −51 %**. The name fix is kept anyway — it is a correctness fix, and "never tune a
+   default down for tokens" is a standing owner ruling. The three-binary decomposition Band 8 already
+   demands is what keeps the two attributable: the row cut alone is still expected near −51 %, and the
+   name fix spends part of it back to stop naming the wrong tree.
+
+**And the decomposition names the real byte defect, which this lane does NOT fix.** At ~1,207 rows
+carrying 1,998 filenames, vscode's tier spends roughly **54 KB repeating directory paths** (~45 chars ×
+1,207) to deliver 1,998 names — the paths, not the names, are the bill, and they are repeated in full on
+every row. Path-prefix compression (or nesting the rows under a shared prefix) is a schema change with its
+own band and is explicitly out of this lane; it is recorded here with its measured size so the next round
+starts from the number rather than from the idea.
