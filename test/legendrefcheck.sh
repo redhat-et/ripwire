@@ -338,8 +338,13 @@ dinline = [CALLS[i % N][0] for i, t in drefs if not is_ref(t) and t != pre[i % N
 check(DNREF >= 12 and not dinline, f"(J) every later XML answer is ref ({DNREF}) or the inline answer byte for byte (third shapes: {dinline})")
 core0 = "<about legend=\"ref\" dict= dictv=>"
 firstref = next((t for _, t in drefs if is_ref(t)), "")
-check(core0 in "".join(comments(firstref)), "(J) the first ref answer carries the dictionary core (the reading of <about legend=\"ref\">)")
-dpost = "".join("".join(comments(t)) for _, t in drefs if is_ref(t))
+# IMPACT-TEST-TIER: the first ref answer may be a batch whose SUB-answer took the ref posture (mcp.h reduces each sub-answer;
+# is_ref() reads it through the CDATA). That sub-answer, inside the batch's CDATA, is where the core then rides, so these two
+# reads take every comment the answer carries, sub-answers included. Seen when impact's legend gained the test-tier readings:
+# the batch's impact sub-answer dropped two more served entries and fit the ref posture before the first `for` did.
+def all_comments(t): return re.findall(r'<!--.*?-->', t, flags=re.S)
+check(core0 in "".join(all_comments(firstref)), "(J) the first ref answer carries the dictionary core (the reading of <about legend=\"ref\">)")
+dpost = "".join("".join(all_comments(t)) for _, t in drefs if is_ref(t))
 dtwice = [e[:60] for e in entries if len(e) > 12 and dpost.count(e) > 1]
 check(not dtwice and dpost.count(core0) == 1, f"(J) no dictionary entry reaches the session twice through its ref answers ({dtwice[:3]})")
 ddiff = [CALLS[i % N][0] for i, t in drefs if is_ref(t) and pairs(t) != pairs(full_by.get(i % N) if CALLS[i % N][0] != "for" else pre[i % N][1])]

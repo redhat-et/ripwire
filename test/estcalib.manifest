@@ -21,5 +21,7 @@ for-named-noe 1193 1185 1605 RIPWIRE_FOR_ENDLINES=never --for=billableTotal
 for-named-nohop 1031 1026 1392 RIPWIRE_NO_CALLER_HOP=1 --for=billableTotal
 # for-budgeted re-pinned 2026-10-14 (forbudget-soft: an explicit budget is a soft row target — the header is no longer shed to fit, measured with pin.py; other rows kept).
 # …and 2026-10-15 (round C: reserve sections first — the tail keeps its share and carries page rows with sym=; 855->982 o200k).
-for-budgeted 982 974 1376 --for=dedupe --token-budget=400
+# …and 2026-11-14 (TOKEN-BUDGET-MONOTONE: the budget sheds the unbudgeted answer instead of choosing a tighter posture, so the
+# answer at 400 is U's floor — 982->1261 o200k, measured with pin.py; other rows kept).
+for-budgeted 1261 1255 1900 --for=dedupe --token-budget=400
 pack-task 882 862 1104 --pack-task=dedupe

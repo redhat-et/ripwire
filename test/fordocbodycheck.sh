@@ -498,9 +498,24 @@ PY
 if ans "$TMP/c6a.xml" "$TFX" "--for=$T6" && ans "$TMP/c6b.xml" "$TFX" "--for=$T6" --token-budget=3500 && run "$TFX" "--for=$T6" --json >"$TMP/c6a.json" && run "$TFX" "--for=$T6" --json --token-budget=3500 >"$TMP/c6b.json"; then
   read -r xn0 xu0 <<<"$( shownpaths xml "$TMP/c6a.xml" )"; read -r xn1 xu1 <<<"$( shownpaths xml "$TMP/c6b.xml" )"
   read -r jn0 ju0 <<<"$( shownpaths json "$TMP/c6a.json" )"; read -r jn1 ju1 <<<"$( shownpaths json "$TMP/c6b.json" )"
-  if [ "$xn0" = 2 ] && [ "$xu0" = 0 ] && [ "$jn0" = 2 ] && [ "$ju0" = 0 ] && [ "${xu1:-9}" = 0 ] && [ "${ju1:-9}" = 0 ] && ! tailrows "$TMP/c6b.xml" | grep -q 'docs/'; then
+  # TOKEN-BUDGET-MONOTONE (2026-11-14): the XML answer under a budget is the unbudgeted answer shed AFTER the block was
+  # priced: the block keeps the doc files the unbudgeted tail printed, and the tail rows naming them may be shed (shed=tail:N,
+  # the tail's next= pages them). So the XML half now holds "the block names no file the UNBUDGETED answer does not print"
+  # (xu0) and the budgeted block names no more files than that one (xn1 <= xn0); the JSON dialect keeps its own budget path.
+  # membership, not only the count (CodeRabbit #665): every file the budgeted block names is one the unbudgeted answer prints
+  xsub="$( python3 - "$TMP/c6a.xml" "$TMP/c6b.xml" <<'PY'
+import re, sys
+def split( p ):
+    s = open( p, encoding="utf8" ).read(); i = s.find( "<!-- ripwire for doc_body" )
+    head = s[ :i ] if i >= 0 else s
+    return set( re.findall( r'<[td] [^>]*p="([^"]+)"', head ) ), set( re.findall( r'<[fb] [^>]*p="([^"]+)"', s[ i: ] ) ) if i >= 0 else set()
+shown0, _ = split( sys.argv[ 1 ] ); _, named1 = split( sys.argv[ 2 ] )
+print( "ok" if named1 <= shown0 else "out:" + ",".join( sorted( named1 - shown0 ) ) )
+PY
+)"
+  if [ "$xn0" = 2 ] && [ "$xu0" = 0 ] && [ "$jn0" = 2 ] && [ "$ju0" = 0 ] && [ "${xn1:-9}" -le "$xn0" ] && [ "$xsub" = ok ] && [ "${ju1:-9}" = 0 ] && ! tailrows "$TMP/c6b.xml" | grep -q 'docs/'; then
     ok "(c6) unbudgeted: both doc files named (XML, JSON); under --token-budget=3500 the tail ends before its doc rows and the block names no doc file the answer does not print ($xn1 XML, $jn1 JSON named)"
-  else no "(c6) emitted-tail rule: xml $xn0/$xu0 -> $xn1/$xu1, json $jn0/$ju0 -> $jn1/$ju1"; fi
+  else no "(c6) emitted-tail rule: xml $xn0/$xu0 -> $xn1/$xu1 ($xsub), json $jn0/$ju0 -> $jn1/$ju1"; fi
 else no "(c6) a run failed"; fi
 
 # (c7) --signatures-only carries no doc text: neither dialect prints the block (positive twin: the same task without the flag fires)

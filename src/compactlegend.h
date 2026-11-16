@@ -100,7 +100,7 @@ inline constexpr CompactLegendSpec kCompactLegendSpecs[] =
     // root (the CLI XML and columnar forms and the MCP twin all write them) and were defined only by the full legend, so they read
     // here beside the rows this line already named, present exactly when the root is. Checked against the emitters: reaches= is
     // transitiveCallers( defs ), the defs themselves excluded; radius_tested= counts isTestedByReach, which never counts a test
-    // symbol (a seed), so a test in the reach set lands in radius_untested=; importers= is impactImportTier's one-hop set of
+    // symbol (a seed), and a test in the reach set is counted apart in radius_tests= (IMPACT-TEST-TIER); importers= is impactImportTier's one-hop set of
     // files whose include/import resolves to a def's file. shown_importers= is a present-only term: the columnar form omits it.
     { "impact",      "impact",      "transitive blast radius of of=: <s t= n= p=> reach set, <f via= p=> importers; defs= matched, reaches= their transitive callers, radius_tested= non-tests an indexed test reaches, radius_untested= the rest; importers= files that #include/import a def's file" },
     { "defs",        "defs",        "per <name q= defs=> the parsed definitions the name binds (defs= groups; a prototype with its definition is one): <d n= t= p= sel= lang= class=source|test in=>, sel= binds that one alone in any SYM verb, in= distinct callers (a floor); source first, then in=, then path" },
@@ -348,6 +348,8 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // lane recall: absent at zero, callers and impact only (graphlegend.h kDeclinedIfaceLegend).
     { "declined_iface",    "declined_iface=K: K declined TS calls sharing a name with an interface/abstract signature, by name only (MAY go through it); not a subset of declined_calls=" },
     { "declined_literal_calls", "declined_literal_calls=K: K built-in member calls on JS/TS literals dropped (shares an in-repo name), in no row" },
+    // BODILESS-SEED (contractseed.h, graphlegend.h kImplsLegend): present exactly when the selector names a bodiless contract method.
+    { "impls",             "impls=K: the selector is an interface/abstract method with no body; its implementors' K same-named bodies (Go: by method names) join defs= as seeds; 0 = none in the tree, a zero beside it is none found" },
     // graph.h StdMemberGate: the callees answer's <stdm> line, absent when the definitions made no such call (graphlegend.h kStdMemberCallsLegend).
     // Keyed on n= (read on <stdm> only): the attribute the full clause opens with, which compactlegendcheck (S) reads.
     { "n",                 "stdm n= calls=: of declined_calls=, calls named like a standard-type member of their language (C++ container/string/optional/smart pointer, Rust collection/string/Option/Result; n=) on a receiver no rule tied to an in-tree class (Rust: one of an in-tree type no rule typed too: a generic bound, dyn or impl Trait, a type alias, a glob of a glob, a tuple-struct field, a non-plain pattern, behind Option / Result / Rc / Arc / RefCell / Cell / Mutex / RwLock); no edge or row (may be the std member)", false, "stdm" },
@@ -547,6 +549,11 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "importers_next",    "importers_next=: the call listing every importer", true, "impact" },
     // IMPACT-ROLLUP (graph.h importTierRollup): present-only, beside importers_capped=1
     { "importers_tests",   "importers_tests=/importers_dirs=: over EVERY importer of a cut tier: test/bench/fixture files / the 3 dirs (2 path segments) holding most, dir:count", true, "impact" },   // also defines importers_dirs=
+    // IMPACT-TEST-TIER (graph.h radiusTiers): present-only, when the reach holds a test definition / ignore-tests dropped them
+    { "radius_tests",      "radius_tests=: TEST definitions in the reach, listed but counted apart; radius_tested=/radius_untested= are production rows only", true, "impact" },
+    { "radius_tests",      "radius_tests=: TEST definitions in impact_reaches=, counted apart; radius_tested=/radius_untested= are production rows only", true, "safe-delete" },
+    { "tests_ignored",     "tests_ignored=1: ignore-tests dropped every test before the walk, so radius_tested=0 is not measured", true, "impact" },
+    { "tests_ignored",     "tests_ignored=1: ignore-tests dropped every test before the walk, so radius_tested=0 is not measured", true, "safe-delete" },
     // IMPACT-PATH (verbs_navigate.h emitImpactPathAnswer): present-only, on a path selector's answer
     { "unresolved_naming", "unresolved_naming=: files whose include/import target is a suffix of this path and resolved to no indexed file; each may import it, so importers= may be a floor", true, "impact" },
     { "selector",          "selector=file: of= names an indexed file, not a symbol; the answer is its importers only, no call reach (of=FILE:SYM for a symbol); file= is the file answered for", true, "impact" },
@@ -625,6 +632,8 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // root's attribute; a <d> signature row's tested= is the next row's. No earlier sweep saw it because the gate fixture holds
     // no test (compactlegendcheck (D31) builds the smallest tree that prints one).
     { "tested",            "<s tested=1>: a non-test row an indexed test transitively reaches (absent otherwise, never 0)", true, "s" },
+    // IMPACT-TEST-TIER: an impact row that is itself a test definition (radius_tests= counts them); never beside tested=1
+    { "test",              "<s test=1>: a test or fixture definition (absent otherwise, never 0)", true, "s" },
     // FE-B (test/receiverevidencecheck.sh): via="name" on a call row — graphlegend.h kViaNameLegend is the full reading. ELEMENT-
     // and VALUE-qualified (<s>/<c>/<e> whose via= lists name), so impact's <f via="import"> importer rows never pull it in; the
     // columnar form names it in fields= like the tested column.
@@ -776,7 +785,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "refs_dropped",      "refs_dropped=K: K listed branches could not be read, in no count or row" },
     // CROSSREF-MAXREFS: the git sweeps' ref window (crossref kMaxRefs). Past 512 refs they read the newest and count the rest,
     // where they used to refuse; present only then, so a sweep under the window is byte-identical. Head terms like refs_dropped=.
-    { "refs_omitted",      "refs_omitted=K: past the 512-ref window the newest refs by committer date were read; K older local branches were not, in no count or row (a ref-name SUBSTR filter picks which are read)" },
+    { "refs_omitted",      "refs_omitted=K: past the ref window (512 refs; whereis: 2097152 tree entries) the newest refs by committer date were read; K older local branches were not, in no count or row (a ref-name SUBSTR filter picks which; detail=1 reads all)" },
     { "labels_omitted",    "labels_omitted=K: K labelled refs past the sweep's 512-ref window, never scored" },
     { "head_conflicts_ok", "head_conflicts_ok=0: that arm's base or HEAD tree was unavailable, head_conflicts= unknown", true, "arm" },
     { "render_failed",     "render_failed=: sections whose render FAILED (empty, not budget-omitted)", true },
@@ -921,6 +930,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "alt_capped", "alt_capped=1: only the first 12 alt rows print; qualify from= or to= as file:name to list the rest", false, "path", MapHeaderRead::No, {}, "path" },
     { "bridges_unsearched", "bridges_unsearched=K: K more to= definitions no chain reaches got no bridge search (only the first 4 are searched), so a hedged bridge to them may exist; qualify to= as file:name to search one", false, "path", MapHeaderRead::No, {}, "path" },
     { "pairs_unlisted", "pairs_unlisted=G: to= names G definition groups, more than the 16 walked, so only the one chain found prints and other reaching pairs are NOT listed; next= runs another to= definition", false, "path", MapHeaderRead::No, {}, "path" },
+    { "nearest_of", "nearest_of=K: beside pairs_unlisted=, reachable=/hops=/from_p=/to_p= describe ONE of K from=/to= definition pairs, not a chosen one: the nearest a single search over all found, or the route a route_hedged= verdict prints in its place; whether the pair you mean reaches is NOT answered: qualify both ends as file:name", false, "path", MapHeaderRead::No, {}, "path" },
     { "hedged", "pair/alt from_p= to_p= hops= hedged=: one reaching pair, fewest hedged hops first (0 = all proven), then fewest hops; hedged=/hops= count the whole chain (a joins= tail too), its via=/prov=split/anchor=missing rows (a bridge: crossings plus via=name), above 0 NOT proven and to_p= a candidate, not a proven binding", true, {}, MapHeaderRead::No, {}, "path" },
     { "joins", "pair joins=J: from its last row the chain is pair J's, rows not repeated", true, "pair", MapHeaderRead::No, {}, "path" },
     { "bridge", "pair bridge=1: a hedged bridge, NOT a path", true, "pair", MapHeaderRead::No, {}, "path" },
@@ -940,6 +950,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "slot_fns", "s slot_fns=K: K functions that struct field holds (the width the crossing picks from); NOT capped, a wide table is still crossed; a hedge", true, {}, MapHeaderRead::No, {}, "path" },
     { "to_glob", "to_glob=1: to='s * matched every function or method definition fitting it (to_defs= counts them)", false, "path", MapHeaderRead::No, {}, "path" },
     { "from_glob", "from_glob=1: from='s * matched every function or method definition fitting it (from_defs= counts them)", false, "path", MapHeaderRead::No, {}, "path" },
+    { "to_impls", "to_impls=K: to= is an interface/abstract method with no body; its implementors' K same-named bodies (Go: by method names) join to_defs=; 0 = none in the tree", false, "path", MapHeaderRead::No, {}, "path" },
+    { "from_impls", "from_impls=K: from= is an interface/abstract method with no body; its implementors' K same-named bodies (Go: by method names) join from_defs=; 0 = none in the tree", false, "path", MapHeaderRead::No, {}, "path" },
     // GV-PATH-BIND (src/forgraphverb.h kNarrowedVerbLegend), present-only: an endpoint / terminal / selector the M1 rule narrowed
     { "narrowed", "narrowed=: the spelling as typed fits several definitions (refused as written); the test/fixture-path and bodyless ones dropped, the ONE source definition left answers by its own spelling", false, "path", MapHeaderRead::No, {}, "path" },
     // PATH-ROUTE v2 (src/pathroute.h pathRouteLegend): present-only, on a single-chain reached answer of >= 2 by-name hops
@@ -1749,9 +1761,9 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "unknown", "unknown=N: refs that could not be analysed (v=unknown, e.g. no merge base); never counted merged", false, "stray-content", MapHeaderRead::No, {}, "stray-content" },
     // grep: src/verbs_grep.h grepCorpusAttrs / grepUnindexedAttrs (each absent at 0)
     { "corpus_excluded", "corpus_excluded=N: files an exclude filter kept out of the index, never searched; skipped verb lists them", false, "grep", MapHeaderRead::No, {}, "grep" },
-    { "corpus_oversize", "corpus_oversize=N: files the crawl saw but dropped over the size ceiling, never searched; skipped verb lists", false, "grep", MapHeaderRead::No, {}, "grep" },
+    { "corpus_oversize", "corpus_oversize=N: files the crawl did not index over the size ceiling; grep still reads them (unindexed list); skipped verb lists", false, "grep", MapHeaderRead::No, {}, "grep" },
     { "corpus_pruned_dirs", "corpus_pruned_dirs=N: DIRECTORIES the built-in crawl denylist pruned whole (vendor, build etc), unsearched", false, "grep", MapHeaderRead::No, {}, "grep" },
-    { "unindexed_files_skipped", "unindexed_files_skipped=N: off-index candidates not read: over max-file-size, binary, or unreadable", false, "grep", MapHeaderRead::No, {}, "grep" },
+    { "unindexed_files_skipped", "unindexed_files_skipped=N: off-index candidates not read: binary or unreadable (no size ceiling)", false, "grep", MapHeaderRead::No, {}, "grep" },
     { "count", "unindexed count=N: off-index hits, equal to unindexed_hits=; paged by the same window as the f rows", true, "unindexed", MapHeaderRead::No, {}, "grep" },
     { "unindexed_candidates_capped", "unindexed_candidates_capped=1: off-index candidates cut at 500 a class, a floor; skipped verb has all", false, "grep", MapHeaderRead::No, {}, "grep" },
     // doc-drift unchecked= and stray-content unknown= pass the checker only by regex accident (checked + unchecked = anchors,

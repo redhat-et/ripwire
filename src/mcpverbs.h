@@ -926,6 +926,7 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
          + declinedCallsKeyJson( chRows.declinedCalls )   // the CLI root's declined_calls=, for the direction count= describes
          + declinedSiteCutKeyJson( sqDcCut )              // the CLI root's dc_shown= / dc_next=, absent when nothing was cut
          + declinedIfaceKeyJson( chRows.declinedIface )   // the CLI root's declined_iface= (callers direction only)
+         + implsKeyJson( chRows.contractSeeds, chRows.implBodies )   // BODILESS-SEED: the CLI root's impls= (callers direction only)
          + stdMemberCallsSpelling( chRows.stdCalls, /*json=*/true )       // the CLI callees answer's <stdm> line (callees direction only; absent when none)
          + symbolQueryNextField( referencingOnly, pwPrimary, rowTotal, page, name, chNextSelector );   // P3 (L7): the CLI root's next= (mcpattrparitycheck)
     if( !referencingOnly && chRows.bodylessDefs > 0 )
@@ -1358,7 +1359,7 @@ inline std::string grepHitsJson( const std::string& root, const std::string& pat
     // §R-J: the CLI's unindexed_files_scanned=/unindexed block twin (search.h grepCollectAux) — literal-only,
     // matching this verb. No --max-file-size equivalent on the MCP surface, so this uses the same
     // kDefaultMaxFileBytes ceiling the CLI falls back to when --max-file-size was never passed.
-    const GrepAuxCollection aux = grepCollectAux( ing.crawlSkips, pattern, /*regex=*/false, kDefaultMaxFileBytes );
+    const GrepAuxCollection aux = grepCollectAux( ing.crawlSkips, pattern, /*regex=*/false, kDefaultMaxFileBytes, kGrepScanStackBytes, ing.skippedOversize );
 
     // §B6 M12: the two disclosures the CLI legend carries and this payload did not. `files` is the
     // DENOMINATOR (how many distinct files the hits come from — hits sorted by file, so one pass counts
@@ -1396,7 +1397,7 @@ inline std::string grepHitsJson( const std::string& root, const std::string& pat
     // R-H adds the tier arm the CLI emitter also adds: a listing that held comment/string rows back did not
     // print every hit it found, so it may not claim to be exhaustive. notfound-on-cut: nor may an index the memory
     // guard cut (the files it never read may hold a hit) — the claim line below carries that fifth term.
-    const bool scanExhaustive  = collected.cleanScan();
+    const bool scanExhaustive  = collected.cleanScan() && aux.oversizeUnread == 0;   // LARGE-PARTIAL-1: the CLI's oversize term
     const bool windowWhole     = grepPage.begin == 0 && grepPage.end == collected.raw.size();
     const bool nothingHeldBack = tierReport.suppressedComment == 0 && tierReport.suppressedString == 0;
 
@@ -3441,7 +3442,9 @@ inline std::optional<std::string> impactText( const std::string& root, const std
     // H1: the decl→def residue, the CLI --impact's unproven_defs= — same resolver, same helpers, so the two surfaces
     // cannot disagree about the number.
     std::size_t               unprovenDefs = 0;
-    const std::vector<NodeId> seeds        = resolveAllByNameQualified( ing, symbol, &unprovenDefs );
+    // BODILESS-SEED (contractseed.h): a contract method seeds from its implementors' bodies too, as on the CLI (impls=)
+    const ContractSeeds        imContract = widenContractSeeds( ing, g, resolveAllByNameQualified( ing, symbol, &unprovenDefs ) );
+    const std::vector<NodeId>& seeds      = imContract.seeds;
     if( seeds.empty() )
     {
         return std::string{}; // symbol not found → caller reports not-found
@@ -3464,8 +3467,7 @@ inline std::optional<std::string> impactText( const std::string& root, const std
     // — mcpclidiffcheck compares root-attribute SETS between the two surfaces, so radius_tested=/
     // radius_untested= have to ride here too, over the same un-windowed reach set.
     const std::vector<char> impTestReach   = testSymbolForwardReach( ing, g );
-    const std::size_t       radiusTested   = countTestedIn( ing, impTestReach, reach );
-    const std::size_t       radiusUntested = reach.size() - radiusTested;
+    const RadiusTiers       radius         = radiusTiers( ing, impTestReach, reach );   // IMPACT-TEST-TIER: + the test tier, as on the CLI
     // The CLI --impact's declined_calls=, by the same call over the same set (graph.h declinedCallsNaming).
     std::vector<NodeId>     declineTargets( reach );
     declineTargets.insert( declineTargets.end(), seeds.begin(), seeds.end() );
@@ -3525,9 +3527,9 @@ inline std::optional<std::string> impactText( const std::string& root, const std
                   ( impactTsImportLegend( imports.importsUnresolved, imports.tsconfigUnread ) + impactNoFileEdgesLegend( imports.noFileEdgeLangs != 0 )   // #220: exactly when the root carries them, as on the CLI
                     + viaNameLegend( imHasVia, true )
                     + viaLinkLegend( imHasLink ) + impactAnchorLegendFor( g, seeds, depth, show, ipw.begin, ipw.end ) ).c_str(),
-                  kTestedRowLegend, kImpactTestedPartitionLegend,   // A6
+                  kTestedRowLegend, impactTestedPartitionLegend( radius.tests, /*testsIgnored=*/false ),   // A6; IMPACT-TEST-TIER, as on the CLI (the server never drops tests)
                   kTestedLensBlindSpotLegend,                       // F-02: rides with the partition, byte-identical to the CLI twin
-                  unprovenDefsVerbLegend( UnprovenDefsVerb::Impact, unprovenDefs > 0 ).c_str(),   // H1: exactly when the root carries unproven_defs=, as on the CLI
+                  ( unprovenDefsVerbLegend( UnprovenDefsVerb::Impact, unprovenDefs > 0 ) + implsLegend( imContract.contracts > 0 ) ).c_str(),   // H1, BODILESS-SEED: exactly when the root carries them, as on the CLI
                   declinedCallsLegendForRows( declinedCalls > 0, g.gateDeclinedCalls > 0, g.stdMemberDeclinedCalls > 0, !imDc.views.empty() )
                     + declinedSitesLegend( declinedSitesLegendFlags( imDc.views, /*callersForm=*/true, imDc.cut ) ),   // exactly when the root carries declined_calls=; ix2-slice: + the <dc> rows, as on the CLI
                   declinedIfaceLegend( declinedIface > 0 ),                                          // likewise declined_iface=, as on the CLI
@@ -3552,9 +3554,9 @@ inline std::optional<std::string> impactText( const std::string& root, const std
     // root=, MCP does not) and every row answered the same question in a different path dialect.
     const std::string  imRootAttr   = imSingleRoot ? ( " root=\"" + ex( root ) + "\"" ) : std::string();
     rw::emitTo( mem, "<impact of=\"{}\" defs=\"{}\" reaches=\"{}\"{}{}{} radius_tested=\"{}\" radius_untested=\"{}\"{}{}{}{}{}{}{}>",
-                  ex( symbol ).c_str(), seeds.size(), reach.size(), impactRingAttrXml( imRing ) + unprovenDefsAttrXml( unprovenDefs ) + defsListedAttrXml( imAttr.groups, imListing ),   // HOP1, as on the CLI; H1: where the CLI root carries it; attrib-multidef
+                  ex( symbol ).c_str(), seeds.size(), reach.size(), impactRingAttrXml( imRing ) + unprovenDefsAttrXml( unprovenDefs ) + implsAttrXml( imContract.contracts, imContract.impls ) + defsListedAttrXml( imAttr.groups, imListing ),   // HOP1, as on the CLI; H1: where the CLI root carries it; attrib-multidef
                   byDepthAttrXml( byDepth ),                                                                        // 0.6.5: the CLI root's by_depth=
-                  imports.xmlAttrs.c_str(), radiusTested, radiusUntested, ( declinedCallsAttrXml( declinedCalls ) + declinedSiteCutAttrXml( imDc.cut ) + declinedIfaceAttrXml( declinedIface ) ).c_str(),
+                  imports.xmlAttrs.c_str(), radius.tested, radius.untested, ( radiusTestTierFields( radius.tests, /*testsIgnored=*/false, /*json=*/false ) + declinedCallsAttrXml( declinedCalls ) + declinedSiteCutAttrXml( imDc.cut ) + declinedIfaceAttrXml( declinedIface ) ).c_str(),
                   ( valueRefsCountAttrXml( imValueRefs.rows.size() ) + valueRefsDepthAttrXml( ing, imValueRefs.depthCut, VrRender{ imSingleRoot, imRootPrefix } ) ), imRootAttr.c_str(),
                   pageDisclosure( ipab, sizeof( ipab ), shownRows, show.size(), ipw.end, page.limit, page.offset, true ),
                   graphCountFloorAttrXml( g ).c_str(), renderDisclosure( prD, DiscloseAs::XmlAttrs ).c_str(),   // M15: gauge + marker
@@ -3567,7 +3569,7 @@ inline std::optional<std::string> impactText( const std::string& root, const std
       const std::string_view rp = imSingleRoot ? sarif::rootRelativeUri( ing.files[ s.fileId ], imRootPrefix ) : std::string_view( ing.files[ s.fileId ] );
       // A6: tested="1" only (never a literal 0) — see kTestedRowLegend. 0.6.5: d= as on the CLI row.
       rw::emitTo( mem, "<s t=\"{}\" n=\"{}\" p=\"{}:{}\"{}{}{}{}/>", symTag( s.kind ), ex( qualifiedMemberName( imOwners, s ) ).c_str(), ex( rp ).c_str(), s.line,
-                    depthRunAttrXml( show, depth, i, ipw.begin ), isTestedByReach( ing, impTestReach, show[i] ) ? " tested=\"1\"" : "",
+                    depthRunAttrXml( show, depth, i, ipw.begin ), radiusTierRowAttrXml( ing, impTestReach, show[i] ),   // IMPACT-TEST-TIER
                     impactLinkAttrs( g, proven, seeds, depth, show[ i ] ), imAttr.ofDefXml( show[i] ) ); }
     // the import tier's rows, after the symbol rows and under their own tag — a different unit, so a
     // different element (see the CLI arm and kImpactImportTierLegend for why they are never one number).
@@ -3987,8 +3989,9 @@ inline std::optional<std::string> pathText( const std::string& root, const std::
     std::size_t               dstUnprovenDefs = 0;
     bool                      srcGlob         = false;   // ix2-slice (IX-2 P4): a `*` endpoint, as on the CLI
     bool                      dstGlob         = false;
-    const std::vector<NodeId> srcDefs         = resolvePathEndpoint( ing, from, &srcUnprovenDefs, &srcGlob );
-    const std::vector<NodeId> dstDefs         = resolvePathEndpoint( ing, to, &dstUnprovenDefs, &dstGlob );
+    std::vector<NodeId>       srcDefs         = resolvePathEndpoint( ing, from, &srcUnprovenDefs, &srcGlob );
+    std::vector<NodeId>       dstDefs         = resolvePathEndpoint( ing, to, &dstUnprovenDefs, &dstGlob );
+    const PathContracts       ptContracts     = widenPathContracts( ing, g, srcDefs, dstDefs );   // BODILESS-SEED, as on the CLI
     const std::size_t         unprovenDefs    = srcUnprovenDefs + dstUnprovenDefs;
     if( srcDefs.empty() || dstDefs.empty() )
     {
@@ -4081,12 +4084,12 @@ inline std::optional<std::string> pathText( const std::string& root, const std::
                   ( std::string( toValueRefsLegend( ptToValueRefs.count > 0 ) ) + valueRefsDepthLegend( ptToValueRefs.depthCut.files > 0 ) ).c_str(),
                   ( pathGapsLegend( ptGaps.any(), !ptSinkCallers.empty() ) + pathBridgeLegend( ptBridge )
                     + nearSinkLegend( ptNear ) + std::string( pathHandlerRuleLegend( ptHandler ) ) + std::string( pathRouteBodiesLegend( !ptRouteEl.xml.empty() ) )
-                    + std::string( pathGlobLegend( srcGlob || dstGlob ) ) ).c_str(),
+                    + std::string( pathGlobLegend( srcGlob || dstGlob ) ) + ptContracts.legend() ).c_str(),
                   graphCountFloorBrief( rw::graphGaugeClauses( g ) ).c_str(), rootRelPathsLegend( ptSingleRoot ) );
     rw::emitTo( mem, "<path from=\"{}\" to=\"{}\"{}{} from_defs=\"{}\" to_defs=\"{}\"{} reachable=\"{}\" hops=\"{}\"{}{}",
                   ex( from ).c_str(), ex( to ).c_str(), ptBound.from ? " from_p=\"" + loc( srcUsed ) + "\"" : std::string(),
                   ptBound.to ? " to_p=\"" + loc( dstUsed ) + "\"" : std::string(),
-                  srcDefs.size(), dstDefs.size(), ( unprovenDefsAttrXml( unprovenDefs ) + pathGlobAttrXml( srcGlob, dstGlob ) ).c_str(),   // H1: as the CLI root carries it; ix2-slice: a glob endpoint
+                  srcDefs.size(), dstDefs.size(), ( unprovenDefsAttrXml( unprovenDefs ) + pathGlobAttrXml( srcGlob, dstGlob ) + ptContracts.attrXml() ).c_str(),   // H1: as the CLI root carries it; ix2-slice: a glob endpoint
                   ptRows.empty() ? 0 : 1, ptShown.empty() ? std::size_t( 0 ) : ptShown.size() - 1,
                   ( ptRootAttrs + hopRootAttrsXml( ptHops ) + ptRootAttr ).c_str(),
                   graphCountFloorAttrXml( g ).c_str()  );   // M15: gauge + marker

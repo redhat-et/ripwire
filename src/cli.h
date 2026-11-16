@@ -188,6 +188,9 @@ struct Config
                                                             // both numbers on stderr; within budget, exit 0 and emit the map unchanged. Composable with
                                                             // --max-tokens: that flag SHAPES the map to fit a target, this one ASSERTS and fails —
                                                             // set neither, either, or both.
+    std::size_t      forHoldBudget     = 0;                // TOKEN-BUDGET-MONOTONE (verbs_for.h runForLensFitted): set only on the --for re-render
+                                                            // of an answer a budget cannot hold whole: the blocks outside est_tokens (<syms>, <doc_body>,
+                                                            // <decl_rows> …, forbudgetfit.h kForHeldBlocks) hold under it, the posture does not read it
     // T2 pagination for high-cardinality verbs (--deps/--callers/--callees/--hotspots/--tree/--lint). Default
     // limit=0 = NO pagination (whole result, byte-identical to pre-T2 callers/gates). --limit=N bounds one
     // response to N items; --offset=M skips the first M. §P8: seven more verbs honor these now (--clones /
@@ -348,7 +351,7 @@ struct Config
                                                             // computes — 1-hop callers, the transitive --impact blast radius, every --uses
                                                             // read/write/import/call/extends site, how much of the radius the tested= lens
                                                             // covers, and --dead-code's own zero-caller/internal-linkage shape at defs=1. FACTS only:
-                                                            // risk= names what was found (none-found/possible-callers/uses-exist/untested-radius/unmodelled), never a
+                                                            // risk= names what was found (none-found/possible-callers/uses-exist/untested-radius/unmodelled/hedged/contract), never a
                                                             // go/no-go verdict. file:name disambiguates like --around/--lego.
     std::string_view sliceSpec;                            // --slice=SYM[:VAR] (lane/paper-slice): NAME-BASED intra-procedural def-use
                                                             // slice of VAR inside the ONE uniquely-resolved definition SYM (multiple defs
@@ -869,12 +872,10 @@ inline constexpr char kHelpHead[] =
         "                               (header total=/shown=/capped=/truncated=/share_bytes=, a per-doc [truncated: X of\n"
         "                               Y bytes] marker, and a closing (capped: …) note); share_bytes= is that per-doc\n"
         "                               ceiling and is ABSENT when it bound no doc.\n"
-        "                               On --for --detail=N it bounds THE BODIES ALONE: the header, signatures, legend and\n"
-        "                               symbol table are not charged against it, so the bundle can price past N. That is\n"
-        "                               deliberate — a ceiling bounds the tail and never the head, and a complete small\n"
-        "                               answer is not worth cutting to fit — so the root DISCLOSES the overshoot instead,\n"
-        "                               carrying over_ceiling=\"1\" beside max_tokens=N whenever est_tokens exceeds N. Reach\n"
-        "                               for --token-budget=N when the whole DOCUMENT must be bounded; this flag SHAPES.\n"
+        "                               On --for --detail=N it is a CEILING applied AFTER the answer's posture: the answer is\n"
+        "                               the --detail=N answer asked without it, byte for byte, until its\n"
+        "                               est_tokens exceeds N; past N it sheds in the --token-budget order below but never a\n"
+        "                               ranked sigs row, and carries over_ceiling=\"1\" when what is left still does not fit.\n"
         "    --token-budget=N[K|M|G]    N tokens: a hard gate on the map, a soft row target on the task lenses\n"
         "                               two personalities depending on the verb:\n"
         "                                 - default map / --query / --recall: a CI GATE — exit 3 if the emitted DOCUMENT's\n"
@@ -901,13 +902,17 @@ inline constexpr char kHelpHead[] =
         "                                   9724 JSON, ~3% LARGER) — the crossover sits near top-k~100-150 here, so the\n"
         "                                   same N can pass or fail differently under --json depending on dialect AND\n"
         "                                   size — never assume one direction, measure the request you actually gate.\n"
-        "                                 - --for / --pack-task / --from-trace / --run-trace: a SOFT TARGET, always exit 0 — rows\n"
-        "                                   stop once it is reached, never a promise of bytes. --for charges N against its\n"
-        "                                   ranked <sigs> rows only (never the header or a disclosure, so compact and full\n"
-        "                                   serve the same rows): rows are added in rank order while they fit, the rank 1..4\n"
-        "                                   rows always ship, and the cut names its continuation (<sigs next=>). The bodies,\n"
-        "                                   hops and tail fill from what the rows left. A target wider than the answer serves\n"
-        "                                   the default answer's rows. --pack-task keeps its section shares (an explicit 6000\n"
+        "                                 - --for / --pack-task / --from-trace / --run-trace: a SOFT TARGET, always exit 0.\n"
+        "                                   --for applies it AFTER the answer's posture: the answer is the one asked without\n"
+        "                                   it, byte for byte, until its est_tokens (plus the blocks outside it) exceeds N;\n"
+        "                                   past N it sheds in one fixed order, shed= naming what went — the blocks outside\n"
+        "                                   est_tokens (held=\"budget\" with next=), the <sigs> rows' optional attributes, the\n"
+        "                                   last <tail> and <hops> rows, the <fold> bodies, the last <bodies>, the docs of the\n"
+        "                                   worst-ranked rows, the worst-ranked <sigs> rows (ranks 1..4 always ship); a cut\n"
+        "                                   block's next= is the call without the budget. So a larger N never serves less.\n"
+        "                                   --signatures-only, the --json dialect and the\n"
+        "                                   --limit page keep a row target (rows stop once it is reached, rank 1..4 always\n"
+        "                                   ship, <sigs next=> names the cut). --pack-task keeps its section shares (an explicit 6000\n"
         "                                   serves the default's sections); --from-trace its section pricing. No lens drops a\n"
         "                                   legend clause or the task echo for it, and none labels itself over_ceiling for it:\n"
         "                                   est_tokens= may exceed N (budget_tokens= says it is the target asked). --pack-task\n"
@@ -944,7 +949,7 @@ inline constexpr char kHelpHead[] =
         "                               <d> row carries next=\"--expand=FILE:NAME\" — the one pasteable follow-up, the body\n"
         "                               that ends the search (defined here, not in the bundle's own header, which the\n"
         "                               token ladder does not charge). An explicit\n"
-        "                               --token-budget=N is a soft row target at the conservative byte rate\n"
+        "                               --token-budget=N sheds this answer to a soft target after its posture is chosen\n"
         "                               (exit 0; see --token-budget above) and the header reports the delivered est_tokens.\n"
         "                               TERMINAL BY DEFAULT: after the signatures, the top-ranked symbols' FULL bodies ride\n"
         "                               inline (CDATA + callee signatures, the --expand shape) under a fixed extra body allowance —\n"
@@ -971,9 +976,8 @@ inline constexpr char kHelpHead[] =
         "                               query word (the one calling another such owner first), else a method a ranked class owns\n"
         "                               (parser scope or span) named by a word, else no body - <bodies pick=\"name|member\">,\n"
         "                               by name, not resolved, not the only relevant body.\n"
-        "                               Over 6000 B it is cut at a line end with next=. Under --token-budget it rides only when\n"
-        "                               the rows at the target's cut leave room for it whole, else <bodies shown=\"0\" capped=\"1\"\n"
-        "                               next=\"--expand=P:L:N\"> and reason=\"budget\". MCP for serves the same body, --json none;\n"
+        "                               Over 6000 B it is cut at a line end with next=. --token-budget never removes it (it is\n"
+        "                               not a shed unit). MCP for serves the same body, --json none;\n"
         "                               RIPWIRE_NO_BODY_SLOT=1 turns it off (the A/B handle). That shape\n"
         "                               discloses on every run too: a target the signatures alone exhaust carries bundle=\"compact\" bodies=\"0\"\n"
         "                               reason=\"budget\" — four distinct reasons, never collapsed (compact-route = the route\n"
@@ -981,9 +985,8 @@ inline constexpr char kHelpHead[] =
         "                               owner body rides).\n"
         "                               ALIASES: a task name that is a C/C++ alias adds an <aliases> block (its chain to what it\n"
         "                               names); CLI XML only: MCP for, --json and --format=columnar carry none.\n"
-        "                               An explicit --token-budget=N is a soft target: the hop rows, bodies and file tail keep\n"
-        "                               the share a hard N left them, <sigs> rows fill the rest by rank; --pack-top-n sets the head\n"
-        "                               the target fills. --compress composes: the served bodies (auto/anchor and\n"
+        "                               An explicit --token-budget=N is a soft target over this whole answer, shed in the order\n"
+        "                               --token-budget names; --pack-top-n sets the head. --compress composes: the served bodies (auto/anchor and\n"
         "                               --detail=N alike) go through the same comment-strip --expand uses, disclosed as\n"
         "                               compress=\"1\" on the <bodies> element (on the compact route, the owner body's).\n"
         "                               RANKING CONFIDENCE, disclosed not scored: the <ctx> root always carries\n"
@@ -1027,7 +1030,7 @@ inline constexpr char kHelpHead[] =
         "                               unchanged is enough. A comma-separated, order-insensitive, closed set (lego and/or\n"
         "                               compose, each named at most once); every other section of the bundle is unaffected —\n"
         "                               the <sigs> budget is the stubbed answer's, under an explicit --token-budget too\n"
-        "                               (a soft target charges the <sigs> rows only).\n"
+        "                               (a soft target sheds the answer after its posture).\n"
         "    --signatures-only          (with --for) signatures only: no automatic bodies in the bundle\n"
         "                               (with --for) opt out of the terminal-by-default bundle: no auto bodies, no bundle=\"auto\"\n"
         "                               attribute — the signatures-only lens exactly as before. Contradicts --detail=N (refused\n"
@@ -2047,7 +2050,9 @@ inline constexpr char kHelpHead[] =
         "                               wide to list candidates for), untested-radius (a radius exists and none of it is test-covered),\n"
         "                               or uses-exist (a radius exists and some of it is tested) — never a go/no-go verdict; unmodelled\n"
         "                               when nothing was found for a kind used by reading or naming it (a variable, class, struct)\n"
-        "                               whose uses those counts cannot see. callers_floor=/uses_floor= mark a count the index holds\n"
+        "                               whose uses those counts cannot see; contract when nothing was found for an interface or abstract\n"
+        "                               method with no body, whose implementors' same-named bodies it also reads (impls=K counts them).\n"
+        "                               callers_floor=/uses_floor= mark a count the index holds\n"
         "                               evidence of a miss for, and next= is the call that lists the rest. A caller row's sites_at= is its\n"
         "                               call sites as file:line tokens (p= stays the line where the caller is defined).\n"
         "    --slice=SYM[:VAR]          trace one variable's definitions and uses inside one function\n"
@@ -2254,8 +2259,9 @@ inline constexpr char kHelpTail[] =
         "                               tell a name this repo never had from one it deleted, and content dropped by every tree\n"
         "                               is invisible. Add --with-history: a <fate> row then says v=\"never\" or v=\"removed\"\n"
         "                               with the commit, date and file that removed it. Remote-tracking refs are excluded\n"
-        "                               (they mirror local ones); past 512 refs the newest by committer date are read and\n"
-        "                               refs_omitted= counts the rest (the MCP twin's kind=SUBSTR picks which refs are read).\n"
+        "                               (they mirror local ones); past the refs ~2M tree entries allow (HEAD's tree size; at least 16)\n"
+        "                               the newest by committer date are read and refs_omitted= counts the rest (the MCP twin's\n"
+        "                               kind=SUBSTR picks which refs are read; --detail=1 reads every one).\n"
         "                               LISTING: by default only the kind=\"def\" (and kind=\"text\") rows are listed and the kind=\"ref\" rows\n"
         "                               counted in one <refs count=N next=...> element, when that page lists MORE definitions\n"
         "                               than the --whereis-listing=all page under the row cap, or the same ones in strictly\n"

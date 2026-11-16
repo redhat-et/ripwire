@@ -332,7 +332,9 @@ for _g in \
     bm25boundcheck \
     bm25check \
     bodiesshowncheck \
+    bodilessseedcheck \
     bodydialectcheck \
+    budgetmonotonecheck \
     budgetpolicycheck \
     buildtypestampcheck \
     builtinbindcheck \
@@ -638,6 +640,7 @@ for _g in \
     impactdepthcheck \
     impactimportcheck \
     impactpartitioncheck \
+    impacttesttiercheck \
     impacttypecheck \
     importcapcheck \
     importnarrowcheck \
@@ -680,6 +683,7 @@ for _g in \
     legobundlecheck \
     legocheck \
     legotransitivecheck \
+    lexicalnoskipcheck \
     liftdisclosurecheck \
     limitstablecheck \
     lintbudgetcheck \
@@ -816,6 +820,7 @@ for _g in \
     pargatescheck \
     parsehealthcheck \
     partitioncheck \
+    pathambigcheck \
     pathfewestcheck \
     pathgapcheck \
     pathownercheck \
@@ -928,6 +933,7 @@ for _g in \
     redactfixcheck \
     reexportcheck \
     refusaltailcheck \
+    refwindowcheck \
     regexbombcheck \
     regexcheck \
     regexguardcheck \

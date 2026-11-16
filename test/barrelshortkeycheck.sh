@@ -34,7 +34,8 @@
 #   B7  a CONST-shaped key with no definition: the literal rung says held="lit" (the <lit> block lists it), no ld rows.
 #   B8  every <shortkey> carries next=; a resolved name-exact route (`getWidgetPtrCount`) prints no <shortkey> (absence twin of B5).
 #       A commented-out `// using WidgetPtr = …` line is never a literal row (D2).
-#   B9  --token-budget: <shortkey held="budget"> with next=, no rungs; --json, --format=candidates: no block (a non-empty
+#   B9  --token-budget (TOKEN-BUDGET-MONOTONE: a budget sheds the unbudgeted answer, never re-decides it): the <shortkey> block is
+#       the unbudgeted answer's, byte for byte (it is not a shed unit); --json, --format=candidates: no block (a non-empty
 #       answer); RIPWIRE_NO_SHORT_KEY=1 removes exactly the block.
 #   C1  (fix round 1, MF1) a DIRECTORY on the path is a hedged proof, never exact: `utils.formatDate` with src/utils/legacy/old.ts
 #       (the decoy) and src/helpers/date.ts reached by a consumer's `import * as utils from "../helpers"`: kept="2" exact="0",
@@ -115,6 +116,8 @@ printf 'export function jleaf(n) {\n  return n;\n}\n' >"$W/js/lib.js"
 printf 'import * as JS from "./lib.js";\nexport { JS };\n' >"$W/js/b.js"
 
 # run ROOT OUT ARGS…: the answer, its exit code checked; a crash or an answer with no <ctx root fails the arm that reads it
+# the <shortkey> element of an answer, open tag through its close (or the self-closing tag), "" when none
+skblock(){ python3 -c 'import re,sys; s=open(sys.argv[1],encoding="utf-8",errors="replace").read(); m=re.search(r"<shortkey[ >].*?(</shortkey>|/>)",s,re.S); print(m.group(0) if m else "")' "$1"; }
 run(){
     local root="$1" out="$2"; shift 2
     ( cd "$root" || exit 1; HOME="$TMP" "$BIN" "$root" --no-cache "$@" </dev/null 2>"$out.err" ) >"$out"
@@ -210,7 +213,10 @@ done
 if [ "$nsk" -ge 8 ] && [ "$nsk" = "$nnext" ]; then ok "B8 every shortkey carries next= ($nnext of $nsk)"; else no "B8 shortkeys with next= $nnext of $nsk (want all, at least 8)"; fi
 run "$S" "$TMP/b8.xml" "--for=getWidgetPtrCount" && { if grep -q '<shortkey' "$TMP/b8.xml"; then no "B8 a resolved name-exact route prints no shortkey"; else ok "B8 a resolved name-exact route prints no shortkey"; fi; }
 run "$S" "$TMP/b9.xml" "--for=GizmoPtr" --token-budget=2000 && {
-if grep -q '<shortkey held="budget" of="GizmoPtr" next="--for=GizmoPtr"/>' "$TMP/b9.xml" && ! grep -q '<rung ' "$TMP/b9.xml"; then ok "B9 token budget: held marker, no rungs"; else no "B9 token budget: held marker, no rungs"; fi
+run "$S" "$TMP/b9u.xml" "--for=GizmoPtr" && {
+if [ -n "$( skblock "$TMP/b9u.xml" )" ] && [ "$( skblock "$TMP/b9.xml" )" = "$( skblock "$TMP/b9u.xml" )" ]; then ok "B9 token budget: the unbudgeted answer's <shortkey> block, byte for byte"
+else no "B9 token budget: the <shortkey> block is not the unbudgeted answer's"; fi
+}
 }
 run "$S" "$TMP/b9.json" --json "--for=GizmoPtr" && { if grep -q 'shortkey' "$TMP/b9.json"; then no "B9 --json carries no block"; else ok "B9 --json carries no block"; fi; }
 for fmt in --format=candidates; do
@@ -398,9 +404,26 @@ skhas   "$TMP/d1b.xml" "D1 sentence, a backquoted :: qualifier"     '<shortkey o
 run "$S" "$TMP/d3.xml" "--for=where does ExprKind come from? --defs finds nothing" && skhas "$TMP/d3.xml" "D3 sentence literal import-as row" '<ld p="rs/src/lib.rs" l="2" shape="import-as">'
 run "$S" "$TMP/d4.xml" "--for=why is the lookup of MAX_WIDGET_COUNT empty" && skhas "$TMP/d4.xml" "D4 sentence CONST key: held=lit" '<rung n="literal" key="MAX_WIDGET_COUNT" held="lit" exact="0"/>'
 run "$S" "$TMP/d5.xml" "--for=where is formatDate defined, it is used as Wrong.formatDate" && skhas "$TMP/d5.xml" "D5 a bare leaf beside its qualified spelling is one name" '<shortkey of="Wrong.formatDate" from="sentence"'
-run "$S" "$TMP/d6.xml" "--for=definition of WidgetPtr, the name lookup is empty" --token-budget=2000 && {
-if grep -q '<shortkey held="budget" of="WidgetPtr" from="sentence" next="--for=WidgetPtr"/>' "$TMP/d6.xml" && ! grep -q '<rung ' "$TMP/d6.xml"; then ok "D6 sentence under a token budget: held marker"; else no "D6 sentence under a token budget: held marker"; fi
-if grep -q 'from=sentence: the route read the task as words' "$TMP/d6.xml"; then ok "D6 the held marker's legend defines from="; else no "D6 the held marker's legend defines from="; fi
+# D6 on both sides of U's whole price (test/lib/softbudget.py whole_price: est_tokens plus the held <shortkey> WITH its own legend
+# comment, as src/forbudgetfit.h charges it). At that price U fits whole: the unbudgeted block byte for byte. Below it the block is
+# held: the held="budget" stub with next=, no rungs. (CodeRabbit #665: the 848 B shortkey legend rode free, so 2000 "fit" a
+# 2369-token answer and the unheld block went out over the budget; red on 1e3b55a75 at B=2000, which printed the rungs.)
+run "$S" "$TMP/d6u.xml" "--for=definition of WidgetPtr, the name lookup is empty" && {
+d6w=$( python3 -c 'import sys; sys.path.insert( 0, sys.argv[1] ); import softbudget; print( softbudget.whole_price( sys.argv[2] ) or 0 )' "$ROOT/test/lib" "$TMP/d6u.xml" )
+if [ "${d6w:-0}" -le 1 ]; then no "D6 whole price of the unbudgeted answer: none read ($d6w)"
+else
+run "$S" "$TMP/d6.xml" "--for=definition of WidgetPtr, the name lookup is empty" "--token-budget=$d6w" && {
+if [ -n "$( skblock "$TMP/d6u.xml" )" ] && [ "$( skblock "$TMP/d6.xml" )" = "$( skblock "$TMP/d6u.xml" )" ]; then ok "D6 sentence at its whole price $d6w: the unbudgeted <shortkey from=\"sentence\"> block"
+else no "D6 sentence at its whole price $d6w: the <shortkey> block is not the unbudgeted answer's"; fi
+if grep -q 'from=sentence: the route read the task as words' "$TMP/d6.xml"; then ok "D6 the budgeted answer's legend defines from="; else no "D6 the budgeted answer's legend defines from="; fi
+}
+run "$S" "$TMP/d6h.xml" "--for=definition of WidgetPtr, the name lookup is empty" "--token-budget=$(( d6w - 1 ))" && {
+if [ "$( skblock "$TMP/d6h.xml" )" = '<shortkey held="budget" of="WidgetPtr" from="sentence" next="--for=WidgetPtr"/>' ] && ! grep -q '<rung ' "$TMP/d6h.xml"; then
+    ok "D6 one token under the whole price ($(( d6w - 1 ))): the held marker with next=, no rungs"
+else no "D6 one token under the whole price ($(( d6w - 1 ))): want the held marker, got $( skblock "$TMP/d6h.xml" | head -c 160 )"; fi
+if grep -q 'from=sentence: the route read the task as words' "$TMP/d6h.xml"; then ok "D6 the held answer's legend defines from="; else no "D6 the held answer's legend defines from="; fi
+}
+fi
 }
 ( cd "$S" || exit 1; RIPWIRE_NO_SHORT_KEY=1 HOME="$TMP" "$BIN" "$S" --no-cache "--for=definition of WidgetPtr, the name lookup is empty" </dev/null 2>/dev/null ) >"$TMP/d7.xml"; d7rc=$?
 if [ "$d7rc" -eq 0 ] && grep -q '<ctx ' "$TMP/d7.xml" && ! grep -q '<shortkey' "$TMP/d7.xml"; then ok "D7 the off switch removes the sentence ladder"; else no "D7 the off switch removes the sentence ladder (rc=$d7rc)"; fi
