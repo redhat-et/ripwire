@@ -15161,3 +15161,99 @@ dropping them all, `dirs_total=` states how many directories exist, and `dirs_ne
 the shape question stays answerable in one disclosed call. If the deferred terminality arm later shows
 a regression on orient tasks, the allowance is the constant to raise, and this card is where that is
 recorded.
+
+## The inventory tier's NAME ceiling spends its budget in path order — on vscode that is 0 of 1,537 `src/` rows named, PRE-REGISTERED 2026-11-15 (second band set of the same lane, before any `src/` change)
+
+**What this registers, and why it is a separate band set.** The card above registers a ROW ceiling for
+`<ls>`. Measuring its input exposed a worse defect in the guard that already ships beside it.
+`applyInventoryNameCeiling` (`src/mapinventory.h`) walks `inv.dirs` **in path order** and clears `f=`
+once the running name count passes `kInventoryNameCeiling = 2000`. So the 2,000-name budget is
+allocated **alphabetically**, and whether it lands on the repository's source tree is an accident of
+directory naming. This registers a second DEFAULT change: allocate the name budget in **priority
+order** — most unshown code files first, ties by path — then re-sort the survivors to path order, the
+same mechanism the row ceiling above uses. The ceiling value, the whole-directory rule ("a directory is
+named completely or not at all") and the `names_capped=`/`names_total=`/`names_next=` disclosure are
+**unchanged**.
+
+It is registered apart from the row ceiling because it changes a different thing — *which* names ship,
+not *how many rows* — so it needs its own bands, its own scope statement and its own independent
+evidence. Both are implemented in one lane because both edit the same two functions and the row cut
+consumes the name ceiling's output: a directory the name ceiling empties becomes a count-only row and
+competes in the row cut's count-only class, so measuring either alone misreads the other.
+
+### The measurement that motivated it
+
+Same instrument and binary as the card above (default map, lane build at `d68b57456`), 7 repos, read
+per top-level component.
+
+| repo | `<ls>` rows | rows naming a file | `names_total` | ceiling fired | where the names went | biggest tree | rows naming a file there |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| vscode | 2,534 | 432 | 9,831 | yes | `extensions` 409, `.github` 8, `cli` 7 | `src` (1,537 rows) | **0** |
+| angular | 1,301 | 669 | 2,745 | yes | `adev` 252, `packages` 227, `devtools` 111 | `packages` (524 rows) | 227 |
+| envoy | 1,349 | 707 | 5,308 | yes | `api` 538, `contrib` 63, `mobile` 48 | `api` (545 rows) | 538 |
+| cockroach | 1,718 | 538 | 6,366 | yes | `pkg` 535, `cloud` 2, `c-deps` 1 | `pkg` (1,684 rows) | 535 |
+| zed | 827 | 461 | — | no | `crates` 433 | `crates` (745 rows) | 433 |
+| cpython | 238 | 174 | — | no | `Lib` 55, `Modules` 34, `Tools` 29 | `Lib` (59 rows) | 55 |
+| terraform | 278 | 186 | — | no | `internal` 179 | `internal` (204 rows) | 179 |
+
+**vscode is the whole case in one row.** `.` → `.agents` → `.config` → `.eslint-plugin-local` →
+`.github` → `build` → `cli` → `copilot_shim` → `extensions` all sort before `src`, and they exhaust the
+2,000-name budget before it is reached. The tier names **409 directories inside `extensions/`** and
+**zero files in the editor's own source tree** — 0 of 1,537 `src/` rows, 0 of 719
+`src/vs/workbench/` rows. The tier exists because "subsystem files ranked just below the cut were
+absent with nothing saying they existed" (`src/mapinventory.h`'s own header); on vscode it reproduces
+that miss exactly, for the subsystem, while spending 70,552 B naming the extension host.
+
+**The honest scope, which is narrower than vscode suggests.** Of 7 repos: **catastrophic on 1**
+(vscode), **harmful on 1** (angular — `adev/`, the documentation site, takes 252 names before
+`packages/`, the shipped libraries, takes 227), **benign by luck on 2** (envoy's `api/` and
+cockroach's `pkg/` happen to sort first *and* happen to be the biggest tree), and **absent on 3** (the
+ceiling never fires). "Benign by luck" is the finding, not a mitigation: nothing in the mechanism
+arranges for the right answer on envoy, and nothing prevents vscode's answer on the next repo.
+
+### Band 6 — NAME PLACEMENT, and it is this set's gating band
+
+Read per repo on the 4 repos where the ceiling fires, never pooled (the 3 where it does not fire are a
+byte-identity arm, Band 8).
+
+- **PASS** ⇔ on every one of the 4, the share of the name budget landing in the repo's **largest code
+  tree by `<ls>` row count** does not fall, and on vscode specifically the number of `src/` rows that
+  name a file goes **from 0 to more than 0**.
+- **FAIL** ⇔ any of the 4 sends a smaller share of its budget to its largest tree than path order did.
+  That is a real possibility and is why this gates: "most unshown code files first" is a size rule, and
+  a repo whose largest tree is made of *many small* directories can lose to one with *few large* ones.
+  cockroach is the repo to watch — `pkg/` holds 1,684 rows and only 535 are named today.
+- `names_total` must be **unchanged** on every repo. It counts what *could* be named; a change there
+  would mean this touched selection, not allocation.
+
+### Band 7 — the NUMBER of names is not allowed to move
+
+`kInventoryNameCeiling` stays **2000** and the printed name count must stay within it on every repo,
+exactly as the `ENSURES` in `applyInventoryNameCeiling` already asserts. This band exists to keep the
+two changes separable: if bytes move on a repo where the ceiling fires, Band 4's prediction must be
+attributable to the ROW cut, not to a quietly larger name budget. A lane that improves placement by
+printing more names has not been measured, it has been widened.
+
+### Band 8 — SCOPE, stated as byte identity
+
+The 3 repos above where `names_capped` does not fire (zed, cpython, terraform) plus tmux, htop,
+textual, hono, django, nushell, axum and starlette must be **byte-identical** to the shipped binary
+under *this* change alone. Any byte that moves on them means the allocator reordered rows that were
+never over the ceiling, which is out of scope.
+
+Where both changes are measured together, the two must be **decomposed**: three binaries (shipped, row
+ceiling only, both) so each band reads its own change. A combined-only readout would let either change
+take credit for the other's bytes, which is the arithmetic that produced this run's
+"nearly double the best peer" error.
+
+### What this registration does NOT claim
+
+No terminality claim, for the reason Band 5 gives — the instrument is observational and this run has
+no deployed sessions. In particular **"names in the source tree are worth more than names in
+`extensions/`" is an argument, not a measurement.** It is a strong argument — it is the tier's own
+stated purpose, and `src/vs/workbench/` is where an orient question about vscode lands — but Band 6 is
+written as *placement follows code mass* rather than *placement follows relevance*, because code mass
+is in the index and relevance is in the rank vector this tier is contractually forbidden to read. If
+the deferred terminality arm ever shows that an orient answer wanted `extensions/`, Band 6 is the band
+that was wrong, and the honest reading is that the fix moved the budget from one arbitrary allocation
+to a differently arbitrary one.
