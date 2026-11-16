@@ -987,6 +987,10 @@ inline void fileTailRankRows( FileTail& out, std::vector<char>& listed, const In
         {
             continue;
         }
+        if( inBundleFile( ing.symbols[ order[k] ] ) )
+        {
+            continue;   // NOSKIP-RANK: a bundle-shaped file is no rank row; the page walk folds it (foldTailRow)
+        }
         const TailRowAdmit a = admitTailRow( ing, order[k], docs, walked, kForFileTailShownCap );
         if( a.inWindow )
         {
@@ -1180,15 +1184,24 @@ inline std::size_t tailSymWideRows()
 }
 // SIZE-2: a widened row (p= only) of a non-code class the task did not name is counted, not listed, and next= pages from the
 // first one (pageSkip). True when the row folded.
+// NOSKIP-RANK: a row of a bundle-shaped file (filter.h inBundleFile: read lexically, a bounded data file's keys, or parsed at the
+// size the crawl once skipped) folds on every walk, at any page row, under its class (code counts as "other"): the file is no
+// pointer an answer needs, total= and folded= still disclose it, next= pages to it, and every verb still lists its definitions.
+inline TailFoldClass bundleTailFoldClass( TailFoldClass cls ) noexcept
+{
+    return cls == TailFoldClass::Code || cls == TailFoldClass::Test ? TailFoldClass::Other : cls;
+}
 inline bool foldTailRow( FileTail& out, std::vector<char>& listed, const TailPageWalkInputs& in, const ForFileRow& row, std::size_t r,
                          TailPageRowFate fate )
 {
-    if( fate != TailPageRowFate::ListWide || in.foldKept == nullptr )
+    const bool    bundle = row.lead < in.ing.symbols.size() && inBundleFile( in.ing.symbols[ row.lead ] );
+    TailFoldClass cls    = tailFoldClass( in.ing, row.lead, rootRelPath( in.ing, row.fileId ) );
+    if( bundle )
     {
-        return false;
+        cls = bundleTailFoldClass( cls );
     }
-    const TailFoldClass cls = tailFoldClass( in.ing, row.lead, rootRelPath( in.ing, row.fileId ) );
-    if( cls == TailFoldClass::Code || cls == TailFoldClass::Test || ( *in.foldKept )[ std::size_t( cls ) ] )
+    else if( fate != TailPageRowFate::ListWide || in.foldKept == nullptr || cls == TailFoldClass::Code || cls == TailFoldClass::Test
+             || ( *in.foldKept )[ std::size_t( cls ) ] )
     {
         return false;
     }

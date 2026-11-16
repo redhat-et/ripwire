@@ -14,7 +14,7 @@
 # Every fixture is generated here (nothing large is committed where whole-repo runs would see it); each arm counts its
 # premise and FAILS on zero.
 #
-#   bash test/bundledemotecheck.sh [BIN]          # lane no-skip-ingest ff0664260 FAILS arm (a); 506afce6f FAILS (h1) (h2); 2fa78ec4f FAILS (i1) (i2)
+#   bash test/bundledemotecheck.sh [BIN]          # lane no-skip-ingest ff0664260 FAILS arm (a); 506afce6f FAILS (h1) (h2); 2fa78ec4f FAILS (i1) (i2); f79f73408 FAILS (j)
 #   BASE_BIN=<binary before the rule> bash test/bundledemotecheck.sh BIN   # adds arm (c2): no bundle, byte-identical output
 
 set -u
@@ -214,6 +214,32 @@ if [ -n "$ilast_src" ] && [ -n "$ifirst_bun" ] && [ "$ifirst_bun" -gt "$ilast_sr
     ok "(i2) every source row ranks above the first bundle row (last source row $ilast_src, first bundle row $ifirst_bun)"
 else
     no "(i2) a bundle row ranks among the source rows: first bundle row ${ifirst_bun:-absent}, last source row ${ilast_src:-absent}"
+fi
+
+# ── (j) a bundle-shaped file is no --for tail row: it folds (forpage.h foldTailRow), counted in total= and folded= ──────────
+# Before the rule the 5 MiB bundle took a <t p="lib/bundle.js"/> pointer in the tail of a question it does not answer (red on
+# f79f73408: the pointer row is listed, folded= absent).
+python3 - "$TMP" <<'EOF'
+import os, sys
+t = sys.argv[1]
+def w(p, s):
+    os.makedirs(os.path.dirname(p), exist_ok=True); open(p, "w").write(s)
+for k in range(60):
+    w(f"{t}/tailfold/src/mod{k}.ts", f"export function widgetPart{k}(a: number): number {{\n    return a + {k};\n}}\n")
+parts, n, i = [], 0, 0
+while n < 5 * 1024 * 1024:
+    f = f"function widget_filler_{i}(x) {{\n    return x + {i};\n}}\n\n"
+    parts.append(f); n += len(f); i += 1
+w(f"{t}/tailfold/lib/bundle.js", "".join(parts))
+EOF
+"$BIN" "$TMP/tailfold" --no-cache "--for=widget part" --legend=compact >"$TMP/j.out" 2>/dev/null   # status: --for exits 0 on any corpus; the tail read below is the verdict
+jtail="$( tr -d '\n' <"$TMP/j.out" | grep -o '<tail [^>]*>.*</tail>' )"
+jhdr="$( printf '%s' "$jtail" | grep -o '<tail [^>]*>' )"
+jbun="$( printf '%s' "$jtail" | grep -o 'p="lib/bundle.js"' | wc -l | tr -d ' ' )"
+if [ -n "$jhdr" ] && [ "$jbun" = 0 ] && printf '%s' "$jhdr" | grep -q 'total="61"' && printf '%s' "$jhdr" | grep -q 'folded="[^"]*other=1'; then
+    ok "(j) the bundle folds out of the tail rows and stays disclosed: $jhdr"
+else
+    no "(j) the bundle is a tail row or undisclosed (bundle rows in tail ${jbun:-?}): ${jhdr:-no tail}"
 fi
 
 # ── (c) negative: a 3 MiB copy is no bundle — nothing is demoted, the file-order lift stands ─────────────────────────
