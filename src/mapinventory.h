@@ -99,8 +99,8 @@ inline constexpr std::size_t kInventoryDirCap       = 2048;
 //
 // The <ls> rows spell every ancestor directory once PER ROW. On vscode that is ~27 B of path per row to
 // deliver filenames, 54 KB of directory strings for 1,998 names, and it grows with the corpus rather than
-// with the question. Nesting the rows under a synthesised `<d p="SEG">` wrapper spells each shared segment
-// ONCE: `<ls p="skills/hermes" …/>` becomes `<d p="skills"><ls p="hermes" …/>…</d>`, and a reader rejoins a
+// with the question. Nesting the rows under a synthesised `<lsd p="SEG">` wrapper spells each shared segment
+// ONCE: `<ls p="skills/hermes" …/>` becomes `<lsd p="skills"><ls p="hermes" …/>…</d>`, and a reader rejoins a
 // row to its absolute directory by concatenating its ancestors' p= segments.
 //
 // This is an ENCODING, not a cut. No row, no n=, no f= name is removed, so §9's terminality objective is
@@ -115,13 +115,13 @@ inline constexpr std::size_t kInventoryDirCap       = 2048;
 // in docs/LIMITS.md.
 inline constexpr std::size_t kInventoryNestDepth = 2;
 
-// WHETHER A GROUP IS EMITTED IS ARITHMETIC, NOT A TUNING KNOB. A `<d p="SEG">` wrapper costs
-// len( `<d p="` ) + len( SEG ) + len( `">` ) + len( `</d>` ) = len( SEG ) + 12 bytes, and saves len( SEG ) + 1
+// WHETHER A GROUP IS EMITTED IS ARITHMETIC, NOT A TUNING KNOB. A `<lsd p="SEG">` wrapper costs
+// len( `<lsd p="` ) + len( SEG ) + len( `">` ) + len( `</lsd>` ) = len( SEG ) + 16 bytes, and saves len( SEG ) + 1
 // on every row it covers (the segment and its separator). So it is emitted only where it pays for itself,
 // which is why a flat repository gets no wrappers at all instead of a document that grew. On this repository
 // exactly one prefix qualifies (skills/, 20 rows, 122 B net) and `.github` and `prompts` at two rows each are
 // correctly refused — both sides of that decision are what test/invnestcheck.sh arm (C1) reads.
-inline constexpr std::size_t kInventoryNestWrapperBytes = 12;
+inline constexpr std::size_t kInventoryNestWrapperBytes = 16;
 
 inline bool inventoryNestPays( std::string_view seg, std::size_t rows ) noexcept
 {
@@ -129,7 +129,7 @@ inline bool inventoryNestPays( std::string_view seg, std::size_t rows ) noexcept
 }
 
 // One row of the emission plan: which MapInventory::dirs row to print, and how many of its own leading path
-// segments its ancestors already spell. depth is also the number of open <d> elements around it.
+// segments its ancestors already spell. depth is also the number of open <lsd> elements around it.
 struct InventoryNestRow
 {
     std::uint32_t row   = 0;
@@ -768,7 +768,7 @@ inline constexpr std::string_view kMapInventoryLegend =
 // prefix barely pays (tmux saved 5 B of rows) an unconditional clause made the document GROW. Documenting
 // what the document does not contain is also exactly what item 2 of the same card removes elsewhere.
 inline constexpr std::string_view kMapInventoryNestLegend =
-    "<!-- d p=SEG: a path segment the ls rows nested under it share, so it is spelled once instead of once per row. A "
+    "<!-- lsd p=SEG: a path segment the ls rows nested under it share, so it is spelled once instead of once per row. A "
     "row's directory is its ancestors' p= segments joined with its own p=, at most 2 wrappers deep (kInventoryNestDepth); "
     "a wrapper is emitted only where it saves more bytes than it costs, so a flat tree carries none. The grouping is the "
     "only reordering in this tier: rows sharing a wrapper are made contiguous at the position of the first of them. No "

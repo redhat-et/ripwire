@@ -3205,13 +3205,13 @@ inline std::size_t writeInventoryNestWrappers( XmlWriter& w, std::string_view di
 {
     std::size_t&      open        = st.count;
     std::string_view* lastOpenSeg = st.seg;
-    while( open > depth ) { w.write( "</d>" ); --open; }
-    while( open > 0 && inventoryPathSeg( dir, open - 1 ) != lastOpenSeg[ open - 1 ] ) { w.write( "</d>" ); --open; }
+    while( open > depth ) { w.write( "</lsd>" ); --open; }
+    while( open > 0 && inventoryPathSeg( dir, open - 1 ) != lastOpenSeg[ open - 1 ] ) { w.write( "</lsd>" ); --open; }
     while( open < depth )
     {
         const std::string_view seg = inventoryPathSeg( dir, open );
         lastOpenSeg[ open ] = seg;
-        w.write( "<d p=\"" );  w.write( escapeXml( seg, esc ) );  w.write( "\">" );
+        w.write( "<lsd p=\"" );  w.write( escapeXml( seg, esc ) );  w.write( "\">" );
         ++open;
     }
     std::size_t trim = 0;
@@ -3256,7 +3256,7 @@ inline void writeMapInventoryXml( XmlWriter& w, const IngestResult& ing, const M
         w.write( "</entry>" );
     }
     // ITEM 1 (docs/EVALS.md, the five lossless map encodings): the rows go out NESTED under synthesised
-    // <d p="SEG"> wrappers wherever a shared prefix pays for its own bytes, so each shared segment is spelled
+    // <lsd p="SEG"> wrappers wherever a shared prefix pays for its own bytes, so each shared segment is spelled
     // once instead of once per row. mapinventory.h owns the decision and the depth constant; this loop only
     // replays the plan, opening and closing wrappers as the plan's depth changes.
     //
@@ -3265,7 +3265,7 @@ inline void writeMapInventoryXml( XmlWriter& w, const IngestResult& ing, const M
     // test/invnestcheck.sh an oracle out of the SAME binary and index: flatten these rows, compare against
     // that array, and Band A's set identity is proved without a pinned expectation or a second build.
     EXPECTS( plan.size() == inv.dirs.size(), "the nesting plan covers every row exactly once" );
-    InventoryNestOpen openWrappers;              // how many <d> elements are open, and what each spells
+    InventoryNestOpen openWrappers;              // how many <lsd> elements are open, and what each spells
     for( const InventoryNestRow& step : plan )
     {
         const MapInventoryDir& d = inv.dirs[ step.row ];
@@ -3286,7 +3286,7 @@ inline void writeMapInventoryXml( XmlWriter& w, const IngestResult& ing, const M
         }
         w.write( "/>" );
     }
-    while( openWrappers.count > 0 ) { w.write( "</d>" ); --openWrappers.count; }
+    while( openWrappers.count > 0 ) { w.write( "</lsd>" ); --openWrappers.count; }
     w.write( "</inv>" );
 }
 
@@ -3434,7 +3434,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     const MapInventory inventory = ( mapInventoryWanted( ing, ann ) && !stubbed )
                                  ? computeMapInventory( ing, outOff, outTargets, seen, pathRel ) : MapInventory{};
     // ITEM 1: the <ls> nesting plan, computed ONCE here because two places need the same answer — the legend
-    // (which charges the <d p=> clause only to a map that carries a wrapper) and the emitter. Computing it
+    // (which charges the <lsd p=> clause only to a map that carries a wrapper) and the emitter. Computing it
     // twice would risk the two disagreeing, which is the shape where a document carries a clause for an
     // element it does not have, or has the element with no clause; mapinventory.h owns the decision.
     const std::vector<InventoryNestRow> inventoryNest = inventoryNestPlan( inventory, kMapInventoryNestLegend.size() );
@@ -3641,7 +3641,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
         legend += kMapInventoryLegend;      // D7: charged to the map that carries <inv>
         if( std::ranges::any_of( inventoryNest, []( const InventoryNestRow& r ) noexcept { return r.depth > 0; } ) )
         {
-            legend += kMapInventoryNestLegend;   // ITEM 1: charged only to a map that carries a <d> wrapper
+            legend += kMapInventoryNestLegend;   // ITEM 1: charged only to a map that carries a <lsd> wrapper
         }
     }
     // W2-F: the pr_iters= / pr_converged= definition, charged to the maps that carry the attributes — empty

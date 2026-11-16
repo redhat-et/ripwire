@@ -18,7 +18,7 @@ def rows_from_xml( xml ):
     """Flatten <inv>'s rows. Returns ( rows, maxDepth, groups ).
 
     rows   : [ ( path, n, ( f names ) ) ] in DOCUMENT order, with each <ls p=> re-joined to its ancestors'
-             <d p=> segments, so a row reads as the absolute directory it did before the encoding.
+             <lsd p=> segments, so a row reads as the absolute directory it did before the encoding.
     groups : [ ( segment, depth, childRowCount ) ] — what (C1) prices.
 
     Hand-rolled rather than fed to an XML parser so the arm sees exactly the bytes the agent is charged for,
@@ -30,11 +30,11 @@ def rows_from_xml( xml ):
     body = inv.group( 1 )
     rows, groups, stack = [], [], []
     maxDepth = 0
-    for tok in re.finditer( r'<d\s+p="([^"]*)"\s*>|</d>|<ls\b([^>]*)/>', body ):
-        if tok.group( 0 ).startswith( '<d' ):
+    for tok in re.finditer( r'<lsd\s+p="([^"]*)"\s*>|</lsd>|<ls\b([^>]*)/>', body ):
+        if tok.group( 0 ).startswith( '<lsd' ):
             stack.append( [ tok.group( 1 ), 0 ] )
             maxDepth = max( maxDepth, len( stack ) )
-        elif tok.group( 0 ) == '</d>':
+        elif tok.group( 0 ) == '</lsd>':
             seg, kids = stack.pop()
             groups.append( ( seg, len( stack ) + 1, kids ) )
         else:
@@ -82,10 +82,10 @@ def arms( rows, maxDepth, groups, oracle, xml, root, ok, no ):
         no( '(A0) the XML map has an <inv> tier with no <ls> row, so every arm below would pass by vacuity' )
         return 1
     if not groups:
-        no( '(A0) no <d> group was emitted on this subject (%d rows): either the encoding is not in this binary, '
+        no( '(A0) no <lsd> group was emitted on this subject (%d rows): either the encoding is not in this binary, '
             'or no prefix paid for itself here — in both cases (A1)/(C1)/(D1) prove nothing about nesting' % len( rows ) )
         return 1
-    ok( '(A0) subject produced %d <ls> row(s) in %d <d> group(s), max nesting depth %d — the arms below have something to read'
+    ok( '(A0) subject produced %d <ls> row(s) in %d <lsd> group(s), max nesting depth %d — the arms below have something to read'
         % ( len( rows ), len( groups ), maxDepth ) )
 
     # ── (A1) Band A: set identity against the flat JSON twin ─────────────────────────────────────────
@@ -119,27 +119,27 @@ def arms( rows, maxDepth, groups, oracle, xml, root, ok, no ):
             % ( len( mutations ), ', '.join( m[ 0 ] for m in mutations ) ) )
 
     # ── (C1) every group pays, and the document is no larger than the same rows flat ─────────────────
-    #   The model is the emitter's own: a <d p="SEG"> wrapper costs len(SEG)+12 bytes ( `<d p="` + SEG + `">`
-    #   + `</d>` ) and saves len(SEG)+1 on each row it covers (the segment and its separator).
-    unpaid = [ ( seg, depth, kids, kids * ( len( seg ) + 1 ) - ( len( seg ) + 12 ) )
+    #   The model is the emitter's own: a <lsd p="SEG"> wrapper costs len(SEG)+16 bytes ( `<lsd p="` + SEG
+    #   + `">` + `</lsd>` ) and saves len(SEG)+1 on each row it covers (the segment and its separator).
+    unpaid = [ ( seg, depth, kids, kids * ( len( seg ) + 1 ) - ( len( seg ) + 16 ) )
                for seg, depth, kids in groups if kids * ( len( seg ) + 1 ) <= len( seg ) + 12 ]
     if unpaid:
         no( '(C1) %d group(s) cost more bytes than they save, so the encoding made the document BIGGER there: %s'
             % ( len( unpaid ), unpaid[ :3 ] ) )
     else:
-        saved = sum( kids * ( len( seg ) + 1 ) - ( len( seg ) + 12 ) for seg, depth, kids in groups )
+        saved = sum( kids * ( len( seg ) + 1 ) - ( len( seg ) + 16 ) for seg, depth, kids in groups )
         ok( '(C1) every one of the %d group(s) pays for its wrapper; net saving on this subject %d B' % ( len( groups ), saved ) )
 
     # ── (C2) the document is NEVER larger than its flat self ────────────────────────────────────────
     #   A per-group decision is not enough: a document where one prefix barely pays still carries the whole
-    #   <d p=> legend clause. tmux saved 5 B of rows and textual 54 B against a ~560 B clause, so both GREW
+    #   <lsd p=> legend clause. tmux saved 5 B of rows and textual 54 B against a ~516 B clause, so both GREW
     #   by ~700 B until mapinventory.h took the decision at document level. This arm reads that back out of
     #   the shipped bytes: either there are no wrappers at all, or the rows they save out-pay the clause.
-    clause = re.search( r'<!--\s*d p=SEG:.*?-->', xml, re.S )
+    clause = re.search( r'<!--\s*lsd p=SEG:.*?-->', xml, re.S )
     clauseLen = len( clause.group( 0 ) ) if clause else 0
-    rowSaving = sum( kids * ( len( seg ) + 1 ) - ( len( seg ) + 12 ) for seg, _d, kids in groups )
+    rowSaving = sum( kids * ( len( seg ) + 1 ) - ( len( seg ) + 16 ) for seg, _d, kids in groups )
     if clauseLen == 0:
-        no( '(C2) the document carries %d <d> wrapper(s) but no <d p=SEG> legend clause — the vocabulary is '
+        no( '(C2) the document carries %d <lsd> wrapper(s) but no <lsd p=SEG> legend clause — the vocabulary is '
             'undocumented in the answer that uses it' % len( groups ) )
     elif rowSaving <= clauseLen:
         no( '(C2) the wrappers save %d B of rows against a %d B legend clause, so this document is LARGER than its '
@@ -201,7 +201,7 @@ def arms( rows, maxDepth, groups, oracle, xml, root, ok, no ):
     elif m.group( 1 ) != str( NEST_DEPTH ):
         no( '(E1) Band E: kInventoryNestDepth is %s, and the registration fixes the shipped default at %d' % ( m.group( 1 ), NEST_DEPTH ) )
     elif maxDepth > NEST_DEPTH:
-        no( '(E1) Band E: the document nests <d> %d deep, past kInventoryNestDepth = %d' % ( maxDepth, NEST_DEPTH ) )
+        no( '(E1) Band E: the document nests <lsd> %d deep, past kInventoryNestDepth = %d' % ( maxDepth, NEST_DEPTH ) )
     else:
         ok( '(E1) Band E: kInventoryNestDepth = %d, declared in src/mapinventory.h, and the document nests at most %d deep'
             % ( NEST_DEPTH, maxDepth ) )

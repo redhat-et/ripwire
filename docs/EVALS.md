@@ -16126,18 +16126,18 @@ not re-run here.
 
 | repo | baseline B | with item 1 | delta | % | wrappers |
 | --- | --- | --- | --- | --- | --- |
-| vscode | 164,135 | 151,442 | −12,693 | **−7.73 %** | 30 |
-| envoy | 130,622 | 118,515 | −12,107 | **−9.27 %** | 21 |
-| angular | 123,869 | 112,884 | −10,985 | −8.87 % | 37 |
-| cockroach | 134,366 | 124,802 | −9,564 | −7.12 % | 30 |
-| nushell | 61,609 | 58,701 | −2,908 | −4.72 % | 27 |
-| django | 44,589 | 42,692 | −1,897 | −4.25 % | 8 |
-| cpython | 81,970 | 81,563 | −407 | −0.50 % | 21 |
-| hono | 25,078 | 25,001 | −77 | −0.31 % | 11 |
+| vscode | 164,135 | 151,560 | −12,575 | **−7.66 %** | 26 |
+| envoy | 130,622 | 118,600 | −12,022 | **−9.20 %** | 20 |
+| angular | 123,869 | 113,033 | −10,836 | −8.75 % | 35 |
+| cockroach | 134,366 | 124,923 | −9,443 | −7.03 % | 28 |
+| nushell | 61,609 | 58,812 | −2,797 | −4.54 % | 25 |
+| django | 44,589 | 42,725 | −1,864 | −4.18 % | 7 |
+| cpython | 81,970 | 81,635 | −335 | −0.41 % | 15 |
+| hono | 25,078 | 25,046 | −32 | −0.13 % | 10 |
 | koa / htop / tmux / textual | — | — | **0** | 0.00 % | 0 |
 
 **Band C FAILS.** It registered item 1 at ≥ 15 % of the vscode map and ≥ 15 % of envoy's, with a stated
-5-point margin under the 20.5 %/20.3 % prediction. The measurement is **7.73 % and 9.27 %** — less than half
+5-point margin under the 20.5 %/20.3 % prediction. The measurement is **7.66 % and 9.20 %** — less than half
 the floor, outside the margin, on both repos. Recorded as a failure rather than renegotiated: the band was
 written down before the code for exactly this case.
 
@@ -16170,13 +16170,95 @@ wrapper AND no clause — because keeping the clause without the wrappers is the
 
 ### What this costs in the owner's metric, and the recommendation
 
-At the registered 2.44–4.66 B/token band, 12,693 B on vscode is **2,700–5,200 tokens**, against a 24,808-token
+At the registered 2.44–4.66 B/token band, 12,575 B on vscode is **2,700–5,150 tokens**, against a 24,808-token
 follow-up: item 1 moves the break-even by about **0.1–0.2 of a follow-up**, not the ~0.6 the card implied.
 Items 2–5 were measured by the same pre-ceiling audit and their predictions are suspect for the same reason;
 item 5 (omitting a derivable `n=`) acts on NAMED rows, which the ceiling kept, so it has the best chance of
 holding up, and items 2–4 total under 1,600 B on vscode either way.
 
-The recommendation is still to ship item 1: the saving is real on every large repo (4.3–9.3 % across seven of
+The recommendation is still to ship item 1: the saving is real on every large repo (4.2–9.2 % across seven of
 them), no document grows, and content identity is proved rather than argued. What changes is the CLAIM. Band F
 (the completeness re-grade) remains the gate on whether a differently-shaped document is as usable, and is
 unaffected by the size of the saving.
+
+
+### The element had to be renamed, and the rename is why the figures above moved
+
+The wrapper first shipped as `<d p="SEG">`. **`<d>` was already taken** — the signature tier spells
+`<d r= cx= in= amp= tested=>`, `--defs` spells `<d sel_proven= decl_only=>`, and the slice verb spells
+`<d p="FILE:LINE" sel= class=>`, which appears in 6 of the 319 recorded answers. The dictionary in
+`src/compactlegend.h` is keyed on ( attribute, owning element ), so a `p=` row filed under owner `d` reads
+as a row about one of those, and a reader of `--legend=full` gets two meanings for one tag.
+
+Renamed to `<lsd p="SEG">`. Two things it cost, both measured rather than estimated:
+
+- **4 bytes per wrapper** (`<lsd p="` + `</lsd>` against `<d p="` + `</d>`), so `kInventoryNestWrapperBytes`
+  moves 12 → 16. That raises the per-group break-even, which dropped 4 marginal wrappers on vscode (30 → 26)
+  and 6 on cpython (21 → 15). Net cost on vscode: 118 B of a 12,693 B saving, 0.9 %.
+- **A blind rename hit a foreign call site.** Replacing `w.write( "</d>" )` matched four sites, and one of
+  them closes the signature tier's own `<d>` inside `<sigs>` — reverted, and it is the concrete argument for
+  the rename rather than for documenting the overload: a tag name shared by two elements makes every textual
+  edit to either one unsafe.
+
+G4 re-checked after the rename: `xmllint --noout` clean on vscode, and two consecutive runs on envoy are
+byte-identical.
+
+## BAND F — NOT-ESTABLISHED for item 1: the registered instrument has ZERO exposure to what it judges
+
+Band F was registered as the instrument that decides whether a differently-shaped document is as usable,
+and it is the band I said was the real gate on shipping. It ran. The grader, the population and the rates
+all reproduce. **And it cannot see this change at all.**
+
+**The measurement.** Re-collected all 319 ripwire cells with the item-1 binary into a fresh store and
+re-graded through the same grader against the same gold:
+
+```
+baseline   291 cells   lenient/strict=156  verdict+completeness=129  precision-only=6
+re-grade   291 cells   lenient/strict=156  verdict+completeness=129  precision-only=6
+baseline   scored 285   lenient 73.3 %   strict 65.3 %
+re-grade   scored 285   lenient 73.3 %   strict 65.3 %
+```
+
+Every pooled rate and every one of the fourteen per-use-case rates is identical to the baseline **to the
+decimal**. That is the tell, not the result. The reason:
+
+```
+answers total                     319
+answers carrying an <inv> tier       0
+verbs the question set runs        319 x `--cache --for`   (one shape, no others)
+```
+
+**All 319 cells are `--for` queries.** The inventory tier is emitted only under the default map scope
+(`mapAnnotations.inventoryTier` is set from `isDefaultMapScope`, which requires an empty `--for`/query), so
+not one graded answer contains an `<inv>` element, let alone an `<lsd>` wrapper. Item 1's exposure to the
+285-cell population is **0 cells**.
+
+27 of the 319 answers did change against the recorded baseline, and 27 of 285 graded cells with them
+(9.5 %, spread over mf1 12, trace 7, ind 3, how-it-works 3, comp 2) — but with zero `<inv>` tiers present,
+none of that is item 1. Those are the other lanes merged since the baseline store was collected.
+
+**So the verdict is NOT-ESTABLISHED, not PASS**, and the band's own rule is what says so: a comparison that
+cannot move is not evidence that nothing moved. Reporting "Band F PASS" here would be the exact shape this
+run already has on file — a population counted from the directory rather than from the instrument, and a
+metric that could not fail.
+
+**The instrument itself is sound, and that was proved separately.** Re-grading the untouched baseline
+answers reproduces `anchor_grade_CLEAN_20261115.json` exactly: 291 cells, the same qid set, **zero** cells
+whose grade differs, identical skip counts. And `harness/bandf_verdict.py` carries four planted controls, so
+the verdict can fail in each registered way: 10 cells dropped → NOT-ESTABLISHED; 20 `complete` → `partial`
+→ FAIL on the pooled floors; `mf1` alone falling while the pooled pair is propped up → FAIL on the
+four-largest rule; 3 cells made ungradable → FAIL. The fourth control found a precedence bug in the verdict
+itself: it first reported NOT-ESTABLISHED where the registration says a newly-ungradable cell is a FAIL,
+because making a cell ungradable also drops the scored count and the population check fired first. The
+ungradable rise is now judged first, and a NOT-ESTABLISHED prints any FAIL that also fired rather than
+swallowing it.
+
+**What would settle Band F.** A question set whose cells invoke the flagless default map, pre-registered as
+its own population with its own gold — not a renegotiation of the 285, which are `--for` answers and have
+nothing to say about the map's shape. Until that exists, the honest position on every one of these five
+encodings is: Bands A–E prove the information is identical, and **nothing here measures readability**.
+
+**This is not confined to item 1.** The `<ls>` row ceiling (#671) also changes only the default map, so any
+completeness claim resting on this instrument has the same zero exposure. The published table's
+Answers/Partial/Wrong column is built from the same 319 `--for` cells, which is correct for what it
+measures and silent about the map.
