@@ -207,7 +207,11 @@ h5(){ local label="$1"; shift
 h5 "name-exact route" --for=dispatchQueuedJobs
 h5 "--no-route" --for="$Q_MONO" --no-route
 h5 "a question naming an indexed file" --for="How does src/scheduler.ts dispatch queued jobs to workers?"
-h5 "--token-budget=1200" --for="$Q_MONO" --token-budget=1200
+# H5t — TOKEN-BUDGET-MONOTONE (rule 4, 2026-11-14): --token-budget is no longer exempt (it used to switch the posture, score order
+# included); a budget the answer fits returns the unbudgeted answer byte for byte, the reorder as it is there
+run "$TMP/t.on" "$FIX/mono" 0 --for="$Q_MONO" --token-budget=100000; run "$TMP/t.off" "$FIX/mono" 0 --for="$Q_MONO"
+if ran "$TMP/t.on" "H5t" && cmp -s "$TMP/t.on" "$TMP/t.off"; then ok "H5t --token-budget=100000: the unbudgeted answer byte for byte"
+else no "H5t --token-budget=100000 is not the unbudgeted answer"; fi
 
 # ── H6: the declaration twin ─────────────────────────────────────────────────────────────────────────────────────────────
 run "$TMP/decl.off" "$FIX/decl" 1 --for="$Q_DECL"

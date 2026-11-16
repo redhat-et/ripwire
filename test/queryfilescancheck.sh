@@ -33,9 +33,11 @@
 #       queries/cpp/tags.scm, and the reported LINE matches an INDEPENDENT oracle (/usr/bin/grep -n -F,
 #       never hardcoded — a line number pinned by hand rots the moment the file is edited again).
 #   (2) DISCLOSURE — unindexed_files_scanned= is present on the root and its value is independently
-#       recomputed: walk --skipped's own unsupported-ext rows, exclude any whose first 4096 B contain a
-#       NUL byte (the same sniff grepCollectAux runs) or whose size exceeds the crawl's max-file-size
-#       ceiling, and the surviving count must equal the attribute.
+#       recomputed: walk --skipped's own unsupported-ext AND oversize rows (LARGE-PARTIAL-1: grep reads
+#       both off-index populations, never skipping one for size), exclude any whose first bytes contain a
+#       NUL (the same sniffs the scan runs: 4096 B on a file read whole, 8192 B on one read in pieces,
+#       i.e. an unsupported-ext file over the max-file-size ceiling and every oversize row), and the
+#       surviving count must equal the attribute.
 #   (3) NO-REGRESSION — a corpus with zero unsupported-ext files (test/fixture) emits
 #       unindexed_files_scanned="0" and NO <unindexed> element at all — the existing grepcheck/
 #       grepcontextcheck/grepscancheck family's byte-level assertions over that same fixture are the
@@ -137,10 +139,12 @@ import re, sys
 xml, root, maxbytes = sys.argv[1], sys.argv[2], int(sys.argv[3])
 text = open(xml, encoding='utf-8', errors='replace').read()
 n = 0
-for m in re.finditer(r'<f p="([^"]*)" why="unsupported-ext" bytes="(\d+)"', text):
-    path, nbytes = m.group(1), int(m.group(2))
-    if nbytes > maxbytes:
-        continue
+# LARGE-PARTIAL-1: an unsupported-ext file over maxbytes, and every oversize row (corpus_oversize= on the root) is
+# read in pieces (src/infra/pieceread.h), whose binary probe is the first kPieceBinaryProbe = 8192 B; a file read
+# whole is sniffed on its first kBinarySniffCap = 4096 B. Neither population is skipped for size any more.
+for m in re.finditer(r'<f p="([^"]*)" why="(unsupported-ext|oversize)" bytes="(\d+)"', text):
+    path, why, nbytes = m.group(1), m.group(2), int(m.group(3))
+    probe = 8192 if why == 'oversize' or nbytes > maxbytes else 4096
     # NOT path.lstrip('./'): lstrip strips a CHARACTER SET, so it also ate the leading dot of a dot-directory
     # (.github/x.txt -> github/x.txt), the open failed, and the row was silently dropped from the recount --
     # found 2026-09-07 the first time a tracked unsupported-ext file lived under a dot-dir (issue: an
@@ -149,7 +153,7 @@ for m in re.finditer(r'<f p="([^"]*)" why="unsupported-ext" bytes="(\d+)"', text
     fp = path if path.startswith('/') else root + '/' + rel
     try:
         with open(fp, 'rb') as fh:
-            head = fh.read(4096)
+            head = fh.read(probe)
     except OSError:
         continue
     if b'\x00' in head:
@@ -159,7 +163,7 @@ print(n)
 PY
 )"
 if [ -n "$SCANNED_ATTR" ] && [ "$SCANNED_ATTR" = "$INDEPENDENT_SCANNED" ]; then
-    ok "(2b) unindexed_files_scanned=$SCANNED_ATTR matches an independent recount of --skipped's unsupported-ext rows ($INDEPENDENT_SCANNED)"
+    ok "(2b) unindexed_files_scanned=$SCANNED_ATTR matches an independent recount of --skipped's unsupported-ext + oversize rows ($INDEPENDENT_SCANNED)"
 else
     no "(2b) unindexed_files_scanned=$SCANNED_ATTR but an independent recount of --skipped's rows gives $INDEPENDENT_SCANNED"
 fi

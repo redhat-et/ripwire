@@ -35,10 +35,10 @@ cap do not both rewrite the same line; the per-file tables are re-read from `src
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 428 | 144 | 279 | **149** |
+| 431 | 146 | 279 | **152** |
 
 Plus 10 ranking and apportionment parameters, in their own table below: they are not caps, they
-are not counted as caps, and 428 + 10 is the 438 constants this generator parses out of `src/`.
+are not counted as caps, and 431 + 10 is the 441 constants this generator parses out of `src/`.
 
 ## INDEXING, OUTPUT or BOUNDARY — which half of the answer a cap bounds
 
@@ -56,8 +56,8 @@ None of them truncates anything, so none can be judged by `shown=`/`total=` and 
 a disclosure — labelling them OUTPUT would ask for a `capped="1"` that could never honestly fire.
 The distinction was named in review on #108 and the rows below now carry it.
 
-The `class` column below carries that answer where it is known. **143 of 428 caps are classified
-(51 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 285 render `—`, which means NOT YET
+The `class` column below carries that answer where it is known. **143 of 431 caps are classified
+(51 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 288 render `—`, which means NOT YET
 CLASSIFIED — never "neither".** Classifications live in `docs/limits_classes.tsv`, a sidecar with
 a known expiry:
 the tag belongs on the declaration itself, and this file exists only because the round that
@@ -439,6 +439,14 @@ Discloses: `capped`, `depth_capped`
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kAliasHopSigBytes` | `240` | — | a declaration's text is cut here (cut="1"); a runaway guard |
+
+### `src/forbudgetfit.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kForBudgetRowFloor` | `4` | — | the <sigs> rows never shed: kForSoftBudgetNote's "rank 1..4 rows always ship" |
 
 ### `src/forcallerhop.h`
 
@@ -952,6 +960,7 @@ Discloses: **none**
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kMaxPlanScout` | `12` | OUTPUT | — |
+| `kPlanScoutFileBudget` | `8192` | — | — |
 
 ### `src/lanes.h`
 
@@ -985,6 +994,14 @@ Discloses: **none**
 | `kMaxLen` | `64` | — | — |
 | `kMaxShown` | `4` | OUTPUT | — |
 | `kMaxUniqueQueryTerms` | `1024` | INDEXING | — |
+
+### `src/limitwarn.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kLimitWarnLines` | `5` | — | — |
 
 ### `src/lintcatalog.h`
 

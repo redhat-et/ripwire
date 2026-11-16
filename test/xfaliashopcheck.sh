@@ -131,9 +131,15 @@ fi
 if ( cd "$C" && RIPWIRE_NO_ALIAS_HOP=1 "$BIN" . --no-cache --for=ColumnPtr ) >"$TMP/f1off" 2>/dev/null; then
   if has "$TMP/f1off" '<aliases'; then no "switch: RIPWIRE_NO_ALIAS_HOP left the block"; else ok "switch: RIPWIRE_NO_ALIAS_HOP drops the block"; fi
 else no "switch: the run with RIPWIRE_NO_ALIAS_HOP failed"; fi
-# 9. a token budget holds the block
-if run "$C" "$TMP/f9" --for=ColumnPtr --token-budget=4000; then
+# 9. a token budget holds the block — TOKEN-BUDGET-MONOTONE (2026-11-14): only when the answer plus the block does not fit it. The
+# old regime held it whenever a budget was set (4000 held it on a 631-token answer); now 4000 returns the unbudgeted answer byte for
+# byte (3414 B, the block whole) and 100 holds it (2717 B, shed="held,...").
+if run "$C" "$TMP/f9" --for=ColumnPtr --token-budget=100; then
   if has "$TMP/f9" '<aliases held="budget" total="1"/>'; then ok "[RED] budget: held marker with total="; else no "[RED] budget: no held marker"; fi
+fi
+if run "$C" "$TMP/f9w" --for=ColumnPtr --token-budget=4000 && run "$C" "$TMP/f9u" --for=ColumnPtr; then
+  if cmp -s "$TMP/f9w" "$TMP/f9u" && has "$TMP/f9w" '<aliases total="1" shown="1"'; then ok "budget that fits: the unbudgeted answer byte for byte, the block whole (twin)"
+  else no "budget that fits: --token-budget=4000 changed the answer ($( wc -c <"$TMP/f9w" | tr -d ' ' ) B vs $( wc -c <"$TMP/f9u" | tr -d ' ' ) B)"; fi
 fi
 
 # 10. alias-free answers are byte-identical: a fixture with no alias, the switch on and off
@@ -234,11 +240,16 @@ if run "$C" "$TMP/l1" --for=ColumnPtr; then
   if has "$TMP/l1" 'unread="1": its file'; then no "[RED] legend: an unread clause with nothing unread"; else ok "[RED] legend: no unread clause"; fi
   if has "$TMP/f5" 'cycle="1": a definition'; then ok "legend: the cycle clause rides when a chain has one (twin)"; else no "legend: cycle clause missing on the cyclic chain"; fi
 fi
-# shed= follows the --for body ceiling (--max-tokens WITH --detail=N), the kShapingVerbs carve-out: a bare --max-tokens is noticed as ignored
-# ("nothing was dropped"), so the bare run must print the block whole and byte-identical to the run without the flag (shapingflagcheck (A) 22 sites)
-if run "$C" "$TMP/l2" --for=ColumnPtr --max-tokens=40000 --detail=1; then
-  if grep -qE '<aliases [^>]*shed="m"' "$TMP/l2" && ! grep -qE '<h [^>]* m="' "$TMP/l2" && grep -qE '<h n="IColumn" [^>]*members="2"' "$TMP/l2"; then ok "[RED] max-tokens + detail: m= shed, members= kept, shed=m disclosed"; else no "[RED] max-tokens + detail: shed wrong"; fi
-  if has "$TMP/l2" 'shed=: a max-tokens'; then ok "[RED] max-tokens + detail: shed= legend-defined"; else no "[RED] max-tokens + detail: shed= legend missing"; fi
+# TOKEN-BUDGET-MONOTONE (2026-11-14): --max-tokens WITH --detail=N is a ceiling applied AFTER the unbudgeted --detail answer, so 40000
+# (far above its 599 tokens) returns that answer byte for byte (3335 B, m= kept; it used to shed m= at any ceiling). Under a ceiling
+# the answer plus the block does not fit, the block is held whole (its stub, shed="held,...") — the in-block m= shed no longer runs on
+# the XML answer, so the arm pins the hold and the legend's held clause.
+if run "$C" "$TMP/l2" --for=ColumnPtr --max-tokens=40000 --detail=1 && run "$C" "$TMP/l2u" --for=ColumnPtr --detail=1; then
+  if cmp -s "$TMP/l2" "$TMP/l2u" && grep -qE '<h [^>]* m="' "$TMP/l2"; then ok "[RED] max-tokens + detail that fits: the unbudgeted --detail=1 answer byte for byte, m= kept"; else no "[RED] max-tokens + detail: a ceiling that fits changed the answer"; fi
+fi
+if run "$C" "$TMP/l3" --for=ColumnPtr --max-tokens=100 --detail=1; then
+  if has "$TMP/l3" '<aliases held="budget" total="1"/>' && grep -qE ' shed="held[,"]' "$TMP/l3"; then ok "[RED] max-tokens + detail under the ceiling: the block held, shed=held disclosed"; else no "[RED] max-tokens + detail under the ceiling: block not held"; fi
+  if has "$TMP/l3" 'held (the blocks outside est_tokens'; then ok "[RED] max-tokens + detail: the held step legend-defined"; else no "[RED] max-tokens + detail: held legend missing"; fi
 fi
 if run "$C" "$TMP/l3" --for=ColumnPtr --max-tokens=40000; then
   if grep -qE '<aliases [^>]*shed=' "$TMP/l3" || ! grep -qE '<h [^>]* m="' "$TMP/l3"; then no "[RED] bare --max-tokens: the alias block shed under a flag the notice says --for ignores"; else ok "[RED] bare --max-tokens: the alias block prints whole (the notice's 'nothing was dropped' holds)"; fi

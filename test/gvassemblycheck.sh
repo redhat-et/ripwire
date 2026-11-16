@@ -6,14 +6,16 @@
 #        graph block runs `--path=src/app/application_ref.ts:tick,refreshView`, narrowed="ApplicationRef.tick", reachable="1", the
 #        chain holds tickImpl, and the block equals the bare --path call with that spelling
 #   (e2) `callers of ApplicationRef.tick`: the same narrowing on the callers form (verb=--callers=src/app/application_ref.ts:tick)
-#   (e3) NEGATIVE: two bodied source definitions left (a second src/ copy) → refused as before: no graph block, no narrowed=
+#   (e3) NEGATIVE: two bodied source definitions left (a second src/ copy) → no M1 bind: no graph block, no narrowed=; the bare
+#       --path binds all four fitting definitions instead of refusing (PATH-AMBIG-VERDICT (b), src/pathgaps.h pathEndpointFittedDefs)
 #   GV-PATH-BIND: the same frozen rule on the DIRECT verbs (src/forgraphverb.h narrowRefusedSpelling, src/verbs_navigate.h):
 #   (d1) `--path=ApplicationRef.tick,refreshView` binds the one source definition: rc 0, from="src/app/application_ref.ts:tick",
 #        narrowed="ApplicationRef.tick" on <path>, its reading in the legend (compact and full), and the answer == the explicit
 #        `--path=src/app/application_ref.ts:tick,refreshView` answer apart from that disclosure
 #   (d2) `--connect=ApplicationRef.tick,refreshView`: the same on <connect> (est_tokens= masked: it charges the disclosure)
 #   (d3) the callers form `--callers=ApplicationRef.tick`: the same on <callers>, bootApp listed
-#   (d4) NEGATIVE: two bodied source definitions left → --path, --connect and --callers still refuse (rc 1, no narrowed=)
+#   (d4) NEGATIVE: two bodied source definitions left → no narrowed= anywhere; --connect and --callers still refuse (rc 1), --path
+#       binds the four fitting definitions (rc 0, from_defs=4: it lists pairs and picks none, so qualifying never refuses there)
 #   M3 MET-BRIDGE: an unreached path whose search reached a caller of to= prints the proven prefix and the one crossing.
 #   (b1) onFileEvent -> ConnectionManagerImpl::onData (a virtual `filter->onData( 1 )` the graph declines): <met_bridge reachable="0"
 #        in="onContinueReading" via="declined"> holding the path verb's reachable="1" answer onFileEvent -> onContinueReading (its
@@ -154,13 +156,13 @@ if [ "$( rc e2 )" = 0 ] && [ "$verb" = "--callers=src/app/application_ref.ts:tic
     ok "(e2) callers form narrowed: verb=$verb, bootApp listed"
 else no "(e2) rc=$( rc e2 ) verb='$verb' narrowed='$nar'"; fi
 
-# (e3) negative: two bodied source definitions left → still refused, no graph block
+# (e3) negative: two bodied source definitions left → no M1 bind, no graph block; the bare --path binds every fitting definition
 run "$F1N" e3 --for="path from ApplicationRef.tick to refreshView"
 run "$F1N" e3v --path=ApplicationRef.tick,refreshView
-if [ "$( rc e3 )" = 0 ] && [ "$( count e3 '<graph_verb ' )" = 0 ] && [ "$( count e3 'narrowed=' )" = 0 ] && grep -q 'refused="' "$TMP/e3v.xml" \
-   && grep -q '<ctx ' "$TMP/e3.xml"; then
-    ok "(e3) two source definitions left: no bind, no graph block (the bare --path still refuses)"
-else no "(e3) rc=$( rc e3 ) graph_verb=$( count e3 '<graph_verb ' ) narrowed=$( count e3 'narrowed=' )"; fi
+if [ "$( rc e3 )" = 0 ] && [ "$( count e3 '<graph_verb ' )" = 0 ] && [ "$( count e3 'narrowed=' )" = 0 ] && [ "$( rc e3v )" = 0 ] \
+   && grep -q 'from_defs="4"' "$TMP/e3v.xml" && [ "$( count e3v 'narrowed=' )" = 0 ] && grep -q '<ctx ' "$TMP/e3.xml"; then
+    ok "(e3) two source definitions left: no M1 bind, no graph block; the bare --path binds the 4 fitting definitions, no narrowed="
+else no "(e3) rc=$( rc e3 )/$( rc e3v ) graph_verb=$( count e3 '<graph_verb ' ) narrowed=$( count e3 'narrowed=' ) e3v_from_defs4=$( count e3v 'from_defs=\"4\"' )"; fi
 
 # ── GV-PATH-BIND: the direct verbs ──
 # $1 the narrowed answer, $2 the explicit-spelling answer: "eq=1" when they are byte-equal once the narrowed= attribute, its one
@@ -218,9 +220,9 @@ run "$F1N" d4p --path=ApplicationRef.tick,refreshView
 run "$F1N" d4c --connect=ApplicationRef.tick,refreshView
 run "$F1N" d4k --callers=ApplicationRef.tick
 d4n=$(( $( count d4p 'narrowed' ) + $( count d4c 'narrowed' ) + $( count d4k 'narrowed' ) ))
-if [ "$( rc d4p )" = 1 ] && [ "$( rc d4c )" = 1 ] && [ "$( rc d4k )" = 1 ] && [ "$d4n" = 0 ] && grep -q 'found="0" refused="4"' "$TMP/d4p.xml" \
+if [ "$( rc d4p )" = 0 ] && [ "$( rc d4c )" = 1 ] && [ "$( rc d4k )" = 1 ] && [ "$d4n" = 0 ] && grep -q 'from_defs="4"' "$TMP/d4p.xml" \
    && grep -q 'found="0" refused="4"' "$TMP/d4k.xml" && [ ! -s "$TMP/d4c.xml" ]; then
-    ok "(d4) two source definitions left: --path/--connect/--callers still refuse (rc 1, refused=4, no narrowed=)"
+    ok "(d4) two source definitions left: --connect/--callers still refuse (rc 1, refused=4), --path binds the 4 (from_defs=4), no narrowed="
 else no "(d4) rc=$( rc d4p )/$( rc d4c )/$( rc d4k ) narrowed=$d4n"; fi
 
 # (b1) met bridge across a declined virtual call

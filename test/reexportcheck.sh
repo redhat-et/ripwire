@@ -173,15 +173,28 @@ has   "$TMP/t2c.xml" "X1c twin: a same-module import is still read through: c's 
 # A token budget is a request the block must obey: the rows sit outside est_tokens, so under one they are NOT printed and a held marker
 # names the count. RED on train head b50d9518 (rows printed, no marker); H3/H4 are twins that hold on both.
 HB="--for=where sayHello used in use.ts is defined"
-ask --token-budget=3000 "$HB" >"$TMP/h1.xml"
-( cd "$FIX" || exit 1; RIPWIRE_NO_REEXPORT_HOPS=1 HOME="$TMP" "$BIN" "$FIX" --no-cache --token-budget=3000 "$HB" </dev/null 2>/dev/null ) >"$TMP/h1off.xml"
-if grep -qE '<(def|rx|u) ' "$TMP/h1.xml"; then no "H1 --token-budget=3000 prints no re-export row"; else ok "H1 --token-budget=3000 prints no re-export row"; fi
+# TOKEN-BUDGET-MONOTONE (2026-11-14): a budget at or above the whole price (est_tokens 975 + the blocks outside it) serves the
+# unbudgeted answer byte for byte, rows included, so 3000 no longer holds anything; the arms move to 100, under the price,
+# where the blocks are held (shed="held,…"). H3 compares through the hold's own disclosure (held in shed=, its legend unit,
+# est_tokens): the off switch holds nothing, so it names no held step.
+ask --token-budget=100 "$HB" >"$TMP/h1.xml" || no "H1: the budgeted run exited $?"
+( cd "$FIX" || exit 1; RIPWIRE_NO_REEXPORT_HOPS=1 HOME="$TMP" "$BIN" "$FIX" --no-cache --token-budget=100 "$HB" </dev/null 2>/dev/null ) >"$TMP/h1off.xml" || no "H3: the off-switch run exited $?"
+if grep -qE '<(def|rx|u) ' "$TMP/h1.xml"; then no "H1 --token-budget=100 prints no re-export row"; else ok "H1 --token-budget=100 prints no re-export row"; fi
 if grep -qF '<reexports held="budget" defs="1"/>' "$TMP/h1.xml"; then ok "H2 the held marker names the definitions (defs=1)"; else no "H2 the held marker names the definitions (defs=1)"; fi
 sed 's|<!-- reexports held=[^>]*-->||; s|<reexports held="budget"[^>]*/>||' "$TMP/h1.xml" >"$TMP/h1.stripped"
-if cmp -s "$TMP/h1off.xml" "$TMP/h1.stripped"; then ok "H3 the answer minus the marker is the off-switch answer, est_tokens included"; else no "H3 the held marker changed more than itself"; fi
+if python3 - "$TMP/h1.stripped" "$TMP/h1off.xml" <<'PY'
+import re, sys
+def norm( t ):
+    t = t.replace( 'shed="held,', 'shed="' )
+    t = re.sub( r' held \(the blocks outside est_tokens:[^)]*\),', '', t )
+    return re.sub( r'est_tokens="\d+"', 'est_tokens=""', t )
+a, b = ( norm( open( p, encoding = "utf-8" ).read() ) for p in sys.argv[ 1: ] )
+sys.exit( 0 if a == b and 'shed="held,' in open( sys.argv[ 1 ], encoding = "utf-8" ).read() else 1 )
+PY
+then ok "H3 the answer minus the marker (and the hold's own disclosure) is the off-switch answer"; else no "H3 the held marker changed more than itself"; fi
 ask "$HB" >"$TMP/h4.xml"
 if grep -qF '<rx p="ts/m/index.ts"' "$TMP/h4.xml" && ! grep -qF 'held="budget"' "$TMP/h4.xml"; then ok "H4 twin: no budget, the rows print and no marker"; else no "H4 twin: no budget, the rows print and no marker"; fi
-ask --token-budget=3000 "--for=add a new built-in filter command" >"$TMP/h5.xml"
+ask --token-budget=100 "--for=add a new built-in filter command" >"$TMP/h5.xml" || no "H5: the budgeted run exited $?"
 if grep -qF 'reexports' "$TMP/h5.xml"; then no "H5 twin: a task with no chain carries no marker under a budget"; else ok "H5 twin: a task with no chain carries no marker under a budget"; fi
 if command -v xmllint >/dev/null 2>&1; then
     for f in f1 f3 f4 g1 n3deep t2a t2b t2c h1; do if xmllint --noout "$TMP/$f.xml" 2>/dev/null; then ok "xml well-formed $f"; else no "xml malformed $f"; fi; done
