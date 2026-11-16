@@ -3207,6 +3207,11 @@ inline void writeMapInventoryXml( XmlWriter& w, const IngestResult& ing, const M
         w.write( " names_capped=\"1\" names_total=\"" );  w.write( std::to_string( inv.namesTotal ) );  w.write( "\"" );
         w.write( nextAttrXml( inv.namesNext, "names_next" ) );
     }
+    if( inv.dirsCapped )   // the ROW ceiling: rows cut, never files from listed=/unlisted= (mapinventory.h)
+    {
+        w.write( " dirs_capped=\"1\" dirs_total=\"" );  w.write( std::to_string( inv.dirTotal ) );  w.write( "\"" );
+        w.write( nextAttrXml( inv.dirsNext, "dirs_next" ) );   // rule 5: the cut is recoverable
+    }
     w.write( ">" );
     for( NodeId id : inv.entries )
     {
@@ -11278,6 +11283,7 @@ inline void writeMapInventoryJson( JsonWriter& w, const IngestResult& ing, const
     // each guard with its recovery argv (rule 5), as the XML twin prints them
     if( inv.entryTotal > inv.entries.size() ) { w.write( ",\"entries_capped\":true,\"entries_total\":" + std::to_string( inv.entryTotal ) + ",\"entries_next\":" );  writeJsonStr( w, inv.entriesNext, esc ); }
     if( inv.namesCapped )                     { w.write( ",\"names_capped\":true,\"names_total\":" + std::to_string( inv.namesTotal ) + ",\"names_next\":" );  writeJsonStr( w, inv.namesNext, esc ); }
+    if( inv.dirsCapped )                      { w.write( ",\"dirs_capped\":true,\"dirs_total\":" + std::to_string( inv.dirTotal ) + ",\"dirs_next\":" );  writeJsonStr( w, inv.dirsNext, esc ); }
     w.write( ",\"entry\":[" );
     for( std::size_t i = 0; i < inv.entries.size(); ++i )
     {
