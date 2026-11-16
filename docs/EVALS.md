@@ -16149,3 +16149,92 @@ Nothing at llvm-project scale. Nothing about the 319 `--for` cells' own complete
 T and R change which answer is produced, so their readouts are new populations, not a re-reading of that
 one. And no claim that the probe's −14 % for `<tail>` will survive its own band; it is the lead that
 justified writing this card, and Band T3 is the reason it might not.
+
+## READOUT — BAND M, first run: the set exists, and on its first use it found a cost Bands A–E could not see
+
+Built and run 2026-11-16, same day as the registration, on the ordering M2 requires: the baseline is the
+pre-change binary (`main` at `6cd55dbb0`, which carries the `<ls>` row ceiling and not the nesting), the
+after store is the item-1 binary, and both stamp their `--version` into the store.
+
+### The set
+
+**49 gold pairs over 12 repositories spanning 638× in code size** — koa 8,073 LOC to vscode 5,149,902,
+measured by an independent line count over code extensions, not by any tool. Five classes, every anchor a
+fact about the repository taken from its own manifests or directory layout:
+
+| class | cells | what the anchors are | where a correct answer must reach |
+| --- | --- | --- | --- |
+| `map-entry` | 5 | entry points the project's manifest or `add_executable` declares | ranked rows |
+| `map-surface` | 8 | the module a consumer imports first | ranked rows |
+| `map-subsystems` | 9 | top-level directories holding code, test trees excluded | both |
+| `map-config` | 12 | CI/build config — files with no ranked symbol | **inventory tier** |
+| `map-tests` | 7 | test roots — no ranked symbols of their own | **inventory tier** |
+| `map-docs` | 8 | documentation roots | **inventory tier** |
+
+Three classes land in the inventory **on purpose**: that is the surface the map encodings change, and Band
+F's failure was precisely a population with zero exposure to it.
+
+**A limitation found in the building, which Band M1's own wording missed.** The default map does not read
+the question, so all cells for a repo are the SAME document: 49 cells are **12 distinct answers** graded
+against 49 question/gold pairs. For a byte claim n is 12, not 49, and completeness cells are correlated
+within a repo. M1 asked for "≥ 40 cells" without noticing this; the count is met and the independence it
+implies is not. Absolute rates from this set are therefore not a quality claim — only deltas on the same
+set are, and the anchor errors that remain (envoy has no "public module", so `map-surface` there names a
+tool) cancel in a delta while they would bias an absolute figure down.
+
+**A grader change was required, with its own control.** The strict bound stripped only `<tail>`, which no
+map answer has, so the two bounds were identical on every map cell and could not tell an answer that
+EXPLAINS from one that LISTS. `<inv>` now strips too, justified by the tier's own legend — *"names only,
+weaker evidence than a ranked row"* — and the control is that the edit is inert where it must be: re-grading
+the 319 `--for` cells reproduces the committed baseline with **zero** changed grades, because none of them
+carries an `<inv>` element.
+
+### The first readout, and it is not what the byte table predicted
+
+```
+baseline (pre-#673)   lenient: complete 49.0 %  items 66.9 %    strict: complete 0.0 %  items 0.4 %
+after #673            lenient: complete 49.0 %  items 66.1 %    strict: complete 0.0 %  items 0.4 %
+```
+
+Two findings, in order of importance.
+
+**(1) STRICT IS 0.4 %. For orientation questions, the inventory tier is doing essentially all the work.**
+With `<inv>` treated as the weak evidence its own legend says it is, the ranked rows satisfy **0.4 % of the
+gold items** and not one of the 49 cells is complete. The map LISTS its answer to these questions; it does
+not explain it. That is the first measurement of this and it is a bigger fact about the map than any byte
+figure in this document.
+
+**(2) ITEM 1 DESTROYS THE LITERAL FORM OF 87 % OF ITS DIRECTORY PATHS — and Band A could not see it.**
+
+One cell changed grade (`map-docs-cpython`, 3/6 → 1/6) and the mechanism generalises far past it:
+
+```
+baseline   <ls p="Doc/c-api" n="80"/>              the literal string Doc/c-api is in the document
+after      <lsd p="Doc"><ls p="c-api" n="80"/>     the literal string Doc/c-api is NOWHERE in it
+```
+
+Counted over the 12 documents: **3,418 of 3,927 directory rows (87.0 %)** lose their literal path, including
+**95.2 % on vscode and 95.5 % on envoy**. Flat repositories lose none, because they get no wrappers at all.
+
+Band A asserted set identity by **flattening the rows and rejoining the prefix before comparing**, so it is
+blind to this by construction — the encoding is lossless under reconstruction and lossy under substring
+search. Any consumer that greps the map for a path stops finding it.
+
+**And the tier's own legend becomes false.** It instructs the reader: *"ripwire on p= ranks that
+directory."* After nesting, `p=` is `"_static"`, and `ripwire` on `_static` is not a command that runs. The
+document now contradicts its own instruction, which is a different and worse thing than being harder to
+read — by §9's standard it makes the answer WRONG, not merely shorter.
+
+### What follows, stated as a recommendation and not as a decision
+
+Item 1's trade, measured on both sides for the first time: **−7.66 % bytes on vscode and −9.20 % on envoy,
+against the literal searchability of 87 % of its directory paths and a legend instruction that no longer
+works.** The standing directives — quality first, never tune a default down for tokens, a cap that makes the
+answer wrong is a wrong answer — point one way, and the byte saving is real but small beside 24,808 tokens
+of follow-up. My recommendation is that item 1 **not ship as a default** on this evidence. The minimum
+alternative, if it does ship, is that the legend's `ripwire on p=` instruction is corrected to name the
+joined path and this 87 % figure is published beside the byte saving.
+
+Band M has paid for itself on its first run, which is the argument for building Bands T and R the same way:
+the cheap instrument found, in one afternoon, a cost that five pre-registered bands and a passing gate
+suite did not.
