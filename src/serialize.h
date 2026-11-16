@@ -5378,8 +5378,14 @@ inline std::vector<std::size_t> headRoundRobinOrder( std::size_t n, FileOf&& fil
 template< class EntryT >
 inline NodeId firstShownRowId( const std::vector<EntryT>& entries ) noexcept
 {
-    const auto it = std::ranges::find_if( entries, []( const EntryT& e ) { return !e.dropped; } );
-    return it == entries.end() ? kNoNode : it->id;
+    for( const EntryT& e : entries )
+    {
+        if( !e.dropped )
+        {
+            return e.id;
+        }
+    }
+    return kNoNode;
 }
 inline bool headRowMayOpenFile( const IngestResult& ing, NodeId id, NodeId firstShown, bool docMovesLast ) noexcept
 {

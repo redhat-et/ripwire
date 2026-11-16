@@ -504,6 +504,35 @@ inline std::vector<char> notLexRankedMask( const IngestResult& ing )
     return rankFlagMask( ing, kRankFlagNotLexRanked );
 }
 
+// NOSKIP-RANK: the GUESTS of a BM25 pass's counted corpus — the definitions in bundle-shaped files (model.h kRankFlagInBundle).
+// A guest is out of the statistics (mergedStatsOut below) but scores against the counted units' statistics, as every source
+// definition does, not against the whole corpus an OUT unit reads; a term only guests carry counts as one counted unit's. So a
+// bundle neither moves a source definition's score nor scores on a scale of its own. A corpus of guests alone (`countedUnits` 0)
+// has no counted statistics: there are no guests, and every unit scores as it did before the rule.
+struct BundleGuests
+{
+    std::vector<char> mask;   // empty: no guest
+    BundleGuests( const IngestResult& ing, std::size_t countedUnits ) : mask( countedUnits > 0 ? rankFlagMask( ing, kRankFlagInBundle ) : std::vector<char>{} ) {}
+    bool operator()( std::size_t i ) const noexcept { return !mask.empty() && mask[i] != 0; }
+};
+// The document frequency unit i's idf reads for one term: a guest's floors at one counted unit; an OUT unit adds the OUT units'.
+inline int unitTermDf( bool guest, bool out, int dfCounted, int dfOut ) noexcept
+{
+    if( guest )
+    {
+        return std::max( dfCounted, 1 );
+    }
+    return out ? dfCounted + dfOut : dfCounted;
+}
+// One unit's term presence into a per-term document count.
+inline void addTermDocs( std::vector<int>& df, const int* tfRow ) noexcept
+{
+    for( std::size_t u = 0; u < df.size(); ++u )
+    {
+        df[u] += tfRow[u] > 0 ? 1 : 0;
+    }
+}
+
 // The units a BM25 pass keeps out of its corpus statistics: the caller's `statsOut` (may be null), every unranked unit, and every
 // definition in a bundle-shaped file (NOSKIP-RANK, model.h kRankFlagInBundle, which every kRankFlagBundleCopy carries): such a unit
 // is scored, but it is no document of the corpus. A build output's copy of a compiler function would cut each name term's idf, and
@@ -560,13 +589,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
             statsS += std::size_t( statsWeight( i ) );
         }
     }
-    // NOSKIP-RANK: a definition in a bundle-shaped file (kRankFlagInBundle, out of the statistics through mergedStatsOut) is a
-    // GUEST of the counted corpus: it scores against the counted units' statistics (statsS, avgdl, dfreq), as every source
-    // definition does, not against the whole corpus an OUT unit reads; a term only guests carry counts as one counted unit's.
-    // So a bundle neither moves a source definition's score nor scores on a scale of its own. A corpus of guests alone
-    // (statsS 0) has no counted statistics: its units score as OUT units.
-    const std::vector<char> guests  = rankFlagMask( ing, kRankFlagInBundle );
-    const auto              isGuest = [ &guests, statsS ]( std::size_t i ) noexcept { return statsS > 0 && !guests.empty() && guests[i] != 0; };
+    const BundleGuests isGuest( ing, statsS );   // NOSKIP-RANK: scored against the counted statistics, no document of them
 
     // query subtokens — occurrence order preserved (BM25 adds one contribution PER occurrence, as before);
     // an empty query scores exactly 0 everywhere (0.0 survives the Section down-weight unchanged)
@@ -1345,15 +1368,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     avgdlAll /= double( allS ? allS : 1 );
     std::vector<int> dfOut( uniqueCount, 0 );   // per term, the OUT units carrying it (all 0 with no statsOut)
     std::vector<int> dfGuest( uniqueCount, 0 ); // per term, the guests carrying it (the pruned branch's bound only)
-    const auto       countInto = [ uniqueCount ]( std::vector<int>& df, const int* tfRow )
-    {
-        for( std::size_t u = 0; u < uniqueCount; ++u )
-        {
-            df[u] += tfRow[u] > 0 ? 1 : 0;
-        }
-    };
-    const auto countOut   = [ & ]( const int* tfRow ) { countInto( dfOut, tfRow ); };
-    const auto countGuest = [ & ]( const int* tfRow ) { countInto( dfGuest, tfRow ); };
+    const auto       countOut = [ & ]( std::size_t i, const int* tfRow ) { addTermDocs( isGuest( i ) ? dfGuest : dfOut, tfRow ); };
 
     const Bm25Params    bm25Params = resolveBm25Params();       // A4: the ONE definition — see above
     const double        k1 = bm25Params.k1, b = bm25Params.b;
@@ -1375,13 +1390,9 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
             const int* tfRow = tfFlat.data() + i * uniqueCount;
             bool       any   = false;
             const int  w     = statsWeight( i );
-            if( isGuest( i ) )
+            if( w == 0 && !isUnranked( i ) )
             {
-                countGuest( tfRow );
-            }
-            else if( w == 0 && !isUnranked( i ) )
-            {
-                countOut( tfRow );
+                countOut( i, tfRow );
             }
             for( std::size_t u = 0; u < uniqueCount; ++u )
             {
@@ -1435,8 +1446,8 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                 const int    nAll = n + dfOut[u];   // an OUT unit's idf: the larger of the two bounds the contribution
                 const double idfIn  = n > 0 ? std::log( ( double( statsS ) - n + 0.5 ) / ( n + 0.5 ) + 1.0 ) : 0.0;
                 const double idfAll = dfOut[u] > 0 ? std::log( ( double( allS ) - nAll + 0.5 ) / ( nAll + 0.5 ) + 1.0 ) : 0.0;
-                const int    nG   = std::max( n, 1 );   // a guest's idf (isGuest): the counted corpus, its df floored at one unit
-                const double idfG = dfGuest[u] > 0 ? std::log( ( double( statsS ) - nG + 0.5 ) / ( nG + 0.5 ) + 1.0 ) : 0.0;
+                const int    nG   = unitTermDf( true, false, n, 0 );   // a guest's idf (BundleGuests): the counted corpus
+                const double idfG = std::log( ( double( statsS ) - nG + 0.5 ) / ( nG + 0.5 ) + 1.0 ) * double( dfGuest[u] > 0 );
                 const double idf  = std::max( { idfIn, idfAll, idfG } );
                 const double T    = double( tfMaxOf[u] );
                 const double cap1 = bm25ImpactBound( idf, T, bm25Params );          // A4: shared bound, same (k1,b)
@@ -1492,7 +1503,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                 {
                     continue; // termKept is all-1 disarmed, so this reads as the historical `tf == 0`
                 }
-                const int    n   = guestI ? std::max( dfreq[u], 1 ) : dfreq[u] + ( outI ? dfOut[u] : 0 );   // a guest's df floors at one counted unit
+                const int    n   = unitTermDf( guestI, outI, dfreq[u], dfOut[u] );
                 const double idf = std::log( ( Si - n + 0.5 ) / ( n + 0.5 ) + 1.0 );
                 sc += idf * ( tf * ( k1 + 1.0 ) ) / ( tf + k1 * ( 1.0 - b + b * dl[i] / ( avgI > 0 ? avgI : 1.0 ) ) );
             }
@@ -1530,9 +1541,9 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     for( std::size_t i = 0; i < S; ++i )
     {
         const int w = statsWeight( i );
-        if( w == 0 && !isUnranked( i ) && !isGuest( i ) )
+        if( w == 0 && !isUnranked( i ) )
         {
-            countOut( tfFlat.data() + i * uniqueCount );
+            countOut( i, tfFlat.data() + i * uniqueCount );
         }
         for( std::size_t u = 0; u < uniqueCount; ++u )
         {
@@ -1566,7 +1577,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
             {
                 continue; // old: docs[i].find( qt ) == end — termKept is all-1 disarmed, so this is that
             }
-            const int    n   = guestI ? std::max( dfreq[u], 1 ) : dfreq[u] + ( outI ? dfOut[u] : 0 );   // a guest's df floors at one counted unit
+            const int    n   = unitTermDf( guestI, outI, dfreq[u], dfOut[u] );
             const double idf = std::log( ( Si - n + 0.5 ) / ( n + 0.5 ) + 1.0 );
             sc += idf * ( tf * ( k1 + 1.0 ) ) / ( tf + k1 * ( 1.0 - b + b * dl[i] / ( avgI > 0 ? avgI : 1.0 ) ) );
         }
@@ -1696,11 +1707,9 @@ inline std::vector<float> lexicalScoresNameExactTiered( const IngestResult& ing,
     // A definition in a bundle-shaped file (kRankFlagInBundle, NOSKIP-RANK) is a GUEST, as in lexicalScoresTiered: scored against
     // the counted units' statistics (its df floored at one unit), but no document of them — its length, its document frequency
     // and its count stay out. A corpus of guests alone has no counted statistics: there every unit counts, as before the rule.
-    const std::vector<char> unranked  = notLexRankedMask( ing );
-    const std::size_t       countedS  = S - symbolsWithRankFlag( ing, kRankFlagNotLexRanked | kRankFlagInBundle );
-    const std::vector<char> bundled   = countedS > 0 ? rankFlagMask( ing, kRankFlagInBundle ) : std::vector<char>{};
-    const auto              isGuest   = [ &bundled ]( std::size_t i ) noexcept { return !bundled.empty() && bundled[i] != 0; };
-    const std::size_t       rankedS   = bundled.empty() ? S - symbolsWithRankFlag( ing, kRankFlagNotLexRanked ) : countedS;
+    const std::vector<char> unranked = notLexRankedMask( ing );
+    const BundleGuests      isGuest( ing, S - symbolsWithRankFlag( ing, kRankFlagNotLexRanked | kRankFlagInBundle ) );
+    const std::size_t       rankedS  = S - symbolsWithRankFlag( ing, isGuest.mask.empty() ? kRankFlagNotLexRanked : kRankFlagNotLexRanked | kRankFlagInBundle );
     // document = whole name (+ container::name as a second whole token, when a scope exists)
     for( std::size_t i = 0; i < S; ++i )
     {
@@ -1732,7 +1741,7 @@ inline std::vector<float> lexicalScoresNameExactTiered( const IngestResult& ing,
     double avgdl = 0;
     for( std::size_t i = 0; i < S; ++i )
     {
-        avgdl += isGuest( i ) ? 0 : dl[i];
+        avgdl += dl[i] * int( !isGuest( i ) );
     }
     avgdl /= double( rankedS ? rankedS : 1 );
     std::vector<int> dfreq( uniqueCount, 0 );
@@ -1765,7 +1774,7 @@ inline std::vector<float> lexicalScoresNameExactTiered( const IngestResult& ing,
             {
                 continue;
             }
-            const int    n   = isGuest( i ) ? std::max( dfreq[u], 1 ) : dfreq[u];   // a guest's df floors at one counted unit
+            const int    n   = unitTermDf( isGuest( i ), false, dfreq[u], 0 );   // a guest's df floors at one counted unit
             const double idf = std::log( ( double( rankedS ) - n + 0.5 ) / ( n + 0.5 ) + 1.0 );
             sc += idf * ( tf * ( k1 + 1.0 ) ) / ( tf + k1 * ( 1.0 - b + b * dl[i] / ( avgdl > 0 ? avgdl : 1.0 ) ) );
         }
