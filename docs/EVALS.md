@@ -15992,3 +15992,106 @@ change with its own band and is deliberately out of scope here; it is recorded w
 the next round starts from the number. It is also the honest answer to "an answer should be bounded by the
 question, not the corpus": this lane bounded the *count-only* tail and fixed *where* the names go, and the
 remaining growth term is a schema that spells every ancestor directory once per row.
+
+## PRE-REGISTRATION 2026-11-16 — five LOSSLESS encodings for the map, registered before the code exists
+
+The owner's cost metric is **expected tokens to a complete answer**, not answer size: *complete answers
+with efficient bytes is the goal ... 3x follow-on grep do not save tokens.* Priced against a measured
+grep-and-read follow-up of **24,808 tokens**, ripwire's vscode map sits at a break-even of **3.74
+follow-ups** — it has to save about four greps to pay for itself. The `<ls>` row ceiling took that from
+3.74 to 2.62. This card registers five encodings that aim to reach ~2.0 **without removing one byte of
+answer content**, which is the whole point: every item below is a re-encoding, never a cut, so §9's
+terminality objective is untouched and no `shown=`/`capped=`/`next=` vocabulary is needed for any of them.
+
+An independent audit measured each item by rewriting a real map, re-serialising, and diffing against the
+original (an untransformed round trip asserted byte-identical; every rewrite `xmllint`-clean). Those
+numbers are the PREDICTION this card is registered against, not the result.
+
+| item | mechanism | predicted saving (vscode / envoy / nushell) |
+| --- | --- | --- |
+| 1 | nest `<ls>` rows under a synthesised `<d p="prefix">`, depth ≤ 2 | 33,707 / 26,525 / 4,989 B |
+| 2 | drop `t=` kind-legend comments for kinds this map never prints | 548 / 788 / 293 B |
+| 3 | merge identical sibling `<c>` rows into `x=N` | 743 / 476 / 597 B |
+| 4 | self-close childless `<s …></s>` | 249 / 243 / 255 B |
+| 5 | omit `<ls n=>` when it equals the name count in `f=` | 6,276 / 5,658 / 1,269 B |
+
+### Band A — LOSSLESSNESS, as a set identity and not as a byte count
+
+The flattened `<ls>` row set after item 1 must equal the row set before it: same directories, same `n=`,
+same `f=` membership, same count. Item 5's omitted `n=` must be re-derivable from `f=` for **every** row
+that omits it. Items 3 and 4 must leave the callee multiset and the symbol row set identical. **FAIL if
+any one row's content changes**, whatever the byte saving. This band is the reason these are encodings
+and not cuts, so it is the band that can sink the card on its own.
+
+### Band B — the attribute vocabulary is REGISTERED, not merely emitted
+
+`<d p=>` and the widened `x=` clause must each have a row in `src/compactlegend.h`'s dictionary. An
+attribute emitted without a dictionary row ships undocumented and the compact dialect's generic
+`*_capped` fallback does not cover these names. FAIL if `--legend=full` does not define every new name.
+
+### Band C — bytes, per repo and never pooled
+
+Item 1 ≥ 15 % of the vscode map and ≥ 15 % of envoy's (predicted 20.5 % / 20.3 %, so the band carries a
+5-point margin). Items 1–5 together ≥ 15 % on vscode and envoy; on the small repos (koa, htop, tmux,
+hono, textual) the band is only that the map does not GROW. Reported per repo. A pooled average would
+hide item 1 paying nothing on a flat repo, which is exactly what it does on koa (4 B).
+
+### Band D — row ORDER is disclosed where it moves
+
+The audit measured item 1 moving 8 rows on vscode and 6 on nushell, 0 on envoy and cpython. §9.1 says
+priority is never source order and never path order, so a reordering is allowed — but it must be stated
+in the legend clause and asserted by the gate, not discovered later. FAIL if the order changes in a way
+the clause does not describe.
+
+### Band E — DEPTH is a declared constant with a measured reason
+
+Depth ≤ 2 is registered, against ≤ 1 (25,437 B on vscode) and unbounded (35,313 B, max depth 8). Depth 2
+takes 95 % of the unbounded saving for a path that needs at most two joins to reconstruct. FAIL if the
+shipped default is not 2, or if the constant is not named and reachable from `--help`/LIMITS.
+
+### Band F — COMPLETENESS, re-graded on the new format (owner's instruction, 2026-11-16)
+
+Bands A–E prove the *information* is identical. They cannot prove the document is as READABLE: a
+differently-shaped answer could be harder for a model to use with every byte of content present, and no
+byte-identity band can see that. So the card registers the one instrument that can.
+
+**The band.** Re-collect the answer set with the new binary and re-grade it through
+`harness/anchor_grade.py` against the same gold. The baseline is the recorded run: **285 gradable cells,
+73 % lenient / 65 % strict**, per-use-case figures in `results/WP2/anchor_grade_CLEAN_20261115.json`.
+
+- PASS requires the pooled lenient and strict rates to be **no lower than baseline minus 2 points**
+  (73 → ≥71, 65 → ≥63). The margin is for grader noise on a 285-cell population, not for a real drop.
+- The per-use-case rates are read **beside** the pooled pair and never instead of it. `mf1` carries 110
+  of the 285 cells, so a pooled rate that holds while `mf1` falls is a FAIL of this band, not a pass:
+  report `mf1`, `how-it-works`, `orient` and `trace` individually (the four largest).
+- The comparison is **same gold, same cells, same grader** — only the binary changes. A re-graded cell
+  count other than 285, or a different ungradable count than the baseline's 6, invalidates the
+  comparison and the band is NOT-ESTABLISHED rather than PASS.
+- A cell the new format makes ungradable is a FAIL, not an exclusion. The grader's own failure mode is
+  to read an answer FORMAT rather than an answer, and items 1 and 5 change the format — so any rise in
+  ungradable cells is evidence against this change, never noise to drop.
+
+**The baseline population, verified rather than assumed.** `anchor_grade_CLEAN_20261115.json` holds
+**291** cells, and the completeness verdict lives in **three different field shapes**: 156 cells carry
+`lenient`/`strict`, 129 carry `verdict` (`complete`/`partial`/`unusable`/`empty`) with `hit`/`total`, and
+6 carry `false_positive`/`named` — the precision shape, which cannot be graded for completeness. So the
+gradable population is **156 + 129 = 285, with 6 excluded**, which is what the recorded 73 %/65 % is
+computed over, and `skipped` is 2 beside it.
+
+This is a registered hazard, not trivia: `harness/token_by_usecase.py`'s own docstring records that its
+first version read **only one of the two completeness shapes**. A re-grade that does the same would
+report ~156 or ~129 cells and look like a population change rather than a reading bug. So the band
+requires the re-grade to print its per-shape counts (156/129/6) and to match them before any rate is
+compared. A shape count that moves is NOT-ESTABLISHED, exactly as a total count that moves is.
+
+**Why this band and not a reasoning argument.** The honest position is that I can assert content identity
+and cannot assert readability; this band is what converts the second half from a claim into a
+measurement. If it fails while Bands A–C pass, the encoding is correct and still wrong to ship.
+
+### What this card does NOT claim
+
+Nothing about the two items the audit declined to recommend (`f=` extension factoring, which pays least
+where the map is biggest, and `k=` re-scaling, ~1 KB flat), and nothing about ranking or cutting the
+NAMED `<ls>` rows — that still needs a terminality instrument and is not attempted here. No token claim
+beyond the conversion already registered (2.44–4.66 B/token, cross-checked against the map's own
+`est_tokens=` at 2.50 B/token on htop, 1 % apart). No claim at llvm-project scale.
