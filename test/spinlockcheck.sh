@@ -25,21 +25,27 @@
 #       Spinlock::lock, not off the source.
 #   (D) sizeof( Spinlock ) == 4, and an InternedText shard fits ONE destructive-interference line.
 #   (E) it satisfies Lockable, so `std::lock_guard` and `std::scoped_lock` take it unchanged.
-#   (F) unlock is a RELEASE store and lock an ACQUIRE exchange — the pairing TSan needs; asserted by
-#       compiling a translation unit that would warn under -Wthread-safety were the orders wrong, and
-#       by the ASan/TSan arm of the suite running (A) under contention.
+#   (F) the spin-wait hint is a REAL INSTRUCTION, read off the object: RW_SPIN_PAUSE() expands to the
+#       architecture's hint (AArch64 YIELD, x86 PAUSE), and a loop that does not call it does not carry
+#       one — so a macro that silently degrades to ( (void)0 ) on a compiler we ship for is caught here
+#       rather than measured as a mysteriously hotter spin.
+#
+# NOT AN ARM HERE, on purpose: that unlock is a RELEASE store and lock an ACQUIRE exchange is a memory
+# ORDER claim, and no compile-time assertion proves it. The ASan/TSan arm of the suite running (A) under
+# contention is the evidence for that pairing, and it lives there rather than being restated here.
 #
 # RED-FIRST: every arm fails on main 0217049f2, where src/infra/spinlock.h does not exist.
 #
-# Usage: test/spinlockcheck.sh [BIN]
+# Usage: test/spinlockcheck.sh    (an argument is accepted and IGNORED — pargates passes every gate the
+# binary under test, and this gate binds none: its subject is src/infra/spinlock.h, the compiler's output
+# for it, and the shard layout in src/infra/internedtext.h. Nothing here executes build/ripwire, which is
+# why test/binoverridecheck.sh carries a pinned exemption row for this gate; that row's reason cites the
+# ABSENCE of RIPWIRE_BIN and $BIN from this file, so do not reintroduce either without updating it.)
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
-[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
-echo "spinlockcheck: BIN=$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 HDR="$ROOT/src/infra/spinlock.h"
 
@@ -268,6 +274,54 @@ EOF
 "$CXX" -std=c++23 -O2 $INC "$TMP/lockable.cpp" -o "$TMP/lockable" 2>"$TMP/lockable.err" && "$TMP/lockable" \
     && ok "(E1) satisfies Lockable: lock_guard, scoped_lock and try_lock all work" \
     || no "(E1) not usable as a standard Lockable: $( head -2 "$TMP/lockable.err" )"
+
+# ── (F) the spin-wait hint reaches the object as an instruction ──────────────────────────────────────
+# RW_SPIN_PAUSE() is the ladder's cheapest rung, and its #else arm is ( (void)0 ) by design — an
+# unrecognised architecture should spin correctly, just hotter. That same fallback is what makes a
+# REGRESSION invisible: if the arm we do ship stops compiling, or an #if is mis-spelled, the macro
+# quietly becomes nothing and the only symptom is a slower spin nobody measures. So read the object.
+#
+# The expected mnemonic comes from `uname -m` rather than from the preprocessor, which makes this arm an
+# independent reading of the same question platform.h answers with its #if ladder: if the two disagree,
+# the arm fails, which is the point. A machine neither family recognises reports NOT-ESTABLISHED.
+cat > "$TMP/pause.cpp" <<'EOF'
+#include "platform.h"
+extern "C" void spin3()   { for( int i = 0; i < 3; ++i ) { RW_SPIN_PAUSE(); } }
+extern "C" void nospin3() { for( volatile int i = 0; i < 3; ++i ) { } }
+EOF
+case "$( uname -m )" in
+    arm64|aarch64)   WANT='\byield\b';  WANTNAME='YIELD' ;;
+    x86_64|amd64)    WANT='\bpause\b';  WANTNAME='PAUSE' ;;
+    i386|i686)       WANT='\bpause\b';  WANTNAME='PAUSE' ;;
+    *)               WANT='';           WANTNAME="$( uname -m )" ;;
+esac
+if [ -z "$WANT" ]; then
+    ok "(F0) INFO: $WANTNAME is neither an AArch64 nor an x86 machine — this arm knows no hint mnemonic for it and reports NOT-ESTABLISHED rather than reading the silence as a pass; platform.h's #else arm spins correctly here, just hotter"
+elif "$CXX" -std=c++23 -O2 $INC -c "$TMP/pause.cpp" -o "$TMP/pause.o" 2>"$TMP/pause.err"; then
+    if command -v objdump >/dev/null 2>&1; then PDIS="objdump -d"; else PDIS="otool -tV"; fi
+    $PDIS "$TMP/pause.o" > "$TMP/pause.txt" 2>/dev/null
+    # Split the text at nospin3 so the control cannot read spin3's hint: a mach-o object renames both to
+    # local labels, so match on the SYMBOL NAME as the disassembler prints it, and fall back to counting
+    # over the whole object only when neither name appears (then the control is the weaker claim, and
+    # (F2) says so rather than pretending the split happened).
+    hits="$( grep -cE "$WANT" "$TMP/pause.txt" )"
+    if [ "$hits" -ge 1 ]; then
+        ok "(F1) RW_SPIN_PAUSE() emits $WANTNAME ($hits site(s) in the object) — the hint is a real instruction, not a dropped macro"
+    else
+        no "(F1) RW_SPIN_PAUSE() emitted no $WANTNAME on $( uname -m ): the macro degraded to nothing for this compiler, so the ladder's cheapest rung is a plain busy spin"
+    fi
+    nos="$( awk -v want="$WANT" 'BEGIN{ inn=0; n=0 } /nospin3/ { inn=1 } inn && $0 ~ want { n++ } END{ print n }' "$TMP/pause.txt" )"
+    namesSeen="$( grep -cE 'nospin3' "$TMP/pause.txt" )"
+    if [ "$namesSeen" -eq 0 ]; then
+        ok "(F2) INFO: this disassembler prints no nospin3 label, so the control could not be scoped to it — (F1) stands on its own and this arm claims nothing"
+    elif [ "$nos" = "0" ]; then
+        ok "(F2) control: the loop that does NOT call the macro carries no $WANTNAME — (F1) is reading the call, not the architecture"
+    else
+        no "(F2) control: the loop that never calls RW_SPIN_PAUSE() still shows $nos $WANTNAME site(s) — the mnemonic is not evidence of the macro, so (F1) proves nothing"
+    fi
+else
+    no "(F) the hint program does not compile: $( head -3 "$TMP/pause.err" )"
+fi
 
 [ "$fail" = 0 ] && echo "spinlockcheck: ALL PASS" || echo "spinlockcheck: FAILURES"
 exit "$fail"
