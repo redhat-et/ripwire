@@ -94,6 +94,245 @@ inline constexpr std::size_t kInventoryEntryCap    = 256;
 inline constexpr std::size_t kInventoryCountOnlyCap = 32;
 inline constexpr std::size_t kInventoryDirCap       = 2048;
 
+// ── ITEM 1 of the five LOSSLESS map encodings (docs/EVALS.md, "five LOSSLESS encodings for the map", ──────
+//    pre-registered 2026-11-16 before this code existed)
+//
+// The <ls> rows spell every ancestor directory once PER ROW. On vscode that is ~27 B of path per row to
+// deliver filenames, 54 KB of directory strings for 1,998 names, and it grows with the corpus rather than
+// with the question. Nesting the rows under a synthesised `<d p="SEG">` wrapper spells each shared segment
+// ONCE: `<ls p="skills/hermes" …/>` becomes `<d p="skills"><ls p="hermes" …/>…</d>`, and a reader rejoins a
+// row to its absolute directory by concatenating its ancestors' p= segments.
+//
+// This is an ENCODING, not a cut. No row, no n=, no f= name is removed, so §9's terminality objective is
+// untouched and none of the shown=/capped=/next= vocabulary applies. test/invnestcheck.sh asserts exactly
+// that, against the FLAT JSON twin of the same answer (writeMapInventoryJson) rather than against a pinned
+// expectation — one binary, one index, two renderings, so the oracle cannot go vacuous once this lands.
+//
+// DEPTH is a declared constant with a measured reason (the registration's Band E). Against depth 1
+// (25,437 B saved on vscode) and unbounded (35,313 B, nesting up to 8 deep), depth 2 takes 33,707 B — 95 %
+// of the unbounded saving for a path a reader reconstructs with at most two joins. Deeper nesting buys
+// diminishing bytes and costs a reader one more join per level, so the default is fixed here and published
+// in docs/LIMITS.md.
+inline constexpr std::size_t kInventoryNestDepth = 2;
+
+// WHETHER A GROUP IS EMITTED IS ARITHMETIC, NOT A TUNING KNOB. A `<d p="SEG">` wrapper costs
+// len( `<d p="` ) + len( SEG ) + len( `">` ) + len( `</d>` ) = len( SEG ) + 12 bytes, and saves len( SEG ) + 1
+// on every row it covers (the segment and its separator). So it is emitted only where it pays for itself,
+// which is why a flat repository gets no wrappers at all instead of a document that grew. On this repository
+// exactly one prefix qualifies (skills/, 20 rows, 122 B net) and `.github` and `prompts` at two rows each are
+// correctly refused — both sides of that decision are what test/invnestcheck.sh arm (C1) reads.
+inline constexpr std::size_t kInventoryNestWrapperBytes = 12;
+
+inline bool inventoryNestPays( std::string_view seg, std::size_t rows ) noexcept
+{
+    return rows * ( seg.size() + 1 ) > seg.size() + kInventoryNestWrapperBytes;
+}
+
+// One row of the emission plan: which MapInventory::dirs row to print, and how many of its own leading path
+// segments its ancestors already spell. depth is also the number of open <d> elements around it.
+struct InventoryNestRow
+{
+    std::uint32_t row   = 0;
+    std::uint8_t  depth = 0;
+};
+
+// The n-th '/'-separated segment of a directory path, or empty past the end. "." (the root row) is one
+// segment and never groups, because a wrapper around it would spell a prefix no other row shares.
+inline std::string_view inventoryPathSeg( std::string_view dir, std::size_t n ) noexcept
+{
+    std::size_t at = 0;
+    for( std::size_t i = 0; i < n; ++i )
+    {
+        const std::size_t slash = dir.find( '/', at );
+        if( slash == std::string_view::npos ) { return {}; }
+        at = slash + 1;
+    }
+    const std::size_t slash = dir.find( '/', at );
+    return dir.substr( at, slash == std::string_view::npos ? std::string_view::npos : slash - at );
+}
+
+inline std::size_t inventoryPathSegCount( std::string_view dir ) noexcept
+{
+    if( dir.empty() ) { return 0; }
+    return 1 + static_cast<std::size_t>( std::count( dir.begin(), dir.end(), '/' ) );
+}
+
+// The plan: a stable hierarchical group-by, deterministic and order-preserving at every level.
+//
+// A group's rows are made CONTIGUOUS at the position of the FIRST of them, and nothing else moves. That is
+// the one reordering this encoding causes, §9.1 permits it (priority is never source order and never path
+// order), and it is stated in the legend clause and asserted by arm (D1) rather than left to be discovered.
+//
+// A row joins a group only if it keeps at least one segment of its own, so no row is ever emitted with an
+// empty p=. That is not cosmetic: a `<ls p="" n="14"/>` row shipped once already (the self-move bug in the
+// in-place compaction), and an empty p= inside a wrapper is indistinguishable from the wrapper's own
+// directory, which would make the flattening ambiguous and Band A unprovable.
+//
+// No std::map / std::unordered_map (CONTRIBUTING's container rule): grouping is a stable sort of 32-bit
+// indices plus a linear run scan, which is also what makes the output independent of hash order.
+// kNoInventoryNestRun marks a row that joined no group at the level being considered.
+inline constexpr std::uint32_t kNoInventoryNestRun = 0xFFFFFFFFu;
+
+// The groups that pay at ONE level, over the rows allowed to join one there. `depth` is 1 for the outermost
+// wrapper and 2 for a wrapper inside it, and the segment a group is keyed on is the ( depth - 1 )-th.
+//
+// A row joins only if it keeps at least one segment of its own, so no row is ever emitted with an empty p=.
+// That is not cosmetic: a `<ls p="" n="14"/>` row shipped once already (the self-move bug in the in-place
+// compaction), and an empty p= inside a wrapper is indistinguishable from the wrapper's own directory, which
+// would make the flattening ambiguous and the registration's Band A unprovable.
+//
+// No std::map / std::unordered_map (CONTRIBUTING's container rule): a stable sort of 32-bit indices plus a
+// linear run scan, which is also what keeps the output independent of hash order.
+inline std::vector<std::vector<std::uint32_t>> inventoryNestRuns( const MapInventory& inv,
+                                                                  const std::vector<std::uint32_t>& members,
+                                                                  std::size_t depth )
+{
+    const auto segOf = [ &inv, depth ]( std::uint32_t i ) noexcept
+    {
+        return inventoryPathSeg( inv.dirs[ i ].dir, depth - 1 );
+    };
+    std::vector<std::uint32_t> bySeg = members;
+    std::stable_sort( bySeg.begin(), bySeg.end(), [ & ]( std::uint32_t a, std::uint32_t b ) noexcept
+    {
+        return segOf( a ) < segOf( b );
+    } );
+
+    std::vector<std::vector<std::uint32_t>> runs;
+    for( std::size_t at = 0; at < bySeg.size(); )
+    {
+        const std::string_view seg = segOf( bySeg[ at ] );
+        std::vector<std::uint32_t> group;
+        std::size_t end = at;
+        for( ; end < bySeg.size() && segOf( bySeg[ end ] ) == seg; ++end )
+        {
+            if( inventoryPathSegCount( inv.dirs[ bySeg[ end ] ].dir ) > depth ) { group.push_back( bySeg[ end ] ); }
+        }
+        at = end;
+        if( seg.empty() || !inventoryNestPays( seg, group.size() ) ) { continue; }
+        std::sort( group.begin(), group.end() );        // row order inside the group
+        runs.push_back( std::move( group ) );
+    }
+    return runs;
+}
+
+inline std::size_t inventoryNestRunSaving( const MapInventory& inv,
+                                           const std::vector<std::vector<std::uint32_t>>& runs, std::size_t depth )
+{
+    std::size_t saved = 0;
+    for( const std::vector<std::uint32_t>& run : runs )
+    {
+        const std::string_view seg = inventoryPathSeg( inv.dirs[ run.front() ].dir, depth - 1 );
+        saved += run.size() * ( seg.size() + 1 ) - ( seg.size() + kInventoryNestWrapperBytes );
+    }
+    return saved;
+}
+
+// Which group each row joined, at which level, and what the wrappers save in row bytes.
+struct InventoryNestAssign
+{
+    std::vector<std::vector<std::uint32_t>> runs;       // depth-1 groups, each a member list in row order
+    std::vector<std::vector<std::uint32_t>> subRuns;    // depth-2 groups, each inside exactly one of the above
+    std::vector<std::uint32_t>              runOf;      // row -> index into runs, or kNoInventoryNestRun
+    std::vector<std::uint32_t>              subRunOf;   // row -> index into subRuns, or kNoInventoryNestRun
+    std::vector<std::uint8_t>               depthOf;    // row -> open wrappers around it (0, 1 or 2)
+    std::size_t                             rowSaving = 0;
+};
+
+inline InventoryNestAssign inventoryNestAssignGroups( const MapInventory& inv )
+{
+    const std::size_t n = inv.dirs.size();
+    InventoryNestAssign a{ {}, {}, std::vector<std::uint32_t>( n, kNoInventoryNestRun ),
+                           std::vector<std::uint32_t>( n, kNoInventoryNestRun ), std::vector<std::uint8_t>( n, 0 ), 0 };
+    std::vector<std::uint32_t> all( n );
+    std::iota( all.begin(), all.end(), 0u );
+
+    a.runs      = inventoryNestRuns( inv, all, 1 );
+    a.rowSaving = inventoryNestRunSaving( inv, a.runs, 1 );
+    for( std::uint32_t r = 0; r < a.runs.size(); ++r )
+    {
+        for( std::uint32_t m : a.runs[ r ] ) { a.runOf[ m ] = r; a.depthOf[ m ] = 1; }
+    }
+    if( kInventoryNestDepth < 2 ) { return a; }
+
+    for( const std::vector<std::uint32_t>& run : a.runs )
+    {
+        std::vector<std::vector<std::uint32_t>> inner = inventoryNestRuns( inv, run, 2 );
+        a.rowSaving += inventoryNestRunSaving( inv, inner, 2 );
+        for( std::vector<std::uint32_t>& group : inner )
+        {
+            for( std::uint32_t m : group ) { a.subRunOf[ m ] = static_cast<std::uint32_t>( a.subRuns.size() ); a.depthOf[ m ] = 2; }
+            a.subRuns.push_back( std::move( group ) );
+        }
+    }
+    return a;
+}
+
+// The emission ORDER: walk the rows in their original order and splice each group in whole at its first
+// member. A group's rows become contiguous at the position of the first of them, and nothing else moves —
+// the one reordering this encoding causes. §9.1 permits it (priority is never source order and never path
+// order); it is stated in kMapInventoryNestLegend and asserted by test/invnestcheck.sh arm (D1).
+inline void inventoryNestEmitRun( const InventoryNestAssign& a, std::uint32_t run,
+                                  std::vector<std::uint8_t>& subDone, std::vector<InventoryNestRow>& plan )
+{
+    for( std::uint32_t m : a.runs[ run ] )
+    {
+        const std::uint32_t sr = a.subRunOf[ m ];
+        if( sr == kNoInventoryNestRun )  { plan.push_back( { m, 1 } ); continue; }
+        if( subDone[ sr ] )              { continue; }     // already spliced at its own first member
+        subDone[ sr ] = 1;
+        for( std::uint32_t sm : a.subRuns[ sr ] ) { plan.push_back( { sm, a.depthOf[ sm ] } ); }
+    }
+}
+
+inline std::vector<InventoryNestRow> inventoryNestOrder( const InventoryNestAssign& a, std::size_t n )
+{
+    std::vector<InventoryNestRow> plan;
+    plan.reserve( n );
+    std::vector<std::uint8_t> runDone( a.runs.size(), 0 );
+    std::vector<std::uint8_t> subDone( a.subRuns.size(), 0 );
+    for( std::uint32_t i = 0; i < n; ++i )
+    {
+        const std::uint32_t r = a.runOf[ i ];
+        if( r == kNoInventoryNestRun )  { plan.push_back( { i, 0 } ); continue; }
+        if( runDone[ r ] )              { continue; }      // already spliced at its own first member
+        runDone[ r ] = 1;
+        inventoryNestEmitRun( a, r, subDone, plan );
+    }
+    return plan;
+}
+
+// clauseBytes is the size of the legend clause a wrapped document must carry (kMapInventoryNestLegend, passed
+// in by the caller that owns both — it is defined below this function, and passing it keeps the dependency
+// explicit rather than reordering the legend block). It is the DOCUMENT-LEVEL threshold, and a per-group
+// decision alone is not enough: a document where one prefix barely pays still carries the whole clause.
+// Measured: tmux saved 5 B of rows and textual 54 B against a ~516 B clause, so both documents GREW by ~700 B
+// until this check existed. With it, a wrapped document is smaller than its flat self by construction, which
+// is what the registration's Band C asks of the small repos.
+//
+// The threshold does NOT vary by legend dialect on purpose. --legend=compact charges far less for the same
+// vocabulary, so a dialect-sensitive rule would make the same answer's ROWS differ between dialects and leave
+// test/invnestcheck.sh's oracle dialect-dependent. One rule, priced at the dearer dialect, costs a few bytes
+// of unclaimed saving on a tiny compact map and keeps one encoding for one answer.
+//
+// Dropping EVERY wrapper rather than the weakest is deliberate: a subset decision would depend on the order
+// the groups were considered in, and this way the answer is a function of the row set alone.
+inline std::vector<InventoryNestRow> inventoryNestPlan( const MapInventory& inv, std::size_t clauseBytes )
+{
+    const std::size_t n = inv.dirs.size();
+    std::vector<InventoryNestRow> flat;
+    flat.reserve( n );
+    for( std::uint32_t i = 0; i < n; ++i ) { flat.push_back( { i, 0 } ); }
+    if( n == 0 || kInventoryNestDepth == 0 ) { return flat; }
+
+    const InventoryNestAssign a = inventoryNestAssignGroups( inv );
+    if( a.rowSaving <= clauseBytes ) { return flat; }
+
+    std::vector<InventoryNestRow> plan = inventoryNestOrder( a, n );
+    ENSURES( plan.size() == n, "the plan emits every inventory row exactly once" );
+    return plan;
+}
+
+
 // Directory components whose subtree rolls up count-only. pathTierOf's test/bench/fixture conventions plus the
 // presentational ones (examples, docs, regress, samples) — local to the inventory on purpose: widening pathTierOf
 // itself would re-tier --grep/--callers ordering on every verb.
@@ -522,5 +761,17 @@ inline constexpr std::string_view kMapInventoryLegend =
     "directory rows exist: every ls row naming code files is kept and the count-only rows are cut to the 32 standing for "
     "the most files, so no indexed file leaves listed=/unlisted= and only the per-directory enumeration is shorter, "
     "dirs_next= the argv listing every indexed file (a superset) -->";
+
+// ITEM 1's half of the inventory clause, kept SEPARATE and charged only to a map that actually carries a
+// <d> wrapper — the same rule every other conditional clause in this legend follows, and the reason it
+// matters here is arithmetic: the sentences below are ~430 B of fixed cost, and on a flat tree where one
+// prefix barely pays (tmux saved 5 B of rows) an unconditional clause made the document GROW. Documenting
+// what the document does not contain is also exactly what item 2 of the same card removes elsewhere.
+inline constexpr std::string_view kMapInventoryNestLegend =
+    "<!-- d p=SEG: a path segment the ls rows nested under it share, so it is spelled once instead of once per row. A "
+    "row's directory is its ancestors' p= segments joined with its own p=, at most 2 wrappers deep (kInventoryNestDepth); "
+    "a wrapper is emitted only where it saves more bytes than it costs, so a flat tree carries none. The grouping is the "
+    "only reordering in this tier: rows sharing a wrapper are made contiguous at the position of the first of them. No "
+    "row, no n= and no f= name is added or removed by it. -->";
 
 }  // namespace rw

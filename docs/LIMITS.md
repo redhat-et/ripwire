@@ -1046,6 +1046,7 @@ Discloses: `dirs_capped`, `entries_capped`, `names_capped`
 | `kInventoryDirCap` | `2048` | — | — |
 | `kInventoryEntryCap` | `256` | OUTPUT | — |
 | `kInventoryNameCeiling` | `2000` | OUTPUT | — |
+| `kInventoryNestDepth` | `2` | — | — |
 
 ### `src/mcp.h`
 

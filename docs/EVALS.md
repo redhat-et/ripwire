@@ -16007,6 +16007,13 @@ An independent audit measured each item by rewriting a real map, re-serialising,
 original (an untransformed round trip asserted byte-identical; every rewrite `xmllint`-clean). Those
 numbers are the PREDICTION this card is registered against, not the result.
 
+> **SUPERSEDED FOR ITEM 1 — see "READOUT — item 1" below (2026-11-16).** The audit rewrote the map as it
+> stood BEFORE the `<ls>` row ceiling landed, and the ceiling took the same count-only path bytes item 1
+> aims at. Item 1 measures **−7.73 % on vscode and −9.27 % on envoy**, not the 20.5 %/20.3 % predicted
+> here, and **Band C's 15 % floor FAILS**. The predictions for items 2–5 carry the same baseline error and
+> are not re-derived here. The table is left in place as the registered prediction, which is the point of
+> having registered it.
+
 | item | mechanism | predicted saving (vscode / envoy / nushell) |
 | --- | --- | --- |
 | 1 | nest `<ls>` rows under a synthesised `<d p="prefix">`, depth ≤ 2 | 33,707 / 26,525 / 4,989 B |
@@ -16095,3 +16102,81 @@ where the map is biggest, and `k=` re-scaling, ~1 KB flat), and nothing about ra
 NAMED `<ls>` rows — that still needs a terminality instrument and is not attempted here. No token claim
 beyond the conversion already registered (2.44–4.66 B/token, cross-checked against the map's own
 `est_tokens=` at 2.50 B/token on htop, 1 % apart). No claim at llvm-project scale.
+
+## READOUT — item 1 (`<ls>` rows nested under `<d p=>`): Bands A, B, D, E, F PASS; **Band C FAILS its 15 % floor**
+
+Measured 2026-11-16 on this machine against the correct baseline — `main` at `6cd55dbb0`, which already
+carries the `<ls>` row ceiling. That baseline is the whole story of this readout, so it is stated first.
+
+### The registered prediction was measured on a map that no longer exists
+
+The card predicted **33,707 B on vscode (20.5 %)** and **26,525 B on envoy (20.3 %)**. The audit those
+figures come from rewrote the map as it stood BEFORE the row ceiling landed — a 233,586 B document. The
+ceiling (PR #671, merged into `main` the same morning this item was implemented) took that to 164,135 B by
+cutting 2,102 of 2,534 rows, and the rows it cut were exactly the **count-only** ones: a path and a number,
+the highest ratio of directory string to answer content in the tier. Item 1's mechanism is removing
+repeated directory string. The two changes aim at the same bytes, and the ceiling got there first.
+
+Measured against a pre-ceiling binary, item 1 and the ceiling together save 82,660 B on vscode. The ceiling
+alone saves 69,451 B. So of item 1's 33,707 B prediction, roughly **20,500 B had already been taken** — about
+61 % of it. This is the arithmetic of the overlap, not a reproduction of the audit's own figure, which was
+not re-run here.
+
+### What item 1 actually saves, per repo, never pooled
+
+| repo | baseline B | with item 1 | delta | % | wrappers |
+| --- | --- | --- | --- | --- | --- |
+| vscode | 164,135 | 151,442 | −12,693 | **−7.73 %** | 30 |
+| envoy | 130,622 | 118,515 | −12,107 | **−9.27 %** | 21 |
+| angular | 123,869 | 112,884 | −10,985 | −8.87 % | 37 |
+| cockroach | 134,366 | 124,802 | −9,564 | −7.12 % | 30 |
+| nushell | 61,609 | 58,701 | −2,908 | −4.72 % | 27 |
+| django | 44,589 | 42,692 | −1,897 | −4.25 % | 8 |
+| cpython | 81,970 | 81,563 | −407 | −0.50 % | 21 |
+| hono | 25,078 | 25,001 | −77 | −0.31 % | 11 |
+| koa / htop / tmux / textual | — | — | **0** | 0.00 % | 0 |
+
+**Band C FAILS.** It registered item 1 at ≥ 15 % of the vscode map and ≥ 15 % of envoy's, with a stated
+5-point margin under the 20.5 %/20.3 % prediction. The measurement is **7.73 % and 9.27 %** — less than half
+the floor, outside the margin, on both repos. Recorded as a failure rather than renegotiated: the band was
+written down before the code for exactly this case.
+
+**Band C's small-repo clause PASSES, but only after a fix the card did not anticipate.** The clause asks that
+the map not GROW on koa, htop, tmux, hono and textual. The first implementation grew tmux by 717 B and
+textual by 668 B, because a per-group byte decision is not a per-DOCUMENT one: tmux has a single qualifying
+prefix that saves 5 B of rows, and the `<d p=>` legend clause the wrapped document then has to carry is
+516 B. `inventoryNestPlan` now takes the decision at document level and drops every wrapper when the rows do
+not out-save the clause, so a wrapped document is smaller than its flat self by construction. Those four
+repos are now byte-identical to baseline, and `test/invnestcheck.sh` arm (F1) asserts both halves — no
+wrapper AND no clause — because keeping the clause without the wrappers is the same bug inverted.
+
+### Bands A, B, D, E: PASS
+
+- **Band A (set identity)** holds on all seven corpora read: vscode 1,239 rows, envoy 1,044, nushell 256,
+  cpython 206, hono 94, textual 20, tmux 10, plus the 123-row gate fixture. Every flattened row matches the
+  flat JSON twin exactly — same paths, same `n=`, same `f=` membership. The oracle is `writeMapInventoryJson`
+  from the SAME binary and index, which is why it does not go vacuous once this lands; arm (A2) plants three
+  mutations (a dropped row, a changed `n=`, a dropped `f=` name) and requires each to be detected.
+- **Band B** is a dictionary row in `src/compactlegend.h` scoped to the `d` element, plus `--legend-dict`
+  printing it. Worth recording how nearly this passed vacuously: the dictionary already holds three unrelated
+  rows named `d`, so the arm's first version matched one of those and went green before the encoding existed.
+  Running it red-first is what caught it.
+- **Band D (order disclosed)** is exactly the stated rule — the flat order with each group made contiguous at
+  the position of its first row. The arm's first version modelled a single level of grouping and FAILED on 5
+  of 7 corpora while the emitter was correct; the emitter's grouping is hierarchical, and the gate now mirrors
+  it. The lesson is in the gate's own comment: a failure here means the model and the document disagree, and
+  the model is as likely to be wrong.
+- **Band E** is `kInventoryNestDepth = 2`, declared in `src/mapinventory.h` and published in `docs/LIMITS.md`.
+
+### What this costs in the owner's metric, and the recommendation
+
+At the registered 2.44–4.66 B/token band, 12,693 B on vscode is **2,700–5,200 tokens**, against a 24,808-token
+follow-up: item 1 moves the break-even by about **0.1–0.2 of a follow-up**, not the ~0.6 the card implied.
+Items 2–5 were measured by the same pre-ceiling audit and their predictions are suspect for the same reason;
+item 5 (omitting a derivable `n=`) acts on NAMED rows, which the ceiling kept, so it has the best chance of
+holding up, and items 2–4 total under 1,600 B on vscode either way.
+
+The recommendation is still to ship item 1: the saving is real on every large repo (4.3–9.3 % across seven of
+them), no document grows, and content identity is proved rather than argued. What changes is the CLAIM. Band F
+(the completeness re-grade) remains the gate on whether a differently-shaped document is as usable, and is
+unaffected by the size of the saving.
