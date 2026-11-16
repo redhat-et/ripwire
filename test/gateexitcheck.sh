@@ -294,6 +294,7 @@ if seen == len( FIXTURES ):
 # status; do not infer it from the `exit` literal you can see, because the one that fires may be another.
 FAILFAST = {
     "bodilessseedcheck.sh":    ( "its arms accumulate inside one embedded Python block (sys.exit(1 if nfail)), the script's last command. rc READ, not inferred: run against main d624cff5f (no impls=, 16 arms red) and a stub binary that exits 3, it exits 1 both times (2026-11-14)", 1 ),
+    "tiercallerscheck.sh":     ( "its arms accumulate inside one embedded Python block (fail[0], sys.exit(fail[0])), the script's last command, so the shell exits on its status. rc READ, not inferred: run against the parent lane binary 36bbc660b (lane/impact-test-tier, 13 arms red) it exits 1 (2026-11-15)", 1 ),
     "impacttesttiercheck.sh":  ( "its arms accumulate inside one embedded Python block (fail[0], sys.exit(fail[0])), the script's last command, so the shell exits on its status. rc READ, not inferred: run against the pre-lane main binary 67b08d46b (10 arms red) it exits 1 (2026-11-15)", 1 ),
     "hopcontextcheck.sh":      ( "its checks accumulate inside one embedded Python block (sys.exit(1 if fails)); the shell then exits 1 on its status. rc READ, not inferred: run against the pre-lane base binary (no hop attributes) and a crashing stub, it exits 1 both times (2026-11-04)", 1 ),
     "elixirsemanticcheck.sh":  ( "set -e and Python assertions; missing protocol and branch-scope probes observed exit 1", 1 ),
