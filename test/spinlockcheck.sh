@@ -165,10 +165,28 @@ if "$CXX" -std=c++23 -O2 $INC -c "$TMP/dis.cpp" -o "$TMP/dis.o" 2>"$TMP/dis.err"
     # SHARED for every waiter that cannot enter. Symbol labels are not matched: a mach-o object of two
     # extern "C" functions disassembles under ltmp0, so this reads instruction ORDER over the whole
     # text section, which holds only lock() and unlock() here.
-    firstLoad="$( grep -nE "\b(ldr|ldar|ldur)\b" "$TMP/dis.txt" | head -1 | cut -d: -f1 )"
+    # ARCHITECTURE. The RMW and branch patterns below already cover AArch64 and x86-64, but the LOAD
+    # pattern was AArch64-only (ldr/ldar/ldur), so on x86-64 -- where a load is mov/cmp, not ldr -- this
+    # arm found "any load (none)" and could never pass. It failed all four ubuntu shard-1 jobs on the PR
+    # that introduces this gate while macOS was green; the product was correct the whole time (the x86
+    # object reads `mov 0x0(%rip),%eax` / `test` / `je` before its xchg, exactly the shape C1 wants).
+    #
+    # x86 loads must be told from x86 STORES or the arm would pass on a store-before-load: AT&T order is
+    # `op SRC,DST`, so a mov is a load only when the memory operand comes BEFORE the comma. cmp/test read
+    # both operands, so either side counts. `\bcmp\b` cannot match `cmpxchg` (no word boundary), so the
+    # RMW cannot be mistaken for its own load.
+    ARM_LOAD='\b(ldr|ldar|ldur)\b'
+    X86_MOV_LOAD='\b(mov|movl|movq|movb|movw|movzbl|movzwl|movslq)\b[[:space:]]+[^,]*(\(%|%fs:|%gs:)[^,]*,'
+    X86_CMP_LOAD='\b(cmp|cmpb|cmpl|cmpq|cmpw|test|testb|testl|testq)\b[^#]*(\(%|%fs:|%gs:)'
+    firstLoad="$( grep -nE "$ARM_LOAD|$X86_MOV_LOAD|$X86_CMP_LOAD" "$TMP/dis.txt" | head -1 | cut -d: -f1 )"
+    # A third architecture must fail LOUDLY rather than silently read as "no load": if neither family's
+    # mnemonics appear anywhere in the object, this arm cannot read it and says so instead of failing it.
+    archSeen="$( grep -cE "$ARM_LOAD|\b(mov|cmp|test|xchg|lea|push)\b" "$TMP/dis.txt" )"
     firstRmw="$(  grep -nE "\b(swpa?l?|casa?l?|ldaxr|stlxr|xchg|cmpxchg)\b" "$TMP/dis.txt" | head -1 | cut -d: -f1 )"
     firstSkip="$( grep -nE "\b(cbnz|cbz|b\.[a-z]+|jne|jnz|je|jz)\b" "$TMP/dis.txt" | head -1 | cut -d: -f1 )"
-    if [ -z "$firstRmw" ]; then
+    if [ "$archSeen" -eq 0 ]; then
+        no "(C1) this arm reads AArch64 and x86-64 mnemonics and recognised NEITHER in $TMP/dis.o — it cannot judge this architecture, so treat as NOT-ESTABLISHED and widen the patterns rather than reading the silence as a pass or a fail"
+    elif [ -z "$firstRmw" ]; then
         no "(C1) no read-modify-write in the object at all — this arm is not reading the lock"
     elif [ -z "$firstLoad" ] || [ "$firstLoad" -ge "$firstRmw" ]; then
         no "(C1) the first write (line $firstRmw) comes before any load (${firstLoad:-none}) — every waiter would invalidate the line"
@@ -177,6 +195,27 @@ if "$CXX" -std=c++23 -O2 $INC -c "$TMP/dis.cpp" -o "$TMP/dis.o" 2>"$TMP/dis.err"
     else
         ok "(C1) lock() loads at line $firstLoad before its first write at line $firstRmw"
         ok "(C2) and branches at line $firstSkip on that load — a waiter that cannot enter never writes the line"
+    fi
+
+    # (C3) MUTATION CONTROL for the load pattern itself. Widening C1 to x86 is only safe if a STORE is
+    # still not read as a load -- otherwise the arm would pass on a store-before-write, which is the very
+    # thing it exists to forbid. Two planted objects, no compiler involved: one where the only memory
+    # writes precede the RMW (must be judged NO load before the write), one where a real load does
+    # (must be judged a load). Without this the widened regex could rot into a pattern that always matches.
+    printf '%s\n' \
+        '   4: 48 89 44 24 18        mov    %rax,0x18(%rsp)' \
+        '   9: 48 89 05 00 00 00 00  mov    %rax,0x0(%rip)' \
+        '  10: 87 07                 xchg   %eax,(%rdi)' > "$TMP/c3_stores.txt"
+    printf '%s\n' \
+        '   0: 8b 05 00 00 00 00     mov    0x0(%rip),%eax' \
+        '   6: 85 c0                 test   %eax,%eax' \
+        '   a: 87 07                 xchg   %eax,(%rdi)' > "$TMP/c3_load.txt"
+    c3bad="$(  grep -ncE "$ARM_LOAD|$X86_MOV_LOAD|$X86_CMP_LOAD" "$TMP/c3_stores.txt" )"
+    c3good="$( grep -nE  "$ARM_LOAD|$X86_MOV_LOAD|$X86_CMP_LOAD" "$TMP/c3_load.txt" | head -1 | cut -d: -f1 )"
+    if [ "$c3bad" = "0" ] && [ -n "$c3good" ] && [ "$c3good" = "1" ]; then
+        ok "(C3) control: two planted memory STORES are not read as loads, and a real load is — the widened x86 pattern can still fail"
+    else
+        no "(C3) control: planted stores matched $c3bad time(s) (want 0) and the planted load was found at ${c3good:-none} (want 1) — the load pattern no longer distinguishes a load from a store"
     fi
 else
     no "(C) the disassembly program does not compile: $( head -2 "$TMP/dis.err" )"
