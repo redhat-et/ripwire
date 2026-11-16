@@ -42,6 +42,7 @@
 #include "forpage.h"            // kForCoverageLegend (and, through lexical.h, kForConfidenceNote)
 #include "graphlegend.h"        // the named MCP `for` clauses, kForIdRouteLegend, kForRouteCodeLegend, the root-rel prose
 #include "serialize.h"          // kForFileTailLegend, kForFileTailFoldedLegend, kForSameAsLegend
+#include "fortailterms.h"       // kForFileTailTermsLegend
 #include "infra/Diagnostics.h"
 #include "infra/hashutil.h"
 
@@ -89,6 +90,7 @@ inline constexpr std::string_view kForClauseEntries[] =
     kForFileTailCodeFirstLegend,
     kForFileTailWideLegend,
     kForFileTailFoldedLegend,   // SIZE-2: the MCP twin splices it after the walk clause (CodeRabbit 4505000658)
+    kForFileTailTermsLegend,    // TAIL-SYM-TERMS: the MCP twin splices it after the tail clause (fortailterms.h)
     kForSameAsLegend,           // SIZE-3a: the MCP twin's same_as= clause, spliced at the end of the first comment
     kForBudgetBytesNote,
     kForDocsDroppedNote,

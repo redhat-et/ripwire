@@ -1049,6 +1049,7 @@ for _g in \
     swiftcheck \
     swiftmemberscheck \
     swiftshapecheck \
+    tailsymtermscheck \
     taskechocheck \
     tempfilesymlinkcheck \
     termmargincheck \

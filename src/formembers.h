@@ -129,11 +129,7 @@ inline bool ownerNameAmbiguous( const IngestResult& ing, const Symbol& c )
 // how many of the question words the name holds as subtokens
 inline std::ptrdiff_t wordOverlap( std::string_view name, const std::vector<std::string>& words )
 {
-    std::vector<std::string> toks;
-    subtokens( name, toks );
-    std::ranges::sort( toks );
-    toks.erase( std::unique( toks.begin(), toks.end() ), toks.end() );
-    return std::ranges::count_if( toks, [ & ]( const std::string& t ) { return std::ranges::find( words, t ) != words.end(); } );
+    return subtokenOverlap( name, words );
 }
 }   // namespace member_detail
 

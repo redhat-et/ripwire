@@ -81,6 +81,44 @@ inline void subtokens( std::string_view id, std::vector<std::string>& out )
     } );
 }
 
+inline std::string suffixStem( std::string w, std::span<const std::string_view> suffixes );
+
+// How many DISTINCT subtokens of `name` — each suffix-stemmed first by `stemSuffixes` when given (suffixStem) — are among `words`.
+// `words` is a handful, read by linear find. Shared by the member-name slice (formembers.h wordOverlap) and the tail's tsym= score
+// (fortailterms.h tailTermScore).
+inline std::ptrdiff_t subtokenOverlap( std::string_view name, const std::vector<std::string>& words, std::span<const std::string_view> stemSuffixes = {} )
+{
+    std::vector<std::string> toks;
+    subtokens( name, toks );
+    for( std::string& t : toks )
+    {
+        t = suffixStem( std::move( t ), stemSuffixes );
+    }
+    std::ranges::sort( toks );
+    toks.erase( std::unique( toks.begin(), toks.end() ), toks.end() );
+    return std::ranges::count_if( toks, [ & ]( const std::string& t ) { return std::ranges::find( words, t ) != words.end(); } );
+}
+
+// A light suffix stem: the FIRST of `suffixes` (in order) that `w` ends with and that leaves 3+ bytes is cut; "ies" becomes "y".
+// The suffix list is the caller's measured rule (forfilesyms.h kLightStemSuffixes for <syms>, fortailterms.h kTailTermSuffixes
+// for tsym=); an empty list leaves `w` as is.
+inline std::string suffixStem( std::string w, std::span<const std::string_view> suffixes )
+{
+    for( const std::string_view suf : suffixes )
+    {
+        if( w.size() > suf.size() + 2 && std::string_view( w ).ends_with( suf ) )
+        {
+            w.resize( w.size() - suf.size() );
+            if( suf == "ies" )
+            {
+                w += 'y';
+            }
+            return w;
+        }
+    }
+    return w;
+}
+
 // Does `text` carry one of `words` (lowercased subtokens) as a subtoken? `words` is a handful, read by linear find. Shared by the
 // --for fold's member slice (forfold.h) and the path owner-word key (pathroute.h).
 inline bool holdsSubtokenWord( std::string_view text, const std::vector<std::string>& words )
