@@ -295,7 +295,9 @@ ccjson.h	ccCountLoc	fopen	1	closes	the only early exit is the failed open; nothi
 clones.h	readCloneSourceFile	fopen	1	closes	the one read both clone passes share: false on a failed open; fclose right after the sized read
 crossref.h	catFileBatch	fopen	1	closes	returns only on a failed open; fclose after the list is written
 crossref.h	catFileBatch	popen	1	closes	the read loop leaves by break or its own condition only; pclose then unlink
+crossref.h	diffTreeSlice	fopen	1	closes	returns only on a failed open; fclose after the list is written
 crossref.h	evalStray	fopen	1	closes	returns only on a failed open; fclose after the read loop
+crossref.h	mergeBasesByOneWalk	fopen	1	closes	returns only on a failed open; fclose after the list is written
 crossref.h	streamBlobs	fopen	1	closes	returns only on a failed open; fclose after the list is written
 crossref.h	streamBlobs	popen	1	closes	the read loop leaves by break/continue only; pclose then unlink
 darkflags.h	readWhole	fopen	1	closes	fclose before the size-cap return and before the final return

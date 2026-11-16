@@ -360,6 +360,15 @@ if len( sys.argv ) > 4:
     # the other sections and the tail reserve runs out; RED on a binary that ignores the tail reserve (rows over-served)
     from softbudget import upper_bound
     upper = upper_bound( _at, _rt, X, k, a[ 'total' ], U )[ 0 ]
+    if not _at.lstrip().startswith( '{' ) and a[ 'bt' ] is not None:
+        # TOKEN-BUDGET-MONOTONE (2026-11-14): the XML --for budget sheds the UNBUDGETED answer and prices all of it (est_tokens, the
+        # header and every section included), not the rows against T = N x 2.36 x 0.9: it fits when est_tokens <= N or the rows are
+        # at the rank 1..4 floor, and a row cut is maximal when the next ranked row (REF's, at the markup rate) would cross N.
+        # (At 1200 on this fixture: 4 rows, est 1645 — the floor; the old reader called it a cut "a whole row short of T".)
+        e = int( a[ 'est' ] ) if a[ 'est' ].isdigit() else 10**9
+        fits = fits and ( e <= N or k <= 4 )
+        maximal = not cut or k >= len( ref[ 'rows' ] ) or k <= 4 or e + int( ref[ 'rows' ][ k ][ 2 ] / 2.5 + 0.5 ) > N
+        upper = True
 mine = [ x[ 1 ] for x in a[ 'rows' ] ]
 rp = len( sys.argv ) > 4 and k > 0 and mine == [ x[ 1 ] for x in ref[ 'rows' ] ][ :k ]
 if rp and len( sys.argv ) > 5 and sys.argv[ 5 ]:
@@ -383,7 +392,12 @@ sys.path.insert( 0, os.environ[ "RIPWIRE_TESTLIB" ] ); from softbudget import se
 rd = lambda p: [ x for x in open( p ).read().split( "\n" ) if x ] if p and os.path.exists( p ) else None
 cur, on, off = rd( sys.argv[ 1 ] ), rd( sys.argv[ 2 ] ), rd( sys.argv[ 3 ] )
 prv = rd( sys.argv[ 4 ] ) if len( sys.argv ) > 4 and sys.argv[ 4 ] else []
-ok = cur is not None and on is not None and off is not None and prv is not None and set_prefix( cur, on, off ) and cur[ :len( prv ) ] == prv
+# TOKEN-BUDGET-MONOTONE (2026-11-14): the XML dialects (argv[5] = xml|compact) shed the no-budget answer, so their rows are its display
+# ranks r=1..K — an ORDER prefix of `on`, the round-robin's order included (they kept score order: a SET prefix). --json keeps
+# its row target, so it stays a set prefix.
+pre = ( cur == on[ :len( cur ) ] ) if cur is not None and on is not None and len( sys.argv ) > 5 and sys.argv[ 5 ] in ( "xml", "compact" ) \
+      else ( cur is not None and on is not None and off is not None and set_prefix( cur, on, off ) )
+ok = bool( cur ) and prv is not None and pre and cur[ :len( prv ) ] == prv
 sys.exit( 0 if ok else 1 )
 PY
 field(){ local re=" $2=([^ ]*)"; [[ " $1 " =~ $re ]] && printf '%s' "${BASH_REMATCH[1]}"; }   # field LINE KEY: one key= of a soft line
@@ -461,7 +475,9 @@ done
 for tb in 1200 1640 3000; do
   xr="$( grep -c . "$TMP/n_${tb}_xml.rows" 2>/dev/null )"; jr="$( grep -c . "$TMP/n_${tb}_json.rows" 2>/dev/null )"
   if ! isnum "$xr" || ! isnum "$jr" || [ "$jr" -eq 0 ]; then no "budget=$tb: JSON selected no rows (xml='$xr' json='$jr') — the comparison has no denominator"; continue; fi
-  if [ "$xr" -le $(( jr * 13 / 10 + 1 )) ] && [ "$xr" -ge $(( jr * 7 / 10 )) ]; then
+  # TOKEN-BUDGET-MONOTONE (2026-11-14): the XML budget prices the whole unbudgeted answer (header, tail, hops included) while --json
+  # keeps its row target over the rows, so XML may buy FEWER rows (1640: 4 vs 9 — XML at its floor, est 1645); never more.
+  if [ "$xr" -le $(( jr * 13 / 10 + 1 )) ] && [ "$xr" -ge 4 ]; then
     ok "budget=$tb: XML $xr rows vs JSON $jr rows — the two dialects agree on what fits"
   else
     no "budget=$tb: XML $xr rows vs JSON $jr rows — the dialects disagree on what the same budget buys"
@@ -583,7 +599,7 @@ while [ "$tb" -le 2000 ]; do
     case "$sl" in *" over=0 "*) ;; *)
       lblFail=$(( lblFail + 1 ))
       [ -z "$lblFirst" ] && lblFirst="budget=$tb ($dialect) $sl" ;; esac
-    if ! python3 "$TMP/rph.py" "$cur" "$TMP/def_$dialect.rows" "$TMP/def_so_$dialect.rows" "$prv"; then
+    if ! python3 "$TMP/rph.py" "$cur" "$TMP/def_$dialect.rows" "$TMP/def_so_$dialect.rows" "${prv:-}" "$dialect"; then
       rphFail=$(( rphFail + 1 ))
       [ -z "$rphFirst" ] && rphFirst="budget=$tb ($dialect): the rows are not a SET prefix of the no-budget rows, or rows(N=$(( tb - 10 ))) are not an order prefix of them — $sl"
     fi
@@ -609,7 +625,7 @@ if [ "$lblFail" -eq 0 ]; then ok "(NOLBL) sweep 700..2000 step 10 x 3 dialects (
 else no "(NOLBL) sweep 700..2000 step 10 x 3 dialects: $lblFail run(s) labelled a soft target over_ceiling= — first: $lblFirst"; fi
 if [ "$rpFail" -eq 0 ]; then ok "(RP) [RIPWIRE_NO_HEAD_RR=1 twin] sweep 700..2000 step 10 x 3 dialects ($runs runs): rows are a rank prefix of the no-budget rows, monotone in N"
 else no "(RP) [RIPWIRE_NO_HEAD_RR=1 twin] sweep 700..2000 step 10 x 3 dialects: $rpFail run(s) broke the rank prefix — first: $rpFirst"; fi
-if [ "$rphFail" -eq 0 ]; then ok "(RPh) head round-robin on, sweep 700..2000 step 10 x 3 dialects ($runs runs): rows are a SET prefix of the no-budget rows (score ranks 1..K), monotone in N"
+if [ "$rphFail" -eq 0 ]; then ok "(RPh) head round-robin on, sweep 700..2000 step 10 x 3 dialects ($runs runs): rows are a display-rank prefix (XML) / SET prefix (--json) of the no-budget rows, monotone in N"
 else no "(RPh) head round-robin on, sweep 700..2000 step 10 x 3 dialects: $rphFail run(s) broke the set prefix — first: $rphFirst"; fi
 if [ "$cfFail" -eq 0 ]; then ok "(CF) sweep 700..2000 step 10: the default and --legend=compact dialects serve the same rows on all $sweepRungs rungs"
 else no "(CF) sweep 700..2000 step 10: $cfFail rung(s) where the legend changed the rows — first: $cfFirst"; fi

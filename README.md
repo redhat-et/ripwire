@@ -2142,9 +2142,9 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 ### In the tests
 
 <details>
-<summary><b>810 gate scripts</b> (counts snapshot 2026-11-13), five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
+<summary><b>827 gate scripts</b> (counts snapshot 2026-11-15), five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
 
-`test/regression.sh` named **810 gate scripts** at the counts snapshot 2026-11-13 and is the authoritative list; <!-- gatecount -->
+`test/regression.sh` named **827 gate scripts** at the counts snapshot 2026-11-15 and is the authoritative list; <!-- gatecount -->
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a
@@ -2464,6 +2464,7 @@ to it:
 - What does the linter flag? (`--lint`)
 - Which cross-module call seams does no test reach? (`--seams`)
 - What is built but switched off in this repo? (`--flags`)
+- Which environment variables do the shell scripts read, which ones must be set, and with what defaults? (`--flags --json`: each Bash read carries `form=` required, default, unset-default, settest, assign or plain; `colon=` when the expansion has an operator, `default=` when it supplies a default word, and `test=` for a `-n`/`-z` operand)
 - How do the modules depend on each other? (`--deps`)
 - Does the code follow our layering rules? (`--arch`)
 - Which clusters of code belong together? (`--communities`)
@@ -2787,7 +2788,7 @@ This is the part to wire into a script.
 
 `--json` emits JSON instead of XML, with keys mirroring the XML attribute names one to one. It is an
 allow-list: the default map, `--for`, `--pack-task`, `--callers`, `--callees`, `--impact`,
-`--quality-delta`, `--test-gate`, `--metrics`, and `--plan-lanes`, which is JSON-native. Every other
+`--quality-delta`, `--test-gate`, `--metrics`, `--flags`, and `--plan-lanes`, which is JSON-native. Every other
 verb refuses on stderr with exit 1 rather than silently falling back to XML, so a verb added tomorrow
 refuses by default.
 
@@ -2904,7 +2905,7 @@ python3 test/pargates.py . ./build/ripwire -j 6
 A new gate script must be added to `test/regression.sh` in the same change. The gate
 `test/manifestcheck.sh` enforces this rule.
 
-Another gate derives the cap inventory. At the counts snapshot 2026-11-13 the tool had 423 compile-time caps and 10 ranking parameters.
+Another gate derives the cap inventory. At the counts snapshot 2026-11-15 the tool had 431 compile-time caps and 10 ranking parameters.
 `docs/LIMITS.md` lists each cap, its value, and whether the file discloses a truncation when the cap
 fires, and `python3 docs/limits_build.py --check` proves that list against `src/`. `docs/TUNING.md`
 lists the measured cost of the caps the sweep has measured, and names the ones it has not.

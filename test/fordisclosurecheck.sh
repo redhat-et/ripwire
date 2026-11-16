@@ -94,7 +94,9 @@ done
 #    argument (kCompactAttrReserve is inside committedBytes), same rule: the attribute survives alone.
 #    At --token-budget=400 the conceptual allowance is spent by header+sigs, so this fires by construction.
 CT="$TMP/c400"
-grep -q 'bundle="compact" bodies="0" reason="budget"' "$CT" \
+# TOKEN-BUDGET-MONOTONE (2026-11-14): the budget no longer re-decides the posture, so the compact route's own zero keeps its own
+# reason (compact-route: the route serves no auto bodies) — the budget shed nothing there to name; reason="budget" stays legal.
+grep -qE 'bundle="compact" bodies="0" reason="(budget|compact-route)"' "$CT" \
     && ok "#1b compact route, ceiling exhausted: bodies=\"0\" reason=\"budget\" disclosed" \
     || no "#1b compact route, ceiling exhausted: no reason=\"budget\" disclosure (the silent shape, compact copy)"
 # BY-DESIGN CHANGE (lego-charge fix round 4, review rv-wrap-recipe-k29 F1, rule 5 "never a silent cut"; reported under
@@ -102,10 +104,11 @@ grep -q 'bundle="compact" bodies="0" reason="budget"' "$CT" \
 # with nothing naming them. What it protected still holds and is asserted: no hop ROW (<h>) and no hops section legend
 # leaks past a spent ceiling. The one <hops> allowed is the counted marker: empty, shown="0", capped="1", next= the same
 # question without the budget.
+# TOKEN-BUDGET-MONOTONE: the marker is now U's <hops> with its rows shed, so U's noedge= count rides on it.
 ct_hops="$( grep -oE '<hops [^>]*>' "$CT" | head -1 )"
 if [ -z "$ct_hops" ]; then
     no "#1b compact route, ceiling exhausted: no <hops> element — the cut hop rows are silent (rule 5)"
-elif printf '%s' "$ct_hops" | grep -qE "^<hops shown=\"0\" total=\"[1-9][0-9]*\" capped=\"1\" next=\"--for=&apos;$CONCTASK&apos;\"/>\$" && ! grep -q '<h ' "$CT"; then
+elif printf '%s' "$ct_hops" | grep -qE "^<hops shown=\"0\" total=\"[1-9][0-9]*\" capped=\"1\"( noedge=\"[0-9]+\")? next=\"--for=&apos;$CONCTASK&apos;\"/>\$" && ! grep -q '<h ' "$CT"; then
     ok "#1b compact route, ceiling exhausted: <hops> is the counted marker only, no hop row leaked ($ct_hops)"
 else
     no "#1b compact route, ceiling exhausted: a <hops> other than the empty counted marker leaked past a spent ceiling ($ct_hops)"
@@ -164,7 +167,8 @@ grep -q 'bundle="auto" bodies="0" reason="budget"' "$T" \
 # on the --legend=full twin; the compact default never spelled bundle=auto:), with no (ceiling) drop and no over_ceiling.
 # RED on base (d4325a8c: no shell, the full legend drops clauses "(ceiling)", over_ceiling="1").
 t_bodies="$( grep -oE '<bodies [^>]*>' "$T" | head -1 )"
-{ printf '%s' "$t_bodies" | grep -qE '^<bodies shown="0" total="[1-9][0-9]*" capped="1">$' && ! grep -q '<b ' "$T"; } \
+# TOKEN-BUDGET-MONOTONE: the shed <bodies> carries next= (the call without the budget serves them)
+{ printf '%s' "$t_bodies" | grep -qE '^<bodies shown="0" total="[1-9][0-9]*" capped="1"( next="[^"]*")?>$' && ! grep -q '<b ' "$T"; } \
     && ok "#2 target exhausted: the empty <bodies> shell rides ($t_bodies), no body row" \
     || no "#2 target exhausted: expected the empty <bodies shown=\"0\" total=N capped=\"1\"> shell, got '${t_bodies:-none}'"
 "$BIN" src --for="$NAMETASK" --token-budget=400 --legend=full --no-cache >"$TMP/n400full" 2>/dev/null; nf_rc=$?
@@ -189,29 +193,53 @@ grep -q '<sigs' "$T" && ok "#2 ceiling-exhausted: the <sigs> block is intact" \
 # forbudget-soft (rule 4): the premise is re-anchored on what still holds. A soft target labels nothing (no over_ceiling=),
 # but the 400 document still has a capped <sigs> carrying next= with the header legend's sigs/next= clauses BEFORE the real
 # tag, so the two anti-forgery greps keep their teeth. Premise: no over_ceiling on the root, the LAST <sigs tag capped + next=.
-if ! grep -qE '^<ctx [^>]* over_ceiling=' "$T" && grep -oE '<sigs [^>]*>' "$T" | tail -1 | grep -q ' capped="1".* next="'; then
-    python3 -c 'import sys; s=open(sys.argv[1],"rb").read(); a=s.rfind(b"<sigs"); b=s.find(b"</sigs>",a); sys.stdout.buffer.write(s[:a]+s[b+7:] if a>=0 and b>=0 else s)' "$T" >"$TMP/n400_nosigs"
-    grep -q '<sigs' "$TMP/n400_nosigs" \
+# TOKEN-BUDGET-MONOTONE (2026-11-14): the name-exact 400 answer keeps all its <sigs> rows now (they are at the rank 1..4 floor,
+# so nothing caps them); the premise moves to the conceptual 400 answer ($CT), whose rows the budget cut (capped + next=).
+if ! grep -qE '^<ctx [^>]* over_ceiling=' "$CT" && grep -oE '<sigs [^>]*>' "$CT" | tail -1 | grep -q ' capped="1".* next="'; then
+    python3 -c 'import sys; s=open(sys.argv[1],"rb").read(); a=s.rfind(b"<sigs"); b=s.find(b"</sigs>",a); sys.stdout.buffer.write(s[:a]+s[b+7:] if a>=0 and b>=0 else s)' "$CT" >"$TMP/c400_nosigs"
+    grep -q '<sigs' "$TMP/c400_nosigs" \
         && no "#2c the intact-block grep still matches with the <sigs> block removed — a legend clause spells the tag" \
         || ok "#2c the intact-block grep FAILS once the <sigs> block is removed (no legend clause spells the tag)"
-    sigsblock "$T" | grep -q -- '-->' \
+    # TOKEN-BUDGET-MONOTONE: the shed <sigs> keeps U's in-block demote comment (its `-->` is inside the real block), so the
+    # span test asks the precise question — does the span START inside a comment (an unclosed <!-- before it)?
+    python3 -c 'import sys; s=open(sys.argv[1],"rb").read(); a=s.find(b"<sigs"); p=s[:a]; sys.exit(0 if a>=0 and p.rfind(b"<!--")>p.rfind(b"-->") else 1)' "$CT" \
         && no "#2c sigsblock() starts inside the header legend comment, not at the real tag" \
         || ok "#2c sigsblock() starts at the real <sigs> tag"
 else
-    no "#2c premise: the --token-budget=400 document has no capped <sigs> with next= (or labels over_ceiling= on a soft target) — re-anchor this arm on one that is"
+    no "#2c premise: the conceptual --token-budget=400 document has no capped <sigs> with next= (or labels over_ceiling= on a soft target) — re-anchor this arm on one that is"
 fi
 "$BIN" src --for="$NAMETASK" --token-budget=400 --signatures-only --no-cache >"$TMP/n400so" 2>/dev/null
 sigsblock "$T" >"$TMP/s_a"; sigsblock "$TMP/n400so" >"$TMP/s_s"
 [ -s "$TMP/s_a" ] || no "#2 presence: could not extract a <sigs> block from the disclosed run"
-diff -q "$TMP/s_a" "$TMP/s_s" >/dev/null \
-    && ok "#2 ceiling-exhausted: <sigs> byte-identical to --signatures-only (disclosure never eats the signature budget)" \
-    || no "#2 ceiling-exhausted: the disclosure changed the <sigs> bytes"
+# TOKEN-BUDGET-MONOTONE (2026-11-14): the --for budget now sheds the unbudgeted answer while --signatures-only keeps its row
+# target, so the two <sigs> blocks are different postures (n400: U's rows with e=, docs shed; n400so: cx=/ccx= rows with docs).
+# What the arm protected — the disclosure never eats a signature row — is asserted on the rows: every <d> of the 400 answer is a
+# row of the unbudgeted answer, in its order, and none of the rank 1..4 rows is missing.
+"$BIN" src --for="$NAMETASK" --no-cache >"$TMP/n0" 2>/dev/null || no "#2: the unbudgeted run exited $?"
+python3 - "$T" "$TMP/n0" <<'PY' \
+    && ok "#2 ceiling-exhausted: the <sigs> rows are the unbudgeted answer's, in order, ranks 1..4 kept (disclosure never eats a signature row)" \
+    || no "#2 ceiling-exhausted: the disclosure changed the <sigs> rows"
+import re, sys
+def rows( p ):
+    s = open( p, encoding = "utf-8", errors = "replace" ).read(); a = s.find( "<sigs" ); b = s.find( "</sigs>", a )
+    return [ ( re.search( r'\bn="([^"]*)"', m.group( 1 ) ).group( 1 ), ( re.search( r'\br="(\d+)"', m.group( 1 ) ) or [ 0, "0" ] )[ 1 ] )
+             for m in re.finditer( r'<d ([^>]*)>', s[ a:b ] ) ] if a >= 0 and b >= 0 else []
+A, U = rows( sys.argv[ 1 ] ), rows( sys.argv[ 2 ] )
+it = iter( U )
+sub = all( r in it for r in A )
+top = [ r for r in U if r[ 1 ] in ( "1", "2", "3", "4" ) ]
+sys.exit( 0 if A and sub and all( r in A for r in top ) else 1 )
+PY
 ET_T=$( grep -o 'est_tokens="[0-9]*"' "$T" | head -1 | grep -o '[0-9]*' )
 ET_S=$( grep -o 'est_tokens="[0-9]*"' "$TMP/n400so" | head -1 | grep -o '[0-9]*' )
 # forbudget-soft (rule 4): the old band (0..30 tokens: the attribute's reserved worth) priced a disclosure squeezed under a hard
 # ceiling; the legend clause and the <bodies> shell now ride, so the band is replaced by honest pricing of the extra bytes:
 # est_tokens rises (>= 1) and by no more than one token per kMinBytesPerToken (2.36) bytes of the byte delta (+1 rounding).
-BY_T=$( wc -c <"$T" | tr -d ' ' ); BY_S=$( wc -c <"$TMP/n400so" | tr -d ' ' )
+# TOKEN-BUDGET-MONOTONE (2026-11-14): both answers are now their unbudgeted posture shed, and each carries the held stubs of the
+# blocks outside est_tokens it renders (<syms>, <decl_rows> … with their legend comments; the two postures hold different ones), so
+# the byte delta is read on the priced bytes: the document minus those held stubs and the comment that defines each.
+pricedbytes(){ python3 -c 'import re,sys; raw=open(sys.argv[1],"rb").read(); h=rb"(?:syms|doc_body|decl_rows|exemplar_family|graph_verb|reexports|shortkey|aliases)"; print(len(re.sub(rb"(?:<!--(?:(?!-->).)*-->)?<"+h+rb"\b[^>]*/>", b"", raw, flags=re.S)))' "$1"; }
+BY_T=$( pricedbytes "$T" ); BY_S=$( pricedbytes "$TMP/n400so" )
 ET_MAX=$( python3 -c 'import math,sys; print(math.ceil(max(0,int(sys.argv[1])-int(sys.argv[2]))/2.36)+1)' "${BY_T:-0}" "${BY_S:-0}" 2>/dev/null )
 { [ -n "${ET_T:-}" ] && [ -n "${ET_S:-}" ] && [ -n "${ET_MAX:-}" ] && [ "$BY_T" -gt "$BY_S" ] && [ $(( ET_T - ET_S )) -ge 1 ] && [ $(( ET_T - ET_S )) -le "$ET_MAX" ]; } \
     && ok "#2 target exhausted: est_tokens prices the disclosure bytes ($ET_T vs $ET_S for +$(( BY_T - BY_S )) B, band 1..$ET_MAX)" \

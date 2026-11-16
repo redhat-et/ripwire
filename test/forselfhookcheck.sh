@@ -1006,9 +1006,10 @@ E
 run y3 "--for=what calls D.hkk" --token-budget=40000 >"$TMP/y3b"
 H="$( hook <"$TMP/y3b" )"
 if grep -q 'route="subtoken' "$TMP/y3b"; then ok "(Y3r) the fixture takes a subtoken route"; else no "(Y3r) the fixture no longer takes a subtoken route"; fi
-want Y3 "$H" '<selfhooks held="budget" total="1"/>'
-lack Y3n "$H" '<selfhook n=' '<s n='
+# TOKEN-BUDGET-MONOTONE (2026-11-14): a budget no longer holds the block by being set (it held at 40000, far above the answer);
+# the answer under a budget that fits is the unbudgeted answer byte for byte, the block whole (Y3 / Y3n were held= / no rows).
 run y3 "--for=what calls D.hkk" >"$TMP/y3"
+if cmp -s "$TMP/y3b" "$TMP/y3"; then ok "(Y3) --token-budget=40000 fits: the unbudgeted answer byte for byte"; else no "(Y3) --token-budget=40000 is not the unbudgeted answer"; fi
 want Y3t "$( hook <"$TMP/y3" )" '<selfhook n="D.hkk" p="d.py:4"' '<s n="Root.go" p="base.py:6"/>'
 
 # ── E ─────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -1106,9 +1107,9 @@ J="$( run a "--for=what calls One.step" --json )"
 if [ -z "$J" ] || has "$J" '[[rc='; then no "(L2) the --json run failed or printed nothing: [$J]"
 elif has "$J" 'selfhook'; then no "(L2) --json carries the element"
 else ok "(L2) --json carries no element"; fi
+# TOKEN-BUDGET-MONOTONE: as Y3 — a budget that fits keeps the block whole (L3 / L3n were held= / no rows)
 H="$( run w "--for=what calls SpecialThing.process_item" --token-budget=40000 | hook )"
-want L3 "$H" '<selfhooks held="budget" total="1"/>'
-lack L3n "$H" '<selfhook n=' '<s n='
+want L3 "$H" '<selfhook n="SpecialThing.process_item" p="one.py:4"'
 
 # ── W ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 run w "--for=what calls SpecialThing.process_item" >"$TMP/w"

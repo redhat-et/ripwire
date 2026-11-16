@@ -88,7 +88,12 @@ grep -q 'bundle="auto"' "$TMP/auto" && grep -qi 'bodies.*inline\|inline.*bod' "$
 #         transcript mine caught that silent shape on 5 of 26 real --for calls (bodyuse-memo §7), and
 #         a disclosure that disappears exactly when the budget is tight is the opposite of a
 #         disclosure. The <sigs> block still may not move a byte vs the opt-out run (bodies/disclosure
-#         ride leftover only — the #6 contract, asserted here at the tight budget too). ────────────────
+#         ride leftover only — the #6 contract, asserted here at the tight budget too).
+#         TOKEN-BUDGET-MONOTONE (train 1111i) prices the WHOLE --for document and trims it in one shed order
+#         (shed=), while --signatures-only caps its own rows on another path, so at a budget no answer fits the
+#         two <sigs> blocks may differ in attributes (docs_dropped= vs capped=). What still must hold, and is
+#         asserted: the bodies never displace a signature row (the SAME rows, by n/p/l/r, as --signatures-only),
+#         and the shed order drops bodies before any signature doc. ───────────────────────────────────────
 "$BIN" src --for="$TASK" --token-budget=400 --no-cache >"$TMP/tight" 2>/dev/null; rc=$?
 [ "$rc" = 0 ] || no "tight-budget --for exited $rc (D10: --token-budget shapes, never gates, this bundle)"
 "$BIN" src --for="$TASK" --token-budget=400 --signatures-only --no-cache >"$TMP/tightso" 2>/dev/null
@@ -100,9 +105,21 @@ grep -q '<b [^>]*><!\[CDATA\[' "$TMP/tight" \
     || ok "ultra-tight budget: no body bytes (whole-body-or-nothing holds)"
 sigsblock "$TMP/tight" >"$TMP/tight_sigs"; sigsblock "$TMP/tightso" >"$TMP/tightso_sigs"
 [ -s "$TMP/tight_sigs" ] || no "ultra-tight budget: could not extract a <sigs> block"
-diff -q "$TMP/tight_sigs" "$TMP/tightso_sigs" >/dev/null \
-    && ok "ultra-tight budget: <sigs> byte-identical to --signatures-only (disclosure rides leftover only)" \
-    || no "ultra-tight budget: the disclosure changed the <sigs> bytes"
+# sigrows FILE → one line per <d> row of a <sigs> block: n p l r (the row's identity, not its attributes)
+sigrows(){ python3 -c 'import re,sys; s=open(sys.argv[1]).read()
+for d in re.findall(r"<d [^>]*>", s):
+    a=dict(re.findall(r"([a-z_]+)=\"([^\"]*)\"", d)); print(a.get("n"), a.get("p"), a.get("l"), a.get("r"))' "$1"; }
+TROWS="$( sigrows "$TMP/tight_sigs" )"; SROWS="$( sigrows "$TMP/tightso_sigs" )"
+{ [ -n "$TROWS" ] && [ "$TROWS" = "$SROWS" ]; } \
+    && ok "ultra-tight budget: <sigs> serves the same $( printf '%s\n' "$TROWS" | wc -l | tr -d ' ' ) row(s) as --signatures-only (bodies displaced no signature)" \
+    || no "ultra-tight budget: the <sigs> rows differ from --signatures-only: [$( printf '%s' "$TROWS" | tr '\n' ';' )] vs [$( printf '%s' "$SROWS" | tr '\n' ';' )]"
+SHED="$( grep -o ' shed="[^"]*"' "$TMP/tight" | head -1 )"
+case "$SHED" in
+    "") ok "ultra-tight budget: no shed= (the answer was not trimmed), nothing to order" ;;
+    *bodies:*docs:*|*bodies:*) case "$SHED" in *docs:*bodies:*) no "ultra-tight budget: signature docs shed before bodies ($SHED)" ;;
+                                                *) ok "ultra-tight budget: bodies shed before any signature doc ($SHED)" ;; esac ;;
+    *) no "ultra-tight budget: the answer was trimmed but no body shed is named ($SHED)" ;;
+esac
 grep -q '<sigs' "$TMP/tight" && ok "ultra-tight budget: the <sigs> block is intact" \
     || no "ultra-tight budget: the <sigs> block vanished (signatures must survive)"
 

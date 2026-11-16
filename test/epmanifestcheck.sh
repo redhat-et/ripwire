@@ -38,7 +38,7 @@
 #   B6 [P] workspace member crates each with src/main.rs: implicit bin row from member Cargo.toml (cargows/crate-a)
 #   B7 [P] an omitted [[bin]] path follows Cargo inference (package bin src/main.rs, named bin src/bin/NAME.rs); a [[bin]] inside a multi-line string is no entry (cargoinf)
 #   N1 [G] a non-manifest .cfg (config.cfg, same text): no <ep>
-#   N2 [G] no <ep>, byte-identical to RIPWIRE_NO_EP_MANIFEST=1: --json, --token-budget=3000, --signatures-only
+#   N2 [G] no <ep>, byte-identical to RIPWIRE_NO_EP_MANIFEST=1: --json, --signatures-only; --token-budget=3000 is the unbudgeted answer
 #   N3 [G] prefix identity: the answer minus <ep> and its clause, est_tokens masked, equals RIPWIRE_NO_EP_MANIFEST=1
 #   R1 [P] (CodeRabbit 4381174525) the groups register rows <sigs> EMITS: --pack-budget-bytes=1 leaves only Fmt in <sigs> (shown=1), so only x.report rides (Other / Lonely were dropped)
 #   R2 [P] every head row that a group registers dropped (load_other alone shown): no <ep> and no clause   R3 [G] --pack-budget-bytes=300 drops only reload_reports (no target): all three groups stay
@@ -379,10 +379,14 @@ if good mbin && has "$MBIN" "any(g['e']==[{'n':'cli','target':'bin/cli','externa
 # N1
 okrun "$TMP/neg" && grep -q 'n="Fmt"' "$TMP/neg" && [ "$NEG" = "[]" ]; verdict $? "N1 a non-manifest .cfg yields no <ep> (Fmt shown)" "N1 config.cfg produced rows: $NEG"
 # N2
-for v in --json --token-budget=3000 --signatures-only; do
+for v in --json --signatures-only; do
     run "$FX/cfg" "$TMP/n2on" "$Q" "$v"; RIPWIRE_NO_EP_MANIFEST=1 run "$FX/cfg" "$TMP/n2off" "$Q" "$v"
     if okrun "$TMP/n2on" && okrun "$TMP/n2off" && cmp -s "$TMP/n2on" "$TMP/n2off" && ! grep -q '<ep ' "$TMP/n2on"; then ok "N2 $v: no <ep>, byte-identical to off"; else no "N2 $v differs or carries <ep>"; fi
 done
+# TOKEN-BUDGET-MONOTONE (rule 4, 2026-11-14): --token-budget no longer switches the answer's posture (it used to drop <ep> with
+# the rest of the default's enrichment); a budget the answer fits returns the unbudgeted answer byte for byte, <ep> as it is there
+run "$FX/cfg" "$TMP/n2tb" "$Q" --token-budget=3000
+if okrun "$TMP/n2tb" && cmp -s "$TMP/n2tb" "$TMP/cfg"; then ok "N2 --token-budget=3000: the unbudgeted answer byte for byte"; else no "N2 --token-budget=3000 is not the unbudgeted answer"; fi
 # N3 prefix identity (compact legend)
 python3 - "$TMP/cfg" "$TMP/cfgoff" <<'PY'; verdict $? "N3 answer minus <ep> and its clause equals RIPWIRE_NO_EP_MANIFEST=1 (est_tokens masked)" "N3 prefix identity broken"
 import re, sys

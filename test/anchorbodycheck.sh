@@ -46,7 +46,8 @@
 #       fixed six-candidate pool. (7)/(7b) prove the mid-sized anchor is now served, alone, from its own
 #       file; (7b2) proves the RAISE did not reopen substitution, which matters because a larger
 #       allowance is exactly the condition under which the original defect fired; (7c) proves an explicit
-#       --token-budget is still a hard ceiling; (7d) proves the raise is BOUNDED (the 36 KB anchor still
+#       --token-budget sheds the answer AFTER its posture (TOKEN-BUDGET-MONOTONE, 2026-11-14: it used to re-decide the posture
+#       and refuse the body — bodies="0" reason="budget"); the anchor's body IS the answer and no shed unit removes it; (7d) proves the raise is BOUNDED (the 36 KB anchor still
 #       refuses, so whole-body-or-nothing survives); (7e) proves a MULTI-candidate anchored bundle gets
 #       no raise at all — the guard that stops this becoming a general per-item budget increase.
 #
@@ -280,9 +281,12 @@ printf '%s' "$MID" | grep -q '<b t="fn" [^>]*p="a_src/mid\.py" n="widgetMidProbe
 printf '%s' "$MID" | grep -q 'ZZBYSTANDERPROSE' \
     && no "(7b2) the bystander's prose rode in on the RAISED allowance — substitution reopened at the new ceiling" \
     || ok "(7b2) no bystander prose in the newly-funded bundle"
-printf '%s' "$MIDCAP" | grep -q 'bundle="auto" bodies="0" reason="budget"' \
-    && ok "(7c) an explicit --token-budget stays a HARD ceiling — the raise does not apply to it" \
-    || no "(7c) the raise leaked into the explicit --token-budget regime (root: $( rootbodies "$MIDCAP" ) bodies)"
+# TOKEN-BUDGET-MONOTONE (rule 4): 6000 tokens holds this answer whole, so it IS the unbudgeted answer byte for byte (no
+# budget_tokens= named: nothing was shed) — the anchor's body rides because the posture is the no-budget one
+{ printf '%s' "$MIDCAP" | grep -q '<b t="fn" [^>]*p="a_src/mid\.py" n="widgetMidProbe"><!\[CDATA\[' \
+  && [ "$MIDCAP" = "$MID" ]; } \
+    && ok "(7c) an explicit --token-budget the answer fits returns it byte for byte: the anchor's body (the answer) still rides" \
+    || no "(7c) --token-budget=6000 lost the anchor's own body or is not the unbudgeted answer (root: $( rootbodies "$MIDCAP" ) bodies)"
 { [ "$( bodycount "$BIG" )" = "0" ] && printf '%s' "$BIG" | grep -q '<!-- body omitted (over budget): widgetAnchorProbe -->'; } \
     && ok "(7d) the oversized anchor STILL refuses at the raised ceiling — whole-body-or-nothing survives, bounded" \
     || no "(7d) the raise is unbounded: the 36 KB anchor now fits, so the allowance is no longer a ceiling"
