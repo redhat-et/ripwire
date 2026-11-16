@@ -14,10 +14,13 @@
 #   B  whereis: a name inside one 3 MB LINE (cut mid-line by the piece reader) is exactly one row, on that line
 #   C  whereis: a name only a branch's 5.8 MB blob holds is a row of that branch
 #   D  whereis: a DIRTY 5.8 MB working copy is read (worktree="read", the new name a ref="worktree" row)
-#   E  grep: a word in an oversize (crawl-dropped) file is an unindexed hit on its true line
+#   E  grep: a word in a large unsupported-ext file (notes.log, past the old ceiling) is an unindexed hit on its true line, and
+#      the same word in a large CODE file (data.ts) is an INDEXED hit on its true line (NO-SKIP-INGEST: the crawl no longer
+#      drops a code file under its 1 GiB hard limit, so the oversize half of the unindexed scan is reached only past 1 GiB,
+#      which no test generates; the piece reader is the same for both halves)
 #   F  grep: three occurrences in one 3 MB line fold to one row with occ="3" (no double count across the cut's overlap)
 #   G  stray-content: a branch's added line in the 5.8 MB file is counted (stray="1"), never diffable="0"
-#   H  grep: the unindexed scan keeps at most its one collection budget (4,000,000 sites) across ALL pieces and files, and says
+#   H  grep (on a 12.6 MB unsupported-ext file): the unindexed scan keeps at most its one collection budget (4,000,000 sites) across ALL pieces and files, and says
 #      the count is a floor (CodeRabbit #665: the budget was per 2 MiB piece, so a 12.6 MB file of 4.2 M matching lines kept
 #      every one, and a 100 MiB one would have kept 52 M rows)
 #   S  source: both piece readers (crossref.h scanWorktreeLarge, search.h scanAuxFileInPieces) open through
@@ -57,6 +60,7 @@ open(f"{r}/huge.c", "w").write("\n".join(lines) + "\n")
 open(f"{r}/caller.c", "w").write("int deep_target_fn( int y );\nint use( void ) { return deep_target_fn( 3 ); }\n")
 pad = "const pad = '" + "z" * 80 + "';\n"
 open(f"{r}/data.ts", "w").write("export const x = 1;\n" * 10 + "// NodeLinksMarker here\n" + pad * 70000)   # marker on line 11
+open(f"{r}/notes.log", "w").write("note\n" * 10 + "NodeLinksMarker here\n" + ("pad " + "z" * 80 + "\n") * 70000)   # unsupported ext, line 11
 EOF
 g(){ git -C "$R" -c user.name=t -c user.email=t@t "$@"; }
 g init -q -b main && g add -A && g commit -qm init
@@ -73,10 +77,11 @@ hb=$( wc -c < "$R/huge.c" ); db=$( wc -c < "$R/data.ts" )
 [ "$db" -gt 4194304 ] \
     && ok "P2 data.ts is $db bytes" \
     || no "P2 data.ts is only $db bytes"
-ov=$( run --grep=NodeLinksMarker | root grep | grep -o 'corpus_oversize="[0-9]*"' )   # status: the arms below assert the answer's bytes; a failed run prints no root or row, so each of them FAILs
-[ -n "$ov" ] \
-    && ok "P3 the crawl dropped the large files ($ov), so E/F test the oversize path" \
-    || no "P3 no corpus_oversize= — the grep arms would prove nothing"
+sk=$( run --skipped | grep -o '<f p="notes.log" why="unsupported-ext" bytes="[0-9]*"' )   # status: the arm asserts the answer's bytes; a failed run prints no row, so it FAILs
+nb=$( printf '%s' "$sk" | sed -n 's/.*bytes="\([0-9]*\)"/\1/p' )
+[ -n "$nb" ] && [ "$nb" -gt 4194304 ] \
+    && ok "P3 notes.log is an unindexed (unsupported-ext) candidate of $nb bytes, so E/H test the piece-read unindexed path" \
+    || no "P3 notes.log is not a large unsupported-ext candidate (${sk:-no --skipped row}) — the unindexed grep arms would prove nothing"
 
 # ── whereis ──────────────────────────────────────────────────────────────────────────────────────────────
 out=$( run --whereis=deep_target_fn --whereis-listing=all )   # status: the arms below assert the answer's bytes; a failed run prints no root or row, so each of them FAILs
@@ -111,9 +116,14 @@ g checkout -q -- huge.c
 
 # ── grep ─────────────────────────────────────────────────────────────────────────────────────────────────
 out=$( run --grep=NodeLinksMarker )   # status: the arms below assert the answer's bytes; a failed run prints no root or row, so each of them FAILs
-printf '%s' "$out" | grep -q 'unindexed_hits="1"' && printf '%s' "$out" | grep -q '<hit l="11"' \
-    && ok "E the oversize data.ts holds NodeLinksMarker at l=11 (unindexed)" \
-    || no "E no unindexed hit at data.ts:11: $( printf '%s' "$out" | root grep )"
+unx=$( printf '%s' "$out" | python3 -c 'import sys; t = sys.stdin.read(); i = t.find( "<unindexed " ); sys.stdout.write( t[ i: ] if i >= 0 else "" )' )
+printf '%s' "$out" | grep -q 'unindexed_hits="1"' && printf '%s' "$unx" | grep -q '<f p="notes.log"' && printf '%s' "$unx" | grep -q '<hit l="11"' \
+    && ok "E the large notes.log holds NodeLinksMarker at l=11 (unindexed)" \
+    || no "E no unindexed hit at notes.log:11: $( printf '%s' "$out" | root grep )"
+idx=$( printf '%s' "$out" | python3 -c 'import sys; t = sys.stdin.read(); i = t.find( "<unindexed " ); sys.stdout.write( t[ :i ] if i >= 0 else t )' )
+printf '%s' "$idx" | grep -q '<f p="data.ts"' && printf '%s' "$idx" | grep -q '<hit l="11"' \
+    && ok "E2 the 6 MB data.ts is indexed (no crawl drop) and holds NodeLinksMarker at l=11" \
+    || no "E2 no indexed hit at data.ts:11: $( printf '%s' "$out" | root grep )"
 
 out=$( run --grep=TrioWord )   # status: the arms below assert the answer's bytes; a failed run prints no root or row, so each of them FAILs
 printf '%s' "$out" | grep -q '<hit l="60003" [^>]*occ="3"' && ok "F three occurrences on one 3 MB line: one row, occ=3" \
@@ -127,14 +137,14 @@ printf '%s' "$row" | grep -q 'stray="1"' && ! printf '%s' "$row" | grep -q 'diff
     || no "G huge.c row not counted: ${row:-<none>}"
 
 # ── the unindexed scan's one budget, across pieces ────────────────────────────────────────────────────────
-python3 -c 'import sys; open( sys.argv[ 1 ], "w" ).write( "QQ\n" * 4200000 )' "$R/cap.ts"   # 12.6 MB: past the crawl ceiling, six pieces
+python3 -c 'import sys; open( sys.argv[ 1 ], "w" ).write( "QQ\n" * 4200000 )' "$R/cap.log"   # 12.6 MB unsupported ext: six pieces
 out=$( run --grep=QQ )   # status: the arm below asserts the answer's bytes; a failed run prints no root, so it FAILs
 r=$( printf '%s' "$out" | root grep )
 uh=$( printf '%s' "$r" | sed -n 's/.* unindexed_hits="\([0-9]*\)".*/\1/p' )
 [ -n "$uh" ] && [ "$uh" -gt 0 ] && [ "$uh" -le 4000000 ] && printf '%s' "$r" | grep -q 'counts_floor="1"' \
-    && ok "H 4.2 M matching lines in one oversize file: $uh kept (the one 4,000,000 budget), counts_floor=1" \
+    && ok "H 4.2 M matching lines in one large unindexed file: $uh kept (the one 4,000,000 budget), counts_floor=1" \
     || no "H want unindexed_hits <= 4000000 with counts_floor=1: unindexed_hits=${uh:-?} $( printf '%s' "$r" | grep -o 'counts_floor="[0-9]*"\|scan_degraded="[0-9]*"' | tr '\n' ' ' )"
-rm -f "$R/cap.ts"
+rm -f "$R/cap.log"
 
 # ── source: the piece readers open no-follow ─────────────────────────────────────────────────────────────
 body(){ awk -v f="$2" '$0 ~ "^inline bool " f "\\(" { on = 1 } on { print } on && /^}/ { exit }' "$ROOT/src/$1"; }
