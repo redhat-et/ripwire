@@ -469,10 +469,13 @@ if ran_ok "$f" "(B1b)"; then
 fi
 # forbudget-soft round C (rule 4): sections are funded from the rows at the soft target's cut (reserve first), so 1200 tokens
 # now leaves the hops a share; re-anchored at 700, the widest budget that still exhausts it (measured: 700 budget, 900 not)
-on="$TMP/b2.on.xml"; off="$TMP/b2.off.xml"; run ts "$on" "--for=$QTS" --token-budget=700; runoff ts "$off" "--for=$QTS" --token-budget=700
+# RE-ANCHOR (NEXT-APOS-RAW, 2026-11-15): 700 -> 690. The spent <hops> marker's next= now prints the raw ' (10 B shorter than
+# &apos;), so the exhausted line moved down: measured on the lane binary, 600-695 exhaust (on == off, reason="budget"), 700
+# funds the owner row (qword_cut="1"); on main it was 700 exhaust, 720 funded. A size-derived threshold, not an owner-hop change.
+on="$TMP/b2.on.xml"; off="$TMP/b2.off.xml"; run ts "$on" "--for=$QTS" --token-budget=690; runoff ts "$off" "--for=$QTS" --token-budget=690
 if ran_ok "$on" "(B2)" && ran_ok "$off" "(B2) A/B"; then
-    grep -q 'reason="budget"' "$off" || no "(B2) premise: --token-budget=700 no longer exhausts the ceiling (no reason=\"budget\") — re-tune"
-    # TOKEN-BUDGET-MONOTONE (2026-11-14): the budget sheds the unbudgeted answer, so at 700 the <hops> rows go whole (shed=hops:N,
+    grep -q 'reason="budget"' "$off" || no "(B2) premise: --token-budget=690 no longer exhausts the ceiling (no reason=\"budget\") — re-tune"
+    # TOKEN-BUDGET-MONOTONE (2026-11-14): the budget sheds the unbudgeted answer, so at 690 the <hops> rows go whole (shed=hops:N,
     # <hops shown="0" capped="1" next=>) and its total= still counts the owner row (7 vs 6 on the A/B handle; 5007 B vs 5164 B,
     # the rest is the qword/via legend U carries). What the arm protects — the owner rows add nothing past a spent budget — is
     # asserted on the answer: no owner row is printed, the hops are shed with a next=, and <sigs>/<tail> equal the A/B handle's.

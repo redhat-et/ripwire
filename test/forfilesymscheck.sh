@@ -324,9 +324,10 @@ fxrun ovl1 ovl1 "$TASK"
 
 # (h2) the held block's next= keeps the origin call's ranking flags
 RIPWIRE_DEV=1 run py "--for=$TASK" --token-budget=100 --no-route --anchor --pack-top-n=12 >"$TMP/h2.xml"; rc=$?
-if [ "$rc" = 0 ] && grep -q "<syms held=\"budget\" next=\"--for=&apos;$TASK&apos; --anchor --no-route --pack-top-n=12\"/></ctx>\$" "$TMP/h2.xml"; then ok "(h2) a held block's next= carries --anchor --no-route --pack-top-n=12"; else no "(h2) rc=$rc: $( grep -o '<syms held.*' "$TMP/h2.xml" | head -c 300 )"; fi
+# RE-PIN (NEXT-APOS-RAW, 2026-11-15): next= pins read --for='…' (was &apos;…&apos;): nextverb.h leaves ' raw in a "-delimited attribute
+if [ "$rc" = 0 ] && grep -q "<syms held=\"budget\" next=\"--for='$TASK' --anchor --no-route --pack-top-n=12\"/></ctx>\$" "$TMP/h2.xml"; then ok "(h2) a held block's next= carries --anchor --no-route --pack-top-n=12"; else no "(h2) rc=$rc: $( grep -o '<syms held.*' "$TMP/h2.xml" | head -c 300 )"; fi
 run py "--for=$TASK" --max-tokens=2000 --no-route >"$TMP/h3.xml"; rc=$?
-if [ "$rc" = 0 ] && grep -q "<syms held=\"budget\" next=\"--for=&apos;$TASK&apos; --no-route\"/></ctx>\$" "$TMP/h3.xml"; then ok "(h2) --max-tokens: next= carries --no-route"; else no "(h2) max-tokens rc=$rc: $( grep -o '<syms held.*' "$TMP/h3.xml" | head -c 300 )"; fi
+if [ "$rc" = 0 ] && grep -q "<syms held=\"budget\" next=\"--for='$TASK' --no-route\"/></ctx>\$" "$TMP/h3.xml"; then ok "(h2) --max-tokens: next= carries --no-route"; else no "(h2) max-tokens rc=$rc: $( grep -o '<syms held.*' "$TMP/h3.xml" | head -c 300 )"; fi
 
 # (c2) a buffer that fails to flush: a real short write (RLIMIT_FSIZE with SIGXFSZ ignored; stdout is a pipe so only the capture file is limited)
 run py "--for=$TASK" >"$TMP/c2.full.xml"
@@ -357,7 +358,7 @@ if [ "$rc" = 0 ] && grep -q '</ctx>$' "$TMP/one.xml" && ! grep -q '<syms' "$TMP/
 # TOKEN-BUDGET-MONOTONE (2026-11-14): a budget holds the block only when the answer plus the block does not fit it (the old
 # 4000 held it at any budget; that answer fits 4000 whole now, so it comes back byte for byte, block and all): 100 forces the hold.
 run py "--for=$TASK" --token-budget=100 >"$TMP/h1.xml"; rc=$?
-if [ "$rc" = 0 ] && grep -q "<syms held=\"budget\" next=\"--for=&apos;$TASK&apos;\"/></ctx>\$" "$TMP/h1.xml" && ! grep -q '<y ' "$TMP/h1.xml" \
+if [ "$rc" = 0 ] && grep -q "<syms held=\"budget\" next=\"--for='$TASK'\"/></ctx>\$" "$TMP/h1.xml" && ! grep -q '<y ' "$TMP/h1.xml" \
    && grep -qE '<!-- ripwire for syms: held="budget":[^>]* next= [^>]*--><syms held=' "$TMP/h1.xml"; then ok "(h1) a token budget holds the block: held=\"budget\" next=, no rows, its own legend defines held= and next="; else no "(h1) rc=$rc: $( grep -o '<syms.*' "$TMP/h1.xml" | head -c 300 )"; fi
 run py "--for=$TASK" --json >"$TMP/j1.json"; rc=$?
 if [ "$rc" = 0 ] && [ -s "$TMP/j1.json" ] && ! grep -q 'syms' "$TMP/j1.json"; then ok "(j1) --json carries no block"; else no "(j1) rc=$rc json: $( grep -o '.\{40\}syms.\{80\}' "$TMP/j1.json" | head -c 300 )"; fi

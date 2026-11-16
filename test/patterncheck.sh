@@ -445,7 +445,8 @@ MP="$( mroot 'post_message($X)' )"
 printf '%s' "$MP" | grep -q ' hits="1"' && printf '%s' "$MP" | grep -q ' unmatched_member="2"' \
     && ok "post_message(\$X): hits=\"1\" (the bare call) and unmatched_member=\"2\" (self.post_message, self.app.post_message)" \
     || no "post_message(\$X) should read hits=\"1\" unmatched_member=\"2\" (a bare-name ARGUMENT self.post_message is not a call): $MP"
-printf '%s' "$MP" | grep -qF " next=\"--pattern=&apos;\$O.post_message(\$X)&apos;\"" \
+# RE-PIN (NEXT-APOS-FINISH, 2026-11-15): next= pins read the raw ' (was &apos;): nextverb.h appendNextValueXml leaves ' raw in a "-delimited attribute
+printf '%s' "$MP" | grep -qF " next=\"--pattern='\$O.post_message(\$X)'\"" \
     && ok "unmatched_member= rides with next=\"--pattern='\$O.post_message(\$X)'\"" || no "unmatched_member= should carry the receiver spelling as next=: $MP"
 MPN="$( mroot '$O.post_message($X)' )"
 printf '%s' "$MPN" | grep -q ' hits="2"' \
@@ -492,11 +493,11 @@ xroot(){ "$BIN" "$1" --no-cache --pattern="$2" 2>/dev/null | grep -oE '<pattern 
 # (1) arrow: mixed spellings disclose the arrow count and keep the dot next=; an all-arrow corpus gets the arrow next=
 XM="$( xroot "$MX/mixed" 'f($X)' )"
 printf '%s' "$XM" | grep -q ' unmatched_member="3"' && printf '%s' "$XM" | grep -q ' unmatched_member_arrow="2"' \
-    && printf '%s' "$XM" | grep -qF "next=\"--pattern=&apos;\$O.f(\$X)&apos;\"" \
+    && printf '%s' "$XM" | grep -qF "next=\"--pattern='\$O.f(\$X)'\"" \
     && ok "mixed . and ->: unmatched_member=\"3\" unmatched_member_arrow=\"2\", next= keeps the dot spelling" \
     || no "mixed . and -> should read unmatched_member=\"3\" unmatched_member_arrow=\"2\" with the dot next=: $XM"
 XA="$( xroot "$MX/arrow" 'f($X)' )"
-printf '%s' "$XA" | grep -qF "next=\"--pattern=&apos;\$O-&gt;f(\$X)&apos;\"" \
+printf '%s' "$XA" | grep -qF "next=\"--pattern='\$O-&gt;f(\$X)'\"" \
     && ok "all-arrow corpus: next= spells \$O->f(\$X)" || no "an all-arrow corpus should get next='\$O->f(\$X)': $XA"
 XAN="$( xroot "$MX/arrow" '$O->f($X)' )"
 printf '%s' "$XAN" | grep -q ' hits="2"' \
@@ -509,7 +510,7 @@ printf '%s' "$MDOT" | grep -q 'unmatched_member_arrow' \
          || no "premise: the dot-only corpus printed no unmatched_member= (the call failed or the near miss vanished): $MDOT"; }
 # (2) receivers exhausted: next= takes a receiver the pattern does not spell, and pasting it hits the counted call
 XR="$( xroot "$MX/recv" 'f($O, $RECV, $RW_RECEIVER)' )"
-XRN="$( printf '%s' "$XR" | sed -n 's/.* next="--pattern=&apos;\([^&]*\)&apos;".*/\1/p' )"
+XRN="$( printf '%s' "$XR" | sed -n 's/.* next="--pattern='\''\([^'\'']*\)'\''".*/\1/p' )"
 printf '%s' "$XR" | grep -q ' unmatched_member="1"' && [ -n "$XRN" ] \
     && [ "$( xroot "$MX/recv" "$XRN" | grep -c ' hits="1"' )" = 1 ] \
     && ok "receivers \$O \$RECV \$RW_RECEIVER taken: next='$XRN' is free and hits the 1 counted call" \
@@ -534,14 +535,14 @@ printf 'function g(o, p) {\n  o?.f(1);\n  p.f(2);\n  return 0;\n}\n' >"$MX/ocmix
 ocSites="$( cat "$MX/oc/a.js" "$MX/ocmix/a.ts" | grep -o '?\.f(' | wc -l | tr -d ' ' )"
 if [ "${ocSites:-0}" -eq 3 ]; then ok "optchain premise: $ocSites \`?.f(\` call sites"; else no "optchain premise: ${ocSites:-0} \`?.f(\` sites, expected 3 — the arms below would be vacuous"; fi
 XO="$( xroot "$MX/oc" 'f($X)' )"
-XON="$( printf '%s' "$XO" | sed -n 's/.* next="--pattern=&apos;\([^&]*\)&apos;".*/\1/p' )"
+XON="$( printf '%s' "$XO" | sed -n 's/.* next="--pattern='\''\([^'\'']*\)'\''".*/\1/p' )"
 printf '%s' "$XO" | grep -q ' unmatched_member="2" unmatched_member_optchain="2"' && [ "$XON" = '$O?.f($X)' ] \
     && [ "$( xroot "$MX/oc" "$XON" | grep -c ' hits="2"' )" = 1 ] \
     && ok "all-?. corpus: unmatched_member_optchain=\"2\", next='\$O?.f(\$X)' hits exactly the 2 counted calls" \
     || no "an all-?. corpus should read unmatched_member_optchain=\"2\" with next='\$O?.f(\$X)' hitting 2: next='$XON' root=$XO"
 XOM="$( xroot "$MX/ocmix" 'f($X)' )"
 printf '%s' "$XOM" | grep -q ' unmatched_member="2" unmatched_member_optchain="1"' \
-    && printf '%s' "$XOM" | grep -qF "next=\"--pattern=&apos;\$O.f(\$X)&apos;\"" \
+    && printf '%s' "$XOM" | grep -qF "next=\"--pattern='\$O.f(\$X)'\"" \
     && ok "mixed . and ?.: unmatched_member_optchain=\"1\" of 2, next= keeps the dot spelling" \
     || no "mixed . and ?. should read unmatched_member=\"2\" unmatched_member_optchain=\"1\" with the dot next=: $XOM"
 printf '%s' "$XM" | grep -q 'unmatched_member_optchain' \
@@ -553,7 +554,7 @@ mkdir -p "$MX/arrowoc"
 printf 'struct P { int f(int); };\nint g(P* p) { return p->f(1); }\n' >"$MX/arrowoc/a.cpp"
 printf 'function h(o) {\n  return o?.f(1);\n}\n' >"$MX/arrowoc/b.js"
 XAO="$( xroot "$MX/arrowoc" 'f($X)' )"
-XAON="$( printf '%s' "$XAO" | sed -n 's/.* next="--pattern=&apos;\(.*\)&apos;".*/\1/p' | sed 's/&gt;/>/g' )"
+XAON="$( printf '%s' "$XAO" | sed -n 's/.* next="--pattern='\''\(.*\)'\''".*/\1/p' | sed 's/&gt;/>/g' )"
 if printf '%s' "$XAO" | grep -q ' unmatched_member="2" unmatched_member_arrow="1" unmatched_member_optchain="1"'; then
     ok "arrow+optchain premise: 2 counted member calls, 1 -> and 1 ?., no dot call"
     if [ "$XAON" = '$O->f($X)' ] && [ "$( xroot "$MX/arrowoc" "$XAON" | grep -c ' hits="1"' )" = 1 ]; then ok "arrow+optchain: next='\$O->f(\$X)' (an operator the calls use) hits the arrow call"
@@ -569,7 +570,7 @@ printf 'def h(o):\n    o.f(%s)\n' "$args32" >"$MX/lim32/a.py"
 nm="$( printf '%s' "$pat32" | grep -o '\$M[0-9]*' | sort -u | wc -l | tr -d ' ' )"
 if [ "$nm" -eq 32 ]; then ok "next-limits premise: the pattern spells $nm distinct metavariables (the limit)"; else no "next-limits premise: $nm metavariables, expected 32"; fi
 X32="$( xroot "$MX/lim32" "$pat32" )"
-X32N="$( printf '%s' "$X32" | sed -n 's/.* next="--pattern=&apos;\([^&]*\)&apos;".*/\1/p' )"
+X32N="$( printf '%s' "$X32" | sed -n 's/.* next="--pattern='\''\([^'\'']*\)'\''".*/\1/p' )"
 printf '%s' "$X32" | grep -q ' unmatched_member="1"' && [ -n "$X32N" ] && [ "$( xroot "$MX/lim32" "$X32N" | grep -c ' hits="1"' )" = 1 ] \
     && ok "at the metavariable limit next= takes an anonymous receiver and pasting it hits the 1 counted call ('${X32N%%(*}(…)')" \
     || no "at the metavariable limit next= should compile and hit the counted call: next='$X32N' root=$( printf '%s' "$X32" | head -c 300 )"
