@@ -203,11 +203,13 @@ inline int emitCallHierarchyAlt( const rw::Config& cfg, const rw::IngestResult& 
                                + chNextAttr;
         std::vector<char>        pageVia( page.size(), 0 );
         std::vector<char>        pageSplit( page.size(), 0 );
+        std::vector<char>        pageTest( page.size(), 0 );   // TIER-FOLLOWUP: the present-only <test> column
         std::vector<std::string> pageOfDef;
         for( std::size_t i = 0; i < page.size(); ++i )
         {
             pageVia[ i ]   = hopViaCode( oneHopRowIsLink( g, matches, result[ pw.begin + i ], wantCallers ), chAttr.nameOnly( pw.begin + i ) );
             pageSplit[ i ] = chAttr.splitArm( pw.begin + i ) ? 1 : 0;
+            pageTest[ i ]  = isTestSymbol( ing, page[ i ] ) ? 1 : 0;
             if( chAttr.groups.multi() )
             {
                 pageOfDef.push_back( rw::ofDefColumnValue( chAttr.groups, chAttr.tokens, pw.begin + i ) );
@@ -217,7 +219,8 @@ inline int emitCallHierarchyAlt( const rw::Config& cfg, const rw::IngestResult& 
         const std::string chDcInRows = chDcRows + chIn.rows;
         emitColumnarSymbolRows( stdout, ing, tag, attr, page, chRootPrefix, &chTested.testReach, nullptr,
                                 rw::ColumnarRowExtras{ &pageVia, chSites.any ? &chSites.tokens : nullptr, &chSites.totals,
-                                                       chAttr.groups.multi() ? &pageOfDef : nullptr, &chDefRows, &pageSplit, &chDcInRows } );   // + the <dc> and <in> rows verbatim
+                                                       chAttr.groups.multi() ? &pageOfDef : nullptr, &chDefRows, &pageSplit, &chDcInRows,
+                                                       nullptr, &pageTest } );   // + the <dc> and <in> rows verbatim; TIER-FOLLOWUP: <test>
         return 0;
     }
     rw::emitTo( stdout, "{{\"of\":\"{}\"{},\"defs\":{},\"count\":{}", jsonStr( sym ).c_str(),
@@ -231,7 +234,8 @@ inline int emitCallHierarchyAlt( const rw::Config& cfg, const rw::IngestResult& 
                  rw::defTableJson( ing, chAttr.groups, chListing, chRootPrefix, /*mcp=*/false ) );
     if( chSingleRoot ) { rw::emitTo( stdout, ",\"root\":\"{}\"", jsonStr( cfg.roots[0] ).c_str() ); }
     rw::emitTo( stdout, ",\"hop_tested\":{},\"hop_untested\":{}{}{}", chTested.tested, chTested.untested,
-                 rw::declinedCallsKeyJson( chRows.declinedCalls ) + rw::declinedSiteCutKeyJson( chDcCut )
+                 rw::countFieldOrEmpty( "hop_tests", chTested.tests, /*json=*/true )   // TIER-FOLLOWUP: the XML root's hop_tests=, absent at 0
+                   + rw::declinedCallsKeyJson( chRows.declinedCalls ) + rw::declinedSiteCutKeyJson( chDcCut )
                    + rw::declinedIfaceKeyJson( chRows.declinedIface )
                    + rw::stdMemberCallsSpelling( chRows.stdCalls, /*json=*/true ),
                  ( rw::valueRefsCountKeyJson( chRows.valueRefs.rows.size() ) + rw::valueRefsDepthKeyJson( ing, chRows.valueRefs.depthCut, chVr )
@@ -256,6 +260,7 @@ inline int emitCallHierarchyAlt( const rw::Config& cfg, const rw::IngestResult& 
             chAtKeys[ i ] = rw::callSitesKeyJson( chSites.tokens[ i - pw.begin ], chSites.totals[ i - pw.begin ] );
         }
         chAtKeys[ i ] += rw::ofDefKeyJson( chAttr.groups, chAttr.tokens, i ) + rw::splitArmKeyJson( chAttr.splitArm( i ) );
+        chAtKeys[ i ] += rw::isTestSymbol( ing, result[ i ] ) ? ",\"test\":true" : "";   // TIER-FOLLOWUP: the XML row's test="1"
         if( oneHopRowIsLink( g, matches, result[ i ], wantCallers, &g.outAnchorMiss ) )
         {
             chAtKeys[ i ] += ",\"anchor\":\"missing\"";
@@ -441,7 +446,10 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
             }
             const bool chHasMiss = rw::pageHasAnchorMiss( g, matches, result, pw.begin, pw.end, wantCallers );
             chHasVia = chHasVia || rw::closureBlocksAnyVia( ing, g, chClosures );   // ix2-slice: a closure block's row may carry it too
-            rw::emitTo( stdout, "{}{}{}{}{}{}{}-->{}{}", rw::callHierarchyLegendOpen( wantCallers, chNextIsBare, cfg.columnar, chNextIsPage ).c_str(),
+            // TIER-FOLLOWUP: the test tier's clause beside the partition it splits, exactly when hop_tests= rides
+            const std::string chOpen = rw::callHierarchyLegendOpen( wantCallers, chNextIsBare, cfg.columnar, chNextIsPage )
+                                     + rw::hopTestTierLegend( chTested.tests, cfg.columnar, rw::anyTestRowIn( ing, result, pw.begin, pw.end ) );
+            rw::emitTo( stdout, "{}{}{}{}{}{}{}-->{}{}", chOpen.c_str(),
                          rw::capLegendClause( rw::computePageDisclosure( pw.end - pw.begin, result.size(), pw.end,
                                                                         cfg.pageLimit, cfg.pageOffset, chDiscloseCap ).active ),
                          rw::declinedCallsLegendForRows( chRows.declinedCalls > 0, g.gateDeclinedCalls > 0, g.stdMemberDeclinedCalls > 0, !chDc.empty(),
@@ -527,7 +535,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
             // A6: tested="1" only (never a literal 0) — the same absence-meaningful convention tested=
             // already follows everywhere else (serialize.h/verbs_for.h), so an untested row costs 0 bytes.
             rw::emitTo( stdout, "<s t=\"{}\" n=\"{}\" p=\"{}:{}\"{}{}{}{}{}{}/>", symTag( s.kind ), ex( rw::qualifiedMemberName( chOwners, s ) ).c_str(), ex( rp ).c_str(), s.line,
-                         macroRoleAttr( s.kind ), rw::isTestedByReach( ing, chTested.testReach, result[i] ) ? " tested=\"1\"" : "",
+                         macroRoleAttr( s.kind ), rw::radiusTierRowAttrXml( ing, chTested.testReach, result[i] ),   // TIER-FOLLOWUP: tested="1" | test="1" | nothing
                          std::string( viaEdgeAttr( chAttr.nameOnly( i ), oneHopRowIsLink( g, matches, result[ i ], wantCallers ) ) )
                            + viaImplAttr( chAttr.viaImpl( i ) )   // lane L6: via="impl"
                            + anchorMissAttr( oneHopRowIsLink( g, matches, result[ i ], wantCallers, &g.outAnchorMiss ) ),
@@ -1437,6 +1445,10 @@ inline constexpr SafeDeleteRiskReading kSafeDeleteRiskReadings[] = {
     { "none-found",      "none-found: zero callers AND zero uses — an ABSENCE of evidence, never evidence of absence. " },
     { "untested-radius", "untested-radius: callers or uses exist, and NONE of the transitive blast radius is test-covered. " },
     { "uses-exist",      "uses-exist: callers or uses exist, and at least part of the radius is test-covered. " },
+    // TIER-FOLLOWUP: a radius of test definitions only is not "untested" (isTestedByReach never counts a test, so it read as one)
+    { "tests-only",      "tests-only: callers or uses exist, and EVERY symbol in the transitive blast radius is a test definition "
+                         "(radius_tests=): no production symbol calls it, directly or transitively. uses= may still count production "
+                         "reads, imports or value uses. " },
     { "unmodelled",      "unmodelled: zero callers AND zero uses were READ, but this kind is used by reading or naming it and those "
                          "counts cannot see that — no reading either way, never a none-found. " },
     // IX-3: a template lookup can name this method — zero proven callers is then no safety reading
@@ -1453,12 +1465,14 @@ inline constexpr SafeDeleteRiskReading kSafeDeleteRiskReadings[] = {
 // The risk= value in force, in precedence order. Without evidence: unmodelled (this kind's uses are not indexed), then
 // possible-callers (gates review Q3: never none-found beside a declined possible caller), then hedged (IX-3: never
 // none-found when a name template, too-wide ones included, can name it), then contract (BODILESS-SEED: never none-found on an interface
-// or abstract method with no body), then none-found; with evidence: untested-radius, else uses-exist.
-inline const char* safeDeleteRisk( bool anyEvidence, bool usesFloor, bool declined, bool patterns, bool untestedRadius, bool contract ) noexcept
+// or abstract method with no body), then none-found; with evidence: untested-radius, then tests-only (TIER-FOLLOWUP: the radius holds
+// test definitions alone), else uses-exist.
+inline const char* safeDeleteRisk( bool anyEvidence, bool usesFloor, bool declined, bool patterns, bool untestedRadius, bool testsOnlyRadius,
+                                   bool contract ) noexcept
 {
     if( anyEvidence )
     {
-        return untestedRadius ? "untested-radius" : "uses-exist";
+        return untestedRadius ? "untested-radius" : testsOnlyRadius ? "tests-only" : "uses-exist";
     }
     if( usesFloor )
     {
@@ -1478,7 +1492,7 @@ inline const char* safeDeleteRiskSentence( std::string_view risk ) noexcept
 {
     const auto it  = std::ranges::find( kSafeDeleteRiskReadings, risk, &SafeDeleteRiskReading::risk );
     const auto end = std::end( kSafeDeleteRiskReadings );   // outside the promise: a self-check names values, it calls nothing
-    ASSUME( it != end, "safeDeleteRiskSentence: runSafeDelete assigns only the seven values listed" );
+    ASSUME( it != end, "safeDeleteRiskSentence: runSafeDelete assigns only the eight values listed" );
     return it != end ? it->sentence : "";
 }
 
@@ -1660,7 +1674,7 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
         if( isTested( def ) ) { testedSelf = true; break; }
     }
     // IMPACT-TEST-TIER: the radius in three tiers (graph.h radiusTiers) — a test definition in impact_reaches= is its own
-    // count (radius_tests=), never untested production. risk= reads the tested count, which the tiering does not move.
+    // count (radius_tests=), never untested production. risk= reads the production tiers (TIER-FOLLOWUP: a radius of tests alone is tests-only).
     const rw::RadiusTiers radius       = rw::radiusTiers( ing, testReach, reach );
     const std::size_t     radiusTested = radius.tested;
 
@@ -1727,8 +1741,10 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
     // lane declined-sites: declined calls whose candidate lists hold a definition (as --callers counts and lists them) — the
     // <dc> rows, file-first, cut at the callers verb's own cap (one constant, gates review Q6).
     const auto [ sdDeclinedCalls, sdDeclinedSites ] = rw::declinedCallsAndSites( ing, g, defs, /*wantCallers=*/true );
-    const char* risk        = safeDeleteRisk( anyEvidence, usesFloor, sdDeclinedCalls > 0, !sdPatterns.empty() || !sdWide.empty(), !reach.empty() && radiusTested == 0,
-                                          sdContract.contracts > 0 );
+    // TIER-FOLLOWUP: untested-radius reads the PRODUCTION rows (radiusTiers): a radius of test definitions alone is tests-only
+    const char* risk        = safeDeleteRisk( anyEvidence, usesFloor, sdDeclinedCalls > 0, !sdPatterns.empty() || !sdWide.empty(),
+                                              radius.untested > 0 && radiusTested == 0, !reach.empty() && radius.tests == reach.size(),
+                                              sdContract.contracts > 0 );
     const bool  sdWideRows  = std::string_view( risk ) == "hedged" && !sdWide.empty();   // the <pdw> rows: exactly when they back risk=hedged
 
     std::vector<char> esc;
@@ -3554,13 +3570,15 @@ int emitImpactColumnar( const ImpactView& v )
     // JSON forms say so through their <files> rollup (type_users=, via="type"), which this form does not carry. The
     // <by_type> column marks each such row (1 = reached only through a type mention), present only when one is shown.
     std::vector<char> rowType( rows.size(), 0 );
+    std::vector<char> rowTest( rows.size(), 0 );   // TIER-FOLLOWUP: the <test> column, the XML row's test="1" (present only when one is shown)
     for( std::size_t i = 0; i < rows.size(); ++i )
     {
         rowType[ i ] = rows[ i ] < v.typeOnly.size() ? v.typeOnly[ rows[ i ] ] : char( 0 );   // empty typeOnly: an unarmed tier, every row 0
+        rowTest[ i ] = rw::isTestSymbol( v.ing, rows[ i ] ) ? 1 : 0;
     }
     const std::string dcRows = rw::declinedSitesXml( v.dc.views, /*callersForm=*/true );   // ix2-slice: the <dc> rows verbatim, as --callers
     emitColumnarSymbolRows( stdout, v.ing, "impact", attr.c_str(), rows, v.rootPrefix, v.testReach, &v.depth,
-                            rw::ColumnarRowExtras{ &rowVia, nullptr, nullptr, v.attrib.groups.multi() ? &rowOfDef : nullptr, &defRows, nullptr, &dcRows, &rowType } );
+                            rw::ColumnarRowExtras{ &rowVia, nullptr, nullptr, v.attrib.groups.multi() ? &rowOfDef : nullptr, &defRows, nullptr, &dcRows, &rowType, &rowTest } );
     return 0;
 }
 
@@ -3708,7 +3726,8 @@ inline void emitImpactLegend( const rw::Config& cfg, const rw::IngestResult& ing
                                                      [ & ]( rw::NodeId n ) { return rw::impactRowNameOnly( imProven, n ); } ), true, cfg.columnar )
                    + rw::impactLinkLegendFor( g, seeds, imDepth, show, imPage.begin, imPage.end )
                    + rw::impactAnchorLegendFor( g, seeds, imDepth, show, imPage.begin, imPage.end ) ).c_str(),
-                 rw::testedLensLegend( cfg.columnar ), rw::impactTestedPartitionLegend( imRoot.radiusTests, cfg.ignoreTests, !cfg.columnar ),   // IMPACT-TEST-TIER
+                 rw::testedLensLegend( cfg.columnar ), ( rw::impactTestedPartitionLegend( imRoot.radiusTests, cfg.ignoreTests, !cfg.columnar )   // IMPACT-TEST-TIER
+                   + rw::testColumnLegend( cfg.columnar && rw::anyTestRowIn( ing, show, imPage.begin, imPage.end ) ) ).c_str(),   // TIER-FOLLOWUP: the <test> column
                  rw::kTestedLensBlindSpotLegend,
                  ( rw::unprovenDefsVerbLegend( rw::UnprovenDefsVerb::Impact, imUnprovenDefs > 0 ) + rw::implsLegend( imRoot.contract ) ).c_str(),   // BODILESS-SEED: impls=
                  rw::declinedCallsLegendForRows( imDeclinedCalls > 0, g.gateDeclinedCalls > 0, g.stdMemberDeclinedCalls > 0, !imDc.views.empty() )

@@ -838,6 +838,7 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
              + "\",\"line\":" + std::to_string( s.line )
              + ",\"handle\":\"" + mcpdetail::jsonEscape( handleFor( ix, id ) ) + "\""
              + ( rw::isTestedByReach( ing, chTested.testReach, id ) ? ",\"tested\":true" : "" )
+             + ( rw::isTestSymbol( ing, id ) ? ",\"test\":true" : "" )   // TIER-FOLLOWUP: the CLI row's test="1" (never beside tested)
              + ( via ? ",\"via\":\"name\"" : "" )   // FE-B: the CLI row's via="name", the same edge bit (defattrib.h, one pass)
              + linkFrag
              + missFrag
@@ -923,6 +924,7 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
          + ( referencingOnly ? "" : ",\"count_of\":\"calls\"" )
          + ",\"hop_tested\":" + std::to_string( chTested.tested )
          + ",\"hop_untested\":" + std::to_string( chTested.untested )
+         + countFieldOrEmpty( "hop_tests", chTested.tests, /*json=*/true )   // TIER-FOLLOWUP: the CLI root's hop_tests=, absent at 0
          + declinedCallsKeyJson( chRows.declinedCalls )   // the CLI root's declined_calls=, for the direction count= describes
          + declinedSiteCutKeyJson( sqDcCut )              // the CLI root's dc_shown= / dc_next=, absent when nothing was cut
          + declinedIfaceKeyJson( chRows.declinedIface )   // the CLI root's declined_iface= (callers direction only)
