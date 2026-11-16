@@ -4,4 +4,4 @@ A tail row's `sym=` names its file's top three symbols by lens rank. When the sy
 
 This is option G2 of the depth lab, which found it while following up the 0.7.0 rehearsal's depth finding. Replacing names (G1) lost 12 credited names on 217 graded answers, so only the append ships. The lab measured +7/−1 items on the 217 terse answers and +8/−0 on the full questions, at about +1 KB median per terse answer and +3.5 KB on the full question. The lane's own numbers are in the PR.
 
-Versions: the session legend dictionary moves to `dictv=6c27422d1b7206cb entries=1113` (the `tsym=` clause); docs/COMMANDS.md and the 2026-11-13 showcase capture record the new pair.
+Versions: the session legend dictionary moves to `dictv=4d3731a96243bc2a entries=1133` (the `tsym=` clause); docs/COMMANDS.md and the 2026-11-13 showcase capture record the new pair.

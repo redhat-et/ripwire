@@ -3371,7 +3371,7 @@ $ ./build/ripwire . --edit-plan=<scratch>/aux/edit_plan.json --apply
 
 **Answers:** "can I delete this?" — one call joining callers, blast radius, tests and history "can I delete this?" — ONE call composing signals the tool already computes for one already-resolved SYM: 1-hop callers=, the transitive --impact blast radius (impact_reaches=), every --uses read/write/import/call/extends site (uses=), how much of the blast radius the tested= lens covers (tested_self=/radius_tested=/radius_untested=), and --dead-code's own zero-caller/internal-linkage shape at defs=1 (dead_code_candidate=).
 
-ambiguous_callers= names callers whose own calls include an ambiguously-resolved one (g.ambOut) — a caveat, not a count of proven-wrong edges. FACTS only: risk= names what was found — none-found (zero callers AND zero uses), possible-callers (none of either, but a call the resolver declined could have meant SYM: its <dc> rows), hedged (none of either, but a name-template lookup, a getattr with an f-string or this['compile' + t], could name SYM: its <pd> rows, or <pdw> for a template too wide to list candidates for), untested-radius (a radius exists and none of it is test-covered), or uses-exist (a radius exists and some of it is tested) — never a go/no-go verdict; unmodelled when nothing was found for a kind used by reading or naming it (a variable, class, struct) whose uses those counts cannot see; contract when nothing was found for an interface or abstract method with no body, whose implementors' same-named bodies it also reads (impls=K counts them). callers_floor=/uses_floor= mark a count the index holds evidence of a miss for, and next= is the call that lists the rest. A caller row's sites_at= is its call sites as file:line tokens (p= stays the line where the caller is defined).
+ambiguous_callers= names callers whose own calls include an ambiguously-resolved one (g.ambOut) — a caveat, not a count of proven-wrong edges. FACTS only: risk= names what was found — none-found (zero callers AND zero uses), possible-callers (none of either, but a call the resolver declined could have meant SYM: its <dc> rows), hedged (none of either, but a name-template lookup, a getattr with an f-string or this['compile' + t], could name SYM: its <pd> rows, or <pdw> for a template too wide to list candidates for), untested-radius (a radius exists and none of it is test-covered), tests-only (every symbol in the radius is a test definition), or uses-exist (a radius exists and some of it is tested) — never a go/no-go verdict; unmodelled when nothing was found for a kind used by reading or naming it (a variable, class, struct) whose uses those counts cannot see; contract when nothing was found for an interface or abstract method with no body, whose implementors' same-named bodies it also reads (impls=K counts them). callers_floor=/uses_floor= mark a count the index holds evidence of a miss for, and next= is the call that lists the rest. A caller row's sites_at= is its call sites as file:line tokens (p= stays the line where the caller is defined).
 
 **Try it**
 
@@ -4626,7 +4626,7 @@ _The session legend dictionary the MCP server serves as ripwire://legend-dict/fu
 
 ```
 $ ./build/ripwire . --legend-dict
-ripwire legend dictionary ripwire.dict/v1 dictv=041b5eb83fe6e787 entries=1123
+ripwire legend dictionary ripwire.dict/v1 dictv=4d3731a96243bc2a entries=1133
 <about legend="ref" dict= dictv=>: the answer's rows come first; its root keeps only task= changed= from= to=, and this LAST child carries every other root attribute unchanged (schema= included); legend="ref": a definition is sent once per session (this dictionary's core, or the first answer that ne … [line truncated: 83 more bytes on this line]
 schema=ripwire.KEY/v1: the line ripwire.KEY/v1 below reads the answer's rows
 window: shown= total= capped= has_more= next_offset= offset= limit= page a list (capped=1 cut; next_offset= pastes as offset=)
@@ -4885,9 +4885,9 @@ $ ./build/ripwire . --no-ignore --top-k=3
 
 ### `--max-file-size=N[K|M|G]`
 
-**Answers:** skip files larger than N bytes;
+**Answers:** read files larger than N bytes lexically;
 
-default 4MB skip files larger than N bytes (default 4MB; raise for repos with big hand-authored source, e.g. --max-file-size=100M; suffix = 1024^n). .json carries a SECOND, fixed 256KB ceiling this flag does not raise (that size of .json is data, not config, and explodes the symbol table); files it drops are counted in the header's skipped_oversize=
+default 64MB files over N bytes are still indexed, read lexically instead of parsed: defs by line shape, calls by name( (default 64MB; suffix = 1024^n). Every file is also parsed under a work budget, in parser steps per MiB: the same on every machine (env RIPWIRE_PARSE_BUDGET=<scale>), with a wall-clock and memory backstop behind it; one that runs past either is read lexically too. .json over 256KB / .yaml over 512KB index their first 256 top-level keys (env RIPWIRE_DATA_KEYS=N). Only a file over 1GB is dropped. Each event warns on stderr; the header counts them (lexical_files=, keys_cut=, skipped_oversize=) and the skipped verb rows them
 
 **Try it**
 
@@ -4916,9 +4916,7 @@ $ ./build/ripwire . --max-file-size=8K --top-k=3
 
 **Caveats (stated by the binary):**
 
-- skip files larger than N bytes;
-- default 4MB skip files larger than N bytes (default 4MB;
-- files it drops are counted in the header's skipped_oversize=
+- the header counts them (lexical_files=, keys_cut=, skipped_oversize=) and the skipped verb rows them
 
 ### `--max-memory=N[K|M|G]`
 
