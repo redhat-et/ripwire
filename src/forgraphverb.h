@@ -233,30 +233,20 @@ public:
     };
     GraphSubjectSpellings( const IngestResult& ing, GraphSubjectForm form ) : m_ing( ing ), m_form( form ) {}
 
-    const std::string& boundOf( const std::string& spec )
+    const Resolved& boundOf( const std::string& spec )
     {
-        if( const Resolved* seen = seenOf( spec ) )
+        if( const auto seen = std::ranges::find( m_memo, spec, &Resolved::spelling ); seen != m_memo.end() )
         {
-            return seen->bound;   // resolved once already
+            return *seen;   // resolved once already
         }
         Resolved r{ spec, bind( spec ) };
         r.viaBundle = r.bound != spec && graphFormResolves( m_ing, m_form, spec );   // resolved as written, so only the bundle step rebinds it
         m_memo.push_back( std::move( r ) );
-        return m_memo.back().bound;
+        return m_memo.back();
     }
     const std::vector<Resolved>& tried() const noexcept { return m_memo; }
-    bool viaBundle( const std::string& spec ) const noexcept
-    {
-        const Resolved* seen = seenOf( spec );
-        return seen != nullptr && seen->viaBundle;
-    }
 
 private:
-    const Resolved* seenOf( const std::string& spec ) const noexcept
-    {
-        const auto seen = std::ranges::find( m_memo, spec, &Resolved::spelling );
-        return seen == m_memo.end() ? nullptr : &*seen;
-    }
     std::string bind( const std::string& spec ) const
     {
         if( graphFormResolves( m_ing, m_form, spec ) )
@@ -284,15 +274,16 @@ inline std::optional<GraphSubjectArgs> chooseGraphSubjectArgs( const IngestResul
     const std::vector<std::vector<std::string>> combos = graphSubjectCombinations( *gs );
     for( std::size_t k = 0; k < combos.size(); ++k )
     {
-        const bool all = std::ranges::all_of( combos[k], [ & ]( const std::string& e ) { return !names.boundOf( e ).empty(); } );
+        const bool all = std::ranges::all_of( combos[k], [ & ]( const std::string& e ) { return !names.boundOf( e ).bound.empty(); } );
         if( all )
         {
             GraphSubjectArgs a{ gs->form, {}, gs->spans, k + 1, {}, {} };
             for( const std::string& e : combos[k] )
             {
-                a.endpoints.push_back( names.boundOf( e ) );
-                if( a.endpoints.back() != e ) { a.narrowed.push_back( e ); }
-                a.bundleNarrowed = a.bundleNarrowed || names.viaBundle( e );
+                const GraphSubjectSpellings::Resolved& r = names.boundOf( e );
+                a.endpoints.push_back( r.bound );
+                if( r.bound != e ) { a.narrowed.push_back( e ); }
+                a.bundleNarrowed = a.bundleNarrowed || r.viaBundle;
             }
             for( const GraphSubjectSpellings::Resolved& r : names.tried() )
             {
