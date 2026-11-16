@@ -16365,3 +16365,56 @@ Their cap is the middle option **neither card registered**, and on this evidence
 capped tail keeps the rows that carry the gold, keeps recoverability by construction through the `next=`
 the tier already emits, and takes most of the bytes. It needs its own band — a cap is a cut, so it owes
 §9 disclosure and a per-repo expected-token readout of its own, at a cap height chosen before the data.
+
+## CROSS-CHECK — the 87 % against an INDEPENDENT map population, and what it can and cannot settle
+
+A peer machine's S1 set turns out to contain **30 `orient` cells over 15 repositories** — a default-map
+population built months before Band M existed, with rubric gold taken from each project's own structure
+(*"~10 subsystems from tmux.h section comments … + entry points (main in tmux.c, server_start,
+client_main)"*). Nine of its fifteen repositories are **not** in Band M's set, so it is a genuinely
+independent repo population and the obvious instrument to check the 87 % against.
+
+### The result
+
+| the 9 repositories only S1 has | `<ls>` rows | paths losing literal form | wrappers |
+| --- | --- | --- | --- |
+| fastify, flake8, fzf, kysely, mdbook, nfpm, nunjucks, rake, starlette | 9–50 each | **0, every one** | **0, every one** |
+
+### What that settles, and what it does not
+
+**It confirms the mechanism is size-gated, exactly as Band M's per-repo table claimed.** Wrappers are
+emitted only where a shared prefix out-saves its own cost, so a flat tree gets none and loses nothing.
+Twenty-one repositories are now measured between the two sets: **14 at 0.0 %** (the five small ones in Band
+M plus these nine) and **7 at 58.3–95.5 %**. The loss is not a broad average — it is concentrated entirely
+in deep trees.
+
+**It cannot corroborate the 87 % itself, because every one of S1's fifteen `orient` repositories is in the
+no-wrapper regime.** Not one is vscode, envoy, angular, cockroach, cpython, django or nushell. So the peer's
+independent map population has **zero exposure to item 1** — the same blind spot Band F has, arrived at for
+a different reason: Band F is blind by VERB (all 319 cells are `--for`), S1's orient cells are blind by
+REPOSITORY SIZE. The two populations that exist are complementary and neither is sufficient:
+
+| population | built by | exposure to a map-shape change |
+| --- | --- | --- |
+| the 319 `--for` cells | the practice run | **none** — no cell emits `<inv>` at all |
+| S1's 30 `orient` cells | the peer machine, independently | **none** — no repository large enough to wrap |
+| Band M's 49 pairs / 12 docs | here, this afternoon | 7 of 12 repositories wrap |
+
+**So the 87 % still rests on one instrument, and this cross-check does not change that.** What it does
+change is the confidence in the *shape* of the claim: two independently chosen repo sets agree that flat
+trees are untouched, which is the half of the finding that could most easily have been an artefact of my
+own repo choice.
+
+### Why the figure is nonetheless the sturdier half of Band M's output
+
+Worth separating from the graded rates it sits beside: **the 87 % is a document property, not a graded
+result.** It is a grep over emitted bytes — does the literal string `Doc/c-api` appear in the answer or not —
+with no gold, no anchors, no grader and no completeness verdict in it. It cannot be wrong because a gold
+anchor was badly chosen, which is the live risk in Band M's absolute rates (`map-surface` on envoy names a
+tool, since envoy has no public module). Its only exposure is whether the repositories measured resemble
+what people index, and 21 repositories spanning 8,073 to 5,149,902 LOC is a reasonable answer to that.
+
+The graded halves — strict at 0.4 %, lenient 66.9 % → 66.1 % — remain single-instrument and are the ones
+that need the independent large-repo `orient` population that does not yet exist. Building one is the
+honest next step for Band M, and it is a bigger job than the set built today: rubric gold for large
+repositories is where the peer machine's S1 effort stopped too.
