@@ -16418,3 +16418,159 @@ The graded halves — strict at 0.4 %, lenient 66.9 % → 66.1 % — remain sing
 that need the independent large-repo `orient` population that does not yet exist. Building one is the
 honest next step for Band M, and it is a bigger job than the set built today: rubric gold for large
 repositories is where the peer machine's S1 effort stopped too.
+
+## PRE-REGISTRATION 2026-11-16 (amendment) — ITEM K: the tail is CAPPED, not removed, and a follow-on command is a COST
+
+Registered after Item T's stage-1 readout and before any Item K code exists. Item T measured the tail's
+removal and its registered per-repo rule FAILED on 7 of 27 repos; T4's rule then kept the tail as a default
+with an opt-out. This card registers the lever that readout pointed at instead: **cap the rendered row
+count, keep every row's recoverability, and take most of the bytes anyway.**
+
+### Why the cap is measurable where the removal was not
+
+Item T's −14 % was an ESTIMATE derived from the grader's **strict** bound, and the strict bound is *defined*
+as evidence that does not appear only inside `<tail>`. Estimating a tail-free build's completeness from it
+is therefore close to circular: the instrument's definition and the change under test are the same
+proposition. **No grader bound models a 64-row truncation.** A capped tail changes which rows are rendered
+without changing what counts as evidence, so both bounds read it the way they read any other answer. That
+is the whole reason this item can carry a verdict and Item T's estimate could not.
+
+### Where the cap lives, and what is already shipped
+
+`renderFileTailXml( t, shownCap, esc )` has taken a render-side row cap since deep-tail d2; the explicit-
+budget caller uses it (`fileTailShownToFill` fills to the element's byte share). The DEFAULT regime does not:
+`renderForFileTailXml` passes `tail.paths.size()` whenever `tokenBudget == 0` — *every* row
+`computeFileTail` collected. The collection stage is capped (`kForFileTailShownCap = 24` rank rows, plus the
+page rows among the file page's first `kForFileTailPageWalk = 160`); the RENDER stage is not. Item K gives
+the default regime the cap the explicit regime already has.
+
+### Band K5 — the height is fixed HERE, with zero degrees of freedom
+
+**64 rendered rows** = `kForFileTailPageRows` (40) + `kForFileTailShownCap` (24): page 0's full page rows
+plus the rank rows, which is the default regime's height as shipped before `471d66da7` (FOR-TAIL-WIDE)
+widened the walk from page 0 to 160 rows without adding a render-side bound. Both constants are in
+`src/serialize.h` today and neither is chosen by this card.
+
+**No height may be selected after a readout.** If 64 fails a band, the band fails; a second height is a new
+registration with its own card, not a repair of this one.
+
+**Two claims of a 50-row height are both withdrawn here, with the source read.** An earlier draft of this
+item said the height was "the previously shipped value, 50", and the peer machine's `ideas-rank-bytes-1116.md`
+§B.1 states that *"0.6.9 capped the tail at 50 rows with `next=`"*. Checked against the `v0.6.9` tag:
+
+- `src/serialize.h` at `v0.6.9` carries `kForFileTailShownCap = 24` and `kForFileTailPageRows = 40` and
+  nothing else; `kForFileTailPageWalk` is **absent** at that tag. The only literal `50`s on the tail path are
+  `kForThinCoveragePct` and two legend sentences quoting it.
+- `renderForFileTailXml` at `v0.6.9` is `return rw::renderFileTailXml( tail, tail.paths.size(), esc )` on
+  `tokenBudget == 0` — **character for character the same uncapped default render as today.**
+
+So 0.6.9's height was **64 rows (24 rank + the file page's first 40), bounded at COLLECTION**, and it had no
+render-side cap and no 50 anywhere. What 0.6.10 changed is FOR-TAIL-WIDE (`471d66da7`) widening the
+collection walk from page 0 to 160 page rows; the render stage was uncapped before and after. `next=` rides
+a cut in both versions and is not what 0.6.9 added.
+
+This is not a quibble about provenance. A 50-row cap would emit **14 fewer rows than 0.6.9 ever did**, which
+makes it a default tuned DOWN for tokens — forbidden by standing directive and by this card's own
+forbidden-alternatives list — and it means the −318 to −537 KB in §B.1 is keyed to a height that never
+shipped. The mechanism that section identifies is right and this card adopts it; its number is not inherited.
+
+### Band K1 — ZERO cells may lose completeness. A cap that cuts gold is a wrong answer, not a shorter one
+
+At **both** bounds, on the 319 `--for` cells, the capped build's completeness must equal the default's
+**exactly**. **FAIL on any cell that loses it**, at any byte saving. This is deliberately absolute where
+Item T's T1 carried a ≥ 5 % floor: T1 priced a trade, K1 does not admit one. A cell whose gold sits in a row
+past the cut is a defect in what the cap kept, not an acceptable loss.
+
+### Band K2 — expected tokens, per repo, both bounds
+
+Expected tokens (`tokens(answer) + P(not complete) × 24,808`) must fall by **≥ 5 % in every repo** at both
+bounds, and **FAIL if they RISE anywhere**, whatever the byte saving. Reported per repo, never pooled —
+Item T's stage 1 is the standing example of a pooled PASS hiding a per-repo FAIL on 7 of 27.
+
+### Band K3 — the answer to a K1 failure is an ORDERING test, NOT a higher cap
+
+If K1 fails, the registered response is to ask whether the ordering put a gold-bearing row late, and to
+report the cut row's rank position for every failing cell. Raising the cap until K1 passes would make the
+band unfalsifiable by construction: a cap at `paths.size()` trivially satisfies it and measures nothing.
+**A cap height raised in response to a K1 failure is a FAIL of this card, not a result.**
+
+### Band K4 — disclosure is required and earns NOTHING
+
+The cap must disclose itself through the vocabulary already emitted: `capped="1"` must flip on every cut
+cell, `total=` must stay the uncut count, and the `next=` argv must be **executed** on the same root and
+shown to produce the rows the cap removed. A `next=` that does not recover them is a FAIL — that is the §P8
+/ §9 honesty requirement and T2's recoverability rule, strengthened from naming the argv to running it.
+
+**But recoverability is a disclosure duty, not a credit.** A cell whose gold is only reachable by running
+the follow-on argv is scored **not complete** in K1 and K2 and pays the full 24,808-token follow-up term.
+Agent follow-on commands are the expensive outcome this whole round exists to avoid: at a measured 2.44–4.66
+B/token, one follow-up round trip costs more than the entire byte saving a cap can produce on any cell in
+the set. **No band may credit a cut because `next=` exists.** Registered because the opposite reading — "the
+rows are still reachable, so the cut is free" — is the single most available way to turn a K1 failure into a
+PASS after the data, and it is wrong on the arithmetic.
+
+### Band K6 — exposure is stated, so neither population is credited with the other's result
+
+Measured before this card was written: **0 of 98** default-map outputs in Band M's base store carry a
+`<tail>` element. Item K's exposure is therefore the 319 `--for` cells **only**, and Band M's 49 map cells
+have **zero** exposure to it. No Item K readout may be reported as a change to the map's shape, and no
+Band M figure may be cited as evidence for or against it. This is the mirror of item 1, whose map nesting
+Band F could not see at all; the two blind spots are complementary and neither set substitutes for the
+other.
+
+### What this card does NOT claim
+
+No byte estimate. Item T's −14 % belonged to removal, not to a cap, and no projection of the cap's saving is
+registered here — the set is in hand, so the measurement arrives before any figure needs to be guessed.
+Nothing about the peers, whose answers remain ungraded this round. Nothing about `<tail>` at llvm-project
+scale. And no claim that 64 is the *best* height: it is the only height with no degrees of freedom, which is
+a different and smaller claim.
+
+### ITEM G — attribute the 0.6.9→0.6.10 GROWTH to sections, and separate the growth that answers from the growth that does not
+
+Registered in the same amendment as Item K and before any Item G measurement. The owner's framing is the
+objective: **fewer tokens, and a follow-on command by an agent is a worse outcome than a longer first
+answer** — so growth that does not move completeness is pure cost and is the first thing to cut.
+
+The peer machine's `ideas-rank-bytes-1116.md` §B.1 and `reports/answer-size-0610.md` report, over 3 slices:
+`<tail>` is **58 %** of the 0.6.9→0.6.10 growth, **41 %** of tail bytes are path-only rows, and **78 %** of
+the growth sits on rows that **gained nothing**. Those are the leads this item exists to test. They are
+single-instrument figures on a population I did not build; **none of them is inherited as a result**, and
+§3.4's rule applies — they are reported beside my own numbers, never merged into one rate.
+
+- **Band G1 — attribution needs BOTH deltas, per section.** On the same cells with the same argv, 0.6.9 vs
+  0.6.10 binaries, report for every section its **byte delta** and its **completeness contribution** at both
+  bounds. "Answer-neutral growth" means a section whose bytes grew and whose contribution is zero at **both**
+  bounds. A byte delta alone is not an attribution and may not be reported as one — that conflation is how a
+  byte win gets published as an improvement.
+- **Band G2 — the metric must be shown able to FIRE.** Before any section is called answer-neutral, a
+  positive control: at least one section known to carry gold must register a **non-zero** contribution on the
+  same run. If none does, "gained nothing" is a statement about the instrument, not about the rows, and the
+  readout is **NOT-ESTABLISHED**. Registered because an absence read as a zero is the failure mode this
+  programme has hit most often, and because a metric that cannot fail cannot pass.
+- **Band G3 — the offline trim method, and the control that makes it trustworthy.** §B.2 of the peer's doc
+  gives the cheap procedure and it is adopted: edit copies of the stored answers (delete a row class or a
+  section), re-grade, read the cost in **items per cut**, no build required. Its control is mandatory and
+  runs first: **re-grading an UNEDITED copy must reproduce the recorded grade exactly.** If it does not, the
+  harness is measuring its own edit path and every cut cost it reports is void. A cut cost produced without
+  that control passing is **NOT-ESTABLISHED**, not a result.
+- **Band G4 — a trim rule is a CLASS rule, stated in advance.** The peer's §0.6 establishes that **no runtime
+  signal separates a gaining row from the rest.** No band here may claim a per-row oracle, and no cut may be
+  defined by which rows happened to carry gold in this corpus — that is fitting the cut to the gold and it
+  would score perfectly by construction. A cut is a rule over a row CLASS (path-only, doc, folded, past rank
+  N) written before its cost is read.
+- **Band G5 — per repo and per class, both bounds, no pooling.** Same rule as K2 and for the same reason: a
+  pooled growth figure lets one repo's answer-neutral bytes pay for another's load-bearing ones.
+- **Band G6 — a cut that forces a follow-on is scored as a loss.** Identical to K4's clause and restated so
+  it cannot be read as local to the tail: a cell whose gold is only reachable by the `next=` argv counts as
+  **not complete** and pays the full 24,808-token follow-up term. At 2.44–4.66 B/token one follow-up round
+  trip costs more than any single-cell byte saving in the set, so **no band may credit a cut because the rows
+  remain reachable.**
+
+### What Item G does NOT claim
+
+That the growth was a mistake. 0.6.10's `--for` answers are measurably more complete than 0.6.9's, and the
+round's object is to keep that completeness at fewer bytes — not to argue the bytes bought nothing. The
+specific claim under test is narrower and falsifiable: **that a nameable share of the growth is attributable
+to sections with zero completeness contribution at both bounds.** And no saving figure is registered in
+advance, because the offline method in G3 returns one without a build and there is no reason to guess it.
