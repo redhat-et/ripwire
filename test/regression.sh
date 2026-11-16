@@ -638,6 +638,7 @@ for _g in \
     ifacedispatchcheck \
     ifacepeelcheck \
     impactdepthcheck \
+    impactimplcheck \
     impactimportcheck \
     impactpartitioncheck \
     impacttesttiercheck \

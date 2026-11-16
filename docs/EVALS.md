@@ -15992,3 +15992,170 @@ change with its own band and is deliberately out of scope here; it is recorded w
 the next round starts from the number. It is also the honest answer to "an answer should be bounded by the
 question, not the corpus": this lane bounded the *count-only* tail and fixed *where* the names go, and the
 remaining growth term is a schema that spells every ancestor directory once per row.
+
+## `--impact` on an interface member should name its IMPLEMENTORS — PRE-REGISTERED 2026-11-15 (before any `src/` change; the motivating measurement below is a simulation over recorded answers, not an implementation)
+
+**What this registers.** `--impact=SYM` walks the transitive CALLERS of the definitions it matched.
+When `SYM` is an interface, trait, abstract or virtual member, the thing that breaks on a signature
+change is every IMPLEMENTOR, and those are not callers — so they are absent from the radius today.
+This registers adding them as a labelled tier, **scoped to the method**, from the implementors map
+the resolver already builds.
+
+### The measurement that motivated it
+
+The 18-cell file-grain gold set includes 10 cells whose target dispatches through indirection
+(interface, trait, abstract, pure-virtual, fn-pointer, callback). Over those cells' 85 required gold
+files, `--impact` on the run pin `44f7d3326` names 35 (**41.2 %**). Simulating a file-level join of
+`--lego`'s `<impl p=>` rows into the same answers lifts that to 47 (**55.3 %**):
+
+| cell | language / target | gold | `--impact` | with the join | implementors `--lego` reports |
+|---|---|---:|---:|---:|---:|
+| mdbook-31 | Rust trait method | 6 | **0** (`found="0"`) | **5** | 8 |
+| kysely-31 | TS interface method | 8 | 6 | **8** | 1 (+4 transitive) |
+| ninja-31 | C++ pure virtual | 7 | 5 | **6** | 1 (+4 transitive) |
+| htop-31 | C fn-pointer slot | 28 | 10 | 11 | 0 |
+| textual-32 | Python override set | 12 | 3 | 4 | **137** |
+| fzf-31 | Go interface method | 5 | 0 | 1 | 0 |
+| nfpm-31 | Go interface method | 8 | 0 | 1 | 0 |
+| koa-31 · nunjucks-31 · starlette-31 | duck-typed / abstract | 11 | 11 | 11 | 0 / 4 / 5 |
+
+The sharpest single row is **mdbook-31**: `--impact=Preprocessor::run` answers `found="0"` — "no
+indexed definition matched the selector" — while `--lego=Preprocessor` on the same index prints the
+method contract and **eight implementors**, and those files hold 5 of that cell's 6 gold files. Two
+verbs over one index disagree about whether the thing exists.
+
+### Three things the simulation settles before any code is written
+
+1. **The join must be METHOD-scoped, not type-scoped.** `--lego=Widget` on textual reports **137
+   implementors** and buys exactly **one** gold file: `render_line`'s nine overrides are a
+   method-level set, and pulling a hub type's whole implementor list would add 137 rows of noise for
+   1 row of signal. `src/ifacedispatch.h` already computes the right set internally — "the bodied
+   methods of that name the types implementing T own" — so the data path exists; neither `--lego`
+   (type-scoped) nor `--uses` is that surface.
+2. **`--uses=<method>` is not a substitute.** It reports the right def COUNTS (nfpm 8, fzf 4, textual
+   17, mdbook 12) but the files its rows name cover only **12 %, 20 %, 25 % and 33 %** of those cells'
+   golds, because it answers about use sites rather than naming each definition's file.
+3. **Go and the C vtable are EXTRACTION gaps, not join gaps.** `--lego=Renderer` (fzf) and
+   `--lego=Packager` (nfpm) both report `methods="0" caveat="not-extracted-for-lang"
+   implementors="0"`, and `--impact` says `no_file_edges="go"`. `MeterClass` (htop) likewise reports 0
+   implementors, because a C function-pointer slot in a class-descriptor struct is not an
+   extends/implements edge. **No band below claims anything for those three cells**; they are a
+   separate lane and the honest ceiling without them is what Band 1 is set against.
+
+### Band 1 — recall on the indirection population, and it gates
+
+Measured over the **7 indirection cells where implementors are extractable** (every cell above except
+fzf-31, nfpm-31 and htop-31; 44 required gold files): `--impact` names 25 of 44 today (**56.8 %**).
+**Registered: at least 70 % — 31 of 44 — with no cell losing a gold file it names today.**
+
+The floor is derived, not chosen: the simulated file-level join reaches 34 of 44 (77.3 %), and 70 %
+asserts that a method-scoped join recovers at least two thirds of what the coarser type-scoped
+simulation found. *Refuted if* under 31, or if any cell regresses.
+
+### Band 2 — the control population must not move, and the answer must not bloat
+
+The 12 control cells (concrete functions, hub types, interface-like types; 252 gold files, 94.0 %
+reach-set recall today) must stay within **1 point** of today's recall, and their file-shaped claim
+counts within **5 %**. A join that fires on a concrete function has misread its target.
+**textual-32's 137-implementor type is the named counter-example**: if the implementation ever adds
+more than **12** claim rows to that cell, it has become type-scoped and fails this band.
+
+### Band 3 — `Wrong` is reported and capped, because this tier ADDS claims
+
+Unlike the importer-ring band, this change makes the answer larger, so precision can only fall and
+`Wrong` can only rise. Registered: over the 7 cells, **`Wrong` may rise by at most the number of
+non-gold implementor files the join names, and that number must be printed**. A rise beyond it means
+the tier is pulling in files that are neither implementors nor callers. Precision is still not a
+gating band — the cap confound applies here as it does everywhere — but an unexplained rise is a fail.
+
+### Band 4 — disclosure, the ship/no-ship gate
+
+1. Implementor rows are **labelled** (`via="implementor"` or the dialect's equivalent), never mixed
+   into the caller reach set, and counted in the header.
+2. A language whose implementors are not extracted keeps saying so — `caveat="not-extracted-for-lang"`
+   on `--lego`, `no_file_edges=` on `--impact`. **Silence is the failure this card exists to remove,
+   not to spread.**
+3. Parity across XML, `--json`, the MCP answer and `--safe-delete`, gated rather than inspected.
+4. A cell whose target matches no bodyless or virtual member emits **byte-identical** output.
+
+### What this registration does NOT claim
+
+Nothing about Go, nothing about C function-pointer slots, nothing about the 3 cells `--impact` refuses
+outright. No claim that the implementors ARE callers — they are a different relation and the label
+says so. And no claim about any peer tool: the gold set has no peer answers.
+
+### The honest failure mode, registered in advance
+
+If the method-scoped set turns out to be empty exactly where the type-scoped one was useful — because
+the implementors' methods are not indexed as definitions of that name (the Rust case the ifacedispatch
+header already documents: "a supertrait's method, whose impl block is another trait's, finds none
+here") — then the join lands near zero on the cells that motivated it, and the honest outcome is to
+record that and reopen it as an EXTRACTION lane rather than a join lane. The simulation's 55.3 % is a
+file-level upper bound, not a promise.
+
+## The implementor tier, MEASURED 2026-11-15 against the band above: **Band 1 PASS at 35 of 44 (79.5 %), Bands 2-4 PASS, and the tier added ZERO non-gold files**
+
+Implemented as a shared primitive (`src/implementortier.h`) rather than inside the verb, on the owner's
+instruction to propagate what this work learns: `--impact` is its first consumer, and the relation
+answers more than one question (see "what this leaves open" below).
+
+| band | registered | measured | verdict |
+|---|---|---|---|
+| **1 — recall** | ≥ 31 of 44 gold files over the 7 cells, no cell regressing | **35 of 44 — 56.8 % → 79.5 %** | **PASS** |
+| **2 — control** | 12 control cells within 1 point of recall and 5 % of claims | recall **86.6 % → 86.6 %**, claims **359 → 359 (+0.0 %)** | **PASS** |
+| **3 — `Wrong` capped and printed** | at most the non-gold implementor files named, and that number stated | **0 new non-gold files across all 7 cells** | **PASS** |
+| **4 — disclosure and parity** | labelled rows, counted, dialect parity, byte-identical where nothing matches | `test/impactimplcheck.sh`, 14 arms; XML/JSON/MCP share one measurement; map byte-identical to `0217049f2` on htop, starlette, kysely | **PASS** |
+
+Per cell, with what the tier found:
+
+| cell | target | before | after | `implementors=` |
+|---|---|---:|---:|---:|
+| **textual-32** | Python method, 9 overrides behind a stored callback | 3 of 12 (25 %) | **11 of 12 (92 %)** | 15 |
+| **ninja-31** | C++ pure virtual | 5 of 7 (71 %) | **7 of 7 (100 %)** | 6 |
+| kysely-31 | TS interface method | 6 of 8 | 6 of 8 | 5 |
+| koa-31 · nunjucks-31 · starlette-31 | duck-typed / abstract | 11 of 11 | 11 of 11 | – / – / 4 |
+| mdbook-31 | Rust trait method | 0 of 6 | 0 of 6 | — |
+
+`mdbook-31` does not move and cannot: `--impact=Preprocessor::run` still answers `found="0"`, so there
+is no seed to find an owner for. That is the extraction gap the registration put out of scope, and it
+is now the largest single remaining item — `--lego=Preprocessor` lists eight implementors for the same
+name on the same index.
+
+### What the implementation had to get right, and what it got wrong first
+
+**The owner rule must apply to BOTH sides of the join.** The first working build found every
+TypeScript interface member's owner and then matched no implementor, because TS/JS store no scope on a
+METHOD: the owner lookup had the containment fallback (graph.h `containedOwnersOf`, memberowner.h's own
+rule — the ONE class whose body holds it, bare when two nest) and the candidate comparison did not.
+kysely's tier went from silent to 5 rows by giving both sides one `memberOwnerNameOf`.
+
+**An overload is not an override, and a decl/def pair is one method.** On the fixture, the first
+version named four rows for `CommandRunner::StartCommand`: `RealCommandRunner::StartCommand` twice (its
+declaration at `runners.cc:5` and its out-of-line definition at `:9`) and
+`DryRunCommandRunner::StartCommand( Edge*, int )`, an arity-mismatched overload that a signature change
+to `StartCommand( Edge* )` does not break. Both are now excluded — by `arityExact`/`params` where both
+arities are call-comparable, and by the house's `isDefinitionNotDeclaration` for the pair — so the
+answer is **2**, which is the number of things a caller would have to change. `test/impactimplcheck.sh`
+arms (C1)–(C4) hold that, and arm (B1) holds the owner scope: `Hollow::hollowRun` is pure virtual with
+no implementor while `Unrelated` and `Unrelated2` define their own `hollowRun`, and a join reading the
+NAME names them.
+
+**The legend had to be registered, not written.** The clause was added to `emitImpactLegend` and never
+appeared: `--impact`'s legend is assembled from the dictionary in `compactlegend.h`, so an attribute
+with no row there is emitted with no explanation. `implementors=`, `implementors_by_name=` and the
+`<impl via="implementor">` element now have rows, element-qualified so the relation cannot read as a
+call edge.
+
+### What this leaves open, and for whom
+
+Three verbs ask the same question and would each need their own band, measured on the same gold set:
+**`--edit-check`**, whose entire job is "the contract changed, who is now incompatible?" — for a
+bodyless member the incompatible parties ARE the implementors; **`--callers`**, which answers
+`count="0"` on a pure virtual today (ninja's `FileReader::ReadFile`, measured) — true and useless; and
+**`--safe-delete`**, where deleting a declaration orphans every override. The primitive is shared so
+those three cannot disagree with `--impact` about who implements what, but none of them is changed
+here and no band above claims anything for them.
+
+The gate-count sites are left alone deliberately: `main` already states 810 against a loop of 820, so
+regenerating them here would fold ten other lanes' increments into this diff. This lane adds the 821st
+gate and the integrator's regeneration is where that count moves.
