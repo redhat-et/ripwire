@@ -1562,7 +1562,7 @@ struct ConstOpen
 // QD-CONSTRUCTS-AT-INGEST: one --quality-delta construct hit (an error-masking block or a handler / placeholder
 // shape), found in the parse worker from the tree ingest already built and carried in the file's cache record, so
 // a warm --quality-delta reads and parses no file to count them. `tag` indexes lintrules.h's construct-tag table
-// (constructTagName): a kErrorMaskRules row, then the four kShape* walk tags. Same fields as lintrules.h ErrorMaskHit,
+// (constructTagName): a kErrorMaskRules row, then the five kShape* walk tags. Same fields as lintrules.h ErrorMaskHit,
 // with the id packed to a byte.
 struct ConstructHit
 {

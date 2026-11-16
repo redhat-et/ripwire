@@ -27,9 +27,12 @@
 //     @JvmStatic) — the index does not read those as entry declarations.
 //   • ls rows — per directory, the unshown files: code files NAMED (basename), every other file COUNTED. A file under
 //     a test/bench/fixture/example/doc directory rolls up to that directory (counted, never named): those trees are
-//     large (textual's docs/examples, tmux's regress) and are not where an orient answer's key files live.
+//     large (textual's docs/examples, tmux's regress) and are not where an orient answer's key files live. The row
+//     list is BOUNDED (kInventoryDirCap, kInventoryCountOnlyCap) and the name budget is spent fewest-directory-first
+//     rather than in path order — both measured, both disclosed, see the constants below.
 #include <algorithm>
 #include <cstdint>
+#include <numeric>   // std::iota — the house index-permutation idiom
 #include <string>
 #include <string_view>
 #include <vector>
@@ -64,6 +67,9 @@ struct MapInventory
     // lists what the guard left out. Empty unless that guard fired.
     std::string                entriesNext;        // --graph-query over every def that could be a cut entry (a superset)
     std::string                namesNext;          // --tree over every indexed file (a superset of the count-only names)
+    std::size_t                dirTotal    = 0;    // every directory row the tier could print (dirs.size() < dirTotal => cut)
+    bool                       dirsCapped  = false;   // the ROW ceiling cut directory rows (disclosed)
+    std::string                dirsNext;           // --tree over every indexed file (a superset of the cut directories' files)
 };
 
 // RUNAWAY GUARDS (PROCESS rule 5a), far above any measured answer: the eleven orient repos of the round-1 table name at
@@ -74,6 +80,19 @@ struct MapInventory
 // Each next= is an argv on the same root that lists what was cut (a superset of it), so neither cut is a dead end.
 inline constexpr std::size_t kInventoryNameCeiling = 2000;
 inline constexpr std::size_t kInventoryEntryCap    = 256;
+
+// The ROW ceiling (added 2026-11-15). The two guards above bound the NAMES inside a row and the ENTRIES above
+// them; neither bounded the number of ROWS, so the row list grew with the corpus rather than with the question.
+// Measured over 15 repos: the ranked map holds within 16,879-27,664 B across a 10x range of repository size while
+// <ls> runs 2,670 B (tmux) to 192,484 B (vscode), 82.4 % of that document. The cut is taken at the measured cliff
+// -- 2,102 of vscode's 2,534 rows were COUNT-ONLY, a path and a number, 121,932 B / 52 % of the whole document,
+// and 959 of those said n="1". So count-only rows get a small allowance, ordered by how many files they stand for,
+// and every row that NAMES code files is kept up to a backstop that is a blow-up guard rather than a tuning knob
+// (above every measured named-row count: 1,211 on cockroach, 1,207 on vscode under the name allocator below).
+// Disclosed as dirs_capped="1" dirs_total=N dirs_next=, the form the other two guards already use.
+// docs/EVALS.md, "the map inventory tier's <ls> rows are unbounded".
+inline constexpr std::size_t kInventoryCountOnlyCap = 32;
+inline constexpr std::size_t kInventoryDirCap       = 2048;
 
 // Directory components whose subtree rolls up count-only. pathTierOf's test/bench/fixture conventions plus the
 // presentational ones (examples, docs, regress, samples) — local to the inventory on purpose: widening pathTierOf
@@ -297,27 +316,143 @@ inline void collectInventoryDirs( MapInventory& inv, const IngestResult& ing, co
     }
 }
 
-// The name ceiling: whole directories, path order — a directory is named completely or not at all, so f= is never a
-// silent part-list; past the ceiling every later directory is count-only too (one contiguous cut).
-inline void applyInventoryNameCeiling( MapInventory& inv ) noexcept
+// ── the ONE order both of the tier's ceilings spend their budget in ────────────────────────────────────────────
+// docs/METHODOLOGY.md §9.1: a ceiling bounds the TAIL only if the cut walks priority order, and "priority" is
+// never source, id or PATH order. Both guards below therefore index through one of these two orders, and neither
+// is path order -- path order only ever decides a tie, which is what keeps the output deterministic.
+//
+// WHY FEWEST-FIRST FOR NAMES, measured 2026-11-15 and not guessed. A probe binary with the ceiling lifted to 10^8
+// dumped the uncapped per-directory name counts: the MEDIAN directory holds 2 nameable code files and the maximum
+// holds 300 (cockroach) to 786 (vscode). Replaying the three candidate orders at the shipped 2,000-name budget:
+//   path order (shipped) : vscode 432 directories named, ZERO of 1,537 src/ rows -- the budget is spent
+//                          alphabetically, on ".agents", ".github", "cli", "copilot_shim" and "extensions"
+//   most-code-first      : vscode 11 directories named; envoy's api/ 538 -> 1. The outliers eat the budget, and
+//                          786 filenames in one directory is not an orient answer. REGISTERED, then REJECTED.
+//   fewest-code-first    : vscode 1,207 named and src/ 0 -> 806; cockroach pkg/ 535 -> 1,206; envoy source/ ~0
+//                          -> 358. Maximises how many directories get named under the budget. ADOPTED.
+// docs/EVALS.md, "the inventory tier's NAME ceiling spends its budget in path order", with its amendment.
+// Each order is an index permutation under its own comparator, written in the house idiom (std::iota then
+// std::sort over the indices, as src/declinedsites.h, src/forpage.h and src/forslots.h do) rather than behind a
+// shared wrapper: the wrapper was a 119-token clone of src/eval.h's rankFiles, which --quality-delta gated.
+inline std::vector<std::uint32_t> inventoryNameOrder( const std::vector<MapInventoryDir>& dirs )
+{
+    std::vector<std::uint32_t> order( dirs.size() );
+    std::iota( order.begin(), order.end(), std::uint32_t( 0 ) );
+    std::sort( order.begin(), order.end(), [ &dirs ]( std::uint32_t a, std::uint32_t b ) noexcept
+    {
+        if( dirs[ a ].named.size() != dirs[ b ].named.size() ) { return dirs[ a ].named.size() < dirs[ b ].named.size(); }
+        return dirs[ a ].dir < dirs[ b ].dir;       // a total order, so two runs cannot disagree
+    } );
+    return order;
+}
+
+// The ROW order: a row that NAMES code files outranks a count-only row (the measured cliff), and among count-only
+// rows the one standing for more files comes first -- "docs/ holds 1,200 unshown files" is repository shape,
+// "x/ holds 1" is 58 bytes of nothing, and 959 of vscode's rows were the latter.
+inline std::vector<std::uint32_t> inventoryRowOrder( const std::vector<MapInventoryDir>& dirs )
+{
+    std::vector<std::uint32_t> order( dirs.size() );
+    std::iota( order.begin(), order.end(), std::uint32_t( 0 ) );
+    std::sort( order.begin(), order.end(), [ &dirs ]( std::uint32_t a, std::uint32_t b ) noexcept
+    {
+        if( dirs[ a ].named.empty() != dirs[ b ].named.empty() ) { return dirs[ b ].named.empty(); }   // named rows first
+        if( dirs[ a ].total != dirs[ b ].total )                 { return dirs[ a ].total > dirs[ b ].total; }
+        return dirs[ a ].dir < dirs[ b ].dir;
+    } );
+    return order;
+}
+
+// The name ceiling: whole directories — a directory is named completely or not at all, so f= is never a silent
+// part-list. The budget is spent in inventoryNameOrder (fewest-first), NOT in path order, and the survivors keep
+// their place in inv.dirs, which is already path order: the emit order is unchanged, only the allocation moved.
+// The stopping rule is the shipped one (stop at the first directory that does not fit), so this changes WHICH
+// directories are named and not HOW MANY names are printed.
+inline void applyInventoryNameCeiling( MapInventory& inv )
 {
     for( const MapInventoryDir& d : inv.dirs )
     {
         inv.namesTotal += d.named.size();
     }
-    std::size_t namedSoFar = 0;
-    for( MapInventoryDir& d : inv.dirs )
+    if( inv.namesTotal <= kInventoryNameCeiling )
     {
-        if( namedSoFar + d.named.size() > kInventoryNameCeiling )
+        return;   // every name fits: no cut, and nothing is reordered that is not cut
+    }
+    std::vector<char> keepNames( inv.dirs.size(), 0 );
+    std::size_t       namedSoFar = 0;
+    for( std::uint32_t idx : inventoryNameOrder( inv.dirs ) )
+    {
+        const std::size_t want = inv.dirs[ idx ].named.size();
+        if( want == 0 )
         {
-            inv.namesCapped = inv.namesCapped || !d.named.empty();
-            d.named.clear();
-            namedSoFar = kInventoryNameCeiling;
-            continue;
+            continue;                 // a count-only directory asks for no budget
         }
-        namedSoFar += d.named.size();
+        if( namedSoFar + want > kInventoryNameCeiling )
+        {
+            break;                    // the shipped stopping rule, now in priority order
+        }
+        keepNames[ idx ] = 1;
+        namedSoFar      += want;
+    }
+    for( std::size_t i = 0; i < inv.dirs.size(); ++i )
+    {
+        if( keepNames[ i ] == 0 && !inv.dirs[ i ].named.empty() )
+        {
+            inv.namesCapped = true;
+            inv.dirs[ i ].named.clear();
+        }
     }
     ENSURES( namedSoFar <= kInventoryNameCeiling, "the printed names stay within the ceiling" );
+}
+
+// The ROW ceiling. Runs AFTER the name ceiling, because a directory the name ceiling emptied IS a count-only row
+// from here on and competes as one. Walks inventoryRowOrder, keeps every named row up to the backstop and
+// count-only rows up to the allowance, then erases the rest IN PLACE -- which preserves inv.dirs' path order, so
+// the survivors are emitted exactly as the tier always emitted them. `fileCount` is files=, for the recovery argv.
+inline void applyInventoryDirCeiling( MapInventory& inv, std::size_t fileCount )
+{
+    inv.dirTotal = inv.dirs.size();
+    std::vector<char> keep( inv.dirs.size(), 0 );
+    std::size_t       kept          = 0;
+    std::size_t       countOnlyKept = 0;
+    for( std::uint32_t idx : inventoryRowOrder( inv.dirs ) )
+    {
+        if( kept >= kInventoryDirCap )
+        {
+            break;
+        }
+        const bool countOnly = inv.dirs[ idx ].named.empty();
+        if( countOnly && countOnlyKept >= kInventoryCountOnlyCap )
+        {
+            continue;
+        }
+        keep[ idx ]   = 1;
+        ++kept;
+        countOnlyKept += countOnly ? 1 : 0;
+    }
+    if( kept == inv.dirs.size() )
+    {
+        return;   // nothing cut: no vocabulary, and a byte-identical tier
+    }
+    std::size_t write = 0;
+    for( std::size_t read = 0; read < inv.dirs.size(); ++read )
+    {
+        if( keep[ read ] == 0 )
+        {
+            continue;
+        }
+        if( write != read )   // NEVER self-move-assign: libc++ leaves a moved-from std::string/vector EMPTY, so a
+        {                     // kept FIRST row would silently lose its p= and its f= (caught by Band 1, 2026-11-15:
+                              // vscode's root row shipped as <ls p="" n="14"/>, its one named file gone)
+            inv.dirs[ write ] = std::move( inv.dirs[ read ] );
+        }
+        ++write;
+    }
+    inv.dirs.resize( write );
+    inv.dirsCapped = true;
+    // --tree lists every indexed file with a symbol, ranked, paging by its own next=; --limit= files= keeps it to
+    // one page. A superset of the cut directories' files (it repeats the kept and the ranked ones).
+    inv.dirsNext = "--tree --limit=" + std::to_string( fileCount );
+    ENSURES( inv.dirs.size() == write && write < inv.dirTotal, "a disclosed cut removed at least one row" );
 }
 
 // `shownFile[f]` != 0 ⇔ the ranked rows printed a <f> group for file f. `pathRel` maps a file id to its display path
@@ -357,6 +492,7 @@ inline MapInventory computeMapInventory( const IngestResult& ing, const std::vec
     collectInventoryEntries( inv, ing, outOff, outTargets, pathRel );
     collectInventoryDirs( inv, ing, shownFile, codeSyms, pathRel );
     applyInventoryNameCeiling( inv );
+    applyInventoryDirCeiling( inv, F );
     if( inv.namesCapped )
     {
         // --tree lists every indexed file with a symbol, ranked, paging by its own next=; --limit= files= keeps it to
@@ -380,7 +516,11 @@ inline constexpr std::string_view kMapInventoryLegend =
     "config files are counted, not named, and a test/e2e/bench/benchmark/fixture/example/_examples/doc directory rolls "
     "up whole. ripwire on p= ranks that directory. Runaway guards: entries_capped=1 entries_total=N when more than 256 "
     "entries exist (the first 256 by path shown), entries_next= the argv listing every def that could be a cut entry (a "
-    "superset); names_capped=1 names_total=N when the N unshown code files pass a 2000 name ceiling (directories past "
-    "it, path order, keep n= only), names_next= the argv listing every indexed file (a superset) -->";
+    "superset); names_capped=1 names_total=N when the N unshown code files pass a 2000 name ceiling (the directories "
+    "with the FEWEST unshown code files are named first, so the budget reaches the most directories; the rest keep n= "
+    "only), names_next= the argv listing every indexed file (a superset); dirs_capped=1 dirs_total=N when more than N "
+    "directory rows exist: every ls row naming code files is kept and the count-only rows are cut to the 32 standing for "
+    "the most files, so no indexed file leaves listed=/unlisted= and only the per-directory enumeration is shorter, "
+    "dirs_next= the argv listing every indexed file (a superset) -->";
 
 }  // namespace rw

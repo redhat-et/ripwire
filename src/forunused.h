@@ -3201,6 +3201,32 @@ inline ExportedGroup collectExportedGroup( const IngestResult& ing, const Graph&
 } // namespace unusedfile
 
 // The block: "" unless the subject carries a cue and names a file or a directory.
+// The files the named directories hold together (renderForUnusedTable's dirTotal): every distinct file a directory anchor
+// lists, plus the files each one counts but does not list (an anchor's own list is capped). It was the LARGEST anchor's
+// total while the table shows their UNION, so two directories of 5 files each showed 6 of 10 with no <unused_cut>
+// (LARGE-PARTIAL-1 item 5); now a cut of the union is always disclosed.
+inline std::size_t namedDirFileTotal( std::span<const FileAnchor> anchors )
+{
+    std::vector<std::uint32_t> named;
+    std::size_t                unlisted = 0;
+    for( const FileAnchor& a : anchors )
+    {
+        if( !a.picksOne() && a.kind != 'd' )
+        {
+            continue;
+        }
+        for( const std::uint32_t f : a.files )
+        {
+            if( !std::ranges::contains( named, f ) )
+            {
+                named.push_back( f );
+            }
+        }
+        unlisted += a.total - std::min<std::size_t>( a.total, a.files.size() );
+    }
+    return named.size() + unlisted;
+}
+
 inline std::string renderForUnusedTable( const IngestResult& ing, const Graph& g, std::string_view task )
 {
     using namespace unusedfile;
@@ -3212,7 +3238,7 @@ inline std::string renderForUnusedTable( const IngestResult& ing, const Graph& g
     std::vector<std::uint32_t> files;
     std::string nameList;
     std::vector<char> esc;
-    std::size_t dirTotal = 0;
+    const std::size_t dirTotal = namedDirFileTotal( anchors );
     for( const FileAnchor& a : anchors )
     {
         if( a.picksOne() || a.kind == 'd' )
@@ -3224,7 +3250,6 @@ inline std::string renderForUnusedTable( const IngestResult& ing, const Graph& g
                     files.push_back( f );
                 }
             }
-            dirTotal = std::max<std::size_t>( dirTotal, a.total );
         }
         else
         {

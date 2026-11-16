@@ -159,7 +159,10 @@ printf '#pragma once\nstruct Other { int keep( int a ) { return a + 41; } };\n' 
 git add -A; git commit -qm two-files
 complex > src/lib.h
 "$BIN" . --quality-ack="fixture" >/dev/null 2>&1
-git add -A; git commit -qm worsen
+# The worsening is NOT committed (QD-GIT-RENAME-HEAL, 2026-11-14): with the complex body committed at src/lib.h, the move below
+# is an unchanged body under a new key, which the baseline's own identity rule (ContentMoves) already carries, so the finding
+# never fires and there is nothing for an ack to suppress. Uncommitted, the moved body differs from the baseline's, so the
+# finding fires at the new key and only the ack's content id can carry the ack there: the route this arm asserts.
 # move Widget into src/other.h and leave src/lib.h behind with unrelated content: both files are MODIFIED,
 # neither is added or deleted, so `git diff -M` has no rename to record. Only content can find it.
 { printf '#pragma once\nstruct Other { int keep( int a ) { return a + 41; } };\n'; complex | tail -n +2; } > src/other.h
@@ -178,7 +181,7 @@ printf '#pragma once\nstruct Other { int keep( int a ) { return a + 41; } };\n' 
 git add -A; git commit -qm two-files
 complex > src/lib.h
 "$BIN" . --quality-ack="fixture" >/dev/null 2>&1
-git add -A; git commit -qm worsen
+# not committed, as arm 5 (the content-id route is what is asserted)
 { printf '#pragma once\nnamespace wrapped\n{\n'; complex | tail -n +2 | sed 's/^./    &/'; printf '}\n'; } > src/other.h
 printf '#pragma once\nstruct Leftover { int noop() { return 0; } };\n' > src/lib.h
 "$BIN" . --quality-delta > "$TMP/d6" 2>/dev/null

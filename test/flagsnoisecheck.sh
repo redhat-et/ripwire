@@ -167,9 +167,15 @@ rows="$( names | grep -c . || true )"
 [ "$declared" = "$rows" ] && ok "header gates=\"$declared\" equals the number of <gate/> rows" \
                           || no "header says gates=\"$declared\" but $rows rows were printed"
 
+# Seven, not five, since the shell env lane (test/bashenvcheck.sh): run.sh expands "$O" and "$TMPDIR" without
+# assigning either, and in Bash an unassigned expansion IS an environment read. Both are named below so the count
+# stays a statement about WHICH reads, not just how many.
 envcount="$( sed -n 's/.*<flags [^>]*env="\([0-9]*\)".*/\1/p' "$TMP/o" )"
-[ "$envcount" = "5" ] && ok "env=\"5\" — exactly the five real environment reads" \
-                      || no "env=\"$envcount\", expected 5 (the five real reads in the fixture)"
+[ "$envcount" = "7" ] && ok "env=\"7\" — the five getenv-family reads plus run.sh's two Bash expansions" \
+                      || no "env=\"$envcount\", expected 7 (five getenv-family reads + \$O and \$TMPDIR in run.sh)"
+for g in O TMPDIR; do
+    if has "$g"; then ok "kept: $g (a Bash expansion run.sh never assigns)"; else no "MISSED: run.sh's \$$g is a Bash env read"; fi
+done
 
 # ── 4) determinism + G4 ───────────────────────────────────────────────────────────────────────────────
 "$BIN" "$FIX" --flags --no-cache --legend=full >"$TMP/o2" 2>/dev/null

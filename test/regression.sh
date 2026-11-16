@@ -324,6 +324,7 @@ for _g in \
     baselinecheck \
     baselinedirtycheck \
     baselineportcheck \
+    bashenvcheck \
     bashsourcecheck \
     batchcheck \
     binoverridecheck \
@@ -331,7 +332,9 @@ for _g in \
     bm25boundcheck \
     bm25check \
     bodiesshowncheck \
+    bodilessseedcheck \
     bodydialectcheck \
+    budgetmonotonecheck \
     budgetpolicycheck \
     buildtypestampcheck \
     builtinbindcheck \
@@ -506,6 +509,7 @@ for _g in \
     expandtopk0check \
     extentcheck \
     externalvetocheck \
+    failuredefaultcheck \
     falseedgecheck \
     fcallforwardcheck \
     fficheck \
@@ -637,6 +641,7 @@ for _g in \
     impactdepthcheck \
     impactimportcheck \
     impactpartitioncheck \
+    impacttesttiercheck \
     impacttypecheck \
     importcapcheck \
     importnarrowcheck \
@@ -679,6 +684,7 @@ for _g in \
     legobundlecheck \
     legocheck \
     legotransitivecheck \
+    lexicalnoskipcheck \
     liftdisclosurecheck \
     limitstablecheck \
     lintbudgetcheck \
@@ -697,6 +703,7 @@ for _g in \
     localscountcheck \
     loopconservationcheck \
     lpincheck \
+    lstiercapcheck \
     luacheck \
     luarequirecheck \
     macroedgecheck \
@@ -817,6 +824,7 @@ for _g in \
     parsebudgetdetcheck \
     parsehealthcheck \
     partitioncheck \
+    pathambigcheck \
     pathfewestcheck \
     pathgapcheck \
     pathownercheck \
@@ -859,6 +867,7 @@ for _g in \
     qackconcurrencycheck \
     qackorigincheck \
     qbasecachecheck \
+    qbasechildcheck \
     qbaselineproducercheck \
     qchurncheck \
     qchurnmemocheck \
@@ -867,8 +876,10 @@ for _g in \
     qddegradecheck \
     qddialscheck \
     qdentryceilingcheck \
+    qdgitrenamehealcheck \
     qdmonstercheck \
     qdrefpaircheck \
+    qdrenameidentitycheck \
     qdtestdeadcheck \
     qdtype3oncecheck \
     qextractionkeycheck \
@@ -926,6 +937,7 @@ for _g in \
     redactfixcheck \
     reexportcheck \
     refusaltailcheck \
+    refwindowcheck \
     regexbombcheck \
     regexcheck \
     regexguardcheck \
@@ -1091,6 +1103,7 @@ for _g in \
     w3fixbudgetcheck \
     w3fixlegendcheck \
     warmpeakcheck \
+    warmsnapcheck \
     weaksignalcheck \
     withgraphcheck \
     withprofilecheck \

@@ -21,6 +21,7 @@
 // in would trade one drift for another.
 
 #include "closures.h"        // ClosureIndex — the callees form's <in> blocks: functions written inside of='s body
+#include "contractseed.h"    // widenContractSeeds — a contract method's callers come from its implementors' bodies (BODILESS-SEED)
 #include "declinedsites.h"   // the <dc> rows: the declined call sites, ordered here once for every surface
 #include "editcheck.h" // rowCallSites / callSitesAttrXml — the C2 byte band estimates the rows it serves
 #include "pageview.h"  // kCallersBandMaxBytes / kCallerRowMinBytes / kCallHierarchyBandMax
@@ -105,6 +106,10 @@ struct CallHierarchyRows
     // GV-PATH-BIND (CLI --callers, src/verbs_navigate.h callHierarchyRowsNarrowed): the selector as typed when it bound nothing and the
     // M1 rule narrowed it to one source definition, whose spelling these rows answer; empty otherwise (the root's narrowed=)
     std::vector<std::string>   narrowed;
+    // BODILESS-SEED (contractseed.h): callers only — the selector's contract seeds and the implementor bodies `matches` gained
+    // for them (the root's impls=; absent when contractSeeds is 0)
+    std::size_t                contractSeeds = 0;
+    std::size_t                implBodies    = 0;
 };
 
 // ── CLOSURE BLOCKS (lane ix2-slice, IX-2 P2): what the functions written INSIDE of='s body call ───────────────────────────
@@ -455,6 +460,13 @@ inline CallHierarchyRows callHierarchyRows( const IngestResult& ing, const Graph
     if( out.matches.empty() )
     {
         return out;   // the caller owns the refusal: a CLI stderr line, or a JSON-RPC -32602
+    }
+    if( wantCallers )
+    {   // BODILESS-SEED: a contract method's callers are the callers of what a call through it runs (contractseed.h)
+        ContractSeeds widened = widenContractSeeds( ing, g, std::move( out.matches ) );
+        out.matches           = std::move( widened.seeds );
+        out.contractSeeds     = widened.contracts;
+        out.implBodies        = widened.impls;
     }
     out.crossKind = crossKindValue( ing, out.matches );
 

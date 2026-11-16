@@ -8,6 +8,7 @@
 #include "hopbody.h"   // PATH-HOP-BODY: the middle hops' bodies of a reached --path
 #include "pathroute.h" // PATH-ROUTE v2: the route verdict (hedged / refused name-stitched chain), shared with MCP path_between
 #include "typeuse.h"   // L7: --impact of a type seeds its walk from the symbols that name it
+#include "contractseed.h" // BODILESS-SEED: a contract method seeds --impact/--callers/--safe-delete/--path from its implementors' bodies
 #include "forgraphverb.h" // GV-PATH-BIND: narrowRefusedSpelling — the --for block's M1 rule on the direct --path/--connect/--callers
 #include "aliashop.h"  // XF-ALIAS-HOP: --uses lists the sites written through an alias of the definition
 #include "infra/sortutil.h"   // svLess: the explicit byte order the alias-name table is sorted and binary-searched by (portablebuildcheck #6)
@@ -225,7 +226,7 @@ inline int emitCallHierarchyAlt( const rw::Config& cfg, const rw::IngestResult& 
     {
         rw::emitTo( stdout, ",\"bodyless_defs\":{}", bodylessDefsCount );
     }
-    rw::emitTo( stdout, "{}{}{}", rw::unprovenDefsKeyJson( chRows.unprovenDefs ).c_str(),
+    rw::emitTo( stdout, "{}{}{}", ( rw::unprovenDefsKeyJson( chRows.unprovenDefs ) + rw::implsKeyJson( chRows.contractSeeds, chRows.implBodies ) ).c_str(),
                  rw::crossKindKeyJson( chRows.crossKind ).c_str(),
                  rw::defTableJson( ing, chAttr.groups, chListing, chRootPrefix, /*mcp=*/false ) );
     if( chSingleRoot ) { rw::emitTo( stdout, ",\"root\":\"{}\"", jsonStr( cfg.roots[0] ).c_str() ); }
@@ -349,7 +350,8 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         // to read, and nothing about an untied definition is direction-specific. Absent at zero, through the
         // shared countAttrXmlOrEmpty spelling. Without it a drop reaches the reader as a bare count="0" —
         // #63's silent zero, re-introduced by the fix for its over-count.
-        const std::string chUnprovenAttr = rw::unprovenDefsAttrXml( chRows.unprovenDefs );
+        // BODILESS-SEED: impls= beside it — the contract seed's implementor bodies defs= now counts (callers only; contractseed.h)
+        const std::string chUnprovenAttr = rw::unprovenDefsAttrXml( chRows.unprovenDefs ) + rw::implsAttrXml( chRows.contractSeeds, chRows.implBodies );
 
         // T2 + §P8 G1: paginate the sorted result. count= stays the un-windowed total (V3 L-4: "TRUE" is the
         // word this comment used, and it contradicts the counts_floor= marker the emitter ten lines below now
@@ -448,6 +450,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
                          std::string( rw::declinedIfaceLegend( chRows.declinedIface > 0 ) ) + rw::viaImplLegend( chHasImpl )   // likewise, exactly when declined_iface= / a via="impl" row is there
                            + rw::stdMemberCallsLegend( chRows.stdCalls.calls > 0 && !cfg.columnar ),   // and when the <stdm> line is (XML only)
                          ( std::string( rw::unprovenDefsLegend( chRows.unprovenDefs > 0 ) )      // H1: likewise, exactly when unproven_defs= is there
+                           + rw::implsLegend( chRows.contractSeeds > 0 )                           // BODILESS-SEED: likewise for impls=
                            + rw::crossKindLegend( !chRows.crossKind.empty() )                      // hono-07: likewise for cross_kind=
                            + rw::viaNameLegend( chHasVia, false, cfg.columnar )                   // FE-B: likewise for via="name"
                            + rw::viaLinkLegend( chHasLink )
@@ -1379,6 +1382,9 @@ struct SafeDeleteLegendFlags
     bool        linkRows      = false;   // a <c via="link"> row is on this page
     bool        anchorRows    = false;   // a <c anchor="missing"> row is on this page
     rw::DeclinedSitesLegendFlags declinedSites{};   // lane declined-sites: what the <dc> rows on this answer carry (declinedsites.h)
+    bool        contract      = false;   // BODILESS-SEED: impls= on the root (contractseed.h)
+    std::size_t radiusTests   = 0;       // IMPACT-TEST-TIER: radius_tests= on the root (graph.h radiusTiers)
+    bool        testsIgnored  = false;   // IMPACT-TEST-TIER: tests_ignored= on the root (ignore-tests dropped them before the walk)
 };
 
 // count-floor (countfloor.h) + CALLSITE-AT: the safe-delete legend's clauses for callers_floor=, uses_floor=, next= and
@@ -1417,6 +1423,7 @@ inline std::string safeDeleteFloorLegend( const SafeDeleteLegendFlags& flags, st
     clause += rw::defTableLegend( flags.defTable, flags.defTableCut ) + rw::splitArmLegend( flags.splitArms );   // attrib-multidef
     clause += rw::viaLinkLegend( flags.linkRows );
     clause += rw::anchorMissLegend( flags.anchorRows );
+    clause += rw::implsLegend( flags.contract );
     return clause;
 }
 
@@ -1438,11 +1445,16 @@ inline constexpr SafeDeleteRiskReading kSafeDeleteRiskReadings[] = {
     // lane declined-sites (gates review Q3): what none-found read beside declined_calls= before the <dc> rows named the calls
     { "possible-callers", "possible-callers: zero proven callers and zero uses, but declined_calls=K call sites (the <dc> rows) could have "
                           "meant this definition; not a safety reading. " },
+    // BODILESS-SEED (contractseed.h): an interface or abstract member is called through its type, which binds to an implementor's body
+    { "contract",        "contract: zero callers and zero uses of an interface or abstract method with no body and of its implementors' "
+                         "bodies (impls=); a call through the interface type binds to an implementor or to nothing in this tree, never to "
+                         "the signature, so this is no safety reading. " },
 };
 // The risk= value in force, in precedence order. Without evidence: unmodelled (this kind's uses are not indexed), then
 // possible-callers (gates review Q3: never none-found beside a declined possible caller), then hedged (IX-3: never
-// none-found when a name template, too-wide ones included, can name it), then none-found; with evidence: untested-radius, else uses-exist.
-inline const char* safeDeleteRisk( bool anyEvidence, bool usesFloor, bool declined, bool patterns, bool untestedRadius ) noexcept
+// none-found when a name template, too-wide ones included, can name it), then contract (BODILESS-SEED: never none-found on an interface
+// or abstract method with no body), then none-found; with evidence: untested-radius, else uses-exist.
+inline const char* safeDeleteRisk( bool anyEvidence, bool usesFloor, bool declined, bool patterns, bool untestedRadius, bool contract ) noexcept
 {
     if( anyEvidence )
     {
@@ -1456,13 +1468,17 @@ inline const char* safeDeleteRisk( bool anyEvidence, bool usesFloor, bool declin
     {
         return "possible-callers";
     }
-    return patterns ? "hedged" : "none-found";
+    if( patterns )
+    {
+        return "hedged";
+    }
+    return contract ? "contract" : "none-found";
 }
 inline const char* safeDeleteRiskSentence( std::string_view risk ) noexcept
 {
     const auto it  = std::ranges::find( kSafeDeleteRiskReadings, risk, &SafeDeleteRiskReading::risk );
     const auto end = std::end( kSafeDeleteRiskReadings );   // outside the promise: a self-check names values, it calls nothing
-    ASSUME( it != end, "safeDeleteRiskSentence: runSafeDelete assigns only the six values listed" );
+    ASSUME( it != end, "safeDeleteRiskSentence: runSafeDelete assigns only the seven values listed" );
     return it != end ? it->sentence : "";
 }
 
@@ -1485,6 +1501,7 @@ inline void emitSafeDeleteLegend( std::size_t defCount, std::size_t unprovenDefs
     declinedClause += rw::slotJoinLegend( flags.slotJoin, true, flags.slotCands );   // IX-1: exactly when a <vr> row carries via=
     declinedClause += rw::valueRefsDepthLegend( flags.valueRefDepthCut );      // exactly when it carries the depth disclosure
     declinedClause += safeDeleteFloorLegend( flags, risk );   // count-floor + CALLSITE-AT: present-only clauses
+    declinedClause += rw::safeDeleteTestTierLegend( flags.radiusTests, flags.testsIgnored );   // IMPACT-TEST-TIER: exactly when radius_tests=/tests_ignored= ride
     rw::emitTo( stdout, "<!-- ripwire safe-delete: composes signals the tool already computes into one \"can I delete this?\" READ "
                 "— never a verdict. defs= is resolveAllByNameQualified's match count, exactly as the impact/uses/callers "
                 "verbs already disclose it. callers= is the 1-hop caller count (the callers verb's own walk over defs' "
@@ -1560,7 +1577,9 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
     // named, so every count below is read without them. Unreported, a drop reached the reader as callers="0"
     // risk="none-found": a "safe to delete" reading about definitions nobody walked.
     std::size_t               sdUnprovenDefs = 0;
-    const std::vector<NodeId> defs           = resolveAllByNameQualified( ing, cfg.safeDeleteSym, &sdUnprovenDefs );
+    // BODILESS-SEED (contractseed.h): a contract method reads its implementors' bodies too (impls=); the selector's own matches lead
+    const rw::ContractSeeds    sdContract = rw::widenContractSeeds( ing, g, resolveAllByNameQualified( ing, cfg.safeDeleteSym, &sdUnprovenDefs ) );
+    const std::vector<NodeId>& defs       = sdContract.seeds;
     if( defs.empty() )
     {
         // §B4.2: the shared did-you-mean refusal every SYM-taking verb speaks (selectorrefuse.h).
@@ -1640,12 +1659,10 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
     {
         if( isTested( def ) ) { testedSelf = true; break; }
     }
-    std::size_t radiusTested = 0;
-    for( NodeId n : reach )
-    {
-        if( isTested( n ) ) { ++radiusTested; }
-    }
-    const std::size_t radiusUntested = reach.size() - radiusTested;
+    // IMPACT-TEST-TIER: the radius in three tiers (graph.h radiusTiers) — a test definition in impact_reaches= is its own
+    // count (radius_tests=), never untested production. risk= reads the tested count, which the tiering does not move.
+    const rw::RadiusTiers radius       = rw::radiusTiers( ing, testReach, reach );
+    const std::size_t     radiusTested = radius.tested;
 
     // dead-code candidacy: --dead-code's own high-confidence shape, asked about ONE already-resolved
     // definition. Only meaningful at defs=1 — a contract is per definition site (same reasoning
@@ -1710,7 +1727,8 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
     // lane declined-sites: declined calls whose candidate lists hold a definition (as --callers counts and lists them) — the
     // <dc> rows, file-first, cut at the callers verb's own cap (one constant, gates review Q6).
     const auto [ sdDeclinedCalls, sdDeclinedSites ] = rw::declinedCallsAndSites( ing, g, defs, /*wantCallers=*/true );
-    const char* risk        = safeDeleteRisk( anyEvidence, usesFloor, sdDeclinedCalls > 0, !sdPatterns.empty() || !sdWide.empty(), !reach.empty() && radiusTested == 0 );
+    const char* risk        = safeDeleteRisk( anyEvidence, usesFloor, sdDeclinedCalls > 0, !sdPatterns.empty() || !sdWide.empty(), !reach.empty() && radiusTested == 0,
+                                          sdContract.contracts > 0 );
     const bool  sdWideRows  = std::string_view( risk ) == "hedged" && !sdWide.empty();   // the <pdw> rows: exactly when they back risk=hedged
 
     std::vector<char> esc;
@@ -1765,7 +1783,8 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
                                                  .hasSitesAt = sdSites.any, .sitesCut = sdSites.anyCut, .valueRefDepthCut = sdValueRefs.depthCut.files > 0,
                                                  .defTable = sdAttr.groups.multi(), .defTableCut = sdListing.cut, .splitArms = sdHasSplit,
                                                  .linkRows = sdHasLink, .anchorRows = sdHasMiss,
-                                                 .declinedSites = rw::declinedSitesLegendFlags( sdDc, /*callersForm=*/true, sdDcCut ) } );
+                                                 .declinedSites = rw::declinedSitesLegendFlags( sdDc, /*callersForm=*/true, sdDcCut ),
+                                                 .contract = sdContract.contracts > 0, .radiusTests = radius.tests, .testsIgnored = cfg.ignoreTests } );
 
     if( sdDeclinedLiteralCalls > 0 )
     {
@@ -1787,12 +1806,14 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
     const std::string sdNextAttr = rw::nextAttrXml( !sdFloor.next.empty() || !sdSites.anyCut ? sdFloor.next
                                                                                              : rw::nextFlag( "--uses=", cfg.safeDeleteSym ) );
     rw::emitTo( stdout, "<safe-delete sym=\"{}\" t=\"{}\" p=\"{}:{}\" defs=\"{}\" callers=\"{}\"{} ambiguous_callers=\"{}\" "
-                "impact_reaches=\"{}\" uses=\"{}\"{} tested_self=\"{}\" radius_tested=\"{}\" radius_untested=\"{}\" "
+                "impact_reaches=\"{}\" uses=\"{}\"{} tested_self=\"{}\" radius_tested=\"{}\" radius_untested=\"{}\"{} "
                 "dead_code_candidate=\"{}\" risk=\"{}\"{}{}{}{}{}{}{}{}>",
                 ex( cfg.safeDeleteSym ).c_str(), symTag( lead.kind ), ex( sdPathRel( lead.fileId ) ).c_str(), lead.line,
                 defs.size(), callerIds.size(), sdCallersFloorAttr, ambiguousCallers, reach.size(), sites.size(), sdUsesFloorAttr,
-                testedSelf ? 1 : 0, radiusTested, radiusUntested, deadCodeCandidate ? 1 : 0, risk,
-                rw::unprovenDefsAttrXml( sdUnprovenDefs ).c_str(),   // H1: beside the verdict it qualifies; absent at zero
+                testedSelf ? 1 : 0, radiusTested, radius.untested,
+                rw::radiusTestTierFields( radius.tests, cfg.ignoreTests, /*json=*/false ),   // IMPACT-TEST-TIER: absent when inert
+                deadCodeCandidate ? 1 : 0, risk,
+                ( rw::unprovenDefsAttrXml( sdUnprovenDefs ) + rw::implsAttrXml( sdContract.contracts, sdContract.impls ) ).c_str(),   // H1, BODILESS-SEED: beside the verdict they qualify; absent at zero
                 ( rw::declinedCallsAttrXml( sdDeclinedCalls ) + rw::declinedSiteCutAttrXml( sdDcCut ) + rw::declinedLiteralCallsAttrXml( sdDeclinedLiteralCalls ) ).c_str(), // beside risk= too: declined calls that may reach it (+ the <dc> cut); absent at zero
                 ( rw::valueRefsCountAttrXml( sdValueRefs.rows.size() ) + rw::valueRefsDepthAttrXml( ing, sdValueRefs.depthCut, sdVr )
                   + rw::patternDispatchAttrXml( sdPatterns.size(), sdWide.size() ) ), // value uses + IX-3 template lookups: never in callers=/impact_reaches=; absent at zero
@@ -2994,6 +3015,10 @@ inline std::optional<std::vector<std::string>> narrowedPathSpellings( const rw::
         std::optional<std::string> pick = rw::narrowRefusedSpelling( ing, *slot, rw::GraphSubjectForm::Path );
         if( !pick )
         {
+            if( !rw::pathEndpointFittedDefs( ing, *slot ).empty() )
+            {
+                continue;   // PATH-AMBIG-VERDICT (b): this endpoint binds its fitting definitions below; the other may still narrow
+            }
             return std::nullopt;
         }
         narrowed.push_back( std::exchange( *slot, std::move( *pick ) ) );
@@ -3023,6 +3048,15 @@ inline PathEndpointsBound bindPathEndpoints( const rw::IngestResult& ing, std::s
         else
         {
             ep = std::move( typed );   // still refused: the spellings as typed
+        }
+    }
+    // PATH-AMBIG-VERDICT (b): an endpoint still refused because several placed definitions fit its scope-qualified spelling binds
+    // them all (src/pathgaps.h pathEndpointFittedDefs): --path lists the reaching pairs, so qualifying narrows and never refuses
+    for( auto [ slot, defs ] : { std::pair{ &ep.src, &ep.srcDefs }, std::pair{ &ep.dst, &ep.dstDefs } } )
+    {
+        if( defs->empty() )
+        {
+            *defs = rw::pathEndpointFittedDefs( ing, *slot );
         }
     }
     ep.spec = ep.src + "," + ep.dst;
@@ -3080,7 +3114,8 @@ std::optional<int> runPathServed( const MainDispatch& d, std::span<const rw::Nod
         // GV-PATH-BIND (bindPathEndpoints): an endpoint refused over several fitting definitions runs as the ONE source definition's
         // own spelling, so the answer is the explicit call's plus narrowed=; while either endpoint binds nothing, every name below is
         // the spelling as typed and the refusal is byte-for-byte as before.
-        const PathEndpointsBound    pthEp           = bindPathEndpoints( ing, srcN, dstN );
+        PathEndpointsBound          pthEp           = bindPathEndpoints( ing, srcN, dstN );
+        const rw::PathContracts     pthContracts    = rw::widenPathContracts( ing, g, pthEp.srcDefs, pthEp.dstDefs );   // BODILESS-SEED, after the M1 rule
         srcN                                        = pthEp.src;
         dstN                                        = pthEp.dst;
         spec                                        = pthEp.spec;
@@ -3214,13 +3249,13 @@ std::optional<int> runPathServed( const MainDispatch& d, std::span<const rw::Nod
                      ( std::string( rw::toValueRefsLegend( pthToValueRefs.count > 0 ) ) + rw::valueRefsDepthLegend( pthToValueRefs.depthCut.files > 0 ) ).c_str(),
                      ( rw::pathGapsLegend( pthGaps.any(), !pthSinkCallers.empty() ) + rw::pathBridgeLegend( pthBridge )
                        + rw::nearSinkLegend( pthNear ) + std::string( rw::pathHandlerRuleLegend( pthHandler ) ) + std::string( rw::pathRouteBodiesLegend( !pthRouteEl.xml.empty() ) )
-                       + std::string( rw::pathGlobLegend( srcGlob || dstGlob ) ) + std::string( rw::narrowedVerbLegend( !pthEp.narrowed.empty() ) ) ).c_str(),
+                       + std::string( rw::pathGlobLegend( srcGlob || dstGlob ) ) + std::string( rw::narrowedVerbLegend( !pthEp.narrowed.empty() ) ) + pthContracts.legend() ).c_str(),
                      rw::graphCountFloorBrief( rw::graphGaugeClauses( g ) ).c_str(), rw::rootRelPathsLegend( pthSingleRoot ) );
         rw::emitTo( stdout, "<path from=\"{}\" to=\"{}\"{}{} from_defs=\"{}\" to_defs=\"{}\"{} reachable=\"{}\" hops=\"{}\"{}{}",
                      ex( srcN ).c_str(), ex( dstN ).c_str(), pthBound.from ? " from_p=\"" + loc( srcUsed ) + "\"" : std::string(),
                      pthBound.to ? " to_p=\"" + loc( dstUsed ) + "\"" : std::string(),
                      srcDefs.size(), dstDefs.size(), ( rw::unprovenDefsAttrXml( pthUnprovenDefs ) + rw::pathGlobAttrXml( srcGlob, dstGlob )
-                                                       + rw::narrowedAttrXml( pthEp.narrowed ) ).c_str(),   // H1: beside the defs counts it is not in; ix2-slice: a glob endpoint; GV-PATH-BIND
+                                                       + rw::narrowedAttrXml( pthEp.narrowed ) + pthContracts.attrXml() ).c_str(),   // H1: beside the defs counts it is not in; ix2-slice: a glob endpoint; GV-PATH-BIND
                      pthRows.empty() ? 0 : 1, pthShown.empty() ? std::size_t( 0 ) : pthShown.size() - 1,
                      ( pthRootAttrs + rw::hopRootAttrsXml( pthHops ) + pthRootAttr ).c_str(),
                      rw::graphCountFloorAttrXml( g ).c_str() );
@@ -3392,8 +3427,8 @@ struct ImpactView
     int                            pageLimit;
     int                            pageOffset;
     const std::vector<char>*       testReach;      // A6: testSymbolForwardReach — never null (runImpact always computes it)
-    std::size_t                    radiusTested;    // A6: |reach ∩ tested|, over the FULL (un-windowed) reach set
-    std::size_t                    radiusUntested;  // A6: reaches - radiusTested
+    rw::RadiusTiers                radius;          // A6 + IMPACT-TEST-TIER: tested / untested production + the test tier, over the FULL (un-windowed) reach set
+    bool                           testsIgnored;    // IMPACT-TEST-TIER: --ignore-tests dropped the tests before the walk (tests_ignored=)
     std::size_t                    declinedCalls;   // tier-3 declines naming SYM or a radius symbol (graph.h declinedCallsNaming)
     std::size_t                    declinedIface;   // declines sharing a name with a TS interface signature, by name only, not a subset (callhierarchy.h)
     const rw::Graph&               g;               // M15: the gauge pair (graphCountFloorAttrXml) reads ambOut/unresolvedOut
@@ -3409,6 +3444,8 @@ struct ImpactView
     const rw::ImpactDeclinedRows&  dc;              // lane ix2-slice (IX-4, declinedsites.h): the <dc> rows declined_calls= counts, cut
     std::span<const std::uint32_t> patternSites {}; // IX-3: template lookups that may name SYM — never in reaches= (XML rows)
     const rw::ImpactRing*          ring = nullptr;  // HOP1 (backhops.h): the hedged slot ring — reaches_hedged= and its d=2 rows; never in reaches=
+    std::size_t                    contractSeeds = 0;   // BODILESS-SEED (contractseed.h): the selector's contract seeds — impls= rides when > 0
+    std::size_t                    implBodies    = 0;   // ... and the implementor bodies `seeds` holds for them: impls=
 };
 
 
@@ -3426,6 +3463,10 @@ inline std::vector<std::string> impactOfDefKeys( const ImpactView& v )
             && rw::oneHopRowIsLink( v.g, v.seeds, v.show[ i ], true, &v.g.outAnchorMiss ) )
         {
             keys[ i ] += ",\"anchor\":\"missing\"";
+        }
+        if( rw::isTestSymbol( v.ing, v.show[ i ] ) )
+        {
+            keys[ i ] += ",\"test\":true";   // IMPACT-TEST-TIER: the XML row's test="1" (radius_tests= counts these rows)
         }
     }
     return keys;
@@ -3467,7 +3508,7 @@ int emitImpactColumnar( const ImpactView& v )
     const std::string       attr = "of=\"" + std::string( escapeXml( v.sym, esc ) ) + "\" defs=\"" + std::to_string( v.defs )
                                  + "\" reaches=\"" + std::to_string( v.reaches ) + "\""
                                  + rw::impactRingAttrXml( *v.ring )                               // HOP1: the XML root's reaches_hedged= (its <ring> rows: XML/JSON only)
-                                 + rw::unprovenDefsAttrXml( v.unprovenDefs )                      // H1: where the XML root carries it
+                                 + rw::unprovenDefsAttrXml( v.unprovenDefs ) + rw::implsAttrXml( v.contractSeeds, v.implBodies )   // H1, BODILESS-SEED: where the XML root carries them
                                  + rw::defsListedAttrXml( v.attrib.groups, v.defListing )         // attrib-multidef: a cut table says so
                                  + rw::byDepthAttrXml( v.byDepth )                                // 0.6.5: the XML root's, same place
                                  + " importers=\"" + std::to_string( v.imports.files.size() ) + "\""
@@ -3475,8 +3516,9 @@ int emitImpactColumnar( const ImpactView& v )
                                  + rw::importsUnresolvedAttrXml( v.imports.importsUnresolved )   // #220: the XML root's, absent at 0
                                  + rw::countAttrXmlOrEmpty( "tsconfig_unread", std::size_t( v.imports.tsconfigUnread ) )
                                  + rw::noFileEdgesAttrXml( v.imports.noFileEdgeLangs )           // arch-honest: the XML root's, absent when every def's language draws edges
-                                 + " radius_tested=\"" + std::to_string( v.radiusTested )       // A6
-                                 + "\" radius_untested=\"" + std::to_string( v.radiusUntested ) + "\""
+                                 + " radius_tested=\"" + std::to_string( v.radius.tested )       // A6
+                                 + "\" radius_untested=\"" + std::to_string( v.radius.untested ) + "\""
+                                 + rw::radiusTestTierFields( v.radius.tests, v.testsIgnored, /*json=*/false )   // IMPACT-TEST-TIER
                                  + rw::declinedCallsAttrXml( v.declinedCalls )                    // tier-3 declines into the radius
                                  + rw::declinedSiteCutAttrXml( v.dc.cut )                         // ix2-slice: + the <dc> cut, as the XML root
                                  + rw::declinedIfaceAttrXml( v.declinedIface )
@@ -3546,7 +3588,7 @@ int emitImpactJson( const ImpactView& v )
     char ipab[ kPageDisclosureCap ];
     const std::size_t shownRows = v.page.end - v.page.begin;
     rw::emitTo( stdout, "{{\"of\":\"{}\",\"defs\":{},\"reaches\":{}{}{}{}", jsonStr( v.sym ).c_str(), v.defs, v.reaches,
-                 ( rw::impactRingKeyJson( *v.ring ) + rw::unprovenDefsKeyJson( v.unprovenDefs ) ).c_str(),   // HOP1: the XML root's reaches_hedged=; H1: absent at zero, like its XML twin
+                 ( rw::impactRingKeyJson( *v.ring ) + rw::unprovenDefsKeyJson( v.unprovenDefs ) + rw::implsKeyJson( v.contractSeeds, v.implBodies ) ).c_str(),   // HOP1: the XML root's reaches_hedged=; H1: absent at zero, like its XML twin
                  rw::defTableJson( v.ing, v.attrib.groups, v.defListing, v.rootPrefix, /*mcp=*/false ),   // attrib-multidef: the <def> table
                  rw::byDepthKeyJson( v.byDepth ) );                   // 0.6.5: the XML root's by_depth=, as an array
     rw::emitTo( stdout, ",\"importers\":{},\"shown_importers\":{},\"importers_capped\":{}",
@@ -3559,8 +3601,8 @@ int emitImpactJson( const ImpactView& v )
     rw::emitTo( stdout, "{}{}{}", rw::importsUnresolvedKeyJson( v.imports.importsUnresolved ),   // #220: the XML root's, absent at 0
                  rw::countFieldOrEmpty( "tsconfig_unread", std::size_t( v.imports.tsconfigUnread ), /*json=*/true ),
                  v.imports.noFileEdgeLangs != 0 ? ",\"no_file_edges\":\"" + rw::noFileEdgeLangTags( v.imports.noFileEdgeLangs ) + "\"" : std::string() );   // arch-honest: likewise
-    rw::emitTo( stdout, ",\"radius_tested\":{},\"radius_untested\":{}{}{}", v.radiusTested, v.radiusUntested,
-                 rw::declinedCallsKeyJson( v.declinedCalls ) + rw::declinedSiteCutKeyJson( v.dc.cut ) + rw::declinedIfaceKeyJson( v.declinedIface ),   // A6; then the XML root's declined_calls=/dc_shown=/dc_next=/declined_iface=
+    rw::emitTo( stdout, ",\"radius_tested\":{},\"radius_untested\":{}{}{}", v.radius.tested, v.radius.untested,
+                 rw::radiusTestTierFields( v.radius.tests, v.testsIgnored, /*json=*/true ) + rw::declinedCallsKeyJson( v.declinedCalls ) + rw::declinedSiteCutKeyJson( v.dc.cut ) + rw::declinedIfaceKeyJson( v.declinedIface ),   // A6; then the XML root's declined_calls=/dc_shown=/dc_next=/declined_iface=
                  ( rw::valueRefsCountKeyJson( v.valueRefs.rows.size() ) + rw::valueRefsDepthKeyJson( v.ing, v.valueRefs.depthCut, rw::VrRender{ v.singleRoot, v.rootPrefix } )
                    + rw::patternDispatchKeyJson( v.patternSites.size(), v.valueRefs.patternWideSites.size() ) ) );   // IX-3: the XML root's pattern counts
     if( v.singleRoot ) { rw::emitTo( stdout, ",\"root\":\"{}\"", jsonStr( v.rootRaw ).c_str() ); }   // R-E
@@ -3596,10 +3638,10 @@ int emitImpactXml( const ImpactView& v )
     char              ipab[ kPageDisclosureCap ];
     const std::size_t shownRows = v.page.end - v.page.begin;
     rw::emitTo( stdout, "<impact of=\"{}\" defs=\"{}\" reaches=\"{}\"{}{}{} radius_tested=\"{}\" radius_untested=\"{}\"{}{}{}{}{}{}{}>",
-                 ex( v.sym ).c_str(), v.defs, v.reaches, rw::impactRingAttrXml( *v.ring ) + rw::unprovenDefsAttrXml( v.unprovenDefs ) + rw::defsListedAttrXml( v.attrib.groups, v.defListing ),   // HOP1: the hedged ring beside reaches=; H1; attrib-multidef
+                 ex( v.sym ).c_str(), v.defs, v.reaches, rw::impactRingAttrXml( *v.ring ) + rw::unprovenDefsAttrXml( v.unprovenDefs ) + rw::implsAttrXml( v.contractSeeds, v.implBodies ) + rw::defsListedAttrXml( v.attrib.groups, v.defListing ),   // HOP1: the hedged ring beside reaches=; H1; attrib-multidef
                  rw::byDepthAttrXml( v.byDepth ),                                                              // 0.6.5: partitions reaches= by hop depth
-                 v.imports.xmlAttrs.c_str(), v.radiusTested, v.radiusUntested,
-                 ( rw::declinedCallsAttrXml( v.declinedCalls ) + rw::declinedSiteCutAttrXml( v.dc.cut ) + rw::declinedIfaceAttrXml( v.declinedIface ) ).c_str(),   // tier-3 declines into the radius (+ the <dc> cut)
+                 v.imports.xmlAttrs.c_str(), v.radius.tested, v.radius.untested,
+                 ( rw::radiusTestTierFields( v.radius.tests, v.testsIgnored, /*json=*/false ) + rw::declinedCallsAttrXml( v.declinedCalls ) + rw::declinedSiteCutAttrXml( v.dc.cut ) + rw::declinedIfaceAttrXml( v.declinedIface ) ).c_str(),   // tier-3 declines into the radius (+ the <dc> cut)
                  ( rw::valueRefsCountAttrXml( v.valueRefs.rows.size() ) + rw::valueRefsDepthAttrXml( v.ing, v.valueRefs.depthCut, rw::VrRender{ v.singleRoot, v.rootPrefix } )
                    + rw::patternDispatchAttrXml( v.patternSites.size(), v.valueRefs.patternWideSites.size() ) ),   // value uses + IX-3 template lookups: never in reaches=; absent at zero
                  std::string( v.rootAttr ).c_str(),
@@ -3619,7 +3661,7 @@ int emitImpactXml( const ImpactView& v )
         const bool imLink = rw::impactDirectLink( v.g, v.seeds, v.depth, v.show[ i ] );
         rw::emitTo( stdout, "<s t=\"{}\" n=\"{}\" p=\"{}:{}\"{}{}{}{}/>", symTag( s.kind ), ex( rw::qualifiedMemberName( imOwners, s ) ).c_str(), ex( rp ).c_str(), s.line,
                      rw::depthRunAttrXml( v.show, v.depth, i, v.page.begin ),
-                     rw::isTestedByReach( v.ing, *v.testReach, v.show[i] ) ? " tested=\"1\"" : "",
+                     rw::radiusTierRowAttrXml( v.ing, *v.testReach, v.show[i] ),   // IMPACT-TEST-TIER: tested="1" | test="1" | nothing
                      std::string( viaEdgeAttr( rw::impactRowNameOnly( v.provenReach, v.show[i] ), imLink ) )
                        + anchorMissAttr( imLink && rw::oneHopRowIsLink( v.g, v.seeds, v.show[ i ], true, &v.g.outAnchorMiss ) ),
                      v.attrib.ofDefXml( v.show[i] ) );                                     // attrib-multidef
@@ -3633,12 +3675,20 @@ int emitImpactXml( const ImpactView& v )
     return 0;
 }
 
+// The root counts two lanes added to --impact, as the legend reads them (train 1111i: one argument for both)
+struct ImpactRootReadings
+{
+    bool        contract    = false;   // BODILESS-SEED: impls= on the root (contractseed.h)
+    std::size_t radiusTests = 0;       // IMPACT-TEST-TIER: radius_tests= on the root (graph.h radiusTiers)
+};
+
 inline void emitImpactLegend( const rw::Config& cfg, const rw::IngestResult& ing, const rw::Graph& g, const std::vector<rw::NodeId>& reach,
                               const std::vector<rw::NodeId>& show, const rw::PageWindow& imPage, const rw::ImpactReach& imWalk,
                               const rw::ImportTier& imports, const std::vector<rw::NodeId>& seeds, const std::vector<std::uint32_t>& imDepth,
                               const std::vector<char>& imProven, std::size_t imUnprovenDefs, std::size_t imDeclinedCalls, std::size_t imDeclinedIface,
                               const rw::ImpactFileRollup& imFiles, const rw::ReachAttribution& imAttr, const rw::DefTableListing& imListing,
-                              const rw::ValueRefRows& imValueRefs, const rw::RankDisclosure& prD, const rw::ImpactDeclinedRows& imDc, const rw::ImpactRing& imRing )
+                              const rw::ValueRefRows& imValueRefs, const rw::RankDisclosure& prD, const rw::ImpactDeclinedRows& imDc, const rw::ImpactRing& imRing,
+                              const ImpactRootReadings& imRoot )
 {
     if( cfg.json )
     {
@@ -3658,9 +3708,9 @@ inline void emitImpactLegend( const rw::Config& cfg, const rw::IngestResult& ing
                                                      [ & ]( rw::NodeId n ) { return rw::impactRowNameOnly( imProven, n ); } ), true, cfg.columnar )
                    + rw::impactLinkLegendFor( g, seeds, imDepth, show, imPage.begin, imPage.end )
                    + rw::impactAnchorLegendFor( g, seeds, imDepth, show, imPage.begin, imPage.end ) ).c_str(),
-                 rw::testedLensLegend( cfg.columnar ), rw::kImpactTestedPartitionLegend,
+                 rw::testedLensLegend( cfg.columnar ), rw::impactTestedPartitionLegend( imRoot.radiusTests, cfg.ignoreTests, !cfg.columnar ),   // IMPACT-TEST-TIER
                  rw::kTestedLensBlindSpotLegend,
-                 rw::unprovenDefsVerbLegend( rw::UnprovenDefsVerb::Impact, imUnprovenDefs > 0 ).c_str(),
+                 ( rw::unprovenDefsVerbLegend( rw::UnprovenDefsVerb::Impact, imUnprovenDefs > 0 ) + rw::implsLegend( imRoot.contract ) ).c_str(),   // BODILESS-SEED: impls=
                  rw::declinedCallsLegendForRows( imDeclinedCalls > 0, g.gateDeclinedCalls > 0, g.stdMemberDeclinedCalls > 0, !imDc.views.empty() )
                    + rw::declinedSitesLegend( rw::declinedSitesLegendFlags( imDc.views, /*callersForm=*/true, imDc.cut ) ),   // ix2-slice: + the <dc> rows, one per counted call
                  rw::declinedIfaceLegend( imDeclinedIface > 0 ),
@@ -3878,11 +3928,14 @@ std::optional<int> runImpact( const MainDispatch& d )
         // decl→def widening's residue — definitions the walk below never starts from, which reached the reader as a
         // bare reaches="0". The MCP twin reads the same resolver through the same helpers.
         std::size_t               imUnprovenDefs = 0;
-        const std::vector<NodeId> seeds          = resolveAllByNameQualified( ing, cfg.impactSym, &imUnprovenDefs );
-        if( seeds.empty() )
+        std::vector<NodeId>       imMatches      = resolveAllByNameQualified( ing, cfg.impactSym, &imUnprovenDefs );
+        if( imMatches.empty() )
         {
             return impactPathOrRefuse( cfg, ing, imSingleRoot, imRootPrefix, imRootAttr );   // IMPACT-PATH, else §B4.2
         }
+        // BODILESS-SEED (contractseed.h): a contract method seeds the walk from its implementors' bodies too (impls= says so)
+        const rw::ContractSeeds    imContract = rw::widenContractSeeds( ing, g, std::move( imMatches ) );
+        const std::vector<NodeId>& seeds      = imContract.seeds;
         // 0.6.5: the SAME walk, keeping each node's hop depth — the rows' d= and the root's by_depth=.
         // L7 (typeuse.h): a TYPE seed's walk also starts from the symbols that name it; a function's walk is unchanged.
         const rw::TypeUseTier            imType   = rw::typeUseTier( ing, seeds );
@@ -3900,8 +3953,8 @@ std::optional<int> runImpact( const MainDispatch& d )
         // un-windowed reach set (not just the shown page) — the same isTestSymbol-seeded lens --safe-delete's
         // radius_tested=/radius_untested= already name (README:1025), never re-derived.
         const std::vector<char> imTestReach     = rw::testSymbolForwardReach( ing, g );
-        const std::size_t       imRadiusTested   = rw::countTestedIn( ing, imTestReach, reach );
-        const std::size_t       imRadiusUntested = reach.size() - imRadiusTested;
+        // IMPACT-TEST-TIER: the test definitions in the reach are their own tier (graph.h radiusTiers), never untested production.
+        const rw::RadiusTiers   imRadius         = rw::radiusTiers( ing, imTestReach, reach );
         // The tier-3 declines that could have reached SYM or a symbol already in the radius: each is a branch
         // reaches= may be missing. One count per call (graph.h declinedCallsNaming), shared with the MCP twin.
         std::vector<NodeId>     imDeclineTargets( reach );
@@ -3953,7 +4006,8 @@ std::optional<int> runImpact( const MainDispatch& d )
                                                                     rw::VrRender{ imSingleRoot, imRootPrefix }, /*candidates=*/false );
 
         emitImpactLegend( cfg, ing, g, reach, show, imPage, imWalk, imports, seeds, imDepth, imProven, imUnprovenDefs,
-                          imDeclinedCalls, imDeclinedIface, imFiles, imAttr, imListing, imValueRefs, prD, imDc, imRing );
+                          imDeclinedCalls, imDeclinedIface, imFiles, imAttr, imListing, imValueRefs, prD, imDc, imRing,
+                          ImpactRootReadings{ .contract = imContract.contracts > 0, .radiusTests = imRadius.tests } );
         // P2.1 + §P8 G1: the rank-ordered listing's 40 is a DEFAULT now, not a ceiling — see the §P10.3 note
         // above runImpact; pageDisclosure emits the ` shown= capped=` bytes this verb used to hand-roll
         // (src/pageview.h, THE TRUNCATION VOCABULARY, rules 1-3). LB-G: the same NAMED constant
@@ -3962,8 +4016,8 @@ std::optional<int> runImpact( const MainDispatch& d )
                                imPage,   // the same window the legend predicate above reads — one expression, not two
                                imports, importPage, importLazyPage, prD, imSingleRoot, imRootPrefix, imRootAttr,
                                imSingleRoot ? cfg.roots[0] : std::string_view(), cfg.pageLimit, cfg.pageOffset,
-                               &imTestReach, imRadiusTested, imRadiusUntested, imDeclinedCalls, imDeclinedIface, g, imDepth, imByDepth, imValueRefs,
-                               imProven, imFiles, imAttr, imListing, imWalk.typeOnly, seeds, imDc, imPatterns, &imRing };
+                               &imTestReach, imRadius, cfg.ignoreTests, imDeclinedCalls, imDeclinedIface, g, imDepth, imByDepth, imValueRefs,
+                               imProven, imFiles, imAttr, imListing, imWalk.typeOnly, seeds, imDc, imPatterns, &imRing, imContract.contracts, imContract.impls };
 
         if( cfg.columnar ) { return emitImpactColumnar( view ); }
         if( cfg.json     ) { return emitImpactJson( view ); }

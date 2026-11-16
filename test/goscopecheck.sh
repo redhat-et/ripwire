@@ -13,7 +13,8 @@
 #
 # ARMS (fixture test/goscopefix: iface.go, deb.go, other.go)
 #   (A) map: Deb's methods sc="Deb", Packager's members sc="Packager", Matcher.Loop sc="Matcher", Terminal.Loop sc="Terminal".
-#   (B) selectors: --callers=Deb::Package and Deb.Package resolve to ONE def and list Run; Packager::Package one def;
+#   (B) selectors: --callers=Deb::Package and Deb.Package resolve to ONE def and list Run; Packager::Package resolves to
+#       the interface's bodiless member plus its one implementor's body (BODILESS-SEED: impls="1", defs="2") and lists Run;
 #       Matcher::Loop one def and lists Terminal.Loop; the bare --callers=Package keeps defs="3", bare Loop defs="2".
 #   (C) near misses: a generic receiver (`*Stack[T]`, and the unnamed value receiver `Stack[T]`) scopes to Stack; a func
 #       literal bound inside a method (`step`) and a local var have no scope; the types Deb / Packager / Stack / closer and
@@ -90,7 +91,14 @@ callers_of(){
 }
 callers_of "Deb::Package" 1 Run
 callers_of "Deb.Package" 1 Run
-callers_of "Packager::Package" 1
+# BODILESS-SEED: the interface member has no body, so its implementor's same-named body (Deb.Package) joins defs= as a
+# seed (impls="1"): two defs, the first the bodiless member itself, and Run is found through the implementor.
+callers_of "Packager::Package" 2 Run
+if grep -q ' impls="1"' "$TMP/out" && grep -q '<def ix="1" t="method" sc="Packager" p="iface.go:7" bodyless="1"/>' "$TMP/out"; then
+    ok "(B) --callers=Packager::Package: impls=\"1\", def ix=1 is the bodiless Packager member"
+else
+    no "(B) --callers=Packager::Package: wanted impls=\"1\" and a bodiless Packager def ix=1: $( grep -o '<callers [^>]*>' "$TMP/out" | head -1 )"
+fi
 callers_of "Matcher::Loop" 1 Terminal.Loop
 # twin (QUALNAME-1): a Go method caller prints Owner.name, so the bare spelling is NOT a row; the positive above
 # can only pass on the qualified row, and this proves the row probe fails on a spelling that is not printed

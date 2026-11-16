@@ -1423,7 +1423,7 @@ int runAbiCheck( const MainDispatch& d )
     using namespace rw;
     const std::string& root = d.root;
 
-    const abicheck::AbiResult result = abicheck::computeAbiCheck( root, d.ing, d.cfg.strayFilter );
+    const abicheck::AbiResult result = abicheck::computeAbiCheck( root, d.ing, d.cfg.strayFilter, d.cfg.detail ? SIZE_MAX : crossref::kMaxRefs );
     if( !result.ok )
     {
         if( result.nonGitRoot )
@@ -1473,7 +1473,8 @@ std::optional<int> runCrossRef( const MainDispatch& d )
             return 1;
         }
         const landingplan::PlanResult result = landingplan::computePlan( root, cfg.strayFilter, d.ing, cfg.excludes, cfg.maxFileBytes,
-                                                                          cfg.detail ? SIZE_MAX : landingplan::kMaxPlanScout );
+                                                                          cfg.detail ? SIZE_MAX : landingplan::planScoutCap( d.ing.files.size() ),
+                                                                          cfg.detail ? SIZE_MAX : crossref::kMaxRefs );
         if( !result.ok )
         {
             if( result.nonGitRoot )
@@ -1506,7 +1507,7 @@ std::optional<int> runCrossRef( const MainDispatch& d )
         {
             return runAbiCheck( d ); // --stray-content --abi: the cross-branch ABI-break gate
         }
-        const crossref::StrayResult result = crossref::computeStrayContent( root, cfg.strayFilter );
+        const crossref::StrayResult result = crossref::computeStrayContent( root, cfg.strayFilter, { .maxRefs = cfg.detail ? SIZE_MAX : crossref::kMaxRefs } );
         if( !result.ok )
         {
             if( result.nonGitRoot )
@@ -1585,9 +1586,15 @@ std::optional<int> runCrossRef( const MainDispatch& d )
         }
         // C1 F-07: the per-gate <read> cap is a raisable DEFAULT now — --limit=N beats it through the
         // tool-wide effectiveRowCap rule, --detail still lifts it outright, and --offset=M pages it.
-        darkflags::writeFlags( stdout, result,
-                               cfg.detail ? SIZE_MAX : std::size_t( rw::effectiveRowCap( cfg.pageLimit, int( darkflags::kMaxSitesShown ) ) ),
-                               cfg.pageOffset );
+        const std::size_t flagsSiteCap = cfg.detail ? SIZE_MAX : std::size_t( rw::effectiveRowCap( cfg.pageLimit, int( darkflags::kMaxSitesShown ) ) );
+        if( cfg.json )
+        {
+            darkflags::writeFlagsJson( stdout, result, flagsSiteCap, cfg.pageOffset );   // the same rows, keys = the XML attribute names
+        }
+        else
+        {
+            darkflags::writeFlags( stdout, result, flagsSiteCap, cfg.pageOffset );
+        }
         return 0;
     }
 
@@ -1632,7 +1639,7 @@ std::optional<int> runCrossRef( const MainDispatch& d )
         const std::vector<crossref::IndexDefSite> indexDefs = crossref::whereisIndexDefSites( d.ing, whereisSel, root );
 
         // --detail lifts every cap of this verb: the row cap below, the runaway guard on the other refs' blob parse and the t= preview.
-        const crossref::WhereisParseBudget parseBudget = cfg.detail ? crossref::WhereisParseBudget{ SIZE_MAX, SIZE_MAX } : crossref::WhereisParseBudget{};
+        const crossref::WhereisParseBudget parseBudget = cfg.detail ? crossref::WhereisParseBudget{ SIZE_MAX, SIZE_MAX, SIZE_MAX } : crossref::WhereisParseBudget{};
         crossref::WhereResult result = crossref::computeWhereis( root, whereisSel, cfg.strayFilter,
                                                                  crossref::WhereisEvidence{ cfg.withHistory ? &history : nullptr, indexDefs }, parseBudget );
         if( !result.ok )

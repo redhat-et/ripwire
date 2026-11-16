@@ -34,7 +34,9 @@
 # ARM E (MAIN-LOCAL-REDS, 2026-11-13; CROSSREF-MAXREFS) covers the sweep verbs past 512 local branches (crossref kMaxRefs).
 # They refused there ("is not a git repository", then the cap's name); now they read the newest 512 by committer date and the
 # root's refs_omitted= counts the rest. ARM H is the same at 4,096 branches. RED-FIRST (c6802ebdc): E1, E3-E7 and H1-H5 fail;
-# E0, E2 and H0 hold on both binaries.
+# E0, E2 and H0 hold on both binaries. LARGE-PARTIAL-1 (2026-11-14, REF-WINDOW-COST): --whereis's window became a tree-entry
+# budget (crossref kWhereisSiteBudget), so on these one-file fixtures it reads EVERY branch: E1, the whereis half of E3/E4 and
+# H1-H3 now pin that (no refs_omitted=, the older tiers found). The whereis cut itself is pinned by refwindowcheck W5.
 #
 # Usage:  bash test/substrfiltercheck.sh [BIN]   |   RIPWIRE_BIN=build_base/ripwire bash test/…
 # Exits non-zero on any failure.
@@ -194,13 +196,13 @@ else
 fi
 # The root element of an answer (its first <whereis / <stray-content / <stray-eval tag).
 eroot(){ printf '%s' "$1" | grep -o "<$2 [^>]*>" | head -1; }
-# E1 the CLI --whereis answers from both roots: 513 refs besides HEAD, 511 read with HEAD in the window of 512, 2 counted.
+# E1 the CLI --whereis answers from both roots and reads all 513 branches (the tree-entry budget is far off): no refs_omitted=.
 for eroot_dir in main linked; do
     OUT="$( "$BIN" "$EFIX/$eroot_dir" --whereis=capProbe --no-cache 2>"$EFIX/e1.err" )"; RC=$?
     ROOTEL="$( eroot "$OUT" whereis )"
-    if [ "$RC" -eq 0 ] && printf '%s' "$ROOTEL" | grep -qF 'refs_scanned="511"' && printf '%s' "$ROOTEL" | grep -qF 'refs_omitted="2"' \
-       && ! printf '%s' "$ROOTEL" | grep -qF 'complete="1"' && printf '%s' "$OUT" | grep -qF 'refs_omitted=K'; then
-        ok "E1 --whereis over 513 branches ($eroot_dir root) answers: refs_scanned=511 refs_omitted=2, no complete=, the reading rides"
+    if [ "$RC" -eq 0 ] && printf '%s' "$ROOTEL" | grep -qF 'refs_scanned="513"' && ! printf '%s' "$ROOTEL" | grep -qF 'refs_omitted=' \
+       && printf '%s' "$ROOTEL" | grep -qF 'hits="514"' && ! grep -qF 'warning:' "$EFIX/e1.err"; then
+        ok "E1 --whereis over 513 branches ($eroot_dir root) answers: refs_scanned=513 hits=514, no refs_omitted=, no warning"
     else
         no "E1 --whereis over 513 branches ($eroot_dir root) → exit $RC: ${ROOTEL:-$( head -c 300 "$EFIX/e1.err" )}"
     fi
@@ -219,9 +221,10 @@ fi
 # E3/E4 the MCP twins answer a document with refs_omitted=, never an error ("not a git repository" or the old cap refusal).
 for etool in whereis stray_content; do
     eargs="{\"path\":\"$EFIX/linked\"}"; ewant='refs_omitted=\"1\"'
-    [ "$etool" = whereis ] && { eargs="{\"path\":\"$EFIX/linked\",\"symbol\":\"capProbe\"}"; ewant='refs_omitted=\"2\"'; }
+    [ "$etool" = whereis ] && { eargs="{\"path\":\"$EFIX/linked\",\"symbol\":\"capProbe\"}"; ewant='refs_scanned=\"513\"'; }
     OUT="$( emcp "$etool" "$eargs" )"
-    if ! printf '%s' "$OUT" | grep -qF '"error"' && printf '%s' "$OUT" | grep -qF "$ewant"; then
+    if ! printf '%s' "$OUT" | grep -qF '"error"' && printf '%s' "$OUT" | grep -qF "$ewant" \
+       && { [ "$etool" != whereis ] || ! printf '%s' "$OUT" | grep -qF 'refs_omitted=\"'; }; then
         ok "E3/E4 MCP $etool over 513 branches answers, disclosing $ewant"
     else
         no "E3/E4 MCP $etool over 513 branches: $( printf '%s' "$OUT" | head -c 300 )"
@@ -284,28 +287,27 @@ if [ "$HSWEPT" -eq 4096 ]; then
 else
     no "H0 fixture: $HSWEPT branches off HEAD's sha, want 4096 — H1-H4 would prove nothing"
 fi
-# H1 --whereis answers and names the omitted count: 511 read beside HEAD, 3,585 counted, and the newest tier is the one read.
+# H1 --whereis reads all 4,096 branches (9 blobs, far under the tree-entry budget) and finds the newest tier's probe.
 OUT="$( "$BIN" "$HFIX" --whereis=tierProbe8 --no-cache 2>"$EFIX/h1.err" )"; RC=$?
 ROOTEL="$( eroot "$OUT" whereis )"
-if [ "$RC" -eq 0 ] && printf '%s' "$ROOTEL" | grep -qF 'refs_scanned="511"' && printf '%s' "$ROOTEL" | grep -qF 'refs_omitted="3585"' \
-   && ! printf '%s' "$ROOTEL" | grep -qF 'hits="0"'; then
-    ok "H1 --whereis over 4,096 branches answers: refs_scanned=511 refs_omitted=3585, the newest tier's probe found"
+if [ "$RC" -eq 0 ] && printf '%s' "$ROOTEL" | grep -qF 'refs_scanned="4096"' && ! printf '%s' "$ROOTEL" | grep -qF 'refs_omitted=' \
+   && printf '%s' "$ROOTEL" | grep -qF 'hits="512"'; then
+    ok "H1 --whereis over 4,096 branches answers: refs_scanned=4096 hits=512, no refs_omitted="
 else
     no "H1 --whereis=tierProbe8 over 4,096 branches → exit $RC: ${ROOTEL:-$( head -c 300 "$EFIX/h1.err" )}"
 fi
-# H2 an older tier's probe lives only on omitted refs: hits="0" beside refs_omitted=, never complete="1" (the zero is windowed).
+# H2 an older tier's probe (once only on omitted refs) is found now: its 512 branches are read, nothing omitted.
 OUT="$( "$BIN" "$HFIX" --whereis=tierProbe7 --no-cache 2>"$EFIX/h2.err" )"; RC=$?
 ROOTEL="$( eroot "$OUT" whereis )"
-if [ "$RC" -eq 0 ] && printf '%s' "$ROOTEL" | grep -qF 'hits="0"' && printf '%s' "$ROOTEL" | grep -qF 'refs_omitted="3585"' \
-   && ! printf '%s' "$ROOTEL" | grep -qF 'complete="1"'; then
-    ok "H2 --whereis=tierProbe7 (only on omitted refs): hits=0 beside refs_omitted=3585, no complete="
+if [ "$RC" -eq 0 ] && printf '%s' "$ROOTEL" | grep -qF 'hits="512"' && ! printf '%s' "$ROOTEL" | grep -qF 'refs_omitted='; then
+    ok "H2 --whereis=tierProbe7 (an older tier): hits=512, no refs_omitted="
 else
     no "H2 --whereis=tierProbe7 over 4,096 branches → exit $RC: ${ROOTEL:-$( head -c 300 "$EFIX/h2.err" )}"
 fi
-# H3 the widening lever the reading names: the MCP whereis kind=t7_ picks tier 7's branches to fill the window, and finds it.
+# H3 the MCP whereis kind=t7_ narrows to tier 7's 512 branches, reads them all, and finds its probe.
 OUT="$( emcp whereis "{\"path\":\"$HFIX\",\"symbol\":\"tierProbe7\",\"kind\":\"t7_\"}" )"
-if printf '%s' "$OUT" | grep -qF '<whereis ' && ! printf '%s' "$OUT" | grep -qF 'hits=\"0\"' && printf '%s' "$OUT" | grep -qF 'refs_omitted=\"1\"'; then
-    ok "H3 MCP whereis kind=t7_ reads tier 7 (512 match, 511 read beside HEAD, 1 counted) and finds tierProbe7"
+if printf '%s' "$OUT" | grep -qF '<whereis ' && ! printf '%s' "$OUT" | grep -qF 'hits=\"0\"' && ! printf '%s' "$OUT" | grep -qF 'refs_omitted=\"'; then
+    ok "H3 MCP whereis kind=t7_ reads tier 7's 512 branches, none omitted, and finds tierProbe7"
 else
     no "H3 MCP whereis kind=t7_ over 4,096 branches: $( printf '%s' "$OUT" | head -c 300 )"
 fi
@@ -318,17 +320,26 @@ else
     no "H4 --stray-content over 4,096 branches → exit $RC: ${ROOTEL:-$( head -c 300 "$EFIX/h4.err" )}"
 fi
 
-# H5 the full-prose legends that define refs_omitted= stay well-formed XML (a `--` inside the legend comment is malformed: the
-# first lane build spelled the widening flags with their dashes there) and carry the definition.
+# H5 the legends that define refs_omitted= stay well-formed XML, full AND compact (a `--` inside a legend comment is malformed:
+# the first lane builds spelled the widening flag with its dashes there, once in the full prose and once, LARGE-PARTIAL-1, in the
+# compact reading), and --stray-content's carries the definition of the refs_omitted= it prints. --whereis reads every branch
+# here (see H1), so its answer carries no refs_omitted= and no definition of it.
 if command -v xmllint >/dev/null 2>&1; then
     for hv in --whereis=tierProbe8 --stray-content; do
-        "$BIN" "$HFIX" "$hv" --legend=full --no-cache >"$EFIX/h5.out" 2>/dev/null; RC=$?
-        if [ "$RC" -eq 0 ] && xmllint --noout "$EFIX/h5.out" 2>/dev/null && grep -qF 'refs_omitted= (present only when non-zero) is the' "$EFIX/h5.out" \
-           && grep -qF 'refs_omitted="' "$EFIX/h5.out"; then
-            ok "H5 $hv --legend=full over 4,096 branches: well-formed, and the prose defines the refs_omitted= it carries"
-        else
-            no "H5 $hv --legend=full over 4,096 branches → exit $RC, xmllint: $( xmllint --noout "$EFIX/h5.out" 2>&1 | head -2 | tr '\n' ' ' )"
-        fi
+        for hl in full compact; do
+            "$BIN" "$HFIX" "$hv" --legend="$hl" --no-cache >"$EFIX/h5.out" 2>/dev/null; RC=$?
+            hdef='refs_omitted= (present only when non-zero) is the'; [ "$hl" = compact ] && hdef='refs_omitted=K:'
+            if [ "$hv" = --stray-content ]; then
+                grep -qF "$hdef" "$EFIX/h5.out" && grep -qF 'refs_omitted="' "$EFIX/h5.out"; hcarry=$?
+            else
+                ! grep -qF 'refs_omitted="' "$EFIX/h5.out"; hcarry=$?
+            fi
+            if [ "$RC" -eq 0 ] && xmllint --noout "$EFIX/h5.out" 2>/dev/null && [ "$hcarry" -eq 0 ]; then
+                ok "H5 $hv --legend=$hl over 4,096 branches: well-formed, refs_omitted= and its definition as expected"
+            else
+                no "H5 $hv --legend=$hl over 4,096 branches → exit $RC, carry check $hcarry, xmllint: $( xmllint --noout "$EFIX/h5.out" 2>&1 | head -2 | tr '\n' ' ' )"
+            fi
+        done
     done
 else
     printf '  SKIP  H5: xmllint absent — the full legends'"'"' well-formedness is not checked\n'

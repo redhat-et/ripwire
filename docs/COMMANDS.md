@@ -1,12 +1,12 @@
-# ripwire-merged — every flag, generated from the binary
+# ripwire — every flag, generated from the binary
 
 **This file is generated. Do not hand-edit it.** Regenerate with:
 
 ```bash
-python3 docs/docs_commands_build.py --bin build/ripwire-merged
+python3 docs/docs_commands_build.py --bin build/ripwire
 ```
 
-The flag surface below is read from `ripwire-merged --help`, so it cannot disagree with the shipped
+The flag surface below is read from `ripwire --help`, so it cannot disagree with the shipped
 binary. `test/docscommandscheck.sh` fails if it ever does — in either direction.
 
 Sample output is lifted from a real recorded run (`docs/captures/COMMANDS_showcase_2026-11-13.md`), trimmed to the first few lines and
@@ -67,7 +67,7 @@ with --for). --for's OWN signature/lego/compose bundle self-limits via --pack-to
 _Same map, capped to the 5 highest-ranked symbols._
 
 ```
-$ ./build/ripwire-merged . --top-k=5
+$ ./build/ripwire . --top-k=5
 <!-- ripwire map schema=ripwire.map/v1: ranked symbol map: <f p= layer=> groups <s t= n= sc= k= amb=> rows (k= rank), <c n=> resolved callees; the header comment is data. est_tokens=: price as emitted (an upper bound under compact). root=: p= relative to it. pr_iters=N: PageRank iterations. <inv listed= unlisted=>: files the ranked rows show / do not (sum = files=), each named or counted below. <entry p= n=>: a program entry by its language's convention (C/Go/Rust main, Java/C# static main, a script main its module scope calls, __main__.py), callees as c rows; manifest entries not read. <ls p= n= f=>: n= unshown files under dir p=; f= names its code files, the rest (tests, docs, config, test/doc/example dirs) counted. declined=K: K call sites without edges, including inert Elixir quote sites after unquote/unquote_splicing re-entry. external=K: K calls proven outside the tree, no edge. locality_pinned=K: K calls pinned by locality alone (a guess). extent_suspect_syms=K: K defs failed containment, corpus-wide. macro_blanked_files=K: K files indexed from a macro-blanked re-parse. prov=scip|binding|import|split|final-segment: how that <c> edge bound (absent: one unique name); split = one arm of an amb= pick; final-segment = a qualified type matched by last name only. files=/symbols=: files and symbols indexed; edges= distinct call edges; shown= symbols printed, a merged row counting each def; ambiguous= calls split over several defs, corpus-wide; unresolved= calls with in-tree evidence and no edge (every def language-filtered or unreachable, or binding refused); order= rows by rank (important-first, important-last; (auto:fill) = flipped past a size threshold) or by path (stable). skipped_oversize=K: K files over a size ceiling, not indexed. unindexed=ext:N: N text files of that extension no grammar reads (6 extensions at most). unindexed_exts=E: E such extensions in all, the list cut. sc=: enclosing scope; the full id is p::sc::n (p= of the row or its <f>) and selectors take it. amb=K: K calls split over several defs. -->
 <!-- t=modscope=a-file's-MODULE-SCOPE(n=<file-scope>):the-statements-outside-every-named-definition,where-a-top-level-call-and-an-anonymous-callback-body's-calls-live;a-CALLER-never-a-callee(nothing-in-the-source-can-name-it)-with-no-body-to-expand;a-file-with-no-such-call-has-no-such-row -->
 <!-- t=type|alias|functype=a-Go-named-type-by-its-written-form:type=a-defined-type-whose-WRITTEN-form-is-not-a-struct/iface/func-literal(type-N-string;type-W-Pair-too,whatever-Pair-is-underneath),alias=type-A=B,functype=type-F-func(...) -->
@@ -103,7 +103,7 @@ The default map appends <inv listed= unlisted=> after its ranked rows whenever t
 _The same capped map without its inventory tier: --top-k=5 leaves files out, so the default map appends <inv listed= unlisted=> (program entries, and the files the ranked rows left out) after its rows; --no-inventory drops that tier, and the ranked rows are the same._
 
 ```
-$ ./build/ripwire-merged . --top-k=5 --no-inventory
+$ ./build/ripwire . --top-k=5 --no-inventory
 <!-- ripwire map schema=ripwire.map/v1: ranked symbol map: <f p= layer=> groups <s t= n= sc= k= amb=> rows (k= rank), <c n=> resolved callees; the header comment is data. est_tokens=: price as emitted (an upper bound under compact). root=: p= relative to it. pr_iters=N: PageRank iterations. declined=K: K call sites without edges, including inert Elixir quote sites after unquote/unquote_splicing re-entry. external=K: K calls proven outside the tree, no edge. locality_pinned=K: K calls pinned by locality alone (a guess). extent_suspect_syms=K: K defs failed containment, corpus-wide. macro_blanked_files=K: K files indexed from a macro-blanked re-parse. prov=scip|binding|import|split|final-segment: how that <c> edge bound (absent: one unique name); split = one arm of an amb= pick; final-segment = a qualified type matched by last name only. files=/symbols=: files and symbols indexed; edges= distinct call edges; shown= symbols printed, a merged row counting each def; ambiguous= calls split over several defs, corpus-wide; unresolved= calls with in-tree evidence and no edge (every def language-filtered or unreachable, or binding refused); order= rows by rank (important-first, important-last; (auto:fill) = flipped past a size threshold) or by path (stable). skipped_oversize=K: K files over a size ceiling, not indexed. unindexed=ext:N: N text files of that extension no grammar reads (6 extensions at most). unindexed_exts=E: E such extensions in all, the list cut. sc=: enclosing scope; the full id is p::sc::n (p= of the row or its <f>) and selectors take it. amb=K: K calls split over several defs. -->
 <!-- t=modscope=a-file's-MODULE-SCOPE(n=<file-scope>):the-statements-outside-every-named-definition,where-a-top-level-call-and-an-anonymous-callback-body's-calls-live;a-CALLER-never-a-callee(nothing-in-the-source-can-name-it)-with-no-body-to-expand;a-file-with-no-such-call-has-no-such-row -->
 <!-- t=type|alias|functype=a-Go-named-type-by-its-written-form:type=a-defined-type-whose-WRITTEN-form-is-not-a-struct/iface/func-literal(type-N-string;type-W-Pair-too,whatever-Pair-is-underneath),alias=type-A=B,functype=type-F-func(...) -->
@@ -130,14 +130,14 @@ $ ./build/ripwire-merged . --top-k=5 --no-inventory
 
 **Answers:** budget the map to ~N tokens (binary-search top-K) — SHAPES the map to fit.
 
-THE FIT IS A BYTE CEILING, and it is deliberately CONSERVATIVE: N is converted at 2.36 B/tok (the densest calibrated language, so N holds for any corpus) times a 0.90 headroom factor. The map's own est_tokens uses THIS corpus's language-weighted rate instead, so a conformant fit REPORTS a number below the N you asked for — expect ~10-20% of N unused. The shaped map discloses both: max_tokens=N (asked) and fit_bytes=B (honoured). Consequence for composing it with --token-budget=N below: the two Ns are different units, so the same N on both is NOT a tautology. At a SMALL N the map's fixed floor (envelope + legend) can exceed fit_bytes with even one symbol emitted — that map says over_ceiling=1 rather than overshoot in silence, and its est_tokens can then exceed N. XML only: the --json map carries no max_tokens=/fit_bytes= keys yet, and its fit is measured in XML bytes. On --recall it SHAPES the doc bundle, and the ceiling is SPLIT ACROSS the docs rather than handed to the top hit: the budget serves the longest rank PREFIX it can give each doc a readable slice, then divides the bytes equally — a doc needing LESS than its share takes only what it needs and the surplus flows to the ones needing more. One long top hit no longer erases the rest of the corpus, and a bigger ceiling never returns FEWER docs. Docs past the prefix are dropped from the BOTTOM of the ranking; selection ORDER never changes. Every cut is DISCLOSED (header total=/shown=/capped=/truncated=/share_bytes=, a per-doc [truncated: X of Y bytes] marker, and a closing (capped: …) note); share_bytes= is that per-doc ceiling and is ABSENT when it bound no doc. On --for --detail=N it bounds THE BODIES ALONE: the header, signatures, legend and symbol table are not charged against it, so the bundle can price past N. That is deliberate — a ceiling bounds the tail and never the head, and a complete small answer is not worth cutting to fit — so the root DISCLOSES the overshoot instead, carrying over_ceiling="1" beside max_tokens=N whenever est_tokens exceeds N. Reach for --token-budget=N when the whole DOCUMENT must be bounded; this flag SHAPES.
+THE FIT IS A BYTE CEILING, and it is deliberately CONSERVATIVE: N is converted at 2.36 B/tok (the densest calibrated language, so N holds for any corpus) times a 0.90 headroom factor. The map's own est_tokens uses THIS corpus's language-weighted rate instead, so a conformant fit REPORTS a number below the N you asked for — expect ~10-20% of N unused. The shaped map discloses both: max_tokens=N (asked) and fit_bytes=B (honoured). Consequence for composing it with --token-budget=N below: the two Ns are different units, so the same N on both is NOT a tautology. At a SMALL N the map's fixed floor (envelope + legend) can exceed fit_bytes with even one symbol emitted — that map says over_ceiling=1 rather than overshoot in silence, and its est_tokens can then exceed N. XML only: the --json map carries no max_tokens=/fit_bytes= keys yet, and its fit is measured in XML bytes. On --recall it SHAPES the doc bundle, and the ceiling is SPLIT ACROSS the docs rather than handed to the top hit: the budget serves the longest rank PREFIX it can give each doc a readable slice, then divides the bytes equally — a doc needing LESS than its share takes only what it needs and the surplus flows to the ones needing more. One long top hit no longer erases the rest of the corpus, and a bigger ceiling never returns FEWER docs. Docs past the prefix are dropped from the BOTTOM of the ranking; selection ORDER never changes. Every cut is DISCLOSED (header total=/shown=/capped=/truncated=/share_bytes=, a per-doc [truncated: X of Y bytes] marker, and a closing (capped: …) note); share_bytes= is that per-doc ceiling and is ABSENT when it bound no doc. On --for --detail=N it is a CEILING applied AFTER the answer's posture: the answer is the --detail=N answer asked without it, byte for byte, until its est_tokens exceeds N; past N it sheds in the --token-budget order below but never a ranked sigs row, and carries over_ceiling="1" when what is left still does not fit.
 
 **Try it**
 
 _SHAPE the map to fit ~1500 tokens (binary-search top-K)._
 
 ```
-$ ./build/ripwire-merged . --max-tokens=1500
+$ ./build/ripwire . --max-tokens=1500
 <!-- ripwire map schema=ripwire.map/v1: ranked symbol map: <f p= layer=> groups <s t= n= sc= k= amb=> rows (k= rank), <c n=> resolved callees; the header comment is data. est_tokens=: price as emitted (an upper bound under compact). over_ceiling=1: budget not met. root=: p= relative to it. pr_iters=N: PageRank iterations. declined=K: K call sites without edges, including inert Elixir quote sites after unquote/unquote_splicing re-entry. external=K: K calls proven outside the tree, no edge. locality_pinned=K: K calls pinned by locality alone (a guess). extent_suspect_syms=K: K defs failed containment, corpus-wide. macro_blanked_files=K: K files indexed from a macro-blanked re-parse. max_tokens=/fit_bytes=: tokens asked/the byte cap applied. files=/symbols=: files and symbols indexed; edges= distinct call edges; shown= symbols printed, a merged row counting each def; ambiguous= calls split over several defs, corpus-wide; unresolved= calls with in-tree evidence and no edge (every def language-filtered or unreachable, or binding refused); order= rows by rank (important-first, important-last; (auto:fill) = flipped past a size threshold) or by path (stable). skipped_oversize=K: K files over a size ceiling, not indexed. unindexed=ext:N: N text files of that extension no grammar reads (6 extensions at most). unindexed_exts=E: E such extensions in all, the list cut. sc=: enclosing scope; the full id is p::sc::n (p= of the row or its <f>) and selectors take it. -->
 <!-- t=modscope=a-file's-MODULE-SCOPE(n=<file-scope>):the-statements-outside-every-named-definition,where-a-top-level-call-and-an-anonymous-callback-body's-calls-live;a-CALLER-never-a-callee(nothing-in-the-source-can-name-it)-with-no-body-to-expand;a-file-with-no-such-call-has-no-such-row -->
 <!-- t=type|alias|functype=a-Go-named-type-by-its-written-form:type=a-defined-type-whose-WRITTEN-form-is-not-a-struct/iface/func-literal(type-N-string;type-W-Pair-too,whatever-Pair-is-underneath),alias=type-A=B,functype=type-F-func(...) -->
@@ -163,14 +163,14 @@ $ ./build/ripwire-merged . --max-tokens=1500
 
 **Answers:** N tokens: a hard gate on the map, a soft row target on the task lenses two personalities depending on the verb: - default map / --query / --recall: a CI GATE — exit 3 if the emitted DOCUMENT's est_tokens exceeds N.
 
-That is the map PLUS every block appended after it (<sigs>/<src>/<bodies>/<outline>), each charged from the bytes it actually emits at the calibrated rate for what those bytes are — so --pack-top-n=3 --token-budget=600 gates on the ~67KB it would stream, not on the map alone. (test/tokenbudgetcheck.sh reports the live MAPE vs tiktoken o200k when tiktoken is installed; the estimate is calibrated, never exact — Claude's tokenizer is not public.) Within budget: exit 0, output unchanged. ASSERTS and fails, vs --max-tokens which shapes to fit — composable: set neither, either, or both (e.g. --max-tokens=16000 --token-budget=16K), but see --max-tokens above: the two Ns are measured in different units. Over budget, nothing of the artifact reaches stdout — only a small record naming withheld_est_tokens= vs budget=, the same vocabulary --recall uses, since est_tokens= is normatively about what a run PRINTED. On --recall the check likewise runs BEFORE a byte of the bundle is emitted: stdout gets the header line naming what was withheld, never the artifact just rejected. --json GATES AT A DIFFERENT NUMBER for the same request, and NOT by a fixed factor: the flag measures the DOCUMENT that was emitted, and whether JSON or XML is smaller flips with RESULT SIZE on this corpus. Small: JSON wins (MEASURED on src --top-k=20: est_tokens 1146 XML vs 899 JSON, ~22% smaller). Large: XML wins instead (MEASURED on src --top-k=200: est_tokens 9405 XML vs 9724 JSON, ~3% LARGER) — the crossover sits near top-k~100-150 here, so the same N can pass or fail differently under --json depending on dialect AND size — never assume one direction, measure the request you actually gate. - --for / --pack-task / --from-trace / --run-trace: a SOFT TARGET, always exit 0 — rows stop once it is reached, never a promise of bytes. --for charges N against its ranked <sigs> rows only (never the header or a disclosure, so compact and full serve the same rows): rows are added in rank order while they fit, the rank 1..4 rows always ship, and the cut names its continuation (<sigs next=>). The bodies, hops and tail fill from what the rows left. A target wider than the answer serves the default answer's rows. --pack-task keeps its section shares (an explicit 6000 serves the default's sections); --from-trace its section pricing. No lens drops a legend clause or the task echo for it, and none labels itself over_ceiling for it: est_tokens= may exceed N (budget_tokens= says it is the target asked). --pack-task without the flag keeps its hard 6K default (over_ceiling when it cannot fit).
+That is the map PLUS every block appended after it (<sigs>/<src>/<bodies>/<outline>), each charged from the bytes it actually emits at the calibrated rate for what those bytes are — so --pack-top-n=3 --token-budget=600 gates on the ~67KB it would stream, not on the map alone. (test/tokenbudgetcheck.sh reports the live MAPE vs tiktoken o200k when tiktoken is installed; the estimate is calibrated, never exact — Claude's tokenizer is not public.) Within budget: exit 0, output unchanged. ASSERTS and fails, vs --max-tokens which shapes to fit — composable: set neither, either, or both (e.g. --max-tokens=16000 --token-budget=16K), but see --max-tokens above: the two Ns are measured in different units. Over budget, nothing of the artifact reaches stdout — only a small record naming withheld_est_tokens= vs budget=, the same vocabulary --recall uses, since est_tokens= is normatively about what a run PRINTED. On --recall the check likewise runs BEFORE a byte of the bundle is emitted: stdout gets the header line naming what was withheld, never the artifact just rejected. --json GATES AT A DIFFERENT NUMBER for the same request, and NOT by a fixed factor: the flag measures the DOCUMENT that was emitted, and whether JSON or XML is smaller flips with RESULT SIZE on this corpus. Small: JSON wins (MEASURED on src --top-k=20: est_tokens 1146 XML vs 899 JSON, ~22% smaller). Large: XML wins instead (MEASURED on src --top-k=200: est_tokens 9405 XML vs 9724 JSON, ~3% LARGER) — the crossover sits near top-k~100-150 here, so the same N can pass or fail differently under --json depending on dialect AND size — never assume one direction, measure the request you actually gate. - --for / --pack-task / --from-trace / --run-trace: a SOFT TARGET, always exit 0. --for applies it AFTER the answer's posture: the answer is the one asked without it, byte for byte, until its est_tokens (plus the blocks outside it) exceeds N; past N it sheds in one fixed order, shed= naming what went — the blocks outside est_tokens (held="budget" with next=), the <sigs> rows' optional attributes, the last <tail> and <hops> rows, the <fold> bodies, the last <bodies>, the docs of the worst-ranked rows, the worst-ranked <sigs> rows (ranks 1..4 always ship); a cut block's next= is the call without the budget. So a larger N never serves less. --signatures-only, the --json dialect and the --limit page keep a row target (rows stop once it is reached, rank 1..4 always ship, <sigs next=> names the cut). --pack-task keeps its section shares (an explicit 6000 serves the default's sections); --from-trace its section pricing. No lens drops a legend clause or the task echo for it, and none labels itself over_ceiling for it: est_tokens= may exceed N (budget_tokens= says it is the target asked). --pack-task without the flag keeps its hard 6K default (over_ceiling when it cannot fit).
 
 **Try it**
 
 _GATE form: exit 3 if the map's own est_tokens exceeds the budget (over-budget failure shape)._
 
 ```
-$ ./build/ripwire-merged . --token-budget=100
+$ ./build/ripwire . --token-budget=100
 <!-- ripwire map schema=ripwire.map/v1: the ranked map WITHHELD whole, no rows: withheld=1 marks this record, withheld_est_tokens= the map's price, over budget= (the token budget asked); rerun with a larger token budget, or max-tokens to shape a map that fits. -->
 <r schema="ripwire.map/v1" withheld_est_tokens="10641" budget="100" withheld="1"/>
 ```
@@ -194,7 +194,7 @@ Reports the intent, integer score/margin and repository facts; never calls a mod
 _The honest half of the contract: a task with no ripwire-shaped evidence ABSTAINS with zero commands rather than guessing._
 
 ```
-$ ./build/ripwire-merged . --help-task="write a cheerful release announcement"
+$ ./build/ripwire . --help-task="write a cheerful release announcement"
 <!-- ripwire help-task schema=ripwire.help-task/v1: which verb answers this task: status=recommend|abstain confidence= score= margin=, <facts> the evidence. next=: the one pasteable follow-up. git=/dirty=: the root is a git repo / its tree differs from HEAD (the stamp's +dirty). trace=1: the task text has a stack/sanitizer trace shape; it routes to from-trace. resolved_symbols=N: indexed names the task NAMES; a bare short/common word needs backticks or F(). -->
 <task-route schema="ripwire.help-task/v1" status="abstain" confidence="none" score="0" margin="0" next="--for=&apos;write a cheerful release announcement&apos;">
 <facts git="1" dirty="0" trace="0" resolved_symbols="0"/>
@@ -217,14 +217,14 @@ a warm or in-time run prints exactly what it prints without the flag. Built for 
 
 **Answers:** the task lens: say what you are doing, get the signatures and bodies to read first the task lens: ranked signatures + metrics framed for reuse.
 
-STOPS WHEN COMPLETE: the ranked head (<sigs total=>: the relevance floor within the top 40, or --pack-top-n) is the answer and every row of it ships. A ~7.5KB payload TARGET shortens row text toward it (tail signatures and doc excerpts first; <sigs shown=S total=T capped="1"> with S=T marks a shrink); rows served past it carry past_target="K" (the last K rows). Only a runaway guard (30KB, a bug signal) cuts rows: over_ceiling="1" and <sigs next=> serving them all (S printed of the T rows handed to the trim). The r=1 (top-ranked) <d> row carries next="--expand=FILE:NAME" — the one pasteable follow-up, the body that ends the search (defined here, not in the bundle's own header, which the token ladder does not charge). An explicit --token-budget=N is a soft row target at the conservative byte rate (exit 0; see --token-budget above) and the header reports the delivered est_tokens. TERMINAL BY DEFAULT: after the signatures, the top-ranked symbols' FULL bodies ride inline (CDATA + callee signatures, the --expand shape) under a fixed extra body allowance — whole-body-or-not-at-all, rank-first, capped at the --pack-task candidate cap (6). The <ctx> root discloses it: bundle="auto" bodies="N" (bodies="0" reason="budget" when none fit) — on EVERY auto-mode run: a target the signatures alone exhaust still carries the attribute (with its legend and the empty <bodies shown="0"> shell), and --for --json, which serves no bodies by design, says so with "bundle":"sigs". Only the caller-chosen postures (--signatures-only, --detail=N) are attribute-free. ANCHOR-ONLY when the route names one: a query that NAMES a symbol gets THAT symbol's own body or NO body — never a same-named doc section, type stub or re-export shim from another file standing in for it. If the anchor's own body does not fit, the bundle serves nothing and says so, and the per-item over-budget comment names what was dropped. COMPACT ON THE CONCEPTUAL ROUTE: a query that anchors nothing (subtoken+body) gets the ranked map plus a <hops> section — the same candidate head's ONE-HOP callee signatures, the <calls> block a body carries — and NO body CDATA (save the owner body below), disclosed as bundle="compact" bodies="0" reason="compact-route". Read the map, then --expand=SYM the one you want. A ranked function or method whose whole name is a word of the query (by name, not resolved) gets the first <h qword=WORD> rows, past that head: up to 3, each listing its callees to 100 names (capped=1 next= past it); more are counted as qword_cut= with next=. --auto-bodies restores the body walk there. The default serves every hop row. OWNER BODY: an explanatory question (how does, what does, ...) also carries ONE body after the hops, root bodies="1" reason="owner": a ranked callable whose whole name is a query word (the one calling another such owner first), else a method a ranked class owns (parser scope or span) named by a word, else no body - <bodies pick="name|member">, by name, not resolved, not the only relevant body. Over 6000 B it is cut at a line end with next=. Under --token-budget it rides only when the rows at the target's cut leave room for it whole, else <bodies shown="0" capped="1" next="--expand=P:L:N"> and reason="budget". MCP for serves the same body, --json none; RIPWIRE_NO_BODY_SLOT=1 turns it off (the A/B handle). That shape discloses on every run too: a target the signatures alone exhaust carries bundle="compact" bodies="0" reason="budget" — four distinct reasons, never collapsed (compact-route = the route chose edges, no_candidates = nothing scored, budget = the ceiling was spent, owner = the owner body rides). ALIASES: a task name that is a C/C++ alias adds an <aliases> block (its chain to what it names); CLI XML only: MCP for, --json and --format=columnar carry none. An explicit --token-budget=N is a soft target: the hop rows, bodies and file tail keep the share a hard N left them, <sigs> rows fill the rest by rank; --pack-top-n sets the head the target fills. --compress composes: the served bodies (auto/anchor and --detail=N alike) go through the same comment-strip --expand uses, disclosed as compress="1" on the <bodies> element (on the compact route, the owner body's). RANKING CONFIDENCE, disclosed not scored: the <ctx> root always carries confidence="high|low" margin_pct="N" — derived from the SAME relevance-cliff gap statistic --adaptive cuts at (no new scorer, no behavior change; the --json dialect carries the same two keys). low means the ranking is FLAT (no material score cliff and more positive matches than the head shows) — treat the set as a starting point, not an answer; high means a material cliff inside the served head (margin_pct= is that drop as a whole percent) or every positive match already shown. COVERAGE, and the widening page: on a THIN answer only, the root also carries coverage="N" — the IDF-weighted share (whole percent) of the task's subtokens found in the top-ranked symbol's name, doc or body; an unmatched subtoken weighs as the rarest, so a "(#12147)" token honestly lowers it. THIN = coverage under 50, or a ranked head spread over fewer than 3 files: coverage= and its legend clause ride the root (present-only: a confident answer carries neither) and the r=1 row's next= names --for=TASK --limit=40 instead of --expand — the FILE-GRAIN WIDENING PAGE: <files task= route= root= coverage= shown= total= capped= …><f p= score= n= sym=/>…, ONE row per positive-score file (~100 B each), ranked file-first by score= = the IDF-weighted share of the task's subtokens the file's top 8 symbols cover between them (a term counts once however often it recurs, so one huge file cannot monopolise; ties by the best symbol's lens score, then path), n= its positive-score symbols, sym= its top symbols. --limit=N sets the rows, --offset=M pages (the house quintet + next= on a cut page). The page takes NO bundle-shaping flag (--json, --format=candidates, --detail, --signatures-only, --auto-bodies, --adaptive, --token-budget, --top-k …): each is refused beside --limit, never ignored. Measured on the routing-loop ladder (RocksDB, frozen 30): the follow-up that completes answers where a body cannot. <lego>/<compose> COLLAPSE TO A COUNTED STUB BY DEFAULT (L2, a disclosed cut, never a silent one): when the ranked set names an interface with implementors, or a HAS-A field edge into/out of it, the bundle used to spend the full <iface>/<m>/<impl> method contract or <field> row list on it — the STUB instead says only how many rows the section held: <lego total="N" shown="0" capped="1" next="…"/> (same shape for <compose>). No stub for a section that would be EMPTY (an absent section stays absent). total= is that section's own pre-cap row count (packLego's post-dedup interface count; every matched HAS-A edge for compose, which caps nothing). next= carries the one restoring spelling that returns BOTH sections byte-identical to the un-stubbed render, in ONE call: --sections=lego,compose.
+STOPS WHEN COMPLETE: the ranked head (<sigs total=>: the relevance floor within the top 40, or --pack-top-n) is the answer and every row of it ships. A ~7.5KB payload TARGET shortens row text toward it (tail signatures and doc excerpts first; <sigs shown=S total=T capped="1"> with S=T marks a shrink); rows served past it carry past_target="K" (the last K rows). Only a runaway guard (30KB, a bug signal) cuts rows: over_ceiling="1" and <sigs next=> serving them all (S printed of the T rows handed to the trim). The r=1 (top-ranked) <d> row carries next="--expand=FILE:NAME" — the one pasteable follow-up, the body that ends the search (defined here, not in the bundle's own header, which the token ladder does not charge). An explicit --token-budget=N sheds this answer to a soft target after its posture is chosen (exit 0; see --token-budget above) and the header reports the delivered est_tokens. TERMINAL BY DEFAULT: after the signatures, the top-ranked symbols' FULL bodies ride inline (CDATA + callee signatures, the --expand shape) under a fixed extra body allowance — whole-body-or-not-at-all, rank-first, capped at the --pack-task candidate cap (6). The <ctx> root discloses it: bundle="auto" bodies="N" (bodies="0" reason="budget" when none fit) — on EVERY auto-mode run: a target the signatures alone exhaust still carries the attribute (with its legend and the empty <bodies shown="0"> shell), and --for --json, which serves no bodies by design, says so with "bundle":"sigs". Only the caller-chosen postures (--signatures-only, --detail=N) are attribute-free. ANCHOR-ONLY when the route names one: a query that NAMES a symbol gets THAT symbol's own body or NO body — never a same-named doc section, type stub or re-export shim from another file standing in for it. If the anchor's own body does not fit, the bundle serves nothing and says so, and the per-item over-budget comment names what was dropped. COMPACT ON THE CONCEPTUAL ROUTE: a query that anchors nothing (subtoken+body) gets the ranked map plus a <hops> section — the same candidate head's ONE-HOP callee signatures, the <calls> block a body carries — and NO body CDATA (save the owner body below), disclosed as bundle="compact" bodies="0" reason="compact-route". Read the map, then --expand=SYM the one you want. A ranked function or method whose whole name is a word of the query (by name, not resolved) gets the first <h qword=WORD> rows, past that head: up to 3, each listing its callees to 100 names (capped=1 next= past it); more are counted as qword_cut= with next=. --auto-bodies restores the body walk there. The default serves every hop row. OWNER BODY: an explanatory question (how does, what does, ...) also carries ONE body after the hops, root bodies="1" reason="owner": a ranked callable whose whole name is a query word (the one calling another such owner first), else a method a ranked class owns (parser scope or span) named by a word, else no body - <bodies pick="name|member">, by name, not resolved, not the only relevant body. Over 6000 B it is cut at a line end with next=. --token-budget never removes it (it is not a shed unit). MCP for serves the same body, --json none; RIPWIRE_NO_BODY_SLOT=1 turns it off (the A/B handle). That shape discloses on every run too: a target the signatures alone exhaust carries bundle="compact" bodies="0" reason="budget" — four distinct reasons, never collapsed (compact-route = the route chose edges, no_candidates = nothing scored, budget = the ceiling was spent, owner = the owner body rides). ALIASES: a task name that is a C/C++ alias adds an <aliases> block (its chain to what it names); CLI XML only: MCP for, --json and --format=columnar carry none. An explicit --token-budget=N is a soft target over this whole answer, shed in the order --token-budget names; --pack-top-n sets the head. --compress composes: the served bodies (auto/anchor and --detail=N alike) go through the same comment-strip --expand uses, disclosed as compress="1" on the <bodies> element (on the compact route, the owner body's). RANKING CONFIDENCE, disclosed not scored: the <ctx> root always carries confidence="high|low" margin_pct="N" — derived from the SAME relevance-cliff gap statistic --adaptive cuts at (no new scorer, no behavior change; the --json dialect carries the same two keys). low means the ranking is FLAT (no material score cliff and more positive matches than the head shows) — treat the set as a starting point, not an answer; high means a material cliff inside the served head (margin_pct= is that drop as a whole percent) or every positive match already shown. COVERAGE, and the widening page: on a THIN answer only, the root also carries coverage="N" — the IDF-weighted share (whole percent) of the task's subtokens found in the top-ranked symbol's name, doc or body; an unmatched subtoken weighs as the rarest, so a "(#12147)" token honestly lowers it. THIN = coverage under 50, or a ranked head spread over fewer than 3 files: coverage= and its legend clause ride the root (present-only: a confident answer carries neither) and the r=1 row's next= names --for=TASK --limit=40 instead of --expand — the FILE-GRAIN WIDENING PAGE: <files task= route= root= coverage= shown= total= capped= …><f p= score= n= sym=/>…, ONE row per positive-score file (~100 B each), ranked file-first by score= = the IDF-weighted share of the task's subtokens the file's top 8 symbols cover between them (a term counts once however often it recurs, so one huge file cannot monopolise; ties by the best symbol's lens score, then path), n= its positive-score symbols, sym= its top symbols. --limit=N sets the rows, --offset=M pages (the house quintet + next= on a cut page). The page takes NO bundle-shaping flag (--json, --format=candidates, --detail, --signatures-only, --auto-bodies, --adaptive, --token-budget, --top-k …): each is refused beside --limit, never ignored. Measured on the routing-loop ladder (RocksDB, frozen 30): the follow-up that completes answers where a body cannot. <lego>/<compose> COLLAPSE TO A COUNTED STUB BY DEFAULT (L2, a disclosed cut, never a silent one): when the ranked set names an interface with implementors, or a HAS-A field edge into/out of it, the bundle used to spend the full <iface>/<m>/<impl> method contract or <field> row list on it — the STUB instead says only how many rows the section held: <lego total="N" shown="0" capped="1" next="…"/> (same shape for <compose>). No stub for a section that would be EMPTY (an absent section stays absent). total= is that section's own pre-cap row count (packLego's post-dedup interface count; every matched HAS-A edge for compose, which caps nothing). next= carries the one restoring spelling that returns BOTH sections byte-identical to the un-stubbed render, in ONE call: --sections=lego,compose.
 
 **Try it**
 
 _Name-shaped query: the router picks name-exact BM25 (header says which/why)._
 
 ```
-$ ./build/ripwire-merged . --for="rankGraphTeleport"
+$ ./build/ripwire . --for="rankGraphTeleport"
 <ctx task="rankGraphTeleport" route="name-exact(rankGraphTeleport); anchors: rankGraphTeleport(src/graph.h)" root="." confidence="high" margin_pct="45" at="daff79c9a" doc_mentions="2" schema="ripwire.for/v1" bundle="auto" bodies="1" doc_mentions_capped="1" doc_mentions_total="13" est_tokens="2071">
 <!-- ripwire for schema=ripwire.for/v1: bundle=/bodies=/reason= the body posture; d: cx= ccx= complexity, in= callers (absent cx/ccx/in = 0), churn= amp= change, clone= tested= 1, sc= scope, id=p::sc::n; total= shown= capped=1 if cut; task= the query; d pure=1 const/constexpr sig, next= the follow-up to paste; route= name-exact(X)|subtoken+body[:broad|:declined]; confidence=/margin_pct= head score drop (low=flat); b t= n= p= l= full bodies, c n= l= callee signatures; callers of=: the one function's 1-hop callers, s t= n= sc= p=file:line (n=Owner.name folds sc= on a member; sites_at= its call sites, sites_total= if cut; via=name by name only), shown= of total=; d=2 rows: their callers (via=name if every path has a by-name hop), d2_shown= of d2=; capped=1 if cut; floors; next= the radius; t p= file outside sigs (weaker), t sym= its top symbols not in sigs/syms (a pointer, not the answer), r= rank (gap = trimmed); t order: code files first, then doc files (a code question); d e= its last line (absent=unknown, never 0; l= the name's line); c prov=split: a resolver split arm; may be another arm's (NOT a claim the edge is false) [doc mentions: 2 docs, 1 symbol; doc_mentions=] [floor: kept 3 of 40] -->
 <!-- root= is the crawl root; p= below is RELATIVE to it (single-root only; absent => p= is ingest's own path, unchanged); at=this commit(+dirty). [cut: doc_mentions_capped="1" doc_mentions_total="13" — an indexing cap dropped content not shown here] est_tokens= prices this bundle in tokens -->
@@ -254,14 +254,14 @@ $ ./build/ripwire-merged . --for="rankGraphTeleport"
 
 **Answers:** (with --for) opt back into the full <lego>/<compose> render the stub above replaces (with --for=TASK) restore the <lego>/<compose> sections the ranked bundle collapses to a counted stub by default — this IS the stub's own next= spelling, so pasting it back unchanged is enough.
 
-A comma-separated, order-insensitive, closed set (lego and/or compose, each named at most once); every other section of the bundle is unaffected — the <sigs> budget is the stubbed answer's, under an explicit --token-budget too (a soft target charges the <sigs> rows only).
+A comma-separated, order-insensitive, closed set (lego and/or compose, each named at most once); every other section of the bundle is unaffected — the <sigs> budget is the stubbed answer's, under an explicit --token-budget too (a soft target sheds the answer after its posture).
 
 **Try it**
 
 _Restore the <lego>/<compose> sections the --for bundle collapses to a counted stub by default (this is the stub's own next= spelling)._
 
 ```
-$ ./build/ripwire-merged . --for="tree-sitter parse of a source file" --sections=lego,compose
+$ ./build/ripwire . --for="tree-sitter parse of a source file" --sections=lego,compose
 <ctx task="tree-sitter parse of a source file" route="subtoken+body" root="." confidence="low" margin_pct="0" at="daff79c9a" doc_mentions="1" schema="ripwire.for/v1" bundle="compact" bodies="0" reason="compact-route" budget_bytes="7500" est_tokens="10446">
 <!-- ripwire for schema=ripwire.for/v1: bundle=/bodies=/reason= the body posture; d: cx= ccx= complexity, in= callers (absent cx/ccx/in = 0), churn= amp= change, clone= tested= 1, sc= scope, id=p::sc::n; total= shown= capped=1 if cut; task= the query; d pure=1 const/constexpr sig, next= the follow-up to paste; d same_as=N: doc+sig text as row n=N (not repeated); route= name-exact(X)|subtoken+body[:broad|:declined]; confidence=/margin_pct= head score drop (low=flat); h l= p= n=, c n= l= (joined for same-named callees, shown= counts them), noedge= no callee resolved; fold kind=bodies: b t= n= p= l= top ranked rows' whole bodies, not the answer; served= of total= in budget_bytes=; slice/skip p= n= l=; skip bytes= next=; a skip makes sigs next= it, sigs_next= the signatures-only re-call; d mem= an owner's direct member names by the index (question words first, names only), mem_more= names cut; t p= file outside sigs (weaker), t sym= its top symbols not in sigs/syms (a pointer, not the answer), r= rank (gap = trimmed); t order: code files first, then doc files (a code question); t page rows go on to file-page row 160 (code question: 160 code rows, docs within row 160); past page 0 (code question: past 40 code rows, a doc past row 40) listed last, head files skipped; past 120 of those p= only, p_only= counts them; t folded=class=N: N p= only rows of that class (doc|config|script|testdata|other) not listed, next= pages to them; field name= type= owner= rel=: a member of owner=, rel=creates held by value, uses by reference/pointer; iface implementors=N: types implementing it, m= its method contract; d e= its last line (absent=unknown, never 0; l= the name's line) [doc mentions: 1 doc, 1 symbol; doc_mentions=] -->
 <!-- root= is the crawl root; p= below is RELATIVE to it (single-root only; absent => p= is ingest's own path, unchanged); at=this commit(+dirty). [budget_bytes= is the default BYTE target this ranked payload was shaped toward: row text shortens toward it, no row of the ranked head is removed for it (sigs past_target=)] [sigs capped=1 with shown=total: rows shrunk, none dropped] [sigs past_target=K: the last K rows are past the budget_bytes target, served because they are rows of the ranked head; none is cut] [sigs next=: one call serving all total= rows uncut] [docs_dropped=N: N shown rows have a doc comment not printed (r>24 always, r5..24 if capped)] [files_first=N: N rows moved so r=1..8 are distinct files' best rows, score order, a repeated name once; same rows; fold, hops keep score order]; iface implementors=N counts every type an extends/implements clause binds to it (the lego verb's count), never the rows listed: implementors_shown=K only K impl rows here, implementors_next= lists all; implementors_floor=1 an extends clause spelled like it bound nowhere, so N may be short (not proof of another), floor_next= lists every extends site est_tokens= prices this bundle in tokens -->
@@ -288,7 +288,7 @@ Contradicts --detail=N (refused together); --detail=N remains the explicit body 
 _T3 opt-out: the signatures-only lens (no auto bodies, no bundle="auto" attribute) — contrast with the terminal default above._
 
 ```
-$ ./build/ripwire-merged . --for="rankGraphTeleport" --signatures-only
+$ ./build/ripwire . --for="rankGraphTeleport" --signatures-only
 <ctx task="rankGraphTeleport" route="name-exact(rankGraphTeleport); anchors: rankGraphTeleport(src/graph.h)" root="." confidence="high" margin_pct="45" at="daff79c9a" doc_mentions="2" schema="ripwire.for/v1" doc_mentions_capped="1" doc_mentions_total="13" est_tokens="959">
 <!-- ripwire for schema=ripwire.for/v1: bundle=/bodies=/reason= the body posture; d: cx= ccx= complexity, in= callers (absent cx/ccx/in = 0), churn= amp= change, clone= tested= 1, sc= scope, id=p::sc::n; total= shown= capped=1 if cut; task= the query; d pure=1 const/constexpr sig, next= the follow-up to paste; route= name-exact(X)|subtoken+body[:broad|:declined]; confidence=/margin_pct= head score drop (low=flat); t p= file outside sigs (weaker), t sym= its top symbols not in sigs/syms (a pointer, not the answer), r= rank (gap = trimmed); t order: code files first, then doc files (a code question); d e= its last line (absent=unknown, never 0; l= the name's line) [doc mentions: 2 docs, 1 symbol; doc_mentions=] [floor: kept 3 of 40] -->
 <!-- root= is the crawl root; p= below is RELATIVE to it (single-root only; absent => p= is ingest's own path, unchanged); at=this commit(+dirty). [cut: doc_mentions_capped="1" doc_mentions_total="13" — an indexing cap dropped content not shown here] est_tokens= prices this bundle in tokens -->
@@ -306,7 +306,7 @@ $ ./build/ripwire-merged . --for="rankGraphTeleport" --signatures-only
 ... [7 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--for`, `--auto-bodies`
+**Shaped by:** `--token-budget`, `--for`, `--auto-bodies`
 
 **Caveats (stated by the binary):**
 
@@ -323,7 +323,7 @@ Inert on the name-exact route, where the allowance already runs. Contradicts --s
 _Opt OUT of compact conceptual serving: restore the rank-first auto <bodies> walk (bundle="auto")._
 
 ```
-$ ./build/ripwire-merged . --for="tree-sitter parse of a source file" --auto-bodies
+$ ./build/ripwire . --for="tree-sitter parse of a source file" --auto-bodies
 <ctx task="tree-sitter parse of a source file" route="subtoken+body" root="." confidence="low" margin_pct="0" at="daff79c9a" doc_mentions="1" schema="ripwire.for/v1" bundle="auto" bodies="5" budget_bytes="7500" est_tokens="10202">
 <!-- ripwire for schema=ripwire.for/v1: bundle=/bodies=/reason= the body posture; d: cx= ccx= complexity, in= callers (absent cx/ccx/in = 0), churn= amp= change, clone= tested= 1, sc= scope, id=p::sc::n; total= shown= capped=1 if cut; task= the query; d pure=1 const/constexpr sig, next= the follow-up to paste; d same_as=N: doc+sig text as row n=N (not repeated); route= name-exact(X)|subtoken+body[:broad|:declined]; confidence=/margin_pct= head score drop (low=flat); b t= n= p= l= full bodies, c n= l= callee signatures; t p= file outside sigs (weaker), t sym= its top symbols not in sigs/syms (a pointer, not the answer), r= rank (gap = trimmed); t order: code files first, then doc files (a code question); t page rows go on to file-page row 160 (code question: 160 code rows, docs within row 160); past page 0 (code question: past 40 code rows, a doc past row 40) listed last, head files skipped; past 120 of those p= only, p_only= counts them; t folded=class=N: N p= only rows of that class (doc|config|script|testdata|other) not listed, next= pages to them; d e= its last line (absent=unknown, never 0; l= the name's line) [doc mentions: 1 doc, 1 symbol; doc_mentions=] -->
 <!-- root= is the crawl root; p= below is RELATIVE to it (single-root only; absent => p= is ingest's own path, unchanged); at=this commit(+dirty). [budget_bytes= is the default BYTE target this ranked payload was shaped toward: row text shortens toward it, no row of the ranked head is removed for it (sigs past_target=)] [sigs capped=1 with shown=total: rows shrunk, none dropped] [sigs past_target=K: the last K rows are past the budget_bytes target, served because they are rows of the ranked head; none is cut] [sigs next=: one call serving all total= rows uncut] [docs_dropped=N: N shown rows have a doc comment not printed (r>24 always, r5..24 if capped)] [files_first=N: N rows moved so r=1..8 are distinct files' best rows, score order, a repeated name once; same rows; fold, hops keep score order]; lego/compose collapse to a counted stub by default (a disclosed cut): total= that section's own pre-cap row count, shown="0" capped="1" (nothing rendered here), next= names the sections=lego,compose flag that restores both sections byte-identically in one call est_tokens= prices this bundle in tokens -->
@@ -355,7 +355,7 @@ Routing is now the DEFAULT: a deterministic, confidence-gated query-shape router
 _Same query with routing forced OFF (plain subtoken+body BM25) — contrast with the routed run._
 
 ```
-$ ./build/ripwire-merged . --for="rankGraphTeleport" --no-route
+$ ./build/ripwire . --for="rankGraphTeleport" --no-route
 <ctx task="rankGraphTeleport" root="." confidence="low" margin_pct="0" at="daff79c9a" doc_mentions="6" schema="ripwire.for/v1" bundle="auto" bodies="3" budget_bytes="7500" doc_mentions_capped="1" doc_mentions_total="21" est_tokens="11130">
 <!-- ripwire for schema=ripwire.for/v1: bundle=/bodies=/reason= the body posture; d: cx= ccx= complexity, in= callers (absent cx/ccx/in = 0), churn= amp= change, clone= tested= 1, sc= scope, id=p::sc::n; total= shown= capped=1 if cut; task= the query; d pure=1 const/constexpr sig, next= the follow-up to paste; confidence=/margin_pct= head score drop (low=flat); b t= n= p= l= full bodies, c n= l= callee signatures; t p= file outside sigs (weaker), t sym= its top symbols not in sigs/syms (a pointer, not the answer), r= rank (gap = trimmed); t order: code files first, then doc files (a code question); t page rows go on to file-page row 160 (code question: 160 code rows, docs within row 160); past page 0 (code question: past 40 code rows, a doc past row 40) listed last, head files skipped; past 120 of those p= only, p_only= counts them; t folded=class=N: N p= only rows of that class (doc|config|script|testdata|other) not listed, next= pages to them; field name= type= owner= rel=: a member of owner=, rel=creates held by value, uses by reference/pointer; d e= its last line (absent=unknown, never 0; l= the name's line); c prov=split: a resolver split arm; may be another arm's (NOT a claim the edge is false) [doc mentions: 6 docs, 3 symbols; doc_mentions=] -->
 <!-- root= is the crawl root; p= below is RELATIVE to it (single-root only; absent => p= is ingest's own path, unchanged); at=this commit(+dirty). [budget_bytes= is the default BYTE target this ranked payload was shaped toward: row text shortens toward it, no row of the ranked head is removed for it (sigs past_target=)] [sigs capped=1 with shown=total: rows shrunk, none dropped] [sigs past_target=K: the last K rows are past the budget_bytes target, served because they are rows of the ranked head; none is cut] [sigs next=: one call serving all total= rows uncut] [docs_dropped=N: N shown rows have a doc comment not printed (r>24 always, r5..24 if capped)] [cut: doc_mentions_capped="1" doc_mentions_total="21" — an indexing cap dropped content not shown here] est_tokens= prices this bundle in tokens -->
@@ -386,7 +386,7 @@ a sharp query returns few, a flat/broad one hits the ceiling. Prints [adaptive: 
 _Cut the result at the relevance cliff (Adaptive-k) — on a flat ranking nothing is cut and the header says so ([adaptive: kept N of N])._
 
 ```
-$ ./build/ripwire-merged . --for="tree-sitter parse of a source file" --adaptive
+$ ./build/ripwire . --for="tree-sitter parse of a source file" --adaptive
 <ctx task="tree-sitter parse of a source file" route="subtoken+body" root="." confidence="low" margin_pct="0" at="daff79c9a" doc_mentions="1" schema="ripwire.for/v1" bundle="compact" bodies="0" reason="compact-route" budget_bytes="7500" est_tokens="9960">
 <!-- ripwire for schema=ripwire.for/v1: bundle=/bodies=/reason= the body posture; d: cx= ccx= complexity, in= callers (absent cx/ccx/in = 0), churn= amp= change, clone= tested= 1, sc= scope, id=p::sc::n; total= shown= capped=1 if cut; task= the query; d pure=1 const/constexpr sig, next= the follow-up to paste; d same_as=N: doc+sig text as row n=N (not repeated); route= name-exact(X)|subtoken+body[:broad|:declined]; confidence=/margin_pct= head score drop (low=flat); h l= p= n=, c n= l= (joined for same-named callees, shown= counts them), noedge= no callee resolved; fold kind=bodies: b t= n= p= l= top ranked rows' whole bodies, not the answer; served= of total= in budget_bytes=; slice/skip p= n= l=; skip bytes= next=; a skip makes sigs next= it, sigs_next= the signatures-only re-call; d mem= an owner's direct member names by the index (question words first, names only), mem_more= names cut; t p= file outside sigs (weaker), t sym= its top symbols not in sigs/syms (a pointer, not the answer), r= rank (gap = trimmed); t order: code files first, then doc files (a code question); t page rows go on to file-page row 160 (code question: 160 code rows, docs within row 160); past page 0 (code question: past 40 code rows, a doc past row 40) listed last, head files skipped; past 120 of those p= only, p_only= counts them; t folded=class=N: N p= only rows of that class (doc|config|script|testdata|other) not listed, next= pages to them; d e= its last line (absent=unknown, never 0; l= the name's line) [adaptive: kept 40 of 40 - no relevance cliff (broad query saturates the score); capped at the ceiling] [doc mentions: 1 doc, 1 symbol; doc_mentions=] -->
 <!-- root= is the crawl root; p= below is RELATIVE to it (single-root only; absent => p= is ingest's own path, unchanged); at=this commit(+dirty). [budget_bytes= is the default BYTE target this ranked payload was shaped toward: row text shortens toward it, no row of the ranked head is removed for it (sigs past_target=)] [sigs capped=1 with shown=total: rows shrunk, none dropped] [sigs past_target=K: the last K rows are past the budget_bytes target, served because they are rows of the ranked head; none is cut] [sigs next=: one call serving all total= rows uncut] [docs_dropped=N: N shown rows have a doc comment not printed (r>24 always, r5..24 if capped)] [files_first=N: N rows moved so r=1..8 are distinct files' best rows, score order, a repeated name once; same rows; fold, hops keep score order]; lego/compose collapse to a counted stub by default (a disclosed cut): total= that section's own pre-cap row count, shown="0" capped="1" (nothing rendered here), next= names the sections=lego,compose flag that restores both sections byte-identically in one call est_tokens= prices this bundle in tokens -->
@@ -417,7 +417,7 @@ By DEFAULT, a file or dotted module literally NAMED in the task text (a path, `p
 _Same task with the anchor disabled — the contrast the flag exists for._
 
 ```
-$ ./build/ripwire-merged . --for="why does src/lexical.h chooseForRanker pick name-exact BM25" --no-mention-boost
+$ ./build/ripwire . --for="why does src/lexical.h chooseForRanker pick name-exact BM25" --no-mention-boost
 <ctx task="why does src/lexical.h chooseForRanker pick name-exact BM25" route="subtoken+body" root="." confidence="low" margin_pct="0" at="daff79c9a" doc_mentions="2" schema="ripwire.for/v1" bundle="compact" bodies="0" reason="compact-route" budget_bytes="7500" doc_mentions_capped="1" doc_mentions_t … [line truncated: 28 more bytes on this line]
 <!-- ripwire for schema=ripwire.for/v1: bundle=/bodies=/reason= the body posture; d: cx= ccx= complexity, in= callers (absent cx/ccx/in = 0), churn= amp= change, clone= tested= 1, sc= scope, id=p::sc::n; total= shown= capped=1 if cut; task= the query; d pure=1 const/constexpr sig, next= the follow-up to paste; route= name-exact(X)|subtoken+body[:broad|:declined]; confidence=/margin_pct= head score drop (low=flat); h l= p= n=, c n= l= (joined for same-named callees, shown= counts them), noedge= no callee resolved; h qword= its name (case-folded, leading _#$@ dropped) equals that question word (by name, not resolved, not the only one), first, calls to 100 (capped=1 next= all); qword_cut= owners not so served, next= the first; fold kind=bodies: b t= n= p= l= top ranked rows' whole bodies, not the answer; served= of total= in budget_bytes=; slice/skip p= n= l=; skip bytes= next=; a skip makes sigs next= it, sigs_next= the signatures-only re-call; t p= file outside sigs (weaker), t sym= its top symbols not in sigs/syms (a pointer, not the answer), r= rank (gap = trimmed); t order: code files first, then doc files (a code question); t page rows go on to file-page row 160 (code question: 160 code rows, docs within row 160); past page 0 (code question: past 40 code rows, a doc past row 40) listed last, head files skipped; past 120 of those p= only, p_only= counts them; t folded=class=N: N p= only rows of that class (doc|config|script|testdata|other) not listed, next= pages to them; d layer=: built-in arch layer (game|infra|render|math|audio|ai|test) from a dir name in p=; d e= its last line (absent=unknown, never 0; l= the name's line); c prov=split: a resolver split arm; may be another arm's (NOT a claim the edge is false) [doc mentions: 2 docs, 1 symbol; doc_mentions=] -->
 <!-- root= is the crawl root; p= below is RELATIVE to it (single-root only; absent => p= is ingest's own path, unchanged); at=this commit(+dirty). [budget_bytes= is the default BYTE target this ranked payload was shaped toward: row text shortens toward it, no row of the ranked head is removed for it (sigs past_target=)] [sigs capped=1 with shown=total: rows shrunk, none dropped] [sigs past_target=K: the last K rows are past the budget_bytes target, served because they are rows of the ranked head; none is cut] [sigs sigs_next=: one call serving all total= rows uncut] [docs_dropped=N: N shown rows have a doc comment not printed (r>24 always, r5..24 if capped)] [cut: doc_mentions_capped="1" doc_mentions_total="3" — an indexing cap dropped content not shown here]; lego/compose collapse to a counted stub by default (a disclosed cut): total= that section's own pre-cap row count, shown="0" capped="1" (nothing rendered here), next= names the sections=lego,compose flag that restores both sections byte-identically in one call est_tokens= prices this bundle in tokens -->
@@ -447,7 +447,7 @@ By DEFAULT, a markdown doc that names one of the task's top-resolved symbols in 
 _The same task with doc-mention surfacing OFF — the contrast the flag exists for (no [doc mentions] clause, one fewer row)._
 
 ```
-$ ./build/ripwire-merged . --for="quality delta acks ledger rubber stamp" --no-doc-mention
+$ ./build/ripwire . --for="quality delta acks ledger rubber stamp" --no-doc-mention
 <ctx task="quality delta acks ledger rubber stamp" route="subtoken+body" root="." confidence="low" margin_pct="0" at="daff79c9a" schema="ripwire.for/v1" bundle="compact" bodies="0" reason="compact-route" budget_bytes="7500" est_tokens="11005">
 <!-- ripwire for schema=ripwire.for/v1: bundle=/bodies=/reason= the body posture; d: cx= ccx= complexity, in= callers (absent cx/ccx/in = 0), churn= amp= change, clone= tested= 1, sc= scope, id=p::sc::n; total= shown= capped=1 if cut; task= the query; d pure=1 const/constexpr sig, next= the follow-up to paste; route= name-exact(X)|subtoken+body[:broad|:declined]; confidence=/margin_pct= head score drop (low=flat); h l= p= n=, c n= l= (joined for same-named callees, shown= counts them), noedge= no callee resolved; h calls capped=1 next= the call listing every callee; fold kind=bodies: b t= n= p= l= top ranked rows' whole bodies, not the answer; served= of total= in budget_bytes=; slice/skip p= n= l=; skip bytes= next=; a skip makes sigs next= it, sigs_next= the signatures-only re-call; t p= file outside sigs (weaker), t sym= its top symbols not in sigs/syms (a pointer, not the answer), r= rank (gap = trimmed); t order: code files first, then doc files (a code question); t page rows go on to file-page row 160 (code question: 160 code rows, docs within row 160); past page 0 (code question: past 40 code rows, a doc past row 40) listed last, head files skipped; past 120 of those p= only, p_only= counts them; t folded=class=N: N p= only rows of that class (doc|config|script|testdata|other) not listed, next= pages to them; field name= type= owner= rel=: a member of owner=, rel=creates held by value, uses by reference/pointer; d e= its last line (absent=unknown, never 0; l= the name's line); c via=name: that callee matched by name alone, receiver unproven (NOT a claim the edge is false); c prov=split: a resolver split arm; may be another arm's (NOT a claim the edge is false) -->
 <!-- root= is the crawl root; p= below is RELATIVE to it (single-root only; absent => p= is ingest's own path, unchanged); at=this commit(+dirty). [budget_bytes= is the default BYTE target this ranked payload was shaped toward: row text shortens toward it, no row of the ranked head is removed for it (sigs past_target=)] [sigs capped=1 with shown=total: rows shrunk, none dropped] [sigs past_target=K: the last K rows are past the budget_bytes target, served because they are rows of the ranked head; none is cut] [sigs sigs_next=: one call serving all total= rows uncut] [docs_dropped=N: N shown rows have a doc comment not printed (r>24 always, r5..24 if capped)] [files_first=N: N rows moved so r=1..8 are distinct files' best rows, score order, a repeated name once; same rows; fold, hops keep score order] est_tokens= prices this bundle in tokens -->
@@ -475,7 +475,7 @@ file:name disambiguates a same-named type. No contract for a language this surfa
 _Interface -> implementors view: every existing impl of the named interface; the method contract is extracted for the C-family/Java/TS/Python tiers — for a Rust trait (this fixture) it discloses caveat="not-extracted-for-lang" rather than an empty list._
 
 ```
-$ ./build/ripwire-merged . --lego=Vehicle
+$ ./build/ripwire . --lego=Vehicle
 <ctx schema="ripwire.lego/v1" root=".">
 <!-- ripwire lego schema=ripwire.lego/v1: ONE interface/base type: <iface n= p= defs= implementors=>, its <m> method contract, every implementor. counts_floor=1: every count is a FLOOR, never a total. graph_ambiguous=/graph_unresolved=: resolver gauge. graph_unindexed=N: N files no grammar could read (the map header's unindexed=); their calls raise neither gauge. root=: p= relative to it. methods=0 caveat=not-extracted-for-lang: no <m> contract read for this language. -->
 <lego graph_ambiguous="3474" graph_unresolved="18839" graph_unindexed="287" counts_floor="1">
@@ -506,7 +506,7 @@ Just pass a plain task — --exemplar="format byte sizes" — and the KIND is in
 _The repo's best-in-class instance to imitate before writing new code (picked by ROLE)._
 
 ```
-$ ./build/ripwire-merged . --exemplar="format byte sizes for humans"
+$ ./build/ripwire . --exemplar="format byte sizes for humans"
 <!-- ripwire exemplar schema=ripwire.exemplar/v1: the best-in-class instance of kind= for the task, chosen by role: n= p= in= ccx= tested=, <bodies>
 <b> to imitate. window: shown= total= capped= (capped=1 cut). root=: p= relative to it. candidates=N: instances of kind= under the ccx ceiling the pick was ranked from. low_confidence=1: weak task-to-kind match, fell back to fn unless off_task=1; pass a kind (fn|method|class...). b t= l=: the body's … [line truncated: 25 more bytes on this line]
 <exemplar schema="ripwire.exemplar/v1" kind="fn" candidates="19223" n="kindIs" p="src/infra/nodekind.h:46" in="389" ccx="3" root="." tested="1" low_confidence="1">
@@ -537,7 +537,7 @@ This is the tool's LARGEST output: its header reports est_tokens + total=/shown=
 _Most relevant DOCS' full bodies (markdown only) — recall what is already written down._
 
 ```
-$ ./build/ripwire-merged . --recall="quality delta gating exit codes"
+$ ./build/ripwire . --recall="quality delta gating exit codes"
 ripwire recall — "quality delta gating exit codes" — 119 relevant of 279 document files, best-first — total=119 shown=6 capped=1 truncated=6 generated_demoted=2 generated_demoted_paths="docs/TUNING.md,docs/LIMITS.md" max_tokens=8000 share_bytes=2628 est_tokens=4635
 
 ━━ README.md  (relevance 22.117) ━━  [sections: 2 of 25 selected (62 in doc), section-granular; whole doc 235834 B; lines="2773-2785,2786-2793"; dropped_by_budget=23]
@@ -606,7 +606,7 @@ and both are yours, because the file you write is the only thing that sets them:
 _The directory-as-knowledge-base pattern: --recall pointed at a 1343114-byte scratch dir of DUMPED TOOL OUTPUT (a git log, this repo's own generated command reference, --help text, an architecture doc, a fabricated JSON access log) instead of a source repo — no index to build, no daemon._
 
 ```
-$ ./build/ripwire-merged <scratch>/aux/kbcorpus --recall="field affinity cache line data layout which fields are read together" --top-k=3 --max-tokens=1200
+$ ./build/ripwire <scratch>/aux/kbcorpus --recall="field affinity cache line data layout which fields are read together" --top-k=3 --max-tokens=1200
 ripwire recall — "field affinity cache line data layout which fields are read together" — 2 relevant of 2 document files, best-first — total=2 shown=1 capped=1 truncated=1 max_tokens=1200 share_bytes=2040 est_tokens=952
 
 ━━ commands.md  (relevance 35.940) ━━  [sections: 1 of 165 selected (194 in doc), section-granular; whole doc 614732 B; lines="566-591"; dropped_by_budget=164]  [truncated: 1854 of 4284 bytes]
@@ -635,7 +635,7 @@ Default window: the 80 files with the best-ranked symbols (shown=/capped=/total=
 _File-by-file orientation map (top symbols per file)._
 
 ```
-$ ./build/ripwire-merged . --tree
+$ ./build/ripwire . --tree
 <!-- ripwire tree schema=ripwire.tree/v1: each file with its top 3 symbols by rank, files by best symbol: <file p= symbols=> of <s t= n=>; of files= indexed, files_unlisted= have none. window: shown= total= capped= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). symbols_capped=: 1 = cut. root=: p= relative to it. pr_iters=N: PageRank iterations. shown_symbols=: <s> rows printed. next=: the one pasteable follow-up. -->
 <tree schema="ripwire.tree/v1" files="4537" files_unlisted="107" shown="80" capped="1" total="4430" has_more="1" next_offset="80" offset="0" limit="0" pr_iters="39" root="." shown_symbols="233" symbols_capped="1" next="--tree --offset=80">
 <file p="src/infra/nodekind.h" symbols="1">
@@ -671,7 +671,7 @@ A navigation or report verb answers instead of the map, so --html beside one ref
 _Self-contained HTML force-directed call graph._
 
 ```
-$ ./build/ripwire-merged . --html=<scratch>/aux/map2.html
+$ ./build/ripwire . --html=<scratch>/aux/map2.html
 (empty)
 ```
 
@@ -692,7 +692,7 @@ the flag only sets the initial mode
 _The HTML graph with the initial colour mode set to community (the page embeds all five modes and keeps a live selector)._
 
 ```
-$ ./build/ripwire-merged . --html=<scratch>/aux/map2.html --color-by=community
+$ ./build/ripwire . --html=<scratch>/aux/map2.html --color-by=community
 (empty)
 ```
 
@@ -707,7 +707,7 @@ no auto-flip) | important-last (highest-rank content emitted last — recency bi
 _Stable (path/id) emit order — provider KV-cache hits across re-runs._
 
 ```
-$ ./build/ripwire-merged . --order=stable --top-k=5
+$ ./build/ripwire . --order=stable --top-k=5
 <!-- ripwire map schema=ripwire.map/v1: ranked symbol map: <f p= layer=> groups <s t= n= sc= k= amb=> rows (k= rank), <c n=> resolved callees; the header comment is data. est_tokens=: price as emitted (an upper bound under compact). root=: p= relative to it. pr_iters=N: PageRank iterations. <inv listed= unlisted=>: files the ranked rows show / do not (sum = files=), each named or counted below. <entry p= n=>: a program entry by its language's convention (C/Go/Rust main, Java/C# static main, a script main its module scope calls, __main__.py), callees as c rows; manifest entries not read. <ls p= n= f=>: n= unshown files under dir p=; f= names its code files, the rest (tests, docs, config, test/doc/example dirs) counted. declined=K: K call sites without edges, including inert Elixir quote sites after unquote/unquote_splicing re-entry. external=K: K calls proven outside the tree, no edge. locality_pinned=K: K calls pinned by locality alone (a guess). extent_suspect_syms=K: K defs failed containment, corpus-wide. macro_blanked_files=K: K files indexed from a macro-blanked re-parse. prov=scip|binding|import|split|final-segment: how that <c> edge bound (absent: one unique name); split = one arm of an amb= pick; final-segment = a qualified type matched by last name only. files=/symbols=: files and symbols indexed; edges= distinct call edges; shown= symbols printed, a merged row counting each def; ambiguous= calls split over several defs, corpus-wide; unresolved= calls with in-tree evidence and no edge (every def language-filtered or unreachable, or binding refused); order= rows by rank (important-first, important-last; (auto:fill) = flipped past a size threshold) or by path (stable). skipped_oversize=K: K files over a size ceiling, not indexed. unindexed=ext:N: N text files of that extension no grammar reads (6 extensions at most). unindexed_exts=E: E such extensions in all, the list cut. lens=: attributes another form of this answer serves, withheld here. sc=: enclosing scope; the full id is p::sc::n (p= of the row or its <f>) and selectors take it. amb=K: K calls split over several defs. -->
 <!-- t=modscope=a-file's-MODULE-SCOPE(n=<file-scope>):the-statements-outside-every-named-definition,where-a-top-level-call-and-an-anonymous-callback-body's-calls-live;a-CALLER-never-a-callee(nothing-in-the-source-can-name-it)-with-no-body-to-expand;a-file-with-no-such-call-has-no-such-row -->
 <!-- t=type|alias|functype=a-Go-named-type-by-its-written-form:type=a-defined-type-whose-WRITTEN-form-is-not-a-struct/iface/func-literal(type-N-string;type-W-Pair-too,whatever-Pair-is-underneath),alias=type-A=B,functype=type-F-func(...) -->
@@ -738,7 +738,7 @@ Read ONLY there: on the CLI it changes nothing and says so on stderr (the map is
 _--no-stable outside --mcp: what the flag does (or says) when there is no stable-by-default ordering to opt out of._
 
 ```
-$ ./build/ripwire-merged . --no-stable --top-k=3
+$ ./build/ripwire . --no-stable --top-k=3
 <!-- ripwire map schema=ripwire.map/v1: ranked symbol map: <f p= layer=> groups <s t= n= sc= k= amb=> rows (k= rank), <c n=> resolved callees; the header comment is data. est_tokens=: price as emitted (an upper bound under compact). root=: p= relative to it. pr_iters=N: PageRank iterations. <inv listed= unlisted=>: files the ranked rows show / do not (sum = files=), each named or counted below. <entry p= n=>: a program entry by its language's convention (C/Go/Rust main, Java/C# static main, a script main its module scope calls, __main__.py), callees as c rows; manifest entries not read. <ls p= n= f=>: n= unshown files under dir p=; f= names its code files, the rest (tests, docs, config, test/doc/example dirs) counted. declined=K: K call sites without edges, including inert Elixir quote sites after unquote/unquote_splicing re-entry. external=K: K calls proven outside the tree, no edge. locality_pinned=K: K calls pinned by locality alone (a guess). extent_suspect_syms=K: K defs failed containment, corpus-wide. macro_blanked_files=K: K files indexed from a macro-blanked re-parse. prov=scip|binding|import|split|final-segment: how that <c> edge bound (absent: one unique name); split = one arm of an amb= pick; final-segment = a qualified type matched by last name only. files=/symbols=: files and symbols indexed; edges= distinct call edges; shown= symbols printed, a merged row counting each def; ambiguous= calls split over several defs, corpus-wide; unresolved= calls with in-tree evidence and no edge (every def language-filtered or unreachable, or binding refused); order= rows by rank (important-first, important-last; (auto:fill) = flipped past a size threshold) or by path (stable). skipped_oversize=K: K files over a size ceiling, not indexed. unindexed=ext:N: N text files of that extension no grammar reads (6 extensions at most). unindexed_exts=E: E such extensions in all, the list cut. sc=: enclosing scope; the full id is p::sc::n (p= of the row or its <f>) and selectors take it. -->
 <!-- t=modscope=a-file's-MODULE-SCOPE(n=<file-scope>):the-statements-outside-every-named-definition,where-a-top-level-call-and-an-anonymous-callback-body's-calls-live;a-CALLER-never-a-callee(nothing-in-the-source-can-name-it)-with-no-body-to-expand;a-file-with-no-such-call-has-no-such-row -->
 <!-- t=type|alias|functype=a-Go-named-type-by-its-written-form:type=a-defined-type-whose-WRITTEN-form-is-not-a-struct/iface/func-literal(type-N-string;type-W-Pair-too,whatever-Pair-is-underneath),alias=type-A=B,functype=type-F-func(...) -->
@@ -771,7 +771,7 @@ the root's depth= says which; --around-depth=2 restores the 2-hop neighbourhood)
 _Ego graph around one symbol — depth 1 BY DEFAULT now (the root's depth= says so): ~6 KB where the 2-hop neighbourhood is ~64 KB on this repo._
 
 ```
-$ ./build/ripwire-merged . --around=rankGraphTeleport
+$ ./build/ripwire . --around=rankGraphTeleport
 <!-- ripwire around schema=ripwire.around/v1: call neighbourhood of of=: depth= hops, fanout= kept per hop; absent rows lie outside that boundary. est_tokens=: price as emitted (an upper bound under compact). root=: p= relative to it. declined=K: K call sites without edges, including inert Elixir quote sites after unquote/unquote_splicing re-entry. external=K: K calls proven outside the tree, no edge. locality_pinned=K: K calls pinned by locality alone (a guess). extent_suspect_syms=K: K defs failed containment, corpus-wide. macro_blanked_files=K: K files indexed from a macro-blanked re-parse. overloads=N: N same-name defs merged in this row; shown= counts each. prov=scip|binding|import|split|final-segment: how that <c> edge bound (absent: one unique name); split = one arm of an amb= pick; final-segment = a qualified type matched by last name only. files=/symbols=: files and symbols indexed; edges= distinct call edges; shown= symbols printed, a merged row counting each def; ambiguous= calls split over several defs, corpus-wide; unresolved= calls with in-tree evidence and no edge (every def language-filtered or unreachable, or binding refused); order= rows by rank (important-first, important-last; (auto:fill) = flipped past a size threshold) or by path (stable). skipped_oversize=K: K files over a size ceiling, not indexed. unindexed=ext:N: N text files of that extension no grammar reads (6 extensions at most). unindexed_exts=E: E such extensions in all, the list cut. <c via="name">: that callee matched by name alone (receiver unproven); it does NOT mean the edge is false. <c x=N>: N same-named via=name rows merged; callees=FILE:SYM lists all. sc=: enclosing scope; the full id is p::sc::n (p= of the row or its <f>) and selectors take it. amb=K: K calls split over several defs. layer=: built-in arch layer (game|infra|render|math|audio|ai|test) from a dir name in p=; absent if none. f p=: a file; s t= n=: kind, name; c n=: a resolved callee. s k=: rank. -->
 <!-- t=modscope=a-file's-MODULE-SCOPE(n=<file-scope>):the-statements-outside-every-named-definition,where-a-top-level-call-and-an-anonymous-callback-body's-calls-live;a-CALLER-never-a-callee(nothing-in-the-source-can-name-it)-with-no-body-to-expand;a-file-with-no-such-call-has-no-such-row -->
 <!-- t=type|alias|functype=a-Go-named-type-by-its-written-form:type=a-defined-type-whose-WRITTEN-form-is-not-a-struct/iface/func-literal(type-N-string;type-W-Pair-too,whatever-Pair-is-underneath),alias=type-A=B,functype=type-F-func(...) -->
@@ -802,7 +802,7 @@ file:name disambiguates a same-named symbol across files (like --around/--lego);
 _Unknown-symbol REFUSAL shape (exit 1) with a did-you-mean from real edit distance._
 
 ```
-$ ./build/ripwire-merged . --callers=DoesNotExist
+$ ./build/ripwire . --callers=DoesNotExist
 <!-- ripwire callers schema=ripwire.callers/v1: 1-hop CALLERS of of= (defs= matched, count= distinct symbols): <s t= n= p=>; hop_tested=/hop_untested=. found=0: no indexed definition matched the selector, nothing listed or counted (zero = none found, not none exists); exit stays 1. -->
 <callers schema="ripwire.callers/v1" of="DoesNotExist" found="0"/>
 ```
@@ -825,7 +825,7 @@ file:name disambiguates like --callers; each call it makes that the resolver dec
 _What SYM calls (1-hop out-edges)._
 
 ```
-$ ./build/ripwire-merged . --callees=rankGraphTeleport
+$ ./build/ripwire . --callees=rankGraphTeleport
 <!-- ripwire callees schema=ripwire.callees/v1: 1-hop CALLEES of of= (defs= matched, count= distinct symbols): <s t= n= p= role= tested=>. counts_floor=1: every count is a FLOOR, never a total. graph_ambiguous=/graph_unresolved=: resolver gauge. graph_unindexed=N: N files no grammar could read (the map header's unindexed=); their calls raise neither gauge. stdm n= calls=: of declined_calls=, calls named like a standard-type member of their language (C++ container/string/optional/smart pointer, Rust collection/string/Option/Result; n=) on a receiver no rule tied to an in-tree class (Rust: one of an in-tree type no rule typed too: a generic bound, dyn or impl Trait, a type alias, a glob of a glob, a tuple-struct field, a non-plain pattern, behind Option / Result / Rc / Arc / RefCell / Cell / Mutex / RwLock); no edge or row (may be the std member). root=: p= relative to it. prov=scip|binding|import|split|final-segment: how that <c> edge bound (absent: one unique name); split = one arm of an amb= pick; final-segment = a qualified type matched by last name only. <s tested=1>: a non-test row an indexed test transitively reaches (absent otherwise, never 0). declined_calls=K: K call sites left unbound, in no count; <dc n= l=|in= p= cands=K via=declined>: one such call SITE (callees: called name, line; callers: calling def, file:line); NOT an edge or a caller/callee claim; cands=K: K in-tree defs it could have meant (K may be 1), the resolver proved none; not a claim this call reaches any of them. dc gate=: builtin or std, a name gate declined it; side, a Ruby call whose in-reach defs answer on the other side of self. next=: the one pasteable follow-up. hop_tested=/hop_untested=: count= split by whether an indexed test reaches the row (in-process calls only). -->
 <callees schema="ripwire.callees/v1" of="rankGraphTeleport" defs="1" count="4" root="." hop_tested="3" hop_untested="1" declined_calls="6" graph_ambiguous="3474" graph_unresolved="18839" graph_unindexed="287" counts_floor="1" next="--expand=rankGraphTeleport">
 <s t="fn" n="biasPrior" p="src/graph.h:13671"/>
@@ -860,7 +860,7 @@ external="1" if SYM has no in-corpus def. file:name or a "::" spelling narrows d
 _The resolvable use-sites (call/read/write/import/extends) with file:line; count= is a floor._
 
 ```
-$ ./build/ripwire-merged . --uses=rankGraphTeleport
+$ ./build/ripwire . --uses=rankGraphTeleport
 <!-- ripwire uses schema=ripwire.uses/v1: resolvable use-sites of of=: <u role=call|macro|read|write|import|extends|type p=file:line in_id=>. counts_floor=1: every count is a FLOOR, never a total. graph_ambiguous=/graph_unresolved=: resolver gauge. graph_unindexed=N: N files no grammar could read (the map header's unindexed=); their calls raise neither gauge. root=: p= relative to it. defs=N: definitions the selector matched; qualify file:name to narrow the call sites. external=1: of= has no definition in the indexed tree under any spelling (stdlib/third-party). count=N: unhedged use-site rows (a floor). -->
 <uses schema="ripwire.uses/v1" of="rankGraphTeleport" defs="1" external="0" count="9" root="." graph_ambiguous="3474" graph_unresolved="18839" graph_unindexed="287" counts_floor="1">
 <u role="call" p="src/mcpindex.h:1342" in_id="src/mcpindex.h::rw::getIndex"/>
@@ -894,7 +894,7 @@ filters kind|cx|fanin|file|layer; bounded closure callers|callees(SET[,depth]); 
 _Composable node-set query: functions within 2 caller-hops of rankGraphTeleport._
 
 ```
-$ ./build/ripwire-merged . --graph-query='and(callers(name("rankGraphTeleport"),2),kind(all,fn))'
+$ ./build/ripwire . --graph-query='and(callers(name("rankGraphTeleport"),2),kind(all,fn))'
 <!-- ripwire graph-query schema=ripwire.graph-query/v1: graph-query expression over the symbol graph: <s t= n= p=> matching rows. window: shown= capped= (capped=1 cut). counts_floor=1: every count is a FLOOR, never a total. graph_ambiguous=/graph_unresolved=: resolver gauge. graph_unindexed=N: N files no grammar could read (the map header's unindexed=); their calls raise neither gauge. root=: p= relative to it. pr_iters=N: PageRank iterations. expr=: the expression as given; count=: symbols it matched (rows page by shown=/total=). -->
 <query schema="ripwire.graph-query/v1" expr="and(callers(name(&quot;rankGraphTeleport&quot;),2),kind(all,fn))" count="55" shown="55" capped="0" graph_ambiguous="3474" graph_unresolved="18839" graph_unindexed="287" counts_floor="1" root="." pr_iters="39">
 <s t="fn" n="getIndex" p="src/mcpindex.h:1226"/>
@@ -931,7 +931,7 @@ each row's lang= is the REFERENCING file's language — a name called from sever
 _Names referenced but never defined in-corpus (stdlib/third-party surface). The root carries names/shown/capped; the default is a 100-row window now, so total= and a pasteable next= join them when it bites (the explicit --limit form carries the same quintet). The sh BUILTINS (cd/echo/set…) are dropped and COUNTED as builtins_excluded= — grep/sed/git stay, they ARE the surface._
 
 ```
-$ ./build/ripwire-merged . --external-surface
+$ ./build/ripwire . --external-surface
 <!-- ripwire external-surface schema=ripwire.external-surface/v1: names used but never defined in the index: <x n= lang= refs= calls=>. window: shown= total= capped= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). next=: the one pasteable follow-up. names=N: distinct external names (the x rows' total). builtins_excluded=N: sh BUILTIN rows (echo printf cd exit test ...) dropped from names=; the include-builtins flag keeps them. -->
 <external-surface schema="ripwire.external-surface/v1" names="3577" builtins_excluded="18" shown="100" capped="1" total="3577" has_more="1" next_offset="100" offset="0" limit="0" next="--external-surface --offset=100">
 <x n="grep" lang="sh" refs="16900" calls="16900"/>
@@ -966,7 +966,7 @@ $ ./build/ripwire-merged . --external-surface
 _Shortest directed call-path SRC -> DST. CHANGED: now reports from_p/to_p/from_defs and resolves the right `main` (was reachable="0")._
 
 ```
-$ ./build/ripwire-merged . --path=main,rankGraphTeleport
+$ ./build/ripwire . --path=main,rankGraphTeleport
 <!-- ripwire path schema=ripwire.path/v1: one DIRECTED call path from= to to=, each <s t= n= p=> a hop; reachable=0 hops=0 when none shown. counts_floor=1: every count is a FLOOR, never a total. graph_ambiguous=/graph_unresolved=: resolver gauge. graph_unindexed=N: N files no grammar could read (the map header's unindexed=); their calls raise neither gauge. root=: p= relative to it. next=: the one pasteable follow-up. s site=: a call of this row's name in the row above (arity fit, then owner, first); by name, not proof. s sites=N: N such lines. s call=: its text, <=3 lines/120 B, U+2026=cut; pair 1 only. s sig=: this row's signature, <=160 B; pair 1 only. alts side=from|to of=: further definitions that endpoint's name binds, not printed above (the pick is not provably unique): <d p= sel= class=>, sel= pastes as that endpoint. alts alts_shown=K defs=N: K of the other rows shown; next= pages the rest. from_p=/to_p=: the definitions from= and to= were bound to. from_defs=/to_defs=: definitions of each name, all searched; above 1, qualify file:name. -->
 <path schema="ripwire.path/v1" from="main" to="rankGraphTeleport" from_p="src/main.cpp:4268" to_p="src/graph.h:13712" from_defs="180" to_defs="1" reachable="1" hops="6" next="--expand=src/main.cpp:4349:finishMainRun" root="." graph_ambiguous="3474" graph_unresolved="18839" graph_unindexed="287" coun … [line truncated: 13 more bytes on this line]
 <s t="fn" n="main" p="src/main.cpp:4268"/>
@@ -989,7 +989,7 @@ $ ./build/ripwire-merged . --path=main,rankGraphTeleport
 _Which definitions each name binds, one row per definition group with sel= (the spelling that picks it alone in any verb), class=source|test and in= callers; source first._
 
 ```
-$ ./build/ripwire-merged . --defs=main,rankGraphTeleport
+$ ./build/ripwire . --defs=main,rankGraphTeleport
 <!-- ripwire defs schema=ripwire.defs/v1: per <name q= defs=> the parsed definitions the name binds (defs= groups; a prototype with its definition is one): <d n= t= p= sel= lang= class=source|test in=>, sel= binds that one alone in any SYM verb, in= distinct callers (a floor); source first, then in=, then path. window: shown= offset= (capped=1 cut). root=: p= relative to it. <d in=N>: N callers in the index (absent: not measured). next=: the one pasteable follow-up. name data_defs=K: data keys or doc headings of that name (JSON/YAML key, markdown heading), not code, not in defs=. name shown=K offset=M: rows M..M+K of defs=; next= pages the rest. name next=: the next page, or (defs=0) the single-name call whose refusal names near names. -->
 <defs schema="ripwire.defs/v1" root=".">
 <name q="main" defs="174" data_defs="6" shown="16" offset="0" next="--defs=main --offset=16">
@@ -1018,7 +1018,7 @@ $ ./build/ripwire-merged . --defs=main,rankGraphTeleport
 _Minimal connecting subgraph over 3 symbols (finds shared-caller joins)._
 
 ```
-$ ./build/ripwire-merged . --connect=rankGraphTeleport,runEval,getIndex
+$ ./build/ripwire . --connect=rankGraphTeleport,runEval,getIndex
 <!-- ripwire connect schema=ripwire.connect/v1: minimal joining subgraph: <g> groups, <t> terminals, <s connects=> joins, <e f= t=> edges, <unconnected>. counts_floor=1: every count is a FLOOR, never a total. graph_ambiguous=/graph_unresolved=: resolver gauge. graph_unindexed=N: N files no grammar could read (the map header's unindexed=); their calls raise neither gauge. est_tokens=: price as emitted (an upper bound under compact). root=: p= relative to it. hub_floor=D: connects= >= D is hub=1, vacuous. nodes=N: symbols printed, terminals plus joins (a floor). radius=N: undirected hop bound searched (default 6, max 12); raise it with connect-radius=N. e site=: a call of t= in f= (arity fit, then owner, first); by name, not proof. e call=: its text, <=3 lines/120 B, U+2026=cut. e sig=: t='s signature, <=160 B, once per callee. terminals=/groups=/edges=: task symbols resolved, connected groups (g), e edges printed. t n= / s n=: a terminal's / a join's symbol name. -->
 <connect schema="ripwire.connect/v1" terminals="3" nodes="3" edges="2" radius="6" groups="1" est_tokens="754" hub_floor="281" root="." graph_ambiguous="3474" graph_unresolved="18839" graph_unindexed="287" counts_floor="1">
 <g terminals="3">
@@ -1044,7 +1044,7 @@ file:name disambiguates like --callers rows run nearest first: d= is the hop dep
 _Transitive blast radius — everything that reaches SYM. NOW carries shown/capped._
 
 ```
-$ ./build/ripwire-merged . --impact=rankGraphTeleport
+$ ./build/ripwire . --impact=rankGraphTeleport
 <!-- ripwire impact schema=ripwire.impact/v1: transitive blast radius of of=: <s t= n= p=> reach set, <f via= p=> importers; defs= matched, reaches= their transitive callers, radius_tested= non-tests an indexed test reaches, radius_untested= the rest; importers= files that #include/import a def's file. window: shown= total= capped= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). importers_capped=/files_capped=: 1 = cut. counts_floor=1: every count is a FLOOR, never a total. graph_ambiguous=/graph_unresolved=: resolver gauge. graph_unindexed=N: N files no grammar could read (the map header's unindexed=); their calls raise neither gauge. root=: p= relative to it. pr_iters=N: PageRank iterations. shown_importers=: <f> rows (limit= sizes them). importers_next=: the call listing every importer. importers_tests=/importers_dirs=: over EVERY importer of a cut tier: test/bench/fixture files / the 3 dirs (2 path segments) holding most, dir:count. files files=/shown_files=: files the WHOLE reach set touches (rides beside a cut symbol window) / listed; rf syms= reached symbols there, d= fewest hops; files_capped=1 + files_next= when cut. <f lazy=1>: every edge from that importer into a def file is deferred (in a function/block body, or an autoload), firing only if reached; lazy=0: at least one is load-time. declined_calls=K: K call sites left unbound, in no count; <dc n= l=|in= p= cands=K via=declined>: one such call SITE (callees: called name, line; callers: calling def, file:line); NOT an edge or a caller/callee claim; cands=K: K in-tree defs it could have meant (K may be 1), the resolver proved none; not a claim this call reaches any of them. <s d=N>: hops to of= (1 = direct caller), set where it changes. by_depth=k:n: n of reaches= at depth k, shallowest rows first. next=: the one pasteable follow-up. -->
 <impact schema="ripwire.impact/v1" of="rankGraphTeleport" defs="1" reaches="70" by_depth="1:7,2:48,3:10,4:3,5:1,6:1" importers="67" shown_importers="40" importers_capped="1" importers_next="--impact=rankGraphTeleport --limit=67" importers_tests="2" importers_dirs="src:65,test:2" radius_tested="0" ra … [line truncated: 271 more bytes on this line]
 <files files="14" shown_files="14" files_capped="0">
@@ -1081,7 +1081,7 @@ Shapes: calls(A,B) does A transitively call B; uses(SYM) / unused(SYM) is SYM re
 _An unparseable claim — the refusal names the accepted shapes._
 
 ```
-$ ./build/ripwire-merged . --verify="frobnicate(x)"
+$ ./build/ripwire . --verify="frobnicate(x)"
 (empty)
 ```
 
@@ -1102,7 +1102,7 @@ An @FILE:LINE seed rebinds to the innermost enclosing definition and answers, di
 _Markdown docs that name SYM in a backtick (doc<->code edges)._
 
 ```
-$ ./build/ripwire-merged . --mentions=rankGraphTeleport
+$ ./build/ripwire . --mentions=rankGraphTeleport
 <!-- ripwire mentions schema=ripwire.mentions/v1: markdown FILES naming of= in backticks (docs=, sections=): <doc p= mentions=>; not a call edge. root=: p= relative to it. defs=N: definitions of= resolved to; rows union their doc mentions. -->
 <!-- unbackticked_docs=N: N more markdown files, over readable indexed markdown, name of= as a whole word but not as a clean one-line backtick span (prose, a code block, a span broken across lines) - not in docs=; a text match, so a ceiling -->
 <mentions schema="ripwire.mentions/v1" of="rankGraphTeleport" defs="1" docs="6" sections="13" unbackticked_docs="4" root=".">
@@ -1128,7 +1128,7 @@ Each item may be `path`, `./path`, `path:LINE` / `path:N-M` (paste a --hotspots/
 _Test files that transitively reach the changed file._
 
 ```
-$ ./build/ripwire-merged . --affected=src/graph.h
+$ ./build/ripwire . --affected=src/graph.h
 <!-- ripwire affected schema=ripwire.affected/v1: test files that transitively reach the changed files/symbols: <test p= partner= hops= run=> in evidence order (order= partners=); seeded_by= the reading taken. counts_floor=1: every count is a FLOOR, never a total. graph_ambiguous=/graph_unresolved=: resolver gauge. graph_unindexed=N: N files no grammar could read (the map header's unindexed=); their calls raise neither gauge. run_unknown=1: no runner derivable (a guess would be worse). root=: p= relative to it. seeds=N: symbols the argument matched; only those outside test files seed the caller walk. seed_test_files=N: matched files that are TESTS; listed to run (seed_kind=test), never walk seeds. tests=N: test files listed to run (the rows). reached=N: symbols the transitive caller walk reached from the seeds (seeds excluded). script_gates_unmodelled=N: test/*.sh runners; their subprocess reach is unmodelled, never in tests=/reached=. run_first=N: the first N test files have the most direct evidence (changed/partner/hops=1, else nearest hops=); not a skip list. changed=: the files/symbols argument as given. -->
 <affected schema="ripwire.affected/v1" changed="src/graph.h" seeded_by="file" seeds="738" seed_test_files="0" tests="10" reached="940" script_gates_unmodelled="878" run_first="3" order="evidence" partners="0" root="." graph_ambiguous="3474" graph_unresolved="18839" graph_unindexed="287" counts_floor … [line truncated: 5 more bytes on this line]
 <test p="test/connectcore_harness.cpp" hops="1" run="bash test/connectcorecheck.sh"/>
@@ -1163,7 +1163,7 @@ The first question when a test fails and you have its name and nothing else. Ran
 _Which symbols a TEST FILE exercises — the reverse direction of --affected._
 
 ```
-$ ./build/ripwire-merged . --exercises=test/regression.sh
+$ ./build/ripwire . --exercises=test/regression.sh
 <!-- ripwire exercises schema=ripwire.exercises/v1: NON-TEST symbols this test transitively calls (what it covers): <t p= run=>; the inverse of affected. window: shown= capped= (capped=1 cut). seed_files_capped=: 1 = cut. counts_floor=1: every count is a FLOOR, never a total. graph_ambiguous=/graph_unresolved=: resolver gauge. graph_unindexed=N: N files no grammar could read (the map header's unindexed=); their calls raise neither gauge. root=: p= relative to it. pr_iters=N: PageRank iterations. seed_files=N: test files the pattern matched. shown_seed_files=N: of those, printed as t rows (at most 20). test_symbols=N: symbols in those test files, the walk's seeds. reaches=N: non-test symbols the tests transitively call (the s rows' total). harness=script|mixed: seeds include shell gates, whose subprocess coverage is unseen; note= says so. of=: the test file pattern given. -->
 <exercises schema="ripwire.exercises/v1" of="test/regression.sh" seed_files="1" shown_seed_files="1" seed_files_capped="0" test_symbols="4" reaches="0" harness="script" note="a shell gate invokes the compiled binary as a subprocess; script-to-binary edges are not modelled, so reaches= counts call-gr … [line truncated: 189 more bytes on this line]
 <t p="test/regression.sh" run="bash test/regression.sh"/>
@@ -1187,7 +1187,7 @@ Backtested on two histories (EVALS.md): a named partner is edited within the nex
 _Mid-task situational report for the current git diff — recorded against a CLEAN tree (contrast with the sandbox run below)._
 
 ```
-$ ./build/ripwire-merged . --situ
+$ ./build/ripwire . --situ
 ripwire situational-awareness — 0 changed file(s), 0 symbols in them
 root: .
 at: daff79c9a
@@ -1207,7 +1207,7 @@ Empty diff is fine — the packet still carries branch/sha + heuristics. Compose
 _The continuation packet for the NEXT session: <verified> disk truth (branch/sha, changed symbols, blast radius, tests) + <heuristic> labeled suggestions. Recorded against a CLEAN tree._
 
 ```
-$ ./build/ripwire-merged . --handoff
+$ ./build/ripwire . --handoff
 <!-- ripwire handoff schema=ripwire.handoff/v1: continuation packet for the NEXT session: <verified changed= blast_files=>, <tests n=>, <heuristic n= candidates=>, <note>, <doc p=>. window: capped= (capped=1 cut). est_tokens=: price as emitted (an upper bound under compact). at=: commit+dirty+shallow. root=: p= relative to it. branch=/subject=: the checked out branch and HEAD commit subject; gitok=0: the git diff probe failed, changed counts are floors. cochange_window=/cochange_commits=: the git window the cochange rows were mined in and the commits it held (0: could not look). doc s=: lexical score of that plan/design doc for the branch+subject query. note target=/txt=: a committed notes row on this work (symbol id or path) and its text; a suggestion. -->
 <handoff schema="ripwire.handoff/v1" at="daff79c9a" root="." branch="integration/train-1111e" subject="docs: counts refresh at the train tip (810 gates, 423 caps, 10 parameters)" gitok="1" est_tokens="856">
 <verified changed="0" blast_files="0">
@@ -1242,7 +1242,7 @@ exit 4 if either is non-empty agent self-check before a PR (pair with --quality-
 _Pre-PR gate on a CLEAN tree: no obligations, exit 0._
 
 ```
-$ ./build/ripwire-merged . --test-gate
+$ ./build/ripwire . --test-gate
 <!-- ripwire test-gate schema=ripwire.test-gate/v1: tests <t p= changed= partner= hops= run=> + untested blast radius <u sym= p= l= ccx=>; exit 4 while either exists. tests_capped=/untested_capped=: 1 = cut. counts_floor=1: every count is a FLOOR, never a total. graph_ambiguous=/graph_unresolved=: resolver gauge. graph_unindexed=N: N files no grammar could read (the map header's unindexed=); their calls raise neither gauge. at=: commit+dirty+shallow. next=: the one pasteable follow-up. impacted=N: symbols that transitively call the change (changed symbols excluded). shown_tests=/shown_untested=: t rows and u rows printed, two independent counts. script_gates_unmodelled=N: test/*.sh runners in the corpus, a path count; not call-graph modelled. script_gates_registered=N: shell gates test/regression.sh registers as suite members. script_gates_mapped=N: registered gates with exact dependency evidence (literal paths or RIPWIRE_TEST_DEPS). script_gates_unresolved_dynamic=N: registered gates with no mappable deps; they may cover the change unlisted. ccx_bar=N: the cognitive-complexity bar a u row's ccx= is read against. untested_modscope=N: <file-scope> owners excluded from untested= (#324, uncallable); still in impacted=. tests=/untested=: tests to run (t total) / impacted symbols no test reaches (u total). -->
 <test-gate schema="ripwire.test-gate/v1" changed="0" impacted="0" tests="0" untested="0" untested_modscope="0" shown_tests="0" tests_capped="0" shown_untested="0" untested_capped="0" script_gates_unmodelled="878" script_gates_registered="829" script_gates_mapped="271" script_gates_unresolved_dynamic … [line truncated: 136 more bytes on this line]
 </test-gate>
@@ -1266,7 +1266,7 @@ every hit comes back with its enclosing symbol literal / regex search + enclosin
 _Literal trigram-indexed search. Each hit carries its MATCHED line as the <hit> element's own CDATA (the <m> wrapper is gone), plus shown/capped/hits_capped and a pasteable next= on the root._
 
 ```
-$ ./build/ripwire-merged . --grep=DISCLOSE
+$ ./build/ripwire . --grep=DISCLOSE
 <!-- ripwire grep schema=ripwire.grep/v1: literal/regex scan grouped by file: <f p=>
 <hit l= in=>CDATA text</hit> (<b>/<a> context around it); complete=1 only for an exhaustive literal scan (beside pattern_meta=, of the literal reading only); <unindexed> = off-index. window: shown= total= capped= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). c … [line truncated: 2364 more bytes on this line]
 <grep pattern="DISCLOSE" schema="ripwire.grep/v1" root="." files="274" hits="934" shown="100" capped="1" total="934" has_more="1" next_offset="100" offset="0" limit="0" hits_capped="0" suppressed_comment="155" suppressed_string="5" tier_parsed="78" tier_unclassified="716" tier_budget="bytes" tier_fi … [line truncated: 202 more bytes on this line]
@@ -1295,7 +1295,7 @@ $ ./build/ripwire-merged . --grep=DISCLOSE
 _Same search with one line of source context either side._
 
 ```
-$ ./build/ripwire-merged . --grep=DISCLOSE --grep-context=1
+$ ./build/ripwire . --grep=DISCLOSE --grep-context=1
 <!-- ripwire grep schema=ripwire.grep/v1: literal/regex scan grouped by file: <f p=>
 <hit l= in=>CDATA text</hit> (<b>/<a> context around it); complete=1 only for an exhaustive literal scan (beside pattern_meta=, of the literal reading only); <unindexed> = off-index. window: shown= total= capped= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). c … [line truncated: 2257 more bytes on this line]
 <grep pattern="DISCLOSE" schema="ripwire.grep/v1" root="." files="274" hits="934" shown="100" capped="1" total="934" has_more="1" next_offset="100" offset="0" limit="0" hits_capped="0" suppressed_comment="155" suppressed_string="5" tier_parsed="78" tier_unclassified="716" tier_budget="bytes" tier_fi … [line truncated: 202 more bytes on this line]
@@ -1324,7 +1324,7 @@ $ ./build/ripwire-merged . --grep=DISCLOSE --grep-context=1
 _Boolean grep: hits where BOTH literals share the matched line (--grep-scope=line is the default)._
 
 ```
-$ ./build/ripwire-merged . --grep=DISCLOSE --and=cache
+$ ./build/ripwire . --grep=DISCLOSE --and=cache
 <!-- ripwire grep schema=ripwire.grep/v1: literal/regex scan grouped by file: <f p=>
 <hit l= in=>CDATA text</hit> (<b>/<a> context around it); complete=1 only for an exhaustive literal scan (beside pattern_meta=, of the literal reading only); <unindexed> = off-index. window: shown= capped= (capped=1 cut). hits_capped=1: hits= is a floor. root=: p= relative to it. parse_degraded=1: E … [line truncated: 1674 more bytes on this line]
 <grep pattern="DISCLOSE" schema="ripwire.grep/v1" root="." terms="DISCLOSE +cache" scope="line" terms_suppressed="1081" files="9" hits="30" shown="30" capped="0" hits_capped="0" suppressed_comment="2" suppressed_string="8" tier_parsed="13" tier_unclassified="0" corpus_oversize="15" corpus_pruned_dir … [line truncated: 120 more bytes on this line]
@@ -1353,7 +1353,7 @@ $ ./build/ripwire-merged . --grep=DISCLOSE --and=cache
 _Drop every hit in a file that ALSO contains the --not literal anywhere (file scope)._
 
 ```
-$ ./build/ripwire-merged . --grep=DISCLOSE --not=test --grep-scope=file
+$ ./build/ripwire . --grep=DISCLOSE --not=test --grep-scope=file
 <!-- ripwire grep schema=ripwire.grep/v1: literal/regex scan grouped by file: <f p=>
 <hit l= in=>CDATA text</hit> (<b>/<a> context around it); complete=1 only for an exhaustive literal scan (beside pattern_meta=, of the literal reading only); <unindexed> = off-index. window: shown= capped= (capped=1 cut). hits_capped=1: hits= is a floor. root=: p= relative to it. parse_degraded=1: E … [line truncated: 1570 more bytes on this line]
 <grep pattern="DISCLOSE" schema="ripwire.grep/v1" root="." terms="DISCLOSE -test" scope="file" terms_suppressed="1070" files="6" hits="18" shown="18" capped="0" hits_capped="0" suppressed_comment="31" suppressed_string="3" tier_parsed="25" tier_unclassified="0" corpus_oversize="15" corpus_pruned_dir … [line truncated: 123 more bytes on this line]
@@ -1384,7 +1384,7 @@ file requires anywhere in the same file. Second occurrence of --grep=/--regex= i
 _Drop every hit in a file that ALSO contains the --not literal anywhere (file scope)._
 
 ```
-$ ./build/ripwire-merged . --grep=DISCLOSE --not=test --grep-scope=file
+$ ./build/ripwire . --grep=DISCLOSE --not=test --grep-scope=file
 <!-- ripwire grep schema=ripwire.grep/v1: literal/regex scan grouped by file: <f p=>
 <hit l= in=>CDATA text</hit> (<b>/<a> context around it); complete=1 only for an exhaustive literal scan (beside pattern_meta=, of the literal reading only); <unindexed> = off-index. window: shown= capped= (capped=1 cut). hits_capped=1: hits= is a floor. root=: p= relative to it. parse_degraded=1: E … [line truncated: 1570 more bytes on this line]
 <grep pattern="DISCLOSE" schema="ripwire.grep/v1" root="." terms="DISCLOSE -test" scope="file" terms_suppressed="1070" files="6" hits="18" shown="18" capped="0" hits_capped="0" suppressed_comment="31" suppressed_string="3" tier_parsed="25" tier_unclassified="0" corpus_oversize="15" corpus_pruned_dir … [line truncated: 123 more bytes on this line]
@@ -1417,7 +1417,7 @@ code (default) serves the CODE tier when any hit is code, and otherwise comment 
 _Span tiers off: the exhaustive view — the comment and string hits the default tier held back (suppressed_comment=96 / suppressed_string=29 in the plain --grep block above) now print alongside the code hits; hits= grows accordingly._
 
 ```
-$ ./build/ripwire-merged . --grep=DISCLOSE --grep-in=any
+$ ./build/ripwire . --grep=DISCLOSE --grep-in=any
 <!-- ripwire grep schema=ripwire.grep/v1: literal/regex scan grouped by file: <f p=>
 <hit l= in=>CDATA text</hit> (<b>/<a> context around it); complete=1 only for an exhaustive literal scan (beside pattern_meta=, of the literal reading only); <unindexed> = off-index. window: shown= total= capped= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). h … [line truncated: 1615 more bytes on this line]
 <grep pattern="DISCLOSE" schema="ripwire.grep/v1" root="." files="298" hits="1092" shown="100" capped="1" total="1092" has_more="1" next_offset="100" offset="0" limit="0" hits_capped="0" corpus_oversize="15" corpus_pruned_dirs="7" unindexed_hits="13" unindexed_files_scanned="286" unindexed_files_ski … [line truncated: 62 more bytes on this line]
@@ -1453,7 +1453,7 @@ Ambiguous or document-only rows get no handle; a later edit must refuse after an
 _h= on each editable enclosing-symbol row: a freshness-pinned identity an edit verb can target and must refuse on after any file change._
 
 ```
-$ ./build/ripwire-merged . --grep=DISCLOSE --handles
+$ ./build/ripwire . --grep=DISCLOSE --handles
 <!-- ripwire grep schema=ripwire.grep/v1: literal/regex scan grouped by file: <f p=>
 <hit l= in=>CDATA text</hit> (<b>/<a> context around it); complete=1 only for an exhaustive literal scan (beside pattern_meta=, of the literal reading only); <unindexed> = off-index. window: shown= total= capped= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). c … [line truncated: 2477 more bytes on this line]
 <grep pattern="DISCLOSE" schema="ripwire.grep/v1" root="." files="274" hits="934" shown="100" capped="1" total="934" has_more="1" next_offset="100" offset="0" limit="0" hits_capped="0" suppressed_comment="155" suppressed_string="5" tier_parsed="78" tier_unclassified="716" tier_budget="bytes" tier_fi … [line truncated: 202 more bytes on this line]
@@ -1487,7 +1487,7 @@ $ ./build/ripwire-merged . --grep=DISCLOSE --handles
 _Tree-sitter structural query WITHOUT a capture — a bare node query gets a capture AUTO-ADDED (auto_captured="1") and matches the same nodes the explicit form does._
 
 ```
-$ ./build/ripwire-merged . --match='(if_statement)'
+$ ./build/ripwire . --match='(if_statement)'
 <!-- ripwire match schema=ripwire.match/v1: tree-sitter structural query: <m p= in=> captured nodes with their enclosing symbol; grammars=/eligible_files= the scope. window: shown= total= capped= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). counts_floor=1: every count is a FLOOR, never a total. hits_capped=1: hits= is a floor. root=: p= relative to it. auto_captured=1: the query bound no @capture, so @m was appended to its single top-level pattern. of_files=: indexed files in all (eligible_files= of them are in the query's languages). -->
 <match schema="ripwire.match/v1" hits="5000" shown="100" capped="1" total="5000" has_more="1" next_offset="100" offset="0" limit="0" counts_floor="1" hits_capped="1" auto_captured="1" grammars="cpp,c,python,go,typescript,tsx,swift,objc,javascript,bash,java,csharp,php,dart,lua,gdscript" eligible_file … [line truncated: 34 more bytes on this line]
 <m p="bench/agentloop/analyze.py:37" in="load_results">if data.get( "schema" ) != SCHEMA:         raise SystemExit( f"{path}: unexpected schema {data.get('schema')!r} (expecte</m>
@@ -1514,7 +1514,7 @@ $NAME binds one node (repeat it and both sites must match structurally); $_ bind
 _A pattern that collapses to a bare token is REFUSED — never reported as hits=0._
 
 ```
-$ ./build/ripwire-merged . --pattern='x'
+$ ./build/ripwire . --pattern='x'
 (empty)
 ```
 
@@ -1535,7 +1535,7 @@ use --for
 _Raw BM25 ranking (debug lens; --for is the real verb)._
 
 ```
-$ ./build/ripwire-merged . --query="teleport pagerank" --top-k=5
+$ ./build/ripwire . --query="teleport pagerank" --top-k=5
 <!-- routed: subtoken+body:broad -->
 <!-- ripwire query schema=ripwire.query/v1: lexical-rank map for the query term, the map's row vocabulary. est_tokens=: price as emitted (an upper bound under compact). root=: p= relative to it. declined=K: K call sites without edges, including inert Elixir quote sites after unquote/unquote_splicing re-entry. external=K: K calls proven outside the tree, no edge. locality_pinned=K: K calls pinned by locality alone (a guess). extent_suspect_syms=K: K defs failed containment, corpus-wide. macro_blanked_files=K: K files indexed from a macro-blanked re-parse. prov=scip|binding|import|split|final-segment: how that <c> edge bound (absent: one unique name); split = one arm of an amb= pick; final-segment = a qualified type matched by last name only. files=/symbols=: files and symbols indexed; edges= distinct call edges; shown= symbols printed, a merged row counting each def; ambiguous= calls split over several defs, corpus-wide; unresolved= calls with in-tree evidence and no edge (every def language-filtered or unreachable, or binding refused); order= rows by rank (important-first, important-last; (auto:fill) = flipped past a size threshold) or by path (stable). skipped_oversize=K: K files over a size ceiling, not indexed. unindexed=ext:N: N text files of that extension no grammar reads (6 extensions at most). unindexed_exts=E: E such extensions in all, the list cut. sc=: enclosing scope; the full id is p::sc::n (p= of the row or its <f>) and selectors take it. amb=K: K calls split over several defs. f p=: a file; s t= n=: kind, name; c n=: a resolved callee. s k=: rank. -->
 <!-- t=modscope=a-file's-MODULE-SCOPE(n=<file-scope>):the-statements-outside-every-named-definition,where-a-top-level-call-and-an-anonymous-callback-body's-calls-live;a-CALLER-never-a-callee(nothing-in-the-source-can-name-it)-with-no-body-to-expand;a-file-with-no-such-call-has-no-such-row -->
@@ -1570,7 +1570,7 @@ Composes with --max-tokens (bounds the BODIES ONLY, never the bundle — see --m
 _Importance-weighted detail: FULL bodies for top-2, signatures for the rest._
 
 ```
-$ ./build/ripwire-merged . --for="pagerank power iteration" --detail=2
+$ ./build/ripwire . --for="pagerank power iteration" --detail=2
 <ctx task="pagerank power iteration" route="subtoken+body" root="." confidence="high" margin_pct="22" at="daff79c9a" doc_mentions="5" schema="ripwire.for/v1" budget_bytes="7500" doc_mentions_capped="1" doc_mentions_total="14" est_tokens="8580">
 <!-- ripwire for schema=ripwire.for/v1: bundle=/bodies=/reason= the body posture; d: cx= ccx= complexity, in= callers (absent cx/ccx/in = 0), churn= amp= change, clone= tested= 1, sc= scope, id=p::sc::n; total= shown= capped=1 if cut; task= the query; d pure=1 const/constexpr sig, next= the follow-up to paste; d same_as=N: doc+sig text as row n=N (not repeated); route= name-exact(X)|subtoken+body[:broad|:declined]; confidence=/margin_pct= head score drop (low=flat); t p= file outside sigs (weaker), t sym= its top symbols not in sigs/syms (a pointer, not the answer), r= rank (gap = trimmed); t order: code files first, then doc files (a code question); t page rows go on to file-page row 160 (code question: 160 code rows, docs within row 160); past page 0 (code question: past 40 code rows, a doc past row 40) listed last, head files skipped; past 120 of those p= only, p_only= counts them; t folded=class=N: N p= only rows of that class (doc|config|script|testdata|other) not listed, next= pages to them; d layer=: built-in arch layer (game|infra|render|math|audio|ai|test) from a dir name in p=; d e= its last line (absent=unknown, never 0; l= the name's line) [doc mentions: 5 docs, 3 symbols; doc_mentions=] -->
 <!-- root= is the crawl root; p= below is RELATIVE to it (single-root only; absent => p= is ingest's own path, unchanged); at=this commit(+dirty). [budget_bytes= is the default BYTE target this ranked payload was shaped toward: row text shortens toward it, no row of the ranked head is removed for it (sigs past_target=)] [sigs capped=1 with shown=total: rows shrunk, none dropped] [sigs past_target=K: the last K rows are past the budget_bytes target, served because they are rows of the ranked head; none is cut] [sigs next=: one call serving all total= rows uncut] [docs_dropped=N: N shown rows have a doc comment not printed (r>24 always, r5..24 if capped)] [docs_after_code=N: N doc rows of the shown set moved below its code rows; same rows, reordered, none added or removed; a question naming docs keeps score order] [files_first=N: N rows moved so r=1..8 are distinct files' best rows, score order, a repeated name once; same rows; fold, hops keep score order] [cut: doc_mentions_capped="1" doc_mentions_total="14" — an indexing cap dropped content not shown here]; lego/compose collapse to a counted stub by default (a disclosed cut): total= that section's own pre-cap row count, shown="0" capped="1" (nothing rendered here), next= names the sections=lego,compose flag that restores both sections byte-identically in one call est_tokens= prices this bundle in tokens -->
@@ -1601,7 +1601,7 @@ test/showcasecapturecheck.sh (C) re-derives this range from the SAME repo every 
 _Body-elided decl skeletons — recounted on this corpus. Measured as element bytes: the <d> signature+doc elements --pack-signatures emits, against the SAME symbols' full <b> bodies from --expand, with the CORPUS-ROOT PREFIX SUBTRACTED FROM BOTH SIDES. That subtraction is the whole methodology and the figure is meaningless without it: the root repeats inside every element's id= and p=, it is not what this verb elides, and counting it makes the headline a function of how deep the checkout happens to sit on disk — on one corpus, three spellings of the same root read 18.6 points apart before the subtraction and agree exactly after it. Root-neutralised on THIS repo: 89.7% fewer bytes at top-10, 88.0% at top-50, 87.8% at top-100 (re-derived 2026-10-10 when the C++ standard-member gate stopped std::vector/std::string calls such as out.push_back() and s.empty() from binding to in-tree namesakes by name: the ranked top-10/50 lost one-line container accessors (svector::push_back, WidePath::c_str, every empty) and gained one-line forwarding helpers and macros (kindIs, ASSUME, formatTo, emitTo) whose signature is nearly the whole body, so less of the set is elidable, from 92.7/88.7/87.6; before that, re-derived 2026-09-20 when the native Windows port landed: src/infra/os_win32.cpp and os_win32_logic.h are ~3,900 lines of new, heavily commented infra that the ranked top-10/50/100 now reach, and their bodies are this ratio's DENOMINATOR, so the figure rises without --pack-signatures eliding anything new, from top-50 87.1. Measured by test/showcasecapturecheck.sh's own recount arm on the combined tree, which is the gate that would otherwise report the drift; before that, re-derived 2026-09-17 at the self-check macro vocabulary rename: VERIFY/VERIFY_TEXT/VERIFY_DEBUG_ONLY/VERIFY_NOT_REACHED/VERIFY_SAME_THREAD/VERIFY_NO_ALIAS*/DYNMAP_VERIFY/DEGRADED_PATH_ALERT renamed to ASSUME/EXPECTS/ENSURES/DASSERT/UNREACHABLE/ASSUME_SAME_THREAD*/ASSUME_NO_ALIAS*/DYNMAP_ASSUME/DISCLOSE (plus new VALIDATE sites) across 839 identifier renames in 179 files, and a hand-written Diagnostics.h/diagnostics.cpp replacing the old ones outright: this moves both WHICH symbols the ranked top-10/50/100 hold and how large their bodies are, from top-50 85.2. A real re-derivation of a corpus that changed, not a tolerance edit; previously re-derived 2026-09-12 when the <d> rows dropped the path-repeating id= for the short sc= scope: the signature side shrank, the bodies did not; before that, 89.5% / 81.8% / 84.3% re-derived 2026-09-10 at the sibs= cap raise: kMaxExpandSibs went 8 -> 100, so --expand's <b> bodies now carry the file context the old cap hid — 89.3% of all sibling names — and the body side is this ratio's DENOMINATOR, so the figure rises without --pack-signatures eliding anything new. Measured on a fixed tree with the top-50 membership and the signature side unchanged: top-50 from 71.0. A real re-derivation of a corpus that changed, not a tolerance edit; previously re-derived 2026-09-09 at the printf-family -> std::print conversion: converting ~1,500 emitter call sites to rw::emitTo/emitRaw/formatTo across 93 files changes how large the ranked symbols' BODIES are, and the body side is this ratio's denominator — top-50 from 72.3. A real re-derivation of a corpus that changed, not a tolerance edit; previously re-derived 2026-09-08 at the confident-zero round, issues #62/#63/#66: that change adds symbols to src/graphlegend.h and the new src/preprocdead.h and re-homes two long comment blocks from call sites onto the helpers they explain, which moves both WHICH symbols the ranked top-50 holds and how large their bodies are — top-50 from 74.0. A real re-derivation of a corpus that changed, not a tolerance edit; previously re-derived 2026-09-06 at the stranger-audit fix round: the doctor, cache-sweep and html-provenance bodies grew this corpus's BODY side, moving top-50 from 75.6 — a real re-derivation, not a tolerance edit; before that, re-derived 2026-09-05 at the capture-audit close: lane L7's P16 caps --expand's sibs= at 8 names, which SHRINKS the body side of this ratio and moved the figure down from 84.5/80.2/80.6 — the V1 2026-08-15 re-center, when sibs=/inc= first grew the body side from 70.0/61.0/63.8, in reverse; both were real re-derivations, not tolerance edits). top-50 is the number to quote, because the sigs payload is top-50 regardless of --top-k and is therefore what THIS command emits. A single small/trivial body can still invert it (signature+doc bigger than the body), like the --format=columnar sibling below. test/showcasecapturecheck.sh (C) re-derives all three from this repo every run, in the same quantity, and fails if the caption and the recount drift apart._
 
 ```
-$ ./build/ripwire-merged . --pack-signatures --top-k=10
+$ ./build/ripwire . --pack-signatures --top-k=10
 <ctx schema="ripwire.pack-signatures/v1">
 <!-- ripwire pack-signatures schema=ripwire.pack-signatures/v1: the ranked map plus <sigs>
 <d l= n= sc= pure=> signature rows. est_tokens=: price as emitted (an upper bound under compact). root=: p= relative to it. pr_iters=N: PageRank iterations. declined=K: K call sites without edges, including inert Elixir quote sites after unquote/unquote_splicing re-entry. external=K: K calls proven  … [line truncated: 1537 more bytes on this line]
@@ -1632,7 +1632,7 @@ $ ./build/ripwire-merged . --pack-signatures --top-k=10
 _Control-flow skeleton of one symbol, payload-only via the new --top-k=0._
 
 ```
-$ ./build/ripwire-merged . --outline=rankGraphTeleport --top-k=0
+$ ./build/ripwire . --outline=rankGraphTeleport --top-k=0
 <!-- ripwire pack-signatures schema=ripwire.pack-signatures/v1: the ranked map plus <sigs>
 <d l= n= sc= pure=> signature rows. est_tokens=: price as emitted (an upper bound under compact). root=: p= relative to it. -->
 <ctx schema="ripwire.pack-signatures/v1" root="." est_tokens="327">
@@ -1663,7 +1663,7 @@ Selector grammar per item (the tail after the LAST ':' decides; a tail STARTING 
 _NEW since the last capture: --top-k=0 means PAYLOAD-ONLY — no ranked map rides along with the body you asked for._
 
 ```
-$ ./build/ripwire-merged . --top-k=0 --expand=rankGraphTeleport
+$ ./build/ripwire . --top-k=0 --expand=rankGraphTeleport
 <ctx schema="ripwire.expand/v1" root="." est_tokens="1211">
 <!-- ripwire expand schema=ripwire.expand/v1: full bodies: <bodies shown= total= capped=> of <b t= l= p= n= sibs= sibs_total= sibs_capped= inc=>; <calls>
 <c n= l=> resolved callees. window: shown= total= capped= (capped=1 cut). sibs_capped=/inc_capped=: 1 = cut. est_tokens=: price as emitted (an upper bound under compact). root=: p= relative to it. scrubbed=1: this CDATA is not the bytes (]]> split or C0 replaced). redacted=1: a credential shape rewr … [line truncated: 336 more bytes on this line]
@@ -1700,7 +1700,7 @@ Disclosed per bundle as compress="1" on the <bodies> element; without the flag, 
 _Comments stripped + blank runs collapsed — compressBody is the function that implements --compress itself, chosen because it is comment-heavy enough to show a real reduction (the previously captioned symbol had no comments or blank runs, so before/after were byte-identical under a caption promising a difference)._
 
 ```
-$ ./build/ripwire-merged . --expand=compressBody --top-k=0 --compress
+$ ./build/ripwire . --expand=compressBody --top-k=0 --compress
 <ctx schema="ripwire.expand/v1" root="." est_tokens="1952">
 <!-- ripwire expand schema=ripwire.expand/v1: full bodies: <bodies shown= total= capped=> of <b t= l= p= n= sibs= sibs_total= sibs_capped= inc=>; <calls>
 <c n= l=> resolved callees. window: shown= total= capped= (capped=1 cut). sibs_capped=/inc_capped=: 1 = cut. est_tokens=: price as emitted (an upper bound under compact). root=: p= relative to it. scrubbed=1: this CDATA is not the bytes (]]> split or C0 replaced). redacted=1: a credential shape rewr … [line truncated: 336 more bytes on this line]
@@ -1733,7 +1733,7 @@ $ ./build/ripwire-merged . --expand=compressBody --top-k=0 --compress
 _Pack the top-3 ranked symbols' full bodies (deprecated verb; see stderr)._
 
 ```
-$ ./build/ripwire-merged . --pack-top-n=3 --top-k=0
+$ ./build/ripwire . --pack-top-n=3 --top-k=0
 <ctx schema="ripwire.pack-top-n/v1" root="." est_tokens="17445">
 <!-- ripwire pack-top-n schema=ripwire.pack-top-n/v1: the ranked map plus <src p=> bodies of the top-N symbols. window: shown= total= capped= (capped=1 cut). est_tokens=: price as emitted (an upper bound under compact). root=: p= relative to it. <src truncated=1 lines=1-K/T>: cut at a line end at the byte budget; K of its T lines. <src_cut shown= total= capped=1 budget_bytes=>: files served of the top-N asked, the rest over the byte ceiling; unreadable=N not readable. -->
 <src_cut shown="1" total="3" capped="1" budget_bytes="65536"/>
@@ -1768,7 +1768,7 @@ Modifies the BODY-serving verbs (--expand, --for, --pack-task, --recall, --slice
 _--no-redact: emit bodies verbatim (credential redaction is on by default)._
 
 ```
-$ ./build/ripwire-merged . --expand=readAckRecords --top-k=0 --no-redact
+$ ./build/ripwire . --expand=readAckRecords --top-k=0 --no-redact
 <ctx schema="ripwire.expand/v1" root="." est_tokens="3077">
 <!-- ripwire expand schema=ripwire.expand/v1: full bodies: <bodies shown= total= capped=> of <b t= l= p= n= sibs= sibs_total= sibs_capped= inc=>; <calls>
 <c n= l=> resolved callees. window: shown= total= capped= (capped=1 cut). sibs_capped=/inc_capped=: 1 = cut. est_tokens=: price as emitted (an upper bound under compact). root=: p= relative to it. <c via="name">: that callee matched by name alone (receiver unproven); it does NOT mean the edge is fal … [line truncated: 443 more bytes on this line]
@@ -1801,7 +1801,7 @@ coupling is the validated signal, complexity is a size-correlated one). also sur
 _Fan-in/out + complexity annotations on the map._
 
 ```
-$ ./build/ripwire-merged . --metrics --top-k=10
+$ ./build/ripwire . --metrics --top-k=10
 <!-- ripwire metrics schema=ripwire.metrics/v1: the ranked map with per-symbol metrics. est_tokens=: price as emitted (an upper bound under compact). root=: p= relative to it. pr_iters=N: PageRank iterations. <inv listed= unlisted=>: files the ranked rows show / do not (sum = files=), each named or counted below. <entry p= n=>: a program entry by its language's convention (C/Go/Rust main, Java/C# static main, a script main its module scope calls, __main__.py), callees as c rows; manifest entries not read. <ls p= n= f=>: n= unshown files under dir p=; f= names its code files, the rest (tests, docs, config, test/doc/example dirs) counted. declined=K: K call sites without edges, including inert Elixir quote sites after unquote/unquote_splicing re-entry. external=K: K calls proven outside the tree, no edge. locality_pinned=K: K calls pinned by locality alone (a guess). extent_suspect_syms=K: K defs failed containment, corpus-wide. macro_blanked_files=K: K files indexed from a macro-blanked re-parse. prov=scip|binding|import|split|final-segment: how that <c> edge bound (absent: one unique name); split = one arm of an amb= pick; final-segment = a qualified type matched by last name only. files=/symbols=: files and symbols indexed; edges= distinct call edges; shown= symbols printed, a merged row counting each def; ambiguous= calls split over several defs, corpus-wide; unresolved= calls with in-tree evidence and no edge (every def language-filtered or unreachable, or binding refused); order= rows by rank (important-first, important-last; (auto:fill) = flipped past a size threshold) or by path (stable). skipped_oversize=K: K files over a size ceiling, not indexed. unindexed=ext:N: N text files of that extension no grammar reads (6 extensions at most). unindexed_exts=E: E such extensions in all, the list cut. <s tested=1>: a non-test row an indexed test transitively reaches (absent otherwise, never 0). <c via="name">: that callee matched by name alone (receiver unproven); it does NOT mean the edge is false. sc=: enclosing scope; the full id is p::sc::n (p= of the row or its <f>) and selectors take it. amb=K: K calls split over several defs. locals_floor=1: locals= is a floor. role=hub: in= is 8 or more. s in= out= cx= ccx= loc= params= nest= cbo= lcom4= amp=: callers, callees, cyclomatic/cognitive complexity, lines, parameters, nesting depth, coupled types, class cohesion, callers + co-changed files. ev=/ev_why=: essential complexity (2+: jumps block extract-method; absent: 1) / the jumps behind it, tag:count. ev_floor=1: ev= is a FLOOR; noreturn calls, macro-hidden exits and unresolved gotos are unseen. layer=: built-in arch layer (game|infra|render|math|audio|ai|test) from a dir name in p=; absent if none. l=N: start line; only on a same-name overload's row, one row per body (bodyless decls fold into overloads=). f p=: a file; s t= n=: kind, name; c n=: a resolved callee. s k=: rank. -->
 <!-- t=modscope=a-file's-MODULE-SCOPE(n=<file-scope>):the-statements-outside-every-named-definition,where-a-top-level-call-and-an-anonymous-callback-body's-calls-live;a-CALLER-never-a-callee(nothing-in-the-source-can-name-it)-with-no-body-to-expand;a-file-with-no-such-call-has-no-such-row -->
 <!-- t=type|alias|functype=a-Go-named-type-by-its-written-form:type=a-defined-type-whose-WRITTEN-form-is-not-a-struct/iface/func-literal(type-N-string;type-W-Pair-too,whatever-Pair-is-underneath),alias=type-A=B,functype=type-F-func(...) -->
@@ -1838,7 +1838,7 @@ its nccd (Lakos) is a design heuristic, not independently outcome-validated. ins
 _File->file dependency graph (god-files, cycles)._
 
 ```
-$ ./build/ripwire-merged . --deps
+$ ./build/ripwire . --deps
 <!-- ripwire deps schema=ripwire.deps/v1: file-to-file include/import view, heaviest cone first: <f p= afferent= includes= instab= transitive=>, <health>, <godfiles>, <cycles>. window: shown= total= capped= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). graph_partial=1: measured over resolved edges; unresolved imports could add, merge or remove cycles and change ratios. no_file_edges=LANGS: this build resolves almost none of these languages' imports to files (Go only across go.mod replace); counts over them (ca/ce and violations= of the arch verb) are floors over the resolved edges only, and a coupling number absent beside it is unknown, not zero. unmeasured_files=N: files in the no_file_edges= languages; an edge to or from them is in a count only where this build resolved it. masked_files=N: no_file_edges= files, left out of dep_files=/ccd/nccd/shape and propagation_cost (an edgeless one would count as a cone of one; one with an edge has only a floor). health cyclic_files=N: dep_files= files inside an include cycle (all cycles, not only the listed ones); absent at 0. health containment_edges=N: Rust mod x; pairs whose only directive is the declaration, out of transitive=/cycles/ccd/shape, in Ca/Ce. root=: p= relative to it. files=N: files with at least one include/import directive; this listing's denominator (health files= = corpus). violations=N: edges into a file more unstable by over 0.05 (Martin I); only the worst 12 are listed. from=: the including file of a stable-deps violation; it depends on the more unstable to=. gap=: instab of to= minus instab of from=, project includes only; worst first. godfiles f layer=: built-in arch layer (game|infra|render|math|audio|ai|test) from a dir name in p=; absent if none. layer=test only for a file under a test directory whose dependents are all test paths, by path. health dep_files=N: dependency-capable files (dep_langs=), the ccd/acd/nccd denominator. health dep_langs=: the languages dep_files= counts; compare its numbers across builds only when equal. ccd=/acd=/nccd=: Lakos: sum of per-file transitive cones (self incl) / per file / over a balanced tree's. health shape=: tangled when cyclic_files= is 1 in 20 of dep_files= or more, else nccd= below 1 horizontal, from 1 vertical (a heuristic). health lazy_edges=N: in-closure (lazy) include pairs kept OUT of cones, cycles and ccd; absent at 0. cycle size=/cost=: files in that include cycle / size squared, the cycle's share of ccd=. cycle cut=/cutrefs=: SUGGESTED edge to break it (fewest directives) / that edge's directive count; nothing cut. inc t=: one include/import target as written; one with no edge did not resolve to an indexed file. -->
 <deps schema="ripwire.deps/v1" files="1733" shown="40" capped="1" total="1733" has_more="1" next_offset="40" offset="0" limit="0" root="." no_file_edges="go,swift,java,cs,php,dart,kt,gd,clj" unmeasured_files="392" graph_partial="1">
 <health files="4537" dep_files="3589" ccd="19814" acd="5.5" nccd="0.51" shape="horizontal" cyclic_files="15" masked_files="378" lazy_edges="82" containment_edges="122" dep_langs="cpp,py,ts,go,rs,swift,objc,js,sh,java,rb,cs,c,php,lua,ex,kt"/>
@@ -1874,7 +1874,7 @@ each row's top= is the worst function's BARE name, top_ccx= its cognitive comple
 _Complexity x recent git churn (maintenance pain)._
 
 ```
-$ ./build/ripwire-merged . --hotspots
+$ ./build/ripwire . --hotspots
 <!-- ripwire hotspots schema=ripwire.hotspots/v1: maintenance pain = churn x ccx over window=: <f p= churn= ccx= score= top= top_ccx= top_l=>; unranked_*= no churn/complexity. window: shown= total= capped= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). at=: commit+dirty+shallow. root=: p= relative to it. files=/ranked=: files in the window / those with both churn and complexity; ranked + unranked_no_churn + unranked_no_complexity = files. unranked_no_churn=/unranked_no_complexity=: files left out for no commit in window= / no measured complexity. -->
 <!-- extent_suspect_syms=K on a row = K of the file's functions failed an extent/scope containment check (the map, the bundles and the skipped verb mark each one, reasons and all) and are LEFT OUT of that row's ccx=, score= and top=, so its ccx= is a FLOOR of the file's true sum rather than a total. unranked_extent_suspect= counts files with commits whose every scorable function was left out that way (or whose trusted remainder scores 0), so ranked= + unranked_no_churn= + unranked_no_complexity= + unranked_extent_suspect= = files= exactly. Absent = nothing excluded. -->
 <hotspots schema="ripwire.hotspots/v1" window="12mo@HEAD" files="4537" ranked="1039" unranked_no_churn="0" unranked_no_complexity="3496" unranked_extent_suspect="2" shown="40" capped="1" total="1039" has_more="1" next_offset="40" offset="0" limit="0" root="." at="daff79c9a">
@@ -1903,7 +1903,7 @@ $ ./build/ripwire-merged . --hotspots
 _Token-normalized duplicate bodies._
 
 ```
-$ ./build/ripwire-merged . --clones
+$ ./build/ripwire . --clones
 <!-- ripwire clones schema=ripwire.clones/v1: similar normalized-token bodies: <group type=2|3 gid= tokens= n= similarity=> of <f n= p=>; dup_loc=/dup_pct=. window: shown= total= capped= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). root=: p= relative to it. groups=/type3=: Type-2 and Type-3 group totals over all groups; total= is their sum. exempt_groups=N: groups whose members all sit on fixture/shell-runner paths quality-delta duplication ignores. idiom_groups=/demoted_groups=: groups of one recognized idiom / those quality-delta demotes to minor; floors. clone_groups=N: clusters after merging pairs (rows sharing gid=); a floor under type3_capped=1. total_loc=N: lines of every function body the detector considered; dup_pct= is dup_loc= over it. group exempt=fixture|shell-runner: every member is on such a path; quality-delta duplication ignores it. group idiom=: the recognized shape every member spells: threshold-ladder, switch-name-table, builder-chain, one-statement. -->
 <clones schema="ripwire.clones/v1" groups="164" type3="821" exempt_groups="652" idiom_groups="37" demoted_groups="18" clone_groups="431" dup_loc="8655" total_loc="304188" dup_pct="2.8" shown="80" capped="1" total="985" has_more="1" next_offset="80" offset="0" limit="0" root=".">
 <group type="2" gid="49" tokens="338" n="3">
@@ -1934,7 +1934,7 @@ APPROXIMATION, disclosed: ONE token-class table serves every language (keywords 
 _Per-function size ranking, largest Halstead volume/token entropy/lines first — a size proxy, not a readability order (withdrawn, docs/EVALS.md §8) — a RANKING lens, not a grade._
 
 ```
-$ ./build/ripwire-merged . --biggest-first --limit=8
+$ ./build/ripwire . --biggest-first --limit=8
 <!-- ripwire readability schema=ripwire.readability/v1: Posnett/Hindle/Devanbu lens, largest Halstead volume first (a size proxy): <fn p= n= lines= toks= ops= vocab= vol= ent= posnett=>. window: shown= total= capped= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). root=: p= relative to it. functions=N: functions and methods measured (bodyless declarations are not). -->
 <readability schema="ripwire.readability/v1" functions="22723" shown="8" capped="1" total="22723" has_more="1" next_offset="8" offset="0" limit="8" root=".">
 <fn p="src/graph.h:9667" n="buildGraph" lines="3988" toks="25047" ops="16092" vocab="1252" vol="257734.1" ent="6.80" posnett="0.000"/>
@@ -1967,7 +1967,7 @@ direct_writes= direct_reads= are the subsets in its own body. A cell is a file/n
 _Per function, the non-local MUTABLE state it can reach (transitively), most writes first — unsound by construction, and the legend says where._
 
 ```
-$ ./build/ripwire-merged . --nonlocal-state --limit=8
+$ ./build/ripwire . --nonlocal-state --limit=8
 <!-- ripwire nonlocal-state schema=ripwire.nonlocal-state/v1: per function, the non-local MUTABLE state it reaches: <fn p= n= writes= reads=> over <cell n= p= dir= via=> rows. window: shown= total= capped= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). cells_capped=: 1 = cut. counts_floor=1: every count is a FLOOR, never a total. graph_ambiguous=/graph_unresolved=: resolver gauge. graph_unindexed=N: N files no grammar could read (the map header's unindexed=); their calls raise neither gauge. root=: p= relative to it. cells=N: mutable non-local cells found in the corpus (globals, statics, Python module globals; FLOOR). functions=N: functions reaching at least one cell, directly or via callees (all rows, before paging). direct_writes=/direct_reads=: the writes=/reads= cells this function's OWN body writes/reads. cells_total=N: distinct cells reached (read and written counts once); at most 12 cell rows print. at=/at_dir=: one own-body use site (may be more) and what own-body sites do (can be narrower than dir=). cells_shown=/cells_capped=1: only this many of cells_total= cell rows print (cap 12). unanalyzed_langs=/unanalyzed_files=: indexed languages (and their files) this lens skips; NOT zero cells. -->
 <nonlocal_state schema="ripwire.nonlocal-state/v1" cells="1071" functions="1243" shown="8" capped="1" total="1243" has_more="1" next_offset="8" offset="0" limit="8" graph_ambiguous="3474" graph_unresolved="18839" graph_unindexed="287" counts_floor="1" unanalyzed_langs="c,go,rust,javascript,typescrip … [line truncated: 108 more bytes on this line]
 <fn p="bench/bench_svector_wave.cpp:346" n="main" writes="8" reads="14" direct_writes="0" direct_reads="4" cells_total="14" cells_shown="12" cells_capped="1">
@@ -2002,7 +2002,7 @@ $ ./build/ripwire-merged . --nonlocal-state --limit=8
 _The family join: per function, which of four orthogonal evidence families fire, ranked by how many agree._
 
 ```
-$ ./build/ripwire-merged . --ensemble --limit=8
+$ ./build/ripwire . --ensemble --limit=8
 <!-- ripwire ensemble schema=ripwire.ensemble/v1: four orthogonal evidence families joined, ranked by DISTINCT families fired (no composite score): <s p= n= fam= of= fired=>. window: total= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). syms_capped=/files_capped=: 1 = cut. at=: commit+dirty+shallow. root=: p= relative to it. eligible=N: functions and methods with a body, the denominator; ranked + no_family = eligible. no_family=N: eligible symbols where no family fired. bar_ccx=/bar_loc=/bar_nest=/bar_params=: absolute structural bars: cognitive cx, lines, nesting, params. rcut=N: ranks the worst readability decile covers (1 to 40); rrank= inside it fires structural. rmeasured=N: functions the readability lens measured. hcut=N: file ranks the worst churn decile covers (1 to 40); hrank= inside it fires historical. hranked=N: files with any in-window commit; 0 = historical family unavailable. cfiles=N: indexed files the confusion (atom) pack can read: C/C++/ObjC/CUDA. cscope=N: eligible symbols in those files; 0 = confusion family unavailable. lscope=N: eligible symbols in a language the naming pack reads; 0 = lexical family unavailable. shown_syms=N: symbol rows printed; the rest page with offset=next_offset. shown_files=N: file rows printed (fixed cap 20, not paged); files_capped=1 = rows dropped. e f=: the fired family: structural, lexical, confusion or historical. why=: the measurements that crossed, space separated; rule*N = that rule fired N times. top=: the file's most corroborated symbol (most families on one symbol). top_l=: that symbol's line. top_fam=N: families fired on top=, the stronger claim; file rows rank by it. union_fam=N: distinct families firing anywhere in the file (weaker: may be different symbols). union=: the names of those families. syms=N: symbols in the file where at least one family fired. families=N: evidence families joined; ranked=N: symbols at least one fired on; window=: the git span the historical family read. -->
 <ensemble schema="ripwire.ensemble/v1" families="4" eligible="22723" ranked="8463" no_family="14260" bar_ccx="15" bar_loc="60" bar_nest="4" bar_params="5" rcut="40" rmeasured="22723" hcut="40" hranked="4537" window="12mo" cfiles="1065" cscope="12277" lscope="22723" shown_syms="8" syms_capped="1" sho … [line truncated: 118 more bytes on this line]
 <s p="src/gitmine.h:1795" n="addRootFilesToGitPathIndex" fam="4" of="4" fired="structural,lexical,confusion,historical">
@@ -2033,7 +2033,7 @@ Per function, which of SIX evidence families fire -- structural (shape), lexical
 _THE single wide-angle quality read: six families in one pass, an eligible/ranked shortlist rather than a firehose._
 
 ```
-$ ./build/ripwire-merged . --quality-panel
+$ ./build/ripwire . --quality-panel
 <!-- ripwire quality-panel schema=ripwire.quality-panel/v1: every quality family in ONE report, ranked by distinct families fired: <s p= n= fam= of= fired= join=>; bar_*= thresholds. window: shown= total= capped= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). at=: commit+dirty+shallow. root=: p= relative to it. preset=: strict (5 stable families, cut 2), default (6, cut 2), lenient (6, cut 1); selects, never weights. families=6: evidence families: structural lexical confusion historical colocation state. enabled=/enabled_n=: the families this preset COUNTS, and how many. cut=N: distinct enabled families that must fire for a row to rank. cut_reachable=0: cut= exceeds the evaluable families (of=); a corpus fact, never a clean bill of health. eligible=N: functions/methods with a body; ranked= + below_cut= + no_family= = eligible=, always. ranked=N: rows that met the cut (total=); only shown= print, page with offset=. below_cut=N: fired at least one enabled family, but fewer than cut=. no_family=N: no enabled family fired; unavailable= families were never measured. bar_ccx=/bar_loc=/bar_nest=/bar_params=: absolute bars: cognitive complexity, lines, nesting, params. rcut=/rmeasured=: readability decile width (rrank= under it fires) / functions measured. hcut=/hranked=: file churn decile width / files with an in-window commit (hranked=0 voids historical). window=: the git churn window hrank= and churn= are counted over (RELATIVE to this corpus). ccut=/cranked=: colocation decile width / functions reading any outside definition (0 voids it). cfiles=/cscope=: files the confusion atom rules read / eligible symbols in them. lscope=N: symbols the lexical naming rules read. sfiles=/sscope=: files the state lens reads / symbols in them. cells=N: non-local mutable cells the state lens found. tested_scope=N: symbols an indexed test reaches; at 0 no row can carry join=deep+untested. deep_untested=N: rows carrying join=deep+untested across the WHOLE set, not just this page. e f=: the fired family this evidence row belongs to. counted=1: this preset counts the family toward fam=; 0 = fired, not counted. why=: the measurements that crossed (rule*N fired N times; hrank=/churn= are the file's, inherited). -->
 <quality_panel schema="ripwire.quality-panel/v1" preset="default" families="6" enabled="structural,lexical,confusion,historical,colocation,state" enabled_n="6" cut="2" cut_reachable="1" eligible="22723" ranked="1259" below_cut="7586" no_family="13878" bar_ccx="15" bar_loc="60" bar_nest="4" bar_param … [line truncated: 335 more bytes on this line]
 <s p="src/gitmine.h:1795" n="addRootFilesToGitPathIndex" fam="4" of="6" fired="structural,lexical,confusion,historical">
@@ -2070,7 +2070,7 @@ ATTRIBUTION: the fraction itself is published — it is Beck and Diehl's per-cla
 _The local-reasoning lens: to understand this symbol, how much must you know that is NOT in front of you (ent_ratio= edge share, read_ratio= token-weighted)._
 
 ```
-$ ./build/ripwire-merged . --context-ratio --limit=8
+$ ./build/ripwire . --context-ratio --limit=8
 <!-- ripwire context-ratio schema=ripwire.context-ratio/v1: LOCAL-REASONING lens: the share of a unit's context outside its file: <s p= n= sites= ents_out= ent_ratio= read_ratio=>. window: total= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). syms_capped=/files_capped=/defs_capped=: 1 = cut. counts_floor=1: every count is a FLOOR, never a total. root=: p= relative to it. units=N: symbols measured (the s row population). file_units=N: files measured (the f row population). defs_per_name_cap=N: most defs one name adds (lowest ids); defs_capped=1 = cut, ents=/rtok= floors. body_bytes_per_token=: the bytes-per-token rate rtok= is estimated at. shown_syms=N: symbol rows printed; the rest page with offset=next_offset. shown_files=N: file rows printed (fixed cap 40, not paged); files_capped=1 = rows dropped. ents=N: distinct in-corpus defs its reference sites resolve to, by name (a FLOOR). files=N: distinct files holding those defs (a FLOOR). files_out=N: of files=, those other than the unit's own file. rtok=N: est. tokens of every resolved def, what a reader must read. rtok_out=N: the part of rtok= defined outside the unit's own file. ext=N: referenced names with no in-corpus def; mostly locals/params, NOT external deps; in neither ratio. amb_names=N: referenced names with 2+ defs, each counted (per name; not the map's per-call amb=). ents=N: distinct in-corpus defs the file's sites resolve to (a FLOOR; a union, not the sum of s rows). files=N: distinct files holding those defs (a FLOOR). files_out=N: of files=, those other than this file. rtok=N: est. tokens of every resolved def, what a reader must read. rtok_out=N: the part of rtok= defined outside this file. ext=N: referenced names with no in-corpus def; mostly locals/params, NOT external deps; in neither ratio. amb_names=N: referenced names with 2+ defs, each counted (per name; not the map's per-call amb=). s t=: the unit's kind (fn|cls|...). -->
 <contextratio schema="ripwire.context-ratio/v1" units="33852" file_units="3885" defs_per_name_cap="8" body_bytes_per_token="3.80" shown_syms="8" syms_capped="1" shown_files="40" files_capped="1" total="33852" has_more="1" next_offset="8" offset="0" limit="8" defs_capped="1" counts_floor="1" root="." … [line truncated: 1 more bytes on this line]
 <s p="src/main.cpp:4438" n="dispatchMainBody" t="fn" sites="1169" ents="263" ents_out="240" ent_ratio="0.913" files="82" files_out="81" rtok="282215" rtok_out="246470" read_ratio="0.873" ext="130" amb_names="32"/>
@@ -2101,7 +2101,7 @@ old=fires on the abandoned spelling, new=fires on the chosen one, proxy=old/(old
 _Score the naming-* rules against this repo's own rename history: proxy=old/(old+new) per rule, 0.50 = chance; read pairs= (sample size) first._
 
 ```
-$ ./build/ripwire-merged . --naming-calibration
+$ ./build/ripwire . --naming-calibration
 <!-- ripwire naming-calibration schema=ripwire.naming-calibration/v1: naming lint rules scored against this repo's OWN rename history (a noisy proxy): <r n= old= new= fired= proxy=>. at=: commit+dirty+shallow. probed=0: no history to mine, nothing scored (r= says why); 1 = the git walk ran. pairs=N: labelled rename pairs that survived the join, the SAMPLE SIZE; a small one means nothing. candidates=N: raw substitutions mined from the patch stream before the join; FLOOR when truncated=1. commits=N: non-merge commits walked (the walk stops at 40000). hunks=N: diff hunks with content on both sides. wide_hunks=N: hunks DROPPED for exceeding the 24-line per-side pairing cap; never mined. drop_old_alive=N: candidates dropped: the old spelling is still an indexed name. drop_new_absent=N: candidates dropped: the new spelling is no eligible indexed symbol at HEAD. drop_ambiguous=N: candidates dropped: a name on both sides of several (split, rework, revert). drop_old_skipped=N: candidates dropped: the lens skips the old spelling, no rule could fire. scope=group-rule: the rule judges co-visible names, which one pair cannot evidence; unscored, not 0/0. o=/n=: one labelled pair's old (abandoned) and new (chosen) spelling. sup=N: distinct hunks that showed this substitution. p at=: path:line of the symbol the pair joined to, not a commit (the root at= is). old_fires=: rules that fired on the old spelling; absent when none. new_fires=: rules that fired on the new spelling; absent when none. -->
 <naming-calibration schema="ripwire.naming-calibration/v1" probed="1" pairs="187" candidates="2796" commits="6569" hunks="136344" wide_hunks="1357" drop_old_alive="777" drop_new_absent="1668" drop_ambiguous="164" drop_old_skipped="0" at="daff79c9a">
 <r n="naming-short" old="2" new="5" fired="7" proxy="0.286"/>
@@ -2136,7 +2136,7 @@ A group DECIDES only when its leading style (camel/pascal/snake/screaming) clear
 _The corpus's OWN case-convention vote per (language, kind) group; off-convention names get a mechanical propose= (a suggestion, never a blind rename)._
 
 ```
-$ ./build/ripwire-merged . --naming-consistency --limit=8
+$ ./build/ripwire . --naming-consistency --limit=8
 <!-- ripwire naming-consistency schema=ripwire.naming-consistency/v1: the corpus's case-convention vote per (language, kind): <g lang= kind= style= agree= total=>, <f p= n= propose=> outliers. window: shown= total= capped= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). root=: p= relative to it. component_exempt=N: PascalCase .tsx/.jsx functions (read as JSX components by extension alone), kept out of voting and flagging. groups=N: (language, kind) groups with at least one styled name. candidates=N: multi-token styled names scanned. decided=N: groups whose leading style cleared both the sample and agreement floors. flagged=N: off-convention names in decided groups (the f rows). g why=insufficient-sample|no-clear-convention: which bar a style=UNAVAILABLE group missed. -->
 <naming-consistency schema="ripwire.naming-consistency/v1" groups="32" candidates="17395" decided="11" flagged="735" component_exempt="8" shown="8" capped="1" total="735" has_more="1" next_offset="8" offset="0" limit="8" root=".">
 <g lang="cpp" kind="fn" style="camel" agree="9222" total="9808"/>
@@ -2173,7 +2173,7 @@ off by default OPT-IN --lint MODIFIER (requires --lint; refused alone), OFF by d
 _The opt-in --lint modifier: naming predicates over LOCAL variable names too, C/C++ only, only inside functions already past a size/complexity gate._
 
 ```
-$ ./build/ripwire-merged . --lint --naming-locals
+$ ./build/ripwire . --lint --naming-locals
 <!-- ripwire lint schema=ripwire.lint/v1: AST-only checks, facts not gates: <rule name= count= shown_rows= rows_capped= count_capped=> of <f rule= p= in=>. window: shown= total= capped= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). findings_capped=/rows_capped=/count_capped=: 1 = cut. counts_floor=1: every count is a FLOOR, never a total. root=: p= relative to it. findings=N: findings over the printed rules; a floor when findings_capped=1. findings_next=: the call counting the floored rules' rest (count_capped=1 rules only, 10x per-rule budget). -->
 <lint schema="ripwire.lint/v1" findings="10274" shown="629" capped="1" total="10274" has_more="1" next_offset="629" offset="0" limit="0" counts_floor="1" findings_capped="1" findings_next="--lint --naming-locals --lint-select=magic-number --lint-max-per-rule=50000" naming_locals="1" root=".">
 <rule name="c-style-cast" count="693" shown_rows="35" rows_capped="1"/>
@@ -2208,7 +2208,7 @@ cic (Scalabrino, ICPC 2016 / JSEP 2018) is the Jaccard overlap of two preprocess
 _Functions WITH a doc comment, most name-restating first: c_coeff (high = the comment repeats the name) and cic (Jaccard of comment vs identifier vocabulary), both reported, never collapsed._
 
 ```
-$ ./build/ripwire-merged . --comment-coherence --limit=8
+$ ./build/ripwire . --comment-coherence --limit=8
 <!-- ripwire comment-coherence schema=ripwire.comment-coherence/v1: two comment/name content measures per documented function, most name-restating first: <fn p= n= c_coeff= cic=>. window: shown= total= capped= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). root=: p= relative to it. documented=N: functions with a doc comment, measured (the rows); a FLOOR when unreadable_files= shows. no_comment=N: eligible symbols with no measurable comment; UNAVAILABLE, never scored as zero. words=/restate=: comment word count (c_coeff= denominator, stopwords kept) / words matching a name word. c_terms=/i_terms=/shared=: comment term set / identifiers the body uses / overlap; cic= shared over union. -->
 <comment_coherence schema="ripwire.comment-coherence/v1" documented="6660" no_comment="16063" shown="8" capped="1" total="6660" has_more="1" next_offset="8" offset="0" limit="8" root=".">
 <fn p="src/infra/os.h:551" n="socket" c_coeff="1.000" words="1" restate="1" cic="0.000" c_terms="1" i_terms="5" shared="0"/>
@@ -2241,7 +2241,7 @@ the rows' own legend defines surprising=) = Fowler's SHOTGUN SURGERY in its meas
 _Files that change together in git (hidden coupling)._
 
 ```
-$ ./build/ripwire-merged . --cochange
+$ ./build/ripwire . --cochange
 <!-- ripwire cochange schema=ripwire.cochange/v1: files that change together in git: <pair a= b= together= deg= conf_ab= conf_ba= surprising=>, or for of= <f p= together= conf_rev=>. window: shown= total= capped= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). at=: commit+dirty+shallow. root=: p= relative to it. pairs=N: file pairs with 3+ shared commits in window= (after min_recur), surprising or not. sub_windows=N: equal-commit-count slices of window=; the denominator of recur=. driver=a|b: the side whose changes best imply the other's, look there first; absent on a tie. recur=K: slices of sub_windows= the pair co-changed in; 1 = one burst, not a standing coupling. -->
 <cochange schema="ripwire.cochange/v1" pairs="5219" window="18mo@HEAD" sub_windows="3" shown="30" capped="1" total="5219" has_more="1" next_offset="30" offset="0" limit="0" root="." at="daff79c9a">
 <pair a="src/aliasdef.h" b="src/ingest_sidecap.h" together="5" deg="1.00" conf_ab="1.00" conf_ba="0.03" driver="a" recur="1" surprising="1"/>
@@ -2273,7 +2273,7 @@ Every row carries recur= with or without this flag; the header publishes sub_win
 _Only pairs whose co-change RECURS in 2+ sub-windows of the mined window (sub_windows= is the denominator) — a one-off sprint stops reading like a structural defect._
 
 ```
-$ ./build/ripwire-merged . --cochange --cochange-recur=2
+$ ./build/ripwire . --cochange --cochange-recur=2
 <!-- ripwire cochange schema=ripwire.cochange/v1: files that change together in git: <pair a= b= together= deg= conf_ab= conf_ba= surprising=>, or for of= <f p= together= conf_rev=>. window: shown= total= capped= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). at=: commit+dirty+shallow. root=: p= relative to it. pairs=N: file pairs with 3+ shared commits in window= (after min_recur), surprising or not. sub_windows=N: equal-commit-count slices of window=; the denominator of recur=. driver=a|b: the side whose changes best imply the other's, look there first; absent on a tie. recur=K: slices of sub_windows= the pair co-changed in; 1 = one burst, not a standing coupling. -->
 <cochange schema="ripwire.cochange/v1" pairs="3429" window="18mo@HEAD" sub_windows="3" min_recur="2" shown="30" capped="1" total="3429" has_more="1" next_offset="30" offset="0" limit="0" root="." at="daff79c9a">
 <pair a="test/headsnapcachecheck.sh" b="test/qsnapcachecheck.sh" together="5" deg="1.00" conf_ab="1.00" conf_ba="0.83" driver="a" recur="3" surprising="1"/>
@@ -2299,7 +2299,7 @@ A greedy cover, disclosed as greedy — set cover is NP-hard, so the group count
 _Modularity-violation GROUPS instead of pairs: "X co-changes with {A,B,C}, none of which it depends on" — a greedy cover, disclosed as greedy._
 
 ```
-$ ./build/ripwire-merged . --cochange --cochange-groups
+$ ./build/ripwire . --cochange --cochange-groups
 <!-- ripwire cochange schema=ripwire.cochange/v1: files that change together in git: <pair a= b= together= deg= conf_ab= conf_ba= surprising=>, or for of= <f p= together= conf_rev=>. window: shown= total= capped= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). no_file_edges=LANGS: this build resolves almost none of these languages' imports to files (Go only across go.mod replace); counts over them (ca/ce and violations= of the arch verb) are floors over the resolved edges only, and a coupling number absent beside it is unknown, not zero. unknown_pairs=N: pairs left out of groups= because surprising= is unknown for them, not 0; drop the cochange-groups flag to list them. at=: commit+dirty+shallow. root=: p= relative to it. sub_windows=N: equal-commit-count slices of window=; the denominator of recur=. recur=K: slices of sub_windows= the pair co-changed in; 1 = one burst, not a standing coupling. no_file_edges=LANGS: with unknown_pairs=N, pairs whose side imports are almost never resolved to files and none links them are in no group; groups= may be low. -->
 <cochange schema="ripwire.cochange/v1" groups="143" pairs_covered="1201" cover="greedy" window="18mo@HEAD" sub_windows="3" no_file_edges="java" unknown_pairs="1" shown="30" capped="1" total="143" has_more="1" next_offset="30" offset="0" limit="0" root="." at="daff79c9a">
 <group core="src/cli.h" partners="82">
@@ -2328,7 +2328,7 @@ e.g. --hotspots --since="1 week ago" ranks by RECENT churn (the regression lens)
 _Hotspots scoped to RECENT churn (the regression lens)._
 
 ```
-$ ./build/ripwire-merged . --hotspots --since="2 weeks ago"
+$ ./build/ripwire . --hotspots --since="2 weeks ago"
 <!-- ripwire hotspots schema=ripwire.hotspots/v1: maintenance pain = churn x ccx over window=: <f p= churn= ccx= score= top= top_ccx= top_l=>; unranked_*= no churn/complexity. window: shown= total= capped= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). at=: commit+dirty+shallow. root=: p= relative to it. files=/ranked=: files in the window / those with both churn and complexity; ranked + unranked_no_churn + unranked_no_complexity = files. unranked_no_churn=/unranked_no_complexity=: files left out for no commit in window= / no measured complexity. -->
 <hotspots schema="ripwire.hotspots/v1" window="2 weeks ago" files="4537" ranked="336" unranked_no_churn="3991" unranked_no_complexity="210" shown="40" capped="1" total="336" has_more="1" next_offset="40" offset="0" limit="0" root="." at="daff79c9a">
 <f p="src/graph.h" churn="134" ccx="6346" score="850364" top="buildGraph" top_ccx="2017" top_l="9667"/>
@@ -2365,7 +2365,7 @@ exit 2 on a violation enforce layering rules (exit 2 on violation); the Martin C
 _Enforce layering rules (exit 2 on violation) — run against the repo's own test fixture rules._
 
 ```
-$ ./build/ripwire-merged . --arch=test/archfix/rules.txt
+$ ./build/ripwire . --arch=test/archfix/rules.txt
 <!-- ripwire arch schema=ripwire.arch/v1: layering rules fit: allowed/denied file-to-file edges, each violation a row. graph_partial=1: measured over resolved edges; unresolved imports could add, merge or remove cycles and change ratios. no_file_edges=LANGS: this build resolves almost none of these languages' imports to files (Go only across go.mod replace); counts over them (ca/ce and violations= of the arch verb) are floors over the resolved edges only, and a coupling number absent beside it is unknown, not zero. unmeasured_files=N: files in the no_file_edges= languages; an edge to or from them is in a count only where this build resolved it. masked_files=N: no_file_edges= files, left out of dep_files=/ccd/nccd/shape and propagation_cost (an edgeless one would count as a cone of one; one with an edge has only a floor). -->
 <arch schema="ripwire.arch/v1" layers="2" rules="1" pathRules="0" violations="0" baselined="0" new_violations="0" no_file_edges="go,swift,java,cs,php,dart,kt,gd,clj" unmeasured_files="392" graph_partial="1">
 <metrics modules="1377" typed_modules="676" zone_pain="371" zone_useless="3" zone_ok="137" zone_na="627" zone_unknown="239" propagation_cost="0.002" masked_files="378" note="Martin Ca/Ce/I/A/D + zone (main-sequence heuristic, no independent outcome-based validation — folklore, not proof) + reachab … [line truncated: 632 more bytes on this line]
@@ -2396,7 +2396,7 @@ $ ./build/ripwire-merged . --arch=test/archfix/rules.txt
 _Enforce layering rules (exit 2 on violation) — run against the repo's own test fixture rules._
 
 ```
-$ ./build/ripwire-merged . --arch=test/archfix/rules.txt
+$ ./build/ripwire . --arch=test/archfix/rules.txt
 <!-- ripwire arch schema=ripwire.arch/v1: layering rules fit: allowed/denied file-to-file edges, each violation a row. graph_partial=1: measured over resolved edges; unresolved imports could add, merge or remove cycles and change ratios. no_file_edges=LANGS: this build resolves almost none of these languages' imports to files (Go only across go.mod replace); counts over them (ca/ce and violations= of the arch verb) are floors over the resolved edges only, and a coupling number absent beside it is unknown, not zero. unmeasured_files=N: files in the no_file_edges= languages; an edge to or from them is in a count only where this build resolved it. masked_files=N: no_file_edges= files, left out of dep_files=/ccd/nccd/shape and propagation_cost (an edgeless one would count as a cone of one; one with an edge has only a floor). -->
 <arch schema="ripwire.arch/v1" layers="2" rules="1" pathRules="0" violations="0" baselined="0" new_violations="0" no_file_edges="go,swift,java,cs,php,dart,kt,gd,clj" unmeasured_files="392" graph_partial="1">
 <metrics modules="1377" typed_modules="676" zone_pain="371" zone_useless="3" zone_ok="137" zone_na="627" zone_unknown="239" propagation_cost="0.002" masked_files="378" note="Martin Ca/Ce/I/A/D + zone (main-sequence heuristic, no independent outcome-based validation — folklore, not proof) + reachab … [line truncated: 632 more bytes on this line]
@@ -2422,7 +2422,7 @@ $ ./build/ripwire-merged . --arch=test/archfix/rules.txt
 _Enforce layering rules (exit 2 on violation) — run against the repo's own test fixture rules._
 
 ```
-$ ./build/ripwire-merged . --arch=test/archfix/rules.txt
+$ ./build/ripwire . --arch=test/archfix/rules.txt
 <!-- ripwire arch schema=ripwire.arch/v1: layering rules fit: allowed/denied file-to-file edges, each violation a row. graph_partial=1: measured over resolved edges; unresolved imports could add, merge or remove cycles and change ratios. no_file_edges=LANGS: this build resolves almost none of these languages' imports to files (Go only across go.mod replace); counts over them (ca/ce and violations= of the arch verb) are floors over the resolved edges only, and a coupling number absent beside it is unknown, not zero. unmeasured_files=N: files in the no_file_edges= languages; an edge to or from them is in a count only where this build resolved it. masked_files=N: no_file_edges= files, left out of dep_files=/ccd/nccd/shape and propagation_cost (an edgeless one would count as a cone of one; one with an edge has only a floor). -->
 <arch schema="ripwire.arch/v1" layers="2" rules="1" pathRules="0" violations="0" baselined="0" new_violations="0" no_file_edges="go,swift,java,cs,php,dart,kt,gd,clj" unmeasured_files="392" graph_partial="1">
 <metrics modules="1377" typed_modules="676" zone_pain="371" zone_useless="3" zone_ok="137" zone_na="627" zone_unknown="239" propagation_cost="0.002" masked_files="378" note="Martin Ca/Ce/I/A/D + zone (main-sequence heuristic, no independent outcome-based validation — folklore, not proof) + reachab … [line truncated: 632 more bytes on this line]
@@ -2450,7 +2450,7 @@ naming-uninformative is ONE-SIDED by design: it fires only when a name's subtoke
 _Built-in AST checks (c-cast, goto, unsafe-c-fn, ...)._
 
 ```
-$ ./build/ripwire-merged . --lint
+$ ./build/ripwire . --lint
 <!-- ripwire lint schema=ripwire.lint/v1: AST-only checks, facts not gates: <rule name= count= shown_rows= rows_capped= count_capped=> of <f rule= p= in=>. window: shown= total= capped= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). findings_capped=/rows_capped=/count_capped=: 1 = cut. counts_floor=1: every count is a FLOOR, never a total. root=: p= relative to it. findings=N: findings over the printed rules; a floor when findings_capped=1. findings_next=: the call counting the floored rules' rest (count_capped=1 rules only, 10x per-rule budget). -->
 <lint schema="ripwire.lint/v1" findings="8417" shown="667" capped="1" total="8417" has_more="1" next_offset="667" offset="0" limit="0" counts_floor="1" findings_capped="1" findings_next="--lint --lint-select=magic-number --lint-max-per-rule=50000" root=".">
 <rule name="c-style-cast" count="693" shown_rows="74" rows_capped="1"/>
@@ -2486,7 +2486,7 @@ Every built-in rule from every pack (base checks, atoms-*, cache-*, naming-*, th
 _The built-in rule registry — one row per rule with sev=/category=/rationale/lang=/since=; no corpus needed._
 
 ```
-$ ./build/ripwire-merged . --lint-catalog
+$ ./build/ripwire . --lint-catalog
 <!-- ripwire lint-catalog schema=ripwire.lint-catalog/v1: the built-in lint rule registry: <rule name= sev= cat= lang= since=>. rules=N: rules in the built-in registry, one rule row each, never cut. -->
 <lintcatalog schema="ripwire.lint-catalog/v1" rules="39">
 <rule name="c-style-cast" sev="warn" cat="style" lang="cpp,c,objc,java,cs" since="v0.1.0">a C-style cast — cppcoreguidelines-pro-type-cstyle-cast prefers the explicit static_cast/const_cast/reinterpret_cast</rule>
@@ -2511,7 +2511,7 @@ $ ./build/ripwire-merged . --lint-catalog
 _User lint rules (YAML, ast-grep style) from a directory._
 
 ```
-$ ./build/ripwire-merged . --lint-rules=test/lintrulesfix/rules
+$ ./build/ripwire . --lint-rules=test/lintrulesfix/rules
 <!-- ripwire lint schema=ripwire.lint/v1: AST-only checks, facts not gates: <rule name= count= shown_rows= rows_capped= count_capped=> of <f rule= p= in=>. window: shown= capped= (capped=1 cut). rows_capped=: 1 = cut. root=: p= relative to it. findings=N: findings over the printed rules; a floor when findings_capped=1. -->
 <lint schema="ripwire.lint/v1" findings="5" shown="5" capped="0" root=".">
 <rule name="broken-query" sev="error" count="0" shown_rows="0" rows_capped="0" compiled="0"/>
@@ -2537,7 +2537,7 @@ cache- selects the whole cache-* family. The root then carries selected="K of N"
 _An unresolvable PREFIX refuses (exit 1) with a did-you-mean from a real edit distance (one character off cache-)._
 
 ```
-$ ./build/ripwire-merged . --lint --lint-select=cach-
+$ ./build/ripwire . --lint --lint-select=cach-
 (empty)
 ```
 
@@ -2559,7 +2559,7 @@ paired with --lint-select elsewhere to isolate one family) — applied AFTER --l
 _DROP two families, applied after selection; the raw select=/ignore= you passed rides on the root._
 
 ```
-$ ./build/ripwire-merged . --lint --lint-ignore=naming-,cache-
+$ ./build/ripwire . --lint --lint-ignore=naming-,cache-
 <!-- ripwire lint schema=ripwire.lint/v1: AST-only checks, facts not gates: <rule name= count= shown_rows= rows_capped= count_capped=> of <f rule= p= in=>. window: shown= total= capped= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). findings_capped=/rows_capped=/count_capped=: 1 = cut. counts_floor=1: every count is a FLOOR, never a total. root=: p= relative to it. findings=N: findings over the printed rules; a floor when findings_capped=1. findings_next=: the call counting the floored rules' rest (count_capped=1 rules only, 10x per-rule budget). -->
 <lint schema="ripwire.lint/v1" findings="2777" shown="725" capped="1" total="2777" has_more="1" next_offset="725" offset="0" limit="0" counts_floor="1" findings_capped="1" findings_next="--lint --lint-select=magic-number --lint-max-per-rule=50000" selected="22 of 39" ignore="naming-,cache-" root="." … [line truncated: 1 more bytes on this line]
 <rule name="c-style-cast" count="693" shown_rows="117" rows_capped="1"/>
@@ -2588,7 +2588,7 @@ The default is a runaway guard, not a target. A rule that spends its budget carr
 _A rule that spends its own match budget (here 4, set BELOW the default 5000 so the floor shows on this repo): goto carries count_capped="1", its count= is a FLOOR, and the root names the call that counts the rest — findings_next= re-runs only the floored rules under a 10x budget._
 
 ```
-$ ./build/ripwire-merged . --lint --lint-select=goto --lint-max-per-rule=4
+$ ./build/ripwire . --lint --lint-select=goto --lint-max-per-rule=4
 <!-- ripwire lint schema=ripwire.lint/v1: AST-only checks, facts not gates: <rule name= count= shown_rows= rows_capped= count_capped=> of <f rule= p= in=>. window: shown= total= capped= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). findings_capped=/rows_capped=/count_capped=: 1 = cut. counts_floor=1: every count is a FLOOR, never a total. root=: p= relative to it. findings=N: findings over the printed rules; a floor when findings_capped=1. findings_next=: the call counting the floored rules' rest (count_capped=1 rules only, 10x per-rule budget). -->
 <lint schema="ripwire.lint/v1" findings="4" shown="4" capped="1" total="4" has_more="0" next_offset="4" offset="0" limit="0" counts_floor="1" findings_capped="1" findings_next="--lint --lint-select=goto --lint-max-per-rule=40" selected="1 of 39" select="goto" root=".">
 <rule name="goto" count="4" shown_rows="4" rows_capped="0" count_capped="1"/>
@@ -2616,7 +2616,7 @@ Pure re-serialization (zero new analysis); results count == the native run's fin
 _The SAME findings as SARIF 2.1.0 (what github/codeql-action/upload-sarif consumes) — pure re-serialization, results count == the native run's._
 
 ```
-$ ./build/ripwire-merged . --lint --sarif
+$ ./build/ripwire . --lint --sarif
 {"version":"2.1.0","$schema":"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json","runs":[{"tool":{"driver":{"name":"ripwire","rules":[{"id":"c-style-cast","shortDescription":{"text":"c-style-cast"},"properties":{"builtin":true,"capped":false,"applicable": … [line truncated: 7 more bytes on this line]
 {"id":"goto","shortDescription":{"text":"goto"},"properties":{"builtin":true,"capped":false,"applicable":true}},
 {"id":"do-while","shortDescription":{"text":"do-while"},"properties":{"builtin":true,"capped":false,"applicable":true}},
@@ -2649,7 +2649,7 @@ a finding whose enclosing symbol contains a PROFILE_SCOPE site gains heat_* attr
 _Join MEASURED heat onto --lint findings — runs in a tiny fabricated demo corpus (one cache-pointer-chase-loop finding under a PROFILE_SCOPE site) because a real report needs a RIPWIRE_PROFILE build; the finding inside the profiled scope gains heat_* columns from the report's #PROF_TSV row._
 
 ```
-$ ./build/ripwire-merged . --lint --with-profile=report.txt
+$ ./build/ripwire . --lint --with-profile=report.txt
 #PROF_TSV_BEGIN	one row per scope, aggregated across threads; counters are RAW integers
 scope	file	line	calls	total_ms	l1d_mpki
 walk: chase pass	x.cpp	9	12	48.500	7.250
@@ -2673,7 +2673,7 @@ each row's id= drills down cluster the call graph into cohesive modules (each ro
 _Cluster the call graph into cohesive modules._
 
 ```
-$ ./build/ripwire-merged . --communities
+$ ./build/ripwire . --communities
 <!-- ripwire communities schema=ripwire.communities/v1: call-graph modules (Louvain): <community id= size= dir= label=> of <member t= n= p=>; drill= the verb taking a row's id=; shown_modules=/shown_bridges= <community>/<bridge> rows listed; bridges= community pairs joined by a call edge; isolated= symbols with no call edge: isolated_doc= doc sections, isolated_decl= other bodyless, isolated_header= other header defs, isolated_source= the rest; modules= modules of 2+ symbols; connected_singletons= 1-symbol modules with a call edge; symbols= indexed symbols. window: shown= total= capped= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). modules_capped=/bridges_capped=: 1 = cut. counts_floor=1: every count is a FLOOR, never a total. graph_ambiguous=/graph_unresolved=: resolver gauge. graph_unindexed=N: N files no grammar could read (the map header's unindexed=); their calls raise neither gauge. root=: p= relative to it. pr_iters=N: PageRank iterations. <bridge a= b=>: two module ids joined by call edges. from_label=/to_label=: the label= of a=/b=. <bridge edges=>: call edges between the two, either direction. -->
 <communities schema="ripwire.communities/v1" drill="--community=ID" modules="4783" shown_modules="30" modules_capped="1" bridges="7816" shown_bridges="12" bridges_capped="1" isolated="18476" isolated_decl="5297" isolated_header="3176" isolated_source="4407" isolated_doc="5596" connected_singletons=" … [line truncated: 193 more bytes on this line]
 <community id="5434" size="804" dir="src" label="src::rootRelPath@model.h:2519:209682 [append,write,render]" shown="5" capped="1">
@@ -2704,7 +2704,7 @@ ID is an id= from --communities/--zoom; ids live in 0..partition-1 (the child's 
 _Drill into ONE call-graph community by id — the drill= the --communities output itself advertises._
 
 ```
-$ ./build/ripwire-merged . --community=0
+$ ./build/ripwire . --community=0
 <!-- ripwire community schema=ripwire.community/v1: ONE module id=: <member t= n= p=> ranked members, its <bridge> edges; size= the TRUE count; dir= its members' most common directory (a top-level file's own path); label= dir::name@file:line:byte of its top fan-in member (non-accessors first) [up to 3 top name verbs]; bridges= modules a call edge joins to it; partition= module count incl. singletons (ids 0..partition-1); modules= those of 2+ symbols; shown_bridges= <bridge> rows listed. window: shown= capped= (capped=1 cut). bridges_capped=: 1 = cut. counts_floor=1: every count is a FLOOR, never a total. graph_ambiguous=/graph_unresolved=: resolver gauge. graph_unindexed=N: N files no grammar could read (the map header's unindexed=); their calls raise neither gauge. root=: p= relative to it. pr_iters=N: PageRank iterations. -->
 <community schema="ripwire.community/v1" id="0" size="1" dir=".coderabbit.yaml" label=".coderabbit.yaml::reviews@.coderabbit.yaml:12:928" bridges="0" shown_bridges="0" bridges_capped="0" partition="23259" modules="4783" shown="1" capped="0" pr_iters="39" root="." graph_ambiguous="3474" graph_unresol … [line truncated: 51 more bytes on this line]
 <member t="sec" n="reviews" p=".coderabbit.yaml:12"/>
@@ -2729,7 +2729,7 @@ $ ./build/ripwire-merged . --community=0
 _Nested module hierarchy (multi-level Louvain) + cross-module bridges — levels_shown="2" of levels= BY DEFAULT over the 40 largest top modules (~8 KB, where the whole tree is ~220 KB); a module AT the cut carries children=._
 
 ```
-$ ./build/ripwire-merged . --zoom
+$ ./build/ripwire . --zoom
 <!-- ripwire zoom schema=ripwire.zoom/v1: nested module hierarchy: <module level= id= size= dir= shown= capped=> of <member t= n= p=>; levels_shown= of levels= printed; symbols= = isolated= + size= of all top_modules=. window: shown= total= capped= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). counts_floor=1: every count is a FLOOR, never a total. graph_ambiguous=/graph_unresolved=: resolver gauge. graph_unindexed=N: N files no grammar could read (the map header's unindexed=); their calls raise neither gauge. pr_iters=N: PageRank iterations. children=K: K child modules below the levels_shown= cut, unprinted. next=: the one pasteable follow-up. -->
 <zoom schema="ripwire.zoom/v1" levels="5" levels_shown="2" top_modules="1613" symbols="39826" isolated="18476" shown="40" capped="1" total="1613" has_more="1" next_offset="40" offset="0" limit="0" pr_iters="39" graph_ambiguous="3474" graph_unresolved="18839" graph_unindexed="287" counts_floor="1" ne … [line truncated: 24 more bytes on this line]
 <module level="4" id="1829" size="9817" dir="./src">
@@ -2763,7 +2763,7 @@ $ ./build/ripwire-merged . --zoom
 _Architecture summary (modules, god-files, cycles) as markdown._
 
 ```
-$ ./build/ripwire-merged . --report
+$ ./build/ripwire . --report
 <!-- ripwire markdown: no run of 4-or-more backticks in this output — safe to embed inside a wider fence -->
 
 # ripwire architecture report
@@ -2792,7 +2792,7 @@ Call-graph isolate provenance: 5297 declaration, 3176 header, 4407 source, 5596 
 _Cross-module call seams no test reaches. NOW carries seam_pairs/shown/capped._
 
 ```
-$ ./build/ripwire-merged . --seams
+$ ./build/ripwire . --seams
 <!-- ripwire seams schema=ripwire.seams/v1: cross-directory call edges NO test reaches: <seam from= to= untested= shown= capped=> of <edge caller= p= callee= cp=>. window: shown= total= capped= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). counts_floor=1: every count is a FLOOR, never a total. graph_ambiguous=/graph_unresolved=: resolver gauge. graph_unindexed=N: N files no grammar could read (the map header's unindexed=); their calls raise neither gauge. root=: p= relative to it. pr_iters=N: PageRank iterations. modules=N: directories holding indexed symbols (a module = parent dir). bridges=N: cross-directory call edges, tested or not; untested= is those no test reaches. test_files=N: test files whose calls seed the reach; 0 means every seam reads untested. seam_pairs=N: directed dir pairs with an untested edge (the seam rows' total). doc_links=N: cross-directory links between two document sections, not in bridges= or untested= (no test exercises a document link); absent at 0. <file-scope> (t=modscope): a file's MODULE SCOPE — where a top-level call and an anonymous callback body's calls live; a CALLER, never a callee, with no body to expand. -->
 <seams schema="ripwire.seams/v1" modules="1372" bridges="5077" untested="2588" doc_links="81" test_files="3740" seam_pairs="39" shown="20" capped="1" total="39" has_more="1" next_offset="20" offset="0" limit="0" pr_iters="39" root="." graph_ambiguous="3474" graph_unresolved="18839" graph_unindexed=" … [line truncated: 22 more bytes on this line]
 <seam from="src" to="src/infra" untested="2420" shown="5" capped="1">
@@ -2821,7 +2821,7 @@ $ ./build/ripwire-merged . --seams
 _Module (directory) dependency graph as a Mermaid diagram._
 
 ```
-$ ./build/ripwire-merged . --mermaid
+$ ./build/ripwire . --mermaid
 %% ripwire --mermaid: module (directory) dependency graph — node = dir (symbol count), edge = inter-module calls (>= 3). Render at mermaid.live.
 flowchart LR
   subgraph sg0 ["src"]
@@ -2852,7 +2852,7 @@ bf=1 = one person holds >80% of weighted commits. Files with authors=1 (determin
 _Bus-factor: recency-weighted author ownership per file._
 
 ```
-$ ./build/ripwire-merged . --owners
+$ ./build/ripwire . --owners
 <!-- ripwire owners schema=ripwire.owners/v1: recency-weighted author ownership (half-life 6mo): <f p= authors= bf= top= share=>; bf=1 = one person holds it. at=: commit+dirty+shallow. root=: p= relative to it. files=N: files analysed. files=N: single-author files folded into this one row; detail=1 lists each. -->
 <owners schema="ripwire.owners/v1" files="4537" root="." at="daff79c9a">
 <uniform authors="1" bf="1" share="1.00" files="3495"/>
@@ -2883,7 +2883,7 @@ $ ./build/ripwire-merged . --owners
 _Internal functions with no caller found in the index — a name-based graph reading, not a confidence score. NOTE the filter is a path-COMPONENT match: 'src' matches any .../src/... segment; use ./src to pin the root directory._
 
 ```
-$ ./build/ripwire-merged . --dead-code=src
+$ ./build/ripwire . --dead-code=src
 <!-- ripwire dead-code schema=ripwire.dead-code/v1: internal-linkage functions with no caller found in the index (not a confidence score): <d n= t= p= l=>; filter= path component. window: shown= total= (capped=1 cut). counts_floor=1: every count is a FLOOR, never a total. graph_ambiguous=/graph_unresolved=: resolver gauge. graph_unindexed=N: N files no grammar could read (the map header's unindexed=); their calls raise neither gauge. value-ref-excluded=N: internal functions kept off because a table, field or argument in another function or at file scope holds them (matched by name, not a proven call); a floor. root=: p= relative to it. evidence=: the rule every row met, internal linkage and no caller in the index; verify before deleting. register-macro-excluded=N: symbols skipped as self-registering test/bench macros (TEST, BENCHMARK...); a floor. exported linkage=exported evidence=no-non-test-caller: PUBLIC free functions of the filtered files with no non-test caller in the graph, <e> rows after d/to; not dead, not in count=, code outside the tree may call them (zero means none found here); total= found, shown= printed (capped=1 rows cut), files= read of files_total= filtered files holding a non-internal free function with no non-test caller (first by path; total=0 can follow), unseen=N a floor on text files unread, unseen_by= the cap or failure behind each, extra=skipped verdicts fixed by indexed files so unindexed ones unread (counts, at= are floors). e n= t= p= l= v=unused no mention in any text file under the root outside its def (prose docs not read)|test-only only tests|file-only same-file words only|unknown why= names what may reach it: string (__all__, getattr, a registry key)|value|framework (decorator, hook)|import (re-export)|barrel|api|name|by-name|declined|built-name|dispatch|members|manifest|in-file|unimported|unseen; tests= text= str= imp= same= word counts, defs= overloads, at= sites to read. count=N: candidates meeting evidence= (a floor). -->
 <dead-code schema="ripwire.dead-code/v1" count="1" evidence="internal-linkage+zero-callers" register-macro-excluded="0" value-ref-excluded="10" filter="src" root="." graph_ambiguous="3474" graph_unresolved="18839" graph_unindexed="287" counts_floor="1">
 <d n="unused_helper" t="fn" p="test/archmetricsfix/src/orphan/util.cpp" l="1"/>
@@ -2917,7 +2917,7 @@ On a tree that DIFFERS from HEAD it computes the HEAD delta FIRST and REFUSES (e
 _REFUSES, exit 1: this sandbox tree is already regressed, and pinning here would swallow that debt into the floor so every later delta read clean. It names how many gating findings it would absorb, the first of them, and the way forward._
 
 ```
-$ ./build/ripwire-merged . --quality-baseline
+$ ./build/ripwire . --quality-baseline
 (empty)
 ```
 
@@ -2939,7 +2939,7 @@ Refused alone.
 _The consent form: pin anyway. The sidecar is stamped with the dirty pin and the absorbed count, so the fact outlives the process that knew it._
 
 ```
-$ ./build/ripwire-merged . --quality-baseline --allow-dirty
+$ ./build/ripwire . --quality-baseline --allow-dirty
 (empty)
 ```
 
@@ -2956,7 +2956,7 @@ either fold only when it saves a quarter of the bytes. Refused alone.
 _The same clean verdict with what it folded printed back: every stale acknowledgement as an <sa kind= key= why=> row and the full header. The regression-free answer above keeps only stale= and stale_by_kind= (and stale_next= names this call), and folds only when that saves a quarter of the bytes. Refused without --quality-delta._
 
 ```
-$ ./build/ripwire-merged . --quality-delta --show-stale
+$ ./build/ripwire . --quality-delta --show-stale
 <!-- ripwire quality-delta schema=ripwire.quality-delta/v1: only what the change made WORSE vs baseline=: regressions= minor= gating=; <r kind= sym= p= was= now= gating= bar=>, <sa> acked. value-ref-excluded=N: internal functions kept off because a table, field or argument in another function or at file scope holds them (matched by name, not a proven call); a floor. at=: commit+dirty+shallow. stale=N: ack ledger rows whose target no longer applies (sa rows); never gating. preexisting-worse=N: regressions on symbols that existed at baseline; they gate when major. new-symbol=N: NEW code; new-symbol rows never gate, except defect-shape format-arity or a ceiling= row. register-macro-excluded=N: symbols kept out of dead-code as self-registering test/bench macros; a floor. declined-call-excluded=N: symbols kept out of dead-code only because a declined call may mean them; a floor. api-new-surface=N: new PUBLIC symbols; a count, never gates, not in regressions=. renames=/rename_window_commits=: git rename pairs read over that many commits, to re-file baseline and acks. acked_by_rename=/acked_by_content=: acked= suppressions matched via git renames / an equal body hash. renames_window_truncated=1: history is deeper than the rename window, older renames unread. acked=N: findings suppressed by the ack ledger, listed as sa rows; never gating. sa key=/why=: the stale ack's ledger hash / target-gone (names nothing now) or finding-gone (no longer fires). head_basis=identity: the floor is this tree's own snapshot; archived-index-hidden: refused, a tracked path is skip-worktree/assume-unchanged; absent: the archived HEAD tree. -->
 <quality-delta schema="ripwire.quality-delta/v1" baseline="git-HEAD" regressions="0" minor="0" acked="0" stale="169" preexisting-worse="0" new-symbol="0" gating="0" register-macro-excluded="62" api-new-surface="0" at="daff79c9a" renames="67" rename_window_commits="400" acked_by_rename="0" acked_by_c … [line truncated: 115 more bytes on this line]
 <sa kind="api-surface" key="085e3d408c2c4a35" why="target-gone"/>
@@ -2978,14 +2978,14 @@ $ ./build/ripwire-merged . --quality-delta --show-stale
 
 **Answers:** before a PR: report ONLY what your change made worse, across 12 kinds — pair with --test-gate.
 
-Each kind is measured against the baseline (complexity/verbosity/nesting/params/dup/dead/api-surface + error-masking/short-horizon-churn/new-clone-of-reused-helper + placeholder + defect-shape); every finding is classified by ORIGIN: a symbol that EXISTED at the baseline and got worse (preexisting-worse="N", no attribute on the row) vs one that exists only because the code is NEW (new-symbol="N", origin="new-symbol" on the row). A small numeric delta is additionally sev="minor". EXIT 2 ONLY on a major AND unacked row that is preexisting-worse, defect-shape format-arity (any origin) or a new function at the ceiling — the gating="N" header count. New-symbol rows are still PRINTED (they are the debt you are adding — read them); new-symbol rows never gate, except defect-shape format-arity and a new function at the ceiling (4x the bar: ccx 60 or 240 lines, not a moved body, not test code, ceiling= on the row); exit 0 means "nothing that already existed got worse", not "clean". Clone kinds classify by member set (new-symbol only if EVERY member is new); short-horizon-churn is preexisting by construction. LIMIT: origin is canonId (path::scope::name) identity, so a RENAMED/MOVED symbol reads as new and a regression carried in with the move will not gate; a function over the ccx or line bar whose body moved, whole or with a small edit (a clone-sketch match to a body that left its key), reads origin="moved" and never gates. error-masking = a NEW empty/pass/comment-only handler, or log-only (a broad handler whose body only logs and never names the error) or rethrow-only (the sole handler re-throws it unchanged); those two gate only where their precision was measured (Python) and are sev="minor" in every other language. Empty counts Go's `if err != nil {}` on a call's err and Rust's `if let Err(..) = f() {}` / `Err(..) => {}` or `=> ()`, and gates like Python's `except: pass`; log-only counts a Rust Err arm of print/log macros and a C++ catch of `std::cerr <<`, `LOG( x ) <<` or `fprintf( stderr, … )` (sev="minor"). placeholder = a stub the change ADDED (todo!()/unimplemented!(), Kotlin TODO(), NotImplementedException, a bare raise NotImplementedError as a free function's body, a throw/raise/panic/assert saying "not implemented") or a comment line opening with TODO/FIXME that names no issue (#12, ABC-12, a URL); new-symbol by construction, so it never gates. Counted per enclosing symbol, like error-masking: a file-level TODO outside every definition is not counted. defect-shape = a known defect shape the change ADDED, named by defect=: format-arity (a literal std::format/print/format_to, fmt::, rw::emitTo/formatTo or Python "literal".format whose fields do not match its arguments — GATES on any origin, a defect not debt), utf8-cut and dedup-first (C++) and vacuous-assert (Bash test scripts) — report-only, always sev="minor". A site is new only when its text occurs more often than in the baseline: a moved one is not. Test-fixture dirs + doc sections are exempt from dead-code/churn; churn needs COMMITTED thrash evidence (rewritten across recent commits AND again by this diff), never the current edit alone WHICH FLOOR IT COMPARES AGAINST, and a side effect: the sidecar is honored only when the sha it was pinned at EQUALS the current git HEAD (strict equality — an ancestor commit describes a DIFFERENT tree, so everything committed since would read as your regression). A sidecar pinned anywhere else is STALE: this verb then DELETES it from your working tree (self-heal, so the next run does not rediscover the dead pin) and auto-compares the working tree vs git HEAD instead. Re-pin with --quality-baseline. The read-only MCP quality_delta verb applies the SAME staleness test but never deletes. A sidecar at the current HEAD that ANOTHER ripwire build pinned (its producer stamp names other sources — a dead set depends on how calls were resolved) is FOREIGN: both arms ignore it, never delete it, and auto-compare vs git HEAD. Which floor was actually used is on every report as baseline=: sidecar | git-HEAD | git-HEAD (stale sidecar removed) | git-HEAD (stale sidecar ignored) | git-HEAD (foreign sidecar ignored) — the stale two say a stale sidecar existed, and 'removed' means the file is gone. A non-git root has no HEAD to fall back to, so its sidecar is honored whenever this build pinned it; without one there, or with another build's, the verb exits 1.
+Each kind is measured against the baseline (complexity/verbosity/nesting/params/dup/dead/api-surface + error-masking/short-horizon-churn/new-clone-of-reused-helper + placeholder + defect-shape); every finding is classified by ORIGIN: a symbol that EXISTED at the baseline and got worse (preexisting-worse="N", no attribute on the row) vs one that exists only because the code is NEW (new-symbol="N", origin="new-symbol" on the row). A small numeric delta is additionally sev="minor". EXIT 2 ONLY on a major AND unacked row that is preexisting-worse, defect-shape format-arity (any origin) or a new function at the ceiling — the gating="N" header count. New-symbol rows are still PRINTED (they are the debt you are adding — read them); new-symbol rows never gate, except defect-shape format-arity and a new function at the ceiling (4x the bar: ccx 60 or 240 lines, not a moved body, not test code, ceiling= on the row); exit 0 means "nothing that already existed got worse", not "clean". Clone kinds classify by member set (new-symbol only if EVERY member is new); short-horizon-churn is preexisting by construction. LIMIT: origin is canonId (path::scope::name) identity; a function RENAMED or MOVED with its body unchanged (whitespace and its own name aside: one body that left its key, matched to one new key) keeps its identity and the move reports nothing (and a file rename git recorded keeps each symbol in it under its own name, twins and changed bodies included), while one whose body also changed reads as new and a regression carried in with it will not gate; a function over the ccx or line bar whose body moved with a small edit (a clone-sketch match to a body that left its key) reads origin="moved" and never gates. error-masking = a NEW empty/pass/comment-only handler, or log-only (a broad handler whose body only logs and never names the error) or rethrow-only (the sole handler re-throws it unchanged); those two gate only where their precision was measured (Python) and are sev="minor" in every other language. Empty counts Go's `if err != nil {}` on a call's err and Rust's `if let Err(..) = f() {}` / `Err(..) => {}` or `=> ()`, and gates like Python's `except: pass`; log-only counts a Rust Err arm of print/log macros and a C++ catch of `std::cerr <<`, `LOG( x ) <<` or `fprintf( stderr, … )` (sev="minor"). facet="failure-default": a read, parse or spawn failure returned as an empty success (a TypeScript catch or .catch returning []/null/{}/false/0/'' around JSON.parse/fs reads/exec/spawn/fetch, in a function typed to return an array/boolean/object; a C++ value_or( empty ) on a file read); it never gates by itself. placeholder = a stub the change ADDED (todo!()/unimplemented!(), Kotlin TODO(), NotImplementedException, a bare raise NotImplementedError as a free function's body, a throw/raise/panic/assert saying "not implemented") or a comment line opening with TODO/FIXME that names no issue (#12, ABC-12, a URL); new-symbol by construction, so it never gates. Counted per enclosing symbol, like error-masking: a file-level TODO outside every definition is not counted. defect-shape = a known defect shape the change ADDED, named by defect=: format-arity (a literal std::format/print/format_to, fmt::, rw::emitTo/formatTo or Python "literal".format whose fields do not match its arguments — GATES on any origin, a defect not debt), utf8-cut and dedup-first (C++) and vacuous-assert (Bash test scripts) — report-only, always sev="minor". A site is new only when its text occurs more often than in the baseline: a moved one is not. Test-fixture dirs + doc sections are exempt from dead-code/churn; churn needs COMMITTED thrash evidence (rewritten across recent commits AND again by this diff), never the current edit alone WHICH FLOOR IT COMPARES AGAINST, and a side effect: the sidecar is honored only when the sha it was pinned at EQUALS the current git HEAD (strict equality — an ancestor commit describes a DIFFERENT tree, so everything committed since would read as your regression). A sidecar pinned anywhere else is STALE: this verb then DELETES it from your working tree (self-heal, so the next run does not rediscover the dead pin) and auto-compares the working tree vs git HEAD instead. Re-pin with --quality-baseline. The read-only MCP quality_delta verb applies the SAME staleness test but never deletes. A sidecar at the current HEAD that ANOTHER ripwire build pinned (its producer stamp names other sources — a dead set depends on how calls were resolved) is FOREIGN: both arms ignore it, never delete it, and auto-compare vs git HEAD. Which floor was actually used is on every report as baseline=: sidecar | git-HEAD | git-HEAD (stale sidecar removed) | git-HEAD (stale sidecar ignored) | git-HEAD (foreign sidecar ignored) — the stale two say a stale sidecar existed, and 'removed' means the file is gone. A non-git root has no HEAD to fall back to, so its sidecar is honored whenever this build pinned it; without one there, or with another build's, the verb exits 1.
 
 **Try it**
 
 _On a CLEAN tree: nothing got worse, exit 0. The gating shape is in the sandbox section below._
 
 ```
-$ ./build/ripwire-merged . --quality-delta
+$ ./build/ripwire . --quality-delta
 <!-- ripwire quality-delta schema=ripwire.quality-delta/v1: only what the change made WORSE vs baseline=: regressions= minor= gating=; <r kind= sym= p= was= now= gating= bar=>, <sa> acked. at=: commit+dirty+shallow. stale=N: ack ledger rows whose target no longer applies (sa rows); never gating. stale_by_kind=: stale= split by ack kind (kind:N,...); the sa rows are collapsed. stale_next=: the call printing the sa rows and the full header. head_basis=identity: the floor is this tree's own snapshot; archived-index-hidden: refused, a tracked path is skip-worktree/assume-unchanged; absent: the archived HEAD tree. -->
 <quality-delta schema="ripwire.quality-delta/v1" baseline="git-HEAD" regressions="0" gating="0" stale="169" at="daff79c9a" head_basis="identity" stale_by_kind="api-surface:24,complexity:12,dead-code:9,duplication:62,nesting:3,new-clone-of-reused-helper:19,params:1,short-horizon-churn:9,verbosity:30" … [line truncated: 43 more bytes on this line]
 </quality-delta>
@@ -2996,8 +2996,8 @@ $ ./build/ripwire-merged . --quality-delta
 **Caveats (stated by the binary):**
 
 - new-symbol rows never gate, except defect-shape format-arity and a new function at the ceiling (4x the bar: ccx 60 or 240 lines, not a moved body, not test code, ceiling= on the row);
-- LIMIT: origin is canonId (path::scope::name) identity, so a RENAMED/MOVED symbol reads as new and a regression carried in with the move will not gate;
-- a function over the ccx or line bar whose body moved, whole or with a small edit (a clone-sketch match to a body that left its key), reads origin="moved" and never gates.
+- LIMIT: origin is canonId (path::scope::name) identity;
+- a function over the ccx or line bar whose body moved with a small edit (a clone-sketch match to a body that left its key) reads origin="moved" and never gates.
 
 ### `--quality-delta=REV|A..B`
 
@@ -3010,7 +3010,7 @@ $ ./build/ripwire-merged . --quality-delta
 _On a CLEAN tree: nothing got worse, exit 0. The gating shape is in the sandbox section below._
 
 ```
-$ ./build/ripwire-merged . --quality-delta
+$ ./build/ripwire . --quality-delta
 <!-- ripwire quality-delta schema=ripwire.quality-delta/v1: only what the change made WORSE vs baseline=: regressions= minor= gating=; <r kind= sym= p= was= now= gating= bar=>, <sa> acked. at=: commit+dirty+shallow. stale=N: ack ledger rows whose target no longer applies (sa rows); never gating. stale_by_kind=: stale= split by ack kind (kind:N,...); the sa rows are collapsed. stale_next=: the call printing the sa rows and the full header. head_basis=identity: the floor is this tree's own snapshot; archived-index-hidden: refused, a tracked path is skip-worktree/assume-unchanged; absent: the archived HEAD tree. -->
 <quality-delta schema="ripwire.quality-delta/v1" baseline="git-HEAD" regressions="0" gating="0" stale="169" at="daff79c9a" head_basis="identity" stale_by_kind="api-surface:24,complexity:12,dead-code:9,duplication:62,nesting:3,new-clone-of-reused-helper:19,params:1,short-horizon-churn:9,verbosity:30" … [line truncated: 43 more bytes on this line]
 </quality-delta>
@@ -3035,7 +3035,7 @@ A named kind's rows are exactly its rows in a full answer (same code, same bars)
 _A ref range run for two of the twelve kinds only: the named kinds' rows are exactly their rows in the full answer, the header names the others (kinds_skipped=, skipped_why="selector"), and a pass no named kind needs does not run. The replay a memory-stopped range answer hands back (kinds_next=) is this flag. Refused without --quality-delta=A..B._
 
 ```
-$ ./build/ripwire-merged . --quality-delta=HEAD~1..HEAD --quality-kinds=complexity,dead-code
+$ ./build/ripwire . --quality-delta=HEAD~1..HEAD --quality-kinds=complexity,dead-code
 <!-- ripwire quality-delta schema=ripwire.quality-delta/v1: only what the change made WORSE vs baseline=: regressions= minor= gating=; <r kind= sym= p= was= now= gating= bar=>, <sa> acked. value-ref-excluded=N: internal functions kept off because a table, field or argument in another function or at file scope holds them (matched by name, not a proven call); a floor. stale=N: ack ledger rows whose target no longer applies (sa rows); never gating. stale_by_kind=: stale= split by ack kind (kind:N,...); the sa rows are collapsed. stale_next=: the call printing the sa rows and the full header. preexisting-worse=N: regressions on symbols that existed at baseline; they gate when major. new-symbol=N: NEW code; new-symbol rows never gate, except defect-shape format-arity or a ceiling= row. register-macro-excluded=N: symbols kept out of dead-code as self-registering test/bench macros; a floor. declined-call-excluded=N: symbols kept out of dead-code only because a declined call may mean them; a floor. api-new-surface=N: new PUBLIC symbols; a count, never gates, not in regressions=. renames=/rename_window_commits=: git rename pairs read over that many commits, to re-file baseline and acks. acked_by_rename=/acked_by_content=: acked= suppressions matched via git renames / an equal body hash. kinds_skipped=: kinds NOT run, so none of their rows is here and every count covers the rest; a count only they feed is absent. skipped_why=selector (the caller chose; stale acks judged for those kinds only) | memory (see ingest_scope=) | selector,memory (both). acked=N: findings suppressed by the ack ledger, listed as sa rows; never gating. base_ref=/target_ref=: the two resolved full shas a range compared (committed trees; at= omitted). churn=unavailable: range form; short-horizon-churn cannot be measured, so its silence is not no churn. -->
 <quality-delta schema="ripwire.quality-delta/v1" baseline="ref-pair" regressions="0" minor="0" acked="0" stale="21" preexisting-worse="0" new-symbol="0" gating="0" register-macro-excluded="62" api-new-surface="0" base_ref="ea982161307c5d77386c3afc30446d8b970d793c" target_ref="daff79c9acae392a7217be5 … [line truncated: 442 more bytes on this line]
 </quality-delta>
@@ -3058,7 +3058,7 @@ thresholds and arithmetic from PyDriller's deltamaintainability reference implem
 _The Delta Maintainability Model scalar for the WORKING TREE vs HEAD — recorded against a CLEAN tree (the sandbox section shows a real delta). UNAVAILABLE is a stated reason, never 0 or 1._
 
 ```
-$ ./build/ripwire-merged . --dmm
+$ ./build/ripwire . --dmm
 <!-- ripwire dmm schema=ripwire.dmm/v1: Delta Maintainability Model base=→target=: dmm= good/(good+bad) units by size_metric=; <p k= dmm= good= bad= d_low= d_high=>. at=: commit+dirty+shallow. available=0: no score at all (dmm=UNAVAILABLE, reason= says why); never read as 1.000 or 0.000. combine=pooled: root dmm= is summed good over summed good+bad of the 3 properties (ripwire's own). low_loc=/low_cx=/low_params=: a unit is LOW risk at or under these lines / cyclomatic / params. base_units=/base_volume=/target_units=/target_volume=: units with a body and their line span per side. reason=: why no score (no unit's size, complexity or params moved; a tree failed to parse ...). -->
 <dmm schema="ripwire.dmm/v1" base="daff79c9acae392a7217be5271c39dac968bfbd9" target="working-tree" at="daff79c9a" available="0" combine="pooled" size_metric="physical-loc" low_loc="15" low_cx="5" low_params="2" dmm="UNAVAILABLE" good="0" bad="0" base_units="22723" base_volume="304188" target_units=" … [line truncated: 147 more bytes on this line]
 <p k="size" dmm="UNAVAILABLE" good="0" bad="0" d_low="0" d_high="0"/>
@@ -3085,7 +3085,7 @@ $ ./build/ripwire-merged . --dmm
 _NEW FLAG: --ack-only matching nothing REFUSES rather than falling back to acking everything._
 
 ```
-$ ./build/ripwire-merged . --quality-delta --quality-ack --ack-only=zzznope
+$ ./build/ripwire . --quality-delta --quality-ack --ack-only=zzznope
 (empty)
 ```
 
@@ -3106,7 +3106,7 @@ the pseudo-token 'gating' selects exactly what would exit 2. Bare --quality-ack 
 _--ack-only WITHOUT --quality-ack REFUSES loudly (exit 1, the pairing named) — it used to be silently ignored._
 
 ```
-$ ./build/ripwire-merged . --ack-only=gating
+$ ./build/ripwire . --ack-only=gating
 (empty)
 ```
 
@@ -3128,7 +3128,7 @@ The delta compares the working tree against HEAD, so every concurrent writer's u
 _OWNERSHIP partition for a shared tree: every regression here lives in src/infra/, so under a scope naming src/graph.h they ALL print under <out-of-scope> with a do-not-ack banner and never gate — scoped-out-gating= says how many would have._
 
 ```
-$ ./build/ripwire-merged . --quality-delta --scope=src/graph.h
+$ ./build/ripwire . --quality-delta --scope=src/graph.h
 <!-- ripwire quality-delta schema=ripwire.quality-delta/v1: only what the change made WORSE vs baseline=: regressions= minor= gating=; <r kind= sym= p= was= now= gating= bar=>, <sa> acked. value-ref-excluded=N: internal functions kept off because a table, field or argument in another function or at file scope holds them (matched by name, not a proven call); a floor. at=: commit+dirty+shallow. stale=N: ack ledger rows whose target no longer applies (sa rows); never gating. preexisting-worse=N: regressions on symbols that existed at baseline; they gate when major. new-symbol=N: NEW code; new-symbol rows never gate, except defect-shape format-arity or a ceiling= row. register-macro-excluded=N: symbols kept out of dead-code as self-registering test/bench macros; a floor. declined-call-excluded=N: symbols kept out of dead-code only because a declined call may mean them; a floor. api-new-surface=N: new PUBLIC symbols; a count, never gates, not in regressions=. renames=/rename_window_commits=: git rename pairs read over that many commits, to re-file baseline and acks. acked_by_rename=/acked_by_content=: acked= suppressions matched via git renames / an equal body hash. renames_window_truncated=1: history is deeper than the rename window, older renames unread. r surface=: the api-surface tier, new-symbol or contract-change. acked=N: findings suppressed by the ack ledger, listed as sa rows; never gating. r sev=minor: a small numeric delta, counted in minor=, never gating (absent: major). r origin=new-symbol: a finding on NEW code; moved: its body left another name or file, never gating (absent: preexisting-worse). sa key=/why=: the stale ack's ledger hash / target-gone (names nothing now) or finding-gone (no longer fires). r members=/tokens=: a duplication row's clone group (member ids) / their shared normalized-token count. -->
 <quality-delta schema="ripwire.quality-delta/v1" baseline="git-HEAD" regressions="0" minor="0" acked="0" stale="169" preexisting-worse="0" new-symbol="0" gating="0" register-macro-excluded="62" api-new-surface="2" at="daff79c9a+dirty" renames="67" rename_window_commits="400" acked_by_rename="0" acke … [line truncated: 156 more bytes on this line]
 <out-of-scope n="9" would-gate="4" note="not yours - do not ack: these rows lie outside the scope this run named. They are disclosed rather than hidden, they never gate this exit code, and the ack refuses to write them.">
@@ -3158,7 +3158,7 @@ A contract is PER DEFINITION, so a SYM matching several definition sites REFUSES
 _Fast per-symbol post-edit contract check vs git HEAD (unchanged on a clean tree)._
 
 ```
-$ ./build/ripwire-merged . --edit-check=rankGraphTeleport
+$ ./build/ripwire . --edit-check=rankGraphTeleport
 <!-- ripwire edit-check schema=ripwire.edit-check/v1: sym='s contract NOW vs HEAD: status=unchanged|new-symbol|contract-change; <c n= p= incompatible=1 sites_l=> callers. counts_floor=1: every count is a FLOOR, never a total. graph_ambiguous=/graph_unresolved=: resolver gauge. graph_unindexed=N: N files no grammar could read (the map header's unindexed=); their calls raise neither gauge. est_tokens=: price as emitted (an upper bound under compact). at=: commit+dirty+shallow. root=: p= relative to it. next=: the one pasteable follow-up. defs=N: overloads at this site (same file, scope, name) folded into one contract; params compared by MAX. callers=N: callers of sym= (the c rows' total; a floor). t=: sym='s kind (fn|cls|...). -->
 <edit-check schema="ripwire.edit-check/v1" sym="rankGraphTeleport" t="fn" p="src/graph.h:13712" status="unchanged" defs="1" callers="7" incompatible="0" at="daff79c9a" graph_ambiguous="3474" graph_unresolved="18839" graph_unindexed="287" counts_floor="1" root="." next="--test-gate=src/graph.h" est_t … [line truncated: 12 more bytes on this line]
 <c n="runEval" p="src/eval.h:171"/>
@@ -3190,7 +3190,7 @@ disclosed as trailing_newline_folded=true; a second one, a deliberate blank line
 _An unknown TARGET refuses and leaves every file byte-identical._
 
 ```
-$ ./build/ripwire-merged . --replace-symbol-body=DoesNotExist --edit-payload=<scratch>/aux/payload_note.h
+$ ./build/ripwire . --replace-symbol-body=DoesNotExist --edit-payload=<scratch>/aux/payload_note.h
 (empty)
 ```
 
@@ -3209,7 +3209,7 @@ $ ./build/ripwire-merged . --replace-symbol-body=DoesNotExist --edit-payload=<sc
 _Insert BEFORE, with --edit-target-file pinning which same-named definition (here unambiguous — the disambiguator is simply honoured)._
 
 ```
-$ ./build/ripwire-merged . --insert-before-symbol=nonNegativeFloatDescKey --edit-payload=<scratch>/aux/payload_note.h --edit-target-file=src/infra/sortutil.h
+$ ./build/ripwire . --insert-before-symbol=nonNegativeFloatDescKey --edit-payload=<scratch>/aux/payload_note.h --edit-target-file=src/infra/sortutil.h
 {"applied":"insert_before_symbol","symbol":"nonNegativeFloatDescKey","file":"src/infra/sortutil.h","span":{"start":3161,"end":3249},"lines":{"start":77,"end":78},"replaced_bytes":0,"old_file_bytes":8855,"new_file_bytes":8943,"file_eol":"lf","eol_normalized":false,"trailing_newline_folded":false,"sep … [line truncated: 753 more bytes on this line]
 {"n":"benchAdaptive","p":"bench/bench_radix_ab.cpp:157","l":[162]},
 {"n":"radixSortNonNegativeFloatsDesc","p":"src/infra/sortutil.h:108","l":[117]},
@@ -3234,7 +3234,7 @@ Both inserts PAD the block (newlines only, never removed) so it is separated fro
 _Insert immediately AFTER one uniquely-resolved definition; replaced_bytes=0 because the insert verbs never overwrite. The receipt carries the folded post-edit verification (lines=, edit_check, tests_to_run) so the loop closes in one call._
 
 ```
-$ ./build/ripwire-merged . --insert-after-symbol=lessByScoreDescId --edit-payload=<scratch>/aux/payload_note.h
+$ ./build/ripwire . --insert-after-symbol=lessByScoreDescId --edit-payload=<scratch>/aux/payload_note.h
 {"applied":"insert_after_symbol","symbol":"lessByScoreDescId","file":"src/infra/sortutil.h","span":{"start":2641,"end":2729},"lines":{"start":59,"end":61},"replaced_bytes":0,"old_file_bytes":8679,"new_file_bytes":8767,"file_eol":"lf","eol_normalized":false,"trailing_newline_folded":true,"separator_p … [line truncated: 650 more bytes on this line]
 "graph_ambiguous":3474,"graph_unresolved":18839,"graph_unindexed":287,"counts_floor":true},"tests_to_run":[{"p":"test/verify_radix.cpp","hops":1,"run":"bash test/greptiercheck.sh"},
 {"p":"test/adaptivecutshapefix/adaptive_cut_shape_test.cpp","hops":2,"run":"bash test/adaptivecutshapecheck.sh"},
@@ -3262,7 +3262,7 @@ empty payloads refuse, never imply deletion
 _An unknown TARGET refuses and leaves every file byte-identical._
 
 ```
-$ ./build/ripwire-merged . --replace-symbol-body=DoesNotExist --edit-payload=<scratch>/aux/payload_note.h
+$ ./build/ripwire . --replace-symbol-body=DoesNotExist --edit-payload=<scratch>/aux/payload_note.h
 (empty)
 ```
 
@@ -3283,7 +3283,7 @@ RELATIVE (matched against the indexed spelling) or ABSOLUTE (matched against the
 _Insert BEFORE, with --edit-target-file pinning which same-named definition (here unambiguous — the disambiguator is simply honoured)._
 
 ```
-$ ./build/ripwire-merged . --insert-before-symbol=nonNegativeFloatDescKey --edit-payload=<scratch>/aux/payload_note.h --edit-target-file=src/infra/sortutil.h
+$ ./build/ripwire . --insert-before-symbol=nonNegativeFloatDescKey --edit-payload=<scratch>/aux/payload_note.h --edit-target-file=src/infra/sortutil.h
 {"applied":"insert_before_symbol","symbol":"nonNegativeFloatDescKey","file":"src/infra/sortutil.h","span":{"start":3161,"end":3249},"lines":{"start":77,"end":78},"replaced_bytes":0,"old_file_bytes":8855,"new_file_bytes":8943,"file_eol":"lf","eol_normalized":false,"trailing_newline_folded":false,"sep … [line truncated: 753 more bytes on this line]
 {"n":"benchAdaptive","p":"bench/bench_radix_ab.cpp:157","l":[162]},
 {"n":"radixSortNonNegativeFloatsDesc","p":"src/infra/sortutil.h:108","l":[117]},
@@ -3316,7 +3316,7 @@ pass this when you are about to edit again immediately). The MCP spelling is pos
 _The opt-out: the same insert with the folded verification skipped — lines= still rides (it is free), edit_check/tests_to_run do not, and the two pasteable commands stay on stderr._
 
 ```
-$ ./build/ripwire-merged . --insert-after-symbol=lessByScoreDescId --edit-payload=<scratch>/aux/payload_note.h --no-post-check
+$ ./build/ripwire . --insert-after-symbol=lessByScoreDescId --edit-payload=<scratch>/aux/payload_note.h --no-post-check
 {"applied":"insert_after_symbol","symbol":"lessByScoreDescId","file":"src/infra/sortutil.h","span":{"start":2641,"end":2729},"lines":{"start":59,"end":61},"replaced_bytes":0,"old_file_bytes":8767,"new_file_bytes":8855,"file_eol":"lf","eol_normalized":false,"trailing_newline_folded":true,"separator_p … [line truncated: 570 more bytes on this line]
 ```
 
@@ -3337,7 +3337,7 @@ op is one of replace_symbol_body, insert_before_symbol, insert_after_symbol each
 _Neither --dry-run nor --apply: the mode is explicit, so this refuses._
 
 ```
-$ ./build/ripwire-merged . --edit-plan=<scratch>/aux/edit_plan.json
+$ ./build/ripwire . --edit-plan=<scratch>/aux/edit_plan.json
 (empty)
 ```
 
@@ -3352,7 +3352,7 @@ exactly one of the two is required the plan's explicit mode: --dry-run preflight
 _The same plan committed: per-file locks, re-verify-before-write, atomic rename, rollback on a later failure._
 
 ```
-$ ./build/ripwire-merged . --edit-plan=<scratch>/aux/edit_plan.json --apply
+$ ./build/ripwire . --edit-plan=<scratch>/aux/edit_plan.json --apply
 {"schema":"ripwire.edit-plan/v1","mode":"apply","edits":1,"files":1,"callers_union":4,"graph_ambiguous":3474,"graph_unresolved":18839,"graph_unindexed":287,"counts_floor":true,"applied":1,"atomic_files":1,"atomic_scope":"per-file","rollback_on_write_error":true,"recheck_before_each_write":true,"mult … [line truncated: 533 more bytes on this line]
 {"n":"benchAdaptive","p":"bench/bench_radix_ab.cpp:157","l":[162]},
 {"n":"radixSortNonNegativeFloatsDesc","p":"src/infra/sortutil.h:110","l":[119]},
@@ -3371,14 +3371,14 @@ $ ./build/ripwire-merged . --edit-plan=<scratch>/aux/edit_plan.json --apply
 
 **Answers:** "can I delete this?" — one call joining callers, blast radius, tests and history "can I delete this?" — ONE call composing signals the tool already computes for one already-resolved SYM: 1-hop callers=, the transitive --impact blast radius (impact_reaches=), every --uses read/write/import/call/extends site (uses=), how much of the blast radius the tested= lens covers (tested_self=/radius_tested=/radius_untested=), and --dead-code's own zero-caller/internal-linkage shape at defs=1 (dead_code_candidate=).
 
-ambiguous_callers= names callers whose own calls include an ambiguously-resolved one (g.ambOut) — a caveat, not a count of proven-wrong edges. FACTS only: risk= names what was found — none-found (zero callers AND zero uses), possible-callers (none of either, but a call the resolver declined could have meant SYM: its <dc> rows), hedged (none of either, but a name-template lookup, a getattr with an f-string or this['compile' + t], could name SYM: its <pd> rows, or <pdw> for a template too wide to list candidates for), untested-radius (a radius exists and none of it is test-covered), or uses-exist (a radius exists and some of it is tested) — never a go/no-go verdict; unmodelled when nothing was found for a kind used by reading or naming it (a variable, class, struct) whose uses those counts cannot see. callers_floor=/uses_floor= mark a count the index holds evidence of a miss for, and next= is the call that lists the rest. A caller row's sites_at= is its call sites as file:line tokens (p= stays the line where the caller is defined).
+ambiguous_callers= names callers whose own calls include an ambiguously-resolved one (g.ambOut) — a caveat, not a count of proven-wrong edges. FACTS only: risk= names what was found — none-found (zero callers AND zero uses), possible-callers (none of either, but a call the resolver declined could have meant SYM: its <dc> rows), hedged (none of either, but a name-template lookup, a getattr with an f-string or this['compile' + t], could name SYM: its <pd> rows, or <pdw> for a template too wide to list candidates for), untested-radius (a radius exists and none of it is test-covered), or uses-exist (a radius exists and some of it is tested) — never a go/no-go verdict; unmodelled when nothing was found for a kind used by reading or naming it (a variable, class, struct) whose uses those counts cannot see; contract when nothing was found for an interface or abstract method with no body, whose implementors' same-named bodies it also reads (impls=K counts them). callers_floor=/uses_floor= mark a count the index holds evidence of a miss for, and next= is the call that lists the rest. A caller row's sites_at= is its call sites as file:line tokens (p= stays the line where the caller is defined).
 
 **Try it**
 
 _Unknown-symbol refusal shape for --safe-delete._
 
 ```
-$ ./build/ripwire-merged . --safe-delete=DoesNotExist
+$ ./build/ripwire . --safe-delete=DoesNotExist
 (empty)
 ```
 
@@ -3387,7 +3387,7 @@ $ ./build/ripwire-merged . --safe-delete=DoesNotExist
 **Caveats (stated by the binary):**
 
 - ambiguous_callers= names callers whose own calls include an ambiguously-resolved one (g.ambOut) — a caveat, not a count of proven-wrong edges.
-- unmodelled when nothing was found for a kind used by reading or naming it (a variable, class, struct) whose uses those counts cannot see.
+- unmodelled when nothing was found for a kind used by reading or naming it (a variable, class, struct) whose uses those counts cannot see;
 - callers_floor=/uses_floor= mark a count the index holds evidence of a miss for, and next= is the call that lists the rest.
 
 ### `--slice=SYM[:VAR]`
@@ -3401,7 +3401,7 @@ One <s l= k= t=> row per line touching VAR, ranked as the root's order="defuse" 
 _Bare --slice=SYM: the INVENTORY of sliceable locals (<v n= l= t=/>), so a caller can pick VAR._
 
 ```
-$ ./build/ripwire-merged . --slice=rankGraphTeleport
+$ ./build/ripwire . --slice=rankGraphTeleport
 <!-- ripwire slice schema=ripwire.slice/v1: name-based def-use rows of one variable in one definition: <s l= k=def|use|both|scope t= [b= pp= rd=]> (rd= reaching-def lines per reach=cfg|linear), <v n= l= t=> inventory; steps=/depth= flow. at=: commit+dirty+shallow. root=: p= relative to it. sym=/lang=: the sliced definition's name and language; p= is its file:line. vars=N: sliceable local bindings in the definition, one v row each; name one to slice it. counts=as-classified: defs=/uses=/vars=/steps= count what the name classifier rowed; neither floors nor totals. -->
 <slice sym="rankGraphTeleport" p="src/graph.h:13712" t="fn" lang="cpp" schema="ripwire.slice/v1" vars="14" at="daff79c9a" root="." counts="as-classified">
 <v n="alpha" l="13704" t="param"/>
@@ -3438,7 +3438,7 @@ refused alone or on the bare inventory — a flow needs a seed variable). Follow
 _Forward flow: which statements the seed's value reaches, at the default depth bound._
 
 ```
-$ ./build/ripwire-merged . --slice=rankGraphTeleport:teleport --slice-flow=fwd
+$ ./build/ripwire . --slice=rankGraphTeleport:teleport --slice-flow=fwd
 <!-- ripwire slice schema=ripwire.slice/v1: name-based def-use rows of one variable in one definition: <s l= k=def|use|both|scope t= [b= pp= rd=]> (rd= reaching-def lines per reach=cfg|linear), <v n= l= t=> inventory; steps=/depth= flow. at=: commit+dirty+shallow. root=: p= relative to it. sym=/lang=: the sliced definition's name and language; p= is its file:line. order=defuse: seed s rows (no v=) ranked among these rows by def-use coverage (distinct local names on the line) desc, then line; not source order, not a whole-function ranking (measured at chance — docs/EVALS.md) — flow s rows (v=) keep their (d=,l=,v=) order. counts=as-classified: defs=/uses=/vars=/steps= count what the name classifier rowed; neither floors nor totals. -->
 <slice sym="rankGraphTeleport" p="src/graph.h:13712" t="fn" lang="cpp" schema="ripwire.slice/v1" var="teleport" defs="1" uses="3" reach="cfg" flow="fwd" depth="8" steps="7" order="defuse" at="daff79c9a" root="." counts="as-classified">
 <s l="13727" k="use" t="call-arg" rd="13709">
@@ -3474,7 +3474,7 @@ $ ./build/ripwire-merged . --slice=rankGraphTeleport:teleport --slice-flow=fwd
 _--slice-depth without --slice-flow is refused loudly rather than silently ignored._
 
 ```
-$ ./build/ripwire-merged . --slice-depth=3
+$ ./build/ripwire . --slice-depth=3
 (empty)
 ```
 
@@ -3494,7 +3494,7 @@ $ ./build/ripwire-merged . --slice-depth=3
 _Hold a LOCATION, not a name: the enclosing-definition chain at FILE:LINE (a compiler error, a diff hunk, a stack frame), outermost -> innermost._
 
 ```
-$ ./build/ripwire-merged . --at=src/graph.h:13714
+$ ./build/ripwire . --at=src/graph.h:13714
 <!-- ripwire at schema=ripwire.at/v1: enclosing-definition chain at p=:l=: sym= innermost, chain= outermost-first, <s n= t= l= el=> spans. root=: p= relative to it. -->
 <at schema="ripwire.at/v1" p="src/graph.h" l="13714" sym="rankGraphTeleport" chain="1" root=".">
 <s n="rankGraphTeleport" t="fn" l="13712" el="13740"/>
@@ -3519,7 +3519,7 @@ The bundle is BUDGETED by default (8000 tokens, budget_default="1" on the root; 
 _No-LLM review-evidence bundle for the working-tree diff (clean tree = empty)._
 
 ```
-$ ./build/ripwire-merged . --pr-context
+$ ./build/ripwire . --pr-context
 <!-- ripwire pr-context schema=ripwire.pr-context/v1: review bundle per changed file vs base=: symbols, callers, blast radius, tests, owners. counts_floor=1: every count is a FLOOR, never a total. graph_ambiguous=/graph_unresolved=: resolver gauge. graph_unindexed=N: N files no grammar could read (the map header's unindexed=); their calls raise neither gauge. est_tokens=: price as emitted (an upper bound under compact). at=: commit+dirty+shallow. root=: p= relative to it. truncated=: what the trim ladder dropped to fit budget_tokens= (budget-floor-exceeded: still over). direction=: side reviewed: worktree-since-head, head-since-fork or head-since-ref-tip. skipped_mode_only=N: mode-only (chmod) diffs left out of the changed files; renames stay in. trim_level=0-4: trim ladder step taken to fit budget_tokens= (0 none, 4 counts only); raise token-budget. budget_default=1: the default 8000-token budget applied (no token-budget or max-tokens given). files=N: changed files in the diff (shown= of them listed). -->
 <pr-context schema="ripwire.pr-context/v1" base="working-tree" root="." direction="worktree-since-head" files="0" skipped_mode_only="0" budget_tokens="8000" est_tokens="584" trim_level="0" truncated="none" budget_default="1" at="daff79c9a" graph_ambiguous="3474" graph_unresolved="18839" graph_uninde … [line truncated: 27 more bytes on this line]
 <!-- no changed files in the index (clean tree, or the diff touched only non-indexed files) -->
@@ -3545,7 +3545,7 @@ the dirty working tree joins as an implicit extra arm. Pairwise: a changed symbo
 _Pairwise cross-arm conflict sites + suggested landing order (any committish sharing a merge base with HEAD works as an arm; one that does not is reported ok="0", never compared)._
 
 ```
-$ ./build/ripwire-merged . --merge-scout=HEAD~2,HEAD~1
+$ ./build/ripwire . --merge-scout=HEAD~2,HEAD~1
 <!-- ripwire merge-scout schema=ripwire.merge-scout/v1: cross-branch overlap of arms= refs: <arm ref= base= changed= head_conflicts=>, <pair a= b= conflicts= risks=>, <landing order=>. at=: commit+dirty+shallow. head=: the HEAD commit, bare 9-hex sha (at= adds +dirty). ok=1 on an arm row means the comparison RAN, so changed=/head_conflicts= are real and may legitimately be 0 (an empty but materialized tree is a real index); ok=0 means it did not run at all. no-work note=: arm compared and has no divergent work vs its merge base, so no landing slot. -->
 <merge-scout schema="ripwire.merge-scout/v1" arms="2" head="daff79c9a" at="daff79c9a">
 <arm ref="HEAD~2" base="9db2092b7" ok="1" changed="0" head_conflicts="0">
@@ -3578,7 +3578,7 @@ Where --merge-scout says "these branches already conflict", this says "these lan
 _Out-of-range refusal shape for the lane count._
 
 ```
-$ ./build/ripwire-merged . --plan-lanes=99 --task=x
+$ ./build/ripwire . --plan-lanes=99 --task=x
 (empty)
 ```
 
@@ -3601,7 +3601,7 @@ Each line is ranked on its own — no community carve, no bin packing — so the
 _NEW VERB, explicit form: one line per lane, lane boundaries are the ones you wrote (the defensible mode)._
 
 ```
-$ ./build/ripwire-merged . --plan-lanes --brief=<scratch>/aux/lanes_brief.txt
+$ ./build/ripwire . --plan-lanes --brief=<scratch>/aux/lanes_brief.txt
 add a --since filter to the doc-drift verb
 add the CLI parse arm and help text for the new filter
 write regression tests for the new filter
@@ -3624,7 +3624,7 @@ Per local ref (SUBSTR filters ref names): the lines its own divergent work AUTHO
 _Which refs of the `lane/` ref family still hold divergent authored work vs HEAD, with verdicts._
 
 ```
-$ ./build/ripwire-merged . --stray-content=lane/
+$ ./build/ripwire . --stray-content=lane/
 <!-- ripwire stray-content schema=ripwire.stray-content/v1: per local ref, lines/symbols NOT in HEAD: <ref ok= v= base= stray=>; v=unknown = no merge base. at=: commit+dirty+shallow. head=: the HEAD commit, bare 9-hex sha (at= adds +dirty). head_ref=: HEAD's branch (HEAD when detached); that branch itself is not scanned. refs=N: local branches scanned (refs/heads only); unmerged + superseded + merged + unknown = refs. blobs=N: distinct git blobs read for the sweep. unmerged=N: refs whose authored work the live line genuinely lacks. superseded=N: refs whose work the live line re-implemented (removed the same base code). merged=N: refs whose work HEAD already has; omitted from the rows. name=: the local branch. tip=: the branch tip commit (9 hex). date=: the tip's committer date, YYYY-MM-DD. files=N: files with stray lines; rows capped at 12, a more element counts the rest (detail=1 lists all). ref superseded=N>: of this ref's stray= lines, those in files the live line re-implemented. authored=N: lines this ref authored in the file vs its merge base. del=N: base lines this ref removed (0 = pure addition). redone=N: of del=, the base lines HEAD removed too (the supersession evidence). sim=: minhash containment, 0 to 1, of the ref's blob in HEAD's (pure-addition evidence). head-touched=1: the live line changed this path since the merge base. more files=N: N more file rows of this ref withheld; shown + N = the ref's files=; detail=1 lists all. unknown=N: refs that could not be analysed (v=unknown, e.g. no merge base); never counted merged. file p=: the stray file, repo-relative. -->
 <stray-content schema="ripwire.stray-content/v1" head="daff79c9a" head_ref="integration/train-1111e" refs="405" blobs="907" unmerged="43" superseded="2" merged="360" unknown="0" filter="lane/" at="daff79c9a">
 <ref name="lane/arise-result" tip="13292db7a" date="2026-09-23" base="60b65f026" ok="1" v="unmerged" stray="16331" files="18" superseded="55">
@@ -3658,7 +3658,7 @@ $ ./build/ripwire-merged . --stray-content=lane/
 _Select the genuinely-unmerged refs of the `lane/` ref family and feed them to merge-scout for a landing order (a fully merged selection yields an empty landing set — still a measurement, disclosed on the root)._
 
 ```
-$ ./build/ripwire-merged . --stray-content=lane/ --plan
+$ ./build/ripwire . --stray-content=lane/ --plan
 <!-- ripwire landing-plan schema=ripwire.landing-plan/v1: stranded-work landing order across refs, fewest conflicts first. at=: commit+dirty+shallow. -->
 <landing-plan schema="ripwire.landing-plan/v1" head="daff79c9a" refs="405" unmerged="43" superseded="2" merged="360" undetermined="0" scouted="12" bounded="31" scout-ok="1" at="daff79c9a">
 <ref name="lane/arise-result" v="unmerged" stray="16331" files="18" scouted="1"/>
@@ -3694,7 +3694,7 @@ SCOPE is what each ref AUTHORED — the paths `git diff base..tip` reports again
 _Cross-branch ABI-break gate over the `lane/` ref family: struct byte-contract drift on each ref's AUTHORED paths — exit 2 when any drift row is found (the only kind that gates), 0 when the compared refs are clean, and exit 1 if the --stray-content filter matches no ref at all._
 
 ```
-$ ./build/ripwire-merged . --stray-content=lane/ --abi
+$ ./build/ripwire . --stray-content=lane/ --abi
 (empty)
 ```
 
@@ -3708,14 +3708,14 @@ $ ./build/ripwire-merged . --stray-content=lane/ --abi
 
 **Answers:** find which branch's tree defines or mentions SYM, HEAD first which REF's tree defines or mentions SYM — HEAD first, then every local branch, with on-head="0" naming the case the verb exists for: content that lives only on a branch.
 
-Each distinct blob is read ONCE (content-addressed), so N branches cost ~one tree. kind="def" on a HEAD row is the PARSED index's answer (head_labels="index"); on another ref's row (ref_labels="parsed") it is the same extraction run over that ref's blob, once per blob and path, and only for a blob holding a line a loose lexical test calls worth parsing (it only CHOOSES blobs): a blob without one reads kind="ref". kind="text" is such a line no parse read (<unparsed> counts them; --detail=1 lifts the parse guard), never a def. head_labels="lexical" ⇒ HEAD fell back to that lexical test (no indexed def of the name, or a working tree that drifted from HEAD). refs_scanned= is the SCAN denominator (refs read besides HEAD), not a matched count. Read-only; single-root only. A checkout that differs from HEAD is read from disk: each changed path's rows say ref="worktree" and replace HEAD's, at= gains +dirty, and worktree= says whether every one was read. LIMITS: a TREE scan finds only what some ref STILL carries, so hits="0" alone cannot tell a name this repo never had from one it deleted, and content dropped by every tree is invisible. Add --with-history: a <fate> row then says v="never" or v="removed" with the commit, date and file that removed it. Remote-tracking refs are excluded (they mirror local ones); past 512 refs the newest by committer date are read and refs_omitted= counts the rest (the MCP twin's kind=SUBSTR picks which refs are read). LISTING: by default only the kind="def" (and kind="text") rows are listed and the kind="ref" rows counted in one <refs count=N next=...> element, when that page lists MORE definitions than the --whereis-listing=all page under the row cap, or the same ones in strictly fewer bytes; otherwise every hit is listed. On that page a definition line several refs hold (same path, same text) is ONE row with refs="N", and folded= on the root counts the rows it stands for (on the first page, shown + more + folded + refs count = hits); listing=all prints each. PREVIEW: a line over 300 bytes prints t= as its first bytes (cut on a UTF-8 boundary) plus an ellipsis, 200 bytes in all, and the row carries t_bytes= (the whole line's size), when that makes the page shorter than the same page whole; <t_cut rows=N next=...> counts them, and its next= (--whereis-full-text) replays that page with every line whole.
+Each distinct blob is read ONCE (content-addressed), so N branches cost ~one tree. kind="def" on a HEAD row is the PARSED index's answer (head_labels="index"); on another ref's row (ref_labels="parsed") it is the same extraction run over that ref's blob, once per blob and path, and only for a blob holding a line a loose lexical test calls worth parsing (it only CHOOSES blobs): a blob without one reads kind="ref". kind="text" is such a line no parse read (<unparsed> counts them; --detail=1 lifts the parse guard), never a def. head_labels="lexical" ⇒ HEAD fell back to that lexical test (no indexed def of the name, or a working tree that drifted from HEAD). refs_scanned= is the SCAN denominator (refs read besides HEAD), not a matched count. Read-only; single-root only. A checkout that differs from HEAD is read from disk: each changed path's rows say ref="worktree" and replace HEAD's, at= gains +dirty, and worktree= says whether every one was read. LIMITS: a TREE scan finds only what some ref STILL carries, so hits="0" alone cannot tell a name this repo never had from one it deleted, and content dropped by every tree is invisible. Add --with-history: a <fate> row then says v="never" or v="removed" with the commit, date and file that removed it. Remote-tracking refs are excluded (they mirror local ones); past the refs ~2M tree entries allow (HEAD's tree size; at least 16) the newest by committer date are read and refs_omitted= counts the rest (the MCP twin's kind=SUBSTR picks which refs are read; --detail=1 reads every one). LISTING: by default only the kind="def" (and kind="text") rows are listed and the kind="ref" rows counted in one <refs count=N next=...> element, when that page lists MORE definitions than the --whereis-listing=all page under the row cap, or the same ones in strictly fewer bytes; otherwise every hit is listed. On that page a definition line several refs hold (same path, same text) is ONE row with refs="N", and folded= on the root counts the rows it stands for (on the first page, shown + more + folded + refs count = hits); listing=all prints each. PREVIEW: a line over 300 bytes prints t= as its first bytes (cut on a UTF-8 boundary) plus an ellipsis, 200 bytes in all, and the row carries t_bytes= (the whole line's size), when that makes the page shorter than the same page whole; <t_cut rows=N next=...> counts them, and its next= (--whereis-full-text) replays that page with every line whole.
 
 **Try it**
 
 _Which ref's tree defines or mentions SYM — HEAD first, then every local branch. The default lists the kind="def" rows (here the first 60, most on branches, each carrying tip= and date=) and counts the references in <refs count= next=>: on this symbol HEAD's references would fill the 60-row cap before the branch definitions arrive, so the whole list (below) shows fewer definitions, and the default serves the page that shows more of them, whatever its bytes._
 
 ```
-$ ./build/ripwire-merged . --whereis=rankGraphTeleport
+$ ./build/ripwire . --whereis=rankGraphTeleport
 <!-- ripwire whereis schema=ripwire.whereis/v1: every LOCAL ref whose tree holds sym= (refs_scanned=, blobs=), HEAD first: <hit ref= tip= date= p= l= kind= t=>. window: shown= total= capped= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). at=: commit+dirty+shallow. next=: the one pasteable follow-up. hits=N: occurrences in HEAD plus every scanned local ref's full tree (the total rows). on-head=1|0: whether HEAD's tree holds it; 0 beside hits = it lives only on a branch. head_labels=index: HEAD kind= from the parsed index; lexical: text heuristic. ref_labels=parsed: another ref's kind= from the index's own tags parse of its blob (one per blob and path; HEAD's own blob takes HEAD's labels); a blob with no line a loose lexical test calls worth parsing is not parsed and its rows read ref; kind=text: such a line no parse read, never a def. unparsed blobs=N: other refs' blobs holding a line worth parsing that no parse read (past the runaway guard, or the parser could not finish); those lines read kind=text; next= lifts the guard. unparsed rows=N: the kind=text rows those blobs gave. hit t_bytes=N: t= previews an N-byte line (over 300 B): 200 B at most, its first bytes cut on a UTF-8 boundary plus an ellipsis. t_cut rows=N: rows of this page whose t= is a preview (each carries t_bytes=); next= replays this page (same listing, window, rows) with every line whole. more hits=N: rows after this page; page on with offset=next_offset. head_date=: a hit without tip= date= has tip= at=, date= this. -->
 <whereis schema="ripwire.whereis/v1" sym="rankGraphTeleport" on-head="1" refs_scanned="450" blobs="11966" hits="2129213" head_labels="index" shown="60" capped="1" total="2129213" has_more="1" next_offset="60" offset="0" limit="0" ref_labels="parsed" head_date="2026-11-13" at="daff79c9a">
 <unparsed blobs="538" rows="2785" next="--whereis=rankGraphTeleport --detail=1"/>
@@ -3747,7 +3747,7 @@ The listing, window, rows and labels are the page's own, so the <t_cut next=> of
 _The same page with every t= line whole: the page above previews each line over 300 B (200 B and t_bytes=, the <t_cut rows= next=> naming this call), and --whereis-full-text replays it with the same listing, window, rows and labels. MCP: full_text=true._
 
 ```
-$ ./build/ripwire-merged . --whereis=rankGraphTeleport --whereis-listing=all --whereis-full-text
+$ ./build/ripwire . --whereis=rankGraphTeleport --whereis-listing=all --whereis-full-text
 <!-- ripwire whereis schema=ripwire.whereis/v1: every LOCAL ref whose tree holds sym= (refs_scanned=, blobs=), HEAD first: <hit ref= tip= date= p= l= kind= t=>. window: shown= total= capped= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). at=: commit+dirty+shallow. next=: the one pasteable follow-up. hits=N: occurrences in HEAD plus every scanned local ref's full tree (the total rows). on-head=1|0: whether HEAD's tree holds it; 0 beside hits = it lives only on a branch. head_labels=index: HEAD kind= from the parsed index; lexical: text heuristic. ref_labels=parsed: another ref's kind= from the index's own tags parse of its blob (one per blob and path; HEAD's own blob takes HEAD's labels); a blob with no line a loose lexical test calls worth parsing is not parsed and its rows read ref; kind=text: such a line no parse read, never a def. unparsed blobs=N: other refs' blobs holding a line worth parsing that no parse read (past the runaway guard, or the parser could not finish); those lines read kind=text; next= lifts the guard. unparsed rows=N: the kind=text rows those blobs gave. more hits=N: rows after this page; page on with offset=next_offset. head_date=: a hit without tip= date= has tip= at=, date= this. -->
 <whereis schema="ripwire.whereis/v1" sym="rankGraphTeleport" on-head="1" refs_scanned="450" blobs="11966" hits="2129213" head_labels="index" shown="60" capped="1" total="2129213" has_more="1" next_offset="60" offset="0" limit="0" ref_labels="parsed" head_date="2026-11-13" at="daff79c9a">
 <unparsed blobs="538" rows="2785" next="--whereis=rankGraphTeleport --whereis-listing=all --detail=1"/>
@@ -3776,7 +3776,7 @@ The default lists defs when that page lists MORE definitions than all under the 
 _The whole hit list asked for by name: under the same 60-row cap HEAD's references fill the list, so it shows far fewer definitions (here HEAD's one) than the default above (here 60). The default serves the all page only when it shows the same definitions as the defs page in strictly fewer bytes (a tie serves it too)._
 
 ```
-$ ./build/ripwire-merged . --whereis=rankGraphTeleport --whereis-listing=all
+$ ./build/ripwire . --whereis=rankGraphTeleport --whereis-listing=all
 <!-- ripwire whereis schema=ripwire.whereis/v1: every LOCAL ref whose tree holds sym= (refs_scanned=, blobs=), HEAD first: <hit ref= tip= date= p= l= kind= t=>. window: shown= total= capped= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). at=: commit+dirty+shallow. next=: the one pasteable follow-up. hits=N: occurrences in HEAD plus every scanned local ref's full tree (the total rows). on-head=1|0: whether HEAD's tree holds it; 0 beside hits = it lives only on a branch. head_labels=index: HEAD kind= from the parsed index; lexical: text heuristic. ref_labels=parsed: another ref's kind= from the index's own tags parse of its blob (one per blob and path; HEAD's own blob takes HEAD's labels); a blob with no line a loose lexical test calls worth parsing is not parsed and its rows read ref; kind=text: such a line no parse read, never a def. unparsed blobs=N: other refs' blobs holding a line worth parsing that no parse read (past the runaway guard, or the parser could not finish); those lines read kind=text; next= lifts the guard. unparsed rows=N: the kind=text rows those blobs gave. hit t_bytes=N: t= previews an N-byte line (over 300 B): 200 B at most, its first bytes cut on a UTF-8 boundary plus an ellipsis. t_cut rows=N: rows of this page whose t= is a preview (each carries t_bytes=); next= replays this page (same listing, window, rows) with every line whole. more hits=N: rows after this page; page on with offset=next_offset. head_date=: a hit without tip= date= has tip= at=, date= this. -->
 <whereis schema="ripwire.whereis/v1" sym="rankGraphTeleport" on-head="1" refs_scanned="450" blobs="11966" hits="2129213" head_labels="index" shown="60" capped="1" total="2129213" has_more="1" next_offset="60" offset="0" limit="0" ref_labels="parsed" head_date="2026-11-13" at="daff79c9a">
 <unparsed blobs="538" rows="2785" next="--whereis=rankGraphTeleport --whereis-listing=all --detail=1"/>
@@ -3801,14 +3801,14 @@ $ ./build/ripwire-merged . --whereis=rankGraphTeleport --whereis-listing=all
 
 **Answers:** the dark-content dashboard: what is built but switched OFF in this repo the dark-content dashboard: what is BUILT but OFF in this repo.
 
-Harvests all three gate patterns — #ifndef/#define header gates, CMake option(), and getenv() reads — and reports gate, kind (compile/cmake/env), default, the size of the code it guards (#if regions and their LOC), and its read sites. When a name is BOTH a header gate and a CMake option the CMake default WINS (that is what the build actually passes) and both sites are listed. A gate whose default IS another gate's name (#define F_WALLS F_ALL) is resolved: it inherits the master's default and rolls its guarded size up, so a master switch shows <aliases n=..> rather than a misleading loc="0". LIMITS: lexical, not preprocessed — a gate computed at configure time or set only in a CI script shows its in-repo default, never the value your build used. A gate needs a VALUE (#ifndef F / #define F 0) to be a gate: valueless pairs are include guards and are excluded, and a gate read as a VALUE (constexpr bool k = F != 0, then if constexpr) reports regions="0" honestly — its code is a C++ branch, not an #if region. Pair it with --flip=NAME below to size ONE gate instead of listing them all.
+Harvests all three gate patterns — #ifndef/#define header gates, CMake option(), and getenv() reads — and reports gate, kind (compile/cmake/env), default, the size of the code it guards (#if regions and their LOC), and its read sites. When a name is BOTH a header gate and a CMake option the CMake default WINS (that is what the build actually passes) and both sites are listed. A gate whose default IS another gate's name (#define F_WALLS F_ALL) is resolved: it inherits the master's default and rolls its guarded size up, so a master switch shows <aliases n=..> rather than a misleading loc="0". LIMITS: lexical, not preprocessed — a gate computed at configure time or set only in a CI script shows its in-repo default, never the value your build used. A gate needs a VALUE (#ifndef F / #define F 0) to be a gate: valueless pairs are include guards and are excluded, and a gate read as a VALUE (constexpr bool k = F != 0, then if constexpr) reports regions="0" honestly — its code is a C++ branch, not an #if region. Pair it with --flip=NAME below to size ONE gate instead of listing them all. BASH: in .sh/.bash/.zsh every $X / ${X...} expansion is an env read unless the same file assigned X before it (X=, export X=, local/declare/readonly, read, for, mapfile, getopts, printf -v, ((X=…)); read/select/getopts/mapfile also set REPLY/OPTARG/ MAPFILE). An assignment takes effect where its command ends; a prefix X=v cmd is not a write; a function's local/declare hides reads only to that function's end, and a write inside $( ) or ( ) only to that subshell's end. Each read row carries form= (required ${X:?}/${X?}, default ${X:-d}, unset-default ${X-d}, settest ${X:+w}/${X+w} or a -n/-z operand of [ / [[ / test, assign ${X:=d}, plain $X), colon=1|0 (does an EMPTY value count as unset), default= the literal word, and test=n|z; write rows list the name's assignments repo-wide; ambient="1" tags a name Bash or the login always sets (PWD, HOME, BASH_SOURCE, RANDOM and the like). A shell file whose header is a GENERATED/DO-NOT-EDIT banner is skipped (generated_skipped=N). Bash LIMITS: lexical order within one file, no flow — a name set only by eval, by printf -v "$1", in a function defined below the read, or in a sourced file still reads as external (the write rows let a consumer that follows source join them). An expansion nested more than 32 deep in another's word is not read past that depth, and the root counts such files (nesting_cut=N). .zsh files are read with Bash's rules (no zsh-only expansion flags), and a script with no .sh/.bash/.zsh extension (a bare #!/bin/bash file) is not scanned. --flags --json emits the same rows as JSON (raise --limit to lift the site cap).
 
 **Try it**
 
 _The dark-content dashboard: gates BUILT but OFF. CHANGED: no longer invents gates from comments/heredocs, so the count only reflects real ifndef/define, CMake option(), and getenv gates._
 
 ```
-$ ./build/ripwire-merged . --flags
+$ ./build/ripwire . --flags
 <!-- ripwire flags schema=ripwire.flags/v1: BUILT but DARK: <gate name= kind=compile|cmake|env default= dark= regions=/loc=(#if only) reads= p= l=> with <read p= l=> sites. reads_capped=: 1 = cut. next=: the one pasteable follow-up. gates=/dark_gates=: gate rows (never cut) / those whose default keeps the guarded code out of the build. compile=/cmake=/env=: gates by kind: ifndef/define header gate, CMake option(), getenv read. files=N: files this verb scanned for gates (source + CMakeLists), wider than the map's corpus. -->
 <!-- ROWS AND WHAT IS NEVER CUT: the gate rows ARE the answer this verb was asked for and are never windowed, capped or paged, and gates/dark_gates/compile/cmake/env/files on the root plus regions/loc/reads/dark on every gate are counted over the FULL set before any cap exists. What pages is the read SITES under one gate, at 8 a gate by default: a gate whose sites were cut says shown_reads= (the rows this run printed) with reads_capped="1", against the reads= total already on the same element, and the more reads= child keeps naming the remainder. The pair is emitted ONLY on a gate that was cut, never as a capped="0" on the gates that fit. limit=N raises the per gate cap (offset=M skips that many sites in every gate), detail lifts it entirely, and next= on the root is the exact pasteable invocation that shows every site this run dropped. -->
 <flags schema="ripwire.flags/v1" gates="152" dark_gates="143" compile="13" cmake="13" env="126" files="4546" next="--flags --limit=19">
@@ -3826,12 +3826,13 @@ $ ./build/ripwire-merged . --flags
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--flip`, `--limit`
+**Shaped by:** `--flip`, `--json`, `--limit`
 
 **Caveats (stated by the binary):**
 
 - LIMITS: lexical, not preprocessed — a gate computed at configure time or set only in a CI script shows its in-repo default, never the value your build used.
 - A gate needs a VALUE (#ifndef F / #define F 0) to be a gate: valueless pairs are include guards and are excluded, and a gate read as a VALUE (constexpr bool k = F != 0, then if constexpr) reports regions="0" honestly — its code is a C++ branch, not an #if region.
+- a prefix X=v cmd is not a write;
 
 ### `--flip=NAME`
 
@@ -3844,7 +3845,7 @@ Reports #if regions AND the C++ branch sites a value-style gate governs (constex
 _Unknown-gate refusal (exit 1) with a did-you-mean from a real edit distance (one character off RIPWIRE_ASAN)._
 
 ```
-$ ./build/ripwire-merged . --flags --flip=RIPWIRE_ASA
+$ ./build/ripwire . --flags --flip=RIPWIRE_ASA
 (empty)
 ```
 
@@ -3867,7 +3868,7 @@ file:name disambiguates a same-named struct (like --around/--lego). Exit 2 when 
 _The honest refusal (exit 1): Lang is an `enum class`, not a struct — no offsets are fabricated._
 
 ```
-$ ./build/ripwire-merged . --layout=Lang
+$ ./build/ripwire . --layout=Lang
 (empty)
 ```
 
@@ -3890,7 +3891,7 @@ Builds a static field CO-ACCESS affinity graph (one observation per indexed C-fa
 _The cache-locality lens over every aggregate: fields READ TOGETHER but declared FAR APART (split-line / straddle findings, Chilimbi separation weight) — advice only, never a rewrite._
 
 ```
-$ ./build/ripwire-merged . --field-affinity
+$ ./build/ripwire . --field-affinity
 <!-- ripwire field-affinity schema=ripwire.field-affinity/v1: fields read together but declared far apart vs 64-byte lines: <s n= p=> structs, <pair a= b= fns= dist=>, <finding k= f= g=>. window: shown= capped= (capped=1 cut). counts_floor=1: every count is a FLOOR, never a total. root=: p= relative to it. block=64: ASSUMED cache-line bytes; all geometry (dist= wt= ln= lines= findings) is against it. model=lp64-approx: sizes/offsets are the layout verb's LP64 standard-layout MODEL, not the real ABI. weighting=fanin-floor: w= sums 1 + fan-in per co-accessing fn; a reachability proxy, not a frequency. aggregates=N: C-family structs/classes the layout model located a body for (the scanned universe). files=N: C-family files declaring at least one struct/class the modelling pass visited. fns_scanned=N: C-family functions/methods with a readable body scanned for dot/arrow member accesses. accesses=N: member-access sites tied to one aggregate field (FLOOR: bare in-method names uncounted). amb_skipped=N: access sites REFUSED, not guessed: 2+ aggregates declare that field name; in no count here. structs=N: aggregates with 1+ attributed access; the top 20 by sepcost= print (shown=/capped=). findings=N: split-line + straddle findings over ALL structs=, not just the printed rows. min_fns=2: a pair fires split-line only when co-accessed by this many distinct functions. as_loops=N: for-loops the static advance-shape pass classified corpus-wide; report-only, never ranks. as_index=/as_chase=/as_mixed=/as_unknown=: as_loops= by advance shape (chase = pointer chase). agg=: the aggregate keyword (struct, class ...). modeled=1: layout model placed the fields; 0 = affinity only, no geometry, no finding (why= says why). fields=N: fields declared (before the touched-only filter). touched=N: fields with 1+ attributed access; at most 32 f rows print. pairs=N: co-accessed field pairs in all; at most 12 pair rows print (most fns= first). sepcost=: sum over measured pairs of fns x (1 - wt); the struct ranking key. findings=N: this struct's findings, every one printed. size=/align=/lines=: modeled sizeof, alignment, cache lines spanned (modeled=1 only). acc=N: member-access sites attributed to this field (FLOOR). sz=B: the field's modeled size in bytes (absent when the model could not size it). off=/ln=: modeled byte offset and its cache line (off/64); placed=0 instead when the model refused. w=: sum of 1 + fan-in over the co-accessing functions; a static reachability proxy, never a frequency. wt=: separation weight (64 - dist)/64, 0.00 = the two can never share a line; measured=0 instead when unplaced. wt=0.00: split-line fires only when the pair can never share a 64-byte line. w=: the split-line pair's 1 + fan-in weight sum (proxy); straddle rows carry none. off=/sz=/crosses=: straddle field offset, size, and the line its last byte lands on (lines start at off/64). fanin=N: this function's caller count (the w= proxy input). touched=N: distinct fields of this struct the function touches (named in f=); at most 8 fn rows of fns= print. scope=: the function's PROFILE_SCOPE description (first 120 chars), a counter to confirm with. scopes=N: distinct PROFILE_SCOPEs among the co-accessing functions (the scope children). status=: instrumented (a scope exists to measure) or uninstrumented (no witness yet). counter=: the hardware counter to compare across the two layouts. hint=: how to add the missing instrumentation (uninstrumented only). as_stem_ambiguous=/as_stem_unowned=/as_stem_nonptr=: chase names REFUSED - 2+ owners / no owner / owner type has no pointer marker. -->
 <fieldaffinity schema="ripwire.field-affinity/v1" block="64" model="lp64-approx" counts_floor="1" weighting="fanin-floor" aggregates="2700" files="563" fns_scanned="13202" accesses="14442" amb_skipped="44900" structs="1024" shown="20" capped="1" findings="572" min_fns="2" as_loops="4186" as_index="9 … [line truncated: 77 more bytes on this line]
 <s n="Graph" p="src/graph.h" l="70" agg="struct" modeled="1" fields="47" touched="39" fns="157" pairs="741" sepcost="990.88" findings="105" size="1512" align="8" lines="24">
@@ -3925,7 +3926,7 @@ Verifies the CHECKABLE anchors in every markdown file (SUBSTR filters doc paths)
 _Which of this repo's doc claims are now false. CHANGED: row attribute at= renamed to tgt= (at= is now only the root sha stamp)._
 
 ```
-$ ./build/ripwire-merged . --doc-drift
+$ ./build/ripwire . --doc-drift
 <!-- ripwire doc-drift schema=ripwire.doc-drift/v1: markdown anchors that no longer hold: <doc p=> of <a k= l= c= why= ref= want= got= tgt=>; unchecked/dated rows disclose the rest. failed_capped=/weak_capped=: 1 = cut. at=: commit+dirty+shallow. next=: the one pasteable follow-up. docs=N: markdown docs scanned for anchors; docs minus clean = the doc rows. clean=N: docs with no failed anchor (drift and dated 0); not proof every anchor was checked. checked=N: anchors verified against the index; checked + unchecked = anchors. prose=N: value anchors dropped as prose (name not in code); subtracted from anchors=, never checked. corpus=N: files the anchors were checked against (index + config/build exts); 0 = no anchor shape, no scan. drift=/dated=: anchors that no longer hold / anchors skipped as dated (unverifiable by date). unchecked=N: anchors not proved (the unchecked rows give each reason); checked + unchecked = anchors. doc shown_failed=/failed_total=: a rows printed / all failed anchors (drift+dated); cut at 12, detail=1 lifts. a kind=/rec=: dated-record, an author-dated failed anchor in dated= / its evidence: line|block|title|stamp. a sym=: the symbol the doc names on that file:line; line-moved = that symbol no longer spans the line. more weak=N: w rows of this group withheld; shown_weak + N = its n=; detail=1 lists all. shown_weak=N: w rows printed of n= (cut at 12 a doc, weak_capped=1); detail=1 lists all. w resolves-to=: the indexed symbol spanning that line; not proof it is the one the doc meant. unchecked r=/note=: why n= anchors were not proved, and what was still checked for them. dated r=/note=: the dating mark that moved n= failed anchors into dated= instead of drift=. -->
 <doc-drift schema="ripwire.doc-drift/v1" docs="276" clean="245" anchors="7725" checked="3657" unchecked="4068" drift="85" dated="116" prose="26" corpus="4700" at="daff79c9a" next="--doc-drift --detail=1">
 <doc p="docs/research/answer-completeness.md" anchors="187" checked="83" drift="16" dated="0" shown_failed="12" failed_capped="1" failed_total="16">
@@ -3959,7 +3960,7 @@ The fix is always the same one this lane already reads for rec="title"/"stamp": 
 _Which of this repo's doc claims are now false. CHANGED: row attribute at= renamed to tgt= (at= is now only the root sha stamp)._
 
 ```
-$ ./build/ripwire-merged . --doc-drift
+$ ./build/ripwire . --doc-drift
 <!-- ripwire doc-drift schema=ripwire.doc-drift/v1: markdown anchors that no longer hold: <doc p=> of <a k= l= c= why= ref= want= got= tgt=>; unchecked/dated rows disclose the rest. failed_capped=/weak_capped=: 1 = cut. at=: commit+dirty+shallow. next=: the one pasteable follow-up. docs=N: markdown docs scanned for anchors; docs minus clean = the doc rows. clean=N: docs with no failed anchor (drift and dated 0); not proof every anchor was checked. checked=N: anchors verified against the index; checked + unchecked = anchors. prose=N: value anchors dropped as prose (name not in code); subtracted from anchors=, never checked. corpus=N: files the anchors were checked against (index + config/build exts); 0 = no anchor shape, no scan. drift=/dated=: anchors that no longer hold / anchors skipped as dated (unverifiable by date). unchecked=N: anchors not proved (the unchecked rows give each reason); checked + unchecked = anchors. doc shown_failed=/failed_total=: a rows printed / all failed anchors (drift+dated); cut at 12, detail=1 lifts. a kind=/rec=: dated-record, an author-dated failed anchor in dated= / its evidence: line|block|title|stamp. a sym=: the symbol the doc names on that file:line; line-moved = that symbol no longer spans the line. more weak=N: w rows of this group withheld; shown_weak + N = its n=; detail=1 lists all. shown_weak=N: w rows printed of n= (cut at 12 a doc, weak_capped=1); detail=1 lists all. w resolves-to=: the indexed symbol spanning that line; not proof it is the one the doc meant. unchecked r=/note=: why n= anchors were not proved, and what was still checked for them. dated r=/note=: the dating mark that moved n= failed anchors into dated= instead of drift=. -->
 <doc-drift schema="ripwire.doc-drift/v1" docs="276" clean="245" anchors="7725" checked="3657" unchecked="4068" drift="85" dated="116" prose="26" corpus="4700" at="daff79c9a" next="--doc-drift --detail=1">
 <doc p="docs/research/answer-completeness.md" anchors="187" checked="83" drift="16" dated="0" shown_failed="12" failed_capped="1" failed_total="16">
@@ -3992,7 +3993,7 @@ ONE `git log -p` walk over everything reachable from HEAD, tokenizing removed li
 _Same report, with git history splitting stale mentions into deleted-by-commit vs never-existed._
 
 ```
-$ ./build/ripwire-merged . --doc-drift --with-history
+$ ./build/ripwire . --doc-drift --with-history
 <!-- ripwire doc-drift schema=ripwire.doc-drift/v1: markdown anchors that no longer hold: <doc p=> of <a k= l= c= why= ref= want= got= tgt=>; unchecked/dated rows disclose the rest. failed_capped=/weak_capped=: 1 = cut. at=: commit+dirty+shallow. next=: the one pasteable follow-up. docs=N: markdown docs scanned for anchors; docs minus clean = the doc rows. clean=N: docs with no failed anchor (drift and dated 0); not proof every anchor was checked. checked=N: anchors verified against the index; checked + unchecked = anchors. prose=N: value anchors dropped as prose (name not in code); subtracted from anchors=, never checked. corpus=N: files the anchors were checked against (index + config/build exts); 0 = no anchor shape, no scan. drift=/dated=: anchors that no longer hold / anchors skipped as dated (unverifiable by date). unchecked=N: anchors not proved (the unchecked rows give each reason); checked + unchecked = anchors. doc shown_failed=/failed_total=: a rows printed / all failed anchors (drift+dated); cut at 12, detail=1 lifts. a kind=/rec=: dated-record, an author-dated failed anchor in dated= / its evidence: line|block|title|stamp. a sym=: the symbol the doc names on that file:line; line-moved = that symbol no longer spans the line. more weak=N: w rows of this group withheld; shown_weak + N = its n=; detail=1 lists all. shown_weak=N: w rows printed of n= (cut at 12 a doc, weak_capped=1); detail=1 lists all. w resolves-to=: the indexed symbol spanning that line; not proof it is the one the doc meant. unchecked r=/note=: why n= anchors were not proved, and what was still checked for them. dated r=/note=: the dating mark that moved n= failed anchors into dated= instead of drift=. -->
 <doc-drift schema="ripwire.doc-drift/v1" docs="276" clean="250" anchors="7725" checked="3639" unchecked="4086" drift="75" dated="108" prose="26" corpus="4700" at="daff79c9a" next="--doc-drift --detail=1">
 <history probed="1" head="daff79c9a" commits="6569" removed-names="55698"/>
@@ -4026,7 +4027,7 @@ FILE is read directly (like --from-trace's FILE, not through the crawled index),
 _The house PLAN/DESIGN format's STRUCTURE check — never semantics; exit 2 when a card or ledger row gates._
 
 ```
-$ ./build/ripwire-merged . --plan-lint=test/planlintfix/wave.md
+$ ./build/ripwire . --plan-lint=test/planlintfix/wave.md
 <!-- ripwire plan-lint schema=ripwire.plan-lint/v1: structural lint of a plan document: each finding names the section and the rule. at=: commit+dirty+shallow. file=/dialect=: the plan read and whether the PLAN dialect was detected (dialect=0: nothing to lint). cards=/ledger=: card rows found / whether the doc carries a ledger (ledger_line= names its line). git=1: git was available, so the staleness read ran; stale_commits=N: a waiting card N commits behind HEAD is stale. gating=N: findings that fail the plan (exit 2); the rest are advisory. -->
 <plan-lint schema="ripwire.plan-lint/v1" file="test/planlintfix/wave.md" dialect="1" cards="3" ledger="1" ledger_line="21" at="daff79c9a" git="1" stale_commits="20" gating="3">
 <card id="T1" line="10" status="check" tline="12"/>
@@ -4059,7 +4060,7 @@ Each frame binds by its own NAME first (resolved_by="name") and falls back to th
 _Map a pasted stack trace onto indexed symbols. CHANGED: in_corpus= now reports the real count (was 0)._
 
 ```
-$ ./build/ripwire-merged . --from-trace=-
+$ ./build/ripwire . --from-trace=-
 AddressSanitizer:DEADLYSIGNAL
 =================================================================
 ==41337==ERROR: AddressSanitizer: SEGV on unknown address 0x000000000018 (pc 0x000102f4a1c8 bp 0x00016d2f1a40 sp 0x00016d2f19e0 T0)
@@ -4090,7 +4091,7 @@ Runs CMD under `sh -c` (the make trust model: your user, your environment, stdin
 _A command that exits 0: a minimal success record (exit, measured duration, disclosed output tail) and NO bundle — nothing failed, nothing to map._
 
 ```
-$ ./build/ripwire-merged . --run-trace="true"
+$ ./build/ripwire . --run-trace="true"
 <ctx schema="ripwire.from-trace/v1" task="run-trace: true">
 <!-- ripwire from-trace schema=ripwire.from-trace/v1: trace frames mapped to indexed symbols, innermost first; the innermost in-corpus body included. task=: the trace source this bundle maps, verbatim (a file path, stdin, or an MCP label). run exit=: the command's OWN exit code; signal=: the signal that killed it; timed_out=1: the timeout_s= cap did. run duration_ms=: wall clock, MEASURED, not deterministic; timeout_s=: the cap it ran under. run lines=: non-empty captured lines; bytes=: the whole capture; dropped_bytes=: middle bytes the cap dropped. -->
 <run exit="0" duration_ms="716" timeout_s="600" lines="0" bytes="0"/>
@@ -4110,7 +4111,7 @@ default 600 s cap for --run-trace's command (default 600 s; always disclosed as 
 _--run-timeout alone is refused loudly (it only modifies --run-trace)._
 
 ```
-$ ./build/ripwire-merged . --run-timeout=5
+$ ./build/ripwire . --run-timeout=5
 (empty)
 ```
 
@@ -4129,7 +4130,7 @@ A symbol is CANONICALISED to its canonical id on write (the id --for/--expand ke
 _Two definitions carry this name, so the write REFUSES rather than pick one: a note keys ONE canonical id, and an ambiguous selector is refused, never silently narrowed. Every candidate is named, with a runnable retry._
 
 ```
-$ ./build/ripwire-merged . --note-add="gitOneLine: which one?"
+$ ./build/ripwire . --note-add="gitOneLine: which one?"
 (empty)
 ```
 
@@ -4151,7 +4152,7 @@ a target with no matching indexed symbol/file is flagged dangling="1" (legal —
 _List all field notes (write-side memory) — the committed .ripwire_notes at the repo root, each with the sha/branch it was recorded at._
 
 ```
-$ ./build/ripwire-merged . --notes
+$ ./build/ripwire . --notes
 <ctx schema="ripwire.notes/v1">
 <!-- ripwire notes schema=ripwire.notes/v1: field notes by target: <target id= dangling=> holds <note d= sha= branch=>; the kept count comment: notes= rows, targets= <target> rows, dangling= targets matching nothing indexed (listed, surfaced nowhere). dangling=1: matches nothing indexed. -->
 <!-- notes=2 targets=2 dangling=0 -->
@@ -4182,7 +4183,7 @@ $ ./build/ripwire-merged . --notes
 _ONE budget-shared bundle: ranking + top bodies + caller sigs + notes + tests_to_run. CHANGED: <d> rows now carry n=/id=._
 
 ```
-$ ./build/ripwire-merged . --pack-task="add a new output format flag to the CLI"
+$ ./build/ripwire . --pack-task="add a new output format flag to the CLI"
 <ctx schema="ripwire.pack-task/v1" task="add a new output format flag to the CLI" route="subtoken+body:declined(add;189-carriers,62-defs)" root="." est_tokens="4066" budget_tokens="6000">
 <!-- ripwire pack-task schema=ripwire.pack-task/v1: one-call task bundle for task= under budget_tokens=: <sigs>
 <d n= sc= l= p=> ranking, <far>
@@ -4219,7 +4220,7 @@ The task's ranked surface is carved along the call graph's own Louvain communiti
 _Fan-out form: one shared core + 3 per-agent slices carved along call-graph communities._
 
 ```
-$ ./build/ripwire-merged . --pack-task="add a new output format flag to the CLI" --partition=3
+$ ./build/ripwire . --pack-task="add a new output format flag to the CLI" --partition=3
 <ctx-partitions schema="ripwire.pack-task/v1" partitions="3" requested="3" core_symbols="6" surface="42" modules="24" split="0" budget_per_agent_tokens="6000" core_budget_tokens="2040" partition_budget_tokens="3960" total_bytes="21078" overlap_mean="0.010" overlap_max="0.031" shared_symbols="2" unio … [line truncated: 36 more bytes on this line]
 <!-- ripwire pack-task schema=ripwire.pack-task/v1: N minimally overlapping agent bundles carved along call-graph communities plus one shared core; each <bundle> wraps a <ctx>; bundle role=core|partition i= symbols= modules= bytes= tokens=: one agent's ctx, symbols= ids assigned, bytes= its size; tokens= = est_tokens= = bytes/2.36 (flat, the densest rate; the inner ctx est_tokens= is language-weighted). Inner ctx task= root= budget_tokens= dropped_positive=: the task, p= base, the slice's token target, ranked candidates its budget cut. of_top=: rows ranked (far) / bodies (callers); s rel=caller|callee shared=: 1-hop edge, bodies reached (absent at 1). window: shown= total= capped= (capped=1 cut). run_unknown=1: no runner derivable (a guess would be worse). est_tokens=: price as emitted (an upper bound under compact). <d r=N>: rank N in this ranking, rows in r= order. <d cx= ccx=>: cyclomatic/cognitive complexity. <d in=N>: N callers in the index (absent: not measured). route=: the ranker: name-exact(X) = the task names symbol X (anchors: its evidence), subtoken+body = conceptual BM25 (:broad = 1-2 plain words, plain rg may also win; :declined(...) = a name hit refused as a common name). sc=: enclosing scope; the full id is p::sc::n (p= of the row or its <f>) and selectors take it. next=: the one pasteable follow-up. pure=1: const/constexpr signature (Swift: non-mutating) and no transitive side effect found; a hint. partitions=/requested=: partitions carved / asked for. modules=/split=: call-graph groups found / cuts forced to split one. core_symbols=/surface=: ids in the shared core / core plus the assignable remainder. budget_per_agent_tokens=: one agent's budget, core_budget_tokens= plus partition_budget_tokens=. total_bytes=N: bytes of all bundles together. overlap_mean=/overlap_max=: pairwise Jaccard over the ids partitions name, before trimming. shared_symbols=/union_symbols=: ids two or more partitions name / ids any partition names. core_overlap=: share of the core surface a partition reaches anyway. layer=: built-in arch layer (game|infra|render|math|audio|ai|test) from a dir name in p=; absent if none. -->
 <bundle role="core" symbols="6" bytes="2735" tokens="1159" est_tokens="1159">
@@ -4252,7 +4253,7 @@ Reuses the --mermaid emitter's syntax. Costs tokens beyond the sigs it sits next
 _Task lens + a compact Mermaid flowchart of the top anchors' 1-hop edges._
 
 ```
-$ ./build/ripwire-merged . --for="pagerank power iteration" --with-graph
+$ ./build/ripwire . --for="pagerank power iteration" --with-graph
 <ctx task="pagerank power iteration" route="subtoken+body" root="." confidence="high" margin_pct="22" at="daff79c9a" doc_mentions="5" schema="ripwire.for/v1" bundle="compact" bodies="0" reason="compact-route" budget_bytes="7500" doc_mentions_capped="1" doc_mentions_total="14" est_tokens="8044">
 <!-- ripwire for schema=ripwire.for/v1: bundle=/bodies=/reason= the body posture; d: cx= ccx= complexity, in= callers (absent cx/ccx/in = 0), churn= amp= change, clone= tested= 1, sc= scope, id=p::sc::n; total= shown= capped=1 if cut; task= the query; d pure=1 const/constexpr sig, next= the follow-up to paste; d same_as=N: doc+sig text as row n=N (not repeated); route= name-exact(X)|subtoken+body[:broad|:declined]; confidence=/margin_pct= head score drop (low=flat); h l= p= n=, c n= l= (joined for same-named callees, shown= counts them), noedge= no callee resolved; fold kind=bodies: b t= n= p= l= top ranked rows' whole bodies, not the answer; served= of total= in budget_bytes=; slice/skip p= n= l=; skip bytes= next=; a skip makes sigs next= it, sigs_next= the signatures-only re-call; d mem= an owner's direct member names by the index (question words first, names only), mem_more= names cut; t p= file outside sigs (weaker), t sym= its top symbols not in sigs/syms (a pointer, not the answer), r= rank (gap = trimmed); t order: code files first, then doc files (a code question); t page rows go on to file-page row 160 (code question: 160 code rows, docs within row 160); past page 0 (code question: past 40 code rows, a doc past row 40) listed last, head files skipped; past 120 of those p= only, p_only= counts them; t folded=class=N: N p= only rows of that class (doc|config|script|testdata|other) not listed, next= pages to them; d layer=: built-in arch layer (game|infra|render|math|audio|ai|test) from a dir name in p=; d e= its last line (absent=unknown, never 0; l= the name's line); c prov=split: a resolver split arm; may be another arm's (NOT a claim the edge is false) [doc mentions: 5 docs, 3 symbols; doc_mentions=] -->
 <!-- root= is the crawl root; p= below is RELATIVE to it (single-root only; absent => p= is ingest's own path, unchanged); at=this commit(+dirty). [budget_bytes= is the default BYTE target this ranked payload was shaped toward: row text shortens toward it, no row of the ranked head is removed for it (sigs past_target=)] [sigs capped=1 with shown=total: rows shrunk, none dropped] [sigs past_target=K: the last K rows are past the budget_bytes target, served because they are rows of the ranked head; none is cut] [sigs sigs_next=: one call serving all total= rows uncut] [docs_dropped=N: N shown rows have a doc comment not printed (r>24 always, r5..24 if capped)] [docs_after_code=N: N doc rows of the shown set moved below its code rows; same rows, reordered, none added or removed; a question naming docs keeps score order] [files_first=N: N rows moved so r=1..8 are distinct files' best rows, score order, a repeated name once; same rows; fold, hops keep score order] [cut: doc_mentions_capped="1" doc_mentions_total="14" — an indexing cap dropped content not shown here]; lego/compose collapse to a counted stub by default (a disclosed cut): total= that section's own pre-cap row count, shown="0" capped="1" (nothing rendered here), next= names the sections=lego,compose flag that restores both sections byte-identically in one call est_tokens= prices this bundle in tokens -->
@@ -4278,7 +4279,7 @@ feeds a CodeCharta 3D city. A file in a language this build draws almost no file
 _Per-file metrics as CodeCharta cc.json._
 
 ```
-$ ./build/ripwire-merged . --export=cc.json:<scratch>/aux/ripwire2.cc.json
+$ ./build/ripwire . --export=cc.json:<scratch>/aux/ripwire2.cc.json
 (empty)
 ```
 
@@ -4299,7 +4300,7 @@ caps at 16 (over-cap = capped=1). THE SAME `verb:arg` line is accepted by the MC
 _One-turn sweep: 4 newline-delimited verb:arg sub-queries answered in ONE deduped <batch>._
 
 ```
-$ ./build/ripwire-merged . --batch=<scratch>/aux/batch2.txt
+$ ./build/ripwire . --batch=<scratch>/aux/batch2.txt
 for:incremental cache invalidation
 callers:rankGraphTeleport
 grep:DISCLOSE
@@ -4328,7 +4329,7 @@ lego:Vehicle
 _Environment self-check: binary staleness, grammars, cache dir, git, tracked-binary staleness — exit 1 when any check fails (here: the PATH install is older than ./build)._
 
 ```
-$ ./build/ripwire-merged . --doctor
+$ ./build/ripwire . --doctor
 <!-- ripwire doctor schema=ripwire.doctor/v1: setup health: <c n= ok=> checks; exit 1 when one fails. at=: commit+dirty+shallow. n=: the check's name (binary-path, grammars, cache-dir, git, tree-sitter, index-cache, layout ...). loaded=/expected=: grammars whose tags query compiled / grammars compiled in; a shortfall fails the row. dir=: the per-user cache directory scanned (TMPDIR/XDG_CACHE_HOME ladder); unwritable fails the row. blobs=N: ripwire cache blobs in dir=; the scan stops at 4096 (blobs_floor=1 then). bytes=N: total size in bytes of the blobs counted (short when truncated=1). many=1: more than 50 blobs; an eviction-sanity flag, informational, never fails the row. truncated=1: cache-dir, blob scan cut (cap or I/O error); tracked-binaries, scan SKIPPED, stale=0 unmeasured. locks=N: advisory edit-lock files under locks/; unheld ones over a day old are swept on a cache write. volatile=: this row's attributes that read LIVE machine state; a determinism diff strips them, never the row. git=0|1: git runs from PATH; 0 fails the row (churn verbs need it). repo=0|1: the root is inside a git work tree; 0 is a diagnosis, not a failure. history=0|1: the repo has at least one commit; head= prints only when it does. head=: HEAD's short sha (9 hex, the at= width). core_abi=/cpp_grammar_abi=: tree-sitter core language ABI / the C++ grammar's ABI; informational. languages=N: distinct compiled-in grammars (the grammars row's expected=). tracked=N: git ls-files count, printed even when truncated=1 (over 20000 files skips the scan). binaries=N: tracked paths that sniff as binary content. non_git=1: no git history to compare; the row passes unscanned. stale=N: tracked binaries committed before a same-dir same-stem source changed; any fails the row. cache_version=/parser_ver_lean=/parser_ver_rich=/artifact_arch=: index identity; reuse needs all four. rich_verbs=: the verbs that consume the rich artifact (rich=); every other verb reads the lean one. source=: auto (per-root blob), cache-flag (named by the cache flag) or disabled (no-cache: nothing read). lean_path=/rich_path=: the artifact files checked; one path when the cache flag named it. lean=/rich=: can THIS binary open that artifact (ok, absent, parser-version ...); format, never freshness. fsmonitor=: the checkout's core.fsmonitor at startup: unset, builtin, off, or hook (a command git runs). neutralised=1: a hook fsmonitor was overridden to false for this run; 0 when none was needed. filter_drivers=N: filter drivers the repository's own config defines; filter_scope= local|all, filter_pinned= 1 (run with an empty command) or refused. state=: layout records agree, disagree (mixed binary: rebuild clean-first), not-checked or no-records. checked=1: the cross-unit layout comparison ran; 0 = under two comparable records. units=N: translation units that registered a layout record. types=N: layout types recorded (only those registered in src/model.h); omitted on state=disagree. checks=/passed=: checks run / how many passed; exit 1 when passed= is below checks=. built_from=: the commit this binary was built from; at= is the tree HEAD now, a mismatch is normal. self=/which=: this binary's path and the one which ripwire finds on PATH; which_version= is the version line that one prints when they differ. on_path=0|1: whether a ripwire is on PATH; 0 fails the row and hint= carries the export line. same_file=1: the PATH copy is this very file (same device and inode). same_bytes=1: a different file with identical content, a copied install (ok); 0 fails the row; unknown: a file was unreadable; the row fails unverified (hint= names it). self_mtime=/self_size=/which_mtime=/which_size=: epoch mtime and byte size of each binary. hint=: the row's verdict and fix in plain text (which binary is stale, what to run). -->
 <doctor schema="ripwire.doctor/v1" checks="9" passed="8" at="daff79c9a" built_from="9db2092b7">
 <c n="binary-path" ok="0" self="./build/ripwire" which="<path>" on_path="1" same_file="0" same_bytes="0" self_mtime="1794578321" self_size="63364616" which_mtime="1793517843" which_size="58197960" which_vers … [line truncated: 533 more bytes on this line]
@@ -4362,7 +4363,7 @@ Read-only; emits fixed repair commands and never prints config contents or shell
 _--doctor plus a LIVE integration inspection for one agent: PATH binary, installed-skill manifest parity, hook executability, MCP wiring — read-only, fixed repair commands, never config contents; exit 1 when any check fails._
 
 ```
-$ ./build/ripwire-merged . --doctor --agent=claude
+$ ./build/ripwire . --doctor --agent=claude
 <!-- ripwire doctor schema=ripwire.doctor/v1: setup health: <c n= ok=> checks; exit 1 when one fails. at=: commit+dirty+shallow. n=: the check's name (binary-path, grammars, cache-dir, git, tree-sitter, index-cache, layout ...). agent=: the agent named by the agent flag; its live-integration c rows follow the built-in checks. loaded=/expected=: grammars whose tags query compiled / grammars compiled in; a shortfall fails the row. dir=: the per-user cache directory scanned (TMPDIR/XDG_CACHE_HOME ladder); unwritable fails the row. blobs=N: ripwire cache blobs in dir=; the scan stops at 4096 (blobs_floor=1 then). bytes=N: total size in bytes of the blobs counted (short when truncated=1). many=1: more than 50 blobs; an eviction-sanity flag, informational, never fails the row. truncated=1: cache-dir, blob scan cut (cap or I/O error); tracked-binaries, scan SKIPPED, stale=0 unmeasured. locks=N: advisory edit-lock files under locks/; unheld ones over a day old are swept on a cache write. volatile=: this row's attributes that read LIVE machine state; a determinism diff strips them, never the row. git=0|1: git runs from PATH; 0 fails the row (churn verbs need it). repo=0|1: the root is inside a git work tree; 0 is a diagnosis, not a failure. history=0|1: the repo has at least one commit; head= prints only when it does. head=: HEAD's short sha (9 hex, the at= width). core_abi=/cpp_grammar_abi=: tree-sitter core language ABI / the C++ grammar's ABI; informational. languages=N: distinct compiled-in grammars (the grammars row's expected=). tracked=N: git ls-files count, printed even when truncated=1 (over 20000 files skips the scan). binaries=N: tracked paths that sniff as binary content. non_git=1: no git history to compare; the row passes unscanned. stale=N: tracked binaries committed before a same-dir same-stem source changed; any fails the row. cache_version=/parser_ver_lean=/parser_ver_rich=/artifact_arch=: index identity; reuse needs all four. rich_verbs=: the verbs that consume the rich artifact (rich=); every other verb reads the lean one. source=: auto (per-root blob), cache-flag (named by the cache flag) or disabled (no-cache: nothing read). lean_path=/rich_path=: the artifact files checked; one path when the cache flag named it. lean=/rich=: can THIS binary open that artifact (ok, absent, parser-version ...); format, never freshness. fsmonitor=: the checkout's core.fsmonitor at startup: unset, builtin, off, or hook (a command git runs). neutralised=1: a hook fsmonitor was overridden to false for this run; 0 when none was needed. filter_drivers=N: filter drivers the repository's own config defines; filter_scope= local|all, filter_pinned= 1 (run with an empty command) or refused. state=: layout records agree, disagree (mixed binary: rebuild clean-first), not-checked or no-records. checked=1: the cross-unit layout comparison ran; 0 = under two comparable records. units=N: translation units that registered a layout record. types=N: layout types recorded (only those registered in src/model.h); omitted on state=disagree. checks=/passed=: checks run / how many passed; exit 1 when passed= is below checks=. built_from=: the commit this binary was built from; at= is the tree HEAD now, a mismatch is normal. self=/which=: this binary's path and the one which ripwire finds on PATH; which_version= is the version line that one prints when they differ. on_path=0|1: whether a ripwire is on PATH; 0 fails the row and hint= carries the export line. same_file=1: the PATH copy is this very file (same device and inode). same_bytes=1: a different file with identical content, a copied install (ok); 0 fails the row; unknown: a file was unreadable; the row fails unverified (hint= names it). self_mtime=/self_size=/which_mtime=/which_size=: epoch mtime and byte size of each binary. hint=: the row's verdict and fix in plain text (which binary is stale, what to run). -->
 <doctor schema="ripwire.doctor/v1" checks="12" passed="10" agent="claude" at="daff79c9a" built_from="9db2092b7">
 <c n="binary-path" ok="0" self="./build/ripwire" which="<path>" on_path="1" same_file="0" same_bytes="0" self_mtime="1794578321" self_size="63364616" which_mtime="1793517843" which_size="58197960" which_vers … [line truncated: 533 more bytes on this line]
@@ -4394,7 +4395,7 @@ $ ./build/ripwire-merged . --doctor --agent=claude
 _WHY a file is not in the index (oversize / excluded / unsupported-ext / gitignored) and which indexed files it cannot vouch for (degraded-parse, minified-suspect), plus the per-language census._
 
 ```
-$ ./build/ripwire-merged . --skipped
+$ ./build/ripwire . --skipped
 <ctx schema="ripwire.skipped/v1">
 <!-- ripwire skipped schema=ripwire.skipped/v1: why the index lacks a file <f p= why= bytes= limit= ext=>; indexed but unvouched <h p= why= err= err_ratio=>; <lang> census. root=: p= relative to it. indexed=N: the map's files=; indexed= + oversize= + excluded= + ignored= = every file the crawl enumerated. oversize=N: files dropped for exceeding a size ceiling (row limit= names which). excluded=N: files dropped by an exclude substring you passed. unsupported_ext=N: source/text files no grammar reads; binary assets and excluded/ignored files not counted. excluded_dirs=N: subtrees an exclude pruned; their files are UNKNOWN, not zero, and in no count here. pruned_dirs=N: subtrees pruned by built-in policy (vendor/build, CMakeCache.txt dirs); contents UNKNOWN. ignored=/ignored_dirs=: files / subtrees git ignore rules hid (else indexed); subtree contents UNKNOWN. ignore_mode=: git (rules applied), off (no-ignore flag), unavailable/root-ignored (not consulted, full walk). degraded_parse=/minified_suspect=: counts of the h rows of each why=; those files stay indexed. unmeasured=N: indexed files never parsed (doc pass, binary sniff, nest guard, read error); not health-counted. max_file_size=B: the effective per-file size ceiling in bytes (the max-file-size flag raises it). json_ceiling=/yaml_ceiling=: fixed .json/.yaml byte ceilings the max-file-size flag does NOT raise. ws_freq=R: whitespace share of the leading 4096 bytes; under 0.070 = minified-suspect (never under 256 B). x=/files=: an unindexed extension and its file count (full list; the map's unindexed= is the top 6). files=/symbols=: per language, files with its symbols (FLOOR: symbol-less files uncounted) / symbols (exact). lang n=: a language this build extracted symbols from; files=/symbols= its counts. -->
 <!-- why=extent-suspect on an <h> row = the file holds extent_suspect_syms= definitions whose extent, scope or kind FAILED a containment check (the map and bundle rows carry the reasons as extent_suspect=: name, head, scope, error); joined to the parse-health reasons comma-separated, and rowed even when the parse itself is clean. extent_suspect_files= on the root counts such rows. Nothing is dropped. -->
@@ -4435,7 +4436,7 @@ It is CRITICAL only when a credential-shaped source is on that line: a credentia
 _Scan a single skill file for injection/exfiltration patterns before installing._
 
 ```
-$ ./build/ripwire-merged --scan-skill=skills/ripwire-orient/SKILL.md
+$ ./build/ripwire --scan-skill=skills/ripwire-orient/SKILL.md
 <!-- ripwire scan-skills schema=ripwire.scan-skills/v1: injection/exfiltration/path-traversal scan of skill files: files= findings= skipped= verdict=. files=N: files scanned (unscannable ones are skipped=). findings=N: pattern hits; rows print up to 200 (shown= capped=1 past that). verdict=clean|warn|critical: the worst finding's severity, the same as exit 0/1/2. -->
 <skillscan schema="ripwire.scan-skills/v1" files="1" findings="0" verdict="clean">
 </skillscan>
@@ -4454,7 +4455,7 @@ EVERY text file, .md and .sh alike — a skill dir's executables are the files m
 _Scan a whole skills directory (exit 2 = CRITICAL, 1 = WARN). Explicit-DIR form only._
 
 ```
-$ ./build/ripwire-merged --scan-skills=skills
+$ ./build/ripwire --scan-skills=skills
 <!-- ripwire scan-skills schema=ripwire.scan-skills/v1: injection/exfiltration/path-traversal scan of skill files: files= findings= skipped= verdict=. files=N: files scanned (unscannable ones are skipped=). findings=N: pattern hits; rows print up to 200 (shown= capped=1 past that). verdict=clean|warn|critical: the worst finding's severity, the same as exit 0/1/2. -->
 <skillscan schema="ripwire.scan-skills/v1" files="26" findings="0" verdict="clean">
 </skillscan>
@@ -4484,7 +4485,7 @@ churn-decay = the same prior with each commit weighted 0.5^(age_days/90) instead
 _Rank by git change-frequency prior instead of PageRank._
 
 ```
-$ ./build/ripwire-merged . --rank-by=churn --top-k=5
+$ ./build/ripwire . --rank-by=churn --top-k=5
 <!-- ripwire map schema=ripwire.map/v1: ranked symbol map: <f p= layer=> groups <s t= n= sc= k= amb=> rows (k= rank), <c n=> resolved callees; the header comment is data. est_tokens=: price as emitted (an upper bound under compact). at=: commit+dirty+shallow. root=: p= relative to it. pr_iters=N: PageRank iterations. rank_by=: the ranker behind k=. window=: the git span mined. declined=K: K call sites without edges, including inert Elixir quote sites after unquote/unquote_splicing re-entry. external=K: K calls proven outside the tree, no edge. locality_pinned=K: K calls pinned by locality alone (a guess). extent_suspect_syms=K: K defs failed containment, corpus-wide. macro_blanked_files=K: K files indexed from a macro-blanked re-parse. overloads=N: N same-name defs merged in this row; shown= counts each. prov=scip|binding|import|split|final-segment: how that <c> edge bound (absent: one unique name); split = one arm of an amb= pick; final-segment = a qualified type matched by last name only. files=/symbols=: files and symbols indexed; edges= distinct call edges; shown= symbols printed, a merged row counting each def; ambiguous= calls split over several defs, corpus-wide; unresolved= calls with in-tree evidence and no edge (every def language-filtered or unreachable, or binding refused); order= rows by rank (important-first, important-last; (auto:fill) = flipped past a size threshold) or by path (stable). skipped_oversize=K: K files over a size ceiling, not indexed. unindexed=ext:N: N text files of that extension no grammar reads (6 extensions at most). unindexed_exts=E: E such extensions in all, the list cut. sc=: enclosing scope; the full id is p::sc::n (p= of the row or its <f>) and selectors take it. amb=K: K calls split over several defs. -->
 <!-- t=modscope=a-file's-MODULE-SCOPE(n=<file-scope>):the-statements-outside-every-named-definition,where-a-top-level-call-and-an-anonymous-callback-body's-calls-live;a-CALLER-never-a-callee(nothing-in-the-source-can-name-it)-with-no-body-to-expand;a-file-with-no-such-call-has-no-such-row -->
 <!-- t=type|alias|functype=a-Go-named-type-by-its-written-form:type=a-defined-type-whose-WRITTEN-form-is-not-a-struct/iface/func-literal(type-N-string;type-W-Pair-too,whatever-Pair-is-underneath),alias=type-A=B,functype=type-F-func(...) -->
@@ -4520,7 +4521,7 @@ a trailing slash is ignored; absolute paths and '..' are refused). The global <r
 _Scope the recent-changes answer to ONE directory. The global <recent> block stays byte-identical, a second <recent scope="src"> page follows it — n=/of= are its counts (of= IS the total, so the paging half carries no total=), capped="1" has_more="1" next_offset= offset= limit= page it, and next= replays THIS run's own corpus flags (--since/--exclude) so the page it names is a page of the same answer. The symbol map collapses to a disclosed <symbols stubbed="1" would_show= next=/> stub — the map was not asked for and was not ranked at all, which is why the header carries no pr_iters=. merge_bombs_skipped= stays on the global block: it counts the window's skipped commits, not the directory's._
 
 ```
-$ ./build/ripwire-merged . --rank-by=churn-decay --since=HEAD~4 --exclude=test --exclude=docs --exclude=skills --exclude=changelog.d --in=src --limit=3
+$ ./build/ripwire . --rank-by=churn-decay --since=HEAD~4 --exclude=test --exclude=docs --exclude=skills --exclude=changelog.d --in=src --limit=3
 <!-- ripwire map schema=ripwire.map/v1: ranked symbol map: <f p= layer=> groups <s t= n= sc= k= amb=> rows (k= rank), <c n=> resolved callees; the header comment is data. window: capped= has_more= next_offset= (capped=1 cut; next_offset= pastes as offset=). est_tokens=: price as emitted (an upper bound under compact). at=: commit+dirty+shallow. root=: p= relative to it. rank_by=: the ranker behind k=. window=: the git span mined. declined=K: K calls left unbound (no evidence chose one def). external=K: K calls proven outside the tree, no edge. locality_pinned=K: K calls pinned by locality alone (a guess). <recent n= of=>: the n= newest-touched of of= touched files; <rc age_d=> days since its last commit, w= decayed weight. merge_bombs_skipped=N: N commits touching more than 100 INDEXED files skipped, uncounted; a file only they touched is absent; the window's count, so the global block only. <recent scope=DIR>: a second block riding when the global one does, DIR's files only (p= root-relative); of= is its total; capped=/has_more=/next_offset=/offset=/limit= page it, next= is that page. <symbols stubbed=1 would_show=N next=>: the symbol map in= did not ask for was not rendered; N is that run's own shown= — definitions counted individually as shown= counts them, so its rows follow from rows+sum(overloads-1)=shown (not the header's symbols= corpus count); next= fetches it. files=/symbols=: files and symbols indexed; edges= distinct call edges; shown= symbols printed, a merged row counting each def; ambiguous= calls split over several defs, corpus-wide; unresolved= calls with in-tree evidence and no edge (every def language-filtered or unreachable, or binding refused); order= rows by rank (important-first, important-last; (auto:fill) = flipped past a size threshold) or by path (stable). skipped_oversize=K: K files over a size ceiling, not indexed. unindexed=ext:N: N text files of that extension no grammar reads (6 extensions at most). unindexed_exts=E: E such extensions in all, the list cut. next=: the one pasteable follow-up. -->
 <!-- t=modscope=a-file's-MODULE-SCOPE(n=<file-scope>):the-statements-outside-every-named-definition,where-a-top-level-call-and-an-anonymous-callback-body's-calls-live;a-CALLER-never-a-callee(nothing-in-the-source-can-name-it)-with-no-body-to-expand;a-file-with-no-such-call-has-no-such-row -->
 <!-- t=alias|functype-in-C++-and-.h:alias=using-X=Y(also-templated-or-class-scope)or-namespace-L=lib(defs=X-prints-its-written-target-as-to=),functype=a-typedef-of-a-function-or-function-pointer-type(typedef-void(*F)(int));other-typedefs-read-t=struct -->
@@ -4557,7 +4558,7 @@ $ ./build/ripwire-merged . --rank-by=churn-decay --since=HEAD~4 --exclude=test -
 _An unknown --format value REFUSES (exit 1), named, with the supported set listed._
 
 ```
-$ ./build/ripwire-merged . --callers=rankGraphTeleport --format=bogus
+$ ./build/ripwire . --callers=rankGraphTeleport --format=bogus
 (empty)
 ```
 
@@ -4578,7 +4579,7 @@ Composes with --top-k.
 _An unknown --format value REFUSES (exit 1), named, with the supported set listed._
 
 ```
-$ ./build/ripwire-merged . --callers=rankGraphTeleport --format=bogus
+$ ./build/ripwire . --callers=rankGraphTeleport --format=bogus
 (empty)
 ```
 
@@ -4595,7 +4596,7 @@ full restores the prose output legend posture for EVERY XML verb. The DEFAULT is
 _The same gating report under --legend=full — same rows, same exit 2; the default compact comment (schema="ripwire.quality-delta/v1", the shape an agent's edit loop should run) becomes ~4 KB of prose legend._
 
 ```
-$ ./build/ripwire-merged . --quality-delta --legend=full
+$ ./build/ripwire . --quality-delta --legend=full
 <!-- ripwire quality-delta: only what a change made WORSE against the floor baseline= names below. Descriptive: weigh and fix the real ones, do not game the number (a wrong abstraction beats a low score). TWELVE KINDS, and kind= on every row names which one: complexity over the ccx bar, verbosity (LOC), nesting, params, duplication, dead-code, api-surface (new public contract drift), error-masking, short-horizon-churn, new-clone-of-reused-helper, placeholder (added stub/TODO), defect-shape (defect= names it). THREE independent axes, in this order: (1) acked findings are suppressed entirely (acked= counts them); (2) ORIGIN — a finding on a symbol that EXISTED at the baseline is preexisting-worse (no origin attribute), one that exists only because the code is NEW carries origin="new-symbol"; (3) MATERIALITY — a small numeric delta is sev="minor", and minor= counts them. EXIT 2 fires only on preexisting-worse AND major, the gating= count; new-symbol rows never gate, except defect-shape format-arity and a new function at the ceiling, so exit 0 is NOT a verdict on them — nothing that existed got worse, but the new debt is yours: read them. Clone kinds are new-symbol only when EVERY member is new; short-horizon-churn is preexisting by construction. preexisting-worse= and new-symbol= partition regressions=. stale= is a FOURTH axis, never gating and never counted in regressions=: rows in the .ripwire_quality_acks ledger whose target no longer applies. api-new-surface= COUNTS the new PUBLIC symbols (never gates, not in regressions=, printed even at zero). register-macro-excluded= is a FLOOR, not a finding: symbols this run excluded from the dead-code kind because their own definition is a registered self-registering test/benchmark macro call. Never gates, never counted in regressions=, printed even at zero (zero: none excluded, not a skipped check). A gating row's next= is the one pasteable follow-up: expand on FILE:NAME, the body to fix (a duplication row names a SET and carries none). bar= on a complexity/verbosity/nesting/params row is the threshold now= is judged against (ccx 15, loc 60, nest 4, params 5). baseline="git-HEAD" means no sidecar existed, so the working tree was auto-compared against the HEAD tree — anything already committed cannot appear. at= is the git commit (plus a dirty marker when the working tree differs) this list was computed at. The registered families are doctest/Catch2 TEST_CASE, GoogleTest TEST/TEST_F/TEST_P, Google Benchmark BENCHMARK, plus any name a .ripwire_config register_macros= line adds; each registers itself through a static initializer the call graph cannot see, so zero in-edges on one is not evidence of anything. declined-call-excluded= is a FLOOR, not a finding: symbols this run kept out of the dead-code kind only because a call the resolver declined to bind (the map's declined=) could have meant them. Never gates; absent at zero. value-ref-excluded= is a FLOOR, not a finding: symbols this run kept out of the dead-code kind only because a table, field, argument or registering decorator holds them as a VALUE (matched by name; it is not a proven call; the callers verb lists the sites; @classmethod-style wrappers do not count), the --dead-code verb's own rule. Never gates; absent at zero. IDENTITY across a rename or a move: a finding is keyed path::scope::name, which a rename would destroy, so the baseline and the .ripwire_quality_acks ledger are both re-filed into the CURRENT tree's identity before either is read, by two EXACT mechanisms — git's own rename record, and equality of a whitespace-and-name-scrubbed body hash — never a similarity heuristic. renames= is how many rename pairs were read, rename_window_commits= how deep the commit window went, acked_by_rename= and acked_by_content= how many of the acked= suppressions each mechanism is responsible for. Three appear ONLY when true, so an absent one is not a silent no: renames_window_truncated= (history is deeper than the window), renames_truncated= (the pair cap was hit), renames_ambiguous= (an ancestor two current symbols both claim — refused rather than guessed). ORIGIN reads the re-filed baseline too, so a regression carried in with a rename is judged preexisting-worse and GATES instead of slipping through as new-symbol. FLOORS, stated because silence here would read as a guarantee: the two clone kinds key on a member-SET hash and are NOT re-filed, so a clone ack still dies on a rename; ORIGIN follows the rename record, not content: a move git recorded no rename for reads as new-symbol, or as moved (never gating) when its body, unchanged or nearly so, is over a bar. Each sa row carries key= (the ack identity as stored) and why=, which is target-gone (the key names no symbol or group any more) or finding-gone (the target survived, this kind just does not fire on it). sym= and p=path:line name WHICH ack it is, and are present exactly when the key still names a live symbol: on every finding-gone row, on none of the target-gone rows (there is nothing left to name), and on neither clone kind — a clone key hashes a member SET that no single symbol carries, so those rows are unnameable by construction rather than guessed at. Hygiene disclosure only — the ledger file is never auto-edited. ROWS: sym= is the canonical id the finding regressed on; was= and now= carry the before/after value for the numeric kinds; p="path:line" is the locator (root-relative; the first-sorting member for the clone kinds; omitted, never faked, when none resolves). churn= and surface= are per-kind classification facets (short-horizon-churn's self/ambient split; api-surface's new-symbol/contract-change tier). churn= facets never gate alone: the kind gates only on 2+ COMMITTED in-window rewrites of the edited lines. Every row the header's gating= counter counts also carries a gating attribute set to 1 — marked positively, never by the ABSENCE of sev or origin. CLONE ROWS name the whole group rather than one symbol: members= is the member list and tokens= its shared normalized-token count (the same per-group pair the clones verb reports). idiom= names a RECOGNIZED BODY SHAPE every member spells, out of a closed set of four (threshold-ladder, switch-name-table, builder-chain, one-statement). idiom= alone changes nothing; a group that ALSO shares no non-keyword identifier between any two members, sits in pairwise-distinct enclosing contexts, and stays under 80 normalized tokens is an idiom COLLISION rather than a copy, and is reported minor instead of gating. Break any one of those and it gates as before, idiom= and all: two bucketing ladders over the SAME enum are a copy. The shape is read off the body's token stream and not a parse tree, so a macro-assembled body classifies as whatever its raw tokens spell — the name is printed so the call can be overruled by reading. -->
 <quality-delta baseline="git-HEAD" regressions="9" minor="1" acked="0" stale="169" preexisting-worse="6" new-symbol="3" gating="5" register-macro-excluded="62" api-new-surface="2" at="daff79c9a+dirty" renames="67" rename_window_commits="400" acked_by_rename="0" acked_by_content="0" renames_window_tr … [line truncated: 65 more bytes on this line]
 <r kind="api-surface" sym="src/infra/sortutil.h::rw::sortutil::nonNegativeFloatDescKey" was="1" now="2" surface="contract-change" p="src/infra/sortutil.h:112" gating="1" next="--expand=src/infra/sortutil.h:nonNegativeFloatDescKey"/>
@@ -4624,8 +4625,8 @@ Prints the dictionary the MCP server serves as ripwire://legend-dict/full: one d
 _The session legend dictionary the MCP server serves as ripwire://legend-dict/full — one definition per line, headed by its dictv= version; no corpus needed. =roster lists the completeness attributes it defines._
 
 ```
-$ ./build/ripwire-merged . --legend-dict
-ripwire legend dictionary ripwire.dict/v1 dictv=3c8ee54253cfd8de entries=1117
+$ ./build/ripwire . --legend-dict
+ripwire legend dictionary ripwire.dict/v1 dictv=e4c4c7d5ead14ee4 entries=1129
 <about legend="ref" dict= dictv=>: the answer's rows come first; its root keeps only task= changed= from= to=, and this LAST child carries every other root attribute unchanged (schema= included); legend="ref": a definition is sent once per session (this dictionary's core, or the first answer that ne … [line truncated: 83 more bytes on this line]
 schema=ripwire.KEY/v1: the line ripwire.KEY/v1 below reads the answer's rows
 window: shown= total= capped= has_more= next_offset= offset= limit= page a list (capped=1 cut; next_offset= pastes as offset=)
@@ -4648,18 +4649,18 @@ ripwire.pack-top-n/v1 <ctx>: the ranked map plus <src p=> bodies of the top-N sy
 
 **Answers:** emit JSON instead of XML;
 
-keys mirror the XML attribute names one to one machine-parseable JSON instead of XML, keys mirror the XML attr names 1:1. Every ROOT attribute survives; a verb that serves fewer SECTIONS than its XML form NAMES them in lens= on the root (--for --json: lens="compose,lego,routes,docs" — their *_total counts are there, their rows are not) — supported for the default map, --for, --pack-task, --callers/--callees/ --impact, --quality-delta, --test-gate, --metrics (the CI/scripting verbs), plus --plan-lanes which is JSON-native. That set is an ALLOW-list: every other verb (and --format=columnar/candidates, --detail, --map-diff, --scip composed with it) refuses loudly on stderr + exit 1 rather than silently falling back to XML — a verb added tomorrow refuses by default. Deterministic: same 2-run byte-diff + stable key order contract as the XML.
+keys mirror the XML attribute names one to one machine-parseable JSON instead of XML, keys mirror the XML attr names 1:1. Every ROOT attribute survives; a verb that serves fewer SECTIONS than its XML form NAMES them in lens= on the root (--for --json: lens="compose,lego,routes,docs" — their *_total counts are there, their rows are not) — supported for the default map, --for, --pack-task, --callers/--callees/ --impact, --quality-delta, --test-gate, --metrics, --flags (the CI/scripting verbs), plus --plan-lanes which is JSON-native. That set is an ALLOW-list: every other verb (and --format=columnar/candidates, --detail, --map-diff, --scip composed with it) refuses loudly on stderr + exit 1 rather than silently falling back to XML — a verb added tomorrow refuses by default. Deterministic: same 2-run byte-diff + stable key order contract as the XML.
 
 **Try it**
 
 _JSON refusal shape: an unsupported verb refuses loudly instead of silently falling back to XML._
 
 ```
-$ ./build/ripwire-merged . --hotspots --json
+$ ./build/ripwire . --hotspots --json
 (empty)
 ```
 
-**Shaped by:** `--max-tokens`, `--token-budget`, `--for`, `--in`, `--legend`
+**Shaped by:** `--max-tokens`, `--token-budget`, `--for`, `--flags`, `--in`, `--legend`
 
 **Caveats (stated by the binary):**
 
@@ -4676,7 +4677,7 @@ HONORED by: --deps --callers --callees --tree --lint --hotspots --clones --cocha
 _The family join: per function, which of four orthogonal evidence families fire, ranked by how many agree._
 
 ```
-$ ./build/ripwire-merged . --ensemble --limit=8
+$ ./build/ripwire . --ensemble --limit=8
 <!-- ripwire ensemble schema=ripwire.ensemble/v1: four orthogonal evidence families joined, ranked by DISTINCT families fired (no composite score): <s p= n= fam= of= fired=>. window: total= has_more= next_offset= offset= limit= (capped=1 cut; next_offset= pastes as offset=). syms_capped=/files_capped=: 1 = cut. at=: commit+dirty+shallow. root=: p= relative to it. eligible=N: functions and methods with a body, the denominator; ranked + no_family = eligible. no_family=N: eligible symbols where no family fired. bar_ccx=/bar_loc=/bar_nest=/bar_params=: absolute structural bars: cognitive cx, lines, nesting, params. rcut=N: ranks the worst readability decile covers (1 to 40); rrank= inside it fires structural. rmeasured=N: functions the readability lens measured. hcut=N: file ranks the worst churn decile covers (1 to 40); hrank= inside it fires historical. hranked=N: files with any in-window commit; 0 = historical family unavailable. cfiles=N: indexed files the confusion (atom) pack can read: C/C++/ObjC/CUDA. cscope=N: eligible symbols in those files; 0 = confusion family unavailable. lscope=N: eligible symbols in a language the naming pack reads; 0 = lexical family unavailable. shown_syms=N: symbol rows printed; the rest page with offset=next_offset. shown_files=N: file rows printed (fixed cap 20, not paged); files_capped=1 = rows dropped. e f=: the fired family: structural, lexical, confusion or historical. why=: the measurements that crossed, space separated; rule*N = that rule fired N times. top=: the file's most corroborated symbol (most families on one symbol). top_l=: that symbol's line. top_fam=N: families fired on top=, the stronger claim; file rows rank by it. union_fam=N: distinct families firing anywhere in the file (weaker: may be different symbols). union=: the names of those families. syms=N: symbols in the file where at least one family fired. families=N: evidence families joined; ranked=N: symbols at least one fired on; window=: the git span the historical family read. -->
 <ensemble schema="ripwire.ensemble/v1" families="4" eligible="22723" ranked="8463" no_family="14260" bar_ccx="15" bar_loc="60" bar_nest="4" bar_params="5" rcut="40" rmeasured="22723" hcut="40" hranked="4537" window="12mo" cfiles="1065" cscope="12277" lscope="22723" shown_syms="8" syms_capped="1" sho … [line truncated: 118 more bytes on this line]
 <s p="src/gitmine.h:1795" n="addRootFilesToGitPathIndex" fam="4" of="4" fired="structural,lexical,confusion,historical">
@@ -4694,7 +4695,7 @@ $ ./build/ripwire-merged . --ensemble --limit=8
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--top-k`, `--for`, `--lego`, `--tree`, `--graph-query`, `--external-surface`, `--impact`, `--exercises`
+**Shaped by:** `--top-k`, `--token-budget`, `--for`, `--lego`, `--tree`, `--graph-query`, `--external-surface`, `--impact`
 
 **Caveats (stated by the binary):**
 
@@ -4711,7 +4712,7 @@ $ ./build/ripwire-merged . --ensemble --limit=8
 _Drop matching paths (repeatable) before ranking._
 
 ```
-$ ./build/ripwire-merged . --exclude=present --exclude=bench --top-k=5
+$ ./build/ripwire . --exclude=present --exclude=bench --top-k=5
 <!-- ripwire map schema=ripwire.map/v1: ranked symbol map: <f p= layer=> groups <s t= n= sc= k= amb=> rows (k= rank), <c n=> resolved callees; the header comment is data. est_tokens=: price as emitted (an upper bound under compact). root=: p= relative to it. pr_iters=N: PageRank iterations. <inv listed= unlisted=>: files the ranked rows show / do not (sum = files=), each named or counted below. <entry p= n=>: a program entry by its language's convention (C/Go/Rust main, Java/C# static main, a script main its module scope calls, __main__.py), callees as c rows; manifest entries not read. <ls p= n= f=>: n= unshown files under dir p=; f= names its code files, the rest (tests, docs, config, test/doc/example dirs) counted. declined=K: K call sites without edges, including inert Elixir quote sites after unquote/unquote_splicing re-entry. external=K: K calls proven outside the tree, no edge. locality_pinned=K: K calls pinned by locality alone (a guess). extent_suspect_syms=K: K defs failed containment, corpus-wide. macro_blanked_files=K: K files indexed from a macro-blanked re-parse. prov=scip|binding|import|split|final-segment: how that <c> edge bound (absent: one unique name); split = one arm of an amb= pick; final-segment = a qualified type matched by last name only. files=/symbols=: files and symbols indexed; edges= distinct call edges; shown= symbols printed, a merged row counting each def; ambiguous= calls split over several defs, corpus-wide; unresolved= calls with in-tree evidence and no edge (every def language-filtered or unreachable, or binding refused); order= rows by rank (important-first, important-last; (auto:fill) = flipped past a size threshold) or by path (stable). unindexed=ext:N: N text files of that extension no grammar reads (6 extensions at most). unindexed_exts=E: E such extensions in all, the list cut. sc=: enclosing scope; the full id is p::sc::n (p= of the row or its <f>) and selectors take it. amb=K: K calls split over several defs. -->
 <!-- t=modscope=a-file's-MODULE-SCOPE(n=<file-scope>):the-statements-outside-every-named-definition,where-a-top-level-call-and-an-anonymous-callback-body's-calls-live;a-CALLER-never-a-callee(nothing-in-the-source-can-name-it)-with-no-body-to-expand;a-file-with-no-such-call-has-no-such-row -->
 <!-- t=type|alias|functype=a-Go-named-type-by-its-written-form:type=a-defined-type-whose-WRITTEN-form-is-not-a-struct/iface/func-literal(type-N-string;type-W-Pair-too,whatever-Pair-is-underneath),alias=type-A=B,functype=type-F-func(...) -->
@@ -4742,7 +4743,7 @@ this is NOT a filter to only-changed symbols. changed="N" in the header names th
 _Full map re-ranked with teleport toward git-changed files — clean tree, so changed=0 and it degrades to the plain map._
 
 ```
-$ ./build/ripwire-merged . --map-diff --top-k=5
+$ ./build/ripwire . --map-diff --top-k=5
 <!-- ripwire map-diff schema=ripwire.map-diff/v1: the ranked map anchored at at=: what the diff touched, the map's row vocabulary. est_tokens=: price as emitted (an upper bound under compact). at=: commit+dirty+shallow. root=: p= relative to it. pr_iters=N: PageRank iterations. declined=K: K call sites without edges, including inert Elixir quote sites after unquote/unquote_splicing re-entry. external=K: K calls proven outside the tree, no edge. locality_pinned=K: K calls pinned by locality alone (a guess). extent_suspect_syms=K: K defs failed containment, corpus-wide. macro_blanked_files=K: K files indexed from a macro-blanked re-parse. prov=scip|binding|import|split|final-segment: how that <c> edge bound (absent: one unique name); split = one arm of an amb= pick; final-segment = a qualified type matched by last name only. files=/symbols=: files and symbols indexed; edges= distinct call edges; shown= symbols printed, a merged row counting each def; ambiguous= calls split over several defs, corpus-wide; unresolved= calls with in-tree evidence and no edge (every def language-filtered or unreachable, or binding refused); order= rows by rank (important-first, important-last; (auto:fill) = flipped past a size threshold) or by path (stable). changed=K: K indexed git-changed files seed the PageRank teleport (0: uniform, incl. no git). skipped_oversize=K: K files over a size ceiling, not indexed. unindexed=ext:N: N text files of that extension no grammar reads (6 extensions at most). unindexed_exts=E: E such extensions in all, the list cut. sc=: enclosing scope; the full id is p::sc::n (p= of the row or its <f>) and selectors take it. amb=K: K calls split over several defs. layer=: built-in arch layer (game|infra|render|math|audio|ai|test) from a dir name in p=; absent if none. f p=: a file; s t= n=: kind, name; c n=: a resolved callee. s k=: rank. -->
 <!-- t=modscope=a-file's-MODULE-SCOPE(n=<file-scope>):the-statements-outside-every-named-definition,where-a-top-level-call-and-an-anonymous-callback-body's-calls-live;a-CALLER-never-a-callee(nothing-in-the-source-can-name-it)-with-no-body-to-expand;a-file-with-no-such-call-has-no-such-row -->
 <!-- t=type|alias|functype=a-Go-named-type-by-its-written-form:type=a-defined-type-whose-WRITTEN-form-is-not-a-struct/iface/func-literal(type-N-string;type-W-Pair-too,whatever-Pair-is-underneath),alias=type-A=B,functype=type-F-func(...) -->
@@ -4776,7 +4777,7 @@ $ ./build/ripwire-merged . --map-diff --top-k=5
 _Explicit incremental cache at a path OUTSIDE the repo (first call writes it)._
 
 ```
-$ ./build/ripwire-merged . --cache=<scratch>/aux/warm2.ripwirecache --top-k=3
+$ ./build/ripwire . --cache=<scratch>/aux/warm2.ripwirecache --top-k=3
 <!-- ripwire map schema=ripwire.map/v1: ranked symbol map: <f p= layer=> groups <s t= n= sc= k= amb=> rows (k= rank), <c n=> resolved callees; the header comment is data. est_tokens=: price as emitted (an upper bound under compact). root=: p= relative to it. pr_iters=N: PageRank iterations. <inv listed= unlisted=>: files the ranked rows show / do not (sum = files=), each named or counted below. <entry p= n=>: a program entry by its language's convention (C/Go/Rust main, Java/C# static main, a script main its module scope calls, __main__.py), callees as c rows; manifest entries not read. <ls p= n= f=>: n= unshown files under dir p=; f= names its code files, the rest (tests, docs, config, test/doc/example dirs) counted. declined=K: K call sites without edges, including inert Elixir quote sites after unquote/unquote_splicing re-entry. external=K: K calls proven outside the tree, no edge. locality_pinned=K: K calls pinned by locality alone (a guess). extent_suspect_syms=K: K defs failed containment, corpus-wide. macro_blanked_files=K: K files indexed from a macro-blanked re-parse. prov=scip|binding|import|split|final-segment: how that <c> edge bound (absent: one unique name); split = one arm of an amb= pick; final-segment = a qualified type matched by last name only. files=/symbols=: files and symbols indexed; edges= distinct call edges; shown= symbols printed, a merged row counting each def; ambiguous= calls split over several defs, corpus-wide; unresolved= calls with in-tree evidence and no edge (every def language-filtered or unreachable, or binding refused); order= rows by rank (important-first, important-last; (auto:fill) = flipped past a size threshold) or by path (stable). skipped_oversize=K: K files over a size ceiling, not indexed. unindexed=ext:N: N text files of that extension no grammar reads (6 extensions at most). unindexed_exts=E: E such extensions in all, the list cut. sc=: enclosing scope; the full id is p::sc::n (p= of the row or its <f>) and selectors take it. -->
 <!-- t=modscope=a-file's-MODULE-SCOPE(n=<file-scope>):the-statements-outside-every-named-definition,where-a-top-level-call-and-an-anonymous-callback-body's-calls-live;a-CALLER-never-a-callee(nothing-in-the-source-can-name-it)-with-no-body-to-expand;a-file-with-no-such-call-has-no-such-row -->
 <!-- t=type|alias|functype=a-Go-named-type-by-its-written-form:type=a-defined-type-whose-WRITTEN-form-is-not-a-struct/iface/func-literal(type-N-string;type-W-Pair-too,whatever-Pair-is-underneath),alias=type-A=B,functype=type-F-func(...) -->
@@ -4807,7 +4808,7 @@ Writes BOTH families — BASE.lean.ripwirecache (map/ nav/--pr-context) and BASE
 _CI generate-and-exit: cold-parse and write BOTH committable cache families (lean + rich), no map on stdout._
 
 ```
-$ ./build/ripwire-merged . --index-out=<scratch>/aux/ci_index
+$ ./build/ripwire . --index-out=<scratch>/aux/ci_index
 (empty)
 ```
 
@@ -4826,7 +4827,7 @@ $ ./build/ripwire-merged . --index-out=<scratch>/aux/ci_index
 _Force a cold parse (bypass the warm TMPDIR cache) — shows the cold-vs-warm cost._
 
 ```
-$ ./build/ripwire-merged . --no-cache --top-k=3
+$ ./build/ripwire . --no-cache --top-k=3
 <!-- ripwire map schema=ripwire.map/v1: ranked symbol map: <f p= layer=> groups <s t= n= sc= k= amb=> rows (k= rank), <c n=> resolved callees; the header comment is data. est_tokens=: price as emitted (an upper bound under compact). root=: p= relative to it. pr_iters=N: PageRank iterations. <inv listed= unlisted=>: files the ranked rows show / do not (sum = files=), each named or counted below. <entry p= n=>: a program entry by its language's convention (C/Go/Rust main, Java/C# static main, a script main its module scope calls, __main__.py), callees as c rows; manifest entries not read. <ls p= n= f=>: n= unshown files under dir p=; f= names its code files, the rest (tests, docs, config, test/doc/example dirs) counted. declined=K: K call sites without edges, including inert Elixir quote sites after unquote/unquote_splicing re-entry. external=K: K calls proven outside the tree, no edge. locality_pinned=K: K calls pinned by locality alone (a guess). extent_suspect_syms=K: K defs failed containment, corpus-wide. macro_blanked_files=K: K files indexed from a macro-blanked re-parse. prov=scip|binding|import|split|final-segment: how that <c> edge bound (absent: one unique name); split = one arm of an amb= pick; final-segment = a qualified type matched by last name only. files=/symbols=: files and symbols indexed; edges= distinct call edges; shown= symbols printed, a merged row counting each def; ambiguous= calls split over several defs, corpus-wide; unresolved= calls with in-tree evidence and no edge (every def language-filtered or unreachable, or binding refused); order= rows by rank (important-first, important-last; (auto:fill) = flipped past a size threshold) or by path (stable). skipped_oversize=K: K files over a size ceiling, not indexed. unindexed=ext:N: N text files of that extension no grammar reads (6 extensions at most). unindexed_exts=E: E such extensions in all, the list cut. sc=: enclosing scope; the full id is p::sc::n (p= of the row or its <f>) and selectors take it. -->
 <!-- t=modscope=a-file's-MODULE-SCOPE(n=<file-scope>):the-statements-outside-every-named-definition,where-a-top-level-call-and-an-anonymous-callback-body's-calls-live;a-CALLER-never-a-callee(nothing-in-the-source-can-name-it)-with-no-body-to-expand;a-file-with-no-such-call-has-no-such-row -->
 <!-- t=type|alias|functype=a-Go-named-type-by-its-written-form:type=a-defined-type-whose-WRITTEN-form-is-not-a-struct/iface/func-literal(type-N-string;type-W-Pair-too,whatever-Pair-is-underneath),alias=type-A=B,functype=type-F-func(...) -->
@@ -4857,7 +4858,7 @@ by default they are skipped crawl paths the repository's own .gitignore covers. 
 _Crawl paths the repo's own .gitignore covers (default honours it and discloses ignored_files=/ignored_dirs= only when it dropped anything — this repo's crawl drops nothing, so the header is identical to the default map's; --skipped's ignore_mode= says which rule applied)._
 
 ```
-$ ./build/ripwire-merged . --no-ignore --top-k=3
+$ ./build/ripwire . --no-ignore --top-k=3
 <!-- ripwire map schema=ripwire.map/v1: ranked symbol map: <f p= layer=> groups <s t= n= sc= k= amb=> rows (k= rank), <c n=> resolved callees; the header comment is data. est_tokens=: price as emitted (an upper bound under compact). root=: p= relative to it. pr_iters=N: PageRank iterations. <inv listed= unlisted=>: files the ranked rows show / do not (sum = files=), each named or counted below. <entry p= n=>: a program entry by its language's convention (C/Go/Rust main, Java/C# static main, a script main its module scope calls, __main__.py), callees as c rows; manifest entries not read. <ls p= n= f=>: n= unshown files under dir p=; f= names its code files, the rest (tests, docs, config, test/doc/example dirs) counted. declined=K: K call sites without edges, including inert Elixir quote sites after unquote/unquote_splicing re-entry. external=K: K calls proven outside the tree, no edge. locality_pinned=K: K calls pinned by locality alone (a guess). extent_suspect_syms=K: K defs failed containment, corpus-wide. macro_blanked_files=K: K files indexed from a macro-blanked re-parse. prov=scip|binding|import|split|final-segment: how that <c> edge bound (absent: one unique name); split = one arm of an amb= pick; final-segment = a qualified type matched by last name only. files=/symbols=: files and symbols indexed; edges= distinct call edges; shown= symbols printed, a merged row counting each def; ambiguous= calls split over several defs, corpus-wide; unresolved= calls with in-tree evidence and no edge (every def language-filtered or unreachable, or binding refused); order= rows by rank (important-first, important-last; (auto:fill) = flipped past a size threshold) or by path (stable). skipped_oversize=K: K files over a size ceiling, not indexed. unindexed=ext:N: N text files of that extension no grammar reads (6 extensions at most). unindexed_exts=E: E such extensions in all, the list cut. sc=: enclosing scope; the full id is p::sc::n (p= of the row or its <f>) and selectors take it. -->
 <!-- t=modscope=a-file's-MODULE-SCOPE(n=<file-scope>):the-statements-outside-every-named-definition,where-a-top-level-call-and-an-anonymous-callback-body's-calls-live;a-CALLER-never-a-callee(nothing-in-the-source-can-name-it)-with-no-body-to-expand;a-file-with-no-such-call-has-no-such-row -->
 <!-- t=type|alias|functype=a-Go-named-type-by-its-written-form:type=a-defined-type-whose-WRITTEN-form-is-not-a-struct/iface/func-literal(type-N-string;type-W-Pair-too,whatever-Pair-is-underneath),alias=type-A=B,functype=type-F-func(...) -->
@@ -4893,7 +4894,7 @@ default 64MB files over N bytes are still indexed, read lexically instead of par
 _Skip files above a size bound before parsing (note the corpus shrink in the header)._
 
 ```
-$ ./build/ripwire-merged . --max-file-size=8K --top-k=3
+$ ./build/ripwire . --max-file-size=8K --top-k=3
 <!-- ripwire map schema=ripwire.map/v1: ranked symbol map: <f p= layer=> groups <s t= n= sc= k= amb=> rows (k= rank), <c n=> resolved callees; the header comment is data. est_tokens=: price as emitted (an upper bound under compact). root=: p= relative to it. pr_iters=N: PageRank iterations. <inv listed= unlisted=>: files the ranked rows show / do not (sum = files=), each named or counted below. <entry p= n=>: a program entry by its language's convention (C/Go/Rust main, Java/C# static main, a script main its module scope calls, __main__.py), callees as c rows; manifest entries not read. <ls p= n= f=>: n= unshown files under dir p=; f= names its code files, the rest (tests, docs, config, test/doc/example dirs) counted. declined=K: K call sites without edges, including inert Elixir quote sites after unquote/unquote_splicing re-entry. external=K: K calls proven outside the tree, no edge. locality_pinned=K: K calls pinned by locality alone (a guess). extent_suspect_syms=K: K defs failed containment, corpus-wide. macro_blanked_files=K: K files indexed from a macro-blanked re-parse. files=/symbols=: files and symbols indexed; edges= distinct call edges; shown= symbols printed, a merged row counting each def; ambiguous= calls split over several defs, corpus-wide; unresolved= calls with in-tree evidence and no edge (every def language-filtered or unreachable, or binding refused); order= rows by rank (important-first, important-last; (auto:fill) = flipped past a size threshold) or by path (stable). skipped_oversize=K: K files over a size ceiling, not indexed. unindexed=ext:N: N text files of that extension no grammar reads (6 extensions at most). unindexed_exts=E: E such extensions in all, the list cut. sc=: enclosing scope; the full id is p::sc::n (p= of the row or its <f>) and selectors take it. -->
 <!-- t=modscope=a-file's-MODULE-SCOPE(n=<file-scope>):the-statements-outside-every-named-definition,where-a-top-level-call-and-an-anonymous-callback-body's-calls-live;a-CALLER-never-a-callee(nothing-in-the-source-can-name-it)-with-no-body-to-expand;a-file-with-no-such-call-has-no-such-row -->
 <!-- t=type|alias|functype=a-Go-named-type-by-its-written-form:type=a-defined-type-whose-WRITTEN-form-is-not-a-struct/iface/func-literal(type-N-string;type-W-Pair-too,whatever-Pair-is-underneath),alias=type-A=B,functype=type-F-func(...) -->
@@ -4948,7 +4949,7 @@ A path that is missing, empty or not a regular file refuses (exit 1). A corrupt 
 _SCIP overlay with a missing index REFUSES (exit 1) naming the file — never silently serves the name-based map you named a precision index to improve on (it used to degrade in silence)._
 
 ```
-$ ./build/ripwire-merged . --scip=does_not_exist.scip --callers=rankGraphTeleport
+$ ./build/ripwire . --scip=does_not_exist.scip --callers=rankGraphTeleport
 (empty)
 ```
 
@@ -4971,7 +4972,7 @@ Under --scip it also writes the index's covered sites, so a precision join needs
 _Eval-only: a per-call-site census of WHICH mechanism resolved each call, and the canonical id of every surviving target._
 
 ```
-$ ./build/ripwire-merged . --pin-census=<scratch>/aux/pin_census.tsv --top-k=3
+$ ./build/ripwire . --pin-census=<scratch>/aux/pin_census.tsv --top-k=3
 <!-- ripwire map schema=ripwire.map/v1: ranked symbol map: <f p= layer=> groups <s t= n= sc= k= amb=> rows (k= rank), <c n=> resolved callees; the header comment is data. est_tokens=: price as emitted (an upper bound under compact). root=: p= relative to it. pr_iters=N: PageRank iterations. <inv listed= unlisted=>: files the ranked rows show / do not (sum = files=), each named or counted below. <entry p= n=>: a program entry by its language's convention (C/Go/Rust main, Java/C# static main, a script main its module scope calls, __main__.py), callees as c rows; manifest entries not read. <ls p= n= f=>: n= unshown files under dir p=; f= names its code files, the rest (tests, docs, config, test/doc/example dirs) counted. declined=K: K call sites without edges, including inert Elixir quote sites after unquote/unquote_splicing re-entry. external=K: K calls proven outside the tree, no edge. locality_pinned=K: K calls pinned by locality alone (a guess). extent_suspect_syms=K: K defs failed containment, corpus-wide. macro_blanked_files=K: K files indexed from a macro-blanked re-parse. prov=scip|binding|import|split|final-segment: how that <c> edge bound (absent: one unique name); split = one arm of an amb= pick; final-segment = a qualified type matched by last name only. files=/symbols=: files and symbols indexed; edges= distinct call edges; shown= symbols printed, a merged row counting each def; ambiguous= calls split over several defs, corpus-wide; unresolved= calls with in-tree evidence and no edge (every def language-filtered or unreachable, or binding refused); order= rows by rank (important-first, important-last; (auto:fill) = flipped past a size threshold) or by path (stable). skipped_oversize=K: K files over a size ceiling, not indexed. unindexed=ext:N: N text files of that extension no grammar reads (6 extensions at most). unindexed_exts=E: E such extensions in all, the list cut. sc=: enclosing scope; the full id is p::sc::n (p= of the row or its <f>) and selectors take it. -->
 <!-- t=modscope=a-file's-MODULE-SCOPE(n=<file-scope>):the-statements-outside-every-named-definition,where-a-top-level-call-and-an-anonymous-callback-body's-calls-live;a-CALLER-never-a-callee(nothing-in-the-source-can-name-it)-with-no-body-to-expand;a-file-with-no-such-call-has-no-such-row -->
 <!-- t=type|alias|functype=a-Go-named-type-by-its-written-form:type=a-defined-type-whose-WRITTEN-form-is-not-a-struct/iface/func-literal(type-N-string;type-W-Pair-too,whatever-Pair-is-underneath),alias=type-A=B,functype=type-F-func(...) -->
@@ -5000,7 +5001,7 @@ Roots: a request's path= (or `paths`), else the startup root of `ripwire <root> 
 _initialize + tools/list: the manifest an agent host loads at session start — every verb's name, description and input schema._
 
 ```
-$ ./build/ripwire-merged '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | ./build/ripwire --mcp
+$ ./build/ripwire '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | ./build/ripwire --mcp
 {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","serverInfo":{"name":"ripwire","version":"1.0"},"capabilities":{"tools":{},"resources":{}},"instructions":"Map before reading files. Start a new task with explore; use from_trace for an error; use impact plus uses before changing a sym … [line truncated: 738 more bytes on this line]
 {"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"analyze","description":"Architecture map for a directory: signatures and the call graph for the top symbols. Use when landing cold in a repo or subdir, before reading files; for a task-scoped inventory use 'for', for one symbol's neighborhood find_ … [line truncated: 742 more bytes on this line]
 {"name":"rank_by","description":"The SAME architecture map 'analyze' serves, ranked by a different signal instead of plain PageRank. rank_by = pagerank (default, omit it — the CLI's own unbiased --rank-by=pagerank; 'analyze' can rank differently on a tree with uncommitted changes, where it biases  … [line truncated: 1077 more bytes on this line]
@@ -5026,7 +5027,7 @@ later answers list rows first, carry each definition only the first time the ses
 _--mcp-legend=inline: every answer of the stdio session carries its own legend (the default, session, sends each definition once per session after the first answer)._
 
 ```
-$ ./build/ripwire-merged '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"whereis","arguments":{"path":".","symbol":"rankGraphTeleport"}}}' '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"whereis","arguments":{"path":".","symbol":"computeOnePairOverlap"}}}' | ./build/ripwire --mcp --mcp-legend=inline
+$ ./build/ripwire '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"whereis","arguments":{"path":".","symbol":"rankGraphTeleport"}}}' '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"whereis","arguments":{"path":".","symbol":"computeOnePairOverlap"}}}' | ./build/ripwire --mcp --mcp-legend=inline
 {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","serverInfo":{"name":"ripwire","version":"1.0"},"capabilities":{"tools":{},"resources":{}},"instructions":"Map before reading files. Start a new task with explore; use from_trace for an error; use impact plus uses before changing a sym … [line truncated: 735 more bytes on this line]
 {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"<!-- ripwire whereis schema=ripwire.whereis/v1: every LOCAL ref whose tree holds sym= (refs_scanned=, blobs=), HEAD first: <hit ref= tip= date= p= l= kind= t=>. window: shown= total= capped= has_more= next_offset= offset= limit= (ca … [line truncated: 13645 more bytes on this line]
 "_index":"[index: files=4537 symbols=39826 hash=601321dc]","_fresh":"ok"}}
@@ -5045,7 +5046,7 @@ A comma list of tool names and/or profiles, unioned. core = explore, batch, from
 _--mcp-tools=core: the server lists only the core profile's tools (explore, batch, from_trace, impact, uses, fetch_body, edit_check, quality_delta), so a host that loads every schema at session start pays only for those._
 
 ```
-$ ./build/ripwire-merged '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | ./build/ripwire --mcp --mcp-tools=core
+$ ./build/ripwire '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | ./build/ripwire --mcp --mcp-tools=core
 {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","serverInfo":{"name":"ripwire","version":"1.0"},"capabilities":{"tools":{},"resources":{}},"instructions":"Map before reading files. Start a new task with explore; use from_trace for an error; use impact plus uses before changing a sym … [line truncated: 955 more bytes on this line]
 {"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"fetch_body","description":"Full (or partial-range) source of a symbol's definition, addressed by the stable `handle` a read verb attached to it (bodies on request, not by default). start_line/end_line are optional, 1-based, INCLUSIVE and BODY-RELAT … [line truncated: 1092 more bytes on this line]
 {"name":"quality_delta","description":"Your PR self-check, run every time you think a change is DONE — pairs with the CLI-only --test-gate (names the tests to run + the untested blast radius; not MCP-exposed) to form the two-step pre-PR gate. Reports ONLY what your tree made WORSE vs baseline, acr … [line truncated: 862 more bytes on this line]
@@ -5110,7 +5111,7 @@ Emits per-case want=/got= plus an accuracy, and exits 3 if any labelled case reg
 _Labelled verdict-accuracy eval for --stray-content — three labels over REAL local refs (names resolved at capture time); exit 3 when accuracy is under the floor. Read got= against v= in the stray-content run: a ref the verb could not analyse (unknown) must never be credited as a merged hit._
 
 ```
-$ ./build/ripwire-merged . --eval-stray=<scratch>/aux/stray_labels2.tsv
+$ ./build/ripwire . --eval-stray=<scratch>/aux/stray_labels2.tsv
 # ref<TAB>verdict labels for --eval-stray (the first three local branches, resolved at capture time; a missing branch is padded with a nonexistent name on purpose)
 integration/train-1106a	merged
 integration/train-1111a	unmerged
@@ -5126,7 +5127,7 @@ integration/train-1111b	merged
 _Self-eval: co-change recall vs BM25._
 
 ```
-$ ./build/ripwire-merged . --eval
+$ ./build/ripwire . --eval
 ripwire --eval  (co-change recovery, averaged over 80 historical commits)
   ranker     recall@5  recall@10  recall@20
   ripwire        2.3%       5.2%       6.8%
@@ -5157,7 +5158,7 @@ reports MRR + recall@1/5/10 per ranker (subtoken+body, name-exact, anchored, rou
 _Known-item retrieval eval: MRR + recall@k per ranker per query mode._
 
 ```
-$ ./build/ripwire-merged . --eval-retrieval
+$ ./build/ripwire . --eval-retrieval
 ripwire --eval-retrieval  (known-item, 4000 doc-commented symbols; gold is in-corpus by construction)
   sample: population=10714 scored=4000 rule=smallest-key CAPPED — a SUBSET, not the population
           (smallest fnv1a64(scope::name) over the population, cut on the key so an identity is never split;
@@ -5190,7 +5191,7 @@ FILE is TSV `prompt<TAB>skill[,skill]|none<TAB>provenance`. Scores deterministic
 _Labelled skill-ROUTING eval over the repo's own skills/ directory (4 hand-labelled prompts)._
 
 ```
-$ ./build/ripwire-merged skills --eval-skills=<scratch>/aux/skills_labels2.tsv
+$ ./build/ripwire skills --eval-skills=<scratch>/aux/skills_labels2.tsv
 orient in an unfamiliar codebase fast	ripwire-orient	judged
 who calls this function and what is the blast radius	ripwire-navigate	judged
 plan parallel worktrees so the lanes do not collide	ripwire-change-check	judged
@@ -5216,11 +5217,11 @@ what is the weather in Paris	none	neg
 _Version + short build info._
 
 ```
-$ ./build/ripwire-merged --version
+$ ./build/ripwire --version
 ripwire 0.6.10 (dev, AppleClang 21.0.0.21000101, emit=std::print, built_from=9db2092b7)
 ```
 
-**Shaped by:** `--verify`, `--metrics`, `--deps`, `--naming-locals`, `--arch`, `--dry-run`, `--doc-drift`, `--from-trace`
+**Shaped by:** `--verify`, `--metrics`, `--deps`, `--naming-locals`, `--arch`, `--dry-run`, `--flags`, `--doc-drift`
 
 ---
 

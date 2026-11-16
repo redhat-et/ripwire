@@ -29,16 +29,16 @@ a small explicit bound" is safe only when nothing inside the group repeats; it i
 `(a|aa){1,100}b$`, tracked with the multi-quantifier family above.
 
 **Totals are a dated snapshot.** Every total on this page (the table below, the class counts, the
-file count) is the counts snapshot taken 2026-11-13 (`docs/counts.tsv`), so two open changes that each add a
+file count) is the counts snapshot taken 2026-11-15 (`docs/counts.tsv`), so two open changes that each add a
 cap do not both rewrite the same line; the per-file tables are re-read from `src/` on every run.
 `python3 docs/counts_snapshot.py show` prints today's numbers beside these.
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 423 | 144 | 277 | **146** |
+| 431 | 146 | 279 | **152** |
 
 Plus 10 ranking and apportionment parameters, in their own table below: they are not caps, they
-are not counted as caps, and 423 + 10 is the 433 constants this generator parses out of `src/`.
+are not counted as caps, and 431 + 10 is the 441 constants this generator parses out of `src/`.
 
 ## INDEXING, OUTPUT or BOUNDARY — which half of the answer a cap bounds
 
@@ -56,8 +56,8 @@ None of them truncates anything, so none can be judged by `shown=`/`total=` and 
 a disclosure — labelling them OUTPUT would ask for a `capped="1"` that could never honestly fire.
 The distinction was named in review on #108 and the rows below now carry it.
 
-The `class` column below carries that answer where it is known. **142 of 423 caps are classified
-(50 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 281 render `—`, which means NOT YET
+The `class` column below carries that answer where it is known. **143 of 431 caps are classified
+(51 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 288 render `—`, which means NOT YET
 CLASSIFIED — never "neither".** Classifications live in `docs/limits_classes.tsv`, a sidecar with
 a known expiry:
 the tag belongs on the declaration itself, and this file exists only because the round that
@@ -244,12 +244,13 @@ Discloses: **none**
 
 ### `src/darkflags.h`
 
-Discloses: `capped`, `reads_capped`
+Discloses: `capped`, `reads_capped`, `writes_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kMaxAliasDepth` | `8` | INDEXING | — |
 | `kMaxEnvNameLen` | `128` | BOUNDARY | longest plausible environment-variable name |
+| `kMaxShellNesting` | `32` | INDEXING | — |
 | `kMaxSitesShown` | `8` | OUTPUT | <read> sites per gate; a DEFAULT, raisable by --limit=N (effectiveRowCap), lifted by --detail |
 
 ### `src/declinedsites.h`
@@ -438,6 +439,14 @@ Discloses: `capped`, `depth_capped`
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kAliasHopSigBytes` | `240` | — | a declaration's text is cut here (cut="1"); a runaway guard |
+
+### `src/forbudgetfit.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kForBudgetRowFloor` | `4` | — | the <sigs> rows never shed: kForSoftBudgetNote's "rank 1..4 rows always ship" |
 
 ### `src/forcallerhop.h`
 
@@ -741,6 +750,7 @@ Discloses: **none**
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kMentionsNameMaxDepth` | `512` | INDEXING | undisclosed: a deeper subtree answers "mentions it", so a log-only handler that deep is never flagged |
+| `kTsHelperHops` | `1` | — | the try body's own calls, then one helper hop: "within depth 2" |
 
 ### `src/handoff.h`
 
@@ -797,6 +807,7 @@ Discloses: **none**
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
+| `kCapacity` | `64` | — | sites a base child's notices adopt; past it a site may print twice (stderr only) |
 | `kNoticeByteCap` | `4096` | OUTPUT | a longer notice is cut and says so: " ... [notice truncated: kept K of N bytes]" |
 
 ### `src/infra/fieldid.h`
@@ -958,6 +969,7 @@ Discloses: **none**
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kMaxPlanScout` | `12` | OUTPUT | — |
+| `kPlanScoutFileBudget` | `8192` | — | — |
 
 ### `src/lanes.h`
 
@@ -991,6 +1003,14 @@ Discloses: **none**
 | `kMaxLen` | `64` | — | — |
 | `kMaxShown` | `4` | OUTPUT | — |
 | `kMaxUniqueQueryTerms` | `1024` | INDEXING | — |
+
+### `src/limitwarn.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kLimitWarnLines` | `5` | — | — |
 
 ### `src/lintcatalog.h`
 
@@ -1027,10 +1047,12 @@ Discloses: **none**
 
 ### `src/mapinventory.h`
 
-Discloses: `entries_capped`, `names_capped`
+Discloses: `dirs_capped`, `entries_capped`, `names_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
+| `kInventoryCountOnlyCap` | `32` | — | — |
+| `kInventoryDirCap` | `2048` | — | — |
 | `kInventoryEntryCap` | `256` | OUTPUT | — |
 | `kInventoryNameCeiling` | `2000` | OUTPUT | — |
 
@@ -1365,11 +1387,12 @@ Discloses: **none**
 
 ### `src/serialize.h`
 
-Discloses: `capped`, `calls_capped`, `entries_capped`, `files_capped`, `importers_capped`, `inc_capped`, `names_capped`, `sibs_capped`, `type_capped`
+Discloses: `capped`, `calls_capped`, `dirs_capped`, `entries_capped`, `files_capped`, `importers_capped`, `inc_capped`, `members_capped`, `names_capped`, `sibs_capped`, `type_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kCap` | `65536` | — | — |
+| `kCycleMemberCap` | `12` | — | — |
 | `kForAnchorBodyBudgetBytes` | `22800` | — | — |
 | `kForAutoBodyBudgetBytes` | `6000` | — | — |
 | `kForCapTailSigBytes` | `96` | — | — |
@@ -1552,4 +1575,12 @@ Discloses: `capped`
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kDeadExportedRowsShown` | `100` | — | exported rows printed (shown= capped=1; total= stays whole) |
+
+### `src/warmsnap_model.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kRowsPerChunk` | `4096` | — | — |
 

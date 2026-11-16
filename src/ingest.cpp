@@ -11,6 +11,7 @@
 #include "docparse.h"          // P1-B: non-code document ingest (notebooks/html/csv + markitdown bridge)
 #include "arch.h"              // T5: relForHash — root-relative path key, reused for cache portability
 #include "quality.h"           // A5: cacheDirLadder + sweepStaleCacheBlobsOnce — the cache-dir hygiene hook (saveCache)
+#include "warmsnap_model.h"    // the warm snapshot: ingest() replays the crawl from it, returns the stored model, and keys what main() stores
 #include "embedded_queries.h"  // configure-generated constexpr tags.scm table; no runtime source-tree dependency
 #include "infra/nodekind.h"    // rw::kindIs - the inline node-kind compare the per-AST-node dispatch chains run on (OPTREMARKS F3)
 #include "infra/tsparent.h"    // rw::parentOf - ts_node_parent answered from one cached root-descent path per file (parent-carry lane)
@@ -307,6 +308,111 @@ static std::vector<std::string> selectorRootPrefixes( const std::string& root )
     return out;
 }
 
+// The warm snapshot's TREE KEY (warmsnap.h): every crawled file's root-relative path and content hash. A file the parse
+// pool left unhashed (a document the doc pass reads, a nest-refused or unreadable file) is digested here, and — because
+// that read is later than the one the model came from — only trusted when the file is old enough that no change can
+// hide between the two (the racy rule). A document's extracted text is keyed too: a bridge format's text depends on
+// whether markitdown ran, not on the bytes alone.
+static void keyWarmSnapshot( warmsnap::Session& snap, const IngestResult& result, std::string_view rootDir, const IngestFileScan& scan )
+{
+    PROFILE_SCOPE_DESCRIBE( "ingest: warm snapshot tree key" );
+    std::vector<std::uint64_t> extra;
+    bool                       pinned = !result.memoryStop.isSet();
+    for( std::uint32_t f = 0; f < result.files.size(); ++f )
+    {
+        const auto text = result.docText.find( f );
+        if( text != result.docText.end() )
+        {
+            extra.push_back( f );
+            extra.push_back( depwatch::digest64( text->second ) );
+        }
+        if( scan.hash[ f ] != 0 )
+        {
+            continue;
+        }
+        const warmsnap::StatSig          before = warmsnap::statSig( result.files[ f ].c_str(), true );
+        const std::optional<std::string> bytes  = docparse::detail::readWholeFile( result.files[ f ] );
+        const long long                  racyFrom = snap.startNs - warmsnap::kRacySlackNs;
+        pinned = pinned && before.mtimeNs < racyFrom && before.ctimeNs < racyFrom && before == warmsnap::statSig( result.files[ f ].c_str(), true );
+        extra.push_back( f );
+        extra.push_back( bytes ? depwatch::digest64( *bytes ) : depwatch::kAbsent );
+    }
+    warmsnap::setTreeKey( snap, result.files, rootDir, scan.hash, extra, pinned );
+}
+
+// The stored model for a tree replayTree() just vouched for, or false with `result` holding the crawl alone, as before.
+static bool loadWarmModel( warmsnap::Session& snap, IngestResult& result )
+{
+    const auto refuse = [ & ]( warmsnap::Why why ) noexcept
+    {
+        snap.modelWhy = why;
+        snap.refuse( why );
+        return false;
+    };
+    if( snap.modelSection.empty() )
+    {
+        return refuse( warmsnap::Why::NoSection );
+    }
+    // The blob this model was built from IS the blob that named the file this section came out of (warmsnap.h kVersion 2:
+    // the name carries the blob's identity, ingest_cache.h cacheBlobIdentity). Deleted, rewritten by another
+    // configuration, or replaced by a run that re-parsed: in every case this run resolves a different name, or none, and
+    // there is nothing here to serve. That used to be a stat signature of the blob stored in the section and compared
+    // here — a field that could be wrong about the binding, where the name cannot be.
+    warmsnap::BlobFacts blob;
+    if( !warmsnap::readModel( snap.modelSection, result, blob ) )
+    {
+        IngestResult crawl;   // a section that does not parse leaves nothing of itself behind
+        crawl.files             = std::move( result.files );
+        crawl.crawlRoot         = std::move( result.crawlRoot );
+        crawl.crawlRootPrefixes = std::move( result.crawlRootPrefixes );
+        crawl.skippedOversize   = std::move( result.skippedOversize );
+        const bool reread = warmsnap::replayTree( snap, crawl );   // crawlSkips was overwritten by the model's: take the crawl's own again
+        result      = std::move( crawl );
+        return reread ? refuse( warmsnap::Why::Checksum ) : refuse( warmsnap::Why::TreeMoved );
+    }
+    snap.modelLoaded  = true;
+    snap.modelWhy     = warmsnap::Why::Ok;
+    snap.treeKey      = snap.fileTreeKey;   // the tree the file was keyed on is the tree replayTree found
+    snap.treeKeyValid = true;
+    if( std::getenv( "RIPWIRE_CACHE_STATS" ) != nullptr )   // the parse pool's line, for the run it did not have to make
+    {
+        rw::emitTo( stderr, "ripwire: cache-stats reparsed=0 reused={} files={} cached_records={} blob_entries={} warm_growths=0\n", result.files.size(), result.files.size(),
+                    blob.cachedRecords, blob.blobEntries );
+    }
+    return true;
+}
+
+// Store the model a CLEAN run assembled (nothing re-extracted: a run that parsed is followed, as a rule, by another edit,
+// and must not pay to write what the next run refuses). Not for a tree with a bridge-extracted document.
+static void recordWarmModel( warmsnap::Session& snap, const IngestResult& result, const CacheLoadStats& cacheStats )
+{
+    const bool stored = snap.fileOk && snap.fileTreeKey == snap.treeKey && !snap.modelSection.empty() && snap.modelWhy != warmsnap::Why::Stale;
+    if( !snap.treeKeyValid || result.reparsedFiles != 0 || result.memoryStop.isSet() || stored )
+    {
+        return;
+    }
+    warmsnap::BlobFacts facts{ cacheStats.recordsRead, cacheStats.blobEntries, {} };
+    for( std::uint32_t f = 0; f < result.files.size(); ++f )
+    {
+        if( docparse::docKindOf( lowerExtensionOf( result.files[ f ] ) ) != docparse::DocKind::Markitdown )
+        {
+            continue;
+        }
+        // a bridge document: its text is markitdown's, or a cached extraction's. Only "neither exists" is a fact a later run can re-check cheaply.
+        const std::optional<std::string> bytes = docparse::detail::readWholeFile( result.files[ f ] );
+        if( !bytes || result.docText.find( f ) != result.docText.end() || docparse::markitdownMayRun() )
+        {
+            return;
+        }
+        facts.bridgeBlobs.push_back( quality::resolveCacheBlobPath( quality::cacheDirLadder(), std::format( "ripwire-docmd-{:016x}.bin", fnv1a64( *bytes ) ) ) );   // docTextViaBridgeCache's name
+    }
+    if( !warmsnap::bridgeDocsStillEmpty( facts.bridgeBlobs ) )
+    {
+        return;
+    }
+    snap.modelOut = warmsnap::writeModel( result, facts );
+}
+
 IngestResult ingest( const char* rootDir, const std::vector<std::string>& excludeSubstr, std::string_view cacheFile,
                      std::size_t maxFileBytes, bool captureValueUses, std::string_view excludeLabel, bool respectGitignore,
                      IngestLayout )
@@ -338,13 +444,36 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     // under --no-cache: the probe then runs inside the crawl, as it always did.
     IgnoreProbeSpeculation ignoreSpeculation( !cacheFile.empty() );
 
+    // The warm snapshot (warmsnap.h), when main() armed one for this call and a cache file names the blob it is derived
+    // from. Which snapshot that is depends on the blob's identity, so a run with no readable blob has none to read —
+    // it still records at the end, under the identity of the blob it leaves behind.
+    warmsnap::Session* const snap = cacheFile.empty() ? nullptr : warmsnap::tlSession;
+    if( snap != nullptr )
+    {
+        snap->blobPath   = std::string( cacheFile );
+        snap->startNs    = wallClockNs();
+        snap->rootKey    = quality::cacheRootKeyHex( rootDir );   // the field the cache-dir sweep pins a root's whole family by
+        snap->optionsKey = warmsnap::optionsKeyOf( rootDir, excludeSubstr, maxFileBytes, captureValueUses, excludeLabel, respectGitignore,
+                                                   kCacheVersion * 100000u + parserVerFor( captureValueUses ), tlIngestWantsConstructHits );
+        if( const std::optional<std::uint64_t> blobId = cacheBlobIdentity( snap->blobPath, captureValueUses ) )
+        {
+            snap->path = warmsnap::snapshotPath( snap->rootKey, snap->optionsKey, *blobId );
+        }
+        warmsnap::openSnapshot( *snap );
+    }
+
     // 1) deterministic crawl -> sorted file list (this list IS result.files / the fileId space). A lambda because a lost
     //    ignore speculation runs it a second time, on git's fresh answer (below, before the parse pool).
     const auto crawlInto = [ & ]()
     {
         PROFILE_SCOPE_DESCRIBE( "ingest: crawl (collectSources)" );
+        if( snap != nullptr )
+        {
+            snap->capture = warmsnap::TreeCapture{};
+            snap->capture.on = true;
+        }
         auto [ crawledPaths, oversizeSkipped, taxonomySkips ] = collectSources( rootDir, excludeSubstr, excludeLabel, respectGitignore, &memWatch,
-                                                                                &ignoreSpeculation );
+                                                                                &ignoreSpeculation, snap != nullptr ? &snap->capture : nullptr );
         result.files           = std::move( crawledPaths );
         // #228: record the root once, for rootRelPath (model.h). A directory crawl joins it onto every path; a
         // single-file root IS its one path, so the root-relative view anchors at that file's directory instead.
@@ -371,7 +500,18 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
             }
         }
     };
-    crawlInto();
+    // A snapshot whose every watched path still carries its recorded signature IS the crawl's answer: no directory is read
+    // and no git child starts (the speculation below then has nothing pending, so it stands).
+    const bool crawlReplayed = snap != nullptr && warmsnap::replayTree( *snap, result );
+    if( !crawlReplayed )
+    {
+        crawlInto();
+    }
+    else if( loadWarmModel( *snap, result ) )
+    {
+        memstats::mark( "model" );   // the model at rest, as the build path marks it
+        return result;
+    }
 
     // Win 1 (PERF.md P1) — lazy grammar compilation: load the cache FIRST, then compile only the
     // grammars needed by cache-miss files (new or hash-changed). On a fully-warm zero-change run,
@@ -415,6 +555,10 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
         scan       = makeFileScan( result.files );
     }
     ENSURES( scan.lang.size() == result.files.size(), "the scan arrays describe the crawl the parse pool will read" );
+    if( snap != nullptr && !crawlReplayed )
+    {
+        warmsnap::recordTree( *snap, result, canonicalCrawlRoot( rootDir ), respectGitignore );   // the crawl that stands, its paths stat'd
+    }
     const long long cacheWriteNs = cacheStats.blobWriteNs;
 
     // lazy tags.scm prewarm: detect the cache-miss set (prefilling scan.hash/stat), launch the async
@@ -461,6 +605,10 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     if( !result.memoryStop.parseCut )   // #350: a stopped parse runs no second parse
     {
         runDocPostPass( result, raw.defs, !cacheFile.empty(), captureValueUses );
+    }
+    if( snap != nullptr )
+    {
+        keyWarmSnapshot( *snap, result, rootDir, scan );
     }
 
     PROFILE_SCOPE_DESCRIBE( "ingest: build model (dedup + symbols/refs)" );
@@ -549,6 +697,15 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
         suppressShadowedReferences( result );
     }
 
+    if( snap != nullptr )
+    {
+        // The snapshot is named after the blob, and the parse pool above has published the blob this run leaves behind
+        // (saveCache, for a run that re-parsed or grew a record). Re-read its identity so what this run records is found
+        // by the NEXT run rather than filed under the blob this one opened. No readable blob: nothing is recorded.
+        const std::optional<std::uint64_t> blobId = cacheBlobIdentity( snap->blobPath, captureValueUses );
+        snap->path = blobId ? warmsnap::snapshotPath( snap->rootKey, snap->optionsKey, *blobId ) : std::string{};
+        recordWarmModel( *snap, result, cacheStats );
+    }
     memstats::mark( "model" );   // M0 MEM-STATS: the model at rest, what buildGraph's side tables stack on (src/memstats.h)
     if( result.memoryStop.isSet() )
     {

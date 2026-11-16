@@ -35,7 +35,10 @@
 # pass (the algorithm is a rewrite, not a capability change), only the TIMING ratio in B goes red. Run
 # against a pre-fix binary — RIPWIRE_BIN=<base>/ripwire bash test/traceasanlinearcheck.sh — arm B must FAIL.
 # Re-proven for the median form (#352): a per-word `after.substr( start ).find_first_of( "./" )` rescan planted in
-# scanAsanWordBoundaries measured medians 132 / 1033 / 14094 ms / timeout and failed B1, B2 and B3.
+# scanAsanWordBoundaries measured medians 132 / 1033 / 14094 ms / timeout (40 KB / 160 KB / 640 KB / 2.5 MB) and failed B1, B2 and B3.
+#
+# B3 is RELATIVE (62.5x the run's own 160 KB median; see the comment at B3) so a loaded host cannot flake it; B4 proves the
+# rule on fixed numbers. B3_INJECT_PCT=1200 (test-only) scales the measured 2.5 MB median to simulate the quadratic case.
 #
 # Usage:  bash test/traceasanlinearcheck.sh   |   RIPWIRE_BIN=asan/ripwire bash test/traceasanlinearcheck.sh
 #
@@ -202,12 +205,43 @@ if [ "$samplesOk" = 1 ]; then
     else
         no "B2: 640 KB -> 2.5 MB cost ${ms640}ms -> ${ms2500}ms, more than 12x — looks quadratic"
     fi
-    # absolute ceiling: the whole point is that 2.5 MB must not take seconds
-    if [ "$ms2500" -le 3000 ]; then
-        ok "B3: the 2.5 MB pathological trace parses in ${ms2500} ms (<=3000 ms)"
+    # B3: the 2.5 MB line must not cost quadratic time. The cap is RELATIVE to this run's own 160 KB median (same
+    # host, same load, same minute), scaled linearly by the size ratio (2500000/160000 = 15.6x) and widened by K = 4:
+    #     cap = K * max( ms160, B3_FLOOR_MS ) * (2500/160); in integers:  ms2500 * 100 <= base * B3_CAP_PCT, B3_CAP_PCT = 6250
+    # (6250 % = 62.5x = 4 * 15.625). WHY NOT AN ABSOLUTE CAP: #641's loaded macOS shard read 40 KB 77 / 160 KB 190 /
+    # 640 KB 1250 / 2.5 MB 3395 ms, which failed the old absolute 3000 ms although B1/B2 passed (a loaded host slows every
+    # size together). 3395/190 = 17.9x there, 1382/65 = 21x on a quiet run: both far under 62.5x. A real quadratic at
+    # 2.5 MB is (2500/160)^2 = 244x the 160 KB time, or a 20 s TIMEOUT (TIMED_OUT_MS), both over the cap. B3_FLOOR_MS keeps a
+    # tiny, timer-granular 160 KB median from making the cap absurdly tight. B3_INJECT_PCT is a TEST-ONLY knob that scales the
+    # measured 2.5 MB median (the mutant arm below proves B3 bites); it is 100 in every real run.
+    B3_CAP_PCT=6250; B3_FLOOR_MS=20
+    b3Within(){ # $1 = ms160, $2 = ms2500 -> 0 when within the cap
+        # A timed-out baseline is not a baseline: with every size at TIMED_OUT_MS the relative cap would scale with the
+        # sentinel itself and pass (CodeRabbit, #670). A timeout on either side is out of the cap.
+        if [ "$1" -ge "$TIMED_OUT_MS" ] || [ "$2" -ge "$TIMED_OUT_MS" ]; then return 1; fi
+        local base="$1"; [ "$base" -lt "$B3_FLOOR_MS" ] && base="$B3_FLOOR_MS"
+        [ $(( $2 * 100 )) -le $(( base * B3_CAP_PCT )) ]
+    }
+    ms2500m=$(( ms2500 * ${B3_INJECT_PCT:-100} / 100 ))
+    capMs=$(( ( ms160 < B3_FLOOR_MS ? B3_FLOOR_MS : ms160 ) * B3_CAP_PCT / 100 ))
+    if b3Within "$ms160" "$ms2500m"; then
+        ok "B3: the 2.5 MB pathological trace parses in ${ms2500m} ms (<= ${capMs} ms = 62.5x this run's 160 KB median of ${ms160} ms)"
     else
-        no "B3: the 2.5 MB pathological trace took ${ms2500} ms — looks unbounded"
+        no "B3: the 2.5 MB pathological trace took ${ms2500m} ms, over ${capMs} ms (62.5x the run's own 160 KB median ${ms160} ms) — looks unbounded"
     fi
+    echo "     B3 margin: ${ms2500m} ms of ${capMs} ms cap ($(( ms2500m * 100 / capMs )) % used)"
+    # B4 premise self-test of the rule itself on fixed numbers (no timing): the #641 loaded run passes, the quadratic fails.
+    b4n=0
+    b4(){ # $1 = label, $2 = ms160, $3 = ms2500, $4 = want (pass|fail)
+        local got=fail; b3Within "$2" "$3" && got=pass; b4n=$(( b4n + 1 ))
+        if [ "$got" = "$4" ]; then ok "B4: $1 -> B3 rule says $got"; else no "B4: $1 -> B3 rule said $got, wanted $4"; fi
+    }
+    b4 "#641 loaded macOS shard (160 KB 190 ms, 2.5 MB 3395 ms)" 190 3395 pass
+    b4 "quiet run (160 KB 65 ms, 2.5 MB 1382 ms)" 65 1382 pass
+    b4 "quadratic at 2.5 MB (160 KB 65 ms, 2.5 MB 65*244 ms)" 65 15860 fail
+    b4 "quadratic that hit the runner cap (timeout)" 1033 "$TIMED_OUT_MS" fail
+    b4 "every size timed out (sentinel baseline)" "$TIMED_OUT_MS" "$TIMED_OUT_MS" fail
+    [ "$b4n" = 5 ] || no "B4: expected 5 rule self-tests, ran $b4n"
 fi
 
 if [ "$fail" = 0 ]; then
