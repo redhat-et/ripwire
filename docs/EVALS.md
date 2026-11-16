@@ -15992,3 +15992,160 @@ change with its own band and is deliberately out of scope here; it is recorded w
 the next round starts from the number. It is also the honest answer to "an answer should be bounded by the
 question, not the corpus": this lane bounded the *count-only* tail and fixed *where* the names go, and the
 remaining growth term is a schema that spells every ancestor directory once per row.
+
+## PRE-REGISTRATION 2026-11-16 — SHORTNESS AT FIXED COMPLETENESS: the `<tail>` section, class→verb routing, and the default-map question set the map bands need
+
+Registered before any `src/` change and before any number in the bands below exists. The owner's framing:
+*complete answers with efficient bytes is the goal ... the real measurement is token savings, as 3x follow-on
+grep do not save tokens* — and, setting this round's direction: *a few of the main verbs could be overloaded
+at this point, the routing plus answers is a tough optimization problem; we worked hard to get complete
+answers, now we need to figure out how to optimize shortness.*
+
+Everything is priced in **expected tokens to a complete answer** = `tokens(answer) + P(not complete) ×
+24,808`, the measured grep-and-read follow-up. One point of completeness is worth **248 tokens** of expected
+cost, which is the exchange rate every band below is written in. Bytes are an input, never a verdict.
+
+### THE INSTRUMENT GAP COMES FIRST, because it invalidates three bands already on the books
+
+The completeness instrument (`harness/anchor_grade.py` over the recorded answer store) grades **319 cells,
+and every one of them is a `--cache --for` query**. Measured 2026-11-16 on the item-1 re-collection:
+
+```
+answers total                        319
+answers carrying an <inv> tier         0
+answers carrying an <lsd> wrapper      0
+distinct argv shapes in the set        1   (--cache --for)
+```
+
+Two consequences, both of which this card treats as findings rather than as background:
+
+1. **Every map-shape claim graded through this instrument has ZERO exposure.** The `<inv>` tier is emitted
+   only under the flagless default map scope, so neither the `<ls>` row ceiling nor the `<lsd>` nesting
+   appears in a single graded answer. Band F of the encodings card re-graded to figures **identical to the
+   baseline to the decimal** (285 scored, 73.3 % / 65.3 %, all fourteen use cases unchanged) and that is
+   the tell, not the result. It is recorded there as NOT-ESTABLISHED.
+2. **A routed answer cannot be graded at all yet.** All the gold grades `--for` answers. Scoring a
+   `--callers` or `--impact` answer against `--for` gold measures the FORMAT, which is this programme's
+   recorded failure mode, not the answer.
+
+So Band M below is not an extra: it is a precondition on Bands T and R, and on the two map lanes already
+merged or open.
+
+### The measured motivation, labelled as a PROBE and not as a result
+
+A 30-cell probe (cpython, envoy, nushell, koa; `harness/` plus the recorded answer store), re-run under
+existing options and graded by the same grader that reproduces the committed baseline exactly:
+
+| variant | bytes | complete L (95 % CI) | expected tokens | vs default |
+| --- | --- | --- | --- | --- |
+| base (default) | 37,825 | 73 % [55, 86] | 22,200 | — |
+| `--signatures-only` | 30,295 | 67 % [49, 81] | 20,603 | −7 % |
+| `--token-budget=6K` | 17,567 | 47 % [31, 64] | 20,348 | −8 % (−20 % strict) |
+| `--token-budget=3K` | 10,935 | 27 % [14, 45] | 22,591 | +2 % |
+
+**At n = 30 the Wilson half-width is about ±18 points, so no two completeness rates above are separated.**
+The byte column is exact; the rate column is not. What the probe does establish is weaker and still useful:
+the expected-token curve is **shallow and its minimum is not at the default**, and bytes and expected tokens
+disagree about which option is best — `--token-budget=3K` is the smallest answer and nearly the most
+expensive one. No band is claimed from this table; it is why the bands below exist.
+
+Where a `--for` answer's bytes are (same 30 answers, mean 37,825 B, by direct child of `<ctx>`):
+
+| section | share |
+| --- | --- |
+| `<tail>` | **41.2 %** |
+| `<sigs>` | 20.6 % |
+| legend + root tags | ~16 % |
+| `<fold>` | 7.8 % |
+| `<hops>` / `<lit>` / `<graph_verb>` / `<bodies>` | 2.1–2.6 % each |
+
+And the scale this round is aimed at: the `--for` median over all 319 cells is **30,762 B**, against the
+whole vscode default map at 151,560 B. The recorded cross-tool medians are **ripwire 41,215 B, codegraph
+24,870, crg 12,592, cbm 9,110, graphify 6,907, graft 1,636** — this tool emits the most of any of them.
+
+### ITEM T — `<tail>` becomes a decision, not a default
+
+`<tail>` is 41.2 % of a `--for` answer, and the grader's **strict** bound is defined as evidence that does
+NOT appear only inside `<tail>`. On the probe, **4 of 30** cells are complete by `<tail>` alone. A tail-free
+answer therefore prices at an estimated 22,241 B / 60 % / **19,038 expected tokens, −14 %** — better than
+every option in the table above, and the best single lever found.
+
+**That figure is an ESTIMATE derived from the strict rate, not a measurement.** No tail-free build exists.
+Band T3 exists precisely to test the assumption it rests on.
+
+- **Band T1 — expected tokens, measured.** On the same cells, at BOTH bounds, expected tokens must fall by
+  ≥ 5 % against the default. **FAIL if expected tokens RISE at either bound**, whatever the byte saving.
+  Reported per repo, never pooled.
+- **Band T2 — recoverability, or it is a cut and not an encoding.** Every cell that loses completeness must
+  be named individually, with its gold anchors shown reachable by a named follow-up argv on the same root.
+  If they are not, the change removes answer content and §9 requires `shown=`/`total=`/`next=` vocabulary
+  for it; shipping it without that is a FAIL of this band, not a trade.
+- **Band T3 — the control on T1's premise.** A tail-free build's **lenient** rate must equal the baseline's
+  **strict** rate within 2 points. If it does not, the strict bound is not "tail-free", the −14 % estimate
+  was built on a misread definition, and T1's result stands on its own measurement with the estimate
+  withdrawn in place.
+- **Band T4 — default vs opt-in is decided by T1, in advance.** If T1 passes at both bounds the tail becomes
+  opt-in (`--tail`), and if it passes at one bound only it stays default with an opt-OUT. Registered now so
+  the result cannot pick the framing.
+
+### ITEM R — class→verb routing, with the router judged apart from the map
+
+`harness/collect_answers.py` records that the plan already gives each tool an **expert verb map
+(class → verb)** and that the collection deliberately does not apply it: *"a judgement call per class per
+tool that belongs in the publish run with the map reviewed adversarially."* This item is that work, scoped
+to this tool only.
+
+- **Band R1 — per class, expected tokens.** For each question class with per-verb gold, the routed verb's
+  expected tokens against `--for`'s on the same cells. PASS needs **≥ 3 classes improving by ≥ 10 % with no
+  class worsening by more than 2 %**. Per class, never pooled: a pooled average would let one class pay for
+  another, which is the join this programme has already been burned by.
+- **Band R2 — the ROUTER is measured separately, from the question text alone.** The verb must be chosen by
+  the router from the question, never from the gold's own `class` column — a map keyed on the gold's label
+  leaks the answer and would report routing accuracy of 100 % by construction. The router's accuracy is
+  reported as a confusion matrix over classes, beside R1 and never folded into it. **FAIL if the routed
+  verb is selected using any field of the gold.**
+- **Band R3 — gold before grading.** Per-verb gold must exist for a class before any routed answer in it is
+  graded. A routed answer scored against `--for` gold is **NOT-ESTABLISHED**, never a result.
+- **Band R4 — the overload is named, not assumed.** The claim "a few of the main verbs are overloaded" is
+  made concrete and reported: for each of the top verbs, the number of distinct `<ctx>` child sections it can
+  emit, and the number of distinct ELEMENTS sharing each tag name. Two facts are already on file and seed
+  this: `<d>` is four different elements (the signature tier's `<d r= cx= in= amp=>`, `--defs`'
+  `<d sel_proven=>`, the slice verb's `<d p="FILE:LINE" sel= class=>`, and — until it was renamed to
+  `<lsd>` — the inventory wrapper), and a `--for` answer carries 32 `<ls>` rows that are not the inventory's
+  `<ls>`. A tag shared by two elements makes every textual edit to either one unsafe; that is how the
+  inventory rename hit a foreign call site inside `<sigs>`.
+
+### ITEM M — the default-map question set, which Bands T, R and F all rest on
+
+- **Band M1 — the set.** ≥ 40 cells whose argv is the **flagless default map**, with gold, across ≥ 6 repos
+  spanning ≥ 10× in LOC, built and recorded as its own population with its own baseline. Until it exists,
+  every claim about the map's SHAPE is NOT-ESTABLISHED — including the `<ls>` row ceiling's and the `<lsd>`
+  nesting's. Stated that plainly so the two merged lanes are not quietly credited with a readability result
+  neither one has.
+- **Band M2 — baseline before the next change.** The set's baseline must be recorded on a binary that
+  predates the next map change. A baseline collected after a change cannot measure it, which is the exact
+  error that made the encodings card's prediction table wrong by 61 %.
+- **Band M3 — the set is not the 285.** The `--for` cells stay as they are and are reported beside the new
+  set, never merged into one rate. Two populations, two readouts.
+
+### Forbidden alternatives, registered so they cannot be chosen after the data
+
+- **No byte claim is a verdict.** A change that cuts bytes and raises expected tokens FAILS. This is the
+  whole point of the round and the one rule with no exceptions.
+- **No pooling** across repos for a byte or token claim, and none across classes for a routing claim.
+- **No floor moved after seeing a readout.** A floor that turns out wrong is recorded as a failed band and
+  superseded in place with its arithmetic, as item 1's Band C was.
+- **No completeness difference claimed at n < 50 without Wilson intervals**, and none claimed as separation
+  while the intervals overlap. The probe table above is the standing example of what that looks like.
+- **No routed answer graded against another verb's gold**, and no router that reads the gold.
+- **No tuning a default DOWN for tokens** (standing owner directive): T4 and R1 may only change which
+  answer is produced, never cap an answer below what the question needs.
+
+### What this card does NOT claim
+
+Nothing about the peer tools: their answers are ungraded in this run and the frozen grader kit for the
+remaining round is still absent, so no cross-tool shortness line exists and none is registered here.
+Nothing at llvm-project scale. Nothing about the 319 `--for` cells' own completeness rates changing — items
+T and R change which answer is produced, so their readouts are new populations, not a re-reading of that
+one. And no claim that the probe's −14 % for `<tail>` will survive its own band; it is the lead that
+justified writing this card, and Band T3 is the reason it might not.
