@@ -15413,7 +15413,7 @@ terraform −5.3 %, zed −11.2 %).
 
 ### Band 2 and Band 3 — PASS, with per-arm firing evidence rather than a green run
 
-`test/lstiercapcheck.sh`, 23 arms, and because a clause that only ever fires beside another has no
+`test/lstiercapcheck.sh`, 22 arms, and because a clause that only ever fires beside another has no
 independent evidence, **nine adversary builds** were built and the gate run against each. Which arms each
 turns red:
 
