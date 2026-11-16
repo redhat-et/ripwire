@@ -14983,3 +14983,172 @@ It does not say the ring is valuable everywhere — it is still 34 % precise whe
 and `reaches <= importers`**, because the cells where the ring carries gold are invisible to both. A
 formulation that reads something else is a new registration with a new band and a fresh readout; per
 the registration's forbidden-alternative clause, a share-of-repo threshold is not it.
+
+## The map inventory tier's `<ls>` rows are unbounded — a row ceiling cut at the named/count-only cliff, PRE-REGISTERED 2026-11-15 (before any `src/` change and before any number from the readout below exists)
+
+**What this registers.** The default map's inventory tier (`<inv>`, `src/mapinventory.h`) prints one
+`<ls p= n= f=>` row **per directory** over the unshown files, in **path order**, with **no row ceiling
+and no row-cut vocabulary**. The tier's two existing runaway guards bound the *names* inside the rows
+(`kInventoryNameCeiling = 2000`, disclosed as `names_capped=`/`names_total=`/`names_next=`) and the
+*entries* above them (`kInventoryEntryCap = 256`), and neither bounds the number of rows. This
+registers a DEFAULT change: cut the row list at the **named/count-only cliff** — keep every row that
+names code files, bound the count-only rows at a small allowance ordered by file count, and bound the
+total rows with a high backstop — disclosed as `dirs_capped="1" dirs_total=N dirs_next=` in the house
+form the other two guards already use.
+
+The bands below are written before a line of the implementation exists and before any number from the
+registered readout set exists. Each one names what would refute it.
+
+### The measurement that motivated it, and the instrument defect it survived
+
+Default `ripwire <dir>` on the practice run's 15-repo local corpus, lane binary at `d68b57456`
+(`origin/main`), stdout bytes. Instrument: the run kit's `harness/ls_tier_composition.py`, which lives outside this repository.
+
+*The instrument defect, stated because it inverted the first readout.* The map opens with a legend
+COMMENT that spells its own schema in prose, and that prose contains the literal strings
+`<inv listed= unlisted=>` and `<ls p= n= f=`. A `<inv\b.*?</inv>` match therefore starts **inside the
+comment** and reports the inventory as 98.5–99.9 % of every map — including 98.7 % on htop, whose
+inventory is really 15.8 %. The instrument now strips the leading comment run first, locates the
+element only by a QUOTED attribute value (which the prose never has), and **asserts that legend +
+ranked rows + `<inv>` sum to the whole document**; a remainder fails the run rather than printing. The
+table below is from the checked instrument. This is the third time in this run that an extractor, not
+the tool, set the first number.
+
+| repo | map B | legend | ranked rows | `<inv>` B | `<ls>` rows | `<ls>` B | `<ls>` % of map | named rows | named B | count-only rows | count-only B | `names_capped` |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| vscode | 233,564 | 3,338 | 24,755 | 205,471 | 2,534 | 192,484 | **82.4 %** | 432 | 70,552 | 2,102 | 121,932 | 1 |
+| angular | 151,804 | 3,249 | 23,086 | 125,469 | 1,301 | 119,527 | 78.7 % | 669 | 85,408 | 632 | 34,119 | 1 |
+| envoy | 149,018 | 3,852 | 24,226 | 120,940 | 1,349 | 118,263 | 79.4 % | 707 | 83,014 | 642 | 35,249 | 1 |
+| cockroach | 153,468 | 3,522 | 25,032 | 124,914 | 1,718 | 112,027 | 73.0 % | 538 | 56,338 | 1,180 | 55,689 | 1 |
+| zed | 106,460 | 2,945 | 27,664 | 75,851 | 827 | 62,754 | 58.9 % | 461 | 49,425 | 366 | 13,329 | — |
+| terraform | 60,892 | 3,064 | 24,996 | 32,832 | 278 | 31,680 | 52.0 % | 186 | 26,542 | 92 | 5,138 | — |
+| cpython | 82,944 | 3,509 | 24,284 | 55,151 | 238 | 36,027 | 43.4 % | 174 | 33,629 | 64 | 2,398 | — |
+| django | 44,581 | 3,081 | 21,621 | 19,879 | 238 | 19,097 | 42.8 % | 199 | 17,223 | 39 | 1,874 | — |
+| nushell | — | — | — | — | 306 | — | — | 224 | 28,689 | 82 | 2,902 | — |
+| hono | 25,131 | 2,406 | 17,109 | 5,616 | 105 | 5,394 | 21.5 % | 62 | 3,920 | 43 | 1,474 | — |
+| htop | 23,157 | 2,614 | 16,879 | 3,664 | 17 | 3,504 | 15.1 % | 12 | 3,385 | 5 | 119 | — |
+| textual | 29,297 | 3,147 | 22,759 | 3,391 | 20 | 2,985 | 10.2 % | 9 | 2,711 | 11 | 274 | — |
+| tmux | 27,140 | 2,561 | 20,911 | 3,668 | 10 | 2,670 | 9.8 % | 4 | 2,492 | 6 | 178 | — |
+| axum | — | — | — | — | 35 | — | — | 18 | 1,298 | 17 | 506 | — |
+| starlette | — | — | — | — | 10 | — | — | 2 | 201 | 8 | 203 | — |
+
+**The ranked rows are bounded and the inventory is not.** Across a 10x range of repository size the
+ranked map holds within 16,879–27,664 B — the `--top-k=200` cut doing its job — while `<ls>` runs
+2,670 B (tmux) to 192,484 B (vscode), a **72x spread on the same question**. Every byte of that spread
+is corpus size, not question scope.
+
+**The cliff is the named/count-only boundary, and it is sharp.** On vscode, **2,102 of 2,534 rows
+(83 %) are count-only** — a path and a number, no file named — and they cost **121,932 B, 52 % of the
+entire document**. **959 of them say `n="1"`**: ~58 B to report that one unnamed file exists somewhere
+under a directory. The first rows in emitted order are `.agents/skills/launch/playwrightScripts` and
+`.config/1espt`, because the emit order is alphabetical; `src/vs/workbench/…` sorts late. The
+`names_capped="1"` guard is already engaged on the four largest repos, so on those the rows past the
+ceiling carry **no names at all** — the existing guard caps the informative part of a row and leaves
+the path string uncapped.
+
+**llvm-project is NOT in the table.** The default map there exits `-9` (SIGKILL) under the instrument.
+That is unexplained as of this registration and is a disclosed hole in the readout set, not an omitted
+row; §9.1's largest rung is re-measured as part of the readout below, and if the cause is this tier
+the finding is reported whichever way the bands fall.
+
+### What this is a violation of, named precisely
+
+This is not a `docs/METHODOLOGY.md` §9 principle 3 breach: nothing is cut, so nothing is cut silently,
+and the chop rate contribution is **0** today. It is a **principle 1 constraint** breach — "maximise
+terminality *subject to output ≤ budget*" — and a **§9.1 ordering** breach waiting to happen: the emit
+order is path order, which §9.1 names as the one order a cut may never walk ("never source order and
+never path or id order"). A row ceiling added without a priority order would turn a bounded answer
+into a chop on the first repo it fired on.
+
+### Band 1 — HEAD RETENTION, and it is the gating band
+
+Over all 15 repos above: the set of code files NAMED in a `<ls f=>` row by the shipped binary must be
+**retained exactly** by the lane binary. Not a rate — a **zero-loss** criterion, re-derived by diffing
+the two answers' named-file sets per repo.
+
+- **PASS** ⇔ zero named code files lost on every repo, and zero gained (a gain would mean the cut
+  changed the name ceiling's own selection, which is a different change than this one).
+- **FAIL** ⇔ any repo loses a named file. The decision rule on a FAIL is **REJECT the cap**, not
+  re-tune it: a cut that reaches a named row is cutting the head, and the instrument that could
+  license that cut (Band 5) does not exist in this run.
+
+This band is designed to be passable **by construction** — the cut is specified to walk count-only
+rows first and the backstop is set above every named-row count measured above (max 707, envoy). It
+gates anyway, because "by construction" is a claim about code I have not written yet.
+
+### Band 2 — DISCLOSURE AND RECOVERY, the ship/no-ship gate
+
+On every repo where the cut fires: `dirs_capped="1"`, `dirs_total=N` with N equal to the row count the
+shipped binary emitted, and a non-empty `dirs_next=`. And in both dialects — the XML `<inv>` attributes
+and the JSON `inv` object must carry the same three fields, per the tier's own "ONE selection both
+dialects render" contract.
+
+- `listed + unlisted = files=` must still hold on every repo, cut or not: the cut removes rows from the
+  per-directory enumeration, never files from the accounting.
+- `dirs_next=` must be an argv that **runs** on the same root and returns a superset of the cut
+  directories' files. A `next=` that is absent, empty, or does not run is a **dead-end cut** (§9.1),
+  which fails this band even though the cut is counted.
+- The legend clause must be **registered in `src/compactlegend.h`'s dictionary**, not only written into
+  the emitter. An attribute emitted with no dictionary row ships undocumented and silently; that is a
+  FAIL of this band, and it is how the `implementors=` clause nearly shipped undocumented three days ago.
+- Any repo whose map carries no cut must be **byte-identical** to the shipped binary's.
+
+### Band 3 — PRIORITY ORDER, stated so it can fail on its own
+
+The kept rows must not be a path-order prefix. Registered falsifiable assertions, each read from the
+lane binary's own vscode answer:
+
+- every count-only row kept has an `n=` **greater than or equal to** every count-only row cut;
+- the kept set is **not** equal to the first K rows of the shipped binary's path-order emission (on
+  vscode it cannot be: the shipped prefix is `.agents/…`, `.config/…`);
+- the survivors are **re-sorted to path order** before emission, so the tier's documented emit order is
+  unchanged and `test/` gates that read it in path order keep reading it in path order.
+
+This band has **independent evidence only if the second clause can fail**, so it is read on vscode,
+cockroach and angular — three repos where the count-only rows outnumber the named ones — and reported
+per repo, not pooled.
+
+### Band 4 — BYTES, reported with a registered prediction, NOT gating
+
+The ceiling is a constraint, not the objective, so bytes do not gate. The prediction is registered so
+it can be wrong:
+
+- vscode `<ls>` **192,484 → ~72,400 B**, map **233,564 → ~113,500 B (−51 %)**;
+- cockroach map **−35 %**, angular **−22 %**, envoy **−22 %**;
+- tmux, htop, textual, starlette, axum, hono, django, cpython, terraform, nushell, zed: **byte-identical**
+  (no cut fires — their count-only rows are at or under the allowance).
+
+**This supersedes my own earlier informal estimate of "vscode 234 KB → ~45–50 KB"**, recorded in this
+run's ledger before the composition was measured. That figure is unreachable without cutting **named**
+rows, which is the head, and is therefore not what this lane does. The estimate was a guess at a byte
+target; §9 principle 2 says cut at the cliff, and the cliff measured 51 %, not 80 %.
+
+### Band 5 — what this registration deliberately does NOT claim
+
+**Terminality is the objective of §9 principle 1 and it is NOT MEASURED in this run.** The instrument
+is `bench/substitution_report.py` §5 over `~/.ripwire/substitution.jsonl`, which is **observational**:
+it counts native sweeps after real agent calls and therefore cannot score a change that has not been
+deployed to live sessions for a period. The offline arm §9 names as primary (`bench/agentloop`, codex /
+opencode runners) needs a live model runner, which this practice run forbids. So:
+
+- no terminality number is claimed for this change, in either direction;
+- the lane is justified by principle 1's **constraint** and by §9.1's **ordering** rule, both of which
+  are mechanically checkable, plus Band 1's zero-loss head retention;
+- the aggressive variant — **ranking the NAMED rows and cutting them too** — is explicitly **deferred**
+  and forbidden to this lane. It would need the rank vector (breaking the tier's "reads only the index
+  and the call graph" contract and its `--max-tokens` exclusion) and it cannot be validated for head
+  safety without the terminality instrument. "A default changed without that number is a guess" is
+  §9 principle 1's own sentence, and it applies to me here.
+
+### The honest failure mode, registered in advance
+
+The way this lane is wrong is that **count-only rows are load-bearing for an orient answer in a way
+the composition table cannot see**: an agent reading "`docs/` has 1,200 unshown files" may be learning
+the repository's shape, and 2,102 such rows may be a cheap map of a monorepo's layout rather than
+noise. If that is true, Bands 1–3 all pass, bytes fall 51 %, and the answer still got worse — and the
+only instrument that would show it is the one Band 5 says this run does not have. The mitigation
+registered now, not after a number: the allowance keeps the **largest** count-only roll-ups rather than
+dropping them all, `dirs_total=` states how many directories exist, and `dirs_next=` returns them; so
+the shape question stays answerable in one disclosed call. If the deferred terminality arm later shows
+a regression on orient tasks, the allowance is the constant to raise, and this card is where that is
+recorded.
