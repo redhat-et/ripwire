@@ -1048,6 +1048,7 @@ struct DeltaBasis
     gtl::btree_map<std::string, rw::quality::AckRecord> acks;
     rw::quality::IdentityHealing                        healing;
     std::size_t                                         registerMacroExcluded = 0;   // P2.2: disclosed dead-code exemption count
+    bool                                                rustTestExcluded      = false;   // issue #499: that count holds Rust test functions (legend only)
     std::size_t                                         declinedCallExcluded  = 0;   // dead-code exemption by a declined call (quality.h isDeadCandidate)
     std::size_t                                         valueRefExcluded      = 0;   // dead-code exemption: held as a VALUE (valuerefindex.h)
     std::size_t                                         apiNewSurface         = 0;   // Q-DIAL-4: new PUBLIC symbols this change added — the count that replaced one never-gating row each
@@ -1094,6 +1095,7 @@ void refPairBasis( const rw::Config& cfg, const std::string& root, RefPairDelta&
                                          out.deltaRoot, cfg.excludes, cfg.maxFileBytes, &out.registerMacroExcluded, &out.apiNewSurface,
                                          cfg.qualityAck ? &out.cloneIdioms : nullptr, &out.declinedCallExcluded, &out.valueRefExcluded,
                                          quality::KindScope{ refs.kinds, refs.macroOverride() }, &out.historyUnread );
+    out.rustTestExcluded = out.registerMacroExcluded > 0 && quality::anyRustTestScopeDef( refs.target().ing );
 }
 
 // Returns an EXIT CODE when there is nothing to compare against (already reported), nullopt when `out` holds
@@ -1199,6 +1201,7 @@ std::optional<int> resolveDeltaBasis( const MainDispatch& d, const std::string& 
                                          std::string( cfg.rootPath ), root, cfg.qualityAck );
     out.regs = quality::computeDelta( d.ing, d.g, out.baseSel.snapshot, cfg.rootPath, cfg.excludes, cfg.maxFileBytes, &out.registerMacroExcluded, &out.apiNewSurface,
                                       &out.cloneIdioms, &out.declinedCallExcluded, &out.valueRefExcluded, quality::KindScope{}, &out.historyUnread, &out.passes );
+    out.rustTestExcluded = out.registerMacroExcluded > 0 && quality::anyRustTestScopeDef( d.ing );
     // hwh-fix4 (N1): against a pinned sidecar the rename record re-files baseline rows; refused on a partial clone, it is unread history
     out.historyUnread.renames = out.healing.renames.refusedPartial && out.baseSel.marker == std::string_view( "sidecar" );
     return std::nullopt;
@@ -1455,6 +1458,11 @@ inline constexpr const char* kQdRegisterMacroLegend =
     "The registered families are doctest/Catch2 TEST_CASE, GoogleTest TEST/TEST_F/TEST_P, Google Benchmark "
     "BENCHMARK, plus any name a .ripwire_config register_macros= line adds; each registers itself through a "
     "static initializer the call graph cannot see, so zero in-edges on one is not evidence of anything. ";
+
+// issue #499 — present-only: printed only when register-macro-excluded= is non-zero AND the tree holds a Rust test-harness
+// function (DeltaBasis::rustTestExcluded), so a tree with no Rust test pays no byte for it.
+inline constexpr const char* kQdRustTestLegend =
+    "Rust #[test] and #[tokio::test] functions count too: the test harness calls them, and no call in the tree names them. ";
 
 // F-13 (audit 2026-09-02) — printed only when .ripwire_config itself has something wrong with it, which
 // used to be a silent no-op: a typo'd key was skipped with no trace, and a register_macros= name that
@@ -1752,6 +1760,7 @@ struct QualityDeltaLegendParts
     bool                                          memoryPeak              = false;   // ... memory_peak= (any range answer whose peak went over the limit)
     bool                                          memorySkippedShare      = false;   // ... memory_skipped= (skipped_why="selector,memory")
     bool                                          historyUnread           = false;   // hwh-fix4 (N1): unread_history= is on the root
+    bool                                          anyRustTestExcluded     = false;   // issue #499: the excluded set holds Rust test functions
 };
 
 // qd-memory-degrade — present-only: each rides only with the attributes it defines. No double dash anywhere in them
@@ -1865,6 +1874,10 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
     if( p.anyRegisterMacro )
     {
         std::fputs( kQdRegisterMacroLegend, out );
+    }
+    if( p.anyRustTestExcluded )
+    {
+        std::fputs( kQdRustTestLegend, out );
     }
     if( p.anyRegisterMacroWarning )
     {
@@ -3050,7 +3063,8 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                                       scope.active() || !foreignAcks.empty(), !foreignAcks.empty(), baselineAbsorbed,
                                       basis.headBasis, basis.declinedCallExcluded > 0, basis.valueRefExcluded > 0, collapse,
                                       refs.kinds != quality::kAllKinds, refs.degraded, !refs.memoryStop.empty(), kd.peakOver != 0,
-                                      kd.memorySkipped != 0 && refs.selected != quality::kAllKinds, basis.historyUnread.any() }, out );
+                                      kd.memorySkipped != 0 && refs.selected != quality::kAllKinds, basis.historyUnread.any(),
+                                      basis.rustTestExcluded }, out );
             const char* baseMarker = baseSel.marker;    // R3: ditto — one seam decides staleness AND names it
             // 2026-09-06: what the sidecar readers skipped, on the root (absent means none) — see kQdBaseHeadUnreadable
             std::string sidecarHealthAttrs;
@@ -3716,7 +3730,7 @@ std::optional<int> runQualityViews( const MainDispatch& d )
             {
                 return false;
             }
-            return quality::startsWithRegisteredMacro( std::string_view( src ).substr( symbol.sigStartByte ), registerMacroNames );
+            return quality::registersItself( symbol, src, std::string_view( src ).substr( symbol.sigStartByte ), registerMacroNames );
         };
         std::size_t registerMacroExcluded = 0;   // P2.2: disclosed count — see the header comment below
         std::size_t runnerRootExcluded    = 0;   // 0.6.6 D4: disclosed count (runner-root-excluded=, absent at 0)
@@ -3879,8 +3893,9 @@ std::optional<int> runQualityViews( const MainDispatch& d )
                      "(test/x/src/y.cpp included); anchor with ./ (filter=\"./src\") to pin the root-level directory only. "
                      "register-macro-excluded= counts symbols excluded because their OWN definition is a registered "
                      "self-registering test/benchmark macro call (doctest/Catch2 TEST_CASE family, GoogleTest TEST/TEST_F/TEST_P, "
-                     "Google Benchmark BENCHMARK family, plus any name a .ripwire_config register_macros= line adds): such a "
-                     "symbol registers itself through a static initializer the call graph cannot see, so zero in-edges on it is "
+                     "Google Benchmark BENCHMARK family, plus any name a .ripwire_config register_macros= line adds), or a Rust "
+                     "#[test] or #[tokio::test] function: such a symbol registers itself through a static initializer or the test "
+                     "harness, which the call graph cannot see, so zero in-edges on it is "
                      "not evidence of anything — never a finding, never gating, absent nothing (0 is printed, not omitted). "
                      "config-warnings= counts two DISCLOSED .ripwire_config problems, each also written to stderr — an "
                      "unrecognized key, and a register_macros= name matching no indexed symbol — never gating, present "
