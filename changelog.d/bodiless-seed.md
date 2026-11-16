@@ -4,4 +4,4 @@ A selector naming a method with no body (a TypeScript or Java interface method, 
 
 What it does not change: `--uses`. A call through the interface that the resolver declined still shows as its `<dc>` row, not as a reach.
 
-Versions: the session legend dictionary moves to `dictv=e9d43c57a00a55d3 entries=1122` (impls=, from_impls=, to_impls=), and docs/COMMANDS.md and the showcase capture are re-recorded; test/printf_parity.manifest re-pinned (moved={help_all}: the `--safe-delete` help text).
+Versions: the session legend dictionary moves to `dictv=e465b030656de882 entries=1123` (impls=, from_impls=, to_impls=), and docs/COMMANDS.md and the showcase capture are re-recorded; test/printf_parity.manifest re-pinned (moved={help_all}: the `--safe-delete` help text).
