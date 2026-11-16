@@ -235,7 +235,7 @@ public:
 
     const std::string& boundOf( const std::string& spec )
     {
-        if( const auto seen = std::ranges::find( m_memo, spec, &Resolved::spelling ); seen != m_memo.end() )
+        if( const Resolved* seen = seenOf( spec ) )
         {
             return seen->bound;   // resolved once already
         }
@@ -247,11 +247,16 @@ public:
     const std::vector<Resolved>& tried() const noexcept { return m_memo; }
     bool viaBundle( const std::string& spec ) const noexcept
     {
-        const auto seen = std::ranges::find( m_memo, spec, &Resolved::spelling );
-        return seen != m_memo.end() && seen->viaBundle;
+        const Resolved* seen = seenOf( spec );
+        return seen != nullptr && seen->viaBundle;
     }
 
 private:
+    const Resolved* seenOf( const std::string& spec ) const noexcept
+    {
+        const auto seen = std::ranges::find( m_memo, spec, &Resolved::spelling );
+        return seen == m_memo.end() ? nullptr : &*seen;
+    }
     std::string bind( const std::string& spec ) const
     {
         if( graphFormResolves( m_ing, m_form, spec ) )
