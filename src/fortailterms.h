@@ -19,7 +19,9 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <string>
 #include <string_view>
@@ -31,6 +33,20 @@ namespace rw
 // The names one code tail row may ADD after its own sym= names (never in their place). Knob: reports/knob-census.md ADDENDUM
 // 2026-11-14 (tail-sym-terms): +0.9-1.2 KB median per terse answer, about +3.5 KB on the full question (lab T1/T5).
 inline constexpr std::size_t kTailSymTermNames = 2;
+
+// TSYM-WRONG-DECOYS (2026-11-16): a name is added only on DISTINCTIVE evidence. The lane's first cut printed ~14.5 k names on fire321
+// (+5.4 % bytes) and 3 gold-WRONG decoys (a backup hook for a restore question, the Windows loop for a Linux one, the AOT compiler's
+// handler for the runtime decorator): a name holding ONE common task word, or one of many names of a file that is all about that word.
+//   kTailSymTermFileMatches: the file holds at most this many symbols whose names share a task word. More, and the word is the
+//                            file's own topic (its sym= already speaks to it); a name picked among them by PageRank is a guess.
+//   kTailSymTermEvidence:    the name and its file's PATH together carry at least this many DISTINCT task words, so one generic
+//                            word ("plan", "create", "template") with nothing else of the question behind it adds nothing.
+// Measured offline on the lane's fire321 (tmp/tsym-decoys/lab): 740 of 14,490 names kept, 3 of the 6 item gains (the other 3 are
+// one-word or whole-file matches, indistinguishable from the decoys), 0 of the 3 decoys. Knob census ADDENDUM 2026-11-16.
+inline constexpr std::size_t kTailSymTermFileMatches = 3;
+inline constexpr std::size_t kTailSymTermEvidence    = 2;
+// A task has at most this many words (tailTermMask's bits); later words are dropped. A --for task is a sentence or a question.
+inline constexpr std::size_t kTailTermMaxWords = 64;
 
 // The legend clause defining tsym=, present-only: spliced right after the tail clause (serialize.h kForFileTailLegend; the compact
 // twin after verbs_for.h kForCompactLegendTail) only when a shown row carries it (forpage.h fileTailTermNamesShown), so an answer
@@ -90,7 +106,7 @@ inline std::vector<std::string> tailTaskTerms( std::string_view task )
             continue;
         }
         std::string st = suffixStem( std::move( w ), kTailTermSuffixes );
-        if( std::ranges::find( out, st ) == out.end() )
+        if( out.size() < kTailTermMaxWords && std::ranges::find( out, st ) == out.end() )
         {
             out.push_back( std::move( st ) );
         }
@@ -98,11 +114,23 @@ inline std::vector<std::string> tailTaskTerms( std::string_view task )
     return out;
 }
 
-// How many distinct task words `name`'s own subtokens carry, each stemmed (0: the name shares none). `terms` is unique, so this is
-// the count of distinct stemmed name subtokens among them.
-inline std::size_t tailTermScore( std::string_view name, const std::vector<std::string>& terms )
+// Which task words `text`'s own subtokens (2+ bytes, each stemmed) carry: bit i is terms[i] (tailTaskTerms keeps at most
+// kTailTermMaxWords). Read for a symbol NAME (its score is the popcount) and for its file's PATH (the co-evidence of
+// kTailSymTermEvidence): a path's subtokens split on '/' and '.' like any other non-identifier byte.
+inline std::uint64_t tailTermMask( std::string_view text, const std::vector<std::string>& terms )
 {
-    return std::size_t( subtokenOverlap( name, terms, tailterms_detail::kTailTermSuffixes ) );
+    std::vector<std::string> toks;
+    subtokens( text, toks );
+    std::uint64_t mask = 0;
+    for( std::string& t : toks )
+    {
+        const std::string st = suffixStem( std::move( t ), tailterms_detail::kTailTermSuffixes );
+        if( const auto it = std::ranges::find( terms, st ); it != terms.end() && it - terms.begin() < std::ptrdiff_t( kTailTermMaxWords ) )
+        {
+            mask |= std::uint64_t( 1 ) << ( it - terms.begin() );
+        }
+    }
+    return mask;
 }
 
 }   // namespace rw

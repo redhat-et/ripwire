@@ -42,7 +42,7 @@
 #include "mention.h"     // ForNamedHeaderRow — forHdrRowsXml below renders the resolver's rows
 #include "infra/enumcount.h" // enumCountIsExact — TailPageRowFate's count beside the enum
 #include "exemplarfamily.h" // exemplarTasksOf — the add-a-new-X reading keeps a tail's docs and config listed
-#include "fortailterms.h" // tailTaskTerms / tailTermScore — TAIL-SYM-TERMS' task words and name score
+#include "fortailterms.h" // tailTaskTerms / tailTermMask — TAIL-SYM-TERMS' task words and name/path evidence
 #include "forliteral.h"   // taskQuotesLiteral — a quoted message keeps a tail's config and docs listed
 #include "langfacts.h"   // langFacts — tailFoldClass reads a file's script/config role off the table
 #include "graph.h"       // rankGraph — TAIL-SYM-TERMS' tie-break order
@@ -55,6 +55,7 @@
 #include "testmap.h"     // splitChangedFilesOfSymbols — the ONE "distinct files of a symbol set" walk (--affected's)
 
 #include <algorithm>
+#include <bit>
 #include <charconv>
 #include <cstddef>
 #include <cstdlib>
@@ -1290,12 +1291,17 @@ inline void appendFileTailRows( FileTail& out, FileTail& from )
 // cut from tsym=). A candidate is any indexed symbol of the file
 // but its module scope, a reST label, a name a shown head row prints (any file) and a name the row already carries. A file holding
 // a doc unit (.md, .rst, a Sphinx or HTML page) adds none: its section titles may hold commas, and the question is about code
-// names. Fills t.termSyms only when some row gains a name, so a task no name matches leaves the tail byte-identical.
+// names. DISTINCTIVE EVIDENCE ONLY (TSYM-WRONG-DECOYS, fortailterms.h kTailSymTermFileMatches / kTailSymTermEvidence): a row adds
+// nothing when more than kTailSymTermFileMatches of its file's symbols share a task word (the word is the file's topic, so a pick
+// among them is a guess), and a name is added only when it and the row's path together carry kTailSymTermEvidence distinct task
+// words (one generic word alone pulled in the lane's three gold-WRONG decoys). The file count includes the head's and the row's
+// own names: it measures the file, not what is left to print.
+// Fills t.termSyms only when some row gains a name, so a task no name matches leaves the tail byte-identical.
 // Cost: one pass over the symbols (the files are a flat row index), the name split only for symbols of a listed file.
 struct TailTermCand
 {
     std::uint32_t row;     // the tail row (its file's)
-    std::uint32_t score;   // tailTermScore
+    std::uint32_t score;   // popcount of the name's tailTermMask
     float         pr;      // the graph's PageRank (the tie-break after the score)
     NodeId        id;
 };
@@ -1304,6 +1310,34 @@ struct TailTermCands
     std::vector<TailTermCand> cands;     // (row, score desc, pr desc, id asc)
     std::vector<char>         docFile;   // per row: its file holds a doc unit, so it adds no name
 };
+// TSYM-WRONG-DECOYS: keep the candidates on distinctive evidence (the rule above tailTermCands; fortailterms.h knobs). `nameMask` is
+// index-aligned with `cands`; `fileMatches` is per row. Each kept row's path is split once.
+inline void keepDistinctiveTailTerms( std::vector<TailTermCand>& cands, const std::vector<std::uint64_t>& nameMask, const std::vector<std::uint32_t>& fileMatches,
+                                      const FileTail& t, const std::vector<std::string>& terms )
+{
+    const std::size_t namedRows = fileMatches.size();
+    std::vector<std::uint64_t> pathMask( namedRows, 0 );
+    std::vector<char>          pathRead( namedRows, 0 );
+    std::size_t                kept = 0;
+    for( std::size_t i = 0; i < cands.size(); ++i )
+    {
+        const std::uint32_t row = cands[i].row;
+        if( fileMatches[row] > kTailSymTermFileMatches )
+        {
+            continue;
+        }
+        if( !pathRead[row] )
+        {
+            pathMask[row] = tailTermMask( t.paths[row], terms );
+            pathRead[row] = 1;
+        }
+        if( std::size_t( std::popcount( nameMask[i] | pathMask[row] ) ) >= kTailSymTermEvidence )
+        {
+            cands[kept++] = cands[i];
+        }
+    }
+    cands.resize( kept );
+}
 inline TailTermCands tailTermCands( const FileTail& t, const IngestResult& ing, const std::vector<float>& tieRank, const std::vector<NodeId>& headIds,
                                     std::size_t namedRows )
 {
@@ -1332,6 +1366,8 @@ inline TailTermCands tailTermCands( const FileTail& t, const IngestResult& ing, 
     }
     std::ranges::sort( headNames, rw::sortutil::svLess );
     out.docFile.assign( namedRows, 0 );
+    std::vector<std::uint32_t> fileMatches( namedRows, 0 );   // per row: its file's symbols whose names share a task word
+    std::vector<std::uint64_t> nameMask;                      // per cand: tailTermMask of its name
     for( NodeId id = 0; id < ing.symbols.size(); ++id )
     {
         const Symbol&       s   = ing.symbols[id];
@@ -1345,16 +1381,23 @@ inline TailTermCands tailTermCands( const FileTail& t, const IngestResult& ing, 
             out.docFile[row] = 1;
             continue;
         }
-        if( s.kind == SymKind::ModuleScope || s.name.empty() || s.name.front() == '<' || isRestLabelUnit( ing, s )
-            || std::ranges::binary_search( headNames, std::string_view( s.name ), rw::sortutil::svLess ) )
+        if( s.kind == SymKind::ModuleScope || s.name.empty() || s.name.front() == '<' || isRestLabelUnit( ing, s ) )
         {
             continue;
         }
-        if( const std::size_t score = tailTermScore( s.name, terms ); score > 0 )
+        const std::uint64_t mask = tailTermMask( s.name, terms );
+        if( mask == 0 )
         {
-            out.cands.push_back( { row, std::uint32_t( score ), id < tieRank.size() ? tieRank[id] : 0.0f, id } );
+            continue;
+        }
+        ++fileMatches[row];
+        if( !std::ranges::binary_search( headNames, std::string_view( s.name ), rw::sortutil::svLess ) )
+        {
+            out.cands.push_back( { row, std::uint32_t( std::popcount( mask ) ), id < tieRank.size() ? tieRank[id] : 0.0f, id } );
+            nameMask.push_back( mask );
         }
     }
+    keepDistinctiveTailTerms( out.cands, nameMask, fileMatches, t, terms );
     std::ranges::sort( out.cands, []( const TailTermCand& a, const TailTermCand& b )
                        { return a.row != b.row ? a.row < b.row : a.score != b.score ? a.score > b.score : a.pr != b.pr ? a.pr > b.pr : a.id < b.id; } );
     return out;

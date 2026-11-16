@@ -7,10 +7,14 @@
 # The lab's G1 (re-pick the three names by task words) lost 12 credited lens names on 217 cells; G2 (append, never displace)
 # lost none, so only the append ships. RIPWIRE_NO_TAIL_SYM_TERMS=1 is the pre-card tail (the ablation arm below).
 #
-# Fixture: 60 strong widget/frobnicate files (they take the head and most of the tail), plus zz_store.py, a weak file whose three
-# lens-scored symbols (doc-comment hits) carry no task word in their names, and four unscored symbols that do, by the lab stem
-# only (restorer_scheduling: 2 words; config_restorer, queue_scheduling, restorer_cache: 1 each). docs/restoration.md is a doc row.
-# c000.py (a head file) also defines probe_schedulers, a <syms> by=name pick; zz_probe.py, another weak file, defines a namesake.
+# DISTINCTIVE EVIDENCE ONLY (TSYM-WRONG-DECOYS, 2026-11-16): a row adds names only when at most 3 of its file's symbols share a
+# task word, and each name plus the file's path carries 2+ distinct task words (fortailterms.h kTailSymTermFileMatches/Evidence).
+#
+# Fixture: 60 strong widget/frobnicate files (they take the head and most of the tail), plus zz_scheduler_store.py, a weak file
+# whose three lens-scored symbols (doc-comment hits) carry no task word in their names, and three unscored symbols that do, by the
+# lab stem only (restorer_scheduling: 2 words; config_restorer, restorer_cache: 1 each, plus "scheduler" from the path).
+# docs/restoration.md is a doc row. c000.py (a head file) also defines probe_schedulers, a <syms> by=name pick; zz_restorer_probe.py,
+# another weak file, defines a namesake. zz_queue.py and zz_scheduler_pool.py are arm j's weak-evidence files.
 #
 # Arms (each counts its premise and FAILS on 0; an empty or crashed answer fails every arm):
 #   a  named:        on the ablated tail restorer_scheduling is absent from the whole answer and zz_store.py's row is listed; on the
@@ -20,7 +24,7 @@
 #                    (same rows, same order, sym= untouched); counts the rows compared and the rows that gained tsym= (both > 0)
 #   c  negative:     a task whose words no unprinted symbol of a tail file carries ("widget frobnicate helper") is byte-identical
 #                    (stdout + stderr + rc) to the ablation; premise: zz_store.py is listed and holds an unprinted symbol
-#   d  cap:          no tsym= holds more than 2 names; premise: zz_store.py has 4 candidates and its tsym= holds 2
+#   d  cap:          no tsym= holds more than 2 names; premise: zz_scheduler_store.py has 3 candidates and its tsym= holds 2
 #   e  doc row:      the docs/restoration.md row (its title holds a comma and task words) is unchanged
 #   f  legend:       the clause rides the full and the compact dialect exactly when a row gained a name, never on the ablation or
 #                    the negative task
@@ -30,6 +34,10 @@
 #                    (probe_schedulers) is cut from every tsym= (the lane's first fire: names in the tail hid 21 of 206 answers'
 #                    picks); premise: the ablated <syms> names probe_schedulers, and with no <syms> (RIPWIRE_NO_FILE_SYMS=1) zz_probe.py's
 #                    row carries tsym="probe_schedulers", so the cut has a name to cut
+#   j  decoy class:  (TSYM-WRONG-DECOYS: the lane's first cut printed 3 gold-WRONG names on fire321) zz_queue.py's restorer_queue
+#                    holds one task word and its path none: no tsym=; zz_scheduler_pool.py's four restorer_* names each hold two
+#                    words with the path, but four symbols of the file match (> 3): no tsym=; premise: both rows listed, the names
+#                    unprinted on the ablation. Red on the pre-fix lane (8eda7e7bf: tsym="restorer_queue", "restorer_a,restorer_b").
 #
 # Usage: test/tailsymtermscheck.sh [BIN]   (default build/ripwire; RIPWIRE_BIN also honoured)
 
@@ -47,13 +55,13 @@ i=0
 while [ $i -lt 60 ]; do
     n=$( printf '%03d' $i )
     if [ $i -ge 50 ]; then   # arm a's tie-break: ten callers lift restorer_cache's PageRank over the other one-word names
-        printf 'from zz_store import restorer_cache\n\n\ndef widget_frobnicate_%s():\n    """widget frobnicate helper"""\n    return restorer_cache()\n' "$n" > "$F/c$n.py"
+        printf 'from zz_scheduler_store import restorer_cache\n\n\ndef widget_frobnicate_%s():\n    """widget frobnicate helper"""\n    return restorer_cache()\n' "$n" > "$F/c$n.py"
     else
         printf 'def widget_frobnicate_%s():\n    """widget frobnicate helper"""\n    return 1\n' "$n" > "$F/c$n.py"
     fi
     i=$(( i + 1 ))
 done
-cat > "$F/zz_store.py" <<'EOF'
+cat > "$F/zz_scheduler_store.py" <<'EOF'
 def alpha_one():
     """widget"""
     return 1
@@ -73,10 +81,6 @@ def config_restorer():
     return 0
 
 
-def queue_scheduling():
-    return 0
-
-
 def restorer_cache():
     return 0
 
@@ -85,7 +89,13 @@ def restorer_scheduling():
     return 0
 EOF
 printf 'def probe_schedulers():\n    return 0\n' >> "$F/c000.py"
-printf 'def alpha_probe():\n    """widget"""\n    return 1\n\n\ndef probe_schedulers():\n    return 0\n' > "$F/zz_probe.py"
+printf 'def alpha_probe():\n    """widget"""\n    return 1\n\n\ndef probe_schedulers():\n    return 0\n' > "$F/zz_restorer_probe.py"
+# arm j (TSYM-WRONG-DECOYS): two more weak files whose names share a task word only WEAKLY. zz_queue.py: restorer_queue holds one
+# task word and the path none (one generic word, no co-evidence). zz_scheduler_pool.py: four names each hold "restorer" and the path
+# "scheduler" (two words each), but four of the file's symbols match (the word is the file's topic, so a pick is a guess).
+printf 'def alpha_queue():\n    """widget"""\n    return 1\n\n\ndef restorer_queue():\n    return 0\n' > "$F/zz_queue.py"
+printf 'def alpha_pool():\n    """widget"""\n    return 1\n' > "$F/zz_scheduler_pool.py"
+for w in a b c d; do printf '\n\ndef restorer_%s():\n    return 0\n' "$w" >> "$F/zz_scheduler_pool.py"; done
 printf '# Restorer scheduling, widget frobnicate notes\n\nThe widget restoration scheduler notes.\n' > "$F/docs/restoration.md"
 Q="widget frobnicate restoration scheduler"
 QN="widget frobnicate helper"
@@ -139,13 +149,13 @@ for n in ("ns.xml", "d.xml", "d.full", "d.cmp", "d.json", "n.xml", "w1.xml", "w2
     if not ok(n):
         arm("run " + n, False, "rc=" + rd(n + ".rc").strip() + " bytes=" + str(len(rd(n))))
 D, A = tail_rows(rd("d.xml")), tail_rows(rd("a.xml"))
-dz = [(s, ts) for p, s, ts in D if p.endswith("zz_store.py")]
-az = [(s, ts) for p, s, ts in A if p.endswith("zz_store.py")]
+dz = [(s, ts) for p, s, ts in D if p.endswith("zz_scheduler_store.py")]
+az = [(s, ts) for p, s, ts in A if p.endswith("zz_scheduler_store.py")]
 # a — named
 arm("a premise", len(az) == 1 and "restorer_scheduling" not in rd("a.xml"),
-    f"ablated: zz_store.py rows={len(az)}, restorer_scheduling in answer={'restorer_scheduling' in rd('a.xml')}")
+    f"ablated: zz_scheduler_store.py rows={len(az)}, restorer_scheduling in answer={'restorer_scheduling' in rd('a.xml')}")
 arm("a named", len(dz) == 1 and len(az) == 1 and dz[0] == (az[0][0], ["restorer_scheduling", "restorer_cache"]) and az[0][1] == [],
-    f"default zz_store.py (sym, tsym)={dz} ablated={az}")
+    f"default zz_scheduler_store.py (sym, tsym)={dz} ablated={az}")
 # b — no displacement: each default tag is the ablated tag, or it with one tsym= inserted before "/>"
 DT, AT = tail_tags(rd("d.xml")), tail_tags(rd("a.xml"))
 kept = sum(1 for dt, at in zip(DT, AT) if re.sub(r' tsym="[^"]*"(?=/>$)', "", dt) == at)
@@ -153,13 +163,13 @@ gained = sum(1 for dt in DT if ' tsym="' in dt)
 arm("b no-displace", len(DT) == len(AT) and len(DT) > 0 and kept == len(DT) and gained > 0,
     f"rows default={len(DT)} ablated={len(AT)} same-but-tsym={kept} gained={gained}")
 # c — negative
-n_rows = [s for p, s, _ in tail_rows(rd("an.xml")) if p.endswith("zz_store.py")]
-arm("c premise", len(n_rows) == 1 and "config_restorer" not in rd("an.xml"), f"zz_store.py rows={len(n_rows)} unprinted symbol listed nowhere")
+n_rows = [s for p, s, _ in tail_rows(rd("an.xml")) if p.endswith("zz_scheduler_store.py")]
+arm("c premise", len(n_rows) == 1 and "config_restorer" not in rd("an.xml"), f"zz_scheduler_store.py rows={len(n_rows)} unprinted symbol listed nowhere")
 arm("c negative", rd("n.xml") == rd("an.xml") and rd("n.xml.err") == rd("an.xml.err") and rd("n.xml.rc") == rd("an.xml.rc"),
     "a task no unprinted name matches: stdout, stderr and rc equal the ablation")
 # d — cap
 over = [(p, len(ts)) for p, s, ts in D if len(ts) > 2]
-arm("d cap", len(dz) == 1 and len(dz[0][1]) == 2 and not over, f"zz_store.py tsym={dz[0][1] if dz else None} (4 candidates); rows over 2: {over}")
+arm("d cap", len(dz) == 1 and len(dz[0][1]) == 2 and not over, f"zz_scheduler_store.py tsym={dz[0][1] if dz else None} (3 candidates); rows over 2: {over}")
 # e — doc row
 dd = [(s, ts) for p, s, ts in D if p.endswith("restoration.md")]
 ad = [(s, ts) for p, s, ts in A if p.endswith("restoration.md")]
@@ -172,11 +182,11 @@ arm("f legend", FULL in rd("d.full") and CMP in rd("d.cmp") and FULL not in rd("
 # g — JSON + MCP
 try:
     j = json.loads(rd("d.json"))["tail"]
-    js = [s for f, s in zip(j["files"], j["tsym"]) if f.endswith("zz_store.py")] + (["why"] if j.get("tsym_why") else [])
+    js = [s for f, s in zip(j["files"], j["tsym"]) if f.endswith("zz_scheduler_store.py")] + (["why"] if j.get("tsym_why") else [])
 except Exception as e:
     js = [f"parse error {e}"]
 mcp = rd("d.mcp")
-mrow = re.search(r'<t p=\\"[^"\\]*zz_store\.py\\" sym=\\"[^"\\]*\\" tsym=\\"([^"\\]*)\\"', mcp)
+mrow = re.search(r'<t p=\\"[^"\\]*zz_scheduler_store\.py\\" sym=\\"[^"\\]*\\" tsym=\\"([^"\\]*)\\"', mcp)
 want = ",".join(dz[0][1]) if dz else None
 arm("g JSON", js == [want, "why"], f"JSON tsym={js} want {want} + tsym_why")
 arm("g MCP", mrow is not None and mrow.group(1) == want and FULL in mcp, f"MCP row sym={mrow.group(1) if mrow else None}")
@@ -186,12 +196,19 @@ arm("h warm==cold", rd("w1.xml") == rd("w2.xml") and rd("w1.xml") == rd("d.xml")
 def syms(t):
     m = re.search(r"<syms[ >].*?</syms>", t)
     return m.group(0) if m else ""
-pz = [ts for p, s, ts in D if p.endswith("zz_probe.py")]
-pn = [ts for p, s, ts in tail_rows(rd("ns.xml")) if p.endswith("zz_probe.py")]
+pz = [ts for p, s, ts in D if p.endswith("zz_restorer_probe.py")]
+pn = [ts for p, s, ts in tail_rows(rd("ns.xml")) if p.endswith("zz_restorer_probe.py")]
 arm("i premise", 'n="probe_schedulers"' in syms(rd("a.xml")) and len(pz) == 1 and pn == [["probe_schedulers"]],
-    f"ablated <syms> names probe_schedulers={'n=\"probe_schedulers\"' in syms(rd('a.xml'))}; zz_probe.py tsym with no <syms>={pn}")
+    f"ablated <syms> names probe_schedulers={'n=\"probe_schedulers\"' in syms(rd('a.xml'))}; zz_restorer_probe.py tsym with no <syms>={pn}")
 arm("i syms first", syms(rd("d.xml")) == syms(rd("a.xml")) and not any("probe_schedulers" in ts for p, s, ts in D),
     "default <syms> equals the ablated block; no tsym= repeats a name it prints")
+# j — decoy class (TSYM-WRONG-DECOYS): no name on one generic word, none from a file whose topic the word is
+jq = [(s, ts) for p, s, ts in D if p.endswith("zz_queue.py")]
+jp = [(s, ts) for p, s, ts in D if p.endswith("zz_scheduler_pool.py")]
+arm("j premise", len(jq) == 1 and len(jp) == 1 and "restorer_queue" not in rd("a.xml") and "restorer_a" not in rd("a.xml"),
+    f"zz_queue.py rows={len(jq)} zz_scheduler_pool.py rows={len(jp)}; their matching names unprinted on the ablation")
+arm("j one word", len(jq) == 1 and jq[0][1] == [], f"zz_queue.py tsym={jq[0][1] if jq else None} (restorer_queue: one task word, path none)")
+arm("j file topic", len(jp) == 1 and jp[0][1] == [], f"zz_scheduler_pool.py tsym={jp[0][1] if jp else None} (4 matching symbols > 3)")
 print("tailsymtermscheck: " + ("FAIL " + ",".join(fails) if fails else "PASS"))
 sys.exit(1 if fails else 0)
 PY

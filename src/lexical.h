@@ -84,8 +84,8 @@ inline void subtokens( std::string_view id, std::vector<std::string>& out )
 inline std::string suffixStem( std::string w, std::span<const std::string_view> suffixes );
 
 // How many DISTINCT subtokens of `name` — each suffix-stemmed first by `stemSuffixes` when given (suffixStem) — are among `words`.
-// `words` is a handful, read by linear find. Shared by the member-name slice (formembers.h wordOverlap) and the tail's tsym= score
-// (fortailterms.h tailTermScore).
+// `words` is a handful, read by linear find. The member-name slice's (formembers.h wordOverlap); the tail's tsym= reads WHICH words
+// match instead (fortailterms.h tailTermMask, the same split and stem).
 inline std::ptrdiff_t subtokenOverlap( std::string_view name, const std::vector<std::string>& words, std::span<const std::string_view> stemSuffixes = {} )
 {
     std::vector<std::string> toks;
