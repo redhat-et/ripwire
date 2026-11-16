@@ -1016,7 +1016,7 @@ inline int writeNonLocalStateReport( const IngestResult& ing, const Graph& g, in
     // the emitter's own condition (graphlegend.h graphUnindexedLegendComment), never a re-derivation of it.
     rw::emitTo( stdout, "{}", rw::graphUnindexedLegendComment( rw::graphGaugeClauses( g ) ).c_str() );
     rw::emitTo( stdout, "<nonlocal_state cells=\"{}\" functions=\"{}\"{}{}", scan.cells.size(), total, rw::cstr( disclosure ),
-                 ( collectionCut ? rw::graphGaugeAttrXml( g.ambOut, g.unresolvedOut, g.unindexedFiles, g.rubyBasesUnscoped )
+                 ( collectionCut ? rw::graphGaugeAttrXml( g.ambOut, g.unresolvedOut, g.unindexedFiles, g.rubyBasesUnscoped, g.lexicalFiles )
                                  : rw::graphCountFloorAttrXml( g ) ).c_str()  );   // M15: gauge + marker
     if( !scan.unanalyzedLangs.empty() )
     {

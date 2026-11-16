@@ -3920,23 +3920,20 @@ static inline bool ts_query_cursor__advance(
       }
     }
 
-    if (++self->operation_count == OP_COUNT_PER_QUERY_CALLBACK_CHECK) {
-      self->operation_count = 0;
-    }
+    // RIPWIRE_VENDOR_PATCH(tree_sitter/002-query-progress-counts-status-walk): the count can jump by a status walk's
+    // steps (below), so one check may owe several callbacks — one per OP_COUNT_PER_QUERY_CALLBACK_CHECK operations, made
+    // up at the next check that is not a match, so the callback count is a function of the work alone.
+    self->operation_count++;
 
     if (self->query_options && self->query_options->progress_callback) {
       self->query_state.current_byte_offset = ts_node_start_byte(ts_tree_cursor_current_node(&self->cursor));
     }
-    if (
-      did_match ||
-      self->halted ||
-      (
-        self->operation_count == 0 &&
-        (
-          (self->query_options && self->query_options->progress_callback && self->query_options->progress_callback(&self->query_state))
-        )
-      )
-    ) {
+    bool canceled = false;
+    while (!did_match && !self->halted && !canceled && self->operation_count >= OP_COUNT_PER_QUERY_CALLBACK_CHECK) {
+      self->operation_count -= OP_COUNT_PER_QUERY_CALLBACK_CHECK;
+      canceled = self->query_options && self->query_options->progress_callback && self->query_options->progress_callback(&self->query_state);
+    }
+    if (did_match || self->halted || canceled) {
       return did_match;
     }
 
@@ -4054,6 +4051,7 @@ static inline bool ts_query_cursor__advance(
         TSFieldId field_id = 0;
         TSSymbol supertypes[8] = {0};
         unsigned supertype_count = 8;
+        unsigned status_walk_steps = 0; // RIPWIRE_VENDOR_PATCH(tree_sitter/002-query-progress-counts-status-walk)
         ts_tree_cursor_current_status(
           &self->cursor,
           &field_id,
@@ -4061,8 +4059,13 @@ static inline bool ts_query_cursor__advance(
           &has_later_named_siblings,
           &can_have_later_siblings_with_this_field,
           supertypes,
-          &supertype_count
+          &supertype_count,
+          &status_walk_steps
         );
+        // RIPWIRE_VENDOR_PATCH(tree_sitter/002-query-progress-counts-status-walk): a node whose later siblings are all
+        // anonymous makes this walk scan every one of them (a run of `{`: quadratic), so the walk counts as work toward
+        // the progress callback, not as one operation.
+        self->operation_count += status_walk_steps;
         LOG(
           "enter node. depth:%u, type:%s, field:%s, row:%u state_count:%u, finished_state_count:%u\n",
           self->depth,

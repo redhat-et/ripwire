@@ -865,6 +865,7 @@ Discloses: `ellipsis_capped`, `hits_capped`, `unmatched_member_capped`
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kBinarySniffCap` | `4096` | — | NUL-byte sniff window |
+| `kDataFileKeyCap` | `256` | — | — |
 | `kMaxAstQueryNesting` | `256` | BOUNDARY | — |
 | `kMaxSkipRowsPerClass` | `500` | OUTPUT | — |
 | `kUnreachableMaxHits` | `5000` | — | — |
@@ -876,6 +877,14 @@ Discloses: **none**
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kMaxEditDistance` | `3` | BOUNDARY | same bandwidth as didYouMean()'s symbol-name cutoff |
+
+### `src/ingest_lexical.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kLimitWarningLines` | `5` | — | — |
 
 ### `src/ingest_model.h`
 

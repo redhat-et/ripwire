@@ -509,6 +509,83 @@ inline void assignSymbols( IngestResult& result, std::vector<RawDef>& rawDefs, b
     }
 }
 
+// NOSKIP-BUNDLE-DEMOTE: a code definition in a bundle-shaped file (model.h isBundleShapedFile) whose name a code definition in
+// a NON-bundle file also has (with a body when its kind can be declared: isBundleCopySource) is a copy of that source, and takes
+// kRankFlagBundleCopy (model.h): the rankers put it below the source copy (also under a bundler's numeric rename,
+// bundleRenameBase); every definition in such a file takes kRankFlagInBundle. Demote, never drop: the def stays in every
+// listing, and a name defined only in bundles is no copy and keeps its rank. Runs on every load after assignSymbols (rankFlags
+// are never cached); without a bundle-shaped file it reads one FileHealth word per file and returns, so such an index is unchanged.
+inline bool isBundleCopyCandidate( const Symbol& s ) noexcept
+{
+    return s.kind != SymKind::Section && s.kind != SymKind::ModuleScope && !langFacts( s.lang ).notCode && !notNamed( s );
+}
+
+// The SOURCE side of a copy (NOSKIP-FIX): a non-bundle candidate whose kind has a declaration form (a function, method, class,
+// interface or struct) counts only as a definition with a body (model.h isDefinitionNotDeclaration). A prototype `int f(int x);`
+// beside the only body of f in an amalgamation declares that body; it is no source the body copies. Counted as one, the body
+// was demoted and --callees=f kept the bodyless prototype alone (count="0"; gates noskipingestcheck arm 1, bundledemotecheck (h)).
+inline bool isBundleCopySource( const Symbol& s ) noexcept
+{
+    const bool declarable = s.kind == SymKind::Function || s.kind == SymKind::Method || s.kind == SymKind::Class || s.kind == SymKind::Interface
+                         || isStructOrNamedType( s.kind );
+    return isBundleCopyCandidate( s ) && ( !declarable || isDefinitionNotDeclaration( s ) );
+}
+
+// A bundler renames the second definition of a name it concatenates by a numeric suffix (esbuild: `doChange` -> `doChange27`), so
+// a copy may carry the source name plus digits. The name without them, when at least kBundleRenameMinBase bytes remain; else empty.
+inline constexpr std::size_t kBundleRenameMinBase = 3;
+inline std::string_view bundleRenameBase( std::string_view name ) noexcept
+{
+    std::size_t end = name.size();
+    while( end > 0 && name[end - 1] >= '0' && name[end - 1] <= '9' )
+    {
+        --end;
+    }
+    return end < name.size() && end >= kBundleRenameMinBase ? name.substr( 0, end ) : std::string_view();
+}
+
+inline void markBundleCopies( IngestResult& result )
+{
+    std::vector<std::uint8_t> bundleFile( result.files.size(), 0u );
+    bool                      anyBundle = false;
+    for( std::size_t f = 0; f < result.files.size() && f < result.fileHealth.size(); ++f )
+    {
+        if( isBundleShapedFile( result.fileHealth[f] ) )
+        {
+            bundleFile[f] = 1u;
+            anyBundle     = true;
+        }
+    }
+    if( !anyBundle )
+    {
+        return;
+    }
+    const auto inBundle = [ &bundleFile ]( const Symbol& s ) noexcept { return s.fileId < bundleFile.size() && bundleFile[ s.fileId ] != 0; };
+    std::vector<std::string_view> sourceNames;   // sorted: the names a non-bundle file defines (views into result.symbols)
+    for( const Symbol& s : result.symbols )
+    {
+        if( !inBundle( s ) && isBundleCopySource( s ) )
+        {
+            sourceNames.push_back( s.name );
+        }
+    }
+    std::ranges::sort( sourceNames, sortutil::svLess );   // a byte order: the default string_view comparator aborts the Linux G1 leg
+    sourceNames.erase( std::ranges::unique( sourceNames ).begin(), sourceNames.end() );
+    const auto fromSource = [ &sourceNames ]( std::string_view n ) { return !n.empty() && std::ranges::binary_search( sourceNames, n, sortutil::svLess ); };
+    for( Symbol& s : result.symbols )
+    {
+        if( !inBundle( s ) )
+        {
+            continue;
+        }
+        s.rankFlags |= kRankFlagInBundle;
+        if( isBundleCopyCandidate( s ) && ( fromSource( s.name ) || fromSource( bundleRenameBase( s.name ) ) ) )
+        {
+            s.rankFlags |= kRankFlagBundleCopy;
+        }
+    }
+}
+
 // 4) attribute each reference to its enclosing definition (innermost span containing it).
 //    Per file: the enclosing def is the one with the latest startByte <= ref.startByte
 //    whose endByte > ref.startByte. We index defs by file via a sorted view.

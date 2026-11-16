@@ -155,6 +155,9 @@ struct Graph
     // class open), so their base stayed on the final-segment byName rule — resolve.h RubyBaseScopeDisclosure.
     // A whole-corpus gauge beside unindexedFiles, emitted as ruby_bases_unscoped= and ABSENT AT ZERO.
     std::size_t                rubyBasesUnscoped = 0;
+    // NO-SKIP-INGEST: code files the ingest read lexically (FileIndexMode LexicalOverSize / LexicalOverBudget), emitted as
+    // graph_lexical= beside the gauges above and ABSENT AT ZERO: their edges come from line shapes and `name(`, not a parse.
+    std::size_t                lexicalFiles = 0;
     // lane ind4b: the precise import adjacency (file → the files its imports resolve to, forCallNarrow), kept past buildGraph
     // for the by-name hedge's rule 2b (pathgaps.h NamesakeRule). Moved in at the end of buildGraph; not cached. (Rule 2c
     // reads implementors + implementorBound above: the per-file base binding.)
@@ -9713,6 +9716,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // vector the header reads (ing.crawlSkips.unindexedExts), because a second traversal elsewhere is
     // exactly the two-derivations-of-one-number defect M15 fixed for the gauge pair.
     for( const UnindexedExt& ue : ing.crawlSkips.unindexedExts ) { g.unindexedFiles += ue.files; }
+    for( const FileHealth& health : ing.fileHealth )   // NO-SKIP-INGEST: the lexically read code files (graph_lexical=)
+    {
+        g.lexicalFiles += isLexicalCodeMode( FileIndexMode( health.indexMode ) ) ? 1u : 0u;
+    }
 
     // S6-C canonical ids: `path::scope::name` per symbol (bare name when no scope). Computed once here so the
     // resolution locality tie-break (below) and serialize's `id=` attribute share one definition. Deterministic.
@@ -15750,17 +15757,29 @@ inline std::vector<NodeId> preferCodeOverDocUnits( const IngestResult& ing, std:
     return code.empty() ? found : code;
 }
 
+// A match list's lesser symbols (`lesser`) go when a match that is not lesser remains; a list that is all lesser, or has none, is
+// returned as it is. Two callers:
+// - dropDocUnitsBesideCode (isDocUnit), below.
+// - NOSKIP-BUNDLE-DEMOTE (model.h bundleCopy): a bundle's copies (kRankFlagBundleCopy: a build output's, an amalgamation's or a
+//   lexically read file's copy of a function a source file defines) leave a path endpoint, a caller hop, a --for graph endpoint
+//   and the callers verb's bare-name selector, which all ask about the source function; its copy is no second one. --defs and a
+//   file-qualified selector still reach the copies (demoted, never dropped from the index).
+inline std::vector<NodeId> dropSymbolsBesideOthers( const IngestResult& ing, std::vector<NodeId> found, bool ( *lesser )( const Symbol& ) noexcept )
+{
+    const auto isLesser = [ &ing, lesser ]( NodeId id ) noexcept { return lesser( ing.symbols[ id ] ); };
+    if( !std::all_of( found.begin(), found.end(), isLesser ) )
+    {
+        std::erase_if( found, isLesser );
+    }
+    return found;
+}
+
 // A --path endpoint's matches, code first (docs-rest CI fix; gates restdocscheck (I5, I6), mdsectioncheck): when a name matches code
 // AND doc units, the doc units go, since a `.. method:: save` directive or a `## run` heading is no second place a call path can
 // start or end, and from_defs=/to_defs= count code only. An all-doc or all-code list is returned as it is.
 inline std::vector<NodeId> dropDocUnitsBesideCode( const IngestResult& ing, std::vector<NodeId> found )
 {
-    const auto doc = [ &ing ]( NodeId id ) noexcept { return isDocUnit( ing.symbols[ id ] ); };
-    if( !std::all_of( found.begin(), found.end(), doc ) )
-    {
-        std::erase_if( found, doc );
-    }
-    return found;
+    return dropSymbolsBesideOthers( ing, std::move( found ), isDocUnit );
 }
 
 // `unprovenDefCountOut` (H1, optional): the residue declToDefFollowThrough dropped — see its contract. Zero
@@ -19497,16 +19516,18 @@ inline ZoomHierarchy multiLevelCommunities( const Graph& g, std::uint32_t maxTop
 // unresolvedOut totals (the map header's ambiguous=/unresolved=, same fold); counts_floor="1" stays LAST.
 inline std::string graphCountFloorAttrXml( const Graph& g )
 {
-    return graphGaugeAttrXml( g.ambOut, g.unresolvedOut, g.unindexedFiles, g.rubyBasesUnscoped ) + kGraphCountFloorAttrXml;
+    return graphGaugeAttrXml( g.ambOut, g.unresolvedOut, g.unindexedFiles, g.rubyBasesUnscoped, g.lexicalFiles ) + kGraphCountFloorAttrXml;
 }
 inline std::string graphCountFloorAttrJson( const Graph& g )
 {
-    return graphGaugeAttrJson( g.ambOut, g.unresolvedOut, g.unindexedFiles, g.rubyBasesUnscoped ) + kGraphCountFloorAttrJson;
+    return graphGaugeAttrJson( g.ambOut, g.unresolvedOut, g.unindexedFiles, g.rubyBasesUnscoped, g.lexicalFiles ) + kGraphCountFloorAttrJson;
 }
 // The legend clauses a root's absent-at-zero gauges call for, read off the same two fields the attribute is.
 inline GaugeClauses graphGaugeClauses( const Graph& g ) noexcept
 {
-    return GaugeClauses( g.unindexedFiles > 0, g.rubyBasesUnscoped > 0 );
+    GaugeClauses on( g.unindexedFiles > 0, g.rubyBasesUnscoped > 0 );
+    on.lexical = g.lexicalFiles > 0;
+    return on;
 }
 
 // THE DECLINED-LIST INTERNER — tier 3's record of what a declined call could equally have meant, stored once per DISTINCT

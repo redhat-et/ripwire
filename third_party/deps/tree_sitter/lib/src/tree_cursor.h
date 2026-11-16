@@ -31,7 +31,8 @@ void ts_tree_cursor_current_status(
   bool *has_later_named_siblings,
   bool *can_have_later_siblings_with_this_field,
   TSSymbol *supertypes,
-  unsigned *supertype_count
+  unsigned *supertype_count,
+  unsigned *walk_steps // RIPWIRE_VENDOR_PATCH(tree_sitter/002-query-progress-counts-status-walk): ancestors and siblings visited
 );
 
 TreeCursorStep ts_tree_cursor_goto_first_child_internal(TSTreeCursor *_self);

@@ -155,6 +155,10 @@ constexpr std::uint32_t kCacheMagic   = 0x4b505443;   // "CTPK"
 // lane rust-degraded's placeholder 42.
 // 44 (train 37b, lane rust-degraded; its placeholder was 42): the FILE record gains a sixth FileHealth u32, useBoundsBlanked
 // (the Rust precise-capture re-parse, src/rustusebounds.h), so an older cache must be rejected. 44 is above train 36's 43.
+constexpr std::uint32_t kCacheVersion = 53;           // 53: TRAIN-1111j renumbers lane no-skip-ingest's 52 (its placeholder 51) above main's
+                                                      //    52 (max + 1) — the FILE record's FileHealth gains indexMode + keysCut (how a file too
+                                                      //    large / too slow / too data-shaped to parse was indexed), so a warm run keeps the lexical
+                                                      //    read's disclosure; an older record must be rejected.
 constexpr std::uint32_t kCacheVersion = 52;           // 52: lane failure-default — the construct hits gain the failure-default shape tag
                                                       //    (lintrules.h kConstructShapeTags, appended); an older record lacks those hits.
                                                       // 51: lane qd-constructs — the FILE record gains a ninth family, the --quality-delta
@@ -379,7 +383,16 @@ constexpr std::uint32_t kCacheVersion = 52;           // 52: lane failure-defaul
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 309;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 314;          // bump on any grammar/.scm/extraction change
+                                                      // 314 = 2026-11-16 (TRAIN-1111j: lane parse-budget-det's placeholder 313 renumbered max + 1 over
+                                                      //   main's 309; no other member bumps it). Rich file tag 315.
+                                                      // 313 = 2026-11-15 (lane parse-budget-det, PLACEHOLDER: the train renumbers; above no-skip-ingest's
+                                                      //   311/312): the parse budget is a deterministic STEP budget, and a wall-clock or memory backstop
+                                                      //   cut is its own FileIndexMode (5/6), so a record written under the old wall budget is re-made.
+                                                      //   Rich file tag 314. kCacheVersion unchanged: no record changes shape.
+                                                      // 311 = 2026-11-14 (lane no-skip-ingest, PLACEHOLDER: the train renumbers; above main's 309/310): no crawled file is
+                                                      //   skipped for size — a file over --max-file-size or past its parse budget is read lexically, a
+                                                      //   .json/.yml over its full-index ceiling yields at most kDataFileKeyCap keys. Rich file tag 312. kCacheVersion 52.
                                                       // 309 = 2026-11-13 (lane macro-p0, PLACEHOLDER: the train renumbers; above main's 307/308): a C-family macro
                                                       //   invocation read as a typeless declarator (`REGISTER_FACTORY( F, B ){ "n" };`, a class-member `MOCK_METHOD( … );`)
                                                       //   mints no function def; the site is a use of the macro (ingest_names.h cFamilyMacroInvocationDecl). Rich file
@@ -2861,6 +2874,8 @@ inline bool readRecordHead( ByteR& r, std::string_view& relOut, CachedRecordHead
     head.health.wsBytes   = r.u32();
     head.health.macroBlanked     = r.u32();  // v20: member-macro re-parse — rides the record so the disclosure survives a warm run
     head.health.useBoundsBlanked = r.u32();  // v44: its Rust layer (use<..> bounds blanked) — same reason
+    head.health.indexMode        = r.u32();  // v51: NO-SKIP-INGEST — FileIndexMode (0 parsed) and the data keys cut
+    head.health.keysCut          = r.u32();
     FileFactCounts& c = head.counts;         // v49: the eight family counts, in the body's family order
     c.defs       = r.u32();
     c.refs       = r.u32();
@@ -3301,10 +3316,11 @@ inline CacheRecords loadCache( const std::string& path, std::string_view rootDir
     out.entryOf.assign( crawledFiles.size(), CacheRecords::kNoCacheEntry );
     out.head.resize( crawledFiles.size() );
 
-    // The head is the record's first bytes: its key (u32 length + bytes) then 4 u64 + 15 u32 (6 health fields and the 9
-    // family counts readRecordHead reads, v51's construct count the ninth). One prefix read covers every key up to 416
-    // bytes; a longer key takes a second read of exactly what the head needs (test/statgatecheck.sh (f)).
-    constexpr std::size_t kHeadFixedBytes = 4 + 4 * 8 + 15 * 4;
+    // The head is the record's first bytes: its key (u32 length + bytes) then 4 u64 + 17 u32 (8 health fields and the 9
+    // family counts readRecordHead reads, v51's construct count the ninth, v52's indexMode + keysCut the last two health
+    // fields). One prefix read covers every key up to 408 bytes; a longer key takes a second read of exactly what the head
+    // needs (test/statgatecheck.sh (f)).
+    constexpr std::size_t kHeadFixedBytes = 4 + 4 * 8 + 17 * 4;
     constexpr std::size_t kHeadProbeBytes = 512;
     std::string headBuf;
     {
@@ -3766,6 +3782,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
                 w.u32( fh.errNodes );  w.u32( fh.errBytes );  w.u32( fh.fileBytes );  w.u32( fh.wsBytes );
                 w.u32( fh.macroBlanked );   // v20: the member-macro re-parse's per-file count (0 ⇒ the first parse was kept)
                 w.u32( fh.useBoundsBlanked );   // v44: the Rust precise-capture re-parse's per-file count (0 ⇒ first parse kept)
+                w.u32( fh.indexMode );  w.u32( fh.keysCut );   // v51: NO-SKIP-INGEST — how the file was indexed when not parsed
             }
             // v49: the head copy of the eight family counts (readRecordHead), in the body's family order
             for( const std::size_t familyCount : { std::size_t( ix.defIndex[f].size() ), ix.refIndex[f].size(), std::size_t( ix.incIndex[f].size() ),

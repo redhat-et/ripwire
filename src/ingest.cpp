@@ -30,6 +30,8 @@
 #include "memstats.h" // M0 MEM-STATS: the RIPWIRE_STATS footprint reading at the model at rest
 
                                 // primitive, reused for a --match query's node-kind tokens (see nearestNodeKindHint)
+#include "crossref.h"          // NO-SKIP-INGEST: definitionShaped / definesNameAt / isIdentByte — the lexical read's one definition shape (ingest_lexical.h)
+#include "clones.h"            // usesHashLineComments — which comment opener the lexical read honours
 #include "pattern.h"           // R2: the pattern surface's compiler + matcher — AstWalk::Pattern rides the shared file walk
 #include "preprocdead.h"       // #62: the ONE literal `#if 0` rule (shared with slice.h) — dead call sites never become edges
 #include "extentsuspect.h"     // extent honesty: the containment rules + the recovered/suspect bit vocabulary
@@ -211,6 +213,7 @@ extern "C"
 #include "ingest_valuerefs.h"
 #include "ingest_rustslots.h"   // FN-SLOT part 2: Rust's slot-join records (callSide ParenFieldCall)
 #include "ingest_sidecap.h"
+#include "ingest_lexical.h"   // NO-SKIP-INGEST: the lexical read of a file a parse cannot or should not take
 #include "ingest_prewarm.h"
 #include "ingest_parsepool.h"
 #include "ingest_docpass.h"
@@ -340,7 +343,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     const auto crawlInto = [ & ]()
     {
         PROFILE_SCOPE_DESCRIBE( "ingest: crawl (collectSources)" );
-        auto [ crawledPaths, oversizeSkipped, taxonomySkips ] = collectSources( rootDir, excludeSubstr, maxFileBytes, excludeLabel, respectGitignore, &memWatch,
+        auto [ crawledPaths, oversizeSkipped, taxonomySkips ] = collectSources( rootDir, excludeSubstr, excludeLabel, respectGitignore, &memWatch,
                                                                                 &ignoreSpeculation );
         result.files           = std::move( crawledPaths );
         // #228: record the root once, for rootRelPath (model.h). A directory crawl joins it onto every path; a
@@ -426,13 +429,14 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     // A crawl the guard stopped is still parsed, under the parse's own (higher) line: the crawl line — an eighth of the
     // limit — is what leaves the parse that room (memguard.h).
     memWatch.rearmForParse();
-    RawFacts raw = runParsePool( result, rootDir, cacheFile, captureValueUses, cache, cacheStats, scan, prewarm, &memWatch );
+    RawFacts raw = runParsePool( result, rootDir, cacheFile, captureValueUses, cache, cacheStats, scan, prewarm, &memWatch, maxFileBytes );
 
     // The warm plan is only needed by the parse pool, which has already released it (WARM-DIRECT: the blob closes and its
     // per-file table is freed at the pool join); this covers the paths that never reach the pool.
     cache.release();
 
     result.fileHealth = std::move( scan.health );   // §L1: after saveCache, before the (unmeasured) doc pass
+    warnIndexLimits( result, maxFileBytes );         // NO-SKIP-INGEST: one stderr line per file that met a limit (ingest_lexical.h)
     collectNestRefusals( scan, result );             // the nesting guards' refusals, as --skipped rows (ingest_prewarm.h)
     collectExtractPartials( scan, result );          // files whose facts came back partial, as --skipped rows (ingest_prewarm.h)
 
@@ -479,6 +483,7 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
 
     // 3b) assign Symbol ids in (fileId, line, name) order + the rich-ingest lex-stats CSR (ingest_model.h)
     assignSymbols( result, raw.defs, captureValueUses );
+    markBundleCopies( result );   // NOSKIP-BUNDLE-DEMOTE: bundle copies of a source definition rank below it (ingest_model.h)
 
     // 4) attribute each reference to its enclosing definition (innermost span containing it) — the
     //    per-file DefSpanIndex + DefSweep cursor every fact family below shares (ingest_model.h).

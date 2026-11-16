@@ -467,7 +467,9 @@ inline CallHierarchyRows callHierarchyRows( const IngestResult& ing, const Graph
     // resolveFocus) — a same-named symbol living in more than one file must be pickable on either surface.
     // H1: the resolver's residue travels WITH the matches it is the complement of — always written (0 on
     // every tier that never reaches the widening), so no emitter can read a stale value.
-    out.matches = resolveAllByNameQualified( ing, selector, &out.unprovenDefs );
+    // NOSKIP-BUNDLE-DEMOTE: a bundle's copies of a source function are no more functions to union (graph.h dropSymbolsBesideOthers with bundleCopy);
+    // a selector that names the copy's file (`lib/_tsc.js:f`) matches only the copy and keeps it.
+    out.matches = dropSymbolsBesideOthers( ing, resolveAllByNameQualified( ing, selector, &out.unprovenDefs ), bundleCopy );
     if( out.matches.empty() )
     {
         return out;   // the caller owns the refusal: a CLI stderr line, or a JSON-RPC -32602

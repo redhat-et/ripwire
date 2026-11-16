@@ -338,6 +338,7 @@ for _g in \
     budgetpolicycheck \
     buildtypestampcheck \
     builtinbindcheck \
+    bundledemotecheck \
     bundleidcheck \
     cachefuzzcheck \
     cachehashcheck \
@@ -791,6 +792,7 @@ for _g in \
     nodekindcheck \
     nongitqmetricscheck \
     nonlocalstatecheck \
+    noskipingestcheck \
     notecanoncheck \
     notescheck \
     notesdegradecheck \
@@ -819,6 +821,7 @@ for _g in \
     panellegendcheck \
     parentcachecheck \
     pargatescheck \
+    parsebudgetdetcheck \
     parsehealthcheck \
     partitioncheck \
     pathambigcheck \

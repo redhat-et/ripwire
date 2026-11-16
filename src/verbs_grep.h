@@ -1257,8 +1257,8 @@ int emitGrepReport( const MainDispatch& d )
                  // literal 'hits="0"' example below (a quoted numeric example — the quality-delta legend's
                  // own rule, restated here after it bit a naive ` hits="N"` extraction downstream twice).
                  "corpus_excluded= counts files a caller's own exclude filter kept OUT of the index entirely; "
-                 "corpus_oversize= counts files the crawl SAW but did not index for exceeding the size ceiling (this answer still "
-                 "greps them, in the unindexed list); "
+                 "corpus_oversize= counts files the crawl SAW but did not index for exceeding the 1 GiB hard size limit (this answer "
+                 "still greps them, in the unindexed list); "
                  "corpus_pruned_dirs= counts the DIRECTORIES the BUILT-IN crawl denylist pruned whole — vendor, third_party, "
                  "build, dist, out, target, node_modules and the rest — a directory count and not a file count, because files "
                  "beneath a pruned subtree are never stat'd and so were never counted. All three answer what an "

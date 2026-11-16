@@ -36,15 +36,58 @@ struct TSLanguage;
 namespace rw
 {
 
-// The crawl's per-file byte ceiling. A text file larger than this is skipped: at this size
-// it is overwhelmingly generated/vendored/data (bundles, generated parsers, minified blobs, data
-// tables) — noise for an architecture map, and it would dominate the cold-parse budget. The specific
-// value also bounds a WORST CASE: tree-sitter's parse is quadratic on pathological comment-dense input
-// (~4 s/MB²), so 4 MB caps such a file at ~1 min (real code parses linearly, ~0.7 s/MB). Overridable
-// per run via --max-file-size (CLI) for repos with genuinely-large hand-authored source.
-constexpr std::size_t kDefaultMaxFileBytes = 4u * 1024u * 1024u;   // 4 MB (was 1 MB pre-2026-07)
+// The crawl's per-file PARSE ceiling (--max-file-size). NO-SKIP-INGEST (owner 2026-11-14: "we should not be skipping
+// files"): a file larger than this is no longer skipped — it is indexed LEXICALLY (FileIndexMode::LexicalOverSize:
+// definitions by line shape, calls by `name(`), counted in the map's lexical_files=, rowed by --skipped and warned
+// once on stderr. It was 4 MB as a SKIP, sized against tree-sitter's worst case; that worst case is now bounded per
+// file by the parse budget below, so this value only says how large a file is still worth a full parse. Measured
+// 2026-11-14 (M2): the largest real source file in the seven large-dev repos, vscode's 8 MB test-checker.ts, parses
+// in 0.49 s; real code across those repos parses at <= 1.35 s/MiB under a full 8-thread pool.
+constexpr std::size_t kDefaultMaxFileBytes = 64u * 1024u * 1024u;   // 64 MiB (a 4 MB skip until 2026-11-14; 1 MB pre-2026-07)
 
-// The JSON lane's OWN crawl ceiling (found live by bench/multiswe): .json is indexed for CONFIG
+// Above this nothing is read at all: the file keeps its --skipped row (skipped_oversize=) and its stderr warning. Not a
+// policy ceiling — every byte offset the index stores is a u32, and a file this large is never source (GitHub refuses
+// a file over 100 MB). The one size at which a crawled file is still dropped.
+constexpr std::size_t kHardMaxFileBytes = std::size_t( 1024u ) * 1024u * 1024u;   // 1 GiB
+
+// THE PARSE BUDGET (NO-SKIP-INGEST; deterministic since PARSE-BUDGET-DETERMINISTIC). tree-sitter's error recovery goes
+// quadratic on degenerate input — measured 2026-11-14: 100 KB of `{` parses in 20 s and 200 KB in 80 s (~2000 s/MiB^2), so
+// the old 4 MB skip bounded nothing for such a file. Every ingest extraction (the parse and the tags query) now runs under a
+// WORK budget of kParseBudgetFloorSteps + kParseBudgetStepsPerMiB x MiB progress steps — tree-sitter calls the progress
+// callback once per ~100 parser or query-cursor operations, a count fixed by the bytes and the grammar alone — and a file
+// past it is cancelled and indexed lexically (FileIndexMode::LexicalOverBudget). The cut is a function of the file, never
+// of the machine's speed or load (CLAUDE.md non-negotiable 2: until 2026-11-15 this was a 4 s + 1 s/MiB WALL budget, and a
+// file near its edge indexed differently on a loaded machine — ld-zed-06, vscode's md5 needing RIPWIRE_PARSE_BUDGET=20).
+// The query half counts real work since tree-sitter patch 002 (third_party/patches/tree_sitter): the cursor's status walk
+// scans every later sibling of a node whose siblings are all anonymous — a run of `{` — and that scan, the quadratic the
+// budget exists for, used to count as one operation (100 KB of `{` took 11 s in 3072 steps).
+// Sized from measurement (PARSE-BUDGET-DETERMINISTIC, 2026-11-15, RIPWIRE_PARSE_STEPS_LOG over all 70,221 extracted files of
+// the large-dev repos — envoy, cockroach, vscode, cpython, zed, nushell, terraform — plus angular, django, nest and this
+// repo): steps/MiB median 20,456, p99 43,294, max 203,188 (cpython Modules/cjkcodecs/mappings_hk.h, a generated table);
+// the most steps in one file 194,079 (cpython Modules/unicodename_db.h, 1.3 MiB), and 5,234 under 64 KiB. Every measured
+// file sits >= 9.3x under its budget (unicodename_db.h the closest), and the densest table's rate stays 4.9x under the
+// per-MiB slope at any size. Degenerate input is cut fast: 100 KB of `{` in 0.2 s, 4 MiB in ~2 s (M2).
+// RIPWIRE_PARSE_BUDGET=<scale> multiplies it (the warning names it).
+inline constexpr std::uint64_t kParseBudgetFloorSteps  = 500'000;
+inline constexpr std::uint64_t kParseBudgetStepsPerMiB = 1'000'000;
+
+// The SAFETY BACKSTOP behind the work budget, for a machine so slow (or so loaded, or so short of memory) that the work
+// budget never trips first: a wall-clock edge 10x the old wall budget, and the memory guard's soft line (half the limit,
+// --max-memory) read every 64 steps. Neither trips on any real file of the measured set at any load seen; when one does,
+// the file is indexed lexically under its OWN mode (LexicalWallBackstop / LexicalMemoryBackstop), its warning says the
+// result depended on the machine, and its cache record is retried on the next run instead of being kept.
+inline constexpr double kParseBackstopFloorSeconds  = 40.0;
+inline constexpr double kParseBackstopSecondsPerMiB = 10.0;
+
+// A .json / .yml / .yaml above its full-index ceiling (kMaxJsonConfigBytes / kMaxYamlConfigBytes below) is DATA: it
+// is indexed WITHOUT a parse, its top- and second-level keys read lexically, at most this many of them in file order
+// (FileIndexMode::DataKeysBounded; the rest counted as keys_cut=). RIPWIRE_DATA_KEYS=<n> raises it (the warning
+// names it). 256 keys keep a data file findable by its top-level shape without the symbol explosion the ceilings
+// were written against (tens of thousands of t="sec" rows, >2 min on nlohmann/json history).
+inline constexpr std::uint32_t kDataFileKeyCap = 256;
+
+// The JSON lane's FULL-INDEX ceiling (found live by bench/multiswe; NO-SKIP-INGEST: above it the file is indexed with
+// bounded keys — kDataFileKeyCap — instead of being skipped): .json is indexed for CONFIG
 // keys, and real config files (package.json, tsconfig, angular.json…) are tens of KB at most — while
 // 200KB-4MB pretty-printed .json is essentially always DATA (test corpora, benchmark datasets, exports)
 // that slips under both the 4MB skip and the minified-line heuristic and explodes into tens of thousands
@@ -63,9 +106,9 @@ constexpr std::uint32_t kMaxJsonNestDepth = 512u;
 // theatre that only ever fires on a file no corpus contains. Measured over 90 real public repos
 // (bench-assets/r4/repos, 321 .toml files) before this lane was written:
 //   SIZE — p50 277 B, p90 3 578 B, p99 21 449 B, MAX 57 759 B. The largest real TOML in 90 repos is 57 KB,
-//     which is a quarter of what kMaxJsonConfigBytes would allow and 1.4% of kDefaultMaxFileBytes. A
-//     TOML-specific ceiling could not be set anywhere both above the observed max and below the generic
-//     4 MB skip without being unreachable by construction.
+//     which is a quarter of what kMaxJsonConfigBytes would allow and 1.4% of the generic 4 MB skip that
+//     stood when this was measured. A TOML-specific ceiling could not be set anywhere both above the observed
+//     max and below that generic ceiling without being unreachable by construction.
 //   PARSE — 270 of 321 parse clean; 50 of the 51 "failures" are cpython's test_tomllib/data/invalid/
 //     deliberately-malformed fixtures, so the real failure rate is ~0.3%.
 //   PATHOLOGY — none. `[` x100 000 = 17.4 ms · dotted key x50 000 = 7.0 ms · 50 000 `[[aot]]` = 58.7 ms ·
@@ -74,8 +117,8 @@ constexpr std::uint32_t kMaxJsonNestDepth = 512u;
 //     TOML is line-oriented, so a malformed line resynchronizes at the newline instead of nesting.
 //   SCANNER — the vendored external scanner is stateless (create() returns NULL, serialize() returns 0,
 //     never allocates), so it adds no serialization or leak hazard to weigh against a guard either.
-// So .toml rides the GENERIC path only: the shared --max-file-size / kDefaultMaxFileBytes skip, which is
-// already disclosed through skipped_oversize=. test/tomllangcheck.sh pins this decision from the outside —
+// So .toml rides the GENERIC path only: the shared --max-file-size lexical fallback and the parse budget
+// (NO-SKIP-INGEST), both disclosed through lexical_files=. test/tomllangcheck.sh pins this decision from the outside —
 // it indexes a 216 KB .toml (3.7x the corpus max, and past where the JSON ceiling would sit) and fails if
 // anything drops it, so a ceiling cannot be added later without the gate saying so out loud.
 
@@ -84,7 +127,7 @@ constexpr std::uint32_t kMaxJsonNestDepth = 512u;
 // style manifests, .dSYM relocation files) so it gets a size ceiling — but JSON's 256 KB would drop REAL
 // config: NeMo's cicd-main.yml is a hand-maintained 293 KB workflow. 512 KB clears every real config file
 // observed in the 90-repo breadth corpus (4 449 .yml/.yaml files) while still amputating the data class.
-// Counted in skipped_oversize= exactly like the JSON drop (test/yamllangcheck.sh pins both sides).
+// NO-SKIP-INGEST: above it the file is indexed with bounded keys (kDataFileKeyCap), like the JSON lane, not skipped.
 constexpr std::size_t kMaxYamlConfigBytes = 512u * 1024u;          // 512 KB — deliberately NOT kMaxJsonConfigBytes
 
 // YAML-lane nesting ceiling (companion to kMaxYamlConfigBytes; see yamlNestsTooDeep in ingest.cpp) — and

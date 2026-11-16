@@ -2007,8 +2007,7 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
 constexpr const char* kSkippedLegend =
     "<ctx><!-- ripwire skipped report: WHY the index does not contain a file, and which files it DOES contain but cannot"
                  " vouch for. Two row kinds. <f p= why= bytes= .../> = a file the crawl passed over, one row per drop, why= being"
-                 " oversize (exceeded a size ceiling; limit= names which — the max-file-size flag's value in max_file_size=, or the fixed"
-                 " .json/.yaml config ceilings that flag does not raise, json_ceiling=), excluded (matched an exclude substring; ext= is"
+                 " oversize (over the 1 GiB hard limit, limit=, the one size that still drops a file), excluded (matched an exclude substring; ext= is"
                  " its extension), or unsupported-ext (ext= has no grammar and no doc handler in this build — the class that hides a whole"
                  " LANGUAGE). <h p= why= .../> = a file that IS indexed and stays indexed, flagged for the reader: why=degraded-parse means"
                  " the parse contains ERROR/MISSING nodes, or invalid UTF-8 in the leading sample (err= counts both, err_ratio= is the share"
@@ -2016,6 +2015,12 @@ constexpr const char* kSkippedLegend =
                  " a syntax verdict — a valid file in a dialect this grammar predates reads"
                  " degraded too; why=minified-suspect means whitespace frequency ws_freq= is under 0.070 across the leading 4096 bytes"
                  " (files under 256 bytes are never flagged — too little text to judge). Nothing here is dropped by these two flags."
+                 " why=lexical-size / lexical-budget / keys-bounded mean the file is indexed from a LEXICAL read, not a parse: over"
+                 " max_file_size=, past its parse work budget (parser steps, the same on every machine), or a .json/.yaml past"
+                 " json_ceiling=/yaml_ceiling= whose top- and second-level keys were read (keys_cut= the ones past the per-file key"
+                 " cap); definitions by line shape, calls by name(, no complexity — lexical_files= and keys_cut= on the root count"
+                 " them. why=lexical-wall / lexical-memory: the same lexical read, cut by the wall-clock or memory BACKSTOP before"
+                 " the work budget — a slow or loaded machine, so the row depends on load and the next run retries the parse."
                  " <lang n= files= symbols=/> = corpus composition BY LANGUAGE: one row per language this build extracted at"
                  " least one symbol OR one file for, sorted files DESC then name ASC, absent languages simply not rowed. files= is a"
                  " FLOOR (derived from symbol-bearing files only — a file with zero extracted symbols is not attributed to any"
@@ -2239,6 +2244,31 @@ void writeOversizeRows( rw::XmlWriter& w, std::vector<char>& esc, const std::vec
     }
 }
 
+// NO-SKIP-INGEST — one <h> row per file read lexically (model.h FileIndexMode), in fileId (path) order, never capped: the
+// population is the rare file a parse could not or should not take. keys_cut= rides a bounded data read that cut keys.
+void writeLexicalRows( rw::XmlWriter& w, std::vector<char>& esc, const rw::IngestResult& ing, std::string_view rootPrefix = {} )
+{
+    for( std::size_t fileIndex = 0; fileIndex < ing.files.size() && fileIndex < ing.fileHealth.size(); ++fileIndex )
+    {
+        const rw::FileHealth&  health = ing.fileHealth[ fileIndex ];
+        const std::string_view why    = rw::fileIndexModeWord( health.indexMode );
+        if( why.empty() )
+        {
+            continue;
+        }
+        const std::string&     path = ing.files[ fileIndex ];
+        const std::string_view rp   = rootPrefix.empty() ? std::string_view( path ) : rw::sarif::rootRelativeUri( path, rootPrefix );
+        w.write( "<h p=\"" );  w.write( rw::escapeXml( rp, esc ) );
+        std::string row = std::format( "\" why=\"{}\" bytes=\"{}\"", why, health.fileBytes );
+        if( health.keysCut > 0 )
+        {
+            row += std::format( " keys_cut=\"{}\"", health.keysCut );
+        }
+        row += "/>";
+        w.write( row );
+    }
+}
+
 // §L1 — the <f> rows for the two non-size drop classes. `why` is a caller-supplied literal from a CLOSED
 // vocabulary (excluded / unsupported-ext), never data — see test/fixedbufsweep.sh's row for this buffer.
 // §N6-C — the ignore mode as one stable token. A LABEL, not a boolean: "unavailable" and "root-ignored"
@@ -2449,7 +2479,7 @@ void writeSkippedHeader( rw::XmlWriter& w, const rw::IngestResult& ing, const Sk
 {
     using namespace rw;
     const CrawlSkips& cs = ing.crawlSkips;
-    char hdr[ 768 ];   // seventeen counters, each up to 20 digits, + ignore_mode= — sized well clear of a truncated count
+    char hdr[ 896 ];   // nineteen counters, each up to 20 digits, + ignore_mode= — sized well clear of a truncated count
     // mirror ingest()'s own zero-ceiling clamp so the header states the EFFECTIVE bound, never a raw 0
     const std::size_t effectiveMax = maxFileBytes == 0 ? kDefaultMaxFileBytes : maxFileBytes;
     const bool        rowsCapped   = cs.excluded.size() < cs.excludedFiles || cs.unsupported.size() < cs.unsupportedFiles
@@ -2465,6 +2495,10 @@ void writeSkippedHeader( rw::XmlWriter& w, const rw::IngestResult& ing, const Sk
     }
     // same absent-when-zero rule; a std::string, so it adds no fixed buffer (20 digits at most, well inside hdr's slack)
     const std::string partialAttr = cs.extractPartialFiles > 0 ? " extract_partial=\"" + std::to_string( cs.extractPartialFiles ) + "\"" : std::string();
+    // NO-SKIP-INGEST: the files read lexically and the data keys cut, absent when zero (the map header's twins)
+    const LexicalIndexCounts lexical = lexicalIndexCounts( ing );
+    const std::string lexicalAttr = ( lexical.files > 0 ? " lexical_files=\"" + std::to_string( lexical.files ) + "\"" : std::string() )
+                                  + ( lexical.keysCut > 0 ? " keys_cut=\"" + std::to_string( lexical.keysCut ) + "\"" : std::string() );
     char escAttr[ 48 ] = "";    // §SEC1 — same absent-when-zero rule: only a tree carrying an escaping symlink pays a byte
     if( cs.escapedFiles > 0 )
     {
@@ -2474,7 +2508,7 @@ void writeSkippedHeader( rw::XmlWriter& w, const rw::IngestResult& ing, const Sk
                    "<skipped indexed=\"{}\" oversize=\"{}\" excluded=\"{}\" unsupported_ext=\"{}\" excluded_dirs=\"{}\""
                    " pruned_dirs=\"{}\" ignored=\"{}\" ignored_dirs=\"{}\" ignore_mode=\"{}\""
                    " degraded_parse=\"{}\" minified_suspect=\"{}\"{} unmeasured=\"{}\" max_file_size=\"{}\" json_ceiling=\"{}\""
-                   " yaml_ceiling=\"{}\"{}{}{}{}",
+                   " yaml_ceiling=\"{}\"{}{}{}{}{}",
                    ing.files.size(), ing.skippedOversize.size(),
                    ( unsigned long long ) cs.excludedFiles, ( unsigned long long ) cs.unsupportedFiles,
                    ( unsigned long long ) cs.excludedDirs, ( unsigned long long ) cs.prunedDirs,
@@ -2483,7 +2517,8 @@ void writeSkippedHeader( rw::XmlWriter& w, const rw::IngestResult& ing, const Sk
                    skippedHealthRootAttrs( health ),   // extent_suspect_files= then macro_blanked_files=, each absent at 0
                    health.unmeasured,
                    effectiveMax, kMaxJsonConfigBytes, kMaxYamlConfigBytes,
-                   std::string_view( nestAttr ), std::string_view( partialAttr ), std::string_view( escAttr ), rowsCapped ? " rows_capped=\"1\"" : "" );
+                   std::string_view( nestAttr ), std::string_view( partialAttr ), std::string_view( lexicalAttr ), std::string_view( escAttr ),
+                   rowsCapped ? " rows_capped=\"1\"" : "" );
     w.write( hdr );
 }
 
@@ -2555,6 +2590,7 @@ std::optional<int> runSkipped( const MainDispatch& d )
         writeDropRows( w, esc, cs.extractPartial, "extract-partial", skRootPrefix );   // indexed, facts partial (ingest_prewarm.h)
         writeUnindexedExtRows( w, esc, cs.unindexedExts );
         writeHealthRows( w, esc, ing, health.findings, skRootPrefix );
+        writeLexicalRows( w, esc, ing, skRootPrefix );       // NO-SKIP-INGEST: indexed from a lexical read, not a parse
         writeLangRows( w, esc, computeLangCounts( ing ) );   // W3-S item 3: corpus composition by language
         w.write( "</skipped></ctx>" );
     }

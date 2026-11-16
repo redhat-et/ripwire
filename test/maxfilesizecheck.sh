@@ -1,20 +1,19 @@
 #!/usr/bin/env bash
-# maxfilesizecheck.sh — §P0.5d gate: --max-file-size must not silently shrink the corpus.
+# maxfilesizecheck.sh — §P0.5d gate, rewritten for NO-SKIP-INGEST (2026-11-14): --max-file-size must not silently
+# shrink the corpus — and since NO-SKIP-INGEST it does not shrink it at all.
 #
-#   --max-file-size=8K  ->  files=463 of ~759, no skipped= anywhere       (before)
+#   --max-file-size=8K  ->  files=463 of ~759, no skipped= anywhere       (before §P0.5d)
+#   --max-file-size=8K  ->  files=463 + skipped_oversize=296              (§P0.5d: dropped, but counted)
+#   --max-file-size=8K  ->  files=759 + lexical_files=296                 (NO-SKIP-INGEST: read lexically, not dropped)
 #
-# The header presented the survivors as if they WERE the corpus: ~296 files vanished with nothing said,
-# and every count downstream (symbols, edges, and every verb's totals) is scoped to a tree the reader
-# was never told had been cut.
-#
-# Two invariants, and the second matters as much as the first:
-#   1. when files ARE dropped for size, the header says so — skipped_oversize=N;
-#   2. when nothing is dropped, the attribute is ABSENT, so a default run stays byte-identical (the
-#      house rule: absent = nothing happened, and an unconditional new attribute would diff every
-#      existing argvdiffcheck vector).
+# Invariants pinned:
+#   1. a file over the ceiling is INDEXED (files= does not move) and disclosed — lexical_files=N on the header;
+#   2. when nothing is over a ceiling, the attribute is ABSENT, so a default run stays byte-identical (the
+#      house rule: absent = nothing happened);
+#   3. the .json lane's 256 KB ceiling no longer drops a file either: such a file is indexed with bounded keys
+#      (why="keys-bounded"), counted in the same lexical_files=, in both dialects.
 #
 #   RIPWIRE_BIN=build/ripwire      bash test/maxfilesizecheck.sh
-#   RIPWIRE_BIN=build_base/ripwire bash test/maxfilesizecheck.sh   # must FAIL (pre-fix binary)
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -28,116 +27,68 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 echo "maxfilesizecheck: BIN=$BIN  ROOT=$ROOT"
 
-# ── 1. a low ceiling drops files and MUST disclose how many
-"$BIN" "$ROOT" --max-file-size=8K --top-k=3 >"$TMP/small" 2>/dev/null
-SKIPPED="$( grep -oE 'skipped_oversize=[0-9]+' "$TMP/small" | head -1 | grep -oE '[0-9]+' )"
-[ -n "${SKIPPED:-}" ] && ok "--max-file-size=8K header carries skipped_oversize=$SKIPPED" \
-    || no "--max-file-size=8K header has no skipped_oversize= (header: $( grep -oE '<!-- files=[^>]*' "$TMP/small" | head -1 ))"
-[ "${SKIPPED:-0}" -gt 200 ] && ok "skipped_oversize=$SKIPPED (> 200, the expected order of magnitude)" \
-    || no "skipped_oversize=${SKIPPED:-<none>} (expected > 200)"
-
-# the disclosure must reconcile: files= + skipped_oversize= cannot exceed the unfiltered corpus
-FILES_SMALL="$( grep -oE '<!-- files=[0-9]+' "$TMP/small" | head -1 | grep -oE '[0-9]+' )"
-"$BIN" "$ROOT" --top-k=3 >"$TMP/full" 2>/dev/null
-FILES_FULL="$( grep -oE '<!-- files=[0-9]+' "$TMP/full" | head -1 | grep -oE '[0-9]+' )"
-[ -n "${FILES_SMALL:-}" ] && [ -n "${FILES_FULL:-}" ] && [ "${FILES_SMALL}" -lt "${FILES_FULL}" ] \
-    && ok "files= shrank under the ceiling ($FILES_SMALL < $FILES_FULL) — there WAS something to disclose" \
-    || no "files= did not shrink under --max-file-size=8K ($FILES_SMALL vs $FILES_FULL)"
-# The disclosure must ACCOUNT FOR every file that disappeared.
-VANISHED=$(( ${FILES_FULL:-0} - ${FILES_SMALL:-0} ))
-[ "${SKIPPED:-0}" -ge "$VANISHED" ] && [ "${SKIPPED:-0}" -le "${FILES_FULL:-0}" ] \
-    && ok "skipped($SKIPPED) accounts for every one of the $VANISHED files that vanished (and <= corpus $FILES_FULL)" \
-    || ok "skipped($SKIPPED) vs $VANISHED vanished — see the exact invariant in §4 below"
-
-# ── 2. nothing dropped ⇒ attribute ABSENT (byte-identity of every default run depends on this)
-# Measured on test/fixture, not on $ROOT: this repo carries three >256 KB .json under bench/locbench/ which
-# the .json lane's own ceiling drops at EVERY --max-file-size setting (§B13.1), so $ROOT is no longer a tree
-# where "nothing is skipped". The house rule being pinned — absent means nothing was skipped — is unchanged,
-# and the fixture is what the argvdiff/golden byte-identity actually rides on.
-"$BIN" "$ROOT/test/fixture" --top-k=3 >"$TMP/fixture" 2>/dev/null
-grep -q 'skipped_oversize=' "$TMP/fixture" \
-    && no "test/fixture run leaked skipped_oversize= with nothing skipped (breaks golden byte-identity)" \
-    || ok "test/fixture run has NO skipped_oversize= (absent = nothing skipped)"
-
-# a generous explicit ceiling behaves like the default on a tree with nothing oversized
-"$BIN" "$ROOT/test/fixture" --max-file-size=64M --top-k=3 >"$TMP/big" 2>/dev/null
-grep -q 'skipped_oversize=' "$TMP/big" \
-    && no "--max-file-size=64M on test/fixture leaked skipped_oversize= with nothing skipped" \
-    || ok "--max-file-size=64M on test/fixture has no skipped_oversize= (nothing that large in the tree)"
-
-# ── 4. §B13.1 — the .json lane's OWN 256 KB ceiling is a size drop too, and it must be COUNTED ─────────
-# Before this fix ingest.cpp dropped a >kMaxJsonConfigBytes .json with no counter, 8 lines below a generic
-# size drop that IS counted. Consequence, measured on this repo BEFORE / AFTER:
-#     --max-file-size=64K    files=837 + skipped_oversize=32  = 869   /  837 + 32 = 869
-#     --max-file-size=256K   files=861 + skipped_oversize=8   = 869   /  861 +  8 = 869
-#     --max-file-size=1M     files=866 + <absent>             = 866   /  866 +  3 = 869
-#     default (4M)           files=866 + <absent>             = 866   /  866 +  3 = 869
-# i.e. the three >256 KB .json under bench/locbench/ vanished from the accounting the moment the generic
-# ceiling stopped catching them first, with zero stderr — the exact class skipped_oversize exists to kill.
-# files= itself does NOT move (the ceiling is a content-class guard and stays; symbols=/edges=/ambiguous=/
-# unresolved= are byte-identical to the pre-fix binary), so this gate asserts the ACCOUNTING INVARIANT
-# rather than a literal count: files= + skipped_oversize= is the same population at every setting.
-# Derived, never hardcoded — a count in a gate rots (trap #12).
-# The name is anchored on the space in front of it. `files=` is a SUFFIX of other header attributes
-# (`macro_blanked_files=`, since the member-macro re-parse; `dep_files=`/`extent_suspect_files=` on
-# other surfaces), and the greedy first match runs to the LAST one, so an unanchored second grep read
-# `files=1773` AND the `files=7` inside `macro_blanked_files=7`, and $(( )) refused "1773\n7".
 hdrnum(){ grep -oE "<!-- [^>]*$2=[0-9]+" "$1" | head -1 | grep -oE "(^| )$2=[0-9]+" | grep -oE '[0-9]+'; }
-totalAt(){   # $1 = --max-file-size arg (may be empty) → "files+skipped"
-    "$BIN" "$ROOT" $1 --top-k=1 >"$TMP/at" 2>/dev/null
-    local f s; f="$( hdrnum "$TMP/at" files )"; s="$( hdrnum "$TMP/at" skipped_oversize )"
-    printf '%d' $(( ${f:-0} + ${s:-0} ))
-}
-T64K="$( totalAt --max-file-size=64K )"; T256K="$( totalAt --max-file-size=256K )"
-T1M="$( totalAt --max-file-size=1M )";  TDEF="$( totalAt '' )"
-[ "$T64K" -gt 0 ] && [ "$T64K" = "$T256K" ] && [ "$T64K" = "$T1M" ] && [ "$T64K" = "$TDEF" ] \
-    && ok "accounting invariant holds: files+skipped_oversize = $TDEF at 64K/256K/1M/default alike" \
-    || no "accounting invariant BROKEN: 64K=$T64K 256K=$T256K 1M=$T1M default=$TDEF (a ceiling drops files it does not count)"
 
-# The invariant above is only meaningful if this tree actually HAS a .json past the JSON-lane ceiling —
-# otherwise every setting agrees trivially and the arm passes for the wrong reason.
-# The denominator must come from the SAME population the tool indexes. The previous form used
-# `find ... -not -path '*/build*'`, which does not exclude a build dir named relbuild/ (trap #25: an
-# exclusion LIST silently admits the member that breaks its pattern) and counted 197 where the tool
-# reports 3. git ls-files is the tool's own population, so the two cannot drift apart again.
+# ── 1. a low ceiling reads files lexically and MUST disclose how many — and drop none
+"$BIN" "$ROOT" --max-file-size=8K --top-k=3 >"$TMP/small" 2>"$TMP/small.err"   # status: the map exits 0 on any corpus; the header counts and rows read here are the verdict, and a missing one FAILs
+LEX="$( hdrnum "$TMP/small" lexical_files )"
+[ "${LEX:-0}" -gt 200 ] && ok "--max-file-size=8K header carries lexical_files=$LEX (> 200, the expected order of magnitude)" \
+    || no "--max-file-size=8K lexical_files=${LEX:-<none>} (header: $( grep -oE '<!-- files=[^>]*' "$TMP/small" | head -1 ))"
+grep -q 'skipped_oversize=' "$TMP/small" && no "--max-file-size=8K still drops files (skipped_oversize= on the header)" \
+    || ok "--max-file-size=8K drops nothing (no skipped_oversize=)"
+FILES_SMALL="$( hdrnum "$TMP/small" files )"
+"$BIN" "$ROOT" --top-k=3 >"$TMP/full" 2>/dev/null
+FILES_FULL="$( hdrnum "$TMP/full" files )"
+[ -n "${FILES_SMALL:-}" ] && [ "${FILES_SMALL:-0}" = "${FILES_FULL:-x}" ] \
+    && ok "files= is the same under the ceiling ($FILES_SMALL = $FILES_FULL): every file is indexed" \
+    || no "files= moved under --max-file-size=8K ($FILES_SMALL vs $FILES_FULL)"
+grep -q '^ripwire: warning: .* exceeds --max-file-size 8.0 KiB; indexed lexically' "$TMP/small.err" \
+    && ok "stderr warns, naming the flag" || no "no stderr warning under --max-file-size=8K: $( head -1 "$TMP/small.err" )"
+
+# ── 2. nothing over a ceiling ⇒ attribute ABSENT (byte-identity of every default run depends on this)
+"$BIN" "$ROOT/test/fixture" --top-k=3 >"$TMP/fixture" 2>/dev/null
+grep -qE 'skipped_oversize=|lexical_files=' "$TMP/fixture" \
+    && no "test/fixture run leaked skipped_oversize=/lexical_files= with nothing over a ceiling (breaks golden byte-identity)" \
+    || ok "test/fixture run has NO skipped_oversize=/lexical_files= (absent = nothing happened)"
+"$BIN" "$ROOT/test/fixture" --max-file-size=64M --top-k=3 >"$TMP/big" 2>/dev/null
+grep -qE 'skipped_oversize=|lexical_files=' "$TMP/big" \
+    && no "--max-file-size=64M on test/fixture leaked a lexical/oversize attribute" \
+    || ok "--max-file-size=64M on test/fixture has no lexical/oversize attribute (nothing that large in the tree)"
+
+# ── 4. the .json lane's 256 KB ceiling indexes with bounded keys, and nothing drops at any setting ──────────
+# files= is the SAME population at every --max-file-size setting (nothing is dropped below the 1 GiB hard limit), and
+# the JSON-lane files past the ceiling are rowed why="keys-bounded" at every setting. Derived, never hardcoded.
+filesAt(){ "$BIN" "$ROOT" $1 --top-k=1 >"$TMP/at" 2>/dev/null; hdrnum "$TMP/at" files; }   # status: the map exits 0 on any corpus; the header counts and rows read here are the verdict, and a missing one FAILs
+F64K="$( filesAt --max-file-size=64K )"; F1M="$( filesAt --max-file-size=1M )"; FDEF="$( filesAt '' )"
+[ "${F64K:-0}" -gt 0 ] && [ "$F64K" = "$F1M" ] && [ "$F64K" = "$FDEF" ] \
+    && ok "files= = $FDEF at 64K/1M/default alike (no ceiling drops a file)" \
+    || no "files= moves with the ceiling: 64K=$F64K 1M=$F1M default=$FDEF"
+# The premise: this tree HAS a .json past the JSON-lane ceiling (git ls-files: the tool's own population).
 BIGJSON="$( cd "$ROOT" && git ls-files -z '*.json' | xargs -0 -I{} sh -c 'test $(wc -c <"{}") -gt 262144 && echo {}' 2>/dev/null | wc -l | tr -d ' ' )"
 [ "${BIGJSON:-0}" -ge 1 ] \
     && ok "premise holds: $BIGJSON .json over the 256 KB JSON-lane ceiling exist in this tree" \
-    || no "premise FAILED: no >256K .json in the tree — the invariant arm above cannot discriminate"
-
-# and the drop is disclosed at a ceiling that no longer catches it generically (this is the red-first arm:
-# the pre-fix binary reports the attribute ABSENT here, so the count reads as a false zero).
-#
-# 2026-09-09: the expectation is DERIVED from the tool's own --skipped rows, no longer assumed. The old form
-# asserted skipped_oversize == BIGJSON, i.e. "nothing but the JSON lane drops at 1M" — a fact about this
-# tree's SHAPE, not about the tool — and it expired the day docs/EVALS.md crossed 1,048,576 B (1M is
-# 1024*1024, cli.h parseByteSize): every shard carrying this gate went red on a landing tip, and it read as a
-# libstdc++-vs-libc++ split only because the macOS Release leg had been cancelled. Three arms replace it,
-# each an invariant of the TOOL: (a) the JSON-lane rows at 1M are exactly the BIGJSON files; (b) every
-# OTHER oversize row names a file that really is over 1,048,576 B on disk — a ceiling never drops a file
-# under it; (c) the header's skipped_oversize= equals the rows itemized. A tree with no non-JSON file over
-# 1 MiB passes (b) and (c) vacuously with OTHERROWS=0, which is the old arm's case, so nothing is weakened.
-SKIPPED_ROWS="$( "$BIN" "$ROOT" --max-file-size=1M --skipped 2>/dev/null | tr '>' '\n' | grep 'why="oversize"' )"
-SKIP1M="$( "$BIN" "$ROOT" --max-file-size=1M --top-k=1 2>/dev/null | grep -oE 'skipped_oversize=[0-9]+' | head -1 | grep -oE '[0-9]+' )"
-JSONROWS="$( printf '%s\n' "$SKIPPED_ROWS" | grep -c 'limit="262144"' | tr -d ' ' )"
-ALLROWS="$(  printf '%s\n' "$SKIPPED_ROWS" | grep -c 'why="oversize"' | tr -d ' ' )"
-OTHERROWS=$(( ALLROWS - JSONROWS ))
+    || no "premise FAILED: no >256K .json in the tree — the keys-bounded arm below cannot discriminate"
+"$BIN" "$ROOT" --max-file-size=1M --skipped 2>/dev/null | tr '>' '\n' >"$TMP/sk1m"   # status: the map exits 0 on any corpus; the header counts and rows read here are the verdict, and a missing one FAILs
+JSONROWS="$( grep 'why="keys-bounded"' "$TMP/sk1m" | grep -c '\.json"' | tr -d ' ' )"
+SIZEROWS="$( grep -c 'why="lexical-size"' "$TMP/sk1m" | tr -d ' ' )"
 [ "${JSONROWS:-0}" = "${BIGJSON:-0}" ] \
-    && ok "--max-file-size=1M discloses the $BIGJSON .json the JSON-lane ceiling dropped, one row each" \
-    || no "--max-file-size=1M itemizes $JSONROWS JSON-lane rows, expected $BIGJSON (the JSON-lane drop is uncounted)"
+    && ok "--max-file-size=1M rows the $BIGJSON big .json why=keys-bounded, one row each" \
+    || no "--max-file-size=1M rows $JSONROWS keys-bounded .json, expected $BIGJSON"
 UNDER=0
 while IFS= read -r p; do
     [ -n "$p" ] || continue
     [ "$( wc -c <"$ROOT/$p" | tr -d ' ' )" -gt 1048576 ] || UNDER=$(( UNDER + 1 ))
 done <<EOF_ROWS
-$( printf '%s\n' "$SKIPPED_ROWS" | grep -v 'limit="262144"' | grep -oE ' p="[^"]+"' | sed 's/ p="//;s/"$//' )
+$( grep 'why="lexical-size"' "$TMP/sk1m" | grep -oE ' p="[^"]+"' | sed 's/ p="//;s/"$//' )
 EOF_ROWS
 [ "$UNDER" = 0 ] \
-    && ok "every non-JSON oversize row at 1M ($OTHERROWS) names a file really over 1,048,576 B (a ceiling never drops a file under it)" \
-    || no "$UNDER non-JSON oversize row(s) at 1M name files UNDER the ceiling"
-[ "${SKIP1M:-0}" = "$(( JSONROWS + OTHERROWS ))" ] \
-    && ok "skipped_oversize=$SKIP1M equals the rows itemized ($JSONROWS JSON-lane + $OTHERROWS at the 1M ceiling)" \
-    || no "skipped_oversize=${SKIP1M:-<absent>} disagrees with the itemized rows ($JSONROWS + $OTHERROWS)"
+    && ok "every lexical-size row at 1M ($SIZEROWS) names a file really over 1,048,576 B (a ceiling never fires under it)" \
+    || no "$UNDER lexical-size row(s) at 1M name files UNDER the ceiling"
+LEX1M="$( "$BIN" "$ROOT" --max-file-size=1M --top-k=1 2>/dev/null | grep -oE ' lexical_files=[0-9]+' | head -1 | grep -oE '[0-9]+' )"   # status: the map exits 0 on any corpus; the header counts and rows read here are the verdict, and a missing one FAILs
+ALLLEX="$( grep -cE 'why="(lexical-size|lexical-budget|keys-bounded)"' "$TMP/sk1m" | tr -d ' ' )"
+[ "${LEX1M:-0}" = "${ALLLEX:-x}" ] \
+    && ok "lexical_files=$LEX1M equals the rows itemized ($ALLLEX)" \
+    || no "lexical_files=${LEX1M:-<absent>} disagrees with the $ALLLEX itemized rows"
 
 # ── 3. still valid XML and still deterministic under the ceiling
 "$BIN" "$ROOT" --max-file-size=8K --top-k=3 >"$TMP/d1" 2>/dev/null
@@ -150,25 +101,24 @@ fi
 # ── adversarial-round extension: the disclosure must reach --json consumers too ──────────────────────
 # The JSON header is built separately from the XML one; §P0.5d's first landing covered only XML, so an
 # MCP/json reader was still shown the survivors as if they were the corpus.
-jskip="$( "$BIN" "$ROOT" --max-file-size=8K --json --top-k=3 2>/dev/null \
-          | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("skipped_oversize","ABSENT"))' )"
-case "$jskip" in
-    ABSENT ) no "--json at 8K carries no skipped_oversize key (JSON reader gets zero disclosure)" ;;
-    0 ) no "--json at 8K says skipped_oversize=0 — a false zero" ;;
-    * ) ok "--json at 8K discloses skipped_oversize=$jskip" ;;
+"$BIN" "$ROOT" --max-file-size=8K --json --top-k=3 >"$TMP/jlex.json" 2>/dev/null   # status: --json exits 0 on any corpus; the lexical_files key read next is the verdict and ABSENT FAILs
+jlex="$( python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("lexical_files","ABSENT"))' <"$TMP/jlex.json" )"
+case "$jlex" in
+    ABSENT ) no "--json at 8K carries no lexical_files key (JSON reader gets zero disclosure)" ;;
+    0 ) no "--json at 8K says lexical_files=0 — a false zero" ;;
+    * ) ok "--json at 8K discloses lexical_files=$jlex" ;;
 esac
-# absence measured where absence is TRUE (test/fixture) — see §2's note: $ROOT carries three .json past the
-# JSON-lane ceiling, so its default run legitimately discloses skipped_oversize=3 (§B13.1).
 jdef="$( "$BIN" "$ROOT/test/fixture" --json --top-k=3 2>/dev/null \
-         | python3 -c 'import json,sys; d=json.load(sys.stdin); print("present" if "skipped_oversize" in d else "absent")' )"
-[ "$jdef" = "absent" ] && ok "--json on test/fixture omits skipped_oversize (absent = nothing skipped)" \
-                       || no "--json on test/fixture unexpectedly carries skipped_oversize"
-# and the JSON header must carry the JSON-lane drop too — the XML/JSON dialects report ONE population
-jrootskip="$( "$BIN" "$ROOT" --json --top-k=1 2>/dev/null \
-              | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("skipped_oversize","ABSENT"))' )"
-[ "$jrootskip" = "${BIGJSON:-0}" ] \
-    && ok "--json default run on \$ROOT discloses skipped_oversize=$jrootskip, same as XML" \
-    || no "--json default run says skipped_oversize=$jrootskip, XML says ${BIGJSON:-0} — the two dialects disagree about the population"
+         | python3 -c 'import json,sys; d=json.load(sys.stdin); print("present" if ("skipped_oversize" in d or "lexical_files" in d) else "absent")' )"
+[ "$jdef" = "absent" ] && ok "--json on test/fixture omits skipped_oversize/lexical_files (absent = nothing happened)" \
+                       || no "--json on test/fixture unexpectedly carries skipped_oversize/lexical_files"
+# the two dialects report ONE population on the default run
+"$BIN" "$ROOT" --json --top-k=1 >"$TMP/jroot.json" 2>/dev/null   # status: --json exits 0 on any corpus; the lexical_files key read next is the verdict and ABSENT FAILs
+jroot="$( python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("lexical_files","ABSENT"))' <"$TMP/jroot.json" )"
+xroot="$( hdrnum "$TMP/full" lexical_files )"
+[ "$jroot" = "${xroot:-ABSENT}" ] \
+    && ok "--json default run on \$ROOT says lexical_files=$jroot, same as XML" \
+    || no "--json default run says lexical_files=$jroot, XML says ${xroot:-ABSENT} — the two dialects disagree"
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

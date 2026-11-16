@@ -396,8 +396,8 @@ echo "=== the 512 KB ceiling: YAML's own line, deliberately NOT JSON's 256 KB ==
 # ═══════════════════════════════════════════════════════════════════════════
 # .yml wears the same hazard as .json (a large DATA class behind a config extension) so it gets
 # a ceiling — but at 512 KB, because JSON's 256 KB would drop real config (NeMo's 293 KB
-# cicd-main.yml). Both sides pinned: a ~300 KB file (over JSON's line) stays indexed, a ~600 KB
-# file is skipped and COUNTED in skipped_oversize (disclosure, not disappearance).
+# cicd-main.yml). Both sides pinned: a ~300 KB file (over JSON's line) is fully parsed, a ~600 KB
+# file yields bounded keys and is COUNTED in lexical_files=/keys_cut= (disclosure, not disappearance).
 BIGY="$TMP/bigyaml"; mkdir -p "$BIGY"
 python3 - "$BIGY/mid_config.yml" "$BIGY/huge_data.yml" <<'PYEOF'
 import sys
@@ -413,16 +413,26 @@ PYEOF
 MIDSZ="$( wc -c < "$BIGY/mid_config.yml" )"; HUGESZ="$( wc -c < "$BIGY/huge_data.yml" )"
 [ "$MIDSZ" -gt 262144 ] && [ "$MIDSZ" -lt 524288 ] || no "mid fixture ($MIDSZ B) is not between 256 KB and 512 KB (fixture bug)"
 [ "$HUGESZ" -gt 524288 ] || no "huge fixture ($HUGESZ B) is not larger than 512 KB (fixture bug)"
-OBIG="$( $BIN "$BIGY" --no-cache 2>/dev/null )"
-printf '%s' "$OBIG" | grep -q 'mid_config' \
-    && ok "ceiling: a ${MIDSZ}-byte .yml (over JSON's 256 KB line) is still indexed" \
-    || no "ceiling: a ${MIDSZ}-byte .yml was dropped — YAML inherited JSON's 256 KB ceiling"
-printf '%s' "$OBIG" | grep -q 'huge_data' \
-    && no "ceiling: a ${HUGESZ}-byte .yml was indexed — the 512 KB YAML ceiling is missing" \
-    || ok "ceiling: a ${HUGESZ}-byte .yml is not in the map"
-printf '%s' "$OBIG" | grep -q 'skipped_oversize=1' \
-    && ok "ceiling: the skip is COUNTED (header skipped_oversize=1) — disclosure, not disappearance" \
-    || no "ceiling: skipped_oversize=1 absent from the header — the drop is undisclosed"
+# RE-PINNED 2026-11-14 (NO-SKIP-INGEST, owner: "we should not be skipping files"): over the 512 KB line a .yml is no
+# longer dropped — its top-level keys are indexed lexically, the first 256 as symbols, the rest counted as keys_cut=.
+HUGESZ="$( printf "%s" "$HUGESZ" | tr -d " " )"
+SBIG="$( $BIN "$BIGY" --skipped --no-cache 2>/dev/null )"   # status: exits 0 either way; the keys-bounded row and header attributes read below are the verdict
+printf '%s' "$SBIG" | grep -q 'p="mid_config.yml"' \
+    && no "ceiling: the ${MIDSZ}-byte .yml (under 512 KB) got a skipped/lexical row — YAML inherited JSON's 256 KB ceiling" \
+    || ok "ceiling: a ${MIDSZ}-byte .yml (over JSON's 256 KB line) is fully parsed (no row)"
+printf '%s' "$SBIG" | grep -q "<h p=\"huge_data.yml\" why=\"keys-bounded\" bytes=\"${HUGESZ}\" keys_cut=\"17745\"/>" \
+    && ok "ceiling: the ${HUGESZ}-byte .yml is indexed with bounded keys (256 kept, keys_cut=17745 of 18001)" \
+    || { no "ceiling: the ${HUGESZ}-byte .yml has no keys-bounded row with keys_cut=17745"; printf '%s' "$SBIG" | sed 's/<!--.*-->//' | head -c 800; echo; }
+printf '%s' "$SBIG" | grep -q '<lang n="yaml" files="2" symbols="9257"/>' \
+    && ok "ceiling: symbols = 9001 parsed + 256 bounded keys (both files indexed)" \
+    || no "ceiling: yaml census is not files=2 symbols=9257"
+OBIG="$( $BIN "$BIGY" --no-cache --legend=full 2>"$TMP/bigy.err" )"   # status: exits 0 either way; the keys-bounded row and header attributes read below are the verdict
+printf '%s' "$OBIG" | grep -q 'lexical_files=1' && ! printf '%s' "$OBIG" | grep -q 'skipped_oversize=' \
+    && ok "ceiling: map header says lexical_files=1 and drops nothing — disclosure, not disappearance" \
+    || no "ceiling: map header lacks lexical_files=1 or still claims skipped_oversize="
+if printf '%s' "$OBIG" | grep -q 'n="hugemarker"'; then ok "ceiling: the over-ceiling file's first key is a symbol"; else no "ceiling: hugemarker is not a symbol"; fi
+grep -q 'huge_data.yml (.*) exceeds the yaml full-index ceiling 512 KiB; top-level keys indexed lexically, 17745 cut at 256' "$TMP/bigy.err" \
+    && ok "ceiling: stderr warns once, naming the file, ceiling and the keys cut" || { no "ceiling: no yaml ceiling warning on stderr"; cat "$TMP/bigy.err"; }
 
 echo
 if [ "$fail" -eq 0 ]; then echo "yamllangcheck: ALL PASS"; else echo "yamllangcheck: FAILURES"; exit 1; fi

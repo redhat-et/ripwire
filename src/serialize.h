@@ -3657,10 +3657,16 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     // raise. `--max-file-size=8K` dropped ~296 of ~759 files on this repo and files= reported the survivors as
     // if they WERE the corpus. Emitted ONLY when non-zero, per the house rule — absent means nothing was
     // skipped, so a default run over a tree with nothing oversized stays byte-identical.
-    char skippedAttr[ 48 ];  skippedAttr[ 0 ] = '\0';
-    if( !ing.skippedOversize.empty() )
+    // NO-SKIP-INGEST: since 2026-11-14 a size ceiling drops nothing below kHardMaxFileBytes; a file a parse could not or
+    // should not take is read lexically instead, and lexical_files= counts those (keys_cut= the data keys a bounded read
+    // left out). Same absent-when-zero rule, so a tree with no such file keeps its bytes.
+    char skippedAttr[ 112 ];  skippedAttr[ 0 ] = '\0';
     {
-        rw::formatTo( skippedAttr, sizeof( skippedAttr ), " skipped_oversize={}", ing.skippedOversize.size() );
+        const LexicalIndexCounts lexical = lexicalIndexCounts( ing );
+        rw::formatTo( skippedAttr, sizeof( skippedAttr ), "{}{}{}{}{}{}", ing.skippedOversize.empty() ? "" : " skipped_oversize=",
+                      ing.skippedOversize.empty() ? std::string() : std::to_string( ing.skippedOversize.size() ),
+                      lexical.files == 0 ? "" : " lexical_files=", lexical.files == 0 ? std::string() : std::to_string( lexical.files ),
+                      lexical.keysCut == 0 ? "" : " keys_cut=", lexical.keysCut == 0 ? std::string() : std::to_string( lexical.keysCut ) );
     }
     // §L1: the LANGUAGES this build could not read at all — buildUnindexedAttr carries the whole rule.
     const std::string unindexedAttr = buildUnindexedAttr( ing.crawlSkips );
@@ -11178,6 +11184,16 @@ inline void writeJsonMapHeader( JsonWriter& w, std::string& esc, const JsonMapHe
     {
         rw::formatTo( hdr, sizeof( hdr ), "\"skipped_oversize\":{},", h.ing.skippedOversize.size() );
         w.write( hdr );
+    }
+    if( const LexicalIndexCounts lexical = lexicalIndexCounts( h.ing ); lexical.files > 0 )   // NO-SKIP-INGEST, the XML twins
+    {
+        rw::formatTo( hdr, sizeof( hdr ), "\"lexical_files\":{},", lexical.files );
+        w.write( hdr );
+        if( lexical.keysCut > 0 )
+        {
+            rw::formatTo( hdr, sizeof( hdr ), "\"keys_cut\":{},", lexical.keysCut );
+            w.write( hdr );
+        }
     }
     w.write( buildMemoryStopAttr( h.ing, true ) );   // #350, JSON lane: empty unless the memory guard stopped the ingest
     w.write( h.memoryPeakJson );   // the overshoot: empty unless the peak went over the limit (read once by the caller)

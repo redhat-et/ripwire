@@ -34,6 +34,10 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-16, TRAIN-1111j (main 08a8493ce + lane parse-budget-det on no-skip-ingest): RE-PINNED with UPDATE_GOLDEN=1 on the
+#   composed tree. Both sides bumped kCacheVersion 51 -> 52 (main: failure-default; the lane: FileHealth indexMode + keysCut), so
+#   the lane's lands as max + 1 = 53; kParserVer: the lane's placeholder 313 lands as 314 (main 309); both mirrored in quality.h.
+#   kQSnapCacheScheme stays 34: no member bumps it. Both sides' log entries are kept below.
 # 2026-11-15, lane land-499-500 fix 1 (CodeRabbit on #668, merged over main d68b57456): RE-PINNED with UPDATE_GOLDEN=1,
 #   kQSnapCacheScheme 33 -> 34 (quality.h's v34 note). rustTestAttributed reads each top-level attribute on a line
 #   (classifyRustAttributeLine, rustAttributeClose: both join the manifest), so the Rust dead set moves; registeredMacroSymbolIds
@@ -64,6 +68,13 @@ PIN="$ROOT/test/qschemetrip.hash"
 #   error-masking failure-default facet (constructCountsBySym through tallyMaskHit).
 #   Also kCacheVersion 51 -> 52 (with quality.h's mirror): the ingest record's construct hits gain the failure-default shape tag
 #   (lintrules.h kConstructShapeTags), so a record an older build wrote, which lacks those hits, is a miss.
+# 2026-11-15, lane parse-budget-det (on no-skip-ingest 506afce6f; PLACEHOLDER, the train renumbers): RE-PINNED with UPDATE_GOLDEN=1.
+#   Watched text: kParserVer 311 -> 313 (the parse budget counts steps, not seconds; backstop cuts get their own index modes),
+#   mirrored in quality.h. kCacheVersion and kQSnapCacheScheme stay: no record changes shape and no watched function moved.
+# 2026-11-14, lane no-skip-ingest merge of main 67b08d46b: RE-PINNED with UPDATE_GOLDEN=1 on the merged tree. Watched text:
+#   kCacheVersion 51 -> 52 (the lane's FileHealth indexMode + keysCut, its placeholder 51, above main's qd-constructs 51) and
+#   kParserVer 309 -> 311 (lexical reads of oversize / over-budget files), mirrored in quality.h. kQSnapCacheScheme stays: the parser
+#   key already keys the qsnap cache on extraction, and no watched function moved.
 # 2026-11-14, TRAIN-1111g (main d624cff5f + lane qd-constructs): RE-PINNED with UPDATE_GOLDEN=1 on the merged tree; both log entries
 #   below are kept (main's entry-ceiling 27 -> 29 and the lane's kCacheVersion 50 -> 51 touch different watched text).
 #   Re-pinned again after lane macro-p0 (kParserVer 307 -> 309, mirrored in quality.h; kQSnapCacheScheme stays: the parser key already

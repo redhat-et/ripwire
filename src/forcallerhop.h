@@ -99,7 +99,8 @@ inline std::vector<NodeId> forCallerHopTargets( const IngestResult& ing, const G
     std::size_t         unproven = 0;
     // the selector the element names (of=, next=) — what `--callers=SELECTOR` resolves: scope::name, the bare name when unscoped
     const std::string   sel      = first.scope.empty() ? first.name : first.scope + "::" + first.name;
-    std::vector<NodeId> matches  = resolveAllByNameQualified( ing, sel, &unproven );
+    // a bundle's copy of the function is no second function: the hop serves the source definition's callers (NOSKIP-BUNDLE-DEMOTE)
+    std::vector<NodeId> matches  = dropSymbolsBesideOthers( ing, resolveAllByNameQualified( ing, sel, &unproven ), bundleCopy );
     if( matches.empty() || unproven != 0 || !crossKindValue( ing, matches ).empty() )
     {
         return {};
