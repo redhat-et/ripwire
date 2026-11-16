@@ -605,8 +605,11 @@ fn real_harness_case() { assert_eq!(api(), 1); }
 EOF
 printf 'register_macros = TYPO_NEVER_USED\n' > "$A14/.ripwire_config"
 commit "$A14" "a Rust test and a typo'd register_macros= name"
-QD14_ERR="$( cd "$A14" && "$BIN" . --quality-delta --no-cache 2>&1 >/dev/null )"
-QD14_TAG="$( cd "$A14" && "$BIN" . --quality-delta --no-cache 2>/dev/null | grep -oE '<quality-delta[^>]*>' )"
+( cd "$A14" && "$BIN" . --quality-delta --no-cache >"$WORK/a14.out" 2>"$WORK/a14.err" )
+rc_qd14=$?
+if [ "$rc_qd14" = 0 ]; then ok "arm14: --quality-delta exits 0 (no row on this fixture gates)"; else no "arm14: --quality-delta exited $rc_qd14, not 0"; fi
+QD14_ERR="$( cat "$WORK/a14.err" )"
+QD14_TAG="$( grep -oE '<quality-delta[^>]*>' "$WORK/a14.out" )"
 printf '%s' "$QD14_TAG" | grep -qE 'register-macro-excluded="[1-9]' \
     && ok "arm14 premise: the Rust test is counted in register-macro-excluded=" \
     || { no "arm14 premise: register-macro-excluded= is zero, so the Rust half did not run"; printf '%s\n' "$QD14_TAG"; }
