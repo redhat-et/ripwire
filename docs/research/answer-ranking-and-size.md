@@ -19,13 +19,17 @@ good. This note collects the candidate levers in one place.
    | rank of the row's file | 1 | 3 |
    | score / head score | 0.95 | 0.76 |
 
-   Proposal: put the print order and the top-10 cut on a key built from these two ranks, with score only as the
-   tiebreak.
+   Candidate rank is the score order, so within one answer this does not reorder anything by itself. What the split
+   shows is that Wrong rows in the top 10 tend to be rows that got there by a lift (the round-robin head, a section)
+   rather than by their own rank. So the lever is the lifts, which is item 2.
 2. **Make the round-robin head conditional.** The head's one-row-per-file lift puts 43 % of the top-10 Wrong items
    there, against 13 % of gold.
    - An ablation (2026-11-08) switched the lift off. It removed 13 in-sample top-10 decoys and lost 0 credited items.
    - On the held-out set it was net +1, so a plain off switch is not the answer.
-   - Proposed rule: lift a file's best row only when that row's own rank is ≤ 8.
+   - Gating the lift alone was tried (2026-11-11) and missed: the freed slots went to the dominant file's next rows,
+     which were Wrong just as often (top-10 Wrong 62→68 items, 1 credited item lost).
+   - Next angle: gate the lift AND choose what fills the slot (a different file, a row with a resolved edge to the
+     head, or no fill at all), emulated offline over stored answers before any code.
 3. **Use a resolved edge to the head as a keep guard.** 26 % of gold rows have a resolved or name-resolved edge to
    the head, against 11 % of Wrong rows. Never demote a row that has one. This is a guard, not a ranking signal.
 4. **Put a one-line direct answer first:** `name — file:line — the relationship to the question`, ahead of every
