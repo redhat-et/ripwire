@@ -315,6 +315,7 @@ FAILFAST = {
     "lintprecisioncheck.sh":    ( "verdict is a TRAILING python3 heredoc; its rc IS the script's",       1 ),
     "mcpattrparitycheck.sh":    ( "python3 heredoc's rc captured into `rc` and re-exited; FORCED by breaking one RENAME entry, rc read, not inferred", 1 ),
     "mcpcontractcheck.sh":      ( "python3 heredoc's rc captured into `rc`, propagated by a brace group", 1 ),
+    "nextaposcheck.sh":         ( "python3 heredoc's rc captured into `rc` and re-exited as 0/1; FORCED on the main binary (19 FAIL lines), rc 1 read, not inferred", 1 ),
     "mcptwinclaimscheck.sh":    ( "python3 heredoc's rc captured into `rc` and re-exited; FORCED on the pre-fix binary (6 checks fail), rc read, not inferred", 1 ),
     "mcpmanifestcheck.sh":       ( "verdict is a TRAILING python3 heredoc (sys.exit); FORCED by appending a bogus routing-sentence pin, rc read, not inferred", 1 ),
     # type3clonecheck.sh was pinned here until 2026-08-11, when its PART 2 (clone grouping + duplication

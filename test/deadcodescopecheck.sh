@@ -246,11 +246,13 @@ fi
 
 # ── A13: with the group and the comments removed, the answer is byte-identical to the pre-group answer ──────────────────────
 # Pinned from the pre-DEAD-CODE-SCOPE main binary (7c851ba77) on this fixture, so CI checks it with no base binary; root= is the fixture.
+# RE-PIN (NEXT-APOS-FINISH, 2026-11-15): the filter next= reads --for='unused functions in …' (was &apos;…&apos;): the one
+# next= escaper leaves ' raw in this "-delimited attribute (nextverb.h appendNextValueXml); written '\'' inside the printf quotes.
 strip(){ python3 -c 'import re,sys; s=sys.stdin.read(); s=re.sub(r"<exported .*?</exported>","",s,flags=re.S); print(re.sub(r"<!--.*?-->","",s,flags=re.S))'; }
 pinned(){ case "$1" in
-  --dead-code=pkg/net.py) printf '%s' '<dead-code schema="ripwire.dead-code/v1" count="0" evidence="internal-linkage+zero-callers" register-macro-excluded="0" filter="pkg/net.py" next="--for=&apos;unused functions in pkg/net.py&apos;" root="@F@" graph_ambiguous="0" graph_unresolved="0" counts_floor="1"></dead-code>' ;;
-  --dead-code=cc/lib.cpp) printf '%s' '<dead-code schema="ripwire.dead-code/v1" count="1" evidence="internal-linkage+zero-callers" register-macro-excluded="0" filter="cc/lib.cpp" next="--for=&apos;unused functions in cc/lib.cpp&apos;" root="@F@" graph_ambiguous="0" graph_unresolved="0" counts_floor="1"><d n="internal_dead" t="fn" p="cc/lib.cpp" l="1"/></dead-code>' ;;
-  --dead-code=web/path.ts) printf '%s' '<dead-code schema="ripwire.dead-code/v1" count="0" evidence="internal-linkage+zero-callers" register-macro-excluded="0" filter="web/path.ts" next="--for=&apos;unused functions in web/path.ts&apos;" root="@F@" graph_ambiguous="0" graph_unresolved="0" counts_floor="1"></dead-code>' ;;
+  --dead-code=pkg/net.py) printf '%s' '<dead-code schema="ripwire.dead-code/v1" count="0" evidence="internal-linkage+zero-callers" register-macro-excluded="0" filter="pkg/net.py" next="--for='\''unused functions in pkg/net.py'\''" root="@F@" graph_ambiguous="0" graph_unresolved="0" counts_floor="1"></dead-code>' ;;
+  --dead-code=cc/lib.cpp) printf '%s' '<dead-code schema="ripwire.dead-code/v1" count="1" evidence="internal-linkage+zero-callers" register-macro-excluded="0" filter="cc/lib.cpp" next="--for='\''unused functions in cc/lib.cpp'\''" root="@F@" graph_ambiguous="0" graph_unresolved="0" counts_floor="1"><d n="internal_dead" t="fn" p="cc/lib.cpp" l="1"/></dead-code>' ;;
+  --dead-code=web/path.ts) printf '%s' '<dead-code schema="ripwire.dead-code/v1" count="0" evidence="internal-linkage+zero-callers" register-macro-excluded="0" filter="web/path.ts" next="--for='\''unused functions in web/path.ts'\''" root="@F@" graph_ambiguous="0" graph_unresolved="0" counts_floor="1"></dead-code>' ;;
   --dead-code) printf '%s' '<dead-code schema="ripwire.dead-code/v1" count="3" evidence="internal-linkage+zero-callers" register-macro-excluded="0" root="@F@" graph_ambiguous="0" graph_unresolved="0" counts_floor="1"><d n="internal_dead" t="fn" p="cc/lib.cpp" l="1"/><d n="lone_static" t="fn" p="cc/only_static.cpp" l="1"/><d n="ov" t="fn" p="cc/over.cpp" l="1"/></dead-code>' ;;
 esac; }
 for args in "--dead-code=pkg/net.py" "--dead-code=cc/lib.cpp" "--dead-code=web/path.ts" "--dead-code"; do

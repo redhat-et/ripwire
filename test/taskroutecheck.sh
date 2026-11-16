@@ -841,7 +841,8 @@ case "$LG" in *--*) no "the legend contains '--' — ill-formed inside an XML co
 # next= (the ranked --for search over the same text, which answers any task) or reason=system-event.
 HA="$( route 'how does hono route a request to a handler' )"
 case "$HA" in
-    *'status="abstain"'*' next="--for=&apos;how does hono route a request to a handler&apos;"'*) ok "HT-a: the hono abstain names --for over the same task as next=";;
+    # RE-PIN (NEXT-APOS-RAW, 2026-11-15): next= reads --for='…' (was &apos;…&apos;); the <run> pins below stay escapeXml's &apos;
+    *'status="abstain"'*' next="--for='\''how does hono route a request to a handler'\''"'*) ok "HT-a: the hono abstain names --for over the same task as next=";;
     *) no "HT-a: the hono abstain should carry next=\"--for='…'\": $HA";;
 esac
 case "$SYS1" in *'status="abstain"'*'reason="system-event"'*) ok "HT-a: a harness event abstains with reason=system-event, not a --for over the event text";;
