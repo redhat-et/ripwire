@@ -1038,10 +1038,12 @@ Discloses: **none**
 
 ### `src/mapinventory.h`
 
-Discloses: `entries_capped`, `names_capped`
+Discloses: `dirs_capped`, `entries_capped`, `names_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
+| `kInventoryCountOnlyCap` | `32` | — | — |
+| `kInventoryDirCap` | `2048` | — | — |
 | `kInventoryEntryCap` | `256` | OUTPUT | — |
 | `kInventoryNameCeiling` | `2000` | OUTPUT | — |
 
@@ -1376,7 +1378,7 @@ Discloses: **none**
 
 ### `src/serialize.h`
 
-Discloses: `capped`, `calls_capped`, `entries_capped`, `files_capped`, `importers_capped`, `inc_capped`, `members_capped`, `names_capped`, `sibs_capped`, `type_capped`
+Discloses: `capped`, `calls_capped`, `dirs_capped`, `entries_capped`, `files_capped`, `importers_capped`, `inc_capped`, `members_capped`, `names_capped`, `sibs_capped`, `type_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |

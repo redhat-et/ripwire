@@ -484,6 +484,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "n",                 "<ls p= n= f=>: n= unshown files under dir p=; f= names its code files, the rest (tests, docs, config, test/doc/example dirs) counted", true, "ls" },
     { "entries_capped",    "inv entries_capped=1 entries_total=N entries_next=: N entries, the first 256 by path shown; entries_next= lists the rest (a superset)", true, "inv" },
     { "names_capped",      "inv names_capped=1 names_total=N names_next=: N unshown code files passed the 2000-name ceiling; later dirs n= only; names_next= lists them (a superset)", true, "inv" },
+    { "dirs_capped",       "inv dirs_capped=1 dirs_total=N dirs_next=: N directories exist; the ls rows naming code files are kept and count-only rows cut to the 32 largest; no file leaves listed=/unlisted=; dirs_next= lists every indexed file (a superset)", true, "inv" },
     { "pr_converged",      "pr_converged=0: iteration cap hit before convergence" },
     // Form-conditional map roots whose clauses (kRankByDisclosure, kChurnRankLegend, --around's seed block) are prose.
     // window= and defs= are ELEMENT-qualified: --hotspots carries window= and --callers defs=, each meaning something else.

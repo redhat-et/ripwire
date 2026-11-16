@@ -702,6 +702,7 @@ for _g in \
     localscountcheck \
     loopconservationcheck \
     lpincheck \
+    lstiercapcheck \
     luacheck \
     luarequirecheck \
     macroedgecheck \
