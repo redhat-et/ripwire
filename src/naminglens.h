@@ -528,7 +528,7 @@ inline bool isPythonDunder( std::string_view name ) noexcept
 }
 
 // local-variable-indexing plan, Phase 2 (docs/LOCALS_INDEXING.md): the four NAME-SHAPE facts
-// checkNameShape computes, as booleans — pure function of (name, lang, toks), no Symbol/RuleSink
+// checkNameShape computes, as booleans (naming-wordy as its word count) — pure function of (name, lang, toks), no Symbol/RuleSink
 // dependency, so it is equally usable for an indexed Symbol OR an un-indexed local variable name. This is
 // the checkNameShapeCore extraction the plan specifies; `reservedForm` disambiguates naming-underscore's
 // TWO message variants (both existing Symbol callers and the new local-scoped caller need it).
@@ -536,11 +536,12 @@ struct NameShapeFacts
 {
     std::size_t wordCount = 0;     // naming-wordy's count: split tokens minus a marker prefix (namingWordCount)
     bool shortName      = false;   // naming-short candidate (1-2 letter alphabetic core)
-    bool wordy           = false;   // naming-wordy candidate (>5 words)
     bool underscoreIssue = false;   // naming-underscore candidate (either sub-case below)
     bool reservedForm    = false;   // TRUE ⇒ underscoreIssue is the C-family reserved-identifier form,
                                     // FALSE ⇒ it is the internal-consecutive-underscores form (message text differs)
     bool caseIssue       = false;   // naming-case candidate (snake_case + camelCase mixed)
+
+    bool wordy() const noexcept { return wordCount > 5; }   // naming-wordy candidate (>5 words)
 };
 
 // naming-wordy counts the WORDS of a name, and a scope or kind MARKER prefix is not one: the `k` of a
@@ -590,9 +591,8 @@ inline NameShapeFacts checkNameShapeCore( std::string_view name, Lang lang, cons
         facts.shortName = allAlpha && core.size() <= 2;
     }
 
-    // naming-wordy — more than 5 words (split tokens, a marker prefix not counted: namingWordCount).
+    // naming-wordy — more than 5 words (split tokens, a marker prefix not counted: namingWordCount; facts.wordy()).
     facts.wordCount = namingWordCount( name, cFamily, toks );
-    facts.wordy     = facts.wordCount > 5;
 
     // naming-underscore — internal consecutive underscores anywhere; C-family reserved forms
     // (leading __ or _Capital). Python dunders and single leading/trailing underscores are idiomatic.
@@ -652,7 +652,7 @@ PROFILE_SCOPE_DESCRIBE( "naminglens/sym: checkNameShape" );
                   s.kind == SymKind::Var ? s.name + " (1-2 letter name for a module/global variable)"
                                          : s.name + " (1-2 letter function name; visible far beyond a 20-line scope)" );
     }
-    if( facts.wordy )
+    if( facts.wordy() )
     {
         sink.add( "naming-wordy", s, s.line, s.name + " (" + std::to_string( facts.wordCount ) + " words in one name)" );
     }
@@ -703,7 +703,7 @@ inline void checkLocalNameShape( const Symbol& enclosingFn, const LocalNameFact&
                   local.name + " (1-2 letter local variable name, nested " + std::to_string( local.declDepth )
                       + " blocks deep in " + enclosingFn.name + ")" );
     }
-    if( facts.wordy )
+    if( facts.wordy() )
     {
         sink.add( "naming-wordy", enclosingFn, local.line,
                   local.name + " (" + std::to_string( facts.wordCount ) + " words in one local variable name, in " + enclosingFn.name + ")" );
