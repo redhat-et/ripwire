@@ -37,7 +37,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 echo "tiebreakcontentcheck: BIN=$BIN"
 fail=0
 checked=0
-ok(){ printf '  PASS  %s\n' "$*"; checked=$(( checked + 1 )); }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; checked=$(( checked + 1 )); return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
