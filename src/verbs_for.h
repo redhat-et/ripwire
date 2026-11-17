@@ -5602,7 +5602,7 @@ inline int runForLensFitted( const MainDispatch& d )
     // the fitted answer still measures the size the budget was fitted against. test/foranswerfirstcheck.sh
     // (R7/R7n) pins both directions.
     std::string out = fit.verdict == rw::ForBudgetFitResult::Verdict::NoRoot ? u.out->bytes : fit.xml;
-    if( !rw::answerfirst::legacyOrderAsked() )
+    if( d.cfg.legendAnswerFirst )
     {
         (void)rw::answerfirst::answerFirst( out );
     }
@@ -5627,7 +5627,7 @@ std::optional<int> runForLens( const MainDispatch& d )
     //
     // A capture that cannot be taken is NOT an error: the answer is written straight through, unpermuted and
     // complete. Only the reordering is missed, so this degrades to 0.6.x behaviour rather than to a failure.
-    if( !rw::answerfirst::legacyOrderAsked() )
+    if( d.cfg.legendAnswerFirst )
     {
         ForPostureRender r = renderForPostureCaptured( d );
         replayForPostureNotices( r );

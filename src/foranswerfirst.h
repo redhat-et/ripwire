@@ -65,15 +65,9 @@ struct Block
     std::string_view name;   // empty for a comment
 };
 
-// The gate-environment opt-out. NEVER a binary knob — the same posture RIPWIRE_LEGEND_PINS=strict holds in
-// legendtarget.sh. test/foranswerfirstcheck.sh needs a legacy baseline to compare against, and a permutation
-// gate with no baseline is a gate that cannot fail.
-[[nodiscard]] inline bool legacyOrderAsked() noexcept
-{
-    const char* v = std::getenv( "RIPWIRE_FOR_LEGACY_ORDER" );
-    return v != nullptr && v[0] == '1' && v[1] == '\0';
-}
-
+// ITEM R IS OPT-IN (--legend=last). The decision belongs to the caller, which holds the Config; this header used to
+// read RIPWIRE_FOR_LEGACY_ORDER itself, which made the ordering depend on the environment rather than on argv and
+// left no user-facing way to ask for it. answerFirst() is now unconditional: call it only when the posture asked.
 // The name characters an XML element name is made of. A set lookup rather than a hand-rolled scan loop:
 // quality-delta scored the loop form as a 79-token duplicate of src/query.h's Eval::ident, which is the
 // repo's identifier scanner and has no business being reimplemented here.
@@ -282,7 +276,6 @@ inline void appendAnswerFirst( std::string_view view, const std::vector<Block>& 
 // a permutation that changed the document's size would be a different change wearing this one's name.
 inline bool answerFirst( std::string& doc )
 {
-    if( legacyOrderAsked() ) { return false; }
     const std::string_view view = doc;
     const std::size_t      openAt = view.find( "<ctx" );
     if( openAt == std::string_view::npos ) { return false; }
