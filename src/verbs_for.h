@@ -3051,12 +3051,12 @@ struct PathGapSides
         if( why == DisclosureWhy::FromUncaptured )
         {
             fromMissing = true;
-            rw::emitTo( stderr, "ripwire: --for: no capture buffer for the path_gap callees side — it is not shown (named in missing=), which is not empty\n" );
+            rw::emitRaw( stderr, "ripwire: --for: no capture buffer for the path_gap callees side — it is not shown (named in missing=), which is not empty\n" );
         }
         else
         {
             toMissing = true;
-            rw::emitTo( stderr, "ripwire: --for: no capture buffer for the path_gap callers side — it is not shown (named in missing=), which is not empty\n" );
+            rw::emitRaw( stderr, "ripwire: --for: no capture buffer for the path_gap callers side — it is not shown (named in missing=), which is not empty\n" );
         }
     }
 };
@@ -5498,10 +5498,10 @@ struct ForBudgetFit
     };
     void disclose( DisclosureWhy why ) noexcept
     {
-        rw::emitTo( stderr, "ripwire: --for: {}\n",
-                    why == DisclosureWhy::NoCapture ? "no buffer for the unbudgeted answer, so the budget re-shaped it (the pre-TOKEN-BUDGET-MONOTONE path)"
-                    : why == DisclosureWhy::NotWhole ? "the unbudgeted answer did not buffer whole, so it is written as it is, not shed to the budget"
-                                                      : "the unbudgeted answer has no root to shed from, so it is written as it is" );
+        // emitRaw (fputs) throws nothing; std::format/std::print could, out of a noexcept function (std::terminate)
+        rw::emitRaw( stderr, why == DisclosureWhy::NoCapture ? "ripwire: --for: no buffer for the unbudgeted answer, so the budget re-shaped it (the pre-TOKEN-BUDGET-MONOTONE path)\n"
+                             : why == DisclosureWhy::NotWhole ? "ripwire: --for: the unbudgeted answer did not buffer whole, so it is written as it is, not shed to the budget\n"
+                                                               : "ripwire: --for: the unbudgeted answer has no root to shed from, so it is written as it is\n" );
     }
 };
 
