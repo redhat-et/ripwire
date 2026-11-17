@@ -300,6 +300,13 @@ inline std::vector<std::string_view> wrapUseWhenBlurbLines( const bool readBefor
         "- Before calling work done: `--quality-delta --legend=compact` (what you made worse), then `--test-gate --legend=compact`.",
         "- Trust notes: counts marked counts_floor are floors, not totals; a zero means \"none found\", never \"none exists\".",
         "- The commands above ask for the compact legend (terse definitions of only the attributes present); add `--legend=full` when a definition's reasoning is needed: a term you do not recognise, a floor or cap you need explained, a map a human will read.",
+        // THE ONE-OFF THAT PAYS ON EVERY LATER CALL. The legend is a near-fixed per-answer cost (531-4,305 B,
+        // median 1,796), so its SHARE grows as answers shrink: 14 % of a --for bundle, 62 % of a --whereis
+        // answer. Measured -30 % over 80 recorded answers, and -31 % over the nine non-for verbs together.
+        // Two lines, because the primer is already the largest thing the SessionStart hook says and the
+        // detail belongs in skills/ripwire-router. "Read it once" is not padding: --legend-have= ASSERTS that
+        // you hold the definitions, and passing it unread points you at definitions you never received.
+        "- Once per session, read the legend dictionary — `ripwire --legend-dict | head -1` names its `dictv=` — then pass `--legend-have=<that dictv>` on every call: answers come back rows-first with no legend prose, nothing dropped (-30% measured). Read it first; the flag asserts you hold it.",
         "Defaults to break (less context is measurably MORE accurate, not just cheaper — code-repair",
         "accuracy fell 29% -> 3% as context grew 32K -> 256K tokens, LongCodeBench):",
         "- Do NOT open a file you have not located first: rank with `--for`/`--grep`, then read what it names.",
