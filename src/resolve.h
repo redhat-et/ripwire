@@ -1507,7 +1507,7 @@ inline RustCrateRoots buildRustCrateRoots( const IngestResult& ing, const HashMa
                 if( has( pre + "lib.rs" ) || has( pre + "main.rs" ) )
                 {
                     rr.dirOf[ f ]  = internDir( d );
-                    rr.isRoot[ f ] = rel == pre + "lib.rs" || rel == pre + "main.rs";
+                    rr.isRoot[ f ] = static_cast<char>( rel == pre + "lib.rs" || rel == pre + "main.rs" );
                     break;
                 }
                 if( d.empty() )
@@ -1550,7 +1550,7 @@ inline RustCrateRoots buildRustCrateRoots( const IngestResult& ing, const HashMa
             if( has( probe + "/main.rs" ) )   // `src/bin/x/main.rs` and its modules
             {
                 rr.dirOf[ f ]  = internDir( probe );
-                rr.isRoot[ f ] = sub.substr( sl + 1 ) == "main.rs";
+                rr.isRoot[ f ] = static_cast<char>( sub.substr( sl + 1 ) == "main.rs" );
             }
             else   // `tests/common/mod.rs`: a module of a root in the directory
             {
