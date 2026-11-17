@@ -771,6 +771,12 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // span holds the full legend comment between <ctx> and its first child, and kLegoLegend spells caveat="…" in it, so
     // a head read fired on every --lego answer (compactlegendcheck (D7) caught it on --lego=Point).
     { "caveat",            "methods=0 caveat=not-extracted-for-lang: no <m> contract read for this language", true, "iface" },
+    // lane lego-unread-for-lang (serialize.h legoImplementorsUnreadAttr, on the <iface> row): the caveat above is about
+    // the <m> ROWS; this one is about the COUNT. An honesty term rather than a per-verb reading, so it reads here beside
+    // counts_floor= — implementors= is not short here, it was never measured, and a reader who has only "a zero is none
+    // found" cannot tell those apart. ELEMENT-qualified for the same reason caveat= is: kLegoLegend spells the attribute
+    // in the head span, so a head read would fire on every --lego answer.
+    { "implementors_unread_for_lang", "implementors_unread_for_lang=LANG: no extends/implements edge is read for LANG at all, so implementors= is ABSENT — unread-for-lang is unknown, not zero (a count beside it is a floor over what did reach the graph)", true, "iface" },
     { "next",              "next=: the one pasteable follow-up", true },
     // L8 (train 29): a capped callers page's next= is the next page, and the uses verb rides beside it here (present-only)
     { "uses_next",         "uses_next=: the uses verb on this selector (the call sites), beside a capped callers page's next=", true },
