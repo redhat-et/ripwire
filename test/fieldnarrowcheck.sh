@@ -22,6 +22,9 @@
 #     (e-py)/(e-ts) arms pin that honesty. Widening receiver capture is an EXTRACTION change (kParserVer)
 #     and deliberately out of this round.
 #
+# Arms (bn1)-(bn9), 2026-11-17 (CPP-BASE-BY-NAME): the base walk binds a base NAME through the deriving class's own scope and
+# includes, and stops at a bodiless declaration — never a namesake's member printed as a resolved callee.
+#
 # The fixture is GENERATED here (self-contained; nothing committed under test/). Line numbers in the
 # fixture are load-bearing: `--callees` rows carry p="file:LINE", which is how a Pool::acquire edge is
 # told apart from the same-named Decoy::acquire decoy.
@@ -1283,6 +1286,192 @@ CASTOUT="$( "$BIN" "$CTRL" --callees=src/user.ts:viaCast --no-cache 2>/dev/null 
 printf '%s' "$CASTOUT" | grep -Eq 'n="([A-Za-z]+\.)?render" p="src/widget.ts:1"' \
     && ok "(kg-ts control) (\"x\" as unknown as Widget).render() keeps Widget.render — a cast ends certainty" \
     || no "(kg-ts control) viaCast lost Widget.render: $( printf '%s' "$CASTOUT" | grep -oE '<callees [^>]*>|<s [^>]*/>' | tr '\n' ' ' )"
+
+# ── (bn) CPP-BASE-BY-NAME (edge audit 2026-11-17, class 1) ─────────────────────────────────────────────────────────────
+# The base walk read the inheritance graph by bare class NAME and the definitions-only method table. Shape (envoy):
+# `Net::Connection : public FilterManager` (Net's), `virtual State state() const = 0;` on Connection, and an unrelated
+# `Http::FilterManager` that DEFINES state(). A `connection_.state()` on a `Net::Connection&` field passed the pure virtual,
+# entered the base by name and printed Http::FilterManager::state as a resolved callee. Every arm is a --callees row read
+# by its p="file:LINE": LINE NUMBERS ARE ASSERTED.
+BN="$TMP/basefix"; mkdir -p "$BN/net" "$BN/http" "$BN/twin"
+cat >"$BN/net/filter.h" <<'EOF'
+#pragma once
+namespace Net {
+class Root2 {
+public:
+  void close() {}
+};
+class FilterManager : public Root2 {
+public:
+  virtual ~FilterManager() = default;
+  void open() {}
+  void flush() {}
+};
+}
+EOF
+cat >"$BN/net/connection.h" <<'EOF'
+#pragma once
+#include "net/filter.h"
+namespace Net {
+class Connection : public FilterManager {
+public:
+  enum class State { Open, Closed };
+  virtual State state() const = 0;
+  virtual void flush() = 0;
+  bool ready() { reset(); return state() == State::Open; }
+};
+class ConnectionImpl : public Connection {
+public:
+  State state() const override { return State::Open; }
+  void flush() override {}
+};
+class QuicConnection : public Connection {
+public:
+  State state() const override { return State::Closed; }
+  void flush() override {}
+};
+}
+EOF
+cat >"$BN/http/filter_manager.h" <<'EOF'
+#pragma once
+namespace Http {
+struct FmState { int n; };
+int fmVersion();
+class HttpRoot {
+public:
+  void ping() {}
+};
+class FilterManager : public HttpRoot {
+public:
+  FmState& state() { return state_; }
+  void reset() {}
+private:
+  FmState state_;
+};
+}
+EOF
+cat >"$BN/http/codec.h" <<'EOF'
+#pragma once
+#include "net/connection.h"
+namespace Http {
+class Codec {
+public:
+  explicit Codec(Net::Connection& c) : connection_(c) {}
+  bool check();
+  void doReset();
+  void doPing();
+  void doOpen();
+  void doFlush();
+  void doClose();
+private:
+  Net::Connection& connection_;
+};
+}
+EOF
+cat >"$BN/http/codec.cc" <<'EOF'
+#include "http/codec.h"
+namespace Http {
+bool Codec::check() { return connection_.state() != Net::Connection::State::Open; }
+void Codec::doReset() { connection_.reset(); }
+void Codec::doPing() { connection_.ping(); }
+void Codec::doOpen() { connection_.open(); }
+void Codec::doFlush() { connection_.flush(); }
+void Codec::doClose() { connection_.close(); }
+}
+EOF
+cat >"$BN/http/upstream.h" <<'EOF'
+#pragma once
+#include "net/filter.h"
+#include "http/filter_manager.h"
+namespace Router {
+class Upstream : public Http::FilterManager {
+public:
+  bool aborted() { return state().n > 0; }
+};
+}
+EOF
+cat >"$BN/twin/a.h" <<'EOF'
+#pragma once
+namespace A {
+class Shared {
+public:
+  void tick() {}
+};
+}
+EOF
+cat >"$BN/twin/b.h" <<'EOF'
+#pragma once
+namespace B {
+class Shared {
+public:
+  void tock() {}
+};
+}
+EOF
+cat >"$BN/twin/twin.h" <<'EOF'
+#pragma once
+#include "twin/a.h"
+#include "twin/b.h"
+namespace B {
+class Twin : public Shared {
+};
+class Holder {
+public:
+  void go() { t_.tick(); }
+private:
+  Twin t_;
+};
+}
+EOF
+bnrows(){ "$BIN" "$BN" --callees="$1" --no-cache 2>/dev/null | grep -oE '<callees [^>]*>|<s [^>]*/>|<dc [^>]*/>' | tr '\n' ' '; }
+# a row naming callee $2 that is neither hedged (via=) nor a decline: what an agent reads as a fact
+bnfact(){ printf '%s' "$1" | grep -oE '<s [^>]*/>' | grep -E "n=\"([A-Za-z0-9_]+::)?$2\"" | grep -v ' via="'; }
+# NEGATIVE arm: the answer must exist and mention the call (a row or a decline of that name), and no fact row may name $3
+bnneg(){   # label, caller, forbidden n= (regex), callee name
+    local out; out="$( bnrows "$2" )"
+    if ! printf '%s' "$out" | grep -q '<callees ' || ! printf '%s' "$out" | grep -Eq "n=\"([A-Za-z0-9_]+::)?$4\""; then
+        no "$1 — premise: --callees=$2 shows no row and no decline for $4 (the arm saw nothing): $out"; return
+    fi
+    if printf '%s' "$out" | grep -oE '<s [^>]*/>' | grep -E "n=\"$3\"" | grep -qv ' via="'; then
+        no "$1 — $2 lists $3 as a RESOLVED callee: $out"
+    else
+        ok "$1"
+    fi
+}
+bnpos(){   # label, caller, exact resolved row fragment
+    local out; out="$( bnrows "$2" )"
+    if printf '%s' "$out" | grep -qF "$3"; then
+        ok "$1"
+    else
+        no "$1 — $2 lost the resolved row [$3]: $out"
+    fi
+}
+# (bn1) the audit's site: the pure virtual on Connection ends the lookup; Http::FilterManager::state is no callee. Two
+# implementors: the call declines with the interface gate, naming them.
+CHK="$( bnrows Codec::check )"
+bnneg "(bn1) connection_.state() on a Net::Connection& field is not Http::FilterManager::state (envoy: 36 callers)" Codec::check 'FilterManager::state' state
+printf '%s' "$CHK" | grep -Eq '<dc n="state"[^>]* cands="2"[^>]* gate="iface"' \
+    && ok "(bn1) … it declines to its two implementors (gate=\"iface\")" \
+    || no "(bn1) connection_.state() should decline with gate=\"iface\" over ConnectionImpl/QuicConnection: $CHK"
+# (bn2) no declaration anywhere on the Net side: the base NAMED FilterManager is Net's (the clause sits in net/connection.h,
+# which includes net/filter.h and nothing of http/), so Http::FilterManager::reset is not reached through it
+bnneg "(bn2) a base name binds through the deriving class's includes: Http::FilterManager::reset is not Net::Connection's" Codec::doReset 'FilterManager::reset' reset
+# (bn3) … and neither is what the namesake itself inherits
+bnneg "(bn3) the namesake's own base is not walked: HttpRoot::ping is not Net::Connection's" Codec::doPing 'HttpRoot::ping' ping
+# (bn4) control: the base the clause does name still answers, resolved
+bnpos "(bn4) control: Net::FilterManager::open still resolves through the bound base" Codec::doOpen '<s t="method" n="FilterManager::open" p="net/filter.h:10"/>'
+# (bn5) a pure re-declaration hides the base's body: Connection declares flush() = 0 over FilterManager::flush() {}
+bnneg "(bn5) a pure virtual re-declaration hides the base body: FilterManager::flush is not the callee" Codec::doFlush 'FilterManager::flush' flush
+# (bn6) control: a base name only one class has walks as before, two levels up
+bnpos "(bn6) control: Root2::close (a unique base name, two levels up) still resolves" Codec::doClose '<s t="method" n="Root2::close" p="net/filter.h:5"/>'
+# (bn7) the same walk from inside the class (a bare call in a member function): Rule 1's base walk and the ladder's cone proof
+bnneg "(bn7) bare state() inside Net::Connection is not Http::FilterManager::state" Connection::ready 'FilterManager::state' state
+bnneg "(bn7) bare reset() inside Net::Connection is not Http::FilterManager::reset" Connection::ready 'FilterManager::reset' reset
+# (bn8) control: a QUALIFIED clause (`: public Http::FilterManager`) in a file that includes both headers binds by its
+# qualifier — the candidate whose file defines things in namespace Http
+bnpos "(bn8) control: \`: public Http::FilterManager\` binds by the written qualifier" Upstream::aborted '<s t="method" n="FilterManager::state" p="http/filter_manager.h:11"/>'
+# (bn9) a base nothing can bind (both namesakes directly included, a bare clause, no namespace evidence): hedged, never a fact
+bnneg "(bn9) an unbindable base name is hedged, never resolved: Shared::tick" Holder::go 'Shared::tick' tick
 
 # ── (i) determinism — narrowed candidate order must be byte-stable run-to-run ──
 "$BIN" "$FIX" --no-cache >"$TMP/m1" 2>/dev/null
