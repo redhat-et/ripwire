@@ -30,12 +30,15 @@ OUT="$TMP/out.txt"; OUT2="$TMP/out2.txt"
 # #663: EVERY BINARY RUN STATES ITS WALL TIME, the gate's running total and the load beside it. The 2026-11-15 nightly killed
 # this gate at its 1200 s budget inside `--doctor` with no other number to go on; --doctor takes ~3 s, the src/ evals
 # take the rest, and on the macOS Release leg this gate had already measured 866-1148 s on 11-11..11-14. A timeout now names
-# the step that ate the budget (the last INFO line is where the killed step started). fd 3 is the gate's own stdout, so the
+# the step that ate the budget (its INFO start line has no INFO time line after it). fd 3 is the gate's own stdout, so the
 # line survives the step's redirection.
 exec 3>&1
 GATE_T0=$SECONDS
 timed(){
     local label="$1" t0=$SECONDS rc; shift
+    # CR676: the start line goes out BEFORE the step, so a step the runner kills still names itself (the completion line
+    # below never prints then); the last "start" line with no matching "time" line is the step that ate the budget.
+    printf '  INFO  start %s (gate %ss)\n' "$label" "$(( SECONDS - GATE_T0 ))" >&3
     "$@"; rc=$?
     printf '  INFO  time %s: %ss (gate %ss, load %s)\n' "$label" "$(( SECONDS - t0 ))" "$(( SECONDS - GATE_T0 ))" \
         "$( uptime | sed 's/.*load average[s]*: *//' )" >&3
