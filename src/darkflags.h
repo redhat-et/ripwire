@@ -1747,15 +1747,19 @@ inline bool shellSeparator( char c, std::size_t col, std::uint32_t lineNo, Shell
 {
     ShellScan::Frame& f = st.frames.back();
     if( c == '(' && f.parens > 0 ) { ++f.parens; }
-    if( c == ')' && f.parens > 0 && --f.parens == 0 && st.frames.size() > 1 )
+    if( c == ')' && f.parens > 0 )
     {
-        shellCommitPending( st, f, fh, lineNo, col );
-        if( f.isSubshell )
+        --f.parens;
+        if( f.parens == 0 && st.frames.size() > 1 )
         {
-            shellCloseSubshell( f, fh, lineNo, col );
+            shellCommitPending( st, f, fh, lineNo, col );
+            if( f.isSubshell )
+            {
+                shellCloseSubshell( f, fh, lineNo, col );
+            }
+            st.frames.pop_back();
+            return true;
         }
-        st.frames.pop_back();
-        return true;
     }
     f.atWordStart = true;
     if( f.isDblTest )

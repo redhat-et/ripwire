@@ -3521,8 +3521,9 @@ inline std::string_view lineAtNumber( const std::string& text, const std::vector
 inline bool opensBlockAbove( const std::string& text, const std::vector<std::size_t>& starts, std::uint32_t l, std::uint32_t first, std::span<const std::string_view> words, bool aligned )
 {
     const std::size_t in = lintdetail::indentOf( lineAtNumber( text, starts, l ) );
-    for( std::uint32_t k = l; k-- > first && k > 0; )
+    for( std::uint32_t k = l; k > first && k > 1; )   // k steps down first: lines l-1 down to first, never line 0
     {
+        --k;
         const std::string_view line = lineAtNumber( text, starts, k );
         const std::string_view t    = trimWs( line );
         if( t.empty() )
