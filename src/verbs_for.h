@@ -5506,9 +5506,18 @@ struct ForBudgetFit
     void disclose( DisclosureWhy why ) noexcept
     {
         // emitRaw (fputs) throws nothing; std::format/std::print could, out of a noexcept function (std::terminate)
-        rw::emitRaw( stderr, why == DisclosureWhy::NoCapture ? "ripwire: --for: no buffer for the unbudgeted answer, so the budget re-shaped it (the pre-TOKEN-BUDGET-MONOTONE path)\n"
-                             : why == DisclosureWhy::NotWhole ? "ripwire: --for: the unbudgeted answer did not buffer whole, so it is written as it is, not shed to the budget\n"
-                                                               : "ripwire: --for: the unbudgeted answer has no root to shed from, so it is written as it is\n" );
+        switch( why )
+        {
+            case DisclosureWhy::NoCapture:
+                rw::emitRaw( stderr, "ripwire: --for: no buffer for the unbudgeted answer, so the budget re-shaped it (the pre-TOKEN-BUDGET-MONOTONE path)\n" );
+                return;
+            case DisclosureWhy::NotWhole:
+                rw::emitRaw( stderr, "ripwire: --for: the unbudgeted answer did not buffer whole, so it is written as it is, not shed to the budget\n" );
+                return;
+            case DisclosureWhy::NoRoot:
+                rw::emitRaw( stderr, "ripwire: --for: the unbudgeted answer has no root to shed from, so it is written as it is\n" );
+                return;
+        }
     }
 };
 
