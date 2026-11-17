@@ -206,13 +206,14 @@ legend inline.
 ### On the CLI, say which dictionary you hold: `--legend-have=DICTV`
 
 The CLI has no session, so it cannot know you were already sent a definition — and output that depended on
-whether an earlier *run* happened would not be reproducible. So you tell it. Read the version once:
+whether an earlier *run* happened would not be reproducible. So you tell it. Read the dictionary once — the
+whole of it, about 130 KB, because the flag asserts you hold every definition and not just their version:
 
 ```
-ripwire --legend-dict | head -1        # the dictv= heading names the version
+ripwire --legend-dict        # line 1 names dictv=; every line after it is a definition that value stands for
 ```
 
-then pass it on every call: `ripwire ROOT --callers=SYM --legend-have=<dictv>`. Each answer then comes back
+then pass that `dictv=` on every call: `ripwire ROOT --callers=SYM --legend-have=<dictv>`. Each answer then comes back
 with its root unchanged, no legend prose, and a closing `<about legend="ref" dict= dictv=/>` that points at the legend.
 
 **Why it is worth a flag.** The legend is a near-FIXED cost per answer (measured 531–4,305 B, median 1,796),
@@ -223,6 +224,12 @@ attribute stays on the root.
 
 This matters most when you ROUTE to a cheaper verb, because that is where the fixed cost dominates: going
 from `--for` to `--whereis` saves ~20x today and ~45x with the handshake on.
+
+**What it costs, plainly.** Reading the dictionary is the price, and it is not small: measured over 453 answers
+the handshake saves 896 B per call against a 126,314 B dictionary, so it takes **about 140 calls to repay**.
+On a short session pass no `--legend-have=` at all; the default answer defines what it carries. Reading only
+line 1 gives you a value and none of the definitions it stands for, and after a context compaction the lines
+are gone: read them again or stop passing the flag.
 
 Two refusals, both deliberate: a version that is not this binary's is refused (you would be pointed at
 definitions you do not hold — run `--legend-dict` again after upgrading), and it cannot combine with

@@ -4628,7 +4628,7 @@ _The session legend dictionary the MCP server serves as ripwire://legend-dict/fu
 
 ```
 $ ./build/ripwire . --legend-dict
-ripwire legend dictionary ripwire.dict/v1 dictv=df790abc866edd5b entries=1130
+ripwire legend dictionary ripwire.dict/v1 dictv=cf491fcb08dfcb9a entries=1149
 <about legend="ref" dict= dictv=>: the answer's rows come first; its root keeps only task= changed= from= to=, and this LAST child carries every other root attribute unchanged (schema= included); legend="ref": a definition is sent once per session (this dictionary's core, or the first answer that ne … [line truncated: 83 more bytes on this line]
 schema=ripwire.KEY/v1: the line ripwire.KEY/v1 below reads the answer's rows
 window: shown= total= capped= has_more= next_offset= offset= limit= page a list (capped=1 cut; next_offset= pastes as offset=)
@@ -4649,9 +4649,9 @@ ripwire.pack-top-n/v1 <ctx>: the ranked map plus <src p=> bodies of the top-N sy
 
 ### `--legend-have=DICTV`
 
-**Answers:** you already hold that legend dictionary (--legend-dict prints its dictv=), so this answer takes the ref posture: no legend prose, a closing <about legend="ref" dict= dictv=/> pointing at it, and the root and rows unchanged -- no fact is dropped or moved.
+**Answers:** you HOLD that legend dictionary: every line `ripwire --legend-dict` prints, read by you (about 130 KB;
 
-Measured -30.4 % over 80 recorded answers (-8 % to -57 % by verb). A version that is not this binary's is REFUSED, naming both.
+its line 1 names dictv=). So this answer takes the ref posture: no legend prose, a closing <about legend="ref" dict= dictv=/> pointing at it, and the root and rows unchanged -- no fact is dropped or moved. The flag is an ASSERTION: a dictv= passed without the lines behind it leaves every dropped definition unread. Reading them takes on the order of 140 calls to repay, so on a short session pass nothing. Measured -30.4 % over 80 recorded answers (-8 % to -57 % by verb). A version that is not this binary's is REFUSED, naming both.
 
 **Caveats (stated by the binary):**
 

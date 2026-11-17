@@ -97,23 +97,23 @@ The other exceptions are not a choice — **the binary refuses `--legend=compact
 
 ### Hold the dictionary once, then stop paying for it: `--legend-have=DICTV`
 
-**This is the single cheapest token win available to you, and it is one extra call per session.**
+**This is a long-session trade, not a free win: one read of about 130 KB (roughly 33K tokens), repaid at about 0.9 KB per call.** Measured over 453 answers of 12 verbs on 5 corpora, the handshake saves 896 B per call against a 126,314 B dictionary — **about 140 calls to break even**. On a session of a few dozen ripwire calls, pass nothing: the default answer already defines only what it carries.
 
 The legend is a near-FIXED cost per answer — measured 531–4,305 B, median 1,796 — so the SHORTER the answer, the bigger its share: 14 % of a `--for` bundle but **62 % of a `--whereis` answer**. Paying it on every call re-reads definitions you already have.
 
-Read the dictionary once, at the start of your session:
+If the session is long enough to repay it, read the dictionary once — **all of it**, into your context:
 
 ```bash
-ripwire --legend-dict | head -1
+ripwire --legend-dict
 ```
 
-That line names the version as `dictv=…`. Pass it on every call after that — `ripwire ROOT --callers=SYM --legend-have=<the dictv>` — and each answer comes back rows-first, with the root attributes on a trailing `<about legend="ref" dict= dictv=/>` and no legend prose.
+Its first line names the version as `dictv=…`; the lines after it are the definitions that value stands for. Reading only the first line gives you a value (78 B) and none of what it asserts. Pass the value on every call after that — `ripwire ROOT --callers=SYM --legend-have=<the dictv>` — and each answer comes back rows-first, with the root attributes on a trailing `<about legend="ref" dict= dictv=/>` and no legend prose.
 
 **Measured over 80 recorded answers: −30 % overall** — `--dead-code` −57 %, `--grep` −50 %, `--callees` −44 %, `--path` −32 %, `--callers` −27 %, `--impact` −26 %. On the nine non-`--for` verbs together, 361,038 B becomes 248,565 B: **a 31 % cut**. Nothing is dropped — every row and every root attribute is preserved, just moved.
 
 **It pays most exactly where you route.** The fixed cost dominates the cheap verbs, so going `--for` → `--whereis` saves ~20× today and **~45×** with the handshake on.
 
-**Read the dictionary first — the flag is an assertion, not a switch.** `--legend-have=` tells the binary *you already hold these definitions*. Passing it without having read `--legend-dict` points you at definitions you never received, and the answer will be correct while you are unable to interpret it. The CLI cannot check this for you: it has no session, and an answer that depended on whether an earlier *run* happened would not be reproducible. That is why you say it rather than the tool guessing.
+**Read the dictionary first — the flag is an assertion, not a switch.** `--legend-have=` tells the binary *you already hold these definitions*. Passing it without having read every line `--legend-dict` printed points you at definitions you never received, and the answer will be correct while you are unable to interpret it. If your context was compacted and the lines are gone, read them again or stop passing the flag. The CLI cannot check this for you: it has no session, and an answer that depended on whether an earlier *run* happened would not be reproducible. That is why you say it rather than the tool guessing.
 
 Two refusals are deliberate: a `dictv` that is not this binary's is refused naming both versions (you would be pointed at definitions you do not hold), and an empty `--legend-have=` is refused rather than ignored (it is usually a shell variable that expanded to nothing, and ignoring it would serve a full-price answer while you believed it was reduced).
 

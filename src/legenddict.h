@@ -7,8 +7,9 @@
 //
 // WHAT "SERVED" MEANS, and it is the whole honesty argument. A definition is an ENTRY of this dictionary: the ref-posture
 // core (below), one purpose line per compact schema (compactlegend.h kCompactLegendSpecs), one reading per completeness
-// term (kCompactCompletenessTerms), and the MCP `for` dialect's fixed clauses (graphlegend.h, lexical.h, forpage.h,
-// serialize.h — named constants, so these are the very bytes the headers append). An entry is served in THIS process
+// term (kCompactCompletenessTerms), the MCP `for` dialect's fixed clauses (graphlegend.h, lexical.h, forpage.h,
+// serialize.h — named constants, so these are the very bytes the headers append), and the readings the compact composer
+// keys on a NAME rather than an attribute (kNameReadingEntries: the module-scope owner). An entry is served in THIS process
 // once its bytes went out verbatim: the core when the client reads ripwire://legend-dict (mcp.h) or when the session's
 // first ref answer carries it, every other entry the first time an answer carries it. The session starts in the inline
 // posture and switches to ref when the core was read or — the MCP stdio default since the lean-answers lane — once its
@@ -111,14 +112,28 @@ inline constexpr std::string_view kForClauseEntries[] =
     kForAtStampProse,
 };
 
+// The readings the compact composer keys on a NAME in the payload, not on an attribute, and so writes itself rather than
+// from a term row (compactlegend.h compactLegendText): today the module-scope owner's alone. They are entries like any
+// other. Until 2026-11-17 this one was not: the composer wrote it, reduceCompactLegend dropped the whole legend, and the
+// dictionary the trailing pointer names held no line for it — a reader with all 1,148 entries had no definition of the
+// <file-scope> row in front of it (25 of 239 answers measured on three corpora, every one that carried the row).
+// LAST in the id space, so no existing entry id moves.
+inline constexpr std::string_view kNameReadingEntries[] =
+{
+    kCompactModScopeReading,
+};
+
 inline constexpr std::size_t kCoreCount     = std::size( kCoreEntries );
 inline constexpr std::size_t kPurposeCount  = std::size( kCompactLegendSpecs );
 inline constexpr std::size_t kTermCount     = kCompactReadingCount;   // BOTH reading tables, in compactlegend.h's joint order
 inline constexpr std::size_t kForCount      = std::size( kForClauseEntries );
 inline constexpr std::size_t kPurposeBase   = kCoreCount;
 inline constexpr std::size_t kTermBase      = kPurposeBase + kPurposeCount;
+inline constexpr std::size_t kNameCount     = std::size( kNameReadingEntries );
 inline constexpr std::size_t kForBase       = kTermBase + kTermCount;
-inline constexpr std::size_t kEntryCount    = kForBase + kForCount;
+inline constexpr std::size_t kNameBase      = kForBase + kForCount;
+inline constexpr std::size_t kEntryCount    = kNameBase + kNameCount;
+inline constexpr std::size_t kModScopeEntryId = kNameBase;   // kNameReadingEntries[ 0 ]
 
 // The bytes an answer carries for entry `id` (the purpose line WITHOUT its schema label — the compact legend spells the
 // label in its opener; a term reading; a `for` clause with its leading punctuation).
@@ -128,11 +143,12 @@ inline std::string_view entryBody( std::size_t id ) noexcept
     if( id < kPurposeBase ) { return kCoreEntries[ id ]; }
     if( id < kTermBase )    { return kCompactLegendSpecs[ id - kPurposeBase ].purpose; }
     if( id < kForBase )     { return compactReading( id - kTermBase ).reading; }
-    return kForClauseEntries[ id - kForBase ];
+    if( id < kNameBase )    { return kForClauseEntries[ id - kForBase ]; }
+    return kNameReadingEntries[ id - kNameBase ];
 }
 
 // The entry's line in the dictionary text: purpose lines gain their schema label, `for` clauses lose their leading
-// punctuation and gain a "for:" label.
+// punctuation and gain a "for:" label; core, term and name readings are their own line.
 inline std::string entryLine( std::size_t id )
 {
     EXPECTS( id < kEntryCount );
@@ -141,7 +157,7 @@ inline std::string entryLine( std::size_t id )
         const CompactLegendSpec& s = kCompactLegendSpecs[ id - kPurposeBase ];
         return "ripwire." + std::string( s.key ) + "/v1 <" + std::string( s.rootTag ) + ">: " + std::string( s.purpose );
     }
-    if( id >= kForBase )
+    if( id >= kForBase && id < kNameBase )
     {
         std::string_view body = entryBody( id );
         while( !body.empty() && ( body.front() == ' ' || body.front() == ';' || body.front() == ':' || body.front() == '[' ) )
@@ -635,6 +651,33 @@ inline bool reduceCompactLegend( std::string_view comment, std::string_view view
     for( const std::uint16_t t : compactPresentTerms( docHead, view, s.spec->key ) )
     {
         ids.push_back( kTermBase + t );
+    }
+    if( view.find( kModScopeEscapedName ) != std::string_view::npos )   // compactLegendText's own scan, on the same document
+    {
+        ids.push_back( kModScopeEntryId );   // the composer's last clause, so the last id: `kept` reads in legend order
+    }
+    // EVERY BYTE DROPPED IS AN ENTRY, checked and not assumed. The legend is rebuilt a second time from `ids` alone plus
+    // the two clauses the core holds generically (window, sub-caps). The check above proves the comment is the composer's
+    // text; this one proves the composer wrote nothing this function has no id for — which is exactly what the
+    // module-scope reading was. A clause appended to compactLegendText without an entry now keeps its answer inline,
+    // disclosed, instead of vanishing from an answer whose pointer cannot return it.
+    std::string fromEntries = compactLegendOpener( *s.spec );
+    fromEntries.append( entryBody( ids.front() ) );   // the purpose, then the window and sub-cap clauses it is followed by
+    fromEntries += '.';
+    fromEntries += compactWindowClause( docHead, view );
+    fromEntries += compactSubcapClause( view );
+    for( std::size_t k = 1; k < ids.size(); ++k )
+    {
+        fromEntries += ' ';
+        fromEntries.append( entryBody( ids[ k ] ) );
+        fromEntries += '.';
+    }
+    fromEntries += " -->";
+    if( comment != fromEntries )
+    {
+        DISCLOSE( Diagnostics::answerUnchanged, "ref posture: the inline answer is served whole, every row and attribute unchanged",
+                  "legenddict: the compact legend carries a clause that is no dictionary entry — dropping it would leave it defined nowhere" );
+        return false;
     }
     std::string kept;
     for( const std::size_t id : ids )
