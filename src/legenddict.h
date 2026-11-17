@@ -849,6 +849,106 @@ inline RefOutcome applyRefPosture( std::string& doc, LegendSession& session )
     return RefOutcome::Ref;
 }
 
+// ITEM D — THE DICT POSTURE, which is the CLI DEFAULT (docs/EVALS.md amendment 4, owner decision 2026-11-17).
+//
+// It is the ref posture's FIRST half and not its second. Both drop the prose legend the dictionary holds; only the ref
+// posture goes on to MOVE the root's non-identity attributes onto a trailing <about>, and that move is the whole of the
+// compatibility difference — a consumer reading <r est_tokens=> keeps working here and breaks there. So this walks the
+// document linearly and rewrites exactly two things: head comments the dictionary covers vanish IN PLACE, and the root
+// open tag gains the three pointer attributes. Everything else — rows, CDATA, data comments, every pre-existing root
+// attribute, their order — is copied byte for byte.
+//
+// Why the comments are classified by RECOMPUTATION and never by how they begin: measured across 24 verbs before this
+// was written, 20 head comments open `<!-- ripwire ` and are schema prose, but at least seven more are legend content
+// that does not (`<!-- root= is the crawl root…`, three `t=` term rows, `demote:`, `syms:`, `extent_suspect_syms=`).
+// A prefix rule leaves all seven in a posture whose name says the prose is gone. reduceHead already identifies the
+// legend the right way, so it does the work here too — with an all-served session, which is exactly a reader holding
+// the dictionary the pointer names.
+inline RefOutcome applyDictPosture( std::string& doc )
+{
+    const std::string_view                   view  = doc;
+    const std::optional<detail::RefShape>    shape = detail::inferRefShape( view );
+    if( !shape )
+    {
+        return RefOutcome::NotApplicable;   // no XML root, or a legend family this dictionary does not hold: unchanged
+    }
+    LegendSession session;
+    session.serveAll();
+    const std::optional<detail::HeadReduction> head = detail::reduceHead( view, *shape, session );
+    if( !head )
+    {
+        return RefOutcome::NotApplicable;   // reduceHead disclosed why; the inline answer is correct and complete
+    }
+    // The reduced text of each head comment, in document order: empty where the dictionary covered the whole comment.
+    // reduceHead returns residual as a flat list, so it is re-walked here to keep each survivor WHERE IT WAS; moving a
+    // data comment to the tail would be a change this posture does not claim to make.
+    std::vector<std::string> replacement;
+    {
+        const std::string compactOpener = shape->spec != nullptr ? compactLegendOpener( *shape->spec ) : std::string();
+        std::vector<std::size_t> forOrder;
+        if( shape->isFor )
+        {
+            for( std::size_t k = 0; k < kForCount; ++k ) { forOrder.push_back( kForBase + k ); }
+            for( const std::uint16_t t : compactPresentTerms( compactDocHead( view, shape->root ), view ) ) { forOrder.push_back( kTermBase + t ); }
+            std::sort( forOrder.begin(), forOrder.end(), []( std::size_t a, std::size_t b )
+                       { return entryBody( a ).size() != entryBody( b ).size() ? entryBody( a ).size() > entryBody( b ).size() : a < b; } );
+        }
+        for( const detail::Span& c : shape->head )
+        {
+            const std::string_view comment = view.substr( c.begin, c.end - c.begin );
+            detail::HeadReduction  one;
+            if( shape->spec != nullptr && comment.starts_with( compactOpener ) )
+            {
+                replacement.emplace_back();   // the compact legend, whole: the dictionary holds every clause of it
+                continue;
+            }
+            if( !detail::reduceOtherComment( comment, *shape, forOrder, session, one ) )
+            {
+                return RefOutcome::NotApplicable;
+            }
+            replacement.push_back( one.residual.empty() ? std::string() : one.residual.front() );
+        }
+    }
+    std::string out;
+    out.reserve( doc.size() );
+    std::size_t copied = 0;
+    for( std::size_t i = 0; i < shape->head.size(); ++i )
+    {
+        const detail::Span& c = shape->head[ i ];
+        out.append( view.substr( copied, c.begin - copied ) );
+        out.append( replacement[ i ] );
+        copied = c.end;
+    }
+    out.append( view.substr( copied ) );
+    // THE POINTER, appended to the root open tag so no existing attribute moves. The tag is found again in the rewritten
+    // document because dropping a comment BEFORE the root shifts every later offset — reusing shape->root here would
+    // splice into the middle of a row.
+    const CompactRootInfo root = findCompactRoot( out );
+    if( root.tag.empty() || root.openEnd < 2 || root.openEnd > out.size() )
+    {
+        DISCLOSE( Diagnostics::answerUnchanged, "dict posture: the inline answer is served whole, every row and attribute unchanged",
+                  "legenddict: the root could not be located after the legend was dropped — nothing is spliced into an answer whose shape is unclear" );
+        doc.assign( view );
+        return RefOutcome::NotApplicable;
+    }
+    const bool        selfClosing = out.compare( root.openEnd - 2, 2, "/>" ) == 0;
+    const std::size_t at          = root.openEnd - ( selfClosing ? 2 : 1 );
+    const std::string pointer     = " legend=\"dict\" dict=\"ripwire --legend-dict\" dictv=\"" + dictionaryVersion() + "\"";
+    out.insert( at, pointer );
+    // est_tokens= PRICES WHAT WAS EMITTED (amendment 4a). Held byte-identical it would overstate every answer by the
+    // prose just removed — an agent budgeting against it would be over-charged on every call — so it is the ONE
+    // pre-existing attribute this posture changes. Both places it can ride are repriced, each from its OWN value, as
+    // the compact dialect does: the root open tag, and the head data comment that carries it alone under order=stable.
+    // Spans are taken AFTER the insert, because the insert moved every offset past the root's name.
+    const std::size_t fullBytes      = doc.size();
+    const std::size_t deliveredBytes = out.size();
+    const std::size_t rootOpenEnd    = root.openEnd + pointer.size();
+    repriceEstTokensIn( out, root.openBegin, rootOpenEnd, fullBytes, deliveredBytes );
+    repriceEstTokensIn( out, 0, root.openBegin, fullBytes, deliveredBytes );
+    doc.swap( out );
+    return RefOutcome::Ref;
+}
+
 // THE MCP DEFAULT (lean-answers lane): a stdio session that never read ripwire://legend-dict is OPENED by its first answer
 // this dictionary can reduce. That answer is served inline and unchanged — its whole legend, the definitions it needs —
 // and every entry it carried counts as served; the session then takes the ref posture, whose first ref answer carries the

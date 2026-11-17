@@ -78,10 +78,32 @@ fi
 python3 - "$BIN" "$DV" <<'PY'
 import re, subprocess, sys
 BIN, DV = sys.argv[1], sys.argv[2]
-CMT  = re.compile(r"<!--.*?-->", re.S)
-ROOT = re.compile(r"\s*<([A-Za-z_][A-Za-z0-9_-]*)\b[^>]*>")
+ROOT = re.compile(r"<([A-Za-z_][A-Za-z0-9_-]*)\b[^>]*>")
 ATTR = re.compile(r'([A-Za-z_][A-Za-z0-9_-]*)="([^"]*)"')
 POINTER = {"legend", "dict", "dictv"}
+REPRICED = {"est_tokens"}   # amendment 4a: the one attribute that MUST change
+
+def head_comments(doc, lo, hi):
+    """Comments in the two head runs only -- before the root open, and right after it.
+
+    Bounded exactly as src/legenddict.h headComments is: the scan stops at the first byte that is neither a
+    comment nor whitespace. A document-wide `<!--` search is NOT equivalent and must never be used here --
+    --expand and --for carry ripwire's own source in CDATA, and that source contains comment-shaped text
+    (`<!--" + add + "-->` was collected by exactly such a sweep). Amendment 4a records the measurement.
+    """
+    out, i = [], lo
+    while i < hi:
+        if doc.startswith("<!--", i):
+            j = doc.find("-->", i)
+            if j < 0:
+                break
+            out.append(doc[i:j + 3])
+            i = j + 3
+        elif doc[i] in " \n\r\t":
+            i += 1
+        else:
+            break
+    return out
 
 def run(*args):
     r = subprocess.run([BIN, "."] + list(args), capture_output=True, text=True)
@@ -118,8 +140,15 @@ def split(doc):
         return None
     close = "</%s>" % m.group(1)
     j = doc.rfind(close)
-    body = doc[m.end():j] if j > m.end() else ""
-    return m.group(0), body, CMT.findall(doc)
+    end = j if j > m.end() else len(doc)
+    # The head comment run AFTER the root open belongs to the head, not the body: compactlegend.h's families
+    # put their legend before the root, --for and --expand put theirs just inside it. Leaving it in the body
+    # would make a legitimate drop look like a body change on exactly those two families.
+    inner = head_comments(doc, m.end(), end)
+    bodyBegin = m.end() + sum(len(c) for c in inner)
+    while bodyBegin < end and doc[bodyBegin] in " \n\r\t":
+        bodyBegin += 1
+    return m.group(0), doc[bodyBegin:end], head_comments(doc, 0, m.start()) + inner
 
 def pairs(text):
     return sorted(ATTR.findall(text or ""))
@@ -155,8 +184,22 @@ for v in VERBS:
     ra, ba, ca = pa
     rb, bb, cb = pb
     fam = family(ra)
-    f = fams.setdefault(fam, {"n": 0, "bad": 0})
+    f = fams.setdefault(fam, {"n": 0, "bad": 0, "reduced": 0, "unreduced": 0})
     f["n"] += 1
+    # UNREDUCED, AND HONEST ABOUT IT. The band's registered negative control: a family whose legend this
+    # dictionary cannot reproduce (--expand, --around) or that never reaches the capture layer at all
+    # (--for, excluded by nativeCompactLegendVerb by design) is served UNCHANGED, with its prose, exactly as
+    # 0.6.x served it. That is a missed saving, never a wrong answer, so it PASSES -- but it is counted
+    # apart and printed as coverage, because a gate that let it read as "reduced" would report the pooled
+    # saving of a posture that had not been applied. The hazard was registered with the band for this reason.
+    if not (set(k for k, _ in pairs(ra)) & POINTER):
+        if a == b and rca == rcb:
+            f["unreduced"] += 1
+            print("  PASS  (D1-unreduced) %-18s served UNCHANGED and byte-identical to the opt-out -- no saving, no loss" % v)
+        else:
+            f["bad"] += 1; nbad += 1
+            print("  FAIL  (D1-unreduced) %-18s not reduced, but the answer CHANGED (%d B vs %d B)" % (v, len(a), len(b)))
+        continue
     why = []
     # 1. THE BODY IS BYTE-IDENTICAL. Comments are left in on purpose: a data comment that moved or vanished
     #    is exactly the defect this arm exists to catch, so it may not be normalised away first.
@@ -192,13 +235,20 @@ for v in VERBS:
         f["bad"] += 1; nbad += 1
         print("  FAIL  (D1) %-22s %s" % (v, "; ".join(why)))
     else:
+        f["reduced"] += 1
         print("  PASS  (D1) %-22s lossless: body byte-identical, %d root attributes kept with their values, %d B saved"
               % (v, len(want), len(b) - len(a)))
 
-print("  INFO  (D1) per legend family:")
+print("  INFO  (D1) coverage per legend family -- reduced vs served-whole:")
+red = sum(f["reduced"] for f in fams.values())
+unr = sum(f["unreduced"] for f in fams.values())
 for fam in sorted(fams):
     f = fams[fam]
-    print("           %-34s n=%d bad=%d" % (fam, f["n"], f["bad"]))
+    print("           %-34s n=%d reduced=%d unreduced=%d bad=%d" % (fam, f["n"], f["reduced"], f["unreduced"], f["bad"]))
+print("  INFO  (D1) COVERAGE: %d of %d families reduced, %d served whole" % (red, red + unr, unr))
+if red == 0:
+    print("  FAIL  (D1-vacuous) no family reduced -- the posture was never applied, so nothing here is evidence")
+    nbad += 1
 if nskip == len(VERBS):
     print("  FAIL  (D1-vacuous) every verb skipped -- this gate measured nothing")
     nbad += 1

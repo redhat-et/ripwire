@@ -74,8 +74,17 @@ struct Config
     bool             json            = false;              // --json (L2): the SAME content as the XML, machine-parseable, for the
                                                            // CORE verbs ONLY (default map, --for, --pack-task, --callers/--callees/
                                                            // --impact, --quality-delta, --test-gate). Keys mirror the XML attr names
-    std::string_view legend;                               // --legend=full|compact: the legend posture of every XML verb (P1, compactlegend.h);
+    std::string_view legend;                               // --legend=full|compact|dict: the legend posture of every XML verb (P1, compactlegend.h);
                                                            // an XML run that names none is RESOLVED to kDefaultLegendPosture (L1)
+    bool             legendProseOff = false;               // item D: the prose legend is replaced by a POINTER to --legend-dict. Set by the
+                                                           // DEFAULT and by the explicit spelling --legend=dict; cleared by an ASKED
+                                                           // --legend=compact, the registered opt-out (D3), which must reproduce the
+                                                           // pre-item-D default byte for byte. NOTE both spellings leave `legend` reading
+                                                           // "compact": 25 call sites across six files read `legend == "compact"` as "the
+                                                           // compact dialect is on", and a third VALUE there would turn every one of them
+                                                           // FALSE under the new default — a silent behaviour change in --for, --grep,
+                                                           // --slice and the reprice guard, none of it about prose. The posture that varies
+                                                           // is therefore carried by this bool and the dialect switch keeps its one value.
     bool             legendDefaulted = false;              // L1: legend was not asked for — validateLegendModifier resolved it to the default
                                                            // posture because the run answers XML. main.cpp reads it: a defaulted posture
                                                            // never refuses a run (it passes the output through), an asked one does.
@@ -2782,8 +2791,17 @@ inline constexpr char kHelpTail[] =
         "                               (with --for/--query) a FLAT top-K export for an EXTERNAL reranker: one\n"
         "                               <cand r= s= n= id= k= p= l=><sig>..</sig></cand> row per result — identity + score +\n"
         "                               signature only, no lens/quality extras, no doc bodies. Composes with --top-k.\n"
-        "    --legend=full|compact      legend posture for every XML verb — compact is the default; full restores the prose\n"
-        "                               output legend posture for EVERY XML verb. The DEFAULT is compact: the legend is a\n"
+        "    --legend=full|compact|dict legend posture for every XML verb — dict is the default (prose replaced by a pointer);\n"
+        "                               compact restores the prose legend, full the long form\n"
+        "                               THE DEFAULT IS dict (item D, 2026-11-17): no prose legend, every root attribute kept\n"
+        "                               exactly where it was, and legend=\"dict\" dict=\"ripwire --legend-dict\" dictv= added so\n"
+        "                               the schema stays resolvable in one deterministic call. Measured first: the legend is\n"
+        "                               531..4,305 B per answer (median 1,796) — a near-FIXED tax, 14.0% of a --for bundle but\n"
+        "                               62.6% of a --whereis answer — and 93% of every clause emitted had already been sent to\n"
+        "                               the reader. At a 2 KB budget it cost 36 points of symbol-grain completeness and ALL of\n"
+        "                               the item grain's. --legend=compact is the OPT-OUT and reproduces the pre-item-D default\n"
+        "                               byte for byte; nothing is dropped from an answer, only the prose that repeats itself.\n"
+        "                               output legend posture for EVERY XML verb. compact: the legend is a\n"
         "                               FIXED ~3 KB of prose per call in its full form, so its share is a function of ANSWER\n"
         "                               SIZE, not of the verb: at least 40% of a small --callers/--uses/--impact/--affected\n"
         "                               answer (and more on --callees and --edit-check), a little of a large --for bundle —\n"
@@ -3475,7 +3493,7 @@ inline constexpr ViewFlag kViewFlags[] =
 
     // search and the --for lens
     { "--query=",       &Config::query           , EmptyValue::Refuse, "search terms",                           "--query=\"teleport pagerank\"" },
-    { "--legend=",      &Config::legend          , EmptyValue::Refuse, "full or compact",                        "--legend=compact" },
+    { "--legend=",      &Config::legend          , EmptyValue::Refuse, "full, compact or dict",                  "--legend=compact" },
     { "--grep=",        &Config::grep            , EmptyValue::Refuse, "a literal string to search for",         "--grep=parseArgs",
       nullptr, nullptr, &Config::grepGiven, kGrepDupMessage },
     { "--match=",       &Config::match           , EmptyValue::Refuse, "a tree-sitter s-expression pattern",     "--match='(call_expression)'" },
@@ -4565,9 +4583,25 @@ inline void validateLintSelectionModifierGuards( Config& c ) noexcept
 // header is its own dialect (verbs_for.h), and under a --token-budget it never loses a row --legend=full keeps
 // (compactlegendcheck (P1) asserts rows(default) ⊇ rows(--legend=full)) — with ONE ruled exemption (knob-honesty-068 round 3,
 // option B): a default whose header is larger than full's, that fits its budget and paid the row for its <sigs next=> (P1-B).
-inline constexpr std::string_view kLegendPostures[]     = { "full", "compact" };
+// ITEM D (owner decision 2026-11-17, prereg docs/EVALS.md amendment 4 + 4a). The prose goes by DEFAULT, and the
+// root keeps every attribute it had. Measured before the change: the legend is 531..4,305 B per answer, median
+// 1,796 — a near-FIXED tax, so 14.0 % of a --for bundle but 62.6 % of a --whereis answer, and 93 % of every clause
+// emitted had already been sent to the reader. On the budget axis, which is the one a context-limited agent lives
+// on, it cost 36 points of symbol-grain completeness at 2 KB and ALL of the item grain's.
+//
+// `dict` is the explicit spelling of the default; `compact` is the registered OPT-OUT that restores the prose
+// byte-for-byte (D3), and `full` restores the long form as before. Both prose-free spellings resolve `legend` to
+// "compact" and carry the difference in Config::legendProseOff — see the note there for the 25 call sites that
+// would have silently flipped had this been a third value of the dialect switch.
+inline constexpr std::string_view kLegendPostures[]     = { "full", "compact", "dict" };
 inline constexpr std::string_view kDefaultLegendPosture = "compact";
 static_assert( std::ranges::contains( kLegendPostures, kDefaultLegendPosture ), "the default is a registered posture" );
+
+// Does this posture replace the prose legend with a pointer? True for the DEFAULT and for --legend=dict.
+[[nodiscard]] inline bool legendPostureDropsProse( std::string_view spelled, bool defaulted ) noexcept
+{
+    return defaulted || spelled == "dict";
+}
 
 // --legend-have= is a VERSION HANDSHAKE. Its VALUE is checked against the dictionary in main.cpp
 // (checkLegendHandshake), not here: cli.h is included early and pulling legenddict.h in shifts declaration order enough
@@ -4689,8 +4723,18 @@ static inline void validateLegendModifier( Config& c ) noexcept
         {
             c.legend          = kDefaultLegendPosture;
             c.legendDefaulted = true;
+            c.legendProseOff  = legendPostureDropsProse( c.legend, /*defaulted=*/true );   // item D: the prose goes by default
         }
         return;
+    }
+    // --legend=dict is the DEFAULT, spelled. It resolves to the same dialect value every downstream reader already
+    // asks about and carries its difference in legendProseOff, so naming it changes nothing except that
+    // legendDefaulted stays false: an ASKED posture refuses an answer the dialect cannot shape, where the default
+    // passes it through. That asymmetry is L1's and is deliberately left alone here.
+    if( c.legend == "dict" )
+    {
+        c.legend         = kDefaultLegendPosture;
+        c.legendProseOff = true;
     }
     // r2-LO: legend=ref is a SESSION posture — definitions sent once per server process, after the session read the
     // dictionary (legenddict.h). A CLI run is one answer with no session to have been served anything, so a ref answer
@@ -4705,7 +4749,7 @@ static inline void validateLegendModifier( Config& c ) noexcept
     }
     if( !isLegendPosture( c.legend ) )
     {
-        rw::emitTo( stderr, "ripwire: --legend needs full or compact — got '{}', e.g. --legend=compact\n", std::string_view( c.legend.data(), c.legend.size() ) );
+        rw::emitTo( stderr, "ripwire: --legend needs full, compact or dict — got '{}', e.g. --legend=compact\n", std::string_view( c.legend.data(), c.legend.size() ) );
         c.ok = false;
     }
     // P1 (capture-audit 2026-09-04, L7): every XML verb honors --legend=compact (main.cpp's runWithCompactLegend
