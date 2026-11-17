@@ -124,6 +124,9 @@ QUERY="frobnicate widget cache"
 # ranking, body or anchor byte moved (anchor-neutrality, this golden's purpose, untouched).
 # L1 (2026-09-19): the CLI default legend is compact; this arm compares against a golden recorded from the full default, so it asks for it.
 "$BIN" anchorfix --no-cache --for="$QUERY" --no-route --legend=full >"$TMP/plain_full.xml" 2>/dev/null
+# RE-PIN 2026-11-15 (lane NEXT-APOS-RAW; rule 4): golden_for.xml 4071 -> 4061 B, est_tokens "1555" -> "1551". nextAttrXml
+# leaves ' raw inside the double-quoted next= (2 entities). Verified mechanically: &apos; -> ' inside next-family values
+# of the old golden, est_tokens= masked, gives the new capture byte for byte (nextaposcheck.sh arm d is the same proof live).
 # RE-PIN 2026-11-08 (lane R-DEDUP, stacked on SIZE-TRIM; rule 4): golden_for.xml 4085 -> 4071 B: the tail legend clause
 # (minus names a sigs row or the syms block shows), est_tokens, and the frob.cpp tail row (all three names shown as sigs rows)
 # printing p= only.

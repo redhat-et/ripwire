@@ -21,6 +21,9 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
+# CR680 (review 5934094974): the live base compare runs in $F, so a relative RIPWIRE_BASE_BIN would resolve there and
+# fail every compare; resolve it against the invocation directory here, where its -x check also runs.
+[ -n "${RIPWIRE_BASE_BIN:-}" ] && [ "${RIPWIRE_BASE_BIN#/}" = "$RIPWIRE_BASE_BIN" ] && RIPWIRE_BASE_BIN="$PWD/$RIPWIRE_BASE_BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
@@ -246,11 +249,13 @@ fi
 
 # ── A13: with the group and the comments removed, the answer is byte-identical to the pre-group answer ──────────────────────
 # Pinned from the pre-DEAD-CODE-SCOPE main binary (7c851ba77) on this fixture, so CI checks it with no base binary; root= is the fixture.
+# RE-PIN (NEXT-APOS-FINISH, 2026-11-15): the filter next= reads --for='unused functions in …' (was &apos;…&apos;): the one
+# next= escaper leaves ' raw in this "-delimited attribute (nextverb.h appendNextValueXml); written '\'' inside the printf quotes.
 strip(){ python3 -c 'import re,sys; s=sys.stdin.read(); s=re.sub(r"<exported .*?</exported>","",s,flags=re.S); print(re.sub(r"<!--.*?-->","",s,flags=re.S))'; }
 pinned(){ case "$1" in
-  --dead-code=pkg/net.py) printf '%s' '<dead-code schema="ripwire.dead-code/v1" count="0" evidence="internal-linkage+zero-callers" register-macro-excluded="0" filter="pkg/net.py" next="--for=&apos;unused functions in pkg/net.py&apos;" root="@F@" graph_ambiguous="0" graph_unresolved="0" counts_floor="1"></dead-code>' ;;
-  --dead-code=cc/lib.cpp) printf '%s' '<dead-code schema="ripwire.dead-code/v1" count="1" evidence="internal-linkage+zero-callers" register-macro-excluded="0" filter="cc/lib.cpp" next="--for=&apos;unused functions in cc/lib.cpp&apos;" root="@F@" graph_ambiguous="0" graph_unresolved="0" counts_floor="1"><d n="internal_dead" t="fn" p="cc/lib.cpp" l="1"/></dead-code>' ;;
-  --dead-code=web/path.ts) printf '%s' '<dead-code schema="ripwire.dead-code/v1" count="0" evidence="internal-linkage+zero-callers" register-macro-excluded="0" filter="web/path.ts" next="--for=&apos;unused functions in web/path.ts&apos;" root="@F@" graph_ambiguous="0" graph_unresolved="0" counts_floor="1"></dead-code>' ;;
+  --dead-code=pkg/net.py) printf '%s' '<dead-code schema="ripwire.dead-code/v1" count="0" evidence="internal-linkage+zero-callers" register-macro-excluded="0" filter="pkg/net.py" next="--for='\''unused functions in pkg/net.py'\''" root="@F@" graph_ambiguous="0" graph_unresolved="0" counts_floor="1"></dead-code>' ;;
+  --dead-code=cc/lib.cpp) printf '%s' '<dead-code schema="ripwire.dead-code/v1" count="1" evidence="internal-linkage+zero-callers" register-macro-excluded="0" filter="cc/lib.cpp" next="--for='\''unused functions in cc/lib.cpp'\''" root="@F@" graph_ambiguous="0" graph_unresolved="0" counts_floor="1"><d n="internal_dead" t="fn" p="cc/lib.cpp" l="1"/></dead-code>' ;;
+  --dead-code=web/path.ts) printf '%s' '<dead-code schema="ripwire.dead-code/v1" count="0" evidence="internal-linkage+zero-callers" register-macro-excluded="0" filter="web/path.ts" next="--for='\''unused functions in web/path.ts'\''" root="@F@" graph_ambiguous="0" graph_unresolved="0" counts_floor="1"></dead-code>' ;;
   --dead-code) printf '%s' '<dead-code schema="ripwire.dead-code/v1" count="3" evidence="internal-linkage+zero-callers" register-macro-excluded="0" root="@F@" graph_ambiguous="0" graph_unresolved="0" counts_floor="1"><d n="internal_dead" t="fn" p="cc/lib.cpp" l="1"/><d n="lone_static" t="fn" p="cc/only_static.cpp" l="1"/><d n="ov" t="fn" p="cc/over.cpp" l="1"/></dead-code>' ;;
 esac; }
 for args in "--dead-code=pkg/net.py" "--dead-code=cc/lib.cpp" "--dead-code=web/path.ts" "--dead-code"; do
@@ -258,9 +263,12 @@ for args in "--dead-code=pkg/net.py" "--dead-code=cc/lib.cpp" "--dead-code=web/p
     if [ "$a" = "$( pinned "$args" )" ]; then ok "A13 $args: root and rows byte-identical to the pinned pre-group answer"; else no "A13 $args differs from the pinned answer beyond the group: $a"; fi
 done
 # Optional: RIPWIRE_BASE_BIN=<a main binary> also compares live against it.
+# CR676 (review 5923622158): a base from before NEXT-APOS spells the filter next='s quotes &apos; where this binary leaves
+# them raw, and a quote may sit in a path either side spells either way, so both sides read &apos; as ' before the compare.
+apos(){ sed "s/&apos;/'/g"; }
 if [ -n "${RIPWIRE_BASE_BIN:-}" ] && [ -x "${RIPWIRE_BASE_BIN}" ]; then
     for args in "--dead-code=pkg/net.py" "--dead-code=cc/lib.cpp" "--dead-code=web/path.ts" "--dead-code"; do
-        a="$( run $args | strip )"; b="$( cd "$F" && "$RIPWIRE_BASE_BIN" "$F" --no-cache $args 2>/dev/null | strip )"
+        a="$( run $args | strip | apos )"; b="$( cd "$F" && "$RIPWIRE_BASE_BIN" "$F" --no-cache $args 2>/dev/null | strip | apos )"   # status: the compared bytes are the verdict; A13 above pins this binary's answer, and a failed base run prints nothing, which FAILs the compare
         if [ "$a" = "$b" ]; then ok "A13 $args: root and rows byte-identical to base"; else no "A13 $args differs from base beyond the group"; fi
     done
 fi

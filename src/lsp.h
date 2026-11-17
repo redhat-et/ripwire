@@ -918,7 +918,7 @@ inline std::string lspStartupCwd()
 
 inline std::string lspCapabilitiesJson()
 {
-    std::string v( rw::kRipwireVersion );
+    std::string v( rw::kRipwireVersionLabel );   // the one label --version prints (test/versionlabelcheck.sh)
     return "{\"capabilities\":{\"positionEncoding\":\"utf-8\","
            "\"textDocumentSync\":{\"openClose\":true,\"change\":0},"
            "\"definitionProvider\":true,\"referencesProvider\":true,"

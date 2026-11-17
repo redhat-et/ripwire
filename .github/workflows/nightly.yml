@@ -442,11 +442,11 @@ jobs:
             fi
           } > "$body"
           if ! gh api "repos/$REPO/labels/$label" --silent 2>/dev/null; then
-            gh label create "$label" --repo "$REPO" --color B60205 \
+            gh label create "$label" --repo "$REPO" --color B60205 --force \
               --description "A nightly-scale workflow run failed on main; see the workflow-specific label for which one"
           fi
           if ! gh api "repos/$REPO/labels/$ownLabel" --silent 2>/dev/null; then
-            gh label create "$ownLabel" --repo "$REPO" --color 5319E7 \
+            gh label create "$ownLabel" --repo "$REPO" --color 5319E7 --force \
               --description "The ThreadSanitizer nightly failed on main; opened and closed by .github/workflows/nightly.yml only"
           fi
           open="$( gh issue list --repo "$REPO" --label "$label,$ownLabel" --state open --json number --jq '.[0].number // empty' )"

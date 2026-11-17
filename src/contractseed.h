@@ -345,25 +345,4 @@ inline ContractSeeds widenContractSeeds( const IngestResult& ing, const Graph& g
     return out;
 }
 
-// --path: both endpoints widened in place (the CLI after bindPathEndpoints, the MCP twin after resolvePathEndpoint), and the
-// counts its root spells as from_impls=/to_impls=, each present exactly when that endpoint names a contract method.
-struct PathContracts
-{
-    ContractSeeds from;   // seeds moved back into the caller's endpoint defs; the counts stay
-    ContractSeeds to;
-
-    std::string attrXml() const
-    {
-        return implsFieldOrEmpty( "from_impls", from.contracts, from.impls, /*json=*/false ) + implsFieldOrEmpty( "to_impls", to.contracts, to.impls, /*json=*/false );
-    }
-    const char* legend() const noexcept { return implsLegend( from.contracts + to.contracts > 0 ); }
-};
-inline PathContracts widenPathContracts( const IngestResult& ing, const Graph& g, std::vector<NodeId>& srcDefs, std::vector<NodeId>& dstDefs )
-{
-    PathContracts out{ widenContractSeeds( ing, g, std::move( srcDefs ) ), widenContractSeeds( ing, g, std::move( dstDefs ) ) };
-    srcDefs = std::move( out.from.seeds );
-    dstDefs = std::move( out.to.seeds );
-    return out;
-}
-
 }   // namespace rw

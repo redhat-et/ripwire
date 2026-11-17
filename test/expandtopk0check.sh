@@ -349,7 +349,8 @@ SC="$TMP/sc"; mkdir -p "$SC"; cp -R "$FIX" "$SC/fix"; mkdir -p "$SC/fix/tests"
 printf 'int testOnlyHelper(void) { return dupTarget(); }\nint testOnlyCaller(void) { return testOnlyHelper(); }\n' >"$SC/fix/tests/test_dup.c"
 ( cd "$SC" && "$BIN" fix --expand=dupTarget --ignore-tests '--exclude=nomatch*' --no-cache ) >"$TMP/scope.xml" 2>/dev/null
 scNext="$( attrOf map_next "$TMP/scope.xml" )"
-[ "$scNext" = "ripwire fix --exclude=&apos;nomatch*&apos; --ignore-tests" ] \
+# RE-PIN (NEXT-APOS-RAW/FINISH, 2026-11-15): next-family values print a raw ' (was &apos;) — nextverb.h appendNextValueXml; here and (N)
+[ "$scNext" = "ripwire fix --exclude='nomatch*' --ignore-tests" ] \
     && ok "(M) crawl scope: map_next replays --exclude (quoted) and --ignore-tests" \
     || no "(M) crawl scope: map_next='$scNext', want the root plus --exclude='nomatch*' --ignore-tests"
 scShell="$( printf '%s' "$scNext" | xmlUnesc )"
@@ -383,7 +384,7 @@ servedAnyOf(){ { servedOf "$1"; grep -oE '<src p="[^"]*" sym="work:[0-9]+"' "$1"
 SP4="$TMP/sp4"; mkwork "$SP4" 4
 ( cd "$SP4" && "$BIN" . --expand=work --pack-budget-bytes=3500 --no-cache ) >"$TMP/sp4.xml" 2>/dev/null
 un4="$( attrOf unserved_next "$TMP/sp4.xml" )"
-grep -q 'unserved_total="3"' "$TMP/sp4.xml" && case "$un4" in "--expand=&apos;sub dir/"*) true ;; *) false ;; esac \
+grep -q 'unserved_total="3"' "$TMP/sp4.xml" && case "$un4" in "--expand='sub dir/"*) true ;; *) false ;; esac \
     && ok "(N) space path: unserved_total=\"3\" and unserved_next is single-quoted for the shell" \
     || no "(N) space path: $( grep -oE '<ctx[^>]*>' "$TMP/sp4.xml" | head -1 )"
 rootOf "$TMP/sp4.xml" | grep -q 'unserved_listed=' \

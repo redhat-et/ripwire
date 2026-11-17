@@ -27,7 +27,7 @@
 #include "pageview.h"  // kCallersBandMaxBytes / kCallerRowMinBytes / kCallHierarchyBandMax
 #include "defattrib.h" // the per-row definition attribution every surface of these rows serves (and tsContractSignatures)
 #include "filter.h"    // pathTierIndexOver / compareTierThenPath — the tier-then-path row order both surfaces serve
-#include "graph.h"     // resolveAllByNameQualified, the CSR, testSymbolForwardReach / countTestedIn / isTestedByReach
+#include "graph.h"     // resolveAllByNameQualified, the CSR, testSymbolForwardReach / radiusTiers / isTestedByReach
 #include "memberowner.h"   // QUALNAME-1: MemberOwners / qualifiedMemberName — n="Owner.name" on every member row
 #include "model.h"
 #include "nextverb.h"  // nextFlag / nextAttrXml / nextFieldJson — a cut <in> block's next=
@@ -50,23 +50,36 @@ namespace rw
 
 // A6: the 1-hop tested/untested partition, bundled into one call so a caller pays ONE statement instead of
 // separately naming testReach / tested / untested / attr. The counting loop itself lives in
-// graph.h::countTestedIn, shared with --impact. (Hoisted here from verbs_navigate.h, unchanged, so the MCP
+// graph.h::radiusTiers, shared with --impact and --safe-delete. (Hoisted here from verbs_navigate.h, unchanged, so the MCP
 // twins can serve the same partition instead of omitting the lens.)
+// TIER-FOLLOWUP: three tiers, not two, by IMPACT-TEST-TIER's graph.h radiusTiers. isTestedByReach never counts a test symbol,
+// so `untested = rows - tested` put every TEST caller into hop_untested=; the test rows are now their own count, hop_tests=
+// (absent at 0), and hop_tested + hop_untested + hop_tests == rows.size().
 struct HopTestedPartition
 {
     std::vector<char> testReach;
     std::size_t       tested;
     std::size_t       untested;
-    std::string       xmlAttr;   // " hop_tested=\"N\" hop_untested=\"M\""
+    std::size_t       tests;     // test definitions among the rows (isTestSymbol): their own tier, never untested production
+    std::string       xmlAttr;   // " hop_tested=\"N\" hop_untested=\"M\"" + " hop_tests=\"K\"" when K > 0
 };
 
 inline HopTestedPartition computeHopTestedPartition( const IngestResult& ing, const Graph& g, const std::vector<NodeId>& rows )
 {
     std::vector<char> testReach = testSymbolForwardReach( ing, g );
-    const std::size_t tested    = countTestedIn( ing, testReach, rows );
-    const std::size_t untested  = rows.size() - tested;
-    std::string       attr      = " hop_tested=\"" + std::to_string( tested ) + "\" hop_untested=\"" + std::to_string( untested ) + "\"";
-    return { std::move( testReach ), tested, untested, std::move( attr ) };
+    const RadiusTiers tiers     = radiusTiers( ing, testReach, rows );
+    std::string       attr      = " hop_tested=\"" + std::to_string( tiers.tested ) + "\" hop_untested=\"" + std::to_string( tiers.untested ) + "\""
+                                + ( tiers.tests > 0 ? " hop_tests=\"" + std::to_string( tiers.tests ) + "\"" : std::string() );
+    return { std::move( testReach ), tiers.tested, tiers.untested, tiers.tests, std::move( attr ) };
+}
+
+// TIER-FOLLOWUP: whether a test definition is among rows[begin, end) — the columnar <test> column and its legend clause ride
+// exactly then (a page with none is byte-identical to the two-tier answer).
+inline bool anyTestRowIn( const IngestResult& ing, const std::vector<NodeId>& rows, std::size_t begin, std::size_t end )
+{
+    const std::size_t last  = std::min( end, rows.size() );
+    const std::size_t first = std::min( begin, last );
+    return std::any_of( rows.begin() + std::ptrdiff_t( first ), rows.begin() + std::ptrdiff_t( last ), [ & ]( NodeId n ) { return isTestSymbol( ing, n ); } );
 }
 
 // The rows one 1-hop question yields, with the two counts that qualify them.

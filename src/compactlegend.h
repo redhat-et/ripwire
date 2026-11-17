@@ -555,6 +555,9 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "radius_tests",      "radius_tests=: TEST definitions in impact_reaches=, counted apart; radius_tested=/radius_untested= are production rows only", true, "safe-delete" },
     { "tests_ignored",     "tests_ignored=1: ignore-tests dropped every test before the walk, so radius_tested=0 is not measured", true, "impact" },
     { "tests_ignored",     "tests_ignored=1: ignore-tests dropped every test before the walk, so radius_tested=0 is not measured", true, "safe-delete" },
+    // TIER-FOLLOWUP (callhierarchy.h computeHopTestedPartition): present-only, when a row is a test definition
+    { "hop_tests",         "hop_tests=: TEST definitions among the rows, listed but counted apart; hop_tested=/hop_untested= are production rows only", true, "callers" },
+    { "hop_tests",         "hop_tests=: TEST definitions among the rows, listed but counted apart; hop_tested=/hop_untested= are production rows only", true, "callees" },
     // IMPACT-PATH (verbs_navigate.h emitImpactPathAnswer): present-only, on a path selector's answer
     { "unresolved_naming", "unresolved_naming=: files whose include/import target is a suffix of this path and resolved to no indexed file; each may import it, so importers= may be a floor", true, "impact" },
     { "selector",          "selector=file: of= names an indexed file, not a symbol; the answer is its importers only, no call reach (of=FILE:SYM for a symbol); file= is the file answered for", true, "impact" },
@@ -624,6 +627,8 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // array cannot omit a false entry, so unlike the <s> attribute this prints 0, and an answer over a tree with no test carries a
     // column of zeros: the term reads the COLUMN (a <cols fields=> that lists tested), never a 1. compactlegendcheck (D34)/(D35).
     { "fields",            "<tested> column: 1 = a non-test row an indexed test transitively reaches; 0 = none found, or a test row", true, "cols", MapHeaderRead::No, "tested" },
+    // TIER-FOLLOWUP (columnar.h ColumnarRowExtras::testRow): present-only, when a shown row is a test definition
+    { "fields",            "<test> column: 1 = a test or fixture definition row, counted apart from production; 0 = a production row", true, "cols", MapHeaderRead::No, "test" },
     { "lens",              "lens=: attributes another form of this answer serves, withheld here" },
     // THE SWEEP'S DESIGN REVIEW (2026-09-12) checked every reading above against its emitter and found one row reading still
     // missing: tested="1" on <s>. --callers/--callees and --impact (verbs_navigate.h), the MCP impact twin (mcpverbs.h) and the
@@ -1158,6 +1163,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "callers_floor", "callers_floor=1: callers= and impact_reaches= may be short (a declined, unbound or value use, or a kind read not called); not proof of more", false, {}, MapHeaderRead::No, {}, "safe-delete" },
     { "uses_floor", "uses_floor=1: this kind's reads and type mentions are not indexed in this run; uses= does not count them", false, {}, MapHeaderRead::No, {}, "safe-delete" },
     { "risk", "risk=unmodelled: nothing found, but the counts cannot see this kind's uses; next= lists them", false, "safe-delete", MapHeaderRead::No, "unmodelled", "safe-delete" },
+    // TIER-FOLLOWUP: the value whose meaning a reader cannot guess from untested-radius beside it
+    { "risk", "risk=tests-only: every symbol in the transitive radius is a test definition (radius_tests=); no production caller was found in the resolved graph", false, "safe-delete", MapHeaderRead::No, "tests-only", "safe-delete" },
     // CALLSITE-AT (2026-10-09): sites_l= became sites_at= (pasteable file:line tokens); the callers verb's s rows carry the same pair.
     { "sites_at", "c sites_at=: its calls of the leaf name, any receiver, as file:line (p= is its def line); not proof each binds", true, "c", MapHeaderRead::No, {}, "safe-delete" },
     { "sites_total", "c sites_total=N: N sites, sites_at= lists the first 16; the uses verb lists all", true, "c", MapHeaderRead::No, {}, "safe-delete" },
