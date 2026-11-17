@@ -2713,7 +2713,7 @@ struct BindSite
 // ever reads a type off it), and so may an ImplBlock's (an implementor with no name), so the empty-typeName refusal applies to every OTHER kind, where it is
 // load-bearing for Rule 2 (an undecidable type must degrade to §2a, not mint a half-record). The DeclType's
 // qualified text rides importedName (see qualifiedNameText) — non-empty only on a declaration's Type/ParamType record.
-inline void pushTypedBind( std::uint32_t fileId, Lang lang, std::string_view var, DeclType type, BindSite site, LocalBindKind kind,
+inline void pushTypedBind( std::uint32_t fileId, Lang lang, std::string_view var, const DeclType& type, BindSite site, LocalBindKind kind,
                            std::vector<RawBind>& binds )
 {
     if( var.empty() || ( type.name.empty() && kind != LocalBindKind::VarDecl && kind != LocalBindKind::ImplBlock ) )
@@ -2913,11 +2913,11 @@ inline void emitDeclBinds( std::uint32_t fileId, Lang lang, TSNode declNode, std
         // typed declaration Rule 2's flat table refuses (declaratorVarName cannot see through the unnamed reference
         // child). Recorded as a ParamType fact, so `s.name` resolves in the field use-site index and `s.m()` narrows
         // through Rule 2's LEXICAL lookup (resolve.h buildScopedRecvDecls) — only where this declaration is in scope.
-        pushTypedBind( fileId, lang, paramDeclaratorVarName( declNode, src ), std::move( type ), BindSite{ site.startByte, 0u, 0u }, LocalBindKind::ParamType, binds );
+        pushTypedBind( fileId, lang, paramDeclaratorVarName( declNode, src ), type, BindSite{ site.startByte, 0u, 0u }, LocalBindKind::ParamType, binds );
     }
     else
     {
-        pushTypedBind( fileId, lang, var, std::move( type ), BindSite{ site.startByte, 0u, 0u }, LocalBindKind::Type, binds );
+        pushTypedBind( fileId, lang, var, type, BindSite{ site.startByte, 0u, 0u }, LocalBindKind::Type, binds );
     }
     emitShadowVarDecls( fileId, lang, declNode, src, site, binds );
 }
@@ -4437,7 +4437,7 @@ inline TSNode calleeNameNode( TSNode call )
 // One CallResult: `var` binds result `index` of `call` after `depth` unwrap operators, visible over `site`. A blank `_`, a
 // non-identifier name or a callee with no name node records nothing.
 // `written`: the qualifier a Rust path call is written with (rustCallQualifier; model.h LocalBindKind::CallResult)
-inline void pushCallResult( BindCtx& cx, TSNode var, TSNode call, std::uint8_t index, std::uint8_t depth, BindSite site, std::string written = {} )
+inline void pushCallResult( BindCtx& cx, TSNode var, TSNode call, std::uint8_t index, std::uint8_t depth, BindSite site, const std::string& written = {} )
 {
     const TSNode           callee = ts_node_is_null( call ) ? TSNode{} : calleeNameNode( call );
     const std::string_view name   = ts_node_is_null( var ) ? std::string_view{} : identifierText( var, cx.src );

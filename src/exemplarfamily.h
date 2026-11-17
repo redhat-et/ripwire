@@ -1695,7 +1695,7 @@ inline std::string_view memberStem( const IngestResult& ing, const ExemplarMembe
 }
 
 // The dense unit id of each member for the keys given (the sorted distinct keys are the units, in key order).
-inline std::vector<std::uint32_t> unitIdsOf( std::vector<std::uint64_t> keys, std::vector<std::uint64_t>& distinct )
+inline std::vector<std::uint32_t> unitIdsOf( const std::vector<std::uint64_t>& keys, std::vector<std::uint64_t>& distinct )
 {
     distinct = keys;
     std::ranges::sort( distinct );

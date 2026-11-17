@@ -526,7 +526,7 @@ private:
         }
     }
 
-    std::string withNext( std::string open ) const { return nextVal_.empty() ? open : withAttr( open, "next", nextVal_ ); }
+    std::string withNext( std::string open ) const { return nextVal_.empty() ? std::move( open ) : withAttr( open, "next", nextVal_ ); }
 
     // U's own <sigs next=> when it is the signatures-only re-call (it serves every row unshrunk: the call without the budget would
     // serve U's head, itself shrunk past its target — forrankordercheck (9)); else the call without the budget
