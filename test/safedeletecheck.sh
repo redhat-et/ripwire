@@ -401,5 +401,30 @@ PD20g="$( pdjson --callers=Widget.plain_handler )"
 [ "$PD20g" = "count=0 reaches=- pd=- pw=-" ] && ok "(20g) near miss: a literal getattr makes no pattern key on --json ($PD20g)" \
                                            || no "(20g) --callers=Widget.plain_handler --json: expected count 0 and no pattern keys, got $PD20g"
 
+# (21) CR676-USES-EXIST-EMPTY: a function used only as a value (a designated initialiser, no caller) reads risk=uses-exist over
+#      an EMPTY radius (impact_reaches=0, radius_tested=0). The full legend's sentence for it must not claim "at least part of the
+#      radius is test-covered" there; it states the empty radius instead. Near miss: helperCalled (a tested radius) keeps the
+#      coverage sentence byte-for-byte. RED on the base binary (it printed the coverage claim on the empty radius).
+SD21="$( mktemp -d )"; trap 'rm -rf "$WORK" "$SD7" "$SD21"' EXIT
+printf 'static int viaTableOnly( int x ) { return x + 4; }\nstruct ops { int (*open)( int ); };\nstruct ops table = { .open = viaTableOnly };\n' > "$SD21/b.c"
+SD21_OUT="$( "$BIN" "$SD21" --no-cache --safe-delete=viaTableOnly --legend=full 2>/dev/null )"
+SD21_ROOT="$( printf '%s' "$SD21_OUT" | grep -o '<safe-delete [^>]*>' )"
+SD21_LEG="$( printf '%s' "$SD21_OUT" | grep -o '<!--.*-->' )"
+if ! { printf '%s' "$SD21_ROOT" | grep -q ' risk="uses-exist"' && printf '%s' "$SD21_ROOT" | grep -q ' impact_reaches="0"' \
+       && printf '%s' "$SD21_ROOT" | grep -q ' radius_tested="0"'; }; then
+    no "(21) premise: viaTableOnly should read risk=uses-exist with impact_reaches=0 radius_tested=0: $SD21_ROOT"
+elif printf '%s' "$SD21_LEG" | grep -q 'at least part of the radius is test-covered'; then
+    no "(21) an empty radius (impact_reaches=0) still claims part of it is test-covered"
+elif printf '%s' "$SD21_LEG" | grep -q 'uses-exist: callers or uses exist, but the transitive blast radius is empty (impact_reaches=0), so it claims no test coverage'; then
+    ok "(21) uses-exist over an empty radius states the empty radius, no coverage claim"
+else
+    no "(21) uses-exist over an empty radius carries no sentence for its value"
+fi
+SD21_NEAR="$( sd helperCalled )"
+( cd "$WORK" && "$BIN" . --safe-delete=helperCalled --no-cache --legend=full 2>/dev/null ) | grep -q 'uses-exist: callers or uses exist, and at least part of the radius is test-covered\. ' \
+    && [ "$( attr "$SD21_NEAR" risk )" = 'risk="uses-exist"' ] && [ "$( attr "$SD21_NEAR" radius_tested )" != 'radius_tested="0"' ] \
+    && ok "(21) near miss: helperCalled (a tested radius) keeps the coverage sentence" \
+    || no "(21) near miss: helperCalled lost its uses-exist coverage sentence"
+
 [ "$fail" = 0 ] && printf 'ALL PASS\n' || printf 'FAILURES ABOVE\n'
 exit "$fail"
