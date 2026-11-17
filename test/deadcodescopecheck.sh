@@ -265,7 +265,7 @@ done
 apos(){ sed "s/&apos;/'/g"; }
 if [ -n "${RIPWIRE_BASE_BIN:-}" ] && [ -x "${RIPWIRE_BASE_BIN}" ]; then
     for args in "--dead-code=pkg/net.py" "--dead-code=cc/lib.cpp" "--dead-code=web/path.ts" "--dead-code"; do
-        a="$( run $args | strip | apos )"; b="$( cd "$F" && "$RIPWIRE_BASE_BIN" "$F" --no-cache $args 2>/dev/null | strip | apos )"
+        a="$( run $args | strip | apos )"; b="$( cd "$F" && "$RIPWIRE_BASE_BIN" "$F" --no-cache $args 2>/dev/null | strip | apos )"   # status: the compared bytes are the verdict; A13 above pins this binary's answer, and a failed base run prints nothing, which FAILs the compare
         if [ "$a" = "$b" ]; then ok "A13 $args: root and rows byte-identical to base"; else no "A13 $args differs from base beyond the group"; fi
     done
 fi
