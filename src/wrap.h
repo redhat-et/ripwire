@@ -299,7 +299,7 @@ inline std::vector<std::string_view> wrapUseWhenBlurbLines( const bool readBefor
         "- Before writing a new fn/class/helper: `--exemplar=\"<what you're writing>\" --legend=compact` — duplicates are born on small tasks.",
         "- Before calling work done: `--quality-delta --legend=compact` (what you made worse), then `--test-gate --legend=compact`.",
         "- Trust notes: counts marked counts_floor are floors, not totals; a zero means \"none found\", never \"none exists\".",
-        "- The commands above ask for the compact legend (terse definitions of only the attributes present); add `--legend=full` when a definition's reasoning is needed: a term you do not recognise, a floor or cap you need explained, a map a human will read.",
+        "- Legend posture: the commands above ask for the compact legend (terse definitions of only the attributes present); add `--legend=full` when a definition's reasoning is needed — a term you do not recognise, a floor or cap you need explained, a map a human will read. On a LONG session only, `ripwire --legend-dict` read in FULL (line 1 names its `dictv=`) lets `--legend-have=<that dictv>` drop legend prose from every answer, nothing lost; it is about 130 KB and takes on the order of 140 calls to repay, the flag asserts you hold every line, and a dictv you merely looked up backs nothing — so on a short session pass none.",
         // HONEST COST (2026-11-17): this line used to teach a first-line cut of the dictionary ("names its dictv="),
         // 78 B read and 130 KB asserted, and called it a one-off that pays on every later call. It pays after about
         // 140 calls (126,314 B against 896 B saved per call, measured over 453 answers), so the line now says who it is for.
@@ -309,7 +309,6 @@ inline std::vector<std::string_view> wrapUseWhenBlurbLines( const bool readBefor
         // Two lines, because the primer is already the largest thing the SessionStart hook says and the
         // detail belongs in skills/ripwire-router. "Read it once" is not padding: --legend-have= ASSERTS that
         // you hold the definitions, and passing it unread points you at definitions you never received.
-        "- Long sessions only (the legend dictionary is about 130 KB and takes on the order of 140 calls to repay): run `ripwire --legend-dict`, read ALL of it (line 1 names its `dictv=`), then pass `--legend-have=<that dictv>` on every call: answers come back with no legend prose, nothing dropped. The flag asserts you hold every line; a dictv you only looked up backs nothing, so on a short session pass none.",
         "Defaults to break (less context is measurably MORE accurate, not just cheaper — code-repair",
         "accuracy fell 29% -> 3% as context grew 32K -> 256K tokens, LongCodeBench):",
         "- Do NOT open a file you have not located first: rank with `--for`/`--grep`, then read what it names.",
