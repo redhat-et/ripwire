@@ -35,6 +35,10 @@
 #        so a definition keyword no longer reaches it; the C++ table used to accept it as "not a name"/0.
 #   (B3..B5) #eq?, #any-of?, #not-any-of? through --match on tagspredicatefix/c: exactly 1, 2 and 1 hits.
 #
+# Every python3 scan's exit status is checked: a scan that cannot run FAILS its arm rather than reading as an empty,
+# passing result (CR #426). The scans are heredocs inside $( ): keep every apostrophe in them PAIRED, or macOS's
+# /bin/bash 3.2 reads the rest of the script as a quoted string and stops on a syntax error.
+#
 # BYTE-IDENTITY (the issue's acceptance) is not an arm here — it needs the pre-change binary. Run
 #   RIPWIRE_BASE=<pre-change ripwire> bash test/langidentitycheck.sh "$RIPWIRE_BASE" ./build/ripwire --langs=ex,clj,js
 # and every row must read SAME.
@@ -58,12 +62,13 @@ allowed = {"eq?", "not-eq?", "any-of?", "not-any-of?"}
 for path in sorted(pathlib.Path(sys.argv[1]).glob("*/tags.scm")):
     for no, line in enumerate(path.read_text().splitlines(), 1):
         code = line.split(";", 1)[0]
-        for op in re.findall(r"\(#([A-Za-z-]+\?)", code):
+        # the WHOLE operator token: underscores, digits, a `!` directive and a name with no suffix all count (CR #426)
+        for op in re.findall(r"\(#([^\s()\"]+)", code):
             if op not in allowed:
                 print(f"{path.parent.name}/tags.scm:{no} #{op}")
 PY
-)"
-if [ -z "$bad" ]; then ok "A1 every tags.scm predicate is one the tags pass evaluates"; else no "A1 tags.scm uses predicates the tags pass does not run: $bad"; fi
+)"; rc_a1=$?
+if [ "$rc_a1" != 0 ]; then no "A1 the tags.scm scan could not run (python3 rc=$rc_a1)"; elif [ -z "$bad" ]; then ok "A1 every tags.scm predicate is one the tags pass evaluates"; else no "A1 tags.scm uses predicates the tags pass does not run: $bad"; fi
 
 # ── A2. Elixir's definition keywords are tags.scm data, with no C++ copy ────────────────────────────────────
 a2="$( python3 - "$ROOT" <<'PY'
@@ -79,17 +84,17 @@ elif "def" not in lists[0]:
     print(f"the @_keyword list has no \"def\": {lists[0]}")
 # A COPY of the list is a C++ statement that spells all of it. Statements that test a few of the keywords for another
 # reason (src/elixir_resolve.h decides privacy and macro-ness from the keyword a definition used) are a different
-# concept and stay: CONTRIBUTING's "two keyword lists can match token for token and mean different things".
+# concept and stay: CONTRIBUTING says "two keyword lists can match token for token and mean different things".
 if lists:
     for path in sorted((root / "src").rglob("*")):
         if path.suffix in (".h", ".cpp") and path.is_file():
             for stmt in path.read_text(errors="replace").split(";"):
                 if all(f'"{kw}"' in stmt for kw in lists[0]):
-                    print(f"{path.relative_to(root)} spells the whole keyword list in one statement (a C++ copy of tags.scm's list)")
+                    print(f"{path.relative_to(root)} spells the whole keyword list in one statement (a C++ copy of the tags.scm list)")
                     break
 PY
-)"
-if [ -z "$a2" ]; then ok "A2 Elixir's definition keywords live only in queries/elixir/tags.scm"; else no "A2 $a2"; fi
+)"; rc_a2=$?
+if [ "$rc_a2" != 0 ]; then no "A2 the keyword-list scan could not run (python3 rc=$rc_a2)"; elif [ -z "$a2" ]; then ok "A2 Elixir's definition keywords live only in queries/elixir/tags.scm"; else no "A2 $a2"; fi
 
 # ── A3. Elixir's metadata attribute names are tags.scm data, with no C++ copy ───────────────────────────────
 a3="$( python3 - "$ROOT" <<'PY'
@@ -106,11 +111,11 @@ else:
         if path.suffix in (".h", ".cpp") and path.is_file():
             for stmt in path.read_text(errors="replace").split(";"):
                 if all(f'"{name}"' in stmt for name in lists[0]):
-                    print(f"{path.relative_to(root)} spells the whole metadata list in one statement (a C++ copy of tags.scm's list)")
+                    print(f"{path.relative_to(root)} spells the whole metadata list in one statement (a C++ copy of the tags.scm list)")
                     break
 PY
-)"
-if [ -z "$a3" ]; then ok "A3 Elixir's metadata attribute names live only in queries/elixir/tags.scm"; else no "A3 $a3"; fi
+)"; rc_a3=$?
+if [ "$rc_a3" != 0 ]; then no "A3 the metadata-list scan could not run (python3 rc=$rc_a3)"; elif [ -z "$a3" ]; then ok "A3 Elixir's metadata attribute names live only in queries/elixir/tags.scm"; else no "A3 $a3"; fi
 
 # ── B1/B2. the tags pass applies #any-of? and #not-any-of? ─────────────────────────────────────────────────
 if ! "$BIN" "$FIX/ex" --no-cache > "$TMP/map.xml" 2> "$TMP/map.err"; then
@@ -135,13 +140,13 @@ for name in ("@moduledoc", "@doc", "@spec", "@enforce_keys"):
     if name in syms:
         print(f"B6 a metadata attribute became a definition: {name}")
 if "test a literal title" not in syms:
-    print("B7 ExUnit's literal test title lost its definition")
+    print("B7 the ExUnit literal test title lost its definition")
 quoted = sorted(s for s in syms if s.startswith('"'))
 if quoted:
-    print(f"B7 a string where a def's name belongs became a definition: {quoted}")
+    print(f"B7 a string in the name slot of a def became a definition: {quoted}")
 PY
-)"
-    if [ -z "$b" ]; then ok "B1 #any-of? keeps every keyword head and no ordinary call; B2 #not-any-of? drops unquote heads; B6 drops metadata attributes; B7 keeps test titles, drops def \"string\""; else no "$b"; fi
+)"; rc_b=$?
+    if [ "$rc_b" != 0 ]; then no "B1/B2/B6/B7 the map could not be read (python3 rc=$rc_b): $b"; elif [ -z "$b" ]; then ok "B1 #any-of? keeps every keyword head and no ordinary call; B2 #not-any-of? drops unquote heads; B6 drops metadata attributes; B7 keeps test titles, drops def \"string\""; else no "$b"; fi
 fi
 
 # ── B3..B5. --match evaluates the same string predicates ─────────────────────────────────────────────────
