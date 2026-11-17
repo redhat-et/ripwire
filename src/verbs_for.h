@@ -3120,7 +3120,14 @@ struct StdoutCaptured
 inline std::string readBackAll( std::FILE* f, bool& failed )
 {
     std::string doc;
-    std::rewind( f );
+    // fseek, not std::rewind: rewind cannot report a failed seek, and the read below would then start wherever the
+    // writes left the stream (its end) and hand back a short or empty answer with `failed` unset, i.e. as whole.
+    if( std::fseek( f, 0, SEEK_SET ) != 0 )
+    {
+        failed = true;
+        return doc;
+    }
+    std::clearerr( f );   // rewind's other half, kept: the error flag is this read's, not the writes'
     char buf[ 65536 ];
     for( std::size_t got; ( got = std::fread( buf, 1, sizeof( buf ), f ) ) > 0; )
     {
