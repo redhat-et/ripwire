@@ -315,7 +315,8 @@ struct CompactCompletenessTerm
     std::string_view onKey     = {};      // read ONLY on an answer of this schema key (ripwire.<key>/v1): the same NAME on the same
                                           // element means different things on two verbs (<f files=> on context-ratio vs ensemble)
     std::string_view unlessTag  = {};     // with unlessAttr: NOT read on a payload where this element carries that attribute — the
-    std::string_view unlessAttr = {};     // row a richer one replaces there (declined_calls= beside a <dc via=> row says "in no row")
+    std::string_view unlessAttr = {};     // row a richer one replaces there (declined_calls= beside a <dc via=> row says "in no row").
+                                          // unlessTag may name alternatives, `a|b`: the row steps aside where EITHER carries it
 };
 
 // #60: the escaped spelling of the module-scope owner's name, as it reaches a rendered document, and the
@@ -350,7 +351,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "closures",          "closures=K: named functions written inside of='s body (closures_capped=1 more than the <in> blocks)" },
     { "count",             "in n= p= via=closure count=: one closure and its OWN callees (count= distinct; shown= capped=1 next= the cut); containment, in no count above", true, "in" },
     { "unproven_defs",     "unproven_defs=K: K same-named defs not tied to that file, in no count or row (bare name shows them)" },
-    { "declined_calls",    "declined_calls=K: K call sites left unbound (no evidence chose one def), in no count or row", false, {}, MapHeaderRead::No, {}, {}, "dc", "via" },
+    { "declined_calls",    "declined_calls=K: K call sites left unbound (no evidence chose one def), in no count or row", false, {}, MapHeaderRead::No, {}, {}, "dc|dcols", "via" },
     { "cross_kind",        "cross_kind=kind:N,...: the defs= definitions differ in kind; rows union all of them (narrow with file:name)" },
     // lane recall: absent at zero, callers and impact only (graphlegend.h kDeclinedIfaceLegend).
     { "declined_iface",    "declined_iface=K: K declined TS calls sharing a name with an interface/abstract signature, by name only (MAY go through it); not a subset of declined_calls=" },
@@ -719,7 +720,22 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "bound",             "dc bound=G: T: a generic receiver bounded by trait T; the candidates are T's implementors', never by name", true, "dc" },
     { "of_def",            "dc of_def=K: the def ix=K making the call; K~d: its candidates include group K, never a claim it calls K", true, "dc" },
     { "dc_shown",          "dc_shown=N: dc rows printed (callers: file-first); dc_next= lists every site" },
+    // BAND DC (handoffwindow.h directRootAllNext): a windowing --callers / --impact root names the complete call; present-only
+    { "all_next",          "all_next=: the ONE call listing every row of total= and every declined site (same rows, columnar); next_offset= pages" },
     { "cand",              "dc cand=: the candidate defs as file:line (legend full only); cand_more= how many more", true, "dc" },
+    // BAND DC (declinedsites.h declinedSitesColumnsXml): the columnar form carries the same sites as ONE <dcols> block, so the dc
+    // rows above (element-scoped to <dc>) do not fire there and these read in their place: the block's reading on its via=, each
+    // optional column on fields= naming it. The gate column has one row for every gate value (a column cannot be value-keyed).
+    { "via",               "declined_calls=K: K call sites left unbound, in no count; <dcols n= via=declined fields=>: those call SITES as parallel "
+                           "arrays, one row order (callees: name,line; callers: path,in,line the calling def, path an index into <paths>; empty cell: "
+                           "no value); NOT an edge or a caller/callee claim; cands: K in-tree defs it could have meant (K may be 1), the resolver "
+                           "proved none; not a claim this call reaches any of them", true, "dcols", MapHeaderRead::No, "declined" },
+    { "fields",            "dcols gate: builtin or std, a name gate declined it; side, a Ruby call whose in-reach defs answer on the other side of self; "
+                           "iface, the receiver's interface/trait/abstract type, cands its implementors' methods of the name (which one runs is unproven; "
+                           "a floor in TS)", true, "dcols", MapHeaderRead::No, "gate" },
+    { "fields",            "dcols bound: G: T, a generic receiver bounded by trait T; the candidates are T's implementors', never by name", true, "dcols", MapHeaderRead::No, "bound" },
+    { "fields",            "dcols of_def: K the def ix=K making the call; K~d its candidates include group K, never a claim it calls K", true, "dcols", MapHeaderRead::No, "of_def" },
+    { "fields",            "dcols cand: the candidate defs as file:line (legend full only); cand_more how many more", true, "dcols", MapHeaderRead::No, "cand" },
     { "fields",            "<of_def> column: each row's def ix=K groups (K~s split label, K~n by name, K~t primary template), space-separated", true, "cols", MapHeaderRead::No, "of_def" },
     { "fields",            "<split> column: 1 where the row's edge to of= carries the resolver's split label (may be another arm's)", true, "cols", MapHeaderRead::No, "split" },
     { "fields",            "<via> column: 1 = via=name, the row's edge matched by name alone (receiver unproven); 2 = via=link, a markdown link; NOT a claim the edge is false", true, "cols", MapHeaderRead::No, "via" },
@@ -2191,9 +2207,14 @@ inline bool isCompletenessTermPresent( const CompactCompletenessTerm& t, std::st
     {
         return false;
     }
-    if( !t.unlessTag.empty() && payloadHasAnyAttr( doc, t.unlessAttr, t.unlessTag ) )
+    for( std::string_view rest = t.unlessTag; !rest.empty(); )   // each `|`-separated alternative: the row steps aside beside any
     {
-        return false;
+        const std::size_t bar = rest.find( '|' );
+        if( payloadHasAnyAttr( doc, t.unlessAttr, rest.substr( 0, bar ) ) )
+        {
+            return false;
+        }
+        rest = bar == std::string_view::npos ? std::string_view() : rest.substr( bar + 1 );
     }
     if( !t.onTag.empty() )
     {

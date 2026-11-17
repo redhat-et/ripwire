@@ -425,6 +425,7 @@ for _g in \
     cyclecutcheck \
     danglingwarncheck \
     dartcheck \
+    dccolumnarcheck \
     deadcheck \
     deadcodescopecheck \
     deadfiltercheck \

@@ -18416,3 +18416,36 @@ cut (`dc_shown=`) answer or no windowed answer, so an arm cannot pass on rows th
 
 **If `<dc>` cannot be rebuilt byte for byte from any columnar spelling, the band stops there and reports
 that**; a smaller answer that loses a declined-call fact is not a saving.
+
+### Amendment 10a, after the first build and before any corpus re-measurement — the block rides only past the default cut
+
+The gate (`test/dccolumnarcheck.sh`) was written first and was red on the unchanged binary on D1, D2, D3, D4,
+P1 and P2. The first build then passed D1 (866 rows on 38 fixture answers rebuilt byte for byte) and **failed
+D2 on small answers: +288 to +301 B on three 1-row answers against the registered +160 B, and +6 B on a
+4-row answer against the registered 0.** The arrays were not the cost; the clause that defines them was. A
+table of one to sixteen rows is not smaller as arrays once its definition is paid for.
+
+So DC1 changes, and the registered thresholds do not:
+
+- **The block replaces the rows exactly when MORE than 16 print** (`kDeclinedSiteCap`, the default cut, so
+  only an answer whose `--limit` lifted it). At 16 or fewer the columnar form prints the rows as it did. A
+  reader meets one shape or the other, each defined only where it rides. This is where the prize was
+  measured: the default page carries 353 `<dc>` rows over 39 cells, the complete answers 184,317.
+- **D2 is tightened, not relaxed:** no answer may grow at all (the +160 B allowance for 1 to 3 rows is
+  withdrawn), and the default-page columnar answers must be byte-identical in their declined-call rows.
+- **D1 runs twice**: as shipped, and with the block forced at any row count by a test lever
+  (`RIPWIRE_TEST_DCCOLS_MUTANT=always`), because the fixtures that carry `gate=`, `bound=` and `of_def=`
+  hold fewer than 17 sites. The three reader-direction mutants force the block for the same reason.
+
+Three smaller corrections to the registration, none of which moves a threshold:
+
+- **D2's default-page clause was written about DC1 and did not price DC2.** `all_next=` and its clause are
+  added bytes on every windowed first page, by design. They are reported as a cost on their own line; the
+  "must not grow" clause is evaluated on the documents with that attribute and its clause removed.
+- **P2 reads "does not window", not "no `has_more=`":** a call with an explicit `--limit` prints
+  `has_more="0"`. The arm fails on `has_more="1"`.
+- **`allnext-always` is spelled `RIPWIRE_TEST_HANDOFF_MUTANT=allnextalways`**: it lives with the hand-off's
+  other mutants in `src/handoffwindow.h`, beside the function it breaks.
+
+`--callees` gets the block (its `<dc>` rows go through the same emitter) and not the pointer: it is in no
+measured population, so no claim is made for it.

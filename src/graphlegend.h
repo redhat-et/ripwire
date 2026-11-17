@@ -761,6 +761,11 @@ inline constexpr const char* kDeclinedSitesCalleesForm =
     "<dc n= l= via=\"declined\">: the called name and the line of the call, in the body of one of these definitions. ";
 inline constexpr const char* kDeclinedSitesCallersForm =
     "<dc in= p= via=\"declined\">: the definition making the call and the call's file:line, listed because its candidates include a definition of this selector. ";
+// BAND DC (declinedsites.h declinedSitesColumnsXml): the same two readings where the rows ride as the columnar <dcols> block
+inline constexpr const char* kDeclinedSitesCalleesColumns =
+    "<dcols n= via=\"declined\" fields=>: the <dc> sites as parallel arrays in one row order (an empty cell: no value): name, line the called name and the line of the call, in the body of one of these definitions. ";
+inline constexpr const char* kDeclinedSitesCallersColumns =
+    "<dcols n= via=\"declined\" fields=>: the <dc> sites as parallel arrays in one row order (path indexes <paths>; an empty cell: no value): in, path:line the definition making the call and the call's file:line, listed because its candidates include a definition of this selector. ";
 inline constexpr const char* kDeclinedSitesSideClause =
     "gate=side: a Ruby call whose in-reach definitions answer on the other side of self. ";
 inline constexpr const char* kDeclinedSitesNameGateClause =
@@ -798,6 +803,7 @@ struct DeclinedSitesLegendFlags
     bool cand = false; // a row carries cand= (legend full)
     bool iface = false; // a row says gate="iface" (lane L6)
     bool bound = false; // a row carries bound= (lane L6)
+    bool columns = false; // BAND DC: the rows ride as the columnar form's <dcols> arrays (declinedsites.h)
 };
 // train 28 (declined-sites review N3): the MCP twins carry the same sites as "declined_sites" entries with their own keys, so
 // their declined_note names those keys ({name, line, cands, via} / {in, file, line, cands}) instead of the XML attributes.
@@ -815,6 +821,19 @@ inline constexpr const char* kDeclinedSitesCandClauseMcp =
     "candidates (legend full only): the candidate definitions as file:line, cand_more how many more. ";
 inline constexpr const char* kDeclinedSitesCallersFormMcp =
     "{in, file, line, via=declined}: the definition making the call and the call's file and line, listed because its candidates include a definition of this selector. ";
+// The clause that says what one site's fields are: the columnar block's (never on an MCP twin: its entries are JSON), else the row's
+inline const char* declinedSitesFormClause( const DeclinedSitesLegendFlags& f, bool mcp ) noexcept
+{
+    if( f.columns )
+    {
+        return f.callersForm ? kDeclinedSitesCallersColumns : kDeclinedSitesCalleesColumns;
+    }
+    if( f.callersForm )
+    {
+        return mcp ? kDeclinedSitesCallersFormMcp : kDeclinedSitesCallersForm;
+    }
+    return mcp ? kDeclinedSitesCalleesFormMcp : kDeclinedSitesCalleesForm;
+}
 inline std::string declinedSitesLegend( const DeclinedSitesLegendFlags& f, bool mcp = false )
 {
     if( !f.any )
@@ -822,7 +841,7 @@ inline std::string declinedSitesLegend( const DeclinedSitesLegendFlags& f, bool 
         return {};
     }
     std::string out( mcp ? kDeclinedSitesMcpLead : kDeclinedSitesLegend );
-    out += f.callersForm ? ( mcp ? kDeclinedSitesCallersFormMcp : kDeclinedSitesCallersForm ) : ( mcp ? kDeclinedSitesCalleesFormMcp : kDeclinedSitesCalleesForm );
+    out += declinedSitesFormClause( f, mcp );
     out += f.side ? kDeclinedSitesSideClause : "";
     out += f.nameGate ? kDeclinedSitesNameGateClause : "";
     out += f.iface ? ( mcp ? kDeclinedSitesIfaceClauseMcp : kDeclinedSitesIfaceClause ) : "";
