@@ -7464,11 +7464,15 @@ struct IdentityNarrower
         // `ns::T` names a namespace-level T; claimed only from a file showing it defines things in `ns` — an
         // `ankerl::unordered_dense::map` must not become amc's `map` (measured on a private corpus)
         std::string nsKey;
-        collectIf( named, [ & ]( NodeId c )
-        {
-            buildShadowKey( nsKey, fileOf( c, ids ), q );
-            return ids.enclosingClass[ c ] == kNoNode && ( !verifiedNamespace || ids.fileNamespaces.find( nsKey ) != ids.fileNamespaces.end() );
-        } );
+        collectIf( named, [ & ]( NodeId c ) { return ids.enclosingClass[ c ] == kNoNode && ( !verifiedNamespace || namespaceLevelIn( c, q, ids, nsKey ) ); } );
+    }
+
+    // a namespace-level class whose FILE shows it defines things in namespace `ns` (ClassIdentity::fileNamespaces): the evidence
+    // a claim through a namespace qualifier stands on. `key` is the caller's scratch.
+    static bool namespaceLevelIn( NodeId c, std::string_view ns, const ClassIdentity& ids, std::string& key )
+    {
+        buildShadowKey( key, fileOf( c, ids ), ns );
+        return ids.enclosingClass[ c ] == kNoNode && ids.fileNamespaces.find( key ) != ids.fileNamespaces.end();
     }
 
     bool nameableFromCallerClass( const rw::SmallVec<NodeId, 2>& named, const Reference& r, const ClassIdentity& ids, const ChaUpNames& chaUp ) const
@@ -7883,6 +7887,7 @@ struct Narrower
         const ClassIdentity&                          ids;
         const std::vector<std::vector<NodeId>>&       implementors;   // class id → the classes deriving from it, ascending (Graph::implementors)
         const std::vector<std::vector<std::uint8_t>>& bound;          // parallel: how each edge was bound (ifacedispatch.h BaseBound)
+        const HashMap<std::string, std::vector<std::string>>& chaUp;  // class name → its direct base names: the graph the cone questions walk
         HashMap<std::string, std::string_view>        baseQualifier;  // "<derived class id>#<base name>" → the qualifier its base clause wrote (views into ing.references)
     };
     // the qualifier each C-family base clause wrote (`Http` for `: public Http::FilterManager`; Reference::memberRoot on an inherit
@@ -8419,19 +8424,16 @@ struct Narrower
         return count == 1 ? found : kNoNode;
     }
 
-    // a QUALIFIED clause: `q` is the qualifier's innermost name
+    // a QUALIFIED clause: `q` is the qualifier's innermost name — a class the candidate is nested in, else a namespace the
+    // candidate's file shows (IdentityNarrower::namespaceLevelIn, the evidence Rule 2's qualifier claim stands on)
     NodeId baseInQualifierScope( std::string_view q ) const
     {
         const ClassIdentity& ids = baseGuard->ids;
         guardKey.assign( q );
-        if( ids.classesByName.find( guardKey ) != ids.classesByName.end() )
-        {
-            return oneDrawnBase( [ & ]( NodeId b ) { return IdentityNarrower::outerNameOf( b, ids ) == q; } );
-        }
+        const bool qualifierIsClass = ids.classesByName.find( guardKey ) != ids.classesByName.end();
         return oneDrawnBase( [ & ]( NodeId b )
         {
-            buildShadowKey( guardKey, IdentityNarrower::fileOf( b, ids ), q );
-            return ids.enclosingClass[ b ] == kNoNode && ids.fileNamespaces.find( guardKey ) != ids.fileNamespaces.end();
+            return qualifierIsClass ? IdentityNarrower::outerNameOf( b, ids ) == q : IdentityNarrower::namespaceLevelIn( b, q, ids, guardKey );
         } );
     }
 
@@ -8792,25 +8794,23 @@ struct Narrower
     // ladderProves' three questions under the guard, kept here so the resolve loop reads them as one call each.
     // (a) `byName` is the by-name cone's answer (ReceiverEvidence::inCone: `owner` is `cls` or one of its bases); for the C
     //     family the guard must also bind candidate `c` to a class the walk from `cls` reaches.
-    bool coneProves( bool byName, const Reference& ref, std::string_view cls, std::string_view owner, NodeId c,
-                     const HashMap<std::string, std::vector<std::string>>& chaUp ) const
+    bool coneProves( bool byName, Lang lang, std::string_view cls, std::string_view owner, NodeId c ) const
     {
-        if( !byName || owner == cls || baseGuard == nullptr || !extent::inSet( extent::kHeadRuleLangs, ref.lang ) )
+        if( !byName || owner == cls || baseGuard == nullptr || !extent::inSet( extent::kHeadRuleLangs, lang ) )
         {
             return byName;
         }
-        return guardedConeOwns( cls, owner, c, chaUp );
+        return guardedConeOwns( cls, owner, c, baseGuard->chaUp );
     }
     // (b) a bare call's candidate with no owning class is a free / top-level function the call reaches — unless the caller's
     //     class or a base declares the name with no body: C++ finds that member first, and its bodies are the subclasses',
     //     which no lookup from here proves. `declared` memoises that per call (-1 unread). A member of a class the owner
     //     table could not name (`struct Outer::Inner { void start(); }`, scope `candScope`) is no free function: as before.
-    bool bareCallReachesFree( std::int8_t& declared, const Reference& ref, std::string_view cls, std::string_view candScope,
-                              const HashMap<std::string, std::vector<std::string>>& chaUp ) const
+    bool bareCallReachesFree( std::int8_t& declared, const Reference& ref, std::string_view cls, std::string_view candScope ) const
     {
         if( declared < 0 )
         {
-            declared = !cls.empty() && baseGuard != nullptr && extent::inSet( extent::kHeadRuleLangs, ref.lang ) && guardedConeDeclares( cls, ref.calleeName, chaUp ) ? 1 : 0;
+            declared = !cls.empty() && baseGuard != nullptr && extent::inSet( extent::kHeadRuleLangs, ref.lang ) && guardedConeDeclares( cls, ref.calleeName, baseGuard->chaUp ) ? 1 : 0;
         }
         return declared == 0 || scopeNamesClass( candScope );
     }
@@ -8829,14 +8829,9 @@ struct Narrower
     // does a level of the guarded walk (fieldWalk from `lvlEnd` on) declare `callee` with no body?
     bool levelDeclaresBodiless( std::size_t lvlEnd, std::string_view callee ) const
     {
-        for( std::size_t i = lvlEnd; i < fieldWalk.size(); ++i )
-        {
-            if( declaresBodiless( i, callee ) )
-            {
-                return true;
-            }
-        }
-        return false;
+        std::size_t at = lvlEnd;
+        return std::any_of( walkMeant.begin() + std::ptrdiff_t( lvlEnd ), walkMeant.end(),
+                            [ & ]( const MeantClasses& meant ) { return declaresBodiless( fieldWalk[ at++ ], meant, callee ); } );
     }
 
     const rw::SmallVec<NodeId, 2>* guardedBaseWalk( std::string_view typeName, const Reference& r, const HashMap<std::string, std::vector<std::string>>& chaUp,
