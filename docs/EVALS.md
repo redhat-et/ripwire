@@ -15992,3 +15992,151 @@ change with its own band and is deliberately out of scope here; it is recorded w
 the next round starts from the number. It is also the honest answer to "an answer should be bounded by the
 question, not the corpus": this lane bounded the *count-only* tail and fixed *where* the names go, and the
 remaining growth term is a schema that spells every ancestor directory once per row.
+
+## PRE-REGISTRATION 2026-11-16 (amendment 3) — ITEM P: is the answer in the FIRST bytes?
+
+Registered before measurement. This is the third of the round's three open items ("the answer in the first
+bytes"), and the only one no instrument has touched from this side. Two independent reads motivate it:
+
+- With the inventory treated as the weak evidence **its own legend declares**, the ranked rows satisfy
+  **0.4 %** of gold items on orientation questions. The map LISTS its answer; it does not lead with it.
+- A separate model, reading five `--for` cells blind, found the same shape from the other end: in **3 of 5**
+  cells the answer is a 0.4–2.1 KB routed section printed **after 36–54 KB** of generic bundle, and it
+  ranked "print the routed section first" as a change in its own right.
+
+**The method needs no build and no re-collection**: truncate the stored answers at a prefix, re-grade with
+the same grader and the same controls as Item G, and read completeness against prefix length.
+
+### Band P0 — ABSOLUTE and RELATIVE prefixes answer DIFFERENT questions and may never be mixed
+
+This band exists because the obvious version of this measurement is wrong. A 2 KB prefix is a third of a
+`flake8` answer and a twentieth of a `vscode` one, so **a curve over absolute bytes pooled across repos
+measures ANSWER SIZE, not ordering** — the same confound in a new costume as every pooled figure this round
+has had to withdraw. Both curves are therefore reported, and separately:
+
+- **Absolute** (1, 2, 4, 8, 16, 32 KB, ∞): the BUDGET question. An agent that truncates at 2 KB truncates at
+  2 KB whatever the repo, so this is the one a consumer feels. Reported **per repo**, and additionally
+  stratified by answer-size tertile, never as one pooled rate.
+- **Relative** (10, 25, 50, 75, 90, 100 % of each answer's own length): the ORDERING question, which is
+  scale-free by construction. This is the curve that bears on reordering; the absolute one cannot, because
+  a repo whose answers are short will look "front-loaded" merely for being small.
+
+**A reordering claim may rest only on the RELATIVE curve.** An absolute curve offered as evidence of
+ordering is a FAIL of this band.
+
+### Band P1 — the legend is a zero-evidence prefix and must be separated out
+
+The legend sits at the TOP of every answer and carries no gold anchors (measured: zero completeness cost
+across 449 cell×bound pairs). It is 531–4,305 B, median 1,796 — so **at a 2 KB prefix the median answer is
+nearly all legend, by construction.** A single curve would therefore measure the legend, not the ordering.
+Both curves are run twice, with the legend and with it stripped, and the pair is reported together. A
+one-variant readout is **NOT-ESTABLISHED**.
+
+### Band P2 — controls, the same three Item G required
+
+1. **identity** — at prefix = ∞ the grade must reproduce the untruncated grade exactly, excluding only the
+   provenance field;
+2. **floor** — at prefix = 0 completeness must be ZERO, which is what proves the metric can fall at all;
+3. **monotonicity** — completeness must be non-decreasing in prefix length. A rise-then-fall means the
+   truncation is corrupting what it keeps, and the readout is void rather than interesting.
+
+### Band P3 — per repo and per verb, both bounds, no pooling
+
+Same rule as K2/G5/C2. The 11 verb populations stay apart: a `--whereis` answer and a `--for` bundle differ
+by 20× in length, so one prefix means something different in each.
+
+### Band P4 — the decision rule, fixed before the data
+
+Reordering is justified **only if the evidence is BACK-loaded**: at the 50 % relative prefix, legend
+stripped, completeness must be **below 75 % of its full-length value** in at least a third of repos. If the
+evidence is front-loaded instead, reordering buys nothing and Item P is a NEGATIVE result that closes the
+question — which is a useful outcome and will be reported as one, not quietly dropped. This threshold is
+registered now so the readout cannot pick it.
+
+### What Item P does NOT measure
+
+A truncated XML document **is not well-formed**. This measures whether the EVIDENCE is present in a prefix,
+not whether a consumer could parse it, and no claim is made that a truncated answer is usable. The honest
+consumer model is an agent whose context cuts the tail of a long answer, or a reader that stops early — and
+for a well-formed short answer the surface already in the binary is a smaller budget, not a byte cut.
+
+## READOUT — ITEM P: the evidence IS back-loaded, so reordering is justified; and at a tight budget the legend IS the answer
+
+Run 2026-11-16 on the 320-cell store, `harness/prefix_curve.py`. Whole measurement: **4.5 s**, no build, no
+re-collection.
+
+### Band P2 — the controls, and one of them VOIDS a bound
+
+| control | result |
+| --- | --- |
+| identity (prefix = ∞ reproduces the untruncated grade) | **PASS** |
+| floor (prefix = 0 yields ZERO complete cells) | **PASS** |
+| monotonicity, item/lenient and symbol+file | **PASS** |
+| monotonicity, **item/strict** | **FAIL** |
+
+The strict bound runs 40.8 % → 36.3 % → 49.7 % across the 75 / 90 / 100 % prefixes. P2 says a rise-then-fall
+means truncation is corrupting what it keeps and the readout is void rather than interesting, so **the strict
+bound is VOID under truncation** — and the mechanism is exact, not a guess:
+
+> The strict bound is *defined* as evidence outside `<tail>`, and it finds the tail with a
+> `<tail …>…</tail>` span match. A prefix that cuts mid-tail removes the closing tag, the span stops
+> matching, nothing is stripped, and **tail evidence counts toward strict**. Include the close tag again and
+> the span is stripped and strict drops. Verified on a minimal document.
+
+So strict's value under truncation depends on whether the cut happens to land inside the tail. **It is not
+measuring what it means.** Reported as a failed control, with the two monotonic bounds carrying the result.
+
+### Band P4 — the registered verdict: BACK-LOADED
+
+Legend stripped, 50 % relative prefix against each repo's own full-length completeness. The rule, fixed
+before the data: back-loaded iff below 75 % of full in at least a third of repos.
+
+| bound | repos back-loaded | bar | verdict |
+| --- | ---: | ---: | --- |
+| item/lenient | **14 of 22 (64 %)** | ≥ 33 % | **MEETS** |
+| symbol+file | **7 of 15 (47 %)** | ≥ 33 % | **MEETS** |
+
+Worst per repo (share of full completeness retained at half the answer): cockroach **0.20**, angular 0.38,
+zed 0.40, axum 0.50, cpython 0.50; tmux **0.42**, kysely 0.44, mdbook 0.60.
+
+**So reordering is justified — by a rule written before the measurement.** It is the first lever this round
+the registered rule has endorsed rather than failed; the three tail items all failed theirs. Half of a
+`cockroach` answer carries a fifth of the answers its full length does.
+
+### The finding that was not the point of the measurement: at a tight budget, the legend IS the answer
+
+| budget | item/lenient with legend | legend stripped | symbol+file with legend | legend stripped |
+| --- | ---: | ---: | ---: | ---: |
+| 1 KB | 0.0 % | 3.8 % | 3.0 % | **33.3 %** |
+| 2 KB | 0.0 % | 14.6 % | 17.8 % | **54.1 %** |
+| 4 KB | 8.3 % | 20.4 % | 43.7 % | 60.7 % |
+| 8 KB | 23.6 % | 30.6 % | 63.0 % | 71.1 % |
+| 32 KB | 51.6 % | 55.4 % | 85.9 % | 85.9 % |
+
+At a **2 KB** budget the legend costs **36 points** of symbol-grain completeness and **all** of the
+item-grain's — a median legend is 1,796 B, so a 2 KB answer is almost entirely schema prose. This reframes
+the legend work: not "bytes saved" but **answers delivered inside a budget**. It is the same lever measured
+on a different axis, and the axis a context-limited agent actually lives on.
+
+### Band P0 — and the absolute curve DOES depend on answer size, which is why it is kept apart
+
+At one fixed 8 KB budget, as a share of each tertile's own full-length completeness:
+
+| tertile | median answer | item/lenient | symbol+file |
+| --- | ---: | ---: | ---: |
+| SMALL (hono 3.5 KB, tmux 3.9 KB, ninja 4.3 KB) | 8,948 B | **76.9 %** | **87.3 %** |
+| MID | 21,046 B | 56.7 % | 75.6 % |
+| LARGE (angular/envoy 35 KB, vscode 43.5 KB) | 32,909 B | **38.9 %** | — |
+
+**A fixed byte budget costs a large-answer repo twice the completeness it costs a small one.** That is the
+confound P0 was registered to separate: pooled, this curve would have reported a single "completeness at
+8 KB" that is really a statement about which repos are in the corpus. The ordering verdict above therefore
+rests on the RELATIVE curve only, exactly as P0 requires.
+
+### What this does and does not license
+
+It licenses **reordering work** — leading with the routed section, the direct answer, the rows that carry
+gold — and it says the gain is real on more than half the corpus. It does **not** say what the new order
+should be: this measures where evidence sits today, not which arrangement is best. And it makes no claim
+that a truncated answer is parseable; a truncated XML document is not well-formed, and the honest consumer
+model is an agent whose context cuts a long answer, not a byte-exact cut.
