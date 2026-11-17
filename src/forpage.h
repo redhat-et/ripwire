@@ -1307,7 +1307,7 @@ struct TailTermCand
 };
 struct TailTermCands
 {
-    std::vector<TailTermCand> cands;     // (row, score desc, pr desc, id asc)
+    std::vector<TailTermCand> cands;     // (row, score desc, pr desc, line asc, name asc, id asc)
     std::vector<char>         docFile;   // per row: its file holds a doc unit, so it adds no name
 };
 // TSYM-WRONG-DECOYS: keep the candidates on distinctive evidence (the rule above tailTermCands; fortailterms.h knobs). `nameMask` is
@@ -1398,8 +1398,26 @@ inline TailTermCands tailTermCands( const FileTail& t, const IngestResult& ing, 
         }
     }
     keepDistinctiveTailTerms( out.cands, nameMask, fileMatches, t, terms );
-    std::ranges::sort( out.cands, []( const TailTermCand& a, const TailTermCand& b )
-                       { return a.row != b.row ? a.row < b.row : a.score != b.score ? a.score > b.score : a.pr != b.pr ? a.pr > b.pr : a.id < b.id; } );
+    // No float-equality tie (.coderabbit.yaml determinism rule): PageRank decides only by strict > either way; an exact PageRank tie
+    // breaks on the content key (definition line, then name), and the id only between same-line namesakes.
+    const auto byContent = [&ing]( const TailTermCand& a, const TailTermCand& b )
+    {
+        const Symbol& x = ing.symbols[a.id];
+        const Symbol& y = ing.symbols[b.id];
+        return x.line != y.line ? x.line < y.line : x.name != y.name ? x.name < y.name : a.id < b.id;
+    };
+    std::ranges::sort( out.cands, [&byContent]( const TailTermCand& a, const TailTermCand& b )
+                       {
+                           if( a.row != b.row || a.score != b.score )
+                           {
+                               return a.row != b.row ? a.row < b.row : a.score > b.score;
+                           }
+                           if( a.pr > b.pr || b.pr > a.pr )
+                           {
+                               return a.pr > b.pr;
+                           }
+                           return byContent( a, b );
+                       } );
     return out;
 }
 inline void fileTailAddTermNames( FileTail& t, const IngestResult& ing, const std::vector<float>& tieRank, const std::vector<NodeId>& headIds,
@@ -1413,7 +1431,8 @@ inline void fileTailAddTermNames( FileTail& t, const IngestResult& ing, const st
     {
         const std::string_view name = ing.symbols[c.id].name;
         std::string            own  = t.syms[c.row];   // the row's own names: a name already there is not repeated
-        if( tc.docFile[c.row] || count[c.row] >= kTailSymTermNames || !appendTailSymName( own, name ) )
+        // A row with no sym= (a path-only row, or a head file whose names the head already shows) stays path-only: tsym= rides sym=.
+        if( own.empty() || tc.docFile[c.row] || count[c.row] >= kTailSymTermNames || !appendTailSymName( own, name ) )
         {
             continue;
         }

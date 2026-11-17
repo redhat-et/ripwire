@@ -38,6 +38,12 @@
 #                    holds one task word and its path none: no tsym=; zz_scheduler_pool.py's four restorer_* names each hold two
 #                    words with the path, but four symbols of the file match (> 3): no tsym=; premise: both rows listed, the names
 #                    unprinted on the ablation. Red on the pre-fix lane (8eda7e7bf: tsym="restorer_queue", "restorer_a,restorer_b").
+#   k  path-only:    (CodeRabbit #678) a second fixture, fx2: head file c000.py's tail row has no sym= (the head shows its one scored
+#                    name), and its unscored restorer_scheduling_plan carries two task words; the row stays `<t p="c000.py"/>`, the
+#                    name nowhere in the answer; premise: the ablated row is path-only. Red on 546cc81f9 (tsym="restorer_scheduling_plan").
+#   l  tie order:    (CodeRabbit #678: no float-equality tie) fx2's zz_scheduler_plan.py defines restorer_zeta before restorer_alpha,
+#                    equal score and equal PageRank (neither called): tsym= keeps definition-line order, "restorer_zeta,restorer_alpha";
+#                    and tailTermCands' comparator in src/forpage.h tests PageRank by strict > only (red on 546cc81f9: `a.pr != b.pr`).
 #
 # Usage: test/tailsymtermscheck.sh [BIN]   (default build/ripwire; RIPWIRE_BIN also honoured)
 
@@ -97,6 +103,16 @@ printf 'def alpha_queue():\n    """widget"""\n    return 1\n\n\ndef restorer_que
 printf 'def alpha_pool():\n    """widget"""\n    return 1\n' > "$F/zz_scheduler_pool.py"
 for w in a b c d; do printf '\n\ndef restorer_%s():\n    return 0\n' "$w" >> "$F/zz_scheduler_pool.py"; done
 printf '# Restorer scheduling, widget frobnicate notes\n\nThe widget restoration scheduler notes.\n' > "$F/docs/restoration.md"
+# fx2 (arms k, l): 60 strong files, head file c000.py with one unscored two-word name, and a weak file with two tied names
+F2="$TMP/fx2"; mkdir -p "$F2"
+i=0
+while [ $i -lt 60 ]; do
+    n=$( printf '%03d' $i )
+    printf 'def widget_frobnicate_%s():\n    """widget frobnicate helper"""\n    return 1\n' "$n" > "$F2/c$n.py"
+    i=$(( i + 1 ))
+done
+printf '\n\ndef restorer_scheduling_plan():\n    return 0\n' >> "$F2/c000.py"
+printf 'def alpha_plan():\n    """widget"""\n    return 1\n\n\ndef restorer_zeta():\n    return 0\n\n\ndef restorer_alpha():\n    return 0\n' > "$F2/zz_scheduler_plan.py"
 Q="widget frobnicate restoration scheduler"
 QN="widget frobnicate helper"
 
@@ -117,6 +133,8 @@ printf '%s\n' \
   '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
   "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"for\",\"arguments\":{\"task\":\"$Q\"}}}" > "$TMP/mcp.in"
 ( cd "$F" || exit 9; HOME="$TMP/home" TMPDIR="$TMP/" "$BIN" "$F" --mcp --no-cache < "$TMP/mcp.in" ) > "$TMP/d.mcp" 2> "$TMP/d.mcp.err"   # status: the server's rc is not the verdict; arm (g MCP) reads the tools/call reply
+( cd "$F2" || exit 9; HOME="$TMP/home" TMPDIR="$TMP/" "$BIN" "$F2" --no-cache "--for=$Q" ) > "$TMP/k.xml" 2> "$TMP/k.xml.err"; echo $? > "$TMP/k.xml.rc"
+( cd "$F2" || exit 9; HOME="$TMP/home" TMPDIR="$TMP/" RIPWIRE_NO_TAIL_SYM_TERMS=1 "$BIN" "$F2" --no-cache "--for=$Q" ) > "$TMP/ka.xml" 2> "$TMP/ka.xml.err"; echo $? > "$TMP/ka.xml.rc"
 RIPWIRE_NO_FILE_SYMS=1 run "$TMP/ns.xml" --no-cache "--for=$Q"   # arm i's premise: with no <syms> block, nothing is cut from tsym=
 export RIPWIRE_NO_TAIL_SYM_TERMS=1
 run "$TMP/a.xml"   --no-cache "--for=$Q"
@@ -125,9 +143,9 @@ run "$TMP/a.json"  --no-cache "--for=$Q" --json
 run "$TMP/an.xml"  --no-cache "--for=$QN"
 unset RIPWIRE_NO_TAIL_SYM_TERMS
 
-python3 - "$TMP" <<'PY'
+python3 - "$TMP" "$ROOT" <<'PY'
 import html, json, re, sys
-T = sys.argv[1]
+T, ROOT = sys.argv[1], sys.argv[2]
 fails = []
 def rd(n):
     return open(f"{T}/{n}", encoding="utf8", errors="replace").read()
@@ -145,7 +163,7 @@ def attr(tag, a):
     return [x for x in html.unescape(m.group(1)).split(",") if x] if m else []
 def tail_rows(t):   # (path, sym names, tsym names)
     return [(html.unescape(re.search(r' p="([^"]*)"', g).group(1)), attr(g, "sym"), attr(g, "tsym")) for g in tail_tags(t)]
-for n in ("ns.xml", "d.xml", "d.full", "d.cmp", "d.json", "n.xml", "w1.xml", "w2.xml", "a.xml", "a.full", "a.json", "an.xml"):
+for n in ("k.xml", "ka.xml", "ns.xml", "d.xml", "d.full", "d.cmp", "d.json", "n.xml", "w1.xml", "w2.xml", "a.xml", "a.full", "a.json", "an.xml"):
     if not ok(n):
         arm("run " + n, False, "rc=" + rd(n + ".rc").strip() + " bytes=" + str(len(rd(n))))
 D, A = tail_rows(rd("d.xml")), tail_rows(rd("a.xml"))
@@ -198,8 +216,9 @@ def syms(t):
     return m.group(0) if m else ""
 pz = [ts for p, s, ts in D if p.endswith("zz_restorer_probe.py")]
 pn = [ts for p, s, ts in tail_rows(rd("ns.xml")) if p.endswith("zz_restorer_probe.py")]
-arm("i premise", 'n="probe_schedulers"' in syms(rd("a.xml")) and len(pz) == 1 and pn == [["probe_schedulers"]],
-    f"ablated <syms> names probe_schedulers={'n=\"probe_schedulers\"' in syms(rd('a.xml'))}; zz_restorer_probe.py tsym with no <syms>={pn}")
+probe_picked = 'n="probe_schedulers"' in syms(rd("a.xml"))   # computed before the f-string: no backslash in its expression (Python < 3.12)
+arm("i premise", probe_picked and len(pz) == 1 and pn == [["probe_schedulers"]],
+    f"ablated <syms> names probe_schedulers={probe_picked}; zz_restorer_probe.py tsym with no <syms>={pn}")
 arm("i syms first", syms(rd("d.xml")) == syms(rd("a.xml")) and not any("probe_schedulers" in ts for p, s, ts in D),
     "default <syms> equals the ablated block; no tsym= repeats a name it prints")
 # j — decoy class (TSYM-WRONG-DECOYS): no name on one generic word, none from a file whose topic the word is
@@ -209,6 +228,21 @@ arm("j premise", len(jq) == 1 and len(jp) == 1 and "restorer_queue" not in rd("a
     f"zz_queue.py rows={len(jq)} zz_scheduler_pool.py rows={len(jp)}; their matching names unprinted on the ablation")
 arm("j one word", len(jq) == 1 and jq[0][1] == [], f"zz_queue.py tsym={jq[0][1] if jq else None} (restorer_queue: one task word, path none)")
 arm("j file topic", len(jp) == 1 and jp[0][1] == [], f"zz_scheduler_pool.py tsym={jp[0][1] if jp else None} (4 matching symbols > 3)")
+# k — a row with no sym= stays path-only
+K, KA = tail_tags(rd("k.xml")), tail_tags(rd("ka.xml"))
+kc = [g for g in K if ' p="c000.py"' in g]
+kac = [g for g in KA if ' p="c000.py"' in g]
+arm("k premise", kac == ['<t p="c000.py"/>'] and "restorer_scheduling_plan" not in rd("ka.xml"),
+    f"fx2 ablated c000.py row={kac}; restorer_scheduling_plan unprinted={'restorer_scheduling_plan' not in rd('ka.xml')}")
+arm("k path-only", kc == ['<t p="c000.py"/>'] and "restorer_scheduling_plan" not in rd("k.xml"), f"fx2 default c000.py row={kc}")
+# l — an exact PageRank tie breaks on the definition line, and the comparator never tests PageRank for equality
+lp = [attr(g, "tsym") for g in K if ' p="zz_scheduler_plan.py"' in g]
+arm("l tie order", lp == [["restorer_zeta", "restorer_alpha"]], f"fx2 zz_scheduler_plan.py tsym={lp} (want definition-line order)")
+src = open(ROOT + "/src/forpage.h", encoding="utf8").read()
+cmp_at = src.find("inline TailTermCands tailTermCands(")
+cmp_src = src[cmp_at:src.find("\n}\n", cmp_at)] if cmp_at >= 0 else ""
+arm("l no float ==", bool(cmp_src) and "a.pr > b.pr || b.pr > a.pr" in cmp_src and not re.search(r"\bpr\s*[!=]=", cmp_src),
+    f"tailTermCands found={bool(cmp_src)}; PageRank compared by strict > only")
 print("tailsymtermscheck: " + ("FAIL " + ",".join(fails) if fails else "PASS"))
 sys.exit(1 if fails else 0)
 PY
