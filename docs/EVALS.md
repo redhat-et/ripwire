@@ -17263,3 +17263,88 @@ distinct values over 252 rows) reconstructs every `run=` exactly.
 - **Backward compatibility is a question, not an assumption.** A consumer reading `run=` breaks. This band
   does NOT decide whether that is acceptable; it measures the saving and states the break, and the
   schema-version call is the owner's.
+
+## READOUT — ITEM E3: the `:declined` hypothesis is REFUTED, and the answer was already in the bundle
+
+Measured 2026-11-17 over the 19 `:declined` cells and a matched pool of 43 conceptual cells on the same
+seven repos. The partition reproduced exactly before anything was read from it.
+
+### The hypothesis, and why it fails
+
+Registered: *a declined route should answer SHORTER, or hand over to a cheaper verb, because the tool is
+admitting it has no precise anchor.* **Refuted on two independent grounds.**
+
+1. **`:declined` is not the predictive partition — most of the headline was a repo confound.** The class
+   lives entirely in the `ld`/`ld2` large-dev families on 7 repos. Matched to those repos the byte ratio is
+   **1.13× (n=19 vs 43)**, not the 1.26× the whole-corpus comparison showed, and declined is *smaller* than
+   matched conceptual on vscode (45,512 vs 48,757) and zed (37,288 vs 41,200). Every structural rate is
+   statistically indistinguishable: tail-only items 12.3 % [6.8, 21.3] vs 12.5 % [8.3, 18.4]; items absent
+   11.1 % vs 14.9 %; cost of dropping `<tail>` 13.9 % vs 14.7 %. **The decisive control:** 5 of the 43
+   matched cells are also `path from A to B` queries that did NOT decline, and they behave identically —
+   3 of 5 resolve a `<graph_verb>`, carrying 11 of 14 items in that section alone. The structure belongs to
+   the QUERY SHAPE, not the route decline.
+2. **The refusal is correct, and the label misdescribes it.** In **16 of 16** distinct (word, corpus) facts
+   the refused word is query prose — `path` 7 cells, `add` 4, `from` 2, `and`, `cluster`, `code`, `user`,
+   `default`, `handler`. 18 of 19 declined on `defs > 3` with a **minimum of 4 defs**; one on the carrier
+   cap alone. Ten of the nineteen queries are literally `path from <A> to <B>`, where the refused word is
+   `path` or `from`. The identifiers the asker actually named are camelCase/dotted, exempt by design, and
+   were **mention-anchored anyway in 12 of 19 cells**. So confidence in the anchor the user meant was never
+   low; the decline prevented a wrong anchor and cost nothing.
+
+**What this supersedes.** This document's own route-partition readout called `:declined` *"lowest
+confidence, highest spend… that looks backwards to us"*. It is not backwards and the spend is 1.13×. The
+figure stands as measured; the interpretation is withdrawn.
+
+### The finding that was not the point of the measurement: `<graph_verb>` IS the answer
+
+`<graph_verb>` is not a routing hint. It is a complete embedded `--path` answer — on `ld-cockroach-03` a
+`<path … reachable="1" hops="5">` carrying the exact gold chain in 3,159 chars.
+
+Grading that section **alone** against the gold, on the 9 declined cells that resolve one:
+
+| | |
+| --- | ---: |
+| items the full answer satisfies | 42 of 42 |
+| items `<graph_verb>` ALONE satisfies | **34 of 42 (81.0 %)** |
+| its share of those cells' bytes | **18.8 %** |
+| cells where it alone is 100 % complete | **5 of 9**, at **7.8–28.4 %** of bytes |
+| cost of dropping `<tail>` on these 9 cells | **1 of 42 items (2.4 % [0.4, 12.3])** |
+
+The 34/42 is a **floor**, not a total: it is graded from the embedded output, which shares the bundle's
+budget. A standalone `--path` run could only be more complete.
+
+And the complement is just as sharp. The **10 cells with no resolved routed section** satisfy only 30 of
+39, and dropping their tail costs **9 of 30 (30.0 % [16.7, 47.9])**. So the width earns its bytes in
+exactly the half where nothing resolved — which is the falsification the band was told to look for first,
+and it holds for that half.
+
+**One substitution was executed** (read-only, repo at the gold's pin): `ld-zed-06` is the cell whose
+35,453-byte `--for` answer scores **0 of 4**. The gold's own prescribed verb, `--callers=Editor::backspace`,
+returns **7,721 B and satisfies 2 of 4**. Two of four in 21.8 % of the bytes, against zero of four in 100 %.
+
+### Two instrument defects found, and they matter beyond this band
+
+1. **A section scan must mask CDATA, not only comments.** `<fold>`'s `<b>` rows carry raw source, and C++
+   source contains `<std::string>` and `<void(Server::Instance& server)>`, which a tag regex reads as
+   elements. **228 of 295 stored answers contain CDATA.** Unmasked, the scan drifted element depth by +2
+   inside `<fold>` and **lost an entire 16.9 KB `<graph_verb>` section** — the section this band turns on.
+   `anchor_grade.py` and `cut_ladder.py` carry the same exposure in `TAIL_RX` / `section:NAME`. It is inert
+   for `<tail>` (no CDATA inside) but a future `section:fold` cut would hit it, and every section figure
+   this round has rested on those two files.
+2. **ITEM C's condition fired on STUBS, which partly explains its failure.** `cut_ladder.py`'s `_routed()`
+   matches tag presence, and `<lego>` / `<compose>` are emitted as `shown="0" capped="1"` stubs when nothing
+   resolved. Measured: `_routed()` fires on **19 of 19** declined and **39 of 43** conceptual cells, while a
+   routed section with CONTENT exists in only 13 of 19 and 19 of 43. In **5 of 19** declined cells *every*
+   routed section is a stub, and `tail-if-routed` collapses their tail for nothing — costing **5 of the 14
+   items those cells had satisfied (36 %)**.
+
+   | gate | cost |
+   | --- | ---: |
+   | tag presence (what item C tested) | 5 of 14 items on the stub-only cells (36 %) |
+   | `shown > 0` | 5 of 58 (8.6 %) |
+   | `graph_verb` with `reachable="1"` | **1 of 42 (2.4 %)** |
+
+   **This independently corroborates item C″** (registered above: `path reachable="1"` ∨ `met_bridge`, the
+   `reexports` arm dropped). Two bands, different populations, different graders, same conclusion — the
+   tighter the resolution gate, the smaller the loss. C″ still may not be published from the cells that
+   produced the hypothesis, but it is now the best-supported cut candidate on the table.
