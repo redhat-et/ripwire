@@ -9652,6 +9652,47 @@ inline const char* legoContractCaveat( bool isContractExtracted, bool isTargeted
     return ( isTargeted && !isContractExtracted ) ? "\" methods=\"0\" caveat=\"not-extracted-for-lang" : "";
 }
 
+// lane lego-unread-for-lang — the SIBLING of the caveat above, for the other half of the answer. The method
+// contract is "not extracted for this language"; the implementor relation can be NOT READ AT ALL for it, and the
+// two are independent facts about one row (a Go interface has both; an ObjC one has only this).
+//
+// WHY. `implementors=` is built from the derived → base extends/implements edges captureBases reads
+// (src/ingest_relations.h), and the clause it walks does not exist in every language: Go states conformance
+// structurally and writes no clause at all, and ObjC / GDScript / Clojure / C write theirs in a shape that chain
+// does not read (LangFacts::implementorEdges, src/langfacts.h — measured per language by
+// test/legounreadlangcheck.sh (D), not asserted here). The targeted verb printed that as `implementors="0"`, so
+// `--lego=Packager` on nfpm answered a confident zero about an interface six packagers implement: the reader was
+// told to write from scratch with the template it asked for sitting in the tree. This repository's rule is that a
+// zero means "none found", never "none exists", and a count that cannot be a total is labelled a floor — and
+// neither reading is available here, because nothing was measured to be short OF.
+//
+// So the count is OMITTED and this attribute rides instead: unknown, not zero. That is exactly the shape the
+// arch-honest lane already uses for the same class of gap (`no_file_edges=LANGS`, src/graphlegend.h: "A <f> row
+// with no_file_edges= and no edge observed has no afferent=/instab=/transitive=: unknown, not zero"), and the
+// value names the language for the same reason that one does — the reader of a mixed tree needs to know WHICH
+// row's silence is unmeasured. RANKED (--for) mode cannot reach this: it selects interfaces by having a non-empty
+// implementor list, so it never prints a zero for a reader to misread (packLego's ranked branch below).
+//
+// A count that exists ANYWAY keeps its number beside the disclosure (the caller's own count, a floor over whatever
+// evidence did reach the graph) rather than being hidden — the same decision archhonestcheck's arm (K) pins for a
+// no-edge language that does have an observed edge.
+/// Whether this language's implementor relation is read at all — the ONE spelling of the question, so the emitter and
+/// anything that later reasons about an <iface> row cannot drift apart.
+inline bool legoImplementorEdgesUnread( Lang lang ) noexcept
+{
+    return langFacts( lang ).implementorEdges == ImplementorEdges::Unread;
+}
+
+/// The TARGETED <iface> row's count attributes: ` implementors="N"` where the relation is read, the disclosure alone
+/// where it is not and nothing was found (absent is the only honest reading), and BOTH where it is not read and an
+/// edge reached the graph anyway — the count is then a floor over that evidence, which hiding it would lose.
+inline std::string legoTargetedImplementorsAttrs( Lang lang, std::size_t directCount )
+{
+    const bool  unread = legoImplementorEdgesUnread( lang );
+    std::string out    = unread && directCount == 0 ? std::string() : " implementors=\"" + std::to_string( directCount ) + "\"";
+    return unread ? out + " implementors_unread_for_lang=\"" + langTag( lang ) + "\"" : out;
+}
+
 // --lego's ROLE order over the tower (graph.h applyNameTower), view-local: the answer to "--lego=NAME" is a TYPE with
 // something to show, so every type kind (Class/Struct/Interface/named type) shares ONE rung, and on it the keys are,
 // in order: at least one implementor (the <impl> rows); a method contract that is extracted (legoMethodContractSound —
@@ -10167,7 +10208,11 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
         const LegoClosurePage deep = focusId != kNoNode ? legoClosurePage( implementors, targeted.implementorBound != nullptr ? *targeted.implementorBound : kNoImplementorBound, id, targeted.pageLimit, targeted.pageOffset ) : LegoClosurePage{};
         if( focusId != kNoNode )
         {
-            hdr = "\" defs=\"" + std::to_string( definitionCountOfName( ing, id ) ) + "\" implementors=\"" + std::to_string( impls.size() + ( mainRows.empty() ? 0u : 1u ) ) + "\""
+            // lane lego-unread-for-lang: the count attributes are one decision, taken in legoTargetedImplementorsAttrs —
+            // a language whose implementor relation is not read at all prints NO count, because a zero there would be a
+            // claim about evidence that was never looked at.
+            hdr = "\" defs=\"" + std::to_string( definitionCountOfName( ing, id ) ) + "\""
+                + legoTargetedImplementorsAttrs( isym.lang, impls.size() + ( mainRows.empty() ? 0u : 1u ) )
                 + legoClosureAttrs( deep, std::string( pathRel( isym.fileId ) ) + ":" + isym.name,
                                     deep.unwalked.empty() ? std::string() : std::string( pathRel( ing.symbols[ deep.unwalked.front() ].fileId ) ) + ":" + ing.symbols[ deep.unwalked.front() ].name,
                                     targeted.pageLimit );

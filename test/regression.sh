@@ -684,6 +684,7 @@ for _g in \
     legobundlecheck \
     legocheck \
     legotransitivecheck \
+    legounreadlangcheck \
     lexicalnoskipcheck \
     liftdisclosurecheck \
     limitstablecheck \
