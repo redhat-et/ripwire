@@ -10542,6 +10542,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         bool                                          pyBindRead = false;
         std::optional<std::uint32_t>                  pyBindFile;   // the one file a Python `import` binding of the receiver names
         std::int8_t                                   namesCls = -1;   // -1 unread; the class the root names, when it does
+        std::int8_t                                   memberDeclared = -1;   // -1 unread; the caller's class or a base declares the callee bodiless (C family)
         std::string_view                              cls;
     };
     const auto ladderCaller = [ & ]( LadderRefFacts& f )
@@ -10622,6 +10623,20 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         return f.namesCls != 0 && recvEv.inCone( f.cls, owner )   // a class-name receiver: the class or a base,
             && recvEv.onSide( ref, c, /*classSide=*/true );          // its CLASS side
     };
+    // CPP-BASE-BY-NAME: `owner` (candidate c's class) is in class `cls`'s base cone — for the C family, as a class the walk from
+    // `cls` binds c to, not a namesake of one of its bases (resolve.h Narrower::guardedConeOwns)
+    const auto coneProves = [ & ]( const Reference& ref, std::string_view cls, std::string_view owner, NodeId c ) -> bool
+    {
+        if( !recvEv.inCone( cls, owner ) )
+        {
+            return false;
+        }
+        if( owner == cls || narrower.baseGuard == nullptr || !extent::inSet( extent::kHeadRuleLangs, ref.lang ) )
+        {
+            return true;
+        }
+        return narrower.guardedConeOwns( cls, owner, c, chaUp );
+    };
     const auto ladderProves = [ & ]( LadderRefFacts& f, NodeId c ) -> bool
     {
         using Root = LadderRefFacts::Root;
@@ -10645,7 +10660,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                     ladderCaller( f );
                     if( !f.callerCls.empty() )
                     {
-                        return !owner.empty() && recvEv.inCone( f.callerCls, owner ) && recvEv.onSide( ref, c, f.callerStatic );
+                        return !owner.empty() && coneProves( ref, f.callerCls, owner, c ) && recvEv.onSide( ref, c, f.callerStatic );
                     }
                     return owner.empty() && cs.fileId == ref.fileId && cs.kind == SymKind::Method;   // an object literal's own member
                 }
@@ -10653,7 +10668,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 {
                     const std::string_view owner = ownerIsClass( c );
                     ladderCaller( f );
-                    return !f.callerCls.empty() && !owner.empty() && owner != f.callerCls && recvEv.inCone( f.callerCls, owner )
+                    return !f.callerCls.empty() && !owner.empty() && owner != f.callerCls && coneProves( ref, f.callerCls, owner, c )
                         && recvEv.onSide( ref, c, f.callerStatic );
                 }
                 case Root::Named:
@@ -10664,12 +10679,20 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         if( langFacts( ref.lang ).implicitReceiver )
         {
             const std::string_view owner = ownerIsClass( c );
+            ladderCaller( f );
             if( owner.empty() )
             {
-                return true;   // a free / top-level function
+                // a free / top-level function — unless the caller's class or a base declares the name with no body (CPP-BASE-BY-NAME:
+                // C++ finds that member first; its bodies are the subclasses', which no lookup from here proves). A member of a
+                // class the owner table could not name (`struct Outer::Inner { void start(); }`) is no free function: as before.
+                if( f.memberDeclared < 0 )
+                {
+                    f.memberDeclared = !f.callerCls.empty() && narrower.baseGuard != nullptr && extent::inSet( extent::kHeadRuleLangs, ref.lang )
+                                       && narrower.guardedConeDeclares( f.callerCls, ref.calleeName, chaUp ) ? 1 : 0;
+                }
+                return f.memberDeclared == 0 || narrower.scopeNamesClass( cs.scope );
             }
-            ladderCaller( f );
-            return !f.callerCls.empty() && recvEv.inCone( f.callerCls, owner );
+            return !f.callerCls.empty() && coneProves( ref, f.callerCls, owner, c );
         }
         if( ref.lang == Lang::Rust || ref.lang == Lang::C )
         {
@@ -11386,6 +11409,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         }
     }
     fillImplementorBound( g, boundEdges );
+    // CPP-BASE-BY-NAME: from here on the C-family base walk reads how each base clause was bound (resolve.h BaseWalkGuard)
+    static_assert( Narrower::kBaseBoundOther == std::uint8_t( BaseBound::Other ), "resolve.h names BaseBound::Other by value" );
+    const Narrower::BaseWalkGuard baseWalkGuard{ classIds, g.implementors, g.implementorBound, Narrower::baseClauseQualifiers( ing ) };
+    narrower.baseGuard = &baseWalkGuard;
     g.rubyMainMixins = rubyMainObjectMixins( ing, rubyBases );
     // lane L6: the interface-typed dispatch tier (ifacedispatch.h) over the map just built, and the edges its one-implementor
     // answer committed (outProv=6, rendered via="impl"); the arity rule it shares with the name tiers' B2.2 filter below.
@@ -12619,12 +12646,17 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             if( !memberRule3.empty() && !isMemberCallRef( r ) )
             {
                 // an implicit receiver's Rule 3 answer, kept where the lookup proves it — Rule 3's own decision, as before
+                narrower.coneUnbound = false;
                 for( NodeId c : memberRule3 )
                 {
                     if( ladderProves( ladderFacts, c ) )
                     {
                         provedScratch.push_back( c );
                     }
+                }
+                if( narrower.coneUnbound )
+                {
+                    provedScratch.clear();   // CPP-BASE-BY-NAME: a candidate behind a base nothing could bind — no other candidate is the proven one
                 }
                 if( !provedScratch.empty() )
                 {
@@ -12636,12 +12668,17 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             if( !narrowed )
             {
                 provedScratch.clear();
+                narrower.coneUnbound = false;
                 for( NodeId c : cand )
                 {
                     if( ladderProves( ladderFacts, c ) )
                     {
                         provedScratch.push_back( c );
                     }
+                }
+                if( narrower.coneUnbound )
+                {
+                    provedScratch.clear();   // CPP-BASE-BY-NAME: the call may mean the member behind the unbound base: every candidate stays, hedged
                 }
                 if( provedScratch.empty() )
                 {
