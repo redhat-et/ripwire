@@ -691,7 +691,15 @@ probeFor()
 # main c3b678bf). The always-on health shape= reading now says what tangled means (cyclic_files= at 1 in 20 of dep_files=) instead
 # of the nccd>2 rule it replaced: +36 B on every --deps answer. The cyclic_files= and containment_edges= readings ride only when
 # their attribute does (absent at 0) and add nothing on this cycle-free, Rust-free probe.
+# PINNED 2026-11-17 (lane abiarch-retire-register): ripwire.abi/v1 2020 (measured 2003) and ripwire.arch/v1 1490 (measured 1477). Neither
+# schema had a pin: the (U) sweep reaches neither verb (--abi is a sub-verb of --stray-content and its probe refuses on this
+# fixture; --arch= needs a rules file and is not probed), so their compact legends were bounded by nothing and, until this
+# lane, defined almost nothing (35 and 30 attribute names undefined). The (U-ABIARCH) arm below is their probe, over the corpora
+# test/lib/abiarchfixture.sh builds. The arch pin is the answer of a tree with no no-file-edge language; the clauses a Go file
+# adds are present-only and registered in test/legend_over_target.tsv, so the second arch probe passes as EXPLAINED, not as headroom.
 PIN_TABLE='
+ripwire.abi/v1                   2020  2003
+ripwire.arch/v1                  1490  1477
 ripwire.edit-check/v1             650   636
 ripwire.map/v1                   1140  1129
 ripwire.map-diff/v1              970   953
@@ -1055,6 +1063,29 @@ if [ "$rcMni" -eq 0 ] && [ "$( leg schema "$TMP/mnoinv.c" )" = "ripwire.map/v1" 
 else
     no "(U-TWIN) --top-k=3 --no-inventory compact PROSE legend is '${mniLb:-none}' B (pin 910; exit $rcMni): $( leg legend "$TMP/mnoinv.c" | head -c 200 )"
 fi
+
+# (U-ABIARCH) the two XML verbs the universe sweep cannot reach, on their own corpora (see the PINNED 2026-11-17 note above the
+# pin table). Same assertions as a (U) row: the schema id, the compact PROSE legend against its pin, rows byte-identical to the
+# full dialect's. The exit code is compared with the full dialect's, never with 0: both corpora carry a real finding (exit 2).
+. "$ROOT/test/lib/abiarchfixture.sh"
+( export GIT_AUTHOR_NAME=ripwire GIT_AUTHOR_EMAIL=ripwire@example.invalid GIT_COMMITTER_NAME=ripwire GIT_COMMITTER_EMAIL=ripwire@example.invalid
+  export GIT_AUTHOR_DATE="2026-01-01T00:00:00Z" GIT_COMMITTER_DATE="2026-01-01T00:00:00Z"
+  aaf_abi_repo "$TMP/aa_abi" ); aaf_arch_tree "$TMP/aa_plain"; aaf_arch_tree "$TMP/aa_go" go
+abiarchArm(){   # LABEL DIR SCHEMA args...
+    local label="$1" dir="$2" schema="$3" rcC rcF lb pin; shift 3
+    ( cd "$dir" && "$BIN" . "$@" --no-cache >"$TMP/aa.c" 2>/dev/null </dev/null ); rcC=$?
+    ( cd "$dir" && "$BIN" . "$@" --no-cache --legend=full >"$TMP/aa.f" 2>/dev/null </dev/null ); rcF=$?
+    lb="$( leg prose "$TMP/aa.c" "$TMP/aa.f" )"; pin="$( pinFor "$schema" )"
+    if [ "$rcC" -ne "$rcF" ] || [ "$( leg schema "$TMP/aa.c" )" != "$schema" ] || [ -z "$pin" ] || [ -z "$lb" ] || [ "$lb" -le 0 ] 2>/dev/null; then
+        no "(U-ABIARCH) $label: exit $rcC (full $rcF), schema '$( leg schema "$TMP/aa.c" )' (want $schema), pin '${pin:-none}', prose '${lb:-none}' B"; return
+    fi
+    lt_gate "(U-ABIARCH) $label $schema compact PROSE legend [all comments $( leg bytes "$TMP/aa.c" ) B, full $( leg bytes "$TMP/aa.f" ) B]" "$schema" "$lb" "$pin" "$( leg bytes "$TMP/aa.c" )" "$LT_GUARD_COMPACT" "$TMP/aa.c"
+    leg payload "$TMP/aa.f" >"$TMP/aa.fpay"; leg payload "$TMP/aa.c" >"$TMP/aa.cpay"
+    if cmp -s "$TMP/aa.fpay" "$TMP/aa.cpay"; then ok "(U-ABIARCH) $label: rows byte-identical under compact"; else no "(U-ABIARCH) $label rows are NOT byte-identical under compact: $( cmp "$TMP/aa.fpay" "$TMP/aa.cpay" 2>&1 | head -c 120 )"; fi
+}
+abiarchArm "--stray-content --abi"               "$TMP/aa_abi"   ripwire.abi/v1  --stray-content --abi
+abiarchArm "--arch=rules.txt"                    "$TMP/aa_plain" ripwire.arch/v1 --arch=rules.txt
+abiarchArm "--arch=rules.txt (a Go file beside)" "$TMP/aa_go"    ripwire.arch/v1 --arch=rules.txt
 
 echo
 echo "=== (F) the DEFAULT is the default posture; --legend=full restores MORE legend over the SAME payload (L1) ==="

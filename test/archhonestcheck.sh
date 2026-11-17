@@ -41,8 +41,13 @@ printf 'layer a = zzz_none_a\nlayer b = zzz_none_b\ndeny a -> b\n' > "$RULES"
 arch(){ ( cd "$1" && perl -e 'alarm 60; exec @ARGV' "$BIN" "$1" --arch="$RULES" --no-cache "${@:2}" 2>"$TMP/stderr" ); }
 deps(){ ( cd "$1" && perl -e 'alarm 60; exec @ARGV' "$BIN" "$1" --deps --no-cache "${@:2}" 2>/dev/null ); }
 report(){ ( cd "$1" && perl -e 'alarm 60; exec @ARGV' "$BIN" "$1" --report --no-cache 2>/dev/null ); }
-row(){ printf '%s' "$1" | grep -o '<m [^>]*/>' | grep "path=\"$2\""; }
-metrics(){ printf '%s' "$1" | grep -o '<metrics [^>]*>' | sed 's/ note=.*//'; }
+# path= is relative to the answer's own root= since 2026-11-17 (lane abiarch-retire-register), so a caller's on-disk path is read
+# against that root; a caller's pattern is taken as written.
+row(){ local r; r="$( printf '%s' "$1" | grep -o '<arch [^>]*>' | sed -n 's/.* root="\([^"]*\)".*/\1/p' )"
+       printf '%s' "$1" | grep -o '<m [^>]*/>' | grep "path=\"${2#"$r"/}\""; }
+metrics(){ printf '%s' "$1" | grep -o '<metrics [^>]*>'; }
+# The <metrics> definitions rode as a note= attribute until the same lane; they are the legend now, in both dialects.
+legendOf(){ printf '%s' "$1" | grep -o '<!--.*-->' ; }
 root(){ printf '%s' "$1" | grep -o "<$2 [^>]*>" | head -1; }
 # Well-formedness (a duplicate attribute, a double hyphen in a comment) is read by xmllint when it exists and by expat (python3) when it does
 # not: both refuse the same documents, so a host without xmllint loses no arm. CR 5725024918: the gate used to exit 0 here before any arm,
@@ -118,7 +123,7 @@ for l in $NOEDGE; do
     o="$( arch "$d" )"; rc=$?
     [ "$rc" = 0 ] && [ -n "$( root "$o" arch )" ] || { no "(A) $l: --arch rc=$rc or no <arch> root"; [ "$f0" = 0 ] || fail=1; continue; }
     m="$( metrics "$o" )"
-    r="$( row "$o" '[^"]*/a' )"
+    r="$( row "$o" a )"
     [ -n "$r" ] || { no "(A) $l: no <m> row for a/"; [ "$f0" = 0 ] || fail=1; continue; }
     printf '%s' "$r" | grep -q 'zone="unknown"' || no "(A) $l: a/ zone is not unknown: $r"
     printf '%s' "$r" | grep -q "no_file_edges=\"$l\"" || no "(A) $l: a/ does not name why: $r"
@@ -132,14 +137,16 @@ for l in $NOEDGE; do
     [ "$f0" = 0 ] || fail=1
 done
 # the abstractness half does not depend on an edge: types=/abstract=/A= stay.
-o="$( arch "$TMP/a_go" )"; r="$( row "$o" '[^"]*/a' )"
+o="$( arch "$TMP/a_go" )"; r="$( row "$o" a )"
 if printf '%s' "$r" | grep -qE 'types="1" abstract="0" A="0\.00"'; then ok "(A) types=/abstract=/A= stay (no edge behind them)"; else no "(A) types half lost: $r"; fi
 m="$( metrics "$o" )"
 if printf '%s' "$m" | grep -q 'typed_modules="2"'; then ok "(A) typed_modules= still counts modules with types"; else no "(A) typed_modules wrong: $m"; fi
-n="$( printf '%s' "$o" | grep -o '<metrics [^>]*note="[^"]*"' )"
-if printf '%s' "$n" | grep -q 'zone_unknown'; then ok "(A) note= defines zone_unknown in the partition"; else no "(A) note= silent on zone_unknown"; fi
+printf '%s' "$o" | grep -q '<metrics [^>]* note="' && no "(A) <metrics> still carries its definitions as a note= attribute"
+n="$( legendOf "$o" )"
+if printf '%s' "$n" | grep -q 'zone_unknown=: modules holding a file in a no_file_edges= language'; then ok "(A) the legend defines zone_unknown in the partition"; else no "(A) the legend is silent on zone_unknown: $( printf '%s' "$n" | head -c 200 )"; fi
+nf="$( legendOf "$( arch "$TMP/a_go" --legend=full )" )"
 # CR 5725024918 (thread 4433389591): the printed sum names every term of the partition when zone_unknown= rides
-if printf '%s' "$n" | grep -q 'zone_pain+zone_useless+zone_ok+zone_na+zone_unknown = modules'; then ok "(A) note= states the partition sum with zone_unknown"; else no "(A) note= sum omits zone_unknown: $( printf '%s' "$n" | grep -o 'zone_pain+[^;]*' )"; fi
+if printf '%s' "$nf" | grep -q 'zone_pain+zone_useless+zone_ok+zone_na+zone_unknown = modules' && printf '%s' "$n" | grep -q 'a fifth part of the partition'; then ok "(A) both legends state the partition with zone_unknown"; else no "(A) a legend's partition omits zone_unknown: full [$( printf '%s' "$nf" | grep -o 'zone_pain+[^;]*' )]"; fi
 
 # a typeless Go module is unknown too, and typed_modules= counts types, not "not n/a"
 d="$TMP/a_typeless"; mkfix go "$d"; put "$d/c/c.go" 'package c\n\nfunc H() {}\n'; put "$d/docs/x.md" '# doc\n'

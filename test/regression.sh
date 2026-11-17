@@ -286,6 +286,7 @@ fi
 _absorb_listed=0; _absorb_ran=0
 for _g in \
     a9disclosurecheck \
+    abiarchretirecheck \
     abicheck \
     accessshapecheck \
     ackonlycheck \

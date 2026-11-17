@@ -294,8 +294,9 @@ else
     printf '%s' "$BREAK" | grep -q 'n="Uniforms".*kind="drift"' \
         && ok 'feat-abi-break: Uniforms reported kind="drift"' \
         || { no "feat-abi-break: Uniforms row missing or not kind=drift"; printf '%s\n' "$BREAK"; }
-    printf '%s' "$BREAK" | grep -q 'head_size="8" ref_size="12" size_differs="1"' \
-        && ok "feat-abi-break: head_size=8 ref_size=12 size_differs=1" \
+    # size_differs= is retired (2026-11-17): it was "size_delta is not 0" (test/abiarchretirecheck.sh (D) rebuilds it)
+    printf '%s' "$BREAK" | grep -q 'head_size="8" ref_size="12" size_delta="4"' \
+        && ok "feat-abi-break: head_size=8 ref_size=12 size_delta=4 (the sizes differ)" \
         || { no "feat-abi-break: size attributes wrong"; printf '%s\n' "$BREAK"; }
     printf '%s' "$BREAK" | grep -q '<d n="z" a="absent" b="float@8"/>' \
         && ok "feat-abi-break: field diff names z as the added field" \
@@ -347,7 +348,7 @@ else
     printf '%s' "$RENAME_FULL" | grep -q 'n="Uniforms".*kind="rename"' \
         && ok 'feat-abi-rename: --detail shows kind="rename"' \
         || { no "feat-abi-rename: --detail row is not kind=rename"; printf '%s\n' "$RENAME_FULL"; }
-    printf '%s' "$RENAME_FULL" | grep -q 'head_size="8" ref_size="8" size_differs="0" size_delta="0"' \
+    printf '%s' "$RENAME_FULL" | grep -q 'head_size="8" ref_size="8" size_delta="0"' \
         && ok "feat-abi-rename: sizes agree (8/8), size_delta=0" \
         || { no "feat-abi-rename: size attributes wrong for a rename"; printf '%s\n' "$RENAME_FULL"; }
 fi
@@ -360,8 +361,8 @@ else
     printf '%s' "$REPACK" | grep -q 'n="Uniforms".*kind="drift"' \
         && ok 'feat-abi-repack: same size, different slots -> kind="drift" (NOT rename)' \
         || { no "feat-abi-repack: not reported as drift"; printf '%s\n' "$REPACK"; }
-    printf '%s' "$REPACK" | grep -q 'head_size="8" ref_size="8" size_differs="0"' \
-        && ok "feat-abi-repack: size_differs=0 on a real break (the size is not the whole contract)" \
+    printf '%s' "$REPACK" | grep -q 'head_size="8" ref_size="8" size_delta="0"' \
+        && ok "feat-abi-repack: size_delta=0 on a real break (the size is not the whole contract)" \
         || { no "feat-abi-repack: size attributes wrong"; printf '%s\n' "$REPACK"; }
 fi
 
@@ -395,9 +396,12 @@ for pair in "drift 2" "rename 1" "head-moved 1" "absent 1" "unknown 1"; do
     got="$( attr abi "$1" )"
     if [ "$got" = "$2" ]; then ok "abi: $1=\"$2\" on the header"; else no "abi: header $1=\"$got\", want \"$2\""; fi
 done
-EXCL="$( attr abi excluded )"
-[ "$EXCL" = "2" ] && ok "abi: excluded=2 (the rename + the head-moved row, counted not dropped)" \
-                   || no "abi: excluded=\"$EXCL\", want 2"
+# rows= and excluded= are retired from the header (2026-11-17): each was a sum of the kind counters beside it, so the arms
+# read the counters. A counter absent from the header is 0 (writeKindAttrs omits a zero).
+kindSum(){ local t=0 k v; for k in "$@"; do v="$( attr abi "$k" )"; t=$(( t + ${v:-0} )); done; echo "$t"; }
+EXCL="$( kindSum rename spelling stub head-moved )"
+[ "$EXCL" = "2" ] && ok "abi: 2 excluded rows (rename=1 + head-moved=1 on the header, counted not dropped)" \
+                   || no "abi: the unlisted kind counters sum to \"$EXCL\", want 2"
 EXCLREFS="$( attr abi excluded_refs )"
 [ "$EXCLREFS" = "2" ] && ok "abi: excluded_refs=2 (feat-abi-rename + feat-abi-sidecar have rows but list none)" \
                        || no "abi: excluded_refs=\"$EXCLREFS\", want 2"
@@ -415,13 +419,13 @@ HEADONLY="$( attr abi head_only )"
 # attribute that is a 0|1 BOOLEAN in every other verb. The count is dropped= now and capped= is the bit
 # (see src/pageview.h, THE TRUNCATION VOCABULARY, rule 3), so this reconciliation reads dropped= and the
 # bit is asserted separately below — an assertion that would have been vacuous while capped= held a count.
-ROWS="$( attr abi rows )"; SHOWN="$( attr abi shown )"; DROPPED="$( attr abi dropped )"
+ROWS="$( kindSum drift unknown absent rename spelling stub head-moved )"; SHOWN="$( attr abi shown )"; DROPPED="$( attr abi dropped )"
 if [ -n "$ROWS" ] && [ -n "$SHOWN" ] && [ -n "$DROPPED" ] && [ -n "$EXCL" ]; then
     SUM=$(( SHOWN + DROPPED + EXCL ))
-    [ "$ROWS" = "$SUM" ] && ok "abi: rows=$ROWS reconciles as shown($SHOWN)+dropped($DROPPED)+excluded($EXCL)" \
-                          || no "abi: rows=$ROWS but shown+dropped+excluded=$SUM (a row went missing)"
+    [ "$ROWS" = "$SUM" ] && ok "abi: the kind counters sum to $ROWS rows = shown($SHOWN)+dropped($DROPPED)+excluded($EXCL)" \
+                          || no "abi: the kind counters sum to $ROWS rows but shown+dropped+excluded=$SUM (a row went missing)"
 else
-    no "abi: one of rows/shown/dropped/excluded is missing from the header"
+    no "abi: shown= or dropped= is missing from the header"
 fi
 CAPPED="$( attr abi capped )"
 case "$CAPPED:$DROPPED" in

@@ -127,8 +127,9 @@ int r(void) { return 1; }'
 ( cd "$TMP/fx5" && "$BIN" "$TMP/fx5" --no-cache --arch="$TMP/all.rules" ) > "$TMP/fx5.arch" 2>&1
 [ -s "$TMP/arch.out" ] || { no "--arch produced no output"; cat "$TMP/arch.err"; echo "SOME CHECKS FAILED"; exit 1; }
 
-edge(){ grep -q "from=\"$FIX/$1\" fromLayer=\"[^\"]*\" to=\"$FIX/$2\"" "$TMP/arch.out"; }
-noedge_from(){ ! grep -q "from=\"$FIX/$1\"" "$TMP/arch.out"; }
+# from=/to= are relative to the answer's root= since 2026-11-17 (lane abiarch-retire-register); the run below names $FIX as its root.
+edge(){ grep -q "from=\"$1\" fromLayer=\"[^\"]*\" to=\"$2\"" "$TMP/arch.out"; }
+noedge_from(){ ! grep -q "from=\"$1\"" "$TMP/arch.out"; }
 
 if edge sub/deep/a.c core/x.h; then ok "R1 root: sub/deep/a.c \"core/x.h\" → core/x.h"; else no "R1 root edge missing"; fi
 if edge app/src/b.cpp app/include/util/y.hpp; then ok "R2 include/: app/src/b.cpp \"util/y.hpp\" → app/include/util/y.hpp"; else no "R2 include/ edge missing"; fi

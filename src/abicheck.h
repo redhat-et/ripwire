@@ -201,9 +201,7 @@ struct KindCounts
         return t;
     }
     std::uint32_t total()    const noexcept { return std::accumulate( std::begin( n ), std::end( n ), std::uint32_t( 0 ) ); }
-    std::uint32_t listed()   const noexcept { return sumWhere( &KindPolicy::listed ); }
     std::uint32_t breaks()   const noexcept { return sumWhere( &KindPolicy::isBreak ); }
-    std::uint32_t excluded() const noexcept { return total() - listed(); }
 };
 
 // ── the result model ─────────────────────────────────────────────────────────────────────────────────────
@@ -219,7 +217,6 @@ struct StructRow
     std::uint32_t refSize   = 0;      // meaningful only when refSized — omitted from the XML otherwise
     std::uint32_t sizeDelta = 0;      // |headSize - refSize| when both are sized; the display RANK key
     bool          refSized  = false;  // the ref side produced a real number (not absent, not unmodellable)
-    bool          sizeDiffers = false;
     std::vector<layout::FieldDiff> fields;
     std::vector<layout::Caveat>    headCaveats;   // usually empty (HEAD must already be modelled to reach here)
     std::vector<layout::Caveat>    refCaveats;    // the honesty requirement: inherited, never dropped
@@ -680,7 +677,6 @@ inline void classifyCandidate( ClassifyCtx cc, const Candidate& c, const PathSit
             shapeKind = "rename";
         }
 
-        srow.sizeDiffers = srow.headSize != srow.refSize;
         srow.sizeDelta   = ( srow.headSize > srow.refSize ) ? srow.headSize - srow.refSize
                                                             : srow.refSize - srow.headSize;
     }
@@ -850,7 +846,7 @@ inline void writeAbiCaveats( std::FILE* out, const char* tag, const std::vector<
 inline void writeAbiStruct( std::FILE* out, const StructRow& s, const XmlEscaper& ex, std::string_view rootPrefix = {} )
 {
     const std::string_view rp = rootPrefix.empty() ? std::string_view( s.path ) : rw::sarif::rootRelativeUri( s.path, rootPrefix );
-    // ref_size/size_differs are meaningful only when the ref side was actually SIZED: "absent" has no bytes
+    // ref_size/size_delta are meaningful only when the ref side was actually SIZED: "absent" has no bytes
     // at all, and "unknown" refused to place a number (finalizeLayout leaves size at 0, which would print
     // as ref_size="0" and read as "an empty struct" — a plausible-looking wrong number of exactly the kind
     // the honesty contract exists to prevent). Omitted rather than printed as a misleading 0.
@@ -858,8 +854,9 @@ inline void writeAbiStruct( std::FILE* out, const StructRow& s, const XmlEscaper
                   ex( s.name ).c_str(), ex( rp ).c_str(), s.headLine, s.kind, s.headSize );
     if( s.refSized )
     {
-        rw::emitTo( out, " ref_size=\"{}\" size_differs=\"{}\" size_delta=\"{}\"",
-                      s.refSize, s.sizeDiffers ? 1 : 0, s.sizeDelta );
+        // size_differs= rode between these two until 2026-11-17. It was `headSize != refSize` beside size_delta's own
+        // |headSize - refSize| (classifyCandidate sets both in one block), so it was exactly "size_delta is not 0".
+        rw::emitTo( out, " ref_size=\"{}\" size_delta=\"{}\"", s.refSize, s.sizeDelta );
     }
     rw::emitRaw( out, ">" );
     for( const layout::FieldDiff& f : s.fields )
@@ -909,9 +906,11 @@ inline void writeAbiRef( std::FILE* out, const RefRow& r, const XmlEscaper& ex, 
     // its capped= companion, so a <ref> at exactly maxStructs rows read as complete. The bit is against
     // `eligible` — the rows THIS VIEW lists — not against rows=, which counts every parsed struct including
     // the kinds this view excludes; <more structs="N"/> below already states the same fact as a count.
-    rw::emitTo( out, "<ref name=\"{}\" tip=\"{:.9}\" date=\"{}\" rows=\"{}\" shown=\"{}\" capped=\"{}\" excluded=\"{}\" head_only=\"{}\"",
+    // rows= and excluded= rode here until 2026-11-17. Every row is pushed beside exactly one counts.add (classifyCandidate), so
+    // rows= was the sum of the kind counters writeKindAttrs prints next, and excluded= the sum of the unlisted ones (KindCounts).
+    rw::emitTo( out, "<ref name=\"{}\" tip=\"{:.9}\" date=\"{}\" shown=\"{}\" capped=\"{}\" head_only=\"{}\"",
                   ex( r.ref.name ).c_str(), r.ref.tip.c_str(), ex( r.ref.date ).c_str(),
-                  r.structs.size(), shownCount, unsigned( shownCount < eligible ), r.counts.excluded(), r.headOnly );
+                  shownCount, unsigned( shownCount < eligible ), r.headOnly );
     writeKindAttrs( out, r.counts );
     rw::emitRaw( out, ">" );
 
@@ -947,7 +946,7 @@ inline void writeAbiCheck( std::FILE* out, const AbiResult& res, std::size_t max
     // used to be printed as capped= — the one place in the tool where that attribute held a number instead
     // of the boolean every other verb spells there, so `capped="12"` and `capped="1"` meant unrelated
     // things under one name. The count keeps its meaning under the honest name dropped=; capped= is the
-    // boolean, and rows= still reconciles exactly as shown + dropped + excluded.
+    // boolean; the kind counters still reconcile exactly, as shown + dropped + the unlisted kinds.
     std::uint32_t brokenRefs = 0, shownRows = 0, droppedRows = 0, excludedRefs = 0;
     for( const RefRow& r : res.refs )
     {
@@ -996,17 +995,22 @@ inline void writeAbiCheck( std::FILE* out, const AbiResult& res, std::size_t max
                        "the live line changes S's mirror in another is a merge hazard only layout(S) on the "
                        "merged result can see. Single-root; read-only (cat-file/diff/merge-base only). at= is the git "
                        "commit these numbers were computed at; a trailing +shallow means the clone's history is truncated (a depth-limited clone: churn counts only the commits present), and a trailing +dirty means the working tree differed from "
-                       "that commit (head= is the same commit, bare sha, kept for compatibility). refs_omitted= (present only when non-zero) is "
+                       "that commit (head=, the bare sha, rides only where at= could not be stamped). Every row is on exactly one kind counter (drift= unknown= absent= rename= spelling= stub= head-moved=, on the root and on its ref, each absent at 0), so the row total is their sum and the excluded total is rename+spelling+stub+head-moved; size_delta= is the absolute difference of head_size= and ref_size=, and 0 there is the same SIZE, not the same layout (see kind=). refs_omitted= (present only when non-zero) is "
                        "the REF WINDOW: past 512 local branches the newest 512 by committer date are compared and this many older ones are not, "
                        "so they are in none of the counts or rows; the stray-content=SUBSTR ref filter picks which branches fill the window, and the detail flag reads every branch. -->" );
-    // M10: head= stays a bare 9-hex sha (gitstampcheck.sh's existing arm pins that spelling); at= is the new
-    // attribute, carrying the dirty bit this document never disclosed before.
-    const std::string atAttrStr = res.atStamp.empty() ? std::string() : ( " at=\"" + res.atStamp + "\"" );
-    rw::emitTo( out, "<abi head=\"{:.9}\" head_ref=\"{}\" refs=\"{}\" candidates=\"{}\" compared=\"{}\" blobs=\"{}\""
-                       " rows=\"{}\" shown=\"{}\" capped=\"{}\" dropped=\"{}\" excluded=\"{}\" head_only=\"{}\" unmodelable=\"{}\""
+    // 2026-11-17, three attributes retired from this root because each was a second spelling of one beside it:
+    //   head=      the first nine characters of at= (gitstamp::stampAt is gitHeadSha's first nine plus the dirty/shallow marks).
+    //              It still rides, alone, where at= could not be stamped, so the commit is never absent from the answer.
+    //   rows=      KindCounts::total(), the sum of the kind counters writeKindAttrs prints below.
+    //   excluded=  that total minus the listed kinds: the sum of the kinds kKindPolicy does not list (rename, spelling, stub, head-moved).
+    // capped= is the same kind of duplicate (dropped > 0) and STAYS: pageview.h's rule 3 puts the bit beside every shown=.
+    const std::string atAttrStr   = res.atStamp.empty() ? std::string() : ( " at=\"" + res.atStamp + "\"" );
+    const std::string headAttrStr = res.atStamp.empty() ? std::format( " head=\"{:.9}\"", res.headSha ) : std::string();
+    rw::emitTo( out, "<abi{} head_ref=\"{}\" refs=\"{}\" candidates=\"{}\" compared=\"{}\" blobs=\"{}\""
+                       " shown=\"{}\" capped=\"{}\" dropped=\"{}\" head_only=\"{}\" unmodelable=\"{}\""
                        " unrelated=\"{}\" broken_refs=\"{}\" quiet=\"{}\" excluded_refs=\"{}\"{}{}",
-                  res.headSha.c_str(), ex( res.headRef ).c_str(), res.refsScanned, res.candidates, res.compared,
-                  res.distinctBlobs, res.counts.total(), shownRows, unsigned( droppedRows > 0 ), droppedRows, res.counts.excluded(),
+                  headAttrStr.c_str(), ex( res.headRef ).c_str(), res.refsScanned, res.candidates, res.compared,
+                  res.distinctBlobs, shownRows, unsigned( droppedRows > 0 ), droppedRows,
                   res.headOnly, res.unmodelable, res.unrelated, brokenRefs, res.quietRefs, excludedRefs,
                   crossref::refsOmittedAttr( res.refsOmitted ).c_str(), atAttrStr.c_str() );
     writeKindAttrs( out, res.counts );

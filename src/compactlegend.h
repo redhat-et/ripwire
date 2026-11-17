@@ -138,7 +138,10 @@ inline constexpr CompactLegendSpec kCompactLegendSpecs[] =
     { "handoff",      "handoff",      "continuation packet for the NEXT session: <verified changed= blast_files=>, <tests n=>, <heuristic n= candidates=>, <note>, <doc p=>" },
     { "merge-scout",  "merge-scout",  "cross-branch overlap of arms= refs: <arm ref= base= changed= head_conflicts=>, <pair a= b= conflicts= risks=>, <landing order=>" },
     { "stray-content","stray-content","per local ref, lines/symbols NOT in HEAD: <ref ok= v= base= stray=>; v=unknown = no merge base" },
-    { "abi",          "abi",          "contract diff of the indexed symbols between two refs: added/removed/changed signatures" },
+    // abi (2026-11-17, lane abiarch-retire-register). The old line described a different verb ("added/removed/changed signatures"
+    // between two refs): --abi compares struct LAYOUTS, per local branch, against HEAD. This one reads the root every answer
+    // carries, shortened from abicheck.h writeAbiCheck's full legend; the rows read present-only below (the abi block).
+    { "abi",          "abi",          "cross-branch ABI-break gate: each local branch's structs on paths it authored (its diff from its merge base with HEAD), laid out lexically, compared with HEAD's; a match is omitted; exit 2 on a drift. head_ref= HEAD's branch, refs= branches read, candidates= structs HEAD declares and locates, compared= sites modelled on both sides, blobs= git blobs read; dropped= listed rows past the 12-per-ref cap; head_only= sites on paths only HEAD changed (out of scope); unmodelable= sites skipped: HEAD's copy has no model; unrelated= refs with no merge base, never compared, also in quiet=; broken_refs= refs with a drift; quiet= refs with no row (none differed or none compared); excluded_refs= refs with unlisted kinds only" },
     { "plan-lint",    "plan-lint",    "structural lint of a plan document: each finding names the section and the rule" },
     // ── reports ──
     { "hotspots",     "hotspots",     "maintenance pain = churn x ccx over window=: <f p= churn= ccx= score= top= top_ccx= top_l=>; unranked_*= no churn/complexity" },
@@ -186,7 +189,11 @@ inline constexpr CompactLegendSpec kCompactLegendSpecs[] =
     { "comment_coherence","comment-coherence","two comment/name content measures per documented function, most name-restating first: <fn p= n= c_coeff= cic=>" },
     { "doctor",       "doctor",       "setup health: <c n= ok=> checks; exit 1 when one fails" },
     { "layout",       "layout",       "struct field layout vs cache lines: offsets, padding, hot/cold split candidates" },
-    { "arch",         "arch",         "layering rules fit: allowed/denied file-to-file edges, each violation a row" },
+    // arch (2026-11-17, lane abiarch-retire-register): the root and the <v> row every answer with a violation carries, checked
+    // against verbs_report.h runArchViews. new_violations= is retired; "a row without it is NEW" is its derivation. Elements are
+    // named WITHOUT angle brackets in the abi and arch readings: a script that counts `<v ` or takes the first `<ref ` must not
+    // count the legend (test/archmetricscheck.sh did, and read 5 violations for 4).
+    { "arch",         "arch",         "layering rules fit: v from= fromLayer= to= toLayer=: a file-to-file include/import a rule denies, with each end's layer (fromLayer=path: a regex path-rule, toLayer= that rule); layers= rules= pathRules= declared; violations= the v rows; baselined= those the baseline sidecar accepts, baselined=1 on the row (under baseline-update: every hash it now holds); a row without it is NEW, exit 2 if any; rules match root-relative paths" },
     { "flip",         "flip",         "the blast radius of flipping one build gate: the regions and symbols it toggles" },
     { "landing-plan", "landing-plan", "stranded-work landing order across refs, fewest conflicts first" },
     { "pattern",      "pattern",      "structural pattern hits with their enclosing symbol" },
@@ -464,7 +471,8 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // means the whole map was withheld — that record reads kCompactWithheldMapPurpose instead (rv-r1-L1 MED-3).
     { "withheld",          "withheld=: rows the budget cut", false, {}, MapHeaderRead::No, {}, "handoff" },
     { "at",                "at=: commit+dirty+shallow" },
-    { "root",              "root=: p= relative to it" },
+    // --arch prints from=/to=/path=, never p=, so its root= takes the arch reading (the abi/arch block) and not this one.
+    { "root",              "root=: p= relative to it", false, {}, MapHeaderRead::No, {}, {}, "arch", "layers" },
     // The multi-root roots table (serialize.h writeMultiRootTable): its `<!-- root rows:` clause is prose-stripped above
     // and nothing put the reading back. ELEMENT-qualified, because --communities carries a different label= on its rows.
     { "label",             "<root label= p=>: a workspace root; label= prefixes every p=/id=", true, "root" },
@@ -828,6 +836,30 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // KEY-qualified (onKey): the same name on the same element means different things on two verbs. Each reading was
     // checked against its emitter (the per-verb comment names it) and against the full legend where it has one; the
     // default-posture floor is gone and test/legendcoveragecheck.sh fails on any undefined attribute a default row emits.
+    // abi: src/abicheck.h writeAbiCheck / writeAbiRef / writeAbiStruct. 2026-11-17 (lane abiarch-retire-register): every row
+    // below was undefined in the compact dialect (35 names, 43 element@attr pairs on the gate's fixture). Shortened from the
+    // verb's own full legend. rows=/excluded= (root and ref), size_differs= and, beside at=, head= are RETIRED, and the
+    // readings that replace them are here: the kind counts sum to the row total, size_delta=0 is what size_differs=0 said.
+    { "tip", "ref name= tip= date=: a branch with rows, its tip commit and date; shown=/capped=/head_only= and kind counts are its own", true, "ref", MapHeaderRead::No, {}, "abi" },
+    { "kind", "struct n= p= l= kind= head_size=: a struct, its file and line at HEAD, sizeof there. kind=drift: the byte contract differs (the kind that exits 2); unknown: the ref's copy could not be modelled, never read as same; absent: the ref does not define it at that path. drift= unknown= absent= count them on abi and ref; each row is on one kind count (absent at 0): their sum is the row total", true, "struct", MapHeaderRead::No, {}, "abi" },
+    { "ref_size", "ref_size= size_delta=: sizeof on the ref and its distance from head_size=, only where the ref's copy was sized; size_delta=0 is the same size, not the same layout", true, "struct", MapHeaderRead::No, {}, "abi" },
+    { "a", "d n= a= b=: a differing field as type@offset at HEAD (a=) and on the ref (b=), or absent", true, "d", MapHeaderRead::No, {}, "abi" },
+    { "k", "ref_caveat k= d=: why the ref's copy is unmodelled: kind, detail", true, "ref_caveat", MapHeaderRead::No, {}, "abi" },
+    { "k", "head_caveat k= d=: a limit of HEAD's own model of the struct: kind, detail", true, "head_caveat", MapHeaderRead::No, {}, "abi" },
+    { "structs", "more structs=N: N more listed structs on this ref (in dropped=); detail=1 lists all", true, "more", MapHeaderRead::No, {}, "abi" },
+    { "rename", "rename=N: same slots and field types, other field names (or a same-type reorder): no byte moved; counted, listed under detail=1", true, {}, MapHeaderRead::No, {}, "abi" },
+    { "spelling", "spelling=N: same bytes, other type names; counted, listed under detail=1", true, {}, MapHeaderRead::No, {}, "abi" },
+    { "stub", "stub=N: one side is an empty placeholder aggregate; counted, listed under detail=1", true, {}, MapHeaderRead::No, {}, "abi" },
+    { "head-moved", "head-moved=N: the ref's copy equals its merge base's, so HEAD changed; counted, listed under detail=1", true, {}, MapHeaderRead::No, {}, "abi" },
+    { "head", "head=: HEAD's commit, printed only where at= could not be stamped", false, {}, MapHeaderRead::No, {}, "abi" },
+    // arch: src/verbs_report.h runArchViews / emitArchMetrics (+ src/arch.h computeModuleMetrics). The <metrics> readings are the
+    // definitions that rode every answer as its note= attribute, now paid once in the legend; propagation_cost= and
+    // zone_unknown= ride only beside their attribute, as their note clauses did.
+    { "root", "root=: from=/to=/path= relative to it", false, {}, MapHeaderRead::No, {}, "arch" },
+    { "modules", "metrics: Martin metrics per directory, estimated from name-based deps; descriptive, never a gate. modules= the m rows, typed_modules= those with types>0; zone_pain= zone_useless= zone_ok= zone_na= partition modules=: the two main-sequence corners (a heuristic with no outcome-based validation: folklore, not proof), typed modules in neither, types=0 modules (no abstractness score)", true, "metrics", MapHeaderRead::No, {}, "arch" },
+    { "zone_unknown", "zone_unknown=: modules holding a file in a no_file_edges= language: zone and coupling unknown, not zero; a fifth part of the partition", true, "metrics", MapHeaderRead::No, {}, "arch" },
+    { "propagation_cost", "propagation_cost=: density of the file-dep transitive closure (MacCormack): the fraction of files reachable from an average file", true, "metrics", MapHeaderRead::No, {}, "arch" },
+    { "path", "m path= ca= ce= types= abstract= I= A= D= zone= reachable=: a directory module: ca= modules depending on it, ce= modules it depends on, types= declared, abstract= abstract ones, I=ce/(ca+ce), A=abstract/types, D=|A+I-1| (distance from the main sequence), zone=pain|useless: D past 0.5 with A+I below|not below 1, else ok; n/a at types=0; reachable=0: no main and no module nothing depends on reaches it; isolated=1: ca=ce=0; leaf=1: ce=0 under ca>0", true, "m", MapHeaderRead::No, {}, "arch" },
     // affected: src/verbs_change.h runAffected (+ src/testmap.h resolveAffectedSeeds/affectedAnswer)
     { "seeds", "seeds=N: symbols the argument matched; only those outside test files seed the caller walk", false, "affected", MapHeaderRead::No, {}, "affected" },
     { "seed_test_files", "seed_test_files=N: matched files that are TESTS; listed to run (seed_kind=test), never walk seeds", false, "affected", MapHeaderRead::No, {}, "affected" },

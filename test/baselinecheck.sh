@@ -87,11 +87,15 @@ else
     cat "$TMP/s2.err"
 fi
 
-# XML must report new_violations="0"
-if grep -q 'new_violations="0"' "$TMP/s2.xml" 2>/dev/null; then
-    ok "step 2: XML reports new_violations=\"0\""
+# new_violations= was retired from the <arch> root on 2026-11-17 (lane abiarch-retire-register): it was exactly the number of
+# <v> rows without baselined="1", in a normal run and in both baseline modes (test/abiarchretirecheck.sh (D) rebuilds it
+# byte-for-byte). The arms below read that count off the rows, so they assert the same fact from the data that carries it.
+newViolations(){ grep -o '<v from="[^>]*>' "$1" 2>/dev/null | grep -vc ' baselined="1"'; }
+# XML must list violations, and none of them new
+if grep -q '<v from="' "$TMP/s2.xml" 2>/dev/null && [ "$( newViolations "$TMP/s2.xml" )" = "0" ]; then
+    ok "step 2: XML lists no new violation (every <v> row is baselined=\"1\")"
 else
-    no "step 2: XML missing new_violations=\"0\" (got: $(head -1 "$TMP/s2.xml"))"
+    no "step 2: XML lists $( newViolations "$TMP/s2.xml" ) new violation(s), want 0 over at least one row (got: $(head -1 "$TMP/s2.xml"))"
 fi
 
 # ── step 3: add a 3rd violation — only the new one triggers exit 2 ───────────────────────────────
@@ -104,11 +108,11 @@ else
     no "step 3: expected exit 2 after adding new violation, got $rc_s3"
 fi
 
-# XML must report new_violations="1"
-if grep -q 'new_violations="1"' "$TMP/s3.xml" 2>/dev/null; then
-    ok "step 3: XML reports new_violations=\"1\" (only the new one)"
+# XML must list exactly one new violation
+if [ "$( newViolations "$TMP/s3.xml" )" = "1" ]; then
+    ok "step 3: XML lists exactly 1 new violation (one <v> row without baselined=\"1\")"
 else
-    no "step 3: XML new_violations count wrong (got: $(head -1 "$TMP/s3.xml"))"
+    no "step 3: XML lists $( newViolations "$TMP/s3.xml" ) new violation(s), want 1 (got: $(head -1 "$TMP/s3.xml"))"
 fi
 
 # The new violation (enemy.cpp) must appear WITHOUT baselined="1" on its <v> element.
