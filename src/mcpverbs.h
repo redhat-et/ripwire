@@ -2419,7 +2419,7 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, std::strin
     if( budgetTokens > 0 && demoteRulesOn() )
     {
         const std::string after = mcpSlot.xml;
-        const auto        point = [ & ] { return demoteAndPointBlock( ing, in.g, task, mcpHdrXml, sigsStr, after ); };
+        const auto        point = [ & ] { return demoteAndPointBlock( ing, in.g, task, { .before = mcpHdrXml, .block = sigsStr, .after = after } ); };
         const auto        renderAt = [ & ]( std::size_t rowDrop ) { return mcpForRowsAt( in, renderSigs, mcpRows, &mcpSigsNext, rowDrop ); };
         std::string pointed = refillRowsForDemote( mcpSigsCut.rowDropBudgetBytes, [ & ]() -> const std::string& { return sigsStr; },
                                                    [ & ] { return mcpSigsCut.rowDropCut; }, [ & ] { return mcpShownIds.size(); }, renderAt, point );
@@ -2597,7 +2597,7 @@ inline void insertFileSyms( std::string& out, const IngestResult& ing, const Gra
         args.answerOut = &cut;
         std::string syms = renderForFileSyms( ing, g, args );
         const std::string_view shaped = cut.empty() ? args.answer : std::string_view( cut );
-        OneSideReachEdit edit = args.held ? OneSideReachEdit {} : demoteOneSideRows( ing, g, args.task, shaped, syms );
+        OneSideReachEdit edit = args.held ? OneSideReachEdit {} : demoteOneSideRows( ing, g, { .task = args.task, .answer = shaped, .syms = syms } );
         std::string answer = !edit.answer.empty() ? std::move( edit.answer ) : std::move( cut );
         demoteAndPointRowsInto( ing, g, args.task, args.answer, answer, args.held, DemoteRegime::Default ); // SIBLING-DEMOTE, then DECL-TWIN
         if( !answer.empty() )

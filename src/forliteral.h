@@ -4040,10 +4040,18 @@ struct TableReaders
     bool        floor = false;  // a file could not be read, or callers past kForTableReaderFiles were not read: readers= is a floor
 };
 
+// A subscript row's function and the row's own file (a NodeId and a file id, one underlying type, named at the call).
+struct ReaderRowAt
+{
+    NodeId        owner   = kNoNode;
+    std::uint32_t rowFile = 0;
+};
 // REG-READER (b): the files a subscript row's table may be read in: the row's own, then the files of its function's callers by path, at most
 // kForTableReaderFiles of them (`floor` when more were left)
-inline std::vector<std::uint32_t> readerFilesOf( const IngestResult& ing, const Graph* g, NodeId owner, std::uint32_t rowFile, bool& floor )
+inline std::vector<std::uint32_t> readerFilesOf( const IngestResult& ing, const Graph* g, ReaderRowAt at, bool& floor )
 {
+    const NodeId        owner   = at.owner;
+    const std::uint32_t rowFile = at.rowFile;
     std::vector<std::uint32_t> files{ rowFile };
     if( g == nullptr || std::size_t( owner ) >= g->inEdges.rows() )
     {
@@ -4183,7 +4191,7 @@ inline TableReaders tableReadersOf( const IngestResult& ing, const Graph* g, con
     const std::string&                  name  = ing.symbols[hits[pick].enclosingId].name;
     const std::size_t                   dot   = name.find_last_of( ".:" );   // npos + 1 would wrap (-fsanitize=integer)
     const std::string_view              fn    = std::string_view( name ).substr( dot == std::string::npos ? 0 : dot + 1 );
-    const std::vector<std::uint32_t>    files = readerFilesOf( ing, g, hits[pick].enclosingId, row.raw.fileId, out.floor );
+    const std::vector<std::uint32_t>    files = readerFilesOf( ing, g, { .owner = hits[pick].enclosingId, .rowFile = row.raw.fileId }, out.floor );
     const std::vector<std::string_view> parts = quotedPartsOf( std::string_view( row.tbl ).substr( row.table.size() ) );
     std::vector<std::pair<int, GrepRawHit>> found = tableReadsInFiles( ing, files, useMemo, fn, row.table, parts, out );
     std::stable_sort( found.begin(), found.end(), []( const auto& a, const auto& b ) { return a.first < b.first; } );
