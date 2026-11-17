@@ -7547,13 +7547,21 @@ struct IdentityNarrower
         {
             return memo->second;
         }
-        memo->second = includeNamesAsSuffix( fromFile, defFile, ids );
+        memo->second = includeNamesAsSuffix( { .fromFile = fromFile, .defFile = defFile }, ids );
         return memo->second;
     }
 
-    // a DIRECT include of `fromFile` names `defFile`'s path as a suffix (fileVisibleFrom's last test; memoised there)
-    static bool includeNamesAsSuffix( std::uint32_t fromFile, std::uint32_t defFile, const ClassIdentity& ids )
+    // The includer and the file whose path it may name: two file ids, named at the call so they cannot trade places.
+    struct IncludeQuery
     {
+        std::uint32_t fromFile = 0;
+        std::uint32_t defFile  = 0;
+    };
+    // a DIRECT include of `fromFile` names `defFile`'s path as a suffix (fileVisibleFrom's last test; memoised there)
+    static bool includeNamesAsSuffix( IncludeQuery q, const ClassIdentity& ids )
+    {
+        const std::uint32_t fromFile = q.fromFile;
+        const std::uint32_t defFile  = q.defFile;
         const std::string_view path             = ( *ids.files )[ defFile ];
         const auto [ firstInclude, endInclude ] = std::ranges::equal_range( ids.includeTargets, fromFile, {}, &ClassIdentity::IncludeTarget::fileId );
         return std::any_of( firstInclude, endInclude, [ & ]( const ClassIdentity::IncludeTarget& include )
