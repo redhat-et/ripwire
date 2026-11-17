@@ -1973,7 +1973,7 @@ inline std::vector<ExemplarMember> typicalDirMembers( const IngestResult& ing, c
     std::vector<ExemplarMember> out;
     for( const ExemplarMember& m : fam.members )
     {
-        if( includerDir( rootRelPath( ing, m.fileId ) ) == dir )
+        if( m.fileId < ing.files.size() && includerDir( rootRelPath( ing, m.fileId ) ) == dir )   // an unindexed member (a manifest's feature) has no directory here
         {
             out.push_back( m ); // members[0] is in `dir` by construction, so it stays first: the typical member of the subset too
         }
@@ -2013,9 +2013,13 @@ inline ExemplarTouchList exemplarTouchList( const IngestResult& ing, const Exemp
     {
         return list; // too few distinct names and stems to call a mention a pattern
     }
-    const std::string_view typicalDir = includerDir( rootRelPath( ing, fam.members.front().fileId ) );
+    // MANIFEST-ROW: a family read off an UNINDEXED manifest (formanifest.h featureFamily: fileId UINT32_MAX) has no typical directory,
+    // so no dir-local rows; the family-wide share still runs
+    const std::uint32_t    typicalFile = fam.members.front().fileId;
+    const bool             typicalIndexed = typicalFile < ing.files.size();
+    const std::string_view typicalDir = typicalIndexed ? includerDir( rootRelPath( ing, typicalFile ) ) : std::string_view {};
     ExemplarFamily dirFam { .rule = fam.rule };
-    dirFam.members = typicalDirMembers( ing, fam, typicalDir );
+    dirFam.members = typicalIndexed ? typicalDirMembers( ing, fam, typicalDir ) : std::vector<ExemplarMember> {};
     const TouchForms dirForms( dirFam.members.empty() ? TouchUnits {} : touchUnits( ing, dirFam ) );
     const TouchUnits& du = dirForms.units;
     std::vector<std::uint32_t> dirStamp( std::size_t( du.names ) + du.stems, 0 );

@@ -80,7 +80,7 @@ struct ForBudgetAsk
 
 // The blocks printed outside est_tokens that a budget holds (each renders its own held="budget" stub and next= under
 // Config::forHoldBudget). <doc_body> prices itself (its est_tokens=); the others are priced at the markup rate.
-inline constexpr std::string_view kForHeldBlocks[] = { "syms", "doc_body", "decl_rows", "exemplar_family", "graph_verb", "reexports", "shortkey", "aliases" };
+inline constexpr std::string_view kForHeldBlocks[] = { "syms", "doc_body", "decl_rows", "exemplar_family", "manifest_rows", "graph_verb", "reexports", "shortkey", "aliases" };
 
 // The budget's legend clauses. The fixed shed order is named once; only the units this answer took are defined (an untouched unit
 // costs no bytes: the whole list was ~940 B of every shed answer's header, six sigs rows at --token-budget=2160 on forrankordercheck's
