@@ -20,22 +20,6 @@
 namespace rw
 {
 
-// text of a capture (first node with this index) in a match; false if absent / out of range.
-inline bool captureText( const TSQueryMatch& m, std::uint32_t capIndex, std::string_view src, std::string& out )
-{
-    for( std::uint16_t i = 0; i < m.capture_count; ++i )
-    {
-        if( m.captures[i].index == capIndex )
-        {
-            const TSNode n = m.captures[i].node;
-            const std::uint32_t a = ts_node_start_byte( n ), b = ts_node_end_byte( n );
-            if( a <= b && b <= src.size() ) { out = std::string( src.substr( a, b - a ) ); return true; }
-            return false;
-        }
-    }
-    return false;
-}
-
 // ---- the compiled #match? / #not-match? regexes of ONE query, resolved when the query is ----------
 // One compiled regex per ( query, string id ), built when the query is compiled instead of once per MATCH.
 //
@@ -231,7 +215,13 @@ inline bool passesPredicates( const TSQuery* q, const PredicateRegexTable& rx, c
         {
             if( s.type == TSQueryPredicateStepTypeCapture )
             {
-                return captureText( m, s.value_id, src, out );
+                std::string_view view;   // the capture's text: captureView, the same reader the string predicates use
+                if( !captureView( m, s.value_id, src, view ) )
+                {
+                    return false;
+                }
+                out = std::string( view );
+                return true;
             }
             if( s.type == TSQueryPredicateStepTypeString )
             {

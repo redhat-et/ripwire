@@ -165,14 +165,24 @@ bool elixirMetadataAttribute( std::string_view name, const ElixirKeywords& keywo
 
 bool elixirLiveHole( TSNode hole, TSNode site, std::string_view src ) noexcept;
 
+/// What one tags match says about its role node, as elixirKeepCapture reads it.
+struct ElixirCaptureRole
+{
+    bool    isDef       = false;            // the role is an @definition.* capture
+    SymKind kind        = SymKind::Other;   // the role's symbol kind
+    bool    keywordHead = false;            // the match carried @_keyword: tags.scm's predicates already decided it is a
+                                            // keyword-headed definition (#any-of? on the keyword, #not-any-of? "unquote"
+                                            // "when" on the name, #355)
+};
+
 /// Decide whether a candidate definition or call capture represents supported executable Elixir syntax.
 /// role and name are non-null query captures into src. Reject quoted and dynamic syntax and metadata
 /// references; retain executable defaults and attributes while excluding declaration heads and patterns.
-/// keywordHead: the match carried @_keyword, so tags.scm's predicates already decided it is a keyword-headed definition
-/// (#any-of? on the keyword, #not-any-of? "unquote" "when" on the name).
-bool elixirKeepCapture( TSNode role, TSNode name, bool isDef, SymKind kind, std::string_view src, bool keywordHead,
-                        const ElixirKeywords& keywords ) noexcept
+/// capture: what the tags match says about the role node (see ElixirCaptureRole).
+bool elixirKeepCapture( TSNode role, TSNode name, ElixirCaptureRole capture, std::string_view src, const ElixirKeywords& keywords ) noexcept
 {
+    const bool    isDef = capture.isDef;
+    const SymKind kind  = capture.kind;
     // Module attributes (notably @spec/@type) are not runtime call sites.
     // The shared inert-region decision runs after this capture's other syntax filters,
     // so quoted definition heads and special forms never inflate declined=.
@@ -214,7 +224,7 @@ bool elixirKeepCapture( TSNode role, TSNode name, bool isDef, SymKind kind, std:
         }
         // `defimpl` defines a real module (`Protocol.For`); ElixirContext supplies its full name.
         if( kind == SymKind::Other ) { return elixirModuleKeyword( target ) || target == "defimpl"; }
-        return keywordHead;   // the keyword list and the unquote/when exclusion live in queries/elixir/tags.scm (#355)
+        return capture.keywordHead;   // the keyword list and the unquote/when exclusion live in queries/elixir/tags.scm (#355)
     }
     const TSNode firstArg = elixirFirstArgument( role );
     if( target == "test" && !ts_node_is_null( firstArg ) && std::strcmp( ts_node_type( firstArg ), "string" ) == 0 && !ts_node_is_null( elixirBody( role, src ) ) )
