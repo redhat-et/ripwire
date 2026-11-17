@@ -4150,6 +4150,84 @@ static_assert( rw::kCompactRepriceDensestBytesPerToken == rw::kMinBytesPerToken,
 // The captured run's answer, compacted and written — or, when the dialect cannot shape it, passed through (the DEFAULT
 // posture) or refused (an ASKED --legend=compact). `rc` is the run's own exit code, returned unchanged on every path that
 // emits the answer.
+// --legend-have='s VERSION HANDSHAKE. It lives here and not in cli.h because cli.h is included early enough that
+// pulling legenddict.h into it shifts declaration order and breaks unrelated headers.
+//
+// WHY A HANDSHAKE AT ALL. --legend=ref is refused on the CLI, and the reason is right: a CLI run is one answer with no
+// session that was served anything, so its ref row would name definitions the reader never received. It would also make
+// output depend on whether an earlier RUN happened, which is not reproducible, and determinism is a contract here.
+// Naming the dictionary version turns both problems into one argv-only fact: the caller states what it holds, the answer
+// depends on nothing but its arguments, and a reader holding a DIFFERENT dictionary is refused instead of being handed a
+// pointer it cannot resolve.
+static bool checkLegendHandshake( const rw::Config& cfg )
+{
+    if( cfg.legendHave.empty() )
+    {
+        return true;   // asserts nothing: not an input to check, so VALIDATE has nothing to say about it
+    }
+    // argv is EXTERNAL INPUT, so the version goes through VALIDATE in the condition of the refusal (CONTRIBUTING §3).
+    if( VALIDATE( cfg.legendHave == rw::legenddict::dictionaryVersion(),
+                  "--legend-have= names the legend dictionary THIS binary holds" ) )
+    {
+        return true;
+    }
+    rw::emitTo( stderr, "ripwire: --legend-have={} does not match this binary's legend dictionary ({}) — a ref answer would point at "
+                        "definitions you do not hold; run `ripwire --legend-dict` and pass the dictv= it prints\n",
+                std::string_view( cfg.legendHave.data(), cfg.legendHave.size() ),
+                std::string_view( rw::legenddict::dictionaryVersion() ) );
+    return false;
+}
+
+// The ref stage, applied to a finished COMPACT answer when the caller proved it holds the dictionary. A served-everything
+// session is exactly the state of such a reader, so the existing MCP transform does the work unchanged — no second
+// implementation of the posture, which is the point of routing it through here.
+static void applyCliRefPosture( const rw::Config& cfg, std::string& doc )
+{
+    if( cfg.legendHave.empty() )
+    {
+        return;
+    }
+    rw::legenddict::LegendSession session;
+    session.serveAll();                       // the handshake asserted every definition is already with the reader
+    const rw::legenddict::RefOutcome outcome = rw::legenddict::applyRefPosture( doc, session );
+    if( outcome == rw::legenddict::RefOutcome::NotApplicable )
+    {
+        // Not a shape this dictionary reduces (no XML root, or a legend it does not hold). The answer is served
+        // UNCHANGED and complete; only the saving is missed, so this is a cost note and never a wrong answer.
+        DISCLOSE( Diagnostics::answerUnchanged, "the inline answer is a correct superset of the ref one: only the cost stays",
+                  "applyCliRefPosture: --legend-have= on an answer the legend dictionary cannot reduce — inline legend kept" );
+    }
+}
+
+// The ONE place a captured answer reaches stdout, with the write CHECKED. An unchecked fwrite/fflush here exits 0 with
+// no answer written when stdout cannot take it (`> /dev/full`, a closed pipe): dispatch already returned 0 having written
+// only into the capture, so the failure is invisible to the caller. A missing answer reported as success is the one
+// outcome this tool must never produce, so the replay decides the exit code.
+static int emitCapturedDoc( const std::string& doc, int rc )
+{
+    const bool written = std::fwrite( doc.data(), 1, doc.size(), stdout ) == doc.size();
+    const bool flushed = std::fflush( stdout ) == 0;
+    if( written && flushed && std::ferror( stdout ) == 0 )
+    {
+        return rc;
+    }
+    // THE ONE CALLER WHOSE STDOUT LEGITIMATELY HAS NO READER: #594's detached help-task child. The parent
+    // abstained and answered already, then exited, so the child's stdout is a closed pipe BY DESIGN — it goes
+    // on running only to warm the index, and nothing is waiting for its bytes. Failing it here turns an
+    // expected condition into a non-zero rc in the child's own status file, which is exactly what
+    // test/helptaskdeadlinecheck.sh caught: `state=finished rc=1` where the design says 0. Confirmed by
+    // experiment -- with this write check unconditional that gate failed, and with it bypassed it passed.
+    // Every other caller keeps the check: a user's `> /dev/full` or closed pipe must not exit 0 with no
+    // answer, which is the defect the check exists for.
+    if( rw::helpdeadline::childSession().active )
+    {
+        return rc;
+    }
+    std::fputs( "ripwire: could not write the answer to stdout — it is incomplete or absent; the exit code says so rather "
+                "than reporting a success that did not happen\n", stderr );
+    return rc != 0 ? rc : 1;
+}
+
 static int finishCompactCapture( const rw::Config& cfg, std::string& doc, int rc )
 {
     EXPECTS( cfg.legend == "compact", "only a compact-posture run is captured" );
@@ -4157,12 +4235,7 @@ static int finishCompactCapture( const rw::Config& cfg, std::string& doc, int rc
     {
         return rc;   // a refusal (or an empty answer) — nothing to rewrite, the exit code says what happened
     }
-    const auto emitCaptured = [&doc, rc]()
-    {
-        std::fwrite( doc.data(), 1, doc.size(), stdout );
-        std::fflush( stdout );
-        return rc;
-    };
+    const auto emitCaptured = [&doc, rc]() { return emitCapturedDoc( doc, rc ); };
     // the DEFAULT posture shapes what it can and leaves the rest exactly as it was emitted (cfg.legendDefaulted);
     // only an ASKED --legend=compact refuses an answer the dialect cannot shape
     // forbudget-soft: an explicit --token-budget on a task lens is a SOFT target — the settle never labels it "over"
@@ -4172,6 +4245,10 @@ static int finishCompactCapture( const rw::Config& cfg, std::string& doc, int rc
     {
         case rw::CompactOutcome::Rewritten:
         case rw::CompactOutcome::AlreadyCompact:
+            // ORDER MATTERS: applyRefPosture reads the answer as the INLINE posture serves it, which for these verbs
+            // means the compact dialect is already applied. Calling it before applyCompactDialect read the pre-compact
+            // document and returned NotApplicable on every verb (measured 2026-11-16: four covered verbs, all no-ops).
+            applyCliRefPosture( cfg, doc );
             return emitCaptured();
         case rw::CompactOutcome::NotXml:
             if( cfg.legendDefaulted )
@@ -4251,7 +4328,13 @@ static void emitDeadlineAbstain( const rw::Config& cfg, char** argv, std::string
 static int runWithCompactLegend( const rw::Config& cfg, char** argv )
 {
     EXPECTS( !cfg.legendDefaulted || cfg.legend == rw::kDefaultLegendPosture, "a defaulted posture is the registered default" );
-    if( !compactCaptures( cfg, argv ) )
+    // --legend-have= on a verb that emits the compact dialect NATIVELY (--for) needs a capture of its own, and it must
+    // NOT be the compact one. Measured 2026-11-16: routing a --for bundle through applyCompactDialect moves it by 290 B
+    // (31,457 -> 31,167), which is exactly why nativeCompactLegendVerb excludes it. Reusing that capture to reach the ref
+    // stage would have silently rewritten the answer on the way. So this path captures and applies the ref stage ALONE,
+    // leaving the compact path byte-identical to a run without the flag.
+    const bool refOnlyCapture = !cfg.legendHave.empty() && !compactCaptures( cfg, argv );
+    if( !compactCaptures( cfg, argv ) && !refOnlyCapture )
     {
         return dispatchMain( cfg, argv );
     }
@@ -4287,7 +4370,12 @@ static int runWithCompactLegend( const rw::Config& cfg, char** argv )
         doc.append( buf, got );
     }
     std::fclose( capture );
-    return finishCompactCapture( cfg, doc, rc );
+    if( refOnlyCapture )
+    {
+        applyCliRefPosture( cfg, doc );
+        return emitCapturedDoc( doc, rc );
+    }
+    return finishCompactCapture( cfg, doc, rc );   // the ref stage runs INSIDE it, after the compact dialect
 }
 
 // #350 layer 3: the memory guard's limit, resolved ONCE, before any thread exists — the flag, else RIPWIRE_MAX_MEMORY,
@@ -4364,6 +4452,10 @@ int main( int argc, char** argv )
     if( !cfg.ok )
     {
         return 1;
+    }
+    if( !checkLegendHandshake( cfg ) )
+    {
+        return 1;   // the refusal is on stderr, and it names both dictionary versions
     }
     if( !installMemoryGuard( cfg ) )
     {

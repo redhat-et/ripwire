@@ -202,6 +202,31 @@ Read `ripwire://legend-dict/full` for all of them, or print them with `ripwire -
 `--mcp --mcp-legend=inline` keeps every answer's legend inline. The HTTP transport (`--listen`) keeps every
 legend inline.
 
+### On the CLI, say which dictionary you hold: `--legend-have=DICTV`
+
+The CLI has no session, so it cannot know you were already sent a definition — and output that depended on
+whether an earlier *run* happened would not be reproducible. So you tell it. Read the version once:
+
+```
+ripwire --legend-dict | head -1        # the dictv= heading names the version
+```
+
+then pass it on every call: `ripwire ROOT --callers=SYM --legend-have=<dictv>`. Each answer then comes back
+rows-first with `<about legend="ref" dict= dictv=/>` carrying the root attributes, and no legend prose.
+
+**Why it is worth a flag.** The legend is a near-FIXED cost per answer (measured 531–4,305 B, median 1,796),
+so the SHORTER the answer the bigger its share: 14 % of a `--for` bundle, **62 % of a `--whereis` answer**.
+Measured over 80 recorded answers: **−30 % overall** — `--dead-code` −57 %, `--grep` −50 %, `--callees` −44 %,
+`--path` −32 %, `--callers` −27 %, `--impact` −26 %. Nothing is dropped: every row and every root attribute
+is preserved, just moved onto the `<about>` row.
+
+This matters most when you ROUTE to a cheaper verb, because that is where the fixed cost dominates: going
+from `--for` to `--whereis` saves ~20x today and ~45x with the handshake on.
+
+Two refusals, both deliberate: a version that is not this binary's is refused (you would be pointed at
+definitions you do not hold — run `--legend-dict` again after upgrading), and it cannot combine with
+`--mcp`/`--listen`/`--lsp`, which have a real session and already send each definition once.
+
 ## The 3 MCP edit verbs — the warm-server counterpart to the preferred CLI
 
 `replace_symbol_body`, `insert_before_symbol`, `insert_after_symbol` — the last 3 of the 30 (see above),
