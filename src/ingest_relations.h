@@ -59,7 +59,7 @@ inline bool isBaseTypeNodeIn( const char* nt, Lang lang ) noexcept
 // One use-site RawRef sited at node `at`: its start byte (the byte-span sweep attributes the ref to the enclosing def)
 // and its 1-based line (ABS-3: --uses p="file:line"), with the role and name the caller decides; every other field keeps
 // RawRef's default.
-inline RawRef rawRefAt( TSNode at, std::uint32_t fileId, Lang lang, RefRole role, const std::string& name )
+inline RawRef rawRefAt( TSNode at, std::uint32_t fileId, Lang lang, RefRole role, std::string_view name )
 {
     RawRef r;
     r.fileId    = fileId;
@@ -67,7 +67,7 @@ inline RawRef rawRefAt( TSNode at, std::uint32_t fileId, Lang lang, RefRole role
     r.line      = ts_node_start_point( at ).row + 1;
     r.lang      = lang;
     r.role      = role;
-    r.name      = name;
+    r.name.assign( name );
     return r;
 }
 
