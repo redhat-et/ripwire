@@ -16865,3 +16865,45 @@ across 311 cells. Whatever the 0.6.9→0.6.10 growth was, it had already landed 
 G1 attribution needs a 0.6.9 binary to be measured properly and is **NOT-ESTABLISHED** from this pair.
 The one verb that grew is `impact` (+1.86 % bytes, +5.54 % legend) on n=6, which is too small to call
 and is recorded as a lead, not a finding.
+
+## PRE-REGISTRATION 2026-11-16 (amendment 2) — ITEM C: the tail becomes CONDITIONAL on a routed section resolving
+
+Registered before measurement. Item K was abandoned by its own K3 ordering test: tail-only evidence is
+front-loaded (median row index 25) but a thin minority sits at indices 65–157, so no unconditional cap
+height both saves bytes and keeps every answer. **Item C asks a different question**: not "how many tail
+rows", but "**does this answer still need its tail at all?**"
+
+The lead is an independent read of five cells by a separate model, whose two load-bearing byte claims were
+re-measured here before any of it was adopted: `--path=Model.save,SQLInsertCompiler.execute_sql` answers
+`ld2-django-07` in **4,543 B against the stored bundle's 44,781 B (10.1 %)**, and
+`--path=CodeMain.main,WindowsMainService.open` answers `ld-vscode-03` in **12,781 B against 57,466 B
+(22.2 %)**. Both reproduce its figures to within 22 B, the same offset in each, so the instrument is sound.
+Its reading that those cells keep their completeness is **its** reading and is not inherited; what is
+adopted is the mechanism.
+
+**The rule, stated before its cost is read.** When an answer carries a ROUTED section — one of the closed
+list below, enumerated from the emitter's own element names and not from any gold — collapse `<tail>` to
+its counted stub (`total=` intact, `shown="0"`, `capped="1"`, `next=` naming the follow-up). The closed
+list: `reexports`, `graph_verb`, `bridge`, `gap`, `path_gap`, `near_sink`, `shortkey`, `exemplar_family`,
+`doc_body`, `dotted_strings`, `compose`, `lego`, `slice`, `connect`. Nothing is added to it after a readout.
+
+- **Band C1 — ZERO cells may lose completeness**, at either bound, on any grain. Same absolute bar as K1
+  and for the same reason: a cut that drops gold is a wrong answer, not a shorter one. FAIL on one cell.
+- **Band C2 — expected tokens fall per repo, and FAIL on any rise.** Never pooled.
+- **Band C3 — the CONDITION is read from the answer's own structure, never from the gold.** A rule that
+  fires on "cells whose gold happens to sit outside the tail" scores perfectly by construction and
+  measures nothing. The condition is the presence of a listed element in the emitted answer, full stop.
+- **Band C4 — the stub discloses, and `next=` is EXECUTED.** `total=` must stay the uncut count and the
+  emitted `next=` argv must be run on the same root and shown to return the collapsed rows. And per K4/G6
+  the recovery earns NOTHING: a cell needing the follow-on is scored NOT complete and pays the full
+  24,808-token term.
+- **Band C5 — the control, because this rule can be vacuous.** The count of cells where the condition
+  FIRES must be reported beside the saving, and a readout in which it fires on fewer than 10 cells is
+  **NOT-ESTABLISHED**, not a pass. A conditional cut that almost never triggers can show a clean C1 while
+  proving nothing, which is the single easiest way for this item to look like a success.
+
+### What Item C does not claim
+
+Not that a routed section makes the tail redundant in general — only that it does so often enough to be
+worth measuring, on a condition fixed in advance. And no saving figure: the offline ladder returns one in
+seconds, so there is nothing to guess.
