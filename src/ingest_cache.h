@@ -381,10 +381,13 @@ constexpr std::uint32_t kCacheVersion = 52;           // 52: lane failure-defaul
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
 constexpr std::uint32_t kParserVer    = 313;          // bump on any grammar/.scm/extraction change
-                                                      // 313 = 2026-11-17 (#355, PR #426 by @conka8, landed as lane/land-426; its placeholders 216 then 311, renumbered strictly above
-                                                      //   main's 311 (#420) and its rich tag 312): the tags pass evaluates tags.scm's string predicates (#eq?, #not-eq?, #any-of?,
-                                                      //   #not-any-of?; src/infra/tspredicates.h), and Elixir's definition keywords and metadata attribute names move into
-                                                      //   queries/elixir/tags.scm. Rich file tag 314. kCacheVersion unchanged.
+                                                      // 313 = 2026-11-17 (TRAIN-1117b: ONE number for its two parser members, strictly above main c565a3fad's 311/312
+                                                      //   (#420, landed by TRAIN-1117a-r #686)). Rich file tag 314. kCacheVersion unchanged.
+                                                      //   - #446 round 2, @SeddonShen, landed as lane land-606 (its placeholder 316): Java base clauses read as
+                                                      //     @reference.base captures (queries/java/tags.scm, LangFacts::basesAsCaptures on the Java row).
+                                                      //   - #355, PR #426 by @conka8, landed as lane/land-426 (its placeholders 216, then 311): the tags pass evaluates
+                                                      //     tags.scm's string predicates (#eq?, #not-eq?, #any-of?, #not-any-of?; src/infra/tspredicates.h), and Elixir's
+                                                      //     definition keywords and metadata attribute names move into queries/elixir/tags.scm.
                                                       // 311 = 2026-11-17 (#358 C# 1a, @LaimaWu; lands #420, rebased; was 198 on the PR, above main's 309/310): using
                                                       //   directives move to shared @import.path captures; import-free deep containers no longer disclose a cut or
                                                       //   lose whole-cache eligibility. Alias/edge facts unchanged; rich tag 312. kCacheVersion unchanged.
