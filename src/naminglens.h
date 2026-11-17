@@ -28,7 +28,8 @@
 // The rules (each cites the empirical work it mechanizes; bracketed tags are the lineage):
 //   naming-short         — 1–2 letter Function/Method/Var name (Var = module/global role; a
 //                          function name is visible far beyond any 20-line scope) [Beniamini/Hofmeister]
-//   naming-wordy         — more than 5 split tokens in one name [Butler; AlSuhaibani]
+//   naming-wordy         — more than 5 split tokens in one name [Butler; AlSuhaibani]; a marker prefix (the k of
+//                          kMaxNodes; C-family g_/m_/s_) is not a word of the name (namingWordCount, measured 2026-11-17)
 //   naming-series        — foo1/foo2/… digit-suffix siblings sharing a base in one scope [Butler]
 //   naming-underscore    — internal consecutive underscores; C-family reserved __x / _X forms [Butler]
 //   naming-case          — snake_case and camelCase mixed inside ONE name [Butler]
@@ -533,13 +534,39 @@ inline bool isPythonDunder( std::string_view name ) noexcept
 // TWO message variants (both existing Symbol callers and the new local-scoped caller need it).
 struct NameShapeFacts
 {
+    std::size_t wordCount = 0;     // naming-wordy's count: split tokens minus a marker prefix (namingWordCount)
     bool shortName      = false;   // naming-short candidate (1-2 letter alphabetic core)
-    bool wordy           = false;   // naming-wordy candidate (>5 split tokens)
+    bool wordy           = false;   // naming-wordy candidate (>5 words)
     bool underscoreIssue = false;   // naming-underscore candidate (either sub-case below)
     bool reservedForm    = false;   // TRUE ⇒ underscoreIssue is the C-family reserved-identifier form,
                                     // FALSE ⇒ it is the internal-consecutive-underscores form (message text differs)
     bool caseIssue       = false;   // naming-case candidate (snake_case + camelCase mixed)
 };
+
+// the C-family languages (C/C++/ObjC): the reserved-identifier forms and the g_/m_/s_ scope markers are theirs.
+inline bool namingCFamily( Lang lang ) noexcept
+{
+    return lang == Lang::Cpp || lang == Lang::C || lang == Lang::ObjC;
+}
+
+// naming-wordy counts the WORDS of a name, and a scope or kind MARKER prefix is not one: the `k` of a
+// constant (`k` + an uppercase letter: kPathFromReachMaxNodes is five words, not six) and, in the C family only,
+// the `g_` / `m_` / `s_` of a global, member or static. Measured 2026-11-17 (test/namingcalibrationcheck.sh
+// LIVE arm): EVERY naming-wordy fire on a developer's CHOSEN spelling (7 at main 5139f7840, 8 with #565) was a
+// k constant that gained a unit or role word under the house cap convention (kCMakeCallLines -> kCMakeMaxCallLines):
+// five words plus the k.
+// The scope markers are C-family only on evidence: across 88 cloned Python repos g_/m_/s_ open real words
+// (g_loss = generator loss, s_start, m_name), while C/C++ use them as markers (m_tempPool, g_object_new).
+// Deliberately NOT stripped: an acronym run the splitter breaks (CMake -> C|Make). Telling CMake from
+// IThing or XAxis needs a dictionary, and the calibration pairs never needed it.
+inline std::size_t namingWordCount( std::string_view name, Lang lang, const std::vector<std::string>& toks ) noexcept
+{
+    const bool constantMarker = name.size() >= 2 && name[0] == 'k' && ncUpper( name[1] );
+    const bool scopeMarker    = namingCFamily( lang ) && name.size() >= 3 && ( name[0] == 'g' || name[0] == 'm' || name[0] == 's' )
+                                && name[1] == '_' && ncAlpha( name[2] );
+    const bool markerPrefix   = ( constantMarker || scopeMarker ) && !toks.empty();
+    return toks.size() - ( markerPrefix ? 1 : 0 );
+}
 
 // N1 + N2 + N4: facts derivable from the name alone (plus lang for the C-family reserved-form gate).
 // role (Var vs Function/Method vs local) is NOT a parameter here — it only ever changes MESSAGE TEXT,
@@ -567,8 +594,9 @@ inline NameShapeFacts checkNameShapeCore( std::string_view name, Lang lang, cons
         facts.shortName = allAlpha && core.size() <= 2;
     }
 
-    // naming-wordy — more than 5 split tokens.
-    facts.wordy = toks.size() > 5;
+    // naming-wordy — more than 5 words (split tokens, a marker prefix not counted: namingWordCount).
+    facts.wordCount = namingWordCount( name, lang, toks );
+    facts.wordy     = facts.wordCount > 5;
 
     // naming-underscore — internal consecutive underscores anywhere; C-family reserved forms
     // (leading __ or _Capital). Python dunders and single leading/trailing underscores are idiomatic.
@@ -589,8 +617,7 @@ inline NameShapeFacts checkNameShapeCore( std::string_view name, Lang lang, cons
             }
         }
         // the reserved-identifier forms are a C-family rule only (C/C++/ObjC reserve leading _Capital and __).
-        const bool cFamily  = lang == Lang::Cpp || lang == Lang::C || lang == Lang::ObjC;
-        const bool reserved = cFamily && name.size() >= 2 && name[0] == '_' && ( name[1] == '_' || ncUpper( name[1] ) );
+        const bool reserved = namingCFamily( lang ) && name.size() >= 2 && name[0] == '_' && ( name[1] == '_' || ncUpper( name[1] ) );
         facts.underscoreIssue = ( internalDouble && !isPythonDunder( name ) ) || reserved;
         facts.reservedForm    = reserved;
     }
@@ -631,7 +658,7 @@ PROFILE_SCOPE_DESCRIBE( "naminglens/sym: checkNameShape" );
     }
     if( facts.wordy )
     {
-        sink.add( "naming-wordy", s, s.line, s.name + " (" + std::to_string( toks.size() ) + " words in one name)" );
+        sink.add( "naming-wordy", s, s.line, s.name + " (" + std::to_string( facts.wordCount ) + " words in one name)" );
     }
     if( facts.underscoreIssue )
     {
@@ -683,7 +710,7 @@ inline void checkLocalNameShape( const Symbol& enclosingFn, const LocalNameFact&
     if( facts.wordy )
     {
         sink.add( "naming-wordy", enclosingFn, local.line,
-                  local.name + " (" + std::to_string( toks.size() ) + " words in one local variable name, in " + enclosingFn.name + ")" );
+                  local.name + " (" + std::to_string( facts.wordCount ) + " words in one local variable name, in " + enclosingFn.name + ")" );
     }
     if( facts.underscoreIssue )
     {

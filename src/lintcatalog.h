@@ -146,7 +146,7 @@ inline constexpr std::array<LintCatalogRow, 39> kLintCatalog = { {
     { "naming-short", "info", "naming",
       "a 1-2 letter Function/Method/Var name — visible far beyond any tiny scope [Beniamini/Hofmeister]",
       kAllCatalogLangs, "v0.2.2" },
-    { "naming-wordy", "info", "naming", "more than 5 split tokens in one name [Butler; AlSuhaibani]",
+    { "naming-wordy", "info", "naming", "more than 5 words in one name; a k or C-family g_/m_/s_ marker prefix is not a word [Butler; AlSuhaibani]",
       kAllCatalogLangs, "v0.2.2" },
     { "naming-series", "info", "naming",
       "foo1/foo2/... digit-suffix siblings sharing a base name in one scope [Butler]", kAllCatalogLangs, "v0.2.2" },
