@@ -693,5 +693,65 @@ grep -q 'set(RIPWIRE_FUZZ_READERS' "$READERS_DIR/run.sh" && grep -q 'executed 0 
     && grep -q 'max_total_time=' "$READERS_DIR/run.sh" && grep -q 'nice -n 10' "$READERS_DIR/run.sh" \
     && ok "reader runner reads the CMake list, refuses a 0-input replay, and fuzzes time-boxed and niced" \
     || no "reader runner (test/fuzz/readers/run.sh) contract missing"
+# #663: every `gh label create` in the scheduled workflows is valid and idempotent. GitHub refuses a label description over
+# 100 characters with HTTP 422; ci.yml's tidy-advisory-report job sent a 121-character one on every nightly (11-14 and 11-15),
+# so its label never existed and its tracking issue was never opened — continue-on-error kept the run green and hid it.
+# Each create must carry a <=100-character --description, a 6-hex-digit --color, and --force (a label that appeared since the
+# existence probe is updated, not a 422). Premise: the creates found, FAIL on zero; a 101-character control proves the length
+# arm can fail.
+LABELTMP="$( mktemp -d )"; trap 'rm -rf "${TMP:-}" "$LABELTMP"' EXIT   # keeps the earlier trap's $TMP cleanup
+cat > "$LABELTMP/labels.py" <<'LABELPY'
+import os, re, shlex, sys
+d = sys.argv[1]
+n, bad = 0, []
+for f in sorted(os.listdir(d)):
+    if not f.endswith((".yml", ".yaml")):
+        continue
+    text = open(os.path.join(d, f), encoding="utf-8").read().replace("\\\n", " ")
+    for line in text.split("\n"):
+        if line.lstrip().startswith("#") or "gh label create" not in line:
+            continue   # a comment that names the command is not a call
+        n += 1
+        cmd = line[line.index("gh label create"):]
+        desc = re.search(r'--description "([^"]*)"', cmd)
+        color = re.search(r"--color ([^ ]+)", cmd)
+        where = f"{f}: {' '.join(cmd.split()[:4])}"
+        if not desc: bad.append(f"{where}: no --description")
+        elif len(desc.group(1)) > 100: bad.append(f"{where}: description {len(desc.group(1))} chars > 100")
+        if not color or not re.fullmatch(r"[0-9A-Fa-f]{6}", color.group(1)): bad.append(f"{where}: --color is not 6 hex digits")
+        try:
+            tokens = shlex.split(cmd, comments=True)   # an option is a TOKEN: "--force" inside a quoted value is not one
+        except ValueError:
+            tokens = []
+        if "--force" not in tokens: bad.append(f"{where}: no --force (not idempotent)")
+print(n)
+print("; ".join(bad))
+LABELPY
+labelOut="$( python3 "$LABELTMP/labels.py" "$ROOT/.github/workflows" )"
+labelN="$( printf '%s\n' "$labelOut" | sed -n 1p )"; labelBad="$( printf '%s\n' "$labelOut" | sed -n 2p )"
+if [ "${labelN:-0}" -lt 1 ]; then
+    no "workflow labels: found 0 \`gh label create\` calls under .github/workflows (vacuous)"
+elif [ -n "$labelBad" ]; then
+    no "workflow labels ($labelN creates): $labelBad"
+else
+    ok "workflow labels: all $labelN \`gh label create\` calls carry a <=100-char description, a hex colour and --force"
+fi
+# control: the same reader on a workflow whose one create has a 101-character description and no --force must flag both
+mkdir -p "$LABELTMP/wf"
+printf '          gh label create "$x" --repo "$R" --color FBCA04 \\\n            --description "%s"\n' "$( printf 'd%.0s' $( seq 1 101 ) )" > "$LABELTMP/wf/ctl.yml"
+ctlOut="$( python3 "$LABELTMP/labels.py" "$LABELTMP/wf" )"
+case "$ctlOut" in
+    1*"101 chars > 100"*"no --force"*) ok "workflow labels control: a 101-char description without --force is flagged twice (the arm can fail)" ;;
+    *) no "workflow labels control: the 101-char create was not flagged as expected: $( printf '%s' "$ctlOut" | tr '\n' '|' )" ;;
+esac
+# control (CodeRabbit #676): --force named only INSIDE the quoted description is no --force option
+mkdir -p "$LABELTMP/wf2"
+printf '          gh label create "$x" --repo "$R" --color FBCA04 --description "Use --force for updates"\n' > "$LABELTMP/wf2/ctl.yml"
+ctl2Out="$( python3 "$LABELTMP/labels.py" "$LABELTMP/wf2" )"
+case "$ctl2Out" in
+    1*"no --force"*) ok "workflow labels control: --force inside a quoted --description does not count as the option" ;;
+    *) no "workflow labels control: a quoted '--force' in the description passed as the option: $( printf '%s' "$ctl2Out" | tr '\n' '|' )" ;;
+esac
+
 [ "$fail" = 0 ] && printf 'ALL PASS\n' || printf 'FAILURES ABOVE\n'
 exit "$fail"

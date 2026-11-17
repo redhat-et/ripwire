@@ -566,7 +566,7 @@ inline void appendFileOpenTag( std::string& out, std::string_view rel, const Fil
     if( !mainNext.empty() )
     {
         out += " next=\"";
-        out += escapeXml( mainNext, esc );
+        appendNextValueXml( out, mainNext );   // the one next= escaper: a raw ' pastes (nextverb.h)
         out += "\"";
     }
     out += ">";

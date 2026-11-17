@@ -544,6 +544,22 @@ inline constexpr const char* kTestsIgnoredLegend =
     "radius_tested= is 0 by construction (not measured, not a finding) and radius_untested= is every production row reached; "
     "importers_tests= still counts test files. ";
 
+// TIER-FOLLOWUP: the columnar forms' per-row half of the same tier (columnar.h ColumnarRowExtras::testRow), said exactly when the
+// column rides, i.e. when a shown row is a test definition. G4: no double hyphen.
+inline constexpr const char* kTestColumnLegend =
+    "the test column (present when a shown row is one): 1 = that row is a test or fixture definition, counted apart from production; 0 = a production row. ";
+inline const char* testColumnLegend( bool present ) noexcept
+{
+    return present ? kTestColumnLegend : "";
+}
+
+// TIER-FOLLOWUP (callhierarchy.h computeHopTestedPartition): the callers/callees answer's test tier, said exactly when hop_tests=
+// rides; then the row's test="1" (XML) or the test column (columnar, only when a shown row carries it). 0 bytes when inert.
+// hopTestTierLegend, which composes them, sits below clausesForCounts (which it reuses).
+inline constexpr const char* kHopTestTierLegend =
+    "hop_tests= (absent at 0) counts the TEST definitions among these rows: listed, but counted apart, so hop_tested=/hop_untested= "
+    "cover production rows only and the three sum to count=. ";
+
 // --impact's partition reading for this answer: the two-tier sentence always (so an answer with no test in its reach is
 // byte-identical to before), then the test tier and its row label when radius_tests= rides, and the ignore-tests disclosure.
 // One function for the CLI and the MCP twin, so the two cannot drift. The columnar form has no per-row attribute (its
@@ -1182,6 +1198,12 @@ inline std::string prunedPackagesLegend( bool on, bool leadingSpace )
 inline std::string clausesForCounts( std::uint64_t countA, const char* clauseA, std::uint64_t countB, const char* clauseB )
 {
     return std::string( countA > 0 ? clauseA : "" ) + ( countB > 0 ? clauseB : "" );
+}
+// TIER-FOLLOWUP: the callers/callees test-tier clause and its row reading (constants above), both exactly when
+// hop_tests= rides: the row's test="1" in XML, the test column in the columnar form only when a shown row carries it.
+inline std::string hopTestTierLegend( std::size_t hopTests, bool columnar, bool testColumn )
+{
+    return clausesForCounts( hopTests, kHopTestTierLegend, hopTests, columnar ? testColumnLegend( testColumn ) : kTestRowLegend );
 }
 // IMPACT-TEST-TIER: --safe-delete's test-tier clauses. It lists callers, not the reach, so no row label; the same two
 // clauses as --impact (kRadiusTestTierLegend, kTestsIgnoredLegend above), each exactly when its attribute rides the root.

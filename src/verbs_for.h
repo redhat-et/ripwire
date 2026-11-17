@@ -2509,7 +2509,6 @@ inline rw::HopOwners forHopOwners( const rw::Config& cfg, const rw::IngestResult
     {
         return owners;
     }
-    std::vector<char> esc;
     const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
     std::size_t       cutReserve = 0;   // ' qword_cut="NNN" next="--callees=' + the longest target + '"'
     std::vector<rw::NodeId> cuttable = plan.rowIds;
@@ -2522,7 +2521,7 @@ inline rw::HopOwners forHopOwners( const rw::Config& cfg, const rw::IngestResult
         const rw::Symbol&      s   = ing.symbols[ id ];
         const std::string_view rel = rootArg.empty() ? std::string_view( ing.files[ s.fileId ] )
                                                      : rw::sarif::rootRelativeUri( ing.files[ s.fileId ], rootPrefix );   // packHops' pathRel
-        cutReserve = std::max( cutReserve, rw::ownerCalleesNext( ing, s, rel, rootArg, esc ).size() + 28 );
+        cutReserve = std::max( cutReserve, rw::ownerCalleesNext( ing, s, rel, rootArg ).size() + 28 );
     }
     owners.budgetBytes = leftBytes > cutReserve ? leftBytes - cutReserve : 1;   // 1, never 0 (0 reads as "ride on top")
     owners.fundFirst   = true;

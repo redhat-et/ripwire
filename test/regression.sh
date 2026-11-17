@@ -786,6 +786,7 @@ for _g in \
     nestedimportcheck \
     nestedqualcheck \
     nestprofilecheck \
+    nextaposcheck \
     nextverbcheck \
     noaliascheck \
     nodekindcheck \
@@ -1066,6 +1067,7 @@ for _g in \
     testscopecheck \
     textdocscheck \
     textpoolcheck \
+    tiercallerscheck \
     timsortcheck \
     tokenbudgetcheck \
     tomllangcheck \
@@ -1096,6 +1098,7 @@ for _g in \
     vendorpatchcheck \
     verifycheck \
     versioncheck \
+    versionlabelcheck \
     w2verbscheck \
     w3fixbudgetcheck \
     w3fixlegendcheck \

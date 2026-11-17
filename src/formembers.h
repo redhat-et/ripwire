@@ -14,7 +14,10 @@
 // the same file (a C++ in-class declaration, a JS/TS/Python method), never one nested inside another member (a closure inside a
 // method is that method's text). Only callables and fields are named; a nested type is not a member name here.
 // Order: the most question words (the fold's own words, sliceWords) in the name first, then the owner's own file before others,
-// then declaration line. A name rides once (an overload, or a C++ declaration and its out-of-line definition, are one name).
+// then path (file id order is path order), then declaration line — forOwnerMemberNames' sort key, and BOTH legend clauses below
+// name every one of those keys, so a reader derives the printed order from the legend alone (#595, soarkit: the clauses stopped at
+// "then line" while the key put the owner's file first). A name rides once (an overload, or a C++ declaration and its
+// out-of-line definition, are one name).
 // NOT listed: a name the answer already shows as a row (one of this owner's members ranked, or the owner's own name: a C++
 // constructor), and a name a comma would split. Every member name not listed for another reason is counted in mem_more=.
 //
@@ -61,13 +64,13 @@ inline bool forMemberNamesOn()
 
 // The legend clauses, present-only beside the attribute (a row carries mem=). Terse (LEGEND-SHORTEN); no "--" (an XML comment).
 inline constexpr std::string_view kForCompactMemberNamesLegend =
-    "; d mem= an owner's direct member names by the index (question words first, names only), mem_more= names cut";
+    "; d mem= an owner's direct member names only, by the index (question words first, then owner's file, path, line), mem_more= names cut";
 namespace member_detail
 {
 // The full clause, built at compile time around kForMemberNameCap's decimal digits, so the cap it states is the cap.
 inline constexpr std::string_view kMemberNamesLegendHead = "; mem= on an owner d row: up to ";
 inline constexpr std::string_view kMemberNamesLegendTail =
-    " names of its direct members by the index (scope or span, question words first, then line), "
+    " names of its direct members by the index (scope or span, question words first, then owner's file, path, line), "
     "not a claim they answer, never a row already shown, mem_more= the member names not listed";
 struct LegendText
 {

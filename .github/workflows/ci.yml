@@ -342,9 +342,13 @@ jobs:
             exit 0
           fi
           case "$new" in ''|*[!0-9]*) echo "::warning::unreadable new= in $st; the tracking issue is left untouched"; exit 0 ;; esac
+          # #663: the old 121-character description drew HTTP 422 "description is too long (maximum is 100 characters)" on every
+          # nightly that reached this line (11-14 and 11-15), so the label never existed and no issue was ever opened. GitHub caps a
+          # label description at 100 characters; test/g1configcheck.sh pins every label create here and in nightly.yml
+          # under that cap, and --force makes the create idempotent (it updates a label that appeared since the check above).
           if ! gh api "repos/$REPO/labels/$label" --silent 2>/dev/null; then
-            gh label create "$label" --repo "$REPO" --color FBCA04 \
-              --description "Nightly advisory clang-tidy found rows not in .clang-tidy-baseline.txt; opened and closed by .github/workflows/ci.yml only"
+            gh label create "$label" --repo "$REPO" --color FBCA04 --force \
+              --description "Advisory clang-tidy rows not in .clang-tidy-baseline.txt; opened and closed by ci.yml only"
           fi
           open="$( gh issue list --repo "$REPO" --label "$label" --state open --json number --jq '.[0].number // empty' )"
           if [ "$new" -gt 0 ]; then
@@ -999,7 +1003,7 @@ jobs:
       - name: The binary runs — --version and --help
         run: |
           ./build/ripwire.exe --version | tee version.txt
-          grep -qE '^ripwire [0-9]+\.[0-9]+\.[0-9]+ \(' version.txt
+          grep -qE '^ripwire [0-9]+\.[0-9]+\.[0-9]+(\+dirty|-dev(\.[0-9]+)?(\+g[0-9a-f]{7,40}(\.dirty)?)?)? \(' version.txt   # the label shapes cmake/version_stamp.cmake stamps (tag, +dirty, -dev.N+g<sha>, -dev+g<sha>, -dev)
           grep -q 'emit=' version.txt
           grep -q 'built_from=' version.txt
           test "$( ./build/ripwire.exe --help | wc -c )" -gt 1000
@@ -1193,11 +1197,11 @@ jobs:
             echo "nightly.yml ThreadSanitizer run — read this run's own job logs for the failing gate."
           } > "$body"
           if ! gh api "repos/$REPO/labels/$label" --silent 2>/dev/null; then
-            gh label create "$label" --repo "$REPO" --color B60205 \
+            gh label create "$label" --repo "$REPO" --color B60205 --force \
               --description "A nightly-scale workflow run failed on main; see the workflow-specific label for which one"
           fi
           if ! gh api "repos/$REPO/labels/$ownLabel" --silent 2>/dev/null; then
-            gh label create "$ownLabel" --repo "$REPO" --color 1D76DB \
+            gh label create "$ownLabel" --repo "$REPO" --color 1D76DB --force \
               --description "The full-matrix nightly failed on main; opened and closed by .github/workflows/ci.yml only"
           fi
           open="$( gh issue list --repo "$REPO" --label "$label,$ownLabel" --state open --json number --jq '.[0].number // empty' )"

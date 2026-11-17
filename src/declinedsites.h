@@ -362,12 +362,8 @@ inline DeclinedSiteCut declinedSiteCut( std::size_t total, int pageLimit, std::s
 }
 inline std::string declinedSiteCutAttrXml( const DeclinedSiteCut& cut )
 {
-    if( cut.next.empty() )
-    {
-        return {};
-    }
-    std::vector<char> esc;
-    return " dc_shown=\"" + std::to_string( cut.shown ) + "\" dc_next=\"" + std::string( escapeXml( cut.next, esc ) ) + "\"";
+    // dc_shown= rides only beside its continuation; nextAttrXml (the one next= writer) is the dc_next= attribute itself
+    return cut.next.empty() ? std::string() : " dc_shown=\"" + std::to_string( cut.shown ) + "\"" + nextAttrXml( cut.next, "dc_next" );
 }
 // The JSON twin of the two root attributes, the same names on the CLI --json and the MCP twins (the attribute-parity rule).
 // A cut prints at least one row (the cap and --limit are >= 1), so dc_shown is never the 0 countFieldOrEmpty leaves out.

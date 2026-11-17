@@ -8,8 +8,12 @@
 // REPEATED through the same seam and its answer compared.
 //
 // One log per process, armed by its owner for the span of one computation. Unarmed (every other run, every other caller) a
-// seam costs one relaxed atomic load. A mutex guards the rows: a serial computation today, and a parallel one tomorrow
-// must not have to remember this file.
+// seam costs one relaxed atomic load. ONE process-wide mutex (logGuard) guards arming, disarming and the rows: the armed
+// computation is not alone in the process (the --grep scan-prefetch thread and its collect workers read files through the
+// same seams while the graph builds, main.cpp §P4.1), so a seam on another thread may see the pointer at any moment. Taking
+// the pointer again under the guard makes the log's construction happen-before every row, and makes the owner's disarm wait
+// for a row in flight, so the owner reads and destroys a log no other thread still holds (TSan, train #676: the relaxed
+// publish raced the Log's construction, and an in-flight row could outlive the disarm).
 #include "hashutil.h"   // multiplyModulo64
 
 #include <atomic>
@@ -87,8 +91,7 @@ struct Dep
 
 struct Log
 {
-    std::mutex       guard;
-    std::vector<Dep> deps;
+    std::vector<Dep> deps;   // written under logGuard() while armed; its owner reads it after the disarm
 };
 
 inline std::atomic<Log*>& activeLog() noexcept
@@ -97,16 +100,27 @@ inline std::atomic<Log*>& activeLog() noexcept
     return log;
 }
 
+// Arming, disarming and every row hold this one guard (the header's note: why not a mutex inside the Log).
+inline std::mutex& logGuard() noexcept
+{
+    static std::mutex guard;
+    return guard;
+}
+
 // One row into the armed log, if any. A row that cannot be stored (allocation) poisons the log instead: its owner reads
 // Seam::Count as "this computation's reads are not all here — store nothing".
 inline void record( Seam seam, const std::string& path, std::uint64_t answer ) noexcept
 {
-    Log* const log = activeLog().load( std::memory_order_relaxed );
+    if( activeLog().load( std::memory_order_relaxed ) == nullptr )
+    {
+        return;   // the unarmed fast path: no lock
+    }
+    const std::lock_guard<std::mutex> hold( logGuard() );
+    Log* const                        log = activeLog().load( std::memory_order_relaxed );   // again, under the guard Armed also holds
     if( log == nullptr )
     {
-        return;
+        return;   // disarmed between the two loads
     }
-    const std::lock_guard<std::mutex> hold( log->guard );
     try
     {
         log->deps.push_back( Dep{ path, seam, answer } );
@@ -139,8 +153,16 @@ inline bool noted( Seam seam, const std::string& path, bool exists ) noexcept
 class Armed
 {
 public:
-    explicit Armed( Log* log ) noexcept { activeLog().store( log, std::memory_order_relaxed ); }
-    ~Armed() { activeLog().store( nullptr, std::memory_order_relaxed ); }
+    explicit Armed( Log* log ) noexcept
+    {
+        const std::lock_guard<std::mutex> hold( logGuard() );
+        activeLog().store( log, std::memory_order_relaxed );
+    }
+    ~Armed()
+    {
+        const std::lock_guard<std::mutex> hold( logGuard() );   // waits out a row in flight: the owner reads the log next
+        activeLog().store( nullptr, std::memory_order_relaxed );
+    }
     Armed( const Armed& )            = delete;
     Armed& operator=( const Armed& ) = delete;
 };
