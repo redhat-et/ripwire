@@ -17414,6 +17414,709 @@ comment: a flagless run must stay byte-identical to `--legend=compact`.
 normalisation `dict` → `compact` meant a refusal built from `cfg.legend` named a value the caller never
 typed: `--legend=dict --json` answered *"--legend=compact applies to the XML verbs only"*. `Config` now
 carries the spelling as typed, and `(N2)` asserts the refusal names it. Flag named means named as typed.
+## READOUT — ITEM C′: the RESOLUTION predicate also FAILS, and the tail cut is now out of ideas
+
+Measured 2026-11-17 on the 295-cell store (`harness/itemk_resolve_band.py`, which *imports* `cut_ladder.py`
+and `anchor_grade.py` unmodified rather than reimplementing either).
+
+**Why this band existed.** Item C collapsed `<tail>` when a routed element was merely **PRESENT**, on a
+closed list of 14 names, and failed C1 on 19 cells. An independent five-cell read proposed a stricter
+condition — a routed verb **RESOLVES** — and argued no gold anchor is tail-only in the cells where that
+holds. Presence is not resolution (`graph_verb` appears as an unresolved cascade, `lego` as a counted stub,
+`doc_body` fires spuriously on slash-delimited tasks), so item C's failure did not settle it.
+
+**The condition, read only from element names and attributes on comment-masked text:**
+`<path … reachable="1">` ∨ `<met_bridge>` ∨ `<reexports>` with BOTH a `<def>` row and ≥1 `<rx>` row.
+
+### VERDICT: FAIL
+
+| | |
+| --- | ---: |
+| `--for` cells satisfying the condition | **27 of 216 (12.5 %)** |
+| bytes saved on those cells | 416,906 B — **42.16 % of their own**, **6.24 % of the `--for` population** |
+| **cells losing a gold item (lenient)** | **3 of 27** — bar was ZERO |
+
+Named: `ld2.ld2-angular-15` 4/4→3/4 (R4 `compileComponent`), `mf1.mf1-mdbook-01` 4/4→3/4 (R4 `errors`),
+`mf1.mf1-textual-01` 3/4→2/4 (R4 `_tab_pane.py`, `__all__`). Discount the weak anchor (`errors`, 6 generic
+characters) entirely and **2 of 27 still lose**, both on a real path plus a symbol name. The verdict does
+not rest on the weak one.
+
+Predicate breakdown: path-reachable 13, met_bridge 2, reexports-with-rows 14 (union 27; path-only 11,
+path+bridge 2, reexports-only 14). `<met_bridge>` **never fires alone** in this corpus — that arm has zero
+independent evidence either way. One `<reexports>` cell carrying only `<spec found="0"/>` is correctly
+rejected, which is precisely the gap between this condition and item C's.
+
+### The controls are why the verdict is believable
+
+| control | result |
+| --- | --- |
+| identity — re-grading an unedited copy reproduces the recorded grade | PASS |
+| unedited copy byte-identical | PASS (7,034,735 → 7,034,735 B) |
+| planted blanked answer is caught | PASS |
+| **unconditional tail removal reports loss** | **PASS — 92 anchors across 63 of 275 cells**, reproduced identically on four stores |
+
+A 3-anchor result from an instrument that reports 92 on the unconditional case is a real small number, not
+a silent zero.
+
+### Three limits stated rather than buried
+
+1. **The strict bound CANNOT register a tail loss on this band, by construction** — `strip_weak()` already
+   removes `<tail>` before the strict count. "No strict-bound loss" is an instrument property here, not
+   evidence of safety. Only the lenient bound could fire, and it did.
+2. **Untested at file and symbol grain.** All 27 band cells are item grain. File grain reads `p=` out of
+   the whole document *including the tail* — the grain most exposed to this cut — and this corpus has no
+   resolved `--for` cell at that grain. The hard case is unmeasured.
+3. **The control reports 92 where ~96 is registered.** Most likely population, not method: 26 cells were
+   never collected into this store (1 repo absent, 25 with no argv or no `root=`), and **17 of those carry
+   gold**, so a complete store would grade 292 rather than 275.
+
+### The one live thread, and why it is NOT a result yet
+
+All three losses came through the `reexports` arm. The `path reachable="1"` and `<met_bridge>` arms lost
+**0 anchors across 13 cells and 236,510 B**. Narrowing the rule to those two arms *now* would fit it to
+where the gold happened to sit — the exact failure C3 was written to prevent — and the band that tested it
+would be the band that suggested it. Registered below as its own band, with the limitation that its
+evidence is currently the same cells that produced the hypothesis, so it may not be published as a verdict
+until it is measured on cells that were not used to form it.
+
+**Four tail approaches have now failed their own registered rules: K (fixed cap), K1 (height 64), C
+(presence), C′ (resolution).** The tail is 45.8 % of the biggest verb's bytes and it has resisted every cut
+anyone has registered. That is the strongest argument yet that it is an ORDERING problem — promote the
+gold-bearing rows out of the tail, then the tail is cappable — and the weakest-possible case for a fifth
+cut attempt.
+
+## PRE-REGISTRATION 2026-11-17 (amendment 6) — ITEM C″: the two arms that lost nothing
+
+Registered now, measured later, and **explicitly exploratory**: the hypothesis comes from C′'s per-arm
+split, so the 13 cells that produced it cannot also judge it.
+
+**Rule.** Collapse `<tail>` to its counted stub when `<path … reachable="1">` ∨ `<met_bridge>` is present —
+the `reexports` arm DROPPED, because all three C′ losses came through it.
+
+- **Band C″1 — zero cells may lose completeness**, at either bound, on any grain. Same absolute bar.
+- **Band C″2 — the population must be cells NOT used to form the hypothesis.** The 13 C′ cells are
+  disqualified as evidence. This requires either newly collected cells or a held-out split registered
+  before the grade is read. Until one exists, C″ has **no verdict** and may not appear in any published
+  table.
+- **Band C″3 — file and symbol grain must be represented**, since C′ could not test them and file grain is
+  the grain most exposed to a tail cut. A population with zero file-grain cells FAILS to establish C″
+  rather than passing it.
+- **Band C″4 — `<met_bridge>` must fire independently at least once.** It never did in C′ (2 of 2 cells
+  also had `path reachable="1"`), so as things stand the rule is really the path arm wearing two names.
+
+## PRE-REGISTRATION 2026-11-17 (amendment 7) — ITEM F: intra-row redundancy, and the legend it pays for
+
+Registered before any `src/` change. This band exists because of a MECHANISM confirmed in the source, not
+a byte count: `compactPresentTerms` (`src/compactlegend.h`) emits a legend clause **if and only if**
+`isCompletenessTermPresent()` finds the attribute it documents in the answer. Measured across the nine
+non-`--for` verbs, that costs **38.9–76.1 B of prose per distinct attribute key**, median ~60 B.
+
+**So an attribute pays twice: its own bytes on every row, and ~60 B of legend prose once.** Removing a
+redundant one is therefore worth strictly more than its row bytes, and the saving is *disclosed-by-
+construction* — the clause disappears because the attribute it documents is gone, which is exactly the
+behaviour the legend machinery already guarantees.
+
+### The redundancy, measured
+
+An attribute that re-prints what another attribute **on the same row** already says:
+
+| verb | shape | rows | bytes | share of that verb |
+| --- | --- | ---: | ---: | ---: |
+| `callers` | `sites_at="f.c:75"` repeats `p="f.c:70"`'s file | **383 of 383** | **12,828** | **12.4 %** |
+| `affected` | `run="pytest tests/x.py"` CONTAINS `p="tests/x.py"` | **252 of 252** | 11,003 | 36.2 % of that cell |
+| `path` | same shape | — | 759 | 1.0 % |
+| `safe-delete` | same shape | — | 66 | 3.7 % (n=1) |
+
+### Why `affected` is more than a byte win
+
+`<g n="54" p="a,b,c,…">` ALREADY collapses equal rows and does so in the companion cell. All 252 rows of
+`s1.textual-20` carry the identical attribute signature `hops|p|run` — they would collapse — but `run=`
+embeds `p=`, so no two rows are ever equal and the grouping never fires. **The redundancy is disabling an
+optimisation that already exists.** Carrying the harness as a group attribute (`runner="pytest"`, two
+distinct values over 252 rows) reconstructs every `run=` exactly.
+
+### The decision rule, fixed before the measurement
+
+- **F1 — RECONSTRUCTIBLE, exactly.** For every row, the removed text must be derivable from what remains by
+  a rule stated in the legend. `run=` = `runner=` + `' '` + `p=`; `sites_at=`'s file = `p=`'s file. A gate
+  reconstructs the original string for EVERY row of EVERY affected cell and compares byte-for-byte. One
+  mismatch FAILS the band. This is not a tolerance.
+- **F2 — zero completeness loss**, both bounds, every grain. No row is removed, so the expectation is that
+  this is trivially satisfied; it is still measured, because "no row removed" is an argument and F2 is
+  evidence.
+- **F3 — the legend clause must actually disappear**, and its byte saving is reported SEPARATELY from the
+  row saving. Netting them into one figure would hide which mechanism paid.
+- **F4 — the grouping must fire** on `s1.textual-20`'s 252 rows after the change, with `<g n=>` reporting
+  the true count. If it does not, the reconstruction is wrong somewhere and F1 missed it.
+- **F5 — reported per verb with its n.** `affected` is n=2 and `safe-delete` n=1; those are observations,
+  not rates, and must be labelled so. `callers` at n=21 and 383 of 383 rows is the only cell of this band
+  with a population worth a percentage.
+
+### Controls
+
+- **Non-vacuity:** the F1 gate must FAIL against a deliberately wrong reconstruction rule (drop the
+  separator, or use the wrong attribute as the base). Asserted by mutation before the real arm runs.
+- **The legend is not assumed.** F3 reads the clause's presence from the emitted answer before and after,
+  never from the clause registry — a clause registered but not emitted, and a clause emitted but not
+  registered, are both real defects this repository has shipped before
+  ([[trap-legend-clause-must-be-registered-not-written]]).
+- **Backward compatibility is a question, not an assumption.** A consumer reading `run=` breaks. This band
+  does NOT decide whether that is acceptable; it measures the saving and states the break, and the
+  schema-version call is the owner's.
+
+## READOUT — ITEM E3: the `:declined` hypothesis is REFUTED, and the answer was already in the bundle
+
+Measured 2026-11-17 over the 19 `:declined` cells and a matched pool of 43 conceptual cells on the same
+seven repos. The partition reproduced exactly before anything was read from it.
+
+### The hypothesis, and why it fails
+
+Registered: *a declined route should answer SHORTER, or hand over to a cheaper verb, because the tool is
+admitting it has no precise anchor.* **Refuted on two independent grounds.**
+
+1. **`:declined` is not the predictive partition — most of the headline was a repo confound.** The class
+   lives entirely in the `ld`/`ld2` large-dev families on 7 repos. Matched to those repos the byte ratio is
+   **1.13× (n=19 vs 43)**, not the 1.26× the whole-corpus comparison showed, and declined is *smaller* than
+   matched conceptual on vscode (45,512 vs 48,757) and zed (37,288 vs 41,200). Every structural rate is
+   statistically indistinguishable: tail-only items 12.3 % [6.8, 21.3] vs 12.5 % [8.3, 18.4]; items absent
+   11.1 % vs 14.9 %; cost of dropping `<tail>` 13.9 % vs 14.7 %. **The decisive control:** 5 of the 43
+   matched cells are also `path from A to B` queries that did NOT decline, and they behave identically —
+   3 of 5 resolve a `<graph_verb>`, carrying 11 of 14 items in that section alone. The structure belongs to
+   the QUERY SHAPE, not the route decline.
+2. **The refusal is correct, and the label misdescribes it.** In **16 of 16** distinct (word, corpus) facts
+   the refused word is query prose — `path` 7 cells, `add` 4, `from` 2, `and`, `cluster`, `code`, `user`,
+   `default`, `handler`. 18 of 19 declined on `defs > 3` with a **minimum of 4 defs**; one on the carrier
+   cap alone. Ten of the nineteen queries are literally `path from <A> to <B>`, where the refused word is
+   `path` or `from`. The identifiers the asker actually named are camelCase/dotted, exempt by design, and
+   were **mention-anchored anyway in 12 of 19 cells**. So confidence in the anchor the user meant was never
+   low; the decline prevented a wrong anchor and cost nothing.
+
+**What this supersedes.** This document's own route-partition readout called `:declined` *"lowest
+confidence, highest spend… that looks backwards to us"*. It is not backwards and the spend is 1.13×. The
+figure stands as measured; the interpretation is withdrawn.
+
+### The finding that was not the point of the measurement: `<graph_verb>` IS the answer
+
+`<graph_verb>` is not a routing hint. It is a complete embedded `--path` answer — on `ld-cockroach-03` a
+`<path … reachable="1" hops="5">` carrying the exact gold chain in 3,159 chars.
+
+Grading that section **alone** against the gold, on the 9 declined cells that resolve one:
+
+| | |
+| --- | ---: |
+| items the full answer satisfies | 42 of 42 |
+| items `<graph_verb>` ALONE satisfies | **34 of 42 (81.0 %)** |
+| its share of those cells' bytes | **18.8 %** |
+| cells where it alone is 100 % complete | **5 of 9**, at **7.8–28.4 %** of bytes |
+| cost of dropping `<tail>` on these 9 cells | **1 of 42 items (2.4 % [0.4, 12.3])** |
+
+The 34/42 is a **floor**, not a total: it is graded from the embedded output, which shares the bundle's
+budget. A standalone `--path` run could only be more complete.
+
+And the complement is just as sharp. The **10 cells with no resolved routed section** satisfy only 30 of
+39, and dropping their tail costs **9 of 30 (30.0 % [16.7, 47.9])**. So the width earns its bytes in
+exactly the half where nothing resolved — which is the falsification the band was told to look for first,
+and it holds for that half.
+
+**One substitution was executed** (read-only, repo at the gold's pin): `ld-zed-06` is the cell whose
+35,453-byte `--for` answer scores **0 of 4**. The gold's own prescribed verb, `--callers=Editor::backspace`,
+returns **7,721 B and satisfies 2 of 4**. Two of four in 21.8 % of the bytes, against zero of four in 100 %.
+
+### Two instrument defects found, and they matter beyond this band
+
+1. **A section scan must mask CDATA, not only comments.** `<fold>`'s `<b>` rows carry raw source, and C++
+   source contains `<std::string>` and `<void(Server::Instance& server)>`, which a tag regex reads as
+   elements. **228 of 295 stored answers contain CDATA.** Unmasked, the scan drifted element depth by +2
+   inside `<fold>` and **lost an entire 16.9 KB `<graph_verb>` section** — the section this band turns on.
+   `anchor_grade.py` and `cut_ladder.py` carry the same exposure in `TAIL_RX` / `section:NAME`. It is inert
+   for `<tail>` (no CDATA inside) but a future `section:fold` cut would hit it, and every section figure
+   this round has rested on those two files.
+2. **ITEM C's condition fired on STUBS, which partly explains its failure.** `cut_ladder.py`'s `_routed()`
+   matches tag presence, and `<lego>` / `<compose>` are emitted as `shown="0" capped="1"` stubs when nothing
+   resolved. Measured: `_routed()` fires on **19 of 19** declined and **39 of 43** conceptual cells, while a
+   routed section with CONTENT exists in only 13 of 19 and 19 of 43. In **5 of 19** declined cells *every*
+   routed section is a stub, and `tail-if-routed` collapses their tail for nothing — costing **5 of the 14
+   items those cells had satisfied (36 %)**.
+
+   | gate | cost |
+   | --- | ---: |
+   | tag presence (what item C tested) | 5 of 14 items on the stub-only cells (36 %) |
+   | `shown > 0` | 5 of 58 (8.6 %) |
+   | `graph_verb` with `reachable="1"` | **1 of 42 (2.4 %)** |
+
+   **This independently corroborates item C″** (registered above: `path reachable="1"` ∨ `met_bridge`, the
+   `reexports` arm dropped). Two bands, different populations, different graders, same conclusion — the
+   tighter the resolution gate, the smaller the loss. C″ still may not be published from the cells that
+   produced the hypothesis, but it is now the best-supported cut candidate on the table.
+
+## READOUT — ITEM Q: reordering cannot fix the small-budget band, and no fitted order beat the printed one
+
+Measured 2026-11-17 over 40,596 rows in all 216 recorded `--for` cells, grains kept apart (156 item, 60
+symbol). Rows enumerated with **expat byte offsets**, not a regex: bodies arrive in CDATA containing literal
+tags, and the legend is a comment holding the literal text of the tags a regex would match.
+
+**Control first.** The row scanner's "anchor appears anywhere in the answer" count reproduces
+`anchor_grade.py`'s committed lenient column on **156 of 156** item cells, 0 disagreements. Of 833 lenient
+gold hits, 829 land inside a row span and 4 do not — satisfied only by header/`next=` text echoing the
+query, which is a caveat on the lenient bound itself.
+
+### This supersedes a claim this document has been making
+
+Item P's headline — *completeness is 0.0 % item-grain at a 2 KB budget with the legend present* — has been
+read here, repeatedly, as licensing **reordering**. It does not.
+
+**The prologue (header + legend) ALONE exceeds the budget in 156 of 156 item cells at 1 KB and 145 of 156
+(92.9 %) at 2 KB.** At symbol grain, 60 of 60 at both. No row of any order — including a hindsight oracle —
+can be read at those budgets. **Item P's 2 KB cell is a LEGEND fact, not an ordering fact.** The prologue is
+median **3,517 B** (item) / 3,740 B (symbol), min 1,383, max 5,102.
+
+That is the third independent instrument to land on the legend as the lever, and the first to show that the
+small-budget band cannot be reached any other way.
+
+### A better order exists; nothing we can build reaches it
+
+| order | 4 KB | 8 KB |
+| --- | --- | --- |
+| **ORACLE** (hindsight) | **21 W** / 3 T / 0 L | **14 W** / 10 T / 0 L |
+| logistic on emit-time features, held out | 1 W / 13 T / **10 L** | 7 W / 6 T / **11 L** |
+| logistic + emit-time file-novelty penalty | 2 W / 13 T / 9 L | 9 W / 6 T / 9 L |
+
+(W/T/L = repos where the order beats / ties / loses to the printed order's per-repo median, 24 item repos.)
+
+The model is not weak at the row level: held-out **precision@3 = 53.4 % and 50.9 %** against held-out base
+rates of 7.84 % / 6.80 % — a 6.5–7× lift. **It does not convert, and the reason is the objective, not the
+features: a per-row gold-PROBABILITY order maximises precision, while completeness needs coverage of
+DISTINCT items**, and the highest-scoring rows are redundant with one another (several rows from the same
+gold file). An emit-time file-novelty penalty recovers part of it and still does not clear the baseline.
+
+**The one clean positive:** `tail LAST + test LAST` — both licensed by the legend's own "leads, not the
+answer" and by a measured test-path negative — takes **every one of the 24 item repos to 100 % at 16 KB**,
+where the printed order leaves 5 below. It **loses 2 repos at symbol grain's 12 KB**, which is registered
+here as its pre-declared failure mode. Every order above is FITTED to these 216 cells; the 2-fold figures
+are internal cross-validation on the same 24/15 repos, not an out-of-corpus result.
+
+### The tail is gold-DILUTE, not gold-free — which is why four cuts failed
+
+Per-row gold rate, item grain: `<tail>` **1.80 %** (394/21,902) against `<sigs>` 16.72 %, `hops` 38.08 %,
+`fold` 44.21 %, `callers` 52.68 %, `reexports` 86.15 %, `graph_verb` **97.14 %**. Counting only the row that
+FIRST delivers a gold group: 485 of 29,849 rows (1.62 %), of which **63 % are in `sigs`** (18.6 % of rows)
+and **18 % in `tail`** (73 % of rows). A ~14× dilution per row — enough that an unconditional cut loses
+anchors, and far too dilute to be worth its 45.8 % of the bytes.
+
+The tail is also already ordered despite carrying no `r=`: within-tail decile gold rate decays monotonically
+from decile 2, ~5× top to bottom. And `r=` itself concentrates gold **2.3× above base in its top three rows**
+(37.8 % at r=1–3) and is then flat and non-monotone — not broken, not strong.
+
+### Features that do NOT separate, reported because a null is a result
+
+Read **within `sigs`** — pooled across row kinds they look predictive only because tail rows never carry
+them, which makes "has `cx=`" a restatement of "is not a tail row".
+
+- **`amp=` is byte-identical to `in=` on all 7,950 `sigs` rows.** Not a feature — a duplicate. It pays its
+  own bytes and, under the present-iff-emitted rule, ~60 B of legend, for zero information. **An item F
+  candidate.**
+- `cx=` item 14.7 %→27.9 % across five bands but **flat at symbol grain** (35.8/39.1/36.3/36.8/35.0 %);
+  `ccx=` non-monotone; `tested=` 1.26× lift; `clone=` the **wrong direction** at n=110; `churn=` is
+  **binary in this corpus** (never ≥2); `pure=` is **16 rows in 216 answers**, Wilson spans the base rate;
+  `mem=` **never co-occurs with a gold hit anywhere**.
+- Row byte length separates pooled (155 B vs 110 B) but **not within section** — another row-kind proxy.
+
+### A leakage check that killed one of the strong features
+
+**76 of 923 gold anchor groups (8.2 %) appear literally in their own task text**; 52 of 156 item cells have
+at least one, and 0 of 60 symbol cells do. Re-run on the 162 cells with no leaked anchor: `pathhit` HOLDS
+(item `sigs` 25.1 % vs 12.8 %; item `tail` 10.4 % vs 1.6 %, a 6.5× lift), while **`namehit` COLLAPSES from
+35.1/14.1 to 19.3/13.3** — at item grain inside `sigs` it was largely measuring "the answer quoted the
+question". `pathhit` may be used; `namehit` may not, until re-measured.
+
+### What this changes about the plan
+
+1. **The small-budget band belongs to the legend, not to ordering.** `--legend-have` / `--legend=dict`
+   delivery is the only thing that can move it.
+2. **Ordering work should optimise DISTINCT-ITEM COVERAGE, not row gold-probability.** That is a different
+   objective and the reason this attempt failed; a future band should register it as such.
+3. **`tail LAST + test LAST` at 16 KB** is the one candidate worth out-of-corpus validation — on different
+   REPOS, not different questions in the same repos, since the file-cluster and path-depth features are
+   repo-shaped.
+
+## PRE-REGISTRATION 2026-11-17 (amendment 8) — ITEM R: the legend goes LAST, and a RESOLVED routed section goes first
+
+Registered before any `src/` change. This is a **permutation**: the same top-level blocks in a different
+order. No row is removed, no byte of payload changes, so **no gold can be lost by construction** — which is
+why it is the only large lever this round that cannot fail the zero-loss bar that killed items K, K1, C and
+C′.
+
+### What it is
+
+1. **Every legend comment moves after the rows**, keeping its original relative order.
+2. **A RESOLVED routed section moves ahead of `<sigs>`** — and only a resolved one.
+
+### Measured before registration, as offline permutations of all 216 recorded `--for` cells
+
+| | current | both moves |
+| --- | ---: | ---: |
+| gold items found at **2 KB** | **0.4 %** | **54.8 %** |
+| at 4 KB | 19.3 % | 70.6 % |
+| at 8 KB | 69.5 % | 84.1 % |
+| median bytes-to-complete | 10,279 | **5,541** |
+| cells made WORSE | — | **0 of 212** |
+| repos improved | — | **27 of 27** |
+
+On the 13 cells carrying `<path reachable="1">` or `<met_bridge>`, bytes-to-complete falls from a median
+**37,125 B (92.9 % depth) to 3,377 B (8.0 %)**.
+
+### Why it does not wait on the coverage contract
+
+Legend-after-rows is the ref posture's move **without its drop** — `src/legenddict.h` already documents
+"rows first … legend comment … moved after the rows". The legend **stays in the answer**, so the ~80
+legend-coverage gates that assert *"defined in this answer"* still pass. And **G4 does not constrain
+position**: its wording is *"the legend is emitted once per answer on the CLI"*, a constraint on COUNT, and
+its next clause already describes an answer that "ends with" its legend material.
+
+### RESOLVED is defined before the measurement, and narrowly
+
+- `<reexports>` with BOTH a `<def>` row and at least one `<rx>` row, or
+- `<graph_verb>` whose resolved element is `<path reachable="1">` or `<met_bridge>`.
+
+**Only the resolved element moves.** The failed `reachable="0"` attempts, `<gap>`, `<near_sink>` and
+`<path_gap>` stay where they are. Without that restriction one cell puts a 14.8 KB block ahead of `<sigs>`
+of which the answering path is 1,348 B, and moving any `graph_verb` has a worst case of **+17,479 B**.
+This is the third time in this round that **presence has been mistaken for resolution**; it is written into
+the rule here so it cannot happen a fourth.
+
+Excluded from the move, each measured net-worse or a wash when promoted: `<callers>` (12/5 but ~1 KB either
+way), `selfhooks` (4/4), `lit`, `shortkey`, `dotted_strings`, `exemplar_family`. `shown="0"` stubs never
+count as resolution.
+
+### The decision rule, fixed before the measurement
+
+- **R1 — PERMUTATION, proven not argued.** A gate asserts the multiset of top-level children is identical
+  to the legacy order's, byte for byte per block, with a **dropped-row negative control** that must FAIL.
+  If R1 cannot be made to fail by deleting a row, it is not asserting anything.
+- **R2 — zero cells may lose completeness** at either bound, any grain. Expected to be trivially satisfied
+  since nothing is removed; measured anyway, because "nothing is removed" is an argument and R2 is evidence.
+- **R3 — a per-repo prefix curve at 1/2/4/8/16 KB**, never pooled; answer size varies ~4× across repos.
+  **Routed-first is graded MARGINALLY against legend-after-rows alone**, so the legend shift cannot mask a
+  routed-first loss. Measured already: routed-first by itself has **16 losing cells**, and the "no cell
+  worse" result depends on the legend move. Reporting them netted would hide that.
+- **R4 — out-of-corpus validation before publication.** Membership of the resolved set was chosen on these
+  216 cells. Re-measure on cells from **different repos**, not different questions in the same repos.
+- **R5 — what a truncating consumer loses changes.** Today it loses rows; after this it loses DEFINITIONS,
+  so a hedge like `cands="133"` could be read without its reading. Report this as a stated consequence, not
+  a solved problem. It is the strongest argument against the change and it belongs in the readout.
+
+### Controls
+
+- A fitted full section order (every section sorted by gold-per-byte) **FAILED a held-out split** — worse in
+  more cells than better in both folds. `<sigs>` stays first among the generic sections. That null is
+  registered here so the band cannot later be widened into it without new evidence.
+- **Moving `<tail>` does not pay** and is NOT part of this band: whole-tail-last took median
+  bytes-to-complete 10,279 → **11,487**. A separate lane measured a `tail LAST + test LAST` gain at 16 KB on
+  a different metric; the two are not reconciled, and neither is adopted here.
+
+## READOUT — `est_tokens=` is a good POINT ESTIMATE and a FALSE UPPER BOUND, on 216 of 216 cells
+
+Measured 2026-11-17 over the 295 recorded answers, with a quote-, comment- and CDATA-aware scanner (of 587
+raw occurrences of the string `est_tokens`, **216 are root attributes, 21 are non-root element attributes,
+350 are legend prose inside comments, 0 are in CDATA** — a regex would have read 350 pieces of prose as
+data).
+
+### Two corrections before the result, both to this round's own framing
+
+1. **The direction test was INVERTED in the brief this band was run from.** It said an implied rate *below*
+   the densest rate means the estimate under-reads. `tokens ≈ bytes / rate`, so a denser document is FEWER
+   bytes per token and `bytes / 2.36` is the LARGEST token count a byte count can imply — the source says
+   as much, calling `kMinBytesPerToken` "the most tokens a byte can cost". The bound holds iff
+   **`bytes / est_tokens ≤ 2.36`**, and an implied rate ABOVE 2.36 is the violation.
+2. **`est_tokens=` is not on every answer.** It is on **exactly the 216 `ripwire.for/v1` answers and nowhere
+   else** — 0 of 21 `callers`, 0 of 14 `path`, 0 of 12 `lego`, 0 of 10 `callees`, 0 of 7 `grep`, 0 of 6
+   `impact`, 0 of 6 `dead-code`, 0 of 2 `affected`, 0 of 1 `safe-delete`. Every denominator below is **216,
+   not 295**, and nine of ten verbs deliver an **unpriced** document: an agent budgeting on `est_tokens`
+   gets nothing at all from them.
+
+### The result
+
+| basis (n=216) | min | median | max | rate > 2.36 |
+| --- | ---: | ---: | ---: | ---: |
+| whole delivered document | 2.550 | **2.771** | 11.538 | **216 / 216** |
+| priced sections only (disclosed-excluded blocks subtracted) | 2.550 | **2.672** | 6.807 | **216 / 216** |
+
+**Not one cell satisfies the documented bound, and zero cells fall on the conservative side.** Median
+`est_tokens` is **85.2 %** of `bytes / 2.36` (p10 65.6 %, min 20.5 %); median shortfall **1,431 tokens**
+(p90 2,317, max 3,865). Against the emitter's OWN model (`kBytesPerTokenDefault = 2.50`, bodies at 3.80),
+**199 of 216 cells still price below it** — about 3 % of delivered priced markup is not charged at all, on
+top of the 2.50-vs-2.36 gap.
+
+### Two defects, which want different fixes
+
+1. **Disclosed-but-unbudgetable.** 88 of 216 answers carry appended blocks the legend honestly declares
+   unpriced — `<lit>` (37), `<graph_verb>` (26), `<shortkey>` (22), `<doc_body>` (15), `<lit_capped>` (1) —
+   a median **10.8 %** and a maximum **71.5 %** of the delivered document. Worst absolute: `mf2-axum-07`
+   with **18,344 B (39.8 %) unpriced** at 4.37 B/token, and `ld-envoy-03` where a single **16,906 B**
+   `<graph_verb>` block carries no price of its own, 32.6 % of a 53.6 KB answer. The legend is honest; the
+   root attribute is not usable as a budget, which is what agents and our published figures use it as. The
+   documented reading *"price as emitted"* does not say "as emitted minus five block kinds".
+2. **A flat under-read inside the priced sections.** All 216 cells, median 2.672 against a 2.36 bound, and
+   **128 of 128** on the answers with no excluded block at all. This is miscalibration, not disclosure.
+
+**And a same-element inconsistency worth naming:** `<graph_verb>` appears on **26** answers and carries a
+nested price on only **6**. Same element, same disclosure sentence, two different behaviours.
+
+### One flat rate cannot be right for these documents
+
+Byte composition of the 216 priced answers: dense markup median **77.9 %** (min 4.1 %), prose legend median
+**13.6 %** (max 62.3 %), CDATA source median **8.0 %** (max 88.6 %). Applying this round's own measured
+rates (dense rows 2.44, prose legend 4.66, raw source 3.80) to each answer's composition gives an implied
+blend of **min 2.566, median 2.701, max 3.766** — so **the top of the 2.36–2.55 band sits below the MINIMUM
+implied rate of all 216 answers.** The 1.47× spread is driven by composition, not language: within-repo
+spread (pydantic 2.62–6.81) swamps between-repo spread, and per-repo medians do not track `kTokenCalib` —
+Python repos (django 2.774, calib 2.36) sit **above** TypeScript ones (angular 2.620, calib 2.59).
+
+### What this does and does not invalidate
+
+Against composition-implied truth, median `est_tokens` is **0.978** — within ~2 % for the median answer,
+135 of 216 below truth and 81 above. So **it is a decent point estimate and a false upper bound.** Any
+published figure that uses it as a point estimate on excluded-block-free `--for` answers is roughly right
+(median 2 % low). **Any figure that leans on the bound property, or pools answers carrying excluded blocks,
+is wrong by 3.4–11.5× on individual cells.** Every such use must be found and restated before 0.7.0.
+
+### The repricing path is untested, and this corpus structurally cannot test it
+
+Of the 79 cells that reduce under `--legend=dict`, **0 carry `est_tokens`**; the 216 that carry it are
+**byte-identical between the two postures**, because the posture does not touch `--for`'s inline trailer
+legend. So `compactRepricedTokens` gets **zero exercise** here — not verified correct, not shown wrong — and
+the legend-posture control cannot test it, because it strips the legend only on the verbs that have no price
+to move. A pair that exercises it has to vary the legend on `--for`. Item D's reprice call therefore fires
+on the map family (fixture: 399 → 140) and on nothing in this corpus.
+
+## READOUT — the byte census, and the corpus artifact that would have deleted a working metric
+
+Measured 2026-11-17 over all 295 recorded answers with an expat parser (attributes only from real
+`StartElement` events; comment and CDATA handlers never feed the census). All 295 are well-formed; 228 carry
+CDATA, so a regex census would have been wrong. 621 (verb, attribute) pairs over 354 distinct keys;
+attributes are 4,626,325 B of the 7,034,735 B corpus (65.8 %), legend comments 1,045,779 B (14.9 %).
+
+### The finding that matters most: STOP, do not drop these two
+
+The two largest zero-information attributes a census would queue are **corpus artifacts of a shallow clone**,
+not schema defects.
+
+| attribute | evidence of "no information" | why it is degenerate |
+| --- | --- | --- |
+| `for@churn` | constant `"1"` on **5,448 of 5,448** occurrences, 213 of 216 answers, 54,480 B | `serialize.h` emits `churnPerFile[f]`, a COUNT. Every repo checked is a **1-commit shallow clone** (`.git/shallow` present, `git rev-list --count HEAD` = 1 on axum, hono, django, tmux), so churn is 1 for every file by construction |
+| `for@amp` | equals `for@in` on **3,172 of 3,172** co-occurrences, never appears without it, 25,764 B | `amp=` is `callerCount` **plus the co-change degree of the symbol's file**; `in=` is callers alone. With one commit the second term is a constant 0 |
+
+**This supersedes an item F candidate.** `amp=` was queued in this round as a redundant attribute paying
+twice under the present-iff-emitted rule, on exactly the evidence above. Dropping it would have **deleted a
+working metric**, and the only reason that did not happen is that the census checked `.git/shallow` instead
+of trusting the equality.
+
+**The corollary is larger than the bytes:** this corpus cannot measure churn or change amplification at all,
+so **any `--for` quality-lens claim derived from these 295 answers rests on two dead columns.** Both items
+are held back pending a deep-clone re-capture. Independently, two other bands this round reported the same
+two facts (`churn` binary, `amp` ≡ `in`) without finding the cause — three instruments, one shallow clone.
+
+### Five corrections to this round's own figures
+
+1. **Attribute framing is 4 bytes, not 5**: `' k="v"'` = space + key + `=` + two quotes + value.
+2. **The four "bytes of distinct values" figures quoted in the brief are not reproducible** under any of
+   four candidate definitions. Occurrence counts all matched exactly; the value-bytes column was wrong.
+3. **`impact@lazy` is CONSTANT, not low-cardinality** — one value, `"0"`, on 129 of 129 occurrences.
+4. **`safe-delete` emits FIVE zero-valued attributes in 91 B**, not six in 101 B — confirmed by parser and
+   by raw grep; there is no sixth.
+5. **`callers@sites_at` = 12,828 B is confirmed to the byte**, once values are split on commas AND
+   whitespace (655 site tokens over 383 rows, 655/655 sharing `p=`'s file).
+
+And the mechanism is **conservative as stated**: regressing legend bytes on distinct key count gives
+**63.5–137.6 B per attribute key by verb** (dead-code 63.5, lego 66.4, impact 66.5, path 75.9, grep 86.5,
+callers 104.3, for 112.9, callees 137.6; pooled 99.6). The ~60 B used elsewhere in this document is a floor.
+Caveat: every per-verb fit has a negative intercept, and the dictionary documents some attributes in shared
+clauses (`"churn= amp= change"`, `"cx= ccx= complexity"`), so dropping one of a pair saves less than the
+slope implies. Per-attribute legend figures are order-of-magnitude, not byte-exact.
+
+### The implementation queue — 7.70 % of the corpus, none of it touching an assertion
+
+| # | item | transform | B | % corpus |
+| ---: | --- | --- | ---: | ---: |
+| 1 | `for@p` | hoist to a group parent | **287,711** | 4.09 % |
+| 2 | `for@n` | hoist | 50,524 | 0.72 % |
+| 3 | `for@sym` | hoist | 48,625 | 0.69 % |
+| 4 | always-`"1"` presence flags, 36 keys in `for` | fold to one `fl=` | **43,370** | 0.62 % |
+| 5 | `for@l` | hoist | 21,893 | 0.31 % |
+| 6 | `for@task` | **drop** — ⊂ argv on 216/216 | 16,993 | 0.24 % |
+| 7–8 | `for@in`, `for@cx` | hoist | 30,643 | 0.44 % |
+| 9 | `root=`, all ten verbs | **drop** — the directory argument | 14,073 | 0.21 % |
+| 10 | `callers@sites_at` + `for@sites_at` + `affected@run` | **shorten** — drop the duplicated path | **27,634** | 0.39 % |
+| | **total** | | **541,466** | **7.70 %** (11.7 % of attribute bytes) |
+
+Row 1's figure is an **upper bound**: it assumes each distinct path is declared once per answer with no new
+element overhead, and 13,870 distinct paths over 216 answers means a high group count. The net is unmeasured.
+
+Derive-and-drop is already house practice, which is the argument for the queue rather than against it: the
+`--for` legend documents `id=p::sc::n` — the identifier is **formed** from three emitted attributes rather
+than emitted.
+
+### The control, which is why the census is believable
+
+`for@sym`: 31,509 occurrences, **27,242 distinct** (86.5 % of occurrences are a value seen nowhere else),
+1.32 MB of distinct text in 1.65 MB total — hoisting recovers **3.0 %**, against 17.5 % for `for@p` and
+100 % for `for@churn`. It is 35.6 % of the whole corpus and the census correctly says leave it alone.
+`callers@sites_at` is **383 of 383 distinct**, so hoisting recovers **0 B** — it is flagged only for the
+duplicated path prefix *inside* its values, which is the test that the census separates "redundant part of a
+value" from "redundant attribute". Uniqueness ratio separates the flagged from the unflagged by **three
+orders of magnitude** (0.0002 for `churn` against 0.865 for `sym`).
+
+### Not queued, and why
+
+**16,057 B of zero-valued disclosure** across 70 pairs (1,413 occurrences) is **reported, not queued**. A
+zero means "none found", never "none exists", so a suppressed `capped="0"` is indistinguishable from an
+older binary that never emitted the key — and `capped` in particular is the attribute an earlier round
+established can make an answer *wrong* when it is false. Those bytes are the price of telling "not capped"
+from "not disclosed".
+
+## READOUT — ITEM E1: the freed bytes buy 0 rows and 0 gold, and 36 % of the saving re-spends itself
+
+Measured 2026-11-17 over all 216 recorded `--for` cells.
+
+### E1's premise does not hold, and this document's framing of it was wrong
+
+This round registered E1 as: *dropping `--for`'s prose legend lets MORE ROWS FIT — a row change, not a
+markup change.* The legend **is** charged into the fit. But in the DEFAULT regime that fit answers a bigger
+budget with **more row TEXT, never more rows.**
+
+- **0 of 216 cells passed `--token-budget`.** Every cell is in the default regime.
+- **`<sigs> shown == total` on 183 of 183** disclosing cells, `over_ceiling` absent on 216 of 216. The
+  recorded answers state the rule themselves: *"row text shortens toward it, no row of the ranked head is
+  removed for it"*, *"[sigs capped=1 with shown=total: rows shrunk, none dropped]"*. In source, only step F
+  of the ladder removes rows, and it runs against a 30,000 B runaway guard no cell reached.
+- `<hops>` `capped="1"` on **0 of 199**; `<tail>` and `<fold>` ride **on top** of the payload budget and are
+  bounded by row-count constants and a literal 4,000 B, not by a share of it; `<lego>`/`<compose>`
+  `shown="0"` is the **default posture stub**, restored by `--sections=`, not a budget cut.
+- **Row-bound cells: 1 of 216 (0.5 %).** `ld.ld-cpython-01`, `bundle="auto"`, where `leftBytes` is the one
+  channel the legend's bytes enter a row decision. Whether its third body fits is not determinable from the
+  record (no per-candidate size disclosed), and **that cell is already complete at both bounds**, so even a
+  gain buys zero completeness.
+
+**Rows gained: 0, in every repo. The trimmed rows hold no gold in any cell.** Reported as its own column
+and never added to the byte column, as R-style discipline requires.
+
+### The byte saving is partly SELF-SPENDING, and publishing the gross figure would be a wrong claim
+
+Raise the target by Δ and `trimSigLadder` stops earlier, restoring row text it had shrunk. Whether that
+happens depends on the overshoot above the target, which the answer discloses as `past_target=`.
+
+| | n | share of 216 |
+| --- | ---: | ---: |
+| full saving realised (overshoot > Δ, or ladder never fired) | 92 | 42.6 % |
+| **saving partly or wholly re-spent** | **124** | **57.4 %** |
+| **answer ends the SAME SIZE OR LARGER** | **5** | **2.3 %** |
+
+Realised fraction across fired cells: mean and median **0.61**. Corpus-wide **623,954 B freed → 400,029 B
+net: 64.1 % survives, 35.9 % is re-spent on restored row text.** The text waiting to come back is concrete —
+`docs_dropped ≥ 1` in 140 of 183 fired cells, **2,142 row docs** in all. The five same-or-larger cells:
+`d2.mf2-nest-02`, `mf1.mf1-nfpm-01`, `s1.htop-11#0`, `s1.htop-12#0`, `s1.htop-13#0`.
+
+**So "−3,018 B / −9.5 % on `--for`" would have been WRONG.** The defensible claim: the document loses a mean
+**2,889 B (9.34 %)**, of which a mean **1,852 B (5.99 %) survives**. Per repo it ranges 3.06 % (django) to
+12.40 % (nunjucks) against gross 8.67 %–12.40 % — answer size spans 3.2× across repos, so the pooled figure
+is a statement about this repo mix. The net estimate is a **lower bound**: the fit charges strictly less than
+the document loses (`chargedHeaderBytes` subtracts a long exemption list), so restoration is smaller and the
+real saving larger.
+
+### The clean positive, and it is the strongest legend evidence in this document
+
+The registered `legend` cut stripped **every legend comment from all 295 cells — −935,439 B on the `--for`
+cells, −14.01 %** — and changed **0 of 275 graded cells' verdicts**, at either bound, in both grains. G3
+identity, byte and negative controls all PASS. **No gold anchor lives only in legend prose.** Since E1's
+header-prose cut is a subset, it cannot regress either, so E1's completeness half is a measured PASS.
+
+### Two things this opens
+
+1. **A method trap worth keeping.** In **20 of 216** cells the first `<` after the root open tag sits
+   **inside the legend prose** (e.g. `<file-scope>`), so a naive structural scan read those cells' header
+   legend as **0 B** and the corpus mean as 2,597 B instead of 2,889 B. Two successive passes carried that
+   error before masking comments first.
+2. **A new item, outside E1's question.** The 2,142 dropped row docs are a **TEXT** channel, not a row
+   channel — the one place freed bytes could become completeness rather than just bytes. Whether those docs
+   carry gold the surviving attributes do not is unmeasured, and the dropped text is not in the record.
+   It needs its own registered band and a re-collection.
+
+## READOUT — the present-only violation is 3,930 B; the INVERSE defect is 136 cells
+
+Measured 2026-11-17, 21 roots × 64 verbs = 1,344 cells, **1,276 answered** (68 unanswered, each with its
+reason and denominator). The detector does not reimplement the buggy predicate: it extracts all **1,024
+reading rows** from `compactlegend.h` with every field and **reconstructs each legend exactly** — opener +
+purpose + window + sub-cap + one clause per emitted term — leaving **zero residue on 1,255 of 1,276 cells**.
+It reproduces the known instance to the byte (htop `--expand` → 166 B) and reports **0 unjustified bytes on
+`--map`**, whose 13 clauses are all genuinely carried.
+
+### The waste is real, constant, and small
+
+**30 of 1,276 cells; 50 unjustified clause instances of 12,507 emitted; 3,930 B total.**
+
+| attribute | wasted | answers | each |
+| --- | ---: | ---: | ---: |
+| `redacted=` | 1,960 B | 20 of 21 `--expand` | 98 |
+| `scrubbed=` | 1,360 B | 20 of 21 `--expand` | 68 |
+| `run_unknown=` | 610 B | 10 (5 `--pack-task` + 5 `--partition`) | 61 |
+
+Nothing else in the 1,024-row table is ever defined-but-absent. The cost is a **constant per answer** —
+min = median = max — because the clause set depends on the prose head, which is identical across roots.
+**Correction to this round's brief:** `run_unknown=` is **5 of 21 roots, not 3**, and is paid **twice** per
+affected root, because `--partition` builds a second answer on the same `pack-task` key. The one unaffected
+`--expand` is koa, which took whole-file mode — the premise's exception, reproduced.
+
+### The "one-line fix" is not one line: it changes 84 cells it does not bill for
+
+**The leak fires on 114 of 1,276 answered cells, not 30.** On 84 further cells a head-only term (no
+`onTag`, not `wholeDoc`, no `mapHeader`) is emitted although the attribute is absent from the head's real
+attributes — root tag and first child both — and is carried only on a **deeper row**. Comment-driven in
+exactly the same way; it was not billed only because it lands on a definition a reader can still use.
+**167 clause instances**: `--lego` 21/21 roots (`counts_floor` 1,155 B, `graph_ambiguous` 1,092 B,
+`graph_unindexed` 2,260 B), `--pack-signatures` 21/21, `--pack-top-n` 21/21, `--skipped` 21/21.
+
+**So a fix that makes `headHasAttr` skip comments must DECIDE whether those 167 clauses survive via a
+whole-document read or disappear.** Shipping it as a trivial correction would silently remove 167
+definitions that readers currently use, on 84 answers the bug report never mentioned.
+
+Control on the other mechanism: the paging-window clause decides presence through `payloadHasAnyAttr`, not
+the head, and over-defines **0 times in 644 window clauses**. The defect is specific to the head arm.
+
+### The INVERSE defect is much larger, and it is the one that matters
+
+**136 of 1,276 answered cells carry at least one payload attribute that no comment in the legend defines.**
+Two kinds:
+
+- **Dropped by the compact rewrite** (defined in `--legend=full`, undefined in compact): `--abi` 21/21 cells
+  (6 distinct attributes), `--partition` 21/21 (4), `--verify` 20/21 (`in_id=`), `--exercises` 16/21,
+  `--arch` 5/21, `--impact` 4/21, `--pack-task` 3/21.
+- **Undocumented in BOTH dialects** — a coverage gap upstream of the compact dialect: `--abi` 21/21 with
+  **27 distinct attributes**, `--arch` 21/21 with **27**, `--verify` 21/21 with 4, `--for` 18/21 with **22**,
+  `--partition` 10/21 with 3.
+
+The sharpest instance: htop `--arch`'s **entire compact legend is one sentence** — *"layering rules fit:
+allowed/denied file-to-file edges, each violation a row."*, 76 B of body — after which the answer emits
+`<arch layers= rules= pathRules= violations= baselined= new_violations=>`, `<metrics modules=
+typed_modules= zone_pain= zone_useless= zone_ok= zone_na= propagation_cost= note=>` and a `<m path= ca= ce=
+types= abstract= I= A= D= zone= reachable= isolated=>` row per module. **None of them defined in either
+dialect**; the full legend is 508 B and does not define them either. And htop `--abi`: compact legend 224 B,
+20 distinct attributes emitted, **15 undefined**.
+
+This is [[trap-legend-clause-must-be-registered-not-written]] measured at scale. It also bears directly on
+the dictionary-backed coverage contract this lane is building: a D5-style assertion — *every emitted
+attribute has a `--legend-dict` row* — would **FAIL on these 136 cells**. That is the contract working, not
+breaking, but it means the contract cannot simply be switched on; the undocumented attributes have to be
+registered first, and `--abi` and `--arch` are where that work is.
+
+### What is not measured, stated rather than implied
+
+The strict census is a **floor**: for a head-intended term the detector accepts the attribute anywhere on a
+real element, which under-bills rather than over-bills — the 84 cells above are exactly that gap. `--for`'s
+21 cells are **coarse-only** (215 B on 1 cell) because `for` has no `kCompactLegendSpecs` entry and its
+legend is substring-stripped rather than rebuilt. **17 of the 79 spec keys were never reached** — each needs
+an input not available read-only (a trace file, two refs, a plan, a skill bundle) — so their waste is
+unmeasured and a zero for them would be dishonest. Six verbs have no census or a partial one. CLI only: the
+MCP postures and `--legend-have` were not swept.
 ## READOUT — BAND R3: the prefix curve on the SHIPPED binary, and the simulation's figures corrected
 
 Measured 2026-11-17 on the item R binary, baseline via `RIPWIRE_FOR_LEGACY_ORDER=1` set in the harness's
