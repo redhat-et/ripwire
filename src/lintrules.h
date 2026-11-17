@@ -1557,10 +1557,10 @@ static_assert( constructTagOf( kShapeFailureDefault ) == kConstructTagCount - 1 
 // BOTH budgets are unbounded: see findQualityConstructs' header for why.
 inline std::vector<AstQuerySpec> errorMaskQuerySpecs()
 {
-    std::vector<AstQuerySpec> specs( kErrorMaskRules.size() );   // sized up front: one spec per rule
-    for( std::size_t ruleIndex = 0; ruleIndex < specs.size(); ++ruleIndex )
+    std::vector<AstQuerySpec> specs;
+    for( const ErrorMaskRule& rule : kErrorMaskRules )
     {
-        specs[ ruleIndex ] = { std::string( kErrorMaskRules[ ruleIndex ].query ), std::to_string( ruleIndex ) };   // tag = row index (errorMaskRuleIndex)
+        specs.push_back( { std::string( rule.query ), std::to_string( specs.size() ) } );   // tag = row index (errorMaskRuleIndex)
     }
     return specs;
 }
