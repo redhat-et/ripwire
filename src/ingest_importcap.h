@@ -254,6 +254,7 @@ ImportSpec normalisePythonImport( TSNode directive, std::string_view raw, std::s
 // alias bindings belongs to 2b, after the shared binds channel (2a). Namespaces remain deferred in resolve.h.
 ImportSpec normaliseCSharpImport( TSNode directive, std::string_view src )
 {
+    // Grammar-bump insurance: never taken on the pinned grammar (an alias directive has no `type` field), no arm pins it.
     if( const TSNode aliasType = fieldChild( directive, NodeField::Type ); !ts_node_is_null( aliasType ) )
     {
         return { importSpecifierText( aliasType, src ) };
