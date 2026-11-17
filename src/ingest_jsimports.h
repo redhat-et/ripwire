@@ -659,7 +659,7 @@ inline void captureJsImportFacts( TSNode root, Lang lang, std::uint32_t fileId, 
         else if( jsNodeIs( stmt, "lexical_declaration" ) || jsNodeIs( stmt, "variable_declaration" ) )
         {
             recordJsObjectLiterals( stmt, lang, fileId, src, binds );
-            captureJsModuleAliases( stmt, src, aliasDecls, [ & ]( TSNode declarator, std::string local, const std::string& source, const std::string& member, bool fromIdentifier )
+            captureJsModuleAliases( stmt, src, aliasDecls, [ & ]( TSNode declarator, const std::string& local, const std::string& source, const std::string& member, bool fromIdentifier )
             {
                 imported.try_emplace( local, 1 );
                 record( declarator, LocalBindKind::ModuleAlias, local, {} );
