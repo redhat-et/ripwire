@@ -45,6 +45,26 @@ FU_REDIR_SP=internal > /dev/null
 # 5b. A `|` between case patterns is an alternative, not a pipe: fu_arch is the script's own.
 case "$(uname -m)" in arm64|aarch64) fu_arch=arm64 ;; *) fu_arch=other ;; esac
 echo "$fu_arch"
+# 5c. (#685 review) A `( … )` pipeline component is a word of its command, so the pipeline ends at the newline and
+# the next line's write is the script's own.
+printf x | ( cat >/dev/null )
+FU_SUBPIPE=internal
+: "${FU_SUBPIPE:?}"
+# 5d. (#685 review) `&` backgrounds the WHOLE && / || list, not only its last command: every write in it ran in a
+# child shell — also when the list goes on onto the next line, or ends in a group.
+FU_LIST_BG=internal && : &
+: "${FU_LIST_BG:?}"
+FU_LIST_NL=internal &&
+  : &
+: "${FU_LIST_NL:?}"
+FU_LIST_GRP=internal && { FU_LIST_IN=internal; : ; } &
+: "${FU_LIST_GRP:?} ${FU_LIST_IN:?}"
+# … but a `;` or the `&` itself ends the list: a command before or after it is the script's own.
+FU_LIST_SEMI=internal; : && : &
+: "${FU_LIST_SEMI:?}"
+: && : & FU_LIST_AFTER=internal
+: "${FU_LIST_AFTER:?}"
+wait
 # 6. LAST, because before the fix the heredoc below never closed: `\"` inside "…" is part of the delimiter.
 cat <<"FU\"EOF"
 FU_HD_BODY=internal

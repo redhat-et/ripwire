@@ -37,6 +37,8 @@
 #                     or a backgrounded group (child shells, unless lastpipe runs the last one here), next to && / ||,
 #                     2>&1 and &> (not pipes or jobs); a later write to a `local`; a $( ) that is the command name; a
 #                     redirection after an assignment; '…' in an unquoted expansion word vs in "…"; <<"FU\"EOF"
+#                     and the #685 review's two: `cmd | ( … )` ends its pipeline at the newline, and `&` backgrounds
+#                     the whole && / || list (a `;` or the `&` itself ends that list)
 # Generated in $TMP: a mode-000 shell file must be disclosed as unreadable="1" (root, legend, JSON), never skipped.
 # Generated in $TMP: a 100,000-level ${X:-${X:-…}} line (the review's crash input) must finish, exit 0 and disclose
 # nesting_cut="1". 160,000 `(X=1)` lines then 160,000 `: "$X"` (2.1 MB) must finish under a 20 s cap (about 0.3 s
@@ -193,14 +195,14 @@ if grep -q '<flags [^>]* nesting_cut=' "$TMP/x"; then no "nesting: the fixture (
 
 # ── 13. FOLLOW-UP (#641 merge review): child shells, local scope, command-position $( ), redirections, quoting ───
 for nl in FU_PIPE_READ:5 FU_BG:8 FU_LOOP:10 FU_GROUP:12 FU_NOTLAST:25 FU_LOCAL_LATER:30 FU_LOCAL_READ:30 FU_CMDPOS:33 \
-          FU_DQ_INNER:43 FU_MIX_INNER:44 FU_HD_BODY:52 FU_AFTER_ESC:52; do
+          FU_DQ_INNER:43 FU_MIX_INNER:44 FU_LIST_BG:56 FU_LIST_NL:59 FU_LIST_GRP:61 FU_LIST_IN:61 FU_HD_BODY:72 FU_AFTER_ESC:72; do
     row "${nl%%:*}" "<read p=\"followup.sh\" l=\"${nl#*:}\" form=\"required\" colon=\"1\"/>"
 done
 # A child shell's write is still listed (a consumer joining writes sees it); it just shadows nothing after its command.
 row FU_PIPE_READ 'reads="1" p="followup.sh" l="5" writes="1"><read p="followup.sh" l="5" form="required" colon="1"/><write p="followup.sh" l="4"/></gate>'
 row FU_LOOP      'reads="1" p="followup.sh" l="10" writes="1">'
 row FU_OUTER     '<read p="followup.sh" l="42" form="default" colon="1" default="&apos;${FU_LITERAL:?}&apos;"/>'
-for n in FU_OR FU_DUP FU_AMPREDIR FU_LASTPIPE FU_REDIR FU_REDIR_SP FU_LITERAL fu_val fu_line fu_arch; do
+for n in FU_OR FU_DUP FU_AMPREDIR FU_LASTPIPE FU_REDIR FU_REDIR_SP FU_LITERAL fu_val fu_line fu_arch FU_SUBPIPE FU_LIST_SEMI FU_LIST_AFTER; do
     if has "$n"; then no "followup: $n should be absent: $( gate "$n" )"; else ok "followup: $n absent"; fi
 done
 # The read lookup is linear: every write of X has left scope (its subshell closed) before every read.
