@@ -17438,3 +17438,78 @@ question". `pathhit` may be used; `namehit` may not, until re-measured.
 3. **`tail LAST + test LAST` at 16 KB** is the one candidate worth out-of-corpus validation — on different
    REPOS, not different questions in the same repos, since the file-cluster and path-depth features are
    repo-shaped.
+
+## PRE-REGISTRATION 2026-11-17 (amendment 8) — ITEM R: the legend goes LAST, and a RESOLVED routed section goes first
+
+Registered before any `src/` change. This is a **permutation**: the same top-level blocks in a different
+order. No row is removed, no byte of payload changes, so **no gold can be lost by construction** — which is
+why it is the only large lever this round that cannot fail the zero-loss bar that killed items K, K1, C and
+C′.
+
+### What it is
+
+1. **Every legend comment moves after the rows**, keeping its original relative order.
+2. **A RESOLVED routed section moves ahead of `<sigs>`** — and only a resolved one.
+
+### Measured before registration, as offline permutations of all 216 recorded `--for` cells
+
+| | current | both moves |
+| --- | ---: | ---: |
+| gold items found at **2 KB** | **0.4 %** | **54.8 %** |
+| at 4 KB | 19.3 % | 70.6 % |
+| at 8 KB | 69.5 % | 84.1 % |
+| median bytes-to-complete | 10,279 | **5,541** |
+| cells made WORSE | — | **0 of 212** |
+| repos improved | — | **27 of 27** |
+
+On the 13 cells carrying `<path reachable="1">` or `<met_bridge>`, bytes-to-complete falls from a median
+**37,125 B (92.9 % depth) to 3,377 B (8.0 %)**.
+
+### Why it does not wait on the coverage contract
+
+Legend-after-rows is the ref posture's move **without its drop** — `src/legenddict.h` already documents
+"rows first … legend comment … moved after the rows". The legend **stays in the answer**, so the ~80
+legend-coverage gates that assert *"defined in this answer"* still pass. And **G4 does not constrain
+position**: its wording is *"the legend is emitted once per answer on the CLI"*, a constraint on COUNT, and
+its next clause already describes an answer that "ends with" its legend material.
+
+### RESOLVED is defined before the measurement, and narrowly
+
+- `<reexports>` with BOTH a `<def>` row and at least one `<rx>` row, or
+- `<graph_verb>` whose resolved element is `<path reachable="1">` or `<met_bridge>`.
+
+**Only the resolved element moves.** The failed `reachable="0"` attempts, `<gap>`, `<near_sink>` and
+`<path_gap>` stay where they are. Without that restriction one cell puts a 14.8 KB block ahead of `<sigs>`
+of which the answering path is 1,348 B, and moving any `graph_verb` has a worst case of **+17,479 B**.
+This is the third time in this round that **presence has been mistaken for resolution**; it is written into
+the rule here so it cannot happen a fourth.
+
+Excluded from the move, each measured net-worse or a wash when promoted: `<callers>` (12/5 but ~1 KB either
+way), `selfhooks` (4/4), `lit`, `shortkey`, `dotted_strings`, `exemplar_family`. `shown="0"` stubs never
+count as resolution.
+
+### The decision rule, fixed before the measurement
+
+- **R1 — PERMUTATION, proven not argued.** A gate asserts the multiset of top-level children is identical
+  to the legacy order's, byte for byte per block, with a **dropped-row negative control** that must FAIL.
+  If R1 cannot be made to fail by deleting a row, it is not asserting anything.
+- **R2 — zero cells may lose completeness** at either bound, any grain. Expected to be trivially satisfied
+  since nothing is removed; measured anyway, because "nothing is removed" is an argument and R2 is evidence.
+- **R3 — a per-repo prefix curve at 1/2/4/8/16 KB**, never pooled; answer size varies ~4× across repos.
+  **Routed-first is graded MARGINALLY against legend-after-rows alone**, so the legend shift cannot mask a
+  routed-first loss. Measured already: routed-first by itself has **16 losing cells**, and the "no cell
+  worse" result depends on the legend move. Reporting them netted would hide that.
+- **R4 — out-of-corpus validation before publication.** Membership of the resolved set was chosen on these
+  216 cells. Re-measure on cells from **different repos**, not different questions in the same repos.
+- **R5 — what a truncating consumer loses changes.** Today it loses rows; after this it loses DEFINITIONS,
+  so a hedge like `cands="133"` could be read without its reading. Report this as a stated consequence, not
+  a solved problem. It is the strongest argument against the change and it belongs in the readout.
+
+### Controls
+
+- A fitted full section order (every section sorted by gold-per-byte) **FAILED a held-out split** — worse in
+  more cells than better in both folds. `<sigs>` stays first among the generic sections. That null is
+  registered here so the band cannot later be widened into it without new evidence.
+- **Moving `<tail>` does not pay** and is NOT part of this band: whole-tail-last took median
+  bytes-to-complete 10,279 → **11,487**. A separate lane measured a `tail LAST + test LAST` gain at 16 KB on
+  a different metric; the two are not reconciled, and neither is adopted here.
