@@ -1268,6 +1268,7 @@ inline void shellLiteralReads( std::string_view text, std::size_t from, std::uin
 struct ShellCompound
 {
     std::size_t writesFrom = 0;              // fh.writes from here on were made inside it
+    std::size_t listFrom = 0;                // the && / || list it is part of starts here (ShellCommand::listFrom)
     bool        isAfterPipe = false;         // it is a pipeline component (`cmd | while …; do …; done`)
 };
 struct ShellCommand
@@ -1275,7 +1276,9 @@ struct ShellCommand
     bool          hasWords = false;          // the current command has a word (or a redirection) so far
     bool          isRedirTarget = false;     // the next word is a redirection's target: neither a command nor an assignment
     bool          isPipeTail = false;        // a `|` came before the current command: it is a pipeline component
+    bool          isListTail = false;        // a `&&` / `||` came before the current command: its list goes on
     std::size_t   writesFrom = 0;            // fh.writes from here on were made by the current command
+    std::size_t   listFrom = 0;              // … and from here on by the current && / || list (`X=1 && cmd &`)
     std::size_t   compoundFrom = SIZE_MAX;   // a compound command (`… done`, `}`) just closed: its writes start here
     std::vector<ShellCompound> compounds;    // open if / while / until / for / select / case / { … } at this level
 };
@@ -1729,7 +1732,7 @@ inline void shellCompoundWord( const ShellWord& w, std::uint32_t lineNo, std::si
     const auto        isIn  = [ & ]( const auto& words ) { return std::find( std::begin( words ), std::end( words ), w.word ) != std::end( words ); };
     if( isCmd && isIn( kShellCompoundOpeners ) )
     {
-        f.cmd.compounds.push_back( ShellCompound{ fh.writes.size(), std::exchange( f.cmd.isPipeTail, false ) } );
+        f.cmd.compounds.push_back( ShellCompound{ fh.writes.size(), f.cmd.listFrom, std::exchange( f.cmd.isPipeTail, false ) } );
         return;
     }
     const bool isEsac = w.word == "esac" && f.cases > 0 && ( f.isPattern || f.isCmdPos );
@@ -1744,6 +1747,7 @@ inline void shellCompoundWord( const ShellWord& w, std::uint32_t lineNo, std::si
         shellNarrowFrom( fh, closed.writesFrom, lineNo, at );
     }
     f.cmd.compoundFrom = closed.writesFrom;
+    f.cmd.listFrom     = closed.listFrom;   // the lists inside it ended; the one it is a command of goes on
 }
 
 // One WORD that starts at `at` in a command context: an assignment, a declaration keyword, or the name a
@@ -1866,26 +1870,38 @@ inline void shellCommitPending( ShellScan& st, ShellScan::Frame& f, FileHarvest&
     shellNoteSubshellWrites( st, fh, from );
 }
 
-// What ended a command: a list separator (`;`, `&&`, `||`, a new line, a paren), a `|` (or `|&`), or a background `&`.
-enum class ShellSep : std::uint8_t { List, Pipe, Background };
+// What ended a command: a list separator (`;`, a new line, a paren), a `&&` / `||` (the list goes on), a `|` (or
+// `|&`), or a background `&`.
+enum class ShellSep : std::uint8_t { List, AndOr, Pipe, Background };
 
 // The frame's current command ENDED at (lineNo, col) because of `sep`: its held writes take effect there. A command
 // before a `|` or `&`, or after a `|` (unless lastpipe runs the pipeline's last command here), ran in a child shell,
-// so everything it wrote — and a compound command that ends right before a `|` / `&` — stops shadowing at once.
+// so everything it wrote — and a compound command that ends right before a `|` / `&` — stops shadowing at once. A `&`
+// backgrounds the whole && / || list it ends (`X=1 && cmd &`), so every command of that list ran in the child.
 inline void shellEndCommand( ShellScan& st, ShellScan::Frame& f, FileHarvest& fh, std::uint32_t lineNo, std::size_t col, ShellSep sep )
 {
-    const bool isChild = sep != ShellSep::List || ( f.cmd.isPipeTail && !st.isLastPipe );
+    const bool isChildSep = sep == ShellSep::Pipe || sep == ShellSep::Background;
+    const bool isChild    = isChildSep || ( f.cmd.isPipeTail && !st.isLastPipe );
     shellCommitPending( st, f, fh, lineNo, col );
     if( isChild )
     {
-        shellNarrowFrom( fh, std::min( f.cmd.writesFrom, fh.writes.size() ), lineNo, col );
+        const std::size_t from = sep == ShellSep::Background ? std::min( f.cmd.listFrom, f.cmd.writesFrom ) : f.cmd.writesFrom;
+        shellNarrowFrom( fh, std::min( from, fh.writes.size() ), lineNo, col );
     }
-    if( sep != ShellSep::List && f.cmd.compoundFrom != SIZE_MAX )
+    if( isChildSep && f.cmd.compoundFrom != SIZE_MAX )
     {
         shellNarrowFrom( fh, f.cmd.compoundFrom, lineNo, col );
     }
+    // The list goes on past a `&&` / `||`, also onto the next line (`a &&` + `b`: that new line ends a command with
+    // no word); a `|` is inside one of its pipelines. Anything else ended it.
+    const bool isListOpen = sep == ShellSep::AndOr || ( sep == ShellSep::List && f.cmd.isListTail && !f.cmd.hasWords );
+    if( !isListOpen && sep != ShellSep::Pipe )
+    {
+        f.cmd.listFrom = fh.writes.size();
+    }
+    f.cmd.isListTail    = isListOpen;
     f.cmd.compoundFrom  = SIZE_MAX;
-    f.cmd.writesFrom = fh.writes.size();
+    f.cmd.writesFrom    = fh.writes.size();
     f.cmd.isPipeTail    = sep == ShellSep::Pipe;
     f.cmd.hasWords      = false;
     f.cmd.isRedirTarget = false;
@@ -2001,6 +2017,7 @@ inline std::size_t shellOpenFrame( std::string_view line, std::size_t i, ShellSc
     if( kind == ShellParen::Command )
     {
         f.kw = ShellScan::Kw::None;   // a `for (( … ))` header is arithmetic, not a NAME list
+        f.cmd.hasWords = true;        // `cmd | ( … )`: the subshell IS the pipeline's command, so a new line ends it
     }
     const std::size_t paren   = kind == ShellParen::Subst ? i + 1 : i;   // the first `(`
     const bool        isArith = paren + 1 < line.size() && line[ paren + 1 ] == '(';
@@ -2119,7 +2136,8 @@ inline std::size_t shellSeparatorAt( std::string_view line, std::size_t i, std::
     }
     const bool     isLogical = ( c == '|' || c == '&' ) && next == c;   // `||` / `&&`
     const bool     isPipe    = c == '|' && !isLogical;
-    const ShellSep sep       = isPipe ? ShellSep::Pipe : c == '&' && !isLogical ? ShellSep::Background : ShellSep::List;
+    const bool     isJob     = c == '&' && !isLogical;
+    const ShellSep sep       = isPipe ? ShellSep::Pipe : isJob ? ShellSep::Background : isLogical ? ShellSep::AndOr : ShellSep::List;
     shellSeparator( c, i, lineNo, st, fh, sep );
     return i + ( isLogical || ( isPipe && next == '&' ) ? 1 : 0 );   // `|&` pipes stderr too
 }
@@ -2156,6 +2174,7 @@ inline void harvestShellLine( std::string_view line, std::uint32_t lineNo, FileH
         if( const std::size_t opened = shellOpenFrame( line, i, st ); opened != std::string_view::npos )
         {
             st.frames.back().cmd.writesFrom = fh.writes.size();   // the new frame's first command starts here
+            st.frames.back().cmd.listFrom   = fh.writes.size();   // … and so does its first list
             i = opened;
             continue;
         }
