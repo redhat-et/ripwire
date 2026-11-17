@@ -9624,15 +9624,16 @@ struct ContentMoves
         return out;
     }
 
-    // The baseline the delta reads: `baseline` itself when nothing matched, else the healed copy kept in `store`.
-    const Snapshot& baseFor( const Snapshot& baseline, std::optional<Snapshot>& store ) const
+    // The baseline the delta reads: `baseline` itself when nothing matched, else the healed copy kept in `store`. Pointers
+    // in and out, not a const& handed back from a const& parameter: that one binds a temporary baseline and returns a
+    // reference that dangles past the caller's full expression, while &temporary does not compile.
+    const Snapshot* baseFor( const Snapshot* baseline, std::optional<Snapshot>& store ) const
     {
         if( empty() )
         {
             return baseline;
         }
-        store.emplace( healed( baseline ) );
-        return *store;
+        return &store.emplace( healed( *baseline ) );
     }
 
     // Dead-code rows from `from` on: a matched symbol dead now stays non-gating (origin="moved") — a body does not decide reachability.
@@ -10889,7 +10890,7 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
     // keys first (a copy, only when something matched; see ContentMoves).
     const ContentMoves      contentMoves( baseline, keyByNode, nowMove.body );
     std::optional<Snapshot> healedBase;
-    const Snapshot&         base = contentMoves.baseFor( baseline, healedBase );
+    const Snapshot&         base = *contentMoves.baseFor( &baseline, healedBase );
 
     // ─── r26 ORIGIN AXIS: preexisting-worse vs new-symbol ──────────────────────────────────────────────
     // The exit code used to fire on ANY major unacked finding, which meant every large-but-fine NEW symbol
