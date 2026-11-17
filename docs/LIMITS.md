@@ -22,10 +22,14 @@ multi-quantifier shapes it used to admit — `a*a*a*a*a*b` (adjacent unbounded q
 proven disjoint, flat or grouped as `^(a)*(a)*(a)*(a)*(a)*$`) and `^(ab\w|((.|.){1,3}){1,3}){1,3}$` (an
 unprovable alternation repeated within a repeat) — by name and before any engine sees the pattern, which is
 `regex-screen-multiquantifier`'s closure (`test/regexmultiquantcheck.sh`). The #484 review then made the
-refusal proportional: a cross-set intersecting PAIR is a constant factor and is admitted (`\s+.*`,
-`\w+.*` — measured sub-millisecond on ordinary source lines; the message names the drop-one-quantifier
-rewrite), while a same-set pair and any 3-run of intersecting atoms still refuse; optionals (`?`, `{0,1}`)
-do not count as repeats; and an unquantified group is transparent (`(a*)(a*)(a*)(a*)(a*)b` refuses).
+refusal proportional: a cross-set intersecting PAIR is admitted (`\s+.*`, `\w+.*`), while a same-set
+pair and any 3-run of intersecting atoms still refuse. That split is a policy, not a cost class: every such
+run is polynomial, degree (atoms-1) in the splits, and on a uniform run a cross-set pair costs what a same-set
+pair does (libstdc++, 320-byte run: `\w+.*b` 133 ms, `a*a*b` 133 ms, the rewrite `\w.*b` 1.2 ms). A same-set
+pair always has a one-atom rewrite; a cross-set pair is common and costs close to its one-quantifier rewrite
+on ordinary source lines, and the message names that rewrite. Optionals (`?`, `{0,1}`) do not count as
+repeats, under either of clause 2's quantifiers; and an unquantified group is transparent
+(`(a*)(a*)(a*)(a*)(a*)b` refuses).
 **What remains open is the general
 case**, and it is still reachable: any ADMITTED pattern whose cost in the subject is super-linear. The family is
 not provable shape-by-shape — `(a|aa){1,100}b$` is admitted (a bounded outer over a branch that repeats itself
