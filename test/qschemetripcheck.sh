@@ -36,8 +36,8 @@ PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
 # 2026-11-17, C# import captures (#358 1a, @LaimaWu; lands #420 rebased onto main 5139f7840): parser tag 309 -> 311 (rich 312)
 #   and mirror move together (the PR's 196 -> 198, renumbered above main). Import-free deep containers cease to be partial;
-#   kCacheVersion and kQSnapCacheScheme stay unchanged. Re-derived with UPDATE_GOLDEN=1; extraction identity remains part of
-#   the quality snapshot key.
+#   kCacheVersion and kQSnapCacheScheme stay unchanged. Re-derived ONCE with UPDATE_GOLDEN=1 from the rebased build (hash
+#   1aec99a6d9…4083c76); extraction identity remains part of the quality snapshot key.
 # 2026-11-15, lane land-499-500 fix 1 (CodeRabbit on #668, merged over main d68b57456): RE-PINNED with UPDATE_GOLDEN=1,
 #   kQSnapCacheScheme 33 -> 34 (quality.h's v34 note). rustTestAttributed reads each top-level attribute on a line
 #   (classifyRustAttributeLine, rustAttributeClose: both join the manifest), so the Rust dead set moves; registeredMacroSymbolIds
