@@ -289,6 +289,7 @@
  "layoutcheck.sh": 22.6,
  "lb3namecheck.sh": 0.2,
  "legendcoveragecheck.sh": 98.2,
+ "legenddefaultcheck.sh": 30.0,
  "legenddriftcheck.sh": 121.8,
  "legendrefcheck.sh": 4.3,
  "legobundlecheck.sh": 10.2,

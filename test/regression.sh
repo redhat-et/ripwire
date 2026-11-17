@@ -679,6 +679,7 @@ for _g in \
     lcsidentitycheck \
     legendcostcheck \
     legendcoveragecheck \
+    legenddefaultcheck \
     legenddriftcheck \
     legendhavecheck \
     legendrefcheck \

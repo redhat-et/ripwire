@@ -4199,6 +4199,23 @@ static void applyCliRefPosture( const rw::Config& cfg, std::string& doc )
     }
 }
 
+// ITEM D: the prose-free DEFAULT, applied to a finished compact answer. Runs when nobody asked for a posture, or when
+// --legend=dict named this one; an asked --legend=compact clears legendProseOff and is the registered opt-out (D3).
+static void applyCliDictPosture( const rw::Config& cfg, std::string& doc )
+{
+    if( !cfg.legendProseOff )
+    {
+        return;
+    }
+    if( rw::legenddict::applyDictPosture( doc ) == rw::legenddict::RefOutcome::NotApplicable )
+    {
+        // A shape the dictionary cannot reduce. The answer is served UNCHANGED and complete — with its prose legend,
+        // exactly as 0.6.x served it — so this is a cost note, never a wrong or a shortened answer.
+        DISCLOSE( Diagnostics::answerUnchanged, "the inline answer is a correct superset of the prose-free one: only the cost stays",
+                  "applyCliDictPosture: the default posture on an answer the legend dictionary cannot reduce — inline legend kept" );
+    }
+}
+
 // The ONE place a captured answer reaches stdout, with the write CHECKED. An unchecked fwrite/fflush here exits 0 with
 // no answer written when stdout cannot take it (`> /dev/full`, a closed pipe): dispatch already returned 0 having written
 // only into the capture, so the failure is invisible to the caller. A missing answer reported as success is the one
@@ -4249,14 +4266,20 @@ static int finishCompactCapture( const rw::Config& cfg, std::string& doc, int rc
             // means the compact dialect is already applied. Calling it before applyCompactDialect read the pre-compact
             // document and returned NotApplicable on every verb (measured 2026-11-16: four covered verbs, all no-ops).
             applyCliRefPosture( cfg, doc );
+            // AFTER the ref stage, and the two never both fire: --legend-have= conflicts with an asked posture at
+            // intake, and a defaulted run that passed the handshake has already taken the ref posture, which moved the
+            // root attributes this one promises not to touch. applyDictPosture then finds no legend left to drop and
+            // leaves the ref answer alone, so the order is safe either way rather than merely untested.
+            applyCliDictPosture( cfg, doc );
             return emitCaptured();
         case rw::CompactOutcome::NotXml:
             if( cfg.legendDefaulted )
             {
                 return emitCaptured();
             }
-            std::fputs( "ripwire: --legend=compact applies to the XML verbs only — this run's output carries no XML legend to compact "
-                        "(text/JSON/markdown); rerun with --legend=full (e.g. ripwire <dir> --callers=SYM --legend=compact)\n", stderr );
+            rw::emitTo( stderr, "ripwire: --legend={} applies to the XML verbs only — this run's output carries no XML legend to compact "
+                                "(text/JSON/markdown); rerun with --legend=full (e.g. ripwire <dir> --callers=SYM --legend=compact)\n",
+                        cfg.legendSpelled.empty() ? cfg.legend : cfg.legendSpelled );
             return 1;
         case rw::CompactOutcome::UnknownRoot:
             if( cfg.legendDefaulted )
