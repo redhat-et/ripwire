@@ -21,6 +21,9 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
+# CR680 (review 5934094974): the live base compare runs in $F, so a relative RIPWIRE_BASE_BIN would resolve there and
+# fail every compare; resolve it against the invocation directory here, where its -x check also runs.
+[ -n "${RIPWIRE_BASE_BIN:-}" ] && [ "${RIPWIRE_BASE_BIN#/}" = "$RIPWIRE_BASE_BIN" ] && RIPWIRE_BASE_BIN="$PWD/$RIPWIRE_BASE_BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }

@@ -610,7 +610,8 @@ fi
 # inside one run, so a single high sample put ingest_need over the parse line (half the limit) and (T) failed on a run
 # that fits. The 2x margin stays — it is what makes this arm near the line. Two things absorb cross-run noise instead:
 #   * the peak is the MAX of 3 serial runs (one sample under-reads the upper tail the limited run can land in);
-#   * a degraded answer is re-tried ONCE at 2x a freshly measured peak, and (T) fails only when both attempts degrade.
+#   * a recognised degraded answer (tdegraded) is re-tried ONCE at 2x a freshly measured peak, and (T) fails only when
+#     both attempts degrade; a crash or any other mismatch on the first attempt fails at once.
 # A binary that degrades a run that fits degrades both attempts and still FAILS (shown with a wrapper that sets
 # RIPWIRE_TEST_MEMGUARD=project:1 on every limited run; the once-only wrapper, a one-off spike, passes on the retry).
 tpeak1(){
@@ -634,13 +635,19 @@ tpeak(){   # the max of 3 serial samples; empty when any sample has no number (n
 }
 tfits(){ lim=$(( peak_mb * 2 )); [ "$lim" -lt 64 ] && lim=64
          qd "$BIN" . --quality-delta=HEAD~1..HEAD "--max-memory=${lim}M" --no-cache; [ "$RC" = "$ARC" ] && cmp -s "$WORK/o" "$WORK/A.xml"; }
+# CR680 (review 5934094974): only a recognised degraded answer earns the retry: a parseable changed-files answer with
+# skipped_why=memory and exactly its degraded exit code (2 or 6). A crash (rc >= 128), any other rc, or a full answer whose
+# bytes differ from (A) FAILs at once, so a later matching run cannot mask it.
+tdegraded(){ [ "$RC" -lt 128 ] && [ -s "$WORK/o" ] && validxml "$WORK/o" && [ "$( attr "$WORK/o" ingest_scope )" = changed-files ] \
+             && [ "$( attr "$WORK/o" skipped_why )" = memory ] && [ "$RC" = "$( degrc "$WORK/o" )" ]; }
 peak_mb="$( tpeak )"
 if isnum "$peak_mb"; then
     if tfits; then ok "(T) --max-memory=${lim}M (2x the ${peak_mb}M peak, max of 3 runs): answered in full, byte-identical to (A)"
     else
         t1="--max-memory=${lim}M rc=$RC scope=$( attr "$WORK/o" ingest_scope )"
-        peak_mb="$( tpeak )"
-        if isnum "$peak_mb" && tfits; then
+        if ! tdegraded; then
+            no "(T) $t1: not a recognised degraded answer (a crash, another rc, or a full answer unlike (A)) — no retry"
+        elif peak_mb="$( tpeak )"; isnum "$peak_mb" && tfits; then
             ok "(T) --max-memory=${lim}M (2x the ${peak_mb}M peak, max of 3 runs): answered in full, byte-identical to (A), on the one retry"
             printf '  INFO  (T) the first attempt degraded (%s): a cross-run footprint spike, not a projection that degrades every run\n' "$t1"
         else no "(T) $t1, then --max-memory=${lim}M rc=$RC scope=$( attr "$WORK/o" ingest_scope ) on the retry — the projection degraded a run that fits"; fi
