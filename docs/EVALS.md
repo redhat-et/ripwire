@@ -17203,3 +17203,63 @@ the `reexports` arm DROPPED, because all three C′ losses came through it.
   rather than passing it.
 - **Band C″4 — `<met_bridge>` must fire independently at least once.** It never did in C′ (2 of 2 cells
   also had `path reachable="1"`), so as things stand the rule is really the path arm wearing two names.
+
+## PRE-REGISTRATION 2026-11-17 (amendment 7) — ITEM F: intra-row redundancy, and the legend it pays for
+
+Registered before any `src/` change. This band exists because of a MECHANISM confirmed in the source, not
+a byte count: `compactPresentTerms` (`src/compactlegend.h`) emits a legend clause **if and only if**
+`isCompletenessTermPresent()` finds the attribute it documents in the answer. Measured across the nine
+non-`--for` verbs, that costs **38.9–76.1 B of prose per distinct attribute key**, median ~60 B.
+
+**So an attribute pays twice: its own bytes on every row, and ~60 B of legend prose once.** Removing a
+redundant one is therefore worth strictly more than its row bytes, and the saving is *disclosed-by-
+construction* — the clause disappears because the attribute it documents is gone, which is exactly the
+behaviour the legend machinery already guarantees.
+
+### The redundancy, measured
+
+An attribute that re-prints what another attribute **on the same row** already says:
+
+| verb | shape | rows | bytes | share of that verb |
+| --- | --- | ---: | ---: | ---: |
+| `callers` | `sites_at="f.c:75"` repeats `p="f.c:70"`'s file | **383 of 383** | **12,828** | **12.4 %** |
+| `affected` | `run="pytest tests/x.py"` CONTAINS `p="tests/x.py"` | **252 of 252** | 11,003 | 36.2 % of that cell |
+| `path` | same shape | — | 759 | 1.0 % |
+| `safe-delete` | same shape | — | 66 | 3.7 % (n=1) |
+
+### Why `affected` is more than a byte win
+
+`<g n="54" p="a,b,c,…">` ALREADY collapses equal rows and does so in the companion cell. All 252 rows of
+`s1.textual-20` carry the identical attribute signature `hops|p|run` — they would collapse — but `run=`
+embeds `p=`, so no two rows are ever equal and the grouping never fires. **The redundancy is disabling an
+optimisation that already exists.** Carrying the harness as a group attribute (`runner="pytest"`, two
+distinct values over 252 rows) reconstructs every `run=` exactly.
+
+### The decision rule, fixed before the measurement
+
+- **F1 — RECONSTRUCTIBLE, exactly.** For every row, the removed text must be derivable from what remains by
+  a rule stated in the legend. `run=` = `runner=` + `' '` + `p=`; `sites_at=`'s file = `p=`'s file. A gate
+  reconstructs the original string for EVERY row of EVERY affected cell and compares byte-for-byte. One
+  mismatch FAILS the band. This is not a tolerance.
+- **F2 — zero completeness loss**, both bounds, every grain. No row is removed, so the expectation is that
+  this is trivially satisfied; it is still measured, because "no row removed" is an argument and F2 is
+  evidence.
+- **F3 — the legend clause must actually disappear**, and its byte saving is reported SEPARATELY from the
+  row saving. Netting them into one figure would hide which mechanism paid.
+- **F4 — the grouping must fire** on `s1.textual-20`'s 252 rows after the change, with `<g n=>` reporting
+  the true count. If it does not, the reconstruction is wrong somewhere and F1 missed it.
+- **F5 — reported per verb with its n.** `affected` is n=2 and `safe-delete` n=1; those are observations,
+  not rates, and must be labelled so. `callers` at n=21 and 383 of 383 rows is the only cell of this band
+  with a population worth a percentage.
+
+### Controls
+
+- **Non-vacuity:** the F1 gate must FAIL against a deliberately wrong reconstruction rule (drop the
+  separator, or use the wrong attribute as the base). Asserted by mutation before the real arm runs.
+- **The legend is not assumed.** F3 reads the clause's presence from the emitted answer before and after,
+  never from the clause registry — a clause registered but not emitted, and a clause emitted but not
+  registered, are both real defects this repository has shipped before
+  ([[trap-legend-clause-must-be-registered-not-written]]).
+- **Backward compatibility is a question, not an assumption.** A consumer reading `run=` breaks. This band
+  does NOT decide whether that is acceptable; it measures the saving and states the break, and the
+  schema-version call is the owner's.
