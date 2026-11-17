@@ -1102,247 +1102,283 @@ inline bool regexCharSetsIdentical( const RegexCharSet& a, const RegexCharSet& b
     return a.asciiLow == b.asciiLow && a.asciiHigh == b.asciiHigh && a.matchesNonAscii == b.matchesNonAscii;
 }
 
-inline std::optional<std::size_t> regexAdjacentAmbiguousQuantifierAt( const std::string& pat )
+// The scopes clause 1 judges: the pattern's top level, then every group's body at EVERY depth, each as
+// (bodyBegin, bodyEnd). A quantifier belongs to the scope it sits in, and adjacency is a fact about that scope
+// only. A depth-0-only collector never learns about `((a*a*a*a*)b)`, whose inner adjacency sits at depth 2 and
+// reaches the engine unrefused. Collected with the same scan the screen already trusts, so a quantifier inside a
+// class or behind a backslash is never mistaken for a group delimiter. One body begin per OPEN GROUP, pushed on
+// '(' and popped on its ')': inner bodies come out first, in close order, then the outer ones.
+inline std::vector<std::pair<std::size_t, std::size_t>> regexAdjacencyScopes( const std::string& pat )
 {
-    // One scope = the pattern's top level, or one group's body. Walk each scope independently: a quantifier
-    // belongs to the scope it sits in, and adjacency is a fact about that scope only.
-    std::vector<std::pair<std::size_t, std::size_t>> scopes;   // (bodyBegin, bodyEnd)
+    std::vector<std::pair<std::size_t, std::size_t>> scopes;
     scopes.push_back( { 0, pat.size() } );
-    // The ')' indices of UNQUANTIFIED groups this walk has entered (the transparent-group rule): a `)` from
-    // this list steps over without breaking the run, because the group was punctuation around its body's own
-    // atoms — `(a*)(a*)` must behave as `a*a*`. Depth-ordered in practice (a group's ')' follows its inner
-    // groups'), so a linear find is fine at pattern sizes the size cap already bounds.
-    std::vector<std::size_t> transparentCloses;
-    // Every group's body is a scope as well, at EVERY depth — a depth-0-only collector never learns
-    // about `((a*a*a*a*)b)`, whose inner adjacency sits at depth 2 and reaches the engine unrefused.
-    // Collected with the same scan the screen already trusts, so a quantifier inside a class or behind
-    // a backslash is never mistaken for a group delimiter. One body begin per OPEN GROUP, pushed on
-    // '(' and popped on its ')': the push of an inner scope stops the outer scope's own walk at the
-    // inner '(' (group branch below), so nothing inside a nested group is judged twice.
+    bool                     isInsideClass = false;
+    std::vector<std::size_t> bodyBegins;
+    for( std::size_t i = 0; i < pat.size(); ++i )
     {
-        bool                     isInsideClass = false;
-        std::vector<std::size_t> bodyBegins;
-        for( std::size_t i = 0; i < pat.size(); ++i )
+        const char c = pat[i];
+        if( c == '\\' ) { ++i; continue; }
+        if( isInsideClass ) { if( c == ']' ) { isInsideClass = false; } continue; }
+        if( c == '[' )  { isInsideClass = true; continue; }
+        if( c == '(' )
         {
-            const char c = pat[i];
-            if( c == '\\' ) { ++i; continue; }
-            if( isInsideClass ) { if( c == ']' ) { isInsideClass = false; } continue; }
-            if( c == '[' )  { isInsideClass = true; continue; }
-            if( c == '(' )
-            {
-                const std::size_t modifier = regexGroupModifierLength( pat, i );
-                bodyBegins.push_back( i + 1 + modifier );
-                i += modifier;
-                continue;
-            }
-            if( c == ')' && !bodyBegins.empty() )
-            {
-                scopes.push_back( { bodyBegins.back(), i } );
-                bodyBegins.pop_back();
-                continue;
-            }
+            const std::size_t modifier = regexGroupModifierLength( pat, i );
+            bodyBegins.push_back( i + 1 + modifier );
+            i += modifier;
+            continue;
+        }
+        if( c == ')' && !bodyBegins.empty() )
+        {
+            scopes.push_back( { bodyBegins.back(), i } );
+            bodyBegins.pop_back();
         }
     }
+    return scopes;
+}
 
-    for( const auto& scope : scopes )
+// THE RUN, NOT THE PAIR — the #484 review's proportional relaxation, as the state of one scope's walk. A same-set
+// PAIR (`a*a*`, `.*.*`, `\w+\w+`) is refused: it has a one-atom rewrite with the same language. A pair whose sets
+// merely INTERSECT (`\s+.*`, `\w+.*` — the `import\s+.*from` / `TODO:\s*.*` class) is common, costs close to its
+// one-quantifier rewrite on ordinary lines, and is ADMITTED; three-or-more consecutive intersecting participants
+// raise the degree to (atoms-1) and refuse. A participant DISJOINT from the previous one restarts the run at
+// itself; a non-participant atom (literal, bounded, anchor) empties it — reset().
+struct RegexAdjacencyRun
+{
+    RegexCharSet previous;
+    bool         havePrevious = false;
+    unsigned     intersectRun = 0;       // consecutive participants whose NEIGHBOURS intersect
+    bool         sameSetPair  = false;   // the last transition was between IDENTICAL sets
+
+    void reset()
     {
-        // THE RUN, NOT THE PAIR — the #484 review's proportional relaxation. A same-set PAIR (`a*a*`, `.*.*`,
-        // `\w+\w+`) is refused: it has a one-atom rewrite with the same language. A pair whose sets merely
-        // INTERSECT (`\s+.*`, `\w+.*` — the `import\s+.*from` / `TODO:\s*.*` class) is common, costs close to
-        // its one-quantifier rewrite on ordinary lines, and is ADMITTED; three-or-more consecutive intersecting
-        // participants raise the degree to (atoms-1) and refuse. A participant DISJOINT from the
-        // previous one resets the run to itself; a non-participant atom (literal, bounded, anchor) resets it
-        // to empty — the same "break" the pair walk always took, now run-shaped.
-        RegexCharSet previous;
-        bool         havePrevious   = false;
-        unsigned     intersectRun   = 0;   // consecutive back-edge participants whose NEIGHBORS intersect
-        bool         sameSetPair     = false; // the last transition was between IDENTICAL sets
-        auto acceptParticipant = [ & ]( std::size_t at, const RegexCharSet& member )
+        havePrevious = false;
+        intersectRun = 0;
+        sameSetPair  = false;
+    }
+    // Adds one participant; true when the run it closes must be refused.
+    bool accept( const RegexCharSet& member )
+    {
+        if( havePrevious && regexCharSetsIntersect( previous, member ) )
         {
-            if( havePrevious && regexCharSetsIntersect( previous, member ) )
-            {
-                ++intersectRun;
-                sameSetPair = regexCharSetsIdentical( previous, member );
-                if( sameSetPair && intersectRun >= 2 )  { return true; }   // same-set pair: a one-atom rewrite exists
-                if( intersectRun >= 3 )                  { return true; }   // intersecting run: degree (atoms-1)
-            }
-            else
-            {
-                intersectRun = 1;   // a participant that begins a run (or restarts one after a disjoint atom)
-                sameSetPair  = false;
-            }
-            previous     = member;
-            havePrevious = true;
-            return false;
-        };
-        for( std::size_t i = scope.first; i < scope.second; )
+            ++intersectRun;
+            sameSetPair = regexCharSetsIdentical( previous, member );
+            if( sameSetPair && intersectRun >= 2 ) { return true; }   // same-set pair: a one-atom rewrite exists
+            if( intersectRun >= 3 )                { return true; }   // intersecting run: degree (atoms-1)
+        }
+        else
         {
-            const char c = pat[i];
-            if( c == '\\' )
-            {
-                // an escape atom: read its set, then look for a quantifier on it
-                RegexCharSet member;
-                const bool   readable = ( i + 2 <= scope.second ) && regexCharSetOfEscape( pat[ i + 1 ], member );
-                const std::size_t atomEnd = std::min( scope.second, i + 2 );
-                const RegexQuantifier quant = regexQuantifierAt( pat, atomEnd );
-                if( readable && quant.isPresent && quant.isUnbounded )
-                {
-                    if( acceptParticipant( i, member ) ) { return i; }
-                    i = atomEnd + quant.lengthCount;
-                    if( i < scope.second && pat[i] == '?' ) { ++i; }   // lazy suffix: same atom, same ambiguity
-                    continue;
-                }
-                havePrevious = false; intersectRun = 0; sameSetPair = false;   // not a participant: reset
-                i = atomEnd;
-                continue;
-            }
-            if( c == '[' )
-            {
-                RegexCharSet member;
-                std::size_t  next = i;
-                const bool   readable = regexCharSetOfClass( pat, i, scope.second, member, next );
-                const RegexQuantifier quant = regexQuantifierAt( pat, next );
-                if( readable && quant.isPresent && quant.isUnbounded )
-                {
-                    if( acceptParticipant( i, member ) ) { return i; }
-                    i = next + quant.lengthCount;
-                    if( i < scope.second && pat[i] == '?' ) { ++i; }   // lazy suffix: the escape-site rule, repeated
-                    continue;
-                }
-                // unreadable or unquantified: the class is ONE ATOM either way — never walk its members (the
-                // #484 review's `[[:alpha:]*.*.*]`: the walk used to stop on the unreadable POSIX class and
-                // then read its members as punctuation, refusing a `.*` that sat INSIDE the brackets). When
-                // the parse failed the walk still steps past the whole class: `openAt` to the first ']' that
-                // closes it, found with a bounded scan (on a malformed class the compile probe owns the error).
-                havePrevious = false; intersectRun = 0; sameSetPair = false;
-                if( readable || next > i + 1 )
-                {
-                    i = next;   // a parsed class, consumed whole — an unquantified class atom, not a reset of the walk's position
-                    continue;
-                }
-                std::size_t close = i;
-                // a POSIX bracket form (`[:alpha:]`, `[.x.]`, `[=x=]`) owns a ']' of its own: a scan that
-                // stops on THAT one re-enters the class and reads its members as atoms — the #484 review's
-                // `[[:alpha:]*.*.*]` refused at its first inner '*'. A marker — '[' followed by ':' '.' or
-                // '=' — ends only at its terminator + ']', and no ']' inside it can close the CLASS.
-                char bracketForm = '\0';
-                for( ; close + 1 < scope.second; ++close )
-                {
-                    const char d = pat[ close + 1 ];
-                    if( d == '\\' ) { ++close; continue; }
-                    if( bracketForm != '\0' )
-                    {
-                        if( d == bracketForm && close + 2 < scope.second && pat[ close + 2 ] == ']' )
-                        {
-                            close += 2; bracketForm = '\0';
-                        }
-                        continue;   // inside a bracket form: no ']' here can close the class
-                    }
-                    if( d == ']' ) { ++close; break; }
-                    if( d == '[' && close + 2 < scope.second )
-                    {
-                        const char m = pat[ close + 2 ];
-                        if( m == ':' || m == '.' || m == '=' ) { bracketForm = m; ++close; }
-                    }
-                }
-                if( bracketForm != '\0' ) { i = scope.second; }   // unclosed form: the compile probe owns the error
-                else                     { i = ( close > i ) ? close + 1 : i + 1; }
-                continue;
-            }
-            if( c == '.' )
-            {
-                const RegexQuantifier quant = regexQuantifierAt( pat, i + 1 );
-                if( quant.isPresent && quant.isUnbounded )
-                {
-                    const RegexCharSet member = regexCharSetOfAny();
-                    if( acceptParticipant( i, member ) ) { return i; }
-                    i += 1 + quant.lengthCount;
-                    if( i < scope.second && pat[i] == '?' ) { ++i; }   // lazy suffix: the escape-site rule, repeated
-                    continue;
-                }
-                havePrevious = false; intersectRun = 0; sameSetPair = false;
-                ++i;
-                continue;
-            }
-            // A GROUP, when quantified, is itself a quantified atom — and this is the case that shape (ii) is
-            // made of. `(a)*(a)*` is two quantified atoms side by side exactly as `a*a*` is; the parentheses
-            // change how each atom is SPELLED, not how many ways the input can be split between them. Reading
-            // only the literal case would refuse `a*a*a*` and admit `(a)*(a)*`, which is the same bomb wearing
-            // two characters of punctuation. The atom's character set is its body's set when the body is a
-            // single width-one atom (`(a)`, `(\d)`, `([a-z])`); anything else has no readable set, so the atom
-            // takes no part in the proof — it neither accuses nor exonerates, the conservative direction.
-            if( c == '(' )
-            {
-                // find this group's matching close, honouring escapes and classes
-                std::size_t close = i + 1, depth = 1;
-                bool        inClass = false;
-                for( ; close < scope.second; ++close )
-                {
-                    const char d = pat[close];
-                    if( d == '\\' ) { ++close; continue; }
-                    if( inClass )   { if( d == ']' ) { inClass = false; } continue; }
-                    if( d == '[' )  { inClass = true; continue; }
-                    if( d == '(' )  { ++depth; continue; }
-                    if( d == ')' )  { if( --depth == 0 ) { break; } continue; }
-                }
-                if( close >= scope.second ) { havePrevious = false; intersectRun = 0; sameSetPair = false; ++i; continue; }   // unbalanced: the compile probe owns it
+            intersectRun = 1;   // a participant that begins a run (or restarts one after a disjoint atom)
+            sameSetPair  = false;
+        }
+        previous     = member;
+        havePrevious = true;
+        return false;
+    }
+};
 
-                const std::size_t modifier = regexGroupModifierLength( pat, i );
-                RegexCharSet      member;
-                const bool        readable = regexCharSetOfSingleCharBranch( pat, i + 1 + modifier, close, member );
-                const RegexQuantifier quant = regexQuantifierAt( pat, close + 1 );
-                if( readable && quant.isPresent && quant.isUnbounded )
-                {
-                    if( acceptParticipant( i, member ) ) { return i; }
-                    i = close + 1 + quant.lengthCount;
-                    if( i < scope.second && pat[i] == '?' ) { ++i; }   // lazy suffix: the escape-site rule, repeated
-                    continue;
-                }
-                // An UNQUANTIFIED group is TRANSPARENT (the #484 review's `(a*)(a*)(a*)(a*)(a*)b`): the
-                // group adds nothing but punctuation — `(a*)` is the atom `a*` in brackets — so the walk
-                // continues at its BODY with the run state intact, and the matching ')' is stepped over as
-                // the punctuation it is rather than being allowed to break the run. A QUANTIFIED group that
-                // is not a readable unbounded atom is the opaque atom it always was: reset, and its body was
-                // already judged in its own scope above.
-                if( !quant.isPresent )
-                {
-                    transparentCloses.push_back( close );
-                    i = i + 1 + modifier;
-                    continue;
-                }
-                havePrevious = false; intersectRun = 0; sameSetPair = false;
-                i = close + 1 + quant.lengthCount;
+// What one atom of a scope is to the run: a PARTICIPANT (an unbounded quantified atom whose set was read), a
+// RESET (anything else that is an atom or a delimiter), or a PASS (the punctuation of a transparent group,
+// which the run walks through untouched). `next` is where the walk resumes; for a participant it is past the
+// quantifier and before any lazy '?' suffix, which the walk steps over itself.
+enum class RegexAdjacencyStep : unsigned char { Participant, Reset, Pass };
+struct RegexAdjacencyAtom
+{
+    RegexAdjacencyStep step   = RegexAdjacencyStep::Reset;
+    RegexCharSet       member;
+    RegexQuantifier    quant  = {};
+    std::size_t        next   = 0;
+};
+
+// The verdict every atom kind shares: the atom ends at `atomEnd`, its set is `member` when `isReadable`, and it
+// takes part in the run only as an UNBOUNDED quantified atom. A BOUNDED atom does not count: `a{2,3}a{2,3}` is a
+// bounded product, and the bounded-outer family is clause 2's business. A non-participant resets the run and the
+// walk resumes right after the atom; the class and group readers below refine that resume point.
+inline RegexAdjacencyAtom regexAdjacencyAtomEndingAt( const std::string& pat, bool isReadable, const RegexCharSet& member, std::size_t atomEnd )
+{
+    RegexAdjacencyAtom atom;
+    atom.member = member;
+    atom.quant  = regexQuantifierAt( pat, atomEnd );
+    if( isReadable && atom.quant.isPresent && atom.quant.isUnbounded )
+    {
+        atom.step = RegexAdjacencyStep::Participant;
+        atom.next = atomEnd + atom.quant.lengthCount;
+        return atom;
+    }
+    atom.next = atomEnd;
+    return atom;
+}
+
+// The class the reader could not parse is still ONE ATOM — never walk its members (the #484 review's
+// `[[:alpha:]*.*.*]`: the walk used to stop on the unreadable POSIX class and then read its members as
+// punctuation, refusing a `.*` that sat INSIDE the brackets). Returns the index past the class: `openAt` to the
+// first ']' that closes it, found with a bounded scan (on a malformed class the compile probe owns the error).
+// A POSIX bracket form (`[:alpha:]`, `[.x.]`, `[=x=]`) owns a ']' of its own: a scan that stops on THAT one
+// re-enters the class and reads its members as atoms. A marker — '[' followed by ':' '.' or '=' — ends only at
+// its terminator + ']', and no ']' inside it can close the CLASS.
+inline std::size_t regexSkipUnparsedClass( const std::string& pat, std::size_t openAt, std::size_t scopeEnd )
+{
+    std::size_t close       = openAt;
+    char        bracketForm = '\0';
+    for( ; close + 1 < scopeEnd; ++close )
+    {
+        const char d = pat[ close + 1 ];
+        if( d == '\\' ) { ++close; continue; }
+        if( bracketForm != '\0' )
+        {
+            if( d == bracketForm && close + 2 < scopeEnd && pat[ close + 2 ] == ']' )
+            {
+                close += 2; bracketForm = '\0';
+            }
+            continue;   // inside a bracket form: no ']' here can close the class
+        }
+        if( d == ']' ) { ++close; break; }
+        if( d == '[' && close + 2 < scopeEnd )
+        {
+            const char m = pat[ close + 2 ];
+            if( m == ':' || m == '.' || m == '=' ) { bracketForm = m; ++close; }
+        }
+    }
+    if( bracketForm != '\0' ) { return scopeEnd; }   // unclosed form: the compile probe owns the error
+    return ( close > openAt ) ? close + 1 : openAt + 1;
+}
+
+// The ')' that closes the group opened at `openAt`, honouring escapes and classes; `scopeEnd` or beyond when the
+// group is unbalanced inside the scope (the compile probe owns that error).
+inline std::size_t regexAdjacencyGroupClose( const std::string& pat, std::size_t openAt, std::size_t scopeEnd )
+{
+    std::size_t close = openAt + 1, depth = 1;
+    bool        inClass = false;
+    for( ; close < scopeEnd; ++close )
+    {
+        const char d = pat[close];
+        if( d == '\\' ) { ++close; continue; }
+        if( inClass )   { if( d == ']' ) { inClass = false; } continue; }
+        if( d == '[' )  { inClass = true; continue; }
+        if( d == '(' )  { ++depth; continue; }
+        if( d == ')' )  { if( --depth == 0 ) { break; } continue; }
+    }
+    return close;
+}
+
+// An escape atom (`\d`, `\w`, `\.`): its set when the escape names one, then the quantifier after it.
+inline RegexAdjacencyAtom regexAdjacencyEscapeAtom( const std::string& pat, std::size_t at, std::size_t scopeEnd )
+{
+    RegexCharSet member;
+    const bool   isReadable = ( at + 2 <= scopeEnd ) && regexCharSetOfEscape( pat[ at + 1 ], member );
+    return regexAdjacencyAtomEndingAt( pat, isReadable, member, std::min( scopeEnd, at + 2 ) );
+}
+
+// A class atom: parsed whole when the reader can, else skipped whole (regexSkipUnparsedClass) — an unquantified
+// class is one atom either way, never a reset of the walk's position into its members.
+inline RegexAdjacencyAtom regexAdjacencyClassAtom( const std::string& pat, std::size_t at, std::size_t scopeEnd )
+{
+    RegexCharSet       member;
+    std::size_t        next       = at;
+    const bool         isReadable = regexCharSetOfClass( pat, at, scopeEnd, member, next );
+    RegexAdjacencyAtom atom       = regexAdjacencyAtomEndingAt( pat, isReadable, member, next );
+    if( atom.step != RegexAdjacencyStep::Participant && !isReadable && next <= at + 1 )
+    {
+        atom.next = regexSkipUnparsedClass( pat, at, scopeEnd );
+    }
+    return atom;
+}
+
+// A GROUP, when quantified, is itself a quantified atom — and this is the case that shape (ii) is made of.
+// `(a)*(a)*` is two quantified atoms side by side exactly as `a*a*` is; the parentheses change how each atom is
+// SPELLED, not how many ways the input can be split between them. The atom's character set is its body's set
+// when the body is a single width-one atom (`(a)`, `(\d)`, `([a-z])`); anything else has no readable set, so the
+// atom takes no part in the proof — it neither accuses nor exonerates, the conservative direction.
+// An UNQUANTIFIED group is TRANSPARENT (the #484 review's `(a*)(a*)(a*)(a*)(a*)b`): `(a*)` is the atom `a*` in
+// brackets, so the walk continues at its BODY with the run intact, and its ')' is recorded in `transparentCloses`
+// so the walk steps over it as punctuation. A QUANTIFIED group that is not a readable unbounded atom is the
+// opaque atom it always was: reset, and its body was already judged in its own scope.
+inline RegexAdjacencyAtom regexAdjacencyGroupAtom( const std::string& pat, std::size_t at, std::size_t scopeEnd,
+                                                   std::vector<std::size_t>& transparentCloses )
+{
+    const std::size_t close = regexAdjacencyGroupClose( pat, at, scopeEnd );
+    if( close >= scopeEnd )
+    {
+        RegexAdjacencyAtom unbalanced;   // the compile probe owns it
+        unbalanced.next = at + 1;
+        return unbalanced;
+    }
+    const std::size_t  modifier   = regexGroupModifierLength( pat, at );
+    RegexCharSet       member;
+    const bool         isReadable = regexCharSetOfSingleCharBranch( pat, at + 1 + modifier, close, member );
+    RegexAdjacencyAtom atom       = regexAdjacencyAtomEndingAt( pat, isReadable, member, close + 1 );
+    if( atom.step == RegexAdjacencyStep::Participant )
+    {
+        return atom;
+    }
+    if( !atom.quant.isPresent )
+    {
+        transparentCloses.push_back( close );
+        atom.step = RegexAdjacencyStep::Pass;
+        atom.next = at + 1 + modifier;
+        return atom;
+    }
+    atom.next = close + 1 + atom.quant.lengthCount;
+    return atom;
+}
+
+// One atom of a scope, read at `at`. A transparent group's own ')' passes; every other thing a participant is not
+// (anchors, '|', a stray quantifier, A LITERAL — unquantified atoms break adjacency: `x.*y` is admitted, and the
+// run carries only unbounded atoms) resets.
+inline RegexAdjacencyAtom regexAdjacencyAtomAt( const std::string& pat, std::size_t at, std::size_t scopeEnd,
+                                                std::vector<std::size_t>& transparentCloses )
+{
+    const char c = pat[at];
+    if( c == '\\' ) { return regexAdjacencyEscapeAtom( pat, at, scopeEnd ); }
+    if( c == '[' )  { return regexAdjacencyClassAtom( pat, at, scopeEnd ); }
+    if( c == '.' )  { return regexAdjacencyAtomEndingAt( pat, true, regexCharSetOfAny(), at + 1 ); }
+    if( c == '(' )  { return regexAdjacencyGroupAtom( pat, at, scopeEnd, transparentCloses ); }
+    RegexAdjacencyAtom delimiter;
+    delimiter.next = at + 1;
+    if( c == ')' )
+    {
+        const auto transparent = std::find( transparentCloses.begin(), transparentCloses.end(), at );
+        if( transparent != transparentCloses.end() )
+        {
+            transparentCloses.erase( transparent );
+            delimiter.step = RegexAdjacencyStep::Pass;
+        }
+        return delimiter;
+    }
+    if( c == '|' || c == '^' || c == '$' || c == '*' || c == '+' || c == '?' || c == '{' || c == '}' || c == ']' )
+    {
+        return delimiter;
+    }
+    RegexCharSet literal;
+    literal.add( static_cast<unsigned char>( c ) );
+    return regexAdjacencyAtomEndingAt( pat, true, literal, at + 1 );
+}
+
+// Clause 1: the byte where an ambiguous run of adjacent unbounded quantified atoms is refused, or nullopt. Each
+// scope (regexAdjacencyScopes) is walked atom by atom (regexAdjacencyAtomAt) and its run state is judged by
+// RegexAdjacencyRun. A lazy `?` after a participant's quantifier is the same atom, same ambiguity. The
+// transparent-group closes are one list across all scopes, as they always were: a group's ')' follows its inner
+// groups', so a linear find is fine at pattern sizes the size cap already bounds.
+inline std::optional<std::size_t> regexAdjacentAmbiguousQuantifierAt( const std::string& pat )
+{
+    std::vector<std::size_t> transparentCloses;
+    for( const auto& [ scopeBegin, scopeEnd ] : regexAdjacencyScopes( pat ) )
+    {
+        RegexAdjacencyRun run;
+        for( std::size_t i = scopeBegin; i < scopeEnd; )
+        {
+            const RegexAdjacencyAtom atom = regexAdjacencyAtomAt( pat, i, scopeEnd, transparentCloses );
+            if( atom.step == RegexAdjacencyStep::Participant )
+            {
+                if( run.accept( atom.member ) ) { return i; }
+                i = atom.next;
+                if( i < scopeEnd && pat[i] == '?' ) { ++i; }   // lazy suffix: same atom, same ambiguity
                 continue;
             }
-            // the transparent group's own ')' steps over without breaking the run — everything else that a
-            // participant is not (anchors, '|', a stray quantifier, A LITERAL — unquantified atoms break
-            // adjacency exactly as before: `x.*y` is admitted, and the run carries only unbounded atoms)
-            if( c == ')' && std::find( transparentCloses.begin(), transparentCloses.end(), i ) != transparentCloses.end() )
+            if( atom.step == RegexAdjacencyStep::Reset )
             {
-                transparentCloses.erase( std::find( transparentCloses.begin(), transparentCloses.end(), i ) );
-                ++i;
-                continue;
+                run.reset();
             }
-            if( c == ')' || c == '|' || c == '^' || c == '$' || c == '*' || c == '+' || c == '?' || c == '{' || c == '}' || c == ']' )
-            {
-                havePrevious = false; intersectRun = 0; sameSetPair = false;
-                ++i;
-                continue;
-            }
-            {
-                const RegexQuantifier quant = regexQuantifierAt( pat, i + 1 );
-                if( quant.isPresent && quant.isUnbounded )
-                {
-                    RegexCharSet member;
-                    member.add( static_cast<unsigned char>( c ) );
-                    if( acceptParticipant( i, member ) ) { return i; }
-                    i += 1 + quant.lengthCount;
-                    if( i < scope.second && pat[i] == '?' ) { ++i; }   // lazy suffix: the escape-site rule, repeated
-                    continue;
-                }
-                havePrevious = false; intersectRun = 0; sameSetPair = false;
-                ++i;
-            }
+            i = atom.next;
         }
     }
     return std::nullopt;
