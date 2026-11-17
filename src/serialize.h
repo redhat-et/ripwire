@@ -3544,13 +3544,14 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     {
         legend += "<!-- of= is the resolved SEED this neighbourhood is centred on; depth= call hops walked and fanout= "
                   "neighbours kept per hop are its whole boundary, so a row's absence means outside them, not nonexistent. "
-                  "defs= (only when >1) = that NAME has N definitions and the most specific one was walked (kind first, its language "
-                  "ahead, id last: a CODE definition before a doc heading or config key, and a C/C++ declaration without a body yields to "
+                  "defs= (only when >1) = that NAME has N definitions and the most specific one was walked (a stated language first, else kind, the "
+                  "repo's majority language on a kind tie, then path order: a CODE definition before a doc heading or config key, and a C/C++ declaration without a body yields to "
                   "the first bodied definition of its scope in that order); qualify with "
                   "file:name or @FILE:LINE to pick another. -->";
         if( ann.seed.reflang != nullptr )   // D4: the FULL dialect's definition for the anchor pair — legendcoveragecheck (A) flags the --legend=full row when the seed stanza is silent,
-            legend += std::string( "<!-- reflang=" ) + ann.seed.reflang + " names the language this answer ANCHORED to (a STATED language — the query's @lang, the asked-from file, the editor's declared languageId — fronts its own definitions); reflang-origin=" + ann.seed.reflangOrigin
-                + " says where it came from — explicit, context, client, corpus (the repo's majority language, which fronts NOTHING: it only breaks ties between definitions of the same kind, and appears here only when one such tie actually moved the front). next= beside a corpus tie carries the defs invocation listing every definition the name binds. A disclosed foreign fallback rides stderr; an anchor that decided nothing is absent. -->";   // charged only when the row carries the attributes (seedBiteLegend's rule)
+            legend += std::string( "<!-- reflang=" ) + ann.seed.reflang + ": the language this answer anchored to; reflang-origin=" + ann.seed.reflangOrigin
+                + ": explicit (the @lang typed), context (the file asked from), client (the editor's languageId) or corpus (the repo's majority language "
+                  "broke a same-kind tie for the front; next= lists every definition). -->";   // charged only when the row carries the attributes (seedBiteLegend's rule); kept short, the verb dict defines the pair in full
         legend += seedBiteLegend( ann.seed );   // C2: charged only on a run whose root carries a bite attribute (the at= rule)
         // H1: charged only on a run whose root carries unproven_defs= — the same rule, and part of the head est_tokens prices.
         legend += unprovenDefsVerbComment( UnprovenDefsVerb::Around, ann.seed.unprovenDefs > 0, "<!-- ripwire around: " );

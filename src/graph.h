@@ -14651,10 +14651,12 @@ struct LangAnchor
     // list alone, and re-deriving it downstream risks disagreeing with the resolver that decided it.
     bool         fellBack = false;
     bool         tieBroke = false;   // the adopted rule (#440): an INFERRED corpus majority no longer lifts a tier — it
-    std::size_t  others   = 0;       // breaks same-rung ties. tieBroke says the tie-break actually ordered a row it
-                                     // otherwise would not have (ids), which is the ONE moment a corpus anchor is
-                                     // allowed to speak: reflang= + the --defs= next step. An anchor that decided
-                                     // nothing stays silent (the maintainer's quiet-reflang case).
+    std::size_t  others   = 0;       // breaks same-rung ties. tieBroke says the tie-break put a DIFFERENT definition at
+                                     // the front than the anchor-free order would, which is the ONE moment a corpus
+                                     // anchor is allowed to speak: reflang= + the --defs= next step. An anchor that
+                                     // decided nothing stays silent (the maintainer's quiet-reflang case).
+    bool         frontMoved = false; // any origin: the anchor's tier or tie key changed which definition leads. A file
+                                     // lane or an @FILE:LINE seed that names one place moves nothing, and says nothing.
     constexpr bool active() const noexcept { return origin != AnchorOrigin::None; }
 };
 
@@ -14808,22 +14810,23 @@ inline std::vector<NodeId> applyNameTower( const IngestResult& ing, std::vector<
     {
         ids[ i ] = keyed[ i ].id;
     }
-    if( corpusTie )   // did the tie key actually order rows the content tail would have ordered otherwise? A rung
-    {                 // whose content keys come out unsorted means exactly that: the majority spoke. Silent otherwise —
-        for( std::size_t i = 1; i < keyed.size(); ++i )   // an anchor that decided nothing must not be disclosed.
+    // Did the anchor DECIDE the front? The anchor-free front is the first row of (kind rank, content key, id), the order
+    // this comparator keeps when no language is stated and no majority speaks. A front that equals it means the anchor
+    // changed nothing a single-pick verb shows, so the disclosure stays silent (the legend's "moved the front"). Rows
+    // moved lower down are still ordered by the rule; they are not announced.
+    const Key* plainFront = &keyed.front();
+    for( const Key& k : keyed )
+    {
+        const bool ahead = k.rank != plainFront->rank       ? k.rank > plainFront->rank
+                         : k.content != plainFront->content ? k.content < plainFront->content
+                                                            : k.id < plainFront->id;
+        if( ahead )
         {
-            // the tail is (content key, id) since #682, so "out of tail order" reads the same pair the comparator ends on; within
-            // a rung the majority rows form one block, so the one boundary pair is the whole test
-            const bool tailWouldSwap = keyed[ i ].content != keyed[ i - 1 ].content ? keyed[ i ].content < keyed[ i - 1 ].content
-                                                                                    : keyed[ i ].id < keyed[ i - 1 ].id;
-            if( keyed[ i ].rank == keyed[ i - 1 ].rank && keyed[ i ].langTier == keyed[ i - 1 ].langTier
-                && keyed[ i ].tie != keyed[ i - 1 ].tie && tailWouldSwap )
-            {
-                anchor.tieBroke = true;
-                break;
-            }
+            plainFront = &k;
         }
     }
+    anchor.frontMoved = anchor.active() && plainFront->id != keyed.front().id;
+    anchor.tieBroke   = corpusTie && anchor.frontMoved;
     return ids;
 }
 

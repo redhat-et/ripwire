@@ -4,8 +4,8 @@
 # The rule (owner's): exact matching language > its edge-family (langCompatible's class) > the
 # kind ladder > foreign languages last — levels decide WITHIN a group, never across it. The
 # fixtures in test/langorderfix/ + test/langorderjvmfix/ are the collision matrix; their file
-# comments carry the tier each line demonstrates. Everything here is RED until D1-D4 land:
-# today the bare-name lane is rank-first with a path-accident reference language.
+# comments carry the tier each line demonstrates. The arms were written red-first against the
+# rank-first lane with its path-accident reference language; they ship green with the change.
 #
 # Arms:
 #   (A1) corpus anchor (no context): langorderfix leads with the C++ fn despite rank 2 vs 3/4
@@ -17,6 +17,8 @@
 #   (A11) different rungs: the ladder fronts over the majority language, in silence
 #   (A12) single def, active majority anchor: still silent (reflang decided nothing)
 #   (A13) a stated @lang must scope the Scope::name tier too — A::f@rs answers RUST, not the id accident
+#   (A14) a file lane that names one place is silent          (A15) so is an @FILE:LINE seed
+#   (A16) the majority reorders a LOWER rung only: the front did not move, the root is silent
 #
 # Usage:  bash test/langordercheck.sh [path/to/ripwire]
 set -u
@@ -168,6 +170,39 @@ elif case "$A13R" in *'reflang="rs"'*'reflang-origin="explicit"'*) true ;; *) fa
 else
     no "(A13) rust-only answered but the explicit anchor is undisclosed: $A13R"
 fi
+
+# ── (A14)/(A15) a file lane or an @FILE:LINE seed names ONE place: the language decided nothing there ──
+# LAND-440 Stage 0 measured `--around=z_lib.js:same` at 1160 -> 2585 bytes: reflang="js" reflang-origin="context"
+# plus its legend, on the selector form that already picked the file. The front is the file's own definition
+# either way, so the root is silent; a typed @lang (A13) still shows.
+for A14Q in 'z_lib.js:same' '@z_lib.js:6'; do
+    A14R="$( "$BIN" --around="$A14Q" "$FIX2" 2>/dev/null | grep -m1 -o '<r [^>]*>' )"
+    A14F="$( "$BIN" --around="$A14Q" "$FIX2" 2>/dev/null | grep -m1 -o '<f p="[^"]*"' )"
+    [ "$A14Q" = 'z_lib.js:same' ] && A14N='(A14)' || A14N='(A15)'
+    case "$A14F" in
+        *'p="z_lib.js"'*) case "$A14R" in
+            *reflang*|*next=*) no "$A14N --around=$A14Q names one place yet the root discloses a language: $A14R" ;;
+            *) ok "$A14N --around=$A14Q answers z_lib.js with no reflang — the selector picked the file, the language decided nothing" ;;
+        esac ;;
+        *) no "$A14N --around=$A14Q front wrong: $A14F" ;;
+    esac
+done
+
+# ── (A16) the majority moves a row BELOW the front: c_low.py's Class leads on kind with or without it ──
+# d_low.py and z_low.js both hold `low` as a Function; js is the majority, so z_low.js orders ahead of
+# d_low.py. That is a lower-rung move: the legend says the corpus origin "appears only when one such tie
+# moved the front", and Stage 0 measured +1.65 KB on four large-repo names whose front never moved.
+A16="$( "$BIN" --around=low "$FIX2" 2>/dev/null )"
+A16R="$( printf '%s' "$A16" | grep -m1 -o '<r [^>]*>' )"
+A16C="$( "$BIN" --callers=low "$FIX2" 2>/dev/null | grep -o '<def ix="[0-9][^>]*>' | tr '\n' ' ' )"
+case "$A16C" in
+    *'ix="1" t="cls"'*'p="c_low.py:'*'ix="2"'*'p="z_low.js:'*'ix="3"'*'p="d_low.py:'*)
+        case "$A16R" in
+            *reflang*|*next=*) no "(A16) the front (c_low.py's Class) did not move, yet the root discloses the majority: $A16R" ;;
+            *) ok "(A16) low: Class fronts on kind, js orders ahead of py one rung down, and the root is silent (the front did not move)" ;;
+        esac ;;
+    *) no "(A16) low order wrong (want cls c_low.py, then z_low.js ahead of d_low.py): $A16C" ;;
+esac
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail
