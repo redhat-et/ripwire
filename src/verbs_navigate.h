@@ -1444,7 +1444,7 @@ struct SafeDeleteRiskReading
 inline constexpr SafeDeleteRiskReading kSafeDeleteRiskReadings[] = {
     { "none-found",      "none-found: zero callers AND zero uses — an ABSENCE of evidence, never evidence of absence. " },
     { "untested-radius", "untested-radius: callers or uses exist, and NONE of the transitive blast radius is test-covered. " },
-    { "uses-exist",      "uses-exist: callers or uses exist, and at least part of a non-empty radius is test-covered; an empty radius (radius_tested=0) claims no coverage. " },
+    { "uses-exist",      "uses-exist: callers or uses exist, and at least part of the radius is test-covered. " },
     // TIER-FOLLOWUP: a radius of test definitions only is not "untested" (isTestedByReach never counts a test, so it read as one)
     { "tests-only",      "tests-only: callers or uses exist, and EVERY symbol in the transitive blast radius is a test definition "
                          "(radius_tests=): no production caller was found in the resolved graph, directly or transitively. uses= may still count production "
