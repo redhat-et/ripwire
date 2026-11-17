@@ -145,7 +145,7 @@ LW="$TMP/lblws"; mkdir -p "$LW/a" "$LW/a-b"
 printf 'int alpha( int x ) { return x + 1; }\n' >"$LW/a/x.c"
 printf 'int beta( int x ) { return x + 2; }\n'  >"$LW/a-b/y.c"
 run "$LW/a" "$LW/a-b" >"$TMP/lbl-multi.xml" 2>/dev/null; rlm=$?
-run "$LW/a-b" "$LW/a" >"$TMP/lbl-multi-rev.xml" 2>/dev/null
+run "$LW/a-b" "$LW/a" >"$TMP/lbl-multi-rev.xml" 2>/dev/null   # status: compared byte-for-byte with the rc-checked a a-b run below
 run "$LW" >"$TMP/lbl-single.xml" 2>/dev/null; rls=$?
 lblm="$( grep -oE '<f p="[^"]*"' "$TMP/lbl-multi.xml" | tr '\n' ' ' )"
 lbls="$( grep -oE '<f p="[^"]*"' "$TMP/lbl-single.xml" | tr '\n' ' ' )"

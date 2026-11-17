@@ -1470,16 +1470,17 @@ inline const char* safeDeleteRisk( bool anyEvidence, bool usesFloor, bool declin
 // all, so the table's sentence (part of the radius is test-covered) would claim what radius_tested=0 does not show.
 inline constexpr const char* kUsesExistEmptyRadiusSentence =
     "uses-exist: callers or uses exist, but the transitive blast radius is empty (impact_reaches=0), so it claims no test coverage. ";
-inline const char* safeDeleteRiskSentence( std::string_view risk, bool emptyRadius ) noexcept
+inline const char* safeDeleteRiskSentence( std::string_view risk ) noexcept
 {
-    if( emptyRadius && risk == "uses-exist" )
-    {
-        return kUsesExistEmptyRadiusSentence;
-    }
     const auto it  = std::ranges::find( kSafeDeleteRiskReadings, risk, &SafeDeleteRiskReading::risk );
     const auto end = std::end( kSafeDeleteRiskReadings );   // outside the promise: a self-check names values, it calls nothing
     ASSUME( it != end, "safeDeleteRiskSentence: runSafeDelete assigns only the eight values listed" );
     return it != end ? it->sentence : "";
+}
+// The sentence for the risk= value in force, read against the radius it describes: the table's, except uses-exist over an empty one.
+inline const char* safeDeleteRiskReading( std::string_view risk, bool emptyRadius ) noexcept
+{
+    return emptyRadius && risk == "uses-exist" ? kUsesExistEmptyRadiusSentence : safeDeleteRiskSentence( risk );
 }
 
 inline void emitSafeDeleteLegend( std::size_t defCount, std::size_t unprovenDefs, std::size_t ambiguousCallers, std::string_view risk,
@@ -1533,7 +1534,7 @@ inline void emitSafeDeleteLegend( std::size_t defCount, std::size_t unprovenDefs
                     : "",
                 // One risk= value, the one in force. A verdict a reader has to look up in a glossary of three is a
                 // marker string legible only to whoever wrote it.
-                  safeDeleteRiskSentence( risk, flags.emptyRadius ),
+                  safeDeleteRiskReading( risk, flags.emptyRadius ),
                 // H1: what risk= did not read, straight after the sentence for the value it qualifies.
                 ( rw::unprovenDefsVerbLegend( rw::UnprovenDefsVerb::SafeDelete, unprovenDefs > 0 ) + declinedClause ).c_str(),
                 rw::modScopeLegend( hasModScope ),   // #60: exactly when a <c n="<file-scope>"> row is on this page

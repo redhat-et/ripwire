@@ -407,7 +407,7 @@ PD20g="$( pdjson --callers=Widget.plain_handler )"
 #      coverage sentence byte-for-byte. RED on the base binary (it printed the coverage claim on the empty radius).
 SD21="$( mktemp -d )"; trap 'rm -rf "$WORK" "$SD7" "$SD21"' EXIT
 printf 'static int viaTableOnly( int x ) { return x + 4; }\nstruct ops { int (*open)( int ); };\nstruct ops table = { .open = viaTableOnly };\n' > "$SD21/b.c"
-SD21_OUT="$( "$BIN" "$SD21" --no-cache --safe-delete=viaTableOnly --legend=full 2>/dev/null )"
+SD21_OUT="$( "$BIN" "$SD21" --no-cache --safe-delete=viaTableOnly --legend=full 2>/dev/null )"   # status: the root element is the premise; a refusal prints none and the premise FAILs
 SD21_ROOT="$( printf '%s' "$SD21_OUT" | grep -o '<safe-delete [^>]*>' )"
 SD21_LEG="$( printf '%s' "$SD21_OUT" | grep -o '<!--.*-->' )"
 if ! { printf '%s' "$SD21_ROOT" | grep -q ' risk="uses-exist"' && printf '%s' "$SD21_ROOT" | grep -q ' impact_reaches="0"' \
@@ -420,8 +420,9 @@ elif printf '%s' "$SD21_LEG" | grep -q 'uses-exist: callers or uses exist, but t
 else
     no "(21) uses-exist over an empty radius carries no sentence for its value"
 fi
-SD21_NEAR="$( sd helperCalled )"
-( cd "$WORK" && "$BIN" . --safe-delete=helperCalled --no-cache --legend=full 2>/dev/null ) | grep -q 'uses-exist: callers or uses exist, and at least part of the radius is test-covered\. ' \
+SD21_NEAR="$( sd helperCalled )"   # status: its risk=/radius_tested= attributes are the verdict; a refusal prints none and the arm FAILs
+SD21_NFULL="$( cd "$WORK" && "$BIN" . --safe-delete=helperCalled --no-cache --legend=full 2>/dev/null )"; sd21rc=$?
+[ "$sd21rc" = 0 ] && printf '%s' "$SD21_NFULL" | grep -q 'uses-exist: callers or uses exist, and at least part of the radius is test-covered\. ' \
     && [ "$( attr "$SD21_NEAR" risk )" = 'risk="uses-exist"' ] && [ "$( attr "$SD21_NEAR" radius_tested )" != 'radius_tested="0"' ] \
     && ok "(21) near miss: helperCalled (a tested radius) keeps the coverage sentence" \
     || no "(21) near miss: helperCalled lost its uses-exist coverage sentence"
