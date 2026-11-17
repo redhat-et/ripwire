@@ -283,29 +283,6 @@ inline int emitCallHierarchyAlt( const rw::Config& cfg, const rw::IngestResult& 
     return 0;
 }
 
-// GV-PATH-BIND: the one-hop rows of `sym`; for a CALLERS selector that binds nothing as typed and that the M1 rule narrows to one source
-// definition (src/forgraphverb.h narrowRefusedSpelling), the rows of that definition's own spelling: `bound` holds it, `sym` is moved
-// onto it and the rows' `narrowed` names the selector as typed. Otherwise the rows as typed (empty matches: the caller refuses as before).
-inline rw::CallHierarchyRows callHierarchyRowsNarrowed( const rw::IngestResult& ing, const rw::Graph& g, std::string_view& sym, bool wantCallers,
-                                                        std::string& bound )
-{
-    rw::CallHierarchyRows rows = rw::callHierarchyRows( ing, g, sym, wantCallers );
-    std::optional<std::string> pick = wantCallers && rows.matches.empty() ? rw::narrowRefusedSpelling( ing, sym, rw::GraphSubjectForm::Callers )
-                                                                          : std::nullopt;
-    if( !pick )
-    {
-        return rows;
-    }
-    rw::CallHierarchyRows narrowedRows = rw::callHierarchyRows( ing, g, *pick, wantCallers );
-    if( narrowedRows.matches.empty() )
-    {
-        return rows;
-    }
-    narrowedRows.narrowed.emplace_back( sym );
-    bound = std::move( *pick );
-    sym   = bound;
-    return narrowedRows;
-}
 
 std::optional<int> runCallHierarchy( const MainDispatch& d )
 {
@@ -330,7 +307,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         // about WHICH rows the question has. GV-PATH-BIND: a callers selector refused over several fitting definitions answers as
         // the ONE source definition's own spelling (sym moves onto it; chRows.narrowed names it as typed).
         std::string               chBound;
-        const CallHierarchyRows   chRows  = callHierarchyRowsNarrowed( ing, g, sym, wantCallers, chBound );
+        const CallHierarchyRows   chRows  = rw::callHierarchyRowsNarrowed( ing, g, sym, wantCallers, chBound );
         // lane ix2-slice (IX-2 P2, src/closures.h): callees only — the functions written inside the matches' bodies, any depth
         const std::vector<NodeId> chClosures = wantCallers ? std::vector<NodeId>{} : rw::ClosureIndex( ing ).closuresOf( chRows.matches );
         const std::vector<NodeId>& matches = chRows.matches;
