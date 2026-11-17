@@ -388,7 +388,8 @@ inline MemberDeclScan memberDeclScan( const IngestResult& ing, std::string_view 
         {
             loadedFile = s.fileId;
             bytes      = darkflags::readWhole( diskPath( ing, s.fileId ) );
-            if( bytes && ( scannedBytes += bytes->size() ) > kLexicalDefScanBytes )
+            scannedBytes += bytes ? bytes->size() : 0;
+            if( bytes && scannedBytes > kLexicalDefScanBytes )
             {
                 return MemberDeclScan{ {}, true };   // budget: no refusal, and the served answer says the scan stopped
             }
