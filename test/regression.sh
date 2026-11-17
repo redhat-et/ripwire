@@ -649,6 +649,7 @@ for _g in \
     includeprecisecheck \
     indexoutcheck \
     infraportcheck \
+    invnestcheck \
     isolateprovenancecheck \
     javamethodrefcheck \
     javarubycheck \

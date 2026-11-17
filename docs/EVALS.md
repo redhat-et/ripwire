@@ -15992,3 +15992,273 @@ change with its own band and is deliberately out of scope here; it is recorded w
 the next round starts from the number. It is also the honest answer to "an answer should be bounded by the
 question, not the corpus": this lane bounded the *count-only* tail and fixed *where* the names go, and the
 remaining growth term is a schema that spells every ancestor directory once per row.
+
+## PRE-REGISTRATION 2026-11-16 — five LOSSLESS encodings for the map, registered before the code exists
+
+The owner's cost metric is **expected tokens to a complete answer**, not answer size: *complete answers
+with efficient bytes is the goal ... 3x follow-on grep do not save tokens.* Priced against a measured
+grep-and-read follow-up of **24,808 tokens**, ripwire's vscode map sits at a break-even of **3.74
+follow-ups** — it has to save about four greps to pay for itself. The `<ls>` row ceiling took that from
+3.74 to 2.62. This card registers five encodings that aim to reach ~2.0 **without removing one byte of
+answer content**, which is the whole point: every item below is a re-encoding, never a cut, so §9's
+terminality objective is untouched and no `shown=`/`capped=`/`next=` vocabulary is needed for any of them.
+
+An independent audit measured each item by rewriting a real map, re-serialising, and diffing against the
+original (an untransformed round trip asserted byte-identical; every rewrite `xmllint`-clean). Those
+numbers are the PREDICTION this card is registered against, not the result.
+
+> **SUPERSEDED FOR ITEM 1 — see "READOUT — item 1" below (2026-11-16).** The audit rewrote the map as it
+> stood BEFORE the `<ls>` row ceiling landed, and the ceiling took the same count-only path bytes item 1
+> aims at. Item 1 measures **−7.73 % on vscode and −9.27 % on envoy**, not the 20.5 %/20.3 % predicted
+> here, and **Band C's 15 % floor FAILS**. The predictions for items 2–5 carry the same baseline error and
+> are not re-derived here. The table is left in place as the registered prediction, which is the point of
+> having registered it.
+
+| item | mechanism | predicted saving (vscode / envoy / nushell) |
+| --- | --- | --- |
+| 1 | nest `<ls>` rows under a synthesised `<d p="prefix">`, depth ≤ 2 | 33,707 / 26,525 / 4,989 B |
+| 2 | drop `t=` kind-legend comments for kinds this map never prints | 548 / 788 / 293 B |
+| 3 | merge identical sibling `<c>` rows into `x=N` | 743 / 476 / 597 B |
+| 4 | self-close childless `<s …></s>` | 249 / 243 / 255 B |
+| 5 | omit `<ls n=>` when it equals the name count in `f=` | 6,276 / 5,658 / 1,269 B |
+
+### Band A — LOSSLESSNESS, as a set identity and not as a byte count
+
+The flattened `<ls>` row set after item 1 must equal the row set before it: same directories, same `n=`,
+same `f=` membership, same count. Item 5's omitted `n=` must be re-derivable from `f=` for **every** row
+that omits it. Items 3 and 4 must leave the callee multiset and the symbol row set identical. **FAIL if
+any one row's content changes**, whatever the byte saving. This band is the reason these are encodings
+and not cuts, so it is the band that can sink the card on its own.
+
+### Band B — the attribute vocabulary is REGISTERED, not merely emitted
+
+`<d p=>` and the widened `x=` clause must each have a row in `src/compactlegend.h`'s dictionary. An
+attribute emitted without a dictionary row ships undocumented and the compact dialect's generic
+`*_capped` fallback does not cover these names. FAIL if `--legend=full` does not define every new name.
+
+### Band C — bytes, per repo and never pooled
+
+Item 1 ≥ 15 % of the vscode map and ≥ 15 % of envoy's (predicted 20.5 % / 20.3 %, so the band carries a
+5-point margin). Items 1–5 together ≥ 15 % on vscode and envoy; on the small repos (koa, htop, tmux,
+hono, textual) the band is only that the map does not GROW. Reported per repo. A pooled average would
+hide item 1 paying nothing on a flat repo, which is exactly what it does on koa (4 B).
+
+### Band D — row ORDER is disclosed where it moves
+
+The audit measured item 1 moving 8 rows on vscode and 6 on nushell, 0 on envoy and cpython. §9.1 says
+priority is never source order and never path order, so a reordering is allowed — but it must be stated
+in the legend clause and asserted by the gate, not discovered later. FAIL if the order changes in a way
+the clause does not describe.
+
+### Band E — DEPTH is a declared constant with a measured reason
+
+Depth ≤ 2 is registered, against ≤ 1 (25,437 B on vscode) and unbounded (35,313 B, max depth 8). Depth 2
+takes 95 % of the unbounded saving for a path that needs at most two joins to reconstruct. FAIL if the
+shipped default is not 2, or if the constant is not named and reachable from `--help`/LIMITS.
+
+### Band F — COMPLETENESS, re-graded on the new format (owner's instruction, 2026-11-16)
+
+Bands A–E prove the *information* is identical. They cannot prove the document is as READABLE: a
+differently-shaped answer could be harder for a model to use with every byte of content present, and no
+byte-identity band can see that. So the card registers the one instrument that can.
+
+**The band.** Re-collect the answer set with the new binary and re-grade it through
+`harness/anchor_grade.py` against the same gold. The baseline is the recorded run: **285 gradable cells,
+73 % lenient / 65 % strict**, per-use-case figures in `results/WP2/anchor_grade_CLEAN_20261115.json`.
+
+- PASS requires the pooled lenient and strict rates to be **no lower than baseline minus 2 points**
+  (73 → ≥71, 65 → ≥63). The margin is for grader noise on a 285-cell population, not for a real drop.
+- The per-use-case rates are read **beside** the pooled pair and never instead of it. `mf1` carries 110
+  of the 285 cells, so a pooled rate that holds while `mf1` falls is a FAIL of this band, not a pass:
+  report `mf1`, `how-it-works`, `orient` and `trace` individually (the four largest).
+- The comparison is **same gold, same cells, same grader** — only the binary changes. A re-graded cell
+  count other than 285, or a different ungradable count than the baseline's 6, invalidates the
+  comparison and the band is NOT-ESTABLISHED rather than PASS.
+- A cell the new format makes ungradable is a FAIL, not an exclusion. The grader's own failure mode is
+  to read an answer FORMAT rather than an answer, and items 1 and 5 change the format — so any rise in
+  ungradable cells is evidence against this change, never noise to drop.
+
+**The baseline population, verified rather than assumed.** `anchor_grade_CLEAN_20261115.json` holds
+**291** cells, and the completeness verdict lives in **three different field shapes**: 156 cells carry
+`lenient`/`strict`, 129 carry `verdict` (`complete`/`partial`/`unusable`/`empty`) with `hit`/`total`, and
+6 carry `false_positive`/`named` — the precision shape, which cannot be graded for completeness. So the
+gradable population is **156 + 129 = 285, with 6 excluded**, which is what the recorded 73 %/65 % is
+computed over, and `skipped` is 2 beside it.
+
+This is a registered hazard, not trivia: `harness/token_by_usecase.py`'s own docstring records that its
+first version read **only one of the two completeness shapes**. A re-grade that does the same would
+report ~156 or ~129 cells and look like a population change rather than a reading bug. So the band
+requires the re-grade to print its per-shape counts (156/129/6) and to match them before any rate is
+compared. A shape count that moves is NOT-ESTABLISHED, exactly as a total count that moves is.
+
+**Why this band and not a reasoning argument.** The honest position is that I can assert content identity
+and cannot assert readability; this band is what converts the second half from a claim into a
+measurement. If it fails while Bands A–C pass, the encoding is correct and still wrong to ship.
+
+### What this card does NOT claim
+
+Nothing about the two items the audit declined to recommend (`f=` extension factoring, which pays least
+where the map is biggest, and `k=` re-scaling, ~1 KB flat), and nothing about ranking or cutting the
+NAMED `<ls>` rows — that still needs a terminality instrument and is not attempted here. No token claim
+beyond the conversion already registered (2.44–4.66 B/token, cross-checked against the map's own
+`est_tokens=` at 2.50 B/token on htop, 1 % apart). No claim at llvm-project scale.
+
+## READOUT — item 1 (`<ls>` rows nested under `<d p=>`): Bands A, B, D, E, F PASS; **Band C FAILS its 15 % floor**
+
+Measured 2026-11-16 on this machine against the correct baseline — `main` at `6cd55dbb0`, which already
+carries the `<ls>` row ceiling. That baseline is the whole story of this readout, so it is stated first.
+
+### The registered prediction was measured on a map that no longer exists
+
+The card predicted **33,707 B on vscode (20.5 %)** and **26,525 B on envoy (20.3 %)**. The audit those
+figures come from rewrote the map as it stood BEFORE the row ceiling landed — a 233,586 B document. The
+ceiling (PR #671, merged into `main` the same morning this item was implemented) took that to 164,135 B by
+cutting 2,102 of 2,534 rows, and the rows it cut were exactly the **count-only** ones: a path and a number,
+the highest ratio of directory string to answer content in the tier. Item 1's mechanism is removing
+repeated directory string. The two changes aim at the same bytes, and the ceiling got there first.
+
+Measured against a pre-ceiling binary, item 1 and the ceiling together save 82,660 B on vscode. The ceiling
+alone saves 69,451 B. So of item 1's 33,707 B prediction, roughly **20,500 B had already been taken** — about
+61 % of it. This is the arithmetic of the overlap, not a reproduction of the audit's own figure, which was
+not re-run here.
+
+### What item 1 actually saves, per repo, never pooled
+
+| repo | baseline B | with item 1 | delta | % | wrappers |
+| --- | --- | --- | --- | --- | --- |
+| vscode | 164,135 | 151,560 | −12,575 | **−7.66 %** | 26 |
+| envoy | 130,622 | 118,600 | −12,022 | **−9.20 %** | 20 |
+| angular | 123,869 | 113,033 | −10,836 | −8.75 % | 35 |
+| cockroach | 134,366 | 124,923 | −9,443 | −7.03 % | 28 |
+| nushell | 61,609 | 58,812 | −2,797 | −4.54 % | 25 |
+| django | 44,589 | 42,725 | −1,864 | −4.18 % | 7 |
+| cpython | 81,970 | 81,635 | −335 | −0.41 % | 15 |
+| hono | 25,078 | 25,046 | −32 | −0.13 % | 10 |
+| koa / htop / tmux / textual | — | — | **0** | 0.00 % | 0 |
+
+**Band C FAILS.** It registered item 1 at ≥ 15 % of the vscode map and ≥ 15 % of envoy's, with a stated
+5-point margin under the 20.5 %/20.3 % prediction. The measurement is **7.66 % and 9.20 %** — less than half
+the floor, outside the margin, on both repos. Recorded as a failure rather than renegotiated: the band was
+written down before the code for exactly this case.
+
+**Band C's small-repo clause PASSES, but only after a fix the card did not anticipate.** The clause asks that
+the map not GROW on koa, htop, tmux, hono and textual. The first implementation grew tmux by 717 B and
+textual by 668 B, because a per-group byte decision is not a per-DOCUMENT one: tmux has a single qualifying
+prefix that saves 5 B of rows, and the `<d p=>` legend clause the wrapped document then has to carry is
+516 B. `inventoryNestPlan` now takes the decision at document level and drops every wrapper when the rows do
+not out-save the clause, so a wrapped document is smaller than its flat self by construction. Those four
+repos are now byte-identical to baseline, and `test/invnestcheck.sh` arm (F1) asserts both halves — no
+wrapper AND no clause — because keeping the clause without the wrappers is the same bug inverted.
+
+### Bands A, B, D, E: PASS
+
+- **Band A (set identity)** holds on all seven corpora read: vscode 1,239 rows, envoy 1,044, nushell 256,
+  cpython 206, hono 94, textual 20, tmux 10, plus the 123-row gate fixture. Every flattened row matches the
+  flat JSON twin exactly — same paths, same `n=`, same `f=` membership. The oracle is `writeMapInventoryJson`
+  from the SAME binary and index, which is why it does not go vacuous once this lands; arm (A2) plants three
+  mutations (a dropped row, a changed `n=`, a dropped `f=` name) and requires each to be detected.
+- **Band B** is a dictionary row in `src/compactlegend.h` scoped to the `d` element, plus `--legend-dict`
+  printing it. Worth recording how nearly this passed vacuously: the dictionary already holds three unrelated
+  rows named `d`, so the arm's first version matched one of those and went green before the encoding existed.
+  Running it red-first is what caught it.
+- **Band D (order disclosed)** is exactly the stated rule — the flat order with each group made contiguous at
+  the position of its first row. The arm's first version modelled a single level of grouping and FAILED on 5
+  of 7 corpora while the emitter was correct; the emitter's grouping is hierarchical, and the gate now mirrors
+  it. The lesson is in the gate's own comment: a failure here means the model and the document disagree, and
+  the model is as likely to be wrong.
+- **Band E** is `kInventoryNestDepth = 2`, declared in `src/mapinventory.h` and published in `docs/LIMITS.md`.
+
+### What this costs in the owner's metric, and the recommendation
+
+At the registered 2.44–4.66 B/token band, 12,575 B on vscode is **2,700–5,150 tokens**, against a 24,808-token
+follow-up: item 1 moves the break-even by about **0.1–0.2 of a follow-up**, not the ~0.6 the card implied.
+Items 2–5 were measured by the same pre-ceiling audit and their predictions are suspect for the same reason;
+item 5 (omitting a derivable `n=`) acts on NAMED rows, which the ceiling kept, so it has the best chance of
+holding up, and items 2–4 total under 1,600 B on vscode either way.
+
+The recommendation is still to ship item 1: the saving is real on every large repo (4.2–9.2 % across seven of
+them), no document grows, and content identity is proved rather than argued. What changes is the CLAIM. Band F
+(the completeness re-grade) remains the gate on whether a differently-shaped document is as usable, and is
+unaffected by the size of the saving.
+
+
+### The element had to be renamed, and the rename is why the figures above moved
+
+The wrapper first shipped as `<d p="SEG">`. **`<d>` was already taken** — the signature tier spells
+`<d r= cx= in= amp= tested=>`, `--defs` spells `<d sel_proven= decl_only=>`, and the slice verb spells
+`<d p="FILE:LINE" sel= class=>`, which appears in 6 of the 319 recorded answers. The dictionary in
+`src/compactlegend.h` is keyed on ( attribute, owning element ), so a `p=` row filed under owner `d` reads
+as a row about one of those, and a reader of `--legend=full` gets two meanings for one tag.
+
+Renamed to `<lsd p="SEG">`. Two things it cost, both measured rather than estimated:
+
+- **4 bytes per wrapper** (`<lsd p="` + `</lsd>` against `<d p="` + `</d>`), so `kInventoryNestWrapperBytes`
+  moves 12 → 16. That raises the per-group break-even, which dropped 4 marginal wrappers on vscode (30 → 26)
+  and 6 on cpython (21 → 15). Net cost on vscode: 118 B of a 12,693 B saving, 0.9 %.
+- **A blind rename hit a foreign call site.** Replacing `w.write( "</d>" )` matched four sites, and one of
+  them closes the signature tier's own `<d>` inside `<sigs>` — reverted, and it is the concrete argument for
+  the rename rather than for documenting the overload: a tag name shared by two elements makes every textual
+  edit to either one unsafe.
+
+G4 re-checked after the rename: `xmllint --noout` clean on vscode, and two consecutive runs on envoy are
+byte-identical.
+
+## BAND F — NOT-ESTABLISHED for item 1: the registered instrument has ZERO exposure to what it judges
+
+Band F was registered as the instrument that decides whether a differently-shaped document is as usable,
+and it is the band I said was the real gate on shipping. It ran. The grader, the population and the rates
+all reproduce. **And it cannot see this change at all.**
+
+**The measurement.** Re-collected all 319 ripwire cells with the item-1 binary into a fresh store and
+re-graded through the same grader against the same gold:
+
+```
+baseline   291 cells   lenient/strict=156  verdict+completeness=129  precision-only=6
+re-grade   291 cells   lenient/strict=156  verdict+completeness=129  precision-only=6
+baseline   scored 285   lenient 73.3 %   strict 65.3 %
+re-grade   scored 285   lenient 73.3 %   strict 65.3 %
+```
+
+Every pooled rate and every one of the fourteen per-use-case rates is identical to the baseline **to the
+decimal**. That is the tell, not the result. The reason:
+
+```
+answers total                     319
+answers carrying an <inv> tier       0
+verbs the question set runs        319 x `--cache --for`   (one shape, no others)
+```
+
+**All 319 cells are `--for` queries.** The inventory tier is emitted only under the default map scope
+(`mapAnnotations.inventoryTier` is set from `isDefaultMapScope`, which requires an empty `--for`/query), so
+not one graded answer contains an `<inv>` element, let alone an `<lsd>` wrapper. Item 1's exposure to the
+285-cell population is **0 cells**.
+
+27 of the 319 answers did change against the recorded baseline, and 27 of 285 graded cells with them
+(9.5 %, spread over mf1 12, trace 7, ind 3, how-it-works 3, comp 2) — but with zero `<inv>` tiers present,
+none of that is item 1. Those are the other lanes merged since the baseline store was collected.
+
+**So the verdict is NOT-ESTABLISHED, not PASS**, and the band's own rule is what says so: a comparison that
+cannot move is not evidence that nothing moved. Reporting "Band F PASS" here would be the exact shape this
+run already has on file — a population counted from the directory rather than from the instrument, and a
+metric that could not fail.
+
+**The instrument itself is sound, and that was proved separately.** Re-grading the untouched baseline
+answers reproduces `anchor_grade_CLEAN_20261115.json` exactly: 291 cells, the same qid set, **zero** cells
+whose grade differs, identical skip counts. And `harness/bandf_verdict.py` carries four planted controls, so
+the verdict can fail in each registered way: 10 cells dropped → NOT-ESTABLISHED; 20 `complete` → `partial`
+→ FAIL on the pooled floors; `mf1` alone falling while the pooled pair is propped up → FAIL on the
+four-largest rule; 3 cells made ungradable → FAIL. The fourth control found a precedence bug in the verdict
+itself: it first reported NOT-ESTABLISHED where the registration says a newly-ungradable cell is a FAIL,
+because making a cell ungradable also drops the scored count and the population check fired first. The
+ungradable rise is now judged first, and a NOT-ESTABLISHED prints any FAIL that also fired rather than
+swallowing it.
+
+**What would settle Band F.** A question set whose cells invoke the flagless default map, pre-registered as
+its own population with its own gold — not a renegotiation of the 285, which are `--for` answers and have
+nothing to say about the map's shape. Until that exists, the honest position on every one of these five
+encodings is: Bands A–E prove the information is identical, and **nothing here measures readability**.
+
+**This is not confined to item 1.** The `<ls>` row ceiling (#671) also changes only the default map, so any
+completeness claim resting on this instrument has the same zero exposure. The published table's
+Answers/Partial/Wrong column is built from the same 319 `--for` cells, which is correct for what it
+measures and silent about the map.

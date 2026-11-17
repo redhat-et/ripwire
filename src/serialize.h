@@ -3186,10 +3186,44 @@ inline bool mapInventoryWanted( const IngestResult& ing, const MapAnnotations& a
     return ann.inventoryTier && !ann.stubSymbols && ing.rootLabels.size() < 2 && ann.maxTokensFit == nullptr;
 }
 
+// ITEM 1's wrapper bookkeeping, split out of writeMapInventoryXml so that writer stays at the complexity and
+// LOC it had before the encoding (the quality bar is a constraint on the writer, not a budget to spend).
+//
+// Closes any wrapper this row does not belong to, opens the ones it needs, and returns how many leading bytes
+// of the row's own path the open wrappers already spell. Comparing the ancestor SEGMENTS rather than a running
+// string keeps this allocation-free, and makes an unequal prefix at the same depth close and reopen — which is
+// what keeps a group contiguous.
+// The open wrappers, carried across rows: how many are open and which segment each one spells.
+struct InventoryNestOpen
+{
+    std::size_t      count = 0;
+    std::string_view seg[ kInventoryNestDepth ] = {};
+};
+
+inline std::size_t writeInventoryNestWrappers( XmlWriter& w, std::string_view dir, std::size_t depth,
+                                               InventoryNestOpen& st, std::vector<char>& esc )
+{
+    std::size_t&      open        = st.count;
+    std::string_view* lastOpenSeg = st.seg;
+    while( open > depth ) { w.write( "</lsd>" ); --open; }
+    while( open > 0 && inventoryPathSeg( dir, open - 1 ) != lastOpenSeg[ open - 1 ] ) { w.write( "</lsd>" ); --open; }
+    while( open < depth )
+    {
+        const std::string_view seg = inventoryPathSeg( dir, open );
+        lastOpenSeg[ open ] = seg;
+        w.write( "<lsd p=\"" );  w.write( escapeXml( seg, esc ) );  w.write( "\">" );
+        ++open;
+    }
+    std::size_t trim = 0;
+    for( std::size_t i = 0; i < open; ++i ) { trim += inventoryPathSeg( dir, i ).size() + 1; }
+    return trim;
+}
+
 // The XML <inv> element: `<inv listed= unlisted=><entry p= n=><c …/></entry>…<ls p= n= f=/>…</inv>`. Entry callees go
 // through writeMapCalleeRows, the ranked rows' own writer, so prov=/via="name"/x= read exactly as they do above.
 template <class PathRel>
-inline void writeMapInventoryXml( XmlWriter& w, const IngestResult& ing, const MapInventory& inv, const PathRel& pathRel,
+inline void writeMapInventoryXml( XmlWriter& w, const IngestResult& ing, const MapInventory& inv,
+                                  const std::vector<InventoryNestRow>& plan, const PathRel& pathRel,
                                   const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets,
                                   const std::vector<std::uint8_t>* outProv, const std::vector<std::uint8_t>* outNameOnly,
                                   std::vector<char>& esc, std::vector<std::uint32_t>& scratch )
@@ -3221,9 +3255,24 @@ inline void writeMapInventoryXml( XmlWriter& w, const IngestResult& ing, const M
         writeMapCalleeRows( w, ing, outOff[ id ], outOff[ id + 1 ], outTargets, outProv, outNameOnly, esc, scratch );
         w.write( "</entry>" );
     }
-    for( const MapInventoryDir& d : inv.dirs )
+    // ITEM 1 (docs/EVALS.md, the five lossless map encodings): the rows go out NESTED under synthesised
+    // <lsd p="SEG"> wrappers wherever a shared prefix pays for its own bytes, so each shared segment is spelled
+    // once instead of once per row. mapinventory.h owns the decision and the depth constant; this loop only
+    // replays the plan, opening and closing wrappers as the plan's depth changes.
+    //
+    // The JSON twin below (writeMapInventoryJson) stays FLAT on purpose. It is not the token-budgeted surface,
+    // its consumers parse structurally rather than paying per byte, and keeping it flat leaves
+    // test/invnestcheck.sh an oracle out of the SAME binary and index: flatten these rows, compare against
+    // that array, and Band A's set identity is proved without a pinned expectation or a second build.
+    EXPECTS( plan.size() == inv.dirs.size(), "the nesting plan covers every row exactly once" );
+    InventoryNestOpen openWrappers;              // how many <lsd> elements are open, and what each spells
+    for( const InventoryNestRow& step : plan )
     {
-        w.write( "<ls p=\"" );  w.write( escapeXml( d.dir, esc ) );
+        const MapInventoryDir& d = inv.dirs[ step.row ];
+        const std::size_t trim = writeInventoryNestWrappers( w, d.dir, step.depth, openWrappers, esc );
+        // p= is the row's own path with the segments its ancestors already spell removed; a reader rejoins
+        // them. inventoryNestPlan never groups a row that would be left with nothing, so p= is never empty.
+        w.write( "<ls p=\"" );  w.write( escapeXml( std::string_view( d.dir ).substr( trim ), esc ) );
         w.write( "\" n=\"" );   w.write( std::to_string( d.total ) );  w.write( "\"" );
         if( !d.named.empty() )
         {
@@ -3237,6 +3286,7 @@ inline void writeMapInventoryXml( XmlWriter& w, const IngestResult& ing, const M
         }
         w.write( "/>" );
     }
+    while( openWrappers.count > 0 ) { w.write( "</lsd>" ); --openWrappers.count; }
     w.write( "</inv>" );
 }
 
@@ -3383,6 +3433,11 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     // D7: the inventory over the files the kept rows did NOT reach (`seen` is exactly the printed <f> groups)
     const MapInventory inventory = ( mapInventoryWanted( ing, ann ) && !stubbed )
                                  ? computeMapInventory( ing, outOff, outTargets, seen, pathRel ) : MapInventory{};
+    // ITEM 1: the <ls> nesting plan, computed ONCE here because two places need the same answer — the legend
+    // (which charges the <lsd p=> clause only to a map that carries a wrapper) and the emitter. Computing it
+    // twice would risk the two disagreeing, which is the shape where a document carries a clause for an
+    // element it does not have, or has the element with no clause; mapinventory.h owns the decision.
+    const std::vector<InventoryNestRow> inventoryNest = inventoryNestPlan( inventory, kMapInventoryNestLegend.size() );
 
     // T1/§H7: the byte MODEL. It keeps two jobs and loses one. It still decides the T3 emit order below
     // (which has to be decided before any byte exists — see §H7 at estimateTokens) and it still supplies
@@ -3584,6 +3639,10 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     if( inventory.active )
     {
         legend += kMapInventoryLegend;      // D7: charged to the map that carries <inv>
+        if( std::ranges::any_of( inventoryNest, []( const InventoryNestRow& r ) noexcept { return r.depth > 0; } ) )
+        {
+            legend += kMapInventoryNestLegend;   // ITEM 1: charged only to a map that carries a <lsd> wrapper
+        }
     }
     // W2-F: the pr_iters= / pr_converged= definition, charged to the maps that carry the attributes — empty
     // for a lexical or HITS ordering, and the prose half only on the map whose iteration stopped short.
@@ -3916,7 +3975,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
         {
             if( inventory.active )
             {
-                writeMapInventoryXml( w, ing, inventory, pathRel, outOff, outTargets, outProv, outNameOnly, esc, hedgedScratch );
+                writeMapInventoryXml( w, ing, inventory, inventoryNest, pathRel, outOff, outTargets, outProv, outNameOnly, esc, hedgedScratch );
             }
         };
         const bool inventoryFirst = !stable && effImportantLast;   // --stable's path order wins, as it does for the rows
