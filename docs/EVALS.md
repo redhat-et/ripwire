@@ -17588,3 +17588,88 @@ legend. So `compactRepricedTokens` gets **zero exercise** here — not verified 
 the legend-posture control cannot test it, because it strips the legend only on the verbs that have no price
 to move. A pair that exercises it has to vary the legend on `--for`. Item D's reprice call therefore fires
 on the map family (fixture: 399 → 140) and on nothing in this corpus.
+
+## READOUT — the byte census, and the corpus artifact that would have deleted a working metric
+
+Measured 2026-11-17 over all 295 recorded answers with an expat parser (attributes only from real
+`StartElement` events; comment and CDATA handlers never feed the census). All 295 are well-formed; 228 carry
+CDATA, so a regex census would have been wrong. 621 (verb, attribute) pairs over 354 distinct keys;
+attributes are 4,626,325 B of the 7,034,735 B corpus (65.8 %), legend comments 1,045,779 B (14.9 %).
+
+### The finding that matters most: STOP, do not drop these two
+
+The two largest zero-information attributes a census would queue are **corpus artifacts of a shallow clone**,
+not schema defects.
+
+| attribute | evidence of "no information" | why it is degenerate |
+| --- | --- | --- |
+| `for@churn` | constant `"1"` on **5,448 of 5,448** occurrences, 213 of 216 answers, 54,480 B | `serialize.h` emits `churnPerFile[f]`, a COUNT. Every repo checked is a **1-commit shallow clone** (`.git/shallow` present, `git rev-list --count HEAD` = 1 on axum, hono, django, tmux), so churn is 1 for every file by construction |
+| `for@amp` | equals `for@in` on **3,172 of 3,172** co-occurrences, never appears without it, 25,764 B | `amp=` is `callerCount` **plus the co-change degree of the symbol's file**; `in=` is callers alone. With one commit the second term is a constant 0 |
+
+**This supersedes an item F candidate.** `amp=` was queued in this round as a redundant attribute paying
+twice under the present-iff-emitted rule, on exactly the evidence above. Dropping it would have **deleted a
+working metric**, and the only reason that did not happen is that the census checked `.git/shallow` instead
+of trusting the equality.
+
+**The corollary is larger than the bytes:** this corpus cannot measure churn or change amplification at all,
+so **any `--for` quality-lens claim derived from these 295 answers rests on two dead columns.** Both items
+are held back pending a deep-clone re-capture. Independently, two other bands this round reported the same
+two facts (`churn` binary, `amp` ≡ `in`) without finding the cause — three instruments, one shallow clone.
+
+### Five corrections to this round's own figures
+
+1. **Attribute framing is 4 bytes, not 5**: `' k="v"'` = space + key + `=` + two quotes + value.
+2. **The four "bytes of distinct values" figures quoted in the brief are not reproducible** under any of
+   four candidate definitions. Occurrence counts all matched exactly; the value-bytes column was wrong.
+3. **`impact@lazy` is CONSTANT, not low-cardinality** — one value, `"0"`, on 129 of 129 occurrences.
+4. **`safe-delete` emits FIVE zero-valued attributes in 91 B**, not six in 101 B — confirmed by parser and
+   by raw grep; there is no sixth.
+5. **`callers@sites_at` = 12,828 B is confirmed to the byte**, once values are split on commas AND
+   whitespace (655 site tokens over 383 rows, 655/655 sharing `p=`'s file).
+
+And the mechanism is **conservative as stated**: regressing legend bytes on distinct key count gives
+**63.5–137.6 B per attribute key by verb** (dead-code 63.5, lego 66.4, impact 66.5, path 75.9, grep 86.5,
+callers 104.3, for 112.9, callees 137.6; pooled 99.6). The ~60 B used elsewhere in this document is a floor.
+Caveat: every per-verb fit has a negative intercept, and the dictionary documents some attributes in shared
+clauses (`"churn= amp= change"`, `"cx= ccx= complexity"`), so dropping one of a pair saves less than the
+slope implies. Per-attribute legend figures are order-of-magnitude, not byte-exact.
+
+### The implementation queue — 7.70 % of the corpus, none of it touching an assertion
+
+| # | item | transform | B | % corpus |
+| ---: | --- | --- | ---: | ---: |
+| 1 | `for@p` | hoist to a group parent | **287,711** | 4.09 % |
+| 2 | `for@n` | hoist | 50,524 | 0.72 % |
+| 3 | `for@sym` | hoist | 48,625 | 0.69 % |
+| 4 | always-`"1"` presence flags, 36 keys in `for` | fold to one `fl=` | **43,370** | 0.62 % |
+| 5 | `for@l` | hoist | 21,893 | 0.31 % |
+| 6 | `for@task` | **drop** — ⊂ argv on 216/216 | 16,993 | 0.24 % |
+| 7–8 | `for@in`, `for@cx` | hoist | 30,643 | 0.44 % |
+| 9 | `root=`, all ten verbs | **drop** — the directory argument | 14,073 | 0.21 % |
+| 10 | `callers@sites_at` + `for@sites_at` + `affected@run` | **shorten** — drop the duplicated path | **27,634** | 0.39 % |
+| | **total** | | **541,466** | **7.70 %** (11.7 % of attribute bytes) |
+
+Row 1's figure is an **upper bound**: it assumes each distinct path is declared once per answer with no new
+element overhead, and 13,870 distinct paths over 216 answers means a high group count. The net is unmeasured.
+
+Derive-and-drop is already house practice, which is the argument for the queue rather than against it: the
+`--for` legend documents `id=p::sc::n` — the identifier is **formed** from three emitted attributes rather
+than emitted.
+
+### The control, which is why the census is believable
+
+`for@sym`: 31,509 occurrences, **27,242 distinct** (86.5 % of occurrences are a value seen nowhere else),
+1.32 MB of distinct text in 1.65 MB total — hoisting recovers **3.0 %**, against 17.5 % for `for@p` and
+100 % for `for@churn`. It is 35.6 % of the whole corpus and the census correctly says leave it alone.
+`callers@sites_at` is **383 of 383 distinct**, so hoisting recovers **0 B** — it is flagged only for the
+duplicated path prefix *inside* its values, which is the test that the census separates "redundant part of a
+value" from "redundant attribute". Uniqueness ratio separates the flagged from the unflagged by **three
+orders of magnitude** (0.0002 for `churn` against 0.865 for `sym`).
+
+### Not queued, and why
+
+**16,057 B of zero-valued disclosure** across 70 pairs (1,413 occurrences) is **reported, not queued**. A
+zero means "none found", never "none exists", so a suppressed `capped="0"` is indistinguishable from an
+older binary that never emitted the key — and `capped` in particular is the attribute an earlier round
+established can make an answer *wrong* when it is false. Those bytes are the price of telling "not capped"
+from "not disclosed".
