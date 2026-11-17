@@ -2155,6 +2155,10 @@ inline std::optional<std::string> readWhole( const std::string& path )
     {
         out.append( buf, n );
         if( out.size() > kMaxFlagFileBytes ) { std::fclose( fp ); return std::nullopt; }
+        if( n < sizeof( buf ) )
+        {
+            break;   // fread came back short: end of file or an error. No read after it (after an error the position is indeterminate)
+        }
     }
     std::fclose( fp );
     return out;
