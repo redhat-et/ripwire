@@ -11,6 +11,7 @@
 #   G-forbid  the decoy stays cross-root-edge-less AND merged ambiguous= == sum of the solo runs;
 #             MUTATION: point cli's include at the decoy's file → the cross-root edge flips WITH it
 #   G-order   `ripwire svc cli` ≡ `ripwire cli svc` byte-identical (×3) + warm==cold + xmllint (G4)
+#   G-label-order  roots a + a-b list their files in the parent root's path order (`<label>/` sort, not the bare label)
 #   G-git     per-root history isolation: --owners attributes each root's same-named util.cpp to ITS
 #             OWN repo author, never the sibling's
 #   G-seam    the churn-backed verbs on roots that are SUBDIRS of ONE repo (a second fixture) — git's
@@ -135,6 +136,25 @@ for i in 1 2 3; do
   diff -q "$TMP/m1.xml" "$TMP/m2.$i.xml" >/dev/null || gorder=1
 done
 if [ $gorder -eq 0 ]; then ok "G-order: reorder byte-identity (x3, warm+cold)"; else no "G-order: output differs under root reordering"; fi
+
+# ── G-label-order (WORKSPACE-LABEL-SORT): the merged file order is the path order, not the bare-label order ──
+# Roots `a` and `a-b`: as labels a < a-b, but as paths `a-b/y.c` < `a/x.c` ('-' sorts below '/'). The workspace
+# must list its files in the order ONE root over their parent gives (that crawl sorts the full paths), so a
+# fileId/NodeId tie reads the same either way. Premise: both runs print both files, and the parent's order is a-b first.
+LW="$TMP/lblws"; mkdir -p "$LW/a" "$LW/a-b"
+printf 'int alpha( int x ) { return x + 1; }\n' >"$LW/a/x.c"
+printf 'int beta( int x ) { return x + 2; }\n'  >"$LW/a-b/y.c"
+run "$LW/a" "$LW/a-b" >"$TMP/lbl-multi.xml" 2>/dev/null; rlm=$?
+run "$LW/a-b" "$LW/a" >"$TMP/lbl-multi-rev.xml" 2>/dev/null
+run "$LW" >"$TMP/lbl-single.xml" 2>/dev/null; rls=$?
+lblm="$( grep -oE '<f p="[^"]*"' "$TMP/lbl-multi.xml" | tr '\n' ' ' )"
+lbls="$( grep -oE '<f p="[^"]*"' "$TMP/lbl-single.xml" | tr '\n' ' ' )"
+if [ $rlm -eq 0 ] && [ $rls -eq 0 ] && [ "$lbls" = '<f p="a-b/y.c" <f p="a/x.c" ' ]; then
+  [ "$lblm" = "$lbls" ] && ok "G-label-order: roots a + a-b list files as the parent root does ($lblm)" \
+                        || no "G-label-order: workspace file order [$lblm] != the parent root's [$lbls]"
+  diff -q "$TMP/lbl-multi.xml" "$TMP/lbl-multi-rev.xml" >/dev/null && ok "G-label-order: argv order still irrelevant" \
+                                                                 || no "G-label-order: a a-b vs a-b a differ"
+else no "G-label-order premise: rc=$rlm/$rls, the parent root lists [$lbls] (want a-b/y.c then a/x.c)"; fi
 
 # ── G-edge: the cross-root evidence edge — cli's caller reaches svc's def through the escaped include ─
 run "$WS/svc" "$WS/cli" --callers=svc_handle >"$TMP/callers.xml" 2>/dev/null
