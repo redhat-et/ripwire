@@ -395,9 +395,9 @@ void emitCapturedImportBind( TSNode namesNode, TSNode aliasNode, std::uint32_t f
     b.lang         = lang;
     b.kind         = c.kind;
     b.var.assign( c.bound );
-    b.typeName     = std::move( c.target );
-    b.importedName = std::move( c.importedName );
-    binds.push_back( std::move( b ) );
+    b.typeName     = c.target;
+    b.importedName = c.importedName;
+    binds.push_back( b );
 }
 
 // One captured `@import.path` → the Include record plus its ABS-3 import-role use-site ref, which is
@@ -462,7 +462,7 @@ void emitCapturedImport( TSNode pathNode, std::uint32_t fileId, Lang lang, std::
         r.startByte = ts_node_start_byte( directive );   // the DIRECTIVE, never its enclosing #if
         r.line      = ts_node_start_point( directive ).row + 1;
         r.role      = RefRole::Import;
-        r.name      = std::move( name );
+        r.name      = name;
         refs.push_back( std::move( r ) );
     }
     includes.push_back( { fileId, spec.isAngle, spec.lazyInClosure && reach.insideFn, false, ts_node_start_byte( directive ), false, spec.text } );

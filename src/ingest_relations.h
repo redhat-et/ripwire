@@ -67,7 +67,7 @@ inline RawRef rawRefAt( TSNode at, std::uint32_t fileId, Lang lang, RefRole role
     r.line      = ts_node_start_point( at ).row + 1;
     r.lang      = lang;
     r.role      = role;
-    r.name      = std::move( name );
+    r.name      = name;
     return r;
 }
 
@@ -3092,7 +3092,7 @@ void captureIncludes( TSNode root, Lang lang, std::uint32_t fileId, std::string_
                 r.startByte = ts_node_start_byte( n );   // the DIRECTIVE, not its enclosing #if → file-scope attribution
                 r.line      = ts_node_start_point( n ).row + 1;
                 r.role      = RefRole::Import;
-                r.name      = std::move( nm );
+                r.name      = nm;
                 refs.push_back( std::move( r ) );
             }
             // The site byte. A Ruby `superclass` carries its CLASS's own start byte: the superclass expression is
