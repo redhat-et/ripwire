@@ -551,5 +551,74 @@ row "$OEM" error-masking lineCommentJs >/dev/null \
     && ok "error-masking: byte-identical run to run (deterministic)" || no "error-masking: non-deterministic delta"
 
 
+# ── 7) params: similar= on a list of adjacent same-typed parameters (QD-SWAP-1117, a PROTOTYPE) ──────────
+# Off unless RIPWIRE_QD_SIMILAR_ARGS is set (src/similarargs.h); report-only. A function that is new, or whose list
+# grew, and now holds a run of adjacent parameters with one written type and different names gets a params row
+# with similar="N" (sev="minor" unless the params kind already reported it). Red before the card: every (s*) arm.
+#   (s1) new, three uint32_t                      -> similar="3", minor, origin="new-symbol"
+#   (s2) grew 1 -> 2 const std::string&            -> similar="2", minor, no origin (it existed)
+#   (s3) the params kind's own major row (5 -> 7)  -> the same row gains similar="7", still major, still ONE row
+#   (n1) new ( from, to ), (n2) new bool pair, (n3) new int beside long, (n4) an unchanged ( p, q ): no row
+#   (off) the variable unset: no similar= in the document, and the same exit status
+#   PREMISE: (n*) count the functions they judged in the fixture and FAIL on a miscount (a vacuous arm is a FAIL).
+SA="$WORK/similar"; mkdir -p "$SA/src"
+( cd "$SA" && git init -q && git config user.email t@t && git config user.name t && git config commit.gpgsign false )
+simgen(){ python3 - "$SA/src" "$1" <<'PY'
+import sys, os
+d, after = sys.argv[1], sys.argv[2] == "after"
+h = ["#include <cstdint>\n#include <cstddef>\n#include <string>\n"]
+h.append("inline int untouched( int p, int q ){ return p - q; }\n")
+h.append("inline std::size_t grew( const std::string& task%s ){ return task.size()%s; }\n"
+         % (", const std::string& answer" if after else "", " + answer.size()" if after else ""))
+h.append("inline int wide( int a1, int b1, int c1, int d1, int e1%s ){ return a1+b1+c1+d1+e1%s; }\n"
+         % (", int f1, int g1" if after else "", "+f1+g1" if after else ""))
+if after:
+    h.append("inline std::uint32_t fresh3( std::uint32_t at, std::uint32_t nameAt, std::uint32_t line ){ return at + nameAt + line; }\n")
+    h.append("inline std::size_t ranged( std::size_t from, std::size_t to ){ return to - from; }\n")
+    h.append("inline bool flags( bool keep, bool fold ){ return keep && fold; }\n")
+    h.append("inline long mixed( int count, long total ){ return count + total; }\n")
+open(os.path.join(d, "sim.hpp"), "w").write("".join(h))
+call = "untouched( 2, 1 ) + int( grew( \"t\"%s ) ) + wide( 1,2,3,4,5%s )" % (", \"a\"" if after else "", ",6,7" if after else "")
+if after:
+    call += " + int( fresh3( 1, 2, 3 ) ) + int( ranged( 1, 2 ) ) + int( flags( true, false ) ) + int( mixed( 1, 2 ) )"
+open(os.path.join(d, "m.cpp"), "w").write('#include "sim.hpp"\nint driver(){\n    return %s;\n}\nint main(){ return driver(); }\n' % call)
+PY
+}
+simgen before
+( cd "$SA" && git add -A >/dev/null 2>&1 && git commit -qm base >/dev/null 2>&1 )
+simgen after
+OSA="$( cd "$SA" && RIPWIRE_QD_SIMILAR_ARGS=1 "$BIN" . --quality-delta --no-cache 2>/dev/null )"; SARC=$?
+OSF="$( cd "$SA" && RIPWIRE_QD_SIMILAR_ARGS=1 "$BIN" . --quality-delta --no-cache --legend=full 2>/dev/null )"
+OSO="$( cd "$SA" && env -u RIPWIRE_QD_SIMILAR_ARGS "$BIN" . --quality-delta --no-cache 2>/dev/null )"; SORC=$?
+srow(){ row "$OSA" params "$1"; }
+R1="$( srow fresh3 )"
+{ printf '%s' "$R1" | grep -q ' similar="3"' && printf '%s' "$R1" | grep -q 'sev="minor"' && printf '%s' "$R1" | grep -q 'origin="new-symbol"'; } \
+    && ok "similar (s1): a new function with three uint32_t is a minor new-symbol params row, similar=3" \
+    || { no "similar (s1): expected a minor new-symbol params row with similar=3 on fresh3"; rows "$OSA"; }
+R2="$( srow grew )"
+{ printf '%s' "$R2" | grep -q ' similar="2"' && printf '%s' "$R2" | grep -q 'was="1" now="2"' && printf '%s' "$R2" | grep -q 'sev="minor"' && ! printf '%s' "$R2" | grep -q 'origin='; } \
+    && ok "similar (s2): a list that grew 1 -> 2 strings is a minor preexisting row, similar=2" \
+    || { no "similar (s2): expected was=1 now=2 sev=minor similar=2 and no origin on grew"; rows "$OSA"; }
+R3="$( srow wide )"
+{ [ "$( rows "$OSA" | grep -c 'sym="wide"' )" = 1 ] && printf '%s' "$R3" | grep -q ' similar="7"' && ! printf '%s' "$R3" | grep -q 'sev="minor"'; } \
+    && ok "similar (s3): the params kind's own 5 -> 7 row gains similar=7, stays major, stays one row" \
+    || { no "similar (s3): expected ONE major params row with similar=7 on wide"; rows "$OSA"; }
+SJUDGED="$( grep -cE '^inline [a-z:_ ]+ (ranged|flags|mixed|untouched)\(' "$SA/src/sim.hpp" )"
+SQUIET=0
+for f in ranged flags mixed untouched; do srow "$f" >/dev/null || SQUIET=$(( SQUIET + 1 )); done
+[ "$SJUDGED" = 4 ] && [ "$SQUIET" = 4 ] \
+    && ok "similar (n1-n4): a range pair, a bool pair, two types and an unchanged list get no row (4 judged)" \
+    || { no "similar (n1-n4): judged=$SJUDGED (want 4), without a row=$SQUIET (want 4)"; rows "$OSA"; }
+printf '%s' "$OSF" | grep -q 'on a params row (a prototype' \
+    && ok "similar: the full legend defines similar= when a row carries it" || no "similar: a row carries similar= and the full legend does not define it"
+printf '%s' "$OSA" | grep -q 'r similar=N' \
+    && ok "similar: the compact legend defines similar= when a row carries it" || no "similar: the compact legend does not define similar="
+{ ! printf '%s' "$OSO" | grep -q 'similar=' && [ "$SORC" = "$SARC" ] && [ "$( rows "$OSO" | grep -c 'kind="params"' )" = 1 ]; } \
+    && ok "similar (off): with the variable unset no similar= is printed, the one params row stands, same exit status ($SORC)" \
+    || { no "similar (off): similar= without the variable, or rc $SORC vs $SARC, or the params rows moved"; rows "$OSO"; }
+[ "$OSA" = "$( cd "$SA" && RIPWIRE_QD_SIMILAR_ARGS=1 "$BIN" . --quality-delta --no-cache 2>/dev/null )" ] \
+    && ok "similar: byte-identical run to run (deterministic)" || no "similar: non-deterministic delta"
+
+
 [ "$fail" = 0 ] && echo "qddialscheck: ALL PASS" || echo "qddialscheck: FAILURES"
 exit "$fail"

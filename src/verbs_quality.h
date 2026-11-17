@@ -1672,6 +1672,15 @@ inline constexpr const char* kQdMonsterLegend =
     "(10 or more) in this change: major whatever the percentage, since tangle in a giant function is a small share of it "
     "forever. Put the new branch in a helper. ";
 
+// QD-SWAP-1117 prototype — emitted only when a params row carries similar= (RIPWIRE_QD_SIMILAR_ARGS set).
+inline constexpr const char* kQdSimilarArgsLegend =
+    "similar=\"N\" on a params row (a prototype, printed only when RIPWIRE_QD_SIMILAR_ARGS is set): the function is new or its "
+    "parameter list grew, and it now holds N adjacent parameters of one written type with different names, so a call that "
+    "swaps two of them compiles. A row with similar= and sev=\"minor\" is report-only: was= and now= are still parameter "
+    "counts, and now= may be under bar=. C and C++ only, read off the signature text: unnamed parameters, bool and iterator "
+    "types, and a pair named as a range (begin/end, from/to, a/b) are not counted, and two spellings of one type are two types. "
+    "Pass a small named struct, so the call names each field. ";
+
 // Emitted only when a clone-family row (duplication / new-clone-of-reused-helper) is in the document,
 // which is what puts members=, tokens= and idiom= on a first screen. A clean tree has none.
 inline constexpr const char* kQdCloneLegend =
@@ -1839,6 +1848,10 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
     {
         return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return r.kind == "defect-shape"; } );
     };
+    const auto anySimilarArgsRow = [] ( const std::vector<rw::quality::Regression>& v )
+    {
+        return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return r.kind == "params" && !r.facet.empty(); } );
+    };
     const auto anyMonsterRow = [] ( const std::vector<rw::quality::Regression>& v )
     {
         return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return r.kind == "complexity" && !r.facet.empty(); } );
@@ -1963,6 +1976,10 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
         if( anyMonsterRow( p.rows ) || anyMonsterRow( p.disclosedRows ) )
         {
             rw::emitRaw( out, kQdMonsterLegend );
+        }
+        if( anySimilarArgsRow( p.rows ) || anySimilarArgsRow( p.disclosedRows ) )
+        {
+            rw::emitRaw( out, kQdSimilarArgsLegend );
         }
     }
 
