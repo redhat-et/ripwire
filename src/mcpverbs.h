@@ -794,11 +794,16 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
     const IngestResult& ing = ix.ing;
     const Graph&        g   = ix.g;
 
-    const CallHierarchyRows chRows = rw::callHierarchyRows( ing, g, name, /*wantCallers=*/referencingOnly, &valueRefIndexOf( ix ) );
+    // CALLERS-TWO-COPY: the CLI's own binder (forgraphverb.h callHierarchyRowsNarrowed), so a callers selector the M1 rule narrows to its ONE
+    // source definition answers here as it does on --callers ("narrowed" names it as typed); every later selector use reads the bound spelling.
+    std::string_view        sqSym = name;
+    std::string             sqBound;
+    const CallHierarchyRows chRows = callHierarchyRowsNarrowed( ing, g, sqSym, /*wantCallers=*/referencingOnly, sqBound, &valueRefIndexOf( ix ) );
     if( chRows.matches.empty() )
     {
         return {};
     }
+    const std::string& sqName = sqBound.empty() ? name : sqBound;
     // find_symbol serves BOTH directions from one call (the CLI needs two), so the caller-side rows are
     // collected with a second pass in the callee direction — one computation each, never a hand-rolled walk.
     const CallHierarchyRows chCallers = referencingOnly
@@ -903,7 +908,7 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
     // lane declined-sites (declinedsites.h): the CLI root's <dc> rows for the direction count= describes (find_symbol: the
     // declines its definitions make; find_referencing_symbols: the declined calls that could have meant them), cut by the
     // same `limit` the rows take — one computation (callhierarchy.h ordered them), the CLI's own row builder.
-    const DeclinedSiteCut sqDcCut = declinedSiteCut( chRows.declinedSites.size(), page.limit, referencingOnly ? "--callers=" : "--callees=", name,
+    const DeclinedSiteCut sqDcCut = declinedSiteCut( chRows.declinedSites.size(), page.limit, referencingOnly ? "--callers=" : "--callees=", sqName,
                                                      std::size_t( effectiveRowCap( page.limit, rw::kCallHierarchyRowCap ) ) );   // the CLI's <dc> cut: no band
     const std::vector<DeclinedSiteView> sqDc = declinedSiteViews( ing, g, std::span<const std::uint32_t>( chRows.declinedSites ).first( sqDcCut.shown ),
                                                                   referencingOnly, chRows.matches, chRows.attr.groups, VrRender{ sqSingleRoot, sqRootPrefix },
@@ -918,12 +923,13 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
     // §P10.6 / A6, in the CLI's own key names: defs= = definitions the name resolved to (the rows below are
     // the UNION of all of their neighbours), count= = the un-windowed row total, hop_tested/hop_untested =
     // the partition over that full set.
-    const auto [ chNextSelector, chNextIsBare ] = callHierarchyNextSelector( ing, chRows, name, referencingOnly );
+    const auto [ chNextSelector, chNextIsBare ] = callHierarchyNextSelector( ing, chRows, sqName, referencingOnly );
     // 0.6.6 command sweep: find_symbol carries TWO arrays, and count/hop_tested/hop_untested describe `calls`
     // only — "count":0 sat beside "calledBy_total":67 on a leaf and read as a contradiction. The CLI key names
     // stay (mcpattrparitycheck), and count_of names the array they total, right beside them
     // (test/mcptwinclaimscheck.sh (C)). find_referencing_symbols has one array, so it needs no label.
-    out += ",\"defs\":" + std::to_string( chRows.matches.size() )
+    out += ( chRows.narrowed.empty() ? std::string() : ",\"narrowed\":\"" + mcpdetail::jsonEscape( chRows.narrowed.front() ) + "\"" )   // GV-PATH-BIND: the CLI JSON root's key
+         + ",\"defs\":" + std::to_string( chRows.matches.size() )
          + ",\"count\":" + std::to_string( rowTotal )
          + ( referencingOnly ? "" : ",\"count_of\":\"calls\"" )
          + ",\"hop_tested\":" + std::to_string( chTested.tested )
@@ -934,8 +940,8 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
          + declinedIfaceKeyJson( chRows.declinedIface )   // the CLI root's declined_iface= (callers direction only)
          + implsKeyJson( chRows.contractSeeds, chRows.implBodies )   // BODILESS-SEED: the CLI root's impls= (callers direction only)
          + stdMemberCallsSpelling( chRows.stdCalls, /*json=*/true )       // the CLI callees answer's <stdm> line (callees direction only; absent when none)
-         + symbolQueryNextField( referencingOnly, pwPrimary, rowTotal, page, name, chNextSelector )   // P3 (L7): the CLI root's next= (mcpattrparitycheck)
-         + nextFieldJson( referencingOnly ? directRootAllNext( "--callers=", name, pwPrimary.end < rowTotal, rowTotal ) : std::string(),
+         + symbolQueryNextField( referencingOnly, pwPrimary, rowTotal, page, sqName, chNextSelector )   // P3 (L7): the CLI root's next= (mcpattrparitycheck)
+         + nextFieldJson( referencingOnly ? directRootAllNext( "--callers=", sqName, pwPrimary.end < rowTotal, rowTotal ) : std::string(),
                           "all_next" );   // BAND DC: the CLI root's all_next=, by the same rule (callers direction only)
     if( !referencingOnly && chRows.bodylessDefs > 0 )
     {
@@ -962,7 +968,7 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
                            page.limit, page.offset, discloseCap, kJsonPageSyntax );
     if( !referencingOnly )
     {
-        out += calledByCutJson( name, calledBy.size(), pwSecond, page.limit );   // cut-fix C: the second array's own cut
+        out += calledByCutJson( sqName, calledBy.size(), pwSecond, page.limit );   // cut-fix C: the second array's own cut
     }
     out += ",\"calledBy\":" + rowArray( calledBy, referencingOnly ? pwPrimary : pwSecond, true );
     if( !referencingOnly )
@@ -972,6 +978,7 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
     out += symbolQueryNotes( anyVia, anyLink, anyMiss );
     out += nextFieldJson( splitArmLegend( anySplit ), "split_note" );   // attrib-multidef Q1: likewise for "prov":"split"
     out += nextFieldJson( viaImplLegend( anyImpl ), "impl_note" );      // lane L6: likewise for "via":"impl"
+    out += nextFieldJson( narrowedVerbLegend( !chRows.narrowed.empty() ), "narrowed_note" );   // CALLERS-TWO-COPY: the CLI legend's narrowed= reading, only with the key
     out += declinedSitesJson( sqDc, referencingOnly, /*mcp=*/true );   // lane declined-sites: the CLI <dc> rows, never in calls/calledBy or count
     out += nextFieldJson( declinedSitesLegend( declinedSitesLegendFlags( sqDc, referencingOnly, sqDcCut ), /*mcp=*/true ), "declined_note" );   // their reading, only when they ride
     out += nextFieldJson( callSitesAtLegend( calledBySites.any, calledBySites.anyCut, kCallSitesPerRowCap ), "sites_note" );   // CALLSITE-AT: its reading, only when a row carries it (nextFieldJson: "" -> no key, JSON-escaped)
@@ -990,10 +997,10 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
         {
             out += valueRefsDepthKeyJson( ing, callerSide.depthCut, vr );   // the --callers/--callees roots' depth cut (one defs set)
         }
-        out += valueRefsJson( ing, callerSide, true, vr, "valueRefs", "--uses=" + name );
+        out += valueRefsJson( ing, callerSide, true, vr, "valueRefs", "--uses=" + sqName );
         if( !referencingOnly )
         {
-            out += valueRefsJson( ing, chRows.valueRefs, false, vr, "valueCallees", "--uses=" + name );
+            out += valueRefsJson( ing, chRows.valueRefs, false, vr, "valueCallees", "--uses=" + sqName );
         }
     }
     // §H4 §3.4: find_symbol / find_referencing_symbols are the MCP twins of --callees / --callers, so the
