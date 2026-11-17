@@ -17,6 +17,7 @@ kReaderCallerReaders	sink:readersMore
 kAliasHopChains	sink:cut,shown
 kAliasHopMemberNames	sink:cut,shown
 kAliasHopSigBytes	sink:cut,truncateUtf8WithEllipsis
+kCMakeMaxCallLines	pending:#565 a read bound on one CMake call: past 16 lines the call still names its target (its first argument), but an IMPORTED / ALIAS keyword there is unseen and the row prints; stated in docs/LIMITS.md, no attribute says it fired
 kCallPathSeeds	none:K4 keep-guard seed window: which seeds the guard tries, no answer row is cut (LARGE-PARTIAL Stage 0 audit)
 kCloneKeyTokenBits	none:a saturating key field width, re-verified: a wider key changes no row (Stage 0 audit)
 kDeadExportedRowsShown	sink:shown,walkSkipped
@@ -115,6 +116,9 @@ kKeep	none:parse-cache eviction count: a work bound, the bytes are unchanged (St
 kLineStartReach	none:the snap window of a line-start search, not a cut (Stage 0 audit)
 kLintDefaultPayloadBytes	sink:saturatedRules,lintDefaultShown
 kLitHubFanIn	none:a rank threshold, not a cut (Stage 0 audit)
+kManifestFileRows	sink:capped
+kManifestLineMax	sink:cut
+kManifestRowsPerFile	sink:capped
 kMatchMaxHits	sink:saturatedRules,lintDefaultShown
 kMaxLinesUp	none:shape windows (two locals share the name), not a cut (Stage 0 audit)
 kOneSideMaxEndpointDefs	none:a rule gate deciding whether the one-side rule applies, not a cut (Stage 0 audit)
