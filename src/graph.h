@@ -14765,68 +14765,77 @@ inline std::uint8_t nameTowerLangTier( const IngestResult& ing, NodeId id, const
     return l == anchor.lang ? 0 : ( langFamilyOf( l ) == langFamilyOf( anchor.lang ) ? 1 : 2 );
 }
 
+// One row of the tower's sort. Tier 0 exact, 1 family, 2 foreign (all 0 with no anchor, or a corpus one, which ties instead);
+// tie 0 for the majority language under a corpus anchor, else 1; the content key (#682) is the deterministic tail on every
+// path, so the order never reads id assignment while two definitions differ in place.
+struct NameTowerKey
+{
+    std::uint8_t                                                                      langTier;
+    int                                                                               rank;
+    std::uint8_t                                                                      tie;
+    decltype( symbolContentKey( std::declval<const IngestResult&>(), NodeId{} ) ) content;
+    NodeId                                                                            id;
+};
+
+// The anchor-free order: kind rank, content key, id. It is the tower's tail, and the order a list keeps when no language
+// is stated and no majority speaks. id is reached only by two definitions alike in path, line, name and byte range.
+inline bool nameTowerPlainAhead( const NameTowerKey& a, const NameTowerKey& b ) noexcept
+{
+    if( a.rank != b.rank )
+    {
+        return a.rank > b.rank;
+    }
+    if( a.content != b.content )
+    {
+        return a.content < b.content;
+    }
+    return a.id < b.id;
+}
+
+// The tower's order: the stated-language tier, kind rank, the majority tie, then the anchor-free tail.
+inline bool nameTowerAhead( const NameTowerKey& a, const NameTowerKey& b ) noexcept
+{
+    if( a.langTier != b.langTier )
+    {
+        return a.langTier < b.langTier;
+    }
+    if( a.rank == b.rank && a.tie != b.tie )
+    {
+        return a.tie < b.tie;
+    }
+    return nameTowerPlainAhead( a, b );
+}
+
+inline std::vector<NameTowerKey> nameTowerKeys( const IngestResult& ing, const std::vector<NodeId>& ids, const LangAnchor& anchor )
+{
+    const bool corpusTie = anchor.origin == AnchorOrigin::Corpus;   // the majority BREAKS ties, it never fronts a tier
+    const std::vector<int>    ranks = nameTowerRanks( ing, ids );
+    std::vector<NameTowerKey> keyed;
+    keyed.reserve( ids.size() );
+    for( std::size_t i = 0; i < ids.size(); ++i )
+    {
+        const bool majority = corpusTie && ing.symbols[ ids[ i ] ].lang == anchor.lang;
+        keyed.push_back( { nameTowerLangTier( ing, ids[ i ], anchor ), ranks[ i ], static_cast<std::uint8_t>( majority ? 0 : 1 ),
+                           symbolContentKey( ing, ids[ i ] ), ids[ i ] } );
+    }
+    return keyed;
+}
+
 inline std::vector<NodeId> applyNameTower( const IngestResult& ing, std::vector<NodeId> ids, LangAnchor& anchor )
 {
     if( ids.size() < 2 )
     {
         return ids;
     }
-    using ContentKey = decltype( symbolContentKey( ing, NodeId{} ) );
-    // tier 0 exact, 1 family, 2 foreign (all 0 with no anchor — or a corpus one, which ties instead); the content key (#682) is
-    // the deterministic tail on every path, so the order never reads id assignment while two definitions differ in place
-    struct Key { std::uint8_t langTier; int rank; std::uint8_t tie; ContentKey content; NodeId id; };
-    const bool corpusTie = anchor.origin == AnchorOrigin::Corpus;                   // the majority BREAKS ties, it never fronts a tier
-    const std::vector<int> ranks = nameTowerRanks( ing, ids );
-    std::vector<Key> keyed;
-    keyed.reserve( ids.size() );
-    for( std::size_t i = 0; i < ids.size(); ++i )
-    {
-        keyed.push_back( { nameTowerLangTier( ing, ids[ i ], anchor ), ranks[ i ],
-                           static_cast< std::uint8_t>( corpusTie && ing.symbols[ ids[ i ] ].lang == anchor.lang ? 0 : 1 ),
-                           symbolContentKey( ing, ids[ i ] ), ids[ i ] } );
-    }
-    std::sort( keyed.begin(), keyed.end(),
-               []( const Key& a, const Key& b ) noexcept
-               {
-                   if( a.langTier != b.langTier )
-                   {
-                       return a.langTier < b.langTier;
-                   }
-                   if( a.rank != b.rank )
-                   {
-                       return a.rank > b.rank;
-                   }
-                   if( a.tie != b.tie )
-                   {
-                       return a.tie < b.tie;
-                   }
-                   if( a.content != b.content )
-                   {
-                       return a.content < b.content;
-                   }
-                   return a.id < b.id;   // reached only by two definitions alike in path, line, name and byte range
-               } );
-    for( std::size_t i = 0; i < ids.size(); ++i )
-    {
-        ids[ i ] = keyed[ i ].id;
-    }
-    // Did the anchor DECIDE the front? The anchor-free front is the first row of (kind rank, content key, id), the order
-    // this comparator keeps when no language is stated and no majority speaks. A front that equals it means the anchor
-    // changed nothing a single-pick verb shows, so the disclosure stays silent (the legend's "moved the front"). Rows
-    // moved lower down are still ordered by the rule; they are not announced.
-    const Key* plainFront = &keyed.front();
-    for( const Key& k : keyed )
-    {
-        const bool ahead = k.rank != plainFront->rank       ? k.rank > plainFront->rank
-                         : k.content != plainFront->content ? k.content < plainFront->content
-                                                            : k.id < plainFront->id;
-        if( ahead )
-        {
-            plainFront = &k;
-        }
-    }
-    anchor.frontMoved = anchor.active() && plainFront->id != keyed.front().id;
-    anchor.tieBroke   = corpusTie && anchor.frontMoved;
+    std::vector<NameTowerKey> keyed = nameTowerKeys( ing, ids, anchor );
+    std::sort( keyed.begin(), keyed.end(), nameTowerAhead );
+    // Did the anchor DECIDE the front? A front that equals the anchor-free front means the anchor changed nothing a
+    // single-pick verb shows, so the disclosure stays silent (the legend's "moved the front"). Rows moved lower down
+    // are still ordered by the rule; they are not announced.
+    const NodeId plainFront = std::min_element( keyed.begin(), keyed.end(), nameTowerPlainAhead )->id;
+    anchor.frontMoved = anchor.active() && plainFront != keyed.front().id;
+    anchor.tieBroke   = anchor.origin == AnchorOrigin::Corpus && anchor.frontMoved;
+    std::ranges::transform( keyed, ids.begin(), &NameTowerKey::id );
     return ids;
 }
 
@@ -16158,6 +16167,28 @@ inline void collectNameMatchesWithCensus( const IngestResult& ing, std::string_v
     }
 }
 
+// The "::" tiers as the QUALIFIED lane answers them. A stated @lang tail must not blind the canonical/scope tiers: they
+// compare against symbol names, which carry no tail (CodeRabbit #440: `path::scope::name@rs` matched neither its own id nor
+// the scope spelling and fell through to a NAME-only lookup), so the tiers get the tail-free spec; a badTag spec passes
+// through untouched so the shared refusal still fires downstream. On a tier answer, a doc heading spelled like code never
+// hides the code (Scope::name tier only), and then the stated tag scopes the tiers too (#440).
+inline std::vector<NodeId> qualifiedColonTierAnswer( const IngestResult& ing, std::string_view spec, bool& answered, LangAnchor* anchorOut )
+{
+    bool                   scopeTier = false;
+    const NameSuffixSplit  specTail  = nameSuffixSplit( spec );
+    const std::string_view tierSpec  = specTail.tag.has_value() ? specTail.base : spec;
+    std::vector<NodeId>    tier      = resolveAllByColonTiers( ing, tierSpec, answered, scopeTier );
+    if( !answered )
+    {
+        return {};
+    }
+    if( scopeTier )
+    {
+        tier = preferCodeOverDocUnits( ing, tierSpec, std::move( tier ) );
+    }
+    return statedScopeOnTierAnswer( ing, std::move( tier ), specTail, specTail.tag.has_value(), anchorOut );
+}
+
 inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, std::string_view spec,
                                                       std::size_t* unprovenDefCountOut = nullptr,
                                                       LangAnchor* anchorOut = nullptr )
@@ -16185,19 +16216,11 @@ inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, s
     // A canonical id first (see resolveAllByName): "path::scope::name" would otherwise be cut at its first
     // ':' by splitQualifiedSpec and refused, which made the id= these very verbs emit unusable as their own
     // input. Falls through to the file:name rule when the spec is not an id, so nothing existing changes.
-    bool colonAnswered = false, scopeTier = false;
-    // A stated @lang tail must not blind the canonical/scope tiers: they compare against symbol names, which
-    // carry no tail (CodeRabbit #440: `path::scope::name@rs` matched neither its own id nor the scope spelling
-    // and fell through to a NAME-only lookup). Split first, hand the tiers the tail-free spec; a badTag case
-    // passes through untouched so the shared refusal still fires downstream.
-    const NameSuffixSplit specTail = nameSuffixSplit( spec );
-    const std::string_view tierSpec = specTail.tag.has_value() ? specTail.base : spec;
-    const std::vector<NodeId> colon = resolveAllByColonTiers( ing, tierSpec, colonAnswered, scopeTier );
+    bool colonAnswered = false;
+    std::vector<NodeId> colon = qualifiedColonTierAnswer( ing, spec, colonAnswered, anchorOut );
     if( colonAnswered )
     {
-        // a doc heading spelled like code never hides the code (Scope::name tier only), then the stated tag scopes the tiers too (#440)
-        return statedScopeOnTierAnswer( ing, scopeTier ? preferCodeOverDocUnits( ing, tierSpec, colon ) : colon, specTail,
-                                        specTail.tag.has_value(), anchorOut );
+        return colon;
     }
 
     std::string_view file, rawName;
