@@ -1571,7 +1571,10 @@ inline std::string runSuffixTextDisclosed( const TestRunnerIndex& idx, std::uint
 // MULTISET of paths: every path verbatim (a reader's grep for a file name still hits; E3's brace-grouped
 // directories were disqualified on exactly that), each exactly once, in the order the single rows had. The
 // rules, stated once here because they decide every emitter:
-//   * a row WITH a runner stays a single <t>/<test> row exactly as before — run= is per row;
+//   * a row WITH a runner stayed a single <t>/<test> row under E1 — "run= is per row". SUPERSEDED 2026-11-17
+//     (affected-group-unjam, below partitionTestRows' header): run= is per row only because it repeats the row's
+//     own path, so a row whose command is exactly `<head> <path>` groups under a run_each= template; every other
+//     runner row is still a single row with its full run=;
 //   * only rows whose remaining per-row attributes are BYTE-EQUAL group (hops=, partner=, changed=,
 //     seed_kind= — the `attrs` string is the key), so a group never blurs two kinds of evidence;
 //   * a group is emitted where its FIRST member stood, its members in list order; a single row with a
@@ -1584,7 +1587,8 @@ inline std::string runSuffixTextDisclosed( const TestRunnerIndex& idx, std::uint
 //     that is right in all three dialects at once, it costs one row on a path shape that is vanishingly
 //     rare, and the legend clause says so rather than describing an escape.
 // The ""-means-not-derivable test stays in runHint alone: the single rows below go through the Disclosed
-// wrappers, and a group exists only where commandFor is empty — one seam, one rule.
+// wrappers, and a group exists only where groupRunHead says every member shares one head (empty: no runner) — one
+// seam, one rule.
 //
 // The byte cap this seam used to carry (`maxGroupBytes`, a pre-escape estimate of a group's rendered size)
 // is GONE, and with it its 48-byte overhead constant and pack-task's per-row units arithmetic. It was the
@@ -1619,11 +1623,81 @@ struct RenderedTestRow
     std::uint32_t files = 1;
 };
 
+// ── AFFECTED-GROUP-UNJAM (2026-11-17) — a row WITH a runner may ride a group too ──────────────────────────
+// THE REDUNDANCY WAS DISABLING THE OPTIMISATION ABOVE. E1 grouped runner-less rows only, on the stated ground that
+// "run= is per row". It is per row because it EMBEDS the row's own p= (`run="pytest tests/x.py"` beside
+// `p="tests/x.py"`), and an attribute that repeats the path makes every row distinct, so on a corpus whose harnesses
+// DO have runners the grouping never fired at all: koa, 46 of 46 rows with the one signature hops|p|run and the one
+// verb, 46 single rows, run= 2,424 B of a 6,189 B answer.
+//
+// THE RULE. A row whose command is EXACTLY `<head><its own path>`, the head ending in a space, may group with its
+// contiguous neighbours of byte-equal attributes AND byte-equal head. The group says the head once, as a TEMPLATE:
+//
+//     <g hops="1" n="3" p="a,b,c" run_each="pytest {p}"/>          XML
+//     {"p":["a","b","c"],"hops":1,"n":3,"run_each":"pytest {p}"}    JSON
+//     [hops=1] (3): a, b, c   (run each: pytest {p})                text
+//
+// and a member's command is the template with its ONE trailing {p} replaced by that member's path — which is the
+// comparison below read backwards, so the reconstruction is exact by construction, not by census.
+//
+// DECIDED PER ROW, BY STRING COMPARISON, NEVER BY THE 98.2 %. Measured on 5,034 rows the path in run= is the row's own
+// p= on 4,943; a "verb + p" rule is quietly WRONG on the rest, and every one of them fails the comparison and so stays
+// a single row carrying its full run=:
+//   * STEM / MENTION runners  — p="test/fuzz/main.cc" run="bash test/integration/hotrestart_test.sh" (another file);
+//   * the package cd-subshell — `(cd PKG && npx jest 'escaped/rel')`: package-relative, regex-escaped, closed by ')';
+//   * quoted or `--` paths    — `python3 -- 'test/my dir/test_sp.py'`: the command ends in a quote;
+//   * multi-root              — the command is a disk path while p= is the row's label.
+// Two VERBS never share a group either (`.py` is python3 on some rows and pytest on others — the head is part of the
+// key), so a mixed answer fragments rather than blurs.
+//
+// A TEMPLATE, NOT A BARE VERB (`runner="pytest"` would be 4 B shorter per group). The form is chosen by how it FAILS
+// in the hands of a reader that did not expand it: `python3 {p}` errors visibly, while a bare `pytest` RUNS THE WHOLE
+// SUITE and a bare `python3` or `bash` sits waiting on stdin. A head or a path that itself holds the slot text is
+// refused (single row), so "replace {p}" has one reading.
+//
+// Gate: test/affectedgroupcheck.sh — reconstructs every command from the grouped answer and compares it, in order,
+// against commands written by hand for its fixture (and, in its corpus mode, against a pre-change binary).
+inline constexpr std::string_view kRunEachSlot = "{p}";
+
+// What a row may share with a <g> row. `ok` false ⇒ it is served as a single row whatever its neighbours are.
+// `head` empty ⇒ runner-less (the group says run_unknown); else the command minus its trailing path, "pytest ".
+// A COPY, never a view: commandFor returns a reference into a hash map that the next lookup may rehash.
+struct GroupRun
+{
+    bool        ok = false;
+    std::string head;
+};
+
+inline GroupRun groupRunHead( const TestRunnerIndex& idx, const TestRowOut& r )
+{
+    // a ',' in the path: p= is a comma-separated list — see the seam's header comment for why no escape can rescue it
+    if( r.path.empty() || r.path.find( ',' ) != std::string::npos )
+    {
+        return {};
+    }
+    const std::string& cmd = idx.commandFor( r.fileId );
+    if( cmd.empty() )
+    {
+        return { true, {} };
+    }
+    if( cmd.size() < r.path.size() + 2 || !cmd.ends_with( r.path ) )
+    {
+        return {};   // the hold-outs: the command does not end in this row's own path
+    }
+    const std::string_view head( cmd.data(), cmd.size() - r.path.size() );
+    if( head.back() != ' ' || head.find( kRunEachSlot ) != std::string_view::npos || r.path.find( kRunEachSlot ) != std::string::npos )
+    {
+        return {};
+    }
+    return { true, std::string( head ) };
+}
+
 // The partition: index lists into `rows`, a run of one for a single row, a run of ≥2 for a group.
 //
 // A group covers a CONTIGUOUS run only: the scan stops at the first row that is not a groupable row with the
-// same attrs. The rows arrive in evidence order, so equal-attribute groupable rows are already adjacent and
-// the only things that can interrupt a run are a same-attribute row WITH a runner and a path carrying a ',';
+// same attrs and the same run head. The rows arrive in evidence order, so equal-attribute groupable rows are already
+// adjacent and the only things that can interrupt a run are a same-attribute row whose command is not the group's
+// template (another verb, a hold-out shape, no runner beside a runner) and a path carrying a ',';
 // hoisting the rows after it into a group in FRONT of it would move them ahead of it (review of #214:
 // A, B(run), A became G(A,A), B). Stopping instead costs one more <g> per interruption and makes order
 // preservation true by construction — test/testrowruncheck.sh arm 12 reads the paths back in emitted order
@@ -1632,21 +1706,18 @@ struct RenderedTestRow
 inline std::vector<std::vector<std::uint32_t>> partitionTestRows( const TestRunnerIndex& idx, std::span<const TestRowOut> rows )
 {
     std::vector<std::vector<std::uint32_t>> groups;
-    // The two disqualifications, in one place: a derivable runner (run= is per row) and a ',' in the path
-    // (p= is a comma-separated list — see the seam's header comment for why no escape can rescue it).
-    const auto groupable = [ & ]( std::uint32_t i ) noexcept
-    {
-        return idx.commandFor( rows[i].fileId ).empty() && rows[i].path.find( ',' ) == std::string::npos;
-    };
     for( std::uint32_t i = 0; i < rows.size(); )
     {
-        std::uint32_t end = i + 1;
-        if( groupable( i ) )
+        std::uint32_t  end   = i + 1;
+        const GroupRun first = groupRunHead( idx, rows[i] );
+        while( first.ok && end < rows.size() && rows[end].attrs == rows[i].attrs )
         {
-            while( end < rows.size() && groupable( end ) && rows[end].attrs == rows[i].attrs )
+            const GroupRun next = groupRunHead( idx, rows[end] );
+            if( !next.ok || next.head != first.head )
             {
-                ++end;
+                break;
             }
+            ++end;
         }
         std::vector<std::uint32_t> members;
         members.reserve( end - i );
@@ -1680,7 +1751,26 @@ inline std::string renderSingleTestRow( const TestRunnerIndex& idx, const TestRo
     return s;
 }
 
-// A group row (≥2 members, no runner by construction), in the dialect.
+// What a group row says about RUNNING its members, in the dialect — the tail renderTestRowGroup's body is closed with.
+// `head` is what groupRunHead returned for EVERY member: empty for a runner-less group (the run_unknown disclosure,
+// once per group), else the shared command head, said as the template `<head>{p}` (run_each).
+template<class EscapeFn>
+inline std::string groupRunTail( RowDialect dialect, std::string_view head, EscapeFn esc )
+{
+    const std::string each = head.empty() ? std::string() : std::string( head ) + std::string( kRunEachSlot );
+    if( dialect == RowDialect::Xml )
+    {
+        return each.empty() ? std::string( " run_unknown=\"1\"/>" ) : " run_each=\"" + esc( each ) + "\"/>";
+    }
+    if( dialect == RowDialect::Json )
+    {
+        return each.empty() ? std::string( ",\"run_unknown\":true}" ) : ",\"run_each\":\"" + esc( each ) + "\"}";
+    }
+    return each.empty() ? std::string( "   (run: not derivable)\n" ) : "   (run each: " + each + ")\n";   // RowDialect::Text, no escaping
+}
+
+// A group row's BODY (≥2 members), in the dialect: everything but its run disclosure, which groupRunTail appends —
+// the split the single row already has (renderSingleTestRow + the Disclosed wrappers).
 template<class EscapeFn>
 inline std::string renderTestRowGroup( std::span<const TestRowOut> rows, std::span<const std::uint32_t> members, const TestRowShape& shape, EscapeFn esc )
 {
@@ -1697,7 +1787,7 @@ inline std::string renderTestRowGroup( std::span<const TestRowOut> rows, std::sp
                 if( k ) { s += ','; }
                 s += esc( rows[ members[k] ].path );   // no path here holds a ',' — partitionTestRows refuses to group one
             }
-            s += "\" run_unknown=\"1\"/>";
+            s += '"';
             break;
         }
         case RowDialect::Json:
@@ -1708,7 +1798,7 @@ inline std::string renderTestRowGroup( std::span<const TestRowOut> rows, std::sp
                 if( k ) { s += ','; }
                 s += '"';  s += esc( rows[ members[k] ].path );  s += '"';
             }
-            s += "]";  s += first.attrs;  s += ",\"n\":";  s += std::to_string( members.size() );  s += ",\"run_unknown\":true}";
+            s += "]";  s += first.attrs;  s += ",\"n\":";  s += std::to_string( members.size() );
             break;
         }
         case RowDialect::Text:
@@ -1730,7 +1820,6 @@ inline std::string renderTestRowGroup( std::span<const TestRowOut> rows, std::sp
                 if( k ) { s += ", "; }
                 s += rows[ members[k] ].path;
             }
-            s += "   (run: not derivable)\n";
             break;
         }
     }
@@ -1777,13 +1866,26 @@ inline std::vector<RenderedTestRow> testRowsRendered( const TestRunnerIndex& idx
     out.reserve( groups.size() );
     for( const std::vector<std::uint32_t>& members : groups )
     {
-        if( members.size() == 1 )
+        // RE-DECIDED HERE, per member, against the rows actually being rendered — never taken from the partition. A
+        // caller may hand in a partition computed over ANOTHER spelling of the same files (pack-task groups its XML
+        // section and renders the JSON tail through that partition), and a command that ends in one spelling of a path
+        // need not end in the other. A group whose members do not all share one head in THIS spelling is served as
+        // single rows, each with its full run=: more bytes, and no command a reader cannot reconstruct.
+        const GroupRun first = groupRunHead( idx, rows[ members[0] ] );
+        const bool     asOne = members.size() >= 2 && first.ok
+                               && std::all_of( members.begin() + 1, members.end(), [ & ]( std::uint32_t k )
+                                               {
+                                                   const GroupRun g = groupRunHead( idx, rows[k] );
+                                                   return g.ok && g.head == first.head && rows[k].attrs == rows[ members[0] ].attrs;
+                                               } );
+        if( asOne )
         {
-            out.push_back( { renderSingleTestRow( idx, rows[ members[0] ], shape, esc ), 1 } );
+            out.push_back( { renderTestRowGroup( rows, members, shape, esc ) + groupRunTail( shape.dialect, first.head, esc ), std::uint32_t( members.size() ) } );
+            continue;
         }
-        else
+        for( const std::uint32_t k : members )
         {
-            out.push_back( { renderTestRowGroup( rows, members, shape, esc ), std::uint32_t( members.size() ) } );
+            out.push_back( { renderSingleTestRow( idx, rows[k], shape, esc ), 1 } );
         }
     }
     return out;
@@ -1833,8 +1935,9 @@ inline std::string testRowsJoined( const TestRunnerIndex& idx, std::span<const T
 // group — and legendcoveragecheck wants n= defined wherever a document carries it.
 inline constexpr std::string_view kRunHintLegendClause =
     "run= is the command that discharges a test row; run_unknown=\"1\" means none is derivable for that "
-    "harness (a guess would be worse than none) — a <t> or <g> row carries one or the other, never neither. "
-    "<g n= p=a,b,c> is 2+ runner-less rows with equal attributes served as ONE row: n= how many, p= their paths "
+    "harness (a guess would be worse than none) — a <t> row carries one or the other, never neither. "
+    "<g n= p=a,b,c> is 2+ rows with equal attributes served as ONE row, run_unknown or run_each= (each path's "
+    "command, {p} = that path): n= how many, p= their paths "
     "verbatim in list order — a path holding ',' is never grouped, so p= splits into exactly n= paths. A "
     "shown=/total= over these rows counts test FILES: a <g> row is n= of them. ";
 

@@ -267,10 +267,14 @@ inline constexpr std::string_view kAtSeedShortClause = "@FILE:LINE line-seeds re
 // check caught it as a JSONDecodeError rather than a byte count. The key is the ONLY thing that differs: the
 // string-or-array rule, the `n` beside an array, and the run/run_unknown obligation are one rule for all
 // three, and are stated once.
+// affected-group-unjam (2026-11-17): an array row may now carry run_each, a template, where its tests HAVE a runner
+// (testmap.h groupRunHead), so "runner-less" left the array's description and the obligation names three keys. Reworded
+// to 304 B from 305: prose never moves the manifest ceiling (test/mcpmanifestcheck.sh), so the new key was paid for in
+// the clause's own words.
 inline constexpr std::string_view kTestRowJsonShapeClause =
     "tests_to_run rows: the path key is 'test' on situational_awareness and 'p' on explore and the edit "
-    "receipts; its value is a path STRING, or an ARRAY of paths beside n when several runner-less tests share "
-    "their attributes and are served as ONE row; every row carries run (the command) or run_unknown:true. ";
+    "receipts; its value is a path STRING, or an ARRAY of paths beside n (several tests as ONE row); a row "
+    "carries run (the command), run_unknown:true or, with an array, run_each: the command, {p} = each path. ";
 
 inline constexpr std::string_view kAtSeedRebindClause =
     "An @FILE:LINE line-seed rebinds to the innermost definition enclosing that line and answers for it, "

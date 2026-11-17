@@ -1537,11 +1537,17 @@ dependency sits in the same manifest or a parent one), and only a manifest with 
 with no manifest evidence of its own still falls back to the SAME test-dir shell/Python driver search
 every other language uses — a named driver beats an
 unguessed default. A row with none says so — `run_unknown="1"`, never a guessed suite command — and a
-`<t>` or `<g>` row carries one or the other, never neither. A
+`<t>` row carries one or the other, never neither. A
 `<g hops="2" n="3" p="a,b,c" run_unknown="1"/>` row is **two or more contiguous runner-less rows whose
 attributes are byte-identical**, served as one: `n=` is how many, `p=` is their paths verbatim in list
-order, and the disclosure is paid once per group rather than once per row. Everything else stays its own
-row — a row with a `run=`, a row whose attributes differ from its neighbour's, and a path containing a
+order, and the disclosure is paid once per group rather than once per row. Rows that HAVE a runner group
+the same way when each one's command is exactly `<head> <its own path>` with the same head:
+`<g hops="1" n="3" p="a,b,c" run_each="pytest {p}"/>`, where a path's command is `run_each=` with `{p}`
+replaced by that path. It is a template rather than a bare verb because of how it fails unexpanded:
+`python3 {p}` errors, a bare `pytest` runs the whole suite. Everything else stays its own
+row — a row whose command is not that shape (a runner that is another file, a `(cd pkg && …)` subshell, a
+quoted or `--` path, a multi-root path) keeps its full `run=`, as does a row whose attributes or verb differ
+from its neighbour's, and a path containing a
 comma, which is never grouped at all, so `p=` splits on `,` into exactly `n=` paths. A `shown=`/`total=`
 over these rows counts test FILES: a `<g>` row is `n=` of them.
 
