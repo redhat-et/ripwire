@@ -9680,7 +9680,8 @@ inline const char* legoContractCaveat( bool isContractExtracted, bool isTargeted
 // no not-extracted caveat, its <m> rows are read; today a C++ / Objective-C definition, decided by the language alone,
 // so it must NOT outrank an implementor: a data-only C++ class would beat a Rust trait that has implementors,
 // rv-pr432-delta B1); then the tower's own key — kind rank (an Interface above a
-// Class), the leading symbol's language, id ASC. Every other rung keeps the tower rank (a Method above the types, a
+// Class), the leading symbol's language (the tower's own front among the tied, CodeRabbit #440), then the tower's incoming
+// order. Every other rung keeps the tower rank (a Method above the types, a
 // constructor just below them). Measured (diagnosis @mpapis, #432): `--lego=Shape` on this repository answered an
 // Elixir `shape.ex` (Interface, methods="0" caveat) over the C++ `Shape` whose contract is extracted
 // (a9disclosurecheck §A9.4); `--lego=Marker` answered the Java `interface Marker` (no implementor) over the Kotlin
@@ -9695,11 +9696,12 @@ inline std::vector<NodeId> legoRoleOrder( const IngestResult& ing, const std::ve
     }
     struct RoleKey
     {
-        int    rung;
-        bool   hasImplementor;
-        bool   isContractExtracted;
-        int    towerRank;
-        NodeId id;
+        int         rung;
+        bool        hasImplementor;
+        bool        isContractExtracted;
+        int         towerRank;
+        std::size_t towerPos;   // the candidate's place in the incoming tower order: the tie reference and the last key (CodeRabbit #440)
+        NodeId      id;
     };
     const std::vector<int> towerRanks = nameTowerRanks( ing, ids );
     const int              typeRung   = 2 * kindSpecificity( SymKind::Interface );
@@ -9711,7 +9713,7 @@ inline std::vector<NodeId> legoRoleOrder( const IngestResult& ing, const std::ve
         const Symbol& s      = ing.symbols[ id ];
         const bool    isType = namespaceCompatible( RefRole::Type, s.kind );   // graph.h's one statement of "a type definition"
         keys.push_back( RoleKey{ isType ? typeRung : towerRanks[ i ], isType && id < implementors.size() && !implementors[ id ].empty(),
-                                 isType && legoMethodContractSound( s.lang ), towerRanks[ i ], id } );
+                                 isType && legoMethodContractSound( s.lang ), towerRanks[ i ], i, id } );
     }
     const auto ahead = []( const RoleKey& a, const RoleKey& b ) noexcept
     {
@@ -9719,7 +9721,7 @@ inline std::vector<NodeId> legoRoleOrder( const IngestResult& ing, const std::ve
              > std::tuple( b.rung, b.hasImplementor, b.isContractExtracted, b.towerRank );
     };
     const RoleKey reference = *std::min_element( keys.begin(), keys.end(), [ & ]( const RoleKey& a, const RoleKey& b )
-                                                 { return ahead( a, b ) || ( !ahead( b, a ) && a.id < b.id ); } );
+                                                 { return ahead( a, b ) || ( !ahead( b, a ) && a.towerPos < b.towerPos ); } );   // the tower's own front among the tied
     const Lang referenceLang = ing.symbols[ reference.id ].lang;
     std::sort( keys.begin(), keys.end(), [ & ]( const RoleKey& a, const RoleKey& b ) noexcept
                {
@@ -9732,7 +9734,7 @@ inline std::vector<NodeId> legoRoleOrder( const IngestResult& ing, const std::ve
                    {
                        return refA;
                    }
-                   return a.id < b.id;
+                   return a.towerPos < b.towerPos;   // the tower already ordered these (stated language, kind, majority tie, content key)
                } );
     for( std::size_t i = 0; i < ids.size(); ++i )
     {
