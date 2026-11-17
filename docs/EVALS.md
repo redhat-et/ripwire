@@ -17740,3 +17740,80 @@ header-prose cut is a subset, it cannot regress either, so E1's completeness hal
    channel — the one place freed bytes could become completeness rather than just bytes. Whether those docs
    carry gold the surviving attributes do not is unmeasured, and the dropped text is not in the record.
    It needs its own registered band and a re-collection.
+
+## READOUT — the present-only violation is 3,930 B; the INVERSE defect is 136 cells
+
+Measured 2026-11-17, 21 roots × 64 verbs = 1,344 cells, **1,276 answered** (68 unanswered, each with its
+reason and denominator). The detector does not reimplement the buggy predicate: it extracts all **1,024
+reading rows** from `compactlegend.h` with every field and **reconstructs each legend exactly** — opener +
+purpose + window + sub-cap + one clause per emitted term — leaving **zero residue on 1,255 of 1,276 cells**.
+It reproduces the known instance to the byte (htop `--expand` → 166 B) and reports **0 unjustified bytes on
+`--map`**, whose 13 clauses are all genuinely carried.
+
+### The waste is real, constant, and small
+
+**30 of 1,276 cells; 50 unjustified clause instances of 12,507 emitted; 3,930 B total.**
+
+| attribute | wasted | answers | each |
+| --- | ---: | ---: | ---: |
+| `redacted=` | 1,960 B | 20 of 21 `--expand` | 98 |
+| `scrubbed=` | 1,360 B | 20 of 21 `--expand` | 68 |
+| `run_unknown=` | 610 B | 10 (5 `--pack-task` + 5 `--partition`) | 61 |
+
+Nothing else in the 1,024-row table is ever defined-but-absent. The cost is a **constant per answer** —
+min = median = max — because the clause set depends on the prose head, which is identical across roots.
+**Correction to this round's brief:** `run_unknown=` is **5 of 21 roots, not 3**, and is paid **twice** per
+affected root, because `--partition` builds a second answer on the same `pack-task` key. The one unaffected
+`--expand` is koa, which took whole-file mode — the premise's exception, reproduced.
+
+### The "one-line fix" is not one line: it changes 84 cells it does not bill for
+
+**The leak fires on 114 of 1,276 answered cells, not 30.** On 84 further cells a head-only term (no
+`onTag`, not `wholeDoc`, no `mapHeader`) is emitted although the attribute is absent from the head's real
+attributes — root tag and first child both — and is carried only on a **deeper row**. Comment-driven in
+exactly the same way; it was not billed only because it lands on a definition a reader can still use.
+**167 clause instances**: `--lego` 21/21 roots (`counts_floor` 1,155 B, `graph_ambiguous` 1,092 B,
+`graph_unindexed` 2,260 B), `--pack-signatures` 21/21, `--pack-top-n` 21/21, `--skipped` 21/21.
+
+**So a fix that makes `headHasAttr` skip comments must DECIDE whether those 167 clauses survive via a
+whole-document read or disappear.** Shipping it as a trivial correction would silently remove 167
+definitions that readers currently use, on 84 answers the bug report never mentioned.
+
+Control on the other mechanism: the paging-window clause decides presence through `payloadHasAnyAttr`, not
+the head, and over-defines **0 times in 644 window clauses**. The defect is specific to the head arm.
+
+### The INVERSE defect is much larger, and it is the one that matters
+
+**136 of 1,276 answered cells carry at least one payload attribute that no comment in the legend defines.**
+Two kinds:
+
+- **Dropped by the compact rewrite** (defined in `--legend=full`, undefined in compact): `--abi` 21/21 cells
+  (6 distinct attributes), `--partition` 21/21 (4), `--verify` 20/21 (`in_id=`), `--exercises` 16/21,
+  `--arch` 5/21, `--impact` 4/21, `--pack-task` 3/21.
+- **Undocumented in BOTH dialects** — a coverage gap upstream of the compact dialect: `--abi` 21/21 with
+  **27 distinct attributes**, `--arch` 21/21 with **27**, `--verify` 21/21 with 4, `--for` 18/21 with **22**,
+  `--partition` 10/21 with 3.
+
+The sharpest instance: htop `--arch`'s **entire compact legend is one sentence** — *"layering rules fit:
+allowed/denied file-to-file edges, each violation a row."*, 76 B of body — after which the answer emits
+`<arch layers= rules= pathRules= violations= baselined= new_violations=>`, `<metrics modules=
+typed_modules= zone_pain= zone_useless= zone_ok= zone_na= propagation_cost= note=>` and a `<m path= ca= ce=
+types= abstract= I= A= D= zone= reachable= isolated=>` row per module. **None of them defined in either
+dialect**; the full legend is 508 B and does not define them either. And htop `--abi`: compact legend 224 B,
+20 distinct attributes emitted, **15 undefined**.
+
+This is [[trap-legend-clause-must-be-registered-not-written]] measured at scale. It also bears directly on
+the dictionary-backed coverage contract this lane is building: a D5-style assertion — *every emitted
+attribute has a `--legend-dict` row* — would **FAIL on these 136 cells**. That is the contract working, not
+breaking, but it means the contract cannot simply be switched on; the undocumented attributes have to be
+registered first, and `--abi` and `--arch` are where that work is.
+
+### What is not measured, stated rather than implied
+
+The strict census is a **floor**: for a head-intended term the detector accepts the attribute anywhere on a
+real element, which under-bills rather than over-bills — the 84 cells above are exactly that gap. `--for`'s
+21 cells are **coarse-only** (215 B on 1 cell) because `for` has no `kCompactLegendSpecs` entry and its
+legend is substring-stripped rather than rebuilt. **17 of the 79 spec keys were never reached** — each needs
+an input not available read-only (a trace file, two refs, a plan, a skill bundle) — so their waste is
+unmeasured and a zero for them would be dishonest. Six verbs have no census or a partial one. CLI only: the
+MCP postures and `--legend-have` were not swept.
