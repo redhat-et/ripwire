@@ -1406,6 +1406,7 @@ struct SafeDeleteLegendFlags
     bool        contract      = false;   // BODILESS-SEED: impls= on the root (contractseed.h)
     std::size_t radiusTests   = 0;       // IMPACT-TEST-TIER: radius_tests= on the root (graph.h radiusTiers)
     bool        testsIgnored  = false;   // IMPACT-TEST-TIER: tests_ignored= on the root (ignore-tests dropped them before the walk)
+    bool        emptyRadius   = false;   // impact_reaches=0: no transitive radius, so risk= reads no coverage (CR676-USES-EXIST-EMPTY)
 };
 
 // count-floor (countfloor.h) + CALLSITE-AT: the safe-delete legend's clauses for callers_floor=, uses_floor=, next= and
@@ -1501,8 +1502,16 @@ inline const char* safeDeleteRisk( bool anyEvidence, bool usesFloor, bool declin
     }
     return contract ? "contract" : "none-found";
 }
-inline const char* safeDeleteRiskSentence( std::string_view risk ) noexcept
+// CR676-USES-EXIST-EMPTY: uses-exist over an EMPTY radius (impact_reaches=0, e.g. a value use and no caller) reads no coverage at
+// all, so the table's sentence (part of the radius is test-covered) would claim what radius_tested=0 does not show.
+inline constexpr const char* kUsesExistEmptyRadiusSentence =
+    "uses-exist: callers or uses exist, but the transitive blast radius is empty (impact_reaches=0), so it claims no test coverage. ";
+inline const char* safeDeleteRiskSentence( std::string_view risk, bool emptyRadius ) noexcept
 {
+    if( emptyRadius && risk == "uses-exist" )
+    {
+        return kUsesExistEmptyRadiusSentence;
+    }
     const auto it  = std::ranges::find( kSafeDeleteRiskReadings, risk, &SafeDeleteRiskReading::risk );
     const auto end = std::end( kSafeDeleteRiskReadings );   // outside the promise: a self-check names values, it calls nothing
     ASSUME( it != end, "safeDeleteRiskSentence: runSafeDelete assigns only the eight values listed" );
@@ -1560,7 +1569,7 @@ inline void emitSafeDeleteLegend( std::size_t defCount, std::size_t unprovenDefs
                     : "",
                 // One risk= value, the one in force. A verdict a reader has to look up in a glossary of three is a
                 // marker string legible only to whoever wrote it.
-                  safeDeleteRiskSentence( risk ),
+                  safeDeleteRiskSentence( risk, flags.emptyRadius ),
                 // H1: what risk= did not read, straight after the sentence for the value it qualifies.
                 ( rw::unprovenDefsVerbLegend( rw::UnprovenDefsVerb::SafeDelete, unprovenDefs > 0 ) + declinedClause ).c_str(),
                 rw::modScopeLegend( hasModScope ),   // #60: exactly when a <c n="<file-scope>"> row is on this page
@@ -1813,7 +1822,8 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
                                                  .defTable = sdAttr.groups.multi(), .defTableCut = sdListing.cut, .splitArms = sdHasSplit,
                                                  .linkRows = sdHasLink, .anchorRows = sdHasMiss,
                                                  .declinedSites = rw::declinedSitesLegendFlags( sdDc, /*callersForm=*/true, sdDcCut ),
-                                                 .contract = sdContract.contracts > 0, .radiusTests = radius.tests, .testsIgnored = cfg.ignoreTests } );
+                                                 .contract = sdContract.contracts > 0, .radiusTests = radius.tests, .testsIgnored = cfg.ignoreTests,
+                                                 .emptyRadius = reach.empty() } );
 
     if( sdDeclinedLiteralCalls > 0 )
     {
