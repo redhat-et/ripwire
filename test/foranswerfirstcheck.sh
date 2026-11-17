@@ -258,5 +258,38 @@ else
     no "(R6) two legacy-order runs differ -- the gate's own baseline is unstable"
 fi
 
+# (R7) THE BUDGETED PATH -- the regime where ordering actually decides what survives, and the one every arm
+# above missed. runForLens() routes a fitting budget to runForLensFitted(), a SECOND code path that renders
+# its own whole document; the permutation lived only on the default path. A feature live on one path and
+# dead on another, with every arm green, is exactly how the inverted capture predicate shipped earlier in
+# this same lane -- so the budgeted path gets its own arms rather than an assumption.
+#
+# The budget is set far above the answer's est_tokens so that a difference can only be an ORDERING
+# difference and never a cut. (R7nv) proves that is so on THIS tree instead of trusting the constant.
+BIG=100000
+"$BIN" . --for="$TASK_A" --token-budget="$BIG" >"$WORK/a_bud.xml" 2>/dev/null
+if [ ! -s "$WORK/a_bud.xml" ]; then
+    no "(R7) the budgeted answer is empty -- the budget arms cannot run"
+elif [ "$( wc -c <"$WORK/a_bud.xml" )" != "$( wc -c <"$WORK/a_new.xml" )" ]; then
+    # A budget that BOUND would legitimately change the answer, and R7 would then be grading a cut.
+    no "(R7nv) --token-budget=$BIG BOUND on this tree ($( wc -c <"$WORK/a_bud.xml" | tr -d ' ' ) B vs $( wc -c <"$WORK/a_new.xml" | tr -d ' ' ) B) -- raise BIG; R7 must compare orders, not cuts"
+else
+    ok "(R7nv) the budget binds nothing: same byte count, so any difference below is ordering alone"
+    if cmp -s "$WORK/a_bud.xml" "$WORK/a_new.xml"; then
+        ok "(R7) a budget that binds nothing leaves the answer-first order intact"
+    else
+        no "(R7) --token-budget changed the ORDER -- the permutation does not run on the budgeted path"
+    fi
+    # (R7n) THE MUTATION CONTROL. R7 is an equality test, so it is evidence only if the two orderings are
+    # DISTINGUISHABLE by it. The budgeted answer must NOT equal the legacy-order answer -- if it did, R7
+    # would pass with the permutation switched off everywhere, and the measured defect was exactly this:
+    # --token-budget was byte-identical to RIPWIRE_FOR_LEGACY_ORDER=1.
+    if cmp -s "$WORK/a_bud.xml" "$WORK/a_old.xml"; then
+        no "(R7n) the budgeted answer is byte-identical to the LEGACY order -- a budget silently opts out of item R"
+    else
+        ok "(R7n) the budgeted answer differs from the legacy order -- R7 can fail"
+    fi
+fi
+
 if [ "$fail" -ne 0 ]; then echo "foranswerfirstcheck: FAILURES"; exit 1; fi
 echo "foranswerfirstcheck: ALL PASS"

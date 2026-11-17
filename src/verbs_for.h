@@ -5592,7 +5592,20 @@ inline int runForLensFitted( const MainDispatch& d )
     {
         DISCLOSE( sink, ForBudgetFit::DisclosureWhy::NoRoot, "runForLensFitted: no <ctx> root in the unbudgeted answer" );
     }
-    const std::string& out = fit.verdict == rw::ForBudgetFitResult::Verdict::NoRoot ? u.out->bytes : fit.xml;
+    // ITEM R (docs/EVALS.md amendment 8): the BUDGETED path renders its own whole document, so the
+    // permutation has to run here too. Without this it did not: --token-budget was byte-identical to
+    // RIPWIRE_FOR_LEGACY_ORDER=1 -- measured at 24,009 B either way on a budget that bound nothing -- so the
+    // feature was dead on exactly the path where ordering decides what survives a cut, while every arm on
+    // the default path stayed green. Same shape as the inverted capture predicate earlier in this lane.
+    //
+    // Safe after fitting, not before: answerFirst() permutes whole top-level blocks and changes no byte, so
+    // the fitted answer still measures the size the budget was fitted against. test/foranswerfirstcheck.sh
+    // (R7/R7n) pins both directions.
+    std::string out = fit.verdict == rw::ForBudgetFitResult::Verdict::NoRoot ? u.out->bytes : fit.xml;
+    if( !rw::answerfirst::legacyOrderAsked() )
+    {
+        (void)rw::answerfirst::answerFirst( out );
+    }
     std::fwrite( out.data(), 1, out.size(), stdout );
     return u.rc;
 }
