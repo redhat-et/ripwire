@@ -17348,3 +17348,93 @@ returns **7,721 B and satisfies 2 of 4**. Two of four in 21.8 % of the bytes, ag
    `reexports` arm dropped). Two bands, different populations, different graders, same conclusion — the
    tighter the resolution gate, the smaller the loss. C″ still may not be published from the cells that
    produced the hypothesis, but it is now the best-supported cut candidate on the table.
+
+## READOUT — ITEM Q: reordering cannot fix the small-budget band, and no fitted order beat the printed one
+
+Measured 2026-11-17 over 40,596 rows in all 216 recorded `--for` cells, grains kept apart (156 item, 60
+symbol). Rows enumerated with **expat byte offsets**, not a regex: bodies arrive in CDATA containing literal
+tags, and the legend is a comment holding the literal text of the tags a regex would match.
+
+**Control first.** The row scanner's "anchor appears anywhere in the answer" count reproduces
+`anchor_grade.py`'s committed lenient column on **156 of 156** item cells, 0 disagreements. Of 833 lenient
+gold hits, 829 land inside a row span and 4 do not — satisfied only by header/`next=` text echoing the
+query, which is a caveat on the lenient bound itself.
+
+### This supersedes a claim this document has been making
+
+Item P's headline — *completeness is 0.0 % item-grain at a 2 KB budget with the legend present* — has been
+read here, repeatedly, as licensing **reordering**. It does not.
+
+**The prologue (header + legend) ALONE exceeds the budget in 156 of 156 item cells at 1 KB and 145 of 156
+(92.9 %) at 2 KB.** At symbol grain, 60 of 60 at both. No row of any order — including a hindsight oracle —
+can be read at those budgets. **Item P's 2 KB cell is a LEGEND fact, not an ordering fact.** The prologue is
+median **3,517 B** (item) / 3,740 B (symbol), min 1,383, max 5,102.
+
+That is the third independent instrument to land on the legend as the lever, and the first to show that the
+small-budget band cannot be reached any other way.
+
+### A better order exists; nothing we can build reaches it
+
+| order | 4 KB | 8 KB |
+| --- | --- | --- |
+| **ORACLE** (hindsight) | **21 W** / 3 T / 0 L | **14 W** / 10 T / 0 L |
+| logistic on emit-time features, held out | 1 W / 13 T / **10 L** | 7 W / 6 T / **11 L** |
+| logistic + emit-time file-novelty penalty | 2 W / 13 T / 9 L | 9 W / 6 T / 9 L |
+
+(W/T/L = repos where the order beats / ties / loses to the printed order's per-repo median, 24 item repos.)
+
+The model is not weak at the row level: held-out **precision@3 = 53.4 % and 50.9 %** against held-out base
+rates of 7.84 % / 6.80 % — a 6.5–7× lift. **It does not convert, and the reason is the objective, not the
+features: a per-row gold-PROBABILITY order maximises precision, while completeness needs coverage of
+DISTINCT items**, and the highest-scoring rows are redundant with one another (several rows from the same
+gold file). An emit-time file-novelty penalty recovers part of it and still does not clear the baseline.
+
+**The one clean positive:** `tail LAST + test LAST` — both licensed by the legend's own "leads, not the
+answer" and by a measured test-path negative — takes **every one of the 24 item repos to 100 % at 16 KB**,
+where the printed order leaves 5 below. It **loses 2 repos at symbol grain's 12 KB**, which is registered
+here as its pre-declared failure mode. Every order above is FITTED to these 216 cells; the 2-fold figures
+are internal cross-validation on the same 24/15 repos, not an out-of-corpus result.
+
+### The tail is gold-DILUTE, not gold-free — which is why four cuts failed
+
+Per-row gold rate, item grain: `<tail>` **1.80 %** (394/21,902) against `<sigs>` 16.72 %, `hops` 38.08 %,
+`fold` 44.21 %, `callers` 52.68 %, `reexports` 86.15 %, `graph_verb` **97.14 %**. Counting only the row that
+FIRST delivers a gold group: 485 of 29,849 rows (1.62 %), of which **63 % are in `sigs`** (18.6 % of rows)
+and **18 % in `tail`** (73 % of rows). A ~14× dilution per row — enough that an unconditional cut loses
+anchors, and far too dilute to be worth its 45.8 % of the bytes.
+
+The tail is also already ordered despite carrying no `r=`: within-tail decile gold rate decays monotonically
+from decile 2, ~5× top to bottom. And `r=` itself concentrates gold **2.3× above base in its top three rows**
+(37.8 % at r=1–3) and is then flat and non-monotone — not broken, not strong.
+
+### Features that do NOT separate, reported because a null is a result
+
+Read **within `sigs`** — pooled across row kinds they look predictive only because tail rows never carry
+them, which makes "has `cx=`" a restatement of "is not a tail row".
+
+- **`amp=` is byte-identical to `in=` on all 7,950 `sigs` rows.** Not a feature — a duplicate. It pays its
+  own bytes and, under the present-iff-emitted rule, ~60 B of legend, for zero information. **An item F
+  candidate.**
+- `cx=` item 14.7 %→27.9 % across five bands but **flat at symbol grain** (35.8/39.1/36.3/36.8/35.0 %);
+  `ccx=` non-monotone; `tested=` 1.26× lift; `clone=` the **wrong direction** at n=110; `churn=` is
+  **binary in this corpus** (never ≥2); `pure=` is **16 rows in 216 answers**, Wilson spans the base rate;
+  `mem=` **never co-occurs with a gold hit anywhere**.
+- Row byte length separates pooled (155 B vs 110 B) but **not within section** — another row-kind proxy.
+
+### A leakage check that killed one of the strong features
+
+**76 of 923 gold anchor groups (8.2 %) appear literally in their own task text**; 52 of 156 item cells have
+at least one, and 0 of 60 symbol cells do. Re-run on the 162 cells with no leaked anchor: `pathhit` HOLDS
+(item `sigs` 25.1 % vs 12.8 %; item `tail` 10.4 % vs 1.6 %, a 6.5× lift), while **`namehit` COLLAPSES from
+35.1/14.1 to 19.3/13.3** — at item grain inside `sigs` it was largely measuring "the answer quoted the
+question". `pathhit` may be used; `namehit` may not, until re-measured.
+
+### What this changes about the plan
+
+1. **The small-budget band belongs to the legend, not to ordering.** `--legend-have` / `--legend=dict`
+   delivery is the only thing that can move it.
+2. **Ordering work should optimise DISTINCT-ITEM COVERAGE, not row gold-probability.** That is a different
+   objective and the reason this attempt failed; a future band should register it as such.
+3. **`tail LAST + test LAST` at 16 KB** is the one candidate worth out-of-corpus validation — on different
+   REPOS, not different questions in the same repos, since the file-cluster and path-depth features are
+   repo-shaped.
