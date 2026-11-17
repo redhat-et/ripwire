@@ -139,29 +139,30 @@ SPEC446=$( grep -o 'role="extends" p="cppbase446.cpp:23"' "$TMP/uses_base" | wc 
 # below are the ones main's walk gives on the same fixture (test/chafix446/java, names prefixed J so the C++
 # section's Base/TBase sets above stay untouched).
 FIXJ="$ROOT/test/chafix446/java"
+jrun(){ "$BIN" "$FIXJ" --no-cache "$1" 2>/dev/null >"$2" || no "Java base capture: ripwire $1 exited non-zero"; }
 directOf(){ grep -o '<impl n="[^"]*" p="[^"]*"/>' "$1" | sed 's/^<impl n="\([^"]*\)".*/\1/' | sort | tr '\n' ' '; }
-"$BIN" "$FIXJ" --no-cache --lego=JBase 2>/dev/null >"$TMP/jlego_base"
+jrun --lego=JBase "$TMP/jlego_base"
 D=$( directOf "$TMP/jlego_base" )
 [ "$D" = "JGeneric JQualGen JSimple " ] && ok "Java base capture: JBase's direct implementors are simple, generic and qualified-generic (jb.JBase<String>)" \
     || no "Java base capture: JBase's direct implementors are [$D], want [JGeneric JQualGen JSimple ]"
 grep -q '<impl n="JQual" [^>]*via="JGeneric"' "$TMP/jlego_base" && ok "Java base capture: qualified base JShapes.JGeneric reaches JBase transitively" \
     || no "Java base capture: JQual (extends JShapes.JGeneric) lost its edge"
-"$BIN" "$FIXJ" --no-cache --lego=JIface 2>/dev/null >"$TMP/jlego_iface"
+jrun --lego=JIface "$TMP/jlego_iface"
 D=$( directOf "$TMP/jlego_iface" )
 [ "$D" = "JColor JSimple " ] && ok "Java base capture: JIface's direct implementors are JColor (enum implements) and JSimple, no anonymous class" \
     || no "Java base capture: JIface's direct implementors are [$D], want [JColor JSimple ]"
-"$BIN" "$FIXJ" --no-cache --lego=Entry 2>/dev/null >"$TMP/jlego_entry"
+jrun --lego=Entry "$TMP/jlego_entry"
 D=$( directOf "$TMP/jlego_entry" )
 [ "$D" = "JColor JEntry " ] && ok "Java base capture: qualified generic JMap.Entry<K, V> edges JEntry and the enum JColor" \
     || no "Java base capture: Entry's direct implementors are [$D], want [JColor JEntry ]"
 # a nested class's bases (JHolder.JOuterNode extends JShapes.JOuterNode; JKid extends JOuterNode): one extends site each
-"$BIN" "$FIXJ" --no-cache --uses=JOuterNode 2>/dev/null >"$TMP/juses_node"
+jrun --uses=JOuterNode "$TMP/juses_node"
 D=$( grep -o 'role="extends" p="jb/JShapes.java:[0-9]*"' "$TMP/juses_node" | sed 's/.*://; s/"//' | tr '\n' ' ' )
 [ "$D" = "10 11 " ] && ok "Java base capture: nested classes' bases are read once each (lines 10 11)" \
     || no "Java base capture: JOuterNode extends sites at lines [$D], want [10 11 ]"
 # every JBase site exactly once (the walk is off for Java, so the capture is the only reader), none from the anonymous class
-"$BIN" "$FIXJ" --no-cache --uses=JBase 2>/dev/null >"$TMP/juses_base"
-"$BIN" "$FIXJ" --no-cache --uses=JIface 2>/dev/null >"$TMP/juses_iface"
+jrun --uses=JBase "$TMP/juses_base"
+jrun --uses=JIface "$TMP/juses_iface"
 NB=$( grep -o 'role="extends"' "$TMP/juses_base" | wc -l | tr -d ' ' ); NA=$( grep -o 'role="extends" p="jb/JShapes.java:13"' "$TMP/juses_iface" | wc -l | tr -d ' ' )
 [ "$NB" = 3 ] && [ "$NA" = 0 ] && ok "Java base capture: 3 JBase extends sites, none at the anonymous class (:13)" \
     || no "Java base capture: $NB JBase extends sites (want 3), $NA at the anonymous class :13 (want 0)"
