@@ -149,7 +149,7 @@ AdoptedSites& adoptedSites() noexcept
     return adopted;
 }
 
-// noexcept, and std::mutex::lock (std::system_error) or formatTo (std::format_error, std::bad_alloc) may throw: a site
+// noexcept, and the mutex lock may throw std::system_error and the key's formatting std::format_error or std::bad_alloc: a site
 // that cannot be checked reads as not adopted, so its notice prints (stderr only, the kCapacity overflow's outcome),
 // instead of the throw reaching std::terminate.
 bool siteAdopted( const char* file, int line ) noexcept
