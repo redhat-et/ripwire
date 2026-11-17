@@ -2055,7 +2055,7 @@ private:
 
     // The classified value `name` at anc[i] (effective position anc[j]): a container it fills is marked fed (its scope's, or
     // the file's), then its Value row. `owner` non-empty: a method value of that receiver type (methodValueAt).
-    void landValue( std::size_t i, std::size_t j, std::string_view name, Slot& s, bool fileShadow, std::string_view owner, std::string via = {} )
+    void landValue( std::size_t i, std::size_t j, std::string_view name, Slot& s, bool fileShadow, std::string_view owner, const std::string& via = {} )
     {
         if( !s.container.empty() && ( s.scope == 'f' || s.scope == 'l' ) )
         {
@@ -3236,7 +3236,7 @@ private:
         m_out.push_back( std::move( r ) );
     }
 
-    void emitSlotFact( TSNode at, std::string owner, std::string_view field, const std::string& type )
+    void emitSlotFact( TSNode at, const std::string& owner, std::string_view field, const std::string& type )
     {
         emitValueFact( at, kValueRefSlotFactScope, owner, field, type );
     }
