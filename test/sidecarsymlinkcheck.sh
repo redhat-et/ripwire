@@ -1060,7 +1060,8 @@ if [ -f "$RA/.ripwire_arch_baseline" ] && grep -qE '^[0-9a-f]{8,}' "$RA/.ripwire
     docRefusedArm archbaseline 'baseline="symlink-refused"'
     # FAIL-CLOSED, not merely unused: the one violation the refused baseline would have accepted is reported NEW
     # and the verb exits 2, exactly as with no sidecar at all.
-    if grep -qF 'new_violations="1"' "$TMP/archbaseline_read_out.out" 2>/dev/null \
+    # new_violations= is retired (2026-11-17): the count is the <v> rows without baselined="1" (test/abiarchretirecheck.sh (D))
+    if [ "$( grep -o '<v from="[^>]*>' "$TMP/archbaseline_read_out.out" 2>/dev/null | grep -vc ' baselined="1"' )" = "1" ] \
        && [ "$( cat "$TMP/archbaseline_read_out.rc" 2>/dev/null )" = "2" ]; then
         ok "archbaseline: (k2) the violation the refused baseline would have accepted is reported NEW, exit 2"
     else

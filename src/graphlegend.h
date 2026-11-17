@@ -1160,6 +1160,23 @@ inline constexpr const char* kDepsMaskedFilesLegend =
     "masked_files=N (<health>, absent at 0): N no_file_edges= files are left out of dep_files= and of ccd/acd/nccd/shape, an edgeless one would sit there as a cone of one and pull the verdict toward horizontal and one with an edge has a cone that is only a floor; the numbers cover the other dep_files= files. ";
 inline constexpr const char* kArchMaskedFilesLegend =
     " masked_files=N (<metrics>, absent at 0): N no_file_edges= files are left out of the propagation_cost denominator, an edgeless one would add a cone of one and one with an edge has a cone that is only a floor; the number covers the other dependency-capable files.";
+// --arch's <metrics> definitions. They rode every answer as a note= ATTRIBUTE on <metrics> until 2026-11-17 (574 B of prose
+// as data, 764 B with the zone_unknown clause); a definition belongs in the legend, so the same words read here in the full
+// dialect and as rows in compactlegend.h. The zone_unknown clause and its term in the partition sum ride exactly when
+// zone_unknown= does (verbs_report.h emitArchMetrics), as they did in the attribute.
+inline std::string archMetricsLegend( bool zoneUnknown )
+{
+    std::string s = " <metrics>: Martin Ca/Ce/I/A/D + zone (main-sequence heuristic, no independent outcome-based validation — folklore, not proof)"
+                    " + reachability — directory-level estimate from name-based deps; zone_na = types=0 modules excluded from zone_pain/zone_useless"
+                    " (no meaningful abstractness score); zone_ok = typed modules in neither corner (the main-sequence middle); zone_pain+zone_useless+zone_ok+zone_na";
+    s += zoneUnknown ? "+zone_unknown" : "";
+    s += " = modules, the full partition; propagation_cost = density of the file-dep transitive closure (MacCormack, validated coupling form)"
+         " — fraction of files reachable from an average file";
+    s += zoneUnknown ? "; zone_unknown = modules holding a file in a language this build draws no file edges for (no_file_edges=): zone and coupling unknown,"
+                       " not zero, and part of the partition."
+                     : ".";
+    return s;
+}
 inline const char* depsNoFileEdgesLegend( bool on ) noexcept { return on ? kDepsNoFileEdgesLegend : ""; }
 inline const char* archNoFileEdgesLegend( bool on ) noexcept { return on ? kArchNoFileEdgesLegend : ""; }
 inline const char* depsMaskedFilesLegend( bool on ) noexcept { return on ? kDepsMaskedFilesLegend : ""; }
