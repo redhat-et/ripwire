@@ -48,7 +48,7 @@ class; `(a*){20}b` (over 6 s at 80 bytes on libstdc++) is named in `docs/LIMITS.
 disclosed in `docs/LIMITS.md`, and it is why the screen refuses rather than guesses: a refusal is a bounded,
 named failure; a hang is not.
 
-Gate: `test/regexmultiquantcheck.sh` (89 assertions over 34 patterns). The two preceding families are
+Gate: `test/regexmultiquantcheck.sh` (88 assertions over 34 patterns). The two preceding families are
 asserted undisplaced in the same gate, and `test/regexguardcheck.sh` arm (b2)'s real-engine vehicle moved from
 `a*a*a*a*a*b` (now refused at admission, correctly) to `(a*){20}b`, so that arm keeps proving what it was
 written to prove. Four evasion/over-refusal classes found in the PR's two review rounds are asserted in the
