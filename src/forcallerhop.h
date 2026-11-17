@@ -401,36 +401,36 @@ inline std::vector<NodeId> forRankedCallerHopTargets( const IngestResult& ing, c
 // inside an XML comment.
 inline constexpr std::string_view kForCallerHopLegend =
     "; callers of=: the route named one function, so its callers follow its definition: s t= n= sc= p=file:line rows are its "
-    "1-hop callers (n=Owner.name with no sc= on a member whose owner the index defines, as the callers verb prints it; sites_at= their calls of it as file:line, sites_total= when that list was cut; via=name: matched by name "
+    "1-hop callers (n=Owner.name with no sc= on a member whose owner the index defines, as the callers verb prints it; sites_at= their calls of it as [file:]line (default file: p='s), sites_total= when that list was cut; via=name: matched by name "
     "alone, the receiver unproven), shown= of total=; then d=2 rows, callers of the shown callers by rank (via=name if every path has a by-name hop), d2_shown= of d2=; "
     "capped=1 when either hop was cut; counts are floors (resolved calls only); next= lists the whole caller radius";
 inline constexpr std::string_view kForCompactCallerHopLegend =
-    "; callers of=: the one function's 1-hop callers, s t= n= sc= p=file:line (n=Owner.name folds sc= on a member; sites_at= its call sites, sites_total= if cut; "
+    "; callers of=: the one function's 1-hop callers, s t= n= sc= p=file:line (n=Owner.name folds sc= on a member; sites_at= its calls as [file:]line, sites_total= if cut; "
     "via=name by name only), shown= of total=; d=2 rows: their callers (via=name if every path has a by-name hop), d2_shown= of d2=; capped=1 if cut; floors; next= the radius";
 
 // UPWARD-2HOP: the ranked seed's clauses (by="rank" on the element). Self-contained — the named-route clause never rides with them.
 inline constexpr std::string_view kForRankedCallerHopLegend =
     "; callers by=rank of=: the task names an error, not a function, so of= is an r=1..3 row that is one function with 1 to "
     "3 callers (the first whose body holds the task's words in one string, else the first; found by rank, a lead to check), and the chain above it follows: s t= n= sc= p=file:line rows are its 1-hop callers "
-    "(n=Owner.name with no sc= on a member whose owner the index defines; sites_at= their calls of it as file:line, sites_total= when "
+    "(n=Owner.name with no sc= on a member whose owner the index defines; sites_at= their calls of it as [file:]line (default file: p='s), sites_total= when "
     "that list was cut; via=name: matched by name alone, the receiver unproven), shown= of total=; then d=2 rows, callers of the "
     "shown callers by rank (via=name if every path has a by-name hop), d2_shown= of d2=; capped=1 when either hop was cut; counts are floors (resolved calls only); next= lists "
     "the whole caller radius";
 inline constexpr std::string_view kForCompactRankedCallerHopLegend =
     "; callers by=rank of=: an error task's r=1..3 row that is one function with 1-3 callers (the first with the task's words in a body string, else the first; a lead by rank): its callers, s t= n= "
-    "sc= p=file:line (n=Owner.name folds sc= on a member; sites_at= its call sites, sites_total= if cut; via=name by name only), "
+    "sc= p=file:line (n=Owner.name folds sc= on a member; sites_at= its calls as [file:]line, sites_total= if cut; via=name by name only), "
     "shown= of total=; d=2 rows: their callers (via=name if every path has a by-name hop), d2_shown= of d2=; capped=1 if cut; floors; next= the radius";
 
 // SUBJECT-ANCHOR: the subject's named symbol (by="subject" on the element). Self-contained, as the ranked clauses are.
 inline constexpr std::string_view kForSubjectCallerHopLegend =
     "; callers by=subject of=: the subject names this function exactly (several: the first with callers), so its callers ride on the conceptual answer above: s t= n= sc= p=file:line rows are its 1-hop callers "
-    "(n=Owner.name with no sc= on a member whose owner the index defines; sites_at= their calls of it as file:line, sites_total= when "
+    "(n=Owner.name with no sc= on a member whose owner the index defines; sites_at= their calls of it as [file:]line (default file: p='s), sites_total= when "
     "that list was cut; via=name: matched by name alone, the receiver unproven), shown= of total=; then d=2 rows, callers of the "
     "shown callers by rank (via=name if every path has a by-name hop), d2_shown= of d2=; capped=1 when either hop was cut; counts are floors (resolved calls only); next= lists "
     "the whole caller radius";
 inline constexpr std::string_view kForCompactSubjectCallerHopLegend =
     "; callers by=subject of=: the function the subject names (several: the first with callers), on top of the conceptual answer: its callers, s t= n= "
-    "sc= p=file:line (n=Owner.name folds sc= on a member; sites_at= its call sites, sites_total= if cut; via=name by name only), "
+    "sc= p=file:line (n=Owner.name folds sc= on a member; sites_at= its calls as [file:]line, sites_total= if cut; via=name by name only), "
     "shown= of total=; d=2 rows: their callers (via=name if every path has a by-name hop), d2_shown= of d2=; capped=1 if cut; floors; next= the radius";
 
 struct CallerHopRender

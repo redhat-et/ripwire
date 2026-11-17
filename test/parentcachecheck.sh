@@ -71,16 +71,16 @@ callers_has(){
         if grep -qF "$want" "$TMP/c.xml"; then ok "(A) --callers=$sym has: $want"; else no "(A) --callers=$sym lacks: $want"; fi
     done
 }
-callers_has helper 1 'n="caller" p="shapes.cpp:21" sites_at="shapes.cpp:25 shapes.cpp:26"'
+callers_has helper 1 'n="caller" p="shapes.cpp:21" sites_at="25 26"'
 callers_has close  1 'n="caller" p="shapes.cpp:21"'
 callers_has make   2 'n="deeper::reach" p="shapes.rs:8"' 'n="run" p="shapes.rs:11"'
-callers_has use    1 'n="loop" p="shapes.go:8" of_def="2" sites_at="shapes.go:10 shapes.go:14"'
+callers_has use    1 'n="loop" p="shapes.go:8" of_def="2" sites_at="10 14"'
 callers_has next   1 'n="loop" p="shapes.go:8"'
-callers_has feed   1 'n="loop" p="shapes.go:8" sites_at="shapes.go:13"'
-callers_has leaf   2 'n="Inner.m" p="deep.py:10"' 'n="deep" p="deep.py:4" sites_at="deep.py:5"'
-callers_has h      1 'n="g" p="missing.c:3" sites_at="missing.c:5 missing.c:6"'
-callers_has k      1 'n="g" p="missing.c:3" sites_at="missing.c:6"'
-callers_has render 2 'n="Panel.refresh" p="shapes.ts:3" sites_at="shapes.ts:5"' 'n="mount" p="shapes.ts:9" sites_at="shapes.ts:11"'
+callers_has feed   1 'n="loop" p="shapes.go:8" sites_at="13"'
+callers_has leaf   2 'n="Inner.m" p="deep.py:10"' 'n="deep" p="deep.py:4" sites_at="5"'
+callers_has h      1 'n="g" p="missing.c:3" sites_at="5 6"'
+callers_has k      1 'n="g" p="missing.c:3" sites_at="6"'
+callers_has render 2 'n="Panel.refresh" p="shapes.ts:3" sites_at="5"' 'n="mount" p="shapes.ts:9" sites_at="11"'
 
 # same DIR LABEL ARGS... → the answer (stdout and stderr) is byte-identical with the cache on and off, and not empty
 same(){

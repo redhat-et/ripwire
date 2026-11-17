@@ -389,6 +389,12 @@ echo "=== (A-PIN) --legend=full is BYTE-IDENTICAL to the pre-L1 default (pinned 
 # RE-PIN 2026-11-15 (NEXT-APOS-RAW), for.xml only: the one next= value with a quote reads --for='…' (was &apos;…&apos;; nextverb.h
 # appendNextValueXml leaves ' raw in a "-delimited attribute) and est_tokens= falls 2227 -> 2223 with the 10 bytes it saves. Checked
 # mechanically: the old pin with &apos; -> ' inside next= and that est_tokens equals the lane's --legend=full output (at= masked).
+# RE-ANCHORED BY HAND 2026-11-17 (lane/sitesat-shortform, SITES-SHORT, by design), callers.xml only: its two <s> rows print
+# the call site as the bare line of the row's own p= file (sites_at="16", sites_at="10") and the sites_at= clause reads the
+# token as [file:]line ("as file:line tokens (...two calls on one line are one site)" -> "as [file:]line (...two calls on
+# a line are one site; no file: p='s)", +8 B, inside the 3769 B full:callers target). Checked mechanically
+# (test/sitesatshortcheck.sh arm B does the same on its own goldens): putting each row's p= file back in front of its bare
+# line and reversing that one phrase gives the previous pin byte for byte (at= masked), 3907 -> 3885 B.
 PIN_DIR="$ROOT/test/compactlegendfix/pre_l1_full"
 # the one normalisation, in python on BOTH sides so no sed dialect decides it (BSD sed appends a final newline, GNU
 # sed does not): at="…" masked, trailing newlines dropped.
@@ -796,9 +802,9 @@ pinFor()
 sdtCut="$( python3 - "$TMP/sdt.c" "$TMP/sdt.cut" <<'PY'
 import re, sys
 doc = open( sys.argv[1], encoding = "utf-8", errors = "replace" ).read()
-reading = " c sites_at=: its calls of the leaf name, any receiver, as file:line (p= is its def line); not proof each binds."
+reading = " c sites_at=: its calls of the leaf name, any receiver, as [file:]line (p=: def line, default file); not proof each binds."
 body = re.sub( r"<!--.*?-->", "", doc, flags = re.S )
-if not re.search( r'<c [^>]*sites_at="[^"]*:[0-9]', body ):
+if not re.search( r'<c [^>]*sites_at="[^"]*[0-9]"', body ):
     print( "NOPREMISE no caller row carries sites_at=" ); sys.exit( 0 )
 if doc.count( reading ) != 1:
     print( "NOPREMISE the sites_at= reading occurs %d times, not once" % doc.count( reading ) ); sys.exit( 0 )
@@ -834,9 +840,9 @@ fi
 catCut="$( python3 - "$TMP/cat.c" "$TMP/cat.cut" <<'PY'
 import re, sys
 doc = open( sys.argv[1], encoding = "utf-8", errors = "replace" ).read()
-reading = " <s sites_at=>: its calls of the leaf name, any receiver, as file:line (p= is its def line); not proof each binds."
+reading = " <s sites_at=>: its calls of the leaf name, any receiver, as [file:]line (p=: def line, default file); not proof each binds."
 body = re.sub( r"<!--.*?-->", "", doc, flags = re.S )
-if not re.search( r'<s [^>]*sites_at="[^"]*:[0-9]', body ):
+if not re.search( r'<s [^>]*sites_at="[^"]*[0-9]"', body ):
     print( "NOPREMISE no caller row carries sites_at=" ); sys.exit( 0 )
 if doc.count( reading ) != 1:
     print( "NOPREMISE the sites_at= reading occurs %d times, not once" % doc.count( reading ) ); sys.exit( 0 )

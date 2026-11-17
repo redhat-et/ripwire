@@ -128,7 +128,7 @@ same renderer. One computation has one output shape.
 
 | Item | Requirement |
 | --- | --- |
-| Operating system | macOS (arm64 or x86-64) or Linux (arm64 or x86-64). Native Windows x64 **builds** with both clang-cl and MSVC `cl.exe` — CI builds both on `windows-latest` every full matrix and smoke-tests each binary (`--version`, `ctest`, a real crawl, the two-run byte-identical contract, well-formed XML); the 660-gate suite does not run there, and ASan is compiled but never executed, so treat it as a build, not a validated platform. From 0.6.3 a prebuilt `windows-x64` zip ships as a **preview** ([Windows](../README.md#windows)): CI unzips it and compares its output with Linux's byte for byte, but no maintainer runs Windows, so WSL2 remains the fully supported way to run it on a Windows machine. |
+| Operating system | macOS (arm64 or x86-64) or Linux (arm64 or x86-64). Native Windows x64 **builds** with both clang-cl and MSVC `cl.exe` — CI builds both on `windows-latest` every full matrix and smoke-tests each binary (`--version`, `ctest`, a real crawl, the two-run byte-identical contract, well-formed XML); the 660-gate suite does not run there, and ASan is compiled but never executed, so treat it as a build, not a validated platform. From 0.6.3 a prebuilt `windows-x64` zip ships as a **preview** ([Windows](#windows)): CI unzips it and compares its output with Linux's byte for byte, but no maintainer runs Windows, so WSL2 remains the fully supported way to run it on a Windows machine. |
 | Prebuilt Linux floor | RHEL 8 or later (glibc 2.28) |
 | Prebuilt macOS floor | macOS 14 or later, Apple silicon. 0.6.1 is the last release with an Intel macOS binary; on an Intel Mac, pin `RIPWIRE_VERSION=v0.6.1` or build from source. |
 | x86-64 floor | x86-64-v3 (Intel Haswell, 2013, or later), for a prebuilt binary and a source build alike |
@@ -177,7 +177,7 @@ binary to `~/.local/bin`. The installer also stages the agent skills under
 your shell profile. It does not register hooks. To register hooks, run
 `bash ~/.local/share/ripwire/skills/install.sh --hook`.
 
-On Windows the installer does not apply: download the `windows-x64` zip instead ([Windows](../README.md#windows), a preview).
+On Windows the installer does not apply: download the `windows-x64` zip instead ([Windows](#windows), a preview).
 
 #### 3.2 Build from source
 
@@ -389,13 +389,13 @@ The leading legend comment is elided here; the line numbers are a capture and mo
 
 ```xml
 <callers of="rankGraphTeleport" defs="1" count="7" root="." hop_tested="0" hop_untested="7" graph_ambiguous="7827" graph_unresolved="4865" graph_unindexed="218" counts_floor="1" next="--uses=rankGraphTeleport">
-<s t="fn" n="getIndex" p="src/mcpindex.h:1165" sites_at="src/mcpindex.h:1268"/>
-<s t="fn" n="rankGraph" p="src/graph.h:7965" sites_at="src/graph.h:7968"/>
-<s t="fn" n="anchoredLexicalRank" p="src/graph.h:8611" sites_at="src/graph.h:8662"/>
-<s t="fn" n="runEval" p="src/eval.h:171" sites_at="src/eval.h:325"/>
-<s t="fn" n="churnDecayRanking" p="src/main.cpp:1383" sites_at="src/main.cpp:1397"/>
-<s t="fn" n="churnRankedGraph" p="src/main.cpp:1422" sites_at="src/main.cpp:1436 src/main.cpp:1437 src/main.cpp:1451"/>
-<s t="fn" n="runDefaultMap" p="src/main.cpp:1632" sites_at="src/main.cpp:1752"/>
+<s t="fn" n="getIndex" p="src/mcpindex.h:1165" sites_at="1268"/>
+<s t="fn" n="rankGraph" p="src/graph.h:7965" sites_at="7968"/>
+<s t="fn" n="anchoredLexicalRank" p="src/graph.h:8611" sites_at="8662"/>
+<s t="fn" n="runEval" p="src/eval.h:171" sites_at="325"/>
+<s t="fn" n="churnDecayRanking" p="src/main.cpp:1383" sites_at="1397"/>
+<s t="fn" n="churnRankedGraph" p="src/main.cpp:1422" sites_at="1436 1437 1451"/>
+<s t="fn" n="runDefaultMap" p="src/main.cpp:1632" sites_at="1752"/>
 </callers>
 ```
 
@@ -536,8 +536,7 @@ python3 test/pargates.py . ./build/ripwire -j 6
 A new gate script must be added to `test/regression.sh` in the same change. The gate
 `test/manifestcheck.sh` enforces this rule.
 
-Another gate derives the cap inventory; the published figure is in the README's own
-[verification fold](../README.md#in-the-tests).
+Another gate derives the cap inventory. At the counts snapshot 2026-11-15 the tool had 431 compile-time caps and 10 ranking parameters.
 `docs/LIMITS.md` lists each cap, its value, and whether the file discloses a truncation when the cap
 fires, and `python3 docs/limits_build.py --check` proves that list against `src/`. `docs/TUNING.md`
 lists the measured cost of the caps the sweep has measured, and names the ones it has not.
@@ -665,7 +664,7 @@ Notebooks, HTML, and CSV files are indexed as documents for `--recall` and `--me
 | Warm run, cache load | The same tree | 52.3 M instructions in place of the cold run's dominant 8.74 B phase: about 167 times fewer |
 
 The per-scope hardware-counter table behind these rows is in
-[Where its own cycles go](../README.md#where-its-own-cycles-go--hardware-counters-per-scope).
+[Where its own cycles go](#where-its-own-cycles-go--hardware-counters-per-scope).
 
 One process answers a query. The tool starts no daemon and holds no server connection. The parse
 cache is keyed by file content hash and a parser version. An extraction change bumps the version and
@@ -715,7 +714,7 @@ graphify 0.9.34 with `--code-only --no-cluster`. The measurement is in `bench/he
 
 ### 15. Documentation
 
-Every document this project publishes is listed under [Documentation](../README.md#documentation) below, with
+Every document this project publishes is listed under [Documentation](#documentation) below, with
 the question each one answers. Two of them matter while you are reading this guide: `docs/COMMANDS.md`
 gives every flag a real invocation and its recorded output, and `ripwire --help` is the authority
 whenever a document disagrees with it.

@@ -34,18 +34,19 @@ trailing `…`.
 spot. The rows below are a real capture: the callers and their files are gate-held current
 (`test/readmeexamplecheck.sh`), the `:line` suffixes were true when captured and drift as the files
 grow — nothing can keep a line number true in a document, so it is not claimed here. `p=` is where each caller is
-defined; `sites_at=` lists its call sites as pasteable `file:line` tokens, so the lines to edit come with the first answer.
+defined; `sites_at=` lists its call sites as lines of that same file (a site in another file would be the full `file:line`),
+so the lines to edit come with the first answer.
 
 ```
 $ ripwire . --callers=rankGraphTeleport
 <callers of="rankGraphTeleport" defs="1" count="7" root="." hop_tested="0" hop_untested="7" counts_floor="1">
-<s t="fn" n="getIndex" p="src/mcpindex.h:1165" sites_at="src/mcpindex.h:1268"/>
-<s t="fn" n="rankGraph" p="src/graph.h:7965" sites_at="src/graph.h:7968"/>
-<s t="fn" n="anchoredLexicalRank" p="src/graph.h:8611" sites_at="src/graph.h:8662"/>
-<s t="fn" n="runEval" p="src/eval.h:171" sites_at="src/eval.h:325"/>
-<s t="fn" n="churnDecayRanking" p="src/main.cpp:1383" sites_at="src/main.cpp:1397"/>
-<s t="fn" n="churnRankedGraph" p="src/main.cpp:1422" sites_at="src/main.cpp:1436 src/main.cpp:1437 src/main.cpp:1451"/>
-<s t="fn" n="runDefaultMap" p="src/main.cpp:1632" sites_at="src/main.cpp:1752"/>
+<s t="fn" n="getIndex" p="src/mcpindex.h:1165" sites_at="1268"/>
+<s t="fn" n="rankGraph" p="src/graph.h:7965" sites_at="7968"/>
+<s t="fn" n="anchoredLexicalRank" p="src/graph.h:8611" sites_at="8662"/>
+<s t="fn" n="runEval" p="src/eval.h:171" sites_at="325"/>
+<s t="fn" n="churnDecayRanking" p="src/main.cpp:1383" sites_at="1397"/>
+<s t="fn" n="churnRankedGraph" p="src/main.cpp:1422" sites_at="1436 1437 1451"/>
+<s t="fn" n="runDefaultMap" p="src/main.cpp:1632" sites_at="1752"/>
 </callers>
 ```
 
@@ -125,17 +126,11 @@ dependency sits in the same manifest or a parent one), and only a manifest with 
 with no manifest evidence of its own still falls back to the SAME test-dir shell/Python driver search
 every other language uses — a named driver beats an
 unguessed default. A row with none says so — `run_unknown="1"`, never a guessed suite command — and a
-`<t>` row carries one or the other, never neither. A
+`<t>` or `<g>` row carries one or the other, never neither. A
 `<g hops="2" n="3" p="a,b,c" run_unknown="1"/>` row is **two or more contiguous runner-less rows whose
 attributes are byte-identical**, served as one: `n=` is how many, `p=` is their paths verbatim in list
-order, and the disclosure is paid once per group rather than once per row. Rows that HAVE a runner group
-the same way when each one's command is exactly `<head> <its own path>` with the same head:
-`<g hops="1" n="3" p="a,b,c" run_each="pytest {p}"/>`, where a path's command is `run_each=` with `{p}`
-replaced by that path. It is a template rather than a bare verb because of how it fails unexpanded:
-`python3 {p}` errors, a bare `pytest` runs the whole suite. Everything else stays its own
-row — a row whose command is not that shape (a runner that is another file, a `(cd pkg && …)` subshell, a
-quoted or `--` path, a multi-root path) keeps its full `run=`, as does a row whose attributes or verb differ
-from its neighbour's, and a path containing a
+order, and the disclosure is paid once per group rather than once per row. Everything else stays its own
+row — a row with a `run=`, a row whose attributes differ from its neighbour's, and a path containing a
 comma, which is never grouped at all, so `p=` splits on `,` into exactly `n=` paths. A `shown=`/`total=`
 over these rows counts test FILES: a `<g>` row is `n=` of them.
 

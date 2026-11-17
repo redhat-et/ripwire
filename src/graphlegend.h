@@ -1347,8 +1347,8 @@ inline const char* modScopeLegend( bool on ) noexcept { return on ? kModScopeLeg
 // condition and `cut` its "a row carries sites_total=" condition, so an answer without them pays 0 bytes. `cap` is
 // pageview.h kCallSitesPerRowCap, passed in (this header sits below pageview.h). No double hyphen: inside an XML comment.
 inline constexpr const char* kCallSitesAtLegend =
-    "sites_at= on a caller row: its calls of the called LEAF name, any receiver or qualifier, as file:line tokens "
-    "(space-separated, ascending; two calls on one line are one site); p= stays where the caller is DEFINED. Matched by name like "
+    "sites_at= on a caller row: its calls of the called LEAF name, any receiver or qualifier, as [file:]line "
+    "(space-separated, ascending; two calls on a line are one site; no file: p='s); p= stays where the caller is DEFINED. Matched by name like "
     "the uses verb's call rows, so not proof each binds here; absent when no call there is spelled like it (an aliased import). ";
 inline std::string callSitesAtLegend( bool on, bool cut, std::size_t cap )
 {
