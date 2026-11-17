@@ -619,6 +619,7 @@ for _g in \
     hashsetcheck \
     hazardpatterncheck \
     headbinstagecheck \
+    headleakcheck \
     headsnapcachecheck \
     helpbudgetcheck \
     helptaskdeadlinecheck \

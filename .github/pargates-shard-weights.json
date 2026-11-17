@@ -245,6 +245,7 @@
  "handoffcheck.sh": 12.6,
  "hasacheck.sh": 2.7,
  "hazardpatterncheck.sh": 5.2,
+ "headleakcheck.sh": 3.0,
  "headsnapcachecheck.sh": 19.9,
  "historyoraclecheck.sh": 6.9,
  "hookcheck.sh": 78.0,
