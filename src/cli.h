@@ -49,6 +49,9 @@ struct Config
     bool             allowRemoteEdits = false;   // --allow-remote-edits: permit the 3 edit verbs over --listen (refused by
                                                  // default); forces the token requirement even on loopback.
     std::string_view mcpLegend;                  // --mcp-legend=session|inline: the stdio server's legend posture (default session)
+    bool             legendHaveSeen = false;     // --legend-have= was PRESENT. Absent and present-but-empty both leave
+                                                 // legendHave empty, and they must not behave alike: absent is a no-op,
+                                                 // an empty value is a refusal (§B5's owner ruling, 2026-07-29).
     std::string_view legendHave;                 // --legend-have=DICTV: the CALLER asserts it already holds that dictionary
                                                  // version, so this answer may take the ref posture. The handshake is what
                                                  // makes a CLI ref answer honest AND deterministic: --legend=ref is refused
@@ -2816,7 +2819,7 @@ inline constexpr char kHelpTail[] =
         "    --legend-have=DICTV        you already hold that legend dictionary (--legend-dict prints its dictv=), so this answer\n"
         "                               takes the ref posture: rows and identity on the root, every other attribute on a trailing\n"
         "                               <about legend=\"ref\" dict= dictv=/>, and no legend prose. Lossless -- nothing is dropped,\n"
-        "                               only moved. Measured -30.4 %% over 80 recorded answers (-8 %% to -57 %% by verb). A version\n"
+        "                               only moved. Measured -30.4 % over 80 recorded answers (-8 % to -57 % by verb). A version\n"
         "                               that is not this binary\'s is REFUSED, naming both.\n"
         "    --json                     emit JSON instead of XML; keys mirror the XML attribute names one to one\n"
         "                               machine-parseable JSON instead of XML, keys mirror the XML attr names 1:1. Every\n"
@@ -4571,8 +4574,23 @@ static_assert( std::ranges::contains( kLegendPostures, kDefaultLegendPosture ), 
 // to break unrelated headers (forcallerhop.h / subjectanchor.h lose oneHopCallerRows). The POSTURE conflict needs no
 // dictionary, so it stays at intake — in its own function rather than inside validateModifierGuards, which is already
 // 5x its complexity bar.
-inline void refuseLegendHaveWithFullPosture( Config& c )
+inline void refuseLegendHaveMisuse( Config& c )
 {
+    // AN EMPTY VALUE REFUSES (§B5, OWNER RULING 2026-07-29: refuse-all). `--legend-have=` is usually a shell
+    // variable that expanded to nothing, and the audit's own argument applies here with force: silently
+    // ignoring it hands back a FULL-PRICE answer at exit 0 with an empty stderr, while the caller believes it
+    // just saved 30 % of the bytes. An earlier version of this flag treated an empty value as "asserts
+    // nothing", and test/emptyvaluerefusecheck.sh was right to refuse that: 20 of the 21 hand-written arms
+    // refuse, and the odd one out was mine. Flag NAMED, real problem stated, runnable example, stdout empty.
+    if( c.legendHaveSeen && c.legendHave.empty() )
+    {
+        rw::emitRaw( stderr, "ripwire: --legend-have= needs the legend dictionary version you hold — an empty value names none "
+                             "(a shell variable that expanded to nothing?), and ignoring it would serve a full-price answer while "
+                             "you believed it was reduced. Read the version with `ripwire --legend-dict | head -1` and pass it, "
+                             "e.g. ripwire . --callers=main --legend-have=$(ripwire --legend-dict | head -1 | tr -dc '0-9a-f')\n" );
+        c.ok = false;
+        return;
+    }
     if( c.legendHave.empty() )
     {
         return;
@@ -4879,7 +4897,7 @@ inline void validateModifierGuards( Config& c ) noexcept
         rw::emitRaw( stderr, "ripwire: --mcp-legend is read by the stdio MCP server only (--listen holds no legend session) — e.g. ripwire . --mcp --mcp-legend=inline\n" );
         c.ok = false;
     }
-    refuseLegendHaveWithFullPosture( c );
+    refuseLegendHaveMisuse( c );
     if( !c.mcpTools.empty() && !c.mcp )   // --listen sets c.mcp, so this covers both transports
     {
         rw::emitRaw( stderr, "ripwire: --mcp-tools is read by the MCP server only — pass --mcp (or --listen) too, e.g. ripwire . --mcp --mcp-tools=core\n" );
@@ -5735,7 +5753,8 @@ inline Config parseArgs( int argc, char** argv ) noexcept
             }
             else if( startsWith( a, "--legend-have=" ) )
             {
-                c.legendHave = a.substr( 14 );
+                c.legendHave     = a.substr( 14 );
+                c.legendHaveSeen = true;
             }
             else if( startsWith( a, "--whereis-listing=" ) )
             {

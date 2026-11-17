@@ -31,10 +31,31 @@ if [ "$rc" -ne 0 ] && grep -q "does not match this binary's legend dictionary" "
 else
     bad "(B1) a stale --legend-have= must refuse and name both versions -- rc=$rc, stderr: $(head -c 200 "$err")"
 fi
-if "$BIN" . --callers=main --legend-have= >/dev/null 2>&1; then
-    pass "(B2) an EMPTY --legend-have= asserts nothing and is a no-op, not a refusal"
+# (B2) AN EMPTY VALUE REFUSES. This arm asserted the OPPOSITE when it was written -- that an empty value
+# "asserts nothing and is a no-op" -- and test/emptyvaluerefusecheck.sh was right to fail it: §B5's owner
+# ruling (2026-07-29) is refuse-all, 20 of the 21 hand-written arms refuse, and the odd one out was this
+# flag. The ruling's argument is the stronger one here: `--legend-have=` is usually a shell variable that
+# expanded to nothing, and ignoring it serves a FULL-PRICE answer at exit 0 while the caller believes the
+# bytes were reduced. Absent and present-but-empty must therefore differ, and both halves are asserted.
+eout="$WORK/empty.out"; eerr="$WORK/empty.err"
+"$BIN" . --callers=main --legend-have= >"$eout" 2>"$eerr"; rc=$?
+if [ "$rc" -eq 1 ] && [ ! -s "$eout" ] && grep -qF -- "--legend-have" "$eerr"; then
+    pass "(B2) an EMPTY --legend-have= refuses (rc=1), names the flag, and writes no stdout"
 else
-    bad "(B2) an empty --legend-have= must not refuse -- it asserts nothing"
+    bad "(B2) an empty --legend-have= must refuse naming the flag with empty stdout -- rc=$rc, $(wc -c <"$eout" | tr -d ' ')B stdout"
+fi
+if "$BIN" . --callers=main >/dev/null 2>&1; then
+    pass "(B3) the flag ABSENT is still a no-op -- an empty value and no flag are different things"
+else
+    bad "(B3) omitting --legend-have= must not refuse"
+fi
+# §B5 also requires the refusal to be byte-identical under --json: the table machinery writes to stderr
+# before any serializer is chosen, and that has to stay true.
+"$BIN" . --callers=main --legend-have= --json >/dev/null 2>"$WORK/empty_json.err"
+if cmp -s "$eerr" "$WORK/empty_json.err"; then
+    pass "(B4) the empty-value refusal is byte-identical under --json"
+else
+    bad "(B4) the empty-value refusal differs under --json"
 fi
 
 # (C) the posture applies, and is LOSSLESS: body identical, every root attribute still present
@@ -173,12 +194,17 @@ fi
 # connected, so responses landed in the capture and a live client waited forever. Measured before the fix: a
 # response in 0.0 s without the flag, NOTHING in 6 s with it. The fix is a refusal at intake, so what this arm
 # holds is that the combination exits non-zero QUICKLY and says why -- never that it answers.
+# The house bounded_run idiom (crashsweepcheck / namedfileinputcheck): `timeout` is GNU coreutils and the
+# macOS CI runner has none, so a bare `timeout 10` exits 127 there and this arm reports a refusal that never
+# ran. It passed locally only because Homebrew put one on PATH. GNU timeout kills with 124, the perl-alarm
+# fallback with 142; neither counts as the refusal being asserted.
+bounded_run(){ if command -v timeout >/dev/null 2>&1; then timeout 10 "$@"; else perl -e 'alarm 10; exec @ARGV' "$@"; fi; }
 for t in "--mcp" "--lsp" "--listen=127.0.0.1:8799"; do
     serr="$WORK/srv.err"
     start=$(date +%s)
-    timeout 10 "$BIN" . $t --legend-have="$DV" >/dev/null 2>"$serr"; rc=$?
+    bounded_run "$BIN" . $t --legend-have="$DV" >/dev/null 2>"$serr"; rc=$?
     took=$(( $(date +%s) - start ))
-    if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ] && [ "$took" -lt 5 ] && grep -q "server transport" "$serr"; then
+    if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ] && [ "$rc" -ne 142 ] && [ "$rc" -ne 127 ] && [ "$took" -lt 5 ] && grep -q "server transport" "$serr"; then
         pass "(G1) $t with --legend-have= is refused at intake in ${took}s (rc=$rc), not captured into a deadlock"
     else
         bad "(G1) $t with --legend-have= must refuse fast and name the transport -- rc=$rc after ${took}s: $(head -c 150 "$serr")"
