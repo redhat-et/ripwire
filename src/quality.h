@@ -1804,7 +1804,12 @@ inline std::vector<std::uint32_t> codeLocByNode( const IngestResult& ing, MoveId
                       // same reason ("doc sections churn by design").
         }
         out[i] = codeLinesInBody( body, s.lang );
-        if( moveOut == nullptr || ( moveOut->body[i] = moveCidOf( s, body ) ) == 0 )
+        if( moveOut == nullptr )
+        {
+            return;
+        }
+        moveOut->body[i] = moveCidOf( s, body );
+        if( moveOut->body[i] == 0 )
         {
             return;
         }
