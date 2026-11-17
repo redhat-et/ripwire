@@ -16907,3 +16907,47 @@ list: `reexports`, `graph_verb`, `bridge`, `gap`, `path_gap`, `near_sink`, `shor
 Not that a routed section makes the tail redundant in general — only that it does so often enough to be
 worth measuring, on a condition fixed in advance. And no saving figure: the offline ladder returns one in
 seconds, so there is nothing to guess.
+
+## READOUT — ITEM C: the condition FAILS its own C1, and it barely improves on cutting the tail outright
+
+Band C5's control first, as registered: the condition **fires on 172 of 321 cells**, far above the 10-cell
+floor, so this is not a vacuous rule showing a clean result by never triggering.
+
+| cut | bytes | Δ | item/lenient | item/strict | symbol | file |
+| --- | ---: | ---: | --- | --- | --- | --- |
+| none (control) | 7,432,873 | 0.00 % | 0 (0) | 0 (0) | 0 (0) | 0 (0) |
+| **tail-if-routed** | 4,884,010 | **−34.29 %** | **55 (19)** | 0 (0) | **23 (13)** | 0 (0) |
+| tail (unconditional) | 4,493,579 | −39.54 % | 64 (19) | 0 (0) | 32 (17) | 0 (0) |
+
+**Band C1 requires ZERO cells losing completeness. 19 cells lose it at the item grain and 13 at the symbol
+grain. Item C FAILS**, and the margin is not close.
+
+### The finding that matters more than the failure
+
+Conditioning the cut on a routed section buys **9 lenient and 9 symbol anchors** against cutting the tail
+outright, and pays **5.25 points of bytes** for them. So **a routed section does not make the tail
+redundant.** The hypothesis was that an answer which already routed has its answer elsewhere; on 172 cells
+it does not. That is the opposite of what the five-cell read suggested, and the five-cell read was not
+wrong about its five — it said "no anchor is tail-only in those 3 cells", which held. It simply did not
+generalise, and C1/C5 were registered so that would surface as a FAIL rather than as a shipped default.
+
+Three items are now registered and failed on this population — K (unconditional cap), its retune (forbidden
+by K3), and C (conditional collapse) — and all three fail for one reason: **`<tail>` carries real, thinly
+spread, deep evidence.** It is 39.5 % of a `--for` answer and it cannot be cut by height, by row class, or
+by condition without dropping answers. The honest conclusion for this round is that **the tail is not the
+lever**, and three pre-registered attempts is enough evidence to stop looking there.
+
+### What the round found instead
+
+The lever is the one measured at zero completeness cost across all 449 cell×bound pairs: **the legend**, a
+near-fixed per-answer tax whose share is 14.0 % of a `--for` bundle and 62.6 % of a `--whereis` answer,
+93 % of whose clause emissions have already been sent to the reader. That is now shipped as an opt-in CLI
+handshake (`--legend-have=DICTV`, PR #677): **−30.39 % over 80 recorded answers, 80/80 taking the posture,
+lossless on every one** — zero root attributes dropped and the body byte-identical.
+
+And the second lever is routing, which the legend work makes materially better: `--for` → `whereis` saves
+19.8× today and **45.4×** once the fixed tax is gone. Two verb substitutions were re-measured directly and
+reproduce an independent read to within 22 B: `--path=` answers `ld2-django-07` in **4,543 B against
+44,781 (10.1 %)** and `ld-vscode-03` in **12,781 against 57,466 (22.2 %)**. Whether completeness holds
+under substitution is NOT established here — it needs per-verb gold, which Band R3 already requires before
+any routed answer may be graded.
