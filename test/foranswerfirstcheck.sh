@@ -43,7 +43,7 @@ BIN="${RIPWIRE_BIN:-${1:-$ROOT/build/ripwire}}"
 if [ ! -x "$BIN" ]; then echo "no ripwire binary at $BIN -- build first (cmake --build build -j)"; exit 2; fi
 command -v python3 >/dev/null 2>&1 || { echo "foranswerfirstcheck: python3 required"; exit 2; }
 fail=0
-ok(){ printf '  PASS  %s\n' "$1"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$1"; fail=1; }
 WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
 echo "foranswerfirstcheck: BIN=$BIN"

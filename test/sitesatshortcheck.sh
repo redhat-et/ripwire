@@ -180,7 +180,14 @@ echo "=== F: a path with a space; a path with an all-digit fragment; absence ===
 PYB="$( sed 's/<!--.*-->//' "$TMP/py.callers.xml" )"
 GPY="$( sed 's/<!--.*-->//' "$GOLD/py.callers.xml" )"
 case "$GPY" in *'<s t="fn" n="spaced" p="my dir/sp.py:2" sites_at="my dir/sp.py:3 my dir/sp.py:4"/>'*) premise=1 ;; *) premise=0 ;; esac
-case "$PYB" in *'<s t="fn" n="spaced" p="my dir/sp.py:2" sites_at="3 4"/>'*) [ "$premise" = 1 ] && ok "(F) my dir/sp.py: the golden's unsplittable \"my dir/sp.py:3 my dir/sp.py:4\" is now \"3 4\"" || no "(F) premise: the golden does not hold the spaced row" ;;
+case "$PYB" in *'<s t="fn" n="spaced" p="my dir/sp.py:2" sites_at="3 4"/>'*)
+        # The verdict is decided BEFORE anything is written. `… && ok … || no …` on one line makes a failed
+        # WRITE of the PASS line fall through to no(), printing FAIL for an arm that passed (gateexitcheck G2).
+        if [ "$premise" = 1 ]; then
+            ok "(F) my dir/sp.py: the golden's unsplittable \"my dir/sp.py:3 my dir/sp.py:4\" is now \"3 4\""
+        else
+            no "(F) premise: the golden does not hold the spaced row"
+        fi ;;
     *) no "(F) the spaced row: $( printf '%s' "$PYB" | grep -o '<s [^>]*n="spaced"[^>]*>' )" ;; esac
 case "$PYB" in *'<s t="fn" n="digits" p="d 12 x/own.py:2" sites_at="3"/>'*) ok "(F) d 12 x/own.py: the row's own path may hold an all-digit fragment; the value is the bare line 3" ;;
     *) no "(F) the digits row: $( printf '%s' "$PYB" | grep -o '<s [^>]*n="digits"[^>]*>' )" ;; esac
@@ -236,7 +243,12 @@ else
         else no "(U) sitesatshort_unit rc=$urc, $n case(s) passed:"; grep -E 'FAIL|assert|Assertion' "$TMP/u_run.log" | head -4 | sed 's/^/        /'; fi
         for want in 'cross-file: a foreign site keeps its FULL token' 'mixed row: bare for the own file, full for the other' \
                     'foreign path with an all-digit fragment: the whole row is full form'; do
-            grep -qF "  PASS  $want" "$TMP/u_run.log" && ok "(U) $want" || no "(U) case missing or failed: $want"
+            # decided first, then reported — see the G2 note above
+            if grep -qF "  PASS  $want" "$TMP/u_run.log"; then
+                ok "(U) $want"
+            else
+                no "(U) case missing or failed: $want"
+            fi
         done
         # the synthetic rows through the SAME reconstruction the real answers got
         if out="$( recon unitrows "$TMP/u_run.log" )"; then

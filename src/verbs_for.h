@@ -5647,7 +5647,9 @@ std::optional<int> runForLens( const MainDispatch& d )
             std::fwrite( r.out->bytes.data(), 1, r.out->bytes.size(), stdout );
             return r.rc;
         }
-        DISCLOSE( "runForLens: no whole capture for the default answer — serving it unpermuted" );
+        rw::answerfirst::AnswerFirstFallback afSink;
+        DISCLOSE( afSink, rw::answerfirst::AnswerFirstFallback::DisclosureWhy::NoWholeCapture,
+                  "runForLens: no whole capture for the default answer — serving it unpermuted" );
     }
     return runForLensPosture( d, nullptr );
 }

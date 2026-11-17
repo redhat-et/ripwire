@@ -52,9 +52,32 @@
 #include <vector>
 
 #include "infra/Diagnostics.h"
+#include "infra/emit.h"
 
 namespace rw::answerfirst
 {
+
+// The DISCLOSE SINK for this pass's two fallbacks. A one-argument DISCLOSE( msg ) is trace-only and compiles
+// away under NDEBUG (Diagnostics.h RW_DISCLOSE_1), so a RELEASE user learns nothing when the permutation
+// declines to run — test/selfcheckcheck.sh (R) ratchets on exactly that count, and it caught these two.
+//
+// Both fallbacks serve a COMPLETE answer: only the reordering is missed, which is why each message says so.
+// A reader who cannot tell a degraded answer from a whole one is the failure this sink exists to prevent.
+struct AnswerFirstFallback
+{
+    enum class DisclosureWhy : std::uint8_t
+    {
+        SizeChanged,      // the permutation changed the document's size — a block was dropped or duplicated
+        NoWholeCapture,   // the answer could not be buffered whole, so it is served in the default order
+    };
+    void disclose( DisclosureWhy why ) noexcept
+    {
+        rw::emitTo( stderr, "ripwire: --legend=last: {}\n",
+                    why == DisclosureWhy::SizeChanged
+                        ? "the permuted answer changed size, so the original order is served — the answer is complete either way"
+                        : "the answer did not buffer whole, so it is served in the default order — the answer is complete either way" );
+    }
+};
 
 // One top-level child of the root: its exact byte span, and what it is.
 struct Block
@@ -297,12 +320,15 @@ inline bool answerFirst( std::string& doc )
 
     // THE PERMUTATION CONTRACT. Not an assertion of taste: if this ever fails, the pass has dropped or
     // duplicated a block, and the band's whole safety argument — no row removed, so no gold lost — is void.
-    // DISCLOSE, not VERIFY( false ): Release deletes the fallback behind a trapping check, and this IS the
-    // fallback. (CLAUDE.md still calls this macro DEGRADED_PATH_ALERT; Diagnostics.h:545 records that as the
-    // same alert "under a new name, byte for byte", and the code is the authority.)
+    // DISCLOSE rather than a trapping self-check: Release deletes the fallback behind a trap, and this IS the
+    // fallback. (test/selfcheckcheck.sh (A) refuses the retired macro spellings anywhere outside its own
+    // history list, so this note names the mechanism instead of the old names; Diagnostics.h:545 holds the
+    // rename record, and the code is the authority over any document.)
     if( out.size() != doc.size() )
     {
-        DISCLOSE( "foranswerfirst: the permuted answer changed size — serving the original, unpermuted" );
+        AnswerFirstFallback sink;
+        DISCLOSE( sink, AnswerFirstFallback::DisclosureWhy::SizeChanged,
+                  "foranswerfirst: the permuted answer changed size — serving the original, unpermuted" );
         return false;
     }
     doc.swap( out );

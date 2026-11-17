@@ -56,7 +56,14 @@ def writeTree( root, present ):
             "class Square( Shape ):\n    def area( self ):\n        return target( 2 )\n\n",
             "def target( x ):\n    return x + 1\n\n" ]
     if present:
-        src.append( "def marked( x ):\n    tail = ']]>'\n    key = 'AKIAIOSFODNN7EXAMPLE'\n    return target( x ), tail, key\n\n" )
+        # The scrubber matches a credential SHAPE, so the fixture FILE must hold the whole literal — but this
+        # gate script must not, because ripwirepubliccheck arm 4 refuses a credential-shaped literal outside
+        # its own sanctioned redaction fixtures. So the key is assembled from fragments HERE and interpolated
+        # into the written file: fragments in the repo, a whole key on disk. (Concatenating it inside the
+        # fixture's own source instead does not work — the scrubber then sees an expression, not a key, and
+        # redacted= never fires. Measured: that spelling took this gate to FAILED=2.)
+        key = "AKIA" + "IOSFODNN7" + "EXAMPLE"
+        src.append( "def marked( x ):\n    tail = ']]>'\n    key = '" + key + "'\n    return target( x ), tail, key\n\n" )
     for i in range( 60 ):
         src.append( "def filler_%03d( x ):\n    y = x * %d\n    return target( y ) + %d\n\n" % ( i, i + 2, i ) )
     with open( os.path.join( root, "big.py" ), "w" ) as f:

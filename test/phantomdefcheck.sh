@@ -40,7 +40,7 @@ BIN="${RIPWIRE_BIN:-${1:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 if [ ! -x "$BIN" ]; then echo "no ripwire binary at $BIN -- build first (cmake --build build -j)"; exit 2; fi
 fail=0
-ok(){ printf '  PASS  %s\n' "$1"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$1"; fail=1; }
 WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
 echo "phantomdefcheck: BIN=$BIN"
@@ -152,7 +152,11 @@ fi
 
 # (D) THE REAL CORPUS, which is where the defect was found. Skipped loudly rather than silently when the
 # tree is absent, because a silent skip here would read as a pass.
-TMUX="/Users/qgames/m5-work/repos/tmux"
+# The real corpus is OPTIONAL and must never be a hard-coded home path: this repo is public, and
+# test/ripwirepubliccheck.sh (arm 2) refuses an absolute home path anywhere in the tree -- and it reads
+# comments too, so this one cannot spell the prefix it is about. Point
+# RIPWIRE_PHANTOM_CORPUS at a tmux checkout to run arm (D); without it the fixture arms are the proof.
+TMUX="${RIPWIRE_PHANTOM_CORPUS:-}"
 if [ -d "$TMUX" ]; then
     DC="$( "$BIN" "$TMUX" --dead-code --legend=compact 2>/dev/null )"
     ph="$( printf '%s' "$DC" | grep -o 'n="\(return\|printflike\)"' | sort -u | tr '\n' ' ' )"
@@ -163,7 +167,7 @@ if [ -d "$TMUX" ]; then
         no "(D) --dead-code on tmux still reports phantom rows: $ph ($tot) — a wrong row here tells an agent to delete live code"
     fi
 else
-    printf '  SKIP  (D) the tmux corpus is absent at %s — the fixture arms above still ran\n' "$TMUX"
+    printf '  SKIP  (D) no corpus at RIPWIRE_PHANTOM_CORPUS%s — the fixture arms above still ran\n' "${TMUX:+ ($TMUX)}"
 fi
 
 if [ "$fail" -ne 0 ]; then echo "phantomdefcheck: FAILURES"; exit 1; fi
