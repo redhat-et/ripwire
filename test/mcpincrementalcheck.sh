@@ -174,11 +174,15 @@ w, c = [ json.loads( l ) for l in sys.stdin.read().splitlines()[:2] ]
 A = re.compile( r"\s([\w:.-]+)=\"([^\"]*)\"" )
 def rows( t ):
     m = re.search( r"<sigs\b[^>]*>.*?</sigs><tail[^>]*>.*?</tail>", t, re.S ); return m.group( 0 ) if m else None   # <sigs> may carry docs_after_code=
-ab = re.search( r"<about\b[^>]*/>", w ); rt = re.search( r"<ctx\b[^>]*>", c )
+ab = re.search( r"<about\b[^>]*/>", w ); rt = re.search( r"<ctx\b[^>]*>", c ); wr = re.search( r"<ctx\b[^>]*>", w )
 if not ab or "legend=\"ref\"" not in ab.group( 0 ): print( "NOREF" ); sys.exit()
-wa = { k: v for k, v in A.findall( ab.group( 0 ) ) if k not in ( "legend", "dict", "dictv" ) }
+# ref-posture-disclosure: the root facts are read where the READER finds them, on the warm answer'"'"'s own <ctx> root. This arm
+# used to read them off <about>, which is where the posture had moved them; <about> is now the legend pointer and nothing else,
+# and a fact found on it is a failure (PTR), not a match.
+if [ k for k, _ in A.findall( ab.group( 0 ) ) if k not in ( "legend", "dict", "dictv" ) ]: print( "PTR: <about> carries facts" ); sys.exit()
+wa = { k: v for k, v in A.findall( wr.group( 0 ) ) if k != "task" } if wr else None
 ca = { k: v for k, v in A.findall( rt.group( 0 ) ) if k != "task" } if rt else None
-print( "SAME" if rows( w ) is not None and rows( w ) == rows( c ) and wa == ca else "DIFF" )
+print( "SAME" if rows( w ) is not None and rows( w ) == rows( c ) and wa is not None and wa == ca else "DIFF" )
 ' 2>&1 )"
     case "$tw" in
         SAME) ok "$what (default legend posture twin): warm legend=\"ref\" answer has the cold answer's rows and root facts";;

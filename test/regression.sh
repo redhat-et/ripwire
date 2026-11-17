@@ -935,6 +935,7 @@ for _g in \
     redactcheck \
     redactfixcheck \
     reexportcheck \
+    refdisclosurecheck \
     refusaltailcheck \
     refwindowcheck \
     regexbombcheck \

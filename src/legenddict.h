@@ -23,11 +23,23 @@
 // the session pays the core once plus exactly the entries it uses, which is the quantity lo_dict.py estimated. The whole
 // dictionary still resolves: ripwire://legend-dict/full on the server, `ripwire --legend-dict` on the CLI.
 //
-// THE REF ANSWER'S SHAPE. Rows first: the root keeps only the answer's identity (task= changed= from= to=); the legend
-// comment is reduced to its unserved entries and moved, with every other head comment (they carry data: the map
-// header, --for's notes and splices), after the rows; the LAST child is
-//     <about ROOT-ATTRIBUTES legend="ref" dict="ripwire --legend-dict" dictv="16-hex"/>
-// carrying every moved root attribute unchanged, in its original order. No attribute is dropped, rows keep all of theirs.
+// THE REF ANSWER'S SHAPE. The root open tag is the inline answer's, byte for byte: EVERY attribute stays on it, in its
+// original order — schema=, the paging window (shown= total= capped= has_more= next_offset=), every *_capped= and
+// counts_floor=, the graph gauges, root= at= route= confidence=. The legend comment is reduced to its unserved entries and
+// moved, with the other head comments (legend prose this dictionary does not hold, --for's notes and splices), after the
+// rows; the LAST child is the legend POINTER and nothing else:
+//     <about legend="ref" dict="ripwire --legend-dict" dictv="16-hex"/>
+// The map header comment (`<!-- files= … shown= … -->`, which the map legend itself calls data) stays where the inline
+// answer has it. No attribute is dropped, none moves, rows keep all of theirs.
+//
+// A FACT IS NEVER RELOCATED (lane ref-posture-disclosure, 2026-11-17). The first shape of this posture kept only task=
+// changed= from= to= on the root and carried every other root attribute on <about>, the answer's last child. The
+// handshake exists to stop re-sending DEFINITIONS; that move relocated FACTS, and a reader holding the rows of a long
+// answer without its tail read a cut list as a complete one: capped="1" has_more="1" counts_floor="1" sat after the last
+// row. Measured on that binary over 103 CLI handshake answers on five corpora, <about> was not wholly inside the first
+// 2 KB in 27, and 22 of the 28 answers over 2 KB had a complete row in that prefix while an active cut or floor lay
+// beyond it. Keeping the attributes on the root costs no byte — they are the same bytes — so there is nothing to trade.
+// Gate: test/refdisclosurecheck.sh.
 // L6: a runner-less <g n= p=> group of n <= 8 rows prints as its n single rows (grouping is a list-scale device) — only
 // while the bytes the dropped legend freed pay for it.
 //
@@ -64,9 +76,9 @@ namespace rw::legenddict
 // session. The window and sub-cap readings are generic here because every compact legend spells them per answer.
 inline constexpr std::string_view kCoreEntries[] =
 {
-    "<about legend=\"ref\" dict= dictv=>: the answer's rows come first; its root keeps only task= changed= from= to=, and "
-    "this LAST child carries every other root attribute unchanged (schema= included); legend=\"ref\": a definition is sent "
-    "once per session (this dictionary's core, or the first answer that needs it, in a trailing comment); dict= prints "
+    "<about legend=\"ref\" dict= dictv=>: this LAST child is only the legend pointer; the root keeps every attribute it "
+    "carries inline, unchanged (schema=, each count, cut and floor); rows follow it; legend=\"ref\": a definition is "
+    "sent once per session (this dictionary's core, or the first answer that needs it, in a trailing comment); dict= prints "
     "every definition, dictv= their version",
     "schema=ripwire.KEY/v1: the line ripwire.KEY/v1 below reads the answer's rows",
     "window: shown= total= capped= has_more= next_offset= offset= limit= page a list (capped=1 cut; next_offset= pastes as offset=)",
@@ -289,40 +301,6 @@ enum class RefOutcome : std::uint8_t
 
 namespace detail
 {
-
-// The attributes that stay on a ref root: the answer's identity (prereg R2-LO, KEEP).
-inline constexpr std::string_view kIdentityAttrs[] = { "task", "changed", "from", "to" };
-
-struct RootAttr
-{
-    std::string_view name;
-    std::string_view whole;   // ` name="value"`, leading space included
-};
-
-// The ` name="value"` pairs of one start tag (whose name ends at `from`). Values are escaped XML: no raw quote inside.
-inline std::vector<RootAttr> startTagAttrs( std::string_view tag, std::size_t from )
-{
-    std::vector<RootAttr> out;
-    std::size_t i = from;
-    while( i < tag.size() )
-    {
-        while( i < tag.size() && tag[ i ] == ' ' ) { ++i; }
-        const std::size_t nameAt = i;
-        while( i < tag.size() && tag[ i ] != '=' && tag[ i ] != ' ' && tag[ i ] != '>' && tag[ i ] != '/' ) { ++i; }
-        if( i + 1 >= tag.size() || tag[ i ] != '=' || tag[ i + 1 ] != '"' )
-        {
-            break;
-        }
-        const std::size_t close = tag.find( '"', i + 2 );
-        if( close == std::string_view::npos )
-        {
-            break;
-        }
-        out.push_back( { tag.substr( nameAt, i - nameAt ), tag.substr( nameAt - 1, close + 1 - ( nameAt - 1 ) ) } );
-        i = close + 1;
-    }
-    return out;
-}
 
 struct Span
 {
@@ -617,8 +595,9 @@ inline std::optional<RefShape> inferRefShape( std::string_view view )
     return s;
 }
 
-// What the head comments leave: the entries the answer carries inline (`touched`, all marked served once it is sent)
-// and the comments a ref answer keeps after its rows (`residual`: unserved entries and data).
+// What the head comments leave: the entries the answer carries inline (`touched`, all marked served once it is sent),
+// the comments a ref answer keeps after its rows (`residual`: unserved entries, legend prose this dictionary does not
+// hold, --for's notes). The map header is in neither: it states the map's own cut and stays in place (staysInPlace).
 struct HeadReduction
 {
     std::vector<std::size_t> touched;
@@ -664,9 +643,16 @@ inline bool reduceCompactLegend( std::string_view comment, std::string_view view
     }
     if( !kept.empty() )
     {
-        r.residual.push_back( "<!-- " + kept + " -->" );   // the schema id rides <about schema=>: no opener
+        r.residual.push_back( "<!-- " + kept + " -->" );   // the schema id rides the root's schema=: no opener
     }
     return true;
+}
+
+// The one head comment that is a FACT about the answer and not a definition: the map header (files= shown= unindexed=).
+// A ref answer leaves it where the inline answer has it — carried after the rows, the map's own cut was its last bytes.
+inline bool staysInPlace( std::string_view comment ) noexcept
+{
+    return comment.starts_with( kCompactMapHeaderOpener );
 }
 
 // Any other head comment: a native `for` legend loses every entry the session was already sent (verbatim, longest first,
@@ -674,6 +660,10 @@ inline bool reduceCompactLegend( std::string_view comment, std::string_view view
 inline bool reduceOtherComment( std::string_view comment, const RefShape& s, const std::vector<std::size_t>& forOrder,
                                 const LegendSession& session, HeadReduction& r )
 {
+    if( staysInPlace( comment ) )
+    {
+        return true;   // not residual: assembleRef leaves it exactly where the inline answer has it
+    }
     std::string rest( comment );
     if( s.isFor )
     {
@@ -732,7 +722,7 @@ inline std::optional<HeadReduction> reduceHead( std::string_view view, const Ref
     return r;
 }
 
-// The ref answer's four pieces: [before the root, head comments out] <root identity> rows [kept comments]<about/> </root>.
+// The ref answer's four pieces: [before the root, legend out] <root, every attribute> rows [kept comments]<about/> </root>.
 struct RefParts
 {
     std::string prefix;
@@ -746,29 +736,25 @@ struct RefParts
 inline RefParts assembleRef( std::string_view view, const RefShape& s, const HeadReduction& r )
 {
     RefParts p;
-    std::string moved;
-    p.opened = "<" + std::string( s.root.tag );
-    for( const RootAttr& a : startTagAttrs( s.rootOpen, s.root.nameEnd - s.root.openBegin ) )
-    {
-        bool isIdentity = false;
-        for( const std::string_view k : kIdentityAttrs )
-        {
-            isIdentity = isIdentity || a.name == k;
-        }
-        ( isIdentity ? p.opened : moved ).append( a.whole );   // identity stays; the rest move, in order
-    }
+    // THE ROOT DOES NOT CHANGE. Its open tag is copied whole — a disclosure that left it would be read only by whoever
+    // reads the answer to its last byte. A self-closing root opens instead, because it gains the <about> child.
+    std::string_view open = s.rootOpen.substr( 0, s.rootOpen.size() - ( s.selfClosing ? 2 : 1 ) );
+    while( !open.empty() && open.back() == ' ' ) { open.remove_suffix( 1 ); }
+    p.opened.assign( open );
     p.opened += '>';
+    const auto keeps = [ & ]( const Span& c ) { return staysInPlace( view.substr( c.begin, c.end - c.begin ) ); };
     std::size_t copied    = 0;
     std::size_t bodyBegin = s.root.openEnd;
     for( const Span& c : s.head )
     {
         if( c.begin < s.root.openBegin )
         {
-            p.prefix.append( view.substr( copied, c.begin - copied ) );   // an XML declaration, if any, stays where it was
+            p.prefix.append( view.substr( copied, ( keeps( c ) ? c.end : c.begin ) - copied ) );   // an XML declaration, if any, stays where it was
             copied = c.end;
         }
         else
         {
+            if( keeps( c ) ) { p.opened.append( view.substr( c.begin, c.end - c.begin ) ); }
             bodyBegin = c.end;
         }
     }
@@ -778,7 +764,7 @@ inline RefParts assembleRef( std::string_view view, const RefShape& s, const Hea
         p.body.assign( view.substr( bodyBegin, s.closeAt - bodyBegin ) );
     }
     for( const std::string& kept : r.residual ) { p.trailer += kept; }
-    p.trailer += "<about" + moved + " legend=\"ref\" dict=\"ripwire --legend-dict\" dictv=\"" + dictionaryVersion() + "\"/>";
+    p.trailer += "<about legend=\"ref\" dict=\"ripwire --legend-dict\" dictv=\"" + dictionaryVersion() + "\"/>";
     return p;
 }
 

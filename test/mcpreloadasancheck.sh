@@ -189,8 +189,9 @@ class Server:
         self.err = open(errpath, "w+")
         self.errpath = errpath
         # --mcp-legend=inline: every answer carries its root facts on its own root, the spelling the one-shot CLI oracle
-        # writes. The default session posture moves them to a closing <about legend="ref"/> after the first answer; its
-        # equality with the CLI is held by mcpincrementalcheck's and pathgapcheck's posture twins and by legendrefcheck.
+        # writes. The default session posture keeps them there too (ref-posture-disclosure: <about legend="ref"/> is only the
+        # legend pointer) and differs in its legend alone; its equality with the CLI is held by mcpincrementalcheck's and
+        # pathgapcheck's posture twins, by legendrefcheck and by refdisclosurecheck.
         self.p = subprocess.Popen([binp, "--mcp", "--mcp-legend=inline"] + args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.err,
                                   text=True, env=env)
         self.id = 0
