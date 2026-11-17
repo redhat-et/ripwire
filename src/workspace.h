@@ -473,7 +473,7 @@ inline IngestResult mergeWorkspaceIngests( const std::vector<WorkspaceRoot>& roo
                 b.fromSymbol += symOff;
             }
             b.fileId += fileOff;
-            m.bindings.push_back( std::move( b ) );
+            m.bindings.push_back( b );
         }
         for( BindingAlias& a : p.bindingAliases )
         {

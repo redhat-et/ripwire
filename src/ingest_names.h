@@ -1224,7 +1224,7 @@ inline RawRef cratePathMacroRef( std::string_view src, std::uint32_t at, std::ui
     std::string qualifier;
     std::string written;
     rustMacroPathOf( path, qualifier, written );
-    r.qualifier = std::move( qualifier );
+    r.qualifier = qualifier;
     if( !written.empty() )
     {
         r.setFieldName( std::move( written ) );
