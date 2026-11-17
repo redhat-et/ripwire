@@ -17354,3 +17354,23 @@ budget. Items K, G's K1 and C already tested that shape against today's ordering
 their registered rules; item D's decomposition explains it (the tail carries the recall). Those become
 tractable only after the reordering Item P licensed, and re-registering them now would spend a round
 re-deriving a known failure.
+
+### Coverage is a property of the ANSWER, not of the verb
+
+Worth separating, because the readout above could be misread as "`--expand` and `--around` are
+unsupported". They are not. On a two-function fixture both reduce and carry the pointer — `--around`
+**1,026 → 363 B**, `--expand` **701 → 323 B**. It is on *this repository's* large answers that they stop,
+with the dictionary's own disclosure: *the compact legend differs from its recomputed parts*. So the limit
+is `reduceCompactLegend`'s ability to rebuild a legend byte-for-byte for a particular combination of
+present terms, and the posture correctly refuses to drop anything it cannot prove it holds.
+
+Two consequences, both recorded rather than fixed here:
+
+1. **The `--legend-have` coverage figure from PR #677 (80 of 80 answers taking the ref posture) is scoped
+   to the answers in that corpus**, not to every answer of those verbs. The same recomputation gate stands
+   in front of both postures, so wherever it fails, `--legend-have` is a no-op too. The figure is not
+   withdrawn — it was measured on the cells it names — but it must not be read as "every answer reduces".
+2. **The term-recomputation gap is the cheapest remaining coverage win**, and it is lossless by
+   construction: every answer it unblocks is one where the legend is provably reproducible and therefore
+   provably droppable. It needs a band of its own only because "which term combinations fail" is an
+   unmeasured population today, and a fix with no denominator is not a result.
