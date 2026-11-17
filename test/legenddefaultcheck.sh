@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# The PROSE-FREE legend posture is the DEFAULT (--legend=dict), and it is lossless.
+# The PROSE-FREE legend posture (--legend=dict) is OPT-IN, and it is lossless.
 #
 # WHAT THIS GUARDS. docs/EVALS.md "PRE-REGISTRATION 2026-11-17 (amendment 4) -- ITEM D". The legend is a
 # near-fixed per-answer cost (531..4,305 B, median 1,796, measured over 311 recorded answers), so its SHARE
 # grows as the answer shrinks: 14.0 % of a --for bundle, 62.6 % of a --whereis answer. At a 2 KB budget it
 # costs 36 points of symbol-grain completeness and ALL of the item grain's -- a 2 KB answer under the old
 # default was almost entirely schema prose. The owner's choice of three options was option (a): drop the
-# prose, leave every root attribute exactly where it is.
+# prose, leave every root attribute exactly where it is. It is OPT-IN rather than the default: the flip reds
+# 89 of 849 gates, 80 of them asserting that every attribute an answer emits is defined in THAT ANSWER'S legend,
+# which a prose-free answer cannot satisfy. (D0) below gates the opt-in-ness itself, so "the default is unchanged"
+# is a check rather than a comment.
 #
 # THE BAR IS NOT THE BYTE SAVING. It is that the saving changes MARKUP ONLY. The prose goes; the rows, the
 # data comments, the CDATA bodies and every pre-existing root attribute stay, in place and with their
@@ -21,7 +24,8 @@
 # undocumented, and under this default it ships undocumented AND unexplained.
 #
 # Arms:
-#   (A)  the posture IS the default -- a flagless XML run, no flag named
+#   (D0) the DEFAULT is UNCHANGED -- a flagless run must be byte-identical to --legend=compact
+#   (A)  the posture applies when ASKED -- --legend=dict
 #   (D1) LOSSLESS, per verb and per legend family: body byte-identical to --legend=compact's, root
 #        attributes identical as (name,value) pairs once the three pointer attributes are set aside
 #   (D3) both opt-outs still work: --legend=compact restores the prose, --legend=full restores more of it
@@ -48,21 +52,37 @@ pass "(A0) --legend-dict names a dictionary version ($DV)"
 # ===================================================================================================
 # (A) THE POSTURE IS THE DEFAULT. No flag is named on this run: that is the whole point of the band.
 # ===================================================================================================
+# (D0) THE OPT-IN IS GATED. Without this arm, a later change that flipped the default would pass every other arm
+# here -- they would simply stop needing the flag. The 89-gate blast radius is the reason the flip is deferred, so
+# "deferred" has to be an assertion.
+"$BIN" . --callers=main >"$WORK/flagless.xml" 2>/dev/null
+"$BIN" . --callers=main --legend=compact >"$WORK/asked_compact.xml" 2>/dev/null
+if cmp -s "$WORK/flagless.xml" "$WORK/asked_compact.xml" && [ -s "$WORK/flagless.xml" ]; then
+    pass "(D0) the DEFAULT is unchanged -- a flagless run is byte-identical to --legend=compact"
+else
+    bad "(D0) a flagless run differs from --legend=compact -- the posture became the default, which is NOT what this band ships"
+fi
+if grep -qF 'legend="dict"' "$WORK/flagless.xml"; then
+    bad "(D0b) the flagless answer carries legend=\"dict\" -- the posture must be asked for"
+else
+    pass "(D0b) the flagless answer carries no pointer -- the posture is opt-in"
+fi
+
 def_out="$WORK/default.xml"
-"$BIN" . --callers=main >"$def_out" 2>/dev/null
+"$BIN" . --callers=main --legend=dict >"$def_out" 2>/dev/null
 if [ ! -s "$def_out" ]; then
-    bad "(A1) a flagless --callers run wrote no stdout -- nothing to check"
+    bad "(A1) --callers --legend=dict wrote no stdout -- nothing to check"
     echo "FAILURES"; exit 1
 fi
 if grep -qF 'legend="dict"' "$def_out"; then
-    pass "(A1) the DEFAULT answer carries legend=\"dict\" -- the posture needs no flag"
+    pass "(A1) --legend=dict carries legend=\"dict\" on the root"
 else
-    bad "(A1) the default answer does not carry legend=\"dict\" -- the posture is not the default"
+    bad "(A1) --legend=dict did not take the posture"
 fi
 if grep -qF '<!-- ripwire ' "$def_out"; then
-    bad "(A2) the default answer still carries a '<!-- ripwire ' prose legend -- the prose was not dropped"
+    bad "(A2) --legend=dict still carries a '<!-- ripwire ' prose legend -- the prose was not dropped"
 else
-    pass "(A2) the default answer carries no prose legend comment"
+    pass "(A2) --legend=dict carries no prose legend comment"
 fi
 # The DATA comment is not prose and must survive. Dropping it would be a silent cut of the answer's own
 # counts, which section 9 principle 4 puts on the honest side of the line. Asserted per verb in (D1)
@@ -167,7 +187,7 @@ VERBS = ["--callers=main", "--callees=main", "--impact=main", "--uses=main", "--
 
 fams, nbad, nskip = {}, 0, 0
 for v in VERBS:
-    a, rca = run(v)                       # the DEFAULT -- no flag
+    a, rca = run(v, "--legend=dict")      # the posture, ASKED for
     b, rcb = run(v, "--legend=compact")   # the opt-out that restores the prose
     pa, pb = split(a), split(b)
     if not pa or not pb:
@@ -317,9 +337,9 @@ else
     bad "(D3b) --legend=full (${fb} B) is SHORTER than --legend=compact (${cb} B)"
 fi
 if [ "$db" -lt "$cb" ]; then
-    pass "(D3c) the default is shorter than the posture it replaced (${db} B < ${cb} B)"
+    pass "(D3c) --legend=dict is shorter than --legend=compact (${db} B < ${cb} B)"
 else
-    bad "(D3c) the default (${db} B) did not get shorter than --legend=compact (${cb} B)"
+    bad "(D3c) --legend=dict (${db} B) is not shorter than --legend=compact (${cb} B)"
 fi
 # Byte-identity against the PRE-CHANGE binary is the only arm that can prove --legend=compact reproduces
 # TODAY, rather than merely still carrying prose. It needs that binary, so it SKIPs loudly without one.
@@ -335,25 +355,31 @@ else
 fi
 
 # ===================================================================================================
-# (N) NEGATIVE CONTROL. --json is not XML and has no legend to drop, so the posture must not touch it.
+# (N) NEGATIVE CONTROL. --json is not XML and has no legend to drop. Two halves: a plain --json answer is
+# untouched and carries no pointer, and ASKING for the posture on it REFUSES -- naming the value as typed.
 # ===================================================================================================
 "$BIN" . --callers=main --json >"$WORK/a.json" 2>/dev/null
-"$BIN" . --callers=main --json >"$WORK/b.json" 2>/dev/null
-if cmp -s "$WORK/a.json" "$WORK/b.json" && [ -s "$WORK/a.json" ] && ! grep -qF 'legend="dict"' "$WORK/a.json"; then
-    pass "(N1) a --json answer is untouched by the posture -- no pointer, no prose, nothing moved"
+if [ -s "$WORK/a.json" ] && ! grep -qF 'legend="dict"' "$WORK/a.json"; then
+    pass "(N1) a plain --json answer carries no pointer -- the posture cannot reach it"
 else
-    bad "(N1) the posture reached a --json answer, or that answer was empty/unstable"
+    bad "(N1) a --json answer was empty, or carried the pointer"
+fi
+"$BIN" . --callers=main --json --legend=dict >"$WORK/b.json" 2>"$WORK/b.jerr"; rc=$?
+if [ "$rc" -ne 0 ] && [ ! -s "$WORK/b.json" ] && grep -qF -- "--legend=dict" "$WORK/b.jerr"; then
+    pass "(N2) --json --legend=dict REFUSES (rc=$rc), writes no stdout, and names the value AS TYPED"
+else
+    bad "(N2) --json --legend=dict must refuse naming --legend=dict -- rc=$rc, $(wc -c <"$WORK/b.json" | tr -d " ")B stdout, stderr: $(head -c 120 "$WORK/b.jerr")"
 fi
 
 # ===================================================================================================
 # (Z) DETERMINISM. The posture depends on argv alone -- never on whether an earlier run happened.
 # ===================================================================================================
-"$BIN" . --callers=main >"$WORK/z1.xml" 2>/dev/null
-"$BIN" . --callers=main >"$WORK/z2.xml" 2>/dev/null
+"$BIN" . --callers=main --legend=dict >"$WORK/z1.xml" 2>/dev/null
+"$BIN" . --callers=main --legend=dict >"$WORK/z2.xml" 2>/dev/null
 if cmp -s "$WORK/z1.xml" "$WORK/z2.xml"; then
-    pass "(Z1) two default runs are byte-identical"
+    pass "(Z1) two --legend=dict runs are byte-identical"
 else
-    bad "(Z1) two default runs differ -- the posture is not a function of argv alone"
+    bad "(Z1) two --legend=dict runs differ -- the posture is not a function of argv alone"
 fi
 
 if [ "$fail" -ne 0 ]; then echo "legenddefaultcheck: FAILURES"; exit 1; fi

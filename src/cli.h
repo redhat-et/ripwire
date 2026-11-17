@@ -76,6 +76,10 @@ struct Config
                                                            // --impact, --quality-delta, --test-gate). Keys mirror the XML attr names
     std::string_view legend;                               // --legend=full|compact|dict: the legend posture of every XML verb (P1, compactlegend.h);
                                                            // an XML run that names none is RESOLVED to kDefaultLegendPosture (L1)
+    std::string_view legendSpelled;                        // the posture AS TYPED, for messages. `legend` is normalised
+                                                           // (dict -> compact), so a refusal built from it names a value the
+                                                           // caller never wrote: `--legend=dict --json` answered "--legend=compact
+                                                           // applies to the XML verbs only". Flag named means named as typed.
     bool             legendProseOff = false;               // item D: the prose legend is replaced by a POINTER to --legend-dict. Set by the
                                                            // DEFAULT and by the explicit spelling --legend=dict; cleared by an ASKED
                                                            // --legend=compact, the registered opt-out (D3), which must reproduce the
@@ -2791,11 +2795,15 @@ inline constexpr char kHelpTail[] =
         "                               (with --for/--query) a FLAT top-K export for an EXTERNAL reranker: one\n"
         "                               <cand r= s= n= id= k= p= l=><sig>..</sig></cand> row per result — identity + score +\n"
         "                               signature only, no lens/quality extras, no doc bodies. Composes with --top-k.\n"
-        "    --legend=full|compact|dict legend posture for every XML verb — dict is the default (prose replaced by a pointer);\n"
-        "                               compact restores the prose legend, full the long form\n"
-        "                               THE DEFAULT IS dict (item D, 2026-11-17): no prose legend, every root attribute kept\n"
-        "                               exactly where it was, and legend=\"dict\" dict=\"ripwire --legend-dict\" dictv= added so\n"
-        "                               the schema stays resolvable in one deterministic call. Measured first: the legend is\n"
+        "    --legend=full|compact|dict legend posture for every XML verb — compact is the default; dict drops the prose for a\n"
+        "                               pointer; full restores the long form\n"
+        "                               --legend=dict (item D, 2026-11-17) serves NO prose legend: every root attribute stays\n"
+        "                               exactly where it was, and legend=\"dict\" dict=\"ripwire --legend-dict\" dictv= is added so\n"
+        "                               the schema stays resolvable in one deterministic call. Lossless — 79 of 79 reduced\n"
+        "                               answers byte-identical outside the legend, -8.7% to -57.6% by verb. It is OPT-IN\n"
+        "                               rather than the default because the default flip reds 89 gates on one contract (every\n"
+        "                               attribute defined in ITS OWN answer's legend); the dictionary-backed contract lands\n"
+        "                               first. Measured first: the legend is\n"
         "                               531..4,305 B per answer (median 1,796) — a near-FIXED tax, 14.0% of a --for bundle but\n"
         "                               62.6% of a --whereis answer — and 93% of every clause emitted had already been sent to\n"
         "                               the reader. At a 2 KB budget it cost 36 points of symbol-grain completeness and ALL of\n"
@@ -4723,7 +4731,13 @@ static inline void validateLegendModifier( Config& c ) noexcept
         {
             c.legend          = kDefaultLegendPosture;
             c.legendDefaulted = true;
-            c.legendProseOff  = legendPostureDropsProse( c.legend, /*defaulted=*/true );   // item D: the prose goes by default
+            // ITEM D IS OPT-IN, NOT THE DEFAULT (owner decision 2026-11-17, after the blast radius was measured).
+            // The posture is lossless and measured — see the readout — but making it the DEFAULT reds 89 of 849 gates,
+            // 80 of them on ONE contract: they assert that every attribute an answer emits is defined in THAT ANSWER'S
+            // legend, which a prose-free answer cannot satisfy by construction. Migrating those 80 to the old contract
+            // would be work done twice, because the right contract is the one test/legenddefaultcheck.sh (D5) already
+            // checks — defined somewhere the reader can OBTAIN it, i.e. --legend-dict. So the dictionary-backed
+            // contract lands first and the default flip falls out of it; until then the default is untouched.
         }
         return;
     }
@@ -4733,6 +4747,7 @@ static inline void validateLegendModifier( Config& c ) noexcept
     // passes it through. That asymmetry is L1's and is deliberately left alone here.
     if( c.legend == "dict" )
     {
+        c.legendSpelled  = c.legend;   // before the normalisation below, so every message can name what was typed
         c.legend         = kDefaultLegendPosture;
         c.legendProseOff = true;
     }

@@ -17114,7 +17114,7 @@ should be: this measures where evidence sits today, not which arrangement is bes
 that a truncated answer is parseable; a truncated XML document is not well-formed, and the honest consumer
 model is an agent whose context cuts a long answer, not a byte-exact cut.
 
-## PRE-REGISTRATION 2026-11-17 (amendment 4) — ITEM D: the prose-free posture becomes the DEFAULT
+## PRE-REGISTRATION 2026-11-17 (amendment 4) — ITEM D: the prose-free posture (shipped OPT-IN; see 4b)
 
 Registered before any `src/` change and before any number below exists. This amendment acts on an owner
 decision, not on a measurement of its own: asked to choose between three legend defaults, the owner chose
@@ -17374,3 +17374,43 @@ Two consequences, both recorded rather than fixed here:
    construction: every answer it unblocks is one where the legend is provably reproducible and therefore
    provably droppable. It needs a band of its own only because "which term combinations fail" is an
    unmeasured population today, and a fix with no denominator is not a result.
+
+### Amendment 4b — the posture ships OPT-IN; the default flip is deferred to the contract fix
+
+Superseded in place, not deleted: everything measured in the readout above **stands**. Every number there
+was taken as *same binary, both postures*, so it measures the POSTURE, and the posture is unchanged. What
+changed is only whether a flagless run takes it.
+
+**Why.** The full suite was run before the lane was offered, and the flip reds **89 of 849 gates** (a
+further 2 of the 91 observed are pre-existing reds on `main` at `7ac855730` — `budgetmonotonecheck` and
+`largeallocpeakcheck` — attributed by building a detached main worktree and re-running the same 91, which
+is the only way the attribution is honest). **80 of the 89 fail on ONE contract**: they assert that every
+attribute an answer emits is defined in *that answer's* legend, which a prose-free answer cannot satisfy by
+construction.
+
+**Why not migrate the 80.** The right contract is already written and passing — D5 asserts that every
+emitted attribute has a row in `--legend-dict`, i.e. *defined somewhere the reader can obtain it*.
+Migrating 80 gates to the answer-local contract first is work done twice, and doing it in one change
+invites the failure `test/printffmtparitycheck.sh`'s own header names: *an unrelated drift gets absorbed
+under someone else's justification*. At 80 files that happens at least once and is not reviewable.
+
+**The sequence, therefore:** the dictionary-backed coverage contract lands first, and the default flip
+falls out of it — the 80 stop being failures rather than needing migration. `(D0)` and `(D0b)` in
+`test/legenddefaultcheck.sh` gate the opt-in-ness itself, so "deferred" is an assertion rather than a
+comment: a flagless run must stay byte-identical to `--legend=compact`.
+
+**Two consequences that follow the posture wherever it is reachable, and are owed before the flip:**
+
+1. **`jsoncheck` G5.** With the posture asked for, `--json` and XML diverge; the gate's invariant is that
+   `--json` is purely additive. Both halves are defensible and they conflict, which this band never
+   examined — it asserted the JSON isolation was correct (N1) without checking what else that breaks. Not
+   closed here: the resolution is either the pointer on JSON too, or a narrower reading of "additive",
+   and that is a decision with its own evidence bar. Under the opt-in it is latent, not live.
+2. **`grepbytescheck`'s doc-drift band.** `--grep` falls **−49.77 %** under the posture, and the gate
+   classes the re-derived median as a **sign flip — a regime change, not drift**, which by its own words
+   means EVALS §5 fact 1 must be **rewritten rather than renumbered**. Recorded as owed, not done.
+
+**One defect of the posture itself, found by the opt-in's own negative control and fixed here.** The
+normalisation `dict` → `compact` meant a refusal built from `cfg.legend` named a value the caller never
+typed: `--legend=dict --json` answered *"--legend=compact applies to the XML verbs only"*. `Config` now
+carries the spelling as typed, and `(N2)` asserts the refusal names it. Flag named means named as typed.

@@ -4277,8 +4277,9 @@ static int finishCompactCapture( const rw::Config& cfg, std::string& doc, int rc
             {
                 return emitCaptured();
             }
-            std::fputs( "ripwire: --legend=compact applies to the XML verbs only — this run's output carries no XML legend to compact "
-                        "(text/JSON/markdown); rerun with --legend=full (e.g. ripwire <dir> --callers=SYM --legend=compact)\n", stderr );
+            rw::emitTo( stderr, "ripwire: --legend={} applies to the XML verbs only — this run's output carries no XML legend to compact "
+                                "(text/JSON/markdown); rerun with --legend=full (e.g. ripwire <dir> --callers=SYM --legend=compact)\n",
+                        cfg.legendSpelled.empty() ? cfg.legend : cfg.legendSpelled );
             return 1;
         case rw::CompactOutcome::UnknownRoot:
             if( cfg.legendDefaulted )
