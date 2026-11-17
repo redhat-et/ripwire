@@ -36,8 +36,8 @@ PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
 # 2026-11-17, C# import captures (#358 1a, @LaimaWu; lands #420 rebased onto main 5139f7840): parser tag 309 -> 311 (rich 312)
 #   and mirror move together (the PR's 196 -> 198, renumbered above main). Import-free deep containers cease to be partial;
-#   kCacheVersion and kQSnapCacheScheme stay unchanged. Re-derived with UPDATE_GOLDEN=1; extraction identity remains part of
-#   the quality snapshot key.
+#   kCacheVersion and kQSnapCacheScheme stay unchanged. Re-derived ONCE with UPDATE_GOLDEN=1 from the rebased build (hash
+#   1aec99a6d9…4083c76); extraction identity remains part of the quality snapshot key.
 # 2026-11-17, lane tidy-681 (clang-tidy #681, base main 5fb68b71a): RE-PINNED with UPDATE_GOLDEN=1. kQSnapCacheScheme stays 34:
 #   codeLocByNode's move-cid store moved out of an if condition (bugprone-assignment-in-if-condition); the same slot is written
 #   and the same early return taken, so no cached Snapshot means anything new.
