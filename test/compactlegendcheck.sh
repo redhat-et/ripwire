@@ -465,8 +465,16 @@ probeFor()
         --for=)            printf '%s' '--for=geometry' ;;
         --pack-task=)      printf '%s' '--pack-task=geometry' ;;
         --task=)           printf '%s' '--task=geometry' ;;
-        --callers=|--callees=|--impact=|--uses=|--edit-check=|--safe-delete=|--slice=|--whereis=|--mentions=|--around=|--expand=|--owners=|--exemplar=)
+        --callers=|--callees=|--impact=|--uses=|--edit-check=|--safe-delete=|--slice=|--whereis=|--mentions=|--around=|--owners=|--exemplar=)
                            printf '%s' "${1}distance" ;;
+        # RE-PROBED 2026-11-17 (lane/w1-head-comment-skip): --expand=distance -> --expand=perimeter. The serving choice prices
+        # both candidates at their DELIVERED size (MED-7), and distance sat whole-file by 76 B only because its bundle's compact
+        # legend spelled scrubbed= and redacted= for an answer carrying neither (166 B, test/headleakcheck.sh). With the leak
+        # shut the bundle is the smaller document (1,395 B against the file's 1,485), so the DEFAULT serves it while full
+        # still serves the file — a posture split, which (FX9) covers and this rows-identical universe cannot read. perimeter
+        # has the same two definitions and reaches the same whole-file legend byte for byte (508 B, the expand-file pin's
+        # own measurement), in both postures. Its margin is 81 B: if a later legend change flips it too, the arm goes red here.
+        --expand=)         printf '%s' '--expand=perimeter' ;;
         --lego=|--field-affinity=|--layout=) printf '%s' "${1}Point" ;;
         --path=)           printf '%s' '--path=total_area,distance' ;;
         --connect=)        printf '%s' '--connect=total_area,distance,perimeter' ;;
@@ -876,8 +884,9 @@ fi
 # (U-twin-expand) the pre-2026-10-08 ripwire.expand-file/v1 pin (360 B), kept (PROCESS rule 4): the same --expand=distance probe
 # with exactly the two lean-default readings cut out of a copy of the compact answer must still fit the OLD pin. The cut is
 # taken only when BOTH readings occur once; any other premise FAILs (a cut that removes nothing proves nothing).
-( cd "$REPO" && "$BIN" . --expand=distance --legend=compact >"$TMP/xft.c" 2>/dev/null </dev/null \
-  && "$BIN" . --expand=distance --legend=full >"$TMP/xft.full" 2>/dev/null </dev/null ); rcXft=$?
+# The probe is --expand=perimeter since 2026-11-17 (see the universe's --expand= row above: distance now serves the bundle).
+( cd "$REPO" && "$BIN" . --expand=perimeter --legend=compact >"$TMP/xft.c" 2>/dev/null </dev/null \
+  && "$BIN" . --expand=perimeter --legend=full >"$TMP/xft.full" 2>/dev/null </dev/null ); rcXft=$?
 xftCut="$( python3 - "$TMP/xft.c" "$TMP/xft.cut" <<'PY'
 import sys
 doc = open( sys.argv[1], encoding = "utf-8", errors = "replace" ).read()
@@ -894,7 +903,7 @@ print( sum( len( r.encode() ) for r in readings ) )
 PY
 )"
 if [ "$rcXft" -ne 0 ]; then
-    no "(U-twin-expand) --expand=distance exited $rcXft — the twin cannot measure"
+    no "(U-twin-expand) --expand=perimeter exited $rcXft — the twin cannot measure"
 else
     case "$xftCut" in
         NOPREMISE*) no "(U-twin-expand) expand-file twin cannot measure: ${xftCut#NOPREMISE }" ;;

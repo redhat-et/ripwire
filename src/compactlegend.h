@@ -1963,12 +1963,6 @@ inline bool spanHasAttr( std::string_view span, std::string_view attr, std::stri
     return span.find( needle ) != std::string_view::npos;
 }
 
-// Does `head` carry ` <attr>="`? Matched at a tag boundary — a leading space and a trailing `="`.
-inline bool headHasAttr( std::string_view head, std::string_view attr )
-{
-    return spanHasAttr( head, attr, "\"" );
-}
-
 // Any payload attribute ending in `_capped` (tests_capped=, importers_capped=, …) — their names, joined by '/'.
 inline std::string payloadSubCapAttrs( std::string_view doc )
 {
@@ -2097,6 +2091,17 @@ inline bool payloadHasAnyAttr( std::string_view doc, std::string_view attr, std:
         }
     }
     return false;
+}
+
+// Does a TAG of `head` carry ` <attr>="`? compactDocHead's span keeps the comments between the root and its first child, and when
+// this is asked they are the FULL-dialect legend prose, which defines an attribute by spelling it (`scrubbed="1" = a ]]> was
+// split`). A substring test over the span read that definition as the attribute: every bundle-mode expand documented scrubbed=
+// and redacted= with neither in the answer, and the ref posture, which recomputes the legend from the COMPACTED answer, then
+// disagreed with what was written and kept the legend inline. The span is right (its other readers need the child's tag and the
+// comments' position); the test was wrong. So it is the payload's own tag walk, run over the head alone.
+inline bool headHasAttr( std::string_view head, std::string_view attr )
+{
+    return payloadHasAnyAttr( head, attr );
 }
 
 // The opener of the map header's data comment (serialize.h buildStats, its one emitter).
