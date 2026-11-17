@@ -7,7 +7,7 @@
 // 2026-08-29 split: base-clause type references (isBaseTypeNode/emitBaseRef/captureBases with the
 // Rust impl walk), function-like #define body call edges (the macro-edges round), field/composition
 // capture (captureFields), and the import/include layer — importName and the per-language
-// specifier readers (C# using, PHP use, JS module loads, preproc include/import), the
+// specifier readers (PHP use, JS module loads, preproc include/import; C# using moved to ingest_importcap.h in #358), the
 // import-container tables by language, directiveTargetOf and captureIncludes. Everything that turns
 // one file's AST into edges BETWEEN symbols and files. Same contract as every ingest_*.h: reopens
 // `namespace rw` and the unnamed namespace inside it — one TU, one unnamed namespace, internal
