@@ -493,7 +493,8 @@ inline GitInputs collectGitInputs( const std::string& rootReal )
             std::string path( origin.substr( 5 ) );
             if( path.empty() || path.front() != '/' )
             {
-                path = rootReal + "/" + path;
+                path.insert( 0, 1, '/' );   // rootReal + "/" + path, built in place
+                path.insert( 0, rootReal );
             }
             if( std::ranges::none_of( g.files, [ & ]( const depwatch::Dep& d ) { return d.seam == depwatch::Seam::WholeFile && d.path == path; } ) )
             {
