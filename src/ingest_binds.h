@@ -2027,7 +2027,7 @@ inline std::optional<RawRef> subscriptOperatorRef( TSNode access, TSNode recv, s
     r.role      = RefRole::Subscript;
     r.name      = op;
     r.recv      = rs.kind == RecvKind::None ? RecvKind::FieldOfVar : rs.kind;   // receiverOf's "too rich" member shape
-    r.recvVar   = std::move( rs.var );
+    r.recvVar   = rs.var;
     r.setFieldName( std::move( rs.field ) );
     if( langFacts( lang ).constantPathReceiver && r.recv == RecvKind::NamedVar )
     {
@@ -2728,10 +2728,10 @@ inline void pushTypedBind( std::uint32_t fileId, Lang lang, std::string_view var
     b.spanStart    = site.spanStart;
     b.spanEnd      = site.spanEnd;
     b.var.assign( var );
-    b.typeName     = std::move( type.name );
-    b.importedName = std::move( type.qualified );
+    b.typeName     = type.name;
+    b.importedName = type.qualified;
     b.isFromAssignment = type.isFromAssignment;
-    binds.push_back( std::move( b ) );
+    binds.push_back( b );
 }
 
 // the same record with no qualified text — every emitter but a declaration's Type/ParamType
@@ -4004,7 +4004,7 @@ inline void pushEvidenceBind( BindCtx& cx, LocalBindKind kind, std::string_view 
     b.var.assign( var );
     b.typeName.assign( type );
     b.importedName.assign( imported );
-    cx.binds->push_back( std::move( b ) );
+    cx.binds->push_back( b );
 }
 
 // the class a constructor-shaped initializer names — JS/TS `new Foo( … )`, Python `Foo( … )`, Go `Foo{ … }` / `&Foo{ … }`
@@ -4280,7 +4280,7 @@ inline void pushSiteEvidence( BindCtx& cx, LocalBindKind kind, std::string_view 
     b.var.assign( var );
     b.typeName.assign( type );
     b.importedName.assign( imported );
-    cx.binds->push_back( std::move( b ) );
+    cx.binds->push_back( b );
 }
 inline void pushLocalEvidence( BindCtx& cx, std::string_view var, std::string_view cls, BindSite site, bool flag = false, std::string_view whole = {} )
 {
@@ -4336,7 +4336,7 @@ inline void pushMemberTombstone( BindCtx& cx, std::string_view var, std::uint32_
     b.lang      = cx.lang;
     b.kind      = LocalBindKind::MemberType;
     b.var.assign( var );
-    cx.binds->push_back( std::move( b ) );
+    cx.binds->push_back( b );
 }
 
 // FE-B (review B3): one declarator's evidence — `name` declared with the class its written `type` names, else the class its
@@ -4677,7 +4677,7 @@ inline void pushTypeBind( BindCtx& cx, std::uint32_t at, std::pair<std::uint32_t
     RawBind row{ .fileId = cx.fileId, .startByte = at, .lang = cx.lang, .kind = LocalBindKind::TypeAlias, .spanStart = span.first, .spanEnd = span.second };
     row.var.assign( var );
     row.typeName.assign( mark );
-    cx.binds->push_back( std::move( row ) );
+    cx.binds->push_back( row );
 }
 inline void captureShadowDecl( BindCtx& cx, TSNode n, const char* t )
 {
@@ -7561,7 +7561,7 @@ void bindsFinalize( BindCtx& cx )
         }
         for( RawBind& p : fnPos )
         {
-            binds.push_back( std::move( p ) );
+            binds.push_back( p );
         }
     }
 }

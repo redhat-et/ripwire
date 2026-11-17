@@ -332,10 +332,10 @@ inline void captureGoImportFacts( TSNode root, Lang lang, std::uint32_t fileId, 
         bind.lang         = lang;
         bind.startByte    = ts_node_start_byte( node );
         bind.kind         = LocalBindKind::ModuleAlias;
-        bind.var          = std::move( local );
-        bind.typeName     = std::move( path );
+        bind.var          = local;
+        bind.typeName     = path;
         bind.importedName = "*";
-        binds.push_back( std::move( bind ) );
+        binds.push_back( bind );
     }
 }
 
@@ -568,7 +568,7 @@ inline void recordJsObjectLiterals( TSNode decl, Lang lang, std::uint32_t fileId
         bind.var       = std::string( pattern::nodeText( name, src ) );
         bind.spanStart = ts_node_start_byte( value );
         bind.spanEnd   = ts_node_end_byte( value );
-        binds.push_back( std::move( bind ) );
+        binds.push_back( bind );
     }
 }
 
@@ -588,13 +588,13 @@ inline void captureJsImportFacts( TSNode root, Lang lang, std::uint32_t fileId, 
         bind.lang = lang;
         bind.startByte = ts_node_start_byte( node );
         bind.kind = kind;
-        bind.var = std::move( name );
+        bind.var = name;
         if( !ts_node_is_null( scope ) )
         {
             bind.spanStart = ts_node_start_byte( scope );
             bind.spanEnd = ts_node_end_byte( scope );
         }
-        binds.push_back( std::move( bind ) );
+        binds.push_back( bind );
     };
     for( TSNode stmt : children )
     {
@@ -663,8 +663,8 @@ inline void captureJsImportFacts( TSNode root, Lang lang, std::uint32_t fileId, 
             {
                 imported.try_emplace( local, 1 );
                 record( declarator, LocalBindKind::ModuleAlias, std::move( local ), {} );
-                binds.back().typeName         = std::move( source );
-                binds.back().importedName     = std::move( member );
+                binds.back().typeName         = source;
+                binds.back().importedName     = member;
                 binds.back().isFromAssignment = fromIdentifier;
             } );
         }
@@ -1044,7 +1044,7 @@ inline void captureJsRebindFacts( TSNode root, Lang lang, std::uint32_t fileId, 
         bind.isFromAssignment = pinned;   // graph.h: a MEMBER call through the name is undecided only when a pinned declaration was replaced
         bind.spanStart = best != nullptr ? best->start : ts_node_start_byte( root );
         bind.spanEnd   = best != nullptr ? best->end : ts_node_end_byte( root );
-        binds.push_back( std::move( bind ) );
+        binds.push_back( bind );
     }
 }
 } // namespace

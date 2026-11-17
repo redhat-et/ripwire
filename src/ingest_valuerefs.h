@@ -2355,7 +2355,7 @@ private:
         const char qualifier[ 2 ] = { s.scope, fileShadow ? '1' : '0' };
         r.qualifier     = std::string_view( qualifier, 2 );   // one of a few dozen two-character texts: never position-keyed
         r.litAt         = s.litAt;   // REGISTRAR: the object literal, a row field (MEM-R1a; read only by regindex.h)
-        r.recvVar       = std::move( s.container );
+        r.recvVar       = s.container;
         r.setComposeRel( std::move( s.key ) );
         r.setFieldName( std::move( s.into ) );
         r.argCount      = s.argIndex;
@@ -3229,7 +3229,7 @@ private:
     {
         RawRef r     = rawRefAt( at, m_fileId, m_lang, RefRole::Value, {} );
         r.qualifier  = std::string( 1, scope );
-        r.recvVar    = std::move( recvVar );
+        r.recvVar    = recvVar;
         r.setComposeRel( std::string( composeRel ) );
         r.setMemberCtor( std::string( memberCtor ) );
         r.setMemberPath( std::string( memberPath ) );
@@ -3627,7 +3627,7 @@ private:
         r.qualifier  = std::string( 1, kValueRefSlotCallScope );
         r.setFieldName( vrClean( text( f ) ) );
         r.setComposeRel( "." + ( dot == std::string::npos ? chain : chain.substr( dot + 1 ) ) );
-        r.setMemberCtor( slotCtor( std::move( key ), kw ) );
+        r.setMemberCtor( slotCtor( key, kw ) );
         r.setMemberPath( std::move( chain ) );
         m_out.push_back( std::move( r ) );
     }
