@@ -10558,8 +10558,7 @@ inline std::vector<std::uint8_t> similarRunByNode( const IngestResult& ing )
     {
         const std::size_t sigLen     = s.sigEndByte > s.sigStartByte ? std::size_t( s.sigEndByte - s.sigStartByte ) : 0;
         const bool        isCallable = s.kind == SymKind::Function || s.kind == SymKind::Method;
-        const bool        isCFamily  = s.lang == Lang::Cpp || s.lang == Lang::C;
-        if( sigLen == 0 || sigLen > body.size() || !isCallable || !isCFamily )
+        if( sigLen == 0 || sigLen > body.size() || !isCallable || !langFacts( s.lang ).typeFirstParameters )
         {
             return;
         }

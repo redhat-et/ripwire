@@ -159,6 +159,10 @@ struct LangFacts
     /// (verbs_quality.h; pinned by test/qddegradecheck.sh (E3)).
     bool defectShapeNeedsMacroSet = false;
 
+    /// C, C++: a parameter is written type first and name last, and defectshape.h's C++ lexer reads the signature. The
+    /// similar-argument-list prototype (similarargs.h, quality.h similarRunByNode) reads these two languages only.
+    bool typeFirstParameters = false;
+
     /// Rust: a trait's bodyless method signature is no definition the index keeps (only a bodied default is), so a trait's contract
     /// cannot be read off its members. The dispatch tier (ifacedispatch.h) takes the implementors' methods of the called name without
     /// it, and leaves a standard-member name (`clone`, `iter`: graph.h StdMemberGate) to the name tiers as before.
@@ -441,7 +445,7 @@ inline constexpr std::array<std::string_view, 3> kJavaObjectMethods = { "equals"
 
 /// The rows, one per Lang in enum order. A language says only the facts it has.
 inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
-    { .lang = Lang::Cpp, .basesAsCaptures = true, .defectShapeNeedsMacroSet = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .aliasTargetDefs = true, .memberSeparator = "::",
+    { .lang = Lang::Cpp, .basesAsCaptures = true, .defectShapeNeedsMacroSet = true, .typeFirstParameters = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .aliasTargetDefs = true, .memberSeparator = "::",
       .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain, .staticLinkage = true,
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .signatureRows = true, .fileEdges = FileEdges::Resolved, .qualifierNamesScope = true,
       .typedInstanceRows = true, .xMacroRows = true, .objectMacrosUnindexed = true },
@@ -476,7 +480,7 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::Json, .notCode = true, .fileEdges = FileEdges::NotApplicable, .configFormat = true },
     { .lang = Lang::CSharp, .overloadsWithoutArity = true, .writtenModule = WrittenModuleRule::DirsOnly,
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .armOpeners = ArmOpeners::FatArrow, .memberDecl = MemberDecl::TypeFirst },
-    { .lang = Lang::C, .noNestedNamedFunctions = true, .memberSeparator = "::", .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain,
+    { .lang = Lang::C, .typeFirstParameters = true, .noNestedNamedFunctions = true, .memberSeparator = "::", .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain,
       .staticLinkage = true, .signatureRows = true, .fileEdges = FileEdges::Resolved, .typedInstanceRows = true, .xMacroRows = true },
     { .lang = Lang::Toml, .notCode = true, .hashComment = true, .fileEdges = FileEdges::NotApplicable, .configFormat = true },
     { .lang = Lang::Yaml, .notCode = true, .hashComment = true, .fileEdges = FileEdges::NotApplicable, .configFormat = true },
