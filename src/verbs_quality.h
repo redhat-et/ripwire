@@ -694,7 +694,7 @@ BaseChildResult tryBaseChild( const std::string& root, const rw::Config& cfg, co
     {
         constexpr std::string_view kOutcome[] = { "child", "failed", "fallback" };
         rw::emitTo( stderr, "ripwire: stats qbase-child outcome={} why={} child_peak_mib={} blob={}\n", kOutcome[ std::size_t( child.outcome ) ],
-                    child.why.empty() ? std::string_view( "-" ) : child.why, refs.childPeak / ( 1024 * 1024 ), child.blob.empty() ? std::string_view( "-" ) : child.blob );
+                    child.why.empty() ? std::string_view( "-" ) : child.why, refs.childPeak / ( std::uint64_t( 1024 ) * 1024 ), child.blob.empty() ? std::string_view( "-" ) : child.blob );
     }
     if( child.outcome == BaseChildOutcome::Fallback )
     {
