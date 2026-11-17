@@ -1187,11 +1187,20 @@ inline bool holdsWord( std::string_view line, std::string_view name ) noexcept
 // A feature's spellings in a doc line: bare, backticked and quoted.
 using FeatureForms = std::array<std::string, 3>;
 
-// The first line of `txt` that names one of the features and is no cfg use: a line naming it in backticks or quotes beats a bare mention.
-// {0, ""} when no line does.
-inline std::pair<std::uint32_t, std::string> definingLine( std::string_view txt, const std::vector<FeatureForms>& forms )
+// A touch row's retargeted line: its number (0: none), its trimmed text, and the file offset of that text's first byte (TOUCH-SYM looks
+// up the definition holding the row by it, so a moved line carries its own offset, never the cfg line's).
+struct DefiningLine
 {
-    std::pair<std::uint32_t, std::string> best { 0, {} };
+    std::uint32_t line = 0;
+    std::string   text;
+    std::uint32_t byte = 0;
+};
+
+// The first line of `txt` that names one of the features and is no cfg use: a line naming it in backticks or quotes beats a bare mention.
+// line 0 when no line does.
+inline DefiningLine definingLine( std::string_view txt, const std::vector<FeatureForms>& forms )
+{
+    DefiningLine best;
     int bestRank = 2;
     darkflags::forEachLine( txt, [&]( std::string_view line, std::uint32_t n )
                             {
@@ -1202,7 +1211,8 @@ inline std::pair<std::uint32_t, std::string> definingLine( std::string_view txt,
             if( rank < bestRank && !cfgUseLine( line ) )
             {
                 bestRank = rank;
-                best = { n, std::string( trimWs( line ) ) };
+                const std::string_view trimmed = trimWs( line );
+                best = { n, std::string( trimmed ), std::uint32_t( trimmed.data() - txt.data() ) }; // forEachLine hands views into txt
             }
         } } );
     return best;
@@ -1221,9 +1231,13 @@ inline void retargetCfgTouchLines( const IngestResult& ing, const std::vector<st
     for( std::size_t i = 0; i < touch.size() && i < kExemplarTouchRows; ++i )
     {
         const std::optional<std::string> txt = cfgUseLine( touch[i].text ) ? docparse::detail::readWholeFile( diskPath( ing, touch[i].fileId ) ) : std::nullopt;
-        const auto [line, text] = txt ? definingLine( *txt, forms ) : std::pair<std::uint32_t, std::string>();
-        touch[i].line = line != 0 ? line : touch[i].line;
-        touch[i].text = line != 0 ? text : touch[i].text;
+        DefiningLine def = txt ? definingLine( *txt, forms ) : DefiningLine {};
+        if( def.line != 0 )
+        {
+            touch[i].line = def.line;
+            touch[i].text = std::move( def.text );
+            touch[i].byte = def.byte; // the holder (n=) is the new line's, not the cfg use's
+        }
     }
 }
 } // namespace manifest_detail
