@@ -260,9 +260,12 @@ for args in "--dead-code=pkg/net.py" "--dead-code=cc/lib.cpp" "--dead-code=web/p
     if [ "$a" = "$( pinned "$args" )" ]; then ok "A13 $args: root and rows byte-identical to the pinned pre-group answer"; else no "A13 $args differs from the pinned answer beyond the group: $a"; fi
 done
 # Optional: RIPWIRE_BASE_BIN=<a main binary> also compares live against it.
+# CR676 (review 5923622158): a base from before NEXT-APOS spells the filter next='s quotes &apos; where this binary leaves
+# them raw, and a quote may sit in a path either side spells either way, so both sides read &apos; as ' before the compare.
+apos(){ sed "s/&apos;/'/g"; }
 if [ -n "${RIPWIRE_BASE_BIN:-}" ] && [ -x "${RIPWIRE_BASE_BIN}" ]; then
     for args in "--dead-code=pkg/net.py" "--dead-code=cc/lib.cpp" "--dead-code=web/path.ts" "--dead-code"; do
-        a="$( run $args | strip )"; b="$( cd "$F" && "$RIPWIRE_BASE_BIN" "$F" --no-cache $args 2>/dev/null | strip )"
+        a="$( run $args | strip | apos )"; b="$( cd "$F" && "$RIPWIRE_BASE_BIN" "$F" --no-cache $args 2>/dev/null | strip | apos )"
         if [ "$a" = "$b" ]; then ok "A13 $args: root and rows byte-identical to base"; else no "A13 $args differs from base beyond the group"; fi
     done
 fi
