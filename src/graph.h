@@ -10510,7 +10510,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                     ladderCaller( f );
                     if( !f.callerCls.empty() )
                     {
-                        return !owner.empty() && narrower.coneProves( recvEv.inCone( f.callerCls, owner ), ref, f.callerCls, owner, c, chaUp ) && recvEv.onSide( ref, c, f.callerStatic );
+                        return !owner.empty() && narrower.coneProves( recvEv.inCone( f.callerCls, owner ), ref.lang, f.callerCls, owner, c ) && recvEv.onSide( ref, c, f.callerStatic );
                     }
                     return owner.empty() && cs.fileId == ref.fileId && cs.kind == SymKind::Method;   // an object literal's own member
                 }
@@ -10518,7 +10518,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 {
                     const std::string_view owner = ownerIsClass( c );
                     ladderCaller( f );
-                    return !f.callerCls.empty() && !owner.empty() && owner != f.callerCls && narrower.coneProves( recvEv.inCone( f.callerCls, owner ), ref, f.callerCls, owner, c, chaUp )
+                    return !f.callerCls.empty() && !owner.empty() && owner != f.callerCls && narrower.coneProves( recvEv.inCone( f.callerCls, owner ), ref.lang, f.callerCls, owner, c )
                         && recvEv.onSide( ref, c, f.callerStatic );
                 }
                 case Root::Named:
@@ -10532,9 +10532,9 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             ladderCaller( f );
             if( owner.empty() )
             {
-                return narrower.bareCallReachesFree( f.memberDeclared, ref, f.callerCls, cs.scope, chaUp );   // a free / top-level function (CPP-BASE-BY-NAME: unless a member hides it)
+                return narrower.bareCallReachesFree( f.memberDeclared, ref, f.callerCls, cs.scope );   // a free / top-level function (CPP-BASE-BY-NAME: unless a member hides it)
             }
-            return !f.callerCls.empty() && narrower.coneProves( recvEv.inCone( f.callerCls, owner ), ref, f.callerCls, owner, c, chaUp );
+            return !f.callerCls.empty() && narrower.coneProves( recvEv.inCone( f.callerCls, owner ), ref.lang, f.callerCls, owner, c );
         }
         if( ref.lang == Lang::Rust || ref.lang == Lang::C )
         {
@@ -11277,7 +11277,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     fillImplementorBound( g, boundEdges );
     // CPP-BASE-BY-NAME: from here on the C-family base walk reads how each base clause was bound (resolve.h BaseWalkGuard)
     static_assert( Narrower::kBaseBoundOther == std::uint8_t( BaseBound::Other ), "resolve.h names BaseBound::Other by value" );
-    const Narrower::BaseWalkGuard baseWalkGuard{ classIds, g.implementors, g.implementorBound, Narrower::baseClauseQualifiers( ing ) };
+    const Narrower::BaseWalkGuard baseWalkGuard{ classIds, g.implementors, g.implementorBound, chaUp, Narrower::baseClauseQualifiers( ing ) };
     narrower.baseGuard = &baseWalkGuard;
     g.rubyMainMixins = rubyMainObjectMixins( ing, rubyBases );
     // lane L6: the interface-typed dispatch tier (ifacedispatch.h) over the map just built, and the edges its one-implementor
