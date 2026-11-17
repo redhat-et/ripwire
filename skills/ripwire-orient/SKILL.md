@@ -77,8 +77,10 @@ name-exact BM25 (recall@1 ~99% vs ~77% generic) — **know the name, query it ve
 uses subtoken+body BM25 instead. The header prints which ranker fired; `--no-route` forces the plain ranker.
 **Asking in a sentence? Backtick the code.** "Which functions call `pkg.Fn` and must change?" gets `<callers by="subject">`,
 and "the call chain from `A` to `B`" / "what calls both `A` and `B`" get the `<graph_verb>` path or connect block, as the bare
-names do. When a sentence's answer ends with `<reask next="--callers=X"/>` (or `--path=A,B`) instead, run that bare call: it is
-the one that answers the question.
+names do. When a sentence's answer ends with `<reask next="--callers=X"/>` (`--impact=X` for a change question, or `--path=A,B`)
+instead, run that bare call: it is the one that answers the question. A hand-off marked `windows="1"` appended no page because the
+verb's default call would list only the first 40 of `next_total=` rows: run its `next=` as written (`--format=columnar
+--limit=<next_total>`), the one call that lists every row, instead of paging.
 It also **anchors query mentions** by default — a file/module/`Type.method` literally named in the task text
 gets lifted near the top (+4.9pp held-out; a task naming nothing indexed is byte-identical); disable with
 `--no-mention-boost`. It also surfaces DOCS: a markdown design/plan doc that `backtick`-names one of the

@@ -884,6 +884,8 @@ inline constexpr std::string_view callerHopClause( const ForLensHeaderParts& p, 
 inline std::string hopClauses( const ForLensHeaderParts& p, bool compact )
 {
     std::string out( callerHopClause( p, compact ) );
+    // WINDOW-AWARE HAND-OFF: rides with the hop and is erased when the rendered hop does not window (SIZE-1, runForLensPass)
+    out += presentOnlyClause( p.callerHopPresent && rw::handoffWindowOn(), compact, rw::kForCompactWindowHandoffLegend, rw::kForWindowHandoffLegend );
     out += presentOnlyClause( p.dispatchHopPresent, compact, rw::kForCompactDispatchHopLegend, rw::kForDispatchHopLegend );
     out += presentOnlyClause( p.selfHookPresent, compact, rw::kForCompactSelfHookLegend, rw::kForSelfHookLegend );
     return out;
@@ -3382,6 +3384,19 @@ inline void appendMetBridge( const MainDispatch& d, const rw::Config& sub, std::
     rw::emitRaw( stdout, ( rw::metBridgeCrossingXml( d.ing, *bridge ) + std::string( rw::kMetBridgeCloseXml ) ).c_str() );
 }
 
+// WINDOW-AWARE HAND-OFF (src/handoffwindow.h): a callers answer whose own root says it windows is not appended as a first page; the
+// tag is self-closed with the verb's total and the one call that lists every row (windows="1" next_total= next=). Returns whether
+// that stub went out; false = the verb's answer does not window (or is not the callers verb) and is appended as before.
+inline bool emitWindowingGraphVerb( const rw::GraphSubjectArgs& args, std::string_view doc )
+{
+    const rw::HandoffWindow win = args.form == rw::GraphSubjectForm::Callers ? rw::handoffWindowOfVerbDoc( doc, "<callers " ) : rw::HandoffWindow{};
+    if( win.windows )
+    {
+        rw::emitRaw( stdout, rw::graphSubjectOpenXml( args, rw::GraphSubjectOpen{ .windowTotal = win.total } ).c_str() );
+    }
+    return win.windows;
+}
+
 // FOR-ROUTE-DECLINED (src/forgraphverb.h): a task spelled `path from A to B` / `callers of X` / `common callers of A and B`
 // gets that verb's DEFAULT answer inside <graph_verb endpoints="subject">, just before </ctx>, on the graph this run built
 // (no re-index). Every byte before it is the ordinary answer; nothing resolves → nothing is printed. XML only (the
@@ -3449,6 +3464,10 @@ inline bool appendSubjectGraphVerbBlock( const MainDispatch& d, std::span<const 
     }
     else
     {
+        if( emitWindowingGraphVerb( *args, *doc ) )
+        {
+            return true;
+        }
         // the open tag goes out after the verb ran: name_test_hops= (S5) is read off the rows it printed
         const std::size_t nameTest = args->form == rw::GraphSubjectForm::Path ? rw::graphSubjectNameTestHops( *doc ) : 0;
         rw::emitRaw( stdout, rw::graphSubjectOpenXml( *args, rw::GraphSubjectOpen{ .nameTestHops = nameTest } ).c_str() );
@@ -3469,6 +3488,36 @@ inline bool appendSubjectGraphVerbBlock( const MainDispatch& d, std::span<const 
 inline constexpr std::string_view kReaskLegend =
     "<!-- ripwire for reask: the task names code in a sentence and asks for its callers or a call path, and this answer carries no "
     "callers or graph_verb block for it; next= is the same question in its bare form, the one call that answers it -->";
+// REASK-GRAIN: the sentence asks what a CHANGE to the code reaches (subjectanchor.h isChangeCue), which is the transitive radius, not
+// the one-hop callers: the impact verb is the bare form of that question. Its own legend, so the callers / path one keeps its bytes.
+inline constexpr std::string_view kReaskImpactLegend =
+    "<!-- ripwire for reask: the task names code in a sentence and asks what a change to it reaches, and this answer carries no "
+    "callers block for it; next= is the same question in its bare form, the transitive radius (the one-hop callers are its d=1 rows)";
+
+// WINDOW-AWARE HAND-OFF (src/handoffwindow.h): what the re-ask's verb would do at its default caps. The impact form is counted by
+// the verb's own walk; the callers form decides its own byte band, so the verb runs captured (default caps, as the graph_verb block
+// runs it) and its root is read. A capture that cannot be set up → not known: the re-ask is the bare call, as before.
+inline rw::HandoffWindow reaskHandoffWindow( const MainDispatch& d, std::string_view flag, const std::string& spelling )
+{
+    if( !rw::handoffWindowOn() )
+    {
+        return {};
+    }
+    if( flag == "--impact=" )
+    {
+        return rw::impactHandoffWindow( d.ing, d.g, spelling );
+    }
+    rw::Config sub = d.cfg;   // the verb as its own bare call (appendSubjectGraphVerbBlock's sub-config)
+    sub.forTask    = {};
+    sub.pageLimit  = 0;
+    sub.pageOffset = 0;
+    sub.callers    = spelling;
+    const MainDispatch sd{ sub, d.ing, d.g, d.root, d.multiRoot, d.ws, d.fanIn, d.fanInPtr, d.qmetrics, d.ampPtr, d.cboPtr, d.testedPtr,
+                           d.lcom4Ptr, d.impurePtr, d.forChurn, d.redactCounts, d.redactPtr, d.notesPtr, d.notesDegraded, d.grepPhases, d.valueUses };
+    const std::optional<std::string> doc = captureGraphVerbDoc( sub, [ & ] { (void)runCallHierarchy( sd ); } );
+    return doc ? rw::handoffWindowOfVerbDoc( *doc, "<callers " ) : rw::HandoffWindow{};
+}
+
 inline void appendSentenceReask( const MainDispatch& d, bool subjectBlockPrinted )
 {
     const rw::Config& cfg = d.cfg;
@@ -3477,12 +3526,25 @@ inline void appendSentenceReask( const MainDispatch& d, bool subjectBlockPrinted
         return;
     }
     const std::string invocation = rw::sentenceReaskInvocation( d.ing, cfg.forTask );
-    // the callers form stands in for <callers by="subject">, so the caller-hop A/B switch (RIPWIRE_NO_CALLER_HOP) turns it off with it
-    if( invocation.empty() || ( invocation.starts_with( "--callers=" ) && !rw::forCallerHopOn() ) )
+    const bool        impact     = invocation.starts_with( "--impact=" );
+    const bool        dependents = impact || invocation.starts_with( "--callers=" );
+    // the dependents forms stand in for <callers by="subject">, so the caller-hop A/B switch (RIPWIRE_NO_CALLER_HOP) turns them off with it
+    if( invocation.empty() || ( dependents && !rw::forCallerHopOn() ) )
     {
         return;
     }
-    rw::emitRaw( stdout, ( std::string( kReaskLegend ) + "<reask" + rw::nextAttrXml( invocation ) + "/>" ).c_str() );
+    const std::string_view legend = impact ? kReaskImpactLegend : kReaskLegend.substr( 0, kReaskLegend.size() - std::string_view( " -->" ).size() );
+    const std::string_view flag   = std::string_view( invocation ).substr( 0, invocation.find( '=' ) + 1 );
+    const std::string      spelling( invocation.substr( flag.size() ) );
+    const rw::HandoffWindow win   = dependents ? reaskHandoffWindow( d, flag, spelling ) : rw::HandoffWindow{};
+    if( !win.windows )
+    {
+        rw::emitRaw( stdout, ( std::string( legend ) + " --><reask" + rw::nextAttrXml( invocation ) + "/>" ).c_str() );
+        return;
+    }
+    // a windowing re-ask names the complete call instead of a first page; the spelling is the one sentenceReaskInvocation chose
+    rw::emitRaw( stdout, ( std::string( legend ) + std::string( rw::kWindowHandoffBlockLegend ) + " --><reask counts_floor=\"1\""
+                           + rw::handoffNextAttrsXml( flag, spelling, win ) + "/>" ).c_str() );
 }
 
 std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, const ForLensPassMode& mode )
@@ -5226,6 +5288,8 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         // section is rendered now, so a clause whose attribute no emitted row carries is erased before the document is priced.
         // A section streamed unbuffered (the degrade path) keeps its clause: its rows are not known here.
         rw::eraseAbsentClause( headerStr, kForCompactLegendLayer, !sigsPreRendered || sigsStr.contains( " layer=\"" ) );
+        rw::eraseAbsentClause( headerStr, headerParts.compactLegend ? rw::kForCompactWindowHandoffLegend : rw::kForWindowHandoffLegend,
+                               callerHop.xml.contains( " windows=\"1\"" ) );   // WINDOW-AWARE HAND-OFF: present only beside a windowing hop
         rw::eraseAbsentClause( headerStr, kForCompactLegendLego, !legoPreRendered || legoStr.contains( " implementors=\"" ) );
         rw::eraseAbsentClause( headerStr, kForCompactLegendCompose, !composePreRendered || composeStr.contains( "<field " ) );
         rw::eraseAbsentClause( headerStr, headerParts.compactLegend ? rw::kForCompactBodyFoldMembersClause : rw::kForBodyFoldMembersClause,
