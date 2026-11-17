@@ -34,6 +34,9 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-17, lane land-606 (#446 round 2, @SeddonShen, over main 5139f7840): RE-PINNED with UPDATE_GOLDEN=1. kParserVer 309 -> 316
+#   (PLACEHOLDER above open TRAIN-1111j's 314; the train renumbers), mirrored in quality.h: Java base clauses are read as @reference.base
+#   captures. kQSnapCacheScheme stays: the parser key already keys the qsnap cache on extraction.
 # 2026-11-15, lane land-499-500 fix 1 (CodeRabbit on #668, merged over main d68b57456): RE-PINNED with UPDATE_GOLDEN=1,
 #   kQSnapCacheScheme 33 -> 34 (quality.h's v34 note). rustTestAttributed reads each top-level attribute on a line
 #   (classifyRustAttributeLine, rustAttributeClose: both join the manifest), so the Rust dead set moves; registeredMacroSymbolIds

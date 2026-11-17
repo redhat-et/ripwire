@@ -380,7 +380,11 @@ constexpr std::uint32_t kCacheVersion = 52;           // 52: lane failure-defaul
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 309;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 316;          // bump on any grammar/.scm/extraction change
+                                                      // 316 = 2026-11-17 (#446 round 2, @SeddonShen, landed as lane land-606, PLACEHOLDER: the train
+                                                      //   renumbers; above main's 309/310 and open TRAIN-1111j's 314/315): Java base clauses read as
+                                                      //   @reference.base captures (queries/java/tags.scm, LangFacts::basesAsCaptures on the Java row).
+                                                      //   Rich file tag 317. kCacheVersion unchanged.
                                                       // 309 = 2026-11-13 (lane macro-p0, PLACEHOLDER: the train renumbers; above main's 307/308): a C-family macro
                                                       //   invocation read as a typeless declarator (`REGISTER_FACTORY( F, B ){ "n" };`, a class-member `MOCK_METHOD( … );`)
                                                       //   mints no function def; the site is a use of the macro (ingest_names.h cFamilyMacroInvocationDecl). Rich file
