@@ -8389,43 +8389,148 @@ struct Narrower
     //     else the namespace-level candidate whose file shares a namespace with d's file.
     NodeId baseInClauseScope( NodeId d, const std::string& base ) const
     {
-        const ClassIdentity& ids = baseGuard->ids;
         buildShadowKey( guardKey, d, base );
         const auto written = baseGuard->baseQualifier.find( guardKey );
+        return written != baseGuard->baseQualifier.end() ? baseInQualifierScope( innermostScopeName( written->second ) ) : baseInDerivingScope( d );
+    }
+
+    // the one class of drawnBases for which `inScope` holds; kNoNode for none or several
+    template <class InScope>
+    NodeId oneDrawnBase( InScope&& inScope ) const
+    {
         NodeId      found = kNoNode;
         std::size_t count = 0;
-        const auto  take  = [ & ]( NodeId b ) { found = b; ++count; };
-        if( written != baseGuard->baseQualifier.end() )
+        for( NodeId b : drawnBases )
         {
-            const std::string_view q = innermostScopeName( written->second );
-            guardKey.assign( q );
-            const bool qualifierIsClass = ids.classesByName.find( guardKey ) != ids.classesByName.end();
-            for( NodeId b : drawnBases )
+            if( inScope( b ) )
             {
-                if( qualifierIsClass )
-                {
-                    if( IdentityNarrower::outerNameOf( b, ids ) == q ) { take( b ); }
-                    continue;
-                }
-                buildShadowKey( guardKey, IdentityNarrower::fileOf( b, ids ), q );
-                if( ids.enclosingClass[ b ] == kNoNode && ids.fileNamespaces.find( guardKey ) != ids.fileNamespaces.end() ) { take( b ); }
+                found = b;
+                ++count;
             }
-            return count == 1 ? found : kNoNode;
-        }
-        const NodeId outer = ids.enclosingClass[ d ];
-        for( NodeId b : drawnBases )
-        {
-            if( outer != kNoNode && ids.enclosingClass[ b ] == outer ) { take( b ); }
-        }
-        if( count != 0 )
-        {
-            return count == 1 ? found : kNoNode;
-        }
-        for( NodeId b : drawnBases )
-        {
-            if( ids.enclosingClass[ b ] == kNoNode && IdentityNarrower::filesShareNamespace( IdentityNarrower::fileOf( d, ids ), IdentityNarrower::fileOf( b, ids ), ids ) ) { take( b ); }
         }
         return count == 1 ? found : kNoNode;
+    }
+
+    // a QUALIFIED clause: `q` is the qualifier's innermost name
+    NodeId baseInQualifierScope( std::string_view q ) const
+    {
+        const ClassIdentity& ids = baseGuard->ids;
+        guardKey.assign( q );
+        if( ids.classesByName.find( guardKey ) != ids.classesByName.end() )
+        {
+            return oneDrawnBase( [ & ]( NodeId b ) { return IdentityNarrower::outerNameOf( b, ids ) == q; } );
+        }
+        return oneDrawnBase( [ & ]( NodeId b )
+        {
+            buildShadowKey( guardKey, IdentityNarrower::fileOf( b, ids ), q );
+            return ids.enclosingClass[ b ] == kNoNode && ids.fileNamespaces.find( guardKey ) != ids.fileNamespaces.end();
+        } );
+    }
+
+    // a BARE clause: the deriving class's own scope
+    NodeId baseInDerivingScope( NodeId d ) const
+    {
+        const ClassIdentity& ids   = baseGuard->ids;
+        const NodeId         outer = ids.enclosingClass[ d ];
+        const auto           sibling = [ & ]( NodeId b ) { return outer != kNoNode && ids.enclosingClass[ b ] == outer; };
+        if( std::ranges::any_of( drawnBases, sibling ) )
+        {
+            return oneDrawnBase( sibling );
+        }
+        const std::uint32_t file = IdentityNarrower::fileOf( d, ids );
+        return oneDrawnBase( [ & ]( NodeId b )
+        {
+            return ids.enclosingClass[ b ] == kNoNode && IdentityNarrower::filesShareNamespace( file, IdentityNarrower::fileOf( b, ids ), ids );
+        } );
+    }
+
+    // (2) of meantBase: the classes of this name the map draws d's clause to (drawnBases), and which of them it did not rule
+    // out as the name collision (standingBases; BaseBound::Other)
+    void drawnAndStandingBases( NodeId d, std::span<const NodeId> baseClasses ) const
+    {
+        standingBases.clear();
+        drawnBases.clear();
+        for( NodeId b : baseClasses )
+        {
+            const std::optional<std::uint8_t> how = baseEdgeBound( b, d );
+            if( !how.has_value() )
+            {
+                continue;
+            }
+            drawnBases.push_back( b );
+            if( *how != kBaseBoundOther )
+            {
+                standingBases.push_back( b );
+            }
+        }
+    }
+
+    // (3) of meantBase: the map proved none of standingBases (its include closure is the includer-relative one). The deriving
+    // class's file may still SEE exactly one: its own file or a header it includes directly (an include written against an
+    // include root, `"net/filter.h"`, read as a path suffix), else anywhere in its include closure (class identity's reading
+    // and Rule 3's). One visible class is the base (standingBases is cut to it, true); none or two is unbound (false).
+    bool bindByIncludes( NodeId d ) const
+    {
+        const ClassIdentity& ids  = baseGuard->ids;
+        const std::uint32_t  file = IdentityNarrower::fileOf( d, ids );
+        NodeId               direct = kNoNode, reached = kNoNode;
+        std::size_t          directCount = 0, reachedCount = 0;
+        for( NodeId b : standingBases )
+        {
+            const std::uint32_t baseFile = IdentityNarrower::fileOf( b, ids );
+            if( baseFile == file || IdentityNarrower::includeNamesAsSuffix( file, baseFile, ids ) )
+            {
+                direct = b;
+                ++directCount;
+            }
+            if( identity.fileVisibleFrom( file, baseFile, ids ) || rule3Includes.contains( file, baseFile ) )
+            {
+                reached = b;
+                ++reachedCount;
+            }
+        }
+        const NodeId one = directCount == 1 ? direct : ( directCount == 0 && reachedCount == 1 ) ? reached : kNoNode;
+        if( one != kNoNode )
+        {
+            standingBases.assign( 1, one );
+        }
+        return one != kNoNode;
+    }
+
+    // one deriving class's reading of the base name, into standingBases (drawnBases: every class the map drew it to). False
+    // when the name stays several classes for it: unbound.
+    bool bindBaseFor( NodeId d, const std::string& base, std::span<const NodeId> baseClasses ) const
+    {
+        drawnAndStandingBases( d, baseClasses );
+        const NodeId inScope = drawnBases.size() > 1 ? baseInClauseScope( d, base ) : kNoNode;   // (1) the clause's own scope decides first, whatever the files say
+        if( inScope != kNoNode )
+        {
+            standingBases.assign( 1, inScope );
+        }
+        return standingBases.size() <= 1 || bindByIncludes( d );
+    }
+
+    // meantBase when no class of the name is left standing for any deriving class: nullopt (not this walk's base) or the
+    // by-name reading
+    std::optional<MeantClasses> unjudgedBase( std::size_t parent, const std::string& base, std::span<const NodeId> from, bool drawn, bool baseDefined ) const
+    {
+        const MeantClasses byName{ {}, walkMeant[ parent ].unbound };
+        if( drawn )
+        {
+            return std::nullopt;   // every edge drawn is the name collision: the evidence names a class the tree does not define here
+        }
+        if( walkMeant[ parent ].ids.empty() )
+        {
+            return byName;   // no edge either way (an alias, a base outside the tree): the name, as before
+        }
+        // a narrowed parent: only a base one of ITS classes writes is walked (a namesake's base clause is not this walk's)
+        const ClassIdentity& ids     = baseGuard->ids;
+        const bool           written = !baseDefined && std::ranges::any_of( from, [ & ]( NodeId d )
+        {
+            const auto up = ids.realUp.find( d );
+            return up != ids.realUp.end() && std::ranges::find( up->second, std::string_view( base ) ) != up->second.end();
+        } );
+        return written ? std::optional<MeantClasses>( byName ) : std::nullopt;
     }
 
     // What the base name `base`, written by the class(es) fieldWalk[ parent ] means, is on this walk. nullopt: no class the
@@ -8450,63 +8555,8 @@ struct Narrower
         bool         drawn = false;   // the map draws an edge from a deriving class to a class of this name
         for( NodeId d : from )
         {
-            // (2) the classes of this name the map draws d's clause to, and which of them it did not rule out (BaseBound::Other)
-            standingBases.clear();
-            drawnBases.clear();
-            for( NodeId b : baseClasses )
-            {
-                const std::optional<std::uint8_t> how = baseEdgeBound( b, d );
-                if( how.has_value() )
-                {
-                    drawnBases.push_back( b );
-                    if( *how != kBaseBoundOther ) { standingBases.push_back( b ); }
-                }
-            }
-            drawn = drawn || !drawnBases.empty();
-            if( drawnBases.size() > 1 )
-            {
-                const NodeId inScope = baseInClauseScope( d, base );   // (1) the clause's own scope decides first, whatever the files say
-                if( inScope != kNoNode )
-                {
-                    standingBases.assign( 1, inScope );
-                }
-            }
-            if( standingBases.size() > 1 )
-            {
-                // (3) the map proved none (its include closure is the includer-relative one). The deriving class's file may still
-                // SEE exactly one: its own file or a header it includes directly (an include written against an include root,
-                // `"net/filter.h"`, read as a path suffix), else anywhere in its include closure (class identity's reading and
-                // Rule 3's). One visible class is the base; none or two is unbound.
-                const std::uint32_t file = IdentityNarrower::fileOf( d, ids );
-                NodeId              direct = kNoNode, reached = kNoNode;
-                std::size_t         directCount = 0, reachedCount = 0;
-                for( NodeId b : standingBases )
-                {
-                    const std::uint32_t baseFile = IdentityNarrower::fileOf( b, ids );
-                    if( baseFile == file || IdentityNarrower::includeNamesAsSuffix( file, baseFile, ids ) )
-                    {
-                        direct = b;
-                        ++directCount;
-                    }
-                    if( identity.fileVisibleFrom( file, baseFile, ids ) || rule3Includes.contains( file, baseFile ) )
-                    {
-                        reached = b;
-                        ++reachedCount;
-                    }
-                }
-                if( directCount == 1 )
-                {
-                    standingBases.assign( 1, direct );
-                }
-                else if( directCount == 0 && reachedCount == 1 )
-                {
-                    standingBases.assign( 1, reached );
-                }
-                else
-                {
-                    meant.unbound = true;
-                }
-            }
+            meant.unbound = !bindBaseFor( d, base, baseClasses ) || meant.unbound;
+            drawn         = drawn || !drawnBases.empty();
             for( NodeId b : standingBases )
             {
                 if( std::ranges::find( meant.ids, b ) == meant.ids.end() )
@@ -8515,35 +8565,68 @@ struct Narrower
                 }
             }
         }
+        if( meant.ids.empty() )
+        {
+            return unjudgedBase( parent, base, from, drawn, !baseClasses.empty() );
+        }
         meant.unbound = meant.unbound || walkMeant[ parent ].unbound;   // above a base nothing could bind, nothing is bound either
-        if( !meant.ids.empty() )
+        std::sort( meant.ids.begin(), meant.ids.end() );
+        if( !narrowedParent && !meant.unbound && meant.ids.size() == baseClasses.size() )
         {
-            std::sort( meant.ids.begin(), meant.ids.end() );
-            if( !narrowedParent && !meant.unbound && meant.ids.size() == baseClasses.size() )
+            meant.ids.clear();   // every class of the name is some deriving class's own base: the name says the same
+        }
+        return meant;
+    }
+
+    // Where the walk already holds the name `base`, for a new reading `meant` of it. A name is visited once BY NAME; as
+    // classes, once per class: `Http::ActiveClient : ConnectionPool::ActiveClient` reaches the second class of the name the
+    // first entry does not mean, so the classes an earlier entry holds are cut from `meant`. `covered`: nothing new is left
+    // (visited by name — cycles too — or every class already held). Returns the entry of the level being built (from
+    // `lvlEnd` on) that holds the name, else fieldWalk.size().
+    std::size_t placeOfBase( std::string_view base, MeantClasses& meant, std::size_t lvlEnd, bool& covered ) const
+    {
+        std::size_t sameLevel = fieldWalk.size();
+        for( std::size_t at = 0; at < fieldWalk.size() && !covered; ++at )
+        {
+            if( fieldWalk[ at ] != base )
             {
-                meant.ids.clear();   // every class of the name is some deriving class's own base: the name says the same
+                continue;
             }
-            return meant;
+            const MeantClasses& have = walkMeant[ at ];
+            if( have.ids.empty() || meant.ids.empty() )
+            {
+                covered = at < lvlEnd || have.ids.empty();
+            }
+            else
+            {
+                meant.ids.erase( std::remove_if( meant.ids.begin(), meant.ids.end(), [ & ]( NodeId c ) { return std::ranges::find( have.ids, c ) != have.ids.end(); } ),
+                                 meant.ids.end() );
+                covered = meant.ids.empty();
+            }
+            sameLevel = at >= lvlEnd ? at : sameLevel;
         }
-        if( drawn )
+        return sameLevel;
+    }
+
+    // one entry of the level being built for what two parents mean by the name (by name when either says so)
+    static void mergeIntoLevel( MeantClasses& have, const MeantClasses& meant, bool covered )
+    {
+        have.unbound = have.unbound || meant.unbound;
+        if( covered )
         {
-            return std::nullopt;   // every edge drawn is the name collision: the evidence names a class the tree does not define here
+            return;
         }
-        if( !narrowedParent )
+        if( meant.ids.empty() )
         {
-            return MeantClasses{ {}, walkMeant[ parent ].unbound };   // no edge either way (an alias, a base outside the tree): the name, as before
+            have.ids.clear();
+            return;
         }
-        // a narrowed parent: only a base one of ITS classes writes is walked (a namesake's base clause is not this walk's)
-        const bool written = baseClasses.empty() && std::ranges::any_of( from, [ & ]( NodeId d )
-        {
-            const auto up = ids.realUp.find( d );
-            return up != ids.realUp.end() && std::ranges::find( up->second, std::string_view( base ) ) != up->second.end();
-        } );
-        return written ? std::optional<MeantClasses>( MeantClasses{ {}, walkMeant[ parent ].unbound } ) : std::nullopt;
+        have.ids.insert( have.ids.end(), meant.ids.begin(), meant.ids.end() );
+        std::sort( have.ids.begin(), have.ids.end() );
     }
 
     // expandWalkLevel under the guard: the same names in the same order, minus the bases meantBase refuses; walkMeant kept
-    // parallel. A base two classes of one level both name keeps what either means (by name when one of them says so).
+    // parallel
     void expandGuardedLevel( std::size_t lvlBegin, std::size_t lvlEnd, const HashMap<std::string, std::vector<std::string>>& chaUp,
                              std::size_t nameCap = kFieldWalkCap ) const
     {
@@ -8551,61 +8634,22 @@ struct Narrower
         {
             guardKey.assign( fieldWalk[ i ] );
             const auto uit = chaUp.find( guardKey );
-            if( uit == chaUp.end() )
-            {
-                continue;
-            }
-            for( const std::string& base : uit->second )
+            for( const std::string& base : ( uit == chaUp.end() ? std::span<const std::string>{} : std::span<const std::string>( uit->second ) ) )
             {
                 std::optional<MeantClasses> meant = meantBase( i, base );
                 if( !meant.has_value() )
                 {
                     continue;
                 }
-                // a name is visited once BY NAME; as classes, once per class: `Http::ActiveClient : ConnectionPool::ActiveClient`
-                // reaches the second class of the name the first entry does not mean
-                std::size_t sameLevel = fieldWalk.size();
-                bool        covered   = false;
-                for( std::size_t at = 0; at < fieldWalk.size() && !covered; ++at )
+                bool              covered   = false;
+                const std::size_t sameLevel = placeOfBase( base, *meant, lvlEnd, covered );
+                if( sameLevel < fieldWalk.size() )
                 {
-                    if( fieldWalk[ at ] != std::string_view( base ) )
-                    {
-                        continue;
-                    }
-                    const MeantClasses& have = walkMeant[ at ];
-                    if( have.ids.empty() || meant->ids.empty() )
-                    {
-                        covered = at < lvlEnd || have.ids.empty();   // visited by name (cycles too), or a by-name reading of an earlier level's name
-                    }
-                    else
-                    {
-                        meant->ids.erase( std::remove_if( meant->ids.begin(), meant->ids.end(), [ & ]( NodeId c ) { return std::ranges::find( have.ids, c ) != have.ids.end(); } ),
-                                          meant->ids.end() );
-                        covered = meant->ids.empty();
-                    }
-                    sameLevel = at >= lvlEnd ? at : sameLevel;
+                    mergeIntoLevel( walkMeant[ sameLevel ], *meant, covered );
+                    continue;
                 }
                 if( covered )
                 {
-                    if( sameLevel < fieldWalk.size() )
-                    {
-                        walkMeant[ sameLevel ].unbound = walkMeant[ sameLevel ].unbound || meant->unbound;
-                    }
-                    continue;
-                }
-                if( sameLevel < fieldWalk.size() )
-                {
-                    MeantClasses& have = walkMeant[ sameLevel ];   // this level already holds the name: one entry for what both parents mean
-                    if( meant->ids.empty() )
-                    {
-                        have.ids.clear();
-                    }
-                    else
-                    {
-                        have.ids.insert( have.ids.end(), meant->ids.begin(), meant->ids.end() );
-                        std::sort( have.ids.begin(), have.ids.end() );
-                    }
-                    have.unbound = have.unbound || meant->unbound;
                     continue;
                 }
                 if( fieldWalk.size() >= nameCap )
@@ -8733,9 +8777,53 @@ struct Narrower
     bool guardedConeDeclares( std::string_view cls, std::string_view callee, const HashMap<std::string, std::vector<std::string>>& chaUp ) const
     {
         keepGuardedCone( cls, chaUp );
-        for( std::size_t at = 0; at < coneNames.size(); ++at )
+        std::size_t at = 0;
+        return std::ranges::any_of( coneNames, [ & ]( std::string_view name ) { return declaresBodiless( name, coneMeant[ at++ ], callee ); } );
+    }
+
+    // ladderProves' three questions under the guard, kept here so the resolve loop reads them as one call each.
+    // (a) `byName` is the by-name cone's answer (ReceiverEvidence::inCone: `owner` is `cls` or one of its bases); for the C
+    //     family the guard must also bind candidate `c` to a class the walk from `cls` reaches.
+    bool coneProves( bool byName, const Reference& ref, std::string_view cls, std::string_view owner, NodeId c,
+                     const HashMap<std::string, std::vector<std::string>>& chaUp ) const
+    {
+        if( !byName || owner == cls || baseGuard == nullptr || !extent::inSet( extent::kHeadRuleLangs, ref.lang ) )
         {
-            if( declaresBodiless( coneNames[ at ], coneMeant[ at ], callee ) )
+            return byName;
+        }
+        return guardedConeOwns( cls, owner, c, chaUp );
+    }
+    // (b) a bare call's candidate with no owning class is a free / top-level function the call reaches — unless the caller's
+    //     class or a base declares the name with no body: C++ finds that member first, and its bodies are the subclasses',
+    //     which no lookup from here proves. `declared` memoises that per call (-1 unread). A member of a class the owner
+    //     table could not name (`struct Outer::Inner { void start(); }`, scope `candScope`) is no free function: as before.
+    bool bareCallReachesFree( std::int8_t& declared, const Reference& ref, std::string_view cls, std::string_view candScope,
+                              const HashMap<std::string, std::vector<std::string>>& chaUp ) const
+    {
+        if( declared < 0 )
+        {
+            declared = !cls.empty() && baseGuard != nullptr && extent::inSet( extent::kHeadRuleLangs, ref.lang ) && guardedConeDeclares( cls, ref.calleeName, chaUp ) ? 1 : 0;
+        }
+        return declared == 0 || scopeNamesClass( candScope );
+    }
+    // (c) a candidate sat behind a base nothing could bind (coneUnbound, set by guardedConeOwns since the caller reset it):
+    //     the call may mean that member, so no other candidate is the proven one — `proved` is emptied and every candidate
+    //     stays, hedged.
+    template <class Proved>
+    void dropProvedIfUnbound( Proved& proved ) const
+    {
+        if( coneUnbound )
+        {
+            proved.clear();
+        }
+    }
+
+    // does a level of the guarded walk (fieldWalk from `lvlEnd` on) declare `callee` with no body?
+    bool levelDeclaresBodiless( std::size_t lvlEnd, std::string_view callee ) const
+    {
+        for( std::size_t i = lvlEnd; i < fieldWalk.size(); ++i )
+        {
+            if( declaresBodiless( i, callee ) )
             {
                 return true;
             }
@@ -8767,16 +8855,9 @@ struct Narrower
             {
                 return unionOnMulti ? &walkUnion : nullptr;
             }
-            if( probe.found != nullptr )
+            if( probe.found != nullptr || levelDeclaresBodiless( lvlEnd, r.calleeName ) )
             {
-                return probe.found;
-            }
-            for( std::size_t i = lvlEnd; i < fieldWalk.size(); ++i )
-            {
-                if( declaresBodiless( i, r.calleeName ) )
-                {
-                    return nullptr;   // a base declares it with no body (a pure virtual): the nearest declaration wins
-                }
+                return probe.found;   // the hit — or nullptr: a base declares it with no body (a pure virtual), and the nearest declaration wins
             }
             lvlBegin = lvlEnd;
         }
