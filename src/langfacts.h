@@ -98,6 +98,16 @@ enum class FileEdges : std::uint8_t
 /// What proves a call Rule 3 narrowed (LangFacts::rule3NameProof): nothing (Rule 3 decides), a Rust `use` or module qualifier, a Python import binding.
 enum class Rule3NameProof : std::uint8_t { None, RustUse, PythonImport };
 
+/// How the language's own test runner finds the tests it calls (LangFacts::testRunnerEntry; quality.h testRunnerInvokedSymbol): no rule,
+/// Go's `go test` naming (Test*/Benchmark*/Example*/Fuzz* in a `_test.go` file), Rust's test attribute (the in-file testScope bit).
+enum class TestRunnerEntry : std::uint8_t { None, GoTestName, RustTestAttr };
+
+/// How a member variable is declared, read lexically where the index extracts no field (LangFacts::memberDecl; fielduses.h
+/// memberDeclShaped): the name first, then `:` / `=` / `;` (TS, Rust, Swift, Kotlin …); Go's name then its type; or the
+/// C-family type first (`Type name;`), Java, C# and Dart. None: the language declares no member lexically (Ruby: instance
+/// variables are `@ivar`s and the attr_* family is indexed as Var defs), so a class-body `has_many :posts` is a call, not a field.
+enum class MemberDecl : std::uint8_t { NameFirst, NameThenType, TypeFirst, None };
+
 /// What shared code asks about a language. Every optional column is false for a language that says nothing.
 struct LangFacts
 {
@@ -116,6 +126,12 @@ struct LangFacts
     /// declared inheritance chain (graph.h).
     bool mixinAncestry = false;
 
+    /// C++ (#446): a class definition reads its base-clause types as @reference.base tags captures
+    /// (queries/cpp/tags.scm), not through captureBases' kind chain — captureSpecializationHeader
+    /// still walks for template specializations. The languages this port has not reached yet keep
+    /// the walk.
+    bool basesAsCaptures = false;
+
     /// Ruby: an element access `recv[ k ]` whose receiver the shape rules cannot classify (a call result, a richer expression) is
     /// still recorded as a site on that receiver, because the typing walk may type it later (`Report.new[ :x ]`). Python and the
     /// rest record nothing for such a receiver (ingest_binds.h subscriptOperatorRef).
@@ -132,6 +148,11 @@ struct LangFacts
     /// Not a code language — prose, configuration or data (and no recognised language at all): a bare basename with such an
     /// extension (`book.toml`, `SUMMARY.md`) named in a --for task is context, never a file anchor (mention.h isCodeExtension).
     bool notCode = false;
+
+    /// Protocol Buffers (PROTO-INDEX): an interface-definition schema whose definitions other languages reach only through GENERATED
+    /// modules, usually not in the tree. Its grammar names no `body:` field (ingest_sidecap.h reads the *_body child or the `{`), and
+    /// the --for not-found ladder links a generated name to these definitions by name only (forreexport.h gen rung).
+    bool generatedSchema = false;
 
     /// C++: defect-shape's whole-tree input is the macro-name set, and a changed C++ file (a .h reads as C++) can only be
     /// judged against the base's whole set. A changed C or Objective-C file does not need it, by today's behaviour
@@ -284,6 +305,11 @@ struct LangFacts
     /// written-spelling tier (graph.h resolveAllByWrittenSpelling) reads the body's name off those binds. The other languages' owners are symbols.
     bool namespaceBodies = false;
 
+    /// Rust: `crate`, `self` and `super` lead a written path as keywords, so the written-spelling tier (graph.h
+    /// resolveAllByWrittenSpelling) drops them before placing the prefix. Elsewhere they are segments like any other: a C++
+    /// `self::` names a namespace called self, a Python `self.` a receiver (SELECTOR-SELF-ANY-LANG).
+    bool selectorPathKeywords = false;
+
     /// TypeScript, JavaScript: an object literal's members are indexed with no owner (an unnamed container), so the written-spelling
     /// tier treats such a member as a candidate whose object name is unknown (graph.h resolveAllByWrittenSpelling).
     bool objectLiteralMembers = false;
@@ -360,8 +386,49 @@ struct LangFacts
     /// is a value, and a family is a base, a registry or an attribute.
     bool typedInstanceRows = false;
 
+    /// C, C++: a holder's existing rows are an X-macro list, a `#define LIST(M) \` block whose lines each call `M( name, … )`
+    /// (ClickHouse's COMMON_SETTINGS), so exemplarfamily.h's into= rows read the largest such list in the holder's file. Elsewhere
+    /// a backslash-continued macro is no list of rows.
+    bool xMacroRows = false;
+
+    /// TypeScript, JavaScript: a holder's existing rows are the `name?: type` property lines inside the braces of its declaration
+    /// (an `interface CompilerOptions { … }`), so exemplarfamily.h's into= rows read them when no macro list and no field defs exist.
+    bool bracedPropertyRows = false;
+
     /// Which arm openers the language has (ArmOpeners above).
     ArmOpeners armOpeners = ArmOpeners::ElseBranch;
+
+    /// Bash: a file of shell commands, a script rather than library code; --for's tail counts a widened row of one as `script`
+    /// (forpage.h tailFoldClass, SIZE-2).
+    bool shellScript = false;
+
+    /// JSON, TOML, YAML: a configuration or data format; --for's tail counts a widened row of one as `config` (forpage.h tailFoldClass).
+    bool configFormat = false;
+
+    /// Go, Rust: the test runner calls a test by its naming or attribute, with no call in the tree (TestRunnerEntry above), so the
+    /// dead-code kind's zero in-edges says nothing about it (quality.h testRunnerInvokedSymbol). Python's runner hooks are
+    /// frameworkEntryHooks; JS/TS tests are anonymous callbacks and C++ test macros are register macros, so neither needs a rule here.
+    TestRunnerEntry testRunnerEntry = TestRunnerEntry::None;
+
+    /// C++ and ObjC: the C++ tags path deliberately captures no OBJECT-LIKE `#define` (queries/cpp/tags.scm), so a name such a
+    /// line defines is unindexed by design and a selector refusal names the line (degradedscan.h lexicalDefHit). C captures them.
+    bool objectMacrosUnindexed = false;
+
+    /// The member declaration shape a bare member name is read by where the index has no field rows (MemberDecl above).
+    MemberDecl memberDecl = MemberDecl::NameFirst;
+
+    /// `'…'` delimits a STRING of any length (TS, JS, Python, Ruby, PHP, Lua, Dart, GDScript). Elsewhere a `'` opens only a char
+    /// literal or is a Rust lifetime, so the member brace walk skips just the char-literal shape (fielduses.h OwnerBraceWalk).
+    /// clones.h kSingleQuoteStringLangMask is a narrower consumer set on purpose: the clone/readability streams keep their bytes.
+    bool singleQuoteStrings = false;
+
+    /// Rust: a `#[test]` or `#[tokio::test]` attribute registers the function with the test harness, which calls it by name
+    /// without any call in the tree (issue #493). quality.h's registersItself reads this column; nothing else does.
+    bool attributeRegistersTests = false;
+
+    /// Rust: a method named `drop` is `Drop::drop`, which the compiler runs when a value leaves scope, so no call names it
+    /// (issue #494). rustDropImplMethodIds (quality.h) reads this column, and only for a method inside a Drop impl block.
+    bool dropRunsAtScopeExit = false;
 };
 
 /// The Rust prelude's bare-callable items (std::prelude::v1, every edition): the Option and Result variants a call constructs, and
@@ -374,52 +441,55 @@ inline constexpr std::array<std::string_view, 3> kJavaObjectMethods = { "equals"
 
 /// The rows, one per Lang in enum order. A language says only the facts it has.
 inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
-    { .lang = Lang::Cpp, .defectShapeNeedsMacroSet = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .aliasTargetDefs = true, .memberSeparator = "::",
+    { .lang = Lang::Cpp, .basesAsCaptures = true, .defectShapeNeedsMacroSet = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .aliasTargetDefs = true, .memberSeparator = "::",
       .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain, .staticLinkage = true,
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .signatureRows = true, .fileEdges = FileEdges::Resolved, .qualifierNamesScope = true,
-      .typedInstanceRows = true },
+      .typedInstanceRows = true, .xMacroRows = true, .objectMacrosUnindexed = true },
     { .lang = Lang::Python, .frameworkEntryHooks = true, .closureReceiverDispatch = true, .externalVetoBeforeRule3 = true, .rule3NameProof = Rule3NameProof::PythonImport, .baseImportEvidence = BaseImportEvidence::PythonImport,
       .instanceReceiver = "self", .underscorePrivacy = true, .leadingDocstring = true,
-      .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .hashComment = true, .fileEdges = FileEdges::Resolved, .tupleParens = true, .armOpeners = ArmOpeners::PythonElif },
+      .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .hashComment = true, .fileEdges = FileEdges::Resolved, .tupleParens = true, .armOpeners = ArmOpeners::PythonElif, .singleQuoteStrings = true },
     { .lang = Lang::TypeScript, .overloadSignatures = true, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
       .writtenBindingUndecided = true, .namespaceBodies = true, .objectLiteralMembers = true, .containmentOwners = true,
-      .classNameReceiver = true, .fileEdges = FileEdges::Resolved, .localBraceNotData = true },
+      .classNameReceiver = true, .fileEdges = FileEdges::Resolved, .localBraceNotData = true, .bracedPropertyRows = true, .singleQuoteStrings = true },
     { .lang = Lang::Go, .structuralTyping = true, .writtenModule = WrittenModuleRule::PackageDir,
-      .memberNeverReachesFreeFunction = true, .moduleCallReachesFunctionsOnly = true, .signatureRows = true },
+      .memberNeverReachesFreeFunction = true, .moduleCallReachesFunctionsOnly = true, .signatureRows = true,
+      .testRunnerEntry = TestRunnerEntry::GoTestName, .memberDecl = MemberDecl::NameThenType },
     { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .rule3NameProof = Rule3NameProof::RustUse, .preludeCalls = kRustPreludeCalls, .bangMacros = true, .returnTypedDispatchLet = true, .constructorMethod = "new", .memberSeparator = "::", .baseImportEvidence = BaseImportEvidence::RustUse,
-      .instanceReceiver = "self", .memberNeverReachesFreeFunction = true, .fileEdges = FileEdges::Resolved, .localBraceNotData = true, .armOpeners = ArmOpeners::FatArrow },
+      .selectorPathKeywords = true, .instanceReceiver = "self", .memberNeverReachesFreeFunction = true, .fileEdges = FileEdges::Resolved, .localBraceNotData = true, .armOpeners = ArmOpeners::FatArrow,
+      .testRunnerEntry = TestRunnerEntry::RustTestAttr, .attributeRegistersTests = true, .dropRunsAtScopeExit = true },
     { .lang = Lang::Swift, .writtenModule = WrittenModuleRule::DirsOnly, .instanceReceiver = "self",
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .localBraceNotData = true },
     { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true, .staticLinkage = true, .fileEdges = FileEdges::Resolved,
-      .qualifierNamesScope = true },
+      .qualifierNamesScope = true, .objectMacrosUnindexed = true },
     { .lang = Lang::Markdown, .notCode = true, .linkSections = true, .fileEdges = FileEdges::NotApplicable },
     { .lang = Lang::JavaScript, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
       .writtenBindingUndecided = true, .objectLiteralMembers = true, .containmentOwners = true,
-      .classNameReceiver = true, .fileEdges = FileEdges::Resolved, .localBraceNotData = true },
-    { .lang = Lang::Bash, .hashComment = true, .fileEdges = FileEdges::Resolved },
+      .classNameReceiver = true, .fileEdges = FileEdges::Resolved, .localBraceNotData = true, .bracedPropertyRows = true, .singleQuoteStrings = true },
+    { .lang = Lang::Bash, .hashComment = true, .fileEdges = FileEdges::Resolved, .shellScript = true },
     { .lang = Lang::Java, .samLambdas = true, .samIgnoredMembers = kJavaObjectMethods, .anonymousImplementors = true, .baseImportEvidence = BaseImportEvidence::JvmImport,
       .writtenModule = WrittenModuleRule::DirsOnly,
-      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true },
+      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .memberDecl = MemberDecl::TypeFirst },
     { .lang = Lang::Ruby, .classObjectLookup = true, .mixinAncestry = true, .keepsUnshapedSubscript = true, .constantPathReceiver = true,
       .memberSeparator = "#", .writtenModule = WrittenModuleRule::ConstantPath, .instanceReceiver = "self",
-      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .hashComment = true, .fileEdges = FileEdges::Resolved, .armOpeners = ArmOpeners::RubyWhen },
+      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .hashComment = true, .fileEdges = FileEdges::Resolved, .armOpeners = ArmOpeners::RubyWhen, .memberDecl = MemberDecl::None, .singleQuoteStrings = true },
     { .lang = Lang::Unknown, .notCode = true, .fileEdges = FileEdges::NotApplicable },
-    { .lang = Lang::Json, .notCode = true, .fileEdges = FileEdges::NotApplicable },
+    { .lang = Lang::Json, .notCode = true, .fileEdges = FileEdges::NotApplicable, .configFormat = true },
     { .lang = Lang::CSharp, .overloadsWithoutArity = true, .writtenModule = WrittenModuleRule::DirsOnly,
-      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .armOpeners = ArmOpeners::FatArrow },
+      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .armOpeners = ArmOpeners::FatArrow, .memberDecl = MemberDecl::TypeFirst },
     { .lang = Lang::C, .noNestedNamedFunctions = true, .memberSeparator = "::", .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain,
-      .staticLinkage = true, .signatureRows = true, .fileEdges = FileEdges::Resolved, .typedInstanceRows = true },
-    { .lang = Lang::Toml, .notCode = true, .hashComment = true, .fileEdges = FileEdges::NotApplicable },
-    { .lang = Lang::Yaml, .notCode = true, .hashComment = true, .fileEdges = FileEdges::NotApplicable },
-    { .lang = Lang::Php, .memberSeparator = "::", .armOpeners = ArmOpeners::FatArrow },
-    { .lang = Lang::Lua, .dashDashComments = true, .fileEdges = FileEdges::Resolved },
+      .staticLinkage = true, .signatureRows = true, .fileEdges = FileEdges::Resolved, .typedInstanceRows = true, .xMacroRows = true },
+    { .lang = Lang::Toml, .notCode = true, .hashComment = true, .fileEdges = FileEdges::NotApplicable, .configFormat = true },
+    { .lang = Lang::Yaml, .notCode = true, .hashComment = true, .fileEdges = FileEdges::NotApplicable, .configFormat = true },
+    { .lang = Lang::Php, .memberSeparator = "::", .armOpeners = ArmOpeners::FatArrow, .singleQuoteStrings = true },
+    { .lang = Lang::Lua, .dashDashComments = true, .fileEdges = FileEdges::Resolved, .singleQuoteStrings = true },
     { .lang = Lang::Elixir, .hasInertQuoteRegions = true, .hashComment = true, .fileEdges = FileEdges::Resolved },
-    { .lang = Lang::Dart },
+    { .lang = Lang::Dart, .memberDecl = MemberDecl::TypeFirst, .singleQuoteStrings = true },
     { .lang = Lang::Kotlin, .samFromJavaLambdas = true, .trailingLambdaScopeFns = true, .interfaceReadsAsClass = true, .anonymousImplementors = true, .overloadsWithoutArity = true,
       .baseImportEvidence = BaseImportEvidence::JvmImport, .writtenModule = WrittenModuleRule::DirsOnly,
       .implicitReceiver = true, .classNameReceiver = true, .localBraceNotData = true },
-    { .lang = Lang::GDScript, .hashComment = true },
+    { .lang = Lang::GDScript, .hashComment = true, .singleQuoteStrings = true },
     { .lang = Lang::Clojure },
+    { .lang = Lang::Proto, .generatedSchema = true, .fileEdges = FileEdges::NotApplicable },   // a schema: `import "x.proto"` is not read as a file edge yet
 } };
 
 /// The index of the first row that is not at its own Lang index, or the table size when every row is.

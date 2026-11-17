@@ -23,6 +23,8 @@
 #include "infra/Diagnostics.h"  // DISCLOSE — graceful-degrade when regex matching throws mid-scan (never terminate)
 #include "didyoumean.h"         // R1a: the ONE near-miss suggester — the zero-hit follow-up reuses it, never a second one
 #include "docparse.h"           // docparse::detail::readWholeFile — the canonical whole-file byte read (reused, not re-rolled)
+#include "infra/pieceread.h"    // LARGE-PARTIAL-1: a file over the crawl ceiling is grepped in line-aligned pieces, never skipped
+#include "pathguard.h"           // openRegularFileNoFollow — a piece-read file is opened no-follow, its size read from the descriptor
 #include "filter.h"             // §P11.1: rw::pathTierOf — the shared source/test/doc ORDERING tier
 #include "ingest.h"             // §R-J: rw::looksBinary / rw::kBinarySniffCap — the shared NUL-sniff, reused by grepCollectAux
 #include "model.h"
@@ -1423,101 +1425,21 @@ inline bool isScanStackRefusedByFault( std::size_t threadIndex, std::size_t tryB
     return isMixed && threadIndex % 2 == 1 && tryBytes > askedBytes / 2;
 }
 
-// `stackBytes` is the size the scan threads ask for; only a gate's fault switch or a caller testing the degrade passes less.
-inline GrepCollection grepCollect( const IngestResult& ing, const std::string& pat, bool regex = false, bool noPrefilter = false,
-                                   std::size_t stackBytes = kGrepScanStackBytes )
+// Pass 2 of a scan, for ONE pattern's per-file sites: RANK the hit files, THEN spend the budget in that order (thread-order-independent).
+// `perFileSites` is consumed (its sites move into the collection's rows); the file-level facts are the pass-1 read's.
+struct GrepPassOneFacts
 {
-    const std::uint32_t fileCount   = std::uint32_t( ing.files.size() );
+    std::uint32_t unreadableFiles    = 0;
+    bool          workerDegraded     = false;
+    std::size_t   engineLineBytesMax = 0;
+    std::size_t   regexStackBytes    = 0;   // 0 for a literal scan
+};
+inline GrepCollection rankGrepSites( const IngestResult& ing, std::vector<std::vector<GrepMatchSite>>& perFileSites, const std::vector<char>& perFileAbandoned,
+                                     const std::vector<std::uint32_t>& perFileSkipped, const GrepPassOneFacts& facts )
+{
+    const std::uint32_t fileCount   = std::uint32_t( perFileSites.size() );
     const std::size_t   budgetCount = kGrepCollectionBudget;
-    if( fileCount == 0 )
-    {
-        return {};
-    }
-
-    // a pattern that doesn't compile is a user error, not a degrade — the CLI seam refuses it before we are
-    // called (regexCompileError above). Kept as a belt-and-braces early REJECT for library/MCP callers that
-    // did not ask; each worker compiles its own copy so no std::regex object is shared.
-    if( regex && regexCompileError( pat ) )
-    {
-        // L5: the SAME verdict the CLI seam uses, incl. the platform-divergent escapes. degraded=true
-        // (T1): NOTHING was scanned, so no caller may read this empty set as a complete zero.
-        return { {}, false, 0, true };
-    }
-
-    // the sound regex→trigram query, computed once and evaluated per file (read-only across workers)
-    const TriQuery prefilterQuery = ( regex && !noPrefilter ) ? RegexAnalyzer( pat ).analyze() : TriQuery::all();
-
-    // ── pass 1: parallel scan, one worker per hardware thread, one file at a time ──────────────────────
-    std::vector<std::vector<GrepMatchSite>> perFileSites( fileCount );   // slot f written by exactly one worker
-    std::vector<char>                       perFileAbandoned( regex ? fileCount : 0, 0 );   // slot f: the engine abandoned a match in f
-    std::vector<std::uint32_t>              perFileSkipped( regex ? fileCount : 0, 0 );     // slot f: lines too long for the engine in f
-    std::atomic<std::size_t>                engineLineBytesMax { 0 };    // every worker stores the SAME value: one settled stack, one pattern
-    std::atomic<std::uint32_t>              nextFileId { 0 };
-    std::atomic<std::uint32_t>              unreadableCount { 0 };       // T1: files the scan could not read
-    std::atomic<bool>                       workerDegraded { false };    // T1: a worker died mid-scan
-    ScanWorkerDegrade                       workerDegradeSink{ workerDegraded };   // the DISCLOSE sink a worker writes it through
-    const auto                              fileWorker = [ & ]( std::size_t stackBytes )
-    {
-        const RegexCompile reLocal = regex ? compileGuardedRegex( pat, kGrepRegexSyntax ) : RegexCompile{};
-        const RegexLinePolicy linePolicy{ regex ? reLocal.regex.maxEngineSubjectBytes( stackBytes ) : SIZE_MAX, !noPrefilter };
-        engineLineBytesMax.store( regex ? linePolicy.engineLineBytesMax : 0, std::memory_order_relaxed );
-        if( reLocal.refusal )
-        {
-            workerDegraded.store( true, std::memory_order_relaxed );
-            return;
-        }
-        try
-        {
-            for( std::uint32_t f = nextFileId.fetch_add( 1 ); f < fileCount; f = nextFileId.fetch_add( 1 ) )
-            {
-                // unreadable file ⇒ degrade to empty bytes and keep going (what the index build did too:
-                // it left an empty `contents` entry rather than dropping the file from the corpus) — but
-                // COUNT it (T1): a scan that skipped a file's bytes may not claim completeness.
-                std::optional<std::string> fileBytes = docparse::detail::readWholeFile( diskPath( ing, f ) );
-                if( !fileBytes )
-                {
-                    unreadableCount.fetch_add( 1, std::memory_order_relaxed );
-                }
-                const std::string text = std::move( fileBytes ).value_or( std::string() );
-                if( regex && !noPrefilter && !triQueryMatchesText( prefilterQuery, text ) )
-                {
-                    continue;
-                }
-                const auto [ isAbandoned, linesSkipped ] = grepScanText( text, pat, regex ? &reLocal.regex : nullptr, budgetCount, perFileSites[f], linePolicy );
-                if( isAbandoned )
-                {
-                    perFileAbandoned[f] = 1;
-                }
-                if( linesSkipped != 0 )
-                {
-                    perFileSkipped[f] = linesSkipped;
-                }
-            }
-        }
-        catch( ... )   // a throw escaping a worker thread is std::terminate — degrade to partial hits instead
-        {
-            // T1: the hit set is partial now — the CLI prints scan_degraded="1" and counts_floor="1" from it
-            DISCLOSE( workerDegradeSink, ScanWorkerDegrade::DisclosureWhy::WorkerThrew, "grep: scan worker degraded (exception swallowed) — partial hit set" );
-        }
-    };
-    // symmetric bare scope: the workers live exactly as long as the scan. A regex scan runs on the scan threads
-    // even when one worker is enough — the line bound is a promise about the stack the match runs on.
-    std::size_t scanStackBytes = 0;
-    {
-        const unsigned    hwThreadCount = std::thread::hardware_concurrency();
-        const std::size_t workerCount   = std::min<std::size_t>( { hwThreadCount ? hwThreadCount : 1u, fileCount, 16 } );
-        if( workerCount <= 1 && !regex )
-        {
-            fileWorker( kCallerStackBytesFloor );
-        }
-        else
-        {
-            scanStackBytes = runOnStackThreads( workerCount, stackBytes, fileWorker, &isScanStackRefusedByFault );
-        }
-    }
-
-    // ── pass 2: RANK the hit files, THEN spend the budget in that order (thread-order-independent) ────────
-    // §P11.1: the canonical order is TIER-then-path (see this function's header comment), keyed once per FILE
+    // §P11.1: the canonical order is TIER-then-path (see grepCollect's header comment), keyed once per FILE
     // through filter.h's shared pathTierIndexOver/compareTierThenPath (the LB-G key every tier-sorted verb
     // uses), never inside a per-hit comparator: pathTierOf() lowercases an extension into a fresh std::string.
     // RANK BEFORE CUT: the budget used to run in ascending fileId order BEFORE this sort, so when it fired the
@@ -1557,6 +1479,7 @@ inline GrepCollection grepCollect( const IngestResult& ing, const std::string& p
         }
     }
     ASSUME( raw.size() <= budgetCount, "pass 2 stops at the ceiling" );
+    std::vector<std::vector<GrepMatchSite>>().swap( perFileSites );   // the rows hold the sites now: the per-file lists go before the sort
 
     // fileRank is a dense position in the tier-then-path order, so the comparator below is pure integer work and
     // a file's hits stay contiguous (pass 4's one-read-per-file caching depends on that).
@@ -1588,9 +1511,255 @@ inline GrepCollection grepCollect( const IngestResult& ing, const std::string& p
     {
         regexLinesSkipped += skipped;
     }
-    return { std::move( raw ), isBudgetReached, unreadableCount.load( std::memory_order_relaxed ),
-             workerDegraded.load( std::memory_order_relaxed ) || stopped.count != 0, stopped.count, stopped.firstFileId,
-             regexLinesSkipped, engineLineBytesMax.load( std::memory_order_relaxed ), regex ? scanStackBytes : 0 };
+    return { std::move( raw ), isBudgetReached, facts.unreadableFiles, facts.workerDegraded || stopped.count != 0, stopped.count, stopped.firstFileId,
+             regexLinesSkipped, facts.engineLineBytesMax, facts.regexStackBytes };
+}
+
+// FOR-SCAN-ONCE: the scan of one or more patterns over the indexed files. Every file is READ ONCE and searched for each pattern in
+// turn, so K literal patterns cost one read of the corpus instead of K (reports/ml-stage0-1113 § FOR-SCAN-ONCE: the read is about 0.6
+// of a scan). result[k] is byte for byte what a scan of pats[k] alone collects: each pattern has its own sites, its own budget and its
+// own ranking (rankGrepSites). The file-level facts — a file the read could not open, a worker that died — are facts of the one read,
+// so every result carries them, as each pattern's own scan of the same disk state would have. A --regex scan is one pattern.
+// `stackBytes` is the size the scan threads ask for; only a gate's fault switch or a caller testing the degrade passes less.
+inline std::vector<GrepCollection> grepCollectEach( const IngestResult& ing, std::span<const std::string> pats, bool regex, bool noPrefilter,
+                                                    std::size_t stackBytes = kGrepScanStackBytes )
+{
+    EXPECTS( !regex || pats.size() == 1, "a --regex scan is one pattern" );
+    const std::uint32_t fileCount   = std::uint32_t( ing.files.size() );
+    const std::size_t   budgetCount = kGrepCollectionBudget;
+    if( fileCount == 0 || pats.empty() )
+    {
+        return std::vector<GrepCollection>( pats.size() );
+    }
+
+    // a pattern that doesn't compile is a user error, not a degrade — the CLI seam refuses it before we are
+    // called (regexCompileError above). Kept as a belt-and-braces early REJECT for library/MCP callers that
+    // did not ask; each worker compiles its own copy so no std::regex object is shared.
+    if( regex && regexCompileError( pats[0] ) )
+    {
+        // L5: the SAME verdict the CLI seam uses, incl. the platform-divergent escapes. degraded=true
+        // (T1): NOTHING was scanned, so no caller may read this empty set as a complete zero.
+        return { GrepCollection{ {}, false, 0, true } };
+    }
+
+    // the sound regex→trigram query, computed once and evaluated per file (read-only across workers)
+    const TriQuery prefilterQuery = ( regex && !noPrefilter ) ? RegexAnalyzer( pats[0] ).analyze() : TriQuery::all();
+
+    // ── pass 1: parallel scan, one worker per hardware thread, one file at a time, every pattern per file ────
+    std::vector<std::vector<std::vector<GrepMatchSite>>> perPatternSites( pats.size(), std::vector<std::vector<GrepMatchSite>>( fileCount ) );   // [k][f] written by exactly one worker
+    std::vector<char>                       perFileAbandoned( regex ? fileCount : 0, 0 );   // slot f: the engine abandoned a match in f
+    std::vector<std::uint32_t>              perFileSkipped( regex ? fileCount : 0, 0 );     // slot f: lines too long for the engine in f
+    std::atomic<std::size_t>                engineLineBytesMax { 0 };    // every worker stores the SAME value: one settled stack, one pattern
+    std::atomic<std::uint32_t>              nextFileId { 0 };
+    std::atomic<std::uint32_t>              unreadableCount { 0 };       // T1: files the scan could not read
+    std::atomic<bool>                       workerDegraded { false };    // T1: a worker died mid-scan
+    ScanWorkerDegrade                       workerDegradeSink{ workerDegraded };   // the DISCLOSE sink a worker writes it through
+    const auto                              fileWorker = [ & ]( std::size_t stackBytes )
+    {
+        const RegexCompile reLocal = regex ? compileGuardedRegex( pats[0], kGrepRegexSyntax ) : RegexCompile{};
+        const RegexLinePolicy linePolicy{ regex ? reLocal.regex.maxEngineSubjectBytes( stackBytes ) : SIZE_MAX, !noPrefilter };
+        engineLineBytesMax.store( regex ? linePolicy.engineLineBytesMax : 0, std::memory_order_relaxed );
+        if( reLocal.refusal )
+        {
+            workerDegraded.store( true, std::memory_order_relaxed );
+            return;
+        }
+        try
+        {
+            for( std::uint32_t f = nextFileId.fetch_add( 1 ); f < fileCount; f = nextFileId.fetch_add( 1 ) )
+            {
+                // unreadable file ⇒ degrade to empty bytes and keep going (what the index build did too:
+                // it left an empty `contents` entry rather than dropping the file from the corpus) — but
+                // COUNT it (T1): a scan that skipped a file's bytes may not claim completeness.
+                std::optional<std::string> fileBytes = docparse::detail::readWholeFile( diskPath( ing, f ) );
+                if( !fileBytes )
+                {
+                    unreadableCount.fetch_add( 1, std::memory_order_relaxed );
+                }
+                const std::string text = std::move( fileBytes ).value_or( std::string() );
+                if( regex && !noPrefilter && !triQueryMatchesText( prefilterQuery, text ) )
+                {
+                    continue;
+                }
+                for( std::size_t k = 0; k < pats.size(); ++k )
+                {
+                    const auto [ isAbandoned, linesSkipped ] = grepScanText( text, pats[k], regex ? &reLocal.regex : nullptr, budgetCount, perPatternSites[k][f], linePolicy );
+                    if( isAbandoned )
+                    {
+                        perFileAbandoned[f] = 1;
+                    }
+                    if( linesSkipped != 0 )
+                    {
+                        perFileSkipped[f] = linesSkipped;
+                    }
+                }
+            }
+        }
+        catch( ... )   // a throw escaping a worker thread is std::terminate — degrade to partial hits instead
+        {
+            // T1: the hit set is partial now — the CLI prints scan_degraded="1" and counts_floor="1" from it
+            DISCLOSE( workerDegradeSink, ScanWorkerDegrade::DisclosureWhy::WorkerThrew, "grep: scan worker degraded (exception swallowed) — partial hit set" );
+        }
+    };
+    // symmetric bare scope: the workers live exactly as long as the scan. A regex scan runs on the scan threads
+    // even when one worker is enough — the line bound is a promise about the stack the match runs on.
+    std::size_t scanStackBytes = 0;
+    {
+        const unsigned    hwThreadCount = std::thread::hardware_concurrency();
+        const std::size_t workerCount   = std::min<std::size_t>( { hwThreadCount ? hwThreadCount : 1u, fileCount, 16 } );
+        if( workerCount <= 1 && !regex )
+        {
+            fileWorker( kCallerStackBytesFloor );
+        }
+        else
+        {
+            scanStackBytes = runOnStackThreads( workerCount, stackBytes, fileWorker, &isScanStackRefusedByFault );
+        }
+    }
+
+    // ── pass 2, per pattern ───────────────────────────────────────────────────────────────────────────
+    const GrepPassOneFacts facts{ unreadableCount.load( std::memory_order_relaxed ), workerDegraded.load( std::memory_order_relaxed ),
+                                  engineLineBytesMax.load( std::memory_order_relaxed ), regex ? scanStackBytes : 0 };
+    std::vector<GrepCollection> out;
+    out.reserve( pats.size() );
+    for( std::vector<std::vector<GrepMatchSite>>& perFileSites : perPatternSites )
+    {
+        out.push_back( rankGrepSites( ing, perFileSites, perFileAbandoned, perFileSkipped, facts ) );
+    }
+    return out;
+}
+
+// FOR-SCAN-ONCE: the literal patterns one block of an answer may scan, read in ONE pass over the corpus. 50 % of --for calls made two
+// or more literal scans, each a full read of every indexed file (envoy's message task: 8 reads of 11,036 files). A block that knows its
+// candidates up front opens a batch with them; while it is open, every literal grepCollect() on the same index is served from it: the
+// first scan reads the corpus once for the asked pattern AND every expected one still pending, and a later ask for an expected pattern
+// takes its collection with no read. An ask nobody expected reads the corpus too, and carries whatever is still pending along.
+// Each collection is the one its own scan would give (grepCollectEach), so an answer is byte-identical with or without the batch: an
+// expectation that never gets asked costs its in-memory search, never a byte of output. The batch holds collections (12 B a hit), never
+// file bytes (the per-call file memo would hold the corpus: the memory column). The open batch is the thread's innermost one (thread_local).
+class GrepScanBatch
+{
+public:
+    GrepScanBatch( const IngestResult& ing, std::vector<std::string> expected ) : ing_( ing ), outer_( tlOpen )
+    {
+        expect( std::move( expected ) );
+        tlOpen = this;
+    }
+    ~GrepScanBatch()
+    {
+        ASSUME( tlOpen == this, "batches close in the order they opened (scoped objects)" );
+        tlOpen = outer_;
+    }
+    GrepScanBatch( const GrepScanBatch& )            = delete;
+    GrepScanBatch& operator=( const GrepScanBatch& ) = delete;
+
+    // the RIPWIRE_STATS counts: literal scans asked, corpus reads made, expectations read but never asked (their search was the cost)
+    std::size_t asks() const noexcept { return asks_; }
+    std::size_t reads() const noexcept { return reads_; }
+    std::size_t unasked() const noexcept { return unasked_; }
+
+    // the batch open on this thread for `ing`, or null. FAULT INJECTION (non-NDEBUG): RIPWIRE_FAULT_SCAN_UNBATCHED=1 serves no scan from a
+    // batch, so every ask reads the corpus alone, as before the batch — the twin test/scanoncecheck.sh compares the answer against
+    static GrepScanBatch* openFor( const IngestResult& ing ) noexcept
+    {
+        struct UnbatchedTag;
+        if( rw::faultSwitchOnOnce<UnbatchedTag>( "RIPWIRE_FAULT_SCAN_UNBATCHED" ) )
+        {
+            return nullptr;
+        }
+        return tlOpen != nullptr && &tlOpen->ing_ == &ing ? tlOpen : nullptr;
+    }
+
+    // the literal scan of `pat`: a held collection (no read), or one read for `pat` and every pending expectation
+    GrepCollection collect( const std::string& pat, std::size_t stackBytes )
+    {
+        ++asks_;
+        const auto held = std::find_if( held_.begin(), held_.end(), [ & ]( const HeldScan& e ) { return e.pattern == pat; } );
+        if( held != held_.end() )
+        {
+            unasked_ -= held->asked ? 0 : 1;
+            held->asked = true;
+            return keepOrHandOver( held );
+        }
+        std::vector<std::string> todo{ pat };
+        for( std::string& p : pending_ )
+        {
+            if( p != pat )
+            {
+                todo.push_back( std::move( p ) );
+            }
+        }
+        pending_.clear();
+        if( std::find( known_.begin(), known_.end(), pat ) == known_.end() )
+        {
+            known_.push_back( pat );
+        }
+        std::vector<GrepCollection> got = grepCollectEach( ing_, todo, /*regex=*/false, /*noPrefilter=*/false, stackBytes );
+        ++reads_;
+        unasked_ += todo.size() - 1;
+        for( std::size_t k = 1; k < todo.size(); ++k )
+        {
+            held_.push_back( HeldScan{ std::move( todo[k] ), std::move( got[k] ), false } );
+        }
+        held_.push_back( HeldScan{ pat, std::move( got[0] ), true } );
+        return keepOrHandOver( held_.end() - 1 );
+    }
+
+private:
+    // A collection read here. One the block asked for may be asked again (a candidate and then a table anchor of the same text), so a
+    // small one stays held: a copy goes out. A large one is handed over (moved): holding it would cost the memory column more than a
+    // second read of the corpus costs time.
+    struct HeldScan
+    {
+        std::string    pattern;
+        GrepCollection collection;
+        bool           asked = false;
+    };
+    static constexpr std::size_t kHeldAskedHitsMax = 65536;   // 768 KiB of rows
+
+    GrepCollection keepOrHandOver( std::vector<HeldScan>::iterator held )
+    {
+        if( held->collection.raw.size() <= kHeldAskedHitsMax )
+        {
+            return held->collection;
+        }
+        GrepCollection got = std::move( held->collection );
+        held_.erase( held );
+        return got;
+    }
+
+    // an expectation already scanned, held or pending is not added twice (an empty one is never scanned: no caller asks for it)
+    void expect( std::vector<std::string> expected )
+    {
+        for( std::string& p : expected )
+        {
+            if( !p.empty() && std::find( known_.begin(), known_.end(), p ) == known_.end() )
+            {
+                known_.push_back( p );
+                pending_.push_back( std::move( p ) );
+            }
+        }
+    }
+
+    inline static thread_local GrepScanBatch* tlOpen = nullptr;
+    const IngestResult&                                 ing_;
+    GrepScanBatch*                                      outer_;
+    std::vector<std::string>                            known_;     // every pattern expected or asked so far
+    std::vector<std::string>                            pending_;   // expected, not read yet
+    std::vector<HeldScan>                               held_;      // read: expected and not asked yet, or asked and small
+    std::size_t                                         asks_ = 0, reads_ = 0, unasked_ = 0;
+};
+
+// The literal or --regex scan of `pat` over every indexed file, in TIER-then-path order (grepCollectEach, one pattern). A literal scan
+// inside an open GrepScanBatch on the same index is served by it (FOR-SCAN-ONCE): the same collection, read with the batch's other patterns.
+inline GrepCollection grepCollect( const IngestResult& ing, const std::string& pat, bool regex = false, bool noPrefilter = false,
+                                   std::size_t stackBytes = kGrepScanStackBytes )
+{
+    if( GrepScanBatch* const batch = regex ? nullptr : GrepScanBatch::openFor( ing ) )
+    {
+        return batch->collect( pat, stackBytes );
+    }
+    return std::move( grepCollectEach( ing, std::span<const std::string>( &pat, 1 ), regex, noPrefilter, stackBytes )[0] );
 }
 
 // ─── §R-J (Wave-2 harvest item R-J) — query-file / unsupported-ext TEXT visibility ─────────────────────
@@ -1637,7 +1806,9 @@ struct GrepAuxCollection
     std::vector<GrepAuxHit> hits;                    // path-then-line order (CrawlSkips::unsupported is already path-sorted)
     std::uint32_t           filesScanned         = 0;   // opened, read, pattern-tested
     std::uint32_t           filesSkippedBinary   = 0;   // opened, NUL-sniffed, excluded from scanning
-    std::uint32_t           filesSkippedOversize = 0;   // NOT opened — the row's own recorded size exceeded maxAuxFileBytes
+    std::uint32_t           filesSkippedOversize = 0;   // retired (LARGE-PARTIAL-1): a file over maxAuxFileBytes is now read in pieces; stays 0
+    std::uint32_t           oversizeScanned      = 0;   // files the crawl dropped over its size ceiling (corpus_oversize=), read here in pieces
+    std::uint32_t           oversizeUnread       = 0;   // …of those, files that could not be read whole (unreadable, or cut short)
     std::uint32_t           filesUnreadable      = 0;   // open/read failed after the crawl saw it (deleted/permission mid-run)
     bool                    candidatesCapped     = false;
     bool                    degraded             = false;   // regex failed to COMPILE — nothing was scanned, mirrors GrepCollection's construction-failure case
@@ -1649,14 +1820,31 @@ struct GrepAuxCollection
 
     // The DISCLOSE sink for the unindexed scan's own degrade: the scan threw part-way, so `degraded` (which the CLI
     // prints as scan_degraded="1" with counts_floor="1") is set and the hits so far are kept.
+    std::size_t             hitBudgetLeft        = kGrepCollectionBudget;   // match sites the scan may still keep, across every file and piece
+
     enum class DisclosureWhy : std::uint8_t
     {
         ScanThrew,
+        HitBudget,   // the shared collection budget ran out: the files and pieces after it were not scanned, counts are floors
     };
     void disclose( DisclosureWhy ) noexcept   // every reason records the same fact
     {
         degraded = true;
     }
+
+    // Charge one scan's kept sites to the shared budget. `capped`: the scan stopped at the budget it was handed, so the rest
+    // of the stream (and every file after it) goes unread — disclosed, as the indexed scan's hits_capped is (CodeRabbit #665:
+    // the budget was per piece, so one 100 MiB file of `x` lines kept 52 M rows).
+    void chargeHits( std::size_t kept, bool capped ) noexcept
+    {
+        hitBudgetLeft -= std::min( hitBudgetLeft, kept );
+        if( capped )
+        {
+            hitBudgetLeft = 0;
+            DISCLOSE( *this, DisclosureWhy::HitBudget, "grep: the unindexed scan reached its collection budget — the rest is unscanned, counts are floors" );
+        }
+    }
+    bool hitBudgetSpent() const noexcept { return hitBudgetLeft == 0; }
 
     // One stopped --regex candidate: the stopped count, plus the first stopped file's path (what the refusal names).
     // The whole per-file decision lives here, so the scan loop that calls it keeps no branch of its own.
@@ -1678,8 +1866,9 @@ struct GrepAuxCollection
 // row's occ=, honest-lex — the indexed list's rule, grepFoldLines), each carrying its matched line's text. `lineStarts` is
 // the caller's scratch, refilled here for `text`. Split out of scanUnsupportedFiles (train 34) so the scan loop keeps only
 // the per-file skip / scan decisions.
+// `lineBase`: the lines before `text` in its file (a piece of a file read in pieces; 0 for a whole file).
 inline void appendAuxFileHits( const std::string& text, const std::string& path, const std::vector<GrepMatchSite>& sites,
-                               std::vector<std::size_t>& lineStarts, GrepAuxCollection& out )
+                               std::vector<std::size_t>& lineStarts, GrepAuxCollection& out, std::uint32_t lineBase = 0 )
 {
     lineStarts.clear();
     lineStarts.push_back( 0 );
@@ -1689,15 +1878,65 @@ inline void appendAuxFileHits( const std::string& text, const std::string& path,
     }
     for( const GrepMatchSite& s : sites )
     {
-        if( !out.hits.empty() && out.hits.back().line == s.line && out.hits.back().path == path )
+        if( !out.hits.empty() && out.hits.back().line == s.line + lineBase && out.hits.back().path == path )
         {
             ++out.hits.back().occ;   // honest-lex: one row per line, the indexed list's rule (grepFoldLines)
             continue;
         }
         std::uint32_t auxLineBytes = 0;
         std::string   auxText        = grepMatchedLine( text, lineStarts, s.line, &auxLineBytes );
-        out.hits.push_back( GrepAuxHit{ path, s.line, std::move( auxText ), auxLineBytes } );
+        out.hits.push_back( GrepAuxHit{ path, s.line + lineBase, std::move( auxText ), auxLineBytes } );
     }
+}
+
+// LARGE-PARTIAL-1: one file over the whole-read ceiling, grepped in line-aligned pieces (readInPieces) in bounded memory.
+// A match lying wholly inside a piece's carried prefix (a cut inside one long line re-serves its tail) was found in the
+// previous piece and is skipped. False when the file could not be read whole (what was found stands).
+// The file is opened no-follow and regular-only, its size read from the descriptor rather than the crawl's record, and a file
+// that grew while it was read is not read whole (CodeRabbit #665). The sites kept are charged to the shared budget; a piece
+// that reaches it stops the read, and the file counts as not read whole.
+inline bool scanAuxFileInPieces( const std::string& path, const std::string& pat, const GuardedRegex* re, RegexLinePolicy linePolicy, GrepAuxCollection& out )
+{
+    const std::optional<pathguard::RegularFileStream> file = pathguard::openRegularFileNoFollow( path );
+    if( !file )
+    {
+        ++out.filesUnreadable;
+        return false;
+    }
+    std::string                window;
+    std::string                text;
+    std::vector<GrepMatchSite> sites;
+    std::vector<std::size_t>   lineStarts;
+    const PieceRead            read = readInPieces( std::size_t( file->size ), [ & ]( char* dst, std::size_t n ) { return out.hitBudgetSpent() ? 0 : file->read( dst, n ); }, window,
+                                                    [ & ]( const BlobPiece& piece )
+    {
+        text.assign( piece.bytes );
+        sites.clear();
+        const std::size_t budget = out.hitBudgetLeft;
+        const auto [ isAbandoned, linesSkipped ] = grepScanText( text, pat, re, budget, sites, linePolicy );
+        out.noteRegexScanOutcome( isAbandoned, path );
+        out.regexLinesSkipped += linesSkipped;
+        const bool        capped     = sites.size() >= budget;
+        const std::size_t matchBytes = re == nullptr ? pat.size() : 1;
+        std::erase_if( sites, [ & ]( const GrepMatchSite& site ) { return std::size_t( site.byteOffset ) + matchBytes <= piece.carried; } );
+        out.chargeHits( sites.size(), capped );
+        if( !sites.empty() )
+        {
+            appendAuxFileHits( text, path, sites, lineStarts, out, piece.firstLine - 1 );
+        }
+    } );
+    if( read == PieceRead::Binary )
+    {
+        ++out.filesSkippedBinary;
+        return true;
+    }
+    if( read == PieceRead::Short || ( read == PieceRead::Text && file->grewPastSize() ) )
+    {
+        ++out.filesUnreadable;
+        return false;
+    }
+    ++out.filesScanned;
+    return true;
 }
 
 // The per-file loop grepCollectAux runs, on whichever thread it chose (below). `re` is null for a literal scan.
@@ -1708,9 +1947,13 @@ inline void scanUnsupportedFiles( const CrawlSkips& skips, const std::string& pa
     std::vector<std::size_t>  lineStarts;
     for( const SkippedFile& row : skips.unsupported )
     {
+        if( out.hitBudgetSpent() )
+        {
+            return;   // the shared budget ran out (disclosed where it did): the rest stay unscanned
+        }
         if( row.sizeBytes > maxAuxFileBytes )
         {
-            ++out.filesSkippedOversize;
+            (void)scanAuxFileInPieces( row.path, pat, re, linePolicy, out );   // LARGE-PARTIAL-1: read, never skipped
             continue;
         }
         const std::optional<std::string> fileBytes = docparse::detail::readWholeFile( row.path );
@@ -1728,9 +1971,11 @@ inline void scanUnsupportedFiles( const CrawlSkips& skips, const std::string& pa
         ++out.filesScanned;
 
         sites.clear();
-        const auto [ isAbandoned, linesSkipped ] = grepScanText( text, pat, re, kGrepCollectionBudget, sites, linePolicy );
+        const std::size_t budget = out.hitBudgetLeft;
+        const auto [ isAbandoned, linesSkipped ] = grepScanText( text, pat, re, budget, sites, linePolicy );
         out.noteRegexScanOutcome( isAbandoned, row.path );
         out.regexLinesSkipped += linesSkipped;
+        out.chargeHits( sites.size(), sites.size() >= budget );
         if( sites.empty() )
         {
             continue;
@@ -1750,8 +1995,40 @@ inline void scanUnsupportedFiles( const CrawlSkips& skips, const std::string& pa
 // fan-out would pay for itself.
 // `stackBytes`: what the scan thread asks for — collectGrepScanPhases passes the size grepCollect's threads settled on, so
 // the unindexed scan never runs on MORE stack than the indexed one did.
+// `oversize` (LARGE-PARTIAL-1): the files the crawl dropped over its size ceiling (IngestResult::skippedOversize, the root's
+// corpus_oversize=). grep is a text search, so the parse ceiling does not apply to it: each is read in pieces after the
+// unsupported-ext population, its hits joining the same unindexed list, never skipped.
+inline void scanOversizeFiles( std::span<const SkippedOversize> oversize, const std::string& pat, const GuardedRegex* re, RegexLinePolicy linePolicy,
+                               GrepAuxCollection& out )
+{
+    for( const SkippedOversize& row : oversize )
+    {
+        if( out.hitBudgetSpent() )
+        {
+            out.oversizeUnread += 1;   // the shared budget ran out (disclosed where it did): not read
+            continue;
+        }
+        if( scanAuxFileInPieces( row.path, pat, re, linePolicy, out ) )
+        {
+            ++out.oversizeScanned;
+        }
+        else
+        {
+            ++out.oversizeUnread;
+        }
+    }
+}
+
+// Both unindexed populations, in order: the unsupported-ext files, then the files the crawl dropped over its size ceiling.
+inline void scanUnindexedFiles( const CrawlSkips& skips, std::span<const SkippedOversize> oversize, const std::string& pat, const GuardedRegex* re,
+                                std::size_t maxAuxFileBytes, RegexLinePolicy linePolicy, GrepAuxCollection& out )
+{
+    scanUnsupportedFiles( skips, pat, re, maxAuxFileBytes, linePolicy, out );
+    scanOversizeFiles( oversize, pat, re, linePolicy, out );
+}
+
 inline GrepAuxCollection grepCollectAux( const CrawlSkips& skips, const std::string& pat, bool regex, std::size_t maxAuxFileBytes,
-                                         std::size_t stackBytes = kGrepScanStackBytes )
+                                         std::size_t stackBytes = kGrepScanStackBytes, std::span<const SkippedOversize> oversize = {} )
 {
     GrepAuxCollection out;
     out.candidatesCapped = skips.unsupported.size() < skips.unsupportedFiles;
@@ -1771,7 +2048,7 @@ inline GrepAuxCollection grepCollectAux( const CrawlSkips& skips, const std::str
         try
         {
             out.regexLineBytesMax = regex ? re.regex.maxEngineSubjectBytes( settledBytes ) : 0;
-            scanUnsupportedFiles( skips, pat, regex ? &re.regex : nullptr, maxAuxFileBytes, RegexLinePolicy{ regex ? out.regexLineBytesMax : SIZE_MAX, true }, out );
+            scanUnindexedFiles( skips, oversize, pat, regex ? &re.regex : nullptr, maxAuxFileBytes, RegexLinePolicy{ regex ? out.regexLineBytesMax : SIZE_MAX, true }, out );
         }
         catch( ... )
         {
@@ -1784,7 +2061,7 @@ inline GrepAuxCollection grepCollectAux( const CrawlSkips& skips, const std::str
     }
     else
     {
-        scanUnsupportedFiles( skips, pat, nullptr, maxAuxFileBytes, RegexLinePolicy{}, out );
+        scanUnindexedFiles( skips, oversize, pat, nullptr, maxAuxFileBytes, RegexLinePolicy{}, out );
     }
     return out;
 }

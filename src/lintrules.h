@@ -23,6 +23,7 @@
 #include <cctype>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>              // std::getenv — RIPWIRE_QD_CONSTRUCTS_VERIFY
 #include <filesystem>
 #include <limits>
 #include <string>
@@ -269,7 +270,7 @@ inline bool dependencyCapable( Lang lang ) noexcept
         case Lang::Dart:   // no import capture yet — see the DART paragraph above
         case Lang::GDScript:   // no preload/load capture yet — the same paragraph
         case Lang::Clojure:    // no namespace/import extraction yet
-        case Lang::Json: case Lang::Toml: case Lang::Yaml: case Lang::Markdown: case Lang::Unknown:
+        case Lang::Json: case Lang::Toml: case Lang::Yaml: case Lang::Proto: case Lang::Markdown: case Lang::Unknown:
             return false;
     }
     return false;   // a byte past the enum
@@ -1183,10 +1184,33 @@ struct ErrorMaskRule
 };
 
 // The table. C-family (C/C++/ObjC), Java, TS/JS empty catches; Python bare/pass/ellipsis except handlers;
-// swallowed promise rejections (`.catch(()=>{})` / `.then(...,()=>{})` empty handler). Go's ignored-error
-// `_ =` discard is deliberately OMITTED: distinguishing an error-typed discard from a benign `_ =` needs type
-// info ripwire does not have, so a deterministic, low-false-positive rule is not available (documented skip).
-inline constexpr std::array<ErrorMaskRule, 7> kErrorMaskRules = { {
+// swallowed promise rejections (`.catch(()=>{})` / `.then(...,()=>{})` empty handler); Go's and Rust's empty
+// error branches (QD-K6E-GO / QD-K6E-RUST, below). Go's ignored-error `_ =` discard and Rust's `let _ =
+// fallible();` are deliberately OMITTED: a spot check of 10 such sites across axum, promgo and vuln found 0
+// defects (`_ = recover()` in a deferred guard, `let _ = buf.write_char(..)` into an in-memory buffer, a
+// compile-only test helper), and telling an error-typed discard from a benign one needs type info ripwire
+// does not have (documented skip).
+//
+// GO: `if <err> != nil {}` with no else, where <err> is error-named (isGoErrName's spelling as a regex) AND is
+// the left-hand result of a CALL — in the if's own initializer (`if _, err := f(); err != nil {}`) or in the
+// statement immediately before it (`err := f()` / `err = f()`). The binding is what makes it the error branch
+// of that call rather than a nil test on some long-lived variable. RUST: `if let Err(..) = <expr> {}` with no
+// else, and an unguarded match arm `Err(..) => {}` or `Err(..) => ()` — the Err variant makes it a Result by
+// construction. Any binding inside Err(..) counts (`_`, `_e`, `e`): rustc warns on an unused `e`, so `_` is
+// the real spelling, and an unused binding swallows the same. Both languages' rows always gate, exactly as
+// Python's `except: pass` does. Every non-block capture (`err`, `Err`) is dropped by the emptyOnly filter,
+// as the promise rules' @p is.
+// Go: <err> bound from a CALL, position-matched. A single call on the right (`_, err := f()`, `err = f()`) feeds
+// every name on the left; a two-value right-hand side feeds each name from the expression in ITS position
+// (`err, n := f(), 3` binds err to the call; `err, _ := savedErr, len(items)` binds it to a variable — CR #632).
+// Three or more values are not matched: a miss, never a false row. Spelled once for both Go rows below.
+#define RW_GO_ERR_FROM_CALL_IN( stmt )                                                                               \
+    "(" stmt " left: (expression_list (identifier) @e) right: (expression_list . (call_expression) .)) "             \
+    "(" stmt " left: (expression_list . (identifier) @e . (_) .) right: (expression_list . (call_expression) . (_) .)) " \
+    "(" stmt " left: (expression_list . (_) . (identifier) @e .) right: (expression_list . (_) . (call_expression) .)) "
+#define RW_GO_ERR_FROM_CALL "[" RW_GO_ERR_FROM_CALL_IN( "short_var_declaration" ) RW_GO_ERR_FROM_CALL_IN( "assignment_statement" ) "]"
+
+inline constexpr std::array<ErrorMaskRule, 11> kErrorMaskRules = { {
     { "(catch_clause body: (compound_statement) @m)",                                    "empty-catch-cfamily", true  },  // C/C++/ObjC
     { "(catch_clause body: (block) @m)",                                                 "empty-catch-java",    true  },  // Java
     { "(catch_clause body: (statement_block) @m)",                                       "empty-catch-tsjs",    true  },  // TS/JS
@@ -1194,7 +1218,20 @@ inline constexpr std::array<ErrorMaskRule, 7> kErrorMaskRules = { {
     { "(except_clause (block (expression_statement (ellipsis))) @m)",                    "swallow-except-dots", false },  // Python: except ...: ...
     { "(call_expression function: (member_expression property: (property_identifier) @p (#eq? @p \"catch\")) arguments: (arguments (arrow_function body: (statement_block) @m)))", "swallow-catch-arrow", true  },  // .catch(()=>{})
     { "(call_expression function: (member_expression property: (property_identifier) @p (#eq? @p \"then\"))  arguments: (arguments (_) (arrow_function body: (statement_block) @m)))", "swallow-then-arrow",  true  },  // .then(_, ()=>{})
+    { "(if_statement initializer: " RW_GO_ERR_FROM_CALL
+      " condition: (binary_expression left: (identifier) @l operator: \"!=\" right: (nil)) consequence: (block) @m !alternative (#eq? @e @l) (#match? @l \"^(.*[eE]rr|err[A-Z].*)$\"))",
+      "empty-err-go-init", true },   // Go: if _, err := f(); err != nil {}
+    { "(" RW_GO_ERR_FROM_CALL
+      " . (if_statement !initializer condition: (binary_expression left: (identifier) @l operator: \"!=\" right: (nil)) consequence: (block) @m !alternative) (#eq? @e @l) (#match? @l \"^(.*[eE]rr|err[A-Z].*)$\"))",
+      "empty-err-go-prev", true },   // Go: err := f() <NL> if err != nil {}
+    { "(if_expression condition: (let_condition pattern: (tuple_struct_pattern type: (identifier) @t) value: (_)) consequence: (block) @m !alternative (#eq? @t \"Err\"))",
+      "empty-err-rust-iflet", true },   // Rust: if let Err(_) = f() {}
+    { "(match_arm pattern: (match_pattern (tuple_struct_pattern type: (identifier) @t) !condition) value: [(block) (unit_expression)] @m (#eq? @t \"Err\"))",
+      "empty-err-rust-arm", true },     // Rust: Err(_) => {} / Err(_) => ()   (a guarded arm handles the error)
 } } ;
+
+#undef RW_GO_ERR_FROM_CALL
+#undef RW_GO_ERR_FROM_CALL_IN
 
 // Does the captured block SWALLOW — is there nothing in it that could handle the error? astQuery returns the
 // @m span text with \n/\r/\t already flattened to spaces and truncated to 120 chars; an empty `{}` (even
@@ -1311,6 +1348,8 @@ inline bool errorMaskCommentConsumesBlock( std::string_view raw ) noexcept
 // A brace pair with nothing at all between them. Split out from errorMaskBlockIsEmpty so the caller can
 // tell WHICH half answered: this one needs no confirm (there is no comment to mis-read), the comment half
 // does.
+// Rust's unit `()` is the same empty body as an arm value (`Err(_) => ()`); no other row captures a node that can
+// spell it.
 inline bool errorMaskBlockIsBareBraces( std::string_view collapsed ) noexcept
 {
     std::string stripped;
@@ -1321,7 +1360,7 @@ inline bool errorMaskBlockIsBareBraces( std::string_view collapsed ) noexcept
             stripped.push_back( c );
         }
     }
-    return stripped == "{}";
+    return stripped == "{}" || stripped == "()";
 }
 
 // THE PREFILTER, over astQuery's flattened span text. Cheap and deliberately over-accepting on its comment
@@ -1363,6 +1402,17 @@ inline bool errorMaskConfirmOnDisk( const IngestResult& ing, const AstMatch& m,
     return errorMaskCommentConsumesBlock( std::string_view( memoBytes ).substr( m.startByte, m.text.size() ) );
 }
 
+// The confirm over bytes the caller already holds for the match's file (the parse worker's own read, at ingest). The
+// disk form above asks the same question of the bytes it reads, over the same slice.
+inline bool errorMaskConfirmInBytes( std::string_view fileBytes, const AstMatch& m ) noexcept
+{
+    if( std::size_t( m.startByte ) + m.text.size() > fileBytes.size() )
+    {
+        return false;
+    }
+    return errorMaskCommentConsumesBlock( fileBytes.substr( m.startByte, m.text.size() ) );
+}
+
 // One error-masking hit: the suppressing block's file + start byte (so a caller can attribute it to the
 // enclosing symbol by span containment), the 1-based line, and the rule id. Shaped for span attribution,
 // not for direct emission — quality.h owns the delta accounting. The same shape carries a PLACEHOLDER hit
@@ -1400,8 +1450,13 @@ inline bool handlerShapeGates( std::string_view shape, Lang lang ) noexcept
 }
 
 // Is this error-masking hit one of the classic always-gating rows, or a widened shape that gates in `lang`?
+// failure-default gates in no language: its hand-read precision as a defect is under the 0.8 bar everywhere.
 inline bool errorMaskHitGates( std::string_view id, Lang lang ) noexcept
 {
+    if( id == kShapeFailureDefault )
+    {
+        return false;
+    }
     return !( id == kShapeLogOnly || id == kShapeRethrowOnly ) || handlerShapeGates( id, lang );
 }
 
@@ -1432,12 +1487,11 @@ inline std::size_t errorMaskRuleIndex( std::string_view tag ) noexcept
 // The query half: keep a row only when its rule's empty-block filter (and, for a comment-only block, the
 // raw-bytes confirm) says the block swallows. The @p identifier capture of the two promise rules is
 // dropped here too — a bare "catch"/"then" is never "{}".
-inline void keepErrorMaskQueryRows( const IngestResult& ing, std::vector<AstMatch>& rows, std::vector<ErrorMaskHit>& out )
+// `confirm( m )` answers the comment-only confirm for one row: from disk (keepErrorMaskQueryRows) or from the bytes
+// the parse worker holds (appendFileConstructHits) — one filter, two byte sources.
+template <class Confirm>
+inline void keepErrorMaskQueryRowsWith( const std::vector<AstMatch>& rows, std::vector<ErrorMaskHit>& out, Confirm&& confirm )
 {
-    // one-entry raw-bytes memo for the confirm below: astQuery already sorts (file, startByte, tag), so the
-    // candidates of one file arrive together and a single slot is the whole cache.
-    std::uint32_t rawFileId = ~std::uint32_t( 0 );
-    std::string   rawBytes;
     for( const AstMatch& m : rows )
     {
         const std::size_t r = errorMaskRuleIndex( m.tag );
@@ -1450,11 +1504,87 @@ inline void keepErrorMaskQueryRows( const IngestResult& ing, std::vector<AstMatc
         {
             continue;
         }
-        if( rule.emptyOnly && !errorMaskBlockIsBareBraces( m.text ) && !errorMaskConfirmOnDisk( ing, m, rawFileId, rawBytes ) )
+        if( rule.emptyOnly && !errorMaskBlockIsBareBraces( m.text ) && !confirm( m ) )
         {
             continue;       // a comment OPENS the block but code follows it — that is a handler
         }
         out.push_back( { m.fileId, m.startByte, m.line, std::string( rule.id ) } );
+    }
+}
+
+inline void keepErrorMaskQueryRows( const IngestResult& ing, const std::vector<AstMatch>& rows, std::vector<ErrorMaskHit>& out )
+{
+    // one-entry raw-bytes memo for the confirm: astQuery already sorts (file, startByte, tag), so the
+    // candidates of one file arrive together and a single slot is the whole cache.
+    std::uint32_t rawFileId = ~std::uint32_t( 0 );
+    std::string   rawBytes;
+    keepErrorMaskQueryRowsWith( rows, out, [ & ]( const AstMatch& m ) { return errorMaskConfirmOnDisk( ing, m, rawFileId, rawBytes ); } );
+}
+
+// ── QD-CONSTRUCTS-AT-INGEST: the construct-tag byte a model.h ConstructHit carries ──────────────────────────────
+// 0 .. kErrorMaskRules.size()-1 name a query row; the five walk shapes follow. The order is part of the ingest cache
+// record (ingest_cache.h kCacheVersion 52): appending is safe, reordering needs a version bump. failure-default was
+// appended in 52, which a bump still needed: a record an older build wrote carries no failure-default hits.
+inline constexpr std::array<std::string_view, 5> kConstructShapeTags = { kShapeLogOnly, kShapeRethrowOnly, kShapeStub, kShapeTodo,
+                                                                         kShapeFailureDefault };
+inline constexpr std::size_t kConstructTagCount = kErrorMaskRules.size() + kConstructShapeTags.size();
+static_assert( kConstructTagCount <= 0xFF, "a construct tag is one byte, and 0xFF stays free as the unknown answer" );
+
+inline constexpr std::string_view constructTagName( std::uint8_t tag ) noexcept
+{
+    return tag < kErrorMaskRules.size() ? kErrorMaskRules[tag].id
+         : tag < kConstructTagCount     ? kConstructShapeTags[tag - kErrorMaskRules.size()]
+                                        : std::string_view();
+}
+
+// The byte for a rule id or shape tag; 0xFF for a string that is neither (never produced by the two passes).
+inline constexpr std::uint8_t constructTagOf( std::string_view id ) noexcept
+{
+    for( std::size_t tag = 0; tag < kConstructTagCount; ++tag )
+    {
+        if( constructTagName( std::uint8_t( tag ) ) == id )
+        {
+            return std::uint8_t( tag );
+        }
+    }
+    return 0xFF;
+}
+static_assert( constructTagOf( kShapeFailureDefault ) == kConstructTagCount - 1 && constructTagOf( kErrorMaskRules[0].id ) == 0,
+               "the tag table round-trips its first and last entries" );
+
+// The two groups findQualityConstructs hands the shared walk — the kErrorMaskRules specs and the HandlerShapes walk —
+// spelled once for the re-parse below and the parse worker's own pass (ingest_astquery.h collectConstructHits).
+// BOTH budgets are unbounded: see findQualityConstructs' header for why.
+inline std::vector<AstQuerySpec> errorMaskQuerySpecs()
+{
+    std::vector<AstQuerySpec> specs;
+    for( const ErrorMaskRule& rule : kErrorMaskRules )
+    {
+        specs.push_back( { std::string( rule.query ), std::to_string( specs.size() ) } );   // tag = row index (errorMaskRuleIndex)
+    }
+    return specs;
+}
+inline std::vector<AstQueryGroup> constructQueryGroups( const std::vector<AstQuerySpec>& specs )
+{
+    return { { &specs, std::numeric_limits<std::size_t>::max(), nullptr },
+             { nullptr, std::numeric_limits<std::size_t>::max(), nullptr, AstWalk::HandlerShapes } };
+}
+
+// One file's hits, from the two buckets the shared walk fills for it (query rows, walk rows), with the confirm
+// answered from the bytes the caller parsed. The parse worker's half of findQualityConstructs: the same filter and the
+// same split, so a carried hit list equals the re-parsed one file for file.
+inline void appendFileConstructHits( const std::vector<AstMatch>& queryRows, const std::vector<AstMatch>& walkRows, std::string_view fileBytes,
+                                     std::vector<ConstructHit>& out )
+{
+    std::vector<ErrorMaskHit> kept;
+    keepErrorMaskQueryRowsWith( queryRows, kept, [ & ]( const AstMatch& m ) { return errorMaskConfirmInBytes( fileBytes, m ); } );
+    for( const ErrorMaskHit& h : kept )
+    {
+        out.push_back( { h.fileId, h.startByte, h.line, constructTagOf( h.id ) } );
+    }
+    for( const AstMatch& m : walkRows )
+    {
+        out.push_back( { m.fileId, m.startByte, m.line, constructTagOf( m.tag ) } );
     }
 }
 
@@ -1474,30 +1604,74 @@ inline void sortConstructHits( const IngestResult& ing, std::vector<ErrorMaskHit
 // empty-catch-java / empty-catch-cfamily capture EVERY catch body (keepErrorMaskQueryRows filters after the
 // query), so a tree with more than 5000 catches crossed it. A match row is a few words; the cost stays linear in
 // the matches. Never throws (astQuery degrades per file internally).
-inline QualityConstructHits findQualityConstructs( const IngestResult& ing )
+inline bool isPlaceholderTag( std::string_view tag ) noexcept
+{
+    return tag == kShapeStub || tag == kShapeTodo;
+}
+
+// QD-CONSTRUCTS-AT-INGEST: the hits the parse worker found in the tree it built (a warm run read them from the cache
+// record), so this reads and parses nothing. The cache reader refuses an unknown tag byte. Unsorted.
+inline QualityConstructHits carriedConstructHits( const IngestResult& ing )
 {
     QualityConstructHits out;
-    if( ing.files.empty() )
+    for( const ConstructHit& h : ing.constructHits )
     {
-        return out;
+        const std::string_view tag = constructTagName( h.tag );
+        ASSUME( !tag.empty(), "a carried construct tag names a rule or a shape (ingest_cache.h readFileRecord bounds it)" );
+        ( isPlaceholderTag( tag ) ? out.placeholder : out.mask ).push_back( { h.fileId, h.startByte, h.line, std::string( tag ) } );
     }
-    std::vector<AstQuerySpec> specs;
-    specs.reserve( kErrorMaskRules.size() );
-    for( std::size_t r = 0; r < kErrorMaskRules.size(); ++r )
-    {
-        specs.push_back( { std::string( kErrorMaskRules[r].query ), std::to_string( r ) } );
-    }
-    std::vector<std::vector<AstMatch>> groups = astQueryGrouped( ing, { { &specs, std::numeric_limits<std::size_t>::max(), nullptr },
-                                                                        { nullptr, std::numeric_limits<std::size_t>::max(), nullptr, AstWalk::HandlerShapes } } );
+    return out;
+}
+
+// The same hits by reading and parsing every file again (the path every call took before the hits were carried, and
+// the one an IngestResult without a whole-tree claim still takes). Unsorted.
+inline QualityConstructHits reparsedConstructHits( const IngestResult& ing )
+{
+    QualityConstructHits               out;
+    const std::vector<AstQuerySpec>    specs  = errorMaskQuerySpecs();
+    std::vector<std::vector<AstMatch>> groups = astQueryGrouped( ing, constructQueryGroups( specs ) );
     ASSUME( groups.size() == 2, "astQueryGrouped returns exactly one bucket per group it was given" );
     keepErrorMaskQueryRows( ing, groups[0], out.mask );
     for( const AstMatch& m : groups[1] )
     {
-        const bool isPlaceholder = m.tag == kShapeStub || m.tag == kShapeTodo;
-        ( isPlaceholder ? out.placeholder : out.mask ).push_back( { m.fileId, m.startByte, m.line, m.tag } );
+        ( isPlaceholderTag( m.tag ) ? out.placeholder : out.mask ).push_back( { m.fileId, m.startByte, m.line, m.tag } );
     }
+    return out;
+}
+
+inline bool sameConstructHits( const std::vector<ErrorMaskHit>& a, const std::vector<ErrorMaskHit>& b ) noexcept
+{
+    return std::equal( a.begin(), a.end(), b.begin(), b.end(), []( const ErrorMaskHit& x, const ErrorMaskHit& y )
+                       { return x.fileId == y.fileId && x.startByte == y.startByte && x.line == y.line && x.id == y.id; } );
+}
+
+// RIPWIRE_QD_CONSTRUCTS_VERIFY=1 (test/qdconstructscheck.sh): compute BOTH lists for an ingest that carries its hits and
+// say on stderr whether they are equal, with the counts, so the identity gate needs no second binary. Off by default:
+// no output and no second pass on any normal run.
+inline void verifyCarriedConstructHits( const IngestResult& ing, const QualityConstructHits& carried )
+{
+    QualityConstructHits reparsed = reparsedConstructHits( ing );
+    sortConstructHits( ing, reparsed.mask );
+    sortConstructHits( ing, reparsed.placeholder );
+    const bool equal = sameConstructHits( carried.mask, reparsed.mask ) && sameConstructHits( carried.placeholder, reparsed.placeholder );
+    rw::emitTo( stderr, "ripwire: qd-constructs-verify equal={} carried_mask={} carried_placeholder={} reparsed_mask={} reparsed_placeholder={}\n",
+                equal ? 1 : 0, carried.mask.size(), carried.placeholder.size(), reparsed.mask.size(), reparsed.placeholder.size() );
+}
+
+inline QualityConstructHits findQualityConstructs( const IngestResult& ing )
+{
+    if( ing.files.empty() )
+    {
+        return {};
+    }
+    const bool           carried = ing.constructHitsForFiles == ing.files.size();
+    QualityConstructHits out     = carried ? carriedConstructHits( ing ) : reparsedConstructHits( ing );
     sortConstructHits( ing, out.mask );
     sortConstructHits( ing, out.placeholder );
+    if( carried && std::getenv( "RIPWIRE_QD_CONSTRUCTS_VERIFY" ) != nullptr )
+    {
+        verifyCarriedConstructHits( ing, out );
+    }
     return out;
 }
 

@@ -39,6 +39,7 @@
 #   L9 [G] bytes= is the element's own size (open tag to </lit>)
 #   X1 [G] determinism  X2 [G] xmllint well-formed  X3 [G] no "--" inside the lit legend comment
 #   N2 [train 42b T-5] `x = x + 1  # note:` is no def header: the bare string after it is a row, not a docstring (twin: the same without the comment)
+#   M6 (READER-CALLERS MSG-VERBATIM): a cue-less task of 4+ words whose whole text is a string site verbatim is a message; M5 keeps a near miss one letter short
 #   K1-K10, M1-M5 (lane LITERAL-ANCHOR; RED on base 4e8bfde7 where [P], fixture built at runtime): a dotted key (3+ segments, or 2 with a setting/option/key/command/flag word) or
 #          an unquoted/backticked/single-quoted 3+ word message with an error/notification/message word, read from the --for text: whole-key rows, longer= counts, frag=1, near misses
 #   T28-T37 (fix round 2; RED on 5bbee3cb where [P]): tbl= is an allowlist of proven openers per language; a closer ends the opener walk; read= and <lit_capped> say the rank cap; table rows first
@@ -180,10 +181,14 @@ for t in APPTOOL_RENDER_MODE '"dependency cycle detected" error' APPTOOL_BIG_FLA
     if [ -n "$b" ] && [ "$a" = "$b" ]; then ok "L7 prefix identity vs RIPWIRE_NO_LITERAL_ANCHOR=1: $t"; else no "L7 answer outside the block changed: $t"; fi
 done
 # ── L8 ──
-for f in --json --token-budget=3000 --format=candidates; do
+for f in --json --format=candidates; do
     a="$( run --for=APPTOOL_RENDER_MODE "$f" )"; b="$( off --for=APPTOOL_RENDER_MODE "$f" )"
     if [ -n "$a" ] && [ "$a" = "$b" ] && ! has "$a" '<lit '; then ok "L8 $f: no block, byte-identical"; else no "L8 $f carries a block or differs"; fi
 done
+# L8t TOKEN-BUDGET-MONOTONE (2026-11-14): --token-budget no longer switches the block off (it was in L8's list). The XML answer
+# under a budget is the unbudgeted answer trimmed, so a budget that fits returns it byte for byte, the block included.
+a="$( run --for=APPTOOL_RENDER_MODE --token-budget=100000 )" || no "L8t: the budgeted run exited $?"; b="$( run --for=APPTOOL_RENDER_MODE )" || no "L8t: the unbudgeted run exited $?"
+if [ -n "$a" ] && [ "$a" = "$b" ] && has "$a" '<lit '; then ok "L8t --token-budget=100000: the unbudgeted answer byte for byte, block included"; else no "L8t --token-budget=100000 is not the unbudgeted answer (or it has no block)"; fi
 co="$( run --for=APPTOOL_RENDER_MODE --format=columnar )"; crc=$?
 if [ "$crc" -ne 0 ] && [ -z "$co" ]; then ok "L8 --format=columnar: the CLI refuses it with --for (the columnar guard in the block is defensive, unreachable)"
 else no "L8 --format=columnar with --for no longer refused (rc=$crc): the lit block's columnar guard is now reachable and needs an arm"; fi
@@ -196,14 +201,16 @@ if python3 -I -c 'import sys,re;s=sys.argv[1];m=re.search(r" bytes=\"(\d+)\"",s)
     ok "L9 bytes= is the element's own size"
 else no "L9 bytes= disagrees with the element"; fi
 # ── L11 ──
+# SIZE-1 (size-trim): a row clause rides iff its attribute does — iffHas TEXT ATTR LEGEND CLAUSE
+iffHas(){ if has "$1" "$2"; then has "$3" "$4"; else ! has "$3" "$4"; fi; }
 legendOf(){ python3 -I -c 'import sys,re;m=re.search(r"<!-- ripwire for lit:.*?-->",sys.stdin.read(),re.S);print(m.group(0) if m else "MISSING",end="")'; }
 noLegend(){ python3 -I -c 'import sys,re;print(re.sub(r"<!-- ripwire for lit:.*?-->","",sys.stdin.read(),flags=re.S),end="")'; }
 LC="$( run --for=APPTOOL_RENDER_MODE | legendOf )"; LF="$( run --for=APPTOOL_RENDER_MODE --legend=full | legendOf )"
 PC="$( run --for=APPTOOL_RENDER_MODE | lit | noLegend )"; PF="$( run --for=APPTOOL_RENDER_MODE --legend=full | lit | noLegend )"
 # train 42b T-4 (rv-mf1-lit-delta N3): the compact form names every attribute the element prints (hits= src= shown= capped= shape=
-# bytes= next= and T-3's cut=) and says of= is the body's line range, never "whole": the ceiling moved 340 -> 450 for those names only; CR harvest 42b: 450 -> 470 for body=held (the cap's disclosure)
+# bytes= next= and T-3's cut=) (SIZE-1: body=above|held only beside a body= row) and says of= is the body's line range, never "whole": the ceiling moved 340 -> 450 for those names only; CR harvest 42b: 450 -> 470 for body=held (the cap's disclosure)
 if [ "${#LC}" -le 470 ] && [ "${#LC}" -ge 250 ] && [ "${#LF}" -ge 700 ] && has "$LF" 'docs, shell, config' && [ "$LC" != "MISSING" ] \
-   && has "$LC" 'k=' && has "$LC" 'comment=' && has "$LC" 'floor=' && has "$LC" 'body=above' && has "$LC" 'held' && [ -n "$PC" ] && [ "$PC" = "$PF" ] \
+   && has "$LC" 'k=' && has "$LC" 'comment=' && has "$LC" 'floor=' && iffHas "$PC" ' body="' "$LC" 'body=above|held' && [ -n "$PC" ] && [ "$PC" = "$PF" ] \
    && has "$LC" 'hits=' && has "$LC" 'src=' && has "$LC" 'shown=' && has "$LC" 'capped=' && has "$LC" 'shape=' && has "$LC" 'bytes=' \
    && has "$LC" 'next=' && has "$LC" 'cut=' && has "$LF" 'cut=' && has "$LC" 'of= body lines' && ! has "$LC" 'of= whole'; then
     ok "L11 compact legend ${#LC} B (the default); --legend=full keeps ${#LF} B naming docs, shell, config; same payload"
@@ -311,9 +318,13 @@ if command -v xmllint >/dev/null 2>&1; then
 else ok "K8 SKIP: xmllint not installed"; fi
 K9="$( krun '--for=many.sites.key' | lit )"
 if has "$K9" 'src="11" shown="8" capped="1"' && has "$K9" 'next="--grep=many.sites.key"'; then ok "K9 [P] the row guard discloses the cut with next="; else no "K9 cap: ${K9:0:300}"; fi
-for j in --json --token-budget=3000; do
+for j in --json; do
     if [ "$( krun '--for=files.autoSave setting' "$j" )" = "$( koff '--for=files.autoSave setting' "$j" )" ]; then ok "K10 [G] $j carries no block"; else no "K10 $j moved"; fi
 done
+# K10t TOKEN-BUDGET-MONOTONE: a budget that fits returns the unbudgeted answer byte for byte (it was "--token-budget carries no block")
+k10a="$( krun '--for=files.autoSave setting' --token-budget=100000 )" || no "K10t: the budgeted run exited $?"
+k10b="$( krun '--for=files.autoSave setting' )" || no "K10t: the unbudgeted run exited $?"
+if [ -n "$k10a" ] && [ "$k10a" = "$k10b" ]; then ok "K10t --token-budget=100000 is the unbudgeted answer"; else no "K10t --token-budget=100000 moved the answer"; fi
 # messages: the stored --for subject is unquoted, so the text around the cue word IS the message
 M1="$( krun '--for=Invalid user settings file notification' | lit )"
 if has "$M1" 's="Invalid user settings file" shape="message"' && has "$M1" 'k="string" in="fail"' && ! has "$M1" 'frag='; then ok "M1 [P] an unquoted message with a trailing cue"; else no "M1: ${M1:0:500}"; fi
@@ -323,11 +334,14 @@ M3="$( krun '--for=the `Invalid user settings file` error' | lit )"; M3b="$( kru
 if has "$M3" 'shape="message"' && has "$M3b" 'shape="message"'; then ok "M3 [P] a backticked or single-quoted span with a cue outside it"; else no "M3: ${M3:0:300} / ${M3b:0:300}"; fi
 M4="$( krun '--for=terminal foo must be the last filter in a chain error' | lit )"
 if has "$M4" 's="must be the last filter in a chain" shape="message"' && has "$M4" 'frag="1"' && has "$M4" 'in="chain"'; then ok "M4 [P] no whole hit: the longest end-anchored fragment, frag=1 says so"; else no "M4: ${M4:0:500}"; fi
-for near in 'Invalid user settings file' 'bad state error' 'Stale cache entry found error' 'Only a test message here error' 'why does retry fail error' '`no outer cue message here`' 'the `no outer cue message here` text' 'Zzq yyx wwv uut error' 'alpha if beta error' 'foo(x) bar baz error' 'Invalid user settings file errorHandler' 'Invalid user settings file terror'; do
+for near in 'Invalid user settings fil' 'bad state error' 'Stale cache entry found error' 'Only a test message here error' 'why does retry fail error' '`no outer cue message here`' 'the `no outer cue message here` text' 'Zzq yyx wwv uut error' 'alpha if beta error' 'foo(x) bar baz error' 'Invalid user settings file errorHandler' 'Invalid user settings file terror'; do
     N="$( krun "--for=$near" )"
     if ! has "$N" '<lit ' && [ "$N" = "$( koff "--for=$near" )" ]; then ok "M5 [G] near miss, no <lit and byte-identical: $near"
     else no "M5 near miss fired: $near: $( lit <<<"$N" | cut -c1-300 )"; fi
 done
+# MSG-VERBATIM (forreadercallerscheck owns the trigger): a cue-less task that IS a source string verbatim is a message; one letter short is not (M5)
+M6="$( krun '--for=Invalid user settings file' | lit )"
+if has "$M6" 's="Invalid user settings file" shape="message"' && ! has "$M6" 'frag='; then ok "M6 [P] a cue-less 4-word task that is a string site verbatim: shape=message"; else no "M6: ${M6:0:300}"; fi
 # ── Q (lane LITERAL-ANCHOR fix round 1; [P] arms are RED on a4ac4941): the review's C1-C5 and the mid-sentence cue; fixture built at runtime ──
 QF="$TMP/qfix"; mkdir -p "$QF/app" "$QF/pkg"
 python3 -I -c 'import sys
@@ -498,8 +512,8 @@ R="$( rrun '--for=svc.rf.key tasks.rake setting' | lit )"
 if has "$R" 's="svc.rf.key"' && ! has "$R" 'try='; then ok "R3c [P] try= counts only literals the task names as keys: tasks.rake is no literal, so svc.rf.key is the first"; else no "R3c try= after a refused file: ${R:0:300}"; fi
 # F5: the legend clauses say what is printed
 R="$( rrun '--for=svc.rf.key setting' )"
-if ! has "$R" 'the earlier ones have no source site' && ! has "$R" 'two row slots kept for a quoted site outside any function' && has "$R" 'were not scanned' && has "$R" 'C #define'; then
-    ok "R4 [P] legend: try= says the earlier literals had no site or were not scanned; the slot clause names its limits"; else no "R4 legend clauses still overstate: $( grep -o 'try=N[^.]*' <<<"$R" | head -1 )"; fi
+if ! has "$R" 'the earlier ones have no source site' && ! has "$R" 'two row slots kept for a quoted site outside any function' && iffHas "$R" ' try="' "$R" 'were not scanned' && has "$R" 'C #define'; then
+    ok "R4 [P] legend: try= (present-only) says the earlier literals had no site or were not scanned; the slot clause names its limits"; else no "R4 legend clauses still overstate: $( grep -o 'try=N[^.]*' <<<"$R" | head -1 )"; fi
 # ── X1-X3 ──
 if [ "$A" = "$( run --for=APPTOOL_RENDER_MODE )" ]; then ok "X1 deterministic"; else no "X1 two runs differ"; fi
 if command -v xmllint >/dev/null 2>&1; then

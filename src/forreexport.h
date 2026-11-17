@@ -41,12 +41,16 @@
 #include "docparse.h"            // detail::readWholeFile — the `pub` check and the row's line read the statement's file
 #include "fordottedstring.h"     // dotteddetail::displayName — a <shortkey> definition row names the symbol as <dotted> rows do
 #include "forliteral.h"          // lit_detail::isConstShaped; hopbody.h renderBodyElement — a CONST-shaped key is <lit>'s; search.h grepCollect/grepEnrich, redact, nextverb
+#include "crossref.h"            // crossref::identEndingAt — the gen rung reads a path segment off a line
+#include "forimportspec.h"       // IMPORT-SPELLING: importSpecOf, resolveWebSpec/resolvePythonSpec, walkImportSpec, tsOrderFile
 #include "graph.h"               // tomlSectionNames, resolveJsNamedImportFile, lexicalNormalize
 #include "infra/namesplit.h"     // isIdentChar
 #include "model.h"
 #include "serialize.h"           // escapeXml
 
 #include <algorithm>
+#include <array>
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -88,6 +92,21 @@ inline constexpr std::string_view kReexportLegend =
     "q_by=dir only directories on its path name Q (all hedged); q_unmatched=1 no "
     "chain proves Q (listed because the task asks where it comes from); u p= l= a task-named file's own import of it (the chain's start); "
     "as_skipped=N renamed re-exports not followed; rows, not call edges -->";
+// SIZE-1 (size-trim): the row-attribute clauses of kReexportLegend, present-only on the rows the block printed (renderReexports
+// erases a clause whose attribute no row carries). Spelled exactly as the legend carries them.
+inline constexpr std::array<std::pair<std::string_view, std::string_view>, 7> kReexportAttrClauses { {
+    { " glob=\"1\"", "glob=1 a glob/star hop (hedged: the module may not supply the name); " },
+    { " cands=\"", "cands=N the path names N same-named crates (hedged); " },
+    { " ns=\"", "ns= a namespace hop (`import * as X` then `export { X }`, or `export * as X from`): the whole module published as X; " },
+    { " q=\"", "def q= the qualifier the task wrote the name under (`Q.name`), proven at a hop or the definition's own file and printed first "
+               "(when one chain proves every segment, a same-named definition that cannot is not listed); " },
+    { " q_by=\"", "q_by=alias only a consumer's own `import * as Q` reaches it, q_by=path its file path names Q but an `import * as Q` binds Q "
+                  "to another module, q_by=dir only directories on its path name Q (all hedged); " },
+    { " q_unmatched=\"", "q_unmatched=1 no chain proves Q (listed because the task asks where it comes from); " },
+    { " as_skipped=\"", "as_skipped=N renamed re-exports not followed; " },
+} };
+static_assert( std::ranges::all_of( kReexportAttrClauses, []( const auto& c ) { return kReexportLegend.contains( c.second ); } ),
+               "the reexport row clauses are spelled as kReexportLegend carries them" );
 
 namespace reexport_detail
 {
@@ -500,7 +519,7 @@ struct Walk
         auto [ it, fresh ] = rustTargets.try_emplace( b );
         if( fresh )
         {
-            const std::string_view head = std::string_view( b->importedName ).substr( 0, b->importedName.find( "::" ) );
+            const std::string_view head = std::string_view( b->importedName ).substr( 0, b->importedName.str().find( "::" ) );
             it->second = resolveRustPath( rc, b->fileId, b->startByte, b->importedName, src.externCrateAs( b->fileId, head ) );
         }
         return it->second;
@@ -510,8 +529,11 @@ struct Walk
         auto [ it, fresh ] = webTargets.try_emplace( b, kNoFile );
         if( fresh )
         {
-            const auto [ file, ambiguous ] = resolveJsNamedImportFile( lexicalNormalize( rootRelPath( ing, b->fileId ) ), b->typeName, files, nullptr, b->fileId );
-            it->second = ambiguous ? kNoFile : file;
+            const std::string importer = lexicalNormalize( rootRelPath( ing, b->fileId ) );
+            const auto [ file, ambiguous ] = resolveJsNamedImportFile( importer, b->typeName, files, nullptr, b->fileId );
+            // IMPORT-SPELLING: a relative extensionless specifier that names both a file and a directory (`./di` beside `di.ts`
+            // and `di/`) is the FILE, as tsc reads it (forimportspec.h tsOrderFile), not a silent end of the walk
+            it->second = !ambiguous && file != kNoFile ? file : importspec_detail::tsOrderFile( importer, b->typeName, files );
         }
         return it->second;
     }
@@ -988,6 +1010,10 @@ inline std::vector<ReexportTaskName> reexportTaskNames( std::string_view task )
 {
     const std::vector<std::string_view> tokens = reexportTaskTokens( task );
     std::vector<ReexportTaskName>       out;
+    // IMPORT-SPELLING: the name an import spelling binds (`inject` in `inject imported from @angular/core`; the cue words between it
+    // and `from` are skipped), never the cue word itself
+    const std::optional<ImportSpecTask> spec   = importSpecOf( tokens );
+    const std::size_t                   specAt = spec ? std::size_t( std::ranges::find( tokens, std::string_view( spec->name ) ) - tokens.begin() ) : tokens.size();
     const auto add = [ & ]( std::string_view w, std::vector<std::string> q )
     {
         if( out.size() < kReexportNameCap && w.size() >= 3 && std::ranges::none_of( out, [ & ]( const ReexportTaskName& n ) { return n.name == w; } ) )
@@ -1011,7 +1037,7 @@ inline std::vector<ReexportTaskName> reexportTaskNames( std::string_view task )
             // the LEAF of a qualified spelling is a name whatever its case (`Utils.formatDate`, `api.v1.handler`): the qualified form
             // is itself the code shape. A file or host suffix (`main.go`, `pkg.json`) is not a leaf.
             const bool leaf = !segs.empty() && end == tok.size() && !lit_detail::isFileOrHostSuffix( w );
-            if( code || leaf || ( end == tok.size() && at == 0 && reexportFromModule( tokens, i ) ) )
+            if( code || leaf || ( end == tok.size() && at == 0 && spec && i == specAt ) )
             {
                 add( w, leaf ? std::vector<std::string>( segs.begin(), segs.end() - 1 ) : std::vector<std::string>{} );
             }
@@ -1433,6 +1459,142 @@ inline std::size_t printReexportChains( ReexportXml& xml, const std::vector<Chai
 
 }   // namespace reexport_detail
 
+// IMPORT-SPELLING: what the spelled import contributes to <reexports>. xml: its spec row (and the walked chain); name: the spelled
+// name; dropName: the definition-side chains skip that name (the walk served it, or the spec is ambiguous or external); narrow:
+// the definition-side chains keep only definitions under pkgDir (the package the spec names); defs: def rows printed.
+struct ImportSpecBlock
+{
+    std::string xml;
+    std::string name;
+    std::string pkgDir;
+    bool        dropName = false;
+    bool        narrow   = false;
+    std::size_t defs     = 0;
+};
+
+inline ImportSpecBlock renderImportSpecBlock( const IngestResult& ing, const std::vector<std::string_view>& tokens )
+{
+    using namespace reexport_detail;
+    ImportSpecBlock                     out;
+    const std::optional<ImportSpecTask> spec = forImportSpecOn() ? importSpecOf( tokens ) : std::nullopt;
+    if( !spec || spec->spec.starts_with( '.' ) )
+    {
+        return out;   // no spelled import, or a relative one (no package to resolve): the definition-side chains as before
+    }
+    const HashMap<std::string, std::uint32_t> files = webFileMap( ing );
+    const SpecEntry e = spec->python ? resolvePythonSpec( ing, spec->spec ) : resolveWebSpec( ing, files, spec->spec );
+    out.name = spec->name;
+    if( spec->python && e.kind != SpecEntry::Kind::Resolved && e.kind != SpecEntry::Kind::Ambiguous )
+    {
+        return out;   // a dotted word that names no in-tree module (`asyncio.run` in a tree without asyncio, `Handle._run`)
+    }
+    std::vector<char> esc;
+    Sources           src{ ing, {} };
+    const auto        attr = [ & ]( std::string_view k, std::string_view v ) { out.xml.append( " " ).append( k ).append( "=\"" ).append( escapeXml( v, esc ) ).append( "\"" ); };
+    const auto        num  = [ & ]( std::string_view k, std::size_t v ) { out.xml.append( " " ).append( k ).append( "=\"" ).append( std::to_string( v ) ).append( "\"" ); };
+    out.xml.append( "<spec" );
+    attr( "m", spec->spec );
+    attr( "n", spec->name );
+    if( e.kind == SpecEntry::Kind::External && e.unread > 0 )
+    {
+        // an in-tree package.json could not be read and may be the one that declares the package: no verdict (CodeRabbit 4542271940)
+        DISCLOSE( Diagnostics::answerRefused, "an unreadable package.json may declare the spelled package: no external=1 verdict and no spec "
+                                              "block; the definition-side chains answer as before",
+                  "renderImportSpecBlock: an in-tree package.json is unreadable — no external verdict" );
+        return {};
+    }
+    if( e.kind == SpecEntry::Kind::External && !spec->python && !jsModuleIsForeign( spec->spec, jsModuleVocabulary( ing ) ) )
+    {
+        return {};   // no package.json declares it, but a segment names this tree (a tsconfig path alias, an undeclared workspace dir): as before
+    }
+    if( e.kind == SpecEntry::Kind::External )
+    {
+        out.dropName = true;
+        out.xml.append( " external=\"1\"/>" );
+        return out;
+    }
+    if( e.kind == SpecEntry::Kind::Ambiguous )
+    {
+        out.dropName = true;
+        num( "cands", e.cands );
+        out.xml.append( "/>" );
+        return out;
+    }
+    attr( "p", rootRelPath( ing, e.manifest ) );
+    if( e.line != 0 )
+    {
+        num( "l", e.line );
+    }
+    out.pkgDir = e.pkgDir;
+    out.narrow = !spec->python;
+    if( e.entry == kNoFile )
+    {
+        out.xml.append( " found=\"0\"/>" );
+        return out;
+    }
+    attr( "entry", rootRelPath( ing, e.entry ) );
+    const auto webTarget = [ & ]( const Binding* b )
+    {
+        const std::string importer = lexicalNormalize( rootRelPath( ing, b->fileId ) );
+        const auto [ file, ambiguous ] = resolveJsNamedImportFile( importer, b->typeName, files, nullptr, b->fileId );
+        return !ambiguous && file != kNoFile ? file : importspec_detail::tsOrderFile( importer, b->typeName, files );
+    };
+    const SpecWalk w = walkImportSpec( ing, files, e.entry, spec->name, spec->python, webTarget );
+    if( w.defs > 1 )
+    {
+        num( "defs", w.defs );
+    }
+    out.xml.append( w.capped ? " capped=\"1\"" : "" );
+    if( w.def == nullptr )
+    {
+        out.xml.append( " found=\"0\"/>" );
+        return out;
+    }
+    // the definition-side chains of the name stay when the walk ended in the entry itself at a value binding (`ValidationError =
+    // pydantic_core.ValidationError` in a package __init__): that is an alias, and the chains are where its definition is
+    out.dropName = !( w.hops.empty() && ( w.def->kind == SymKind::Var || w.def->kind == SymKind::Alias ) );
+    out.defs     = 1;
+    out.xml.append( "/><def" );
+    attr( "n", w.def->name );
+    attr( "p", rootRelPath( ing, w.def->fileId ) );
+    num( "l", w.def->line );
+    num( "total", w.hops.size() );
+    out.xml.append( "/>" );
+    for( const SpecHop& h : w.hops )
+    {
+        out.xml.append( "<rx" );
+        attr( "p", rootRelPath( ing, h.file ) );
+        num( "l", src.lineOf( h.file, h.byte ) );
+        attr( "from", h.from );
+        if( !h.val.empty() )
+        {
+            attr( "val", h.val );
+        }
+        else if( !h.glob && h.taken != h.bound )
+        {
+            attr( "as", h.bound );
+        }
+        out.xml.append( h.glob ? " glob=\"1\"/>" : "/>" );
+    }
+    return out;
+}
+
+// IMPORT-SPELLING: the definition-side candidates once the spelled import has spoken: its name dropped when the walk served it (or
+// the spec is ambiguous or external), the rest under the spec's package directory when it resolved one (else main's last-segment rule).
+inline std::vector<const Symbol*> specScopedDefs( const IngestResult& ing, const ImportSpecBlock& spec, std::vector<reexport_detail::ReexportTaskName>& names,
+                                                  const std::vector<std::string_view>& tokens )
+{
+    using namespace reexport_detail;
+    if( spec.dropName )
+    {
+        std::erase_if( names, [ & ]( const ReexportTaskName& n ) { return n.name == spec.name; } );
+    }
+    std::vector<const Symbol*> defs = names.empty() ? std::vector<const Symbol*>{} : reexportDefs( ing, names, spec.narrow ? std::string_view() : reexportFromPackage( tokens ) );
+    const std::string          under = spec.pkgDir.empty() ? std::string() : spec.pkgDir + "/";
+    std::erase_if( defs, [ & ]( const Symbol* d ) { return spec.narrow && !rootRelPath( ing, d->fileId ).starts_with( under ); } );
+    return defs;
+}
+
 // CR pre-pass 42b: a token budget is a request the block must obey, so under one the rows are NOT printed (they sit outside
 // est_tokens). A one-line marker names how many definitions carry a chain; the legend sentence holds no double dash.
 inline std::string reexportHeldMarker( std::size_t defs )
@@ -1442,17 +1604,30 @@ inline std::string reexportHeldMarker( std::size_t defs )
            "<reexports held=\"budget\" defs=\"" + std::to_string( defs ) + "\"/>";
 }
 
+// IMPORT-SPELLING: the block when only the spelled import prints ("" when it printed nothing; the held marker under a token budget).
+inline std::string specOnlyBlock( const ImportSpecBlock& spec, bool held )
+{
+    if( spec.xml.empty() )
+    {
+        return {};
+    }
+    return held ? reexportHeldMarker( spec.defs ) : "<reexports>" + std::string( kImportSpecLegend ) + spec.xml + "</reexports>";
+}
+
 // The <reexports> block for `task` ("" when no task word names a definition that something re-exports; `held`: a token budget is
 // set, so a marker stands in for the rows).
 inline std::string renderForReexports( const IngestResult& ing, std::string_view task, bool held = false )
 {
     using namespace reexport_detail;
-    const std::vector<ReexportTaskName> names  = reexportTaskNames( task );
+    std::vector<ReexportTaskName>       names  = reexportTaskNames( task );
     const std::vector<std::string_view> tokens = reexportTaskTokens( task );
-    const std::vector<const Symbol*>    defs   = names.empty() ? std::vector<const Symbol*>{} : reexportDefs( ing, names, reexportFromPackage( tokens ) );
+    // IMPORT-SPELLING: the chain FROM the spelled import, ahead of the definition-side chains; it may also drop the spelled name
+    // from them (served, ambiguous or external) and narrow them to the package's own directory
+    const ImportSpecBlock            spec = renderImportSpecBlock( ing, tokens );
+    const std::vector<const Symbol*> defs = specScopedDefs( ing, spec, names, tokens );
     if( defs.empty() )
     {
-        return {};
+        return specOnlyBlock( spec, held );
     }
     // CR nitpick (review 5712563408, forreexport.h:1025): no cue word and no task-named file means no chain can print (a chain prints
     // when cued, or when it carries a use row, and a use row is only noted from a task-named file): return before the file map and
@@ -1467,7 +1642,7 @@ inline std::string renderForReexports( const IngestResult& ing, std::string_view
     std::vector<char> taskFiles = reexportTaskFiles( ing, tokens );
     if( !cued && !qualified && std::ranges::none_of( taskFiles, []( char c ) { return c != 0; } ) )
     {
-        return {};
+        return specOnlyBlock( spec, held );
     }
     const auto dialectOf = []( DepDialect want ) { return [ want ]( const Symbol* d ) { return dependencyDialect( d->lang ) == want; }; };
     const bool rust      = std::ranges::any_of( defs, dialectOf( DepDialect::Rust ) );
@@ -1485,9 +1660,21 @@ inline std::string renderForReexports( const IngestResult& ing, std::string_view
     }
     if( xml.out.empty() )
     {
-        return xml.out;
+        return specOnlyBlock( spec, held );
     }
-    return held ? reexportHeldMarker( printedDefs ) : xml.out.append( "</reexports>" );
+    if( held )
+    {
+        return reexportHeldMarker( printedDefs + spec.defs );
+    }
+    for( const auto& [ attrSpelling, clause ] : kReexportAttrClauses )   // SIZE-1: the legend rides the first def; the rows are all printed now
+    {
+        eraseAbsentClause( xml.out, clause, xml.out.contains( attrSpelling ) );
+    }
+    if( !spec.xml.empty() )   // the spelled import's chain first, under its own legend; the definition-side chains keep theirs
+    {
+        xml.out.insert( std::string_view( "<reexports>" ).size(), std::string( kImportSpecLegend ) + spec.xml );
+    }
+    return xml.out.append( "</reexports>" );
 }
 
 // ── SHORT-KEY-FOR (lane barrel-short-key): the fallback ladder of a name-exact route that resolved no definition ─────────────────
@@ -1506,7 +1693,7 @@ inline std::string renderForReexports( const IngestResult& ing, std::string_view
 //             the <lit> block's (held="lit"). Other lines holding the word are not rows (next= --grep).
 // Every shortkey carries a next=. RIPWIRE_NO_SHORT_KEY (any value) turns it off; a token budget prints a held marker.
 inline constexpr std::size_t kShortKeyRows          = 6;   // rows per rung (a runaway guard; total= counts all)
-static_assert( kShortKeyRows == 6, "kShortKeyLegend states the cap (6 shown): move the sentence with the constant" );
+static_assert( kShortKeyRows == 6, "kShortKeyLegend (6 shown) and kShortKeyGenLegend (6 at most) state the cap: move both with the constant" );
 inline constexpr std::size_t kShortKeyMinSubstring  = 4;   // a shorter key matches too many names to be a lead
 inline constexpr std::size_t kShortKeyLineBytes     = 200; // a literal row's line is cut here (an ellipsis marks it)
 inline constexpr std::size_t kShortKeyBodyBytes     = 8192;   // the exact leaf's body is cut at a line end past this (a runaway guard, disclosed)
@@ -1532,6 +1719,34 @@ inline constexpr std::string_view kShortKeyLegend =
     "held=lit: the lit block lists this key. total= all matches, 6 shown; floor=1: the scan stopped early, counts are floors. "
     "d n= t= p= l=: a definition row; ld p= l= shape=: a line row; b: the exact leaf's body (the expand shape; cut past 8192 bytes "
     "with truncated=1 lines= next=). next= the call that continues. The block is not in est_tokens -->";
+// Emitted after the legends above only on an answer whose ladder printed a b body under --compress (no other answer moves a byte).
+inline constexpr std::string_view kShortKeyCompressLegend =
+    "<!-- shortkey compress=1: --compress is set, so the b body is compressed like the answer's other bodies -->";
+// PROTO-INDEX: emitted after kShortKeyLegend only on an answer whose ladder ran the gen rung, so every other answer keeps its bytes.
+inline constexpr std::string_view kShortKeyGenLegend =
+    "<!-- shortkey gen: rung n=gen: X is the name generated code gives a Protocol Buffers definition; path= the generated path read "
+    "(from X itself or a literal row: `use a::b::Leaf as X`, `from m_pb2 import Leaf as X`, `X = pkg.Outer_Leaf`), paths= the distinct "
+    "paths read; key= path='s leaf; kept= the .proto definitions (message, enum, oneof, service, rpc, enum value) whose name is the path's leaf and whose "
+    "owner is the segment before it, both compared without case or underscores (prost `outer_msg::Leaf`, Go and C++ `OuterMsg_Leaf`), "
+    "a top-level one when no owner matches; via=name: a link by name only, never a proven edge (the generated module is not in the "
+    "index); cands=N several; shown= the rows printed (6 at most); b: the one kept definition's body. Enum values in a generator's renamed spelling (prost `Add` for "
+    "`ADD`, Go `Outer_ADD`) and package segments are not matched -->";
+
+// SIZE-1 (size-trim): the per-rung clauses of kShortKeyLegend, present-only on the rungs and attributes this ladder printed
+// (renderShortKey erases the others). Spelled exactly as the legend carries them.
+inline constexpr std::string_view kShortKeyLeafClause =
+    "rung n=leaf: X written Q.leaf; kept= the definitions named leaf that prove every segment of Q (q_by=scope: its owner path; file: "
+    "its file stem or path tail, never for a member; ns: a TS/JS re-export hop publishes it under Q; alias: only a consumer's own "
+    "`import * as Q`; path: its file path names Q but an `import * as Q` binds Q to another module; dir: only directories on its path; "
+    "alias, path and dir are hedged and kept only when nothing proves Q fully), of= all named leaf; exact=1 one "
+    "fully proven (the ladder stops), cands=N several (hedged), q_unmatched=1 none proves Q (the rows are same-leaf definitions, NOT "
+    "the one asked). ";
+inline constexpr std::string_view kShortKeySubstringClause = "rung n=substring: definitions whose name contains key (exact=0 always). ";
+inline constexpr std::string_view kShortKeyHeldLitClause   = "held=lit: the lit block lists this key. ";
+inline constexpr std::string_view kShortKeyFloorClause     = "; floor=1: the scan stopped early, counts are floors";
+static_assert( kShortKeyLegend.contains( kShortKeyLeafClause ) && kShortKeyLegend.contains( kShortKeySubstringClause )
+                   && kShortKeyLegend.contains( kShortKeyHeldLitClause ) && kShortKeyLegend.contains( kShortKeyFloorClause ),
+               "the shortkey rung clauses are spelled as kShortKeyLegend carries them" );
 
 namespace shortkey_detail
 {
@@ -2020,6 +2235,306 @@ inline std::vector<ShortKeyDeclLine> shortKeyDeclLines( const IngestResult& ing,
     return decl;
 }
 
+// PROTO-INDEX gen rung. A name compared the way protobuf generators respell it: no case, no underscores.
+inline std::string genNorm( std::string_view s )
+{
+    std::string out;
+    out.reserve( s.size() );
+    for( const char c : s )
+    {
+        if( c != '_' )
+        {
+            out.push_back( static_cast<char>( std::tolower( static_cast<unsigned char>( c ) ) ) );
+        }
+    }
+    return out;
+}
+// The identifier ending just before `end` in line ("" when none) and its start (crossref.h identEndingAt reads it).
+inline std::string_view genIdentBefore( std::string_view line, std::size_t end, std::size_t& start )
+{
+    const std::string_view id = crossref::identEndingAt( line, end );
+    start                     = end - id.size();
+    return id;
+}
+// A path separator (`::` or one `.`) ending just before `end`: its start, or npos.
+inline std::size_t genSepBefore( std::string_view line, std::size_t end )
+{
+    if( end >= 2 && line.substr( end - 2, 2 ) == "::" )
+    {
+        return end - 2;
+    }
+    return end >= 1 && line[ end - 1 ] == '.' && ( end < 2 || line[ end - 2 ] != '.' ) ? end - 1 : std::string_view::npos;
+}
+// A nested name as Go and C++ generators write it: `Outer_Leaf` (each part capitalised) becomes Outer, Leaf in place.
+inline void genSplitNested( std::vector<std::string>& segs )
+{
+    if( !segs.empty() && std::isupper( static_cast<unsigned char>( segs.back().front() ) ) && segs.back().find( '_' ) != std::string::npos )
+    {
+        const std::string        last = segs.back();
+        std::vector<std::string> parts;
+        std::size_t              a    = 0;
+        for( std::size_t u = last.find( '_' ); u != std::string::npos; u = last.find( '_', u + 1 ) )
+        {
+            if( u + 1 < last.size() && std::isupper( static_cast<unsigned char>( last[ u + 1 ] ) ) && u > a )
+            {
+                parts.push_back( last.substr( a, u - a ) );
+                a = u + 1;
+            }
+        }
+        parts.push_back( last.substr( a ) );
+        // the outer part is a CamelCase message name (a SCREAMING_CASE constant `MAX_SIZE` is no nested name)
+        if( parts.size() > 1 && std::ranges::any_of( parts.front(), []( char c ) { return std::islower( static_cast<unsigned char>( c ) ) != 0; } ) &&
+            std::ranges::all_of( parts, []( const std::string& q ) { return !q.empty() && std::isupper( static_cast<unsigned char>( q.front() ) ); } ) )
+        {
+            segs.pop_back();
+            segs.insert( segs.end(), parts.begin(), parts.end() );
+        }
+    }
+}
+// The generated path a declaration line gives key, leaf last: `use a::b::{C, Leaf as key}` / `use a::b::Leaf as key` (Rust),
+// `from a.b import Leaf as key` (Python), `import { Leaf as key } from` (TS: no module path), `key = a.b.Leaf` /
+// `using key = a::Leaf` / `type key = pb.Leaf` (an alias). A Go or C++ nested name `Outer_Leaf` splits into Outer, Leaf.
+// Empty when the line holds none of these shapes.
+inline std::vector<std::string> genPathOf( std::string_view line, std::string_view key )
+{
+    std::vector<std::string> segs;
+    const auto isWordAt = [ & ]( std::size_t at, std::size_t n )
+    {
+        return ( at == 0 || !namesplit::isIdentChar( line[ at - 1 ] ) ) && ( at + n >= line.size() || !namesplit::isIdentChar( line[ at + n ] ) );
+    };
+    const auto skipLeft = [ & ]( std::size_t at )
+    {
+        while( at > 0 && ( line[ at - 1 ] == ' ' || line[ at - 1 ] == '\t' ) )
+        {
+            --at;
+        }
+        return at;
+    };
+    for( std::size_t at = line.find( key ); at != std::string_view::npos && segs.empty(); at = line.find( key, at + 1 ) )
+    {
+        if( !isWordAt( at, key.size() ) )
+        {
+            continue;
+        }
+        std::size_t       st   = 0;
+        const std::size_t asAt = skipLeft( at );
+        if( asAt >= 2 && line.substr( asAt - 2, 2 ) == "as" && ( asAt == 2 || !namesplit::isIdentChar( line[ asAt - 3 ] ) ) )
+        {   // `Leaf as key`: the leaf, then the qualifier chain to its left (through one `{ … ,` group)
+            const std::string_view leaf = genIdentBefore( line, skipLeft( asAt - 2 ), st );
+            if( leaf.empty() )
+            {
+                continue;
+            }
+            segs.emplace_back( leaf );
+            std::size_t cur = st;
+            if( const std::size_t brace = line.rfind( '{', cur ); brace != std::string_view::npos && line.substr( brace, cur - brace ).find( '}' ) == std::string_view::npos &&
+                line.substr( brace + 1, cur - brace - 1 ).find_first_not_of( " \t,_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" ) == std::string_view::npos )
+            {
+                cur = skipLeft( brace );
+            }
+            for( std::size_t sep = genSepBefore( line, cur ); sep != std::string_view::npos; sep = genSepBefore( line, cur ) )
+            {
+                const std::string_view seg = genIdentBefore( line, sep, st );
+                if( seg.empty() )
+                {
+                    break;
+                }
+                segs.insert( segs.begin(), std::string( seg ) );
+                cur = st;
+            }
+            // Python `from a.b import Leaf as key`: the module path is the qualifier
+            if( const std::size_t from = line.find( "from " ), imp = line.find( " import " ); segs.size() == 1 && from != std::string_view::npos && imp != std::string_view::npos && from < imp )
+            {
+                const std::string_view mod = line.substr( from + 5, imp - from - 5 );
+                std::size_t            a   = 0;
+                for( std::size_t dot = mod.find( '.' ); ; dot = mod.find( '.', a ) )
+                {
+                    const std::string_view part = mod.substr( a, dot == std::string_view::npos ? std::string_view::npos : dot - a );
+                    if( !part.empty() && std::ranges::all_of( part, []( char c ) { return namesplit::isIdentChar( c ); } ) )
+                    {
+                        segs.insert( segs.end() - 1, std::string( part ) );
+                    }
+                    if( dot == std::string_view::npos )
+                    {
+                        break;
+                    }
+                    a = dot + 1;
+                }
+            }
+            continue;
+        }
+        // `key = a.b.Leaf` (an alias or a constant): the written path after `=`
+        std::size_t eq = at + key.size();
+        while( eq < line.size() && ( line[ eq ] == ' ' || line[ eq ] == '\t' ) )
+        {
+            ++eq;
+        }
+        if( eq >= line.size() || line[ eq ] != '=' || line.substr( eq, 2 ) == "==" )
+        {
+            continue;
+        }
+        std::size_t p = eq + 1;
+        while( p < line.size() && ( line[ p ] == ' ' || line[ p ] == '\t' ) )
+        {
+            ++p;
+        }
+        for( std::size_t a = p;; )
+        {
+            std::size_t b = a;
+            while( b < line.size() && namesplit::isIdentChar( line[ b ] ) )
+            {
+                ++b;
+            }
+            if( b == a )
+            {
+                break;
+            }
+            segs.emplace_back( line.substr( a, b - a ) );
+            if( line.substr( b, 2 ) == "::" )
+            {
+                a = b + 2;
+            }
+            else if( b < line.size() && line[ b ] == '.' )
+            {
+                a = b + 1;
+            }
+            else
+            {
+                // the path ends the statement: only whitespace, then the end, `;` or a comment, may follow it. A call, an index or
+                // a template (`pkg.Leaf(arg)`, `pkg.Leaf (arg)`, `pkg.Leaf [0]`, `pkg.Leaf<T>`) is not a written path
+                std::size_t r = b;
+                while( r < line.size() && ( line[ r ] == ' ' || line[ r ] == '\t' || line[ r ] == '\r' ) )
+                {
+                    ++r;
+                }
+                const std::string_view rest = line.substr( r );
+                if( !( rest.empty() || rest.front() == ';' || rest.front() == '#' || rest.starts_with( "//" ) || rest.starts_with( "/*" ) ) )
+                {
+                    segs.clear();
+                }
+                break;
+            }
+        }
+        if( segs.size() < 2 )   // a bare `key = Leaf` names no generated module
+        {
+            segs.clear();
+        }
+    }
+    genSplitNested( segs );
+    return segs;
+}
+// The .proto definitions a generated path names, by name only: leaf equal (genNorm), owner = the segment before the leaf equal to the
+// definition's scope; when no scoped definition matches, the top-level ones named leaf. Sorted by file then line.
+inline std::vector<const Symbol*> genProtoDefs( const IngestResult& ing, const std::vector<std::string>& segs )
+{
+    std::vector<const Symbol*> scoped, top;
+    if( segs.empty() )
+    {
+        return scoped;
+    }
+    const std::string leaf  = genNorm( segs.back() );
+    const std::string owner = segs.size() >= 2 ? genNorm( segs[ segs.size() - 2 ] ) : std::string();
+    for( const Symbol& s : ing.symbols )
+    {
+        if( !langFacts( s.lang ).generatedSchema || genNorm( s.name ) != leaf )
+        {
+            continue;
+        }
+        if( s.scope.empty() )
+        {
+            top.push_back( &s );
+        }
+        else if( !owner.empty() && genNorm( s.scope ) == owner )
+        {
+            scoped.push_back( &s );
+        }
+    }
+    std::vector<const Symbol*>& kept = scoped.empty() ? top : scoped;
+    std::ranges::stable_sort( kept, [ & ]( const Symbol* l, const Symbol* r ) { return rowBefore( ing, l, r ); } );
+    return std::move( kept );
+}
+
+// The generated paths the alias-shaped literal rows spell for key (`use … Leaf as key`, `key = a.b.Leaf`, `using` / `type` /
+// `typedef` / `const`), one per row that spells one.
+inline std::vector<std::vector<std::string>> genDeclPaths( const std::vector<ShortKeyDeclLine>& decl, std::string_view key )
+{
+    std::vector<std::vector<std::string>> out;
+    for( const ShortKeyDeclLine& d : decl )
+    {
+        if( d.shape == "import-as" || d.shape == "using" || d.shape == "type" || d.shape == "typedef" || d.shape == "const" || d.shape == "assign" )
+        {
+            out.push_back( genPathOf( d.h->text, key ) );
+        }
+    }
+    return out;
+}
+// The generated path X itself spells: `a::b::Leaf` (its qualifier segments) or a Go / C++ `Outer_Leaf`; empty for a bare name.
+inline std::vector<std::string> genOwnPath( std::span<const std::string_view> segs, std::string_view x )
+{
+    std::vector<std::string> own( segs.begin(), segs.end() );
+    if( own.empty() )
+    {
+        own.emplace_back( x );
+    }
+    genSplitNested( own );   // `Outer_Leaf` is a path; a bare name stays one segment and reads as none
+    if( own.size() < 2 )
+    {
+        own.clear();
+    }
+    return own;
+}
+// The .proto definitions every read path names (first-seen order, no repeats), the first path that named one (`::`-joined) and
+// that path's leaf: key= and path= come from the same path, so an earlier path that named nothing never lends its leaf.
+struct GenKept
+{
+    std::vector<const Symbol*> defs;
+    std::string                firstPath;
+    std::string                firstKey;
+};
+inline GenKept genKeptDefs( const IngestResult& ing, const std::vector<std::vector<std::string>>& genPaths )
+{
+    GenKept out;
+    for( const std::vector<std::string>& p : genPaths )
+    {
+        const std::vector<const Symbol*> named = genProtoDefs( ing, p );
+        const bool first = !named.empty() && out.firstPath.empty();
+        for( std::size_t i = 0; first && i < p.size(); ++i )
+        {
+            out.firstPath.append( i == 0 ? "" : "::" ).append( p[ i ] );
+        }
+        if( first )
+        {
+            out.firstKey = p.back();
+        }
+        for( const Symbol* d : named )
+        {
+            if( std::ranges::find( out.defs, d ) == out.defs.end() )
+            {
+                out.defs.push_back( d );
+            }
+        }
+    }
+    return out;
+}
+// The gen rung's open tag: key= path='s leaf (the first path's when none named a definition), path=, paths=, kept=, via="name",
+// cands= when several, shown= the rows printed (kShortKeyRows at most), exact="0".
+inline std::string genRungOpenTag( const GenKept& kept, std::string_view firstLeaf, std::size_t paths, std::vector<char>& esc )
+{
+    std::string out = "<rung n=\"gen\" key=\"";
+    out.append( escapeXml( kept.firstPath.empty() ? firstLeaf : std::string_view( kept.firstKey ), esc ) ).append( "\"" );
+    if( !kept.firstPath.empty() )
+    {
+        out.append( " path=\"" ).append( escapeXml( kept.firstPath, esc ) ).append( "\"" );
+    }
+    out.append( " paths=\"" ).append( std::to_string( paths ) ).append( "\" kept=\"" ).append( std::to_string( kept.defs.size() ) ).append( "\" via=\"name\"" );
+    if( kept.defs.size() > 1 )
+    {
+        out.append( " cands=\"" ).append( std::to_string( kept.defs.size() ) ).append( "\"" );
+    }
+    out.append( " shown=\"" ).append( std::to_string( std::min( kept.defs.size(), kShortKeyRows ) ) ).append( "\"" );
+    return out.append( " exact=\"0\">" );
+}
+
 }   // namespace shortkey_detail
 
 struct ShortKeyArgs
@@ -2028,10 +2543,74 @@ struct ShortKeyArgs
     bool             noDefinitionServed;  // the answer printed no signature row (the no_candidates shape)
     bool             held = false;        // a token budget is set: the marker, not the rows
     RedactCounts*    redact = nullptr;
+    bool             compress = false;    // --compress: a served body is compressed like the answer's other bodies (compress="1")
     std::string_view rootArg;             // the single root (p= relative to it), "" otherwise
     std::string_view task;                // the --for text (SHORT-KEY-SENTENCE: its one code-shaped name when the route read it as words)
     const std::vector<NodeId>* served = nullptr;   // the signature rows the answer printed; null when they streamed unrecorded (no sentence ladder)
 };
+
+namespace shortkey_detail
+{
+// One `<d n= t= p= l= [q_by=]/>` definition row of the ladder.
+inline void appendShortKeyDefRow( std::string& out, const IngestResult& ing, const Symbol& s, std::string_view by, std::vector<char>& esc )
+{
+    out.append( "<d n=\"" ).append( escapeXml( dotteddetail::displayName( s ), esc ) ).append( "\" t=\"" ).append( escapeXml( symTag( s.kind ), esc ) );
+    out.append( "\" p=\"" ).append( escapeXml( rootRelPath( ing, s.fileId ), esc ) ).append( "\" l=\"" ).append( std::to_string( s.line ) ).append( "\"" );
+    if( !by.empty() )
+    {
+        out.append( " q_by=\"" ).append( escapeXml( by, esc ) ).append( "\"" );
+    }
+    out.append( "/>" );
+}
+// The one definition a rung settled on: its body (the expand shape, compressed under --compress) and the --expand next= that
+// continues it. Sets bodyCompressed when a compressed body printed.
+inline std::string appendShortKeyBody( std::string& out, const IngestResult& ing, const Symbol& s, const ShortKeyArgs& a, bool& bodyCompressed )
+{
+    if( std::optional<std::string> b = renderBodyElement( ing, NodeId( &s - ing.symbols.data() ), kShortKeyBodyBytes, a.compress, a.redact, a.rootArg, nullptr ) )
+    {
+        out.append( *b );
+        bodyCompressed = a.compress;
+    }
+    return nextFlag( "--expand=", std::string( rootRelPath( ing, s.fileId ) ) + ":" + std::to_string( s.line ) + ":" + s.name );
+}
+// The literal rung's `<ld p= l= shape= [in=]>` line rows (the first kShortKeyRows), each line trimmed, redacted and cut.
+inline void appendShortKeyLineRows( std::string& out, const IngestResult& ing, const std::vector<ShortKeyDeclLine>& decl, RedactCounts* redact, std::vector<char>& esc )
+{
+    for( std::size_t i = 0; i < decl.size() && i < kShortKeyRows; ++i )
+    {
+        const GrepHit& h = *decl[ i ].h;
+        out.append( "<ld p=\"" ).append( escapeXml( rootRelPath( ing, h.fileId ), esc ) ).append( "\" l=\"" ).append( std::to_string( h.line ) );
+        out.append( "\" shape=\"" ).append( escapeXml( decl[ i ].shape, esc ) ).append( "\"" );
+        if( !decl[ i ].in.empty() )
+        {
+            out.append( " in=\"" ).append( escapeXml( decl[ i ].in, esc ) ).append( "\"" );
+        }
+        std::string text( h.text.substr( std::min( h.text.find_first_not_of( " \t" ), h.text.size() ) ) );
+        redactInPlace( text, redact );
+        truncateUtf8WithEllipsis( text, kShortKeyLineBytes );
+        out.append( "><![CDATA[" );
+        appendCdataSafe( text, out );
+        out.append( "]]></ld>" );
+    }
+}
+// Rung 4 (PROTO-INDEX): the generated paths, linked by name to .proto definitions; the one kept definition's body and next=.
+inline void appendShortKeyGenRung( std::string& out, const IngestResult& ing, const std::vector<std::vector<std::string>>& genPaths, const ShortKeyArgs& a,
+                                   std::vector<char>& esc, std::string& next, bool& bodyCompressed )
+{
+    const GenKept                     gk   = genKeptDefs( ing, genPaths );
+    const std::vector<const Symbol*>& kept = gk.defs;
+    out.append( genRungOpenTag( gk, genPaths.front().back(), genPaths.size(), esc ) );
+    for( std::size_t i = 0; i < kept.size() && i < kShortKeyRows; ++i )
+    {
+        appendShortKeyDefRow( out, ing, *kept[ i ], {}, esc );
+    }
+    out.append( "</rung>" );
+    if( kept.size() == 1 )   // the one name-linked definition: its body, hedged by the rung's via=name
+    {
+        next = appendShortKeyBody( out, ing, *kept.front(), a, bodyCompressed );
+    }
+}
+}   // namespace shortkey_detail
 
 // The <shortkey> block ("" unless the route is name-exact and no definition was served, or the route read the task as words and
 // its one code-shaped name resolved to no definition: from="sentence").
@@ -2062,19 +2641,7 @@ inline std::string renderShortKeyFallback( const IngestResult& ing, const ShortK
     std::vector<char>                   esc;
     const auto attr = [ & ]( std::string_view k, std::string_view v ) { out.append( " " ).append( k ).append( "=\"" ).append( escapeXml( v, esc ) ).append( "\"" ); };
     const auto num  = [ & ]( std::string_view k, std::size_t v ) { out.append( " " ).append( k ).append( "=\"" ).append( std::to_string( v ) ).append( "\"" ); };
-    const auto defRow = [ & ]( const Symbol& s, std::string_view by )
-    {
-        out.append( "<d" );
-        attr( "n", dotteddetail::displayName( s ) );
-        attr( "t", symTag( s.kind ) );
-        attr( "p", rootRelPath( ing, s.fileId ) );
-        num( "l", s.line );
-        if( !by.empty() )
-        {
-            attr( "q_by", by );
-        }
-        out.append( "/>" );
-    };
+    const auto defRow = [ & ]( const Symbol& s, std::string_view by ) { appendShortKeyDefRow( out, ing, s, by, esc ); };
     if( a.held )
     {
         out = fromSentence ? "<!-- shortkey held=\"budget\": a token budget is set, so the fallback ladder is not run (not in est_tokens); next= runs it without the budget; "
@@ -2085,6 +2652,17 @@ inline std::string renderShortKeyFallback( const IngestResult& ing, const ShortK
         return out.append( nextAttrXml( nextFlag( "--for=", x ) ) ).append( "/>" );
     }
     std::string rungs, body, next;
+    bool        bodyCompressed = false;   // a b body was printed under --compress: the block says so (compress="1")
+    // PROTO-INDEX: the generated paths the gen rung reads (X itself when qualified or `Outer_Leaf`, then each literal row's target)
+    std::vector<std::vector<std::string>> genPaths;
+    const auto addGenPath = [ & ]( std::vector<std::string> p )
+    {
+        if( !p.empty() && std::ranges::find( genPaths, p ) == genPaths.end() )
+        {
+            genPaths.push_back( std::move( p ) );
+        }
+    };
+    addGenPath( genOwnPath( segs, x ) );
     // rung 1: the leaf, proven by its qualifier
     bool exact = false;
     if( !segs.empty() )
@@ -2116,12 +2694,7 @@ inline std::string renderShortKeyFallback( const IngestResult& ing, const ShortK
         out.append( "</rung>" );
         if( exact )   // the one proven definition IS the answer the route missed: its body, like --expand prints it
         {
-            const Symbol& s = *kept.front().s;
-            if( std::optional<std::string> b = renderBodyElement( ing, NodeId( &s - ing.symbols.data() ), kShortKeyBodyBytes, /*compress=*/false, a.redact, a.rootArg, nullptr ) )
-            {
-                out.append( *b );
-            }
-            next = nextFlag( "--expand=", std::string( rootRelPath( ing, s.fileId ) ) + ":" + std::to_string( s.line ) + ":" + s.name );
+            next = appendShortKeyBody( out, ing, *kept.front().s, a, bodyCompressed );
         }
         else if( !sameLeaf.empty() )
         {
@@ -2173,24 +2746,11 @@ inline std::string renderShortKeyFallback( const IngestResult& ing, const ShortK
             num( "total", decl.size() );
             num( "shown", std::min( decl.size(), kShortKeyRows ) );
             out.append( " exact=\"0\"" ).append( got.cleanScan() ? "" : " floor=\"1\"" ).append( ">" );
-            for( std::size_t i = 0; i < decl.size() && i < kShortKeyRows; ++i )
+            for( std::vector<std::string>& p : genDeclPaths( decl, key ) )
             {
-                const GrepHit& h = *decl[ i ].h;
-                out.append( "<ld" );
-                attr( "p", rootRelPath( ing, h.fileId ) );
-                num( "l", h.line );
-                attr( "shape", decl[ i ].shape );
-                if( !decl[ i ].in.empty() )
-                {
-                    attr( "in", decl[ i ].in );
-                }
-                std::string text( h.text.substr( std::min( h.text.find_first_not_of( " \t" ), h.text.size() ) ) );
-                redactInPlace( text, a.redact );
-                truncateUtf8WithEllipsis( text, kShortKeyLineBytes );
-                out.append( "><![CDATA[" );
-                appendCdataSafe( text, out );
-                out.append( "]]></ld>" );
+                addGenPath( std::move( p ) );
             }
+            appendShortKeyLineRows( out, ing, decl, a.redact, esc );
             out.append( "</rung>" );
         }
         if( next.empty() )
@@ -2198,10 +2758,23 @@ inline std::string renderShortKeyFallback( const IngestResult& ing, const ShortK
             next = nextFlag( "--grep=", key );
         }
     }
-    std::string head = std::string( kShortKeyLegend ).append( "<shortkey" );
-    std::swap( out, head );
+    // rung 4 (PROTO-INDEX): the generated paths, linked by name to .proto definitions; run only when the index holds one
+    const bool genRan = !exact && !genPaths.empty() && std::ranges::any_of( ing.symbols, []( const Symbol& s ) { return langFacts( s.lang ).generatedSchema; } );
+    if( genRan )
+    {
+        rungs.append( rungs.empty() ? "" : "," ).append( "gen" );
+        appendShortKeyGenRung( out, ing, genPaths, a, esc, next, bodyCompressed );
+    }
+    std::string head = std::string( kShortKeyLegend ).append( genRan ? kShortKeyGenLegend : std::string_view() )
+                           .append( bodyCompressed ? kShortKeyCompressLegend : std::string_view() ).append( "<shortkey" );
+    std::swap( out, head );   // head: the rungs; out: the legend, then the root
+    eraseAbsentClause( out, kShortKeyLeafClause, head.contains( "<rung n=\"leaf\"" ) );   // SIZE-1: present-only on the rungs printed
+    eraseAbsentClause( out, kShortKeySubstringClause, head.contains( "<rung n=\"substring\"" ) );
+    eraseAbsentClause( out, kShortKeyHeldLitClause, head.contains( " held=\"lit\"" ) );
+    eraseAbsentClause( out, kShortKeyFloorClause, head.contains( " floor=\"1\"" ) );
     attr( "of", x );
     out.append( fromSentence ? " from=\"sentence\" found=\"0\"" : " found=\"0\"" );
+    out.append( bodyCompressed ? " compress=\"1\"" : "" );
     attr( "rungs", rungs );
     out.append( nextAttrXml( next ) ).append( ">" ).append( head ).append( "</shortkey>" );
     return out;

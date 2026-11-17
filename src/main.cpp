@@ -1,4 +1,5 @@
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "memstats.h" // M0 MEM-STATS: rw::memstats::mib — the RIPWIRE_STATS family table's capacity in MiB
 #include "gitcmd.h"         // rw::gitCmd — every git child starts with --no-optional-locks -c core.fsmonitor=false
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 #include <exception>         // std::uncaught_exceptions: the stopped fold's unwind abandons the history walks
@@ -15,6 +16,7 @@
 #include "ingest.h"
 #include "workspace.h"             // multi-root workspaces: root hygiene + labels + the id-offset merge
 #include "graph.h"
+#include "warmsnap_graph.h"        // the warm snapshot: the crawl replayed, the resolved graph loaded instead of rebuilt
 #include "scip.h"                  // SCIP precision overlay (--scip=index.scip)
 #include "serialize.h"
 #include "pageview.h"              // §P8: the ONE --limit/--offset window + root-element shown=/capped= disclosure
@@ -69,6 +71,7 @@ static_assert( rw::kTestGateCcxBarMirror == rw::quality::kCcxBar, "situ.h kTestG
 #include "pattern.h"               // R2: the pattern surface's compiler + disclosures (the matcher runs inside the ingest walk)
 #include "verify.h"                // G4 verify-a-claim: the --verify closed claim grammar + verdict/limit vocabularies (runVerify below)
 #include "forpage.h"               // forWidenNext — the ONE spelling of the --for widening page
+#include "helpdeadline.h"          // --help-task --deadline-ms: answer in time or abstain while a detached child warms the index (#594)
 #include "taskroute.h"             // --help-task: deterministic task -> one safe CLI recommendation or abstention
 #include "quality.h"
 #include "cloneidiom.h"          // idiom-class demotion for clone findings — the closed 3-idiom shape classifier both --clones and the quality-delta duplication kind annotate rows with
@@ -186,7 +189,7 @@ using rw::quality::deadCodeEligibleKind;
 // DIFFERENT versions (parserVerFor), so a single shared file forced a full re-parse + full rewrite on
 // every class switch (measured: plain-map-after --for 0.81 s vs 0.16 s warm). Suffixing the filename
 // with the class gives each class its OWN warm cache, so alternating verb classes never thrashes.
-// (MCP has its own separate file, mcpCachePath in mcp.h — unaffected.)
+// (The MCP server shares the rich file: mcpindex.h mcpCachePath, ONE-PARSE.)
 //
 // Y4: resolved through resolveCacheBlobPath (quality.h) — the shard-aware, backward-compatible
 // choke point every ripwire-*.bin blob path now routes through. See its comment for the full rationale.
@@ -1899,7 +1902,7 @@ int runDefaultMap( const MainDispatch& d )
     }
     else
     {
-        rank = rw::takeRank( rankGraph( g ), rankDisclosure );
+        rank = rw::takeRank( rw::warmsnap::defaultRank( g ), rankDisclosure );   // the stored rank when the warm snapshot served this graph, else rankGraph( g )
     }
 
     // HITS: surface hubs (entrypoints/orchestrators) or authorities (core APIs) instead of the default
@@ -2259,7 +2262,7 @@ int runDefaultMap( const MainDispatch& d )
         const HtmlProvenance  htmlProv = htmlProvenanceFor( root, multiRoot );
         htmlColor.atStamp  = htmlProv.atStamp;
         htmlColor.rootName = htmlProv.rootName;
-        htmlColor.version  = kRipwireVersion;
+        htmlColor.version  = kRipwireVersionLabel;
         writeHtml( htmlOut, ing, rank, g, mapTopK, htmlColor, mapRootArg, /*codeFirstRows=*/isDefaultMapScope );   // R-R
         if( htmlOut != stdout )
         {
@@ -3129,6 +3132,53 @@ VerbPrecedence scanReportVerbPrecedence( const rw::Config& c )
     return prec;
 }
 
+// DEPS-NO-GRAPH: true when the verb that will answer is --deps or --arch (runArchViews reads the ingest only) and nothing
+// that runs between the graph build and dispatch reads the graph: --pin-census writes g.pinCensus; --metrics, --for and
+// --exemplar fold the in-edge CSR into fanIn and computeQMetrics; the signature emitters run computeImpure over it. Any of
+// those keeps the build, so a combination answers exactly as before. Everything else that outranks --deps/--arch is a verb
+// row above them in the precedence table, so it would have been the winner.
+// The graph for a run with a warm snapshot armed: the stored one when every guard in warmsnap.h holds, else a build whose
+// outcome becomes the next run's stored one.
+static rw::Graph graphFromWarmSnapshot( rw::warmsnap::Session& snap, const rw::IngestResult& ing )
+{
+    if( std::optional<rw::Graph> stored = rw::warmsnap::readGraph( snap, ing ) )
+    {
+        rw::memstats::mark( "graph-end" );   // the same reading a build ends on, so a stats consumer always finds its line
+        return std::move( *stored );
+    }
+    return rw::warmsnap::buildGraphRecorded( snap, ing );
+}
+
+// Write what this run learned, and — under RIPWIRE_SNAPSHOT_STATS — say which stages it did not repeat. stderr only,
+// env-gated, and its own variable: RIPWIRE_CACHE_STATS consumers compare that stream between cached and uncached runs.
+static void finishWarmSnapshot( rw::warmsnap::Session& snap )
+{
+    if( !snap.on() )
+    {
+        return;
+    }
+    rw::warmsnap::saveSnapshot( snap );
+    snap.treeSection = snap.modelSection = snap.graphSection = {};   // the file's bytes and this run's sections are not read again: give them back
+    std::string().swap( snap.file );
+    std::string().swap( snap.treeOut );
+    std::string().swap( snap.modelOut );
+    std::string().swap( snap.graphOut );
+    if( std::getenv( "RIPWIRE_SNAPSHOT_STATS" ) != nullptr )
+    {
+        rw::emitTo( stderr, "ripwire: snapshot-stats tree={} model={} graph={} why={} model_why={} graph_why={} saved={}\n", snap.treeReplayed ? "replayed" : "walked",
+                    snap.modelLoaded ? "loaded" : "built", snap.graphLoaded ? "loaded" : "built", rw::warmsnap::kWhyNames[ std::size_t( snap.why ) ],
+                    rw::warmsnap::kWhyNames[ std::size_t( snap.modelWhy ) ], rw::warmsnap::kWhyNames[ std::size_t( snap.graphWhy ) ], snap.saved ? 1 : 0 );
+    }
+}
+
+bool graphUnreadByWinner( const rw::Config& c, const char* winner )
+{
+    const bool archWins = winner != nullptr && ( std::strcmp( winner, "--deps" ) == 0 || std::strcmp( winner, "--arch" ) == 0 );
+    const bool modifierReadsGraph = !c.pinCensus.empty() || c.metrics || !c.forTask.empty() || !c.exemplar.empty() || c.packSignatures
+                                    || !c.fromTrace.empty() || !c.runTrace.empty() || c.packTaskFlag;
+    return archWins && !modifierReadsGraph;
+}
+
 void warnReportVerbPrecedence( const VerbPrecedence& prec )
 {
     if( prec.ignored.empty() )
@@ -3240,6 +3290,7 @@ void warnMapModifierDiscarded( const rw::Config& c, const VerbPrecedence& prec )
 inline constexpr std::string_view kJsonVerbs[] =
 {
     "--for", "--pack-task", "--callers", "--callees", "--impact", "--quality-delta", "--test-gate", "--metrics", "--defs",
+    "--flags",        // the gate rows, Bash env reads (form/colon/default) included — a CI contract check's input
     "--plan-lanes",   // JSON-NATIVE: emits JSON with or without the flag, and says so (the redundancy note in main)
 };
 
@@ -3548,17 +3599,9 @@ inline bool isJsonShapeModifier( std::string_view flag ) noexcept
     return std::ranges::find( kJsonShapeModifiers, flag ) != std::end( kJsonShapeModifiers );
 }
 
-int runHelpTask( const rw::Config& cfg, const rw::IngestResult& ing, const std::string& root )
+// The --help-task document for one decided route — the classifier's answer, or the deadline's abstention (#594).
+std::string renderHelpTask( const rw::Config& cfg, const rw::taskroute::TaskRouteResult& route )
 {
-    const std::string stamp = rw::gitstamp::stampAt( root );
-    const bool        git   = !stamp.empty();
-    const bool        dirty = stamp.ends_with( "+dirty" );
-    // What this build can actually parse, read off the flag table itself (cli.h shipsViewFlag) rather than
-    // asserted here: the router composes the directory scope only on a binary that has the row for it.
-    rw::taskroute::RouterCaps caps;
-    caps.dirScope = rw::shipsViewFlag( rw::taskroute::kDirScopeFlag );
-    const rw::taskroute::TaskRouteResult route = rw::taskroute::classifyRoutes( cfg.helpTask, root, ing, git, dirty, caps );
-
     std::vector<char> esc;
     const auto ex = [&]( std::string_view s ) { return std::string( rw::escapeXml( s, esc ) ); };
     // THE LEGEND. Until 2026-09-13 this document had none in the default dialect: every attribute a reader
@@ -3566,7 +3609,10 @@ int runHelpTask( const rw::Config& cfg, const rw::IngestResult& ing, const std::
     // place any of them was explained. One line, every attribute, no flag spelled (a literal double hyphen
     // is ill-formed inside an XML comment — G4).
     std::string out = "<!-- ripwire help-task: one task in, ONE safe command out, or an honest abstention. "
-                      "status=recommend|ambiguous|abstain and confidence=high|low|none track each other; "
+                      "status=recommend|ambiguous|abstain and confidence=high|low|none track each other, except that a "
+                      "recommend standing on a plain word the task names only after of reads confidence=low; an abstain "
+                      "names its next step: next= the ranked search over the same task text, or reason=system-event "
+                      "when the text is a harness report rather than a task; "
                       "score= is the winning card's evidence total and margin= its lead over the runner-up "
                       "(100/100 on a structural route, one the shipped parser itself accepts). <facts> is the "
                       "repository evidence the decision read: git= dirty= a git repo and an uncommitted diff, "
@@ -3581,9 +3627,18 @@ int runHelpTask( const rw::Config& cfg, const rw::IngestResult& ing, const std::
     out += "<task-route status=\"";
     out += rw::taskroute::statusName( route.status );
     out += "\" confidence=\"";
-    out += route.status == rw::taskroute::RouteStatus::Recommend ? "high" :
+    out += route.status == rw::taskroute::RouteStatus::Recommend ? ( route.weakOfSlot ? "low" : "high" ) :
            route.status == rw::taskroute::RouteStatus::Ambiguous ? "low" : "none";
-    out += "\" score=\"" + std::to_string( route.score ) + "\" margin=\"" + std::to_string( route.margin ) + "\">";
+    out += "\" score=\"" + std::to_string( route.score ) + "\" margin=\"" + std::to_string( route.margin ) + "\"";
+    // HELP-TASK-ROUTE (a), audit-verify 2026-11-11: an abstain used to end the document with nothing to do next (hono `how
+    // does hono route a request to a handler`: status="abstain", no next step). The ranked --for search answers ANY task
+    // text, so it is always an honest next step; a harness event is not a task, and says so instead.
+    if( route.status == rw::taskroute::RouteStatus::Abstain )
+    {
+        out += rw::taskroute::looksLikeSystemEvent( cfg.helpTask ) ? std::string( " reason=\"system-event\"" )
+                                                                  : rw::nextAttrXml( rw::nextFlag( "--for=", cfg.helpTask ) );
+    }
+    out += ">";
     out += "<facts git=\"" + std::to_string( int( route.facts.git ) ) + "\" dirty=\"" + std::to_string( int( route.facts.dirty ) );
     out += "\" trace=\"" + std::to_string( int( route.facts.trace ) ) + "\" resolved_symbols=\"";
     out += std::to_string( route.facts.resolvedSymbols.size() ) + "\"/>";
@@ -3601,7 +3656,21 @@ int runHelpTask( const rw::Config& cfg, const rw::IngestResult& ing, const std::
         out += "><run>" + ex( choice.command ) + "</run></choice>";
     }
     out += "</task-route>\n";
-    std::fputs( out.c_str(), stdout );
+    return out;
+}
+
+int runHelpTask( const rw::Config& cfg, const rw::IngestResult& ing, const std::string& root )
+{
+    const std::string stamp = rw::gitstamp::stampAt( root );
+    const bool        git   = !stamp.empty();
+    const bool        dirty = stamp.ends_with( "+dirty" );
+    // What this build can actually parse, read off the flag table itself (cli.h shipsViewFlag) rather than
+    // asserted here: the router composes the directory scope only on a binary that has the row for it.
+    rw::taskroute::RouterCaps caps;
+    caps.dirScope = rw::shipsViewFlag( rw::taskroute::kDirScopeFlag );
+    const rw::taskroute::TaskRouteResult route = rw::taskroute::classifyRoutes( cfg.helpTask, root, ing, git, dirty, caps );
+    rw::helpdeadline::noteIndexedFiles( ing.files.size() );   // the warm-done meter row's files= (a no-op off the deadline child)
+    std::fputs( renderHelpTask( cfg, route ).c_str(), stdout );
     return 0;
 }
 
@@ -4081,6 +4150,84 @@ static_assert( rw::kCompactRepriceDensestBytesPerToken == rw::kMinBytesPerToken,
 // The captured run's answer, compacted and written — or, when the dialect cannot shape it, passed through (the DEFAULT
 // posture) or refused (an ASKED --legend=compact). `rc` is the run's own exit code, returned unchanged on every path that
 // emits the answer.
+// --legend-have='s VERSION HANDSHAKE. It lives here and not in cli.h because cli.h is included early enough that
+// pulling legenddict.h into it shifts declaration order and breaks unrelated headers.
+//
+// WHY A HANDSHAKE AT ALL. --legend=ref is refused on the CLI, and the reason is right: a CLI run is one answer with no
+// session that was served anything, so its ref row would name definitions the reader never received. It would also make
+// output depend on whether an earlier RUN happened, which is not reproducible, and determinism is a contract here.
+// Naming the dictionary version turns both problems into one argv-only fact: the caller states what it holds, the answer
+// depends on nothing but its arguments, and a reader holding a DIFFERENT dictionary is refused instead of being handed a
+// pointer it cannot resolve.
+static bool checkLegendHandshake( const rw::Config& cfg )
+{
+    if( cfg.legendHave.empty() )
+    {
+        return true;   // asserts nothing: not an input to check, so VALIDATE has nothing to say about it
+    }
+    // argv is EXTERNAL INPUT, so the version goes through VALIDATE in the condition of the refusal (CONTRIBUTING §3).
+    if( VALIDATE( cfg.legendHave == rw::legenddict::dictionaryVersion(),
+                  "--legend-have= names the legend dictionary THIS binary holds" ) )
+    {
+        return true;
+    }
+    rw::emitTo( stderr, "ripwire: --legend-have={} does not match this binary's legend dictionary ({}) — a ref answer would point at "
+                        "definitions you do not hold; run `ripwire --legend-dict` and pass the dictv= it prints\n",
+                std::string_view( cfg.legendHave.data(), cfg.legendHave.size() ),
+                std::string_view( rw::legenddict::dictionaryVersion() ) );
+    return false;
+}
+
+// The ref stage, applied to a finished COMPACT answer when the caller proved it holds the dictionary. A served-everything
+// session is exactly the state of such a reader, so the existing MCP transform does the work unchanged — no second
+// implementation of the posture, which is the point of routing it through here.
+static void applyCliRefPosture( const rw::Config& cfg, std::string& doc )
+{
+    if( cfg.legendHave.empty() )
+    {
+        return;
+    }
+    rw::legenddict::LegendSession session;
+    session.serveAll();                       // the handshake asserted every definition is already with the reader
+    const rw::legenddict::RefOutcome outcome = rw::legenddict::applyRefPosture( doc, session );
+    if( outcome == rw::legenddict::RefOutcome::NotApplicable )
+    {
+        // Not a shape this dictionary reduces (no XML root, or a legend it does not hold). The answer is served
+        // UNCHANGED and complete; only the saving is missed, so this is a cost note and never a wrong answer.
+        DISCLOSE( Diagnostics::answerUnchanged, "the inline answer is a correct superset of the ref one: only the cost stays",
+                  "applyCliRefPosture: --legend-have= on an answer the legend dictionary cannot reduce — inline legend kept" );
+    }
+}
+
+// The ONE place a captured answer reaches stdout, with the write CHECKED. An unchecked fwrite/fflush here exits 0 with
+// no answer written when stdout cannot take it (`> /dev/full`, a closed pipe): dispatch already returned 0 having written
+// only into the capture, so the failure is invisible to the caller. A missing answer reported as success is the one
+// outcome this tool must never produce, so the replay decides the exit code.
+static int emitCapturedDoc( const std::string& doc, int rc )
+{
+    const bool written = std::fwrite( doc.data(), 1, doc.size(), stdout ) == doc.size();
+    const bool flushed = std::fflush( stdout ) == 0;
+    if( written && flushed && std::ferror( stdout ) == 0 )
+    {
+        return rc;
+    }
+    // THE ONE CALLER WHOSE STDOUT LEGITIMATELY HAS NO READER: #594's detached help-task child. The parent
+    // abstained and answered already, then exited, so the child's stdout is a closed pipe BY DESIGN — it goes
+    // on running only to warm the index, and nothing is waiting for its bytes. Failing it here turns an
+    // expected condition into a non-zero rc in the child's own status file, which is exactly what
+    // test/helptaskdeadlinecheck.sh caught: `state=finished rc=1` where the design says 0. Confirmed by
+    // experiment -- with this write check unconditional that gate failed, and with it bypassed it passed.
+    // Every other caller keeps the check: a user's `> /dev/full` or closed pipe must not exit 0 with no
+    // answer, which is the defect the check exists for.
+    if( rw::helpdeadline::childSession().active )
+    {
+        return rc;
+    }
+    std::fputs( "ripwire: could not write the answer to stdout — it is incomplete or absent; the exit code says so rather "
+                "than reporting a success that did not happen\n", stderr );
+    return rc != 0 ? rc : 1;
+}
+
 static int finishCompactCapture( const rw::Config& cfg, std::string& doc, int rc )
 {
     EXPECTS( cfg.legend == "compact", "only a compact-posture run is captured" );
@@ -4088,12 +4235,7 @@ static int finishCompactCapture( const rw::Config& cfg, std::string& doc, int rc
     {
         return rc;   // a refusal (or an empty answer) — nothing to rewrite, the exit code says what happened
     }
-    const auto emitCaptured = [&doc, rc]()
-    {
-        std::fwrite( doc.data(), 1, doc.size(), stdout );
-        std::fflush( stdout );
-        return rc;
-    };
+    const auto emitCaptured = [&doc, rc]() { return emitCapturedDoc( doc, rc ); };
     // the DEFAULT posture shapes what it can and leaves the rest exactly as it was emitted (cfg.legendDefaulted);
     // only an ASKED --legend=compact refuses an answer the dialect cannot shape
     // forbudget-soft: an explicit --token-budget on a task lens is a SOFT target — the settle never labels it "over"
@@ -4103,6 +4245,10 @@ static int finishCompactCapture( const rw::Config& cfg, std::string& doc, int rc
     {
         case rw::CompactOutcome::Rewritten:
         case rw::CompactOutcome::AlreadyCompact:
+            // ORDER MATTERS: applyRefPosture reads the answer as the INLINE posture serves it, which for these verbs
+            // means the compact dialect is already applied. Calling it before applyCompactDialect read the pre-compact
+            // document and returned NotApplicable on every verb (measured 2026-11-16: four covered verbs, all no-ops).
+            applyCliRefPosture( cfg, doc );
             return emitCaptured();
         case rw::CompactOutcome::NotXml:
             if( cfg.legendDefaulted )
@@ -4148,10 +4294,47 @@ static void discloseGitWalkCuts( const rw::Config& cfg, char** argv )
     rw::emitTo( stderr, "ripwire: {}\n", sentence.c_str() );
 }
 
+// Does this run's stdout pass through the compact dialect? The one test runWithCompactLegend and the #594 deadline
+// abstention (which prints without running the verb) both ask.
+static bool compactCaptures( const rw::Config& cfg, char** argv ) noexcept
+{
+    return cfg.legend == "compact" && !nativeCompactLegendVerb( cfg ) && !certainlyNonXmlAnswer( cfg, argv );
+}
+
+// #594: the abstention --deadline-ms prints when the index is not ready in time — the classifier's own Abstain shape with
+// the facts it can read without an index (git/dirty from the stamp, the trace shape from the text; resolved_symbols=0,
+// since nothing was resolved), in the dialect the run would have printed it in.
+static std::string deadlineAbstainDoc( const rw::Config& cfg, const std::string& root )
+{
+    const std::string              stamp = rw::gitstamp::stampAt( root );
+    rw::taskroute::TaskRouteResult route;
+    route.facts.git   = !stamp.empty();
+    route.facts.dirty = stamp.ends_with( "+dirty" );
+    route.facts.trace = !rw::taskroute::looksLikeSystemEvent( cfg.helpTask ) && rw::taskroute::looksLikeTrace( rw::taskroute::lowerAscii( cfg.helpTask ) );
+    return renderHelpTask( cfg, route );
+}
+
+static void emitDeadlineAbstain( const rw::Config& cfg, char** argv, std::string& doc )
+{
+    if( compactCaptures( cfg, argv ) )
+    {
+        (void)finishCompactCapture( cfg, doc, 0 );
+        return;
+    }
+    std::fputs( doc.c_str(), stdout );
+    std::fflush( stdout );
+}
+
 static int runWithCompactLegend( const rw::Config& cfg, char** argv )
 {
     EXPECTS( !cfg.legendDefaulted || cfg.legend == rw::kDefaultLegendPosture, "a defaulted posture is the registered default" );
-    if( cfg.legend != "compact" || nativeCompactLegendVerb( cfg ) || certainlyNonXmlAnswer( cfg, argv ) )
+    // --legend-have= on a verb that emits the compact dialect NATIVELY (--for) needs a capture of its own, and it must
+    // NOT be the compact one. Measured 2026-11-16: routing a --for bundle through applyCompactDialect moves it by 290 B
+    // (31,457 -> 31,167), which is exactly why nativeCompactLegendVerb excludes it. Reusing that capture to reach the ref
+    // stage would have silently rewritten the answer on the way. So this path captures and applies the ref stage ALONE,
+    // leaving the compact path byte-identical to a run without the flag.
+    const bool refOnlyCapture = !cfg.legendHave.empty() && !compactCaptures( cfg, argv );
+    if( !compactCaptures( cfg, argv ) && !refOnlyCapture )
     {
         return dispatchMain( cfg, argv );
     }
@@ -4164,7 +4347,7 @@ static int runWithCompactLegend( const rw::Config& cfg, char** argv )
         std::fputs( "ripwire: compact legend: could not open a capture buffer — emitting the full legend instead\n", stderr );
         return dispatchMain( cfg, argv );
     }
-    const int savedStdout = rw::os::dup( STDOUT_FILENO );
+    const int savedStdout = rw::os::dup_cloexec( STDOUT_FILENO );   // never inherited: a lingering git child would hold stdout open
     if( savedStdout < 0 || rw::os::dup2( rw::os::fileno( capture ), STDOUT_FILENO ) < 0 )
     {
         DISCLOSE( Diagnostics::answerUnchanged, "the full legend is a correct superset of the compact one, and stderr says so: only the cost grows",
@@ -4187,7 +4370,12 @@ static int runWithCompactLegend( const rw::Config& cfg, char** argv )
         doc.append( buf, got );
     }
     std::fclose( capture );
-    return finishCompactCapture( cfg, doc, rc );
+    if( refOnlyCapture )
+    {
+        applyCliRefPosture( cfg, doc );
+        return emitCapturedDoc( doc, rc );
+    }
+    return finishCompactCapture( cfg, doc, rc );   // the ref stage runs INSIDE it, after the compact dialect
 }
 
 // #350 layer 3: the memory guard's limit, resolved ONCE, before any thread exists — the flag, else RIPWIRE_MAX_MEMORY,
@@ -4211,6 +4399,8 @@ static bool installMemoryGuard( const rw::Config& cfg )
     rw::memguard::install( bytes, source );
     return true;
 }
+
+static int finishMainRun( const rw::Config& cfg, char** argv );
 
 int main( int argc, char** argv )
 {
@@ -4263,6 +4453,10 @@ int main( int argc, char** argv )
     {
         return 1;
     }
+    if( !checkLegendHandshake( cfg ) )
+    {
+        return 1;   // the refusal is on stderr, and it names both dictionary versions
+    }
     if( !installMemoryGuard( cfg ) )
     {
         return 1;   // the refusal is on stderr
@@ -4271,6 +4465,31 @@ int main( int argc, char** argv )
     // every read-only call this process makes; neutralise it HERE — one site, before any thread or git child — and
     // disclose it (stderr + --doctor). githarden.h holds the measurement and the reasoning.
     githarden::hardenForRoots( cfg.roots );
+    // #594: --help-task --deadline-ms forks HERE, the last point before any thread exists. The parent returns the answer
+    // (or the on-time abstention); the child, and every run without the flag, falls through to the verb. Only a run that
+    // --help-task ANSWERS is supervised: a verb that dispatches ahead of it (--index-out) runs in this process, so it never
+    // keeps writing in a detached child after a help-task abstention.
+    const char* const answeringVerb = scanReportVerbPrecedence( cfg ).winner;
+    if( cfg.helpTaskDeadlineMs > 0 && cfg.roots.size() == 1 && !isGitUrl( cfg.roots[0] ) && answeringVerb != nullptr
+        && std::string_view( answeringVerb ) == "--help-task" )
+    {
+        const std::string deadlineRoot( cfg.roots[0] );
+        const auto        prepare = [&cfg, &deadlineRoot]() { return deadlineAbstainDoc( cfg, deadlineRoot ); };
+        const auto        emit    = [&cfg, argv]( std::string& doc ) { emitDeadlineAbstain( cfg, argv, doc ); };
+        if( const std::optional<int> answered = rw::helpdeadline::superviseHelpTask( deadlineRoot, cfg.helpTaskDeadlineMs, prepare, emit ) )
+        {
+            return *answered;
+        }
+    }
+    const int rc = finishMainRun( cfg, argv );
+    rw::helpdeadline::finishChild( rc );
+    return rc;
+}
+
+// Everything main() does after the fork seam: the verb, then the memory guard's backstop and peak disclosure.
+static int finishMainRun( const rw::Config& cfg, char** argv )
+{
+    using namespace rw;
     const int rc = runWithCompactLegend( cfg, argv );
     discloseGitWalkCuts( cfg, argv );
     // #350: the backstop — an ingest the memory guard stopped inside a verb that does not read the stop (memguard.h).
@@ -4387,7 +4606,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
                 // The sentence is the allow-list (kJsonVerbs) spelled out; keep the two in step.
                 rw::emitTo( stderr, "ripwire: --json is not yet supported for {} — supported: the default map, "
                               "--for, --pack-task, --callers/--callees, --impact, --quality-delta, --test-gate, "
-                              "--metrics, --defs, and --plan-lanes which is JSON-native (e.g. ripwire <dir> --callers=SYM --json)\n", std::string_view( unsupported.data(), unsupported.size() ) );
+                              "--metrics, --defs, --flags, and --plan-lanes which is JSON-native (e.g. ripwire <dir> --callers=SYM --json)\n", std::string_view( unsupported.data(), unsupported.size() ) );
             }
             return 1;
         }
@@ -5277,7 +5496,10 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
         return rc;
     }
 
+    // QD-CONSTRUCTS-AT-INGEST: only a quality-delta run has its ingests find the construct hits (ingest.h WantConstructHits)
+    const WantConstructHits wantConstructHits( cfg.qualityDelta || cfg.qualityBaseline );
     // #387: --quality-delta=A..B indexes its two commits itself and never reads the working tree's index.
+    offerBaseChildArgv( argv );   // QD-BASE-CHILD: the range form may re-run this command line (less --refetch) for its base phase
     if( std::optional<int> handled = runQualityDeltaRangeBeforeIngest( cfg, verbPrec.winner, root, ws ) )
     {
         return *handled;
@@ -5302,6 +5524,12 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
         ~AbandonWalksOnUnwind() { if( std::uncaught_exceptions() > uncaught ) { rw::abandonGitWalks(); } }
     } abandonWalksOnUnwind;
     IngestResult ing;
+    // The warm snapshot (warmsnap.h) serves the one ingest a single-root run makes. Not armed for a multi-root merge (each
+    // root has its own blob and the graph is the merge's), under --scip or --pin-census (the graph then holds an overlay or
+    // a census this file does not store), under --max-memory (the guard watches the crawl and the parse a load would skip:
+    // a run asked to stop at a limit must do the work the limit is about), or when RIPWIRE_NO_WARMSNAP is set.
+    rw::warmsnap::Session warmSnap;
+    const bool warmSnapArmed = !multiRoot && cfg.scipIndex.empty() && cfg.pinCensus.empty() && cfg.maxMemoryBytes == 0 && std::getenv( "RIPWIRE_NO_WARMSNAP" ) == nullptr;
     if( multiRoot )
     {
         // Multi-root ingest: ONE existing per-root cache blob per root (the exact
@@ -5342,6 +5570,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
             autoCache = defaultCachePath( root, needsValueUses );
             cacheArg  = autoCache;
         }
+        const rw::warmsnap::Armed armed( warmSnapArmed ? &warmSnap : nullptr );
         ing = ingest( root.c_str(), cfg.excludes, cacheArg, cfg.maxFileBytes, needsValueUses,
                       /*excludeLabel=*/{}, /*respectGitignore=*/!cfg.noIgnore );
     }
@@ -5400,6 +5629,54 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
             "        references/callees = {} ({} B)\n"
             "        includes/targets   = {} ({} B)\n",
             total, bytes, ing.files.size(), pathB, ing.symbols.size(), nameB, ing.references.size(), calleeB, ing.includes.size(), incB );
+        // M0 MEM-STATS (mem-audit-fable-1111): every model family's size, capacity and row bytes (capacity x sizeof — the
+        // reserved row storage, not the strings it points at), then the bindings by LocalBindKind (model.h, by enumerator
+        // value) with how many of each sit inside a definition — what buildGraph's per-kind side tables are sized by
+        const auto family = [ & ]( std::string_view name, const auto& v )
+        {
+            using Row = typename std::decay_t<decltype( v )>::value_type;
+            rw::emitTo( stderr, "[mem] family {} size={} cap={} row_b={} cap_mib={:.1f}\n", name, v.size(), v.capacity(), sizeof( Row ),
+                        rw::memstats::mib( v.capacity() * sizeof( Row ) ) );
+        };
+        family( "files", ing.files );
+        family( "fileHealth", ing.fileHealth );
+        family( "symbols", ing.symbols );
+        family( "fields", ing.fields );
+        family( "aliasTargets", ing.aliasTargets );
+        family( "fnLocalScopes", ing.fnLocalScopes );
+        family( "cloneKeys", ing.cloneKeys );
+        family( "references", ing.references );
+        family( "includes", ing.includes );
+        family( "constOpens", ing.constOpens );
+        family( "constructHits", ing.constructHits );
+        family( "bindings", ing.bindings );
+        family( "bindingAliases", ing.bindingAliases );
+        family( "routeDefs", ing.routeDefs );
+        family( "routeUses", ing.routeUses );
+        family( "lexTokenHashes", ing.lexTokenHashes );
+        family( "lexTokenTfs", ing.lexTokenTfs );
+        std::array<std::size_t, kLocalBindKindCount> kindAll {};
+        std::array<std::size_t, kLocalBindKindCount> kindScoped {};
+        for( const Binding& b : ing.bindings )
+        {
+            const std::size_t kind = std::size_t( b.kind );
+            if( kind < kLocalBindKindCount )
+            {
+                ++kindAll[ kind ];
+                kindScoped[ kind ] += b.fromSymbol != kNoNode ? 1u : 0u;
+            }
+        }
+        std::string kinds;
+        for( std::size_t kind = 0; kind < kLocalBindKindCount; ++kind )
+        {
+            if( kindAll[ kind ] != 0 )
+            {
+                kinds += std::format( " {}={}/{}", kind, kindAll[ kind ], kindScoped[ kind ] );
+            }
+        }
+        rw::emitTo( stderr, "[mem] bindings by kind (kind=all/in-a-def):{}\n", kinds );
+        const std::size_t coldBlocks = std::size_t( std::count_if( ing.references.begin(), ing.references.end(), []( const Reference& r ) { return r.hasColdBlock(); } ) );
+        rw::emitTo( stderr, "[mem] textpool ids={} reference cold blocks={} ({} B each)\n", RefNames::pool().idCount(), coldBlocks, sizeof( RefColdText ) );
     }
     // SCIP precision overlay: parse the index (if --scip given) → map to ripwire ids → hand to buildGraph as an optional
     // parameter. An unreadable/corrupt/mismatched index yields an EMPTY overlay (one DISCLOSE + stderr note) and
@@ -5420,11 +5697,15 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
     // condition and the degrade path, and is handed §B11.4's own dispatch winner rather than a guess.
     GrepScanPhases    grepPhases;
     std::thread       grepPhaseWorker = startGrepScanPrefetch( cfg, ing, verbPrec.winner, grepPhases );
+    // DEPS-NO-GRAPH: --deps and --arch answer from the ingest alone (runArchViews reads d.ing, never d.g), so when one of
+    // them is the dispatch WINNER (§B11.4's own scan, not cfg.deps: `--deps --callers` still answers --deps, but a graph verb
+    // that outranks it would not) and no modifier reads the graph before dispatch, the build is skipped and `g` stays empty.
+    const bool graphUnread = graphUnreadByWinner( cfg, verbPrec.winner );
     const Graph       g               = [ & ]
     {
         try   // a failed build (fileGraphStop.h) unwinds past a joinable worker, which would std::terminate: join it, then let the stop go on
         {
-            Graph built = buildGraph( ing, scipPtr, !cfg.pinCensus.empty() );
+            Graph built = graphUnread ? Graph{} : warmSnap.on() ? graphFromWarmSnapshot( warmSnap, ing ) : buildGraph( ing, scipPtr, !cfg.pinCensus.empty() );
             joinGrepScanPrefetch( grepPhaseWorker );
             return built;
         }
@@ -5434,10 +5715,11 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
             throw;
         }
     }();
-    if( rw::memguard::overHardLimit() )   // #350: the hard line between the graph build and the verbs
+    finishWarmSnapshot( warmSnap );
+    if( rw::memguard::overHardLimit() )   // #350: the hard line between the graph build (or, for --deps/--arch, the ingest) and the verbs
     {
-        DISCLOSE( Diagnostics::answerRefused, "main: over the memory guard's hard limit after the graph build — exit 5, one stderr line" );
-        rw::emitTo( stderr, "ripwire: {}\n", rw::memguard::hardStopLine( "graph build" ) );
+        DISCLOSE( Diagnostics::answerRefused, "main: over the memory guard's hard limit after the graph build (--deps/--arch: after the ingest) — exit 5, one stderr line" );
+        rw::emitTo( stderr, "ripwire: {}\n", rw::memguard::hardStopLine( graphUnread ? "ingest" : "graph build" ) );
         rw::abandonGitWalks();   // the refusal is out: do not wait for the history walks' futures (gitmine.h)
         return 5;
     }
@@ -5573,7 +5855,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
             if( !commits.empty() )
             {
                 // co-change degree per file = # of OTHER files that share ≥1 commit with it (file-level).
-                std::vector<HashMap<std::uint32_t, char>> partners( ing.files.size() );
+                std::vector<HashSet<std::uint32_t>> partners( ing.files.size() );
                 for( const std::vector<std::uint32_t>& c : commits )
                 {
                     for( std::size_t i = 0; i < c.size(); ++i )
@@ -5581,7 +5863,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
                         for( std::size_t j = i + 1; j < c.size(); ++j )
                         {
                             const std::uint32_t a = c[i], b = c[j];
-                            if( a < ing.files.size() && b < ing.files.size() ) { partners[a][b] = 1; partners[b][a] = 1; }
+                            if( a < ing.files.size() && b < ing.files.size() ) { partners[a].insert( b ); partners[b].insert( a ); }
                         }
                     }
                 }

@@ -46,8 +46,40 @@
 #   (e4) the line to copy: the first naming the typical member (names.go:4), a code line before a comment that names a member
 #        (list.go:4, not its doc comment on line 1), an import line only when no code line does (index.ts:2); cut="1" past 120 bytes
 #   (e5) CAP-DISCLOSE: seven listing files print five <touch> rows, total="7" shown="5" capped="1"
+#   (e6) TOUCH-SYM: a <touch> row names the innermost indexed definition holding its line, n= as the other rows spell it: a Go
+#        function body (defaults.go:4 n="defaultPlugins"), a Rust match arm (pure.rs:3 n="is_pure"), a TS method in a class
+#        (registry.ts:3 n="DialectRegistry.all", the method and not its class); a line no definition holds (an `export *` line, an
+#        import line) prints no n=; a Go `const (` group stores the group's span on every constant, so a line inside it names the
+#        constant declared on it (kinds.go:5 n="Second") or nothing, never the group's first or last constant; a continuation
+#        line inside the group, where no constant is declared, prints no n= (kinds2.go:6: the span tie stands); own fixture gok
 #   (s1) --json carries no block; (s2) a token budget holds it (held="budget", no rows); (x1) MCP `for`: the same element bytes
 #   (a1) the block's own legend defines every attribute it prints; the answer is well-formed XML; the block closes right before </ctx>
+
+# ARMS (E3a-INTO: a family of HOLDERS of X — member names carry X's plural — takes X as a row inside one holder)
+#   (i1) C++ BaseSettings holders, each with its own X-macro list: `a new query-level setting` (no holder named for it) goes into
+#        the bare holder SettingsImpl (into_by="bare"), rows by="macro" list="COMMON_SETTINGS" n="4" with the row NAME argument (not the
+#        type); the other holders (ServerSettingsImpl, MergeTreeSettingsImpl) are not printed; a lister of the rows is a touch row, a
+#        docs/ copy of them is not; `a new server setting` goes into ServerSettingsImpl (into_by="word" into_word="server")
+#   (i2) TS affix holders (`*Options` interfaces in three files): `a new compiler option` goes into CompilerOptions over the longer
+#        WatchCompilerOptions (fewest other words), rows by="line" (its `name?: type` lines), commandLineParser.ts the touch row
+#   (i2b) `a new option for the compiler`: a family whose holder is named by a task word outscores a larger family of holders
+#        (src/harness *Options) that names none
+#   (i5) a second family of holders the task word names more than once (a tie) gets no score bonus: the bare holder of (i1) still wins
+#   (i3) holders and no holder the task points into (no bare one): the block is withheld; a sibling family (not holders) is unchanged
+#   (i4) a `### Heading` line inside a row's text does not end the X-macro list (n= counts every row); nor does an `#include`
+#        line inside a raw-string description; a `DECLARE(` call after the macro's replacement text is not a row
+#   (i6) a holder with no X-macro list: its fields (the field side table) are the rows, by="field", two fields are n="2"
+#   (i7) a larger X-macro list whose name column is unknown (type and name columns tie) does not hide a smaller list with a known one
+#   (i8) `key` → `Keys` holders (vowel + y plural); a brace inside a comment does not move the property-line depth; two rows are n="2"
+#
+# ARMS (EXEMPLAR-RESIDUAL-2)
+#   (r1) a directory-local touch row: the typical member's directory aggregator (filters/__init__.py) names all four members in that
+#        directory but four of the family's ten: <touch .. share="4/4" scope="dir">, after the family-wide rows, and the legend then
+#        defines scope="dir"; (r1n) a directory whose aggregator names one of its four members prints no such row and no such clause
+#   (r2) Go contract lines: the typical registry entry's package (plugins/alpha) asserts three interfaces for Alpha (`&T{}`,
+#        `(*T)(nil)`, a `var (` group's `T{}`): <asserts type="Alpha" p=.. n="3"> after the touch list; a helper type's single assertion
+#        and a _test.go file's are not printed; the legend defines <asserts>; (r2n) a Go registry whose packages assert nothing: no row
+#   (r2u) an unreadable Go file of that package: n= is a floor, floor="1" unread="1" (r2u0: the asserting file itself: <asserts n="0" ../>)
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
@@ -156,6 +188,7 @@ for d in postgres mysql sqlite mssql; do
     D="$( cap "$d" )"; mkdir -p "$F/ts/src/dialects/$d"
     printf "import { Dialect } from '../../dialect'\n\nexport class %sDialect implements Dialect {\n  createDriver(): unknown {\n    return '%s'\n  }\n}\n" "$D" "$d" > "$F/ts/src/dialects/$d/$d-dialect.ts"
 done
+printf 'export class DialectRegistry {\n  all(): unknown[] {\n    return [PostgresDialect, MysqlDialect, SqliteDialect, MssqlDialect]\n  }\n}\n' > "$F/ts/src/registry.ts"
 
 mkdir -p "$F/cap/ui"
 printf 'class Widget:\n    pass\n' > "$F/cap/ui/base.py"
@@ -177,6 +210,143 @@ mkdir -p "$F/go/baseline" "$F/go/vendor/x"
 printf 'package baseline\n\nvar frozen = "%s"\n' "$all_go" > "$F/go/baseline/list.go"
 printf 'package x\n\nvar v = "%s"\n' "$all_go" > "$F/go/vendor/x/list.go"
 for i in 1 2 3 4 5 6 7; do printf 'from ui.a import AWidget\nREG%s = [AWidget, "BWidget", "CWidget", "DWidget", "EWidget", "FWidget"]\n' "$i" > "$F/cap/list$i.py"; done
+
+# TOUCH-SYM (e6) Go const groups: a copy of the Go fixture plus two listers inside a `const (` group (own copy: the e_go row cap)
+cp -R "$F/go" "$F/gok"
+mkdir -p "$F/gok/kinds"
+printf 'package kinds\n\nconst (\n\tFirst  = 1\n\tSecond = names.Alpha + names.Beta + names.Gamma + names.Delta\n\tThird  = 3\n)\n' > "$F/gok/kinds/kinds.go"
+printf 'package kinds\n\nconst (\n\tOne = 1\n\tTwo =\n\t\tnames.Alpha + names.Beta + names.Gamma + names.Delta\n\tThree = 3\n)\n' > "$F/gok/kinds/kinds2.go"
+
+# E3a-INTO fixtures: C++ settings holders with X-macro lists; TS option-bag interfaces
+mkdir -p "$F/hold/src/Core" "$F/hold/src/Server" "$F/hold/src/Tree" "$F/hold/docs/site" "$F/hold2/src/A" "$F/hold2/src/B" "$F/hold2/src/C" "$F/tsh/src/compiler"
+printf 'template <class T> struct BaseSettings { int x; };\n' > "$F/hold/src/Core/BaseSettings.h"
+cat > "$F/hold/src/Core/Settings.cpp" <<'CPP'
+#include "BaseSettings.h"
+#define COMMON_SETTINGS(DECLARE, DECLARE_WITH_ALIAS) \
+    DECLARE(UInt64, max_threads, 0, R"(
+The maximum number of threads.
+### Heading inside a description
+#include lines in a description are text
+)", 0) \
+    DECLARE(UInt64, max_block_size, 65536, "rows per block", 0) \
+    DECLARE(Bool, use_uncompressed_cache, false, "cache", 0) \
+    DECLARE_WITH_ALIAS(UInt64, join_buffer_rows, 1000, "rows", 0, join_rows) \
+
+struct SettingsTraits {};
+struct SettingsImpl : public BaseSettings<SettingsTraits>
+{
+    void apply();
+};
+void SettingsImpl::apply()
+{
+    DECLARE(UInt64, stray_call_one, 0, "x", 0);
+    DECLARE(UInt64, stray_call_two, 0, "x", 0);
+}
+CPP
+cat > "$F/hold/src/Server/ServerSettings.cpp" <<'CPP'
+#include "../Core/BaseSettings.h"
+#define LIST_OF_SERVER_SETTINGS(DECLARE, ALIAS) \
+    DECLARE(UInt64, max_connections, 1024, "conns", 0) \
+    DECLARE(UInt64, listen_backlog, 64, "backlog", 0) \
+    DECLARE(String, tmp_path, "/tmp", "path", 0) \
+
+struct ServerSettingsTraits {};
+struct ServerSettingsImpl : public BaseSettings<ServerSettingsTraits>
+{
+    void load();
+};
+CPP
+cat > "$F/hold/src/Tree/MergeTreeSettings.cpp" <<'CPP'
+#include "../Core/BaseSettings.h"
+#define LIST_OF_MERGE_TREE_SETTINGS(DECLARE, ALIAS) \
+    DECLARE(UInt64, index_granularity, 8192, "gran", 0) \
+    DECLARE(UInt64, parts_to_throw_insert, 300, "parts", 0) \
+    DECLARE(Bool, allow_nullable_key, false, "key", 0) \
+
+struct MergeTreeSettingsTraits {};
+struct MergeTreeSettingsImpl : public BaseSettings<MergeTreeSettingsTraits>
+{
+    void check();
+};
+CPP
+printf 'const char* kFuzzSettings[] = { "max_threads", "max_block_size", "use_uncompressed_cache", "join_buffer_rows" };\n' > "$F/hold/src/Core/FuzzList.cpp"
+printf 'export const settings = [ "max_threads", "max_block_size", "use_uncompressed_cache", "join_buffer_rows" ];\n' > "$F/hold/docs/site/settings.js"
+printf 'template <class T> struct BaseSettings { int x; };\n' > "$F/hold2/src/BaseSettings.h"
+for d in A B C; do
+    cat > "$F/hold2/src/$d/${d}xSettings.cpp" <<CPP
+#include "../BaseSettings.h"
+struct ${d}xTraits {};
+struct ${d}xSettingsImpl : public BaseSettings<${d}xTraits> { void f(); };
+CPP
+done
+# i6: a holder with fields and no list; i7: a 4-row list whose type and name columns tie, then a 3-row list with a known name column
+cat > "$F/hold2/src/B/BxSettings.cpp" <<'CPP'
+#include "../BaseSettings.h"
+struct BxTraits {};
+struct BxSettingsImpl : public BaseSettings<BxTraits>
+{
+    int max_rows;
+    int min_rows;
+};
+CPP
+mkdir -p "$F/hold2/src/D"
+cat > "$F/hold2/src/D/DxSettings.cpp" <<'CPP'
+#include "../BaseSettings.h"
+#define DX_TYPED_SETTINGS(M) \
+    M(Int, alpha) \
+    M(Bool, beta) \
+    M(Str, gamma) \
+    M(Dbl, delta) \
+
+#define DX_SETTINGS(M) \
+    M(UInt64, dx_one, 1) \
+    M(UInt64, dx_two, 2) \
+    M(UInt64, dx_three, 3) \
+
+struct DxTraits {};
+struct DxSettingsImpl : public BaseSettings<DxTraits> { void f(); };
+CPP
+# i8: `*Keys` holders in three files; a brace in a comment inside ServerKeys
+mkdir -p "$F/tsk/src/keys"
+cat > "$F/tsk/src/keys/server.ts" <<'TS'
+export interface ServerKeys {
+    // a stray { in a comment
+    apiKey?: string;
+    /* and a } in another */
+    sessionKey?: string;
+}
+TS
+for k in Client Admin; do printf 'export interface %sKeys {\n    k?: string;\n}\n' "$k" > "$F/tsk/src/keys/$( echo "$k" | tr 'A-Z' 'a-z' ).ts"; done
+# hold3 = hold plus a family of holders the task word `query` names more than once (QueryPlanSettings, QueryTreeSettings, ..): a tie,
+# so that family gets no task-word bonus and cannot outrank the bare holder (ClickHouse: the 2026-11-07 withhold of `query-level setting`)
+mkdir -p "$F/hold3/src/Query" && cp -R "$F/hold/src" "$F/hold3/"
+for q in Plan Tree Ast; do
+    printf '#include "../Core/BaseSettings.h"\nstruct Query%sSettings\n{\n    int a;\n    int b;\n};\nvoid useQuery%sSettings( Query%sSettings& s );\n' "$q" "$q" "$q" > "$F/hold3/src/Query/Query${q}Settings.h"
+done
+cat > "$F/tsh/src/compiler/types.ts" <<'TS'
+export interface CompilerOptions {
+    allowJs?: boolean;
+    strictNullChecks?: boolean;
+    outDir?: string;
+    readonly moduleResolution?: string;
+    [option: string]: unknown;
+}
+export interface WatchCompilerOptions {
+    pollingInterval?: number;
+}
+TS
+printf 'export interface WatchOptions {\n    watchFile?: string;\n}\n' > "$F/tsh/src/compiler/watch.ts"
+printf 'export interface BuildOptions {\n    dry?: boolean;\n}\n' > "$F/tsh/src/compiler/build.ts"
+mkdir -p "$F/tsh/src/harness"
+for h in a b c d; do printf 'export interface %sRunOptions {\n    v?: number;\n}\nexport interface %sShowOptions {\n    w?: number;\n}\n' "$( cap "$h" )" "$( cap "$h" )" > "$F/tsh/src/harness/$h.ts"; done
+cat > "$F/tsh/src/compiler/commandLineParser.ts" <<'TS'
+export const optionDeclarations = [
+    { name: "allowJs", type: "boolean" },
+    { name: "strictNullChecks", type: "boolean" },
+    { name: "outDir", type: "string" },
+    { name: "moduleResolution", type: "string" },
+];
+TS
 
 # fix-round fixtures
 mkdir -p "$F/m1s/src" "$F/m1n/cmds" "$F/m2/app" "$F/s3/src/ui" "$F/s2/src/plugins" "$F/s2/examples" "$F/s2/benchmarks" "$F/s4/src" "$F/s4c/src/jobs"
@@ -202,14 +372,14 @@ for p in Aa Bb Cc Dd; do printf 'from src.plugins.base import Plugin\n\n\nclass 
 for d in src examples benchmarks; do printf 'ALL = ["AaPlugin", "BbPlugin", "CcPlugin"]\n' > "$F/s2/$d/all.py"; done
 for c in quit write open close; do printf 'pub fn %s_command() -> u32 {\n    1\n}\n' "$c"; done > "$F/s4/src/commands.rs"
 for j in Send Fetch Purge; do printf 'class %sWorker:\n    def run(self):\n        return 1\n' "$j" > "$F/s4c/src/jobs/$(echo "$j" | tr 'A-Z' 'a-z').py"; done
-# g2 / g3 fixtures: affix classes in one file, in two files, in .d.ts files only (and the same in .ts files)
+# g2 / g3 fixtures: affix classes in one file, in two files, in .d.ts files only (and the same in .ts files) (g3 names are singular *Option: plural *Options members are holders, see i2)
 mkdir -p "$F/g2a/src/jobs" "$F/g2b/src/jobs" "$F/g3d/src/opts" "$F/g3t/src/opts"
 for j in Send Fetch Purge Drain; do printf 'class %sRunner:\n    def run(self):\n        return 1\n\n\n' "$j"; done > "$F/g2a/src/jobs/all.py"
 for j in Send Fetch; do printf 'class %sRunner:\n    def run(self):\n        return 1\n\n\n' "$j"; done > "$F/g2b/src/jobs/one.py"
 for j in Purge Drain; do printf 'class %sRunner:\n    def run(self):\n        return 1\n\n\n' "$j"; done > "$F/g2b/src/jobs/two.py"
 for j in Read Write Seek; do
-    printf 'export interface %sOptions {\n  flag: number\n}\n' "$j" > "$F/g3d/src/opts/$( echo "$j" | tr 'A-Z' 'a-z' ).d.ts"
-    printf 'export interface %sOptions {\n  flag: number\n}\n' "$j" > "$F/g3t/src/opts/$( echo "$j" | tr 'A-Z' 'a-z' ).ts"
+    printf 'export interface %sOption {\n  flag: number\n}\n' "$j" > "$F/g3d/src/opts/$( echo "$j" | tr 'A-Z' 'a-z' ).d.ts"
+    printf 'export interface %sOption {\n  flag: number\n}\n' "$j" > "$F/g3t/src/opts/$( echo "$j" | tr 'A-Z' 'a-z' ).ts"
 done
 
 # CR round (#559) fixtures: single-quoted and double-quoted decorator names, a same-line Rust attribute, a registry over 4000 lines
@@ -315,10 +485,26 @@ no_touch e3 "$TMP/e_go.xml" vendor/x/list.go "vendored"
 has_touch e4 "$TMP/e_go.xml" names/names.go:4 4/4
 has_touch e4 "$TMP/e_ts.xml" src/index.ts:2 4/4
 has_touch e4 "$TMP/e_go.xml" plugins/list.go:4 3/4
-if touchrows "$TMP/e_go.xml" | grep -q '<touch p="plugins/defaults.go:4" share="4/4" cut="1">'; then ok "(e4) a line past 120 bytes is cut: cut=\"1\""; else no "(e4) cut: $( touchrows "$TMP/e_go.xml" | head -c 400 )"; fi
+if touchrows "$TMP/e_go.xml" | grep -q '<touch p="plugins/defaults.go:4"[^>]* share="4/4" cut="1">'; then ok "(e4) a line past 120 bytes is cut: cut=\"1\""; else no "(e4) cut: $( touchrows "$TMP/e_go.xml" | head -c 400 )"; fi
 run cap "--for=add a new widget" >"$TMP/e_cap.xml"
 if touchrows "$TMP/e_cap.xml" | grep -q '^<touch_list total="7" shown="5" capped="1">' && [ "$( touchrows "$TMP/e_cap.xml" | grep -o '<touch ' | wc -l | tr -d ' ' )" = 5 ]; then ok "(e5) seven listers: five rows, total=7 shown=5 capped=1"
 else no "(e5) cap: $( touchrows "$TMP/e_cap.xml" | head -c 300 )"; fi
+touch_n(){ # ARM FILE P:LINE NAME — the <touch> row at p= carries n="NAME" (NAME empty: the row carries no n=)
+    local row; row="$( touchrows "$2" | grep -o "<touch p=\"$3\"[^>]*>" )"
+    if [ -z "$row" ]; then no "($1) no touch row at $3: $( touchrows "$2" | head -c 400 )"
+    elif [ -n "$4" ] && printf '%s' "$row" | grep -q " n=\"$4\""; then ok "($1) touch $3 n=\"$4\""
+    elif [ -z "$4" ] && ! printf '%s' "$row" | grep -q ' n='; then ok "($1) touch $3: no definition holds the line, no n="
+    else no "($1) touch $3 want n=\"$4\": $row"; fi
+}
+touch_n e6 "$TMP/e_go.xml" plugins/defaults.go:4 defaultPlugins
+touch_n e6 "$TMP/e_rs.xml" src/pure.rs:3 is_pure
+touch_n e6 "$TMP/e_ts.xml" src/registry.ts:3 DialectRegistry.all
+touch_n e6 "$TMP/e_ts.xml" src/index.ts:2 ""
+touch_n e6 "$TMP/e_py.xml" app/handlers/__init__.py:1 ""
+run gok "--for=add a new in-tree plugin" >"$TMP/e_gok.xml"
+if touchrows "$TMP/e_gok.xml" | grep -q '<touch p="kinds/kinds.go:5"\( n="Second"\)\? share='; then ok "(e6) kinds.go:5 inside a const group: n=\"Second\" or none, never First/Third"
+else no "(e6) kinds.go:5 const group: $( touchrows "$TMP/e_gok.xml" | grep -o '<touch p="kinds/kinds.go[^>]*>' || touchrows "$TMP/e_gok.xml" | head -c 400 )"; fi
+touch_n e6 "$TMP/e_gok.xml" kinds/kinds2.go:6 ""
 cp "$TMP/e_go.xml" "$TMP/e_goa.xml"
 
 # t1 / t2: wordings
@@ -451,10 +637,157 @@ fi
 if block "$TMP/u2prime.xml" | grep -q ' rule="registry" key="NewInTreeRegistry"' && ! block "$TMP/u2prime.xml" | grep -q 'unread='; then ok "(u2) positive twin: the same run with the file readable resolves the registry and carries no unread="
 else no "(u2) twin: $( block "$TMP/u2prime.xml" | head -c 300 )"; fi
 
+# E3a-INTO arms
+run hold "--for=add a new query-level setting" >"$TMP/i1.xml"
+b="$( block "$TMP/i1.xml" )"
+if printf '%s' "$b" | grep -q ' rule="base" key="BaseSettings"[^>]* n="3" into="SettingsImpl" into_p="src/Core/Settings.cpp:[0-9]*" into_by="bare">' \
+   && printf '%s' "$b" | grep -q '<rows by="macro" list="COMMON_SETTINGS" list_p="src/Core/Settings.cpp:2" n="4">' \
+   && printf '%s' "$b" | grep -q '<m n="max_threads" p="src/Core/Settings.cpp:3"/>' && printf '%s' "$b" | grep -q '<m n="join_buffer_rows" ' \
+   && ! printf '%s' "$b" | grep -q 'ServerSettingsImpl\|MergeTreeSettingsImpl\|UInt64\|stray_call'; then ok "(i1) query-level setting: into the bare holder SettingsImpl, COMMON_SETTINGS rows by name, other holders unprinted"
+else no "(i1) query-level setting: $( printf '%s' "$b" | head -c 500 )"; fi
+has_touch i1 "$TMP/i1.xml" src/Core/FuzzList.cpp 4/4
+no_touch i1 "$TMP/i1.xml" docs/site/settings.js "a docs/ tree is not read"
+# i4: the row after the `### Heading` line of max_threads' description is still a row (n="4" above counts all four)
+if printf '%s' "$b" | grep -q '<m n="max_block_size" '; then ok "(i4) a ### line inside a row's text does not end the list"; else no "(i4) rows after the ### line: $( printf '%s' "$b" | head -c 400 )"; fi
+run hold "--for=add a new server setting" >"$TMP/i1b.xml"
+if block "$TMP/i1b.xml" | grep -q ' into="ServerSettingsImpl" into_p="src/Server/ServerSettings.cpp:[0-9]*" into_by="word" into_word="server">' \
+   && block "$TMP/i1b.xml" | grep -q 'list="LIST_OF_SERVER_SETTINGS"[^>]* n="3"' && ! block "$TMP/i1b.xml" | grep -q 'max_threads'; then ok "(i1) server setting: into ServerSettingsImpl by the task word"
+else no "(i1) server setting: $( block "$TMP/i1b.xml" | head -c 400 )"; fi
+run tsh "--for=add a new compiler option" >"$TMP/i2.xml"
+b="$( block "$TMP/i2.xml" )"
+if printf '%s' "$b" | grep -q ' rule="affix"[^>]* into="CompilerOptions" into_p="src/compiler/types.ts:1" into_by="word" into_word="compiler">' \
+   && printf '%s' "$b" | grep -q '<rows by="line" n="4">' && printf '%s' "$b" | grep -q '<m n="moduleResolution" p="src/compiler/types.ts:5"/>' \
+   && ! printf '%s' "$b" | grep -q '<m n="option"\|WatchOptions\|BuildOptions'; then ok "(i2) compiler option: into CompilerOptions, its property lines are the rows"
+else no "(i2) compiler option: $( printf '%s' "$b" | head -c 500 )"; fi
+has_touch i2 "$TMP/i2.xml" src/compiler/commandLineParser.ts 4/4
+# i2b: `a new option for the compiler` (X is only `option`): the larger src/harness family of *Options names no holder for the task;
+# the family whose holder is named by a task word (compiler) wins and goes into CompilerOptions
+run tsh "--for=I need a new option for the compiler; where is it declared?" >"$TMP/i2b.xml"
+if block "$TMP/i2b.xml" | grep -q ' scope="src"[^>]* into="CompilerOptions"[^>]* into_by="word" into_word="compiler">\| into="CompilerOptions"[^>]* into_by="word" into_word="compiler">' \
+   && ! block "$TMP/i2b.xml" | grep -q 'harness'; then ok "(i2b) option for the compiler: the family with a holder named by the task wins over a larger one"
+else no "(i2b) option for the compiler: $( block "$TMP/i2b.xml" | head -c 400 )"; fi
+# i5: a family whose holders the task word names more than once is a tie; it gets no bonus and the bare holder still wins
+run hold3 "--for=add a new query-level setting" >"$TMP/i5.xml"
+if block "$TMP/i5.xml" | grep -q ' into="SettingsImpl" into_p="src/Core/Settings.cpp:[0-9]*" into_by="bare">'; then ok "(i5) holders tied on the task word get no bonus: the bare SettingsImpl still wins"
+else no "(i5) tied holders outranked the bare holder: $( block "$TMP/i5.xml" | head -c 400 )"; fi
+silent i3 hold2 "add a new query-level setting"
+if run hold2 "--for=add a new ax setting" >"$TMP/i3b.xml" && block "$TMP/i3b.xml" | grep -q ' into="AxSettingsImpl"[^>]* into_by="word" into_word="ax"><rows n="0"/>'; then ok "(i3) positive twin: a task word picks the holder; no list in its file: <rows n=\"0\"/>"
+else no "(i3) twin: $( block "$TMP/i3b.xml" | head -c 400 )"; fi
+
+run hold2 "--for=add a new bx setting" >"$TMP/i6.xml"
+if block "$TMP/i6.xml" | grep -q ' into="BxSettingsImpl"[^>]* into_by="word" into_word="bx"><rows by="field" n="2"><m n="max_rows" p="src/B/BxSettings.cpp:5"/><m n="min_rows" '; then
+    ok "(i6) no list in the holder's file: its two fields are the rows (by=\"field\" n=\"2\")"
+else no "(i6) field rows: $( block "$TMP/i6.xml" | head -c 400 )"; fi
+run hold2 "--for=add a new dx setting" >"$TMP/i7.xml"
+if block "$TMP/i7.xml" | grep -q ' into="DxSettingsImpl"[^>]* into_by="word" into_word="dx"><rows by="macro" list="DX_SETTINGS" list_p="src/D/DxSettings.cpp:8" n="3"><m n="dx_one" ' \
+   && ! block "$TMP/i7.xml" | grep -q 'alpha\|"Int"'; then ok "(i7) a larger list with tied type/name columns does not hide the list whose name column is known"
+else no "(i7) tied columns: $( block "$TMP/i7.xml" | head -c 400 )"; fi
+run tsk "--for=add a new server key" >"$TMP/i8.xml"
+if block "$TMP/i8.xml" | grep -q ' into="ServerKeys" into_p="src/keys/server.ts:1" into_by="word" into_word="server"><rows by="line" n="2"><m n="apiKey" p="src/keys/server.ts:3"/><m n="sessionKey" p="src/keys/server.ts:5"/>'; then
+    ok "(i8) key -> Keys holders; braces in comments are not depth; two property lines are n=\"2\""
+else no "(i8) Keys holders: $( block "$TMP/i8.xml" | head -c 400 )"; fi
+
+# r1 / r1n: RESIDUAL-2 dir-local touch rows. Ten Command subclasses in three directories (none holds half, so the scope is app):
+# four in app/filters (3 lines each, the median size: the typical member is one of them), three in app/strings (1 line), three in
+# app/math (6 lines). filters/__init__.py imports the four filters (4 of 10: not half the family); app/registry.py lists all ten.
+mkdir -p "$F/dirloc/app/filters" "$F/dirloc/app/strings" "$F/dirloc/app/math"
+printf 'class Command:\n    def run(self):\n        raise NotImplementedError\n' > "$F/dirloc/app/base.py"
+for c in where select reject uniq; do
+    printf 'from app.base import Command\n\n\nclass %sCommand(Command):\n    def run(self):\n        return "%s"\n' "$( cap "$c" )" "$c" > "$F/dirloc/app/filters/$c.py"
+done
+for c in upcase downcase trim; do printf 'from app.base import Command\nclass %sCommand(Command): pass\n' "$( cap "$c" )" > "$F/dirloc/app/strings/$c.py"; done
+for c in floor ceil round; do
+    printf 'from app.base import Command\n\n\nclass %sCommand(Command):\n    def run(self):\n        a = 1\n        b = 2\n        c = 3\n        return "%s"\n' "$( cap "$c" )" "$c" > "$F/dirloc/app/math/$c.py"
+done
+printf 'from .where import WhereCommand\nfrom .select import SelectCommand\nfrom .reject import RejectCommand\nfrom .uniq import UniqCommand\n' > "$F/dirloc/app/filters/__init__.py"
+printf 'ALL = [\n    "WhereCommand", "SelectCommand", "RejectCommand", "UniqCommand",\n    "UpcaseCommand", "DowncaseCommand", "TrimCommand",\n    "FloorCommand", "CeilCommand", "RoundCommand",\n]\n' > "$F/dirloc/app/registry.py"
+cp -R "$F/dirloc" "$F/dirneg"
+printf 'from .where import WhereCommand\n' > "$F/dirneg/app/filters/__init__.py"
+run dirloc "--for=add a new command" >"$TMP/r1.xml"
+b="$( block "$TMP/r1.xml" )"
+if printf '%s' "$b" | grep -q '<m n="\(Where\|Select\|Reject\|Uniq\)Command" p="app/filters/'; then ok "(r1) the typical member is a filter (the median size)"
+else no "(r1) typical: $( printf '%s' "$b" | head -c 400 )"; fi
+if printf '%s' "$b" | grep -q '<touch p="app/registry.py:[0-9]*"[^>]* share="10/10"[^>]*>[^<]*</touch><touch p="app/filters/__init__.py:[0-9]*" share="4/4" scope="dir">'; then
+    ok "(r1) filters/__init__.py: share=\"4/4\" scope=\"dir\", after the family-wide registry.py row"
+else no "(r1) dir-local row: $( touchrows "$TMP/r1.xml" | head -c 500 )"; fi
+if grep -q 'scope="dir"[^<]*<touch>: a file in the typical member' "$TMP/r1.xml"; then ok "(r1) the legend defines scope=\"dir\" when a row carries it"; else no "(r1) legend: scope=\"dir\" clause missing"; fi
+run dirneg "--for=add a new command" >"$TMP/r1n.xml"
+if [ -n "$( block "$TMP/r1n.xml" )" ] && ! grep -q 'scope="dir"' "$TMP/r1n.xml" && has_touch r1n "$TMP/r1n.xml" app/registry.py 10/10 | grep -q PASS; then
+    ok "(r1n) an aggregator naming one of its four members: no dir-local row, no scope=\"dir\" clause"
+else no "(r1n) $( touchrows "$TMP/r1n.xml" | head -c 400 )"; fi
+
+# r2 / r2n: RESIDUAL-2 Go contract lines. A registry of four plugin packages (gofx/plugins/registry.go); the typical entry (the first,
+# alpha) is named for its package plugins/alpha, whose alpha.go asserts three interfaces for Alpha (`&T{}`, `(*T)(nil)`, a `var (`
+# group's `T{}`) and one for a helper type; alpha_test.go asserts one more (a test file: not read).
+mkdir -p "$F/gofx/plugins"
+for p in alpha beta gamma delta; do
+    P="$( cap "$p" )"; mkdir -p "$F/gofx/plugins/$p"
+    printf 'package %s\n\nconst Name = "%s"\n\ntype %s struct{}\n\nfunc New() (*%s, error) { return &%s{}, nil }\n' "$p" "$P" "$P" "$P" "$P" > "$F/gofx/plugins/$p/$p.go"
+done
+cat >> "$F/gofx/plugins/alpha/alpha.go" <<'GO'
+
+type helper struct{}
+
+var _ fw.FilterPlugin = &Alpha{}
+var _ fw.ScorePlugin = (*Alpha)(nil) // checked by the compiler
+var (
+	_ fw.PreFilterPlugin = Alpha{}
+)
+var _ fw.Lister = &helper{}
+var answer = 42
+GO
+printf 'package alpha\n\nvar _ fw.TestOnlyPlugin = &Alpha{}\n' > "$F/gofx/plugins/alpha/alpha_test.go"
+printf 'package alpha\n' > "$F/gofx/plugins/alpha/extra.go" # asserts nothing: the r2u arm makes it unreadable
+cat > "$F/gofx/plugins/registry.go" <<'GO'
+package plugins
+
+type Registry map[string]func() (interface{}, error)
+
+func NewInTreeRegistry() Registry {
+	return Registry{
+		alpha.Name: alpha.New,
+		beta.Name:  beta.New,
+		gamma.Name: gamma.New,
+		delta.Name: delta.New,
+	}
+}
+GO
+run gofx "--for=add a new in-tree plugin" >"$TMP/r2.xml"
+b="$( block "$TMP/r2.xml" )"
+if printf '%s' "$b" | grep -q '\(</touch_list>\|<touch_list total="0"/>\)<asserts type="Alpha" p="plugins/alpha/alpha.go:11" n="3">fw.FilterPlugin fw.ScorePlugin fw.PreFilterPlugin</asserts></exemplar_family>' \
+   && ! printf '%s' "$b" | grep -q 'TestOnlyPlugin\|fw.Lister'; then ok "(r2) the typical entry's package asserts three interfaces for Alpha: <asserts type=\"Alpha\" n=\"3\">, after the touch list"
+else no "(r2) contract row: $( printf '%s' "$b" | head -c 600 )"; fi
+if grep -q '<asserts> (Go)' "$TMP/r2.xml"; then ok "(r2) the legend defines <asserts> when the row prints"; else no "(r2) legend: <asserts> clause missing"; fi
+if [ -n "$( block "$TMP/e_go.xml" )" ] && ! grep -q '<asserts' "$TMP/e_go.xml" && ! grep -q '<asserts> (Go)' "$TMP/e_go.xml"; then ok "(r2n) a Go registry whose packages assert nothing: no <asserts> row, no clause"
+else no "(r2n) e_go: $( block "$TMP/e_go.xml" | head -c 400 )"; fi
+# r2u / r2u0: a home Go file the contract scan cannot read makes n= a floor, never a silent total or a silent "none" (CodeRabbit
+# #600). r2u: extra.go unreadable, alpha.go still asserts three: n="3" floor="1" unread="1". r2u0: alpha.go itself unreadable, no
+# type asserts anything in what could be read: <asserts n="0" floor="1" unread="1"/>. The clean r2 run above carries neither.
+runc gofx "--for=add a new in-tree plugin" >"$TMP/r2uprime.xml"
+if unreadable "$F/gofx/plugins/alpha/extra.go"; then
+    runc gofx "--for=add a new in-tree plugin" >"$TMP/r2u.xml"; chmod 644 "$F/gofx/plugins/alpha/extra.go"
+    if block "$TMP/r2u.xml" | grep -q '<asserts type="Alpha" p="plugins/alpha/alpha.go:11" n="3" floor="1" unread="1">fw.FilterPlugin fw.ScorePlugin fw.PreFilterPlugin</asserts></exemplar_family>' \
+       && grep -qE 'unread=K on <asserts>|<asserts> floor="1" unread=K' "$TMP/r2u.xml"; then ok "(r2u) an unreadable package file: <asserts n=\"3\" floor=\"1\" unread=\"1\">, the legend says n= is a floor"
+    else no "(r2u) unreadable package file: $( block "$TMP/r2u.xml" | grep -o '<asserts.*' | head -c 400 )"; fi
+else
+    echo "  SKIP  (r2u) cannot make a file unreadable here (root?): the unread-contract arm did not run"
+fi
+if unreadable "$F/gofx/plugins/alpha/alpha.go"; then
+    runc gofx "--for=add a new in-tree plugin" >"$TMP/r2u0.xml"; chmod 644 "$F/gofx/plugins/alpha/alpha.go"
+    if block "$TMP/r2u0.xml" | grep -q '<asserts n="0" floor="1" unread="1"/></exemplar_family>' && ! grep -q '<asserts> (Go)' "$TMP/r2u0.xml" \
+       && grep -qE 'unread=K on <asserts>|<asserts> floor="1" unread=K' "$TMP/r2u0.xml"; then ok "(r2u0) the asserting file itself unreadable: <asserts n=\"0\" floor=\"1\" unread=\"1\"/>, not a silent none"
+    else no "(r2u0) unreadable asserting file: $( block "$TMP/r2u0.xml" | grep -o '</touch_list>.*\|<touch_list total="0"/>.*' | head -c 400 )"; fi
+else
+    echo "  SKIP  (r2u0) cannot make a file unreadable here (root?): the unread-contract arm did not run"
+fi
+if ! grep -qE 'unread=K on <asserts>|<asserts> floor="1" unread=K' "$TMP/r2.xml"; then ok "(r2u) positive twin: the clean r2 run carries no contract-unread clause"; else no "(r2u) twin: clean run carries the contract-unread clause"; fi
+
 # s1 / s2 / x1 / a1
 run ts "--for=add a new dialect" --json >"$TMP/s1.json"
 if [ -s "$TMP/s1.json" ] && ! grep -q 'exemplar_family' "$TMP/s1.json"; then ok "(s1) --json carries no block"; else no "(s1) --json"; fi
-run ts "--for=add a new dialect" --token-budget=4000 >"$TMP/s2.xml"
+# TOKEN-BUDGET-MONOTONE (2026-11-14): a budget holds the block only when the answer plus the block does not fit it (the old
+# 4000 held it at any budget; that answer fits 4000 whole now, so it comes back byte for byte, block and all): 100 forces the hold.
+run ts "--for=add a new dialect" --token-budget=100 >"$TMP/s2.xml" || no "(s2) the budgeted run exited $?"
 if grep -q '<exemplar_family of="dialect" held="budget"/></ctx>$' "$TMP/s2.xml" && ! grep -q '<m n=' "$TMP/s2.xml"; then ok "(s2) a token budget holds the block"
 else no "(s2) budget: $( grep -o '<exemplar_family.*' "$TMP/s2.xml" | head -c 300 )"; fi
 run ts "--for=add a new dialect" >"$TMP/a1.xml"
@@ -469,7 +802,7 @@ for line in sys.stdin:
 if [ -n "$( block "$TMP/a1.xml" )" ] && [ "$( block "$TMP/x1.xml" )" = "$( block "$TMP/a1.xml" )" ]; then ok "(x1) MCP for: the same element bytes"
 else no "(x1) MCP: $( block "$TMP/x1.xml" | head -c 300 )"; fi
 cp "$TMP/c1.xml" "$TMP/c1a.xml"
-for f in a1 s2 c1a e_goa l_full a2 a2f v4 u1 u2; do
+for f in a1 s2 c1a e_goa l_full a2 a2f v4 u1 u2 i1 i2 i3b i6 i7 i8 r1 r1n r2 r2u r2u0; do
     if [ ! -s "$TMP/$f.xml" ]; then echo "  SKIP  (a1) $f: the arm that writes it did not run"; continue; fi
     if python3 - "$TMP/$f.xml" <<'PY'
 import re, sys, xml.dom.minidom as M
@@ -480,7 +813,7 @@ legend = s[ i: s.index( "-->", i ) ]
 if "--" in legend[ 4: ]: sys.exit( "double hyphen in the legend" )
 m = re.search( r'(<exemplar_family .*?(?:/>|</exemplar_family>))</ctx>$', s, re.S )
 if not m: sys.exit( "the block does not close right before </ctx>" )
-for tag, attrs in re.findall( r'<(exemplar_family|m|touch_list|touch) ([^>]*?)/?>', m.group( 1 ) ):
+for tag, attrs in re.findall( r'<(exemplar_family|m|touch_list|touch|rows|asserts) ([^>]*?)/?>', m.group( 1 ) ):
     for a in re.findall( r'(\w+)="', attrs ):
         if not re.search( r'(?<![\w])' + a + r'=', legend ): sys.exit( "attribute %s= on <%s> is not in the legend" % ( a, tag ) )
 PY

@@ -67,6 +67,12 @@ CONCEPT="how does resolution work"
 #    the pre-routing golden (captured from plain subtoken+body). The DEFAULT run only ADDS a "[routed:
 #    subtoken+body …]" header note, so we compare the --no-route run (identical bytes) to the golden AND
 #    assert the DEFAULT run's ranking body matches by stripping just the header comment. ──────────────────
+# RE-PIN 2026-11-15 (NEXT-APOS-RAW): golden_for.xml 4303 -> 4293 B. Re-captured from the lane binary and checked mechanically:
+# the previous golden (== the main binary's output) with &apos; -> ' inside next= values and est_tokens "1647" -> "1643" is the
+# new golden byte for byte (nextverb.h leaves ' raw in a "-delimited attribute; the 10 bytes saved lower the price).
+# RE-PIN 2026-11-08 (lane R-DEDUP, stacked on SIZE-TRIM; rule 4): golden_for.xml 4318 -> 4311 B: the tail legend clause
+# (minus names a sigs row or the syms block shows), est_tokens, and the two tail rows (resolve.cpp, graph.cpp) whose names the
+# sigs rows all show print p= only.
 # RE-PIN 2026-10-18 (train 30, lane tail-sym merged; rule 4): golden_for.xml 4300 -> 4318 B (est_tokens "1643" -> "1650"),
 # re-captured from the merged binary and diffed by hand: the ONLY bytes that moved are the tail legend clause only: "first t p= alone" / "then t p= sym=" lose the `t p=` words and sym= reads "its top symbols by lens rank (a pointer, not the answer)".
 # RE-PIN 2026-10-15 (forbudget-soft round C, FOLD C; rule 4): golden_for.xml re-captured — the ONLY bytes that moved are the

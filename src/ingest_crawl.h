@@ -69,7 +69,7 @@ inline constexpr std::string_view kJbuilderExt = ".jbuilder";
 // The extent is EXACT, not headroom: it was 32 with 32 rows, .toml made it 33, .pyi made it 34 and the
 // .yml/.yaml pair made it 36, the .php/.phtml/.lua trio made it 40, the .ex/.exs pair made it 42, the
 // .rst/.adoc/.org/.mdx prose quartet made it 46, .dart made it 47, .kt made it 48, .hxx made it 49,
-// .gd made it 50, .astro made it 51, two later extensions made it 53, and Clojure's four make it 57. Sizing it to the row count makes
+// .gd made it 50, .astro made it 51, two later extensions made it 53, Clojure's four made it 57, and .proto makes it 58. Sizing it to the row count makes
 // `std::array<bool, kLangTable.size()> present` (the grammar-prewarm set,
 // below) exact too, and it turns "added a row and forgot the extent" into a compile error rather than a
 // silent drop.
@@ -101,7 +101,7 @@ inline constexpr std::string_view kJbuilderExt = ".jbuilder";
 // the latter a list item), so those files carry the file-level node alone and serve as ONE whole-file
 // unit. A heading detector per format is a later lane with its own measurement. `.mdx` is markdown with
 // JSX, which the block grammar already reads as html blocks (opaque). Gate: test/textdocscheck.sh.
-constexpr std::array<LangEntry, 57> kLangTable = {{
+constexpr std::array<LangEntry, 58> kLangTable = {{
     { ".cpp",  Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
     { ".cc",   Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
     { ".cxx",  Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
@@ -227,6 +227,8 @@ constexpr std::array<LangEntry, 57> kLangTable = {{
     { ".cljs", Lang::Clojure,    &tree_sitter_clojure,    "clojure"    },
     { ".cljc", Lang::Clojure,    &tree_sitter_clojure,    "clojure"    },
     { ".bb",   Lang::Clojure,    &tree_sitter_clojure,    "clojure"    },
+    // Protocol Buffers: message / enum / service / rpc / enum value definitions, no call edges (queries/proto/tags.scm).
+    { ".proto", Lang::Proto,     &tree_sitter_proto,      "proto"      },
     { ".md",   Lang::Markdown,   &tree_sitter_markdown,   ""           },   // Markdown DOC tier — headings/sections via extractMarkdown()'s custom tree walk; NO tags.scm (query stays "")
     { ".markdown", Lang::Markdown, &tree_sitter_markdown, ""           },   // sibling extension, same walk
     { ".rst",  Lang::Markdown,   &tree_sitter_markdown,   ""           },   // reStructuredText — read by ingest_rest.h, no parse with this grammar
@@ -1924,8 +1926,13 @@ private:
 
 CrawlResult collectSources( const char* rootDir, const std::vector<std::string>& excludeSubstr,
                             std::size_t maxFileBytes, std::string_view excludeLabel = {}, bool respectGitignore = true,
-                            memguard::Watch* memWatch = nullptr, IgnoreProbeSpeculation* ignoreSpeculation = nullptr )
+                            memguard::Watch* memWatch = nullptr, IgnoreProbeSpeculation* ignoreSpeculation = nullptr,
+                            warmsnap::TreeCapture* capture = nullptr )
 {
+    // `capture` (the warm snapshot's, warmsnap.h): every path this walk LOOKS at is handed over, so a later run can tell
+    // from their stat signatures alone that the walk would answer the same. A walk a replay cannot stand for says so.
+    warmsnap::TreeCapture  nobody;                                          // off: every seen.* call below is a test and a return
+    warmsnap::TreeCapture& seen = capture != nullptr ? *capture : nobody;
     std::vector<std::string>     out;
     std::vector<SkippedOversize> skipped;
     CrawlSkips                   skips;
@@ -1946,6 +1953,7 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
     // If the root is a regular file, index just that one file instead of refusing.
     if( fs::is_regular_file( root, ec ) && !ec )
     {
+        seen.unreplayable();   // a single-file root has no walk to replay
         // Process this single file through the same validation pipeline as directory walk would.
         const std::string name = root.filename().string();
         if( !isDenylistedName( name ) )
@@ -1979,11 +1987,13 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
     if( ec )
     {
         DISCLOSE( "ingest: cannot open root directory — empty result" );
+        seen.unreplayable();
         return { std::move( out ), std::move( skipped ), std::move( skips ) };
     }
 
     const GitIgnoreSet ignoreSet = probeIgnoreSet( rootDir, respectGitignore, skips.ignoreMode, ignoreSpeculation, rootReal );   // §N6-C
     SphinxTxtRoots     sphinxTxtRoots( os::program_path( root ) );
+    seen.root( os::program_path( root ) );
 
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/crawl: directory walk (stat + classify)" );
@@ -1992,10 +2002,12 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
         {
             if( memWatch != nullptr && memWatch->crawlShouldStop( entryCount++ ) )
             {
+                seen.unreplayable();
                 break;   // #350: the memory guard's crawl line — ingest() records the stop from the watch
             }
             if( ec )
             {
+                seen.unreplayable();
                 ec.clear();
                 continue;
             }
@@ -2037,6 +2049,7 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
             // prune noise/vendor/build subtrees entirely (a .gitignore-lite default denylist)
             if( it->is_directory( ec ) )
             {
+                seen.entry( *it, fullPath, /*follow=*/0 );
                 // The denylist itself now lives in ingest.h (kCrawlSkipDirs / isSkippedCrawlDir) so darkflags.h's
                 // CMake walk prunes exactly the same subtrees — see the note there.
                 bool skip = excluded;
@@ -2066,11 +2079,13 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
                 if( skip )
                 {
                     it.disable_recursion_pending();
+                    seen.ignoredDir( ignoredDir, fullPath );
                     recordDirPrune( skips, excluded, ignoredDir, *it, fullPath );   // §L1/§N6-C: see its header
                 }
                 continue;
             }
 
+            seen.entry( *it, fullPath, /*follow=*/1 );
             if( !it->is_regular_file( ec ) )
             {
                 continue;

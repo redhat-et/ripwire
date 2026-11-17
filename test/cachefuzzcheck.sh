@@ -13,7 +13,7 @@
 #
 # ── Part 1: v15 ingest-cache blob (loadCache) — DETERMINISTIC structured mutation table ────────────
 # Blob layout (native-endian, no padding — mirrors ingest_cache.h saveCache/openCacheFrame/loadCache):
-#   HEADER, 25 B:
+#   HEADER, 25 B (ONE number, in three python scopes below — see the note under HDR):
 #     [0:4)   u32 magic "CTPK"        [4:8)   u32 version (kCacheVersion)
 #     [8:12)  u32 parserVer           [12]    u8  kArtifactArch (endian|pointerWidth<<1)
 #     [13:21) u64 blobWriteNs         [21:25) u32 entryCount
@@ -172,6 +172,13 @@ def blob_checksum(data: bytes) -> int:
         h = ((h ^ lane[k]) * P) & M
     return h
 
+# THE HEADER SIZE IS ONE NUMBER IN THREE PLACES in this file — here, the tableSum slice in the famcnt arm below,
+# and the HDR/TRAILER/ENTRY triple further down (separate python heredocs, so separate scopes; each now names it
+# instead of spelling 25 inline). Getting it wrong does not make an arm fail loudly: the recomputed tableSum is
+# then taken over the wrong bytes, the WHOLE blob is refused, and a per-record arm reads `cached_records=0` as
+# "the guard did not fire" when the guard it was aiming at was never reached. Measured on a lane that moved the
+# header to 41 bytes: six arms went red and two more passed for the wrong reason. If kCacheHeaderBytes moves,
+# change all three.
 HDR      = 25   # header bytes: magic4 + ver4 + parserVer4 + arch1 + blobWriteNs8 + entryCount4
 TRAILER  = 24   # trailer bytes: tableOffset8 + entryCount4 + reserved4 + tableSum8
 ENTRY    = 32   # offset-table row: pathHash8 + recOffset8 + contentHash8 + recLength4 + recSum4
@@ -204,7 +211,7 @@ size_off  = hash_off + 8
 mtime_off = size_off + 8
 ctime_off = mtime_off + 8
 hd_off    = ctime_off + 8 + 24   # past ctimeNs and the six FileHealth u32s (v20 macroBlanked, v44 useBoundsBlanked): the v49 HEAD's family counts (defs first)
-nd_off    = hd_off + 8 * 4       # past the eight head family counts: the BODY's LEAN def-record count (readFileRecord's first count)
+nd_off    = hd_off + 9 * 4       # past the nine head family counts (v51): the BODY's LEAN def-record count (readFileRecord's first count)
 
 mutations = {}
 
@@ -263,7 +270,7 @@ mutations["huge_def_count_recomputed_checksum"] = mut_huge_defcount
 # record[0] refused). The head's counts are what the warm planner reserves from; the body's are what readFileRecord
 # reserves from; the two must agree and each must fit the record's own bytes. Mutants (a)-(d) are the review's.
 def head_count(slot):
-    return hd_off + 4 * slot          # defs refs incs binds ffis routeDefs routeUses constOpens
+    return hd_off + 4 * slot          # defs refs incs binds ffis routeDefs routeUses constOpens constructs (v51)
 def mut_huge_head_defcount(b):        # the planner's headCountsFit: reserve() never sees it
     p = bytearray(b[:payload_len]); struct.pack_into("<I", p, head_count(0), 0xFFFFFFF0); return with_recomputed_trailer(p)
 mutations["huge_head_def_count_recomputed_checksum"] = mut_huge_head_defcount
@@ -280,7 +287,7 @@ def mut_head_refcount_off_by_one(b):  # the same lie in another family (refs): h
     p = bytearray(b[:payload_len]); v = struct.unpack_from("<I", p, head_count(1))[0]; struct.pack_into("<I", p, head_count(1), v + 1); return with_recomputed_trailer(p)
 mutations["head_ref_count_plus_one_recomputed_checksum"] = mut_head_refcount_off_by_one
 def mut_head_zeroed(b):               # the head says factless while the body has rows
-    p = bytearray(b[:payload_len]); struct.pack_into("<8I", p, hd_off, 0, 0, 0, 0, 0, 0, 0, 0); return with_recomputed_trailer(p)
+    p = bytearray(b[:payload_len]); struct.pack_into("<9I", p, hd_off, 0, 0, 0, 0, 0, 0, 0, 0, 0); return with_recomputed_trailer(p)
 mutations["head_counts_zeroed_recomputed_checksum"] = mut_head_zeroed
 
 def mut_overflow_size(b):
@@ -576,6 +583,7 @@ python3 - "$GOOD" "$DISCDIR" <<'PYWRAP'
 import struct, sys
 good, outdir = sys.argv[1], sys.argv[2]
 b = open(good, "rb").read()
+HDR = 25   # the blob header; its own copy, because this heredoc is a separate python scope from the table above
 TABLE_OFF, N = struct.unpack_from("<QI", b, len(b) - 24)[0:2]
 def blob_checksum(data):
     P, M = 1099511628211, (1 << 64) - 1
@@ -595,7 +603,7 @@ for name, off in (("record_offset_near_u64_max", (1 << 64) - 16), ("record_range
     p = bytearray(b[:len(b) - 24])
     struct.pack_into("<Q", p, TABLE_OFF + 8, off)
     struct.pack_into("<I", p, TABLE_OFF + 24, 64)
-    tbl = bytes(p[:25]) + bytes(p[TABLE_OFF:TABLE_OFF + N * 32])
+    tbl = bytes(p[:HDR]) + bytes(p[TABLE_OFF:TABLE_OFF + N * 32])
     open("%s/%s.cache" % (outdir, name), "wb").write(bytes(p) + struct.pack("<QIIQ", TABLE_OFF, N, 0, blob_checksum(tbl)))
 PYWRAP
 for dname in record_range_overlaps_table record_offset_near_u64_max; do
@@ -994,7 +1002,7 @@ ENUM_OF = { "def.kind": "SymKind", "def.lang": "Lang", "ref.lang": "Lang", "ref.
 count = { e: enumerator_count(e) for e in set(ENUM_OF.values()) }
 
 blob = bytearray(open(good_path, "rb").read())
-HDR, TRAILER, ENTRY = 25, 24, 32
+HDR, TRAILER, ENTRY = 25, 24, 32   # the header (see the note on the first HDR above), the trailer, and one table row
 table_off, n = struct.unpack_from("<QI", blob, len(blob) - TRAILER)[0:2]
 sites = {}
 pmin = {}
@@ -1015,12 +1023,13 @@ for i in range(n):
         sites.setdefault(cls, (p, blob[p])); skip(1)
     def site32(cls, rel):                                                 # a u32 slot `rel` bytes ahead; p does not move
         sites.setdefault(cls, (p + rel, struct.unpack_from("<I", blob, p + rel)[0]))
-    s(); skip(4 * 8 + 6 * 4 + 8 * 4)                                      # path, hash/size/mtime/ctime, FileHealth (6 u32 since v44), head family counts (8 u32 since v49)
+    s(); skip(4 * 8 + 6 * 4 + 9 * 4)                                      # path, hash/size/mtime/ctime, FileHealth (6 u32 since v44), head family counts (8 u32 since v49, 9 since v51)
     for _ in range(u32()):                                                # defs (LEAN family: no subtoken rows)
         site32("def.ppAlt", 9 * 4); site32("def.params", 13 * 4)
         if "def.paramsMin" not in pmin and struct.unpack_from("<I", blob, p + 13 * 4)[0] >= 1:   # B2.2 pair rule: a def with params >= 1
             pmin["def.paramsMin"] = (p + 14 * 4, struct.unpack_from("<I", blob, p + 14 * 4)[0], struct.unpack_from("<I", blob, p + 13 * 4)[0])
         skip(15 * 4 + 6 + 2 * 4); site("def.kind"); site("def.lang"); s(); s(); skip(8)   # #150: +1 u8 (scopeRootsStd); cache v26: +2 u32 (fnScopeStart/End) before kind; cache v33: +1 u32 (paramsMin) after params
+        has_key = blob[p]; skip(1 + (8 if has_key else 0))               # cache v50: clone-key presence u8, then the u64 key when 1
     for _ in range(u32()):                                                # refs
         skip(4); site("ref.lang"); s(); skip(2); s(); site("ref.recv"); s(); skip(1); s(); s(); site("ref.role"); site32("ref.argCount", 4); skip(12); s(); s(); s(); s(); skip(1); site("ref.forwarded"); site("ref.trailingLambda")   # line, argCount, argCountKnown, viaArrow, #150's qualifierRootsStd, FE-A's memberCall u8 + memberRoot str, FE-B's memberPath + memberCtor + memberVia strs, memberFactory u8, fcall-forward's forwarded u8, #155's trailingLambda u8
     for _ in range(u32()):                                                # includes
@@ -1035,6 +1044,7 @@ for i in range(n):
         skip(8); site("routeuse.method"); s()
     for _ in range(u32()):                                                # const-opens
         skip(9); s()
+    skip(u32() * 9)                                                       # cache v51: construct hits (startByte, line u32; tag u8)
     if p != rec_off + rec_len:
         raise SystemExit(f"walker desynchronised from the record layout at entry {i}: ended at {p}, record ends at {rec_off + rec_len}")
 

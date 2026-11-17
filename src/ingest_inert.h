@@ -18,7 +18,7 @@ template<typename BoundaryOf>
 bool inInertRegion( TSNode node, BoundaryOf boundaryOf ) noexcept
 {
     std::size_t liveHoles = 0;
-    for( TSNode ancestor = ts_node_parent( node ); !ts_node_is_null( ancestor ); ancestor = ts_node_parent( ancestor ) )
+    for( TSNode ancestor = parentOf( node ); !ts_node_is_null( ancestor ); ancestor = parentOf( ancestor ) )
     {
         switch( boundaryOf( ancestor, node ) )
         {

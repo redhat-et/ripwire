@@ -347,11 +347,10 @@ inline std::string bodySlotSkippedXml( const IngestResult& ing, NodeId id, BodyS
     const Symbol&     s          = ing.symbols[id];
     const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
     const std::string path       = rootArg.empty() ? std::string( ing.files[s.fileId] ) : std::string( rw::sarif::rootRelativeUri( ing.files[s.fileId], rootPrefix ) );
-    std::vector<char> esc;
     std::string       x = "<bodies shown=\"0\" total=\"1\" capped=\"1\" pick=\"";
     x += kBodySlotPickNames[std::size_t( pick )];
     x += "\" next=\"";
-    x += escapeXml( nextFlag( "--expand=", path + ":" + std::to_string( s.line ) + ":" + s.name ), esc );   // quoted only where a shell would split it
+    appendNextValueXml( x, nextFlag( "--expand=", path + ":" + std::to_string( s.line ) + ":" + s.name ) );   // quoted only where a shell would split it; the one next= escaper
     x += "\"></bodies>";
     return x;
 }

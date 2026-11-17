@@ -922,6 +922,30 @@ inline std::string degradedParseNote( const IngestResult& ing, std::string_view 
            "grep pattern=\"" + cappedEcho( spelling ) + "\" shows the textual hits and marks such file rows parse_degraded=\"1\"";
 }
 
+// B31: the MCP wording of degradedscan.h's lexicalDefHit (selectorrefuse.h::lexicalDefClause words the same facts for
+// the CLI) — the line whose bytes define a name the index does not hold. "" when the scan found none.
+inline std::string lexicalDefNote( const IngestResult& ing, std::string_view spelling, const LexicalDefHit& hit )
+{
+    if( hit.capped )
+    {
+        return " — note: the lexical definition scan stopped at its budget, " + std::to_string( kLexicalDefScanFiles ) + " files or "
+             + std::to_string( kLexicalDefScanBytes >> 20 ) + " MiB, before reading every file, so this miss is not proof the bytes define nothing; grep pattern=\""
+             + cappedEcho( spelling ) + "\" lists its text uses";
+    }
+    if( !hit.found )
+    {
+        return {};
+    }
+    const std::string site = ing.files[ hit.fileIndex ] + ":" + std::to_string( hit.line );
+    if( hit.objectMacro )
+    {
+        return " — note: the name is an object-like macro, #define at " + site + ", and object-like macros on the C++ parse path "
+               "are not indexed, so this miss is not proof it is undefined; grep pattern=\"" + cappedEcho( spelling ) + "\" lists its text uses";
+    }
+    return " — note: the name is defined at " + site + " by a lexical read, in a file whose parse is DEGRADED (err_ratio=" + hit.errRatio
+         + "): the definition was not extracted, so this miss is not proof of a rename";
+}
+
 // The @FILE:LINE half: a spelling that is a line-seed gets the SAME fault diagnosis the CLI's selector
 // clause speaks (selectorrefuse.h::atSeedFaultClause — one sentence per AtFault value, shared verbatim so
 // the same fault is never described two ways across surfaces). "" for a non-@ spelling, and "" for a seed
@@ -943,13 +967,15 @@ inline std::string notFound( const IngestResult& ing, std::string_view noun, std
     { // a line-seed: the at-diagnosis is the actionable half; a symbol-name near-miss for '@f.cpp:12' is noise
         return msg + atSeedClause( ing, spelling );
     }
-    const std::string near = didYouMean( ing, spelling );
+    const LexicalDefHit defHit = lexicalDefHit( ing, spelling );
+    const std::string   defNote = lexicalDefNote( ing, spelling, defHit );
+    const std::string   near    = defHit.found ? std::string() : didYouMean( ing, spelling );   // the bytes define it: no near-miss
     if( !near.empty() && near != spelling )
     {
         msg += " (did you mean '" + near + "'?)";
     }
     if( !retryHint.empty() ) { msg += " — "; msg += retryHint; }
-    msg += degradedParseNote( ing, spelling );
+    msg += defHit.found ? defNote : degradedParseNote( ing, spelling ) + defNote;   // a capped scan adds its note after the degraded one
     return msg;
 }
 

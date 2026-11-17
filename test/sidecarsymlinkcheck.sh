@@ -431,7 +431,8 @@ xOpen="$( pgopens 'inline int openExclNoFollow(' )"
 eOpen="$( pgopens 'inline std::string randomTempSuffix(' )"
 pOpen="$( pgopens 'inline bool readWholeBeneathNoFollow(' )"
 pOpenAt="$( pgfn 'inline bool readWholeBeneathNoFollow(' | grep '::openat(' )"
-mOpen="$( pgopens 'inline std::optional<std::string> readRegularFileNoFollow(' )"
+mOpen="$( pgopens 'inline std::optional<RegularFileStream> openRegularFileNoFollow(' )"
+mRead="$( pgfn 'inline std::optional<std::string> readRegularFileNoFollow(' )"
 EXPECT_OPENS=6
 # The write open does NOT truncate. With O_TRUNC on the open, an existing regular sidecar was emptied before the
 # fstat check had looked at anything; the writer now truncates the descriptor with ftruncate, and only after fstat has
@@ -483,13 +484,16 @@ else
 fi
 # The metadata read (githarden's config candidates): one ::open carrying O_RDONLY|O_NOFOLLOW|O_NONBLOCK and an
 # fstat S_ISREG check, so a FIFO or other non-regular file at a candidate name is unreadable rather than a stall.
+# The open lives in openRegularFileNoFollow, which the large-file piece readers stream through too (CodeRabbit #665);
+# readRegularFileNoFollow opens only through it and has no ::open of its own.
 if [ "$( printf '%s\n' "$mOpen" | grep -c '::open(' )" = "1" ] && printf '%s' "$mOpen" | grep -q 'O_RDONLY' \
    && printf '%s' "$mOpen" | grep -q 'O_NOFOLLOW' && printf '%s' "$mOpen" | grep -q 'O_NONBLOCK' \
    && ! printf '%s' "$mOpen" | grep -qE 'O_WRONLY|O_CREAT|O_TRUNC' \
-   && pgfn 'inline std::optional<std::string> readRegularFileNoFollow(' | grep -q 'S_ISREG'; then
-    ok "pathguard: (f10) the metadata read is one ::open carrying O_RDONLY|O_NOFOLLOW|O_NONBLOCK, refusing a non-regular file by fstat"
+   && pgfn 'inline std::optional<RegularFileStream> openRegularFileNoFollow(' | grep -q 'S_ISREG' \
+   && printf '%s' "$mRead" | grep -q 'openRegularFileNoFollow( path )' && ! printf '%s' "$mRead" | grep -q '::open('; then
+    ok "pathguard: (f10) the metadata read opens through openRegularFileNoFollow: one ::open carrying O_RDONLY|O_NOFOLLOW|O_NONBLOCK, refusing a non-regular file by fstat"
 else
-    no "pathguard: (f10) expected one ::open in readRegularFileNoFollow with O_RDONLY|O_NOFOLLOW|O_NONBLOCK and an S_ISREG check — found: $( printf '%s' "$mOpen" | tr '\n' ' ' | head -c 240 )"
+    no "pathguard: (f10) expected readRegularFileNoFollow to open only through openRegularFileNoFollow, whose one ::open carries O_RDONLY|O_NOFOLLOW|O_NONBLOCK with an S_ISREG check — open: $( printf '%s' "$mOpen" | tr '\n' ' ' | head -c 200 ); read: $( printf '%s' "$mRead" | grep -E 'open' | tr '\n' ' ' | head -c 160 )"
 fi
 # No ::openat anywhere in the header follows a link.
 openatAll="$( grep -c '::openat(' "$PGCODE" | tr -d ' ' )"

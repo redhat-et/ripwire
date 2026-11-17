@@ -30,7 +30,7 @@
 // answer (gaps, bridge, near_sink) is unchanged — this file is never consulted there.
 
 #include "defattrib.h"   // defGroupsOf, pathHopSplitArm, pathHopOwners, emitPathHopRows — the one --path row emitter
-#include "filter.h"      // isTestSymbol, pathTierOf — the test twin's classifier
+#include "filter.h"      // pathDefInTests — the test twin's classifier
 #include "forowner.h"     // ownerQuestionWords, ownerFoldName — the question words (owner-hop's)
 #include "graph.h"       // edgeIndex, edgeNameOnly/edgeIsLink/edgeAnchorMiss/edgeViaImpl, reachRankBefore
 #include "memberowner.h"  // MemberOwners — an endpoint's owner, as its row prints it
@@ -99,6 +99,10 @@ struct PathPairs
     // N4 (rv-trace-ep): to= groups past kPathPairMaxDstGroups are not walked; the answer says so (pairs_unlisted= + next=) instead of
     // printing today's one chain as if it were the only pair. 0 = not capped. nextFrom/nextTo: the continuation's endpoints.
     std::size_t unlistedDstGroups = 0;
+    // PATH-AMBIG-VERDICT (nushell `--path=eval_call,run`: reachable="1" hops="1" beside pairs_unlisted="833"): on that unwalked
+    // answer the root's verdict is the NEAREST pair's (shortestPathAny: fewest hops over every from=/to= definition pair), not the
+    // pair the reader meant, so the root says so: nearest_of=K, K = from= groups x to= groups (site twins folded). 0 = walked.
+    std::size_t nearestOfPairs = 0;
     // to= groups no chain reaches past the kPathPairBridgeSearches searched: they got no bridge search, and the answer counts them
     // (bridges_unsearched=) instead of reading as if every unreached group had been tried. 0 = every unreached group was searched.
     std::size_t bridgesUnsearched = 0;
@@ -264,6 +268,7 @@ inline PathPairs pathReachingPairs( const IngestResult& ing, const Graph& g, std
     {
         // past the walk bound: today's answer, DISCLOSED (N4) — the first to= definition of another group is the continuation
         out.unlistedDstGroups = dstG.size();
+        out.nearestOfPairs    = srcG.size() * dstG.size();
         out.nextFrom          = today.front();
         for( std::size_t i = 0; i < dstDefs.size() && out.nextTo == kNoNode; ++i )
         {
@@ -465,7 +470,10 @@ inline constexpr std::string_view kPathPairBridgeCapLegend =
     "exist; qualify to= as file:name to search one. ";
 inline constexpr std::string_view kPathPairUnlistedLegend =
     "pairs_unlisted=G: to= names G definition groups, more than the 16 this answer walks, so only the one chain found is printed and "
-    "other reaching pairs are NOT listed; next= runs the same from= to another to= definition, or qualify to= as file:name. ";
+    "other reaching pairs are NOT listed; next= runs the same from= to another to= definition, or qualify to= as file:name. "
+    "nearest_of=K: so reachable=/hops=/from_p=/to_p= describe ONE of K from=/to= definition pairs, not a chosen one: the nearest one a single "
+    "search over all of them found, or the route a route_hedged= verdict prints in its place; whether the pair you mean reaches is NOT "
+    "answered; qualify both ends as file:name. ";
 // P1 PATH-ORDER: present only when a listed pair carries qword= (the ordering departed from the reach rank above)
 inline constexpr std::string_view kPathPairQwordLegend =
     "qword=WORD: that pair's from= owner equals a word of the path argument (FROM,TO as typed), else its to= owner when no pair's from= owner "
@@ -496,12 +504,7 @@ struct PathEndpointSide
     std::string_view        typed;
     bool                    bound = false;
 };
-// a definition in the test partition (filter.h isTestSymbol) or a fixture/bench/testdata directory (pathTierOf) — the two
-// classifiers the listing verbs already order by; nothing is re-derived here
-inline bool pathDefInTests( const IngestResult& ing, NodeId n ) noexcept
-{
-    return isTestSymbol( ing, n ) || pathTierOf( rootRelPath( ing, ing.symbols[n].fileId ) ) == PathTier::TestOrBench;
-}
+// pathDefInTests (the test class: a test symbol or a fixture/bench/testdata path) lives in filter.h beside its two classifiers
 // one side: `fired` = the bound def is in tests and a non-test DEFINITION (never a declaration) of the selector exists; `twin` =
 // the one of those that reaches the other endpoint's definitions (shortestPathAny: proven or hedged hops; a bridge-only def is
 // not a chain, so it is not named), kNoNode when none does
@@ -588,7 +591,7 @@ inline PathPairsXml pathPairsRootAttrs( const IngestResult& ing, const PathPairs
     PathPairsXml out;
     if( pp.unlisted() )
     {
-        out.rootAttrs = " pairs_unlisted=\"" + std::to_string( pp.unlistedDstGroups ) + "\"";
+        out.rootAttrs = " nearest_of=\"" + std::to_string( pp.nearestOfPairs ) + "\" pairs_unlisted=\"" + std::to_string( pp.unlistedDstGroups ) + "\"";
         if( pp.nextTo != kNoNode )
         {
             out.rootAttrs += nextAttrXml( nextFlag( "--path=", pathPairSelector( ing, pp.nextFrom, singleRoot, rootPrefix ) + ","
@@ -699,19 +702,21 @@ inline bool pathPairsAnyHop( const PathPairs& pp, Pred&& pred )
 
 // THE hop rows of a reached --path answer: the listed pairs, else today's single path (defattrib.h emitPathHopRows).
 inline void emitPathAnswerRows( std::FILE* out, const IngestResult& ing, const Graph& g, const PathPairs& pp, std::span<const NodeId> path,
-                                std::span<const std::string_view> owners, bool singleRoot, std::string_view rootPrefix, const HopFacts& hops )
+                                std::span<const std::string_view> owners, bool singleRoot, std::string_view rootPrefix, const HopFacts& hops,
+                                std::uint32_t declinedLastCands = 0 )
 {
     if( pp.active() )
     {
         emitPathPairs( out, ing, g, pp, singleRoot, rootPrefix, hops );
         return;
     }
-    emitPathHopRows( out, ing, g, path, owners, PathRowView{ singleRoot, rootPrefix, hops, HopShed::Full } );
+    emitPathHopRows( out, ing, g, path, owners, PathRowView{ singleRoot, rootPrefix, hops, HopShed::Full, declinedLastCands } );   // PATH-FEWEST-UNPROVEN
 }
 
 // HOP-CONTEXT-1: the edges emitPathAnswerRows prints, in the shape it prints them (pair 1 and today's single path in full,
 // later pairs site only; a bridge pair prints no hop rows) — the one input of the answer's single hopFacts() pass.
-inline std::vector<HopWant> pathHopWants( const PathPairs& pp, std::span<const NodeId> path )
+// `lastHopRef` != kHopNoRef: today's single path ends on a declined call (PATH-FEWEST-UNPROVEN), that call's reference — its row's site=.
+inline std::vector<HopWant> pathHopWants( const PathPairs& pp, std::span<const NodeId> path, std::uint32_t lastHopRef = kHopNoRef )
 {
     std::vector<HopWant> want;
     const auto add = [ & ]( std::span<const NodeId> rows, bool full )
@@ -724,6 +729,10 @@ inline std::vector<HopWant> pathHopWants( const PathPairs& pp, std::span<const N
     if( !pp.active() )
     {
         add( path, true );
+        if( !want.empty() )
+        {
+            want.back().pinRef = lastHopRef;
+        }
         return want;
     }
     for( std::size_t i = 0; i < pp.pairs.size() && i < kPathPairChains; ++i )
@@ -738,9 +747,12 @@ inline std::vector<HopWant> pathHopWants( const PathPairs& pp, std::span<const N
 }
 
 // The one call both --path transports make: the answer's hop facts, before its root is written (the root carries the disclosures).
-inline HopFacts pathHopFacts( const IngestResult& ing, const Graph& g, const PathPairs& pp, std::span<const NodeId> path, RedactCounts* redact )
+// `lastHopRef`: kHopNoRef, or the reference of the declined call today's single path ends on (PathRouteVerdict::declinedRef).
+inline HopFacts pathHopFacts( const IngestResult& ing, const Graph& g, const PathPairs& pp, std::span<const NodeId> path, RedactCounts* redact,
+                              std::uint32_t lastHopRef )
 {
-    return hopFacts( ing, g, pathHopWants( pp, path ), redact );   // no reader lent: hopFacts makes one for the answer
+    EXPECTS( lastHopRef == kHopNoRef || !pp.active(), "only a single-chain answer ends on a declined hop (pathRouteChains)" );
+    return hopFacts( ing, g, pathHopWants( pp, path, lastHopRef ), redact );   // no reader lent: hopFacts makes one for the answer
 }
 
 // What the answer's hop rows carry, for the legend: today's path, or every printed chain when pairs are listed — the CLI and
@@ -749,15 +761,17 @@ struct PathShownMarks
 {
     bool via = false, link = false, miss = false, split = false, owner = false, ownerContained = false;
 };
-inline PathShownMarks pathShownMarks( const IngestResult& ing, const Graph& g, const PathPairs& pp, std::span<const NodeId> path )
+// `lastHopDeclined`: today's single path ends on a declined call, whose row prints via="declined", never the graph edge's own marks.
+inline PathShownMarks pathShownMarks( const IngestResult& ing, const Graph& g, const PathPairs& pp, std::span<const NodeId> path, bool lastHopDeclined = false )
 {
     PathShownMarks m;
     const auto add = [ & ]( std::span<const NodeId> c )
     {
-        m.via   = m.via || pathHasNameOnlyHop( g, c );
-        m.link  = m.link || pathHasNameOnlyHop( g, c, kEdgeLink );
-        m.miss  = m.miss || pathHasNameOnlyHop( g, c, 0 );
-        m.split = m.split || pathEndpointBinding( g, 1, 1, c ).splitHop;
+        const std::span<const NodeId> edged = lastHopDeclined && !pp.active() && !c.empty() ? c.first( c.size() - 1 ) : c;   // the hops whose row reads its edge
+        m.via   = m.via || pathHasNameOnlyHop( g, edged );
+        m.link  = m.link || pathHasNameOnlyHop( g, edged, kEdgeLink );
+        m.miss  = m.miss || pathHasNameOnlyHop( g, edged, 0 );
+        m.split = m.split || pathEndpointBinding( g, 1, 1, edged ).splitHop;
         const MemberOwnerRows owners = memberOwnerRows( ing, c );   // the rows pathHopOwners prints, and whether a TS/JS owner was read by containment
         m.owner          = m.owner || owners.any;
         m.ownerContained = m.ownerContained || owners.contained;

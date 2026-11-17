@@ -14,6 +14,8 @@
 #include "infra/sortutil.h"  // svLess — JS/TS builtin-member tables below (binary_search, no signed-char wrap)
 #include "smallvec.h"   // rw::SmallVec — THE ONE ALIAS; the per-key span lists and per-file id buckets below
 #include "structlayout.h"   // cross-translation-unit sizeof/alignof tripwire for the shared model
+#include "refnames.h"   // rw::InternedText — Reference::calleeName / qualifier / recvVar (MEM-REF-SHRINK step 2)
+#include "infra/sharedOnce.h"   // rw::sharedOnce — RefColdFields::block, the cold text block made on its first write
 
 #include <algorithm>   // std::sort — symbolsByFile below; std::binary_search — isJsTsBuiltinMember
 #include <memory>      // IngestResult::rustCrateRoots — the per-run Rust crate-root table
@@ -29,6 +31,7 @@
 
 #if defined( CTX_USE_STD_MAP )
     #include <unordered_map>
+    #include <unordered_set>
 #else
     #include "unordered_dense.h"   // ankerl flat hash map — far faster than std::unordered_map
 #endif
@@ -37,14 +40,35 @@ namespace rw
 {
 
 // project-wide fast map alias — use HashMap<>, never std::unordered_map (flat, cache-friendly).
+// HashSet<> is its membership twin (HASHSET-ALIAS, owner 11-11): a table that only asks "is K in it" is a set, never a
+// HashMap<K, char|bool> whose value nobody reads — 8 B per u64 entry instead of 16, 4 per u32 instead of 8, the same
+// container family and the same insertion-order iteration (test/hashsetcheck.sh holds the line).
 #if defined( CTX_USE_STD_MAP )
 template<class K, class V> using HashMap = std::unordered_map<K, V>;
+template<class K> using HashSet = std::unordered_set<K>;
 #else
 template<class K, class V> using HashMap = ankerl::unordered_dense::map<K, V>;
+template<class K> using HashSet = ankerl::unordered_dense::set<K>;
 #endif
 
 using NodeId = std::uint32_t;
 inline constexpr NodeId kNoNode = 0xFFFFFFFFu;
+
+// G1d: a per-symbol label almost every symbol lacks (Graph::bindLabel, the JNI-decoded Java name of a `Java_*` def). Rows
+// are appended in ascending id order and binary-searched; an id with no row reads "". A dense vector<string> spent 24 B
+// on every symbol of a tree with one JNI export.
+struct SparseLabels
+{
+    std::vector<std::pair<NodeId, std::string>> rows;   // ascending id, one row per labelled symbol
+
+    bool empty() const noexcept { return rows.empty(); }
+    void add( NodeId id, std::string label ) { rows.emplace_back( id, std::move( label ) ); }   // callers walk ids ascending
+    std::string_view labelOf( NodeId id ) const noexcept
+    {
+        const auto row = std::lower_bound( rows.begin(), rows.end(), id, []( const std::pair<NodeId, std::string>& r, NodeId key ) { return r.first < key; } );
+        return row != rows.end() && row->first == id ? std::string_view( row->second ) : std::string_view{};
+    }
+};
 
 // symbol kind → the terse XML attribute (t="fn|method|cls|struct|iface|var|sec|macro|modscope|type|alias|functype").
 // Macro (the macro-edges round) is APPENDED before Other so no existing kind renumbers: a preprocessor
@@ -223,14 +247,18 @@ inline bool isUntestableOwner( SymKind kind ) noexcept
 // JVM-bridged to Java via graph.h's langCompatible (mirroring the existing Cpp<->ObjC and Cpp<->C
 // bridges) so a mixed Kotlin+Java module (the Android norm) resolves calls across the language
 // boundary instead of dropping every one of them as unresolved.
-enum class Lang : std::uint8_t { Cpp, Python, TypeScript, Go, Rust, Swift, ObjC, Markdown, JavaScript, Bash, Java, Ruby, Unknown, Json, CSharp, C, Toml, Yaml, Php, Lua, Elixir, Dart, Kotlin, GDScript, Clojure };
+// Proto (25, PROTO-INDEX) is appended AFTER Clojure: a Protocol Buffers schema is an interface definition, not code
+// (isCodeLang false): message / enum / service / rpc / enum value definitions, no call sites, lang-incompatible with
+// every language, so a generated Rust or Go name never binds to it as a proven edge (forreexport.h's gen rung links
+// it by name, hedged).
+enum class Lang : std::uint8_t { Cpp, Python, TypeScript, Go, Rust, Swift, ObjC, Markdown, JavaScript, Bash, Java, Ruby, Unknown, Json, CSharp, C, Toml, Yaml, Php, Lua, Elixir, Dart, Kotlin, GDScript, Clojure, Proto };
 // The number of Lang enumerators. MUST stay ( last enumerator + 1 ): any per-language array sized by
 // a LITERAL silently drops the tail when a language is appended, and the drop is invisible because
 // the affected code paths just see a zero. That happened: nonlocalstate.h's filesByLang was a
 // hardcoded 16 while Php(18), Lua(19) and Elixir(20) existed, so --nonlocal-state never disclosed
 // those three as unanalyzed even though kUnanalyzedLangs listed Php and Lua. Size per-language
 // arrays with this, never with a number.
-inline constexpr std::size_t kLangCount = static_cast<std::size_t>( Lang::Clojure ) + 1;
+inline constexpr std::size_t kLangCount = static_cast<std::size_t>( Lang::Proto ) + 1;
 // ...and the cache readers validate every cached Lang byte against it, so a stale kLangCount would also refuse
 // the new language's records. The compile-time proof (infra/enumcount.h) makes the append a build error instead.
 static_assert( enumCountIsExact<Lang, kLangCount>(), "kLangCount must name the LAST Lang enumerator — move it with the append" );
@@ -241,7 +269,7 @@ inline constexpr bool isDocLang( Lang l ) noexcept
     return l == Lang::Markdown;
 }
 
-// short lang label — the terse XML/JSON attribute (lang="cpp|py|ts|go|rs|swift|objc|js|sh|java|rb|md|json|cs|c|toml|yaml|php|lua|ex|dart|kt|gd|clj").
+// short lang label — the terse XML/JSON attribute (lang="cpp|py|ts|go|rs|swift|objc|js|sh|java|rb|md|json|cs|c|toml|yaml|php|lua|ex|dart|kt|gd|clj|proto").
 // The canonical home for this switch: previously duplicated privately in htmlexport.h, moved here so a THIRD
 // caller (naming-consistency's per-language vote groups) reuses it instead of growing a second copy.
 /// Return the stable short output label for a language, or "?" for an unknown value.
@@ -274,6 +302,7 @@ inline constexpr const char* langTag( Lang l ) noexcept
         case Lang::Kotlin:     return "kt";
         case Lang::GDScript:   return "gd";
         case Lang::Clojure:    return "clj";
+        case Lang::Proto:      return "proto";
         case Lang::Unknown:    return "?";
     }
     return "?";   // a byte past the enum (a corrupt cache value) still reads "?"; a NEW Lang is a -Werror=switch error above
@@ -293,7 +322,7 @@ inline constexpr bool isCodeLang( Lang l ) noexcept
         case Lang::ObjC: case Lang::JavaScript: case Lang::Bash: case Lang::Java: case Lang::Ruby: case Lang::CSharp:
         case Lang::C: case Lang::Php: case Lang::Lua: case Lang::Elixir: case Lang::Dart: case Lang::Kotlin: case Lang::GDScript: case Lang::Clojure:
             return true;
-        case Lang::Markdown: case Lang::Json: case Lang::Toml: case Lang::Yaml: case Lang::Unknown:
+        case Lang::Markdown: case Lang::Json: case Lang::Toml: case Lang::Yaml: case Lang::Proto: case Lang::Unknown:
             return false;
     }
     return false;   // a byte past the enum (a corrupt cache value) is not a language
@@ -947,7 +976,13 @@ struct Symbol
     // extraction bit), in ingest_model.h::markExtentSuspects — never persisted itself, so a rule change needs no
     // parser bump. Rows stay; surfaces DISCLOSE it as extent_suspect="name,head,scope,error" and --hotspots keeps
     // a flagged def's complexity out of its ranking. Takes the last free pad byte (the static_assert below holds).
-    std::uint8_t  extentSuspect = 0;
+    // Four bits are enough: extentsuspect.h defines four reasons (name/head/scope/error); the other half of the byte is rankFlags.
+    std::uint8_t  extentSuspect : 4 = 0;
+    // RANK FLAGS (DOCS-UNITS-FIX; gate test/docsunitscheck.sh arm H): a packed per-symbol flag word, the kRankFlag* bits below the
+    // struct: which readers may rank or name this def (an HTML section unit: --recall only). Set by ingest when it makes the def
+    // (RawDef::rankFlags), never cached: the doc post-pass that sets it runs on every load. The high half of extentSuspect's byte, so
+    // Symbol does not grow (the static_assert below holds).
+    std::uint8_t  rankFlags : 4 = 0;
     std::string   name;                // final identifier segment
     std::string   scope;               // enclosing class/namespace name (C++), for canonical scope::name resolution; "" if none
 };
@@ -989,6 +1024,26 @@ struct Symbol
 // 4 bits were free. A u16 field would have cost a full 8 B (64 -> 72: extentSuspect had taken the last pad byte).
 static_assert( sizeof( Symbol ) == 64 + 2 * sizeof( std::string ),
                "Symbol size changed — verify the new field uses the smallest type + is grouped (SoA); see model.h" );
+
+// Symbol::rankFlags bits (a 4-bit field: two bits left). An HTML section unit (ingest_docpass.h pushHtmlUnitDefs) carries both: --recall
+// reads it, nothing else ranks or names it. A .proto definition (langfacts.h generatedSchema) carries kRankFlagNotLexRanked alone: out of
+// --for's statistics but still a definition --defs lists (RANK-PROTO; ingest_model.h assignSymbols sets it from the lang on every load).
+//   kRankFlagNotLexRanked: out of every lexical ranking lens (--for, MCP `for`, --query, pack-task): no corpus statistics (document
+//     frequency, average length, symbol count), no score, no route name, no route carrier, no mention-anchor target (lexical.h, mention.h).
+//   kRankFlagNotNamed: no name binds it: no call edge (graph.h byName), no bare-name resolution (resolveAllByName/Qualified: --callers,
+//     --defs, the --for caller hop; a file-qualified selector still reaches it), no markdown-link heading target, no PageRank prior,
+//     and the map's symbols= does not count it.
+inline constexpr std::uint8_t kRankFlagNotLexRanked = 1u << 0;
+inline constexpr std::uint8_t kRankFlagNotNamed     = 1u << 1;
+inline constexpr std::uint8_t kRankFlagRecallOnly   = kRankFlagNotLexRanked | kRankFlagNotNamed;
+inline bool notLexRanked( const Symbol& s ) noexcept
+{
+    return ( s.rankFlags & kRankFlagNotLexRanked ) != 0;
+}
+inline bool notNamed( const Symbol& s ) noexcept
+{
+    return ( s.rankFlags & kRankFlagNotNamed ) != 0;
+}
 
 // INDEX-ALIAS-CONST (src/aliasdef.h): where an alias definition's WRITTEN TARGET starts, when the target ends the declaration —
 // C++ `using X = Y;` / `namespace L = lib;` (a TS arm is carded,
@@ -1139,7 +1194,67 @@ inline PyKwArgs pyKwArgsOf( std::string_view composeRel ) noexcept
     return out;
 }
 
-struct Reference
+// MEM-REF-SHRINK: the five text members most references leave empty (Stage 0 counts, reports/mem-ref-shrink.md: non-empty on
+//   0-13 % of the references of envoy, cockroach and vscode each) live in ONE block a reference owns only when it has one, so a
+//   Reference / RawRef carries an 8 B pointer instead of five string headers (120 B on libc++, 160 B on libstdc++). memberRoot is
+//   NOT here: Go and TS receivers fill it on half the references. Reads go through the accessors (an empty string when the
+//   block is absent); writes through setX (any text: string, view or literal; an empty one allocates nothing) or XMut. Value semantics: a copy copies the block.
+//   The cache record is unchanged: writeRef / readRef read and write the same five strings in the same order.
+// MEM-R1b: the five are 4 B pool ids (infra/internedtext.h), so a block is 20 B in a 32 B malloc bucket instead of 120 B in a 128 B
+//   one, on every ABI. Every text here is a name, a written path or type, a slot as written or a short mark (`k3o`, `.provide`,
+//   kCppElementMark + a container), never a byte position, so a server's pool still grows only with distinct texts. An accessor
+//   still returns `const std::string&`: the pool's text, which never moves.
+struct RefColdText
+{
+    rw::InternedText fieldName;
+    rw::InternedText composeRel;
+    rw::InternedText memberPath;
+    rw::InternedText memberCtor;
+    rw::InternedText memberVia;
+};
+static_assert( sizeof( RefColdText ) == 20, "five pool ids: see the MEM-R1b note above" );
+inline const std::string kNoRefColdText{};   // what every accessor returns without a block (constant-initialised: no guard)
+class RefColdFields
+{
+public:
+    RefColdFields() noexcept = default;
+    RefColdFields( const RefColdFields& other ) : cold_( other.cold_ ? std::make_unique<RefColdText>( *other.cold_ ) : nullptr ) {}
+    RefColdFields& operator=( const RefColdFields& other )
+    {
+        if( this != &other ) { cold_ = other.cold_ ? std::make_unique<RefColdText>( *other.cold_ ) : nullptr; }
+        return *this;
+    }
+    RefColdFields( RefColdFields&& ) noexcept            = default;
+    RefColdFields& operator=( RefColdFields&& ) noexcept = default;
+    ~RefColdFields()                                     = default;
+
+    bool hasColdBlock() const noexcept { return cold_ != nullptr; }   // RIPWIRE_STATS counts the rows that carry a block
+    const std::string& fieldName() const noexcept { return cold_ ? cold_->fieldName.str() : kNoRefColdText; }
+    const std::string& composeRel() const noexcept { return cold_ ? cold_->composeRel.str() : kNoRefColdText; }
+    const std::string& memberPath() const noexcept { return cold_ ? cold_->memberPath.str() : kNoRefColdText; }
+    const std::string& memberCtor() const noexcept { return cold_ ? cold_->memberCtor.str() : kNoRefColdText; }
+    const std::string& memberVia() const noexcept { return cold_ ? cold_->memberVia.str() : kNoRefColdText; }
+
+    void setFieldName( std::string_view value ) { setText( &RefColdText::fieldName, value ); }
+    void setComposeRel( std::string_view value ) { setText( &RefColdText::composeRel, value ); }
+    void setMemberPath( std::string_view value ) { setText( &RefColdText::memberPath, value ); }
+    void setMemberCtor( std::string_view value ) { setText( &RefColdText::memberCtor, value ); }
+    void setMemberVia( std::string_view value ) { setText( &RefColdText::memberVia, value ); }
+
+    // emitReferences: a RawRef's block moves into its Reference whole (one pointer, no string moves).
+    void takeColdFrom( RefColdFields& other ) noexcept { cold_ = std::move( other.cold_ ); }
+
+private:
+    RefColdText& block() { return rw::sharedOnce( cold_, [] { return std::make_unique<RefColdText>(); } ); }
+    void setText( rw::InternedText RefColdText::* slot, std::string_view value )
+    {
+        if( cold_ || !value.empty() ) { block().*slot = value; }
+    }
+    std::unique_ptr<RefColdText> cold_;
+};
+static_assert( sizeof( RefColdFields ) == sizeof( void* ), "one pointer per reference: the whole point of the split" );
+
+struct Reference : RefColdFields
 {
     NodeId        fromSymbol = kNoNode;   // enclosing symbol (caller); kNoNode if file-scope
     std::uint32_t fileId     = 0;
@@ -1169,11 +1284,12 @@ struct Reference
                                           //   graph.h::keepStdQualifiedCandidates, alongside Symbol::scopeRootsStd. false (the safe default) on
                                           //   every bare/unqualified call and on every non-Cpp language (ObjC gets no `qualifier` at all today —
                                           //   see keepStdQualifiedCandidates' stated floor — so this stays false there too, by construction).
-    std::string   calleeName;             // referenced name (final identifier segment)
-    std::string   qualifier;              // explicit scope at the call site (`A` in `A::b()`); "" if bare/method — for canonical resolve
-    std::string   recvVar;                // receiver variable identifier when recv==NamedVar/FieldOfVar (`x` in `x->m()`); "" otherwise — for Rule 2
+    bool          memberCall = false;     // FE-A: a Go/JS/TS/Rust/C call written on a receiver (`x.f()`), whose recv stays None; see memberRoot below
+    rw::InternedText calleeName;          // referenced name (final identifier segment)
+    rw::InternedText qualifier;           // explicit scope at the call site (`A` in `A::b()`); "" if bare/method — for canonical resolve
+    rw::InternedText recvVar;             // receiver variable identifier when recv==NamedVar/FieldOfVar (`x` in `x->m()`); "" otherwise — for Rule 2
                                           //   A Ruby receiver the code BUILDS leaves it empty: its type is memberCtor/memberVia (rubyTypedRecvOf).
-    std::string   fieldName;              // member variable name when isCompose (e.g. "m_pool"); ALSO the INTERMEDIATE
+    // fieldName() (RefColdFields): member variable name when isCompose (e.g. "m_pool"); ALSO the INTERMEDIATE
                                           //   field of a depth-2 chained receiver when recv is FieldOfThis/FieldOfVar
                                           //   (`this->m_pool.run()` → "m_pool") — the two are mutually exclusive
                                           //   (a compose ref is never a call ref, and the compose readers all gate
@@ -1186,15 +1302,16 @@ struct Reference
                                           //   A fourth reading, on a Rust CALL reference (role Call, recv None): the whole qualifier a path call
                                           //   is written with when it has more than one segment (`crate::far` for `crate::far::helper()`), ""
                                           //   otherwise (ingest_names.h rustWrittenQualifier; read through rustWrittenQualifierOf below).
-    std::string   composeRel;             // "creates" (value/inline) or "uses" (reference/pointer) when isCompose; "" otherwise
+                                          //   RUST-MACRO-PATH: a Rust MACRO reference carries the same reading (ingest_names.h rustMacroPathOf,
+                                          //   `$crate` read as `crate`; a `use … as` alias's path, ingest_model.h retargetRustMacroAliases).
+    // composeRel() (RefColdFields): "creates" (value/inline) or "uses" (reference/pointer) when isCompose; "" otherwise
     // FE-A (test/falseedgecheck.sh): Go, JS/TS, Rust and C record no receiver SHAPE for a member call — `x.f()`, `JSON.parse()`,
     //   `h.render()`, C's `ops->open()` keep recv == None, exactly like a bare `f()` (ingest_binds.h receiverOf: widening recv would move every
     //   recv==None guard). These two fields tell the shapes apart WITHOUT touching recv: memberCall is true when the callee
     //   is the field of a member access, and memberRoot is the receiver chain's ROOT identifier as written (`crypto` for
     //   `crypto.subtle.verify()`, `this`, a package alias), "" when the root is not an identifier (a call, a literal,
     //   `new X()`). Read only by graph.h's FalseEdgeRules. false/"" for every other language and every non-call ref.
-    bool          memberCall = false;
-    std::string   memberRoot;
+    rw::InternedText memberRoot;   // MEM-R1a: a 4 B pool id like the three above (a name, an alias, a scope path: never a position)
     // FE-B (test/receiverevidencecheck.sh): the rest of a member call's receiver chain, for the receiver-evidence rule
     //   (graph.h ReceiverEvidence). memberPath is the member names BETWEEN memberRoot and the callee, '.'-joined —
     //   "bucket" for `this.bucket.listSchemas()`, "req.raw.headers" for `ctx.req.raw.headers.get()`, "" for `root.m()`.
@@ -1210,12 +1327,11 @@ struct Reference
     //   record and a composeRel "elem" field record carry the std container's whole written text here (ingest_relations.h
     //   stdElementContainerText). Rust (lane L6): an `impl Trait for T` inherit ref carries the trait's path as written when it is
     //   qualified (`render::Renderer`, generic arguments dropped), "" for a bare trait name (ingest_relations.h rustImplVisitNode).
-    std::string   memberPath;
-    std::string   memberCtor;
+    // memberPath() and memberCtor() (RefColdFields) hold the two texts above.
     // FE-B on #373: a Ruby receiver the code BUILDS (`User.new`, a finder, a FactoryBot build, a let or local holding one)
     //   carries its type here, out of band: memberCtor = the class's constant as written (or the factory name when
     //   memberFactory), memberVia = the method that built it. recvVar is then empty. Read through rubyTypedRecvOf.
-    std::string   memberVia;
+    // memberVia() (RefColdFields) holds it.
     bool          memberFactory = false;
     // lane fcall-forward fix 1 (test/fcallforwardcheck.sh N7 N8 N10 N11 H): a JS/TS call reference the value-ref walk
     //   FORWARDED from `f.call( … )` / `f.apply( … )` (ingest_valuerefs.h forwardCallAt) — it stands for the bare call
@@ -1234,7 +1350,18 @@ struct Reference
     //   memberCall is false there, so no member-call reader sees it. graph.h's implementors builder reads both (baseEvidence).
     //   Sits in memberFactory's alignment padding: sizeof(Reference) is unchanged.
     std::uint32_t baseBind = 0;
+    // MEM-R1a, a REGISTRAR Value ref only (model.h kRegLangs form ProviderRecord, ingest_valuerefs.h emitValueRef): 1 + the start byte
+    //   of the object literal the pair is read from, 0 = none. regindex.h collectProviderSites pairs a literal's key and value through
+    //   ( fileId, litAt ). It was the qualifier's "@<offset>" tail, a position-keyed pooled text (refnames.h GROWTH); the cache record
+    //   still spells it that way (writeRef / readRef), so the blob is unchanged.
+    std::uint32_t litAt = 0;
 };
+// MEM-REF-SHRINK: the row budget, so a new member pays for its bytes on purpose. Four 4 B pool ids (calleeName, qualifier, recvVar,
+// memberRoot: step 2 and MEM-R1a, infra/internedtext.h), the cold block's pointer, 44 B of ids, counts and flags and litAt: exactly
+// 64 B, one row per 64 B line, on every ABI (no std::string member is left, so libc++, libstdc++ and MSVC agree; step 2 80 B on
+// libc++, step 1 144, before it 264). A new member, or a flag placed where it adds a padding slot, fails here; move cold text into
+// RefColdText, or a name into rw::InternedText, instead.
+static_assert( sizeof( Reference ) == 64, "Reference is one 64 B row: see the MEM-REF-SHRINK note above" );
 // The sentinels Reference::baseBind holds besides a real binding (1 + a name byte): ONE definition for the writer (ingest_relations.h
 // localBaseBinding) and every reader (graph.h provenBasesOf, valuerefindex.h inheritEdges / ClassFamilies::bindBase).
 inline constexpr std::uint32_t kBaseBindNone          = 0;            // no enclosing scope declares the name
@@ -1247,8 +1374,8 @@ static_assert( kBaseBindTemplateParam < kBaseBindUnknown, "the readers test `>= 
 // references only (graph.h W3, receiverevidence.h rustRule3Proves): another language's call keeps a receiver's field here.
 inline std::string_view rustWrittenQualifierOf( const Reference& r ) noexcept
 {
-    const bool whole = r.role == RefRole::Call && r.recv == RecvKind::None && !r.isCompose && !r.isInherit && !r.fieldName.empty();
-    return whole ? std::string_view( r.fieldName ) : std::string_view( r.qualifier );
+    const bool whole = ( r.role == RefRole::Call || r.role == RefRole::Macro ) && r.recv == RecvKind::None && !r.isCompose && !r.isInherit && !r.fieldName().empty();
+    return whole ? std::string_view( r.fieldName() ) : std::string_view( r.qualifier );
 }
 
 // ONE rule for every reader of the reference table that counts a call SITE (train 30, fcall-forward nit N1): a FORWARDED
@@ -1280,11 +1407,11 @@ struct RubyTypedRecv
 // the type a Ruby reference's receiver was built as, or nullopt for every other reference
 inline std::optional<RubyTypedRecv> rubyTypedRecvOf( const Reference& r ) noexcept
 {
-    if( r.lang != Lang::Ruby || r.memberCtor.empty() || r.memberVia.empty() )
+    if( r.lang != Lang::Ruby || r.memberCtor().empty() || r.memberVia().empty() )
     {
         return std::nullopt;
     }
-    return RubyTypedRecv { r.memberCtor, r.memberVia, r.memberFactory };
+    return RubyTypedRecv { r.memberCtor(), r.memberVia(), r.memberFactory };
 }
 
 // RSpec's targets (test/rubyrspectargetcheck.sh, parser version 133): inside an example group, the receiver-less builder
@@ -1413,6 +1540,19 @@ struct ConstOpen
     std::uint32_t endByte       = 0;
     bool          namespaceOnly = false;
     std::string   written;                // the name as written: `Base`, `App::Audited`, `::Top`
+};
+
+// QD-CONSTRUCTS-AT-INGEST: one --quality-delta construct hit (an error-masking block or a handler / placeholder
+// shape), found in the parse worker from the tree ingest already built and carried in the file's cache record, so
+// a warm --quality-delta reads and parses no file to count them. `tag` indexes lintrules.h's construct-tag table
+// (constructTagName): a kErrorMaskRules row, then the five kShape* walk tags. Same fields as lintrules.h ErrorMaskHit,
+// with the id packed to a byte.
+struct ConstructHit
+{
+    std::uint32_t fileId    = 0;
+    std::uint32_t startByte = 0;
+    std::uint32_t line      = 0;
+    std::uint8_t  tag       = 0;
 };
 
 // P2-D Rule 2 LOCAL-VARIABLE TYPE BINDING (`var : typeName`) captured at ingest. One record per
@@ -1808,17 +1948,20 @@ struct Binding
                                           //   declarations) from its scope's start. See suppressShadowedReferences.
                                           //   ES/Elixir bindings also use spans as documented in LocalBindKind.
                                           //   {0,0} on a scope-less shadow capture (contains nothing).
-    std::string   var;                    // the declared variable identifier (`x`)
-    std::string   importedName;           // JsImport: the requested export name; never a global-name fallback.
+    rw::InternedText var;                 // the declared variable identifier (`x`). MEM-B1 BIND-INTERN: the three texts are 4 B ids
+                                          //   into the reference names' pool (refnames.h), so a Binding is nine u32 (see the pin below)
+    rw::InternedText importedName;        // JsImport: the requested export name; never a global-name fallback.
                                           //   Type/ParamType: the written type WHOLE when it is qualified, else "".
                                           //   JsExport: the LOCAL name the exported spelling binds (empty when
                                           //   the two are identical). Elixir: see LocalBindKind's field contracts.
-    std::string   typeName;               // kind==Type: the written type's final segment (`Foo`), resolved to a
+    rw::InternedText typeName;            // kind==Type: the written type's final segment (`Foo`), resolved to a
                                           //   class in buildGraph. kind==FnDecl/FnAssign: the bound FUNCTION
                                           //   name as written minus `&` (`alpha`, `ns::alpha`), or a sentinel.
 };
-static_assert( sizeof( Binding ) == 6 * sizeof( std::uint32_t ) + 3 * sizeof( std::string ),
-               "Binding's scalars are five u32, a u8 kind, a bool and two u8 in 24 bytes — the four ride one u32 slot" );
+// MEM-B1 BIND-INTERN: 36 B on every ABI (96 B on libc++ with three std::string, 120 B on libstdc++). Six u32 of scalars (five u32,
+// a u8 kind, a bool and two u8 riding one u32 slot) and three 4 B pool ids: no member's size depends on the standard library, so
+// the pin is exact everywhere. A std::string member fails it; intern the text (rw::InternedText) instead.
+static_assert( sizeof( Binding ) == 9 * sizeof( std::uint32_t ), "Binding grew: see the MEM-B1 note above" );
 
 // R5 cross-language FFI binding alias. A language-binding DECLARATION found in a C/C++ file (or a
 // ctypes-handle assignment in a Python file) that makes a C/C++ definition reachable under a DIFFERENT
@@ -2208,9 +2351,17 @@ struct IngestResult
                                                // every symbol splice re-offsets it like fnLocalScopes (workspace.h mergeWorkspaceIngests, editpreview.h previewMerge)
     std::vector<FnLocalScope> fnLocalScopes;   // one row per Symbol::fnLocal def, ascending id: the span of the function
                                                // whose body binds its name (SoA side table: Symbol has no byte left for it)
+    std::vector<std::uint64_t> cloneKeys;      // CLONES-PERSIST: size symbols.size() when built (ingest_model.h assignSymbols), else empty:
+                                               // a Function/Method body's exact-clone key (clones.h cloneBodyKey), 0 = none. findClones
+                                               // groups by it with no file I/O and reads a body's file only to key a 0 or to verify a
+                                               // shared key; a size mismatch (an IngestResult built without it) makes it read every file.
     std::vector<Reference>   references;   // unresolved calls
     std::vector<Include>     includes;     // #include / import directives (physical dependencies)
     std::vector<ConstOpen>   constOpens;   // parser version 82: Ruby class/module opens, for the constant index (resolve.h)
+    std::vector<ConstructHit> constructHits;   // QD-CONSTRUCTS-AT-INGEST: every file's construct hits, any order (lintrules.h findQualityConstructs sorts)
+    std::size_t constructHitsForFiles = SIZE_MAX;   // == files.size() when constructHits covers EVERY file (a whole parse pool, no memory
+                                                    // cut); anything else (a merged, preview or partial IngestResult) makes the reader
+                                                    // re-parse the tree for them, exactly as before the hits were carried
     std::vector<Binding>     bindings;     // P2-D Rule 2: local var→type bindings (`Foo x;`), for receiver-var narrowing
     std::vector<BindingAlias> bindingAliases;  // R5: cross-language FFI binding declarations (pybind/extern-C/ctypes)
     std::vector<RouteDef>    routeDefs;     // B6.3: HTTP server-side route registrations (unresolved handler names)
@@ -2421,6 +2572,14 @@ inline bool isMacroBlankedHealth( const FileHealth& health ) noexcept
 inline bool isUseBoundsBlankedHealth( const FileHealth& health ) noexcept
 {
     return health.useBoundsBlanked > 0;
+}
+
+// How many symbols carry a kRankFlag* bit (`flag`, one bit or several: any of them counts). The ranked corpus a lens or the map
+// reads is symbols.size() less this: lexical.h routeCarrierCap and lexicalScoresNameExactTiered (kRankFlagNotLexRanked), serialize.h
+// mapSymbolCount (kRankFlagNotNamed). 0 on an index without such units, the historical sizes.
+inline std::size_t symbolsWithRankFlag( const IngestResult& ing, std::uint8_t flag ) noexcept
+{
+    return std::size_t( std::ranges::count_if( ing.symbols, [ flag ]( const Symbol& s ) { return ( s.rankFlags & flag ) != 0; } ) );
 }
 
 // ...and its corpus count: macro_blanked_files= on the map and --json headers (the skipped verb's root counts the same rows).

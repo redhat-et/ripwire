@@ -15,6 +15,10 @@
 //   * <s … ctor="Owner::new"> rows: the callers of each shown candidate owner's constructor (a member of the candidate's scope
 //     named as the language spells a constructor — forctorhop.h ctor_detail::isCtorName, plus Rust `new`), non-test, at most kForDispatchCtorRows in all —
 //     where a candidate's type is made, which is where the choice is decided;
+//   * <s held="member|local" of= n= p=file:line>declaration</s> rows (DISPATCH-HELD-AS) for a shown candidate whose type NO non-test
+//     constructor call makes: the by-value declarations holding it (a C++ field, `RealDiskInterface disk_interface_;` in NinjaMain;
+//     a function's local), non-test, at most kForDispatchHeldRows per call — a value member is built with its owner, so its declaration
+//     is where the choice is decided;
 //   * the candidate's body when exactly ONE non-test candidate exists (the implementation production code can run there).
 // Hedged by construction: the rows are the declined list, never an edge (which one runs is unproven) — nothing enters a reaches=
 // set, and a call the resolver bound or declined for another reason (ladder, builtin, std) carries no element.
@@ -27,16 +31,20 @@
 
 #include "callhierarchy.h"   // oneHopCallerRows — the callers verb's rows
 #include "declinedsites.h"   // declinedSitesMadeBy, orderDeclinedSites
+#include "filetext.h"        // FileTextCache — a held-as row's declaration line
 #include "filter.h"          // isTestSymbol
 #include "forcallerhop.h"    // appendCallerHopRow / CallerHopRowCtx — the caller hop's <s> row
 #include "forctorhop.h"     // ctor_detail::isCtorName — the language-gated constructor spelling
 #include "forfold.h"         // fold_detail::renderOneBody
+#include "infra/namesplit.h" // namesplit::isIdentChar — the one identifier-byte test
 #include "langfacts.h"       // langFacts( lang ).structuralTyping
 #include "graph.h"
 #include "memberowner.h"
 #include "model.h"
 #include "nextverb.h"
 #include "receiverevidence.h"   // ReceiverEvidence::callableKind
+#include "redact.h"          // redactInPlace — a held-as row's text is source text
+#include "resolve.h"         // trimWs
 #include "sarif.h"           // rootRelativeUri
 #include "serialize.h"       // escapeXml
 
@@ -57,6 +65,8 @@ namespace rw
 inline constexpr std::size_t kForDispatchHopRows  = 8;   // candidate rows per call
 inline constexpr std::size_t kForDispatchCtorRows = 4;   // constructor-caller rows per call
 inline constexpr std::size_t kForDispatchSites    = 2;   // calls per answer (a task naming more is a different question)
+inline constexpr std::size_t kForDispatchHeldRows = 2;   // held-as declaration rows per call (DISPATCH-HELD-AS)
+inline constexpr std::size_t kForDispatchHeldText = 160; // bytes of one declaration line printed (a runaway guard: a cut line ends in "…", capped="1")
 
 inline bool forDispatchHopOn()
 {
@@ -68,10 +78,13 @@ inline constexpr std::string_view kForDispatchHopLegend =
     "receiver, which the resolver declined: s t= n= p=file:line rows are the implementations that can run there (cands= the in-tree "
     "candidates, shown= of them, test= test doubles not shown (test code, or a type only test code names), floor=1 the language types structurally so an unlisted "
     "implementation can run too, which one runs is unproven, never an edge), s ctor= rows call that candidate "
-    "type's constructor (where it is made), one shown candidate carries its body b (never when floor=1), capped=1 if cut, next= lists every definition";
+    "type's constructor (where it is made), s held=member|local rows when no constructor call makes a candidate type: the by-value declarations that hold it "
+    "(member: a field, n=Owner::field, local: a variable of function n=), of= that type, the declaration line as text, two per call, "
+    "one shown candidate carries its body b (never when floor=1), capped=1 if cut, next= lists every definition";
 inline constexpr std::string_view kForCompactDispatchHopLegend =
     "; dispatch call= in= p=: a task-named call declined at an interface/trait receiver, s rows the implementations that can run "
-    "(unproven which), cands= in-tree shown= test= doubles floor=1 unlisted ones can run, s ctor= rows make that type, one candidate: its body b, capped=1 if cut, next= every definition";
+    "(unproven which), cands= in-tree shown= test= doubles floor=1 unlisted ones can run, s ctor= rows make that type, s held=member|local of=: no ctor call, the "
+    "by-value field (n=Owner::field) or local (n= its function) holding that type, line as text, two per call, one candidate: its body b, capped=1 if cut, next= every definition";
 static_assert( kForDispatchHopLegend.find( ';', 1 ) == std::string_view::npos && kForCompactDispatchHopLegend.find( ';', 1 ) == std::string_view::npos
                    && kForDispatchHopLegend.find( "--" ) == std::string_view::npos && kForCompactDispatchHopLegend.find( "--" ) == std::string_view::npos,
                "one clause each, and no \"--\": it rides inside an XML comment" );
@@ -427,6 +440,224 @@ inline std::vector<NodeId> dispatchOwnerCtors( const IngestResult& ing, NodeId c
     return out;
 }
 
+// DISPATCH-HELD-AS (residual pass 11-12, card 4): a candidate type no constructor CALL makes is often held BY VALUE — ninja's
+// `RealDiskInterface disk_interface_;`, a member of NinjaMain, built with its owner; a `Foo local;` in a function — and that
+// declaration is where the choice is decided. These rows name it with its line as text; a pointer or reference (an injected
+// dependency, made elsewhere), a parameter, a test file or test symbol is no row. The member reading comes from the C++ HAS-A
+// capture (isCompose, composeRel "creates": by value); the local one from a role=Type use whose line is a by-value declaration.
+struct HeldAsRow
+{
+    NodeId        cand;   // the candidate whose owner type the row holds
+    NodeId        from;   // the class (member) or the function (local)
+    std::uint32_t ref;    // ing.references index: its file
+    bool          member;
+    std::uint32_t line = 0;   // its 1-based line (dispatchHeldAs fills it)
+};
+namespace dispatch_detail
+{
+// A by-value declaration of `type` STARTING the (trimmed) line: optional `const`/`static`/`mutable` words and a `ns::` qualifier,
+// the type word, an identifier, then `;` `(` `{` `=` or `[`. `Foo* p;`, `Foo& r = x;`, `Foo<T> v;` and `int f(Foo x)` are not.
+inline bool byValueDecl( std::string_view line, std::string_view type ) noexcept
+{
+    line = trimWs( line );
+    for( const std::string_view w : { std::string_view( "const " ), std::string_view( "static " ), std::string_view( "mutable " ) } )
+    {
+        if( line.starts_with( w ) )
+        {
+            line = trimWs( line.substr( w.size() ) );
+        }
+    }
+    const std::size_t at = line.find( type );
+    if( at == std::string_view::npos || ( at > 0 && !line.substr( 0, at ).ends_with( "::" ) ) )
+    {
+        return false;
+    }
+    if( at > 0 && !std::ranges::all_of( line.substr( 0, at ), []( char c ) { return namesplit::isIdentChar( c ) || c == ':'; } ) )
+    {
+        return false;
+    }
+    std::size_t i = at + type.size();
+    if( i < line.size() && namesplit::isIdentChar( line[i] ) )
+    {
+        return false;   // a longer name (`FooBar`)
+    }
+    while( i < line.size() && line[i] == ' ' )
+    {
+        ++i;
+    }
+    const std::size_t nameAt = i;
+    while( i < line.size() && namesplit::isIdentChar( line[i] ) )
+    {
+        ++i;
+    }
+    if( i == nameAt || std::isdigit( static_cast<unsigned char>( line[nameAt] ) ) )
+    {
+        return false;
+    }
+    while( i < line.size() && line[i] == ' ' )
+    {
+        ++i;
+    }
+    return i < line.size() && std::string_view( ";({=[" ).find( line[i] ) != std::string_view::npos;
+}
+// One source line, or "" when the file is unreadable, changed since indexing or shorter than `line`.
+inline std::string_view sourceLine( FileTextCache& text, std::uint32_t fid, std::uint32_t line )
+{
+    const std::string* t = text.text( fid );
+    if( t == nullptr || text.stale( fid ) || line == 0 )
+    {
+        return {};
+    }
+    const std::span<const std::uint32_t> starts = text.lineStarts( fid );
+    if( line > starts.size() )
+    {
+        return {};
+    }
+    const std::size_t b = starts[ line - 1 ];
+    std::size_t       e = line < starts.size() ? starts[ line ] : t->size();
+    while( e > b && ( ( *t )[ e - 1 ] == '\n' || ( *t )[ e - 1 ] == '\r' ) )
+    {
+        --e;   // the line without its end: trimWs keeps a newline
+    }
+    return std::string_view( *t ).substr( b, e - b );
+}
+// A reference's 1-based line: its own, or (a HAS-A member record stores none) the line holding its start byte; 0 when unreadable.
+inline std::uint32_t refLine( FileTextCache& text, const Reference& r )
+{
+    if( r.line != 0 )
+    {
+        return r.line;
+    }
+    if( text.text( r.fileId ) == nullptr || text.stale( r.fileId ) )
+    {
+        return 0;
+    }
+    const std::span<const std::uint32_t> starts = text.lineStarts( r.fileId );
+    return std::uint32_t( std::ranges::upper_bound( starts, r.startByte ) - starts.begin() );
+}
+inline bool productionSite( const IngestResult& ing, const Reference& r )
+{
+    return r.fromSymbol != kNoNode && r.fromSymbol < ing.symbols.size() && !isTestPath( rootRelPath( ing, r.fileId ) ) && !isTestSymbol( ing, r.fromSymbol );
+}
+}   // namespace dispatch_detail
+
+// The held-as rows of the candidates `bare` (their owners have no non-test constructor caller): members first, then locals, each in
+// reference order, one row per (file, line). ONE scan of the reference table for every owner asked about.
+inline std::vector<HeldAsRow> dispatchHeldAs( const IngestResult& ing, std::span<const NodeId> bare, FileTextCache& text )
+{
+    std::vector<HeldAsRow> members, locals;
+    if( bare.empty() )
+    {
+        return members;
+    }
+    std::vector<std::string_view> typeOf;   // each bare candidate's owner type: its scope's last segment
+    for( const NodeId c : bare )
+    {
+        const std::string_view scope = ing.symbols[c].scope;
+        typeOf.push_back( scope.substr( scope.find_last_of( ".:" ) == std::string_view::npos ? 0 : scope.find_last_of( ".:" ) + 1 ) );
+    }
+    // A short type name two class-like definitions carry (a::Reader beside b::Reader; a symbol's scope keeps no namespace) is
+    // ambiguous: a declaration of it cannot say which type it holds, so such a candidate takes no held row (floors, not guesses).
+    std::vector<const Symbol*> ownerDef( bare.size(), nullptr );
+    std::vector<char>          ambiguous( bare.size(), 0 );
+    for( const Symbol& s : ing.symbols )
+    {
+        if( !ReceiverEvidence::classLike( s.kind ) )
+        {
+            continue;
+        }
+        for( std::size_t k = 0; k < bare.size(); ++k )
+        {
+            if( s.name != typeOf[k] || s.lang != ing.symbols[ bare[k] ].lang )
+            {
+                continue;
+            }
+            const Symbol*& first = ownerDef[k];
+            ambiguous[k] |= first != nullptr && ( first->fileId != s.fileId || first->line != s.line );
+            first = first == nullptr ? &s : first;
+        }
+    }
+    for( std::uint32_t i = 0; i < ing.references.size(); ++i )
+    {
+        const Reference& r = ing.references[i];
+        const bool       asMember = r.isCompose && r.composeRel() == "creates" && !r.fieldName().empty();
+        const bool       asLocal  = !r.isCompose && r.role == RefRole::Type;
+        if( ( !asMember && !asLocal ) || r.isDocLink || !dispatch_detail::productionSite( ing, r ) )
+        {
+            continue;
+        }
+        for( std::size_t k = 0; k < bare.size(); ++k )
+        {
+            const NodeId  c  = bare[k];
+            const Symbol& cs = ing.symbols[c];
+            if( r.calleeName != typeOf[k] || r.lang != cs.lang )
+            {
+                continue;
+            }
+            if( ambiguous[k] != 0 )
+            {
+                break;   // two types carry this short name: the declaration names neither for sure
+            }
+            const Symbol& from = ing.symbols[ r.fromSymbol ];
+            if( asMember && ReceiverEvidence::classLike( from.kind ) )
+            {
+                members.push_back( { c, r.fromSymbol, i, true } );
+            }
+            else if( asLocal && ReceiverEvidence::callableKind( from.kind ) && from.scope != cs.scope
+                     && dispatch_detail::byValueDecl( dispatch_detail::sourceLine( text, r.fileId, r.line ), r.calleeName ) )
+            {
+                locals.push_back( { c, r.fromSymbol, i, false } );
+            }
+            break;
+        }
+    }
+    members.insert( members.end(), locals.begin(), locals.end() );
+    std::vector<HeldAsRow> out;
+    for( HeldAsRow h : members )
+    {
+        const Reference& r = ing.references[ h.ref ];
+        h.line             = dispatch_detail::refLine( text, r );
+        if( h.line != 0 && std::ranges::none_of( out, [ & ]( const HeldAsRow& o ) { return ing.references[ o.ref ].fileId == r.fileId && o.line == h.line; } ) )
+        {
+            out.push_back( h );
+        }
+    }
+    return out;
+}
+
+// One <s held= of= n= p=file:line>declaration line</s> row (the line redacted like any served source, then cut at kForDispatchHeldText
+// on a UTF-8 boundary, ending in "…"). True when the line was cut: the element then says capped="1".
+inline bool appendHeldAsRow( std::string& x, const IngestResult& ing, const MemberOwners& owners, const HeldAsRow& h, FileTextCache& text,
+                             std::string_view rootArg, RedactCounts* redact, std::vector<char>& esc )
+{
+    const Reference& r    = ing.references[ h.ref ];
+    const Symbol&    from = ing.symbols[ h.from ];
+    std::string      line( trimWs( dispatch_detail::sourceLine( text, r.fileId, h.line ) ) );
+    redactInPlace( line, redact );   // BEFORE the cut: a secret crossing byte kForDispatchHeldText must reach the redactor whole
+    const bool cut = line.size() > kForDispatchHeldText;
+    if( cut )
+    {
+        std::size_t at = kForDispatchHeldText;
+        while( at > 0 && ( static_cast<unsigned char>( line[at] ) & 0xC0 ) == 0x80 )
+        {
+            --at;   // never split a UTF-8 sequence
+        }
+        line.resize( at );
+        line += "\xE2\x80\xA6";   // "…": the reader sees where the text stops
+    }
+    const std::string_view rp = rootArg.empty() ? std::string_view( ing.files[ r.fileId ] ) : sarif::rootRelativeUri( ing.files[ r.fileId ], rootArg );
+    x += h.member ? "<s held=\"member\" of=\"" : "<s held=\"local\" of=\"";
+    x += escapeXml( r.calleeName, esc );
+    x += "\" n=\"";
+    x += escapeXml( h.member ? qualifiedMemberName( owners, from ) + "::" + r.fieldName() : qualifiedMemberName( owners, from ), esc );
+    x += "\" p=\"";
+    x += escapeXml( rp, esc );
+    x += ':' + std::to_string( h.line ) + "\">";
+    x += escapeXml( line, esc );
+    x += "</s>";
+    return cut;
+}
+
 // `withBody` false: the MCP `for` twin, which serves no inline body (its bodies ride by fetch_body handle) — rows only.
 inline DispatchHopRender renderForDispatchHop( const IngestResult& ing, const Graph& g, std::span<const std::uint32_t> sites, const BodyFoldInputs& bodyIn,
                                                bool withBody = true )
@@ -435,6 +666,7 @@ inline DispatchHopRender renderForDispatchHop( const IngestResult& ing, const Gr
     std::vector<char>     esc;
     const MemberOwners    owners( ing );
     const CallerHopRowCtx rc{ ing, owners, bodyIn.rootArg, esc };
+    FileTextCache         text( ing );
     for( const std::uint32_t site : sites )
     {
         const Reference&              r     = ing.references[ g.declinedSiteRef[ site ] ];
@@ -450,14 +682,21 @@ inline DispatchHopRender renderForDispatchHop( const IngestResult& ing, const Gr
         // where each shown candidate's type is made: the callers of its constructors, non-test, deduped, capped over the call
         std::vector<std::pair<NodeId, NodeId>> made;   // (caller, ctor)
         std::size_t                            madeTotal = 0;
+        std::vector<NodeId>                    bare;      // shown candidates no non-test constructor call makes (DISPATCH-HELD-AS)
         for( std::size_t i = 0; i < shown; ++i )
         {
+            bool madeByProduction = false;
             for( const NodeId ctor : dispatchOwnerCtors( ing, prod[i] ) )
             {
                 const std::vector<NodeId> ctorTargets{ ctor };
                 for( const NodeId caller : oneHopCallerRows( ing, g, ctorTargets ) )
                 {
-                    if( isTestSymbol( ing, caller ) || std::ranges::any_of( made, [ & ]( const auto& m ) { return m.first == caller; } ) )
+                    if( isTestSymbol( ing, caller ) )
+                    {
+                        continue;
+                    }
+                    madeByProduction = true;
+                    if( std::ranges::any_of( made, [ & ]( const auto& m ) { return m.first == caller; } ) )
                     {
                         continue;
                     }
@@ -468,6 +707,18 @@ inline DispatchHopRender renderForDispatchHop( const IngestResult& ing, const Gr
                     }
                 }
             }
+            if( !madeByProduction && !ing.symbols[ prod[i] ].scope.empty() )
+            {
+                bare.push_back( prod[i] );
+            }
+        }
+        const std::vector<HeldAsRow> held      = dispatchHeldAs( ing, bare, text );
+        const std::size_t            heldShown = std::min( held.size(), kForDispatchHeldRows );
+        std::string                  heldXml;   // rendered before the head: a cut declaration line sets capped="1"
+        bool                         heldCut = false;
+        for( std::size_t i = 0; i < heldShown; ++i )
+        {
+            heldCut |= appendHeldAsRow( heldXml, ing, owners, held[i], text, bodyIn.rootArg, bodyIn.redact, esc );
         }
         const Symbol&          caller = ing.symbols[ g.declinedSiteCaller[ site ] ];
         // a structurally typed language (TS/JS/Go): the candidate list is a floor, an unlisted object literal / type can run too
@@ -490,7 +741,7 @@ inline DispatchHopRender renderForDispatchHop( const IngestResult& ing, const Gr
             x += " floor=\"1\"";
         }
         x += " capped=\"";
-        x += ( shown < prod.size() || made.size() < madeTotal ) ? "1" : "0";
+        x += ( shown < prod.size() || made.size() < madeTotal || heldShown < held.size() || heldCut ) ? "1" : "0";
         x += '"';
         x += nextAttrXml( nextFlag( "--whereis=", r.calleeName ) );
         x += '>';
@@ -502,6 +753,7 @@ inline DispatchHopRender renderForDispatchHop( const IngestResult& ing, const Gr
         {
             appendCallerHopRow( x, rc, who, std::string( " ctor=\"" ) + std::string( escapeXml( qualifiedMemberName( owners, ing.symbols[ ctor ] ), esc ) ) + '"' );
         }
+        x += heldXml;
         if( withBody && prod.size() == 1 && !isFloor )   // a floor list names no single implementation
         {
             if( const std::optional<std::string> body = fold_detail::renderOneBody( bodyIn, prod.front() ) )

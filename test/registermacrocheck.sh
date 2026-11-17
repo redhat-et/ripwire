@@ -358,5 +358,267 @@ printf '%s' "$DC8B_TAG" | grep -q 'config-warnings=' \
     && { no "arm8: a genuinely-used register_macros= name still warned as inert"; printf '%s\n' "$DC8B_TAG"; } \
     || ok "arm8: a genuinely-used config name draws no warning (negative control)"
 
+# ── ARM 9: Rust test-harness registration, via --quality-delta (issue #493) ──────────────────────────────
+# A #[test] (or #[tokio::test…]) function is called by the test harness, and no line in the tree names it, so the
+# name-based call graph sees zero callers. The attribute sits ABOVE the item, outside the signature text the macro
+# check reads, so it needed its own rule (quality.h rustTestAttributed). Positive shapes must be exempt; each
+# negative lookalike must still be flagged: an attribute inside a comment, '#[testing]', '#[tested]', a `#[test]` that only
+# sits in a trailing // comment (`static X: u32 = 1; // used to be #[test]`), a dead fn placed directly after a #[test] item,
+# and an ordinary dead fn. A one-line `#[test] fn ...` and a #[test] indented inside `#[cfg(test)] mod tests { }` are positives.
+# A test attribute written after code on the same line (`const A: u32 = 1; #[test]`) is a positive too (lane land-499-500):
+# Rust's grammar attaches an outer attribute to the next item whatever precedes it on the line, so that fn IS a harness
+# test. The ingest's syntactic testScope bit (quality.h testRunnerInvokedSymbol, QD-TEST-DEAD) exempts it; the text scan
+# (rustTestAttributed) does not read it, so it is not in register-macro-excluded= (the count stays the eight it reads).
+A9="$WORK/a9"; newrepo "$A9"
+cat > "$A9/lib.rs" <<'EOF'
+fn live_helper() -> u32 { 1 }
+EOF
+commit "$A9" "baseline: no tests yet"
+cat > "$A9/lib.rs" <<'EOF'
+fn live_helper() -> u32 { 1 }
+
+#[test]
+fn plain_case() { assert_eq!(live_helper(), 1); }
+
+#[tokio::test(flavor = "current_thread")]
+async fn flavored_case() { assert_eq!(live_helper(), 1); }
+
+#[inline]
+#[test]
+fn stacked_case() { assert_eq!(live_helper(), 1); }
+
+#[test]
+
+fn blank_line_case() { assert_eq!(live_helper(), 1); }
+
+#[test]
+/// A documented harness case: the doc line sits between the attribute and the item.
+fn doc_comment_case() { assert_eq!(live_helper(), 1); }
+
+#[test] fn one_line_case() { assert_eq!(live_helper(), 1); }
+
+#[cfg(test)] mod tests {
+    #[test]
+    fn indented_in_test_mod() { assert_eq!(live_helper(), 1); }
+}
+
+#[testing]
+fn testing_attribute_is_not_a_test() { }
+
+// #[test]
+fn commented_attribute_is_not_a_test() { }
+
+#[tested]
+fn tested_attribute_is_not_a_test() { }
+
+const A: u32 = 1; #[test]
+fn attribute_after_code_case() { }
+
+static X: u32 = 1; // used to be #[test]
+fn really_dead() { }
+
+#[test]
+fn test_is_here() { assert_eq!(live_helper(), 1); }
+fn dead_after_test_attribute() { }
+
+fn dead_plain() { }
+EOF
+QD9="$( cd "$A9" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"
+rc_qd9=$?
+if [ "$rc_qd9" = 0 ]; then ok "arm9: --quality-delta exits 0 (no row on this fixture gates)"; else no "arm9: --quality-delta exited $rc_qd9, not 0"; fi
+for sym in plain_case flavored_case stacked_case blank_line_case doc_comment_case one_line_case indented_in_test_mod test_is_here attribute_after_code_case; do
+    printf '%s' "$QD9" | grep -q "kind=\"dead-code\" sym=\"$sym\"" \
+        && no "arm9: '$sym' is a #[test] function but was reported as dead-code" \
+        || ok "arm9: '$sym' (#[test] shape) excluded from dead-code"
+done
+for sym in testing_attribute_is_not_a_test commented_attribute_is_not_a_test tested_attribute_is_not_a_test really_dead dead_after_test_attribute dead_plain; do
+    printf '%s' "$QD9" | grep -q "kind=\"dead-code\" sym=\"$sym\"" \
+        && ok "arm9: '$sym' (negative lookalike) still flagged" \
+        || { no "arm9: '$sym' should still be flagged — the test-attribute exemption leaked"; printf '%s\n' "$QD9" | grep -oE 'sym="[^"]*"' | head -12; }
+done
+printf '%s' "$QD9" | grep -q 'kind="dead-code" sym="live_helper"' \
+    && no "arm9: live_helper (called from tests) wrongly reported" \
+    || ok "arm9: live_helper (called from the tests) not reported"
+printf '%s' "$QD9" | grep -q 'register-macro-excluded="8"' \
+    && ok "arm9: register-macro-excluded=\"8\" (the eight #[test] functions the text scan reads)" \
+    || { no "arm9: register-macro-excluded count wrong"; printf '%s\n' "$QD9" | grep -oE 'register-macro-excluded="[0-9]*"'; }
+
+# ── ARM 10: a test attribute with no item after it must not break the scan ─────────────────────────────
+A10="$WORK/a10"; newrepo "$A10"
+printf 'fn live() -> u32 { 1 }\n\n#[test]\n' > "$A10/lib.rs"
+commit "$A10" "a dangling test attribute at end of file"
+"$BIN" "$A10" --quality-delta --no-cache >/dev/null 2>&1; RC10=$?
+# 0 = clean, 2 = a gating finding; anything else (a signal, an abort) is the crash this arm guards against.
+if [ "$RC10" -eq 0 ] || [ "$RC10" -eq 2 ]; then ok "arm10: a dangling #[test] at end of file does not crash the scan (exit $RC10)"
+else no "arm10: a dangling #[test] at end of file made ripwire exit $RC10"; fi
+
+# ── ARM 11: a trailing // comment after a test attribute (issue #499 review) ───────────────────────────────
+# Rust reads `#[test] // case` as `#[test]` followed by a comment, so the harness still registers the fn and the
+# exemption must hold. A `//` inside an attribute's string argument is text, not a comment: the
+# `#[tokio::test(flavor = "http://x")]` shape stays exempt with no trailing comment at all. A trailing comment on a
+# NON-test attribute changes nothing: `#[testing] // note` stays flagged, and so does an ordinary dead fn.
+A11="$WORK/a11"; newrepo "$A11"
+printf 'fn live_helper() -> u32 { 1 }\n' > "$A11/lib.rs"
+commit "$A11" "baseline for the trailing-comment arms"
+cat >> "$A11/lib.rs" <<'EOF'
+
+#[test] // regression case
+fn trailing_comment_case() { assert_eq!(live_helper(), 1); }
+
+#[tokio::test(flavor = "current_thread")] // harness case
+fn flavored_trailing_case() { assert_eq!(live_helper(), 1); }
+
+#[tokio::test(flavor = "http://x")]
+fn slashes_in_string_case() { assert_eq!(live_helper(), 1); }
+
+#[testing] // not a test attribute
+fn testing_attr_with_comment() { }
+
+fn dead_plain() { }
+EOF
+QD11="$( cd "$A11" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"
+rc_qd11=$?
+if [ "$rc_qd11" = 0 ]; then ok "arm11: --quality-delta exits 0 (no row on this fixture gates)"; else no "arm11: --quality-delta exited $rc_qd11, not 0"; fi
+for sym in trailing_comment_case flavored_trailing_case slashes_in_string_case; do
+    printf '%s' "$QD11" | grep -q "kind=\"dead-code\" sym=\"$sym\"" \
+        && no "arm11: '$sym' is a #[test] function but was reported as dead-code" \
+        || ok "arm11: '$sym' (#[test] shape with trailing comment or // in its string) excluded from dead-code"
+done
+for sym in testing_attr_with_comment dead_plain; do
+    printf '%s' "$QD11" | grep -q "kind=\"dead-code\" sym=\"$sym\"" \
+        && ok "arm11: '$sym' (negative lookalike) still flagged" \
+        || no "arm11: '$sym' should still be flagged — the trailing comment leaked into the exemption"
+done
+
+# ── ARM 12: a name alone exempts nothing (lane land-499-500, landing #499 + #500) ─────────────────────────────────
+# The two Rust exemptions read an ATTRIBUTE (#[test], #[tokio::test]) and an IMPL BLOCK (impl Drop for T), never a name.
+# A truly unused fn named like a test with no attribute (`test_parse_input`, a bare `test`) and a method named drop outside
+# any impl Drop (an inherent impl, another trait's impl) must stay dead-code rows. Each case is judged on its own line by
+# the row's p= attribute (two `drop` rows cannot be told apart by sym=). PREMISE: the same file holds one real #[test] fn
+# and one real Drop::drop, and both must be exempt, so both rules ran on this file; and the arm counts the negatives it
+# found reported and FAILS when that count is not the four it planted (zero included).
+A12="$WORK/a12"; newrepo "$A12"
+printf 'pub fn api() -> u32 { 1 }\n' > "$A12/lib.rs"
+commit "$A12" "baseline for the name-only negatives"
+cat > "$A12/lib.rs" <<'EOF'
+pub fn api() -> u32 { 1 }
+
+#[test]
+fn real_harness_case() { assert_eq!(api(), 1); } // P-test
+
+struct Guard;
+impl Drop for Guard {
+    fn drop(&mut self) { } // P-drop
+}
+
+fn test_parse_input() { } // N-test-name
+
+fn test() { } // N-bare-test
+
+struct Cache;
+impl Cache {
+    fn drop(&mut self) { } // N-inherent-drop
+}
+
+trait Closer { fn close(&mut self); }
+struct Conn;
+impl Closer for Conn {
+    fn close(&mut self) { }
+    fn drop(&mut self) { } // N-other-trait-drop
+}
+EOF
+QD12="$( cd "$A12" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"
+rc_qd12=$?
+if [ "$rc_qd12" = 0 ]; then ok "arm12: --quality-delta exits 0 (no row on this fixture gates)"; else no "arm12: --quality-delta exited $rc_qd12, not 0"; fi
+line12(){ [ "$( grep -c -F -- "$1" "$A12/lib.rs" )" = 1 ] && grep -n -F -- "$1" "$A12/lib.rs" | cut -d: -f1; }
+dead12(){ printf '%s' "$QD12" | tr '>' '\n' | grep -F 'kind="dead-code"' | grep -q -F "p=\"lib.rs:$1\""; }
+for m in '// P-test' '// P-drop'; do
+    l="$( line12 "$m" )" || { no "arm12 premise: marker '$m' is not on exactly one line"; continue; }
+    dead12 "$l" && no "arm12 premise: '$m' (lib.rs:$l) was reported, so its exemption did not run on this file" \
+                || ok "arm12 premise: '$m' (lib.rs:$l) is exempt"
+done
+seen12=0
+for m in '// N-test-name' '// N-bare-test' '// N-inherent-drop' '// N-other-trait-drop'; do
+    l="$( line12 "$m" )" || { no "arm12: marker '$m' is not on exactly one line"; continue; }
+    if dead12 "$l"; then seen12=$(( seen12 + 1 )); ok "arm12: '$m' (lib.rs:$l) is still reported (a name, no attribute or Drop impl)"
+    else no "arm12: '$m' (lib.rs:$l) was exempt by its name alone"; fi
+done
+[ "$seen12" = 4 ] && ok "arm12: all 4 planted name-only negatives reported" \
+                  || no "arm12: $seen12 of the 4 planted name-only negatives reported (0 means the arm judged nothing)"
+
+# ── ARM 13: every attribute on a line is read, and a `#[` inside a string is text (CodeRabbit on #668) ─────────────────
+# rustTestAttributed used to test only the LAST `#[` on an attribute line, found by rfind. Two shapes broke it:
+#   * `#[tokio::test(flavor = "current_thread")] #[allow(unused)]`: the test attribute is not the last one, so the harness's
+#     function was reported (the ingest's testScope rule does not read tokio::test with an argument list either);
+#   * `#[doc = "#[tokio::test(x)]"]`: the last `#[` sits inside the doc string, so an unused function was exempt.
+# Positives must be exempt, the doc-string lookalikes must be reported, and the controls hold: `#[inline] #[test]` (the test
+# attribute last) and `#[tokio::test(flavor = "x")]` alone stay exempt. The full legend carries the Rust sentence here
+# (a Rust test was excluded); donelegendcheck (c) holds it absent on a tree with no Rust test.
+A13="$WORK/a13"; newrepo "$A13"
+printf 'fn live_helper() -> u32 { 1 }\n' > "$A13/lib.rs"
+commit "$A13" "baseline for the per-attribute arms"
+cat >> "$A13/lib.rs" <<'EOF'
+
+#[tokio::test(flavor = "current_thread")] #[allow(unused)]
+fn stacked_first_case() { assert_eq!(live_helper(), 1); }
+
+#[inline] #[test]
+fn stacked_last_case() { assert_eq!(live_helper(), 1); }
+
+#[tokio::test(flavor = "x")]
+fn flavored_control_case() { assert_eq!(live_helper(), 1); }
+
+#[doc = "#[tokio::test(x)]"]
+fn doc_string_lookalike() { }
+
+#[doc = "a ] then #[tokio::test]"] #[inline]
+fn doc_bracket_lookalike() { }
+EOF
+QD13="$( cd "$A13" && "$BIN" . --quality-delta --no-cache --legend=full 2>/dev/null )"
+rc_qd13=$?
+if [ "$rc_qd13" = 0 ]; then ok "arm13: --quality-delta exits 0 (no row on this fixture gates)"; else no "arm13: --quality-delta exited $rc_qd13, not 0"; fi
+for sym in stacked_first_case stacked_last_case flavored_control_case; do
+    printf '%s' "$QD13" | grep -q "kind=\"dead-code\" sym=\"$sym\"" \
+        && no "arm13: '$sym' carries a test attribute on its line but was reported as dead-code" \
+        || ok "arm13: '$sym' (a test attribute among others on one line) excluded from dead-code"
+done
+seen13=0
+for sym in doc_string_lookalike doc_bracket_lookalike; do
+    if printf '%s' "$QD13" | grep -q "kind=\"dead-code\" sym=\"$sym\""; then seen13=$(( seen13 + 1 )); ok "arm13: '$sym' (a test attribute only inside a doc string) still flagged"
+    else no "arm13: '$sym' was exempt by a #[ inside a string"; fi
+done
+[ "$seen13" = 2 ] && ok "arm13: both planted doc-string lookalikes reported" \
+                  || no "arm13: $seen13 of the 2 planted doc-string lookalikes reported (0 means the arm judged nothing)"
+case "$QD13" in *'Rust #[test] and #[tokio::test] functions count too'*) ok "arm13: the full legend states the Rust sentence (a Rust test was excluded)";;
+                 *) no "arm13: the full legend is missing the Rust sentence on a tree whose excluded set holds Rust tests";; esac
+
+# ── ARM 14: a configured name is inert unless a MACRO CALL matches it, Rust tests or not (CodeRabbit on #668) ─────────
+# inertRegisterMacroNames asked registeredMacroSymbolIds, which also holds every Rust #[test] fn, so in a tree with one Rust
+# test a typo'd register_macros= name looked live and drew no warning. PREMISE: the Rust test is exempt (register-macro-
+# excluded= is non-zero), so the Rust half really ran on this tree.
+A14="$WORK/a14"; newrepo "$A14"
+cat > "$A14/lib.rs" <<'EOF'
+pub fn api() -> u32 { 1 }
+
+#[test]
+fn real_harness_case() { assert_eq!(api(), 1); }
+EOF
+printf 'register_macros = TYPO_NEVER_USED\n' > "$A14/.ripwire_config"
+commit "$A14" "a Rust test and a typo'd register_macros= name"
+( cd "$A14" && "$BIN" . --quality-delta --no-cache >"$WORK/a14.out" 2>"$WORK/a14.err" )
+rc_qd14=$?
+if [ "$rc_qd14" = 0 ]; then ok "arm14: --quality-delta exits 0 (no row on this fixture gates)"; else no "arm14: --quality-delta exited $rc_qd14, not 0"; fi
+QD14_ERR="$( cat "$WORK/a14.err" )"
+QD14_TAG="$( grep -oE '<quality-delta[^>]*>' "$WORK/a14.out" )"
+printf '%s' "$QD14_TAG" | grep -qE 'register-macro-excluded="[1-9]' \
+    && ok "arm14 premise: the Rust test is counted in register-macro-excluded=" \
+    || { no "arm14 premise: register-macro-excluded= is zero, so the Rust half did not run"; printf '%s\n' "$QD14_TAG"; }
+printf '%s' "$QD14_ERR" | grep -q 'TYPO_NEVER_USED' \
+    && ok "arm14: the inert name is named on stderr beside a Rust test" \
+    || { no "arm14: no stderr warning for the inert name 'TYPO_NEVER_USED' (a Rust test made it look live)"; printf '%s\n' "$QD14_ERR"; }
+printf '%s' "$QD14_TAG" | grep -q 'config-warnings="1"' \
+    && ok "arm14: --quality-delta root carries config-warnings=\"1\"" \
+    || { no "arm14: no config-warnings= disclosure for the inert name"; printf '%s\n' "$QD14_TAG"; }
+
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME FAILED"
 exit "$fail"

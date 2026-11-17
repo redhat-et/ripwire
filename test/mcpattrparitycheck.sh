@@ -104,10 +104,15 @@ int client() { Box b; b.fill( 1 ); return b.size() + helper_add( 1, 2 ); }
 EOF
 echo "mcpattrparitycheck: BIN=$BIN  CORPUS=$ROOT  REFFIX=$SFIX  MARKERFIX=$MFIX  ANFIX=$AFX"
 
-python3 - "$BIN" "$ROOT" "$SFIX" "$MFIX" "$AFX" <<'PY'
+# The SELECTOR arms ask whereis on this checkout; past its 512-branch refusal (a long-lived dev clone or its linked worktree)
+# they ask test/lib/sweeproot.sh's stand-in with CI's ref shape instead.
+. "$ROOT/test/lib/sweeproot.sh"
+SWEEPTMP="$( mktemp -d )"; MFIX_CLEANUP="$MFIX_CLEANUP $SWEEPTMP"   # cleaned by the trap above
+SWEEP="$( sweepRoot "$ROOT" "$SWEEPTMP/sweep" )"
+python3 - "$BIN" "$ROOT" "$SFIX" "$MFIX" "$AFX" "$SWEEP" <<'PY'
 import json, os, re, subprocess, sys
 
-BIN, ROOT, SFIX, MFIX, AFX = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
+BIN, ROOT, SFIX, MFIX, AFX, SWEEP = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6]
 
 fails = 0
 def check( cond, msg ):
@@ -522,8 +527,8 @@ nearMissSel = "escape" + "Xm"
 for label, sel in ( ( "@FILE:LINE seed", seedSpec ), ( "near-miss", nearMissSel ) ):
     if not sel:
         continue
-    cx = cli( [ "--whereis=" + sel ] )
-    mx = mcp( "whereis", { "path": ROOT, "symbol": sel } )
+    cx = cliAt( SWEEP, [ "--whereis=" + sel ] )
+    mx = mcp( "whereis", { "path": SWEEP, "symbol": sel } )
     if mx.startswith( "__ERROR__" ):
         check( False, "whereis %s: MCP refused (%s)" % ( label, mx[ :100 ] ) )
         continue

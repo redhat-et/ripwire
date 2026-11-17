@@ -270,6 +270,13 @@ absent  qd_dirty       'SCOPE, present only when the scope flag was given'
 present qd_dirty_scope 'SCOPE, present only when the scope flag was given'
 # foreign-acks= is "present only when non-zero" — so is its paragraph.
 absent  qd_dirty_scope 'foreign-acks= is a SEPARATE axis'
+# issue #499: the Rust test-harness sentence rides only when the excluded set holds a Rust test (registermacrocheck arm 13 holds
+# it present); these fixtures are C++ with no Rust test, so no form pays for it (lane land-499-500 fix 1: with it in the core, 2730/4057/5331/4461 B
+# had been over the 2700/4000/5300/4400 targets with it in the core).
+for n in qd_clean qd_dirty qd_dirty_scope qd_refpair; do
+    absent "$n" 'Rust #[test] and #[tokio::test] functions count too'
+    absent "$n" 'Rust #[test]'
+done
 # test-gate's row contract governs rows; the empty-obligation case has none.
 absent  tg_empty 'REPEAT VERBATIM'
 "$BIN" "$ROOT" --test-gate=src/model.h --legend=full >"$WORK/tg_rows.xml" 2>/dev/null

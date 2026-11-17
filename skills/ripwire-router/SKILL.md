@@ -17,7 +17,8 @@ ONE skill to enter. If you routed wrong, each skill's own routing header sends y
 `ripwire <dir> --help-task="<the task in words>" --legend=compact` returns ONE recommended command with the evidence
 behind the pick (intent, score/margin, repository facts) — or honestly abstains when the evidence is
 too thin to name a winner. One hop cheaper than reading this whole map: paste the task, run what it
-recommends. Advice only — it never executes the recommendation.
+recommends. Advice only — it never executes the recommendation. From a prompt hook with a hard timeout, add
+`--deadline-ms=N`: a cold index past N prints the abstention (exit 0) while a background run warms the index.
 
 A short bare word abstains even when it names a real symbol — a lone letter, a SCREAMING name, or an
 ordinary word that happens to match an indexed name (`F` in `--help-task="understand F"`, django's ORM
@@ -106,7 +107,7 @@ These aren't a "moment" you land in; they're reflexes you carry into every momen
 
 `ripwire --help` (its **Languages** line) is the source of truth for what gets parsed; it grows, so trust it over any copy.
 Today: C-family (C, C++, ObjC/ObjC++, Metal, CUDA), Python, TypeScript, JavaScript, Java, Kotlin, C#, Go, Rust, Swift,
-Ruby, PHP, Lua, Elixir, Dart, Clojure, GDScript, Bash; JSON/TOML/YAML (config keys); Markdown (headings are sections).
+Ruby, PHP, Lua, Elixir, Dart, Clojure, GDScript, Bash; Protocol Buffers (.proto definitions); JSON/TOML/YAML (config keys); Markdown (headings are sections).
 A repo in a language not on that line (Haskell, OCaml, Scala, Zig, ...) gets an empty map whose header names the skipped
 extensions (`unindexed=`) — don't mistake that for "nothing here"; reach for plain `rg` + reads instead. Supported
 languages are not "thin": try the map first. And ripwire maps *structure*, not build/link state — a

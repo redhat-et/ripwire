@@ -273,7 +273,7 @@ inline bool cc_isCountableLocalDecl( TSNode n, const char* t ) noexcept
     {
         return false;
     }
-    const TSNode parent = ts_node_parent( n );
+    const TSNode parent = parentOf( n );
     if( ts_node_is_null( parent ) || !kindIs( ts_node_type( parent ), "compound_statement" ) )
     {
         return false;
@@ -1124,7 +1124,7 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
         if( isNamed && ( cc_isNestingControl( t, lang ) || elixirControl ) )
         {
             const bool   isIf = ( kindIs( t, "if_statement" ) || kindIs( t, "if_expression" ) );
-            const TSNode p    = ts_node_parent( n );
+            const TSNode p    = parentOf( n );
             const bool   elseIf = isIf && !ts_node_is_null( p )
                                   && ( kindIs( ts_node_type( p ), "if_statement" ) || kindIs( ts_node_type( p ), "if_expression" ) );
             const std::uint32_t childNest = elseIf ? nesting : nesting + 1;   // else-if doesn't deepen
@@ -1195,7 +1195,7 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
             continue;
         }
         const std::string_view bop = cc_boolOp( n, src );
-        if( !bop.empty() && cc_boolOp( ts_node_parent( n ), src ) != bop )
+        if( !bop.empty() && cc_boolOp( parentOf( n ), src ) != bop )
         {
             ++acc.cog; // new boolean run (cognitive)
         }
@@ -1308,7 +1308,7 @@ inline void ln_declaratorIdentifiers( TSNode declNode, std::vector<TSNode>& outI
 inline std::uint8_t ln_declDepth( TSNode declNode, TSNode funcRoot ) noexcept
 {
     std::uint8_t depth = 0;
-    TSNode       cur   = ts_node_parent( declNode );
+    TSNode       cur   = parentOf( declNode );
     while( !ts_node_is_null( cur ) )
     {
         if( kindIs( ts_node_type( cur ), "compound_statement" ) )
@@ -1323,7 +1323,7 @@ inline std::uint8_t ln_declDepth( TSNode declNode, TSNode funcRoot ) noexcept
         {
             break;
         }
-        cur = ts_node_parent( cur );
+        cur = parentOf( cur );
     }
     return depth;
 }
@@ -1433,7 +1433,7 @@ inline std::uint16_t countParams( TSNode defNode )   // A4-F25: NOT noexcept —
             // this grammar, not nested inside it, so the generic "every named child" rule reads 3 real
             // params as 5 (verified on a real parse before this branch was written).
             const bool kotlinList = kindIs( t, "function_value_parameters" );
-            std::uint16_t count = 0;
+            std::uint32_t count = 0;   // a list may hold more children than the uint16 result: saturate below, never wrap
             for( const TSNode c : kids )
             {
                 if( !ts_node_is_named( c ) )
@@ -1454,7 +1454,7 @@ inline std::uint16_t countParams( TSNode defNode )   // A4-F25: NOT noexcept —
                 }
                 ++count;
             }
-            return count;
+            return std::uint16_t( std::min<std::uint32_t>( count, std::numeric_limits<std::uint16_t>::max() ) );
         }
         for( std::size_t i = kids.size(); i > 0; --i )
         {
@@ -1513,7 +1513,7 @@ inline constexpr ParamMinLang kParamMinLangs[] = {
 // stops at the first function, since a def nested in a method's body is a closure, not a member.
 inline bool ownedBy( TSNode def, std::string_view owner ) noexcept
 {
-    for( TSNode p = ts_node_parent( def ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
+    for( TSNode p = parentOf( def ); !ts_node_is_null( p ); p = parentOf( p ) )
     {
         const std::string_view t = ts_node_type( p );
         if( t == owner )
@@ -1607,7 +1607,8 @@ inline ParamShape cc_paramShape( TSNode defNode, Lang lang, SymKind kind, std::s
         if( f.n.id != defNode.id && cc_isParamList( t ) )       // the FIRST parameter list — classify and scan it
         {
             collectChildren( f.n, cursor.cur, kids );           // the list's direct children — read before the scan below reuses kids
-            std::uint16_t named = 0, defaulted = 0, notParam = 0;
+            // uint32: a generated list can hold 65,536+ children, and a wrapped `named` broke the ASSUME below.
+            std::uint32_t named = 0, defaulted = 0, notParam = 0;
             bool          elastic = false, receiver = false, untyped = false;
             TSNode        lone{};
             struct QF { TSNode n; std::uint16_t depth; };
@@ -1649,15 +1650,15 @@ inline ParamShape cc_paramShape( TSNode defNode, Lang lang, SymKind kind, std::s
             }
             ParamShape shape;
             shape.exact = !elastic && defaulted == 0;
-            const TSNode decoParent = ts_node_parent( defNode );
+            const TSNode decoParent = parentOf( defNode );
             const bool   decorated  = row != nullptr && !row->decoratedParent.empty() && !ts_node_is_null( decoParent )
                                    && std::string_view( ts_node_type( decoParent ) ) == row->decoratedParent;
             const bool   method     = row != nullptr && !row->selfOwner.empty() && ownedBy( defNode, row->selfOwner );
             const bool   soleVoid   = row != nullptr && !row->soleVoid.empty() && named == 1 && nodeTextOf( lone, src ) == row->soleVoid;
             // a function VALUE whose signature lives elsewhere (row comment `fnValue`): annotated or cast binding, or a
             // contextually typed (untyped) parameter.
-            const TSNode fnNode     = ts_node_parent( f.n );
-            const TSNode binding    = ts_node_is_null( fnNode ) ? TSNode{} : ts_node_parent( fnNode );
+            const TSNode fnNode     = parentOf( f.n );
+            const TSNode binding    = ts_node_is_null( fnNode ) ? TSNode{} : parentOf( fnNode );
             const bool   fnValue    = row != nullptr && !ts_node_is_null( fnNode ) && paramKindIn( ts_node_type( fnNode ), row->fnValue );
             const bool   typedElsewhere = fnValue
                                    && ( untyped || ts_node_is_null( binding ) || !ts_node_eq( fieldChild( binding, NodeField::Value ), fnNode )
@@ -1665,7 +1666,7 @@ inline ParamShape cc_paramShape( TSNode defNode, Lang lang, SymKind kind, std::s
             if( row != nullptr && !elastic && !receiver && !decorated && !method && !soleVoid && !typedElsewhere )
             {
                 ASSUME( defaulted + notParam <= named );   // each counted child is one of the named ones
-                shape.minimum = std::uint16_t( named - defaulted - notParam );
+                shape.minimum = std::uint16_t( std::min<std::uint32_t>( named - defaulted - notParam, std::numeric_limits<std::uint16_t>::max() ) );
             }
             ENSURES( shape.minimum <= named );
             return shape;
@@ -1699,7 +1700,7 @@ inline TSNode callArgumentList( TSNode nameNode ) noexcept
     TSNode n = nameNode;
     for( int hop = 0; hop < 4 && !ts_node_is_null( n ); ++hop )
     {
-        const TSNode p = ts_node_parent( n );
+        const TSNode p = parentOf( n );   // the climb reads the file's cached ancestor path (infra/tsparent.h)
         if( ts_node_is_null( p ) )
         {
             break;
@@ -1745,7 +1746,7 @@ inline std::pair<std::uint16_t, bool> callArity( TSNode nameNode, Lang lang, std
     // count NAMED argument children; a spread / splat / apply argument makes the count unreliable → not known.
     // O(children): the `comment` skip below is itself the proof that this list's width is INPUT-set, and this
     // counter runs once per CALL SITE, so the indexed form was O(calls x C²) — arm B11, 56x its control.
-    std::uint16_t count      = 0;
+    std::uint32_t count      = 0;   // wider than the uint16 result: an overflowing count is unknown below, never a wrapped known one
     bool          unreliable = false;
     ChildCursor   argsCursor( args );
     forEachChild( args, argsCursor.cur, [ & ]( TSNode c )
@@ -1761,7 +1762,11 @@ inline std::pair<std::uint16_t, bool> callArity( TSNode nameNode, Lang lang, std
         ++count;
         return true; } );
     (void)lang;
-    return unreliable ? std::pair<std::uint16_t,bool>{ 0, false } : std::pair<std::uint16_t,bool>{ count, true };
+    if( unreliable || count > std::numeric_limits<std::uint16_t>::max() )
+    {
+        return { 0, false };   // CR #586: 65,536+ arguments wrapped to a KNOWN 0 and arity-dropped the right def
+    }
+    return { std::uint16_t( count ), true };
 }
 
 // The KEYWORD arguments of the Python call whose callee identifier is `nameNode`, as the byte pyKwTag writes (model.h): the count

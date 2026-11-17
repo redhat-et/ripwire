@@ -72,7 +72,9 @@ run(){ local fx="$1"; shift; ( cd "$fx" || exit 1; "$BIN" "$fx" --no-cache "$@" 
 # an answer: rc 0 and a closed root, else the arm is red (z1)
 ans(){ local out="$1" fx="$2"; shift 2; run "$fx" "$@" >"$out"; local rc=$?; [ "$rc" = 0 ] && [ -s "$out" ] && grep -q '</ctx>$' "$out"; }
 block(){ python3 -c 'import sys; s=open(sys.argv[1],encoding="utf8").read(); i=s.find("<!-- ripwire for doc_body"); j=s.find("</doc_body>",i); print(s[i:j+11].replace("\n"," ") if i>=0 and j>=0 else "")' "$1"; }
-tailrows(){ python3 -c 'import re,sys; print(" ".join(re.findall(r"<t p=\"([^\"]+)\"", open(sys.argv[1]).read())[:10]))' "$1"; }
+# the FILE tail rows (<t p="FILE"/>, <t p="FILE" sym="NAME"/>); a SIBLING-DEMOTE pointer in <sigs> (<t p= sym= r=/>, forsiblingdemote.h)
+# carries its rank r= — a demoted ranked row, not a tail row
+tailrows(){ python3 -c 'import re,sys; print(" ".join(re.findall(r"<t p=\"([^\"]+)\"(?: sym=\"[^\"]*\")?/>", open(sys.argv[1]).read())[:10]))' "$1"; }
 
 # (f1) fires
 if ans "$TMP/f1.xml" "$DFX" "--for=$TASK" && python3 - "$TMP/f1.xml" <<'PY'
@@ -89,8 +91,10 @@ assert all( int( x[4] ) <= int( x[5] ) for x in secs ), "rank <= of"
 PY
 then ok "(f1) fires: <doc_body>, its legend, section rows with p= l= e= n= rank= of= and the section text"; else no "(f1) fires: $( block "$TMP/f1.xml" | head -c 400 )"; fi
 
+# RE-PIN (NEXT-APOS-RAW, 2026-11-15): doc_body next= reads --recall='…' / --for='…' (was &apos;…&apos;; written '\'' inside these
+# single-quoted patterns): nextverb.h leaves ' raw in a "-delimited attribute. Here, (h1) and (b2).
 # (f2) the allowance cut
-if [ -s "$TMP/f1.xml" ] && block "$TMP/f1.xml" | grep -q '<doc_body [^>]*next="--recall=&apos;how do the docs describe the retry policy for failed uploads&apos;" capped="1">' \
+if [ -s "$TMP/f1.xml" ] && block "$TMP/f1.xml" | grep -q '<doc_body [^>]*next="--recall='\''how do the docs describe the retry policy for failed uploads'\''" capped="1">' \
    && block "$TMP/f1.xml" | grep -q '<b t="section" p="docs/retries.md" l="[0-9]*" e="[0-9]*" n="Retry policy" rank="[0-9]*" of="[0-9]*" cut="1" range="[0-9]*-[0-9]*/[0-9]*">'
 then ok "(f2) a section over the allowance is cut=\"1\"; the root says capped=\"1\" and next= the recall call"; else no "(f2) allowance: $( block "$TMP/f1.xml" | grep -o '<doc_body [^>]*>' )"; fi
 
@@ -136,7 +140,7 @@ done
 
 # (h1) token budget: held
 if ans "$TMP/h1.xml" "$DFX" "--for=$TASK" --token-budget=4000 \
-   && grep -q '<doc_body match="lexical" est_tokens="[0-9]*" held="budget" files="3" next="--for=&apos;how do the docs describe the retry policy for failed uploads&apos;"><f p="[^"]*"/><f p="[^"]*"/><f p="[^"]*"/></doc_body></ctx>$' "$TMP/h1.xml" \
+   && grep -q '<doc_body match="lexical" est_tokens="[0-9]*" held="budget" files="3" next="--for='\''how do the docs describe the retry policy for failed uploads'\''"><f p="[^"]*"/><f p="[^"]*"/><f p="[^"]*"/></doc_body></ctx>$' "$TMP/h1.xml" \
    && ! grep -q '<b t="section"' "$TMP/h1.xml"
 then ok "(h1) --token-budget below the answer holds the block: held=\"budget\", three f p= rows, next= the same call, no section text"; else no "(h1) held: $( grep -o '<doc_body.*' "$TMP/h1.xml" | head -c 300 )"; fi
 
@@ -152,7 +156,9 @@ assert d["in_est_tokens"] is False and d["capped"] is True and d["next"].startsw
 assert xs and xs == js, ( "path, line, heading and text of every section", [ x[:3] for x in xs ], [ j[:3] for j in js ] )
 PY
 then ok "(j1) --json: a doc_body key with the XML block's passages, capped and next="; else no "(j1) --json doc_body"; fi
-run "$DFX" "--for=$TASK" --json --token-budget=4000 >"$TMP/j2.json"; j2rc=$?
+# R-DEDUP (2026-11-08): the head files' tail rows no longer repeat their shown headings, so the JSON answer at 4000 fell from
+# est_tokens 4070 to 3632 and the doc-body allowance cleared its floor (2 capped passages served). 3500 holds the block on both.
+run "$DFX" "--for=$TASK" --json --token-budget=3500 >"$TMP/j2.json"; j2rc=$?
 if [ "$j2rc" = 0 ] && python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))["doc_body"]; assert d["held"]=="budget" and d["match"]=="lexical" and "passages" not in d and len(d["files"])==3' "$TMP/j2.json" 2>/dev/null
 then ok "(j2) --json under a token budget: held, files named, no passages"; else no "(j2) --json held"; fi
 
@@ -246,7 +252,7 @@ partial=0; full=0; allfit=1
 for B in 5000 5400 5800 6200 6600 7000 7600 8400; do
   if ans "$TMP/b2.xml" "$DFX" "--for=$TASK" --token-budget=$B && [ "$FULLB" -gt 0 ] && chk_fit "$TMP/b2.xml" $B "$FULLB"; then
     if grep -q '<doc_body match="lexical" est_tokens="[0-9]*" files="3" allowance="[0-9]*" bytes="[0-9]*" held="budget" held_bytes="[1-9][0-9]*"' "$TMP/b2.xml" && [ "$( nsec "$TMP/b2.xml" )" -ge 1 ] \
-       && grep -q ' next="--for=&apos;' "$TMP/b2.xml"; then partial=1; fi
+       && grep -q ' next="--for='\''' "$TMP/b2.xml"; then partial=1; fi
     grep -q '<doc_body match="lexical" est_tokens' "$TMP/b2.xml" && ! grep -q '<doc_body [^>]*held="budget"' "$TMP/b2.xml" && full=1
   else allfit=0; fi
 done
@@ -494,9 +500,24 @@ PY
 if ans "$TMP/c6a.xml" "$TFX" "--for=$T6" && ans "$TMP/c6b.xml" "$TFX" "--for=$T6" --token-budget=3500 && run "$TFX" "--for=$T6" --json >"$TMP/c6a.json" && run "$TFX" "--for=$T6" --json --token-budget=3500 >"$TMP/c6b.json"; then
   read -r xn0 xu0 <<<"$( shownpaths xml "$TMP/c6a.xml" )"; read -r xn1 xu1 <<<"$( shownpaths xml "$TMP/c6b.xml" )"
   read -r jn0 ju0 <<<"$( shownpaths json "$TMP/c6a.json" )"; read -r jn1 ju1 <<<"$( shownpaths json "$TMP/c6b.json" )"
-  if [ "$xn0" = 2 ] && [ "$xu0" = 0 ] && [ "$jn0" = 2 ] && [ "$ju0" = 0 ] && [ "${xu1:-9}" = 0 ] && [ "${ju1:-9}" = 0 ] && ! tailrows "$TMP/c6b.xml" | grep -q 'docs/'; then
+  # TOKEN-BUDGET-MONOTONE (2026-11-14): the XML answer under a budget is the unbudgeted answer shed AFTER the block was
+  # priced: the block keeps the doc files the unbudgeted tail printed, and the tail rows naming them may be shed (shed=tail:N,
+  # the tail's next= pages them). So the XML half now holds "the block names no file the UNBUDGETED answer does not print"
+  # (xu0) and the budgeted block names no more files than that one (xn1 <= xn0); the JSON dialect keeps its own budget path.
+  # membership, not only the count (CodeRabbit #665): every file the budgeted block names is one the unbudgeted answer prints
+  xsub="$( python3 - "$TMP/c6a.xml" "$TMP/c6b.xml" <<'PY'
+import re, sys
+def split( p ):
+    s = open( p, encoding="utf8" ).read(); i = s.find( "<!-- ripwire for doc_body" )
+    head = s[ :i ] if i >= 0 else s
+    return set( re.findall( r'<[td] [^>]*p="([^"]+)"', head ) ), set( re.findall( r'<[fb] [^>]*p="([^"]+)"', s[ i: ] ) ) if i >= 0 else set()
+shown0, _ = split( sys.argv[ 1 ] ); _, named1 = split( sys.argv[ 2 ] )
+print( "ok" if named1 <= shown0 else "out:" + ",".join( sorted( named1 - shown0 ) ) )
+PY
+)"
+  if [ "$xn0" = 2 ] && [ "$xu0" = 0 ] && [ "$jn0" = 2 ] && [ "$ju0" = 0 ] && [ "${xn1:-9}" -le "$xn0" ] && [ "$xsub" = ok ] && [ "${ju1:-9}" = 0 ] && ! tailrows "$TMP/c6b.xml" | grep -q 'docs/'; then
     ok "(c6) unbudgeted: both doc files named (XML, JSON); under --token-budget=3500 the tail ends before its doc rows and the block names no doc file the answer does not print ($xn1 XML, $jn1 JSON named)"
-  else no "(c6) emitted-tail rule: xml $xn0/$xu0 -> $xn1/$xu1, json $jn0/$ju0 -> $jn1/$ju1"; fi
+  else no "(c6) emitted-tail rule: xml $xn0/$xu0 -> $xn1/$xu1 ($xsub), json $jn0/$ju0 -> $jn1/$ju1"; fi
 else no "(c6) a run failed"; fi
 
 # (c7) --signatures-only carries no doc text: neither dialect prints the block (positive twin: the same task without the flag fires)

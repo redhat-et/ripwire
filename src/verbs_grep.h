@@ -378,8 +378,12 @@ void emitGrepSuggest( const rw::IngestResult& ing, const std::string& pat, bool 
     }
     if( sug.offerFor )
     {
-        const auto fp = rw::escapeXml( pat, esc );
-        rw::emitTo( stdout, " next=\"--for=&quot;{}&quot;\"", std::string_view( fp.data(), fp.size() ) );
+        // NEXT-APOS-FINISH: the shell quoting is nextFlag's apostrophes, not `"`. Inside this "-delimited attribute a `"`
+        // can only be &quot;, which a reader pasting the raw answer hands the shell as a literal entity (and an `&` that
+        // backgrounds the command); a raw `'` is legal XML here, so `--for='total area'` is both well-formed and the call
+        // a shell runs, and a one-word pattern needs no quotes at all (`--for=perimeterr`). As before, the value is a shell
+        // line (it needs a shell or shlex to split), like every other next=. One next= escaper: nextverb.h.
+        rw::emitTo( stdout, "{}", rw::nextAttrXml( rw::nextFlag( "--for=", pat ) ) );
     }
     rw::emitTo( stdout, "/>" );
 }
@@ -799,7 +803,7 @@ GrepScanPhases collectGrepScanPhases( const rw::Config& cfg, const rw::IngestRes
         PROFILE_SCOPE_DESCRIBE( "grep/3: aux unindexed scan" );
         const std::size_t maxAuxFileBytes = cfg.maxFileBytes == 0 ? kDefaultMaxFileBytes : cfg.maxFileBytes;
         phases.aux = grepCollectAux( ing.crawlSkips, pat, cfg.grepRegex, maxAuxFileBytes,
-                                     phases.found.regexStackBytes != 0 ? phases.found.regexStackBytes : kGrepScanStackBytes );
+                                     phases.found.regexStackBytes != 0 ? phases.found.regexStackBytes : kGrepScanStackBytes, ing.skippedOversize );
     }
     phases.valid = true;
     return phases;
@@ -1109,7 +1113,8 @@ int emitGrepReport( const MainDispatch& d )
     //            absent above is absent from every indexed file", and that is false the moment a comment or
     //            string row was held back. --grep-in=any (no filtering) keeps the claim, which is what makes
     //            the claim recoverable rather than lost.
-    const bool scanExhaustive = found.cleanScan() && !cfg.grepRegex && !ing.memoryStop.isSet();   // notfound-on-cut: a cut index never claims it (the CLI refuses one first; this is the twin of the MCP term)
+    // LARGE-PARTIAL-1: corpus_oversize= files are read by the unindexed scan now; one it could not read whole withholds the claim.
+    const bool scanExhaustive = found.cleanScan() && !cfg.grepRegex && !ing.memoryStop.isSet() && aux.oversizeUnread == 0;   // notfound-on-cut: a cut index never claims it (the CLI refuses one first; this is the twin of the MCP term)
     const bool windowWhole    = grepPage.begin == 0 && grepPage.end == hitCount;
     const bool nothingHeldBack = tierReport.suppressedComment == 0 && tierReport.suppressedString == 0;
     const char* const completeAttr = ( scanExhaustive && windowWhole && nothingHeldBack ) ? " complete=\"1\"" : "";
@@ -1229,7 +1234,8 @@ int emitGrepReport( const MainDispatch& d )
                  // unsupported-ext/text-looking population and print its hits in a trailing block, never
                  // folded into the indexed count above and never claimed by complete=.
                  "unindexed_files_scanned= counts files outside the index (unsupported-ext, but text-looking — the skipped verb's "
-                 "own unsupported-ext class) that THIS answer additionally scanned for the same pattern; their hits print inside a "
+                 "own unsupported-ext class — and the files corpus_oversize= counts, read whole however large) that THIS answer "
+                 "additionally scanned for the same pattern; their hits print inside a "
                  "trailing unindexed element (present only when it found something), holding its own <f> rows in the same shape as "
                  "above, and never carry in= — there is no symbol table to check for such a file, which is not the same claim as file "
                  "scope. "
@@ -1242,7 +1248,7 @@ int emitGrepReport( const MainDispatch& d )
                  "carries that same number as its own count= beside shown=/capped= and obeys the SAME window limit/offset set here "
                  "(dashes omitted), so a one-row page is one row on BOTH lists and a page past its end is empty, not repeated. "
                  "unindexed_files_skipped= (present only when nonzero) counts "
-                 "candidates this scan saw but did not read: over the max-file-size ceiling, sniffed binary, or unreadable. "
+                 "candidates this scan saw but did not read: sniffed binary, or unreadable (no size ceiling applies to this text scan). "
                  "unindexed_candidates_capped=\"1\" (present only when true) means the CANDIDATE list itself (the skipped verb's own "
                  "500-row-per-class cap) was already a floor, so files past it were never considered here either — see the skipped verb "
                  "for every row. "
@@ -1251,7 +1257,8 @@ int emitGrepReport( const MainDispatch& d )
                  // literal 'hits="0"' example below (a quoted numeric example — the quality-delta legend's
                  // own rule, restated here after it bit a naive ` hits="N"` extraction downstream twice).
                  "corpus_excluded= counts files a caller's own exclude filter kept OUT of the index entirely; "
-                 "corpus_oversize= counts files the crawl SAW but dropped for exceeding the size ceiling; "
+                 "corpus_oversize= counts files the crawl SAW but did not index for exceeding the size ceiling (this answer still "
+                 "greps them, in the unindexed list); "
                  "corpus_pruned_dirs= counts the DIRECTORIES the BUILT-IN crawl denylist pruned whole — vendor, third_party, "
                  "build, dist, out, target, node_modules and the rest — a directory count and not a file count, because files "
                  "beneath a pruned subtree are never stat'd and so were never counted. All three answer what an "

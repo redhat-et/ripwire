@@ -96,5 +96,41 @@ rm -f "$TMP/cc"
 diff -q "$TMP/warm" "$TMP/cold" >/dev/null && ok "cache-transparent (arity/CHA facts round-trip: warm == cold)" \
     || { no "cache changes output (warm != cold)"; diff "$TMP/cold" "$TMP/warm" | head -6; }
 
+# ── 6) #446: C++ base-clause types read as @reference.base captures (the capture IS the language gate).
+# The fixture covers direct, qualified, template (CRTP family) and multiple-inheritance bases;
+# a nameless struct with a base stays edgeless (the capture only matches a named class/struct),
+# and a specialization's base is walked once (captureSpecializationHeader's own path).
+FIX446="$ROOT/test/chafix446"
+"$BIN" "$FIX446" --no-cache --lego=TBase 2>/dev/null >"$TMP/lego_tbase"
+# edge-specific: each impl names TBase (the global one) among its bases
+for impl in Tmpl QualTmpl Multi2 DepT In; do
+    if grep -q "n=\"$impl\"" "$TMP/lego_tbase"; then ok "C++ base capture: $impl -> TBase"; \
+    else no "C++ base capture: $impl lost its TBase edge"; fi
+done
+# Crtpd implements Crtp, not TBase — check against the right base
+"$BIN" "$FIX446" --no-cache --lego=Crtp 2>/dev/null >"$TMP/lego_crtp"
+if grep -q "n=\"Crtpd\"" "$TMP/lego_crtp"; then ok "C++ base capture: Crtpd -> Crtp (CRTP)"; \
+    else no "C++ base capture: Crtpd lost its Crtp edge"; fi
+# Base's direct implementors are exactly Dog, Cat and Multi2 (Multi arrives transitively via Dog).
+# anon_var's nameless struct also derives from Base: an edge from it would add a direct row here.
+"$BIN" "$FIX446" --no-cache --lego=Base 2>/dev/null >"$TMP/lego_base"
+DIRECT446=$( grep -o '<impl n="[^"]*" p="[^"]*"/>' "$TMP/lego_base" | sed 's/^<impl n="\([^"]*\)".*/\1/' | sort | tr '\n' ' ' )
+[ "$DIRECT446" = "Cat Dog Multi2 " ] && ok "C++ base capture: Base's direct implementors are exactly Cat Dog Multi2" \
+    || no "C++ base capture: Base's direct implementors are [$DIRECT446], want [Cat Dog Multi2 ]"
+# nameless struct (line 21): no extends site at all, and no anon_var row
+"$BIN" "$FIX446" --no-cache --uses=Base 2>/dev/null >"$TMP/uses_base"
+ANON446=$( grep -o 'role="extends" p="cppbase446.cpp:21"' "$TMP/uses_base" | wc -l | tr -d ' ' )
+if [ "$ANON446" = 0 ] && ! grep -q 'anon_var' "$TMP/lego_base"; then ok "C++ base capture: nameless struct has no edge"; \
+    else no "C++ base capture: nameless struct wrongly edged (extends sites at :21 = $ANON446)"; fi
+# specialization (line 23): exactly one extends site — captureSpecializationHeader's own walk, not doubled by the capture
+SPEC446=$( grep -o 'role="extends" p="cppbase446.cpp:23"' "$TMP/uses_base" | wc -l | tr -d ' ' )
+[ "$SPEC446" = 1 ] && ok "C++ base capture: specialization's base read exactly once" \
+    || no "C++ base capture: specialization produced $SPEC446 extends sites (want exactly 1)"
+# determinism
+"$BIN" "$FIX446" --no-cache >"$TMP/base446_map" 2>/dev/null
+"$BIN" "$FIX446" --no-cache >"$TMP/base446_map2" 2>/dev/null
+[ -s "$TMP/base446_map" ] && diff -q "$TMP/base446_map" "$TMP/base446_map2" >/dev/null && ok "C++ base capture: deterministic fixture map" \
+    || no "C++ base capture: empty or non-deterministic fixture map"
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

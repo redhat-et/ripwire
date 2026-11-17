@@ -253,11 +253,13 @@ if command -v git >/dev/null 2>&1; then
     # The fault is planted with a PATH shim around the real git that appends one malformed row to for-each-ref's
     # output — a seam that reaches the Release binary too, unlike the non-NDEBUG fault switches. Control: the same
     # shim passing everything through keeps the claim, so the arm cannot pass by breaking git.
+    # The planted row has for-each-ref's four fields (name|tip|date|unix date: CROSSREF-MAXREFS added the unix committer date
+    # the ref window orders by), so only its tip is wrong.
     REALGIT="$( command -v git )"; SHIM="$TMP/gitshim"; mkdir -p "$SHIM"
     cat >"$SHIM/git" <<SHEOF
 #!/usr/bin/env bash
 case " \$* " in
-    *" for-each-ref "*) "$REALGIT" "\$@"; rc=\$?; [ -n "\${RW_SHIM_MANGLE:-}" ] && printf 'zz-dropped|not-an-object-name|2026-01-01\n'; exit \$rc ;;
+    *" for-each-ref "*) "$REALGIT" "\$@"; rc=\$?; [ -n "\${RW_SHIM_MANGLE:-}" ] && printf 'zz-dropped|not-an-object-name|2026-01-01|1767225600\n'; exit \$rc ;;
     *) exec "$REALGIT" "\$@" ;;
 esac
 SHEOF
@@ -295,9 +297,10 @@ SHEOF
         fi
     done
 
-    # ── 15) MUTATION: an OVERSIZED text blob (silently unscannable) must drop the claim ────────────────
-    # kMaxBlobBytes is 2 MB; a symbol inside a larger blob is invisible to the scan, so the scan may
-    # not claim exhaustiveness over a tree that contains one.
+    # ── 15) an OVERSIZED text blob is READ, so the claim stands and counts its row ─────────────────────
+    # kMaxBlobBytes is 2 MB. Until LARGE-PARTIAL-1 a symbol inside a larger blob was invisible to the scan, so the
+    # claim had to drop; now (owner 11-14: "we should not be skipping files") the blob is read in line-aligned pieces,
+    # so the answer holds its row at the true line and may claim complete=. RED on fade32332: no bigblob row.
     g checkout -qb bigblob
     python3 - "$R/huge.txt" <<'PYEOF'
 import sys
@@ -309,9 +312,10 @@ PYEOF
     g checkout -q main
     "$BIN" "$R" --whereis=zqWhereToken --no-cache >"$TMP/w3.xml" 2>/dev/null
     W3ROOT="$( root_of whereis <"$TMP/w3.xml" )"
-    { [ -n "$W3ROOT" ] && ! printf '%s' "$W3ROOT" | grep -q 'complete='; } \
-        && ok 'whereis MUTATION: an oversized blob in any scanned tree makes complete= vanish' \
-        || { no 'whereis MUTATION: complete= survived an oversized (unscanned) blob'; printf '%s\n' "$W3ROOT"; }
+    W3ROW="$( grep -o '<hit ref="bigblob" [^>]*p="huge\.txt" l="80001"' "$TMP/w3.xml" | head -1 )"
+    { [ -n "$W3ROOT" ] && [ -n "$W3ROW" ] && printf '%s' "$W3ROOT" | grep -q 'complete="1"'; } \
+        && ok 'whereis: an oversized blob is read (bigblob huge.txt:80001 row) and complete="1" holds' \
+        || { no 'whereis: the oversized blob was not read whole (no bigblob huge.txt:80001 row, or no complete="1")'; printf '%s\n' "$W3ROOT"; }
 
     # ── 16) determinism + well-formedness of the claiming whereis ──────────────────────────────────────
     # Two FRESH runs at the same repo state (w1 predates the bigblob branch, so it is not comparable).

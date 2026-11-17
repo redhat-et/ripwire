@@ -291,10 +291,10 @@ TSNode importDirectiveOf( DepDialect dialect, TSNode pathNode ) noexcept
     {
         return pathNode;   // the Go capture IS the whole import_declaration
     }
-    const TSNode parent = ts_node_parent( pathNode );
+    const TSNode parent = parentOf( pathNode );
     const bool hasParent = !ts_node_is_null( parent );
     ASSUME( hasParent, "a captured specifier is a string or path token, never the file root" );
-    const TSNode directive = kindIs( ts_node_type( parent ), "arguments" ) ? ts_node_parent( parent ) : parent;
+    const TSNode directive = kindIs( ts_node_type( parent ), "arguments" ) ? parentOf( parent ) : parent;
     const bool hasDirective = !ts_node_is_null( directive );
     ENSURES( hasDirective, "an `arguments` list always belongs to a call" );
     return directive;
@@ -323,8 +323,8 @@ struct CapturedImportBind
 inline bool pythonImportBindOf( TSNode namesNode, TSNode aliasNode, std::string_view src, CapturedImportBind& out )
 {
     const bool   hasAlias = !ts_node_is_null( aliasNode );
-    const TSNode clause   = hasAlias ? ts_node_parent( namesNode ) : namesNode;
-    out.directive         = ts_node_parent( clause );
+    const TSNode clause   = hasAlias ? parentOf( namesNode ) : namesNode;
+    out.directive         = parentOf( clause );
     const bool   isFrom   = kindIs( ts_node_type( out.directive ), "import_from_statement" );
     const TSNode first    = fieldChild( out.directive, isFrom ? NodeField::ModuleName : NodeField::Name );
     if( nodeTextOf( first, src ).empty() )
@@ -352,10 +352,10 @@ inline bool webReexportBindOf( TSNode namesNode, TSNode aliasNode, std::string_v
 {
     static constexpr std::string_view kStar = "*";
     const bool star      = kindIs( ts_node_type( namesNode ), "string" );
-    const bool namespc   = !star && kindIs( ts_node_type( ts_node_parent( namesNode ) ), "namespace_export" );
-    out.directive        = star ? ts_node_parent( namesNode )
-                         : namespc ? ts_node_parent( ts_node_parent( namesNode ) )
-                                   : ts_node_parent( ts_node_parent( ts_node_parent( namesNode ) ) );
+    const bool namespc   = !star && kindIs( ts_node_type( parentOf( namesNode ) ), "namespace_export" );
+    out.directive        = star ? parentOf( namesNode )
+                         : namespc ? parentOf( parentOf( namesNode ) )
+                                   : parentOf( parentOf( parentOf( namesNode ) ) );
     if( ts_node_is_null( out.directive ) || !kindIs( ts_node_type( out.directive ), "export_statement" )   // a capture the query did not
         || ( !star && !kindIs( ts_node_type( namesNode ), "identifier" ) ) )                                // shape this way is refused
     {

@@ -15,7 +15,7 @@
 #   (n1) "path from X to serialising a dict" does NOT fire, though `dict` is a symbol here
 #   (n2) "path from X to spawning ripgrep" does NOT fire, though `spawning` and `ripgrep` are symbols here
 #   (n3) an endpoint no resolver finds: no block, and nothing on stdout says not found
-#   (n4) a task that is not a graph question: no block
+#   (n4) a task that is not a graph question: no block ("how does A reach B" IS one since SENTENCE-SUBJECT: test/sentencesubjectcheck.sh G)
 #   (j1) --json carries no block (one document per dialect)
 #   (x1) MCP `for`: the same <graph_verb …> opening tag and the same path answer element
 # FIX ROUND 1 (review B1/S1-S5, mutants):
@@ -145,7 +145,7 @@ u="$( attr "$TMP/t1.xml" unresolved )"
 if [ "$u" = "notReal_xq" ] && xmlok "$TMP/t1.xml"; then ok "(t1b) unresolved= names the spelling that failed (legend clause rides; well-formed)"; else no "(t1b) unresolved=[$u]"; fi
 
 for arm in "n1|path from startEntry to serialising a dict" "n2|path from startEntry to spawning ripgrep" \
-           "n3|path from startEntry to notReal_xq" "n4|how does startEntry reach leaf_sink"
+           "n3|path from startEntry to notReal_xq" "n4|how does startEntry handle leaf_sink"
 do
     id="${arm%%|*}"; q="${arm#*|}"
     run --for="$q" >"$TMP/$id.xml"
@@ -186,7 +186,9 @@ then ok "(n8) \"e.g.\" is prose: --callers=leaf_sink with no tried="
 else no "(n8) verb=[$( attr "$TMP/n8.xml" verb )] tried=[$( attr "$TMP/n8.xml" tried )] unresolved=[$( attr "$TMP/n8.xml" unresolved )]"; fi
 
 # S2: a token budget holds the verb back: the self-closed tag names it, verb= is the call, no verb body
-for arm in "b1a|--token-budget=4100"
+# TOKEN-BUDGET-MONOTONE (2026-11-14): a budget holds the block only when the answer plus the block does not fit it (4100 held it
+# at any size; that answer now fits 4100 whole and comes back byte for byte, block and all): 100 forces the hold.
+for arm in "b1a|--token-budget=100"
 do
     id="${arm%%|*}"; fl="${arm#*|}"
     run --for="path from startEntry to leaf_sink" "$fl" >"$TMP/$id.xml"

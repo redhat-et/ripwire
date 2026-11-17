@@ -12,8 +12,12 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>       // gType3PassRuns / gType3PassPairs — the QD-ENVOY-TIME cost-bound counters
+#include <bit>          // std::popcount — CloneLcsBits counts the zero bits of its DP vector
 #include <cctype>
 #include <cstdint>
+#include <cstdlib>      // std::getenv — RIPWIRE_LCS_VERIFY
+#include <span>         // cloneLcsLen — a clamped token run is a view, not a copy
 #include <limits>       // std::numeric_limits — the mask-width static_assert: an index shifted into a mask must fit it
 #include <cstdio>
 #include <string>
@@ -386,6 +390,65 @@ inline std::string normalizeSpan( const std::string& src, std::uint32_t a, std::
     return out;
 }
 
+// CLONES-PERSIST: the exact-clone KEY of one body, packed in one u64 so the cache can carry it per Function/Method def
+// and a warm findClones groups bodies with no file I/O. High 40 bits: FNV-1a over the SAME byte stream normalizeSpan
+// builds (each normalized form plus its ' '), top bit forced so a computed key is never kCloneKeyNone; low 24 bits:
+// the token count, SATURATING at 2^24-1 (a floor the minTokens test can still pass; the verify step re-counts).
+// Equal normalized strings give equal keys, so grouping by key yields a SUPERSET of every true clone group;
+// findClones then re-reads only the members of keys with >= 2 bodies and compares the real strings, so a hash
+// collision can never print a false clone.
+inline constexpr unsigned      kCloneKeyTokenBits = 24;
+inline constexpr std::uint64_t kCloneKeyTokenMask = ( std::uint64_t( 1 ) << kCloneKeyTokenBits ) - 1;
+inline constexpr std::uint64_t kCloneKeyNone      = 0;   // not computed (old record, keyless def, oversized body)
+
+inline std::uint32_t cloneKeyTokens( std::uint64_t key ) noexcept
+{
+    return std::uint32_t( key & kCloneKeyTokenMask );
+}
+
+inline std::uint64_t cloneBodyKey( const std::string& src, std::uint32_t a, std::uint32_t b, bool stripHashComments )
+{
+    std::uint64_t hash   = 14695981039346656037ull;   // FNV-1a 64 offset basis
+    std::uint64_t tokens = 0;
+    scanCodeTokens( src, a, b, stripHashComments, false,
+                    [ & ]( std::string_view token, CodeTokenKind kind )
+                    {
+                        for( const char c : cloneNormalizedForm( token, kind ) )
+                        {
+                            hash = hashutil::fnv1aAbsorb( hash, c );
+                        }
+                        hash = hashutil::fnv1aAbsorb( hash, ' ' );
+                        ++tokens;
+                    } );
+    const std::uint64_t tokenField = tokens < kCloneKeyTokenMask ? tokens : kCloneKeyTokenMask;   // saturates: findClones re-counts on verify
+    return ( hash & ~kCloneKeyTokenMask ) | ( std::uint64_t( 1 ) << 63 ) | tokenField;
+}
+
+// Read one indexed file whole, the way both clone passes always have. false (and `bytes` empty) when it cannot be
+// opened or read, or is empty: such a file contributes no bodies (never a crash).
+inline bool readCloneSourceFile( const IngestResult& ing, std::uint32_t fileId, std::string& bytes )
+{
+    bytes.clear();
+    std::FILE* fp = std::fopen( diskPath( ing, fileId ).c_str(), "rb" );
+    if( !fp )
+    {
+        return false;
+    }
+    std::fseek( fp, 0, SEEK_END );
+    const long sz = std::ftell( fp );
+    std::fseek( fp, 0, SEEK_SET );
+    if( sz > 0 )
+    {
+        bytes.resize( std::size_t( sz ) );
+        if( std::fread( bytes.data(), 1, std::size_t( sz ), fp ) != std::size_t( sz ) )
+        {
+            bytes.clear();
+        }
+    }
+    std::fclose( fp );
+    return !bytes.empty();
+}
+
 // type: 2 = exact normalized-stream match (Type-1/2, similarity==1); 3 = near-miss (Type-3, similarity in
 // [kType3MinSimilarity,1)). Defaults keep every existing consumer (main.cpp --clones emit, quality.h duplication
 // delta) byte-identical: they read only .members/.tokens, and findClones() still returns ONLY type==2 groups.
@@ -412,88 +475,194 @@ struct CloneGroup
     float               similarity = 1.0f;   // 1.0 for exact; LCS-ratio in [kType3MinSimilarity,1) for Type-3
 };
 
-// Find function/method bodies with identical normalized token streams (≥ minTokens, ≥2 members).
-inline std::vector<CloneGroup> findClones( const IngestResult& ing, int minTokens )
+// CLONES-PERSIST: findClones runs in two passes over flat arrays (no per-body string, no node map).
+//   (1) KEY every candidate body: from ing.cloneKeys (written at ingest, carried by the cache) with no file I/O; a
+//       body without a key (a def no parse worker keyed, an IngestResult built without the side array) reads its
+//       file once and is keyed here.
+//   (2) VERIFY: only bodies whose key is shared by >= 2 bodies (clone groups are ~2 % of keys) are re-read and their
+//       real normalized strings compared, exactly as the one-pass detector compared them, so a key collision splits
+//       into its true groups and never prints a false clone.
+namespace clonepass
 {
-    // Require a real body (a [sigEndByte,endByte) region exists): excludes prototypes AND the
-    // most-vexing-parse phantoms — block-scope `Type name(args);` variable decls the grammar shapes like a
-    // function declarator (they have no body, so sigEndByte==endByte). We compare the BODY, so
-    // same-implementation / different-name still matches.
+struct KeyRow
+{
+    std::uint64_t key;
+    std::uint32_t seq;   // the one-pass detector's visiting order (file, then id): a group's member order
+    NodeId        id;
+};
+
+struct VerifyRow
+{
+    std::uint32_t seq;
+    std::uint32_t run;           // which shared key this body belongs to
+    NodeId        id;
+    std::uint32_t tokens = 0;
+    bool          read   = false;   // false: the file could not be read now, or the body is under minTokens — no part
+    std::string   norm;
+};
+
+// Pass 1. Same candidate set as the one-pass detector: a Function/Method with a real body region [sigEndByte,endByte)
+// — this excludes prototypes AND the most-vexing-parse phantoms (block-scope `Type name(args);` variable decls the
+// grammar shapes like a function declarator have no body, so sigEndByte==endByte). We compare the BODY, so
+// same-implementation / different-name still matches.
+inline std::vector<KeyRow> keyBodies( const IngestResult& ing, int minTokens )
+{
     const SymbolsByFile byFile = symbolsByFileInIdOrder(
         ing, []( const Symbol& s ) { return ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && s.endByte > s.sigEndByte; } );
-
-    // normalized body → member symbol ids. N=2 is FREE: rw::svector<NodeId,1> and <NodeId,2> are both 16 B
-    // (the union's inline array can never be smaller than the heap pointer it shares storage with), so the
-    // second slot costs nothing and lifts inline coverage from 97.8%/94.9% to 99.5%/98.8% across the two
-    // census corpora. Almost every distinct body is unique — the whole point of the pass is that the rare
-    // key with ≥2 members is a clone — so this replaces ~2.4K/7.2K one-element heap blocks with none.
-    HashMap<std::string, rw::SmallVec<NodeId, 2>> groups;
-    HashMap<NodeId, std::uint32_t>                tok;   // symbol → token count (for ranking)
-    std::string bytes;
+    const bool keysFit = ing.cloneKeys.size() == ing.symbols.size();
+    std::vector<KeyRow> rows;
+    std::string         bytes;
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
-        if( byFile[f].empty() )
-        {
-            continue;
-        }
-        std::FILE* fp = std::fopen( diskPath( ing, std::uint32_t( f ) ).c_str(), "rb" );
-        if( !fp )
-        {
-            continue;
-        }
-        std::fseek( fp, 0, SEEK_END );
-        const long sz = std::ftell( fp );
-        std::fseek( fp, 0, SEEK_SET );
-        bytes.clear();
-        if( sz > 0 )
-        {
-            bytes.resize( std::size_t( sz ) );
-            if( std::fread( bytes.data(), 1, std::size_t( sz ), fp ) != std::size_t( sz ) )
-            {
-                bytes.clear();
-            }
-        }
-        std::fclose( fp );
-        if( bytes.empty() )
-        {
-            continue;
-        }
-
+        bool loaded = false;
+        bool ok     = false;
         for( NodeId id : byFile[f] )
         {
-            const Symbol& s = ing.symbols[id];
-            std::uint32_t tc = 0;
-            const bool    hash = usesHashLineComments( s.lang );   // `#` line comments
-            std::string   norm = normalizeSpan( bytes, s.sigEndByte, s.endByte, tc, hash );   // the BODY only [sigEndByte,endByte)
-            if( int( tc ) < minTokens )
+            std::uint64_t key = keysFit ? ing.cloneKeys[id] : kCloneKeyNone;
+            if( key == kCloneKeyNone )
             {
-                continue;
+                if( !loaded )
+                {
+                    ok     = readCloneSourceFile( ing, f, bytes );
+                    loaded = true;
+                }
+                if( !ok )
+                {
+                    continue;
+                }
+                const Symbol& s = ing.symbols[id];
+                key             = cloneBodyKey( bytes, s.sigEndByte, s.endByte, usesHashLineComments( s.lang ) );
             }
-            tok[id] = tc;
-            groups[ std::move( norm ) ].push_back( id );
+            // A saturated token field is a floor, not a count: keep the body for the verify step, which re-counts.
+            const std::uint32_t keyTokens = cloneKeyTokens( key );
+            if( keyTokens == kCloneKeyTokenMask || int( keyTokens ) >= minTokens )
+            {
+                rows.push_back( { key, std::uint32_t( rows.size() ), id } );
+            }
         }
     }
+    return rows;
+}
 
-    std::vector<CloneGroup> out;
-    for( auto& [norm, members] : groups )
+// The rows of keys shared by >= 2 bodies, numbered by run (one run per shared key), in seq order.
+inline std::vector<VerifyRow> sharedKeyRows( std::vector<KeyRow> rows )
+{
+    std::sort( rows.begin(), rows.end(), []( const KeyRow& x, const KeyRow& y ) { return x.key != y.key ? x.key < y.key : x.seq < y.seq; } );
+    std::vector<VerifyRow> shared;
+    std::uint32_t          runCount = 0;
+    for( std::size_t i = 0; i < rows.size(); )
     {
-        if( members.size() >= 2 )
+        std::size_t j = i + 1;
+        while( j < rows.size() && rows[j].key == rows[i].key )
         {
-            // CloneGroup::members stays a std::vector — it is the RETURNED type, read by four verbs and by
-            // quality.h, and it is materialized only for the ≥2-member groups (2.2%/1.1% of keys), so the
-            // one allocation per emitted group is not what this conversion was about.
-            out.push_back( { std::vector<NodeId>( members.begin(), members.end() ), tok[members[0]] } );
+            ++j;
+        }
+        if( j - i >= 2 )
+        {
+            for( std::size_t k = i; k < j; ++k )
+            {
+                shared.push_back( { rows[k].seq, runCount, rows[k].id } );
+            }
+            ++runCount;
+        }
+        i = j;
+    }
+    std::sort( shared.begin(), shared.end(), []( const VerifyRow& x, const VerifyRow& y ) { return x.seq < y.seq; } );
+    return shared;
+}
+
+// Pass 2's reads: in seq order, so each file is read once; fills norm/tokens/read.
+inline void normalizeShared( const IngestResult& ing, int minTokens, std::vector<VerifyRow>& shared )
+{
+    std::string   bytes;
+    std::uint32_t loadedFile = std::numeric_limits<std::uint32_t>::max();
+    bool          fileOk     = false;
+    for( VerifyRow& v : shared )
+    {
+        const Symbol& s = ing.symbols[v.id];
+        if( s.fileId != loadedFile )
+        {
+            fileOk     = readCloneSourceFile( ing, s.fileId, bytes );
+            loadedFile = s.fileId;
+        }
+        if( fileOk )
+        {
+            v.norm = normalizeSpan( bytes, s.sigEndByte, s.endByte, v.tokens, usesHashLineComments( s.lang ) );
+            v.read = int( v.tokens ) >= minTokens;
         }
     }
-    std::sort( out.begin(), out.end(), [ & ]( const CloneGroup& x, const CloneGroup& y ) { // biggest clones first; stable tiebreak by first member's file:line
+}
+
+// One shared key's rows [first, last) (seq order): split by the real normalized string, keep every split of >= 2.
+inline void appendVerifiedGroups( const std::vector<VerifyRow>& shared, std::size_t first, std::size_t last, std::vector<CloneGroup>& out )
+{
+    std::vector<std::size_t>         heads;   // the first row of each distinct normalized string
+    std::vector<std::vector<NodeId>> split;   // parallel to heads
+    for( std::size_t k = first; k < last; ++k )
+    {
+        if( !shared[k].read )
+        {
+            continue;
+        }
+        std::size_t h = 0;
+        while( h < heads.size() && shared[heads[h]].norm != shared[k].norm )
+        {
+            ++h;
+        }
+        if( h == heads.size() )
+        {
+            heads.push_back( k );
+            split.emplace_back();
+        }
+        split[h].push_back( shared[k].id );
+    }
+    for( std::size_t h = 0; h < heads.size(); ++h )
+    {
+        if( split[h].size() >= 2 )
+        {
+            out.push_back( { std::move( split[h] ), shared[heads[h]].tokens } );
+        }
+    }
+}
+
+// Biggest clones first; tiebreak by first member's file:line, then its id (a total order: two groups never share a
+// first member).
+inline void sortGroups( const IngestResult& ing, std::vector<CloneGroup>& groups )
+{
+    std::sort( groups.begin(), groups.end(), [ & ]( const CloneGroup& x, const CloneGroup& y ) {
         if( x.tokens != y.tokens )
         {
             return x.tokens > y.tokens;
         }
         const Symbol& sx = ing.symbols[x.members[0]];
         const Symbol& sy = ing.symbols[y.members[0]];
-        return ing.files[sx.fileId] != ing.files[sy.fileId] ? ing.files[sx.fileId] < ing.files[sy.fileId] : sx.line < sy.line;
+        if( ing.files[sx.fileId] != ing.files[sy.fileId] )
+        {
+            return ing.files[sx.fileId] < ing.files[sy.fileId];
+        }
+        return sx.line != sy.line ? sx.line < sy.line : x.members[0] < y.members[0];
     } );
+}
+}   // namespace clonepass
+
+// Find function/method bodies with identical normalized token streams (≥ minTokens, ≥2 members).
+inline std::vector<CloneGroup> findClones( const IngestResult& ing, int minTokens )
+{
+    std::vector<clonepass::VerifyRow> shared = clonepass::sharedKeyRows( clonepass::keyBodies( ing, minTokens ) );
+    clonepass::normalizeShared( ing, minTokens, shared );
+    std::sort( shared.begin(), shared.end(), []( const clonepass::VerifyRow& x, const clonepass::VerifyRow& y ) { return x.run != y.run ? x.run < y.run : x.seq < y.seq; } );
+    std::vector<CloneGroup> out;
+    for( std::size_t i = 0; i < shared.size(); )
+    {
+        std::size_t j = i + 1;
+        while( j < shared.size() && shared[j].run == shared[i].run )
+        {
+            ++j;
+        }
+        clonepass::appendVerifiedGroups( shared, i, j, out );
+        i = j;
+    }
+    clonepass::sortGroups( ing, out );
     return out;
 }
 
@@ -528,6 +697,7 @@ inline std::vector<CloneGroup> findClones( const IngestResult& ing, int minToken
 //      the emitted set was verified pair-identical against the exact baseline on this repo src/, SFML, and llama.cpp
 //      (test/clonebandcheck.sh asserts the parity on a borderline-including fixture on every run).
 //   5. Only pairs passing (a)+(a′)+(b) get the O(n·m) LCS over the two token sequences (n,m ≤ per-body token count;
+//      QD-LCS runs it bit-parallel, n·⌈m/64⌉ word steps, and stops once the pair cannot reach the threshold;
 //      capped at kType3MaxTokensForLcs so one pathological pair can't dominate). similarity = 2·LCS/(|a|+|b|).
 //   6. Report pairs with kType3MinSimilarity ≤ similarity < 1.0 as CloneGroup{ {a,b}, tokens, type=3, similarity }.
 //
@@ -653,6 +823,12 @@ struct Type3Stats
     std::uint64_t jaccardMerges  = 0;   // exact fingerprint merges run
     std::uint64_t lcsRuns        = 0;   // pairs that cleared every gate and reached the LCS DP
     std::uint64_t emittedPairs   = 0;   // final Type-3 pairs returned
+    std::uint64_t lcsComputed    = 0;   // LCS DPs actually run (a cap re-run reuses the candidate walk's; never a parity counter)
+    std::uint64_t partnersPeak   = 0;   // the candidate walk's largest partner list (distinct candidates: <= candidateCount)
+    // RIPWIRE_LCS_VERIFY=1 only (test/lcsidentitycheck.sh): every LCS the pass ran, re-run by the plain DP and compared
+    std::uint64_t lcsVerified         = 0;   // pairs compared against the plain DP
+    std::uint64_t lcsVerifyExits      = 0;   // ... of which the fast path answered "below need" (the early exit)
+    std::uint64_t lcsVerifyMismatches = 0;   // a kept length that differs, or an exit on a pair that reaches need
     bool          pairCapHit     = false;   // kType3MaxPairs fired: the pair list (and every count built on it) is a FLOOR
 
     // The DISCLOSE sink for the pass's one degrade. Until 2026-09-24 the cap used the one-argument DISCLOSE, whose
@@ -688,33 +864,494 @@ inline std::uint64_t cloneTokenHash( const std::string& t, std::uint64_t seed ) 
     return h;
 }
 
+// The sorted, de-duplicated kFpGram-gram fingerprint set of one normalized token stream (empty under kFpGram tokens): the one
+// definition the Type-3 pass buckets and Jaccard-compares on, and the moved-body sketch (cloneSketchOfStream) is built from.
+inline std::vector<std::uint64_t> cloneGramFingerprints( const std::vector<std::string>& raw )
+{
+    std::vector<std::uint64_t> fp;
+    if( raw.size() >= kFpGram )
+    {
+        fp.reserve( raw.size() - kFpGram + 1 );
+        for( std::size_t i = 0; i + kFpGram <= raw.size(); ++i )
+        {
+            std::uint64_t g = 1469598103934665603ull;
+            for( std::uint32_t k = 0; k < kFpGram; ++k )
+            {
+                g = cloneTokenHash( raw[i + k], g );
+            }
+            fp.push_back( g );
+        }
+        std::sort( fp.begin(), fp.end() );
+        fp.erase( std::unique( fp.begin(), fp.end() ), fp.end() );
+    }
+    return fp;
+}
+
+// QD-ENTRY-CEILING MOVES (2026-11-13) — the Type-3 pass's own minhash sketch of one body, kept as a value so a Snapshot can carry it
+// (128 bytes) where it cannot carry the body: --quality-delta reads a moved-and-edited body by comparing the sketch of a NEW body with
+// the sketch the baseline recorded for a body that left its key. Same normalization (identifiers, numbers, strings erased), same
+// grams, same fixed permutations as the pre-gate above, so a near-miss here is a near-miss there.
+using CloneSketch = std::array<std::uint8_t, kSketchHashes>;
+inline CloneSketch cloneSketchOfStream( const std::vector<std::string>& raw )
+{
+    CloneSketch sig{};
+    cloneSketchSig( cloneGramFingerprints( raw ), sig.data() );
+    return sig;
+}
+// The k-gram Jaccard the two sketches estimate: the matching-component share, with the 8-bit truncation's 1/256 collision floor
+// taken out (the RECALL BOUND table above: p = J + (1-J)/256). Standard error about sqrt(J(1-J)/128): 0.03 at J = 0.85.
+inline float cloneSketchJaccard( const CloneSketch& a, const CloneSketch& b ) noexcept
+{
+    const float p = float( cloneSketchMatches( a.data(), b.data() ) ) / float( kSketchHashes );
+    return std::max( 0.0f, ( p - 1.0f / 256.0f ) / ( 1.0f - 1.0f / 256.0f ) );
+}
+
 // LCS length of two token-ID sequences via rolling two-row DP. O(|a|·|b|) time, O(min) space. Comparing interned
 // u32 ids (A4-P2) instead of std::string cells makes each DP cell a scalar compare. Sequences are clamped to
 // kType3MaxTokensForLcs by the caller so this stays a bounded constant per pair.
-inline std::size_t cloneLcsLen( const std::vector<std::uint32_t>& a, const std::vector<std::uint32_t>& b )
+//
+// T3-LCS (QD-ENVOY-TIME): the two rows are the CALLER's scratch, grown once per pass instead of allocated per pair,
+// and the per-row refill is gone. It was dead work: column 0 of every row is 0 and never written, and columns 1..nb
+// of the row about to be filled are all overwritten before any is read (cell j reads only the previous row and
+// cell j-1 of its own row). The rows swap as pointers; the result is the same value cell for cell.
+//
+// QD-LCS early exit: `need` > 0 asks only "does the LCS reach `need`?". Row i's last cell is LCS(a[0..i], b), and each
+// later row adds at most 1, so once that cell plus the rows left is below `need` the answer is no, and the DP stops
+// and returns that bound (a value below `need`). A pair that reaches `need` never stops early and gets its exact
+// length. `need` = 0 (the default) is the plain DP.
+inline std::size_t cloneLcsLen( std::span<const std::uint32_t> a, std::span<const std::uint32_t> b, std::vector<std::uint32_t>& prevRow,
+                                std::vector<std::uint32_t>& curRow, std::size_t need = 0 )
 {
     const std::size_t na = a.size(), nb = b.size();
     if( na == 0 || nb == 0 )
     {
         return 0;
     }
-    std::vector<std::uint32_t> prev( nb + 1, 0 ), cur( nb + 1, 0 );
-    for( std::size_t i = 1; i <= na; ++i )
+    if( std::min( na, nb ) < need )
     {
+        return std::min( na, nb );
+    }
+    prevRow.assign( nb + 1, 0 );
+    curRow.assign( nb + 1, 0 );
+    std::uint32_t*       prev = prevRow.data();
+    std::uint32_t*       cur  = curRow.data();
+    const std::uint32_t* bs   = b.data();
+    for( std::size_t i = 0; i < na; ++i )
+    {
+        const std::uint32_t ai = a[i];
         for( std::size_t j = 1; j <= nb; ++j )
         {
-            cur[j] = ( a[i - 1] == b[j - 1] ) ? prev[j - 1] + 1 : std::max( prev[j], cur[j - 1] );
+            cur[j] = ( ai == bs[j - 1] ) ? prev[j - 1] + 1 : std::max( prev[j], cur[j - 1] );
         }
         std::swap( prev, cur );
-        std::fill( cur.begin(), cur.end(), 0u );
+        const std::size_t reach = prev[nb] + ( na - 1 - i );   // the most the LCS can still reach
+        if( reach < need )
+        {
+            return reach;
+        }
     }
     return prev[nb];
 }
+
+// The early exit's `need` for a pair whose ratio denominator is `den` (= |a| + |b|): ceil(0.4·den) less one. A kept pair
+// has 2·LCS/den ≥ kType3MinSimilarity (0.8), so LCS ≥ ceil(0.4·den); the one-token margin keeps the exit clear of float
+// rounding (the global profile builds with -ffast-math), since a length two below that ceiling is at least 2/den under
+// the threshold. Integer arithmetic only, so it is the same on every compiler.
+inline std::size_t type3LcsNeed( std::size_t den ) noexcept
+{
+    static_assert( kType3MinSimilarity == 0.80f, "type3LcsNeed hard-codes the 0.8 ratio as 2/5" );
+    const std::size_t ceilTwoFifths = ( 2 * den + 4 ) / 5;
+    return ceilTwoFifths == 0 ? 0 : ceilTwoFifths - 1;
+}
+
+// QD-LCS bit-parallel: the LCS length of `a` against many `b`s, 64 DP cells per machine word (Allison-Dix 1986, in the
+// form of Hyyrö 2004, "Bit-parallel LCS-length computation revisited"). load(a) builds one match mask per distinct token
+// of a: bit k is set where a[k] is that token. lcs(b) then keeps one bit vector V over a's positions, all ones at the
+// start, and for each token of b updates
+//     U = V & M[token];   V = (V + U) | (V & ~M[token])
+// where the add carries across words. After the last token the LCS is the number of zero bits in V's low |a| bits. A
+// token of b that a does not hold leaves V unchanged, so its row costs one table load. The answer equals cloneLcsLen's
+// cell for cell; test/lcsidentitycheck.sh checks both against an independent DP on a fuzz set and on real pairs.
+//
+// Built for the Type-3 pair walk, where one candidate meets every partner in turn: the walk loads a candidate once and
+// runs every partner against its masks. The slot table is indexed by token id (the pass interns ids densely), grows to
+// the largest id seen and is cleared through the list of ids a load touched, so a load costs O(|a|) and no hashing.
+//
+// `need` has cloneLcsLen's contract: an answer ≥ need is exact, and once the LCS cannot reach `need` the scan stops and
+// returns a bound below it. The bound after j tokens of b is zeros(V) + (|b| - j), and it falls by at most one per token,
+// so it is counted (a popcount pass) only at the first token where it could have fallen below `need`, not every row.
+class CloneLcsBits
+{
+public:
+    void load( std::span<const std::uint32_t> a )
+    {
+        for( const std::uint32_t t : used_ )
+        {
+            slot_[t] = 0;
+        }
+        used_.clear();
+        masks_.clear();
+        size_  = a.size();
+        words_ = ( size_ + 63 ) / 64;
+        for( std::size_t k = 0; k < size_; ++k )
+        {
+            const std::uint32_t t = a[k];
+            if( t >= slot_.size() )
+            {
+                slot_.resize( std::size_t( t ) + 1, 0 );
+            }
+            if( slot_[t] == 0 )
+            {
+                used_.push_back( t );
+                slot_[t] = std::uint32_t( used_.size() );
+                masks_.resize( masks_.size() + words_, 0 );
+            }
+            masks_[ ( slot_[t] - 1 ) * words_ + k / 64 ] |= std::uint64_t( 1 ) << ( k % 64 );
+        }
+    }
+
+    std::size_t lcs( std::span<const std::uint32_t> b, std::size_t need = 0 )
+    {
+        const std::size_t nb       = b.size();
+        const std::size_t shortest = std::min( size_, nb );
+        if( shortest == 0 || shortest < need )
+        {
+            return shortest;
+        }
+        v_.assign( words_, ~std::uint64_t( 0 ) );
+        std::uint64_t* const v    = v_.data();
+        std::size_t          next = nb - need + 1;   // the first token count after which the bound can be below need
+        for( std::size_t j = 0; j < nb; ++j )
+        {
+            const std::uint32_t t = b[j];
+            if( t < slot_.size() && slot_[t] != 0 )
+            {
+                const std::uint64_t* const m     = masks_.data() + std::size_t( slot_[t] - 1 ) * words_;
+                std::uint64_t              carry = 0;
+                for( std::size_t w = 0; w < words_; ++w )
+                {
+                    const std::uint64_t vw = v[w];
+                    const std::uint64_t u  = vw & m[w];
+                    v[w]                   = infra::platform::addWithCarry64( vw, u, carry ) | ( vw & ~m[w] );
+                }
+            }
+            if( j + 1 == next )
+            {
+                const std::size_t reach = zeros() + ( nb - j - 1 );   // the most the LCS can still reach
+                if( reach < need )
+                {
+                    return reach;
+                }
+                next = j + 2 + ( reach - need );
+            }
+        }
+        return zeros();
+    }
+
+private:
+    // the zero bits of V in a's |a| positions: the LCS of a and the tokens of b seen so far
+    std::size_t zeros() const noexcept
+    {
+        std::size_t ones = 0;
+        for( std::size_t w = 0; w + 1 < words_; ++w )
+        {
+            ones += std::size_t( std::popcount( v_[w] ) );
+        }
+        const std::size_t topBits = size_ - ( words_ - 1 ) * 64;   // 1..64 live bits in the last word
+        const std::uint64_t topMask = topBits == 64 ? ~std::uint64_t( 0 ) : ( std::uint64_t( 1 ) << topBits ) - 1;
+        ones += std::size_t( std::popcount( v_[words_ - 1] & topMask ) );
+        return size_ - ones;
+    }
+
+    std::vector<std::uint32_t> slot_;    // token id -> 1 + its mask row in masks_; 0 = not in a
+    std::vector<std::uint32_t> used_;    // the ids the last load gave a slot (cleared by the next load)
+    std::vector<std::uint64_t> masks_;   // one row of words_ words per distinct token of a
+    std::vector<std::uint64_t> v_;       // the DP's bit vector, words_ words
+    std::size_t                size_  = 0;
+    std::size_t                words_ = 0;
+};
+
+// One Type-3 candidate: one representative per DISTINCT normalized stream (findClonesType3 below collects them).
+struct Type3Cand
+{
+    NodeId                     id;
+    std::vector<std::uint32_t> toks;    // normalized token sequence (interned ids; LCS input)
+    std::vector<std::uint64_t> fp;      // sorted, de-duplicated k-gram fingerprint set
+};
+// fingerprint gram → the candidates holding it, in ascending candidate order (see findClonesType3 on N=4)
+using Type3Buckets = HashMap<std::uint64_t, rw::SmallVec<std::uint32_t, 4>>;
+
+// THE PAIR SEARCH of findClonesType3: every distinct candidate pair that shares a usable bucket and is in the length
+// band goes through the cap, the sketch, the Jaccard merge and the LCS, once. run() returns the kept pairs (unsorted;
+// the caller sorts) and leaves the counters in `st`.
+//
+// THE WALK (T3-PAIRSEEN, QD-ENVOY-TIME): candidate-major, with no global pair table. Candidate ia's partners are every
+// ib > ia that shares a usable bucket with it and is in its length band; they are gathered from ia's own grams into one
+// scratch list, sorted and de-duplicated, then gated in ascending ib. That visits exactly the raw pairs the bucket walk
+// visits (each bucket's every a < b once) and gates exactly the same distinct pairs, so every Type3Stats count and —
+// after the caller's id sort — the emitted vector are the same. What it drops is the `pairSeen` hash the bucket walk
+// de-duplicates through: one find (and, for a new pair, an emplace with rehash growth) per length-band survivor, 31 %
+// of the pass on envoy and the bulk of its 1.68 GB peak.
+//
+// THE CAP is the one place the two walks can differ. kType3MaxPairs keeps the FIRST N gated pairs, and "first" is a
+// visit order: ascending (ia, ib) in the candidate walk, bucket order in the bucket walk. A pass that reaches the cap
+// is therefore re-run by the bucket walk from the start, so the pairs a capped corpus keeps — and the disclosure — are
+// the ones it always kept. The re-run does not pay the LCS twice (CodeRabbit 4542253199): the candidate walk records
+// each LCS it ran, (pair, similarity) in ascending pair order (its visit order), and the bucket walk looks a pair up
+// there before running the DP. The record is at most kType3MaxPairs entries (12 B each) and dies with the search.
+// The partner list holds each partner ONCE (CodeRabbit 4542253208): a per-candidate stamp drops a repeat as it is
+// visited, so the list is bounded by the candidate count, not by ia's raw bucket visits. Shipped corpora do not reach the cap, and test/clonebandcheck.sh runs both walks, capped and
+// uncapped, against each other (-DCTX_TYPE3_BUCKET_WALK compiles the candidate walk out).
+class Type3PairSearch
+{
+public:
+    Type3PairSearch( const std::vector<Type3Cand>& cands, const std::vector<std::uint32_t>& candTokens, const std::vector<std::uint8_t>& candSig,
+                     const Type3Buckets& buckets, Type3Stats& st, bool verifyLcs = false ) noexcept
+        : cands_( cands ), candTokens_( candTokens ), candSig_( candSig ), buckets_( buckets ), st_( st ), verifyLcs_( verifyLcs )
+    {
+    }
+
+    std::vector<CloneGroup> run()
+    {
+        for( const auto& [g, idxs] : buckets_ )
+        {
+            (void)g;
+            ASSUME( std::is_sorted( idxs.begin(), idxs.end() ) && std::adjacent_find( idxs.begin(), idxs.end() ) == idxs.end(),
+                    "a bucket lists each candidate once, in candidate order" );
+        }
+#ifndef CTX_TYPE3_BUCKET_WALK
+        if( walkByCandidate() )
+        {
+            return std::move( out_ );
+        }
+#endif
+        // The bucket walk, as it has always run: every counter restarts, and the cap's "first N" are bucket order. The LCS
+        // ratios the candidate walk computed are read back, not recomputed (similarityOf).
+        out_.clear();
+        rerun_            = true;
+        comparedPairs_    = 0;
+        st_.rawPairVisits = st_.distinctPairs = st_.sketchRejects = st_.jaccardMerges = st_.lcsRuns = 0;
+        walkByBucket();
+        return std::move( out_ );
+    }
+
+private:
+    // (a) length band FIRST (B1) — O(1) and a PURE function of the pair, so it runs ahead of any de-dup bookkeeping and
+    // drops the common length-mismatched pair with a single float compare. The Jaccard gate (b) is O(|fp|) and
+    // DELIBERATELY stays behind the de-dup: a pair recurs in every bucket it shares a k-gram with, so re-running the
+    // merge per recurrence is a large net loss (measured ~3× slower). Emitted SET is unchanged by where either sits: the
+    // gates are pure. Outside the band an LCS-ratio ≥ kType3MinSimilarity is impossible, so dropping here is exact.
+    // Reads the SoA candTokens array ONLY (Y3): two 4-byte loads from a cache-resident array per raw visit.
+    bool inLengthBand( std::uint32_t ia, std::uint32_t ib ) const noexcept
+    {
+        const std::uint32_t lo = std::min( candTokens_[ia], candTokens_[ib] ), hi = std::max( candTokens_[ia], candTokens_[ib] );
+        return hi != 0 && !( float( lo ) / float( hi ) < kType3LenBand );
+    }
+    // Stop-gram cut (A4-P2): a bucket bigger than kType3MaxBucket is a ubiquitous k-gram — O(size²) pairs of pure
+    // boilerplate. Skipped by both walks; any real near-clone in it shares a rarer gram and is compared via a smaller
+    // bucket. A fixed threshold, decided before any per-pair work, so the decision is fully deterministic.
+    static bool usableBucket( const rw::SmallVec<std::uint32_t, 4>& idxs ) noexcept { return idxs.size() >= 2 && idxs.size() <= kType3MaxBucket; }
+
+    // One DISTINCT length-band-surviving pair (ia < ib) through the cap, the sketch, the Jaccard merge and the LCS, in
+    // the order the pass has always run them; false = the cap stops the pass before this pair.
+    bool gatePair( std::uint32_t ia, std::uint32_t ib )
+    {
+        if( comparedPairs_ >= kType3MaxPairs )
+        {
+            return false;
+        }
+        ++st_.distinctPairs;
+#ifndef CTX_TYPE3_SKETCH_OFF
+        // (a′) Y3 minhash pre-gate — O(kSketchHashes) byte compares against the operating point; the grossly
+        // dissimilar pairs that dominate real corpora (99 % at J < 0.20 on llama.cpp) die here without ever
+        // paying the O(|fp|) exact merge. Pure + deterministic (fixed constants); recall bound at the top.
+        if( cloneSketchMatches( candSig_.data() + std::size_t( ia ) * kSketchHashes, candSig_.data() + std::size_t( ib ) * kSketchHashes ) < kSketchMinMatches )
+        {
+            ++st_.sketchRejects;
+            return true;
+        }
+#endif
+        const Type3Cand& ca = cands_[ia];
+        const Type3Cand& cb = cands_[ib];
+        // (b) fingerprint Jaccard — lexical lower bound on similarity, both fp sets sorted → merge count. Behind the
+        // de-dup, so it runs once per distinct length-band-surviving pair, not once per recurrence.
+        ++st_.jaccardMerges;
+        std::size_t inter = 0;
+        for( std::size_t i = 0, j = 0; i < ca.fp.size() && j < cb.fp.size(); )
+        {
+            if( ca.fp[i] == cb.fp[j] ) { ++inter; ++i; ++j; }
+            else if( ca.fp[i] < cb.fp[j] ) { ++i; }
+            else
+            {
+                ++j;
+            }
+        }
+        const std::size_t uni = ca.fp.size() + cb.fp.size() - inter;
+        if( uni == 0 || float( inter ) / float( uni ) < kType3MinFpJaccard )
+        {
+            return true;
+        }
+        // (c) the expensive compare: LCS over token sequences, each a view of its first kType3MaxTokensForLcs (T3-LCS).
+        ++comparedPairs_;
+        ++st_.lcsRuns;
+        const std::span<const std::uint32_t> pa( ca.toks.data(), std::min( ca.toks.size(), kType3MaxTokensForLcs ) );
+        const std::span<const std::uint32_t> pb( cb.toks.data(), std::min( cb.toks.size(), kType3MaxTokensForLcs ) );
+        const std::size_t den = pa.size() + pb.size();
+        const float       sim = similarityOf( ia, ib, pa, pb );
+        if( den == 0 || sim < kType3MinSimilarity || sim >= 1.0f )
+        {
+            return true; // < 1.0: exact would be Type-1/2
+        }
+        // member order stable by symbol id (small id first) → deterministic emit.
+        out_.push_back( { { std::min( ca.id, cb.id ), std::max( ca.id, cb.id ) }, std::max( candTokens_[ia], candTokens_[ib] ), std::uint8_t( 3 ), sim } );
+        return true;
+    }
+
+    // The LCS ratio of (ia, ib): the candidate walk computes and records it; the bucket walk's cap re-run reads the record
+    // first (the walk recorded in ascending pair order, so the record is sorted) and computes only a pair it lacks.
+    float similarityOf( std::uint32_t ia, std::uint32_t ib, std::span<const std::uint32_t> pa, std::span<const std::uint32_t> pb )
+    {
+        const std::uint64_t key = ( std::uint64_t( ia ) << 32 ) | ib;
+        if( rerun_ )
+        {
+            const auto it = std::lower_bound( lcsKeys_.begin(), lcsKeys_.end(), key );
+            if( it != lcsKeys_.end() && *it == key )
+            {
+                return lcsSims_[ std::size_t( it - lcsKeys_.begin() ) ];
+            }
+        }
+        ++st_.lcsComputed;
+        const std::size_t den = pa.size() + pb.size();
+        // below type3LcsNeed the ratio cannot reach kType3MinSimilarity, so the DP may stop early with a smaller value
+        const std::size_t need = type3LcsNeed( den );
+        if( lcsBitsFor_ != ia )   // the candidate walk meets every partner of ia in a row: one load serves them all
+        {
+            lcsBits_.load( pa );
+            lcsBitsFor_ = ia;
+        }
+        const std::size_t lcs = lcsBits_.lcs( pb, need );
+        if( verifyLcs_ )
+        {
+            verifyLcs( pa, pb, need, lcs );
+        }
+        const float       sim = den == 0 ? 0.0f : 2.0f * float( lcs ) / float( den );
+        if( !rerun_ )
+        {
+            ASSUME( lcsKeys_.empty() || lcsKeys_.back() < key, "the candidate walk gates pairs in ascending (ia, ib)" );
+            lcsKeys_.push_back( key );
+            lcsSims_.push_back( sim );
+        }
+        return sim;
+    }
+
+    // The identity check behind RIPWIRE_LCS_VERIFY: the fast answer `lcs` for `need` against the plain DP's exact length. A
+    // length at or above `need` must be exact; one below it must come from a pair whose exact length is below it too.
+    // The bit-parallel LCS run to the end (no need) must equal the plain DP on every pair, exited or not.
+    void verifyLcs( std::span<const std::uint32_t> pa, std::span<const std::uint32_t> pb, std::size_t need, std::size_t lcs )
+    {
+        const std::size_t exact = cloneLcsLen( pa, pb, verifyPrevRow_, verifyCurRow_ );
+        const bool        bad   = ( lcs >= need ? lcs != exact : exact >= need ) || lcsBits_.lcs( pb ) != exact;
+        ++st_.lcsVerified;
+        st_.lcsVerifyExits += lcs < need ? 1 : 0;
+        st_.lcsVerifyMismatches += bad ? 1 : 0;
+    }
+
+    // The candidate walk (see the class comment); false = it reached the cap and the bucket walk must answer.
+    bool walkByCandidate()
+    {
+        std::vector<std::uint32_t> partners;
+        std::vector<std::uint32_t> stamp( cands_.size(), 0 );   // stamp[ib] == ia + 1: ib is already in ia's list
+        for( std::uint32_t ia = 0; ia < cands_.size(); ++ia )
+        {
+            partners.clear();
+            for( const std::uint64_t g : cands_[ia].fp )
+            {
+                const auto it = buckets_.find( g );   // every gram of every candidate was bucketed
+                if( it == buckets_.end() || !usableBucket( it->second ) )
+                {
+                    continue;
+                }
+                for( auto p = std::upper_bound( it->second.begin(), it->second.end(), ia ); p != it->second.end(); ++p )
+                {
+                    ++st_.rawPairVisits;
+                    if( stamp[ *p ] != ia + 1 && inLengthBand( ia, *p ) )
+                    {
+                        stamp[ *p ] = ia + 1;
+                        partners.push_back( *p );
+                    }
+                }
+            }
+            st_.partnersPeak = std::max<std::uint64_t>( st_.partnersPeak, partners.size() );
+            std::sort( partners.begin(), partners.end() );
+            for( const std::uint32_t ib : partners )
+            {
+                if( !gatePair( ia, ib ) )
+                {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    // The bucket walk: every usable bucket's a < b pairs in bucket order, de-duplicated through `pairSeen` (pure
+    // membership; the walk is insertion-ordered, so the kept/dropped split on a cap-hitting corpus is deterministic).
+    void walkByBucket()
+    {
+        HashMap<std::uint64_t, std::uint8_t> pairSeen;
+        for( const auto& [g, idxs] : buckets_ )
+        {
+            (void)g;
+            if( !usableBucket( idxs ) )
+            {
+                continue;
+            }
+            for( std::size_t a = 0; a < idxs.size(); ++a )
+            {
+                for( std::size_t b = a + 1; b < idxs.size(); ++b )
+                {
+                    const std::uint32_t ia = idxs[a], ib = idxs[b];   // ia < ib: the bucket is in candidate order
+                    ++st_.rawPairVisits;
+                    if( !inLengthBand( ia, ib ) || !pairSeen.emplace( ( std::uint64_t( ia ) << 32 ) | ib, std::uint8_t( 1 ) ).second )
+                    {
+                        continue;
+                    }
+                    if( !gatePair( ia, ib ) )
+                    {
+                        DISCLOSE( st_, Type3Stats::DisclosureWhy::PairCapHit, "clones: Type-3 pair cap hit — first N compared (both-gate-surviving) near-misses kept, rest skipped" );
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    const std::vector<Type3Cand>&     cands_;
+    const std::vector<std::uint32_t>& candTokens_;   // SoA token counts (the length band's only read)
+    const std::vector<std::uint8_t>&  candSig_;      // SoA minhash bytes, kSketchHashes per candidate
+    const Type3Buckets&               buckets_;
+    Type3Stats&                       st_;
+    std::vector<CloneGroup>           out_;
+    std::size_t                       comparedPairs_ = 0;
+    CloneLcsBits                      lcsBits_;   // the bit-parallel LCS, loaded with candidate lcsBitsFor_ (QD-LCS)
+    std::uint32_t                     lcsBitsFor_ = ~std::uint32_t( 0 );   // the candidate lcsBits_ holds; none at the start
+    std::vector<std::uint32_t>        verifyPrevRow_, verifyCurRow_;   // the RIPWIRE_LCS_VERIFY plain DP's rows
+    std::vector<std::uint64_t>        lcsKeys_;   // the candidate walk's LCS record: (ia << 32 | ib), ascending
+    std::vector<float>                lcsSims_;   // ... and each pair's similarity
+    bool                              rerun_ = false;   // the bucket walk is re-running a capped pass: read the record first
+    bool                              verifyLcs_ = false;   // RIPWIRE_LCS_VERIFY: check every LCS against the plain DP
+};
 
 // Find Type-3 (gapped) clone PAIRS: normalized streams highly similar (LCS-ratio ≥ kType3MinSimilarity) but not
 // identical. Each returned group has exactly two members {loId,hiId} with type==3 and the measured similarity.
 // Deterministic; bounded (see the header block). Does NOT alter findClones() — callers opt into this pass.
 // statsOut (optional): per-pass pair-visit counters for the clonebandcheck gate; never affects the result.
+// QD-ENVOY-TIME cost bound: Type-3 passes this process ran, and the pairs they emitted in all. --quality-delta prints both on
+// its RIPWIRE_STATS line, and test/qdtype3oncecheck.sh holds the run count to one per call (the pairs are its premise).
+// Relaxed: a count read once at the end, never a synchronization point.
+inline std::atomic<std::uint32_t> gType3PassRuns{ 0 };
+inline std::atomic<std::uint64_t> gType3PassPairs{ 0 };
+
 inline std::vector<CloneGroup> findClonesType3( const IngestResult& ing, int minTokens, Type3Stats* statsOut = nullptr )
 {
     Type3Stats st;
@@ -727,13 +1364,7 @@ inline std::vector<CloneGroup> findClonesType3( const IngestResult& ing, int min
     // A4-P2: token streams are interned to u32 ids (one repo-wide HashMap) so the LCS DP and the k-gram
     // fingerprints compare/hash scalars, not std::strings. Interning order is process-local and never leaks:
     // ids feed only equality-compares, hashes, and set membership — every emitted field stays name/path/line-based.
-    struct Cand
-    {
-        NodeId                     id;
-        std::vector<std::uint32_t> toks;    // normalized token sequence (interned ids; LCS input)
-        std::vector<std::uint64_t> fp;      // sorted, de-duplicated k-gram fingerprint set
-    };
-    std::vector<Cand>                     cands;
+    std::vector<Type3Cand>                cands;
     std::vector<std::uint32_t>            candTokens;   // SoA: token count per candidate — the ONLY field the hot
                                                         // length-band check reads (flat u32 array ⇒ cache-resident
                                                         // across the tens of millions of raw pair visits, instead of
@@ -749,27 +1380,9 @@ inline std::vector<CloneGroup> findClonesType3( const IngestResult& ing, int min
         {
             continue;
         }
-        std::FILE* fp = std::fopen( diskPath( ing, std::uint32_t( f ) ).c_str(), "rb" );
-        if( !fp )
+        if( !readCloneSourceFile( ing, f, bytes ) )
         {
-            continue; // degrade: unreadable file just contributes no candidates (never a crash)
-        }
-        std::fseek( fp, 0, SEEK_END );
-        const long sz = std::ftell( fp );
-        std::fseek( fp, 0, SEEK_SET );
-        bytes.clear();
-        if( sz > 0 )
-        {
-            bytes.resize( std::size_t( sz ) );
-            if( std::fread( bytes.data(), 1, std::size_t( sz ), fp ) != std::size_t( sz ) )
-            {
-                bytes.clear();
-            }
-        }
-        std::fclose( fp );
-        if( bytes.empty() )
-        {
-            continue;
+            continue; // degrade: an unreadable or empty file just contributes no candidates (never a crash)
         }
 
         for( NodeId id : byFile[f] )
@@ -802,22 +1415,7 @@ inline std::vector<CloneGroup> findClonesType3( const IngestResult& ing, int min
 
             // k-gram fingerprint set (sorted+unique for Jaccard by merge) — hashed over the token TEXT, exactly as
             // before, so bucketing + Jaccard are unchanged. (Only the LCS below moved to interned u32 ids.)
-            std::vector<std::uint64_t> fp;
-            if( raw.size() >= kFpGram )
-            {
-                fp.reserve( raw.size() - kFpGram + 1 );
-                for( std::size_t i = 0; i + kFpGram <= raw.size(); ++i )
-                {
-                    std::uint64_t g = 1469598103934665603ull;
-                    for( std::uint32_t k = 0; k < kFpGram; ++k )
-                    {
-                        g = cloneTokenHash( raw[i + k], g );
-                    }
-                    fp.push_back( g );
-                }
-                std::sort( fp.begin(), fp.end() );
-                fp.erase( std::unique( fp.begin(), fp.end() ), fp.end() );
-            }
+            std::vector<std::uint64_t> fp = cloneGramFingerprints( raw );
 
             // intern each token text → dense u32 id: the LCS DP (the O(n·m) hot loop, item 2) then compares scalars
             // instead of std::strings. Interning order is process-local and feeds only equality-compares.
@@ -853,7 +1451,7 @@ inline std::vector<CloneGroup> findClonesType3( const IngestResult& ing, int min
     // adds 850 KB of inline slots to spare ~225 KB of heap, so total footprint is ~5.1 MB against N=4's
     // ~4.5 MB (std::vector today: ~5.3 MB). N=4 is also exactly the 24 bytes a std::vector header already
     // costs, so the array itself does not grow at all and two thirds of the heap blocks simply stop.
-    HashMap<std::uint64_t, rw::SmallVec<std::uint32_t, 4>> buckets;
+    Type3Buckets buckets;
     for( std::uint32_t ci = 0; ci < cands.size(); ++ci )
     {
         for( std::uint64_t g : cands[ci].fp )
@@ -862,129 +1460,19 @@ inline std::vector<CloneGroup> findClonesType3( const IngestResult& ing, int min
         }
     }
 
-    // Enumerate candidate PAIRS via co-occurrence in any bucket; de-dup pairs with a seen-set.
-    HashMap<std::uint64_t, std::uint8_t> pairSeen;
-    std::vector<CloneGroup>              out;
-    std::size_t                          comparedPairs = 0;
-    const auto pairKey = []( std::uint32_t x, std::uint32_t y ) noexcept
-    { return ( std::uint64_t( x ) << 32 ) | std::uint64_t( y ); };
-
-    for( auto& [g, idxs] : buckets )
+    const bool              verifyLcs = std::getenv( "RIPWIRE_LCS_VERIFY" ) != nullptr;
+    std::vector<CloneGroup> out       = Type3PairSearch( cands, candTokens, candSig, buckets, st, verifyLcs ).run();
+    if( verifyLcs )
     {
-        (void)g;
-        if( idxs.size() < 2 )
-        {
-            continue;
-        }
-        // Stop-gram cut (A4-P2): a bucket bigger than kType3MaxBucket is a ubiquitous k-gram — O(size²) pairs of
-        // pure boilerplate. Skip it; any real near-clone in it shares a rarer gram and is compared via a smaller
-        // bucket. Fixed threshold + this is before any per-pair work, so the decision is fully deterministic.
-        if( idxs.size() > kType3MaxBucket )
-        {
-            continue;
-        }
-        std::sort( idxs.begin(), idxs.end() );   // deterministic pair enumeration within the bucket
-        for( std::size_t a = 0; a < idxs.size(); ++a )
-        {
-            for( std::size_t b = a + 1; b < idxs.size(); ++b )
-            {
-                const std::uint32_t ia = idxs[a], ib = idxs[b];   // ia < ib by the sort
-
-                // (a) length band FIRST (B1) — this gate is O(1) and a PURE function of the pair, so hoisting it AHEAD
-                // of the `pairSeen` bookkeeping drops the common length-mismatched pair without ever touching the
-                // hashmap: it replaces that pair's find+emplace (the ~60.5 M raw-visit ops that dominated the pass)
-                // with a single float compare. The Jaccard gate (b) is O(|fp|), NOT O(1), and DELIBERATELY stays AFTER
-                // the de-dup: a pair recurs in every bucket it shares a k-gram with, so re-running the merge per
-                // recurrence is a large net loss (measured ~3× slower) — behind `pairSeen` it runs once per distinct
-                // pair. Emitted SET is unchanged: the gates are pure, so their order and where the de-dup sits never
-                // change WHICH distinct pairs pass both. Outside the length band an LCS-ratio ≥ kType3MinSimilarity is
-                // impossible, so dropping here is exact. Reads the SoA candTokens array ONLY (Y3): two 4-byte loads
-                // from a cache-resident array instead of two random Cand-struct loads per raw visit.
-                ++st.rawPairVisits;
-                const std::uint32_t lo = std::min( candTokens[ia], candTokens[ib] ), hi = std::max( candTokens[ia], candTokens[ib] );
-                if( hi == 0 || float( lo ) / float( hi ) < kType3LenBand )
-                {
-                    continue;
-                }
-
-                // De-dup the length-band survivors (once per distinct pair) + charge the deterministic cap. `pairSeen`
-                // is insertion-order-free (pure membership) and the bucket walk is insertion-ordered + idx-sorted, so
-                // the kept/dropped split on a cap-hitting corpus is fully deterministic.
-                const std::uint64_t pk = pairKey( ia, ib );
-                if( pairSeen.find( pk ) != pairSeen.end() )
-                {
-                    continue;
-                }
-                pairSeen.emplace( pk, 1 );
-                if( comparedPairs >= kType3MaxPairs ) { DISCLOSE( st, Type3Stats::DisclosureWhy::PairCapHit, "clones: Type-3 pair cap hit — first N compared (both-gate-surviving) near-misses kept, rest skipped" ); goto done; }
-                ++st.distinctPairs;
-
-#ifndef CTX_TYPE3_SKETCH_OFF
-                // (a′) Y3 minhash pre-gate — O(kSketchHashes) byte compares against the operating point; the grossly
-                // dissimilar pairs that dominate real corpora (99 % at J < 0.20 on llama.cpp) die here without ever
-                // paying the O(|fp|) exact merge. Pure + deterministic (fixed constants); recall bound at the top.
-                if( cloneSketchMatches( candSig.data() + std::size_t( ia ) * kSketchHashes,
-                                        candSig.data() + std::size_t( ib ) * kSketchHashes ) < kSketchMinMatches )
-                { ++st.sketchRejects; continue; }
-#endif
-
-                const Cand& ca = cands[ia];
-                const Cand& cb = cands[ib];
-
-                // (b) fingerprint Jaccard — lexical lower bound on similarity, both fp sets sorted → merge count. Now
-                // behind the de-dup, so it runs once per distinct length-band-surviving pair, not once per recurrence.
-                ++st.jaccardMerges;
-                std::size_t inter = 0;
-                {
-                    std::size_t i = 0, j = 0;
-                    while( i < ca.fp.size() && j < cb.fp.size() )
-                    {
-                        if( ca.fp[i] == cb.fp[j] ) { ++inter; ++i; ++j; }
-                        else if( ca.fp[i] < cb.fp[j] ) { ++i; }
-                        else
-                        {
-                            ++j;
-                        }
-                    }
-                }
-                const std::size_t uni = ca.fp.size() + cb.fp.size() - inter;
-                if( uni == 0 || float( inter ) / float( uni ) < kType3MinFpJaccard )
-                {
-                    continue;
-                }
-
-                // (c) the expensive compare: LCS over token sequences (clamped to the cost cap).
-                ++comparedPairs;
-                ++st.lcsRuns;
-                const std::vector<std::uint32_t>* pa = &ca.toks;
-                const std::vector<std::uint32_t>* pb = &cb.toks;
-                std::vector<std::uint32_t>        ta, tb;
-                if( pa->size() > kType3MaxTokensForLcs ) { ta.assign( pa->begin(), pa->begin() + kType3MaxTokensForLcs ); pa = &ta; }
-                if( pb->size() > kType3MaxTokensForLcs ) { tb.assign( pb->begin(), pb->begin() + kType3MaxTokensForLcs ); pb = &tb; }
-                const std::size_t lcs = cloneLcsLen( *pa, *pb );
-                const std::size_t den = pa->size() + pb->size();
-                if( den == 0 )
-                {
-                    continue;
-                }
-                const float sim = 2.0f * float( lcs ) / float( den );
-                if( sim < kType3MinSimilarity || sim >= 1.0f )
-                {
-                    continue; // < 1.0: exact would be Type-1/2
-                }
-
-                // member order stable by symbol id (small id first) → deterministic emit.
-                const NodeId x = std::min( ca.id, cb.id ), y = std::max( ca.id, cb.id );
-                out.push_back( { { x, y }, std::max( candTokens[ia], candTokens[ib] ), std::uint8_t( 3 ), sim } );
-            }
-        }
+        rw::emitTo( stderr, "ripwire: lcs-verify pairs={} early_exits={} mismatches={}\n", st.lcsVerified, st.lcsVerifyExits, st.lcsVerifyMismatches );
     }
-done:
     // Deterministic order: by (first member id, second member id). Similarity is a pure function of the streams,
     // so ties are impossible for a fixed pair; the id sort fully determines the sequence.
     std::sort( out.begin(), out.end(), []( const CloneGroup& p, const CloneGroup& q )
                { return p.members[0] != q.members[0] ? p.members[0] < q.members[0] : p.members[1] < q.members[1]; } );
     st.emittedPairs = out.size();
+    gType3PassRuns.fetch_add( 1, std::memory_order_relaxed );
+    gType3PassPairs.fetch_add( out.size(), std::memory_order_relaxed );
     if( statsOut )
     {
         *statsOut = st;

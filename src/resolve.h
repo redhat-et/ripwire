@@ -52,9 +52,11 @@
 #include "arch.h"        // §B1.3: relForHash — the root-relative path segment canonicalIdRelTo keys on
 #include "smallvec.h"
 #include "infra/namesplit.h"   // stripTemplateArgs — a C++ template-id scope's family (appendTemplateFamilyKey), a `using Base<T>::m;` qualifier (buildUsingReexports)
+#include "infra/hashutil.h"       // packPair — IdentityNarrower's (fromFile, defFile) visibility memo key
 #include "infra/fileSetStore.h"   // FileAdjacency, FileSetStore, buildFileClosure — the file graph's stores
 #include "memguard.h"                 // guardedFileClosure
 #include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
+#include "infra/depwatch.h"     // readConfigBytes and hasEntry report to the warm snapshot's dependency log when one is armed
 #include "infra/os.h"           // os::realpath / os::stat — the ancestor-config walk (#220: configs above the crawl root)
 #include "infra/sharedOnce.h"   // sharedOnce — rustCrateRootsOf
 #include "infra/Diagnostics.h"   // ASSUME — buildScopedRecvDecls' index-range precondition
@@ -74,6 +76,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>        // std::tie — PythonMemberSite's (fileId, byte) order
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -678,6 +681,104 @@ inline std::uint32_t resolvePythonImport( std::string_view includerPath, std::st
     return ( hit == kNoFile || hit == kNoFile - 1 ) ? kNoFile : hit;   // unique-or-degrade
 }
 
+// ── #478 gap 1: the SUBMODULE a from-import member names ─────────────────────────────────────────────
+// `from pkg import mod` has ONE Include, `pkg`, and Python loads pkg/mod.py for it whenever pkg/__init__.py does not bind `mod`
+// itself — and the file DEPENDS on pkg/mod.py whenever that file exists, because an __init__ that binds the name is the usual way
+// it re-exports the submodule. So the file graph gains an edge to the module `<from-module>.<member>` names, resolved by
+// resolvePythonImport exactly as `import pkg.mod` would be (same tiers, unique-or-degrade): no file → no edge, two → no edge.
+// The member is the name taken FROM the module, never the local alias (`from pkg import mod as m` → pkg.mod, never pkg.m), read
+// off the binds channel's Import record for the same statement: importedName "from:<member>" for a rename, else var. A plain
+// `import` (importedName "module") and a wildcard (no record) name no member. `from . import x` / `from .. import x` join without
+// a dot: `.` + `x` → `.x`.
+struct PythonMemberSite
+{
+    std::uint32_t fileId;
+    std::uint32_t byte;   // the from-import statement's start byte — the byte its Include is sited at (emitCapturedImport)
+    std::uint32_t bind;   // index into ing.bindings
+};
+
+inline std::vector<PythonMemberSite> pythonFromImportMembers( const IngestResult& ing )
+{
+    std::vector<PythonMemberSite> sites;
+    for( std::uint32_t i = 0; i < ing.bindings.size(); ++i )
+    {
+        const Binding& b = ing.bindings[ i ];
+        if( b.kind == LocalBindKind::Import && b.importedName != "module" && !b.typeName.empty() && b.fileId < ing.files.size()
+            && includeLangOf( rootRelPath( ing, b.fileId ) ) == IncludeLang::Python )
+        {
+            sites.push_back( { b.fileId, b.startByte, i } );
+        }
+    }
+    std::sort( sites.begin(), sites.end(), []( const PythonMemberSite& a, const PythonMemberSite& b )
+               { return std::tie( a.fileId, a.byte, a.bind ) < std::tie( b.fileId, b.byte, b.bind ); } );
+    return sites;
+}
+
+// the distinct member files one Python from-import Include reaches, in binding order; never the includer itself. `pkgFile` is the
+// file the statement's own Include resolved to (kNoFile = none), and it confines the lookup the way Python's import does (#533):
+//   * <D>/__init__.py → the member is pkg's own: only <D>/<member>.py or <D>/<member>/__init__.py (unique-or-degrade), never
+//     another root's pkg/<member>.py, which Python never loads for this statement. The edge is drawn even when the __init__
+//     also binds <member> itself: that binding is usually the package re-exporting its own submodule (pinned by the
+//     init-and-sibling arm of test/pyimportprecisecheck.sh);
+//   * a plain module (util.py) → no member edge: the module wins at import time, and a util/x.py beside it is not util.x;
+//   * nothing (a namespace package, an ambiguous root) → the full tiered probe of `<module>.<member>`, as `import pkg.mod` would.
+inline void pythonMemberFiles( const IngestResult& ing, const std::vector<PythonMemberSite>& sites, const Include& inc, std::uint32_t pkgFile,
+                               const HashMap<std::string, std::uint32_t>& fileIndex, const WsIncludeCtx* ws, std::vector<std::uint32_t>& out )
+{
+    out.clear();
+    std::string_view pkgDir;   // set iff the package resolved to <D>/__init__.py
+    if( pkgFile != kNoFile )
+    {
+        const std::string_view pkgPath = rootRelPath( ing, pkgFile );
+        if( pkgPath != "__init__.py" && !pkgPath.ends_with( "/__init__.py" ) )
+        {
+            return;   // a plain module: see above
+        }
+        pkgDir = includerDir( pkgPath );
+    }
+    const std::string_view includerPath = rootRelPath( ing, inc.fileId );
+    const auto [ lo, hi ] = std::equal_range( sites.begin(), sites.end(), PythonMemberSite{ inc.fileId, inc.byte, 0 },
+                                              []( const PythonMemberSite& a, const PythonMemberSite& b ) { return std::tie( a.fileId, a.byte ) < std::tie( b.fileId, b.byte ); } );
+    std::string module;
+    for( auto it = lo; it != hi; ++it )
+    {
+        const Binding& b = ing.bindings[ it->bind ];
+        if( b.typeName != inc.target )
+        {
+            continue;   // a record sited at this byte that is not this statement's module
+        }
+        const std::string_view member = std::string_view( b.importedName ).starts_with( kPythonFromMemberMark )
+                                            ? std::string_view( b.importedName ).substr( kPythonFromMemberMark.size() ) : std::string_view( b.var );
+        std::uint32_t to = kNoFile;
+        if( pkgFile != kNoFile )
+        {
+            // pkgDir is the PACKAGE's path, so the probe takes the package's identity: in a multi-root workspace its root is the
+            // one the member lives in, and the importer's root would reject that hit and fall back to its own disk dir (#533).
+            module.assign( member );
+            module.append( ".py" );
+            const std::uint32_t asModule = joinNormalizeLookup( pkgDir, module, fileIndex, ws, pkgFile );
+            module.assign( member );
+            module.append( "/__init__.py" );
+            const std::uint32_t asPackage = joinNormalizeLookup( pkgDir, module, fileIndex, ws, pkgFile );
+            to = ( asModule == kNoFile ) ? asPackage : ( asPackage == kNoFile || asPackage == asModule ) ? asModule : kNoFile;   // unique-or-degrade
+        }
+        else
+        {
+            module.assign( inc.target );
+            if( module.back() != '.' )
+            {
+                module.push_back( '.' );
+            }
+            module.append( member );
+            to = resolvePythonImport( includerPath, module, fileIndex, ws, inc.fileId );
+        }
+        if( to != kNoFile && to != inc.fileId && std::find( out.begin(), out.end(), to ) == out.end() )
+        {
+            out.push_back( to );
+        }
+    }
+}
+
 // A relative JS/TS specifier may spell the RUNTIME file its source compiles to: TypeScript's node16/nodenext
 // resolution requires `import './api.js'` for `api.ts`, and a `.mjs`/`.cjs` specifier names its `.mts`/`.cts`
 // source. ONE table, read by the precise include tier (resolveTsImport below) and by graph.h's named-import binder
@@ -987,6 +1088,7 @@ inline std::string readConfigBytes( const std::string& path )
     std::FILE*  f = std::fopen( path.c_str(), "rb" );
     if( !f )
     {
+        depwatch::note( depwatch::Seam::ConfigBytes, path, &out );   // unreadable reads as empty, here and when the warm snapshot repeats the read
         return out;
     }
     std::fseek( f, 0, SEEK_END );
@@ -999,6 +1101,7 @@ inline std::string readConfigBytes( const std::string& path )
         out.resize( n );
     }
     std::fclose( f );
+    depwatch::note( depwatch::Seam::ConfigBytes, path, &out );
     return out;
 }
 
@@ -4636,7 +4739,7 @@ private:
     {
         const std::string at = dir + std::string( name );
         os::stat_t        st;
-        return os::stat( at.c_str(), &st ) == 0;
+        return depwatch::noted( depwatch::Seam::StatExists, at, os::stat( at.c_str(), &st ) == 0 );
     }
 
     // The directories strictly above `crawlRoot`, nearest first, up to and including the git top-level; empty when the
@@ -5574,6 +5677,11 @@ inline std::pair<rw::FileAdjacency, WsIncludeCtx> buildPreciseIncludeAdjWithCont
     HashMap<std::string, std::pair<std::uint32_t, std::uint32_t>> rubyMemo;
 
     std::optional<tsimport::ImportResolver> tsResolver;   // #220: built on the first bare TS/JS specifier that missed
+    // #478 gap 1: a from-import member's submodule is a DEPENDENCY of the file and every dependency view keeps it, but it is not
+    // import evidence for a bare call — `from pkg import mod` makes no name of mod visible unqualified — so, like an
+    // Include::isValueUse record, buildGraph's call narrow (forCallNarrow) leaves it out and the call graph is unchanged.
+    const std::vector<PythonMemberSite> memberSites = forCallNarrow ? std::vector<PythonMemberSite>{} : pythonFromImportMembers( ing );
+    std::vector<std::uint32_t>          memberFiles;
     TsImportMemo tsMemo( F );                              // PATH-NORM: this build's (dir, specifier) → answer
     for( const Include& inc : ing.includes )
     {
@@ -5648,15 +5756,30 @@ inline std::pair<rw::FileAdjacency, WsIncludeCtx> buildPreciseIncludeAdjWithCont
         {
             to = resolveBareTsImport( ing, fileIndex, tsResolver, ws, inc, importsUnresolvedOut, extrasOut );
         }
-        if( to == kNoFile || to == inc.fileId )
+        if( to != kNoFile && to != inc.fileId )   // unresolved or self-include → contributes nothing
         {
-            continue; // unresolved or self-include → contributes nothing
+            edgeFrom.push_back( inc.fileId );
+            edgeTo.push_back( to );
+            if( lazyPairsOut != nullptr )
+            {
+                recordLazyPair( *lazyPairsOut, inc.fileId, to, inc.isLazy );
+            }
         }
-        edgeFrom.push_back( inc.fileId );
-        edgeTo.push_back( to );
-        if( lazyPairsOut != nullptr )
+        if( memberSites.empty() || includeLangOf( rootRelPath( ing, inc.fileId ) ) != IncludeLang::Python )
         {
-            recordLazyPair( *lazyPairsOut, inc.fileId, to, inc.isLazy );
+            continue;   // no from-import members in this build, or not a Python includer: nothing to look up
+        }
+        // #478 gap 1: the submodules a from-import's members name, confined to the package `to` resolved to (kNoFile — a
+        // namespace package has no __init__.py — keeps the full probe; a self-resolve, `from . import x` in an __init__.py, confines too). Left out of the call narrow (memberSites is empty there): see its note above.
+        pythonMemberFiles( ing, memberSites, inc, to, fileIndex, ws, memberFiles );
+        for( const std::uint32_t m : memberFiles )
+        {
+            edgeFrom.push_back( inc.fileId );
+            edgeTo.push_back( m );
+            if( lazyPairsOut != nullptr )
+            {
+                recordLazyPair( *lazyPairsOut, inc.fileId, m, inc.isLazy );
+            }
         }
     }
     if( extrasOut != nullptr )
@@ -5862,7 +5985,7 @@ inline bool fieldTypeWrittenInStd( const Reference& r ) noexcept
 // never reads it as a member, and composeRel "alias", which the HAS-A edges refuse. addTypeAliasBases is its one reader.
 inline bool isTypeAliasRecord( const Reference& r ) noexcept
 {
-    return r.isCompose && r.fieldName.empty() && r.composeRel == "alias";
+    return r.isCompose && r.fieldName().empty() && r.composeRel() == "alias";
 }
 
 // The inheritance NAME graph's alias edges (graph.h chaUp): an alias NAME gains its target as a direct base, so a base walk that
@@ -6091,10 +6214,10 @@ public:
             Entry e;
             e.fileId = r.fileId;
             e.scope  = Scope( r.memberRoot );
-            if( !r.memberCtor.empty() )
+            if( !r.memberCtor().empty() )
             {
-                e.kind    = r.memberVia == "std" ? Kind::Refused : Kind::Pointer;   // `std::shared_ptr<std::string>`: no in-tree pointee
-                e.pointee = FlatRecvType{ r.memberCtor, !r.memberVia.empty(), true };
+                e.kind    = r.memberVia() == "std" ? Kind::Refused : Kind::Pointer;   // `std::shared_ptr<std::string>`: no in-tree pointee
+                e.pointee = FlatRecvType{ r.memberCtor(), !r.memberVia().empty(), true };
                 anyPointer = anyPointer || e.kind == Kind::Pointer;
             }
             else if( !fieldTypeWrittenInStd( r ) && !r.calleeName.empty() )
@@ -6183,7 +6306,7 @@ public:
     // its base reading.
     std::optional<FlatRecvType> pointeeOf( const Reference& member ) const
     {
-        if( byName_.empty() || member.memberVia == kTemplateParamMemberType || member.memberVia == kPointerMemberType || realClass_.find( member.calleeName ) != realClass_.end() )
+        if( byName_.empty() || member.memberVia() == kTemplateParamMemberType || member.memberVia() == kPointerMemberType || realClass_.find( member.calleeName ) != realClass_.end() )
         {
             return std::nullopt;
         }
@@ -6395,43 +6518,51 @@ struct RecvVarType
     const Binding*   declared         = nullptr;
 };
 
-// The provenance value of one resolved edge (Graph::outProv; graph.h provLabel spells it) from the edge sets the resolve loop
-// filled. The precedence is deliberate: scip PINS an edge (precise); binding and import NAME the mechanism that resolved it;
-// split says the resolver could not choose; impl (lane L6) that the one implementor in the tree of the receiver's interface
-// owns the callee; final-segment says it chose by a qualified written type's last name alone (test/narrowcheck.sh arm 25). prov= is single-valued and a symbol's amb= counts a split arm either way, so nothing is
-// lost by the ordering. 0 = a uniquely resolved name-based edge, which no emitter writes.
-struct EdgeProvenanceSets
+// EDGE-FLAGS (speed audit card 6, mem-audit-fable-1111): what the sites that committed one (from, to) edge said about it, one bit
+// each, ORed over those sites into buildGraph's edge accumulator (graph.h EdgeAcc::marks) — nine per-edge key tables before
+// (one hash insert per mark per site, one lookup per mark per flattened edge, all alive through the CSR build).
+enum EdgeMark : std::uint8_t
 {
-    const HashMap<std::uint64_t, char>& binding;
-    const HashMap<std::uint64_t, char>& import;
-    const HashMap<std::uint64_t, char>& split;
-    const HashMap<std::uint64_t, char>& finalSegment;
-    const HashMap<std::uint64_t, char>& impl;           // lane L6: 1 = every site committing the edge was a one-implementor dispatch
+    kEdgeMarkSplit        = 1u << 0,   // C1: an ARM of a k-way split the resolver could not choose between (prov="split")
+    kEdgeMarkBinding      = 1u << 1,   // A4-R5: resolved via an FFI alias (prov="binding")
+    kEdgeMarkImport       = 1u << 2,   // an ES named-import binding pinned it (prov="import")
+    kEdgeMarkFinalSegment = 1u << 3,   // a receiver's QUALIFIED written type chose it by its last name alone (prov="final-segment")
+    kEdgeMarkImplOnly     = 1u << 4,   // lane L6: EVERY committing site was a one-implementor dispatch (via="impl"); the first site
+                                       // sets it, any site of another kind clears it for good
+    kEdgeMarkProven       = 1u << 5,   // FE-B: some site bound it WITH evidence; without it every site was name-only (kEdgeName)
+    kEdgeMarkLink         = 1u << 6,   // a markdown link bound it (kEdgeLink)
+    kEdgeMarkAnchorMiss   = 1u << 7,   // … whose slug named no heading, so the target is the file node (anchor="missing")
 };
-inline std::uint8_t edgeProvenance( bool scipPrecise, const EdgeProvenanceSets& sets, std::uint64_t edgeKey ) noexcept
+inline constexpr std::uint8_t kEdgeMarksProv = kEdgeMarkSplit | kEdgeMarkBinding | kEdgeMarkImport | kEdgeMarkFinalSegment;
+
+// The provenance value of one resolved edge (Graph::outProv; graph.h provLabel spells it) from its marks. The precedence is
+// deliberate: scip PINS an edge (precise); binding and import NAME the mechanism that resolved it; split says the resolver could
+// not choose; impl (lane L6) that the one implementor in the tree of the receiver's interface owns the callee; final-segment says
+// it chose by a qualified written type's last name alone (test/narrowcheck.sh arm 25). prov= is single-valued and a symbol's amb=
+// counts a split arm either way, so nothing is lost by the ordering. 0 = a uniquely resolved name-based edge, which no emitter writes.
+inline std::uint8_t edgeProvenance( bool scipPrecise, std::uint8_t marks ) noexcept
 {
-    const auto holds = [ edgeKey ]( const HashMap<std::uint64_t, char>& set ) { return set.find( edgeKey ) != set.end(); };
     if( scipPrecise )
     {
         return 1u;
     }
-    if( holds( sets.binding ) )
+    if( ( marks & kEdgeMarkBinding ) != 0 )
     {
         return 2u;
     }
-    if( holds( sets.import ) )
+    if( ( marks & kEdgeMarkImport ) != 0 )
     {
         return 4u;
     }
-    if( holds( sets.split ) )
+    if( ( marks & kEdgeMarkSplit ) != 0 )
     {
         return 3u;
     }
-    if( const auto it = sets.impl.find( edgeKey ); it != sets.impl.end() && it->second == 1 )
+    if( ( marks & kEdgeMarkImplOnly ) != 0 )
     {
         return 6u;   // lane L6: graph.h kProvImpl, via="impl" — only when no other kind of site committed the edge
     }
-    return holds( sets.finalSegment ) ? 5u : 0u;
+    return ( marks & kEdgeMarkFinalSegment ) != 0 ? 5u : 0u;
 }
 
 // P2-D Rule 2, PARAMETER receivers (2026-09-16, test/narrowcheck.sh arms 7-18): one DECLARATION of a receiver
@@ -7096,6 +7227,14 @@ struct IdentityNarrower
     mutable const Reference*                              claimRef       = nullptr;
     mutable bool                                          subclassClaim  = false;   // lane L6: claimRef's claim is step (3), the dispatch split
     mutable bool                                          lookupLexical  = false;   // classWalk came from an enclosing class or a class qualifier
+    // NARROW-MEMO: two pure functions the class walk asks again for every same-named class (envoy holds hundreds of
+    // `Impl` and `Config`), memoised for the loop. Neither memo reaches output: each returns what the walk computes.
+    //   ancestorMemo: a class NAME -> every name derivesFromName reaches from it (chaUp is fixed for the loop; keyed
+    //                 to the one table it was built from), so `nestedInAncestorOf` is one set probe per candidate
+    //   visibleMemo:  (fromFile, defFile) -> fileVisibleFrom's include-target suffix answer
+    mutable HashMap<std::string, ankerl::unordered_dense::set<std::string_view>> ancestorMemo;
+    mutable const ChaUpNames*                             ancestorMemoOf = nullptr;
+    mutable HashMap<std::uint64_t, bool>                  visibleMemo;
 
     IdentityNarrower( const HashMap<std::string, rw::SmallVec<NodeId, 2>>& canon, const rw::FileSetStore& incl,
                       const std::vector<std::uint32_t>& symFile ) noexcept
@@ -7226,10 +7365,51 @@ struct IdentityNarrower
         return ( ids.ownerAmbiguous[ from ] != 0 ) ? kNoNode : ids.ownerClass[ from ];
     }
 
-    static bool nestedInAncestorOf( NodeId cls, std::string_view className, const ClassIdentity& ids, const ChaUpNames& chaUp )
+    // is `cls` nested directly in a class whose name `ancestors` (ancestorNamesOf) holds — derivesFromName( className, its outer )
+    static bool nestedInAncestorOf( NodeId cls, const ankerl::unordered_dense::set<std::string_view>& ancestors, const ClassIdentity& ids )
     {
         const std::string_view outer = outerNameOf( cls, ids );
-        return !outer.empty() && derivesFromName( className, outer, chaUp );
+        return !outer.empty() && ancestors.contains( outer );
+    }
+
+    // every name derivesFromName( className, name, chaUp ) is true for, memoised per class name for the loop
+    const ankerl::unordered_dense::set<std::string_view>& ancestorNamesOf( std::string_view className, const ChaUpNames& chaUp ) const
+    {
+        if( ancestorMemoOf != &chaUp )
+        {
+            ancestorMemo.clear();
+            ancestorMemoOf = &chaUp;
+        }
+        const auto [ at, inserted ] = ancestorMemo.try_emplace( std::string( className ) );
+        if( inserted )
+        {
+            collectAncestorNames( className, chaUp, at->second );
+        }
+        return at->second;
+    }
+
+    // the names up to 12 chaUp steps above className, into `ancestors`. A breadth-first walk keeps each name once at its
+    // shortest distance, so it reaches exactly the names the bounded walk of derivesFromName reaches.
+    static void collectAncestorNames( std::string_view className, const ChaUpNames& chaUp, ankerl::unordered_dense::set<std::string_view>& ancestors )
+    {
+        std::vector<std::string_view> frontier{ className };
+        std::vector<std::string_view> next;
+        for( int depth = 0; depth < 12 && !frontier.empty(); ++depth )
+        {
+            next.clear();
+            for( std::string_view name : frontier )
+            {
+                const auto up = chaUp.find( std::string( name ) );
+                for( const std::string& base : ( up == chaUp.end() ? std::span<const std::string>{} : std::span<const std::string>( up->second ) ) )
+                {
+                    if( ancestors.insert( base ).second )
+                    {
+                        next.push_back( base );
+                    }
+                }
+            }
+            frontier.swap( next );
+        }
     }
 
     bool collectIf( const rw::SmallVec<NodeId, 2>& named, const auto& pick ) const
@@ -7295,7 +7475,7 @@ struct IdentityNarrower
         {
             const std::string& scName = ( *ids.symbols )[ sc ].name;
             if( collectIf( named, [ & ]( NodeId c ) { return ids.enclosingClass[ c ] == sc; } )
-             || collectIf( named, [ & ]( NodeId c ) { return nestedInAncestorOf( c, scName, ids, chaUp ); } ) )
+             || collectIf( named, [ &, &ancestors = ancestorNamesOf( scName, chaUp ) ]( NodeId c ) { return nestedInAncestorOf( c, ancestors, ids ); } ) )
             {
                 return true;
             }
@@ -7317,7 +7497,7 @@ struct IdentityNarrower
             return collectIf( named, []( NodeId ) { return true; } );   // a member of a class of that very name: any of them, as before
         }
         return collectIf( named, [ & ]( NodeId c ) { return outerNameOf( c, ids ) == scope; } )
-            || collectIf( named, [ & ]( NodeId c ) { return nestedInAncestorOf( c, scope, ids, chaUp ); } );
+            || collectIf( named, [ &, &ancestors = ancestorNamesOf( scope, chaUp ) ]( NodeId c ) { return nestedInAncestorOf( c, ancestors, ids ); } );
     }
 
     // a hit owned by a NESTED class outside the nameable set whose file is visible from the caller
@@ -7362,6 +7542,18 @@ struct IdentityNarrower
         {
             return false;
         }
+        const auto [ memo, inserted ] = visibleMemo.try_emplace( hashutil::packPair( fromFile, defFile ), false );
+        if( !inserted )
+        {
+            return memo->second;
+        }
+        memo->second = includeNamesAsSuffix( fromFile, defFile, ids );
+        return memo->second;
+    }
+
+    // a DIRECT include of `fromFile` names `defFile`'s path as a suffix (fileVisibleFrom's last test; memoised there)
+    static bool includeNamesAsSuffix( std::uint32_t fromFile, std::uint32_t defFile, const ClassIdentity& ids )
+    {
         const std::string_view path             = ( *ids.files )[ defFile ];
         const auto [ firstInclude, endInclude ] = std::ranges::equal_range( ids.includeTargets, fromFile, {}, &ClassIdentity::IncludeTarget::fileId );
         return std::any_of( firstInclude, endInclude, [ & ]( const ClassIdentity::IncludeTarget& include )
@@ -8336,12 +8528,17 @@ struct Narrower
     // stopped with a base unvisited answer nullptr too: neither proves which member the name reaches.
     const FlatRecvType* fieldEntryAt( const Reference& r, const std::string& callerScope, const FieldRecvTables& fields ) const
     {
+        return fieldEntryOf( r.recvVar, callerScope, fields );
+    }
+    // The same lookup for a member NAME the caller has as text (graph.h's std-field probe): no reference row, nothing interned.
+    const FlatRecvType* fieldEntryOf( std::string_view member, const std::string& callerScope, const FieldRecvTables& fields ) const
+    {
         std::string_view className( callerScope );
         if( const std::size_t cut = className.rfind( "::" ); cut != std::string_view::npos )
         {
             className.remove_prefix( cut + 2 );
         }
-        if( const auto [ own, ownDeclared ] = declaredFieldAt( className, r.recvVar, fields ); ownDeclared )
+        if( const auto [ own, ownDeclared ] = declaredFieldAt( className, member, fields ); ownDeclared )
         {
             return own;   // the class's own member hides every base's — nullptr when its type was not captured
         }
@@ -8354,7 +8551,7 @@ struct Narrower
             {
                 return nullptr;   // the cap left a base unvisited: this level may be incomplete, and deeper ones are unread
             }
-            if( const auto [ hit, declaring ] = declaringBasesAt( lvlEnd, r.recvVar, fields ); declaring != 0 )
+            if( const auto [ hit, declaring ] = declaringBasesAt( lvlEnd, member, fields ); declaring != 0 )
             {
                 return declaring == 1 ? hit : nullptr;   // two bases declaring it at one level → an ambiguous lookup
             }

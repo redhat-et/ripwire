@@ -377,6 +377,18 @@ echo "=== (A-PIN) --legend=full is BYTE-IDENTICAL to the pre-L1 default (pinned 
 # kForFileTailCodeFirstLegend, it rides because the fixture indexes notes.md) and masking at=/est_tokens= leaves the previous pin
 # with one change, the <tail> row order: notes.md moves from first to last behind the three code files (forpage.h
 # computeFileTail). Same four rows; est_tokens "2215" -> "2282".
+# RE-ANCHORED BY HAND 2026-11-08 (lane R-DEDUP, stacked on SIZE-TRIM), for.xml only: the lane's intended output change, nothing
+# else. Checked mechanically: the previous pin equals the SIZE-TRIM head's --legend=full output (at= masked); the new pin differs by
+# est_tokens= ("2244" -> "2227"), the tail legend clause (", minus names a sigs row or the syms block shows", serialize.h
+# kForFileTailLegend) and the <tail> rows: each file whose positive-score names the sigs rows already show prints p= only
+# (geometry.h, geometry.cpp, sub/consumer.cpp, notes.md; same four rows, same order). 5762 -> 5718 B. The six other pins are unchanged.
+# RE-ANCHORED BY HAND 2026-11-14 (lane LARGE-PARTIAL-1, GREP-OVERSIZE-COMPLETE), grep.xml only: the lane's intended legend change,
+# nothing else. Checked mechanically: the previous pin equals the fade32332 binary's --legend=full output byte for byte; the new pin
+# differs only in three legend sentences (unindexed_files_scanned= now counts the corpus_oversize= files, read whole however large;
+# unindexed_files_skipped= drops the size-ceiling reason; corpus_oversize= says grep still reads those files). 7565 -> 7703 B. The six other pins are unchanged.
+# RE-PIN 2026-11-15 (NEXT-APOS-RAW), for.xml only: the one next= value with a quote reads --for='…' (was &apos;…&apos;; nextverb.h
+# appendNextValueXml leaves ' raw in a "-delimited attribute) and est_tokens= falls 2227 -> 2223 with the 10 bytes it saves. Checked
+# mechanically: the old pin with &apos; -> ' inside next= and that est_tokens equals the lane's --legend=full output (at= masked).
 PIN_DIR="$ROOT/test/compactlegendfix/pre_l1_full"
 # the one normalisation, in python on BOTH sides so no sed dialect decides it (BSD sed appends a final newline, GNU
 # sed does not): at="…" masked, trailing newlines dropped.
@@ -1335,18 +1347,24 @@ if len( sys.argv ) > 5:
     ref = read( sys.argv[ 5 ] )
     if ref is None: sys.exit( 3 )
     if cut and k < len( ref[ "rows" ] ): maximal = a[ "charged" ] + ref[ "rows" ][ k ][ 2 ] > X - U - 160
+    # TOKEN-BUDGET-MONOTONE (2026-11-14): the --for budget prices the WHOLE delivered document (header and legend included), not
+    # the rows against T less the trailing sections, so a cut is maximal when the next row of the reference would carry est_tokens
+    # past N (its bytes at 2.0 B a token, the lenient side); an answer at the rank 1..4 floor whose est_tokens is still past N
+    # could not carry another row. The rows-only reading above stays for the --json dialect, which keeps the row target.
+    if cut and k < len( ref[ "rows" ] ) and a[ "est" ] != "-" and not a[ "s" ].lstrip().startswith( "{" ):
+        maximal = ( k <= 4 ) if int( a[ "est" ] ) > N else int( a[ "est" ] ) + ref[ "rows" ][ k ][ 2 ] / 2.0 > N
     # FIX2 C1 (rule 4): the upper-bound twin of maximality (test/lib/softbudget.py upper_bound): rows past the floor stop where T less
     # the other sections and the tail reserve runs out; RED on a binary that ignores the tail reserve
     from softbudget import upper_bound
     upper = upper_bound( a[ "s" ], ref[ "s" ], X, k, a[ "total" ], U )[ 0 ]
     rp = k > 0 and [ x[ 1 ] for x in a[ "rows" ] ] == [ x[ 1 ] for x in ref[ "rows" ] ][ :k ]
     if len( sys.argv ) > 6:
-        # head round-robin (lane hrr, rule 4): REF is the reordered no-budget answer, argv[6] its RIPWIRE_NO_HEAD_RR=1 twin — the
-        # rows are a SET prefix (score ranks 1..k of the twin; test/lib/softbudget.py set_prefix) rather than an order prefix
-        from softbudget import set_prefix
+        # head round-robin (lane hrr, rule 4): REF is the reordered no-budget answer, argv[6] its RIPWIRE_NO_HEAD_RR=1 twin.
+        # TOKEN-BUDGET-MONOTONE (2026-11-14): the budget sheds the unbudgeted answer, so the kept rows are REF's display ranks
+        # r=1..k — an ORDER prefix of REF, the round-robin's order included (it used to keep score order, a SET prefix of the
+        # twin's ranks 1..k). The twin is still read (a missing one is a premise failure).
         off = read( sys.argv[ 6 ] )
         if off is None: sys.exit( 3 )
-        rp = k > 0 and set_prefix( [ x[ 1 ] for x in a[ "rows" ] ], [ x[ 1 ] for x in ref[ "rows" ] ], [ x[ 1 ] for x in off[ "rows" ] ] )
 ok = a[ "est" ] != "-" and fits and maximal and upper and rp and nxt and not a[ "over" ] and a[ "hl" ]
 print( "%s rows=%d total=%d charged=%d T=%d est=%s over=%d next=%d fits=%d maximal=%d upper=%d rp=%d hl=%d"
        % ( "OK" if ok else "BAD", k, a[ "total" ], a[ "charged" ], X, a[ "est" ], int( a[ "over" ] ), int( nxt ), int( fits ),
@@ -1354,13 +1372,18 @@ print( "%s rows=%d total=%d charged=%d T=%d est=%s over=%d next=%d fits=%d maxim
 PY
 spfield(){ local re=" $2=([^ ]*)"; [[ " $1 " =~ $re ]] && printf '%s' "${BASH_REMATCH[1]}"; }   # spfield LINE KEY
 # spRef LAB DIR ROOTARG TASK — the no-budget answer of both dialects (the ST/RP reference), and its rows in "$TMP/sp.ref.LAB.DIAL.rows".
+# SIBLING-DEMOTE (forsiblingdemote.h): the reference is the full rank list with each row's own bytes, so it is read with
+# RIPWIRE_NO_SIBLING_DEMOTE=1 (a no-budget answer prints its deep same-file siblings as <t> pointers; a budgeted one is never demoted).
+# TOKEN-BUDGET-MONOTONE (2026-11-14): a budgeted answer is now the no-budget answer shed, demoted siblings included, so the
+# reference is that answer as served (the switch dropped here and on the P4 next= runs below): its <d> rows by r= are what a cut
+# keeps a prefix of (src 'rank symbols by pagerank' @3000: <d> r=1..10,13,14,15,18 — the demoted 11,12,16,17 ride as <t>).
 spRef(){
     local d; for d in compact full; do
         rm -f "$TMP/sp.ref.$1.$d.rows"
-        ( cd "$2" && "$BIN" "$3" --for="$4" --legend=$d ) >"$TMP/sp.ref.$1.$d" 2>/dev/null
+        ( cd "$2" && "$BIN" "$3" --for="$4" --legend=$d ) >"$TMP/sp.ref.$1.$d" 2>/dev/null || no "spRef $1 $d: the no-budget run exited $?"
         python3 "$TMP/softp.py" "$TMP/sp.ref.$1.$d" 0 "$4" "$TMP/sp.ref.$1.$d.rows" >/dev/null
         rm -f "$TMP/sp.ref.$1.$d.so.rows"   # lane hrr: the RIPWIRE_NO_HEAD_RR=1 twin reference
-        ( cd "$2" && RIPWIRE_NO_HEAD_RR=1 "$BIN" "$3" --for="$4" --legend=$d ) >"$TMP/sp.ref.$1.$d.so" 2>/dev/null
+        ( cd "$2" && RIPWIRE_NO_HEAD_RR=1 "$BIN" "$3" --for="$4" --legend=$d ) >"$TMP/sp.ref.$1.$d.so" 2>/dev/null || no "spRef $1 $d [RIPWIRE_NO_HEAD_RR=1 twin]: the no-budget run exited $?"
         python3 "$TMP/softp.py" "$TMP/sp.ref.$1.$d.so" 0 "$4" "$TMP/sp.ref.$1.$d.so.rows" >/dev/null
     done
 }
@@ -1386,8 +1409,11 @@ softPair(){
         eval "spLine_$d=\"\$line\""
     done
     nc="$( wc -l <"$TMP/sp.compact.rows" 2>/dev/null | tr -d ' ' )"; nf="$( wc -l <"$TMP/sp.full.rows" 2>/dev/null | tr -d ' ' )"
-    { [ "${nc:-0}" -gt 0 ] && cmp -s "$TMP/sp.compact.rows" "$TMP/sp.full.rows"; } \
-        || spWhy="$spWhy CF: compact rows (${nc:-?}) are not full's (${nf:-?});"
+    # TOKEN-BUDGET-MONOTONE (2026-11-14): the budget prices the whole document, legend included, so the compact dialect's shorter
+    # legend buys rows the full one cannot (src 'rank symbols by pagerank' @3000: compact 18 rows est 2928, full 7 est 2970). CF
+    # is now that full's rows are a prefix of compact's (was: the same rows).
+    { [ "${nc:-0}" -gt 0 ] && [ "${nf:-0}" -gt 0 ] && [ "${nf:-0}" -le "${nc:-0}" ] && head -n "$nf" "$TMP/sp.compact.rows" | cmp -s - "$TMP/sp.full.rows"; } \
+        || spWhy="$spWhy CF: full rows (${nf:-?}) are not a prefix of compact's (${nc:-?});"
 }
 
 # (P1-S) THE SWEEP — REPLACED, forbudget-soft (rule 4). Was (train 27): over --token-budget=1100..1700 step 50 the default fits
@@ -1397,10 +1423,13 @@ softPair(){
 # deleted contract). Now, on the same short relative root and band, both dialects: CF + ST + RP + NOLBL + NX + HL at every
 # budget, the rows a rank prefix that grows with N (RP monotone), and it BINDS: at least one budget cuts the head past the
 # rank 1..4 floor (so ST's fit and maximality are read on a real cut, not a floor or a complete answer).
+# TOKEN-BUDGET-MONOTONE (2026-11-14): the budget prices the whole unbudgeted answer (10,291 tokens compact, 11,012 full on this
+# task), so 1100..1700 now serves the rank 1..4 floor at every budget (est 2022 compact / 2743 full) and the binding premise read
+# 0 cuts. The band moves to 2000..3200 step 100, where the rows cut past the floor (@3000: compact 18, full 7 of 40).
 spRef pr "$ROOT" src "rank symbols by pagerank"
 p1sbad=0; p1sn=0; p1scut=0; p1sfirst=""; p1sprev=""; p1slo=""; p1shi=""
 p1sfail(){ p1sbad=$(( p1sbad + 1 )); [ "$p1sbad" -le 6 ] && p1sfirst="$p1sfirst [$1]"; }
-for tb in $( seq 1100 50 1700 ); do
+for tb in $( seq 2000 100 3200 ); do
     softPair pr "$ROOT" src "rank symbols by pagerank" "$tb"
     r="$( spfield "$spLine_compact" rows )"; t="$( spfield "$spLine_compact" total )"
     if ! printf '%s' "$r$t" | grep -qE '^[0-9]+$'; then p1sfail "@$tb unreadable:$spWhy"; continue; fi
@@ -1414,7 +1443,7 @@ for tb in $( seq 1100 50 1700 ); do
     cp "$TMP/sp.compact.rows" "$TMP/p1s.prev" 2>/dev/null; p1sprev="$tb"
 done
 if [ "$p1sbad" -eq 0 ] && [ "$p1sn" -eq 13 ] && [ "$p1scut" -gt 0 ]; then
-    ok "(P1-S) --for='rank symbols by pagerank' on root src, --token-budget=1100..1700 step 50: compact rows == full rows at every budget, each fits T or is the floor and stops only where the next row would cross it, no over_ceiling=, every cut carries next=, no (ceiling) drop; rows $p1slo -> $p1shi, a growing rank prefix (binds: $p1scut budget(s) cut past the floor)"
+    ok "(P1-S) --for='rank symbols by pagerank' on root src, --token-budget=2000..3200 step 100: full rows a prefix of compact rows at every budget, each fits T or is the floor and stops only where the next row would cross it, no over_ceiling=, every cut carries next=, no (ceiling) drop; rows $p1slo -> $p1shi, a growing rank prefix (binds: $p1scut budget(s) cut past the floor)"
 else
     no "(P1-S) the soft-target sweep ($p1sn of 13 budgets read, $p1scut cut past the floor):$p1sfirst ($p1sbad failure(s))"
 fi
@@ -1531,7 +1560,7 @@ for tb in 500 900; do
                     p4floor_bad=$(( p4floor_bad + 1 )); no "(P4 floor twin) --token-budget=500: the cut's <sigs> carries no next= to run"
                 else
                     nb=0; nbr="$( printf '%s\n' "$nargv" | sed -n 's/^--token-budget=\([0-9]*\)$/\1/p' | head -1 )"; [ -n "$nbr" ] && nb="$nbr"
-                    ( cd "$P4" && printf '%s\n' "$nargv" | tr '\n' '\0' | xargs -0 "$BIN" . ) >"$TMP/p4n.out" 2>/dev/null
+                    ( cd "$P4" && printf '%s\n' "$nargv" | tr '\n' '\0' | xargs -0 "$BIN" . ) >"$TMP/p4n.out" 2>/dev/null   # the rank list (spRef's note)
                     nl="$( python3 "$TMP/softp.py" "$TMP/p4n.out" "$nb" "widget routine dispatcher" "$TMP/p4n.rows" )"
                     nr="$( spfield "$nl" rows )"; nt="$( spfield "$nl" total )"
                     # lane hrr (rule 4): the twin — the RIPWIRE_NO_HEAD_RR=1 cut's next=, run with it set — must serve the twin's
@@ -1564,7 +1593,9 @@ for tb in 500 900; do
             if [ "${rT:-0}" -eq 0 ] || ! head -n "$rT" "$TMP/sp.ref.p4.$lg.so.rows" | cmp -s - "$TMP/sp.$lg.so.rows"; then
                 p4floor_bad=$(( p4floor_bad + 1 )); no "(P4 floor twin) [RIPWIRE_NO_HEAD_RR=1 twin] --token-budget=900 --legend=$lg: ${rT:-?} rows — not a rank prefix of the twin's no-budget answer"
             fi
-            if ! python3 "$RIPWIRE_TESTLIB/softbudget.py" setprefix "$TMP/sp.$lg.rows" "$TMP/sp.ref.p4.$lg.rows" "$TMP/sp.ref.p4.$lg.so.rows" || { [ "$r" -lt "$t" ] && [ $(( capd * nxd )) -ne 1 ]; }; then
+            # TOKEN-BUDGET-MONOTONE (2026-11-14): the whole document is priced (est 1243 compact / 1955 full at the 4-row floor), so
+            # 900 serves the floor, not 11 of 12 rows; the rows are the no-budget answer's display ranks 1..r (an ORDER prefix).
+            if [ "${r:-0}" -eq 0 ] || ! head -n "$r" "$TMP/sp.ref.p4.$lg.rows" | cmp -s - "$TMP/sp.$lg.rows" || { [ "$r" -lt "$t" ] && [ $(( capd * nxd )) -ne 1 ]; }; then
                 p4floor_bad=$(( p4floor_bad + 1 )); no "(P4 floor twin) --token-budget=900 --legend=$lg: $r of $t rows, capped=$capd next=$nxd — the rows must be a rank prefix of the no-budget answer's, and a cut must carry capped + next="
             fi
         fi
@@ -1578,7 +1609,7 @@ for tb in 500 900; do
         p4floor_bad=$(( p4floor_bad + 1 )); no "(P4 floor twin) --token-budget=$tb: est_tokens unreadable (compact '$pc', full '$pf')"
     fi
 done
-[ "$p4floor_bad" -eq 0 ] && ok "(P4 floor twin) soft target on the twelve-routine fixture: at 500 both dialects serve the same maximal rank prefix within T, unlabelled, its next= serving the whole head, and with 900 the complete head ships uncut, est_tokens honest; compact never further over than full ($p4facts)"
+[ "$p4floor_bad" -eq 0 ] && ok "(P4 floor twin) soft target on the twelve-routine fixture: at 500 and 900 full's rows a prefix of compact's, each a maximal display-rank prefix (TOKEN-BUDGET-MONOTONE: the whole document priced), unlabelled, the 500 cut's next= serving the whole head, est_tokens honest; compact never further over than full ($p4facts)"
 
 # (P5) the BUDGET LEDGER survives compaction (orchestrator rule, METHODOLOGY §9.3/§9.4: never cut silently). --pack-task's
 # full legend ends with "budget=N bytes (T-token target, ceiling C) | ranking: … | bodies: … | callers: … | notes: … | tests:

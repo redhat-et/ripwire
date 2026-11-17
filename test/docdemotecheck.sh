@@ -104,6 +104,21 @@ PY
 "$BIN" docdemotefix --for="$BUGQ" --no-route --format=candidates --no-cache >"$TMP/noroute.xml" 2>/dev/null
 "$BIN" docdemotefix --for="$BUGQ"     --no-cache >"$TMP/bugfor.xml"    2>/dev/null
 "$BIN" docdemotefix --for="$TRACEQ"   --no-cache >"$TMP/tracefor.xml"  2>/dev/null
+# RE-PIN 2026-11-15 (lane NEXT-APOS-RAW; rule 4): docdemotegolden_for.xml 5999 -> 5989 B (est_tokens "2400" -> "2396") and
+# docdemotegolden_noroute.xml 9524 -> 9514 B ("3373" -> "3369"): nextAttrXml leaves ' raw inside the double-quoted next=
+# (2 entities each). Verified mechanically: &apos; -> ' inside next-family values, est_tokens= masked, gives each capture exactly.
+# RE-PIN 2026-11-08 (lane SIBLING-DEMOTE, stacked on R-DEDUP-B; rule 4): docdemotegolden_for.xml 6431 -> 5999 B and
+# docdemotegolden_noroute.xml 9939 -> 9524 B, diffed by hand: only est_tokens and the deep same-file sibling <d> rows past answer row 10
+# (for: CHANGELOG r=11/12, Contributing r=14, both tier_probe rows r=16/18; noroute: PageCache.flush_cache/request_page/__init__ r=12/13/19,
+# paging_design r=15, CHANGELOG r=17/18) now print in place as <t p= sym= r=/> pointers, with the demote legend comment before the first.
+# RE-PIN 2026-11-08 (lane R-DEDUP, stacked on SIZE-TRIM; rule 4): docdemotegolden_for.xml 6709 -> 6431 B and
+# docdemotegolden_noroute.xml 10216 -> 9939 B. The moves: the tail legend clause (sym= minus names a sigs row or the syms block
+# shows) and est_tokens; every tail row of a file whose positive-score names the sigs rows all show now prints p= only
+# (pagecache.py, evictor.py, the .md pages); and SIZE-3a's same_as= on the second tier_probe <d> row (its text repeats the
+# first's), which SIZE-TRIM's own test fix (next note) re-pins on its side; this golden carries both.
+# RE-PIN 2026-11-08 (SIZE-TRIM test fix; rule 4): docdemotegolden_for.xml 6709 -> 6624 B (est_tokens "2684" -> "2650") and
+# docdemotegolden_noroute.xml 10216 -> 10131 B ("3650" -> "3616"). SIZE-3a's same_as= on the second tier_probe <d> row (its text
+# repeats the first's) and the legend clause that explains it are the whole diff (checked mechanically against the previous goldens).
 # RE-PIN 2026-11-02 b (lane docs-rest CI fix 2, the tail-order legend clause; rule 4): docdemotegolden_for.xml 6542 -> 6709 B
 # (est_tokens "2617" -> "2684") and docdemotegolden_noroute.xml 10049 -> 10216 B ("3583" -> "3650"). Both are code questions, so
 # both carry serialize.h kForFileTailCodeFirstLegend (167 B) after the tail clause; removing it and masking est_tokens= gives the

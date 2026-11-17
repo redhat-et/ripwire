@@ -1130,12 +1130,12 @@ private:
     // value goes, never stored itself.
     bool pyStoreKey( TSNode id ) const
     {
-        const TSNode sub = ts_node_parent( id );
+        const TSNode sub = parentOf( id );
         if( ts_node_is_null( sub ) || !kindIs( ts_node_type( sub ), "subscript" ) || !ts_node_eq( child( sub, m_fSubscript ), id ) )
         {
             return false;
         }
-        const TSNode as = ts_node_parent( sub );
+        const TSNode as = parentOf( sub );
         return !ts_node_is_null( as ) && kindIs( ts_node_type( as ), "assignment" ) && ts_node_eq( child( as, m_fLeft ), sub )
             && pySelfRooted( sub );
     }
@@ -1143,7 +1143,7 @@ private:
     // Python: is identifier `id` only a label (an attribute name or a keyword-argument name), never a read of a variable?
     bool pyLabel( TSNode id ) const
     {
-        const TSNode parent = ts_node_parent( id );
+        const TSNode parent = parentOf( id );
         return !ts_node_is_null( parent )
             && ( ( kindIs( ts_node_type( parent ), "attribute" ) && ts_node_eq( child( parent, m_fAttribute ), id ) )
                  || ( kindIs( ts_node_type( parent ), "keyword_argument" ) && ts_node_eq( child( parent, m_fName ), id ) ) );
@@ -2228,7 +2228,7 @@ private:
             return;
         }
         goValueSlot( j, r );
-        if( r.memberPath.empty() )
+        if( r.memberPath().empty() )
         {
             return;
         }
@@ -2324,7 +2324,7 @@ private:
         r.recvVar       = std::string( sc.fnName );
         r.argCount      = static_cast<std::uint16_t>( std::min<std::ptrdiff_t>( at - sc.params.begin() - 1, 0xFFFF ) );
         r.argCountKnown = true;
-        r.memberPath    = std::string( field );
+        r.setMemberPath( std::string( field ) );
         m_out.push_back( std::move( r ) );
     }
     // `self.<field>` → field; anything else → "".
@@ -2352,19 +2352,17 @@ private:
         r.lang          = m_lang;
         r.role          = RefRole::Value;
         r.name          = std::string( name );
-        r.qualifier     = std::string{ s.scope, fileShadow ? '1' : '0' };
+        const char qualifier[ 2 ] = { s.scope, fileShadow ? '1' : '0' };
+        r.qualifier     = std::string_view( qualifier, 2 );   // one of a few dozen two-character texts: never position-keyed
+        r.litAt         = s.litAt;   // REGISTRAR: the object literal, a row field (MEM-R1a; read only by regindex.h)
         r.recvVar       = std::move( s.container );
-        r.composeRel    = std::move( s.key );
-        r.fieldName     = std::move( s.into );
+        r.setComposeRel( std::move( s.key ) );
+        r.setFieldName( std::move( s.into ) );
         r.argCount      = s.argIndex;
         r.argCountKnown = s.isArg;
-        if( s.litAt != 0 )
-        {
-            r.qualifier += "@" + std::to_string( s.litAt );   // REGISTRAR: the object literal (qualifier[2..], read only by regindex.h)
-        }
         valueSlot( j, r );   // IX-1: a struct-field slot's type and field (inert without a slot row)
         r.memberRoot = std::string( owner );   // IX1-V2: a method value's receiver type (methodValueAt), "" otherwise
-        r.memberVia  = std::move( via );       // FN-SLOT S2: C++ `&Cls::m` — where it was written (model.h VrMemberScope), "" otherwise
+        r.setMemberVia( std::move( via ) );       // FN-SLOT S2: C++ `&Cls::m` — where it was written (model.h VrMemberScope), "" otherwise
         m_out.push_back( std::move( r ) );
     }
 
@@ -2794,7 +2792,7 @@ private:
             r.role      = RefRole::Value;
             r.name      = std::string( fnName );
             r.qualifier = "x0";
-            r.fieldName = "@" + vrClean( text( e ) );
+            r.setFieldName( "@" + vrClean( text( e ) ) );
             m_out.push_back( std::move( r ) );
             return true;
         } );
@@ -3232,9 +3230,9 @@ private:
         RawRef r     = rawRefAt( at, m_fileId, m_lang, RefRole::Value, {} );
         r.qualifier  = std::string( 1, scope );
         r.recvVar    = std::move( recvVar );
-        r.composeRel = std::string( composeRel );
-        r.memberCtor = std::string( memberCtor );
-        r.memberPath = std::string( memberPath );
+        r.setComposeRel( std::string( composeRel ) );
+        r.setMemberCtor( std::string( memberCtor ) );
+        r.setMemberPath( std::string( memberPath ) );
         m_out.push_back( std::move( r ) );
     }
 
@@ -3459,10 +3457,10 @@ private:
             {
                 return;   // a map / slice / inline struct literal: the key is not a field of a named struct type
             }
-            r.memberPath = std::string( text( k ) );
+            r.setMemberPath( std::string( text( k ) ) );
             // fix1 F-2: `pkg.T` kept WHOLE (the join maps pkg through the file's import to its directory); a bare `T` is the
             // file's own package's
-            r.memberCtor = kindIs( ts_node_type( tyNode ), "qualified_type" ) ? std::string( text( tyNode ) ) : std::string( ty );
+            r.setMemberCtor( kindIs( ts_node_type( tyNode ), "qualified_type" ) ? std::string( text( tyNode ) ) : std::string( ty ) );
             return;
         }
         if( kindIs( p.kind, "assignment_statement" ) && m_anc[j].field == m_fRight && kindIs( m_anc[j].kind, "expression_list" ) && j + 1 < m_anc.size() )
@@ -3478,8 +3476,8 @@ private:
             {
                 return;   // `a, b.F = f()`: a multi-value call, no position maps one value to one field
             }
-            r.memberPath = std::string( text( fld ) );
-            r.memberCtor.clear();
+            r.setMemberPath( std::string( text( fld ) ) );
+            r.setMemberCtor( std::string_view() );
         }
     }
 
@@ -3510,9 +3508,10 @@ private:
             {
                 return;   // a nested `.a.b =` / array `[i] =` designator: not one field of this literal's type
             }
-            r.memberPath = std::string( fld );
-            const auto [ lt, ltKw ] = designatedType( j - 2, r.memberPath );
-            r.memberCtor = slotCtor( lt, ltKw );
+            std::string path( fld );
+            const auto [ lt, ltKw ] = designatedType( j - 2, path );
+            r.setMemberPath( path );
+            r.setMemberCtor( slotCtor( lt, ltKw ) );
             return;
         }
         if( kindIs( pt, "initializer_list" ) )
@@ -3526,8 +3525,8 @@ private:
             const std::ptrdiff_t idx = sf == m_structs.end() ? -1 : vrPositionOf( p.node, m_anc[j].node, *sf, m_fDesignator, m_src );
             if( idx >= 0 )
             {
-                r.memberPath = std::string( sf->fields[ static_cast<std::size_t>( idx ) ].name );
-                r.memberCtor = slotCtor( t, tKw );
+                r.setMemberPath( std::string( sf->fields[ static_cast<std::size_t>( idx ) ].name ) );
+                r.setMemberCtor( slotCtor( t, tKw ) );
             }
             return;   // an index not provable exactly: no slot (never a guessed field)
         }
@@ -3549,8 +3548,8 @@ private:
             {
                 return;   // a non-struct object
             }
-            r.memberPath = std::move( chain );
-            r.memberCtor = slotCtor( std::string( ty.key ), ty.structKw );
+            r.setMemberPath( std::move( chain ) );
+            r.setMemberCtor( slotCtor( std::string( ty.key ), ty.structKw ) );
         }
     }
 
@@ -3626,10 +3625,10 @@ private:
         const std::size_t dot = chain.rfind( '.' );
         RawRef r     = rawRefAt( call, m_fileId, m_lang, RefRole::Through, std::string( text( root ) ) );
         r.qualifier  = std::string( 1, kValueRefSlotCallScope );
-        r.fieldName  = vrClean( text( f ) );
-        r.composeRel = "." + ( dot == std::string::npos ? chain : chain.substr( dot + 1 ) );
-        r.memberCtor = slotCtor( std::move( key ), kw );
-        r.memberPath = std::move( chain );
+        r.setFieldName( vrClean( text( f ) ) );
+        r.setComposeRel( "." + ( dot == std::string::npos ? chain : chain.substr( dot + 1 ) ) );
+        r.setMemberCtor( slotCtor( std::move( key ), kw ) );
+        r.setMemberPath( std::move( chain ) );
         m_out.push_back( std::move( r ) );
     }
     // FN-SLOT S2 (c): a call of a bare identifier (a function-like macro, or a function returning a struct pointer) as a field
@@ -4219,9 +4218,9 @@ private:
         r.qualifier  = !( pre || suf ) ? "w" : t.callable ? "" : "t";
         // an unusable side is no constraint: a template `x_{a}.{b}` keeps only its usable prefix; a too-wide one keeps
         // both sides as written (valuerefindex.h counts the members they could name, pattern_too_wide=)
-        r.fieldName  = pre || !suf ? t.prefix : std::string();
-        r.composeRel = suf || !pre ? t.suffix : std::string();
-        r.name       = r.fieldName + "*" + r.composeRel;
+        r.setFieldName( pre || !suf ? t.prefix : std::string() );
+        r.setComposeRel( suf || !pre ? t.suffix : std::string() );
+        r.name       = r.fieldName() + "*" + r.composeRel();
         r.recvVar    = ts_node_is_null( recv ) ? std::string() : vrClean( text( recv ) );
         m_out.push_back( std::move( r ) );
     }
@@ -4292,7 +4291,7 @@ private:
             return;
         }
         // `o[ 'on' + e ] = fn` stores a function under the name (an assignment target, `++`, `delete`): no lookup, so no call
-        const TSNode parent = ts_node_parent( sub );
+        const TSNode parent = parentOf( sub );
         const char*  pk     = ts_node_is_null( parent ) ? "" : ts_node_type( parent );
         const bool   store  = ( ( kindIs( pk, "assignment_expression" ) || kindIs( pk, "augmented_assignment_expression" ) )
                                 && ts_node_eq( child( parent, m_fLeft ), sub ) )
@@ -4318,8 +4317,8 @@ private:
         r.lang      = m_lang;
         r.role      = RefRole::Through;
         r.name      = std::string( x );
-        r.composeRel = std::move( key );
-        r.fieldName = vrClean( text( f ) );
+        r.setComposeRel( std::move( key ) );
+        r.setFieldName( vrClean( text( f ) ) );
 
         const std::size_t d = declaringScope( x );
         if( d != 0 )

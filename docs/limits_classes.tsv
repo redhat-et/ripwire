@@ -99,6 +99,7 @@ kMaxRenameProbeFiles	INDEXING
 kMaxSample	INDEXING
 kMaxScopeChars	OUTPUT
 kMaxScored	INDEXING
+kMaxShellNesting	INDEXING
 kMaxShown	OUTPUT
 kMaxSig	OUTPUT
 kMaxSitesShown	OUTPUT

@@ -21,12 +21,13 @@
 // in would trade one drift for another.
 
 #include "closures.h"        // ClosureIndex — the callees form's <in> blocks: functions written inside of='s body
+#include "contractseed.h"    // widenContractSeeds — a contract method's callers come from its implementors' bodies (BODILESS-SEED)
 #include "declinedsites.h"   // the <dc> rows: the declined call sites, ordered here once for every surface
 #include "editcheck.h" // rowCallSites / callSitesAttrXml — the C2 byte band estimates the rows it serves
 #include "pageview.h"  // kCallersBandMaxBytes / kCallerRowMinBytes / kCallHierarchyBandMax
 #include "defattrib.h" // the per-row definition attribution every surface of these rows serves (and tsContractSignatures)
 #include "filter.h"    // pathTierIndexOver / compareTierThenPath — the tier-then-path row order both surfaces serve
-#include "graph.h"     // resolveAllByNameQualified, the CSR, testSymbolForwardReach / countTestedIn / isTestedByReach
+#include "graph.h"     // resolveAllByNameQualified, the CSR, testSymbolForwardReach / radiusTiers / isTestedByReach
 #include "memberowner.h"   // QUALNAME-1: MemberOwners / qualifiedMemberName — n="Owner.name" on every member row
 #include "model.h"
 #include "nextverb.h"  // nextFlag / nextAttrXml / nextFieldJson — a cut <in> block's next=
@@ -49,23 +50,36 @@ namespace rw
 
 // A6: the 1-hop tested/untested partition, bundled into one call so a caller pays ONE statement instead of
 // separately naming testReach / tested / untested / attr. The counting loop itself lives in
-// graph.h::countTestedIn, shared with --impact. (Hoisted here from verbs_navigate.h, unchanged, so the MCP
+// graph.h::radiusTiers, shared with --impact and --safe-delete. (Hoisted here from verbs_navigate.h, unchanged, so the MCP
 // twins can serve the same partition instead of omitting the lens.)
+// TIER-FOLLOWUP: three tiers, not two, by IMPACT-TEST-TIER's graph.h radiusTiers. isTestedByReach never counts a test symbol,
+// so `untested = rows - tested` put every TEST caller into hop_untested=; the test rows are now their own count, hop_tests=
+// (absent at 0), and hop_tested + hop_untested + hop_tests == rows.size().
 struct HopTestedPartition
 {
     std::vector<char> testReach;
     std::size_t       tested;
     std::size_t       untested;
-    std::string       xmlAttr;   // " hop_tested=\"N\" hop_untested=\"M\""
+    std::size_t       tests;     // test definitions among the rows (isTestSymbol): their own tier, never untested production
+    std::string       xmlAttr;   // " hop_tested=\"N\" hop_untested=\"M\"" + " hop_tests=\"K\"" when K > 0
 };
 
 inline HopTestedPartition computeHopTestedPartition( const IngestResult& ing, const Graph& g, const std::vector<NodeId>& rows )
 {
     std::vector<char> testReach = testSymbolForwardReach( ing, g );
-    const std::size_t tested    = countTestedIn( ing, testReach, rows );
-    const std::size_t untested  = rows.size() - tested;
-    std::string       attr      = " hop_tested=\"" + std::to_string( tested ) + "\" hop_untested=\"" + std::to_string( untested ) + "\"";
-    return { std::move( testReach ), tested, untested, std::move( attr ) };
+    const RadiusTiers tiers     = radiusTiers( ing, testReach, rows );
+    std::string       attr      = " hop_tested=\"" + std::to_string( tiers.tested ) + "\" hop_untested=\"" + std::to_string( tiers.untested ) + "\""
+                                + ( tiers.tests > 0 ? " hop_tests=\"" + std::to_string( tiers.tests ) + "\"" : std::string() );
+    return { std::move( testReach ), tiers.tested, tiers.untested, tiers.tests, std::move( attr ) };
+}
+
+// TIER-FOLLOWUP: whether a test definition is among rows[begin, end) — the columnar <test> column and its legend clause ride
+// exactly then (a page with none is byte-identical to the two-tier answer).
+inline bool anyTestRowIn( const IngestResult& ing, const std::vector<NodeId>& rows, std::size_t begin, std::size_t end )
+{
+    const std::size_t last  = std::min( end, rows.size() );
+    const std::size_t first = std::min( begin, last );
+    return std::any_of( rows.begin() + std::ptrdiff_t( first ), rows.begin() + std::ptrdiff_t( last ), [ & ]( NodeId n ) { return isTestSymbol( ing, n ); } );
 }
 
 // The rows one 1-hop question yields, with the two counts that qualify them.
@@ -102,6 +116,13 @@ struct CallHierarchyRows
     // lane declined-sites (declinedsites.h): the records behind declinedCalls, in served order (callers file-first, callees
     // file and line) — the <dc> rows, never in `rows` or any count above; uncut, declinedSites.size() == declinedCalls.
     std::vector<std::uint32_t> declinedSites;
+    // GV-PATH-BIND (CLI --callers, src/verbs_navigate.h callHierarchyRowsNarrowed): the selector as typed when it bound nothing and the
+    // M1 rule narrowed it to one source definition, whose spelling these rows answer; empty otherwise (the root's narrowed=)
+    std::vector<std::string>   narrowed;
+    // BODILESS-SEED (contractseed.h): callers only — the selector's contract seeds and the implementor bodies `matches` gained
+    // for them (the root's impls=; absent when contractSeeds is 0)
+    std::size_t                contractSeeds = 0;
+    std::size_t                implBodies    = 0;
 };
 
 // ── CLOSURE BLOCKS (lane ix2-slice, IX-2 P2): what the functions written INSIDE of='s body call ───────────────────────────
@@ -450,6 +471,13 @@ inline CallHierarchyRows callHierarchyRows( const IngestResult& ing, const Graph
     if( out.matches.empty() )
     {
         return out;   // the caller owns the refusal: a CLI stderr line, or a JSON-RPC -32602
+    }
+    if( wantCallers )
+    {   // BODILESS-SEED: a contract method's callers are the callers of what a call through it runs (contractseed.h)
+        ContractSeeds widened = widenContractSeeds( ing, g, std::move( out.matches ) );
+        out.matches           = std::move( widened.seeds );
+        out.contractSeeds     = widened.contracts;
+        out.implBodies        = widened.impls;
     }
     out.crossKind = crossKindValue( ing, out.matches );
 

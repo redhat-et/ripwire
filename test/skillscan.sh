@@ -468,7 +468,7 @@ int main()
 }
 CPP
 if "$CXX" -std=c++23 -I "$ROOT/src" "$TMP/merge.cpp" -o "$TMP/merge" >"$TMP/merge.err" 2>&1; then
-    MERGED="$( "$TMP/merge" )"
+    MERGED="$( "$TMP/merge" )" || no "(merge) the harness exited $? (gateexitcheck H1: its status carries its own checks)"
     WANT="$( printf '3 EXFILTRATE:net-exfil 2 code3\n5 INJECTION:disregard 2 md5\n6 SCOPE-CREEP:bash 1 md6\n7 X:y 0 code7' )"
     if [ "$MERGED" = "$WANT" ]; then ok "(merge) a (line, rule) both passes report keeps the WORSE severity (code CRITICAL over markdown WARN; markdown on a tie; code-only rows added)"
     else no "(merge) want the worst severity per (line, rule), got: $( printf '%s' "$MERGED" | tr '\n' '|' )"; fi
@@ -518,7 +518,7 @@ int main()
 }
 CPP
 if "$CXX" -std=c++23 -I "$ROOT/src" -I "$ROOT/src/infra" -I "$ROOT/third_party" "$TMP/excerpt.cpp" "$ROOT/src/infra/diagnostics.cpp" -o "$TMP/excerpt" >"$TMP/excerpt.err" 2>&1; then
-    GOT="$( "$TMP/excerpt" )"
+    GOT="$( "$TMP/excerpt" )" || no "(excerpt cap) the harness exited $? (gateexitcheck H1: its status carries its own checks)"
     for want in 'straddle2 in=138 out=119 valid=1 ellipsis=1' 'straddle4 in=139 out=118 valid=1 ellipsis=1' 'exact120 in=120 out=120 valid=1 ellipsis=0' 'over in=121 out=120 valid=1 ellipsis=1'; do
         if printf '%s\n' "$GOT" | grep -qxF "$want"; then ok "(excerpt cap) $want"
         else no "(excerpt cap) want '$want', got: $( printf '%s\n' "$GOT" | grep "^${want%% *} " | head -1 )"; fi
@@ -560,7 +560,7 @@ int main()
 }
 CPP
 if "$CXX" -std=c++23 -I "$ROOT/src" -I "$ROOT/src/infra" -I "$ROOT/third_party" "$TMP/dedupe.cpp" "$ROOT/src/infra/diagnostics.cpp" -o "$TMP/dedupe" >"$TMP/dedupe.err" 2>&1; then
-    GOT="$( "$TMP/dedupe" )"
+    GOT="$( "$TMP/dedupe" )" || no "(dedupe) the harness exited $? (gateexitcheck H1: its status carries its own checks)"
     if [ "$GOT" = "rows=42 non_critical_kept=0 wrong_excerpt=0" ]; then ok "(dedupe) 40 colliding (line, rule) pairs keep the CRITICAL row whichever came first (42 rows: 40 + the two lone ones)"
     else no "(dedupe) want 'rows=42 non_critical_kept=0 wrong_excerpt=0', got: $GOT"; fi
 else

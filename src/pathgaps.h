@@ -651,7 +651,7 @@ private:
         }
         std::vector<NodeId>   out;
         std::vector<NodeId>   stack = ownersOf( bs );
-        HashMap<NodeId, char> seen;
+        HashSet<NodeId>       seen;
         while( !stack.empty() )
         {
             const NodeId b = stack.back();
@@ -660,7 +660,7 @@ private:
             const std::vector<std::uint8_t>& bound = g_.implementorBound[b];
             for( std::size_t k = 0; k < kids.size(); ++k )
             {
-                if( bound[k] == std::uint8_t( BaseBound::Proven ) && seen.try_emplace( kids[k], char( 1 ) ).second )
+                if( bound[k] == std::uint8_t( BaseBound::Proven ) && seen.insert( kids[k] ).second )
                 {
                     out.push_back( kids[k] );
                     stack.push_back( kids[k] );
@@ -903,7 +903,7 @@ inline PathNearSink pathNearSink( const IngestResult& ing, const Graph& g, std::
             // a reference inside the row itself is no way in; nor is a WRAPPER decorator (`@property`, `@classmethod`,
             // `@overload` — valuerefindex.h vrIsWrapperDecorator, the dead-set's own rule): it hands the function back under its
             // own name, which is then read or called by name, not handed off
-            if( vr.fromSymbol == u || vrIsWrapperDecorator( vr.fieldName ) )
+            if( vr.fromSymbol == u || vrIsWrapperDecorator( vr.fieldName() ) )
             {
                 continue;
             }
@@ -1427,7 +1427,7 @@ inline PathBridge pathBridge( const IngestResult& ing, const Graph& g, std::span
             }
             for( auto it = std::ranges::lower_bound( valueBy, lo ); it != valueBy.end() && *it <= hi; ++it )
             {
-                if( vrIsWrapperDecorator( ing.references[ it->second ].fieldName ) )
+                if( vrIsWrapperDecorator( ing.references[ it->second ].fieldName() ) )
                 {
                     continue;   // a wrapper decorator hands the function back under its own name: no hand-off
                 }

@@ -73,7 +73,9 @@ OUT="$( mcp_call \
 RC=$?
 LASTLINE="$( printf '%s\n' "$OUT" | tail -1 )"
 
-if [ -z "$LASTLINE" ]; then
+if [ "$RC" != 0 ]; then
+    no "A4-F6: 25-digit start_line: the server exited $RC (want 0 at end of input; a signal is the UB/abort this arm exists for). stderr: $( head -3 "$TMP/f6_stderr" )"
+elif [ -z "$LASTLINE" ]; then
     no "A4-F6: 25-digit start_line produced NO response line at all (crash/abort suspected). stderr: $( cat "$TMP/f6_stderr" | head -3 )"
 elif printf '%s' "$LASTLINE" | python3 -c 'import sys,json; json.load(sys.stdin)' 2>/dev/null; then
     ok "A4-F6: 25-digit start_line yields a well-formed JSON-RPC response (no UB/abort)"

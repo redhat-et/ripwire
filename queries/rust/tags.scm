@@ -118,3 +118,10 @@
 ; or type that shares the name, and with no indexed macro it is a call outside the tree (external=).
 (macro_invocation
     macro: (identifier) @name) @reference.macro
+
+; RUST-MACRO-PATH: a path macro invocation (`crate::__define_thing!(..)`, `axum_core::__define_rejection! { .. }`, `serde_json::json!(..)`)
+; is the same Macro site, named by its last segment; ingest keeps the written path (`$crate` read as `crate`), and graph.h binds it only
+; to a macro that path proves (receiverevidence.h rustRule3Proves): an outside crate's path never reaches an in-tree namesake.
+(macro_invocation
+    macro: (scoped_identifier
+        name: (identifier) @name)) @reference.macro

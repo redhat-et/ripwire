@@ -306,6 +306,10 @@ for n in ( 1000, 16000 ):
     # lists, so both sides execute nodesMatchExactly and only the flooded list differs (CodeRabbit, #130)
     w( "patmeta/n%d/big.c" % n, [ "int a( int x );", "int f( void )", "{", "    return a(" ] + [ C ] * n + [ "    1 ) == a(" ] + [ C ] * n + [ "    1 );", "}" ] )
     w( "patmeta_off/n%d/big.c" % n, [ "int a( int x );", "int f( void )", "{", "    return a( 1 ) == a( 1 );" ] + [ C ] * n + [ C ] * n + [ "}" ] )
+    # memberCalleeOperator (CodeRabbit #633 4557724164) — `p->f( 1 )` with the flood between `p` and `->f`, inside the
+    # field_expression the member near-miss probes; the control floods the body beside the same call
+    w( "patarrow/n%d/big.cpp" % n, [ "struct S { int f( int x ); };", "int g( S* p )", "{", "    return p" ] + [ C ] * n + [ "        ->f( 1 );", "}" ] )
+    w( "patarrow_off/n%d/big.cpp" % n, [ "struct S { int f( int x ); };", "int g( S* p )", "{", "    int r = p->f( 1 );" ] + [ C ] * n + [ "    return r;", "}" ] )
 # #358 import-capture reach: importContainerReach reads one directive's ancestry. These two fixtures are about
 # DEPTH, not child-list width, so they sit outside the n1000/n16000 loop and the (C) corpus list on purpose.
 # Each puts 2000 IMPORTS inside 2000 nested containers; the control keeps the nesting and swaps the imports
@@ -405,6 +409,12 @@ if [ "$( count_rows "$TMP/a_pat.xml" '<m p="big.c:2" in="f">' )" = 1 ]; then
     ok "(A7) findMatches/matchChildren: the pattern still matches f's body past 1000 comment children"
 else
     no "(A7) findMatches/matchChildren: the pattern lost its match on the flooded body"
+fi
+"$BIN" "$TMP/patarrow/n1000" --no-cache --pattern='f($X)' >"$TMP/a_pa.xml" 2>/dev/null   # status: --pattern exits 0 or 1 by hit count; the unmatched_member_arrow attribute is the verdict and a missing one FAILs
+if grep -q ' unmatched_member="1" unmatched_member_arrow="1"' "$TMP/a_pa.xml"; then
+    ok "(A7b) memberCalleeOperator: the flooded \`p ->f( 1 )\` still counts as an arrow member near-miss (B39 reaches the walk)"
+else
+    no "(A7b) memberCalleeOperator: the flooded arrow call lost its near-miss count: $( grep -o '<pattern [^>]*>' "$TMP/a_pa.xml" | head -c 300 )"
 fi
 callers_count(){ # $1 = corpus, $2 = fully qualified symbol -> the callers verb's count= attribute
     "$BIN" "$1" --no-cache --callers="$2" 2>/dev/null | sed -n 's/.*<callers [^>]*count="\([0-9]*\)".*/\1/p'
@@ -542,6 +552,10 @@ pair "(B35) captureTagsFacts/objc-body" objcbody     objcbody_off    "an ObjC me
 b_pm_off="$(  usercpu "$TMP/patmeta_off/n16000" "$BIN" --pattern='$X == $X' )"
 b_pm_walk="$( usercpu "$TMP/patmeta/n16000"     "$BIN" --pattern='$X == $X' )"
 arm "(B36) nodesMatchExactly" "$b_pm_off" "$b_pm_walk" 8 0.30 "--pattern='\$X == \$X' over two 16000-comment argument lists vs the same pattern with the floods outside both lists"
+
+b_pa_off="$(  usercpu "$TMP/patarrow_off/n16000" "$BIN" --pattern='f($X)' )"
+b_pa_walk="$( usercpu "$TMP/patarrow/n16000"     "$BIN" --pattern='f($X)' )"
+arm "(B39) memberCalleeOperator" "$b_pa_off" "$b_pa_walk" 8 0.30 "--pattern='f(\$X)' near-miss on a 16000-comment \`p ->f\` callee vs the same call with the flood beside it"
 
 # #358 — importContainerReach (src/ingest_importcap.h): ancestry read in ONE descent, not k ts_node_parent hops
 b_rjs_off="$(     usercpu "$TMP/reachjs_off"  "$BIN" --top-k=100000 )"

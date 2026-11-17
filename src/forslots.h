@@ -114,7 +114,7 @@ inline InitSlotPairs initSlotPairs( const IngestResult& ing, const ValueRefIndex
     for( const std::uint32_t v : refs )
     {
         const Reference&       r   = ing.references[v];
-        const std::string_view key = slot_detail::slotKey( r.fieldName, ing.symbols[id].name );
+        const std::string_view key = slot_detail::slotKey( r.fieldName(), ing.symbols[id].name );
         std::vector<NodeId>    tgt = vri.targetsOf( v );
         std::ranges::sort( tgt, [ & ]( NodeId a, NodeId b ) { return ing.symbols[a].name != ing.symbols[b].name ? ing.symbols[a].name < ing.symbols[b].name : a < b; } );
         for( const NodeId t : tgt )
@@ -356,7 +356,7 @@ inline std::size_t spliceSlotJoinRows( std::string& sigs, const IngestResult& in
     {
         return r.role == RefRole::Value
             && ( std::ranges::binary_search( fnNames, std::string_view( r.calleeName ), rw::sortutil::svLess )
-                 || ( structRow && ( !r.memberPath.empty() || ( !r.qualifier.empty() && r.qualifier[0] == kValueRefSlotParamScope ) ) ) );
+                 || ( structRow && ( !r.memberPath().empty() || ( !r.qualifier.empty() && r.qualifier[0] == kValueRefSlotParamScope ) ) ) );
     } );
     if( !joinable )
     {

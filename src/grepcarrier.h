@@ -119,7 +119,7 @@ inline std::vector<std::uint64_t> valueSitesOf( const IngestResult& rd, std::spa
     for( std::uint32_t i = 0; i < rd.references.size(); ++i )
     {
         const Reference& r = rd.references[i];
-        if( r.role == RefRole::Value && !r.fieldName.starts_with( '@' ) && std::ranges::binary_search( names, std::string_view( r.calleeName ), sortutil::svLess ) )
+        if( r.role == RefRole::Value && !r.fieldName().starts_with( '@' ) && std::ranges::binary_search( names, std::string_view( r.calleeName ), sortutil::svLess ) )
         {
             candidates.push_back( i );
         }
@@ -150,7 +150,7 @@ namespace grepcarrier
 // definition it resolves to (none when it resolves to several). `targets` is vri.targetsOf of that reference.
 inline GrepCarrierVal storedVal( const IngestResult& ing, const Reference& ref, std::span<const NodeId> targets )
 {
-    const std::string_view rel = ref.composeRel;
+    const std::string_view rel = ref.composeRel();
     GrepCarrierVal         val{ std::string( rel.starts_with( '.' ) ? rel.substr( 1 ) : rel ), ref.calleeName, {}, 0 };
     if( targets.size() == 1 && targets[0] < ing.symbols.size() )
     {
@@ -173,7 +173,7 @@ inline void fillVals( const IngestResult& ing, const ValueRefIndex& vri, std::sp
     {
         const Reference&          ref     = ing.references[v];
         const std::vector<NodeId> targets = vri.targetsOf( v );
-        if( ref.fieldName.starts_with( '@' ) || targets.empty() )
+        if( ref.fieldName().starts_with( '@' ) || targets.empty() )
         {
             continue;   // a decorator row is a fact about a definition; an unresolved name is not a function value
         }

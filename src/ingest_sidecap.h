@@ -22,6 +22,14 @@ namespace rw
 namespace
 {
 
+// RIPWIRE_NO_PARENT_CACHE (any value) turns infra/tsparent.h's ancestor cache off: same answers, the pre-cache cost (the A/B
+// handle test/parentcachecheck.sh diffs against). Read once per process.
+inline bool parentCacheOn()
+{
+    static const bool on = std::getenv( "RIPWIRE_NO_PARENT_CACHE" ) == nullptr;
+    return on;
+}
+
 // One parser, reused across files (single-threaded). Language set per file.
 struct ParserGuard
 {
@@ -724,7 +732,7 @@ inline bool spanContains( TSNode outer, TSNode inner ) noexcept
 // base of) an update operand, or exactly the `left` side of an assignment?
 inline bool isUpdateOrAssignmentTarget( TSNode node ) noexcept
 {
-    const TSNode parent = ts_node_parent( node );
+    const TSNode parent = parentOf( node );
     if( ts_node_is_null( parent ) )
     {
         return false;
@@ -755,7 +763,7 @@ inline bool isUpdateOrAssignmentTarget( TSNode node ) noexcept
 // in `a.b.c = 1` only `c` is written and `b` is traversed).
 inline TSNode outermostBaseOf( TSNode node, bool throughMemberAccess ) noexcept
 {
-    for( TSNode up = ts_node_parent( node ); !ts_node_is_null( up ); up = ts_node_parent( node ) )
+    for( TSNode up = parentOf( node ); !ts_node_is_null( up ); up = parentOf( node ) )
     {
         const char* ut = ts_node_type( up );
         const bool isSubscript = kindIs( ut, "subscript_expression" ) || kindIs( ut, "subscript" );   // C/C++ · Python `a[i]`
@@ -778,7 +786,7 @@ inline bool isWriteTarget( TSNode id ) noexcept
 // is `id` the callee/function-position name of a call (already captured as a Call ref by the tags query)?
 inline bool isCallCallee( TSNode id ) noexcept
 {
-    const TSNode parent = ts_node_parent( id );
+    const TSNode parent = parentOf( id );
     if( ts_node_is_null( parent ) )
     {
         return false;
@@ -803,7 +811,7 @@ inline bool isCallCallee( TSNode id ) noexcept
         {
             return false;
         }
-        const TSNode gp = ts_node_parent( parent );   // the field-access is the callee only when its parent is a call whose `function` is it
+        const TSNode gp = parentOf( parent );   // the field-access is the callee only when its parent is a call whose `function` is it
         if( ts_node_is_null( gp ) )
         {
             return false;
@@ -881,7 +889,7 @@ inline bool isDeclSiteName( TSNode id, TSNode parent, const char* pt ) noexcept
 // we EXCLUDE rather than mislabel — a missed read is far better than reporting a def's own name as a "read".
 inline bool isNonValueContext( TSNode id ) noexcept
 {
-    const TSNode parent = ts_node_parent( id );
+    const TSNode parent = parentOf( id );
     if( ts_node_is_null( parent ) )
     {
         return false;
@@ -980,7 +988,7 @@ inline bool isTypeMentionNode( const char* nt ) noexcept
 //   (c) a TYPE PARAMETER's own name (`template< typename T >`) — T is being declared here, not named.
 inline bool isTypeDeclarationSite( TSNode id ) noexcept
 {
-    const TSNode parent = ts_node_parent( id );
+    const TSNode parent = parentOf( id );
     if( ts_node_is_null( parent ) )
     {
         return false;
@@ -1033,7 +1041,7 @@ inline bool isTypeDeclarationSite( TSNode id ) noexcept
 // node. The receiver half (`a`, `p`, `o`) is NOT this shape and keeps its bare-identifier treatment.
 inline TSNode memberAccessOfField( TSNode id, Lang lang ) noexcept
 {
-    const TSNode parent = ts_node_parent( id );
+    const TSNode parent = parentOf( id );
     if( ts_node_is_null( parent ) || !isMemberAccessNode( ts_node_type( parent ), lang ) )
     {
         return TSNode{};
@@ -1089,7 +1097,7 @@ inline void stampMemberReceiver( RawRef& r, TSNode access, Lang lang, std::strin
     RecvShape    rs       = ts_node_is_null( recvNode ) ? RecvShape{} : classifyReceiver( recvNode, lang, src, /*allowChain=*/ true );
     r.recv      = rs.kind == RecvKind::None ? RecvKind::FieldOfVar : rs.kind;   // a member access is never a bare name
     r.recvVar   = std::move( rs.var );
-    r.fieldName = std::move( rs.field );
+    r.setFieldName( std::move( rs.field ) );
 }
 
 void usesVisitNode( UseCtx& cx, TSNode n, const char* t )
@@ -1185,6 +1193,7 @@ inline constexpr ExtractFamily kExtractFamilyByLang[] = {
     ExtractFamily::JvmDotNet,        // Kotlin
     ExtractFamily::Scripting,        // GDScript
     ExtractFamily::Scripting,        // Clojure
+    ExtractFamily::DocsData,         // Proto
 };
 static_assert( std::size( kExtractFamilyByLang ) == kLangCount, "one profile family row per Lang, in enumerator order" );
 static_assert( kExtractFamilyByLang[ std::size_t( Lang::Kotlin ) ] == ExtractFamily::JvmDotNet && kExtractFamilyByLang[ std::size_t( Lang::C ) ] == ExtractFamily::CFamily,
@@ -1633,6 +1642,7 @@ void captureSideFacts( const LangEntry& le, std::uint32_t fileId, std::string_vi
                        std::vector<RawRouteUse>& routeUses, std::vector<ConstOpen>& constOpens, bool captureValueUses,
                        const std::vector<PreprocDeadRange>& ppDead, ExtractShortfall& shortfall )
 {
+    AncestorCacheScope ancestors( root, parentCacheOn() );   // parent-carry: the side walk's visitors climb through one cached root-descent path (infra/tsparent.h)
     const std::size_t firstRefOfFile  = refs.size();
     const std::size_t firstIncOfFile  = incs.size();
     const std::size_t firstBindOfFile = binds.size();
@@ -1831,6 +1841,48 @@ inline bool isCFamilyTypeSpecifier( Lang lang, TSNode node ) noexcept
     return kindIs( t, "enum_specifier" ) || kindIs( t, "struct_specifier" ) || kindIs( t, "union_specifier" ) || kindIs( t, "class_specifier" );
 }
 
+// MACRO-P1 (ingest_names.h annotatedDefinitionAfter): `T f( a ) ABSL_LOCKS_EXCLUDED( mu ) { body }` reads as a prototype closed
+// by a MISSING ";" and a typeless definition named after the annotation; the annotation is a macro use, and a C-family
+// function prototype with no body of its own adopts that definition's body. `body` comes back unchanged otherwise.
+inline TSNode annotatedSiblingBody( TSNode body, Lang lang, SymKind kind, TSNode roleNode, std::string_view src ) noexcept
+{
+    if( !ts_node_is_null( body ) || !macroRefLang( lang ) || !( kind == SymKind::Function || kind == SymKind::Method )
+        || !kindIs( ts_node_type( roleNode ), "function_declarator" ) )
+    {
+        return body;
+    }
+    const TSNode annotated = annotatedDefinitionAfter( roleNode, src );
+    return ts_node_is_null( annotated ) ? body : fieldChild( annotated, NodeField::Body );
+}
+
+// MACRO-P1: the kind of the real function an annotation's definition is renamed to (ingest_names.h annotationRenamedName) —
+// a method when it is a class member or qualified, as the tags query's own patterns would have captured it.
+inline SymKind renamedAnnotationKind( TSNode name ) noexcept
+{
+    const TSNode qualifier = parentOf( name );
+    const bool   member    = kindIs( ts_node_type( name ), "field_identifier" ) || ( !ts_node_is_null( qualifier ) && kindIs( ts_node_type( qualifier ), "qualified_identifier" ) );
+    return member ? SymKind::Method : SymKind::Function;
+}
+
+// MACRO-P1: a renamed annotation definition's facts that are the real function's, not the macro's: the parameter list in it is
+// the ANNOTATION's (`( mu_ )`), the real one was the empty `()` emptyCallInitName requires, and its span and rows start at
+// the real function's own declaration. No-op when nothing was renamed.
+inline void applyAnnotationRename( RawDef& d, const AnnotationRename& renamed, TSNode defNode ) noexcept
+{
+    if( ts_node_is_null( renamed.name ) )
+    {
+        return;
+    }
+    d.params     = 0;
+    d.paramsMin  = 0;
+    d.arityExact = 1;
+    if( !ts_node_is_null( renamed.start ) )
+    {
+        d.startByte = ts_node_start_byte( renamed.start );
+        d.loc       = ts_node_end_point( defNode ).row - ts_node_start_point( renamed.start ).row + 1u;
+    }
+}
+
 // The two postures of one tags pass. Full: every fact the index keeps. DefinitionsOnly (definitionLinesInBlobs, --whereis on
 // other refs): the SAME definitions — every step that decides a definition's existence, name, line, kind or scope runs
 // unchanged — without the work only references, imports and metrics read: the @reference arm, @import emission,
@@ -1855,6 +1907,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
         return;
     }
 
+    AncestorCacheScope  ancestors( root, parentCacheOn() );   // parent-carry: every parentOf climb in this file's capture reads one cached root-descent path
     BaseScopeIndexGuard baseScopes;   // lane lego-transitive fix 1 (mutable: lookups fill it): this file's base-lookup scope tables (ingest_relations.h)
     TSQuery* query = compiledQueryFor( le );   // shared immutable query, compiled once per grammar (pre-warmed) — do NOT delete
     if( query == nullptr )
@@ -2051,6 +2104,33 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 }
                 aliasShape = aliasShapeOf( Lang::Cpp, roleNode );
             }
+            AnnotationRename renamed {};
+            if( cFamilyMacroInvocationCapture( defCapSv, le.lang, nameTxt, roleNode, src ) )   // defCapSv: set by a @definition capture only
+            {
+                // MACRO-P0 (ingest_names.h): a macro invocation read as a typeless declarator mints no definition of its own; the site is
+                // a call-shaped use of the macro (model.h retagMacroCallReferences makes it role="macro" when the #define is
+                // indexed and its name is uniquely a macro). No argument count: the "parameters" are macro arguments.
+                RawRef r;
+                r.fileId    = fileId;
+                r.startByte = ts_node_start_byte( roleNode );
+                r.line      = ts_node_start_point( roleNode ).row + 1;
+                r.lang      = le.lang;
+                r.role      = RefRole::Call;
+                r.name      = nameTxt;
+                refs.push_back( std::move( r ) );
+                // MACRO-P1: when the grammar read the real function's own `f()` as a variable (ingest_names.h
+                // annotationRenamedName), this definition is the only one f gets — it carries f's name, from f's own start.
+                renamed = annotationRenamedName( roleNode, src );
+                if( ts_node_is_null( renamed.name ) )
+                {
+                    continue;
+                }
+                nameNode = renamed.name;
+                nameTxt  = nodeTextOf( renamed.name, src );
+                nameByte = ts_node_start_byte( renamed.name );
+                nameRow  = ts_node_start_point( renamed.name ).row;
+                kind     = renamedAnnotationKind( renamed.name );
+            }
             if( isDef && dropGatedCapture( defCapSv, le.lang, nameTxt, nameNode, roleNode, src ) )
             {
                 continue;
@@ -2089,7 +2169,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             if( le.lang == Lang::Elixir && refCapSv == "reference.bare" )
             {
                 // Bare pipe targets have their own capture; every other bare name needs lexical variable exclusion.
-                const TSNode parent = ts_node_parent( nameNode );
+                const TSNode parent = parentOf( nameNode );
                 if( ( elixirNodeIs( parent, "binary_operator" ) && nodeFieldText( parent, NodeField::Operator, src  ) == "|>"
                       && ts_node_eq( fieldChild( parent, NodeField::Right ), nameNode ) ) || !elixir.bareCall( nameNode ) ) { continue; }
             }
@@ -2097,7 +2177,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             {
                 constexpr std::string_view special[] = { "=", "<-", "\\\\", "::", "|>", "when", "|", "^", "&", "@" };
                 if( std::find( std::begin( special ), std::end( special ), nameTxt ) != std::end( special ) ) { continue; }
-                const TSNode parent = ts_node_parent( roleNode );
+                const TSNode parent = parentOf( roleNode );
                 if( nameTxt == "/" && elixirNodeIs( parent, "unary_operator" ) && nodeFieldText( parent, NodeField::Operator, src  ) == "&" ) { continue; }
             }
 
@@ -2184,7 +2264,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             if( ts_node_is_null( body ) && kind != SymKind::Var && kind != SymKind::Field && le.lang != Lang::Elixir )
             {
                 TSNode child = roleNode;
-                TSNode p     = ts_node_parent( roleNode );
+                TSNode p     = parentOf( roleNode );
                 for( int guard = 0; !ts_node_is_null( p ) && guard < 4; ++guard )
                 {
                     const char* pt = ts_node_type( p );
@@ -2232,13 +2312,18 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                         break;
                     }
                     child = p;
-                    p     = ts_node_parent( p );
+                    p     = parentOf( p );
                 }
             }
             if( typeUseInSignature )
             {
                 continue;   // a body-less C/C++ specifier in a function's signature: a type use, never a definition
             }
+
+            // MACRO-P1: a prototype adopts its trailing annotation's definition body, its span running THROUGH that sibling
+            const TSNode ownBody       = body;
+            body                       = annotatedSiblingBody( body, le.lang, kind, roleNode, src );
+            const bool   annotatedBody = !ts_node_eq( body, ownBody );
 
             // ObjC/Kotlin body-field fallback for the grammars that expose a body as an unnamed CHILD, not a
             // named "body" field. C++ function_definition owns a "body" field (found above); the ObjC grammar
@@ -2274,18 +2359,25 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                                          { "compound_statement", "function_body", "block", "implementation_definition", "class_body", "enum_class_body" } );
             }
 
+            // Proto (PROTO-INDEX): the grammar names no `body:` field. A message's or enum's body is its *_body child; a service's,
+            // an rpc's option block's and a oneof's body starts at its `{` token (an rpc ending in `;` has none).
+            if( ts_node_is_null( body ) && langFacts( le.lang ).generatedSchema )
+            {
+                body = firstChildOfKind( defNode, /*namedOnly=*/false, { "message_body", "enum_body", "{" } );
+            }
+
             // Dart's body is a SIBLING of the signature, so neither defBodyNodeOf nor the climb above can
             // find it and the span would stop at the signature — see dartFollowingBody (ingest_relations.h)
             // for the measurement and for why an abstract member still comes back null.
-            bool dartSiblingBody = false;
+            bool siblingBody = annotatedBody;   // MACRO-P1's annotated sibling above, or Dart's here
             if( ts_node_is_null( body ) && le.lang == Lang::Dart )
             {
-                body            = dartFollowingBody( defNode );
-                dartSiblingBody = !ts_node_is_null( body );
+                body        = dartFollowingBody( defNode );
+                siblingBody = !ts_node_is_null( body );
             }
             // Both flags mean the same thing to the three span consumers below: the code this symbol
             // owns lives in a SIBLING node, so byte/row extents and complexity must run through it.
-            const bool spanThroughBody = isTestMacroBlock || dartSiblingBody;
+            const bool spanThroughBody = isTestMacroBlock || siblingBody;
 
             d.startByte = ts_node_start_byte( defNode );
             d.endByte   = spanThroughBody ? ts_node_end_byte( body ) : ts_node_end_byte( defNode );   // LB-E: the span runs THROUGH the sibling block
@@ -2326,6 +2418,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             const ParamShape shape = ( fnOrMethod && !isTestMacroBlock && le.lang != Lang::Clojure ) ? cc_paramShape( metricNode, le.lang, kind, src ) : ParamShape{};
             d.arityExact = shape.exact ? std::uint8_t( 1 ) : std::uint8_t( 0 );
             d.paramsMin  = shape.minimum <= d.params ? shape.minimum : std::uint16_t( 0 );
+            applyAnnotationRename( d, renamed, defNode );   // MACRO-P1: the real function's parameters and start, not the annotation's
             // L8: the in-file test-scope bit, for EVERY kind (a `#[cfg(test)] mod` and a `class TestFoo`
             // are themselves symbols, and dropping the members while keeping the shell would be a worse
             // answer than either). Runs on defNode, whose ancestors are the enclosing scopes.
@@ -2362,7 +2455,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 const auto attribute = elixirAttribute( roleNode, src );
                 if( elixirTypedAttribute( attribute ) )
                 {
-                    const TSNode args = elixirArguments( ts_node_parent( nameNode ) );
+                    const TSNode args = elixirArguments( parentOf( nameNode ) );
                     std::uint32_t arity = 0;
                     for( std::uint32_t i = 0; !ts_node_is_null( args ) && i < ts_node_named_child_count( args ); ++i )
                     {
@@ -2470,7 +2563,13 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             }
             if( kind == SymKind::Class || isStructOrNamedType( kind ) || kind == SymKind::Interface )
             {
-                captureBases( defNode, fileId, le.lang, src, refs );    // IS-A: inheritance edges (derived → base)
+                // #446: a language on the bases-as-captures port reads its bases through the
+                // @reference.base reader above (LangFacts::basesAsCaptures; C++ is the first). The
+                // others keep the walk; C++'s own walk survives for captureSpecializationHeader.
+                if( !langFacts( le.lang ).basesAsCaptures )
+                {
+                    captureBases( defNode, fileId, le.lang, src, refs );    // IS-A: inheritance edges (derived → base)
+                }
                 if( defCapSv == "definition.classfactory" )               // lane lego-transitive (M2): the factory's receiver is the base
                 {
                     emitBaseRef( jsClassFactoryReceiver( nameNode, src ), fileId, le.lang, src, refs, defNode );
@@ -2480,6 +2579,10 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             else if( kind == SymKind::Macro )
             {
                 captureMacroBodyCalls( roleNode, fileId, le.lang, src, refs );   // macro-edges: the graph connects THROUGH the macro
+                if( langFacts( le.lang ).bangMacros )   // Rust: `$crate` exists only where `name!` macros do
+                {
+                    captureRustTranscriberMacroCalls( roleNode, fileId, src, refs );   // RUST-MACRO-PATH: `$crate::m!` in a transcriber
+                }
             }
             }
             else if( isRef && full )
@@ -2533,6 +2636,16 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                     continue;
                 }
 
+                // #446: a @reference.base capture is a base-clause type on the class-def path —
+                // queries/<lang>/tags.scm names the clause's type node, so the capture IS the language
+                // gate. The clause's parent is the class node (emitBaseRef's `self`), the same pairing
+                // the captureBases walk passed; C++ is the first language on this capture.
+                if( refCapSv == "reference.base" )
+                {
+                    emitBaseRef( nameNode, fileId, le.lang, src, refs, parentOf( roleNode ) );
+                    continue;
+                }
+
                 RawRef r;
                 r.fileId    = fileId;
                 r.startByte = ts_node_start_byte( roleNode );
@@ -2544,7 +2657,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 r.name      = finalSegment( nameTxt );
                 if( le.lang == Lang::Clojure )
                 {
-                    r.qualifier = nodeFieldText( ts_node_parent( nameNode ), NodeField::Namespace, src );
+                    r.qualifier = nodeFieldText( parentOf( nameNode ), NodeField::Namespace, src );
                 }
                 if( le.lang == Lang::Elixir )
                 {
@@ -2586,6 +2699,17 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                     r.qualifierRootsStd = cppQualifiedChainRootsStd( nameNode, src );
                     cppResplitRefName( r, nameTxt );            // H4 RE-SPLIT at 3+ segments, operator tails, `template` disambiguator
                 }
+                else if( langFacts( le.lang ).bangMacros && r.role == RefRole::Macro )
+                {
+                    // RUST-MACRO-PATH: `crate::m!`, `axum_core::m!`, `serde_json::json!`: the written path, which graph.h requires to prove the macro
+                    const TSNode parent = parentOf( nameNode );
+                    if( !ts_node_is_null( parent ) && kindIs( ts_node_type( parent ), "scoped_identifier" ) )
+                    {
+                        std::string qualifier;
+                        rustMacroPathOf( nodeTextOf( fieldChild( parent, NodeField::Path ), src ), qualifier, rustWritten );
+                        r.qualifier = std::move( qualifier );
+                    }
+                }
                 else if( le.lang == Lang::Rust )
                 {
                     r.qualifier = rustQualifierOf( nameNode, src ); // H4: `Widget::new()` → "Widget"
@@ -2604,13 +2728,13 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                                  ? javaMethodReferenceReceiver( roleNode, src )
                                  : receiverOf( nameNode, le.lang, src );                 // P2-D: `this`/`self`/`x`/`base.field` shape
                     r.recv = rs.kind;  r.recvVar = std::move( rs.var );                  //   → one-hop narrowing in resolve.h
-                    r.fieldName = std::move( rs.field );                                 //   depth-2 intermediate field; "" otherwise
+                    r.setFieldName( std::move( rs.field ) );                                 //   depth-2 intermediate field; "" otherwise
                     r.viaArrow  = rs.viaArrow;                                           //   `p->m()`: Rule 2b's smart-pointer pointee needs it
                     r.memberCall = rs.member;  r.memberRoot = std::move( rs.root );      //   FE-A: a Go/JS/TS/Rust member call and its receiver root
-                    r.memberPath = std::move( rs.path );  r.memberCtor = std::move( rs.ctor );   //   FE-B: the rest of that receiver chain
+                    r.setMemberPath( std::move( rs.path ) );  r.setMemberCtor( std::move( rs.ctor ) );   //   FE-B: the rest of that receiver chain
                     if( le.lang == Lang::Ruby && r.recv == RecvKind::NamedVar )
                     {
-                        r.fieldName = rubyReceiverWrittenPath( nameNode, r.recvVar, src );   // parser version 137: a constant's path as written
+                        r.setFieldName( rubyReceiverWrittenPath( nameNode, r.recvVar, src ) );   // parser version 137: a constant's path as written
                     }
                     auto [ ac, ak ] = callArity( nameNode, le.lang, src );               // B2.2: call-site positional arg count
                     r.argCount = ac;  r.argCountKnown = ak;                              //   → arity filter in graph.h
@@ -2620,13 +2744,13 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                     }
                     if( !rustWritten.empty() )
                     {
-                        r.fieldName = std::move( rustWritten );   // a Rust path call's whole written qualifier (model.h Reference::fieldName)
+                        r.setFieldName( std::move( rustWritten ) );   // a Rust path call's whole written qualifier (model.h Reference::fieldName)
                     }
                     if( isQueueLang( le.lang ) && isQueueCallName( r.name ) )
                     {
                         if( const std::uint8_t kw = callKeywords( nameNode, src ); kw != 0 )
                         {
-                            r.composeRel = pyKwTag( kw );                                // a queue call's keywords, for QueueHops (model.h pyKwTag)
+                            r.setComposeRel( pyKwTag( kw ) );                                // a queue call's keywords, for QueueHops (model.h pyKwTag)
                         }
                     }
                 }

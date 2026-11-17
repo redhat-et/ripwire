@@ -239,7 +239,6 @@ struct AbiResult
 {
     bool           ok          = true;
     bool           nonGitRoot  = false;
-    bool           tooManyRefs = false;
     bool           filterMatchedNothing = false;   // H7: the --stray-content=SUBSTR filter selected no ref NAME
     bool           blobsUnread = false;            // K75: the blob batch both sides are modelled from never started or died part-way — refused
     std::string    headSha;
@@ -248,6 +247,7 @@ struct AbiResult
                                        // (gitstampcheck.sh pins that spelling); at= is the new attribute
                                        // carrying the dirty bit.
     std::size_t    refsScanned = 0;
+    std::vector<std::string> refsOmitted;   // the ref window's leftovers (crossref::windowNewestRefs): refs_omitted=
     std::size_t    distinctBlobs = 0;
     std::size_t    candidates  = 0;   // (path,name) pairs HEAD declares and this module can LOCATE a body for
     std::size_t    compared    = 0;   // …of those, the (ref,path,name) sites actually modelled on both sides
@@ -453,7 +453,7 @@ struct SweepState
 // share the answer, and it is only ever read as a COUNT (the head_only= honesty number, never a verdict).
 using PathMemo = gtl::btree_map<std::string, std::vector<std::string>>;
 
-inline const std::vector<std::string>& headChangedPaths( const std::string& root, const std::string& headSha,
+inline const std::vector<std::string>& headChangedPaths( const std::vector<crossref::RawRow>& headDiff,
                                                          const std::string& base, const PathIndex& byPath, PathMemo& memo )
 {
     auto hit = memo.find( base );
@@ -463,7 +463,7 @@ inline const std::vector<std::string>& headChangedPaths( const std::string& root
     }
 
     std::vector<std::string> paths;
-    for( const crossref::RawRow& r : crossref::diffRaw( root, base, headSha ) )
+    for( const crossref::RawRow& r : headDiff )
     {
         if( r.aSha == r.bSha )
         {
@@ -478,6 +478,31 @@ inline const std::vector<std::string>& headChangedPaths( const std::string& root
     return memo.emplace( base, std::move( paths ) ).first->second;
 }
 
+// Each ref's merge base (one history walk, crossref::probeRefBases) and its two diffs, base->tip and base->HEAD, through
+// batched `diff-tree --stdin` processes (crossref::DiffPairTable) — REF-WINDOW-COST, LARGE-PARTIAL-1: collectAuthoredSites
+// spawned three git processes per ref, serially, which took 125 s at 512 refs on a one-file repo.
+struct AuthoredDiffs
+{
+    std::vector<crossref::RefPlumbing> plumbing;   // per ref: base, refDiffPair, headDiffPair (kNoPair without a base)
+    crossref::DiffPairTable            diffs;
+};
+
+inline AuthoredDiffs diffRefsAgainstBases( const std::string& root, const std::vector<crossref::RefInfo>& refs, const std::string& headSha )
+{
+    AuthoredDiffs out{ crossref::probeRefBases( root, refs, headSha ), {} };
+    for( std::uint32_t i = 0; i < refs.size(); ++i )
+    {
+        crossref::RefPlumbing& p = out.plumbing[ i ];
+        if( !p.base.empty() )
+        {
+            p.refDiffPair  = out.diffs.want( p.base, refs[ i ].tip );
+            p.headDiffPair = out.diffs.want( p.base, headSha );
+        }
+    }
+    out.diffs.run( root );
+    return out;
+}
+
 inline void collectAuthoredSites( const std::string& root, const std::vector<crossref::RefInfo>& refs,
                                   const PathIndex& byPath, SweepState& sw, Tally tally )
 {
@@ -485,10 +510,11 @@ inline void collectAuthoredSites( const std::string& root, const std::vector<cro
     AbiResult&           result = tally.result;
     PathMemo             headPathsByBase;
 
+    const AuthoredDiffs ad = diffRefsAgainstBases( root, refs, result.headSha );
+
     for( std::uint32_t i = 0; i < refs.size(); ++i )
     {
-        const std::string base = quality::gitOneLine( root, "merge-base " + shSingleQuote( refs[i].tip ) + " "
-                                                          + shSingleQuote( result.headSha ) + " 2>/dev/null" );
+        const std::string& base = ad.plumbing[ i ].base;
         if( base.empty() )
         {
             DISCLOSE( result, AbiResult::DisclosureWhy::NoMergeBase, "abi: no merge-base for a ref (unrelated history?) — that ref is counted, not compared" );
@@ -497,7 +523,7 @@ inline void collectAuthoredSites( const std::string& root, const std::vector<cro
         rows[i].base = base;
 
         gtl::btree_map<std::string, bool> authoredPaths;
-        for( const crossref::RawRow& r : crossref::diffRaw( root, base, refs[i].tip ) )
+        for( const crossref::RawRow& r : ad.diffs.rows( ad.plumbing[ i ].refDiffPair ) )
         {
             if( r.aSha == r.bSha )
             {
@@ -517,7 +543,7 @@ inline void collectAuthoredSites( const std::string& root, const std::vector<cro
         // Everything the narrowing dropped, as a number. A candidate site on a path the LIVE LINE changed
         // and this ref did not is outside the authored scope by construction — never a break this branch
         // introduced — but it is counted here rather than vanishing.
-        for( const std::string& p : headChangedPaths( root, result.headSha, base, byPath, headPathsByBase ) )
+        for( const std::string& p : headChangedPaths( ad.diffs.rows( ad.plumbing[ i ].headDiffPair ), base, byPath, headPathsByBase ) )
         {
             if( authoredPaths.find( p ) != authoredPaths.end() )
             {
@@ -709,7 +735,8 @@ inline void classifyPathSite( ClassifyCtx cc, const PathIndex& byPath, const Swe
 
 // ── the whole computation ────────────────────────────────────────────────────────────────────────────────
 
-inline AbiResult computeAbiCheck( const std::string& root, const IngestResult& ing, std::string_view filter )
+// `maxRefs`: the ref window (crossref::kMaxRefs; SIZE_MAX under --detail).
+inline AbiResult computeAbiCheck( const std::string& root, const IngestResult& ing, std::string_view filter, std::size_t maxRefs = crossref::kMaxRefs )
 {
     AbiResult result;
     if( !quality::gitRepoHasHistory( root ) ) { result.ok = false; result.nonGitRoot = true; return result; }
@@ -719,12 +746,13 @@ inline AbiResult computeAbiCheck( const std::string& root, const IngestResult& i
     result.headRef = quality::gitOneLine( root, "rev-parse --abbrev-ref HEAD 2>/dev/null" );
 
     std::size_t                          filterNameHits = 0;
-    const std::vector<crossref::RefInfo> refs = crossref::enumerateRefs( root, filter, result.headSha, &filterNameHits );
+    std::vector<crossref::RefInfo>       refs = crossref::enumerateRefs( root, filter, result.headSha, &filterNameHits );
     // H7 (wave-3 close): a filter that matched no ref NAME is a refusal, never an empty measurement — the same
-    // rule computeStrayContent applies; before this the zero case fell through to the ">kMaxRefs" sentence.
+    // rule computeStrayContent applies; before this the zero case fell through to the ref-cap refusal sentence.
     result.filterMatchedNothing = !filter.empty() && filterNameHits == 0;
     if( result.filterMatchedNothing ) { result.ok = false; return result; }
-    if( refs.size() > crossref::kMaxRefs ) { result.ok = false; result.tooManyRefs = true; return result; }
+    result.refsOmitted = crossref::windowNewestRefs( refs, maxRefs );   // past the window: the newest, the rest counted
+    crossref::warnRefWindow( "--abi", refs.size(), result.refsOmitted, std::format( "{} refs", crossref::kMaxRefs ) );
     result.refsScanned = refs.size();
 
     const layout::AggIndex byName = layout::buildAggIndex( ing );
@@ -968,16 +996,19 @@ inline void writeAbiCheck( std::FILE* out, const AbiResult& res, std::size_t max
                        "the live line changes S's mirror in another is a merge hazard only layout(S) on the "
                        "merged result can see. Single-root; read-only (cat-file/diff/merge-base only). at= is the git "
                        "commit these numbers were computed at; a trailing +shallow means the clone's history is truncated (a depth-limited clone: churn counts only the commits present), and a trailing +dirty means the working tree differed from "
-                       "that commit (head= is the same commit, bare sha, kept for compatibility). -->" );
+                       "that commit (head= is the same commit, bare sha, kept for compatibility). refs_omitted= (present only when non-zero) is "
+                       "the REF WINDOW: past 512 local branches the newest 512 by committer date are compared and this many older ones are not, "
+                       "so they are in none of the counts or rows; the stray-content=SUBSTR ref filter picks which branches fill the window, and the detail flag reads every branch. -->" );
     // M10: head= stays a bare 9-hex sha (gitstampcheck.sh's existing arm pins that spelling); at= is the new
     // attribute, carrying the dirty bit this document never disclosed before.
     const std::string atAttrStr = res.atStamp.empty() ? std::string() : ( " at=\"" + res.atStamp + "\"" );
     rw::emitTo( out, "<abi head=\"{:.9}\" head_ref=\"{}\" refs=\"{}\" candidates=\"{}\" compared=\"{}\" blobs=\"{}\""
                        " rows=\"{}\" shown=\"{}\" capped=\"{}\" dropped=\"{}\" excluded=\"{}\" head_only=\"{}\" unmodelable=\"{}\""
-                       " unrelated=\"{}\" broken_refs=\"{}\" quiet=\"{}\" excluded_refs=\"{}\"{}",
+                       " unrelated=\"{}\" broken_refs=\"{}\" quiet=\"{}\" excluded_refs=\"{}\"{}{}",
                   res.headSha.c_str(), ex( res.headRef ).c_str(), res.refsScanned, res.candidates, res.compared,
                   res.distinctBlobs, res.counts.total(), shownRows, unsigned( droppedRows > 0 ), droppedRows, res.counts.excluded(),
-                  res.headOnly, res.unmodelable, res.unrelated, brokenRefs, res.quietRefs, excludedRefs, atAttrStr.c_str() );
+                  res.headOnly, res.unmodelable, res.unrelated, brokenRefs, res.quietRefs, excludedRefs,
+                  crossref::refsOmittedAttr( res.refsOmitted ).c_str(), atAttrStr.c_str() );
     writeKindAttrs( out, res.counts );
     if( !rootArg.empty() ) { rw::emitTo( out, " root=\"{}\"", ex( rootArg ).c_str() ); }
     rw::emitRaw( out, ">" );

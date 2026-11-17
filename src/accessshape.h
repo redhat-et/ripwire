@@ -88,8 +88,8 @@
 // The plan's original ambition names SEVEN self-reference shapes (typedef aliases, templates, smart-
 // pointer unwrapping, cross-aggregate multi-hop links among them). Shipping all seven unverified would be
 // exactly the overclaim SCOPE DISCIPLINE forbids. What ships now, real and gated:
-//   HANDLED   — the field's AS-WRITTEN declared type (layout.h's FieldRow::type, e.g. "Node**" for a
-//               `Node*` field per layout.h's own pointer-marker convention) contains the enclosing
+//   HANDLED   — the field's AS-WRITTEN declared type (layout.h's FieldRow::type, e.g. "Node *" for a
+//               `Node *next` field: the declarator's own spelling, one `*` per `*` written) contains the enclosing
 //               aggregate's own indexed name as a WHOLE WORD (docdrift.h::hasWholeWord — the same
 //               whole-word predicate the naming/doc-drift lenses already use, so "NodeExtra" cannot
 //               satisfy "Node"). An EXACT match — the word appears and the type, punctuation stripped, is
@@ -505,8 +505,8 @@ inline bool chaseTypeCanPoint( std::string_view fieldType ) noexcept
     return fieldType.find( '*' ) != std::string_view::npos || fieldType.find( '&' ) != std::string_view::npos;
 }
 
-// `fieldType` is layout.h's FieldRow::type — the AS-WRITTEN spelling (e.g. "Node**" for a `Node*` field,
-// per layout.h's own pointer-marker convention; template/const/volatile spelling otherwise untouched).
+// `fieldType` is layout.h's FieldRow::type — the AS-WRITTEN spelling (e.g. "Node *" for `Node *next`, "Node" for the
+// plain `val` of `Node *next, val;`; template/const/volatile spelling otherwise untouched).
 // `aggName` is the enclosing aggregate's own indexed name. See the file header for exactly which of the
 // plan's seven self-reference shapes this covers and which it honestly does not.
 inline ChaseConfidence chaseFieldConfidence( std::string_view fieldType, std::string_view aggName ) noexcept

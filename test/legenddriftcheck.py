@@ -196,7 +196,10 @@ def extract_flag_tokens_from_legend(legend_text):
     # lane FE-B fix round 1: "x" joins for the same documented reason. The map's via legend (src/graphlegend.h
     # kMapViaNameLegend) and the compact <c x=N> row define a merged map row's OUTPUT ATTRIBUTE as "x=N"; there is no --x
     # flag. Added by NAME, per this list's own rule.
-    placeholder_exclude = {"bodies", "bodyless", "overloads", "files", "hits", "toks", "noedge", "total", "shown", "d", "x"}
+    # SIZE-2 (size-trim): "class" joins for the same documented reason. The --for tail's folded= legend (src/serialize.h
+    # kForFileTailFoldedLegend and its compact twin) spells the OUTPUT ATTRIBUTE's value as "folded=class=N" (doc=N,config=N,…);
+    # there is no --class flag. Added by NAME, per this list's own rule.
+    placeholder_exclude = {"bodies", "bodyless", "overloads", "files", "hits", "toks", "noedge", "total", "shown", "d", "x", "class"}
     for match in re.finditer(r'\b([a-z][a-z0-9\-]*)=[NM]\b', legend_text):
         word = match.group(1)
         if word not in placeholder_exclude:

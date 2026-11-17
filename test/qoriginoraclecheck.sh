@@ -133,9 +133,9 @@ PQ="$( cd "$S" && "$BIN" . --quality-delta --no-cache 2>"$WORK/pq_err" )"; rcp=$
 # and the tree is compared against git HEAD. The two copies below ARE new against HEAD, so new-symbol rows
 # are the truth here, not a disarmed gate; what must never appear is a was=0 now=0 phantom.
 PQPHANTOM="$( printf '%s' "$PQ" | tr '<' '\n' | grep '^r kind=' | grep -c 'was="0" now="0"' )"
-{ [ "$PQPHANTOM" -eq 0 ] && printf '%s' "$PQ" | grep -q 'baseline="git-HEAD (sidecar unreadable)"'; } \
+{ [ "$rcp" = 0 ] && [ "$PQPHANTOM" -eq 0 ] && printf '%s' "$PQ" | grep -q 'baseline="git-HEAD (sidecar unreadable)"'; } \
     && ok "pre-Q1 sidecar: refused and named on the root (sidecar unreadable), no was=0 now=0 phantom row (exit $rcp)" \
-    || { no "pre-Q1 sidecar: $PQPHANTOM phantom row(s), root marker: $( printf '%s' "$PQ" | grep -o 'baseline="[^"]*"' )"; printf '%s' "$PQ" | tr '<' '\n' | grep 'was="0" now="0"' | head -3; }
+    || { no "pre-Q1 sidecar: exit $rcp (want 0), $PQPHANTOM phantom row(s), root marker: $( printf '%s' "$PQ" | grep -o 'baseline="[^"]*"' )"; printf '%s' "$PQ" | tr '<' '\n' | grep 'was="0" now="0"' | head -3; }
 grep -q 'pre-Q1' "$WORK/pq_err" && grep -q 'quality-baseline' "$WORK/pq_err" \
     && ok "pre-Q1 sidecar: stderr names the format and the re-pin (the Release-visible line — this refusal raises no debug alert)" \
     || { no "pre-Q1 sidecar: stderr does not name pre-Q1 + the re-pin"; head -3 "$WORK/pq_err"; }

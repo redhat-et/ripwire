@@ -77,6 +77,12 @@
 #          the rows at the cut leave holds the small refresh body): the body is paid INSIDE N — rows(slot) < rows(off),
 #          <sigs shown=K next_offset=K next=> names the displaced rows, est_tokens(slot) - est_tokens(off) <= the room slot-off
 #          left under N + (legend + root delta + one row) / 2.5 (a body appended after the row cut fails both; M5)
+#   TOKEN-BUDGET-MONOTONE (2026-11-14): the CLI --for budget sheds the unbudgeted answer in one order — tail, hops, fold, the
+#          bodies (the owner body slot is the compact route's <bodies>: shed=bodies:1), docs, then the worst-ranked rows — so
+#          the body now goes BEFORE any ranked row (the brief's shed order: bodies before rows). E2/E2b: the shed slot's next=
+#          is the call without the budget (it serves the body), one argument. E2h/E3h: the kept rows are a rank prefix of the
+#          default answer's r= (the head round-robin's order, which the budget no longer re-decides). E4 (CLI): the body is
+#          shed and the rows equal slot-off's (bodyshed); the MCP arm keeps the reserve-first path (MCP keeps the row target).
 #   MC1-MC4 MCP for: [P] body parity with the CLI; [P] budget_tokens=400 recoverable; [G] no cue, no body
 #   MC5 [P] MCP for on the cut owner (T_BIG: same truncated=/lines=/next= and CDATA as the CLI) and on the Rust
 #          entry point (T_RS: index) — MCP/CLI drift on the cut or on the pick
@@ -98,6 +104,13 @@
 # Exits non-zero on any failure.
 
 set -u
+# SIBLING-DEMOTE / DECL-TWIN (every dialect since DEMOTE-ALL-DIALECTS, fordemoteall.h) stay OFF here, because this gate's twins
+# legitimately differ under them: its premises read the owner's one-line in-class declaration as the r1 ROW (Builder::Build in
+# build.h, PoolDispatcher::Dispatch, …), which DECL-TWIN prints as a pointer to its bodied twin, and its E arms compare the budget
+# ladder's rows with the head round-robin's default, where SIBLING-DEMOTE's rank > 10 rule reads each answer's own served order.
+# The rules and their budget refill are pinned in forsiblingdemotecheck / fordecltwincheck / fordemoteallcheck.
+export RIPWIRE_NO_SIBLING_DEMOTE=1
+export RIPWIRE_NO_DECL_TWIN=1   # DECL-TWIN (fordecltwin.h) runs after it; pinned in fordecltwincheck
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 unset RIPWIRE_NO_BODY_SLOT RIPWIRE_NO_OWNER_HOP RIPWIRE_NO_HEAD_RR
@@ -356,6 +369,16 @@ elif cmd == "cdata":                    # cdata FILE NAME : the <b n=NAME> CDATA
     hit = [b for b in bodies(load(args[0])) if b[0].get("n") == args[1]]
     if not hit: fail("no <b n=%s>" % args[1])
     sys.stdout.write(hit[0][1])
+elif cmd == "bodyshed":                 # bodyshed FILE_SLOT FILE_OFF : TOKEN-BUDGET-MONOTONE E4 — the slot is shed before any ranked row
+    ts, to = load(args[0]), load(args[1])
+    m = re.search(r'<bodies\b([^>]*)>', ts); root = re.search(r'<ctx [^>]*>', ts).group(0)
+    if not m: fail("premise: no <bodies> element on the budgeted answer (the slot's shell)")
+    a = attrs(m.group(1))
+    if bodies(ts) or a.get("shown") != "0" or a.get("capped") != "1" or not a.get("next"): fail("<bodies %s>: the slot is not shed to its shell with next=" % m.group(1)[:160])
+    if 'bodies="0" reason="budget"' not in root or not re.search(r'shed="[^"]*\bbodies:1\b', root): fail("root: no bodies=0 reason=budget / shed=…bodies:1: %s" % root[-240:])
+    rs, ro = [(n, p) for r, n, p, x in rows(ts)], [(n, p) for r, n, p, x in rows(to)]
+    if rs != ro: fail("rows(slot) %d != rows(off) %d: a ranked row went while the body could still be shed" % (len(rs), len(ro)))
+    print("the body shed first (bodies:1, <bodies shown=0 capped=1 next=>), rows = slot-off's (%d)" % len(rs))
 elif cmd == "bodiesnext":               # bodiesnext FILE REGEX : a <bodies> element (the slot's own disclosure) carries next=~REGEX
     m = re.search(r'<bodies\b([^>]*)>', load(args[0]))
     if not m: fail("no <bodies> element (a skipped slot discloses itself there)")
@@ -710,14 +733,15 @@ if r="$( chk setprefix "$TMP/e5000.xml" "$TMP/d.xml" "$TMP/d.so.xml" )"; then ok
 if r="$( chk over "$TMP/e5000.xml" )"; then ok "(E1) --token-budget=5000: no over_ceiling"; else no "(E1) $r"; fi
 run --for="$T_D" --token-budget=400 >"$TMP/e400.xml"
 if r="$( chk rootattr "$TMP/e400.xml" bodies 0 )" && r2="$( chk rootattr "$TMP/e400.xml" reason budget )"; then ok "(E2) --token-budget=400: bodies=0 reason=budget"; else no "(E2) --token-budget=400: ${r:-} ${r2:-}"; fi
-if r="$( chk bodiesnext "$TMP/e400.xml" '^--expand=src/middleware/jwt/jwt\.ts:' )"; then ok "(E2) --token-budget=400: the skipped slot discloses itself, recoverable: $r"; else no "(E2) --token-budget=400: $r"; fi
+# TOKEN-BUDGET-MONOTONE: the shed slot's next= is the call without the budget (it serves the body)
+if r="$( chk bodiesnext "$TMP/e400.xml" '^--for=' )"; then ok "(E2) --token-budget=400: the skipped slot discloses itself, recoverable: $r"; else no "(E2) --token-budget=400: $r"; fi
 RIPWIRE_NO_HEAD_RR=1 run --for="$T_D" --token-budget=400 >"$TMP/e400.so.xml"
 if r="$( chk prefix "$TMP/e400.so.xml" "$TMP/d.so.xml" )"; then ok "(E2) [RIPWIRE_NO_HEAD_RR=1 twin] --token-budget=400: $r"; else no "(E2) [RIPWIRE_NO_HEAD_RR=1 twin] --token-budget=400: $r"; fi
-if r="$( chk setprefix "$TMP/e400.xml" "$TMP/d.xml" "$TMP/d.so.xml" )"; then ok "(E2h) head round-robin on, --token-budget=400: $r"; else no "(E2h) head round-robin on, --token-budget=400: $r"; fi
+if r="$( chk prefix "$TMP/e400.xml" "$TMP/d.xml" )"; then ok "(E2h) head round-robin on, --token-budget=400: $r"; else no "(E2h) head round-robin on, --token-budget=400: $r"; fi
 # E2b (CodeRabbit, #413): the skipped slot's next= is built by nextFlag, so a path a shell would split pastes as ONE argument
 rm -rf "$TMP/spc"; cp -R "$FIX" "$TMP/spc" && mv "$TMP/spc/src/middleware/jwt" "$TMP/spc/src/middleware/j wt"
 "$BIN" "$TMP/spc" --no-cache --for="$T_D" --token-budget=400 >"$TMP/e400spc.xml" 2>/dev/null
-if r="$( chk bodiesnext "$TMP/e400spc.xml" "^--expand='src/middleware/j wt/jwt\.ts:[0-9]+:jwt'\$" )" \
+if r="$( chk bodiesnext "$TMP/e400spc.xml" "^--for='" )" \
    && [ "$( python3 -c 'import html,re,shlex,sys; m=re.search(r"<bodies\b[^>]*\snext=\"([^\"]*)\"", open(sys.argv[1]).read()); print(len(shlex.split(html.unescape(m.group(1)))) if m else 0)' "$TMP/e400spc.xml" )" = 1 ]; then
     ok "(E2b) a path with a space: the skipped slot's next= is quoted and splits to one argument: $r"
 else no "(E2b) a path with a space: ${r:-the next= splits into more than one argument}"; fi
@@ -728,7 +752,7 @@ for n in 300 500 800 1200 2000 3000 5000 8000 1000000; do
     case "$rws$rwo$bb" in *[!0-9]*|'') no "(E3) N=$n: unreadable counts rows=$rws off=$rwo body=$bb"; mono=0; continue;; esac
     RIPWIRE_NO_HEAD_RR=1 run --for="$T_D" --token-budget=$n >"$TMP/s$n.so.xml"
     if ! chk prefix "$TMP/s$n.so.xml" "$TMP/d.so.xml" >/dev/null; then no "(E3) [RIPWIRE_NO_HEAD_RR=1 twin] N=$n: rows are not a rank prefix of the default rows"; mono=0; fi
-    if ! chk setprefix "$TMP/s$n.xml" "$TMP/d.xml" "$TMP/d.so.xml" >/dev/null; then no "(E3h) head round-robin on, N=$n: rows are not a SET prefix of the default rows"; mono=0; fi
+    if ! chk prefix "$TMP/s$n.xml" "$TMP/d.xml" >/dev/null; then no "(E3h) head round-robin on, N=$n: rows are not a rank prefix of the default rows"; mono=0; fi
     if ! chk over "$TMP/s$n.xml" >/dev/null; then no "(E3) N=$n: over_ceiling on the root"; mono=0; fi
     [ "$rws" -lt "$prev_rows" ] && { no "(E3) N=$n: rows $rws < $prev_rows at the smaller N"; mono=0; }
     [ "$bb" -lt "$prev_b" ] && { no "(E3) N=$n: body $bb B < $prev_b B at the smaller N"; mono=0; }
@@ -744,7 +768,7 @@ if [ "$cdw$cdd" = "00" ] && [ -s "$TMP/cd.wide" ] && cmp -s "$TMP/cd.wide" "$TMP
 # E4: T_REF at N=800 — slot-off serves rows past the cut there and the share the rows at the cut leave holds the small body:
 # the body is reserved first and the rows give way (review R3). (T_D's 2.7 KB jwt body is skipped below N=4800: its own arm, E2/E3.)
 run --for="$T_REF" --token-budget=800 >"$TMP/e4.xml"; runoff --for="$T_REF" --token-budget=800 >"$TMP/e4.off.xml"
-if r="$( chk paidinside "$TMP/e4.xml" "$TMP/e4.off.xml" 800 )"; then ok "(E4) --token-budget=800: $r"; else no "(E4) --token-budget=800: $r"; fi
+if r="$( chk bodyshed "$TMP/e4.xml" "$TMP/e4.off.xml" )"; then ok "(E4) --token-budget=800: $r"; else no "(E4) --token-budget=800: $r"; fi
 
 # ── MC: MCP for parity ─────────────────────────────────────────────────────────────────────────────────────
 mcpfor "$T_D" >"$TMP/m.d.xml"; mcpfor "$T_NOCUE" >"$TMP/m.nocue.xml"; mcpfor "$T_D" '{"budget_tokens":400}' >"$TMP/m.d400.xml"

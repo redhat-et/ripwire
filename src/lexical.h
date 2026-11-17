@@ -81,6 +81,53 @@ inline void subtokens( std::string_view id, std::vector<std::string>& out )
     } );
 }
 
+inline std::string suffixStem( std::string w, std::span<const std::string_view> suffixes );
+
+// How many DISTINCT subtokens of `name` — each suffix-stemmed first by `stemSuffixes` when given (suffixStem) — are among `words`.
+// `words` is a handful, read by linear find. The member-name slice's (formembers.h wordOverlap); the tail's tsym= reads WHICH words
+// match instead (fortailterms.h tailTermMask, the same split and stem).
+inline std::ptrdiff_t subtokenOverlap( std::string_view name, const std::vector<std::string>& words, std::span<const std::string_view> stemSuffixes = {} )
+{
+    std::vector<std::string> toks;
+    subtokens( name, toks );
+    for( std::string& t : toks )
+    {
+        t = suffixStem( std::move( t ), stemSuffixes );
+    }
+    std::ranges::sort( toks );
+    toks.erase( std::unique( toks.begin(), toks.end() ), toks.end() );
+    return std::ranges::count_if( toks, [ & ]( const std::string& t ) { return std::ranges::find( words, t ) != words.end(); } );
+}
+
+// A light suffix stem: the FIRST of `suffixes` (in order) that `w` ends with and that leaves 3+ bytes is cut; "ies" becomes "y".
+// The suffix list is the caller's measured rule (forfilesyms.h kLightStemSuffixes for <syms>, fortailterms.h kTailTermSuffixes
+// for tsym=); an empty list leaves `w` as is.
+inline std::string suffixStem( std::string w, std::span<const std::string_view> suffixes )
+{
+    for( const std::string_view suf : suffixes )
+    {
+        if( w.size() > suf.size() + 2 && std::string_view( w ).ends_with( suf ) )
+        {
+            w.resize( w.size() - suf.size() );
+            if( suf == "ies" )
+            {
+                w += 'y';
+            }
+            return w;
+        }
+    }
+    return w;
+}
+
+// Does `text` carry one of `words` (lowercased subtokens) as a subtoken? `words` is a handful, read by linear find. Shared by the
+// --for fold's member slice (forfold.h) and the path owner-word key (pathroute.h).
+inline bool holdsSubtokenWord( std::string_view text, const std::vector<std::string>& words )
+{
+    std::vector<std::string> toks;
+    subtokens( text, toks );
+    return std::ranges::any_of( toks, [ & ]( const std::string& t ) { return std::ranges::find( words, t ) != words.end(); } );
+}
+
 // ── L-W (routing-loop round 2026-09-12): what the BM25 pass saw, read back out ──────────────────────────
 // Per symbol, which of the query's unique terms it matched, and per term, how many symbols matched it — the
 // integers lexicalScoresTiered accumulates anyway, exposed rather than re-derived by a second tokenizer that
@@ -470,6 +517,25 @@ inline const std::string* lexicalScanText( const IngestResult& ing, std::size_t 
     return &scratch;
 }
 
+// The kRankFlagNotLexRanked units (model.h) as a per-symbol mask, 1 = left out; EMPTY when the index holds none, so a corpus
+// without such units runs the historical pass byte-for-byte. One pass over the symbols per ranking call.
+inline std::vector<char> notLexRankedMask( const IngestResult& ing )
+{
+    std::vector<char> mask;
+    for( std::size_t i = 0; i < ing.symbols.size(); ++i )
+    {
+        if( notLexRanked( ing.symbols[i] ) )
+        {
+            if( mask.empty() )
+            {
+                mask.assign( ing.symbols.size(), 0 );
+            }
+            mask[i] = 1;
+        }
+    }
+    return mask;
+}
+
 inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const std::vector<std::uint32_t>& outOff,
                                                const std::vector<NodeId>& outTargets, std::string_view query,
                                                std::size_t pruneTopK, const std::vector<char>* alwaysExact,
@@ -480,6 +546,22 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
 {
     PROFILE_SCOPE_DESCRIBE( "lexical: lexicalScores (BM25 over symbols)" );
     const std::size_t S = ing.symbols.size();
+    // kRankFlagNotLexRanked units (model.h): out of the statistics like a statsOut unit, and never scored (0 below)
+    const std::vector<char> unranked = notLexRankedMask( ing );
+    std::vector<char>       statsOutMerged;
+    if( !unranked.empty() )
+    {
+        statsOutMerged = unranked;
+        for( std::size_t i = 0; statsOut != nullptr && i < statsOut->size() && i < S; ++i )
+        {
+            statsOutMerged[i] = char( statsOutMerged[i] | ( *statsOut )[i] );
+        }
+        statsOut = &statsOutMerged;
+    }
+    const auto isUnranked = [ &unranked ]( std::size_t i ) noexcept { return !unranked.empty() && unranked[i] != 0; };
+    // the WHOLE corpus an OUT unit scores against (avgdlAll, allS, dfOut below) is the ranked one: a kRankFlagNotLexRanked
+    // unit is no document there either, so a Sphinx .txt section scores as it did before HTML units existed
+    const std::size_t allS = S - std::size_t( std::count( unranked.begin(), unranked.end(), char( 1 ) ) );
     // statsOut (filter.h sphinxTxtStatsExclusion): units SCORED like any other but kept out of the corpus statistics —
     // the symbol count, every document frequency and the average length. Null: every unit counts, the historical pass.
     const auto  statsWeight = [ statsOut ]( std::size_t i ) noexcept -> int
@@ -717,7 +799,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     for( std::size_t i = 0; i < S; ++i )
     {
         scanField( i, ing.symbols[i].name, kwName );
-        if( evidenceOut )
+        if( evidenceOut && !isUnranked( i ) )
         {
             const int* const nameRow = tfFlat.data() + i * matchCount;   // name field only: nothing else has run
             std::uint64_t*   words   = evidenceOut->nameMask.data() + i * evidenceWords;
@@ -732,7 +814,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         if( marginArmed )
         {
             const int* const nameRow = tfFlat.data() + i * matchCount;   // name field only: nothing else has run
-            for( std::size_t m = 0; m < matchCount; ++m )
+            for( std::size_t m = 0; m < matchCount && !isUnranked( i ); ++m )
             {
                 nameDf[m] += nameRow[m] > 0 ? 1 : 0;
             }
@@ -1085,7 +1167,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     // code operating on the historical layout.
     if( variantCount > 0 )
     {
-        const std::uint32_t sOver64    = std::uint32_t( S / 64 );
+        const std::uint32_t sOver64    = std::uint32_t( allS / 64 );   // the ranked corpus: an unranked unit does not widen the cap
         const std::uint32_t variantCap = sOver64 > 8u ? sOver64 : 8u;
         if( std::getenv( "RIPWIRE_QSTEM_DEBUG" ) != nullptr )
         {
@@ -1146,7 +1228,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
             const int* const row   = tfFlat.data() + i * uniqueCount;
             std::uint64_t*   words = evidenceOut->anyMask.data() + i * evidenceWords;
             const int        w     = statsWeight( i );
-            for( std::size_t u = 0; u < uniqueCount; ++u )
+            for( std::size_t u = 0; u < uniqueCount && !isUnranked( i ); ++u )
             {
                 if( row[u] > 0 )
                 {
@@ -1265,10 +1347,10 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     for( std::size_t i = 0; i < S; ++i )
     {
         avgdl += statsWeight( i ) != 0 ? dl[i] : 0;
-        avgdlAll += dl[i];
+        avgdlAll += isUnranked( i ) ? 0 : dl[i];
     }
     avgdl /= double( statsS ? statsS : 1 );
-    avgdlAll /= double( S ? S : 1 );
+    avgdlAll /= double( allS ? allS : 1 );
     std::vector<int> dfOut( uniqueCount, 0 );   // per term, the OUT units carrying it (all 0 with no statsOut)
     const auto       countOut = [ & ]( const int* tfRow )
     {
@@ -1298,7 +1380,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
             const int* tfRow = tfFlat.data() + i * uniqueCount;
             bool       any   = false;
             const int  w     = statsWeight( i );
-            if( w == 0 )
+            if( w == 0 && !isUnranked( i ) )
             {
                 countOut( tfRow );
             }
@@ -1353,7 +1435,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                 const int    n    = dfreq[u];
                 const int    nAll = n + dfOut[u];   // an OUT unit's idf: the larger of the two bounds the contribution
                 const double idfIn  = n > 0 ? std::log( ( double( statsS ) - n + 0.5 ) / ( n + 0.5 ) + 1.0 ) : 0.0;
-                const double idfAll = dfOut[u] > 0 ? std::log( ( double( S ) - nAll + 0.5 ) / ( nAll + 0.5 ) + 1.0 ) : 0.0;
+                const double idfAll = dfOut[u] > 0 ? std::log( ( double( allS ) - nAll + 0.5 ) / ( nAll + 0.5 ) + 1.0 ) : 0.0;
                 const double idf  = std::max( idfIn, idfAll );
                 const double T    = double( tfMaxOf[u] );
                 const double cap1 = bm25ImpactBound( idf, T, bm25Params );          // A4: shared bound, same (k1,b)
@@ -1381,6 +1463,10 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                     ub += capOcc[u];
                 }
             }
+            if( isUnranked( i ) )
+            {
+                continue; // a kRankFlagNotLexRanked unit scores 0, the value a skipped symbol keeps
+            }
             const bool mustScore = alwaysExact && i < alwaysExact->size() && (*alwaysExact)[i] != 0;
             if( !mustScore && ub < theta )
             {
@@ -1389,7 +1475,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
 
             // exact score — the IDENTICAL expressions, in the IDENTICAL order, as the exhaustive branch
             const bool   outI = statsWeight( i ) == 0;
-            const double Si   = outI ? double( S ) : double( statsS );
+            const double Si   = outI ? double( allS ) : double( statsS );
             const double avgI = outI ? avgdlAll : avgdl;
             double sc = 0;
             for( std::size_t qi = 0; qi < qToks.size(); ++qi )
@@ -1442,7 +1528,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     for( std::size_t i = 0; i < S; ++i )
     {
         const int w = statsWeight( i );
-        if( w == 0 )
+        if( w == 0 && !isUnranked( i ) )
         {
             countOut( tfFlat.data() + i * uniqueCount );
         }
@@ -1457,8 +1543,12 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
 
     for( std::size_t i = 0; i < S; ++i )
     {
+        if( isUnranked( i ) )
+        {
+            continue; // a kRankFlagNotLexRanked unit scores 0 (model.h)
+        }
         const bool   outI = statsWeight( i ) == 0;
-        const double Si   = outI ? double( S ) : double( statsS );
+        const double Si   = outI ? double( allS ) : double( statsS );
         const double avgI = outI ? avgdlAll : avgdl;
         double sc = 0;
         for( std::size_t qi = 0; qi < qToks.size(); ++qi )
@@ -1599,9 +1689,16 @@ inline std::vector<float> lexicalScoresNameExactTiered( const IngestResult& ing,
         }
     };
 
+    // kRankFlagNotLexRanked units (model.h) are no document: no tf, no length, not in the corpus size; they score 0
+    const std::vector<char> unranked = notLexRankedMask( ing );
+    const std::size_t       rankedS  = S - symbolsWithRankFlag( ing, kRankFlagNotLexRanked );
     // document = whole name (+ container::name as a second whole token, when a scope exists)
     for( std::size_t i = 0; i < S; ++i )
     {
+        if( !unranked.empty() && unranked[i] != 0 )
+        {
+            continue;
+        }
         const Symbol&          s    = ing.symbols[i];
         const std::string_view base = ( s.lang == Lang::Elixir ) ? elixirBaseName( s.name ) : std::string_view( s.name );
         const std::string_view alt  = ( base.size() != s.name.size() ) ? base : std::string_view{};
@@ -1628,7 +1725,7 @@ inline std::vector<float> lexicalScoresNameExactTiered( const IngestResult& ing,
     {
         avgdl += d;
     }
-    avgdl /= double( S ? S : 1 );
+    avgdl /= double( rankedS ? rankedS : 1 );
     std::vector<int> dfreq( uniqueCount, 0 );
     for( std::size_t i = 0; i < S; ++i )
     {
@@ -1660,7 +1757,7 @@ inline std::vector<float> lexicalScoresNameExactTiered( const IngestResult& ing,
                 continue;
             }
             const int    n   = dfreq[u];
-            const double idf = std::log( ( double( S ) - n + 0.5 ) / ( n + 0.5 ) + 1.0 );
+            const double idf = std::log( ( double( rankedS ) - n + 0.5 ) / ( n + 0.5 ) + 1.0 );
             sc += idf * ( tf * ( k1 + 1.0 ) ) / ( tf + k1 * ( 1.0 - b + b * dl[i] / ( avgdl > 0 ? avgdl : 1.0 ) ) );
         }
         if( ing.symbols[i].kind == SymKind::Section )
@@ -1874,6 +1971,13 @@ struct RouteAnchorDef
                                       // definition in NodeId order; see noteWholeNameDef), i.e. the same one
                                       // routeAnchorEvidence prints the path of
     std::uint32_t extraDefs = 0;      // further definitions sharing the name — the "+N" the reason discloses
+};
+
+// FRAME-HIGH-CONFIDENCE: the anchor of a name-exact route, in the two forms a ranked head row can match. Empty on every other route.
+struct RouteAnchorKeys
+{
+    std::vector<std::string> lowerNames; // each subject word's leaf, lowercased (`a.b.C::d` gives d), and each resolved anchor name
+    std::vector<std::uint32_t> fileIds; // the files the anchors are defined in, and a FILE subject's own file
 };
 
 struct RouteChoice
@@ -2171,6 +2275,10 @@ inline HashMap<std::string, NameAnchor> buildLowerNameIndex( const IngestResult&
     std::vector<std::string> parts;
     for( const Symbol& s : ing.symbols )
     {
+        if( notLexRanked( s ) )
+        {
+            continue;   // a unit no lexical lens ranks names no route (model.h kRankFlagNotLexRanked)
+        }
         noteWholeNameDef( names, s );
         parts.clear();
         subtokens( s.name, parts );
@@ -2202,7 +2310,9 @@ inline constexpr std::uint32_t kMaxAnchorDefs = 3;
 // "common" name — test/routecheck.sh (g) covers the floored regime, the r7 webpack corpus the scaled one.
 inline std::uint32_t routeCarrierCap( const IngestResult& ing ) noexcept
 {
-    const std::uint32_t sOver128 = std::uint32_t( ing.symbols.size() / 128 );
+    // the ranked corpus: a kRankFlagNotLexRanked unit (model.h) is no carrier and does not widen the cap
+    const std::size_t   ranked   = ing.symbols.size() - symbolsWithRankFlag( ing, kRankFlagNotLexRanked );
+    const std::uint32_t sOver128 = std::uint32_t( ranked / 128 );
     return sOver128 > 8u ? sOver128 : 8u;
 }
 
@@ -2432,71 +2542,143 @@ inline std::vector<std::string> graphSubjectCandidates( std::span<const std::str
     }
     return out;
 }
+
+using GraphSubjectWords = std::vector<std::string_view>;
+
+// the slots read from w[b, e) per range, in order; nullopt when a slot holds no candidate
+inline std::optional<GraphSubject> graphSubjectFill( const GraphSubjectWords& w, GraphSubjectForm form,
+                                                     std::initializer_list<std::pair<std::size_t, std::size_t>> ranges )
+{
+    GraphSubject gs;
+    gs.form = form;
+    for( const auto& [ b, e ] : ranges )
+    {
+        std::string              span;
+        std::vector<std::string> c = graphSubjectCandidates( std::span<const std::string_view>( w.data() + b, e - b ), span );
+        if( c.empty() )
+        {
+            return std::nullopt;
+        }
+        gs.spans.push_back( std::move( span ) );
+        gs.slots.push_back( std::move( c ) );
+    }
+    return gs;
+}
+
+// the first separator word at or after `from` (needs >= 1 word before it and >= 1 after it); w.size() when none
+inline std::size_t graphSubjectSep( const GraphSubjectWords& w, std::size_t from, std::string_view word )
+{
+    for( std::size_t k = from + 1; k + 1 < w.size(); ++k )
+    {
+        if( routeLower( w[k] ) == word )
+        {
+            return k;
+        }
+    }
+    return w.size();
+}
+
+// one form's scan: `decided` stops the parse with `gs` (a form that matched decides even when a slot is empty)
+struct GraphFormScan
+{
+    bool                        decided = false;
+    std::optional<GraphSubject> gs;
+};
+
+// common callers of A and B (the key form: once matched, its slots decide) | calls both A and B (a sentence's phrase: read only when its
+// slots hold code)
+inline GraphFormScan scanCommonForm( const GraphSubjectWords& w, bool sentencePhrase )
+{
+    for( std::size_t i = 0; i + 3 < w.size(); ++i )
+    {
+        const bool matched = sentencePhrase ? graphSubjectWordIs( w[i], { "call", "calls" } ) && routeLower( w[i + 1] ) == "both"
+                                            : graphSubjectWordIs( w[i], { "common" } ) && graphSubjectWordIs( w[i + 1], { "caller", "callers" } ) && routeLower( w[i + 2] ) == "of";
+        const std::size_t from = i + ( sentencePhrase ? 2 : 3 );
+        const std::size_t a    = matched ? graphSubjectSep( w, from, "and" ) : w.size();
+        if( a < w.size() )
+        {
+            std::optional<GraphSubject> gs = graphSubjectFill( w, GraphSubjectForm::Common, { { from, a }, { a + 1, w.size() } } );
+            if( gs || !sentencePhrase )
+            {
+                return { true, std::move( gs ) };
+            }
+        }
+    }
+    return {};
+}
+
+// [call] path from A to B (the key form) | [call] chain from A to B (a sentence's)
+inline GraphFormScan scanPathForm( const GraphSubjectWords& w, std::string_view noun )
+{
+    for( std::size_t i = 0; i + 3 < w.size(); ++i )
+    {
+        const std::size_t t = graphSubjectWordIs( w[i], { noun } ) && routeLower( w[i + 1] ) == "from" ? graphSubjectSep( w, i + 2, "to" ) : w.size();
+        if( t < w.size() )
+        {
+            return { true, graphSubjectFill( w, GraphSubjectForm::Path, { { i + 2, t }, { t + 1, w.size() } } ) };
+        }
+    }
+    return {};
+}
+
+inline GraphFormScan scanReachForm( const GraphSubjectWords& w )   // A reach(es) B: A's span runs back to the previous clause word or stop
+{
+    for( std::size_t i = 1; i + 1 < w.size(); ++i )
+    {
+        if( !graphSubjectWordIs( w[i], { "reach", "reaches" } ) )
+        {
+            continue;
+        }
+        std::size_t b = i;
+        while( b > 0 && !graphSubjectQualifier( w[b - 1] ) && !graphSubjectTrimWord( w[b - 1] ).stop )
+        {
+            --b;
+        }
+        if( std::optional<GraphSubject> gs = graphSubjectFill( w, GraphSubjectForm::Path, { { b, i }, { i + 1, w.size() } } ) )
+        {
+            return { true, std::move( gs ) };
+        }
+    }
+    return {};
+}
+
+inline GraphFormScan scanCallersForm( const GraphSubjectWords& w )   // callers of X
+{
+    for( std::size_t i = 0; i + 2 < w.size(); ++i )
+    {
+        if( graphSubjectWordIs( w[i], { "caller", "callers" } ) && routeLower( w[i + 1] ) == "of" )
+        {
+            return { true, graphSubjectFill( w, GraphSubjectForm::Callers, { { i + 2, w.size() } } ) };
+        }
+    }
+    return {};
+}
 }   // namespace detail
 
 // nullopt unless the task holds one of the three forms AND every slot has a candidate. Forms are tried common,
 // path, callers (parse.py PATS order); the first keyword occurrence of a form anchors it; the first span ends at
 // the form's first separator word (`to` / `and`), the last span runs to the end of the task.
+// SENTENCE-SUBJECT: the same forms as a sentence spells them, read only when no key form matched (so nothing a key form printed is replaced). `[call] chain from A to B` is `path from A to B`; `calls both A
+// and B` asks for their common callers; `A reach(es) B` is a path whose FROM span runs back from `reach` to the previous clause
+// word or sentence stop ("How does `ApplicationRef.tick()` reach `refreshView`"). Every slot still needs a code-like candidate, so a
+// sentence that only uses the words ("which tests reach the cache", "a chain from start to finish") reads nothing.
 inline std::optional<GraphSubject> parseGraphSubject( std::string_view task )
 {
-    const std::vector<std::string_view> w = splitRouteWords( task );
-    const auto fill = [ & ]( GraphSubjectForm form, std::initializer_list<std::pair<std::size_t, std::size_t>> ranges ) -> std::optional<GraphSubject>
+    using namespace detail;
+    using Scan = GraphFormScan ( * )( const GraphSubjectWords& );
+    // the key forms first, in their own order, so a task one of them reads keeps the block it always had; the sentence forms only after
+    static constexpr Scan kScans[] = { []( const GraphSubjectWords& x ) { return scanCommonForm( x, /*sentencePhrase=*/false ); },
+                                       []( const GraphSubjectWords& x ) { return scanPathForm( x, "path" ); },
+                                       &scanCallersForm,
+                                       []( const GraphSubjectWords& x ) { return scanCommonForm( x, /*sentencePhrase=*/true ); },
+                                       []( const GraphSubjectWords& x ) { return scanPathForm( x, "chain" ); },
+                                       &scanReachForm };
+    const GraphSubjectWords w = splitRouteWords( task );
+    for( const Scan scan : kScans )
     {
-        GraphSubject gs;
-        gs.form = form;
-        for( const auto& [ b, e ] : ranges )
+        if( GraphFormScan r = scan( w ); r.decided )
         {
-            std::string span;
-            std::vector<std::string> c = detail::graphSubjectCandidates( std::span<const std::string_view>( w.data() + b, e - b ), span );
-            if( c.empty() )
-            {
-                return std::nullopt;
-            }
-            gs.spans.push_back( std::move( span ) );
-            gs.slots.push_back( std::move( c ) );
-        }
-        return gs;
-    };
-    // the first separator word at or after `from` (needs >= 1 word before it and >= 1 after it)
-    const auto sep = [ & ]( std::size_t from, std::string_view word ) -> std::size_t
-    {
-        for( std::size_t k = from + 1; k + 1 < w.size(); ++k )
-        {
-            if( routeLower( w[k] ) == word )
-            {
-                return k;
-            }
-        }
-        return w.size();
-    };
-    for( std::size_t i = 0; i + 3 < w.size(); ++i )   // common callers of A and B
-    {
-        if( detail::graphSubjectWordIs( w[i], { "common" } ) && detail::graphSubjectWordIs( w[i + 1], { "caller", "callers" } )
-            && routeLower( w[i + 2] ) == "of" )
-        {
-            const std::size_t a = sep( i + 3, "and" );
-            if( a < w.size() )
-            {
-                return fill( GraphSubjectForm::Common, { { i + 3, a }, { a + 1, w.size() } } );   // the form matched: its slots decide
-            }
-        }
-    }
-    for( std::size_t i = 0; i + 3 < w.size(); ++i )   // [call] path from A to B
-    {
-        if( detail::graphSubjectWordIs( w[i], { "path" } ) && routeLower( w[i + 1] ) == "from" )
-        {
-            const std::size_t t = sep( i + 2, "to" );
-            if( t < w.size() )
-            {
-                return fill( GraphSubjectForm::Path, { { i + 2, t }, { t + 1, w.size() } } );
-            }
-        }
-    }
-    for( std::size_t i = 0; i + 2 < w.size(); ++i )   // callers of X
-    {
-        if( detail::graphSubjectWordIs( w[i], { "caller", "callers" } ) && routeLower( w[i + 1] ) == "of" )
-        {
-            return fill( GraphSubjectForm::Callers, { { i + 2, w.size() } } );
+            return std::move( r.gs );
         }
     }
     return std::nullopt;
@@ -2843,13 +3025,15 @@ struct ForConfidence
 // stamp is the same defect wearing a different hat). marginPct is left as the TRUE measured drop even
 // when declined — 0 means "no cliff found" (non-negotiable #3: a zero must mean none found, never none
 // exists), and a real 25% tie-break drop is not that; the note's extra clause is what says not to trust it.
-// anchorNoSource (CONFIDENCE-ANCHOR, subjectanchor.h): a name-exact route whose anchor is served from a test, doc or data file. The
-// drop may be real, but it says the name matched, not that the answer is here: low, and route= says why.
-inline ForConfidence deriveForConfidence( const rw::AdaptiveCut& cut, int servedTopN, bool homonymDecline, bool anchorNoSource = false )
+// anchorUnproven (subjectanchor.h): a name-exact route whose anchor is served from a test, doc or data file (CONFIDENCE-ANCHOR), or
+// whose ranked head is not the anchor (FRAME-HIGH-CONFIDENCE). The drop may be real, but it says the name matched, not that the answer
+// is here: low, and route= says why.
+inline ForConfidence deriveForConfidence( const rw::AdaptiveCut& cut, int servedTopN, bool homonymDecline, bool anchorUnproven = false )
 {
     ForConfidence out;
     const bool servedComplete = cut.positiveHits > 0 && cut.positiveHits <= std::size_t( servedTopN );
-    out.level     = ( homonymDecline || anchorNoSource ) ? "low" : ( !cut.hitCeiling || servedComplete ) ? "high" : "low";
+    const bool sharpHead = !cut.hitCeiling || servedComplete;
+    out.level = ( homonymDecline || anchorUnproven || !sharpHead ) ? "low" : "high";
     out.marginPct = cut.hitCeiling ? 0 : cut.dropPct;
     char attrBuf[ 48 ];
     rw::formatTo( attrBuf, sizeof( attrBuf ), " confidence=\"{}\" margin_pct=\"{}\"", out.level, out.marginPct );

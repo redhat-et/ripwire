@@ -41,6 +41,11 @@
 
 #include "mention.h"     // ForNamedHeaderRow — forHdrRowsXml below renders the resolver's rows
 #include "infra/enumcount.h" // enumCountIsExact — TailPageRowFate's count beside the enum
+#include "exemplarfamily.h" // exemplarTasksOf — the add-a-new-X reading keeps a tail's docs and config listed
+#include "fortailterms.h" // tailTaskTerms / tailTermMask — TAIL-SYM-TERMS' task words and name/path evidence
+#include "forliteral.h"   // taskQuotesLiteral — a quoted message keeps a tail's config and docs listed
+#include "langfacts.h"   // langFacts — tailFoldClass reads a file's script/config role off the table
+#include "graph.h"       // rankGraph — TAIL-SYM-TERMS' tie-break order
 #include "filter.h"      // taskAsksAboutDocs — the code-first tail asks the docs reorder's own question
 #include "lexical.h"     // LexTermEvidence — the term masks + df the BM25 pass already accumulated
 #include "model.h"
@@ -50,7 +55,11 @@
 #include "testmap.h"     // splitChangedFilesOfSymbols — the ONE "distinct files of a symbol set" walk (--affected's)
 
 #include <algorithm>
+#include <bit>
+#include <charconv>
 #include <cstddef>
+#include <cstdlib>
+#include <system_error>
 #include <numeric>
 #include <ranges>
 #include <span>
@@ -766,6 +775,8 @@ struct FileTail
 {
     std::vector<std::string>  paths;     // printed order: the rank rows, then the page rows (display form, R-R)
     std::vector<std::string>  syms;      // a row's sym= (comma-joined, unescaped): the file's top lens symbols, either row kind
+    std::vector<std::uint32_t> fileIds;  // per row: the file it lists (TAIL-SYM-TERMS reads its symbols)
+    std::vector<std::string>  termSyms;  // TAIL-SYM-TERMS: per row, its tsym= names (comma-joined, unescaped; empty: none, or not computed)
     std::vector<std::size_t>  pageNext;  // per row: the page offset continuing a tail that ends at it (0 on a rank row
                                          //   before any page row: the whole page continues it)
     std::size_t               total = 0; // every positive-score file: the page's total=
@@ -778,25 +789,110 @@ struct FileTail
     // order. `oldRows` counts that prefix; oldPageSeen/oldPageSkip are what that walk's own counters read, so fileTailOldWalk
     // rebuilds the 40-row walk's tail byte for byte (the soft-target reserve charges THAT, never the widened rows).
     std::size_t               oldRows = 0;
+    std::size_t               wideSymRows = 0;   // TAIL-SYM-WIDE: the widened rows right after the prefix that carry sym= too
     std::size_t               oldPageSeen = 0;
     std::size_t               oldPageSkip = SIZE_MAX;
+    // SIZE-2 (size-trim): widened rows (past the old cut, p= only) of a NON-code file class the code question did not ask for are
+    // folded: counted here per class (TailFoldClass order), not listed. pageSkip marks the first one, so next= pages to it.
+    std::array<std::uint32_t, 5> folded{};
 };
 
+// SIZE-3b (size-trim): the ONE rule every tail sym= list follows — a name the list already holds (an overload, a same-named member)
+// is not repeated; the first, by rank, stays. True when `name` was appended.
+inline bool appendTailSymName( std::string& sym, std::string_view name )
+{
+    for( std::size_t at = sym.find( name ); at != std::string::npos; at = sym.find( name, at + 1 ) )
+    {
+        const std::size_t end = at + name.size();
+        if( ( at == 0 || sym[at - 1] == ',' ) && ( end == sym.size() || sym[end] == ',' ) )
+        {
+            return false;
+        }
+    }
+    sym += sym.empty() ? "" : ",";
+    sym += name;
+    return true;
+}
 // a file page row's sym= value: the file's top symbols by lens rank (row.top[], at most kForPageSymNameCount), comma-joined,
-// unescaped — "" for a row with none. The ONE spelling both tail row kinds print.
+// unescaped, each name once — "" for a row with none. The ONE spelling both tail row kinds print.
 inline std::string forFileRowSymNames( const IngestResult& ing, const ForFileRow& row )
 {
     std::string sym;
     for( std::size_t k = 0; k < kForPageSymNameCount && row.top[k] != kNoNode; ++k )
     {
         ASSUME( row.top[k] < ing.symbols.size(), "forFileRowSymNames: a page row names a symbol outside the index" );
-        sym += k > 0 ? "," : "";
-        sym += ing.symbols[ row.top[k] ].name;
+        appendTailSymName( sym, ing.symbols[row.top[k]].name );
     }
     return sym;
 }
 
 inline constexpr std::uint32_t kNoPageRow = UINT32_MAX;
+
+// SIZE-2 (size-trim): the file class of a widened tail row, by its lead symbol's language and its path. The first five fold, on a
+// code question, unless the task keeps the class (tailFoldKept); Test and Code never fold. Test = a code file under a test path
+// (filter.h isTestPath, the file-level half of the test=1 predicate: a test-scoped symbol inside a source file keeps that file
+// code; a shell script under a test path is test code too): it defines symbols an edit may have to follow, so it is code to the
+// fold (round 2: test code never folds).
+enum class TailFoldClass : std::uint8_t
+{
+    Doc,
+    Config,
+    Script,
+    TestData,
+    Other,
+    Test,   // the never-folded classes follow (kTailFoldClassNames stops before them)
+    Code
+};
+inline constexpr std::string_view kTailFoldClassNames[] { "doc", "config", "script", "testdata", "other" };
+static_assert( std::size( kTailFoldClassNames ) == static_cast<std::size_t>( TailFoldClass::Test )
+                   && std::tuple_size_v<decltype( FileTail::folded )> == std::size( kTailFoldClassNames ),
+               "one name and one count per foldable class, in TailFoldClass order" );
+inline TailFoldClass tailFoldClass( const IngestResult& ing, NodeId lead, std::string_view relPath ) noexcept
+{
+    ASSUME( lead < ing.symbols.size(), "tailFoldClass: a page row's lead is outside the index" );
+    const Lang       lang  = ing.symbols[ lead ].lang;
+    const LangFacts& facts = langFacts( lang );   // the per-language file roles live in the table, not in Lang:: compares here
+    if( isDocLang( lang ) )
+    {
+        return TailFoldClass::Doc;
+    }
+    const bool test = isTestPath( relPath );
+    if( facts.shellScript )
+    {
+        return test ? ( isCodeLang( lang ) ? TailFoldClass::Test : TailFoldClass::TestData ) : TailFoldClass::Script;   // a shell test is test code (CodeRabbit 4505000649)
+    }
+    if( isCodeLang( lang ) )
+    {
+        return test ? TailFoldClass::Test : TailFoldClass::Code;
+    }
+    if( test )
+    {
+        return TailFoldClass::TestData;
+    }
+    return facts.configFormat ? TailFoldClass::Config : TailFoldClass::Other;
+}
+// The classes a code question keeps listed (TailFoldClass order): the ones its task names (a whole word: test data, config,
+// scripts), and on an add-a-new-X task (exemplarTasksOf, EXEMPLAR-STAIRS' one reading of that intent) its docs and config too:
+// a new member is also registered in a manifest, a public-API golden or a doc page beside its siblings (round 1 of SIZE-2 lost
+// exactly those two items on the 321: a package.json peer dependency, an API golden .md). A task that quotes a message literal
+// (forliteral.h taskQuotesLiteral) keeps them too: the text of a quoted message lives in a string table or a doc page (round 3: the
+// graded sit lost two items on `Where does the hue cannot_connect error get its "Failed to connect" text?` when 14 strings.json
+// rows folded). A class not kept folds. Docs need no cue otherwise: a docs question takes the plain walk, which folds nothing.
+inline std::array<bool, 5> tailFoldKept( std::string_view task )
+{
+    const std::string lower = queryshape::detail::lowerAscii( task );
+    const auto any = [ & ]( std::initializer_list<std::string_view> words )
+    { return std::ranges::any_of( words, [ & ]( std::string_view w ) { return taskNamesWord( lower, w ); } ); };
+    const bool keepText = !exemplarTasksOf( task ).empty() || taskQuotesLiteral( task );   // add-a-new-X, or a quoted message
+    return { keepText, keepText || any( { "config", "configuration", "yaml", "yml", "json", "toml", "settings" } ),
+             any( { "script", "scripts", "shell", "bash" } ), any( { "test", "tests", "testing", "spec", "specs", "fixture", "fixtures" } ),
+             false };
+}
+// RIPWIRE_NO_TAIL_FOLD=1: list every widened row (the pre-SIZE-2 tail), the ablation arm of test/fortailfoldcheck.sh
+inline bool tailFoldOn()
+{
+    return std::getenv( "RIPWIRE_NO_TAIL_FOLD" ) == nullptr;
+}
 
 // fileId -> its row in `page`, kNoPageRow for a file holding no positive-score symbol
 inline std::vector<std::uint32_t> forPageRowOfFile( const ForFilePage& page, std::size_t fileCount )
@@ -865,6 +961,7 @@ inline void listTailRow( FileTail& out, FileTail* docs, const TailRowAdmit& a, s
     }
     to.paths.push_back( std::move( path ) );
     to.syms.push_back( std::move( sym ) );
+    to.fileIds.push_back( f );
     to.pageNext.push_back( next );
 }
 
@@ -989,13 +1086,123 @@ inline constexpr std::uint8_t kTailFateOldListed = 1, kTailFateListed = 2;
 inline constexpr std::uint8_t kTailFateBits[] { kTailFateOldListed, 0, 0, kTailFateOldListed | kTailFateListed, kTailFateListed };
 static_assert( std::size( kTailFateBits ) == kTailPageRowFateCount, "kTailFateBits is indexed by TailPageRowFate — one entry per enumerator" );
 
+// R-DEDUP (2026-11-07): a page row of a file the shown head already shows (only page 0 lists such a row with sym=) used to
+// repeat the names its sigs rows print — mf2-pydantic-08 and nfpm-11 named only <d> names there, and the in-file symbol the
+// question wanted sat at the next lens rank. Its sym= now skips those names and fills from the file's next positive-score
+// symbols in the same (score desc, id asc) order, at most kForPageSymNameCount, nameable ones only (forFileRowAbsorb's rule):
+// the same row, never more names. A head file whose every positive-score name is shown prints p= only. Head files are few
+// (the shown rows' files): a sorted id list, one scan of the symbols for their candidates, a sort of those candidates only.
+// <syms> has priority (forfilesyms.h tailRowsWithoutPicks): a name its block prints is dropped from these rows after the answer is rendered.
+struct TailHeadFileSyms
+{
+    std::vector<std::uint32_t> files; // the head's files, sorted unique
+    std::vector<std::string> syms; // per entry of `files`: its sym= value, comma-joined, unescaped
+    std::vector<std::uint32_t> slotOfFile; // per indexed file id (sized ing.files): its entry in `files`, else files.size() — one flat index, no search
+};
+// symbol `id` is a sym= candidate of a head file: positive score, nameable, and no shown row of its file carries its name
+inline bool tailHeadSymCandidate( const IngestResult& ing, const std::vector<float>& rank, const std::vector<NodeId>& headIds, NodeId id )
+{
+    const Symbol& s = ing.symbols[id];
+    return rank[id] > 0.0f && !isRestLabelUnit( ing, s ) && std::ranges::none_of( headIds, [&]( NodeId h )
+                                                                                  { return h < ing.symbols.size() && ing.symbols[h].fileId == s.fileId && ing.symbols[h].name == s.name; } );
+}
+inline TailHeadFileSyms tailHeadFileSyms( const IngestResult& ing, const std::vector<float>& rank, const std::vector<NodeId>& headIds )
+{
+    TailHeadFileSyms out;
+    for( const NodeId id : headIds )
+    {
+        if( id < ing.symbols.size() && ing.symbols[id].fileId < ing.files.size() ) // a cached ingest's fileId is bounded before it indexes slotOfFile
+        {
+            out.files.push_back( ing.symbols[id].fileId );
+        }
+    }
+    std::ranges::sort( out.files );
+    out.files.erase( std::unique( out.files.begin(), out.files.end() ), out.files.end() );
+    out.syms.assign( out.files.size(), std::string() );
+    out.slotOfFile.assign( ing.files.size(), std::uint32_t( out.files.size() ) );
+    for( std::size_t k = 0; k < out.files.size(); ++k )
+    {
+        out.slotOfFile[out.files[k]] = std::uint32_t( k );
+    }
+    std::vector<std::pair<std::size_t, NodeId>> cands; // (head file slot, symbol)
+    const std::size_t S = std::min( ing.symbols.size(), rank.size() );
+    for( NodeId id = 0; id < S && !out.files.empty(); ++id )
+    {
+        const std::size_t fileId = ing.symbols[id].fileId;
+        const std::size_t slot   = fileId < out.slotOfFile.size() ? out.slotOfFile[fileId] : out.files.size();
+        if( slot < out.files.size() && tailHeadSymCandidate( ing, rank, headIds, id ) )
+        {
+            cands.emplace_back( slot, id );
+        }
+    }
+    std::ranges::sort( cands, [&]( const auto& a, const auto& b ) // per file, the lens's (score desc, id asc) order
+                       { return a.first != b.first ? a.first < b.first : rank[a.second] != rank[b.second] ? rank[a.second] > rank[b.second]
+                                                                                                          : a.second < b.second; } );
+    std::vector<std::uint8_t> named( out.files.size(), 0 );
+    for( const auto& [slot, id] : cands )
+    {
+        if( named[slot] < kForPageSymNameCount && appendTailSymName( out.syms[slot], ing.symbols[id].name ) ) // SIZE-3b's rule: each name once
+        {
+            ++named[slot];
+        }
+    }
+    return out;
+}
+// a page row's sym=: a head file's deduplicated names, else the row's own top symbols
+inline std::string tailPageRowSym( const IngestResult& ing, const ForFileRow& row, const TailHeadFileSyms& head )
+{
+    const std::size_t slot = row.fileId < head.slotOfFile.size() ? head.slotOfFile[row.fileId] : head.files.size(); // out of range: not a head file
+    return slot < head.files.size() ? head.syms[slot] : forFileRowSymNames( ing, row );
+}
+
 struct TailPageWalkInputs
 {
     const IngestResult&      ing;
     const ForFilePage&       page;
     std::string_view         rootArg;
     const std::vector<char>& inHead;   // the shown head's files (computeFileTail): skipped past the old cut
+    const TailHeadFileSyms& headSyms; // R-DEDUP: a head file's sym= without the names its shown sigs rows print
+    const std::array<bool, 5>* foldKept = nullptr;   // SIZE-2: a code question folds widened non-code rows except these classes
+    std::size_t wideSymRows = kForFileTailSymWideRows; // TAIL-SYM-WIDE: the first this many widened rows listed carry sym= too
 };
+// TAIL-SYM-WIDE: the widened rows that carry sym= — kForFileTailSymWideRows, or RIPWIRE_TAIL_SYM_WIDE_ROWS=N (0..that constant;
+// the measurement / ablation arm of test/fortailwidecheck.sh: 0 is the pre-card tail, 40 is arm A). Anything else reads the default.
+inline std::size_t tailSymWideRows()
+{
+    const char* v = std::getenv( "RIPWIRE_TAIL_SYM_WIDE_ROWS" );
+    if( v == nullptr )
+    {
+        return kForFileTailSymWideRows;
+    }
+    const std::string_view text( v );
+    std::size_t n = 0;
+    const auto [end, ec] = std::from_chars( text.data(), text.data() + text.size(), n );
+    if( ec != std::errc() || end != text.data() + text.size() || text.empty() || n > kForFileTailSymWideRows )
+    {
+        rw::emitTo( stderr, "ripwire: RIPWIRE_TAIL_SYM_WIDE_ROWS is set but not a count 0-{} — default tail\n", kForFileTailSymWideRows );
+        return kForFileTailSymWideRows;
+    }
+    return n;
+}
+// SIZE-2: a widened row (p= only) of a non-code class the task did not name is counted, not listed, and next= pages from the
+// first one (pageSkip). True when the row folded.
+inline bool foldTailRow( FileTail& out, std::vector<char>& listed, const TailPageWalkInputs& in, const ForFileRow& row, std::size_t r,
+                         TailPageRowFate fate )
+{
+    if( fate != TailPageRowFate::ListWide || in.foldKept == nullptr )
+    {
+        return false;
+    }
+    const TailFoldClass cls = tailFoldClass( in.ing, row.lead, rootRelPath( in.ing, row.fileId ) );
+    if( cls == TailFoldClass::Code || cls == TailFoldClass::Test || ( *in.foldKept )[ std::size_t( cls ) ] )
+    {
+        return false;
+    }
+    listed[ row.fileId ] = 1;
+    ++out.folded[ std::size_t( cls ) ];
+    out.pageSkip = std::min( out.pageSkip, r );
+    return true;
+}
 inline void fileTailPageRows( FileTail& out, std::vector<char>& listed, const TailPageWalkInputs& in, FileTail& wide, FileTail* docs = nullptr )
 {
     static_assert( kForFileTailPageWalk >= kForFileTailPageRows, "the tail walks at least the page its sym= rows come from" );
@@ -1021,10 +1228,11 @@ inline void fileTailPageRows( FileTail& out, std::vector<char>& listed, const Ta
         {
             out.pageSkip = std::min( out.pageSkip, r );
         }
-        else if( ( bits & kTailFateListed ) != 0 )
+        else if( ( bits & kTailFateListed ) != 0 && !foldTailRow( out, listed, in, row, r, fate ) )
         {
             listTailRow( out, docs, a, listed, row.fileId, lensRowPath( ing, row.fileId, in.rootArg ),
-                         symRow ? forFileRowSymNames( ing, row ) : std::string(), r + 1, symRow ? nullptr : &wide );
+                         symRow || wide.paths.size() < in.wideSymRows ? tailPageRowSym( ing, row, in.headSyms ) : std::string(), r + 1,
+                         symRow ? nullptr : &wide );   // TAIL-SYM-WIDE: a widened row names its file's top symbols too, up to wideSymRows
         }
     }
 }
@@ -1068,13 +1276,202 @@ inline void appendFileTailRows( FileTail& out, FileTail& from )
     {
         out.paths.push_back( std::move( from.paths[i] ) );
         out.syms.push_back( std::move( from.syms[i] ) );
+        out.fileIds.push_back( from.fileIds[i] );
         out.pageNext.push_back( from.pageNext[i] );
     }
 }
 
+// TAIL-SYM-TERMS (depth lab G2, reports/depth-gc-lab-1114.md): each of the first `namedRows` rows (the rows that print sym=; the
+// p= only suffix stays p= only) ADDS up to kTailSymTermNames more of its file's symbols whose NAMES share a task word
+// (fortailterms.h), best score first, then the graph's own PageRank (tailTermTieRank: the lab's order, which its --graph-query index
+// listed by; the lens order instead traded htop-11's ✓ for two ◐ items on the lane's fire321), then index order — in its own tsym=
+// after sym=, never in place of a name (G1,
+// the re-pick, lost 12 credited names on the lab's 217 cells; this append lost none). Its own attribute keeps sym= byte for byte and
+// lets <syms> read the answer as if tsym= were not there (forfilesyms.h termsMasked: <syms> keeps priority, and a name it prints is
+// cut from tsym=). A candidate is any indexed symbol of the file
+// but its module scope, a reST label, a name a shown head row prints (any file) and a name the row already carries. A file holding
+// a doc unit (.md, .rst, a Sphinx or HTML page) adds none: its section titles may hold commas, and the question is about code
+// names. DISTINCTIVE EVIDENCE ONLY (TSYM-WRONG-DECOYS, fortailterms.h kTailSymTermFileMatches / kTailSymTermEvidence): a row adds
+// nothing when more than kTailSymTermFileMatches of its file's symbols share a task word (the word is the file's topic, so a pick
+// among them is a guess), and a name is added only when it and the row's path together carry kTailSymTermEvidence distinct task
+// words (one generic word alone pulled in the lane's three gold-WRONG decoys). The file count includes the head's and the row's
+// own names: it measures the file, not what is left to print.
+// Fills t.termSyms only when some row gains a name, so a task no name matches leaves the tail byte-identical.
+// Cost: one pass over the symbols (the files are a flat row index), the name split only for symbols of a listed file.
+struct TailTermCand
+{
+    std::uint32_t row;     // the tail row (its file's)
+    std::uint32_t score;   // popcount of the name's tailTermMask
+    float         pr;      // the graph's PageRank (the tie-break after the score)
+    NodeId        id;
+};
+struct TailTermCands
+{
+    std::vector<TailTermCand> cands;     // (row, score desc, pr desc, line asc, name asc, id asc)
+    std::vector<char>         docFile;   // per row: its file holds a doc unit, so it adds no name
+};
+// TSYM-WRONG-DECOYS: keep the candidates on distinctive evidence (the rule above tailTermCands; fortailterms.h knobs). `nameMask` is
+// index-aligned with `cands`; `fileMatches` is per row. Each kept row's path is split once.
+inline void keepDistinctiveTailTerms( std::vector<TailTermCand>& cands, const std::vector<std::uint64_t>& nameMask, const std::vector<std::uint32_t>& fileMatches,
+                                      const FileTail& t, const std::vector<std::string>& terms )
+{
+    const std::size_t namedRows = fileMatches.size();
+    std::vector<std::uint64_t> pathMask( namedRows, 0 );
+    std::vector<char>          pathRead( namedRows, 0 );
+    std::size_t                kept = 0;
+    for( std::size_t i = 0; i < cands.size(); ++i )
+    {
+        const std::uint32_t row = cands[i].row;
+        if( fileMatches[row] > kTailSymTermFileMatches )
+        {
+            continue;
+        }
+        if( !pathRead[row] )
+        {
+            pathMask[row] = tailTermMask( t.paths[row], terms );
+            pathRead[row] = 1;
+        }
+        if( std::size_t( std::popcount( nameMask[i] | pathMask[row] ) ) >= kTailSymTermEvidence )
+        {
+            cands[kept++] = cands[i];
+        }
+    }
+    cands.resize( kept );
+}
+inline TailTermCands tailTermCands( const FileTail& t, const IngestResult& ing, const std::vector<float>& tieRank, const std::vector<NodeId>& headIds,
+                                    std::size_t namedRows )
+{
+    TailTermCands                  out;
+    const std::vector<std::string> terms = tailTaskTerms( t.task );
+    if( terms.empty() || namedRows == 0 )
+    {
+        return out;
+    }
+    constexpr std::uint32_t    kNoRow = UINT32_MAX;
+    std::vector<std::uint32_t> rowOfFile( ing.files.size(), kNoRow );
+    for( std::size_t i = 0; i < namedRows; ++i )
+    {
+        if( t.fileIds[i] < rowOfFile.size() )
+        {
+            rowOfFile[ t.fileIds[i] ] = std::uint32_t( i );
+        }
+    }
+    std::vector<std::string_view> headNames;
+    for( const NodeId h : headIds )
+    {
+        if( h < ing.symbols.size() )
+        {
+            headNames.push_back( ing.symbols[h].name );
+        }
+    }
+    std::ranges::sort( headNames, rw::sortutil::svLess );
+    out.docFile.assign( namedRows, 0 );
+    std::vector<std::uint32_t> fileMatches( namedRows, 0 );   // per row: its file's symbols whose names share a task word
+    std::vector<std::uint64_t> nameMask;                      // per cand: tailTermMask of its name
+    for( NodeId id = 0; id < ing.symbols.size(); ++id )
+    {
+        const Symbol&       s   = ing.symbols[id];
+        const std::uint32_t row = s.fileId < rowOfFile.size() ? rowOfFile[ s.fileId ] : kNoRow;
+        if( row == kNoRow )
+        {
+            continue;
+        }
+        if( isDocLang( s.lang ) )
+        {
+            out.docFile[row] = 1;
+            continue;
+        }
+        if( s.kind == SymKind::ModuleScope || s.name.empty() || s.name.front() == '<' || isRestLabelUnit( ing, s ) )
+        {
+            continue;
+        }
+        const std::uint64_t mask = tailTermMask( s.name, terms );
+        if( mask == 0 )
+        {
+            continue;
+        }
+        ++fileMatches[row];
+        if( !std::ranges::binary_search( headNames, std::string_view( s.name ), rw::sortutil::svLess ) )
+        {
+            out.cands.push_back( { row, std::uint32_t( std::popcount( mask ) ), id < tieRank.size() ? tieRank[id] : 0.0f, id } );
+            nameMask.push_back( mask );
+        }
+    }
+    keepDistinctiveTailTerms( out.cands, nameMask, fileMatches, t, terms );
+    // No float-equality tie (.coderabbit.yaml determinism rule): PageRank decides only by strict > either way; an exact PageRank tie
+    // breaks on the content key (definition line, then name), and the id only between same-line namesakes.
+    const auto byContent = [&ing]( const TailTermCand& a, const TailTermCand& b )
+    {
+        const Symbol& x = ing.symbols[a.id];
+        const Symbol& y = ing.symbols[b.id];
+        return x.line != y.line ? x.line < y.line : x.name != y.name ? x.name < y.name : a.id < b.id;
+    };
+    std::ranges::sort( out.cands, [&byContent]( const TailTermCand& a, const TailTermCand& b )
+                       {
+                           if( a.row != b.row || a.score != b.score )
+                           {
+                               return a.row != b.row ? a.row < b.row : a.score > b.score;
+                           }
+                           if( a.pr > b.pr || b.pr > a.pr )
+                           {
+                               return a.pr > b.pr;
+                           }
+                           return byContent( a, b );
+                       } );
+    return out;
+}
+inline void fileTailAddTermNames( FileTail& t, const IngestResult& ing, const std::vector<float>& tieRank, const std::vector<NodeId>& headIds,
+                                  std::size_t namedRows )
+{
+    const TailTermCands       tc = tailTermCands( t, ing, tieRank, headIds, namedRows );
+    std::vector<std::string>  added( t.paths.size() );
+    std::vector<std::uint8_t> count( namedRows, 0 );
+    bool                      any = false;
+    for( const TailTermCand& c : tc.cands )
+    {
+        const std::string_view name = ing.symbols[c.id].name;
+        std::string            own  = t.syms[c.row];   // the row's own names: a name already there is not repeated
+        // A row with no sym= (a path-only row, or a head file whose names the head already shows) stays path-only: tsym= rides sym=.
+        if( own.empty() || tc.docFile[c.row] || count[c.row] >= kTailSymTermNames || !appendTailSymName( own, name ) )
+        {
+            continue;
+        }
+        if( appendTailSymName( added[c.row], name ) )
+        {
+            ++count[c.row];
+            any = true;
+        }
+    }
+    if( any )
+    {
+        t.termSyms = std::move( added );
+    }
+}
+// Does a shown row (the first `shown`) carry a TAIL-SYM-TERMS name? The present-only test of the clause that defines them.
+inline bool fileTailTermNamesShown( const FileTail& t, std::size_t shown ) noexcept
+{
+    const std::size_t n = std::min( shown, t.termSyms.size() );
+    return std::any_of( t.termSyms.begin(), t.termSyms.begin() + std::ptrdiff_t( n ), []( const std::string& s ) { return !s.empty(); } );
+}
+
+// TAIL-SYM-TERMS' tie-break: the graph's plain PageRank (the default map's and --graph-query's order), computed once per answer and
+// only when a tail row can gain a name (the switch on and a task word to match); empty otherwise, and then no row gains one.
+// `tokenBudget` (--token-budget / MCP budget_tokens) > 0: empty too. The target's tail reserve prices the pre-card walk
+// (fileTailOldWalk), so a name there would spend bytes the target never granted (forsoftbudgetcheck (ST) upper bound).
+inline std::vector<float> tailTermTieRank( const Graph& g, std::string_view task, std::size_t tokenBudget )
+{
+    if( tokenBudget > 0 || !tailSymTermsOn() || tailTaskTerms( task ).empty() )
+    {
+        return {};
+    }
+    return std::move( rankGraph( g ).rank );
+}
+
 // `rankOrder`: the plain interleaved walk whatever the task (FOR-DOC-BODY's trigger reads the files in rank order: fordocbody.h).
+// `termTieRank`: tailTermTieRank's vector; null or empty adds no TAIL-SYM-TERMS name (the old-walk reserve and rank-order callers).
 inline FileTail computeFileTail( const IngestResult& ing, const std::vector<float>& rank, const LexTermEvidence& ev,
-                                 const std::vector<NodeId>& headIds, std::string_view rootArg, std::string_view task, bool rankOrder = false )
+                                 const std::vector<NodeId>& headIds, std::string_view rootArg, std::string_view task, bool rankOrder = false,
+                                 const std::vector<float>* termTieRank = nullptr )
 {
     FileTail          out;
     std::vector<char> listed( ing.files.size(), 0 );
@@ -1086,12 +1483,22 @@ inline FileTail computeFileTail( const IngestResult& ing, const std::vector<floa
     FileTail                docRows, wideRows;
     FileTail*               docs   = rankOrder || taskAsksForDocText( task ) ? nullptr : &docRows;
     const std::vector<char> inHead = fileMaskOfSymbols( ing, headIds );   // once, for both row kinds
+    const TailHeadFileSyms headSyms = tailHeadFileSyms( ing, rank, headIds ); // R-DEDUP: the head files' own sym=
     fileTailRankRows( out, listed, ing, rank, page, inHead, rootArg, docs );
-    fileTailPageRows( out, listed, TailPageWalkInputs{ ing, page, rootArg, inHead }, wideRows, docs );
+    const std::array<bool, 5> foldKept = tailFoldKept( task );
+    const std::size_t wideSym = tailSymWideRows();
+    fileTailPageRows( out, listed, TailPageWalkInputs { ing, page, rootArg, inHead, headSyms, docs != nullptr && tailFoldOn() ? &foldKept : nullptr, wideSym },
+                      wideRows, docs );
     appendFileTailRows( out, docRows );
-    out.oldRows = out.paths.size();   // review F2: the old walk's rows are a prefix; the widened rows follow, in page order
+    out.oldRows     = out.paths.size();   // review F2: the old walk's rows are a prefix; the widened rows follow, in page order
+    out.wideSymRows = std::min( wideRows.paths.size(), wideSym );
     appendFileTailRows( out, wideRows );
-    ENSURES( out.paths.size() == out.syms.size() && out.paths.size() == out.pageNext.size() && out.paths.size() <= out.total,
+    if( !rankOrder && termTieRank != nullptr && !termTieRank->empty() )   // the rank-order walk feeds FOR-DOC-BODY's file pick (paths only)
+    {
+        fileTailAddTermNames( out, ing, *termTieRank, headIds, std::min( out.paths.size(), out.oldRows + out.wideSymRows ) );
+    }
+    ENSURES( out.paths.size() == out.syms.size() && out.paths.size() == out.pageNext.size() && out.paths.size() == out.fileIds.size()
+                 && out.paths.size() <= out.total,
              "computeFileTail: the rows, their sym= and their continuations disagree, or more rows than positive-score files" );
     return out;
 }
@@ -1104,6 +1511,7 @@ inline FileTail fileTailOldWalk( const FileTail& t )
     FileTail old;
     old.paths.assign( t.paths.begin(), t.paths.begin() + std::ptrdiff_t( t.oldRows ) );
     old.syms.assign( t.syms.begin(), t.syms.begin() + std::ptrdiff_t( t.oldRows ) );
+    old.fileIds.assign( t.fileIds.begin(), t.fileIds.begin() + std::ptrdiff_t( t.oldRows ) );   // termSyms stays empty: the pre-card tail
     old.pageNext.assign( t.pageNext.begin(), t.pageNext.begin() + std::ptrdiff_t( t.oldRows ) );
     old.total    = t.total;
     old.pageSeen = t.oldPageSeen;
@@ -1113,11 +1521,12 @@ inline FileTail fileTailOldWalk( const FileTail& t )
     return old;
 }
 
-// FOR-TAIL-WIDE (review F3): the shown rows that print p= only because they sit past the old walk's cut (a suffix). The tail
-// discloses the count (`p_only=` / "p_only"), present only when it is above zero.
+// FOR-TAIL-WIDE (review F3): the shown rows that print p= only because they sit past the old walk's cut and past the widened rows
+// that carry sym= (TAIL-SYM-WIDE; a suffix). The tail discloses the count (`p_only=` / "p_only"), present only when it is above zero.
 inline std::size_t fileTailPathOnlyShown( const FileTail& t, std::size_t shown ) noexcept
 {
-    return shown > t.oldRows ? shown - t.oldRows : 0;
+    const std::size_t named = t.oldRows + t.wideSymRows;
+    return shown > named ? shown - named : 0;
 }
 
 // The shown sigs rows a soft target's trailing sections are funded from (round C, reserve first): the shown ids without the
@@ -1137,6 +1546,23 @@ inline std::vector<NodeId> rowsAtTargetIds( std::vector<NodeId> shown, const std
     return shown;
 }
 
+// SIZE-2: the folded classes, "doc=12,config=3" in TailFoldClass order, "" when nothing folded
+inline std::string fileTailFoldedList( const FileTail& t, std::string_view sep, std::string_view quote = {} )
+{
+    std::string v;
+    for( std::size_t c = 0; c < t.folded.size(); ++c )
+    {
+        if( t.folded[c] > 0 )
+        {
+            v += v.empty() ? "" : ",";
+            v += quote;
+            v += kTailFoldClassNames[c];
+            v += sep;
+            v += std::to_string( t.folded[c] );
+        }
+    }
+    return v;
+}
 // the call serving the files a tail of `shown` rows left out: the file page from the first page row it did not print
 inline std::string fileTailNextInvocation( const FileTail& t, std::size_t shown )
 {
@@ -1173,6 +1599,10 @@ inline std::string renderFileTailXml( const FileTail& t, std::size_t shownCap, s
     {
         x += " p_only=\"" + std::to_string( pOnly ) + "\"";   // review F3: the rows past the old walk's cut, sym= shed
     }
+    if( const std::string folded = fileTailFoldedList( t, "=" ); !folded.empty() )
+    {
+        x += " folded=\"" + folded + "\"";   // SIZE-2: the folded rows' counts, absent when none
+    }
     x += ">";
     for( std::size_t i = 0; i < shown; ++i )
     {
@@ -1180,6 +1610,10 @@ inline std::string renderFileTailXml( const FileTail& t, std::size_t shownCap, s
         if( !t.syms[i].empty() )
         {
             x += "\" sym=\"";  x += escapeXml( t.syms[i], esc );
+        }
+        if( i < t.termSyms.size() && !t.termSyms[i].empty() )
+        {
+            x += "\" tsym=\"";  x += escapeXml( t.termSyms[i], esc );   // TAIL-SYM-TERMS: after sym=, never in it
         }
         x += "\"/>";
     }
@@ -1212,9 +1646,18 @@ inline std::string renderFileTailJson( const FileTail& t, std::size_t shownCap )
     };
     list( ",\"files\":[", t.paths );
     list( ",\"sym\":[", t.syms );
+    if( fileTailTermNamesShown( t, shown ) )
+    {
+        list( ",\"tsym\":[", t.termSyms );   // TAIL-SYM-TERMS: index-aligned with "files", present only when a shown row has one
+        j += ",\"tsym_why\":\"" + std::string( kForFileTailTermsWhy ) + "\"";
+    }
     if( const std::size_t pOnly = fileTailPathOnlyShown( t, shown ); pOnly > 0 )   // review F3: JSON has no legend, so the why rides
     {
         j += ",\"p_only\":" + std::to_string( pOnly ) + ",\"p_only_why\":\"" + std::string( kForFileTailPathOnlyWhy ) + "\"";
+    }
+    if( const std::string v = fileTailFoldedList( t, "\":", "\"" ); !v.empty() )   // SIZE-2: JSON has no legend, so the why rides too
+    {
+        j += ",\"folded\":{" + v + "},\"folded_why\":\"" + std::string( kForFileTailFoldedWhy ) + "\"";
     }
     j += "}";
     return j;

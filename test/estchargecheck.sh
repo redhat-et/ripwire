@@ -181,99 +181,90 @@ print( m.group( 1 ).decode() if m else '' )
 PYX
 }
 
-# ── forbudget-soft (rule 4): THE SOFT TARGET's invariants, shared by the A7/A7B/sweep/floor/C3/A7R/#15/#19 arms below. An
-# explicit --token-budget=N on --for charges T = N x 2.36 x 0.90 bytes (serialize.h kMinBytesPerToken x kBudgetHeadroom)
-# against the rows inside <sigs> ONLY — never the header, a disclosure or a trailing section — so the old "delivered <= N x
-# 2.36 x 1.15 or over_ceiling=1" bar is gone by design (est_tokens may exceed N, unlabelled) and these replace it:
-#   soft_rows FILE        the served <sigs> rows as p:l:n in RANK order (r=), one per line; exit 3 when there is no <sigs>
-#   soft_st FILE N [REF]  ST: the bytes inside <sigs> (the rows as printed) fit T, or the rows are only the rank 1..4 floor;
-#                         with REF (the same shape's complete, no-budget answer) a cut must also be MAXIMAL — in the ladder's
-#                         own currency (serialize.h entryCost: a row's printed bytes plus the zero cx=/ccx=/in= the lean
-#                         spelling elides), the served rows plus REF's next row would cross T (160 B slack, as
-#                         forsoftbudgetcheck's (ST)). Prints "OK|BAD ...", exit 0|1.
-#   rows_prefix A B       RP: rows file A is a non-empty rank prefix of rows file B
+# ── TOKEN-BUDGET-MONOTONE (rule 4, 2026-11-14; was forbudget-soft's rows-only soft target): THE BUDGET's invariants, shared
+# by the A7/A7B/sweep/floor/C3/A7R/#15 arms below. An explicit --token-budget=N on --for no longer re-decides the answer: the
+# answer U is the one asked without it, and N is applied AFTER, by one fixed shed sequence over U (src/forbudgetfit.h): the
+# <sigs> rows' optional attributes, the last <tail> rows, the <fold>, the last <bodies> bodies, then the last <sigs> rows down
+# to the rank 1..4 floor. (The rows-only target charged T = N x 2.36 x 0.90 bytes against <sigs> alone, so ANY N switched the
+# posture — 21/21 rehearsal questions under 16,000 est_tokens came back smaller and different; test/budgetmonotonecheck.sh
+# holds the new contract on its own fixtures.) These helpers judge it here:
+#   soft_rows FILE        the served <sigs> rows as p:n in DOCUMENT order, one per line; exit 3 when there is no <sigs>
+#   soft_st FILE N [REF]  ST: est_tokens <= N, or the answer is at its floor (<= 4 rows, no tail or hop row, no fold, body or doc); with
+#                         REF (the same call without the budget) a REF that fits (est <= N) comes back byte for byte, and
+#                         otherwise the rows and tail rows are document-order prefixes of REF's and a <sigs> row is cut only
+#                         once the tail, fold and bodies are gone (rows last). Prints "OK|BAD ...", exit 0|1.
+#   rows_prefix A B       RP: rows file A is a non-empty prefix of rows file B
 #   ctx_root FILE         the <ctx ...> root open tag (an over_ceiling= is read off the root only: a <b> can carry its own)
 cat >"$TMP/soft_rows.py" <<'PY'
-import re, sys
+import os, re, sys
+sys.path.insert( 0, os.path.dirname( os.path.abspath( __file__ ) ) )
+import soft_st
 s = open( sys.argv[ 1 ], encoding='utf-8', errors='replace' ).read()
-m = re.search( r'<sigs\b[^>]*>(.*?)</sigs>', s, re.S )
-if not m: sys.exit( 3 )
-rows = []
-for d in re.finditer( r'<d ([^>]*)>', m.group( 1 ) ):
-    a = d.group( 1 )
-    g = lambda k: ( re.search( r'\b' + k + r'="([^"]*)"', a ) or [ None, "?" ] )[ 1 ]
-    r = g( "r" )
-    rows.append( ( int( r ) if r.isdigit() else 10**9, g( "p" ) + ":" + g( "l" ) + ":" + g( "n" ) ) )
-rows.sort()
-print( "\n".join( x[ 1 ] for x in rows ) )
+if not re.search( r'<sigs\b[^>]*>(.*?)</sigs>', s, re.S ): sys.exit( 3 )
+print( "\n".join( soft_st.row_ids( sys.argv[ 1 ] ) ) )
 PY
 cat >"$TMP/soft_st.py" <<'PY'
 import re, sys
-def charge( a, printed ):
-    return printed + sum( n for k, n in ( ( 'cx', 7 ), ( 'ccx', 8 ), ( 'in', 7 ) ) if not re.search( r'\b' + k + r'="', a ) )
-def rb( p ):
-    s = open( p, encoding='utf-8', errors='replace' ).read()
-    m = re.search( r'<sigs\b[^>]*>(.*?)</sigs>', s, re.S )
-    if not m: return None
-    inner = m.group( 1 ); rows = []; elided = 0
-    for d in re.finditer( r'<d ([^>]*)>.*?</d>|<d ([^>]*)/>', inner, re.S ):
-        a = d.group( 1 ) or d.group( 2 )
-        r = re.search( r'\br="(\d+)"', a )
-        printed = len( d.group( 0 ).encode() ); c = charge( a, printed ); elided += c - printed
-        rows.append( ( int( r.group( 1 ) ) if r else 10**9, c ) )
-    rows.sort()
-    return len( inner.encode() ), len( inner.encode() ) + elided, rows
-def row_ids( p ):   # soft_rows.py's list, for an in-process caller (the sweep)
-    s = open( p, encoding='utf-8', errors='replace' ).read()
-    m = re.search( r'<sigs\b[^>]*>(.*?)</sigs>', s, re.S )
-    if not m: return []
-    rows = []
-    for d in re.finditer( r'<d ([^>]*)>', m.group( 1 ) ):
-        a = d.group( 1 )
+def _sec( s, tag ):
+    m = re.search( r'<%s\b[^>]*>(.*?)</%s>' % ( tag, tag ), s, re.S )
+    return m.group( 1 ) if m else ''
+def _rows( inner, tags ):
+    # a SIBLING-DEMOTE / DECL-TWIN pointer <t p= sym= r=/> holds its rank in <sigs>: it is a row (key p:sym)
+    out = []
+    for d in re.finditer( r'<(%s) ([^>]*)>' % tags, inner ):
+        a = d.group( 2 )
         g = lambda k: ( re.search( r'\b' + k + r'="([^"]*)"', a ) or [ None, "?" ] )[ 1 ]
-        r = g( "r" )
-        rows.append( ( int( r ) if r.isdigit() else 10**9, g( "p" ) + ":" + g( "l" ) + ":" + g( "n" ) ) )
-    rows.sort()
-    return [ x[ 1 ] for x in rows ]
+        out.append( g( "p" ) + ":" + g( "n" if d.group( 1 ) == "d" else "sym" ) )
+    return out
+def parts( p ):
+    s = open( p, encoding='utf-8', errors='replace' ).read()
+    root = re.match( r'<ctx [^>]*>', s ); root = root.group( 0 ) if root else ''
+    est = re.search( r' est_tokens="(\d+)"', root )
+    sigs = _sec( s, 'sigs' )
+    return { 'text': s, 'est': int( est.group( 1 ) ) if est else None, 'rows': _rows( sigs, 'd|t' ),
+             'tail': _rows( _sec( s, 'tail' ), 't' ), 'fold': '<fold' in s, 'bodies': len( re.findall( r'<b [^>]*><!\[CDATA\[', s ) ),
+             'hops': len( re.findall( r'<h ', _sec( s, 'hops' ) ) ), 'docs': sigs.count( '<doc>' ),
+             'hasSigs': '<sigs' in s }
+def _shed_below_rows( a ):
+    # every unit the sequence sheds before a ranked row is gone: tail, hops, fold, bodies, docs (CodeRabbit #665: hops and docs
+    # were not read, so a candidate that kept them could pass as the floor)
+    return not a[ 'tail' ] and not a[ 'fold' ] and a[ 'bodies' ] == 0 and a[ 'hops' ] == 0 and a[ 'docs' ] == 0
+def row_ids( p ):
+    return parts( p )[ 'rows' ]
 def verdict( path, n, refpath=None ):
-    a = rb( path ); T = int( int( n ) * 2.36 * 0.90 )
-    if a is None: return False, "BAD no <sigs>"
-    pb, ab, ar = a; k = len( ar )
-    fits = pb <= T or k <= 4
+    n = int( n ); a = parts( path )
+    if not a[ 'hasSigs' ] or a[ 'est' ] is None: return False, "BAD no <sigs> or no est_tokens"
+    k = len( a[ 'rows' ] )
+    floor = k <= 4 and _shed_below_rows( a )
+    fits = a[ 'est' ] <= n or floor
+    msg = "fits=%d rows=%d est=%d N=%d tail=%d fold=%d bodies=%d hops=%d docs=%d" % ( fits, k, a[ 'est' ], n, len( a[ 'tail' ] ), a[ 'fold' ], a[ 'bodies' ], a[ 'hops' ], a[ 'docs' ] )
     if refpath is None:
-        return fits, "%s fits=%d rows=%d bytes=%d T=%d" % ( "OK" if fits else "BAD", fits, k, pb, T )
-    ref = rb( refpath )
-    if ref is None: return False, "BAD no <sigs> in the reference answer"
-    rr = ref[ 2 ]
-    if k >= len( rr ):
-        return fits, "%s fits=%d rows=%d/%d bytes=%d T=%d complete" % ( "OK" if fits else "BAD", fits, k, len( rr ), pb, T )
-    # round C (forbudget-soft, owner decision 2026-10-14: RESERVE SECTIONS FIRST; rule 4): the trailing sections are served first
-    # and the rows past the target cut fill what they leave of T, so maximality is judged against T less their bytes (U: all
-    # after </sigs> but </ctx>, and the <hdr> rows — less the --detail bodies, the caller's own request under its own ceiling:
-    # on a run without bundle= on the root the <bodies> element is the --detail section)
-    # K-WRONGSYM / K-LEGEND: the <syms> block (or its held stub) and its legend comment ride after the ranked answer on their own
-    # allowance, outside est_tokens and outside T (test/lib/softbudget.py APPENDED, as forsoftbudgetcheck and fornotesbudgetcheck read
-    # it): the answer AND its no-budget reference are read less that block, or U and the tail floor count ~0.5-1 KB the ladder never spends
-    import os as _os, sys as _sys; _sys.path.insert( 0, _os.environ[ "RIPWIRE_TESTLIB" ] ); from softbudget import strip_appended
-    s = strip_appended( open( path, encoding='utf-8', errors='replace' ).read() )
-    refs = strip_appended( open( refpath, encoding='utf-8', errors='replace' ).read() )
-    U = ( len( s.split( '</sigs>', 1 )[ 1 ].encode() ) - len( '</ctx>' ) ) if '</sigs>' in s else 0
-    U += sum( len( h.encode() ) for h in re.findall( r'<hdr [^>]*/>', s.split( '<sigs', 1 )[ 0 ] ) )
-    # the tail size: test/lib/softbudget.py, shared by the five soft-target readers (the FIX1 R1 tail floor)
-    from softbudget import tail_size
-    U += max( 0, tail_size( refs ) - tail_size( s ) )
-    root = re.match( r'<ctx [^>]*>', s )
-    if root and ' bundle="' not in root.group( 0 ):
-        bm = re.search( r'<bodies\b.*?</bodies>', s, re.S )
-        U -= len( bm.group( 0 ).encode() ) if bm else 0
-    maximal = ab + rr[ k ][ 1 ] > T - U - 160
-    # FIX2 C1 (rule 4): the upper-bound twin of maximality (test/lib/softbudget.py upper_bound): rows past the floor stop where T less
-    # the other sections and the tail reserve runs out; RED on a binary that ignores the tail reserve
-    from softbudget import upper_bound
-    upper, udet = upper_bound( s, refs, T, k, len( rr ), U )
-    return fits and maximal and upper, "%s fits=%d maximal=%d upper=%d rows=%d/%d bytes=%d charged=%d next=%d T=%d U=%d%s" % (
-        "OK" if fits and maximal and upper else "BAD", fits, maximal, upper, k, len( rr ), pb, ab, rr[ k ][ 1 ], T, U, "" if upper else " -- " + udet )
+        return fits, ( "OK " if fits else "BAD " ) + msg
+    r = parts( refpath )
+    if r[ 'est' ] is None: return False, "BAD the reference answer has no est_tokens"
+    if r[ 'est' ] <= n:
+        same = a[ 'text' ] == r[ 'text' ]
+        return same, "%s whole=%d (the reference fits: est %d <= %d) %s" % ( "OK" if same else "BAD", same, r[ 'est' ], n, msg )
+    prefix = k > 0 and a[ 'rows' ] == r[ 'rows' ][ :k ]
+    tailp  = a[ 'tail' ] == r[ 'tail' ][ :len( a[ 'tail' ] ) ]
+    last   = k == len( r[ 'rows' ] ) or _shed_below_rows( a )
+    rfloor = k >= min( 4, len( r[ 'rows' ] ) )   # ranks 1..4 always ship (CodeRabbit #665: a one-row cut of an eight-row answer passed)
+    good   = fits and prefix and tailp and last and rfloor
+    return good, "%s prefix=%d tailprefix=%d rowslast=%d rowfloor=%d rows=%d/%d %s" % ( "OK" if good else "BAD", prefix, tailp, last, rfloor, k, len( r[ 'rows' ] ), msg )
+def bodies_verdict( path, refpath ):
+    # the <bodies> bodies are a prefix of the unbudgeted answer's; fewer, and the <bodies> tag is cut (capped="1") with the next=
+    # that serves them (the call without the budget)
+    a = open( path, encoding='utf-8', errors='replace' ).read(); r = open( refpath, encoding='utf-8', errors='replace' ).read()
+    names = lambda t: re.findall( r'<b [^>]*\bn="([^"]*)"', _sec( t, 'bodies' ) )
+    an, rn = names( a ), names( r )
+    tag = re.search( r'<bodies [^>]*>', a ); tag = tag.group( 0 ) if tag else ''
+    if not tag: return False, "BAD no <bodies> section"
+    if an != rn[ :len( an ) ]: return False, "BAD bodies %s not a prefix of %s" % ( an, rn )
+    if len( an ) < len( rn ) and not ( ' capped="1"' in tag and ' next="--for=' in tag ): return False, "BAD %d of %d bodies cut without next=" % ( len( rn ) - len( an ), len( rn ) )
+    return True, "OK bodies %d/%d" % ( len( an ), len( rn ) )
 if __name__ == "__main__":
+    if sys.argv[ 1 ] == "bodies":
+        good, msg = bodies_verdict( sys.argv[ 2 ], sys.argv[ 3 ] ); print( msg ); sys.exit( 0 if good else 1 )
     good, msg = verdict( sys.argv[ 1 ], sys.argv[ 2 ], sys.argv[ 3 ] if len( sys.argv ) > 3 else None )
     print( msg ); sys.exit( 0 if good else 1 )
 PY
@@ -326,6 +317,7 @@ with open( os.path.join( out, "steps.py" ), "w" ) as fh:
 PYRZ
 soft_rows(){ python3 "$TMP/soft_rows.py" "$1"; }
 soft_st(){ python3 "$TMP/soft_st.py" "$@"; }
+soft_bodies(){ python3 "$TMP/soft_st.py" bodies "$1" "$2"; }   # TOKEN-BUDGET-MONOTONE: bodies a prefix of REF's, a cut carries next=
 rows_prefix(){ [ -s "$1" ] && [ "$( head -n "$( wc -l < "$1" | tr -d ' ' )" "$2" )" = "$( cat "$1" )" ]; }
 # head round-robin (lane hrr, train 31; PROCESS rule 4, orchestrator ruling FIX1 §4(a)): the routed no-budget --for answer reorders
 # its first 8 rows (files_first=), so a budgeted answer's rows are an ORDER prefix of it only in score order. Each #11 arm that
@@ -336,12 +328,15 @@ rwm(){ if [ "${HRR:-on}" = twin ]; then RIPWIRE_NO_HEAD_RR=1 rw "$@"; else rw "$
 rwcallm(){ if [ "${HRR:-on}" = twin ]; then RIPWIRE_NO_HEAD_RR=1 rwcall "$@"; else rwcall "$@"; fi; }
 set_prefix(){ python3 "$RIPWIRE_TESTLIB/softbudget.py" setprefix "$1" "$2" "$3"; }
 hrr_tag(){ if [ "${HRR:-on}" = twin ]; then printf ' [RIPWIRE_NO_HEAD_RR=1 twin]'; else printf ' [head round-robin on: set prefix]'; fi; }
-# the no-budget order-prefix clause of an arm: A against REF (this mode's no-budget answer) and REF_SO (the twin's)
-nobudget_prefix(){ if [ "${HRR:-on}" = twin ]; then rows_prefix "$1" "$2"; else set_prefix "$1" "$2" "$3"; fi; }
+# the no-budget order-prefix clause of an arm: A against REF (this mode's no-budget answer). TOKEN-BUDGET-MONOTONE (rule 4): a
+# budget sheds U's LAST rows, so the rows are a document-order prefix of this mode's own no-budget answer with the reorder on
+# too (the set_prefix reading of the twin's score order is retired with the regime switch; REF_SO is no longer read)
+nobudget_prefix(){ rows_prefix "$1" "$2"; }
 ctx_root(){ grep -aoE '^<ctx [^>]*>' "$1" | head -1; }
-# the soft-target legend clauses (verbs_for.h / graphlegend.h): the compact dialect's reading of budget_tokens=, and the full one's
-SOFT_CLAUSE_COMPACT='budget_tokens= the soft row target asked (rows stop once it is reached)'
-SOFT_CLAUSE_FULL='[budget_tokens=: the soft token target; rows stop once it is reached, the rank 1..4 rows and every disclosure always ship, so est_tokens may exceed it]'
+# the budget's legend clause (src/forbudgetfit.h kForBudgetTargetLegend): one spelling in the compact and the full dialect, on an
+# answer something was shed from (a budget the answer fits says nothing)
+SOFT_CLAUSE_COMPACT='[budget_tokens=: the token target asked. The answer is the one asked without it; only past the target is it shed'
+SOFT_CLAUSE_FULL="$SOFT_CLAUSE_COMPACT"
 
 est_1(){
 # ── #1: the CHARGE band. For every payload shape, bytes/est_tokens must sit inside the calibrated B/tok
@@ -900,8 +895,9 @@ done
 rwm src --for="$FOR_TASK" --token-budget=$TBF --detail=20 --with-graph >"$TMP/f_tb.out" 2>"$TMP/f_tb.err"
 rc_ftb=$?
 a7b_root="$( ctx_root "$TMP/f_tb.out" )"
-soft_rows "$TMP/f_tb.out" >"$TMP/a7b.rows" 2>/dev/null; soft_rows "$TMP/f_tbp.out" >"$TMP/a7b.plain" 2>/dev/null; soft_rows "$TMP/f_for.out" >"$TMP/a7b.unc" 2>/dev/null
-soft_rows "$TMP/f_for_so.out" >"$TMP/a7b.unc_so" 2>/dev/null; [ "$HRR" = twin ] && cp "$TMP/a7b.unc_so" "$TMP/a7b.unc"
+# TOKEN-BUDGET-MONOTONE (rule 4): the reference is the SAME shape without the budget (--detail=20 --with-graph), not the flagless one
+soft_rows "$TMP/f_tb.out" >"$TMP/a7b.rows" 2>/dev/null; soft_rows "$TMP/f_tbp.out" >"$TMP/a7b.plain" 2>/dev/null; soft_rows "$TMP/f_for_both.out" >"$TMP/a7b.unc" 2>/dev/null
+soft_rows "$TMP/f_for_both_so.out" >"$TMP/a7b.unc_so" 2>/dev/null; [ "$HRR" = twin ] && cp "$TMP/a7b.unc_so" "$TMP/a7b.unc"
 a7b_n="$( wc -l < "$TMP/a7b.rows" | tr -d ' ' )"; a7b_pn="$( wc -l < "$TMP/a7b.plain" | tr -d ' ' )"
 a7b_why=""
 { [ "$rc_ftb" -eq 0 ] && [ -n "$a7b_root" ]; } || a7b_why="$a7b_why exit-$rc_ftb-or-no-root"
@@ -909,12 +905,15 @@ a7b_why=""
 # rows past the cut); the uncapped answer's rank-prefix clause below is the rows invariant
 nobudget_prefix "$TMP/a7b.rows" "$TMP/a7b.unc" "$TMP/a7b.unc_so" || a7b_why="$a7b_why rows:not-the-uncapped-answer's-rank-prefix"
 [ -n "$a7b_root" ] && [ "${a7b_root#* over_ceiling=}" = "$a7b_root" ] || a7b_why="$a7b_why over_ceiling-on-a-soft-target"
-{ grep -aq '<graph ' "$TMP/f_tb.out" && grep -aqE '<bodies [^>]*><b ' "$TMP/f_tb.out"; } || a7b_why="$a7b_why graph-or-first-body-missing"
-a7b_b1="$( grep -aoE '<b [^>]*>' "$TMP/f_tb.out" | head -1 )"
-{ [ -n "$a7b_b1" ] && { [ "${a7b_b1#* truncated=\"1\"}" = "$a7b_b1" ] || [ "${a7b_b1#* next=\"--expand=}" != "$a7b_b1" ]; }; } \
-    || a7b_why="$a7b_why first-body-cut-without-next"
+# TOKEN-BUDGET-MONOTONE (rule 4): the --detail bodies shed BEFORE the rows (whole bodies from the last; no reserved first body), so
+# the clause is: the graph block rides (not a shed unit), and the <bodies> section either serves its first body or is cut with a
+# next= that serves the rest (the call without the budget)
+a7b_bodies="$( grep -aoE '<bodies [^>]*>' "$TMP/f_tb.out" | head -1 )"
+{ grep -aq '<graph ' "$TMP/f_tb.out" && [ -n "$a7b_bodies" ]; } || a7b_why="$a7b_why graph-or-bodies-section-missing"
+{ grep -aqE '<bodies [^>]*><b ' "$TMP/f_tb.out" || { [ "${a7b_bodies#* capped=\"1\"}" != "$a7b_bodies" ] && [ "${a7b_bodies#* next=\"--for=}" != "$a7b_bodies" ]; }; } \
+    || a7b_why="$a7b_why bodies-cut-without-next"
 [ -z "$a7b_why" ] \
-    && ok "#11 A7B (forbudget-soft, round C)$( hrr_tag ) --token-budget=$TBF --detail=20 --with-graph: $a7b_n rows (flagless: $a7b_pn), the uncapped answer's rank prefix, no over_ceiling=, graph + first body served" \
+    && ok "#11 A7B (TOKEN-BUDGET-MONOTONE)$( hrr_tag ) --token-budget=$TBF --detail=20 --with-graph: $a7b_n rows (flagless: $a7b_pn), a prefix of the same shape's unbudgeted rows, no over_ceiling=, graph served, bodies served or cut with next=" \
     || no "#11 A7B (forbudget-soft)$( hrr_tag ) --token-budget=$TBF --detail=20 --with-graph —$a7b_why"
 done   # HRR twin / on (lane hrr)
 # A7B-X — REPLACED (forbudget-soft (rule 4)). Was: the kept-rows note rides and the answer still parses (fix round 6: its first
@@ -965,6 +964,10 @@ python3 -c 'import re,sys; m=re.search(r" task=\"([^\"]*)\"", sys.argv[1]); sys.
 }
 
 est_11_sweep(){
+# B26 DEMOTE-ALL: a budgeted answer is demoted too (SIBLING-DEMOTE / DECL-TWIN run before the rows settle and the bytes they
+# free buy rows). ST's maximality prices REF's next entry as the ladder prices it, an UNDEMOTED row, while a demoted REF prints
+# that rank as a ~46 B pointer, so this section reads the rules-OFF twin; fordemoteallcheck (b)/(b+) pins the demoted fill
+local -x RIPWIRE_NO_SIBLING_DEMOTE=1 RIPWIRE_NO_DECL_TWIN=1
 # A7 SWEEP — the harness is kept, its property REPLACED (forbudget-soft (rule 4)). Was (PR #135 CI, 2026-09-11): delivered
 # bytes <= N x 2.36 x 1.15 at exit 0 at EVERY budget, or the ladder's disclosed last rung / the <sigs> unpaid twin — the guard
 # against a byte spliced in after the ladder priced the document. A soft target makes no byte promise, so the sweep now pins
@@ -1110,6 +1113,10 @@ done   # HRR twin / on (lane hrr)
 }
 
 est_11_a7r(){
+# B26 DEMOTE-ALL: a budgeted answer is demoted too (SIBLING-DEMOTE / DECL-TWIN run before the rows settle and the bytes they
+# free buy rows). ST's maximality prices REF's next entry as the ladder prices it, an UNDEMOTED row, while a demoted REF prints
+# that rank as a ~46 B pointer, so this section reads the rules-OFF twin; fordemoteallcheck (b)/(b+) pins the demoted fill
+local -x RIPWIRE_NO_SIBLING_DEMOTE=1 RIPWIRE_NO_DECL_TWIN=1
 # ── #11 A7R (lego-charge fix round 4): THE TRAILING-SECTION RESERVE — and its forbudget-soft (rule 4) REPLACEMENT. Under the
 # old hard ceiling --with-graph's block and the first --detail body were charged only AFTER <sigs> had claimed the whole
 # sig-side ceiling, so lego-charge reserved the graph bytes and a measured first-body floor OUT of the sig claim
@@ -1140,6 +1147,8 @@ A7R_Q="serialize the map row"
 a7r_out(){ ( cd "$A7R" && rwcall corpus --for="$A7R_Q" "$@" --no-cache ) 2>/dev/null; }
 a7r_sigs(){ python3 -c 'import re,sys; m=re.search(r"<sigs\b.*?</sigs>",open(sys.argv[1]).read(),re.S); print(m.group(0) if m else "")' "$1"; }
 a7r_out >"$A7R/n0.xml"   # the no-budget answer: the ST reference below, and the A7R no-ceiling / A7D default arms
+# TOKEN-BUDGET-MONOTONE (rule 4): a budget sheds the SAME call's unbudgeted answer, so each shape is judged against its own
+a7r_out --with-graph >"$A7R/n0_graph.xml"; a7r_out --detail=3 >"$A7R/n0_detail.xml"; a7r_out --detail=20 --with-graph >"$A7R/n0_both.xml"
 # A7R-1 — REPLACED (forbudget-soft (rule 4)). Was: --with-graph / --detail=3 at 1500..3000 — exit 0, inside N x 2.36 x 1.15, no
 # over_ceiling, no last rung, first body served (the reserve made room for it). Now: exit 0; NOLBL and no last-rung note; SEC
 # (rows identical to the bare run at the same N — d099ec21: 12/16/21/26 rows each; base d4325a8c: --with-graph 6/11/16/20 and
@@ -1164,20 +1173,17 @@ for N in 1500 2000 2500 3000; do
         soft_rows "$A7R/n0.xml" >"$A7R/n0.rows" 2>/dev/null
         [ -s "$A7R/o.rows" ] && rows_prefix "$A7R/o.rows" "$A7R/n0.rows" \
             || r_why="$r_why rows:$( wc -l < "$A7R/o.rows" | tr -d ' ' )-not-a-rank-prefix-of-the-no-budget-answer"
-        r_st="$( soft_st "$A7R/o.xml" "$N" "$A7R/n0.xml" )" || r_why="$r_why ST:[$r_st]"
+        r_st="$( soft_st "$A7R/o.xml" "$N" "$A7R/n0_$r_label.xml" )" || r_why="$r_why ST:[$r_st]"
         [ "${r_root#* over_ceiling=}" = "$r_root" ] || r_why="$r_why over_ceiling"
         ! grep -aqF '[over_ceiling= is 1 on the root: ' "$A7R/o.xml" || r_why="$r_why last-rung"
-        if [ "${r_args#*--detail}" != "$r_args" ]; then
-            r_b1="$( grep -aoE '<b [^>]*>' "$A7R/o.xml" | head -1 )"
-            [ -n "$r_b1" ] || r_why="$r_why no-first-body"
-            [ "${r_b1#* over_ceiling=}" = "$r_b1" ] || r_why="$r_why first-body-stub"
-            { [ "${r_b1#* truncated=\"1\"}" = "$r_b1" ] || [ "${r_b1#* next=\"--expand=}" != "$r_b1" ]; } || r_why="$r_why cut-without-next"
+        if [ "${r_args#*--detail}" != "$r_args" ]; then   # TOKEN-BUDGET-MONOTONE: whole bodies shed from the last, before the rows
+            r_bv="$( soft_bodies "$A7R/o.xml" "$A7R/n0_detail.xml" )" || r_why="$r_why BODIES:[$r_bv]"
         fi
         [ -z "$r_why" ] || a7r_bad="$a7r_bad $r_label@$N:[${r_why# }]"
     done
 done
 [ "$a7r_runs" -eq 8 ] && [ -z "$a7r_bad" ] \
-    && ok "#11 A7R (forbudget-soft, round C): 8 budgeted runs (--with-graph / --detail=3 at 1500..3000) serve a rank prefix of the no-budget rows, ST against T less the sections, unlabelled, first body served (cut ones carry next=)" \
+    && ok "#11 A7R (TOKEN-BUDGET-MONOTONE): 8 budgeted runs (--with-graph / --detail=3 at 1500..3000) serve a prefix of the no-budget rows, ST against the same call unbudgeted, unlabelled, the bodies a prefix (a cut carries next=)" \
     || no "#11 A7R no reserve (forbudget-soft): a trailing section changed the <sigs> rows or the soft target broke —$a7r_bad"
 # A7R-K — REPLACED in part (forbudget-soft (rule 4)). Was the pre-registered kill (reports/lego-charge.md fix round 4): with BOTH
 # --detail and --with-graph the reserve was off, so the rows were never FEWER than the --with-graph run's; a delivery past
@@ -1194,14 +1200,14 @@ for N in 2000 2500 3000; do
     [ "$k_rc" -eq 0 ] && [ -n "$k_root" ] || k_why="exit $k_rc / no root"
     soft_rows "$A7R/n0.xml" >"$A7R/n0.rows" 2>/dev/null   # round C (rule 4): RP instead of SEC, as A7R-1
     [ -s "$A7R/k.rows" ] && rows_prefix "$A7R/k.rows" "$A7R/n0.rows" || k_why="$k_why rows $( wc -l < "$A7R/k.rows" | tr -d ' ' )-not-a-rank-prefix-of-the-no-budget-answer"
-    k_st="$( soft_st "$A7R/k.xml" "$N" "$A7R/n0.xml" )" || k_why="$k_why ST:[$k_st]"
+    k_st="$( soft_st "$A7R/k.xml" "$N" "$A7R/n0_both.xml" )" || k_why="$k_why ST:[$k_st]"
     [ "${k_root#* over_ceiling=}" = "$k_root" ] || k_why="$k_why over_ceiling"
-    [ -n "$k_b1" ] && [ "${k_b1#* over_ceiling=}" = "$k_b1" ] || k_why="$k_why first-body-stub"
-    { [ "${k_b1#* truncated=\"1\"}" = "$k_b1" ] || [ "${k_b1#* next=\"--expand=}" != "$k_b1" ]; } || k_why="$k_why cut-without-next"
+    [ "${k_b1#* over_ceiling=}" = "$k_b1" ] || k_why="$k_why body-stub"
+    k_bv="$( soft_bodies "$A7R/k.xml" "$A7R/n0_both.xml" )" || k_why="$k_why BODIES:[$k_bv]"
     [ -z "$k_why" ] || a7k_bad="$a7k_bad @$N:[${k_why# }]"
 done
 [ -z "$a7k_bad" ] \
-    && ok "#11 A7R both sections (forbudget-soft, round C): --detail=20 --with-graph at 2000..3000 serves a rank prefix of the no-budget rows, ST, unlabelled, first body at its floor" \
+    && ok "#11 A7R both sections (TOKEN-BUDGET-MONOTONE): --detail=20 --with-graph at 2000..3000 serves a prefix of the no-budget rows, ST, unlabelled, the bodies a prefix (a cut carries next=)" \
     || no "#11 A7R both sections (forbudget-soft): —$a7k_bad"
 # A7R-K2 — REPLACED in part (forbudget-soft (rule 4)). Was the A7B contract on this corpus: past the allowance with
 # over_ceiling="1" and the kept-rows reason (both gone with the ceiling), well-formed despite the note, and the head-cut first
@@ -1218,43 +1224,33 @@ for N in 2000 2500; do
     if command -v xmllint >/dev/null 2>&1; then
         xmllint --noout "$A7R/k2.xml" 2>/dev/null || k2_why="$k2_why xmllint-rejected"
     fi
-    k2_next="$( grep -aoE '<b [^>]*>' "$A7R/k2.xml" | head -1 | sed -nE 's/.* truncated="1".* next="--expand=([^"]*)".*/\1/p' )"
-    if [ -z "$k2_next" ]; then
-        k2_why="$k2_why first-body-not-head-cut-with-next"
+    # TOKEN-BUDGET-MONOTONE (rule 4): no first-body head-cut any more (bodies shed whole, from the last); the clause is that a cut
+    # <bodies> carries next= — the call without the budget — and that call RUNS and serves every body the unbudgeted answer does
+    k2_tag="$( grep -aoE '<bodies [^>]*>' "$A7R/k2.xml" | head -1 )"
+    k2_next="$( printf '%s' "$k2_tag" | sed -nE 's/.* next="(--for=[^"]*)".*/\1/p' | sed "s/&apos;/'/g; s/&quot;/\"/g; s/&amp;/\\&/g" )"
+    k2_bv="$( soft_bodies "$A7R/k2.xml" "$A7R/n0_both.xml" )" || k2_why="$k2_why BODIES:[$k2_bv]"
+    if [ "${k2_tag#* capped=\"1\"}" = "$k2_tag" ] || [ -z "$k2_next" ]; then
+        k2_why="$k2_why bodies-not-cut-with-next"
     else
-        ( cd "$A7R" && rwcall corpus --expand="$k2_next" --no-cache ) >"$A7R/k2n.xml" 2>/dev/null
-        python3 - "$A7R/k2.xml" "$A7R/k2n.xml" "$A7R/corpus" <<'PYR' || k2_why="$k2_why next=-does-not-recover-the-cut"
-import re, sys, os
-cut = open( sys.argv[1] ).read(); nxt = open( sys.argv[2] ).read()
-m1 = re.search( r'<b [^>]* p="([^"]+)" n="[^"]+" lines="1-(\d+)/(\d+)" truncated="1"[^>]*><!\[CDATA\[(.*?)\]\]>', cut, re.S )
-l1 = re.search( r'<b [^>]* l="(\d+)" p="', cut )
-m2 = re.search( r'<b [^>]* lines="(\d+)-(\d+)/(\d+)"[^>]*><!\[CDATA\[(.*?)\]\]>', nxt, re.S )
-if not ( m1 and l1 and m2 ): sys.exit( 1 )
-k, t = int( m1.group( 2 ) ), int( m1.group( 3 ) )
-if ( int( m2.group( 1 ) ), int( m2.group( 2 ) ), int( m2.group( 3 ) ) ) != ( k + 1, t, t ): sys.exit( 1 )
-src = open( os.path.join( sys.argv[3], m1.group( 1 ) ) ).read().split( "\n" )
-start = int( l1.group( 1 ) ) - 1
-want = "\n".join( src[ start : start + t ] )
-got = m1.group( 4 ).rstrip( "\n" ) + "\n" + m2.group( 4 )
-sys.exit( 0 if got.rstrip( "\n" ) == want.rstrip( "\n" ) else 1 )
-PYR
+        eval "set -- $k2_next"
+        ( cd "$A7R" && rwcall corpus "$@" --no-cache ) >"$A7R/k2n.xml" 2>/dev/null
+        cmp -s "$A7R/k2n.xml" "$A7R/n0_both.xml" || k2_why="$k2_why next=-is-not-the-unbudgeted-call"
     fi
     [ -z "$k2_why" ] || a7k2_bad="$a7k2_bad @$N:[${k2_why# }]"
 done
 [ -z "$a7k2_bad" ] \
-    && ok "#11 A7R cut body next= (forbudget-soft): --detail=20 --with-graph at 2000/2500 is unlabelled and well-formed, and the cut first body's next= returns exactly the lines it cut" \
+    && ok "#11 A7R cut bodies next= (TOKEN-BUDGET-MONOTONE): --detail=20 --with-graph at 2000/2500 is unlabelled and well-formed, its <bodies> cut carries next=, and that call is the unbudgeted answer byte for byte" \
     || no "#11 A7R cut body next= (forbudget-soft): —$a7k2_bad"
 # A7R-2 (the floor's cut is the one the floor priced): at 1500 tokens the first body is longer than the floor, so it ships
 # head-cut — truncated="1" with lines= and next= — never dropped and never the bare one-line stub.
+# TOKEN-BUDGET-MONOTONE (rule 4): the floor no longer head-cuts the first --detail body (bodies shed whole before the rows); at
+# 1500 tokens --detail=3 serves a prefix of the unbudgeted bodies, a cut one carrying next=, and is otherwise at the row floor or fits
 a7r_out --token-budget=1500 --detail=3 >"$A7R/f.xml"
-r_b1="$( grep -aoE '<b [^>]*>' "$A7R/f.xml" | head -1 )"
-r_hi="$( printf '%s' "$r_b1" | sed -nE 's/.* lines="1-([0-9]+)\/[0-9]+".*/\1/p' )"
-{ [ "${r_b1#* truncated=\"1\"}" != "$r_b1" ] && [ "${r_b1#* over_ceiling=}" = "$r_b1" ] && [ "${r_hi:-0}" -ge 2 ] 2>/dev/null \
-  && [ "${r_b1#* next=\"--expand=}" != "$r_b1" ]; } \
-    && ok "#11 A7R floor: the first --detail body at 1500 tokens is head-cut at the floor with lines= and next= ($r_b1)" \
-    || no "#11 A7R floor: the first --detail body at 1500 tokens is not the floor's head-cut of >= 2 lines (got '${r_b1:-none}')"
-# A7R-N1 (near-miss negative, NO explicit ceiling): the reserve must not exist — <sigs> is byte-identical with and
-# without --with-graph (the default regime's graph rides on top, as before).
+f_bv="$( soft_bodies "$A7R/f.xml" "$A7R/n0_detail.xml" )"; f_bok=$?
+f_st="$( soft_st "$A7R/f.xml" 1500 "$A7R/n0_detail.xml" )"; f_sok=$?
+{ [ "$f_bok" -eq 0 ] && [ "$f_sok" -eq 0 ]; } \
+    && ok "#11 A7R floor: --detail=3 at 1500 tokens sheds whole bodies from the last, then rows ($f_bv; $f_st)" \
+    || no "#11 A7R floor: --detail=3 at 1500 tokens — $f_bv; $f_st"
 a7r_out --with-graph >"$A7R/n1.xml"
 n0="$( a7r_sigs "$A7R/n0.xml" )"; n1="$( a7r_sigs "$A7R/n1.xml" )"
 { [ -n "$n0" ] && [ "$n0" = "$n1" ] && [ "${n0#*capped=\"1\"}" != "$n0" ]; } \
@@ -1283,14 +1279,19 @@ est_11_a7d(){
 # answer) serves every one of the same total= hop rows.
 # round C (reserve first; rule 4): the hops are funded from the rows at the cut, so 1500 now serves the whole set — re-anchored
 # to 600 (the marker) and 800 (the partial cut), measured on the round C build: 600 shown=0, 800 shown=3 of 6, 900+ whole
+# RE-PIN (NEXT-APOS-RAW, 2026-11-15): next= pins --for='Q' — it was --for=&apos;Q&apos;; a raw ' is legal in this
+# "-delimited attribute, and the entity did not paste into a shell (nextverb.h appendNextValueXml). Here and A7D-2 below.
 a7r_out --token-budget=600 >"$A7R/h.xml"
 h_tag="$( grep -aoE '<hops [^>]*>' "$A7R/h.xml" | head -1 )"
 h_root="$( ctx_root "$A7R/h.xml" )"
 h_tot="$( printf '%s' "$h_tag" | sed -nE 's/.* total="([0-9]+)".*/\1/p' )"
 hd_tag="$( grep -aoE '<hops [^>]*>' "$A7R/n0.xml" | head -1 )"
 hd_shown="$( printf '%s' "$hd_tag" | sed -nE 's/<hops shown="([0-9]+)".*/\1/p' )"; hd_tot="$( printf '%s' "$hd_tag" | sed -nE 's/.* total="([0-9]+)".*/\1/p' )"
-{ [ "$h_tag" = "<hops shown=\"0\" total=\"$h_tot\" capped=\"1\" next=\"--for=&apos;$A7R_Q&apos;\"/>" ] && [ "${h_tot:-0}" -ge 1 ] 2>/dev/null \
-  && grep -aqF '; hops: this budget left out the call-hop rows (one hop of callees for each of total= top rows)' "$A7R/h.xml" && [ "${h_root#* over_ceiling=}" = "$h_root" ] \
+# TOKEN-BUDGET-MONOTONE (rule 4): the marker is the budget's hops:N shed of the unbudgeted <hops> (src/forbudgetfit.h), so it keeps
+# U's other attributes (noedge=) and is defined by the budget's one clause (hops:N) instead of the old hops-only clause
+h_hasnext=0; printf '%s' "$h_tag" | grep -qF " next=\"--for='$A7R_Q'\"" && h_hasnext=1   # grep -F: bash strips the ' inside a ${x#pattern}
+{ [ "${h_tag#<hops shown=\"0\" total=\"$h_tot\"}" != "$h_tag" ] && [ "${h_tag#* capped=\"1\"}" != "$h_tag" ] && [ "$h_hasnext" = 1 ] && [ "${h_tag%/>}" != "$h_tag" ] && [ "${h_tot:-0}" -ge 1 ] 2>/dev/null \
+  && grep -aqF 'hops:N (the last N hops rows)' "$A7R/h.xml" && [ "${h_root#* over_ceiling=}" = "$h_root" ] \
   && [ -n "$h_root" ] && [ -n "$hd_shown" ] && [ "$hd_shown" = "$h_tot" ] && [ "$hd_tot" = "$h_tot" ]; } \
     && ok "#11 A7D hops: the spent-target <hops> at 600 is the counted marker ($h_tag), defined, unlabelled; its next= serves all $hd_shown of $hd_tot rows" \
     || no "#11 A7D hops: spent-target <hops> at 600 not the counted, continued marker (got '${h_tag:-none}', next= answer '${hd_tag:-none}', root '${h_root:0:80}…')"
@@ -1300,18 +1301,20 @@ hd_shown="$( printf '%s' "$hd_tag" | sed -nE 's/<hops shown="([0-9]+)".*/\1/p' )
 a7r_out --token-budget=600 --legend=full >"$A7R/hf.xml"
 hf_tag="$( grep -aoE '<hops [^>]*>' "$A7R/hf.xml" | head -1 )"; hf_root="$( ctx_root "$A7R/hf.xml" )"
 { [ "$hf_tag" = "$h_tag" ] && [ -n "$hf_tag" ] && [ -n "$hf_root" ] \
-  && grep -aqF '; hops shown=0 capped=1: this budget left out the call-hop rows (one hop of callees for each of total= top rows); next= serves them' "$A7R/hf.xml" \
-  && [ "${hf_root#* over_ceiling=}" = "$hf_root" ] && ! grep -aqF '; hops: this budget' "$A7R/hf.xml"; } \
-    && ok "#11 A7D hops (--legend=full twin): the same marker ($hf_tag), defined by the full clause (shown=0 capped=1, next=), unlabelled" \
+  && grep -aqF 'hops:N (the last N hops rows)' "$A7R/hf.xml" \
+  && [ "${hf_root#* over_ceiling=}" = "$hf_root" ]; } \
+    && ok "#11 A7D hops (--legend=full twin): the same marker ($hf_tag), defined by the budget clause (hops:N), unlabelled" \
     || no "#11 A7D hops (--legend=full twin): got '${hf_tag:-none}' vs compact '${h_tag:-none}', root '${hf_root:0:80}…' — the full clause is missing or the root is labelled"
 # A7D-2: a PARTIAL hops cut under the target carries the same next= (800 tokens since round C: some rows fit, not all).
-a7r_out --token-budget=800 >"$A7R/hp.xml"
+# TOKEN-BUDGET-MONOTONE (rule 4): hops shed after the tail and before the fold and the rows, so a partial cut sits just under the
+# unbudgeted price (est_tokens 4167 on this corpus): measured on the lane build, 4150 serves 3 of 6, 4100 1 of 6, <= 4050 none
+a7r_out --token-budget=4150 >"$A7R/hp.xml"
 hp_tag="$( grep -aoE '<hops [^>]*>' "$A7R/hp.xml" | head -1 )"
 hp_sh="$( printf '%s' "$hp_tag" | sed -nE 's/<hops shown="([0-9]+)".*/\1/p' )"; hp_tot="$( printf '%s' "$hp_tag" | sed -nE 's/.* total="([0-9]+)".*/\1/p' )"
 { [ -n "$hp_sh" ] && [ -n "$hp_tot" ] && [ "$hp_sh" -ge 1 ] && [ "$hp_sh" -lt "$hp_tot" ] && [ "${hp_tag#* capped=\"1\"}" != "$hp_tag" ] \
-  && [ "${hp_tag#* next=\"--for=&apos;$A7R_Q&apos;\"}" != "$hp_tag" ]; } 2>/dev/null \
-    && ok "#11 A7D partial hops cut at 800 tokens carries next= ($hp_tag)" \
-    || no "#11 A7D partial hops cut at 800 tokens: not a partial cut with next= (got '${hp_tag:-none}')"
+  && printf '%s' "$hp_tag" | grep -qF " next=\"--for='$A7R_Q'\""; } 2>/dev/null \
+    && ok "#11 A7D partial hops cut at 4150 tokens carries next= ($hp_tag)" \
+    || no "#11 A7D partial hops cut at 4150 tokens: not a partial cut with next= (got '${hp_tag:-none}')"
 # A7D-W (forbudget-soft, replaces the old 5000-token partial cut): a target wide enough for the rows AND the hop rows serves the
 # whole hop set, like the default answer — stop when complete, nothing left to continue (no capped=, so no next= owed).
 a7r_out --token-budget=5000 >"$A7R/hw.xml"
@@ -1415,6 +1418,34 @@ fi
 grep -aq '<hops ' "$TMP/f_for.out" \
     && ok "#11 A9/A10 presence: the compact arm really did serve a <hops> section (the arm is not inert)" \
     || no "#11 A9/A10 presence: no <hops> in the default --for bundle — re-anchor this arm, it proves nothing"
+# R-DEDUP: the <syms> block cuts the names it prints out of the head files' tail rows AFTER the root was priced (forfilesyms.h
+# tailRowsWithoutPicks), so both surfaces re-price the root on the cut bytes (serialize.h repriceRootAfterCut). The four CLI arms
+# above carry the cut on this task (est_tokens read 6-7 high without the re-price); this is the MCP `for` twin, same task and
+# corpus: no doc/decl block rides here, so the answer less its <syms> block is the priced document, flat at 2.50.
+python3 - "$FOR_TASK" "$ROOT/src" >"$TMP/f_mcp.in" <<'PYM'
+import json, sys
+print( json.dumps( { "jsonrpc": "2.0", "id": 1, "method": "initialize" } ) )
+print( json.dumps( { "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                     "params": { "name": "for", "arguments": { "path": sys.argv[2], "task": sys.argv[1] } } } ) )
+PYM
+rwcall --mcp <"$TMP/f_mcp.in" >"$TMP/f_mcp.json" 2>/dev/null
+mcp_out="$( python3 - "$TMP/f_mcp.json" <<'PYR'
+import json, re, sys, os; sys.path.insert( 0, os.environ[ "RIPWIRE_TESTLIB" ] ); from softbudget import strip_appended_bytes
+try:
+    t = json.loads( [ l for l in open( sys.argv[1] ) if l.strip() ][-1] )["result"]["content"][0]["text"].encode()
+    e = int( re.search( rb'est_tokens="(\d+)"', t ).group( 1 ) )
+except Exception:
+    print( "unreadable" ); sys.exit( 0 )
+d = strip_appended_bytes( t )
+print( f"{len(d)} {e} {int( len( d ) / 2.50 + 0.5 )} syms={int( b'<syms>' in t or b'<syms ' in t )}" )
+PYR
+)"
+read -r _ mcp_e mcp_x mcp_s mcp_more <<<"$mcp_out"
+if [ -n "$mcp_s" ] && [ -z "$mcp_more" ] && [ "$mcp_e" = "$mcp_x" ] && [ "$mcp_s" = "syms=1" ]; then
+    ok "#11 A9/A10 MCP for twin (R-DEDUP <syms> cut): est_tokens = round(bytes/2.50) with the block served — bytes/est/expected = $mcp_out"
+else
+    no "#11 A9/A10 MCP for twin (R-DEDUP <syms> cut): bytes/est/expected = ${mcp_out:-unreadable} (the cut tail rows are priced, or no <syms> rode)"
+fi
 # the weak="1" path: a nonsense query trips the weak-score threshold, so the 9-byte attribute is present and
 # the same identity must still hold with it in the document. R9 fix (W3-S, 2026-08-19): a query this weak
 # also has no positive-score body candidates, so buildForAutoBodies now ALWAYS emits the honest

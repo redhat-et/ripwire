@@ -111,6 +111,18 @@ struct RefPairDelta
     std::string               baseSha, targetSha;
     PhaseStop                 stop;                                // the guard's stop in a full tree, when there was one
     std::uint64_t             ingestPeak = 0;                      // this process's peak at the end of the base commit's ingest (the projection's input)
+    bool                      baseFromCache = false;               // QD-PAIR-BASE-CACHE: the base side came from its qbase blob (no base ingest to project from)
+    // QD-BASE-CHILD: the base side was built by a child process (baseInChild), which wrote the qbase blob this one read. Its
+    // readings stand in for this process's own in the projection, and its peak for the base phase's in the peak disclosure.
+    bool                      baseFromChild  = false;
+    std::uint64_t             childBefore    = 0;   // the child's footprint before its base phase
+    std::uint64_t             childBasePeak  = 0;   // its peak at the end of the base phase
+    std::uint64_t             childAfter     = 0;   // its footprint once the base tree was released
+    std::uint64_t             childPeak      = 0;   // its peak when it exited (the blob written)
+    std::uint64_t             childFixed     = 0;   // the construct tables its base phase compiled (memguard.h FIXED BYTES)
+    // the base ingest refused no file for nesting and extracted none partially (quality.h baseScoreStorable): only then is its
+    // score written to the qbase blob, by this process or by the child (CodeRabbit 4572576455 on #655)
+    bool                      baseStorable   = false;
 
     const rw::quality::RefTree& target() const noexcept { return targetTree; }
     const std::vector<std::string>* macroOverride() const noexcept { return degraded && haveBaseMacros ? &baseMacros : nullptr; }
@@ -191,25 +203,534 @@ int refPairStopRefusal( const PhaseStop& stop, const RefPairDelta& refs, std::st
 // index, graph and temp dir are released on return, before the target tree is materialized. qd-memory-degrade: it also
 // keeps the base tree's C-family macro NAMES (defect-shape's one tree-wide input, names only) and reads this process's
 // peak at the end of the ingest, for the projection. Exit code on an environment failure; a memory stop goes to `stop`.
-std::optional<int> scoreBaseCommit( const std::string& root, const std::string& sha, const rw::Config& cfg, RefPairDelta& refs )
+// QD-PAIR-BASE-CACHE: the base side from its qbase blob (quality.h), when one validates for this sha and key. A refused blob
+// is said once on stderr, in every build type (the HEAD qsnap's corrupt-cache line), and the caller recomputes and rewrites it.
+bool takeCachedBase( const std::string& path, const std::string& sha, RefPairDelta& refs )
 {
     using namespace rw;
-    quality::TmpTreeGuard      baseGuard;
-    quality::RefTree           baseTree;
-    const quality::RefTreeLoad load = quality::loadRefTree( root, sha, cfg.excludes, cfg.maxFileBytes, "qdpair-base", baseGuard, baseTree );
-    refs.ingestPeak = os::mem_footprint_peak();
-    if( const std::optional<int> failed = recordLoad( load, baseTree, sha, "base commit", refs.stop ) )
+    // 1 = a valid hit, 0 = a clean miss (absent, empty, not a regular file), -1 = present but refused
+    quality::BaseCommitScore         cached;
+    const std::optional<std::string> blob = quality::readQSnapBlob( path );
+    const int                        hit  = !blob ? 0 : quality::deserializeBaseCommitScore( *blob, sha, cached ) ? 1 : -1;
+    if( hit == -1 )
+    {
+        rw::emitRaw( stderr, "ripwire: quality: base Snapshot cache corrupt — recomputing\n" );
+        DISCLOSE( Diagnostics::answerUnchanged, "the corrupt cache is recomputed from the base tree: same answer, slower", "quality: base Snapshot cache corrupt — recomputing" );
+    }
+    if( hit != 1 )
+    {
+        return false;
+    }
+    refs.baseSnapshot   = std::move( cached.snapshot );
+    refs.baseMacros     = std::move( cached.macros );
+    refs.haveBaseMacros = true;
+    refs.baseFromCache  = true;
+    return true;
+}
+
+// The cache key of the base side (QD-PAIR-BASE-CACHE): the base sha, the excludes, maxFileBytes, the selected kinds and the
+// build. --no-cache neither reads nor writes it, so the flag that asks for a fresh answer gets one: `path` is then empty.
+struct BaseCacheKey
+{
+    std::string repoHex, exclHex, path;
+    bool        use() const noexcept { return !path.empty(); }
+};
+BaseCacheKey baseCacheKey( const std::string& root, const std::string& sha, const rw::Config& cfg, rw::quality::KindMask selected )
+{
+    using namespace rw;
+    if( cfg.noCache )
+    {
+        return {};
+    }
+    BaseCacheKey key;
+    key.repoHex = quality::cacheRootKeyHex( root );
+    // the qsnap key (excludes, maxFileBytes, scheme, producer identity) plus the selected kinds: a base Snapshot holds only those
+    key.exclHex = quality::qsnapExclHex( cfg.excludes, cfg.maxFileBytes ) + "k" + std::to_string( selected );
+    key.path    = quality::qbaseCachePath( key.repoHex, key.exclHex, sha );
+    return key;
+}
+
+// One commit's tree for the range form, materialized, ingested and graphed under the memory guard (#387): an exit code on
+// an environment failure; a stop goes to `stop` (the hard line read after the graph). `ingestPeak`, when given, takes this
+// process's peak at the end of the ingest (the projection's input).
+std::optional<int> loadGuardedTree( const std::string& root, const std::string& sha, const rw::Config& cfg, const char* tag, std::string_view side,
+                                    rw::quality::TmpTreeGuard& guard, rw::quality::RefTree& tree, PhaseStop& stop, std::uint64_t* ingestPeak )
+{
+    using namespace rw;
+    const quality::RefTreeLoad load = quality::loadRefTree( root, sha, cfg.excludes, cfg.maxFileBytes, tag, guard, tree );
+    if( ingestPeak != nullptr )
+    {
+        *ingestPeak = os::mem_footprint_peak();
+    }
+    if( const std::optional<int> failed = recordLoad( load, tree, sha, side, stop ) )
     {
         return failed;
     }
-    if( refs.stop.stopped || hardLineStops( "graph of the base commit", refs.stop ) )
+    if( !stop.stopped )
+    {
+        (void)hardLineStops( "graph of the " + std::string( side ), stop );
+    }
+    return std::nullopt;
+}
+
+// The base commit, scored in this process: its snapshot and macro names kept, the tree released on return. Exit code on an
+// environment failure; a memory stop goes to refs.stop. Writes nothing: whether its score may be stored is refs.baseStorable.
+std::optional<int> buildBaseInProcess( const std::string& root, const std::string& sha, const rw::Config& cfg, RefPairDelta& refs )
+{
+    using namespace rw;
+    quality::TmpTreeGuard baseGuard;
+    quality::RefTree      baseTree;
+    if( const std::optional<int> failed = loadGuardedTree( root, sha, cfg, "qdpair-base", "base commit", baseGuard, baseTree, refs.stop, &refs.ingestPeak ) )
+    {
+        return failed;
+    }
+    if( refs.stop.stopped )
     {
         return std::nullopt;
     }
     refs.baseSnapshot   = quality::computeSnapshot( baseTree.ing, baseTree.g, baseTree.root, nullptr, { refs.selected } );
     refs.baseMacros     = quality::cFamilyMacroNames( baseTree.ing );
     refs.haveBaseMacros = true;
+    refs.baseStorable   = quality::baseScoreStorable( baseTree.ing );
     (void)hardLineStops( "snapshot of the base commit", refs.stop );
+    return std::nullopt;
+}
+
+// ── QD-BASE-CHILD: the base phase in a child process ─────────────────────────────────────────────────────────────────
+// The base tree is built and released before the target is read (#387), but on macOS the allocator keeps the freed pages
+// (~80 % fragmented, qd-pair-residue): the target then either reuses them or stacks on top of them, and vscode's cold A..B
+// peak was bimodal at 933-1327 MiB. So on a qbase miss the CLI re-runs itself (os::spawn_self, the same argv) as a child
+// that builds the base side and writes the qbase blob, and this process reads the blob as a cache hit: the child's pages
+// go back to the system when it exits. No new format — the cold path becomes "the child fills the cache, then the warm
+// path". The protocol is the child's stderr, one pipe: what it prints before `begin` (this process printed the same lines
+// already) is dropped, what it prints between `begin` and `end` (the base phase's own diagnostics) is passed through on
+// stderr where the in-process run would have printed it, and the `end` line carries the outcome and the readings.
+// Anything else — no posix_spawn (Windows), a spawn that fails, a non-zero exit, a missing end line, a blob that does not
+// validate — runs the base phase in-process instead, the answer this form always gave (its own child output dropped, so
+// the base-phase lines are printed once).
+constexpr const char*      kBaseChildEnv   = "RIPWIRE_QBASE_CHILD";   // "<parent pid>:<temp blob path>"
+constexpr std::string_view kBaseChildBegin = "ripwire-qbase-child: begin\n";
+constexpr std::string_view kBaseChildEnd   = "ripwire-qbase-child: end ";
+
+// The argv of a CLI run that may re-run itself: main() offers it just before runQualityDeltaRangeBeforeIngest, which takes
+// it back when it declines, so the MCP server, a --quality-ack run and any other route that reaches the range form score
+// the base in-process.
+char**& baseChildArgv() noexcept
+{
+    static char** argv = nullptr;
+    return argv;
+}
+
+// main()'s offer: its argv without --refetch. The child then reuses the clone of a git-URL root this process just made
+// (resolveRemoteRoot's .git check) instead of deleting it and cloning again under the parent (CodeRabbit 4577036256, #662).
+void offerBaseChildArgv( char** argv )
+{
+    static std::vector<char*> kept;
+    kept.clear();
+    for( char** arg = argv; *arg != nullptr; ++arg )
+    {
+        if( arg == argv || std::string_view( *arg ) != "--refetch" )
+        {
+            kept.push_back( *arg );
+        }
+    }
+    kept.push_back( nullptr );
+    baseChildArgv() = kept.data();
+}
+
+// RIPWIRE_TEST_QBASE_CHILD (gates only): `inproc` never spawns; `force` spawns below the size floor (a fixture is small);
+// `spawnfail` hands the spawn a bad descriptor so the real spawn fails; `exit` makes the child exit 70 before its base phase;
+// `partial` makes it write half the blob; `crash` makes it abort inside its base phase; `badline` makes its end line say
+// peak="12x". The last five imply `force`; each falls back to the in-process answer: byte for byte, but for a crash, whose
+// own lines are passed through so it is never silent.
+std::string_view baseChildSeam() noexcept
+{
+    const char* const v = std::getenv( "RIPWIRE_TEST_QBASE_CHILD" );
+    return v == nullptr ? std::string_view() : std::string_view( v );
+}
+
+// This process's role when it is the child its parent spawned: the two commits the parent already resolved (so the child
+// asks git nothing to find them) and the temp blob path. The variable names the parent's pid, so a stray value in a user's
+// environment is ignored: `child` is then false and the process runs as any other.
+struct BaseChildRole
+{
+    bool        child = false;
+    std::string baseSha, targetSha, tempPath;
+};
+BaseChildRole baseChildRole()
+{
+    BaseChildRole     role;
+    const char* const v = std::getenv( kBaseChildEnv );
+    if( v == nullptr )
+    {
+        return role;
+    }
+    // "<pid>:<base sha>:<target sha>:<temp path>" — the path last, so it may hold a ':'
+    std::string_view rest( v );
+    std::string_view fields[ 3 ];
+    for( std::string_view& field : fields )
+    {
+        const std::size_t colon = rest.find( ':' );
+        if( colon == std::string_view::npos )
+        {
+            return role;
+        }
+        field = rest.substr( 0, colon );
+        rest.remove_prefix( colon + 1 );
+    }
+    if( fields[ 0 ] != std::to_string( rw::os::getppid() ) || fields[ 1 ].empty() || fields[ 2 ].empty() || rest.empty() )
+    {
+        return role;
+    }
+    role.child     = true;
+    role.baseSha   = std::string( fields[ 1 ] );
+    role.targetSha = std::string( fields[ 2 ] );
+    role.tempPath  = std::string( rest );
+    return role;
+}
+
+// The size floor: below it the base phase runs in-process. A small tree's freed pages are a small residue, while the
+// child's fixed cost — a second process start, its own query compilation and the blob round trip — is a large share of a
+// short run (measured 11-14 on the loaded M2: hono, a 35 KB index, 7.3 → 9.9 s; textual, 68 KB, 9.9 → 11.8 s; envoy,
+// cockroach and vscode, 1.9-3.0 MB, within 1.3 % of the in-process CPU). The proxy is the repository's git index, one
+// stat: ~70-100 bytes per tracked file, so 1 MiB is ~10,000-15,000 files. No index found (not a plain .git, an unusual
+// layout) reads as small: the in-process phase, the answer this form always gave.
+inline constexpr std::uint64_t kBaseChildMinIndexBytes = std::uint64_t( 1 ) << 20;
+
+// The git dir a `.git` entry at `dir` names: itself, or — a worktree or submodule's `.git` file — its "gitdir: <path>".
+// Empty when the file does not say.
+std::string gitDirAt( const std::string& dir, const rw::os::stat_t& dotGit )
+{
+    using namespace rw;
+    const std::string gitDir = dir + "/.git";
+    if( !S_ISREG( dotGit.st_mode ) )
+    {
+        return gitDir;
+    }
+    const std::optional<std::string> file = pathguard::readRegularFileNoFollow( gitDir );
+    if( !file || !file->starts_with( "gitdir: " ) )
+    {
+        return {};
+    }
+    const std::string target = file->substr( 8, file->find( '\n' ) == std::string::npos ? std::string::npos : file->find( '\n' ) - 8 );
+    return target.starts_with( "/" ) ? target : dir + "/" + target;
+}
+
+std::uint64_t gitIndexBytes( const std::string& root )
+{
+    using namespace rw;
+    char resolved[ PATH_MAX ];
+    if( os::realpath( root.c_str(), resolved ) == nullptr )
+    {
+        return 0;
+    }
+    std::string dir( resolved );
+    for( int levelIndex = 0; levelIndex < 64 && !dir.empty(); ++levelIndex )   // the bound: a hostile-symlink guard, as hasEnclosingGitRepo
+    {
+        os::stat_t st;
+        if( os::stat( ( dir + "/.git" ).c_str(), &st ) == 0 )
+        {
+            const std::string gitDir = gitDirAt( dir, st );
+            os::stat_t        index;
+            return !gitDir.empty() && os::stat( ( gitDir + "/index" ).c_str(), &index ) == 0 && S_ISREG( index.st_mode ) ? std::uint64_t( index.st_size ) : 0;
+        }
+        const std::size_t slash = dir.rfind( '/' );
+        if( dir == "/" || slash == std::string::npos )
+        {
+            break;
+        }
+        dir.resize( slash == 0 ? 1 : slash );
+    }
+    return 0;
+}
+
+// The child's blob: the cache when it may and can be written, else the parent's temp path. Where it went: "cache", "temp" or
+// "" (nowhere). A base whose ingest refused or partially extracted a file is never cached (quality.h baseScoreStorable,
+// CodeRabbit 4572576455 on #655): it goes to the temp path, the hand-over the parent reads once and removes, so this run
+// answers as in-process — the disclosures that ingest printed are passed through — and the next one builds the base again.
+std::string_view writeChildBlob( const std::string& root, const rw::Config& cfg, const RefPairDelta& out, const std::string& tempPath )
+{
+    using namespace rw;
+    std::string blob = quality::serializeBaseCommitScore( { out.baseSnapshot, out.baseMacros }, out.baseSha );
+    if( baseChildSeam() == "partial" )
+    {
+        blob.resize( blob.size() / 2 );
+    }
+    const BaseCacheKey key = baseCacheKey( root, out.baseSha, cfg, out.selected );
+    if( out.baseStorable && key.use() && quality::atomicWriteFile( key.path, blob ) )
+    {
+        quality::evictOldCacheFamily( quality::cacheDirLadder(), "ripwire-qbase-" + key.repoHex + "-" + key.exclHex + "-", key.path, 2 );
+        return "cache";
+    }
+    return quality::atomicWriteFile( tempPath, blob ) ? "temp" : "";
+}
+
+// The child's side: the base phase, the blob, the end line. The process's exit code: 0 once the end line is out, the
+// refusal's own code after an environment failure (said in the line).
+int runBaseChild( const std::string& root, const rw::Config& cfg, RefPairDelta& out, std::uint64_t before, const std::string& tempPath )
+{
+    using namespace rw;
+    if( baseChildSeam() == "exit" )
+    {
+        return 70;
+    }
+    rw::emitRaw( stderr, std::string( kBaseChildBegin ).c_str() );
+    if( baseChildSeam() == "crash" )
+    {
+        rw::emitRaw( stderr, "ripwire: test seam: the base child aborts\n" );
+        std::abort();
+    }
+    const std::uint64_t      fixedBefore = constructTablesFootprint();
+    const std::optional<int> failed      = buildBaseInProcess( root, out.baseSha, cfg, out );
+    const std::uint64_t      basePeak    = os::mem_footprint_peak();
+    const std::uint64_t      after       = memguard::measuredFootprint();
+    // a stopped side is never persisted: the parent re-runs it in-process (an unstorable base is handed over, writeChildBlob)
+    const std::string_view where  = failed || out.stop.stopped ? std::string_view() : writeChildBlob( root, cfg, out, tempPath );
+    const std::string_view status = failed ? "failed" : out.stop.stopped ? "stopped" : where.empty() ? "nowrite" : "ok";
+    memguard::answerStops();   // the parent answers for a stop (it re-runs the phase): this process prints no backstop of its own
+    const std::string peak = baseChildSeam() == "badline" ? std::string( "12x" ) : std::to_string( os::mem_footprint_peak() );
+    rw::emitTo( stderr, "{}status=\"{}\" rc=\"{}\" blob=\"{}\" before=\"{}\" ingest_peak=\"{}\" base_peak=\"{}\" after=\"{}\" fixed=\"{}\" peak=\"{}\" type3_runs=\"{}\" type3_pairs=\"{}\"\n",
+                kBaseChildEnd, status, failed ? *failed : 0, where, before, out.ingestPeak, basePeak, after, constructTablesFootprint() - fixedBefore,
+                peak,
+                gType3PassRuns.load( std::memory_order_relaxed ), gType3PassPairs.load( std::memory_order_relaxed ) );
+    return failed ? *failed : 0;
+}
+
+// The parent's reading of the child's end line, whose fields are spelled as attributes: `name`'s value (metbridge_detail::
+// attrOf, the one attribute reader), and its unsigned value: nullopt when absent, not a number, cut by trailing text or past
+// 64 bits — never a silent 0 (the line is another process's output; CodeRabbit 4577036263, #662).
+std::string_view baseChildWord( std::string_view line, std::string_view name )
+{
+    return rw::metbridge_detail::attrOf( line, name );
+}
+std::optional<std::uint64_t> baseChildField( std::string_view line, std::string_view name )
+{
+    std::uint64_t                value = 0;
+    const std::string_view       text  = baseChildWord( line, name );
+    const std::from_chars_result read  = std::from_chars( text.data(), text.data() + text.size(), value );
+    if( !VALIDATE( !text.empty() && read.ec == std::errc() && read.ptr == text.data() + text.size(), "a base child's end-line field is a whole unsigned number" ) )
+    {
+        return std::nullopt;
+    }
+    return value;
+}
+
+// What baseInChild did: the base side is in `refs` (Answered), the child refused with an exit code (Failed — its line is
+// on stderr), or nothing usable came back (Fallback — the caller scores the base in-process).
+enum class BaseChildOutcome : std::uint8_t
+{
+    Answered,
+    Failed,
+    Fallback,
+};
+struct BaseChildResult
+{
+    BaseChildOutcome outcome = BaseChildOutcome::Fallback;
+    int              rc      = 0;
+    std::string_view why;    // the fallback's cause, for the stats line
+    std::string_view blob;   // where an answering child left its blob: "cache", or "temp" (--no-cache, an unstorable base)
+};
+
+// The child run, read to its end: everything it printed on stderr, and its wait status.
+struct BaseChildRun
+{
+    std::string text;
+    int         status = 0;
+    bool        spawned = false;
+};
+BaseChildRun spawnBaseChild( const std::string& tempPath, const RefPairDelta& refs )
+{
+    using namespace rw;
+    BaseChildRun run;
+    int          fds[ 2 ] = { -1, -1 };
+    if( os::pipe_cloexec( fds ) != 0 )
+    {
+        return run;
+    }
+    const std::string env = std::string( kBaseChildEnv ) + "=" + std::to_string( os::getpid() ) + ":" + refs.baseSha + ":" + refs.targetSha + ":" + tempPath;
+    const os::pid_t   pid = os::spawn_self( baseChildArgv(), env, baseChildSeam() == "spawnfail" ? -1 : fds[ 1 ] );
+    os::close( fds[ 1 ] );
+    if( pid < 0 )
+    {
+        os::close( fds[ 0 ] );
+        return run;
+    }
+    run.spawned = true;
+    char buf[ 1 << 14 ];
+    for( ;; )
+    {
+        const os::ssize_t got = os::read( fds[ 0 ], buf, sizeof( buf ) );
+        if( got > 0 )
+        {
+            run.text.append( buf, std::size_t( got ) );
+        }
+        else if( got == 0 || errno != EINTR )
+        {
+            break;
+        }
+    }
+    os::close( fds[ 0 ] );
+    while( os::waitpid( pid, &run.status, 0 ) < 0 && errno == EINTR )
+    {
+    }
+    return run;
+}
+
+// The child's end line read: its outcome, and on success its blob taken into `refs` with the readings. `said` is what the
+// child printed between `begin` and `end`, passed through here as the in-process phase would have printed it.
+BaseChildResult takeChildEnd( std::string_view line, int exitRc, const std::string& said, const std::string& blobPath, RefPairDelta& refs )
+{
+    using namespace rw;
+    BaseChildResult        result;
+    const std::string_view status = baseChildWord( line, "status" );
+    if( status == "failed" && exitRc != 0 && baseChildField( line, "rc" ) == std::optional<std::uint64_t>( std::uint64_t( exitRc ) ) )
+    {
+        rw::emitRaw( stderr, said.c_str() );   // the refusal, said once, by the child
+        return { BaseChildOutcome::Failed, exitRc, {} };
+    }
+    if( status != "ok" || exitRc != 0 )
+    {
+        result.why = status == "stopped" ? "stopped" : "exit";
+        return result;
+    }
+    // the readings, each required whole before the blob is taken: a malformed one falls back (why=line), never reads as 0
+    constexpr std::string_view   kReadings[] = { "ingest_peak", "before", "base_peak", "after", "peak", "fixed", "type3_runs", "type3_pairs" };
+    std::array<std::uint64_t, 8> reading{};
+    for( std::size_t readingIndex = 0; readingIndex < reading.size(); ++readingIndex )
+    {
+        const std::optional<std::uint64_t> value = baseChildField( line, kReadings[ readingIndex ] );
+        if( !value )
+        {
+            result.why = "line";
+            return result;
+        }
+        reading[ readingIndex ] = *value;
+    }
+    quality::BaseCommitScore         score;
+    const std::optional<std::string> blob = quality::readQSnapBlob( blobPath );
+    if( !blob || !quality::deserializeBaseCommitScore( *blob, refs.baseSha, score ) )
+    {
+        os::remove( blobPath.c_str() );   // never left for the next run to refuse: the in-process phase rewrites the cache
+        result.why = "blob";
+        return result;
+    }
+    rw::emitRaw( stderr, said.c_str() );
+    Diagnostics::ConsoleLog::adoptNotices( said.c_str() );   // a site the child's phase already noted stays silent here, as in-process
+    refs.baseSnapshot   = std::move( score.snapshot );
+    refs.baseMacros     = std::move( score.macros );
+    refs.haveBaseMacros = true;
+    refs.baseFromChild  = true;
+    refs.ingestPeak     = reading[ 0 ];
+    refs.childBefore    = reading[ 1 ];
+    refs.childBasePeak  = reading[ 2 ];
+    refs.childAfter     = reading[ 3 ];
+    refs.childPeak      = reading[ 4 ];
+    refs.childFixed     = reading[ 5 ];
+    // the Type-3 cost counters (RIPWIRE_STATS' quality-passes line) count the child's passes too, as they did in-process
+    gType3PassRuns.fetch_add( std::uint32_t( reading[ 6 ] ), std::memory_order_relaxed );
+    gType3PassPairs.fetch_add( reading[ 7 ], std::memory_order_relaxed );
+    return { BaseChildOutcome::Answered, 0, {}, baseChildWord( line, "blob" ) == "cache" ? "cache" : "temp" };
+}
+
+// The parent's side: spawn, read the child to its end, take its blob. `key` is the cache key (empty under --no-cache).
+BaseChildResult baseInChild( const BaseCacheKey& key, RefPairDelta& refs )
+{
+    using namespace rw;
+    // a temp path of this process's own (pid-suffixed, beside the materialized trees), removed on every path
+    const std::string tempPath = quality::cacheDirLadder() + "/ripwire-qbase-child-" + std::to_string( os::getpid() ) + ".bin";
+    os::remove( tempPath.c_str() );   // a crashed earlier run's leftover
+    struct RemoveOnExit
+    {
+        const std::string& path;
+        ~RemoveOnExit() { rw::os::remove( path.c_str() ); }
+    } removeTemp{ tempPath };
+
+    const BaseChildRun run = spawnBaseChild( tempPath, refs );
+    if( !run.spawned )
+    {
+        return { BaseChildOutcome::Fallback, 0, "spawn" };
+    }
+    const std::size_t begin   = run.text.find( kBaseChildBegin );
+    const std::size_t endLine = run.text.rfind( kBaseChildEnd );
+    if( !WIFEXITED( run.status ) )
+    {
+        // a crash is a bug, never a quiet fallback: what the child said after `begin` (a sanitizer report, an abort's
+        // line) is passed through before the in-process phase runs, at the cost of its base-phase lines printing twice
+        rw::emitRaw( stderr, run.text.substr( begin == std::string::npos ? 0 : begin + kBaseChildBegin.size() ).c_str() );
+        return { BaseChildOutcome::Fallback, 0, "signal" };
+    }
+    if( begin == std::string::npos || endLine == std::string::npos || endLine < begin )
+    {
+        return { BaseChildOutcome::Fallback, 0, "exit" };
+    }
+    const std::string_view line = std::string_view( run.text ).substr( endLine, run.text.find( '\n', endLine ) - endLine );
+    const std::string      said = run.text.substr( begin + kBaseChildBegin.size(), endLine - begin - kBaseChildBegin.size() );
+    return takeChildEnd( line, WEXITSTATUS( run.status ), said, baseChildWord( line, "blob" ) == "cache" ? key.path : tempPath, refs );
+}
+
+// QD-BASE-CHILD's decision and attempt. Fallback with no `why` when the phase is this process's anyway: not the CLI's own
+// route (MCP, --quality-ack: its ledger lock is this process's), a memory-guard test seam (its counters are this process's
+// ordinals), or a repository under the size floor.
+BaseChildResult tryBaseChild( const std::string& root, const rw::Config& cfg, const BaseCacheKey& key, RefPairDelta& refs )
+{
+    using namespace rw;
+    const std::string_view seam = baseChildSeam();
+    if( baseChildArgv() == nullptr || cfg.qualityAck || std::getenv( "RIPWIRE_TEST_MEMGUARD" ) != nullptr || seam == "inproc" )
+    {
+        return {};
+    }
+    const bool          stats = std::getenv( "RIPWIRE_STATS" ) != nullptr;
+    const std::uint64_t index = gitIndexBytes( root );
+    if( index < kBaseChildMinIndexBytes && seam.empty() )
+    {
+        if( stats )
+        {
+            rw::emitTo( stderr, "ripwire: stats qbase-child outcome=inproc why=small index_bytes={}\n", index );
+        }
+        return {};
+    }
+    const BaseChildResult child = baseInChild( key, refs );
+    if( stats )
+    {
+        constexpr std::string_view kOutcome[] = { "child", "failed", "fallback" };
+        rw::emitTo( stderr, "ripwire: stats qbase-child outcome={} why={} child_peak_mib={} blob={}\n", kOutcome[ std::size_t( child.outcome ) ],
+                    child.why.empty() ? std::string_view( "-" ) : child.why, refs.childPeak / ( 1024 * 1024 ), child.blob.empty() ? std::string_view( "-" ) : child.blob );
+    }
+    if( child.outcome == BaseChildOutcome::Fallback )
+    {
+        DISCLOSE( Diagnostics::answerUnchanged, "the base phase runs in this process instead: the same answer, with the base tree's freed pages kept here",
+                  "quality: --quality-delta=A..B base child unavailable — scoring the base in-process" );
+    }
+    return child;
+}
+
+std::optional<int> scoreBaseCommit( const std::string& root, const std::string& sha, const rw::Config& cfg, RefPairDelta& refs )
+{
+    using namespace rw;
+    if( const BaseChildRole role = baseChildRole(); role.child )
+    {
+        return runBaseChild( root, cfg, refs, os::mem_footprint(), role.tempPath );   // QD-BASE-CHILD: this process is the child, and ends here
+    }
+    const BaseCacheKey key = baseCacheKey( root, sha, cfg, refs.selected );
+    if( key.use() && takeCachedBase( key.path, sha, refs ) )
+    {
+        return std::nullopt;
+    }
+    if( const BaseChildResult child = tryBaseChild( root, cfg, key, refs ); child.outcome != BaseChildOutcome::Fallback )
+    {
+        return child.outcome == BaseChildOutcome::Failed ? std::optional<int>( child.rc ) : std::nullopt;
+    }
+    if( const std::optional<int> failed = buildBaseInProcess( root, sha, cfg, refs ) )
+    {
+        return failed;
+    }
+    // A stopped side is never persisted: the next call must not read a partial floor as whole. Nor is a base whose ingest
+    // refused or partially extracted a file: a hit would answer without that disclosure (quality.h baseScoreStorable).
+    if( key.use() && !refs.stop.stopped && refs.baseStorable )
+    {
+        (void)quality::atomicWriteFile( key.path, quality::serializeBaseCommitScore( { refs.baseSnapshot, refs.baseMacros }, sha ) );
+        quality::evictOldCacheFamily( quality::cacheDirLadder(), "ripwire-qbase-" + key.repoHex + "-" + key.exclHex + "-", key.path, 2 );
+    }
     return std::nullopt;
 }
 
@@ -217,16 +738,11 @@ std::optional<int> scoreBaseCommit( const std::string& root, const std::string& 
 std::optional<int> loadTargetCommit( const std::string& root, const std::string& sha, const rw::Config& cfg, RefPairDelta& out )
 {
     using namespace rw;
-    const quality::RefTreeLoad load = quality::loadRefTree( root, sha, cfg.excludes, cfg.maxFileBytes, "qdpair-target", out.targetGuard, out.targetTree );
-    if( const std::optional<int> failed = recordLoad( load, out.targetTree, sha, "target commit", out.stop ) )
+    if( const std::optional<int> failed = loadGuardedTree( root, sha, cfg, "qdpair-target", "target commit", out.targetGuard, out.targetTree, out.stop, nullptr ) )
     {
         return failed;
     }
-    if( out.stop.stopped || hardLineStops( "graph of the target commit", out.stop ) )
-    {
-        return std::nullopt;
-    }
-    if( out.sameRef )
+    if( !out.stop.stopped && out.sameRef )
     {
         out.baseSnapshot = quality::computeSnapshot( out.targetTree.ing, out.targetTree.g, out.targetTree.root, nullptr, { out.selected } );
         (void)hardLineStops( "snapshot of the base commit", out.stop );
@@ -356,6 +872,22 @@ std::optional<int> loadChangedFiles( const std::string& root, const rw::Config& 
 // kind for certain: a selection of whole-tree kinds (with or without defect-shape, which the changed files may not
 // decide) gains nothing from pre-empting the full attempt — that is the replay kinds_next= names, and it runs in full,
 // refused only by a real stop. Exit code on an environment failure only.
+// The base phase's readings for the projection: this process's own, or — QD-BASE-CHILD — the child's, the phase this
+// process never ran. `before` is this process's footprint before the base phase and `fixedBefore` its construct tables
+// then; `fixed` is what the phase added to them (memguard.h FIXED BYTES).
+struct BaseReadings
+{
+    std::uint64_t before = 0, basePeak = 0, after = 0, fixed = 0;
+};
+BaseReadings baseReadings( const RefPairDelta& out, std::uint64_t before, std::uint64_t fixedBefore )
+{
+    if( out.baseFromChild )
+    {
+        return { out.childBefore, out.childBasePeak, out.childAfter, out.childFixed };
+    }
+    return { before, rw::os::mem_footprint_peak(), rw::memguard::measuredFootprint(), rw::constructTablesFootprint() - fixedBefore };
+}
+
 std::optional<int> loadFullTrees( const std::string& root, const rw::Config& cfg, RefPairDelta& out, bool& projectedNoFit )
 {
     using namespace rw;
@@ -365,27 +897,30 @@ std::optional<int> loadFullTrees( const std::string& root, const rw::Config& cfg
                                          : static_cast<quality::KindMask>( out.selected & ~( quality::kWholeTreeKinds | quality::kindBit( "defect-shape" ) ) );
     if( !out.sameRef )
     {
-        const std::uint64_t before = os::mem_footprint();
+        const std::uint64_t before      = os::mem_footprint();
+        const std::uint64_t fixedBefore = constructTablesFootprint();   // construct tables an earlier ingest compiled are in `before`
         if( const std::optional<int> failed = scoreBaseCommit( root, out.baseSha, cfg, out ) )
         {
             return failed;
         }
-        // #387: the base tree's index, graph and temp dir were released when scoreBaseCommit returned.
-        if( out.stop.stopped || hardLineStops( "base commit's snapshot, with its index released", out.stop ) || certainLocal == 0 )
+        // #387: the base tree's index, graph and temp dir were released when scoreBaseCommit returned. QD-PAIR-BASE-CACHE: a base
+        // read from its qbase blob built no tree, so there is no base ingest to project the target from: the target is read in
+        // full, and only a real stop in it sends the answer to the changed files.
+        if( out.stop.stopped || hardLineStops( "base commit's snapshot, with its index released", out.stop ) || certainLocal == 0 || out.baseFromCache )
         {
             return out.stop.stopped ? std::nullopt : loadTargetCommit( root, out.targetSha, cfg, out );
         }
-        const std::uint64_t              basePeak = os::mem_footprint_peak();
-        const std::uint64_t              after    = memguard::measuredFootprint();
-        const memguard::TargetProjection proj     = memguard::projectTargetPhase( before, out.ingestPeak, basePeak, after );
+        const auto [ baseBefore, basePeak, after, fixed ] = baseReadings( out, before, fixedBefore );
+        const memguard::TargetProjection proj             = memguard::projectTargetPhase( baseBefore, out.ingestPeak, basePeak, after, fixed );
         out.needBytes       = proj.needBytes;
         out.ingestNeedBytes = proj.ingestNeedBytes;
         projectedNoFit = !proj.fits;
         if( std::getenv( "RIPWIRE_STATS" ) )   // the projection's own readings, the calibration's instrument (kProjectionScalePct)
         {
-            rw::emitTo( stderr, "ripwire: memory-projection before={} ingest_peak={} base_peak={} after={} need={} measured={} fits={}\n",
-                        memguard::limitSpelling( before ), memguard::limitSpelling( out.ingestPeak ), memguard::limitSpelling( basePeak ),
-                        memguard::limitSpelling( after ), memguard::limitSpelling( proj.needBytes ), proj.measured ? 1 : 0, proj.fits ? 1 : 0 );
+            rw::emitTo( stderr, "ripwire: memory-projection before={} ingest_peak={} base_peak={} after={} fixed={} need={} ingest_need={} measured={} fits={}\n",
+                        memguard::limitSpelling( baseBefore ), memguard::limitSpelling( out.ingestPeak ), memguard::limitSpelling( basePeak ),
+                        memguard::limitSpelling( after ), memguard::limitSpelling( proj.fixedBytes ), memguard::limitSpelling( proj.needBytes ),
+                        memguard::limitSpelling( proj.ingestNeedBytes ), proj.measured ? 1 : 0, proj.fits ? 1 : 0 );
         }
         if( projectedNoFit )
         {
@@ -418,7 +953,9 @@ std::optional<int> loadRefPairDelta( const std::string& root, std::string_view s
 {
     using namespace rw;
 
-    const quality::RefSpec ref = quality::resolveRefSpec( root, spec );
+    // QD-BASE-CHILD: the child takes the two commits its parent resolved, and asks git nothing to find them again
+    const BaseChildRole    role = baseChildRole();
+    const quality::RefSpec ref  = role.child ? quality::RefSpec{ quality::RefSpecStatus::Ok, role.baseSha, role.targetSha } : quality::resolveRefSpec( root, spec );
     switch( ref.status )
     {
         case quality::RefSpecStatus::BadRev:
@@ -511,6 +1048,7 @@ struct DeltaBasis
     gtl::btree_map<std::string, rw::quality::AckRecord> acks;
     rw::quality::IdentityHealing                        healing;
     std::size_t                                         registerMacroExcluded = 0;   // P2.2: disclosed dead-code exemption count
+    bool                                                rustTestExcluded      = false;   // issue #499: that count holds Rust test functions (legend only)
     std::size_t                                         declinedCallExcluded  = 0;   // dead-code exemption by a declined call (quality.h isDeadCandidate)
     std::size_t                                         valueRefExcluded      = 0;   // dead-code exemption: held as a VALUE (valuerefindex.h)
     std::size_t                                         apiNewSurface         = 0;   // Q-DIAL-4: new PUBLIC symbols this change added — the count that replaced one never-gating row each
@@ -526,6 +1064,10 @@ struct DeltaBasis
     // and never looks at it, which keeps the two runs' reported findings identical.
     std::vector<rw::quality::CloneIdiomFact> cloneIdioms;
     rw::quality::HistoryUnread               historyUnread;   // hwh-fix4 (N1): history a gating kind could not read (unread_history=, exit 6)
+    // QD-IDENTITY-ONCE: the working-tree form's pure passes over d.ing — the identity-basis snapshot, the delta and the
+    // --show-stale snapshot all read the same ingest, so the clone and construct passes run once between them. Unbound
+    // (never read) in the ref-pair form, whose two trees are other ingests.
+    rw::quality::TreePasses                  passes;
 };
 
 // The REF-PAIR floor's comparison, once loadRefPairDelta has both sides: the base snapshot is the floor, tree B the judged
@@ -553,6 +1095,7 @@ void refPairBasis( const rw::Config& cfg, const std::string& root, RefPairDelta&
                                          out.deltaRoot, cfg.excludes, cfg.maxFileBytes, &out.registerMacroExcluded, &out.apiNewSurface,
                                          cfg.qualityAck ? &out.cloneIdioms : nullptr, &out.declinedCallExcluded, &out.valueRefExcluded,
                                          quality::KindScope{ refs.kinds, refs.macroOverride() }, &out.historyUnread );
+    out.rustTestExcluded = out.registerMacroExcluded > 0 && quality::anyRustTestScopeDef( refs.target().ing );
 }
 
 // Returns an EXIT CODE when there is nothing to compare against (already reported), nullopt when `out` holds
@@ -610,7 +1153,7 @@ std::optional<int> resolveDeltaBasis( const MainDispatch& d, const std::string& 
         // #228 part 1 — the IDENTITY BASIS (quality.h): when the tracked tree already IS HEAD, the baseline is
         // this tree's own snapshot, so a no-op diff is empty by construction instead of by luck. Falls back to
         // the archived HEAD snapshot on any modified tree, unchanged.
-        quality::HeadBasis basis = quality::computeHeadBasis( root, d.ing, d.g, cfg.rootPath, cfg.maxFileBytes, cfg.excludes );
+        quality::HeadBasis basis = quality::computeHeadBasis( root, d.ing, d.g, cfg.rootPath, cfg.maxFileBytes, cfg.excludes, &out.passes );
         if( !basis.ok )
         {
             // w1 MED: this used to say "no <file>" in BOTH cases — factually false when the file is a STALE
@@ -657,7 +1200,8 @@ std::optional<int> resolveDeltaBasis( const MainDispatch& d, const std::string& 
     out.healing = quality::healIdentity( out.baseSel.snapshot, out.acks, d.ing, d.g,
                                          std::string( cfg.rootPath ), root, cfg.qualityAck );
     out.regs = quality::computeDelta( d.ing, d.g, out.baseSel.snapshot, cfg.rootPath, cfg.excludes, cfg.maxFileBytes, &out.registerMacroExcluded, &out.apiNewSurface,
-                                      &out.cloneIdioms, &out.declinedCallExcluded, &out.valueRefExcluded, quality::KindScope{}, &out.historyUnread );
+                                      &out.cloneIdioms, &out.declinedCallExcluded, &out.valueRefExcluded, quality::KindScope{}, &out.historyUnread, &out.passes );
+    out.rustTestExcluded = out.registerMacroExcluded > 0 && quality::anyRustTestScopeDef( d.ing );
     // hwh-fix4 (N1): against a pinned sidecar the rename record re-files baseline rows; refused on a partial clone, it is unread history
     out.historyUnread.renames = out.healing.renames.refusedPartial && out.baseSel.marker == std::string_view( "sidecar" );
     return std::nullopt;
@@ -893,8 +1437,8 @@ inline constexpr const char* kQdLegendCore =
     "order: (1) acked findings are suppressed entirely (acked= counts them); (2) ORIGIN — a finding on a "
     "symbol that EXISTED at the baseline is preexisting-worse (no origin attribute), one that exists only "
     "because the code is NEW carries origin=\"new-symbol\"; (3) MATERIALITY — a small numeric delta is "
-    "sev=\"minor\", and minor= counts them. EXIT 2 fires only on preexisting-worse AND major, or on "
-    "format-arity, the gating= count; new-symbol rows never gate, except defect-shape format-arity, so exit 0 "
+    "sev=\"minor\", and minor= counts them. EXIT 2 fires only on preexisting-worse AND major, the gating= count; "
+    "new-symbol rows never gate, except defect-shape format-arity and a new function at the ceiling, so exit 0 "
     "is NOT a verdict on them — nothing that existed got worse, but the new debt is yours: read them. Clone kinds are new-symbol only when EVERY member is new; short-horizon-churn is "
     "preexisting by construction. preexisting-worse= and new-symbol= partition regressions=. stale= is a "
     "FOURTH axis, never gating and never counted in regressions=: rows in the .ripwire_quality_acks ledger "
@@ -902,8 +1446,7 @@ inline constexpr const char* kQdLegendCore =
     "api-new-surface= COUNTS the new PUBLIC symbols (never gates, not in regressions=, printed even at zero). "
     "register-macro-excluded= is a FLOOR, not a finding: symbols this run excluded from the dead-code kind "
     "because their own definition is a registered self-registering test/benchmark macro call. Never gates, "
-    "never counted in regressions=, printed even at zero (zero means none excluded, not that the check did "
-    "not run). "
+    "never counted in regressions=, printed even at zero (zero: none excluded, not a skipped check). "
     // P3 (L7): next= on gating rows, defined where the reader meets it
     "A gating row's next= is the one pasteable follow-up: expand on FILE:NAME, the body to fix (a duplication row names a SET and carries none). "
     // P8 (L7): the threshold beside the number
@@ -915,6 +1458,11 @@ inline constexpr const char* kQdRegisterMacroLegend =
     "The registered families are doctest/Catch2 TEST_CASE, GoogleTest TEST/TEST_F/TEST_P, Google Benchmark "
     "BENCHMARK, plus any name a .ripwire_config register_macros= line adds; each registers itself through a "
     "static initializer the call graph cannot see, so zero in-edges on one is not evidence of anything. ";
+
+// issue #499 — present-only: printed only when register-macro-excluded= is non-zero AND the tree holds a Rust test-harness
+// function (DeltaBasis::rustTestExcluded), so a tree with no Rust test pays no byte for it.
+inline constexpr const char* kQdRustTestLegend =
+    "Rust #[test] and #[tokio::test] functions count too: the test harness calls them, and no call in the tree names them. ";
 
 // F-13 (audit 2026-09-02) — printed only when .ripwire_config itself has something wrong with it, which
 // used to be a silent no-op: a typo'd key was skipped with no trace, and a register_macros= name that
@@ -1011,16 +1559,19 @@ inline constexpr const char* kQdIdentityLegend =
     "destroy, so the baseline and the .ripwire_quality_acks ledger are both re-filed into the CURRENT "
     "tree's identity before either is read, by two EXACT mechanisms — git's own rename record, and equality "
     "of a whitespace-and-name-scrubbed body hash — never a similarity heuristic. renames= is how many "
-    "rename pairs were read, rename_window_commits= how deep the commit window went, acked_by_rename= and "
+    "rename pairs were read (with no ledger, only the uncommitted renames or the A..B range, and the family "
+    "appears only when one was read), rename_window_commits= how deep the commit window went, acked_by_rename= and "
     "acked_by_content= how many of the acked= suppressions each mechanism is responsible for. Three appear "
     "ONLY when true, so an absent one is not a silent no: renames_window_truncated= (history is deeper than "
     "the window), renames_truncated= (the pair cap was hit), renames_ambiguous= (an ancestor two current "
     "symbols both claim — refused rather than guessed). ORIGIN reads the re-filed baseline too, so a "
     "regression carried in with a rename is judged preexisting-worse and GATES instead of slipping through "
     "as new-symbol. FLOORS, stated because silence here would read as a guarantee: the two clone kinds key "
-    "on a member-SET hash and are NOT re-filed, so a clone ack still dies on a rename; ORIGIN follows the "
-    "rename record but never content, because the baseline stores no content id at all; and a move git "
-    "recorded no rename for still reads as new-symbol. ";
+    "on a member-SET hash and are NOT re-filed, so a clone ack still dies on a rename (a clone group itself is "
+    "held across a file rename git recorded); ORIGIN follows the "
+    "rename record and an unchanged body (whitespace and its own name aside): a function keeps its identity "
+    "across a rename or move git recorded no rename for when its body did not change; one whose body also "
+    "changed reads as new-symbol, or as moved (never gating) when it is over a bar and nearly unchanged. ";
 
 // How the two mechanisms decide, in full — printed only when an ack was actually SUPPRESSED by one of
 // them (acked= is non-zero), which is the only state in which a reader has a suppression to audit. The
@@ -1104,21 +1655,44 @@ inline constexpr const char* kQdPlaceholderLegend =
 inline constexpr const char* kQdMaskReportOnlyLegend =
     "An error-masking row is sev=\"minor\" when every construct it added is a widened shape that does not "
     "gate in that language yet: log-only (a broad handler whose body only logs and never names the error) "
-    "or rethrow-only (the sole handler re-throws the error unchanged). ";
+    "or rethrow-only (the sole handler re-throws the error unchanged), or failure-default (below). ";
+
+// Emitted only when an error-masking row carries facet="failure-default".
+inline constexpr const char* kQdFailureDefaultLegend =
+    "facet=\"failure-default\" on an error-masking row: the change added a read, parse or spawn failure returned as an empty "
+    "success, in a function whose declared result cannot say it failed (a TypeScript catch or .catch returning [], null, {}, "
+    "false, 0 or '' around JSON.parse, an fs read, exec/spawn or fetch; a C++ value_or( empty ) on a file read). Report-only in "
+    "every language: a caller reads the failure as \"none\". A comment on the handler or the value_or line, a log call, or an "
+    "if that tests the read first refuses it. ";
+
+// QD-MONSTER-GROWTH — emitted only when a monster="1" row is in the document.
+inline constexpr const char* kQdMonsterLegend =
+    "monster=\"1\" marks a complexity row on a function over 5x the ccx bar (was= 75 or more) that grew by now= minus was= "
+    "(10 or more) in this change: major whatever the percentage, since tangle in a giant function is a small share of it "
+    "forever. Put the new branch in a helper. ";
 
 // Emitted only when a clone-family row (duplication / new-clone-of-reused-helper) is in the document,
 // which is what puts members=, tokens= and idiom= on a first screen. A clean tree has none.
 inline constexpr const char* kQdCloneLegend =
     "CLONE ROWS name the whole group rather than one symbol: members= is the member list and tokens= its "
     "shared normalized-token count (the same per-group pair the clones verb reports). idiom= names a "
-    "RECOGNIZED BODY SHAPE every member spells, out of a closed set of three (threshold-ladder, "
-    "switch-name-table, builder-chain). idiom= alone changes nothing; a group that ALSO shares no "
+    "RECOGNIZED BODY SHAPE every member spells, out of a closed set of four (threshold-ladder, "
+    "switch-name-table, builder-chain, one-statement). idiom= alone changes nothing; a group that ALSO shares no "
     "non-keyword identifier between any two members, sits in pairwise-distinct enclosing contexts, and "
     "stays under 80 normalized tokens is an idiom COLLISION rather than a copy, and is reported minor "
     "instead of gating. Break any one of those and it gates as before, idiom= and all: two bucketing "
     "ladders over the SAME enum are a copy. The shape is read off the body's token stream and not a parse "
     "tree, so a macro-assembled body classifies as whatever its raw tokens spell — the name is printed so "
     "the call can be overruled by reading. ";
+
+// The one-statement half of the clone paragraph, printed only when a row carries idiom="one-statement": its
+// narrowed shared-identifier test is the one rule a reader of THAT row needs, and a ladder-only document
+// should not pay for it (the same G4 rule as every conditional section here).
+inline constexpr const char* kQdOneStatementLegend =
+    "one-statement is a body of one return statement (leading EXPECTS/ASSUME/DASSERT/VALIDATE asserts aside); "
+    "its shared-identifier test leaves out each member's own parameter names, every std:: chain and standard "
+    "container/string words (size, find, npos, first, second and the like), and a pair identical once its "
+    "parameters are renamed always gates. ";
 
 // P1 — the SCOPE half of the quality-delta legend, printed ONLY when the report actually contains a
 // scope partition or a foreign-ack row. That is a G4 (token density) decision, not a hedge: the
@@ -1186,6 +1760,7 @@ struct QualityDeltaLegendParts
     bool                                          memoryPeak              = false;   // ... memory_peak= (any range answer whose peak went over the limit)
     bool                                          memorySkippedShare      = false;   // ... memory_skipped= (skipped_why="selector,memory")
     bool                                          historyUnread           = false;   // hwh-fix4 (N1): unread_history= is on the root
+    bool                                          anyRustTestExcluded     = false;   // issue #499: the excluded set holds Rust test functions
 };
 
 // qd-memory-degrade — present-only: each rides only with the attributes it defines. No double dash anywhere in them
@@ -1243,9 +1818,17 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
         }
         return false;
     };
+    const auto anyOneStatementRow = [] ( const std::vector<rw::quality::Regression>& v )
+    {
+        return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return r.facet == rw::cloneIdiomName( rw::CloneIdiom::OneStatement ); } );
+    };
     const auto anyMinorMaskRow = [] ( const std::vector<rw::quality::Regression>& v )
     {
         return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return r.kind == "error-masking" && r.isMinor; } );
+    };
+    const auto anyFailureDefaultRow = [] ( const std::vector<rw::quality::Regression>& v )
+    {
+        return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return r.kind == "error-masking" && !r.facet.empty(); } );
     };
     const auto anyPlaceholderRow = [] ( const std::vector<rw::quality::Regression>& v )
     {
@@ -1254,6 +1837,10 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
     const auto anyDefectShapeRow = [] ( const std::vector<rw::quality::Regression>& v )
     {
         return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return r.kind == "defect-shape"; } );
+    };
+    const auto anyMonsterRow = [] ( const std::vector<rw::quality::Regression>& v )
+    {
+        return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return r.kind == "complexity" && !r.facet.empty(); } );
     };
 
     std::fputs( kQdLegendCore, out );
@@ -1287,6 +1874,10 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
     if( p.anyRegisterMacro )
     {
         std::fputs( kQdRegisterMacroLegend, out );
+    }
+    if( p.anyRustTestExcluded )
+    {
+        std::fputs( kQdRustTestLegend, out );
     }
     if( p.anyRegisterMacroWarning )
     {
@@ -1333,13 +1924,32 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
     if( !p.rows.empty() || !p.disclosedRows.empty() )
     {
         std::fputs( kQdRowLegend, out );
+        // QD-ENTRY-CEILING: the two NEW-code readings are defined only on an answer that carries them (present-only), so every
+        // other answer keeps its legend bytes.
+        if( std::any_of( p.rows.begin(), p.rows.end(), []( const rw::quality::Regression& r ) { return r.isNewSymbol && r.isMoved; } ) )
+        {
+            rw::emitRaw( out, "origin=\"moved\": the same or a nearly identical body (a clone-sketch match) left another name or file in this diff; it never gates. " );
+        }
+        if( std::any_of( p.rows.begin(), p.rows.end(), []( const rw::quality::Regression& r ) { return r.ceiling != 0; } ) )
+        {
+            rw::emitRaw( out, "ceiling= on a NEW complexity or verbosity row: it reached 4x the bar (ccx 60 or 240 lines; not a moved body, not test "
+                              "code), so it gates. " );
+        }
         if( anyCloneRow( p.rows ) || anyCloneRow( p.disclosedRows ) )
         {
             std::fputs( kQdCloneLegend, out );
+            if( anyOneStatementRow( p.rows ) || anyOneStatementRow( p.disclosedRows ) )
+            {
+                std::fputs( kQdOneStatementLegend, out );
+            }
         }
         if( anyMinorMaskRow( p.rows ) || anyMinorMaskRow( p.disclosedRows ) )
         {
             rw::emitRaw( out, kQdMaskReportOnlyLegend );
+        }
+        if( anyFailureDefaultRow( p.rows ) || anyFailureDefaultRow( p.disclosedRows ) )
+        {
+            rw::emitRaw( out, kQdFailureDefaultLegend );
         }
         if( anyPlaceholderRow( p.rows ) || anyPlaceholderRow( p.disclosedRows ) )
         {
@@ -1348,6 +1958,10 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
         if( anyDefectShapeRow( p.rows ) || anyDefectShapeRow( p.disclosedRows ) )
         {
             rw::emitRaw( out, kQdDefectShapeLegend );
+        }
+        if( anyMonsterRow( p.rows ) || anyMonsterRow( p.disclosedRows ) )
+        {
+            rw::emitRaw( out, kQdMonsterLegend );
         }
     }
 
@@ -1496,7 +2110,8 @@ DirtyPinVerdict inspectDirtyBaselinePin( const MainDispatch& d, const std::strin
     // statement about the delta, so computing it another way is how the two would come to disagree. #228: on a
     // tree whose tracked files are HEAD this now absorbs nothing, which is what unblocks --quality-baseline on
     // exactly the repositories that needed the escape hatch.
-    quality::HeadBasis basis = quality::computeHeadBasis( root, d.ing, d.g, cfg.rootPath, cfg.maxFileBytes, cfg.excludes );
+    quality::TreePasses passes;   // QD-IDENTITY-ONCE: one clone/construct pass for the identity snapshot and the delta below
+    quality::HeadBasis  basis = quality::computeHeadBasis( root, d.ing, d.g, cfg.rootPath, cfg.maxFileBytes, cfg.excludes, &passes );
     if( !basis.ok )
     {
         return verdict;   // no HEAD tree to compare against — nothing can be absorbed, so nothing is claimed
@@ -1505,7 +2120,7 @@ DirtyPinVerdict inspectDirtyBaselinePin( const MainDispatch& d, const std::strin
     quality::healIdentity( basis.snapshot, acks, d.ing, d.g, std::string( cfg.rootPath ), root, /*wantContentIds=*/false );
     std::vector<quality::Regression> regs =
         quality::computeDelta( d.ing, d.g, basis.snapshot, cfg.rootPath, cfg.excludes, cfg.maxFileBytes, nullptr, nullptr, nullptr, nullptr, nullptr,
-                               quality::KindScope{}, &verdict.historyUnread );
+                               quality::KindScope{}, &verdict.historyUnread, &passes );
     quality::applyAckRatchet( regs, acks );
 
     for( const quality::Regression& r : regs )
@@ -1715,6 +2330,11 @@ KindsDisclosure kindsDisclosure( const rw::Config& cfg, const RefPairDelta& refs
         }
     }
     out.peakOver = memguard::peakOverLimit();
+    // QD-BASE-CHILD: the base phase's peak was the child's; in-process it was this process's, so the disclosure reads both
+    if( refs.baseFromChild && memguard::limits().hardBytes != 0 && refs.childPeak > memguard::limits().hardBytes )
+    {
+        out.peakOver = std::max( out.peakOver, refs.childPeak );
+    }
     if( out.peakOver != 0 )
     {
         memguard::stopCounts().peakSaid.store( true, std::memory_order_relaxed );   // main() need not say it again
@@ -1747,6 +2367,46 @@ void emitMemoryLines( const KindsDisclosure& kd, const RefPairDelta& refs )
 int qualityDeltaExit( std::size_t gatingCount, bool partial ) noexcept
 {
     return gatingCount > 0 ? 2 : partial ? 6 : 0;
+}
+
+// P2.5 — the stderr line NAMING the first gating finding of a --quality-delta answer (the sorted list's first row that
+// gates), so a caller that only checks `$?` has a subject on the channel a human reads. Nothing when no row gates.
+inline void emitQdGatingLine( const std::vector<rw::quality::Regression>& regs, std::size_t gatingCount, const std::string& deltaRoot )
+{
+    using namespace rw;
+    const auto firstGating = std::find_if( regs.begin(), regs.end(), []( const quality::Regression& r ) { return quality::rowGates( r ); } );
+    if( gatingCount == 0 || firstGating == regs.end() )
+    {
+        return;
+    }
+    const quality::Regression* const first = &*firstGating;
+    const std::string at = first->path.empty() ? std::string{}
+                                               : " at " + first->path + ":" + std::to_string( first->line );
+    // M12: displaySym, not first->sym raw — the XML/JSON rows both normalize sym's path segment
+    // for display (quality::displaySym); this stderr line was the one caller that skipped it,
+    // so it named "./src/…::rw::…" beside a row that named the same finding "src/…::rw::…".
+    // a gating row on NEW code is defect-shape format-arity or a new function at the ceiling (rowGates); the line names
+    // either part only when there is one, so every run without them keeps its bytes.
+    const std::size_t newGating = static_cast<std::size_t>( std::count_if( regs.begin(), regs.end(), []( const quality::Regression& r )
+                                                                           { return r.isNewSymbol && quality::rowGates( r ); } ) );
+    const std::size_t ceilingGating = static_cast<std::size_t>( std::count_if( regs.begin(), regs.end(), []( const quality::Regression& r )
+                                                                               { return r.ceiling != 0 && quality::rowGates( r ); } ) );
+    if( ceilingGating != 0 )
+    {
+        rw::emitTo( stderr, "ripwire: --quality-delta gating: {} gating finding(s), {} of them a new function at the ceiling (ccx {} / {} lines); first: {} {}{} (was={} now={})\n",
+                      gatingCount, ceilingGating, quality::newSymbolCeiling( quality::kCcxBar ), quality::newSymbolCeiling( quality::kLocBar ),
+                      first->kind.c_str(), quality::displaySym( first->sym, deltaRoot ).c_str(), at.c_str(), first->was, first->now );
+    }
+    else if( newGating == 0 )
+    {
+        rw::emitTo( stderr, "ripwire: --quality-delta gating: {} preexisting-worse major finding(s); first: {} {}{} (was={} now={})\n",
+                      gatingCount, first->kind.c_str(), quality::displaySym( first->sym, deltaRoot ).c_str(), at.c_str(), first->was, first->now );
+    }
+    else
+    {
+        rw::emitTo( stderr, "ripwire: --quality-delta gating: {} gating finding(s), {} of them defect-shape format-arity on new code; first: {} {}{} (was={} now={})\n",
+                      gatingCount, newGating, first->kind.c_str(), quality::displaySym( first->sym, deltaRoot ).c_str(), at.c_str(), first->was, first->now );
+    }
 }
 
 std::optional<int> runQualityDelta( const MainDispatch& d )
@@ -1976,9 +2636,9 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                 // tolerant token parsing, splitAckLocator, the takeAckNamedToken family) at all — that half of
                 // the contract is what qackconcurrencycheck.sh's grammar arm (2) and byte-identity arm (7) pin
                 // instead, over the actual file. What THIS catches: rescoreNumericMajor's kMaterialityBars
-                // lookup (by kind name) silently drifting from the bar/minorDelta/growthTiered literals
-                // perSymbolKind was called with (computeDelta, above) — two spellings of the same three
-                // constants that a future edit could change in only one place. A drift there means the live
+                // lookup (by kind name) silently drifting from the kMaterialityBars row perSymbolKind is handed
+                // by index (computeDelta, above; the static_assert beside the table pins the order) — two ways
+                // to reach the same constants that a future edit could break in only one place. A drift there means the live
                 // formula (numericRegressionIsMajor, via perSymbolKind) and the re-score formula
                 // (rescoreNumericMajor) have silently diverged — see quality.h's MaterialityBar table, the one
                 // place both are meant to agree. ENSURES, not ASSUME: this is this function's OWN postcondition
@@ -2063,7 +2723,12 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         // kind selection judges its own kinds' acks only).
         const std::vector<quality::StaleAck> staleAcks = acks.empty() ? std::vector<quality::StaleAck>{}
                                                          : refPair ? refPairStaleAcks( acks, refs )
-                                                         : quality::computeStaleAcks( acks, quality::computeSnapshot( ing, g, cfg.rootPath ) );
+                                                         : quality::computeStaleAcks( acks, quality::computeSnapshot( ing, g, cfg.rootPath, nullptr, {}, &basis.passes ) );
+        if( std::getenv( "RIPWIRE_STATS" ) )   // QD-ENVOY-TIME cost bound: Type-3 passes this call ran (test/qdtype3oncecheck.sh)
+        {
+            rw::emitTo( stderr, "ripwire: quality-passes type3_runs={} type3_pairs={}\n", gType3PassRuns.load( std::memory_order_relaxed ),
+                        gType3PassPairs.load( std::memory_order_relaxed ) );
+        }
 
         // P1.4 — the <sa> family now carries THREE whys, and the third is counted SEPARATELY: stale= means
         // "this ack no longer applies", and a foreign ack applies fine — it is the SESSION that was wrong,
@@ -2149,36 +2814,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         // §A4 (minor): emitted BEFORE the format fork, not after the XML tail — under --json the fork returned
         // first, so exactly the caller most likely to be a script reading `$?` got the bare exit=2 with no
         // subject. The line is about the EXIT CODE, which both formats share, so it belongs to neither.
-        if( gatingCount > 0 )
-        {
-            const quality::Regression* first = nullptr;
-            for( const quality::Regression& r : regs )
-            {
-                if( quality::rowGates( r ) ) { first = &r; break; }
-            }
-            if( first )
-            {
-                const std::string at = first->path.empty() ? std::string{}
-                                                           : " at " + first->path + ":" + std::to_string( first->line );
-                // M12: displaySym, not first->sym raw — the XML/JSON rows both normalize sym's path segment
-                // for display (quality::displaySym); this stderr line was the one caller that skipped it,
-                // so it named "./src/…::rw::…" beside a row that named the same finding "src/…::rw::…".
-                // a gating row on NEW code is only ever defect-shape format-arity (rowGates); the line names that
-                // part only when there is one, so every run without it keeps its bytes.
-                const std::size_t newGating = static_cast<std::size_t>( std::count_if( regs.begin(), regs.end(), []( const quality::Regression& r )
-                                                                                       { return r.isNewSymbol && quality::rowGates( r ); } ) );
-                if( newGating == 0 )
-                {
-                    rw::emitTo( stderr, "ripwire: --quality-delta gating: {} preexisting-worse major finding(s); first: {} {}{} (was={} now={})\n",
-                                  gatingCount, first->kind.c_str(), quality::displaySym( first->sym, deltaRoot ).c_str(), at.c_str(), first->was, first->now );
-                }
-                else
-                {
-                    rw::emitTo( stderr, "ripwire: --quality-delta gating: {} gating finding(s), {} of them defect-shape format-arity on new code; first: {} {}{} (was={} now={})\n",
-                                  gatingCount, newGating, first->kind.c_str(), quality::displaySym( first->sym, deltaRoot ).c_str(), at.c_str(), first->was, first->now );
-                }
-            }
-        }
+        emitQdGatingLine( regs, gatingCount, deltaRoot );
 
         // L2: --json — same regressions, keys mirror the XML attr names (kind/sym/members/tokens/was/now/
         // sev/churn/surface). jsonUnsupportedVerb already refused --quality-baseline/--quality-ack, so
@@ -2254,9 +2890,13 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                         rw::emitTo( stdout, ",\"{}\":\"{}\"", facetName, jsonStr( r.facet ).c_str() );
                     }
                 }
-                if( r.isNewSymbol )
+                if( const char* origin = quality::originValue( r ) )
                 {
-                    rw::emitRaw( stdout, ",\"origin\":\"new-symbol\"" ); // absent = preexisting-worse (mirrors the XML)
+                    rw::emitTo( stdout, ",\"origin\":\"{}\"", origin ); // absent = preexisting-worse (mirrors the XML)
+                }
+                if( r.ceiling != 0 )
+                {
+                    rw::emitTo( stdout, ",\"ceiling\":{}", r.ceiling ); // QD-ENTRY-CEILING (mirrors the XML)
                 }
                 rw::emitRaw( stdout, "}" );
             };
@@ -2356,7 +2996,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             // on new-symbol rows (absent = preexisting-worse), the same "mark the exception" convention sev=
             // uses. api-surface's own surface="new-symbol" facet is the same fact narrowed to that kind; it
             // stays for shape compatibility, and origin= is what the exit gate reads.
-            const char* origin = r.isNewSymbol ? " origin=\"new-symbol\"" : "";
+            const char* origin = !r.isNewSymbol ? "" : r.isMoved ? " origin=\"moved\"" : " origin=\"new-symbol\"";   // quality::originValue
             // P2.5 — the two attributes that make a row ACTIONABLE, appended last so every pre-r27 attribute
             // keeps its position:
             //   p="path:line" — sym= is a canonical id whose display tail is often a bare one-letter local
@@ -2370,6 +3010,8 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                 locAttr = " p=\"" + ex( r.path ) + ":" + std::to_string( r.line ) + "\"";
             }
             const char* gatingAttr = ( gatingAllowed && quality::rowGates( r ) ) ? " gating=\"1\"" : "";
+            // QD-ENTRY-CEILING: the ceiling a NEW function reached, beside the gating= it causes (present-only)
+            const std::string ceilingAttr = r.ceiling != 0 ? " ceiling=\"" + std::to_string( r.ceiling ) + "\"" : std::string();
             // P8 (L7): the threshold beside the number it judges — bar= on the four numeric kinds (quality.h's
             // kCcxBar/kLocBar/kNestBar/kParamBar), so was=/now= read without the legend.
             const char* barAttr = r.kind == "complexity" ? " bar=\"15\"" : r.kind == "verbosity" ? " bar=\"60\""
@@ -2403,7 +3045,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             }
             else
             {
-                rw::emitTo( out, "<r kind=\"{}\" sym=\"{}\" was=\"{}\" now=\"{}\"{}{}{}{}{}{}{}/>", r.kind.c_str(), ex( quality::displaySym( r.sym, deltaRoot ) ).c_str(), r.was, r.now, barAttr, sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr, nextAttr.c_str() );
+                rw::emitTo( out, "<r kind=\"{}\" sym=\"{}\" was=\"{}\" now=\"{}\"{}{}{}{}{}{}{}{}/>", r.kind.c_str(), ex( quality::displaySym( r.sym, deltaRoot ) ).c_str(), r.was, r.now, barAttr, sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr, ceilingAttr.c_str(), nextAttr.c_str() );
             }
         };
         // Fix round 1 (rv-lean-trio item 5, owner ruling 5): a fold ships only when it PAYS (compactlegend.h foldPays: shorter
@@ -2421,7 +3063,8 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                                       scope.active() || !foreignAcks.empty(), !foreignAcks.empty(), baselineAbsorbed,
                                       basis.headBasis, basis.declinedCallExcluded > 0, basis.valueRefExcluded > 0, collapse,
                                       refs.kinds != quality::kAllKinds, refs.degraded, !refs.memoryStop.empty(), kd.peakOver != 0,
-                                      kd.memorySkipped != 0 && refs.selected != quality::kAllKinds, basis.historyUnread.any() }, out );
+                                      kd.memorySkipped != 0 && refs.selected != quality::kAllKinds, basis.historyUnread.any(),
+                                      basis.rustTestExcluded }, out );
             const char* baseMarker = baseSel.marker;    // R3: ditto — one seam decides staleness AND names it
             // 2026-09-06: what the sidecar readers skipped, on the root (absent means none) — see kQdBaseHeadUnreadable
             std::string sidecarHealthAttrs;
@@ -2513,6 +3156,7 @@ std::optional<int> runQualityDeltaRangeBeforeIngest( const rw::Config& cfg, cons
 {
     if( cfg.qualityDeltaRange.empty() || !cfg.pinCensus.empty() || dispatchWinner == nullptr || std::string_view( dispatchWinner ) != "--quality-delta" )
     {
+        baseChildArgv() = nullptr;   // QD-BASE-CHILD: main() offered its argv for this route only; any other route scores in-process
         return std::nullopt;
     }
     const rw::IngestResult           noWorkingTree;
@@ -3086,7 +3730,7 @@ std::optional<int> runQualityViews( const MainDispatch& d )
             {
                 return false;
             }
-            return quality::startsWithRegisteredMacro( std::string_view( src ).substr( symbol.sigStartByte ), registerMacroNames );
+            return quality::registersItself( symbol, src, std::string_view( src ).substr( symbol.sigStartByte ), registerMacroNames );
         };
         std::size_t registerMacroExcluded = 0;   // P2.2: disclosed count — see the header comment below
         std::size_t runnerRootExcluded    = 0;   // 0.6.6 D4: disclosed count (runner-root-excluded=, absent at 0)
@@ -3249,8 +3893,9 @@ std::optional<int> runQualityViews( const MainDispatch& d )
                      "(test/x/src/y.cpp included); anchor with ./ (filter=\"./src\") to pin the root-level directory only. "
                      "register-macro-excluded= counts symbols excluded because their OWN definition is a registered "
                      "self-registering test/benchmark macro call (doctest/Catch2 TEST_CASE family, GoogleTest TEST/TEST_F/TEST_P, "
-                     "Google Benchmark BENCHMARK family, plus any name a .ripwire_config register_macros= line adds): such a "
-                     "symbol registers itself through a static initializer the call graph cannot see, so zero in-edges on it is "
+                     "Google Benchmark BENCHMARK family, plus any name a .ripwire_config register_macros= line adds), or a Rust "
+                     "#[test] or #[tokio::test] function: such a symbol registers itself through a static initializer or the test "
+                     "harness, which the call graph cannot see, so zero in-edges on it is "
                      "not evidence of anything — never a finding, never gating, absent nothing (0 is printed, not omitted). "
                      "config-warnings= counts two DISCLOSED .ripwire_config problems, each also written to stderr — an "
                      "unrecognized key, and a register_macros= name matching no indexed symbol — never gating, present "
@@ -3301,7 +3946,7 @@ std::optional<int> runQualityViews( const MainDispatch& d )
             // UNUSED-IN-FILE (forunused.h): this verb answers for internal linkage; a filter that names a path is often asking about public defs, so it names the verb that does
             if( rw::forUnusedOn() && cfg.deadCodeDir.find_first_of( "./" ) != std::string_view::npos )
             {
-                dcFilterAttr += " next=\"" + std::string( escapeXml( rw::nextFlag( "--for=", std::string( "unused functions in " ) + std::string( cfg.deadCodeDir ) ), dcFiltEsc ) ) + "\"";
+                dcFilterAttr += rw::nextAttrXml( rw::nextFlag( "--for=", std::string( "unused functions in " ) + std::string( cfg.deadCodeDir ) ) );
             }
         }
         // 0.6.6 D4: runner-root-excluded= is absent at 0, so a tree with no Python test/decorated root is byte-identical

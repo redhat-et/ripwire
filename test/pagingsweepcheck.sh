@@ -161,6 +161,11 @@ cacheFor(){   # $1 = corpus dir → that corpus's cache path, primed once on fir
     printf '%s' "$c"
 }
 ROOTCACHE="$( cacheFor "$ROOT" )"   # the main corpus, primed up front — section (K) invokes $BIN directly
+# The git-sweep verbs (--whereis, --stray-content) read every local branch of the enclosing repository and refuse past 512:
+# the arms below that ask them on $ROOT ((H) whereis, (J) whereis, (K)'s honoring set, (L)) ask SWEEPROOT instead — $ROOT
+# itself under the cap (CI), else a stand-in with CI's ref shape over the same commit (test/lib/sweeproot.sh says why).
+. "$ROOT/test/lib/sweeproot.sh"
+SWEEPROOT="$( sweepRoot "$ROOT" "$TMP/sweep" )"
 
 # ── the in-gate paging fixture ────────────────────────────────────────────────────────────────────────
 # THREE of these arms run here instead of on $ROOT. Two — --mentions and --stray-content — need a
@@ -439,7 +444,7 @@ disclose(){   # $1=label $2=root-element $3=row-pattern $4..=verb args
 }
 disclose "hotspots" "hotspots" '<f p='   --hotspots
 disclose "cochange" "cochange" '<pair '  --cochange
-disclose "whereis"  "whereis"  '<hit '   --whereis=rankGraph
+PAGE_CORPUS="$SWEEPROOT" disclose "whereis"  "whereis"  '<hit '   --whereis=rankGraph
 # G1 (2026-08-15): on the UNPAGINATED default view a byte-identical match at another site in the same
 # file folds into its <hit>'s n= plus an <at l=… in=…/> child instead of its own <hit> row (search.h's
 # grepGroupByFile) — shown= counts underlying HITS (sites), not printed <hit> elements, so the row pattern
@@ -523,7 +528,8 @@ for v in --lint --hotspots --callers=escapeXml --callees=runUses --tree --deps -
          --clones --doc-drift --communities --whereis=rankGraph --grep=NodeId --impact=escapeXml --uses=escapeXml \
          --flags --situ=src/situ.h \
          --seams --zoom --external-surface --dead-code --mentions=main --stray-content; do
-    if "$BIN" "$ROOT" $v --limit=3 --cache="$ROOTCACHE" >/dev/null 2>"$TMP/k2.err"; then
+    vroot="$ROOT"; case "$v" in --whereis=*|--stray-content) vroot="$SWEEPROOT" ;; esac
+    if "$BIN" "$vroot" $v --limit=3 --cache="$( cacheFor "$vroot" )" >/dev/null 2>"$TMP/k2.err"; then
         ok "honoring set: $v --limit=3 exits 0"
     else
         no "honoring set: $v --limit=3 was REFUSED — the guard's list disagrees with the code ($( head -1 "$TMP/k2.err" ))"
@@ -651,7 +657,7 @@ fi
 for spec in "hotspots:--hotspots" "cochange:--cochange" "whereis:--whereis=main" "grep:--grep=main" \
             "match:--match=(function_definition)" "impact:--impact=main" "seams:--seams"; do
     label="${spec%%:*}"; args="${spec#*:}"
-    OUT="$( run $args )"
+    if [ "$label" = whereis ]; then OUT="$( PAGE_CORPUS="$SWEEPROOT" run $args )"; else OUT="$( run $args )"; fi
     printf '%s' "$OUT" | grep -q 'raise the default cap with limit=N' \
         && ok "$label: bare-run legend names the raise flag (§A10.1)" \
         || no "$label: bare-run legend still silent about --limit"
@@ -675,9 +681,10 @@ done
 #     every member must have an invocation in the table below — a verb that joins honorsPaging() without a
 #     row here reds the arm until it is enumerated, which is the whole point of deriving the universe.
 echo "--- (L) capped=\"1\" ⇒ the paging quintet, on the DEFAULT window (M2) ---"
-python3 - "$BIN" "$ROOT" <<'PYL'
+python3 - "$BIN" "$ROOT" "$SWEEPROOT" <<'PYL'
 import re, subprocess, sys
-BIN, ROOT = sys.argv[1], sys.argv[2]
+BIN, ROOT, SWEEPROOT = sys.argv[1], sys.argv[2], sys.argv[3]
+SWEEP_VERBS = ( "--whereis", "--stray-content" )   # asked from SWEEPROOT (see above the (H) arms)
 helptxt = subprocess.run( [ BIN, "--help=all" ], capture_output=True, text=True ).stdout
 m = re.search( r'HONORED by:(.*?)Emit at most', helptxt, re.S )
 if not m:
@@ -769,7 +776,7 @@ checked = 0
 for verb in universe:
     if verb not in TABLE: continue
     args, primary = TABLE[ verb ]
-    doc = subprocess.run( [ BIN, ROOT ] + args, capture_output=True, text=True, errors="replace" ).stdout
+    doc = subprocess.run( [ BIN, SWEEPROOT if verb in SWEEP_VERBS else ROOT ] + args, capture_output=True, text=True, errors="replace" ).stdout
     if primary == "PROSE":
         # the prose dialect of rules 1+3: a cut section states shown=/total=/capped=1 inline, and nothing
         # states capped=0. There is no window to page from, so the quintet does not apply — but the

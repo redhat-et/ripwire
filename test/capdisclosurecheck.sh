@@ -325,10 +325,16 @@ case "$ECTX" in
     *'budget_tokens="3000"'*) ok "C3 the explicit --token-budget path still names budget_tokens=\"3000\"" ;;
     *) no "C3 --token-budget=3000 stopped naming budget_tokens=" ;;
 esac
-case "$ECTX" in
-    *budget_bytes*) no "C8 exclusivity: an explicit run named BOTH ceilings — $ECTX" ;;
-    *) ok "C8 exclusivity: the explicit run names its own ceiling and only that one" ;;
-esac
+# C8 (TOKEN-BUDGET-MONOTONE, 2026-11-14): an explicit --token-budget is applied AFTER the default answer is built, so both ceilings
+# really applied — the default's budget_bytes= target shaped <sigs>, budget_tokens= shed the result — and the root names both
+# exactly when the default answer it sheds names budget_bytes= (it used to name budget_tokens= alone, the pre-fix regime switch).
+run "$BIG" --for="$FORQ" > "$TMP/c_unbudgeted.xml" || no "C8: the unbudgeted run exited $?"
+UCTX="$( grep -o '<ctx[^>]*>' "$TMP/c_unbudgeted.xml" | head -1 )"
+U_NAMES=0; E_NAMES=0
+case "$UCTX" in *budget_bytes*) U_NAMES=1 ;; esac
+case "$ECTX" in *budget_bytes*) E_NAMES=1 ;; esac
+if [ "$U_NAMES" = "$E_NAMES" ]; then ok "C8 the budgeted root names budget_bytes= exactly when the default answer it sheds does ($U_NAMES)"
+else no "C8 default names budget_bytes=$U_NAMES, the budgeted answer $E_NAMES — $ECTX"; fi
 
 # SILENCE: a corpus whose bundle fits pays nothing — no attribute AND no legend clause.
 run "$TINY" --for="leafOne" > "$TMP/c_tiny.xml"

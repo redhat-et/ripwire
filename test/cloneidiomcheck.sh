@@ -33,6 +33,12 @@
 #   (L) the two root counters are present and count over ALL groups
 #   (M) the emitted legend DEFINES both new attributes (the legend-coverage ratchet's own predicate)
 #   (N) the fixture corpus is TRACKED by git — a gate whose corpus only exists locally is not a gate
+#   (O) THE FOURTH IDIOM, one-statement (decision C3, QD-DUP-SHORT): a one-return pair sharing only its
+#       parameter names demotes; the same pair plus ONE shared named constant gates; the same pair in one
+#       namespace gates; an EXPECTS-led member still classifies; an if-then-return member is refused (the
+#       group carries no idiom); a pair identical once its parameters are renamed gates although it shares
+#       no other identifier at all, also when its signature is generic (`name<T>(…)`, `name[T any](…)`) or one default holds a template comma or a less-than; a pair sharing a MEMBER spelled like a parameter gates. The quality-delta half: the demoted pair is minor, the shared-constant
+#       pair gates. The real-history replays live in test/dupshortcheck.sh.
 #
 # Usage:  bash test/cloneidiomcheck.sh            |   RIPWIRE_BIN=asan/ripwire bash test/cloneidiomcheck.sh
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
@@ -101,12 +107,24 @@ expect_row ladder_samefile  widthClassOf        depthClassOf        threshold-la
 expect_row switchtable      hueName             phaseName           switch-name-table yes   # (D)
 expect_row paramstruct      defaultCameraParams defaultMixerParams  builder-chain     yes   # (E)
 expect_row nonidiom         accumulateWeights   rollupSamples       NONE              no    # (F)
+expect_row onestmt_demote      siteBefore  entryBefore one-statement yes   # (O) only parameter names in common
+expect_row onestmt_sharedconst siteBefore  entryBefore one-statement no    # (O) + one shared constant kOrderSlack
+expect_row onestmt_samefile    siteBefore  entryBefore one-statement no    # (O) one file, one namespace
+expect_row onestmt_expects     siteBefore  entryBefore one-statement yes   # (O) EXPECTS does not count as a statement
+expect_row onestmt_ifreturn    siteBefore  entryBefore NONE          no    # (O) if-then-return is two statements
+expect_row onestmt_alpha       widthBetween gapOf      one-statement no    # (O) identical after renaming parameters
+expect_row onestmt_alpha_generic widthBetween gapOf  one-statement no    # (O) the same, through a generic signature (`gapOf<T>(…)`: the parameter list follows the type parameters)
+expect_row onestmt_alpha_tdefault widthBetween gapOf one-statement no    # (O) the same, with a template comma in one default (`hi = pick<Lo, Hi>()`: no parameter `long`, `pad` stays third; CodeRabbit #636)
+expect_row onestmt_alpha_ltdefault widthBetween gapOf one-statement no   # (O) the same, with a less-than in one default (`hi = kLo < kHi`: the `<` opens no template, `pad` is still a parameter)
+expect_row onestmt_alpha_gogeneric WidthBetween GapOf one-statement no   # (O) the same through Go type parameters (`GapOf[T int | int64](…)`)
+expect_row onestmt_memberparam rowFits     cellFits    one-statement no    # (O) a shared MEMBER spelled like a parameter
 
 # ── (G) true-positive preservation: the row stream itself is untouched ────────────────────────────────
 # Demotion is an ANNOTATION. Every fixture must still yield exactly ONE group of exactly TWO members —
 # the shape each yielded before any of this existed. A classifier that suppressed a row would pass every
 # attribute arm above and fail here.
-for d in ladder_demote ladder_sharedids ladder_samefile switchtable paramstruct nonidiom; do
+for d in ladder_demote ladder_sharedids ladder_samefile switchtable paramstruct nonidiom \
+         onestmt_demote onestmt_sharedconst onestmt_samefile onestmt_expects onestmt_ifreturn onestmt_alpha onestmt_alpha_generic onestmt_alpha_gogeneric onestmt_alpha_tdefault onestmt_alpha_ltdefault onestmt_memberparam; do
     n="$( rows "$d" | wc -l | tr -d ' ' )"
     m="$( rows "$d" | grep -c 'n="2"' )"
     if [ "$n" = 1 ] && [ "$m" = 1 ]; then
@@ -153,6 +171,21 @@ for a in idiom demoted idiom_groups demoted_groups; do
         *)       no "legend never defines $a=";;
     esac
 done
+
+# (M) the DEFAULT (compact) legend's demoted=1 reading on a demoted one-statement pair: that pair may share its
+# parameter names (the identifier test leaves them out), so a reading that says only "no shared identifier"
+# states something false about the very row it explains (CodeRabbit #629). Premise: the row is demoted.
+CL="$( "$BIN" "$CORPUS/onestmt_demote" --clones --no-cache 2>/dev/null )" || no "--clones on onestmt_demote exited $?"
+case "$CL" in
+    *'idiom="one-statement" demoted="1"'*)
+        DR="$( printf '%s' "$CL" | sed 's/<clones .*//' | grep -oE 'group demoted=1: [^;]*' | head -1 )"
+        case "$DR" in
+            '') no "compact legend: a demoted one-statement row, but no 'group demoted=1:' reading";;
+            *parameter*) ok "compact legend: demoted=1 qualifies the one-statement identifier test ($DR)";;
+            *) no "compact legend: demoted=1 reads '$DR' without the one-statement parameter exclusion";;
+        esac;;
+    *) no "compact legend premise: onestmt_demote printed no demoted one-statement row";;
+esac
 
 # ── (H)/(I) the quality-delta half ────────────────────────────────────────────────────────────────────
 # A group is only judged preexisting-worse when at least one member EXISTED at the baseline, so each repo
@@ -217,6 +250,41 @@ esac
 case "$SROW" in
     *'gating="1"'*) ok "quality-delta: the shared-identifier ladder still gates";;
     *)              no "quality-delta: the shared-identifier ladder stopped gating";;
+esac
+
+# (O) the quality-delta half of the fourth idiom: the parameter-only pair is minor, the shared-constant pair gates
+mkrepo qd_onestmt "onestmt_demote/site.h" "onestmt_demote/ledger.h" || { echo "git fixture setup failed"; exit 2; }
+OROW="$( qd qd_onestmt | tr '<' '\n' | grep 'kind="duplication"' | grep 'siteBefore' )"   # status: --quality-delta exits 0 or 2 (gating) by design; the row's sev= is the verdict, and an empty row FAILs
+case "$OROW" in
+    *'idiom="one-statement"'*'sev="minor"'*|*'sev="minor"'*'idiom="one-statement"'*) ok "quality-delta: the parameter-only one-statement pair is minor, idiom named";;
+    *) no "quality-delta: the parameter-only one-statement pair is not a minor one-statement row (row: ${OROW:-<none>})";;
+esac
+case "$OROW" in
+    *'gating="1"'*) no "quality-delta: the demoted one-statement pair still gates";;
+    '')             no "quality-delta: no row for the one-statement pair at all — the arm above is vacuous";;
+    *)              ok "quality-delta: the demoted one-statement pair does not gate";;
+esac
+# the one-statement legend sentence rides only a document that carries a one-statement row (G4); it is part of
+# the FULL legend, so both halves ask for it (the compact one would make the negative half vacuous)
+qdfull(){ "$BIN" "$TMP/$1" --quality-delta --no-cache --legend=full 2>/dev/null; }
+case "$( qdfull qd_onestmt )" in
+    *'one-statement is a body of one return statement'*) ok "quality-delta: the one-statement row's document defines the idiom's narrowed test";;
+    *) no "quality-delta: a document with a one-statement row never defines the narrowed test";;
+esac
+LFULL="$( qdfull qd_demote )"   # status: --quality-delta exits 0 or 2 (gating) by design; the next case FAILs a document with no clone paragraph
+case "$LFULL" in
+    *'CLONE ROWS name the whole group'*) ;;
+    *) no "quality-delta: the ladder document's full legend has no clone paragraph — the next arm would be vacuous";;
+esac
+case "$LFULL" in
+    *'one-statement is a body of one return statement'*) no "quality-delta: a ladder-only document pays for the one-statement sentence";;
+    *) ok "quality-delta: a ladder-only document does not carry the one-statement sentence";;
+esac
+mkrepo qd_onestmt_const "onestmt_sharedconst/site.h" "onestmt_sharedconst/ledger.h" || { echo "git fixture setup failed"; exit 2; }
+CROW="$( qd qd_onestmt_const | tr '<' '\n' | grep 'kind="duplication"' | grep 'siteBefore' )"   # status: --quality-delta exits 2 here by design (the pair gates); the row's gating= is the verdict, and an empty row FAILs
+case "$CROW" in
+    *'idiom="one-statement"'*'gating="1"'*|*'gating="1"'*'idiom="one-statement"'*) ok "quality-delta: the shared-constant one-statement pair still gates";;
+    *) no "quality-delta: the shared-constant one-statement pair stopped gating (row: ${CROW:-<none>})";;
 esac
 
 # ── (J) determinism ───────────────────────────────────────────────────────────────────────────────────

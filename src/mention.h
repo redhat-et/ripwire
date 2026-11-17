@@ -521,7 +521,7 @@ inline bool resolveStemFile( const IngestResult& ing, std::string_view word, std
     {
         return false;
     }
-    return std::none_of( ing.symbols.begin(), ing.symbols.end(), [ & ]( const Symbol& s ) { return s.name == word; } );
+    return std::none_of( ing.symbols.begin(), ing.symbols.end(), [ & ]( const Symbol& s ) { return s.name == word && !notLexRanked( s ); } );
 }
 
 // Did kMentionMaxFiles CUT a file this mention names, or only STOP a scan? The anchor's scans stop the instant the
@@ -536,7 +536,7 @@ inline bool resolveStemFile( const IngestResult& ing, std::string_view word, std
 // with a different cap.
 inline bool definesScopeName( const IngestResult& ing, const std::string& scope, const std::string& name ) noexcept
 {
-    return std::any_of( ing.symbols.begin(), ing.symbols.end(), [ & ]( const Symbol& s ) { return s.name == name && s.scope == scope; } );
+    return std::any_of( ing.symbols.begin(), ing.symbols.end(), [ & ]( const Symbol& s ) { return s.name == name && s.scope == scope && !notLexRanked( s ); } );
 }
 
 // FOR-FILE-ANCHOR: the (a0) whole-basename reading of mentionUnkeptFiles — true when it ENDS resolution (the token is a basename the
@@ -972,21 +972,25 @@ inline std::string asciiLower( std::string_view v )
     return out;
 }
 
-// Is `q` the symbol's scope, its file's stem, or its file's directory name?
-inline bool qualifierPlaces( const IngestResult& ing, const Symbol& s, std::string_view q ) noexcept
+// Does `isName` accept the file's stem (base name without extension) or its parent directory's name? The one path rule the
+// qualifier ("nftables.syncProxyRules") and the path-word namesake (pathWordPlaces) share; each brings its own comparison.
+template <class IsName>
+inline bool fileStemOrDirIs( const IngestResult& ing, std::uint32_t fileId, IsName isName )
 {
-    if( s.scope == q )
-    {
-        return true;
-    }
-    const std::string_view path = rootRelPath( ing, s.fileId );
+    const std::string_view path = rootRelPath( ing, fileId );
     const std::string_view base = baseNameOf( path );
-    if( stripExt( base ) == q )
+    if( isName( stripExt( base ) ) )
     {
         return true;
     }
     const std::string_view dir = path.substr( 0, path.size() - base.size() );
-    return dir.size() > 1 && baseNameOf( dir.substr( 0, dir.size() - 1 ) ) == q;
+    return dir.size() > 1 && isName( baseNameOf( dir.substr( 0, dir.size() - 1 ) ) );
+}
+
+// Is `q` the symbol's scope, its file's stem, or its file's directory name?
+inline bool qualifierPlaces( const IngestResult& ing, const Symbol& s, std::string_view q ) noexcept
+{
+    return s.scope == q || fileStemOrDirIs( ing, s.fileId, [ q ]( std::string_view name ) { return name == q; } );
 }
 
 // keep, per file, the one definition with the best (lensRank desc, id asc) — a total order, so ties are integer-exact.
@@ -1071,58 +1075,171 @@ inline std::vector<std::pair<std::uint32_t, NodeId>> matchNamedIdents( const Ing
     return matches;
 }
 
+// PATH-WORD-NAMESAKE. An identifier with several definitions is placed by ANOTHER word of the task that is the file stem or the
+// parent directory name of exactly one of them: "kube-proxy nftables syncProxyRules" means pkg/proxy/nftables/proxier.go's
+// syncProxyRules among iptables/, ipvs/, nftables/ and winkernel/ — the separate-word twin of the `nftables.syncProxyRules` qualifier
+// (qualifierPlaces). Only the namesake choice: a word placing two or more of them says nothing, two words placing two different ones
+// choose none, and more than kNamesakeMaxFiles files is a flood no word disambiguates.
+inline constexpr std::size_t kNamesakeMaxFiles     = 12;   // the same flood bound as subjectanchor.h kSubjectMaxDefs
+inline constexpr std::size_t kNamesakeMinWordBytes = 3;    // "go", "rs", "ui": a shorter word names a directory by accident
+inline constexpr std::uint32_t kNoNamesakeFile     = 0xFFFFFFFFu;
+
+// Is `lw` (lower case) the file's stem or its parent directory's name, case-insensitively?
+inline bool pathWordPlaces( const IngestResult& ing, std::uint32_t fileId, std::string_view lw )
+{
+    const auto isWord = [ lw ]( std::string_view name ) { return asciiLower( name ) == lw; };
+    return fileStemOrDirIs( ing, fileId, isWord );
+}
+
+// Definition over declaration (model.h isDefinitionNotDeclaration, the house test), for callables: drop each C-family prototype or
+// abstract method of `perFile` when a real definition of the same name sits in another of its files — it does not spend a lift of
+// its own, and it is not a namesake a path word can choose.
+inline void dropDeclarationsBesideDefinition( const IngestResult& ing, std::vector<std::pair<std::uint32_t, NodeId>>& perFile )
+{
+    const auto callableWithVerdict = [ & ]( const std::pair<std::uint32_t, NodeId>& fb, bool wantDefinition )
+    {
+        const Symbol& c = ing.symbols[fb.second];
+        return ( c.kind == SymKind::Function || c.kind == SymKind::Method ) && isDefinitionNotDeclaration( c ) == wantDefinition;
+    };
+    if( std::ranges::any_of( perFile, [ & ]( const auto& fb ) { return callableWithVerdict( fb, true ); } ) )
+    {
+        std::erase_if( perFile, [ & ]( const auto& fb ) { return callableWithVerdict( fb, false ); } );
+    }
+}
+
+// The one file of `perFile` (an identifier's definitions, best per file) that a task word other than the identifier names by path,
+// or kNoNamesakeFile.
+inline std::uint32_t namesakeFileByPathWord( const IngestResult& ing, std::string_view task, std::string_view name,
+                                             const std::vector<std::pair<std::uint32_t, NodeId>>& perFile )
+{
+    if( perFile.size() < 2 || perFile.size() > kNamesakeMaxFiles )
+    {
+        return kNoNamesakeFile;
+    }
+    // the choice is among the definitions: a word placing only a bodyless prototype (`api` naming api/x.h) beside a real definition
+    // elsewhere places nothing, and the bare reading's declaration filter lifts the definition (the flood bound above counts all)
+    std::vector<std::pair<std::uint32_t, NodeId>> choosable = perFile;
+    dropDeclarationsBesideDefinition( ing, choosable );
+    const std::string lname  = asciiLower( name );
+    std::uint32_t     chosen = kNoNamesakeFile;
+    const auto        wordChar = []( char c ) { return isIdentChar( c ) || c == '-'; };
+    for( std::size_t i = 0; i < task.size(); )
+    {
+        if( !wordChar( task[i] ) )
+        {
+            ++i;
+            continue;
+        }
+        const std::size_t start = i;
+        while( i < task.size() && wordChar( task[i] ) )
+        {
+            ++i;
+        }
+        const std::string lw = asciiLower( task.substr( start, i - start ) );
+        // a qualifier segment (`Utils.` in `Utils.formatDate`, `Wrong::` in `Wrong::Fmt3::x`) is not a separate word: the qualifier
+        // proof (qualifierPlaces, case-exact, every segment) already judged it, and a directory or stem it only resembles is no proof.
+        // A dot joins a qualifier only when an identifier follows it: `nftables.` ending a sentence (or `nftables.)`) is a word.
+        const bool dotJoins         = i + 1 < task.size() && task[i] == '.' && isIdentChar( task[i + 1] );
+        const bool qualifierSegment = dotJoins || task.substr( i ).starts_with( "::" );
+        if( lw.size() < kNamesakeMinWordBytes || lw == lname || qualifierSegment )
+        {
+            continue;
+        }
+        std::size_t   placed = 0;
+        std::uint32_t hit    = kNoNamesakeFile;
+        for( const auto& fb : choosable )
+        {
+            if( pathWordPlaces( ing, fb.first, lw ) )
+            {
+                ++placed;
+                hit = fb.first;
+            }
+        }
+        if( placed != 1 )
+        {
+            continue;   // places none, or several: no evidence either way
+        }
+        if( chosen != kNoNamesakeFile && chosen != hit )
+        {
+            return kNoNamesakeFile;   // two words, two different namesakes: no guess
+        }
+        chosen = hit;
+    }
+    return chosen;
+}
+
+// The files (best definition each) that one named identifier lifts at, from its `matches` rows: the qualifier's files when it
+// places any, else the bare reading, narrowed to ONE file when another task word names it by path (namesakeFileByPathWord).
+// Empty when nothing matched. Longer than kMentionMaxNameFiles means ambiguous — the caller lifts nothing.
+inline std::vector<std::pair<std::uint32_t, NodeId>> filesForNamedIdent( const IngestResult& ing, const std::vector<float>& lensRank,
+                                                                         const NamedIdent& n, std::string_view task,
+                                                                         std::span<const std::pair<std::uint32_t, NodeId>> rows )
+{
+    const bool bareFallback = n.qualifier.empty() || hasIdentifierShape( n.name );
+    std::vector<std::pair<std::uint32_t, NodeId>> narrowed, bare, every;   // every: the bare reading uncut, for the namesake choice
+    for( const auto& row : rows )
+    {
+        const Symbol& s = ing.symbols[ row.second ];
+        ASSUME( s.id < lensRank.size() );
+        if( !n.qualifier.empty() && qualifierPlaces( ing, s, n.qualifier ) )
+        {
+            keepBestPerFile( narrowed, s, lensRank );
+        }
+        if( bareFallback && narrowed.empty() && bare.size() <= kMentionMaxNameFiles )
+        {
+            keepBestPerFile( bare, s, lensRank );   // stops growing once ambiguous — the verdict is already decided
+        }
+        if( bareFallback && narrowed.empty() && every.size() <= kNamesakeMaxFiles )
+        {
+            keepBestPerFile( every, s, lensRank );   // stops one past the flood bound: the choice is already refused
+        }
+    }
+    if( !narrowed.empty() )
+    {
+        return narrowed;
+    }
+    if( !bareFallback )
+    {
+        return {};
+    }
+    if( const std::uint32_t f = namesakeFileByPathWord( ing, task, n.name, every ); f != kNoNamesakeFile )
+    {
+        return { *std::ranges::find( every, f, &std::pair<std::uint32_t, NodeId>::first ) };
+    }
+    return bare;
+}
+
 // Resolve each identifier, in `named` order, to at most kMentionMaxNameFiles symbols — each named file's best
 // definition by (lensRank desc, id asc) — skipping an ambiguous or unmatched name, then dropping a declaration
 // beside a real definition and test/fixture-tier targets in files the task does not name (`namedFiles`:
 // B8's resolved file mentions). The ambiguity bound counts EVERY definition first, fixtures and prototypes included.
 // Appends to `out`, deduplicated.
 inline void resolveNamedIdents( const IngestResult& ing, const std::vector<float>& lensRank, const std::vector<NamedIdent>& named,
-                                const std::vector<std::uint32_t>& namedFiles, std::vector<NodeId>& out )
+                                const std::vector<std::uint32_t>& namedFiles, std::string_view task, std::vector<NodeId>& out )
 {
     EXPECTS( lensRank.size() == ing.symbols.size() );
     ASSUME_NO_ALIAS( lensRank, out );
     const std::vector<std::pair<std::uint32_t, NodeId>> matches = matchNamedIdents( ing, named );
-    std::vector<std::pair<std::uint32_t, NodeId>>       perFile;   // (fileId, best symbol in it) for one identifier
     for( std::size_t m = 0; m < matches.size(); )
     {
         const std::uint32_t k = matches[m].first;
         ASSUME( k < named.size() );
-        const NamedIdent& n            = named[k];
-        const bool        bareFallback = n.qualifier.empty() || hasIdentifierShape( n.name );
-        std::vector<std::pair<std::uint32_t, NodeId>> narrowed, bare;
-        for( ; m < matches.size() && matches[m].first == k; ++m )
+        std::size_t end = m;
+        while( end < matches.size() && matches[end].first == k )
         {
-            const Symbol& s = ing.symbols[ matches[m].second ];
-            ASSUME( s.id < lensRank.size() );
-            if( !n.qualifier.empty() && qualifierPlaces( ing, s, n.qualifier ) )
-            {
-                keepBestPerFile( narrowed, s, lensRank );
-            }
-            if( bareFallback && narrowed.empty() && bare.size() <= kMentionMaxNameFiles )
-            {
-                keepBestPerFile( bare, s, lensRank );   // stops growing once ambiguous — the verdict is already decided
-            }
+            ++end;
         }
-        perFile = !narrowed.empty() ? std::move( narrowed ) : ( bareFallback ? std::move( bare ) : decltype( bare ){} );
+        std::vector<std::pair<std::uint32_t, NodeId>> perFile =   // (fileId, best symbol in it) for one identifier
+            filesForNamedIdent( ing, lensRank, named[k], task, std::span( matches ).subspan( m, end - m ) );
+        m = end;
         if( perFile.empty() || perFile.size() > kMentionMaxNameFiles )
         {
             continue;   // unmatched, or ambiguous: precision over recall — no lift, no reordering
         }
-        // definition over declaration (model.h isDefinitionNotDeclaration, the house test), for callables: a C-family
-        // prototype or an abstract method beside a real definition of the same name does not spend a lift of its own
-        const auto isCallableDecl = [ & ]( NodeId id, bool wantDefinition )
-        {
-            const Symbol& c = ing.symbols[id];
-            return ( c.kind == SymKind::Function || c.kind == SymKind::Method ) && isDefinitionNotDeclaration( c ) == wantDefinition;
-        };
-        const bool hasDefinition = std::ranges::any_of( perFile, [ & ]( const auto& fb ) { return isCallableDecl( fb.second, true ); } );
+        dropDeclarationsBesideDefinition( ing, perFile );
         std::sort( perFile.begin(), perFile.end() );   // file order, a total order on (fileId, id)
         for( const auto& fileBest : perFile )
         {
-            if( hasDefinition && isCallableDecl( fileBest.second, false ) )
-            {
-                continue;
-            }
             if( !isUnnamedTestOrFixtureTarget( ing, fileBest.second, namedFiles ) && std::find( out.begin(), out.end(), fileBest.second ) == out.end() )
             {
                 out.push_back( fileBest.second );
@@ -1237,7 +1354,7 @@ inline bool applyMentionBoost( const IngestResult& ing, std::string_view task, s
             const std::string& nameSeg  = m.segments[1];
             for( const Symbol& s : ing.symbols )
             {
-                if( s.name == nameSeg && s.scope == scopeSeg )
+                if( s.name == nameSeg && s.scope == scopeSeg && !notLexRanked( s ) )   // a --recall-only unit is no mention target
                 {
                     ++directSymbolTotal;
                     if( directSymbols.size() < kMentionMaxDirectSymbols )
@@ -1283,7 +1400,7 @@ inline bool applyMentionBoost( const IngestResult& ing, std::string_view task, s
     const std::size_t       namedDistinct = finalizeNamedIdents( identToks, named );
     noteCap( outInfo, "mention_idents_capped", "mention_idents_total", namedDistinct > named.size(), namedDistinct );
     std::vector<NodeId> namedSymbols;
-    resolveNamedIdents( ing, lensRank, named, mentionedFiles, namedSymbols );
+    resolveNamedIdents( ing, lensRank, named, mentionedFiles, task, namedSymbols );
     // A refused identifier symbol is a CUT only when the lift would have moved it: one already scoring at or above the
     // direct slot is served exactly where it is either way, so counting it would announce content the answer shows.
     const float   directSlot  = topScore * ( 1.0f - kMentionTopGapStep );
@@ -1353,7 +1470,7 @@ inline bool applyMentionBoost( const IngestResult& ing, std::string_view task, s
         std::uint32_t bestCount = 0;
         for( const Symbol& s : ing.symbols )
         {
-            if( s.fileId != f )
+            if( s.fileId != f || notLexRanked( s ) )   // a --recall-only unit (model.h kRankFlagNotLexRanked) is never lifted
             {
                 continue;
             }

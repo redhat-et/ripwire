@@ -513,6 +513,7 @@ memguard.h	guardedFileClosure	1	a stopped fold is a failed build, not a partial 
 alloccount.cpp	operator new	2	the one throw seam CONTRIBUTING §3 permits: operator new under RIPWIRE_ALLOC_COUNT, an A/B instrument no shipped build links
 infra/dynamic_map.hpp	at	1	vendored container API; no ripwire call site reaches it (rule C lists its one caller, the container's own non-const at)
 regexguard.h	throwIfMatchFaultInjected	1	the RIPWIRE_FAULT_REGEX_MATCH fault switch, off unless the variable is set; its three call sites are the first statement inside GuardedRegex's search, search and forEachMatch try blocks, which catch std::regex_error by type and return Exhausted (a stopped --regex scan has one cause — the former MIXED sibling rode with the per-file match budget the PR #397 review removed)
+ingest_parsepool.h	collectWantedConstructHits	1	the RIPWIRE_TEST_EXTRACT_THROW test seam, off unless the variable is set; its one caller is the parse worker body inside its try (ingest_parsepool.h), whose catch( ... ) reports FileExtractThrew: the file reads extract-partial and its constructsKnown flag clears (qdconstructscheck X, qbasecachecheck D drive it)
 REGB2
 cat > "$TMP/reg_c.tsv" <<'REGC'
 crossref.h	listTreeRows	.at	2	readTreeLevels returns its table only when every level was served whole by catFileBatch and every child tree id was queued unless already read, so the root tree and each subtree id it walks are keys
@@ -528,6 +529,8 @@ alloccount.cpp	countedAlloc	malloc	1	the counting allocator's own storage, freed
 alloccount.cpp	operator new	aligned_alloc	1	the counting allocator's aligned storage, freed by its operator delete (A/B instrument, never shipped)
 infra/dynamic_map.hpp	compact	new	4	the rebuilt pools replace the old ones (delete[] before the swap, owned by ~dynamic_map after it); the two scratch arrays are delete[]d before the return
 infra/dynamic_map.hpp	dynamic_map	new	2	the constructor's pools, owned by ~dynamic_map
+infra/os.h	pipe_cloexec	pipe	1	POSIX body of os::pipe_cloexec: closes both ends itself when the FD_CLOEXEC step fails, else hands them to the caller, as pipe() does (helpdeadline.h ChildPipes owns them as pathguard::OwnedFd)
+infra/os_win32.cpp	pipe_cloexec	pipe	1	Windows body of os::pipe_cloexec: forwards to os::pipe, which hands both ends to the caller (helpdeadline.h ChildPipes owns them as pathguard::OwnedFd)
 infra/os_win32.cpp	getline	realloc	1	Windows body of os::getline: POSIX getline's contract hands the grown *line buffer to the caller, who frees it (pathguard.h NoFollowRead frees its lineBuf)
 infra/os_win32.cpp	open_memstream	malloc	1	Windows body of os::open_memstream: POSIX hands *buffer to the caller, who frees it (rw::MemoryStream's destructor)
 infra/os_win32.cpp	publishMemoryStream	realloc	1	Windows os::fflush / os::fclose republishing a memstream's *buffer: the caller's pointer is replaced in place and the caller frees it, as with POSIX open_memstream
@@ -550,7 +553,6 @@ ingest_parsepool.h	runParseWorker	ts_query_cursor_new	1	deleted at the end of th
 ingest_sidecap.h	parseTree	ts_parser_parse_string	1	returned to the caller, which adopts it into TreeGuard
 jsrunner.h	scanModule	ts_parser_new	1	deleted right after the parse, before the null-tree return
 jsrunner.h	scanModule	ts_parser_parse_string	1	the tree is deleted by hand after the whole-tree walk, before the return
-main.cpp	runWithCompactLegend	dup	1	closed on the failure path and after the restore on the success path
 mcpindex.h	arm	dirwatch_open	1	owned	held by the FS watcher, closed by its reset and its destructor
 mcpserver.h	runMcpHttp	accept	1	each accepted connection is closed after its one request
 mcpserver.h	runMcpHttp	socket	1	the listening socket is closed before every return
@@ -565,7 +567,7 @@ verbs_change.h	runCommandCapture	pipe	1	both ends closed in the child, the write
 verbs_doctor.h	doctorParseProbe	ts_parser_new	1	deleted before the return
 verbs_doctor.h	doctorParseProbe	ts_parser_parse_string	1	deleted inside the same if
 verbs_doctor.h	doctorProbeGrammars	ts_query_new	1	a compile probe, deleted inside the same if
-verbs_for.h	appendSubjectGraphVerbBlock	dup	1	closed on the failure path and after the restore on the success path (runWithCompactLegend's capture, for the --for graph-verb block)
+verbs_for.h	captureGraphVerbDoc	dup	1	closed on the failure path and after the restore on the success path (runWithCompactLegend's capture, shared by the --for graph-verb block and its <path_gap> sides)
 REGE
 
 judge_static(){   # $1 = scan output dir, $2 = label (src | probe); echoes one line per violation

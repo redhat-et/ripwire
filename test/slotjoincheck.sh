@@ -171,7 +171,8 @@ done
 echo "-- section L (CR pre-pass 32b): the <vs> window's continuation and the JSON twin's target names"
 o="$( run --callees=big_fire )"
 has   "L1 18 stores, a window of 16: the row discloses the cut" "$o" 'targets="18" shown="16" next="--regex='
-has   "L2 next= is a regex over ANY spacing and a field assignment, never the literal .f =" "$o" 'next="--regex=&apos;(\.|-&gt;)bigcb\s*=[^=]&apos;"'
+# RE-PIN (NEXT-APOS-FINISH, 2026-11-15): next= pins read the raw ' (was &apos;): nextverb.h appendNextValueXml leaves ' raw in a "-delimited attribute
+has   "L2 next= is a regex over ANY spacing and a field assignment, never the literal .f =" "$o" 'next="--regex='\''(\.|-&gt;)bigcb\s*=[^=]'\''"'
 n="$( cd "$FIX" && "$BIN" "$FIX" --regex='(\.|->)bigcb\s*=[^=]' --no-cache 2>/dev/null | grep -o 'hits="[0-9]*"' | head -1 )"
 if [ "$n" = 'hits="18"' ]; then ok "L3 replaying that regex finds all 18 stores (aligned and unspaced too)"; else no "L3 the replayed regex found ${n:-nothing}, not hits=\"18\""; fi
 n="$( cd "$FIX" && "$BIN" "$FIX" --grep='.bigcb =' --no-cache 2>/dev/null | grep -o 'hits="[0-9]*"' | head -1 )"

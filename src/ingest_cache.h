@@ -8,6 +8,7 @@
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 #include <bit>               // std::endian — the cache blob's arch tag, without a compiler-specific macro
 #include <memory>            // std::unique_ptr — CacheRecords holds its open frame
+#include <optional>          // std::optional — cacheBlobIdentity: "this blob's identity" vs "there is no blob to identify"
 
 // ingest_cache.h — the raw-facts model + incremental cache, moved VERBATIM from ingest.cpp in the
 // 2026-08-29 split: RawDef (the pre-id-assignment definition record), the extraction identity
@@ -53,17 +54,19 @@ struct RawDef
                                    //   C++ method inside one); 0 ⇒ no recovery claim. Feeds the `error` reason at load.
     std::uint8_t  internalLinkage = 0;   // C/C++: anonymous-namespace or namespace-scope `static` def (model.h Symbol::internalLinkage)
     std::uint8_t  scopeRootsStd = 0;     // #150: 1 ⇒ this def's full enclosing-namespace chain roots at std (model.h Symbol::scopeRootsStd)
+    std::uint8_t  rankFlags = 0;         // kRankFlag* (model.h Symbol::rankFlags): set by the doc post-pass on every load, never in the cache record
     std::uint32_t fnScopeStart = 0;      // a FUNCTION-LOCAL def (ingest_names.h enclosingFunctionScope): the byte span of the
     std::uint32_t fnScopeEnd   = 0;      //   function whose body binds its name; End 0 ⇒ not function-local (model.h fnLocalScopes)
     SymKind       kind      = SymKind::Other;
     Lang          lang      = Lang::Unknown;
     std::string   name;
     std::string   scope;               // enclosing class/namespace name (C++), for canonical scope::name
+    std::uint64_t cloneKey  = 0;       // CLONES-PERSIST (ingest_parsepool.h rawDefCloneKey): Function/Method body's exact-clone key; 0 = none
     RawDefLex     lex;                 // B0.2: doc+body weighted subtoken stats (rich ingests only; rides the
                                        //   cache record so a warm --for never re-reads/re-tokenizes the file)
 };
 
-struct RawRef
+struct RawRef : RefColdFields   // fieldName, composeRel, memberPath, memberCtor, memberVia: model.h RefColdFields
 {
     std::uint32_t fileId    = 0;
     std::uint32_t startByte = 0;   // span start of the @reference node (for enclosing lookup)
@@ -80,22 +83,22 @@ struct RawRef
                                        //   of a std smart pointer member, which only `->` reaches (see Reference::viaArrow)
     bool          qualifierRootsStd = false;   // #150: the FULL written qualifier chain is rooted at namespace std (model.h Reference::qualifierRootsStd)
     bool          memberCall = false;   // FE-A: a Go/JS/TS/Rust call written on a receiver (`x.f()`), whose recv stays None (model.h Reference::memberCall)
-    std::string   name;
-    std::string   qualifier;           // explicit scope at a call site (`A` in `A::b()`); C++; "" if bare/method
-    std::string   recvVar;             // receiver variable when recv==NamedVar/FieldOfVar (`x` in `x->m()`); Rule 2 fuel
-    std::string   fieldName;           // member variable name when isCompose (e.g. "m_pool"); ALSO the intermediate
-                                       //   field of a depth-2 chained receiver (recv FieldOfThis/FieldOfVar); "" otherwise
-    std::string   composeRel;          // "creates" (value/inline) or "uses" (reference/pointer) when isCompose; "" otherwise
-    std::string   memberRoot;          // FE-A: the receiver chain's ROOT identifier when memberCall (`JSON` in `JSON.parse()`); see model.h
-    std::string   memberPath;          // FE-B: the member names between memberRoot and the callee, '.'-joined ("" = `root.m()`); see model.h
-    std::string   memberCtor;          // FE-B: the class a constructed receiver names (`new X().m()`, Go `X{}.m()`); see model.h
-    std::string   memberVia;           // FE-B on #373: the method a Ruby typed receiver was built by (`new`, a finder); see model.h
+    rw::InternedText name;             // MEM-REF-SHRINK step 2: name / qualifier / recvVar are 4 B pool ids (infra/internedtext.h)
+    rw::InternedText qualifier;        // explicit scope at a call site (`A` in `A::b()`); C++; "" if bare/method
+    rw::InternedText recvVar;          // receiver variable when recv==NamedVar/FieldOfVar (`x` in `x->m()`); Rule 2 fuel
+    rw::InternedText memberRoot;       // FE-A: the receiver chain's ROOT identifier when memberCall (`JSON` in `JSON.parse()`); see model.h
     bool          memberFactory = false;   // FE-B on #373: memberCtor names a FactoryBot factory, not a class
     bool          forwarded = false;       // lane fcall-forward fix 1: a JS/TS `f.call/f.apply` site standing for `f( … )` (model.h Reference::forwarded)
     bool          trailingLambda = false;  // #155: a Kotlin call whose lambda is written after its argument list (model.h Reference::trailingLambda)
     std::uint32_t baseBind = 0;          // lane lego-transitive fix 1, an inherit ref only: 1 + the name byte of the same-file
                                          //   declaration the base binds to (ingest_relations.h localBaseBinding); 0 none, ~0u unknown
+    std::uint32_t litAt = 0;             // MEM-R1a: a registrar Value ref's 1 + object-literal start byte (model.h Reference::litAt)
 };
+
+// MEM-REF-SHRINK (model.h, beside Reference's own budget): Reference minus fromSymbol, in the same 64 B on every ABI (MEM-R1a:
+// memberRoot a pool id; step 2 80 B on libc++, step 1 136, before it 248). Every worker's vector<RawRef> and the merged one hold
+// these rows at the parse-pool peak.
+static_assert( sizeof( RawRef ) == 64, "RawRef is one 64 B row: see the MEM-REF-SHRINK note in model.h" );
 
 // P2-D Rule 2 raw local-variable type binding (pre-attribution). startByte sits inside the enclosing
 // function body so the enclosing-def attribution (the same byte-span scan as RawRef) assigns the binding's
@@ -111,11 +114,13 @@ struct RawBind
     std::uint8_t  unwrapDepth = 0;                   // kind==CallResult/ReturnType: unwrap operators / layers (model.h LocalBindKind)
     std::uint32_t spanStart = 0;   // lexical visibility or declaration span; see model.h Binding/LocalBindKind
     std::uint32_t spanEnd   = 0;
-    std::string   var;             // the declared variable identifier (`x`)
-    std::string   importedName;    // ES export identity or Elixir callable/import fact; see LocalBindKind.
-    std::string   typeName;        // kind==Type: the written type's final segment (`Foo`);
-                                   // kind==FnDecl/FnAssign: the bound function name (or an L3 sentinel)
+    rw::InternedText var;          // the declared variable identifier (`x`). MEM-B1: pool ids, as model.h Binding's
+    rw::InternedText importedName; // ES export identity or Elixir callable/import fact; see LocalBindKind.
+    rw::InternedText typeName;     // kind==Type: the written type's final segment (`Foo`);
+                                   // kind==FnDecl/FnAssign: the bound function name (or an L3 sentinel: a fixed text)
 };
+// MEM-B1: four u32 positions, five u8 facts in one padded u32 pair, three pool ids: 36 B on every ABI (no std::string member).
+static_assert( sizeof( RawBind ) == 9 * sizeof( std::uint32_t ), "RawBind grew: see the MEM-B1 note at model.h Binding" );
 
 // B6.3 raw client-side HTTP-route USE (pre-attribution). startByte sits at the call-expression's own
 // start so the enclosing-def byte-span scan (same DefSweep as RawRef/RawBind) assigns fromSymbol. The
@@ -151,7 +156,12 @@ constexpr std::uint32_t kCacheMagic   = 0x4b505443;   // "CTPK"
 // lane rust-degraded's placeholder 42.
 // 44 (train 37b, lane rust-degraded; its placeholder was 42): the FILE record gains a sixth FileHealth u32, useBoundsBlanked
 // (the Rust precise-capture re-parse, src/rustusebounds.h), so an older cache must be rejected. 44 is above train 36's 43.
-constexpr std::uint32_t kCacheVersion = 49;           // 49: lane warm-direct — the FILE record's head gains the eight family counts
+constexpr std::uint32_t kCacheVersion = 52;           // 52: lane failure-default — the construct hits gain the failure-default shape tag
+                                                      //    (lintrules.h kConstructShapeTags, appended); an older record lacks those hits.
+                                                      // 51: lane qd-constructs — the FILE record gains a ninth family, the --quality-delta
+                                                      //    construct hits (ConstructHit: startByte, line, tag byte), with its head count.
+                                                      // 50: lane clones-persist — a def record ends with a clone-key presence u8 (+ the u64 key).
+                                                      // 49: lane warm-direct — the FILE record's head gains the eight family counts
                                                       //    (FileFactCounts, right after FileHealth) so a warm run can size and plan every
                                                       //    record from its head alone and decode the body in the parse worker.
                                                       // 48: train 42b — lane alias-import's LocalBindKind ReExport (appended; readBind's kind bound
@@ -370,7 +380,20 @@ constexpr std::uint32_t kCacheVersion = 49;           // 49: lane warm-direct �
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 301;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 309;          // bump on any grammar/.scm/extraction change
+                                                      // 309 = 2026-11-13 (lane macro-p0, PLACEHOLDER: the train renumbers; above main's 307/308): a C-family macro
+                                                      //   invocation read as a typeless declarator (`REGISTER_FACTORY( F, B ){ "n" };`, a class-member `MOCK_METHOD( … );`)
+                                                      //   mints no function def; the site is a use of the macro (ingest_names.h cFamilyMacroInvocationDecl). Rich file
+                                                      //   tag 310. kCacheVersion unchanged. MACRO-P1 (stacked on macro-p0, same placeholder): a trailing annotation
+                                                      //   macro (`T f() ABSL_LOCKS_EXCLUDED( mu ) { body }`) is a use, and f's prototype adopts the body
+                                                      //   (ingest_names.h annotationHostDeclarator / annotatedDefinitionAfter).
+                                                      // 307 = 2026-11-11 (lane rust-macro-path, PLACEHOLDER: the train renumbers; above main's 305/306): a Rust path
+                                                      //   macro invocation (`crate::m!`, `serde_json::json!`) is captured with its written path, and a transcriber's
+                                                      //   `$crate::m!` is a Macro reference of its `macro_rules!`. Rich file tag 308. kCacheVersion unchanged.
+                                                      // 305 = 2026-11-10 (#446 round 1, @SeddonShen; above main's 303 and the PR head's 304): C++ base clauses read as @reference.base tags captures
+                                                      //   (queries/cpp/tags.scm, LangFacts::basesAsCaptures). Rich file tag 306. kCacheVersion unchanged.
+                                                      // 303 = 2026-11-06 (lane proto-index, PLACEHOLDER: the train renumbers; above main's 301 and open #538's 302;
+                                                      //   rich file tag 304): .proto files are indexed (Lang::Proto, queries/proto/tags.scm). kCacheVersion stays 49.
                                                       // 301 = 2026-11-04 (#478 gap 2, PLACEHOLDER: the train renumbers; above main's 299/300, rich file tag 302;
                                                       //   test/pyimportprecisecheck.sh): `import a.b as c` records the Include target `a.b`, not the aliased_import span
                                                       //   `a.b as c` no resolver could find. kCacheVersion stays 48: no record changes shape.
@@ -2072,6 +2095,7 @@ static_assert( alignof( CacheEntry ) == 8, "CacheEntry must stay 8-byte aligned 
 // compiler's own answer to "is every byte of this type part of its value", so it refuses padding (and any float).
 static_assert( std::is_trivially_copyable_v<CacheEntry> && std::has_unique_object_representations_v<CacheEntry>,
                "CacheEntry is copied to disk as raw bytes — it must carry no padding bytes and no float" );
+// ...and no rw::InternedText: a pool id has unique object representations but a timing-dependent value (infra/internedtext.h).
 
 // The per-record digest stored in the table: the low half of the same 8-lane FNV the trailer uses.
 // 32 bits is a detection budget, not a security one — the whole-blob guards above sit in front of it.
@@ -2156,6 +2180,10 @@ struct CacheFrame
     bool                    ok          = false;
     CacheReject             reason      = CacheReject::Absent;   // meaningful only while ok == false
     std::uint32_t           foundStamp  = 0; // FormatVersion: the blob's kCacheVersion; ParserVersion: its parserVer
+    // The trailer's tableSum: the digest of this blob's HEADER and its WHOLE offset table, which carries every
+    // record's own recSum. It is read and verified below on every open; `cacheBlobIdentity` publishes it as the
+    // blob's identity, and nothing else reads it.
+    std::uint64_t           tableSum    = 0;
 };
 
 // pread the whole of [ off, off+n ) into `dst`. Short reads are retried (a pread on a regular file can
@@ -2334,6 +2362,7 @@ inline CacheFrame openCacheFrame( const std::string& path, bool captureValueUses
     }
 
     frame.tableOffset = tableOffset;
+    frame.tableSum    = tableSum;
     // F3/X5: the racy-rule reference is THIS blob's own on-disk mtime, from the fd we already hold — the
     // same stat() domain and granularity every per-file mtime is compared against.
     frame.mtimeNs = statSizeTimes( path ).mtimeNs;
@@ -2358,6 +2387,36 @@ inline CacheReject inspectCacheArtifact( const std::string& path, bool captureVa
     return openCacheFrame( path, captureValueUses ).reason;
 }
 
+// ── the blob's IDENTITY, for the warm snapshot that is derived from it (src/warmsnap.h) ───────────────────────────
+//
+// WHY THE BLOB NEEDS AN IDENTITY AT ALL. The warm snapshot stores the OUTCOME of stages a warm run would otherwise
+// repeat — the crawl, the assembled model, the resolved graph — and it is only valid for the records it was built
+// from. It lives in ripwire's own cache directory, NOT beside the blob and NOT inside it (owner ruling 2026-11-15,
+// superseding the in-blob design on this point): writing anything beside the user's `--cache=PATH` breaks
+// test/cacheidentitycheck.sh arm (D3), and writing INTO that file breaks test/portablecachecheck.sh arm (a) —
+// a committed blob is read-shared by many checkouts and a consuming run must not mutate the artifact another
+// checkout owns. So the binding to the blob is made by NAME instead: the snapshot's filename carries this
+// identity, and a blob that is rewritten, replaced or deleted names a different artifact or none.
+//
+// WHAT THE IDENTITY IS. The trailer's `tableSum` — the digest over this blob's header and its whole offset table,
+// which holds every record's own `recSum`. One re-parsed file moves that record's recSum, and the header carries
+// the write stamp besides, so any rewrite of the blob moves the identity. It is verified on every open before this
+// returns it, so it is never read out of a blob this build would refuse.
+//
+// Nothing (0 of 2^64 values aside) when there is no blob at `path` this build can read — absent, another format,
+// another parser family, truncated or corrupt. A blob whose tableSum is exactly 0 is indistinguishable from that
+// and simply never carries a snapshot: the cost is one unstored run, and the answer is the same either way.
+inline std::optional<std::uint64_t> cacheBlobIdentity( const std::string& path, bool captureValueUses )
+{
+    PROFILE_SCOPE_DESCRIBE( "ingest/cache: the blob's identity (trailer tableSum), for the warm snapshot's name" );
+    const CacheFrame frame = openCacheFrame( path, captureValueUses );
+    if( !frame.ok || frame.tableSum == 0 )
+    {
+        return std::nullopt;
+    }
+    return frame.tableSum;
+}
+
 // The half-open [ first, last ) span of table entries carrying `pathHash`. A u64 FNV collision across a
 // corpus this size is ~1e-9, but a collision that SERVED the wrong file's facts would be a wrong answer,
 // so the lookup returns a range and the caller confirms identity against the record's own stored path.
@@ -2378,7 +2437,22 @@ inline std::pair<std::size_t, std::size_t> cacheEntryRange( const std::vector<Ca
 // not racy. ctimeNs is the one an unprivileged writer cannot restore (see ingest_crawl.h statSizeTimes),
 // so it is what makes a same-(mtime,size) edit visible for free. -1 ⇒ unknown (the file was unstatable at
 // hash time) → the gate always re-hashes, which is the safe direction.
-struct FileFacts { std::uint64_t hash = 0; long long sizeBytes = -1; long long mtimeNs = -1; long long ctimeNs = -1; FileHealth health; std::vector<RawDef> defs; std::vector<RawRef> refs; std::vector<Include> incs; std::vector<RawBind> binds; std::vector<BindingAlias> ffis; std::vector<RouteDef> routeDefs; std::vector<RawRouteUse> routeUses; std::vector<ConstOpen> constOpens; };
+struct FileFacts { std::uint64_t hash = 0; long long sizeBytes = -1; long long mtimeNs = -1; long long ctimeNs = -1; FileHealth health; std::vector<RawDef> defs; std::vector<RawRef> refs; std::vector<Include> incs; std::vector<RawBind> binds; std::vector<BindingAlias> ffis; std::vector<RouteDef> routeDefs; std::vector<RawRouteUse> routeUses; std::vector<ConstOpen> constOpens; std::vector<ConstructHit> constructs; bool constructsAbsent = false; };
+
+// Empty every family of a decode scratch, keeping each array's capacity for the next record (WARM-DIRECT reuse).
+inline void clearFileFactsKeepCapacity( FileFacts& f ) noexcept
+{
+    f.defs.clear();
+    f.refs.clear();
+    f.incs.clear();
+    f.binds.clear();
+    f.ffis.clear();
+    f.routeDefs.clear();
+    f.routeUses.clear();
+    f.constOpens.clear();
+    f.constructs.clear();
+    f.constructsAbsent = false;
+}
 
 // v49 (WARM-DIRECT): the eight per-file fact-family counts. The record carries them in its HEAD as well as before each
 // family, so a reader holding only the head (the warm planner, CacheRecords below) knows every record's exact sizes:
@@ -2386,7 +2460,8 @@ struct FileFacts { std::uint64_t hash = 0; long long sizeBytes = -1; long long m
 struct FileFactCounts
 {
     std::uint32_t defs = 0, refs = 0, incs = 0, binds = 0, ffis = 0, routeDefs = 0, routeUses = 0, constOpens = 0;
-    bool none() const noexcept { return ( defs | refs | incs | binds | ffis | routeDefs | routeUses | constOpens ) == 0; }
+    std::uint32_t constructs = 0;   // v51 (QD-CONSTRUCTS-AT-INGEST): the ninth family, after constOpens
+    bool none() const noexcept { return ( defs | refs | incs | binds | ffis | routeDefs | routeUses | constOpens | constructs ) == 0; }
 };
 
 // A record's head: everything a warm run decides on before the body is decoded — the stat gate, the hit test, the
@@ -2399,12 +2474,15 @@ struct CachedRecordHead
     long long      ctimeNs   = -1;
     FileHealth     health;
     FileFactCounts counts;
+    bool           constructsAbsent = false;   // v51: the record was written by a pool that ran no construct pass (kConstructsAbsent)
 };
 
 // tiny native-endian binary (de)serializer (the cache is host-local, never shipped)
 struct ByteW
 {
-    std::string b;
+    std::string   b;
+    std::uint64_t streamed = 0;   // C1 SAVE-STREAM: bytes saveCache already wrote out of `b` to its file (0 for an in-memory writer)
+    std::uint64_t offset() const noexcept { return streamed + b.size(); }   // the absolute blob offset the next byte lands at
     void u8 ( std::uint8_t  v ) { b.push_back( char( v ) ); }
     void u32( std::uint32_t v ) { b.append( reinterpret_cast<const char*>( &v ), 4 ); }
     void u64( std::uint64_t v ) { b.append( reinterpret_cast<const char*>( &v ), 8 ); }
@@ -2489,10 +2567,16 @@ inline unsigned lexDictIndexWidth( std::size_t dictCount ) noexcept
 {
     return dictCount <= 0x100 ? 1u : dictCount <= 0x10000 ? 2u : 4u;   // indices go up to dictCount-1
 }
+// v50 (CLONES-PERSIST): the def kinds that get a clone key — the kinds findClones compares — as a bit per SymKind
+// (ingest_parsepool.h rawDefCloneKey). The record does not depend on it: every def record carries a presence byte.
+inline constexpr std::uint32_t kCloneKeyKindBits = ( 1u << unsigned( SymKind::Function ) ) | ( 1u << unsigned( SymKind::Method ) );
+static_assert( kSymKindCount <= 32, "kCloneKeyKindBits holds one bit per SymKind" );
 inline void writeDef( ByteW& w, const RawDef& d, bool withLex, std::size_t fileDictCount, const std::uint32_t* rowDictIndex )
 {
     w.u32( d.line ); w.u32( d.startByte ); w.u32( d.endByte ); w.u32( d.nameByte ); w.u32( d.bodyByte ); w.u32( d.cx ); w.u32( d.ccx ); w.u32( d.loc ); w.u32( d.locals ); w.u32( d.ppAlt ); w.u32( d.humps ); w.u32( d.deepLoc ); w.u32( d.ev ); w.u32( d.params ); w.u32( d.paramsMin ); w.u8( d.maxNest ); w.u8( d.arityExact ); w.u8( d.testScope ); w.u8( d.recovered ); w.u8( d.internalLinkage ); w.u8( d.scopeRootsStd ); w.u32( d.fnScopeStart ); w.u32( d.fnScopeEnd ); w.u8( std::uint8_t( d.kind ) ); w.u8( std::uint8_t( d.lang ) ); w.str( d.name ); w.str( d.scope );
     for( const std::uint8_t tagCount : d.evWhy ) { w.u8( tagCount ); }   // 8×u8, fixed order (model.h kEvWhyTagTable)
+    w.u8( d.cloneKey != 0 ? 1 : 0 );                                     // v50: clone-key presence byte (0 = no key), then the key
+    if( d.cloneKey != 0 ) { w.u64( d.cloneKey ); }
     if( withLex )
     {
         ASSUME( d.lex.tokenHashes.size() == d.lex.tokenTfs.size() );
@@ -2576,7 +2660,50 @@ inline void writeDef( ByteW& w, const RawDef& d, bool withLex, std::size_t fileD
         }
     }
 }
-inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8( std::uint8_t( r.lang ) ); w.str( r.name ); w.u8( r.isInherit ? 1 : 0 ); w.u8( r.isDocLink ? 1 : 0 ); w.str( r.qualifier ); w.u8( std::uint8_t( r.recv ) ); w.str( r.recvVar ); w.u8( r.isCompose ? 1 : 0 ); w.str( r.fieldName ); w.str( r.composeRel ); w.u8( std::uint8_t( r.role ) ); w.u32( r.line ); w.u32( r.argCount ); w.u8( r.argCountKnown ? 1 : 0 ); w.u8( r.viaArrow ? 1 : 0 ); w.u8( r.qualifierRootsStd ? 1 : 0 ); w.u8( r.memberCall ? 1 : 0 ); w.str( r.memberRoot ); w.str( r.memberPath ); w.str( r.memberCtor ); w.str( r.memberVia ); w.u8( r.memberFactory ? 1 : 0 ); w.u8( r.forwarded ? 1 : 0 ); w.u8( r.trailingLambda ? 1 : 0 ); if( r.isInherit ) { w.u32( r.baseBind ); } }
+// MEM-R1a: a registrar Value ref's object-literal offset is the row field litAt, but the record still spells it as the qualifier's
+// "@<litAt>" tail (the format every blob since the registrar lane holds), so the blob is byte-identical and no kParserVer moves.
+// Only a Value ref's qualifier is ever split (its text is "<scope><shadow>", two characters, from emitValueRef): a call's written
+// qualifier keeps any '@' it has.
+inline void writeRefQualifier( ByteW& w, const RawRef& r )
+{
+    if( r.litAt == 0 )
+    {
+        w.str( r.qualifier );
+        return;
+    }
+    DASSERT( r.role == RefRole::Value && r.qualifier.size() == 2 );
+    w.str( std::string( r.qualifier ) + "@" + std::to_string( r.litAt ) );
+}
+// The reader's half. The blob is external input: a tail that is not a nonzero u32 in decimal is corruption (the record takes
+// readFileRecord's one refusal path), never a text to keep.
+inline void readRefQualifier( ByteR& r, std::string_view qualifier, RawRef& x )
+{
+    if( x.role != RefRole::Value || qualifier.size() <= 2 || qualifier[ 2 ] != '@' )
+    {
+        x.qualifier = qualifier;
+        return;
+    }
+    const std::string_view digits = qualifier.substr( 3 );
+    std::uint64_t          litAt  = 0;
+    // length and every digit are checked BEFORE any arithmetic (CodeRabbit 4545944847): a 20-nines tail or a `1/` would
+    // otherwise wrap the accumulator, which -fsanitize=integer aborts on before VALIDATE can refuse the record
+    bool valid = !digits.empty() && digits.size() <= 10
+              && std::all_of( digits.begin(), digits.end(), []( char c ) { return c >= '0' && c <= '9'; } );
+    for( std::size_t k = 0; valid && k < digits.size(); ++k )
+    {
+        litAt = litAt * 10 + std::uint64_t( digits[ k ] - '0' );   // <= 10 digits: at most 9 999 999 999, far under 2^64
+    }
+    if( !VALIDATE( valid && litAt != 0 && litAt <= 0xFFFFFFFFu ) )
+    {
+        DISCLOSE( Diagnostics::answerUnchanged, "a rejected cache is rebuilt from source: this run parses and answers byte-identically",
+                  "ingest: cache ref record carries a registrar qualifier whose literal offset is not a number — cache treated as corrupt" );
+        r.ok = false;
+        return;
+    }
+    x.qualifier = qualifier.substr( 0, 2 );
+    x.litAt     = std::uint32_t( litAt );
+}
+inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8( std::uint8_t( r.lang ) ); w.str( r.name ); w.u8( r.isInherit ? 1 : 0 ); w.u8( r.isDocLink ? 1 : 0 ); writeRefQualifier( w, r ); w.u8( std::uint8_t( r.recv ) ); w.str( r.recvVar ); w.u8( r.isCompose ? 1 : 0 ); w.str( r.fieldName() ); w.str( r.composeRel() ); w.u8( std::uint8_t( r.role ) ); w.u32( r.line ); w.u32( r.argCount ); w.u8( r.argCountKnown ? 1 : 0 ); w.u8( r.viaArrow ? 1 : 0 ); w.u8( r.qualifierRootsStd ? 1 : 0 ); w.u8( r.memberCall ? 1 : 0 ); w.str( r.memberRoot ); w.str( r.memberPath() ); w.str( r.memberCtor() ); w.str( r.memberVia() ); w.u8( r.memberFactory ? 1 : 0 ); w.u8( r.forwarded ? 1 : 0 ); w.u8( r.trailingLambda ? 1 : 0 ); if( r.isInherit ) { w.u32( r.baseBind ); } }
 
 // loadCache's countFits() bounds a corrupt on-disk record COUNT against remaining bytes /
 // minRecordBytes BEFORE reserve() — the guard that keeps a hostile blob's 0xFFFFFFFF count from reaching
@@ -2601,7 +2728,7 @@ inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8
 // verifyCacheRecordMinimaTripwire() below derives these
 // same numbers from the REAL writer functions at runtime so the next field added to writeDef/writeRef
 // can't silently stale them.
-inline constexpr std::size_t kMinDefRecordBytesLean      = 92;   // 17×u32 + 16×u8 + 2×str(len u32, empty) (paramsMin u32: 88 -> 92, kCacheVersion 33)
+inline constexpr std::size_t kMinDefRecordBytesLean      = 93;   // 17×u32 + 17×u8 + 2×str(len u32, empty) (paramsMin u32: 88 -> 92, kCacheVersion 33; clone-key presence u8: 92 -> 93, v50)
 inline constexpr std::size_t kMinDefRecordBytesRichExtra =  9;   // v10 rich withLex extra: dlWeighted u32 + tokenCount u32 + tfWidth u8
 inline constexpr std::size_t kMinRefRecordBytes          = 61;   // 3×u32 + 13×u8 + 9×str(len u32, empty)
 
@@ -2642,6 +2769,16 @@ inline RawDef readDef( ByteR& r, bool withLex, const std::vector<std::uint64_t>&
         r.ok = false;
     }
     for( std::uint8_t& tagCount : d.evWhy ) { tagCount = r.u8(); }   // mirrors writeDef's fixed 8×u8 order
+    // v50: mirrors writeDef. The presence byte is 0 or 1; any other value is corruption and takes the one refusal path. Any
+    // u64 is a valid key: findClones re-reads and compares every shared key, so a wrong key costs a read, never an answer.
+    const std::uint8_t hasCloneKey = r.u8();
+    if( r.ok && !VALIDATE( hasCloneKey <= 1 ) )
+    {
+        DISCLOSE( Diagnostics::answerUnchanged, "a rejected cache is rebuilt from source: this run parses and answers byte-identically",
+                  "ingest: cache def record carries a clone-key presence byte other than 0/1 — cache treated as corrupt" );
+        r.ok = false;
+    }
+    if( r.ok && hasCloneKey == 1 ) { d.cloneKey = r.u64(); }
     if( withLex && r.ok )
     {
         d.lex.dlWeighted = r.u32();
@@ -2720,9 +2857,9 @@ inline RawDef readDef( ByteR& r, bool withLex, const std::vector<std::uint64_t>&
     }
     return d;
 }
-inline RawRef readRef ( ByteR& r ) { RawRef x; x.startByte = r.u32(); x.lang = r.enumU8<Lang>( kLangCount ); x.name = r.str(); x.isInherit = r.flagU8(); x.isDocLink = r.flagU8(); x.qualifier = r.str(); x.recv = r.enumU8<RecvKind>( kRecvKindCount ); x.recvVar = r.str(); x.isCompose = r.flagU8(); x.fieldName = r.str(); x.composeRel = r.str(); x.role = r.enumU8<RefRole>( kRefRoleCount ); x.line = r.u32(); x.argCount = r.u16Of32(); x.argCountKnown = r.flagU8(); x.viaArrow = r.flagU8(); x.qualifierRootsStd = r.flagU8(); x.memberCall = r.flagU8(); x.memberRoot = r.str(); x.memberPath = r.str(); x.memberCtor = r.str(); x.memberVia = r.str(); x.memberFactory = r.flagU8(); x.forwarded = r.flagU8(); x.trailingLambda = r.flagU8(); if( x.isInherit ) { x.baseBind = r.u32(); } return x; }
+inline RawRef readRef ( ByteR& r ) { RawRef x; x.startByte = r.u32(); x.lang = r.enumU8<Lang>( kLangCount ); x.name = r.view(); x.isInherit = r.flagU8(); x.isDocLink = r.flagU8(); const std::string_view qualifier = r.view(); x.recv = r.enumU8<RecvKind>( kRecvKindCount ); x.recvVar = r.view(); x.isCompose = r.flagU8(); x.setFieldName( r.view() ); x.setComposeRel( r.view() ); x.role = r.enumU8<RefRole>( kRefRoleCount ); readRefQualifier( r, qualifier, x ); x.line = r.u32(); x.argCount = r.u16Of32(); x.argCountKnown = r.flagU8(); x.viaArrow = r.flagU8(); x.qualifierRootsStd = r.flagU8(); x.memberCall = r.flagU8(); x.memberRoot = r.view(); x.setMemberPath( r.view() ); x.setMemberCtor( r.view() ); x.setMemberVia( r.view() ); x.memberFactory = r.flagU8(); x.forwarded = r.flagU8(); x.trailingLambda = r.flagU8(); if( x.isInherit ) { x.baseBind = r.u32(); } return x; }
 inline void   writeBind( ByteW& w, const RawBind& b ) { w.u32( b.startByte ); w.u8( std::uint8_t( b.lang ) ); w.u8( std::uint8_t( b.kind ) ); w.u8( b.isFromAssignment ? 1 : 0 ); w.u8( b.resultIndex ); w.u8( b.unwrapDepth ); w.u32( b.spanStart ); w.u32( b.spanEnd ); w.str( b.var ); w.str( b.typeName ); w.str( b.importedName ); }
-inline RawBind readBind( ByteR& r ) { RawBind b; b.startByte = r.u32(); b.lang = r.enumU8<Lang>( kLangCount ); b.kind = r.enumU8<LocalBindKind>( kLocalBindKindCount ); b.isFromAssignment = r.flagU8(); b.resultIndex = r.u8(); b.unwrapDepth = r.u8(); b.spanStart = r.u32(); b.spanEnd = r.u32(); b.var = r.str(); b.typeName = r.str(); b.importedName = r.str(); return b; }
+inline RawBind readBind( ByteR& r ) { RawBind b; b.startByte = r.u32(); b.lang = r.enumU8<Lang>( kLangCount ); b.kind = r.enumU8<LocalBindKind>( kLocalBindKindCount ); b.isFromAssignment = r.flagU8(); b.resultIndex = r.u8(); b.unwrapDepth = r.u8(); b.spanStart = r.u32(); b.spanEnd = r.u32(); b.var = r.view(); b.typeName = r.view(); b.importedName = r.view(); return b; }
 inline void   writeFfi( ByteW& w, const BindingAlias& a ) { w.u8( std::uint8_t( a.kind ) ); w.u8( a.lowConf ? 1 : 0 ); w.str( a.aliasName ); w.str( a.targetName ); w.str( a.targetScope ); }
 inline BindingAlias readFfi( ByteR& r ) { BindingAlias a; a.kind = r.enumU8<BindKind>( kBindKindCount ); a.lowConf = r.flagU8(); a.aliasName = r.str(); a.targetName = r.str(); a.targetScope = r.str(); return a; }
 // B6.3: RouteDef needs no startByte (its handler is resolved by NAME in buildGraph); RawRouteUse mirrors
@@ -2740,6 +2877,10 @@ inline constexpr std::size_t kMinFfiRecordBytes      = 14;   // 2×u8 (kind,lowC
 inline constexpr std::size_t kMinRouteDefRecordBytes = 13;   // B6.3: 1×u32 (line) + 1×u8 (method) + 2×str(len u32, empty)
 inline constexpr std::size_t kMinRouteUseRecordBytes = 13;   // B6.3: 2×u32 (startByte,line) + 1×u8 (method) + 1×str(len u32, empty)
 inline constexpr std::size_t kMinConstOpenRecordBytes = 13;  // parser version 82: 2×u32 (startByte,endByte) + 1×u8 (namespaceOnly) + 1×str(len u32, empty)
+inline constexpr std::size_t kConstructRecordBytes    = 9;   // v51: 2×u32 (startByte,line) + 1×u8 (tag) — fixed size
+// v51: the HEAD's construct count when the record's pool ran no construct pass (ingest.h WantConstructHits): the hits are
+// unknown, not zero. The body then holds a zero count; a --quality-delta ingest treats the record as a miss.
+inline constexpr std::uint32_t kConstructsAbsent      = 0xFFFFFFFFu;
 
 // Read a record's HEAD: its root-relative key (a view into the reader's bytes), hash, stat triple, health and the v49
 // family counts. readFileRecord starts with it; the warm planner (loadCache) reads only this much of each record.
@@ -2765,6 +2906,12 @@ inline bool readRecordHead( ByteR& r, std::string_view& relOut, CachedRecordHead
     c.routeDefs  = r.u32();
     c.routeUses  = r.u32();
     c.constOpens = r.u32();
+    c.constructs = r.u32();                  // v51; kConstructsAbsent = never computed for this record
+    head.constructsAbsent = c.constructs == kConstructsAbsent;
+    if( head.constructsAbsent )
+    {
+        c.constructs = 0;
+    }
     return r.ok;
 }
 
@@ -2776,7 +2923,8 @@ inline bool headCountsFit( const FileFactCounts& c, std::uint64_t recLength, boo
     const std::uint64_t need = std::uint64_t( c.defs ) * minDefRecordBytes( captureValueUses ) + std::uint64_t( c.refs ) * kMinRefRecordBytes
                              + std::uint64_t( c.incs ) * kMinIncRecordBytes + std::uint64_t( c.binds ) * kMinBindRecordBytes
                              + std::uint64_t( c.ffis ) * kMinFfiRecordBytes + std::uint64_t( c.routeDefs ) * kMinRouteDefRecordBytes
-                             + std::uint64_t( c.routeUses ) * kMinRouteUseRecordBytes + std::uint64_t( c.constOpens ) * kMinConstOpenRecordBytes;
+                             + std::uint64_t( c.routeUses ) * kMinRouteUseRecordBytes + std::uint64_t( c.constOpens ) * kMinConstOpenRecordBytes
+                             + std::uint64_t( c.constructs ) * kConstructRecordBytes;
     return need <= recLength;
 }
 
@@ -2831,6 +2979,7 @@ inline bool readFileRecord( ByteR& r, bool captureValueUses, std::vector<std::ui
     ffOut.mtimeNs   = head.mtimeNs;
     ffOut.ctimeNs   = head.ctimeNs;
     ffOut.health    = head.health;
+    ffOut.constructsAbsent = head.constructsAbsent;
     if( captureValueUses )
     {
         // H3 (v10): the file's subtoken dictionary — def rows below index into it. Must be strictly
@@ -2945,6 +3094,20 @@ inline bool readFileRecord( ByteR& r, bool captureValueUses, std::vector<std::ui
         co.namespaceOnly = r.flagU8();
         co.written       = r.str();
         ffOut.constOpens.push_back( std::move( co ) );
+    }
+    const std::uint32_t nch = r.u32();
+    if( !countFits( nch, kConstructRecordBytes, head.counts.constructs ) )
+    {
+        return false;
+    }
+    ffOut.constructs.reserve( nch );
+    for( std::uint32_t j = 0; j < nch && r.ok; ++j )
+    {
+        ConstructHit ch;                                // v51 (fileId re-labelled by the caller)
+        ch.startByte = r.u32();
+        ch.line      = r.u32();
+        ch.tag       = r.enumU8<std::uint8_t>( kConstructTagCount );   // a tag past the table is a corrupt record
+        ffOut.constructs.push_back( ch );
     }
     return r.ok;
 }
@@ -3083,14 +3246,7 @@ struct CacheRecords
                       "ingest: cache record checksum mismatch — that file is reparsed, the rest of the blob stands" );
             return false;
         }
-        out.defs.clear();
-        out.refs.clear();
-        out.incs.clear();
-        out.binds.clear();
-        out.ffis.clear();
-        out.routeDefs.clear();
-        out.routeUses.clear();
-        out.constOpens.clear();
+        clearFileFactsKeepCapacity( out );
         ByteR       r{ recBuf.data(), recBuf.data() + recBuf.size() };
         std::string rel;
         bool        decoded = false;
@@ -3181,9 +3337,10 @@ inline CacheRecords loadCache( const std::string& path, std::string_view rootDir
     out.entryOf.assign( crawledFiles.size(), CacheRecords::kNoCacheEntry );
     out.head.resize( crawledFiles.size() );
 
-    // The head is the record's first bytes: its key (u32 length + bytes) then 4 u64 + 14 u32. One prefix read covers
-    // every key up to about 400 bytes; a longer key takes a second read of exactly what the head needs.
-    constexpr std::size_t kHeadFixedBytes = 4 + 4 * 8 + 14 * 4;
+    // The head is the record's first bytes: its key (u32 length + bytes) then 4 u64 + 15 u32 (6 health fields and the 9
+    // family counts readRecordHead reads, v51's construct count the ninth). One prefix read covers every key up to 416
+    // bytes; a longer key takes a second read of exactly what the head needs (test/statgatecheck.sh (f)).
+    constexpr std::size_t kHeadFixedBytes = 4 + 4 * 8 + 15 * 4;
     constexpr std::size_t kHeadProbeBytes = 512;
     std::string headBuf;
     {
@@ -3276,7 +3433,7 @@ struct CacheFileIndexes
 {
     std::vector<rw::SmallVec<std::uint32_t, 8>> defIndex;
     std::vector<std::vector<std::uint32_t>>     refIndex, bindIndex;
-    std::vector<rw::SmallVec<std::uint32_t, 2>> incIndex, ffiIndex, routeDefIndex, routeUseIndex, constOpenIndex;
+    std::vector<rw::SmallVec<std::uint32_t, 2>> incIndex, ffiIndex, routeDefIndex, routeUseIndex, constOpenIndex, constructIndex;
 };
 
 inline CacheFileIndexes buildCacheFileIndexes( std::size_t fileCount,
@@ -3284,7 +3441,7 @@ inline CacheFileIndexes buildCacheFileIndexes( std::size_t fileCount,
                                                const std::vector<Include>& incs, const std::vector<RawBind>& binds,
                                                const std::vector<BindingAlias>& ffis,
                                                const std::vector<RouteDef>& routeDefs, const std::vector<RawRouteUse>& routeUses,
-                                               const std::vector<ConstOpen>& constOpens )
+                                               const std::vector<ConstOpen>& constOpens, const std::vector<ConstructHit>& constructs )
 {
     CacheFileIndexes ix;
     ix.defIndex.resize( fileCount );
@@ -3295,6 +3452,7 @@ inline CacheFileIndexes buildCacheFileIndexes( std::size_t fileCount,
     ix.routeDefIndex.resize( fileCount );
     ix.routeUseIndex.resize( fileCount );
     ix.constOpenIndex.resize( fileCount );
+    ix.constructIndex.resize( fileCount );
 
     // One generic grouping pass per family — an out-of-range fileId is DROPPED, never clamped, exactly as
     // the seven hand-written loops this replaces did.
@@ -3316,6 +3474,7 @@ inline CacheFileIndexes buildCacheFileIndexes( std::size_t fileCount,
     group( routeDefs, ix.routeDefIndex );   // B6.3
     group( routeUses, ix.routeUseIndex );   // B6.3
     group( constOpens, ix.constOpenIndex ); // parser version 82
+    group( constructs, ix.constructIndex ); // v51
     return ix;
 }
 
@@ -3410,7 +3569,7 @@ inline std::vector<CacheWriteRow> buildCacheWritePlan( const std::vector<std::ui
 // configuration crawls it; the rest of the blob is unaffected.
 inline bool appendCarryRecord( ByteW& w, int fd, const CacheEntry& src, std::string& scratch, CacheEntry& entryOut )
 {
-    const std::size_t recOffset = w.b.size();
+    const std::uint64_t recOffset = w.offset();
     scratch.resize( src.recLength );
     if( !preadExact( fd, scratch.data(), scratch.size(), src.recOffset )
         || recordSum32( std::string_view( scratch.data(), scratch.size() ) ) != src.recSum )
@@ -3420,28 +3579,36 @@ inline bool appendCarryRecord( ByteW& w, int fd, const CacheEntry& src, std::str
         return false;
     }
     w.raw( scratch.data(), scratch.size() );
-    entryOut = CacheEntry{ src.pathHash, std::uint64_t( recOffset ), src.contentHash,
+    entryOut = CacheEntry{ src.pathHash, recOffset, src.contentHash,
                            std::uint32_t( scratch.size() ), src.recSum };
     return true;
 }
 
-// Close a v15 blob: patch the header's entry count (carry-over drops only settle it here), append the
-// offset table, then the 24-byte trailer whose digest covers HEADER || TABLE. Each record carries its own
-// digest in its table entry and is checked only when that record is actually read, so this is the whole of
-// "the checksum covers the table plus the records actually read". The exact-fit invariant the trailer
-// encodes — fileSize == tableOffset + entryCount*32 + 24 — is what makes a truncation that removes whole
-// records detectable at all, so it is asserted here at the one place that can still be wrong about it.
-inline void finishCacheBlob( ByteW& w, const std::vector<CacheEntry>& table )
+// Close a v15 blob: append the offset table, then the 24-byte trailer whose digest covers HEADER || TABLE. Each record carries
+// its own digest in its table entry and is checked only when that record is actually read, so this is the whole of "the
+// checksum covers the table plus the records actually read". The exact-fit invariant the trailer encodes — fileSize ==
+// tableOffset + entryCount*32 + 24 — is what makes a truncation that removes whole records detectable at all, so it is asserted
+// here at the one place that can still be wrong about it. C1 SAVE-STREAM: the header's bytes left `w` with the first window, so
+// they ride in `index` beside the table, entryCount patched in here (carry-over drops only settle it now); saveCache patches the
+// FILE's copy once the stream is out.
+struct CacheBlobIndex
 {
+    std::string             header;   // the blob's first kCacheHeaderBytes, as written (entryCount 0 until finishCacheBlob)
+    std::vector<CacheEntry> table;    // one entry per record, in record order
+};
+inline void finishCacheBlob( ByteW& w, CacheBlobIndex& index )
+{
+    const std::vector<CacheEntry>& table = index.table;
+    ASSUME( index.header.size() == kCacheHeaderBytes );
     const std::uint32_t entryCount  = std::uint32_t( table.size() );
-    const std::uint64_t tableOffset = std::uint64_t( w.b.size() );
-    std::memcpy( w.b.data() + 21, &entryCount, 4 );
+    std::memcpy( index.header.data() + 21, &entryCount, 4 );
+    const std::uint64_t tableOffset = w.offset();
 
     // The digest's input is header || table, which are not adjacent in the blob, so it is assembled once
     // here and the table half is then appended to the blob out of the same buffer.
     std::string hdrTable;
     hdrTable.resize( kCacheHeaderBytes + std::size_t( entryCount ) * kCacheEntryBytes );
-    std::memcpy( hdrTable.data(), w.b.data(), kCacheHeaderBytes );
+    std::memcpy( hdrTable.data(), index.header.data(), kCacheHeaderBytes );
     if( entryCount != 0 )
     {
         std::memcpy( hdrTable.data() + kCacheHeaderBytes, table.data(), std::size_t( entryCount ) * kCacheEntryBytes );
@@ -3452,12 +3619,19 @@ inline void finishCacheBlob( ByteW& w, const std::vector<CacheEntry>& table )
     w.u32( entryCount );
     w.u32( 0 );   // reserved
     w.u64( blobChecksum( std::string_view( hdrTable.data(), hdrTable.size() ) ) );
-    ASSUME( w.b.size() == tableOffset + std::uint64_t( entryCount ) * kCacheEntryBytes + kCacheTrailerBytes );
+    ASSUME( w.offset() == tableOffset + std::uint64_t( entryCount ) * kCacheEntryBytes + kCacheTrailerBytes );
 }
 
 // write the cache atomically (path.tmp → rename); groups the merged raw facts back by file.
 // T5: `rootDir` is the CURRENT invocation's ingest root — every file key is stored root-relative
 // (relForHash) rather than verbatim, so the cache blob is committable/portable (see kCacheVersion=3).
+// v51: the construct hits saveCache writes, and per fileId whether they are KNOWN (0 = the record says kConstructsAbsent).
+struct ConstructHitsToSave
+{
+    const std::vector<ConstructHit>&  hits;
+    const std::vector<std::uint8_t>&  known;
+};
+
 inline void saveCache( const std::string& path, std::string_view rootDir, const std::vector<std::string>& files,
                        const std::vector<std::uint64_t>& fileHash,
                        const std::vector<long long>& fileSize, const std::vector<long long>& fileMtime,
@@ -3467,6 +3641,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
                        const std::vector<RawBind>& binds, const std::vector<BindingAlias>& ffis,
                        const std::vector<RouteDef>& routeDefs, const std::vector<RawRouteUse>& routeUses,   // B6.3
                        const std::vector<ConstOpen>& constOpens,                                             // parser version 82
+                       const ConstructHitsToSave& constructHits,                                             // v51
                        bool captureValueUses )
 {
     PROFILE_SCOPE_DESCRIBE( "ingest: saveCache (serialize + write)" );
@@ -3481,7 +3656,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
     }
 
     const std::size_t      F  = files.size();
-    const CacheFileIndexes ix = buildCacheFileIndexes( F, defs, refs, incs, binds, ffis, routeDefs, routeUses, constOpens );
+    const CacheFileIndexes ix = buildCacheFileIndexes( F, defs, refs, incs, binds, ffis, routeDefs, routeUses, constOpens, constructHits.hits );
 
     // This header field is no longer the racy-rule reference — loadCache now derives that from
     // a fresh stat() of the cache file itself (same clock+granularity domain as the per-file mtimes it's
@@ -3507,10 +3682,73 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
     std::vector<CacheEntry>          carry;
     const std::vector<CacheWriteRow> plan  = buildCacheWritePlan( keys.order, keys.pathHashes, prev.entries, carry );
 
-    std::vector<CacheEntry> table;
+    // unique per-process temp so two concurrent runs (this repo runs ~20 parallel sessions) don't
+    // interleave writes into ONE shared "path.tmp" and rename a torn file. rename(2) is atomic; the
+    // per-pid temp makes each writer's bytes whole → last-writer-wins, never a corrupt cache.
+    //
+    // A3-F9: fwrite/fclose were never checked, so an ENOSPC (or any short write) produced a truncated
+    // temp file that still got rename()'d over the previous GOOD cache — silently destroying it (the
+    // checksum trailer self-heals on next load via a full reparse, so this was perf-only, but a good
+    // cache should never be clobbered without a peep). Mirrors mcpedit::atomicWrite's discipline
+    // (src/mcp.h): check the write byte-count AND fclose's return, and on any failure unlink the temp
+    // and leave the prior on-disk cache (if any) untouched.
+    // Round 5 (rw::pathguard): the temp is created EXCLUSIVELY and WITHOUT following a link, under an
+    // unpredictable name beside the cache blob, refusing an existing entry at that name. The name keeps its
+    // `.tmp` tail (a *.tmp residue glob still
+    // matches) and 0666 preserves the fopen("wb") default mode. The RAII holder owns the temp NAME and removes
+    // it on every early return below; fdopen adopts the descriptor so fwrite/fclose keep their bookkeeping.
+    rw::pathguard::ExclTempFile temp  = rw::pathguard::createExclTempFile( path + ".", ".tmp", 0666 );
+    const int                   rawFd = temp.ok() ? temp.releaseFd() : -1;
+    std::FILE*                  fp    = rawFd >= 0 ? os::fdopen( rawFd, "wb" ) : nullptr;
+    // A throw between here and the checked close below (table.reserve, a window's growth) must not leak the stream and its
+    // descriptor (CodeRabbit 4545944852): this owner closes it on unwind; the normal path takes the stream back first.
+    struct StreamOwner
+    {
+        std::FILE*& stream;
+        ~StreamOwner()
+        {
+            if( stream != nullptr )
+            {
+                std::fclose( stream );
+            }
+        }
+    } closeOnUnwind{ fp };
+    if( !fp )
+    {
+        const int openErr = errno;
+        if( rawFd >= 0 )
+        {
+            os::close( rawFd );   // fdopen did not adopt the descriptor; the holder still removes the temp name
+        }
+        DISCLOSE( Diagnostics::answerUnchanged, "this answer is already computed in memory: only the next run starts cold",
+                  "ingest: saveCache could not open temp file for write — cache left unchanged" );
+        rw::emitTo( stderr, "ripwire: cache {}: cannot write ({}) — every run parses from source until this is fixed\n",
+                      path.c_str(), std::strerror( openErr )  );   // 2026-09-06: Release kept no signal for this
+        return;
+    }
+    // C1 SAVE-STREAM (reports/mem-audit-fable-1111 §C1): the blob is no longer built whole in memory. `w` is a WINDOW: once it
+    // holds kSaveWindowBytes at a record boundary it is written to the temp and cleared, `w.streamed` carrying the absolute offset
+    // every recOffset and the trailer's tableOffset are read from. The one header field that settles only at the end, entryCount,
+    // is patched in the file with one seek-and-write before the rename; the bytes are the ones the whole-blob write produced.
+    // Before this the doubling std::string set the cold peak on envoy and vscode (+1.4-1.5 x the blob over the pool join, M2 11-11).
+    // The stream owns the descriptor since releaseFd(), so it closes on every path: a write failure only marks `wErr`, and the
+    // close is evaluated on its own, never short-circuited into one expression.
+    constexpr std::size_t kSaveWindowBytes = std::size_t( 4 ) << 20;
+    bool                  wErr             = false;
+    ByteW                 w;
+    const auto            drain = [ & ]
+    {
+        if( !wErr && !w.b.empty() && std::fwrite( w.b.data(), 1, w.b.size(), fp ) != w.b.size() )
+        {
+            wErr = true;
+        }
+        w.streamed += w.b.size();
+        w.b.clear();
+    };
+    CacheBlobIndex           index;
+    std::vector<CacheEntry>& table = index.table;
     table.reserve( plan.size() );
 
-    ByteW w;
     // A1 (team-index): kArtifactArch byte sits in the header right after parserVer so loadCache's guard
     // rejects a foreign-arch (endian/pointer-width) blob before trusting any raw-int record bytes.
     w.u32( kCacheMagic );
@@ -3520,6 +3758,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
     w.u64( (std::uint64_t)blobWriteNs );
     w.u32( 0 );   // entryCount — patched in place below, once the carry-over verification has settled it
     ASSUME( w.b.size() == kCacheHeaderBytes );
+    index.header = w.b;   // finishCacheBlob's digest input: the first window takes these bytes to the file
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/saveCache: serialize records" );
         std::vector<std::uint64_t> fileDict;                                   // per-file subtoken dictionary, reused across files
@@ -3529,6 +3768,14 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
         std::string                carryBuf;                                   // one carry-over record, verified before it is appended
         for( const CacheWriteRow& row : plan )
         {
+            if( w.b.size() >= kSaveWindowBytes )   // a record boundary: no record straddles a window, so its bytes are whole in `w`
+            {
+                drain();
+            }
+            if( wErr )
+            {
+                break;   // the temp is torn already: nothing below can publish it
+            }
             if( row.fileIndex == kNoCacheIndex )
             {
                 CacheEntry copied;
@@ -3539,7 +3786,8 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
                 continue;
             }
 
-            const std::size_t   recOffset = w.b.size();
+            const std::size_t   recStart  = w.b.size();   // the record's first byte in the window
+            const std::uint64_t recOffset = w.offset();   //   …and in the blob
             const std::uint32_t f         = row.fileIndex;
             w.str( keys.rels[f] );
             w.u64( f < fileHash.size() ? fileHash[f] : 0 );
@@ -3562,6 +3810,8 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
             {
                 w.u32( std::uint32_t( familyCount ) );
             }
+            const bool constructsKnownHere = f >= constructHits.known.size() || constructHits.known[f] != 0;
+            w.u32( constructsKnownHere ? std::uint32_t( ix.constructIndex[f].size() ) : kConstructsAbsent );   // v51
             if( captureValueUses )
             {
                 // H3 (v10): the sorted union of this file's def rows — subtokens repeat heavily across a
@@ -3684,55 +3934,35 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
                 w.u8( constOpens[i].namespaceOnly ? 1 : 0 );
                 w.str( constOpens[i].written );
             }
-            table.push_back( CacheEntry{ row.pathHash, std::uint64_t( recOffset ),
+            w.u32( std::uint32_t( ix.constructIndex[f].size() ) );
+            for( std::uint32_t i : ix.constructIndex[f] )
+            {                                        // v51: span start + line + tag byte (fileId is the record's)
+                w.u32( constructHits.hits[i].startByte );
+                w.u32( constructHits.hits[i].line );
+                w.u8( constructHits.hits[i].tag );
+            }
+            table.push_back( CacheEntry{ row.pathHash, recOffset,
                                          f < fileHash.size() ? fileHash[f] : 0,
-                                         std::uint32_t( w.b.size() - recOffset ),
-                                         recordSum32( std::string_view( w.b.data() + recOffset, w.b.size() - recOffset ) ) } );
+                                         std::uint32_t( w.b.size() - recStart ),
+                                         recordSum32( std::string_view( w.b.data() + recStart, w.b.size() - recStart ) ) } );
         }
     }   // symmetric bare scope: serialize-records profiling span
 
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/saveCache: offset table + trailer" );
-        finishCacheBlob( w, table );
+        const std::uint32_t entryCount = std::uint32_t( table.size() );
+        finishCacheBlob( w, index );
+        drain();
+        // entryCount into the file's header: one seek-and-write after the stream, before the close and the rename
+        if( !wErr && ( std::fseek( fp, 21, SEEK_SET ) != 0 || std::fwrite( &entryCount, 1, 4, fp ) != 4 ) )
+        {
+            wErr = true;
+        }
     }
     PROFILE_SCOPE_DESCRIBE( "ingest/saveCache: write + rename" );
 
-    // unique per-process temp so two concurrent runs (this repo runs ~20 parallel sessions) don't
-    // interleave writes into ONE shared "path.tmp" and rename a torn file. rename(2) is atomic; the
-    // per-pid temp makes each writer's bytes whole → last-writer-wins, never a corrupt cache.
-    //
-    // A3-F9: fwrite/fclose were never checked, so an ENOSPC (or any short write) produced a truncated
-    // temp file that still got rename()'d over the previous GOOD cache — silently destroying it (the
-    // checksum trailer self-heals on next load via a full reparse, so this was perf-only, but a good
-    // cache should never be clobbered without a peep). Mirrors mcpedit::atomicWrite's discipline
-    // (src/mcp.h): check the write byte-count AND fclose's return, and on any failure unlink the temp
-    // and leave the prior on-disk cache (if any) untouched.
-    // Round 5 (rw::pathguard): the temp is created EXCLUSIVELY and WITHOUT following a link, under an
-    // unpredictable name beside the cache blob, refusing an existing entry at that name. The name keeps its
-    // `.tmp` tail (a *.tmp residue glob still
-    // matches) and 0666 preserves the fopen("wb") default mode. The RAII holder owns the temp NAME and removes
-    // it on every early return below; fdopen adopts the descriptor so fwrite/fclose keep their bookkeeping.
-    rw::pathguard::ExclTempFile temp  = rw::pathguard::createExclTempFile( path + ".", ".tmp", 0666 );
-    const int                   rawFd = temp.ok() ? temp.releaseFd() : -1;
-    std::FILE*                  fp    = rawFd >= 0 ? os::fdopen( rawFd, "wb" ) : nullptr;
-    if( !fp )
-    {
-        const int openErr = errno;
-        if( rawFd >= 0 )
-        {
-            os::close( rawFd );   // fdopen did not adopt the descriptor; the holder still removes the temp name
-        }
-        DISCLOSE( Diagnostics::answerUnchanged, "this answer is already computed in memory: only the next run starts cold",
-                  "ingest: saveCache could not open temp file for write — cache left unchanged" );
-        rw::emitTo( stderr, "ripwire: cache {}: cannot write ({}) — every run parses from source until this is fixed\n",
-                      path.c_str(), std::strerror( openErr )  );   // 2026-09-06: Release kept no signal for this
-        return;
-    }
-    // The stream owns the descriptor since releaseFd(), so it closes on every path: the write and the close
-    // are evaluated separately, never short-circuited into one expression.
-    const std::size_t wrote  = std::fwrite( w.b.data(), 1, w.b.size(), fp );
-    const bool        closed = std::fclose( fp ) == 0;
-    const bool        wErr   = wrote != w.b.size() || !closed;
+    const bool closed = std::fclose( std::exchange( fp, nullptr ) ) == 0;   // taken back from closeOnUnwind: closed once, checked
+    wErr              = wErr || !closed;
     if( wErr )
     {
         // never rename a short/torn write over a good cache — the holder removes the temp on return

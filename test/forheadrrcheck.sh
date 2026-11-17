@@ -37,6 +37,10 @@
 # Exits non-zero on any failure.
 
 set -u
+# SIBLING-DEMOTE / DECL-TWIN (every dialect since DEMOTE-ALL-DIALECTS, fordemoteall.h) print some ranked rows as <t p= sym= r=/>
+# pointers (--json: {"pointer":…,"sym":…,"r":…} objects) in their place. This gate pins the ORDER of the ranked entries — a row or a
+# pointer at its r= — so it reads the answer as shipped; the rules are pinned in forsiblingdemotecheck / fordecltwincheck.
+unset RIPWIRE_NO_SIBLING_DEMOTE RIPWIRE_NO_DECL_TWIN
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 unset RIPWIRE_NO_HEAD_RR RIPWIRE_NO_BODY_FOLD RIPWIRE_NO_DOCS_AFTER_CODE
@@ -73,9 +77,9 @@ def load(p): return open(p, "rb").read().decode("utf-8", "replace")
 def attrs(s): return dict((k, html.unescape(v)) for k, v in re.findall(r'(\w+)="([^"]*)"', s))
 def rows(t):
     out = []
-    for m in re.finditer(r'<d ([^>]*)>', t):
-        a = attrs(m.group(1))
-        if "r" in a: out.append((int(a["r"]), a.get("p", ""), a.get("n", "")))
+    for m in re.finditer(r'<(d|t) ([^>]*)>', t):   # a ranked entry: a <d> row, or a demote pointer <t p= sym= r=/> in its place
+        a = attrs(m.group(2))
+        if "r" in a: out.append((int(a["r"]), a.get("p", ""), a.get("n", a.get("sym", ""))))
     return [(p, n) for r, p, n in sorted(out)]
 def sigs(t):
     m = re.search(r'<sigs\b([^>]*)>', t); return attrs(m.group(1)) if m else {}
@@ -138,7 +142,7 @@ elif cmd == "json":        # JSON XMLON — the JSON rows in the XML order, file
     js = find(j) or []
     flat = []
     for e in js:
-        if isinstance(e, dict) and "r" in e: flat.append((int(e["r"]), e.get("p", ""), e.get("n", "")))
+        if isinstance(e, dict) and "r" in e: flat.append((int(e["r"]), e.get("p", ""), e.get("n", e.get("sym", ""))))   # a row, or a pointer object
         if isinstance(e, dict) and isinstance(e.get("syms"), list):
             for s in e["syms"]:
                 if "r" in s: flat.append((int(s["r"]), e.get("p", s.get("p", "")), s.get("n", "")))
@@ -203,7 +207,11 @@ h5(){ local label="$1"; shift
 h5 "name-exact route" --for=dispatchQueuedJobs
 h5 "--no-route" --for="$Q_MONO" --no-route
 h5 "a question naming an indexed file" --for="How does src/scheduler.ts dispatch queued jobs to workers?"
-h5 "--token-budget=1200" --for="$Q_MONO" --token-budget=1200
+# H5t — TOKEN-BUDGET-MONOTONE (rule 4, 2026-11-14): --token-budget is no longer exempt (it used to switch the posture, score order
+# included); a budget the answer fits returns the unbudgeted answer byte for byte, the reorder as it is there
+run "$TMP/t.on" "$FIX/mono" 0 --for="$Q_MONO" --token-budget=100000; run "$TMP/t.off" "$FIX/mono" 0 --for="$Q_MONO"
+if ran "$TMP/t.on" "H5t" && cmp -s "$TMP/t.on" "$TMP/t.off"; then ok "H5t --token-budget=100000: the unbudgeted answer byte for byte"
+else no "H5t --token-budget=100000 is not the unbudgeted answer"; fi
 
 # ── H6: the declaration twin ─────────────────────────────────────────────────────────────────────────────────────────────
 run "$TMP/decl.off" "$FIX/decl" 1 --for="$Q_DECL"

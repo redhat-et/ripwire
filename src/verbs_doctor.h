@@ -54,6 +54,7 @@ extern "C"
     const TSLanguage* tree_sitter_kotlin( void );
     const TSLanguage* tree_sitter_gdscript( void );
     const TSLanguage* tree_sitter_clojure( void );
+    const TSLanguage* tree_sitter_proto( void );
 }
 
 // This process's own executable path, realpath'd. The platform's own answer comes first (rw::os::exepath) because
@@ -342,7 +343,7 @@ inline std::string doctorBinaryPathVerdictAttr( const std::string& selfPath, con
                       " compare " + whichPath + " with " + selfPath + " by hand (cmp on POSIX, Get-FileHash in PowerShell)" ), esc ) ) + "\"";
     }
     const bool        selfIsOlder = order != 0 ? order > 0 : selfSt.st_mtime < whichSt.st_mtime;
-    const std::string selfName    = order != 0 ? selfPath + " (ripwire " + rw::kRipwireVersion + ")" : selfPath;
+    const std::string selfName    = order != 0 ? selfPath + " (ripwire " + rw::kRipwireVersionLabel + ")" : selfPath;
     const std::string whichName   = order != 0 ? whichPath + " (" + whichVersion + ")" : whichPath;
     const std::string& olderName  = selfIsOlder ? selfName : whichName;
     const std::string& newerName  = selfIsOlder ? whichName : selfName;
@@ -626,6 +627,7 @@ inline DoctorGrammarProbe doctorProbeGrammars()
         { "kotlin",     &tree_sitter_kotlin,     "kotlin"     },
         { "gdscript",   &tree_sitter_gdscript,   "gdscript"   },
         { "clojure",    &tree_sitter_clojure,    "clojure"    },
+        { "proto",      &tree_sitter_proto,      "proto"      },
         // markdown carries NO tags.scm — ingest extracts sections by a custom tree walk, so the honest
         // probe is the pairing ingest actually uses: set_language + a real parse, not a query compile.
         { nullptr,      &tree_sitter_markdown,   "markdown"   },
@@ -687,6 +689,16 @@ inline DoctorCacheStats doctorCacheStats( const std::string& dir )
         if( name.rfind( "ripwire-", 0 ) != 0 ) { return; }
         std::error_code ec;
         if( !entry.is_regular_file( ec ) ) { if( ec ) { out.truncated = true; } return; }
+        // Every `ripwire-` file in this directory is accounted here, the warm snapshot (`ripwire-warmsnap-<options>-
+        // <blob>.bin`, src/warmsnap.h) included: it is a cache artifact of its own family in ripwire's own cache
+        // directory, exactly like ripwire-qsnap-/ripwire-qheadsnap-/ripwire-docmd-, and it is swept by the same passes.
+        // There is no exclusion rule here any more. One was briefly needed when the snapshot was written as
+        // `<blob>.snap` BESIDE the user's named blob: it inherited the `ripwire-` prefix, DOUBLED the apparent blob
+        // count for every root that had one, and the windows-package release gate read a warm run taking the count
+        // 4 -> 5 as "wrote a new blob instead of reusing one" while that same run's cache-stats line said
+        // `reparsed=0 reused=6 files=6`. A snapshot of its own is created by the run that first writes the blob and
+        // then REWRITTEN IN PLACE (one per configuration, kept by evictOldCacheFamily), so a warm run does not move
+        // this count and that reading cannot come back.
         if( out.blobCount >= rw::quality::kMaxCacheBlobCount ) { out.truncated = true; out.capHit = true; return; }
         ++out.blobCount;
         const auto byteSize = entry.file_size( ec );

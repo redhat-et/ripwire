@@ -17,6 +17,7 @@
 //   • mcpedit.h  — the symbol-addressed EDIT verbs + runEditVerb()                 (includes mcpindex.h)
 // Include direction is strictly one-way: mcpjson → mcpindex → {mcpverbs, mcpedit} → mcp. No cycles.
 
+#include "version.h"        // kRipwireVersionLabel — initialize's serverInfo.version (the --version label)
 #include "mcpverbs.h"      // the read/flagship verb builders runMcp dispatches to (pulls mcpindex.h → mcpjson.h)
 #include "compactlegend.h"   // P1 (L7): the legend:"compact" rewrite applied in textResult
 #include "legenddict.h"      // r2-LO: the session dictionary and the legend="ref" posture (resources/read, textResult)
@@ -1277,7 +1278,8 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                                                          : kMcpLatestProtocolVersion;
                 resp = "{\"jsonrpc\":\"2.0\",\"id\":" + id +
                        ",\"result\":{\"protocolVersion\":\"" + std::string( negotiatedVersion ) +
-                       "\",\"serverInfo\":{\"name\":\"ripwire\",\"version\":\"1.0\"},\"capabilities\":{\"tools\":{},\"resources\":{}},"
+                       "\",\"serverInfo\":{\"name\":\"ripwire\",\"version\":\"" + mcpdetail::jsonEscape( rw::kRipwireVersionLabel )   // the --version label
+                       + "\"},\"capabilities\":{\"tools\":{},\"resources\":{}},"
                        "\"instructions\":\"" + mcpdetail::jsonEscape( mcpInstructionsText( policy )   // V3/F4: the; --mcp-tools: only hints for listed tools
                                                     + mcpLegendPointer( policy )   // r2-LO: the session dictionary, where a session exists
                                                     + mcpToolSubsetNote( policy )   // --mcp-tools: a subset announces itself
@@ -1372,7 +1374,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                    // paraphrased — this stanza used to describe an ordering the selector does not use.
                    "{\"name\":\"exemplar\",\"description\":\"BEFORE writing a function / method / class / struct / interface / variable, get the repo's single best-in-class instance of that kind to imitate — signature AND full body. " + std::string( kExemplarSelectionRule ) + ". Beats grep/find_symbol: those find A definition, this ranks every definition and returns the one worth copying. kind = fn|method|class|struct|iface|var, OR a task string (its top match's kind is used).\","
                    + mcprefuse::toolMetadataFor( "exemplar", pathIsRequired ) + "},"
-                   "{\"name\":\"quality_delta\",\"description\":\"Your PR self-check, run every time you think a change is DONE — pairs with the CLI-only --test-gate (names the tests to run + the untested blast radius; not MCP-exposed) to form the two-step pre-PR gate. Reports ONLY what your working tree made WORSE vs baseline, across 12 kinds (complexity, verbosity, nesting, params, new duplication, new dead code, new public API, error-masking, short-horizon churn, new helper clone, an added stub/TODO, a defect shape). new-symbol rows never gate, except defect-shape format-arity. Read-only; auto-compares vs git HEAD, or a pinned .ripwire_quality_baseline sidecar when fresh. sev=minor does not gate; acked findings stay suppressed until worse. at= is the commit compared at (+dirty = tree differed).\","
+                   "{\"name\":\"quality_delta\",\"description\":\"Your PR self-check, run every time you think a change is DONE — pairs with the CLI-only --test-gate (names the tests to run + the untested blast radius; not MCP-exposed) to form the two-step pre-PR gate. Reports ONLY what your tree made WORSE vs baseline, across 12 kinds (complexity, verbosity, nesting, params, new duplication/dead code/public API, error-masking, short-horizon churn, new helper clone, a stub/TODO, a defect shape). new-symbol rows never gate, except defect-shape format-arity and a new function at the ceiling. Read-only; compares vs git HEAD, or a pinned .ripwire_quality_baseline sidecar when fresh. sev=minor does not gate; acked findings stay hidden until worse. at= is the commit compared at (+dirty = tree differed).\","
                    + mcprefuse::toolMetadataFor( "quality_delta", pathIsRequired ) + "},"
                    "{\"name\":\"quality_baseline\",\"description\":\"PIN the quality floor: writes .ripwire_quality_baseline stamped with the current git HEAD sha, snapshotting complexity / duplication / dead-code / API surface. Call once at the start of non-trivial work, then quality_delta compares against this pinned floor instead of HEAD. Side-effecting (writes a file) — skip it for a simple 'before I push' check, quality_delta already compares vs HEAD with zero setup.\","
                    + mcprefuse::toolMetadataFor( "quality_baseline", pathIsRequired ) + "},"
@@ -2436,14 +2438,14 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     resp = !listingRefusal.empty() ? errResultMsg( -32602, listingRefusal ) : pagedResult( [ & ]( McpPageArgs pg )
                     {
                         bool              seedFault = false;
-                        bool              blobFault = false;
-                        const std::string t = whereisText( path, symbol, kind, crossref::kWhereisHits, pg, &seedFault, listing, &blobFault,
+                        SweepFault        sweepFault = SweepFault::None;
+                        const std::string t = whereisText( path, symbol, kind, crossref::kWhereisHits, pg, &seedFault, listing, &sweepFault,
                                                             whereisFullText );
                         if( seedFault )
                         {
                             return errResultMsg( -32602, mcprefuse::notFound( getIndex( path ).ing, "symbol", symbol ) );
                         }
-                        if( blobFault )
+                        if( sweepFault == SweepFault::BlobsUnread )
                         {
                             DISCLOSE( Diagnostics::answerRefused, "whereis (MCP): the blob stream did not serve every blob — a -32603 error names it, no hit count" );
                             return errResultMsg( -32603, crossref::blobsUnreadCause( crossref::UnreadBlobBatch::Trees ) + " — no hit count rather than one nothing measured" );
@@ -2456,9 +2458,9 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     // `kind` doubles as the optional ref-name substring filter (no dedicated arg needed).
                     resp = pagedResult( [ & ]( McpPageArgs pg )   // M13
                     {
-                        bool              blobFault = false;
-                        const std::string t = strayContentText( path, kind, crossref::kStrayFilesPerRef, pg, &blobFault );
-                        if( blobFault )
+                        SweepFault        sweepFault = SweepFault::None;
+                        const std::string t = strayContentText( path, kind, crossref::kStrayFilesPerRef, pg, &sweepFault );
+                        if( sweepFault == SweepFault::BlobsUnread )
                         {
                             DISCLOSE( Diagnostics::answerRefused, "stray_content (MCP): the blob batch did not serve every blob - a -32603 error names it, no verdicts" );
                             return errResultMsg( -32603, crossref::blobsUnreadCause( crossref::UnreadBlobBatch::Branches ) );

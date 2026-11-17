@@ -1,0 +1,8 @@
+[package]
+name = "app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+thing_core = { path = "../thing_core" }
+serde_json = "1"
