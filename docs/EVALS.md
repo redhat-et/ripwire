@@ -17113,3 +17113,93 @@ gold — and it says the gain is real on more than half the corpus. It does **no
 should be: this measures where evidence sits today, not which arrangement is best. And it makes no claim
 that a truncated answer is parseable; a truncated XML document is not well-formed, and the honest consumer
 model is an agent whose context cuts a long answer, not a byte-exact cut.
+
+## READOUT — ITEM C′: the RESOLUTION predicate also FAILS, and the tail cut is now out of ideas
+
+Measured 2026-11-17 on the 295-cell store (`harness/itemk_resolve_band.py`, which *imports* `cut_ladder.py`
+and `anchor_grade.py` unmodified rather than reimplementing either).
+
+**Why this band existed.** Item C collapsed `<tail>` when a routed element was merely **PRESENT**, on a
+closed list of 14 names, and failed C1 on 19 cells. An independent five-cell read proposed a stricter
+condition — a routed verb **RESOLVES** — and argued no gold anchor is tail-only in the cells where that
+holds. Presence is not resolution (`graph_verb` appears as an unresolved cascade, `lego` as a counted stub,
+`doc_body` fires spuriously on slash-delimited tasks), so item C's failure did not settle it.
+
+**The condition, read only from element names and attributes on comment-masked text:**
+`<path … reachable="1">` ∨ `<met_bridge>` ∨ `<reexports>` with BOTH a `<def>` row and ≥1 `<rx>` row.
+
+### VERDICT: FAIL
+
+| | |
+| --- | ---: |
+| `--for` cells satisfying the condition | **27 of 216 (12.5 %)** |
+| bytes saved on those cells | 416,906 B — **42.16 % of their own**, **6.24 % of the `--for` population** |
+| **cells losing a gold item (lenient)** | **3 of 27** — bar was ZERO |
+
+Named: `ld2.ld2-angular-15` 4/4→3/4 (R4 `compileComponent`), `mf1.mf1-mdbook-01` 4/4→3/4 (R4 `errors`),
+`mf1.mf1-textual-01` 3/4→2/4 (R4 `_tab_pane.py`, `__all__`). Discount the weak anchor (`errors`, 6 generic
+characters) entirely and **2 of 27 still lose**, both on a real path plus a symbol name. The verdict does
+not rest on the weak one.
+
+Predicate breakdown: path-reachable 13, met_bridge 2, reexports-with-rows 14 (union 27; path-only 11,
+path+bridge 2, reexports-only 14). `<met_bridge>` **never fires alone** in this corpus — that arm has zero
+independent evidence either way. One `<reexports>` cell carrying only `<spec found="0"/>` is correctly
+rejected, which is precisely the gap between this condition and item C's.
+
+### The controls are why the verdict is believable
+
+| control | result |
+| --- | --- |
+| identity — re-grading an unedited copy reproduces the recorded grade | PASS |
+| unedited copy byte-identical | PASS (7,034,735 → 7,034,735 B) |
+| planted blanked answer is caught | PASS |
+| **unconditional tail removal reports loss** | **PASS — 92 anchors across 63 of 275 cells**, reproduced identically on four stores |
+
+A 3-anchor result from an instrument that reports 92 on the unconditional case is a real small number, not
+a silent zero.
+
+### Three limits stated rather than buried
+
+1. **The strict bound CANNOT register a tail loss on this band, by construction** — `strip_weak()` already
+   removes `<tail>` before the strict count. "No strict-bound loss" is an instrument property here, not
+   evidence of safety. Only the lenient bound could fire, and it did.
+2. **Untested at file and symbol grain.** All 27 band cells are item grain. File grain reads `p=` out of
+   the whole document *including the tail* — the grain most exposed to this cut — and this corpus has no
+   resolved `--for` cell at that grain. The hard case is unmeasured.
+3. **The control reports 92 where ~96 is registered.** Most likely population, not method: 26 cells were
+   never collected into this store (1 repo absent, 25 with no argv or no `root=`), and **17 of those carry
+   gold**, so a complete store would grade 292 rather than 275.
+
+### The one live thread, and why it is NOT a result yet
+
+All three losses came through the `reexports` arm. The `path reachable="1"` and `<met_bridge>` arms lost
+**0 anchors across 13 cells and 236,510 B**. Narrowing the rule to those two arms *now* would fit it to
+where the gold happened to sit — the exact failure C3 was written to prevent — and the band that tested it
+would be the band that suggested it. Registered below as its own band, with the limitation that its
+evidence is currently the same cells that produced the hypothesis, so it may not be published as a verdict
+until it is measured on cells that were not used to form it.
+
+**Four tail approaches have now failed their own registered rules: K (fixed cap), K1 (height 64), C
+(presence), C′ (resolution).** The tail is 45.8 % of the biggest verb's bytes and it has resisted every cut
+anyone has registered. That is the strongest argument yet that it is an ORDERING problem — promote the
+gold-bearing rows out of the tail, then the tail is cappable — and the weakest-possible case for a fifth
+cut attempt.
+
+## PRE-REGISTRATION 2026-11-17 (amendment 6) — ITEM C″: the two arms that lost nothing
+
+Registered now, measured later, and **explicitly exploratory**: the hypothesis comes from C′'s per-arm
+split, so the 13 cells that produced it cannot also judge it.
+
+**Rule.** Collapse `<tail>` to its counted stub when `<path … reachable="1">` ∨ `<met_bridge>` is present —
+the `reexports` arm DROPPED, because all three C′ losses came through it.
+
+- **Band C″1 — zero cells may lose completeness**, at either bound, on any grain. Same absolute bar.
+- **Band C″2 — the population must be cells NOT used to form the hypothesis.** The 13 C′ cells are
+  disqualified as evidence. This requires either newly collected cells or a held-out split registered
+  before the grade is read. Until one exists, C″ has **no verdict** and may not appear in any published
+  table.
+- **Band C″3 — file and symbol grain must be represented**, since C′ could not test them and file grain is
+  the grain most exposed to a tail cut. A population with zero file-grain cells FAILS to establish C″
+  rather than passing it.
+- **Band C″4 — `<met_bridge>` must fire independently at least once.** It never did in C′ (2 of 2 cells
+  also had `path reachable="1"`), so as things stand the rule is really the path arm wearing two names.
