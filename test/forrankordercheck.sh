@@ -203,6 +203,17 @@ FX_Q=( "geometry area of a shape" "call a native function from python" "parse th
 
 # ── (3) byte growth ≤ 4% against the registered sizes ─────────────────────────────────────────────────────
 growth_fail=0
+# FOLD C's tail page rows: sym=, sym= then tsym=, or tsym= alone (R-DEDUP's <syms> cut can empty a head file's sym= and keep tsym=,
+# CodeRabbit #678). Path-only rows (`<t p="…"/>`) are FOR-TAIL-WIDE's separate pattern below, so this one never matches them.
+export TAIL_PAGE_ROW_RE='<t p="[^"]*"(?: sym="[^"]*"(?: tsym="[^"]*")?| tsym="[^"]*")/>'
+# (3t) the pattern's own arm: four canned rows, one of each shape; page rows 3, path-only 1, every row counted exactly once
+pr_rows="$( python3 -c '
+import os, re
+s = "<t p=\x22a.py\x22 sym=\x22x\x22/><t p=\x22b.py\x22 sym=\x22x\x22 tsym=\x22y\x22/><t p=\x22c.py\x22 tsym=\x22y\x22/><t p=\x22d.py\x22/>"
+page = re.findall( os.environ[ "TAIL_PAGE_ROW_RE" ], s ); po = re.findall( r"<t p=\x22[^\x22]*\x22/>", s )
+print( len( page ), len( po ), sum( map( len, page + po ) ) == len( s ) )' )"
+if [ "$pr_rows" = "3 1 True" ]; then ok "(3t) tail page-row pattern: sym=, sym=+tsym= and tsym=-only rows counted once each, path-only apart (got $pr_rows)"
+else no "(3t) tail page-row pattern: want '3 1 True' (page rows, path-only, every byte once), got '$pr_rows'"; growth_fail=1; fi
 # body-fold (train 31; rule 4, by design — the FOLD C precedent): a compact answer now ends with <fold kind="bodies">, the top ranked
 # bodies appended after the unchanged answer (forbodyfoldcheck (F5) pins that nothing before it moved). The band reads the answer
 # WITHOUT those additions: the fold element, its legend clause, the hop-calls next= clause and the <sigs> continuation pair
@@ -259,14 +270,17 @@ for q in "${REPO_Q[@]}"; do
     # the default serves every hop row), or — forbudget-soft round C, FOLD C (owner decision 2026-10-14) — a tail PAGE row
     # (`<t p= sym=/>`: page 0 of the --for file page now rides the answer), never anything else
     past="$( printf '%s' "$out" | python3 -c '
-import re, sys
+import os, re, sys
 s = sys.stdin.read(); m = re.search( r"<sigs\b([^>]*)>(.*?)</sigs>", s, re.S )
 k = re.search( r"past_target=\"([0-9]+)\"", m.group( 1 ) ) if m else None
 rows = sorted( ( int( re.search( r"\br=\"([0-9]+)\"", d.group( 1 ) ).group( 1 ) ), len( d.group( 0 ).encode() ) )
                for d in re.finditer( r"<d ([^>]*)>.*?</d>", m.group( 2 ) if m else "", re.S ) )
 past = sum( b for _, b in rows[ len( rows ) - int( k.group( 1 ) ): ] ) if k else 0
 h = re.search( r"<hops\b.*?</hops>", s, re.S )      # D-3: the compact <hops> is no longer cut at its 1,000 B allowance
-page = sum( len( t.encode() ) for t in re.findall( r"<t p=\"[^\"]*\" sym=\"[^\"]*\"/>", s ) )   # FOLD C: the tail page rows
+page = sum( len( t.encode() ) for t in re.findall( os.environ[ "TAIL_PAGE_ROW_RE" ], s ) )   # FOLD C: the tail page rows (TAIL_PAGE_ROW_RE)
+# TAIL-SYM-TERMS (2026-11-14): a page row may add tsym= (task-word names after sym=) and its present-only clause; tail bytes like the rows
+for pat in ( r"; tail tsym= up to \d+ more .*?not a lens rank", r"; t tsym= up to \d+ more file symbols named by a task word \(a name match\)" ):
+    lm = re.search( pat, s ); page += len( lm.group( 0 ).encode() ) if lm else 0
 for pat, was in ( ( r"; tail: [^\]]*?budget-trimmed row\)", 391 ), ( r"; t p= file outside sigs \(weaker\)[^;]*?r= rank \(gap = trimmed\)", 57 ) ):
     lm = re.search( pat, s )                         # …and the growth of the clause that now defines them (full 391 B / compact 57 B before)
     page += max( 0, len( lm.group( 0 ).encode() ) - was ) if lm else 0

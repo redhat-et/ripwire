@@ -509,6 +509,7 @@ struct ForLensJsonInputs
     // FOR-DOC-BODY: the graph the doc sections are scored on (fordocbody.h, the "doc_body" key) — REQUIRED like fileTail above
     const rw::Graph*                  graph;
     bool                              signaturesOnly;   // --signatures-only: no doc text rides the answer (the XML twin's rule)
+    const std::vector<float>*         tailTermTieRank;  // TAIL-SYM-TERMS: the order fileTail's added names took (forpage.h tailTermTieRank)
 };
 
 // The lens bundle's opening keys. Every note is absent-unless-present — the same silence-means-nothing-
@@ -914,6 +915,13 @@ inline std::string bodyFoldLegend( const ForLensHeaderParts& p, bool compact )
 }
 inline constexpr std::string_view kForCompactLegendTail =
     "; t p= file outside sigs (weaker), t sym= its top symbols not in sigs/syms (a pointer, not the answer), r= rank (gap = trimmed)";
+// TAIL-SYM-TERMS: the clause defining tsym=, right after the tail clause that defines sym=, only when a shown row carries one.
+// Absent, the clause is empty and the splice inserts nothing.
+inline void spliceTailTermsClause( std::string& header, bool compact, bool present )
+{
+    const std::string_view tailClause = compact ? kForCompactLegendTail : rw::kForFileTailLegend;
+    rw::spliceClauseAfter( header, tailClause, presentOnlyClause( present, compact, rw::kForCompactFileTailTermsLegend, rw::kForFileTailTermsLegend ) );
+}
 inline constexpr std::string_view kForCompactLegendTailCodeFirst = "; t order: code files first, then doc files (a code question)";
 inline constexpr std::string_view kForCompactLegendTailWide =
     "; t page rows go on to file-page row 160 (code question: 160 code rows, docs within row 160); past page 0 (code question: "
@@ -1888,7 +1896,7 @@ inline int emitForLensJsonPass( std::FILE* out, const std::string& header, const
     // from what the rows AT THE CUT left of the bundle budget (the same share the refill above priced the rows against)
     // lane 2: the rank rows exclude the files of the rows emitted (after a refill: the rows it kept — the XML twin's rule)
     const std::size_t  jsonCutRows = jsonAtCutUndemoted.value_or( sigsJson.size() - std::min( sigsJson.size(), sigsCut.pastTargetBytes ) );
-    const rw::FileTail jsonTail    = rw::computeFileTail( in.ing, in.rank, *in.evidence, jsonShownIds, in.rootArg, in.task );
+    const rw::FileTail jsonTail    = rw::computeFileTail( in.ing, in.rank, *in.evidence, jsonShownIds, in.rootArg, in.task, false, in.tailTermTieRank );
     std::size_t        jsonTailShown = 0;
     tailStanza = forLensJsonTailStanza( jsonTail, in.tokenBudget, forLensJsonTailShare( in.tokenBudget, bundleBudget, fixedBytes, jsonCutRows ), &jsonTailShown );
     const std::size_t bundleBytesBase   = header.size() + sigsJson.size() + notesStanza.size()
@@ -4098,7 +4106,10 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         // DEEP-TAIL d2, FOLD C (forbudget-soft round C): the file-grain tail is page 0 of the --for file page — one shared
         // model (forpage.h computeFileTail) for both dialects and the MCP twin, from the SAME ranking and term evidence the
         // `--limit=40` page uses, so the tail, its next= page and the page itself cannot disagree.
-        const FileTail forFileTail = computeFileTail( ing, lensRank, lr.evidence, lensSurfaceIds, flRootArg, cfg.forTask );   // the DEGRADE paths' tail
+        // TAIL-SYM-TERMS: the tie-break order of the names a tail row adds (forpage.h tailTermTieRank), once for every tail below;
+        // empty under --token-budget (none is added there — the MCP twin's rule too).
+        const std::vector<float> termTieRank = rw::tailTermTieRank( g, cfg.forTask, cfg.tokenBudget );
+        const FileTail forFileTail = computeFileTail( ing, lensRank, lr.evidence, lensSurfaceIds, flRootArg, cfg.forTask, false, &termTieRank );   // the DEGRADE paths' tail
         // H2H-Graft lane 2 (2026-09-07): the tail's rank rows exclude only the files of the sigs rows actually EMITTED (a row the
         // ladder trimmed must land in the tail, never nowhere).
         std::vector<NodeId> shownSigIds;
@@ -4179,7 +4190,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
                                                                    cfg.packBudgetBytes, cfg.tokenBudget, notesPtr,
                                                                    legoTotal, composeTotal, routesTotal, flRootArg,
                                                                    &forFileTail, &lr.evidence, d.notesDegraded, forDocsAfterCode, forHeadRR, cfg.forTask,
-                                                                   cfg.packTopN, forRankShapingFlags( cfg ), &g, cfg.signaturesOnly } );
+                                                                   cfg.packTopN, forRankShapingFlags( cfg ), &g, cfg.signaturesOnly, &termTieRank } );
             // §B0: this early return skipped the end-of-function tally below, so a --for --json run redacted
             // SILENTLY — the one stderr line that tells the user a secret was in their tree never appeared.
             reportRedactions( stderr, redactCounts );
@@ -4667,7 +4678,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         const FileTail    forFileTailShown = sigsPreRendered ? computeFileTail( ing, lensRank, lr.evidence,
                                                                                 forSoftTarget ? rowsAtTargetIds( shownSigIds, lensRank, forSigsCut.pastTarget )
                                                                                               : shownSigIds,
-                                                                                flRootArg, cfg.forTask )
+                                                                                flRootArg, cfg.forTask, false, &termTieRank )
                                                              : forFileTail;
         const bool        softOptInCandidate = forSoftTarget && legoPreRendered && composePreRendered && legoStr.size() + composeStr.size() <= sectionsShare;
         const std::size_t trailingFloor      = softOptInCandidate && autoBundleMode && sigsPreRendered
@@ -4994,6 +5005,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         std::size_t       tailShownRows  = 0;
         std::string       tailStr        = renderForFileTailXml( forFileTailShown, cfg.tokenBudget, bundleBudget, tailSpentBytes, &tailShownRows );
         std::vector<std::string> tailPrinted = rw::emittedTailPaths( forFileTailShown, tailShownRows );   // FOR-DOC-BODY: the <t> rows this answer prints
+        bool tailTermNames = rw::fileTailTermNamesShown( forFileTailShown, tailShownRows );   // TAIL-SYM-TERMS: its clause rides only then
 
         // ── round C (owner decision 2026-10-14, RESERVE SECTIONS FIRST): the rows past the soft target's cut fill what the
         // trailing sections left of T. The sections above were funded as if the rows stopped at the cut (sigsFundedBytes), so
@@ -5030,9 +5042,10 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
                 sigsCeilingNote = rw::sigsCutReportLegend( forSigsCut );   // a soft target: no default ceiling, no guard reading
                 // lane 2: a row the refill dropped lands in the tail's rank rows — re-listed against the rows now shown, at
                 // the same share (the share, not the rows, is what the refill priced)
-                const FileTail refilledTail = computeFileTail( ing, lensRank, lr.evidence, shownSigIds, flRootArg, cfg.forTask );
+                const FileTail refilledTail = computeFileTail( ing, lensRank, lr.evidence, shownSigIds, flRootArg, cfg.forTask, false, &termTieRank );
                 tailStr     = renderForFileTailXml( refilledTail, cfg.tokenBudget, bundleBudget, tailSpentBytes, &tailShownRows );
                 tailPrinted = rw::emittedTailPaths( refilledTail, tailShownRows );
+                tailTermNames = rw::fileTailTermNamesShown( refilledTail, tailShownRows );
                 return true;
             }
             forSigsCut         = firstCut;
@@ -5224,6 +5237,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             rw::spliceClauseAfter( headerStr, headerParts.compactLegend ? kForCompactLegendTailWide : rw::kForFileTailWideLegend,
                                    headerParts.compactLegend ? rw::kForCompactFileTailFoldedLegend : rw::kForFileTailFoldedLegend );
         }
+        spliceTailTermsClause( headerStr, headerParts.compactLegend, tailTermNames );
         if( sigsPreRendered && sigsStr.contains( " same_as=\"" ) )
         {
             rw::spliceClauseAfter( headerStr, headerParts.compactLegend ? kForCompactLegendFacts : std::string_view(),

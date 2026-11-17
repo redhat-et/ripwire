@@ -189,6 +189,10 @@ kShingleTokens	none:the stray-content shingle width, part of the sketch definiti
 kSideDepthStd	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
 kSideDepthUses	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
 kSketchSize	none:the stray-content sketch width, part of the sketch definition
+kTailSymTermEvidence	none:an evidence threshold, not a cut: a name with fewer distinct task words (name + path) is never added to tsym=, which is additive beside sym= (nothing shown is dropped); the clause says tsym= is a name match (TSYM-WRONG-DECOYS; read by hand at train 1111k)
+kTailSymTermFileMatches	none:an evidence threshold, not a cut: a file with more same-word names adds no tsym= (the word is the file's topic), sym= unchanged and nothing shown is dropped (TSYM-WRONG-DECOYS; read by hand at train 1111k)
+kTailSymTermNames	legend
+kTailTermMaxWords	none:an input bound (tailTermMask's 64 bits): a --for task's words past 64 do not match tsym= names; tsym= is additive, so no answer row is cut (read by hand at train 1111k)
 kUnreachableMaxHits	pending:B43 not audited yet (LARGE-PARTIAL-1 scope widening)
 kVerdictCount	none:an enum count, not a bound
 kVrDottedFlowMaxBytes	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it

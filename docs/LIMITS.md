@@ -681,6 +681,14 @@ Discloses: **none**
 | `kForSlotByCap` | `4` | — | — |
 | `kForSlotCap` | `16` | — | — |
 
+### `src/fortailterms.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kTailTermMaxWords` | `64` | — | — |
+
 ### `src/forunused.h`
 
 Discloses: `capped`, `bytes_capped`
