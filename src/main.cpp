@@ -4161,7 +4161,13 @@ static_assert( rw::kCompactRepriceDensestBytesPerToken == rw::kMinBytesPerToken,
 // pointer it cannot resolve.
 static bool checkLegendHandshake( const rw::Config& cfg )
 {
-    if( cfg.legendHave.empty() || cfg.legendHave == rw::legenddict::dictionaryVersion() )
+    if( cfg.legendHave.empty() )
+    {
+        return true;   // asserts nothing: not an input to check, so VALIDATE has nothing to say about it
+    }
+    // argv is EXTERNAL INPUT, so the version goes through VALIDATE in the condition of the refusal (CONTRIBUTING §3).
+    if( VALIDATE( cfg.legendHave == rw::legenddict::dictionaryVersion(),
+                  "--legend-have= names the legend dictionary THIS binary holds" ) )
     {
         return true;
     }
@@ -4193,6 +4199,23 @@ static void applyCliRefPosture( const rw::Config& cfg, std::string& doc )
     }
 }
 
+// The ONE place a captured answer reaches stdout, with the write CHECKED. An unchecked fwrite/fflush here exits 0 with
+// no answer written when stdout cannot take it (`> /dev/full`, a closed pipe): dispatch already returned 0 having written
+// only into the capture, so the failure is invisible to the caller. A missing answer reported as success is the one
+// outcome this tool must never produce, so the replay decides the exit code.
+static int emitCapturedDoc( const std::string& doc, int rc )
+{
+    const bool written = std::fwrite( doc.data(), 1, doc.size(), stdout ) == doc.size();
+    const bool flushed = std::fflush( stdout ) == 0;
+    if( written && flushed && std::ferror( stdout ) == 0 )
+    {
+        return rc;
+    }
+    std::fputs( "ripwire: could not write the answer to stdout — it is incomplete or absent; the exit code says so rather "
+                "than reporting a success that did not happen\n", stderr );
+    return rc != 0 ? rc : 1;
+}
+
 static int finishCompactCapture( const rw::Config& cfg, std::string& doc, int rc )
 {
     EXPECTS( cfg.legend == "compact", "only a compact-posture run is captured" );
@@ -4200,12 +4223,7 @@ static int finishCompactCapture( const rw::Config& cfg, std::string& doc, int rc
     {
         return rc;   // a refusal (or an empty answer) — nothing to rewrite, the exit code says what happened
     }
-    const auto emitCaptured = [&doc, rc]()
-    {
-        std::fwrite( doc.data(), 1, doc.size(), stdout );
-        std::fflush( stdout );
-        return rc;
-    };
+    const auto emitCaptured = [&doc, rc]() { return emitCapturedDoc( doc, rc ); };
     // the DEFAULT posture shapes what it can and leaves the rest exactly as it was emitted (cfg.legendDefaulted);
     // only an ASKED --legend=compact refuses an answer the dialect cannot shape
     // forbudget-soft: an explicit --token-budget on a task lens is a SOFT target — the settle never labels it "over"
@@ -4343,9 +4361,7 @@ static int runWithCompactLegend( const rw::Config& cfg, char** argv )
     if( refOnlyCapture )
     {
         applyCliRefPosture( cfg, doc );
-        std::fwrite( doc.data(), 1, doc.size(), stdout );
-        std::fflush( stdout );
-        return rc;
+        return emitCapturedDoc( doc, rc );
     }
     return finishCompactCapture( cfg, doc, rc );   // the ref stage runs INSIDE it, after the compact dialect
 }

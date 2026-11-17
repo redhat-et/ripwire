@@ -44,6 +44,17 @@ BIN, DV, WORK = sys.argv[1], sys.argv[2], sys.argv[3]
 CMT = re.compile(r"<!--.*?-->", re.S)
 AB  = re.compile(r"<about\b[^>]*/>")
 ROOT = re.compile(r"\s*<([A-Za-z_][A-Za-z0-9_-]*)\b[^>]*>")
+# NAME AND VALUE. An earlier version of this arm compared attribute NAME SETS, which passes when count="2"
+# becomes count="1" -- it would have reported "lossless" while the answer's data had changed. Values are
+# compared as a multiset so a duplicated attribute cannot hide either.
+ATTR = re.compile(r'([A-Za-z_][A-Za-z0-9_-]*)="([^"]*)"')
+
+def row_paths(x):
+    """Every p= path in the body, flattened across grouped rows, as a multiset."""
+    out = []
+    for m in re.finditer(r'\bp="([^"]*)"', x or ""):
+        out += [q for q in m.group(1).split(",") if q]
+    return sorted(out)
 
 def parts(x):
     x = CMT.sub("", x)
@@ -52,39 +63,82 @@ def parts(x):
         return None
     close = "</%s>" % m.group(1)
     j = x.rfind(close)
-    if j <= m.end():
-        return (m.group(0), "")          # self-closing or empty body: still comparable
-    return (m.group(0), x[m.end():j])
+    return (m.group(0), x[m.end():j] if j > m.end() else "")
+
+def pairs(*texts):
+    out = []
+    for t in texts:
+        out += ATTR.findall(t or "")
+    return sorted(out)
 
 VERBS = ["--callers=main", "--callees=main", "--impact=main", "--whereis=main",
          "--path=main,main", "--dead-code", "--affected=README.md", "--lego=Iface"]
 ok = lossy = skipped = 0
 for v in VERBS:
-    a = subprocess.run([BIN, ".", v], capture_output=True, text=True).stdout
-    b = subprocess.run([BIN, ".", v, "--legend-have=" + DV], capture_output=True, text=True).stdout
+    ra_ = subprocess.run([BIN, ".", v], capture_output=True, text=True)
+    rb_ = subprocess.run([BIN, ".", v, "--legend-have=" + DV], capture_output=True, text=True)
+    a, b = ra_.stdout, rb_.stdout
     pa, pb = parts(a), parts(b)
     if not pa or not pb or 'legend="ref"' not in b:
-        skipped += 1
-        print("  PASS  (C-skip) %-22s not reduced by this dictionary -- answer served inline, unchanged" % v)
+        # UNREDUCED is only acceptable if the answer really was served unchanged. Without this, a verb that
+        # returned empty stdout or a DIFFERENT inline answer would pass as "skipped" -- the non-vacuity arm
+        # below only stops EVERY verb from skipping, not one of them from hiding a changed answer.
+        if a == b and ra_.returncode == rb_.returncode:
+            skipped += 1
+            print("  PASS  (C-skip) %-22s not reduced by this dictionary, and served byte-identical (rc=%d)"
+                  % (v, rb_.returncode))
+        else:
+            lossy += 1
+            print("  FAIL  (C-skip) %-22s not reduced, but the answer CHANGED (%d B -> %d B, rc %d -> %d)"
+                  % (v, len(a), len(b), ra_.returncode, rb_.returncode))
         continue
     ra, ba = pa
     rb, bb = pb
     ab = AB.search(bb)
     body_b = AB.sub("", bb)
-    attrs_a = set(re.findall(r'([a-z_]+)="', ra))
-    attrs_b = set(re.findall(r'([a-z_]+)="', rb)) | (set(re.findall(r'([a-z_]+)="', ab.group(0))) if ab else set())
-    missing = sorted(attrs_a - attrs_b)
+    want = pairs(ra)
+    have = pairs(rb, ab.group(0) if ab else "")
+    # the ref row adds legend=/dict=/dictv=; every ORIGINAL pair must survive with its value
+    missing = [kv for kv in want if have.count(kv) < want.count(kv)]
     if ba == body_b and not missing:
         ok += 1
-        print("  PASS  (C1) %-22s ref posture is LOSSLESS: body byte-identical, every root attribute kept" % v)
+        print("  PASS  (C1) %-22s LOSSLESS: body byte-identical, every root attribute kept WITH ITS VALUE" % v)
+    elif not missing and row_paths(ba) == row_paths(body_b):
+        # GROUPING. The ref posture UNGROUPS compact `<g n= p="a,b,c">` rows, because a ref reader is not
+        # carrying the grouping clause -- so the body legitimately differs and gets LONGER, not shorter.
+        # Measured 2026-11-16 on a 68-path --affected answer: 2,881 B -> 2,950 B, four <g> rows -> three, and
+        # the p= multiset identical. Content-preserving, so it passes -- but only against the multiset, never
+        # against "it differs, so it must be grouping".
+        ok += 1
+        print("  PASS  (C1) %-22s LOSSLESS: grouped rows expanded (%d B -> %d B), p= multiset identical"
+              % (v, len(ba), len(body_b)))
     else:
         lossy += 1
-        why = "body differs" if ba != body_b else "attributes LOST: " + ",".join(missing)
+        why = "body differs and the p= multiset differs too" if ba != body_b else (
+            "name=value pairs LOST: " + ", ".join("%s=%s" % kv for kv in missing[:4]))
         print("  FAIL  (C1) %-22s %s" % (v, why))
 if ok == 0:
     print("  FAIL  (C2) no verb took the ref posture -- the handshake saved nothing, so C1 proved nothing")
     sys.exit(1)
-print("  PASS  (C2) %d verb(s) took the posture, %d served inline unchanged" % (ok, skipped))
+
+# (C3) the grouping tier is UNEXERCISED by the verbs above: no answer on this repository carries a `<g>` row
+# (measured: 0 for --affected/--impact/--callers here), and an arm that cannot fire proves nothing. So the
+# comparison itself is tested on a synthetic pair, both directions, rather than left unproven.
+G_BEFORE = '<x><g n="3" p="a/one.ts,b/two.ts,c/three.ts" hops="3"/><t p="d/four.ts"/></x>'
+G_AFTER  = '<x><t p="a/one.ts" hops="3"/><t p="b/two.ts" hops="3"/><t p="c/three.ts" hops="3"/><t p="d/four.ts"/></x>'
+G_LOSSY  = '<x><t p="a/one.ts" hops="3"/><t p="b/two.ts" hops="3"/><t p="d/four.ts"/></x>'
+if row_paths(G_BEFORE) == row_paths(G_AFTER) and row_paths(G_BEFORE) != row_paths(G_LOSSY):
+    print("  PASS  (C3) the grouping-aware comparison accepts an expansion AND rejects a dropped row")
+else:
+    print("  FAIL  (C3) the grouping-aware comparison does not distinguish an expansion from a dropped row")
+    lossy += 1
+if any(re.search(r"<g\b", subprocess.run([BIN, ".", v], capture_output=True, text=True).stdout or "")
+       for v in VERBS):
+    print("  PASS  (C3b) a verb here does emit <g>, so the grouping tier is live, not only synthetic")
+else:
+    print("  PASS  (C3b) NOT-ESTABLISHED on this repository: no verb here emits <g>, so (C3) is the only "
+          "evidence for the grouping tier -- stated rather than implied")
+print("  PASS  (C2) %d verb(s) took the posture, %d served inline byte-identical" % (ok, skipped))
 sys.exit(1 if lossy else 0)
 PY
 [ $? -eq 0 ] || fail=1
@@ -112,6 +166,37 @@ if "$BIN" . --callers=main --legend=full --legend-have="$DV" >/dev/null 2>&1; th
     bad "(F1) --legend=full with --legend-have= must refuse -- the posture reduces the dialect the dictionary holds"
 else
     pass "(F1) --legend=full with --legend-have= is refused"
+fi
+
+# (G) THE SERVER TRANSPORTS. This arm exists because the flag DEADLOCKED --mcp before it was refused: the ref
+# stage replays a captured document once the verb returns, and a server does not return while a client is
+# connected, so responses landed in the capture and a live client waited forever. Measured before the fix: a
+# response in 0.0 s without the flag, NOTHING in 6 s with it. The fix is a refusal at intake, so what this arm
+# holds is that the combination exits non-zero QUICKLY and says why -- never that it answers.
+for t in "--mcp" "--lsp" "--listen=127.0.0.1:8799"; do
+    serr="$WORK/srv.err"
+    start=$(date +%s)
+    timeout 10 "$BIN" . $t --legend-have="$DV" >/dev/null 2>"$serr"; rc=$?
+    took=$(( $(date +%s) - start ))
+    if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ] && [ "$took" -lt 5 ] && grep -q "server transport" "$serr"; then
+        pass "(G1) $t with --legend-have= is refused at intake in ${took}s (rc=$rc), not captured into a deadlock"
+    else
+        bad "(G1) $t with --legend-have= must refuse fast and name the transport -- rc=$rc after ${took}s: $(head -c 150 "$serr")"
+    fi
+done
+
+# (H) a failing stdout write must not be reported as success. The captured answer reaches stdout in ONE place and
+# that place decides the exit code; an unchecked fwrite/fflush there exits 0 having written only into the capture.
+# stdout is CLOSED here rather than pointed at /dev/full, which does not exist on macOS.
+if "$BIN" . --callers=main --legend-have="$DV" >&- 2>/dev/null; then
+    bad "(H1) a captured answer that cannot reach stdout must exit non-zero, not report success"
+else
+    pass "(H1) a captured answer that cannot reach stdout exits non-zero"
+fi
+if "$BIN" . --callers=main >&- 2>/dev/null; then
+    bad "(H2) the same must hold on the compact path, which shares the one checked replay"
+else
+    pass "(H2) the compact path's replay is checked too (same seam)"
 fi
 
 if [ "$fail" -ne 0 ]; then echo "legendhavecheck: FAILURES"; exit 1; fi
