@@ -1504,9 +1504,17 @@ inline int structuralBraces( std::string_view line, bool& inComment )
     return depth;
 }
 
-// The `name: type;` / `name?: type;` / `readonly name: type;` lines at the top brace depth of a holder's body (a TS interface).
-inline void propertyLineRows( std::string_view body, std::uint32_t fileId, std::uint32_t firstLine, ExemplarInto& into )
+// Where a holder's body starts: its file and the 1-based line of its first byte (two uint32_t, named at the call).
+struct HolderBodyAt
 {
+    std::uint32_t fileId    = 0;
+    std::uint32_t firstLine = 0;
+};
+// The `name: type;` / `name?: type;` / `readonly name: type;` lines at the top brace depth of a holder's body (a TS interface).
+inline void propertyLineRows( std::string_view body, HolderBodyAt holderAt, ExemplarInto& into )
+{
+    const std::uint32_t fileId    = holderAt.fileId;
+    const std::uint32_t firstLine = holderAt.firstLine;
     int depth = 0;
     bool inComment = false;
     std::uint32_t ln = firstLine;
@@ -1563,7 +1571,7 @@ inline void holderRows( const IngestResult& ing, const ExemplarMember& holder, E
         if( open != std::string_view::npos )
         {
             const std::uint32_t first = h.line + std::uint32_t( std::ranges::count( span.substr( 0, open ), '\n' ) );
-            propertyLineRows( span.substr( open ), h.fileId, first, into );
+            propertyLineRows( span.substr( open ), { .fileId = h.fileId, .firstLine = first }, into );
         }
     }
 }
