@@ -2859,7 +2859,7 @@ inline bool markTableRows( const IngestResult& ing, std::vector<Site>& rows, std
             }
             registrationOfRow( loadedText, rows[i], ctx );
             rows[i].regCall = !rows[i].tbl.empty();
-            drop[i]         = rows[i].longer && rows[i].tbl.empty();
+            drop[i]         = static_cast<char>( rows[i].longer && rows[i].tbl.empty() );
         }
         else if( rows[i].tbl == "item" )
         {
@@ -2883,7 +2883,7 @@ inline bool keepTailKeyRows( const IngestResult& ing, std::string_view tail, std
         const NodeId owner = enriched[i].enclosingId;
         const bool   def   = owner != kNoNode && ing.symbols[owner].name == tail && ing.symbols[owner].line == enriched[i].line;
         anyKey             = anyKey || rows[i].quotedKey;
-        drop[i]            = !( rows[i].quotedKey || def );
+        drop[i]            = static_cast<char>( !( rows[i].quotedKey || def ) );
     }
     if( !anyKey )
     {
