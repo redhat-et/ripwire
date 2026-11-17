@@ -73,7 +73,8 @@ set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
-README="$ROOT/README.md"
+README_MD="$ROOT/README.md"
+REFGUIDE="$ROOT/docs/REFERENCE_GUIDE.md"
 LINEAGE="$ROOT/docs/LINEAGE.md"
 fail=0
 
@@ -81,8 +82,32 @@ ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write th
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "readmedriftcheck: no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
-[ -f "$README" ] || { echo "readmedriftcheck: missing $README"; exit 2; }
+[ -f "$README_MD" ] || { echo "readmedriftcheck: missing $README_MD"; exit 2; }
+[ -f "$REFGUIDE" ] || { echo "readmedriftcheck: missing $REFGUIDE — the reference guide is half of the advertised-prose surface (README-RESTRUCTURE 2026-11-17)"; exit 2; }
 [ -f "$LINEAGE" ] || { echo "readmedriftcheck: missing $LINEAGE — arm (E) has no ground truth to check against"; exit 2; }
+
+# ── THE ADVERTISED-PROSE SURFACE (README-RESTRUCTURE, 2026-11-17) ───────────────────────────────────
+# Until 0.7.0 the reference guide was a section of README.md, and every arm below read one file. The
+# 0.7.0 front-page restructure moved the guide to docs/REFERENCE_GUIDE.md so the README leads with what
+# the tool is, why it is better and how to start. The guide's numbers did not stop being ADVERTISED when
+# they moved: §6.3's `--json` allow-list (K), §12's vendored-grammar count (R) and the Evidence-basis
+# restatement of the lineage pair and the survey figure (E2b-E2e) are published prose either way.
+#
+# So `$README` is now that PAIR, concatenated into one scratch file, and the arms read it unchanged. This
+# is a WIDENING, not a weakening: before, a count could be taken out of the comparison by moving it from
+# README.md into the guide and no arm would notice; now neither file can hide one. Where a claim must be
+# on the FRONT PAGE specifically — the lineage <summary> (H1), the recency join (H2), the prompt count
+# (I1) — those arms read README.md by name and are deliberately left alone.
+SURFTMP="$( mktemp -d )"
+README="$SURFTMP/advertised_prose.md"
+cat "$README_MD" "$REFGUIDE" > "$README"
+# Presence guard: a concatenation that silently produced less than either input would make every arm
+# below vacuous (CONTRIBUTING.md §2, "green while inert").
+if [ "$( wc -c < "$README" )" -le "$( wc -c < "$README_MD" )" ]; then
+    echo "readmedriftcheck: the advertised-prose surface is no larger than README.md alone — the concatenation failed"
+    rm -rf "$SURFTMP"; exit 2
+fi
+trap 'rm -rf "$SURFTMP"' EXIT
 
 HELP="$( "$BIN" --help=all 2>&1 )"
 
@@ -125,7 +150,7 @@ else
 fi
 
 # ── (C) mutation control — a wrong count in a COPY must be caught ───────────────────────────────────
-TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
+TMP="$( mktemp -d )"; trap 'rm -rf "$TMP" "$SURFTMP"' EXIT
 wrong=$(( derived + 7 ))
 sed -E "s/[0-9]+ long flags advertised/${wrong} long flags advertised/" "$README" > "$TMP/README_bad.md"
 bad_stated="$( grep -oE '[0-9]+ long flags advertised' "$TMP/README_bad.md" | head -1 | grep -oE '^[0-9]+' )"
@@ -1055,7 +1080,7 @@ fi
 k_help="$( "$BIN" --help=--json 2>&1 | tr '\n' ' ' | tr -s ' ' )"
 k_allow="${k_help%%ALLOW-list*}"          # stop before the text that names the REFUSED verbs
 k_allow="${k_allow#*supported for}"       # start at the allow-list itself
-KTMP="$( mktemp -d )"; trap 'rm -rf "$TMP" "$KTMP"' EXIT
+KTMP="$( mktemp -d )"; trap 'rm -rf "$TMP" "$KTMP" "$SURFTMP"' EXIT
 printf '%s' "$k_allow" | grep -oE '\-\-[a-z][a-z0-9-]+' | sort -u > "$KTMP/bin.txt"
 
 r_json="$( tr '\n' ' ' < "$README" | tr -s ' ' )"
