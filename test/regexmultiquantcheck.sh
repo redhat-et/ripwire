@@ -83,7 +83,7 @@ READ_ABANDONED='refused, no hit is reported:'
 # a polling wait does the same job in portable POSIX shell (the regexbombcheck.sh idiom, inherited).
 capRun(){                        # capRun <seconds> <outfile> <errfile> <args…> -> echoes the exit status, or 'TIMEOUT'
     local capSeconds="$1" outPath="$2" errPath="$3"; shift 3
-    "$BIN" "$@" >"$outPath" 2>"$errPath" &
+    "$BIN" "$@" >"$outPath" 2>"$errPath" &   # status: backgrounded; `wait "$runPid"; echo $?` below echoes its exit status to every caller
     local runPid=$! waitedTenths=0 capTenths=$(( capSeconds * 10 ))
     while kill -0 "$runPid" 2>/dev/null; do
         [ "$waitedTenths" -ge "$capTenths" ] && { kill -9 "$runPid" 2>/dev/null; wait "$runPid" 2>/dev/null; echo TIMEOUT; return; }
