@@ -151,7 +151,8 @@ fi
 
 # ── B3..B5. --match evaluates the same string predicates ─────────────────────────────────────────────────
 FN='(function_definition declarator: (function_declarator declarator: (identifier) @n)'
-hits(){ "$BIN" "$FIX/c" --no-cache "--match=$FN $1)" --legend=compact 2>/dev/null | grep -o '<match [^>]*hits="[0-9]*"' | grep -o 'hits="[0-9]*"' | grep -o '[0-9]*'; }
+# status: a failed or crashed --match prints no hits= count, and check() FAILS an empty count ("hits=none")
+hits(){ "$BIN" "$FIX/c" --no-cache "--match=$FN $1)" --legend=compact 2>/dev/null | grep -o '<match [^>]*hits="[0-9]*"' | grep -o 'hits="[0-9]*"' | grep -o '[0-9]*'; }   # status: an empty count fails in check()
 check(){ local label="$1" pred="$2" want="$3" got; got="$( hits "$pred" )"; if [ "$got" = "$want" ]; then ok "$label $pred: hits=$got"; else no "$label $pred: hits=${got:-none}, want $want"; fi; }
 check B3 '(#eq? @n "keep_one")' 1
 check B4 '(#any-of? @n "keep_one" "keep_two")' 2

@@ -2163,7 +2163,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 aliasTargetStart  = suffix ? ts_node_start_byte( aliasShape.target ) : 0u;
             }
 
-            if( le.lang == Lang::Elixir && !elixirKeepCapture( roleNode, nameNode, isDef, kind, src, keywordHead, elixir.keywords ) )
+            if( le.lang == Lang::Elixir && !elixirKeepCapture( roleNode, nameNode, ElixirCaptureRole{ isDef, kind, keywordHead }, src, elixir.keywords ) )
             {
                 continue;
             }
