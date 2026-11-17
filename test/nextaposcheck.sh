@@ -39,6 +39,8 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$PWD/$BIN"
 BASE="${RIPWIRE_BASE_BIN:-}"
+# CR676: run() executes with cwd= the fixture copy, so a relative base would resolve there (FileNotFoundError); absolute now
+[ -n "$BASE" ] && [ "${BASE#/}" = "$BASE" ] && BASE="$PWD/$BASE"
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 not found"; exit 2; }
 if [ -n "$BASE" ]; then [ -x "$BASE" ] || { echo "RIPWIRE_BASE_BIN=$BASE is not executable"; exit 2; }; fi

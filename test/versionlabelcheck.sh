@@ -124,7 +124,9 @@ if [ -n "$MVER" ] && [ "$MVER" = "$BLABEL" ]; then ok "(B) MCP serverInfo.versio
 
 LINIT="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":\"file://$ROOT/test/fixture\",\"capabilities\":{}}}"
 LEXIT='{"jsonrpc":"2.0","id":2,"method":"shutdown"}'
-{ printf 'Content-Length: %d\r\n\r\n%s' "${#LINIT}" "$LINIT"; printf 'Content-Length: %d\r\n\r\n%s' "${#LEXIT}" "$LEXIT"; } >"$TMP/lsp.in"
+# CR676: Content-Length is a BYTE count (LSP framing); ${#VAR} counts characters, which differ on a non-ASCII checkout path
+bytes(){ printf '%s' "$1" | wc -c | tr -d ' '; }
+{ printf 'Content-Length: %d\r\n\r\n%s' "$( bytes "$LINIT" )" "$LINIT"; printf 'Content-Length: %d\r\n\r\n%s' "$( bytes "$LEXIT" )" "$LEXIT"; } >"$TMP/lsp.in"
 LOUT="$( "$BIN" --lsp <"$TMP/lsp.in" 2>/dev/null )"; lrc=$?
 if [ "$lrc" -ne 0 ]; then no "(B) --lsp exited $lrc on initialize + shutdown + EOF"; fi
 LVER="$( printf '%s' "$LOUT" | grep -oE '"serverInfo":\{"name":"ripwire","version":"[^"]*"' | sed -E 's/.*"version":"([^"]*)"/\1/' )"

@@ -21,6 +21,9 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
+# CR680 (review 5934094974): the live base compare runs in $F, so a relative RIPWIRE_BASE_BIN would resolve there and
+# fail every compare; resolve it against the invocation directory here, where its -x check also runs.
+[ -n "${RIPWIRE_BASE_BIN:-}" ] && [ "${RIPWIRE_BASE_BIN#/}" = "$RIPWIRE_BASE_BIN" ] && RIPWIRE_BASE_BIN="$PWD/$RIPWIRE_BASE_BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
@@ -260,9 +263,12 @@ for args in "--dead-code=pkg/net.py" "--dead-code=cc/lib.cpp" "--dead-code=web/p
     if [ "$a" = "$( pinned "$args" )" ]; then ok "A13 $args: root and rows byte-identical to the pinned pre-group answer"; else no "A13 $args differs from the pinned answer beyond the group: $a"; fi
 done
 # Optional: RIPWIRE_BASE_BIN=<a main binary> also compares live against it.
+# CR676 (review 5923622158): a base from before NEXT-APOS spells the filter next='s quotes &apos; where this binary leaves
+# them raw, and a quote may sit in a path either side spells either way, so both sides read &apos; as ' before the compare.
+apos(){ sed "s/&apos;/'/g"; }
 if [ -n "${RIPWIRE_BASE_BIN:-}" ] && [ -x "${RIPWIRE_BASE_BIN}" ]; then
     for args in "--dead-code=pkg/net.py" "--dead-code=cc/lib.cpp" "--dead-code=web/path.ts" "--dead-code"; do
-        a="$( run $args | strip )"; b="$( cd "$F" && "$RIPWIRE_BASE_BIN" "$F" --no-cache $args 2>/dev/null | strip )"
+        a="$( run $args | strip | apos )"; b="$( cd "$F" && "$RIPWIRE_BASE_BIN" "$F" --no-cache $args 2>/dev/null | strip | apos )"   # status: the compared bytes are the verdict; A13 above pins this binary's answer, and a failed base run prints nothing, which FAILs the compare
         if [ "$a" = "$b" ]; then ok "A13 $args: root and rows byte-identical to base"; else no "A13 $args differs from base beyond the group"; fi
     done
 fi
