@@ -126,10 +126,10 @@ struct LangFacts
     /// declared inheritance chain (graph.h).
     bool mixinAncestry = false;
 
-    /// C++ (#446): a class definition reads its base-clause types as @reference.base tags captures
-    /// (queries/cpp/tags.scm), not through captureBases' kind chain — captureSpecializationHeader
-    /// still walks for template specializations. The languages this port has not reached yet keep
-    /// the walk.
+    /// C++ and Java (#446): a class definition reads its base-clause types as @reference.base tags captures
+    /// (queries/cpp/tags.scm, queries/java/tags.scm), not through captureBases' kind chain — C++'s
+    /// captureSpecializationHeader still walks for template specializations. The languages this port has
+    /// not reached yet keep the walk.
     bool basesAsCaptures = false;
 
     /// Ruby: an element access `recv[ k ]` whose receiver the shape rules cannot classify (a call result, a richer expression) is

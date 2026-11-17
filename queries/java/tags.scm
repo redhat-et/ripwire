@@ -92,18 +92,30 @@
 
 ; #446 round 2 (Java): base-clause types as @reference.base captures — the
 ; superclass (extends) and super_interfaces (implements) clauses under a named
-; class declaration. The inner type_identifier is @name so the RawRef stays
-; identical to the walk's. Anonymous classes (no name:) do not match, matching
-; the C++ round's nameless-struct exclusion.
+; class declaration, and an enum's super_interfaces (`enum E implements I`).
+; LangFacts::basesAsCaptures turns the captureBases walk off for Java, so these
+; patterns take every type kind the walk took (isBaseTypeNode): a plain
+; type_identifier, a scoped_type_identifier (`Outer.Nested`, `p.Iface`) and a
+; generic_type over either (`Base<T>`, `Map.Entry<K, V>`). The WHOLE type node is
+; @name, as the walk passed it to emitBaseRef: finalSegment/baseSegments strip the
+; type arguments and keep the qualifier in memberRoot. @reference.base sits on the
+; clause, so its parent is the class (emitBaseRef's `self`), the pairing the walk
+; used. Anonymous classes are no class_declaration and do not match. An
+; interface's extends_interfaces and a record's implements are not read by the
+; walk either, so they stay out (a faithful port, not a silent fix).
 (class_declaration
   name: (identifier)
   (superclass
-    [ (type_identifier) @name
-      (generic_type (type_identifier) @name) ])) @reference.base
+    [ (type_identifier) (scoped_type_identifier) (generic_type) ] @name) @reference.base)
 
 (class_declaration
   name: (identifier)
   (super_interfaces
     (type_list
-      [ (type_identifier) @name
-        (generic_type (type_identifier) @name) ]))) @reference.base
+      [ (type_identifier) (scoped_type_identifier) (generic_type) ] @name)) @reference.base)
+
+(enum_declaration
+  name: (identifier)
+  (super_interfaces
+    (type_list
+      [ (type_identifier) (scoped_type_identifier) (generic_type) ] @name)) @reference.base)
