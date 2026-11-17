@@ -3946,7 +3946,8 @@ inline bool refuseUnknownLangTail( const rw::IngestResult& ing, std::string_view
 inline void aroundAnchorDisclosure( const rw::LangAnchor& arAnchor, rw::MapAnnotations::SeedDisclosure& seedAnn )
 {
     const bool decides = arAnchor.active()
-        && ( arAnchor.origin != rw::AnchorOrigin::Corpus || arAnchor.tieBroke || arAnchor.fellBack );
+        && ( arAnchor.origin == rw::AnchorOrigin::Explicit || arAnchor.frontMoved || arAnchor.fellBack );   // a typed @lang always shows; a file
+    // lane, an @FILE:LINE seed and the majority show only when they changed which definition leads (LAND-440 Stage 0: file:name grew 1.4 KB)
     seedAnn.reflang       = decides ? rw::langTag( arAnchor.lang ) : nullptr;
     seedAnn.reflangOrigin = decides ? rw::anchorOriginName( arAnchor.origin ) : nullptr;
     if( arAnchor.tieBroke && arAnchor.origin == rw::AnchorOrigin::Corpus && !seedAnn.of.empty() )
