@@ -678,8 +678,8 @@ for _g in \
     lcsidentitycheck \
     legendcostcheck \
     legendcoveragecheck \
-    legenddriftcheck \
     legenddefaultcheck \
+    legenddriftcheck \
     legendhavecheck \
     legendrefcheck \
     legobundlecheck \
