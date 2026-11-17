@@ -110,6 +110,13 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative binary
 CORPUS="$ROOT/test/forcompletefix"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
+# A PRIVATE WARM CACHE. This gate compares stderr, and the warm snapshot in a SHARED $TMPDIR carries the
+# writing build's source identity: a binary whose identity differs refuses it, says so on stderr
+# ("warmsnap: written by another build", warmsnap.h:760/762), runs cold and overwrites it, then is silent on
+# its next run. So a foreign build touching this corpus first turns a stderr comparison red for reasons that
+# have nothing to do with the code, and it self-heals on re-run — which is what makes it read as a flake.
+# Diagnosed on budgetmonotonecheck 2026-11-17; these are its siblings by the same shared-root exposure.
+export TMPDIR="$TMP/cache"; mkdir -p "$TMPDIR"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
