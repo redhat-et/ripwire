@@ -1981,6 +1981,14 @@ inline std::vector<ExemplarMember> typicalDirMembers( const IngestResult& ing, c
     return out.size() >= kExemplarFamilyMin && out.size() < fam.members.size() ? out : std::vector<ExemplarMember> {};
 }
 
+// The typical member's directory. MANIFEST-ROW: a family read off an UNINDEXED manifest (formanifest.h featureFamily: fileId
+// UINT32_MAX) has none: "", and typicalDirMembers skips its members, so no dir-local rows; the family-wide share still runs.
+inline std::string_view typicalMemberDir( const IngestResult& ing, const ExemplarFamily& fam )
+{
+    const std::uint32_t typicalFile = fam.members.front().fileId;
+    return typicalFile < ing.files.size() ? includerDir( rootRelPath( ing, typicalFile ) ) : std::string_view {};
+}
+
 // Larger share first (cross-multiplied), then the larger count, then the path.
 inline void sortTouchRows( const IngestResult& ing, std::vector<ExemplarTouch>& rows )
 {
@@ -2013,13 +2021,9 @@ inline ExemplarTouchList exemplarTouchList( const IngestResult& ing, const Exemp
     {
         return list; // too few distinct names and stems to call a mention a pattern
     }
-    // MANIFEST-ROW: a family read off an UNINDEXED manifest (formanifest.h featureFamily: fileId UINT32_MAX) has no typical directory,
-    // so no dir-local rows; the family-wide share still runs
-    const std::uint32_t    typicalFile = fam.members.front().fileId;
-    const bool             typicalIndexed = typicalFile < ing.files.size();
-    const std::string_view typicalDir = typicalIndexed ? includerDir( rootRelPath( ing, typicalFile ) ) : std::string_view {};
+    const std::string_view typicalDir = typicalMemberDir( ing, fam );
     ExemplarFamily dirFam { .rule = fam.rule };
-    dirFam.members = typicalIndexed ? typicalDirMembers( ing, fam, typicalDir ) : std::vector<ExemplarMember> {};
+    dirFam.members = typicalDirMembers( ing, fam, typicalDir );
     const TouchForms dirForms( dirFam.members.empty() ? TouchUnits {} : touchUnits( ing, dirFam ) );
     const TouchUnits& du = dirForms.units;
     std::vector<std::uint32_t> dirStamp( std::size_t( du.names ) + du.stems, 0 );

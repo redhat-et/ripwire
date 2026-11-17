@@ -447,34 +447,35 @@ has fx1 bk "add a new dependency like toml" '<mf p="Cargo.toml" matched="toml"' 
 # ── caps, dialects, placement ────────────────────────────────────────────────────────────────────────────────────────────────
 has cap1 acme "use the kafkajs dependency in a plugin" '<manifest_rows files="5" shown="3" capped="1">'
 has cap2 acme "add the kafkajs, nats and mqtt dependencies to brokers" '<mf p="packages/brokers/package.json" matched="[^"]*" rows="4" shown="3" capped="1">'
-run acme "--for=add a new broker transport like NATS or MQTT to brokers" --json >"$TMP/j1.json"
+run acme "--for=add a new broker transport like NATS or MQTT to brokers" --json >"$TMP/j1.json" || no "(j1) the run exited $?"
 if [ -s "$TMP/j1.json" ] && ! grep -q 'manifest_rows' "$TMP/j1.json"; then ok "(j1) --json carries no block"; else no "(j1) --json"; fi
 # TOKEN-BUDGET-MONOTONE (main 2026-11-14): a budget holds the block only when the answer plus the block does not fit it; 100 forces the hold
-run acme "--for=add a new broker transport like NATS or MQTT to brokers" --token-budget=100 >"$TMP/b1.xml"
+run acme "--for=add a new broker transport like NATS or MQTT to brokers" --token-budget=100 >"$TMP/b1.xml" || no "(b1) the run exited $?"
 if grep -q '<manifest_rows files="2" held="budget"/></ctx>$' "$TMP/b1.xml" && ! grep -q '<r l=' "$TMP/b1.xml"; then ok "(b1) a token budget holds the block"
 else no "(b1) budget: $( grep -o '<manifest_rows.*' "$TMP/b1.xml" | head -c 300 )"; fi
 # (b2) a budget the answer and the block fit whole: the block comes back byte for byte
-run acme "--for=add a new broker transport like NATS or MQTT to brokers" >"$TMP/b2u.xml"
-run acme "--for=add a new broker transport like NATS or MQTT to brokers" --token-budget=4000 >"$TMP/b2.xml"
+run acme "--for=add a new broker transport like NATS or MQTT to brokers" >"$TMP/b2u.xml" || no "(b2) the run exited $?"
+run acme "--for=add a new broker transport like NATS or MQTT to brokers" --token-budget=4000 >"$TMP/b2.xml" || no "(b2) the run exited $?"
 if [ -n "$( block "$TMP/b2u.xml" )" ] && [ "$( block "$TMP/b2.xml" )" = "$( block "$TMP/b2u.xml" )" ]; then ok "(b2) a budget that fits the block prints it whole"
 else no "(b2) budget 4000: $( grep -o '<manifest_rows.*' "$TMP/b2.xml" | head -c 300 )"; fi
 # (b3) the fit prices <manifest_rows> (forbudgetfit.h kForHeldBlocks): at 1400 the answer alone fits but not with the block, so the
 # re-render holds it; unpriced, the whole answer printed over the budget (red on the merge before manifest_rows joined the list)
-run acme "--for=add a new broker transport like NATS or MQTT to brokers" --token-budget=1400 >"$TMP/b3.xml"
+run acme "--for=add a new broker transport like NATS or MQTT to brokers" --token-budget=1400 >"$TMP/b3.xml" || no "(b3) the run exited $?"
 if grep -q '<manifest_rows files="2" held="budget"/></ctx>$' "$TMP/b3.xml" && ! grep -q '<r l=' "$TMP/b3.xml"; then ok "(b3) the fit prices the block: held at 1400"
 else no "(b3) budget 1400: $( grep -o '<manifest_rows.*' "$TMP/b3.xml" | head -c 300 )"; fi
-run ferris "--for=add a new extractor behind its own cargo feature like multipart" >"$TMP/a1.xml"
+run ferris "--for=add a new extractor behind its own cargo feature like multipart" >"$TMP/a1.xml" || no "(a1) the run exited $?"
 printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"%s","task":"add a new extractor behind its own cargo feature like multipart"}}}\n' "$F/ferris" \
-  | ( cd "$F/ferris" || exit 1; "$BIN" --mcp 2>/dev/null ) | python3 -c '
+  | ( cd "$F/ferris" || exit 1; "$BIN" --mcp 2>/dev/null ) >"$TMP/x1.jsonl" || no "(x1) the MCP run exited $?"
+python3 -c '
 import json, sys
 for line in sys.stdin:
     d = json.loads( line )
     if d.get( "id" ) == 1:
         print( d["result"]["content"][0]["text"], end="" )
-' >"$TMP/x1.xml"
+' <"$TMP/x1.jsonl" >"$TMP/x1.xml"
 if [ -n "$( block "$TMP/a1.xml" )" ] && [ "$( block "$TMP/x1.xml" )" = "$( block "$TMP/a1.xml" )" ]; then ok "(x1) MCP for: the same element bytes"
 else no "(x1) MCP: $( block "$TMP/x1.xml" | head -c 300 )"; fi
-run ferris "--for=add a new extractor behind its own cargo feature like multipart" --legend=full >"$TMP/l1.xml"
+run ferris "--for=add a new extractor behind its own cargo feature like multipart" --legend=full >"$TMP/l1.xml" || no "(l1) the run exited $?"
 if python3 - "$TMP/a1.xml" "$TMP/l1.xml" <<'PY'
 import sys
 def legend( path ):
