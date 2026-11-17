@@ -9,7 +9,9 @@
 # different dictionary is REFUSED rather than handed a pointer it cannot resolve.
 #
 # The bar this gate holds is not the byte saving. It is that the saving is LOSSLESS: every row and every
-# attribute of the inline answer must still be in the ref answer, moved but never dropped.
+# attribute of the inline answer must still be in the ref answer -- and ON ITS ROOT, where the inline answer
+# has it (ref-posture-disclosure, 2026-11-17). "Moved but never dropped" was this gate's first bar, and it
+# passed an answer whose capped="1" sat after its last row; test/refdisclosurecheck.sh holds the placement.
 set -u
 BIN="${RIPWIRE_BIN:-${1:-./build/ripwire}}"
 if [ ! -x "$BIN" ]; then echo "no ripwire binary at $BIN -- build first (cmake --build build -j)"; exit 2; fi
@@ -118,12 +120,14 @@ for v in VERBS:
     ab = AB.search(bb)
     body_b = AB.sub("", bb)
     want = pairs(ra)
-    have = pairs(rb, ab.group(0) if ab else "")
-    # the ref row adds legend=/dict=/dictv=; every ORIGINAL pair must survive with its value
+    have = pairs(rb)
+    # every ORIGINAL pair must survive with its value ON THE ROOT; <about> is the legend pointer (legend=/dict=/dictv=)
+    # and a root fact found only there counts as LOST, which is what it is to a reader of the prefix
     missing = [kv for kv in want if have.count(kv) < want.count(kv)]
+    missing += [kv for kv in pairs(ab.group(0) if ab else "") if kv[0] not in ("legend", "dict", "dictv")]
     if ba == body_b and not missing:
         ok += 1
-        print("  PASS  (C1) %-22s LOSSLESS: body byte-identical, every root attribute kept WITH ITS VALUE" % v)
+        print("  PASS  (C1) %-22s LOSSLESS: body byte-identical, every root attribute kept ON THE ROOT with its value" % v)
     elif not missing and row_paths(ba) == row_paths(body_b):
         # GROUPING. The ref posture UNGROUPS compact `<g n= p="a,b,c">` rows, because a ref reader is not
         # carrying the grouping clause -- so the body legitimately differs and gets LONGER, not shorter.

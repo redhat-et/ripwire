@@ -194,8 +194,9 @@ the kit-style default-lean posture (measured ~90% cut on comparable extract-symb
 
 On the stdio server the legend session opens with the first answer that carries a legend (served inline) or
 with a read of the MCP resource `ripwire://legend-dict` (`initialize` names it). After that, the verbs that take
-`legend` (and `for`) answer rows first and end with `<about … legend="ref" dict= dictv=/>`, which carries the
-root attributes; a definition arrives once per session, in a comment after the rows of the first answer that
+`legend` (and `for`) answer rows first and end with `<about legend="ref" dict= dictv=/>`, which is only the
+pointer to the legend: the root keeps every attribute it carries inline — `capped=`, `has_more=`,
+`next_offset=`, `counts_floor=`, `root=` — so read cuts and floors off the root, as always; a definition arrives once per session, in a comment after the rows of the first answer that
 needs it (an answer whose ref form would be longer stays inline). Lost the definitions (a compacted context)?
 Read `ripwire://legend-dict/full` for all of them, or print them with `ripwire --legend-dict`.
 `legend:"compact"` on one call keeps that answer's legend inline; a server started with
@@ -212,13 +213,13 @@ ripwire --legend-dict | head -1        # the dictv= heading names the version
 ```
 
 then pass it on every call: `ripwire ROOT --callers=SYM --legend-have=<dictv>`. Each answer then comes back
-rows-first with `<about legend="ref" dict= dictv=/>` carrying the root attributes, and no legend prose.
+with its root unchanged, no legend prose, and a closing `<about legend="ref" dict= dictv=/>` that points at the legend.
 
 **Why it is worth a flag.** The legend is a near-FIXED cost per answer (measured 531–4,305 B, median 1,796),
 so the SHORTER the answer the bigger its share: 14 % of a `--for` bundle, **62 % of a `--whereis` answer**.
 Measured over 80 recorded answers: **−30 % overall** — `--dead-code` −57 %, `--grep` −50 %, `--callees` −44 %,
-`--path` −32 %, `--callers` −27 %, `--impact` −26 %. Nothing is dropped: every row and every root attribute
-is preserved, just moved onto the `<about>` row.
+`--path` −32 %, `--callers` −27 %, `--impact` −26 %. Nothing is dropped and no fact moves: every row is kept, and every root
+attribute stays on the root.
 
 This matters most when you ROUTE to a cheaper verb, because that is where the fixed cost dominates: going
 from `--for` to `--whereis` saves ~20x today and ~45x with the handshake on.
