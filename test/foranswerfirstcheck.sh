@@ -181,12 +181,34 @@ for label, new_n, old_n in (("conceptual", "a_new.xml", "a_old.xml"), ("routed",
         bad += 1
     else:
         kinds = [k for k, _, _ in b_new]
-        lastEl = max((i for i, k in enumerate(kinds) if k == "element"), default=-1)
-        firstC = min((i for i, k in enumerate(kinds) if k == "comment"), default=len(kinds))
-        if firstC > lastEl:
-            print("  PASS  (R2) %-11s every one of the %d legend comments follows every row block" % (label, len(cn)))
+
+        # A BLOCK-LOCAL legend is EXEMPT here, by design: it names its own element and travels with that block
+        # so it still sits immediately before the block's open tag. Excluding them is not a relaxation of R2 --
+        # R2 and R8 TOGETHER are stricter than R2 alone ever was. R2 alone said "every comment is at the tail";
+        # R2+R8 say "the DOCUMENT legend is at the tail AND each block legend is exactly adjacent to its block",
+        # which forbids strictly more arrangements. R8 is what makes this exemption safe, so if R8 is ever
+        # deleted this exemption must go with it.
+        def blockLocal( idx ):
+            m = re.match( r'<!--\s*([A-Za-z_][\w-]*)', b_new[ idx ][ 2 ] )
+            if not m:
+                return False
+            for k2, n2, _ in b_new[ idx + 1: ]:
+                if k2 == "comment":
+                    continue          # several comments may queue in front of one block
+                return n2 == m.group( 1 )
+            return False              # nothing follows it: the document legend by position as well as by name
+
+        docC   = [ i for i, k in enumerate( kinds ) if k == "comment" and not blockLocal( i ) ]
+        local  = sum( 1 for i, k in enumerate( kinds ) if k == "comment" and blockLocal( i ) )
+        lastEl = max( ( i for i, k in enumerate( kinds ) if k == "element" ), default = -1 )
+        firstC = min( docC, default = len( kinds ) )
+        if not docC:
+            print("  FAIL  (R2) %-11s every comment is block-local -- no document legend was placed, so R2 proves nothing" % label)
+            bad += 1
+        elif firstC > lastEl:
+            print("  PASS  (R2) %-11s every one of the %d document legend comments follows every row block (%d block-local, pinned by R8)" % (label, len(docC), local))
         else:
-            print("  FAIL  (R2) %-11s a legend comment at index %d precedes the last row block at %d" % (label, firstC, lastEl))
+            print("  FAIL  (R2) %-11s a document legend comment at index %d precedes the last row block at %d" % (label, firstC, lastEl))
             bad += 1
 
     # (R3) A RESOLVED routed section precedes <sigs>; an UNRESOLVED one does not move.
@@ -290,6 +312,94 @@ else
         ok "(R7n) the budgeted answer differs from the legacy order -- R7 can fail"
     fi
 fi
+
+# (R8) A BLOCK-LOCAL LEGEND TRAVELS WITH ITS BLOCK.
+#
+# Two kinds of comment ride a --for answer and they are not interchangeable. The DOCUMENT legend opens with
+# the verb or the root ("<!-- ripwire for ...", "<!-- root ...") and documents the answer as a whole: item R
+# moves that one to the tail on purpose. A BLOCK-LOCAL legend NAMES ITS OWN ELEMENT ("<!-- syms ..." before
+# <syms>, "<!-- shortkey ..." before <shortkey>) and the house convention is that it sits in the comment
+# IMMEDIATELY before that element's open tag, so the block can be switched off without moving a byte in
+# front of it and so a reader meets the definition exactly where the block starts.
+#
+# Moving those to the tail broke readers that are RIGHT to depend on the adjacency. Measured: formaxtokens'
+# judge strips one self-declaring trailing block before pricing and its pattern requires comment-then-block,
+# so with the comment relocated 1,447 B stopped being stripped and est_tokens looked like it under-charged by
+# exactly 579 tokens. That was not an est_tokens defect at all -- it was this adjacency.
+cap "$WORK/rich_new.xml" "legend posture" ; "$BIN" . --for="legend posture" --detail=5 >"$WORK/rich_new.xml" 2>/dev/null
+env $LEGACY_ENV "$BIN" . --for="legend posture" --detail=5 >"$WORK/rich_old.xml" 2>/dev/null
+python3 - "$WORK" <<'PY_EOF'
+import os, re, sys
+WORK = sys.argv[1]
+bad  = 0
+
+def read( n ):
+    with open( os.path.join( WORK, n ), 'rb' ) as fh:
+        return fh.read()
+
+def selfNaming( raw ):
+    """(comment span, named element) for every comment whose FIRST WORD is an element the document opens.
+
+    The first word is the convention: a block-local legend names its own element, the document legend opens
+    with the verb or the root instead."""
+    out = []
+    for m in re.finditer( rb'<!--\s*([A-Za-z_][\w-]*)', raw ):
+        word = m.group( 1 )
+        end  = raw.find( b'-->', m.start() )
+        if end < 0:
+            continue
+        if re.search( rb'<' + re.escape( word ) + rb'[ />]', raw ):
+            out.append( ( m.start(), end + 3, word ) )
+    return out
+
+def adjacent( raw ):
+    """Every self-naming comment is immediately followed by the element it names."""
+    off = []
+    for begin, end, word in selfNaming( raw ):
+        if not raw[ end: ].startswith( b'<' + word ):
+            off.append( word.decode() )
+    return off
+
+newd, oldd = read( 'rich_new.xml' ), read( 'rich_old.xml' )
+pairs = selfNaming( oldd )
+if not pairs:
+    print( '  FAIL  (R8nv) the fixture carries NO self-naming comment -- R8 would pass vacuously' )
+    bad += 1
+else:
+    print( '  PASS  (R8nv) the fixture carries %d self-naming comment(s): %s'
+           % ( len( pairs ), ', '.join( sorted( { w.decode() for _, _, w in pairs } ) ) ) )
+
+    # The legacy order is the reference: adjacency holds there by construction, so if it does NOT, the
+    # predicate itself is wrong and every verdict below is worthless.
+    offOld = adjacent( oldd )
+    if offOld:
+        print( '  FAIL  (R8ref) adjacency already fails in the LEGACY order for %s -- the predicate is wrong, not the permutation' % ', '.join( offOld ) )
+        bad += 1
+    else:
+        print( '  PASS  (R8ref) adjacency holds in the legacy order -- the predicate is sound' )
+
+        off = adjacent( newd )
+        if off:
+            print( '  FAIL  (R8) the permutation separated a block-local legend from its block: %s' % ', '.join( off ) )
+            bad += 1
+        else:
+            print( '  PASS  (R8) every block-local legend still sits immediately before its own block' )
+
+        # (R8n) MUTATION CONTROL. R8 is a "nothing is out of place" assertion, so it is evidence only if
+        # putting something out of place makes it red. Relocate one self-naming comment to the tail.
+        begin, end, word = pairs[ 0 ]
+        moved = oldd[ :begin ] + oldd[ end: ]
+        at    = moved.rfind( b'</ctx>' )
+        moved = moved[ :at ] + oldd[ begin:end ] + moved[ at: ]
+        if adjacent( moved ):
+            print( '  PASS  (R8n) relocating the %s legend to the tail DOES make R8 red -- R8 can fail' % word.decode() )
+        else:
+            print( '  FAIL  (R8n) relocating a block-local legend did NOT make R8 red -- R8 asserts nothing' )
+            bad += 1
+
+sys.exit( 1 if bad else 0 )
+PY_EOF
+[ $? -eq 0 ] || fail=1
 
 if [ "$fail" -ne 0 ]; then echo "foranswerfirstcheck: FAILURES"; exit 1; fi
 echo "foranswerfirstcheck: ALL PASS"

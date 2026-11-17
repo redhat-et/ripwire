@@ -185,6 +185,97 @@ inline constexpr std::string_view kNameChars = "abcdefghijklmnopqrstuvwxyzABCDEF
     return false;
 }
 
+// The FIRST WORD of a comment: `syms` in `<!-- syms t= n= …`. This is what separates the two kinds of
+// comment a --for answer carries. The DOCUMENT legend opens with the verb or the root (`<!-- ripwire for …`,
+// `<!-- root …`) and documents the answer as a whole; a BLOCK-LOCAL legend NAMES ITS OWN ELEMENT. Measured on
+// a --detail=5 answer: `ripwire`→<sigs> and `root`→<sigs> do not match, `syms`→<syms> does.
+[[nodiscard]] inline std::string_view commentFirstWord( std::string_view doc, const Block& b ) noexcept
+{
+    const std::size_t from = doc.find_first_of( kNameChars, b.begin + 4 );   // past the "<!--"
+    if( from == std::string_view::npos || from >= b.end ) { return {}; }
+    const std::size_t stop = doc.find_first_not_of( kNameChars, from );
+    return doc.substr( from, ( stop == std::string_view::npos ? b.end : std::min( stop, b.end ) ) - from );
+}
+
+// Which row block does this comment DECLARE, if any? The house convention is that a block's own legend sits
+// in the comment IMMEDIATELY before its open tag, so the block can be switched off without moving a byte in
+// front of it and a reader meets the definition where the block begins. Such a comment must therefore TRAVEL
+// WITH its block rather than join the document legend at the tail.
+//
+// Why this matters beyond tidiness: formaxtokenscheck's judge strips one self-declaring trailing block before
+// pricing, and its pattern requires comment-then-block. With the comment relocated, 1,447 B stopped being
+// stripped and est_tokens looked as though it under-charged by exactly 579 tokens — a phantom accounting
+// defect whose only cause was this adjacency. test/foranswerfirstcheck.sh (R8) pins it.
+[[nodiscard]] inline std::size_t declaredBlock( std::string_view doc, const std::vector<Block>& blocks, std::size_t k ) noexcept
+{
+    if( !blocks[ k ].comment ) { return std::string_view::npos; }
+    for( std::size_t j = k + 1; j < blocks.size(); ++j )
+    {
+        if( blocks[ j ].comment ) { continue; }   // several comments may queue in front of one block
+        return commentFirstWord( doc, blocks[ k ] ) == blocks[ j ].name ? j : std::string_view::npos;
+    }
+    return std::string_view::npos;   // nothing follows it: the document legend, by position as well as by name
+}
+
+// One row block preceded by its own block-local legend. Its own function because --quality-delta gates a NEW
+// function at the complexity ceiling, and inlining this loop put appendAnswerFirst at 17 against a bar of 15.
+inline void appendBlockWithLegend( std::string_view view, const std::vector<Block>& blocks,
+                                   const std::vector<std::size_t>& ownerOf, std::size_t j, std::string& out )
+{
+    for( std::size_t k = 0; k < blocks.size(); ++k )
+    {
+        if( ownerOf[ k ] == j )
+        {
+            out.append( view.substr( blocks[ k ].begin, blocks[ k ].end - blocks[ k ].begin ) );
+        }
+    }
+    out.append( view.substr( blocks[ j ].begin, blocks[ j ].end - blocks[ j ].begin ) );
+}
+
+// Append the blocks in ANSWER-FIRST order: resolved routed sections, then every other row block, then the
+// DOCUMENT legend — and each row block preceded by its own block-local legend, so the convention's adjacency
+// survives the permutation. Every byte of every block is copied unchanged; only the order moves.
+inline void appendAnswerFirst( std::string_view view, const std::vector<Block>& blocks, std::string& out )
+{
+    // The ownership map, built HERE rather than in a helper of its own. A `legendOwners()` function was the
+    // obvious extraction and --quality-delta rejected it: a 70-token clone of BOTH crossref::normalizeTokens
+    // and query.h::Eval::sourceAll, because "size a vector, fill it from a per-index call, return it" is a
+    // shape this codebase already carries twice. Third clone this week from an extraction that felt harmless.
+    std::vector<std::size_t> ownerOf( blocks.size(), std::string_view::npos );
+    for( std::size_t k = 0; k < blocks.size(); ++k )
+    {
+        ownerOf[ k ] = declaredBlock( view, blocks, k );
+    }
+    const auto emit = [ & ]( const Block& b ) { out.append( view.substr( b.begin, b.end - b.begin ) ); };
+    const auto isRouted = [ & ]( std::size_t j )
+    {
+        return resolvedRouted( view.substr( blocks[ j ].begin, blocks[ j ].end - blocks[ j ].begin ), blocks[ j ].name );
+    };
+    const auto emitOwned = [ & ]( std::size_t j ) { appendBlockWithLegend( view, blocks, ownerOf, j, out ); };
+
+    for( std::size_t j = 0; j < blocks.size(); ++j )   // 1. resolved routed sections, in their original relative order
+    {
+        if( !blocks[ j ].comment && isRouted( j ) )
+        {
+            emitOwned( j );
+        }
+    }
+    for( std::size_t j = 0; j < blocks.size(); ++j )   // 2. every other row block, order untouched — <sigs> stays first
+    {
+        if( !blocks[ j ].comment && !isRouted( j ) )
+        {
+            emitOwned( j );
+        }
+    }
+    for( std::size_t k = 0; k < blocks.size(); ++k )   // 3. the DOCUMENT legend, last, relative order kept
+    {
+        if( blocks[ k ].comment && ownerOf[ k ] == std::string_view::npos )
+        {
+            emit( blocks[ k ] );
+        }
+    }
+}
+
 // Permute one finished --for answer in place. Returns whether it was rewritten.
 //
 // Every byte of every block is copied unchanged; only their order moves. The ENSURES below is the contract:
@@ -207,20 +298,8 @@ inline bool answerFirst( std::string& doc )
     std::string out;
     out.reserve( doc.size() );
     out.append( view.substr( 0, openEnd + 1 ) );
-    const auto emit = [ & ]( const Block& b ) { out.append( view.substr( b.begin, b.end - b.begin ) ); };
 
-    for( const Block& b : blocks )   // 1. resolved routed sections, in their original relative order
-    {
-        if( !b.comment && resolvedRouted( view.substr( b.begin, b.end - b.begin ), b.name ) ) { emit( b ); }
-    }
-    for( const Block& b : blocks )   // 2. every other row block, order untouched — <sigs> stays first among them
-    {
-        if( !b.comment && !resolvedRouted( view.substr( b.begin, b.end - b.begin ), b.name ) ) { emit( b ); }
-    }
-    for( const Block& b : blocks )   // 3. the legend, last, relative order kept
-    {
-        if( b.comment ) { emit( b ); }
-    }
+    appendAnswerFirst( view, blocks, out );
     out.append( view.substr( closeAt ) );
 
     // THE PERMUTATION CONTRACT. Not an assertion of taste: if this ever fails, the pass has dropped or
