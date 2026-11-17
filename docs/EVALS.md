@@ -17673,3 +17673,70 @@ zero means "none found", never "none exists", so a suppressed `capped="0"` is in
 older binary that never emitted the key — and `capped` in particular is the attribute an earlier round
 established can make an answer *wrong* when it is false. Those bytes are the price of telling "not capped"
 from "not disclosed".
+
+## READOUT — ITEM E1: the freed bytes buy 0 rows and 0 gold, and 36 % of the saving re-spends itself
+
+Measured 2026-11-17 over all 216 recorded `--for` cells.
+
+### E1's premise does not hold, and this document's framing of it was wrong
+
+This round registered E1 as: *dropping `--for`'s prose legend lets MORE ROWS FIT — a row change, not a
+markup change.* The legend **is** charged into the fit. But in the DEFAULT regime that fit answers a bigger
+budget with **more row TEXT, never more rows.**
+
+- **0 of 216 cells passed `--token-budget`.** Every cell is in the default regime.
+- **`<sigs> shown == total` on 183 of 183** disclosing cells, `over_ceiling` absent on 216 of 216. The
+  recorded answers state the rule themselves: *"row text shortens toward it, no row of the ranked head is
+  removed for it"*, *"[sigs capped=1 with shown=total: rows shrunk, none dropped]"*. In source, only step F
+  of the ladder removes rows, and it runs against a 30,000 B runaway guard no cell reached.
+- `<hops>` `capped="1"` on **0 of 199**; `<tail>` and `<fold>` ride **on top** of the payload budget and are
+  bounded by row-count constants and a literal 4,000 B, not by a share of it; `<lego>`/`<compose>`
+  `shown="0"` is the **default posture stub**, restored by `--sections=`, not a budget cut.
+- **Row-bound cells: 1 of 216 (0.5 %).** `ld.ld-cpython-01`, `bundle="auto"`, where `leftBytes` is the one
+  channel the legend's bytes enter a row decision. Whether its third body fits is not determinable from the
+  record (no per-candidate size disclosed), and **that cell is already complete at both bounds**, so even a
+  gain buys zero completeness.
+
+**Rows gained: 0, in every repo. The trimmed rows hold no gold in any cell.** Reported as its own column
+and never added to the byte column, as R-style discipline requires.
+
+### The byte saving is partly SELF-SPENDING, and publishing the gross figure would be a wrong claim
+
+Raise the target by Δ and `trimSigLadder` stops earlier, restoring row text it had shrunk. Whether that
+happens depends on the overshoot above the target, which the answer discloses as `past_target=`.
+
+| | n | share of 216 |
+| --- | ---: | ---: |
+| full saving realised (overshoot > Δ, or ladder never fired) | 92 | 42.6 % |
+| **saving partly or wholly re-spent** | **124** | **57.4 %** |
+| **answer ends the SAME SIZE OR LARGER** | **5** | **2.3 %** |
+
+Realised fraction across fired cells: mean and median **0.61**. Corpus-wide **623,954 B freed → 400,029 B
+net: 64.1 % survives, 35.9 % is re-spent on restored row text.** The text waiting to come back is concrete —
+`docs_dropped ≥ 1` in 140 of 183 fired cells, **2,142 row docs** in all. The five same-or-larger cells:
+`d2.mf2-nest-02`, `mf1.mf1-nfpm-01`, `s1.htop-11#0`, `s1.htop-12#0`, `s1.htop-13#0`.
+
+**So "−3,018 B / −9.5 % on `--for`" would have been WRONG.** The defensible claim: the document loses a mean
+**2,889 B (9.34 %)**, of which a mean **1,852 B (5.99 %) survives**. Per repo it ranges 3.06 % (django) to
+12.40 % (nunjucks) against gross 8.67 %–12.40 % — answer size spans 3.2× across repos, so the pooled figure
+is a statement about this repo mix. The net estimate is a **lower bound**: the fit charges strictly less than
+the document loses (`chargedHeaderBytes` subtracts a long exemption list), so restoration is smaller and the
+real saving larger.
+
+### The clean positive, and it is the strongest legend evidence in this document
+
+The registered `legend` cut stripped **every legend comment from all 295 cells — −935,439 B on the `--for`
+cells, −14.01 %** — and changed **0 of 275 graded cells' verdicts**, at either bound, in both grains. G3
+identity, byte and negative controls all PASS. **No gold anchor lives only in legend prose.** Since E1's
+header-prose cut is a subset, it cannot regress either, so E1's completeness half is a measured PASS.
+
+### Two things this opens
+
+1. **A method trap worth keeping.** In **20 of 216** cells the first `<` after the root open tag sits
+   **inside the legend prose** (e.g. `<file-scope>`), so a naive structural scan read those cells' header
+   legend as **0 B** and the corpus mean as 2,597 B instead of 2,889 B. Two successive passes carried that
+   error before masking comments first.
+2. **A new item, outside E1's question.** The 2,142 dropped row docs are a **TEXT** channel, not a row
+   channel — the one place freed bytes could become completeness rather than just bytes. Whether those docs
+   carry gold the surviving attributes do not is unmeasured, and the dropped text is not in the record.
+   It needs its own registered band and a re-collection.
