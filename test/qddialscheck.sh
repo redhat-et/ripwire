@@ -554,7 +554,8 @@ row "$OEM" error-masking lineCommentJs >/dev/null \
 # ── 7) params: similar= on a list of adjacent same-typed parameters (QD-SWAP-1117, a PROTOTYPE) ──────────
 # Off unless RIPWIRE_QD_SIMILAR_ARGS is set (src/similarargs.h); report-only. A function that is new, or whose list
 # grew, and now holds a run of adjacent parameters with one written type and different names gets a params row
-# with similar="N" (sev="minor" unless the params kind already reported it). Red before the card: every (s*) arm.
+# with similar="N" (sev="minor" unless the params kind already reported it). Red before the card: every (s*) arm and
+# the full-legend arm. The compact dialect does not define similar= yet (its table feeds the session dictionary).
 #   (s1) new, three uint32_t                      -> similar="3", minor, origin="new-symbol"
 #   (s2) grew 1 -> 2 const std::string&            -> similar="2", minor, no origin (it existed)
 #   (s3) the params kind's own major row (5 -> 7)  -> the same row gains similar="7", still major, still ONE row
@@ -611,8 +612,8 @@ for f in ranged flags mixed untouched; do srow "$f" >/dev/null || SQUIET=$(( SQU
     || { no "similar (n1-n4): judged=$SJUDGED (want 4), without a row=$SQUIET (want 4)"; rows "$OSA"; }
 printf '%s' "$OSF" | grep -q 'on a params row (a prototype' \
     && ok "similar: the full legend defines similar= when a row carries it" || no "similar: a row carries similar= and the full legend does not define it"
-printf '%s' "$OSA" | grep -q 'r similar=N' \
-    && ok "similar: the compact legend defines similar= when a row carries it" || no "similar: the compact legend does not define similar="
+[ "$( "$BIN" --legend-dict 2>/dev/null | grep -c 'similar=' )" = 0 ] \
+    && ok "similar: the session dictionary holds no similar= reading (a prototype moves no dictv=)" || no "similar: --legend-dict carries similar=, so dictv= moved for every answer"
 { ! printf '%s' "$OSO" | grep -q 'similar=' && [ "$SORC" = "$SARC" ] && [ "$( rows "$OSO" | grep -c 'kind="params"' )" = 1 ]; } \
     && ok "similar (off): with the variable unset no similar= is printed, the one params row stands, same exit status ($SORC)" \
     || { no "similar (off): similar= without the variable, or rc $SORC vs $SARC, or the params rows moved"; rows "$OSO"; }

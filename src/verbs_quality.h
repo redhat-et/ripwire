@@ -1672,7 +1672,9 @@ inline constexpr const char* kQdMonsterLegend =
     "(10 or more) in this change: major whatever the percentage, since tangle in a giant function is a small share of it "
     "forever. Put the new branch in a helper. ";
 
-// QD-SWAP-1117 prototype — emitted only when a params row carries similar= (RIPWIRE_QD_SIMILAR_ARGS set).
+// QD-SWAP-1117 prototype — emitted only when a params row carries similar= (RIPWIRE_QD_SIMILAR_ARGS set). The compact
+// dialect has no reading for it yet: a row in compactlegend.h's table moves the session dictionary (dictv=) for every
+// answer, which a prototype that is off by default may not do. Under the variable, --legend=full defines similar=.
 inline constexpr const char* kQdSimilarArgsLegend =
     "similar=\"N\" on a params row (a prototype, printed only when RIPWIRE_QD_SIMILAR_ARGS is set): the function is new or its "
     "parameter list grew, and it now holds N adjacent parameters of one written type with different names, so a call that "
