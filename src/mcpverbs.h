@@ -2501,15 +2501,18 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, std::strin
     // it rides on top at the default row cap in every regime here, as it did before (this twin funds no trailing section
     // from budget_tokens but <lego>/<compose>), and a cut tail carries the page after its last row as next=.
     bool mcpTailFolded = false;   // SIZE-2: the tail folded widened rows, so its clause rides (spliced below, before pricing)
+    bool mcpTailTermNames = false;   // TAIL-SYM-TERMS: a tail row added task-word names, so its clause rides (spliced below)
     {
         std::vector<char> tailEsc;
         // FOR-TAIL-WIDE (review F8): this twin has no tail fill, so under budget_tokens it serves the old 40-row walk's tail (its
         // pre-widening size, byte for byte; a cut tail's next= continues the page) and the widened rows only without a budget
+        const std::vector<float> termTieRank = tailTermTieRank( in.g, task, in.budgetTokens );   // TAIL-SYM-TERMS
         const FileTail    mcpTail = in.budgetTokens > 0 ? fileTailOldWalk( computeFileTail( ing, lensRank, in.evidence, mcpShownIds, flRootArg, task ) )
-                                                        : computeFileTail( ing, lensRank, in.evidence, mcpShownIds, flRootArg, task );
+                                                        : computeFileTail( ing, lensRank, in.evidence, mcpShownIds, flRootArg, task, false, &termTieRank );
         const std::string tailStr = renderFileTailXml( mcpTail, mcpTail.paths.size(), tailEsc );   // every row computeFileTail collected
         std::fwrite( tailStr.data(), 1, tailStr.size(), mem );
         mcpTailFolded = tailStr.contains( " folded=\"" );
+        mcpTailTermNames = fileTailTermNamesShown( mcpTail, mcpTail.paths.size() );
         mcpDocPick = pickForDocBody( ing, task, mcpShownIds, [ & ]
                                     { return computeFileTail( ing, lensRank, in.evidence, mcpShownIds, flRootArg, task, /*rankOrder=*/true ); }, flRootArg, &mcpTail.paths );   // mcpTail: the rows printed above
     }
@@ -2527,6 +2530,10 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, std::strin
     // so the clause's bytes are part of the est_tokens price exactly as the CLI's own version is.
     spliceForSectionStubLegend( out, mcpSectionsWillStub );
     spliceForLegoCountLegend( out, mcpLegoCountAttrs );   // count-floor: present-only, the CLI twin's clause
+    if( mcpTailTermNames )
+    {
+        rw::spliceClauseAfter( out, rw::kForFileTailLegend, rw::kForFileTailTermsLegend );   // TAIL-SYM-TERMS: the CLI twin's clause
+    }
     if( mcpTailFolded )
     {
         rw::spliceClauseAfter( out, rw::kForFileTailWideLegend, rw::kForFileTailFoldedLegend );   // SIZE-2: the CLI twin's clause
