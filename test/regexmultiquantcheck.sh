@@ -377,5 +377,23 @@ safeCase "[[:alpha:]*.*.*] (unreadable class internals are never walked, review 
 shapeCase "same-set pair a*a*?b (the relax-back guard: identical sets refuse at TWO)" 'a*a*?b' "$FIX/i" '--no-prefilter'
 shapeCase "3-run \w+.*\w+.*\w+ (cross-set run at THREE: degree-2, refused)" '\w+.*\w+.*\w+' "$FIX/clean" '--no-prefilter'
 
+# ── (10) CLAUSE 2, ROUND 2's OPEN HALF: an OUTER optional, and a workaround of clause 2's own ─────────────────
+# Section (9) stopped an optional from counting as the FIRST of clause 2's two repeats; the SECOND repeat still
+# counted one, so `((www|www2){1,5}\.)?example` — an overlap under a bounded repeat, then made OPTIONAL — was
+# refused as a repeat of a repeat (measured 0.5 ms at a 400-byte subject on libstdc++; main admits it). Red on
+# the round-2 head 367dbfe (refused), green here. The admit arms can only be red on that head: main admits both.
+safeCase "((www|www2){1,5}\.)?example (bounded overlap under an OPTIONAL outer — the optional is no second repeat)" '((www|www2){1,5}\.)?example'
+safeCase "((a|aa){1,5})?b (the same outer-optional rule, minimal spelling)" '((a|aa){1,5})?b'
+# And clause 2's refusal used to teach the alternation arm's workaround, "make the OUTER quantifier a small
+# explicit bound" — advice the reader has already taken, because clause 2's outer IS bounded. The pattern below
+# stays refused (a bounded repeat of a repeated overlap); its message must name a workaround that can work.
+# Red on main (admitted: no clause 2) and on 367dbfe (the borrowed sentence); green here.
+shapeCase "clause 2 ((www|www2){1,5}\.){1,5}example (bounded outer over a repeated overlap)" '((www|www2){1,5}\.){1,5}example' "$FIX/clean"
+if [ -s "$TMP/err" ] && ! grep -qF 'make the OUTER quantifier a small explicit bound' "$TMP/err" && grep -qF 'repeat the alternation ONCE' "$TMP/err"; then
+    ok "clause 2's refusal carries its own workaround, not the bound-the-outer sentence its outer already obeys"
+else
+    no "clause 2's refusal teaches the wrong workaround (or none): $( head -c 300 "$TMP/err" )"
+fi
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail
