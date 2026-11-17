@@ -103,87 +103,109 @@ struct LangMap
 // The tiny TOML subset we accept (the zero-dep rule): `key = "value"` client-map rows and an
 // [overrule] `suffixes = [".h", ...]` single-line string array. See the file header for what is
 // ignored and why; lowering at parse time keeps the lookup one comparison.
+// A row's key: the text left of '=', trimmed, with a TOML quoted key's pair stripped ("c++" names the same thing as its bare spelling).
+inline std::string langMapKey( std::string_view raw )
+{
+    while( !raw.empty() && ( raw.back() == ' ' || raw.back() == '\t' ) )
+    {
+        raw.remove_suffix( 1 );
+    }
+    while( !raw.empty() && ( raw.front() == ' ' || raw.front() == '\t' ) )
+    {
+        raw.remove_prefix( 1 );
+    }
+    if( raw.size() >= 2 && raw.front() == '"' && raw.back() == '"' )
+    {
+        raw = raw.substr( 1, raw.size() - 2 );
+    }
+    return std::string( raw );
+}
+
+// [overrule] `suffixes = [".h", ...]`: every double-quoted string of the value. A listed list replaces the default set,
+// an empty one keeps it (the section exists to scope the set).
+inline void langMapSuffixes( LangMap& m, const std::string& val )
+{
+    std::vector<std::string> suf;
+    for( std::size_t p = 0; ( p = val.find( '"', p ) ) != std::string::npos; )
+    {
+        const std::size_t e = val.find( '"', p + 1 );
+        if( e == std::string::npos )
+        {
+            break;
+        }
+        suf.push_back( val.substr( p + 1, e - p - 1 ) );
+        p = e + 1;
+    }
+    if( !suf.empty() )
+    {
+        m.overrule = std::move( suf );
+    }
+}
+
+// A client-map row `key = "tag"`: a tag outside the vocabulary is kept in rejects for the disclosure, never guessed.
+inline void langMapAliasRow( LangMap& m, const std::string& key, const std::string& val )
+{
+    const std::size_t q1 = val.find( '"' );
+    const std::size_t q2 = val.rfind( '"' );
+    if( q1 == std::string::npos || q2 <= q1 )
+    {
+        return;
+    }
+    const std::string tag  = val.substr( q1 + 1, q2 - q1 - 1 );
+    Lang              lang = Lang::Unknown;
+    if( !langFromTag( tag, lang ) || tag == "?" )   // '?' is langTag(Unknown)'s own spelling — refuse to register the sentinel as a real alias
+    {
+        m.rejects.push_back( key + "=" + tag );
+    }
+    else if( const std::string k = canonicalKey( key ); !k.empty() )
+    {
+        m.rows.emplace_back( k, lang );
+    }
+}
+
+// One line of the map file. A blank line or a `#` comment is skipped, a `[section]` line sets inOverrule, and a
+// `key = value` line is an [overrule] suffix list or a client-map row.
+inline void langMapLine( LangMap& m, std::string_view line, bool& inOverrule )
+{
+    while( !line.empty() && ( line.front() == ' ' || line.front() == '\t' || line.front() == '\r' ) )
+    {
+        line.remove_prefix( 1 );
+    }
+    if( line.empty() || line.front() == '#' )
+    {
+        return;
+    }
+    if( line.front() == '[' )
+    {
+        inOverrule = line.find( "overrule" ) != std::string_view::npos;
+        return;
+    }
+    const std::size_t eq = line.find( '=' );
+    if( eq == std::string_view::npos )
+    {
+        return;
+    }
+    const std::string key = langMapKey( line.substr( 0, eq ) );
+    const std::string val( line.substr( eq + 1 ) );
+    if( !inOverrule )
+    {
+        langMapAliasRow( m, key, val );
+    }
+    else if( key == "suffixes" )
+    {
+        langMapSuffixes( m, val );
+    }
+}
+
 inline LangMap parseLangMapFile( const std::string& text )
 {
     LangMap m;
     bool    inOverrule = false;
-    std::size_t pos    = 0;
-    while( pos <= text.size() )
+    for( std::size_t pos = 0; pos <= text.size(); )
     {
         const std::size_t nl  = text.find( '\n', pos );
-        const std::string lineFull( text.substr( pos, ( nl == std::string::npos ? text.size() : nl ) - pos ) );   // OWN storage: a view bound straight to the substr temporary dangles
-        std::string_view  line = lineFull;   // lives for the whole iteration
-        while( !line.empty() && ( line.front() == ' ' || line.front() == '\t' || line.front() == '\r' ) )
-        {
-            line.remove_prefix( 1 );
-        }
-        if( line.empty() || line.front() == '#' )
-        {
-            if( nl == std::string::npos ) break;
-            pos = nl + 1;
-            continue;
-        }
-        if( line.front() == '[' )
-        {
-            inOverrule = line.find( "overrule" ) != std::string_view::npos;
-            if( nl == std::string::npos ) break;
-            pos = nl + 1;
-            continue;
-        }
-        const std::size_t eq = line.find( '=' );
-        if( eq != std::string::npos )
-        {
-            std::string key( line.substr( 0, eq ) );
-            while( !key.empty() && ( key.back() == ' ' || key.back() == '\t' ) )
-            {
-                key.pop_back();
-            }
-            while( !key.empty() && ( key.front() == ' ' || key.front() == '\t' ) )
-            {
-                key.erase( key.begin() );
-            }
-            if( key.size() >= 2 && key.front() == '"' && key.back() == '"' )
-            {
-                key = key.substr( 1, key.size() - 2 );   // a TOML quoted key names the same thing as its bare spelling
-            }
-            const std::string val( line.substr( eq + 1 ) );
-            if( inOverrule && key == "suffixes" )
-            {
-                std::vector<std::string> suf;
-                for( std::size_t p = 0; ( p = val.find( '"', p ) ) != std::string::npos; )
-                {
-                    const std::size_t e = val.find( '"', p + 1 );
-                    if( e == std::string::npos )
-                    {
-                        break;
-                    }
-                    suf.push_back( val.substr( p + 1, e - p - 1 ) );
-                    p = e + 1;
-                }
-                if( !suf.empty() )
-                {
-                    m.overrule = std::move( suf );   // the section exists to scope the set: a listed list replaces the default, an empty one keeps it
-                }
-            }
-            else if( !inOverrule )
-            {
-                const std::size_t q1 = val.find( '"' );
-                const std::size_t q2 = val.rfind( '"' );
-                if( q1 != std::string::npos && q2 > q1 )
-                {
-                    const std::string tag = val.substr( q1 + 1, q2 - q1 - 1 );
-                    Lang            lang  = Lang::Unknown;
-                    if( !langFromTag( tag, lang ) || tag == "?" )   // '?' is langTag(Unknown)'s own spelling — refuse to register the sentinel as a real alias
-                    {
-                        m.rejects.push_back( key + "=" + tag );
-                    }
-                    else if( const std::string k = canonicalKey( key ); !k.empty() )
-                    {
-                        m.rows.emplace_back( k, lang );
-                    }
-                }
-            }
-        }
+        const std::size_t end = nl == std::string::npos ? text.size() : nl;
+        langMapLine( m, std::string_view( text ).substr( pos, end - pos ), inOverrule );
         if( nl == std::string::npos )
         {
             break;
