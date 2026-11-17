@@ -17113,3 +17113,190 @@ gold — and it says the gain is real on more than half the corpus. It does **no
 should be: this measures where evidence sits today, not which arrangement is best. And it makes no claim
 that a truncated answer is parseable; a truncated XML document is not well-formed, and the honest consumer
 model is an agent whose context cuts a long answer, not a byte-exact cut.
+
+## READOUT — BAND R3: the prefix curve on the SHIPPED binary, and the simulation's figures corrected
+
+Measured 2026-11-17 on the item R binary, baseline via `RIPWIRE_FOR_LEGACY_ORDER=1` set in the harness's
+environment. 295 cells collected in both arms, 0 skipped, 0 failed, 216 of them `--for`. No timing taken.
+
+### The three controls, first, because without them the curve means nothing
+
+| control | result |
+| --- | ---: |
+| **1 — the shipped code IS a permutation** | **216 of 216**: top-level block multiset byte-identical, root and trailer unchanged, file size identical — and all 216 genuinely reordered, so not vacuous |
+| **3 — lossless at full length** | **0 differing cells**, both bounds (lenient 0 of 214, strict 0 of 156) |
+| **2 — the metric can fire** | an oracle reaches 85.7 % at 1 KB against the shipped 25.8 % |
+
+### The curve — item grain, n=156 cells / 558 groups / 24 repos
+
+| arm | 1 KB | 2 KB | 4 KB | 8 KB | 16 KB | median BTC |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| legacy | 11.6 % | 12.0 % | 30.1 % | 63.6 % | 84.8 % | 12,271 B |
+| legend-last only | 27.2 % | 46.8 % | 59.9 % | 74.4 % | 88.0 % | 9,053 B |
+| **both moves (shipped)** | **25.8 %** | **48.2 %** | **62.0 %** | **79.4 %** | **91.4 %** | **6,736 B** |
+| oracle (hindsight) | 85.7 % | 92.5 % | 98.6 % | 99.8 % | 100 % | 866 B |
+
+**Symbol grain** (n=58 / 275 groups / 15 repos), where the shipped and legend-last arms are identical
+because routed-first fires on no symbol-grain cell: legacy **0.0 / 0.0 / 31.6 / 82.5 / 96.7 %** → shipped
+**32.0 / 73.8 / 80.0 / 92.4 / 98.2 %**, median BTC 6,679 → **2,698 B**.
+
+**Zero cells worse at any budget in either grain** (item 0 of 156, symbol 0 of 58), and **no repo worse at
+any budget** (item 24 of 24 improved or tied, symbol 15 of 15). The registered "no cell worse" result
+reproduces.
+
+### The registered figures were WRONG in absolute terms, and the reason is instructive
+
+| figure | registered (simulation) | measured (shipped) |
+| --- | --- | --- |
+| 2 KB | 0.4 % → 54.8 % (+54.4) | 12.0 % → 48.2 % (**+36.2**) |
+| 4 KB | 19.3 % → 70.6 % (+51.3) | 30.1 % → 62.0 % (**+31.9**) |
+| 8 KB | 69.5 % → 84.1 % (+14.6) | 63.6 % → 79.4 % (+15.8) |
+| median BTC | −46.1 % | **−45.1 %** |
+
+Direction, arm ordering and the ~1.8× bytes-to-complete improvement reproduce. **The absolute percentages
+do not: every measured baseline is higher and every measured gain 15–18 points smaller at 2 and 4 KB.**
+
+**Why.** The simulation's 0.4 % baseline did not credit the task echo. **65 of 558 item groups (11.6 %) are
+satisfied by the root `<ctx task="…">` open tag alone**, because the grader's `terms=` anchors often appear
+verbatim in the question — which is *exactly* the legacy 1 KB figure and all but 2 of the legacy 2 KB
+figure. So **in legacy order, only 2 of 558 item groups are reached from answer CONTENT inside 2 KB.** The
+real baseline is worse than it looks and the real gain is smaller than was claimed. Symbol grain has no
+echo (0 of 275 from the root tag) and its legacy floor is a clean 0.0 %.
+
+**Two denominators in the registered text are also not reproducible as a single grain.** "0 of 212 cells"
+and "27 of 27 repos" pool item and symbol grain, which this band forbids: the gradable `--for` population is
+**156 item + 58 symbol = 214** cells, and the repos are **24 item + 15 symbol**, union 27. The per-repo
+median answer size spans **7.38×** (fzf 6,666 B → vscode 49,167 B), so pooling is worse than was stated.
+
+### R3's marginal requirement did its job
+
+Routed-first fires on **27 of 216 cells** (27 of 156 graded, **0 of 58 symbol-grain**); on the other 129
+graded item cells the legend-last arm is byte-identical to the shipped default, so the step is cleanly
+isolated.
+
+- **Step 1, the legend move alone:** +15.6 / +34.8 / +29.8 / +10.8 / +3.2 points, **0 of 156 cells worse at
+  any budget**, 153 better / 1 tied on bytes-to-complete.
+- **Step 2, routed-first's MARGINAL effect**, on its own 27 firing cells (103 groups): **−7.8 points at
+  1 KB**, then +7.8 / +11.7 / **+27.2** / +18.4 at 2/4/8/16 KB; median BTC **22,411 → 3,797 B**.
+
+**Cells worse on the marginal step: 7 at 1 KB, 9 at 2 KB, 7 at 4 KB, 1 at 8 KB, 0 at 16 KB — 15 distinct
+cells of the 27 it fires on.** Every loss is a firing cell, so the losses are routed-first's and not the
+legend's. **The "zero cells worse" headline survives only because the legend move's gain covers them.**
+Netting the two steps would have hidden that completely, which is precisely what R3 was registered to
+prevent. The simulation predicted 16 losing cells; 15 were measured.
+
+Also recorded: **3 item cells have WORSE bytes-to-complete** under the full change — `ld-vscode-03`
+4,660 → 5,459 B, `ld-zed-04` 15,942 → 16,249 B, `ld2-angular-06` 7,637 → 7,750 B — though none is worse on
+prefix completeness at any of the five budgets.
+
+### What the oracle says about what is left
+
+The oracle reaches **85.7 % at 1 KB against the shipped 25.8 %**, and 98.6 % against 62.0 % at 4 KB. It is
+hindsight and not an achievable order, but it bounds the headroom: **the shipped change captures a minority
+of what is available.** A previous band established why nothing buildable from emit-time features reached it
+— a per-row gold-probability order maximises precision while completeness needs coverage of DISTINCT items —
+so the next ordering band must register that objective, not this one.
+
+## PRE-REGISTRATION 2026-11-17 (amendment 9) — ITEM S: an attribute macro costs a real definition
+
+Registered before any `src/` or `queries/` change, from a defect found while auditing `--dead-code`'s
+answers and then reproduced in a 12-line fixture this band owns.
+
+### The defect, and it is three defects with one cause
+
+In C it is idiomatic to put a format-attribute macro between the return type and the function name:
+
+```c
+static int printflike(7, 8)
+window_customize_write_value(struct screen_write_ctx *ctx, u_int cx, ...)
+{
+	...
+		return (0);
+```
+
+The parser takes `printflike(7, 8)` as the function declarator, and three things follow:
+
+1. **The real definition is NEVER INDEXED.** `--defs=window_customize_write_value` answers `found="0"`,
+   so every call to it is unresolved.
+2. **A phantom takes its place and ABSORBS the real body.** `--grep` attributes the real definition line
+   to `in="printflike"`.
+3. **Rows from inside the absorbed body become symbols** — `return`, and in the fixture also `int`.
+
+`--dead-code` then lists the phantoms as deletion candidates. On tmux its only non-empty answer was **10 of
+10 wrong**: seven `printflike` and three `return`. **A wrong row in `--dead-code` tells an agent it is safe
+to delete live code**, which is the most expensive wrong answer this tool can produce.
+
+The tool is not silent about the cause — it flags the file `parse_degraded="1"` — but it ships the symbols
+anyway, so the disclosure does not reach the answer that uses them.
+
+### Measured population
+
+**8 definitions across 8 files in tmux** use the macro-on-its-own-line shape, and ripwire flags **9 files**
+`parse_degraded`. Each one costs one real function and mints at least one phantom. The shape is not
+tmux-specific — `__attribute__`, `printflike`, `__printflike` and warn-unused macros are common C idiom —
+but **8 of 8 is this band's whole measured denominator and no claim beyond tmux is registered.**
+
+### The decision rule, fixed before the fix
+
+- **S1 — the real definition must be INDEXED.** The fixture's `realwriter` and tmux's
+  `window_customize_write_value` must both resolve under `--defs`. **This is the half worth more than the
+  phantom**: a phantom is noise, a missing definition makes every call site unresolved. A fix that removes
+  the phantom and leaves the function missing FAILS S1.
+- **S2 — no indexed symbol is a reserved keyword.** 33 C/C++ keywords checked. A keyword can never be a
+  function name; this is a fact, not a heuristic, which is why it is gateable.
+- **S3 — no definition is minted from an all-integer-literal parameter list.** `f(3, 4)` at definition
+  position is an attribute macro, a vexing parse or a call — never a definition. Also a fact.
+- **S4 — THE CONTROL: a name that merely CONTAINS a keyword or the macro's name stays indexed.**
+  `returnValue` and `printflikeFmt` must survive. **A veto that also removes these is worse than the
+  defect**, and this arm is the only thing that tells the two apart.
+- **S5 — no regression in indexed symbol count on the other corpora.** A veto that quietly drops real
+  symbols elsewhere buys a clean fixture and a worse index. Report the per-corpus symbol count before and
+  after; any FALL that is not an identified phantom fails the band.
+
+### Controls
+
+- **Non-vacuity, and it has already fired once.** The fixture must carry the exact shape — macro on its own
+  line, real name below it, bare `return (0)` in the body. An earlier version of this arm grepped for the
+  macro with different arguments than the fixture used, so it went stale silently and `(S2)` passed for the
+  wrong reason. A non-vacuity arm that does not track its own fixture is the one arm that must never be
+  approximate.
+- **The fixture reproduces all three defects** before the fix: `realwriter` missing, `printflike` indexed,
+  `int` indexed. A fix is only believable against a fixture that was red for every one of them.
+
+### Amendment 9a, before any fix — S1 is NOT achievable this round, and the better fix is elsewhere
+
+Probing the fixture settled what a veto can and cannot buy, and it changes the band.
+
+**The error region swallows the whole definition.** On a 12-line fixture the indexed names are `int`, `main`
+and `printflike`. `realwriter` is absent, and **even its CALL SITE on line 12 is attributed to
+`in="printflike"`** — the phantom owns lines 4 through 12. So the parse failed over that whole region, and
+**vetoing a symbol does not re-parse it**: no veto can recover the definition.
+
+**S1 is therefore reclassified as measured-but-unfixable in this round**, not quietly dropped. Recovering it
+needs macro pre-expansion or a targeted re-parse of the error region, each of which is its own band and
+neither of which is an afternoon. The measured cost stands on the record: **8 definitions across 8 tmux
+files, 9 files flagged `parse_degraded`.**
+
+**And the probe found the better fix for the dangerous half.** The file is ALREADY flagged
+`parse_degraded="1"`. `--dead-code`'s rule is *internal linkage and no caller found in the index* — but in a
+file whose parse failed, **"no caller found" is not evidence of deadness, it is evidence the parse failed.**
+The tool holds that fact and does not use it.
+
+So the registered rule changes to:
+
+- **S1′ — `--dead-code` and `--safe-delete` must not offer a candidate from a file whose parse degraded**,
+  and must disclose how many candidates were withheld for that reason. This kills the dangerous answer at
+  its source rather than at its symptom: on tmux it removes all 10 wrong rows, because all 10 come from
+  parse-degraded files. A withheld count is a floor the reader can act on; a wrong deletion candidate is
+  not.
+- **S2, S3, S4 unchanged** — the keyword and all-literal vetoes, and the control that a name merely
+  containing a keyword survives.
+- **S5 unchanged** — no symbol-count regression on the other corpora.
+- **S6 — the withholding must be VISIBLE, not silent.** A verb that quietly serves fewer candidates has
+  swapped one dishonesty for another. `--dead-code` already carries `counts_floor="1"`; this adds a named
+  count, and the gate asserts the count is non-zero on a corpus that has such files.
+
+**What this does NOT fix, stated so the readout cannot be read as more than it is:** the 8 tmux functions
+are still missing from the index, so every call to them is still unresolved, and `--for`/`--callers` on them
+still answer nothing. `--dead-code` stops recommending deletions it cannot support; the index is no more
+complete than before.

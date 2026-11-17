@@ -531,6 +531,7 @@ for _g in \
     fnptrcheck \
     fnslotcheck \
     foranchornscheck \
+    foranswerfirstcheck \
     forautobodycheck \
     forblowupcheck \
     forbodyfoldcheck \

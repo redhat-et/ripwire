@@ -190,6 +190,7 @@
  "flipcheck.sh": 13.1,
  "floormarkcheck.sh": 71.7,
  "fnptrcheck.sh": 11.3,
+ "foranswerfirstcheck.sh": 45.0,
  "forautobodycheck.sh": 21.6,
  "forblowupcheck.sh": 1.0,
  "forbodyfoldcheck.sh": 60.0,
