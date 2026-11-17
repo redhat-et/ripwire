@@ -17188,3 +17188,37 @@ The default change is REJECTED unless all five hold. D1–D3 are mechanical and 
   dialects rather than compactlegend.h's, and MCP `for` carries a third. A posture that reduces three of the
   four families and silently misses one would still pass a pooled byte check. D1 is therefore reported
   **per legend family**, and a family with zero cells in the corpus is reported as `n=0` — not as passing.
+
+### Amendment 4a, before any `src/` change — two corrections the pre-flight forced, and one to D1
+
+The band above was written from the shape of a `--whereis` answer. Classifying 35 distinct head comments
+across 24 verbs, before writing a line of the posture, broke two of its assumptions. Both are recorded here
+rather than silently fixed, because each would have shipped a *wrong* saving while the gate said PASS.
+
+**1. "Prose" cannot be identified by a text prefix.** 20 of the 35 comments begin `<!-- ripwire ` and are
+schema prose. At least seven more are legend content that does **not**: `<!-- root= is the crawl root; p=
+below is RELATIVE… -->`, `<!-- t=alias|functype-in-C++-and-.h:alias=using… -->`, `<!-- t=modscope=… -->`,
+`<!-- demote: a <t> in sigs is a lower same-file… -->`, `<!-- syms: leads, not the answer… -->`,
+`<!-- extent_suspect_syms=K on a row = K of the… -->` and `<!-- a bound BIT this walk, so raising it
+would… -->`. A prefix rule leaves all seven in a posture whose name says the prose is gone, and under-reports
+the saving on exactly the verbs that carry them. The posture therefore identifies the legend the way the ref
+posture already does — by **recomputation** (`compactLegendText`, plus `compactPresentTerms` for the term
+rows and the `for` family's native dialect) — and never by how a comment begins.
+
+**2. A document-wide comment scan reads inside CDATA.** `--expand` and `--for` carry ripwire's own source in
+CDATA bodies, and that source contains comment-shaped text: the sweep returned `<!--" + add + "-->` and
+`<!--" ) ? answer.find( " -->` as "comments". Both the posture and the gate must use the bounded head scan
+(`headComments`, which stops at the first non-comment byte before and after the root open) and never a
+`<!--`-anywhere match. This is the same defect class as
+[[trap-legend-prose-matches-its-own-schema]], one level down.
+
+**3. D1 is amended: `est_tokens=` is repriced, and is the ONE attribute allowed to change.** D1 as written
+required every root attribute to be byte-identical. That rule, kept literally, would ship a stale
+`est_tokens=` on every answer — overstating a now-smaller answer by the prose it just dropped. The
+attribute's contract is *"price as emitted"*, so a value that no longer describes what was emitted is not a
+compat promise kept, it is the attribute no longer doing its job; an agent budgeting against it would be
+over-charged by 14.8 % on every call. So: **every root attribute stays byte-identical except `est_tokens=`,
+which MUST change, and must move DOWN by an amount consistent with the bytes removed** (the compact
+dialect's existing reprice path and its `kCompactReprice*` constants). An unchanged `est_tokens=` now FAILS
+D1 rather than passing it. Registered here, before the measurement, with the reason — not adjusted
+afterwards to match what the code happened to do.
