@@ -8281,7 +8281,7 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
         if( truncated )
         {
             // OUTSIDE the CDATA, where every other cut is stated: the body is cut, and next= serves the rest.
-            piece += " truncated=\"1\" next=\"";  piece += escapeXml( nextCall, esc );  piece += "\"";
+            piece += " truncated=\"1\" next=\"";  appendNextValueXml( piece, nextCall );  piece += "\"";
         }
         if( overCeiling )
         {
@@ -8439,11 +8439,12 @@ struct HopOwners
 
 // The continuation that lists one owner's callees: the canonical id when the symbol has a scope (two same-named methods
 // of one file are two entities, and FILE:NAME would merge them), else FILE:NAME. Escaped for an attribute value.
-inline std::string ownerCalleesNext( const IngestResult& ing, const Symbol& s, std::string_view pathRel, std::string_view rootArg,
-                                     std::vector<char>& esc )
+inline std::string ownerCalleesNext( const IngestResult& ing, const Symbol& s, std::string_view pathRel, std::string_view rootArg )
 {
     std::string target = s.scope.empty() ? std::string( pathRel ) + ":" + std::string( s.name ) : canonicalIdForEmit( ing, s, rootArg );
-    return std::string( escapeXml( nextFlag( "--callees=", target ), esc ) );   // quoted only where a shell would split it (checklist 34)
+    std::string next;
+    appendNextValueXml( next, nextFlag( "--callees=", target ) );   // quoted only where a shell would split it (checklist 34); the one next= escaper
+    return next;
 }
 
 // What the owner walk hands back to packHops: the rows, how many nodes they consumed, and the budget and via-legend charge
@@ -8491,7 +8492,7 @@ inline OwnerHopRows packOwnerHopRows( const IngestResult& ing, const std::vector
         // forOwnerHopPlan seats only indexed symbols, each with a proven callee edge (hopSlotHasProvenEdge, read there)
         ASSUME( id < ing.symbols.size(), "the owner plan seats only indexed symbols (forOwnerHopPlan)" );
         const Symbol&     s    = ing.symbols[ id ];
-        const std::string next = ownerCalleesNext( ing, s, pathRel( s.fileId ), rootArg, esc );
+        const std::string next = ownerCalleesNext( ing, s, pathRel( s.fileId ), rootArg );
         std::string       row  = "<h l=\"" + std::to_string( s.line ) + "\" p=\"";   // composed on std::string: no fixed buffer
         row += escapeXml( pathRel( s.fileId ), esc );
         row += "\" n=\"";
@@ -8523,7 +8524,7 @@ inline OwnerHopRows packOwnerHopRows( const IngestResult& ing, const std::vector
     if( out.cut > 0 )
     {
         ASSUME( first < ing.symbols.size(), "a counted owner cut names an indexed symbol (forOwnerHopPlan / the walk above)" );
-        out.cutNext = ownerCalleesNext( ing, ing.symbols[ first ], pathRel( ing.symbols[ first ].fileId ), rootArg, esc );
+        out.cutNext = ownerCalleesNext( ing, ing.symbols[ first ], pathRel( ing.symbols[ first ].fileId ), rootArg );
     }
     return out;
 }
@@ -8675,7 +8676,7 @@ inline void packHops( std::FILE* out, const IngestResult& ing, const std::vector
         const Symbol& s = ing.symbols[ id ];
         // body-fold rider (forbudget-soft N3, rule 5): a cut listing names the call that lists every callee, as an owner row's does —
         // written only beside capped="1", and outside the budget walk (a disclosure never costs a callee row)
-        const std::string next = ownerCalleesNext( ing, s, pathRel( s.fileId ), rootArg, esc );
+        const std::string next = ownerCalleesNext( ing, s, pathRel( s.fileId ), rootArg );
         std::string   row;
         char          hdr[ 64 ];
         rw::formatTo( hdr, sizeof( hdr ), "<h l=\"{}\" p=\"", s.line );

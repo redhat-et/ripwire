@@ -91,8 +91,10 @@ assert all( int( x[4] ) <= int( x[5] ) for x in secs ), "rank <= of"
 PY
 then ok "(f1) fires: <doc_body>, its legend, section rows with p= l= e= n= rank= of= and the section text"; else no "(f1) fires: $( block "$TMP/f1.xml" | head -c 400 )"; fi
 
+# RE-PIN (NEXT-APOS-RAW, 2026-11-15): doc_body next= reads --recall='…' / --for='…' (was &apos;…&apos;; written '\'' inside these
+# single-quoted patterns): nextverb.h leaves ' raw in a "-delimited attribute. Here, (h1) and (b2).
 # (f2) the allowance cut
-if [ -s "$TMP/f1.xml" ] && block "$TMP/f1.xml" | grep -q '<doc_body [^>]*next="--recall=&apos;how do the docs describe the retry policy for failed uploads&apos;" capped="1">' \
+if [ -s "$TMP/f1.xml" ] && block "$TMP/f1.xml" | grep -q '<doc_body [^>]*next="--recall='\''how do the docs describe the retry policy for failed uploads'\''" capped="1">' \
    && block "$TMP/f1.xml" | grep -q '<b t="section" p="docs/retries.md" l="[0-9]*" e="[0-9]*" n="Retry policy" rank="[0-9]*" of="[0-9]*" cut="1" range="[0-9]*-[0-9]*/[0-9]*">'
 then ok "(f2) a section over the allowance is cut=\"1\"; the root says capped=\"1\" and next= the recall call"; else no "(f2) allowance: $( block "$TMP/f1.xml" | grep -o '<doc_body [^>]*>' )"; fi
 
@@ -138,7 +140,7 @@ done
 
 # (h1) token budget: held
 if ans "$TMP/h1.xml" "$DFX" "--for=$TASK" --token-budget=4000 \
-   && grep -q '<doc_body match="lexical" est_tokens="[0-9]*" held="budget" files="3" next="--for=&apos;how do the docs describe the retry policy for failed uploads&apos;"><f p="[^"]*"/><f p="[^"]*"/><f p="[^"]*"/></doc_body></ctx>$' "$TMP/h1.xml" \
+   && grep -q '<doc_body match="lexical" est_tokens="[0-9]*" held="budget" files="3" next="--for='\''how do the docs describe the retry policy for failed uploads'\''"><f p="[^"]*"/><f p="[^"]*"/><f p="[^"]*"/></doc_body></ctx>$' "$TMP/h1.xml" \
    && ! grep -q '<b t="section"' "$TMP/h1.xml"
 then ok "(h1) --token-budget below the answer holds the block: held=\"budget\", three f p= rows, next= the same call, no section text"; else no "(h1) held: $( grep -o '<doc_body.*' "$TMP/h1.xml" | head -c 300 )"; fi
 
@@ -250,7 +252,7 @@ partial=0; full=0; allfit=1
 for B in 5000 5400 5800 6200 6600 7000 7600 8400; do
   if ans "$TMP/b2.xml" "$DFX" "--for=$TASK" --token-budget=$B && [ "$FULLB" -gt 0 ] && chk_fit "$TMP/b2.xml" $B "$FULLB"; then
     if grep -q '<doc_body match="lexical" est_tokens="[0-9]*" files="3" allowance="[0-9]*" bytes="[0-9]*" held="budget" held_bytes="[1-9][0-9]*"' "$TMP/b2.xml" && [ "$( nsec "$TMP/b2.xml" )" -ge 1 ] \
-       && grep -q ' next="--for=&apos;' "$TMP/b2.xml"; then partial=1; fi
+       && grep -q ' next="--for='\''' "$TMP/b2.xml"; then partial=1; fi
     grep -q '<doc_body match="lexical" est_tokens' "$TMP/b2.xml" && ! grep -q '<doc_body [^>]*held="budget"' "$TMP/b2.xml" && full=1
   else allfit=0; fi
 done

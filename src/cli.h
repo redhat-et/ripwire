@@ -358,7 +358,7 @@ struct Config
                                                             // computes — 1-hop callers, the transitive --impact blast radius, every --uses
                                                             // read/write/import/call/extends site, how much of the radius the tested= lens
                                                             // covers, and --dead-code's own zero-caller/internal-linkage shape at defs=1. FACTS only:
-                                                            // risk= names what was found (none-found/possible-callers/uses-exist/untested-radius/unmodelled/hedged/contract), never a
+                                                            // risk= names what was found (none-found/possible-callers/uses-exist/untested-radius/tests-only/unmodelled/hedged/contract), never a
                                                             // go/no-go verdict. file:name disambiguates like --around/--lego.
     std::string_view sliceSpec;                            // --slice=SYM[:VAR] (lane/paper-slice): NAME-BASED intra-procedural def-use
                                                             // slice of VAR inside the ONE uniquely-resolved definition SYM (multiple defs
@@ -2055,6 +2055,7 @@ inline constexpr char kHelpHead[] =
         "                               SYM: its <dc> rows), hedged (none of either, but a name-template lookup, a getattr with an\n"
         "                               f-string or this['compile' + t], could name SYM: its <pd> rows, or <pdw> for a template too\n"
         "                               wide to list candidates for), untested-radius (a radius exists and none of it is test-covered),\n"
+        "                               tests-only (every symbol in the radius is a test definition),\n"
         "                               or uses-exist (a radius exists and some of it is tested) — never a go/no-go verdict; unmodelled\n"
         "                               when nothing was found for a kind used by reading or naming it (a variable, class, struct)\n"
         "                               whose uses those counts cannot see; contract when nothing was found for an interface or abstract\n"
@@ -5590,7 +5591,9 @@ inline Config parseArgs( int argc, char** argv ) noexcept
             // emit= names the formatted-output path this binary compiled in (infra/emit.h; test/versioncheck.sh
             // #6, and asserted per CI leg). It precedes built_from= on purpose: test/doctorcheck.sh arm (H)
             // reads built_from= as everything up to the closing paren, so the sha stays the LAST token.
-            rw::emitTo( stdout, "ripwire {} ({}, {} {}, emit={}, built_from={})\n", kRipwireVersion, kRipwireBuildType,
+            // The version token is the LABEL (cmake/version_stamp.cmake): a build off the tag says -dev, so a build of main is
+            // never mistaken for the release it follows; MCP/LSP serverInfo, --html and --doctor print the same one.
+            rw::emitTo( stdout, "ripwire {} ({}, {} {}, emit={}, built_from={})\n", kRipwireVersionLabel, kRipwireBuildType,
                         kRipwireCompilerId, kRipwireCompilerVer, rw::kEmitterName, kRipwireGitStamp );
             std::exit( 0 );
         }

@@ -17,6 +17,7 @@
 //   • mcpedit.h  — the symbol-addressed EDIT verbs + runEditVerb()                 (includes mcpindex.h)
 // Include direction is strictly one-way: mcpjson → mcpindex → {mcpverbs, mcpedit} → mcp. No cycles.
 
+#include "version.h"        // kRipwireVersionLabel — initialize's serverInfo.version (the --version label)
 #include "mcpverbs.h"      // the read/flagship verb builders runMcp dispatches to (pulls mcpindex.h → mcpjson.h)
 #include "compactlegend.h"   // P1 (L7): the legend:"compact" rewrite applied in textResult
 #include "legenddict.h"      // r2-LO: the session dictionary and the legend="ref" posture (resources/read, textResult)
@@ -1277,7 +1278,8 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                                                          : kMcpLatestProtocolVersion;
                 resp = "{\"jsonrpc\":\"2.0\",\"id\":" + id +
                        ",\"result\":{\"protocolVersion\":\"" + std::string( negotiatedVersion ) +
-                       "\",\"serverInfo\":{\"name\":\"ripwire\",\"version\":\"1.0\"},\"capabilities\":{\"tools\":{},\"resources\":{}},"
+                       "\",\"serverInfo\":{\"name\":\"ripwire\",\"version\":\"" + mcpdetail::jsonEscape( rw::kRipwireVersionLabel )   // the --version label
+                       + "\"},\"capabilities\":{\"tools\":{},\"resources\":{}},"
                        "\"instructions\":\"" + mcpdetail::jsonEscape( mcpInstructionsText( policy )   // V3/F4: the; --mcp-tools: only hints for listed tools
                                                     + mcpLegendPointer( policy )   // r2-LO: the session dictionary, where a session exists
                                                     + mcpToolSubsetNote( policy )   // --mcp-tools: a subset announces itself

@@ -40,20 +40,26 @@ inline constexpr const char* kNextLegendClause =
     "next= is ONE pasteable follow-up — this tool's flags, or a shell line copied from a run= row — the call that "
     "ends this search; paste it as-is. ";
 
-// attribute-escaped ` next="…"`; empty invocation ⇒ empty string (a root with nothing honest to suggest says nothing).
-// `attr` names a SECONDARY listing's own follow-up (cut-fix E: --impact's importers_next=, beside the root's next=),
-// escaped by the same policy; the default is the root's one next=.
-inline std::string nextAttrXml( std::string_view invocation, std::string_view attr = "next" )
+// THE ONE next= VALUE ESCAPER (NEXT-APOS-FINISH, 2026-11-15): appends `invocation` escaped for a "-DELIMITED attribute.
+// Every next-family value goes through here — nextAttrXml below (the whole ` attr="…"`), and the emitters that build their own ` next="` (the
+// dead-code filter hint, the file page, value refs, the body cut, the owner-callees list, declined sites' dc_next=,
+// defs' to_next=, the fold and owner <skip>/<bodies> rows, grep's zero-hit <suggest>) — so no hint is pasteable on one
+// verb and entity-corrupted on the next. serialize.h escapeXml (every other attribute and text) still writes &apos;, and
+// differs on one more byte class: it writes a stray C0 byte as a space and passes DEL, where this writes '?' for both.
+// The re-routed values are flags, paths and names that carry neither (fire321: no row moved but by the apostrophe).
+inline void appendNextValueXml( std::string& a, std::string_view invocation )
 {
-    if( invocation.empty() ) { return {}; }
-    std::string a;
-    a.reserve( invocation.size() + attr.size() + 8 );
-    a += ' ';
-    a += attr;
-    a += "=\"";
-    // serialize.h escapeXml's policy, byte for byte (w3fixbudgetcheck: a --grep pattern with a raw newline / C0 /
-    // invalid UTF-8 byte is echoed by grep's next= and MUST NOT reach markup — G4): the five XML escapes, the three
+    // serialize.h escapeXml's policy, byte for byte, BUT ONE (w3fixbudgetcheck: a --grep pattern with a raw newline /
+    // C0 / invalid UTF-8 byte is echoed by grep's next= and MUST NOT reach markup — G4): four XML escapes, the three
     // legal control bytes as character references, every other C0 byte (and DEL) as '?', invalid UTF-8 as '?'.
+    // The one: `'` stays RAW. Every caller writes this value double-quoted (`attr="…"`, nextAttrXml below), and a raw
+    // apostrophe is legal XML there (XML 1.0 [10] AttValue excludes only the delimiter, `<` and `&`), so an XML parser
+    // reads the same value either way. A reader pasting next= out of a raw document — a captured answer, a doc, a
+    // terminal — is the other consumer, and nextFlag's shell quoting is all apostrophes: `--for=&apos;x y&apos;` is a
+    // literal `&apos;` to the shell (and a `&` that backgrounds the command), `--for='x y'` is the call. Measured on
+    // the 321 in-sample --for calls: 1,482 entities, 7.4 KB, and nothing else moves (nextaposcheck.sh). `"`, `&`, `<`
+    // and `>` stay escaped — the first ends the attribute, the rest are markup. A caller that ever writes this value
+    // into a SINGLE-quoted attribute must escape `'` itself; none does today.
     const char*       d = invocation.data();
     const std::size_t n = invocation.size();
     for( std::size_t i = 0; i < n; )
@@ -65,7 +71,7 @@ inline std::string nextAttrXml( std::string_view invocation, std::string_view at
             case '<':  a += "&lt;";   ++i; break;
             case '>':  a += "&gt;";   ++i; break;
             case '"':  a += "&quot;"; ++i; break;
-            case '\'': a += "&apos;"; ++i; break;
+            case '\'': a += '\'';     ++i; break;   // raw: the attribute is "-delimited (above)
             case '\t': a += "&#9;";   ++i; break;
             case '\n': a += "&#10;";  ++i; break;
             case '\r': a += "&#13;";  ++i; break;
@@ -77,6 +83,20 @@ inline std::string nextAttrXml( std::string_view invocation, std::string_view at
                 break;
         }
     }
+}
+
+// attribute-escaped ` next="…"`; empty invocation ⇒ empty string (a root with nothing honest to suggest says nothing).
+// `attr` names a SECONDARY listing's own follow-up (cut-fix E: --impact's importers_next=, beside the root's next=),
+// escaped by the same policy; the default is the root's one next=.
+inline std::string nextAttrXml( std::string_view invocation, std::string_view attr = "next" )
+{
+    if( invocation.empty() ) { return {}; }
+    std::string a;
+    a.reserve( invocation.size() + attr.size() + 8 );
+    a += ' ';
+    a += attr;
+    a += "=\"";
+    appendNextValueXml( a, invocation );
     a += "\"";
     return a;
 }
@@ -128,6 +148,12 @@ inline std::string nextFlag( std::string_view flag, std::string_view value )
     // is word-initial, and the quotes are load-bearing — which is why this is a narrowing and not a deletion.
     // test/nextverbcheck.sh arm (9) pins the bare form, and a space-bearing value as the control that quoting
     // still happens where a shell would really act.
+    //
+    // THE ENTITY HALF IS GONE TOO (NEXT-APOS-RAW, 2026-11-15). Both paragraphs above describe quotes that the
+    // escaper turned into &apos;. nextAttrXml now leaves `'` raw in its "-delimited attribute, so the quotes this
+    // function still emits — a space-bearing value, `'\''` around an apostrophe, a word-initial `~` — paste as the
+    // shell reads them: `next="--for='x y' --limit=40"`. The tilde narrowing still matters, because it keeps
+    // quotes off a value that needs none.
     bool plain = !value.empty();
     for( std::size_t i = 0; i < value.size(); ++i )
     {

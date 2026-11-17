@@ -15,6 +15,7 @@
 # bench/PROFILE.md as a ledger, never as a red CI gate).
 #
 # Asserts:
+#   (0) EVERY RUN ANSWERED: each run below exits 0 with a non-empty stdout (two dead runs compare equal; #676's TSan leg).
 #   (1) COLD == WARM, over a matrix of --grep option combinations: the first run of each vector (empty
 #       cache dir) and the second (memo populated) are BYTE-IDENTICAL on stdout, stderr and exit code.
 #   (1b) LIVENESS: the memo actually engaged — blobs of the ripwire-stier- family exist after the cold
@@ -137,6 +138,21 @@ runVector(){   # $1 = binary  $2 = cache dir  $3 = out prefix  $4.. = argv tail
     printf '%s' "$?" >"$out.rc"
 }
 
+# (0) LIVENESS OF EVERY RUN: each arm compares two runs, and two runs that both DIED compare equal — train #676's TSan leg
+# killed every cached run (halt_on_error on a depwatch race), so cold == warm == warm passed on empty stdout while the
+# real failure surfaced as a missing blob and a "stale memo". A run that does not exit 0 with an answer on stdout is
+# named here, with its stderr head, before any arm reads it.
+deadRuns=0
+answered(){   # $1 = out prefix  $2 = what ran
+    local rc; rc="$( cat "$1.rc" 2>/dev/null )"
+    if [ "$rc" != "0" ] || [ ! -s "$1.out" ]; then
+        no "(0) a run gave no answer (exit ${rc:-?}, $( wc -c <"$1.out" 2>/dev/null | tr -d ' ' ) B stdout): $2"
+        head -3 "$1.err" 2>/dev/null | sed 's/^/        | /'
+        deadRuns=$(( deadRuns + 1 ))
+    fi
+    runsChecked=$(( ${runsChecked:-0} + 1 ))
+}
+
 memoBlobCount(){   # $1 = cache dir — the ripwire-stier- family, in either blob layout (flat or sharded)
     find "$1" -name 'ripwire-stier-*' -type f 2>/dev/null | wc -l | tr -d ' '
 }
@@ -151,6 +167,7 @@ for i in "${!VECTORS[@]}"; do
     runVector "$BIN" "$coldCache" "$TMP/v$i.cold" "${argv[@]}"
     runVector "$BIN" "$coldCache" "$TMP/v$i.warm" "${argv[@]}"
     runVector "$BIN" "$coldCache" "$TMP/v$i.warm2" "${argv[@]}"
+    for leg in cold warm warm2; do answered "$TMP/v$i.$leg" "$leg ${VECTORS[$i]}"; done
     for chan in out err rc; do
         if ! cmp -s "$TMP/v$i.cold.$chan" "$TMP/v$i.warm.$chan"; then
             no "(1) cold != warm on $chan for: ${VECTORS[$i]}"
@@ -180,6 +197,7 @@ for i in "${!VECTORS[@]}"; do
     # shellcheck disable=SC2206
     argv=( ${VECTORS[$i]} )
     runVector "$BIN" "$ncCache" "$TMP/v$i.nc" "${argv[@]}" --no-cache
+    answered "$TMP/v$i.nc" "--no-cache ${VECTORS[$i]}"
     if ! cmp -s "$TMP/v$i.warm.out" "$TMP/v$i.nc.out"; then
         no "(3) --no-cache stdout differs from the warm answer for: ${VECTORS[$i]}"
         diff "$TMP/v$i.warm.out" "$TMP/v$i.nc.out" 2>&1 | head -6 | sed 's/^/        | /'
@@ -202,7 +220,7 @@ mkdir -p "$staleCache"
 
 # Baseline: the token is real CODE in alpha.c, so the tiered default serves the code rows and suppresses
 # the comment/string ones. Populate the memo for alpha.c at this content.
-runVector "$BIN" "$staleCache" "$TMP/stale.pre" --grep=FASTTOKEN_zeta
+runVector "$BIN" "$staleCache" "$TMP/stale.pre" --grep=FASTTOKEN_zeta; answered "$TMP/stale.pre" "(4) baseline --grep=FASTTOKEN_zeta"
 preSuppressed="$( grep -c 'suppressed_comment=' "$TMP/stale.pre.out" 2>/dev/null || true )"
 if grep -q 'in="alphaFastTokenZeta"' "$TMP/stale.pre.out"; then
     ok "(4) precondition: the code-tier row is served before the edit"
@@ -222,7 +240,7 @@ int alphaFastTokenZeta( int n )
 }
 EOF
 alphaFiller >>"$SB/src/alpha.c"
-runVector "$BIN" "$staleCache" "$TMP/stale.a" --grep=FASTTOKEN_zeta
+runVector "$BIN" "$staleCache" "$TMP/stale.a" --grep=FASTTOKEN_zeta; answered "$TMP/stale.a" "(4a) after the size-changing edit --grep=FASTTOKEN_zeta"
 if grep -q 'in="alphaFastTokenZeta"' "$TMP/stale.a.out"; then
     no "(4a) STALE MEMO: a code-tier row still served after the code occurrence was deleted"
     sed 's/^/        | /' "$TMP/stale.a.out" | head -4
@@ -257,13 +275,19 @@ if [ $? -ne 0 ]; then
     no "(4b) fixture could not be built (python3 missing or the sandbox line drifted)"
 else
     sizeNow="$( wc -c <"$SB/src/alpha.c" | tr -d ' ' )"
-    runVector "$BIN" "$staleCache" "$TMP/stale.b" --grep=FASTTOKEN_zeta
+    runVector "$BIN" "$staleCache" "$TMP/stale.b" --grep=FASTTOKEN_zeta; answered "$TMP/stale.b" "(4b) after the size-preserving edit --grep=FASTTOKEN_zeta"
     if grep -q 'FASTTOKEN_zeta = n;' "$TMP/stale.b.out"; then
         ok "(4b) size-preserving edit invalidated the memo (byte size held at $sizeNow, new code row served)"
     else
         no "(4b) STALE MEMO: a size-preserving edit was not seen (byte size held at $sizeNow)"
         sed 's/^/        | /' "$TMP/stale.b.out" | head -6
     fi
+fi
+
+if [ "${runsChecked:-0}" -lt 50 ]; then
+    no "(0) only ${runsChecked:-0} runs were checked for an answer (expected 4 per vector + 3 staleness runs) — the liveness arm is vacuous"
+elif [ "$deadRuns" -eq 0 ]; then
+    ok "(0) all $runsChecked runs answered (exit 0, non-empty stdout): no arm above compared two dead runs"
 fi
 
 # ── arm (5): every matrix answer is still well-formed XML ─────────────────────────────────────────────

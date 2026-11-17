@@ -223,7 +223,8 @@ t = run( nr, "--impact=widgets.py:on_button_pressed" )
 check( t is not None and attr( root( t, "impact" ), "reaches_hedged_via" ) is None, "N2 no rule: no name-key hop" )
 t = run( wd, "--path=post_message,on_*" )
 hr = root( t, "handler_rule" )
-check( attr( hr, "handlers" ) == "17" and "<h n=\"" not in ( t or "" ) and attr( hr, "next" ) == "--regex=&apos;def on_wide\\(&apos;", f"W1 17 defs: count + next=, no cut list ({hr[:260]})" )
+# RE-PIN (NEXT-APOS-FINISH, 2026-11-15): next= reads the raw ' (was &apos;): nextverb.h appendNextValueXml
+check( attr( hr, "handlers" ) == "17" and "<h n=\"" not in ( t or "" ) and attr( hr, "next" ) == "--regex='def on_wide\\('", f"W1 17 defs: count + next=, no cut list ({hr[:260]})" )
 
 t = run( fw, "--path=post_message,on_*" )
 check( "handler_rule via=name-key base=" in t, "L1 compact clause rides with the block" )
