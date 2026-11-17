@@ -679,6 +679,7 @@ for _g in \
     legendcostcheck \
     legendcoveragecheck \
     legenddriftcheck \
+    legenddefaultcheck \
     legendhavecheck \
     legendrefcheck \
     legobundlecheck \
