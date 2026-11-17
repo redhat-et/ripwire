@@ -16059,3 +16059,84 @@ A truncated XML document **is not well-formed**. This measures whether the EVIDE
 not whether a consumer could parse it, and no claim is made that a truncated answer is usable. The honest
 consumer model is an agent whose context cuts the tail of a long answer, or a reader that stops early — and
 for a well-formed short answer the surface already in the binary is a smaller budget, not a byte cut.
+
+## READOUT — ITEM P: the evidence IS back-loaded, so reordering is justified; and at a tight budget the legend IS the answer
+
+Run 2026-11-16 on the 320-cell store, `harness/prefix_curve.py`. Whole measurement: **4.5 s**, no build, no
+re-collection.
+
+### Band P2 — the controls, and one of them VOIDS a bound
+
+| control | result |
+| --- | --- |
+| identity (prefix = ∞ reproduces the untruncated grade) | **PASS** |
+| floor (prefix = 0 yields ZERO complete cells) | **PASS** |
+| monotonicity, item/lenient and symbol+file | **PASS** |
+| monotonicity, **item/strict** | **FAIL** |
+
+The strict bound runs 40.8 % → 36.3 % → 49.7 % across the 75 / 90 / 100 % prefixes. P2 says a rise-then-fall
+means truncation is corrupting what it keeps and the readout is void rather than interesting, so **the strict
+bound is VOID under truncation** — and the mechanism is exact, not a guess:
+
+> The strict bound is *defined* as evidence outside `<tail>`, and it finds the tail with a
+> `<tail …>…</tail>` span match. A prefix that cuts mid-tail removes the closing tag, the span stops
+> matching, nothing is stripped, and **tail evidence counts toward strict**. Include the close tag again and
+> the span is stripped and strict drops. Verified on a minimal document.
+
+So strict's value under truncation depends on whether the cut happens to land inside the tail. **It is not
+measuring what it means.** Reported as a failed control, with the two monotonic bounds carrying the result.
+
+### Band P4 — the registered verdict: BACK-LOADED
+
+Legend stripped, 50 % relative prefix against each repo's own full-length completeness. The rule, fixed
+before the data: back-loaded iff below 75 % of full in at least a third of repos.
+
+| bound | repos back-loaded | bar | verdict |
+| --- | ---: | ---: | --- |
+| item/lenient | **14 of 22 (64 %)** | ≥ 33 % | **MEETS** |
+| symbol+file | **7 of 15 (47 %)** | ≥ 33 % | **MEETS** |
+
+Worst per repo (share of full completeness retained at half the answer): cockroach **0.20**, angular 0.38,
+zed 0.40, axum 0.50, cpython 0.50; tmux **0.42**, kysely 0.44, mdbook 0.60.
+
+**So reordering is justified — by a rule written before the measurement.** It is the first lever this round
+the registered rule has endorsed rather than failed; the three tail items all failed theirs. Half of a
+`cockroach` answer carries a fifth of the answers its full length does.
+
+### The finding that was not the point of the measurement: at a tight budget, the legend IS the answer
+
+| budget | item/lenient with legend | legend stripped | symbol+file with legend | legend stripped |
+| --- | ---: | ---: | ---: | ---: |
+| 1 KB | 0.0 % | 3.8 % | 3.0 % | **33.3 %** |
+| 2 KB | 0.0 % | 14.6 % | 17.8 % | **54.1 %** |
+| 4 KB | 8.3 % | 20.4 % | 43.7 % | 60.7 % |
+| 8 KB | 23.6 % | 30.6 % | 63.0 % | 71.1 % |
+| 32 KB | 51.6 % | 55.4 % | 85.9 % | 85.9 % |
+
+At a **2 KB** budget the legend costs **36 points** of symbol-grain completeness and **all** of the
+item-grain's — a median legend is 1,796 B, so a 2 KB answer is almost entirely schema prose. This reframes
+the legend work: not "bytes saved" but **answers delivered inside a budget**. It is the same lever measured
+on a different axis, and the axis a context-limited agent actually lives on.
+
+### Band P0 — and the absolute curve DOES depend on answer size, which is why it is kept apart
+
+At one fixed 8 KB budget, as a share of each tertile's own full-length completeness:
+
+| tertile | median answer | item/lenient | symbol+file |
+| --- | ---: | ---: | ---: |
+| SMALL (hono 3.5 KB, tmux 3.9 KB, ninja 4.3 KB) | 8,948 B | **76.9 %** | **87.3 %** |
+| MID | 21,046 B | 56.7 % | 75.6 % |
+| LARGE (angular/envoy 35 KB, vscode 43.5 KB) | 32,909 B | **38.9 %** | — |
+
+**A fixed byte budget costs a large-answer repo twice the completeness it costs a small one.** That is the
+confound P0 was registered to separate: pooled, this curve would have reported a single "completeness at
+8 KB" that is really a statement about which repos are in the corpus. The ordering verdict above therefore
+rests on the RELATIVE curve only, exactly as P0 requires.
+
+### What this does and does not license
+
+It licenses **reordering work** — leading with the routed section, the direct answer, the rows that carry
+gold — and it says the gain is real on more than half the corpus. It does **not** say what the new order
+should be: this measures where evidence sits today, not which arrangement is best. And it makes no claim
+that a truncated answer is parseable; a truncated XML document is not well-formed, and the honest consumer
+model is an agent whose context cuts a long answer, not a byte-exact cut.
