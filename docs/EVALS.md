@@ -16095,7 +16095,10 @@ Band T3 exists precisely to test the assumption it rests on.
   was built on a misread definition, and T1's result stands on its own measurement with the estimate
   withdrawn in place.
 - **Band T4 — default vs opt-in is decided by T1, in advance.** If T1 passes at both bounds the tail becomes
-  opt-in (`--tail`), and if it passes at one bound only it stays default with an opt-OUT. Registered now so
+  opt-in behind a flag of its own, and if it passes at one bound only it stays default with an opt-OUT.
+  (An earlier wording spelled that hypothetical flag out as if it existed. It does not, and T1's per-repo
+  rule then failed, so T4 kept the tail as a default — the spelling is gone rather than left to read as a
+  shipped surface.) Registered now so
   the result cannot pick the framing.
 
 ### ITEM R — class→verb routing, with the router judged apart from the map
@@ -16508,8 +16511,9 @@ band unfalsifiable by construction: a cap at `paths.size()` trivially satisfies 
 
 The cap must disclose itself through the vocabulary already emitted: `capped="1"` must flip on every cut
 cell, `total=` must stay the uncut count, and the `next=` argv must be **executed** on the same root and
-shown to produce the rows the cap removed. A `next=` that does not recover them is a FAIL — that is the §P8
-/ §9 honesty requirement and T2's recoverability rule, strengthened from naming the argv to running it.
+shown to produce the rows the cap removed. A `next=` that does not recover them is a FAIL — that is the
+disclosure contract for a cut element (`total=` / `shown=` / `capped=` / `next=`) plus the methodology's
+honesty requirement, and T2's recoverability rule strengthened from naming the argv to running it.
 
 **But recoverability is a disclosure duty, not a credit.** A cell whose gold is only reachable by running
 the follow-on argv is scored **not complete** in K1 and K2 and pays the full 24,808-token follow-up term.
