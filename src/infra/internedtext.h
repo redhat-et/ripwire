@@ -29,7 +29,8 @@
 #include <cstdint>
 #include <format>
 #include <memory>   // std::construct_at / std::destroy_at: a segment's slots are constructed one id at a time (NIT-7)
-#include <mutex>
+#include <mutex>     // std::lock_guard — the holder; the lock itself is rw::Spinlock below
+#include "spinlock.h"   // SPINLOCK: a shard hold is a probe, so a 4 B flag beats a 40-64 B mutex twice over
 #include <new>      // ::operator new / delete: a segment is raw storage
 #include <optional>  // InternedTextOf::ifInterned
 #include <string>
@@ -164,15 +165,25 @@ private:
     };
     struct alignas( kLine ) Shard   // one shard per destructive-interference line: no false sharing between shards' locks
     {
-        mutable std::mutex mutex;   // lookup (const) locks it too
-        std::vector<Slot>  slots;   // open addressing, linear probe, a power of two at most half full
+        mutable Spinlock  mutex;   // lookup (const) locks it too
+        std::vector<Slot> slots;   // open addressing, linear probe, a power of two at most half full
         std::size_t       used = 0;
     };
-    // alignas( kLine ) is the no-false-sharing guarantee: no two shards share a line on any platform. One shard fits ONE line
-    // only where the line is 128 B (ARM, where the bounce was measured); on x86 (64 B) libstdc++'s 40 B std::mutex + the
-    // vector + used = 72 B, and MSVC's mutex is fatter, so a shard takes two lines of its own there (#608 CI). A shard past
-    // two lines means a much fatter mutex: re-measure the bounce.
-    static_assert( sizeof( Shard ) % kLine == 0 && sizeof( Shard ) <= 2 * kLine, "a Shard outgrew two lines (a fatter std::mutex?): re-measure the bounce" );
+    // alignas( kLine ) is the no-false-sharing guarantee: no two shards share a line on any platform. The lock used to be a
+    // std::mutex, and at 40 B (libstdc++) or 64 B (libc++) a shard did not fit a 64 B line: vector + used took it to 72-96 B,
+    // so every shard claimed TWO lines of its own on x86 and MSVC's fatter mutex made it worse (#608 CI). rw::Spinlock is
+    // 4 B, so the shard is 4 + 24 + 8 = 36 B and ONE line holds it on every platform we build for — half the shard array's
+    // lines, and the locks of two shards are still never on the same one.
+    //
+    // WHY A SPINLOCK IS RIGHT HERE, and the one case where the hold is not short. `lookup` is a probe over a half-full table
+    // plus a string compare: a few hundred cycles, no allocation, exactly the shape a futex round trip is too expensive for.
+    // `intern` shares this lock and is usually the same probe plus a construct — but when the shard passes half full it calls
+    // growShard, which ALLOCATES a vector of twice the size and rehashes into it. Allocating under a spinlock is the classic
+    // way to turn a fast lock into a stall, so it is named here rather than glossed: what makes it safe is that the lock's
+    // backoff stops spinning after kSpinHotRounds and then SLEEPS on a doubling ladder (infra/spinlock.h), so a waiter caught
+    // behind a grow yields its core instead of burning it. The grows are amortised doubling — O(log n) of n inserts — so the
+    // common case is the probe and the rare case degrades to a sleep rather than to a spin.
+    static_assert( sizeof( Shard ) % kLine == 0 && sizeof( Shard ) <= kLine, "a Shard outgrew its line: re-measure the bounce (it fit one line at 4 B of lock + 24 B vector + 8 B used)" );
 
     static void growShard( Shard& shard )
     {

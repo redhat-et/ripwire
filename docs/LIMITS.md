@@ -850,6 +850,14 @@ Discloses: **none**
 | --- | --- | --- | --- |
 | `kRadixThreshold` ×2 | `2048` | BOUNDARY | — |
 
+### `src/infra/spinlock.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kSpinBackoffMaxNs` | `65536` | — | ~86 us actual: the cap. Doubling without one |
+
 ### `src/infra/strkern.h`
 
 Discloses: **none**
