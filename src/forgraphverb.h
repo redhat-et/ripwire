@@ -14,6 +14,7 @@
 // answer is never replaced: the block rides after it, inside <graph_verb endpoints="subject">, whose legend says the
 // endpoints were read from prose (a name match, hedged), and the verb's default caps and next= paging bound it.
 // Nothing resolves → nothing is appended (byte-identical to the answer without this lane).
+#include "callhierarchy.h"   // callHierarchyRows — the callers / callees rows callHierarchyRowsNarrowed binds
 #include "compactlegend.h"   // spanHasAttr — the ONE attribute-at-a-tag-boundary test
 #include "filter.h"      // pathTierOf — name_test_hops=: the verb's own test/fixture path classifier
 #include "graph.h"       // resolveAllByNameQualified / resolveFocus — the callers / connect resolvers
@@ -137,6 +138,31 @@ inline std::optional<std::string> narrowRefusedSpelling( const IngestResult& ing
         return pick;
     }
     return std::nullopt;
+}
+
+// GV-PATH-BIND + CALLERS-TWO-COPY: the ONE binder of the one-hop rows every surface serves — the CLI --callers/--callees and MCP
+// find_referencing_symbols / find_symbol / the callers verb. The rows of `sym`; for a CALLERS selector that binds nothing as typed and that
+// the M1 rule narrows to one source definition (narrowRefusedSpelling), the rows of that definition's own spelling: `bound` holds it, `sym`
+// is moved onto it and the rows' `narrowed` names the selector as typed. Otherwise the rows as typed (empty matches: the caller refuses as
+// before). MCP used to call callHierarchyRows directly and refused the spelling the CLI answered.
+inline CallHierarchyRows callHierarchyRowsNarrowed( const IngestResult& ing, const Graph& g, std::string_view& sym, bool wantCallers, std::string& bound,
+                                                    const ValueRefIndex* valueIndex = nullptr )   // the MCP server passes its cached one
+{
+    CallHierarchyRows          rows = callHierarchyRows( ing, g, sym, wantCallers, valueIndex );
+    std::optional<std::string> pick = wantCallers && rows.matches.empty() ? narrowRefusedSpelling( ing, sym, GraphSubjectForm::Callers ) : std::nullopt;
+    if( !pick )
+    {
+        return rows;
+    }
+    CallHierarchyRows narrowedRows = callHierarchyRows( ing, g, *pick, wantCallers, valueIndex );
+    if( narrowedRows.matches.empty() )
+    {
+        return rows;
+    }
+    narrowedRows.narrowed.emplace_back( sym );
+    bound = std::move( *pick );
+    sym   = bound;
+    return narrowedRows;
 }
 
 // ` narrowed="a b"`: the spellings as typed that M1 narrowed, space-separated; "" when none. The --for block's open tag and the direct
