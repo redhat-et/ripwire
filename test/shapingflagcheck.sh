@@ -435,7 +435,7 @@ fprobeFor()
         --format=)       printf '%s' '--format=columnar' ;;
         --color-by=)     printf '%s' '--color-by=lang' ;;
         --grep-scope=)   printf '%s' '--grep-scope=file' ;;
-        --grep-in=)      printf '%s' '--grep-in=any' ;;  --whereis-listing=) printf '%s' '--whereis-listing=all' ;;  --mcp-legend=) printf '%s' '--mcp-legend=inline' ;;  # closed value sets: a bogus value refuses before any knob
+        --grep-in=)      printf '%s' '--grep-in=any' ;;  --whereis-listing=) printf '%s' '--whereis-listing=all' ;;  --mcp-legend=) printf '%s' '--mcp-legend=inline' ;;  --legend-have=) printf '%s' "--legend-have=$( "$BIN" --legend-dict 2>/dev/null | head -1 | grep -oE '[0-9a-f]{8,}' | head -1 )" ;;  # closed value sets, and --legend-have='s dictionary version: a bogus value refuses before any knob (its valid value is no constant, so it is read from $BIN)
         --legend=)       printf '%s' '--legend=compact' ;;
         --slice-flow=)   printf '%s' '--slice-flow=back' ;;
         --agent=)        printf '%s' '--agent=codex' ;;

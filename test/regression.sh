@@ -679,6 +679,7 @@ for _g in \
     legendcostcheck \
     legendcoveragecheck \
     legenddriftcheck \
+    legendhavecheck \
     legendrefcheck \
     legobundlecheck \
     legocheck \
@@ -786,6 +787,7 @@ for _g in \
     nestedimportcheck \
     nestedqualcheck \
     nestprofilecheck \
+    nextaposcheck \
     nextverbcheck \
     noaliascheck \
     nodekindcheck \
@@ -1050,6 +1052,7 @@ for _g in \
     swiftcheck \
     swiftmemberscheck \
     swiftshapecheck \
+    tailsymtermscheck \
     taskechocheck \
     tempfilesymlinkcheck \
     termmargincheck \
@@ -1066,6 +1069,7 @@ for _g in \
     testscopecheck \
     textdocscheck \
     textpoolcheck \
+    tiercallerscheck \
     timsortcheck \
     tokenbudgetcheck \
     tomllangcheck \
@@ -1096,6 +1100,7 @@ for _g in \
     vendorpatchcheck \
     verifycheck \
     versioncheck \
+    versionlabelcheck \
     w2verbscheck \
     w3fixbudgetcheck \
     w3fixlegendcheck \

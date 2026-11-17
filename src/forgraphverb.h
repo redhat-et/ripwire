@@ -30,6 +30,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <deque>         // ConnectTerminalSpellings: bound spellings the terminal views point into
 #include <format>
 #include <optional>
 #include <span>
@@ -160,6 +161,121 @@ inline std::string_view narrowedVerbLegend( bool on ) noexcept
 {
     return on ? kNarrowedVerbLegend : std::string_view();
 }
+
+// GV-PATH-BIND: the --path endpoints, resolved, after the M1 rule (narrowRefusedSpelling above). PATH-AMBIG-VC: one binder for both
+// transports — the CLI --path (verbs_navigate.h runPathServed) and MCP path_between (mcpverbs.h pathText) — moved here from
+// verbs_navigate.h, so MCP gets the narrowing and the fitted Owner.method binding too. When an endpoint binds nothing as typed
+// and EVERY such endpoint narrows to its one source definition, src/dst/spec are the spellings the verb runs with (the
+// explicit call's) and `narrowed` names the spellings as typed, from= first; otherwise everything is as typed, defs as resolved (the
+// verb then refuses exactly as before). H1: each *Unproven is that endpoint's decl→def residue (graph.h declToDefFollowThrough).
+struct PathEndpointsBound
+{
+    std::string              src;
+    std::string              dst;
+    std::string              spec;   // "src,dst": the --path= value of the call that runs
+    std::vector<NodeId>      srcDefs;
+    std::vector<NodeId>      dstDefs;
+    std::size_t              srcUnproven = 0;
+    std::size_t              dstUnproven = 0;
+    bool                     srcGlob     = false;
+    bool                     dstGlob     = false;
+    std::vector<std::string> narrowed;
+};
+
+// The narrowed spellings of the endpoints that bound nothing, slot order; nullopt when one of them is still refused.
+inline std::optional<std::vector<std::string>> narrowedPathSpellings( const IngestResult& ing, PathEndpointsBound& ep )
+{
+    std::vector<std::string> narrowed;
+    for( auto [ slot, defs ] : { std::pair{ &ep.src, &ep.srcDefs }, std::pair{ &ep.dst, &ep.dstDefs } } )
+    {
+        if( !defs->empty() )
+        {
+            continue;
+        }
+        std::optional<std::string> pick = narrowRefusedSpelling( ing, *slot, GraphSubjectForm::Path );
+        if( !pick )
+        {
+            if( !ownerSpellingFittedDefs( ing, *slot ).empty() )
+            {
+                continue;   // PATH-AMBIG-VERDICT (b): this endpoint binds its fitting definitions below; the other may still narrow
+            }
+            return std::nullopt;
+        }
+        narrowed.push_back( std::exchange( *slot, std::move( *pick ) ) );
+    }
+    return narrowed;
+}
+
+inline PathEndpointsBound bindPathEndpoints( const IngestResult& ing, std::string_view srcN, std::string_view dstN )
+{
+    PathEndpointsBound ep;
+    ep.src = srcN;
+    ep.dst = dstN;
+    const auto resolve = [ & ]
+    {
+        ep.srcDefs = resolvePathEndpoint( ing, ep.src, &ep.srcUnproven, &ep.srcGlob );
+        ep.dstDefs = resolvePathEndpoint( ing, ep.dst, &ep.dstUnproven, &ep.dstGlob );
+    };
+    resolve();
+    if( ep.srcDefs.empty() || ep.dstDefs.empty() )
+    {
+        PathEndpointsBound typed = ep;
+        if( std::optional<std::vector<std::string>> narrowed = narrowedPathSpellings( ing, ep ) )
+        {
+            ep.narrowed = std::move( *narrowed );
+            resolve();
+        }
+        else
+        {
+            ep = std::move( typed );   // still refused: the spellings as typed
+        }
+    }
+    // PATH-AMBIG-VERDICT (b): an endpoint still refused because several placed definitions fit its scope-qualified spelling binds
+    // them all (graph.h ownerSpellingFittedDefs): --path lists the reaching pairs, so qualifying narrows and never refuses
+    for( auto [ slot, defs ] : { std::pair{ &ep.src, &ep.srcDefs }, std::pair{ &ep.dst, &ep.dstDefs } } )
+    {
+        if( defs->empty() )
+        {
+            *defs = ownerSpellingFittedDefs( ing, *slot );
+        }
+    }
+    ep.spec = ep.src + "," + ep.dst;
+    return ep;
+}
+
+// The --connect terminals as resolved, for the CLI --connect (verbs_navigate.h runConnect) and MCP connect (mcpverbs.h connectText) alike
+// (PATH-AMBIG-VC moved it here). resolve() is a terminal's node as --around/--lego resolve it (resolveFocus), its decl→def residue
+// summed into `unprovenDefs` (H1). GV-PATH-BIND: a spelling that binds nothing and that the M1 rule narrows to one source definition
+// (narrowRefusedSpelling above) resolves as that definition's own spelling: `bound` holds it (a deque, so `spec` may view it), `spec`
+// is moved onto it and `narrowed` gains the spelling as typed. PATH-AMBIG-VC: else a spelling refused over K >= 2 fitting definitions
+// named after its last segment (graph.h ownerSpellingFittedDefs) resolves to resolveFocus's pick among those K, and joinTerminalPicks
+// then moves it onto the one that joins (ambiguous_terminal= on a tie), as for any many-definition name. kNoNode = refused as before,
+// `spec` as typed (a wrong owner fits nothing).
+struct ConnectTerminalSpellings
+{
+    std::size_t              unprovenDefs = 0;
+    std::deque<std::string>  bound;
+    std::vector<std::string> narrowed;
+
+    NodeId resolve( const IngestResult& ing, std::string_view& spec )
+    {
+        std::size_t                termUnprovenDefs = 0;
+        NodeId                     id   = resolveFocus( ing, spec, &termUnprovenDefs );
+        std::optional<std::string> pick = id == kNoNode ? narrowRefusedSpelling( ing, spec, GraphSubjectForm::Common ) : std::nullopt;
+        if( pick )
+        {
+            narrowed.emplace_back( spec );
+            spec = bound.emplace_back( std::move( *pick ) );
+            id   = resolveFocus( ing, spec, &termUnprovenDefs );
+        }
+        else if( id == kNoNode )
+        {
+            id = focusOfOrderedMatches( ing, ownerSpellingFittedDefs( ing, spec ) );
+        }
+        unprovenDefs += termUnprovenDefs;
+        return id;
+    }
+};
 
 // How a block is opened (FOR-ROUTE fix1): `jsonDialect` = the body is the MCP callers twin's JSON in a CDATA section (S1);
 // `held` = a token budget is set, so the verb did NOT run here and the tag is self-closed with the verb= handle only (S2);
