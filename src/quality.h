@@ -27,6 +27,7 @@
 #include "clones.h"
 #include "cloneidiom.h"         // idiom-class demotion — the closed 3-idiom shape classifier that turns an idiom-COLLISION clone group into a minor row instead of a gating one
 #include "lintrules.h"          // findQualityConstructs — the built-in error-masking rule table (GitClear +47% kind) + the placeholder shapes
+#include "similarargs.h"        // the similar-argument-list scanner (a prototype, off unless RIPWIRE_QD_SIMILAR_ARGS is set)
 #include "defectshape.h"        // the defect-shape kind's four scanners (format-arity, utf8-cut, dedup-first, vacuous-assert)
 #include "arch.h"               // fnv1a64
 #include "pathguard.h"          // CWE-59/367: rw::pathguard::openNoFollowTruncate — writeBaseline truncates, so its open must refuse a link atomically
@@ -8048,6 +8049,7 @@ inline constexpr FacetAttr kFacetAttrs[] = {
     { "duplication",                "idiom"   },   // the recognized clone-body shape (cloneidiom.h)
     { "defect-shape",               "defect"  },   // format-arity / utf8-cut / dedup-first / vacuous-assert
     { "error-masking",              "facet"   },   // failure-default: the growth includes a read failure returned as an empty success
+    { "params",                     "similar" },   // QD-SWAP-1117 prototype: the longest run of adjacent same-typed parameters (similarargs.h)
     { "complexity",                 "monster" },   // QD-MONSTER-GROWTH: "1" when isMonsterGrowth made (or would make) the row major
     { "new-clone-of-reused-helper", "idiom"   },   // T13/fix2 gave this kind duplication's idiom demotion (Regression::facet
                                                     // is populated the same way, from the same CloneIdiomVerdict); this row was
@@ -10561,6 +10563,104 @@ inline std::pair<std::string, std::string> scopeDisclosure( const Scope& scope, 
     return out;
 }
 
+// ── similar-argument lists (QD-SWAP-1117, a prototype: similarargs.h) ─────────────────────────────────
+// The longest run of adjacent same-typed parameters of each C or C++ function or method definition, read off its own
+// signature bytes ([sigStartByte, sigEndByte), the span trailingDefaultByNode reads); 0 where there is none.
+inline std::vector<std::uint8_t> similarRunByNode( const IngestResult& ing )
+{
+    std::vector<std::uint8_t> out( ing.symbols.size(), 0 );
+    forEachSymbolBody( ing, [ & ]( NodeId i, const Symbol& s, std::string_view body )
+    {
+        const std::size_t sigLen     = s.sigEndByte > s.sigStartByte ? std::size_t( s.sigEndByte - s.sigStartByte ) : 0;
+        const bool        isCallable = s.kind == SymKind::Function || s.kind == SymKind::Method;
+        const bool        isCFamily  = s.lang == Lang::Cpp || s.lang == Lang::C;
+        if( sigLen == 0 || sigLen > body.size() || !isCallable || !isCFamily )
+        {
+            return;
+        }
+        out[i] = std::uint8_t( std::min<std::uint32_t>( similarargs::longestSimilarRun( { .text = body.substr( 0, sigLen ), .name = s.name } ), UINT8_MAX ) );
+    } );
+    return out;
+}
+
+// One qualityKey's longest run: `at` the definition that holds it (the first, in id order), `maxParams` the key's
+// parameter count as paramsBySym aggregates it (the MAX over every definition of the key).
+struct SimilarKeyRun
+{
+    std::uint64_t key       = 0;
+    NodeId        at        = kNoNode;
+    std::uint32_t run       = 0;
+    std::uint32_t maxParams = 0;
+};
+// Every key that holds a run of similarargs::kSimilarRunMin or more, ascending by key.
+inline std::vector<SimilarKeyRun> similarRunsByKey( const IngestResult& ing, const Graph& g, const std::vector<std::uint64_t>& keyByNode )
+{
+    const std::vector<std::uint8_t> runByNode = similarRunByNode( ing );
+    std::vector<SimilarKeyRun>      perNode;
+    for( NodeId i = 0; i < ing.symbols.size() && i < keyByNode.size(); ++i )
+    {
+        if( i < g.canonId.size() && !g.canonId[i].empty() )
+        {
+            perNode.push_back( { keyByNode[i], i, runByNode[i], std::uint32_t( ing.symbols[i].params ) } );
+        }
+    }
+    std::ranges::stable_sort( perNode, {}, &SimilarKeyRun::key );
+    std::vector<SimilarKeyRun> out;
+    for( const SimilarKeyRun& n : perNode )
+    {
+        if( out.empty() || out.back().key != n.key )
+        {
+            out.push_back( n );
+            continue;
+        }
+        SimilarKeyRun& best = out.back();
+        best.maxParams      = std::max( best.maxParams, n.maxParams );
+        if( n.run > best.run )
+        {
+            best.run = n.run;
+            best.at  = n.at;
+        }
+    }
+    std::erase_if( out, []( const SimilarKeyRun& r ) { return r.run < similarargs::kSimilarRunMin; } );
+    return out;
+}
+
+// The rows: a definition whose parameter list holds such a run AND is new or grew since the baseline (the baseline
+// holds parameter counts only, paramsBySym, so a run made by retyping a parameter at the same count is a stated miss).
+// A symbol the params kind already reported keeps its row and gains similar="N"; any other gets a params row with
+// sev="minor": was= and now= are its parameter counts, similar= the run. Report-only, never gating.
+// What the rows are judged against: the graph (row names), the baseline (parameter counts) and this change's moved bodies.
+struct SimilarRowContext
+{
+    const Graph&       g;
+    const Snapshot&    base;
+    const MovedBodies& moved;
+};
+template<class ExistedFn, class StampFn>
+inline void appendSimilarArgsRows( std::vector<Regression>& regs, const SimilarRowContext& cx, const std::vector<SimilarKeyRun>& runs,
+                                   ExistedFn&& existedAtBaseline, StampFn&& stampLoc )
+{
+    for( const SimilarKeyRun& r : runs )
+    {
+        const auto          baseIt = cx.base.paramsBySym.find( r.key );
+        const std::uint32_t was    = baseIt == cx.base.paramsBySym.end() ? 0u : baseIt->second;
+        const bool          isNew  = !existedAtBaseline( r.key );
+        if( !isNew && r.maxParams <= was )
+        {
+            continue;
+        }
+        const std::string similar = std::to_string( r.run );
+        const auto        row     = std::ranges::find_if( regs, [ & ]( const Regression& have ) { return have.kind == "params" && have.key == r.key; } );
+        if( row != regs.end() )
+        {
+            row->facet = similar;
+            continue;
+        }
+        regs.push_back( { "params", cx.g.canonId[ r.at ], was, r.maxParams, r.key, /*isMinor=*/true, similar, isNew, isNew && cx.moved.isMoved( r.at ) } );
+        stampLoc( r.at );
+    }
+}
+
 // ── defect-shape (the twelfth kind) ───────────────────────────────────────────────────────────────────
 // A site is NEW when its identity (facet + normalized text) occurs more often in the current tree than in
 // the baseline, REPO-WIDE: an untouched, moved or renamed defect is not new, an edited one is, and a swap
@@ -11502,6 +11602,10 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
     if( kindSelected( scope.kinds, "defect-shape" ) )
     {
         appendDefectShapeRows( regs, ing, g, base, root, existedAtBaseline, stampLoc, scope.macroOverride );   // the twelfth kind (see its doc)
+    }
+    if( similarargs::similarArgsOn() && kindSelected( scope.kinds, "params" ) )   // QD-SWAP-1117 prototype: off unless the variable is set
+    {
+        appendSimilarArgsRows( regs, { g, base, moved }, similarRunsByKey( ing, g, keyByNode ), existedAtBaseline, stampLoc );
     }
 
     // ── §D#4-2 short-horizon churn (GitClear +15% "new code rewritten within two weeks") ───────────────────
