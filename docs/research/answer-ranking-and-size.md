@@ -63,9 +63,10 @@ credited items lost and top-10 Wrong down):
 
    0.6.9 capped the tail at 50 rows with `next=`. Restoring a cap, or dropping path-only rows by class, was
    estimated at −318 to −537 KB over the three sets.
-2. **Prove trims offline before writing code.** No runtime signal in the answer separates rows that gained from rows
-   that did not (confidence=, coverage= and the tail totals have equal medians), so a trim has to be a row-class
-   rule. The cheap method:
+2. **Prove trims offline before writing code.** The runtime signals checked (confidence=, coverage= and the tail
+   totals) had equal medians for rows that gained and rows that did not. Equal medians do not rule out a split in the
+   tails, so those signals are untested as trim keys, not disproved; a row-class rule is the cheaper thing to try
+   first. The cheap method:
    - edit copies of the stored answers (delete one row class or section);
    - re-grade them;
    - read off the cost in items per cut.
@@ -77,8 +78,9 @@ credited items lost and top-10 Wrong down):
    nested this way (2026-11-16), 87 % of directory rows lost their literal path, so a substring search for the
    path failed and a `p=` meant to be pasted as a command argument stopped running. Ranked rows carry the same
    exposure. Count literal-path survival on before/after answer pairs (one grep each) before building anything.
-4. **Legends.** Legends are about 16 % of bytes (median ~2 KB). Present-only legends landed in #668, and agent
-   surfaces can already take the legend once per session (`--legend=ref`, CLAUDE.md G4). The open question is
+4. **Legends.** Legends are about 16 % of bytes (median ~2 KB). Present-only legends landed in #668, and an MCP
+   session already takes the legend once per session (the ref posture, CLAUDE.md G4), and a shell caller that holds
+   the dictionary (`--legend-dict`) gets the same posture with `--legend-have=DICTV`. The open question is
    measurement: how often real agent sessions get the ref form, and what the inline legend costs on the CLI paths
    agents call through a shell.
 5. **Detail by distance:** full body for the head, signature for near rows, `name@file:line` for far rows.
