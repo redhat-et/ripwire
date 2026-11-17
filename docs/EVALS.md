@@ -17222,3 +17222,135 @@ which MUST change, and must move DOWN by an amount consistent with the bytes rem
 dialect's existing reprice path and its `kCompactReprice*` constants). An unchanged `est_tokens=` now FAILS
 D1 rather than passing it. Registered here, before the measurement, with the reason — not adjusted
 afterwards to match what the code happened to do.
+
+## READOUT — ITEM D: the posture is LOSSLESS on every cell it reaches, and reaches 5 % of the bytes
+
+Measured 2026-11-17 on the 295-cell fire321 replay, **same binary in both postures**
+(`harness/recollect_itemd_control.py`, which appends `--legend=compact` to every replayed argv).
+
+### The baseline had to be corrected first, and the correction is the finding's foundation
+
+The obvious measurement — new binary against the answers recorded on 2026-11-16 — is **confounded** and
+was run first. It reported `--for` at **+0.37 %**, with **207 of 216 cells changed**, on a verb this
+posture provably never touches. The cause is not the posture: `main` merged two TypeScript resolution
+fixes (`288b99df7`, `e0d5b72a0`) plus three PRs between the store's binary and this one, so a
+cross-binary delta carries every one of those changes. Same defect shape as
+[[trap-contamination-exposure-is-a-time-join]] one level up: a *version* difference read as the change
+under test. The controlled run fixes it, and the fix is verifiable in its own output — `--for` is
+**0.00 %, 216 of 216 byte-identical**, which is the posture's non-application proved rather than asserted.
+
+### D4 — bytes, per verb, reported not bounded
+
+| verb | n | `--legend=compact` B | default B | Δ |
+| --- | ---: | ---: | ---: | ---: |
+| `for` | 216 | 6,701,910 | 6,701,910 | **0.00 %** |
+| `callers` | 21 | 103,242 | 73,679 | −28.63 % |
+| `path` | 14 | 74,439 | 49,507 | −33.49 % |
+| `impact` | 6 | 56,456 | 41,607 | −26.30 % |
+| `affected` | 2 | 35,335 | 32,258 | −8.71 % |
+| `callees` | 10 | 32,506 | 18,201 | −44.01 % |
+| `grep` | 7 | 28,390 | 14,261 | −49.77 % |
+| `lego` | 12 | 19,199 | 14,017 | −26.99 % |
+| `dead-code` | 6 | 9,664 | 4,102 | −57.55 % |
+| `safe-delete` | 1 | 1,807 | 933 | −48.37 % |
+| **TOTAL** | **295** | **7,062,948** | **6,950,475** | **−1.59 %** |
+
+**−1.59 % pooled, and that number is honest rather than disappointing.** `--for` is **6.70 MB of the
+7.06 MB** this corpus contains — **94.9 % of all bytes across 73 % of cells** — and the posture does not
+reach it. On the verbs it does reach it removes **a quarter to nearly three-fifths** of the answer. The
+pooled figure is a statement about the corpus's composition, which is why it is reported beside the
+per-verb column and never instead of it; the earlier −14.8 % was the legend's share of all bytes, i.e.
+the saving *available*, not the saving *delivered*.
+
+### D1/D2 — lossless, at corpus scale
+
+Every reduced cell was checked structurally, not by size: body byte-identical, no root attribute lost,
+none added but the three pointer attributes, none changed in value but `est_tokens=`, and every surviving
+head comment present in order.
+
+| outcome | cells |
+| --- | ---: |
+| LOSSLESS (reduced, every check passed) | **79 of 79** |
+| untouched (`--for`, byte-identical) | 216 |
+| body changed / attribute lost / attribute changed / reprice upward / data comment changed | **0** |
+
+Completeness (D2) follows from this rather than needing its own grading pass: a body that is byte-identical
+cannot grade differently. No cell regressed because no cell's answer content moved.
+
+### Coverage, and the three families served whole
+
+On this repository, **10 of 13 legend families reduce**; `--expand` and `--around` carry legends the
+dictionary cannot reproduce from its parts (it says so and serves them whole), and `--for` never reaches
+the capture layer — `nativeCompactLegendVerb` excludes it **by design**, with the reason recorded at
+`main.cpp`: the generic rewrite moved it 31,457 → 31,167 B, which was not worth the risk. All three are
+served **unchanged and byte-identical to the opt-out**: a missed saving, never a wrong answer. The gate
+counts them apart, so a pooled figure can never be read as coverage — the hazard registered with the band.
+
+### Where `--for`'s bytes actually are, since it is 94.9 % of them
+
+Decomposed over the **175 conceptual** cells (mean 32,060 B; nested spans attributed to the outer section,
+so the `<fold>`/`<bodies>` boundary is approximate and `<tail>`/`<sigs>` are exact):
+
+| section | B/answer | share |
+| --- | ---: | ---: |
+| `<tail>` | 14,512 | **45.8 %** |
+| `<sigs>` | 7,038 | 22.2 % |
+| `<fold>` | 5,304 | 16.7 % |
+| legend + head comments | 3,018 | 9.5 % |
+| `<hops>` | 893 | 2.8 % |
+| everything else | <1,000 | ~2.9 % |
+
+**Nearly half of the largest verb's answer is `<tail>` — rows its own legend calls "leads, not the
+answer".** Items K and C both tried to cap exactly that and both failed their registered rules, and these
+two facts together are the diagnosis: the tail is not padding, it is where the recall lives, so cutting it
+drops answers. That makes it an ORDERING problem — rank the tail's rows and promote the gold-bearing ones
+into the head, and only then is the tail cappable. Three failed bands collapse into one tractable one.
+
+### The route partition, which refutes the obvious hypothesis
+
+The 216 `--for` cells, split by the route each answer declares:
+
+| class | n | median B | mean B | share of `--for` bytes |
+| --- | ---: | ---: | ---: | ---: |
+| conceptual | 175 | 32,958 | 32,073 | 84.1 % |
+| `:declined` | 19 | **41,506** | 43,406 | 12.4 % |
+| name-exact | 17 | **6,045** | 7,555 | 1.9 % |
+| `:broad` | 5 | 22,679 | 22,298 | 1.7 % |
+
+The hypothesis going in was that name-exact questions are over-served at one default size. **They are
+not** — the router already serves them **5.5× smaller** than conceptual ones, so that part works and no
+verb split is needed; the split exists and is declared in `route=`. The outlier is `:declined`, which is
+the **largest class in the corpus** and is produced precisely when the router **refused** a name anchor as
+too common. Lowest confidence, highest spend. 19 cells and 12.4 % of `--for` bytes — a small, cheap
+population to grade, and a band of its own.
+
+## PRE-REGISTRATION 2026-11-17 (amendment 5) — ITEM E: `--for`, which is 94.9 % of the bytes
+
+Registered now, measured later, because item D's readout establishes exactly one thing about `--for`: the
+posture cannot reach it, and it is where the bytes are. Three bands, in the order their dependencies force.
+
+**E1 — the legend (ordering-independent, 9.5 % of a `--for` answer, 3,018 B).** `--for` renders its own
+compact legend natively and is excluded from the capture layer by design. The saving is the same
+zero-completeness-cost one item D measured elsewhere, but it is NOT a post-capture rewrite here: the
+native renderer charges its legend's bytes into its own `budget_bytes` fit, so dropping the prose lets
+MORE ROWS FIT. That changes what is served, not just how it is marked up. **Decision rule: E1 passes only
+if completeness does not regress on any graded cell at either bound, and the extra rows are reported as a
+separate line — a byte saving and a row change must not be netted into one figure.**
+
+**E2 — `<tail>` path repetition (ordering-independent, 45.8 % of a `--for` answer).** 159 shown rows each
+carrying a full `p=`. The same mechanism measured ~54 KB of directory strings on vscode's map tier to
+deliver 1,998 filenames. Prefix compression or nesting under a shared `p=` removes no row and reorders
+nothing. **Decision rule: byte-identical row CONTENT after decompression, or E2 fails; the saving is
+reported per repo, since path depth is a property of the tree and not of the tool.**
+
+**E3 — the `:declined` class (19 cells, median 41,506 B, the largest in the corpus).** Produced when the
+router refuses a name anchor as too common: lowest confidence, highest spend. **Hypothesis, registered
+before measurement: a declined route should answer SHORTER or hand over a cheaper verb, because the tool
+is admitting it has no precise anchor.** Falsifiable the obvious way — if the gold in these cells sits
+late and broad, the width is earning its bytes and the hypothesis is wrong.
+
+**What is NOT registered here, and why.** Capping `<tail>`, trimming `<sigs>`, lowering the default
+budget. Items K, G's K1 and C already tested that shape against today's ordering and all three FAILED
+their registered rules; item D's decomposition explains it (the tail carries the recall). Those become
+tractable only after the reordering Item P licensed, and re-registering them now would spend a round
+re-deriving a known failure.
