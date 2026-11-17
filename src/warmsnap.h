@@ -770,7 +770,7 @@ inline void openSnapshot( Session& s )
         return;
     }
     std::string_view* const sections[] = { &s.treeSection, &s.modelSection, &s.graphSection };
-    for( int i = 0; i < 3; ++i )
+    for( std::size_t i = 0; i < 3; ++i )
     {
         const std::uint64_t off = span[ 2 * i ], len = span[ 2 * i + 1 ];
         if( !VALIDATE( off <= s.file.size() && len <= s.file.size() - off, "warmsnap: a section lies outside the file" ) )
