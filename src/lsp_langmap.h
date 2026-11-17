@@ -21,6 +21,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -201,16 +202,9 @@ inline LangMap parseLangMapFile( const std::string& text )
 {
     LangMap m;
     bool    inOverrule = false;
-    for( std::size_t pos = 0; pos <= text.size(); )
+    for( const auto line : std::views::split( std::string_view( text ), '\n' ) )
     {
-        const std::size_t nl  = text.find( '\n', pos );
-        const std::size_t end = nl == std::string::npos ? text.size() : nl;
-        langMapLine( m, std::string_view( text ).substr( pos, end - pos ), inOverrule );
-        if( nl == std::string::npos )
-        {
-            break;
-        }
-        pos = nl + 1;
+        langMapLine( m, std::string_view( line.begin(), line.end() ), inOverrule );
     }
     return m;
 }

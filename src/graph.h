@@ -14781,29 +14781,13 @@ struct NameTowerKey
 // is stated and no majority speaks. id is reached only by two definitions alike in path, line, name and byte range.
 inline bool nameTowerPlainAhead( const NameTowerKey& a, const NameTowerKey& b ) noexcept
 {
-    if( a.rank != b.rank )
-    {
-        return a.rank > b.rank;
-    }
-    if( a.content != b.content )
-    {
-        return a.content < b.content;
-    }
-    return a.id < b.id;
+    return std::forward_as_tuple( b.rank, a.content, a.id ) < std::forward_as_tuple( a.rank, b.content, b.id );   // rank DESC: operands swapped
 }
 
-// The tower's order: the stated-language tier, kind rank, the majority tie, then the anchor-free tail.
+// The tower's order: the stated-language tier, kind rank DESC, the majority tie, then the content key and id.
 inline bool nameTowerAhead( const NameTowerKey& a, const NameTowerKey& b ) noexcept
 {
-    if( a.langTier != b.langTier )
-    {
-        return a.langTier < b.langTier;
-    }
-    if( a.rank == b.rank && a.tie != b.tie )
-    {
-        return a.tie < b.tie;
-    }
-    return nameTowerPlainAhead( a, b );
+    return std::forward_as_tuple( a.langTier, b.rank, a.tie, a.content, a.id ) < std::forward_as_tuple( b.langTier, a.rank, b.tie, b.content, b.id );
 }
 
 inline std::vector<NameTowerKey> nameTowerKeys( const IngestResult& ing, const std::vector<NodeId>& ids, const LangAnchor& anchor )
@@ -14839,11 +14823,6 @@ inline std::vector<NodeId> applyNameTower( const IngestResult& ing, std::vector<
     return ids;
 }
 
-inline std::vector<NodeId> applyNameTower( const IngestResult& ing, std::vector<NodeId> ids )   // no anchor: the pure ladder
-{
-    LangAnchor none;
-    return applyNameTower( ing, std::move( ids ), none );
-}
 
 // Name@lang (task D): the suffix is read ONLY when the full string resolves to nothing — indexed data keys
 // legitimately carry '@' (measured: user@corp, a@b are <s> rows), so a name that exists wins over a selector
@@ -15988,7 +15967,8 @@ inline std::vector<NodeId> resolveAllByWrittenSpelling( const IngestResult& ing,
         out.push_back( m.id );
     }
     out = preferExactFile( ing, w->file, std::move( out ) );
-    return applyNameTower( ing, std::move( out ) );
+    LangAnchor noAnchor;   // no language is stated on this path: the pure ladder (kind, content key, id)
+    return applyNameTower( ing, std::move( out ), noAnchor );
 }
 
 // lane js-def-naming fix 1: every definition of the seed's file whose signature STARTS on the seed line, in index order. More than one
@@ -16826,7 +16806,8 @@ inline std::vector<NodeId> ownerSpellingFittedDefs( const IngestResult& ing, std
     {
         return {};
     }
-    return dropDocUnitsBesideCode( ing, applyNameTower( ing, std::move( fits ) ) );
+    LangAnchor noAnchor;   // no language is stated on this path: the pure ladder (kind, content key, id)
+    return dropDocUnitsBesideCode( ing, applyNameTower( ing, std::move( fits ), noAnchor ) );
 }
 
 // PATH-AMBIG-VC: every definition a verb that picks none binds for `spec`: resolveAllByNameQualified (every tier), else the
