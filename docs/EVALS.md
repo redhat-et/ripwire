@@ -16005,6 +16005,16 @@ Everything is priced in **expected tokens to a complete answer** = `tokens(answe
 24,808`, the measured grep-and-read follow-up. One point of completeness is worth **248 tokens** of expected
 cost, which is the exchange rate every band below is written in. Bytes are an input, never a verdict.
 
+**The follow-up cost is ONE CONSTANT applied to every arm, and that is an assumption, not a per-arm
+measurement.** It is stated here because the conclusions are sensitive to it and the sensitivity is not
+uniform: the arm with the most incomplete answers carries the most exposure. On the probe table the 6K arm
+is 53 % incomplete, and a follow-up only **~3,500 tokens above the constant would erase its 1,852-token
+advantage over the default** — a margin thinner than the quantity it rests on. Nothing in this document
+measures follow-up tokens or call counts per arm, so **no band may treat a lead smaller than that
+sensitivity as separation**, and every expected-token figure below — Items T, R, M, K, G and C included —
+inherits this assumption. Recording per-arm follow-up cost is the fix; until it exists, the constant is a
+stated premise and is labelled as one wherever a verdict leans on it.
+
 ### THE INSTRUMENT GAP COMES FIRST, because it invalidates three bands already on the books
 
 The completeness instrument (`harness/anchor_grade.py` over the recorded answer store) grades **319 cells,
