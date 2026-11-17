@@ -275,6 +275,7 @@ inline RowWant rowWant( filesyms_detail::FileLookup& files, const AnswerRow& r )
 inline void resolveWants( const IngestResult& ing, std::vector<RowWant>& wants )
 {
     std::vector<std::uint32_t> wantedFiles;
+    wantedFiles.reserve( wants.size() );
     for( const RowWant& w : wants )
     {
         wantedFiles.push_back( w.file );
@@ -434,6 +435,7 @@ inline void markWithoutCallPath( const IngestResult& ing, const Graph& g, std::s
 {
     filesyms_detail::FileLookup files( ing );
     std::vector<RowWant> wants;
+    wants.reserve( scan.rows.size() );
     for( const AnswerRow& r : scan.rows )
     {
         wants.push_back( rowWant( files, r ) );

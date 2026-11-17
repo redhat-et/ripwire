@@ -589,6 +589,7 @@ inline std::vector<CodeName> sentenceCodeNames( const IngestResult& ing, std::st
         }
     }
     std::vector<Spelling> parsed;
+    parsed.reserve( spellings.size() );
     for( const std::string& sp : spellings )
     {
         parsed.push_back( parseSpelling( sp ) );
