@@ -1017,6 +1017,7 @@ for _g in \
     sincecochangecheck \
     sincewindowcheck \
     singledefcheck \
+    sitesatshortcheck \
     situdiffcheck \
     situhunkcheck \
     situshapecheck \

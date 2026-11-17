@@ -1446,18 +1446,19 @@ trailing `…`.
 spot. The rows below are a real capture: the callers and their files are gate-held current
 (`test/readmeexamplecheck.sh`), the `:line` suffixes were true when captured and drift as the files
 grow — nothing can keep a line number true in a document, so it is not claimed here. `p=` is where each caller is
-defined; `sites_at=` lists its call sites as pasteable `file:line` tokens, so the lines to edit come with the first answer.
+defined; `sites_at=` lists its call sites as lines of that same file (a site in another file would be the full `file:line`),
+so the lines to edit come with the first answer.
 
 ```
 $ ripwire . --callers=rankGraphTeleport
 <callers of="rankGraphTeleport" defs="1" count="7" root="." hop_tested="0" hop_untested="7" counts_floor="1">
-<s t="fn" n="getIndex" p="src/mcpindex.h:1165" sites_at="src/mcpindex.h:1268"/>
-<s t="fn" n="rankGraph" p="src/graph.h:7965" sites_at="src/graph.h:7968"/>
-<s t="fn" n="anchoredLexicalRank" p="src/graph.h:8611" sites_at="src/graph.h:8662"/>
-<s t="fn" n="runEval" p="src/eval.h:171" sites_at="src/eval.h:325"/>
-<s t="fn" n="churnDecayRanking" p="src/main.cpp:1383" sites_at="src/main.cpp:1397"/>
-<s t="fn" n="churnRankedGraph" p="src/main.cpp:1422" sites_at="src/main.cpp:1436 src/main.cpp:1437 src/main.cpp:1451"/>
-<s t="fn" n="runDefaultMap" p="src/main.cpp:1632" sites_at="src/main.cpp:1752"/>
+<s t="fn" n="getIndex" p="src/mcpindex.h:1165" sites_at="1268"/>
+<s t="fn" n="rankGraph" p="src/graph.h:7965" sites_at="7968"/>
+<s t="fn" n="anchoredLexicalRank" p="src/graph.h:8611" sites_at="8662"/>
+<s t="fn" n="runEval" p="src/eval.h:171" sites_at="325"/>
+<s t="fn" n="churnDecayRanking" p="src/main.cpp:1383" sites_at="1397"/>
+<s t="fn" n="churnRankedGraph" p="src/main.cpp:1422" sites_at="1436 1437 1451"/>
+<s t="fn" n="runDefaultMap" p="src/main.cpp:1632" sites_at="1752"/>
 </callers>
 ```
 
@@ -2758,13 +2759,13 @@ The leading legend comment is elided here; the line numbers are a capture and mo
 
 ```xml
 <callers of="rankGraphTeleport" defs="1" count="7" root="." hop_tested="0" hop_untested="7" graph_ambiguous="7827" graph_unresolved="4865" graph_unindexed="218" counts_floor="1" next="--uses=rankGraphTeleport">
-<s t="fn" n="getIndex" p="src/mcpindex.h:1165" sites_at="src/mcpindex.h:1268"/>
-<s t="fn" n="rankGraph" p="src/graph.h:7965" sites_at="src/graph.h:7968"/>
-<s t="fn" n="anchoredLexicalRank" p="src/graph.h:8611" sites_at="src/graph.h:8662"/>
-<s t="fn" n="runEval" p="src/eval.h:171" sites_at="src/eval.h:325"/>
-<s t="fn" n="churnDecayRanking" p="src/main.cpp:1383" sites_at="src/main.cpp:1397"/>
-<s t="fn" n="churnRankedGraph" p="src/main.cpp:1422" sites_at="src/main.cpp:1436 src/main.cpp:1437 src/main.cpp:1451"/>
-<s t="fn" n="runDefaultMap" p="src/main.cpp:1632" sites_at="src/main.cpp:1752"/>
+<s t="fn" n="getIndex" p="src/mcpindex.h:1165" sites_at="1268"/>
+<s t="fn" n="rankGraph" p="src/graph.h:7965" sites_at="7968"/>
+<s t="fn" n="anchoredLexicalRank" p="src/graph.h:8611" sites_at="8662"/>
+<s t="fn" n="runEval" p="src/eval.h:171" sites_at="325"/>
+<s t="fn" n="churnDecayRanking" p="src/main.cpp:1383" sites_at="1397"/>
+<s t="fn" n="churnRankedGraph" p="src/main.cpp:1422" sites_at="1436 1437 1451"/>
+<s t="fn" n="runDefaultMap" p="src/main.cpp:1632" sites_at="1752"/>
 </callers>
 ```
 

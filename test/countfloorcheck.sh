@@ -231,8 +231,8 @@ OUT_C="$( run c --safe-delete=width_of )"
 ROW_PAD="$( printf '%s' "$OUT_C" | grep -oE '<c n="pad"[^>]*/>' | head -1 )"
 ROW_USER="$( printf '%s' "$OUT_C" | grep -oE '<c n="user"[^>]*/>' | head -1 )"
 if [ "$( attr "$ROW_PAD" p )" = "a.c:9" ]; then ok "(C) p= still names the caller's definition line (a.c:9)"; else no "(C) p= changed on the pad row: $ROW_PAD"; fi
-if [ "$( attr "$ROW_PAD" sites_at )" = "a.c:11 a.c:12 a.c:13" ]; then ok "(C) three calls on three lines: sites_at=\"a.c:11 a.c:12 a.c:13\""; else no "(C) pad row: $ROW_PAD"; fi
-if [ "$( attr "$ROW_USER" sites_at )" = "a.c:22" ]; then ok "(C) a call continued onto its own line: sites_at=\"a.c:22\""; else no "(C) user row: $ROW_USER"; fi
+if [ "$( attr "$ROW_PAD" sites_at )" = "11 12 13" ]; then ok "(C) three calls on three lines: sites_at=\"11 12 13\" (SITES-SHORT: bare lines of the p= file asserted just above)"; else no "(C) pad row: $ROW_PAD"; fi
+if [ "$( attr "$ROW_USER" sites_at )" = "22" ] && [ "$( attr "$ROW_USER" p )" = "a.c:17" ]; then ok "(C) a call continued onto its own line: p=\"a.c:17\" sites_at=\"22\""; else no "(C) user row: $ROW_USER"; fi
 if [ -z "$ROW_PAD" ] || [ -z "$ROW_USER" ]; then
     no "(C-twin) premise: the safe-delete answer printed no caller rows"
 elif printf '%s' "$OUT_C" | grep -q '<c [^>]*sites_l='; then
@@ -241,7 +241,7 @@ else
     ok "(C-twin) safe-delete rows carry sites_at= only (the bare-line sites_l= stays on edit-check)"
 fi
 ROW_TW="$( printf '%s' "$( run c --safe-delete=twice )" | grep -oE '<c n="user"[^>]*/>' | head -1 )"
-if [ "$( attr "$ROW_TW" sites_at )" = "a.c:20" ]; then ok "(D) a single-definition callee called once still prints its call site (a.c:20)"; else no "(D) twice row: $ROW_TW"; fi
+if [ "$( attr "$ROW_TW" sites_at )" = "20" ] && [ "$( attr "$ROW_TW" p )" = "a.c:17" ]; then ok "(D) a single-definition callee called once still prints its call site (a.c:20)"; else no "(D) twice row: $ROW_TW"; fi
 R_C="$( root_tag "$OUT_C" safe-delete )"
 case "$R_C" in *callers_floor=*) no "(C) bound direct calls only, yet callers is floored: $R_C" ;; *) ok "(C) callers=\"2\" with no floor (every call bound)" ;; esac
 

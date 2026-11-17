@@ -130,8 +130,8 @@ done
 "$BIN" "$FIX" --callers=name --no-cache 2>/dev/null >"$TMP/callers_name"
 # attrib-multidef: the 19 definitions form several groups, so each row also names its definitions (of_def=, defattrib.h)
 [ "$( callershead name )"       = 'of="name" defs="19" count="2"' ] \
-    && grep -qE '<s t="method" n="ConsumerAmbiguous#render_label" p="consumer_ambiguous.rb:7" via="name"( of_def="[^"]*")? sites_at="consumer_ambiguous.rb:8"/>' "$TMP/callers_name" \
-    && grep -qE '<s t="method" n="PairDefColumn#lookup" p="pair_def_column.rb:14"( of_def="[^"]*")? sites_at="pair_def_column.rb:15"/>' "$TMP/callers_name" \
+    && grep -qE '<s t="method" n="ConsumerAmbiguous#render_label" p="consumer_ambiguous.rb:7" via="name"( of_def="[^"]*")? sites_at="8"/>' "$TMP/callers_name" \
+    && grep -qE '<s t="method" n="PairDefColumn#lookup" p="pair_def_column.rb:14"( of_def="[^"]*")? sites_at="15"/>' "$TMP/callers_name" \
     && ok 'defs-only: the 2 name callers are METHODS (render_label by name alone, lookup pinned by its own class) — the 9 columns contribute zero edges to the 19-def set; SingleColumn.new.name binds nothing (no in-tree def on that model)' \
     || no "defs-only: name callers: $( callershead name )"
 

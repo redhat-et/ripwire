@@ -156,7 +156,7 @@ printf 'static int sdone( int x ) { return x; }\nint sdonecaller( void ) { retur
 SD7_OUT="$( "$BIN" "$SD7" --no-cache --safe-delete=sdmany 2>/dev/null )"
 SD7_ROW="$( printf '%s' "$SD7_OUT" | sed 's/<!--.*-->//' | grep -oE '<c n="sdcaller"[^>]*/>' )"
 SD7_AT="$( printf '%s' "$SD7_ROW" | grep -oE ' sites_at="[^"]*"' | sed -e 's/^ sites_at="//' -e 's/"$//' )"
-{ [ "$( printf '%s' "$SD7_AT" | wc -w | tr -d ' ' )" = 16 ] && [ "${SD7_AT%% *}" = "m.c:5" ] && printf '%s' "$SD7_ROW" | grep -q ' sites_total="20"' \
+{ [ "$( printf '%s' "$SD7_AT" | wc -w | tr -d ' ' )" = 16 ] && [ "${SD7_AT%% *}" = "5" ] && printf '%s' "$SD7_ROW" | grep -q ' p="m.c:2"' && printf '%s' "$SD7_ROW" | grep -q ' sites_total="20"' \
   && printf '%s' "$SD7_OUT" | grep -o '<safe-delete [^>]*>' | grep -q ' next="--uses=sdmany"'; } \
     && ok "(7) a 20-site caller lists 16 file:line sites, sites_total=\"20\", and next=\"--uses=sdmany\" lists every one" \
     || no "(7) cut safe-delete row/root: $SD7_ROW $( printf '%s' "$SD7_OUT" | grep -o '<safe-delete [^>]*>' )"
@@ -165,7 +165,7 @@ SD7_FULL="$( "$BIN" "$SD7" --no-cache --safe-delete=sdmany --legend=full 2>/dev/
   && printf '%s' "$SD7_OUT" | grep -o '<!--.*-->' | grep -q 'next=: ' && printf '%s' "$SD7_FULL" | xmllint --noout - 2>/dev/null; } \
     && ok "(7) both legends define that next= and sites_total= where they ride (full: well-formed)" || no "(7) next=/sites_total= undefined in a legend of the cut answer"
 SD7_ONE="$( "$BIN" "$SD7" --no-cache --safe-delete=sdone 2>/dev/null )"
-{ printf '%s' "$SD7_ONE" | grep -q '<c n="sdonecaller" p="o.c:2" sites_at="o.c:2"/>' \
+{ printf '%s' "$SD7_ONE" | grep -q '<c n="sdonecaller" p="o.c:2" sites_at="2"/>' \
   && ! printf '%s' "$SD7_ONE" | grep -o '<safe-delete [^>]*>' | grep -q ' next=' && ! printf '%s' "$SD7_ONE" | grep -q 'sites_total'; } \
     && ok "(7) near miss: an uncut answer carries sites_at= with neither sites_total= nor a next=" \
     || no "(7) uncut answer: $SD7_ONE"
@@ -191,10 +191,10 @@ SD8="$( "$BIN" "$SD7" --no-cache --safe-delete=sdnoise 2>/dev/null )"
 SD8_ALL="$( printf '%s' "$SD8" | sed 's/<!--.*-->//' | grep -oE ' sites_at="[^"]*"' | sed -e 's/^ sites_at="//' -e 's/"$//' | tr '\n' ' ' | sed 's/ $//' )"
 if ! printf '%s' "$SD8" | grep -q '<c n="sdnoisecaller"'; then
     no "(8) premise: --safe-delete=sdnoise printed no sdnoisecaller row: $SD8"
-elif [ "$SD8_ALL" = "n.c:11" ]; then
-    ok "(8) near miss: a value use, &f, a local prototype, a string and comments are not sites (only n.c:11)"
+elif [ "$SD8_ALL" = "11" ] && printf '%s' "$SD8" | sed 's/<!--.*-->//' | grep -qE '<c [^>]*p="n\.c:[0-9]+"[^>]* sites_at="11"'; then
+    ok "(8) near miss: a value use, &f, a local prototype, a string and comments are not sites (only line 11 of n.c)"
 else
-    no "(8) non-call references printed as call sites: every sites_at= is \"$SD8_ALL\", want \"n.c:11\""
+    no "(8) non-call references printed as call sites: every sites_at= is \"$SD8_ALL\", want \"11\" on a p=n.c row"
 fi
 
 # (9)-(17) IX-3 name-template dispatch (lane name-template-dispatch): a method a template lookup can name is no
