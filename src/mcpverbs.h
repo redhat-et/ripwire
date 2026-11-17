@@ -4314,6 +4314,7 @@ inline std::string connectDeclinedJointsXml( const IngestResult& ing, const Conn
         out += "<dj n=\"" + ex( s.name ) + "\" t=\"" + std::string( symTag( s.kind ) ) + "\" p=\"" + ex( rp ) + ":" + std::to_string( s.line ) + "\">";
         // terminals that print the same name (`A.run`, `B.run`) get tp= as group edges do (CodeRabbit 4570578072)
         std::vector<ConnectEdge> rows;
+        rows.reserve( dj.links.size() );
         for( const ConnectResult::DeclinedLink& l : dj.links )
         {
             rows.push_back( ConnectEdge{ dj.fn, l.terminal } );

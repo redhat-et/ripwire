@@ -1558,6 +1558,7 @@ static_assert( constructTagOf( kShapeFailureDefault ) == kConstructTagCount - 1 
 inline std::vector<AstQuerySpec> errorMaskQuerySpecs()
 {
     std::vector<AstQuerySpec> specs;
+    specs.reserve( kErrorMaskRules.size() );
     for( const ErrorMaskRule& rule : kErrorMaskRules )
     {
         specs.push_back( { std::string( rule.query ), std::to_string( specs.size() ) } );   // tag = row index (errorMaskRuleIndex)

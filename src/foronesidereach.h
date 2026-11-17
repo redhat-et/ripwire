@@ -267,6 +267,7 @@ inline void resolveSeeds( const IngestResult& ing, const Graph& g, std::vector<R
         wants.push_back( std::move( w ) );
     }
     std::vector<std::uint32_t> wantedFiles;
+    wantedFiles.reserve( wants.size() );
     for( const Want& w : wants )
     {
         wantedFiles.push_back( w.file );
