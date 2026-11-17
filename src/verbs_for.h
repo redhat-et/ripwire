@@ -3286,9 +3286,15 @@ struct CapturedForAnswer
 };
 
 // The capture holds the whole answer: a buffer, flushed and read back without error, and stdout restored.
+// wholeCapture is the same test handing back the capture itself (nullptr when not whole), so a read of its bytes needs no
+// second, unchecked look into the optional.
+inline const StdoutCaptured* wholeCapture( const std::optional<StdoutCaptured>& cap )
+{
+    return cap && !cap->failed && cap->restored ? &*cap : nullptr;
+}
 inline bool capturedWhole( const std::optional<StdoutCaptured>& cap )
 {
-    return cap && !cap->failed && cap->restored;
+    return wholeCapture( cap ) != nullptr;
 }
 
 // TOKEN-BUDGET-MONOTONE: the demote passes edit the captured answer after it was priced, and the root re-prices over
@@ -3327,15 +3333,16 @@ inline int appendForFileSyms( const MainDispatch& d, CapturedForAnswer answer )
     {
         rw::emitTo( stderr, "ripwire: --for: the answer's buffer failed to flush or read back whole — the answer may be short and the <syms> block is not rendered (held=\"uncaptured\")\n" );
     }
-    const bool        whole = capturedWhole( cap );   // restored: the branch above returned otherwise
+    const StdoutCaptured* const wholeCap = wholeCapture( cap );   // restored: the branch above returned otherwise
+    const bool        whole = wholeCap != nullptr;
     const bool        held  = cfg.tokenBudget > 0 || cfg.maxTokens > 0;   // the demote passes' read (shapedForFileSymsAnswer)
     const bool        symsHeld = held || cfg.forHoldBudget > 0;            // the block's: the fitted re-render holds it too (kForHeldBlocks)
     std::string       cut;   // the answer with the head files' tail-row names <syms> prints cut (R-DEDUP: <syms> has priority), "" when none is
     std::string       syms  = rw::renderForFileSyms(
-        d.ing, d.g, rw::FileSymsArgs{ .task = cfg.forTask, .answer = whole ? std::string_view( cap->bytes ) : std::string_view(), .held = symsHeld,
+        d.ing, d.g, rw::FileSymsArgs{ .task = cfg.forTask, .answer = whole ? std::string_view( wholeCap->bytes ) : std::string_view(), .held = symsHeld,
                                       .heldFlags = forHeldNextFlags( cfg ), .compactLegend = cfg.legend == "compact", .uncaptured = !whole, .answerOut = &cut,
                                       .cutWhenHeld = !held } );
-    const std::string  edited = whole ? shapedForFileSymsAnswer( d, cap->bytes, std::move( cut ), syms, price, held ) : std::string();
+    const std::string  edited = whole ? shapedForFileSymsAnswer( d, wholeCap->bytes, std::move( cut ), syms, price, held ) : std::string();
     ledgerFollowsEdit( answer.ledger, cap, edited );
     const std::string& bytes  = !edited.empty() ? edited : cap ? cap->bytes : edited;
     const std::size_t  at    = forSymsInsertAt( bytes, cfg.withGraph );   // the answer goes to stdout byte for byte, <syms> in front of the <graph> block
@@ -5568,17 +5575,23 @@ inline int runForLensFitted( const MainDispatch& d )
         DISCLOSE( sink, ForBudgetFit::DisclosureWhy::NoCapture, "runForLensFitted: no capture buffer for the unbudgeted answer" );
         return runForLensPosture( d, nullptr ).value_or( 0 );
     }
-    rw::ForBudgetFitResult fit = capturedWhole( u.out ) ? rw::fitForAnswerToBudget( u.out->bytes, ask, u.ledger ) : rw::ForBudgetFitResult{};
+    rw::ForBudgetFitResult fit{};
+    if( const StdoutCaptured* const firstWhole = wholeCapture( u.out ) )   // scoped: u is re-rendered below
+    {
+        fit = rw::fitForAnswerToBudget( firstWhole->bytes, ask, u.ledger );
+    }
     if( fit.verdict == rw::ForBudgetFitResult::Verdict::HoldBlocks )
     {
         d.redactCounts        = redactedBefore;   // the first render's tally is discarded with its answer: the run reports the one it prints
         posture.forHoldBudget = ask.targetTokens > 0 && ask.ceilingTokens > 0 ? std::min( ask.targetTokens, ask.ceilingTokens ) : std::max( ask.targetTokens, ask.ceilingTokens );
         ask.heldPass          = true;
         u                     = renderForPostureCaptured( pd );   // pd reads `posture`: the same posture, its held blocks held
-        fit = u.stdoutCaptured && capturedWhole( u.out ) ? rw::fitForAnswerToBudget( u.out->bytes, ask, u.ledger ) : rw::ForBudgetFitResult{};
+        const StdoutCaptured* const heldWhole = u.stdoutCaptured ? wholeCapture( u.out ) : nullptr;
+        fit = heldWhole != nullptr ? rw::fitForAnswerToBudget( heldWhole->bytes, ask, u.ledger ) : rw::ForBudgetFitResult{};
     }
     replayForPostureNotices( u );
-    if( !u.stdoutCaptured || !capturedWhole( u.out ) )
+    const StdoutCaptured* const printed = u.stdoutCaptured ? wholeCapture( u.out ) : nullptr;   // the render whose bytes go out
+    if( printed == nullptr )
     {
         DISCLOSE( sink, ForBudgetFit::DisclosureWhy::NotWhole, "runForLensFitted: the unbudgeted answer did not buffer whole" );
         if( u.out && u.out->restored )
@@ -5591,7 +5604,7 @@ inline int runForLensFitted( const MainDispatch& d )
     {
         DISCLOSE( sink, ForBudgetFit::DisclosureWhy::NoRoot, "runForLensFitted: no <ctx> root in the unbudgeted answer" );
     }
-    const std::string& out = fit.verdict == rw::ForBudgetFitResult::Verdict::NoRoot ? u.out->bytes : fit.xml;
+    const std::string& out = fit.verdict == rw::ForBudgetFitResult::Verdict::NoRoot ? printed->bytes : fit.xml;
     std::fwrite( out.data(), 1, out.size(), stdout );
     return u.rc;
 }

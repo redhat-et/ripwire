@@ -2591,6 +2591,7 @@ inline std::string renderForExemplarFamily( const IngestResult& ing, const Graph
                "<exemplar_family of=\"" +
                std::string( escapeXml( t->phrase, esc ) ) + "\" held=\"budget\"/>";
     }
+    ASSUME( fam.has_value(), "t and fam are set together (the reading loop) and reset together (settleInto)" );
     fam->unread = scan.unread;
     fam->oversized = scan.oversized;
     return forExemplarFamilyXml( ing, *t, *fam, compactLegend );
