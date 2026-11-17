@@ -1017,8 +1017,18 @@ struct TailOldWalk
 {
     bool code = false, doc = false, open = false;
 };
-inline TailOldWalk tailOldWalkAt( bool codeFirst, std::size_t r, std::size_t codeSeen, std::size_t windowSeen ) noexcept
+// The page walk's three counters at one row (named at the call): the row's page index, the CODE rows met before it, the window rows met.
+struct TailWalkAt
 {
+    std::size_t r          = 0;
+    std::size_t codeSeen   = 0;
+    std::size_t windowSeen = 0;
+};
+inline TailOldWalk tailOldWalkAt( bool codeFirst, TailWalkAt at ) noexcept
+{
+    const std::size_t r          = at.r;
+    const std::size_t codeSeen   = at.codeSeen;
+    const std::size_t windowSeen = at.windowSeen;
     const bool open = ( codeFirst ? codeSeen : r ) < kForFileTailPageRows;
     return { open, windowSeen < kForFileTailPageRows, open };
 }
@@ -1216,7 +1226,7 @@ inline void fileTailPageRows( FileTail& out, std::vector<char>& listed, const Ta
     {
         const ForFileRow&  row = page.rows[r];
         // the old cut (page 0): the row the 40-row walk listed (a Sphinx .txt page's own cap is in a.inWindow either way)
-        const TailOldWalk  old = tailOldWalkAt( docs != nullptr, r, codeSeen, windowSeen );
+        const TailOldWalk  old = tailOldWalkAt( docs != nullptr, { .r = r, .codeSeen = codeSeen, .windowSeen = windowSeen } );
         const TailRowAdmit a      = admitTailRow( ing, row.lead, docs, windowSeen, kForFileTailPageWalk );
         const bool         symRow = a.isDoc ? old.doc : old.code;
         codeSeen += std::size_t( !a.isDoc );

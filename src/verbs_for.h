@@ -3250,7 +3250,7 @@ inline std::string forHeldNextFlags( const rw::Config& cfg )
 // The caller skips it under a budget, which leaves both as shaped.
 inline std::string oneSideReachAnswer( const MainDispatch& d, const std::string& answer, std::string& syms, const std::optional<rw::PricedRootInputs>& price )
 {
-    rw::OneSideReachEdit edit = rw::demoteOneSideRows( d.ing, d.g, d.cfg.forTask, answer, syms );
+    rw::OneSideReachEdit edit = rw::demoteOneSideRows( d.ing, d.g, { .task = d.cfg.forTask, .answer = answer, .syms = syms } );
     if( !edit.answer.empty() && price )
     {
         rw::repriceRootAfterCut( edit.answer, *price, answer.size() );   // signed: the pointers and legend may outweigh the rows they replace
@@ -5106,7 +5106,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         {
             const std::string before = forHdrXml + filePageXml + unusedXml;
             const std::string after  = autoSection.xml + slot.xml;
-            const auto        point  = [ & ] { return rw::demoteAndPointBlock( ing, g, cfg.forTask, before, sigsStr, after ); };
+            const auto        point  = [ & ] { return rw::demoteAndPointBlock( ing, g, cfg.forTask, { .before = before, .block = sigsStr, .after = after } ); };
             std::string pointed = rw::refillRowsForDemote( forSigsCut.rowDropBudgetBytes, [ & ]() -> const std::string& { return sigsStr; },
                                                            [ & ] { return forSigsCut.rowDropCut; }, [ & ] { return shownSigIds.size(); }, renderRowsAt, point );
             if( !pointed.empty() )

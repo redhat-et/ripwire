@@ -1294,9 +1294,24 @@ inline bool cratePathMacroAt( std::string_view src, std::uint32_t at, std::uint3
     j = skipBlanks( src, j, end );
     return nameEnd > nameAt && j < end && src[ j ] == '!' && ( j + 1 >= end || src[ j + 1 ] != '=' );
 }
-// The Macro reference for `$crate::a::name!` at `at`, its written path read by rustMacroPathOf (`$crate` as `crate`).
-inline RawRef cratePathMacroRef( std::string_view src, std::uint32_t at, std::uint32_t nameAt, std::uint32_t nameEnd, std::uint32_t fileId, std::uint32_t line )
+// Where one `$crate::a::name!` sits: `$crate` at byte `at`, the macro name at [nameAt, nameEnd), in file `fileId` on 1-based `line`
+// (five uint32_t, named at the call).
+struct CrateMacroSite
 {
+    std::uint32_t at      = 0;
+    std::uint32_t nameAt  = 0;
+    std::uint32_t nameEnd = 0;
+    std::uint32_t fileId  = 0;
+    std::uint32_t line    = 0;
+};
+// The Macro reference for `$crate::a::name!` at `site.at`, its written path read by rustMacroPathOf (`$crate` as `crate`).
+inline RawRef cratePathMacroRef( std::string_view src, CrateMacroSite site )
+{
+    const std::uint32_t at      = site.at;
+    const std::uint32_t nameAt  = site.nameAt;
+    const std::uint32_t nameEnd = site.nameEnd;
+    const std::uint32_t fileId  = site.fileId;
+    const std::uint32_t line    = site.line;
     std::string_view path = src.substr( at, nameAt - at );   // `$crate::a::` — its trailing `::` dropped
     while( !path.empty() && ( rw::isJsonWs( path.back() ) || path.back() == ':' ) )
     {
@@ -1349,7 +1364,7 @@ inline void captureRustTranscriberMacroCalls( TSNode macroDef, std::uint32_t fil
         std::uint32_t nameEnd = 0;
         if( cratePathMacroAt( src, i, end, nameAt, nameEnd ) )
         {
-            refs.push_back( cratePathMacroRef( src, i, nameAt, nameEnd, fileId, line ) );
+            refs.push_back( cratePathMacroRef( src, { .at = i, .nameAt = nameAt, .nameEnd = nameEnd, .fileId = fileId, .line = line } ) );
         }
         i += 6;   // resume past `$crate` so a newline inside the path is still counted
     }
