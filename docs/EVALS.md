@@ -17262,3 +17262,41 @@ but **8 of 8 is this band's whole measured denominator and no claim beyond tmux 
   approximate.
 - **The fixture reproduces all three defects** before the fix: `realwriter` missing, `printflike` indexed,
   `int` indexed. A fix is only believable against a fixture that was red for every one of them.
+
+### Amendment 9a, before any fix — S1 is NOT achievable this round, and the better fix is elsewhere
+
+Probing the fixture settled what a veto can and cannot buy, and it changes the band.
+
+**The error region swallows the whole definition.** On a 12-line fixture the indexed names are `int`, `main`
+and `printflike`. `realwriter` is absent, and **even its CALL SITE on line 12 is attributed to
+`in="printflike"`** — the phantom owns lines 4 through 12. So the parse failed over that whole region, and
+**vetoing a symbol does not re-parse it**: no veto can recover the definition.
+
+**S1 is therefore reclassified as measured-but-unfixable in this round**, not quietly dropped. Recovering it
+needs macro pre-expansion or a targeted re-parse of the error region, each of which is its own band and
+neither of which is an afternoon. The measured cost stands on the record: **8 definitions across 8 tmux
+files, 9 files flagged `parse_degraded`.**
+
+**And the probe found the better fix for the dangerous half.** The file is ALREADY flagged
+`parse_degraded="1"`. `--dead-code`'s rule is *internal linkage and no caller found in the index* — but in a
+file whose parse failed, **"no caller found" is not evidence of deadness, it is evidence the parse failed.**
+The tool holds that fact and does not use it.
+
+So the registered rule changes to:
+
+- **S1′ — `--dead-code` and `--safe-delete` must not offer a candidate from a file whose parse degraded**,
+  and must disclose how many candidates were withheld for that reason. This kills the dangerous answer at
+  its source rather than at its symptom: on tmux it removes all 10 wrong rows, because all 10 come from
+  parse-degraded files. A withheld count is a floor the reader can act on; a wrong deletion candidate is
+  not.
+- **S2, S3, S4 unchanged** — the keyword and all-literal vetoes, and the control that a name merely
+  containing a keyword survives.
+- **S5 unchanged** — no symbol-count regression on the other corpora.
+- **S6 — the withholding must be VISIBLE, not silent.** A verb that quietly serves fewer candidates has
+  swapped one dishonesty for another. `--dead-code` already carries `counts_floor="1"`; this adds a named
+  count, and the gate asserts the count is non-zero on a corpus that has such files.
+
+**What this does NOT fix, stated so the readout cannot be read as more than it is:** the 8 tmux functions
+are still missing from the index, so every call to them is still unresolved, and `--for`/`--callers` on them
+still answer nothing. `--dead-code` stops recommending deletions it cannot support; the index is no more
+complete than before.
