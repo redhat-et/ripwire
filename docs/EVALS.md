@@ -15992,3 +15992,70 @@ change with its own band and is deliberately out of scope here; it is recorded w
 the next round starts from the number. It is also the honest answer to "an answer should be bounded by the
 question, not the corpus": this lane bounded the *count-only* tail and fixed *where* the names go, and the
 remaining growth term is a schema that spells every ancestor directory once per row.
+
+## PRE-REGISTRATION 2026-11-16 (amendment 3) — ITEM P: is the answer in the FIRST bytes?
+
+Registered before measurement. This is the third of the round's three open items ("the answer in the first
+bytes"), and the only one no instrument has touched from this side. Two independent reads motivate it:
+
+- With the inventory treated as the weak evidence **its own legend declares**, the ranked rows satisfy
+  **0.4 %** of gold items on orientation questions. The map LISTS its answer; it does not lead with it.
+- A separate model, reading five `--for` cells blind, found the same shape from the other end: in **3 of 5**
+  cells the answer is a 0.4–2.1 KB routed section printed **after 36–54 KB** of generic bundle, and it
+  ranked "print the routed section first" as a change in its own right.
+
+**The method needs no build and no re-collection**: truncate the stored answers at a prefix, re-grade with
+the same grader and the same controls as Item G, and read completeness against prefix length.
+
+### Band P0 — ABSOLUTE and RELATIVE prefixes answer DIFFERENT questions and may never be mixed
+
+This band exists because the obvious version of this measurement is wrong. A 2 KB prefix is a third of a
+`flake8` answer and a twentieth of a `vscode` one, so **a curve over absolute bytes pooled across repos
+measures ANSWER SIZE, not ordering** — the same confound in a new costume as every pooled figure this round
+has had to withdraw. Both curves are therefore reported, and separately:
+
+- **Absolute** (1, 2, 4, 8, 16, 32 KB, ∞): the BUDGET question. An agent that truncates at 2 KB truncates at
+  2 KB whatever the repo, so this is the one a consumer feels. Reported **per repo**, and additionally
+  stratified by answer-size tertile, never as one pooled rate.
+- **Relative** (10, 25, 50, 75, 90, 100 % of each answer's own length): the ORDERING question, which is
+  scale-free by construction. This is the curve that bears on reordering; the absolute one cannot, because
+  a repo whose answers are short will look "front-loaded" merely for being small.
+
+**A reordering claim may rest only on the RELATIVE curve.** An absolute curve offered as evidence of
+ordering is a FAIL of this band.
+
+### Band P1 — the legend is a zero-evidence prefix and must be separated out
+
+The legend sits at the TOP of every answer and carries no gold anchors (measured: zero completeness cost
+across 449 cell×bound pairs). It is 531–4,305 B, median 1,796 — so **at a 2 KB prefix the median answer is
+nearly all legend, by construction.** A single curve would therefore measure the legend, not the ordering.
+Both curves are run twice, with the legend and with it stripped, and the pair is reported together. A
+one-variant readout is **NOT-ESTABLISHED**.
+
+### Band P2 — controls, the same three Item G required
+
+1. **identity** — at prefix = ∞ the grade must reproduce the untruncated grade exactly, excluding only the
+   provenance field;
+2. **floor** — at prefix = 0 completeness must be ZERO, which is what proves the metric can fall at all;
+3. **monotonicity** — completeness must be non-decreasing in prefix length. A rise-then-fall means the
+   truncation is corrupting what it keeps, and the readout is void rather than interesting.
+
+### Band P3 — per repo and per verb, both bounds, no pooling
+
+Same rule as K2/G5/C2. The 11 verb populations stay apart: a `--whereis` answer and a `--for` bundle differ
+by 20× in length, so one prefix means something different in each.
+
+### Band P4 — the decision rule, fixed before the data
+
+Reordering is justified **only if the evidence is BACK-loaded**: at the 50 % relative prefix, legend
+stripped, completeness must be **below 75 % of its full-length value** in at least a third of repos. If the
+evidence is front-loaded instead, reordering buys nothing and Item P is a NEGATIVE result that closes the
+question — which is a useful outcome and will be reported as one, not quietly dropped. This threshold is
+registered now so the readout cannot pick it.
+
+### What Item P does NOT measure
+
+A truncated XML document **is not well-formed**. This measures whether the EVIDENCE is present in a prefix,
+not whether a consumer could parse it, and no claim is made that a truncated answer is usable. The honest
+consumer model is an agent whose context cuts the tail of a long answer, or a reader that stops early — and
+for a well-formed short answer the surface already in the binary is a smaller budget, not a byte cut.
