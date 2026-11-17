@@ -40,6 +40,7 @@
 # ARMS (merge of main 2026-11-17)
 #   (b2) a budget the block fits prints it whole; (b3) the budget fit prices <manifest_rows> (kForHeldBlocks) and holds it at 1400
 #   (f4a) a retargeted touch row carries its own line's offset: no n= of the cfg line's holder
+#   (fx1) a file name's extension (`book.toml`) is no task word: the `toml` dependency stays silent; "a dependency like toml" fires
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
@@ -435,6 +436,13 @@ lacks cr5 big "the huge module" ''
 has cr6 lnk "the innermod module" '<manifest_rows files="1" floor="1" unread="1">' '<r l="1" kind="module">module example.com/innermod</r>'
 lacks cr6 lnk "the secretmod module" ''
 has cr7 xtra "add a new extra like beta" '<mf p="sub/setup.cfg"' '<feature_touch n="3"><touch_list total="1"><touch p="sub/use.py:1" n="EXTRAS" share="3/3">'
+
+# (fx1) a file name the task spells (`book.toml`) names a format, not the `toml` dependency (mdbook-02); the bare word still fires
+mkdir -p "$F/bk/src"
+printf '[package]\nname = "bk"\n\n[dependencies]\ntoml = "0.8"\nserde = "1"\n' >"$F/bk/Cargo.toml"
+printf 'pub fn render() -> u32 { 1 }\n' >"$F/bk/src/lib.rs"
+lacks fx1 bk "add a new renderer; renderers are selected from book.toml" ''
+has fx1 bk "add a new dependency like toml" '<mf p="Cargo.toml" matched="toml"' '<r l="5" kind="dep">toml = &quot;0.8&quot;</r>'
 
 # ── caps, dialects, placement ────────────────────────────────────────────────────────────────────────────────────────────────
 has cap1 acme "use the kafkajs dependency in a plugin" '<manifest_rows files="5" shown="3" capped="1">'
