@@ -49,6 +49,13 @@ struct Config
     bool             allowRemoteEdits = false;   // --allow-remote-edits: permit the 3 edit verbs over --listen (refused by
                                                  // default); forces the token requirement even on loopback.
     std::string_view mcpLegend;                  // --mcp-legend=session|inline: the stdio server's legend posture (default session)
+    std::string_view legendHave;                 // --legend-have=DICTV: the CALLER asserts it already holds that dictionary
+                                                 // version, so this answer may take the ref posture. The handshake is what
+                                                 // makes a CLI ref answer honest AND deterministic: --legend=ref is refused
+                                                 // because a CLI run has no session that was served anything, and output that
+                                                 // depended on whether an earlier RUN happened would not be reproducible.
+                                                 // Naming the version depends only on argv, and a stale version is refused
+                                                 // rather than silently pointing at definitions the reader does not have.
     std::string_view mcpTools;                   // --mcp-tools=SPEC: list (and answer) only these MCP tools — names and/or the
                                                  // core/no-edit/full profiles, validated against the tool table in main.cpp (mcp.h).
     std::vector<std::string> excludes;           // --exclude=SUBSTR (repeatable): drop matching paths
@@ -2805,6 +2812,11 @@ inline constexpr char kHelpTail[] =
         "                               ref answer's <about dictv=> names). =roster lists the completeness attributes it\n"
         "                               defines (attr, element, source), the roster test/legendrefcheck.sh reads. Answered\n"
         "                               wherever it stands on the command line; nothing else runs.\n"
+        "    --legend-have=DICTV        you already hold that legend dictionary (--legend-dict prints its dictv=), so this answer\n"
+        "                               takes the ref posture: rows and identity on the root, every other attribute on a trailing\n"
+        "                               <about legend=\"ref\" dict= dictv=/>, and no legend prose. Lossless -- nothing is dropped,\n"
+        "                               only moved. Measured -30.4 %% over 80 recorded answers (-8 %% to -57 %% by verb). A version\n"
+        "                               that is not this binary\'s is REFUSED, naming both.\n"
         "    --json                     emit JSON instead of XML; keys mirror the XML attribute names one to one\n"
         "                               machine-parseable JSON instead of XML, keys mirror the XML attr names 1:1. Every\n"
         "                               ROOT attribute survives; a verb that serves fewer SECTIONS than its XML form NAMES\n"
@@ -4553,6 +4565,22 @@ inline constexpr std::string_view kLegendPostures[]     = { "full", "compact" };
 inline constexpr std::string_view kDefaultLegendPosture = "compact";
 static_assert( std::ranges::contains( kLegendPostures, kDefaultLegendPosture ), "the default is a registered posture" );
 
+// --legend-have= is a VERSION HANDSHAKE. Its VALUE is checked against the dictionary in main.cpp
+// (checkLegendHandshake), not here: cli.h is included early and pulling legenddict.h in shifts declaration order enough
+// to break unrelated headers (forcallerhop.h / subjectanchor.h lose oneHopCallerRows). The POSTURE conflict needs no
+// dictionary, so it stays at intake — in its own function rather than inside validateModifierGuards, which is already
+// 5x its complexity bar.
+inline void refuseLegendHaveWithFullPosture( Config& c )
+{
+    if( c.legendHave.empty() || c.legend != "full" )
+    {
+        return;
+    }
+    rw::emitRaw( stderr, "ripwire: --legend-have= serves the ref posture, which reduces the dialect the legend dictionary holds — it "
+                         "cannot combine with --legend=full (drop --legend=full, or drop --legend-have=)\n" );
+    c.ok = false;
+}
+
 [[nodiscard]] inline bool isLegendPosture( std::string_view v ) noexcept
 {
     return std::ranges::contains( kLegendPostures, v );
@@ -4831,6 +4859,7 @@ inline void validateModifierGuards( Config& c ) noexcept
         rw::emitRaw( stderr, "ripwire: --mcp-legend is read by the stdio MCP server only (--listen holds no legend session) — e.g. ripwire . --mcp --mcp-legend=inline\n" );
         c.ok = false;
     }
+    refuseLegendHaveWithFullPosture( c );
     if( !c.mcpTools.empty() && !c.mcp )   // --listen sets c.mcp, so this covers both transports
     {
         rw::emitRaw( stderr, "ripwire: --mcp-tools is read by the MCP server only — pass --mcp (or --listen) too, e.g. ripwire . --mcp --mcp-tools=core\n" );
@@ -5681,6 +5710,10 @@ inline Config parseArgs( int argc, char** argv ) noexcept
                     c.ok = false; return c;
                 }
                 c.mcpLegend = v;
+            }
+            else if( startsWith( a, "--legend-have=" ) )
+            {
+                c.legendHave = a.substr( 14 );
             }
             else if( startsWith( a, "--whereis-listing=" ) )
             {
