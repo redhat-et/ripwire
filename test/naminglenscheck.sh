@@ -281,8 +281,8 @@ CPP
 cat >"$MARK/markers.py" <<'PY'
 g_generator_loss_running_mean_value = 0
 PY
-"$BIN" "$MARK" --no-cache >"$TMP/markers.map" 2>/dev/null
-"$BIN" "$MARK" --lint --no-cache >"$TMP/markers.lint" 2>/dev/null
+"$BIN" "$MARK" --no-cache >"$TMP/markers.map" 2>/dev/null          # status: the map is the verdict; a refusal indexes nothing and the arm below FAILs
+"$BIN" "$MARK" --lint --no-cache >"$TMP/markers.lint" 2>/dev/null  # status: the lint document is the verdict; a refusal fails the parse or the fire arms below
 python3 - "$TMP/markers.map" "$TMP/markers.lint" <<'PY'
 import sys
 import xml.etree.ElementTree as ET

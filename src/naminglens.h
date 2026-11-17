@@ -543,12 +543,6 @@ struct NameShapeFacts
     bool caseIssue       = false;   // naming-case candidate (snake_case + camelCase mixed)
 };
 
-// the C-family languages (C/C++/ObjC): the reserved-identifier forms and the g_/m_/s_ scope markers are theirs.
-inline bool namingCFamily( Lang lang ) noexcept
-{
-    return lang == Lang::Cpp || lang == Lang::C || lang == Lang::ObjC;
-}
-
 // naming-wordy counts the WORDS of a name, and a scope or kind MARKER prefix is not one: the `k` of a
 // constant (`k` + an uppercase letter: kPathFromReachMaxNodes is five words, not six) and, in the C family only,
 // the `g_` / `m_` / `s_` of a global, member or static. Measured 2026-11-17 (test/namingcalibrationcheck.sh
@@ -559,10 +553,10 @@ inline bool namingCFamily( Lang lang ) noexcept
 // (g_loss = generator loss, s_start, m_name), while C/C++ use them as markers (m_tempPool, g_object_new).
 // Deliberately NOT stripped: an acronym run the splitter breaks (CMake -> C|Make). Telling CMake from
 // IThing or XAxis needs a dictionary, and the calibration pairs never needed it.
-inline std::size_t namingWordCount( std::string_view name, Lang lang, const std::vector<std::string>& toks ) noexcept
+inline std::size_t namingWordCount( std::string_view name, bool cFamily, const std::vector<std::string>& toks ) noexcept
 {
     const bool constantMarker = name.size() >= 2 && name[0] == 'k' && ncUpper( name[1] );
-    const bool scopeMarker    = namingCFamily( lang ) && name.size() >= 3 && ( name[0] == 'g' || name[0] == 'm' || name[0] == 's' )
+    const bool scopeMarker    = cFamily && name.size() >= 3 && ( name[0] == 'g' || name[0] == 'm' || name[0] == 's' )
                                 && name[1] == '_' && ncAlpha( name[2] );
     const bool markerPrefix   = ( constantMarker || scopeMarker ) && !toks.empty();
     return toks.size() - ( markerPrefix ? 1 : 0 );
@@ -574,6 +568,8 @@ inline std::size_t namingWordCount( std::string_view name, Lang lang, const std:
 inline NameShapeFacts checkNameShapeCore( std::string_view name, Lang lang, const std::vector<std::string>& toks ) noexcept
 {
     NameShapeFacts facts;
+    // the C family (C/C++/ObjC) owns the reserved-identifier forms and the g_/m_/s_ scope markers.
+    const bool cFamily = lang == Lang::Cpp || lang == Lang::C || lang == Lang::ObjC;
 
     // naming-short — strip decorating underscores; a 1–2 letter alphabetic core.
     {
@@ -595,7 +591,7 @@ inline NameShapeFacts checkNameShapeCore( std::string_view name, Lang lang, cons
     }
 
     // naming-wordy — more than 5 words (split tokens, a marker prefix not counted: namingWordCount).
-    facts.wordCount = namingWordCount( name, lang, toks );
+    facts.wordCount = namingWordCount( name, cFamily, toks );
     facts.wordy     = facts.wordCount > 5;
 
     // naming-underscore — internal consecutive underscores anywhere; C-family reserved forms
@@ -617,7 +613,7 @@ inline NameShapeFacts checkNameShapeCore( std::string_view name, Lang lang, cons
             }
         }
         // the reserved-identifier forms are a C-family rule only (C/C++/ObjC reserve leading _Capital and __).
-        const bool reserved = namingCFamily( lang ) && name.size() >= 2 && name[0] == '_' && ( name[1] == '_' || ncUpper( name[1] ) );
+        const bool reserved = cFamily && name.size() >= 2 && name[0] == '_' && ( name[1] == '_' || ncUpper( name[1] ) );
         facts.underscoreIssue = ( internalDouble && !isPythonDunder( name ) ) || reserved;
         facts.reservedForm    = reserved;
     }
