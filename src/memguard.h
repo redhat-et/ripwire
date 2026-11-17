@@ -528,9 +528,23 @@ struct TargetProjection
     std::uint64_t ingestNeedBytes = 0;       // max( after, ingestPeak ) - fixed / 2, judged against half the limit (0 when not measured)
     std::uint64_t fixedBytes      = 0;       // the fixed bytes counted once (the reading, at most the phase's growth)
 };
-inline TargetProjection projectTargetPhase( std::uint64_t before, std::uint64_t ingestPeak, std::uint64_t basePeak, std::uint64_t after,
-                                            std::uint64_t fixedBytes )
+// The base phase's readings the projection is made from (five byte counts, named at the call): the footprint `before` it, its
+// peak at the end of the base ingest and of the whole phase, the footprint `after` it, and the fixed bytes it added.
+struct BasePhaseReadings
 {
+    std::uint64_t before     = 0;
+    std::uint64_t ingestPeak = 0;
+    std::uint64_t basePeak   = 0;
+    std::uint64_t after      = 0;
+    std::uint64_t fixedBytes = 0;
+};
+inline TargetProjection projectTargetPhase( BasePhaseReadings readings )
+{
+    const std::uint64_t before     = readings.before;
+    const std::uint64_t ingestPeak = readings.ingestPeak;
+    const std::uint64_t basePeak   = readings.basePeak;
+    const std::uint64_t after      = readings.after;
+    const std::uint64_t fixedBytes = readings.fixedBytes;
     TargetProjection    p;
     const std::uint64_t limit = limits().hardBytes;
     p.measured = basePeak != 0 && ingestPeak != 0 && after != 0 && basePeak >= before;

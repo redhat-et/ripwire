@@ -911,7 +911,8 @@ std::optional<int> loadFullTrees( const std::string& root, const rw::Config& cfg
             return out.stop.stopped ? std::nullopt : loadTargetCommit( root, out.targetSha, cfg, out );
         }
         const auto [ baseBefore, basePeak, after, fixed ] = baseReadings( out, before, fixedBefore );
-        const memguard::TargetProjection proj             = memguard::projectTargetPhase( baseBefore, out.ingestPeak, basePeak, after, fixed );
+        const memguard::TargetProjection proj             = memguard::projectTargetPhase(
+            { .before = baseBefore, .ingestPeak = out.ingestPeak, .basePeak = basePeak, .after = after, .fixedBytes = fixed } );
         out.needBytes       = proj.needBytes;
         out.ingestNeedBytes = proj.ingestNeedBytes;
         projectedNoFit = !proj.fits;
