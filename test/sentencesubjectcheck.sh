@@ -156,7 +156,13 @@ runs(){ # $1 root $2 invocation $3 row it must print $4 label
 q='I need to change prepare_setup_platform to log retry timing metrics somewhere; what depends on it?'
 A="$( ask "$R" "$q" )" || no "R callers: ripwire exited $?"
 hasnt "$A" '<callers by="subject"' "R callers: the sentence got no block (premise)"
-N="$( reask "$A" )"; if [ "$N" = '--callers=prepare_setup_platform' ]; then ok "R callers: next=$N"; else no "R callers: next=$N"; fi
+# REASK-GRAIN: a CHANGE question ("I need to change X ...; what depends on it?") asks for the transitive radius, so its bare form is
+# the impact verb (it was --callers= until the grain rule, a cheaper answer to a different question); a who-calls question keeps --callers=
+N="$( reask "$A" )"; if [ "$N" = '--impact=prepare_setup_platform' ]; then ok "R change question: next=$N (the radius, not the one-hop callers)"; else no "R change question: next=$N (want --impact=prepare_setup_platform)"; fi
+[ "${N#--}" != "$N" ] && runs "$R" "$N" first_caller "impact"
+A="$( ask "$R" 'I need to log retry timing metrics somewhere beside prepare_setup_platform; which functions call it?' )" || no "R callers: ripwire exited $?"
+hasnt "$A" '<callers by="subject"' "R callers: the sentence got no block (premise)"
+N="$( reask "$A" )"; if [ "$N" = '--callers=prepare_setup_platform' ]; then ok "R callers: next=$N (a who-calls question stays one hop)"; else no "R callers: next=$N"; fi
 [ "${N#--}" != "$N" ] && runs "$R" "$N" first_caller "callers"
 A="$( ask "$R" 'What is the path, if any, between `start_here` and `other_end`?' )" || no "R path: ripwire exited $?"
 hasnt "$A" '<graph_verb' "R path: the sentence got no block (premise)"
