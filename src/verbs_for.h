@@ -6,6 +6,7 @@
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
 #include "forliteral.h" // MF1-LIT: a task naming a literal gets its byte-exact sites and owner bodies, appended
 #include "forpage.h"    // L-W: the --for --limit=N file page, coverage=, the thin rule and the widening next=
+#include "foranswerfirst.h" // ITEM R: a finished --for answer serves its ANSWER first (a permutation)
 #include "forbudgetfit.h" // TOKEN-BUDGET-MONOTONE: a budget sheds the unbudgeted answer, it never re-decides its posture
 #include "forowner.h"   // the question's owner (owner-hop's found set) and the one owner body of an explanatory question
 #include "forfold.h"    // body-fold: the whole bodies of the top ranked rows, appended to a compact-route answer
@@ -5605,6 +5606,35 @@ std::optional<int> runForLens( const MainDispatch& d )
     if( forBudgetFitsAfterPosture( d ) )
     {
         return runForLensFitted( d );
+    }
+    // ITEM R (docs/EVALS.md amendment 8): the DEFAULT path buffers its answer so the permutation can run on a
+    // finished document. The budgeted path above already buffers through renderForPostureCaptured, so this
+    // reuses proven machinery rather than inverting any dependency. Measured: 0 of 216 recorded cells passed
+    // --token-budget, so the default path is where every one of them lives.
+    //
+    // A capture that cannot be taken is NOT an error: the answer is written straight through, unpermuted and
+    // complete. Only the reordering is missed, so this degrades to 0.6.x behaviour rather than to a failure.
+    if( !rw::answerfirst::legacyOrderAsked() )
+    {
+        ForPostureRender r = renderForPostureCaptured( d );
+        replayForPostureNotices( r );
+        // capturedWhole() is the house predicate and the only correct one here: `restored` means the capture
+        // SUCCEEDED and handed its bytes back. An earlier version of this branch read `!restored`, the exact
+        // inverse, so the permutation never ran and the answer fell through to the write-it-anyway path
+        // below — a complete, unpermuted answer and a silently dead feature.
+        if( r.stdoutCaptured && capturedWhole( r.out ) )
+        {
+            std::string doc = r.out->bytes;
+            (void)rw::answerfirst::answerFirst( doc );
+            std::fwrite( doc.data(), 1, doc.size(), stdout );
+            return r.rc;
+        }
+        if( r.out && !r.out->bytes.empty() )
+        {
+            std::fwrite( r.out->bytes.data(), 1, r.out->bytes.size(), stdout );
+            return r.rc;
+        }
+        DISCLOSE( "runForLens: no whole capture for the default answer — serving it unpermuted" );
     }
     return runForLensPosture( d, nullptr );
 }
