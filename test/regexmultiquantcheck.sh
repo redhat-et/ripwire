@@ -345,9 +345,10 @@ safeCase "a{1,4}?b{1,4}? (lazy BOUNDED intervals — bounded atoms are never par
 # binaries before any change. Two FALSE-POSITIVE classes, one per clause, both now closed with the review's
 # own thresholds:
 #   • CLAUSE 1 refused ANY adjacent intersecting pair. In a 900-regex agent sample 9 (1%) were cross-set
-#     pairs (`import\s+.*from`, `TODO:\s*.*`, `ERROR.*\d+`, `\w+.*`, `=\s*[^;]+;`, `^#+.*`) that cost a
-#     constant factor on ordinary lines (measured: sub-millisecond) — the family's real exponent lives in
-#     SAME-SET pairs (`a*a*`, per-byte split) and in runs of 3+ intersecting atoms (degree (atoms-1)).
+#     pairs (`import\s+.*from`, `TODO:\s*.*`, `ERROR.*\d+`, `\w+.*`, `=\s*[^;]+;`, `^#+.*`) that cost close
+#     to their one-quantifier rewrite on ordinary lines (measured: sub-millisecond). On a uniform run a
+#     cross-set pair costs what a same-set pair does (both polynomial), so the split is a POLICY: a SAME-SET
+#     pair (`a*a*`) always has a one-atom rewrite, and a run of 3+ intersecting atoms raises the degree.
 #     The rule now fires on: same-set PAIR, or any 3-run. All six sample patterns re-admitted, below.
 #   • CLAUSE 2 counted `?` as a nesting repeat. `(https?://(www\.|www2\.)?)?example`, the access-modifier
 #     prefix `(((public|private)\s+)?static\s+)?void` and — the proof the workaround was dead —
@@ -360,7 +361,7 @@ safeCase "a{1,4}?b{1,4}? (lazy BOUNDED intervals — bounded atoms are never par
 # The three section-3 shapes keep their refusals: `a*b*c*` is admitted today (disjoint sets), and its
 # comment in the source (which claimed the opposite) is fixed with this round.
 shapeCase "group-list (a*)(a*)(a*)(a*)(a*)b (transparent unquantified groups, review item 3)" '(a*)(a*)(a*)(a*)(a*)b' "$FIX/i"
-safeCase "import\s+.*from (cross-set intersecting PAIR — constant factor, review blocker 1)" 'import\s+.*from'
+safeCase "import\s+.*from (cross-set intersecting PAIR — admitted by policy, review blocker 1)" 'import\s+.*from'
 safeCase "TODO:\s*.* (cross-set pair, single second atom)" 'TODO:\s*.*'
 safeCase "ERROR.*\d+ (cross-set pair, escape-vs-any)" 'ERROR.*\d+'
 safeCase "\w+.* (the review's own listed pair)" '\w+.*'

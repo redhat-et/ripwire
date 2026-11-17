@@ -14,9 +14,13 @@ are now refused by name, bounded, before any engine sees the pattern:
 
 **Proportionality** (the review round, measured and adopted): clause 1 no longer refuses any adjacent
 intersecting pair — a *same-set* pair (`a*a*`, `.*.*`, `\w+\w+`) refuses, and *three or more* intersecting
-atoms in a row refuse as degree-(atoms−1) growth; a cross-set pair (`\s+.*`, `\w+.*`) costs a constant factor
-on ordinary source lines (measured: sub-millisecond, and on a 4 KB minified line the rewrite `\w.*TODO`
-costs 413 ms against `\w+.*TODO`'s 898 ms — the same order) and is admitted. Nine patterns in a 900-regex
+atoms in a row refuse as degree-(atoms−1) growth; a cross-set pair (`\s+.*`, `\w+.*`) is admitted. That
+split is a policy, not a cost class: every such run is polynomial, not exponential, and on a uniform run a
+cross-set pair costs what a same-set pair does (libstdc++, a 320-byte run: `\w+.*b` 133 ms, `a*a*b` 133 ms,
+the rewrite `\w.*b` 1.2 ms). A same-set pair always has a one-atom rewrite with the same language; a
+cross-set pair is common and costs close to its rewrite on ordinary source lines (measured: sub-millisecond,
+and on a 4 KB minified line the rewrite `\w.*TODO` costs 413 ms against `\w+.*TODO`'s 898 ms — the same
+order). Nine patterns in a 900-regex
 agent sample (1%) were such pairs (`import\s+.*from`, `TODO:\s*.*`, `ERROR.*\d+`, `\w+.*`, `=\s*[^;]+;`,
 `^#+.*`); all are re-admitted, and the refusal message now names the pair rewrite — drop one quantifier
 (`import\s.*from`), same hits on ordinary source lines. An unquantified group is transparent to the walk
@@ -25,8 +29,11 @@ inside a character class it cannot parse (`[[:alpha:]*.*.*]` is a class, not an 
 POSIX-aware — a bracket form (`[:alpha:]`, `[.x.]`, `[=x=]`) owns a `]` of its own, and the scan closes the
 class only past its terminator. Clause 2 no
 longer counts an *optional* (`?`, `{0,1}`) as one of its two repeats — `(https?://(www\.|www2\.)?)?example`
-and `(((public|private)\s+)?static\s+)?void` measured sub-0.1 ms and are re-admitted; `((a|aa){2,5}){2,5}b$`
-keeps its refusal, because a bounded *repeat* is a repeat.
+and `(((public|private)\s+)?static\s+)?void` measured sub-0.1 ms and are re-admitted, and neither does an
+optional OUTER quantifier (`((www|www2){1,5}\.)?example` is admitted); `((a|aa){2,5}){2,5}b$` keeps its
+refusal, because a bounded *repeat* is a repeat, and clause 2's refusal now carries a workaround of its own
+(drop one of the two repeats, or make the branches provably disjoint) instead of "bound the outer
+quantifier", which its outer already is.
 
 What this means in practice: these patterns used to reach the engine, where libc++ abandons the match
 (`error_complexity`) and libstdc++ has no budget at all and simply does not return. The verdict is now one

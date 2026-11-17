@@ -791,11 +791,14 @@ inline std::string catastrophicRegexAdjacentMessage( const std::string& pat, std
                           "proven disjoint ('" ) + pat + "', at byte " + std::to_string( at ) + "). "
              "Each atom repeats without bound and the split of the input between them is a separate path, so a "
              "candidate line that does not match costs time that grows with its length on every engine — "
-             "exponential for a same-set run (a*a*a*), polynomial of degree (atoms-1) for the rest — the k atoms "
-             "give degree (k-1). An intersecting PAIR is refused only when its two atoms carry the SAME set "
-             "(a*a*, .*.*, \\w+\\w+ — the split is per byte, so the paths multiply per length); a pair whose "
-             "sets merely intersect (\\s+.*, \\w+.*, [a-z]+.*) costs a constant factor, and THREE OR MORE "
-             "intersecting atoms in a row are refused as (atoms-1)-degree growth. The screen can prove two "
+             "polynomially, of degree (k-1) in the splits for k atoms in a row, whether or not the sets are the "
+             "same (libstdc++, a 320-byte run: 'a*a*b' 133 ms, '\\w+.*b' 133 ms, the one-quantifier '\\w.*b' "
+             "1.2 ms). Which runs refuse is a policy, not a cost class: a PAIR is refused when its two atoms "
+             "carry the SAME set (a*a*, .*.*, \\w+\\w+), because it always has a one-atom rewrite with the same "
+             "language and is rare in real searches; a pair whose sets merely intersect (\\s+.*, \\w+.*, "
+             "[a-z]+.*) is admitted, because it is common and on ordinary source lines costs close to its "
+             "one-quantifier rewrite; and THREE OR MORE intersecting atoms in a row are refused, because each "
+             "further atom raises the degree. The screen can prove two "
              "atoms disjoint only when both are single width-one characters or classes and their character sets "
              "do not intersect, and it must return ONE verdict on two standard libraries that disagree about the "
              "cost, so it refuses rather than answer differently per platform. Workaround: make the atoms one "
@@ -1066,15 +1069,18 @@ inline std::optional<std::string> regexCloseGroup( const std::string& pat, std::
 // The other half of the family, and neither arm above can see it. `a*a*a*a*` is five quantified atoms side by
 // side at TOP level, where there is no group at all; `^(a)*(a)*(a)*(a)*(a)*$` is the same adjacency one level
 // down, where the quantified GROUPS are siblings. Both let the input be split between the quantifiers in
-// exponentially (resp. polynomially) many ways, and both are invisible to a screen whose only question is "does
-// a group close under an unbounded quantifier".
+// polynomially many ways — degree (k-1) for k atoms, retried from every start offset — and both are invisible
+// to a screen whose only question is "does a group close under an unbounded quantifier".
 //
 // THE PROOF IS THE SAME ONE THE ALTERNATION ARM USES, applied to adjacency instead of branches: each atom's
 // character set is read with regexCharSetOfSingleCharBranch — the width-one, no-quantifier reader — and where a
 // set cannot be read the atom is not a participant (it neither accuses nor exonerates). Adjacent participants
 // whose sets INTERSECT enter the run below; a run of TWO carries the SAME set refuses, and a run of THREE OR
-// MORE intersecting atoms refuses — one or two mere intersections are a constant factor and are admitted
-// (the #484 review's proportional relaxation; the message names both thresholds).
+// MORE intersecting atoms refuses — a cross-set PAIR is admitted (the #484 review's proportional relaxation;
+// the message names both thresholds). That split is a POLICY, not a cost class: on a uniform run a cross-set
+// pair costs what a same-set pair does (both are degree 1 in the splits; measured equal on libstdc++), but a
+// same-set pair always has a one-atom rewrite with the same language and is rare, while a cross-set pair is
+// common and costs close to its one-quantifier rewrite on ordinary source lines.
 //
 // WHY ADJACENCY AND NOT "ANY TWO IN THE SCOPE": `ab*c` has one quantified atom, fine; `a*b*c*` is ADMITTED —
 // its three atoms' sets are pairwise DISJOINT (a vs b vs c), the split between them is forced at the letters,
@@ -1087,8 +1093,8 @@ inline std::optional<std::string> regexCloseGroup( const std::string& pat, std::
 // so only UNBOUNDED quantified atoms are participants. Measured basis: shape (i) and (ii) are unbounded
 // (`a*`), and the bounded-outer family is clause 2's business.
 // TRUE-set equality, the pair-fire gate of the #484 relaxation: `a*a*` / `.*.*` / `\w+\w+` refuse as a PAIR
-// (same-set: the split is per byte, paths multiply per length), while a pair that merely INTERSECTS
-// (`\s+.*`, `\w+.*`) is a constant factor and waits for a third intersecting atom. Dense-set equality on the
+// (same-set: a one-atom rewrite with the same language always exists), while a pair that merely INTERSECTS
+// (`\s+.*`, `\w+.*`) is admitted by policy and waits for a third intersecting atom. Dense-set equality on the
 // three fields RegexCharSet carries — no shortcuts, because a "subset implies equal enough" guess here would
 // re-refuse the very pairs the relaxation admits.
 inline bool regexCharSetsIdentical( const RegexCharSet& a, const RegexCharSet& b )
@@ -1141,10 +1147,10 @@ inline std::optional<std::size_t> regexAdjacentAmbiguousQuantifierAt( const std:
     for( const auto& scope : scopes )
     {
         // THE RUN, NOT THE PAIR — the #484 review's proportional relaxation. A same-set PAIR (`a*a*`, `.*.*`,
-        // `\w+\w+`) is refused: the split between same-set quantifiers is per byte, so the paths multiply per
-        // length. A pair whose sets merely INTERSECT (`\s+.*`, `\w+.*` — the `import\s+.*from` / `TODO:\s*.*`
-        // class) costs a constant factor on ordinary lines and is ADMITTED; three-or-more consecutive
-        // intersecting participants are (atoms-1)-degree growth and refuse. A participant DISJOINT from the
+        // `\w+\w+`) is refused: it has a one-atom rewrite with the same language. A pair whose sets merely
+        // INTERSECT (`\s+.*`, `\w+.*` — the `import\s+.*from` / `TODO:\s*.*` class) is common, costs close to
+        // its one-quantifier rewrite on ordinary lines, and is ADMITTED; three-or-more consecutive intersecting
+        // participants raise the degree to (atoms-1) and refuse. A participant DISJOINT from the
         // previous one resets the run to itself; a non-participant atom (literal, bounded, anchor) resets it
         // to empty — the same "break" the pair walk always took, now run-shaped.
         RegexCharSet previous;
@@ -1157,7 +1163,7 @@ inline std::optional<std::size_t> regexAdjacentAmbiguousQuantifierAt( const std:
             {
                 ++intersectRun;
                 sameSetPair = regexCharSetsIdentical( previous, member );
-                if( sameSetPair && intersectRun >= 2 )  { return true; }   // same-set pair: exponential
+                if( sameSetPair && intersectRun >= 2 )  { return true; }   // same-set pair: a one-atom rewrite exists
                 if( intersectRun >= 3 )                  { return true; }   // intersecting run: degree (atoms-1)
             }
             else
@@ -1425,7 +1431,7 @@ inline std::optional<std::string> catastrophicRegexConstruct( const std::string&
 //
 //   CLAUSE 1 (repetition scope). Two or more quantified atoms ADJACENT within one repetition scope whose
 //   character sets are not provably disjoint. `a*a*a*` is the canonical member: the atoms are the SAME set, so
-//   the input can be split between the quantifiers in exponentially many ways. `^(a)*(a)*(a)*` is the same
+//   the input can be split between the quantifiers in polynomially many ways, degree (k-1) for k atoms. `^(a)*(a)*(a)*` is the same
 //   adjacency one level in — the quantified groups are siblings in one scope. Adjacency is what makes it
 //   decidable without semantics: `ab*c` has ONE quantified atom in its scope and is admitted; `foo.*bar` has
 //   `.*` alone and is admitted.
