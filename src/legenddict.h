@@ -623,6 +623,12 @@ struct HeadReduction
 {
     std::vector<std::size_t> touched;
     std::vector<std::string> residual;
+    // ITEM D: the same survivors as `residual`, but ONE ENTRY PER HEAD COMMENT and in document order (empty where the
+    // dictionary covered that comment whole). The ref posture moves every survivor to the tail, so a flat list is all it
+    // needs; the dict posture keeps each survivor WHERE IT WAS and needs the positions. Filled here rather than in a
+    // second walk because an extracted copy of this loop is a clone of it -- quality-delta scored exactly that, gating,
+    // when this was first written as its own function.
+    std::vector<std::string> perComment;
 };
 
 // THE compact legend, rebuilt from its parts — it must be byte-identical to what compactlegend.h wrote, or nothing is
@@ -723,12 +729,17 @@ inline std::optional<HeadReduction> reduceHead( std::string_view view, const Ref
     for( const Span& c : s.head )
     {
         const std::string_view comment = view.substr( c.begin, c.end - c.begin );
-        const bool isLegend = s.spec != nullptr && comment.starts_with( compactOpener );
+        const bool             isLegend = s.spec != nullptr && comment.starts_with( compactOpener );
+        const std::size_t      before   = r.residual.size();
         if( !( isLegend ? reduceCompactLegend( comment, view, s, session, r ) : reduceOtherComment( comment, s, forOrder, session, r ) ) )
         {
             return std::nullopt;
         }
+        std::string mine;
+        for( std::size_t k = before; k < r.residual.size(); ++k ) { mine += r.residual[ k ]; }
+        r.perComment.push_back( std::move( mine ) );
     }
+    ENSURES( r.perComment.size() == s.head.size(), "one reduced text per head comment, in document order" );
     return r;
 }
 
@@ -879,36 +890,7 @@ inline RefOutcome applyDictPosture( std::string& doc )
     {
         return RefOutcome::NotApplicable;   // reduceHead disclosed why; the inline answer is correct and complete
     }
-    // The reduced text of each head comment, in document order: empty where the dictionary covered the whole comment.
-    // reduceHead returns residual as a flat list, so it is re-walked here to keep each survivor WHERE IT WAS; moving a
-    // data comment to the tail would be a change this posture does not claim to make.
-    std::vector<std::string> replacement;
-    {
-        const std::string compactOpener = shape->spec != nullptr ? compactLegendOpener( *shape->spec ) : std::string();
-        std::vector<std::size_t> forOrder;
-        if( shape->isFor )
-        {
-            for( std::size_t k = 0; k < kForCount; ++k ) { forOrder.push_back( kForBase + k ); }
-            for( const std::uint16_t t : compactPresentTerms( compactDocHead( view, shape->root ), view ) ) { forOrder.push_back( kTermBase + t ); }
-            std::sort( forOrder.begin(), forOrder.end(), []( std::size_t a, std::size_t b )
-                       { return entryBody( a ).size() != entryBody( b ).size() ? entryBody( a ).size() > entryBody( b ).size() : a < b; } );
-        }
-        for( const detail::Span& c : shape->head )
-        {
-            const std::string_view comment = view.substr( c.begin, c.end - c.begin );
-            detail::HeadReduction  one;
-            if( shape->spec != nullptr && comment.starts_with( compactOpener ) )
-            {
-                replacement.emplace_back();   // the compact legend, whole: the dictionary holds every clause of it
-                continue;
-            }
-            if( !detail::reduceOtherComment( comment, *shape, forOrder, session, one ) )
-            {
-                return RefOutcome::NotApplicable;
-            }
-            replacement.push_back( one.residual.empty() ? std::string() : one.residual.front() );
-        }
-    }
+    const std::vector<std::string>& replacement = head->perComment;
     std::string out;
     out.reserve( doc.size() );
     std::size_t copied = 0;
