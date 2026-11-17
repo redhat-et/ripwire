@@ -2391,7 +2391,7 @@ struct IngestResult
     //    the LABELED spelling `<label>/<root-relative-path>` (the identity every surface emits) and
     //    realPaths hold the on-disk crawl spelling (what any fopen/stat must use — see diskPath below).
     std::vector<std::string>   realPaths;    // fileId → on-disk path (empty ⇒ ing.files ARE the disk paths)
-    std::vector<std::uint32_t> fileRoot;     // fileId → root index (canonical label order)
+    std::vector<std::uint32_t> fileRoot;     // fileId → root index (canonical `<label>/` order)
     std::vector<std::string>   rootLabels;   // root index → label (shortest unique whole-segment suffix)
     std::vector<std::string>   rootPaths;    // root index → the root path as passed (post-dedupe)
     std::vector<std::string>   rootReals;    // root index → realpath (cross-root include probes, git -C)
