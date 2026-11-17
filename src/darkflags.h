@@ -1747,19 +1747,15 @@ inline bool shellSeparator( char c, std::size_t col, std::uint32_t lineNo, Shell
 {
     ShellScan::Frame& f = st.frames.back();
     if( c == '(' && f.parens > 0 ) { ++f.parens; }
-    if( c == ')' && f.parens > 0 )
+    if( c == ')' && f.parens > 0 && --f.parens == 0 && st.frames.size() > 1 )
     {
-        --f.parens;
-        if( f.parens == 0 && st.frames.size() > 1 )
+        shellCommitPending( st, f, fh, lineNo, col );
+        if( f.isSubshell )
         {
-            shellCommitPending( st, f, fh, lineNo, col );
-            if( f.isSubshell )
-            {
-                shellCloseSubshell( f, fh, lineNo, col );
-            }
-            st.frames.pop_back();
-            return true;
+            shellCloseSubshell( f, fh, lineNo, col );
         }
+        st.frames.pop_back();
+        return true;
     }
     f.atWordStart = true;
     if( f.isDblTest )
@@ -2155,10 +2151,6 @@ inline std::optional<std::string> readWhole( const std::string& path )
     {
         out.append( buf, n );
         if( out.size() > kMaxFlagFileBytes ) { std::fclose( fp ); return std::nullopt; }
-        if( n < sizeof( buf ) )
-        {
-            break;   // fread came back short: end of file or an error. No read after it (after an error the position is indeterminate)
-        }
     }
     std::fclose( fp );
     return out;
