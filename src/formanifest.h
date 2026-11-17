@@ -821,11 +821,17 @@ inline constexpr auto kManifestStopWords = std::to_array<std::string_view>( { "t
 inline constexpr auto kManifestGenericNames = std::to_array<std::string_view>( { "test", "testing", "example", "demo", "doc", "lib", "src", "main", "index", "app", "util", "common", "core", "type", "build",
                                                                                  "dev", "default", "internal", "api", "cli", "server", "client", "shared", "tool", "script", "config", "base", "helper", "web", "node" } );
 
-// The words of one task token: each run of letters and digits, and the token folded whole when it is hyphenated or dotted.
+// The extension of a file name a task spells (`book.toml`, `package.json`, `setup.cfg`): it names the file's format, not a package or
+// dependency, so it is no task word (mdbook-02: "renderers are selected from book.toml" printed the `toml` dependency rows).
+inline constexpr auto kManifestFileNameExts = std::to_array<std::string_view>( { "toml", "json", "yaml", "yml", "cfg", "ini", "lock", "xml", "txt" } );
+
+// The words of one task token: each run of letters and digits, and the token folded whole when it is hyphenated or dotted. A dotted
+// token's last run is dropped when it is a file name's extension (kManifestFileNameExts); its stem and folded form stay.
 template<class Add>
 inline void splitTaskToken( std::string_view tok, Add&& add )
 {
     std::string part, folded;
+    char lastSep = 0; // the last non-alphanumeric byte after a run: '.' before the final run makes it an extension
     for( const char c : tok )
     {
         const bool alnum = ( c >= 'a' && c <= 'z' ) || ( c >= '0' && c <= '9' );
@@ -833,6 +839,7 @@ inline void splitTaskToken( std::string_view tok, Add&& add )
         part += alnum ? std::string( 1, c ) : std::string();
         if( !alnum && !part.empty() )
         {
+            lastSep = c;
             add( std::exchange( part, std::string() ) );
         }
     }
@@ -840,7 +847,8 @@ inline void splitTaskToken( std::string_view tok, Add&& add )
     {
         add( folded );
     }
-    if( !part.empty() )
+    const bool fileExt = lastSep == '.' && std::ranges::contains( kManifestFileNameExts, part );
+    if( !part.empty() && !fileExt )
     {
         add( part );
     }
