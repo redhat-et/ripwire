@@ -37,7 +37,7 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 # ── (A1) no stated language: the LADDER fronts — widget.rs's trait is the top rung (Interface 4); the
 #    cpp fn (2) cannot ride the census any more (that lifting is what this commit removes). The head
 #    rung stands alone, so the majority tie-break is never asked: the root is SILENT.
-A1="$( "$BIN" --around=Shape "$FIX" 2>/dev/null )"
+A1="$( "$BIN" --around=Shape "$FIX" 2>/dev/null )"   # status: a failed run prints no row, and the positive match on it below then fails the arm
 A1R="$( printf '%s' "$A1" | grep -m1 -o '<r [^>]*>' )"
 first="$( printf '%s' "$A1" | grep -m1 -o '<s [^>]*' )"
 case "$first" in
@@ -53,11 +53,11 @@ case "$first" in
 esac
 
 # ── (A2/A3) @lang suffix: explicit anchor is exact-tier, byte-pinned per family ─────────────────────
-A2="$( "$BIN" --around=Shape@rs "$FIX" 2>/dev/null | grep -m1 -o '<s [^>]*' )"
-A2F="$( "$BIN" --around=Shape@rs "$FIX" 2>/dev/null | grep -m1 -o '<f p="[^"]*"' )"
+A2="$( "$BIN" --around=Shape@rs "$FIX" 2>/dev/null | grep -m1 -o '<s [^>]*' )"   # status: a failed run prints no row, and the positive match on it below then fails the arm
+A2F="$( "$BIN" --around=Shape@rs "$FIX" 2>/dev/null | grep -m1 -o '<f p="[^"]*"' )"   # status: a failed run prints no row, and the positive match on it below then fails the arm
 case "$A2$A2F" in *'t="iface"'*'p="widget.rs"'*) ok "(A2) Shape@rs pins the Rust trait exact-first" ;;
                                                   *) no "(A2) Shape@rs wrong: $A2 | $A2F" ;; esac
-A3="$( "$BIN" --around=Shape@c "$FIX" 2>/dev/null | grep -m1 -o '<f p="[^"]*"><s [^>]*' )"
+A3="$( "$BIN" --around=Shape@c "$FIX" 2>/dev/null | grep -m1 -o '<f p="[^"]*"><s [^>]*' )"   # status: a failed run prints no row, and the positive match on it below then fails the arm
 case "$A3" in *'p="widget.c"><s t="cls"'*) ok "(A3) Shape@c anchors to C — the struct (class-bucketed by the C grammar, measured) is exact regardless of rank" ;;
                                                   *) no "(A3) Shape@c wrong: $A3" ;; esac
 
@@ -73,7 +73,7 @@ fi
 
 # ── (A5) foreign fallback is DISCLOSED, never a silent cross-language pick ──────────────────────────
 A5E="$( "$BIN" --around=Extra@cpp "$JVM" 2>&1 >/dev/null )"; A5RC=$?
-A5S="$( "$BIN" --around=Extra@cpp "$JVM" 2>/dev/null | grep -m1 -o '<s [^>]*' )"
+A5S="$( "$BIN" --around=Extra@cpp "$JVM" 2>/dev/null | grep -m1 -o '<s [^>]*' )"   # status: a failed run prints no row, and the positive match on it below then fails the arm
 if [ "$A5RC" = 0 ] && printf '%s' "$A5E" | grep -q 'holds no definition' \
    && case "$A5S" in *'n="Extra"'*) true ;; *) false ;; esac; then
     ok "(A5) cpp-anchored Extra: fallback served AND said ('holds no definition')"
@@ -85,7 +85,7 @@ fi
 #    while Kotlin's interface shares class_declaration (queries/kotlin/tags.scm) as Class (3) — the ladder
 #    therefore fronts JAVA for a bare Marker, and the kt majority is never consulted: silent root. kt
 #    users state it — (A6b) is the other path of the same rule.
-A6="$( "$BIN" --around=Marker "$JVM" 2>/dev/null )"
+A6="$( "$BIN" --around=Marker "$JVM" 2>/dev/null )"   # status: a failed run prints no row, and the positive match on it below then fails the arm
 A6R="$( printf '%s' "$A6" | grep -m1 -o '<r [^>]*>' )"
 A6F="$( printf '%s' "$A6" | grep -m1 -o '<f p="[^"]*"' )"
 case "$A6F" in *'p="jv/Marker.java"'*)
@@ -94,13 +94,13 @@ case "$A6F" in *'p="jv/Marker.java"'*)
         *) ok "(A6) bare Marker fronts jv/Marker.java on the interface rung; kt majority silent" ;;
     esac ;;
     *) no "(A6) Marker front wrong (want jv by rung, kt only via @kt): $A6F" ;; esac
-A6K="$( "$BIN" --around=Marker@kt "$JVM" 2>/dev/null | grep -m1 -o '<f p="[^"]*"' )"
+A6K="$( "$BIN" --around=Marker@kt "$JVM" 2>/dev/null | grep -m1 -o '<f p="[^"]*"' )"   # status: a failed run prints no row, and the positive match on it below then fails the arm
 case "$A6K" in *'p="kt/Marker.kt"'*) ok "(A6b) Marker@kt states the language and kt fronts — the stated path of the rule" ;;
                                      *) no "(A6b) @kt did not front kt: $A6K" ;; esac
 
 # ── (A7) determinism x2 on the anchor-bearing outputs (house pattern) ──────────────────────────────
-"$BIN" --around=Shape "$FIX" > /dev/null 2>&1
-d1="$( "$BIN" --around=Shape "$FIX" 2>/dev/null )"; d2="$( "$BIN" --around=Shape "$FIX" 2>/dev/null )"
+"$BIN" --around=Shape "$FIX" > /dev/null 2>&1   # status: a warm-up run; the two runs on the next line are the ones compared
+d1="$( "$BIN" --around=Shape "$FIX" 2>/dev/null )"; d2="$( "$BIN" --around=Shape "$FIX" 2>/dev/null )"   # status: -n "$d1" below fails on a run that printed nothing
 if [ -n "$d1" ] && [ "$d1" = "$d2" ]; then ok "(A7) --around byte-stable x2"; else no "(A7) anchor output not deterministic"; fi
 
 # ── (A8) "?" is the DISPLAY fallback, not vocabulary: Shape@? refuses like any unknown tail (CR #440) ─
@@ -115,16 +115,16 @@ fi
 # ── (A9) a stated @lang must not blind the qualified lane (CR #440; CONTROL pin — the tier-blindness on
 #    scope-bearing canonical ids is real in code but unprovable here: no fixture symbol has a scope,
 #    and adding one moves lines that arms (27)/(A1) pin. This guards the file:name@lang agreement. ────
-A9="$( "$BIN" --around='widget.rs:Shape@rs' "$FIX" 2>/dev/null | grep -m1 -o '<f p="[^"]*"' )"
-A9B="$( "$BIN" --around='widget.rs:Shape' "$FIX" 2>/dev/null | grep -m1 -o '<f p="[^"]*"' )"
+A9="$( "$BIN" --around='widget.rs:Shape@rs' "$FIX" 2>/dev/null | grep -m1 -o '<f p="[^"]*"' )"   # status: a failed run prints no row, and the positive match on it below then fails the arm
+A9B="$( "$BIN" --around='widget.rs:Shape' "$FIX" 2>/dev/null | grep -m1 -o '<f p="[^"]*"' )"   # status: a failed run prints no row, and the positive match on it below then fails the arm
 [ "$A9" = '<f p="widget.rs"' ] && [ "$A9" = "$A9B" ] \
     && ok "(A9) widget.rs:Shape@rs resolves where widget.rs:Shape does — the tail is stripped before the tiers" \
     || no "(A9) @lang tail broke the qualified lane: [$A9] vs [$A9B]"
 
 # ── (A10) same-rung cross-language pair: the majority LANGUAGE breaks the TIE (not a tier), and a tie-break
 #    that actually ordered rows speaks — reflang= + origin=corpus + the pasteable --defs= next ───────────
-A10R="$( "$BIN" --around=same "$FIX2" 2>/dev/null | grep -m1 -o '<r [^>]*>' )"
-A10F="$( "$BIN" --around=same "$FIX2" 2>/dev/null | grep -m1 -o '<f p="[^"]*"' )"
+A10R="$( "$BIN" --around=same "$FIX2" 2>/dev/null | grep -m1 -o '<r [^>]*>' )"   # status: a failed run prints no row, and the positive match on it below then fails the arm
+A10F="$( "$BIN" --around=same "$FIX2" 2>/dev/null | grep -m1 -o '<f p="[^"]*"' )"   # status: a failed run prints no row, and the positive match on it below then fails the arm
 case "$A10F" in
     *'p="z_lib.js"'*)
         case "$A10R" in
@@ -137,8 +137,8 @@ esac
 
 # ── (A11) different rungs decide alone: the js majority must NOT front its rung-2 Function over the
 #    py rung-3 Class — and a ladder win needs no language talk: silent root ───────────────────────────
-A11R="$( "$BIN" --around=rung "$FIX2" 2>/dev/null | grep -m1 -o '<r [^>]*>' )"
-A11F="$( "$BIN" --around=rung "$FIX2" 2>/dev/null | grep -m1 -o '<f p="[^"]*"' )"
+A11R="$( "$BIN" --around=rung "$FIX2" 2>/dev/null | grep -m1 -o '<r [^>]*>' )"   # status: a failed run prints no row, and the positive match on it below then fails the arm
+A11F="$( "$BIN" --around=rung "$FIX2" 2>/dev/null | grep -m1 -o '<f p="[^"]*"' )"   # status: a failed run prints no row, and the positive match on it below then fails the arm
 case "$A11F" in
     *'p="y_rung.py"'*) case "$A11R" in
         *reflang*|*next=*) no "(A11) ladder answered alone (Class rung 3 over Function rung 2) yet the root still discloses: $A11R" ;;
@@ -148,8 +148,8 @@ case "$A11F" in
 esac
 
 # ── (A12) one def, majority anchor active elsewhere: NOTHING was decided about this answer → silent ─────
-A12R="$( "$BIN" --around=pick "$FIX2" 2>/dev/null | grep -m1 -o '<r [^>]*>' )"
-A12F="$( "$BIN" --around=pick "$FIX2" 2>/dev/null | grep -m1 -o '<f p="[^"]*"' )"
+A12R="$( "$BIN" --around=pick "$FIX2" 2>/dev/null | grep -m1 -o '<r [^>]*>' )"   # status: a failed run prints no row, and the positive match on it below then fails the arm
+A12F="$( "$BIN" --around=pick "$FIX2" 2>/dev/null | grep -m1 -o '<f p="[^"]*"' )"   # status: a failed run prints no row, and the positive match on it below then fails the arm
 case "$A12F" in
     *'p="b_pick.py"'*) case "$A12R" in
         *reflang*|*next=*) no "(A12) single-def answer carries a majority reflang it decided nothing with: $A12R" ;;
@@ -161,7 +161,7 @@ esac
 # ── (A13) the stated @lang must scope the Scope::name tier too (the maintainer's `A::f@rs` shape) ───────
 # a_ns.cpp sorts to the LOWER id, so the unscoped tier answer fronts C++ today — the id accident the
 # tag exists to prevent. Expected after the fix: only m.rs answers, with the explicit anchor disclosed.
-A13="$( "$BIN" --around='A::f@rs' "$FIX3" 2>/dev/null )"
+A13="$( "$BIN" --around='A::f@rs' "$FIX3" 2>/dev/null )"   # status: a failed run prints no row, and the positive match on it below then fails the arm
 A13R="$( printf '%s' "$A13" | grep -m1 -o '<r [^>]*>' )"
 if printf '%s' "$A13" | grep -q '<f p="a_ns.cpp"'; then
     no "(A13) A::f@rs still answers C++ — the Scope::name tier returns before the stated scope applies: $( printf '%s' "$A13" | grep -m1 -o '<f p="[^"]*"' )"
@@ -176,8 +176,8 @@ fi
 # plus its legend, on the selector form that already picked the file. The front is the file's own definition
 # either way, so the root is silent; a typed @lang (A13) still shows.
 for A14Q in 'z_lib.js:same' '@z_lib.js:6'; do
-    A14R="$( "$BIN" --around="$A14Q" "$FIX2" 2>/dev/null | grep -m1 -o '<r [^>]*>' )"
-    A14F="$( "$BIN" --around="$A14Q" "$FIX2" 2>/dev/null | grep -m1 -o '<f p="[^"]*"' )"
+    A14R="$( "$BIN" --around="$A14Q" "$FIX2" 2>/dev/null | grep -m1 -o '<r [^>]*>' )"   # status: a failed run prints no row, and the positive match on it below then fails the arm
+    A14F="$( "$BIN" --around="$A14Q" "$FIX2" 2>/dev/null | grep -m1 -o '<f p="[^"]*"' )"   # status: a failed run prints no row, and the positive match on it below then fails the arm
     [ "$A14Q" = 'z_lib.js:same' ] && A14N='(A14)' || A14N='(A15)'
     case "$A14F" in
         *'p="z_lib.js"'*) case "$A14R" in
@@ -192,9 +192,9 @@ done
 # d_low.py and z_low.js both hold `low` as a Function; js is the majority, so z_low.js orders ahead of
 # d_low.py. That is a lower-rung move: the legend says the corpus origin "appears only when one such tie
 # moved the front", and Stage 0 measured +1.65 KB on four large-repo names whose front never moved.
-A16="$( "$BIN" --around=low "$FIX2" 2>/dev/null )"
+A16="$( "$BIN" --around=low "$FIX2" 2>/dev/null )"   # status: a failed run prints no row, and the positive match on it below then fails the arm
 A16R="$( printf '%s' "$A16" | grep -m1 -o '<r [^>]*>' )"
-A16C="$( "$BIN" --callers=low "$FIX2" 2>/dev/null | grep -o '<def ix="[0-9][^>]*>' | tr '\n' ' ' )"
+A16C="$( "$BIN" --callers=low "$FIX2" 2>/dev/null | grep -o '<def ix="[0-9][^>]*>' | tr '\n' ' ' )"   # status: a failed run prints no row, and the positive match on it below then fails the arm
 case "$A16C" in
     *'ix="1" t="cls"'*'p="c_low.py:'*'ix="2"'*'p="z_low.js:'*'ix="3"'*'p="d_low.py:'*)
         case "$A16R" in

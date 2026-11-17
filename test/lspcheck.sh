@@ -88,6 +88,9 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
+# A dialogue that ends on shutdown exits 0. An arm that reads a failed run's frames would compare empty answers, so the
+# task D/E dialogues (27)-(44) test the exit status where they run (LAND-440, the gate-status rule).
+lspRc(){ no "--lsp exited non-zero on dialogue $1: the arm below reads a failed run"; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 
@@ -666,7 +669,7 @@ mkdir -p "$WORK/lof/lib"; cp "$ROOT/test/langorderfix/lib/shape.ex" "$WORK/lof/l
   msg "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\"}"
   msg "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}"
 } > "$WORK/d27"
-"$BIN" --lsp < "$WORK/d27" > "$WORK/raw27" 2>/dev/null
+"$BIN" --lsp < "$WORK/d27" > "$WORK/raw27" 2>/dev/null || lspRc d27
 decodeFrames "$WORK/raw27" > "$WORK/r27" 2>/dev/null
 R60="$( grep '"id":60,' "$WORK/r27" )"
 d_pp="$( printf '%s' "$R60" | grep -bo 'widget\.cpp","range":{"start":{"line":3' | cut -d: -f1 | head -1 )"
@@ -687,7 +690,7 @@ mkdir -p "$WORK/lofb"; cp "$ROOT/test/langorderfix/widget.cpp" "$WORK/lofb/impl.
   msg "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\"}"
   msg "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}"
 } > "$WORK/d28"
-"$BIN" --lsp < "$WORK/d28" > "$WORK/raw28" 2>/dev/null
+"$BIN" --lsp < "$WORK/d28" > "$WORK/raw28" 2>/dev/null || lspRc d28
 decodeFrames "$WORK/raw28" > "$WORK/r28" 2>/dev/null
 n28="$( grep -c 'window/logMessage.*holds no definition' "$WORK/r28" )"
 n28l="$( grep -n 'window/logMessage.*holds no definition' "$WORK/r28" | head -1 | cut -d: -f1 )"
@@ -711,7 +714,7 @@ mkdir -p "$WORK/loexp/lib"; cp "$ROOT/test/langorderfix/lib/shape.ex" "$WORK/loe
   msg "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\"}"
   msg "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}"
 } > "$WORK/d29"
-"$BIN" --lsp < "$WORK/d29" > "$WORK/raw29" 2>/dev/null
+"$BIN" --lsp < "$WORK/d29" > "$WORK/raw29" 2>/dev/null || lspRc d29
 decodeFrames "$WORK/raw29" > "$WORK/r29" 2>/dev/null
 R63="$( grep '"id":63,' "$WORK/r29" )"
 row63="$( printf '%s' "$R63" | grep -o '"name":"Shape"' | wc -l | tr -d ' ' )"
@@ -729,7 +732,7 @@ printf '%s' "$R63" | grep -qF "\"uri\":\"file://$WORK/loexp/widget.rs\"" \
   msg "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\"}"
   msg "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}"
 } > "$WORK/d30"
-"$BIN" --lsp < "$WORK/d30" > "$WORK/raw30" 2>/dev/null
+"$BIN" --lsp < "$WORK/d30" > "$WORK/raw30" 2>/dev/null || lspRc d30
 decodeFrames "$WORK/raw30" > "$WORK/r30" 2>/dev/null
 R64="$( grep '"id":64,' "$WORK/r30" )"
 n64="$( grep -c 'window/logMessage.*unknown language' "$WORK/r30" )"
@@ -753,7 +756,7 @@ printf 'def helper\nend\n' > "$WORK/lotie/one.rb"
   msg "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\"}"
   msg "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}"
 } > "$WORK/d32"
-"$BIN" --lsp < "$WORK/d32" > "$WORK/raw32" 2>/dev/null
+"$BIN" --lsp < "$WORK/d32" > "$WORK/raw32" 2>/dev/null || lspRc d32
 decodeFrames "$WORK/raw32" > "$WORK/r32" 2>/dev/null
 R65="$( grep '"id":65,' "$WORK/r32" )"
 t65py="$( printf '%s' "$R65" | grep -bo 'top\.py' | cut -d: -f1 | head -1 )"
@@ -773,7 +776,7 @@ printf 'def run():\n    return 1\n' > "$WORK/lotie2/a.py"
   msg "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\"}"
   msg "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}"
 } > "$WORK/d32b"
-"$BIN" --lsp < "$WORK/d32b" > "$WORK/raw32b" 2>/dev/null
+"$BIN" --lsp < "$WORK/d32b" > "$WORK/raw32b" 2>/dev/null || lspRc d32b
 decodeFrames "$WORK/raw32b" > "$WORK/r32b" 2>/dev/null
 R66="$( grep '"id":66,' "$WORK/r32b" )"
 t66js="$( printf '%s' "$R66" | grep -bo 'z\.js' | cut -d: -f1 | head -1 )"
@@ -792,7 +795,7 @@ fi
   msg "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\"}"
   msg "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}"
 } > "$WORK/d34"
-"$BIN" --lsp < "$WORK/d34" > "$WORK/raw34" 2>/dev/null
+"$BIN" --lsp < "$WORK/d34" > "$WORK/raw34" 2>/dev/null || lspRc d34
 decodeFrames "$WORK/raw34" > "$WORK/r34" 2>/dev/null
 R66s="$( grep '"id":66,' "$WORK/r34" )"
 printf '%s' "$R66s" | grep -q '"result":\[\]' \
@@ -814,7 +817,7 @@ printf '// a C struct named thing, one family step out and a HIGHER rung\nstruct
   msg "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\"}"
   msg "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}"
 } > "$WORK/d35"
-"$BIN" --lsp < "$WORK/d35" > "$WORK/raw35" 2>/dev/null
+"$BIN" --lsp < "$WORK/d35" > "$WORK/raw35" 2>/dev/null || lspRc d35
 decodeFrames "$WORK/raw35" > "$WORK/r35" 2>/dev/null
 R67d="$( grep '"id":67,' "$WORK/r35" )"
 e_cpp="$( printf '%s' "$R67d" | grep -bo 'thing\.cpp","range":{"start":{"line":0' | cut -d: -f1 | head -1 )"
@@ -834,7 +837,7 @@ e_c="$(   printf '%s' "$R67d" | grep -bo 'thing\.c","range":{"start":{"line":1' 
   msg "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\"}"
   msg "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}"
 } > "$WORK/d36"
-"$BIN" --lsp < "$WORK/d36" > "$WORK/raw36" 2>/dev/null
+"$BIN" --lsp < "$WORK/d36" > "$WORK/raw36" 2>/dev/null || lspRc d36
 decodeFrames "$WORK/raw36" > "$WORK/r36" 2>/dev/null
 R68s="$( grep '"id":68,' "$WORK/r36" )"; R69s="$( grep '"id":69,' "$WORK/r36" )"
 printf '%s' "$R68s" | grep -qF "\"uri\":\"file://$WORK/loexp/widget.cpp\"" \
@@ -863,7 +866,7 @@ lid_tail(){ msg "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\"}"; msg "
   lid_def
   lid_tail
 } > "$WORK/d37"
-"$BIN" --lsp < "$WORK/d37" > "$WORK/raw37" 2>/dev/null
+"$BIN" --lsp < "$WORK/d37" > "$WORK/raw37" 2>/dev/null || lspRc d37
 decodeFrames "$WORK/raw37" > "$WORK/r37" 2>/dev/null
 R71c="$( grep '"id":71,' "$WORK/r37" )"
 first37="$( printf '%s' "$R71c" | grep -o '"uri":"[^"]*"' | head -1 )"
@@ -878,7 +881,7 @@ printf '%s' "$R71c" | grep -q 'shape.c' && [ "$first37" = "\"uri\":\"file://$WOR
   lid_def
   lid_tail
 } > "$WORK/d39"
-"$BIN" --lsp < "$WORK/d39" > "$WORK/raw39" 2>/dev/null
+"$BIN" --lsp < "$WORK/d39" > "$WORK/raw39" 2>/dev/null || lspRc d39
 decodeFrames "$WORK/raw39" > "$WORK/r39" 2>/dev/null
 R71x="$( grep '"id":71,' "$WORK/r39" )"
 {
@@ -887,7 +890,8 @@ R71x="$( grep '"id":71,' "$WORK/r39" )"
   lid_def
   lid_tail
 } > "$WORK/d39b"
-R71plain="$( "$BIN" --lsp < "$WORK/d39b" 2>/dev/null > "$WORK/raw39b"; decodeFrames "$WORK/raw39b" | grep '"id":71,' )"
+"$BIN" --lsp < "$WORK/d39b" 2>/dev/null > "$WORK/raw39b" || lspRc d39b
+R71plain="$( decodeFrames "$WORK/raw39b" | grep '"id":71,' )"
 [ "$R71x" = "$R71plain" ] \
     && ok "(39) languageId Cobol: byte-identical to the empty declaration — an unmappable id is no hint" \
     || { no "(39) unknown languageId changed the answer"; printf '%s\n' "$R71x" | head -c 200; }
@@ -899,7 +903,7 @@ R71plain="$( "$BIN" --lsp < "$WORK/d39b" 2>/dev/null > "$WORK/raw39b"; decodeFra
   msg "{\"jsonrpc\":\"2.0\",\"id\":73,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"Shape@rs\"}}"
   lid_tail
 } > "$WORK/d40"
-"$BIN" --lsp < "$WORK/d40" > "$WORK/raw40" 2>/dev/null
+"$BIN" --lsp < "$WORK/d40" > "$WORK/raw40" 2>/dev/null || lspRc d40
 decodeFrames "$WORK/raw40" > "$WORK/r40" 2>/dev/null
 R73="$( grep '"id":73,' "$WORK/r40" )"
 files40="$( printf '%s' "$R73" | grep -o '"uri":"[^"]*"' | sort -u | wc -l | tr -d ' ' )"   # files touched, not rows: the Rust trait alone carries 3 Shape defs
@@ -920,8 +924,8 @@ printf '%s' "$R73" | grep -qF "widget.rs" && [ "$files40" = 1 ] \
   msg "{\"jsonrpc\":\"2.0\",\"id\":74,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"Shape\"}}"
   lid_tail
 } > "$WORK/d41b"
-"$BIN" --lsp < "$WORK/d41" 2>/dev/null > "$WORK/raw41"; decodeFrames "$WORK/raw41" > "$WORK/r41" 2>/dev/null; A41="$( grep '"id":74,' "$WORK/r41" )"
-"$BIN" --lsp < "$WORK/d41b" 2>/dev/null > "$WORK/raw41b"; decodeFrames "$WORK/raw41b" > "$WORK/r41b" 2>/dev/null; B41="$( grep '"id":74,' "$WORK/r41b" )"
+"$BIN" --lsp < "$WORK/d41" 2>/dev/null > "$WORK/raw41" || lspRc d41; decodeFrames "$WORK/raw41" > "$WORK/r41" 2>/dev/null; A41="$( grep '"id":74,' "$WORK/r41" )"
+"$BIN" --lsp < "$WORK/d41b" 2>/dev/null > "$WORK/raw41b" || lspRc d41b; decodeFrames "$WORK/raw41b" > "$WORK/r41b" 2>/dev/null; B41="$( grep '"id":74,' "$WORK/r41b" )"
 [ -n "$A41" ] && [ "$A41" = "$B41" ] \
     && ok "(41) Shape (no @lang) with a C-declared buffer open: byte-identical to no buffer — the declaration never reaches the picker" \
     || { no "(41) client hint leaked into workspace/symbol"; printf '%s\n' "$A41" | head -c 200; }
@@ -934,7 +938,7 @@ printf 'mycustom-c = "c"\n' > "$WORK/loh-langmap.toml"
   lid_def
   lid_tail
 } > "$WORK/d38"
-"$BIN" --lsp --lsp-langmap="$WORK/loh-langmap.toml" < "$WORK/d38" > "$WORK/raw38" 2>/dev/null
+"$BIN" --lsp --lsp-langmap="$WORK/loh-langmap.toml" < "$WORK/d38" > "$WORK/raw38" 2>/dev/null || lspRc d38
 decodeFrames "$WORK/raw38" > "$WORK/r38" 2>/dev/null
 R38="$( grep '"id":71,' "$WORK/r38" )"
 first38="$( printf '%s' "$R38" | grep -o '"uri":"[^"]*"' | head -1 )"
@@ -949,7 +953,7 @@ first38="$( printf '%s' "$R38" | grep -o '"uri":"[^"]*"' | head -1 )"
   lid_def
   lid_tail
 } > "$WORK/d42"
-"$BIN" --lsp < "$WORK/d42" > "$WORK/raw42" 2>/dev/null
+"$BIN" --lsp < "$WORK/d42" > "$WORK/raw42" 2>/dev/null || lspRc d42
 decodeFrames "$WORK/raw42" > "$WORK/r42" 2>/dev/null
 R7142="$( grep '"id":71,' "$WORK/r42" )"
 {
@@ -957,7 +961,7 @@ R7142="$( grep '"id":71,' "$WORK/r42" )"
   lid_def
   lid_tail
 } > "$WORK/d42b"
-"$BIN" --lsp < "$WORK/d42b" > "$WORK/raw42b" 2>/dev/null
+"$BIN" --lsp < "$WORK/d42b" > "$WORK/raw42b" 2>/dev/null || lspRc d42b
 R7142b="$( decodeFrames "$WORK/raw42b" | grep '"id":71,' )"
 [ -n "$R7142" ] && [ "$R7142" = "$R7142b" ] \
     && ok "(42) didOpen before initialize changes nothing — the record waits for a root, the answer matches the never-opened session" \
@@ -971,7 +975,7 @@ R7142b="$( decodeFrames "$WORK/raw42b" | grep '"id":71,' )"
   lid_def
   lid_tail
 } > "$WORK/d43"
-"$BIN" --lsp < "$WORK/d43" > "$WORK/raw43" 2>/dev/null
+"$BIN" --lsp < "$WORK/d43" > "$WORK/raw43" 2>/dev/null || lspRc d43
 decodeFrames "$WORK/raw43" > "$WORK/r43" 2>/dev/null
 R7143="$( grep '"id":71,' "$WORK/r43" )"
 first43="$( printf '%s' "$R7143" | grep -o '"uri":"[^"]*"' | head -1 )"
@@ -989,7 +993,7 @@ printf 'myroot-c = "c"\n' > "$WORK/loh/.ripwire/lsp-langmap.toml"
   lid_def
   lid_tail
 } > "$WORK/d44"
-"$BIN" "$WORK/loh" --lsp < "$WORK/d44" > "$WORK/raw44" 2>/dev/null
+"$BIN" "$WORK/loh" --lsp < "$WORK/d44" > "$WORK/raw44" 2>/dev/null || lspRc d44
 decodeFrames "$WORK/raw44" > "$WORK/r44" 2>/dev/null
 R7144="$( grep '"id":71,' "$WORK/r44" )"
 first44="$( printf '%s' "$R7144" | grep -o '"uri":"[^"]*"' | head -1 )"
