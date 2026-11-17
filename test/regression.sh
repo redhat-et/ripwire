@@ -292,6 +292,7 @@ for _g in \
     adaptivecheck \
     adaptivecutshapecheck \
     affectedcheck \
+    affectedgroupcheck \
     agentloopclaudecheck \
     agentloopcodexcheck \
     agentloopeditsuitecheck \
