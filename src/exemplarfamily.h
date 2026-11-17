@@ -437,6 +437,7 @@ inline bool inScope( std::string_view dir, std::string_view scope ) noexcept
 inline std::string scopeMembers( const IngestResult& ing, std::vector<ExemplarMember>& ms )
 {
     std::vector<std::string_view> dirs;
+    dirs.reserve( ms.size() );
     for( const ExemplarMember& m : ms )
     {
         dirs.push_back( includerDir( rootRelPath( ing, m.fileId ) ) );
@@ -549,6 +550,7 @@ inline bool memberEligible( const IngestResult& ing, const Symbol& s ) noexcept
 inline void orderTypical( const IngestResult& ing, std::vector<ExemplarMember>& ms )
 {
     std::vector<std::uint32_t> locs;
+    locs.reserve( ms.size() );
     for( const ExemplarMember& m : ms )
     {
         locs.push_back( m.loc );
@@ -619,6 +621,7 @@ inline std::string_view keyExpr( std::string_view k ) noexcept
 inline void nameRegistryEntries( std::vector<ExemplarMember>& ms )
 {
     std::vector<std::string_view> last;
+    last.reserve( ms.size() );
     for( const ExemplarMember& m : ms )
     {
         last.push_back( lastIdent( m.name ) );
@@ -1701,6 +1704,7 @@ inline std::vector<std::uint32_t> unitIdsOf( const std::vector<std::uint64_t>& k
     std::ranges::sort( distinct );
     distinct.erase( std::unique( distinct.begin(), distinct.end() ), distinct.end() );
     std::vector<std::uint32_t> ids;
+    ids.reserve( keys.size() );
     for( const std::uint64_t k : keys )
     {
         ids.push_back( std::uint32_t( std::ranges::lower_bound( distinct, k ) - distinct.begin() ) );

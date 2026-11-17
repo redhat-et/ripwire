@@ -4143,6 +4143,7 @@ inline std::vector<std::pair<int, GrepRawHit>> tableReadsInFiles( const IngestRe
                                                                   const std::string& table, std::span<const std::string_view> parts, TableReaders& out )
 {
     std::vector<std::string> paths;
+    paths.reserve( files.size() );
     for( const std::uint32_t f : files )
     {
         paths.push_back( diskPath( ing, f ) );
