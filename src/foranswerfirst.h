@@ -74,7 +74,38 @@ struct Block
     return v != nullptr && v[0] == '1' && v[1] == '\0';
 }
 
+// The name characters an XML element name is made of. A set lookup rather than a hand-rolled scan loop:
+// quality-delta scored the loop form as a 79-token duplicate of src/query.h's Eval::ident, which is the
+// repo's identifier scanner and has no business being reimplemented here.
+inline constexpr std::string_view kNameChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-";
+
+[[nodiscard]] inline std::string_view elementName( std::string_view doc, std::size_t i, std::size_t j ) noexcept
+{
+    const std::size_t stop = doc.find_first_not_of( kNameChars, i + 1 );
+    return doc.substr( i + 1, ( stop == std::string_view::npos ? j : std::min( stop, j ) ) - ( i + 1 ) );
+}
+
 // Scan the root's top-level children between [bodyBegin, bodyEnd).
+//
+// Hand-rolled, and it must stay that way: --for answers carry ripwire's own C++ inside CDATA, and that
+// source contains BOTH comment-shaped and tag-shaped text (`<!--" + add + "-->` and `<std::string>` are real
+// strings in it). 228 of 295 recorded answers carry CDATA, and an unmasked scan cost another instrument this
+// round an entire 16.9 KB section. A regex here is a defect, not a shortcut.
+// A bracketed span the scanner must step over whole rather than parse: a comment or a CDATA section.
+// Returns the byte just past its terminator, or npos when it is unterminated inside the body.
+[[nodiscard]] inline std::size_t skipBracketed( std::string_view doc, std::size_t i, std::size_t end,
+                                                std::string_view open, std::string_view close ) noexcept
+{
+    if( doc.compare( i, open.size(), open ) != 0 )
+    {
+        return i;   // not this kind of span: the caller tries the next shape
+    }
+    const std::size_t j = doc.find( close, i );
+    return ( j == std::string_view::npos || j + close.size() > end ) ? std::string_view::npos : j + close.size();
+}
+
+// Scan the root's top-level children between [bodyBegin, bodyEnd). Empty means "a shape this pass does not
+// understand", and the caller then serves the answer unchanged.
 //
 // Hand-rolled, and it must stay that way: --for answers carry ripwire's own C++ inside CDATA, and that
 // source contains BOTH comment-shaped and tag-shaped text (`<!--" + add + "-->` and `<std::string>` are real
@@ -87,48 +118,36 @@ struct Block
     std::string_view   name;
     while( i < bodyEnd )
     {
-        if( doc.compare( i, 4, "<!--" ) == 0 )
+        const std::size_t afterComment = skipBracketed( doc, i, bodyEnd, "<!--", "-->" );
+        if( afterComment == std::string_view::npos ) { return {}; }
+        if( afterComment != i )
         {
-            const std::size_t j = doc.find( "-->", i );
-            if( j == std::string_view::npos || j + 3 > bodyEnd ) { return {}; }
-            if( depth == 0 ) { out.push_back( { i, j + 3, true, {} } ); }
-            i = j + 3;
+            if( depth == 0 ) { out.push_back( { i, afterComment, true, {} } ); }
+            i = afterComment;
             continue;
         }
-        if( doc.compare( i, 9, "<![CDATA[" ) == 0 )
+        const std::size_t afterCdata = skipBracketed( doc, i, bodyEnd, "<![CDATA[", "]]>" );
+        if( afterCdata == std::string_view::npos ) { return {}; }
+        if( afterCdata != i ) { i = afterCdata; continue; }
+        if( doc[ i ] != '<' ) { ++i; continue; }   // inter-tag text: minified output has none
+
+        const std::size_t j = doc.find( '>', i );
+        if( j == std::string_view::npos || j >= bodyEnd ) { return {}; }
+        if( doc[ i + 1 ] == '/' )
         {
-            const std::size_t j = doc.find( "]]>", i );
-            if( j == std::string_view::npos || j + 3 > bodyEnd ) { return {}; }
-            i = j + 3;
-            continue;
-        }
-        if( doc.compare( i, 2, "</" ) == 0 )
-        {
-            const std::size_t j = doc.find( '>', i );
-            if( j == std::string_view::npos || j >= bodyEnd || depth == 0 ) { return {}; }
-            --depth;
-            if( depth == 0 ) { out.push_back( { start, j + 1, false, name } ); }
+            if( depth == 0 ) { return {}; }
+            if( --depth == 0 ) { out.push_back( { start, j + 1, false, name } ); }
             i = j + 1;
             continue;
         }
-        if( doc[ i ] == '<' )
+        const bool selfClosing = j > i && doc[ j - 1 ] == '/';
+        if( depth == 0 )
         {
-            const std::size_t j = doc.find( '>', i );
-            if( j == std::string_view::npos || j >= bodyEnd ) { return {}; }
-            const bool        selfClosing = j > i && doc[ j - 1 ] == '/';
-            std::size_t       k           = i + 1;
-            while( k < j && ( std::isalnum( static_cast<unsigned char>( doc[ k ] ) ) || doc[ k ] == '_' || doc[ k ] == '-' ) ) { ++k; }
-            const std::string_view tag = doc.substr( i + 1, k - i - 1 );
-            if( depth == 0 )
-            {
-                if( selfClosing ) { out.push_back( { i, j + 1, false, tag } ); }
-                else              { start = i; name = tag; }
-            }
-            if( !selfClosing ) { ++depth; }
-            i = j + 1;
-            continue;
+            if( selfClosing ) { out.push_back( { i, j + 1, false, elementName( doc, i, j ) } ); }
+            else              { start = i; name = elementName( doc, i, j ); }
         }
-        ++i;   // inter-tag text: minified output has none, but a stray byte must not derail the scan
+        if( !selfClosing ) { ++depth; }
+        i = j + 1;
     }
     return depth == 0 ? out : std::vector<Block>{};
 }
@@ -144,6 +163,24 @@ struct Block
     if( name == "graph_verb" )
     {
         return block.find( "reachable=\"1\"" ) != std::string_view::npos || block.find( "<met_bridge" ) != std::string_view::npos;
+    }
+    return false;
+}
+
+// Would the permutation actually move anything? A comment before a row block, or a resolved routed section
+// sitting behind <sigs>. Separated so answerFirst stays one job: assemble.
+[[nodiscard]] inline bool permutationWouldMove( std::string_view view, const std::vector<Block>& blocks ) noexcept
+{
+    std::size_t sigsAt = blocks.size();
+    for( std::size_t k = 0; k < blocks.size(); ++k )
+    {
+        if( !blocks[ k ].comment && blocks[ k ].name == "sigs" ) { sigsAt = k; break; }
+    }
+    for( std::size_t k = 0; k < blocks.size(); ++k )
+    {
+        const Block& b = blocks[ k ];
+        if( b.comment ) { if( k + 1 < blocks.size() ) { return true; } continue; }
+        if( k > sigsAt && resolvedRouted( view.substr( b.begin, b.end - b.begin ), b.name ) ) { return true; }
     }
     return false;
 }
@@ -165,21 +202,7 @@ inline bool answerFirst( std::string& doc )
     const std::vector<Block> blocks = topLevelBlocks( view, openEnd + 1, closeAt );
     if( blocks.empty() ) { return false; }   // not a shape this pass understands: served unchanged
 
-    // Nothing to do when no comment sits before a row block and no resolved section sits behind <sigs>.
-    std::size_t sigsAt = blocks.size();
-    for( std::size_t k = 0; k < blocks.size(); ++k )
-    {
-        if( !blocks[ k ].comment && blocks[ k ].name == "sigs" ) { sigsAt = k; break; }
-    }
-    bool work = false;
-    for( std::size_t k = 0; k < blocks.size() && !work; ++k )
-    {
-        const bool leadingComment = blocks[ k ].comment && k < blocks.size() - 1;
-        const bool lateResolved   = !blocks[ k ].comment && k > sigsAt
-                                 && resolvedRouted( view.substr( blocks[ k ].begin, blocks[ k ].end - blocks[ k ].begin ), blocks[ k ].name );
-        work = leadingComment || lateResolved;
-    }
-    if( !work ) { return false; }
+    if( !permutationWouldMove( view, blocks ) ) { return false; }
 
     std::string out;
     out.reserve( doc.size() );
