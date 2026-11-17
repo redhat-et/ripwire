@@ -35,7 +35,11 @@
 #   (cr5) a manifest over 4 MiB is not read and makes files= a floor: floor="1" unread="1" (legend-defined, a1), the block still prints
 #   (cr6) a probed go.mod that is a link: inside the root it is read, out of the root it is not (its module never prints) and is counted
 #         in unread=
-#   (cr7) an UNINDEXED setup.cfg's extras give a <feature_touch> (the indexed file naming them)
+#   (cr7) an UNINDEXED setup.cfg's extras give a <feature_touch> (the indexed file naming them); n= the definition holding the line
+#         (main's TOUCH-SYM). Merge of main 2026-11-17: an unindexed manifest's family has no typical directory (was a crash)
+# ARMS (merge of main 2026-11-17)
+#   (b2) a budget the block fits prints it whole; (b3) the budget fit prices <manifest_rows> (kForHeldBlocks) and holds it at 1400
+#   (f4a) a retargeted touch row carries its own line's offset: no n= of the cfg line's holder
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
@@ -430,16 +434,27 @@ has cr5 big "rename the bigdemo package" '<manifest_rows files="1" floor="1" unr
 lacks cr5 big "the huge module" ''
 has cr6 lnk "the innermod module" '<manifest_rows files="1" floor="1" unread="1">' '<r l="1" kind="module">module example.com/innermod</r>'
 lacks cr6 lnk "the secretmod module" ''
-has cr7 xtra "add a new extra like beta" '<mf p="sub/setup.cfg"' '<feature_touch n="3"><touch_list total="1"><touch p="sub/use.py:1" share="3/3">'
+has cr7 xtra "add a new extra like beta" '<mf p="sub/setup.cfg"' '<feature_touch n="3"><touch_list total="1"><touch p="sub/use.py:1" n="EXTRAS" share="3/3">'
 
 # ── caps, dialects, placement ────────────────────────────────────────────────────────────────────────────────────────────────
 has cap1 acme "use the kafkajs dependency in a plugin" '<manifest_rows files="5" shown="3" capped="1">'
 has cap2 acme "add the kafkajs, nats and mqtt dependencies to brokers" '<mf p="packages/brokers/package.json" matched="[^"]*" rows="4" shown="3" capped="1">'
 run acme "--for=add a new broker transport like NATS or MQTT to brokers" --json >"$TMP/j1.json"
 if [ -s "$TMP/j1.json" ] && ! grep -q 'manifest_rows' "$TMP/j1.json"; then ok "(j1) --json carries no block"; else no "(j1) --json"; fi
-run acme "--for=add a new broker transport like NATS or MQTT to brokers" --token-budget=4000 >"$TMP/b1.xml"
+# TOKEN-BUDGET-MONOTONE (main 2026-11-14): a budget holds the block only when the answer plus the block does not fit it; 100 forces the hold
+run acme "--for=add a new broker transport like NATS or MQTT to brokers" --token-budget=100 >"$TMP/b1.xml"
 if grep -q '<manifest_rows files="2" held="budget"/></ctx>$' "$TMP/b1.xml" && ! grep -q '<r l=' "$TMP/b1.xml"; then ok "(b1) a token budget holds the block"
 else no "(b1) budget: $( grep -o '<manifest_rows.*' "$TMP/b1.xml" | head -c 300 )"; fi
+# (b2) a budget the answer and the block fit whole: the block comes back byte for byte
+run acme "--for=add a new broker transport like NATS or MQTT to brokers" >"$TMP/b2u.xml"
+run acme "--for=add a new broker transport like NATS or MQTT to brokers" --token-budget=4000 >"$TMP/b2.xml"
+if [ -n "$( block "$TMP/b2u.xml" )" ] && [ "$( block "$TMP/b2.xml" )" = "$( block "$TMP/b2u.xml" )" ]; then ok "(b2) a budget that fits the block prints it whole"
+else no "(b2) budget 4000: $( grep -o '<manifest_rows.*' "$TMP/b2.xml" | head -c 300 )"; fi
+# (b3) the fit prices <manifest_rows> (forbudgetfit.h kForHeldBlocks): at 1400 the answer alone fits but not with the block, so the
+# re-render holds it; unpriced, the whole answer printed over the budget (red on the merge before manifest_rows joined the list)
+run acme "--for=add a new broker transport like NATS or MQTT to brokers" --token-budget=1400 >"$TMP/b3.xml"
+if grep -q '<manifest_rows files="2" held="budget"/></ctx>$' "$TMP/b3.xml" && ! grep -q '<r l=' "$TMP/b3.xml"; then ok "(b3) the fit prices the block: held at 1400"
+else no "(b3) budget 1400: $( grep -o '<manifest_rows.*' "$TMP/b3.xml" | head -c 300 )"; fi
 run ferris "--for=add a new extractor behind its own cargo feature like multipart" >"$TMP/a1.xml"
 printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"%s","task":"add a new extractor behind its own cargo feature like multipart"}}}\n' "$F/ferris" \
   | ( cd "$F/ferris" || exit 1; "$BIN" --mcp 2>/dev/null ) | python3 -c '
