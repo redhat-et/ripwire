@@ -1295,7 +1295,8 @@ inline std::string manifestRowXml( const ManifestDoc& doc, const ManifestEntry& 
     }
     std::string out = "<r l=\"" + std::to_string( en.line ) + "\" kind=\"" + std::string( kManifestKindTags[std::size_t( en.kind )] ) + "\"";
     out += en.group.empty() ? std::string() : " group=\"" + std::string( escapeXml( en.group, esc ) ) + "\"";
-    out += keep < text.size() ? " cut=\"1\">" : ">";
+    const bool cut = keep < text.size(); // CAP-DISCLOSE: cut="1"
+    out += cut ? " cut=\"1\">" : ">";
     return out + std::string( escapeXml( text.substr( 0, keep ), esc ) ) + "</r>";
 }
 
@@ -1309,7 +1310,8 @@ inline std::string manifestFileXml( const IngestResult& ing, const ManifestDoc& 
         words += ( words.empty() ? "" : " " ) + w;
     }
     std::string out = "<mf p=\"" + std::string( escapeXml( doc.rel, esc ) ) + "\" matched=\"" + std::string( escapeXml( words, esc ) ) + "\" rows=\"" + std::to_string( m.hits.size() ) + "\"";
-    out += m.hits.size() > kManifestRowsPerFile ? " shown=\"" + std::to_string( kManifestRowsPerFile ) + "\" capped=\"1\">" : std::string( ">" ); // CAP-DISCLOSE
+    const bool capped = m.hits.size() > kManifestRowsPerFile;
+    out += capped ? " shown=\"" + std::to_string( kManifestRowsPerFile ) + "\" capped=\"1\">" : std::string( ">" ); // CAP-DISCLOSE
     for( std::size_t i = 0; i < m.hits.size() && i < kManifestRowsPerFile; ++i )
     {
         out += manifestRowXml( doc, doc.entries[m.hits[i].entry], esc );
@@ -1366,7 +1368,8 @@ inline std::string renderForManifestRows( const IngestResult& ing, std::string_v
     }
     std::string out( compactLegend ? kForManifestRowsCompactLegend : kForManifestRowsLegend );
     out += "<manifest_rows files=\"" + std::to_string( ranked.size() ) + "\"" + floor;
-    out += ranked.size() > kManifestFileRows ? " shown=\"" + std::to_string( kManifestFileRows ) + "\" capped=\"1\">" : std::string( ">" ); // CAP-DISCLOSE
+    const bool capped = ranked.size() > kManifestFileRows;
+    out += capped ? " shown=\"" + std::to_string( kManifestFileRows ) + "\" capped=\"1\">" : std::string( ">" ); // CAP-DISCLOSE
     for( std::size_t i = 0; i < ranked.size() && i < kManifestFileRows; ++i )
     {
         out += manifestFileXml( ing, docs[ranked[i].doc], ranked[i] );
