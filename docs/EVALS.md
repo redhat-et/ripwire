@@ -17196,3 +17196,69 @@ hindsight and not an achievable order, but it bounds the headroom: **the shipped
 of what is available.** A previous band established why nothing buildable from emit-time features reached it
 — a per-row gold-probability order maximises precision while completeness needs coverage of DISTINCT items —
 so the next ordering band must register that objective, not this one.
+
+## PRE-REGISTRATION 2026-11-17 (amendment 9) — ITEM S: an attribute macro costs a real definition
+
+Registered before any `src/` or `queries/` change, from a defect found while auditing `--dead-code`'s
+answers and then reproduced in a 12-line fixture this band owns.
+
+### The defect, and it is three defects with one cause
+
+In C it is idiomatic to put a format-attribute macro between the return type and the function name:
+
+```c
+static int printflike(7, 8)
+window_customize_write_value(struct screen_write_ctx *ctx, u_int cx, ...)
+{
+	...
+		return (0);
+```
+
+The parser takes `printflike(7, 8)` as the function declarator, and three things follow:
+
+1. **The real definition is NEVER INDEXED.** `--defs=window_customize_write_value` answers `found="0"`,
+   so every call to it is unresolved.
+2. **A phantom takes its place and ABSORBS the real body.** `--grep` attributes the real definition line
+   to `in="printflike"`.
+3. **Rows from inside the absorbed body become symbols** — `return`, and in the fixture also `int`.
+
+`--dead-code` then lists the phantoms as deletion candidates. On tmux its only non-empty answer was **10 of
+10 wrong**: seven `printflike` and three `return`. **A wrong row in `--dead-code` tells an agent it is safe
+to delete live code**, which is the most expensive wrong answer this tool can produce.
+
+The tool is not silent about the cause — it flags the file `parse_degraded="1"` — but it ships the symbols
+anyway, so the disclosure does not reach the answer that uses them.
+
+### Measured population
+
+**8 definitions across 8 files in tmux** use the macro-on-its-own-line shape, and ripwire flags **9 files**
+`parse_degraded`. Each one costs one real function and mints at least one phantom. The shape is not
+tmux-specific — `__attribute__`, `printflike`, `__printflike` and warn-unused macros are common C idiom —
+but **8 of 8 is this band's whole measured denominator and no claim beyond tmux is registered.**
+
+### The decision rule, fixed before the fix
+
+- **S1 — the real definition must be INDEXED.** The fixture's `realwriter` and tmux's
+  `window_customize_write_value` must both resolve under `--defs`. **This is the half worth more than the
+  phantom**: a phantom is noise, a missing definition makes every call site unresolved. A fix that removes
+  the phantom and leaves the function missing FAILS S1.
+- **S2 — no indexed symbol is a reserved keyword.** 33 C/C++ keywords checked. A keyword can never be a
+  function name; this is a fact, not a heuristic, which is why it is gateable.
+- **S3 — no definition is minted from an all-integer-literal parameter list.** `f(3, 4)` at definition
+  position is an attribute macro, a vexing parse or a call — never a definition. Also a fact.
+- **S4 — THE CONTROL: a name that merely CONTAINS a keyword or the macro's name stays indexed.**
+  `returnValue` and `printflikeFmt` must survive. **A veto that also removes these is worse than the
+  defect**, and this arm is the only thing that tells the two apart.
+- **S5 — no regression in indexed symbol count on the other corpora.** A veto that quietly drops real
+  symbols elsewhere buys a clean fixture and a worse index. Report the per-corpus symbol count before and
+  after; any FALL that is not an identified phantom fails the band.
+
+### Controls
+
+- **Non-vacuity, and it has already fired once.** The fixture must carry the exact shape — macro on its own
+  line, real name below it, bare `return (0)` in the body. An earlier version of this arm grepped for the
+  macro with different arguments than the fixture used, so it went stale silently and `(S2)` passed for the
+  wrong reason. A non-vacuity arm that does not track its own fixture is the one arm that must never be
+  approximate.
+- **The fixture reproduces all three defects** before the fix: `realwriter` missing, `printflike` indexed,
+  `int` indexed. A fix is only believable against a fixture that was red for every one of them.
