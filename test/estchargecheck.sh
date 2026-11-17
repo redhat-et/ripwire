@@ -56,6 +56,13 @@ skip(){ printf '  SKIP  %s\n' "$*"; }
 cd "$ROOT"
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
+# A PRIVATE WARM CACHE. This gate compares stderr, and the warm snapshot in a SHARED $TMPDIR carries the
+# writing build's source identity: a binary whose identity differs refuses it, says so on stderr
+# ("warmsnap: written by another build", warmsnap.h:760/762), runs cold and overwrites it, then is silent on
+# its next run. So a foreign build touching this corpus first turns a stderr comparison red for reasons that
+# have nothing to do with the code, and it self-heals on re-run — which is what makes it read as a flake.
+# Diagnosed on budgetmonotonecheck 2026-11-17; these are its siblings by the same shared-root exposure.
+export TMPDIR="$TMP/cache"; mkdir -p "$TMPDIR"
 
 # ── CALL HARNESS (speed + honesty; changes no assertion) ───────────────────────────────────────────────
 # rwcall ARGS… runs ONE ripwire call under a per-call budget (ESTCHARGE_CALL_TIMEOUT seconds, default 300; a cold

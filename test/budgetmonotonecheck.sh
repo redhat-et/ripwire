@@ -45,6 +45,19 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required"; exit 2; }
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
+# A PRIVATE WARM CACHE, and this arm needs it more than most.
+#
+# The warm snapshot in $TMPDIR carries the WRITING build's source identity. A binary whose identity differs
+# refuses it, says so on stderr ("warmsnap: written by another build", warmsnap.h:760/762 — 447 B), runs cold
+# and overwrites it; its next run is silent. Arm (a) compares stdout AND stderr AND rc, so a shared $TMPDIR
+# makes it red whenever a FOREIGN build touched this corpus first: the notice lands on the unbudgeted run U
+# (q5 is the first question on $ROOT/src) and not on the budgeted ones. stdout is byte-identical throughout —
+# the gate's own message says "or stderr/rc differ" and that is the half that fires. It self-heals on a
+# re-run, which is exactly what makes it look like a flake instead of a shared-state bug.
+#
+# The stderr comparison STAYS: a budget that adds a stderr clause is a real regression. Only the sharing goes.
+# Same convention pargates.py already records for two other gates (see its $TMPDIR note).
+export TMPDIR="$TMP/cache"; mkdir -p "$TMPDIR"
 echo "budgetmonotonecheck: BIN=$BIN"
 
 # ── the two engineered corpora ──────────────────────────────────────────────────────────────────────────────────────────

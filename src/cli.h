@@ -2857,10 +2857,13 @@ inline constexpr char kHelpTail[] =
         "                               ref answer's <about dictv=> names). =roster lists the completeness attributes it\n"
         "                               defines (attr, element, source), the roster test/legendrefcheck.sh reads. Answered\n"
         "                               wherever it stands on the command line; nothing else runs.\n"
-        "    --legend-have=DICTV        you already hold that legend dictionary (--legend-dict prints its dictv=), so this answer\n"
-        "                               takes the ref posture: no legend prose, a closing <about legend=\"ref\" dict= dictv=/> pointing at it,\n"
-        "                               and the root and rows unchanged -- no fact is dropped or moved. Measured -30.4 % over 80 recorded\n"
-        "                               answers (-8 % to -57 % by verb). A version that is not this binary\'s is REFUSED, naming both.\n"
+        "    --legend-have=DICTV        you HOLD that legend dictionary: every line `ripwire --legend-dict` prints, read by you\n"
+        "                               (about 130 KB; its line 1 names dictv=). So this answer takes the ref posture: no legend prose, a\n"
+        "                               closing <about legend=\"ref\" dict= dictv=/> pointing at it, and the root and rows unchanged -- no\n"
+        "                               fact is dropped or moved. The flag is an ASSERTION: a dictv= passed without the lines behind it\n"
+        "                               leaves every dropped definition unread. Reading them takes on the order of 140 calls to repay,\n"
+        "                               so on a short session pass nothing. Measured -30.4 % over 80 recorded answers (-8 % to -57 % by\n"
+        "                               verb). A version that is not this binary\'s is REFUSED, naming both.\n"
         "    --json                     emit JSON instead of XML; keys mirror the XML attribute names one to one\n"
         "                               machine-parseable JSON instead of XML, keys mirror the XML attr names 1:1. Every\n"
         "                               ROOT attribute survives; a verb that serves fewer SECTIONS than its XML form NAMES\n"
@@ -4659,12 +4662,19 @@ inline void refuseLegendHaveMisuse( Config& c )
     // just saved 30 % of the bytes. An earlier version of this flag treated an empty value as "asserts
     // nothing", and test/emptyvaluerefusecheck.sh was right to refuse that: 20 of the 21 hand-written arms
     // refuse, and the odd one out was mine. Flag NAMED, real problem stated, runnable example, stdout empty.
+    // THE REMEDY TEACHES THE WHOLE READ (2026-11-17). It used to say `--legend-dict` piped into a first-line cut:
+    // 78 B read, 130,243 B asserted, and its example's `tr -dc '0-9a-f'` also kept the hex letters of the words
+    // around the version, so the value it built was refused. The example now names WHERE the value is and leaves
+    // the read to the reader, because a substitution that computes dictv= puts no definition in anyone's context.
+    // The stated size is checked against the dictionary by test/legendhavecheck.sh (T3), 10 % band.
     if( c.legendHaveSeen && c.legendHave.empty() )
     {
         rw::emitRaw( stderr, "ripwire: --legend-have= needs the legend dictionary version you hold — an empty value names none "
                              "(a shell variable that expanded to nothing?), and ignoring it would serve a full-price answer while "
-                             "you believed it was reduced. Read the version with `ripwire --legend-dict | head -1` and pass it, "
-                             "e.g. ripwire . --callers=main --legend-have=$(ripwire --legend-dict | head -1 | tr -dc '0-9a-f')\n" );
+                             "you believed it was reduced. The flag ASSERTS you hold every definition, so obtain them first: run "
+                             "`ripwire --legend-dict` and read ALL of its output (about 130 KB, which takes on the order of 140 calls "
+                             "to repay: on a short session pass no --legend-have= at all). Its line 1 carries dictv=, the value to pass, "
+                             "e.g. ripwire . --callers=main --legend-have=<the dictv= on line 1>\n" );
         c.ok = false;
         return;
     }

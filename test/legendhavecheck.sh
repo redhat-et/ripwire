@@ -19,11 +19,19 @@ fail=0
 pass() { printf '  PASS  %s\n' "$1"; }
 bad()  { printf '  FAIL  %s\n' "$1"; fail=1; }
 
-DV=$("$BIN" --legend-dict 2>/dev/null | head -1 | grep -oE '[0-9a-f]{8,}' | head -1)
-if [ -z "$DV" ]; then bad "(A0) --legend-dict prints no dictv= -- the handshake has no version to name"; echo "FAILURES"; exit 1; fi
-pass "(A0) --legend-dict names a dictionary version ($DV)"
-
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
+
+# (A0) OBTAIN THE DICTIONARY, THEN NAME IT. This gate used to cut the dictionary to its first line and pass the
+# version it found there: 78 B read, the rest asserted -- the unbacked claim the flag exists to prevent, taught by
+# the gate that guards it. The whole text is held in $DICT, the version is read from the held copy, and arms (M)
+# and (T) below check the definitions an answer drops against THAT copy, not against a second run.
+DICT="$WORK/dict.txt"
+"$BIN" --legend-dict >"$DICT" 2>/dev/null
+DV=$(sed -n '1s/.*dictv=\([0-9a-f]\{16\}\).*/\1/p' "$DICT")
+if [ -z "$DV" ]; then bad "(A0) --legend-dict prints no dictv= -- the handshake has no version to name"; echo "FAILURES"; exit 1; fi
+DICT_BYTES=$(wc -c <"$DICT" | tr -d ' '); DICT_LINES=$(wc -l <"$DICT" | tr -d ' ')
+if [ "$DICT_LINES" -gt 100 ]; then pass "(A0) the dictionary is HELD ($DICT_BYTES B, $DICT_LINES lines) and names its version on line 1 ($DV)"
+else bad "(A0) --legend-dict printed $DICT_LINES line(s) -- a version with no definitions behind it"; fi
 
 # (B) a stale version is REFUSED, naming both -- the arm that keeps the posture honest
 err="$WORK/stale.err"
@@ -228,6 +236,190 @@ if "$BIN" . --callers=main >&- 2>/dev/null; then
 else
     pass "(H2) the compact path's replay is checked too (same seam)"
 fi
+
+# ── (M)/(T) THE HANDSHAKE'S OTHER HALF: what it DROPS must be OBTAINABLE, and the guidance must OBTAIN it ─────────────
+# Arms (A0)..(H) hold that the ref answer keeps every row and attribute. None of them asked the question the flag's
+# name raises: the caller asserts it HOLDS the dictionary, so is every definition the answer dropped actually IN the
+# dictionary, and does the command the tool teaches actually put the dictionary in the caller's hands? Both were false
+# (2026-11-17). The <file-scope> (t=modscope) reading was written by the compact composer and was no dictionary entry,
+# so a reduced answer dropped it and a reader holding all 130 KB still had no definition of the row it was shown:
+# 25 of 239 answers on three corpora, every one that carried it. And the refusal, the --help-adjacent skills, the
+# SessionStart primer and THIS gate all read line 1 of the dictionary (78 B) and then asserted the other 130,243.
+#   (M0) non-vacuity, counted on this gate's OWN fixture: a <file-scope> row, reduced answers, entries dropped. 0 = FAIL.
+#   (M1) every clause a reduced answer dropped is a line of the dictionary the taught command printed.
+#   (M1x) control: delete ANY ONE of those lines from the held dictionary and (M1) must go red -- each is load-bearing.
+#   (M2) the <file-scope> reading specifically: carried by the compact legend, dropped by the handshake, held by the dictionary.
+#   (M3) an answer the handshake did NOT reduce keeps its compact legend whole (the other honest outcome). Its cell is
+#        the Elixir inert-quote variant of declined_calls=, a reading the composer swaps in and the dictionary does not
+#        hold: kept inline, so it is not the <file-scope> defect -- but it is the same KIND of clause, and this arm is
+#        what says so if a later change starts dropping it.
+#   (T1) the command the refusal teaches, run as written, prints the WHOLE dictionary: every dropped definition, and a
+#        line-1 dictv= the handshake accepts.   (T1x) the same check on that command cut to its first line must FAIL.
+#   (T2) no guidance site -- refusal, --help, the skills, the primer, this gate -- pipes the dictionary into a
+#        first-line cut.   (T2x) the scanner fires on a planted instance.
+#   (T3) the cost the guidance states is the cost: every "about N KB" beside the handshake is within 10 % of the bytes.
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+MODFIX="$WORK/modfix"; mkdir -p "$MODFIX/src"
+printf 'export function setPhase(p: string): void { console.log(p) }\nexport function boot(): void { setPhase("boot") }\n' >"$MODFIX/src/lifecycle.ts"
+printf "import { setPhase, boot } from './lifecycle'\nsetPhase('starting')\nboot()\n" >"$MODFIX/src/index.ts"
+"$BIN" . --callers=main --legend-have= >/dev/null 2>"$WORK/teach.err"
+"$BIN" --help=all >"$WORK/help.txt" 2>/dev/null
+python3 - "$BIN" "$WORK" "$ROOT" "$MODFIX" "$DICT" <<'PY'
+import os, re, subprocess, sys
+BIN, WORK, ROOT, MODFIX, DICT = sys.argv[1:6]
+fail = 0
+def say(ok, arm, msg):
+    global fail
+    print("  %s  (%s) %s" % ("PASS" if ok else "FAIL", arm, msg))
+    if not ok:
+        fail = 1
+def out(args, **kw):
+    return subprocess.run(args, capture_output=True, **kw).stdout.decode("utf-8", "replace")
+
+held = open(DICT, encoding="utf-8").read()
+PURPOSE = re.compile(r"^ripwire\.([A-Za-z0-9_-]+)/v1 <[^>]*>: (.*)$")
+def parse(text):
+    """The held dictionary as (purposes by schema key, every other line)."""
+    purposes, entries = {}, set()
+    for line in text.split("\n")[1:]:
+        m = PURPOSE.match(line)
+        if m:
+            purposes.setdefault(m.group(1), []).append(m.group(2))
+        elif line:
+            entries.add(line)
+    return purposes, entries
+LEGEND = re.compile(r"<!-- ripwire (\S+) schema=ripwire\.\1/v1: (.*?) -->", re.S)
+WINDOW = re.compile(r"^ window: [a-z_= ]+ \(capped=1 cut(?:; next_offset= pastes as offset=)?\)\.")
+SUBCAP = re.compile(r"^ [A-Za-z0-9_]+_capped=(?:/[A-Za-z0-9_]+_capped=)*: 1 = cut\.")
+def residue(answer, purposes, entries, used=None):
+    """What the compact legend of `answer` says that the dictionary does not: '' when every clause is a held line."""
+    m = LEGEND.search(answer)
+    if not m:
+        return "NO-COMPACT-LEGEND"
+    key, body = m.group(1), m.group(2)
+    for p in purposes.get(key, []):
+        if body.startswith(p + "."):
+            body = body[len(p) + 1:]
+            break
+    else:
+        return "PURPOSE " + body[:90]
+    # the window and sub-cap clauses are spelled per answer; the dictionary's core holds their generic reading
+    if any(e.startswith("window: ") for e in entries):
+        body = WINDOW.sub("", body)
+    if any(e.startswith("X_capped= ") for e in entries):
+        body = SUBCAP.sub("", body)
+    for e in sorted(entries, key=lambda s: (-len(s), s)):
+        clause = " " + e + "."
+        if clause in body:
+            body = body.replace(clause, "\0")
+            if used is not None:
+                used.add(e)
+    return body.replace("\0", "").strip()
+
+purposes, entries = parse(held)
+DV = re.search(r"dictv=([0-9a-f]{16})", held.split("\n", 1)[0]).group(1)
+CELLS = [(MODFIX, v) for v in ("--callers=setPhase", "--impact=setPhase", "--uses=setPhase", "--around=setPhase", "--callees=boot")]
+CELLS += [(".", v) for v in ("--callers=main", "--callees=main", "--impact=main", "--whereis=main", "--dead-code")]
+ELIXIR = os.path.join(ROOT, "test", "elixirfix")
+CELLS += [(ELIXIR, "--callees=quoted")]
+NAME, READING = "&lt;file-scope&gt;", "<file-scope> (t=modscope): "
+reduced, kept, used, bad_rows, scoped = [], [], set(), [], 0
+for root, verb in CELLS:
+    extra = ["--no-cache"] if root != "." else []
+    compact = out([BIN, root, verb, "--legend=compact"] + extra)
+    have    = out([BIN, root, verb, "--legend-have=" + DV] + extra)
+    label   = "%s %s" % ({MODFIX: "fixture", ELIXIR: "elixirfix"}.get(root, "repo"), verb)
+    legend  = LEGEND.search(compact)
+    if 'legend="ref"' not in have:
+        kept.append((label, legend is not None and legend.group(0) in have))
+        continue
+    reduced.append((label, compact, have))
+    left = residue(compact, purposes, entries, used)
+    if left:
+        bad_rows.append("%s drops a clause no dictionary line holds: [%s]" % (label, left[:150]))
+    if root == MODFIX and NAME in have:
+        scoped += 1
+        m2 = legend is not None and READING in legend.group(2)
+        line = [e for e in entries if e.startswith(READING)]
+        ok = m2 and READING not in have and len(line) == 1 and (" " + line[0] + ".") in legend.group(2)
+        say(ok, "M2", "%s: the <file-scope> reading is carried by the compact legend (%s), dropped by the handshake (%s) and "
+            "held by the dictionary as one line (%d found)" % (label, m2, READING not in have, len(line)))
+say(scoped >= 1 and len(reduced) >= 3 and len(used) >= 5, "M0",
+    "non-vacuity on this gate's own fixture: %d reduced answer(s) show a <file-scope> row, %d of %d cells took the ref "
+    "posture, %d distinct dictionary lines were dropped (floors 1 / 3 / 5; below a floor this arm fails)"
+    % (scoped, len(reduced), len(CELLS), len(used)))
+say(not bad_rows, "M1", "every clause the %d reduced answers dropped is a line of the held dictionary%s"
+    % (len(reduced), "" if not bad_rows else " -- " + "; ".join(bad_rows[:3])))
+silent = [e for e in sorted(used) if not any(residue(c, purposes, entries - {e}) for _, c, _ in reduced)]
+say(used and not silent, "M1x", "control: deleting any ONE of the %d dropped lines from the held dictionary turns (M1) red"
+    "%s" % (len(used), "" if not silent else " -- but %d deletion(s) went unnoticed, first: [%s]" % (len(silent), silent[0][:80])))
+if kept:
+    say(all(ok for _, ok in kept), "M3", "%d cell(s) the handshake did not reduce keep their compact legend whole (%s)%s"
+        % (len(kept), ", ".join(l for l, _ in kept), "" if all(ok for _, ok in kept) else " -- lost on: " + ", ".join(l for l, ok in kept if not ok)))
+else:
+    print("  PASS  (M3) NOT-ESTABLISHED: every cell was reduced, so no kept-inline answer was observed -- stated, not implied")
+
+# ---- (T) the guidance ---------------------------------------------------------------------------------------------
+teach = open(os.path.join(WORK, "teach.err"), encoding="utf-8").read()
+helpt = open(os.path.join(WORK, "help.txt"), encoding="utf-8", errors="replace").read()
+full  = subprocess.run([BIN, "--legend-dict"], capture_output=True).stdout
+def obtains(cmd):
+    """Run a taught command as written (ripwire -> BIN). Why it does NOT deliver the dictionary, or '' when it does."""
+    got = subprocess.run(["sh", "-c", 'ripwire() { "$RW_BIN" "$@"; }; ' + cmd], capture_output=True,
+                         env=dict(os.environ, RW_BIN=os.path.abspath(BIN))).stdout
+    text = got.decode("utf-8", "replace")
+    if got != full:
+        missing = [e for e in sorted(used) if e not in text.split("\n")]
+        return "prints %d B of the dictionary's %d B, and %d of the %d definitions the answers above dropped are not in it" % (
+            len(got), len(full), len(missing), len(used))
+    m = re.search(r"dictv=([0-9a-f]{16})", text.split("\n", 1)[0])
+    if not m or subprocess.run([BIN, ".", "--callers=main", "--legend-have=" + m.group(1)], capture_output=True).returncode != 0:
+        return "its line 1 names no dictv= the handshake accepts"
+    return ""
+taught = [c for c in re.findall(r"`([^`]+)`", teach) if c.startswith("ripwire --legend-dict")]
+say(len(taught) >= 1, "T0", "the empty-value refusal teaches a `ripwire --legend-dict ...` command (%d found; zero fails this arm)" % len(taught))
+CUT = " | he" + "ad -1"   # spelled in two pieces so (T2) can scan this file
+for cmd in taught:
+    why = obtains(cmd)
+    say(not why, "T1", "taught command `%s` delivers what --legend-have= asserts: all %d B, every dropped definition, an accepted dictv=%s"
+        % (cmd, len(full), "" if not why else " -- NO: " + why))
+    why = obtains(cmd + CUT)
+    say(bool(why), "T1x", "control: the same command cut to its first line is REJECTED (%s)" % (why or "it passed -- (T1) cannot see the defect"))
+
+SCAN = re.compile(r"legend-dict[^\n|`]*\|\s*head\b")
+sites = {"the empty-value refusal": teach, "--help=all": helpt}
+for rel in ("src/cli.h", "src/wrap.h", "src/main.cpp", "src/mcp.h", "test/legendhavecheck.sh"):
+    sites[rel] = open(os.path.join(ROOT, rel), encoding="utf-8", errors="replace").read()
+skills = os.path.join(ROOT, "skills")
+for d, _, names in sorted(os.walk(skills)):
+    for n in sorted(names):
+        if n.endswith(".md"):
+            p = os.path.join(d, n)
+            sites[os.path.relpath(p, ROOT)] = open(p, encoding="utf-8", errors="replace").read()
+hits = ["%s:%d" % (name, text[:m.start()].count("\n") + 1) for name, text in sorted(sites.items()) for m in SCAN.finditer(text)]
+say(not hits, "T2", "no guidance site pipes the dictionary into a first-line cut (%d sites read)%s"
+    % (len(sites), "" if not hits else " -- " + ", ".join(hits[:8])))
+say(len(sites) >= 8 and SCAN.search("ripwire --legend-dict" + CUT) is not None and SCAN.search("ripwire --legend-dict") is None, "T2x",
+    "control: the scanner fires on a planted first-line cut and not on the bare command")
+
+COST = re.compile(r"about ([0-9]+) KB")
+stated = []
+COST_SITES = ("the empty-value refusal", "--help=all", "skills/ripwire-router/SKILL.md", "skills/ripwire-mcp/SKILL.md", "src/wrap.h")
+for name in COST_SITES:
+    text = sites.get(name, "")
+    for m in re.finditer(r"legend-(?:have|dict)", text):
+        for c in COST.finditer(text[max(0, m.start() - 700): m.end() + 700]):
+            stated.append((name, int(c.group(1))))
+stated = sorted(set(stated))
+off = ["%s says about %d KB" % s for s in stated if abs(s[1] * 1000 - len(full)) * 10 > len(full)]
+mute = [n for n in COST_SITES if n not in {s[0] for s in stated}]
+say(not mute and not off, "T3",
+    "the cost stated beside the handshake is the cost: %d of %d guidance sites say %s; the dictionary is %d B (10 %% band)%s%s"
+    % (len(COST_SITES) - len(mute), len(COST_SITES), "/".join(sorted({"about %d KB" % s[1] for s in stated})) or "nothing", len(full),
+       "" if not off else " -- WRONG: " + "; ".join(off), "" if not mute else " -- SILENT on the cost: " + ", ".join(mute)))
+sys.exit(fail)
+PY
+[ $? -eq 0 ] || fail=1
 
 if [ "$fail" -ne 0 ]; then echo "legendhavecheck: FAILURES"; exit 1; fi
 echo "legendhavecheck: all arms PASS"

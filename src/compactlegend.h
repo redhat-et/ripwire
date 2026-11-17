@@ -2362,6 +2362,12 @@ inline std::string compactLegendText( const CompactLegendSpec& spec, std::string
     // Present-only like every reading above: a document without such a row pays 0 bytes. It sits outside
     // compactPresentTerms deliberately — that function answers "which TERM-TABLE rows are present", and this
     // reading is not one of them (test/compactlegendcheck.sh arm (S) proves it live instead of by a row).
+    // NOT A TERM ROW IS NOT "NOT A DEFINITION": it is a legend-dictionary entry all the same (legenddict.h
+    // kNameReadingEntries). For a day it was not, and every answer that took the ref posture dropped this
+    // sentence while the dictionary its pointer names had no line for it — test/legendhavecheck.sh arm (M).
+    // A reading added here by hand must be added there too, or reduceCompactLegend keeps the answer inline — and
+    // that function repeats this very scan, so the two must stay the same expression (its rebuild check catches a
+    // drift: the answer stays inline, disclosed).
     if( doc.find( kModScopeEscapedName ) != std::string_view::npos )
     {
         out += ' ';

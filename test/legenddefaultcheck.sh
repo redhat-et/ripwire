@@ -101,6 +101,11 @@ BIN, DV = sys.argv[1], sys.argv[2]
 ROOT = re.compile(r"<([A-Za-z_][A-Za-z0-9_-]*)\b[^>]*>")
 ATTR = re.compile(r'([A-Za-z_][A-Za-z0-9_-]*)="([^"]*)"')
 POINTER = {"legend", "dict", "dictv"}
+# est_tokens is NOT a pointer attribute and is NOT exempt: it is the one root attribute that MUST move,
+# because it prices the DELIVERED document and the posture deletes the prose legend from it. Exempting it
+# outright would let a repricing bug through, so (D1) sets it aside from the equality and (D1t) below
+# asserts its DIRECTION and its MAGNITUDE instead — a strictly stronger test than equality could be.
+REPRICED = {"est_tokens"}
 REPRICED = {"est_tokens"}   # amendment 4a: the one attribute that MUST change
 
 def head_comments(doc, lo, hi):
@@ -226,12 +231,35 @@ for v in VERBS:
     if ba != bb:
         why.append("body differs (%d B vs %d B)" % (len(ba), len(bb)))
     # 2. ROOT ATTRIBUTES, NAME AND VALUE. Comparing name SETS would pass when shown="2" became shown="1".
-    want = [p for p in pairs(ra) if p[0] not in POINTER]
-    have = pairs(rb)
+    want = [p for p in pairs(ra) if p[0] not in POINTER and p[0] not in REPRICED]
+    have = [p for p in pairs(rb) if p[0] not in REPRICED]
     if want != have:
         lost = [p for p in have if p not in want]
         added = [p for p in want if p not in have]
         why.append("root attributes moved (lost %s, changed %s)" % (lost[:3], added[:3]))
+    # (D1t) THE REPRICED ATTRIBUTE, by direction and magnitude. est_tokens is the one root attribute that
+    #       MUST move: it prices the DELIVERED document, and this posture deletes the prose legend from it.
+    #       Exempting it outright would let a repricing bug through, so it is set aside from the equality
+    #       above and checked here instead — strictly stronger than equality could be.
+    #
+    #       ORIENTATION, because I got this backwards the first time and it is the second inverted
+    #       est_tokens direction test in this project: `ra`/`a` is the PROSE-FREE answer (it is the one
+    #       carrying the POINTER attributes, which is exactly how the D1-unreduced arm above detects it),
+    #       and `rb`/`b` is the --legend=compact opt-out. So the prose-free side must be the SMALLER one.
+    ea = dict( pairs( ra ) ).get( "est_tokens" )   # prose-free
+    eb = dict( pairs( rb ) ).get( "est_tokens" )   # compact opt-out
+    if ( ea is None ) != ( eb is None ):
+        why.append( "est_tokens present in one posture only (prose-free=%s compact=%s)" % ( ea, eb ) )
+    elif ea is not None:
+        free, prose = int( ea ), int( eb )
+        saved = len( b ) - len( a )                # compact bytes minus prose-free bytes
+        priced = prose - free
+        if priced <= 0:
+            why.append( "est_tokens did not fall: compact=%d prose-free=%d, yet the posture deleted the prose legend" % ( prose, free ) )
+        elif saved <= 0:
+            why.append( "est_tokens fell %d tokens but the prose-free answer is not smaller (%d B vs %d B)" % ( priced, len( a ), len( b ) ) )
+        elif not ( 0.4 <= ( priced * 2.5 ) / saved <= 2.6 ):
+            why.append( "est_tokens fell %d tokens for %d delivered bytes — outside the markup rate band" % ( priced, saved ) )
     # 3. THE POINTER IS COMPLETE. All three or none -- a dictv= without a dict= is a reference the reader
     #    cannot resolve, which is the silent-cut failure the band forbids.
     got = {k for k, _ in pairs(ra)} & POINTER

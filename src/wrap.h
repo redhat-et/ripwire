@@ -299,14 +299,16 @@ inline std::vector<std::string_view> wrapUseWhenBlurbLines( const bool readBefor
         "- Before writing a new fn/class/helper: `--exemplar=\"<what you're writing>\" --legend=compact` — duplicates are born on small tasks.",
         "- Before calling work done: `--quality-delta --legend=compact` (what you made worse), then `--test-gate --legend=compact`.",
         "- Trust notes: counts marked counts_floor are floors, not totals; a zero means \"none found\", never \"none exists\".",
-        "- The commands above ask for the compact legend (terse definitions of only the attributes present); add `--legend=full` when a definition's reasoning is needed: a term you do not recognise, a floor or cap you need explained, a map a human will read.",
-        // THE ONE-OFF THAT PAYS ON EVERY LATER CALL. The legend is a near-fixed per-answer cost (531-4,305 B,
+        "- Legend posture: the commands above ask for the compact legend (terse definitions of only the attributes present); add `--legend=full` when a definition's reasoning is needed — a term you do not recognise, a floor or cap you need explained, a map a human will read. On a LONG session only, `ripwire --legend-dict` read in FULL (line 1 names its `dictv=`) lets `--legend-have=<that dictv>` drop legend prose from every answer, nothing lost; it is about 130 KB and takes on the order of 140 calls to repay, the flag asserts you hold every line, and a dictv you merely looked up backs nothing — so on a short session pass none.",
+        // HONEST COST (2026-11-17): this line used to teach a first-line cut of the dictionary ("names its dictv="),
+        // 78 B read and 130 KB asserted, and called it a one-off that pays on every later call. It pays after about
+        // 140 calls (126,314 B against 896 B saved per call, measured over 453 answers), so the line now says who it is for.
+        // THE ONE-OFF THAT PAYS ON EVERY LATER CALL -- on a session long enough to repay it. The legend is a near-fixed per-answer cost (531-4,305 B,
         // median 1,796), so its SHARE grows as answers shrink: 14 % of a --for bundle, 62 % of a --whereis
         // answer. Measured -30 % over 80 recorded answers, and -31 % over the nine non-for verbs together.
         // Two lines, because the primer is already the largest thing the SessionStart hook says and the
         // detail belongs in skills/ripwire-router. "Read it once" is not padding: --legend-have= ASSERTS that
         // you hold the definitions, and passing it unread points you at definitions you never received.
-        "- Once per session, read the legend dictionary — `ripwire --legend-dict | head -1` names its `dictv=` — then pass `--legend-have=<that dictv>` on every call: answers come back rows-first with no legend prose, nothing dropped (-30% measured). Read it first; the flag asserts you hold it.",
         "Defaults to break (less context is measurably MORE accurate, not just cheaper — code-repair",
         "accuracy fell 29% -> 3% as context grew 32K -> 256K tokens, LongCodeBench):",
         "- Do NOT open a file you have not located first: rank with `--for`/`--grep`, then read what it names.",
