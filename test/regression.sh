@@ -1069,6 +1069,7 @@ for _g in \
     testscopecheck \
     textdocscheck \
     textpoolcheck \
+    tiebreakcontentcheck \
     tiercallerscheck \
     timsortcheck \
     tokenbudgetcheck \

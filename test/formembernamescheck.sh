@@ -184,13 +184,13 @@ elif cmd == "order":          # FILE OWNER OWNERPATH MODE QUESTION NAME@PATH:LIN
     keys = []
     for tok in paren.group(1).split(","):
         w = " ".join(re.sub(r"\b(first|then|next|own|the)\b", " ", tok.lower()).split())
-        k = {"question words": "qw", "owner's file": "file", "path": "path", "line": "line"}.get(w)
+        k = {"question words": "qw", "owner's file": "file", "path": "path", "line": "line", "name": "name"}.get(w)
         if k: keys.append(k)
     qw = set(re.findall(r"[a-z0-9]+", q.lower()))
     def over(n):
         return len({x.lower() for x in re.findall(r"[A-Z]?[a-z0-9]+|[A-Z]+(?![a-z])", n)} & qw)
     def key(n):
-        v = {"qw": -over(n), "file": pos[n][0] != args[2], "path": pos[n][0], "line": pos[n][1]}
+        v = {"qw": -over(n), "file": pos[n][0] != args[2], "path": pos[n][0], "line": pos[n][1], "name": n}
         return tuple(v[k] for k in keys)
     want = sorted(got, key=key)
     tied = [(a, b) for a, b in zip(want, want[1:]) if key(a) == key(b)]

@@ -1444,7 +1444,7 @@ struct SafeDeleteRiskReading
 inline constexpr SafeDeleteRiskReading kSafeDeleteRiskReadings[] = {
     { "none-found",      "none-found: zero callers AND zero uses — an ABSENCE of evidence, never evidence of absence. " },
     { "untested-radius", "untested-radius: callers or uses exist, and NONE of the transitive blast radius is test-covered. " },
-    { "uses-exist",      "uses-exist: callers or uses exist, and at least part of the radius is test-covered. " },
+    { "uses-exist",      "uses-exist: callers or uses exist, and at least part of a non-empty radius is test-covered; an empty radius (radius_tested=0) claims no coverage. " },
     // TIER-FOLLOWUP: a radius of test definitions only is not "untested" (isTestedByReach never counts a test, so it read as one)
     { "tests-only",      "tests-only: callers or uses exist, and EVERY symbol in the transitive blast radius is a test definition "
                          "(radius_tests=): no production caller was found in the resolved graph, directly or transitively. uses= may still count production "
@@ -1807,7 +1807,7 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
         rw::emitTo( stdout, "<!-- ripwire safe-delete: {}risk= describes retained evidence after these exclusions. -->", rw::declinedLiteralCallsLegend( true ) );
     }
     const Symbol&      lead = ing.symbols[ defs[0] ];   // resolveAllByNameQualified's name tier arrives tower-ordered — defs[0] is the
-                                                        // tower front (kind, leading language, lowest id), the same orientation
+                                                        // tower front (kind, leading language, path, line, name), the same orientation
                                                         // convention --impact/--uses/--callers's of=/defs= pairing relies on when defs > 1.
     const PageWindow   cw   = pageWindow( callerIds.size(), effectiveRowCap( cfg.pageLimit, 40 ), cfg.pageOffset );
     ASSUME( cw.begin == sdLw.begin && cw.end == sdLw.end, "pageWindow is pure: the rows' window is the legend's (sdSites is indexed by it)" );

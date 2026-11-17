@@ -161,8 +161,8 @@ struct EditCheckGroup
 };
 
 // The (file, contract) KEYS of a match list with each key's members, in first-seen order: the name/file tier of
-// resolveAllByNameQualified comes back TOWER-ordered (applyNameTower), its early canonical-id/Scope::name tiers ascend by
-// id, so members[i][0] is group i's tower front on the name path — a POSITION, not a guarantee of the lowest id, which is
+// resolveAllByNameQualified comes back TOWER-ordered (applyNameTower), its early canonical-id tier ascends by id and its
+// Scope::name tier by symbolContentKey, so members[i][0] is group i's tower front on the name path — a POSITION, not a guarantee of the lowest id, which is
 // why editCheckRoundTripSpelling compares membership rather than first elements.
 struct EditCheckGroupKeys
 {

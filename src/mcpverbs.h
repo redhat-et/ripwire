@@ -3282,7 +3282,7 @@ inline std::optional<std::string> ownersText( const std::string& root, const std
                        "files= means two different things by DEPTH here and is deliberately not renamed: on the ROOT it is how "
                        "many files were ANALYSED; on the <uniform/> fold it is how many of them collapsed into that one row. "
                        "With a symbol, of= echoes it and defs= is how many DEFINITIONS that name has: this report covers the "
-                       "file holding the TOWER FRONT of them (most specific kind, leading language, then lowest node id), so defs= above 1 means the other definitions' files "
+                       "file holding the TOWER FRONT of them (most specific kind, leading language, then path, line, name), so defs= above 1 means the other definitions' files "
                        "were NOT analysed. An @FILE:LINE seed rebinds to the innermost definition enclosing that line "
                        "(sym= names it) and covers exactly that definition's file -->" );
     // 0.6.6: the CLI --owners qualification, on the same element in the same slot (before at=).
@@ -4206,7 +4206,7 @@ inline constexpr char kConnectHeader[] =
     " whose in-repo defs were all language-filtered), the map header's ambiguous=/unresolved=."
     " defs= on a terminal row = the N definitions that terminal's spelling matched (all of a bare name's; only those a qualified"
     " Owner::m / Owner.m / ns.fn / file:name names; spellings that pick one definition share a row and print the widest); every one is scored and the one reaching the most other"
-    " terminals within radius= (fewest hops) is used, else the tower front (most specific kind, leading language, lowest id; a C/C++ declaration without a body yields to the"
+    " terminals within radius= (fewest hops) is used, else the tower front (most specific kind, leading language, then path, line, name; a C/C++ declaration without a body yields to the"
     " definition of its scope); ambiguous_terminal= on the root names terminals whose pick tied with another equally-joining"
     " definition. Qualify with file:name to pick another. Steiner rows never carry it."
     " connects= on a Steiner row = how many DISTINCT symbols that intermediary joins (its callers plus its"
