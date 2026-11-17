@@ -17113,3 +17113,78 @@ gold — and it says the gain is real on more than half the corpus. It does **no
 should be: this measures where evidence sits today, not which arrangement is best. And it makes no claim
 that a truncated answer is parseable; a truncated XML document is not well-formed, and the honest consumer
 model is an agent whose context cuts a long answer, not a byte-exact cut.
+
+## PRE-REGISTRATION 2026-11-17 (amendment 4) — ITEM D: the prose-free posture becomes the DEFAULT
+
+Registered before any `src/` change and before any number below exists. This amendment acts on an owner
+decision, not on a measurement of its own: asked to choose between three legend defaults, the owner chose
+**drop legend prose, root attributes untouched**. The two options not taken are recorded with it, because
+the registered rule below has to be the rule for the option chosen and not a rule retro-fitted to whichever
+option measured best:
+
+| option | bytes | compat | status |
+| --- | ---: | --- | --- |
+| (a) drop legend prose, root attributes untouched | −14.8 % | additive — nothing moves | **CHOSEN** |
+| (b) full ref posture (`--legend-have`'s) | −30.4 % | root attributes MOVE to `<about>` | shipped as opt-in, PR #677 |
+| (c) opt-in only | 0 % by default | none | superseded by this amendment |
+
+### What the posture is, exactly
+
+A third value of `--legend=`, and the new default. Against today's compact default it changes **three
+things and nothing else**:
+
+1. the head legend comment — the ~0.5–4.3 KB of schema prose — is **not emitted**;
+2. the root element keeps **every attribute it has today, unchanged and in place**, and gains three:
+   `legend="dict" dict="ripwire --legend-dict" dictv="…"`;
+3. data comments (`<!-- files= symbols= edges= shown= est_tokens= … -->`) are **kept**, because they are
+   not prose — they are the answer's own counts, and §9 principle 4 puts honesty in attributes and data,
+   never in sentences.
+
+It is therefore NOT the ref posture with a different name. The ref posture's saving comes in two parts —
+dropping the prose, and moving the root attributes onto a trailing `<about>` — and this takes only the
+first. That is the whole of the compat difference: a consumer reading `<r est_tokens=>` keeps working.
+
+### Why the prose can go when a pointer stays
+
+§9 principle 3: *never cut silently; a disclosed cut is still terminal* — a small answer that hands over the
+one deterministic call that fetches what it left out ends the search. `dict="ripwire --legend-dict"` IS that
+call, and `dictv=` lets the reader check the dictionary it resolves is this binary's. What this does not do
+is prove an agent that has never seen ripwire output can read a prose-free answer; that is the one open
+question the owner's choice was made under, and D5 below is the only band that can speak to it.
+
+### The decision rule, fixed before the measurement
+
+The default change is REJECTED unless all five hold. D1–D3 are mechanical and admit no judgement.
+
+- **D1 — content losslessness, per cell.** For every recorded answer, strip the head legend comment from
+  today's default and append the three pointer attributes to its root: the result must be **byte-identical**
+  to the new default's answer. Every row, every existing root attribute, every data comment, every CDATA
+  body. Any cell that is not byte-identical FAILS the band — this is not a tolerance.
+- **D2 — completeness unchanged on every graded cell, at both bounds.** Item grain (`lenient` and `strict`)
+  and symbol/file grain. **Zero cells may regress.** A single regression rejects the default; the posture
+  then stays opt-in, as (c).
+- **D3 — the opt-outs restore today byte-for-byte.** `--legend=compact` must reproduce today's default
+  answer byte-identically, and `--legend=full` the full prose legend, on every cell. A default is only
+  safe to change if the old behaviour is still reachable by name.
+- **D4 — bytes, reported not bounded.** Per verb and pooled, with its own `n`. No threshold is registered,
+  because the owner's choice was not made on the byte figure; a saving smaller than 14.8 % is a finding,
+  not a failure. Reported beside the budget axis, which is the axis the choice WAS made on: completeness
+  at 1, 2, 4, 8 and 32 KB prefixes, with and without the prose, per repo.
+- **D5 — the pointer resolves, and the dictionary is complete for the answer.** Every attribute the
+  prose-free answer emits must have a definition in `--legend-dict`, and the emitted `dictv=` must equal
+  `--legend-dict`'s own. This is the gate that would have caught
+  [[trap-legend-clause-must-be-registered-not-written]] — an attribute emitted with no dictionary row ships
+  undocumented, and under this default it ships undocumented AND unexplained.
+
+### Controls, so the band cannot pass vacuously
+
+- **Negative control.** An answer whose legend the dictionary does not hold (JSON, plain text, a legend
+  family with no spec) must be served **unchanged**. The posture may never half-reduce an answer it does
+  not fully understand.
+- **Non-vacuity.** The D1 gate must FAIL against a binary that leaves the prose in, and the D5 gate must
+  FAIL against an answer carrying an attribute with no dictionary row. Both are asserted by mutation, in
+  the gate, before the real arm runs.
+- **Known hazard, stated in advance.** `--for`, `--grep` and `--slice` carry their own native legend
+  dialects rather than compactlegend.h's, and MCP `for` carries a third. A posture that reduces three of the
+  four families and silently misses one would still pass a pooled byte check. D1 is therefore reported
+  **per legend family**, and a family with zero cells in the corpus is reported as `n=0` — not as passing.
