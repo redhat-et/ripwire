@@ -17513,3 +17513,78 @@ count as resolution.
 - **Moving `<tail>` does not pay** and is NOT part of this band: whole-tail-last took median
   bytes-to-complete 10,279 → **11,487**. A separate lane measured a `tail LAST + test LAST` gain at 16 KB on
   a different metric; the two are not reconciled, and neither is adopted here.
+
+## READOUT — `est_tokens=` is a good POINT ESTIMATE and a FALSE UPPER BOUND, on 216 of 216 cells
+
+Measured 2026-11-17 over the 295 recorded answers, with a quote-, comment- and CDATA-aware scanner (of 587
+raw occurrences of the string `est_tokens`, **216 are root attributes, 21 are non-root element attributes,
+350 are legend prose inside comments, 0 are in CDATA** — a regex would have read 350 pieces of prose as
+data).
+
+### Two corrections before the result, both to this round's own framing
+
+1. **The direction test was INVERTED in the brief this band was run from.** It said an implied rate *below*
+   the densest rate means the estimate under-reads. `tokens ≈ bytes / rate`, so a denser document is FEWER
+   bytes per token and `bytes / 2.36` is the LARGEST token count a byte count can imply — the source says
+   as much, calling `kMinBytesPerToken` "the most tokens a byte can cost". The bound holds iff
+   **`bytes / est_tokens ≤ 2.36`**, and an implied rate ABOVE 2.36 is the violation.
+2. **`est_tokens=` is not on every answer.** It is on **exactly the 216 `ripwire.for/v1` answers and nowhere
+   else** — 0 of 21 `callers`, 0 of 14 `path`, 0 of 12 `lego`, 0 of 10 `callees`, 0 of 7 `grep`, 0 of 6
+   `impact`, 0 of 6 `dead-code`, 0 of 2 `affected`, 0 of 1 `safe-delete`. Every denominator below is **216,
+   not 295**, and nine of ten verbs deliver an **unpriced** document: an agent budgeting on `est_tokens`
+   gets nothing at all from them.
+
+### The result
+
+| basis (n=216) | min | median | max | rate > 2.36 |
+| --- | ---: | ---: | ---: | ---: |
+| whole delivered document | 2.550 | **2.771** | 11.538 | **216 / 216** |
+| priced sections only (disclosed-excluded blocks subtracted) | 2.550 | **2.672** | 6.807 | **216 / 216** |
+
+**Not one cell satisfies the documented bound, and zero cells fall on the conservative side.** Median
+`est_tokens` is **85.2 %** of `bytes / 2.36` (p10 65.6 %, min 20.5 %); median shortfall **1,431 tokens**
+(p90 2,317, max 3,865). Against the emitter's OWN model (`kBytesPerTokenDefault = 2.50`, bodies at 3.80),
+**199 of 216 cells still price below it** — about 3 % of delivered priced markup is not charged at all, on
+top of the 2.50-vs-2.36 gap.
+
+### Two defects, which want different fixes
+
+1. **Disclosed-but-unbudgetable.** 88 of 216 answers carry appended blocks the legend honestly declares
+   unpriced — `<lit>` (37), `<graph_verb>` (26), `<shortkey>` (22), `<doc_body>` (15), `<lit_capped>` (1) —
+   a median **10.8 %** and a maximum **71.5 %** of the delivered document. Worst absolute: `mf2-axum-07`
+   with **18,344 B (39.8 %) unpriced** at 4.37 B/token, and `ld-envoy-03` where a single **16,906 B**
+   `<graph_verb>` block carries no price of its own, 32.6 % of a 53.6 KB answer. The legend is honest; the
+   root attribute is not usable as a budget, which is what agents and our published figures use it as. The
+   documented reading *"price as emitted"* does not say "as emitted minus five block kinds".
+2. **A flat under-read inside the priced sections.** All 216 cells, median 2.672 against a 2.36 bound, and
+   **128 of 128** on the answers with no excluded block at all. This is miscalibration, not disclosure.
+
+**And a same-element inconsistency worth naming:** `<graph_verb>` appears on **26** answers and carries a
+nested price on only **6**. Same element, same disclosure sentence, two different behaviours.
+
+### One flat rate cannot be right for these documents
+
+Byte composition of the 216 priced answers: dense markup median **77.9 %** (min 4.1 %), prose legend median
+**13.6 %** (max 62.3 %), CDATA source median **8.0 %** (max 88.6 %). Applying this round's own measured
+rates (dense rows 2.44, prose legend 4.66, raw source 3.80) to each answer's composition gives an implied
+blend of **min 2.566, median 2.701, max 3.766** — so **the top of the 2.36–2.55 band sits below the MINIMUM
+implied rate of all 216 answers.** The 1.47× spread is driven by composition, not language: within-repo
+spread (pydantic 2.62–6.81) swamps between-repo spread, and per-repo medians do not track `kTokenCalib` —
+Python repos (django 2.774, calib 2.36) sit **above** TypeScript ones (angular 2.620, calib 2.59).
+
+### What this does and does not invalidate
+
+Against composition-implied truth, median `est_tokens` is **0.978** — within ~2 % for the median answer,
+135 of 216 below truth and 81 above. So **it is a decent point estimate and a false upper bound.** Any
+published figure that uses it as a point estimate on excluded-block-free `--for` answers is roughly right
+(median 2 % low). **Any figure that leans on the bound property, or pools answers carrying excluded blocks,
+is wrong by 3.4–11.5× on individual cells.** Every such use must be found and restated before 0.7.0.
+
+### The repricing path is untested, and this corpus structurally cannot test it
+
+Of the 79 cells that reduce under `--legend=dict`, **0 carry `est_tokens`**; the 216 that carry it are
+**byte-identical between the two postures**, because the posture does not touch `--for`'s inline trailer
+legend. So `compactRepricedTokens` gets **zero exercise** here — not verified correct, not shown wrong — and
+the legend-posture control cannot test it, because it strips the legend only on the verbs that have no price
+to move. A pair that exercises it has to vary the legend on `--for`. Item D's reprice call therefore fires
+on the map family (fixture: 399 → 140) and on nothing in this corpus.
