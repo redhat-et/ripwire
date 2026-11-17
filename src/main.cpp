@@ -4211,6 +4211,18 @@ static int emitCapturedDoc( const std::string& doc, int rc )
     {
         return rc;
     }
+    // THE ONE CALLER WHOSE STDOUT LEGITIMATELY HAS NO READER: #594's detached help-task child. The parent
+    // abstained and answered already, then exited, so the child's stdout is a closed pipe BY DESIGN — it goes
+    // on running only to warm the index, and nothing is waiting for its bytes. Failing it here turns an
+    // expected condition into a non-zero rc in the child's own status file, which is exactly what
+    // test/helptaskdeadlinecheck.sh caught: `state=finished rc=1` where the design says 0. Confirmed by
+    // experiment -- with this write check unconditional that gate failed, and with it bypassed it passed.
+    // Every other caller keeps the check: a user's `> /dev/full` or closed pipe must not exit 0 with no
+    // answer, which is the defect the check exists for.
+    if( rw::helpdeadline::childSession().active )
+    {
+        return rc;
+    }
     std::fputs( "ripwire: could not write the answer to stdout — it is incomplete or absent; the exit code says so rather "
                 "than reporting a success that did not happen\n", stderr );
     return rc != 0 ? rc : 1;
