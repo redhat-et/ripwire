@@ -41,6 +41,18 @@ good. This note collects the candidate levers in one place.
 
    The anchor's provenance is already computed, so this needs no new signal.
 
+**Results since this was written** (offline labs over stored answers, rules fixed before grading; keep rules: 0
+credited items lost and top-10 Wrong down):
+- **Item 2, gate and fill (2026-11-16): not pursued.** All three fills raised top-10 Wrong on the held-out set: a
+  different file, a row with a resolved edge to the head, and no fill. The lead is parked.
+- **Item 3, edge guard (2026-11-17): not pursued.** The edge reaches 5 of the 3,440 rows the live demotes move,
+  because the existing keep guards already protect its strong forms: a callee of a hop, or a proven call path of
+  two edges or fewer to the first rows. No guarded variant lowered top-10 Wrong. The 26 % vs 11 % split holds
+  among printed rows; it is not a lever on demoted ones.
+- **Depth, a related finding (2026-11-17, #678):** tail rows now name up to 2 more of a file's symbols that share a
+  question word (`tsym=`). In-sample this gained 3 credited items and lost none. On the held-out set every grade
+  stayed the same, and bytes rose 0.37 %.
+
 ## B. Fewer bytes without losing answers
 
 1. **The `<tail>` section is the biggest lever.** An answer-size breakdown of 0.6.9 vs 0.6.10 (2026-11-07,
