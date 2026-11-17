@@ -2072,7 +2072,7 @@ private:
             }
         }
 
-        emitValueRef( i, j, name, s, fileShadow, owner, std::move( via ) );
+        emitValueRef( i, j, name, s, fileShadow, owner, via );
     }
 
     // A node a method value may be written as: Go `b.opPlan` (methodValueAt), C++ `&Cls::m` (memberPointerValueAt).
@@ -2343,7 +2343,7 @@ private:
     }
 
     // The Value row of identifier anc[i] (effective position anc[j]) landing in slot `s`.
-    void emitValueRef( std::size_t i, std::size_t j, std::string_view name, Slot& s, bool fileShadow, std::string_view owner, std::string via )
+    void emitValueRef( std::size_t i, std::size_t j, std::string_view name, Slot& s, bool fileShadow, std::string_view owner, const std::string& via )
     {
         RawRef r;
         r.fileId        = m_fileId;
@@ -2864,7 +2864,7 @@ private:
         {
             return;   // a Python attribute call is a method call, never a dict-slot lookup
         }
-        emitThrough( call, obj, f, std::move( key ), kindIs( ft, "identifier" ) );
+        emitThrough( call, obj, f, key, kindIs( ft, "identifier" ) );
     }
 
     // ── slot-type join (IX-1) ──────────────────────────────────────────────────────────────────────────
@@ -3225,7 +3225,7 @@ private:
     }
 
     // One no-row fact record (role Value, name "": no identifier is empty, so no row): the slot facts and the dotted-string facts.
-    void emitValueFact( TSNode at, char scope, std::string recvVar, std::string_view composeRel, std::string_view memberCtor, std::string_view memberPath = {} )
+    void emitValueFact( TSNode at, char scope, const std::string& recvVar, std::string_view composeRel, std::string_view memberCtor, std::string_view memberPath = {} )
     {
         RawRef r     = rawRefAt( at, m_fileId, m_lang, RefRole::Value, {} );
         r.qualifier  = std::string( 1, scope );
@@ -3238,7 +3238,7 @@ private:
 
     void emitSlotFact( TSNode at, std::string owner, std::string_view field, const std::string& type )
     {
-        emitValueFact( at, kValueRefSlotFactScope, std::move( owner ), field, type );
+        emitValueFact( at, kValueRefSlotFactScope, owner, field, type );
     }
 
     // The struct type a name is declared with, innermost scope first: declared = some scope declares it; key "" with
@@ -3979,7 +3979,7 @@ private:
                     break;
                 }
             }
-            emitValueFact( call, kValueRefDottedStringScope, std::move( flow ), kDottedShapeVariable, {}, sink );
+            emitValueFact( call, kValueRefDottedStringScope, flow, kDottedShapeVariable, {}, sink );
         }
     }
     // The assignment target's last name: `NAME`, `self.NAME`, `a.b.NAME`; "" for anything else (a tuple target, a subscript).
@@ -4303,7 +4303,7 @@ private:
     }
 
     // Record one call through the container `obj` (written callee `f`), routed by where `obj` is declared.
-    void emitThrough( TSNode call, TSNode obj, TSNode f, std::string key, bool bareCall )
+    void emitThrough( TSNode call, TSNode obj, TSNode f, const std::string& key, bool bareCall )
     {
         if( ts_node_is_null( obj ) )
         {
