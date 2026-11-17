@@ -808,7 +808,7 @@ struct MetBridgeShown
     void disclose( DisclosureWhy ) noexcept
     {
         prefixMissing = true;
-        rw::emitTo( stderr, "ripwire: --for: no capture buffer for the met_bridge proven prefix — it is not shown (missing=\"prefix\"), which is not empty\n" );
+        rw::emitRaw( stderr, "ripwire: --for: no capture buffer for the met_bridge proven prefix — it is not shown (missing=\"prefix\"), which is not empty\n" );
     }
 };
 
