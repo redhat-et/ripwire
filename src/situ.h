@@ -1151,17 +1151,22 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
         "\"(n): a, b\" = n runner-less files sharing that evidence; ";
     static constexpr std::string_view kSituRunRootRel  = "a (run: …) is relative to root:\n";
     static constexpr std::string_view kSituRunAbsolute = "a (run: …) is absolute: this report spans several roots, so there is no one root to be relative to:\n";
+    // PATH-FOLD (testmap.h): the rows are rendered BEFORE the heading, because the heading owes its reader the fold's
+    // rule exactly when a line carries "(n folded):" — and says nothing about it otherwise, so an unfolded section is
+    // byte-identical to what it was.
+    static constexpr std::string_view kSituRowsFolded = "\"(n folded): d/{a,s/{b,c}}.py\" = d/a.py, d/s/b.py, d/s/c.py (braces nest; expand in order); ";
+    const TestRunnerIndex     situRunners( ing, root );
+    const rw::JoinedTestRows  situRows = testRowsList( situRunners, evidenceRowsOut( testRows, EvDialect::Text, situPathRel ),
+                                                       TestRowShape{ RowDialect::Text, {}, "        ", /*fold=*/true }, []( std::string_view s ) { return std::string( s ); } );
     const std::string situRowsHeading =
         tests.empty() ? std::string( ": (none transitively reach these files)\n" )
-                      : std::string( kSituRowsOrder )
+                      : std::string( kSituRowsOrder ) + std::string( situRows.folded ? kSituRowsFolded : std::string_view() )
                             + std::string( rw::runsAreRootRelative( ing, root ) ? kSituRunRootRel : kSituRunAbsolute );
     rw::emitTo( out, "  [2] tests to run ({}){}", tests.size(), situRowsHeading.c_str() );
     // §P11.4: this section says "tests to run" and named files that are not commands. The runner is appended
     // where one is DERIVABLE and omitted where it is not — see testmap.h; a guessed command is worse than none.
     // E1: runner-less rows with equal evidence are ONE `[hops=N] (n): a, b` line — testmap.h's seam, the multiset unchanged
-    const TestRunnerIndex situRunners( ing, root );
-    rw::emitRaw( out, testRowsJoined( situRunners, evidenceRowsOut( testRows, EvDialect::Text, situPathRel ), TestRowShape{ RowDialect::Text, {}, "        " },
-                                      []( std::string_view s ) { return std::string( s ); } ).c_str() );
+    rw::emitRaw( out, situRows.text.c_str() );
     // §B7.3: this section inherits --affected's blind spot without --affected's disclosure — a shell harness
     // runs the compiled BINARY as a subprocess, which is not a call edge, so no test/*.sh gate can EVER be
     // named above, however much of the change it exercises. Same number, same counter as --affected's
@@ -1854,10 +1859,16 @@ inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const 
     // on here. (It remains a legitimate CALLER row elsewhere — --callers/--impact/--for still carry
     // rw::modScopeLegend for their own t="modscope" rows; this document has none of those, only <u> rows.)
     const std::string tgRunFirst = runFirstField( r.testRows, testRows, /*json=*/false );   // hono-20/textual-20: the run-first head
+    // §P11.4: this gate EXITS 4 on the obligation, so its rows carry the command that discharges it — where
+    // one is derivable. Absent run= = not derivable (testmap.h states why a fallback would be a lie).
+    // PATH-FOLD: rendered before the legend, which splices the fold's sentence exactly when a row carries pf=.
+    const TestRunnerIndex gateRunners( ing, root );
+    const JoinedTestRows  tgRows = testRowsList( gateRunners, evidenceRowsOut( r.testRows, EvDialect::Xml, tgPathRel ), TestRowShape{ RowDialect::Xml, "t", {}, /*fold=*/true }, ex );
     rw::emitTo( out, "<!-- {}{}{}{}{}{}{}{}-->{}", kTestGateLegend,
                   tgHasRows ? kTestGateRowLegend : "", std::string_view( kTestRowEvidenceLegend.data(), tgHasRows ? int( kTestRowEvidenceLegend.size() ) : 0 ),
                   runFirstLegend( !tgRunFirst.empty() ),   // exactly when the root carries run_first=
-                  runHintClauseIfRows( testRows, runsAreRootRelative( ing, root ) ),   // the ONE gate: this clause is about <t> rows, so an untested-only report pays nothing
+                  ( runHintClauseIfRows( testRows, runsAreRootRelative( ing, root ) )   // the ONE gate: this clause is about <t> rows, so an untested-only report pays nothing
+                    + std::string( tgRows.folded ? rw::kPathFoldLegendClause : std::string_view() ) ),
                   untestedModscopeLegend( r.untestedModscope > 0 ),   // F3: the full clause at N>0, a one-line definition at 0
                   testGateHunkShaped( r ) ? kTestGateGranularityLegend : "",   // the change-set narrowing, defined exactly when its attributes ride
                   ( std::string( rw::graphUnindexedLegend( rw::graphGaugeClauses( g ) ) )   // #66: exactly when the root carries the attribute
@@ -1865,9 +1876,6 @@ inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const 
                     + rw::declinedCallsGateLegend( r.declinedCalls > 0 && g.gateDeclinedCalls > 0 ) ).c_str(),   // the short form above makes no
                     // claim the standard-member gate's declines would contradict, so its clause stays off this budgeted legend
                   rw::rootRelPathsLegend( !tgRootAttr.empty() ) );
-    // §P11.4: this gate EXITS 4 on the obligation, so its rows carry the command that discharges it — where
-    // one is derivable. Absent run= = not derivable (testmap.h states why a fallback would be a lie).
-    const TestRunnerIndex gateRunners( ing, root );
     // shown_tests= / tests_capped= are DERIVED from the rows this document actually emits, not asserted.
     // tests_capped= was the string literal "0" — a disclosure that could never become "1", so if a <t> row
     // cap were ever added the attribute would keep saying nothing was cut while something was. It is kept
@@ -1890,7 +1898,7 @@ inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const 
                   declinedCallsAttrXml( r.declinedCalls ).c_str(),   // callers the radius could not walk; absent at zero
                   testGateGranularityAttrXml( r ).c_str(),   // the symbol-granular change set; absent without hunk evidence
                   nextAttrXml( testGateNextInvocation( ing, r, gateRunners ) ).c_str()  );   // P3 (L7)
-    rw::emitRaw( out, testRowsJoined( gateRunners, evidenceRowsOut( r.testRows, EvDialect::Xml, tgPathRel ), TestRowShape{ RowDialect::Xml, "t" }, ex ).c_str() );   // E1: <g> where no runner is derivable
+    rw::emitRaw( out, tgRows.text.c_str() );   // E1: <g> where no runner is derivable; PATH-FOLD: pf= where the listing folds
     for( const ShellGateObligation& gate : r.shellGates.obligations )
     {
         rw::emitTo( out, "<t p=\"{}\" evidence=\"{}\" run=\"{}\"/>", ex( tgPathRel( gate.fileId ) ).c_str(), gate.evidence,

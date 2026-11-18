@@ -308,7 +308,9 @@ i=1; while [ $i -le 30 ]; do printf 'int coreFn();\nint t%02d_main(){ return cor
 S2LINE="$( grep -E '^  \[2\]' "$TMP/situ30" || true )"
 # E1 (2026-09-12): runner-less rows sharing their evidence ride ONE `[hops=N] (n): a, b, …` line, so the
 # count is of PATHS (occurrences), not lines — `grep -c` would count the 30 tests as 1.
-S2ROWS="$( sed -n '/\[2\]/,/\[3\]/p' "$TMP/situ30" | grep -o 'test/t[0-9]*\.cpp' | wc -l | tr -d ' ' || true )"
+# PATH-FOLD (2026-11-18): thirty siblings fold (`(30 folded): test/{t1,t10,…}.cpp`), so a full path is no longer a
+# substring of the raw line — the rows are read through the shared reader, which expands a folded line.
+S2ROWS="$( sed -n '/\[2\]/,/\[3\]/p' "$TMP/situ30" | python3 "$ROOT/test/testrowpaths.py" paths text | grep -c '^test/t[0-9]*\.cpp$' || true )"
 case "$S2LINE" in
     *"showing "*" of "*) no "situ [2] still discloses a cut on its ANSWER rows (the 25-row cap was retired): $S2LINE";;
     *"(30)"*)             ok "situ [2]: '(30)' with no cut disclosed — answer rows never page";;
