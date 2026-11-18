@@ -791,6 +791,7 @@ for _g in \
     namedfileinputcheck \
     nameinfocheck \
     namekeyhopcheck \
+    namewalkcheck \
     namingcalibrationcheck \
     namingconsistencycheck \
     naminglenscheck \
