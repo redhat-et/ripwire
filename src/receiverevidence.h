@@ -1126,6 +1126,15 @@ struct CallResultTypes
             return found;
         } );
     }
+    // RUST-PATH-OWNER: the crate (RustLayout) file `f` belongs to, kNoCrate when the layout places it in none
+    std::uint32_t rustCrateOfFile( std::uint32_t f ) const
+    {
+        if( !rust.built )
+        {
+            buildRustLayout();
+        }
+        return f < rust.crateOf.size() ? rust.crateOf[ f ] : kNoCrate;
+    }
     // the (crate, module) `modPath` (`crate::model`, `super::x`, `mdbook_core::book`, a `use`d `model`) names at byte `at` of
     // file `f` — relative to the module `at` sits in, an inline `mod` included (fix round 3: `super::` inside `mod m` is the
     // file's module, `self::` is m)
@@ -3410,6 +3419,97 @@ struct ReceiverEvidence
         types.pathCut = false;   // the top-level walk's own cut: a cut walk is no proof that the path stays in the tree
         const bool out = types.rustPathOutside( r.fileId, r.startByte, written );
         return !out && !types.pathCut;
+    }
+    // RUST-PATH-OWNER: what the canonical tier's answer to a Rust path call `T::m( .. )` proves. The tier holds every in-tree `m`
+    // whose impl scope is NAMED T; the path names the ONE type T resolves to where it is written (the file's `use`s, its module
+    // path), resolved like a written `x: T` (rustQualifierClass), and each candidate's owner is the in-tree class its impl is for
+    // (selfClass). The invariant: two types, one name, never one `m`.
+    //   * T names an in-tree class: its own candidates are the answer. With none of them placed, a candidate another class owns
+    //     leaves and one the walk cannot place stays; nothing left (the class's `m` is no indexed definition) is declined, `cand`
+    //     untouched so the decline lists the namesakes.
+    //   * T names no class the walk can place (two globs bring it, a glob it cannot follow): two owners among the candidates in the
+    //     caller's own crate, or a member there it cannot place beside another, are a Split: every candidate stays (the ladder's
+    //     own split when locality would keep them all, else hedged) — never a locality pick. One there, a crate the layout cannot
+    //     place, or a module's item among the candidates (`util::tool()`: the module path decides it) keeps the tier as before.
+    enum class RustPathOwners : std::uint8_t { Keep, Split, Decline };
+    static constexpr NodeId kRustOwnerUnread  = kNoNode - 1;   // rustPathOwnerMemo: not read yet
+    mutable std::vector<NodeId> rustPathOwnerMemo;              // per symbol: its owner as rustPathOwners reads it (sized on first use)
+    RustPathOwners rustPathOwners( const Reference& r, std::vector<NodeId>& cand ) const
+    {
+        if( callResultFamilyOf( r.lang ) != CallResultFamily::Rust || r.qualifier.empty() || cand.empty() )
+        {
+            return RustPathOwners::Keep;
+        }
+        const std::string_view written = rustWrittenQualifierOf( r );
+        const NodeId           cls     = rustQualifierClass( r, written );
+        rw::SmallVec<NodeId, 4> owners;   // per candidate, in cand's order: its impl's in-tree class, or kNoNode (unplaced)
+        if( rustPathOwnerMemo.size() != ing.symbols.size() )
+        {
+            rustPathOwnerMemo.assign( ing.symbols.size(), kRustOwnerUnread );
+        }
+        for( const NodeId c : cand )
+        {
+            NodeId& owner = rustPathOwnerMemo[ c ];   // a candidate's owner is the candidate's own fact: read once per run
+            if( owner == kRustOwnerUnread )
+            {
+                owner = selfClass( c );
+            }
+            owners.push_back( owner );
+        }
+        const auto keepWhere = [ & ]( auto&& keep )   // cand narrowed to the candidates `keep( index )` holds, in order
+        {
+            std::size_t kept = 0;
+            for( std::size_t i = 0; i < cand.size(); ++i )
+            {
+                if( keep( i ) )
+                {
+                    cand[ kept++ ] = cand[ i ];
+                }
+            }
+            cand.resize( kept );
+        };
+        if( cls != kNoNode )
+        {
+            const bool own  = std::ranges::find( owners, cls ) != owners.end();
+            const auto mine = [ & ]( std::size_t i ) { return own ? owners[ i ] == cls : owners[ i ] == kNoNode; };
+            bool any = false;
+            for( std::size_t i = 0; i < cand.size() && !any; ++i )
+            {
+                any = mine( i );
+            }
+            if( !any )
+            {
+                return RustPathOwners::Decline;   // cand untouched: the declined site lists the namesakes it refused
+            }
+            keepWhere( mine );
+            return RustPathOwners::Keep;
+        }
+        // a module's item among them (`util::tool()`, an inline mod's fn) is the module path's question, not a type's: the tier as before
+        if( cand.size() < 2 || std::ranges::any_of( cand, [ & ]( NodeId c ) { return ownerClass[ c ].empty(); } ) )
+        {
+            return RustPathOwners::Keep;
+        }
+        // the types a path no `use` chooses may mean are the caller's own crate's (another crate's needs a `use` or its name); a crate the
+        // layout cannot place, or one of them in it, leaves the tier as before
+        const std::uint32_t crate = types.rustCrateOfFile( r.fileId );
+        if( crate == CallResultTypes::kNoCrate )
+        {
+            return RustPathOwners::Keep;
+        }
+        std::size_t inCrate = 0;
+        NodeId      first   = kNoNode;
+        bool        differ  = false;
+        for( std::size_t i = 0; i < cand.size(); ++i )
+        {
+            if( types.rustCrateOfFile( ing.symbols[ cand[ i ] ].fileId ) != crate )
+            {
+                continue;
+            }
+            first  = inCrate == 0 ? owners[ i ] : first;
+            differ = differ || owners[ i ] != first || owners[ i ] == kNoNode;
+            ++inCrate;
+        }
+        return inCrate >= 2 && differ ? RustPathOwners::Split : RustPathOwners::Keep;
     }
     // rust-receivers: the ONE class `self` names inside `from` (or the method enclosing it): the in-tree class of the method's
     // owner name that owns the method (memberOwnerRuleOf — Rust: its own file and item scope, or the only class of the name);

@@ -212,6 +212,28 @@ printf '%s' "$MAP" | grep -qE '<s t="fn" n="new"' \
 expect uses    new 4 "4 call SITES spell ::new (name-based use-sites, one of them the external Vec)"
 expect callers new 2 "but only 2 CALLERS — external_caller is not one of them"
 
+# ── §5b RUST-PATH-OWNER: a path names the ONE type it resolves to (test/rustpathownerfix, its own tree so §1-§9's counts hold) ──
+# The canonical tier matches a path call's SCOPE NAME: `TestClient::new( 1 )` held every in-tree `TestClient::new`, and the ladder
+# picked the one in the caller's directory, unhedged. Two classes are named TestClient (test_helpers/test_client.rs, the one the
+# `use`s name; other_helpers.rs, beside every caller). Literals read off test/rustpathownerfix/src/*.rs. RED on main 9087eb59c:
+# (a)-(d) bound other_helpers.rs unhedged.
+PO="test/rustpathownerfix"
+porows(){ run "$PO" "--callees=$1" --no-cache | grep -oE '<s t="[^>]*>' | sed -E 's/ (tested|test|of_def)="[^"]*"//g'; }
+poexpect(){   # $1 caller  $2 the exact rows, one per line  $3 prose
+    local got; got="$( porows "$1" )"
+    if [ "$got" = "$2" ]; then ok "§5b $1: $3"; else no "§5b $1 expected [$2] got [$got] — $3"; fi
+}
+TC='<s t="method" n="TestClient::new" p="src/test_helpers/test_client.rs:3"/>'
+OH='<s t="method" n="TestClient::new" p="src/other_helpers.rs:4"/>'
+poexpect one_use "$TC" "(a) RUST-PATH-SAMENAME-CLASS: \`use crate::test_helpers::TestClient\` names test_client.rs's, proven, never the same-directory namesake"
+poexpect written "$TC" "(b) the written path crate::test_helpers::TestClient::new names test_client.rs's"
+poexpect turbo '<s t="method" n="Holder::new" p="src/test_helpers/test_client.rs:8"/>' "(c) a turbofish Holder::<u32>::new under its \`use\` names test_client.rs's"
+poexpect two_globs '<s t="method" n="TestClient::new" p="src/other_helpers.rs:4" via="name"/>
+<s t="method" n="TestClient::new" p="src/test_helpers/test_client.rs:3" via="name"/>' "(d) NEGATIVE: two globs bring a TestClient and no \`use\` chooses: both hedged, never a pick"
+poexpect other_use "$OH" "(k) guard: \`use crate::other_helpers::TestClient\` keeps other_helpers.rs's, proven"
+poexpect written_other "$OH" "(l) guard: the written crate::other_helpers::TestClient::new keeps other_helpers.rs's"
+poexpect again "$TC" "(m) guard: Self::new() inside test_client.rs's impl stays its own"
+
 # ── §6 AMBIGUITY IS DISCLOSED, never silently resolved (plan §6) ───────────────────────────────────────
 # Canonical keying makes the honest cases precise, so the amb= path is exercised ON PURPOSE: two modules
 # in ONE file each hold `impl Thing`, so `Thing::run` legitimately keys TWO defs.
