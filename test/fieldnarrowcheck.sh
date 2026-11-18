@@ -1423,7 +1423,8 @@ private:
 };
 }
 EOF
-bnrows(){ "$BIN" "$BN" --callees="$1" --no-cache 2>/dev/null | grep -oE '<callees [^>]*>|<s [^>]*/>|<dc [^>]*/>' | tr '\n' ' '; }
+# status: the <callees> root and its rows are the verdict — a refusal or a crash leaves none, and every arm below then FAILs (bnneg's premise, bnpos's exact row)
+bnrows(){ "$BIN" "$BN" --callees="$1" --no-cache 2>/dev/null | grep -oE '<callees [^>]*>|<s [^>]*/>|<dc [^>]*/>' | tr '\n' ' '; }   # status: see the line above
 # a row naming callee $2 that is neither hedged (via=) nor a decline: what an agent reads as a fact
 bnfact(){ printf '%s' "$1" | grep -oE '<s [^>]*/>' | grep -E "n=\"([A-Za-z0-9_]+::)?$2\"" | grep -v ' via="'; }
 # NEGATIVE arm: the answer must exist and mention the call (a row or a decline of that name), and no fact row may name $3
