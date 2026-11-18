@@ -418,6 +418,7 @@
  "packtaskmonotoncheck.sh": 13.7,
  "packtaskquotacheck.sh": 2.7,
  "padscalecheck.sh": 1.0,
+ "pagenextlegendcheck.sh": 1.2,
  "paginationcheck.sh": 53.0,
  "pagingsweepcheck.sh": 267.3,
  "panellegendcheck.sh": 18.2,

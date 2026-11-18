@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 843 gate scripts (counts snapshot 2026-11-17) plus the determinism, cache-transparency and golden contracts. <!-- gatecount --> |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 854 gate scripts (counts snapshot 2026-11-18) plus the determinism, cache-transparency and golden contracts. <!-- gatecount --> |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -5888,7 +5888,7 @@ copy here would be exactly the dialect divergence that gate exists to catch. Com
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-(**843 gate scripts** at the counts snapshot 2026-11-17; `test/manifestcheck.sh` proves every listed name exists on disk). <!-- gatecount -->
+(**854 gate scripts** at the counts snapshot 2026-11-18; `test/manifestcheck.sh` proves every listed name exists on disk). <!-- gatecount -->
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -7008,7 +7008,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 843 at the counts snapshot 2026-11-17. The <!-- gatecount -->
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 854 at the counts snapshot 2026-11-18. The <!-- gatecount -->
   loop is the authority; the stale docstrings are a known drift. Since 2026-09-10 the number is not
   written by hand anywhere, and since 2026-11-02 it is the dated counts snapshot `docs/counts.tsv`
   (so two open changes that each add a gate never conflict on it): `docs/gatecount_build.py` rewrites
@@ -19404,3 +19404,91 @@ The unread token names a language, not a symbol: it says the language's value us
 use is known and no slot caller is: it is not a second copy of `slot_by=`, but the two overlap on rows that have both.
 The budget accounting does not charge the two legend comments (written by `packHops` beside the section, the way `via="name"`'s is);
 the section's `est_tokens` charge does include them. `--token-budget` ceilings were not re-measured with them.
+
+## PRE-REGISTRATION + READOUT 2026-11-18 (amendment 14) — BAND RP: a windowed answer does not say how to continue it cheaply
+
+The gate (`test/pagenextlegendcheck.sh`) was written and run RED on the pre-change binary before any
+`src/` change, and the arms that had to hold already did — including the safety claim. That order is the
+registration.
+
+### What was measured FIRST, on the pre-change binary
+
+A continuation page costs a FULL SECOND ANSWER. 57 windowed cells over `--impact`, `--grep`, `--uses`
+and `--callers` on nushell, cpython and envoy: median page/first = **1.01**, every verb inside
+0.99–1.02. **That ratio is mostly CORRECT and not waste** — page 0 and page 1 of
+`cpython --impact=assertEqual` each carry **89 rows and ~8,100 B of rows**, so a page delivers a fresh
+payload. An earlier reading of mine called the other 79 % a re-sent envelope; decomposing the page
+refuted it. The figure that survives is narrower: **the PROSE LEGEND is 3,255 B of that 12,281 B page,
+26.4 %**, and it is prose the reader already read on page 0.
+
+Re-taking all 57 continuations under `--legend=dict`: **median 13.2 % smaller** (min 3.5 %, max 23.2 %;
+summed 766,318 B → 670,237 B, 12.5 % off). Per verb `--impact` 19.3 %, `--callers` 12.9 %, `--grep`
+9.5 %, `--uses` 5.1 %. The saving already existed behind a flag and nothing told the reader to use it.
+
+### The registered rule, fixed before the change
+
+A cut listing that PAGES says, in its own legend, that the continuation may be taken with
+`--legend=dict`. Said in PROSE, carrying no new vocabulary.
+
+- **Bar (correctness, must hold):** the sentence appears when and only when a continuation exists, and
+  the continuation taken prose-free has a **byte-identical ROW SET** to the continuation without it. No
+  row may move. A smaller answer that answers less is a loss on this metric, so this arm is what
+  licenses the change.
+- **Control, must hold:** an answer that does NOT window must not carry it. A pointer to a page that is
+  not there is the mirror defect and reads as a cut answer.
+- **Cost (reported, no bar):** bytes added to a windowed answer, bytes saved on a continuation.
+
+### AN ATTRIBUTE WAS BUILT FIRST AND WITHDRAWN. That is the main finding of this band.
+
+The first implementation emitted `next_legend="--legend=dict"` from `pageDisclosure`, the one shared
+paging emitter. It worked, it was gate-green on ten arms with a mutation control, and it cost a constant
+**+190 B**. It was withdrawn because of what `test/legendcoveragecheck.sh` then said: the attribute
+reaches **19 verbs' first screens**, and the full dialect has no shared window clause, so each of those
+19 would need the definition in its own legend string across ~22 files. The exemption route is closed by
+contract — `test/legendcoverage_baseline.txt`'s own header states it is "an INVENTORY OF KNOWN DEBT, not
+an approval" and "may only be edited DOWNWARD".
+
+So the gate's ratchet was saying the attribute was the wrong shape for the value, and it was right. The
+prose form says the same thing to the reader, in the place the reader already learns that `next_offset=`
+pastes as `offset=`, and it measures **better**:
+
+| | attribute form (withdrawn) | **prose form (shipped)** |
+| --- | ---: | ---: |
+| cost on a windowed answer | +190 B constant | **+130 B constant** |
+| saving per continuation | 2,001 B median | **2,074 B median** |
+| break-even follow rate | 9.5 % | **6.3 %** |
+| rows lost | zero | **zero** |
+| registration sites | 19 verb dialects + a dictionary row | **2** |
+| dictionary identity moved | yes | **no** |
+
+### Readout
+
+All eight arms pass. The continuation's row set is byte-identical over 40 rows, so **completeness cannot
+regress through this path** — a property of the change, not a measurement of it.
+
+**The trade, measured on 30 windowed cells:** cost a constant **+130 B** (min +130, max +130), saving a
+median **2,074 B** per continuation taken prose-free, so it pays once **6.3 %** of continuations are
+followed.
+
+**Two figures of mine in this band were wrong and are corrected here.** The continuation cost was first
+estimated at 1,198 tokens from a median-of-medians and measured at ~1.0x a full answer. And the attribute
+form's cost was first written as "~29 B", counting the attribute and forgetting its definition costs
+more; the measured constant was +190 B.
+
+### Not done, and not claimed
+
+- **No agent was measured following the advice.** Whether the 6.3 % break-even is met is a behavioural
+  question about the reader, registered separately as BAND FU. This band does not assume it, which is
+  why the cost is disclosed as a cost rather than netted out.
+- **DISCLOSED GAP: the full dialect reaches only some verbs.** The DEFAULT (compact) posture is
+  universal — one clause in `src/compactlegend.h`, so every paging verb says it, and that is the posture
+  an agent gets. `--legend=full` has no shared window clause, so the sentence reaches only verbs whose
+  legend composes `src/pageview.h`'s `kPageRaiseCapClause` (`mcpverbs.h`, `graphlegend.h`,
+  `verbs_grep.h`, `verbs_navigate.h`). `--callers --legend=full` windows and does NOT carry it. The gate
+  asserts the full dialect on `--grep`, a shared-clause verb, and names this gap rather than hiding it.
+- The 57 cells cover four verbs that window; `--for` and `--pack-task` have no completion point and are
+  excluded from this metric by the registered rule.
+- Two continuation pages are much cheaper than 1.01x (0.22 on a `--uses` cell, 0.71 on a `--grep` cell).
+  Those are last pages with an emptying window, not a page mode, and they are the min of the range.
+- **This band makes continuing cheaper; it does not reduce the NUMBER of continuations needed.** The 19
+  cells that never complete within 24 calls are untouched by it.

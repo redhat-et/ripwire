@@ -2275,7 +2275,15 @@ inline std::string compactWindowClause( std::string_view head, std::string_view 
     {
         return {};
     }
-    return " window: " + window + ( payloadHasAnyAttr( doc, "next_offset" ) ? " (capped=1 cut; next_offset= pastes as offset=)." : " (capped=1 cut)." );
+    // BAND RP (docs/EVALS.md amendment 14): a cut listing that PAGES also says how to take the continuation
+    // cheaply. Measured over 57 windowed cells on four verbs, taking it prose-free is a median 13.2 % smaller
+    // and drops ZERO rows. Said in PROSE, carrying no new attribute: an attribute would need defining in 19
+    // verb dialects, and test/legendcoverage_baseline.txt is a ratchet that may only be edited DOWNWARD, so
+    // its own contract rules out shipping one undocumented. This is where the reader already learns that
+    // next_offset= pastes as offset=, so it is where the cheap continuation belongs.
+    return " window: " + window + ( payloadHasAnyAttr( doc, "next_offset" )
+                                        ? " (capped=1 cut; next_offset= pastes as offset=, and that continuation can be taken with --legend=dict — this answer already sent you its prose, so it drops no row, only prose)."
+                                        : " (capped=1 cut)." );
 }
 
 // The sub-cap clause — " importers_capped=/…: 1 = cut." — or empty when no payload attribute ends in _capped.
