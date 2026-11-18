@@ -98,8 +98,9 @@ two_rows(){ # file, subject: rows="2", the definition row, the header row decl_o
 import re, sys
 s = open( sys.argv[1], encoding="utf8" ).read()
 # a trailing <shortkey> (the out-of-band fallback ladder, gate barrelshortkeycheck: `app::run_it` is unproven under namespace app)
-# whose legend declares it outside est_tokens may follow; nothing else may
-m = re.search( r'<decl_rows of="([^"]*)" rows="(\d+)">(.*?)</decl_rows>(?:<!-- shortkey[^>]*?not in est_tokens[^>]*?-->(?:<shortkey [^>]*/>|<shortkey [^>]*>.*?</shortkey>))?</ctx>$', s, re.S )
+# whose legend declares it outside est_tokens may follow; nothing else may — except, since AF1 (2026-11-18), the answer-first
+# DOCUMENT legend: the trailing run of comments the default --for answer ends with, inside the same answer. No row may.
+m = re.search( r'<decl_rows of="([^"]*)" rows="(\d+)">(.*?)</decl_rows>(?:<!-- shortkey[^>]*?not in est_tokens[^>]*?-->(?:<shortkey [^>]*/>|<shortkey [^>]*>.*?</shortkey>))?(?:<!--(?:(?!-->).)*-->)*</ctx>$', s, re.S )
 if not m or m.group( 1 ) != sys.argv[2] or m.group( 2 ) != "2": sys.exit( 1 )
 rows = re.findall( r'<d [^>]*/>', m.group( 3 ) )
 if len( rows ) != 2: sys.exit( 1 )

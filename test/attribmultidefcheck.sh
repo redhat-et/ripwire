@@ -688,7 +688,9 @@ d = open( sys.argv[ 1 ], encoding="utf-8", errors="replace" ).read()
 m = re.search( r"<bodies [^>]*pick=\"name\"[^>]*>(.*?)</bodies>", d, re.S )
 if not m: print( "none" ); sys.exit( 0 )
 rows = re.findall( r"<c n=\"Normalize\"[^>]*>", m.group( 1 ) )
-legend = d.split( "<sigs", 1 )[ 0 ]
+# AF1 (2026-11-18): the default --for answer is answer-first — its document legend trails the rows, inside the same answer. The
+# reading must ride a legend COMMENT of this answer (CDATA masked), wherever it sits; ahead of <sigs> was the legend-first shape.
+legend = "".join( re.findall( r"<!--.*?-->", re.sub( r"<!\[CDATA\[.*?\]\]>", "", d, flags = re.S ), re.S ) )
 print( len( rows ), sum( "prov=\"split\"" in r for r in rows ), int( "c prov=split" in legend or "prov=\"split\" on a <c> row" in legend ) )
 ' "$DIR/s_slot.out" )"
 if [ "$s_rc" -ne 0 ] || [ "$s_counts" = none ] || [ -z "$s_counts" ]; then
@@ -697,8 +699,8 @@ else
     read -r s_all s_split s_leg <<<"$s_counts"
     if [ "$s_all" -ge 1 ] && [ "$s_split" = "$s_all" ]; then ok "[S] the body slot labels its $s_all Normalize split-arm row(s) prov=\"split\""
     else no "[S] the body slot's Normalize rows: $s_split of $s_all carry prov=\"split\""; fi
-    if [ "$s_leg" = 1 ]; then ok "[S] the header defines the split reading the slot's rows use"
-    else no "[S] no split reading in the header of an answer that labels a split arm"; fi
+    if [ "$s_leg" = 1 ]; then ok "[S] the answer's legend defines the split reading the slot's rows use"
+    else no "[S] no split reading in the legend of an answer that labels a split arm"; fi
 fi
 
 # [S] MCP twin (CR pre-pass A): the MCP for tool's slot body labels the same two rows, and defines the reading once beside

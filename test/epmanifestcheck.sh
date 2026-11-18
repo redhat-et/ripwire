@@ -385,8 +385,11 @@ for v in --json --signatures-only; do
 done
 # TOKEN-BUDGET-MONOTONE (rule 4, 2026-11-14): --token-budget no longer switches the answer's posture (it used to drop <ep> with
 # the rest of the default's enrichment); a budget the answer fits returns the unbudgeted answer byte for byte, <ep> as it is there
+# AF1 (2026-11-18): U is the whole LEGEND-FIRST answer a budget sheds — the budgeted path stayed legend-first and unpaged while the
+# flagless default became answer-first (budgetmonotonecheck (a) re-pinned the same way) — so the twin is --legend=first.
 run "$FX/cfg" "$TMP/n2tb" "$Q" --token-budget=3000
-if okrun "$TMP/n2tb" && cmp -s "$TMP/n2tb" "$TMP/cfg"; then ok "N2 --token-budget=3000: the unbudgeted answer byte for byte"; else no "N2 --token-budget=3000 is not the unbudgeted answer"; fi
+run "$FX/cfg" "$TMP/cfgfirst" "$Q" --legend=first
+if okrun "$TMP/n2tb" && cmp -s "$TMP/n2tb" "$TMP/cfgfirst"; then ok "N2 --token-budget=3000: the unbudgeted answer byte for byte"; else no "N2 --token-budget=3000 is not the unbudgeted answer"; fi
 # N3 prefix identity (compact legend)
 python3 - "$TMP/cfg" "$TMP/cfgoff" <<'PY'; verdict $? "N3 answer minus <ep> and its clause equals RIPWIRE_NO_EP_MANIFEST=1 (est_tokens masked)" "N3 prefix identity broken"
 import re, sys
@@ -396,7 +399,8 @@ a = re.sub(r"; ep p= l= group=:.*?groups_total= if cut", "", a, flags=re.S)
 # K-WRONGSYM: <syms> lists the shown files' symbols that NO WORD OF THE ANSWER names (src/forfilesyms.h), and the <ep> block names
 # some (used_in=load_other), so the answer without it lists one row more. Both sides are read less the <syms> block and its legend
 # comment (the rest is the prefix identity); the off side must carry the row the on side lost, or the strip proves nothing.
-syms = re.compile(r'<!-- (?:ripwire for )?syms:(?:(?!-->).)*--><syms .*?</syms>(?=</ctx>)', re.S)
+# AF1 (2026-11-18): answer-first — the last row block is followed only by the trailing document legend (comments) before </ctx>
+syms = re.compile(r'<!-- (?:ripwire for )?syms:(?:(?!-->).)*--><syms .*?</syms>(?=(?:<!--(?:(?!-->).)*-->)*</ctx>)', re.S)
 sa, sb = syms.search(a), syms.search(b)
 twin = sa is not None and sb is not None and 'n="load_other"' in sb.group(0) and 'n="load_other"' not in sa.group(0)
 a, b = syms.sub('', a), syms.sub('', b)
