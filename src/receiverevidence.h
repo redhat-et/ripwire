@@ -20,6 +20,7 @@
 // What it does NOT do: infer a function's return type (`s = self.get_screen(); s.refresh()`), follow a property, or type
 // a value that crossed a call boundary. Those receivers stay name-only — the honest answer, not a guess.
 
+#include "externalnames.h"   // kRustStdReceiverTypes / kRustStdDerefTypes / kRustPreludeTypes (lane std-namesake)
 #include "infra/idkeyedmap.h"   // IdKeyedCsr: localType's packed ( scope, name ) → facts table (K1a LOCALTYPE-PACK)
 #include "infra/sortutil.h"   // svLess: the explicit byte order the operatorResult sort takes (portablebuildcheck #6)
 #include "langfacts.h"   // langFacts(l).overloadsWithoutArity — overloadedAbove's language column
@@ -2123,6 +2124,20 @@ struct ReceiverEvidence
     HashMap<std::string, NodeId>                          memberClass;     // rust-receivers: "<class id>#field" → the ONE class its written type resolved to (kNoNode = unknown)
     HashMap<std::string, NodeId>                          memberIface;     // lane L6: "<class id>#field" → the trait a `Box<dyn T>` field dispatches through (kNoNode = disagree)
     HashMap<std::string, std::vector<std::string>>        embeds;          // "Class" → its other bases: Go embedded classes (promotion)
+    // lane std-namesake: a Rust struct field WRITTEN as a standard type — "<class id>#field" → the type's spine (ingest_binds.h
+    // rustStdSpine) and the file that declares it (the spine's names are proven there). Only a field with ONE declaration: build()
+    // drops an entry a second declaration of the field shares (a `#[cfg]` twin may be written as an in-tree type).
+    struct RustStdField
+    {
+        rw::InternedText spine;
+        std::uint32_t    fileId = 0;
+        std::uint32_t    decls  = 0;   // the MemberType records of this key, counted once every record is in
+    };
+    HashMap<std::string, RustStdField>                    memberStd;
+    mutable HashMap<std::string, std::string_view>        rustStdSpineMemo;      // "<fileId>#spine" → the proven final type name ("" unproven)
+    mutable HashMap<std::string, char>                    rustStdNamesakeMemo;   // type name → are its in-tree namesakes all std aliases
+    mutable HashMap<std::string, char>                    rustStdOwnerMemo;      // owner name → may a std receiver reach its methods
+    mutable std::vector<std::int8_t>                      rustForeignGlob;       // fileId → 0 unread, 1 no foreign glob import, 2 one
     HashMap<std::string, std::string>                     nameAlias;       // "<fileId>#local" → the class name it imports
     // FE-B (review B4): one binding of a local name — the class it names ("" = unknown: it hides an outer binding of the
     // name and proves nothing) and the bytes it is visible in. end == 0: a record with no span (a Python name, a reassignment,
@@ -2135,7 +2150,9 @@ struct ReceiverEvidence
         rw::InternedText type;              // "" = a tombstone
         NodeId           cls   = kNoNode;   // (L) fix round 1: the ONE in-tree class `type` resolved to (kNoNode: the name alone); Go: or the witness of a type the tree declares no class for (CallResultTypes::goDeclLessType)
         NodeId           iface = kNoNode;   // lane L6: a binding typed only as SOME implementor of this trait (type stays "")
-        rw::InternedText bound;             // lane L6: a generic bound's text (`R: Renderer`), "" otherwise
+        rw::InternedText bound;             // lane L6: a generic bound's text (`R: Renderer`), "" otherwise. Lane std-namesake: on a
+                                            //   TOMBSTONE with no iface (type "", cls and iface kNoNode) the SPINE of the standard type
+                                            //   the binding is written as (ingest_binds.h rustStdSpine; rustStdWrittenReceiver reads it)
         bool operator==( const LocalFact& ) const = default;
     };
     static_assert( sizeof( LocalFact ) == 24, "K1a: a local fact is six 4 B fields" );
@@ -2381,6 +2398,11 @@ struct ReceiverEvidence
             {
                 written.push_back( &b );   // rust-receivers: a written Rust type resolves like a declared result, once imports are known
             }
+            else if( ( b.kind == LocalBindKind::RecvType || b.kind == LocalBindKind::MemberType ) && !b.var.empty() && !b.importedName.empty()
+                     && callResultFamilyOf( ing.symbols[ b.fromSymbol ].lang ) == CallResultFamily::Rust )
+            {
+                noteRustStdWritten( from, b, b.importedName, false );   // std-namesake: a tombstone carrying a standard type's spine
+            }
             else if( ( b.kind == LocalBindKind::RecvType || b.kind == LocalBindKind::MemberType ) && !b.var.empty() && !b.importedName.empty() )
             {
                 qualified.push_back( &b );
@@ -2423,6 +2445,7 @@ struct ReceiverEvidence
         {
             noteDispatchWritten( *d );
         }
+        sealRustStdFields();
         std::ranges::sort( operatorResult, []( const std::pair<NodeId, std::string_view>& a, const std::pair<NodeId, std::string_view>& b )
                            { return a.first != b.first ? a.first < b.first : sortutil::svLess( a.second, b.second ); } );
         localType.seal();   // every fact but the AugAssign drops below: their reads see the sealed table
@@ -2551,6 +2574,13 @@ struct ReceiverEvidence
     void noteResolvedWritten( const Binding& w )
     {
         NodeId cls = types.resultClassOf( w, ing.symbols[ w.fromSymbol ].lang );
+        // std-namesake: a spelling that resolved to nothing in the tree and names a standard receiver type (`Vec<T>`, `String`,
+        // `std::collections::HashMap<K, V>`) keeps its tombstone, carrying the spelling as a one-name spine
+        if( cls == kNoNode && externalnames::inSortedTable( externalnames::kRustStdReceiverTypes, std::string_view( w.typeName ) ) )
+        {
+            noteRustStdWritten( factScope( w ), w, w.importedName.empty() ? std::string_view( w.typeName ) : std::string_view( w.importedName ), true );
+            return;
+        }
         if( cls != kNoNode && ing.symbols[ cls ].kind == SymKind::Interface )
         {
             cls = kNoNode;
@@ -2604,6 +2634,273 @@ struct ReceiverEvidence
         f.bound.assign( bound );
         localType.addUnique( factScope( d ), d.var, f );
     }
+    // ── lane std-namesake (STD-RECEIVER-NAMESAKE): a Rust receiver WRITTEN as a standard type ──────────────────────────────────
+    // A local, parameter or field whose written type spells a standard type (`m: &HashMap<K, V>`, `opt: Option<T>`, `s: &str`,
+    // the payload of `if let Some( x ) = v`) is the tombstone it was — it names no in-tree class — carrying the type's SPINE
+    // (ingest_binds.h rustStdSpine). A field is a memberClass tombstone with its spine in memberStd.
+    // `typedRecord`: the binding came through noteResolvedWritten (a spelling with a class NAME that resolved to nothing), which
+    // records a field's memberClass tombstone; a record that never named a class records what it did before the lane.
+    void noteRustStdWritten( NodeId scope, const Binding& b, std::string_view spine, bool typedRecord )
+    {
+        if( b.kind == LocalBindKind::MemberType )
+        {
+            if( !typedRecord )
+            {
+                noteMemberType( b, {} );   // the name tables' tombstone, as for any field that names no class
+            }
+            if( classLike( ing.symbols[ b.fromSymbol ].kind ) )
+            {
+                if( typedRecord )
+                {
+                    const auto [ it, fresh ] = memberClass.try_emplace( keyOf( b.fromSymbol, '#', b.var ), kNoNode );
+                    if( !fresh )
+                    {
+                        it->second = kNoNode;   // two declarations of the field disagree: decide nothing (noteResolvedWritten's rule)
+                    }
+                }
+                RustStdField field;
+                field.spine.assign( spine );
+                field.fileId = b.fileId;
+                memberStd.try_emplace( keyOf( b.fromSymbol, '#', b.var ), field );
+            }
+            return;
+        }
+        LocalFact f = factOf( b, kNoNode );
+        f.bound.assign( spine );
+        localType.addUnique( scope, b.var, f );
+    }
+    // a std field is read only when its struct declares the field ONCE: count every MemberType record of each kept key
+    void sealRustStdFields()
+    {
+        if( memberStd.empty() )
+        {
+            return;
+        }
+        for( const Binding& b : ing.bindings )
+        {
+            if( b.kind == LocalBindKind::MemberType && !b.var.empty() && b.fromSymbol < ing.symbols.size() && classLike( ing.symbols[ b.fromSymbol ].kind ) )
+            {
+                if( const auto it = memberStd.find( keyOf( b.fromSymbol, '#', b.var ) ); it != memberStd.end() )
+                {
+                    ++it->second.decls;
+                }
+            }
+        }
+        std::erase_if( memberStd, []( const auto& kv ) { return kv.second.decls != 1; } );
+    }
+    static bool rustPathRootedInStd( std::string_view path ) noexcept
+    {
+        const std::string_view root = path.substr( 0, path.find( "::" ) );
+        return root == "std" || root == "core" || root == "alloc";
+    }
+    // The tree's own Rust types named `name`: None; StdAliases when every one is an ALIAS of the standard type of that name (`pub
+    // type Result<T> = std::result::Result<T, Error>;`); Foreign when one is a struct, enum, union or trait, or an alias of
+    // anything else (or of a path not rooted in std / core / alloc) — an in-tree namesake a written `name` may mean.
+    enum class RustNamesakes : char { Foreign, None, StdAliases };
+    RustNamesakes rustNamesakesOf( std::string_view name ) const
+    {
+        const auto [ memo, fresh ] = rustStdNamesakeMemo.try_emplace( std::string( name ), char( 0 ) );
+        if( !fresh )
+        {
+            return RustNamesakes( memo->second );
+        }
+        NodeId            one     = kNoNode;
+        const std::size_t classes = types.classesNamed( name, CallResultFamily::Rust, []( NodeId ) { return true; }, one );
+        std::size_t       stdAliases = 0;
+        if( classes != 0 )
+        {
+            if( const auto rows = types.aliasesByName.find( std::string( name ) ); rows != types.aliasesByName.end() )
+            {
+                for( const Binding* b : rows->second )
+                {
+                    const std::string_view target = std::string_view( b->importedName );
+                    const std::string_view head   = target.substr( 0, target.find( '<' ) );
+                    const bool rustFile = b->fileId < ing.files.size() && std::string_view( ing.files[ b->fileId ] ).ends_with( ".rs" );
+                    stdAliases += rustFile && rustPathRootedInStd( head ) && head.find( "::" ) != std::string_view::npos && namesplit::afterLast( head, "::" ) == name ? 1u : 0u;
+                }
+            }
+        }
+        const RustNamesakes verdict = classes != stdAliases ? RustNamesakes::Foreign : classes == 0 ? RustNamesakes::None : RustNamesakes::StdAliases;
+        rustStdNamesakeMemo.find( std::string( name ) )->second = char( verdict );
+        return verdict;
+    }
+    // Does file `f` glob-import a module that is neither the standard library's nor the tree's (`use rayon::prelude::*`)? Such a
+    // glob may bring in a type that hides a prelude name, which no record shows: a bare prelude spelling proves nothing there.
+    bool rustHasForeignGlob( std::uint32_t f ) const
+    {
+        if( rustForeignGlob.size() < ing.files.size() )
+        {
+            rustForeignGlob.resize( ing.files.size(), 0 );
+        }
+        if( f >= rustForeignGlob.size() )
+        {
+            return true;
+        }
+        if( rustForeignGlob[ f ] == 0 )
+        {
+            bool foreign = false;
+            types.forEachImport( f, "*", [ & ]( const Binding& b )
+            {
+                const std::string_view path = std::string_view( b.importedName );
+                const std::string_view root = path.substr( 0, path.find( "::" ) );
+                const bool ours = root == "crate" || root == "self" || root == "super" || types.rustRootNamesTreePackage( f, b.startByte, path );
+                foreign = foreign || ( b.kind == LocalBindKind::TypeImport && !ours && !rustPathRootedInStd( path ) );
+            } );
+            rustForeignGlob[ f ] = foreign ? 2 : 1;
+        }
+        return rustForeignGlob[ f ] == 2;
+    }
+    // Is `written` — one name of a spine, as the source spells it (`Option`, `HashMap`, `std::sync::Mutex`, `io::Result`) — provably
+    // the STANDARD type in file `f`? `str` and "[]" always (no declaration can shadow a primitive). Otherwise the tree must define
+    // no namesake but an alias of the standard type itself (rustNamesakesAreStd), and the spelling must reach std: a path rooted
+    // in std / core / alloc; a path whose first segment the file imports from there (`use std::io;` … `io::Result`); a bare name
+    // the file imports from there, or from `crate` / `self` / `super` where the tree aliases the standard type under that name; or a bare PRELUDE name the
+    // file neither imports from elsewhere nor may receive from a foreign glob. A renamed or outside import of the name, and a
+    // non-prelude name the file does not import (it came through a glob or a macro), prove nothing.
+    bool rustStdNameProven( std::uint32_t f, std::string_view written ) const
+    {
+        if( written == "str" || written == "[]" )
+        {
+            return true;
+        }
+        const std::size_t      sep  = written.find( "::" );
+        const std::string_view name = namesplit::afterLast( written, "::" );
+        if( !( externalnames::inSortedTable( externalnames::kRustStdReceiverTypes, name ) || externalnames::inSortedTable( externalnames::kRustStdDerefTypes, name ) )
+            || name == "str" || name == "[]" || rustNamesakesOf( "Box" ) == RustNamesakes::Foreign )   // Box: a typed record's `Box<Vec<T>>` was read through unseen
+        {
+            return false;
+        }
+        const RustNamesakes namesakes = rustNamesakesOf( name );
+        if( namesakes == RustNamesakes::Foreign )
+        {
+            return false;
+        }
+        const std::string_view probe = sep == std::string_view::npos ? name : written.substr( 0, sep );   // the name the file must bind
+        bool good = false, bad = false;
+        types.forEachImport( f, probe, [ & ]( const Binding& b )
+        {
+            if( b.kind != LocalBindKind::TypeImport )
+            {
+                return;   // the file's own alias of the name: rustNamesakesAreStd answered for it
+            }
+            const std::string_view path = std::string_view( b.importedName );
+            const std::string_view root = path.substr( 0, path.find( "::" ) );
+            const bool fromStd  = rustPathRootedInStd( path ) && !types.rustRootNamesTreePackage( f, b.startByte, path );
+            const bool fromTree = sep == std::string_view::npos && namesakes == RustNamesakes::StdAliases && b.typeName == probe
+                               && ( root == "crate" || root == "self" || root == "super" );
+            ( fromStd || fromTree ? good : bad ) = true;
+        } );
+        if( bad )
+        {
+            return false;
+        }
+        if( sep != std::string_view::npos )
+        {
+            return good || ( rustPathRootedInStd( written ) && !types.rustRootNamesTreePackage( f, 0, written ) );
+        }
+        return good || ( externalnames::inSortedTable( externalnames::kRustPreludeTypes, name ) && !rustHasForeignGlob( f ) );
+    }
+    // The final type name a spine proves its binding to be — "Vec", "Mutex", "[]" — when EVERY name on it is the standard type in
+    // file `f` (rustStdNameProven), else "". Memoised per ( file, spine ).
+    std::string_view rustStdSpineHead( std::uint32_t f, std::string_view spine ) const
+    {
+        const auto [ memo, fresh ] = rustStdSpineMemo.try_emplace( std::string( keyOf( f, '#', spine ) ), std::string_view{} );
+        if( !fresh )
+        {
+            return memo->second;
+        }
+        std::string_view head;
+        for( std::string_view rest = spine; ; )
+        {
+            const std::size_t      cut = rest.find( '<' );
+            const std::string_view seg = rest.substr( 0, cut );
+            if( seg.empty() || !rustStdNameProven( f, seg ) )
+            {
+                head = {};
+                break;
+            }
+            head = namesplit::afterLast( seg, "::" );
+            if( cut == std::string_view::npos )
+            {
+                break;
+            }
+            rest.remove_prefix( cut + 1 );
+        }
+        if( !externalnames::inSortedTable( externalnames::kRustStdReceiverTypes, head ) )
+        {
+            head = {};   // a spine must END in a receiver type (a bare `Arc` proves nothing)
+        }
+        rustStdSpineMemo.find( std::string( keyOf( f, '#', spine ) ) )->second = head;
+        return head;
+    }
+    // The standard type a Rust member call's receiver is WRITTEN as, proven (rustStdSpineHead), else "": a local or parameter
+    // (`m.get( k )`), a field of `self` or of a local typed as an in-tree class, each field above the last by its resolved class
+    // (`self.opt.map( .. )`, `s.inner.names.get( 0 )`). The receiver is the ROOT or the last FIELD itself — never a call result,
+    // an index, a `?` or an `.await` on it (chainOf reads none of those as a path). A local is read lexically (localSeenAt): a
+    // shadowing binding of the name, typed or not, hides the standard one.
+    std::string_view rustStdWrittenReceiver( const Reference& r ) const
+    {
+        if( !active || langFacts( r.lang ).writtenStdReceiver != WrittenStdReceiver::RustSpine || r.fromSymbol >= ing.symbols.size() || !r.qualifier.empty() || !isMemberCallRef( r ) )
+        {
+            return {};
+        }
+        const Chain ch = chainOf( r );
+        if( !ch.valid || !ch.ctor.empty() || ch.root.empty() )
+        {
+            return {};
+        }
+        NodeId cls = kNoNode;
+        if( ch.root == "self" )
+        {
+            cls = ch.path.empty() ? kNoNode : selfClass( r.fromSymbol );
+        }
+        else if( const std::optional<SeenLocal> t = localSeenAt( r.fromSymbol, ch.root, r.startByte ); t.has_value() )
+        {
+            if( ch.path.empty() )
+            {
+                const bool stdTombstone = t->type.empty() && t->cls == kNoNode && t->iface == kNoNode && !t->bound.empty();
+                return stdTombstone ? rustStdSpineHead( r.fileId, t->bound ) : std::string_view{};
+            }
+            cls = t->cls;
+        }
+        for( std::string_view rest = ch.path; cls != kNoNode; )
+        {
+            const std::size_t      dot   = rest.find( '.' );
+            const std::string_view field = rest.substr( 0, dot );
+            if( dot == std::string_view::npos )   // the last field: the receiver itself
+            {
+                const auto it = memberStd.find( keyOf( cls, '#', field ) );
+                return it == memberStd.end() ? std::string_view{} : rustStdSpineHead( it->second.fileId, std::string_view( it->second.spine ) );
+            }
+            rest.remove_prefix( dot + 1 );
+            const auto it = memberClass.find( keyOf( cls, '#', field ) );
+            cls = it == memberClass.end() ? kNoNode : it->second;
+        }
+        return {};
+    }
+    // May a receiver proven to be the standard type `head` run a method OWNED by the in-tree type-like name `owner`? Only through
+    // a trait: `owner` is a trait (its default method, or the declaration an `impl Trait for Vec<T>` answers), an alias (`impl Ext
+    // for Table` under `type Table = HashMap<..>` is an impl for the standard type), or the type's own name. A struct, enum or
+    // union of another name never: std's types deref to no user type and take no inherent impl outside std.
+    bool rustStdReceiverMayReach( std::string_view owner, std::string_view head ) const
+    {
+        if( owner == head )
+        {
+            return true;
+        }
+        const auto [ memo, fresh ] = rustStdOwnerMemo.try_emplace( std::string( owner ), char( 0 ) );
+        if( fresh )
+        {
+            NodeId     one    = kNoNode;
+            const bool trait  = types.classesNamed( owner, CallResultFamily::Rust, [ & ]( NodeId c ) { return ing.symbols[ c ].kind == SymKind::Interface; }, one ) != 0;
+            const bool known  = types.classesNamed( owner, CallResultFamily::Rust, []( NodeId ) { return true; }, one ) != 0;
+            const bool reach  = trait || !known || types.aliasesByName.contains( std::string( owner ) );
+            rustStdOwnerMemo.find( std::string( owner ) )->second = char( reach ? 1 : 0 );
+            return reach;
+        }
+        return memo->second != 0;
+    }
+
     // is the result of the operator Python calls on a `cls` receiver (`inPlace`, else `binary`) provably `cls` (augDropsClass)
     bool operatorKeepsClass( std::string_view cls, NodeId id, std::string_view inPlace, std::string_view binary ) const
     {

@@ -380,7 +380,12 @@ constexpr std::uint32_t kCacheVersion = 52;           // 52: lane failure-defaul
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 331;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 333;          // bump on any grammar/.scm/extraction change
+                                                      // 333 = 2026-11-18 (train 1117d2, stacked on train 1117d1's 331/332; above the members' placeholders): rich file tag 334.
+                                                      //   The members' extraction changes (each lane's number was a placeholder):
+                                                      //   std-namesake (placeholder 317): a Rust local, parameter or field written as a standard type that names no class (`Option<T>`,
+                                                      //   `&str`, `Arc<Mutex<T>>`) keeps its tombstone with the type's spine as importedName (ingest_binds.h rustStdSpine), and
+                                                      //   `if let Some( x ) = v` under a written `v: Option<Vec<T>>` records x the same way.
                                                       // 331 = 2026-11-18 (train 1117d1; above main's 311/312, #688's 313/314 and the members' placeholders
                                                       //   317/321/323/327/329): rich file tag 332. kCacheVersion unchanged. The members' extraction changes:
                                                       //   go-cpp-edges (placeholder 317): a Go result type written as a generic instantiation (`Set[T]`, `*pkg.Set[string]`) records its

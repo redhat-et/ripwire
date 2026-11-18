@@ -60,6 +60,15 @@ enum class WrittenModuleRule : std::uint8_t
     DirsOnly,
 };
 
+/// Lane std-namesake (STD-RECEIVER-NAMESAKE): how a receiver WRITTEN as a standard type is proven, so a member call on it binds
+/// no in-tree namesake (graph.h stdWrittenReceiverOf). None: the language records no such proof and its calls keep the name tier.
+enum class WrittenStdReceiver : std::uint8_t
+{
+    None,
+    RustSpine,        // the binding's written type spine, each name proven std's in the file (receiverevidence.h rustStdWrittenReceiver)
+    CppStdTemplate,   // the declaration in scope written `std::NAME< … >` (externalnames.h kCppStdReceiverTypes; graph.h StdWrittenReceiverRule)
+};
+
 /// Lane fc2-lego-extparent: which of the file's own import facts can show that an extends / implements clause names a type
 /// from OUTSIDE the tree (graph.h baseBoundOutsideTree), so no in-tree namesake is listed as its base. None: the language's
 /// imports cannot rule one out here (a C# `using`, a Swift `import`, a C++ include: the clause keeps its by-name edge).
@@ -269,6 +278,11 @@ struct LangFacts
     /// buildFieldNarrowTables follows a bounded alias chain). A `.` call on such a member reaches the smart pointer, never I.
     bool aliasPeelsSmartPointer = false;
 
+    /// Rust, C++: a `.` call on a local, parameter or field whose declaration is written as a standard type runs the standard
+    /// library's own member, so a candidate an in-tree class owns under another name is dropped (lane std-namesake; the proof per
+    /// language is WrittenStdReceiver's).
+    WrittenStdReceiver writtenStdReceiver = WrittenStdReceiver::None;
+
     /// C++ (and every `.h`, which reads as C++; a `.c` file reads with the C grammar and its own query, untouched here, card
     /// C-FUNCTYPE-QUERY): a `using X = Y;` / `namespace L = lib;` definition (tags @definition.alias) records
     /// where its written target starts (src/aliasdef.h, model.h AliasTarget; the defs verb prints it as to=), and one written
@@ -468,7 +482,7 @@ inline constexpr std::array<std::string_view, 3> kJavaObjectMethods = { "equals"
 
 /// The rows, one per Lang in enum order. A language says only the facts it has.
 inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
-    { .lang = Lang::Cpp, .basesAsCaptures = true, .defectShapeNeedsMacroSet = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .aliasTargetDefs = true, .memberSeparator = "::",
+    { .lang = Lang::Cpp, .basesAsCaptures = true, .defectShapeNeedsMacroSet = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .writtenStdReceiver = WrittenStdReceiver::CppStdTemplate, .aliasTargetDefs = true, .memberSeparator = "::",
       .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain, .staticLinkage = true,
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .signatureRows = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .qualifierNamesScope = true,
       .typedInstanceRows = true, .xMacroRows = true, .objectMacrosUnindexed = true, .edgeFamily = Lang::C },
@@ -481,7 +495,7 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::Go, .structuralTyping = true, .writtenModule = WrittenModuleRule::PackageDir,
       .memberNeverReachesFreeFunction = true, .moduleCallReachesFunctionsOnly = true, .signatureRows = true,
       .testRunnerEntry = TestRunnerEntry::GoTestName, .memberDecl = MemberDecl::NameThenType },
-    { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .rule3NameProof = Rule3NameProof::RustUse, .preludeCalls = kRustPreludeCalls, .bangMacros = true, .returnTypedDispatchLet = true, .constructorMethod = "new", .memberSeparator = "::", .baseImportEvidence = BaseImportEvidence::RustUse,
+    { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .rule3NameProof = Rule3NameProof::RustUse, .preludeCalls = kRustPreludeCalls, .bangMacros = true, .writtenStdReceiver = WrittenStdReceiver::RustSpine, .returnTypedDispatchLet = true, .constructorMethod = "new", .memberSeparator = "::", .baseImportEvidence = BaseImportEvidence::RustUse,
       .selectorPathKeywords = true, .instanceReceiver = "self", .memberNeverReachesFreeFunction = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .localBraceNotData = true, .armOpeners = ArmOpeners::FatArrow,
       .testRunnerEntry = TestRunnerEntry::RustTestAttr, .attributeRegistersTests = true, .dropRunsAtScopeExit = true },
     { .lang = Lang::Swift, .writtenModule = WrittenModuleRule::DirsOnly, .instanceReceiver = "self",
