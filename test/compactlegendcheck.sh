@@ -1351,8 +1351,12 @@ if len( sys.argv ) > 5:
     # the rows against T less the trailing sections, so a cut is maximal when the next row of the reference would carry est_tokens
     # past N (its bytes at 2.0 B a token, the lenient side); an answer at the rank 1..4 floor whose est_tokens is still past N
     # could not carry another row. The rows-only reading above stays for the --json dialect, which keeps the row target.
+    # CodeRabbit #686: the price is est_tokens plus the held blocks and their legends (softbudget.py whole_price, the fit's
+    # heldBlocksPrice): the held <syms> stub's `<!-- ripwire for syms:` legend comes off the target, so est alone under-reads it
     if cut and k < len( ref[ "rows" ] ) and a[ "est" ] != "-" and not a[ "s" ].lstrip().startswith( "{" ):
-        maximal = ( k <= 4 ) if int( a[ "est" ] ) > N else int( a[ "est" ] ) + ref[ "rows" ][ k ][ 2 ] / 2.0 > N
+        from softbudget import whole_price
+        wp = whole_price( sys.argv[ 1 ] )
+        maximal = ( k <= 4 ) if wp > N else wp + ref[ "rows" ][ k ][ 2 ] / 2.0 > N
     # FIX2 C1 (rule 4): the upper-bound twin of maximality (test/lib/softbudget.py upper_bound): rows past the floor stop where T less
     # the other sections and the tail reserve runs out; RED on a binary that ignores the tail reserve
     from softbudget import upper_bound
