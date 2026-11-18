@@ -584,6 +584,7 @@ for _g in \
     fortailfoldcheck \
     fortailwidecheck \
     forunusedcheck \
+    forverbroutecheck \
     forwidencheck \
     freshclonecheck \
     freshnesscheck \

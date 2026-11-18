@@ -117,6 +117,10 @@ bound a `--for` call with `--signatures-only`, `--token-budget=N` or `--detail=N
 A `--for` answer comes **answer-first, in pages** of about 12 KB: the root says `page= pages= withheld_bytes=`, and its
 `next=` (the same call with `--page-bytes=N:K`) serves the next page with no legend re-sent. Stop reading once the
 answer is in hand; `--page-bytes=0` serves the whole answer in one call, `--legend=first` the legend-first order.
+A `--for` question that names its symbol in backticks and asks who calls it, what it reaches or what breaks is
+answered by `--callers` / `--impact` / `--uses`, ROUTED: `<route kind= verb= complete="not-proven" next=>` comes first;
+`warn="1" why=` means evidence of a miss, and then the first `--for` page rides along. `--no-verb-route` (the route's
+`next=`) is the ranked answer, unrouted.
 When the ranked rows leave files out, the map ends with `<inv>`: the program entries (`<entry>`, by each language's entry convention)
 and every unshown file, named or counted per directory (`<ls>`). Read it before concluding a file or entry point is
 not there; `--no-inventory` drops it (the rows are unchanged), and so does `--max-tokens` — `--top-k` keeps it.
