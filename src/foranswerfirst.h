@@ -48,6 +48,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -280,6 +281,34 @@ inline constexpr std::string_view kPromotable[] = { "lit", "dotted_strings", "gr
     return out;
 }
 
+// ── AF4 T-B, CALLERS FIRST UNDER A CALLERS CUE (results/P1_VERBROUTE_1118/SPEC.md §2; pre-registered in
+// results/AF4_TOPLOAD_1118/PREREG.md). A who-calls question ("which functions call `f` directly?") is answered by the
+// <callers by="subject"> block, which the assembly emits after <sigs>; on P1's three such held-out cells, emitted first it moved
+// bytes-to-all-gold 5,387→726, 6,629→935 and 11,112→743 with the same bytes and groups. The CUE is the caller's to read
+// (subjectanchor.h subjectCallersCueLeads, from the task): a change or blast-radius question must NOT lead with the one-hop
+// callers (P1's change-risk cell got worse, 5,965→6,451). Order only: the block, with any lead comment of its own, becomes the
+// first row block; no byte is added (P1's `lead=` disclosure attribute is deliberately not built: it would break the permutation
+// contract answerFirst ENSURES). G runs on the order this produces, so its guard counts the block's bytes.
+inline constexpr std::string_view kSubjectCallersOpen = "<callers by=\"subject\"";
+
+// The top-level <callers by="subject"> block among `blocks`, or npos.
+[[nodiscard]] inline std::size_t subjectCallersBlock( std::string_view view, const std::vector<Block>& blocks ) noexcept
+{
+    for( std::size_t j = 0; j < blocks.size(); ++j )
+    {
+        if( !blocks[ j ].comment && blocks[ j ].name == "callers" && view.substr( blocks[ j ].begin ).starts_with( kSubjectCallersOpen ) ) { return j; }
+    }
+    return std::string_view::npos;
+}
+
+// T-B: `order` with block `lead` moved to the front, every other block's relative order kept (npos: unchanged).
+[[nodiscard]] inline std::vector<std::size_t> leadWith( std::vector<std::size_t> order, std::size_t lead )
+{
+    const auto at = std::ranges::find( order, lead );
+    if( at != order.end() ) { std::rotate( order.begin(), at, at + 1 ); }
+    return order;
+}
+
 // The answer-first order of the row blocks before G: resolved routed sections, then every other row block in place, a
 // zero-row lego/compose stub that sits between <sigs> and <tail> moved to just after </tail>.
 [[nodiscard]] inline std::vector<std::size_t> rowBlockOrder( std::string_view view, const std::vector<Block>& blocks )
@@ -365,12 +394,12 @@ struct Layout
 
 // Append the blocks in ANSWER-FIRST order: the row blocks (each preceded by its own block-local legend, so the convention's
 // adjacency survives), then the DOCUMENT legend, then the comments A lifted out of the sections. Every byte of the answer is
-// copied once; only the order moves.
-inline void appendAnswerFirst( std::string_view view, const std::vector<Block>& blocks, std::string& out )
+// copied once; only the order moves. `lead` (T-B): the block that goes first, before G reads the order; npos for none.
+inline void appendAnswerFirst( std::string_view view, const std::vector<Block>& blocks, std::string& out, std::size_t lead )
 {
     const Layout l   = layoutBlocks( view, blocks );
     const auto   put = [ & ]( std::size_t k ) { out.append( view.substr( blocks[ k ].begin, blocks[ k ].end - blocks[ k ].begin ) ); };
-    for( const std::size_t j : promoteGuarded( view, blocks, rowBlockOrder( view, blocks ), l ) )
+    for( const std::size_t j : promoteGuarded( view, blocks, leadWith( rowBlockOrder( view, blocks ), lead ), l ) )
     {
         for( std::size_t k = 0; k < blocks.size(); ++k )
         {
@@ -385,29 +414,61 @@ inline void appendAnswerFirst( std::string_view view, const std::vector<Block>& 
     for( const std::string_view c : l.hoisted ) { out.append( c ); }
 }
 
-// Permute one finished --for answer in place. Returns whether it was rewritten.
+// The root's body: [after the <ctx …> open tag, at </ctx>), or nullopt when the document is not one <ctx> root.
+struct RootBody
+{
+    std::size_t openEnd = 0;   // the open tag's '>'
+    std::size_t closeAt = 0;   // the "</ctx>"
+};
+[[nodiscard]] inline std::optional<RootBody> rootBody( std::string_view view ) noexcept
+{
+    const std::size_t openAt = view.find( "<ctx" );
+    if( openAt == std::string_view::npos ) { return std::nullopt; }
+    const std::size_t openEnd = view.find( '>', openAt );
+    const std::size_t closeAt = view.rfind( "</ctx>" );
+    if( openEnd == std::string_view::npos || closeAt == std::string_view::npos || closeAt <= openEnd ) { return std::nullopt; }
+    return RootBody{ openEnd, closeAt };
+}
+
+// T-B: the of= of the answer's top-level <callers by="subject"> block, still XML-escaped as the answer prints it; "" when there is
+// none. Read from the TOP-LEVEL scan, never a text search: a CDATA body can spell the same open tag.
+[[nodiscard]] inline std::string_view subjectCallersOf( std::string_view doc )
+{
+    const std::optional<RootBody> rb = rootBody( doc );
+    if( !rb ) { return {}; }
+    const std::vector<Block> blocks = topLevelBlocks( doc, rb->openEnd + 1, rb->closeAt );
+    const std::size_t        j      = subjectCallersBlock( doc, blocks );
+    if( j == std::string_view::npos ) { return {}; }
+    const std::string_view open = doc.substr( blocks[ j ].begin, doc.find( '>', blocks[ j ].begin ) - blocks[ j ].begin );
+    const std::size_t      at   = open.find( " of=\"" );
+    if( at == std::string_view::npos ) { return {}; }
+    const std::size_t from = at + 5, to = open.find( '"', from );
+    return to == std::string_view::npos ? std::string_view() : open.substr( from, to - from );
+}
+
+// Permute one finished --for answer in place. Returns whether it was rewritten. `callersLead` (T-B): the task asks who calls the
+// subject the <callers by="subject"> block answers, so that block leads.
 //
 // Every byte of every block is copied unchanged; only their order moves. The ENSURES below is the contract:
 // a permutation that changed the document's size would be a different change wearing this one's name.
-inline bool answerFirst( std::string& doc )
+inline bool answerFirst( std::string& doc, bool callersLead = false )
 {
-    const std::string_view view = doc;
-    const std::size_t      openAt = view.find( "<ctx" );
-    if( openAt == std::string_view::npos ) { return false; }
-    const std::size_t openEnd = view.find( '>', openAt );
-    const std::size_t closeAt = view.rfind( "</ctx>" );
-    if( openEnd == std::string_view::npos || closeAt == std::string_view::npos || closeAt <= openEnd ) { return false; }
+    const std::string_view        view = doc;
+    const std::optional<RootBody> rb   = rootBody( view );
+    if( !rb ) { return false; }
+    const std::size_t openEnd = rb->openEnd, closeAt = rb->closeAt;
 
     const std::vector<Block> blocks = topLevelBlocks( view, openEnd + 1, closeAt );
     if( blocks.empty() ) { return false; }   // not a shape this pass understands: served unchanged
 
-    if( !permutationWouldMove( view, blocks ) ) { return false; }
+    const std::size_t lead = callersLead ? subjectCallersBlock( view, blocks ) : std::string_view::npos;
+    if( lead == std::string_view::npos && !permutationWouldMove( view, blocks ) ) { return false; }
 
     std::string out;
     out.reserve( doc.size() );
     out.append( view.substr( 0, openEnd + 1 ) );
 
-    appendAnswerFirst( view, blocks, out );
+    appendAnswerFirst( view, blocks, out, lead );
     out.append( view.substr( closeAt ) );
 
     // THE PERMUTATION CONTRACT. Not an assertion of taste: if this ever fails, the pass has dropped or

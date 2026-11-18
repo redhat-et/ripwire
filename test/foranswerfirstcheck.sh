@@ -537,5 +537,78 @@ sys.exit(1 if bad else 0)
 PY_AF2
 [ $? -eq 0 ] || fail=1
 
+# (CL) AF4 T-B -- CALLERS FIRST UNDER A CALLERS CUE (results/P1_VERBROUTE_1118/SPEC.md §2, results/AF4_TOPLOAD_1118/PREREG.md).
+# A who-calls question's <callers by="subject"> block is the FIRST row block of the answer-first document; a change / blast-radius
+# or transitive question keeps it where it was. ORDER-ONLY: the who-calls answer is still a permutation of its legacy order
+# (equal length, identical unit multiset). (CL1) is RED on the parent binary (f6288ec32 emits the block after <sigs>).
+TASK_C="Which functions call \`topLevelBlocks\` directly?"
+TASK_X="What is the blast radius of changing \`topLevelBlocks\`?"
+TASK_T="Which functions call \`topLevelBlocks\` transitively?"
+cap "$WORK/c_new.xml" "$TASK_C" $OPTIN $WHOLE
+cap "$WORK/c_old.xml" "$TASK_C" $LEGACY
+cap "$WORK/x_new.xml" "$TASK_X" $OPTIN $WHOLE
+cap "$WORK/t_new.xml" "$TASK_T" $OPTIN $WHOLE
+python3 - "$WORK" <<'PY_CL'
+import re, sys, os
+W = sys.argv[1]; bad = 0
+def rd(n): return open(os.path.join(W, n), "rb").read().decode("latin-1")
+def cdata(d): return re.sub(r"<!\[CDATA\[.*?\]\]>", lambda m: " " * len(m.group(0)), d, flags=re.S)
+def mask(d): return re.sub(r"<!--.*?-->", lambda m: " " * len(m.group(0)), cdata(d), flags=re.S)
+def tops(d):
+    """top-level row blocks of <ctx> as (name, open tag) in order -- comments and CDATA masked first"""
+    m = mask(d); r = re.search(r"<ctx\b[^>]*>", m); i = r.end(); end = m.rfind("</ctx>"); out = []; depth = 0; start = 0; name = ""
+    for t in re.finditer(r"<(/?)([A-Za-z_][\w-]*)[^>]*?(/?)>", m[i:end]):
+        a, b = i + t.start(), i + t.end()
+        if t.group(1):
+            depth -= 1
+            if depth == 0: out.append((name, d[start:d.find(">", start) + 1]))
+        elif t.group(3):
+            if depth == 0: out.append((t.group(2), d[a:b]))
+        else:
+            if depth == 0: start, name = a, t.group(2)
+            depth += 1
+    return out
+def units(d):
+    """AF2's unit multiset: root open/close, each top-level block's open and close tag, its direct children, top-level comments"""
+    m = cdata(d); r = re.search(r"<ctx\b[^>]*>", m); end = m.rfind("</ctx>"); out = [d[:r.end()], d[end:]]; depth = 0; kid = 0
+    for t in re.finditer(r"<!--.*?-->|<(/?)([A-Za-z_][\w-]*)[^>]*?(/?)>", m[r.end():end], re.S):
+        a, b = r.end() + t.start(), r.end() + t.end()
+        if t.group(0).startswith("<!--"):
+            if depth <= 1: out.append(d[a:b])
+        elif t.group(1):
+            depth -= 1
+            if depth == 0: out.append(d[a:b])
+            elif depth == 1: out.append(d[kid:b])
+        elif t.group(3):
+            if depth <= 1: out.append(d[a:b])
+        else:
+            if depth == 0: out.append(d[a:b])
+            elif depth == 1: kid = a
+            depth += 1
+    return sorted(out)
+def say(ok, msg):
+    global bad
+    print("  %s  %s" % ("PASS" if ok else "FAIL", msg)); bad += 0 if ok else 1
+def leads(d):
+    t = tops(d)
+    return bool(t) and t[0][0] == "callers" and ' by="subject"' in t[0][1], [x[0] for x in t][:4]
+c_new, c_old, x_new, t_new = rd("c_new.xml"), rd("c_old.xml"), rd("x_new.xml"), rd("t_new.xml")
+has = lambda d: any(n == "callers" and ' by="subject"' in o for n, o in tops(d))
+say(has(c_new) and has(x_new) and has(t_new), "(CL0) all three fixture answers carry <callers by=\"subject\"> -- if not, the tree drifted and CL is untested")
+ok, order = leads(c_new)
+say(ok, "(CL1) who-calls: <callers by=\"subject\"> is the FIRST row block (order %s)" % order)
+ok, order = leads(x_new)
+say(not ok, "(CL2) blast-radius / change cue: the block does NOT lead (order %s)" % order)
+ok, order = leads(t_new)
+say(not ok, "(CL3) transitive cue: the block does NOT lead (order %s)" % order)
+say(len(c_new) == len(c_old) and units(c_new) == units(c_old),
+    "(CL4) the who-calls answer is a permutation of its legacy order: %d B vs %d B, %d units identical" % (len(c_new), len(c_old), len(units(c_new))))
+i = c_new.find('<callers by="subject"'); j = c_new.find("</callers>", i); k = c_new.rfind("<s ", i, j)
+cut = c_new[:k] + c_new[c_new.find("/>", k) + 2:] if k > 0 else c_new
+say(units(cut) != units(c_old), "(CL4n) dropping one <callers> row DOES break CL4 -- CL4 can fail")
+sys.exit(1 if bad else 0)
+PY_CL
+[ $? -eq 0 ] || fail=1
+
 if [ "$fail" -ne 0 ]; then echo "foranswerfirstcheck: FAILURES"; exit 1; fi
 echo "foranswerfirstcheck: ALL PASS"

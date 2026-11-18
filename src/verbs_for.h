@@ -5748,7 +5748,7 @@ inline int runForLensFitted( const MainDispatch& d )
     // flip is the default PATH's; a budgeted answer keeps the legend-first shape its own gates hold, and is never paged.
     if( d.cfg.legendAnswerFirstAsked )
     {
-        (void)rw::answerfirst::answerFirst( out );
+        (void)rw::answerfirst::answerFirst( out, rw::subjectCallersCueLeads( d.cfg.forTask, rw::answerfirst::subjectCallersOf( out ) ) );
     }
     std::fwrite( out.data(), 1, out.size(), stdout );
     return u.rc;
@@ -5808,7 +5808,8 @@ std::optional<int> runForLens( const MainDispatch& d )
         if( r.stdoutCaptured && capturedWhole( r.out ) )
         {
             std::string doc = r.out->bytes;
-            (void)rw::answerfirst::answerFirst( doc );
+            // AF4 T-B: a who-calls question leads with its <callers by="subject"> block (foranswerfirst.h rowBlockOrder)
+            (void)rw::answerfirst::answerFirst( doc, rw::subjectCallersCueLeads( d.cfg.forTask, rw::answerfirst::subjectCallersOf( doc ) ) );
             if( !serveForPage( d.cfg, doc ) )
             {
                 return 1;
