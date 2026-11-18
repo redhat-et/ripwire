@@ -1335,8 +1335,8 @@ inline constexpr const char* kUsesDefTableLegend =
 inline constexpr const char* kUsesDefsListedLegend = "defs_listed=0: above 16 groups no group is listed (a use-site row names none). ";
 enum class DefLegendFor : std::uint8_t
 {
-    Rows,      // a verb whose rows carry of_def (callers, callees, safe-delete, impact)
-    UseSites   // --uses: rows that name no group
+    Rows, // a verb whose rows carry of_def (callers, callees, safe-delete, impact)
+    UseSites // --uses: rows that name no group
 };
 inline std::string defTableLegend( bool table, bool cut, bool sole = false, DefLegendFor rows = DefLegendFor::Rows )
 {
