@@ -1739,6 +1739,7 @@ void captureSideFacts( const LangEntry& le, std::uint32_t fileId, std::string_vi
             bindsFinalize( bindCtx );   // L3 noise gates + clobber sweep — the tail of the old captureBindings
             if( callResultFamilyOf( le.lang ) == CallResultFamily::Rust )
             {
+                dropUnreadRustSpines( binds, firstBindOfFile, bindCtx.rustReceiverRoots );   // std-namesake: a spine no member access reads
                 pruneRustTombstones( binds, firstBindOfFile );   // (L) only a typed name's tombstones hide anything
             }
         }

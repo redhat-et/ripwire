@@ -380,7 +380,11 @@ constexpr std::uint32_t kCacheVersion = 52;           // 52: lane failure-defaul
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 309;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 317;          // bump on any grammar/.scm/extraction change
+                                                      // 317 = 2026-11-17 (lane std-namesake, PLACEHOLDER: the train renumbers; above rust-macro-args' 315/316): a Rust local, parameter or field
+                                                      //   written as a standard type that names no class (`Option<T>`, `&str`, `Arc<Mutex<T>>`) keeps its tombstone
+                                                      //   with the type's spine as importedName (ingest_binds.h rustStdSpine), and `if let Some( x ) = v` under a
+                                                      //   written `v: Option<Vec<T>>` records x the same way: the binding stream changed, the reader did not.
                                                       // 309 = 2026-11-13 (lane macro-p0, PLACEHOLDER: the train renumbers; above main's 307/308): a C-family macro
                                                       //   invocation read as a typeless declarator (`REGISTER_FACTORY( F, B ){ "n" };`, a class-member `MOCK_METHOD( … );`)
                                                       //   mints no function def; the site is a use of the macro (ingest_names.h cFamilyMacroInvocationDecl). Rich file
