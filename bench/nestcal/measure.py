@@ -14,8 +14,10 @@ from pathlib import Path
 def main() -> int:
     binary, corpus, label, outdir = sys.argv[1:5]
     corpus = str( Path( corpus ).resolve() )
+    # Bounded (one cold whole-corpus run). check=True already turns a signal-kill into a CalledProcessError that
+    # names the signal; a timeout raises TimeoutExpired. Neither can reach the TSV as an empty metric set.
     xml = subprocess.run( [ binary, corpus, "--metrics", "--no-cache", "--max-tokens=100000000" ],
-                          capture_output=True, text=True, check=True ).stdout
+                          capture_output=True, text=True, check=True, timeout=3600 ).stdout
     rows = []
     cur_file = ""
     for tag in xml.split( ">" ):
