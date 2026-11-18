@@ -7447,6 +7447,18 @@ inline void collectCalleeNameRow( std::vector<MergedCalleeNameRow>& rows, const 
     }
 }
 
+// ` p="<file>"` after a callee row's l=, when calleeRowPath named one (BAND CF's hop row and BAND BC's body row print it alike).
+inline void appendCalleePathAttr( std::string& out, std::string_view path, std::vector<char>& esc )
+{
+    if( path.empty() )
+    {
+        return;
+    }
+    out += " p=\"";
+    out += escapeXml( path, esc );
+    out += "\"";
+}
+
 // …and the rows written out, once the block's walk is complete.
 inline void appendMergedCalleeNameRows( std::string& callsBody, std::vector<MergedCalleeNameRow>& rows, std::vector<char>& esc )
 {
@@ -7467,12 +7479,7 @@ inline void appendMergedCalleeNameRows( std::string& callsBody, std::vector<Merg
             callsBody += lb;
         }
         callsBody += "\"";
-        if( !r.path.empty() )
-        {
-            callsBody += " p=\"";   // after l=, so a reader keyed on `<c n= l=` still finds both
-            callsBody += escapeXml( r.path, esc );
-            callsBody += "\"";
-        }
+        appendCalleePathAttr( callsBody, r.path, esc );   // after l=, so a reader keyed on `<c n= l=` still finds both
         callsBody += viaEdgeAttr( r.via, r.link );
         callsBody += anchorMissAttr( r.miss );
         callsBody += r.split ? " prov=\"split\"" : "";   // attrib-multidef Q1
@@ -7643,15 +7650,22 @@ inline bool appendOneCalleeCall( std::string& callsBody, std::vector<MergedCalle
     {
         return false;
     }
+    // BAND BC: a body's callee row names its file exactly as a hop row does — the helper, the rule and the "no p= = the owner's
+    // file" reading are BAND CF's (calleeRowPath); a signature row never merges, so each row's one l= is one file's line.
+    const std::string_view calleePath = calleeRowPath( ing, sink, ing.symbols[ id ], cs );
     char hb[ 64 ];
-    rw::formatTo( hb, sizeof( hb ), "\" l=\"{}\"{}{}>", cs.line, viaAttr, splitAttr );
+    rw::formatTo( hb, sizeof( hb ), "\" l=\"{}\"", cs.line );
     callsBody += "<c n=\"";
     callsBody += escapeXml( cs.name, esc );
     callsBody += hb;
+    appendCalleePathAttr( callsBody, calleePath, esc );   // after l=, as the hop row's is
+    callsBody += viaAttr;
+    callsBody += splitAttr;
+    callsBody += ">";
     applyCalleeAnchorMiss( sink, outOff, outTargets, id, cid, anchorLegendCharged, used, &callsBody );
     callsBody += escapeXml( sig, esc );
     callsBody += "</c>";
-    used += sig.size() + 24 + viaAttr.size() + splitAttr.size();
+    used += sig.size() + 24 + viaAttr.size() + splitAttr.size() + ( calleePath.empty() ? 0u : calleePath.size() + 5u );
     if( sink.recorded )
     {
         sink.recorded->push_back( EmittedBodyCall { cs.name, cs.line, sig } );
@@ -8374,8 +8388,9 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
         // total=/shown=/capped= block — see emitCalleeCallsBlock above; `calleeRank` decides which
         // rows survive when it CUTS one, which is far from rare here (CalleeCallsSink::rank).
         emitCalleeCallsBlock( piece, id, outOff, outTargets, ing, contentOf, esc, used, budgetBytes,
-                              withLinkBits( withSplitArms( CalleeCallsSink{ redact, record ? &record->calls : nullptr, /*namesOnly=*/false, calleeRank, &outNameOnly,
-                                                              &viaLegendCharged }, outEdges.prov, &splitLegendCharged ), outEdges.link, outEdges.anchor ) );
+                              withRowRoot( withLinkBits( withSplitArms( CalleeCallsSink{ redact, record ? &record->calls : nullptr, /*namesOnly=*/false, calleeRank, &outNameOnly,
+                                                              &viaLegendCharged }, outEdges.prov, &splitLegendCharged ), outEdges.link, outEdges.anchor ),
+                                           rootArg, rootPrefix ) );
         const std::string bodyNotes = renderNoteChildren( noteIndex, symbolNoteTarget( noteIndex, ing, s ), esc );   // L3/D5
         piece += bodyNotes;
         used += bodyNotes.size();                                                                   // W3-N2: same charge-never-trim rule

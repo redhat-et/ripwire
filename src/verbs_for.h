@@ -819,13 +819,13 @@ inline std::size_t ownerLegendExemptBytes( const ForLensHeaderParts& p, bool com
     return ownerHopLegend( p, compact ).size() + viaBytes;
 }
 inline constexpr std::string_view kForCompactLegendBodies =
-    "; b t= n= p= l= full bodies, c n= l= callee signatures";
+    "; b t= n= p= l= full bodies, c n= l= p= callee signatures (p= if not b's)";
 // for-body-slot: the compact dialect's reading of the ONE owner body (the full dialect's is forowner.h kForBodySlotLegend + the
 // root clause below), present-only (bodySlotPresent), right after the owner clause. No "--": it rides inside an XML comment.
 // FIX1 R3: it states what the full one states — what each pick= means and what reason=owner does NOT mean (the subject, the
 // whole answer): the default posture is this dialect, so this is the only reading most readers get.
 inline constexpr std::string_view kForCompactLegendBodySlot =
-    "; b t= n= p= l= full bodies, c n= l= callee signatures; bodies=1 reason=owner: ONE body, the question's owner by the rule "
+    "; b t= n= p= l= full bodies, c n= l= p= callee signatures (p= if not b's); bodies=1 reason=owner: ONE body, the question's owner by the rule "
     "(pick=name: its name is a question word; pick=member: a method so named of a ranked class), chosen by name not resolved; "
     "not necessarily the subject, not a claim it is the whole answer; shown=0 capped=1 next= when a budget skipped it";
 static_assert( kForCompactLegendBodySlot.starts_with( kForCompactLegendBodies ), "the slot's compact clause defines <b> as the bodies clause does" );
@@ -1105,7 +1105,7 @@ inline constexpr std::string_view kForAutoBundleLegend =
     "(bodies=N on this root counts them; bodies=0 reason=budget when none fit the remaining budget "
     "whole; the signatures-only flag (no-bodies mode) opts out) — read them here instead of opening the files. The "
     "bodies element discloses the house way: total=requested, shown=printed, capped=1 when they "
-    "differ; each body's calls child lists its callee signatures, total= always, shown=/capped= only "
+    "differ; each body's calls child lists its callee signatures (c p= their file when it is not the body's), total= always, shown=/capped= only "
     "when that list is cut";
 
 // The clause defining the degraded reason, spliced into the header ONLY on that path (no "--": it rides in a comment).
