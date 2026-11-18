@@ -275,10 +275,36 @@ for v in VERBS:
         why.append("--legend=compact carries no prose legend, so this verb cannot show it was dropped")
     # 5. THE DATA COMMENTS SURVIVE, EXACTLY. Counts are data, not prose: whatever non-prose comments the
     #    opt-out carries, the default must carry the same ones, byte for byte and in the same order.
-    da = [c for c in ca if not c.startswith("<!-- ripwire ")]
+    #
+    #    CLASSIFIED BY SURVIVAL, NOT BY PREFIX (lane legend-session-default, 2026-11-18). The posture only ever
+    #    REMOVES dictionary text from a head comment; it never writes a comment of its own. So a comment of the
+    #    prose-free answer is DATA exactly when it came through untouched, and legend RESIDUE when it is a
+    #    reduction of one. The old rule read `<!-- ripwire ` and nothing else, which was right only while the
+    #    posture dropped the whole dictionary: once it drops one TIER, the definitions outside that tier stay in
+    #    a head comment that begins with the first survivor instead, and all eight reduced verbs reported
+    #    "data comments changed (1 vs 0)" -- a new data comment the posture had not written. src/legenddict.h
+    #    records the same hazard for the binary's own classifier: at least seven head comments are legend content
+    #    that does not open `<!-- ripwire `, so a prefix rule cannot tell them apart. The protection this arm
+    #    exists for is unchanged and is asserted both ways below: every data comment of the opt-out survives
+    #    verbatim and in order, and the prose-free answer adds nothing that was not already there.
     db_ = [c for c in cb if not c.startswith("<!-- ripwire ")]
+    da  = [c for c in ca if c in db_]
     if da != db_:
-        why.append("data comments changed (%d vs %d)" % (len(da), len(db_)))
+        why.append("data comments changed (%d of %d survived verbatim and in order)" % (len(da), len(db_)))
+    # A residue comment is a REDUCTION of one the opt-out carries: sentences were taken OUT of the middle, so it
+    # is not a substring of any one of them, but every sentence it still carries must be in that answer. A
+    # sentence that is not is text the posture WROTE, which it is not allowed to do.
+    opt_out_text = " ".join(cb)
+    strayed = []
+    for c in ca:
+        if c in db_:
+            continue
+        for seg in c[4:-3].split(". "):
+            seg = seg.strip()
+            if len(seg) > 24 and seg not in opt_out_text:
+                strayed.append(seg)
+    if strayed:
+        why.append("the posture wrote %d comment sentence(s) of its own (first: %s)" % (len(strayed), strayed[0][:70]))
     if why:
         f["bad"] += 1; nbad += 1
         print("  FAIL  (D1) %-22s %s" % (v, "; ".join(why)))
@@ -408,6 +434,165 @@ if cmp -s "$WORK/z1.xml" "$WORK/z2.xml"; then
     pass "(Z1) two --legend=dict runs are byte-identical"
 else
     bad "(Z1) two --legend=dict runs differ -- the posture is not a function of argv alone"
+fi
+
+# ===================================================================================================
+# (D6) THE POINTER NAMES A READ THAT RESOLVES WHAT IT DROPPED -- AND THE CHEAPEST ONE.
+#      BAND S (session default), arms S1 and S3. docs/EVALS.md.
+#
+# WHY THIS ARM EXISTS, measured. (D5) above asks only that every emitted attribute have SOME row in the
+# dictionary, and the whole dictionary is 131,822 B. Under that contract this posture served a reader as
+# if it held all 1,157 lines (applyDictPosture called LegendSession::serveAll), so it dropped EVERY
+# definition and pointed at the only read that could resolve them. Measured on cpython
+# --impact=PyObject_Str, warm: --legend=dict read 7,219 B, which is 577 B BELOW the 7,796 B the same cell
+# serves to a caller that actually holds core+impact (--legend-have=0a04c49c2eaff940). A posture that is
+# cheaper than the honest one is not a win -- it is 577 B borrowed from the reader at 131,822/3,812 = 34x
+# interest. The tier the answer's own schema names resolves the same definitions for 3,812 B.
+#
+# So the bar is NOT the byte saving, and it is not "a row exists somewhere":
+#   (D6a) dict= names ONE TIER, not the whole dictionary -- `ripwire --legend-dict=KEY`, and that read works
+#   (D6b) that read is CHEAPER than the whole dictionary, which is the only thing that makes it a remedy
+#   (D6c) NO UNDER-SERVING: the posture is never shorter than the same cell served to a caller that really
+#         holds the tier dict= names. This is the arm the defect fails.
+#   (D6d) the tier is the ANSWER'S OWN -- an --impact answer may not point at some other verb's pack
+#   (M3)  non-vacuity: the arm must REJECT the defect's own pointer value, or its PASS means nothing
+# ===================================================================================================
+"$BIN" --legend-dict >"$WORK/full.txt" 2>/dev/null
+fullb=$(wc -c <"$WORK/full.txt" | tr -d ' ')
+d6=0
+for probe in "--callers=main" "--impact=main" "--uses=main"; do
+    pout="$WORK/d6.xml"
+    "$BIN" . "$probe" --legend=dict >"$pout" 2>/dev/null
+    if [ ! -s "$pout" ] || ! grep -qF 'legend="dict"' "$pout"; then
+        printf '  INFO  (D6) %-18s not reduced by this posture -- no pointer to grade\n' "$probe"
+        continue
+    fi
+    d6=$(( d6 + 1 ))
+    ptr=$(grep -o 'dict="[^"]*"' "$pout" | head -1 | sed 's/^dict="//; s/"$//')
+    # The answer's own schema key, from schema="ripwire.KEY/v1" on the root.
+    key=$(grep -o 'schema="ripwire\.[^"/]*' "$pout" | head -1 | sed 's/^schema="ripwire\.//')
+    tier=$(printf '%s' "$ptr" | sed -n 's/^ripwire --legend-dict=\([a-z][a-z-]*\)$/\1/p')
+    if [ -z "$tier" ]; then
+        bad "(D6a) $probe: dict=\"$ptr\" names no tier -- it points at the whole dictionary (${fullb} B), the one read this posture exists to avoid"
+        continue
+    fi
+    "$BIN" --legend-dict="$tier" >"$WORK/tier.txt" 2>/dev/null; trc=$?
+    tierb=$(wc -c <"$WORK/tier.txt" | tr -d ' ')
+    if [ "$trc" -ne 0 ] || [ ! -s "$WORK/tier.txt" ] || ! head -1 "$WORK/tier.txt" | grep -q '^ripwire legend dictionary'; then
+        bad "(D6a) $probe: dict=\"$ptr\" does not resolve -- \`--legend-dict=$tier\` exited $trc with ${tierb} B"
+        continue
+    fi
+    pass "(D6a) $probe: dict= names the tier '$tier', and that read resolves (${tierb} B)"
+    if [ "$tierb" -lt "$fullb" ]; then
+        pass "(D6b) $probe: the named read is cheaper than the whole dictionary (${tierb} B < ${fullb} B)"
+    else
+        bad "(D6b) $probe: the named read (${tierb} B) is no cheaper than the whole dictionary (${fullb} B) -- it is not a remedy"
+    fi
+    have=$(head -1 "$WORK/tier.txt" | sed -n 's/.* have=\([0-9a-f]*\) .*/\1/p')
+    if [ -z "$have" ]; then
+        bad "(D6c) $probe: tier '$tier' line 1 carries no have= -- a reader cannot assert this holding next call"
+    else
+        "$BIN" . "$probe" --legend=compact >"$WORK/prose.xml" 2>/dev/null
+        if [ ! -s "$WORK/prose.xml" ]; then
+            bad "(D6c) $probe: --legend=compact wrote no answer -- there is no inline legend to say what the posture dropped"
+        else
+            # EVERY DEFINITION THIS POSTURE DROPPED IS IN THE TIER ITS POINTER NAMES. This is arm S1 stated
+            # literally, per DEFINITION, and it is deliberately not a byte compare of two answers: the ref posture
+            # MOVES its survivors after the rows while this one leaves them in place, so the two can never be
+            # byte-identical however honest both are, and a >= on raw bytes measures only the two pointer
+            # encodings (74 B of root attributes here against a 93 B <about/> child there -- 19 B on every probe).
+            #
+            # So: walk the WHOLE dictionary. A line that the inline (--legend=compact) answer carries and this
+            # posture does not is a line the posture DROPPED, and it must be a line of the named tier. The
+            # non-vacuity count is printed, because a run that matched no dictionary line would report a clean
+            # sweep having tested nothing -- a rate of 0 or 100 % with no exceptions is an instrument fault here.
+            python3 -I - "$pout" "$WORK/prose.xml" "$WORK/tier.txt" "$WORK/full.txt" "$probe" "$tier" <<'D6PY'
+import sys
+rd = lambda p: open(p, encoding="utf-8", errors="surrogateescape").read()
+dictdoc, prose, tier, full, probe, name = rd(sys.argv[1]), rd(sys.argv[2]), rd(sys.argv[3]), rd(sys.argv[4]), sys.argv[5], sys.argv[6]
+# Line 1 of a tier is its header (have=/entries=/of=) and the last is its footer sentence: neither is a definition.
+tierlines = set(l for l in tier.splitlines()[1:-1] if len(l) > 24)
+lines     = [l for l in full.splitlines() if len(l) > 24]
+carried   = [l for l in lines if l in prose]                      # this verb's inline legend really spells it
+dropped   = [l for l in carried if l not in dictdoc]              # ... and the posture left it out
+unresolved = [l for l in dropped if l not in tierlines]
+if not carried:
+    print('  FAIL  (D6c-vacuous) %s: no dictionary line was found in the inline legend -- the arm tested nothing '
+          '(instrument fault until one cell is hand-checked)' % probe)
+    sys.exit(1)
+if unresolved:
+    print('  FAIL  (D6c) %s: %d of %d dropped definitions are in NEITHER the tier \'%s\' nor the answer -- '
+          'the cheapest read that resolves them is the whole dictionary. First: %s'
+          % (probe, len(unresolved), len(dropped), name, unresolved[0][:90]))
+    sys.exit(1)
+print('  PASS  (D6c) %s: all %d dropped definitions are lines of the tier \'%s\' (of %d the inline legend carries; '
+      '%d kept in the answer)' % (probe, len(dropped), name, len(carried), len(carried) - len(dropped)))
+sys.exit(0)
+D6PY
+            [ $? -ne 0 ] && fail=1
+        fi
+    fi
+    if [ "$tier" = "core" ] || [ "$tier" = "$key" ]; then
+        pass "(D6d) $probe: the tier named ('$tier') is this answer's own (schema key '$key')"
+    else
+        bad "(D6d) $probe: the pointer names tier '$tier' but the answer's schema key is '$key' -- another verb's pack resolves the wrong definitions"
+    fi
+done
+if [ "$d6" -eq 0 ]; then
+    bad "(D6-vacuous) no probe was reduced by this posture -- D6 measured nothing, which is not a pass"
+else
+    pass "(D6) graded on $d6 probe(s)"
+fi
+# (M3) THE MUTATION CONTROL, run on every invocation. The arm has to REJECT the exact value the defect
+# emitted; an arm that accepts both the defect and the fix has no evidence. This is the C1/C2 pair the
+# band registered: C2 points at the whole dictionary while dropping only a tier, C1 drops more than the
+# tier names.
+if printf '%s' "ripwire --legend-dict" | sed -n 's/^ripwire --legend-dict=\([a-z][a-z-]*\)$/\1/p' | grep -q .; then
+    bad "(M3a) D6a accepts the defect's own pointer value 'ripwire --legend-dict' -- the arm cannot fire"
+else
+    pass "(M3a) D6a can fire -- it rejects 'ripwire --legend-dict' (the whole-dictionary pointer)"
+fi
+# (M3b) D6c IS AN EQUALITY, so its control has to produce an inequality from a real pair. The WRONG holding does
+# it: --impact's answer served to a caller holding the CORE alone carries the impact pack's definitions inline,
+# where the same answer served to a caller holding core+impact does not. If those two came back identical, D6c's
+# comparison is blind to which definitions were dropped and its PASS above means nothing.
+m3core=$("$BIN" --legend-dict=core 2>/dev/null | head -1 | sed -n 's/.* have=\([0-9a-f]*\) .*/\1/p')
+m3pack=$("$BIN" --legend-dict=impact 2>/dev/null | head -1 | sed -n 's/.* have=\([0-9a-f]*\) .*/\1/p')
+if [ -z "$m3core" ] || [ -z "$m3pack" ] || [ "$m3core" = "$m3pack" ]; then
+    bad "(M3b) the core and impact tiers have no distinct have= values -- D6c's control cannot be built"
+else
+    "$BIN" . --impact=main --legend-have="$m3core" >"$WORK/m3a.xml" 2>/dev/null
+    "$BIN" . --impact=main --legend-have="$m3pack" >"$WORK/m3b.xml" 2>/dev/null
+    if [ -s "$WORK/m3a.xml" ] && [ -s "$WORK/m3b.xml" ] && ! cmp -s "$WORK/m3a.xml" "$WORK/m3b.xml"; then
+        pass "(M3b) D6c can fire -- the same answer under two different holdings differs ($(wc -c <"$WORK/m3a.xml" | tr -d ' ') B core vs $(wc -c <"$WORK/m3b.xml" | tr -d ' ') B core+impact)"
+    else
+        bad "(M3b) the same answer under two DIFFERENT holdings is identical -- D6c's equality cannot distinguish what was dropped"
+    fi
+fi
+
+# ===================================================================================================
+# (D7) ONE POSTURE PER ANSWER. --legend=dict with --legend-have= must REFUSE.
+#      BAND S arm S1. Measured before the fix on cpython --impact=PyObject_Str: 7,864 B carrying BOTH
+#      `legend="dict" dict="ripwire --legend-dict"` on the root AND
+#      `<about legend="ref" have="core+impact" .../>` as the last child -- two legend declarations that
+#      contradict each other. A reader that believes the root's legend="dict" ("the definitions are in the
+#      dictionary, not here") does not look in the trailing comment, which is where the unheld ones are.
+#      src/main.cpp asserted in a comment that "the two never both fire"; they did.
+# ===================================================================================================
+corev=$("$BIN" --legend-dict=core 2>/dev/null | head -1 | sed -n 's/.* have=\([0-9a-f]*\) .*/\1/p')
+if [ -z "$corev" ]; then
+    bad "(D7) --legend-dict=core line 1 carries no have= -- D7 has no holding to pass"
+else
+    "$BIN" . --callers=main --legend=dict --legend-have="$corev" >"$WORK/d7.xml" 2>"$WORK/d7.err"; rc7=$?
+    d7b=$(wc -c <"$WORK/d7.xml" | tr -d ' ')
+    if [ "$rc7" -ne 0 ] && [ ! -s "$WORK/d7.xml" ] \
+       && grep -qF -- "--legend=dict" "$WORK/d7.err" && grep -qF -- "--legend-have=" "$WORK/d7.err"; then
+        pass "(D7) --legend=dict with --legend-have= REFUSES (rc=$rc7), writes no stdout, and names both flags"
+    elif grep -qF 'legend="dict"' "$WORK/d7.xml" && grep -qF 'legend="ref"' "$WORK/d7.xml"; then
+        bad "(D7) the answer carries TWO legend declarations at once -- legend=\"dict\" on the root and legend=\"ref\" on <about> (${d7b} B, rc=$rc7)"
+    else
+        bad "(D7) --legend=dict with --legend-have= must refuse naming both flags -- rc=$rc7, ${d7b} B stdout, stderr: $(head -c 160 "$WORK/d7.err")"
+    fi
 fi
 
 if [ "$fail" -ne 0 ]; then echo "legenddefaultcheck: FAILURES"; exit 1; fi

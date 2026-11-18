@@ -2814,9 +2814,15 @@ inline constexpr char kHelpTail[] =
         "                               signature only, no lens/quality extras, no doc bodies. Composes with --top-k.\n"
         "    --legend=full|compact|dict|last legend posture for every XML verb — compact is the default; dict drops the prose\n"
         "                               for a pointer; full restores the long form; last puts the ANSWER before the legend\n"
-        "                               --legend=dict (item D, 2026-11-17) serves NO prose legend: every root attribute stays\n"
-        "                               exactly where it was, and legend=\"dict\" dict=\"ripwire --legend-dict\" dictv= is added so\n"
-        "                               the schema stays resolvable in one deterministic call. Lossless — 79 of 79 reduced\n"
+        "                               --legend=dict (item D, 2026-11-17) drops the prose legend of ONE TIER — the core plus\n"
+        "                               this answer's own verb pack — and names that tier: every root attribute stays exactly\n"
+        "                               where it was, and legend=\"dict\" dict=\"ripwire --legend-dict=KEY\" dictv= is added, so one\n"
+        "                               bounded read (1.5-3.8 KB, not the 131 KB dictionary) resolves everything it left out and\n"
+        "                               its line 1 carries the have= for your next call. A definition outside that tier stays in\n"
+        "                               the answer. Until 2026-11-18 it dropped ALL 1,157 definitions and pointed at the whole\n"
+        "                               dictionary, which read 577 B SHORTER than the honest answer on cpython\n"
+        "                               --impact=PyObject_Str (7,219 B against 7,796 B) — bytes borrowed from the reader at 34x.\n"
+        "                               Cannot combine with --legend-have=: that is two postures for one answer. Lossless — 79 of 79 reduced\n"
         "                               answers byte-identical outside the legend, -8.7% to -57.6% by verb. It is OPT-IN\n"
         "                               rather than the default because the default flip reds 89 gates on one contract (every\n"
         "                               attribute defined in ITS OWN answer's legend); the dictionary-backed contract lands\n"
@@ -4707,6 +4713,25 @@ inline void refuseLegendHaveMisuse( Config& c )
         rw::emitRaw( stderr, "ripwire: --legend-have= serves one finished answer, so it cannot combine with a server transport "
                              "(--mcp/--listen/--lsp): the server would answer into a capture the client never sees. The servers "
                              "already send each definition once per session — see --mcp-legend=session\n" );
+        c.ok = false;
+        return;
+    }
+    // TWO POSTURES IN ONE ANSWER, and it is a DISCLOSURE conflict rather than a missed saving (lane
+    // legend-session-default, 2026-11-18). An ASKED --legend=dict normalises to the default dialect and carries its
+    // difference in legendProseOff, so it slipped the --legend=full arm below and BOTH stages ran: applyCliRefPosture
+    // reduced the legend to the entries the holding does not cover and moved them after the rows, then
+    // applyCliDictPosture spliced its own pointer onto the root. MEASURED on this repo before the refusal was written:
+    // one 15,592 B answer at rc=0 carrying `legend="dict" dict="ripwire --legend-dict"` on the root AND
+    // `<about legend="ref" have="core" …/>` as its last child. A reader that believes the root ("the definitions are in
+    // the dictionary, not here") does not look in the trailing comment, which is where the unheld ones actually are, so
+    // the contradiction can cost it a reading, not just bytes. main.cpp's ordering comment asserted that "the two never
+    // both fire"; this is what makes that true. Keyed on the SPELLING, not on legendProseOff, so a later default flip
+    // does not turn this into a refusal of every --legend-have= run. test/legenddefaultcheck.sh arm (D7).
+    if( c.legendSpelled == "dict" )
+    {
+        rw::emitRaw( stderr, "ripwire: --legend-have= and --legend=dict are two legend postures for one answer — it would carry both "
+                             "pointers and they disagree about where the definitions are. --legend-have= already drops exactly the "
+                             "tiers you named; drop --legend=dict, or drop --legend-have= and read the tier the answer's dict= names\n" );
         c.ok = false;
         return;
     }
