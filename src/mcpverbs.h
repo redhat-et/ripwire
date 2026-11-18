@@ -19,6 +19,7 @@
 #include "mention.h"       // B8: applyMentionBoost — the `for` verb's query-mention anchor (same default-on behavior as CLI --for)
 #include "filter.h"        // §P4: rankTierSymbolMultipliers — the fixture/present tier down-weight the CLI ranking lenses apply
 #include "redact.h"        // RedactCounts — the per-request redaction tally threaded through the body/doc verbs
+#include "forbudgetfit.h" // forHeldBlocksPrice — <manifest_rows> held from the CLI fit's price under budget_tokens
 #include "forpage.h"    // L-W: the --for file page, coverage= and the thin rule — shared with the CLI twin
 #include "forfilepage.h"   // FOR-FILE-ANCHOR: applyFileSubjectLift — the CLI twin's file-subject ranking rule
 #include "forowner.h"   // for-body-slot: the one owner body of an explanatory question — shared with the CLI twin
@@ -3119,16 +3120,28 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     const auto [answerEstTokens, answerPrice] = priceForTaskRoot( out, chosen.cut.rowDropCut && budgetTokens == 0 ); // R1: est_tokens=; over_ceiling="1" only past the runaway guard
     // K-WRONGSYM (src/forfilesyms.h): the CLI --for's <syms> goes LAST before </ctx> (after the row blocks and the graph verb below, as on the CLI)
     // DECL-ROW (src/fordeclrow.h): the CLI --for's task-read row blocks, one renderer, before </ctx>, not priced; under a budget the tag is held="budget", as there
+    std::size_t manifestTokens = 0;   // the <manifest_rows> a budget prints whole: <doc_body> is served into the budget left after it
     if( out.ends_with( "</ctx>" ) )
     {
         out.insert( out.size() - 6, renderForDeclRows( ing, ix.g, task, /*held=*/budgetTokens > 0 ) );
         out.insert( out.size() - 6, renderForExemplarFamily( ing, ix.g, task, /*held=*/budgetTokens > 0 ) );   // EXEMPLAR-STAIRS, the CLI twin's renderer
-        out.insert( out.size() - 6, renderForManifestRows( ing, task, redact, /*held=*/budgetTokens > 0 ) );   // MANIFEST-ROW, the CLI twin's renderer
+        // MANIFEST-ROW, the CLI twin's renderer. CodeRabbit #686: under budget_tokens the block prints whole when the answer plus the
+        // held blocks with it fit (the CLI fit's price, forHeldBlocksPrice), held otherwise; a held render's tally is not the run's
+        std::optional<RedactCounts> manifestTally = redact != nullptr ? std::optional<RedactCounts>( *redact ) : std::nullopt;
+        const std::string manifestWhole = renderForManifestRows( ing, task, manifestTally ? &*manifestTally : nullptr );
+        const bool manifestHeld = budgetTokens > 0 && !manifestWhole.empty()
+                               && answerEstTokens + forHeldBlocksPrice( std::string( out ).insert( out.size() - 6, manifestWhole ) ) > budgetTokens;
+        if( !manifestHeld && manifestTally )
+        {
+            *redact = *manifestTally;
+        }
+        out.insert( out.size() - 6, manifestHeld ? renderForManifestRows( ing, task, redact, /*held=*/true ) : manifestWhole );
+        manifestTokens = budgetTokens > 0 && !manifestHeld ? tokensForEmittedBytes( manifestWhole.size(), kBytesPerTokenDefault ) : 0;   // <doc_body> below is served into what is left
     }
     // FOR-DOC-BODY (fordocbody.h): the CLI --for's <doc_body>, one renderer, before </ctx>, priced on its own root; under budget_tokens it is served into the budget left after the answer, as there
     if( out.ends_with( "</ctx>" ) )
     {
-        out.insert( out.size() - 6, renderForDocBody( ForDocBodyInputs{ ing, ix.g.outOff, ix.g.outTargets, task, chosen.docPick, redact, flRootArg }, ForDocBodyBudget{ std::size_t( budgetTokens ), answerEstTokens }, ForDocDialect::Xml ) );
+        out.insert( out.size() - 6, renderForDocBody( ForDocBodyInputs{ ing, ix.g.outOff, ix.g.outTargets, task, chosen.docPick, redact, flRootArg }, ForDocBodyBudget{ std::size_t( budgetTokens ), answerEstTokens + manifestTokens }, ForDocDialect::Xml ) );
     }
     // FOR-ROUTE-DECLINED (src/forgraphverb.h): the CLI --for's <graph_verb endpoints="subject"> block, the same wrapper around
     // this surface's twin of the verb (path_between / find_referencing_symbols / connect), before </ctx>; priced like the CLI's (not)

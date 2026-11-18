@@ -46,6 +46,8 @@
 #         cut (redacted before the cut), and stderr counts every marker; (rd2) --no-redact prints them raw
 #   (b4) the fit prices the block's legend (heldLegendAt reads `<!-- ripwire for manifest_rows:`): one token under the whole
 #        price holds the block, the whole price prints the answer byte for byte
+#   (x2) MCP `for` with budget_tokens=4000 (the CLI's b2): the block the answer and it fit prints whole, the CLI's bytes;
+#   (x3) budget_tokens=100 still holds it
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
@@ -504,6 +506,25 @@ for line in sys.stdin:
 ' <"$TMP/x1.jsonl" >"$TMP/x1.xml"
 if [ -n "$( block "$TMP/a1.xml" )" ] && [ "$( block "$TMP/x1.xml" )" = "$( block "$TMP/a1.xml" )" ]; then ok "(x1) MCP for: the same element bytes"
 else no "(x1) MCP: $( block "$TMP/x1.xml" | head -c 300 )"; fi
+# (x2)/(x3) CodeRabbit 4609415554: MCP holds the block from the fit (the answer plus the block against budget_tokens), as the CLI's
+# b2 / b1. Red before: any budget_tokens printed the empty held="budget" element.
+mcpfor(){   # mcpfor OUT FIXTURE TASK BUDGET
+    printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"%s","task":"%s","budget_tokens":%s}}}\n' "$F/$2" "$3" "$4" \
+      | ( cd "$F/$2" || exit 1; "$BIN" --mcp 2>/dev/null ) \
+      | python3 -c '
+import json, sys
+for line in sys.stdin:
+    d = json.loads( line )
+    if d.get( "id" ) == 1:
+        print( d["result"]["content"][0]["text"], end="" )
+' >"$1"
+}
+mcpfor "$TMP/x2.xml" acme "add a new broker transport like NATS or MQTT to brokers" 4000 || no "(x2) the MCP run failed"
+if [ -n "$( block "$TMP/b2u.xml" )" ] && [ "$( block "$TMP/x2.xml" )" = "$( block "$TMP/b2u.xml" )" ]; then ok "(x2) MCP budget_tokens=4000: the block fits and prints whole, the CLI's bytes"
+else no "(x2) MCP budget 4000: $( grep -o '<manifest_rows[^>]*>' "$TMP/x2.xml" | head -1 )"; fi
+mcpfor "$TMP/x3.xml" acme "add a new broker transport like NATS or MQTT to brokers" 100 || no "(x3) the MCP run failed"
+if grep -q '<manifest_rows files="2" held="budget"/>' "$TMP/x3.xml" && ! grep -q '<r l=' "$TMP/x3.xml"; then ok "(x3) MCP budget_tokens=100 holds the block"
+else no "(x3) MCP budget 100: $( grep -o '<manifest_rows[^>]*>' "$TMP/x3.xml" | head -1 )"; fi
 run ferris "--for=add a new extractor behind its own cargo feature like multipart" --legend=full >"$TMP/l1.xml" || no "(l1) the run exited $?"
 if python3 - "$TMP/a1.xml" "$TMP/l1.xml" <<'PY'
 import sys

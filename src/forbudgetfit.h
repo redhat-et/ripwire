@@ -896,6 +896,17 @@ private:
 };
 }   // namespace budgetfit_detail
 
+// The price of a --for answer's held blocks (kForHeldBlocks children of its <ctx> root, each with its legend), as the fit charges
+// them: est_tokens= plus this is what a budget must hold (ForBudgetFitter::fitsWhole). The MCP `for` holds <manifest_rows> from it
+// (mcpverbs.h forTaskText). 0 when no root closes.
+inline std::size_t forHeldBlocksPrice( std::string_view answer )
+{
+    const std::size_t rootAt = answer.find( "<ctx " );
+    std::size_t       close  = std::string_view::npos;
+    const std::vector<budgetfit_detail::Child> top = rootAt == std::string_view::npos ? std::vector<budgetfit_detail::Child>{} : budgetfit_detail::childrenOf( answer, rootAt, close );
+    return close == std::string_view::npos ? 0 : budgetfit_detail::heldBlocksPrice( answer, top );
+}
+
 // What fitting U to a budget came to: the answer to print, or the call for the re-render that holds kForHeldBlocks.
 struct ForBudgetFitResult
 {
