@@ -222,6 +222,17 @@ plainSole(){
        && [ "$( nrows "$tag" )" -gt 0 ]; then ok "[$cls] $tag: one definition group — one group row + $want declaration row(s), no of_def, no prov ($( nrows "$tag" ) rows)"
     else no "[$cls] $tag: a one-group answer: groups=$( groups "$tag" ) (want 1), declaration rows=$( members "$tag" ) (want $want), rows: $( grep '^ROW' "$DIR/$tag.rows" | cut -f2,3,4 | tr '\t\n' '= ' )"; fi
 }
+# untiedSole CLASS TAG : RE-PIN 2026-11-18 (lane bx1-verbfix, BX1 FIX 7; gate test/verbfixcheck.sh). The untied declaration a
+# one-group answer used to drop while defs= still counted it (the tmux/ninja prototype shape) is now listed as a bodyless <def>
+# row of its own, ix=2; it stays out of the attribution: one attributed group, still no of_def and no prov on any row.
+untiedSole(){
+    local cls="$1" tag="$2"
+    if [ "$( groups "$tag" )" = 2 ] && [ "$( awk -F'\t' '$1=="DEF" && $2=="2" { print $4; exit }' "$DIR/$tag.rows" )" = 1 ] \
+       && ! awk -F'\t' '$1=="ROW" && $3!="-" { f=1 } END { exit !f }' "$DIR/$tag.rows" \
+       && ! awk -F'\t' '$1=="ROW" && $4 ~ /prov=split/ { f=1 } END { exit !f }' "$DIR/$tag.rows" \
+       && [ "$( nrows "$tag" )" -gt 0 ]; then ok "[$cls] $tag: one attributed group + the untied declaration listed (ix=2 bodyless=1), no of_def, no prov"
+    else no "[$cls] $tag: want one attributed group + an ix=2 bodyless row: groups=$( groups "$tag" ), rows: $( grep '^ROW' "$DIR/$tag.rows" | cut -f2,3,4 | tr '\t\n' '= ' )"; fi
+}
 # rowset CLASS TAG COUNT NAMES : attribution adds attributes and never removes a row — the root count and the sorted row-name
 # multiset equal the base binary's (pinned from base d4325a8c)
 rowset(){
@@ -336,9 +347,9 @@ fi
 if ans b_rp cpp callers s xml -- --callers=ReadPath; then plainSole N b_rp 1; fi   # ReadPath: a declaration + its definition
 # UsesPiece is declared in piece_user.cc with no #include that ties it to parser.cc's definition: the identity rule answers
 # Unproven (may declare it, cannot prove it), and no row ties to that declaration (DrivePiece's call binds the definition), so
-# the declaration is silent and the answer stays one group — the tmux/ninja prototype shape (a variadic or template-qualified
+# the declaration was silent and the answer stayed one group — the tmux/ninja prototype shape; BX1 FIX 7 lists it (untiedSole) (a variadic or template-qualified
 # declarator is Unproven the same way). A FOREIGN declaration (c_tal, c_hlp below: provably another function) is always listed.
-if ans b_up cpp callers s xml -- --callers=UsesPiece; then plainSole N b_up; fi
+if ans b_up cpp callers s xml -- --callers=UsesPiece; then untiedSole N b_up; fi   # RE-PIN BX1 FIX 7: listed, not silent
 if ans b_q cpp callers s xml -- --callers=string_piece.h:empty; then plainSole N b_q; fi
 # Q1 (orchestrator ruling): the split-arm hedge rides single-definition answers too (by-design byte change on them)
 if ans b_one cpp callees s xml -- --callees=PutInt; then
@@ -661,12 +672,12 @@ fi
 if ans j_u2i u2 impact s xml -- --impact=scan_tok; then
     [ "$( groups j_u2i )" = 3 ]; say $? "[P] j_u2i: impact lists the three groups" "[P] j_u2i: <def> rows=$( groups j_u2i ), want 3"
 fi
-# the one-group sibling (u1 = prog1 + prog2): dropping the untied prototype leaves one group, so the answer stays plain
+# the one-group sibling (u1 = prog1 + prog2): dropping the untied prototype leaves one group, so no row carries of_def (BX1 FIX 7: it is still listed)
 mkdir -p "$DIR/u1/prog1" "$DIR/u1/prog2"; cp "$FIX/u2/prog1/util.c" "$DIR/u1/prog1/"; cp "$FIX/u2/prog2/main.c" "$DIR/u1/prog2/"
 FIXSAVE="$FIX"; FIX="$DIR"
 # RE-PIN 2026-11-18 (lane v1-verbdef, VERB-DEF-ROWS; gate test/verbdefrowscheck.sh): a one-group --callers answer names the
 # definitions it measured, as --impact does — one group row, then a row per tied declaration — and still no of_def / prov.
-if ans j_u1 u1 callers s xml -- --callers=scan_tok; then plainSole C j_u1; fi
+if ans j_u1 u1 callers s xml -- --callers=scan_tok; then untiedSole C j_u1; fi   # RE-PIN BX1 FIX 7: listed, not silent
 FIX="$FIXSAVE"
 
 # ── (I) Q1 on --for: a body's <calls> row (and a hop's) whose edge is a resolver split arm carries prov="split", defined in the

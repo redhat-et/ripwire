@@ -90,6 +90,10 @@ struct DefGroups
                                                 // identity rule's Unproven: a template-qualified or macro-built declarator, no shared
                                                 // #include) — dropped only when no row ties to it and one group is left
                                                 // (defGroupsDropSilent); on a printed table it is listed bodyless="1"
+    // BX1 FIX 7 (test/verbfixcheck.sh F7): the members of the untied groups defGroupsDropSilent dropped, in group then match order.
+    // Out of every group and every row's attribution, still counted by defs=: a printed table lists each as a bodyless row of
+    // its own after the groups (ix = size() + 1, …), so the table's rows equal defs= and nothing it counts is silent.
+    std::vector<NodeId>        unattributed;
 
     std::size_t size() const noexcept { return rep.size(); }
     bool        multi() const noexcept { return rep.size() >= 2; }
@@ -763,6 +767,12 @@ inline void forEachDefRow( const DefGroups& groups, const DefTableListing& listi
             }
         }
     }
+    // BX1 FIX 7: then each declaration defGroupsDropSilent dropped, a bodyless row of its own (k = size() + j, the spelling a
+    // multi-group table gives an untied declaration), so an uncut table lists every definition and declaration defs= counts
+    for( std::size_t j = 0; !listing.cut && j < groups.unattributed.size(); ++j )
+    {
+        row( std::uint32_t( groups.size() + j ), ing.symbols[ groups.unattributed[j] ], true );
+    }
 }
 // The <def> rows (XML; the columnar form prints the same rows before its <cols>).
 inline std::string defTableXml( const IngestResult& ing, const DefGroups& groups, const DefTableListing& listing, std::string_view rootPrefix,
@@ -861,12 +871,16 @@ inline void defGroupsDropSilent( DefGroups& groups, RowDefTokens& tokens )
         kept.primaryOfSpec.push_back( groups.primaryOfSpec[k] );
         kept.untied.push_back( groups.untied[k] );
     }
-    kept.member = std::move( groups.member );   // parallel to ofMatch, which keeps every match (a silent one as UINT32_MAX)
     kept.ofMatch.reserve( groups.ofMatch.size() );
-    for( const std::uint32_t g : groups.ofMatch )
+    for( std::size_t i = 0; i < groups.ofMatch.size(); ++i )
     {
-        kept.ofMatch.push_back( renum[g] );   // UINT32_MAX: a silent group's member (no row ties to it)
+        kept.ofMatch.push_back( renum[ groups.ofMatch[i] ] );   // UINT32_MAX: a silent group's member (no row ties to it)
+        if( kept.ofMatch.back() == UINT32_MAX )
+        {
+            kept.unattributed.push_back( groups.member[i] );   // BX1 FIX 7: still listed by a printed table, in match order
+        }
     }
+    kept.member = std::move( groups.member );   // parallel to ofMatch, which keeps every match (a silent one as UINT32_MAX)
     for( std::uint32_t& t : tokens.tok )
     {
         ASSUME( renum[ t >> 2 ] != UINT32_MAX, "a group a row names is kept" );
@@ -1024,7 +1038,8 @@ inline UsesDefTable usesDefTable( const IngestResult& ing, std::span<const NodeI
     out.listedAttr = defsListedAttrXml( groups, listing );
     if( !out.rows.empty() || !out.listedAttr.empty() )
     {
-        out.legend = defTableLegend( groups.multi(), listing.cut, /*sole=*/groups.size() == 1, DefLegendFor::UseSites );
+        out.legend = defTableLegend( groups.multi(), listing.cut, /*sole=*/groups.size() == 1, DefLegendFor::UseSites )
+                   + untiedDeclLegend( !groups.unattributed.empty() );   // BX1 FIX 7
     }
     return out;
 }

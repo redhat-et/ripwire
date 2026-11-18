@@ -754,7 +754,7 @@ inline std::string symbolQueryDefTableJson( const IngestResult& ing, const DefGr
     }
     else if( !out.empty() )
     {
-        out += nextFieldJson( defTableLegend( false, false, /*sole=*/true ), "def_note" );   // VERB-DEF-ROWS: the one group's reading
+        out += nextFieldJson( defTableLegend( false, false, /*sole=*/true ) + untiedDeclLegend( !groups.unattributed.empty() ), "def_note" );   // VERB-DEF-ROWS: the one group's reading; BX1 FIX 7
     }
     return out;
 }
@@ -3597,6 +3597,7 @@ inline std::optional<std::string> impactText( const std::string& root, const std
                     + impactRollupLegend( !imFiles.rows.empty(), imports.umbrella, impactRollupHedged( imFiles ), !imports.next.empty(),
                                           ImpactRollupTypeClauses{ imFiles.typed, imFiles.typeDefs, imFiles.typeCapped } )   // idea #6; FIX1 R1; L7, as on the CLI
                     + defTableLegend( imAttr.groups.multi(), imListing.cut, /*sole=*/imAttr.groups.size() == 1 )                     // attrib-multidef, as on the CLI; IMPACT-SOLE-DEF
+                    + untiedDeclLegend( !imAttr.groups.unattributed.empty() )                                          // BX1 FIX 7, as on the CLI
                     + memberOwnerLegendFor( memberOwnerRows( ing, std::span<const NodeId>( show ).subspan( ipw.begin, ipw.end - ipw.begin ) ) ) ).c_str(),   // QUALNAME-1, as on the CLI
                   graphCountDisclosure( rw::graphGaugeClauses( g ) ).c_str(), renderDisclosure( prD, DiscloseAs::LegendClause ).c_str() );
     // r27-emitters §P2.1: the listing is capped at 40 by rank. Without shown=/capped= a 40-row answer to

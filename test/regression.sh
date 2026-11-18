@@ -1119,6 +1119,7 @@ for _g in \
     vendoredbundlecheck \
     vendorpatchcheck \
     verbdefrowscheck \
+    verbfixcheck \
     verifycheck \
     versioncheck \
     versionlabelcheck \

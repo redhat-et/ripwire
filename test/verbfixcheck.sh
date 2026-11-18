@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+# verbfixcheck.sh — three blind spots of the 1-hop verbs (lane BX1, from BS1's diagnosis results/BS1_BLINDSPOT_1118):
+#
+#   test/verbfixcheck.sh [BIN]        # BIN defaults to $RIPWIRE_BIN, then build/ripwire
+#
+#   [F7] AN UNTIED DECLARATION IS PRINTED, NEVER SILENT (defattrib.h defGroupsDropSilent). A prototype the edit-check identity
+#        rule cannot tie to the definition (no include proof here) was dropped from a one-group answer while defs="2" still
+#        counted it: ninja util.h:82 and tmux tmux.h:3200 printed defs="2" beside ONE <def> row. It now prints as a <def> row
+#        of its own (its own ix=, bodyless="1"), so the rows equal defs=. No row is attributed to it (no of_def).
+#   [F3] A C `static` IN A HEADER IS VISIBLE TO ITS INCLUDERS (valuerefindex.h ValueRefIndex::resolveName). htop's
+#        `static inline Row_idEqualCompare` (Row.h) passed as a comparator from Table.c / ProcessTable.c / pcp/InDomTable.c bound
+#        to nothing, because the value resolver kept every internal-linkage definition private to its own FILE. Linkage is per
+#        translation unit: a header's static is in every unit that #includes it, directly or through another header.
+#        A static in a .c file stays private; a file that does not include the header binds nothing.
+#   [F2] MACRO SEE-THROUGH (callhierarchy.h callHierarchyRows, verbs_navigate.h runUses). tmux's cmdq_get_callback1 is only
+#        ever called through `#define cmdq_get_callback(cb, data) cmdq_get_callback1(#cb, cb, data)`: --callers printed the
+#        macro row and stopped (1 of 9 files). The macro's own callers now follow the direct rows, each marked
+#        via="macro:NAME" (JSON "via":"macro:NAME", columnar <via> 3), through a chain of macros too; --uses appends the
+#        macro's call sites the same way and counts them in via_macro=. An answer with no macro row is unchanged.
+#
+# Arm classes: [P] positive — RED on the parent binary (lane/v1-verbdef e6671f267); [N] near miss — a shape the change must
+# not touch; [C] control — holds on every binary (the pins were taken from the parent).
+set -u
+ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
+[ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
+DIR="$( mktemp -d )"; trap 'rm -rf "$DIR"' EXIT
+fail=0
+# every verdict is an if/else: a failed write of a PASS line must never print FAIL for an arm that passed (gateexitcheck G2)
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
+no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
+has(){ if printf '%s' "$1" | grep -qF -- "$2"; then ok "$3"; else no "$3 — missing: $2"; fi; }
+hasnt(){ if printf '%s' "$1" | grep -qF -- "$2"; then no "$3 — present: $2"; else ok "$3"; fi; }
+body(){ printf '%s' "$1" | sed 's/^.*-->//'; }
+count(){ printf '%s' "$1" | grep -oF -- "$2" | wc -l | tr -d ' '; }
+
+echo "verbfixcheck: BIN=$BIN"
+[ -x "$BIN" ] || { echo "  FAIL  no ripwire binary at $BIN"; exit 1; }
+
+# ── the corpus, written here (no file of this tree is read as a fixture) ─────────────────────────────────────────────
+# u/  util.h declares close_exec(); util.c defines it WITHOUT including util.h (the identity rule's include proof fails: untied);
+#     user.c includes util.h and calls it.
+# t/  the tied shape: t.c includes t.h, so the prototype is tied (one group, two rows, same ix).
+# h/  row.h: `static inline row_cmp`; t1.c includes row.h, t2.c includes table.h which includes row.h, lone.c includes
+#     neither (binds nothing), other.c has its OWN `static row_cmp` (binds its own).
+# m/  q.h: get_cb(cb, data) -> get_cb1(#cb, cb, data); get_cb_twice(cb) -> get_cb(cb, 0). direct() calls get_cb1 by name,
+#     start_a() through get_cb, start_b() through get_cb_twice (a two-macro chain).
+mkdir -p "$DIR/u" "$DIR/t" "$DIR/h" "$DIR/m"
+printf 'void close_exec(int fd);\n' >"$DIR/u/util.h"
+printf 'void close_exec(int fd)\n{\n    (void)fd;\n}\n' >"$DIR/u/util.c"
+printf '#include "util.h"\nvoid spawn(void)\n{\n    close_exec(3);\n}\n' >"$DIR/u/user.c"
+printf 'int tally(int a, int b);\n' >"$DIR/t/t.h"
+printf '#include "t.h"\nint tally(int a, int b)\n{\n    return a + b;\n}\n' >"$DIR/t/t.c"
+printf '#include "t.h"\nint total(void)\n{\n    return tally(1, 2);\n}\n' >"$DIR/t/main.c"
+cat >"$DIR/h/row.h" <<'C'
+#ifndef ROW_H
+#define ROW_H
+static inline int row_cmp(const void *a, const void *b) { return a == b; }
+#endif
+C
+printf 'int vec_index(void *v, void *x, int (*cmp)(const void *, const void *));\n' >"$DIR/h/vec.h"
+printf '#include "row.h"\n' >"$DIR/h/table.h"
+printf '#include "row.h"\n#include "vec.h"\nint t1(void *v, void *x) { return vec_index(v, x, row_cmp); }\n' >"$DIR/h/t1.c"
+printf '#include "table.h"\n#include "vec.h"\nint t2(void *v, void *x) { return vec_index(v, x, row_cmp); }\n' >"$DIR/h/t2.c"
+printf '#include "vec.h"\nstatic int row_cmp(const void *a, const void *b) { return 0; }\nint t3(void *v, void *x) { return vec_index(v, x, row_cmp); }\n' >"$DIR/h/other.c"
+printf '#include "vec.h"\nint t4(void *v, void *x) { return vec_index(v, x, row_cmp); }\n' >"$DIR/h/lone.c"
+cat >"$DIR/m/q.h" <<'C'
+struct item;
+#define get_cb(cb, data) get_cb1(#cb, cb, data)
+#define get_cb_twice(cb) get_cb(cb, 0)
+struct item *get_cb1(const char *, void *, void *);
+C
+printf '#include "q.h"\nstruct item *get_cb1(const char *name, void *cb, void *data)\n{\n    return 0;\n}\nvoid direct(void)\n{\n    get_cb1("x", 0, 0);\n}\n' >"$DIR/m/q.c"
+printf '#include "q.h"\nstatic void on_a(void *d) { }\nvoid start_a(void)\n{\n    get_cb(on_a, 0);\n}\n' >"$DIR/m/a.c"
+printf '#include "q.h"\nstatic void on_b(void *d) { }\nvoid start_b(void)\n{\n    get_cb_twice(on_b);\n}\n' >"$DIR/m/b.c"
+cd "$DIR" || exit 1
+export TMPDIR="$DIR/tmp"; mkdir -p "$TMPDIR"
+rw(){ "$BIN" "$@" 2>/dev/null; }
+
+# ── [F7] the untied declaration ──────────────────────────────────────────────────────────────────────────────────────
+echo "[F7] an untied declaration is printed beside defs="
+for v in callers uses impact; do
+    a="$( rw u --$v=close_exec )"
+    has "$a" 'defs="2"' "(F7-$v.0) [C] --$v=close_exec counts the definition and the untied prototype"
+    has "$a" '<def ix="2" t="fn" p="util.h:1" bodyless="1"/>' "(F7-$v.1) [P] --$v prints the untied prototype as its own bodyless row"
+    rows="$( count "$( body "$a" )" '<def ix=' )"
+    if [ "$rows" = 2 ]; then ok "(F7-$v.2) [P] --$v: <def> rows == defs= (2)"; else no "(F7-$v.2) [P] --$v: <def> rows $rows, defs=2"; fi
+    hasnt "$a" 'of_def=' "(F7-$v.3) [N] --$v: no row is attributed to the untied group (no of_def)"
+done
+a="$( rw u --callers=close_exec --legend=full )"
+has "$a" 'tied to none' "(F7.4) [P] the full legend reads the untied row"
+a="$( rw u --callers=close_exec --json )"
+has "$a" '{"ix":2,"t":"fn","p":"util.h:1","bodyless":1}' "(F7.5) [P] --json lists the untied row in def_table"
+a="$( rw u --callers=close_exec --format=columnar )"
+has "$a" '<def ix="2" t="fn" p="util.h:1" bodyless="1"/>' "(F7.6) [P] columnar lists the untied row"
+a="$( printf '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{}}\n{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"find_referencing_symbols","arguments":{"path":"%s","symbol":"close_exec"}}}\n' "$DIR/u" | "$BIN" --mcp 2>/dev/null | tail -1 )"
+has "$a" '\"ix\":2,\"kind\":\"fn\",\"file\":\"util.h\",\"line\":1,\"bodyless\":1' "(F7.7) [P] MCP find_referencing_symbols lists the untied row"
+has "$a" 'tied to none' "(F7.8) [P] MCP def_note reads the untied row"
+a="$( body "$( rw t --callers=tally )" )"
+has "$a" '<def ix="1" t="fn" p="t.c:2"/><def ix="1" t="fn" p="t.h:1" bodyless="1"/><s ' "(F7.9) [N] a TIED prototype keeps its group's ix=1 row"
+hasnt "$a" 'ix="2"' "(F7.10) [N] a tied prototype makes no second group"
+a="$( body "$( rw u --callees=close_exec )" )"
+hasnt "$a" '<def ' "(F7.11) [N] --callees keeps a one-group answer table-less"
+
+# [F3] and [F2] arms land with their fixes (BX1 commits 2 and 3).
+
+a1="$( rw m --callers=get_cb1 )"; a2="$( rw m --callers=get_cb1 )"
+if [ "$a1" = "$a2" ]; then ok "(D) [C] deterministic: two runs byte-identical"; else no "(D) two runs differ"; fi
+if command -v xmllint >/dev/null 2>&1; then
+    if rw m --callers=get_cb1 | xmllint --noout - 2>/dev/null && rw m --uses=get_cb1 | xmllint --noout - 2>/dev/null \
+       && rw u --impact=close_exec | xmllint --noout - 2>/dev/null; then ok "(X) [C] well-formed XML"; else no "(X) xmllint rejects an answer"; fi
+fi
+
+if [ "$fail" = 0 ]; then echo "verbfixcheck: ALL PASS"; else echo "verbfixcheck: FAIL"; fi
+exit "$fail"

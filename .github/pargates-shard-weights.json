@@ -631,6 +631,7 @@
  "vendoredbundlecheck.sh": 0.8,
  "vendorpatchcheck.sh": 60.2,
  "verbdefrowscheck.sh": 4.0,
+ "verbfixcheck.sh": 4.0,
  "verifycheck.sh": 6.4,
  "versioncheck.sh": 0.1,
  "w2verbscheck.sh": 5.3,
