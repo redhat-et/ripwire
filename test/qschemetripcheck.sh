@@ -34,6 +34,9 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-18, lane rust-self-chain (base main 9087eb59c): RE-PINNED ONCE with UPDATE_GOLDEN=1 (ab701560… -> 7e577375…). Watched text:
+#   kParserVer 309 -> 319 (rich 320) and kCacheVersion 52 -> 53 (LocalBindKind RecvCall appended), both PLACEHOLDERS the train
+#   renumbers, with quality.h's two mirrors in the same commit. kQSnapCacheScheme stays: no watched quality.h function moved.
 # 2026-11-15, lane land-499-500 fix 1 (CodeRabbit on #668, merged over main d68b57456): RE-PINNED with UPDATE_GOLDEN=1,
 #   kQSnapCacheScheme 33 -> 34 (quality.h's v34 note). rustTestAttributed reads each top-level attribute on a line
 #   (classifyRustAttributeLine, rustAttributeClose: both join the manifest), so the Rust dead set moves; registeredMacroSymbolIds

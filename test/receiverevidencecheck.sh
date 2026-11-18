@@ -1390,6 +1390,44 @@ notproven $CR/kt   callees src/app/Use2.kt:useChain         "size src/app/Model2
 proven    $CR/ts   callees src/use2.ts:useChain             "method size src/nest.ts:7"                 # [P]
 notproven $CR/ts   callees src/use2.ts:useChain             "size src/nest.ts:2"                        # [N]
 notproven $CR/rust callees src/fix1.rs:near_hedged_hop      "get src/model.rs:6" "get src/model.rs:13"  # [N] `g.build()` on an untyped g
+# RUST-SELF-CHAIN (lane rust-self-chain; root rust7): a Rust member call written on ANOTHER call's result — a builder chain
+# `Router::new().route( .. ).layer( .. )` — reads that result's type as a call-result local would: the chain's root (a path call
+# `T::f()` whose qualifier reaches f's class, a typed local, `self`'s fields) and then each hop's ONE proven callee's declared
+# result (`Self` in an impl of T is T; a named type in its callee's file), through `?` / `.unwrap()` and `.await` (an `async fn`'s
+# result, or the in-tree `IntoFuture` / `Future` impl's `Output`). model.rs: Router::route :5, layer :6, poke :9, Done::route :20,
+# Done::report :21, Done::serve :29; decoy.rs Other::route :4, layer :5, poke :6, report :7, serve :8. [P] red on main (via="name").
+R7=$CR/rust7; R7M=src/model.rs; R7D=src/decoy.rs
+exactproven $R7 callees src/app.rs:chain_self       "method new $R7M;method route $R7M;method layer $R7M"     # [P] every hop of a `-> Self` chain
+for f in chain_self chain_qualified chain_let_root chain_let_after; do
+    proven    $R7 callees "src/app.rs:$f" "method route $R7M:5"                                            # [P]
+    notproven $R7 callees "src/app.rs:$f" "route $R7D:4" "route $R7M:20"                                   # [N] the namesakes
+done
+for f in chain_self chain_let_root chain_try chain_unwrap chain_await let_await_async; do   # `?`, `.unwrap()`, an `async fn -> Self` awaited
+    proven    $R7 callees "src/app.rs:$f" "method layer $R7M:6"                                            # [P]
+    notproven $R7 callees "src/app.rs:$f" "layer $R7D:5"                                                   # [N]
+done
+proven    $R7 callees src/app.rs:chain_mut          "method poke $R7M:9"                                       # [P] `&mut Self`
+notproven $R7 callees src/app.rs:chain_mut          "poke $R7D:6"                                              # [N]
+for f in chain_into_future let_into_future; do   # `.await` on an in-tree `impl IntoFuture for Pending { type Output = Done }`
+    proven    $R7 callees "src/app.rs:$f" "method report $R7M:21"                                          # [P]
+    notproven $R7 callees "src/app.rs:$f" "report $R7D:7"                                                  # [N]
+done
+proven    $R7 callees src/app.rs:chain_other_root   "method route $R7D:4" "method layer $R7D:5"                # [P] the root decides the class
+notproven $R7 callees src/app.rs:chain_other_root   "route $R7M:5" "layer $R7M:6"                              # [N]
+proven    $R7 callees src/app.rs:near_other_type    "method route $R7M:20"                                     # [P] a hop to ANOTHER type: the chain follows it
+notproven $R7 callees src/app.rs:near_other_type    "route $R7M:5" "route $R7D:4"                              # [N] never the root's class
+for f in near_future near_let_future near_try_missing; do   # an un-awaited `async fn` (a future), a Result with no `?`
+    notproven $R7 callees "src/app.rs:$f" "layer $R7M:6" "layer $R7D:5"                                    # [N]
+done
+for f in near_dyn near_impl near_trait_obj; do   # `Box<dyn Service>`, `impl Service`, a trait method's `Self` on a trait object
+    notproven $R7 callees "src/app.rs:$f" "serve $R7M:29" "serve $R7D:8"                                   # [N]
+done
+for f in near_no_await near_split_hop; do   # IntoFuture's Output needs the `.await`; `twice` is inherent AND a trait's (`-> Done`)
+    notproven $R7 callees "src/app.rs:$f" "report $R7M:21" "report $R7D:7"                                 # [N]
+done
+proven    $R7 callees "$R7M::Router::self_root"     "method route $R7M:5" "method layer $R7M:6"                # [P] a `Self::new()` root
+proven    $R7 callers "$R7M::Router::route"         "fn chain_self src/app.rs" "fn chain_let_after src/app.rs"  # [P] the callers side
+notproven $R7 callers "$R7M::Router::route"         "near_other_type src/app.rs" "chain_other_root src/app.rs"  # [N]
 # Shapes the identity rule keeps (census-driven, fix round 1): a named non-struct result type (Go `type Shape int`), a field
 # path below a call-typed local whose class name no other in-tree class shares, a result type named through a re-export.
 proven    $CR/go   callees src/app/fix1.go:UseNamedType     "method HasTop src/nest/nest.go:22"         # [P]

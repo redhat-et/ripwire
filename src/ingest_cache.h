@@ -156,7 +156,9 @@ constexpr std::uint32_t kCacheMagic   = 0x4b505443;   // "CTPK"
 // lane rust-degraded's placeholder 42.
 // 44 (train 37b, lane rust-degraded; its placeholder was 42): the FILE record gains a sixth FileHealth u32, useBoundsBlanked
 // (the Rust precise-capture re-parse, src/rustusebounds.h), so an older cache must be rejected. 44 is above train 36's 43.
-constexpr std::uint32_t kCacheVersion = 52;           // 52: lane failure-default — the construct hits gain the failure-default shape tag
+constexpr std::uint32_t kCacheVersion = 53;           // 53: lane rust-self-chain (PLACEHOLDER: the train renumbers) — LocalBindKind RecvCall (appended;
+                                                      //    readBind's kind bound moves).
+                                                      // 52: lane failure-default — the construct hits gain the failure-default shape tag
                                                       //    (lintrules.h kConstructShapeTags, appended); an older record lacks those hits.
                                                       // 51: lane qd-constructs — the FILE record gains a ninth family, the --quality-delta
                                                       //    construct hits (ConstructHit: startByte, line, tag byte), with its head count.
@@ -380,7 +382,11 @@ constexpr std::uint32_t kCacheVersion = 52;           // 52: lane failure-defaul
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 309;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 319;          // bump on any grammar/.scm/extraction change
+                                                      // 319 = 2026-11-18 (lane rust-self-chain, PLACEHOLDER: the train renumbers; above main's 309 and the open lanes'
+                                                      //   311..318): a Rust member call on another call's result records a RecvCall (ingest_binds.h
+                                                      //   captureRustRecvCall), an `async fn`'s ReturnType carries kAwaitResultBit, and a `let x = f().await` binds its
+                                                      //   CallResult with it (rustUnwrappedCall). Rich file tag 320. kCacheVersion 53 (RecvCall appended).
                                                       // 309 = 2026-11-13 (lane macro-p0, PLACEHOLDER: the train renumbers; above main's 307/308): a C-family macro
                                                       //   invocation read as a typeless declarator (`REGISTER_FACTORY( F, B ){ "n" };`, a class-member `MOCK_METHOD( … );`)
                                                       //   mints no function def; the site is a use of the macro (ingest_names.h cFamilyMacroInvocationDecl). Rich file

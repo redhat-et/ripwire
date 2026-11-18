@@ -2432,6 +2432,91 @@ impl D {
     pub fn hit5(&self) -> usize { 0 }
     pub fn hit6(&self) -> usize { 0 }
 }
+@@@ rust7/Cargo.toml
+[package]
+name = "rust7"
+version = "0.1.0"
+@@@ rust7/src/lib.rs
+pub mod model;
+pub mod decoy;
+pub mod app;
+@@@ rust7/src/model.rs
+use std::future::IntoFuture;
+pub struct Router<S> { s: S }
+impl<S> Router<S> {
+    pub fn new() -> Self { todo!() }
+    pub fn route(self, _p: &str) -> Self { self }
+    pub fn layer(self, _l: u32) -> Self { self }
+    pub fn try_route(self) -> Result<Self, ()> { Ok(self) }
+    pub fn tweak(&mut self) -> &mut Self { self }
+    pub fn poke(&mut self) {}
+    pub async fn ready(self) -> Self { self }
+    pub fn finish(self) -> Done { Done }
+    pub fn boxed(self) -> Box<dyn Service> { Box::new(Done) }
+    pub fn opaque(self) -> impl Service { Done }
+    pub fn pending(self) -> Pending { Pending }
+    pub fn twice(self) -> Self { self }
+    pub fn self_root(self) -> Self { Self::new().route("x").layer(2) }
+}
+pub struct Done;
+impl Done {
+    pub fn route(&self) {}
+    pub fn report(&self) {}
+}
+pub trait Service {
+    fn fresh(&self) -> Self where Self: Sized;
+    fn serve(&self);
+}
+impl Service for Done {
+    fn fresh(&self) -> Self { Done }
+    fn serve(&self) {}
+}
+pub trait Twice {
+    fn twice(self) -> Done;
+}
+impl<S> Twice for Router<S> {
+    fn twice(self) -> Done { Done }
+}
+pub struct Pending;
+impl IntoFuture for Pending {
+    type Output = Done;
+    type IntoFuture = std::future::Ready<Done>;
+    fn into_future(self) -> Self::IntoFuture { std::future::ready(Done) }
+}
+@@@ rust7/src/decoy.rs
+pub struct Other;
+impl Other {
+    pub fn new() -> Self { Other }
+    pub fn route(self, _p: &str) -> Self { self }
+    pub fn layer(self, _l: u32) -> Self { self }
+    pub fn poke(&mut self) {}
+    pub fn report(&self) {}
+    pub fn serve(&self) {}
+}
+@@@ rust7/src/app.rs
+use crate::decoy::Other;
+use crate::model::{Router, Service};
+pub fn chain_self() { let _ = Router::new().route("a").route("b").layer(1); }
+pub fn chain_qualified() { crate::model::Router::new().route("a"); }
+pub fn chain_let_root() { let r = Router::new(); r.route("a").layer(1); }
+pub fn chain_try() -> Result<(), ()> { Router::new().try_route()?.layer(1); Ok(()) }
+pub fn chain_unwrap() { Router::new().try_route().unwrap().layer(1); }
+pub fn chain_mut() { let mut r = Router::new(); r.tweak().tweak().poke(); }
+pub async fn chain_await() { Router::new().ready().await.layer(1); }
+pub fn chain_let_after() { let app = Router::new().route("a").layer(1); app.route("b"); }
+pub async fn chain_into_future() { Router::new().pending().await.report(); }
+pub async fn let_into_future() { let d = Router::new().pending().await; d.report(); }
+pub async fn let_await_async() { let r = Router::new().ready().await; r.layer(1); }
+pub fn chain_other_root() { Other::new().route("a").layer(1); }
+pub fn near_other_type() { Router::new().finish().route(); }
+pub fn near_future() { Router::new().ready().layer(1); }
+pub fn near_let_future() { let f = Router::new().ready(); f.layer(1); }
+pub fn near_dyn() { Router::new().boxed().fresh().serve(); }
+pub fn near_impl() { Router::new().opaque().serve(); }
+pub fn near_trait_obj(s: &dyn Service) { s.fresh().serve(); }
+pub fn near_no_await() { Router::new().pending().report(); }
+pub fn near_try_missing() { Router::new().try_route().layer(1); }
+pub fn near_split_hop() { Router::new().twice().report(); }
 @@@ rust6/Cargo.toml
 [package]
 name = "rust6"

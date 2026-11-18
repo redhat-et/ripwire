@@ -10333,8 +10333,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 {
                     // lane iface-peel: `-> &dyn T` — the local is SOME implementor of T (the dispatch tier reads it); same
                     // position, no unwrap at the call, and the Rust path qualifier check as for a class result
-                    if( langFacts( cs.lang ).returnTypedDispatchLet && rt.resultIndex == cr.resultIndex && cr.unwrapDepth == 0
-                        && recvEv.rustQualifierTypes( r, cr.importedName, callee, rt.isFromAssignment ) )
+                    if( langFacts( cs.lang ).returnTypedDispatchLet && rt.resultIndex == cr.resultIndex && cr.unwrapDepth == ( rt.unwrapDepth & ~kDispatchResultBit )
+                        && recvEv.rustQualifierTypes( r, cr.importedName, callee, rt.isFromAssignment ) )   // an `async fn`'s only when awaited
                     {
                         recvEv.typeCallResultDispatch( cr, rt );
                         break;
@@ -10345,6 +10345,14 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                                             && recvEv.rustQualifierTypes( r, cr.importedName, callee, rt.isFromAssignment );   // Rust T::f(): its T reaches f's class
                 if( !match )
                 {
+                    // lane rust-self-chain: `let x = f().await` on a non-async `f`: the awaited class's IntoFuture / Future `Output`
+                    const NodeId awaited = rt.resultIndex == cr.resultIndex && recvEv.rustQualifierTypes( r, cr.importedName, callee, rt.isFromAssignment )
+                                         ? recvEv.rustAwaitedCallResult( cr, rt, cs.lang ) : kNoNode;
+                    if( awaited != kNoNode )
+                    {
+                        recvEv.typeCallResult( cr, ing.symbols[ awaited ].name, awaited );
+                        break;
+                    }
                     continue;
                 }
                 const NodeId cls = recvEv.types.resultClassOf( rt, cs.lang );
