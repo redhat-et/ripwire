@@ -185,8 +185,9 @@ for name, depth in (("shallow", 3), ("deep", 20)):
 row     C1.shallow     "$D" callers deep_leaf     src/lib.rs shallow        proven
 row     C2.pastbound   "$D" callers deep_leaf     src/lib.rs deep           none
 c3=$( cd "$D" && "$BIN" "$D" --skipped --no-cache --legend=compact </dev/null 2>/dev/null )
-if printf '%s' "$c3" | grep -q '<f p="src/lib.rs" why="extract-partial"'; then echo "PASS C3.disclosed (--skipped lists src/lib.rs why=extract-partial)"
-else echo "FAIL C3.disclosed --skipped does not list src/lib.rs as extract-partial: the bound cut calls unsaid"; fail=1; fi
+c3rc=$?
+if [ "$c3rc" = 0 ] && printf '%s' "$c3" | grep -q '<f p="src/lib.rs" why="extract-partial"'; then echo "PASS C3.disclosed (--skipped lists src/lib.rs why=extract-partial)"
+else echo "FAIL C3.disclosed --skipped (rc=$c3rc) does not list src/lib.rs as extract-partial: the bound cut calls unsaid"; fail=1; fi
 
 if [ "$fail" = 0 ]; then echo "rustmacropathcheck: PASS"; else echo "rustmacropathcheck: FAIL"; fi
 exit "$fail"
