@@ -34,6 +34,9 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-17, train 1117a-r (rebase-stack on main 9087eb59c: naming-wordy prefix, tidy-681, #420, #473, #540, ROW-MANIFEST): RE-PINNED ONCE
+#   with UPDATE_GOLDEN=1 from the composed build (hash d208bb4995…e892919). It carries the two entries below together: #420's parser tag
+#   311 (rich 312) and tidy-681's codeLocByNode text; each lane's own hash named below was that lane alone. No constant moves; #682 leaves it.
 # 2026-11-17, C# import captures (#358 1a, @LaimaWu; lands #420 rebased onto main 5139f7840): parser tag 309 -> 311 (rich 312)
 #   and mirror move together (the PR's 196 -> 198, renumbered above main). Import-free deep containers cease to be partial;
 #   kCacheVersion and kQSnapCacheScheme stay unchanged. Re-derived ONCE with UPDATE_GOLDEN=1 from the rebased build (hash
