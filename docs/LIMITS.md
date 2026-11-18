@@ -29,16 +29,16 @@ a small explicit bound" is safe only when nothing inside the group repeats; it i
 `(a|aa){1,100}b$`, tracked with the multi-quantifier family above.
 
 **Totals are a dated snapshot.** Every total on this page (the table below, the class counts, the
-file count) is the counts snapshot taken 2026-11-17 (`docs/counts.tsv`), so two open changes that each add a
+file count) is the counts snapshot taken 2026-11-18 (`docs/counts.tsv`), so two open changes that each add a
 cap do not both rewrite the same line; the per-file tables are re-read from `src/` on every run.
 `python3 docs/counts_snapshot.py show` prints today's numbers beside these.
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 436 | 148 | 282 | **154** |
+| 440 | 149 | 288 | **152** |
 
 Plus 10 ranking and apportionment parameters, in their own table below: they are not caps, they
-are not counted as caps, and 436 + 10 is the 446 constants this generator parses out of `src/`.
+are not counted as caps, and 440 + 10 is the 450 constants this generator parses out of `src/`.
 
 ## INDEXING, OUTPUT or BOUNDARY — which half of the answer a cap bounds
 
@@ -56,8 +56,8 @@ None of them truncates anything, so none can be judged by `shown=`/`total=` and 
 a disclosure — labelling them OUTPUT would ask for a `capped="1"` that could never honestly fire.
 The distinction was named in review on #108 and the rows below now carry it.
 
-The `class` column below carries that answer where it is known. **143 of 436 caps are classified
-(51 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 293 render `—`, which means NOT YET
+The `class` column below carries that answer where it is known. **143 of 440 caps are classified
+(51 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 297 render `—`, which means NOT YET
 CLASSIFIED — never "neither".** Classifications live in `docs/limits_classes.tsv`, a sidecar with
 a known expiry:
 the tag belongs on the declaration itself, and this file exists only because the round that
@@ -255,7 +255,7 @@ Discloses: `capped`, `reads_capped`, `writes_capped`
 
 ### `src/declinedsites.h`
 
-Discloses: **none**
+Discloses: `dc_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
@@ -272,7 +272,7 @@ Discloses: **none**
 
 ### `src/defslookup.h`
 
-Discloses: `to_capped`
+Discloses: `alts_capped`, `to_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
@@ -450,7 +450,7 @@ Discloses: **none**
 
 ### `src/forcallerhop.h`
 
-Discloses: `capped`
+Discloses: `capped`, `d2_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
@@ -1397,7 +1397,7 @@ Discloses: **none**
 
 ### `src/serialize.h`
 
-Discloses: `capped`, `calls_capped`, `dirs_capped`, `entries_capped`, `files_capped`, `importers_capped`, `inc_capped`, `members_capped`, `names_capped`, `sibs_capped`, `type_capped`
+Discloses: `capped`, `calls_capped`, `dirs_capped`, `entries_capped`, `files_capped`, `implementors_capped`, `importers_capped`, `inc_capped`, `members_capped`, `names_capped`, `sibs_capped`, `transitive_capped`, `type_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
