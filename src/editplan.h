@@ -332,7 +332,7 @@ inline Outcome prepare( const std::string& root, const std::string& planPath, st
             // not owner-narrowed (XF-QUALIFIED-ENDPOINTS): a plan target resolves as the edit verbs do (mcpedit.h
             // resolveOneForEdit, the bare name exactly), so a qualified `Alpha.run` never reaches here
             const std::vector<NodeId> overloads = editCheckOverloadSet( ix.ing, ix.g, edit.node );
-            EditCheckCalleeTest       callee( ix.ing, target, overloads );
+            EditCheckCalleeTest       callee( ix.ing, target, overloads, ix.g.provenSites );
             const auto [ callerIds, callerIncompatible ] = editCheckCallers( ix.ing, ix.g, overloads, callee );
             (void) callerIncompatible;   // the FLAGS are an after-the-edit question; a dry-run has no edit yet
             edit.callers = callerIds;

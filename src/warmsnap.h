@@ -78,7 +78,8 @@ namespace rw::warmsnap
 {
 
 inline constexpr std::uint64_t kMagic   = 0x0150'414e'5357'52ull;   // "RWSNAP\x01"
-inline constexpr std::uint32_t kVersion = 2;                        // bump on ANY layout change in the three sections
+inline constexpr std::uint32_t kVersion = 3;                        // bump on ANY layout change in the three sections
+                                                                    // 3: the GRAPH section carries Graph::provenSites (PROVEN-SITE-KEEPS-NAMESAKES)
                                                                     // 2: the MODEL section dropped its stored stat signature of the blob — the
                                                                     //    blob's identity is in this file's NAME, so that binding is structural
                                                                     //    and there is no field left to be wrong about it (see the note above).

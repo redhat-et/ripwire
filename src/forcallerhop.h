@@ -588,7 +588,7 @@ inline CallerHopRender renderForCallerHop( const IngestResult& ing, const Graph&
     const std::size_t             secondShown = std::min( second.size(), kForCallerHopDepth2Rows );
 
     // the callers verb's per-row readings over the shown rows: the call sites (CALLSITE-AT) and the by-name hedge (FE-B)
-    const RowCallSites       sites = rowCallSites( ing, targets, shown, VrRender{ !rootArg.empty(), rootArg }, g.keptForwards );
+    const RowCallSites       sites = rowCallSites( ing, targets, shown, VrRender{ !rootArg.empty(), rootArg }, g );
     const OneHopAttribution  attr  = attributeOneHopAnswer( ing, g, targets, shown, /*towardMatches=*/true );
     // the second hop's by-name hedge: a d=2 row with no proven edge into a proven first-hop caller is receiver-unproven — via="name"
     FirstHopProof proof( g, targets, first, firstShown, attr );

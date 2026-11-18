@@ -68,6 +68,34 @@ enum class DeclinedSiteKind : std::uint8_t
 // call, with no list (no cands=, and no callers row — declinedCallsNaming cannot count it either).
 inline constexpr std::uint32_t kNoDeclinedList = UINT32_MAX;
 
+// PROVEN-SITE-KEEPS-NAMESAKES: one target a PROVEN call site committed (Graph::provenSites) — never a via=name site's
+struct ProvenSite
+{
+    std::uint32_t ref;      // the call's index into IngestResult::references
+    NodeId        target;   // a definition the site's evidence bound it to
+
+    friend auto operator<=>( const ProvenSite&, const ProvenSite& ) = default;
+};
+
+// May call site `ref` count for one of `defs`? A site `proven` (Graph::provenSites, sorted) lists counts for its own targets alone;
+// every other site, yes — its name test decides.
+inline bool provenSiteCountsFor( std::span<const ProvenSite> proven, std::uint32_t ref, std::span<const NodeId> defs )
+{
+    auto at = std::lower_bound( proven.begin(), proven.end(), ref, []( const ProvenSite& p, std::uint32_t r ) { return p.ref < r; } );
+    if( at == proven.end() || at->ref != ref )
+    {
+        return true;
+    }
+    for( ; at != proven.end() && at->ref == ref; ++at )
+    {
+        if( std::find( defs.begin(), defs.end(), at->target ) != defs.end() )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 struct Graph
 {
     sparseCsr<float>           inEdges;     // N×N, row = target's in-neighbours (for PageRank)
@@ -212,6 +240,13 @@ struct Graph
     // Reference::forwarded) whose call the resolve loop kept — bound, proven, to a function or method. Every other forwarded
     // reference stands for no call the code makes, so the use-site index skips it too (verbs_navigate.h collectUseSites).
     std::vector<std::uint32_t> keptForwards;
+    // PROVEN-SITE-KEEPS-NAMESAKES: the proven call sites a by-name site test would misplace, sorted by ( ref, target ). A row's call
+    // sites (sites_at=, the --for hop's site, --edit-check's sites) are matched by the callee's NAME (editcheck.h CallSiteCalleeTest),
+    // and a caller with edges to two definitions of one name had each row list every call of that name: envoy's onConnectionClose
+    // printed its proven `close_action.closeSocket()` lines under the by-name ConnectionImpl::closeSocket row. Kept: each target of a
+    // call a rule PROVED (never via=name) whose caller also has an edge to another definition of the name (rivalledProvenSites); a
+    // site listed here counts only for its own targets, every other site keeps the name test.
+    std::vector<ProvenSite>    provenSites;
     // Every call reference's disposition (pincensus.h CallDisposition), one bucket per reference. Read by buildGraph's
     // unaccounted alert and copied into pinCensus when a census is armed; its external/unresolved/declined buckets
     // equal those header gauges by construction.
@@ -1329,6 +1364,59 @@ inline void keepRustTraitImplementors( ChaConeMemo& chaCones, const IngestResult
     const auto foreign = [ & ]( NodeId c ) { return ing.symbols[ c ].scope != r.qualifier && !implementsTrait( c ); };
     std::erase_if( cand, foreign );
     std::erase_if( rule3Hedge, foreign );
+}
+
+// PROVEN-SITE-KEEPS-NAMESAKES: a PROVEN call site's targets, appended to Graph::provenSites in reference order, while the name has
+// more than one definition (`namesakes`) — a name with one cannot be misplaced. rivalledProvenSites prunes the list once every
+// edge exists. A via=name site appends nothing: it counts for every row of its name, as before.
+inline void noteProvenSite( std::vector<ProvenSite>& out, bool proven, std::size_t namesakes, std::uint32_t ref, NodeId from, std::span<const NodeId> tier )
+{
+    if( !proven || namesakes < 2 )
+    {
+        return;
+    }
+    for( const NodeId to : tier )
+    {
+        if( to != from )
+        {
+            out.push_back( { ref, to } );
+        }
+    }
+}
+
+// PROVEN-SITE-KEEPS-NAMESAKES: keep the noted sites (noteProvenSite) whose caller has an out-edge to another definition of the
+// call's name, the only ones a site test by name can misplace; each kept site's targets sorted. `sites` arrives ascending by ref.
+inline void rivalledProvenSites( const IngestResult& ing, const Graph& g, std::vector<ProvenSite>& sites )
+{
+    std::size_t kept = 0;
+    for( std::size_t at = 0; at < sites.size(); )
+    {
+        std::size_t end = at + 1;
+        while( end < sites.size() && sites[ end ].ref == sites[ at ].ref )
+        {
+            ++end;
+        }
+        ASSUME( end == sites.size() || sites[ end ].ref > sites[ at ].ref, "noted in reference order" );
+        const Reference&                r     = ing.references[ sites[ at ].ref ];
+        const std::span<const ProvenSite> mine( sites.data() + at, end - at );
+        const auto ownTarget = [ & ]( NodeId t ) { return std::any_of( mine.begin(), mine.end(), [ & ]( const ProvenSite& p ) { return p.target == t; } ); };
+        bool rival = false;
+        for( std::uint32_t e = g.outOff[ r.fromSymbol ]; e < g.outOff[ r.fromSymbol + 1 ] && !rival; ++e )
+        {
+            const NodeId t = g.outTargets[ e ];
+            rival = ing.symbols[ t ].name == r.calleeName && !ownTarget( t );
+        }
+        if( rival )
+        {
+            std::sort( sites.begin() + std::ptrdiff_t( at ), sites.begin() + std::ptrdiff_t( end ) );
+            std::move( sites.begin() + std::ptrdiff_t( at ), sites.begin() + std::ptrdiff_t( end ), sites.begin() + std::ptrdiff_t( kept ) );
+            kept += end - at;
+        }
+        at = end;
+    }
+    sites.resize( kept );
+    sites.shrink_to_fit();
+    ENSURES( std::is_sorted( sites.begin(), sites.end() ), "provenSites is sorted by ( ref, target )" );
 }
 
 // true ⇒ every `::`-separated segment of a C++ scope passes `pred` (`std::__1` under "names std"); an empty scope has one empty segment
@@ -13668,6 +13756,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 }
             }
         }
+        noteProvenSite( g.provenSites, !nameOnly, it == byName.end() ? 0u : it->second.size(), std::uint32_t( siteIndex ), r.fromSymbol, tier );
         if( r.forwarded )
         {
             g.keptForwards.push_back( std::uint32_t( siteIndex ) );   // ascending: the loop walks the references in order
@@ -13848,6 +13937,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             }
         }
     }
+
+    rivalledProvenSites( ing, g, g.provenSites );   // PROVEN-SITE-KEEPS-NAMESAKES: the out-edges exist now
 
     // in-edge CSR (row = target) for PageRank
     std::vector<std::uint32_t> inDeg( N, 0 );
