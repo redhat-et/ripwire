@@ -34,6 +34,10 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-18, lane overload-split (base main 9087eb59c; PLACEHOLDER, the train renumbers): RE-PINNED with UPDATE_GOLDEN=1.
+#   Watched text: kParserVer 309 -> 329 (mirrored in quality.h's kIngestParserVerMirror): ingest_binds.h goQualifiedWhole unwraps a Go
+#   generic_type, so a field `addrs.Set[addrs.Module]` records its qualified class. kQSnapCacheScheme stays: the parser key already
+#   keys the qsnap cache on extraction.
 # 2026-11-17, lane go-cpp-edges (base main 9087eb59c): RE-PINNED with UPDATE_GOLDEN=1. Watched text: kParserVer 309 -> 317
 #   (placeholder, mirrored in quality.h): a Go result written as a generic instantiation records its ReturnType. kQSnapCacheScheme
 #   stays: the parser key already keys the qsnap cache on extraction, and no watched function moved.

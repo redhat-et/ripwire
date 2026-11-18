@@ -2119,6 +2119,7 @@ struct ReceiverEvidence
     HashMap<std::string, rw::SmallVec<NodeId, 2>>         abstractByType;  // "Class::name" → its BODYLESS callables (the contract a call dispatches through)
     HashMap<std::string_view, char>                       abstractNames;   // every name some class declares without a body (the gate of the two walks below)
     HashMap<std::string, std::string>                     memberType;      // "Class#field" → field class ("" = tombstone)
+    HashMap<std::string, NodeId>                          memberTypeClass; // lane overload-split: "Class#field" → the ONE class every record of it resolved to (kNoNode = disagree; only qualified fields have a row)
     HashMap<std::string, NodeId>                          memberClass;     // rust-receivers: "<class id>#field" → the ONE class its written type resolved to (kNoNode = unknown)
     HashMap<std::string, NodeId>                          memberIface;     // lane L6: "<class id>#field" → the trait a `Box<dyn T>` field dispatches through (kNoNode = disagree)
     HashMap<std::string, std::vector<std::string>>        embeds;          // "Class" → its other bases: Go embedded classes (promotion)
@@ -2483,8 +2484,10 @@ struct ReceiverEvidence
             ++callResultDecls[ keyOf( factScope( b ), '#', b.var ) ];
         }
     }
-    // a field's class on its owner (`type` "": unknown, a tombstone); an embedded field (Go) is also a base
-    void noteMemberType( const Binding& b, std::string_view type )
+    // a field's class on its owner (`type` "": unknown, a tombstone); an embedded field (Go) is also a base. `cls`: the ONE
+    // class a QUALIFIED written type resolved to (noteQualifiedWritten), kept beside the name only while every record of the
+    // key agrees on it — a same-named owner whose field names no class (or another) leaves kNoNode, the name alone
+    void noteMemberType( const Binding& b, std::string_view type, NodeId cls = kNoNode )
     {
         const Symbol&      from  = ing.symbols[ b.fromSymbol ];
         const std::string& owner = classLike( from.kind ) ? from.name : ownerClass[ b.fromSymbol ];
@@ -2492,7 +2495,16 @@ struct ReceiverEvidence
         {
             return;
         }
-        tombstoneInsert( memberType, typeKey( owner, "#", b.var ), type );
+        const std::string& fieldKey = typeKey( owner, "#", b.var );
+        if( const auto known = memberTypeClass.find( fieldKey ); known != memberTypeClass.end() )
+        {
+            known->second = known->second == cls ? cls : kNoNode;   // a record that disagrees (or names no class) hides it
+        }
+        else if( cls != kNoNode && !memberType.contains( fieldKey ) )
+        {
+            memberTypeClass.emplace( fieldKey, cls );   // the key's first record: an earlier one without a class leaves no entry
+        }
+        tombstoneInsert( memberType, fieldKey, type );
         if( b.isFromAssignment && !type.empty() )
         {
             addBase( owner, type );
@@ -2525,7 +2537,7 @@ struct ReceiverEvidence
         const std::string_view type = keep ? std::string_view( q.typeName ) : std::string_view{};
         if( q.kind == LocalBindKind::MemberType )
         {
-            noteMemberType( q, type );
+            noteMemberType( q, type, keep ? cls : kNoNode );   // a Go field `addrs.Set[addrs.Module]`: addrs' Set, not every Set
             return;
         }
         addTypedFact( factScope( q ), q, type, cls );
@@ -3244,13 +3256,16 @@ struct ReceiverEvidence
         // the side the receiver names: the class object (a class-name receiver, or `this`/`super` inside a static member),
         // else an instance; a stated field below always holds an instance
         bool classSide = isStatic || ( ch.ctor.empty() && ( isThisRoot( ch.root ) || isSuperRoot( r, ch.root ) ) && callerIsStatic( r.fromSymbol ) );
-        std::string_view rest = ch.path;
+        std::string_view rest     = ch.path;
+        NodeId           fieldCls = kNoNode;   // the last field's ONE class when its qualified written type resolved to one
         while( !rest.empty() )   // walk the stated field classes
         {
             const std::size_t dot = rest.find( '.' );
             const std::string_view field = rest.substr( 0, dot );
             rest = dot == std::string_view::npos ? std::string_view{} : rest.substr( dot + 1 );
-            type = fieldOf( type, field );
+            const auto known = memberTypeClass.find( typeKey( type, "#", field ) );   // declared on `type` itself, not a base
+            fieldCls  = known == memberTypeClass.end() ? kNoNode : known->second;
+            type      = fieldOf( type, field );
             superOnly = false;
             classSide = false;
             if( type.empty() )
@@ -3258,7 +3273,10 @@ struct ReceiverEvidence
                 return false;
             }
         }
-        if( !methodOf( type, r.calleeName, superOnly, cls ) )
+        // lane overload-split: a field whose qualified written type resolved to ONE class answers with that class's OWN members
+        // (terraform's `d.suppressedModules.Add` is addrs.Set's Add, not every Set's). When it owns none — an interface, a method
+        // promoted from an embedded type — the field reads by name exactly as before.
+        if( !( fieldCls != kNoNode && methodOf( type, r.calleeName, superOnly, fieldCls ) ) && !methodOf( type, r.calleeName, superOnly, cls ) )
         {
             return false;
         }
