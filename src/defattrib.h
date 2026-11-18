@@ -897,11 +897,59 @@ struct OneHopAttribution
     DefGroups         groups;
     RowDefTokens      tokens;   // parallel to the rows; empty when nothing was computed
     std::vector<char> impl;     // lane L6: parallel to the rows, 1 = every edge joining the row to the matches is via="impl"; empty when none is
+    // BX1 FIX 2 (callhierarchy.h macroSeeThroughRows): parallel to the rows, the function-like macro a see-through caller row
+    // invokes (its via="macro:NAME"), kNoNode on a direct row; empty when the answer has none, so it keeps its bytes
+    std::vector<NodeId> macro;
 
-    bool nameOnly( std::size_t row ) const noexcept { return tokens.strongest( row ) == DefMark::Name; }   // None when none recorded
-    bool splitArm( std::size_t row ) const noexcept { return rowSplitArm( groups, tokens, row ); }
-    bool viaImpl( std::size_t row ) const noexcept { return row < impl.size() && impl[ row ] != 0; }
+    bool   nameOnly( std::size_t row ) const noexcept { return tokens.strongest( row ) == DefMark::Name; }   // None when none recorded
+    bool   splitArm( std::size_t row ) const noexcept { return rowSplitArm( groups, tokens, row ); }
+    bool   viaImpl( std::size_t row ) const noexcept { return row < impl.size() && impl[ row ] != 0; }
+    NodeId viaMacro( std::size_t row ) const noexcept
+    {
+        if( macro.empty() )
+        {
+            return kNoNode;   // the common answer: no see-through row
+        }
+        EXPECTS( row < macro.size(), "macro is parallel to the rows once any row is a see-through row" );
+        return macro[ row ];
+    }
 };
+// BX1 FIX 2: a see-through row has no edge to the matches — it reaches them through the macro row it invokes — so it carries
+// that macro row's ties (of_def, the ~n/~s marks), followed down a chain of macros to the direct macro row. `viaMacro` is
+// parallel to `rows` (kNoNode on a direct row); every macro it names is an earlier row (macroSeeThroughRows appends a row
+// only after the macro it invokes). Returns `tokens` unchanged when no row is a see-through row or none was computed.
+inline RowDefTokens inheritMacroRowTies( const RowDefTokens& tokens, std::span<const NodeId> rows, std::span<const NodeId> viaMacro )
+{
+    if( tokens.empty() || viaMacro.size() != rows.size() )
+    {
+        return tokens;
+    }
+    HashMap<NodeId, std::size_t> rowOf;
+    rowOf.reserve( rows.size() );
+    for( std::size_t i = 0; i < rows.size(); ++i )
+    {
+        rowOf.emplace( rows[i], i );
+    }
+    RowDefTokens out;
+    out.off.push_back( 0 );
+    for( std::size_t i = 0; i < rows.size(); ++i )
+    {
+        std::size_t src = i;
+        for( std::size_t hop = 0; hop < rows.size() && viaMacro[src] != kNoNode; ++hop )
+        {
+            const auto it = rowOf.find( viaMacro[src] );
+            if( it == rowOf.end() )
+            {
+                break;   // the macro is not a row: no tie to inherit (never reached: macroSeeThroughRows lists it first)
+            }
+            src = it->second;
+        }
+        const std::span<const std::uint32_t> ties = tokens.of( src );
+        out.tok.insert( out.tok.end(), ties.begin(), ties.end() );
+        out.off.push_back( std::uint32_t( out.tok.size() ) );
+    }
+    return out;
+}
 // lane L6: per row, whether every edge joining it to the matches (row → match toward the matches, match → row away) is the
 // one-implementor edge (graph.h kProvImpl); empty when no row's is, so an answer without one keeps its bytes
 inline std::vector<char> rowsViaImpl( const Graph& g, std::span<const NodeId> matches, std::span<const NodeId> rows, bool towardMatches )
@@ -935,16 +983,17 @@ inline std::vector<char> rowsViaImpl( const Graph& g, std::span<const NodeId> ma
     return out;
 }
 inline OneHopAttribution attributeOneHopAnswer( const IngestResult& ing, const Graph& g, std::span<const NodeId> matches,
-                                                std::span<const NodeId> rows, bool towardMatches )
+                                                std::span<const NodeId> rows, bool towardMatches, std::span<const NodeId> viaMacro = {} )
 {
     OneHopAttribution out;
     out.groups = defGroupsOf( ing, matches );
     if( out.groups.multi() || !g.outProv.empty() || !g.outNameOnly.empty() )
     {
-        out.tokens = attributeOneHop( g, out.groups, matches, rows, towardMatches );
+        out.tokens = inheritMacroRowTies( attributeOneHop( g, out.groups, matches, rows, towardMatches ), rows, viaMacro );   // BX1 FIX 2
         defGroupsDropSilent( out.groups, out.tokens );
     }
-    out.impl = rowsViaImpl( g, matches, rows, towardMatches );
+    out.impl  = rowsViaImpl( g, matches, rows, towardMatches );
+    out.macro.assign( viaMacro.begin(), viaMacro.end() );
     return out;
 }
 

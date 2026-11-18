@@ -405,14 +405,6 @@ inline std::pair<std::string_view, bool> callHierarchyNextSelector( const Ingest
     return { name, true };
 }
 
-// attrib-multidef (defattrib.h): which definition each row belongs to, over the rows in their FINAL order — computed here,
-// once, so every dialect of both surfaces (the CLI verbs and the MCP twins) reads one attribution.
-inline CallHierarchyRows withOneHopAttribution( const IngestResult& ing, const Graph& g, CallHierarchyRows rows, bool wantCallers )
-{
-    rows.attr = attributeOneHopAnswer( ing, g, rows.matches, rows.rows, wantCallers );
-    return rows;
-}
-
 // LB-G (r10 §5): the served order of a one-hop listing — TIER before path (filter.h states the key once and --uses shares
 // it; plain path order put 171 `tests/` rows ahead of anything useful on django's `--callers=bulk_create`), then line, then name.
 inline void sortOneHopRows( const IngestResult& ing, std::vector<NodeId>& rows )
@@ -459,6 +451,88 @@ inline std::vector<NodeId> oneHopCallerRows( const IngestResult& ing, const Grap
     return rows;
 }
 
+// BX1 FIX 2 — MACRO SEE-THROUGH (test/verbfixcheck.sh F2). tmux calls cmdq_get_callback1 only through
+// `#define cmdq_get_callback(cb, data) cmdq_get_callback1(#cb, cb, data)`: the graph holds the macro -> function edge (the macro's
+// replacement text is scanned, ingest_relations.h captureMacroBodyCalls) and --impact walks it, but --callers printed the macro
+// row and stopped — 1 of the 9 files that call it. A function-like macro is not a caller of its own: what calls the code it
+// expands to is whatever invokes it. So after the direct rows, the callers of every caller row that is a macro (t="macro") are
+// rows too, through a chain of macros (a macro row's own callers are walked when they are macros), each marked with the macro it
+// invokes (via="macro:NAME"). Each node once, never a match or a direct row; the walk ends because every node is visited once.
+// The block keeps the direct rows' order rule (oneHopCallerRows: tier, path, then ranked before the cap) and follows them, so
+// the direct rows keep their positions and an answer with no macro row is unchanged.
+struct MacroSeeThrough
+{
+    std::vector<NodeId> rows;   // the see-through callers, in served order
+    std::vector<NodeId> via;    // parallel: the macro each one invokes
+};
+inline MacroSeeThrough macroSeeThroughRows( const IngestResult& ing, const Graph& g, std::span<const NodeId> matches, std::span<const NodeId> direct )
+{
+    MacroSeeThrough     out;
+    std::vector<NodeId> frontier;
+    for( const NodeId r : direct )
+    {
+        if( r < ing.symbols.size() && ing.symbols[r].kind == SymKind::Macro )
+        {
+            frontier.push_back( r );
+        }
+    }
+    if( frontier.empty() )
+    {
+        return out;
+    }
+    std::vector<char> seen( ing.symbols.size(), 0 );
+    for( const std::span<const NodeId> set : { matches, direct } )
+    {
+        for( const NodeId n : set )
+        {
+            seen[n] = n < seen.size() ? 1 : 0;
+        }
+    }
+    HashMap<NodeId, NodeId> viaOf;
+    const auto*             ro = g.inEdges.rowOffsets();
+    const auto*             ci = g.inEdges.colIndices();
+    for( std::size_t at = 0; at < frontier.size(); ++at )   // frontier grows as macro callers are found: a chain of macros
+    {
+        const NodeId m = frontier[at];
+        for( std::uint32_t k = ro[m]; k < ro[m + 1]; ++k )
+        {
+            if( const NodeId c = ci[k]; c < seen.size() && !seen[c] )
+            {
+                seen[c] = 1;
+                out.rows.push_back( c );
+                viaOf.emplace( c, m );
+                if( ing.symbols[c].kind == SymKind::Macro )
+                {
+                    frontier.push_back( c );
+                }
+            }
+        }
+    }
+    sortOneHopRows( ing, out.rows );
+    rankBeforeCap( ing, out.rows, [ & ]( NodeId r ) { return ing.symbols[r].fileId; }, [ & ]( NodeId r ) { return navRelevanceWeight( g, r ); } );
+    out.via.reserve( out.rows.size() );
+    for( const NodeId r : out.rows )
+    {
+        out.via.push_back( viaOf.find( r )->second );
+    }
+    ENSURES( out.via.size() == out.rows.size(), "one macro per see-through row" );
+    return out;
+}
+// The row's via= for a see-through caller (absent on a direct row), in each dialect: XML ` via="macro:NAME"`, JSON `,"via":"macro:NAME"`.
+inline std::string viaMacroAttrXml( const IngestResult& ing, NodeId macro )
+{
+    if( macro == kNoNode || macro >= ing.symbols.size() )
+    {
+        return {};
+    }
+    std::vector<char> esc;
+    return " via=\"macro:" + std::string( escapeXml( ing.symbols[macro].name, esc ) ) + "\"";
+}
+inline std::string viaMacroKeyJson( const IngestResult& ing, NodeId macro )
+{
+    return ( macro == kNoNode || macro >= ing.symbols.size() ) ? std::string() : ",\"via\":\"macro:" + jsonStr( ing.symbols[macro].name ) + "\"";
+}
+
 inline CallHierarchyRows callHierarchyRows( const IngestResult& ing, const Graph& g, std::string_view selector, bool wantCallers,
                                             const ValueRefIndex* valueIndex = nullptr )   // the MCP server passes its cached one
 {
@@ -481,9 +555,16 @@ inline CallHierarchyRows callHierarchyRows( const IngestResult& ing, const Graph
     }
     out.crossKind = crossKindValue( ing, out.matches );
 
+    std::vector<NodeId> viaMacro;   // BX1 FIX 2: parallel to out.rows once a see-through row exists, else empty
     if( wantCallers )
     {
         out.rows = oneHopCallerRows( ing, g, out.matches );   // collected, tier/path ordered and ranked before the cap (below)
+        if( MacroSeeThrough seeThrough = macroSeeThroughRows( ing, g, out.matches, out.rows ); !seeThrough.rows.empty() )
+        {
+            viaMacro.assign( out.rows.size(), kNoNode );
+            out.rows.insert( out.rows.end(), seeThrough.rows.begin(), seeThrough.rows.end() );
+            viaMacro.insert( viaMacro.end(), seeThrough.via.begin(), seeThrough.via.end() );
+        }
     }
     else
     {
@@ -515,7 +596,8 @@ inline CallHierarchyRows callHierarchyRows( const IngestResult& ing, const Graph
         const ValueRefIndex&               vri   = valueIndex != nullptr ? *valueIndex : *local;
         out.valueRefs = withPatternRows( wantCallers ? valueRefCallerRows( ing, vri, out.matches ) : valueRefCalleeRows( ing, vri, out.matches ), PatternIndex( ing, vri ), out.matches, wantCallers );
     }
-    return withOneHopAttribution( ing, g, std::move( out ), wantCallers );
+    out.attr = attributeOneHopAnswer( ing, g, out.matches, out.rows, wantCallers, viaMacro );   // attrib-multidef; BX1 FIX 2: + via="macro:"
+    return out;
 }
 
 // C2 callers byte band (pageview.h kCallersBandMaxBytes): the estimated bytes of EVERY row of a callers answer, so
@@ -556,7 +638,8 @@ inline CallersByteBand callersByteBand( const IngestResult& ing, std::span<const
         bytes += std::string_view( "<s t=\"\" n=\"\" p=\":\"/>" ).size() + std::string_view( symTag( s.kind ) ).size() + nameLen + pathLen
                + std::to_string( s.line ).size()
                + ( isTestedByReach( ing, testReach, rows[i] ) ? std::string_view( " tested=\"1\"" ).size() : 0 )
-               + std::string_view( viaNameAttr( attr.nameOnly( i ) ) ).size() + std::string_view( splitArmAttrXml( attr.splitArm( i ) ) ).size()
+               + ( attr.viaMacro( i ) != kNoNode ? viaMacroAttrXml( ing, attr.viaMacro( i ) ).size() : std::string_view( viaNameAttr( attr.nameOnly( i ) ) ).size() )
+               + std::string_view( splitArmAttrXml( attr.splitArm( i ) ) ).size()
                + ofDefAttrXml( attr.groups, attr.tokens, i ).size() + callSitesAttrXml( sites.tokens[i], sites.totals[i] ).size();
     }
     ENSURES( sites.tokens.size() == rows.size(), "the site pass covers every row the estimate read" );   // rowCallSites' own ENSURES
