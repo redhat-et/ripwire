@@ -4490,19 +4490,113 @@ struct ReceiverEvidence
         const bool out = types.rustPathOutside( r.fileId, r.startByte, written );
         return !out && !types.pathCut;
     }
+    // RUST-PATH-OWNER: does the Rust path `path` written at byte `at` of `f` name an item outside the tree by what the file writes? Its
+    // root bound by a `use` in force there, every one leading out (rustPathProvablyOutside, its root no package directory: a bare call's
+    // reading of its `use`), else by such a `use` at the own level of a placed module a glob in force there names (`mod tests { use
+    // super::*; }` over the file's `use std::path::PathBuf;`). A path of two or more segments may also start at an outside root no
+    // `use` binds (`std::`, an extern crate) when no glob in force there is one the walk cannot place. A one-segment path no `use`
+    // binds — a generic parameter `T::f()`, a name only a glob the walk cannot follow brings — is not.
+    bool rustPathHeadLeavesTree( std::uint32_t f, std::uint32_t at, std::string_view path ) const
+    {
+        const auto leadsOut = [ & ]( std::uint32_t file, std::uint32_t pos, std::string_view p )
+        {
+            return types.rustPathProvablyOutside( file, pos, p ) && !types.rustRootNamesTreePackage( file, pos, p );
+        };
+        const std::string_view head = path.substr( 0, path.find( "::" ) );
+        bool any = false;
+        bool out = true;
+        types.forEachRustUseAt( f, at, head, [ & ]( const Binding& b )
+        {
+            any = true;
+            out = out && leadsOut( f, b.startByte, b.importedName );
+        } );
+        if( any )
+        {
+            return out && leadsOut( f, at, path );
+        }
+        bool unplaced = false;   // a glob in force the walk cannot place (`use crate::alias::*;` through a module re-exported by a `use`)
+        bool viaGlob  = false;
+        types.forEachRustScopeAt( f, at, [ & ]( const CallResultTypes::Level& lv )
+        {
+            types.forEachImport( f, "*", [ & ]( const Binding& g )
+            {
+                if( g.kind != LocalBindKind::TypeImport || types.levelAt( f, g.startByte ) != lv || leadsOut( f, g.startByte, g.importedName ) )
+                {
+                    return;
+                }
+                std::uint32_t crate = CallResultTypes::kNoCrate;
+                std::string   module;
+                if( !types.rustModuleOf( f, g.startByte, g.importedName, crate, module, 0 ) )
+                {
+                    unplaced = true;
+                    return;
+                }
+                NodeId          inlineMod = kNoNode;
+                std::uint32_t   ownFile   = 0;
+                const auto      mfs       = types.rustModuleFiles( crate, module, inlineMod, ownFile );
+                const auto      level     = types.rustModuleLevel( inlineMod );
+                for( const std::uint32_t mf : mfs )
+                {
+                    types.forEachImport( mf, head, [ & ]( const Binding& b )
+                    {
+                        if( b.kind == LocalBindKind::TypeImport && types.levelAt( mf, b.startByte ) == level )
+                        {
+                            any     = true;
+                            viaGlob = true;
+                            out     = out && leadsOut( mf, b.startByte, b.importedName );
+                        }
+                    } );
+                }
+            } );
+            return any || unplaced;
+        } );
+        if( unplaced )
+        {
+            return false;
+        }
+        if( viaGlob )
+        {
+            return out && leadsOut( f, at, path );
+        }
+        return head.size() != path.size() && leadsOut( f, at, path );
+    }
+    // RUST-PATH-OWNER: is the Rust path `path`'s head, at byte `at` of `f`, bound by a `use` in force there whose every path starts
+    // in the tree (`crate::` / `self::` / `super::`, an in-tree crate's name): `pub use crate::wit::process::Command; impl Command {}`
+    bool rustPathHeadUsedInTree( std::uint32_t f, std::uint32_t at, std::string_view path ) const
+    {
+        const std::string_view head = path.substr( 0, path.find( "::" ) );
+        bool any    = false;
+        bool inTree = true;
+        types.forEachRustUseAt( f, at, head, [ & ]( const Binding& b )
+        {
+            const std::string_view root = std::string_view( b.importedName ).substr( 0, std::string_view( b.importedName ).find( "::" ) );
+            any    = true;
+            inTree = inTree && ( root == "crate" || root == "self" || root == "super" || types.rustRootNamesTreePackage( f, b.startByte, b.importedName ) );
+        } );
+        return any && inTree;
+    }
     // RUST-PATH-OWNER: what the canonical tier's answer to a Rust path call `T::m( .. )` proves. The tier holds every in-tree `m`
     // whose impl scope is NAMED T; the path names the ONE type T resolves to where it is written (the file's `use`s, its module
     // path), resolved like a written `x: T` (rustQualifierClass), and each candidate's owner is the in-tree class its impl is for
     // (selfClass). The invariant: two types, one name, never one `m`.
+    // A candidate whose impl writes a type name that leads out of the tree where the impl is written (`use std::path::PathBuf;
+    // impl From<X> for PathBuf`, read like a call's path: rustPathHeadLeavesTree) is owned by that outside type, whatever in-tree
+    // class shares the name.
     //   * T names an in-tree class: its own candidates are the answer. With none of them placed, a candidate another class owns
-    //     leaves and one the walk cannot place stays; nothing left (the class's `m` is no indexed definition) is declined, `cand`
-    //     untouched so the decline lists the namesakes.
+    //     (in the tree or outside it) leaves and one the walk cannot place stays; nothing left (the class's `m` is no indexed
+    //     definition) is declined, `cand` untouched so the decline lists the namesakes.
+    //   * T provably leads out of the tree, its root no package directory (`use std::path::PathBuf; PathBuf::from( s )`, the same
+    //     reading a bare call's `use` gets): an in-tree type's namesake is never it (one with no indexed class too, its impl's type
+    //     name a `use` into the tree). A candidate the outside type owns is a trait impl FOR it (`impl From<X> for PathBuf`),
+    //     reached only when the argument is an X, which is not read: hedged. Nothing left: external=.
     //   * T names no class the walk can place (two globs bring it, a glob it cannot follow): two owners among the candidates in the
     //     caller's own crate, or a member there it cannot place beside another, are a Split: every candidate stays (the ladder's
     //     own split when locality would keep them all, else hedged) — never a locality pick. One there, a crate the layout cannot
     //     place, or a module's item among the candidates (`util::tool()`: the module path decides it) keeps the tier as before.
-    enum class RustPathOwners : std::uint8_t { Keep, Split, Decline };
+    enum class RustPathOwners : std::uint8_t { Keep, Hedge, Split, External, Decline };
     static constexpr NodeId kRustOwnerUnread  = kNoNode - 1;   // rustPathOwnerMemo: not read yet
+    static constexpr NodeId kRustOwnerOutside = kNoNode - 2;   // an owner: the impl's own type name leads out of the tree where the impl is written
+    static constexpr NodeId kRustOwnerInTree  = kNoNode - 3;   // an owner: no indexed class, but the impl's type name is a `use` into the tree
     mutable std::vector<NodeId> rustPathOwnerMemo;              // per symbol: its owner as rustPathOwners reads it (sized on first use)
     RustPathOwners rustPathOwners( const Reference& r, std::vector<NodeId>& cand ) const
     {
@@ -4512,7 +4606,7 @@ struct ReceiverEvidence
         }
         const std::string_view written = rustWrittenQualifierOf( r );
         const NodeId           cls     = rustQualifierClass( r, written );
-        rw::SmallVec<NodeId, 4> owners;   // per candidate, in cand's order: its impl's in-tree class, or kNoNode (unplaced)
+        rw::SmallVec<NodeId, 4> owners;   // per candidate, in cand's order: its impl's in-tree class, kRustOwnerOutside, kRustOwnerInTree, or kNoNode (unplaced)
         if( rustPathOwnerMemo.size() != ing.symbols.size() )
         {
             rustPathOwnerMemo.assign( ing.symbols.size(), kRustOwnerUnread );
@@ -4522,7 +4616,9 @@ struct ReceiverEvidence
             NodeId& owner = rustPathOwnerMemo[ c ];   // a candidate's owner is the candidate's own fact: read once per run
             if( owner == kRustOwnerUnread )
             {
-                owner = selfClass( c );
+                const Symbol& cs = ing.symbols[ c ];
+                owner = rustPathHeadLeavesTree( cs.fileId, cs.sigStartByte, ownerClass[ c ] ) ? kRustOwnerOutside : selfClass( c );
+                owner = owner == kNoNode && rustPathHeadUsedInTree( cs.fileId, cs.sigStartByte, ownerClass[ c ] ) ? kRustOwnerInTree : owner;
             }
             owners.push_back( owner );
         }
@@ -4541,7 +4637,7 @@ struct ReceiverEvidence
         if( cls != kNoNode )
         {
             const bool own  = std::ranges::find( owners, cls ) != owners.end();
-            const auto mine = [ & ]( std::size_t i ) { return own ? owners[ i ] == cls : owners[ i ] == kNoNode; };
+            const auto mine = [ & ]( std::size_t i ) { return own ? owners[ i ] == cls : owners[ i ] == kNoNode || owners[ i ] == kRustOwnerInTree; };
             bool any = false;
             for( std::size_t i = 0; i < cand.size() && !any; ++i )
             {
@@ -4553,6 +4649,20 @@ struct ReceiverEvidence
             }
             keepWhere( mine );
             return RustPathOwners::Keep;
+        }
+        if( rustPathHeadLeavesTree( r.fileId, r.startByte, written ) )
+        {
+            // an in-tree class's member stays only as a trait's the path may name: `http_body::Body::size_hint( &s )` runs s's impl of
+            // the trait Body. The inheritance names keep a base by its last segment, so `impl std::error::Error for Error` stays under
+            // `std::io::Error::from( e )` too: hedged, a floor, never bound
+            const std::string_view tail = CallResultTypes::splitLast( written, "::" ).second;
+            keepWhere( [ & ]( std::size_t i )
+            {
+                bool implementsTail = false;
+                forEachBase( ownerClass[ cand[ i ] ], [ & ]( std::string_view b ) { implementsTail = implementsTail || CallResultTypes::splitLast( b, "::" ).second == tail; } );
+                return owners[ i ] == kRustOwnerOutside || owners[ i ] == kNoNode || implementsTail;
+            } );
+            return cand.empty() ? RustPathOwners::External : RustPathOwners::Hedge;
         }
         // a module's item among them (`util::tool()`, an inline mod's fn) is the module path's question, not a type's: the tier as before
         if( cand.size() < 2 || std::ranges::any_of( cand, [ & ]( NodeId c ) { return ownerClass[ c ].empty(); } ) )
@@ -4576,7 +4686,7 @@ struct ReceiverEvidence
                 continue;
             }
             first  = inCrate == 0 ? owners[ i ] : first;
-            differ = differ || owners[ i ] != first || owners[ i ] == kNoNode;
+            differ = differ || owners[ i ] != first || owners[ i ] == kNoNode || owners[ i ] == kRustOwnerOutside || owners[ i ] == kRustOwnerInTree;
             ++inCrate;
         }
         return inCrate >= 2 && differ ? RustPathOwners::Split : RustPathOwners::Keep;
