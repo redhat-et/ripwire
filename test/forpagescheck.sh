@@ -20,6 +20,7 @@
 #   (P6)  --legend=first is the legend-first order, unpaged, and a permutation of the --page-bytes=0 answer
 #   (P7)  determinism: page 1 and page 2, two runs each, byte-identical
 #   (P8)  an answer that fits one page is served whole (no page attributes), byte-identical to --page-bytes=0
+#   (P10) the flagless default is --page-bytes=12000's page 1 (one default constant)
 #   (P9)  refusals: empty / malformed / page 0 / 0:K / without --for / with --legend=first / with a token budget /
 #         a page past the last — each exits 1 with empty stdout and names --page-bytes
 set -u
@@ -81,6 +82,12 @@ chain 6000 || no "(P2) the 6000 B page chain could not be followed"
 "$BIN" . --for="$TASK" --page-bytes=3000:2               >"$WORK/again_2.xml" 2>/dev/null
 "$BIN" . --for="$TASK" --page-bytes=100000000            >"$WORK/onepage.xml" 2>/dev/null
 
+# (P10) the DEFAULT page size is the one constant: a flagless default answer is --page-bytes=12000's page 1, byte for byte (Config's
+# literal and src/foranswerfirst.h kAnswerPageBytesDefault, which AF2's guard reads, cannot drift apart unseen)
+"$BIN" . --for="$TASK"                       >"$WORK/dflt.xml" 2>/dev/null
+"$BIN" . --for="$TASK" --page-bytes=12000    >"$WORK/p12k.xml" 2>/dev/null
+cmp -s "$WORK/dflt.xml" "$WORK/p12k.xml" && grep -q ' page="1" pages="' "$WORK/dflt.xml" && ok "(P10) the flagless default is --page-bytes=12000's page 1, byte for byte" \
+    || no "(P10) the flagless default differs from --page-bytes=12000 (or is unpaged on this task)"
 cmp -s "$WORK/whole.xml" "$WORK/whole_last.xml" && ok "(P5) --page-bytes=0 is byte-identical to --legend=last --page-bytes=0" \
     || no "(P5) --page-bytes=0 differs from --legend=last --page-bytes=0"
 cmp -s "$WORK/onepage.xml" "$WORK/whole.xml" && ok "(P8) an answer inside one page is served whole, byte-identical to --page-bytes=0" \

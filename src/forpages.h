@@ -48,7 +48,9 @@
 namespace rw::forpages
 {
 
-inline constexpr std::size_t kForPageBytesDefault = 12000;   // the owner's figure; 6,000 is pre-registered beside it
+// The owner's figure; 6,000 is pre-registered beside it. ONE constant: AF2's guarded promotion (foranswerfirst.h G) guards the
+// DEFAULT page, so every page size windows the same document and --page-bytes=0 stays the reference for all of them.
+inline constexpr std::size_t kForPageBytesDefault = answerfirst::kAnswerPageBytesDefault;
 
 // The page asked: its size in bytes (0 = the whole answer) and its 1-based index; `call` is the same --for call without
 // --page-bytes (forUnbudgetedCall), which every page's next= extends.

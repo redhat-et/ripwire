@@ -3532,8 +3532,10 @@ inline bool appendSubjectGraphVerbBlock( const MainDispatch& d, std::span<const 
         std::fwrite( doc->data(), 1, doc->size(), stdout );
         if( args->form == rw::GraphSubjectForm::Path && rw::graphSubjectPathUnreachable( *doc ) )
         {
-            appendPathGapSides( sd, *args );
+            // AF2 E1 (results/AF2_FIRST12K_1118 §SPEC, 2026-11-18): the met bridge — the RESOLVED half, when there is one — is
+            // emitted ahead of the path gap's two sides, so a reader that stops early meets the answer before the failed search.
             appendMetBridge( d, sub, served, *args, *doc );   // GV-ASSEMBLY M3: "" unless the search reached a caller of to= (src/forgraphverb.h metBridgePlan)
+            appendPathGapSides( sd, *args );
         }
     }
     rw::emitRaw( stdout, std::string( rw::kGraphSubjectCloseXml ).c_str() );
