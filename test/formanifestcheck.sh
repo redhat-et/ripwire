@@ -59,7 +59,7 @@ ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write th
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required"; exit 2; }
-TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
+TMP="$( mktemp -d )"; trap 'rc=$?; rm -rf "$TMP"; exit $rc' EXIT   # keep the status: a set -u abort must not exit 0 (binoverridecheck)
 export HOME="$TMP/home"; mkdir -p "$HOME"
 F="$TMP/fx"
 
@@ -474,6 +474,7 @@ else no "(b3) budget 1400: $( grep -o '<manifest_rows.*' "$TMP/b3.xml" | head -c
 # heldBlocksPrice). Red before: heldLegendAt read only `<!-- manifest_rows`, so a budget one token under the whole price
 # still printed the whole answer, the legend over the budget.
 W="$( python3 -c 'import sys; sys.path.insert( 0, sys.argv[1] ); import softbudget; print( softbudget.whole_price( sys.argv[2] ) )' "$ROOT/test/lib" "$TMP/b2u.xml" )"
+case "$W" in ''|*[!0-9]*) no "(b4) no whole price from the unbudgeted answer (got '$W')"; W=1 ;; esac
 run acme "--for=add a new broker transport like NATS or MQTT to brokers" --token-budget="$W" >"$TMP/b4w.xml" || no "(b4) the run exited $?"
 run acme "--for=add a new broker transport like NATS or MQTT to brokers" --token-budget="$(( W - 1 ))" >"$TMP/b4.xml" || no "(b4) the run exited $?"
 if cmp -s "$TMP/b4w.xml" "$TMP/b2u.xml" && grep -q '<manifest_rows files="2" held="budget"/></ctx>$' "$TMP/b4.xml" && ! grep -q '<r l=' "$TMP/b4.xml"; then
