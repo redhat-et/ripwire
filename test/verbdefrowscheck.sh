@@ -3,7 +3,7 @@
 #
 #   test/verbdefrowscheck.sh [BIN]        # BIN defaults to $RIPWIRE_BIN, then build/ripwire
 #
-# The defect (lane P1 VERBROUTE, results/P1_VERBROUTE_1118 SPEC §1; lane V1 implements it): these roots said defs="N" and
+# The defect (lane P1 VERBROUTE, its readout, question 1; lane V1 implements it): these roots said defs="N" and
 # printed no path for the definition. On the held-out set 13 of the 16 gold groups a routed answer lost were the file that
 # DEFINES or DECLARES the symbol. Lane T2 (test/impactsoledefcheck.sh) made a one-group --impact answer print its one
 # <def ix="1"/> row; this gate generalises it:
