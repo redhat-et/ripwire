@@ -978,7 +978,7 @@ $ ./build/ripwire . --path=main,rankGraphTeleport
 ... [20 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--no-route`, `--connect`, `--limit`
+**Shaped by:** `--no-route`, `--connect`, `--no-redact`, `--limit`
 
 ### `--defs=NAME[,NAME...]`
 
@@ -1084,6 +1084,8 @@ _An unparseable claim — the refusal names the accepted shapes._
 $ ./build/ripwire . --verify="frobnicate(x)"
 (empty)
 ```
+
+**Shaped by:** `--no-redact`
 
 **Caveats (stated by the binary):**
 
@@ -1518,7 +1520,7 @@ $ ./build/ripwire . --pattern='x'
 (empty)
 ```
 
-**Shaped by:** `--limit`
+**Shaped by:** `--no-redact`, `--limit`
 
 **Caveats (stated by the binary):**
 
@@ -1761,7 +1763,7 @@ $ ./build/ripwire . --pack-top-n=3 --top-k=0
 
 **Answers:** emit source and doc text verbatim, redacting nothing emit source/doc text VERBATIM, redacting nothing.
 
-Modifies the BODY-serving verbs (--expand, --for, --pack-task, --recall, --slice, --connect, --from-trace, --batch, --mcp); the default map carries no bodies (identifiers and signatures are never redacted), so bare on the map it is refused, naming one of them REDACTED by default (high-confidence credential SHAPES only, precision over recall): emitted symbol BODIES, doc/markdown bodies and doc-comment excerpts, the --outline skeleton, and SIGNATURES — a default argument carries whatever literal was written. NOT redacted, and a deliberate residual: --grep/--regex/--match hit lines and their --grep-context neighbours, and --note-add/--notes text. --grep is the exception on purpose — auditing a repo FOR secrets needs the hit you searched for shown verbatim.
+Modifies the BODY-serving verbs (--expand, --for, --pack-task, --recall, --slice, --connect, --path, --whereis, --plan-lint, --from-trace, --batch, --mcp); the default map carries no bodies (identifiers and signatures are never redacted), so bare on the map it is refused, naming one of them REDACTED by default (high-confidence credential SHAPES only, precision over recall): emitted symbol BODIES (the --path hop and route bodies too), doc/markdown bodies and doc-comment excerpts, the --outline skeleton, SIGNATURES — a default argument carries whatever literal was written — and the source, manifest and plan LINES an answer quotes (--for <touch>/<listed>, --whereis t=, --plan-lint <owed>). NOT redacted, and a deliberate residual: --grep/--regex/--match/--pattern/--verify hit lines and their --grep-context neighbours, and --note-add/--notes text. --grep is the exception on purpose — auditing a repo FOR secrets needs the hit you searched for shown verbatim.
 
 **Try it**
 
@@ -3676,7 +3678,7 @@ $ ./build/ripwire . --stray-content=lane/ --plan
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--stray-content`, `--legend`, `--json`
+**Shaped by:** `--no-redact`, `--stray-content`, `--legend`, `--json`
 
 **Caveats (stated by the binary):**
 
@@ -3728,7 +3730,7 @@ $ ./build/ripwire . --whereis=rankGraphTeleport
 ... [22 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--whereis-full-text`, `--whereis-listing`, `--with-history`, `--limit`
+**Shaped by:** `--no-redact`, `--whereis-full-text`, `--whereis-listing`, `--with-history`, `--limit`
 
 **Caveats (stated by the binary):**
 
@@ -4042,6 +4044,8 @@ $ ./build/ripwire . --plan-lint=test/planlintfix/wave.md
 </owed>
 </plan-lint>
 ```
+
+**Shaped by:** `--no-redact`
 
 **Caveats (stated by the binary):**
 
@@ -5235,7 +5239,7 @@ $ ./build/ripwire --version
 ripwire 0.6.10 (dev, AppleClang 21.0.0.21000101, emit=std::print, built_from=9db2092b7)
 ```
 
-**Shaped by:** `--verify`, `--metrics`, `--deps`, `--naming-locals`, `--arch`, `--dry-run`, `--flags`, `--doc-drift`
+**Shaped by:** `--verify`, `--no-redact`, `--metrics`, `--deps`, `--naming-locals`, `--arch`, `--dry-run`, `--flags`
 
 ---
 
