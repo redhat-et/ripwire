@@ -12310,7 +12310,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             canonical = !cand.empty();
         }
         // RUST-PATH-OWNER (receiverevidence.h rustPathOwners): the tier matched a Rust path's scope NAME; the type the path resolves to
-        // where it is written decides among same-named types — the one it names, a decline, or a split over every candidate
+        // where it is written decides among same-named types — the one it names, external=, a decline, or a hedge over every candidate
         bool rustPathHedge = false;
         bool rustPathSplit = false;   // ... or a split no locality may narrow (the S6-C tie-break below skips it)
         if( canonical )
@@ -12318,6 +12318,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             switch( recvEv.rustPathOwners( r, cand ) )
             {
                 case ReceiverEvidence::RustPathOwners::Keep:     break;
+                case ReceiverEvidence::RustPathOwners::Hedge:    rustPathHedge = true; break;
                 case ReceiverEvidence::RustPathOwners::Split:
                 {
                     // the ladder keeps every candidate when tier 1 or 2 holds all of them or none (tier 3's canonical rescue): its own
@@ -12332,6 +12333,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                     rustPathSplit = !rustPathHedge;
                     break;
                 }
+                case ReceiverEvidence::RustPathOwners::External: disposition = vetoExternal( r ); continue;
                 case ReceiverEvidence::RustPathOwners::Decline:
                     recordDecline( r, cand, DeclinedSiteKind::Ladder );
                     disposition = CallDisposition::Declined;
