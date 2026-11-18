@@ -711,6 +711,15 @@ probeFor()
 # lane, defined almost nothing (35 and 30 attribute names undefined). The (U-ABIARCH) arm below is their probe, over the corpora
 # test/lib/abiarchfixture.sh builds. The arch pin is the answer of a tree with no no-file-edge language; the clauses a Go file
 # adds are present-only and registered in test/legend_over_target.tsv, so the second arch probe passes as EXPLAINED, not as headroom.
+# RE-PINNED 2026-11-18 (lane dc-shown-vocab, the rule-3 cut vocabulary): ripwire.zoom/v1 410 -> 480 (measured 467,
+# was 394). The seven noun-first <noun>_shown= attributes became shown_<noun>= beside a <noun>_capped bit, and
+# shown_levels= moved OUT of the zoom verb row's prose INTO its own dictionary row that spells its companion
+# (levels_capped=1 deeper ones unprinted): +57 B on every --zoom answer. A test/legend_over_target.tsv row would be
+# the WRONG remedy and was deliberately not written: that registry explains a PRESENT-ONLY clause, and shown_levels=
+# rides EVERY --zoom answer, so registering it would assert something false. This file's own header says the honest
+# alternative is exactly this one-line re-pin. What the 57 B buys: under the tiering posture the DICTIONARY is the
+# authority -- a reader holding core plus a pack never receives a verb-legend string -- so a definition that lived
+# only in the zoom verb row was unresolvable for precisely the readers the 0.7.0 posture work is for.
 PIN_TABLE='
 ripwire.abi/v1                   2020  2003
 ripwire.arch/v1                  1490  1477
@@ -732,7 +741,7 @@ ripwire.naming-consistency/v1     630   620
 ripwire.comment-coherence/v1      460   445
 ripwire.cochange/v1               540   521
 ripwire.communities/v1           820   807
-ripwire.zoom/v1                  410   394
+ripwire.zoom/v1                  480   467
 ripwire.tree/v1                  310   300
 ripwire.seams/v1                  720   703
 ripwire.handoff/v1                600   589
@@ -2166,9 +2175,9 @@ done
 # ── THE THIRD SWEEP (2026-09-12): the verbs #185's last agent listed but did not fix, each RUN before any reading landed ──
 # (D13) UNCONDITIONAL root vocabulary that the full legend defines and the compact document did not: --tree's files= (the
 # indexed corpus, beside the files_unlisted= its purpose already named), and --zoom's symbols=/isolated=/top_modules= (the
-# identity its full legend says reconciles exactly) and levels_shown=. They ride EVERY answer of their root, so each reading
+# identity its full legend says reconciles exactly) and shown_levels=. They ride EVERY answer of their root, so each reading
 # lives in that root's purpose line, where files_unlisted= and levels= already were: present exactly when the root is.
-# (D14)..(D16) CONDITIONAL fields, each a present-only term: --zoom's <module children=> (only a module AT the levels_shown=
+# (D14)..(D16) CONDITIONAL fields, each a present-only term: --zoom's <module children=> (only a module AT the shown_levels=
 # cut, so the row lowers the cut to 1 on test/chafix, a two-level hierarchy), rank_by=churn-decay's <recent n= of=> file rows
 # with <rc age_d= w=> (single-root only), and the map's absent-when-default row fields lpin=, overloads=, prov= (defined only
 # inside the always-on `<!-- ripwire v1` legend). test/declinefix and test/lpinfix are (D10)'s own corpora: their maps
@@ -2181,7 +2190,7 @@ done
 # Stopped here on the (U) 400 B pin, and defined in the fourth sweep (D20) below once the owner raised the pins to fit honest
 # definitions: --communities' drill= and isolated=.
 condPair D13 "--tree (files= on its root)" "$FIX" "--tree" tree:files
-condPair D13 "--zoom (its root's counts)" "$FIX" "--zoom" zoom:symbols zoom:isolated zoom:top_modules zoom:levels_shown
+condPair D13 "--zoom (its root's counts)" "$FIX" "--zoom" zoom:symbols zoom:isolated zoom:top_modules zoom:shown_levels
 [ -d "$ROOT/test/chafix" ] || no "(D14) fixture missing: test/chafix — its children= row would be vacuous"
 condPair D14 "--zoom --zoom-levels=1 over test/chafix (modules AT the depth cut)" "$ROOT/test/chafix" "--zoom --zoom-levels=1" module:children
 condPair D15 "--rank-by=churn-decay (the <recent> file rows)" "$REPO" "--rank-by=churn-decay" recent:of rc:age_d rc:w
@@ -2773,7 +2782,7 @@ echo "=== (S) STRUCTURAL: every conditional attribute the graphlegend.h family, 
 # fix: deleting the declined row, making pr_iters header-only, or dropping ignored_dirs' header read each went red on
 # exactly that name, and on nothing else (landing commit).
 # Population 4 does NOT see unconditional root vocabulary (--tree's files=, --zoom's symbols=/isolated=/top_modules=/
-# levels_shown=), nor a conditional element whose clause is not a marked field of that legend (--zoom's children=,
+# shown_levels=), nor a conditional element whose clause is not a marked field of that legend (--zoom's children=,
 # churn-decay's <recent>): (D13)..(D15) guard those. RED on 3c89ac0b: lpin=, overloads= and prov= FAILed. Shown able to fail
 # on the fix: deleting the prov row, making overloads head-only, or making lpin header-only each went red on exactly that
 # name, and on nothing else (landing commit).

@@ -5,19 +5,19 @@
 # WHY. --limit sizes two listings on --callers and --impact: the symbol rows (shown= / total= / capped=) and the declined call
 # sites (<dc>, <dcols>). The call a windowed root names (all_next=, and the --for hand-off's next= beside windows="1") carries
 # --limit=<row total> (amendment 10b: a limit that cleared both tiers nearly doubled the median bytes to every row), so where the
-# answer holds more declined sites than rows that call still cuts them. It says so: dc_shown= (the sites printed), declined_calls=
+# answer holds more declined sites than rows that call still cuts them. It says so: shown_dc= (the sites printed), declined_calls=
 # (the tier's count, a floor under counts_floor="1"), dc_next= (the call that lists every site). That disclosure was asserted by one
 # arm on one surface and no mutation had shown the arm can fail. This gate asserts it on every surface and breaks it three ways.
 #
 #   (T1) a cut tier is SAID: each named call — and the same question as XML, under --legend=full, as --json, and through the MCP
-#        twin at the same limit — that prints fewer declined sites than declined_calls= carries dc_shown= and dc_next= on its root.
-#   (T2) the disclosure is arithmetic: dc_shown= equals the sites printed (<dc> rows; <dcols n=> and every array; the JSON list),
-#        dc_shown < declined_calls, counts_floor rides the same root, and the answer's own legend / note defines dc_shown=.
-#   (T3) dc_next=, run verbatim, clears BOTH tiers: rc 0, no dc_shown=, no has_more="1", declined_calls= sites listed, and the same
+#        twin at the same limit — that prints fewer declined sites than declined_calls= carries shown_dc= and dc_next= on its root.
+#   (T2) the disclosure is arithmetic: shown_dc= equals the sites printed (<dc> rows; <dcols n=> and every array; the JSON list),
+#        shown_dc < declined_calls, counts_floor rides the same root, and the answer's own legend / note defines shown_dc=.
+#   (T3) dc_next=, run verbatim, clears BOTH tiers: rc 0, no shown_dc=, no has_more="1", declined_calls= sites listed, and the same
 #        symbol rows as the named call, in the same form.
 #   (T4) no false alarm: an answer whose declined tier is whole carries neither attribute (a named call whose rows outnumber its
 #        declined sites; a small answer under the default cut).
-#   (H1) --help: the --impact paragraph that names all_next= scopes it to total= and names dc_shown= and dc_next=.
+#   (H1) --help: the --impact paragraph that names all_next= scopes it to total= and names shown_dc= and dc_next=.
 #   (N)  non-vacuity: a named call that cuts the tier on --impact, on --callers and through a --for hand-off; one that does not.
 #   (M)  the registered mutation controls, RIPWIRE_TEST_DCCUT_MUTANT in the real binary, each of which must turn its arm RED:
 #        silentcut -> (T1)   reader: a cut answer reads as whole
@@ -89,7 +89,7 @@ def mcp( tool, arguments, env = None ):
     return ""
 
 def body( text ):
-    """the answer without its comments (a legend spells dc_shown= and <dcols ...> to define them)"""
+    """the answer without its comments (a legend spells shown_dc= and <dcols ...> to define them)"""
     return re.sub( r"<!--.*?-->", "", text, flags = re.S )
 
 def attr( tag, name ):
@@ -104,7 +104,7 @@ class Ans:
     `sites` the declined call sites actually printed, `rows` the symbol rows actually printed (order kept), None where unreadable."""
     def __init__( self, text, name ):
         self.name, self.text, self.ok = name, text, False
-        self.declined = self.dc_shown = self.dc_next = self.has_more = self.floor = None
+        self.declined = self.shown_dc = self.dc_next = self.has_more = self.floor = None
         self.sites, self.rows, self.arrays_ok, self.defines = None, None, True, False
         t = text.lstrip()
         if t.startswith( "{" ):
@@ -118,7 +118,7 @@ class Ans:
             return
         self.ok       = True
         self.declined = j.get( "declined_calls", 0 )
-        self.dc_shown = j.get( "dc_shown" )
+        self.shown_dc = j.get( "shown_dc" )
         self.dc_next  = j.get( "dc_next" )
         self.has_more = "1" if j.get( "has_more" ) else "0"
         self.floor    = j.get( "counts_floor" ) is True
@@ -127,7 +127,7 @@ class Ans:
         rows          = j.get( "impact", j.get( "callers", j.get( "calledBy", [] ) ) )
         self.rows     = [ json.dumps( r, sort_keys = True ) for r in rows ]
         # the CLI --json form carries no legend; the MCP twin's declined_note is its definition
-        self.defines  = "dc_shown" in j.get( "declined_note", "" ) if "declined_note" in j else None
+        self.defines  = "shown_dc" in j.get( "declined_note", "" ) if "declined_note" in j else None
     def _xml( self, text ):
         b = body( text )
         m = re.search( r"<(callers|impact) [^>]*>", b )
@@ -136,11 +136,11 @@ class Ans:
         r = m.group( 0 )
         self.ok       = True
         self.declined = int( attr( r, "declined_calls" ) or 0 )
-        self.dc_shown = int( attr( r, "dc_shown" ) ) if attr( r, "dc_shown" ) is not None else None
+        self.shown_dc = int( attr( r, "shown_dc" ) ) if attr( r, "shown_dc" ) is not None else None
         self.dc_next  = unesc( attr( r, "dc_next" ) ) if attr( r, "dc_next" ) is not None else None
         self.has_more = attr( r, "has_more" )
         self.floor    = attr( r, "counts_floor" ) == "1"
-        self.defines  = "dc_shown=" in "".join( re.findall( r"<!--.*?-->", text, flags = re.S ) )
+        self.defines  = "shown_dc=" in "".join( re.findall( r"<!--.*?-->", text, flags = re.S ) )
         blk = re.search( r"<dcols( [^>]*)>(.*?)</dcols>", b, re.S )
         if blk is not None:
             self.sites = int( attr( blk.group( 1 ), "n" ) or -1 )
@@ -158,7 +158,7 @@ class Ans:
     def cut( self ):
         return self.ok and self.sites is not None and self.sites < self.declined
     def said( self ):
-        return self.dc_shown is not None and bool( self.dc_next )
+        return self.shown_dc is not None and bool( self.dc_next )
 
 # ── the generated tree. Three families, each built so the numbers below are facts of the tree and are RE-READ by (N):
 #    leaf:  300 proven callers + C0.poll calls it (301 rows); 10 same-named `poll` methods, 360 declined x.poll() sites  -> impact cut
@@ -247,15 +247,15 @@ def sweep( env = None ):
             seen[ "cut_for" if q else "cut_" + verb ] += 1
             seen[ "sites_listed" ] += a.sites; seen[ "sites_counted" ] += a.declined
             if not a.said():
-                bad[ "T1" ].append( "%s: %d of %d declined sites printed, dc_shown=%s dc_next=%r" % ( a.name, a.sites, a.declined, a.dc_shown, a.dc_next ) )
+                bad[ "T1" ].append( "%s: %d of %d declined sites printed, shown_dc=%s dc_next=%r" % ( a.name, a.sites, a.declined, a.shown_dc, a.dc_next ) )
                 continue
-            if a.dc_shown != a.sites or not a.dc_shown < a.declined or not a.arrays_ok or not a.floor or a.defines is False:
-                bad[ "T2" ].append( "%s: dc_shown=%s, %s sites printed, declined_calls=%s, arrays %s, counts_floor %s, defined %s" % (
-                    a.name, a.dc_shown, a.sites, a.declined, "ok" if a.arrays_ok else "RAGGED", a.floor, a.defines ) )
+            if a.shown_dc != a.sites or not a.shown_dc < a.declined or not a.arrays_ok or not a.floor or a.defines is False:
+                bad[ "T2" ].append( "%s: shown_dc=%s, %s sites printed, declined_calls=%s, arrays %s, counts_floor %s, defined %s" % (
+                    a.name, a.shown_dc, a.sites, a.declined, "ok" if a.arrays_ok else "RAGGED", a.floor, a.defines ) )
             f = follow( a, rerun, env )
-            if f is None or not f.ok or f.dc_shown is not None or f.dc_next or f.has_more == "1" or f.sites != a.declined or f.rows != a.rows or not f.rows:
+            if f is None or not f.ok or f.shown_dc is not None or f.dc_next or f.has_more == "1" or f.sites != a.declined or f.rows != a.rows or not f.rows:
                 bad[ "T3" ].append( "%s: dc_next=%r answered %s" % ( a.name, a.dc_next, "nothing" if f is None or not f.ok else
-                    "%s of %s sites, dc_shown=%s, has_more=%s, %d rows against %d" % ( f.sites, a.declined, f.dc_shown, f.has_more, len( f.rows or [] ), len( a.rows or [] ) ) ) )
+                    "%s of %s sites, shown_dc=%s, has_more=%s, %d rows against %d" % ( f.sites, a.declined, f.shown_dc, f.has_more, len( f.rows or [] ), len( a.rows or [] ) ) ) )
     for verb, sel in WHOLE_CELLS:
         argv = named_call( verb, sel, env )
         if not argv:
@@ -264,22 +264,22 @@ def sweep( env = None ):
             seen[ "surfaces" ] += 1
             whole = a.ok and a.sites == a.declined and a.declined > 16
             seen[ "whole" ] += 1 if whole else 0
-            if not whole or a.dc_shown is not None or a.dc_next:
-                bad[ "T4" ].append( "%s: %s of %s sites printed, dc_shown=%s dc_next=%r" % ( a.name, a.sites, a.declined, a.dc_shown, a.dc_next ) )
+            if not whole or a.shown_dc is not None or a.dc_next:
+                bad[ "T4" ].append( "%s: %s of %s sites printed, shown_dc=%s dc_next=%r" % ( a.name, a.sites, a.declined, a.shown_dc, a.dc_next ) )
     for extra in ( [], [ "--format=columnar" ], [ "--json" ] ):
         a = Ans( run( [ "--callers=zs/z0.py:zap" ] + extra, env )[ 1 ], "--callers=zs/z0.py:zap %s" % " ".join( extra ) )
         seen[ "surfaces" ] += 1
-        if not a.ok or a.sites != 5 or a.declined != 5 or a.dc_shown is not None or a.dc_next:
-            bad[ "T4" ].append( "%s: %s of %s sites printed, dc_shown=%s dc_next=%r" % ( a.name, a.sites, a.declined, a.dc_shown, a.dc_next ) )
+        if not a.ok or a.sites != 5 or a.declined != 5 or a.shown_dc is not None or a.dc_next:
+            bad[ "T4" ].append( "%s: %s of %s sites printed, shown_dc=%s dc_next=%r" % ( a.name, a.sites, a.declined, a.shown_dc, a.dc_next ) )
     return bad, seen
 
 print( "=== (T1) (T2) (T3) (T4) every surface of every named call ===" )
 bad, seen = sweep()
-say( not bad[ "T1" ], "(T1) a cut tier is said", "%d answers print fewer declined sites than declined_calls= (%d of %d listed) and each carries dc_shown= and dc_next=" % (
+say( not bad[ "T1" ], "(T1) a cut tier is said", "%d answers print fewer declined sites than declined_calls= (%d of %d listed) and each carries shown_dc= and dc_next=" % (
      seen[ "cut" ], seen[ "sites_listed" ], seen[ "sites_counted" ] ), "; ".join( bad[ "T1" ][ :3 ] ) )
-say( not bad[ "T2" ], "(T2) arithmetic", "dc_shown= is the sites printed and below declined_calls=, every array is that long, counts_floor rides the root, the legend / note defines it",
+say( not bad[ "T2" ], "(T2) arithmetic", "shown_dc= is the sites printed and below declined_calls=, every array is that long, counts_floor rides the root, the legend / note defines it",
      "; ".join( bad[ "T2" ][ :3 ] ) )
-say( not bad[ "T3" ], "(T3) dc_next clears both tiers", "run verbatim: no dc_shown=, no has_more=\"1\", every declined site, the same symbol rows in the same form", "; ".join( bad[ "T3" ][ :3 ] ) )
+say( not bad[ "T3" ], "(T3) dc_next clears both tiers", "run verbatim: no shown_dc=, no has_more=\"1\", every declined site, the same symbol rows in the same form", "; ".join( bad[ "T3" ][ :3 ] ) )
 say( not bad[ "T4" ], "(T4) no false alarm", "%d answers whose tier is whole (a named call with more rows than declined sites; 5 sites under the default cut) carry neither attribute" % (
      seen[ "whole" ] + 3 ), "; ".join( bad[ "T4" ][ :3 ] ) )
 say( seen[ "cut_impact" ] >= 6 and seen[ "cut_callers" ] >= 6 and seen[ "cut_for" ] >= 6 and seen[ "whole" ] >= 6, "(N) non-vacuity",
@@ -295,8 +295,8 @@ except subprocess.TimeoutExpired:
 lines = [ l.strip() for l in para.splitlines() ]
 at    = next( ( i for i, l in enumerate( lines ) if "all_next=" in l ), len( lines ) )
 line  = " ".join( lines[ at : at + 3 ] )   # the sentence that names the pointer, and the two lines it may wrap onto
-say( "all_next=" in para and "every row of total=" in line and "dc_shown=" in line and "dc_next=" in line and "declined" in line, "(H1) help",
-     "the --impact paragraph names all_next= as every row of total=, and dc_shown= / dc_next= for the declined call sites beside it", line[ :260 ] or "no --impact paragraph naming all_next= was found" )
+say( "all_next=" in para and "every row of total=" in line and "shown_dc=" in line and "dc_next=" in line and "declined" in line, "(H1) help",
+     "the --impact paragraph names all_next= as every row of total=, and shown_dc= / dc_next= for the declined call sites beside it", line[ :260 ] or "no --impact paragraph naming all_next= was found" )
 
 # ── (M) the registered mutation controls ──────────────────────────────────────────────────────────────────────────────────────
 print( "=== (M) each registered mutant makes its arm fail ===" )
@@ -304,9 +304,9 @@ def mut( name, arm, what ):
     b, _ = sweep( { MUT: name } )
     say( bool( b[ arm ] ), "(M) %s" % name, "%s -> %s" % ( what, "RED, as registered (%d failures, e.g. %s)" % ( len( b[ arm ] ), b[ arm ][ 0 ][ :150 ] ) if b[ arm ]
          else "the arm still passes: it asserts nothing, or the binary has no such mutant" ) )
-mut( "silentcut", "T1", "the tier is cut and the root says neither dc_shown= nor dc_next=: (T1)" )
+mut( "silentcut", "T1", "the tier is cut and the root says neither shown_dc= nor dc_next=: (T1)" )
 mut( "nextshort", "T3", "dc_next= names a limit one site short: (T3)" )
-mut( "cutalways", "T4", "dc_shown= / dc_next= ride an answer whose tier is whole: (T4)" )
+mut( "cutalways", "T4", "shown_dc= / dc_next= ride an answer whose tier is whole: (T4)" )
 
 # ── (I) determinism and well-formedness ───────────────────────────────────────────────────────────────────────────────────────
 print( "=== (I) determinism, well-formedness ===" )

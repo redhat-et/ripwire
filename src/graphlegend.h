@@ -786,7 +786,7 @@ inline constexpr const char* kDeclinedSitesOfDefCallees =
 inline constexpr const char* kDeclinedSitesOfDefCallers =
     "of_def=K~d on a <dc>: its candidates include definition group K; never a claim it calls K. ";
 inline constexpr const char* kDeclinedSitesCutClause =
-    "dc_shown=N: the <dc> rows printed (the callers form cuts file-first: each file's first site before any file's second); dc_next= is the call that lists every site. ";
+    "shown_dc=N: the <dc> rows printed (the callers form cuts file-first: each file's first site before any file's second), dc_capped=1 the rest are cut; dc_next= is the call that lists every site. ";
 inline constexpr const char* kDeclinedSitesCandClause =
     "cand= (legend full only): the candidate definitions as file:line, cand_more= how many more. ";
 // The impact answer printed no <dc> row (gates review Q4) and pointed at the callers verb instead; since lane ix2-slice (IX-4) it
@@ -799,7 +799,7 @@ struct DeclinedSitesLegendFlags
     bool side = false; // a row says gate="side"
     bool nameGate = false; // a row says gate="builtin" or gate="std"
     bool ofDef = false; // a row carries of_def=
-    bool cut = false; // the root carries dc_shown= / dc_next=
+    bool cut = false; // the root carries shown_dc= / dc_next=
     bool cand = false; // a row carries cand= (legend full)
     bool iface = false; // a row says gate="iface" (lane L6)
     bool bound = false; // a row carries bound= (lane L6)
@@ -816,7 +816,7 @@ inline constexpr const char* kDeclinedSitesOfDefCalleesMcp =
 inline constexpr const char* kDeclinedSitesOfDefCallersMcp =
     "of_def [K~d] on an entry: its candidates include definition group K; never a claim it calls K. ";
 inline constexpr const char* kDeclinedSitesCutClauseMcp =
-    "dc_shown: the entries listed (the callers form cuts file-first: each file's first site before any file's second); dc_next: the call that lists every site. ";
+    "shown_dc: the entries listed (the callers form cuts file-first: each file's first site before any file's second), dc_capped: 1 when cut; dc_next: the call that lists every site. ";
 inline constexpr const char* kDeclinedSitesCandClauseMcp =
     "candidates (legend full only): the candidate definitions as file:line, cand_more how many more. ";
 inline constexpr const char* kDeclinedSitesCallersFormMcp =

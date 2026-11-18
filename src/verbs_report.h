@@ -3227,7 +3227,7 @@ std::optional<int> runZoom( const MainDispatch& d )
                      "On a level-0 module size= is its true member count and shown=/capped= describe the member list printed here, which is fixed at the 5 top-ranked members and is not widened by limit=/offset= (those page the TOP-LEVEL modules); "
                      "the community drill verb pages one module's full member list by its level-0 id. A module above level 0 lists every child module, so it carries no shown=/capped= pair. "
                      // P4 (L7): the two default ceilings, defined where the reader meets them
-                     "levels_shown= is how many of the levels= this document prints from the top (default 2; the zoom-levels flag sets it, 0 = all): a module AT the cut "
+                     "shown_levels= is how many of the levels= this document prints from the top (default 2; the zoom-levels flag sets it, 0 = all), levels_capped=1 when deeper ones are unprinted: a module AT the cut "
                      "carries children= (its child modules, none printed) instead of nesting. The top-level module rows are a WINDOW (shown=/capped=/total=/next_offset=, "
                      "default 40 by rank mass; limit=/offset= page it) and next= pastes the next page. {}{}-->",
                      bridge.size() > kZoomBridgeCap ? ", the 12 heaviest (shown_bridges=/bridges_capped=/bridges= of all pairs)" : "",
@@ -3239,7 +3239,7 @@ std::optional<int> runZoom( const MainDispatch& d )
         // a fixed-shape diagram, not a row list (its own hard-coded top-10/top-8/top-5 caps are unaffected —
         // honorsPaging() excludes the --zoom --mermaid combination for the same reason plain --mermaid refuses).
         // P4 (L7): the default window over the top modules (kZoomTopModuleCap; --limit raises it) and the printed
-        // depth (levels_shown=, default 2; --zoom-levels=N sets it, 0 = every level). Both cuts are disclosed on the
+        // depth (shown_levels=, default 2; --zoom-levels=N sets it, 0 = every level). Both cuts are disclosed on the
         // root and next= pastes the next page; a module AT the depth cut carries children= instead of nesting.
         const PageWindow  zoomPw = pageWindow( topOrder.size(), effectiveRowCap( cfg.pageLimit, kZoomTopModuleCap ), cfg.pageOffset );
         const std::size_t levelsShown = cfg.zoomLevelsSet ? ( cfg.zoomLevels > 0 ? std::min<std::size_t>( L, std::size_t( cfg.zoomLevels ) ) : L )
@@ -3256,7 +3256,7 @@ std::optional<int> runZoom( const MainDispatch& d )
         // the lightest pairs), and the cut was silent: no total, no flag. secondaryCutAttrs is the pair plus the
         // total, present only on a cut (an uncut answer is byte-identical); no call pages it, so there is no next=.
         const std::size_t zoomBridgesShown = std::min<std::size_t>( kZoomBridgeCap, bridge.size() );
-        rw::emitTo( stdout, "<zoom levels=\"{}\" levels_shown=\"{}\" top_modules=\"{}\" symbols=\"{}\" isolated=\"{}\"{}{}{}{}>", L, levelsShown, topOrder.size(), N, isolatedCount,
+        rw::emitTo( stdout, "<zoom levels=\"{}\" shown_levels=\"{}\" levels_capped=\"{}\" top_modules=\"{}\" symbols=\"{}\" isolated=\"{}\"{}{}{}{}>", L, levelsShown, ( levelsShown < L ? 1 : 0 ), topOrder.size(), N, isolatedCount,
                      ( pageDisclosure( zoomAb, sizeof( zoomAb ), zoomPw.end - zoomPw.begin, topOrder.size(), zoomPw.end,
                                        cfg.pageLimit, cfg.pageOffset, zoomCut )
                        + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str(),
@@ -3286,7 +3286,7 @@ std::optional<int> runZoom( const MainDispatch& d )
             rw::emitTo( stdout, ">" );
             if( atCut )
             {
-                // the depth ceiling: nothing below this row is printed (levels_shown= on the root says so)
+                // the depth ceiling: nothing below this row is printed (shown_levels= on the root says so)
             }
             else if( l == 0 )   // finest community → list its top-ranked symbols
             {

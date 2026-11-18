@@ -1188,7 +1188,7 @@ Discloses: `capped`, `count_capped`, `findings_capped`, `hits_capped`, `importer
 | `kTreeSymbolsPerFile` | `3` | — | cut-fix E: --tree's <s> rows per <file>, disclosed by the root's shown_symbols=/symbols_capped= |
 | `kUseSiteRowCap` | `100` | — | — |
 | `kZoomBridgeCap` | `12` | — | cut-fix E: --zoom's <bridge> rows (traffic desc), a secondary listing disclosed by secondaryCutAttrs |
-| `kZoomTopModuleCap` | `40` | — | top-level modules, rank-mass desc then size desc then id (massSizeIdLess; their children ride along: levels_shown=2) |
+| `kZoomTopModuleCap` | `40` | — | top-level modules, rank-mass desc then size desc then id (massSizeIdLess; their children ride along: shown_levels=2) |
 
 ### `src/partition.h`
 

@@ -108,7 +108,7 @@ if printf '%s' "$alts" | grep -q '^<alts side="from" of="run">' && [ "$( printf 
 run --path=A.run,helperA >"$TMP/p2.xml" 2>/dev/null
 if grep -q 'reachable="1"' "$TMP/p2.xml" && ! grep -q '<alts' "$TMP/p2.xml"; then ok "P2: a unique pick prints no <alts> (0 bytes)"; else no "P2: $( head -c 400 "$TMP/p2.xml" )"; fi
 run --path=many,helperA --legend=full >"$TMP/p3.xml" 2>/dev/null
-if grep -q '<alts side="from" of="many" alts_shown="16" defs="18" next="--defs=many --offset=1[67]">' "$TMP/p3.xml" && xmllint --noout "$TMP/p3.xml" 2>/dev/null; then ok "P3: 17 others past the cap: alts_shown=16 defs=18 next=--defs=many --offset=16|17, well-formed"; else no "P3: $( grep -o '<alts [^>]*>' "$TMP/p3.xml" )"; fi
+if grep -q '<alts side="from" of="many" shown_alts="16" alts_capped="1" defs="18" next="--defs=many --offset=1[67]">' "$TMP/p3.xml" && xmllint --noout "$TMP/p3.xml" 2>/dev/null; then ok "P3: 17 others past the cap: shown_alts=16 defs=18 next=--defs=many --offset=16|17, well-formed"; else no "P3: $( grep -o '<alts [^>]*>' "$TMP/p3.xml" )"; fi
 # F8: the continuation starts AFTER the rows already shown (it used to replay page 1): the 16 shown + the bound + the offset page = 18 distinct, no repeat
 off="$( grep -o '<alts side="from" of="many"[^>]*next="--defs=many --offset=[0-9]*"' "$TMP/p3.xml" | sed 's/.*--offset=//; s/"$//' )"
 run --defs=many --offset="${off:-0}" >"$TMP/p3n.xml" 2>/dev/null
@@ -123,7 +123,7 @@ if [ -n "$off" ] && [ "$rep" = 0 ] && [ "$cover" = 18 ]; then ok "P3 next=: --de
 # prototype (row 0, skipped) + the bound w05 (skipped): the 16th alternative used to come from row 17 with sel="" sel_proven="0".
 run --path=wide,helperA >"$TMP/p3b.xml" 2>/dev/null
 altsw="$( grep -o '<alts side="from" of="wide".*</alts>' "$TMP/p3b.xml" )"
-if printf '%s' "$altsw" | grep -q 'alts_shown=' && ! printf '%s' "$altsw" | grep -q 'sel=""' && ! printf '%s' "$altsw" | grep -q 'sel_proven' && [ "$( printf '%s' "$altsw" | grep -o '<d ' | wc -l | tr -d ' ' )" -ge 14 ]; then ok "P3b: two rows skipped above the window: every printed <alts> row carries a sel= (none empty, none sel_proven=0); the rest pages via next="; else no "P3b: $( printf '%s' "$altsw" | grep -o '<alts [^>]*>\|<d [^>]*sel=\"\"[^>]*>' | head -c 400 )"; fi
+if printf '%s' "$altsw" | grep -q 'shown_alts=' && ! printf '%s' "$altsw" | grep -q 'sel=""' && ! printf '%s' "$altsw" | grep -q 'sel_proven' && [ "$( printf '%s' "$altsw" | grep -o '<d ' | wc -l | tr -d ' ' )" -ge 14 ]; then ok "P3b: two rows skipped above the window: every printed <alts> row carries a sel= (none empty, none sel_proven=0); the rest pages via next="; else no "P3b: $( printf '%s' "$altsw" | grep -o '<alts [^>]*>\|<d [^>]*sel=\"\"[^>]*>' | head -c 400 )"; fi
 offw="$( printf '%s' "$altsw" | grep -o 'next="--defs=wide --offset=[0-9]*"' | sed 's/.*--offset=//; s/"$//' )"
 run --defs=wide --offset="${offw:-0}" >"$TMP/p3bn.xml" 2>/dev/null
 shownw="$( printf '%s' "$altsw" | grep -o 'p="[^"]*"' | sort )"

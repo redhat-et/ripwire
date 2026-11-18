@@ -3404,7 +3404,7 @@ int emitImpactJson( const ImpactView& v )
                  rw::countFieldOrEmpty( "tsconfig_unread", std::size_t( v.imports.tsconfigUnread ), /*json=*/true ),
                  v.imports.noFileEdgeLangs != 0 ? ",\"no_file_edges\":\"" + rw::noFileEdgeLangTags( v.imports.noFileEdgeLangs ) + "\"" : std::string() );   // arch-honest: likewise
     rw::emitTo( stdout, ",\"radius_tested\":{},\"radius_untested\":{}{}{}", v.radius.tested, v.radius.untested,
-                 rw::radiusTestTierFields( v.radius.tests, v.testsIgnored, /*json=*/true ) + rw::declinedCallsKeyJson( v.declinedCalls ) + rw::declinedSiteCutKeyJson( v.dc.cut ) + rw::declinedIfaceKeyJson( v.declinedIface ),   // A6; then the XML root's declined_calls=/dc_shown=/dc_next=/declined_iface=
+                 rw::radiusTestTierFields( v.radius.tests, v.testsIgnored, /*json=*/true ) + rw::declinedCallsKeyJson( v.declinedCalls ) + rw::declinedSiteCutKeyJson( v.dc.cut ) + rw::declinedIfaceKeyJson( v.declinedIface ),   // A6; then the XML root's declined_calls=/shown_dc=/dc_next=/declined_iface=
                  ( rw::valueRefsCountKeyJson( v.valueRefs.rows.size() ) + rw::valueRefsDepthKeyJson( v.ing, v.valueRefs.depthCut, rw::VrRender{ v.singleRoot, v.rootPrefix } )
                    + rw::patternDispatchKeyJson( v.patternSites.size(), v.valueRefs.patternWideSites.size() ) ) );   // IX-3: the XML root's pattern counts
     if( v.singleRoot ) { rw::emitTo( stdout, ",\"root\":\"{}\"", jsonStr( v.rootRaw ).c_str() ); }   // R-E

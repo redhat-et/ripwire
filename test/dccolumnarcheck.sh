@@ -21,12 +21,12 @@
 #        360-site answer.
 #   (D3) the reader is told what the block is, in both legend postures: the block is defined, a site is NOT an edge, the resolver
 #        proved none, and via="declined" rides the block.
-#   (D4) n= equals every array's length; uncut it equals declined_calls=, cut it equals dc_shown=.
+#   (D4) n= equals every array's length; uncut it equals declined_calls=, cut it equals shown_dc=.
 #   (D5) the XML and --json forms print their rows as before (no <dcols>).
 #   (P1) all_next= rides exactly the roots that carry has_more="1": 0 false positives, 0 false negatives. Cell grain.
 #   (P2) the call all_next= names, run verbatim, does not window (no has_more="1"), and its ( path, name, line ) rows equal the
 #        XML rows paged to the end in set, count and order. Symbol grain. Its limit is the row total (amendment 10b): where it
-#        holds more declined sites than that it says so (dc_shown=), and its dc_next= keeps the columnar form and lists them all.
+#        holds more declined sites than that it says so (shown_dc=), and its dc_next= keeps the columnar form and lists them all.
 #   (P3) a root that does not window carries no all_next=.
 #   (N)  non-vacuity: the fixtures yield a gate=, bound=, of_def=, cand=, cand_more= row, a cut answer and a windowed answer.
 #   (M)  the seven registered mutation controls, on the real binary: each makes its arm fail.
@@ -223,7 +223,7 @@ def sweep( env = None ):
         for k in ( "gate", "bound", "of_def", "cand", "cand_more" ):
             seen[ k ] += sum( 1 for r in want if ( " %s=\"" % k ) in r )
         seen[ "comma" ] += sum( 1 for r in want if "," in r )
-        seen[ "cut" ]   += 1 if attr( root_tag( c ), "dc_shown" ) else 0
+        seen[ "cut" ]   += 1 if attr( root_tag( c ), "shown_dc" ) else 0
         got = blk.rows()
         if got != want:
             first = next( ( i for i, ( a, b ) in enumerate( zip( got or [], want ) ) if a != b ), min( len( got or [] ), len( want ) ) )
@@ -233,9 +233,9 @@ def sweep( env = None ):
         if xml_dc_rows( c ):
             bad[ "D1" ].append( "%s: the columnar form still prints <dc> rows beside the block" % name )
         r = root_tag( c )
-        total, shown = attr( r, "declined_calls" ), attr( r, "dc_shown" )
+        total, shown = attr( r, "declined_calls" ), attr( r, "shown_dc" )
         if not blk.lengths_ok() or str( blk.n ) != ( shown or total ):
-            bad[ "D4" ].append( "%s: n=%s, arrays %s, declined_calls=%s dc_shown=%s %s" % (
+            bad[ "D4" ].append( "%s: n=%s, arrays %s, declined_calls=%s shown_dc=%s %s" % (
                 name, blk.n, sorted( { len( v ) for v in blk.cols.values() } ), total, shown, blk.err ) )
         lg = legend( c )
         miss = [ w for w in ( "dcols", "NOT an edge", "the resolver proved none" ) if w not in lg ]
@@ -254,7 +254,7 @@ for k in bad:
 say( not bad[ "D1" ], "(D1) rebuild", "the block forced at any row count: %d <dc> rows on %d answers rebuilt equal the XML rows byte for byte, in order" % (
      seen[ "rows" ], seen[ "docs" ] ), "; ".join( bad[ "D1" ][ :3 ] ) )
 say( not bad[ "D3" ], "(D3) legend", "every answer with a block defines it, keeps NOT-an-edge and proved-none, and the block says via=\"declined\"", "; ".join( bad[ "D3" ][ :3 ] ) )
-say( not bad[ "D4" ], "(D4) counts", "n= is every array's length, and dc_shown= (cut) or declined_calls= (uncut)", "; ".join( bad[ "D4" ][ :3 ] ) )
+say( not bad[ "D4" ], "(D4) counts", "n= is every array's length, and shown_dc= (cut) or declined_calls= (uncut)", "; ".join( bad[ "D4" ][ :3 ] ) )
 say( not bad[ "D5" ], "(D5) other forms", "the XML form prints rows, never the block", "; ".join( bad[ "D5" ][ :3 ] ) )
 rc, j = run( W, [ "--impact=leaf", "--json" ] )
 say( rc == 0 and '"dc":[{"in":' in j and "dcols" not in j, "(D5) json", "--json keeps its \"dc\" array", j[ :200 ] )
@@ -279,7 +279,7 @@ say( not off, "(D1) pinned", "four answers' rows equal their pre-change literals
 
 print( "=== (N) non-vacuity ===" )
 for k, what in ( ( "gate", "a gate= row" ), ( "bound", "a bound= row" ), ( "of_def", "an of_def= row" ), ( "cand", "a cand= row" ),
-                 ( "cand_more", "a cand_more= row" ), ( "cut", "a cut (dc_shown=) answer" ), ( "comma", "a row whose value holds a comma" ) ):
+                 ( "cand_more", "a cand_more= row" ), ( "cut", "a cut (shown_dc=) answer" ), ( "comma", "a row whose value holds a comma" ) ):
     say( seen[ k ] > 0, "(N) %s" % k, "the fixtures yield %s (%d)" % ( what, seen[ k ] ) )
 
 # ── (D2) bytes ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -378,10 +378,10 @@ dn = attr( ar, "dc_next" ) or ""
 rd, d = run( W, shlex.split( dn ) ) if dn else ( 1, "" )
 _, dx = run( W, [ x for x in shlex.split( dn ) if x != "--format=columnar" ] ) if dn else ( 1, "" )   # the same call in the XML form
 total, declined = attr( r, "total" ), attr( r, "declined_calls" )
-say( rc == 0 and ra == 0 and nxt.endswith( "--limit=%s" % total ) and int( declined or 0 ) > int( total or 0 ) > 40 and attr( ar, "dc_shown" ) == total,
-     "(P2) declined tier cut, and said", "more declined sites (%s) than rows (%s): the named limit is the row total and the answer says dc_shown=" % ( declined, total ),
+say( rc == 0 and ra == 0 and nxt.endswith( "--limit=%s" % total ) and int( declined or 0 ) > int( total or 0 ) > 40 and attr( ar, "shown_dc" ) == total,
+     "(P2) declined tier cut, and said", "more declined sites (%s) than rows (%s): the named limit is the row total and the answer says shown_dc=" % ( declined, total ),
      "all_next=%r root=%s" % ( nxt, ar[ :300 ] ) )
-say( "--format=columnar" in dn and rd == 0 and attr( root_tag( d ), "dc_shown" ) is None and Block( d ).rows() == xml_dc_rows( dx )
+say( "--format=columnar" in dn and rd == 0 and attr( root_tag( d ), "shown_dc" ) is None and Block( d ).rows() == xml_dc_rows( dx )
      and len( xml_dc_rows( dx ) ) == int( declined or -1 ), "(P2) dc_next keeps the form",
      "its dc_next= stays columnar and lists every declined site: the block rebuilds to the XML rows of the same call", "dc_next=%r rc=%s" % ( dn, rd ) )
 

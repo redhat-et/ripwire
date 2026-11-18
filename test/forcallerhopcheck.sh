@@ -6,7 +6,7 @@
 #
 #   TRIGGER  CLI --for (XML, compact and full legends) on the name-exact route whose body candidates are ONE function (every
 #            candidate a function or method of the same name and scope), in the DEFAULT regime.
-#   WHAT     <callers of= shown= total= capped= [d2= d2_shown=] next="--impact=OF"> after the tail, before <bodies>: the
+#   WHAT     <callers of= shown= total= capped= [d2= shown_d2= d2_capped=] next="--impact=OF"> after the tail, before <bodies>: the
 #            callers verb's 1-hop rows <s t= n= [sc=] p=file:line [via="name"] [sites_at=]>, then d="2" rows (callers of the
 #            shown callers, at most 4); 16 first-hop rows at most, the rest counted (total=, capped="1").
 #   NOT      a struct, a variable, a conceptual question, --json, --signatures-only, --detail=1, --token-budget=N and
@@ -103,7 +103,7 @@ case "$H1" in
 esac
 printf '%s' "$H1" | grep -q 'n="run_client" p="client.c:8" sites_at="13"'; verdict $? "(P1b) run_client is a caller row" "(P1b) no run_client caller row: [$H1]"
 printf '%s' "$H1" | grep -q '<s t="fn" n="main" p="main.c:3" d="2"/>'; verdict $? "(P1c) main is the d=2 row" "(P1c) main is not a d=2 row: [$H1]"
-printf '%s' "$H1" | grep -q '<callers of="start_server" shown="2" total="2" capped="0" d2="1" d2_shown="1" next="--impact=start_server">'; verdict $? "(P1d) the element's counts and next=" "(P1d) the element's open tag: [${H1%%>*}>]"
+printf '%s' "$H1" | grep -q '<callers of="start_server" shown="2" total="2" capped="0" d2="1" shown_d2="1" d2_capped="0" next="--impact=start_server">'; verdict $? "(P1d) the element's counts and next=" "(P1d) the element's open tag: [${H1%%>*}>]"
 ! printf '%s' "$H1" | grep -q 'n="listen_socket"'; verdict $? "(P1e) no callee in the caller rows" "(P1e) a CALLEE (listen_socket) rode as a caller"
 # placement: after the tail, before the bodies
 python3 - "$TMP/p1" <<'PY'

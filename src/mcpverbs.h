@@ -928,7 +928,7 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
          + ",\"hop_untested\":" + std::to_string( chTested.untested )
          + countFieldOrEmpty( "hop_tests", chTested.tests, /*json=*/true )   // TIER-FOLLOWUP: the CLI root's hop_tests=, absent at 0
          + declinedCallsKeyJson( chRows.declinedCalls )   // the CLI root's declined_calls=, for the direction count= describes
-         + declinedSiteCutKeyJson( sqDcCut )              // the CLI root's dc_shown= / dc_next=, absent when nothing was cut
+         + declinedSiteCutKeyJson( sqDcCut )              // the CLI root's shown_dc= / dc_next=, absent when nothing was cut
          + declinedIfaceKeyJson( chRows.declinedIface )   // the CLI root's declined_iface= (callers direction only)
          + implsKeyJson( chRows.contractSeeds, chRows.implBodies )   // BODILESS-SEED: the CLI root's impls= (callers direction only)
          + stdMemberCallsSpelling( chRows.stdCalls, /*json=*/true )       // the CLI callees answer's <stdm> line (callees direction only; absent when none)
