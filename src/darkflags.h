@@ -1300,6 +1300,15 @@ struct ShellFunctionWrite
     bool          isLocal = false;           // it IS the `local` / in-function `declare` that binds the name
 };
 
+// The scan-time narrowing chain over fh.writes (shellNarrowFrom): next[k] == k while write k has not been narrowed,
+// else an index past it to jump to. Narrow points come in scan order, so a write narrowed once already ends before any
+// later point and is never visited again; `last` is that order, checked.
+struct ShellNarrowChain
+{
+    std::vector<std::size_t>                next;
+    std::pair<std::uint32_t, std::uint32_t> last{ 0, 0 };
+};
+
 // The scanner's state across lines: quoting and command context nest (`"$( cmd "$X" )"`), and both `'…'` and `"…"`
 // may span lines, so this is per FILE, like forEachCodeByte's block-comment flag.
 struct ShellScan
@@ -1370,13 +1379,8 @@ struct ShellScan
     std::vector<std::pair<std::uint32_t, std::uint32_t>> functionEnds;   // per function: its closing `}` (line, col)
     std::vector<std::pair<std::size_t, std::uint32_t>>   scopedWrites;  // (fh.writes index, function) per local write
     std::vector<ShellFunctionWrite> functionWrites;    // every write inside a function body (shellCloseScopes)
-    bool                       isLastPipe = false;     // `shopt -s lastpipe` in force in the shell the scan is in (a
-                                                       // child shell's shopt is undone where it ends: #688 review)
-    // The scan-time narrowing chain over fh.writes (shellNarrowFrom): narrowNext[k] == k while write k has not been
-    // narrowed, else an index past it to jump to. Narrow points come in scan order, so a write narrowed once already
-    // ends before any later point and is never visited again; lastNarrow is that order, checked.
-    std::vector<std::size_t>   narrowNext;
-    std::pair<std::uint32_t, std::uint32_t> lastNarrow{ 0, 0 };
+    bool                       isLastPipe = false;     // `shopt -s lastpipe` in force here (a child's is undone at its end)
+    ShellNarrowChain           narrowed;               // shellNarrowFrom's visit-once chain over fh.writes
     NextStop                   wordEnd;                // the next blank or `;&|`
     NextStop                   bracket;                // the next `]`
 
@@ -1703,12 +1707,12 @@ inline void shellNarrowScope( FileHarvest::Read& w, std::uint32_t line, std::uin
 // fh.writes[from, size) were made in a child shell that ends at (line, col): none of them shadows anything past it.
 // Each write is visited ONCE over the whole scan: nested background groups (`{ V=1` … `} &` N deep) re-walked every
 // inner group's writes at each enclosing close, quadratic in the depth (#688 review, CodeRabbit 4614203147: 160,000
-// levels took 23 s). A write narrowed earlier already ends at or before (line, col), so st.narrowNext skips it.
+// levels took 23 s). A write narrowed earlier already ends at or before (line, col), so st.narrowed skips it.
 inline void shellNarrowFrom( ShellScan& st, FileHarvest& fh, std::size_t from, std::uint32_t line, std::size_t col )
 {
-    DASSERT( std::pair( line, std::uint32_t( col ) ) >= st.lastNarrow );
-    st.lastNarrow = { line, std::uint32_t( col ) };
-    std::vector<std::size_t>& next = st.narrowNext;
+    DASSERT( std::pair( line, std::uint32_t( col ) ) >= st.narrowed.last );
+    st.narrowed.last = { line, std::uint32_t( col ) };
+    std::vector<std::size_t>& next = st.narrowed.next;
     const std::size_t         end  = fh.writes.size();
     for( std::size_t k = next.size(); k <= end; ++k )
     {
