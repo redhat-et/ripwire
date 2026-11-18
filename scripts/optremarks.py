@@ -145,6 +145,9 @@ COLD_FILES = (
       "the ripwire_probe binary. Not linked into ripwire at all, so nothing in it runs when the tool runs." ),
     ( "src/largealloc.cpp",
       "macOS operator new and delete; a block under 256 KiB pays one compare, and the mmap route is called a few thousand times a run" ),
+    ( "src/memceiling_new.cpp",
+      "the memory ceiling's portable operator new/delete (malloc/free plus the ceiling hook) where largealloc.cpp is not linked; not built on a default macOS "
+      "build at all, and on Linux a block pays one compare before malloc, as largealloc.cpp's does" ),
     ( "src/alloccount.cpp",
       "the RIPWIRE_ALLOC_COUNT operator new/delete replacement: absent from every shipped build and from every gate by construction — see the honesty note at the "
       "top of the file." ),

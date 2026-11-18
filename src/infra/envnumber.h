@@ -1,7 +1,7 @@
 #pragma once
 
-// envnumber.h — one environment variable read as a whole decimal number. The knob readers (forpage.h's
-// RIPWIRE_TAIL_SYM_WIDE_ROWS, memceiling.h's RIPWIRE_MEM_BUDGET_MB) share it, so each states only its own range and its
+// envnumber.h — one environment variable read as a whole decimal number. The knob readers (forpage.h's tail-width
+// knob, memceiling.h's budget knob) share it, so each states only its own range and its
 // own reply to a bad value: whether a malformed value is refused or read as the default is the caller's decision.
 
 #include <charconv>

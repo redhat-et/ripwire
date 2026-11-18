@@ -116,6 +116,14 @@ for form in map json for; do
     for arm in 0 1000000; do
         dtotal=$(( dtotal + 1 ))
         RIPWIRE_MEM_BUDGET_MB="$arm" "$BIN" "$@" >"$TMP/d.$form.$arm.out" 2>"$TMP/d.$form.$arm.err"; rca=$?
+        # A build that cannot arm the line (sanitizer, RIPWIRE_ALLOC_COUNT; hooked=0 from arm R) says so ONCE on stderr when
+        # an explicit non-zero budget is spelled; that disclosure is the contract (header, line 23), not drift. Compare the
+        # rest of stderr, and require the line exactly once. (Integration 2026-11-18: arm D was red under ASan only.)
+        if [ "$hooked" -eq 0 ] && [ "$arm" != 0 ]; then
+            nNot="$( grep -c 'RIPWIRE_MEM_BUDGET_MB is NOT armed (this build does not replace operator new' "$TMP/d.$form.$arm.err" )"
+            grep -v 'RIPWIRE_MEM_BUDGET_MB is NOT armed (this build does not replace operator new' "$TMP/d.$form.$arm.err" >"$TMP/d.$form.$arm.err.rest"
+            if [ "$nNot" = 1 ]; then mv "$TMP/d.$form.$arm.err.rest" "$TMP/d.$form.$arm.err"; else no "D: $form, unarmable build at RIPWIRE_MEM_BUDGET_MB=$arm printed the NOT-armed line $nNot times (want 1)"; fi
+        fi
         if [ "$rca" -eq "$rcon" ] && [ -s "$TMP/d.$form.on.out" ] && cmp -s "$TMP/d.$form.on.out" "$TMP/d.$form.$arm.out" && cmp -s "$TMP/d.$form.on.err" "$TMP/d.$form.$arm.err"; then
             dsame=$(( dsame + 1 ))
         else
