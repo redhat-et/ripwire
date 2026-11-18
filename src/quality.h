@@ -3147,6 +3147,7 @@ constexpr std::uint32_t kIngestCacheVersionMirror   = 52;   // MUST equal ingest
 constexpr std::uint32_t kIngestParserVerMirror    = 331;  // MUST equal ingest.cpp's kParserVer   (gated)
                                                           // 331 = 2026-11-18 (train 1117d1, rich 332; members below, each was a placeholder)
                                                           //   go-cpp-edges (placeholder 317): a Go generic result type `Set[T]` records its ReturnType as the instantiated class
+                                                          //   cpp-ptr-alias (placeholder 321): a C++ Type / ParamType record whose declarator names the variable carries kDirectDeclaratorBit
                                                           // 313 = 2026-11-17 (TRAIN-1117b, one number for two members, above main 311/312 (#420 via #686); rich 314;
                                                           //   see the kParserVer note): #446 round 2 (@SeddonShen, lane land-606, its placeholder 316): Java base clauses as
                                                           //   @reference.base captures; #355 (PR #426 by @conka8, its placeholders 216 then 311): tags-pass string predicates +
