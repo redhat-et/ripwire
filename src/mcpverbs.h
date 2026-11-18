@@ -880,7 +880,7 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
     // C2 (train 31): the calledBy array also takes the CLI's callers BYTE band — the same estimate (callersByteBand) over the
     // same rows, so both surfaces agree on whether a callers list is cut; the calls array keeps the row band.
     CallersByteBand  calledByBand = callersByteBand( ing, chRows.matches, calledBy, VrRender{ sqSingleRoot, sqRootPrefix }, page.limit,
-                                                    chTested.testReach, calledByAttr, g.keptForwards );
+                                                    chTested.testReach, calledByAttr, g );
     const int        rowCap    = referencingOnly ? callHierarchyRowCap( page.limit, calledBy.size(), calledByBand.rowBytes ) : callHierarchyRowCap( page.limit, calls.size() );
     const PageWindow pwPrimary = pageWindow( referencingOnly ? calledBy.size() : calls.size(), rowCap, page.offset );
     const PageWindow pwSecond  = pageWindow( calledBy.size(), callHierarchyRowCap( page.limit, calledBy.size(), calledByBand.rowBytes ), page.offset );
@@ -896,7 +896,7 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
     else
     {
         calledBySites = rowCallSites( ing, chRows.matches, std::span<const NodeId>( calledBy ).subspan( calledByWin.begin, calledByWin.end - calledByWin.begin ),
-                                      VrRender{ sqSingleRoot, sqRootPrefix }, g.keptForwards );
+                                      VrRender{ sqSingleRoot, sqRootPrefix }, g );
     }
     char        pab[ kPageDisclosureCap ];
     // lane declined-sites (declinedsites.h): the CLI root's <dc> rows for the direction count= describes (find_symbol: the
