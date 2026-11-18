@@ -59,6 +59,34 @@ inline bool captureView( const TSQueryMatch& m, std::uint32_t capIndex, std::str
     return false;
 }
 
+// Call fn( text ) for the source text of EVERY node bound to capture `capIndex` in match `m`, in match order; fn returns
+// false to stop. Returns how many nodes it visited, or -1 when a node's span falls outside `src` (nothing decidable). A
+// quantified capture (`(_)* @arg`) or one name written twice binds several nodes in one match, and tree-sitter's own
+// string predicates test each of them (#688 review, CodeRabbit 4614203164); captureView reads the first only.
+template <class Fn> inline int forEachCaptureView( const TSQueryMatch& m, std::uint32_t capIndex, std::string_view src, Fn&& fn )
+{
+    int seen = 0;
+    for( std::uint16_t i = 0; i < m.capture_count; ++i )
+    {
+        if( m.captures[i].index != capIndex )
+        {
+            continue;
+        }
+        const TSNode        n = m.captures[i].node;
+        const std::uint32_t a = ts_node_start_byte( n ), b = ts_node_end_byte( n );
+        if( a > b || b > src.size() )
+        {
+            return -1;
+        }
+        ++seen;
+        if( !fn( src.substr( a, b - a ) ) )
+        {
+            break;
+        }
+    }
+    return seen;
+}
+
 // Call fn( group ) for each predicate of pattern `pattern`, in order. `group` is the predicate's steps without its
 // trailing Done step: group[0] the operator name, then its arguments. fn returns false to stop the walk early.
 template <class Fn> inline void forEachPredicate( const TSQuery* q, std::uint32_t pattern, Fn&& fn )
@@ -97,6 +125,8 @@ enum class StringPredicate : std::uint8_t { Pass, Fail, NotString };
 //   (#any-of? @c "s" …) / (#not-any-of? @c "s" …) — the capture's text against a list of strings
 // NotString: any other operator (#match? included), or a group this cannot read — an absent capture, a short group, a
 // non-string list entry. The caller filters nothing for NotString, which is what an unevaluated predicate always did.
+// A capture against strings (#any-of? @c …, #eq? @c "s", in either order) holds only when it holds for EVERY node bound
+// to the capture, as tree-sitter decides it; two captures (#eq? @a @b) compare their first nodes.
 inline StringPredicate evalStringPredicate( const TSQuery* q, std::span<const TSQueryPredicateStep> group, const TSQueryMatch& m,
                                             std::string_view src ) noexcept
 {
@@ -120,32 +150,66 @@ inline StringPredicate evalStringPredicate( const TSQuery* q, std::span<const TS
         }
         return false;
     };
-    std::string_view lhs;
-    if( !argText( group[1], lhs ) )
-    {
-        return StringPredicate::NotString;
-    }
     const bool negated = op.starts_with( "not-" );
+    // The predicate holds for every text of `s` — each node bound to a capture, or a string once. NotString when a
+    // capture binds no node, a node falls outside `src`, or `s` is neither.
+    const auto everyText = [ & ]( const TSQueryPredicateStep& s, auto&& holds ) -> StringPredicate
+    {
+        bool       ok    = true;
+        const auto visit = [ & ]( std::string_view text )
+        {
+            ok = holds( text ) != negated;
+            return ok;
+        };
+        int seen = -1;
+        if( s.type == TSQueryPredicateStepTypeCapture )
+        {
+            seen = forEachCaptureView( m, s.value_id, src, visit );
+        }
+        else if( s.type == TSQueryPredicateStepTypeString )
+        {
+            seen = 1;
+            visit( queryString( q, s.value_id ) );
+        }
+        return seen <= 0 ? StringPredicate::NotString : ok ? StringPredicate::Pass : StringPredicate::Fail;
+    };
     if( eq )
     {
-        std::string_view rhs;
-        if( !argText( group[2], rhs ) )
+        const bool isCap1 = group[1].type == TSQueryPredicateStepTypeCapture;
+        std::string_view lhs, rhs;
+        if( isCap1 && group[2].type == TSQueryPredicateStepTypeCapture )   // two captures: their first nodes
+        {
+            if( !argText( group[1], lhs ) || !argText( group[2], rhs ) )
+            {
+                return StringPredicate::NotString;
+            }
+            return ( ( lhs == rhs ) != negated ) ? StringPredicate::Pass : StringPredicate::Fail;
+        }
+        const TSQueryPredicateStep& many = isCap1 ? group[1] : group[2];   // the side that may bind several nodes
+        if( !argText( isCap1 ? group[2] : group[1], rhs ) )
         {
             return StringPredicate::NotString;
         }
-        return ( ( lhs == rhs ) != negated ) ? StringPredicate::Pass : StringPredicate::Fail;
+        return everyText( many, [ & ]( std::string_view text ) { return text == rhs; } );
     }
-    bool listed = false;
     for( std::size_t i = 2; i < group.size(); ++i )
     {
         if( group[i].type != TSQueryPredicateStepTypeString )
         {
             return StringPredicate::NotString;
         }
-        listed = listed || queryString( q, group[i].value_id ) == lhs;
     }
-    return ( listed != negated ) ? StringPredicate::Pass : StringPredicate::Fail;
+    return everyText( group[1], [ & ]( std::string_view text )
+    {
+        bool listed = false;
+        for( std::size_t i = 2; i < group.size() && !listed; ++i )
+        {
+            listed = queryString( q, group[i].value_id ) == text;
+        }
+        return listed;
+    } );
 }
+
 
 // True when no string predicate of the match's pattern fails. The tags pass's whole predicate surface: operators this
 // header does not decide (#match? among them) filter nothing here, as they never did.

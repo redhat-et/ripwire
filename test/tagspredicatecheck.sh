@@ -34,6 +34,8 @@
 #        and `def "not a name" do` (invalid Elixir) defines nothing. The string-title pattern carries no @_keyword,
 #        so a definition keyword no longer reaches it; the C++ table used to accept it as "not a name"/0.
 #   (B3..B5) #eq?, #any-of?, #not-any-of? through --match on tagspredicatefix/c: exactly 1, 2 and 1 hits.
+#   (B8..B10) a capture bound to several nodes in one match (tagspredicatefix/cmulti): every node must pass, as in
+#        tree-sitter; red on 7253fb78e (first node only). B8c: with no predicate all three functions match.
 #
 # Every python3 scan's exit status is checked: a scan that cannot run FAILS its arm rather than reading as an empty,
 # passing result (CR #426). The scans are heredocs inside $( ): keep every apostrophe in them PAIRED, or macOS's
@@ -157,6 +159,20 @@ check(){ local label="$1" pred="$2" want="$3" got; got="$( hits "$pred" )"; if [
 check B3 '(#eq? @n "keep_one")' 1
 check B4 '(#any-of? @n "keep_one" "keep_two")' 2
 check B5 '(#not-any-of? @n "keep_one" "keep_two")' 1
+
+# ── B8..B10. a capture bound to SEVERAL nodes: every node must satisfy the predicate (#688 review, CodeRabbit 4614203164) ──
+# Both parameter names of each function in tagspredicatefix/cmulti bind @arg in one match. tree-sitter's string
+# predicates test every node of the capture; red on 7253fb78e, which tested the first node only, so first_keep (keep, drop)
+# passed #any-of? "keep" "keep2", #not-eq? "drop" and #not-any-of? "drop" "other". Controls: both_keep (every node
+# passes) stays in all three, and with no predicate all three functions match.
+MQ='(function_definition declarator: (function_declarator declarator: (identifier) @f parameters: (parameter_list (parameter_declaration declarator: (identifier) @arg) (parameter_declaration declarator: (identifier) @arg)))'
+# status: a failed --match prints no <m> rows, so the function list reads "" and the check FAILS
+fns(){ "$BIN" "$FIX/cmulti" --no-cache "--match=$MQ $1)" --legend=compact 2>/dev/null | grep -o '<m p="[^"]*" in="[^"]*"' | sed 's/.* in="//; s/"$//' | sort -u | tr '\n' ' '; }
+mcheck(){ local label="$1" pred="$2" want="$3" got; got="$( fns "$pred" )"; if [ "$got" = "$want" ]; then ok "$label ${pred:-(no predicate)}: [$got]"; else no "$label ${pred:-(no predicate)}: [$got], want [$want]"; fi; }
+mcheck B8c ''                                    'both_keep first_keep none_keep '
+mcheck B8  '(#any-of? @arg "keep" "keep2")'      'both_keep '
+mcheck B9  '(#not-eq? @arg "drop")'              'both_keep '
+mcheck B10 '(#not-any-of? @arg "drop" "other")'  'both_keep '
 
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "FAILURES ABOVE"; fi
 exit $fail
