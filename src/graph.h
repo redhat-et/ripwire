@@ -25,6 +25,7 @@
 #include "scipoverlay.h"         // SCIP precision overlay (data struct only; parser lives in scip.h)
 #include "pincensus.h"           // eval-only per-call-site decision census (--pin-census); inert unless armed
 #include "externalnames.h"       // Phase 5: the committed builtin/stdlib tables behind the external-name veto
+#include "pyscopepin.h"          // PY-CLASS-SPRAY: a bare Python call binds through its lexical scope chain (pythonLexicalScopePin)
 #include "infra/sortutil.h"      // radix edge sorting for large integer-key graph edge lists
 #include "clones.h"              // scanCodeTokens / CodeScanOptions — BuiltinMethodGate::namedBeyondDefinition's code-token count
 #include "infra/mdslug.h"        // mdSlugOf — bindMarkdownLinks matches a link slug to a heading
@@ -10736,6 +10737,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // census row with no target.
     const ExternalVeto externalVeto{ ing, canonByName, fieldNarrow.localNameSet, extVeto };
     const PythonRenamedImports pyRenamedImports = buildPythonRenamedImports( ing );   // PY-IMPORT-ALIAS-CALL (pythonRenamedImportPin)
+    const PythonLexicalScopes  pyScopes         = buildPythonLexicalScopes( ing, byName );   // PY-CLASS-SPRAY (pythonLexicalScopePin)
     // The builtin-method name gate (BuiltinMethodGate above): decides, in Rule 3's place, the calls whose name is a
     // method of the caller language's builtin map/list/set/string type. Inert (active=false) on a corpus with no
     // symbol in a gated language.
@@ -12422,6 +12424,19 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 narrowed     = true;
                 importPinned = true;
             }
+        }
+        // PY-CLASS-SPRAY: a bare Python call whose name the first binding scope of its chain (LEGB) binds by def or class statements
+        // alone names those definitions, never a namesake in another function or module (pythonLexicalScopePin states when it decides)
+        if( !scipPinned && !canonical && !narrowed && cand.empty() && !pyScopes.empty() && isPythonBareCall( r ) )
+        {
+            // the module's namespace is not read under a star import or a dynamic write (`globals()`, `setattr`): either may rebind the name
+            const auto moduleUnread = [ & ]
+            {
+                std::string key;
+                return ( r.fileId < extVeto.pythonScopes.starTargets.size() && !extVeto.pythonScopes.starTargets[ r.fileId ].empty() )
+                    || extVeto.pythonModuleRebind.contains( fileNameKey( key, r.fileId, kPythonDynamicWrite ) );
+            };
+            narrowed = pythonLexicalScopePin( pyScopes, ing, r, moduleUnread, cand );
         }
         if( !scipPinned && r.role == RefRole::Call && r.recv == RecvKind::None && r.qualifier.empty()
             && ( r.lang == Lang::TypeScript || r.lang == Lang::JavaScript ) )
