@@ -1301,6 +1301,38 @@ struct CallResultTypes
         } );
         return bound.verdict();
     }
+    // RUST-PARAM-GLOB-REEXPORT, on top of FE-A's verdict `kinds` for the call (graph.h FalseEdgeRules::decide, whose kindDecide has
+    // already dropped what a bare call cannot name: a bare Rust path call never names a method). Where a `use` in force binds the
+    // name, the ONE free function that `use` reaches is the only candidate left (`kept`, Narrow): `use nu_engine::redirect_env;`
+    // over lib.rs's `pub use eval::{redirect_env};` is eval.rs's, never a private `eval_ir::redirect_env` of the same crate, which
+    // Rule 3's included-file closure cannot tell apart. Any other call, a verdict that is no Keep / Narrow, a name a local of the
+    // caller hides (`localOfCaller`, asked only for a bare Rust call), a `use` that decides nothing: `kinds`, unchanged.
+    template <class Verdict, class LocalOfCaller>
+    Verdict rustBareNarrow( const Reference& r, Verdict kinds, std::span<const NodeId> ids, rw::SmallVec<NodeId, 2>& kept, LocalOfCaller&& localOfCaller ) const
+    {
+        const bool bare = callResultFamilyOf( r.lang ) == CallResultFamily::Rust && r.role == RefRole::Call && r.qualifier.empty() && r.recv == RecvKind::None
+                          && !r.memberCall && r.fromSymbol < ing.symbols.size();
+        if( !bare || ( kinds != Verdict::Keep && kinds != Verdict::Narrow ) || localOfCaller() )
+        {
+            return kinds;
+        }
+        rw::SmallVec<NodeId, 2> freeFns;
+        for( const NodeId c : kinds == Verdict::Narrow ? std::span<const NodeId>( kept.begin(), kept.end() ) : ids )
+        {
+            if( ing.symbols[ c ].kind == SymKind::Function && ing.symbols[ c ].lang == r.lang )
+            {
+                freeFns.push_back( c );
+            }
+        }
+        const NodeId bound = rustUseBoundFn( r, std::span<const NodeId>( freeFns.begin(), freeFns.end() ) );
+        if( bound == kNoNode )
+        {
+            return kinds;
+        }
+        kept.clear();
+        kept.push_back( bound );
+        return Verdict::Narrow;
+    }
     // rustItemAt, asked once: a class asked from outside any walk (a `use` row, a glob row, a written path) is a function of
     // the layout alone, so each (module, name) is walked once (rustClassMemo: engine/mod.rs's twenty globs, asked per typed
     // parameter); and inside one walk a question asked again brings nothing new — a module's private `use` of the name often
