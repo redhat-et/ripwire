@@ -11,8 +11,11 @@
 # that reads ONE row and nothing else, and that the result is, byte for byte, what the binary printed before the change.
 #
 # TWO INDEPENDENT REFERENCES, never one:
-#   1. GOLDENS captured from the binary before the change (994f0021f) on the fixtures below, committed under
-#      test/importrowshortfix/golden/. The comparison is over the WHOLE <impact> element, so a row that moved, a count
+#   1. GOLDENS captured from the binary before the change on the fixtures below, committed under
+#      test/importrowshortfix/golden/. (First taken at 994f0021f; RE-CAPTURED 2026-11-18 at integration from the composed
+#      tree just before this change, 1ddf1c29a, because lane V1's <def> rows (one-group --impact answers name their
+#      definition, XML and --json def_table) land in the same batch: the only difference from the 994f0021f goldens is
+#      those <def> rows and def_table, checked by diff with the legend comment and at= masked.) The comparison is over the WHOLE <impact> element, so a row that moved, a count
 #      that moved, or a neighbour that moved are all the same failure.
 #   2. the --json dialect's import_reach array for the same selector, from the binary under test (a different emitter,
 #      which still spells via and lazy on every entry).
