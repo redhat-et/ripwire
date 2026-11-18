@@ -652,6 +652,7 @@ for _g in \
     impactdepthcheck \
     impactimportcheck \
     impactpartitioncheck \
+    impactsoledefcheck \
     impacttesttiercheck \
     impacttypecheck \
     importcapcheck \
@@ -1117,6 +1118,7 @@ for _g in \
     vendoredassetcheck \
     vendoredbundlecheck \
     vendorpatchcheck \
+    verbdefrowscheck \
     verifycheck \
     versioncheck \
     versionlabelcheck \
