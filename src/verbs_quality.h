@@ -1672,13 +1672,12 @@ inline constexpr const char* kQdMonsterLegend =
     "(10 or more) in this change: major whatever the percentage, since tangle in a giant function is a small share of it "
     "forever. Put the new branch in a helper. ";
 
-// QD-SWAP-1117 prototype — emitted only when a params row carries similar= (RIPWIRE_QD_SIMILAR_ARGS set). The compact
-// dialect has no reading for it yet: a row in compactlegend.h's table moves the session dictionary (dictv=) for every
-// answer, which a prototype that is off by default may not do. Under the variable, --legend=full defines similar=.
+// QD-SWAP-1117 — emitted only when a params row carries similar=. The compact dialect's reading is compactlegend.h's
+// "similar" row (it is in the session dictionary, --legend-dict).
 inline constexpr const char* kQdSimilarArgsLegend =
-    "similar=\"N\" on a params row (a prototype, printed only when RIPWIRE_QD_SIMILAR_ARGS is set): the function is new or its "
-    "parameter list grew, and it now holds N adjacent parameters of one written type with different names, so a call that "
-    "swaps two of them compiles. A row with similar= and sev=\"minor\" is report-only: was= and now= are still parameter "
+    "similar=\"N\" on a params row: the function is new or its parameter list grew, and it now holds N adjacent "
+    "parameters of one written type with different names, so a call that swaps two of them compiles. similar= never gates "
+    "and never changes a row's sev= or the exit status; a row it adds is sev=\"minor\": was= and now= are still parameter "
     "counts, and now= may be under bar=. C and C++ only, read off the signature text: unnamed parameters, bool and iterator "
     "types, and a pair named as a range (begin/end, from/to, a/b) are not counted, and two spellings of one type are two types. "
     "Pass a small named struct, so the call names each field. ";

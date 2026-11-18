@@ -169,7 +169,7 @@ struct LangFacts
     bool defectShapeNeedsMacroSet = false;
 
     /// C, C++: a parameter is written type first and name last, and defectshape.h's C++ lexer reads the signature. The
-    /// similar-argument-list prototype (similarargs.h, quality.h similarRunByNode) reads these two languages only.
+    /// similar-argument-list signal (similarargs.h, quality.h similarRunByNode) reads these two languages only.
     bool typeFirstParameters = false;
 
     /// Rust: a trait's bodyless method signature is no definition the index keeps (only a bodied default is), so a trait's contract

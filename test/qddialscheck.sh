@@ -18,6 +18,8 @@
 #   5. duplication / new-clone-of-reused-helper — an overload set and a vendored path are not this change's
 #      duplication; a same-file copy IS, which is why the audit's one-file drop was withdrawn.
 #   6. error-masking — a block whose only content is a COMMENT is a swallow.
+#   7. params similar= — on by default, report-only: a new or grown list of adjacent same-typed parameters is
+#      marked, and the mark never changes a row's severity or the exit status.
 #
 # Fixtures are built in temp dirs (git-init where a section needs history); the repo is never touched.
 # Usage:  RIPWIRE_BIN=build/ripwire bash test/qddialscheck.sh
@@ -551,17 +553,21 @@ row "$OEM" error-masking lineCommentJs >/dev/null \
     && ok "error-masking: byte-identical run to run (deterministic)" || no "error-masking: non-deterministic delta"
 
 
-# ── 7) params: similar= on a list of adjacent same-typed parameters (QD-SWAP-1117, a PROTOTYPE) ──────────
-# Off unless RIPWIRE_QD_SIMILAR_ARGS is set (src/similarargs.h); report-only. A function that is new, or whose list
-# grew, and now holds a run of adjacent parameters with one written type and different names gets a params row
-# with similar="N" (sev="minor" unless the params kind already reported it). Red before the card: every (s*) arm and
-# the full-legend arm. The compact dialect does not define similar= yet (its table feeds the session dictionary).
+# ── 7) params: similar= on a list of adjacent same-typed parameters (QD-SWAP-1117; ON BY DEFAULT since QD-SIMILAR-DEFAULT) ──
+# On by default and report-only (src/similarargs.h; owner 2026-11-17). A function that is new, or whose list grew,
+# and now holds a run of adjacent parameters with one written type and different names gets a params row with
+# similar="N" (sev="minor" unless the params kind already reported it). There is no variable: the only way to drop
+# the rows is the range form's --quality-kinds= without params, the selector every kind has.
+# Red before QD-SIMILAR-DEFAULT (lane/qd-swap-1117's binary, the prototype, run WITHOUT its variable): 9 FAIL — every
+# (s*) arm, the full- and compact-legend arms, the session-dictionary arm and the (kinds) and (g0) premises.
 #   (s1) new, three uint32_t                      -> similar="3", minor, origin="new-symbol"
 #   (s2) grew 1 -> 2 const std::string&            -> similar="2", minor, no origin (it existed)
 #   (s3) the params kind's own major row (5 -> 7)  -> the same row gains similar="7", still major, still ONE row
 #   (n1) new ( from, to ), (n2) new bool pair, (n3) new int beside long, (n4) an unchanged ( p, q ): no row
-#   (off) the variable unset: no similar= in the document, and the same exit status
-#   PREMISE: (n*) count the functions they judged in the fixture and FAIL on a miscount (a vacuous arm is a FAIL).
+#   (kinds) the range form with --quality-kinds= without params: no similar= and no params row (the range alone has them)
+#   (g0) NEGATIVE: a change whose ONLY row is a similar= params row exits 0 (similar= never gates)
+#   PREMISE: (n*) count the functions they judged in the fixture and FAIL on a miscount (a vacuous arm is a FAIL);
+#   (g0) asserts its one row IS a similar= row before it reads the exit status.
 SA="$WORK/similar"; mkdir -p "$SA/src"
 ( cd "$SA" && git init -q && git config user.email t@t && git config user.name t && git config commit.gpgsign false )
 simgen(){ python3 - "$SA/src" "$1" <<'PY'
@@ -588,14 +594,14 @@ PY
 simgen before
 ( cd "$SA" && git add -A >/dev/null 2>&1 && git commit -qm base >/dev/null 2>&1 )
 simgen after
-OSA="$( cd "$SA" && RIPWIRE_QD_SIMILAR_ARGS=1 "$BIN" . --quality-delta --no-cache 2>/dev/null )"; SARC=$?
-OSF="$( cd "$SA" && RIPWIRE_QD_SIMILAR_ARGS=1 "$BIN" . --quality-delta --no-cache --legend=full 2>/dev/null )"; SFRC=$?
-OSO="$( cd "$SA" && env -u RIPWIRE_QD_SIMILAR_ARGS "$BIN" . --quality-delta --no-cache 2>/dev/null )"; SORC=$?
+OSA="$( cd "$SA" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"; SARC=$?
+OSF="$( cd "$SA" && "$BIN" . --quality-delta --no-cache --legend=full 2>/dev/null )"; SFRC=$?
+OSC="$( cd "$SA" && "$BIN" . --quality-delta --no-cache --legend=compact 2>/dev/null )"; SCRC=$?
 srow(){ row "$OSA" params "$1"; }
 R1="$( srow fresh3 )"
 { printf '%s' "$R1" | grep -q ' similar="3"' && printf '%s' "$R1" | grep -q 'sev="minor"' && printf '%s' "$R1" | grep -q 'origin="new-symbol"'; } \
-    && ok "similar (s1): a new function with three uint32_t is a minor new-symbol params row, similar=3" \
-    || { no "similar (s1): expected a minor new-symbol params row with similar=3 on fresh3"; rows "$OSA"; }
+    && ok "similar (s1): by default a new function with three uint32_t is a minor new-symbol params row, similar=3" \
+    || { no "similar (s1): expected a minor new-symbol params row with similar=3 on fresh3 (no variable set)"; rows "$OSA"; }
 R2="$( srow grew )"
 { printf '%s' "$R2" | grep -q ' similar="2"' && printf '%s' "$R2" | grep -q 'was="1" now="2"' && printf '%s' "$R2" | grep -q 'sev="minor"' && ! printf '%s' "$R2" | grep -q 'origin='; } \
     && ok "similar (s2): a list that grew 1 -> 2 strings is a minor preexisting row, similar=2" \
@@ -610,17 +616,51 @@ for f in ranged flags mixed untouched; do srow "$f" >/dev/null || SQUIET=$(( SQU
 [ "$SJUDGED" = 4 ] && [ "$SQUIET" = 4 ] \
     && ok "similar (n1-n4): a range pair, a bool pair, two types and an unchanged list get no row (4 judged)" \
     || { no "similar (n1-n4): judged=$SJUDGED (want 4), without a row=$SQUIET (want 4)"; rows "$OSA"; }
-{ [ "$SFRC" = "$SARC" ] && printf '%s' "$OSF" | grep -q 'on a params row (a prototype'; } \
+{ [ "$SFRC" = "$SARC" ] && printf '%s' "$OSF" | grep -q 'on a params row: the function is new or its parameter list grew'; } \
     && ok "similar: the full legend defines similar= when a row carries it" || no "similar: a row carries similar= and the full legend does not define it"
+{ [ "$SCRC" = "$SARC" ] && printf '%s' "$OSC" | grep -q ' similar="3"' && printf '%s' "$OSC" | grep -q 'r similar=N: '; } \
+    && ok "similar: the compact legend defines similar= when a row carries it" || no "similar: the compact answer carries similar= without its 'r similar=N:' reading"
+CLEAN="$WORK/similar-clean"; mkdir -p "$CLEAN/src"
+( cd "$CLEAN" && git init -q && git config user.email t@t && git config user.name t && git config commit.gpgsign false )
+printf 'int base( int p ){ return p; }\n' > "$CLEAN/src/c.cpp"
+( cd "$CLEAN" && git add -A >/dev/null 2>&1 && git commit -qm base >/dev/null 2>&1 )
+printf 'int base( int p ){ return p; }\nint grow2( long n ){ return int( n ); }\n' > "$CLEAN/src/c.cpp"
+OCL="$( cd "$CLEAN" && "$BIN" . --quality-delta --no-cache --legend=compact 2>/dev/null )"; CLRC=$?
+{ [ -n "$OCL" ] && ! printf '%s' "$OCL" | grep -q 'similar='; } \
+    && ok "similar: an answer with no similar= row carries no similar= reading (present-only)" || no "similar: the similar= reading rode an answer with no similar= row (rc $CLRC)"
 SDICT="$( "$BIN" --legend-dict 2>/dev/null )"; SDRC=$?
-{ [ "$SDRC" = 0 ] && [ -n "$SDICT" ] && ! printf '%s' "$SDICT" | grep -q 'similar='; } \
-    && ok "similar: the session dictionary holds no similar= reading (a prototype moves no dictv=)" || no "similar: --legend-dict carries similar=, so dictv= moved for every answer"
-{ ! printf '%s' "$OSO" | grep -q 'similar=' && [ "$SORC" = "$SARC" ] && [ "$( rows "$OSO" | grep -c 'kind="params"' )" = 1 ]; } \
-    && ok "similar (off): with the variable unset no similar= is printed, the one params row stands, same exit status ($SORC)" \
-    || { no "similar (off): similar= without the variable, or rc $SORC vs $SARC, or the params rows moved"; rows "$OSO"; }
-OSA2="$( cd "$SA" && RIPWIRE_QD_SIMILAR_ARGS=1 "$BIN" . --quality-delta --no-cache 2>/dev/null )"; SA2RC=$?
+{ [ "$SDRC" = 0 ] && printf '%s' "$SDICT" | grep -q 'r similar=N: '; } \
+    && ok "similar: the session dictionary holds the similar= reading (dictv= moved once)" || no "similar: --legend-dict has no similar= reading (rc $SDRC)"
+# (kinds) --quality-kinds= selects kinds of the range form only: commit the after state in a copy and read HEAD~1..HEAD.
+SAK="$WORK/similar-kinds"; cp -R "$SA" "$SAK"
+( cd "$SAK" && git add -A >/dev/null 2>&1 && git commit -qm after >/dev/null 2>&1 )
+OSR="$( cd "$SAK" && "$BIN" . --quality-delta=HEAD~1..HEAD --no-cache 2>/dev/null )"; SRRC=$?
+OSK="$( cd "$SAK" && "$BIN" . --quality-delta=HEAD~1..HEAD --no-cache --quality-kinds=complexity,verbosity,nesting 2>/dev/null )"; SKRC=$?
+if printf '%s' "$OSR" | grep -q ' similar="3"'; then
+    { [ -n "$OSK" ] && ! printf '%s' "$OSK" | grep -q 'similar=' && [ "$( rows "$OSK" | grep -c 'kind="params"' )" = 0 ]; } \
+        && ok "similar (kinds): the range carries similar= (rc $SRRC); --quality-kinds= without params prints no similar= and no params row (rc $SKRC)" \
+        || { no "similar (kinds): similar= or a params row under --quality-kinds= without params (rc $SKRC)"; rows "$OSK"; }
+else
+    no "similar (kinds) PREMISE: the range HEAD~1..HEAD carries no similar=3 row (rc $SRRC)"; rows "$OSR"
+fi
+OSA2="$( cd "$SA" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"; SA2RC=$?
 { [ "$OSA" = "$OSA2" ] && [ "$SA2RC" = "$SARC" ]; } \
     && ok "similar: byte-identical run to run (deterministic)" || no "similar: non-deterministic delta"
+# (g0) NEGATIVE: similar= never gates. The change adds ONE small function with two same-typed parameters and nothing
+# else a kind reports, so its document holds exactly one row, a minor similar= params row, and the exit status is 0.
+GZ="$WORK/similar-gate"; mkdir -p "$GZ/src"
+( cd "$GZ" && git init -q && git config user.email t@t && git config user.name t && git config commit.gpgsign false )
+printf 'int keep( int p ){ return p; }\nint main(){ return keep( 0 ); }\n' > "$GZ/src/g.cpp"
+( cd "$GZ" && git add -A >/dev/null 2>&1 && git commit -qm base >/dev/null 2>&1 )
+printf 'int keep( int p ){ return p; }\nint pick( int index, int count ){ return index < count ? index : 0; }\nint main(){ return keep( 0 ) + pick( 1, 2 ); }\n' > "$GZ/src/g.cpp"
+OGZ="$( cd "$GZ" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"; GZRC=$?
+GZROWS="$( rows "$OGZ" | grep -c '<r kind="[a-z-]*" sym=' )"; GZSIM="$( rows "$OGZ" | grep -c 'kind="params" sym="pick".* similar="2"' )"
+if [ "$GZROWS" = 1 ] && [ "$GZSIM" = 1 ]; then
+    [ "$GZRC" = 0 ] && ok "similar (g0): a change whose only row is a similar= params row exits 0 (never gates)" \
+                    || { no "similar (g0): the only row is a similar= params row and the exit status is $GZRC (want 0)"; rows "$OGZ"; }
+else
+    no "similar (g0) PREMISE: want exactly one row, a similar=2 params row on pick; rows=$GZROWS similar=$GZSIM"; rows "$OGZ"
+fi
 
 
 [ "$fail" = 0 ] && echo "qddialscheck: ALL PASS" || echo "qddialscheck: FAILURES"
