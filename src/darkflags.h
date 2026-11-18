@@ -1270,6 +1270,8 @@ struct ShellCompound
     std::size_t writesFrom = 0;              // fh.writes from here on were made inside it
     std::size_t listFrom = 0;                // the && / || list it is part of starts here (ShellCommand::listFrom)
     bool        isAfterPipe = false;         // it is a pipeline component (`cmd | while …; do …; done`)
+    bool        isLastPipeAtOpen = false;    // ShellScan::isLastPipe when it opened (a child's shopt is undone at its end)
+    bool        isLastPipeAtList = false;    // … and when its && / || list started (ShellCommand::isLastPipeAtList)
 };
 struct ShellCommand
 {
@@ -1281,6 +1283,12 @@ struct ShellCommand
     std::size_t   listFrom = 0;              // … and from here on by the current && / || list (`X=1 && cmd &`)
     std::size_t   compoundFrom = SIZE_MAX;   // a compound command (`… done`, `}`) just closed: its writes start here
     std::vector<ShellCompound> compounds;    // open if / while / until / for / select / case / { … } at this level
+    // ShellScan::isLastPipe when the current command, its && / || list, and the compound command that just closed
+    // (with compoundFrom) STARTED. A `shopt` that ran in a child shell changed only the child's options, so the end
+    // of that child puts the value back (shellEndCommand) — the same ranges whose writes stop shadowing there.
+    bool          isLastPipeAtCmd = false;
+    bool          isLastPipeAtList = false;
+    bool          isLastPipeAtCompound = false;
 };
 
 // A write made inside a function body, so a later assignment to a name the function made `local` can be scoped to
@@ -1318,6 +1326,7 @@ struct ShellScan
         std::int32_t  parens = 0;            // a `$( … )` / `(( … ))` / `( … )` frame: open parens; 0 = the file's top level
         bool          isArith = false;       // `$(( … ))` / `(( … ))`: `<<` is a shift there, never a heredoc
         bool          isSubshell = false;    // `$( … )` / `( … )`: a child shell, whose writes end at its `)`
+        bool          isLastPipeAtOpen = false;   // ShellScan::isLastPipe when it opened: a subshell's `shopt` ends at its `)`
         bool          isList = false;        // `X=( … )`: a compound assignment's element list, part of X's command
         std::uint32_t cases = 0;             // open `case … in` statements (their `esac` not met yet)
         bool          isPattern = false;     // a case pattern is next: its `)` ends the pattern, it closes no paren
@@ -1361,7 +1370,8 @@ struct ShellScan
     std::vector<std::pair<std::uint32_t, std::uint32_t>> functionEnds;   // per function: its closing `}` (line, col)
     std::vector<std::pair<std::size_t, std::uint32_t>>   scopedWrites;  // (fh.writes index, function) per local write
     std::vector<ShellFunctionWrite> functionWrites;    // every write inside a function body (shellCloseScopes)
-    bool                       isLastPipe = false;     // `shopt -s lastpipe` seen: a pipeline's last command runs here
+    bool                       isLastPipe = false;     // `shopt -s lastpipe` in force in the shell the scan is in (a
+                                                       // child shell's shopt is undone where it ends: #688 review)
     NextStop                   wordEnd;                // the next blank or `;&|`
     NextStop                   bracket;                // the next `]`
 
@@ -1705,7 +1715,8 @@ inline void shellNarrowEach( FileHarvest& fh, const std::vector<std::size_t>& in
 }
 
 // `shopt -s NAME …` / `shopt -u NAME …`: only lastpipe matters here (ShellScan::isLastPipe, file order). The frame's
-// wordsLeft holds the mode while the list runs: 1 = -s, 2 = -u.
+// wordsLeft holds the mode while the list runs: 1 = -s, 2 = -u. It takes effect at once; when the shopt turns out to
+// have run in a child shell (`( shopt -u lastpipe )`, `shopt -u lastpipe &`), the end of that child undoes it.
 inline void shellShoptWord( const ShellWord& w, ShellScan::Frame& f, ShellScan& st )
 {
     if( w.word == "-s" || w.word == "-u" )
@@ -1732,7 +1743,8 @@ inline void shellCompoundWord( const ShellWord& w, std::uint32_t lineNo, std::si
     const auto        isIn  = [ & ]( const auto& words ) { return std::find( std::begin( words ), std::end( words ), w.word ) != std::end( words ); };
     if( isCmd && isIn( kShellCompoundOpeners ) )
     {
-        f.cmd.compounds.push_back( ShellCompound{ fh.writes.size(), f.cmd.listFrom, std::exchange( f.cmd.isPipeTail, false ) } );
+        f.cmd.compounds.push_back( ShellCompound{ fh.writes.size(), f.cmd.listFrom, std::exchange( f.cmd.isPipeTail, false ),
+                                                  st.isLastPipe, f.cmd.isLastPipeAtList } );
         return;
     }
     const bool isEsac = w.word == "esac" && f.cases > 0 && ( f.isPattern || f.isCmdPos );
@@ -1742,12 +1754,15 @@ inline void shellCompoundWord( const ShellWord& w, std::uint32_t lineNo, std::si
     }
     const ShellCompound closed = f.cmd.compounds.back();
     f.cmd.compounds.pop_back();
-    if( closed.isAfterPipe && !st.isLastPipe )
+    if( closed.isAfterPipe && !closed.isLastPipeAtOpen )   // lastpipe as the pipeline started decides where it runs
     {
         shellNarrowFrom( fh, closed.writesFrom, lineNo, at );
+        st.isLastPipe = closed.isLastPipeAtOpen;
     }
-    f.cmd.compoundFrom = closed.writesFrom;
-    f.cmd.listFrom     = closed.listFrom;   // the lists inside it ended; the one it is a command of goes on
+    f.cmd.compoundFrom         = closed.writesFrom;
+    f.cmd.isLastPipeAtCompound = closed.isLastPipeAtOpen;
+    f.cmd.listFrom             = closed.listFrom;   // the lists inside it ended; the one it is a command of goes on
+    f.cmd.isLastPipeAtList     = closed.isLastPipeAtList;
 }
 
 // One WORD that starts at `at` in a command context: an assignment, a declaration keyword, or the name a
@@ -1881,12 +1896,17 @@ enum class ShellSep : std::uint8_t { List, AndOr, Pipe, Background };
 inline void shellEndCommand( ShellScan& st, ShellScan::Frame& f, FileHarvest& fh, std::uint32_t lineNo, std::size_t col, ShellSep sep )
 {
     const bool isChildSep = sep == ShellSep::Pipe || sep == ShellSep::Background;
-    const bool isChild    = isChildSep || ( f.cmd.isPipeTail && !st.isLastPipe );
+    const bool isChild    = isChildSep || ( f.cmd.isPipeTail && !f.cmd.isLastPipeAtCmd );
     shellCommitPending( st, f, fh, lineNo, col );
     if( isChild )
     {
         const std::size_t from = sep == ShellSep::Background ? std::min( f.cmd.listFrom, f.cmd.writesFrom ) : f.cmd.writesFrom;
         shellNarrowFrom( fh, std::min( from, fh.writes.size() ), lineNo, col );
+        // a shopt in the child changed the child's options: back to the value where the child began (the whole list
+        // for a `&`, the compound command before a `|`, else this command)
+        st.isLastPipe = sep == ShellSep::Background ? f.cmd.isLastPipeAtList
+                      : ( isChildSep && f.cmd.compoundFrom != SIZE_MAX ) ? f.cmd.isLastPipeAtCompound
+                                                                         : f.cmd.isLastPipeAtCmd;
     }
     if( isChildSep && f.cmd.compoundFrom != SIZE_MAX )
     {
@@ -1897,8 +1917,10 @@ inline void shellEndCommand( ShellScan& st, ShellScan::Frame& f, FileHarvest& fh
     const bool isListOpen = sep == ShellSep::AndOr || ( sep == ShellSep::List && f.cmd.isListTail && !f.cmd.hasWords );
     if( !isListOpen && sep != ShellSep::Pipe )
     {
-        f.cmd.listFrom = fh.writes.size();
+        f.cmd.listFrom         = fh.writes.size();
+        f.cmd.isLastPipeAtList = st.isLastPipe;
     }
+    f.cmd.isLastPipeAtCmd = st.isLastPipe;
     f.cmd.isListTail    = isListOpen;
     f.cmd.compoundFrom  = SIZE_MAX;
     f.cmd.writesFrom    = fh.writes.size();
@@ -1931,7 +1953,8 @@ inline bool shellSeparator( char c, std::size_t col, std::uint32_t lineNo, Shell
         shellEndCommand( st, f, fh, lineNo, col, ShellSep::List );
         if( f.isSubshell )
         {
-            shellNarrowEach( fh, f.childWrites, lineNo, col );   // the parent shell never saw these writes
+            shellNarrowEach( fh, f.childWrites, lineNo, col );   // the parent shell never saw these writes …
+            st.isLastPipe = f.isLastPipeAtOpen;                  // … nor its shopt (#688 review, CodeRabbit 4614203135)
         }
         st.frames.pop_back();
         return true;
@@ -2173,8 +2196,10 @@ inline void harvestShellLine( std::string_view line, std::uint32_t lineNo, FileH
         }
         if( const std::size_t opened = shellOpenFrame( line, i, st ); opened != std::string_view::npos )
         {
-            st.frames.back().cmd.writesFrom = fh.writes.size();   // the new frame's first command starts here
-            st.frames.back().cmd.listFrom   = fh.writes.size();   // … and so does its first list
+            ShellScan::Frame& inner = st.frames.back();
+            inner.cmd.writesFrom = fh.writes.size();   // the new frame's first command starts here
+            inner.cmd.listFrom   = fh.writes.size();   // … and so does its first list
+            inner.isLastPipeAtOpen = inner.cmd.isLastPipeAtCmd = inner.cmd.isLastPipeAtList = st.isLastPipe;
             i = opened;
             continue;
         }
