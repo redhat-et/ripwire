@@ -237,6 +237,40 @@ else
     pass "(H2) the compact path's replay is checked too (same seam)"
 fi
 
+# ── (S) A PROSE SURFACE SAYS THE HANDSHAKE DID NOTHING (A17, lane s1-small; found by lane A4, results/A4_SITU_PACK_1118 F1) ──
+# --situ under a valid --legend-have= exited 0 with byte-identical stdout and an EMPTY stderr, 33 of 33 — the silence the C4
+# rule in applyCliRefPosture exists to prevent, while --for says `not-applicable`. Every surface legendNonXmlReadSurface names
+# answers with no XML legend to reduce, so each must say so on stderr and leave stdout byte for byte as it was. Two of them
+# are run here (--situ, the measured one; --recall=, a second branch of the same test); [N] a stale value is still refused.
+ABIN="$( cd "$( dirname "$BIN" )" && pwd )/$( basename "$BIN" )"   # the arms below cd into their corpus
+SX="$WORK/sx"; mkdir -p "$SX"
+printf 'def area(w, h):\n    return w * h\n' >"$SX/geo.py"
+printf '# Notes\n\nArea is width times height.\n' >"$SX/NOTES.md"
+( cd "$SX" && git init -q && git -c user.email=s@example.invalid -c user.name=s add -A \
+    && git -c user.email=s@example.invalid -c user.name=s commit -qm one ) >/dev/null 2>&1
+printf 'def area(w, h):\n    return w * h * 1\n' >"$SX/geo.py"
+for row in "situ|--situ|--situ" "recall|--recall=area width|--recall"; do
+    tag="${row%%|*}"; rest="${row#*|}"; arg="${rest%%|*}"; surf="${rest#*|}"
+    ( cd "$SX" && "$ABIN" . "$arg" --no-cache >"$WORK/s_$tag.plain" 2>/dev/null ); rc0=$?
+    ( cd "$SX" && "$ABIN" . "$arg" --no-cache --legend-have="$DV" >"$WORK/s_$tag.have" 2>"$WORK/s_$tag.err" ); rc1=$?
+    if [ "$rc0" = "$rc1" ] && [ -s "$WORK/s_$tag.plain" ] && cmp -s "$WORK/s_$tag.plain" "$WORK/s_$tag.have"; then
+        pass "(S1) $arg under --legend-have=: same exit ($rc1), stdout byte-identical ($( wc -c <"$WORK/s_$tag.have" | tr -d ' ' ) B)"
+    else
+        bad "(S1) $arg under --legend-have=: rc $rc0 -> $rc1, or stdout moved/empty"
+    fi
+    if grep -q -- "--legend-have=: not-applicable" "$WORK/s_$tag.err" && grep -qF -- "$surf" "$WORK/s_$tag.err"; then
+        pass "(S2) $arg under --legend-have=: stderr says not-applicable and names $surf"
+    else
+        bad "(S2) $arg under --legend-have=: stderr is silent about the unused handshake: '$( grep -v '^\[' "$WORK/s_$tag.err" | head -c 200 )'"
+    fi
+done
+( cd "$SX" && "$ABIN" . --situ --no-cache --legend-have=0000000000000000 >/dev/null 2>"$WORK/s_stale.err" ); rc=$?
+if [ "$rc" -ne 0 ] && grep -q "does not match this binary's legend dictionary" "$WORK/s_stale.err" && ! grep -q "not-applicable" "$WORK/s_stale.err"; then
+    pass "(S3) [N] a stale --legend-have= on --situ is still refused (rc=$rc), with no not-applicable line"
+else
+    bad "(S3) [N] a stale --legend-have= on --situ: rc=$rc, stderr '$( head -c 200 "$WORK/s_stale.err" )'"
+fi
+
 # ── (M)/(T) THE HANDSHAKE'S OTHER HALF: what it DROPS must be OBTAINABLE, and the guidance must OBTAIN it ─────────────
 # Arms (A0)..(H) hold that the ref answer keeps every row and attribute. None of them asked the question the flag's
 # name raises: the caller asserts it HOLDS the dictionary, so is every definition the answer dropped actually IN the

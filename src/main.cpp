@@ -4173,6 +4173,15 @@ static bool checkLegendHandshake( const rw::Config& cfg )
     const bool                     everyValueIsATier = rw::legenddict::resolveHolding( cfg.legendHave, refusal ).has_value();
     if( VALIDATE( everyValueIsATier, "--legend-have= names only legend tiers THIS binary holds" ) )
     {
+        // A17 (lane s1-small, test/legendhavecheck.sh (S)): a prose/markdown/JSON/text surface never reaches
+        // applyCliRefPosture, so it answered exit 0, stdout unchanged, stderr EMPTY — the silence C4 there exists to
+        // prevent (lane A4: --situ, 33 of 33). Same line, naming the surface; stdout is untouched.
+        if( const char* surface = rw::legendNonXmlReadSurface( cfg ); surface != nullptr )
+        {
+            rw::emitTo( stderr, "ripwire: --legend-have=: not-applicable — {} answers with no XML legend the legend dictionary reduces, "
+                                "so it is served whole; nothing was saved\n",
+                        surface );
+        }
         return true;
     }
     // THE REMEDY NAMES THE CHEAPEST TIER AND ITS REAL SIZE. It used to prescribe the whole dictionary, a ~130 KB read to
