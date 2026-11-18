@@ -3148,6 +3148,7 @@ constexpr std::uint32_t kIngestParserVerMirror    = 333;  // MUST equal ingest.c
                                                           // 333 = 2026-11-18 (train 1117d2 on train 1117d1, rich 334; members below, each was a placeholder)
                                                           //   std-namesake (placeholder 317): a Rust binding written as a standard type keeps its spine on the tombstone
                                                           //   rust-self-chain (placeholder 319; kCacheVersion 53): Rust RecvCall records for member calls on a call's result, async ReturnType bit
+                                                          //   rust-macro-args (placeholder 315): calls inside Rust macro arguments are references
                                                           // 331 = 2026-11-18 (train 1117d1, rich 332; members below, each was a placeholder)
                                                           //   go-cpp-edges (placeholder 317): a Go generic result type `Set[T]` records its ReturnType as the instantiated class
                                                           //   cpp-ptr-alias (placeholder 321): a C++ Type / ParamType record whose declarator names the variable carries kDirectDeclaratorBit

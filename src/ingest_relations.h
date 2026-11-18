@@ -2935,6 +2935,7 @@ struct ExtractShortfall
         ImportNestingTooDeep,     // imports nested past kMaxImportContainerDepth containers: the deeper ones not captured
         AstroFrontmatterUnterminated,   // an .astro opened a `---` fence and never closed it: its frontmatter is not extracted
         RestUnitsCapped,          // a reST file past kMaxRestUnits or kMaxRestDepth: later units stay in the whole-file node
+        MacroArgsNestedTooDeep,   // Rust macro arguments nested past kMacroArgNestingDepth: the deeper calls are not captured
     };
     bool isShort = false;
     void disclose( DisclosureWhy ) noexcept   // every reason records the same fact
