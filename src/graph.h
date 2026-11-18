@@ -32,6 +32,7 @@
 #include "infra/namesplit.h"     // isIdentChar — identifierRunCount, the identifier runs inside a string annotation
 #include "docparse.h"            // detail::readWholeFile — resolveAtSeed reads the seed line's byte range off disk
 #include "cppscopechain.h"       // EditCheckBraceLexer / editCheckWrittenQualifier — the written-spelling tier's C/C++ full chain
+#include "argtypepick.h"         // B2.3: ArgTypeOverloadPick — a C++ call's same-arity overloads picked by the arguments' declared types; cppFullChainOf
 #include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
 #include "memstats.h"      // M0 MEM-STATS: RIPWIRE_STATS footprint readings at buildGraph's tables-built, resolve-done and end
 
@@ -10363,6 +10364,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     ChaConeMemo              chaCones( chaUp, chaDown );   // one cone per receiver type, computed on first use (see the type)
     ClassIdentity      classIds = buildClassIdentity( ing, chaUp );   // Rule 2's class identity: nesting, owners, real inheritance (resolve.h)
     std::vector<NodeId>      filtScratch;  // reused per-call survivor buffer for CHA-lite / arity filtering
+    ArgTypeOverloadPick      argTypePick( ing, scopedRecvDecls );   // B2.3: a C++ call's same-arity overloads, by its arguments' declared types
     rw::SmallVec<NodeId, 2>  reachScratch; // reused per-call buffer: the candidates a call can reach by name (reachableByName)
     AsideMarks               reachAside( ing.fnLocalScopes.empty() ? 0 : ing.symbols.size() );   // the name's locals out of this call's reach (reachableByName); unused, and empty, with no function-local def
     // FE-B (receiverevidence.h): the receiver-evidence tables, the per-edge hedge sets and the reused per-call buffers.
@@ -13045,6 +13047,17 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                     }
                 }
             }
+
+            // B2.3 argument-type pick (argtypepick.h, test/aritycheck.sh section 3d): a C++ tier still holding one class's
+            // same-arity overloads binds the ONE overload every bare-identifier argument reaches by the identity conversion
+            // (its declared type, nothing added) — the overload C++ itself selects. Any doubt leaves the tier whole (the split
+            // stands; so does a NAME-ONLY site, whose candidates no lookup tied to the receiver). Counted in the census as an
+            // arity-stage narrow: both stages read the call's argument list.
+            if( const NodeId picked = argTypePick.pick( r, tier, !nameOnly ); picked != kNoNode )
+            {
+                tier.assign( 1, picked );
+                censusArity = true;
+            }
         }
         censusPreS6c = tier.size();   // the tier width the locality tie-break is handed (census only)
 
@@ -15575,35 +15588,7 @@ inline bool writtenHeadNamesModule( std::span<const std::string_view> head, std:
     return namesInOrder( head.first( head.size() - 1 ), comps, false );
 }
 
-// The C/C++ full chain of one definition (enclosing namespaces and classes, then its written qualifier), read off the
-// comment-blanked source; nullopt when the reader cannot prove it (see the tier's contract above).
-inline std::optional<std::vector<std::string>> cppFullChainOf( const Symbol& s, std::string_view file )
-{
-    const std::uint32_t end = std::min<std::uint32_t>( isDefinitionNotDeclaration( s ) ? s.sigEndByte : s.endByte, std::uint32_t( file.size() ) );
-    if( end <= s.sigStartByte )
-    {
-        return std::nullopt;
-    }
-    const std::size_t nameAt = editCheckParamOpen( file.substr( s.sigStartByte, end - s.sigStartByte ), s.name ).first;
-    if( nameAt == std::string_view::npos )
-    {
-        return std::nullopt;
-    }
-    const std::size_t                              nameInFile = s.sigStartByte + nameAt;
-    const std::optional<EditCheckWrittenQualifier> written    = editCheckWrittenQualifier( file, nameInFile );
-    EditCheckBraceLexer                            lexer( file );
-    std::optional<std::vector<std::string>>        chain      = lexer.chainAt( nameInFile );
-    if( !written || !chain || ( !written->names.empty() && !written->absolute && lexer.usingDirectiveBefore() ) )
-    {
-        return std::nullopt;
-    }
-    if( written->absolute )
-    {
-        chain->clear();
-    }
-    chain->insert( chain->end(), written->names.begin(), written->names.end() );
-    return chain;
-}
+// cppFullChainOf — the C/C++ full chain of one definition — lives in argtypepick.h (moved verbatim; the B2.3 pick reads it too).
 
 // An unnamed namespace is skipped by name lookup (`A::C` names `namespace A { namespace { C } }` too). True when `chain` (a C++
 // definition's full chain) is not the prefix's contiguous tail as read, but is once its unnamed-namespace labels are dropped.
