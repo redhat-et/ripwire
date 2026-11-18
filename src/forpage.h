@@ -697,14 +697,10 @@ inline std::string renderForFilePageXml( const IngestResult& ing, const ForFileP
     const std::size_t shown  = window.end - window.begin;
 
     x += "<files";
-    // The open tag ends at its FIRST '>' (every attribute value is escapeXml'd): ctxRootOpen may follow it with history_unread='s
-    // definition comment, which goes behind this root's own '>' below. Splicing at the string's last '>' put this root's own
-    // attributes inside that comment: an ill-formed page (a "--" in a comment) whose coverage=/shown=/next= no reader saw.
-    const std::size_t rootTagEnd = p.rootOpen.starts_with( "<ctx" ) ? p.rootOpen.find( '>' ) : std::string_view::npos;
-    if( rootTagEnd != std::string_view::npos )
-    {
-        x.append( p.rootOpen.substr( 4, rootTagEnd - 4 ) );   // the attributes between "<ctx" and its ">"
-    }
+    // Spliced at the lens root's OWN '>' (ctxRootOpenParts): splicing at the string's last '>' put this root's attributes inside
+    // history_unread's definition comment when the walk was cut, an ill-formed page whose coverage=/shown=/next= no reader saw.
+    const auto [ rootAttrs, rootTail ] = ctxRootOpenParts( p.rootOpen );
+    x.append( rootAttrs );
     if( p.coveragePct >= 0 )
     {
         x += " coverage=\"" + std::to_string( p.coveragePct ) + "\"";
@@ -716,10 +712,7 @@ inline std::string renderForFilePageXml( const IngestResult& ing, const ForFileP
         x += nextAttrXml( forPageInvocation( p.task, p.limit > 0 ? p.limit : kForPageRowsDefault, int( window.end ) ) );
     }
     x += ">";
-    if( rootTagEnd != std::string_view::npos )
-    {
-        x.append( p.rootOpen.substr( rootTagEnd + 1 ) );   // "" unless the history walk was unread (historyread.h)
-    }
+    x.append( rootTail );   // "" unless the history walk was unread (historyread.h)
     x += p.compactLegend ? "<!-- ripwire for-page ripwire.for-page/v1" : "<!-- ripwire for-page";
     x += p.compactLegend ? kForPageLegendCompact : kForPageLegend;
     x += " -->";
