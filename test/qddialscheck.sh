@@ -589,7 +589,7 @@ simgen before
 ( cd "$SA" && git add -A >/dev/null 2>&1 && git commit -qm base >/dev/null 2>&1 )
 simgen after
 OSA="$( cd "$SA" && RIPWIRE_QD_SIMILAR_ARGS=1 "$BIN" . --quality-delta --no-cache 2>/dev/null )"; SARC=$?
-OSF="$( cd "$SA" && RIPWIRE_QD_SIMILAR_ARGS=1 "$BIN" . --quality-delta --no-cache --legend=full 2>/dev/null )"
+OSF="$( cd "$SA" && RIPWIRE_QD_SIMILAR_ARGS=1 "$BIN" . --quality-delta --no-cache --legend=full 2>/dev/null )"; SFRC=$?
 OSO="$( cd "$SA" && env -u RIPWIRE_QD_SIMILAR_ARGS "$BIN" . --quality-delta --no-cache 2>/dev/null )"; SORC=$?
 srow(){ row "$OSA" params "$1"; }
 R1="$( srow fresh3 )"
@@ -610,14 +610,16 @@ for f in ranged flags mixed untouched; do srow "$f" >/dev/null || SQUIET=$(( SQU
 [ "$SJUDGED" = 4 ] && [ "$SQUIET" = 4 ] \
     && ok "similar (n1-n4): a range pair, a bool pair, two types and an unchanged list get no row (4 judged)" \
     || { no "similar (n1-n4): judged=$SJUDGED (want 4), without a row=$SQUIET (want 4)"; rows "$OSA"; }
-printf '%s' "$OSF" | grep -q 'on a params row (a prototype' \
+{ [ "$SFRC" = "$SARC" ] && printf '%s' "$OSF" | grep -q 'on a params row (a prototype'; } \
     && ok "similar: the full legend defines similar= when a row carries it" || no "similar: a row carries similar= and the full legend does not define it"
-[ "$( "$BIN" --legend-dict 2>/dev/null | grep -c 'similar=' )" = 0 ] \
+SDICT="$( "$BIN" --legend-dict 2>/dev/null )"; SDRC=$?
+{ [ "$SDRC" = 0 ] && [ -n "$SDICT" ] && ! printf '%s' "$SDICT" | grep -q 'similar='; } \
     && ok "similar: the session dictionary holds no similar= reading (a prototype moves no dictv=)" || no "similar: --legend-dict carries similar=, so dictv= moved for every answer"
 { ! printf '%s' "$OSO" | grep -q 'similar=' && [ "$SORC" = "$SARC" ] && [ "$( rows "$OSO" | grep -c 'kind="params"' )" = 1 ]; } \
     && ok "similar (off): with the variable unset no similar= is printed, the one params row stands, same exit status ($SORC)" \
     || { no "similar (off): similar= without the variable, or rc $SORC vs $SARC, or the params rows moved"; rows "$OSO"; }
-[ "$OSA" = "$( cd "$SA" && RIPWIRE_QD_SIMILAR_ARGS=1 "$BIN" . --quality-delta --no-cache 2>/dev/null )" ] \
+OSA2="$( cd "$SA" && RIPWIRE_QD_SIMILAR_ARGS=1 "$BIN" . --quality-delta --no-cache 2>/dev/null )"; SA2RC=$?
+{ [ "$OSA" = "$OSA2" ] && [ "$SA2RC" = "$SARC" ]; } \
     && ok "similar: byte-identical run to run (deterministic)" || no "similar: non-deterministic delta"
 
 
