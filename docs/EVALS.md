@@ -18303,3 +18303,237 @@ So the registered rule changes to:
 are still missing from the index, so every call to them is still unresolved, and `--for`/`--callers` on them
 still answer nothing. `--dead-code` stops recommending deletions it cannot support; the index is no more
 complete than before.
+
+## PRE-REGISTRATION 2026-11-17 (amendment 10) — BAND DC: the declined-call rows bypass the columnar dialect
+
+Registered before any `src/` change, on the composed byte-token train plus the window-aware hand-off lane
+(merged into this lane so `src/handoffwindow.h` can be reused, not re-derived).
+
+### The reproduction, and three corrections to the figures this band was opened on
+
+Population: the 39 symbols at rank positions 1, 2, 4, 8, 16, 32, 64, 128 of each corpus's `--top-k=300` map
+(tmux, koa, nushell, terraform, cpython) inherited unchanged from the headline-metric definition, as
+`--callers=X` and `--impact=X`: **78 cells**, of which **42 window** (32 impact, 10 callers). Each cell was
+asked four ways (default, default `--format=columnar`, and for a windowed cell `--limit=<total>` in both
+forms): 240 calls, all rc 0, and a second full run was byte-identical on 240 of 240.
+
+| reading | n | bytes | `<dc>` | symbol rows |
+| --- | --- | --- | --- | --- |
+| impact, complete, XML | 32 | 40,920,671 | 17,479,478 (42.7 %), 184,317 rows | 23,287,821 (`<s>`) |
+| impact, complete, columnar | 32 | 30,101,002 | **17,479,478 (58.1 %)**, the same bytes | 12,527,180 (`<cols>` + `<paths>`), −46.2 % |
+| callers, complete, columnar | 10 | 2,685,965 | 236,651 (8.8 %), 1,829 rows | 2,423,416 |
+| impact, first page, XML | 39 | 327,432 | 32,748 (10.0 %), 353 rows | 128,167 |
+
+The opening finding holds: the dialect removes 46.2 % of the symbol rows and 0 % of the `<dc>` rows. Three
+figures are corrected, each to a smaller or narrower one:
+
+1. **"58 % on 42 cells" is 58.1 % on the 32 impact cells.** Pooled with the 10 callers cells it is 54.0 %
+   (17,716,129 of 32,786,967 B). The verbs are reported apart below; callers' share is 8.8 %.
+2. **The file roll-up is not a prize in the complete answer.** The census's "45.6 % other" is, in a complete
+   answer, the `<dc>` rows almost alone: the importer `<f>` rows are 59,497 B of 40,920,671 (0.15 %, 1,212
+   rows), a complete answer carries no `<rf>` row at all (the roll-up rides only beside a cut window), and the
+   columnar form already withholds both and says so (`lens=`). On the FIRST page the roll-up is real but
+   small in absolute terms: `<rf>` 38,202 B (11.7 %) + `<f>` 11,111 B (3.4 %) over 39 cells, about 1,260 B a
+   cell, in the default XML form where a columnar encoding does not apply. **Registered as measured and not
+   changed**; no saving is claimed for it.
+3. **The "complete" call is not complete at the declined-call grain.** `--limit=<total>` sizes the `<dc>` cut
+   too, and `total=` counts symbol rows: on **12 of the 32** impact cells the complete answer still cuts
+   `<dc>` (`dc_shown=` 184,317 of `declined_calls=` 245,698 pooled) and names a second call. This band's
+   pointer has to name a limit that clears both.
+
+### What changes
+
+- **DC1 — `<dcols>`.** Under `--format=columnar` the `<dc>` rows of `--callers`, `--callees` and `--impact`
+  become one block of parallel arrays after `</cols>`: `<dcols n= via="declined" fields=…>` with one child
+  array per attribute a row can carry (`path` indexing the answer's one `<paths>` table, `in`, `line`,
+  `cands`; the callees form `name`, `line`, `cands`; `gate`, `bound`, `of_def`, `cand`, `cand_more` each
+  present only when some row carries it). An empty cell is an absent attribute. `via="declined"` moves from
+  every row to the block. The default XML, `--json` and the MCP twins keep their rows.
+- **DC2 — the direct roots point at the complete call.** A `--callers` / `--impact` root that windows
+  (`has_more="1"`) carries `all_next="--VERB=X --format=columnar --limit=N"`, spelled by
+  `handoffwindow.h`'s `completeCallInvocation`, with `N = max( total, declined call sites )` so the named
+  call cuts neither tier. No prediction is made: the attribute is written from the window the verb already
+  computed for that answer.
+- **The roll-up: no change** (correction 2).
+
+### The decision rule, fixed before the change
+
+Grains are never pooled: D1 and D4 are at the **item grain** (one declined call site), P2 at the **symbol
+grain** (one reached definition row), P1 and D2 at the **cell grain** (one answer).
+
+- **D1 — every declined-call fact survives, byte for byte.** For every answer, the rows rebuilt from
+  `<dcols>` (zip the arrays, look `path` up in `<paths>`, restore `&#44;`, drop an empty cell's attribute,
+  put `via="declined"` back) must equal the `<dc>` rows of the same call's XML form: same bytes, same count,
+  same order. Threshold: every row of every answer, on the 120 corpus documents (78 default + 42 complete)
+  and on the in-tree fixtures that carry `gate=`, `bound=`, `of_def=`, `cand=` and `cand_more=`. One
+  differing byte fails the band. The XML form's rows must in turn equal the pre-change binary's.
+- **D2 — bytes, whole document, legend included.** On the 32 complete impact cells the columnar answer must
+  fall by **at least 35 %** pooled and the `<dc>` payload by **at least 60 %**. No answer with 4 or more
+  declined rows may grow. An answer with 1 to 3 rows may grow by at most **160 B** (the block's fixed cost
+  and its legend clause); pooled over the 78 default-page columnar answers the bytes must not grow.
+- **D3 — the reader is told what the block is.** Every answer carrying `<dcols>` defines it in both legend
+  postures, keeps the sentence that a declined site is NOT an edge and that `cands=` proves no candidate,
+  and carries `via="declined"` on the block.
+- **D4 — counts.** `n=` equals the length of every array; uncut, `n=` equals `declined_calls=`; cut, it
+  equals `dc_shown=`.
+- **D5 — nothing else moves.** The XML form of all 120 documents is byte-identical to the pre-change binary
+  once ` all_next="…"` is removed from a windowed root.
+- **P1 — the pointer is exact: 0 false positives and 0 false negatives.** `all_next=` is present exactly on
+  the roots that carry `has_more="1"`, on the 78 cells in both forms (156 documents). A pointer on a complete
+  answer is the worse error and fails the band on one occurrence.
+- **P2 — the named call is complete.** Run verbatim, it answers with no `has_more=`, no `dc_shown=`, and
+  ( path, name, line ) rows equal in set, count and order to the XML rows paged to the end, on 42 of 42.
+- **P3 — a root that does not window is byte for byte what it was**, on 36 of 36.
+
+### What this band predicts for the headline, stated so it can be wrong
+
+The headline is a pair: *k of n complete in one call*, and median bytes.
+
+- **Bytes half:** DC1 moves it, for the complete call only. Predicted −35 % or better on the 32 impact cells.
+- **Completeness half, first call: predicted 0 cells.** `--impact` windows on a ROW cap (40), not a byte
+  band, and the default form is XML, which DC1 does not touch, so no answer moves from windowed to complete
+  in one call. The opening brief expected some; this registers that none will.
+- **Completeness half, second call:** DC2 moves the cells whose named complete call is complete at BOTH
+  grains from 20 of 32 to a predicted 32 of 32 impact cells.
+
+### Controls and mutation controls, each of which must go red
+
+`RIPWIRE_TEST_DCCOLS_MUTANT` names one deliberate defect in the real binary (the
+`RIPWIRE_TEST_HANDOFF_MUTANT` precedent), so each arm is shown able to fail:
+
+| mutant | defect | arm that must fail | direction |
+| --- | --- | --- | --- |
+| `dropgate` | the `gate` column is not written | D1 | **reader: a declined-call fact is lost** |
+| `dropvia` | the block carries no `via="declined"` | D3 | **reader: the hedge is lost** |
+| `lastrow` | the last site is left out of every array, `n=` unchanged | D4 and D1 | **reader: a site is lost silently** |
+| `verbatim` | the rows are printed as before | D2 | bytes |
+| `allnext-always` | the pointer rides a root that does not window | P1 (false positive) | **reader: a complete answer is called windowed** |
+| `RIPWIRE_NO_WINDOW_HANDOFF=1` | the pointer is off | P1 (false negative) | completeness |
+| `RIPWIRE_TEST_HANDOFF_MUTANT=limitminus1` | the named limit is one short | P2 | completeness |
+
+Non-vacuity: the gate fails if its fixtures yield no `gate=`, no `bound=`, no `of_def=`, no `cand=` row, no
+cut (`dc_shown=`) answer or no windowed answer, so an arm cannot pass on rows that were never there.
+
+**If `<dc>` cannot be rebuilt byte for byte from any columnar spelling, the band stops there and reports
+that**; a smaller answer that loses a declined-call fact is not a saving.
+
+### Amendment 10a, after the first build and before any corpus re-measurement — the block rides only past the default cut
+
+The gate (`test/dccolumnarcheck.sh`) was written first and was red on the unchanged binary on D1, D2, D3, D4,
+P1 and P2. The first build then passed D1 (866 rows on 38 fixture answers rebuilt byte for byte) and **failed
+D2 on small answers: +288 to +301 B on three 1-row answers against the registered +160 B, and +6 B on a
+4-row answer against the registered 0.** The arrays were not the cost; the clause that defines them was. A
+table of one to sixteen rows is not smaller as arrays once its definition is paid for.
+
+So DC1 changes, and the registered thresholds do not:
+
+- **The block replaces the rows exactly when MORE than 16 print** (`kDeclinedSiteCap`, the default cut, so
+  only an answer whose `--limit` lifted it). At 16 or fewer the columnar form prints the rows as it did. A
+  reader meets one shape or the other, each defined only where it rides. This is where the prize was
+  measured: the default page carries 353 `<dc>` rows over 39 cells, the complete answers 184,317.
+- **D2 is tightened, not relaxed:** no answer may grow at all (the +160 B allowance for 1 to 3 rows is
+  withdrawn), and the default-page columnar answers must be byte-identical in their declined-call rows.
+- **D1 runs twice**: as shipped, and with the block forced at any row count by a test lever
+  (`RIPWIRE_TEST_DCCOLS_MUTANT=always`), because the fixtures that carry `gate=`, `bound=` and `of_def=`
+  hold fewer than 17 sites. The three reader-direction mutants force the block for the same reason.
+
+Three smaller corrections to the registration, none of which moves a threshold:
+
+- **D2's default-page clause was written about DC1 and did not price DC2.** `all_next=` and its clause are
+  added bytes on every windowed first page, by design. They are reported as a cost on their own line; the
+  "must not grow" clause is evaluated on the documents with that attribute and its clause removed.
+- **P2 reads "does not window", not "no `has_more=`":** a call with an explicit `--limit` prints
+  `has_more="0"`. The arm fails on `has_more="1"`.
+- **`allnext-always` is spelled `RIPWIRE_TEST_HANDOFF_MUTANT=allnextalways`**: it lives with the hand-off's
+  other mutants in `src/handoffwindow.h`, beside the function it breaks.
+
+`--callees` gets the block (its `<dc>` rows go through the same emitter) and not the pointer: it is in no
+measured population, so no claim is made for it.
+
+### Amendment 10b, after the corpus run — the pointer names the row total, not the larger of two tiers
+
+DC2 registered `N = max( total, declined call sites )` and predicted the named call complete at both grains on
+32 of 32 impact cells. It was built, it met that prediction (245,698 of 245,698 declined sites listed), and
+it is **withdrawn on its own measurement**:
+
+| reading, 39 impact cells | median bytes to every row | pooled |
+| --- | --- | --- |
+| first page + `--limit=<total>`, XML (the chain the tool directed) | 132,960 | 41,248,103 |
+| first page + the named call, `N = max` | **145,532** | 20,977,926 |
+| first page + the named call, `N = total` | **77,797** | 18,857,705 |
+
+A limit that clears the declined-site cut lists 61,381 more hedge rows on 12 cells, and those cells sit below
+the median: one holds 99 rows and 4,005 declined sites. The pooled figure hid it; the median nearly doubled.
+A declined site is a call that MIGHT mean the symbol, and forcing every one of them into the answer to a
+question about what DOES reach it is the wrong default.
+
+- **`N` is the row total**, the hand-offs' own rule, so the direct roots and the `--for` hand-offs spell the
+  same call. The named call lists every row. Where it holds more declined sites than that, it says so
+  (`dc_shown=`) and `dc_next=` names the call that lists them all.
+- **`dc_next=` on a columnar answer keeps `--format=columnar`.** It dropped the form, so the declined-complete
+  follow-up of a columnar answer came back as XML. This is the one change to a root that does not window:
+  **P3 is evaluated with that 18-byte form marker removed.**
+- **P2 no longer requires the absence of `dc_shown=`**; it requires the cut to be said and `dc_next=`, run
+  verbatim, to list every declined site in the same form.
+- **The registered prediction "20 of 32 to 32 of 32 complete at both grains in the named call" is NOT met**,
+  by this choice: it stays 20 of 32, and the other 12 are one named columnar call away.
+
+## READOUT — BAND DC: −38.5 % on the complete columnar `--impact` answer, 0 cells moved to one call
+
+Measured on the lane binary against the train it merged (`7d759ad21`), both built from clean trees: 78 cells,
+240 calls a side, all rc 0; 42 named calls and 24 `dc_next=` calls beside them. A second full run of the lane
+binary was byte-identical on 240 of 240, and all 306 lane documents pass `xmllint --noout`.
+
+### The registered rule
+
+| arm | grain | result |
+| --- | --- | --- |
+| D1 rebuild | item | **186,584 of 186,584** `<dc>` rows equal the baseline's bytes on 120 of 120 columnar documents: 23 carry the block (rebuilt), 97 print the rows |
+| D2 bytes, 32 complete impact cells | cell | 30,101,002 B to 18,525,158 B, **−38.5 %** (registered: at least −35 %) |
+| D2 declined-call payload | cell | 17,479,478 B to 5,681,319 B, plus 220,125 B of new `<paths>` entries: **−66.2 %** (registered: at least −60 %) |
+| D2 no answer grows | cell | 0 of 120 columnar documents larger, pointer and form marker removed |
+| D3, D4 | cell | 23 of 23 blocks defined in the legend, `via="declined"` on each, `n=` equal to every array and to `dc_shown=` or `declined_calls=` |
+| D5 | cell | 120 of 120 XML documents byte-identical with `all_next=` and its clause removed |
+| P1 | cell | **0 false positives, 0 false negatives** on 156 documents (84 windowed) |
+| P2 | symbol | 42 of 42 named calls do not window; 269,671 rows equal the XML rows in set, count and order |
+| P2 declined tier | item | 12 named calls cut declined sites and say so; their `dc_next=` lists 151,947 of 151,947 in the columnar form, rebuilt equal to the XML rows |
+| P3 | cell | 71 of 72 non-windowing documents byte-identical; the 72nd differs by the 18-byte form marker in `dc_next=` |
+
+Per corpus, the complete columnar answer at `--limit=<total>`:
+
+| corpus | verb | cells | bytes before | bytes after | `<dc>` rows | `<dc>` bytes before | after | legend before | after |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| cpython | impact | 8 | 24,547,782 | 14,900,181 (−39.3 %) | 156,159 | 14,483,847 | 4,780,054 | 21,207 | 22,351 |
+| terraform | impact | 8 | 3,382,995 | 2,058,883 (−39.1 %) | 19,330 | 2,071,549 | 639,794 | 19,172 | 19,598 |
+| nushell | impact | 8 | 1,819,297 | 1,215,166 (−33.2 %) | 8,810 | 922,552 | 259,941 | 16,906 | 17,310 |
+| tmux | impact | 8 | 350,928 | 350,928 (0) | 18 | 1,530 | 1,530 | 12,924 | 12,924 |
+| terraform | callers | 3 | 506,551 | 368,472 (−27.3 %) | 1,813 | 234,819 | 86,361 | 6,717 | 6,936 |
+| cpython | callers | 2 | 1,943,596 | 1,943,596 (0) | 16 | 1,832 | 1,832 | 5,133 | 5,133 |
+| nushell | callers | 4 | 218,433 | 218,433 (0) | 0 | 0 | 0 | 5,922 | 5,922 |
+| tmux | callers | 1 | 17,385 | 17,385 (0) | 0 | 0 | 0 | 1,657 | 1,657 |
+
+koa has no windowed cell. Rows are unchanged everywhere: the same sites, in the same order. The legend costs
+1,974 B over the 20 impact answers that carry a block (about 99 B each) and 219 B over the 3 callers answers.
+
+### Which half of the headline each part moves
+
+- **Complete in one call: 0 cells move.** `--impact` 7 of 39 before and after, `--callers` 29 of 39 before and
+  after, as registered. The window is a row cap and the default form is unchanged.
+- **DC1 moves the pooled bytes and the heavy tail, not the median.** The median complete impact answer is a
+  tmux cell with 6 declined sites. Median bytes to every row over the 39 impact cells, first page plus the
+  columnar call: 77,644 before, 77,797 after. Pooled: 30,428,434 B to 18,857,705 B (−38.0 %).
+- **DC2 moves the median, for an agent that follows it.** Against the chain the tool directed before (first
+  page, then XML at `--limit=<total>`), the first page plus the named call is 132,960 B to 77,797 B at the
+  median (−41.5 %) and 41,248,103 B to 18,857,705 B pooled (−54.3 %). No measurement here shows an agent
+  following it; that is the hand-off lane's open question and this band inherits it.
+- **DC2's cost:** 5,115 B over the 32 windowed impact first pages (160 B each) and 1,567 B over the 10 callers
+  ones (157 B each): the attribute and its legend clause. The median impact first call goes 8,154 B to 8,327 B.
+
+### Not done, and not claimed
+
+- **The file roll-up is unchanged** (pre-registration, correction 2).
+- **The columnar complete answer still withholds the importer `<f>` rows** (1,212 rows, 59,497 B in XML on
+  these 32 cells) and says so in `lens=`. The pointer's clause says "every row of `total=`", which is true,
+  and an agent that needs the importing files must ask the XML form.
+- **`--callees` gets the block and not the pointer**, and no number is published for it.
+- **No sanitizer build was run for this band.**

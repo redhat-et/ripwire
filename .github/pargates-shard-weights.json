@@ -109,6 +109,7 @@
  "csharpcondcheck.sh": 2.2,
  "cudacheck.sh": 9.7,
  "cyclecutcheck.sh": 1.6,
+ "dccolumnarcheck.sh": 30.0,
  "deadcheck.sh": 0.9,
  "deadfiltercheck.sh": 6.3,
  "deadprecisioncheck.sh": 0.8,

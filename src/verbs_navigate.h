@@ -167,13 +167,20 @@ inline int refuseNotFoundWithAnswer( const rw::IngestResult& ing, const rw::Conf
     return 1;
 }
 
+// BAND DC (DC2, handoffwindow.h directRootAllNext): the complete call a windowing --callers root names; "" on a page that is the
+// whole answer. Callers only: the callees direction pages the same way but is in no measured population, so it makes no claim.
+inline std::string callersAllNext( bool wantCallers, std::string_view sym, bool windows, std::size_t rowTotal )
+{
+    return wantCallers ? rw::directRootAllNext( "--callers=", sym, windows, rowTotal ) : std::string();
+}
+
 inline int emitCallHierarchyAlt( const rw::Config& cfg, const rw::IngestResult& ing, const rw::Graph& g, const std::vector<rw::NodeId>& result,
                                 const std::vector<rw::NodeId>& matches, const rw::PageWindow& pw, std::string_view sym, bool wantCallers,
                                 std::size_t bodylessDefsCount, const std::string& chUnprovenAttr, const rw::CallHierarchyRows& chRows,
                                 const rw::OneHopAttribution& chAttr, const rw::DefTableListing& chListing, const HopTestedPartition& chTested,
                                 const std::string& chDeclinedAttr, const std::string& chValueRefsAttr, const std::string& chRootAttr, char* pab,
                                 bool chDiscloseCap, const std::string& chNextAttr, const rw::RowCallSites& chSites, const std::string& chRootPrefix,
-                                const char* tag, const std::string& chDcRows, bool chSingleRoot, const rw::VrRender& chVr, const std::string& chHintCall,
+                                const char* tag, bool chSingleRoot, const rw::VrRender& chVr, const std::string& chHintCall,
                                 bool chNextIsPage, const rw::DeclinedSiteCut& chDcCut, const std::vector<rw::DeclinedSiteView>& chDc,
                                 const std::vector<rw::NodeId>& chClosures )
 {
@@ -216,11 +223,12 @@ inline int emitCallHierarchyAlt( const rw::Config& cfg, const rw::IngestResult& 
             }
         }
         const std::string chDefRows = rw::defTableXml( ing, chAttr.groups, chListing, chRootPrefix );
-        const std::string chDcInRows = chDcRows + chIn.rows;
+        const rw::DeclinedColumnsOut chDcCols   = rw::declinedSitesColumnar( ing, page, chDc, wantCallers );   // BAND DC: the <dc> rows as <dcols> arrays
+        const std::string            chDcInRows = chDcCols.block + chIn.rows;
         emitColumnarSymbolRows( stdout, ing, tag, attr, page, chRootPrefix, &chTested.testReach, nullptr,
                                 rw::ColumnarRowExtras{ &pageVia, chSites.any ? &chSites.tokens : nullptr, &chSites.totals,
                                                        chAttr.groups.multi() ? &pageOfDef : nullptr, &chDefRows, &pageSplit, &chDcInRows,
-                                                       nullptr, &pageTest } );   // + the <dc> and <in> rows verbatim; TIER-FOLLOWUP: <test>
+                                                       nullptr, &pageTest, &chDcCols.paths } );   // + the <dcols> block and the <in> rows; TIER-FOLLOWUP: <test>
         return 0;
     }
     rw::emitTo( stdout, "{{\"of\":\"{}\"{},\"defs\":{},\"count\":{}", jsonStr( sym ).c_str(),
@@ -246,6 +254,7 @@ inline int emitCallHierarchyAlt( const rw::Config& cfg, const rw::IngestResult& 
                  rw::graphCountFloorAttrJson( g ).c_str(),
                  chNextIsPage ? rw::nextFieldJson( rw::callHierarchyPageNext( wantCallers, sym, cfg.pageLimit, pw.end, false, true ) )
                                   + rw::nextFieldJson( chHintCall, rw::callHierarchyHintAttr( wantCallers ) )
+                                  + rw::nextFieldJson( callersAllNext( wantCallers, sym, chNextIsPage, result.size() ), "all_next" )   // BAND DC
                               : std::string() );
     rw::emitTo( stdout, ",\"{}\":[", tag );
     std::vector<char> chVia( result.size(), 0 );
@@ -409,11 +418,13 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         // lane declined-sites (declinedsites.h): the <dc> rows — the declined call SITES declined_calls= counts, in callhierarchy.h's
         // served order, cut at the default cap (--limit raises it; dc_next= names that call) — computed once for every dialect below.
         const rw::DeclinedSiteCut chDcCut = rw::declinedSiteCut( chRows.declinedSites.size(), cfg.pageLimit, wantCallers ? "--callers=" : "--callees=", sym,
-                                                                 std::size_t( effectiveRowCap( cfg.pageLimit, rw::kCallHierarchyRowCap ) ) );
+                                                                 std::size_t( effectiveRowCap( cfg.pageLimit, rw::kCallHierarchyRowCap ) ), cfg.columnar );
         const std::vector<rw::DeclinedSiteView> chDc =
             rw::declinedSiteViews( ing, g, std::span<const std::uint32_t>( chRows.declinedSites ).first( chDcCut.shown ), wantCallers, matches, chAttr.groups,
                                    rw::VrRender{ chSingleRoot, chRootPrefix }, cfg.legend == "full" );
         const std::string chDcRows = rw::declinedSitesXml( chDc, wantCallers );
+        // BAND DC (DC2): the complete call a windowing callers root names (all_next=); "" on a page that is the whole answer
+        const std::string chAllNext = callersAllNext( wantCallers, sym, chNextIsPage, result.size() );
 
         // §H4 §3.4: the FIRST legend these two verbs have ever shipped (0 bytes before — which is why every
         // one of their root attributes sits in test/legendcoverage_baseline.txt), and the floor marker that
@@ -452,9 +463,10 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
             rw::emitTo( stdout, "{}{}{}{}{}{}{}-->{}{}", chOpen.c_str(),
                          rw::capLegendClause( rw::computePageDisclosure( pw.end - pw.begin, result.size(), pw.end,
                                                                         cfg.pageLimit, cfg.pageOffset, chDiscloseCap ).active ),
-                         rw::declinedCallsLegendForRows( chRows.declinedCalls > 0, g.gateDeclinedCalls > 0, g.stdMemberDeclinedCalls > 0, !chDc.empty(),
+                         std::string( rw::allNextLegend( chAllNext ) )   // BAND DC: exactly when the root carries all_next=
+                           + rw::declinedCallsLegendForRows( chRows.declinedCalls > 0, g.gateDeclinedCalls > 0, g.stdMemberDeclinedCalls > 0, !chDc.empty(),
                                                            !wantCallers && rw::inertDeclinedMadeBy( g, matches ) > 0 )   // exactly when the root carries declined_calls=; the inert sentence only where THESE definitions made an inert quoted site
-                           + rw::declinedSitesLegend( rw::declinedSitesLegendFlags( chDc, wantCallers, chDcCut ) ),   // and the <dc> rows, exactly when one rides
+                           + rw::declinedSitesLegend( rw::declinedSitesLegendFlags( chDc, wantCallers, chDcCut, cfg.columnar ) ),   // and the <dc> rows, exactly when one rides
                          std::string( rw::declinedIfaceLegend( chRows.declinedIface > 0 ) ) + rw::viaImplLegend( chHasImpl )   // likewise, exactly when declined_iface= / a via="impl" row is there
                            + rw::stdMemberCallsLegend( chRows.stdCalls.calls > 0 && !cfg.columnar ),   // and when the <stdm> line is (XML only)
                          ( std::string( rw::unprovenDefsLegend( chRows.unprovenDefs > 0 ) )      // H1: likewise, exactly when unproven_defs= is there
@@ -487,10 +499,11 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         // selector has declined calls: the shared derivation then names their wider bare-name site list.
         // Callees keep expand on the original selector; nextFlag retains quoting and the 120-byte contract.
         const std::string chHintCall = rw::nextFlag( wantCallers ? "--uses=" : "--expand=", chNextSelector );
-        const std::string chNextAttr = chNextIsPage
+        const std::string chNextAttr = ( chNextIsPage
             ? rw::nextAttrXml( rw::callHierarchyPageNext( wantCallers, sym, cfg.pageLimit, pw.end, cfg.columnar ) )
                 + rw::nextAttrXml( chHintCall, rw::callHierarchyHintAttr( wantCallers ) )
-            : rw::nextAttrXml( chHintCall );
+            : rw::nextAttrXml( chHintCall ) )
+            + rw::nextAttrXml( chAllNext, "all_next" );   // BAND DC: a windowing root names the complete call
         // The tier-3 declines count= does not include (callhierarchy.h), on every dialect; absent at zero.
         const std::string chDeclinedAttr = rw::declinedCallsAttrXml( chRows.declinedCalls ) + rw::declinedSiteCutAttrXml( chDcCut )   // + the <dc> cut, beside the count it cuts
                                          + rw::declinedIfaceAttrXml( chRows.declinedIface );
@@ -504,7 +517,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         {
             return emitCallHierarchyAlt( cfg, ing, g, result, matches, pw, sym, wantCallers, bodylessDefsCount, chUnprovenAttr, chRows,
                                           chAttr, chListing, chTested, chDeclinedAttr, chValueRefsAttr, chRootAttr, pab, chDiscloseCap, chNextAttr,
-                                          chSites, chRootPrefix, tag, chDcRows, chSingleRoot, chVr, chHintCall, chNextIsPage, chDcCut, chDc, chClosures );
+                                          chSites, chRootPrefix, tag, chSingleRoot, chVr, chHintCall, chNextIsPage, chDcCut, chDc, chClosures );
         }
         // lane ix2-slice (IX-2 P2): the callees form's closure blocks — root closures= and the <in> blocks, absent with none
         const rw::ClosureBlocksOut chIn         = rw::closureBlocks( ing, g, chClosures, chSingleRoot, chRootPrefix, /*json=*/false );
@@ -3227,6 +3240,13 @@ struct ImpactView
 };
 
 
+// BAND DC (DC2, handoffwindow.h directRootAllNext): the complete call a windowing --impact root names; "" when this page is the
+// whole answer. The window is the one this answer prints.
+inline std::string impactAllNext( const ImpactView& v )
+{
+    return rw::directRootAllNext( "--impact=", v.sym, v.page.end < v.show.size(), v.show.size() );
+}
+
 // attrib-multidef: the window's of_def JSON keys in row order (indexed like `show`), "" where none
 inline std::vector<std::string> impactOfDefKeys( const ImpactView& v )
 {
@@ -3318,7 +3338,8 @@ int emitImpactColumnar( const ImpactView& v )
                                  + ( v.imports.next.empty() ? " lens=\"shown_importers,importers_capped\""
                                                             : " lens=\"shown_importers,importers_capped,importers_next\"" )
                                  + rw::renderDisclosure( v.prD, rw::DiscloseAs::XmlAttrs )   // W2-F
-                                 + rw::nextAttrXml( rw::impactRootNext( v.ing, *v.ring, rw::VrRender{ v.singleRoot, v.rootPrefix }, rw::nextFlag( "--safe-delete=", v.sym ) ) );   // P3 (L7); hub-fold: the XML root's next=, same rule
+                                 + rw::nextAttrXml( rw::impactRootNext( v.ing, *v.ring, rw::VrRender{ v.singleRoot, v.rootPrefix }, rw::nextFlag( "--safe-delete=", v.sym ) ) )   // P3 (L7); hub-fold: the XML root's next=, same rule
+                                 + rw::nextAttrXml( impactAllNext( v ), "all_next" );   // BAND DC: a windowing root names the complete call
     const std::vector<char> via    = impactJsonVia( v );
     const std::vector<char> rowVia( via.begin() + v.page.begin, via.begin() + v.page.end );   // FE-B: in `rows` order
     std::vector<std::string> rowOfDef;   // attrib-multidef: of_def per row, only on a multi-group selector
@@ -3338,9 +3359,10 @@ int emitImpactColumnar( const ImpactView& v )
         rowType[ i ] = rows[ i ] < v.typeOnly.size() ? v.typeOnly[ rows[ i ] ] : char( 0 );   // empty typeOnly: an unarmed tier, every row 0
         rowTest[ i ] = rw::isTestSymbol( v.ing, rows[ i ] ) ? 1 : 0;
     }
-    const std::string dcRows = rw::declinedSitesXml( v.dc.views, /*callersForm=*/true );   // ix2-slice: the <dc> rows verbatim, as --callers
+    const rw::DeclinedColumnsOut dcCols = rw::declinedSitesColumnar( v.ing, rows, v.dc.views, /*callersForm=*/true );   // BAND DC: the <dc> rows as <dcols> arrays, as --callers
     emitColumnarSymbolRows( stdout, v.ing, "impact", attr.c_str(), rows, v.rootPrefix, v.testReach, &v.depth,
-                            rw::ColumnarRowExtras{ &rowVia, nullptr, nullptr, v.attrib.groups.multi() ? &rowOfDef : nullptr, &defRows, nullptr, &dcRows, &rowType, &rowTest } );
+                            rw::ColumnarRowExtras{ &rowVia, nullptr, nullptr, v.attrib.groups.multi() ? &rowOfDef : nullptr, &defRows, nullptr, &dcCols.block, &rowType, &rowTest,
+                                                   &dcCols.paths } );
     return 0;
 }
 
@@ -3390,7 +3412,7 @@ int emitImpactJson( const ImpactView& v )
                  pageDisclosure( ipab, sizeof( ipab ), shownRows, v.show.size(), v.page.end,
                                  v.pageLimit, v.pageOffset, true, kJsonPageSyntax ),
                  rw::graphCountFloorAttrJson( v.g ).c_str(),                                                // §H4 §3.4
-                 rw::renderDisclosure( v.prD, rw::DiscloseAs::JsonKeys ).c_str() );           // W2-F: ONE keyset
+                 rw::renderDisclosure( v.prD, rw::DiscloseAs::JsonKeys ) + rw::nextFieldJson( impactAllNext( v ), "all_next" ) );   // W2-F: ONE keyset; BAND DC: the XML root's all_next=
     const std::vector<char>        via  = impactJsonVia( v );   // 2 = direct markdown link, 1 = via="name"
     const std::vector<std::string> keys = impactOfDefKeys( v );                             // attrib-multidef: each row's of_def
     printJsonSymbolRows( v.ing, v.show, v.page.begin, v.page.end, v.rootPrefix, v.testReach, &v.depth, &via, &keys );
@@ -3428,7 +3450,8 @@ int emitImpactXml( const ImpactView& v )
                  pageDisclosure( ipab, sizeof( ipab ), shownRows, v.show.size(), v.page.end,
                                  v.pageLimit, v.pageOffset, true ),
                  rw::graphCountFloorAttrXml( v.g ).c_str(), rw::renderDisclosure( v.prD, rw::DiscloseAs::XmlAttrs ).c_str(),
-                 rw::nextAttrXml( rw::impactRootNext( v.ing, *v.ring, rw::VrRender{ v.singleRoot, v.rootPrefix }, rw::nextFlag( "--safe-delete=", v.sym ) ) ).c_str() );   // P3 (L7): "is it safe to change" → "can it go"; hub-fold: a ring cut / the widest hub first
+                 rw::nextAttrXml( rw::impactRootNext( v.ing, *v.ring, rw::VrRender{ v.singleRoot, v.rootPrefix }, rw::nextFlag( "--safe-delete=", v.sym ) ) )   // P3 (L7): "is it safe to change" → "can it go"; hub-fold: a ring cut / the widest hub first
+                   + rw::nextAttrXml( impactAllNext( v ), "all_next" ) );   // BAND DC: a windowing root names the complete call
     rw::emitRaw( stdout, rw::defTableXml( v.ing, v.attrib.groups, v.defListing, v.rootPrefix ).c_str() );   // attrib-multidef: the groups, by ix=
     rw::emitImpactFileRollupXml( stdout, v.ing, v.fileRollup, v.rootPrefix );   // idea #6: before the symbol window
     const rw::MemberOwners imOwners( v.ing );   // QUALNAME-1: n="Owner.name" on a member row (memberowner.h)
@@ -3492,8 +3515,9 @@ inline void emitImpactLegend( const rw::Config& cfg, const rw::IngestResult& ing
                    + rw::testColumnLegend( cfg.columnar && rw::anyTestRowIn( ing, show, imPage.begin, imPage.end ) ) ).c_str(),   // TIER-FOLLOWUP: the <test> column
                  rw::kTestedLensBlindSpotLegend,
                  ( rw::unprovenDefsVerbLegend( rw::UnprovenDefsVerb::Impact, imUnprovenDefs > 0 ) + rw::implsLegend( imRoot.contract ) ).c_str(),   // BODILESS-SEED: impls=
-                 rw::declinedCallsLegendForRows( imDeclinedCalls > 0, g.gateDeclinedCalls > 0, g.stdMemberDeclinedCalls > 0, !imDc.views.empty() )
-                   + rw::declinedSitesLegend( rw::declinedSitesLegendFlags( imDc.views, /*callersForm=*/true, imDc.cut ) ),   // ix2-slice: + the <dc> rows, one per counted call
+                 std::string( rw::allNextLegend( rw::directRootAllNext( "--impact=", cfg.impactSym, imPage.end < show.size(), show.size() ) ) )   // BAND DC: exactly when the root carries all_next=
+                   + rw::declinedCallsLegendForRows( imDeclinedCalls > 0, g.gateDeclinedCalls > 0, g.stdMemberDeclinedCalls > 0, !imDc.views.empty() )
+                   + rw::declinedSitesLegend( rw::declinedSitesLegendFlags( imDc.views, /*callersForm=*/true, imDc.cut, cfg.columnar ) ),   // ix2-slice: + the <dc> rows, one per counted call
                  rw::declinedIfaceLegend( imDeclinedIface > 0 ),
                  ( std::string( rw::modScopeLegend( imHasModScope ) )
                    + rw::impactRollupLegend( !imFiles.rows.empty() && !cfg.columnar, imports.umbrella, rw::impactRollupHedged( imFiles ),
@@ -3784,7 +3808,7 @@ std::optional<int> runImpact( const MainDispatch& d )
         // no cand= under any legend (as the MCP twin): --help promises the rows byte-identical across postures (legendcostcheck C)
         const rw::ImpactDeclinedRows imDc = rw::impactDeclinedRows( ing, g, imDeclineTargets, imDeclinedCalls, cfg.pageLimit, cfg.impactSym,
                                                                     std::size_t( effectiveRowCap( cfg.pageLimit, rw::kCallHierarchyRowCap ) ),
-                                                                    rw::VrRender{ imSingleRoot, imRootPrefix }, /*candidates=*/false );
+                                                                    rw::VrRender{ imSingleRoot, imRootPrefix }, /*candidates=*/false, cfg.columnar );
 
         emitImpactLegend( cfg, ing, g, reach, show, imPage, imWalk, imports, seeds, imDepth, imProven, imUnprovenDefs,
                           imDeclinedCalls, imDeclinedIface, imFiles, imAttr, imListing, imValueRefs, prD, imDc, imRing,

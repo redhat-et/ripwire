@@ -13,6 +13,7 @@
 #include "mcpindex.h"
 #include "memguard.h"        // #350: quality_baseline refuses an ingest the memory guard cut
 #include "nextverb.h"       // P3 (L7): next= on the MCP impact root (CLI parity)
+#include "handoffwindow.h"  // BAND DC: directRootAllNext — all_next= on a windowing callers / impact answer (CLI parity)
 #include "gitmine.h"       // B3: gitRecentCommitFileSets + applyCoChangeBoost — the `for` verb's co-change prior (same boost as CLI --for)
 #include "ownersview.h"    // §P6.4: countUniformOwnership/ownershipRowsToPrint — shared with main.cpp's --owners CLI path
 #include "gitstamp.h"      // §P8: gitstamp::atAttr/stampAt — the at="<sha>[+dirty]" anchor on the git-history verbs
@@ -931,7 +932,9 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
          + declinedIfaceKeyJson( chRows.declinedIface )   // the CLI root's declined_iface= (callers direction only)
          + implsKeyJson( chRows.contractSeeds, chRows.implBodies )   // BODILESS-SEED: the CLI root's impls= (callers direction only)
          + stdMemberCallsSpelling( chRows.stdCalls, /*json=*/true )       // the CLI callees answer's <stdm> line (callees direction only; absent when none)
-         + symbolQueryNextField( referencingOnly, pwPrimary, rowTotal, page, name, chNextSelector );   // P3 (L7): the CLI root's next= (mcpattrparitycheck)
+         + symbolQueryNextField( referencingOnly, pwPrimary, rowTotal, page, name, chNextSelector )   // P3 (L7): the CLI root's next= (mcpattrparitycheck)
+         + nextFieldJson( referencingOnly ? directRootAllNext( "--callers=", name, pwPrimary.end < rowTotal, rowTotal ) : std::string(),
+                          "all_next" );   // BAND DC: the CLI root's all_next=, by the same rule (callers direction only)
     if( !referencingOnly && chRows.bodylessDefs > 0 )
     {
         out += ",\"bodyless_defs\":" + std::to_string( chRows.bodylessDefs );
@@ -3530,6 +3533,8 @@ inline std::optional<std::string> impactText( const std::string& root, const std
     const DefTableListing imListing = defTableListing( imAttr.groups, imNamed );
     const bool          imHasVia    = std::any_of( show.begin() + ipw.begin, show.begin() + ipw.end, [ & ]( NodeId n ) { return impactRowNameOnly( proven, n ); } );
     const bool          imHasLink   = std::any_of( show.begin() + ipw.begin, show.begin() + ipw.end, [ & ]( NodeId n ) { return impactDirectLink( g, seeds, depth, n ); } );
+    // BAND DC (handoffwindow.h): the complete call a windowing root names, the CLI root's all_next= by the same rule
+    const std::string   imAllNext   = directRootAllNext( "--impact=", symbol, ipw.end < show.size(), show.size() );
     rw::emitTo( mem, "{}{}. {}{}{}{}{}{}{}{}{}{}{}{}-->", kImpactLegendOpen, kPageRaiseCapClause,
                   reach.empty() ? "" : kImpactDepthLegend,           // 0.6.5: exactly when d=/by_depth= ride, as on the CLI
                   ( std::string( kImpactImportTierLegend ) + importersNextLegend( !imports.next.empty() )
@@ -3540,7 +3545,8 @@ inline std::optional<std::string> impactText( const std::string& root, const std
                   kTestedRowLegend, impactTestedPartitionLegend( radius.tests, /*testsIgnored=*/false ),   // A6; IMPACT-TEST-TIER, as on the CLI (the server never drops tests)
                   kTestedLensBlindSpotLegend,                       // F-02: rides with the partition, byte-identical to the CLI twin
                   ( unprovenDefsVerbLegend( UnprovenDefsVerb::Impact, unprovenDefs > 0 ) + implsLegend( imContract.contracts > 0 ) ).c_str(),   // H1, BODILESS-SEED: exactly when the root carries them, as on the CLI
-                  declinedCallsLegendForRows( declinedCalls > 0, g.gateDeclinedCalls > 0, g.stdMemberDeclinedCalls > 0, !imDc.views.empty() )
+                  std::string( allNextLegend( imAllNext ) )   // BAND DC: exactly when the root carries all_next=, as on the CLI
+                    + declinedCallsLegendForRows( declinedCalls > 0, g.gateDeclinedCalls > 0, g.stdMemberDeclinedCalls > 0, !imDc.views.empty() )
                     + declinedSitesLegend( declinedSitesLegendFlags( imDc.views, /*callersForm=*/true, imDc.cut ) ),   // exactly when the root carries declined_calls=; ix2-slice: + the <dc> rows, as on the CLI
                   declinedIfaceLegend( declinedIface > 0 ),                                          // likewise declined_iface=, as on the CLI
                   ( std::string( valueRefsReachLegend( !imValueRefs.rows.empty() ) )                  // exactly when the root carries value_refs=, as on the CLI
@@ -3570,7 +3576,8 @@ inline std::optional<std::string> impactText( const std::string& root, const std
                   ( valueRefsCountAttrXml( imValueRefs.rows.size() ) + valueRefsDepthAttrXml( ing, imValueRefs.depthCut, VrRender{ imSingleRoot, imRootPrefix } ) ), imRootAttr.c_str(),
                   pageDisclosure( ipab, sizeof( ipab ), shownRows, show.size(), ipw.end, page.limit, page.offset, true ),
                   graphCountFloorAttrXml( g ).c_str(), renderDisclosure( prD, DiscloseAs::XmlAttrs ).c_str(),   // M15: gauge + marker
-                  nextAttrXml( impactRootNext( ing, imRing, VrRender{ imSingleRoot, imRootPrefix }, nextFlag( "--safe-delete=", symbol ) ) ).c_str()  );   // P3 (L7): the CLI twin's next=, same rule (mcpclidiffcheck)
+                  nextAttrXml( impactRootNext( ing, imRing, VrRender{ imSingleRoot, imRootPrefix }, nextFlag( "--safe-delete=", symbol ) ) )   // P3 (L7): the CLI twin's next=, same rule (mcpclidiffcheck)
+                    + nextAttrXml( imAllNext, "all_next" ) );   // BAND DC: the CLI twin's all_next=
     rw::emitRaw( mem, defTableXml( ing, imAttr.groups, imListing, imSingleRoot ? std::string_view( imRootPrefix ) : std::string_view() ).c_str() );   // attrib-multidef
     emitImpactFileRollupXml( mem, ing, imFiles, imSingleRoot ? std::string_view( imRootPrefix ) : std::string_view() );   // idea #6, as on the CLI
     const MemberOwners imOwners( ing );   // QUALNAME-1: n="Owner.name" on a member row, as on the CLI (memberowner.h)

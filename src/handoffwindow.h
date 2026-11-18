@@ -30,6 +30,7 @@
 #include "compactlegend.h"   // spanHasAttr — the ONE attribute-at-a-tag-boundary test
 #include "contractseed.h"    // widenContractSeeds — the impact verb's own seed set
 #include "graph.h"           // resolveAllByNameQualified — the impact verb's own resolver
+#include "infra/tablelookup.h"   // envChoice — the test hook's one-of-N switch
 #include "model.h"
 #include "nextverb.h"        // nextFlag / nextAttrXml
 #include "packtask.h"        // findSectionOpenTag — an element's open tag, comments skipped
@@ -62,14 +63,10 @@ enum class HandoffMutant : std::uint8_t
     FirstDef,      // the total walked from the first definition only
     LimitMinus1,   // the named call's --limit is one row short
     InDegree,      // the total replaced by the in-degree proxy (the depth-1 count)
+    AllNextAlways, // BAND DC: a direct root that does not window carries all_next= all the same (a false positive)
 };
-inline HandoffMutant handoffMutant()
-{
-    const char* const env = std::getenv( "RIPWIRE_TEST_HANDOFF_MUTANT" );
-    const std::string_view v = env != nullptr ? std::string_view( env ) : std::string_view();
-    return v == "threshold4" ? HandoffMutant::Threshold4 : v == "firstdef" ? HandoffMutant::FirstDef : v == "limitminus1" ? HandoffMutant::LimitMinus1
-           : v == "indegree" ? HandoffMutant::InDegree : HandoffMutant::None;
-}
+inline constexpr std::string_view kHandoffMutantNames[] = { "threshold4", "firstdef", "limitminus1", "indegree", "allnextalways" };   // the enum's order after None
+inline HandoffMutant handoffMutant() { return HandoffMutant( envChoice( "RIPWIRE_TEST_HANDOFF_MUTANT", kHandoffMutantNames ) ); }
 
 // What a hand-off knows about the verb it points at: `windows` = the verb's DEFAULT call lists a first page only; `total` = the rows
 // the verb holds (meaningful when windows). Default-constructed: not windowing, or not known — either way the hand-off is unchanged.
@@ -156,6 +153,33 @@ inline std::string completeCallInvocation( std::string_view flag, std::string_vi
 {
     const std::size_t limit = handoffMutant() == HandoffMutant::LimitMinus1 ? total - 1 : total;
     return nextFlag( flag, selector ) + " --format=columnar --limit=" + std::to_string( limit );
+}
+
+// ── BAND DC (docs/EVALS.md, pre-registration 2026-11-17 amendment 10): the DIRECT roots ─────────────────────────────────────────────
+// The three hand-offs above point a --for reader at the complete call. An agent that calls --callers or --impact itself got a
+// first page whose next= names the next page of 40 (callers) or another verb (impact), and no pointer to the one call that lists
+// every row. A root that windows now says it: all_next="--VERB=X --format=columnar --limit=N" (verbs_navigate.h, the MCP twins).
+// NO PREDICTION is made here: `windows` is the page window the verb has just computed for the answer it is printing, so the
+// attribute rides exactly the roots that carry has_more="1" (0 false positives and 0 false negatives by construction;
+// test/dccolumnarcheck.sh P1 counts both). N is the row total, the hand-offs' own rule. NOT the larger of the rows and the
+// declined call sites (registered, measured, withdrawn: amendment 10b): --limit sizes the declined-site cut too, and a limit
+// that cleared it listed 61,381 more hedge rows on 12 of the 32 windowed impact cells of the registered population — 99 rows
+// and 4,005 declined sites on one — taking the median bytes to a complete answer from 77,821 to 145,532. The named call
+// therefore lists every ROW; where it holds more declined sites it says so (dc_shown=) and dc_next= names the call that
+// lists them all, in the same form. "" when the page is the whole answer, or the lane is off.
+inline std::string directRootAllNext( std::string_view flag, std::string_view selector, bool windows, std::size_t rowTotal )
+{
+    const bool on = handoffWindowOn() && ( windows || handoffMutant() == HandoffMutant::AllNextAlways );
+    return on ? completeCallInvocation( flag, selector, rowTotal ) : std::string();
+}
+
+// Its clause, exactly beside the attribute (`allNext` is directRootAllNext's value). A trailing space: it joins a clause run.
+inline constexpr std::string_view kAllNextLegend =
+    "all_next=: the ONE call that lists every row of total=, the same rows in columnar form (a page at next_offset= lists only the "
+    "next shown=). ";
+inline std::string_view allNextLegend( std::string_view allNext ) noexcept
+{
+    return allNext.empty() ? std::string_view() : kAllNextLegend;
 }
 
 // ` windows="1" next_total="N" next="--VERB=X --format=columnar --limit=N"` for a windowing hand-off; the plain ` next="--VERB=X"`
