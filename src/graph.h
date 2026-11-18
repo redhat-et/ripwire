@@ -6924,6 +6924,7 @@ struct FalseEdgeRules
     GoPackagePaths                              goPackages;      // fileId → its package's import paths (receiverevidence.h)
     HashMap<std::string, char>                  jsVocabulary;    // jsModuleVocabulary, built only when a JS alias exists
     HashMap<std::string, char>                  rustOutsideUse;  // "<fileId>#name": a Rust `use` of a path outside the crate names it
+    const CallResultTypes*                      rustTypes = nullptr;   // the Rust module layout and its re-exports (receiverevidence.h), set by buildGraph
     std::vector<std::vector<NodeId>>            functionsByFile; // fileId → its functions/methods sorted by sigStartByte (enclosingFunction)
     mutable std::string                         key;
     bool                                        active = false;
@@ -7253,6 +7254,35 @@ struct FalseEdgeRules
         return jsModuleIsForeign( a.source, jsVocabulary );
     }
 
+    // RUST-PARAM-GLOB-REEXPORT: a bare Rust call. kindDecide first (a bare path call never names a method); then, where a `use` in
+    // force binds the name, the ONE free function that `use` reaches through the module tree and its re-exports is the only
+    // candidate left (CallResultTypes::rustUseBoundFn): `use nu_engine::redirect_env;` over lib.rs's `pub use eval::{redirect_env};`
+    // is eval.rs's, never a private `eval_ir::redirect_env` of the same crate, which the included-file closure cannot tell apart.
+    // A `use` that leads outside, nowhere or two ways decides nothing, and neither does a name a local of the caller hides.
+    Verdict rustBareDecide( const Reference& r, std::span<const NodeId> ids, rw::SmallVec<NodeId, 2>& kept ) const
+    {
+        const Verdict kinds = kindDecide( r, ids, kept );
+        if( rustTypes == nullptr || ( kinds != Verdict::Keep && kinds != Verdict::Narrow ) || isLocalOfCaller( r ) )
+        {
+            return kinds;
+        }
+        rw::SmallVec<NodeId, 2> freeFns;
+        for( const NodeId c : kinds == Verdict::Narrow ? std::span<const NodeId>( kept.begin(), kept.end() ) : ids )
+        {
+            if( ing.symbols[ c ].kind == SymKind::Function && ing.symbols[ c ].lang == r.lang )
+            {
+                freeFns.push_back( c );
+            }
+        }
+        const NodeId bound = rustTypes->rustUseBoundFn( r, std::span<const NodeId>( freeFns.begin(), freeFns.end() ) );
+        if( bound == kNoNode )
+        {
+            return kinds;
+        }
+        kept.clear();
+        kept.push_back( bound );
+        return Verdict::Narrow;
+    }
     // The one entry point. `ids` is the name's whole candidate list; `kept` (cleared here) receives the narrowed list on Narrow.
     Verdict decide( const Reference& r, std::span<const NodeId> ids, rw::SmallVec<NodeId, 2>& kept ) const
     {
@@ -7288,7 +7318,7 @@ struct FalseEdgeRules
             }
             case Lang::Rust:
             {
-                return r.memberCall ? Verdict::Keep : kindDecide( r, ids, kept );
+                return r.memberCall ? Verdict::Keep : rustBareDecide( r, ids, kept );
             }
             case Lang::C:
             {
@@ -11021,6 +11051,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         PROFILE_SCOPE_DESCRIBE( "buildGraph/2i: receiver-evidence tables" );
         recvEv.localNames = &fieldNarrow.localNameSet;
         recvEv.goPackages = &falseEdges.goPackages;
+        falseEdges.rustTypes = &recvEv.types;
         recvEv.qualifierVerdicts = &qualifierVerdicts;   // h1-annot: a Python / TS annotation's qualifier, by the file's imports
         recvEv.types.classIds        = &classIds;          // (L) a C++ call result's class: unique by name, scoped by its qualifier
         recvEv.types.fileIncludes    = &fileIncludes;      // (L) fix round 2: the usings a C++ callee's headers put in force

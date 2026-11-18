@@ -222,9 +222,18 @@
 #            foo.bar()`, `dyn` / `impl` / generic-bound / bare-trait receivers (dispatch: lane L6), Option / Rc (a parameter,
 #            a `let`, a field), a shadowing `let` / `for` / closure parameter, an outside `use std::fs::File` beside an
 #            in-tree File, a tuple pattern, `String::default()`, a u32 / generic-`T` / tuple-struct field, a missing field,
-#            a same-named owner whose field differs, a glob of a module that only globs (not followed: a floor). Early
+#            a same-named owner whose field differs. A glob of a module that only globs is followed since arm (RX). Early
 #            gates review adds (src/adds.rs, alias.rs, samename.rs, consts.rs): self forms, lifetimes, `use … as`, same
 #            names in two modules, Box<dyn> / Arc / RefCell / index / type-alias / element-type near misses, a const block.
+#   (RX) RUST-PARAM-GLOB-REEXPORT (root rsreexp/, unpacked from rsreexp.txt; a three-crate workspace shaped like nushell). A type
+#            reached through a module's glob re-export (`pub use engine_state::*;` in engine/mod.rs) is the class its written
+#            spelling names: by a cross-crate `use proto::engine::EngineState`, a same-crate `use crate::engine::{..}`, a prelude
+#            module's named re-export read through the caller's own glob, and from a sibling module whose private `use` leads
+#            back to the module that globs it (asked once per walk, it blocks nothing). A bare call whose name a `use` binds is
+#            the ONE free function the `use` reaches through the re-exports (`pub use eval::{redirect_env};`, a turbofish call,
+#            a glob re-export), never a private namesake of a sibling module and never a method. [N]: two types (or two
+#            functions) of one name behind two globs, a glob that does not reach the type, and (floor) an in-tree glob beside
+#            a glob of an outside crate, which may supply the name unseen. Each [N] arm first checks that the answer shows the call.
 #   (Q) qualified annotations and in-place rebinding (lane h1-annot; roots qualannot/<lang>/, unpacked from qualannot.txt).
 #            A Python / TS parameter, annotated local or TS field written `q.T` / `q.T<…>` names the in-tree class T only when
 #            the qualifier's ROOT `q` is an in-tree module or namespace as the file sees it: an import that resolves into the
@@ -286,8 +295,8 @@ echo "receiverevidencecheck: BIN=$BIN  CORPUS=$CORPUS"
 
 # arm (L)'s roots (callresult/<lang>) live in one text bundle unpacked into the temp dir: committed as source trees they
 # joined the repo's own indexed map (readmedriftcheck G4's --max-tokens=3000 head lost two rows)
-# (arm (RS)'s root rsrecv/ and arm (Q)'s roots qualannot/<lang> the same way, from rsrecv.txt and qualannot.txt)
-for bundle in "$CORPUS/callresult.txt:$TMP/fix/callresult" "$CORPUS/qualannot.txt:$TMP/fix/qualannot" "$CORPUS/rsrecv.txt:$TMP/fix"; do
+# (arm (RS)'s root rsrecv/, arm (RX)'s root rsreexp/ and arm (Q)'s roots qualannot/<lang> the same way, from rsrecv.txt, rsreexp.txt and qualannot.txt)
+for bundle in "$CORPUS/callresult.txt:$TMP/fix/callresult" "$CORPUS/qualannot.txt:$TMP/fix/qualannot" "$CORPUS/rsrecv.txt:$TMP/fix" "$CORPUS/rsreexp.txt:$TMP/fix"; do
 [ -f "${bundle%%:*}" ] || { echo "fixture missing: ${bundle%%:*}"; exit 2; }
 python3 -I - "${bundle%%:*}" "${bundle#*:}" <<'PY' || { echo "could not unpack ${bundle%%:*}"; exit 2; }
 import os, sys
@@ -305,7 +314,7 @@ sys.exit( 0 if n > 0 else 1 )
 PY
 done
 # rw ROOT ARGS… — run against one fixture root (every selector below is relative to that root's `.`)
-rw(){ local r="$1" d="$CORPUS/$1"; shift; case "$r" in callresult/*|qualannot/*|rsrecv) d="$TMP/fix/$r" ;; esac; ( cd "$d" && "$BIN" . --no-cache "$@" 2>/dev/null ); }
+rw(){ local r="$1" d="$CORPUS/$1"; shift; case "$r" in callresult/*|qualannot/*|rsrecv|rsreexp) d="$TMP/fix/$r" ;; esac; ( cd "$d" && "$BIN" . --no-cache "$@" 2>/dev/null ); }
 
 # ── the one reader every predicate shares ─────────────────────────────────────────────────────────────────────
 # parse.py MODE FILE [ARGS] — prints one line per row; NOROOT when the document has no answer about a symbol.
@@ -1650,18 +1659,20 @@ rs_none "src/other.rs::Shelf::near_same_named_owner"                            
 # --callers lists the [P] caller unhedged and never the [N] one; Knob::tune's callers are the typed Knob locals only
 proven      rsrecv callers "$RSM::Cfg::tune" "fn let_default $RSA"
 notproven   rsrecv callers "$RSM::Cfg::tune" "near_default_outside $RSA" "glob_default src/nest/inner.rs" "glob_of_glob_default src/glob2/leaf.rs"
-proven      rsrecv callers "$RSM::Knob::tune" "fn glob_default src/nest/inner.rs"
-notproven   rsrecv callers "$RSM::Knob::tune" "let_default $RSA" "near_default_outside $RSA" "glob_of_glob_default src/glob2/leaf.rs"
+proven      rsrecv callers "$RSM::Knob::tune" "fn glob_default src/nest/inner.rs" "fn glob_of_glob_default src/glob2/leaf.rs"
+notproven   rsrecv callers "$RSM::Knob::tune" "let_default $RSA" "near_default_outside $RSA"
 # a glob `use super::*` brings in what the parent module's own `use` names (Rust: a glob imports the module's imports
-# too); a glob of a module that only globs in turn is not followed (stated floor: names nothing, proves nothing) — and
-# (fix round 1, rv-l3 M1) neither does its `T::default()`: a callee's declared `-> Self` types the local only through a
-# qualifier that resolves at the site, so glob_of_glob_default is declined exactly as on base
+# too), and (RUST-PARAM-GLOB-REEXPORT) what the parent's own glob supplies: a glob of a module that only globs in turn is
+# followed to the one class every glob that can supply the name agrees on — and so is its `T::default()`, whose qualifier
+# now resolves at the site (both were a stated floor, declined, before that lane)
 exactproven rsrecv callees "src/nest/inner.rs:glob_param" "method spin $RSM"                                     # [P]
 proven      rsrecv callees "src/nest/inner.rs:glob_param" "method spin $RSM:5"
 proven      rsrecv callees "src/nest/inner.rs:glob_default" "method tune $RSM:20"                                # [P] Knob's
 notproven   rsrecv callees "src/nest/inner.rs:glob_default" "tune $RSM:16"
-rs_none "src/glob2/leaf.rs:glob_of_glob"                                                                        # [N] floor
-notproven   rsrecv callees "src/glob2/leaf.rs:glob_of_glob_default" "tune $RSM:20" "tune $RSM:16"                # [N] floor (= base)
+exactproven rsrecv callees "src/glob2/leaf.rs:glob_of_glob" "method spin $RSM"                                  # [P] RUST-PARAM-GLOB-REEXPORT (was a floor)
+proven      rsrecv callees "src/glob2/leaf.rs:glob_of_glob" "method spin $RSM:5"
+proven      rsrecv callees "src/glob2/leaf.rs:glob_of_glob_default" "method tune $RSM:20"                        # [P] Knob's (was a floor)
+notproven   rsrecv callees "src/glob2/leaf.rs:glob_of_glob_default" "tune $RSM:16"
 # early gates review (rv-l3-gates A1-A12; src/adds.rs, alias.rs, samename.rs, kinds.rs's trait). [P]: the field below
 # `&mut self`, by-value `self`, `&'a self`, a field written `&'a Book`, a `&Self` parameter's field, a `Self::new()` local's
 # field, a `&'a Book` parameter, a `use … as` alias (by the path it names: other::Book, never the in-tree model::Other its
@@ -1829,6 +1840,49 @@ done
 proven      rsrecv callees "src/gcto.rs:gcto_bare" "method as_os $NS:10"                                      # [P]
 # guard: `Book::new()` is a path call the canonical tier answers (rustqualcheck's shape), unchanged
 proven      rsrecv callees "$RSA:let_new" "method new $RSM:4"
+
+echo "=== (RX) RUST-PARAM-GLOB-REEXPORT: a type or a free function reached through a re-export proves the call ==="
+# rsreexp/: proto engine/engine_state.rs EngineState::get_decl :3, engine/overlay.rs OverlayFrame::get_decl :3 (engine/mod.rs
+# `pub use engine_state::*; pub use overlay::*; pub use closure::*;`); eng eval.rs CallEval::redirect_env :3 (a METHOD), fn
+# redirect_env :5, fn eval_block :6 (lib.rs `pub use eval::{..}`), helpers.rs fn glob_fn :1 (lib.rs `pub use helpers::*;`),
+# eval_ir.rs's private namesakes fn redirect_env :2, eval_block :3, glob_fn :4. [P] arms are RED on main 5139f7840 (each call
+# declined); # guard arms were green there.
+RXA="crates/app/src/main.rs"; RXS="crates/proto/src/engine/engine_state.rs"; RXO="crates/proto/src/engine/overlay.rs"; RXE="crates/eng/src"
+for sel in "$RXA:cross_crate" "crates/proto/src/dbg.rs:same_crate" "crates/proto/src/engine/closure.rs::Closure::sibling" "crates/app/src/globuse.rs:via_prelude"; do
+    exactproven rsreexp callees "$sel" "method get_decl $RXS"                                                    # [P] the type behind `pub use engine_state::*;`
+    proven      rsreexp callees "$sel" "method get_decl $RXS:3"
+    notproven   rsreexp callees "$sel" "get_decl $RXO:3"                                                         # never the same module's other get_decl
+done
+exactproven rsreexp callees "crates/proto/src/dbg.rs:same_crate_overlay" "method get_decl $RXO"                  # [P] each glob supplies its own type
+proven      rsreexp callees "crates/proto/src/dbg.rs:same_crate_overlay" "method get_decl $RXO:3"
+proven      rsreexp callees "$RXA:bare_list" "fn redirect_env $RXE/eval.rs:5"                                    # [P] `use eng::redirect_env` over `pub use eval::{redirect_env}`
+notproven   rsreexp callees "$RXA:bare_list" "redirect_env $RXE/eval_ir.rs:2" "redirect_env $RXE/eval.rs:3"      # never the private namesake, never the method
+proven      rsreexp callees "$RXA:bare_turbofish" "fn eval_block $RXE/eval.rs:6"                                 # [P] `eval_block::<u8>(a)`
+notproven   rsreexp callees "$RXA:bare_turbofish" "eval_block $RXE/eval_ir.rs:3"
+proven      rsreexp callees "$RXA:bare_glob" "fn glob_fn $RXE/helpers.rs:1"                                      # [P] `use eng::glob_fn` over `pub use helpers::*;`
+notproven   rsreexp callees "$RXA:bare_glob" "glob_fn $RXE/eval_ir.rs:4"
+proven      rsreexp callees "$RXE/eval_ir.rs:ir" "fn redirect_env $RXE/eval_ir.rs:2" "fn eval_block $RXE/eval_ir.rs:3" "fn glob_fn $RXE/eval_ir.rs:4"   # guard: a module's own fn, no `use`
+notproven   rsreexp callees "$RXE/eval_ir.rs:ir" "redirect_env $RXE/eval.rs:5" "glob_fn $RXE/helpers.rs:1"       # guard
+proven      rsreexp callees "$RXE/eval.rs::CallEval::redirect_env" "fn redirect_env $RXE/eval.rs:5"              # guard: the method's bare call is the free fn
+# the callers side reads the same edges
+proven      rsreexp callers "$RXS::EngineState::get_decl" "fn cross_crate $RXA" "fn same_crate crates/proto/src/dbg.rs" "fn via_prelude crates/app/src/globuse.rs"
+proven      rsreexp callers "$RXE/eval.rs:redirect_env" "fn bare_list $RXA"
+notproven   rsreexp callers "$RXE/eval_ir.rs:redirect_env" "bare_list $RXA"
+# [N] each arm's premise first (rx_seen): the answer shows the call, as a declined site or a row, so "never proves" is no empty pass
+rx_seen(){   # rx_seen SELECTOR NAME
+    local f; f="$( answer rsreexp callees "$1" )"
+    if grep -q "<dc n=\"$2\"" "$f" || grep -Eq "<s [^>]*n=\"([^\"]*::)?$2\"" "$f"; then ok "(rsreexp) --callees=$1 shows the call of $2 (premise of the [N] arm)"
+    else no "(rsreexp) --callees=$1 shows no call of $2: the [N] arm below would pass on nothing"; fi
+}
+RXN="crates/app/src/near.rs"; RXALL=( "get_decl $RXS:3" "get_decl $RXO:3" "get_decl crates/proto/src/dup/a.rs:2" "get_decl crates/proto/src/dup/b.rs:2"
+                                       "get_decl crates/proto/src/noreach/elsewhere.rs:2" "get_decl crates/proto/src/extglob/d.rs:2" )
+for f in near_twin near_lone near_mixed; do   # two Twins behind two globs; a glob that does not reach Lone; (floor) an outside crate's glob beside Mixed's
+    rx_seen "$RXN:$f" get_decl
+    notproven rsreexp callees "$RXN:$f" "${RXALL[@]}"                                                           # [N]
+done
+rx_seen "$RXN:near_twin_fn" twin_fn
+notproven   rsreexp callees "$RXN:near_twin_fn" "twin_fn $RXE/t1.rs:1" "twin_fn $RXE/t2.rs:1"                    # [N] two fns behind two globs
+echo
 
 echo "=== (Q) qualified annotations and in-place rebinding (lane h1-annot) ==="
 QA=qualannot
