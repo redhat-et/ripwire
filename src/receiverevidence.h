@@ -711,8 +711,8 @@ struct CallResultTypes
             {
                 return kNoNode;
             }
-            supplies = false;   // rust-receivers: rustItemAt sets it when the module has the item, re-exports it or may glob it in
-            return rustItemAt( crate, module, name, 0, supplies );
+            RustItemWalk walk;
+            return rustModuleItem( crate, module, name, walk, supplies );   // rust-receivers: `supplies` when the module has the item, re-exports it or globs it in
         }
         nameKey.assign( b.importedName );
         const auto files = packageFiles.find( nameKey );
@@ -1320,52 +1320,141 @@ struct CallResultTypes
         return rustModuleExists( crate, module );
     }
     // the ONE Rust class `cls` module `modPath` (seen from byte `at` of `f`) defines — or re-exports: a `use` of the name at
-    // the module's own level (`pub use mdbook::MDBook;` in lib.rs) is followed to the module it names (depth-bounded)
-    NodeId rustClassAt( std::uint32_t f, std::uint32_t at, std::string_view modPath, std::string_view cls, int depth = 0 ) const
+    // the module's own level (`pub use mdbook::MDBook;` in lib.rs) is followed to the module it names (depth-bounded), and
+    // (RUST-PARAM-GLOB-REEXPORT) so is a glob there (`pub use engine_state::*;` in engine/mod.rs)
+    NodeId rustClassAt( std::uint32_t f, std::uint32_t at, std::string_view modPath, std::string_view cls ) const
+    {
+        RustItemWalk walk;
+        return rustItemOfPath( { f, at }, modPath, cls, walk ).id;
+    }
+    // One walk from a written path to the item it names: which kind of item is asked for, how deep the walk is, and the
+    // questions it already asked.
+    struct RustItemWalk
+    {
+        int                      depth = 0;   // re-export hops taken so far (capped at 4: a cut walk names nothing)
+        std::span<const NodeId>  fns;         // empty: a class-like item; else the Rust free functions of the name asked for (graph.h's candidates)
+        std::vector<std::string> seen;        // the "<crate>#<module>#<item>" questions already asked: asked again (a cycle, a diamond), one brings nothing new
+        std::uint32_t            reasked = 0; // how often that happened: a step that found nothing below a re-asked question says nothing either way
+    };
+    // What a module answers for an item name: the ONE in-tree item (kNoNode: outside the tree, ambiguous, an alias), and
+    // whether the module has the name at all (`found` false: it declares, re-exports and globs in no such item).
+    struct RustItem
+    {
+        NodeId id    = kNoNode;
+        bool   found = false;
+    };
+    mutable HashMap<std::string, RustItem> rustClassMemo;   // rustModuleItem: "<crate>#<module>#<name>" → what the module answers for a class name
+    // where a path is written: a byte of a file
+    struct RustSite
+    {
+        std::uint32_t file = 0;
+        std::uint32_t at   = 0;
+    };
+    // a module's own level: the file level of its files, or an inline mod's body
+    struct RustModuleRef
+    {
+        std::uint32_t      crate     = kNoCrate;
+        const std::string& module;
+        NodeId             inlineMod = kNoNode;
+        Level              level;
+    };
+    // is byte `pos` of `file` at module `m`'s own level (never inside a mod or fn it holds)?
+    bool rustAtModuleLevel( const RustModuleRef& m, std::uint32_t file, std::uint32_t pos ) const
+    {
+        return m.inlineMod == kNoNode ? file < rust.crateOf.size() && rust.crateOf[ file ] == m.crate && rust.moduleOf[ file ] == m.module && levelAt( file, pos ).wholeFile()
+                                      : file == ing.symbols[ m.inlineMod ].fileId && levelAt( file, pos ) == m.level;
+    }
+    // is symbol `c` an item of module `m`'s own level, never of a mod or fn in it?
+    bool rustOwnsItem( const RustModuleRef& m, NodeId c ) const
+    {
+        const std::uint32_t cf = ing.symbols[ c ].fileId;
+        return m.inlineMod == kNoNode ? cf < rust.crateOf.size() && rust.crateOf[ cf ] == m.crate && rust.moduleOf[ cf ] == m.module && enclosingSymbol( c ) == kNoNode
+                                      : enclosingSymbol( c ) == m.inlineMod;
+    }
+    // the item `item` of the module `modPath` names at `site`, under a walk already begun (a re-export hop, a function lookup)
+    RustItem rustItemOfPath( RustSite site, std::string_view modPath, std::string_view item, RustItemWalk& walk ) const
     {
         std::uint32_t crate = kNoCrate;
         std::string   module;
-        bool          found = false;
-        if( depth > 4 || !rustModuleOf( f, at, modPath, crate, module, 0 ) )
+        RustItem      hit;
+        if( walk.depth <= 4 && rustModuleOf( site.file, site.at, modPath, crate, module, 0 ) )
+        {
+            hit.id = rustModuleItem( crate, module, item, walk, hit.found );
+        }
+        return hit;
+    }
+    // RUST-PARAM-GLOB-REEXPORT: the ONE in-tree free function the `use` bindings of a bare call's name, in force at the call, reach
+    // through the module tree and its re-exports (`use nu_engine::redirect_env;` over lib.rs's `pub use eval::{redirect_env};`), out
+    // of `fns` (the Rust free functions of that name). kNoNode when no `use` binds the name there, one leads outside or nowhere,
+    // two disagree, or a function nested in a fn body of the caller's file may shadow the binding: the call then resolves as before.
+    NodeId rustUseBoundFn( const Reference& r, std::span<const NodeId> fns ) const
+    {
+        const bool nestedNamesake = std::ranges::any_of( fns, [ & ]( NodeId c )
+        {
+            const NodeId outer = ing.symbols[ c ].fileId == r.fileId ? enclosingSymbol( c ) : kNoNode;
+            return outer != kNoNode && ing.symbols[ outer ].kind != SymKind::Other;   // an item of a fn body: in scope there, over any `use`
+        } );
+        Ballot bound;
+        if( fns.empty() || nestedNamesake )
         {
             return kNoNode;
         }
-        return rustItemAt( crate, module, cls, depth, found );
+        forEachRustUseAt( r.fileId, r.startByte, r.calleeName, [ & ]( const Binding& b )
+        {
+            const auto [ modPath, item ] = splitLast( b.importedName, "::" );
+            RustItemWalk walk{ 0, fns, {}, 0 };
+            bound.vote( modPath.empty() ? kNoNode : rustItemOfPath( { r.fileId, b.startByte }, modPath, item, walk ).id );
+        } );
+        return bound.verdict();
     }
-    // the item `cls` of module (crate, module): a class declared at the module's own level (a file module's file level, an
-    // inline mod's body), else a re-export there; an alias there names nothing. `found` false when the module has none.
-    NodeId rustItemAt( std::uint32_t crate, const std::string& module, std::string_view cls, int depth, bool& found ) const
+    // rustItemAt, asked once: a class asked from outside any walk (a `use` row, a glob row, a written path) is a function of
+    // the layout alone, so each (module, name) is walked once (rustClassMemo: engine/mod.rs's twenty globs, asked per typed
+    // parameter); and inside one walk a question asked again brings nothing new — a module's private `use` of the name often
+    // leads back to the module that globs it (closure.rs `use crate::engine::EngineState;` under engine/mod.rs `pub use closure::*;`).
+    NodeId rustModuleItem( std::uint32_t crate, const std::string& module, std::string_view cls, RustItemWalk& walk, bool& found ) const
     {
-        const auto   inl       = rust.inlineMods.find( rustModuleKey( crate, module ) );
-        const NodeId inlineMod = inl == rust.inlineMods.end() ? kNoNode : inl->second;
-        const Level  level     = rustModuleLevel( inlineMod );
-        const auto   atLevel   = [ & ]( std::uint32_t file, std::uint32_t pos )
+        const bool  outermost = walk.seen.empty() && walk.fns.empty();
+        std::string asked     = rustModuleKey( crate, module );
+        asked.append( 1, '#' ).append( cls );
+        if( const auto memo = rustClassMemo.find( asked ); outermost && memo != rustClassMemo.end() )
         {
-            return inlineMod == kNoNode ? file < rust.crateOf.size() && rust.crateOf[ file ] == crate && rust.moduleOf[ file ] == module && levelAt( file, pos ).wholeFile()
-                                        : file == ing.symbols[ inlineMod ].fileId && levelAt( file, pos ) == level;
-        };
-        NodeId            one = kNoNode;
-        const std::size_t n   = classesNamed( cls, CallResultFamily::Rust, [ & ]( NodeId c )
-        {
-            const std::uint32_t cf = ing.symbols[ c ].fileId;   // an item of the module's own level, never of a mod or fn in it
-            return inlineMod == kNoNode ? cf < rust.crateOf.size() && rust.crateOf[ cf ] == crate && rust.moduleOf[ cf ] == module && enclosingSymbol( c ) == kNoNode
-                                        : enclosingSymbol( c ) == inlineMod;
-        }, one );
-        bool aliased = false;
-        nameKey.assign( cls );
-        if( const auto aliases = aliasesByName.find( nameKey ); aliases != aliasesByName.end() )
-        {
-            aliased = std::ranges::any_of( aliases->second, [ & ]( const Binding* b ) { return atLevel( b->fileId, b->startByte ); } );   // a Rust file's (atLevel)
+            found = memo->second.found;
+            return memo->second.id;
         }
-        if( n > 0 || aliased )
+        found = false;
+        if( std::ranges::find( walk.seen, asked ) != walk.seen.end() )
+        {
+            ++walk.reasked;
+            return kNoNode;
+        }
+        walk.seen.push_back( asked );
+        const NodeId item = rustItemAt( crate, module, cls, walk, found );
+        if( outermost )
+        {
+            rustClassMemo.try_emplace( std::move( asked ), RustItem{ item, found } );
+        }
+        return item;
+    }
+    // the item `cls` of module (crate, module): a class (or, on a function walk, a free function) declared at the module's own
+    // level (a file module's file level, an inline mod's body), else a re-export there, else (RUST-PARAM-GLOB-REEXPORT) what the
+    // globs there supply; an alias there names nothing. `found` false when the module has none.
+    NodeId rustItemAt( std::uint32_t crate, const std::string& module, std::string_view cls, RustItemWalk& walk, bool& found ) const
+    {
+        const auto          inl       = rust.inlineMods.find( rustModuleKey( crate, module ) );
+        const NodeId        inlineMod = inl == rust.inlineMods.end() ? kNoNode : inl->second;
+        const RustModuleRef m{ crate, module, inlineMod, rustModuleLevel( inlineMod ) };
+        const auto          atLevel   = [ & ]( std::uint32_t file, std::uint32_t pos ) { return rustAtModuleLevel( m, file, pos ); };
+        const int           depth     = walk.depth;
+        if( const RustItem own = rustDeclaredItem( m, cls, walk ); own.found )
         {
             found = true;
-            return n == 1 && !aliased ? one : kNoNode;
+            return own.id;
         }
         const auto files = rust.filesOf.find( rustModuleKey( crate, module ) );
         const std::vector<std::uint32_t> none;
         const std::vector<std::uint32_t>& of = inlineMod != kNoNode ? none : files == rust.filesOf.end() ? none : files->second;
         ReexportPick pick;
+        pick.walk = &walk;
         for( std::uint32_t mf : of )   // by reference: the layout's own list, never a copy
         {
             rustFollowReexports( mf, atLevel, cls, depth, pick );
@@ -1374,8 +1463,33 @@ struct CallResultTypes
         {
             rustFollowReexports( ing.symbols[ inlineMod ].fileId, atLevel, cls, depth, pick );
         }
+        if( !pick.bound )   // a named `use` of the name shadows every glob of its level
+        {
+            rustGlobsSupply( pick, cls );
+        }
         found = found || pick.bound || pick.globbed;
         return pick.clash ? kNoNode : pick.one;
+    }
+    // rustItemAt's first step: the item module `m` declares at its own level under the name. On a function walk, the module's
+    // own free functions of the name; a class of the name declared there (a tuple struct's constructor is a value too) decides
+    // nothing when no function does. On a class walk, an alias of the name there names nothing.
+    RustItem rustDeclaredItem( const RustModuleRef& m, std::string_view cls, const RustItemWalk& walk ) const
+    {
+        const auto        owned   = [ & ]( NodeId c ) { return rustOwnsItem( m, c ); };
+        NodeId            one     = kNoNode;
+        const std::size_t classes = classesNamed( cls, CallResultFamily::Rust, owned, one );
+        if( !walk.fns.empty() )
+        {
+            const std::size_t fns = static_cast<std::size_t>( std::ranges::count_if( walk.fns, owned ) );
+            return { fns == 1 ? *std::ranges::find_if( walk.fns, owned ) : kNoNode, fns + classes > 0 };
+        }
+        bool aliased = false;
+        nameKey.assign( cls );
+        if( const auto aliases = aliasesByName.find( nameKey ); aliases != aliasesByName.end() )
+        {
+            aliased = std::ranges::any_of( aliases->second, [ & ]( const Binding* b ) { return rustAtModuleLevel( m, b->fileId, b->startByte ); } );   // a Rust file's
+        }
+        return { classes == 1 && !aliased ? one : kNoNode, classes > 0 || aliased };
     }
     // What the module-level `use … cls` bindings rustFollowReexports read name, across the module's files and its inline mod.
     struct ReexportPick
@@ -1384,6 +1498,10 @@ struct CallResultTypes
         bool   bound   = false;     // some binding spells the name (it may resolve outside the tree)
         bool   clash   = false;     // two bindings resolve to DIFFERENT in-tree classes: ambiguous, no class
         bool   globbed = false;     // rust-receivers: a glob at the module's level may bring the name in unseen (not followed)
+        // RUST-PARAM-GLOB-REEXPORT: the walk these bindings are read under, and the globs at the module's level, which
+        // rustGlobsSupply follows when no binding spells the name (`globbed` is then a glob it could not follow)
+        RustItemWalk*               walk = nullptr;
+        std::vector<const Binding*> globs;
         // one binding that spells the name, resolving to `c` (kNoNode: outside the tree, which carries no class)
         void take( NodeId c )
         {
@@ -1396,6 +1514,8 @@ struct CallResultTypes
     // the class its path reaches, and a glob there sets `globbed`. #610 (@soarkit): a binding that resolves to no in-tree class
     // (`#[cfg(feature = "x")] pub use external_crate::Config;`) carries no class, and two cfg-exclusive re-exports of ONE class
     // agree; only two bindings resolving to different in-tree classes are ambiguous.
+    // RUST-PARAM-GLOB-REEXPORT: a glob there is kept in `pick.globs` (rustGlobsSupply follows it, and sets `globbed` only for one
+    // it cannot follow); a binding whose path only leads back into this walk is a binding of what is being asked and says nothing.
     template <class AtLevel>
     void rustFollowReexports( std::uint32_t mf, const AtLevel& atLevel, std::string_view cls, int depth, ReexportPick& pick ) const
     {
@@ -1411,12 +1531,50 @@ struct CallResultTypes
             }
             if( b->var == "*" )
             {
-                pick.globbed = true;
+                pick.globs.push_back( b );
                 continue;
             }
             const auto [ modPath, item ] = splitLast( b->importedName, "::" );
-            pick.take( modPath.empty() ? kNoNode : rustClassAt( mf, b->startByte, modPath, item, depth + 1 ) );
+            RustItemWalk&       walk          = *pick.walk;
+            const std::uint32_t reaskedBefore = walk.reasked;
+            walk.depth = depth + 1;
+            const RustItem hit = modPath.empty() ? RustItem{} : rustItemOfPath( { mf, b->startByte }, modPath, item, walk );
+            walk.depth = depth;
+            if( hit.found || walk.reasked == reaskedBefore )
+            {
+                pick.take( hit.id );
+            }
         }
+    }
+    // RUST-PARAM-GLOB-REEXPORT: what the globs at a module's level supply for the item `cls` (`pub use engine_state::*;` in
+    // engine/mod.rs), read into the pick when no binding spells the name. A glob of an in-tree module supplies what that module
+    // declares or re-exports under the name (rustModuleItem, one hop deeper), and nothing when the module has no such item. A glob
+    // the layout cannot place (an outside crate, an enum's variants, a cut walk) MAY supply the name unseen: `globbed`. So ONE
+    // item is named only when every glob that can supply the name agrees on it; two same-named types behind two globs, an
+    // ambiguous module below, or an in-tree glob beside one that cannot be followed, name nothing (`clash`).
+    void rustGlobsSupply( ReexportPick& pick, std::string_view cls ) const
+    {
+        RustItemWalk& walk = *pick.walk;
+        std::uint32_t gc   = kNoCrate;
+        std::string   gm;
+        for( const Binding* g : pick.globs )
+        {
+            if( walk.depth >= 4 || !rustModuleOf( g->fileId, g->startByte, g->importedName, gc, gm, 0 ) )
+            {
+                pick.globbed = true;
+                continue;
+            }
+            bool supplies = false;
+            ++walk.depth;
+            const NodeId c = rustModuleItem( gc, gm, cls, walk, supplies );
+            --walk.depth;
+            if( supplies )
+            {
+                pick.take( c );
+                pick.clash = pick.clash || c == kNoNode;
+            }
+        }
+        pick.clash = pick.clash || ( pick.globbed && pick.bound );
     }
     // (L) a qualified Rust call whose qualifier is a module path reaching `target`'s own module (`model::load()`,
     // `crate::nest::holder()`, a `use`d `nest::holder()`): the evidence the canonical tier, keyed by type scopes, lacks
