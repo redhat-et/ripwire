@@ -598,6 +598,11 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "type_capped", "type_capped=1: the type-mention walk stopped at its budget; type rows are a floor", true, "files", MapHeaderRead::No, {}, "impact" },
     { "via",         "rf via=type: every reached symbol in that file is reached only through a type mention (syms=0: the file names the type outside any indexed definition)", true, "rf", MapHeaderRead::No, "type" },
     { "by_type",     "rf by_type=K: K of its syms= are reached only through a type mention", true, "rf" },
+    // A19 (lane s1-small; test/legendcoveragecheck.sh row impact-rollup-name-default): a multi-definition --impact rollup's
+    // by-name hedge (serialize.h impactRollupHedgeXml) rode the default answer undefined; the full dialect's reading
+    // (graphlegend.h, fix27) in the compact form, element-qualified so the <e>/<s>/<c> via=name rows cannot answer for it.
+    { "via",         "rf via=name: of= has several definitions and every reached symbol there is reached by name alone (maybe a namesake's dependant)", true, "rf", MapHeaderRead::No, "name" },
+    { "by_name",     "rf by_name=K: K of its syms= are reached by name alone", true, "rf" },
     { "shown_bridges",     "shown_bridges=/bridges=: <bridge> rows printed (the 12 heaviest) / all pairs", false, "zoom", MapHeaderRead::No, {}, "zoom" },
     { "shown_symbols",     "shown_symbols=: <s> rows printed", false, "tree", MapHeaderRead::No, {}, "tree" },
     // THE SWEEP'S LAST PASS (2026-09-12) listed every attribute the compact --impact, --safe-delete, --communities,
@@ -715,7 +720,8 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // attrib-multidef (defattrib.h; graphlegend.h kDefTableLegend): the definition table of a multi-group selector, its rows'
     // ties, the cut table's count, and the columnar split column. Present-only, element-scoped. A row's prov="split" (Q1) reads
     // through the shared prov= row above, which already fires on any prov= in the payload.
-    { "ix",                "<def ix= t= sc= p= bodyless=1>: the groups defs= forms (a definition, then each declaration tied to it, same ix=; bodyless=1 no body)", true, "def" },
+    // DEF-READING-TRIM (lane s1-small, test/verbdefrowscheck.sh (11)): 133 -> 111 B, same readings (V1 measured the legend at ~2x the rows).
+    { "ix",                "<def ix= t= sc= p= bodyless=1>: defs= groups: definition, then tied declarations (same ix=; bodyless=1 no body)", true, "def" },
     { "defs_listed",       "defs_listed=N: above 16 groups, only the N this page's rows name are listed; K~n not enumerated: a bare ~n = also by name, a by-name-only row has no of_def" },
     { "of_def",            "of_def=K..: the def ix=K groups the row belongs to; K resolved edge, K~s edge labelled split, K~n by name alone, K~t into a primary template whose specialisation is listed; NOT a claim the edge is false", true, "s" },
     { "of_def",            "c of_def=K..: the def ix=K groups that caller belongs to (K~s split label, K~n by name, K~t primary template); NOT a claim the edge is false", true, "c" },
