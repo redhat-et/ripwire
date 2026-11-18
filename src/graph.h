@@ -12310,36 +12310,21 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             canonical = !cand.empty();
         }
         // RUST-PATH-OWNER (receiverevidence.h rustPathOwners): the tier matched a Rust path's scope NAME; the type the path resolves to
-        // where it is written decides among same-named types — the one it names, external=, a decline, or a hedge over every candidate
-        bool rustPathHedge = false;
-        bool rustPathSplit = false;   // ... or a split no locality may narrow (the S6-C tie-break below skips it)
-        if( canonical )
+        // where it is written decides among same-named types — the one it names, external=, a decline, a hedge over every candidate
+        // (nameOnly below), or the ladder's own split that no locality tie-break narrows
+        const ReceiverEvidence::RustPathOwners rustPath = recvEv.rustPathOwners( r, cand, canonical );
+        if( rustPath == ReceiverEvidence::RustPathOwners::External )
         {
-            switch( recvEv.rustPathOwners( r, cand ) )
-            {
-                case ReceiverEvidence::RustPathOwners::Keep:     break;
-                case ReceiverEvidence::RustPathOwners::Hedge:    rustPathHedge = true; break;
-                case ReceiverEvidence::RustPathOwners::Split:
-                {
-                    // the ladder keeps every candidate when tier 1 or 2 holds all of them or none (tier 3's canonical rescue): its own
-                    // split. A strict subset there would be a locality pick among types the path cannot tell apart: hedged instead
-                    std::size_t inFile = 0, inDir = 0;
-                    for( const NodeId c : cand )
-                    {
-                        inFile += symFileId[ c ] == r.fileId ? 1u : 0u;
-                        inDir  += fileDir[ symFileId[ c ] ] == fileDir[ r.fileId ] ? 1u : 0u;
-                    }
-                    rustPathHedge = inFile != 0 ? inFile < cand.size() : inDir != 0 && inDir < cand.size();
-                    rustPathSplit = !rustPathHedge;
-                    break;
-                }
-                case ReceiverEvidence::RustPathOwners::External: disposition = vetoExternal( r ); continue;
-                case ReceiverEvidence::RustPathOwners::Decline:
-                    recordDecline( r, cand, DeclinedSiteKind::Ladder );
-                    disposition = CallDisposition::Declined;
-                    continue;
-            }
+            disposition = vetoExternal( r );
+            continue;
         }
+        if( rustPath == ReceiverEvidence::RustPathOwners::Decline )
+        {
+            recordDecline( r, cand, DeclinedSiteKind::Ladder );
+            disposition = CallDisposition::Declined;
+            continue;
+        }
+        const bool rustPathHedge = rustPath == ReceiverEvidence::RustPathOwners::Hedge;
         // ── L3 fn-pointer/callback binding resolve — BEFORE Rule 1, because a local variable shadows a
         // same-named class member or global in real C++ name lookup. A bare call `fn()` whose name has ANY
         // var→function binding visible at this call site is a call THROUGH THE VARIABLE: it resolves via
@@ -13638,7 +13623,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         if( !scipPinned && !bindingPinned && r.lang != Lang::Elixir && tier.size() > 1 && !ing.symbols[ r.fromSymbol ].scope.empty()
          && r.recv != RecvKind::FieldOfThis && r.recv != RecvKind::FieldOfVar && r.recv != RecvKind::SuperObj && !identityClaim
          && !isJsTsLitRecv( r.recv ) && r.recv != RecvKind::JavaTypeCandidate && !nameOnly   // FE-B: a name-only call keeps every candidate
-         && !rustPathSplit )   // RUST-PATH-OWNER: same-named types the path cannot tell apart are a genuine split (#74), not a locality race
+         && rustPath != ReceiverEvidence::RustPathOwners::Split )   // RUST-PATH-OWNER: same-named types the path cannot tell apart are a genuine split (#74)
         {
             const std::string& callerCanon = g.localityKeyAt( r.fromSymbol );   // == canonId here (the caller is scoped)
             const std::size_t localityCap = receiverLocalityCap( r, receiverTypeNarrowed, ing.files[ ing.symbols[ r.fromSymbol ].fileId ] );
