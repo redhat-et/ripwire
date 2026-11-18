@@ -104,6 +104,9 @@ PY
 "$BIN" docdemotefix --for="$BUGQ" --no-route --format=candidates --no-cache >"$TMP/noroute.xml" 2>/dev/null
 "$BIN" docdemotefix --for="$BUGQ"     --no-cache >"$TMP/bugfor.xml"    2>/dev/null
 "$BIN" docdemotefix --for="$TRACEQ"   --no-cache >"$TMP/tracefor.xml"  2>/dev/null
+# RE-PIN 2026-11-17 (BAND BC, lane body-callee-file; rule 4): docdemotegolden_noroute.xml 9514 -> 9558 B (est_tokens "3369" -> "3387"). The whole diff,
+# read mechanically: est_tokens= and 44 B of the auto-bundle legend, whose bodies clause now reads "callee signatures (c p= their file when it
+# is not the body's)". No row, rank or route byte moved: a fixture whose <c> rows are all same-file prints no p=.
 # RE-PIN 2026-11-17 (BAND CF, lane callee-row-file; rule 4): docdemotegolden_for.xml 5985 -> 6040 B (est_tokens "2396" -> "2418").
 # The whole diff, read mechanically: est_tokens= and 55 B of the bundle legend, whose callee clause now reads "same-named callees
 # of one file, c p= that file when it is not the h row's". The golden's <hops> is shown="0" and prints no <c> row, so no row moved.

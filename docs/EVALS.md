@@ -19184,3 +19184,30 @@ DEV items were this shape on real answers (`render l="43,102"` over `dummy.py` a
 - **`test/showcasecapturecheck.sh` (I) is red on the train binary too** (capture `entries=1149`, train 1155, this
   lane 1156). Not re-recorded here.
 - No agent was measured following the row. No peer answer was opened.
+
+## PRE-REGISTRATION 2026-11-17 (amendment 12) — BAND BC: a body's callee signature row prints a line and no file
+
+BAND CF gave every hop-callee row (`<h><calls><c n= l=/>`) the file its line is in, through one helper (`calleeRowPath`). The
+signature rows under `<b>` bodies (`<calls><c n= l=>sig</c>`: `--expand`, `--pack-task`, `--exemplar`, a `--for` body) were
+left alone by name. This band applies the same helper there; no second one is written.
+
+**Registered before measuring (the pre-fix binary, a draw no earlier cell touched).** Population: for each of the 28 corpora,
+every `--expand=NAME` (4 names) and `--pack-task="A B"` (2 pairs) drawn by seed `bodycallee-fresh-1` from the corpus's own
+flagless map (fn/method symbols, name longer than 3, identifier-shaped): 108 expand + 54 pack-task answers. Instrument: every
+`<b>` with a `<calls>`, every `<c n= l=>`; the row's file is read from `--callees=@<b file>:<b line>` (another verb, another
+emitter), matched on (leaf name, line); legend comments stripped before any element search.
+- **Surface (a count, no bar):** rows whose callee is in a file other than the `<b>`'s.
+- **Bar (correctness):** after the change 0 rows print a `p=` that `--callees` does not give for that (name, line), 0 print the
+  `<b>`'s own file, and every cross-file row prints one. Control: the callee set, row order and `total=`/`shown=` do not move.
+- **Cost (reported, no bar):** answer bytes, split by whether the answer's body set is unchanged.
+
+**Readout.** Before: 75 expand answers and 42 pack-task answers carry bodies with `<calls>`; 960 + 166 rows; **513 + 92 = 605
+rows (53 %, 55 %) in 46 + 28 = 74 of 162 answers are cross-file and name no file.** After: `p=` on every cross-file row, 0 wrong,
+0 own-file. The bar holds on every row the instrument could match (29 rows of 1,126 had no `--callees` match and are
+unassessed). Cost where the body set did not change: expand +144 B/answer (+1.95 %, 74 answers), pack-task +77 B/answer
+(+0.78 %, 41). **Where it does change** (2 of 162): path bytes are charged to the body budget, so a budget-bound answer serves
+fewer whole bodies, disclosed as before (`capped=1`, `unserved_total=`): `vscode --expand=clear` (328 matches) 277 -> 223
+bodies, `unserved_total` 51 -> 105; one `envoy` pack-task answer 2 -> 1.
+
+Gate `test/bodycalleefilecheck.sh`: 64 FAIL on the pre-fix binary, PASS after. Not measured: any effect on a reader (this band
+measures the row, not whether an agent finds more), and the JSON dialect's `calls[]` (`{n,l,sig}`, no file).

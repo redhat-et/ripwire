@@ -335,6 +335,7 @@ for _g in \
     bm25check \
     bodiesshowncheck \
     bodilessseedcheck \
+    bodycalleefilecheck \
     bodydialectcheck \
     budgetmonotonecheck \
     budgetpolicycheck \

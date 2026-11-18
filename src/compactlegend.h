@@ -71,7 +71,7 @@ inline constexpr CompactLegendSpec kCompactLegendSpecs[] =
     { "ctx", "skipped",    "why the index lacks a file <f p= why= bytes= limit= ext=>; indexed but unvouched <h p= why= err= err_ratio=>; <lang> census" },
     { "ctx", "notes",      "field notes by target: <target id= dangling=> holds <note d= sha= branch=>; the kept count comment: notes= rows, targets= <target> rows, dangling= targets matching nothing indexed (listed, surfaced nowhere)" },
     { "ctx", "lego",       "ONE interface/base type: <iface n= p= defs= implementors=>, its <m> method contract, every implementor" },
-    { "ctx", "expand",     "full bodies: <bodies shown= total= capped=> of <b t= l= p= n= sibs= sibs_total= sibs_capped= inc=>; <calls><c n= l=> resolved callees" },
+    { "ctx", "expand",     "full bodies: <bodies shown= total= capped=> of <b t= l= p= n= sibs= sibs_total= sibs_capped= inc=>; <calls><c n= l= p=> resolved callees (p= when not the b's file)" },
     // PR #215 review item 9: --expand has TWO servings and they share no element. The line above describes the
     // BUNDLE serving; the whole-file serving is <src p= sym=> with <s n= sc= l=/> anchor rows and no <bodies> at
     // all, so that line described a shape the document does not contain — and was LONGER than the full dialect's
@@ -88,7 +88,7 @@ inline constexpr CompactLegendSpec kCompactLegendSpecs[] =
     // one spec for both verbs and both dialects, because the page is ONE document shape.
     { "sigs", "candidate-page",
       "budgeted-bundle candidate page: a resumable window over the ranked candidate set the bundle cuts, for task= under budget_tokens=, one tier per page, ranks global across pages" },
-    { "ctx", "pack-task",  "one-call task bundle for task= under budget_tokens=: <sigs><d n= sc= l= p=> ranking, <far><s t= n= p=> ranked but over 1 hop out (of_top= ranked rows) > <bodies><b t= n= p= l=> with <calls><c n= l=> callees > <callers><s rel=caller|callee shared=> 1-hop from the bodies (of_top= bodies; shared= bodies reached, absent at 1) > notes > <tests><test p= run=> (run= when derivable)" },
+    { "ctx", "pack-task",  "one-call task bundle for task= under budget_tokens=: <sigs><d n= sc= l= p=> ranking, <far><s t= n= p=> ranked but over 1 hop out (of_top= ranked rows) > <bodies><b t= n= p= l=> with <calls><c n= l= p=> callees > <callers><s rel=caller|callee shared=> 1-hop from the bodies (of_top= bodies; shared= bodies reached, absent at 1) > notes > <tests><test p= run=> (run= when derivable)" },
     { "ctx", "from-trace", "trace frames mapped to indexed symbols, innermost first; the innermost in-corpus body included" },
     { "ctx", "exemplar",   "the best-in-class instance of kind= for the task, chosen by role: <exemplar n= p= in= ccx= tested=>, <bodies><b> to imitate" },
     { "ctx-partitions", "pack-task", "N minimally overlapping agent bundles carved along call-graph communities plus one shared core; each <bundle> wraps a <ctx>; bundle role=core|partition i= symbols= modules= bytes= tokens=: one agent's ctx, symbols= ids assigned, bytes= its size; tokens= = est_tokens= = bytes/2.36 (flat, the densest rate; the inner ctx est_tokens= is language-weighted). Inner ctx task= root= budget_tokens= dropped_positive=: the task, p= base, the slice's token target, ranked candidates its budget cut. of_top=: rows ranked (far) / bodies (callers); s rel=caller|callee shared=: 1-hop edge, bodies reached (absent at 1)" },
@@ -1904,7 +1904,11 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "n", "d n= l=: the symbol's name and def line", true, "d", MapHeaderRead::No, {}, "for" },
     { "t", "b t= n= p= l=: a served body's kind, name, file, first line", true, "b", MapHeaderRead::No, {}, "for" },
     // BAND CF (serialize.h MergedCalleeNameRow): present-only, on a hop callee row whose definition is outside its h row's file
-    { "p", "c p=: the file a hop callee's l= lines are in, printed when it is not the h row's own (no p=: the h row's file)", true, "c", MapHeaderRead::No, {}, "for" },
+    // BAND BC (serialize.h appendOneCalleeCall): the same attribute on a served body's signature rows; one row per verb key, as the reading is key-qualified
+    { "p", "c p=: the file a hop or body callee's l= lines are in, printed when it is not the h/b row's own (no p=: that row's file)", true, "c", MapHeaderRead::No, {}, "for" },
+    { "p", "c p=: the file a body callee's l= is in, printed when it is not the b row's own (no p=: the b's file)", true, "c", MapHeaderRead::No, {}, "expand" },
+    { "p", "c p=: the file a body callee's l= is in, printed when it is not the b row's own (no p=: the b's file)", true, "c", MapHeaderRead::No, {}, "pack-task" },
+    { "p", "c p=: the file a body callee's l= is in, printed when it is not the b row's own (no p=: the b's file)", true, "c", MapHeaderRead::No, {}, "exemplar" },
     { "owner", "field name= type= owner= rel=: a member of owner=, rel=creates held by value, uses by reference/pointer", true, "field", MapHeaderRead::No, {}, "for" },
     { "pure", "d pure=1: const/constexpr signature (Swift: non-mutating) and no transitive side effect found; a hint", true, "d", MapHeaderRead::No, {}, "for" },
     { "h", "enc h=: the edit handle, sym#<16hex>@<16hex> (identity, file content hash); stale after any change to that file", true, "enc", MapHeaderRead::No, {}, "grep" },

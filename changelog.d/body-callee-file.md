@@ -1,0 +1,7 @@
+### Fixed — a callee signature row under a `<b>` body names the file its line is in
+
+The `<calls><c n= l=>signature</c>` rows under a served `<b>` body (`--expand`, `--pack-task`, `--exemplar`, a `--for` body) printed the callee's definition line and no file, so a row could not be opened. This is the sibling of the hop-callee fix: the same helper (`calleeRowPath`) and the same rule. A row prints `p="<file>"` when the callee is not in its `<b>` row's own file; a row with no `p=` is in the `<b>`'s file. The callee set, the order, `total=` and `shown=` do not move. The legends of those verbs and the dictionary say so.
+
+Measured on 162 fresh answers (108 `--expand`, 54 `--pack-task`, a draw no earlier cell touched; the row's file read from `--callees`, another emitter): 1,126 signature rows, 605 of them (54 %) in a file other than their body's, in 74 answers. After: every one prints its file, 0 print a file `--callees` does not give, 0 print the body's own. Cost where the set of bodies is unchanged: +144 B per `--expand` answer (1.95 %), +77 B per `--pack-task` answer (0.78 %). The path bytes are charged to the body budget, so an answer already at its budget serves fewer whole bodies, disclosed as before (`capped="1"`, `unserved_total=`): 2 of 162 answers moved, the larger `vscode --expand=clear` (328 matches) 277 to 223 bodies. Gate: `test/bodycalleefilecheck.sh`.
+
+What it does not mean: the JSON dialect's `calls[]` (`{n,l,sig}`) still carries no file.

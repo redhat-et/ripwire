@@ -35,6 +35,7 @@
  "bm25boundcheck.sh": 20.6,
  "bm25check.sh": 1.9,
  "bodiesshowncheck.sh": 11.6,
+ "bodycalleefilecheck.sh": 3.0,
  "bodydialectcheck.sh": 54.1,
  "budgetpolicycheck.sh": 50.2,
  "buildtypestampcheck.sh": 7.0,
