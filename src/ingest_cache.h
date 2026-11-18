@@ -389,6 +389,9 @@ constexpr std::uint32_t kParserVer    = 331;          // bump on any grammar/.sc
                                                       //   cpp-ptr-alias (placeholder 321): a C++ Type /
                                                       //   ParamType record whose declarator names the variable or a reference to it carries
                                                       //   model.h kDirectDeclaratorBit in unwrapDepth (ingest_binds.h cppDirectDeclarator)
+                                                      //   overload-split (placeholder 329): a Go type written as a qualified generic instantiation (`addrs.Set[addrs.Module]`) keeps its
+                                                      //   package qualifier on the field / parameter / local record (ingest_binds.h goQualifiedWhole). Rich file tag 330.
+                                                      //   kCacheVersion unchanged: no record changes shape.
                                                       // 311 = 2026-11-17 (#358 C# 1a, @LaimaWu; lands #420, rebased; was 198 on the PR, above main's 309/310): using
                                                       //   directives move to shared @import.path captures; import-free deep containers no longer disclose a cut or
                                                       //   lose whole-cache eligibility. Alias/edge facts unchanged; rich tag 312. kCacheVersion unchanged.
