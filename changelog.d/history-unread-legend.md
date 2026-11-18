@@ -8,7 +8,7 @@ three showed only when the walk was actually cut, which on this repository happe
 - `--for … --limit=N` (the file page) printed an ill-formed document: its own `coverage=`, `shown=`, `total=` and `next=`
   attributes and its legend landed inside the explaining comment, so no reader or XML parser saw them. The page now keeps
   its attributes on its `<files>` root and puts the comment after the tag.
-- The comment opened as `<!--history_unread=1: …`. It now opens `<!-- history_unread=1: …`, the spelling every other
+- The comment had no space between the comment opener and `history_unread=1:`. It now has one, the spelling every other
   definition comment uses, so the legend checks read it as the attribute's definition.
 - On the ranked map (`--metrics`, `--grep --metrics`), the comment now leads the legend in front of the `<r>` root, rather
   than following the root tag where the full-legend first screen does not look.
