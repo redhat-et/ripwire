@@ -1,13 +1,14 @@
 #pragma once
 
-// similarargs.h — the scanner behind --quality-delta's similar-argument-list signal (QD-SWAP-1117, a PROTOTYPE).
+// similarargs.h — the scanner behind --quality-delta's similar-argument-list signal (QD-SWAP-1117; on by default since QD-SIMILAR-DEFAULT).
 //
 // The shape: a run of adjacent parameters with ONE written type and different names — f( task, answer ),
 // g( at, nameAt, nameEnd, fileId, line ). A call that swaps two of them compiles and runs wrong. clang-tidy names it
 // bugprone-easily-swappable-parameters; this is the part of that check a signature's own bytes decide.
 //
-// OFF BY DEFAULT. The rows print only when RIPWIRE_QD_SIMILAR_ARGS is set in the environment (similarArgsOn), and they
-// never gate: the owner decides whether the signal becomes a default. With the variable unset no answer changes.
+// ON BY DEFAULT, REPORT-ONLY (owner 2026-11-17). The rows ride the params kind (--quality-delta=A..B --quality-kinds= without params drops
+// them, the one selector qd has) and never gate: a new row is sev="minor", and a row the params kind already reported
+// keeps its own severity.
 //
 // What is read: the signature text of one C or C++ function or method definition (quality.h hands in
 // [sigStartByte, sigEndByte)), as defectshape.h's C++ tokens (comments dropped). The parameter list opens at the `(`
@@ -27,7 +28,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -36,12 +36,6 @@
 
 namespace rw::similarargs
 {
-
-// The prototype's switch: the rows exist only when the variable is set (any value).
-inline bool similarArgsOn() noexcept
-{
-    return std::getenv( "RIPWIRE_QD_SIMILAR_ARGS" ) != nullptr;
-}
 
 // A run shorter than this is not a list of similar arguments.
 inline constexpr std::uint32_t kSimilarRunMin = 2;

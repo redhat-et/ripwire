@@ -27,7 +27,7 @@
 #include "clones.h"
 #include "cloneidiom.h"         // idiom-class demotion — the closed 3-idiom shape classifier that turns an idiom-COLLISION clone group into a minor row instead of a gating one
 #include "lintrules.h"          // findQualityConstructs — the built-in error-masking rule table (GitClear +47% kind) + the placeholder shapes
-#include "similarargs.h"        // the similar-argument-list scanner (a prototype, off unless RIPWIRE_QD_SIMILAR_ARGS is set)
+#include "similarargs.h"        // the similar-argument-list scanner (the params kind's report-only similar= facet)
 #include "defectshape.h"        // the defect-shape kind's four scanners (format-arity, utf8-cut, dedup-first, vacuous-assert)
 #include "arch.h"               // fnv1a64
 #include "pathguard.h"          // CWE-59/367: rw::pathguard::openNoFollowTruncate — writeBaseline truncates, so its open must refuse a link atomically
@@ -8034,7 +8034,7 @@ inline constexpr FacetAttr kFacetAttrs[] = {
     { "duplication",                "idiom"   },   // the recognized clone-body shape (cloneidiom.h)
     { "defect-shape",               "defect"  },   // format-arity / utf8-cut / dedup-first / vacuous-assert
     { "error-masking",              "facet"   },   // failure-default: the growth includes a read failure returned as an empty success
-    { "params",                     "similar" },   // QD-SWAP-1117 prototype: the longest run of adjacent same-typed parameters (similarargs.h)
+    { "params",                     "similar" },   // QD-SWAP-1117: the longest run of adjacent same-typed parameters (similarargs.h)
     { "complexity",                 "monster" },   // QD-MONSTER-GROWTH: "1" when isMonsterGrowth made (or would make) the row major
     { "new-clone-of-reused-helper", "idiom"   },   // T13/fix2 gave this kind duplication's idiom demotion (Regression::facet
                                                     // is populated the same way, from the same CloneIdiomVerdict); this row was
@@ -10548,7 +10548,7 @@ inline std::pair<std::string, std::string> scopeDisclosure( const Scope& scope, 
     return out;
 }
 
-// ── similar-argument lists (QD-SWAP-1117, a prototype: similarargs.h) ─────────────────────────────────
+// ── similar-argument lists (QD-SWAP-1117, report-only: similarargs.h) ─────────────────────────────────
 // The longest run of adjacent same-typed parameters of each C or C++ function or method definition, read off its own
 // signature bytes ([sigStartByte, sigEndByte), the span trailingDefaultByNode reads); 0 where there is none.
 inline std::vector<std::uint8_t> similarRunByNode( const IngestResult& ing )
@@ -11587,7 +11587,7 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
     {
         appendDefectShapeRows( regs, ing, g, base, root, existedAtBaseline, stampLoc, scope.macroOverride );   // the twelfth kind (see its doc)
     }
-    if( similarargs::similarArgsOn() && kindSelected( scope.kinds, "params" ) )   // QD-SWAP-1117 prototype: off unless the variable is set
+    if( kindSelected( scope.kinds, "params" ) )   // QD-SWAP-1117 similar=: on by default, report-only (never gating)
     {
         appendSimilarArgsRows( regs, { g, base, moved }, similarRunsByKey( ing, g, keyByNode ), existedAtBaseline, stampLoc );
     }
