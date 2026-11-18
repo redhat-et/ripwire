@@ -8496,6 +8496,65 @@ inline std::string ownerCalleesNext( const IngestResult& ing, const Symbol& s, s
     return next;
 }
 
+// A hop row's value-use fact. `counts` is the caller's (verbs_for.h): the function-valued symbols among the hop nodes with at
+// least one value use, sorted by id, each with the number of uses (what --callers prints as value_refs=). A row writer adds
+// ` value_refs="N"` to a row whose symbol is in it, and, once the row is PRINTED, notes into `unread` its language when that
+// language reads no value use at all (model.h valueRefFamily): there the absence of value_refs= is unknown, not zero.
+struct HopValueRefs
+{
+    std::vector<std::pair<NodeId, std::uint32_t>> counts;
+    std::vector<std::string_view>                 unread;   // language tags of printed rows, sorted unique at read time
+    bool                                          anyRow = false;   // a printed row carried value_refs=
+};
+inline bool hopRowIsFunction( const IngestResult& ing, NodeId id )
+{
+    // a value use targets a function or a method only (valuerefs.h): nothing is said of a class row
+    return id < ing.symbols.size() && ( ing.symbols[ id ].kind == SymKind::Function || ing.symbols[ id ].kind == SymKind::Method );
+}
+inline std::string hopValueRefsAttr( const HopValueRefs* vals, const IngestResult& ing, NodeId id )
+{
+    if( vals == nullptr || !hopRowIsFunction( ing, id ) )
+    {
+        return {};
+    }
+    const auto at = std::ranges::lower_bound( vals->counts, id, {}, &std::pair<NodeId, std::uint32_t>::first );
+    if( at == vals->counts.end() || at->first != id || at->second == 0 )
+    {
+        return {};
+    }
+    return " value_refs=\"" + std::to_string( at->second ) + "\"";
+}
+// A row has been printed: record what it makes the section say.
+inline void hopRowPrinted( HopValueRefs* vals, const IngestResult& ing, NodeId id, bool carriedAttr )
+{
+    if( vals == nullptr || !hopRowIsFunction( ing, id ) )
+    {
+        return;
+    }
+    vals->anyRow = vals->anyRow || carriedAttr;
+    if( valueRefFamily( ing.symbols[ id ].lang ) == ValueRefFamily::None )
+    {
+        vals->unread.push_back( langTag( ing.symbols[ id ].lang ) );
+    }
+}
+// ` value_refs_unread_for_lang="a,b"` (sorted unique), or nothing when every printed function row is in a language that reads value uses.
+inline std::string hopUnreadAttr( HopValueRefs* vals )
+{
+    if( vals == nullptr || vals->unread.empty() )
+    {
+        return {};
+    }
+    std::ranges::sort( vals->unread );
+    vals->unread.erase( std::ranges::unique( vals->unread ).begin(), vals->unread.end() );
+    std::string out = " value_refs_unread_for_lang=\"";
+    for( std::size_t i = 0; i < vals->unread.size(); ++i )
+    {
+        out += i == 0 ? "" : ",";
+        out += vals->unread[ i ];
+    }
+    return out + "\"";
+}
+
 // What the owner walk hands back to packHops: the rows, how many nodes they consumed, and the budget and via-legend charge
 // the RANKED rows then run on, plus the cut disclosure (`cutNext` already escaped; empty when nothing was cut).
 struct OwnerHopRows
@@ -8518,7 +8577,7 @@ inline OwnerHopRows packOwnerHopRows( const IngestResult& ing, const std::vector
                                       const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets,
                                       const CalleeEdgeBytes& outEdges, RedactCounts* redact, const std::vector<float>* rank,
                                       std::string_view rootArg, std::size_t rankedBudget, bool rankedVia,
-                                      PathRelFn&& pathRel, ContentOfFn&& contentOf, std::vector<char>& esc )
+                                      PathRelFn&& pathRel, ContentOfFn&& contentOf, std::vector<char>& esc, HopValueRefs* vals = nullptr )
 {
     const std::vector<std::uint8_t>& outNameOnly = outEdges.nameOnly;
     OwnerHopRows out;
@@ -8549,7 +8608,10 @@ inline OwnerHopRows packOwnerHopRows( const IngestResult& ing, const std::vector
         row += escapeXml( s.name, esc );
         row += "\" qword=\"";
         row += escapeXml( owners->words[ i ], esc );
-        row += "\">";
+        row += "\"";
+        const std::string valueAttr = hopValueRefsAttr( vals, ing, id );
+        row += valueAttr;   // charged with the row's identity, like qword=
+        row += ">";
         const std::size_t rowFixed = row.size() + next.size() + 8 + 16;   // + ' next=""' + '</calls></h>'
         if( used + rowFixed >= budget )
         {
@@ -8565,6 +8627,7 @@ inline OwnerHopRows packOwnerHopRows( const IngestResult& ing, const std::vector
         out.xml += row;
         out.xml += "</h>";
         ++out.shown;
+        hopRowPrinted( vals, ing, id, !valueAttr.empty() );
     }
     if( owners->fundFirst )
     {
@@ -8581,7 +8644,7 @@ inline OwnerHopRows packOwnerHopRows( const IngestResult& ing, const std::vector
 }
 
 // The <hops> open tag: the truncation triple, noedge= when non-zero, and the owner cut disclosure when there is one.
-inline std::string hopsOpenTag( std::size_t shown, std::size_t requested, std::size_t noEdge, const OwnerHopRows& own )
+inline std::string hopsOpenTag( std::size_t shown, std::size_t requested, std::size_t noEdge, const OwnerHopRows& own, std::string_view unreadAttr = {} )
 {
     char open[ 128 ];
     if( noEdge > 0 )
@@ -8595,6 +8658,7 @@ inline std::string hopsOpenTag( std::size_t shown, std::size_t requested, std::s
                        shown, requested, shown < requested ? 1 : 0 );
     }
     std::string tag( open );
+    tag += unreadAttr;   // value_refs_unread_for_lang=: the languages of printed rows whose value uses this build does not read
     if( own.cut > 0 )
     {
         tag += " qword_cut=\"" + std::to_string( own.cut ) + "\" next=\"" + own.cutNext + "\"";   // DISCLOSE the owners not served
@@ -8636,7 +8700,8 @@ inline void packHops( std::FILE* out, const IngestResult& ing, const std::vector
                       const std::vector<float>* rank = nullptr, // query relevance, for ordering a CUT callee listing
                       std::string_view rootArg = {},            // R-E: same single-root-only root= every verb takes
                       CalleeLegendsInHead legendsInHead = {},   // FE-B (+ Q1): packBodies' parameter of the same name
-                      const HopOwners* owners = nullptr )       // owner-hop: the leading owner rows; nullptr ⇒ none (byte-identical)
+                      const HopOwners* owners = nullptr,       // owner-hop: the leading owner rows; nullptr ⇒ none (byte-identical)
+                      HopValueRefs* vals = nullptr )        // value_refs= on a row, value_refs_unread_for_lang= on the section; nullptr ⇒ none (byte-identical)
 {
     const std::vector<std::uint8_t>& outNameOnly     = outEdges.nameOnly;
     const bool                       viaLegendInHead = legendsInHead.via;
@@ -8686,7 +8751,7 @@ inline void packHops( std::FILE* out, const IngestResult& ing, const std::vector
     // owner-hop: the leading owner rows first (THE QUESTION'S OWNER ROWS above; nothing when `owners` is null), then the
     // ranked rows exactly as before, from the node the owners end at, on the budget and via charge the owners leave them
     const OwnerHopRows own = packOwnerHopRows( ing, nodes, owners, outOff, outTargets, withAnchorEdge( CalleeEdgeBytes( outNameOnly, outEdges.prov, &splitLegendCharged ), outEdges.anchor ),
-                                               redact, rank, rootArg, budgetBytes, viaLegendCharged, pathRel, contentOf, esc );
+                                               redact, rank, rootArg, budgetBytes, viaLegendCharged, pathRel, contentOf, esc, vals );
     std::string children       = own.xml;
     std::size_t requestedCount = own.shown;
     std::size_t shownCount     = own.shown;
@@ -8735,7 +8800,10 @@ inline void packHops( std::FILE* out, const IngestResult& ing, const std::vector
         row += escapeXml( pathRel( s.fileId ), esc );
         row += "\" n=\"";
         row += escapeXml( s.name, esc );
-        row += "\">";
+        row += "\"";
+        const std::string valueAttr = hopValueRefsAttr( vals, ing, id );
+        row += valueAttr;
+        row += ">";
         used += row.size();
         // the 1-hop callee signatures — the identical block a body carries, charged against the same
         // running `used` so the row identity bytes and the edge bytes share one budget.
@@ -8747,6 +8815,7 @@ inline void packHops( std::FILE* out, const IngestResult& ing, const std::vector
         row += "</h>";
         children += row;
         ++shownCount;
+        hopRowPrinted( vals, ing, id, !valueAttr.empty() );
     }
 
     // pageview.h THE TRUNCATION VOCABULARY rules 1+2+3, the same triple <bodies> carries: shown= rows
@@ -8754,7 +8823,8 @@ inline void packHops( std::FILE* out, const IngestResult& ing, const std::vector
     // capped= is the BUDGET bit only: the candidates neither printed nor accounted by noedge=. Emitted
     // as the 0|1 boolean the vocabulary requires either way; noedge= follows the house silence rule and
     // appears only when it is non-zero.
-    const std::string openTag = hopsOpenTag( shownCount, requestedCount, noEdgeCount, own );
+    const std::string unreadAttr = hopUnreadAttr( vals );
+    const std::string openTag    = hopsOpenTag( shownCount, requestedCount, noEdgeCount, own, unreadAttr );
     if( !viaLegendInHead && children.find( " via=\"name\"" ) != std::string::npos )
     {
         w.write( viaNameLegendComment() );   // FE-B: exactly when a hop's <calls> row carries via="name"
@@ -8770,6 +8840,14 @@ inline void packHops( std::FILE* out, const IngestResult& ing, const std::vector
     if( !legendsInHead.split && children.find( " prov=\"split\"" ) != std::string::npos )
     {
         w.write( splitArmCallsLegendComment() );   // attrib-multidef Q1: exactly when a hop's <calls> row carries prov="split"
+    }
+    if( vals != nullptr && vals->anyRow )
+    {
+        w.write( hopValueRefsLegendComment() );
+    }
+    if( !unreadAttr.empty() )
+    {
+        w.write( hopValueRefsUnreadLegendComment() );
     }
     w.write( openTag );
     w.write( children );

@@ -253,6 +253,7 @@
  "historyoraclecheck.sh": 6.9,
  "hookcheck.sh": 78.0,
  "hop1check.sh": 30.0,
+ "hopvaluerefscheck.sh": 3.0,
  "hostilecheck.sh": 6.2,
  "hotspotsincecheck.sh": 8.6,
  "htmlcolorcheck.sh": 12.4,

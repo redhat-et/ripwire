@@ -19184,3 +19184,74 @@ DEV items were this shape on real answers (`render l="43,102"` over `dummy.py` a
 - **`test/showcasecapturecheck.sh` (I) is red on the train binary too** (capture `entries=1149`, train 1155, this
   lane 1156). Not re-recorded here.
 - No agent was measured following the row. No peer answer was opened.
+
+## PRE-REGISTRATION 2026-11-17 (amendment 12) — BAND HV: a `--for` hop row does not say "bound as a value"
+
+Registered before the fresh draw below was run. The gate (`test/hopvaluerefscheck.sh`) was written and run red on the train
+binary before any `src/` change (3 arms red: (A) twice, (U) once); the fix and the readout follow.
+
+### The gap, and what the partition's figures turned out to be
+
+The retrieval-gap partition (2026-11-17) counted 9 "resolution" items (class 3) and recommended disclosure: `--callers` prints
+`value_refs=N` for a function stored or passed as a value, a `--for` hop row did not. Checked against the partition's own
+per-item table before building anything:
+
+- the 9 are 9 of 182 absent items (4.9 %), as printed; the table reproduces (9 / 12 / 9 / 23 / 42 / 15 / 15 / 16 / 28 / 13 over 182);
+- **only 3 of the 9 have a value use at all** (`value_refs=1`: `restorePlanHook`, `buildOpaque`, `LinuxProcess_new`); the other 6 have
+  zero call edges AND zero value references (interface and trait dispatch, a closure, a dynamic attribute protocol), so a
+  value-reference disclosure says nothing about them;
+- **none of the 9 is a hop row in its cell's answer**: their lexical ranks are 220 to 4,534 (`<hops>` serves at most the top 6 ranked
+  rows and 3 owner rows). The disclosure below recovers no item of the partition. It removes a silence from rows that ARE printed.
+
+### The change being registered
+
+An attribute, not a flag. On `<hops>` (compact `--for`):
+
+| token | spelling | reading |
+| --- | --- | --- |
+| VALUE | `<h … value_refs="N">` | the row's function is used as a value N times (the count `--callers` prints as `value_refs=`); a call through that slot is not an edge |
+| ABSENT | no attribute | none found, for a language whose value uses are read; never "none exists" |
+| UNREAD | `<hops … value_refs_unread_for_lang="java">` | a printed row is in a language that reads no value use at all (model.h `valueRefFamily` is `None`): its missing `value_refs=` is unknown, not zero. Comma-joined, sorted, only languages of PRINTED function rows |
+
+Present-only legend comments beside the section, one per attribute. No dictionary row (the existing `value_refs` row already
+reads this attribute; the `--for` compact legend is its own). Callee rows, `total=`, `shown=`, `capped=`, `noedge=` and row order do not move.
+
+### Pre-registered fresh draw
+
+The 140 cells that produced the partition cannot grade it. The draw is the 295-cell FIRE321 collection (short wording; the
+census read the full-question wording), every cell whose repository is present locally, `--for` only, binary A = the train binary,
+binary B = this lane's, one process at a time, private `TMPDIR`. Read as bytes only; no timing, no memory.
+
+| id | claim | rule |
+| --- | --- | --- |
+| HV1 | structure unchanged | for every answer, `total=` `shown=` `capped=` `noedge=`, the `<h>` order and every `<calls>` body equal A's after removing the two new attributes. **0 differences or the band fails.** |
+| HV2 | the count is `--callers`' | for every row printing `value_refs=N` whose name has ONE definition (`--callers` says `defs="1"`), N equals the `--callers` value_refs. Up to 60 rows. **0 mismatches or it fails.** |
+| HV3 | the unread token is true | `value_refs_unread_for_lang=` appears only on an answer with a printed `<h>` row whose file extension is outside the armed families (C/C++, JS/TS, Python, Go, Rust), and names exactly those. **0 violations.** |
+| HV4 | cost | mean added bytes per answer, and per answer that fires, with the share of answer bytes. Registered ceiling: **mean ≤ 1.0 % of answer bytes**. A fire is one printed attribute or comment. |
+| HV5 | materiality | the share of answers that fire, with a Wilson 95 % interval. **No pass line**: a low share is a finding, reported as one. |
+| HV6 | a rate of 0 % or 100 % is an instrument fault until one cell is hand-checked | one firing cell is opened by hand and its rows read against the source |
+
+What is NOT registered and will not be claimed: an item gained, a rank moved, any comparison number. The disclosure is graded as a
+fact the answer now states, not as retrieval.
+
+### READOUT 2026-11-17 — BAND HV (fresh draw, 216 cells, A = train binary, B = this lane)
+
+Draw: the FIRE321 collection's 295 cells, 216 of them with the repository present locally (79 skipped for an absent checkout),
+every one `--for`, every one run by both binaries (rc 0 on all 432). Comments are stripped before any element search.
+
+| id | result |
+| --- | --- |
+| HV1 | **0 differences** in `total=` `shown=` `capped=` `noedge=`, the `<h>` order and every `<calls>` body across all 199 answers that print `<hops>` (17 print none). PASS. |
+| HV2 | 30 of 30 checked rows equal `--callers` `value_refs=`. **Short of the registered 60**: of 69 distinct rows, 39 name a function with several definitions (`defs` above 1), where a row counts one definition and `--callers` counts all of them by design; they were not checked and are not claimed. PASS on 30. |
+| HV3 | 6 answers carry `value_refs_unread_for_lang=` (3 `rb`, 3 `sh`); **0 violations**: each has a printed `<h>` row outside the armed families. PASS. |
+| HV4 | mean +58.9 B per answer over all 216 (**0.20 % of answer bytes**, 0.19 % pooled); +249.5 B per answer that fires. Ceiling 1.0 %. PASS. |
+| HV5 | 51 of 216 answers fire (23.6 %, Wilson 95 % 18.4–29.7 %); 72 rows print `value_refs=` on 45 answers, 6 answers print the unread token. No pass line. |
+| HV6 | instrument check: the 51 answers whose bytes differ are exactly the 51 with a printed attribute (no other source of difference). Hand-checked: htop `Row_display` `value_refs="11"` against the source has 11 `display = Row_display` sites; htop `actionKill` `value_refs="2"` has two `keys[...] = actionKill` sites. |
+
+What this does not show. It is a fact the answer now states, not retrieval: no item is gained, no rank moves, and the 9 partition
+items it was prompted by are not touched (above: ranks 220 to 4,534, none a hop row). The 39 multi-definition rows are unchecked.
+The unread token names a language, not a symbol: it says the language's value uses are not read, and nothing about this row's.
+`<d>` rows already carry `slot_by=` for a function a slot call is found through; the new attribute adds the rows where a value
+use is known and no slot caller is: it is not a second copy of `slot_by=`, but the two overlap on rows that have both.
+The budget accounting does not charge the two legend comments (written by `packHops` beside the section, the way `via="name"`'s is);
+the section's `est_tokens` charge does include them. `--token-budget` ceilings were not re-measured with them.
