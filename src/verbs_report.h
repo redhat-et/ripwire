@@ -2656,9 +2656,10 @@ std::optional<int> runLayout( const MainDispatch& d )
     // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
     const std::string_view layoutRootArg = ( d.ing.realPaths.empty() && cfg.roots.size() == 1 ) ? cfg.roots[0] : std::string_view();
     layout::writeLayout( stdout, result, layoutRootArg );
-    // exit 2 = mirror drift or a contradicted tripwire (a break it SAW); exit 3 = a definition it could not read, so the
-    // contract was not fully verified (unreadable="N" on the root says which); 0 = verified, no break
-    return layout::layoutContractBroken( result ) ? 2 : ( result.unreadableDefs > 0 ? 3 : 0 );
+    // exit 2 = mirror drift or a contradicted tripwire (a break it SAW); exit 3 = a definition, or a file the assertion
+    // scan reads, it could not read, so the contract was not fully verified (unreadable= / asserts_unreadable= on the
+    // root say which); 0 = verified, no break
+    return layout::layoutContractBroken( result ) ? 2 : ( result.isIncomplete() ? 3 : 0 );
 }
 
 // --field-affinity[=STRUCT]: the CACHE-LOCALITY lens. src/fieldaffinity.h owns the whole computation (the

@@ -955,6 +955,7 @@ for _g in \
     regexbombcheck \
     regexcheck \
     regexguardcheck \
+    regexmultiquantcheck \
     regexrefusecheck \
     registermacrocheck \
     regsitecheck \
@@ -1069,6 +1070,7 @@ for _g in \
     swiftcheck \
     swiftmemberscheck \
     swiftshapecheck \
+    tagspredicatecheck \
     tailsymtermscheck \
     taskechocheck \
     tempfilesymlinkcheck \

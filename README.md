@@ -1823,9 +1823,9 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 ### In the tests
 
 <details>
-<summary><b>852 gate scripts</b> (counts snapshot 2026-11-18), five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
+<summary><b>854 gate scripts</b> (counts snapshot 2026-11-18), five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
 
-`test/regression.sh` named **852 gate scripts** at the counts snapshot 2026-11-18 and is the authoritative list; <!-- gatecount -->
+`test/regression.sh` named **854 gate scripts** at the counts snapshot 2026-11-18 and is the authoritative list; <!-- gatecount -->
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a

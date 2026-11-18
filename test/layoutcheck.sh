@@ -609,6 +609,39 @@ else
     no "unreadable (control): the readable mirror did not report mismatch/exit 2 with no unreadable= (rc=$urc, unreadable= hits=$( grep -c 'unreadable=' "$UR/warm.out" )) — the arm is void: $( grep -o '<layout [^>]*>' "$UR/warm.out" )"
 fi
 
+# ── UNREADABLE ASSERTION FILE (#688 review, CodeRabbit 4614203156): a C-family file the static_assert scan cannot read
+# is DISCLOSED, never skipped as if it held no tripwire. b/t.h's sizeof tripwire contradicts a/s.h's 4-byte struct
+# (control: asserts="1" conflicts="1", exit 2). With b/t.h unreadable on the warm run, 7253fb78e answered asserts="0"
+# conflicts="0", exit 0 — a clean contract it never checked; now asserts_unreadable="1" on the root, defined in the
+# legend, and exit 3 (not verified).
+UA="$TMP/unreadassert"; mkdir -p "$UA/tree/a" "$UA/tree/b" "$UA/xdg"
+printf 'struct UnreadAssert { int x; };\n' >"$UA/tree/a/s.h"
+printf '#include "../a/s.h"\nstatic_assert( sizeof( UnreadAssert ) == 99, "tripwire" );\n' >"$UA/tree/b/t.h"
+XDG_CACHE_HOME="$UA/xdg" TMPDIR="$UA/xdg" "$BIN" "$UA/tree" --layout=UnreadAssert >"$UA/warm.out" 2>/dev/null; uac=$?
+if [ "$uac" -eq 2 ] && grep -q '<layout [^>]* asserts="1" conflicts="1"' "$UA/warm.out" && ! grep -q 'asserts_unreadable=' "$UA/warm.out"; then
+    ok "asserts_unreadable (control): the readable tripwire contradicts the struct — asserts=\"1\" conflicts=\"1\", exit 2, no asserts_unreadable="
+    chmod 000 "$UA/tree/b/t.h"
+    if cat "$UA/tree/b/t.h" >/dev/null 2>&1; then
+        printf '  SKIP  asserts_unreadable: chmod 000 does not stop this user reading the file (root?) — the arm cannot plant its fault\n'
+    else
+        XDG_CACHE_HOME="$UA/xdg" TMPDIR="$UA/xdg" "$BIN" "$UA/tree" --layout=UnreadAssert >"$UA/cold.out" 2>/dev/null; uac3=$?
+        [ "$uac3" -eq 3 ] \
+            && ok "asserts_unreadable: exit 3 (could not verify) — not 0 (a clean contract it never checked)" \
+            || no "asserts_unreadable: an unreadable tripwire file exited $uac3, expected 3"
+        grep -o '<layout [^>]*>' "$UA/cold.out" | grep -q ' asserts="0" .*asserts_unreadable="1"' \
+            && ok "asserts_unreadable: the root says asserts_unreadable=\"1\" beside asserts=\"0\"" \
+            || no "asserts_unreadable: the unread tripwire file vanished silently: $( grep -o '<layout [^>]*>' "$UA/cold.out" )"
+        grep -qE 'asserts_unreadable="N": |asserts_unreadable=N: ' "$UA/cold.out" \
+            && ok "asserts_unreadable: the attribute is defined in the legend of the same document" \
+            || no "asserts_unreadable: asserts_unreadable= is emitted with no legend definition"
+        command -v xmllint >/dev/null 2>&1 && { xmllint --noout "$UA/cold.out" 2>/dev/null \
+            && ok "asserts_unreadable: the disclosing document is well-formed" || no "asserts_unreadable: the disclosing document fails xmllint"; }
+    fi
+    chmod 644 "$UA/tree/b/t.h"
+else
+    no "asserts_unreadable (control): want exit 2 with asserts=\"1\" conflicts=\"1\" and no asserts_unreadable= (rc=$uac) — the arm is void: $( grep -o '<layout [^>]*>' "$UA/warm.out" )"
+fi
+
 # base SPELLING is not byte drift (CodeRabbit 4553235766; red on c9c01fcff: kind="drift", exit 2): the host spells its base
 # `simd::BaseSlot`, the shader `BaseSlot`, both 4 B at offset 0 — same bytes, so kind="spelling" and exit 0. Control: a base of
 # a DIFFERENT size in the same pair stays drift, exit 2.
