@@ -3219,6 +3219,16 @@ struct ReceiverEvidence
         return from < staticMember.size() && staticMember[ from ] != 0;
     }
 
+    // lane overload-split: the ONE class field `field` declared on `type` itself (not a base) resolved to through its QUALIFIED
+    // written type (memberTypeClass), else kNoNode. narrow() answers with that class's OWN members first — terraform's
+    // `d.suppressedModules.Add` is addrs.Set's Add, not every Set's — and, when it owns none (an interface, a method promoted
+    // from an embedded type), reads the field by name exactly as before.
+    NodeId qualifiedFieldClass( std::string_view type, std::string_view field ) const
+    {
+        const auto known = memberTypeClass.find( typeKey( type, "#", field ) );
+        return known == memberTypeClass.end() ? kNoNode : known->second;
+    }
+
     // RESOLVE: the definitions this member call's typed receiver reaches, in `found`; false when the receiver proves
     // nothing (untyped, a type this tree does not define, or a type that defines no such member anywhere in its cone).
     // `spellingDecides` false: the receiver root is a name WRITTEN in its scope (graph.h JsWrittenRoot), so the class its SPELLING names
@@ -3263,8 +3273,7 @@ struct ReceiverEvidence
             const std::size_t dot = rest.find( '.' );
             const std::string_view field = rest.substr( 0, dot );
             rest = dot == std::string_view::npos ? std::string_view{} : rest.substr( dot + 1 );
-            const auto known = memberTypeClass.find( typeKey( type, "#", field ) );   // declared on `type` itself, not a base
-            fieldCls  = known == memberTypeClass.end() ? kNoNode : known->second;
+            fieldCls  = qualifiedFieldClass( type, field );
             type      = fieldOf( type, field );
             superOnly = false;
             classSide = false;
@@ -3273,9 +3282,7 @@ struct ReceiverEvidence
                 return false;
             }
         }
-        // lane overload-split: a field whose qualified written type resolved to ONE class answers with that class's OWN members
-        // (terraform's `d.suppressedModules.Add` is addrs.Set's Add, not every Set's). When it owns none — an interface, a method
-        // promoted from an embedded type — the field reads by name exactly as before.
+        // the field's ONE class answers first (qualifiedFieldClass); owning no such member, the field reads by name as before
         if( !( fieldCls != kNoNode && methodOf( type, r.calleeName, superOnly, fieldCls ) ) && !methodOf( type, r.calleeName, superOnly, cls ) )
         {
             return false;
