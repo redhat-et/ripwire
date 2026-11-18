@@ -18537,3 +18537,157 @@ koa has no windowed cell. Rows are unchanged everywhere: the same sites, in the 
   and an agent that needs the importing files must ask the XML form.
 - **`--callees` gets the block and not the pointer**, and no number is published for it.
 - **No sanitizer build was run for this band.**
+
+## PRE-REGISTRATION 2026-11-17 (amendment 11) — BAND K: a legend tier never claims a definition the reader does not hold
+
+Registered before any `src/` change, on `integration/byte-token-070` at `93210787e`
+(`0.6.10-dev.78+g93210787e`). Gate: `test/legendtiercheck.sh`, written first and shown red on that binary.
+**The letter collides with ITEM K (the cap-height bands K1–K6 above, closed).** The rules below are this
+band's only; where both could be meant, write "BAND K (tiers)".
+
+### The defect, measured before the fix
+
+`--legend-have=DICTV` asserts the caller holds the whole dictionary, so the answer leaves every definition
+out. On the unchanged binary, over the 453 registered cells of the headline metric (12 verbs × tmux, koa,
+nushell, terraform, cpython; symbols at map ranks 1, 2, 4 … 128; fixed before this band existed):
+
+| | |
+| --- | ---: |
+| dictionary (`ripwire --legend-dict`) | **131,571 B**, 1,155 entries |
+| saving, default answer − `--legend-have` answer, summed | 453,904 B over 453 cells = **1,002.0 B per call** |
+| calls to repay the dictionary | 131,571 / 1,002.0 = **131.3** |
+| cells that take the ref posture | 388 of 453 (every `--for` cell, 65 of 65, is served inline) |
+| dictionary entries an answer of these verbs ever carries | 148 of 1,149 non-core, in the 388 non-`--for` answers |
+
+So the handshake is a net loss for any session under about 131 calls, and the only holding the binary can
+be told about is all 1,155 lines. The distribution that makes a small tier possible is not a head and a
+tail. Six entries cross verbs — `root=` 388/388, `next=` 224, `counts_floor=` 217,
+`graph_ambiguous=/graph_unresolved=` 206, `graph_unindexed=` 169, `est_tokens=` 143 of 388 — and the
+seventh is at 65/388 = 16.8 % and private to `--pack-task`. Leaving out each corpus in turn, the set at or
+above 25 % is the same six every time (lowest in-set 33.3 %, highest out-of-set 19.9 %). Everything else
+belongs to one verb, which is a pack, not a core.
+
+Two figures in the design this band implements were measured on an earlier binary and do **not** hold
+here; the measurement on this binary is the one registered. `--expand` took the ref posture on 2 of 39
+cells there and takes it on 39 of 39 here; `--pack-task` 54 of 65 there, 65 of 65 here. And the
+`<file-scope>` reading that no dictionary line held (22 of 453 answers) is an entry on this train
+(`kNameReadingEntries`), so the premise control below cannot be "K1 fails on the file-scope cells": it is
+"no tier smaller than the dictionary can be named at all".
+
+### What changes
+
+Tiers, each with its own identity:
+
+- **core** — the six ref-posture readings `legenddict.h` already calls the core, the reading of `have=`,
+  and the six cross-verb terms above. `ripwire --legend-dict=core`.
+- **pack(KEY)** — core plus, for one schema key, the entries present in at least one third of that
+  schema's answers in a committed census. `ripwire --legend-dict=KEY`. A schema with no census answers the
+  core with `census="0"`: zero measured answers is not a measured empty pack.
+- **full** — every line, as today. `ripwire --legend-dict`.
+
+`--legend-have=` takes a comma list of tier versions; the served set is their union; the answer says what
+was assumed in `<about legend="ref" have="core|core+KEY…|full" …>`. An entry in no named tier rides the
+answer that carries it, in the trailing comment `applyRefPosture` already writes. The CLI's
+`session.serveAll()` is replaced by serving exactly the named tiers. The MCP stdio session is unchanged.
+
+### Grain
+
+Every rule is at **answer (cell) grain, per verb, with the verb named**. K4's one pooled figure is cell
+grain over the gate's registered cells, whose verb mix the gate prints. None is the grader's item grain or
+its symbol/file grain, none may be reported with the word "recall", and no K figure may be averaged with
+an R-band figure. K3 is evaluated per pack and never as a mean over packs. K2 is per tier.
+
+### The rule, fixed before the change
+
+Holdings: `none`, `corev`, `packv(own key)`, `packv(another key)`, `dictv`.
+
+- **K1 — HELD OR CARRIED (reader-protecting; bar 0, not a rate; grain: cell × holding).** For every
+  registered cell and holding, every attribute of `ripwire --legend-dict=roster` (sources `term`, `attr`,
+  `window`) present in the answer, and every clause of that cell's **default-posture legend**, has its
+  verbatim dictionary body in (a) the text of a tier the call PASSED in `--legend-have=` (which K2(c)
+  separately requires `have=` to name — K1 does not take the answer's word for it), as printed by this
+  binary's `--legend-dict=<tier>`, or (b) a comment of that same answer. The gate reads tier text from
+  the binary and holds no copy. A legend clause that is no dictionary line and is absent from the ref answer fails as
+  UNENTERED.
+- **K2 — IDENTITY (grain: tier).** (a) line 1 of each tier's text carries `have=H` and `entries=N`, and
+  FNV-1a 64 over the N lines after it equals H; the bare dictionary likewise with `dictv=`. (b) Tier
+  versions are pairwise distinct unless their line sets are equal. (c) `<about have=>` on every ref answer
+  names exactly the tiers passed. (d) A value that is no tier of this binary: exit non-zero, stdout empty,
+  stderr names the value and contains `--legend-dict=core`; with a valid value beside it in the list, the
+  same. (e) `packv(X)` on a schema-Y answer: exit 0, K1 holds, `have="core+X"`.
+- **K3 — A PACK EARNS ITS PLACE (grain: pack, over that pack's cells).** For each pack with at least 5
+  registered ref-capable cells: `bytes(--legend-dict=KEY) − bytes(--legend-dict=core)` ≤ 3 × the mean over
+  those cells of `bytes(answer under corev) − bytes(answer under packv(KEY))`. Fewer than 5 cells prints
+  `ABSENT n=k`, never a pass.
+- **K4 — THE REPAYMENT ARITHMETIC IS PINNED (grain: cell, pooled over the registered cells).** With
+  B = `bytes(ripwire --legend-dict=core)` and S = the mean over the registered cells of
+  `bytes(default answer) − bytes(answer under corev)`: (a) **B ≤ 1,536**; (b) **ceil(B / S) ≤ 12**;
+  (c) the core holds no entry present in fewer than 25 % of the registered cells, the structural readings
+  (the six `kCoreEntries` lines and the reading of `have=`) exempt by name. The gate prints B, S, the
+  quotient and n. The bar in (b) is 12 and not 9: the design measured 8.1–11.9 across four populations
+  and a bar of 9 is one it already fails.
+- **K5 — NOTHING LOST (grain: cell × holding).** The ref answer holds the same multiset of rows and the
+  same root-attribute name/value multiset as the default answer, and is not longer than it.
+- **K6 — DETERMINISM (grain: cell × holding).** Same argv twice, byte-identical.
+
+### Decision rule
+
+- K1, K2, K5, K6 at bar 0 and K4 holds, on the gate's cells **and** on the 453 registered cells re-run on
+  the built binary: the core tier ships, and every guidance site drops the whole-dictionary recipe for the
+  core in the same commit.
+- Additionally K3 holds for every pack with ≥ 5 cells, and core + own pack retains **≥ 80 %** of the
+  full-dictionary saving on the 453 cells, measured on the built binary: packs ship. Below 80 %: the core
+  ships alone.
+- K1 fails on any cell: nothing ships.
+- K4(b) fails: the core is too large or the population moved; it is shrunk under a new band. The bar is
+  not raised to fit.
+- The published sentence is the measured pair with its n — "core: B bytes, repays in ceil(B/S) calls on n
+  cells of these verbs; `--for` unreached" — and **never "single-digit"**.
+
+### Controls
+
+- **The premise is red first**, on the unchanged binary: K2(a) fails (`--legend-dict=core` is refused, so
+  no holding smaller than the dictionary exists), K1/K3 under `corev` and `packv` are UNREACHABLE, and K4
+  fails with B = the whole dictionary and the quotient that follows.
+- **Non-vacuity, counted, zero is a FAIL.** The cells must include: an answer whose default legend holds an
+  entry in no tier (inline carry exercised); an answer fully covered by core + pack (zero carry); a
+  not-applicable answer; an answer carrying the module-scope clause; a schema with no census; an answer
+  whose schema key differs from its flag's name. An inline-kept answer is counted and reported; the
+  fixture is not contorted to force one, and a count of 0 there is printed as `ABSENT`, not a pass.
+- **The unreduced count is a number.** The gate prints, per verb and holding, `ref / inline-kept /
+  not-applicable`. A verb whose cells all move to not-applicable under a holding fails, `--for` excepted
+  by name (its CLI legend is its own dialect and no dictionary line holds it). To make the two unreduced
+  outcomes tell apart from outside, a run with `--legend-have=` whose answer is served inline says which
+  on stderr.
+- **Three output tokens.** An arm prints a value, `ABSENT` or `UNREACHABLE`; no mean over an empty list.
+- **Exit codes** of every call are checked; a refusal arm requires the stderr content K2(d) names.
+- **The pack table is a build product.** `bench/legendtier/packs_build.py` writes `src/legendpacks.h`
+  from the committed census `bench/legendtier/census.tsv` by the one-third rule; the gate runs it with
+  `--check`, so membership cannot be hand-tuned. The census itself comes from corpora that are not in
+  this repository; the gate cannot re-run it and does not claim to.
+
+### Mutation controls — each must go RED
+
+Applied by the gate to a copy of what it collected (answers, tier texts, the roster), so every run proves
+each arm can fail. Reader-protecting ones are marked.
+
+| | mutation | arm that must fail |
+| --- | --- | --- |
+| **M1 (reader)** | delete the trailing definition comment of a `corev` answer that carries one; bytes shrink, rows unchanged | K1, naming the attribute |
+| **M2 (reader)** | the same, and rewrite `have="core"` to `have="full"` — today's `serveAll()` | K1 under the core's text, and K2(c) |
+| **M3 (reader)** | remove one line from the core's text, keep its `have=` | K2(a); and with K2(a) not consulted, K1 on every cell carrying that attribute |
+| **M4 (reader)** | force `packv(callers)` to equal `corev` | K2(b) |
+| **M5 (reader)** | remove the module-scope reading from every tier text while the answer still drops it | K1, as UNENTERED |
+| M6 | a 16-hex value one digit off is served instead of refused | K2(d) |
+| M7 | add 100 real dictionary lines to the core | K4(a) and K4(c), while K1 still passes; then the whole dictionary as the core: K4(b), quotient above 100 |
+| M8 | add 40 never-met lines to one pack | K3 for that pack and no other |
+| M9 | delete one row; change one root attribute's value | K5, each time |
+| M10 | the roster is empty | the gate fails rather than passing with nothing to check |
+| M11 | — | the matrix of which arm fails alone under M1–M10 is printed; an arm that never fires without another has no independent evidence and its removal is registered here in advance |
+
+### What this band does not claim
+
+Not that a core makes the handshake pay for a short session. Not anything about `--for`. No session-level
+repayment figure. Not that the census is complete: schemas with no measured answer have no pack. Not
+that `--legend-have=` proves receipt — it is argv, echoed after validation. Nothing about envoy, vscode,
+llvm or any corpus outside the five.
