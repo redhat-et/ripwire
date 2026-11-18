@@ -950,6 +950,14 @@ Discloses: **none**
 | `kMaxRestUnits` | `20000` | — | — |
 | `kMaxRoleBytes` | `400` | — | a role's closing backtick must be this near, on one paragraph |
 
+### `src/ingest_rustmacroargs.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kMacroArgNestingDepth` | `16` | — | — |
+
 ### `src/ingest_sidecap.h`
 
 Discloses: **none**
