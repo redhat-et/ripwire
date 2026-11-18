@@ -7307,6 +7307,20 @@ inline void noteRustReceiverRoots( BindCtx& cx, TSNode n, const char* t )
     } );
 }
 
+// `|a, (b, c)|`: each pattern's names are tombstones; a typed `|b: &Book|` is a `parameter`, recorded by its own arm.
+// Moved out of captureRustEvidence by train 1117d2 (the composed std-namesake and rust-self-chain arms took it past qd's bar).
+inline void captureRustClosureParameters( BindCtx& cx, TSNode n, std::uint32_t at )
+{
+    const BindSite site = siteIn( at, parentOf( n ) );
+    for( std::uint32_t i = 0, k = ts_node_named_child_count( n ); i < k; ++i )
+    {
+        if( const TSNode c = ts_node_named_child( n, i ); !kindIs( ts_node_type( c ), "parameter" ) )
+        {
+            pushPatternTombstones( cx, c, site );
+        }
+    }
+}
+
 inline void captureRustEvidence( BindCtx& cx, TSNode n, const char* t, std::uint32_t at )
 {
     if( kindIs( t, "function_item" ) )
@@ -7335,15 +7349,7 @@ inline void captureRustEvidence( BindCtx& cx, TSNode n, const char* t, std::uint
     }
     else if( kindIs( t, "closure_parameters" ) )
     {
-        // `|a, (b, c)|`: each pattern's names are tombstones; a typed `|b: &Book|` is a `parameter`, recorded by its own arm
-        const BindSite site = siteIn( at, parentOf( n ) );
-        for( std::uint32_t i = 0, k = ts_node_named_child_count( n ); i < k; ++i )
-        {
-            if( const TSNode c = ts_node_named_child( n, i ); !kindIs( ts_node_type( c ), "parameter" ) )
-            {
-                pushPatternTombstones( cx, c, site );
-            }
-        }
+        captureRustClosureParameters( cx, n, at );
     }
     else if( kindIs( t, "for_expression" ) )
     {
