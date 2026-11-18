@@ -553,7 +553,7 @@ struct MainDispatch
 #include "verbs_change.h"
 #include "verbs_report.h"
 #include "verbs_grep.h"
-#include "memceiling.h"          // lane M2 prototype: RIPWIRE_MEM_BUDGET_MB, the allocator-level ceiling (default off)
+#include "memceiling.h"          // the memory guard's allocator line (on by default; RIPWIRE_MEM_BUDGET_MB overrides it)
 #include "memguard.h"            // #350 layer 3: the memory guard's limit (installed in main) and its verdicts after ingest
 #include "lsp.h"                 // the --lsp navigation-server section (Phase 1 PoC — docs/LSP.md); after the verb families so it can reuse the shared use-site scan
 
@@ -4453,36 +4453,50 @@ static bool installMemoryGuard( const rw::Config& cfg )
     return true;
 }
 
-// Lane M2 prototype (memceiling.h, default off): RIPWIRE_MEM_BUDGET_MB arms an allocator-level ceiling. Read once, before any
-// thread. A value that is set but not a whole MiB count of at least 64 refuses the run (exit 1), as RIPWIRE_MAX_MEMORY does.
-// Servers do not arm it — its refusal ends the process — and a binary whose operator new is not replaced cannot: both say so.
+// The memory guard's allocator line (memceiling.h, on by default): installed straight after the guard, before any thread. Its
+// ceiling is the guard's hard limit (65% of RAM, --max-memory, RIPWIRE_MAX_MEMORY) unless RIPWIRE_MEM_BUDGET_MB names one for
+// this line alone (0 = off). A value that is not a whole MiB count of 0 or at least 64 refuses the run (exit 1), as
+// RIPWIRE_MAX_MEMORY does. Servers do not arm it (its refusal ends the process); nor can a build whose operator new is not
+// replaced. Either is said on stderr only when RIPWIRE_MEM_BUDGET_MB asked for the line explicitly.
 static bool installMemoryCeiling( const rw::Config& cfg )
 {
     const rw::memceiling::Setting s = rw::memceiling::readSetting();
-    if( s.parse == rw::memceiling::Parse::Unset )
-    {
-        return true;
-    }
-    if( !VALIDATE( s.parse == rw::memceiling::Parse::Armed, "RIPWIRE_MEM_BUDGET_MB is a whole number of MiB, at least 64" ) )
+    if( !VALIDATE( s.parse != rw::memceiling::Parse::Invalid, "RIPWIRE_MEM_BUDGET_MB is 0 or a whole number of MiB, at least 64" ) )
     {
         DISCLOSE( Diagnostics::answerRefused, "main: an unparseable RIPWIRE_MEM_BUDGET_MB refuses the run (exit 1, stderr names it)" );
-        rw::emitTo( stderr, "ripwire: RIPWIRE_MEM_BUDGET_MB needs a whole number of MiB, at least {} — got '{}', e.g. RIPWIRE_MEM_BUDGET_MB=8000\n",
+        rw::emitTo( stderr, "ripwire: RIPWIRE_MEM_BUDGET_MB needs 0 (off) or a whole number of MiB, at least {} — got '{}', e.g. RIPWIRE_MEM_BUDGET_MB=8000\n",
                     rw::memceiling::kFloorMiB, std::getenv( "RIPWIRE_MEM_BUDGET_MB" ) );
         return false;
     }
-#if defined( RIPWIRE_LARGE_ALLOC_LINKED )
+    if( s.parse == rw::memceiling::Parse::Off )
+    {
+        return true;
+    }
+#if defined( RIPWIRE_MEM_CEILING_HOOK )
     constexpr bool kHookLinked = true;
 #else
     constexpr bool kHookLinked = false;
 #endif
     if( cfg.mcp || cfg.lsp || !kHookLinked )
     {
-        rw::emitTo( stderr, "ripwire: RIPWIRE_MEM_BUDGET_MB is NOT armed ({}); only the memory guard's own limits apply to this run\n",
-                    !kHookLinked ? "this build does not replace operator new (largealloc.cpp is macOS-only)"
-                                 : "a server must survive a refused request, and this prototype's refusal ends the process" );
+        if( s.parse == rw::memceiling::Parse::Armed )
+        {
+            rw::emitTo( stderr, "ripwire: RIPWIRE_MEM_BUDGET_MB is NOT armed ({}); only the memory guard's own limits apply to this run\n",
+                        !kHookLinked ? "this build does not replace operator new (a sanitizer or RIPWIRE_ALLOC_COUNT build)"
+                                     : "a server must survive a refused request, and the ceiling's refusal ends the process" );
+        }
         return true;
     }
-    rw::memceiling::arm( s.mib );
+    if( s.parse == rw::memceiling::Parse::Armed )
+    {
+        rw::memceiling::arm( s.mib * rw::memceiling::kMiB, "RIPWIRE_MEM_BUDGET_MB=" + std::to_string( s.mib ) );
+        return true;
+    }
+    const rw::memguard::Limits& l = rw::memguard::limits();   // 0 = the machine's memory is unknown: no footprint cap, so none here
+    const std::string spelled = rw::memguard::limitSpelling( l.hardBytes );
+    rw::memceiling::arm( l.hardBytes, l.source == rw::memguard::Source::Flag  ? "--max-memory=" + spelled
+                                    : l.source == rw::memguard::Source::Env   ? "RIPWIRE_MAX_MEMORY=" + spelled
+                                                                              : "the default 65% of RAM, " + spelled );
     return true;
 }
 
