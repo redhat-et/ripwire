@@ -34,6 +34,9 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-17, lane go-cpp-edges (base main 9087eb59c): RE-PINNED with UPDATE_GOLDEN=1. Watched text: kParserVer 309 -> 317
+#   (placeholder, mirrored in quality.h): a Go result written as a generic instantiation records its ReturnType. kQSnapCacheScheme
+#   stays: the parser key already keys the qsnap cache on extraction, and no watched function moved.
 # 2026-11-17, TRAIN-1117b (lanes land-426 + land-606 stacked over main c565a3fad): RE-PINNED with UPDATE_GOLDEN=1 in the train's
 #   re-pin commit. kParserVer and kIngestParserVerMirror 311 -> 313 (rich 314): ONE number for both members, above main's 311/312
 #   (#420, landed by TRAIN-1117a-r #686). kQSnapCacheScheme unchanged: the extraction key moves, the snapshot blob shape does not.

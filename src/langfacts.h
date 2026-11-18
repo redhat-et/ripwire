@@ -569,8 +569,9 @@ static_assert( !langFacts( Lang::Unknown ).implicitReceiver && !langFacts( Lang:
 /// caller's translation unit DECLARES it — in the caller's own file or a file it includes, as the body or as a prototype. A
 /// namesake defined in a source file the caller never includes, with no prototype in reach, is not what the call names (graph.h
 /// FreeDeclReach). C++; C keeps its own reach rules (FE-A).
-inline constexpr bool bareCallNeedsDeclaration( Lang l ) noexcept { return l == Lang::Cpp; }
-static_assert( bareCallNeedsDeclaration( Lang::Cpp ) && langFacts( Lang::Cpp ).implicitReceiver && !bareCallNeedsDeclaration( Lang::Unknown ),
+inline constexpr std::array<Lang, 1> kBareCallNeedsDeclaration = { Lang::Cpp };
+static_assert( std::ranges::find( kBareCallNeedsDeclaration, Lang::Cpp ) != kBareCallNeedsDeclaration.end() && langFacts( Lang::Cpp ).implicitReceiver
+                   && std::ranges::find( kBareCallNeedsDeclaration, Lang::Unknown ) == kBareCallNeedsDeclaration.end(),
                "CPP-FREE-VS-MEMBER: the declaration rule is read on the implicit-receiver path of the resolve loop" );
 static_assert( !langFacts( Lang::Unknown ).moduleCallReachesFunctionsOnly && !langFacts( Lang::Unknown ).classNameReceiver && !langFacts( Lang::Unknown ).hashComment );
 static_assert( !langFacts( static_cast<Lang>( 99 ) ).implicitReceiver && !langFacts( static_cast<Lang>( 99 ) ).hashComment );
