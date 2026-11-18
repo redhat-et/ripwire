@@ -6,6 +6,7 @@
  "adaptivecheck.sh": 20.8,
  "adaptivecutshapecheck.sh": 7.5,
  "affectedcheck.sh": 8.8,
+ "affectedfoldcheck.sh": 8.8,
  "agentloopclaudecheck.sh": 3.8,
  "agentloopcodexcheck.sh": 0.2,
  "agentloopeditsuitecheck.sh": 0.8,

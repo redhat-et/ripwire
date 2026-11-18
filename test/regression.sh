@@ -294,6 +294,7 @@ for _g in \
     adaptivecheck \
     adaptivecutshapecheck \
     affectedcheck \
+    affectedfoldcheck \
     affectedgroupcheck \
     agentloopclaudecheck \
     agentloopcodexcheck \

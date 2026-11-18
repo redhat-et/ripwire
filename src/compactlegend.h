@@ -453,6 +453,11 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // without (p= splits into exactly n= paths; counts are FILES) beside the one it adds: the command is the TEMPLATE with {p}
     // replaced by each path. Gate: test/affectedgroupcheck.sh arm 6 (defined where carried, absent where not).
     { "run_each",          "<g n= p=a,b,c run_each=>: n rows with equal attrs as ONE row; each path's command is run_each= with {p} replaced by that path; p= splits on ',' into exactly n= paths; shown=/total= count test FILES", true, "g" },
+    // PATH-FOLD (2026-11-18, testmap.h foldPathsInto): a tests_to_run <g> row whose paths are said folded carries pf= in
+    // place of p=. Present-only and qualified to <g>: a document that folds nothing never pays, and this row is the
+    // compact dialect's ONLY reading of pf=, so it states the whole expansion rule a reader needs to get the n= paths.
+    // Gate: test/affectedfoldcheck.sh arm (L) (defined where carried, absent where not) and arm (H) (the rule is bash's).
+    { "pf",                "<g pf=>: p= folded; PRE{A,B}SUF = PREASUF,PREBSUF, braces nest (bash brace expansion): d/{a,s/{b,c}}.py = d/a.py,d/s/b.py,d/s/c.py; expand in order for exactly n= paths", true, "g" },
     { "hits_capped",       "hits_capped=1: hits= is a floor" },
     // --regex's long-line disclosure (search.h grepScanText / regexguard.h maxEngineSubjectBytes): the count rides every
     // regex answer, the bound only beside a nonzero count.
