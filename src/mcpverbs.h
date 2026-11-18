@@ -599,7 +599,7 @@ inline SweepFault sweepFaultOf( bool blobsUnread ) noexcept
 inline std::string whereisText( const std::string& root, const std::string& symbol, const std::string& filter,
                                 std::size_t maxHits, McpPageArgs page = {}, bool* seedFault = nullptr,
                                 crossref::WhereisListing listing = crossref::WhereisListing::ShorterOfDefsAll,
-                                SweepFault* fault = nullptr, bool fullText = false )
+                                SweepFault* fault = nullptr, bool fullText = false, RedactCounts* redact = nullptr )
 {
     std::string sel = symbol;
     std::string seedSpec;
@@ -636,7 +636,7 @@ inline std::string whereisText( const std::string& root, const std::string& symb
     {
         res.nearMiss = didYouMean( getIndex( root ).ing, sel );
     }
-    return captureXml( [ & ]( std::FILE* f ) { crossref::writeWhereisPage( f, res, maxHits, page.limit, page.offset, listing ); } );
+    return captureXml( [ & ]( std::FILE* f ) { crossref::writeWhereisPage( f, res, maxHits, page.limit, page.offset, listing, redact ); } );
 }
 
 // `stray_content` verb: per ref, the content its own divergent work authored that the live line lacks.
@@ -3154,7 +3154,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     if( out.ends_with( "</ctx>" ) )
     {
         out.insert( out.size() - 6, renderForDeclRows( ing, ix.g, task, /*held=*/budgetTokens > 0 ) );
-        out.insert( out.size() - 6, renderForExemplarFamily( ing, ix.g, task, /*held=*/budgetTokens > 0 ) );   // EXEMPLAR-STAIRS, the CLI twin's renderer
+        out.insert( out.size() - 6, renderForExemplarFamily( ing, ix.g, task, redact, /*held=*/budgetTokens > 0 ) );   // EXEMPLAR-STAIRS, the CLI twin's renderer
         const McpManifestRows manifest = mcpManifestRowsFitted( ing, task, redact, out, ForDocBodyBudget{ budgetTokens, answerEstTokens } );   // MANIFEST-ROW
         out.insert( out.size() - 6, manifest.xml );
         manifestTokens = manifest.tokens;

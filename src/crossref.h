@@ -95,6 +95,7 @@
 #include "arch.h"               // fnv1a64
 #include "infra/hashutil.h"     // fnv1aMultiply — the sanitizer-safe wrapping multiply (G1 runs -fsanitize=integer)
 #include "infra/jsonesc.h"      // shSingleQuote
+#include "redact.h"             // redactSecrets — a hit's t= is a source line (the checkout's or another ref's blob)
 #include "serialize.h"          // escapeXml
 #include "pageview.h"           // §P8: pageWindow / pageDisclosure — the shared --limit/--offset contract
 #include "nextverb.h"           // nextAttrXml / nextFlag — the <refs next=> follow-up of the default listing
@@ -5478,8 +5479,8 @@ inline ListedHits whereisServedListing( const WhereResult& res, std::size_t maxH
 // PREVIEW clause or the compact readings can cost more than cutting a line just past the threshold saves (a 395-byte line
 // saved 92 B and its disclosure cost 250). So a served page is byte-identical to the same page whole, or strictly shorter
 // in both postures. A tie, or a render that fails, serves the page whole (the whole answer).
-inline void writeWhereisPage( std::FILE* out, const WhereResult& res, std::size_t maxHits, int pageLimit, int pageOffset,
-                              WhereisListing listing )
+inline void writeWhereisServedPage( std::FILE* out, const WhereResult& res, std::size_t maxHits, int pageLimit, int pageOffset,
+                                    WhereisListing listing )
 {
     // The LISTED rows (WhereisListing): indices into res.hits, in the hit list's own order, so a listing is a
     // subsequence of the whole list and its rows print byte-identically to the same rows of listing=all.
@@ -5504,10 +5505,56 @@ inline void writeWhereisPage( std::FILE* out, const WhereResult& res, std::size_
     writeWhereisListedPage( out, res, maxHits, pageLimit, pageOffset, listed );
 }
 
-// The un-paginated form — unchanged contract, for callers that want the whole (capped) listing.
-inline void writeWhereis( std::FILE* out, const WhereResult& res, std::size_t maxHits )
+// REDACT-TOUCH: a hit's t= is a source line, so every hit's line is redacted BEFORE the listing is chosen and a long line is
+// cut (the bytes rules above then measure what prints, and a token crossing the preview cut reaches the redactor whole). A copy
+// of the result is made only when some line holds a credential shape; nullopt otherwise, and under --no-redact (nullptr).
+inline std::optional<WhereResult> whereisRedacted( const WhereResult& res, RedactCounts* redact )
 {
-    writeWhereisPage( out, res, maxHits, 0, 0, WhereisListing::All );
+    std::optional<WhereResult> out;
+    if( redact == nullptr )
+    {
+        return out;
+    }
+    RedactCounts scratch;   // the run's tally counts the printed rows only (writeWhereisPage)
+    std::string  red;
+    for( std::size_t i = 0; i < res.hits.size(); ++i )
+    {
+        if( redactSecrets( res.hits[i].text, red, scratch ) )
+        {
+            if( !out )
+            {
+                out.emplace( res );
+            }
+            out->hits[i].text = std::move( red );   // redactSecrets clears its out string before it writes
+        }
+    }
+    return out;
+}
+
+// One --whereis answer page (writeWhereisServedPage) over the redacted lines. `redact`: the run's tally, counting the
+// secrets of the rows this page prints (nullptr: --no-redact, every line verbatim).
+inline void writeWhereisPage( std::FILE* out, const WhereResult& raw, std::size_t maxHits, int pageLimit, int pageOffset,
+                              WhereisListing listing, RedactCounts* redact )
+{
+    const std::optional<WhereResult> redacted = whereisRedacted( raw, redact );
+    writeWhereisServedPage( out, redacted ? *redacted : raw, maxHits, pageLimit, pageOffset, listing );
+    if( !redacted )
+    {
+        return;   // no line held a credential shape (or redaction is off): nothing to count
+    }
+    const ListedHits  listed = whereisServedListing( *redacted, maxHits, listing );   // the listing the page above served
+    const PageWindow  window = whereisHitWindow( listed.rows.size(), maxHits, pageLimit, pageOffset );
+    std::string       scratch;
+    for( std::size_t k = window.begin; k < window.end; ++k )
+    {
+        redactSecrets( raw.hits[ listed.rows[k] ].text, scratch, *redact );
+    }
+}
+
+// The un-paginated form — unchanged contract, for callers that want the whole (capped) listing.
+inline void writeWhereis( std::FILE* out, const WhereResult& res, std::size_t maxHits, RedactCounts* redact )
+{
+    writeWhereisPage( out, res, maxHits, 0, 0, WhereisListing::All, redact );
 }
 
 }}   // namespace rw::crossref
