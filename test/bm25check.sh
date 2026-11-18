@@ -89,5 +89,43 @@ else
     printf '  SKIP  xml well-formed (no xmllint)\n'
 fi
 
+# ── #5 CALLEE-FIELD-ONCE: a call SITE puts its callee name in the caller's document once, however many
+#    candidates the resolver split it over (src/lexical.h calleeEdgeTimes). Generated at test time, so no
+#    whole-repo run sees it. Pairs whose texts tokenize identically and differ ONLY in how the resolver bound
+#    the call must score identically under a query only their names carry ("caller"):
+#      alpha_caller  obj.ping()                — one site split over the 5 `ping` impls (5 edges)
+#      bravo_caller  obj.pong()                — one site, one `pong` (1 edge)
+#      charlie_caller obj.ping(); other.ping() — two sites, the same 5 edges: counts TWO, not 5, not 1
+#      delta_caller  obj.pong(); other.pang()  — two sites, two unique callees (2 edges)
+#    Main counted one name per edge, so alpha's and charlie's documents carried 5 `ping`s and scored below
+#    their twins. ─────────────────────────────────────────────────────────────────────────────────────────
+CF="$( mktemp -d "${TMPDIR:-/tmp}/bm25callee.XXXXXX" )"
+trap 'rm -rf "$CF"' EXIT
+{
+    for n in 1 2 3 4 5; do printf 'class A%s:\n    def ping(self):\n        return %s\n' "$n" "$n"; done
+    printf 'class B1:\n    def pong(self):\n        return 6\n'
+    printf 'class B2:\n    def pang(self):\n        return 7\n'
+    printf 'def alpha_caller(obj):\n    return obj.ping()\n'
+    printf 'def bravo_caller(obj):\n    return obj.pong()\n'
+    printf 'def charlie_caller(obj, other):\n    obj.ping()\n    return other.ping()\n'
+    printf 'def delta_caller(obj, other):\n    obj.pong()\n    return other.pang()\n'
+} > "$CF/m.py"
+cf(){ perl -e 'alarm 15; exec @ARGV' "$BIN" "$CF" --no-cache "$@" 2>/dev/null; }
+callee_count(){ cf --callees="$1" | grep -oE '<callees [^>]*count="[0-9]+"' | grep -oE 'count="[0-9]+"' | grep -oE '[0-9]+'; }
+# premise: the split really is 5 candidates and the twins really are unique, else the equalities below are vacuous
+pa="$( callee_count alpha_caller )"; pb="$( callee_count bravo_caller )"; pc="$( callee_count charlie_caller )"; pd="$( callee_count delta_caller )"
+{ [ "$pa" = 5 ] && [ "$pb" = 1 ] && [ "$pc" = 5 ] && [ "$pd" = 2 ]; } \
+    && ok "callee-field premise: alpha/charlie split over 5 ping candidates, bravo 1 callee, delta 2 (got $pa/$pb/$pc/$pd)" \
+    || no "callee-field premise: expected callees 5/1/5/2, got '$pa'/'$pb'/'$pc'/'$pd' — the arms below would test nothing"
+OUT_CF="$( cf --query=caller )"
+ka="$( k_of "$OUT_CF" alpha_caller )"; kb="$( k_of "$OUT_CF" bravo_caller )"
+kc="$( k_of "$OUT_CF" charlie_caller )"; kd="$( k_of "$OUT_CF" delta_caller )"
+{ [ -n "$ka" ] && [ "$ka" = "$kb" ]; } \
+    && ok "callee-field once: a site split over 5 candidates scores like its 1-candidate twin (alpha k=$ka, bravo k=$kb)" \
+    || no "callee-field once: alpha_caller k='$ka' != bravo_caller k='$kb' — the split site's callee name counted per candidate"
+{ [ -n "$kc" ] && [ "$kc" = "$kd" ]; } \
+    && ok "callee-field per site: two sites over the same 5 candidates count two names (charlie k=$kc, delta k=$kd)" \
+    || no "callee-field per site: charlie_caller k='$kc' != delta_caller k='$kd' — two split sites must count twice, not 5 times or once"
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

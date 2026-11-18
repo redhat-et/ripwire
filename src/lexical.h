@@ -536,7 +536,134 @@ inline std::vector<char> notLexRankedMask( const IngestResult& ing )
     return mask;
 }
 
-inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const std::vector<std::uint32_t>& outOff,
+// CALLEE-FIELD-ONCE: how many times pass 1 scans an out-edge's callee name, for the edges that differ from once.
+// A call site is ONE occurrence of its callee name in the caller's text, whatever the resolver concluded about it:
+// a by-name site the resolver split over N candidates (`Body::from(self).into_response()`, 31 `into_response`
+// impls in axum) is still one word in the caller, not N. The CSR is deduped per (caller, callee), so a caller's
+// edges that share a callee NAME stand for at most as many sites as the caller's references spell that name;
+// they count min(edges, sites) together. A name no reference of the caller spells (Ruby `new` reaching
+// `initialize`, an FFI binding, a route) keeps one per edge, the historical count, because nothing says how many
+// sites made those edges. Sparse: (edge index, times) for each shared-name edge, ascending by edge, the group's
+// first edge carrying the group's count and the rest 0; every edge not listed scans once.
+struct CalleeEdgeTimes
+{
+    std::uint32_t edge  = 0;
+    std::uint32_t times = 0;
+};
+
+namespace calleefield
+{
+struct NamedEdge
+{
+    std::string_view name;
+    std::uint32_t    edge = 0;
+};
+struct SharedName   // one caller's edges that share a callee name: edges [ first, first + count ) of `NamedEdge` scratch
+{
+    NodeId           caller = kNoNode;
+    std::string_view name;
+    std::uint32_t    firstEdge = 0;   // index into the shared-edge list
+    std::uint32_t    edgeCount = 0;
+};
+struct CallerName
+{
+    NodeId           caller = kNoNode;
+    std::string_view name;
+    friend bool operator<( const CallerName& a, const CallerName& b ) noexcept
+    {
+        return a.caller != b.caller ? a.caller < b.caller : sortutil::svCompare( a.name, b.name ) < 0;
+    }
+};
+
+// Every caller's groups of two or more out-edges whose targets share a name; `edges` receives the grouped edge
+// indices, each group's run ascending.
+inline std::vector<SharedName> sharedCalleeNames( const IngestResult& ing, const std::vector<std::uint32_t>& outOff,
+                                                  const std::vector<NodeId>& outTargets, std::vector<std::uint32_t>& edges )
+{
+    std::vector<SharedName> groups;
+    std::vector<NamedEdge>  scratch;
+    const std::size_t       callers = outOff.empty() ? 0 : std::min( outOff.size() - 1, ing.symbols.size() );
+    for( std::size_t i = 0; i < callers; ++i )
+    {
+        if( outOff[i + 1] - outOff[i] < 2 )
+        {
+            continue;
+        }
+        scratch.clear();
+        for( std::uint32_t e = outOff[i]; e < outOff[i + 1]; ++e )
+        {
+            scratch.push_back( { ing.symbols[ outTargets[e] ].name, e } );
+        }
+        std::sort( scratch.begin(), scratch.end(), []( const NamedEdge& a, const NamedEdge& b )
+        {
+            const auto byName = sortutil::svCompare( a.name, b.name );
+            return byName != 0 ? byName < 0 : a.edge < b.edge;
+        } );
+        for( std::size_t a = 0, b = 0; a < scratch.size(); a = b )
+        {
+            for( b = a + 1; b < scratch.size() && scratch[b].name == scratch[a].name; ++b ) {}
+            if( b - a < 2 )
+            {
+                continue;
+            }
+            groups.push_back( { NodeId( i ), scratch[a].name, std::uint32_t( edges.size() ), std::uint32_t( b - a ) } );
+            for( std::size_t k = a; k < b; ++k )
+            {
+                edges.push_back( scratch[k].edge );
+            }
+        }
+    }
+    return groups;
+}
+
+// The references the grouped callers make, as (caller, spelled name), sorted: one row per site.
+inline std::vector<CallerName> groupedCallerSites( const IngestResult& ing, const std::vector<SharedName>& groups )
+{
+    std::vector<char> grouped( ing.symbols.size(), 0 );
+    for( const SharedName& g : groups )
+    {
+        grouped[ g.caller ] = 1;
+    }
+    std::vector<CallerName> sites;
+    for( const Reference& r : ing.references )
+    {
+        if( r.fromSymbol < grouped.size() && grouped[ r.fromSymbol ] != 0 )
+        {
+            sites.push_back( { r.fromSymbol, std::string_view( r.calleeName ) } );
+        }
+    }
+    std::sort( sites.begin(), sites.end() );
+    return sites;
+}
+}   // namespace calleefield
+
+inline std::vector<CalleeEdgeTimes> calleeEdgeTimes( const IngestResult& ing, const std::vector<std::uint32_t>& outOff,
+                                                     const std::vector<NodeId>& outTargets )
+{
+    std::vector<std::uint32_t>                 groupedEdges;
+    const std::vector<calleefield::SharedName> groups = calleefield::sharedCalleeNames( ing, outOff, outTargets, groupedEdges );
+    std::vector<CalleeEdgeTimes>               out;
+    if( groups.empty() )
+    {
+        return out;
+    }
+    const std::vector<calleefield::CallerName> sites = calleefield::groupedCallerSites( ing, groups );
+    out.reserve( groupedEdges.size() );
+    for( const calleefield::SharedName& g : groups )
+    {
+        const auto [ lo, hi ] = std::equal_range( sites.begin(), sites.end(), calleefield::CallerName{ g.caller, g.name } );
+        const std::size_t   spelled = std::size_t( hi - lo );
+        const std::uint32_t times   = spelled == 0 ? g.edgeCount : std::uint32_t( std::min<std::size_t>( spelled, g.edgeCount ) );
+        for( std::uint32_t k = 0; k < g.edgeCount; ++k )
+        {
+            out.push_back( { groupedEdges[ g.firstEdge + k ], k == 0 ? times : 0u } );
+        }
+    }
+    std::sort( out.begin(), out.end(), []( const CalleeEdgeTimes& a, const CalleeEdgeTimes& b ) { return a.edge < b.edge; } );
+    return out;
+}
+
+inline std::vector<float> lexicalScoresTiered(const IngestResult& ing, const std::vector<std::uint32_t>& outOff,
                                                const std::vector<NodeId>& outTargets, std::string_view query,
                                                std::size_t pruneTopK, const std::vector<char>* alwaysExact,
                                                const std::vector<float>* symbolScoreMul, int pathFieldDefaultW = 0,
@@ -795,7 +922,10 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         evidenceOut->nameMask.assign( S * evidenceWords, 0u );
     }
 
-    // pass 1 — name (×kwName) + callee-name (×kwCallee) fields need no file text
+    // pass 1 — name (×kwName) + callee-name (×kwCallee) fields need no file text. The callee field counts a call SITE once
+    // (CALLEE-FIELD-ONCE, calleeEdgeTimes above): edges sharing a name scan it as often as the caller spells it, at most.
+    const std::vector<CalleeEdgeTimes> calleeTimes = calleeEdgeTimes( ing, outOff, outTargets );
+    std::size_t                        calleeTimesAt = 0;
     for( std::size_t i = 0; i < S; ++i )
     {
         scanField( i, ing.symbols[i].name, kwName );
@@ -821,7 +951,12 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         }
         for( std::uint32_t e = outOff[i]; e < outOff[i + 1]; ++e )
         {
-            scanField( i, ing.symbols[ outTargets[e] ].name, kwCallee );
+            const bool          listed = calleeTimesAt < calleeTimes.size() && calleeTimes[ calleeTimesAt ].edge == e;
+            const std::uint32_t times  = listed ? calleeTimes[ calleeTimesAt++ ].times : 1u;
+            if( times > 0 )
+            {
+                scanField( i, ing.symbols[ outTargets[e] ].name, kwCallee * int( times ) );   // tf and dl are linear in the weight
+            }
         }
     }
 
