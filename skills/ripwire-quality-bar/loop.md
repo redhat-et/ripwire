@@ -1,0 +1,131 @@
+# ripwire-quality-bar — reference: loop (read on demand; the recipe is in SKILL.md)
+
+## The loop
+1. **Zero-setup path:** just make your change, then run `ripwire <dir> --quality-delta --legend=compact`
+   before you call it done — add `--legend=compact` every time you run this in a loop: on a CLEAN report the
+   legend is nearly the whole payload (2,776 B to 454 B measured on a small fixture, 15,601 B to 8,775 B on
+   a mid-change repo), the rows are byte-identical either way, and you have already read the dictionary — in a git repo it auto-compares the working tree vs `git HEAD` (`<quality-delta
+   baseline="git-HEAD">` confirms it), no start-of-task action needed. **Tighter loop on a long change:** run
+   `ripwire <dir> --quality-baseline` FIRST — **on a clean tree** — to pin an explicit floor (takes
+   precedence over HEAD) so each edit deltas against the original start, not the last commit. On a tree that
+   already differs from HEAD the pin **refuses**, naming the gating findings it would have swallowed into the
+   floor: commit first, or pass `--allow-dirty` to pin anyway, which stamps the absorbed count so every later
+   report carries `baseline_absorbed="N"` and a green exit beside it reads "clean *since the pin*".
+2. **Make your change.**
+3. **Measure the delta** — `ripwire <dir> --quality-delta --legend=compact` → only the regressions you
+   introduced, across the
+   12 kinds in the table below. Each emits `<r kind="…" sym=… was=… now=…>` (`members=` for duplication).
+   Test-fixture dirs are exempt from `dead-code`; `short-horizon-churn` ignores your own current edit and
+   exempts brand-new symbols/markdown/fixtures. Two exemptions are DISCLOSED on the report rather than
+   silent, and both change how you read a zero: a symbol defined by a self-registering test/benchmark
+   macro (doctest `TEST_CASE`, gtest `TEST`/`TEST_F`/`TEST_P`, Catch2, Google Benchmark, plus anything in
+   `.ripwire_config`'s `register_macros`) is never `dead-code` — a static initializer is invisible to a
+   name-based call graph — and the header's `register-macro-excluded="N"` counts how many were dropped
+   that way, printed even at 0. A `duplication` row whose members share only a recognized *idiom* — a
+   scalar threshold ladder, an enum-to-string switch table, a builder chain — and share no domain
+   identifiers across different scopes is demoted to `sev="minor"` with `idiom="…"` and stops gating.
+   **The idiom name is there so you can overrule it by reading**: a demotion is a judgement the tool is
+   showing its work on, not a row it hid. **Watch `verbosity` hardest** — LOC growth is the single
+   most-measured agent failure mode, the one most likely to hide in an otherwise-clean diff.
+
+   **Read the exit code correctly — it is narrower than it looks.** Findings are sorted on three
+   independent axes, and only one combination gates:
+   - **acked** — suppressed entirely (counted honestly in `acked="N"`).
+   - **ORIGIN** — a symbol that EXISTED at the baseline and got worse is *preexisting-worse* (**no**
+     `origin=` attribute on the row); one that exists only because the code is NEW carries
+     `origin="new-symbol"`.
+   - **MATERIALITY** — a small numeric delta is additionally `sev="minor"`.
+
+   **`--quality-delta` exits 2 ONLY on preexisting-worse AND major AND unacked** — exactly the
+   `gating="N"` count in the header. Read `gating=`, not `regressions=`. A real header looks like:
+
+   ```
+   <quality-delta baseline="git-HEAD" regressions="0" minor="0" acked="0"
+                  preexisting-worse="0" new-symbol="0" gating="0" at="f0a45e43d">
+   ```
+
+   **What exits 2** (the `gating="N"` rows, and nothing else): a finding that is major, unacked AND on code
+   that already existed (`preexisting-worse`), plus any `defect-shape` `format-arity` row on any origin — a
+   format/argument mismatch is a defect, not debt, so it gates on new code too. Minor-tier findings, acked
+   findings and every other `origin="new-symbol"` row are PRINTED but do not gate. The new-symbol rows are the
+   debt you are adding — read them; nothing else will make you. And `--help` is explicit that **exit 0 means "nothing that already
+   existed got worse", NOT "clean"**: a change that is entirely new code can add unbounded new-symbol
+   debt and still exit 0. Never report "quality-delta passed" as "no new debt" — open the rows.
+
+   Two more contract details worth knowing: clone kinds classify by member set (a group is new-symbol
+   only if EVERY member is new), and `short-horizon-churn` is preexisting by construction.
+   **LIMIT:** origin is canonId (`path::scope::name`) identity, so a **RENAMED or MOVED symbol reads as
+   new** — a genuine regression carried in with a move classifies `new-symbol` and will not gate. A body over
+   a bar that moved, whole or with a small edit, reads `origin="moved"` and never gates. If your diff moves
+   code, the exit code is especially weak evidence; read the rows.
+4. **Fix the REAL ones, re-run, converge.** Which fix a row calls for is the **shape → refactor playbook**
+   below; proving the fix landed is the **closed fix loop** below that. Repeat until clean or the remainder
+   are conscious trade-offs.
+   **Record a trade-off instead of re-reading it forever:** `ripwire <dir> --quality-ack="why it's accepted"`
+   writes the currently-visible findings into `.ripwire_quality_acks` (committable) — later runs suppress
+   them honestly (`acked="N"`) and a finding REAPPEARS the moment it worsens past its acked size.
+   A regression-free answer collapses ack rows that no longer apply to `stale=` + `stale_by_kind=`;
+   `--quality-delta --show-stale` (its `stale_next=`) prints those `<sa>` rows when you prune the ledger.
+
+   **Ack a SUBSET, never the screen.** Bare `--quality-ack` accepts *every* finding currently visible, so
+   using it to accept one deliberate change silently accepts the rest too — that is how a ratchet turns into
+   a rubber stamp. Narrow it with `--ack-only=SUBSTR[,SUBSTR]`, which matches a finding's kind, its canonical
+   id, or its **facet**:
+
+   ```bash
+   ripwire <dir> --quality-delta --ack-only=contract-change --quality-ack="arity change required by <fix>"
+   ```
+
+   Prefer the facet over the kind when one exists: `api-surface` also covers the never-gating `new-symbol`
+   rows, so acking by kind can sweep in dozens of findings to accept a handful. `--ack-only=gating` selects
+   exactly what would exit 2. A pattern matching nothing refuses (exit 1) rather than acking everything.
+   Whatever you leave unacked stays visible — that is the point; an exit 2 you have explained in a commit
+   message is worth more than an exit 0 you bought with a blanket ack.
+
+   **Sharing the working tree with other sessions? Then `--ack-only` is not enough — add `--scope=`.**
+   `--quality-delta` compares the *working tree* against HEAD, so in a checkout several agents are editing
+   at once, every sibling's uncommitted rows land in **your** report. Bare `--quality-ack` there accepts
+   the whole screen, which writes another session's debt into a committed ledger under *your* reason
+   string: that is how the ratchet becomes a rubber stamp, and no amount of care reading the report
+   prevents it. `--scope=GLOB[,GLOB...]` files each finding by its `p=` path:
+
+   ```bash
+   ripwire <dir> --quality-delta --legend=compact --scope=src/render,src/render_gl.h             # gate on MY subtree only
+   ripwire <dir> --quality-delta --scope=src/render --quality-ack="deliberate"  # …and ack only my rows
+   ```
+
+   Rows outside the scope are **still printed**, under an `<out-of-scope>` element with a do-not-ack
+   banner, and never gate; the header's `scoped-out-gating=` says how many of them *would* have gated, so
+   a scoped exit 0 means "nothing of mine is broken", never "the tree is clean". The ack cannot write an
+   out-of-scope row at all, and an `--ack-only=` that names one refuses (exit 1). Each row you write
+   records `by=<scope>`, so a later run can flag an ack that suppressed a path its author never owned
+   (`foreign-acks=`). A pattern with no wildcard is a root-anchored path prefix; `*`/`?` match the whole
+   path, with `*` spanning `/`. A scope that names nothing indexed refuses rather than reporting you clean.
+   One reserved word: `--scope=diff` is whatever the working tree changed vs the baseline, expanded to
+   one path per changed indexed file. It is sugar for the **single-writer** case — in the shared tree
+   this flag exists for, a sibling's edits are "changed" too, so name your own paths there.
+
+5. **Want ONE number instead of a list — `ripwire <dir> --dmm --legend=compact`.** `--quality-delta` says *which* kinds got
+   worse; it has no scale, so "is this change better than my last one?" has no answer. `--dmm` is that scale:
+   the Delta Maintainability Model (di Biase, Rastogi, Bruntink & van Deursen, TechDebt 2019; thresholds and
+   arithmetic from PyDriller's reference implementation) scores the share of the volume your change moved
+   that landed in — or freed from — risky units.
+
+   ```
+   <dmm base="2edbb46c…" target="working-tree" available="1" combine="pooled" size_metric="physical-loc"
+        dmm="0.436" good="462" bad="597" base_units="4759" target_units="4780">
+     <p k="size" dmm="0.184" good="65" bad="288" d_low="65" d_high="288"/>…
+   ```
+
+   A unit (a function/method definition with a body) is **low risk** iff `loc<=15` (size), `cyclomatic<=5`
+   (complexity), `params<=2` (interfacing). `good` = low-risk volume **added** plus high-risk volume
+   **removed**; `bad` = the reverse; `dmm = good/(good+bad)`. **Deleting a god function scores 1.000;
+   growing one scores 0.000.** The three sub-scores are separately actionable — a low `size` with a healthy
+   `interfacing` says *split the function*, not *change the signature*.
+
+   Three things to carry. **It is a DELTA, never a level:** editing bad code without changing its size,
+   complexity or parameter count contributes *nothing* — you are not punished for touching a mess, which is
+   deliberate. **`dmm="UNAVAILABLE"` is not a score of 1.0 or 0.0** — it means `good+bad` was 0 (a rename, a
+   literal edit, a comment reflow), i.e. the change is outside what the model measures; the same token can
+   appear per property. And **it never gates** (always exit 0): use it to *trend* — `--dmm=REV` scores one
+   commit against its parent and `--dmm=A..B` scores a range, so a series of commits is a series of numbers.
