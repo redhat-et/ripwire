@@ -1621,6 +1621,130 @@ inline bool rule3PicksPreprocessorAlternative( const IngestResult& ing, const st
     } );
 }
 
+// CPP-FREE-VS-MEMBER (langfacts.h bareCallNeedsDeclaration): which free functions an unqualified C++ call can name. The decl/def
+// collapse below evicts a prototype once its name has a body, so a bare `errorDetails( e )` whose header prototype the caller
+// includes was left with every bodied namesake of the tree and no evidence between them: Rule 3 reads the candidates' own
+// files, and a `.cc` is nobody's include. Envoy: `Envoy::errorDetails` (utility.cc, declared in utility.h) beside the `#else`
+// twin of an unrelated http2 struct's member in codec_impl.cc — 80 call sites declined, cands=2.
+// The language's rule: the call binds a function the caller's translation unit declares. A candidate is DECLARED to the
+// caller when its own file is the caller's or one the caller includes (Rule 3's closure, include roots included), or when an
+// evicted prototype of its name and scope is; an internal-linkage definition (`static`, an anonymous namespace) only by its
+// own file, since no other unit's prototype declares it. When at least one free candidate is declared, the undeclared leave.
+// It decides nothing, and the ladder keeps its answer, when
+//   * a candidate the lookup proved is a member (the class's own lookup hides the free function);
+//   * the caller has no class and a member of the name is declared in its unit: a macro-made member function (gtest's
+//     `TEST_F( Fixture, Name ) { config(); }`) is indexed as a free function, and that member is what it calls;
+//   * an undeclared namesake sits in the caller's own innermost scope: it would hide the declared one if an include the
+//     tree could not resolve declares it.
+struct FreeDeclReach
+{
+    // what keepDeclared reads besides the call, fixed for the whole resolve loop
+    struct Lookup
+    {
+        const IngestResult&       ing;
+        const CallResultTypes&    types;        // cppScopeNamesClass: a scope that names a class, not a namespace
+        const CppQualifierScopes& qualScopes;   // foreignByUsing: `using Q::name;` with Q foreign names Q's, never ours
+        const rw::FileSetStore&   closure;      // each file's transitive includes (Rule 3's, include roots included)
+    };
+    HashMap<std::string, rw::SmallVec<NodeId, 2>> prototypes;   // name → the C-family declarations the collapse evicted (free and member), list order
+    mutable std::string                           nameKey;      // prototypesOf's lookup buffer
+
+    static bool callableOfCFamily( const Symbol& s ) noexcept { return ReceiverEvidence::callableKind( s.kind ) && langCompatible( s.lang, Lang::Cpp ); }
+    // collapseDeclarationsOfName on one name's list `ids`, keeping what it evicted (noteCollapsed); `before` is reused
+    void collapse( const IngestResult& ing, bool multiRoot, const std::string& name, rw::SmallVec<NodeId, 2>& ids, std::vector<NodeId>& before );
+    // the collapse took `before` to `after`: keep the evicted declarations of a name that still has two bodied free functions
+    void noteCollapsed( const IngestResult& ing, const std::string& name, std::span<const NodeId> before, std::span<const NodeId> after )
+    {
+        const auto freeBody = [ & ]( NodeId c ) { return ing.symbols[ c ].kind == SymKind::Function && callableOfCFamily( ing.symbols[ c ] ) && isDefinitionNotDeclaration( ing.symbols[ c ] ); };
+        if( std::ranges::count_if( after, freeBody ) < 2 )
+        {
+            return;
+        }
+        rw::SmallVec<NodeId, 2> evicted;
+        for( const NodeId c : before )
+        {
+            if( callableOfCFamily( ing.symbols[ c ] ) && !isDefinitionNotDeclaration( ing.symbols[ c ] ) && std::ranges::find( after, c ) == after.end() )
+            {
+                evicted.push_back( c );
+            }
+        }
+        if( !evicted.empty() )
+        {
+            prototypes.try_emplace( name, std::move( evicted ) );
+        }
+    }
+    // The bare call `r`: cut `cand` (the candidates the lookup proved, out of `all`) to the free functions `r`'s translation
+    // unit declares; true ⇒ it was cut. `ownerOf( c )`: the class the index knows c a member of, "" for none. `scratch` is reused.
+    template <class OwnerOf>
+    bool keepDeclared( const Lookup& lk, const Reference& r, std::span<const NodeId> all, std::vector<NodeId>& cand, OwnerOf&& ownerOf, std::vector<NodeId>& scratch ) const
+    {
+        const rw::SmallVec<NodeId, 2>* const protos = prototypesOf( lk, r, cand );
+        if( protos == nullptr )
+        {
+            return false;
+        }
+        const auto member = [ & ]( NodeId c ) { return lk.ing.symbols[ c ].kind != SymKind::Function || !ownerOf( c ).empty() || lk.types.cppScopeNamesClass( c ); };
+        const auto inUnit = [ & ]( NodeId c ) { return lk.ing.symbols[ c ].fileId == r.fileId || lk.closure.contains( r.fileId, lk.ing.symbols[ c ].fileId ); };
+        const auto memberInUnit = [ & ]( NodeId c ) { return member( c ) && inUnit( c ); };
+        if( std::ranges::any_of( cand, member ) )
+        {
+            return false;   // a member the lookup proved hides the free function
+        }
+        if( ownerOf( r.fromSymbol ).empty() && ( std::ranges::any_of( all, memberInUnit ) || std::ranges::any_of( *protos, memberInUnit ) ) )
+        {
+            return false;   // a class-less caller may be a macro-made member: the member its unit declares is in reach
+        }
+        const auto declared = [ & ]( NodeId c )
+        {
+            const Symbol& cs = lk.ing.symbols[ c ];
+            return inUnit( c ) || ( !cs.internalLinkage && std::ranges::any_of( *protos, [ & ]( NodeId p ) { return !member( p ) && lk.ing.symbols[ p ].scope == cs.scope && inUnit( p ); } ) );
+        };
+        return cutToDeclared( lk.ing, r, cand, declared, scratch );
+    }
+
+private:
+    // the evicted prototypes of the bare C++ call `r`'s name when the declaration rule can decide it, else nullptr
+    const rw::SmallVec<NodeId, 2>* prototypesOf( const Lookup& lk, const Reference& r, std::span<const NodeId> cand ) const
+    {
+        const bool applies = bareCallNeedsDeclaration( r.lang ) && !isMemberCallRef( r ) && !lk.qualScopes.foreignByUsing( r );
+        if( !applies || prototypes.empty() || cand.size() < 2 || r.fromSymbol >= lk.ing.symbols.size() )
+        {
+            return nullptr;
+        }
+        nameKey.assign( std::string_view( r.calleeName ) );
+        const auto it = prototypes.find( nameKey );
+        return it == prototypes.end() ? nullptr : &it->second;
+    }
+    // keep the `declared` candidates; nothing is cut when none or all are, or when an undeclared one sits in the caller's own
+    // scope (it would hide the declared one if an include the tree could not resolve declares it). A member caller's scope is
+    // its class — C++ keeps no namespace record to read the class's namespace from — so test/cppextqualcheck.sh D8, the member
+    // twin, is left open.
+    template <class Declared>
+    static bool cutToDeclared( const IngestResult& ing, const Reference& r, std::vector<NodeId>& cand, Declared&& declared, std::vector<NodeId>& scratch )
+    {
+        const std::string& callerScope   = ing.symbols[ r.fromSymbol ].scope;
+        const auto         ofCallerScope = [ & ]( NodeId c ) { return !callerScope.empty() && ing.symbols[ c ].scope == callerScope; };
+        scratch.clear();
+        for( const NodeId c : cand )
+        {
+            if( declared( c ) )
+            {
+                scratch.push_back( c );
+            }
+            else if( ofCallerScope( c ) )
+            {
+                return false;
+            }
+        }
+        if( scratch.empty() || scratch.size() == cand.size() )
+        {
+            return false;
+        }
+        cand.swap( scratch );
+        return true;
+    }
+};
+
 // The decl/def collapse FAMILY of a language (collapseDeclarationsOfName below): a definition evicts a declaration only
 // inside its own family. Kotlin is 1, Ruby is 2, and every other language shares 0.
 inline constexpr std::size_t kCollapseFamilies = 3u;
@@ -1693,6 +1817,20 @@ inline void collapseDeclarationsOfName( const IngestResult& ing, bool multiRoot,
     if( anyEvicted )
     {
         ids = std::move( kept );
+    }
+}
+
+inline void FreeDeclReach::collapse( const IngestResult& ing, bool multiRoot, const std::string& name, rw::SmallVec<NodeId, 2>& ids, std::vector<NodeId>& before )
+{
+    const bool mayHoldPrototype = ids.size() >= 3;   // two bodies and a prototype at the least
+    if( mayHoldPrototype )
+    {
+        before.assign( ids.begin(), ids.end() );
+    }
+    collapseDeclarationsOfName( ing, multiRoot, ids );
+    if( mayHoldPrototype && ids.size() < before.size() )
+    {
+        noteCollapsed( ing, name, before, std::span<const NodeId>( ids.data(), ids.size() ) );
     }
 }
 
@@ -9806,16 +9944,18 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // B2.2 minimum arity: read every declaration's minimum BEFORE the collapse below folds declarations away.
     const std::vector<std::uint16_t> paramsMinOf = paramsMinAcrossDeclarations( ing, byName );
 
+    FreeDeclReach     freeDeclReach;              // CPP-FREE-VS-MEMBER: the prototypes the collapse below evicts, for the bare-call declaration rule
     std::vector<bool> rule3AltBody( N, false );   // EXTQUAL-FIX1: a C-family function body beside its own prototype in one file (markPreprocessorAlternatives)
     bool              rule3AltAny = false;
     // decl/def collapse (adversarial-review #1) — collapseDeclarationsOfName carries the rule, its per-root and per-family
     // keys, and why a Kotlin body never evicts a Java declaration (or the reverse).
     {
         PROFILE_SCOPE_DESCRIBE( "buildGraph/1e: decl/def collapse" );
+        std::vector<NodeId> beforeCollapse;   // reused: a name's list as it stood, read only when the collapse shortened it
         for( auto& [ name, ids ] : byName )
         {
             rule3AltAny = markPreprocessorAlternatives( ing, ids, rule3AltBody ) || rule3AltAny;   // before the collapse evicts the prototype
-            collapseDeclarationsOfName( ing, multiRoot, ids );
+            freeDeclReach.collapse( ing, multiRoot, name, ids, beforeCollapse );   // collapseDeclarationsOfName, the evicted prototypes kept
         }
     }
 
@@ -10361,6 +10501,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         }
     };
     std::vector<NodeId>      provedScratch;   // reused: the name-ladder candidates the language's own lookup proves
+    std::vector<NodeId>      declaredScratch; // reused: FreeDeclReach::keepDeclared's survivors
+    const FreeDeclReach::Lookup freeDeclLookup{ .ing = ing, .types = recvEv.types, .qualScopes = cppQualScopes, .closure = rule3Includes };
     std::vector<NodeId>      memberRule3;     // reused: Rule 3's included-file candidates for a MEMBER call — a hedge tier, never a proof
     // FE-B: which of a call's name-ladder candidates the language's own lookup PROVES (receiverevidence.h, point 2). A
     // member call's receiver must name the candidate's class (this/self/cls and the class's bases, super and the bases,
@@ -12547,6 +12689,12 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 else if( provedScratch.size() < cand.size() )
                 {
                     cand.swap( provedScratch );
+                }
+                // CPP-FREE-VS-MEMBER: of several free functions, the ones the caller's translation unit declares. provedScratch holds
+                // the whole proven list here, swapped or not
+                if( !nameOnly )
+                {
+                    freeDeclReach.keepDeclared( freeDeclLookup, r, provedScratch, cand, ownerIsClass, declaredScratch );
                 }
             }
             // a name-only MEMBER call never reaches a free function where the language has no way to (Python, Go, C++,

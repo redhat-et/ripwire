@@ -537,6 +537,14 @@ static_assert( []() constexpr
     return true;
 }(), "Slice 6c: all 5 columns in kLangFacts must match the exact original language predicate sets" );
 static_assert( !langFacts( Lang::Unknown ).implicitReceiver && !langFacts( Lang::Unknown ).memberNeverReachesFreeFunction );
+
+/// The inverse of memberNeverReachesFreeFunction (CPP-FREE-VS-MEMBER): an unqualified call binds a free function only when the
+/// caller's translation unit DECLARES it — in the caller's own file or a file it includes, as the body or as a prototype. A
+/// namesake defined in a source file the caller never includes, with no prototype in reach, is not what the call names (graph.h
+/// FreeDeclReach). C++; C keeps its own reach rules (FE-A).
+inline constexpr bool bareCallNeedsDeclaration( Lang l ) noexcept { return l == Lang::Cpp; }
+static_assert( bareCallNeedsDeclaration( Lang::Cpp ) && langFacts( Lang::Cpp ).implicitReceiver && !bareCallNeedsDeclaration( Lang::Unknown ),
+               "CPP-FREE-VS-MEMBER: the declaration rule is read on the implicit-receiver path of the resolve loop" );
 static_assert( !langFacts( Lang::Unknown ).moduleCallReachesFunctionsOnly && !langFacts( Lang::Unknown ).classNameReceiver && !langFacts( Lang::Unknown ).hashComment );
 static_assert( !langFacts( static_cast<Lang>( 99 ) ).implicitReceiver && !langFacts( static_cast<Lang>( 99 ) ).hashComment );
 
