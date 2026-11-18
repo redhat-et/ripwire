@@ -568,6 +568,7 @@ for _g in \
     fornotesbudgetcheck \
     fornotesjsoncheck \
     foronesidecheck \
+    forpagescheck \
     forrankordercheck \
     forreadercallerscheck \
     forregrowcheck \

@@ -943,7 +943,8 @@ doc = open( sys.argv[ 1 ], "rb" ).read()
 CORE = { "p", "n", "t", "id", "l", "k", "c" }
 m = re.match( rb"\A(?:\s*<!--.*?-->)+", doc, re.S ); lead = m.group( 0 ) if m else b""
 m2 = re.match( rb"\A\s*<[\w-]+\b[^>]*>((?:\s*<!--.*?-->)+)", doc[ len( lead ): ], re.S )
-legend = ( lead + ( m2.group( 1 ) if m2 else b"" ) ).decode( "utf-8", "replace" )
+m3 = None if m2 else re.search( rb"((?:<!--(?:(?!-->).)*-->\s*)+)</[\w-]+>\s*\Z", doc[ len( lead ): ], re.S )   # AF1: an answer-first legend trails the rows
+legend = ( lead + ( m2.group( 1 ) if m2 else b"" ) + ( m3.group( 1 ) if m3 else b"" ) ).decode( "utf-8", "replace" )
 body = re.sub( rb"<!--.*?-->", b"", re.sub( rb"<!\[CDATA\[.*?\]\]>", b"", doc, flags = re.S ), flags = re.S )
 keys = set()
 for e in re.finditer( rb"<([a-zA-Z][\w-]*)((?:\s+[\w:.-]+=\"[^\"]*\")*)\s*/?>", body ):

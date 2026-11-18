@@ -200,7 +200,7 @@ function storyCards(s, { kick, head, stories, footText }){
     ["byte-identical", "two runs, same bytes — a gate on every push, not a tendency; warm equals cold"],
     ["zero runtime deps", "CMake + a C++23 compiler; builds with the network off — vendored everything"],
     ["the languages", "Rust · C++ · ObjC/C++ · C · Metal · CUDA · Python · Go · Swift · TypeScript · JavaScript · Java · Kotlin · Ruby · PHP · Lua · Elixir · Dart · GDScript · Clojure · Bash · C# · Protocol Buffers · JSON · TOML · YAML · Markdown — 27 vendored grammars, Astro on the TypeScript one; markdown and reST headings are real symbols"],   // GDScript: CHANGELOG [0.6.2] (#233); Astro: [0.6.4] (#320); Clojure: [0.6.8] (#349); reST: [0.6.10] (#409); proto: changelog.d/proto-index.md
-    ["agent-native", "an MCP server and 195 long flags behind one `--help` that is always the authority"],
+    ["agent-native", "an MCP server and 196 long flags behind one `--help` that is always the authority"],
   ];
   // Row height carries the LONGEST body (the language line, which wraps to three at this width),
   // not the shortest — a fixed 0.68 clipped its last line off the bottom of the card.
@@ -235,7 +235,7 @@ function storyCards(s, { kick, head, stories, footText }){
     s.addText(flags, { x: MX+6.3,  y: y+0.04, w: 5.65, h: 0.58, fontFace: MONO, fontSize: 9, color: CYAN, valign: "middle", margin: 0 });
     y += 0.74;
   }
-  foot(s, "--help is generated from the binary's own flag table — 195 long flags; docs/COMMANDS.md carries an entry for every one of them, 173 with a recorded invocation and its output");   // docs/docs_commands_build.py on main cd04d477e: "173 sample(s)"
+  foot(s, "--help is generated from the binary's own flag table — 196 long flags; docs/COMMANDS.md carries an entry for every one of them, 173 with a recorded invocation and its output");   // docs/docs_commands_build.py on main cd04d477e: "173 sample(s)"
 }
 
 /* ── S5 · the moments ───────────────────────────────────────────────────── */
@@ -1737,7 +1737,7 @@ function storyCards(s, { kick, head, stories, footText }){
   kicker(s, "// do not take any of it on trust", AMBER);
   title(s, "Every claim, and the command that re-derives it");
   const claims = [
-    ["195 long flags · 39 slides",        "bash test/deckclaimcheck.sh"],
+    ["196 long flags · 39 slides",        "bash test/deckclaimcheck.sh"],
     ["every --flag named here exists",    "bash test/deckcheck.sh"],
     ["74.7% fewer element bytes",         "bash test/showcasecapturecheck.sh"],
     ["852 gate scripts (counts snapshot 2026-11-18)", "bash test/manifestcheck.sh"], // gatecount

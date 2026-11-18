@@ -35,7 +35,8 @@
 #   (R4)  byte-for-byte identical totals: a permutation changes no byte count
 #   (R5)  determinism -- two runs byte-identical, and the order depends on argv alone
 #   (R6)  the default order is reproducible
-#   (R9)  ITEM R IS OFF BY DEFAULT -- the legend precedes the rows unless --legend=last asked
+#   (R9)  --legend=first is the legend-first order: the legend precedes the rows
+#   (R9d) AF1 (owner decision 2026-11-18): the DEFAULT is answer-first -- its rows precede its legend
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${RIPWIRE_BIN:-${1:-$ROOT/build/ripwire}}"
@@ -51,7 +52,12 @@ echo "foranswerfirstcheck: BIN=$BIN"
 # The opt-out knob is GATE ENVIRONMENT ONLY, never a binary knob -- the same posture test/legendtarget.sh's
 # RIPWIRE_LEGEND_PINS=strict uses. Without a legacy baseline R1 has nothing to compare against, and a
 # permutation gate with no baseline is a gate that cannot fail.
-OPTIN="--legend=last"   # ITEM R IS OPT-IN: the DEFAULT is legend-first, --legend=last asks for answer-first
+# AF1 (owner decision 2026-11-18): answer-first IS the default now, and the default answer is PAGED (src/forpages.h,
+# test/forpagescheck.sh). This gate compares WHOLE answers, so the answer-first side asks --page-bytes=0, and the legacy
+# baseline is the opt-out --legend=first. The budgeted path (R7) does not page, so it takes $OPTIN alone.
+OPTIN="--legend=last"   # answer-first, spelled
+WHOLE="--page-bytes=0"  # the whole answer in one call: the permutation is judged on whole documents
+LEGACY="--legend=first" # the legend-first order the permutation is measured against
 
 # Two tasks: one conceptual (the 84 % population) and one that resolves a routed section (the 13-cell shape
 # the band's largest effect comes from). If the second never resolves on this tree, (R3) says so rather than
@@ -64,10 +70,10 @@ cap(){  # cap FILE TASK [extra-args-to-the-binary]
     "$BIN" . --for="$t" "$@" >"$f" 2>/dev/null
 }
 
-cap "$WORK/a_new.xml" "$TASK_A" $OPTIN
-cap "$WORK/a_old.xml" "$TASK_A"
-cap "$WORK/b_new.xml" "$TASK_B" $OPTIN
-cap "$WORK/b_old.xml" "$TASK_B"
+cap "$WORK/a_new.xml" "$TASK_A" $OPTIN $WHOLE
+cap "$WORK/a_old.xml" "$TASK_A" $LEGACY
+cap "$WORK/b_new.xml" "$TASK_B" $OPTIN $WHOLE
+cap "$WORK/b_old.xml" "$TASK_B" $LEGACY
 for f in a_new a_old b_new b_old; do
     [ -s "$WORK/$f.xml" ] || { no "(R0) $f.xml is empty -- nothing to check"; echo "FAILURES"; exit 1; }
 done
@@ -263,8 +269,8 @@ PY
 [ $? -eq 0 ] || fail=1
 
 # (R5) DETERMINISM. The order depends on argv and the tree alone -- never on whether an earlier call happened.
-cap "$WORK/z1.xml" "$TASK_A" $OPTIN
-cap "$WORK/z2.xml" "$TASK_A" $OPTIN
+cap "$WORK/z1.xml" "$TASK_A" $OPTIN $WHOLE
+cap "$WORK/z2.xml" "$TASK_A" $OPTIN $WHOLE
 if cmp -s "$WORK/z1.xml" "$WORK/z2.xml"; then
     ok "(R5) two runs byte-identical"
 else
@@ -272,14 +278,14 @@ else
 fi
 
 # (R6) THE DEFAULT IS REPRODUCIBLE, so the baseline every arm above rests on is itself trustworthy.
-cap "$WORK/r1.xml" "$TASK_A"
+cap "$WORK/r1.xml" "$TASK_A" $LEGACY
 if cmp -s "$WORK/r1.xml" "$WORK/a_old.xml"; then
     ok "(R6) the default order is reproducible byte for byte"
 else
     no "(R6) two default runs differ -- the gate's own baseline is unstable"
 fi
 
-# (R9) ITEM R IS OFF UNLESS ASKED FOR. This is the arm the owner's opt-in decision rests on, and no other arm
+# (R9) THE OPT-OUT IS LEGEND-FIRST. Until AF1 this was the arm the owner's opt-in decision rested on, and no other arm
 # implies it: R1-R8 all compare an opt-in answer against the default, and every one of them would still pass if
 # the permutation ALSO ran by default. Measured 2026-11-17: as the default this ordering left an active cut or
 # floor disclosure outside the 2 KB prefix on 9 of 50 --for answers, so "off by default" is a correctness
@@ -292,11 +298,25 @@ print( d.find( b'<!-- ripwire for' ), d.find( b'<sigs' ) )
 " "$WORK/$subj.xml" )
     set -- $legAt
     if [ "$1" -ge 0 ] && [ "$2" -ge 0 ] && [ "$1" -lt "$2" ]; then
-        ok "(R9) $subj: the DEFAULT serves its legend BEFORE the rows (legend@$1 < sigs@$2) -- item R is opt-in"
+        ok "(R9) $subj: --legend=first serves its legend BEFORE the rows (legend@$1 < sigs@$2)"
     else
-        no "(R9) $subj: the default no longer puts the legend first (legend@$1 sigs@$2) -- item R leaked into the default"
+        no "(R9) $subj: --legend=first no longer puts the legend first (legend@$1 sigs@$2) -- the opt-out leaked answer-first"
     fi
 done
+# (R9d) AF1: the DEFAULT is answer-first. Without this arm R1-R8 would all pass with the flip reverted, because they
+# compare two ASKED postures; this is the arm that makes "the default is answer-first" checkable.
+cap "$WORK/dflt.xml" "$TASK_A"
+legAt=$( python3 -c "
+import sys
+d = open( sys.argv[ 1 ], 'rb' ).read()
+print( d.find( b'<!-- ripwire for' ), d.find( b'<sigs' ) )
+" "$WORK/dflt.xml" )
+set -- $legAt
+if [ "$1" -ge 0 ] && [ "$2" -ge 0 ] && [ "$2" -lt "$1" ]; then
+    ok "(R9d) the DEFAULT serves its rows BEFORE its legend (sigs@$2 < legend@$1) -- answer-first is the default"
+else
+    no "(R9d) the default is not answer-first (legend@$1 sigs@$2)"
+fi
 
 # (R7) THE BUDGETED PATH -- the regime where ordering actually decides what survives, and the one every arm
 # above missed. runForLens() routes a fitting budget to runForLensFitted(), a SECOND code path that renders
@@ -344,8 +364,8 @@ fi
 # judge strips one self-declaring trailing block before pricing and its pattern requires comment-then-block,
 # so with the comment relocated 1,447 B stopped being stripped and est_tokens looked like it under-charged by
 # exactly 579 tokens. That was not an est_tokens defect at all -- it was this adjacency.
-"$BIN" . --for="legend posture" --detail=5 $OPTIN >"$WORK/rich_new.xml" 2>/dev/null
-"$BIN" . --for="legend posture" --detail=5 >"$WORK/rich_old.xml" 2>/dev/null
+"$BIN" . --for="legend posture" --detail=5 $OPTIN $WHOLE >"$WORK/rich_new.xml" 2>/dev/null
+"$BIN" . --for="legend posture" --detail=5 $LEGACY >"$WORK/rich_old.xml" 2>/dev/null
 python3 - "$WORK" <<'PY_EOF'
 import os, re, sys
 WORK = sys.argv[1]
