@@ -62,6 +62,10 @@ PIN="$ROOT/test/qschemetrip.hash"
 # 2026-11-17, lane tidy-681 (clang-tidy #681, base main 5fb68b71a): RE-PINNED with UPDATE_GOLDEN=1. kQSnapCacheScheme stays 34:
 #   codeLocByNode's move-cid store moved out of an if condition (bugprone-assignment-in-if-condition); the same slot is written
 #   and the same early return taken, so no cached Snapshot means anything new.
+# 2026-11-17, lane std-namesake (base main 9087eb59c; PLACEHOLDER, the train renumbers): RE-PINNED with UPDATE_GOLDEN=1.
+#   Watched text: kParserVer 309 -> 317 (above rust-macro-args' 315/316), mirrored in quality.h: a Rust binding written as a
+#   standard type keeps its spine on the tombstone. kQSnapCacheScheme stays: no watched function moved, and the parser key
+#   already keys the qsnap cache on extraction.
 # 2026-11-15, lane land-499-500 fix 1 (CodeRabbit on #668, merged over main d68b57456): RE-PINNED with UPDATE_GOLDEN=1,
 #   kQSnapCacheScheme 33 -> 34 (quality.h's v34 note). rustTestAttributed reads each top-level attribute on a line
 #   (classifyRustAttributeLine, rustAttributeClose: both join the manifest), so the Rust dead set moves; registeredMacroSymbolIds
