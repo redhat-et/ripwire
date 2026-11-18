@@ -156,7 +156,9 @@ constexpr std::uint32_t kCacheMagic   = 0x4b505443;   // "CTPK"
 // lane rust-degraded's placeholder 42.
 // 44 (train 37b, lane rust-degraded; its placeholder was 42): the FILE record gains a sixth FileHealth u32, useBoundsBlanked
 // (the Rust precise-capture re-parse, src/rustusebounds.h), so an older cache must be rejected. 44 is above train 36's 43.
-constexpr std::uint32_t kCacheVersion = 52;           // 52: lane failure-default — the construct hits gain the failure-default shape tag
+constexpr std::uint32_t kCacheVersion = 53;           // 53: lane rust-self-chain (PLACEHOLDER: the train renumbers) — LocalBindKind RecvCall (appended;
+                                                      //    readBind's kind bound moves).
+                                                      // 52: lane failure-default — the construct hits gain the failure-default shape tag
                                                       //    (lintrules.h kConstructShapeTags, appended); an older record lacks those hits.
                                                       // 51: lane qd-constructs — the FILE record gains a ninth family, the --quality-delta
                                                       //    construct hits (ConstructHit: startByte, line, tag byte), with its head count.
@@ -386,6 +388,9 @@ constexpr std::uint32_t kParserVer    = 333;          // bump on any grammar/.sc
                                                       //   std-namesake (placeholder 317): a Rust local, parameter or field written as a standard type that names no class (`Option<T>`,
                                                       //   `&str`, `Arc<Mutex<T>>`) keeps its tombstone with the type's spine as importedName (ingest_binds.h rustStdSpine), and
                                                       //   `if let Some( x ) = v` under a written `v: Option<Vec<T>>` records x the same way.
+                                                      //   rust-self-chain (placeholder 319, kCacheVersion 53): a Rust member call on another call's result records a RecvCall (ingest_binds.h
+                                                      //   captureRustRecvCall), an `async fn`'s ReturnType carries kAwaitResultBit, and a `let x = f().await` binds its CallResult with it
+                                                      //   (rustUnwrappedCall). kCacheVersion 52 -> 53 (LocalBindKind RecvCall appended).
                                                       // 331 = 2026-11-18 (train 1117d1; above main's 311/312, #688's 313/314 and the members' placeholders
                                                       //   317/321/323/327/329): rich file tag 332. kCacheVersion unchanged. The members' extraction changes:
                                                       //   go-cpp-edges (placeholder 317): a Go result type written as a generic instantiation (`Set[T]`, `*pkg.Set[string]`) records its

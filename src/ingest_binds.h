@@ -6445,6 +6445,27 @@ inline std::string_view rustDispatchTrait( TSNode type, TSNode owner, std::strin
 
 // Rust: one ReturnType per declared result of a fn — the whole value (kWholeResult) or, for a tuple at the core
 // (`Result<(Book, Ctx)>`), one per element by position; each element is read through the transparent wrappers only.
+// lane rust-self-chain: is `fn` written `async fn` (its call yields a future of the declared result: kAwaitResultBit)
+inline bool rustFnIsAsync( TSNode fn )
+{
+    for( std::uint32_t i = 0, k = ts_node_child_count( fn ); i < k; ++i )
+    {
+        const TSNode c = ts_node_child( fn, i );
+        if( !kindIs( ts_node_type( c ), "function_modifiers" ) )
+        {
+            continue;
+        }
+        for( std::uint32_t j = 0, m = ts_node_child_count( c ); j < m; ++j )
+        {
+            if( kindIs( ts_node_type( ts_node_child( c, j ) ), "async" ) )
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 inline void captureRustReturnTypes( BindCtx& cx, TSNode fn )
 {
     const TSNode ret = fieldChild( fn, NodeField::ReturnType );
@@ -6453,6 +6474,7 @@ inline void captureRustReturnTypes( BindCtx& cx, TSNode fn )
         return;
     }
     const std::uint32_t defStart = ts_node_start_byte( fn );
+    const std::uint8_t  awaitBit = rustFnIsAsync( fn ) ? kAwaitResultBit : 0;   // the declared result is the awaited future's
     std::uint8_t        depth    = 0;
     std::string_view    whole;
     TSNode              tuple{};
@@ -6469,11 +6491,11 @@ inline void captureRustReturnTypes( BindCtx& cx, TSNode fn )
             const std::string_view trait = rustDispatchTrait( ret, fn, cx.src, traitWhole, generic );
             if( !trait.empty() && generic.empty() )
             {
-                pushReturnType( cx, defStart, kWholeResult, trait, traitWhole, kDispatchResultBit );
+                pushReturnType( cx, defStart, kWholeResult, trait, traitWhole, kDispatchResultBit | awaitBit );
             }
             return;
         }
-        pushReturnType( cx, defStart, kWholeResult, cls, whole, depth, spelledSelf );
+        pushReturnType( cx, defStart, kWholeResult, cls, whole, depth | awaitBit, spelledSelf );
         return;
     }
     for( std::uint32_t i = 0, k = ts_node_named_child_count( tuple ); i < k && i < kWholeResult; ++i )
@@ -6483,7 +6505,7 @@ inline void captureRustReturnTypes( BindCtx& cx, TSNode fn )
         const std::string_view elem      = rustResultClass( ts_node_named_child( tuple, i ), fn, cx.src, inner, whole, nullptr, elemSelf );
         if( inner == 0 )   // an element that is itself a Result/Option layer needs an operator the tuple pattern cannot apply
         {
-            pushReturnType( cx, defStart, std::uint8_t( i ), elem, whole, depth, elemSelf );
+            pushReturnType( cx, defStart, std::uint8_t( i ), elem, whole, depth | awaitBit, elemSelf );
         }
     }
 }
@@ -6502,15 +6524,29 @@ inline std::string rustCallQualifier( TSNode call, std::string_view src )
 // Rust: the call a `let` value binds, through the unwrap operators applied to it — each `?` and each `.unwrap()` /
 // `.expect( … )` counts one into `depth`; any other method on the result (`.into_other()`, `.iter()`) is not stripped, so
 // that call is the one recorded (its own result: one level further, a floor). Null when the value is no call.
+// lane rust-self-chain: an `.await` applied to the call FIRST (`f().await`, `f().await?`) sets kAwaitResultBit in `depth`; an
+// await anywhere else (`f()?.await`, two awaits) records nothing.
 inline TSNode rustUnwrappedCall( TSNode value, std::uint8_t& depth, std::string_view src )
 {
     depth = 0;
+    bool awaited = false;
     for( int guard = 0; guard < 8 && !ts_node_is_null( value ); ++guard )
     {
         const char* t = ts_node_type( value );
+        if( awaited && !kindIs( t, "call_expression" ) )
+        {
+            return {};   // an operator applied before the await (`f()?.await`): the awaited value is no call result this reads
+        }
         if( kindIs( t, "try_expression" ) && ts_node_named_child_count( value ) == 1 )
         {
             ++depth;
+            value = ts_node_named_child( value, 0 );
+            continue;
+        }
+        if( kindIs( t, "await_expression" ) && ts_node_named_child_count( value ) == 1 )
+        {
+            awaited = true;
+            depth |= kAwaitResultBit;
             value = ts_node_named_child( value, 0 );
             continue;
         }
@@ -6521,7 +6557,7 @@ inline TSNode rustUnwrappedCall( TSNode value, std::uint8_t& depth, std::string_
             {
                 const TSNode           field = fieldChild( fn, NodeField::Field );
                 const std::string_view name  = ts_node_is_null( field ) ? std::string_view{} : nodeTextOf( field, src );
-                if( name == "unwrap" || name == "expect" )
+                if( ( name == "unwrap" || name == "expect" ) && !awaited )
                 {
                     ++depth;
                     value = fieldChild( fn, NodeField::Value );
@@ -6533,6 +6569,82 @@ inline TSNode rustUnwrappedCall( TSNode value, std::uint8_t& depth, std::string_
         return {};
     }
     return {};
+}
+
+// ── lane rust-self-chain: a member call on another call's result (model.h LocalBindKind::RecvCall) ────────────────────────────
+// The call a Rust member call's receiver evaluates, through parentheses, the `?` operators (`tries`) and an `.await` applied to it
+// first (`awaited`: `x.f().await?.g()`); null when the receiver is no call (a name, a field, a literal, a macro) or an operator was
+// applied before the await (`x.f()?.await.g()`), and for a call that is no member call (`f( x )`, a path call: its receiver is no
+// value).
+inline TSNode rustReceiverCall( TSNode call, std::uint8_t& tries, bool& awaited )
+{
+    tries   = 0;
+    awaited = false;
+    const TSNode fn = fieldChild( call, NodeField::Function );
+    if( ts_node_is_null( fn ) || !kindIs( ts_node_type( fn ), "field_expression" ) )
+    {
+        return {};
+    }
+    TSNode value = fieldChild( fn, NodeField::Value );
+    for( int guard = 0; guard < 16 && !ts_node_is_null( value ); ++guard )
+    {
+        const char* t = ts_node_type( value );
+        if( kindIs( t, "call_expression" ) )
+        {
+            return value;
+        }
+        if( ts_node_named_child_count( value ) != 1 || awaited )
+        {
+            return {};   // two awaits, or a `?` applied before the await
+        }
+        if( kindIs( t, "try_expression" ) && tries < kUnwrapLayersMask )
+        {
+            ++tries;
+        }
+        else if( kindIs( t, "await_expression" ) )
+        {
+            awaited = true;
+        }
+        else if( !kindIs( t, "parenthesized_expression" ) )
+        {
+            return {};
+        }
+        value = ts_node_named_child( value, 0 );
+    }
+    return {};
+}
+// Rust: one RecvCall per member call whose receiver is another call — `.route( a )` and `.layer( b )` in
+// `Router::new().route( a ).layer( b )`. Its hop depth counts the calls below it down to the chain's root (rustReceiverCall
+// walked again from the inner call: the depth the inner call's own record carries, plus one); a chain deeper than a u8 holds,
+// or an inner call with no name node (a generic instantiation `x.f::<T>()`, a closure call), records nothing.
+inline void captureRustRecvCall( BindCtx& cx, TSNode call )
+{
+    std::uint8_t tries   = 0;
+    bool         awaited = false;
+    const TSNode inner   = rustReceiverCall( call, tries, awaited );
+    const TSNode outerName = ts_node_is_null( inner ) ? TSNode{} : calleeNameNode( call );
+    const TSNode innerName = ts_node_is_null( inner ) ? TSNode{} : calleeNameNode( inner );
+    if( ts_node_is_null( outerName ) || ts_node_is_null( innerName ) )
+    {
+        return;
+    }
+    std::uint32_t depth = 1;
+    std::uint8_t  ignoredTries   = 0;
+    bool          ignoredAwaited = false;
+    for( TSNode below = rustReceiverCall( inner, ignoredTries, ignoredAwaited ); !ts_node_is_null( below ) && depth < kWholeResult;
+         below = rustReceiverCall( below, ignoredTries, ignoredAwaited ) )
+    {
+        ++depth;
+    }
+    if( depth >= kWholeResult )
+    {
+        return;
+    }
+    const std::uint32_t innerStart = ts_node_start_byte( inner );
+    cx.binds->push_back( RawBind{ .fileId = cx.fileId, .startByte = ts_node_start_byte( call ), .lang = cx.lang, .kind = LocalBindKind::RecvCall,
+                                  .isFromAssignment = awaited, .resultIndex = std::uint8_t( depth ), .unwrapDepth = tries,
+                                  .spanStart = innerStart, .spanEnd = innerStart,
+                                  .var = rw::InternedText( nodeTextOf( innerName, cx.src ) ), .typeName = rw::InternedText( nodeTextOf( outerName, cx.src ) ) } );
 }
 
 // Rust: where a `let` name is visible — from the end of its statement (`let c = c.f();` reads the OUTER c) to its block's end
@@ -7196,6 +7308,10 @@ inline void captureRustEvidence( BindCtx& cx, TSNode n, const char* t, std::uint
     if( kindIs( t, "function_item" ) )
     {
         captureRustReturnTypes( cx, n );
+    }
+    else if( kindIs( t, "call_expression" ) )
+    {
+        captureRustRecvCall( cx, n );   // lane rust-self-chain: a member call on another call's result
     }
     else if( kindIs( t, "use_declaration" ) )
     {
