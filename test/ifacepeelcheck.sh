@@ -69,6 +69,8 @@
 #   NA3 an alias of a non-pointer class (`using CodecAlias = Codec;`) keeps today's reading (Codec::encode by name, no Gadget)
 #   NA4 an unqualified alias two namespaces declare for two different Items (`ItemPtr p; p->run()`) is never typed: both by-name rows stay
 #   NA5 STATED FLOORS, never a typed (unhedged) edge: a template alias (`Ptr<Codec> p`), `c.get()->encode()`, `(*c).encode()`
+#   NA6 the PA5 decline needs a namesake: `socket_->setDetected()`, whose split holds the one body ConnectionSocketImpl::setDetected and
+#       whose name no other definition carries, keeps the name tiers' one by-name row (ninja `status_->BuildFinished()`), no decline
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
@@ -273,6 +275,8 @@ o="$( callees "$PA" "socket.cc:onRead" )"
 say "$( has "$o" '<dc n="isOpen" l="5" cands="1" via="declined" gate="iface"/>' )" "PA5 a base-declared contract with an inherited body: isOpen gate=iface cands=1"
 say "$( hasnt "$o" 'IoSocketHandleImpl::isOpen' )" "PA5 never the IoHandle namesake"
 say "$( hasnt "$o" 'ListenSocketImpl::isOpen' )" "PA5 never ListenSocketImpl (no ConnectionSocket)"
+say "$( has "$o" 'n="ConnectionSocketImpl::setDetected" p="socket.h:12" via="name"' )" "NA6 a lone definition of the name keeps its by-name row"
+say "$( hasnt "$o" '<dc n="setDetected"' )" "NA6 ... and is no decline"
 o="$( callees "$PA" "widget.cc:ptrToAlias" )"
 say "$( hasnt "$o" '<s t="method" n="Codec::encode" p="widget.h:7"/>' )" "NA1 a pointer to the alias is never typed as Codec (no unhedged Codec::encode)"
 say "$( has "$o" 'n="Codec::encode" p="widget.h:7" via="name"' )" "NA1 positive: its by-name row stays"

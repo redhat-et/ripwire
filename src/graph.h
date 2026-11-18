@@ -4568,6 +4568,20 @@ struct StdMemberGate
 
 };
 
+// CPP-PTR-ALIAS: whether a C++ member's dispatch split (`candidates`, Rule 2b) must decline rather than fall to the name tiers —
+// two or more bodies, or one body while another in-tree definition of a compatible language shares the call's name (the name tiers
+// would list it beside the split's body: ninja `status_->Error()` → Lexer::Error). A lone definition of the name is the only row
+// the name tiers can give, and they label it by name, so that one stays (ninja `status_->BuildFinished()` → StatusPrinter's).
+inline bool memberSplitDeclines( std::span<const NodeId> candidates, const rw::SmallVec<NodeId, 2>* namesakes, Lang callerLang, const std::vector<Symbol>& symbols )
+{
+    if( candidates.size() != 1 || namesakes == nullptr )
+    {
+        return !candidates.empty();
+    }
+    return std::any_of( namesakes->begin(), namesakes->end(),
+                        [ & ]( NodeId c ) { return c != candidates.front() && langCompatible( symbols[ c ].lang, callerLang ); } );
+}
+
 // CPP-PTR-ALIAS: the pointee `->` reaches through a C++ LOCAL or PARAMETER declared directly (no pointer or array declarator: the
 // record's kDirectDeclaratorBit) as a std smart pointer or optional (`std::unique_ptr<ns::Codec> c` → Codec, written `ns::Codec`;
 // StdMemberGate::stdArrowPointee's rule: an argument written in std, a pointer or a non-class argument reads nothing) or as an
@@ -11996,7 +12010,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             bool                   proven = true;
             bool                   statedField = false;   // TS-FIELD-SELF: the receiver is `this.f` with f stated as another type
             bool                   openList    = false;   // RUST-DYN-NAMESAKE: the candidates are the open trait's visible impl bodies
-            bool                   fieldSplit  = false;   // CPP-PTR-ALIAS: the candidates are a C++ member's dispatch split (Rule 2b)
+            bool                   fieldSplit  = false;   // CPP-PTR-ALIAS: a C++ member's dispatch split (Rule 2b) that must decline
             std::string_view       bound;
             const bool             cppSplit = narrowed;
             if( cppSplit )
@@ -12008,7 +12022,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             {
                 narrowTo( split, r, ifaceCand );
                 proven     = false;   // a field's dispatch split: one candidate is no proof here (a mock's macro-made override is unseen)
-                fieldSplit = !ifaceCand.empty();
+                fieldSplit = memberSplitDeclines( ifaceCand, it != byName.end() ? &it->second : nullptr, r.lang, ing.symbols );
             }
             else if( const ReceiverEvidence::DispatchReceiver recv = recvEv.dispatchReceiverOf( r );
                      recv.type != kNoNode && !( langFacts( r.lang ).contractSignaturesUnindexed && StdMemberGate::tableIndexOf( r ) != StdMemberGate::kNotStd ) )
@@ -12041,8 +12055,9 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             // executor's own compileQuery); the row says cands="1" and names it, never an edge. The same for an OPEN Rust trait list
             // with one candidate (the trait's default): an implementor the tree cannot list may override it, and the name tiers would
             // bind an unrelated inherent `name` (RUST-DYN-NAMESAKE)
-            // CPP-PTR-ALIAS: the same for a C++ member typed as an interface whose split holds one body (`ConnectionSocketPtr socket_;
-            // socket_->isOpen()` → SocketImpl::isOpen alone): unproven, and the name tiers would list every `isOpen` in reach
+            // CPP-PTR-ALIAS: the same for a C++ member typed as an interface whose split holds one body while another definition shares
+            // the name (`Status* status_; status_->Error()` → StatusPrinter::Error alone): unproven, and the name tiers would list
+            // Lexer::Error beside it (memberSplitDeclines; a lone definition of the name stays the name tiers' one by-name row)
             else if( ifaceCand.size() > 1 || ( ( statedField || openList || fieldSplit ) && !proven && !cppSplit ) )
             {
                 recordDecline( r, std::span<const NodeId>( ifaceCand.data(), ifaceCand.size() ), DeclinedSiteKind::Iface );
