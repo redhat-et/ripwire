@@ -360,6 +360,28 @@ inline bool isDemoOrGeneratedPath( std::string_view p ) noexcept
     return isYarnPnpFileName( fileName ) || ( hasDirSegment( p, "migrations/" ) && isNumberedMigrationFileName( fileName ) );
 }
 
+// A CI, tool or vendored copy: under a dot directory (.github, .circleci, .yarn), a vendoring directory, or the demo/generated tier. Such
+// a file can define the subject's symbol, even first in path order (a bundled .github action defined Angular's UrlSerializer), and it
+// is never what the subject means. The --for subject anchor (subjectanchor.h sourceClassDef) and the --callers two-copy bind
+// (forgraphverb.h definitionIsCopy) read this one rule; it moved here from subjectanchor.h so both can.
+inline bool isToolOrVendoredPath( std::string_view p ) noexcept
+{
+    if( isDemoOrGeneratedPath( p ) )
+    {
+        return true;
+    }
+    for( std::size_t start = 0, slash = p.find( '/' ); slash != std::string_view::npos; start = slash + 1, slash = p.find( '/', start ) )
+    {
+        const std::string_view dir = p.substr( start, slash - start );
+        const bool             vendoring = dir == "vendor" || dir == "third_party" || dir == "node_modules" || dir == "bower_components";
+        if( vendoring || ( dir.size() > 1 && dir.front() == '.' && dir != ".." ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 inline constexpr float kRankTierTestMul = 0.35f;
 inline constexpr float kRankTierDemoMul = 0.35f;
 

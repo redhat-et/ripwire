@@ -195,7 +195,7 @@ inline int emitCallHierarchyAlt( const rw::Config& cfg, const rw::IngestResult& 
     if( cfg.columnar )
     {
         std::vector<NodeId> page( result.begin() + pw.begin, result.begin() + pw.end );
-        const std::string attr = "of=\"" + ex( sym ) + "\"" + rw::narrowedAttrXml( chRows.narrowed ) + " defs=\"" + std::to_string( matches.size() )
+        const std::string attr = "of=\"" + ex( sym ) + "\"" + rw::narrowedAttrXml( chRows.narrowed ) + rw::sourceCopyAttrXml( ing, chRows.copies ) + " defs=\"" + std::to_string( matches.size() )
                                + "\" count=\"" + std::to_string( result.size() ) + "\""
                                + ( !wantCallers && bodylessDefsCount > 0 ? " bodyless_defs=\"" + std::to_string( bodylessDefsCount ) + "\"" : "" )
                                + chUnprovenAttr
@@ -234,8 +234,9 @@ inline int emitCallHierarchyAlt( const rw::Config& cfg, const rw::IngestResult& 
                                                        nullptr, &pageTest, &chDcCols.paths } );   // + the <dcols> block and the <in> rows; TIER-FOLLOWUP: <test>
         return 0;
     }
-    rw::emitTo( stdout, "{{\"of\":\"{}\"{},\"defs\":{},\"count\":{}", jsonStr( sym ).c_str(),
-                chRows.narrowed.empty() ? std::string() : ",\"narrowed\":\"" + jsonStr( chRows.narrowed.front() ) + "\"", matches.size(), result.size() );   // GV-PATH-BIND
+    rw::emitTo( stdout, "{{\"of\":\"{}\"{}{},\"defs\":{},\"count\":{}", jsonStr( sym ).c_str(),
+                chRows.narrowed.empty() ? std::string() : ",\"narrowed\":\"" + jsonStr( chRows.narrowed.front() ) + "\"",   // GV-PATH-BIND
+                rw::sourceCopyKeysJson( ing, chRows.copies ), matches.size(), result.size() );   // CALLERS-TWO-COPY-BIND
     if( !wantCallers && bodylessDefsCount > 0 )
     {
         rw::emitTo( stdout, ",\"bodyless_defs\":{}", bodylessDefsCount );
@@ -469,7 +470,8 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
                            + rw::valueRefsDepthLegendFor( chRows.valueRefs )   // exactly when the root carries the depth disclosure
                            + rw::patternDispatchLegend( !chRows.valueRefs.patternSites.empty() || !chRows.valueRefs.patternWideSites.empty(), wantCallers )
                            + std::string( rw::slotJoinLegend( wantCallers ? chRows.valueRefs.slotCallers : !chRows.valueRefs.slotSites.empty(), wantCallers, wantCallers && chRows.valueRefs.slotCands ) )   // IX-1: exactly when a slot join rides
-                           + std::string( rw::closureBlocksLegend( !chClosures.empty() ) ) + std::string( rw::narrowedVerbLegend( !chRows.narrowed.empty() ) ) ).c_str(),   // IX-3: exactly when pattern_dispatch= rides; ix2-slice: exactly when an <in> block rides
+                           + std::string( rw::closureBlocksLegend( !chClosures.empty() ) ) + std::string( rw::narrowedVerbLegend( !chRows.narrowed.empty() ) )
+                           + std::string( rw::sourceCopyLegend( !chRows.copies.empty() ) ) ).c_str(),   // IX-3: exactly when pattern_dispatch= rides; ix2-slice: exactly when an <in> block rides
                          rw::rootRelPathsLegend( chSingleRoot ),
                          rw::multiRootTableLegend( ing.rootLabels.size() >= 2 ) );
             if( cfg.columnar && chHasLink )
@@ -518,8 +520,9 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
 
         // §P10.6: defs= = resolved definitions this name matched (matches.size()) — the rows below UNION the
         // neighbors of every def, which --uses/--impact already disclose and these two verbs silently hid.
-        rw::emitTo( stdout, "<{} of=\"{}\"{} defs=\"{}\" count=\"{}\"{}", tag, ex( sym ).c_str(), rw::narrowedAttrXml( chRows.narrowed ), matches.size(), result.size(),
-                    chRootAttr.c_str() );   // GV-PATH-BIND: narrowed= beside the of= it qualifies
+        rw::emitTo( stdout, "<{} of=\"{}\"{}{} defs=\"{}\" count=\"{}\"{}", tag, ex( sym ).c_str(), rw::narrowedAttrXml( chRows.narrowed ),
+                    rw::sourceCopyAttrXml( ing, chRows.copies ), matches.size(), result.size(),
+                    chRootAttr.c_str() );   // GV-PATH-BIND: narrowed= beside the of= it qualifies; CALLERS-TWO-COPY-BIND: copy_p= / copy_next=
         if( !wantCallers && bodylessDefsCount > 0 )
         {
             rw::emitTo( stdout, " bodyless_defs=\"{}\"", bodylessDefsCount );

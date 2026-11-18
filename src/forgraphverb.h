@@ -25,6 +25,7 @@
 #include "pathgaps.h"    // resolvePathEndpoint — the --path resolver
 #include "pathpairs.h"   // pathDefInTests — the --defs class="test" rule (M1)
 #include "defattrib.h"   // endpointDefinitionCount — from= binds one definition (M3)
+#include "docparse.h"    // hasGeneratedMarker / readWholeFile — a generated or copied file's banner (CALLERS-TWO-COPY-BIND)
 #include "backhops.h"    // DeclinedCrossRule — a builtin-spelled declined call is no crossing (M3)
 #include "infra/emit.h"  // emitTo — the met_bridge disclosure's stderr line
 #include "serialize.h"   // escapeXml
@@ -82,6 +83,22 @@ inline std::optional<std::string> soleDefinitionSpelling( const IngestResult& in
     return std::nullopt;
 }
 
+// The M1 survivors of `spec`: its fitting definitions less the test/fixture-path, bodyless and doc-unit ones, in the resolver's order;
+// nullopt when the spelling was not refused over two or more fitting definitions all placed (an unplaced one is never listed).
+inline std::optional<std::vector<NodeId>> sourceOnlyKeptDefs( const IngestResult& ing, std::string_view spec )
+{
+    std::size_t         fitted = 0;
+    std::vector<NodeId> fits;
+    (void)resolveAllByWrittenSpelling( ing, spec, {}, &fitted, &fits );
+    if( fitted < 2 || fits.size() != fitted )
+    {
+        return std::nullopt;
+    }
+    std::erase_if( fits, [ & ]( NodeId id )
+                   { return id >= ing.symbols.size() || !isDefinitionNotDeclaration( ing.symbols[ id ] ) || pathDefInTests( ing, id ) || isDocUnit( ing.symbols[ id ] ); } );
+    return fits;
+}
+
 // GV-ASSEMBLY M1 ESRC (endpoint source-prefer; ORCH reports/s0-xh-1110.md, rule frozen there). A task spelling the resolver REFUSES
 // because several definitions fit it (`ApplicationRef.tick` on angular: the source method plus two bodyless mocks under a tests/
 // tree) leaves the graph question unasked, though only one of them is code the task can mean. On that refusal only, the fitting
@@ -92,26 +109,65 @@ inline std::optional<std::string> soleDefinitionSpelling( const IngestResult& in
 // as before. The block discloses the narrowing (narrowed= on the open tag), so verb= is the one call that ran.
 inline std::optional<std::string> sourceOnlyPickSpelling( const IngestResult& ing, std::string_view spec )
 {
-    std::size_t         fitted = 0;
-    std::vector<NodeId> fits;
-    (void)resolveAllByWrittenSpelling( ing, spec, {}, &fitted, &fits );
-    if( fitted < 2 || fits.size() != fitted )
+    const std::optional<std::vector<NodeId>> kept = sourceOnlyKeptDefs( ing, spec );
+    if( !kept || kept->size() != 1 )
     {
         return std::nullopt;
     }
-    std::vector<NodeId> kept;
-    for( const NodeId id : fits )
+    return soleDefinitionSpelling( ing, kept->front() );
+}
+
+// CALLERS-TWO-COPY-BIND: is definition `id` a COPY of code that lives elsewhere: a file under a CI/tool dot directory, a vendoring
+// directory or the demo/generated tier (filter.h isToolOrVendoredPath, the --for subject anchor's rule), or a file whose head
+// declares it generated or copied (docparse.h hasGeneratedMarker: vscode's extensions/copilot/src/util/vs tree opens with
+// "DO NOT modify, this file was COPIED"). An unreadable file is not called a copy.
+inline bool definitionIsCopy( const IngestResult& ing, NodeId id )
+{
+    const std::uint32_t f = ing.symbols[ id ].fileId;
+    if( isToolOrVendoredPath( rootRelPath( ing, f ) ) )
     {
-        if( id < ing.symbols.size() && isDefinitionNotDeclaration( ing.symbols[ id ] ) && !pathDefInTests( ing, id ) && !isDocUnit( ing.symbols[ id ] ) )
+        return true;
+    }
+    const std::optional<std::string> text = docparse::detail::readWholeFile( diskPath( ing, f ) );
+    return text && docparse::hasGeneratedMarker( *text );
+}
+
+// CALLERS-TWO-COPY-BIND (owner 11-17: "bind source, disclose"). A callers spelling M1 still refuses because two or more source-looking
+// definitions survive it (sourceOnlyKeptDefs), where all but ONE are copies (definitionIsCopy): the answer is that one's own
+// spelling, and `copies` names the copies the answer leaves out (resolver order), so the reader can ask for one. Two non-copies
+// left, or none, → nullopt: refused as before.
+struct SourceCopyPick
+{
+    std::string         spelling;
+    std::vector<NodeId> copies;
+};
+inline std::optional<SourceCopyPick> sourceCopyPick( const IngestResult& ing, std::string_view spec )
+{
+    std::optional<std::vector<NodeId>> kept = sourceOnlyKeptDefs( ing, spec );
+    if( !kept || kept->size() < 2 )
+    {
+        return std::nullopt;   // M1's own case (one left) or nothing left
+    }
+    SourceCopyPick pick;
+    NodeId         source = kNoNode;
+    for( const NodeId id : *kept )
+    {
+        if( definitionIsCopy( ing, id ) )
         {
-            kept.push_back( id );
+            pick.copies.push_back( id );
+        }
+        else if( std::exchange( source, id ) != kNoNode )
+        {
+            return std::nullopt;   // two source definitions: no pick
         }
     }
-    if( kept.size() != 1 )
+    std::optional<std::string> spelling = source == kNoNode ? std::nullopt : soleDefinitionSpelling( ing, source );
+    if( !spelling )
     {
         return std::nullopt;
     }
-    return soleDefinitionSpelling( ing, kept.front() );
+    pick.spelling = std::move( *spelling );
+    return pick;
 }
 
 // Does the graph verb of `form` bind `spec` as written: the --path resolver (a glob included), the --callers one, the --connect one.
@@ -141,16 +197,36 @@ inline std::optional<std::string> narrowRefusedSpelling( const IngestResult& ing
     return std::nullopt;
 }
 
+// The spelling a refused CALLERS selector binds instead: the M1 pick (narrowRefusedSpelling), else (CALLERS-TWO-COPY-BIND) the one
+// source definition beside its copies (sourceCopyPick; `copies` receives them), each kept only when --callers binds it; nullopt =
+// refused as before.
+inline std::optional<std::string> callersRefusedPick( const IngestResult& ing, std::string_view sym, std::vector<NodeId>& copies )
+{
+    if( std::optional<std::string> pick = narrowRefusedSpelling( ing, sym, GraphSubjectForm::Callers ) )
+    {
+        return pick;
+    }
+    std::optional<SourceCopyPick> two = sourceCopyPick( ing, sym );
+    if( !two || !graphFormResolves( ing, GraphSubjectForm::Callers, two->spelling ) )
+    {
+        return std::nullopt;
+    }
+    copies = std::move( two->copies );
+    return std::move( two->spelling );
+}
+
 // GV-PATH-BIND + CALLERS-TWO-COPY: the ONE binder of the one-hop rows every surface serves — the CLI --callers/--callees and MCP
 // find_referencing_symbols / find_symbol / the callers verb. The rows of `sym`; for a CALLERS selector that binds nothing as typed and that
-// the M1 rule narrows to one source definition (narrowRefusedSpelling), the rows of that definition's own spelling: `bound` holds it, `sym`
-// is moved onto it and the rows' `narrowed` names the selector as typed. Otherwise the rows as typed (empty matches: the caller refuses as
-// before). MCP used to call callHierarchyRows directly and refused the spelling the CLI answered.
+// callersRefusedPick binds to one source definition, the rows of that definition's own spelling: `bound` holds it, `sym` is moved
+// onto it, the rows' `narrowed` names the selector as typed and `copies` the copies left out (CALLERS-TWO-COPY-BIND). Otherwise the
+// rows as typed (empty matches: the caller refuses as before). MCP used to call callHierarchyRows directly and refused the spelling
+// the CLI answered.
 inline CallHierarchyRows callHierarchyRowsNarrowed( const IngestResult& ing, const Graph& g, std::string_view& sym, bool wantCallers, std::string& bound,
                                                     const ValueRefIndex* valueIndex = nullptr )   // the MCP server passes its cached one
 {
     CallHierarchyRows          rows = callHierarchyRows( ing, g, sym, wantCallers, valueIndex );
-    std::optional<std::string> pick = wantCallers && rows.matches.empty() ? narrowRefusedSpelling( ing, sym, GraphSubjectForm::Callers ) : std::nullopt;
+    std::vector<NodeId>        copies;
+    std::optional<std::string> pick = wantCallers && rows.matches.empty() ? callersRefusedPick( ing, sym, copies ) : std::nullopt;
     if( !pick )
     {
         return rows;
@@ -161,9 +237,65 @@ inline CallHierarchyRows callHierarchyRowsNarrowed( const IngestResult& ing, con
         return rows;
     }
     narrowedRows.narrowed.emplace_back( sym );
+    narrowedRows.copies = std::move( copies );
     bound = std::move( *pick );
     sym   = bound;
     return narrowedRows;
+}
+
+// CALLERS-TWO-COPY-BIND: the disclosure of the copies a two-copy bind left out, every dialect from one place. copy_p= lists each copy
+// as p:line (space-separated, resolver order); copy_next= is the callers call on the first, by the spelling that binds it alone
+// (soleDefinitionSpelling; absent when none does). Empty with no copies (0 bytes).
+struct SourceCopyDisclosure
+{
+    std::string p;      // "file:line file:line"
+    std::string next;   // "--callers=file:name", or ""
+};
+inline SourceCopyDisclosure sourceCopyDisclosure( const IngestResult& ing, std::span<const NodeId> copies )
+{
+    SourceCopyDisclosure out;
+    for( const NodeId id : copies )
+    {
+        const Symbol& s = ing.symbols[ id ];
+        out.p += ( out.p.empty() ? "" : " " ) + std::string( rootRelPath( ing, s.fileId ) ) + ":" + std::to_string( s.line );
+    }
+    if( !copies.empty() )
+    {
+        const std::optional<std::string> sel = soleDefinitionSpelling( ing, copies.front() );
+        out.next                             = sel ? nextFlag( "--callers=", *sel ) : std::string();
+    }
+    return out;
+}
+inline std::string sourceCopyAttrXml( const IngestResult& ing, std::span<const NodeId> copies )
+{
+    if( copies.empty() )
+    {
+        return {};
+    }
+    const SourceCopyDisclosure d = sourceCopyDisclosure( ing, copies );
+    std::vector<char>          esc;
+    std::string                out = " copy_p=\"" + std::string( escapeXml( d.p, esc ) ) + "\"";
+    return d.next.empty() ? out : out + " copy_next=\"" + std::string( escapeXml( d.next, esc ) ) + "\"";
+}
+inline std::string sourceCopyKeysJson( const IngestResult& ing, std::span<const NodeId> copies )
+{
+    if( copies.empty() )
+    {
+        return {};
+    }
+    const SourceCopyDisclosure d   = sourceCopyDisclosure( ing, copies );
+    const std::string          out = ",\"copy_p\":\"" + jsonStr( d.p ) + "\"";
+    return d.next.empty() ? out : out + ",\"copy_next\":\"" + jsonStr( d.next ) + "\"";
+}
+
+// The legend clause for copy_p= / copy_next= (present only with them; no period inside, so it reads as one sentence).
+inline constexpr std::string_view kSourceCopyLegend =
+    "copy_p=: beside narrowed=, the other definitions the spelling fits are COPIES (under a CI/tool dot directory, a vendoring "
+    "directory or the demo/generated tier, or their file opens with a generated or copied banner), so the one source definition "
+    "answers and the copies (p:line each) are not counted; copy_next= is the callers call on the first copy. ";
+inline std::string_view sourceCopyLegend( bool on ) noexcept
+{
+    return on ? kSourceCopyLegend : std::string_view();
 }
 
 // ` narrowed="a b"`: the spellings as typed that M1 narrowed, space-separated; "" when none. The --for block's open tag and the direct

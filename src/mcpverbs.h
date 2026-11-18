@@ -943,6 +943,7 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
     // stay (mcpattrparitycheck), and count_of names the array they total, right beside them
     // (test/mcptwinclaimscheck.sh (C)). find_referencing_symbols has one array, so it needs no label.
     out += ( chRows.narrowed.empty() ? std::string() : ",\"narrowed\":\"" + mcpdetail::jsonEscape( chRows.narrowed.front() ) + "\"" )   // GV-PATH-BIND: the CLI JSON root's key
+         + sourceCopyKeysJson( ing, chRows.copies )   // CALLERS-TWO-COPY-BIND: the CLI JSON root's copy_p / copy_next
          + ",\"defs\":" + std::to_string( chRows.matches.size() )
          + ",\"count\":" + std::to_string( rowTotal )
          + ( referencingOnly ? "" : ",\"count_of\":\"calls\"" )
@@ -996,6 +997,7 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
     out += nextFieldJson( viaImplLegend( anyImpl ), "impl_note" );      // lane L6: likewise for "via":"impl"
     out += nextFieldJson( narrowedVerbLegend( !chRows.narrowed.empty() ), "narrowed_note" );   // CALLERS-TWO-COPY: the CLI legend's narrowed= reading, only with the key
     out += nextFieldJson( std::string( viaMacroLegend( anyMacro ) ) + viaMacroCappedLegend( chRows.viaMacroWithheld > 0 ), "via_macro_note" );   // BX1 FIX 2; + the ceiling
+    out += nextFieldJson( sourceCopyLegend( !chRows.copies.empty() ), "copy_note" );   // CALLERS-TWO-COPY-BIND: likewise for copy_p / copy_next
     out += declinedSitesJson( sqDc, referencingOnly, /*mcp=*/true );   // lane declined-sites: the CLI <dc> rows, never in calls/calledBy or count
     out += nextFieldJson( declinedSitesLegend( declinedSitesLegendFlags( sqDc, referencingOnly, sqDcCut ), /*mcp=*/true ), "declined_note" );   // their reading, only when they ride
     out += nextFieldJson( callSitesAtLegend( calledBySites.any, calledBySites.anyCut, kCallSitesPerRowCap ), "sites_note" );   // CALLSITE-AT: its reading, only when a row carries it (nextFieldJson: "" -> no key, JSON-escaped)

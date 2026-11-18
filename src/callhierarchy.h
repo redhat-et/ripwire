@@ -116,9 +116,12 @@ struct CallHierarchyRows
     // lane declined-sites (declinedsites.h): the records behind declinedCalls, in served order (callers file-first, callees
     // file and line) — the <dc> rows, never in `rows` or any count above; uncut, declinedSites.size() == declinedCalls.
     std::vector<std::uint32_t> declinedSites;
-    // GV-PATH-BIND (CLI --callers, src/verbs_navigate.h callHierarchyRowsNarrowed): the selector as typed when it bound nothing and the
+    // GV-PATH-BIND (CLI --callers, src/forgraphverb.h callHierarchyRowsNarrowed): the selector as typed when it bound nothing and the
     // M1 rule narrowed it to one source definition, whose spelling these rows answer; empty otherwise (the root's narrowed=)
     std::vector<std::string>   narrowed;
+    // CALLERS-TWO-COPY-BIND (forgraphverb.h sourceCopyPick): beside `narrowed`, the copies of the bound definition the answer left out
+    // (the root's copy_p= / copy_next=); empty otherwise
+    std::vector<NodeId>        copies;
     // BODILESS-SEED (contractseed.h): callers only — the selector's contract seeds and the implementor bodies `matches` gained
     // for them (the root's impls=; absent when contractSeeds is 0)
     std::size_t                contractSeeds = 0;
