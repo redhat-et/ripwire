@@ -541,7 +541,7 @@ inline HopFacts hopFacts( const IngestResult& ing, const Graph& g, std::vector<H
     tests.reserve( wanted.size() );
     for( const HopWant& w : wanted )
     {
-        tests.emplace_back( ing, ing.symbols[ w.to ], std::span<const NodeId>( &w.to, 1 ) );
+        tests.emplace_back( ing, ing.symbols[ w.to ], std::span<const NodeId>( &w.to, 1 ), g.provenSites );
     }
     // The arity half of the tiebreak: can the edge's callee accept this call's argument count? The --edit-check rule
     // (editCheckArityAccepts): an uncounted call, a variadic/defaulted callee or an implicit receiver always fits. A C-family
@@ -599,7 +599,7 @@ inline HopFacts hopFacts( const IngestResult& ing, const Graph& g, std::vector<H
         for( auto it = lo; it != wanted.end() && it->from == r.fromSymbol; ++it )
         {
             const std::size_t k = std::size_t( it - wanted.begin() );
-            if( !tests[k].reaches( r ) )
+            if( !tests[k].reaches( r, refIndex ) )
             {
                 continue;
             }

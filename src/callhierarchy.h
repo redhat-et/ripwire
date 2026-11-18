@@ -538,13 +538,13 @@ struct CallersByteBand
 // The band is built in a local and returned as one aggregate. (Fix round 1 restructured this for the gcc-14.2 Release/LTO
 // rc=139; the SEGV round found the cause in pageview.h callHierarchyRowCap's unstated precondition, not here.)
 inline CallersByteBand callersByteBand( const IngestResult& ing, std::span<const NodeId> defs, std::span<const NodeId> rows, const VrRender& rr, int pageLimit,
-                                        const std::vector<char>& testReach, const OneHopAttribution& attr, std::span<const std::uint32_t> keptForwards )
+                                        const std::vector<char>& testReach, const OneHopAttribution& attr, const Graph& g )
 {
     if( pageLimit > 0 || rows.size() <= std::size_t( kCallHierarchyBandMax ) || rows.size() > kCallersBandMaxBytes / kCallerRowMinBytes )
     {
         return CallersByteBand{};
     }
-    RowCallSites       sites = rowCallSites( ing, defs, rows, rr, keptForwards );
+    RowCallSites       sites = rowCallSites( ing, defs, rows, rr, g );
     std::vector<char>  esc;   // the escape buffer the row's n= and p= are measured through
     const MemberOwners owners( ing );   // QUALNAME-1: the row's n= is its owner-qualified name (memberowner.h), so the estimate charges it
     std::size_t       bytes = 0;

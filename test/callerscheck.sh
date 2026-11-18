@@ -343,9 +343,62 @@ elif [ "$( sat "$( row "$SA_NM" nm_noise )" )" = "nm/noise.c:10" ] && [ "$SA_NM_
 else
     no "SA12: non-call references printed as call sites: every sites_at= is \"$SA_NM_ALL\", want \"nm/noise.c:10\""
 fi
+# RE-PINNED 2026-11-18 (lane edge-strays-1118, PROVEN-SITE-KEEPS-NAMESAKES): `w.nst_fn(5)` is PROVEN to W::nst_fn (its local's
+#   class), so it is no site of ns::nst_fn (was "nm/ns.cpp:5 nm/ns.cpp:6": the leaf-name match listed it under both rows).
 SA_NS="$( sa --callers=ns::nst_fn )"
-[ "$( sat "$( row "$SA_NS" nst_mixed )" )" = "nm/ns.cpp:5 nm/ns.cpp:6" ] \
-    && ok "SA12: by LEAF name: --callers=ns::nst_fn lists the row's w.nst_fn(5) call too (nm/ns.cpp:5 nm/ns.cpp:6)" \
+[ "$( sat "$( row "$SA_NS" nst_mixed )" )" = "nm/ns.cpp:6" ] \
+    && ok "SA12: --callers=ns::nst_fn lists ns::nst_fn(6) only; w.nst_fn(5) is proven to W::nst_fn (nm/ns.cpp:6)" \
     || no "SA12: ns::nst_fn row: $( row "$SA_NS" nst_mixed )"
+SA_WN="$( sa --callers=W::nst_fn )"
+[ "$( sat "$( row "$SA_WN" nst_mixed )" )" = "nm/ns.cpp:5" ] \
+    && ok "SA12: and --callers=W::nst_fn lists w.nst_fn(5) only (nm/ns.cpp:5)" \
+    || no "SA12: W::nst_fn row: $( row "$SA_WN" nst_mixed )"
+
+# SP (lane edge-strays-1118, PROVEN-SITE-KEEPS-NAMESAKES): a call site a rule PROVED is a site of its own target only, never of a
+#   by-name row of a namesake (sites_at=, a narrowed --uses). The envoy shape (FilterManagerImpl::onConnectionClose): two proven
+#   `a.closeSocket()` calls and one `latched_->closeSocket()` through a std::optional, whose by-name rows (Conn, Raw: the api/ dir
+#   holds Action) listed all three lines. RED on main 9087eb59c: SP1 and SP3 print "sp/impl/mgr.cc:10 sp/impl/mgr.cc:13 sp/impl/mgr.cc:16".
+mkdir -p "$SA/sp/api" "$SA/sp/impl"
+printf '#pragma once\nstruct Action {\n  bool closeSocket() const { return true; }\n};\n' > "$SA/sp/api/action.h"
+printf '#pragma once\nstruct Conn {\n  void closeSocket(int ev) {}\n};\nstruct Raw {\n  void closeSocket(int ev, bool b) {}\n};\n' > "$SA/sp/impl/conn.h"
+cat > "$SA/sp/impl/mgr.cc" <<'SAEOF'
+#include "sp/api/action.h"
+#include "sp/impl/conn.h"
+#include <optional>
+struct Mgr {
+  std::optional<Action> latched_;
+  void onClose(Action a);
+  void unprovenOnly();
+};
+void Mgr::onClose(Action a) {
+  if (a.closeSocket()) {
+    return;
+  }
+  if (latched_->closeSocket()) {
+    return;
+  }
+  bool z = a.closeSocket();
+}
+void Mgr::unprovenOnly() {
+  latched_->closeSocket();
+}
+SAEOF
+SP_C="$( sa --callers=sp/impl/conn.h:Conn::closeSocket )"
+SP_ON="$( row "$SP_C" Mgr::onClose )"
+{ printf '%s' "$SP_ON" | grep -q 'via="name"' && [ "$( sat "$SP_ON" )" = "sp/impl/mgr.cc:13" ]; } \
+    && ok "SP1: the by-name Conn::closeSocket row lists the unproven latched_->closeSocket() only (sp/impl/mgr.cc:13)" \
+    || no "SP1: onClose row under Conn::closeSocket: $SP_ON"
+[ "$( sat "$( row "$SP_C" Mgr::unprovenOnly )" )" = "sp/impl/mgr.cc:19" ] \
+    && ok "SP2: NEGATIVE: a caller with no proven call of the name keeps its row and site (sp/impl/mgr.cc:19)" \
+    || no "SP2: unprovenOnly row under Conn::closeSocket: $( row "$SP_C" Mgr::unprovenOnly )"
+SP_U="$( sa --uses=sp/impl/conn.h:Conn::closeSocket | sed 's/<!--.*-->//' | grep -oE '<u role="call" p="[^"]*"' | sed -e 's/.*p="//' -e 's/"$//' | tr '\n' ' ' | sed 's/ $//' )"
+[ "$SP_U" = "sp/impl/mgr.cc:13 sp/impl/mgr.cc:19" ] \
+    && ok "SP3: the narrowed --uses=…:Conn::closeSocket drops the two calls proven to Action::closeSocket" \
+    || no "SP3: --uses=sp/impl/conn.h:Conn::closeSocket call sites: $SP_U"
+SP_A="$( sa --callers=sp/api/action.h:Action::closeSocket )"
+SP_AON="$( row "$SP_A" Mgr::onClose )"
+{ ! printf '%s' "$SP_AON" | grep -q 'via=' && sat "$SP_AON" | grep -q 'sp/impl/mgr.cc:10' && sat "$SP_AON" | grep -q 'sp/impl/mgr.cc:16'; } \
+    && ok "SP4: NEGATIVE: the proven Action::closeSocket row keeps both proven lines (10, 16)" \
+    || no "SP4: onClose row under Action::closeSocket: $SP_AON"
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail
