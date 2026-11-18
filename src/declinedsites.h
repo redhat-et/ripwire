@@ -493,21 +493,38 @@ struct DeclinedSiteCut
     std::size_t shown = 0;
     std::string next;   // "" when nothing was cut
 };
+
+// Test hook (test/dctiercutcheck.sh's registered mutation controls; docs/EVALS.md amendment 10c): RIPWIRE_TEST_DCCUT_MUTANT names
+// ONE deliberate defect in the cut's DISCLOSURE, so the gate shows on the real binary that each of its arms can fail. --limit sizes
+// this listing as well as the symbol rows, so the call a windowed root names (all_next=, at the row total) still cuts it wherever
+// the answer holds more declined sites than rows; what keeps that honest is the root saying so, and these break exactly that.
+// Unset (every ordinary run): None.
+enum class DcCutMutant : std::uint8_t
+{
+    None,
+    SilentCut,   // the sites are cut and the root says neither dc_shown= nor dc_next=: a cut answer reads as whole
+    NextShort,   // dc_next= names a limit one site short: the call named as listing every site does not
+    CutAlways,   // dc_shown= / dc_next= ride an answer whose sites are all printed: a whole answer is called cut
+};
+inline constexpr std::string_view kDcCutMutantNames[] = { "silentcut", "nextshort", "cutalways" };   // the enum's order after None
+inline DcCutMutant dcCutMutant() { return DcCutMutant( envChoice( "RIPWIRE_TEST_DCCUT_MUTANT", kDcCutMutantNames ) ); }
+
 // `columnar` (BAND DC): the asking answer is in the columnar form, so dc_next= keeps it — the page it names has the same form
 // (nextverb.h callHierarchyPageNext's rule), and past kDeclinedSiteCap sites that form carries them as the <dcols> arrays.
 inline DeclinedSiteCut declinedSiteCut( std::size_t total, int pageLimit, std::string_view verbFlag, std::string_view selector, std::size_t rowWindow,
                                         bool columnar = false )
 {
-    DeclinedSiteCut cut;
-    const std::size_t cap = pageLimit > 0 ? std::size_t( pageLimit ) : kDeclinedSiteCap;
+    DeclinedSiteCut   cut;
+    const DcCutMutant mutant = dcCutMutant();
+    const std::size_t cap    = pageLimit > 0 ? std::size_t( pageLimit ) : kDeclinedSiteCap;
     cut.shown = std::min( total, cap );
-    if( cut.shown < total )
+    if( ( cut.shown < total && mutant != DcCutMutant::SilentCut ) || ( total > 0 && mutant == DcCutMutant::CutAlways ) )
     {
         // saturated at --limit's own ceiling, so the call it names is one the parser accepts (a billion sites is past any tree)
-        const std::size_t limit = std::min( std::max( total, rowWindow ), std::size_t( kPageValueMax ) );
+        const std::size_t limit = std::min( std::max( total, rowWindow ), std::size_t( kPageValueMax ) ) - ( mutant == DcCutMutant::NextShort ? 1 : 0 );
         cut.next = nextFlag( verbFlag, selector ) + ( columnar ? " --format=columnar" : "" ) + " --limit=" + std::to_string( limit );
     }
-    ENSURES( cut.shown <= total && ( cut.shown == total ) == cut.next.empty() );
+    ENSURES( cut.shown <= total && ( mutant != DcCutMutant::None || ( cut.shown == total ) == cut.next.empty() ) );
     return cut;
 }
 inline std::string declinedSiteCutAttrXml( const DeclinedSiteCut& cut )

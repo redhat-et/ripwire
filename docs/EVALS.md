@@ -18645,3 +18645,37 @@ windowed `--callers` root, or no `--for` hand-off with `windows="1"`.
 **Red first.** On the unchanged binary the gate must be red on H1 and on all three (M) arms (an unknown mutant
 name changes nothing, so each arm "still passes" and the control reports it), and green on T1 to T4: that green
 is the finding, not a defect in the gate.
+
+## READOUT — amendment 10c: the cut was already said; 0 answer bytes moved, the disclosure now cannot regress unseen
+
+Measured on the lane binary against the train it branched from (`93210787e`), both plain builds: 40 cells, 72
+calls a side, all rc 0, plus 15 `dc_next=` calls.
+
+| arm | grain | result |
+| --- | --- | --- |
+| red first | — | on the unchanged binary: T1 to T4 and (N) green, H1 and the three (M) arms red, as registered |
+| T1 said | cell | 18 of 18 cut fixture answers (6 surfaces of 3 named calls: an `--impact` root, a `--callers` root, a `--for` hand-off) carry `dc_shown=` and `dc_next=`; corpus: 15 of 15 |
+| T2 arithmetic | cell | 18 of 18: `dc_shown=` is the sites printed, below `declined_calls=`, `counts_floor` on the root, defined by the answer's legend or note |
+| T3 `dc_next=` clears both tiers | item | fixture 18 of 18; corpus 15 of 15, **179,022 of 179,022** declined sites listed with the row count unchanged |
+| T4 no false alarm | cell | 9 of 9 whole answers carry neither attribute; corpus: 17 of 17 uncut named calls |
+| H1 help | — | the `--impact` sentence reads "every row of total=" and names `dc_shown=`, `declined_calls=`, `dc_next=` |
+| B1 bytes | cell | **72 of 72** corpus documents byte-identical to the base binary; 72 of 72 pass `xmllint --noout` |
+| (M) `silentcut` | — | T1 red, 18 failures |
+| (M) `nextshort` | — | T3 red, 18 failures |
+| (M) `cutalways` | — | T4 red, 9 failures |
+
+What moved: one sentence of `--help` (+2 lines of help text; `docs/COMMANDS.md` regenerated, the `help_all` byte
+pin of `test/printf_parity.manifest` re-recorded and no other label moved). No answer, legend or attribute
+changed, so no legend dictionary row was added.
+
+### Not done, and not claimed
+
+- **The population is this band's re-derivation, not amendment 10's symbol list** (40 cells against 39; 15 cut
+  cells against 12). The 99-row, 4,005-site cell amendment 10b cites is not among them; the smallest cut cell
+  here holds 602 rows and 8,864 declined sites.
+- **`dc_shown=` stays outside rule 3's `shown_<noun>=` / `<noun>_capped=` pair** (`src/pageview.h`): it is one of
+  seven noun-first `_shown` spellings in the tool, an absent `dc_shown=` means "not cut", and `truncvocabcheck`'s
+  sweep matches `shown_` prefixes only. A reader that looks for a `capped="1"` bit alone finds none on a
+  declined-tier cut. Folding those seven into the one vocabulary is a tool-wide change and is not made here.
+- **`dc_next=` on a `--json` answer does not carry `--json`**; the gate adds the form itself.
+- **No sanitizer build was run for this band**, and no timing or memory figure was taken.
