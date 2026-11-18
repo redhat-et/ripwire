@@ -39,6 +39,21 @@ def med(argv):
     return {"median_s": round(statistics.median(ts), 4), "min_s": round(min(ts), 4), "max_s": round(max(ts), 4)}
 
 
+MAP_TIMEOUT_S = 3600  # one whole-repo map; generous on purpose
+
+
+def map_stdout(argv):
+    """Bounded; a timeout or a signal-kill (rc < 0) stops the run with that state named, so two killed runs'
+    (equal, empty) outputs can never be recorded as ripwire_deterministic=true."""
+    try:
+        p = subprocess.run(argv, capture_output=True, timeout=MAP_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        raise SystemExit(f"TIMEOUT ({MAP_TIMEOUT_S}s): {' '.join(argv)}")
+    if p.returncode < 0:
+        raise SystemExit(f"KILLED (signal={-p.returncode}): {' '.join(argv)}")
+    return p.stdout
+
+
 def main():
     out = {"n_runs": N}
     out["ripwire_warm_map"] = med([RIPWIRE, str(CORPUS)])
@@ -69,8 +84,8 @@ def main():
     }
     out["headroom_deterministic"] = len(set(outs)) == 1
 
-    a = subprocess.run([RIPWIRE, str(CORPUS)], capture_output=True).stdout
-    b = subprocess.run([RIPWIRE, str(CORPUS)], capture_output=True).stdout
+    a = map_stdout([RIPWIRE, str(CORPUS)])
+    b = map_stdout([RIPWIRE, str(CORPUS)])
     out["ripwire_deterministic"] = a == b
 
     (HERE / "timing_determinism.json").write_text(json.dumps(out, indent=1))

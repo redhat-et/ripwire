@@ -158,9 +158,21 @@ def _tail_name( s ):
 
 # ---- census side files -------------------------------------------------------------------------------
 
+CENSUS_TIMEOUT_S = 3600   # one cold whole-repo census run; generous on purpose
+
+
 def run_census( binp, repo, out, extra ):
     cmd = [ binp, repo, "--pin-census=" + out, "--no-cache" ] + extra
-    r = subprocess.run( cmd, capture_output = True, text = True )
+    # Bounded, and a timeout or signal-kill (rc < 0, e.g. the OS killing a runaway run) is named as its own
+    # state rather than reported as a bare FAILED with a negative rc.
+    try:
+        r = subprocess.run( cmd, capture_output = True, text = True, timeout = CENSUS_TIMEOUT_S )
+    except subprocess.TimeoutExpired:
+        sys.stderr.write( "TIMEOUT (%ds): %s\n" % ( CENSUS_TIMEOUT_S, " ".join( cmd ) ) )
+        sys.exit( 2 )
+    if r.returncode < 0:
+        sys.stderr.write( "KILLED (signal=%d): %s\n%s\n" % ( -r.returncode, " ".join( cmd ), r.stderr[ :2000 ] ) )
+        sys.exit( 2 )
     if r.returncode != 0:
         sys.stderr.write( "FAILED: %s\n%s\n" % ( " ".join( cmd ), r.stderr[ :2000 ] ) )
         sys.exit( 2 )
