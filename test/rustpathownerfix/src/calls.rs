@@ -13,7 +13,7 @@ pub mod std_use {
     pub fn std_new() { let _p = PathBuf::new(); }
     pub fn std_from() { let _p = PathBuf::from("x"); }
 }
-pub fn std_written() { let _p = std::path::PathBuf::new(); }
+pub fn std_written() -> bool { std::path::PathBuf::new().as_os_str().is_empty() }
 pub fn std_written_from() { let _p = std::path::PathBuf::from("x"); }
 pub mod tree_use {
     use crate::mypath::PathBuf;

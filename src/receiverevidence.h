@@ -4590,17 +4590,17 @@ struct ReceiverEvidence
     //     name a `use` into the tree). A candidate the outside type owns is a trait impl FOR it (`impl From<X> for PathBuf`),
     //     reached only when the argument is an X, which is not read: hedged. Nothing left: external=.
     //   * T names no class the walk can place (two globs bring it, a glob it cannot follow): two owners among the candidates in the
-    //     caller's own crate, or a member there it cannot place beside another, are a Split: every candidate stays (the ladder's
-    //     own split when locality would keep them all, else hedged) — never a locality pick. One there, a crate the layout cannot
+    //     caller's own crate, or a member there it cannot place beside another, split: every candidate stays (rustLadderSplit:
+    //     the ladder's own split when locality would keep them all, else hedged) — never a locality pick. One there, a crate the layout cannot
     //     place, or a module's item among the candidates (`util::tool()`: the module path decides it) keeps the tier as before.
     enum class RustPathOwners : std::uint8_t { Keep, Hedge, Split, External, Decline };
     static constexpr NodeId kRustOwnerUnread  = kNoNode - 1;   // rustPathOwnerMemo: not read yet
     static constexpr NodeId kRustOwnerOutside = kNoNode - 2;   // an owner: the impl's own type name leads out of the tree where the impl is written
     static constexpr NodeId kRustOwnerInTree  = kNoNode - 3;   // an owner: no indexed class, but the impl's type name is a `use` into the tree
     mutable std::vector<NodeId> rustPathOwnerMemo;              // per symbol: its owner as rustPathOwners reads it (sized on first use)
-    RustPathOwners rustPathOwners( const Reference& r, std::vector<NodeId>& cand ) const
+    RustPathOwners rustPathOwners( const Reference& r, std::vector<NodeId>& cand, bool canonical ) const
     {
-        if( callResultFamilyOf( r.lang ) != CallResultFamily::Rust || r.qualifier.empty() || cand.empty() )
+        if( !canonical || callResultFamilyOf( r.lang ) != CallResultFamily::Rust || r.qualifier.empty() || cand.empty() )
         {
             return RustPathOwners::Keep;
         }
@@ -4689,7 +4689,24 @@ struct ReceiverEvidence
             differ = differ || owners[ i ] != first || owners[ i ] == kNoNode || owners[ i ] == kRustOwnerOutside || owners[ i ] == kRustOwnerInTree;
             ++inCrate;
         }
-        return inCrate >= 2 && differ ? RustPathOwners::Split : RustPathOwners::Keep;
+        return inCrate >= 2 && differ ? rustLadderSplit( r, cand ) : RustPathOwners::Keep;
+    }
+    // RUST-PATH-OWNER: how the ladder keeps a Split's candidates. Tier 1 or 2 holding all of them or none (tier 3's canonical rescue)
+    // is its own split (Split: no locality tie-break narrows it); a strict subset there would be a locality pick among types the path
+    // cannot tell apart, so every candidate is hedged instead (Hedge)
+    RustPathOwners rustLadderSplit( const Reference& r, const std::vector<NodeId>& cand ) const
+    {
+        const std::string_view dir    = includerDir( ing.files[ r.fileId ] );
+        std::size_t            inFile = 0;
+        std::size_t            inDir  = 0;
+        for( const NodeId c : cand )
+        {
+            const std::uint32_t f = ing.symbols[ c ].fileId;
+            inFile += f == r.fileId ? 1u : 0u;
+            inDir  += includerDir( ing.files[ f ] ) == dir ? 1u : 0u;
+        }
+        const bool subset = inFile != 0 ? inFile < cand.size() : inDir != 0 && inDir < cand.size();
+        return subset ? RustPathOwners::Hedge : RustPathOwners::Split;
     }
     // rust-receivers: the ONE class `self` names inside `from` (or the method enclosing it): the in-tree class of the method's
     // owner name that owns the method (memberOwnerRuleOf — Rust: its own file and item scope, or the only class of the name);
