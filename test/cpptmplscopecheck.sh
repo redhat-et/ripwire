@@ -528,8 +528,10 @@ for pair in callers:count impact:reaches uses:defs; do
         && ok "templ: --$verb=Box::grow identical to the control's answer element, bodyless <def> rows masked ($attr=\"$got\")" \
         || no "templ: --$verb=Box::grow differs from the control — control: $( el "$P" ) — templ: $( el "$T" )"
     pd="$( el "$P" | grep -oE '<def [^>]*bodyless="1"/>' | tr -d '\n' )"; td="$( el "$T" | grep -oE '<def [^>]*bodyless="1"/>' | tr -d '\n' )"
-    if [ "$pd" = '<def ix="1" t="method" sc="Box" p="box.hpp:3" bodyless="1"/>' ] && [ -z "$td" ]; then
-        ok "KNOWN GAP (--$verb): the control ties its declaration (box.hpp:3); the template member's declaration is untied and silent"
+    # Since BX1 FIX 7 (b32349df7, merged in the same batch) an UNTIED declaration is no longer silent: it is listed after the
+    # groups with an ix= past them (graphlegend.h kUntiedDeclRowLegend), so the template answer names box.hpp:3 as ix="2".
+    if [ "$pd" = '<def ix="1" t="method" sc="Box" p="box.hpp:3" bodyless="1"/>' ] && [ "$td" = '<def ix="2" t="method" sc="Box" p="box.hpp:3" bodyless="1"/>' ]; then
+        ok "KNOWN GAP (--$verb): the control ties its declaration (box.hpp:3, ix=1); the template member's declaration is untied, listed as ix=2 (BX1 FIX 7)"
     else
         no "KNOWN GAP (--$verb) changed shape: control bodyless rows [$pd], templ [$td] — if the template declaration is now tied, drop the mask above"
     fi
