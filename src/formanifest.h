@@ -56,6 +56,7 @@
 #include "infra/sortutil.h" // svLess
 #include "lexical.h" // lexLowerByte
 #include "model.h"
+#include "redact.h" // redactInPlace — a defining line is manifest text (a script can hold a token)
 #include "resolve.h" // trimWs
 #include "serialize.h" // escapeXml
 
@@ -1284,10 +1285,12 @@ static_assert( kForManifestRowsLegend.find( "--", 4 ) == kForManifestRowsLegend.
 
 namespace manifest_detail
 {
-// One <r> row: the line, the kind it defines, its text (cut at kManifestLineMax bytes, never inside a UTF-8 sequence).
-inline std::string manifestRowXml( const ManifestDoc& doc, const ManifestEntry& en, std::vector<char>& esc )
+// One <r> row: the line, the kind it defines, its text (redacted, then cut at kManifestLineMax bytes, never inside a UTF-8 sequence).
+// `redact`: the run's tally (nullptr: --no-redact). CodeRabbit #686: a package.json script line can carry a token literal.
+inline std::string manifestRowXml( const ManifestDoc& doc, const ManifestEntry& en, std::vector<char>& esc, RedactCounts* redact )
 {
-    const std::string_view text = lineOf( doc.text, en.line );
+    std::string text( lineOf( doc.text, en.line ) );
+    redactInPlace( text, redact );   // BEFORE the cut: a secret crossing byte kManifestLineMax must reach the redactor whole
     std::size_t keep = std::min( text.size(), kManifestLineMax );
     while( keep > 0 && keep < text.size() && ( static_cast<unsigned char>( text[keep] ) & 0xC0 ) == 0x80 )
     {
@@ -1297,11 +1300,11 @@ inline std::string manifestRowXml( const ManifestDoc& doc, const ManifestEntry& 
     out += en.group.empty() ? std::string() : " group=\"" + std::string( escapeXml( en.group, esc ) ) + "\"";
     const bool cut = keep < text.size(); // CAP-DISCLOSE: cut="1"
     out += cut ? " cut=\"1\">" : ">";
-    return out + std::string( escapeXml( text.substr( 0, keep ), esc ) ) + "</r>";
+    return out + std::string( escapeXml( std::string_view( text ).substr( 0, keep ), esc ) ) + "</r>";
 }
 
 // One <mf> element: the manifest, the task words it names, its best rows and, for a feature match, the feature touch list.
-inline std::string manifestFileXml( const IngestResult& ing, const ManifestDoc& doc, const ManifestMatch& m )
+inline std::string manifestFileXml( const IngestResult& ing, const ManifestDoc& doc, const ManifestMatch& m, RedactCounts* redact )
 {
     std::vector<char> esc;
     std::string words;
@@ -1314,7 +1317,7 @@ inline std::string manifestFileXml( const IngestResult& ing, const ManifestDoc& 
     out += capped ? " shown=\"" + std::to_string( kManifestRowsPerFile ) + "\" capped=\"1\">" : std::string( ">" ); // CAP-DISCLOSE
     for( std::size_t i = 0; i < m.hits.size() && i < kManifestRowsPerFile; ++i )
     {
-        out += manifestRowXml( doc, doc.entries[m.hits[i].entry], esc );
+        out += manifestRowXml( doc, doc.entries[m.hits[i].entry], esc, redact );
     }
     if( const std::optional<ExemplarFamily> fam = featureFamily( doc, m ) )
     {
@@ -1337,7 +1340,8 @@ inline std::string manifestFileXml( const IngestResult& ing, const ManifestDoc& 
 
 // The <manifest_rows> block of this task, or "" (see WHEN above). `held`: a token budget is set; the block is named, not printed.
 // `compactLegend`: the --legend=compact posture (the CLI default) prints the short legend; the MCP tool and --legend=full the long one.
-inline std::string renderForManifestRows( const IngestResult& ing, std::string_view task, bool held = false, bool compactLegend = false )
+// `redact`: the run's redaction tally, every defining line passes it (nullptr: --no-redact).
+inline std::string renderForManifestRows( const IngestResult& ing, std::string_view task, RedactCounts* redact, bool held = false, bool compactLegend = false )
 {
     using namespace manifest_detail;
     if( !ing.realPaths.empty() || task.empty() )
@@ -1372,7 +1376,7 @@ inline std::string renderForManifestRows( const IngestResult& ing, std::string_v
     out += capped ? " shown=\"" + std::to_string( kManifestFileRows ) + "\" capped=\"1\">" : std::string( ">" ); // CAP-DISCLOSE
     for( std::size_t i = 0; i < ranked.size() && i < kManifestFileRows; ++i )
     {
-        out += manifestFileXml( ing, docs[ranked[i].doc], ranked[i] );
+        out += manifestFileXml( ing, docs[ranked[i].doc], ranked[i], redact );
     }
     return out + "</manifest_rows>";
 }

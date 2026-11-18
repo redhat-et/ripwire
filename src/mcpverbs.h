@@ -3123,7 +3123,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     {
         out.insert( out.size() - 6, renderForDeclRows( ing, ix.g, task, /*held=*/budgetTokens > 0 ) );
         out.insert( out.size() - 6, renderForExemplarFamily( ing, ix.g, task, /*held=*/budgetTokens > 0 ) );   // EXEMPLAR-STAIRS, the CLI twin's renderer
-        out.insert( out.size() - 6, renderForManifestRows( ing, task, /*held=*/budgetTokens > 0 ) );   // MANIFEST-ROW, the CLI twin's renderer
+        out.insert( out.size() - 6, renderForManifestRows( ing, task, redact, /*held=*/budgetTokens > 0 ) );   // MANIFEST-ROW, the CLI twin's renderer
     }
     // FOR-DOC-BODY (fordocbody.h): the CLI --for's <doc_body>, one renderer, before </ctx>, priced on its own root; under budget_tokens it is served into the budget left after the answer, as there
     if( out.ends_with( "</ctx>" ) )

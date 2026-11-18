@@ -41,6 +41,9 @@
 #   (b2) a budget the block fits prints it whole; (b3) the budget fit prices <manifest_rows> (kForHeldBlocks) and holds it at 1400
 #   (f4a) a retargeted touch row carries its own line's offset: no n= of the cfg line's holder
 #   (fx1) a file name's extension (`book.toml`) is no task word: the `toml` dependency stays silent; "a dependency like toml" fires
+# ARMS (CodeRabbit round on train #686)
+#   (rd1) a defining line is source text: a package.json script's token literals print redacted, also one past the raw 120-byte
+#         cut (redacted before the cut), and stderr counts every marker; (rd2) --no-redact prints them raw
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
@@ -463,6 +466,21 @@ else no "(b2) budget 4000: $( grep -o '<manifest_rows.*' "$TMP/b2.xml" | head -c
 run acme "--for=add a new broker transport like NATS or MQTT to brokers" --token-budget=1400 >"$TMP/b3.xml" || no "(b3) the run exited $?"
 if grep -q '<manifest_rows files="2" held="budget"/></ctx>$' "$TMP/b3.xml" && ! grep -q '<r l=' "$TMP/b3.xml"; then ok "(b3) the fit prices the block: held at 1400"
 else no "(b3) budget 1400: $( grep -o '<manifest_rows.*' "$TMP/b3.xml" | head -c 300 )"; fi
+# (rd1)/(rd2) CodeRabbit 4609415549: a defining line is source text, redacted like every served body (redact.h). The release line
+# is 147 bytes raw; its second token starts at byte 105: cut first, only `ghp_` and 11 bytes of it print, too short for the GitHub
+# rule, and leak. Redacted first, the first token's marker frees 34 bytes and both markers fit under the 120-byte cut.
+mkdir -p "$F/vault/tools"
+TOK1="ghp_$( printf 'A%.0s' $( seq 1 30 ) )"; TOKL="ghp_$( printf 'C%.0s' $( seq 1 60 ) )"; TOK2="ghp_$( printf 'B%.0s' $( seq 1 30 ) )"
+printf '{\n  "name": "@vault/tools",\n  "scripts": {\n    "deploy": "GITHUB_TOKEN=%s node deploy.js",\n    "release": "node release.js --a %s --b %s --tail"\n  }\n}\n' "$TOK1" "$TOKL" "$TOK2" >"$F/vault/tools/package.json"
+printf 'export function deploy() { return 1; }\n' >"$F/vault/tools/deploy.js"
+( cd "$F/vault" || exit 1; "$BIN" "$F/vault" --no-cache "--for=fix the deploy and release npm scripts" 2>"$TMP/rd1.err" </dev/null ) >"$TMP/rd1.xml" || no "(rd1) the run exited $?"
+run vault "--for=fix the deploy and release npm scripts" --no-redact >"$TMP/rd2.xml" || no "(rd2) the run exited $?"
+RDN="$( grep -o '\[REDACTED:' "$TMP/rd1.xml" | wc -l | tr -d ' ' )"   # every marker the answer prints (other blocks show the lines too)
+if [ "$( block "$TMP/rd1.xml" | grep -o '\[REDACTED:' | wc -l | tr -d ' ' )" = 3 ] && ! grep -q 'AAAAAAAAAA\|BBBBBBB\|CCCCCCCCCC' "$TMP/rd1.xml" \
+   && grep -q "redacted $RDN secrets" "$TMP/rd1.err"; then ok "(rd1) the three tokens redacted in the defining lines (one past the raw cut); stderr counts all $RDN markers"
+else no "(rd1) redaction: $( block "$TMP/rd1.xml" | head -c 600 ) | stderr: $( grep -o 'redacted[^(]*' "$TMP/rd1.err" )"; fi
+if block "$TMP/rd2.xml" | grep -q "$TOK1" && ! grep -q 'REDACTED' "$TMP/rd2.xml"; then ok "(rd2) --no-redact prints the defining line raw"
+else no "(rd2) --no-redact: $( block "$TMP/rd2.xml" | head -c 400 )"; fi
 run ferris "--for=add a new extractor behind its own cargo feature like multipart" >"$TMP/a1.xml" || no "(a1) the run exited $?"
 printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"%s","task":"add a new extractor behind its own cargo feature like multipart"}}}\n' "$F/ferris" \
   | ( cd "$F/ferris" || exit 1; "$BIN" --mcp 2>/dev/null ) >"$TMP/x1.jsonl" || no "(x1) the MCP run exited $?"

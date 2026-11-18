@@ -2998,7 +2998,7 @@ inline void appendForTaskRowBlocks( const MainDispatch& d )
     }
     rw::emitRaw( stdout, rw::renderForDeclRows( d.ing, d.g, cfg.forTask, /*held=*/forHeldBlocksBudget( cfg ) > 0 ).c_str() );
     rw::emitRaw( stdout, rw::renderForExemplarFamily( d.ing, d.g, cfg.forTask, /*held=*/forHeldBlocksBudget( cfg ) > 0, /*compactLegend=*/cfg.legend == "compact" ).c_str() );   // EXEMPLAR-STAIRS: "" unless the task adds one more X
-    rw::emitRaw( stdout, rw::renderForManifestRows( d.ing, cfg.forTask, /*held=*/forHeldBlocksBudget( cfg ) > 0, /*compactLegend=*/cfg.legend == "compact" ).c_str() );   // MANIFEST-ROW: "" unless the task names a manifest entry
+    rw::emitRaw( stdout, rw::renderForManifestRows( d.ing, cfg.forTask, d.redactPtr, /*held=*/forHeldBlocksBudget( cfg ) > 0, /*compactLegend=*/cfg.legend == "compact" ).c_str() );   // MANIFEST-ROW: "" unless the task names a manifest entry
 }
 
 // Runs `run` with stdout pointed at a temporary file and returns what it printed, compacted by the same applyCompactDialect +
