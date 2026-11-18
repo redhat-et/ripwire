@@ -288,7 +288,7 @@ UF="test/rustufcsfix"
 ufrows(){ run "$UF" "--callees=src/calls.rs:$1" --no-cache | grep -oE '<s [^>]*>' | grep -v 't= n=' | sed -E 's/ tested="[0-9]"//'; }
 ufexpect(){   # $1 caller  $2 the exact rows, one per line  $3 prose
     local got; got="$( ufrows "$1" )"
-    [ "$got" = "$2" ] && ok "§10 $1: $3" || no "§10 $1 expected [$2] got [$got] — $3"
+    if [ "$got" = "$2" ]; then ok "§10 $1: $3"; else no "§10 $1 expected [$2] got [$got] — $3"; fi
 }
 ufexpect cast_call '<s t="method" n="Where::run" p="src/impls.rs:4"/>' "(a) <Where as Command>::run is Where's impl, one proven row"
 ufexpect inherent_call '<s t="method" n="Where::helper" p="src/impls.rs:7"/>' "(b) <Where>::helper is Where's own helper, proven"
