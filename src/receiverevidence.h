@@ -251,6 +251,7 @@ struct CallResultTypes
     std::vector<std::string_view>                         filePackage;
     HashMap<std::string, std::vector<std::uint32_t>>      packageFiles;
     HashMap<std::string, std::vector<const Binding*>>     aliasesByName;
+    HashMap<std::string, rw::SmallVec<NodeId, 2>>         goReceiverWitness;   // GO-CALLRESULT-LOCAL: Go receiver type name → one method per package directory (goDeclLessType)
     // RULE3-MEMBER-GUARD: the package directory of a Rust source path (`crates/settings/src/file.rs` → `crates/settings`), empty for a path outside src/, tests/, benches/, examples/
     static std::string_view rustPackageDirOf( std::string_view path )
     {
@@ -841,7 +842,10 @@ struct CallResultTypes
     // Go: `pkg.T` names a class of THIS tree only when `pkg` imports an in-tree package and that package defines exactly one
     // `T` — the exact package path when the tree has module facts (go.mod), else a directory that ends the path,
     // segment-aligned. Shared by written types (a local, parameter or field `f *os.File`) and call results.
-    NodeId goQualifiedClass( std::uint32_t fileId, std::string_view whole, std::string_view cls ) const
+    // Go `pkg.T` written in file `fileId` (`whole` = "pkg.T", `cls` = "T"): `find( inPackage )` with inPackage( f ) true for
+    // the files of the package the file's import of `pkg` names; kNoNode when the spelling names no import
+    template <class Find>
+    NodeId inGoImportedPackage( std::uint32_t fileId, std::string_view whole, std::string_view cls, Find&& find ) const
     {
         const std::size_t dot = whole.find( '.' );
         if( dot == std::string_view::npos || cls.empty() )
@@ -854,10 +858,16 @@ struct CallResultTypes
             return kNoNode;
         }
         const bool modules = goPackages != nullptr && !goPackages->known.empty();
-        return onlyPackageClass( cls, [ & ]( NodeId c )
+        return find( [ & ]( std::uint32_t f ) { return modules ? goPackages->names( f, path ) : endsWithDir( path, dirOf( f ) ); } );
+    }
+    NodeId goQualifiedClass( std::uint32_t fileId, std::string_view whole, std::string_view cls ) const
+    {
+        return inGoImportedPackage( fileId, whole, cls, [ & ]( auto&& inPackage )
         {
-            return ( modules ? goPackages->names( ing.symbols[ c ].fileId, path ) : endsWithDir( path, dirOf( ing.symbols[ c ].fileId ) ) )
-                && enclosingSymbol( c ) == kNoNode;   // a package-level type, never one local to a function
+            return onlyPackageClass( cls, [ & ]( NodeId c )
+            {
+                return inPackage( ing.symbols[ c ].fileId ) && enclosingSymbol( c ) == kNoNode;   // a package-level type, never one local to a function
+            } );
         } );
     }
     NodeId goResultClass( std::uint32_t fileId, std::uint32_t at, std::string_view whole, std::string_view cls ) const
@@ -868,6 +878,81 @@ struct CallResultTypes
         }
         const std::string_view dir = dirOf( fileId );   // one package is one directory
         return onlyPackageClass( cls, [ & ]( NodeId c ) { return dirOf( ing.symbols[ c ].fileId ) == dir && visibleAt( c, fileId, at ); } );
+    }
+    // GO-CALLRESULT-LOCAL: a Go type the tree holds METHODS of and no declaration for — the declaration sits in a generated file
+    // the tree leaves out (cockroach's `.pb.go`: `TenantID` is a proto message, its hand-written methods are in tenant.go). Go
+    // declares a method only in its receiver type's own package, so a method `func ( t T ) m()` in package directory D proves
+    // D.T exists, and T's methods in D are that type's own. The WITNESS — the first such method — stands for the type where
+    // a class definition would (LocalFact::cls): ownedBy reads only its package directory, sameNamedClasses reads 0 for it (no
+    // base walk, no field path), and no dispatch tier takes it for a type (it is not class-like).
+    // `keep`: the files the written type's package admits. kNoNode when no kept method has that receiver, when two kept
+    // directories do, or when a kept directory DECLARES a class of the name (then the declaration decides, refusals included).
+    template <class Keep>
+    NodeId goDeclLessType( std::string_view cls, Keep&& keep ) const
+    {
+        nameKey.assign( cls );
+        const auto it = goReceiverWitness.find( nameKey );
+        if( it == goReceiverWitness.end() )
+        {
+            return kNoNode;
+        }
+        NodeId witness = kNoNode;
+        for( NodeId m : it->second )   // one per package directory
+        {
+            if( !keep( ing.symbols[ m ].fileId ) )
+            {
+                continue;
+            }
+            if( witness != kNoNode )
+            {
+                return kNoNode;   // two packages the spelling could name
+            }
+            witness = m;
+        }
+        if( witness == kNoNode )
+        {
+            return kNoNode;
+        }
+        const std::string_view dir = dirOf( ing.symbols[ witness ].fileId );
+        NodeId                 declared = kNoNode;
+        return classesNamed( cls, CallResultFamily::Go, [ & ]( NodeId c ) { return dirOf( ing.symbols[ c ].fileId ) == dir; }, declared ) == 0 ? witness : kNoNode;
+    }
+    // the build, after every noteClass: `method` has the Go receiver type `recvType` — kept once per package directory (binding
+    // order), and only where that directory declares no class of the name, so a tree that holds its declarations keeps no row
+    void noteGoReceiver( std::string_view recvType, NodeId method )
+    {
+        const std::string_view dir      = dirOf( ing.symbols[ method ].fileId );
+        NodeId                 declared = kNoNode;
+        if( classesNamed( recvType, CallResultFamily::Go, [ & ]( NodeId c ) { return dirOf( ing.symbols[ c ].fileId ) == dir; }, declared ) != 0 )
+        {
+            return;
+        }
+        rw::SmallVec<NodeId, 2>& witnesses = goReceiverWitness[ std::string( recvType ) ];
+        if( std::ranges::none_of( witnesses, [ & ]( NodeId w ) { return dirOf( ing.symbols[ w ].fileId ) == dir; } ) )
+        {
+            witnesses.push_back( method );
+        }
+    }
+    // does `id` stand for a declaration-less Go type (goDeclLessType's witness, a method), not a class definition
+    bool standsForDeclLessType( NodeId id ) const noexcept { return id < ing.symbols.size() && !classKind( ing.symbols[ id ].kind ) && !isStructOrNamedType( ing.symbols[ id ].kind ); }
+    // a declared result type (`rt`, a ReturnType) or a written qualified type naming such a type: its witness, else kNoNode
+    NodeId goDeclLessResult( const Binding& rt, Lang lang ) const
+    {
+        if( callResultFamilyOf( lang ) != CallResultFamily::Go || rt.typeName.empty() )
+        {
+            return kNoNode;
+        }
+        const std::string_view whole = rt.importedName;
+        if( whole.empty() )
+        {
+            const std::string_view dir = dirOf( rt.fileId );   // an unqualified result: the callee's own package
+            return goDeclLessType( rt.typeName, [ & ]( std::uint32_t f ) { return dirOf( f ) == dir; } );
+        }
+        return goDeclLessQualified( rt.fileId, whole, rt.typeName );
+    }
+    NodeId goDeclLessQualified( std::uint32_t fileId, std::string_view whole, std::string_view cls ) const
+    {
+        return inGoImportedPackage( fileId, whole, cls, [ & ]( auto&& inPackage ) { return goDeclLessType( cls, inPackage ); } );
     }
     // Go: the class `cls` of the ONE package directory `keep` admits — a type a package defines once per build-tag file
     // (`Executor` in util_unix.go and util_windows.go) is one class to the member rule (PackageDir), so its first
@@ -1992,6 +2077,10 @@ struct CallResultTypes
     // the in-tree class-likes of `cls`'s language sharing its name (cls included)
     std::size_t sameNamedClasses( NodeId cls ) const
     {
+        if( standsForDeclLessType( cls ) )
+        {
+            return 0;   // a witness is no class definition: its type has no bases or fields the tree can read by name
+        }
         NodeId one = kNoNode;
         return classesNamed( ing.symbols[ cls ].name, callResultFamilyOf( ing.symbols[ cls ].lang ), []( NodeId ) { return true; }, one );
     }
@@ -2023,7 +2112,7 @@ struct ReceiverEvidence
         std::uint32_t    start = 0;
         std::uint32_t    end   = 0;
         rw::InternedText type;              // "" = a tombstone
-        NodeId           cls   = kNoNode;   // (L) fix round 1: the ONE in-tree class `type` resolved to (kNoNode: the name alone)
+        NodeId           cls   = kNoNode;   // (L) fix round 1: the ONE in-tree class `type` resolved to (kNoNode: the name alone); Go: or the witness of a type the tree declares no class for (CallResultTypes::goDeclLessType)
         NodeId           iface = kNoNode;   // lane L6: a binding typed only as SOME implementor of this trait (type stays "")
         rw::InternedText bound;             // lane L6: a generic bound's text (`R: Renderer`), "" otherwise
         bool operator==( const LocalFact& ) const = default;
@@ -2159,6 +2248,10 @@ struct ReceiverEvidence
             if( b.kind == LocalBindKind::RecvType && b.isFromAssignment && b.fromSymbol < N && !b.typeName.empty() )
             {
                 ownerClass[ b.fromSymbol ] = b.typeName;
+                if( callResultFamilyOf( ing.symbols[ b.fromSymbol ].lang ) == CallResultFamily::Go && callableKind( ing.symbols[ b.fromSymbol ].kind ) )
+                {
+                    types.noteGoReceiver( b.typeName, b.fromSymbol );
+                }
             }
         }
         ENSURES( ownerClass.size() == N && fnsByFile.size() == ing.files.size() && classesByFile.size() == ing.files.size(),
@@ -2400,6 +2493,10 @@ struct ReceiverEvidence
         {
             case WrittenQualifierRule::GoPackage:
                 cls  = types.goQualifiedClass( q.fileId, q.importedName, q.typeName );
+                if( cls == kNoNode && q.kind != LocalBindKind::MemberType )   // a field's class is kept by NAME (memberType): no witness there
+                {
+                    cls = types.goDeclLessQualified( q.fileId, q.importedName, q.typeName );   // a type the tree has only methods of
+                }
                 keep = cls != kNoNode;
                 break;
             case WrittenQualifierRule::FileImport: keep = qualifierInTree( q.fileId, q.importedName ); break;
@@ -2574,6 +2671,19 @@ struct ReceiverEvidence
             }
         }
         return false;
+    }
+    // the call-result local `b` whose callee declares result `rt`: typed by `cls` (resultClassOf's class), else — Go — by the
+    // witness of a type the tree holds only methods of (GO-CALLRESULT-LOCAL, CallResultTypes::goDeclLessResult)
+    void typeCallResultOf( const Binding& b, const Binding& rt, NodeId cls, Lang lang )
+    {
+        if( cls != kNoNode )
+        {
+            typeCallResult( b, ing.symbols[ cls ].name, cls );
+        }
+        else if( const NodeId witness = types.goDeclLessResult( rt, lang ); witness != kNoNode )
+        {
+            typeCallResult( b, rt.typeName, witness );
+        }
     }
 
     // lane iface-peel (LangFacts::returnTypedDispatchLet): the local `b` (a CallResult) holds the result of a call whose ONE
