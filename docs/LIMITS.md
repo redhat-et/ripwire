@@ -747,6 +747,7 @@ Discloses: `files_capped`, `importers_capped`
 | `kImpactFileRollupCap` | `20` | — | — |
 | `kImpactTypeRollupBandMax` | `200` | — | — |
 | `kImportTierRollupDirDepth` | `2` | — | — |
+| `kMaxAliasDepth` | `8` | INDEXING | — |
 | `kMaxEdges` | `256` | — | total emitted edge cap |
 | `kMaxNodes` | `96` | — | total emitted node cap (§3 size caps) |
 | `kMaxRadius` | `12` | — | — |

@@ -278,6 +278,7 @@ else
 fi
 # retired: forspinecheck — the --for caller spine (Change A) was dropped by its own offline kill rule: a spine of up to 2 caller hops from the top 3 seeds named a missed rubric item on 1 of 7 in-sample rows, so the gate that pinned it went with it
 # retired: cacheexclkeycheck — the per-configuration auto-cache key it pinned is a registered NEGATIVE (docs/EVALS.md, "The auto-cache key ignores --exclude", RUN 2026-09-03: a 158K-file root with >= 12 gate configurations thrashed the 2 GiB sweep); the retry design keeps ONE superset blob per root and will bring its own gate
+# retired: phantomdefcheck — the attribute-macro phantom gate (train item S) left the train with its code at 82ed4c8bf ("train: move item S (attribute-macro phantoms) to its own lane"); 994f0021f-based lanes still listed it, so the batch merges declare the retirement here
 # THE ABSORB LIST: one gate per line, in byte (LC_ALL=C) order, ending with the `    ; do` line. Two branches
 # that each add a gate then touch different lines and merge without a conflict; the old single line conflicted
 # on every gate added anywhere. A new gate goes on its own line at its sorted place. test/manifestcheck.sh holds
@@ -651,6 +652,7 @@ for _g in \
     impactdepthcheck \
     impactimportcheck \
     impactpartitioncheck \
+    impactsoledefcheck \
     impacttesttiercheck \
     impacttypecheck \
     importcapcheck \
@@ -1117,6 +1119,7 @@ for _g in \
     vendoredassetcheck \
     vendoredbundlecheck \
     vendorpatchcheck \
+    verbdefrowscheck \
     verifycheck \
     versioncheck \
     versionlabelcheck \

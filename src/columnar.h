@@ -481,7 +481,7 @@ inline void emitColumnarUseSites( std::FILE* out, const IngestResult& ing,
                                   const std::vector<std::uint32_t>& lines,
                                   const std::vector<RefRole>&       roles,
                                   const std::vector<std::string>&   inNames,
-                                  std::string_view rootPrefix = {} )
+                                  std::string_view rootPrefix = {}, const std::string& defRows = std::string() )
 {
     std::vector<char> esc;
     std::vector<std::uint32_t> uniqueFiles, rowPathIdx;
@@ -491,6 +491,7 @@ inline void emitColumnarUseSites( std::FILE* out, const IngestResult& ing,
     std::fputs( kColumnarLegend, out );   // §B1.5: the same one legend the symbol-row emitter uses
     rw::emitTo( out, "<uses {} format=\"columnar\">", wrapperAttrs.c_str() );
     emitPathTable( out, ing, uniqueFiles, esc, rootPrefix );
+    rw::emitRaw( out, defRows.c_str() );   // VERB-DEF-ROWS: the <def> rows, where the symbol-row form prints them (before <cols>)
     rw::emitTo( out, "<cols n=\"{}\" fields=\"path,line,role,in_id\">", nRows );
 
     std::fputs( "<path>", out );
