@@ -1304,6 +1304,33 @@ inline bool keepRustQualifiedCandidates( const IngestResult& ing, ChaConeMemo& c
     return true;
 }
 
+// RUST-UFCS-QUALIFIED: the trait half of the guard above, for a qualified call Rule 3 left hedged (the guard is skipped there: a
+// type's qualifier can reach a re-exported item or a trait's default method it cannot place). A call qualified by a TRAIT —
+// `Command::run( t, 1 )`, and `<T as Command>::run( t, 1 )` through a type parameter (ingest_names.h rustBracketedQualifier) —
+// can mean only that trait's method, so when some candidate's scope implements the qualifier the candidates that implement it
+// (or are the trait's own) are the hedge, and a namesake that does not (an inherent `Runner::run`) never was a candidate. A
+// qualifier no candidate implements is a type or a module: nothing changes. `rule3Hedge` is Rule 3's unproven list, the tier's other source.
+inline void keepRustTraitImplementors( ChaConeMemo& chaCones, const IngestResult& ing, const Reference& r, std::vector<NodeId>& cand,
+                                       std::vector<NodeId>& rule3Hedge )
+{
+    if( r.lang != Lang::Rust || r.qualifier.empty() )
+    {
+        return;
+    }
+    const auto implementsTrait = [ & ]( NodeId c )
+    {
+        const std::string& scope = ing.symbols[ c ].scope;
+        return !scope.empty() && scope != r.qualifier && chaCones.ancestorsReach( scope, r.qualifier );
+    };
+    if( std::none_of( cand.begin(), cand.end(), implementsTrait ) && std::none_of( rule3Hedge.begin(), rule3Hedge.end(), implementsTrait ) )
+    {
+        return;
+    }
+    const auto foreign = [ & ]( NodeId c ) { return ing.symbols[ c ].scope != r.qualifier && !implementsTrait( c ); };
+    std::erase_if( cand, foreign );
+    std::erase_if( rule3Hedge, foreign );
+}
+
 // true ⇒ every `::`-separated segment of a C++ scope passes `pred` (`std::__1` under "names std"); an empty scope has one empty segment
 template <class Pred>
 inline bool everyScopeSegment( std::string_view scope, Pred&& pred )
@@ -12843,6 +12870,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 }
             }
             rule3QualifiedHedge = true;
+            keepRustTraitImplementors( chaCones, ing, r, cand, memberRule3 );
         }
         const bool alreadyPinned = scipPinned || canonical || narrowed || rule3QualifiedHedge;
         if( !keepRustQualifiedCandidates( ing, chaCones, r, alreadyPinned, cand ) && bindingTier.empty() )

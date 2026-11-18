@@ -3150,6 +3150,7 @@ constexpr std::uint32_t kIngestParserVerMirror    = 331;  // MUST equal ingest.c
                                                           //   cpp-ptr-alias (placeholder 321): a C++ Type / ParamType record whose declarator names the variable carries kDirectDeclaratorBit
                                                           //   overload-split (placeholder 329): a Go qualified generic instantiation keeps its package qualifier
                                                           //   small-edges-1118 (placeholder 323): a Go method expression `(*T).m` in a value position is a Value row (GO-METHOD-EXPR)
+                                                          //   edge-strays-1118 (placeholder 327): Rust `<T as Trait>::m` calls are qualified by T, else by Trait
                                                           // 313 = 2026-11-17 (TRAIN-1117b, one number for two members, above main 311/312 (#420 via #686); rich 314;
                                                           //   see the kParserVer note): #446 round 2 (@SeddonShen, lane land-606, its placeholder 316): Java base clauses as
                                                           //   @reference.base captures; #355 (PR #426 by @conka8, its placeholders 216 then 311): tags-pass string predicates +

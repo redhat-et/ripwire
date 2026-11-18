@@ -394,6 +394,10 @@ constexpr std::uint32_t kParserVer    = 331;          // bump on any grammar/.sc
                                                       //   kCacheVersion unchanged: no record changes shape.
                                                       //   small-edges-1118 (placeholder 323): a Go method expression `(*T).m` in a value position is a Value row naming m with
                                                       //   memberRoot T (ingest_valuerefs.h methodValueAt, GO-METHOD-EXPR); it recorded none. kCacheVersion unchanged.
+                                                      //   edge-strays-1118 (placeholder 327): a Rust
+                                                      //   call written through a bracketed type (`<Where as Command>::run( .. )`, `<Where>::f( .. )`) is qualified by
+                                                      //   the type it names, or by the trait when the type names none (ingest_names.h rustBracketedQualifier).
+                                                      //   Rich file tag 328. kCacheVersion unchanged.
                                                       // 313 = 2026-11-17 (TRAIN-1117b: ONE number for its two parser members, strictly above main c565a3fad's 311/312
                                                       //   (#420, landed by TRAIN-1117a-r #686)). Rich file tag 314. kCacheVersion unchanged.
                                                       //   - #446 round 2, @SeddonShen, landed as lane land-606 (its placeholder 316): Java base clauses read as
