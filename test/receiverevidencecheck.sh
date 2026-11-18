@@ -81,6 +81,8 @@
 #            Merger.Get/Length; Bd an outside screen's Size, an outside value's Runes, a field or local named `log`
 #            of an outside type beside the in-repo log.Errorf. Near misses: a pointer-literal local, the method
 #            receiver itself, a real import of the in-repo log package.
+#            A field, parameter or local typed as a generic instantiation (`util.Set[util.Chars]`) keeps its package
+#            qualifier, so Add is util.Set's alone (a decoy coll.Set.Add); an outside package's generic proves neither.
 #   (G2) Go module aliases (gomod/, one tree per directory): an import path proves a package EXACTLY — the nearest
 #            go.mod's module path plus the directory below it, or the path a local `replace L => ./D` gives D. Bm:
 #            `replace github.com/up/lib => ./third/lib` beside an in-repo lib/ drew lib.Mark() to lib/ (a directory
@@ -670,6 +672,12 @@ exactproven go callees src/result.go:merged "method Length src/merger.go"
 exactproven go callees src/merger.go:First "method Get src/merger.go"
 exactproven go callees src/tui/tcell.go:Lines "method Size src/tui/tcell.go"
 exactproven go callees src/cmd/run.go:Run "fn Errorf src/internal/log/log.go"   # guard
+echo "--- (G) a generic instantiation keeps its package qualifier (lane overload-split: terraform's d.suppressedModules.Add, a"
+echo "    field typed addrs.Set[addrs.Module], was split onto collections.Set.Add; RED on main 9087eb59c: both Set.Add rows)"
+exactproven go callees src/generic.go:mark "method Add src/util/set.go"
+exactproven go callees src/generic.go:markParam "method Add src/util/set.go"
+exactproven go callees src/generic.go:markLocal "method Add src/util/set.go"
+notproven go callees src/generic.go:markOutside "Add src/util/set.go" "Add src/coll/set.go"   # guard: an outside package's generic
 
 echo "=== (G2) Go module aliases: an import path proves a package exactly ==="
 mkdir -p "$TMP/gomod"

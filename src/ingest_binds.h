@@ -5191,15 +5191,22 @@ inline void captureGoReturnTypes( BindCtx& cx, TSNode fn )
 }
 
 // Go: the import qualifier of a written type (`os` in `*os.File`), so graph.h can refuse a class an outside package names
-// (receiverevidence.h ReceiverEvidence::build). "" for an unqualified type.
+// (receiverevidence.h ReceiverEvidence::build). "" for an unqualified type. A generic instantiation keeps its class's
+// qualifier (`addrs.Set[addrs.Module]` → "addrs.Set"): annotatedClass already reads it as `Set`, and without the qualifier
+// every in-tree `Set` was a candidate (terraform's `d.suppressedModules.Add` split onto collections.Set.Add).
 inline std::string_view goQualifiedWhole( TSNode type, std::string_view src )
 {
-    for( int guard = 0; guard < 4 && !ts_node_is_null( type ); ++guard )
+    for( int guard = 0; guard < 5 && !ts_node_is_null( type ); ++guard )
     {
         const char* t = ts_node_type( type );
         if( kindIs( t, "pointer_type" ) || kindIs( t, "parenthesized_type" ) )
         {
             type = ts_node_named_child_count( type ) == 1 ? ts_node_named_child( type, 0 ) : TSNode{};
+            continue;
+        }
+        if( kindIs( t, "generic_type" ) )
+        {
+            type = fieldChild( type, NodeField::Type );   // the instantiated class, never a type argument
             continue;
         }
         return kindIs( t, "qualified_type" ) ? nodeTextOf( type, src ) : std::string_view{};
