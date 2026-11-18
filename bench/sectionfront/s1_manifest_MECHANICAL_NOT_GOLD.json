@@ -1,0 +1,9703 @@
+{
+ "s1.fastify-01#0": {
+  "repo": "fastify",
+  "qid": "fastify-01",
+  "kind": "item",
+  "nitems": 11,
+  "req": [
+   "R1",
+   "R6"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "fastify.js",
+     89
+    ],
+    [
+     "fastify.js",
+     1005
+    ],
+    [
+     "fastify.js",
+     797
+    ],
+    [
+     "lib/server.js",
+     26
+    ]
+   ],
+   "R6": [
+    [
+     "fastify.js",
+     368
+    ]
+   ]
+  }
+ },
+ "s1.fastify-02#0": {
+  "repo": "fastify",
+  "qid": "fastify-02",
+  "kind": "item",
+  "nitems": 5,
+  "req": [
+   "R1",
+   "R2",
+   "R3"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "fastify.js",
+     368
+    ]
+   ],
+   "R2": [
+    [
+     "lib/plugin-utils.js",
+     62
+    ]
+   ],
+   "R3": [
+    [
+     "fastify.js",
+     267
+    ]
+   ]
+  }
+ },
+ "s1.fastify-11#0": {
+  "repo": "fastify",
+  "qid": "fastify-11",
+  "kind": "item",
+  "nitems": 7,
+  "req": [
+   "R1",
+   "R2",
+   "R3",
+   "R6",
+   "R7"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "lib/route.js",
+     460
+    ]
+   ],
+   "R2": [
+    [
+     "lib/route.js",
+     651
+    ]
+   ],
+   "R3": [
+    [
+     "lib/handle-request.js",
+     24
+    ]
+   ],
+   "R6": [
+    [
+     "fastify.js",
+     576
+    ]
+   ],
+   "R7": [
+    [
+     "lib/hooks.js",
+     278
+    ]
+   ]
+  }
+ },
+ "s1.fastify-12#0": {
+  "repo": "fastify",
+  "qid": "fastify-12",
+  "kind": "item",
+  "nitems": 6,
+  "req": [
+   "R1",
+   "R4",
+   "R5"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "lib/reply.js",
+     156
+    ]
+   ],
+   "R4": [
+    [
+     "lib/reply.js",
+     1081
+    ]
+   ],
+   "R5": [
+    [
+     "lib/hooks.js",
+     278
+    ]
+   ]
+  }
+ },
+ "s1.fastify-13#0": {
+  "repo": "fastify",
+  "qid": "fastify-13",
+  "kind": "item",
+  "nitems": 6,
+  "req": [
+   "R1",
+   "R3",
+   "R5",
+   "R6"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "lib/validation.js",
+     220
+    ]
+   ],
+   "R3": [
+    [
+     "lib/handle-request.js",
+     106
+    ],
+    [
+     "lib/validation.js",
+     330
+    ]
+   ],
+   "R5": [
+    [
+     "lib/validation.js",
+     440
+    ]
+   ],
+   "R6": [
+    [
+     "lib/handle-request.js",
+     126
+    ]
+   ]
+  }
+ },
+ "s1.fastify-14#0": {
+  "repo": "fastify",
+  "qid": "fastify-14",
+  "kind": "sym",
+  "nitems": 7,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4",
+   "S5",
+   "S6",
+   "S7"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "lib/route.js",
+     575
+    ]
+   ],
+   "S2": [
+    [
+     "lib/route.js",
+     664
+    ]
+   ],
+   "S3": [
+    [
+     "lib/handle-request.js",
+     86
+    ]
+   ],
+   "S4": [
+    [
+     "lib/handle-request.js",
+     99
+    ]
+   ],
+   "S5": [
+    [
+     "lib/handle-request.js",
+     122
+    ]
+   ],
+   "S6": [
+    [
+     "lib/handle-request.js",
+     145
+    ]
+   ],
+   "S7": [
+    [
+     "lib/handle-request.js",
+     155
+    ]
+   ]
+  }
+ },
+ "s1.flake8-01#0": {
+  "repo": "flake8",
+  "qid": "flake8-01",
+  "kind": "item",
+  "nitems": 11,
+  "req": [
+   "R1"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "setup.cfg",
+     41
+    ],
+    [
+     "src/flake8/main/cli.py",
+     10
+    ],
+    [
+     "src/flake8/api/legacy.py",
+     193
+    ]
+   ]
+  }
+ },
+ "s1.flake8-02#0": {
+  "repo": "flake8",
+  "qid": "flake8-02",
+  "kind": "item",
+  "nitems": 5,
+  "req": [
+   "R1",
+   "R2",
+   "R3",
+   "R4"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "src/flake8/formatting/base.py",
+     14
+    ],
+    [
+     "src/flake8/violation.py",
+     22
+    ]
+   ],
+   "R2": [
+    [
+     "src/flake8/main/options.py",
+     210
+    ],
+    [
+     "src/flake8/plugins/reporter.py",
+     13
+    ],
+    [
+     "src/flake8/main/application.py",
+     68
+    ]
+   ],
+   "R3": [
+    [
+     "src/flake8/plugins/finder.py",
+     326
+    ],
+    [
+     "src/flake8/plugins/finder.py",
+     213
+    ]
+   ],
+   "R4": [
+    [
+     "src/flake8/formatting/default.py",
+     75
+    ]
+   ]
+  }
+ },
+ "s1.flake8-06#0": {
+  "repo": "flake8",
+  "qid": "flake8-06",
+  "kind": "sym",
+  "nitems": 2,
+  "req": [
+   "S1",
+   "S2"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "src/flake8/checker.py",
+     79
+    ]
+   ],
+   "S2": [
+    [
+     "src/flake8/checker.py",
+     215
+    ]
+   ]
+  }
+ },
+ "s1.flake8-11#0": {
+  "repo": "flake8",
+  "qid": "flake8-11",
+  "kind": "item",
+  "nitems": 7,
+  "req": [
+   "R1",
+   "R2",
+   "R3",
+   "R4",
+   "R5",
+   "R6",
+   "R7"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "src/flake8/options/parse_args.py",
+     15
+    ],
+    [
+     "src/flake8/plugins/finder.py",
+     127
+    ]
+   ],
+   "R2": [
+    [
+     "src/flake8/plugins/finder.py",
+     247
+    ]
+   ],
+   "R3": [
+    [
+     "src/flake8/plugins/finder.py",
+     150
+    ],
+    [
+     "src/flake8/plugins/pyflakes.py",
+     70
+    ],
+    [
+     "src/flake8/plugins/pycodestyle.py",
+     40
+    ]
+   ],
+   "R4": [
+    [
+     "src/flake8/plugins/finder.py",
+     355
+    ]
+   ],
+   "R5": [
+    [
+     "src/flake8/plugins/finder.py",
+     310
+    ]
+   ],
+   "R6": [
+    [
+     "src/flake8/options/manager.py",
+     244
+    ],
+    [
+     "src/flake8/options/parse_args.py",
+     55
+    ]
+   ],
+   "R7": [
+    [
+     "src/flake8/main/application.py",
+     86
+    ],
+    [
+     "src/flake8/checker.py",
+     330
+    ],
+    [
+     "src/flake8/processor.py",
+     250
+    ]
+   ]
+  }
+ },
+ "s1.flake8-12#0": {
+  "repo": "flake8",
+  "qid": "flake8-12",
+  "kind": "item",
+  "nitems": 6,
+  "req": [
+   "R1",
+   "R2",
+   "R3",
+   "R4",
+   "R5",
+   "R6"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "src/flake8/checker.py",
+     174
+    ],
+    [
+     "src/flake8/style_guide.py",
+     260
+    ]
+   ],
+   "R2": [
+    [
+     "src/flake8/style_guide.py",
+     375
+    ],
+    [
+     "src/flake8/violation.py",
+     22
+    ]
+   ],
+   "R3": [
+    [
+     "src/flake8/style_guide.py",
+     69
+    ],
+    [
+     "src/flake8/defaults.py",
+     18
+    ]
+   ],
+   "R4": [
+    [
+     "src/flake8/style_guide.py",
+     205
+    ],
+    [
+     "src/flake8/utils.py",
+     78
+    ]
+   ],
+   "R5": [
+    [
+     "src/flake8/violation.py",
+     32
+    ],
+    [
+     "src/flake8/defaults.py",
+     27
+    ],
+    [
+     "src/flake8/violation.py",
+     18
+    ],
+    [
+     "src/flake8/checker.py",
+     323
+    ],
+    [
+     "src/flake8/processor.py",
+     315
+    ]
+   ],
+   "R6": [
+    [
+     "src/flake8/processor.py",
+     356
+    ],
+    [
+     "src/flake8/checker.py",
+     289
+    ]
+   ]
+  }
+ },
+ "s1.flake8-13#0": {
+  "repo": "flake8",
+  "qid": "flake8-13",
+  "kind": "item",
+  "nitems": 7,
+  "req": [
+   "R1",
+   "R2",
+   "R3",
+   "R4",
+   "R5",
+   "R6",
+   "R7"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "src/flake8/main/application.py",
+     92
+    ],
+    [
+     "src/flake8/checker.py",
+     241
+    ]
+   ],
+   "R2": [
+    [
+     "src/flake8/checker.py",
+     130
+    ]
+   ],
+   "R3": [
+    [
+     "src/flake8/processor.py",
+     31
+    ]
+   ],
+   "R4": [
+    [
+     "src/flake8/checker.py",
+     377
+    ],
+    [
+     "src/flake8/processor.py",
+     238
+    ]
+   ],
+   "R5": [
+    [
+     "src/flake8/checker.py",
+     455
+    ],
+    [
+     "src/flake8/processor.py",
+     273
+    ]
+   ],
+   "R6": [
+    [
+     "src/flake8/checker.py",
+     563
+    ]
+   ],
+   "R7": [
+    [
+     "src/flake8/checker.py",
+     330
+    ],
+    [
+     "src/flake8/processor.py",
+     250
+    ]
+   ]
+  }
+ },
+ "s1.flake8-14#0": {
+  "repo": "flake8",
+  "qid": "flake8-14",
+  "kind": "sym",
+  "nitems": 6,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4",
+   "S5",
+   "S6"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "src/flake8/main/cli.py",
+     23
+    ]
+   ],
+   "S2": [
+    [
+     "src/flake8/main/application.py",
+     198
+    ]
+   ],
+   "S3": [
+    [
+     "src/flake8/main/application.py",
+     187
+    ]
+   ],
+   "S4": [
+    [
+     "src/flake8/main/application.py",
+     103
+    ]
+   ],
+   "S5": [
+    [
+     "src/flake8/checker.py",
+     236
+    ]
+   ],
+   "S6": [
+    [
+     "src/flake8/checker.py",
+     215
+    ]
+   ]
+  }
+ },
+ "s1.flake8-21#0": {
+  "repo": "flake8",
+  "qid": "flake8-21",
+  "kind": "sym",
+  "nitems": 4,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "src/flake8/checker.py",
+     380
+    ],
+    [
+     "src/flake8/processor.py",
+     238
+    ]
+   ],
+   "S2": [
+    [
+     "src/flake8/checker.py",
+     383
+    ]
+   ],
+   "S3": [
+    [
+     "src/flake8/checker.py",
+     387
+    ],
+    [
+     "src/flake8/plugins/pyflakes.py",
+     85
+    ]
+   ],
+   "S4": [
+    [
+     "src/flake8/checker.py",
+     391
+    ]
+   ]
+  }
+ },
+ "s1.flake8-22#0": {
+  "repo": "flake8",
+  "qid": "flake8-22",
+  "kind": "sym",
+  "nitems": 5,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4",
+   "S5"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "src/flake8/formatting/default.py",
+     22
+    ]
+   ],
+   "S2": [
+    [
+     "src/flake8/formatting/default.py",
+     102
+    ]
+   ],
+   "S3": [
+    [
+     "src/flake8/formatting/default.py",
+     56
+    ]
+   ],
+   "S4": [
+    [
+     "src/flake8/formatting/default.py",
+     75
+    ]
+   ],
+   "S5": [
+    [
+     "src/flake8/formatting/default.py",
+     81
+    ]
+   ]
+  }
+ },
+ "s1.fzf-01#0": {
+  "repo": "fzf",
+  "qid": "fzf-01",
+  "kind": "item",
+  "nitems": 11,
+  "req": [
+   "R1"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "main.go",
+     57
+    ],
+    [
+     "src/options.go",
+     3905
+    ],
+    [
+     "main.go",
+     113
+    ],
+    [
+     "src/core.go",
+     55
+    ]
+   ]
+  }
+ },
+ "s1.fzf-02#0": {
+  "repo": "fzf",
+  "qid": "fzf-02",
+  "kind": "item",
+  "nitems": 5,
+  "req": [
+   "R1",
+   "R2",
+   "R3"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "src/terminal.go",
+     557
+    ],
+    [
+     "src/terminal.go",
+     556
+    ]
+   ],
+   "R2": [
+    [
+     "src/options.go",
+     1744
+    ],
+    [
+     "src/options.go",
+     2017
+    ],
+    [
+     "src/options.go",
+     2062
+    ]
+   ],
+   "R3": [
+    [
+     "src/terminal.go",
+     6283
+    ],
+    [
+     "src/terminal.go",
+     7034
+    ]
+   ]
+  }
+ },
+ "s1.fzf-11#0": {
+  "repo": "fzf",
+  "qid": "fzf-11",
+  "kind": "item",
+  "nitems": 6,
+  "req": [
+   "R1",
+   "R5",
+   "R6"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "src/algo/algo.go",
+     722
+    ]
+   ],
+   "R5": [
+    [
+     "src/pattern.go",
+     157
+    ],
+    [
+     "src/pattern.go",
+     487
+    ]
+   ],
+   "R6": [
+    [
+     "src/result.go",
+     32
+    ],
+    [
+     "src/options.go",
+     269
+    ]
+   ]
+  }
+ },
+ "s1.fzf-12#0": {
+  "repo": "fzf",
+  "qid": "fzf-12",
+  "kind": "item",
+  "nitems": 6,
+  "req": [
+   "R1",
+   "R2",
+   "R3",
+   "R4"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "src/pattern.go",
+     79
+    ]
+   ],
+   "R2": [
+    [
+     "src/pattern.go",
+     168
+    ]
+   ],
+   "R3": [
+    [
+     "src/pattern.go",
+     24
+    ]
+   ],
+   "R4": [
+    [
+     "src/pattern.go",
+     157
+    ]
+   ]
+  }
+ },
+ "s1.fzf-13#0": {
+  "repo": "fzf",
+  "qid": "fzf-13",
+  "kind": "item",
+  "nitems": 7,
+  "req": [
+   "R1",
+   "R2",
+   "R3",
+   "R4",
+   "R5",
+   "R6"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "src/core.go",
+     55
+    ]
+   ],
+   "R2": [
+    [
+     "src/matcher.go",
+     243
+    ],
+    [
+     "src/core.go",
+     250
+    ]
+   ],
+   "R3": [
+    [
+     "src/matcher.go",
+     81
+    ]
+   ],
+   "R4": [
+    [
+     "src/matcher.go",
+     157
+    ]
+   ],
+   "R5": [
+    [
+     "src/merger.go",
+     57
+    ]
+   ],
+   "R6": [
+    [
+     "src/matcher.go",
+     147
+    ],
+    [
+     "src/terminal.go",
+     2031
+    ]
+   ]
+  }
+ },
+ "s1.fzf-14#0": {
+  "repo": "fzf",
+  "qid": "fzf-14",
+  "kind": "sym",
+  "nitems": 5,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4",
+   "S5"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "src/matcher.go",
+     138
+    ]
+   ],
+   "S2": [
+    [
+     "src/matcher.go",
+     194
+    ]
+   ],
+   "S3": [
+    [
+     "src/pattern.go",
+     314
+    ]
+   ],
+   "S4": [
+    [
+     "src/pattern.go",
+     363
+    ]
+   ],
+   "S5": [
+    [
+     "src/pattern.go",
+     390
+    ]
+   ]
+  }
+ },
+ "s1.hono-01#0": {
+  "repo": "hono",
+  "qid": "hono-01",
+  "kind": "item",
+  "nitems": 12,
+  "req": [],
+  "locs": {}
+ },
+ "s1.hono-02#0": {
+  "repo": "hono",
+  "qid": "hono-02",
+  "kind": "item",
+  "nitems": 4,
+  "req": [
+   "R1",
+   "R3"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "src/router.ts",
+     51
+    ]
+   ],
+   "R3": [
+    [
+     "src/router/trie-router/router.ts",
+     5
+    ],
+    [
+     "src/router/linear-router/router.ts",
+     11
+    ],
+    [
+     "src/router/pattern-router/router.ts",
+     8
+    ],
+    [
+     "src/router/smart-router/router.ts",
+     4
+    ],
+    [
+     "src/router/reg-exp-router/router.ts",
+     48
+    ],
+    [
+     "src/router/reg-exp-router/prepared-router.ts",
+     9
+    ]
+   ]
+  }
+ },
+ "s1.hono-09#0": {
+  "repo": "hono",
+  "qid": "hono-09",
+  "kind": null,
+  "nitems": 0,
+  "req": [],
+  "locs": {}
+ },
+ "s1.hono-10#0": {
+  "repo": "hono",
+  "qid": "hono-10",
+  "kind": "sym",
+  "nitems": 8,
+  "req": [],
+  "locs": {}
+ },
+ "s1.hono-11#0": {
+  "repo": "hono",
+  "qid": "hono-11",
+  "kind": "item",
+  "nitems": 6,
+  "req": [
+   "R1",
+   "R2",
+   "R3",
+   "R4",
+   "R5",
+   "R6"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "src/hono.ts",
+     28
+    ]
+   ],
+   "R2": [
+    [
+     "src/hono-base.ts",
+     62
+    ]
+   ],
+   "R3": [
+    [
+     "src/preset/quick.ts",
+     20
+    ],
+    [
+     "src/preset/tiny.ts",
+     18
+    ]
+   ],
+   "R4": [
+    [
+     "src/router/smart-router/router.ts",
+     21
+    ]
+   ],
+   "R5": [
+    [
+     "src/router/smart-router/router.ts",
+     40
+    ]
+   ],
+   "R6": [
+    [
+     "src/router/smart-router/router.ts",
+     46
+    ]
+   ]
+  }
+ },
+ "s1.hono-12#0": {
+  "repo": "hono",
+  "qid": "hono-12",
+  "kind": "item",
+  "nitems": 7,
+  "req": [
+   "R1"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "src/hono-base.ts",
+     481
+    ]
+   ]
+  }
+ },
+ "s1.hono-13#0": {
+  "repo": "hono",
+  "qid": "hono-13",
+  "kind": "item",
+  "nitems": 8,
+  "req": [
+   "R1",
+   "R4",
+   "R5",
+   "R7"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "src/middleware/jwt/jwt.ts",
+     54
+    ]
+   ],
+   "R4": [
+    [
+     "src/utils/jwt/jwt.ts",
+     96
+    ]
+   ],
+   "R5": [
+    [
+     "src/utils/jwt/jwt.ts",
+     265
+    ]
+   ],
+   "R7": [
+    [
+     "src/utils/jwt/jws.ts",
+     39
+    ]
+   ]
+  }
+ },
+ "s1.hono-14#0": {
+  "repo": "hono",
+  "qid": "hono-14",
+  "kind": "item",
+  "nitems": 5,
+  "req": [
+   "R1",
+   "R3"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "src/client/client.ts",
+     151
+    ]
+   ],
+   "R3": [
+    [
+     "src/client/utils.ts",
+     11
+    ]
+   ]
+  }
+ },
+ "s1.hono-17#0": {
+  "repo": "hono",
+  "qid": "hono-17",
+  "kind": null,
+  "nitems": 0,
+  "req": [],
+  "locs": {}
+ },
+ "s1.hono-18#0": {
+  "repo": "hono",
+  "qid": "hono-18",
+  "kind": null,
+  "nitems": 0,
+  "req": [],
+  "locs": {}
+ },
+ "s1.hono-19#0": {
+  "repo": "hono",
+  "qid": "hono-19",
+  "kind": "sym",
+  "nitems": 18,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4",
+   "S5",
+   "S6",
+   "S7",
+   "S8",
+   "S9",
+   "S10",
+   "S11",
+   "S12",
+   "S13",
+   "S14",
+   "S15",
+   "S16",
+   "S17",
+   "S18"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "adapters/aws-lambda/test/index.test.ts",
+     168
+    ]
+   ],
+   "S2": [
+    [
+     "adapters/aws-lambda/test/index.test.ts",
+     169
+    ]
+   ],
+   "S3": [
+    [
+     "src/adapter/cloudflare-pages/handler.test.ts",
+     97
+    ]
+   ],
+   "S4": [
+    [
+     "src/helper/cookie/index.test.ts",
+     19
+    ]
+   ],
+   "S5": [
+    [
+     "src/helper/cookie/index.test.ts",
+     20
+    ]
+   ],
+   "S6": [
+    [
+     "src/helper/cookie/index.test.ts",
+     36
+    ]
+   ],
+   "S7": [
+    [
+     "src/helper/cookie/index.test.ts",
+     140
+    ]
+   ],
+   "S8": [
+    [
+     "src/helper/cookie/index.test.ts",
+     216
+    ]
+   ],
+   "S9": [
+    [
+     "src/helper/cookie/index.test.ts",
+     225
+    ]
+   ],
+   "S10": [
+    [
+     "src/helper/cookie/index.ts",
+     142
+    ]
+   ],
+   "S11": [
+    [
+     "src/middleware/jwk/jwk.ts",
+     101
+    ]
+   ],
+   "S12": [
+    [
+     "src/middleware/jwk/jwk.ts",
+     115
+    ]
+   ],
+   "S13": [
+    [
+     "src/middleware/jwk/jwk.ts",
+     117
+    ]
+   ],
+   "S14": [
+    [
+     "src/middleware/jwt/jwt.ts",
+     101
+    ]
+   ],
+   "S15": [
+    [
+     "src/middleware/jwt/jwt.ts",
+     115
+    ]
+   ],
+   "S16": [
+    [
+     "src/middleware/jwt/jwt.ts",
+     117
+    ]
+   ],
+   "S17": [
+    [
+     "src/middleware/language/language.ts",
+     146
+    ]
+   ],
+   "S18": [
+    [
+     "src/validator/validator.ts",
+     158
+    ]
+   ]
+  }
+ },
+ "s1.hono-20#0": {
+  "repo": "hono",
+  "qid": "hono-20",
+  "kind": "sym",
+  "nitems": 3,
+  "req": [],
+  "locs": {}
+ },
+ "s1.htop-01#0": {
+  "repo": "htop",
+  "qid": "htop-01",
+  "kind": "item",
+  "nitems": 11,
+  "req": [
+   "R1"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "htop.c",
+     16
+    ],
+    [
+     "CommandLine.c",
+     409
+    ],
+    [
+     "ScreenManager.c",
+     241
+    ],
+    [
+     "pcp-htop.c",
+     19
+    ]
+   ]
+  }
+ },
+ "s1.htop-02#0": {
+  "repo": "htop",
+  "qid": "htop-02",
+  "kind": "item",
+  "nitems": 5,
+  "req": [
+   "R1",
+   "R3",
+   "R4"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "Meter.h",
+     60
+    ]
+   ],
+   "R3": [
+    [
+     "linux/Platform.c",
+     231
+    ]
+   ],
+   "R4": [
+    [
+     "CPUMeter.c",
+     89
+    ],
+    [
+     "linux/Platform.c",
+     346
+    ]
+   ]
+  }
+ },
+ "s1.htop-11#0": {
+  "repo": "htop",
+  "qid": "htop-11",
+  "kind": "item",
+  "nitems": 7,
+  "req": [
+   "R1",
+   "R2",
+   "R3",
+   "R4",
+   "R6",
+   "R7"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "ScreenManager.c",
+     122
+    ],
+    [
+     "CommandLine.c",
+     510
+    ]
+   ],
+   "R2": [
+    [
+     "Machine.c",
+     100
+    ],
+    [
+     "Table.h",
+     58
+    ]
+   ],
+   "R3": [
+    [
+     "ProcessTable.c",
+     56
+    ],
+    [
+     "linux/LinuxProcessTable.c",
+     1838
+    ]
+   ],
+   "R4": [
+    [
+     "linux/LinuxProcessTable.c",
+     1483
+    ],
+    [
+     "ProcessTable.c",
+     31
+    ]
+   ],
+   "R6": [
+    [
+     "Table.c",
+     482
+    ]
+   ],
+   "R7": [
+    [
+     "Table.c",
+     257
+    ],
+    [
+     "ScreenManager.c",
+     163
+    ]
+   ]
+  }
+ },
+ "s1.htop-12#0": {
+  "repo": "htop",
+  "qid": "htop-12",
+  "kind": "item",
+  "nitems": 6,
+  "req": [
+   "R1",
+   "R2",
+   "R3",
+   "R4",
+   "R5",
+   "R6"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "ScreenManager.c",
+     122
+    ]
+   ],
+   "R2": [
+    [
+     "Header.c",
+     230
+    ],
+    [
+     "Meter.h",
+     96
+    ]
+   ],
+   "R3": [
+    [
+     "CPUMeter.c",
+     89
+    ],
+    [
+     "linux/Platform.c",
+     346
+    ],
+    [
+     "MemoryMeter.c",
+     33
+    ],
+    [
+     "linux/Platform.c",
+     444
+    ]
+   ],
+   "R4": [
+    [
+     "linux/LinuxMachine.c",
+     864
+    ]
+   ],
+   "R5": [
+    [
+     "Header.c",
+     205
+    ]
+   ],
+   "R6": [
+    [
+     "Meter.c",
+     416
+    ]
+   ]
+  }
+ },
+ "s1.htop-13#0": {
+  "repo": "htop",
+  "qid": "htop-13",
+  "kind": "item",
+  "nitems": 6,
+  "req": [
+   "R1",
+   "R2",
+   "R3",
+   "R5",
+   "R6"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "ScreenManager.c",
+     241
+    ]
+   ],
+   "R2": [
+    [
+     "MainPanel.c",
+     59
+    ]
+   ],
+   "R3": [
+    [
+     "Action.c",
+     962
+    ],
+    [
+     "MainPanel.c",
+     250
+    ]
+   ],
+   "R5": [
+    [
+     "Action.c",
+     527
+    ],
+    [
+     "SignalsPanel.c",
+     23
+    ],
+    [
+     "Action.c",
+     60
+    ]
+   ],
+   "R6": [
+    [
+     "MainPanel.c",
+     184
+    ],
+    [
+     "Process.c",
+     931
+    ]
+   ]
+  }
+ },
+ "s1.htop-14#0": {
+  "repo": "htop",
+  "qid": "htop-14",
+  "kind": "sym",
+  "nitems": 3,
+  "req": [
+   "S1",
+   "S2",
+   "S3"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "ScreenManager.c",
+     264
+    ]
+   ],
+   "S2": [
+    [
+     "ScreenManager.c",
+     147
+    ]
+   ],
+   "S3": [
+    [
+     "linux/LinuxMachine.c",
+     872
+    ]
+   ]
+  }
+ },
+ "s1.koa-01#0": {
+  "repo": "koa",
+  "qid": "koa-01",
+  "kind": "item",
+  "nitems": 10,
+  "req": [
+   "R1",
+   "R2",
+   "R7",
+   "R8"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "lib/application.js",
+     66
+    ]
+   ],
+   "R2": [
+    [
+     "lib/application.js",
+     87
+    ]
+   ],
+   "R7": [
+    [
+     "lib/context.js",
+     106
+    ],
+    [
+     "lib/application.js",
+     253
+    ]
+   ],
+   "R8": [
+    [
+     "lib/application.js",
+     106
+    ]
+   ]
+  }
+ },
+ "s1.koa-02#0": {
+  "repo": "koa",
+  "qid": "koa-02",
+  "kind": "item",
+  "nitems": 5,
+  "req": [
+   "R3",
+   "R4"
+  ],
+  "locs": {
+   "R3": [
+    [
+     "lib/application.js",
+     98
+    ]
+   ],
+   "R4": [
+    [
+     "lib/response.js",
+     338
+    ]
+   ]
+  }
+ },
+ "s1.koa-11#0": {
+  "repo": "koa",
+  "qid": "koa-11",
+  "kind": "item",
+  "nitems": 8,
+  "req": [
+   "R1",
+   "R4",
+   "R5",
+   "R8"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "lib/context.js",
+     207
+    ],
+    [
+     "lib/response.js",
+     135
+    ]
+   ],
+   "R4": [
+    [
+     "lib/application.js",
+     213
+    ]
+   ],
+   "R5": [
+    [
+     "lib/application.js",
+     283
+    ]
+   ],
+   "R8": [
+    [
+     "lib/response.js",
+     241
+    ]
+   ]
+  }
+ },
+ "s1.koa-12#0": {
+  "repo": "koa",
+  "qid": "koa-12",
+  "kind": "item",
+  "nitems": 7,
+  "req": [
+   "R1",
+   "R2",
+   "R3",
+   "R6",
+   "R7"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "lib/application.js",
+     213
+    ]
+   ],
+   "R2": [
+    [
+     "lib/context.js",
+     95
+    ]
+   ],
+   "R3": [
+    [
+     "lib/context.js",
+     106
+    ]
+   ],
+   "R6": [
+    [
+     "lib/application.js",
+     253
+    ]
+   ],
+   "R7": [
+    [
+     "lib/application.js",
+     25
+    ]
+   ]
+  }
+ },
+ "s1.koa-13#0": {
+  "repo": "koa",
+  "qid": "koa-13",
+  "kind": "item",
+  "nitems": 6,
+  "req": [
+   "R1",
+   "R3"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "lib/application.js",
+     98
+    ]
+   ],
+   "R3": [
+    [
+     "lib/application.js",
+     228
+    ]
+   ]
+  }
+ },
+ "s1.koa-14#0": {
+  "repo": "koa",
+  "qid": "koa-14",
+  "kind": "sym",
+  "nitems": 3,
+  "req": [
+   "S1",
+   "S2",
+   "S3"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "lib/application.js",
+     130
+    ]
+   ],
+   "S2": [
+    [
+     "lib/application.js",
+     190
+    ]
+   ],
+   "S3": [
+    [
+     "lib/application.js",
+     217
+    ]
+   ]
+  }
+ },
+ "s1.kysely-01#0": {
+  "repo": "kysely",
+  "qid": "kysely-01",
+  "kind": "item",
+  "nitems": 12,
+  "req": [
+   "R1",
+   "R4",
+   "R5",
+   "R6",
+   "R7",
+   "R10",
+   "R12"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "src/kysely.ts",
+     97
+    ],
+    [
+     "src/query-creator.ts",
+     51
+    ],
+    [
+     "src/raw-builder/sql.ts",
+     382
+    ]
+   ],
+   "R4": [
+    [
+     "src/operation-node/operation-node-visitor.ts",
+     107
+    ],
+    [
+     "src/operation-node/operation-node-transformer.ts",
+     141
+    ]
+   ],
+   "R5": [
+    [
+     "src/query-compiler/compiled-query.ts",
+     9
+    ]
+   ],
+   "R6": [
+    [
+     "src/query-executor/query-executor-base.ts",
+     27
+    ],
+    [
+     "src/query-executor/default-query-executor.ts",
+     12
+    ],
+    [
+     "src/driver/runtime-driver.ts",
+     20
+    ]
+   ],
+   "R7": [
+    [
+     "src/dialect/dialect.ts",
+     18
+    ]
+   ],
+   "R10": [
+    [
+     "src/kysely.ts",
+     307
+    ]
+   ],
+   "R12": [
+    [
+     "test/node/src/test-setup.ts",
+     109
+    ]
+   ]
+  }
+ },
+ "s1.kysely-02#0": {
+  "repo": "kysely",
+  "qid": "kysely-02",
+  "kind": "item",
+  "nitems": 5,
+  "req": [
+   "R1",
+   "R2",
+   "R3",
+   "R4"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "src/dialect/dialect.ts",
+     18
+    ],
+    [
+     "src/dialect/postgres/postgres-dialect.ts",
+     43
+    ]
+   ],
+   "R2": [
+    [
+     "src/driver/database-connection.ts",
+     9
+    ]
+   ],
+   "R3": [
+    [
+     "src/query-compiler/default-query-compiler.ts",
+     126
+    ],
+    [
+     "src/dialect/dialect-adapter-base.ts",
+     10
+    ]
+   ],
+   "R4": [
+    [
+     "src/kysely.ts",
+     113
+    ]
+   ]
+  }
+ },
+ "s1.kysely-06#0": {
+  "repo": "kysely",
+  "qid": "kysely-06",
+  "kind": "sym",
+  "nitems": 4,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "src/query-executor/default-query-executor.ts",
+     35
+    ]
+   ],
+   "S2": [
+    [
+     "test/node/src/raw-sql.test.ts",
+     76
+    ]
+   ],
+   "S3": [
+    [
+     "test/node/src/async-dispose.test.ts",
+     48
+    ]
+   ],
+   "S4": [
+    [
+     "test/node/src/query-id.test.ts",
+     41
+    ]
+   ]
+  }
+ },
+ "s1.kysely-11#0": {
+  "repo": "kysely",
+  "qid": "kysely-11",
+  "kind": "item",
+  "nitems": 8,
+  "req": [
+   "R1",
+   "R2",
+   "R4",
+   "R5",
+   "R6"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "src/kysely.ts",
+     105
+    ],
+    [
+     "src/dialect/dialect.ts",
+     18
+    ]
+   ],
+   "R2": [
+    [
+     "src/query-creator.ts",
+     165
+    ],
+    [
+     "src/query-builder/select-query-builder.ts",
+     2731
+    ],
+    [
+     "src/operation-node/select-query-node.ts",
+     113
+    ]
+   ],
+   "R4": [
+    [
+     "src/query-executor/query-executor-base.ts",
+     40
+    ]
+   ],
+   "R5": [
+    [
+     "src/query-executor/default-query-executor.ts",
+     34
+    ],
+    [
+     "src/query-compiler/default-query-compiler.ts",
+     137
+    ],
+    [
+     "src/operation-node/operation-node-visitor.ts",
+     218
+    ],
+    [
+     "src/query-compiler/compiled-query.ts",
+     9
+    ]
+   ],
+   "R6": [
+    [
+     "src/driver/default-connection-provider.ts",
+     13
+    ],
+    [
+     "src/driver/runtime-driver.ts",
+     59
+    ],
+    [
+     "src/dialect/postgres/postgres-driver.ts",
+     200
+    ]
+   ]
+  }
+ },
+ "s1.kysely-12#0": {
+  "repo": "kysely",
+  "qid": "kysely-12",
+  "kind": "item",
+  "nitems": 7,
+  "req": [
+   "R1",
+   "R2",
+   "R3",
+   "R5",
+   "R6",
+   "R7"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "src/plugin/kysely-plugin.ts",
+     7
+    ]
+   ],
+   "R2": [
+    [
+     "src/kysely.ts",
+     786
+    ],
+    [
+     "src/query-builder/select-query-builder.ts",
+     2625
+    ],
+    [
+     "src/query-executor/default-query-executor.ts",
+     54
+    ],
+    [
+     "src/kysely.ts",
+     473
+    ]
+   ],
+   "R3": [
+    [
+     "src/query-builder/select-query-builder.ts",
+     2632
+    ],
+    [
+     "src/query-executor/query-executor-base.ts",
+     40
+    ]
+   ],
+   "R5": [
+    [
+     "src/operation-node/operation-node-transformer.ts",
+     141
+    ]
+   ],
+   "R6": [
+    [
+     "src/plugin/camel-case/camel-case-plugin.ts",
+     121
+    ],
+    [
+     "src/plugin/camel-case/camel-case-transformer.ts",
+     6
+    ]
+   ],
+   "R7": [
+    [
+     "src/plugin/with-schema/with-schema-plugin.ts",
+     11
+    ],
+    [
+     "src/plugin/with-schema/with-schema-transformer.ts",
+     27
+    ]
+   ]
+  }
+ },
+ "s1.kysely-13#0": {
+  "repo": "kysely",
+  "qid": "kysely-13",
+  "kind": "item",
+  "nitems": 6,
+  "req": [
+   "R1",
+   "R2",
+   "R3",
+   "R4",
+   "R6"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "src/kysely.ts",
+     307
+    ],
+    [
+     "src/driver/driver.ts",
+     104
+    ],
+    [
+     "src/driver/default-connection-provider.ts",
+     13
+    ]
+   ],
+   "R2": [
+    [
+     "src/driver/single-connection-provider.ts",
+     6
+    ]
+   ],
+   "R3": [
+    [
+     "src/driver/runtime-driver.ts",
+     117
+    ],
+    [
+     "src/dialect/postgres/postgres-driver.ts",
+     69
+    ]
+   ],
+   "R4": [
+    [
+     "src/util/provide-controlled-connection.ts",
+     12
+    ]
+   ],
+   "R6": [
+    [
+     "src/dialect/postgres/postgres-driver.ts",
+     98
+    ],
+    [
+     "src/driver/runtime-driver.ts",
+     132
+    ]
+   ]
+  }
+ },
+ "s1.kysely-14#0": {
+  "repo": "kysely",
+  "qid": "kysely-14",
+  "kind": "sym",
+  "nitems": 3,
+  "req": [
+   "S1",
+   "S2",
+   "S3"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "src/query-builder/select-query-builder.ts",
+     2647
+    ]
+   ],
+   "S2": [
+    [
+     "src/query-builder/select-query-builder.ts",
+     2640
+    ],
+    [
+     "src/query-executor/default-query-executor.ts",
+     34
+    ]
+   ],
+   "S3": [
+    [
+     "src/query-executor/default-query-executor.ts",
+     35
+    ],
+    [
+     "src/query-compiler/default-query-compiler.ts",
+     137
+    ]
+   ]
+  }
+ },
+ "s1.kysely-21#0": {
+  "repo": "kysely",
+  "qid": "kysely-21",
+  "kind": "sym",
+  "nitems": 7,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4",
+   "S5",
+   "S6",
+   "S7"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "src/kysely.ts",
+     887
+    ],
+    [
+     "src/driver/driver.ts",
+     104
+    ]
+   ],
+   "S2": [
+    [
+     "src/kysely.ts",
+     889
+    ],
+    [
+     "src/query-executor/default-query-executor.ts",
+     38
+    ],
+    [
+     "src/kysely.ts",
+     1361
+    ],
+    [
+     "src/query-executor/noop-query-executor.ts",
+     20
+    ]
+   ],
+   "S3": [
+    [
+     "src/kysely.ts",
+     893
+    ],
+    [
+     "src/query-executor/default-query-executor.ts",
+     72
+    ]
+   ],
+   "S4": [
+    [
+     "src/kysely.ts",
+     892
+    ]
+   ],
+   "S5": [
+    [
+     "src/kysely.ts",
+     894
+    ],
+    [
+     "src/driver/single-connection-provider.ts",
+     6
+    ]
+   ],
+   "S6": [
+    [
+     "src/kysely.ts",
+     899
+    ]
+   ],
+   "S7": [
+    [
+     "src/kysely.ts",
+     903
+    ],
+    [
+     "src/kysely.ts",
+     120
+    ],
+    [
+     "src/driver/runtime-driver.ts",
+     117
+    ]
+   ]
+  }
+ },
+ "s1.kysely-22#0": {
+  "repo": "kysely",
+  "qid": "kysely-22",
+  "kind": "sym",
+  "nitems": 5,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4",
+   "S5"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "src/dialect/mssql/mssql-adapter.ts",
+     9
+    ]
+   ],
+   "S2": [
+    [
+     "src/dialect/mysql/mysql-adapter.ts",
+     9
+    ]
+   ],
+   "S3": [
+    [
+     "src/dialect/postgres/postgres-adapter.ts",
+     9
+    ]
+   ],
+   "S4": [
+    [
+     "src/dialect/sqlite/sqlite-adapter.ts",
+     5
+    ]
+   ],
+   "S5": [
+    [
+     "src/dialect/pglite/pglite-adapter.ts",
+     3
+    ]
+   ]
+  }
+ },
+ "s1.kysely-23#0": {
+  "repo": "kysely",
+  "qid": "kysely-23",
+  "kind": "sym",
+  "nitems": 6,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4",
+   "S5",
+   "S6"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "src/plugin/camel-case/camel-case-transformer.ts",
+     6
+    ]
+   ],
+   "S2": [
+    [
+     "src/plugin/deduplicate-joins/deduplicate-joins-transformer.ts",
+     9
+    ]
+   ],
+   "S3": [
+    [
+     "src/plugin/handle-empty-in-lists/handle-empty-in-lists-transformer.ts",
+     11
+    ]
+   ],
+   "S4": [
+    [
+     "src/plugin/immediate-value/immediate-value-transformer.ts",
+     14
+    ]
+   ],
+   "S5": [
+    [
+     "src/plugin/safe-null-comparison/safe-null-comparison-transformer.ts",
+     6
+    ]
+   ],
+   "S6": [
+    [
+     "src/plugin/with-schema/with-schema-transformer.ts",
+     27
+    ]
+   ]
+  }
+ },
+ "s1.mdbook-01#0": {
+  "repo": "mdbook",
+  "qid": "mdbook-01",
+  "kind": "item",
+  "nitems": 10,
+  "req": [
+   "R1",
+   "R7"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "src/cmd/build.rs",
+     17
+    ],
+    [
+     "crates/mdbook-driver/src/mdbook.rs",
+     29
+    ]
+   ],
+   "R7": [
+    [
+     "crates/mdbook-html/src/html_handlebars/hbs_renderer.rs",
+     23
+    ],
+    [
+     "crates/mdbook-driver/src/builtin_renderers/markdown_renderer.rs",
+     10
+    ],
+    [
+     "crates/mdbook-driver/src/builtin_renderers/mod.rs",
+     20
+    ]
+   ]
+  }
+ },
+ "s1.mdbook-02#0": {
+  "repo": "mdbook",
+  "qid": "mdbook-02",
+  "kind": "item",
+  "nitems": 5,
+  "req": [
+   "R1",
+   "R2",
+   "R3",
+   "R4",
+   "R5"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "crates/mdbook-renderer/src/lib.rs",
+     28
+    ]
+   ],
+   "R2": [
+    [
+     "crates/mdbook-driver/src/mdbook.rs",
+     403
+    ]
+   ],
+   "R3": [
+    [
+     "crates/mdbook-driver/src/builtin_renderers/mod.rs",
+     37
+    ]
+   ],
+   "R4": [
+    [
+     "crates/mdbook-driver/src/mdbook.rs",
+     190
+    ]
+   ],
+   "R5": [
+    [
+     "crates/mdbook-driver/src/builtin_renderers/markdown_renderer.rs",
+     19
+    ]
+   ]
+  }
+ },
+ "s1.mdbook-06#0": {
+  "repo": "mdbook",
+  "qid": "mdbook-06",
+  "kind": "sym",
+  "nitems": 7,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4",
+   "S5",
+   "S6",
+   "S7"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "crates/mdbook-driver/src/mdbook.rs",
+     137
+    ]
+   ],
+   "S2": [
+    [
+     "crates/mdbook-driver/src/mdbook.rs",
+     271
+    ]
+   ],
+   "S3": [
+    [
+     "crates/mdbook-core/src/book.rs",
+     51
+    ]
+   ],
+   "S4": [
+    [
+     "crates/mdbook-html/src/html_handlebars/hbs_renderer.rs",
+     615
+    ]
+   ],
+   "S5": [
+    [
+     "crates/mdbook-core/src/book/tests.rs",
+     31
+    ]
+   ],
+   "S6": [
+    [
+     "crates/mdbook-core/src/book/tests.rs",
+     66
+    ]
+   ],
+   "S7": [
+    [
+     "crates/mdbook-core/src/book/tests.rs",
+     104
+    ]
+   ]
+  }
+ },
+ "s1.mdbook-07#0": {
+  "repo": "mdbook",
+  "qid": "mdbook-07",
+  "kind": "sym",
+  "nitems": 7,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4",
+   "S5",
+   "S6",
+   "S7"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "crates/mdbook-core/src/config.rs",
+     114
+    ]
+   ],
+   "S2": [
+    [
+     "crates/mdbook-driver/src/load.rs",
+     14
+    ]
+   ],
+   "S3": [
+    [
+     "crates/mdbook-driver/src/builtin_preprocessors/links.rs",
+     415
+    ]
+   ],
+   "S4": [
+    [
+     "crates/mdbook-html/src/html_handlebars/hbs_renderer.rs",
+     155
+    ]
+   ],
+   "S5": [
+    [
+     "crates/mdbook-html/src/html_handlebars/static_files.rs",
+     277
+    ]
+   ],
+   "S6": [
+    [
+     "tests/testsuite/book_test.rs",
+     554
+    ]
+   ],
+   "S7": [
+    [
+     "crates/mdbook-html/src/html_handlebars/static_files.rs",
+     347
+    ]
+   ]
+  }
+ },
+ "s1.mdbook-11#0": {
+  "repo": "mdbook",
+  "qid": "mdbook-11",
+  "kind": "item",
+  "nitems": 7,
+  "req": [
+   "R1",
+   "R2",
+   "R3",
+   "R4",
+   "R5",
+   "R6",
+   "R7"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "src/cmd/build.rs",
+     17
+    ],
+    [
+     "src/cmd/command_prelude.rs",
+     62
+    ]
+   ],
+   "R2": [
+    [
+     "crates/mdbook-driver/src/mdbook.rs",
+     48
+    ],
+    [
+     "crates/mdbook-core/src/config.rs",
+     113
+    ]
+   ],
+   "R3": [
+    [
+     "crates/mdbook-driver/src/load.rs",
+     10
+    ]
+   ],
+   "R4": [
+    [
+     "crates/mdbook-driver/src/mdbook.rs",
+     403
+    ]
+   ],
+   "R5": [
+    [
+     "crates/mdbook-renderer/src/lib.rs",
+     40
+    ]
+   ],
+   "R6": [
+    [
+     "crates/mdbook-html/src/html_handlebars/hbs_renderer.rs",
+     328
+    ],
+    [
+     "crates/mdbook-html/src/html/mod.rs",
+     89
+    ]
+   ],
+   "R7": [
+    [
+     "crates/mdbook-driver/src/builtin_renderers/mod.rs",
+     37
+    ]
+   ]
+  }
+ },
+ "s1.mdbook-12#0": {
+  "repo": "mdbook",
+  "qid": "mdbook-12",
+  "kind": "item",
+  "nitems": 7,
+  "req": [
+   "R1",
+   "R2",
+   "R4",
+   "R5",
+   "R6"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "crates/mdbook-preprocessor/src/lib.rs",
+     30
+    ]
+   ],
+   "R2": [
+    [
+     "crates/mdbook-driver/src/mdbook.rs",
+     447
+    ]
+   ],
+   "R4": [
+    [
+     "crates/mdbook-driver/src/builtin_preprocessors/cmd.rs",
+     14
+    ]
+   ],
+   "R5": [
+    [
+     "crates/mdbook-driver/src/builtin_preprocessors/links.rs",
+     49
+    ]
+   ],
+   "R6": [
+    [
+     "crates/mdbook-driver/src/builtin_preprocessors/index.rs",
+     29
+    ]
+   ]
+  }
+ },
+ "s1.mdbook-13#0": {
+  "repo": "mdbook",
+  "qid": "mdbook-13",
+  "kind": "item",
+  "nitems": 6,
+  "req": [
+   "R1",
+   "R3",
+   "R5",
+   "R6"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "crates/mdbook-driver/src/load.rs",
+     10
+    ],
+    [
+     "crates/mdbook-summary/src/lib.rs",
+     59
+    ]
+   ],
+   "R3": [
+    [
+     "crates/mdbook-core/src/book.rs",
+     222
+    ]
+   ],
+   "R5": [
+    [
+     "crates/mdbook-driver/src/load.rs",
+     25
+    ]
+   ],
+   "R6": [
+    [
+     "crates/mdbook-driver/src/load.rs",
+     60
+    ],
+    [
+     "crates/mdbook-core/src/book.rs",
+     38
+    ]
+   ]
+  }
+ },
+ "s1.mdbook-14#0": {
+  "repo": "mdbook",
+  "qid": "mdbook-14",
+  "kind": "sym",
+  "nitems": 3,
+  "req": [
+   "S1",
+   "S2",
+   "S3"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "src/cmd/build.rs",
+     23
+    ],
+    [
+     "crates/mdbook-driver/src/mdbook.rs",
+     162
+    ]
+   ],
+   "S2": [
+    [
+     "crates/mdbook-driver/src/mdbook.rs",
+     166
+    ]
+   ],
+   "S3": [
+    [
+     "crates/mdbook-driver/src/mdbook.rs",
+     207
+    ],
+    [
+     "crates/mdbook-renderer/src/lib.rs",
+     34
+    ],
+    [
+     "crates/mdbook-html/src/html_handlebars/hbs_renderer.rs",
+     328
+    ]
+   ]
+  }
+ },
+ "s1.mdbook-21#0": {
+  "repo": "mdbook",
+  "qid": "mdbook-21",
+  "kind": "sym",
+  "nitems": 5,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4",
+   "S5"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "crates/mdbook-driver/src/mdbook.rs",
+     174
+    ],
+    [
+     "crates/mdbook-preprocessor/src/lib.rs",
+     70
+    ]
+   ],
+   "S2": [
+    [
+     "crates/mdbook-driver/src/mdbook.rs",
+     177
+    ],
+    [
+     "crates/mdbook-renderer/src/lib.rs",
+     30
+    ],
+    [
+     "crates/mdbook-html/src/html_handlebars/hbs_renderer.rs",
+     324
+    ],
+    [
+     "crates/mdbook-driver/src/builtin_renderers/markdown_renderer.rs",
+     20
+    ],
+    [
+     "crates/mdbook-driver/src/builtin_renderers/mod.rs",
+     33
+    ],
+    [
+     "crates/mdbook-driver/src/mdbook.rs",
+     258
+    ]
+   ],
+   "S3": [
+    [
+     "crates/mdbook-driver/src/mdbook.rs",
+     181
+    ]
+   ],
+   "S4": [
+    [
+     "crates/mdbook-driver/src/mdbook.rs",
+     182
+    ],
+    [
+     "crates/mdbook-preprocessor/src/lib.rs",
+     32
+    ]
+   ],
+   "S5": [
+    [
+     "crates/mdbook-driver/src/mdbook.rs",
+     183
+    ],
+    [
+     "crates/mdbook-driver/src/builtin_preprocessors/links.rs",
+     49
+    ],
+    [
+     "crates/mdbook-driver/src/builtin_preprocessors/cmd.rs",
+     62
+    ]
+   ]
+  }
+ },
+ "s1.mdbook-22#0": {
+  "repo": "mdbook",
+  "qid": "mdbook-22",
+  "kind": "sym",
+  "nitems": 4,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "crates/mdbook-html/src/html_handlebars/hbs_renderer.rs",
+     23
+    ]
+   ],
+   "S2": [
+    [
+     "crates/mdbook-driver/src/builtin_renderers/markdown_renderer.rs",
+     10
+    ]
+   ],
+   "S3": [
+    [
+     "crates/mdbook-driver/src/builtin_renderers/mod.rs",
+     20
+    ]
+   ],
+   "S4": [
+    [
+     "crates/mdbook-driver/src/mdbook.rs",
+     255
+    ]
+   ]
+  }
+ },
+ "s1.mdbook-23#0": {
+  "repo": "mdbook",
+  "qid": "mdbook-23",
+  "kind": "sym",
+  "nitems": 6,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4",
+   "S5",
+   "S6"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "crates/mdbook-driver/src/builtin_preprocessors/links.rs",
+     32
+    ]
+   ],
+   "S2": [
+    [
+     "crates/mdbook-driver/src/builtin_preprocessors/index.rs",
+     12
+    ]
+   ],
+   "S3": [
+    [
+     "crates/mdbook-driver/src/builtin_preprocessors/cmd.rs",
+     14
+    ]
+   ],
+   "S4": [
+    [
+     "guide/guide-helper/src/lib.rs",
+     33
+    ]
+   ],
+   "S5": [
+    [
+     "examples/remove-emphasis/mdbook-remove-emphasis/src/main.rs",
+     30
+    ]
+   ],
+   "S6": [
+    [
+     "examples/nop-preprocessor.rs",
+     79
+    ]
+   ]
+  }
+ },
+ "s1.nfpm-01#0": {
+  "repo": "nfpm",
+  "qid": "nfpm-01",
+  "kind": "item",
+  "nitems": 10,
+  "req": [
+   "R1",
+   "R3",
+   "R5",
+   "R7",
+   "R8"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "internal/cmd/root.go",
+     18
+    ]
+   ],
+   "R3": [
+    [
+     "nfpm.go",
+     122
+    ],
+    [
+     "deb/deb.go",
+     39
+    ],
+    [
+     "internal/cmd/root.go",
+     9
+    ]
+   ],
+   "R5": [
+    [
+     "rpm/builder.go",
+     13
+    ],
+    [
+     "rpm/relations.go",
+     13
+    ],
+    [
+     "rpm/scripts.go",
+     64
+    ],
+    [
+     "rpm/files.go",
+     20
+    ],
+    [
+     "rpm/srpm.go",
+     29
+    ]
+   ],
+   "R7": [
+    [
+     "nfpm.go",
+     595
+    ]
+   ],
+   "R8": [
+    [
+     "nfpm.go",
+     426
+    ]
+   ]
+  }
+ },
+ "s1.nfpm-02#0": {
+  "repo": "nfpm",
+  "qid": "nfpm-02",
+  "kind": "item",
+  "nitems": 5,
+  "req": [
+   "R1",
+   "R2",
+   "R3",
+   "R4"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "nfpm.go",
+     122
+    ]
+   ],
+   "R2": [
+    [
+     "nfpm.go",
+     33
+    ],
+    [
+     "deb/deb.go",
+     39
+    ],
+    [
+     "rpm/rpm.go",
+     19
+    ]
+   ],
+   "R3": [
+    [
+     "internal/cmd/package.go",
+     65
+    ],
+    [
+     "nfpm.go",
+     141
+    ],
+    [
+     "nfpm.go",
+     56
+    ],
+    [
+     "internal/cmd/package.go",
+     111
+    ],
+    [
+     "internal/cmd/package.go",
+     42
+    ]
+   ],
+   "R4": [
+    [
+     "nfpm.go",
+     595
+    ],
+    [
+     "files/files.go",
+     259
+    ],
+    [
+     "nfpm.go",
+     359
+    ]
+   ]
+  }
+ },
+ "s1.nfpm-06#0": {
+  "repo": "nfpm",
+  "qid": "nfpm-06",
+  "kind": "sym",
+  "nitems": 6,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4",
+   "S5",
+   "S6"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "internal/cmd/package.go",
+     80
+    ]
+   ],
+   "S2": [
+    [
+     "nfpm_test.go",
+     330
+    ]
+   ],
+   "S3": [
+    [
+     "nfpm_test.go",
+     586
+    ]
+   ],
+   "S4": [
+    [
+     "acceptance_test.go",
+     109
+    ]
+   ],
+   "S5": [
+    [
+     "acceptance_test.go",
+     407
+    ]
+   ],
+   "S6": [
+    [
+     "acceptance_test.go",
+     467
+    ]
+   ]
+  }
+ },
+ "s1.nfpm-11#0": {
+  "repo": "nfpm",
+  "qid": "nfpm-11",
+  "kind": "item",
+  "nitems": 8,
+  "req": [
+   "R1",
+   "R3",
+   "R4",
+   "R5",
+   "R6",
+   "R7",
+   "R8"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "internal/cmd/package.go",
+     22
+    ]
+   ],
+   "R3": [
+    [
+     "nfpm.go",
+     103
+    ]
+   ],
+   "R4": [
+    [
+     "nfpm.go",
+     141
+    ]
+   ],
+   "R5": [
+    [
+     "nfpm.go",
+     652
+    ],
+    [
+     "internal/cmd/package.go",
+     85
+    ],
+    [
+     "internal/modtime/mtime.go",
+     9
+    ]
+   ],
+   "R6": [
+    [
+     "nfpm.go",
+     56
+    ],
+    [
+     "internal/cmd/root.go",
+     9
+    ]
+   ],
+   "R7": [
+    [
+     "internal/cmd/package.go",
+     93
+    ]
+   ],
+   "R8": [
+    [
+     "internal/cmd/package.go",
+     111
+    ],
+    [
+     "nfpm.go",
+     122
+    ],
+    [
+     "deb/deb.go",
+     60
+    ],
+    [
+     "nfpm.go",
+     595
+    ],
+    [
+     "internal/cmd/package.go",
+     112
+    ]
+   ]
+  }
+ },
+ "s1.nfpm-12#0": {
+  "repo": "nfpm",
+  "qid": "nfpm-12",
+  "kind": "item",
+  "nitems": 8,
+  "req": [
+   "R1",
+   "R2",
+   "R3",
+   "R4",
+   "R5",
+   "R6",
+   "R7"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "nfpm.go",
+     595
+    ],
+    [
+     "deb/deb.go",
+     121
+    ],
+    [
+     "rpm/rpm.go",
+     124
+    ],
+    [
+     "nfpm.go",
+     156
+    ]
+   ],
+   "R2": [
+    [
+     "files/files.go",
+     354
+    ]
+   ],
+   "R3": [
+    [
+     "files/files.go",
+     259
+    ]
+   ],
+   "R4": [
+    [
+     "files/files.go",
+     444
+    ]
+   ],
+   "R5": [
+    [
+     "files/files.go",
+     490
+    ],
+    [
+     "files/fs.go",
+     5
+    ]
+   ],
+   "R6": [
+    [
+     "files/files.go",
+     377
+    ]
+   ],
+   "R7": [
+    [
+     "files/files.go",
+     127
+    ]
+   ]
+  }
+ },
+ "s1.nfpm-13#0": {
+  "repo": "nfpm",
+  "qid": "nfpm-13",
+  "kind": "item",
+  "nitems": 7,
+  "req": [
+   "R1"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "deb/deb.go",
+     118
+    ]
+   ]
+  }
+ },
+ "s1.nfpm-14#0": {
+  "repo": "nfpm",
+  "qid": "nfpm-14",
+  "kind": "sym",
+  "nitems": 3,
+  "req": [
+   "S1",
+   "S2",
+   "S3"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "internal/cmd/package.go",
+     111
+    ],
+    [
+     "deb/deb.go",
+     118
+    ]
+   ],
+   "S2": [
+    [
+     "deb/deb.go",
+     121
+    ],
+    [
+     "rpm/rpm.go",
+     124
+    ],
+    [
+     "apk/apk.go",
+     116
+    ],
+    [
+     "arch/arch.go",
+     125
+    ],
+    [
+     "ipk/ipk.go",
+     120
+    ],
+    [
+     "msix/msix.go",
+     121
+    ]
+   ],
+   "S3": [
+    [
+     "nfpm.go",
+     611
+    ]
+   ]
+  }
+ },
+ "s1.nfpm-21#0": {
+  "repo": "nfpm",
+  "qid": "nfpm-21",
+  "kind": "sym",
+  "nitems": 6,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4",
+   "S5",
+   "S6"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "internal/cmd/package.go",
+     75
+    ],
+    [
+     "nfpm.go",
+     103
+    ]
+   ],
+   "S2": [
+    [
+     "internal/cmd/package.go",
+     80
+    ],
+    [
+     "nfpm.go",
+     141
+    ]
+   ],
+   "S3": [
+    [
+     "internal/cmd/package.go",
+     85
+    ],
+    [
+     "nfpm.go",
+     652
+    ]
+   ],
+   "S4": [
+    [
+     "internal/cmd/package.go",
+     88
+    ],
+    [
+     "nfpm.go",
+     56
+    ]
+   ],
+   "S5": [
+    [
+     "internal/cmd/package.go",
+     96
+    ],
+    [
+     "deb/deb.go",
+     88
+    ],
+    [
+     "rpm/rpm.go",
+     80
+    ],
+    [
+     "apk/apk.go",
+     98
+    ],
+    [
+     "arch/arch.go",
+     71
+    ],
+    [
+     "ipk/ipk.go",
+     72
+    ],
+    [
+     "msix/msix.go",
+     58
+    ]
+   ],
+   "S6": [
+    [
+     "internal/cmd/package.go",
+     111
+    ],
+    [
+     "deb/deb.go",
+     118
+    ],
+    [
+     "rpm/rpm.go",
+     121
+    ],
+    [
+     "apk/apk.go",
+     110
+    ],
+    [
+     "arch/arch.go",
+     119
+    ],
+    [
+     "ipk/ipk.go",
+     117
+    ],
+    [
+     "msix/msix.go",
+     117
+    ]
+   ]
+  }
+ },
+ "s1.nfpm-22#0": {
+  "repo": "nfpm",
+  "qid": "nfpm-22",
+  "kind": "sym",
+  "nitems": 6,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4",
+   "S5",
+   "S6"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "deb/deb.go",
+     83
+    ]
+   ],
+   "S2": [
+    [
+     "rpm/rpm.go",
+     43
+    ]
+   ],
+   "S3": [
+    [
+     "apk/apk.go",
+     96
+    ]
+   ],
+   "S4": [
+    [
+     "arch/arch.go",
+     41
+    ]
+   ],
+   "S5": [
+    [
+     "ipk/ipk.go",
+     66
+    ]
+   ],
+   "S6": [
+    [
+     "msix/msix.go",
+     55
+    ]
+   ]
+  }
+ },
+ "s1.ninja-01#0": {
+  "repo": "ninja",
+  "qid": "ninja-01",
+  "kind": "item",
+  "nitems": 10,
+  "req": [
+   "R1",
+   "R2",
+   "R5",
+   "R6"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "src/status_printer.cc",
+     59
+    ]
+   ],
+   "R2": [
+    [
+     "src/ninja.cc",
+     1386
+    ]
+   ],
+   "R5": [
+    [
+     "src/graph.cc",
+     310
+    ],
+    [
+     "src/graph.cc",
+     69
+    ]
+   ],
+   "R6": [
+    [
+     "src/build.h",
+     159
+    ],
+    [
+     "src/real_command_runner.cc",
+     21
+    ],
+    [
+     "src/build.cc",
+     50
+    ]
+   ]
+  }
+ },
+ "s1.ninja-02#0": {
+  "repo": "ninja",
+  "qid": "ninja-02",
+  "kind": "item",
+  "nitems": 5,
+  "req": [
+   "R1",
+   "R2"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "src/ninja.cc",
+     1386
+    ]
+   ],
+   "R2": [
+    [
+     "src/ninja.cc",
+     173
+    ]
+   ]
+  }
+ },
+ "s1.ninja-06#0": {
+  "repo": "ninja",
+  "qid": "ninja-06",
+  "kind": "sym",
+  "nitems": 7,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4",
+   "S5",
+   "S6",
+   "S7"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "src/graph.h",
+     58
+    ]
+   ],
+   "S2": [
+    [
+     "src/graph_test.cc",
+     1172
+    ]
+   ],
+   "S3": [
+    [
+     "src/disk_interface_test.cc",
+     324
+    ]
+   ],
+   "S4": [
+    [
+     "src/disk_interface_test.cc",
+     340
+    ]
+   ],
+   "S5": [
+    [
+     "src/disk_interface_test.cc",
+     360
+    ]
+   ],
+   "S6": [
+    [
+     "src/disk_interface_test.cc",
+     382
+    ]
+   ],
+   "S7": [
+    [
+     "src/build_test.cc",
+     1440
+    ]
+   ]
+  }
+ },
+ "s1.ninja-07#0": {
+  "repo": "ninja",
+  "qid": "ninja-07",
+  "kind": "sym",
+  "nitems": 4,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "src/manifest_parser.cc",
+     172
+    ],
+    [
+     "src/eval_env.h",
+     87
+    ]
+   ],
+   "S2": [
+    [
+     "src/manifest_parser.cc",
+     199
+    ]
+   ],
+   "S3": [
+    [
+     "src/manifest_parser.cc",
+     229
+    ]
+   ],
+   "S4": [
+    [
+     "src/dyndep_parser.cc",
+     109
+    ]
+   ]
+  }
+ },
+ "s1.ninja-11#0": {
+  "repo": "ninja",
+  "qid": "ninja-11",
+  "kind": "item",
+  "nitems": 8,
+  "req": [
+   "R1",
+   "R3",
+   "R4",
+   "R6",
+   "R7"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "src/ninja.cc",
+     1953
+    ],
+    [
+     "src/status_printer.cc",
+     59
+    ]
+   ],
+   "R3": [
+    [
+     "src/build.cc",
+     678
+    ],
+    [
+     "src/graph.cc",
+     310
+    ],
+    [
+     "src/build.cc",
+     95
+    ]
+   ],
+   "R4": [
+    [
+     "src/build.cc",
+     709
+    ],
+    [
+     "src/graph.h",
+     469
+    ]
+   ],
+   "R6": [
+    [
+     "src/real_command_runner.cc",
+     157
+    ],
+    [
+     "src/build.cc",
+     50
+    ],
+    [
+     "src/subprocess-posix.cc",
+     56
+    ]
+   ],
+   "R7": [
+    [
+     "src/build_log.cc",
+     90
+    ]
+   ]
+  }
+ },
+ "s1.ninja-12#0": {
+  "repo": "ninja",
+  "qid": "ninja-12",
+  "kind": "item",
+  "nitems": 7,
+  "req": [
+   "R1",
+   "R2",
+   "R3",
+   "R4",
+   "R7"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "src/parser.cc",
+     22
+    ],
+    [
+     "src/manifest_parser.cc",
+     43
+    ]
+   ],
+   "R2": [
+    [
+     "src/lexer.h",
+     80
+    ],
+    [
+     "src/eval_env.h",
+     36
+    ],
+    [
+     "src/eval_env.cc",
+     111
+    ]
+   ],
+   "R3": [
+    [
+     "src/eval_env.h",
+     94
+    ]
+   ],
+   "R4": [
+    [
+     "src/eval_env.h",
+     67
+    ]
+   ],
+   "R7": [
+    [
+     "src/graph.cc",
+     629
+    ],
+    [
+     "src/eval_env.cc",
+     95
+    ]
+   ]
+  }
+ },
+ "s1.ninja-13#0": {
+  "repo": "ninja",
+  "qid": "ninja-13",
+  "kind": "item",
+  "nitems": 7,
+  "req": [
+   "R1",
+   "R4",
+   "R5",
+   "R7"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "src/graph.cc",
+     310
+    ]
+   ],
+   "R4": [
+    [
+     "src/build.cc",
+     269
+    ]
+   ],
+   "R5": [
+    [
+     "src/graph.cc",
+     842
+    ]
+   ],
+   "R7": [
+    [
+     "src/build.cc",
+     870
+    ]
+   ]
+  }
+ },
+ "s1.ninja-14#0": {
+  "repo": "ninja",
+  "qid": "ninja-14",
+  "kind": "sym",
+  "nitems": 4,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "src/build.cc",
+     746
+    ],
+    [
+     "src/build.cc",
+     851
+    ]
+   ],
+   "S2": [
+    [
+     "src/build.cc",
+     901
+    ],
+    [
+     "src/build.h",
+     162
+    ],
+    [
+     "src/real_command_runner.cc",
+     89
+    ],
+    [
+     "src/real_command_runner.cc",
+     157
+    ]
+   ],
+   "S3": [
+    [
+     "src/real_command_runner.cc",
+     91
+    ],
+    [
+     "src/subprocess-posix.cc",
+     312
+    ]
+   ],
+   "S4": [
+    [
+     "src/subprocess-posix.cc",
+     314
+    ]
+   ]
+  }
+ },
+ "s1.ninja-21#0": {
+  "repo": "ninja",
+  "qid": "ninja-21",
+  "kind": "sym",
+  "nitems": 12,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4",
+   "S5",
+   "S6",
+   "S7",
+   "S8",
+   "S9",
+   "S10",
+   "S11",
+   "S12"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "src/build.cc",
+     853
+    ],
+    [
+     "src/graph.cc",
+     787
+    ]
+   ],
+   "S2": [
+    [
+     "src/build.cc",
+     856
+    ],
+    [
+     "src/metrics.cc",
+     111
+    ]
+   ],
+   "S3": [
+    [
+     "src/build.cc",
+     859
+    ],
+    [
+     "src/status.h",
+     30
+    ],
+    [
+     "src/status_printer.cc",
+     117
+    ]
+   ],
+   "S4": [
+    [
+     "src/build.cc",
+     868
+    ],
+    [
+     "src/disk_interface.cc",
+     179
+    ]
+   ],
+   "S5": [
+    [
+     "src/build.cc",
+     868
+    ],
+    [
+     "src/graph.h",
+     84
+    ]
+   ],
+   "S6": [
+    [
+     "src/build.cc",
+     871
+    ],
+    [
+     "src/disk_interface.h",
+     57
+    ],
+    [
+     "src/disk_interface.cc",
+     290
+    ],
+    [
+     "src/test.cc",
+     165
+    ],
+    [
+     "src/build_log_test.cc",
+     233
+    ],
+    [
+     "src/disk_interface_test.cc",
+     287
+    ]
+   ],
+   "S7": [
+    [
+     "src/build.cc",
+     877
+    ],
+    [
+     "src/disk_interface.h",
+     48
+    ],
+    [
+     "src/disk_interface.cc",
+     218
+    ]
+   ],
+   "S8": [
+    [
+     "src/build.cc",
+     887
+    ],
+    [
+     "src/graph.cc",
+     744
+    ]
+   ],
+   "S9": [
+    [
+     "src/build.cc",
+     893
+    ],
+    [
+     "src/graph.cc",
+     754
+    ]
+   ],
+   "S10": [
+    [
+     "src/build.cc",
+     895
+    ],
+    [
+     "src/graph.cc",
+     735
+    ]
+   ],
+   "S11": [
+    [
+     "src/build.cc",
+     901
+    ],
+    [
+     "src/build.h",
+     162
+    ],
+    [
+     "src/real_command_runner.cc",
+     89
+    ],
+    [
+     "src/build.cc",
+     64
+    ],
+    [
+     "src/build_test.cc",
+     645
+    ]
+   ],
+   "S12": [
+    [
+     "src/build.cc",
+     902
+    ],
+    [
+     "src/graph.cc",
+     725
+    ]
+   ]
+  }
+ },
+ "s1.ninja-22#0": {
+  "repo": "ninja",
+  "qid": "ninja-22",
+  "kind": "sym",
+  "nitems": 2,
+  "req": [
+   "S1",
+   "S2"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "src/real_command_runner.cc",
+     21
+    ]
+   ],
+   "S2": [
+    [
+     "src/build.cc",
+     50
+    ]
+   ]
+  }
+ },
+ "s1.ninja-23#0": {
+  "repo": "ninja",
+  "qid": "ninja-23",
+  "kind": "sym",
+  "nitems": 3,
+  "req": [
+   "S1",
+   "S2",
+   "S3"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "src/eval_env.h",
+     94
+    ],
+    [
+     "src/eval_env.cc",
+     21
+    ]
+   ],
+   "S2": [
+    [
+     "src/graph.cc",
+     611
+    ],
+    [
+     "src/graph.cc",
+     629
+    ]
+   ],
+   "S3": [
+    [
+     "src/status_printer.cc",
+     46
+    ]
+   ]
+  }
+ },
+ "s1.ninja-25#0": {
+  "repo": "ninja",
+  "qid": "ninja-25",
+  "kind": "sym",
+  "nitems": 2,
+  "req": [
+   "S1",
+   "S2"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "src/build.cc",
+     171
+    ],
+    [
+     "src/jobserver.h",
+     201
+    ],
+    [
+     "src/jobserver-posix.cc",
+     47
+    ],
+    [
+     "src/jobserver-win32.cc",
+     36
+    ]
+   ],
+   "S2": [
+    [
+     "src/build.cc",
+     172
+    ],
+    [
+     "src/jobserver.h",
+     76
+    ]
+   ]
+  }
+ },
+ "s1.ninja-26#0": {
+  "repo": "ninja",
+  "qid": "ninja-26",
+  "kind": "sym",
+  "nitems": 8,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4",
+   "S5",
+   "S6",
+   "S7",
+   "S8"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "src/manifest_parser.cc",
+     197
+    ],
+    [
+     "src/lexer.h",
+     80
+    ]
+   ],
+   "S2": [
+    [
+     "src/manifest_parser.cc",
+     199
+    ],
+    [
+     "src/eval_env.h",
+     45
+    ]
+   ],
+   "S3": [
+    [
+     "src/manifest_parser.cc",
+     200
+    ],
+    [
+     "src/lexer.in.cc",
+     28
+    ],
+    [
+     "src/lexer.cc",
+     29
+    ]
+   ],
+   "S4": [
+    [
+     "src/manifest_parser.cc",
+     203
+    ],
+    [
+     "src/eval_env.cc",
+     111
+    ]
+   ],
+   "S5": [
+    [
+     "src/manifest_parser.cc",
+     207
+    ],
+    [
+     "src/util.cc",
+     124
+    ],
+    [
+     "src/util.cc",
+     141
+    ]
+   ],
+   "S6": [
+    [
+     "src/manifest_parser.cc",
+     209
+    ],
+    [
+     "src/state.cc",
+     159
+    ]
+   ],
+   "S7": [
+    [
+     "src/manifest_parser.cc",
+     212
+    ],
+    [
+     "src/eval_env.h",
+     44
+    ]
+   ],
+   "S8": [
+    [
+     "src/manifest_parser.cc",
+     217
+    ],
+    [
+     "src/parser.cc",
+     40
+    ]
+   ]
+  }
+ },
+ "s1.nunjucks-01#0": {
+  "repo": "nunjucks",
+  "qid": "nunjucks-01",
+  "kind": "item",
+  "nitems": 12,
+  "req": [],
+  "locs": {}
+ },
+ "s1.nunjucks-02#0": {
+  "repo": "nunjucks",
+  "qid": "nunjucks-02",
+  "kind": "item",
+  "nitems": 5,
+  "req": [
+   "R1",
+   "R3",
+   "R4",
+   "R5"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "nunjucks/src/parser.js",
+     595
+    ]
+   ],
+   "R3": [
+    [
+     "nunjucks/src/compiler.js",
+     1168
+    ]
+   ],
+   "R4": [
+    [
+     "nunjucks/src/environment.js",
+     120
+    ],
+    [
+     "nunjucks/src/nodes.js",
+     136
+    ]
+   ],
+   "R5": [
+    [
+     "nunjucks/src/nodes.js",
+     112
+    ],
+    [
+     "tests/parser.js",
+     594
+    ],
+    [
+     "tests/compiler.js",
+     156
+    ]
+   ]
+  }
+ },
+ "s1.nunjucks-06#0": {
+  "repo": "nunjucks",
+  "qid": "nunjucks-06",
+  "kind": "sym",
+  "nitems": 7,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4",
+   "S5",
+   "S6",
+   "S7"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "nunjucks/src/environment.js",
+     308
+    ]
+   ],
+   "S2": [
+    [
+     "tests/api.js",
+     29
+    ]
+   ],
+   "S3": [
+    [
+     "tests/api.js",
+     54
+    ]
+   ],
+   "S4": [
+    [
+     "tests/api.js",
+     69
+    ]
+   ],
+   "S5": [
+    [
+     "tests/loader.js",
+     45
+    ]
+   ],
+   "S6": [
+    [
+     "tests/loader.js",
+     66
+    ]
+   ],
+   "S7": [
+    [
+     "tests/loader.js",
+     138
+    ]
+   ]
+  }
+ },
+ "s1.nunjucks-11#0": {
+  "repo": "nunjucks",
+  "qid": "nunjucks-11",
+  "kind": "item",
+  "nitems": 8,
+  "req": [
+   "R1",
+   "R2",
+   "R3",
+   "R4",
+   "R5",
+   "R6",
+   "R8"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "nunjucks/src/environment.js",
+     255
+    ]
+   ],
+   "R2": [
+    [
+     "nunjucks/src/environment.js",
+     553
+    ]
+   ],
+   "R3": [
+    [
+     "nunjucks/src/compiler.js",
+     1183
+    ]
+   ],
+   "R4": [
+    [
+     "nunjucks/src/lexer.js",
+     509
+    ]
+   ],
+   "R5": [
+    [
+     "nunjucks/src/parser.js",
+     1360
+    ]
+   ],
+   "R6": [
+    [
+     "nunjucks/src/transformer.js",
+     206
+    ]
+   ],
+   "R8": [
+    [
+     "nunjucks/src/environment.js",
+     445
+    ]
+   ]
+  }
+ },
+ "s1.nunjucks-12#0": {
+  "repo": "nunjucks",
+  "qid": "nunjucks-12",
+  "kind": "item",
+  "nitems": 8,
+  "req": [
+   "R1",
+   "R2",
+   "R3",
+   "R6",
+   "R8"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "nunjucks/src/parser.js",
+     415
+    ],
+    [
+     "nunjucks/src/nodes.js",
+     108
+    ],
+    [
+     "nunjucks/src/nodes.js",
+     106
+    ]
+   ],
+   "R2": [
+    [
+     "nunjucks/src/transformer.js",
+     134
+    ]
+   ],
+   "R3": [
+    [
+     "nunjucks/src/compiler.js",
+     1119
+    ]
+   ],
+   "R6": [
+    [
+     "nunjucks/src/environment.js",
+     337
+    ]
+   ],
+   "R8": [
+    [
+     "nunjucks/src/environment.js",
+     574
+    ]
+   ]
+  }
+ },
+ "s1.nunjucks-13#0": {
+  "repo": "nunjucks",
+  "qid": "nunjucks-13",
+  "kind": "item",
+  "nitems": 7,
+  "req": [
+   "R1",
+   "R2",
+   "R3",
+   "R4",
+   "R6",
+   "R7"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "nunjucks/src/environment.js",
+     55
+    ],
+    [
+     "nunjucks/index.js",
+     18
+    ]
+   ],
+   "R2": [
+    [
+     "nunjucks/src/compiler.js",
+     1094
+    ]
+   ],
+   "R3": [
+    [
+     "nunjucks/src/runtime.js",
+     209
+    ]
+   ],
+   "R4": [
+    [
+     "nunjucks/src/lib.js",
+     141
+    ]
+   ],
+   "R6": [
+    [
+     "nunjucks/src/filters.js",
+     143
+    ]
+   ],
+   "R7": [
+    [
+     "nunjucks/src/nodes.js",
+     143
+    ]
+   ]
+  }
+ },
+ "s1.nunjucks-14#0": {
+  "repo": "nunjucks",
+  "qid": "nunjucks-14",
+  "kind": "sym",
+  "nitems": 4,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "nunjucks/src/environment.js",
+     462
+    ]
+   ],
+   "S2": [
+    [
+     "nunjucks/src/environment.js",
+     549
+    ]
+   ],
+   "S3": [
+    [
+     "nunjucks/src/environment.js",
+     559
+    ],
+    [
+     "nunjucks/src/compiler.js",
+     1183
+    ]
+   ],
+   "S4": [
+    [
+     "nunjucks/src/compiler.js",
+     1191
+    ]
+   ]
+  }
+ },
+ "s1.nunjucks-21#0": {
+  "repo": "nunjucks",
+  "qid": "nunjucks-21",
+  "kind": "sym",
+  "nitems": 6,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4",
+   "S5",
+   "S6"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "nunjucks/src/environment.js",
+     217
+    ]
+   ],
+   "S2": [
+    [
+     "nunjucks/src/environment.js",
+     199
+    ],
+    [
+     "nunjucks/src/lib.js",
+     147
+    ]
+   ],
+   "S3": [
+    [
+     "nunjucks/src/environment.js",
+     226
+    ]
+   ],
+   "S4": [
+    [
+     "nunjucks/src/environment.js",
+     253
+    ]
+   ],
+   "S5": [
+    [
+     "nunjucks/src/environment.js",
+     267
+    ],
+    [
+     "nunjucks/src/lib.js",
+     306
+    ]
+   ],
+   "S6": [
+    [
+     "nunjucks/src/environment.js",
+     283
+    ],
+    [
+     "nunjucks/src/node-loaders.js",
+     56
+    ],
+    [
+     "nunjucks/src/web-loaders.js",
+     30
+    ],
+    [
+     "nunjucks/src/precompiled-loader.js",
+     11
+    ]
+   ]
+  }
+ },
+ "s1.nunjucks-22#0": {
+  "repo": "nunjucks",
+  "qid": "nunjucks-22",
+  "kind": "sym",
+  "nitems": 12,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4",
+   "S5",
+   "S6",
+   "S7",
+   "S8",
+   "S9",
+   "S10",
+   "S11",
+   "S12"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "nunjucks/src/nodes.js",
+     119
+    ]
+   ],
+   "S2": [
+    [
+     "nunjucks/src/nodes.js",
+     120
+    ]
+   ],
+   "S3": [
+    [
+     "nunjucks/src/nodes.js",
+     121
+    ]
+   ],
+   "S4": [
+    [
+     "nunjucks/src/nodes.js",
+     122
+    ]
+   ],
+   "S5": [
+    [
+     "nunjucks/src/nodes.js",
+     124
+    ]
+   ],
+   "S6": [
+    [
+     "nunjucks/src/nodes.js",
+     125
+    ]
+   ],
+   "S7": [
+    [
+     "nunjucks/src/nodes.js",
+     126
+    ]
+   ],
+   "S8": [
+    [
+     "nunjucks/src/nodes.js",
+     127
+    ]
+   ],
+   "S9": [
+    [
+     "nunjucks/src/nodes.js",
+     128
+    ]
+   ],
+   "S10": [
+    [
+     "nunjucks/src/nodes.js",
+     129
+    ]
+   ],
+   "S11": [
+    [
+     "nunjucks/src/nodes.js",
+     130
+    ]
+   ],
+   "S12": [
+    [
+     "nunjucks/src/nodes.js",
+     131
+    ]
+   ]
+  }
+ },
+ "s1.nunjucks-23#0": {
+  "repo": "nunjucks",
+  "qid": "nunjucks-23",
+  "kind": "sym",
+  "nitems": 4,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "nunjucks/src/node-loaders.js",
+     11
+    ]
+   ],
+   "S2": [
+    [
+     "nunjucks/src/node-loaders.js",
+     88
+    ]
+   ],
+   "S3": [
+    [
+     "nunjucks/src/web-loaders.js",
+     6
+    ]
+   ],
+   "S4": [
+    [
+     "nunjucks/src/precompiled-loader.js",
+     5
+    ]
+   ]
+  }
+ },
+ "s1.rake-01#0": {
+  "repo": "rake",
+  "qid": "rake-01",
+  "kind": "item",
+  "nitems": 11,
+  "req": [
+   "R1"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "rake.gemspec",
+     96
+    ]
+   ]
+  }
+ },
+ "s1.rake-02#0": {
+  "repo": "rake",
+  "qid": "rake-02",
+  "kind": "item",
+  "nitems": 5,
+  "req": [
+   "R1",
+   "R2",
+   "R3",
+   "R5"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "lib/rake/tasklib.rb",
+     7
+    ],
+    [
+     "lib/rake/cloneable.rb",
+     6
+    ]
+   ],
+   "R2": [
+    [
+     "lib/rake/testtask.rb",
+     86
+    ],
+    [
+     "lib/rake/testtask.rb",
+     108
+    ],
+    [
+     "lib/rake/dsl_definition.rb",
+     60
+    ],
+    [
+     "lib/rake/task.rb",
+     416
+    ],
+    [
+     "lib/rake/task_manager.rb",
+     23
+    ]
+   ],
+   "R3": [
+    [
+     "lib/rake/testtask.rb",
+     35
+    ],
+    [
+     "lib/rake/file_utils.rb",
+     103
+    ],
+    [
+     "lib/rake/packagetask.rb",
+     45
+    ]
+   ],
+   "R5": [
+    [
+     "test/helper.rb",
+     23
+    ]
+   ]
+  }
+ },
+ "s1.rake-06#0": {
+  "repo": "rake",
+  "qid": "rake-06",
+  "kind": "sym",
+  "nitems": 5,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4",
+   "S5"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "lib/rake/task.rb",
+     417
+    ]
+   ],
+   "S2": [
+    [
+     "lib/rake/task_manager.rb",
+     83
+    ]
+   ],
+   "S3": [
+    [
+     "test/test_rake_application.rb",
+     131
+    ]
+   ],
+   "S4": [
+    [
+     "test/test_rake_task_manager.rb",
+     18
+    ],
+    [
+     "test/helper.rb",
+     28
+    ]
+   ],
+   "S5": [
+    [
+     "test/test_rake_name_space.rb",
+     19
+    ]
+   ]
+  }
+ },
+ "s1.rake-11#0": {
+  "repo": "rake",
+  "qid": "rake-11",
+  "kind": "item",
+  "nitems": 7,
+  "req": [
+   "R1",
+   "R3",
+   "R5",
+   "R6",
+   "R7"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "lib/rake/application.rb",
+     80
+    ]
+   ],
+   "R3": [
+    [
+     "lib/rake/rake_module.rb",
+     28
+    ]
+   ],
+   "R5": [
+    [
+     "lib/rake/dsl_definition.rb",
+     184
+    ]
+   ],
+   "R6": [
+    [
+     "lib/rake/application.rb",
+     798
+    ]
+   ],
+   "R7": [
+    [
+     "lib/rake/default_loader.rb",
+     10
+    ],
+    [
+     "lib/rake/loaders/makefile.rb",
+     24
+    ]
+   ]
+  }
+ },
+ "s1.rake-12#0": {
+  "repo": "rake",
+  "qid": "rake-12",
+  "kind": "item",
+  "nitems": 7,
+  "req": [
+   "R1",
+   "R2",
+   "R3",
+   "R4",
+   "R5",
+   "R6",
+   "R7"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "lib/rake/application.rb",
+     132
+    ],
+    [
+     "lib/rake/task_manager.rb",
+     54
+    ]
+   ],
+   "R2": [
+    [
+     "lib/rake/task.rb",
+     186
+    ],
+    [
+     "lib/rake/invocation_chain.rb",
+     28
+    ]
+   ],
+   "R3": [
+    [
+     "lib/rake/task.rb",
+     237
+    ]
+   ],
+   "R4": [
+    [
+     "lib/rake/task.rb",
+     219
+    ]
+   ],
+   "R5": [
+    [
+     "lib/rake/file_task.rb",
+     16
+    ],
+    [
+     "lib/rake/file_creation_task.rb",
+     12
+    ]
+   ],
+   "R6": [
+    [
+     "lib/rake/multi_task.rb",
+     10
+    ],
+    [
+     "lib/rake/task.rb",
+     238
+    ],
+    [
+     "lib/rake/thread_pool.rb",
+     33
+    ],
+    [
+     "lib/rake/application.rb",
+     173
+    ]
+   ],
+   "R7": [
+    [
+     "lib/rake/invocation_exception_mixin.rb",
+     3
+    ],
+    [
+     "lib/rake/task.rb",
+     229
+    ],
+    [
+     "lib/rake/application.rb",
+     208
+    ]
+   ]
+  }
+ },
+ "s1.rake-13#0": {
+  "repo": "rake",
+  "qid": "rake-13",
+  "kind": "item",
+  "nitems": 5,
+  "req": [
+   "R1",
+   "R2",
+   "R3",
+   "R5"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "lib/rake/dsl_definition.rb",
+     152
+    ],
+    [
+     "lib/rake/task.rb",
+     421
+    ],
+    [
+     "lib/rake/task_manager.rb",
+     17
+    ]
+   ],
+   "R2": [
+    [
+     "lib/rake/task_manager.rb",
+     54
+    ],
+    [
+     "lib/rake/task.rb",
+     277
+    ]
+   ],
+   "R3": [
+    [
+     "lib/rake/task_manager.rb",
+     151
+    ]
+   ],
+   "R5": [
+    [
+     "lib/rake/task.rb",
+     52
+    ]
+   ]
+  }
+ },
+ "s1.rake-14#0": {
+  "repo": "rake",
+  "qid": "rake-14",
+  "kind": "sym",
+  "nitems": 5,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4",
+   "S5"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "lib/rake/application.rb",
+     84
+    ]
+   ],
+   "S2": [
+    [
+     "lib/rake/application.rb",
+     139
+    ]
+   ],
+   "S3": [
+    [
+     "lib/rake/application.rb",
+     183
+    ],
+    [
+     "lib/rake/task_manager.rb",
+     54
+    ]
+   ],
+   "S4": [
+    [
+     "lib/rake/task.rb",
+     188
+    ]
+   ],
+   "S5": [
+    [
+     "lib/rake/task.rb",
+     219
+    ]
+   ]
+  }
+ },
+ "s1.rake-21#0": {
+  "repo": "rake",
+  "qid": "rake-21",
+  "kind": "sym",
+  "nitems": 8,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4",
+   "S5",
+   "S6",
+   "S7",
+   "S8"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "lib/rake/task.rb",
+     198
+    ],
+    [
+     "lib/rake/invocation_chain.rb",
+     28
+    ]
+   ],
+   "S2": [
+    [
+     "lib/rake/task.rb",
+     201
+    ],
+    [
+     "lib/rake/task.rb",
+     106
+    ],
+    [
+     "lib/rake/application.rb",
+     168
+    ]
+   ],
+   "S3": [
+    [
+     "lib/rake/task.rb",
+     202
+    ],
+    [
+     "lib/rake/application.rb",
+     413
+    ]
+   ],
+   "S4": [
+    [
+     "lib/rake/task.rb",
+     202
+    ]
+   ],
+   "S5": [
+    [
+     "lib/rake/task.rb",
+     218
+    ],
+    [
+     "lib/rake/task.rb",
+     237
+    ],
+    [
+     "lib/rake/multi_task.rb",
+     10
+    ]
+   ],
+   "S6": [
+    [
+     "lib/rake/task.rb",
+     219
+    ],
+    [
+     "lib/rake/task.rb",
+     286
+    ],
+    [
+     "lib/rake/file_task.rb",
+     16
+    ],
+    [
+     "lib/rake/file_creation_task.rb",
+     14
+    ]
+   ],
+   "S7": [
+    [
+     "lib/rake/task.rb",
+     219
+    ]
+   ],
+   "S8": [
+    [
+     "lib/rake/task.rb",
+     221
+    ]
+   ]
+  }
+ },
+ "s1.rake-22#0": {
+  "repo": "rake",
+  "qid": "rake-22",
+  "kind": "sym",
+  "nitems": 3,
+  "req": [
+   "S1",
+   "S2",
+   "S3"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "lib/rake/file_task.rb",
+     12
+    ]
+   ],
+   "S2": [
+    [
+     "lib/rake/multi_task.rb",
+     7
+    ]
+   ],
+   "S3": [
+    [
+     "lib/rake/file_creation_task.rb",
+     12
+    ]
+   ]
+  }
+ },
+ "s1.rake-23#0": {
+  "repo": "rake",
+  "qid": "rake-23",
+  "kind": "sym",
+  "nitems": 5,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4",
+   "S5"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "lib/rake/tasklib.rb",
+     9
+    ]
+   ],
+   "S2": [
+    [
+     "lib/rake/loaders/makefile.rb",
+     19
+    ]
+   ],
+   "S3": [
+    [
+     "lib/rake/dsl_definition.rb",
+     196
+    ]
+   ],
+   "S4": [
+    [
+     "lib/rake/testtask.rb",
+     35
+    ]
+   ],
+   "S5": [
+    [
+     "lib/rake/packagetask.rb",
+     45
+    ]
+   ]
+  }
+ },
+ "s1.rake-24#0": {
+  "repo": "rake",
+  "qid": "rake-24",
+  "kind": "sym",
+  "nitems": 1,
+  "req": [
+   "S1"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "lib/rake/task_manager.rb",
+     54
+    ],
+    [
+     "lib/rake/application.rb",
+     21
+    ]
+   ]
+  }
+ },
+ "s1.starlette-01#0": {
+  "repo": "starlette",
+  "qid": "starlette-01",
+  "kind": "item",
+  "nitems": 12,
+  "req": [
+   "R1"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "starlette/applications.py",
+     20
+    ]
+   ]
+  }
+ },
+ "s1.starlette-02#0": {
+  "repo": "starlette",
+  "qid": "starlette-02",
+  "kind": "item",
+  "nitems": 5,
+  "req": [
+   "R1",
+   "R2",
+   "R3",
+   "R4",
+   "R5"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "starlette/types.py",
+     12
+    ]
+   ],
+   "R2": [
+    [
+     "starlette/middleware/__init__.py",
+     21
+    ],
+    [
+     "starlette/applications.py",
+     104
+    ]
+   ],
+   "R3": [
+    [
+     "starlette/applications.py",
+     63
+    ]
+   ],
+   "R4": [
+    [
+     "starlette/middleware/gzip.py",
+     44
+    ]
+   ],
+   "R5": [
+    [
+     "starlette/middleware/base.py",
+     96
+    ]
+   ]
+  }
+ },
+ "s1.starlette-11#0": {
+  "repo": "starlette",
+  "qid": "starlette-11",
+  "kind": "item",
+  "nitems": 6,
+  "req": [
+   "R1",
+   "R2",
+   "R4",
+   "R5"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "starlette/routing.py",
+     111
+    ]
+   ],
+   "R2": [
+    [
+     "starlette/routing.py",
+     108
+    ]
+   ],
+   "R4": [
+    [
+     "starlette/routing.py",
+     244
+    ]
+   ],
+   "R5": [
+    [
+     "starlette/routing.py",
+     93
+    ]
+   ]
+  }
+ },
+ "s1.starlette-12#0": {
+  "repo": "starlette",
+  "qid": "starlette-12",
+  "kind": "item",
+  "nitems": 7,
+  "req": [
+   "R1",
+   "R3",
+   "R4",
+   "R5",
+   "R6",
+   "R7"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "starlette/applications.py",
+     92
+    ]
+   ],
+   "R3": [
+    [
+     "starlette/middleware/errors.py",
+     127
+    ]
+   ],
+   "R4": [
+    [
+     "starlette/middleware/exceptions.py",
+     18
+    ]
+   ],
+   "R5": [
+    [
+     "starlette/_exception_handler.py",
+     23
+    ]
+   ],
+   "R6": [
+    [
+     "starlette/routing.py",
+     47
+    ]
+   ],
+   "R7": [
+    [
+     "starlette/middleware/__init__.py",
+     21
+    ],
+    [
+     "starlette/applications.py",
+     104
+    ]
+   ]
+  }
+ },
+ "s1.starlette-13#0": {
+  "repo": "starlette",
+  "qid": "starlette-13",
+  "kind": "item",
+  "nitems": 7,
+  "req": [
+   "R1",
+   "R3",
+   "R5",
+   "R6",
+   "R7"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "starlette/requests.py",
+     313
+    ]
+   ],
+   "R3": [
+    [
+     "starlette/formparsers.py",
+     149
+    ]
+   ],
+   "R5": [
+    [
+     "starlette/datastructures.py",
+     410
+    ]
+   ],
+   "R6": [
+    [
+     "starlette/formparsers.py",
+     55
+    ]
+   ],
+   "R7": [
+    [
+     "starlette/datastructures.py",
+     482
+    ]
+   ]
+  }
+ },
+ "s1.starlette-14#0": {
+  "repo": "starlette",
+  "qid": "starlette-14",
+  "kind": "item",
+  "nitems": 7,
+  "req": [
+   "R1",
+   "R2",
+   "R3",
+   "R5",
+   "R6",
+   "R7"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "starlette/applications.py",
+     92
+    ]
+   ],
+   "R2": [
+    [
+     "starlette/middleware/errors.py",
+     149
+    ],
+    [
+     "starlette/middleware/exceptions.py",
+     47
+    ]
+   ],
+   "R3": [
+    [
+     "starlette/routing.py",
+     672
+    ]
+   ],
+   "R5": [
+    [
+     "starlette/routing.py",
+     273
+    ]
+   ],
+   "R6": [
+    [
+     "starlette/routing.py",
+     47
+    ]
+   ],
+   "R7": [
+    [
+     "starlette/responses.py",
+     166
+    ]
+   ]
+  }
+ },
+ "s1.textual-01#0": {
+  "repo": "textual",
+  "qid": "textual-01",
+  "kind": "item",
+  "nitems": 11,
+  "req": [],
+  "locs": {}
+ },
+ "s1.textual-02#0": {
+  "repo": "textual",
+  "qid": "textual-02",
+  "kind": "item",
+  "nitems": 5,
+  "req": [],
+  "locs": {}
+ },
+ "s1.textual-07#0": {
+  "repo": "textual",
+  "qid": "textual-07",
+  "kind": "sym",
+  "nitems": 178,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4",
+   "S5",
+   "S6",
+   "S7",
+   "S8",
+   "S9",
+   "S10",
+   "S11",
+   "S12",
+   "S13",
+   "S14",
+   "S15",
+   "S16",
+   "S17",
+   "S18",
+   "S19",
+   "S20",
+   "S21",
+   "S22",
+   "S23",
+   "S24",
+   "S25",
+   "S26",
+   "S27",
+   "S28",
+   "S29",
+   "S30",
+   "S31",
+   "S32",
+   "S33",
+   "S34",
+   "S35",
+   "S36",
+   "S37",
+   "S38",
+   "S39",
+   "S40",
+   "S41",
+   "S42",
+   "S43",
+   "S44",
+   "S45",
+   "S46",
+   "S47",
+   "S48",
+   "S49",
+   "S50",
+   "S51",
+   "S52",
+   "S53",
+   "S54",
+   "S55",
+   "S56",
+   "S57",
+   "S58",
+   "S59",
+   "S60",
+   "S61",
+   "S62",
+   "S63",
+   "S64",
+   "S65",
+   "S66",
+   "S67",
+   "S68",
+   "S69",
+   "S70",
+   "S71",
+   "S72",
+   "S73",
+   "S74",
+   "S75",
+   "S76",
+   "S77",
+   "S78",
+   "S79",
+   "S80",
+   "S81",
+   "S82",
+   "S83",
+   "S84",
+   "S85",
+   "S86",
+   "S87",
+   "S88",
+   "S89",
+   "S90",
+   "S91",
+   "S92",
+   "S93",
+   "S94",
+   "S95",
+   "S96",
+   "S97",
+   "S98",
+   "S99",
+   "S100",
+   "S101",
+   "S102",
+   "S103",
+   "S104",
+   "S105",
+   "S106",
+   "S107",
+   "S108",
+   "S109",
+   "S110",
+   "S111",
+   "S112",
+   "S113",
+   "S114",
+   "S115",
+   "S116",
+   "S117",
+   "S118",
+   "S119",
+   "S120",
+   "S121",
+   "S122",
+   "S123",
+   "S124",
+   "S125",
+   "S126",
+   "S127",
+   "S128",
+   "S129",
+   "S130",
+   "S131",
+   "S132",
+   "S133",
+   "S134",
+   "S135",
+   "S136",
+   "S137",
+   "S138",
+   "S139",
+   "S140",
+   "S141",
+   "S142",
+   "S143",
+   "S144",
+   "S145",
+   "S146",
+   "S147",
+   "S148",
+   "S149",
+   "S150",
+   "S151",
+   "S152",
+   "S153",
+   "S154",
+   "S155",
+   "S156",
+   "S157",
+   "S158",
+   "S159",
+   "S160",
+   "S161",
+   "S162",
+   "S163",
+   "S164",
+   "S165",
+   "S166",
+   "S167",
+   "S168",
+   "S169",
+   "S170",
+   "S171",
+   "S172",
+   "S173",
+   "S174",
+   "S175",
+   "S176",
+   "S177",
+   "S178"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "docs/examples/events/custom01.py",
+     29
+    ]
+   ],
+   "S2": [
+    [
+     "docs/examples/guide/compound/byte02.py",
+     48
+    ]
+   ],
+   "S3": [
+    [
+     "docs/examples/guide/compound/byte03.py",
+     53
+    ]
+   ],
+   "S4": [
+    [
+     "examples/color_command.py",
+     31
+    ]
+   ],
+   "S5": [
+    [
+     "src/textual/app.py",
+     1286
+    ]
+   ],
+   "S6": [
+    [
+     "src/textual/app.py",
+     2105
+    ]
+   ],
+   "S7": [
+    [
+     "src/textual/app.py",
+     2616
+    ]
+   ],
+   "S8": [
+    [
+     "src/textual/app.py",
+     2622
+    ]
+   ],
+   "S9": [
+    [
+     "src/textual/app.py",
+     2653
+    ]
+   ],
+   "S10": [
+    [
+     "src/textual/app.py",
+     2670
+    ]
+   ],
+   "S11": [
+    [
+     "src/textual/app.py",
+     2863
+    ]
+   ],
+   "S12": [
+    [
+     "src/textual/app.py",
+     2943
+    ]
+   ],
+   "S13": [
+    [
+     "src/textual/app.py",
+     2956
+    ]
+   ],
+   "S14": [
+    [
+     "src/textual/app.py",
+     3023
+    ]
+   ],
+   "S15": [
+    [
+     "src/textual/app.py",
+     3111
+    ]
+   ],
+   "S16": [
+    [
+     "src/textual/app.py",
+     3170
+    ]
+   ],
+   "S17": [
+    [
+     "src/textual/app.py",
+     3177
+    ]
+   ],
+   "S18": [
+    [
+     "src/textual/app.py",
+     3179
+    ]
+   ],
+   "S19": [
+    [
+     "src/textual/app.py",
+     3234
+    ]
+   ],
+   "S20": [
+    [
+     "src/textual/app.py",
+     3237
+    ]
+   ],
+   "S21": [
+    [
+     "src/textual/app.py",
+     3964
+    ]
+   ],
+   "S22": [
+    [
+     "src/textual/app.py",
+     4383
+    ]
+   ],
+   "S23": [
+    [
+     "src/textual/app.py",
+     4680
+    ]
+   ],
+   "S24": [
+    [
+     "src/textual/app.py",
+     5038
+    ]
+   ],
+   "S25": [
+    [
+     "src/textual/app.py",
+     5040
+    ]
+   ],
+   "S26": [
+    [
+     "src/textual/command.py",
+     815
+    ]
+   ],
+   "S27": [
+    [
+     "src/textual/command.py",
+     821
+    ]
+   ],
+   "S28": [
+    [
+     "src/textual/command.py",
+     1242
+    ]
+   ],
+   "S29": [
+    [
+     "src/textual/command.py",
+     1251
+    ]
+   ],
+   "S30": [
+    [
+     "src/textual/command.py",
+     1256
+    ]
+   ],
+   "S31": [
+    [
+     "src/textual/driver.py",
+     287
+    ]
+   ],
+   "S32": [
+    [
+     "src/textual/driver.py",
+     299
+    ]
+   ],
+   "S33": [
+    [
+     "src/textual/drivers/web_driver.py",
+     173
+    ]
+   ],
+   "S34": [
+    [
+     "src/textual/drivers/web_driver.py",
+     241
+    ]
+   ],
+   "S35": [
+    [
+     "src/textual/drivers/web_driver.py",
+     243
+    ]
+   ],
+   "S36": [
+    [
+     "src/textual/drivers/web_driver.py",
+     245
+    ]
+   ],
+   "S37": [
+    [
+     "src/textual/drivers/web_driver.py",
+     247
+    ]
+   ],
+   "S38": [
+    [
+     "src/textual/message.py",
+     158
+    ]
+   ],
+   "S39": [
+    [
+     "src/textual/message_pump.py",
+     467
+    ]
+   ],
+   "S40": [
+    [
+     "src/textual/message_pump.py",
+     505
+    ]
+   ],
+   "S41": [
+    [
+     "src/textual/message_pump.py",
+     844
+    ]
+   ],
+   "S42": [
+    [
+     "src/textual/message_pump.py",
+     858
+    ]
+   ],
+   "S43": [
+    [
+     "src/textual/pilot.py",
+     97
+    ]
+   ],
+   "S44": [
+    [
+     "src/textual/reactive.py",
+     87
+    ]
+   ],
+   "S45": [
+    [
+     "src/textual/screen.py",
+     1122
+    ]
+   ],
+   "S46": [
+    [
+     "src/textual/screen.py",
+     1130
+    ]
+   ],
+   "S47": [
+    [
+     "src/textual/screen.py",
+     1135
+    ]
+   ],
+   "S48": [
+    [
+     "src/textual/screen.py",
+     1345
+    ]
+   ],
+   "S49": [
+    [
+     "src/textual/screen.py",
+     1358
+    ]
+   ],
+   "S50": [
+    [
+     "src/textual/screen.py",
+     1375
+    ]
+   ],
+   "S51": [
+    [
+     "src/textual/screen.py",
+     1380
+    ]
+   ],
+   "S52": [
+    [
+     "src/textual/screen.py",
+     1395
+    ]
+   ],
+   "S53": [
+    [
+     "src/textual/screen.py",
+     1654
+    ]
+   ],
+   "S54": [
+    [
+     "src/textual/screen.py",
+     1826
+    ]
+   ],
+   "S55": [
+    [
+     "src/textual/screen.py",
+     1883
+    ]
+   ],
+   "S56": [
+    [
+     "src/textual/screen.py",
+     1945
+    ]
+   ],
+   "S57": [
+    [
+     "src/textual/screen.py",
+     1950
+    ]
+   ],
+   "S58": [
+    [
+     "src/textual/scrollbar.py",
+     341
+    ]
+   ],
+   "S59": [
+    [
+     "src/textual/scrollbar.py",
+     346
+    ]
+   ],
+   "S60": [
+    [
+     "src/textual/scrollbar.py",
+     394
+    ]
+   ],
+   "S61": [
+    [
+     "src/textual/suggester.py",
+     73
+    ]
+   ],
+   "S62": [
+    [
+     "src/textual/timer.py",
+     203
+    ]
+   ],
+   "S63": [
+    [
+     "src/textual/widget.py",
+     4317
+    ]
+   ],
+   "S64": [
+    [
+     "src/textual/widget.py",
+     4508
+    ]
+   ],
+   "S65": [
+    [
+     "src/textual/widget.py",
+     4520
+    ]
+   ],
+   "S66": [
+    [
+     "src/textual/widget.py",
+     4563
+    ]
+   ],
+   "S67": [
+    [
+     "src/textual/widget.py",
+     4567
+    ]
+   ],
+   "S68": [
+    [
+     "src/textual/widget.py",
+     4577
+    ]
+   ],
+   "S69": [
+    [
+     "src/textual/widget.py",
+     4769
+    ]
+   ],
+   "S70": [
+    [
+     "src/textual/widget.py",
+     4775
+    ]
+   ],
+   "S71": [
+    [
+     "src/textual/widget.py",
+     4834
+    ]
+   ],
+   "S72": [
+    [
+     "src/textual/widget.py",
+     4836
+    ]
+   ],
+   "S73": [
+    [
+     "src/textual/widget.py",
+     4840
+    ]
+   ],
+   "S74": [
+    [
+     "src/textual/widget.py",
+     4842
+    ]
+   ],
+   "S75": [
+    [
+     "src/textual/widgets/_button.py",
+     435
+    ]
+   ],
+   "S76": [
+    [
+     "src/textual/widgets/_collapsible.py",
+     76
+    ]
+   ],
+   "S77": [
+    [
+     "src/textual/widgets/_collapsible.py",
+     80
+    ]
+   ],
+   "S78": [
+    [
+     "src/textual/widgets/_collapsible.py",
+     218
+    ]
+   ],
+   "S79": [
+    [
+     "src/textual/widgets/_collapsible.py",
+     220
+    ]
+   ],
+   "S80": [
+    [
+     "src/textual/widgets/_data_table.py",
+     1272
+    ]
+   ],
+   "S81": [
+    [
+     "src/textual/widgets/_data_table.py",
+     1303
+    ]
+   ],
+   "S82": [
+    [
+     "src/textual/widgets/_data_table.py",
+     1310
+    ]
+   ],
+   "S83": [
+    [
+     "src/textual/widgets/_data_table.py",
+     2687
+    ]
+   ],
+   "S84": [
+    [
+     "src/textual/widgets/_data_table.py",
+     2693
+    ]
+   ],
+   "S85": [
+    [
+     "src/textual/widgets/_data_table.py",
+     2849
+    ]
+   ],
+   "S86": [
+    [
+     "src/textual/widgets/_data_table.py",
+     2860
+    ]
+   ],
+   "S87": [
+    [
+     "src/textual/widgets/_data_table.py",
+     2864
+    ]
+   ],
+   "S88": [
+    [
+     "src/textual/widgets/_directory_tree.py",
+     573
+    ]
+   ],
+   "S89": [
+    [
+     "src/textual/widgets/_directory_tree.py",
+     582
+    ]
+   ],
+   "S90": [
+    [
+     "src/textual/widgets/_directory_tree.py",
+     585
+    ]
+   ],
+   "S91": [
+    [
+     "src/textual/widgets/_input.py",
+     555
+    ]
+   ],
+   "S92": [
+    [
+     "src/textual/widgets/_input.py",
+     734
+    ]
+   ],
+   "S93": [
+    [
+     "src/textual/widgets/_input.py",
+     1114
+    ]
+   ],
+   "S94": [
+    [
+     "src/textual/widgets/_list_item.py",
+     30
+    ]
+   ],
+   "S95": [
+    [
+     "src/textual/widgets/_list_view.py",
+     232
+    ]
+   ],
+   "S96": [
+    [
+     "src/textual/widgets/_list_view.py",
+     234
+    ]
+   ],
+   "S97": [
+    [
+     "src/textual/widgets/_list_view.py",
+     361
+    ]
+   ],
+   "S98": [
+    [
+     "src/textual/widgets/_list_view.py",
+     392
+    ]
+   ],
+   "S99": [
+    [
+     "src/textual/widgets/_markdown.py",
+     269
+    ]
+   ],
+   "S100": [
+    [
+     "src/textual/widgets/_markdown.py",
+     614
+    ]
+   ],
+   "S101": [
+    [
+     "src/textual/widgets/_markdown.py",
+     1148
+    ]
+   ],
+   "S102": [
+    [
+     "src/textual/widgets/_markdown.py",
+     1437
+    ]
+   ],
+   "S103": [
+    [
+     "src/textual/widgets/_markdown.py",
+     1505
+    ]
+   ],
+   "S104": [
+    [
+     "src/textual/widgets/_markdown.py",
+     1680
+    ]
+   ],
+   "S105": [
+    [
+     "src/textual/widgets/_markdown.py",
+     1686
+    ]
+   ],
+   "S106": [
+    [
+     "src/textual/widgets/_markdown.py",
+     1692
+    ]
+   ],
+   "S107": [
+    [
+     "src/textual/widgets/_option_list.py",
+     935
+    ]
+   ],
+   "S108": [
+    [
+     "src/textual/widgets/_option_list.py",
+     1039
+    ]
+   ],
+   "S109": [
+    [
+     "src/textual/widgets/_radio_set.py",
+     247
+    ]
+   ],
+   "S110": [
+    [
+     "src/textual/widgets/_select.py",
+     163
+    ]
+   ],
+   "S111": [
+    [
+     "src/textual/widgets/_select.py",
+     167
+    ]
+   ],
+   "S112": [
+    [
+     "src/textual/widgets/_select.py",
+     173
+    ]
+   ],
+   "S113": [
+    [
+     "src/textual/widgets/_select.py",
+     273
+    ]
+   ],
+   "S114": [
+    [
+     "src/textual/widgets/_select.py",
+     617
+    ]
+   ],
+   "S115": [
+    [
+     "src/textual/widgets/_selection_list.py",
+     272
+    ]
+   ],
+   "S116": [
+    [
+     "src/textual/widgets/_selection_list.py",
+     283
+    ]
+   ],
+   "S117": [
+    [
+     "src/textual/widgets/_selection_list.py",
+     578
+    ]
+   ],
+   "S118": [
+    [
+     "src/textual/widgets/_switch.py",
+     181
+    ]
+   ],
+   "S119": [
+    [
+     "src/textual/widgets/_tabbed_content.py",
+     231
+    ]
+   ],
+   "S120": [
+    [
+     "src/textual/widgets/_tabbed_content.py",
+     235
+    ]
+   ],
+   "S121": [
+    [
+     "src/textual/widgets/_tabbed_content.py",
+     519
+    ]
+   ],
+   "S122": [
+    [
+     "src/textual/widgets/_tabbed_content.py",
+     563
+    ]
+   ],
+   "S123": [
+    [
+     "src/textual/widgets/_tabbed_content.py",
+     570
+    ]
+   ],
+   "S124": [
+    [
+     "src/textual/widgets/_tabs.py",
+     92
+    ]
+   ],
+   "S125": [
+    [
+     "src/textual/widgets/_tabs.py",
+     196
+    ]
+   ],
+   "S126": [
+    [
+     "src/textual/widgets/_tabs.py",
+     206
+    ]
+   ],
+   "S127": [
+    [
+     "src/textual/widgets/_tabs.py",
+     210
+    ]
+   ],
+   "S128": [
+    [
+     "src/textual/widgets/_tabs.py",
+     499
+    ]
+   ],
+   "S129": [
+    [
+     "src/textual/widgets/_tabs.py",
+     521
+    ]
+   ],
+   "S130": [
+    [
+     "src/textual/widgets/_tabs.py",
+     623
+    ]
+   ],
+   "S131": [
+    [
+     "src/textual/widgets/_tabs.py",
+     628
+    ]
+   ],
+   "S132": [
+    [
+     "src/textual/widgets/_tabs.py",
+     767
+    ]
+   ],
+   "S133": [
+    [
+     "src/textual/widgets/_tabs.py",
+     772
+    ]
+   ],
+   "S134": [
+    [
+     "src/textual/widgets/_tabs.py",
+     847
+    ]
+   ],
+   "S135": [
+    [
+     "src/textual/widgets/_tabs.py",
+     870
+    ]
+   ],
+   "S136": [
+    [
+     "src/textual/widgets/_text_area.py",
+     896
+    ]
+   ],
+   "S137": [
+    [
+     "src/textual/widgets/_text_area.py",
+     1214
+    ]
+   ],
+   "S138": [
+    [
+     "src/textual/widgets/_text_area.py",
+     1701
+    ]
+   ],
+   "S139": [
+    [
+     "src/textual/widgets/_text_area.py",
+     1766
+    ]
+   ],
+   "S140": [
+    [
+     "src/textual/widgets/_text_area.py",
+     1815
+    ]
+   ],
+   "S141": [
+    [
+     "src/textual/widgets/_toggle_button.py",
+     285
+    ]
+   ],
+   "S142": [
+    [
+     "src/textual/widgets/_tree.py",
+     257
+    ]
+   ],
+   "S143": [
+    [
+     "src/textual/widgets/_tree.py",
+     290
+    ]
+   ],
+   "S144": [
+    [
+     "src/textual/widgets/_tree.py",
+     1005
+    ]
+   ],
+   "S145": [
+    [
+     "src/textual/widgets/_tree.py",
+     1172
+    ]
+   ],
+   "S146": [
+    [
+     "src/textual/widgets/_tree.py",
+     1540
+    ]
+   ],
+   "S147": [
+    [
+     "src/textual/worker.py",
+     183
+    ]
+   ],
+   "S148": [
+    [
+     "src/textual/worker.py",
+     208
+    ]
+   ],
+   "S149": [
+    [
+     "tests/input/test_select_on_focus.py",
+     26
+    ]
+   ],
+   "S150": [
+    [
+     "tests/input/test_select_on_focus.py",
+     28
+    ]
+   ],
+   "S151": [
+    [
+     "tests/snapshot_tests/snapshot_apps/app_blur.py",
+     29
+    ]
+   ],
+   "S152": [
+    [
+     "tests/snapshot_tests/test_snapshots.py",
+     2099
+    ]
+   ],
+   "S153": [
+    [
+     "tests/test_app.py",
+     246
+    ]
+   ],
+   "S154": [
+    [
+     "tests/test_app.py",
+     247
+    ]
+   ],
+   "S155": [
+    [
+     "tests/test_app_focus_blur.py",
+     22
+    ]
+   ],
+   "S156": [
+    [
+     "tests/test_app_focus_blur.py",
+     32
+    ]
+   ],
+   "S157": [
+    [
+     "tests/test_app_focus_blur.py",
+     35
+    ]
+   ],
+   "S158": [
+    [
+     "tests/test_app_focus_blur.py",
+     45
+    ]
+   ],
+   "S159": [
+    [
+     "tests/test_app_focus_blur.py",
+     48
+    ]
+   ],
+   "S160": [
+    [
+     "tests/test_app_focus_blur.py",
+     58
+    ]
+   ],
+   "S161": [
+    [
+     "tests/test_app_focus_blur.py",
+     62
+    ]
+   ],
+   "S162": [
+    [
+     "tests/test_app_focus_blur.py",
+     72
+    ]
+   ],
+   "S163": [
+    [
+     "tests/test_app_focus_blur.py",
+     77
+    ]
+   ],
+   "S164": [
+    [
+     "tests/test_message_handling.py",
+     17
+    ]
+   ],
+   "S165": [
+    [
+     "tests/test_message_pump.py",
+     87
+    ]
+   ],
+   "S166": [
+    [
+     "tests/test_message_pump.py",
+     89
+    ]
+   ],
+   "S167": [
+    [
+     "tests/test_message_pump.py",
+     184
+    ]
+   ],
+   "S168": [
+    [
+     "tests/test_on.py",
+     166
+    ]
+   ],
+   "S169": [
+    [
+     "tests/test_on.py",
+     169
+    ]
+   ],
+   "S170": [
+    [
+     "tests/test_on.py",
+     325
+    ]
+   ],
+   "S171": [
+    [
+     "tests/test_on.py",
+     328
+    ]
+   ],
+   "S172": [
+    [
+     "tests/test_paste.py",
+     15
+    ]
+   ],
+   "S173": [
+    [
+     "tests/test_paste.py",
+     37
+    ]
+   ],
+   "S174": [
+    [
+     "tests/test_reactive.py",
+     740
+    ]
+   ],
+   "S175": [
+    [
+     "tests/text_area/test_edit_via_bindings.py",
+     569
+    ]
+   ],
+   "S176": [
+    [
+     "tests/text_area/test_edit_via_bindings.py",
+     587
+    ]
+   ],
+   "S177": [
+    [
+     "tests/text_area/test_history.py",
+     266
+    ]
+   ],
+   "S178": [
+    [
+     "tests/text_area/test_history.py",
+     267
+    ]
+   ]
+  }
+ },
+ "s1.textual-10#0": {
+  "repo": "textual",
+  "qid": "textual-10",
+  "kind": null,
+  "nitems": 0,
+  "req": [],
+  "locs": {}
+ },
+ "s1.textual-11#0": {
+  "repo": "textual",
+  "qid": "textual-11",
+  "kind": "item",
+  "nitems": 7,
+  "req": [
+   "R5",
+   "R7"
+  ],
+  "locs": {
+   "R5": [
+    [
+     "src/textual/message.py",
+     44
+    ]
+   ],
+   "R7": [
+    [
+     "src/textual/message.py",
+     151
+    ]
+   ]
+  }
+ },
+ "s1.textual-12#0": {
+  "repo": "textual",
+  "qid": "textual-12",
+  "kind": "item",
+  "nitems": 7,
+  "req": [],
+  "locs": {}
+ },
+ "s1.textual-13#0": {
+  "repo": "textual",
+  "qid": "textual-13",
+  "kind": "item",
+  "nitems": 7,
+  "req": [
+   "R1",
+   "R2",
+   "R3",
+   "R7"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "src/textual/css/tokenize.py",
+     307
+    ]
+   ],
+   "R2": [
+    [
+     "src/textual/css/parse.py",
+     452
+    ]
+   ],
+   "R3": [
+    [
+     "src/textual/css/stylesheet.py",
+     142
+    ]
+   ],
+   "R7": [
+    [
+     "src/textual/app.py",
+     2504
+    ]
+   ]
+  }
+ },
+ "s1.textual-14#0": {
+  "repo": "textual",
+  "qid": "textual-14",
+  "kind": "item",
+  "nitems": 6,
+  "req": [
+   "R3",
+   "R4",
+   "R5"
+  ],
+  "locs": {
+   "R3": [
+    [
+     "src/textual/_compositor.py",
+     365
+    ]
+   ],
+   "R4": [
+    [
+     "src/textual/_compositor.py",
+     1248
+    ]
+   ],
+   "R5": [
+    [
+     "src/textual/_compositor.py",
+     1096
+    ]
+   ]
+  }
+ },
+ "s1.textual-17#0": {
+  "repo": "textual",
+  "qid": "textual-17",
+  "kind": null,
+  "nitems": 0,
+  "req": [],
+  "locs": {}
+ },
+ "s1.textual-18#0": {
+  "repo": "textual",
+  "qid": "textual-18",
+  "kind": "sym",
+  "nitems": 7,
+  "req": [],
+  "locs": {}
+ },
+ "s1.textual-19#0": {
+  "repo": "textual",
+  "qid": "textual-19",
+  "kind": "sym",
+  "nitems": 40,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4",
+   "S5",
+   "S6",
+   "S7",
+   "S8",
+   "S9",
+   "S10",
+   "S11",
+   "S12",
+   "S13",
+   "S14",
+   "S15",
+   "S16",
+   "S17",
+   "S18",
+   "S19",
+   "S20",
+   "S21",
+   "S22",
+   "S23",
+   "S24",
+   "S25",
+   "S26",
+   "S27",
+   "S28",
+   "S29",
+   "S30",
+   "S31",
+   "S32",
+   "S33",
+   "S34",
+   "S35",
+   "S36",
+   "S37",
+   "S38",
+   "S39",
+   "S40"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "docs/examples/guide/reactivity/recompose01.py",
+     27
+    ]
+   ],
+   "S2": [
+    [
+     "docs/examples/guide/reactivity/recompose02.py",
+     24
+    ]
+   ],
+   "S3": [
+    [
+     "docs/examples/guide/reactivity/world_clock01.py",
+     47
+    ]
+   ],
+   "S4": [
+    [
+     "docs/examples/guide/reactivity/world_clock02.py",
+     43
+    ]
+   ],
+   "S5": [
+    [
+     "docs/examples/guide/reactivity/world_clock03.py",
+     45
+    ]
+   ],
+   "S6": [
+    [
+     "docs/examples/guide/structure.py",
+     17
+    ]
+   ],
+   "S7": [
+    [
+     "docs/examples/how-to/inline01.py",
+     22
+    ]
+   ],
+   "S8": [
+    [
+     "docs/examples/how-to/inline02.py",
+     29
+    ]
+   ],
+   "S9": [
+    [
+     "docs/examples/tutorial/stopwatch.py",
+     18
+    ]
+   ],
+   "S10": [
+    [
+     "docs/examples/tutorial/stopwatch05.py",
+     17
+    ]
+   ],
+   "S11": [
+    [
+     "docs/examples/tutorial/stopwatch06.py",
+     18
+    ]
+   ],
+   "S12": [
+    [
+     "docs/examples/widgets/clock.py",
+     22
+    ]
+   ],
+   "S13": [
+    [
+     "docs/examples/widgets/progress_bar_isolated.py",
+     21
+    ]
+   ],
+   "S14": [
+    [
+     "docs/examples/widgets/progress_bar_isolated_.py",
+     23
+    ]
+   ],
+   "S15": [
+    [
+     "docs/examples/widgets/progress_bar_styled.py",
+     22
+    ]
+   ],
+   "S16": [
+    [
+     "docs/examples/widgets/progress_bar_styled_.py",
+     24
+    ]
+   ],
+   "S17": [
+    [
+     "examples/clock.py",
+     22
+    ]
+   ],
+   "S18": [
+    [
+     "examples/merlin.py",
+     91
+    ]
+   ],
+   "S19": [
+    [
+     "src/textual/app.py",
+     3416
+    ]
+   ],
+   "S20": [
+    [
+     "src/textual/demo/game.py",
+     403
+    ]
+   ],
+   "S21": [
+    [
+     "src/textual/demo/widgets.py",
+     369
+    ]
+   ],
+   "S22": [
+    [
+     "src/textual/demo/widgets.py",
+     370
+    ]
+   ],
+   "S23": [
+    [
+     "src/textual/demo/widgets.py",
+     568
+    ]
+   ],
+   "S24": [
+    [
+     "src/textual/dom.py",
+     472
+    ]
+   ],
+   "S25": [
+    [
+     "src/textual/renderables/gradient.py",
+     167
+    ]
+   ],
+   "S26": [
+    [
+     "src/textual/screen.py",
+     1745
+    ]
+   ],
+   "S27": [
+    [
+     "src/textual/screen.py",
+     354
+    ]
+   ],
+   "S28": [
+    [
+     "src/textual/widgets/_header.py",
+     92
+    ]
+   ],
+   "S29": [
+    [
+     "src/textual/widgets/_input.py",
+     723
+    ]
+   ],
+   "S30": [
+    [
+     "src/textual/widgets/_progress_bar.py",
+     289
+    ]
+   ],
+   "S31": [
+    [
+     "src/textual/widgets/_text_area.py",
+     1915
+    ]
+   ],
+   "S32": [
+    [
+     "tests/test_win_sleep.py",
+     29
+    ]
+   ],
+   "S33": [
+    [
+     "README.md",
+     45
+    ]
+   ],
+   "S34": [
+    [
+     "docs/blog/posts/spinners-and-pbs-in-textual.md",
+     112
+    ]
+   ],
+   "S35": [
+    [
+     "docs/blog/posts/spinners-and-pbs-in-textual.md",
+     174
+    ]
+   ],
+   "S36": [
+    [
+     "docs/blog/posts/spinners-and-pbs-in-textual.md",
+     236
+    ]
+   ],
+   "S37": [
+    [
+     "docs/blog/posts/spinners-and-pbs-in-textual.md",
+     281
+    ]
+   ],
+   "S38": [
+    [
+     "docs/blog/posts/spinners-and-pbs-in-textual.md",
+     330
+    ]
+   ],
+   "S39": [
+    [
+     "docs/blog/posts/spinners-and-pbs-in-textual.md",
+     484
+    ]
+   ],
+   "S40": [
+    [
+     "docs/tutorial.md",
+     409
+    ]
+   ]
+  }
+ },
+ "s1.textual-20#0": {
+  "repo": "textual",
+  "qid": "textual-20",
+  "kind": null,
+  "nitems": 0,
+  "req": [],
+  "locs": {}
+ },
+ "s1.tmux-01#0": {
+  "repo": "tmux",
+  "qid": "tmux-01",
+  "kind": "item",
+  "nitems": 12,
+  "req": [
+   "R1"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "tmux.c",
+     435
+    ],
+    [
+     "client.c",
+     232
+    ],
+    [
+     "server.c",
+     177
+    ]
+   ]
+  }
+ },
+ "s1.tmux-02#0": {
+  "repo": "tmux",
+  "qid": "tmux-02",
+  "kind": "item",
+  "nitems": 6,
+  "req": [
+   "R2",
+   "R3",
+   "R4",
+   "R5"
+  ],
+  "locs": {
+   "R2": [
+    [
+     "window-copy.c",
+     179
+    ],
+    [
+     "window-copy.c",
+     192
+    ]
+   ],
+   "R3": [
+    [
+     "cmd-copy-mode.c",
+     57
+    ]
+   ],
+   "R4": [
+    [
+     "window.c",
+     1743
+    ],
+    [
+     "cmd-copy-mode.c",
+     94
+    ],
+    [
+     "window-copy.c",
+     601
+    ]
+   ],
+   "R5": [
+    [
+     "window-copy.c",
+     3893
+    ]
+   ]
+  }
+ },
+ "s1.tmux-06#0": {
+  "repo": "tmux",
+  "qid": "tmux-06",
+  "kind": "sym",
+  "nitems": 12,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4",
+   "S5",
+   "S6",
+   "S7",
+   "S8",
+   "S9",
+   "S10",
+   "S11",
+   "S12"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "cmd-refresh-client.c",
+     233
+    ]
+   ],
+   "S2": [
+    [
+     "cmd-refresh-client.c",
+     280
+    ]
+   ],
+   "S3": [
+    [
+     "cmd-select-pane.c",
+     72
+    ]
+   ],
+   "S4": [
+    [
+     "options.c",
+     1375
+    ]
+   ],
+   "S5": [
+    [
+     "options.c",
+     1474
+    ]
+   ],
+   "S6": [
+    [
+     "server-client.c",
+     359
+    ]
+   ],
+   "S7": [
+    [
+     "server-client.c",
+     2573
+    ]
+   ],
+   "S8": [
+    [
+     "server-client.c",
+     2602
+    ]
+   ],
+   "S9": [
+    [
+     "server-client.c",
+     3152
+    ]
+   ],
+   "S10": [
+    [
+     "server-fn.c",
+     77
+    ]
+   ],
+   "S11": [
+    [
+     "server-fn.c",
+     127
+    ]
+   ],
+   "S12": [
+    [
+     "tty.c",
+     568
+    ]
+   ]
+  }
+ },
+ "s1.tmux-07#0": {
+  "repo": "tmux",
+  "qid": "tmux-07",
+  "kind": "sym",
+  "nitems": 147,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4",
+   "S5",
+   "S6",
+   "S7",
+   "S8",
+   "S9",
+   "S10",
+   "S11",
+   "S12",
+   "S13",
+   "S14",
+   "S15",
+   "S16",
+   "S17",
+   "S18",
+   "S19",
+   "S20",
+   "S21",
+   "S22",
+   "S23",
+   "S24",
+   "S25",
+   "S26",
+   "S27",
+   "S28",
+   "S29",
+   "S30",
+   "S31",
+   "S32",
+   "S33",
+   "S34",
+   "S35",
+   "S36",
+   "S37",
+   "S38",
+   "S39",
+   "S40",
+   "S41",
+   "S42",
+   "S43",
+   "S44",
+   "S45",
+   "S46",
+   "S47",
+   "S48",
+   "S49",
+   "S50",
+   "S51",
+   "S52",
+   "S53",
+   "S54",
+   "S55",
+   "S56",
+   "S57",
+   "S58",
+   "S59",
+   "S60",
+   "S61",
+   "S62",
+   "S63",
+   "S64",
+   "S65",
+   "S66",
+   "S67",
+   "S68",
+   "S69",
+   "S70",
+   "S71",
+   "S72",
+   "S73",
+   "S74",
+   "S75",
+   "S76",
+   "S77",
+   "S78",
+   "S79",
+   "S80",
+   "S81",
+   "S82",
+   "S83",
+   "S84",
+   "S85",
+   "S86",
+   "S87",
+   "S88",
+   "S89",
+   "S90",
+   "S91",
+   "S92",
+   "S93",
+   "S94",
+   "S95",
+   "S96",
+   "S97",
+   "S98",
+   "S99",
+   "S100",
+   "S101",
+   "S102",
+   "S103",
+   "S104",
+   "S105",
+   "S106",
+   "S107",
+   "S108",
+   "S109",
+   "S110",
+   "S111",
+   "S112",
+   "S113",
+   "S114",
+   "S115",
+   "S116",
+   "S117",
+   "S118",
+   "S119",
+   "S120",
+   "S121",
+   "S122",
+   "S123",
+   "S124",
+   "S125",
+   "S126",
+   "S127",
+   "S128",
+   "S129",
+   "S130",
+   "S131",
+   "S132",
+   "S133",
+   "S134",
+   "S135",
+   "S136",
+   "S137",
+   "S138",
+   "S139",
+   "S140",
+   "S141",
+   "S142",
+   "S143",
+   "S144",
+   "S145",
+   "S146",
+   "S147"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "alerts.c",
+     81
+    ]
+   ],
+   "S2": [
+    [
+     "alerts.c",
+     115
+    ]
+   ],
+   "S3": [
+    [
+     "alerts.c",
+     119
+    ]
+   ],
+   "S4": [
+    [
+     "alerts.c",
+     123
+    ]
+   ],
+   "S5": [
+    [
+     "alerts.c",
+     150
+    ]
+   ],
+   "S6": [
+    [
+     "alerts.c",
+     190
+    ]
+   ],
+   "S7": [
+    [
+     "alerts.c",
+     228
+    ]
+   ],
+   "S8": [
+    [
+     "alerts.c",
+     264
+    ]
+   ],
+   "S9": [
+    [
+     "alerts.c",
+     308
+    ]
+   ],
+   "S10": [
+    [
+     "cmd-break-pane.c",
+     178
+    ]
+   ],
+   "S11": [
+    [
+     "cmd-display-menu.c",
+     138
+    ]
+   ],
+   "S12": [
+    [
+     "cmd-display-menu.c",
+     348
+    ]
+   ],
+   "S13": [
+    [
+     "cmd-list-keys.c",
+     63
+    ]
+   ],
+   "S14": [
+    [
+     "cmd-move-window.c",
+     116
+    ]
+   ],
+   "S15": [
+    [
+     "cmd-new-session.c",
+     253
+    ]
+   ],
+   "S16": [
+    [
+     "cmd-send-keys.c",
+     223
+    ]
+   ],
+   "S17": [
+    [
+     "cmd-send-keys.c",
+     225
+    ]
+   ],
+   "S18": [
+    [
+     "format.c",
+     2670
+    ]
+   ],
+   "S19": [
+    [
+     "format.c",
+     3221
+    ]
+   ],
+   "S20": [
+    [
+     "format.c",
+     3423
+    ]
+   ],
+   "S21": [
+    [
+     "input-keys.c",
+     467
+    ]
+   ],
+   "S22": [
+    [
+     "input-keys.c",
+     593
+    ]
+   ],
+   "S23": [
+    [
+     "input.c",
+     1535
+    ]
+   ],
+   "S24": [
+    [
+     "input.c",
+     1555
+    ]
+   ],
+   "S25": [
+    [
+     "input.c",
+     1673
+    ]
+   ],
+   "S26": [
+    [
+     "input.c",
+     2596
+    ]
+   ],
+   "S27": [
+    [
+     "input.c",
+     2671
+    ]
+   ],
+   "S28": [
+    [
+     "input.c",
+     2724
+    ]
+   ],
+   "S29": [
+    [
+     "input.c",
+     2802
+    ]
+   ],
+   "S30": [
+    [
+     "input.c",
+     2833
+    ]
+   ],
+   "S31": [
+    [
+     "input.c",
+     2845
+    ]
+   ],
+   "S32": [
+    [
+     "input.c",
+     3347
+    ]
+   ],
+   "S33": [
+    [
+     "input.c",
+     3377
+    ]
+   ],
+   "S34": [
+    [
+     "input.c",
+     3643
+    ]
+   ],
+   "S35": [
+    [
+     "layout-set.c",
+     631
+    ]
+   ],
+   "S36": [
+    [
+     "menu.c",
+     614
+    ]
+   ],
+   "S37": [
+    [
+     "mode-tree.c",
+     1157
+    ]
+   ],
+   "S38": [
+    [
+     "mode-tree.c",
+     1415
+    ]
+   ],
+   "S39": [
+    [
+     "names.c",
+     63
+    ]
+   ],
+   "S40": [
+    [
+     "options.c",
+     1221
+    ]
+   ],
+   "S41": [
+    [
+     "options.c",
+     1264
+    ]
+   ],
+   "S42": [
+    [
+     "options.c",
+     1383
+    ]
+   ],
+   "S43": [
+    [
+     "options.c",
+     1441
+    ]
+   ],
+   "S44": [
+    [
+     "options.c",
+     1443
+    ]
+   ],
+   "S45": [
+    [
+     "options.c",
+     1463
+    ]
+   ],
+   "S46": [
+    [
+     "paste.c",
+     180
+    ]
+   ],
+   "S47": [
+    [
+     "prompt-history.c",
+     186
+    ]
+   ],
+   "S48": [
+    [
+     "prompt.c",
+     146
+    ]
+   ],
+   "S49": [
+    [
+     "prompt.c",
+     148
+    ]
+   ],
+   "S50": [
+    [
+     "prompt.c",
+     155
+    ]
+   ],
+   "S51": [
+    [
+     "resize.c",
+     291
+    ]
+   ],
+   "S52": [
+    [
+     "resize.c",
+     377
+    ]
+   ],
+   "S53": [
+    [
+     "resize.c",
+     378
+    ]
+   ],
+   "S54": [
+    [
+     "screen-redraw.c",
+     302
+    ]
+   ],
+   "S55": [
+    [
+     "screen-redraw.c",
+     1144
+    ]
+   ],
+   "S56": [
+    [
+     "screen-redraw.c",
+     1598
+    ]
+   ],
+   "S57": [
+    [
+     "screen-write.c",
+     438
+    ]
+   ],
+   "S58": [
+    [
+     "screen-write.c",
+     2066
+    ]
+   ],
+   "S59": [
+    [
+     "screen-write.c",
+     2218
+    ]
+   ],
+   "S60": [
+    [
+     "screen-write.c",
+     3000
+    ]
+   ],
+   "S61": [
+    [
+     "screen-write.c",
+     3272
+    ]
+   ],
+   "S62": [
+    [
+     "screen-write.c",
+     3304
+    ]
+   ],
+   "S63": [
+    [
+     "screen.c",
+     119
+    ]
+   ],
+   "S64": [
+    [
+     "screen.c",
+     214
+    ]
+   ],
+   "S65": [
+    [
+     "server-client.c",
+     1062
+    ]
+   ],
+   "S66": [
+    [
+     "server-client.c",
+     1154
+    ]
+   ],
+   "S67": [
+    [
+     "server-client.c",
+     1218
+    ]
+   ],
+   "S68": [
+    [
+     "server-client.c",
+     1253
+    ]
+   ],
+   "S69": [
+    [
+     "server-client.c",
+     1268
+    ]
+   ],
+   "S70": [
+    [
+     "server-client.c",
+     1272
+    ]
+   ],
+   "S71": [
+    [
+     "server-client.c",
+     1290
+    ]
+   ],
+   "S72": [
+    [
+     "server-client.c",
+     1368
+    ]
+   ],
+   "S73": [
+    [
+     "server-client.c",
+     1413
+    ]
+   ],
+   "S74": [
+    [
+     "server-client.c",
+     1414
+    ]
+   ],
+   "S75": [
+    [
+     "server-client.c",
+     1440
+    ]
+   ],
+   "S76": [
+    [
+     "server-client.c",
+     2143
+    ]
+   ],
+   "S77": [
+    [
+     "server-client.c",
+     2151
+    ]
+   ],
+   "S78": [
+    [
+     "server-client.c",
+     2437
+    ]
+   ],
+   "S79": [
+    [
+     "server-fn.c",
+     270
+    ]
+   ],
+   "S80": [
+    [
+     "server-fn.c",
+     330
+    ]
+   ],
+   "S81": [
+    [
+     "server-fn.c",
+     384
+    ]
+   ],
+   "S82": [
+    [
+     "server-fn.c",
+     493
+    ]
+   ],
+   "S83": [
+    [
+     "server-fn.c",
+     542
+    ]
+   ],
+   "S84": [
+    [
+     "server.c",
+     285
+    ]
+   ],
+   "S85": [
+    [
+     "server.c",
+     288
+    ]
+   ],
+   "S86": [
+    [
+     "server.c",
+     559
+    ]
+   ],
+   "S87": [
+    [
+     "session.c",
+     269
+    ]
+   ],
+   "S88": [
+    [
+     "session.c",
+     516
+    ]
+   ],
+   "S89": [
+    [
+     "session.c",
+     754
+    ]
+   ],
+   "S90": [
+    [
+     "session.c",
+     832
+    ]
+   ],
+   "S91": [
+    [
+     "spawn.c",
+     187
+    ]
+   ],
+   "S92": [
+    [
+     "spawn.c",
+     311
+    ]
+   ],
+   "S93": [
+    [
+     "spawn.c",
+     528
+    ]
+   ],
+   "S94": [
+    [
+     "status.c",
+     53
+    ]
+   ],
+   "S95": [
+    [
+     "status.c",
+     71
+    ]
+   ],
+   "S96": [
+    [
+     "status.c",
+     89
+    ]
+   ],
+   "S97": [
+    [
+     "status.c",
+     92
+    ]
+   ],
+   "S98": [
+    [
+     "status.c",
+     120
+    ]
+   ],
+   "S99": [
+    [
+     "status.c",
+     134
+    ]
+   ],
+   "S100": [
+    [
+     "status.c",
+     249
+    ]
+   ],
+   "S101": [
+    [
+     "status.c",
+     252
+    ]
+   ],
+   "S102": [
+    [
+     "status.c",
+     369
+    ]
+   ],
+   "S103": [
+    [
+     "status.c",
+     645
+    ]
+   ],
+   "S104": [
+    [
+     "tty-keys.c",
+     993
+    ]
+   ],
+   "S105": [
+    [
+     "tty.c",
+     356
+    ]
+   ],
+   "S106": [
+    [
+     "tty.c",
+     486
+    ]
+   ],
+   "S107": [
+    [
+     "tty.c",
+     511
+    ]
+   ],
+   "S108": [
+    [
+     "tty.c",
+     558
+    ]
+   ],
+   "S109": [
+    [
+     "tty.c",
+     560
+    ]
+   ],
+   "S110": [
+    [
+     "window-clock.c",
+     243
+    ]
+   ],
+   "S111": [
+    [
+     "window-copy.c",
+     592
+    ]
+   ],
+   "S112": [
+    [
+     "window-copy.c",
+     1250
+    ]
+   ],
+   "S113": [
+    [
+     "window-copy.c",
+     3954
+    ]
+   ],
+   "S114": [
+    [
+     "window-copy.c",
+     4709
+    ]
+   ],
+   "S115": [
+    [
+     "window-copy.c",
+     4712
+    ]
+   ],
+   "S116": [
+    [
+     "window-copy.c",
+     5173
+    ]
+   ],
+   "S117": [
+    [
+     "window-copy.c",
+     5257
+    ]
+   ],
+   "S118": [
+    [
+     "window-copy.c",
+     5375
+    ]
+   ],
+   "S119": [
+    [
+     "window-copy.c",
+     6033
+    ]
+   ],
+   "S120": [
+    [
+     "window-copy.c",
+     6104
+    ]
+   ],
+   "S121": [
+    [
+     "window-copy.c",
+     6196
+    ]
+   ],
+   "S122": [
+    [
+     "window-copy.c",
+     6322
+    ]
+   ],
+   "S123": [
+    [
+     "window-copy.c",
+     6479
+    ]
+   ],
+   "S124": [
+    [
+     "window-copy.c",
+     6508
+    ]
+   ],
+   "S125": [
+    [
+     "window-copy.c",
+     6588
+    ]
+   ],
+   "S126": [
+    [
+     "window-copy.c",
+     6719
+    ]
+   ],
+   "S127": [
+    [
+     "window-copy.c",
+     6770
+    ]
+   ],
+   "S128": [
+    [
+     "window-copy.c",
+     6800
+    ]
+   ],
+   "S129": [
+    [
+     "window-copy.c",
+     6845
+    ]
+   ],
+   "S130": [
+    [
+     "window-customize.c",
+     1378
+    ]
+   ],
+   "S131": [
+    [
+     "window-customize.c",
+     2204
+    ]
+   ],
+   "S132": [
+    [
+     "window-customize.c",
+     2207
+    ]
+   ],
+   "S133": [
+    [
+     "window-panes.c",
+     911
+    ]
+   ],
+   "S134": [
+    [
+     "window.c",
+     439
+    ]
+   ],
+   "S135": [
+    [
+     "window.c",
+     440
+    ]
+   ],
+   "S136": [
+    [
+     "window.c",
+     775
+    ]
+   ],
+   "S137": [
+    [
+     "window.c",
+     1242
+    ]
+   ],
+   "S138": [
+    [
+     "window.c",
+     1280
+    ]
+   ],
+   "S139": [
+    [
+     "window.c",
+     2028
+    ]
+   ],
+   "S140": [
+    [
+     "window.c",
+     2046
+    ]
+   ],
+   "S141": [
+    [
+     "window.c",
+     2066
+    ]
+   ],
+   "S142": [
+    [
+     "window.c",
+     2102
+    ]
+   ],
+   "S143": [
+    [
+     "window.c",
+     2658
+    ]
+   ],
+   "S144": [
+    [
+     "window.c",
+     2901
+    ]
+   ],
+   "S145": [
+    [
+     "window.c",
+     2913
+    ]
+   ],
+   "S146": [
+    [
+     "window.c",
+     2921
+    ]
+   ],
+   "S147": [
+    [
+     "window.c",
+     2945
+    ]
+   ]
+  }
+ },
+ "s1.tmux-09#0": {
+  "repo": "tmux",
+  "qid": "tmux-09",
+  "kind": "sym",
+  "nitems": 69,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4",
+   "S5",
+   "S6",
+   "S7",
+   "S8",
+   "S9",
+   "S10",
+   "S11",
+   "S12",
+   "S13",
+   "S14",
+   "S15",
+   "S16",
+   "S17",
+   "S18",
+   "S19",
+   "S20",
+   "S21",
+   "S22",
+   "S23",
+   "S24",
+   "S25",
+   "S26",
+   "S27",
+   "S28",
+   "S29",
+   "S30",
+   "S31",
+   "S32",
+   "S33",
+   "S34",
+   "S35",
+   "S36",
+   "S37",
+   "S38",
+   "S39",
+   "S40",
+   "S41",
+   "S42",
+   "S43",
+   "S44",
+   "S45",
+   "S46",
+   "S47",
+   "S48",
+   "S49",
+   "S50",
+   "S51",
+   "S52",
+   "S53",
+   "S54",
+   "S55",
+   "S56",
+   "S57",
+   "S58",
+   "S59",
+   "S60",
+   "S61",
+   "S62",
+   "S63",
+   "S64",
+   "S65",
+   "S66",
+   "S67",
+   "S68",
+   "S69"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "grid.c",
+     691
+    ]
+   ],
+   "S2": [
+    [
+     "grid.c",
+     1405
+    ]
+   ],
+   "S3": [
+    [
+     "grid.c",
+     1416
+    ]
+   ],
+   "S4": [
+    [
+     "grid.c",
+     1502
+    ]
+   ],
+   "S5": [
+    [
+     "grid-view.c",
+     45
+    ]
+   ],
+   "S6": [
+    [
+     "grid-view.c",
+     52
+    ]
+   ],
+   "S7": [
+    [
+     "grid.c",
+     1523
+    ]
+   ],
+   "S8": [
+    [
+     "grid.c",
+     1593
+    ]
+   ],
+   "S9": [
+    [
+     "grid.c",
+     1584
+    ]
+   ],
+   "S10": [
+    [
+     "screen-write.c",
+     710
+    ]
+   ],
+   "S11": [
+    [
+     "screen-write.c",
+     1458
+    ]
+   ],
+   "S12": [
+    [
+     "screen-write.c",
+     2636
+    ]
+   ],
+   "S13": [
+    [
+     "screen-write.c",
+     2892
+    ]
+   ],
+   "S14": [
+    [
+     "screen-write.c",
+     2896
+    ]
+   ],
+   "S15": [
+    [
+     "screen-write.c",
+     2898
+    ]
+   ],
+   "S16": [
+    [
+     "screen-write.c",
+     3069
+    ]
+   ],
+   "S17": [
+    [
+     "image-sixel.c",
+     673
+    ]
+   ],
+   "S18": [
+    [
+     "image-sixel.c",
+     679
+    ]
+   ],
+   "S19": [
+    [
+     "screen-write.c",
+     2858
+    ]
+   ],
+   "S20": [
+    [
+     "screen-write.c",
+     3071
+    ]
+   ],
+   "S21": [
+    [
+     "screen.c",
+     675
+    ]
+   ],
+   "S22": [
+    [
+     "screen-write.c",
+     992
+    ]
+   ],
+   "S23": [
+    [
+     "format-draw.c",
+     119
+    ]
+   ],
+   "S24": [
+    [
+     "format-draw.c",
+     150
+    ]
+   ],
+   "S25": [
+    [
+     "format-draw.c",
+     158
+    ]
+   ],
+   "S26": [
+    [
+     "format-draw.c",
+     269
+    ]
+   ],
+   "S27": [
+    [
+     "format-draw.c",
+     372
+    ]
+   ],
+   "S28": [
+    [
+     "format-draw.c",
+     480
+    ]
+   ],
+   "S29": [
+    [
+     "window-panes.c",
+     119
+    ]
+   ],
+   "S30": [
+    [
+     "window-panes.c",
+     823
+    ]
+   ],
+   "S31": [
+    [
+     "status.c",
+     511
+    ]
+   ],
+   "S32": [
+    [
+     "status.c",
+     679
+    ]
+   ],
+   "S33": [
+    [
+     "window-client.c",
+     356
+    ]
+   ],
+   "S34": [
+    [
+     "input.c",
+     1438
+    ]
+   ],
+   "S35": [
+    [
+     "screen-write.c",
+     2692
+    ]
+   ],
+   "S36": [
+    [
+     "screen-write.c",
+     2701
+    ]
+   ],
+   "S37": [
+    [
+     "screen-write.c",
+     2725
+    ]
+   ],
+   "S38": [
+    [
+     "screen-write.c",
+     3142
+    ]
+   ],
+   "S39": [
+    [
+     "screen-write.c",
+     3147
+    ]
+   ],
+   "S40": [
+    [
+     "screen-write.c",
+     3165
+    ]
+   ],
+   "S41": [
+    [
+     "window-switch.c",
+     319
+    ]
+   ],
+   "S42": [
+    [
+     "window-border.c",
+     219
+    ]
+   ],
+   "S43": [
+    [
+     "screen-write.c",
+     455
+    ]
+   ],
+   "S44": [
+    [
+     "screen-write.c",
+     556
+    ]
+   ],
+   "S45": [
+    [
+     "screen-write.c",
+     648
+    ]
+   ],
+   "S46": [
+    [
+     "screen-write.c",
+     786
+    ]
+   ],
+   "S47": [
+    [
+     "screen-write.c",
+     790
+    ]
+   ],
+   "S48": [
+    [
+     "screen-write.c",
+     796
+    ]
+   ],
+   "S49": [
+    [
+     "screen-write.c",
+     908
+    ]
+   ],
+   "S50": [
+    [
+     "screen-write.c",
+     911
+    ]
+   ],
+   "S51": [
+    [
+     "screen-write.c",
+     913
+    ]
+   ],
+   "S52": [
+    [
+     "screen-write.c",
+     918
+    ]
+   ],
+   "S53": [
+    [
+     "screen-write.c",
+     921
+    ]
+   ],
+   "S54": [
+    [
+     "screen-write.c",
+     923
+    ]
+   ],
+   "S55": [
+    [
+     "screen-write.c",
+     930
+    ]
+   ],
+   "S56": [
+    [
+     "screen-write.c",
+     933
+    ]
+   ],
+   "S57": [
+    [
+     "screen-write.c",
+     999
+    ]
+   ],
+   "S58": [
+    [
+     "screen-write.c",
+     2765
+    ]
+   ],
+   "S59": [
+    [
+     "screen-write.c",
+     3088
+    ]
+   ],
+   "S60": [
+    [
+     "format-draw.c",
+     685
+    ]
+   ],
+   "S61": [
+    [
+     "format-draw.c",
+     784
+    ]
+   ],
+   "S62": [
+    [
+     "format-draw.c",
+     812
+    ]
+   ],
+   "S63": [
+    [
+     "window-copy.c",
+     5241
+    ]
+   ],
+   "S64": [
+    [
+     "prompt.c",
+     342
+    ]
+   ],
+   "S65": [
+    [
+     "prompt.c",
+     393
+    ]
+   ],
+   "S66": [
+    [
+     "window-panes.c",
+     606
+    ]
+   ],
+   "S67": [
+    [
+     "window-panes.c",
+     644
+    ]
+   ],
+   "S68": [
+    [
+     "screen-write.c",
+     39
+    ]
+   ],
+   "S69": [
+    [
+     "screen-write.c",
+     2811
+    ]
+   ]
+  }
+ },
+ "s1.tmux-10#0": {
+  "repo": "tmux",
+  "qid": "tmux-10",
+  "kind": null,
+  "nitems": 0,
+  "req": [],
+  "locs": {}
+ },
+ "s1.tmux-11#0": {
+  "repo": "tmux",
+  "qid": "tmux-11",
+  "kind": "item",
+  "nitems": 7,
+  "req": [
+   "R1",
+   "R3",
+   "R4",
+   "R5",
+   "R7"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "cmd-find.c",
+     943
+    ]
+   ],
+   "R3": [
+    [
+     "cmd-find.c",
+     264
+    ]
+   ],
+   "R4": [
+    [
+     "cmd-find.c",
+     328
+    ]
+   ],
+   "R5": [
+    [
+     "cmd-find.c",
+     518
+    ]
+   ],
+   "R7": [
+    [
+     "cmd-find.c",
+     684
+    ]
+   ]
+  }
+ },
+ "s1.tmux-12#0": {
+  "repo": "tmux",
+  "qid": "tmux-12",
+  "kind": "item",
+  "nitems": 7,
+  "req": [
+   "R1",
+   "R2",
+   "R3",
+   "R4",
+   "R5",
+   "R6",
+   "R7"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "format.c",
+     6902
+    ]
+   ],
+   "R2": [
+    [
+     "format.c",
+     6705
+    ]
+   ],
+   "R3": [
+    [
+     "format.c",
+     6016
+    ]
+   ],
+   "R4": [
+    [
+     "format.c",
+     4935
+    ]
+   ],
+   "R5": [
+    [
+     "format.c",
+     4610
+    ]
+   ],
+   "R6": [
+    [
+     "format.c",
+     3587
+    ],
+    [
+     "format.c",
+     4244
+    ]
+   ],
+   "R7": [
+    [
+     "format.c",
+     4282
+    ],
+    [
+     "format.c",
+     6978
+    ]
+   ]
+  }
+ },
+ "s1.tmux-13#0": {
+  "repo": "tmux",
+  "qid": "tmux-13",
+  "kind": "item",
+  "nitems": 7,
+  "req": [
+   "R1",
+   "R2",
+   "R3",
+   "R5",
+   "R6",
+   "R7"
+  ],
+  "locs": {
+   "R1": [
+    [
+     "window.c",
+     1632
+    ],
+    [
+     "input.c",
+     1028
+    ]
+   ],
+   "R2": [
+    [
+     "input.c",
+     1042
+    ],
+    [
+     "input.c",
+     969
+    ]
+   ],
+   "R3": [
+    [
+     "input.c",
+     1228
+    ]
+   ],
+   "R5": [
+    [
+     "grid-view.c",
+     42
+    ]
+   ],
+   "R6": [
+    [
+     "server-client.c",
+     2348
+    ]
+   ],
+   "R7": [
+    [
+     "tty-draw.c",
+     119
+    ]
+   ]
+  }
+ },
+ "s1.tmux-14#0": {
+  "repo": "tmux",
+  "qid": "tmux-14",
+  "kind": "sym",
+  "nitems": 4,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "server-client.c",
+     1776
+    ]
+   ],
+   "S2": [
+    [
+     "server-client.c",
+     2422
+    ]
+   ],
+   "S3": [
+    [
+     "screen-redraw.c",
+     1860
+    ]
+   ],
+   "S4": [
+    [
+     "screen-redraw.c",
+     1783
+    ]
+   ]
+  }
+ },
+ "s1.tmux-17#0": {
+  "repo": "tmux",
+  "qid": "tmux-17",
+  "kind": "sym",
+  "nitems": 8,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4",
+   "S5",
+   "S6",
+   "S7",
+   "S8"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "screen.c",
+     464
+    ]
+   ],
+   "S2": [
+    [
+     "cmd-capture-pane.c",
+     120
+    ]
+   ],
+   "S3": [
+    [
+     "cmd-capture-pane.c",
+     119
+    ]
+   ],
+   "S4": [
+    [
+     "grid.c",
+     507
+    ]
+   ],
+   "S5": [
+    [
+     "screen.c",
+     675
+    ]
+   ],
+   "S6": [
+    [
+     "grid.c",
+     1584
+    ]
+   ],
+   "S7": [
+    [
+     "cmd-resize-pane.c",
+     77
+    ]
+   ],
+   "S8": [
+    [
+     "grid-view.c",
+     116
+    ]
+   ]
+  }
+ },
+ "s1.tmux-18#0": {
+  "repo": "tmux",
+  "qid": "tmux-18",
+  "kind": null,
+  "nitems": 0,
+  "req": [],
+  "locs": {}
+ },
+ "s1.tmux-19#0": {
+  "repo": "tmux",
+  "qid": "tmux-19",
+  "kind": "sym",
+  "nitems": 23,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4",
+   "S5",
+   "S6",
+   "S7",
+   "S8",
+   "S9",
+   "S10",
+   "S11",
+   "S12",
+   "S13",
+   "S14",
+   "S15",
+   "S16",
+   "S17",
+   "S18",
+   "S19",
+   "S20",
+   "S21",
+   "S22",
+   "S23"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "alerts.c",
+     318
+    ]
+   ],
+   "S2": [
+    [
+     "alerts.c",
+     321
+    ]
+   ],
+   "S3": [
+    [
+     "cmd-display-message.c",
+     171
+    ]
+   ],
+   "S4": [
+    [
+     "cmd-if-shell.c",
+     161
+    ]
+   ],
+   "S5": [
+    [
+     "cmd-list-keys.c",
+     246
+    ]
+   ],
+   "S6": [
+    [
+     "cmd-queue.c",
+     882
+    ]
+   ],
+   "S7": [
+    [
+     "cmd-run-shell.c",
+     213
+    ]
+   ],
+   "S8": [
+    [
+     "cmd-run-shell.c",
+     229
+    ]
+   ],
+   "S9": [
+    [
+     "mode-tree.c",
+     1839
+    ]
+   ],
+   "S10": [
+    [
+     "window-copy.c",
+     3930
+    ]
+   ],
+   "S11": [
+    [
+     "window-customize.c",
+     1744
+    ]
+   ],
+   "S12": [
+    [
+     "window-customize.c",
+     1847
+    ]
+   ],
+   "S13": [
+    [
+     "window-customize.c",
+     1856
+    ]
+   ],
+   "S14": [
+    [
+     "window-customize.c",
+     1867
+    ]
+   ],
+   "S15": [
+    [
+     "window-customize.c",
+     1931
+    ]
+   ],
+   "S16": [
+    [
+     "window-customize.c",
+     1939
+    ]
+   ],
+   "S17": [
+    [
+     "window-customize.c",
+     2296
+    ]
+   ],
+   "S18": [
+    [
+     "window-customize.c",
+     2420
+    ]
+   ],
+   "S19": [
+    [
+     "window-customize.c",
+     2520
+    ]
+   ],
+   "S20": [
+    [
+     "window-customize.c",
+     2529
+    ]
+   ],
+   "S21": [
+    [
+     "window-customize.c",
+     2537
+    ]
+   ],
+   "S22": [
+    [
+     "window-customize.c",
+     2561
+    ]
+   ],
+   "S23": [
+    [
+     "window-switch.c",
+     476
+    ]
+   ]
+  }
+ },
+ "s1.tmux-20#0": {
+  "repo": "tmux",
+  "qid": "tmux-20",
+  "kind": "sym",
+  "nitems": 7,
+  "req": [
+   "S1",
+   "S2",
+   "S3",
+   "S4",
+   "S5",
+   "S6",
+   "S7"
+  ],
+  "locs": {
+   "S1": [
+    [
+     "cmd-list-keys.c",
+     75
+    ]
+   ],
+   "S2": [
+    [
+     "cmd-list-keys.c",
+     88
+    ]
+   ],
+   "S3": [
+    [
+     "prompt.c",
+     526
+    ]
+   ],
+   "S4": [
+    [
+     "prompt.c",
+     574
+    ]
+   ],
+   "S5": [
+    [
+     "prompt.c",
+     583
+    ]
+   ],
+   "S6": [
+    [
+     "utf8.c",
+     1017
+    ]
+   ],
+   "S7": [
+    [
+     "utf8.c",
+     996
+    ]
+   ]
+  }
+ }
+}
