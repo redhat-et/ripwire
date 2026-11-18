@@ -1302,7 +1302,8 @@ inline RefOutcome applyRefPosture( std::string& doc, LegendSession& session, std
     return RefOutcome::Ref;
 }
 
-// ITEM D — THE DICT POSTURE, which is the CLI DEFAULT (docs/EVALS.md amendment 4, owner decision 2026-11-17).
+// ITEM D — THE DICT POSTURE, `--legend=dict`, OPT-IN (docs/EVALS.md amendment 4, owner decision 2026-11-17;
+// validateLegendModifier in cli.h is the authority on which posture is the default, and it is `compact`).
 //
 // It is the ref posture's FIRST half and not its second. Both drop the prose legend the dictionary holds; only the ref
 // posture goes on to MOVE the root's non-identity attributes onto a trailing <about>, and that move is the whole of the
@@ -1315,8 +1316,24 @@ inline RefOutcome applyRefPosture( std::string& doc, LegendSession& session, std
 // was written, 20 head comments open `<!-- ripwire ` and are schema prose, but at least seven more are legend content
 // that does not (`<!-- root= is the crawl root…`, three `t=` term rows, `demote:`, `syms:`, `extent_suspect_syms=`).
 // A prefix rule leaves all seven in a posture whose name says the prose is gone. reduceHead already identifies the
-// legend the right way, so it does the work here too — with an all-served session, which is exactly a reader holding
-// the dictionary the pointer names.
+// legend the right way, so it does the work here too.
+//
+// THE HOLDING IS A TIER, NEVER THE WHOLE DICTIONARY (lane legend-session-default, 2026-11-18; BAND S arms S1/S3,
+// test/legenddefaultcheck.sh arms (D6a-d)). Until this lane the session here was `serveAll()`, so the posture dropped
+// all 1,157 definitions and `dict=` named the only read that could resolve them: `ripwire --legend-dict`, 131,822 B.
+// That made it the CHEAPEST posture on the CLI and the only one that under-serves. Measured on cpython
+// --impact=PyObject_Str, warm: 7,219 B, which is 577 B BELOW the 7,796 B the same cell serves a caller that actually
+// holds core+impact. Those 577 B were borrowed from the reader at 131,822/3,812 = 34x interest, because nobody
+// asserted a holding here — `--legend-have=` is the flag that asserts one, and this posture is what a reader gets
+// when it has asserted nothing.
+//
+// So the session is served EXACTLY the tier the answer's own schema key names — core + that key's pack, or the core
+// alone where the key has no census — and `dict=` names that tier's read. Everything outside it stays in the answer,
+// in place, as reduceHead already leaves an unserved entry. The reader's worst case to resolve what this posture
+// dropped falls from 131,822 B to the named tier (1,512-3,812 B on the four instrument verbs), and line 1 of that
+// read carries the `have=` the reader pastes into its next call — so one bounded read is both the definitions and
+// the handshake. dictv= is unchanged: it names the DICTIONARY this binary holds, which is what lets a reader tell two
+// builds apart, where the tier's own version rides the tier's line 1.
 inline RefOutcome applyDictPosture( std::string& doc )
 {
     const std::string_view                   view  = doc;
@@ -1325,8 +1342,21 @@ inline RefOutcome applyDictPosture( std::string& doc )
     {
         return RefOutcome::NotApplicable;   // no XML root, or a legend family this dictionary does not hold: unchanged
     }
+    // The MCP `for` dialect carries no compact schema key (shape->key is empty there), and a key with no census IS the
+    // core by construction (packTier) — both land on the core tier, which every holding contains.
+    std::string_view         tierName = "core";
+    std::vector<std::size_t> tierIds  = coreTierIds();
+    if( isSchemaKey( shape->key ) )
+    {
+        const PackTier pack = packTier( shape->key );
+        if( pack.census > 0 )
+        {
+            tierName = shape->key;
+            tierIds  = pack.ids;
+        }
+    }
     LegendSession session;
-    session.serveAll();
+    session.serveTier( tierIds );
     const std::optional<detail::HeadReduction> head = detail::reduceHead( view, *shape, session );
     if( !head )
     {
@@ -1357,7 +1387,7 @@ inline RefOutcome applyDictPosture( std::string& doc )
     }
     const bool        selfClosing = out.compare( root.openEnd - 2, 2, "/>" ) == 0;
     const std::size_t at          = root.openEnd - ( selfClosing ? 2 : 1 );
-    const std::string pointer     = " legend=\"dict\" dict=\"ripwire --legend-dict\" dictv=\"" + dictionaryVersion() + "\"";
+    const std::string pointer     = " legend=\"dict\" dict=\"ripwire --legend-dict=" + std::string( tierName ) + "\" dictv=\"" + dictionaryVersion() + "\"";
     out.insert( at, pointer );
     // est_tokens= PRICES WHAT WAS EMITTED (amendment 4a). Held byte-identical it would overstate every answer by the
     // prose just removed — an agent budgeting against it would be over-charged on every call — so it is the ONE

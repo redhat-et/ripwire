@@ -17140,6 +17140,22 @@ things and nothing else**:
    not prose — they are the answer's own counts, and §9 principle 4 puts honesty in attributes and data,
    never in sentences.
 
+> **SUPERSEDED IN PLACE, 2026-11-18 (BAND S, lane legend-session-default).** Two statements above are no
+> longer true of the shipped posture, and the measurement that overturned them is recorded with BAND S.
+> (i) It is **not** the default — `validateLegendModifier` ships `compact`, and
+> `test/legenddefaultcheck.sh` arm (D0) gates that; the flip was reversed by the owner on 2026-11-17 and
+> this paragraph was not re-read. (ii) The pointer is **`dict="ripwire --legend-dict=KEY"`**, naming the
+> core plus this answer's own verb pack, not `dict="ripwire --legend-dict"`. The original form dropped all
+> 1,157 definitions, so the only read that resolved them was the whole 131,822 B dictionary — and it
+> therefore read **577 B shorter than the honest answer** (cpython `--impact=PyObject_Str`, warm: 7,219 B
+> against the 7,796 B the same cell serves a caller holding `core+impact`). A posture cheaper than the
+> honest one is not a win: those 577 B were borrowed from the reader at 131,822/3,812 = 34× interest.
+> Fixed — the posture now serves exactly the tier its pointer names and leaves every definition outside it
+> in the answer, so the reader's worst-case cost to resolve what it dropped falls from 131,822 B to
+> 1,512–3,812 B while the answer itself grows to within 19 B (the pointer encoding alone) of the
+> `--legend-have=` answer carrying the same definitions. Arms (D6a–d), the refusal arm (D7) and their
+> red-before/green-after are in `test/legenddefaultcheck.sh`.
+
 It is therefore NOT the ref posture with a different name. The ref posture's saving comes in two parts —
 dropping the prose, and moving the root attributes onto a trailing `<about>` — and this takes only the
 first. That is the whole of the compat difference: a consumer reading `<r est_tokens=>` keeps working.
@@ -19211,3 +19227,109 @@ bodies, `unserved_total` 51 -> 105; one `envoy` pack-task answer 2 -> 1.
 
 Gate `test/bodycalleefilecheck.sh`: 64 FAIL on the pre-fix binary, PASS after. Not measured: any effect on a reader (this band
 measures the row, not whether an agent finds more), and the JSON dialect's `calls[]` (`{n,l,sig}`, no file).
+
+## PRE-REGISTRATION + READOUT — BAND S (session default): a CLI has no session, and the prose-free posture was under-serving
+
+Registered before collecting, in the round's local results directory (lane `legend-session-default`, 2026-11-18).
+Binary: `integration/byte-token-070` at `5e2f7f0f6` + this lane, plain dev build. **Bytes only — no timing
+and no memory figure is taken anywhere in this band.** Grain is the **answer (cell)**, per verb; never an
+item or symbol grain, never recall.
+
+### The question
+
+The owner's ruling was `have=core` by default plus an auto-emitted per-verb pack on first use in a session.
+The mechanism question comes first: the stdio MCP server holds a legend session (`--mcp-legend=session`,
+`mcp.h mcpStdioLegendSession`) as a function-local `static LegendSession` — **no file, no key, no
+identifier**. What makes it honest is that the PROCESS is the session: one server process serves one client
+for exactly that client's lifetime, so "these bytes went out earlier" and "this reader has them" are the
+same fact. A CLI run is one answer and one process, and argv is all it knows about its reader.
+
+Three mechanisms were judged on (a) a fresh agent gets the win with no flag, (b) a reader can ALWAYS resolve
+a definition it does not hold, and (c) same argv, same bytes — (c) being pinned by
+`test/legendtiercheck.sh` K6, `test/legenddefaultcheck.sh` (Z), the house determinism gate and
+`main.cpp checkLegendHandshake`'s own stated reason for being an argv handshake.
+
+| mechanism | (a) | (b) | (c) |
+| --- | --- | --- | --- |
+| state file keyed by (cwd, dictv) | yes | **no** — the cwd is not the reader: two lanes in one checkout, a human beside an agent, or a session after compaction all read a marker saying "served" with nothing in context | **no** |
+| env handshake | **no** — a child cannot set its parent's environment, so only an outside wrapper can carry it | no better than argv, and argv is in the transcript | yes |
+| explicit `--session=ID` | **no** (it is a flag) | partly | **no** |
+
+No mechanism passes all three, so the literal flip is not shipped. What ships instead costs no state and no
+flag: **a pointer names the cheapest read that resolves what that answer dropped.**
+
+### The defect this found, and the fix
+
+`applyDictPosture` served `LegendSession::serveAll()` — the one CLI path that serves a reader as if it held
+all 1,157 definitions, when `--legend-have=` is the flag by which a caller asserts a holding and this
+posture is what a reader gets having asserted nothing. Consequences, measured:
+
+| cpython `--impact=PyObject_Str`, warm | bytes |
+| --- | --- |
+| `--legend=full` | 14,976 |
+| default (`compact`) | 10,186 |
+| `--legend-have=<core>` (`6458b8da5fccacc6`) | 9,792 |
+| `--legend-have=<impact pack>` (`0a04c49c2eaff940`) | 7,796 |
+| `--legend=dict`, **before** | **7,219** |
+| `--legend=dict`, **after** | **7,777** |
+
+So the posture was 577 B CHEAPER than the honest answer, with a resolution cost of 131,822 B against the
+3,812 B the impact tier costs — 34× interest on bytes borrowed from the reader. It now serves exactly the
+tier its pointer names (`dict="ripwire --legend-dict=impact"`), leaves every definition outside that tier in
+the answer, and sits 19 B below the `--legend-have=` answer carrying the same definitions — the 19 B being
+the pointer encoding alone (74 B of root attributes against a 93 B `<about/>` child), attributed by hand.
+
+A second defect, found by measuring: `--legend=dict` with `--legend-have=` **both fired**, so one answer
+carried `legend="dict"` on its root and `<about legend="ref" have="core+impact"/>` as its last child — two
+declarations that disagree about where the definitions are (15,592 B at rc=0 on this repo). `main.cpp`
+asserted in a comment that "the two never both fire"; `refuseLegendHaveMisuse` now makes that true.
+
+### The fresh draw
+
+The 128 cells that produced the hypotheses (cpython / terraform / nushell / tmux) cannot grade them.
+Draw: **django** (Python), **cockroach** (Go), **axum** (Rust), **htop** (C) × 8 top-ranked symbols ×
+`--callers/--impact/--uses/--grep` = **n = 128**, plus a second **n = 64** tail draw at ranks 240-243 of the
+same corpora, taken because the head draw produced no complete cells. Five postures per cell.
+
+| arm | result on the fresh draw |
+| --- | --- |
+| **control** — the fix does not touch the DEFAULT | byte-identical on base and fixed binaries, **128 of 128** cells (and 64 of 64 on the tail draw) |
+| **S2** — the defect is a population, not a cell | `--legend=dict` shorter than the honest core+pack answer on **128 of 128** cells; gap median 27 B, range 24–1,795 B |
+| **S3** — the fix closes it | gap now **exactly 19 B on 128 of 128** cells (the pointer encoding); **0** cells shorter than the honest answer by more than that; every pointer parameterised (`--legend-dict=callers/impact/uses/grep`) |
+| **S5** — completeness is untouched | 4 postures × 32 cells, **0 disagreements**; 47 of 128 complete in the head draw and 38 of 64 in the tail draw, identically in every posture |
+| **S6** — determinism | `(Z1)`, and a flagless map run twice byte-identical |
+
+**S4 — repayment, re-measured (median saving per call of that verb, n = 32 per verb):**
+
+| verb | core (1,512 B) | repay | core + pack | pack B | repay | default median |
+| --- | --- | --- | --- | --- | --- | --- |
+| `--callers` | 238 B/call | 7 calls | 754 B/call (14.8 %) | 2,597 | 4 calls | 5,102 B |
+| `--impact` | 394 B/call | 4 calls | 2,002 B/call (20.0 %) | 3,812 | 2 calls | 10,014 B |
+| `--uses` | 196 B/call | 8 calls | 523 B/call (9.4 %) | 1,927 | 4 calls | 5,547 B |
+| `--grep` | 128 B/call | 12 calls | 1,714 B/call (10.1 %) | 3,799 | 3 calls | 16,963 B |
+
+**This is the measured case against `have=core` as a default.** The core saves a median **238 B per call**
+and costs 1,512 B, so it repays in 4–12 calls *of the same verb* — and a default cannot ask the reader
+whether it will make them. A fresh agent's first call under that default is served 238 B short against 13
+definitions it never read, and the read that would resolve them is the whole dictionary. The per-verb PACKS
+repay in 2–4 calls, which is why pointing at one costs nothing on call 1 and auto-emitting one does.
+
+### What this band did NOT establish
+
+- **No agent was measured.** Nothing here shows an agent reads a tier when a pointer names it.
+- The owner's `−19.5 %` / `−14.2 %` / per-verb figures compare a **train binary against base `5139f7840`**,
+  which is a different pair from this band's (one binary, posture against posture) and is **not** reproduced
+  here. Of the four per-verb numbers, `--impact` agrees closely (−20.0 % here against −19.8 %), `--uses`
+  (−9.4 % / −7.4 %) and `--grep` (−10.1 % / −13.3 %) are near, and **`--callers` differs by half**
+  (−14.8 % here against −29.2 %).
+- **`55 of 128 complete` is not reproduced and is not a property of the tool**: it is their draw's number.
+  This draw gives 47 of 128. The transferable claim is the INVARIANT, and it is established.
+- The first completeness instrument here read `counts_floor="1"` as incomplete and returned **0 % in every
+  posture on every cell**. A rate of 0 % or 100 % with no exceptions is an instrument fault until one cell is
+  hand-checked: `django --callers=RawQuery` carries `counts_floor="1"` and **no** `capped=`/`has_more=`, so
+  the label is a standing floor on an uncut answer and cannot be a completeness term. Both 100 % rates above
+  were hand-checked the same way before being reported.
+- **`--impact` is 0 of 32 complete** on this draw — every answer windows. Hand-checked on
+  `cpython --impact=PyObject_Str` (`capped="1" has_more="1"`, 40 of 16,937 shown).
+- The default flip itself is **not shipped and not measured for blast radius**: the previously recorded
+  "89 of 849 gates, 80 on one contract" was not re-run.
