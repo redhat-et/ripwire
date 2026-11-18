@@ -202,9 +202,11 @@ inline bool macroArgFragmentIsCode( TSNode root, const MacroArgSpan& span, Macro
     return std::find( kGroupKinds.begin(), kGroupKinds.end(), kind ) != kGroupKinds.end();
 }
 
-inline bool isMacroArgCall( const RawRef& r ) noexcept
+// A fragment that declares a type makes the tags pass's definition arm mint relation rows (a base, a member's type).
+// They belong to a definition the re-read does not keep. Every other row a Rust fragment yields is a call or a macro.
+inline bool isRelationRow( const RawRef& r ) noexcept
 {
-    return ( r.role == RefRole::Call || r.role == RefRole::Macro ) && !r.isInherit && !r.isCompose && !r.isDocLink;
+    return r.isInherit || r.isCompose;
 }
 
 // The macro invocations among refs[ first, end ), ordered by position. A `Never` macro is not a site at all.
@@ -315,8 +317,7 @@ inline bool rereadMacroArgSpan( MacroArgPass& pass, const MacroArgSpan& span, Ma
     const std::vector<PreprocDeadRange> noDeadRanges;
     captureTagsFacts( pass.cursor, pass.le, pass.fileId, pass.src, root, pass.work.defs, pass.refs, pass.work.binds, pass.work.includes, noDeadRanges,
                       fragmentShortfall );
-    pass.refs.erase( std::remove_if( pass.refs.begin() + std::ptrdiff_t( firstRef ), pass.refs.end(), []( const RawRef& r ) { return !isMacroArgCall( r ); } ),
-                     pass.refs.end() );
+    pass.refs.erase( std::remove_if( pass.refs.begin() + std::ptrdiff_t( firstRef ), pass.refs.end(), isRelationRow ), pass.refs.end() );
     const std::vector<MacroArgSite> nested = macroArgSitesIn( pass.refs, firstRef );
     forEachMacroInvocationAt( root, nested, [ & ]( TSNode invocation, const MacroArgSite& site )
     {
@@ -332,21 +333,9 @@ inline bool isMacroArgBlockGroup( TSNode node, std::string_view src ) noexcept
     return kindIs( ts_node_type( node ), "token_tree" ) && src[ ts_node_start_byte( node ) ] == '{';
 }
 
-// Rule (4) for the direct children [first, stop) of a rejected token tree that follow a top-level `=>`: an arm body.
-// Tried as one expression; when it is not one, its `{ … }` groups are tried as blocks.
-inline void rereadMacroArm( MacroArgPass& pass, std::span<const TSNode> children, std::size_t first, std::size_t stop, std::uint32_t depth )
+// The `{ … }` groups among the direct children [first, stop) of a rejected token tree, each tried as a block.
+inline void rereadMacroArgBlocks( MacroArgPass& pass, std::span<const TSNode> children, std::size_t first, std::size_t stop, std::uint32_t depth )
 {
-    if( first >= stop )
-    {
-        return;
-    }
-    const MacroArgSpan span{ ts_node_start_byte( children[ first ] ), ts_node_start_byte( children[ stop ] ), ts_node_start_point( children[ first ] ),
-                             ts_node_start_point( children[ stop ] ) };
-    const bool holdsCall = pass.src.substr( span.startByte, span.endByte - span.startByte ).find( '(' ) != std::string_view::npos;
-    if( !holdsCall || rereadMacroArgSpan( pass, span, MacroArgShape::Expression, depth ) )
-    {
-        return;
-    }
     for( std::size_t index = first; index < stop; ++index )
     {
         if( isMacroArgBlockGroup( children[ index ], pass.src ) )
@@ -356,47 +345,53 @@ inline void rereadMacroArm( MacroArgPass& pass, std::span<const TSNode> children
     }
 }
 
-// Rule (4) over a rejected token tree's direct children. An arm body runs from a top-level `=>` to the next top-level
-// `,` or `;` (or the closing delimiter); a second `=>` before one of those means the arms are not separated, and then
-// only the `{ … }` groups between the two arrows are tried. A `{ … }` group outside any arm is tried as a block.
+// Rule (4) for an arm body, the direct children [first, stop): tried as one expression; when it is not one, its
+// `{ … }` groups are tried as blocks.
+inline void rereadMacroArm( MacroArgPass& pass, std::span<const TSNode> children, std::size_t first, std::size_t stop, std::uint32_t depth )
+{
+    if( first >= stop )
+    {
+        return;
+    }
+    const MacroArgSpan span{ ts_node_start_byte( children[ first ] ), ts_node_start_byte( children[ stop ] ), ts_node_start_point( children[ first ] ),
+                             ts_node_start_point( children[ stop ] ) };
+    const bool holdsCall = pass.src.substr( span.startByte, span.endByte - span.startByte ).find( '(' ) != std::string_view::npos;
+    if( holdsCall && !rereadMacroArgSpan( pass, span, MacroArgShape::Expression, depth ) )
+    {
+        rereadMacroArgBlocks( pass, children, first, stop, depth );
+    }
+}
+
+// Rule (4) over a rejected token tree's direct children. A top-level `=>`, `,` or `;` (and the closing delimiter)
+// ends a piece. A piece that follows a `=>` and ends at a `,`, a `;` or the closing delimiter is an arm body. In every
+// other piece (an arm's pattern, or the tokens between two arrows when the arms are not separated) only the `{ … }`
+// groups are tried.
 inline void rereadRejectedMacroArgGroup( MacroArgPass& pass, TSNode tokenTree, std::uint32_t depth )
 {
     std::vector<TSNode> children;
     ChildCursor         cursor( tokenTree );
     collectChildren( tokenTree, cursor.cur, children );
-    constexpr std::size_t kNoArm   = std::numeric_limits<std::size_t>::max();
-    std::size_t           armFirst = kNoArm;
-    for( std::size_t index = 1; index < children.size(); ++index )   // [0] is the opening delimiter; the last child closes
+    std::size_t pieceFirst  = 1;       // [0] is the opening delimiter
+    bool        isAfterArrow = false;
+    for( std::size_t index = 1; index < children.size(); ++index )
     {
         const char* kind    = ts_node_type( children[ index ] );
         const bool  isArrow = kindIs( kind, "=>" );
         const bool  isStop  = index + 1 == children.size() || kindIs( kind, "," ) || kindIs( kind, ";" );
-        if( isStop && armFirst != kNoArm )
+        if( !isArrow && !isStop )
         {
-            rereadMacroArm( pass, children, armFirst, index, depth );
+            continue;
         }
-        else if( isArrow && armFirst != kNoArm )
+        if( isAfterArrow && isStop )
         {
-            for( std::size_t between = armFirst; between < index; ++between )
-            {
-                if( isMacroArgBlockGroup( children[ between ], pass.src ) )
-                {
-                    rereadMacroArgGroup( pass, children[ between ], depth );
-                }
-            }
+            rereadMacroArm( pass, children, pieceFirst, index, depth );
         }
-        else if( armFirst == kNoArm && !isStop && isMacroArgBlockGroup( children[ index ], pass.src ) )
+        else
         {
-            rereadMacroArgGroup( pass, children[ index ], depth );
+            rereadMacroArgBlocks( pass, children, pieceFirst, index, depth );
         }
-        if( isArrow )
-        {
-            armFirst = index + 1;
-        }
-        else if( isStop )
-        {
-            armFirst = kNoArm;
-        }
+        pieceFirst   = index + 1;
+        isAfterArrow = isArrow;
     }
 }
 
@@ -474,23 +469,36 @@ void rereadMacroInvocation( MacroArgPass& pass, TSNode invocation, MacroArgPolic
     }
 }
 
-/// RUST-MACRO-ARGS, after one file's tags pass: append the calls written inside the arguments of the macro invocations
-/// that pass recorded in refs[ firstRefOfFile, end ). A language without `name!` macros, or a file without one, costs
-/// one scan of that window. `root` is the tree the tags pass read; `src` its bytes.
-inline void rereadMacroArguments( MacroArgScratch& work, TSQueryCursor* cursor, const LangEntry& le, std::uint32_t fileId, std::string_view src, TSNode root,
-                                  std::vector<RawRef>& refs, std::size_t firstRefOfFile, ExtractShortfall& shortfall )
+// The file a tags pass just read: `root` is the tree it read, `src` its bytes.
+struct MacroArgFile
 {
-    if( !langFacts( le.lang ).bangMacros || cursor == nullptr )
+    const LangEntry& le;
+    std::uint32_t    fileId;
+    std::string_view src;
+    TSNode           root;
+};
+
+/// RUST-MACRO-ARGS, right after one file's tags pass: append the calls written inside the arguments of the macro
+/// invocations that pass recorded. Its rows are the trailing rows of `refs` that carry this file's id. A language without
+/// `name!` macros costs one test; a file without one, one scan of those rows.
+inline void rereadMacroArguments( MacroArgScratch& work, TSQueryCursor* cursor, const MacroArgFile& file, std::vector<RawRef>& refs, ExtractShortfall& shortfall )
+{
+    if( !langFacts( file.le.lang ).bangMacros || cursor == nullptr )
     {
         return;
+    }
+    std::size_t firstRefOfFile = refs.size();
+    while( firstRefOfFile > 0 && refs[ firstRefOfFile - 1 ].fileId == file.fileId )
+    {
+        --firstRefOfFile;
     }
     const std::vector<MacroArgSite> sites = macroArgSitesIn( refs, firstRefOfFile );
-    if( sites.empty() || !ts_parser_set_language( work.parser.p, le.grammar() ) )
+    if( sites.empty() || !ts_parser_set_language( work.parser.p, file.le.grammar() ) )
     {
         return;
     }
-    MacroArgPass pass{ work, cursor, le, fileId, src, refs, shortfall };
-    forEachMacroInvocationAt( root, sites, [ & ]( TSNode invocation, const MacroArgSite& site )
+    MacroArgPass pass{ work, cursor, file.le, file.fileId, file.src, refs, shortfall };
+    forEachMacroInvocationAt( file.root, sites, [ & ]( TSNode invocation, const MacroArgSite& site )
     {
         rereadMacroInvocation( pass, invocation, site.policy, 0 );
     } );
