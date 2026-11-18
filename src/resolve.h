@@ -7941,6 +7941,29 @@ struct IdentityNarrower
         return owns;
     }
 
+    // the plausible direct bases of `c` (its base clause read from its own file) not in `visited`, appended to it and to `next`
+    void queueUnvisitedBases( NodeId c, const ClassIdentity& ids, std::vector<NodeId>& visited, std::vector<NodeId>& next ) const
+    {
+        const auto up = ids.realUp.find( c );
+        for( std::string_view base : ( up == ids.realUp.end() ) ? std::span<const std::string_view>{} : std::span<const std::string_view>( up->second ) )
+        {
+            const auto bases = ids.classesByName.find( std::string( base ) );
+            if( bases == ids.classesByName.end() )
+            {
+                continue;
+            }
+            plausibleClasses( std::span<const NodeId>( bases->second.data(), bases->second.size() ), fileOf( c, ids ), ids );
+            for( NodeId b : plausible )
+            {
+                if( std::ranges::find( visited, b ) == visited.end() )
+                {
+                    visited.push_back( b );
+                    next.push_back( b );
+                }
+            }
+        }
+    }
+
     // CPP-PTR-ALIAS (C2): a real subclass `d` of the receiver class that defines no body of the callee runs the one it INHERITS
     // through another base — `class ConnectionSocketImpl : public SocketImpl, public virtual ConnectionSocket` runs
     // SocketImpl::isOpen on a ConnectionSocket receiver whose contract Socket declares. The shallowest ancestor level of `d`
@@ -7958,24 +7981,7 @@ struct IdentityNarrower
             for( NodeId c : level )
             {
                 found = ( depth > 0 && appendClassDefinitions( r, c, ids ) ) || found;
-                const auto up = ids.realUp.find( c );
-                for( std::string_view base : ( up == ids.realUp.end() ) ? std::span<const std::string_view>{} : std::span<const std::string_view>( up->second ) )
-                {
-                    const auto bases = ids.classesByName.find( std::string( base ) );
-                    if( bases == ids.classesByName.end() )
-                    {
-                        continue;
-                    }
-                    plausibleClasses( std::span<const NodeId>( bases->second.data(), bases->second.size() ), fileOf( c, ids ), ids );
-                    for( NodeId b : plausible )
-                    {
-                        if( std::ranges::find( visited, b ) == visited.end() )
-                        {
-                            visited.push_back( b );
-                            next.push_back( b );
-                        }
-                    }
-                }
+                queueUnvisitedBases( c, ids, visited, next );
             }
             if( found )
             {
@@ -9418,25 +9424,7 @@ struct Narrower
         keyBind.append( r.recvVar );
         if( const auto sit = scopedDecls.byName.find( keyBind ); sit != scopedDecls.byName.end() )
         {
-            const ScopedRecvDecl* const innermost = innermostCoveringDecl( sit->second, r.startByte );
-            if( innermost == nullptr || innermost->typeBinding >= kRecvDeclConflicted )
-            {
-                return RecvVarType{};   // no declaration in scope (a field or global of the name), a tie, or untyped/conflicted
-            }
-            const Binding& declared = ( *scopedDecls.bindings )[ innermost->typeBinding ];
-            if( scopedDecls.arrowPointee != nullptr )
-            {
-                if( const auto p = scopedDecls.arrowPointee->find( innermost->typeBinding ); p != scopedDecls.arrowPointee->end() )
-                {
-                    // CPP-PTR-ALIAS: a smart pointer — `->` reaches the pointee, `.` the pointer's own members (no in-tree class)
-                    return r.viaArrow ? RecvVarType{ p->second.type, !p->second.qualified.empty(), &declared, &p->second } : RecvVarType{};
-                }
-            }
-            if( declared.kind == LocalBindKind::ReturnType )   // a call result's class, resolved to the one in-tree class (graph.h)
-            {
-                return RecvVarType{ declared.typeName, false, &declared };
-            }
-            return namesStdType( declared.importedName ) ? RecvVarType{} : RecvVarType{ declared.typeName, !declared.importedName.empty(), &declared };
+            return scopedRecvVarType( r, sit->second );
         }
         const auto vit = varType.find( keyBind );
         if( vit == varType.end() || ( vit->second.arrowOnly && !r.viaArrow ) )
@@ -9444,6 +9432,38 @@ struct Narrower
             return RecvVarType{};   // a smart pointer's pointee (a call result's, train 29) answers `->` only, never `.`
         }
         return RecvVarType{ vit->second.type, vit->second.writtenQualified, nullptr };
+    }
+
+    // recvVarType's lexical answer: the declaration of the name innermost at the site, and the type its record wrote
+    RecvVarType scopedRecvVarType( const Reference& r, std::span<const ScopedRecvDecl> decls ) const
+    {
+        const ScopedRecvDecl* const innermost = innermostCoveringDecl( decls, r.startByte );
+        if( innermost == nullptr || innermost->typeBinding >= kRecvDeclConflicted )
+        {
+            return RecvVarType{};   // no declaration in scope (a field or global of the name), a tie, or untyped/conflicted
+        }
+        const Binding& declared = ( *scopedDecls.bindings )[ innermost->typeBinding ];
+        if( const WrittenPointeeText* const p = arrowPointeeOf( innermost->typeBinding ) )
+        {
+            // CPP-PTR-ALIAS: a smart pointer — `->` reaches the pointee, `.` the pointer's own members (no in-tree class)
+            return r.viaArrow ? RecvVarType{ p->type, !p->qualified.empty(), &declared, p } : RecvVarType{};
+        }
+        if( declared.kind == LocalBindKind::ReturnType )   // a call result's class, resolved to the one in-tree class (graph.h)
+        {
+            return RecvVarType{ declared.typeName, false, &declared };
+        }
+        return namesStdType( declared.importedName ) ? RecvVarType{} : RecvVarType{ declared.typeName, !declared.importedName.empty(), &declared };
+    }
+
+    // CPP-PTR-ALIAS: the pointee a declaration record's smart-pointer type reaches through `->` (ScopedRecvDecls::arrowPointee)
+    const WrittenPointeeText* arrowPointeeOf( std::uint32_t bindIndex ) const
+    {
+        if( scopedDecls.arrowPointee == nullptr )
+        {
+            return nullptr;
+        }
+        const auto p = scopedDecls.arrowPointee->find( bindIndex );
+        return p == scopedDecls.arrowPointee->end() ? nullptr : &p->second;
     }
 
     // the qualifier the receiver's declaration wrote — the lexical record's own, else the flat table's kept one (read while
