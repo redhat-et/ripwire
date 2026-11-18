@@ -553,6 +553,7 @@ struct MainDispatch
 #include "verbs_change.h"
 #include "verbs_report.h"
 #include "verbs_grep.h"
+#include "memceiling.h"          // lane M2 prototype: RIPWIRE_MEM_BUDGET_MB, the allocator-level ceiling (default off)
 #include "memguard.h"            // #350 layer 3: the memory guard's limit (installed in main) and its verdicts after ingest
 #include "lsp.h"                 // the --lsp navigation-server section (Phase 1 PoC — docs/LSP.md); after the verb families so it can reuse the shared use-site scan
 
@@ -4452,6 +4453,39 @@ static bool installMemoryGuard( const rw::Config& cfg )
     return true;
 }
 
+// Lane M2 prototype (memceiling.h, default off): RIPWIRE_MEM_BUDGET_MB arms an allocator-level ceiling. Read once, before any
+// thread. A value that is set but not a whole MiB count of at least 64 refuses the run (exit 1), as RIPWIRE_MAX_MEMORY does.
+// Servers do not arm it — its refusal ends the process — and a binary whose operator new is not replaced cannot: both say so.
+static bool installMemoryCeiling( const rw::Config& cfg )
+{
+    const rw::memceiling::Setting s = rw::memceiling::readSetting();
+    if( s.parse == rw::memceiling::Parse::Unset )
+    {
+        return true;
+    }
+    if( !VALIDATE( s.parse == rw::memceiling::Parse::Armed, "RIPWIRE_MEM_BUDGET_MB is a whole number of MiB, at least 64" ) )
+    {
+        DISCLOSE( Diagnostics::answerRefused, "main: an unparseable RIPWIRE_MEM_BUDGET_MB refuses the run (exit 1, stderr names it)" );
+        rw::emitTo( stderr, "ripwire: RIPWIRE_MEM_BUDGET_MB needs a whole number of MiB, at least {} — got '{}', e.g. RIPWIRE_MEM_BUDGET_MB=8000\n",
+                    rw::memceiling::kFloorMiB, std::getenv( "RIPWIRE_MEM_BUDGET_MB" ) );
+        return false;
+    }
+#if defined( RIPWIRE_LARGE_ALLOC_LINKED )
+    constexpr bool kHookLinked = true;
+#else
+    constexpr bool kHookLinked = false;
+#endif
+    if( cfg.mcp || cfg.lsp || !kHookLinked )
+    {
+        rw::emitTo( stderr, "ripwire: RIPWIRE_MEM_BUDGET_MB is NOT armed ({}); only the memory guard's own limits apply to this run\n",
+                    !kHookLinked ? "this build does not replace operator new (largealloc.cpp is macOS-only)"
+                                 : "a server must survive a refused request, and this prototype's refusal ends the process" );
+        return true;
+    }
+    rw::memceiling::arm( s.mib );
+    return true;
+}
+
 // r2-LO: the session legend dictionary for a human (or a harness that holds a session of its own) — the text
 // ripwire://legend-dict/full serves, one TIER of it, or a view (legenddict.h). Like --version, answered wherever it
 // stands and nothing else runs. Returns the exit code, or -1 when no --legend-dict was asked.
@@ -4535,6 +4569,10 @@ int main( int argc, char** argv )
         return 1;   // the refusal is on stderr, and it names both dictionary versions
     }
     if( !installMemoryGuard( cfg ) )
+    {
+        return 1;   // the refusal is on stderr
+    }
+    if( !installMemoryCeiling( cfg ) )
     {
         return 1;   // the refusal is on stderr
     }
