@@ -20,6 +20,17 @@
 #       the definition that joins, as for any many-definition name)
 #   (d5) CALLERS-TWO-COPY: MCP find_referencing_symbols binds through the same callHierarchyRowsNarrowed: the d3 answer
 #       (narrowed, bootApp), and the d4 fixture still refuses
+#   CALLERS-TWO-COPY-BIND (owner 11-17 "bind source, disclose"; src/forgraphverb.h sourceCopyPick): when M1 leaves two bodied
+#   definitions and all but ONE are COPIES (a CI/tool dot dir, a vendoring dir, the demo/generated tier, or a file opening with a
+#   generated/copied banner), --callers binds the source one and names the copies
+#   (d6) a copied-banner twin (the vscode extensions/copilot/src/util/vs shape): --callers=ApplicationRef.tick rc 0, of= the source
+#       definition, narrowed=, copy_p= the copy's p:line, copy_next= the callers call on the copy (which itself binds the copy alone),
+#       bootApp listed, the readings in the compact and full legends, and the answer == the explicit call's apart from that disclosure
+#   (d7) NEGATIVE: neither definition left is source (a banner copy + a .github copy, no src/ one) -> still refused (rc 1), no copy_p=;
+#       the d4 two-source refusal carries no copy_p= either
+#   (d8) MCP find_referencing_symbols answers the same copy as the CLI: the bound file, narrowed, copy_p, copy_next equal the CLI --json
+#       root's, and the MCP answer carries copy_note
+#   (e4) --for is not reached: `callers of ApplicationRef.tick` on the d6 tree appends no graph block (the M1 rule alone binds there)
 #   M3 MET-BRIDGE: an unreached path whose search reached a caller of to= prints the proven prefix and the one crossing.
 #   (b1) onFileEvent -> ConnectionManagerImpl::onData (a virtual `filter->onData( 1 )` the graph declines): <met_bridge reachable="0"
 #        in="onContinueReading" via="declined"> holding the path verb's reachable="1" answer onFileEvent -> onContinueReading (its
@@ -77,6 +88,24 @@ export class ApplicationRef {
   tick(): void { oldTick(); }
 }
 function oldTick(): void {}
+T
+
+# CALLERS-TWO-COPY-BIND: the F1 tree plus a copied-banner twin of the source class (the vscode copilot shape)
+F1V="$TMP/fx1v"; cp -R "$F1" "$F1V"; mkdir -p "$F1V/extensions/copilot/src/util/vs/app"
+cat > "$F1V/extensions/copilot/src/util/vs/app/application_ref.ts" <<'T'
+//!!! DO NOT modify, this file was COPIED from 'upstream/src/app'
+export class ApplicationRef {
+  tick(): void { copyTick(); }
+}
+function copyTick(): void {}
+T
+# the neither-source twin: the banner copy and a .github copy, no src/ definition left
+F1X="$TMP/fx1x"; cp -R "$F1V" "$F1X"; rm -f "$F1X/src/app/application_ref.ts"; mkdir -p "$F1X/.github/actions/app"
+cat > "$F1X/.github/actions/app/application_ref.ts" <<'T'
+export class ApplicationRef {
+  tick(): void { ghTick(); }
+}
+function ghTick(): void {}
 T
 
 # ── M3 fixtures ──
@@ -233,7 +262,7 @@ else no "(d4) rc=$( rc d4p )/$( rc d4c )/$( rc d4k ) narrowed=$d4n"; fi
 #      callHierarchyRowsNarrowed), so ApplicationRef.tick narrows to the one source definition there too ("narrowed", its
 #      note, bootApp in calledBy), where MCP called callHierarchyRows directly and refused it. NEGATIVE: the two-source
 #      fixture still refuses on MCP, as --callers does (d4). RED on the base binary (MCP answered -32602 / not found).
-mcpq(){ python3 - "$BIN" "$1" "$2" <<'PY'
+mcpq(){ python3 - "$BIN" "$1" "$2" ${3:+"$3"} <<'PY'
 import json, subprocess, sys
 binp, root, verb = sys.argv[1], sys.argv[2], sys.argv[3]
 reqs = [ { "jsonrpc": "2.0", "id": 0, "method": "initialize", "params": { "protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": { "name": "g", "version": "1" } } },
@@ -255,6 +284,10 @@ for line in p.stdout.splitlines():
     names = [ e.get( "name" ) for e in j.get( "calledBy", [] ) ]
     print( "ok", "narrowed=" + str( j.get( "narrowed", "-" ) ), "note=" + ( "1" if "narrowed_note" in j else "0" ),
            "defs=" + str( j.get( "defs" ) ), "calledBy=" + ",".join( n for n in names if n ) )
+    if len( sys.argv ) > 4:   # (d8): the fields the CLI --json root carries, for the twin comparison
+        sym = j.get( "symbol" ) if isinstance( j.get( "symbol" ), dict ) else {}
+        print( "file=%s narrowed=%s copy_p=%s copy_next=%s copy_note=%d" % ( str( sym.get( "p", sym.get( "file", "-" ) ) ).split( ":" )[0], j.get( "narrowed", "-" ), j.get( "copy_p", "-" ),
+                                                                          j.get( "copy_next", "-" ), int( "copy_note" in j ) ) )
     break
 else:
     print( "err no response" )
@@ -268,6 +301,62 @@ case "$d5b" in
     ok\ *) no "(d5) negative: two source definitions left, MCP must still refuse like --callers (d4): [$d5b]" ;;
     *)     ok "(d5) negative: two source definitions left, MCP still refuses like --callers" ;;
 esac
+
+# ── CALLERS-TWO-COPY-BIND ──
+# (d6) the copied-banner twin: --callers binds the source definition and names the copy
+run "$F1V" d6 --callers=ApplicationRef.tick
+run "$F1V" d6f --callers=ApplicationRef.tick --legend=full
+run "$F1V" d6v --callers=src/app/application_ref.ts:tick
+d6of="$( rootattr d6 callers of )"; d6nar="$( rootattr d6 callers narrowed )"; d6cp="$( rootattr d6 callers copy_p )"; d6cn="$( rootattr d6 callers copy_next )"
+# "eq=1" when the bound answer equals the explicit call's once narrowed=/copy_p=/copy_next= and their compact readings are taken out
+d6eq="$( python3 - "$TMP/d6.xml" "$TMP/d6v.xml" <<'PY'
+import re, sys
+a = open( sys.argv[1], encoding="utf8", errors="replace" ).read()
+b = open( sys.argv[2], encoding="utf8", errors="replace" ).read()
+reads = len( re.findall( r'copy_p=: ', a ) ) + len( re.findall( r'copy_next=: ', a ) )
+cut = re.sub( r' (narrowed|copy_p|copy_next)="[^"]*"', '', a )
+cut = re.sub( r'(narrowed|copy_p|copy_next)=: [^.]*\. ?', '', cut )
+mask = lambda s: re.sub( r' est_tokens="\d+"', '', s )
+print( "eq=%d reads=%d" % ( int( mask( cut ) == mask( b ) and b != '' ), reads ) )
+PY
+)"
+cp_sel="${d6cn#--callers=}"
+run "$F1V" d6c "--callers=$cp_sel"
+if [ "$( rc d6 )" = 0 ] && [ "$( rc d6f )" = 0 ] && [ "$( rc d6v )" = 0 ] && [ "$d6of" = "src/app/application_ref.ts:tick" ] && [ "$d6nar" = "ApplicationRef.tick" ] \
+   && [ "$d6cp" = "extensions/copilot/src/util/vs/app/application_ref.ts:3" ] && [ "$d6cn" = "--callers=extensions/copilot/src/util/vs/app/application_ref.ts:tick" ] \
+   && grep -q 'n="bootApp"' "$TMP/d6.xml" && [ "$d6eq" = "eq=1 reads=2" ] && grep -q 'copy_p=: beside narrowed=' "$TMP/d6f.xml" \
+   && [ "$( rc d6c )" = 0 ] && [ "$( rootattr d6c callers defs )" = 1 ] && [ "$( rootattr d6c callers copy_p )" = "-" ]; then
+    ok "(d6) banner copy: --callers binds of=$d6of (narrowed=$d6nar), copy_p=$d6cp, copy_next= binds the copy alone, == the explicit call ($d6eq)"
+else no "(d6) rc=$( rc d6 )/$( rc d6f )/$( rc d6v )/$( rc d6c ) of='$d6of' narrowed='$d6nar' copy_p='$d6cp' copy_next='$d6cn' $d6eq"; fi
+
+# (d7) negative: no source definition left (a banner copy + a .github copy) -> still refused, no disclosure; nor on d4's refusal
+run "$F1X" d7 --callers=ApplicationRef.tick
+if [ "$( rc d7 )" = 1 ] && grep -q 'found="0" refused=' "$TMP/d7.xml" && [ "$( count d7 'copy_p' )" = 0 ] && [ "$( count d7 'narrowed' )" = 0 ] \
+   && [ "$( count d4k 'copy_p' )" = 0 ]; then
+    ok "(d7) neither definition is source: --callers still refuses (rc 1), no copy_p=/narrowed=; the two-source refusal (d4) has no copy_p= either"
+else no "(d7) rc=$( rc d7 ) copy_p=$( count d7 'copy_p' )/$( count d4k 'copy_p' ) narrowed=$( count d7 'narrowed' )"; fi
+
+# (d8) MCP answers the same copy as the CLI
+run "$F1V" d8j --callers=ApplicationRef.tick --json --legend=full   # (--legend=compact is XML-only and refuses with --json)
+d8cli="$( python3 - "$TMP/d8j.xml" <<'PY'
+import json, sys
+try:
+    j = json.loads( open( sys.argv[1], encoding="utf8" ).read() )
+except ValueError:
+    print( "unparsable" ); sys.exit()
+print( "file=%s narrowed=%s copy_p=%s copy_next=%s copy_note=1" % ( j.get( "of", "-" ).split( ":" )[0], j.get( "narrowed", "-" ), j.get( "copy_p", "-" ), j.get( "copy_next", "-" ) ) )
+PY
+)"
+d8mcp="$( mcpq "$F1V" find_referencing_symbols twin | sed -n 2p )"
+if [ "$( rc d8j )" = 0 ] && [ -n "$d8mcp" ] && [ "$d8mcp" = "$d8cli" ] && [ "${d8cli#*copy_p=extensions/}" != "$d8cli" ]; then
+    ok "(d8) MCP find_referencing_symbols == CLI --json on the two-copy bind: $d8mcp"
+else no "(d8) CLI [$d8cli] vs MCP [$d8mcp]"; fi
+
+# (e4) --for is not reached by the two-copy bind
+run "$F1V" e4 --for="callers of ApplicationRef.tick"
+if [ "$( rc e4 )" = 0 ] && [ "$( count e4 '<graph_verb ' )" = 0 ] && [ "$( count e4 'copy_p' )" = 0 ]; then
+    ok "(e4) --for callers of a two-copy name: no graph block, no copy_p= (the bind is --callers / MCP only)"
+else no "(e4) rc=$( rc e4 ) graph_verb=$( count e4 '<graph_verb ' ) copy_p=$( count e4 'copy_p' )"; fi
 
 # (b1) met bridge across a declined virtual call
 RIPWIRE_NO_HOP_BODY=1 run "$F3" b1 --for="path from ConnectionImpl::onFileEvent to ConnectionManagerImpl::onData"

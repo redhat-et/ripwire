@@ -240,27 +240,6 @@ inline bool isGraphForm( std::string_view task, const std::vector<std::string_vi
     return false;
 }
 
-// A CI, tool or vendored copy: under a dot directory (.github, .circleci, .yarn), a vendoring directory, or the demo/generated tier. Such
-// a file can define the subject's symbol, even first in path order (a bundled .github action defined Angular's UrlSerializer), and it
-// is never what the subject means.
-inline bool isToolOrVendoredPath( std::string_view p ) noexcept
-{
-    if( isDemoOrGeneratedPath( p ) )
-    {
-        return true;
-    }
-    for( std::size_t start = 0, slash = p.find( '/' ); slash != std::string_view::npos; start = slash + 1, slash = p.find( '/', start ) )
-    {
-        const std::string_view dir = p.substr( start, slash - start );
-        const bool             vendoring = dir == "vendor" || dir == "third_party" || dir == "node_modules" || dir == "bower_components";
-        if( vendoring || ( dir.size() > 1 && dir.front() == '.' && dir != ".." ) )
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
 inline bool sourceClassDef( const IngestResult& ing, NodeId id )
 {
     const Symbol& s = ing.symbols[id];
