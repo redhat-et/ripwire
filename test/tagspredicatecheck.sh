@@ -167,7 +167,7 @@ check B5 '(#not-any-of? @n "keep_one" "keep_two")' 1
 # passes) stays in all three, and with no predicate all three functions match.
 MQ='(function_definition declarator: (function_declarator declarator: (identifier) @f parameters: (parameter_list (parameter_declaration declarator: (identifier) @arg) (parameter_declaration declarator: (identifier) @arg)))'
 # status: a failed --match prints no <m> rows, so the function list reads "" and the check FAILS
-fns(){ "$BIN" "$FIX/cmulti" --no-cache "--match=$MQ $1)" --legend=compact 2>/dev/null | grep -o '<m p="[^"]*" in="[^"]*"' | sed 's/.* in="//; s/"$//' | sort -u | tr '\n' ' '; }
+fns(){ "$BIN" "$FIX/cmulti" --no-cache "--match=$MQ $1)" --legend=compact 2>/dev/null | grep -o '<m p="[^"]*" in="[^"]*"' | sed 's/.* in="//; s/"$//' | sort -u | tr '\n' ' '; }   # status: an empty list fails in mcheck()
 mcheck(){ local label="$1" pred="$2" want="$3" got; got="$( fns "$pred" )"; if [ "$got" = "$want" ]; then ok "$label ${pred:-(no predicate)}: [$got]"; else no "$label ${pred:-(no predicate)}: [$got], want [$want]"; fi; }
 mcheck B8c ''                                    'both_keep first_keep none_keep '
 mcheck B8  '(#any-of? @arg "keep" "keep2")'      'both_keep '

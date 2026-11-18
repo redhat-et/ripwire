@@ -1717,7 +1717,7 @@ inline void shellNarrowFrom( ShellScan& st, FileHarvest& fh, std::size_t from, s
     {
         next.push_back( k );   // writes committed since the last call start open; next[end] is the end sentinel
     }
-    const auto open = [ & ]( std::size_t k )   // the first open write at or after k (path halving)
+    const auto firstOpen = [ & ]( std::size_t k )   // the first open write at or after k (path halving)
     {
         while( next[k] != k )
         {
@@ -1726,7 +1726,7 @@ inline void shellNarrowFrom( ShellScan& st, FileHarvest& fh, std::size_t from, s
         }
         return k;
     };
-    for( std::size_t k = open( std::min( from, end ) ); k < end; k = open( k ) )
+    for( std::size_t k = firstOpen( std::min( from, end ) ); k < end; k = firstOpen( k ) )
     {
         shellNarrowScope( fh.writes[k], line, std::uint32_t( col ) );
         next[k] = k + 1;
