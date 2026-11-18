@@ -345,6 +345,7 @@
  "mcpgrepdegradedcheck.sh": 1.1,
  "mcphandlecheck.sh": 4.8,
  "mcpincrementalcheck.sh": 11.5,
+ "mcplisttrimcheck.sh": 0.4,
  "mcpmanifestcheck.sh": 0.4,
  "mcprangeedgecheck.sh": 2.7,
  "mcpreadloopcheck.sh": 8.3,
