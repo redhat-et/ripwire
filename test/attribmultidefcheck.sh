@@ -24,7 +24,8 @@
 #     impact <rf> rollup row: the union of its symbols' tokens, the strongest mark per K. Above 16 groups the table
 #     lists the groups the page's rows name and the root says defs_listed=N; there a row prints its K, K~s and K~t tokens
 #     and ONE bare ~n when it also has by-name ties (a row tied by name alone prints no of_def: its via="name" hedges it).
-#   * Every other answer (one definition, or one definition with its own declarations) carries no table and no of_def;
+#   * Every other answer (one definition, or one definition with its own declarations) carries no table and no of_def
+#     (--impact alone names its one group as a single <def ix="1"/> row and still no of_def: test/impactsoledefcheck.sh);
 #     its rows that are one arm of a split call carry prov="split" (the map's per-edge vocabulary), whatever defs= is.
 #   * --path: a to= with several definitions carries no to_p= unless a proven hop bound it (unreached, or the hop into
 #     it is a split arm or by name: dropped); a from= with several definitions carries no from_p= when unreached.
@@ -202,6 +203,14 @@ plain(){
        && { [ -n "$allow" ] || ! awk -F'\t' '$1=="ROW" && $4 ~ /prov=split/ { f=1 } END { exit !f }' "$DIR/$tag.rows"; } \
        && [ "$( nrows "$tag" )" -gt 0 ]; then ok "[$cls] $tag: one definition group — no <def> table, no of_def$( [ -n "$allow" ] || printf ', no prov' ) ($( nrows "$tag" ) rows)"
     else no "[$cls] $tag: a one-group answer grew attribution: groups=$( groups "$tag" ), rows: $( grep '^ROW' "$DIR/$tag.rows" | cut -f2,3,4 | tr '\t\n' '= ' )"; fi
+}
+# plainSole CLASS TAG : a one-group --impact answer (IMPACT-SOLE-DEF) — exactly ONE <def> row, no of_def and no prov="split" on any row
+plainSole(){
+    local cls="$1" tag="$2"
+    if [ "$( groups "$tag" )" = 1 ] && ! awk -F'\t' '$1=="ROW" && $3!="-" { f=1 } END { exit !f }' "$DIR/$tag.rows" \
+       && ! awk -F'\t' '$1=="ROW" && $4 ~ /prov=split/ { f=1 } END { exit !f }' "$DIR/$tag.rows" \
+       && [ "$( nrows "$tag" )" -gt 0 ]; then ok "[$cls] $tag: one definition group on --impact — one <def> row, no of_def, no prov ($( nrows "$tag" ) rows)"
+    else no "[$cls] $tag: a one-group --impact answer: groups=$( groups "$tag" ) (want 1), rows: $( grep '^ROW' "$DIR/$tag.rows" | cut -f2,3,4 | tr '\t\n' '= ' )"; fi
 }
 # rowset CLASS TAG COUNT NAMES : attribution adds attributes and never removes a row — the root count and the sorted row-name
 # multiset equal the base binary's (pinned from base d4325a8c)
@@ -430,7 +439,10 @@ if ans d_impj cpp - reach json -- --impact=empty --json; then
     expect P d_impj DrivePiece "$SP"
 fi
 if mcp d_mcp cpp s impact '"symbol":"empty"'; then expect P d_mcp DriveEval "$EV"; fi
-if ans d_one cpp impact s xml -- --impact=string_piece.h:empty; then plain N d_one; fi
+# RE-PIN 2026-11-18 (lane t2-rankdefects, IMPACT-SOLE-DEF; gate test/impactsoledefcheck.sh): a one-group --impact answer names the
+# ONE definition it measured as a single <def ix="1"/> row (the radius of a change holds the file the change is made in). The arm
+# keeps what it was for — no of_def and no prov on any row of a one-group answer — and pins the table at exactly one row.
+if ans d_one cpp impact s xml -- --impact=string_piece.h:empty; then plainSole N d_one; fi
 
 # ── (E) --path endpoints ──────────────────────────────────────────────────────────────────────────────────────────────
 echo "(E) C++ --path endpoints"

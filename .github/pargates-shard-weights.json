@@ -265,6 +265,7 @@
  "impactdepthcheck.sh": 4.0,
  "impactimportcheck.sh": 1.8,
  "impactpartitioncheck.sh": 74.7,
+ "impactsoledefcheck.sh": 3.0,
  "impacttypecheck.sh": 4.0,
  "importnarrowcheck.sh": 2.8,
  "includeanglecheck.sh": 1.1,

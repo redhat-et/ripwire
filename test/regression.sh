@@ -651,6 +651,7 @@ for _g in \
     impactdepthcheck \
     impactimportcheck \
     impactpartitioncheck \
+    impactsoledefcheck \
     impacttesttiercheck \
     impacttypecheck \
     importcapcheck \

@@ -3348,7 +3348,7 @@ int emitImpactColumnar( const ImpactView& v )
         const std::size_t at = v.attrib.indexOf( v.show[ i ] );
         rowOfDef.push_back( at == SIZE_MAX ? std::string() : rw::ofDefColumnValue( v.attrib.groups, v.attrib.tokens, at ) );
     }
-    const std::string defRows = rw::defTableXml( v.ing, v.attrib.groups, v.defListing, v.rootPrefix );
+    const std::string defRows = rw::defTableXml( v.ing, v.attrib.groups, v.defListing, v.rootPrefix, rw::DefRows::SoleToo );   // IMPACT-SOLE-DEF
     // CodeRabbit 4303967681: a type impact's depth-1 rows hold the symbols that NAME the type beside its callers; the XML and
     // JSON forms say so through their <files> rollup (type_users=, via="type"), which this form does not carry. The
     // <by_type> column marks each such row (1 = reached only through a type mention), present only when one is shown.
@@ -3391,7 +3391,7 @@ int emitImpactJson( const ImpactView& v )
     const std::size_t shownRows = v.page.end - v.page.begin;
     rw::emitTo( stdout, "{{\"of\":\"{}\",\"defs\":{},\"reaches\":{}{}{}{}", jsonStr( v.sym ).c_str(), v.defs, v.reaches,
                  ( rw::impactRingKeyJson( *v.ring ) + rw::unprovenDefsKeyJson( v.unprovenDefs ) + rw::implsKeyJson( v.contractSeeds, v.implBodies ) ).c_str(),   // HOP1: the XML root's reaches_hedged=; H1: absent at zero, like its XML twin
-                 rw::defTableJson( v.ing, v.attrib.groups, v.defListing, v.rootPrefix, /*mcp=*/false ),   // attrib-multidef: the <def> table
+                 rw::defTableJson( v.ing, v.attrib.groups, v.defListing, v.rootPrefix, /*mcp=*/false, rw::DefRows::SoleToo ),   // attrib-multidef: the <def> table; IMPACT-SOLE-DEF: the one group too
                  rw::byDepthKeyJson( v.byDepth ) );                   // 0.6.5: the XML root's by_depth=, as an array
     rw::emitTo( stdout, ",\"importers\":{},\"shown_importers\":{},\"importers_capped\":{}",
                  v.imports.files.size(), v.imports.shown, v.imports.capped ? "true" : "false" );
@@ -3452,7 +3452,7 @@ int emitImpactXml( const ImpactView& v )
                  rw::graphCountFloorAttrXml( v.g ).c_str(), rw::renderDisclosure( v.prD, rw::DiscloseAs::XmlAttrs ).c_str(),
                  rw::nextAttrXml( rw::impactRootNext( v.ing, *v.ring, rw::VrRender{ v.singleRoot, v.rootPrefix }, rw::nextFlag( "--safe-delete=", v.sym ) ) )   // P3 (L7): "is it safe to change" → "can it go"; hub-fold: a ring cut / the widest hub first
                    + rw::nextAttrXml( impactAllNext( v ), "all_next" ) );   // BAND DC: a windowing root names the complete call
-    rw::emitRaw( stdout, rw::defTableXml( v.ing, v.attrib.groups, v.defListing, v.rootPrefix ).c_str() );   // attrib-multidef: the groups, by ix=
+    rw::emitRaw( stdout, rw::defTableXml( v.ing, v.attrib.groups, v.defListing, v.rootPrefix, rw::DefRows::SoleToo ).c_str() );   // attrib-multidef: the groups, by ix=; IMPACT-SOLE-DEF: the one group too
     rw::emitImpactFileRollupXml( stdout, v.ing, v.fileRollup, v.rootPrefix );   // idea #6: before the symbol window
     const rw::MemberOwners imOwners( v.ing );   // QUALNAME-1: n="Owner.name" on a member row (memberowner.h)
     for( std::size_t i = v.page.begin; i < v.page.end; ++i )
@@ -3522,7 +3522,7 @@ inline void emitImpactLegend( const rw::Config& cfg, const rw::IngestResult& ing
                  ( std::string( rw::modScopeLegend( imHasModScope ) )
                    + rw::impactRollupLegend( !imFiles.rows.empty() && !cfg.columnar, imports.umbrella, rw::impactRollupHedged( imFiles ),
                                              !imports.next.empty() && !cfg.columnar, rw::ImpactRollupTypeClauses{ imFiles.typed, imFiles.typeDefs, imFiles.typeCapped } )
-                   + rw::defTableLegend( imAttr.groups.multi(), imListing.cut )
+                   + rw::defTableLegend( imAttr.groups.multi(), imListing.cut, /*sole=*/imAttr.groups.size() == 1 )   // IMPACT-SOLE-DEF: the one-group row's clause
                    + rw::memberOwnerLegendFor( rw::memberOwnerRows( ing, std::span<const rw::NodeId>( show ).subspan( imPage.begin, imPage.end - imPage.begin ) ) ) ).c_str(),   // QUALNAME-1
                  ( std::string( rw::valueRefsReachLegend( !imValueRefs.rows.empty() ) )
                    + rw::valueRefsDepthLegendFor( imValueRefs )

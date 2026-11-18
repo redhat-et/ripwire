@@ -395,6 +395,11 @@ echo "=== (A-PIN) --legend=full is BYTE-IDENTICAL to the pre-L1 default (pinned 
 # a line are one site; no file: p='s)", +8 B, inside the 3769 B full:callers target). Checked mechanically
 # (test/sitesatshortcheck.sh arm B does the same on its own goldens): putting each row's p= file back in front of its bare
 # line and reversing that one phrase gives the previous pin byte for byte (at= masked), 3907 -> 3885 B.
+# RE-ANCHORED BY HAND 2026-11-18 (lane t2-rankdefects, IMPACT-SOLE-DEF, by design), impact.xml only: a one-group --impact answer
+# names the definition it measured (test/impactsoledefcheck.sh). Checked mechanically: the previous pin equals the 994f0021f
+# binary's --legend=full output byte for byte (at= masked); the new pin differs by exactly two insertions, the row
+# <def ix="1" t="fn" p="geometry.cpp:4"/> after the root and the sole-definition legend clause (graphlegend.h kSoleDefLegend,
+# 230 B, registered in test/legend_over_target.tsv). 4575 -> 4844 B. The six other pins are unchanged.
 PIN_DIR="$ROOT/test/compactlegendfix/pre_l1_full"
 # the one normalisation, in python on BOTH sides so no sed dialect decides it (BSD sed appends a final newline, GNU
 # sed does not): at="…" masked, trailing newlines dropped.

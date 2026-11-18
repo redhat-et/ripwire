@@ -721,10 +721,24 @@ inline bool rowSplitArm( const DefGroups& groups, const RowDefTokens& tokens, st
 inline const char* splitArmAttrXml( bool on ) noexcept { return on ? " prov=\"split\"" : ""; }
 inline const char* splitArmKeyJson( bool on ) noexcept { return on ? ",\"prov\":\"split\"" : ""; }
 
-// The <def> rows (XML; the columnar form prints the same rows before its <cols>).
-inline std::string defTableXml( const IngestResult& ing, const DefGroups& groups, const DefTableListing& listing, std::string_view rootPrefix )
+// IMPACT-SOLE-DEF (lane t2-rankdefects, gate test/impactsoledefcheck.sh): WHICH answers print the <def> rows. A multi-group
+// selector always does. A ONE-group selector does on the verb whose answer set includes the definition itself — --impact: the
+// radius of a change holds the file the change is made in, and `of="intersection" defs="1"` named that file only when a caller
+// happened to live in it — and on no other verb (attribmultidefcheck: every other one-group answer carries no table).
+enum class DefRows : std::uint8_t
 {
-    if( !groups.multi() )
+    MultiOnly,
+    SoleToo
+};
+inline bool defRowsPrint( const DefGroups& groups, DefRows when ) noexcept
+{
+    return groups.multi() || ( when == DefRows::SoleToo && groups.size() == 1 );
+}
+// The <def> rows (XML; the columnar form prints the same rows before its <cols>).
+inline std::string defTableXml( const IngestResult& ing, const DefGroups& groups, const DefTableListing& listing, std::string_view rootPrefix,
+                                DefRows when = DefRows::MultiOnly )
+{
+    if( !defRowsPrint( groups, when ) )
     {
         return {};
     }
@@ -749,9 +763,10 @@ inline std::string defTableXml( const IngestResult& ing, const DefGroups& groups
 }
 // The CLI JSON dialect: "def_table":[{"ix","t","sc","p"[,"bodyless"]}] (the XML attribute names); `mcp` spells the MCP row
 // vocabulary instead ({"ix","kind","scope","file","line"[,"bodyless"]}), the keys find_symbol's own rows use.
-inline std::string defTableJson( const IngestResult& ing, const DefGroups& groups, const DefTableListing& listing, std::string_view rootPrefix, bool mcp )
+inline std::string defTableJson( const IngestResult& ing, const DefGroups& groups, const DefTableListing& listing, std::string_view rootPrefix, bool mcp,
+                                 DefRows when = DefRows::MultiOnly )
 {
-    if( !groups.multi() )
+    if( !defRowsPrint( groups, when ) )
     {
         return {};
     }

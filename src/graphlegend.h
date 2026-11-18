@@ -1318,13 +1318,22 @@ inline constexpr const char* kDefsListedLegend =
     "defs_listed=N: above 16 groups the table lists only the N that this page's rows name, and a row enumerates no by-name tie: "
     "it prints its K, K~s and K~t tokens and one bare ~n when it also has ties by name alone; a row tied by name alone prints no "
     "of_def (its via=name is the hedge). ";
-inline std::string defTableLegend( bool table, bool cut )
+// IMPACT-SOLE-DEF: the one-group row's own clause. The multi-group clause above reads of_def tokens no row of a one-group
+// answer carries, so it is not reused.
+inline constexpr const char* kSoleDefLegend =
+    "<def ix=1 t= sc= p=> alone: the ONE definition group defs= forms (a definition with the declarations tied to it), at "
+    "file:line: the definition this radius was measured from; bodyless=1 no member has a body; no row carries of_def. ";
+inline std::string defTableLegend( bool table, bool cut, bool sole = false )
 {
     std::string clause;
     if( table )
     {
         clause = kDefTableLegend;
         clause += cut ? kDefsListedLegend : "";
+    }
+    else if( sole )
+    {
+        clause = kSoleDefLegend;
     }
     return clause;
 }
