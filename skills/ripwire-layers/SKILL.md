@@ -9,81 +9,32 @@ allowed-tools: Bash, Read
 
 # Layers with ripwire
 
-> Nearest neighbours:
-> • You want the file→file dependency graph itself (not a health read) → `--deps` is step 2 below, or
->   go straight to it if you already know you want godfiles/cycles.
-> • Reviewing YOUR OWN diff for coupling risk, not a repo-wide sweep → **ripwire-change-check**.
-> • Unfamiliar subsystem, general risk sweep (not architecture-specific) → **ripwire-fresh-eyes**.
+> Routing: reviewing YOUR OWN diff for coupling risk → **ripwire-change-check** · a general risk sweep, not
+> architecture-specific → **ripwire-fresh-eyes** · an overview without gating → **ripwire-orient**.
 
-Trigger: you want a factual picture of architectural health before a large refactor, or you're
-reviewing whether the codebase is trending toward or away from clean layering.
+Trigger: a factual picture of architectural health before a large refactor, or enforcing module boundaries in CI.
+Every metric has a NUMBER → THRESHOLD → ACTION — do not stop at reporting it.
 
-`<dir>` = repo root. Every metric below has a NUMBER → THRESHOLD → ACTION — don't stop at reporting it.
+## The decision
 
-1. **Layering rules** (if a rules file exists) — `ripwire <dir> --arch=rules.txt`
-   Output: `<arch>` with violations listed by layer pair and file. Exit 2 = NEW violations
-   found (CI gate). If no rules file exists yet, this step is the prompt to write one
-   (grammar: `layer NAME = substr…`, `deny FROM -> TO`, `allow FROM -> TO`; `#` comments).
-   **Action**: every violation is a concrete edge to either fix (remove the dependency) or
-   explicitly `allow` (document why it's intentional) — don't leave it silently baselined forever.
+| Question | Run | Act on |
+|---|---|---|
+| enforce "ui/ never imports db/" in CI | `ripwire <dir> --arch=rules.txt` — grammar `layer NAME = substr…`, `deny FROM -> TO`, `allow FROM -> TO`; exit 2 = NEW violations | fix each violation or `allow` it with a reason |
+| adopt rules on a codebase with existing debt | `ripwire <dir> --arch=rules.txt --baseline` (commit `.ripwire_arch_baseline`; later runs fail only on NEW ones) | `--baseline-update` only in its own reviewed commit |
+| is this a dependency mess? cycles, god files | `ripwire <dir> --deps --legend=compact` | `nccd` < 0.25 healthy; `shape` horizontal good; top-3 godfiles by `afferent` → name them as layers with `deny` rules; a cycle in `--report` first |
+| how far does a touch ripple? | `<metrics propagation_cost=>` from `--arch` (lower is better; > 0.3 worth a look) | the `<m path= ca= ce=>` rows show which directories drive it |
+| where do modules couple across boundaries | `ripwire <dir> --communities --legend=compact` | a high `<bridge>` count between non-adjacent clusters → a `deny` rule |
 
-   **Adopting rules on a codebase with existing debt** — the baseline workflow:
-   - `ripwire <dir> --arch=rules.txt --baseline` — accept every CURRENT violation as known
-     debt: writes a `.ripwire_arch_baseline` sidecar in the CWD (commit it), exits 0.
-   - From then on, plain `--arch=rules.txt` suppresses baselined violations and exits 2 only
-     on NEW ones — the gate stops the bleeding without demanding an up-front cleanup.
-   - `--arch=rules.txt --baseline-update` — deliberately accept new debt by merging current
-     violations into the sidecar (exit 0). Use sparingly, in its own reviewed commit.
+Trust the god-file and cycle read hardest — `afferent` and cycles are validated defect predictors; `nccd` and the
+Martin `I`/`A`/`D` block are design heuristics. A row with `no_file_edges=` is a language whose imports rarely
+resolve to files: an absent number means not measured, never zero.
 
-   **`--arch=rules.txt` also emits `<metrics propagation_cost="X.XXX">`** — the DSM
-   (design-structure-matrix) transitive-closure density: the fraction of the file-dep graph
-   reachable from an average file (MacCormack; a validated coupling *form*, computed here as a
-   directory-level estimate from name-based deps). **Direction: lower is better** — 0 means
-   files are mostly isolated from each other's transitive reach, 1 means touching any file
-   risks rippling through the whole tree. **Action at a high reading** (no fixed universal
-   threshold — compare against this same repo's own history/other modules, or treat >0.3 as
-   worth a look): a high propagation cost is a change-amplification TAX — every edit here is
-   more likely to have knock-on effects. Don't just report the number; find which directories
-   are driving it (the `<m path=... ca= ce=>` per-module rows) and formalize a boundary between
-   them — a `layer`/`deny` rule in `rules.txt` that would have caught the coupling.
+## Stop rule
 
-2. **Dependency health** — `ripwire <dir> --deps --legend=compact`
-   Output: `<deps>` with `<health>` metrics:
-   - `acd` (average component dependency) — lower is better
-   - `nccd` (normalized CCD) — < 0.25 is healthy
-   - `shape` — "horizontal" (layered, good) vs "vertical" (coupled, risk)
-   Then `<godfiles>` ranked by `afferent` (dependents) — each godfile is an implicit layer
-   boundary that hasn't been formalized. **`afferent`/cycles are validated defect predictors;
-   `nccd` (Lakos) and the `--arch` Martin Ca/Ce/I/A/D `I`/`A`/`D`/`zone=` block are design
-   heuristics — mechanistically plausible, widely implemented, but no independent
-   outcome-based study has validated them. Trust the god-file/cycle read hardest; treat
-   nccd/D as descriptive, not proof.**
-   A row with `no_file_edges=` is a language whose imports this build almost never resolves to files (Go, Java, Kotlin, C#, PHP,
-   Swift, Dart, GDScript, Clojure): `zone="unknown"` and an absent number mean not measured, never zero or uncoupled, and a
-   `ca=`/`ce=` beside the attribute is a floor.
-   **Action**: a file in the top-3 by `afferent` is doing double duty as a de-facto layer
-   boundary with no rule enforcing it — that's the concrete next step, not just a note: add it
-   as a named `layer` in `rules.txt` and write the `deny` rules that keep new dependents out of
-   its internals. A cycle in `--report` is worse than a high-afferent file — break it before
-   formalizing anything downstream of it.
+One pass answers it: run the row that matches, then classify healthy / at-risk / needs restructuring, and for
+anything at-risk name the boundary to formalize (which layer, which `deny` rule).
 
-3. **Module clustering** — `ripwire <dir> --communities --legend=compact`
-   Output: `<communities modules="N">` clusters with dominant directory and lead symbols.
-   `<bridge edges="N">` shows where clusters are tightly coupled across module boundaries.
-   High bridge counts between non-adjacent modules are the layering violations `--arch` catches.
-   **Action**: a high bridge count between two clusters that AREN'T adjacent in your intended
-   layering is the specific violation to gate — turn it into a `deny FROM -> TO` rule rather
-   than leaving it as an observation; a high bridge count between clusters that ARE meant to
-   talk to each other is fine and doesn't need a rule.
+## Reference file
 
-4. **Mermaid diagram** (optional, for visual review) — `ripwire <dir> --mermaid`
-   Output: a `flowchart LR` Mermaid snippet with module nodes and inter-module call counts.
-   Paste at mermaid.live to render. Edges labeled with high counts are the hot coupling seams —
-   same action as step 3: a heavy edge crossing an intended boundary becomes a `deny` rule.
-
-## Output
-
-Health summary: `shape=`, `nccd=`, `propagation_cost=`, cycle count (from `--report`), top 3
-god-files, and any `--arch` violations. Classify overall health: healthy / at-risk / needs
-restructuring — and for anything "at-risk" or worse, name the specific boundary to formalize
-(which layer, which `deny` rule) rather than stopping at the classification.
+`layers-reference.md` — the rules grammar and baseline workflow in full, propagation cost, dependency health,
+module clustering, the Mermaid view, and the Output shape.
