@@ -4165,37 +4165,66 @@ static bool checkLegendHandshake( const rw::Config& cfg )
     {
         return true;   // asserts nothing: not an input to check, so VALIDATE has nothing to say about it
     }
-    // argv is EXTERNAL INPUT, so the version goes through VALIDATE in the condition of the refusal (CONTRIBUTING §3).
-    if( VALIDATE( cfg.legendHave == rw::legenddict::dictionaryVersion(),
-                  "--legend-have= names the legend dictionary THIS binary holds" ) )
+    // argv is EXTERNAL INPUT, so the list goes through VALIDATE in the condition of the refusal (CONTRIBUTING §3).
+    // EVERY value must be a tier of this binary (BAND K (tiers), K2(d)): one stale value beside a valid one refuses the
+    // whole call, the same all-or-nothing as the empty-value ruling — honouring the valid one would leave the stale
+    // tier's lines in the reader's context under a meaning this binary no longer has.
+    rw::legenddict::HoldingRefusal refusal;
+    const bool                     everyValueIsATier = rw::legenddict::resolveHolding( cfg.legendHave, refusal ).has_value();
+    if( VALIDATE( everyValueIsATier, "--legend-have= names only legend tiers THIS binary holds" ) )
     {
         return true;
     }
-    rw::emitTo( stderr, "ripwire: --legend-have={} does not match this binary's legend dictionary ({}) — a ref answer would point at "
-                        "definitions you do not hold; run `ripwire --legend-dict` and pass the dictv= it prints\n",
-                std::string_view( cfg.legendHave.data(), cfg.legendHave.size() ),
-                std::string_view( rw::legenddict::dictionaryVersion() ) );
+    // THE REMEDY NAMES THE CHEAPEST TIER AND ITS REAL SIZE. It used to prescribe the whole dictionary, a ~130 KB read to
+    // repair a handshake whose point is not re-reading definitions. The sizes are computed here, not written.
+    rw::emitTo( stderr, "ripwire: --legend-have={} does not match this binary's legend dictionary or any tier of it — a ref answer would "
+                        "leave out definitions you do not hold, so nothing is served{}. Read the core again: `ripwire --legend-dict=core` "
+                        "({} B, {} definitions) and pass the have= on its line 1; `ripwire --legend-dict=KEY` is the core plus one verb's "
+                        "pack. The whole dictionary is dictv={} ({} B)\n",
+                refusal.unknown.empty() ? std::string_view( "(an empty list item)" ) : std::string_view( refusal.unknown ),
+                refusal.recognised.empty() ? std::string() : " (the rest of the list named: " + refusal.recognised + ")",
+                rw::legenddict::coreTierText().size(), rw::legenddict::kCoreTierEntryCount,
+                std::string_view( rw::legenddict::dictionaryVersion() ), rw::legenddict::fullDictionaryText().size() );
     return false;
 }
 
-// The ref stage, applied to a finished COMPACT answer when the caller proved it holds the dictionary. A served-everything
-// session is exactly the state of such a reader, so the existing MCP transform does the work unchanged — no second
-// implementation of the posture, which is the point of routing it through here.
+// The ref stage, applied to a finished COMPACT answer when the caller named the tiers it holds. The session is served
+// EXACTLY those tiers' lines (resolveHolding) and nothing else, so the MCP transform does the rest unchanged: an entry
+// the caller holds is dropped, an entry it does not hold stays in THIS answer, in the trailing comment. Until lane
+// dict-core-packs this was session.serveAll() — every definition dropped whatever the reader held, which was honest only
+// because the one holding a caller could name was the entire dictionary.
 static void applyCliRefPosture( const rw::Config& cfg, std::string& doc )
 {
     if( cfg.legendHave.empty() )
     {
         return;
     }
-    rw::legenddict::LegendSession session;
-    session.serveAll();                       // the handshake asserted every definition is already with the reader
-    const rw::legenddict::RefOutcome outcome = rw::legenddict::applyRefPosture( doc, session );
-    if( outcome == rw::legenddict::RefOutcome::NotApplicable )
+    rw::legenddict::HoldingRefusal        refusal;
+    std::optional<rw::legenddict::Holding> holding = rw::legenddict::resolveHolding( cfg.legendHave, refusal );
+    if( !holding )
     {
-        // Not a shape this dictionary reduces (no XML root, or a legend it does not hold). The answer is served
-        // UNCHANGED and complete; only the saving is missed, so this is a cost note and never a wrong answer.
         DISCLOSE( Diagnostics::answerUnchanged, "the inline answer is a correct superset of the ref one: only the cost stays",
-                  "applyCliRefPosture: --legend-have= on an answer the legend dictionary cannot reduce — inline legend kept" );
+                  "applyCliRefPosture: the holding checkLegendHandshake accepted no longer resolves — inline legend kept" );
+        return;
+    }
+    // AN ANSWER SERVED INLINE SAYS SO (BAND K (tiers), control C4). Both outcomes below are correct — the inline answer
+    // is a superset — but the caller passed the flag believing bytes were saved, and exit 0 with an unchanged answer and
+    // an empty stderr is the silence the empty-value ruling exists to prevent. Stdout is untouched: one line on stderr
+    // names WHICH of the two it was, which is also what lets the gate count them apart.
+    switch( rw::legenddict::applyRefPosture( doc, holding->session, holding->label ) )
+    {
+        case rw::legenddict::RefOutcome::Ref:
+            break;
+        case rw::legenddict::RefOutcome::NotApplicable:
+            DISCLOSE( Diagnostics::answerUnchanged, "the inline answer is a correct superset of the ref one: only the cost stays",
+                      "applyCliRefPosture: --legend-have= on an answer the legend dictionary cannot reduce — inline legend kept" );
+            rw::emitRaw( stderr, "ripwire: --legend-have=: not-applicable — this answer's legend is not one the legend dictionary reduces, so it "
+                                 "is served whole with every definition in it; nothing was saved\n" );
+            break;
+        case rw::legenddict::RefOutcome::InlineKept:
+            rw::emitRaw( stderr, "ripwire: --legend-have=: inline-kept — with the definitions you do not hold the reduced answer would not be "
+                                 "shorter, so it is served whole; nothing was saved\n" );
+            break;
     }
 }
 
@@ -4423,6 +4452,61 @@ static bool installMemoryGuard( const rw::Config& cfg )
     return true;
 }
 
+// r2-LO: the session legend dictionary for a human (or a harness that holds a session of its own) — the text
+// ripwire://legend-dict/full serves, one TIER of it, or a view (legenddict.h). Like --version, answered wherever it
+// stands and nothing else runs. Returns the exit code, or -1 when no --legend-dict was asked.
+// EVERY occurrence is read before anything is printed. Answering at the FIRST one made acceptance depend on
+// ORDER: `--legend-dict=roster --legend-dict=bad` printed the roster and exited 0, while the same two flags the
+// other way round exited 1 — one command line, two verdicts, and a typo silently honoured. argv is external
+// input, so each occurrence is checked with VALIDATE.
+static int answerLegendDict( int argc, char** argv )
+{
+    using namespace rw;
+    // lane dict-core-packs: the forms are `roster`, `tiers`, `index`, `core`, or a schema KEY (the core plus that verb's
+    // pack). Any other value refuses — and so do two DIFFERENT forms on one command line.
+    bool             wantFull = false;
+    std::string_view wantForm;
+    bool             formsDiffer = false;
+    for( int i = 1; i < argc; ++i )
+    {
+        const std::string_view a = argv[ i ];
+        if( a == "--legend-dict" ) { wantFull = true; continue; }
+        if( a.starts_with( "--legend-dict=" ) )
+        {
+            const std::string_view v = a.substr( 14 );
+            if( !VALIDATE( std::ranges::contains( legenddict::kDictForms, v ) || legenddict::isSchemaKey( v ),
+                           "--legend-dict= names a form it takes: roster, tiers, index, core or a schema key" ) )
+            {
+                rw::emitTo( stderr, "ripwire: --legend-dict= takes core (the {}-definition core tier), a schema KEY such as callers (the core plus "
+                                    "that verb's pack; --legend-dict=tiers lists them), roster, tiers or index — got '{}'; bare --legend-dict "
+                                    "prints the whole dictionary\n", legenddict::kCoreTierEntryCount, v );
+                return 1;
+            }
+            formsDiffer = formsDiffer || ( !wantForm.empty() && wantForm != v );
+            wantForm    = v;
+        }
+    }
+    // Two forms asked is a question with two answers, not a preference: refused rather than quietly served one.
+    if( formsDiffer || ( wantFull && !wantForm.empty() ) )
+    {
+        rw::emitRaw( stderr, "ripwire: --legend-dict prints the dictionary and --legend-dict=FORM one view of it (core, a schema KEY, roster, "
+                             "tiers, index) — pass one, not both\n" );
+        return 1;
+    }
+    if( wantFull || !wantForm.empty() )
+    {
+        const std::string text = wantFull              ? legenddict::fullDictionaryText()
+                               : wantForm == "roster" ? legenddict::rosterText()
+                               : wantForm == "tiers"  ? legenddict::tiersText()
+                               : wantForm == "index"  ? legenddict::indexText()
+                               : wantForm == "core"   ? legenddict::coreTierText()
+                                                      : legenddict::packTierText( wantForm );
+        rw::emitRaw( stdout, text.c_str() );
+        return 0;
+    }
+    return -1;
+}
+
 static int finishMainRun( const rw::Config& cfg, char** argv );
 
 int main( int argc, char** argv )
@@ -4436,39 +4520,9 @@ int main( int argc, char** argv )
         return runWrap( argc, argv, selfExecutablePath( argv[0] ) );
     }
 
-    // r2-LO: the session legend dictionary for a human (or a harness that holds a session of its own) — the text
-    // ripwire://legend-dict/full serves, or `=roster`, the completeness attributes it defines (legenddict.h). Like
-    // --version, answered wherever it stands and nothing else runs.
-    // EVERY occurrence is read before anything is printed. Answering at the FIRST one made acceptance depend on
-    // ORDER: `--legend-dict=roster --legend-dict=bad` printed the roster and exited 0, while the same two flags the
-    // other way round exited 1 — one command line, two verdicts, and a typo silently honoured. argv is external
-    // input, so each occurrence is checked with VALIDATE.
-    bool wantFull = false, wantRoster = false;
-    for( int i = 1; i < argc; ++i )
+    if( const int dictRc = answerLegendDict( argc, argv ); dictRc >= 0 )
     {
-        const std::string_view a = argv[ i ];
-        if( a == "--legend-dict" ) { wantFull = true; continue; }
-        if( a.starts_with( "--legend-dict=" ) )
-        {
-            const std::string_view v = a.substr( 14 );
-            if( !VALIDATE( v == "roster", "--legend-dict= names the one form it takes" ) )
-            {
-                rw::emitTo( stderr, "ripwire: --legend-dict= takes roster — got '{}'; bare --legend-dict prints the dictionary\n", v );
-                return 1;
-            }
-            wantRoster = true;
-        }
-    }
-    // Both forms asked is a question with two answers, not a preference: refused rather than quietly served one.
-    if( wantFull && wantRoster )
-    {
-        rw::emitRaw( stderr, "ripwire: --legend-dict prints the dictionary and --legend-dict=roster the attributes it defines — pass one, not both\n" );
-        return 1;
-    }
-    if( wantFull || wantRoster )
-    {
-        rw::emitRaw( stdout, wantRoster ? legenddict::rosterText().c_str() : legenddict::fullDictionaryText().c_str() );
-        return 0;
+        return dictRc;
     }
 
     const Config cfg = parseArgs( argc, argv );

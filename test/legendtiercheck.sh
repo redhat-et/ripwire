@@ -44,6 +44,7 @@ echo "legendtiercheck: BIN=$BIN"
 fail=0
 
 # ── the fixture: C with tests, an interface with implementors, JS with a top-level call (the <file-scope> owner),
+#    names defined twice (clamp, scale: the <def ix=> / of_def= rows a real --callers answer carries), and
 #    one file no grammar reads (graph_unindexed=) ─────────────────────────────────────────────────────────────────────
 FX="$TMP/fx"
 mkdir -p "$FX/src" "$FX/tests" "$FX/web" "$FX/docs"
@@ -72,7 +73,9 @@ const struct shape_ops rect_ops = { rect_area };
 EOF
 cat >"$FX/src/tri.c" <<'EOF'
 #include "shape.h"
-static int tri_area(const struct shape *s) { return s->w * s->h / 2 + helper(2); }
+static int clamp(int v) { return v > 9 ? 9 : v; }
+int scale(int v) { return clamp(v) * 3; }
+static int tri_area(const struct shape *s) { return clamp(s->w * s->h / 2) + helper(2) + scale(1); }
 const struct shape_ops tri_ops = { tri_area };
 EOF
 for n in a b c d e f g h i j; do
@@ -87,6 +90,8 @@ function render(v) { return format(v) + "!"; }
 function boot() { return render("x"); }
 boot();
 render(format("top"));
+function scale(v) { return format(v) + render(v); }
+scale(1);
 module.exports = { format, render, boot, Emitter, Bus, Hub };
 EOF
 cat >"$FX/web/only.js" <<'EOF'
@@ -238,7 +243,7 @@ def row_multiset(body):
     return sorted(out)
 
 # ── collection ───────────────────────────────────────────────────────────────────────────────────────────────────────
-CELLS = [("callers", s) for s in ("helper", "work", "area", "render", "format", "clamp")]
+CELLS = [("callers", s) for s in ("helper", "work", "scale", "render", "format", "clamp")]
 CELLS += [("callees", s) for s in ("work", "total", "main", "render", "boot", "area")]
 CELLS += [("impact", s) for s in ("helper", "work", "clamp", "format", "render", "area")]
 CELLS += [("uses", s) for s in ("helper", "work", "area", "render", "format", "clamp")]
@@ -250,6 +255,9 @@ CELLS += [("pack-task", t) for t in ("change how helper clamps", "render a strin
                                      "double the work result", "format a value")]
 CELLS += [("lego", s) for s in ("Emitter", "shape_ops")]
 CELLS += [("dead-code", None), ("whereis", "helper"), ("whereis", "render")]
+# schemas the census never measured (their tier is the core alone); --notes and --flags have so little legend that the
+# reduced answer is not shorter, which is the inline-kept outcome
+CELLS += [("naming-consistency", None), ("notes", None), ("flags", None)]
 CELLS += [("for", t) for t in ("change how helper clamps", "render a string with a suffix")]
 
 def argv(cell):
@@ -496,9 +504,10 @@ def a_core_answer_with_carry(d):
     for c in d["cells"]:
         if "core" in c["runs"] and is_ref(c["runs"]["core"][1]):
             doc = c["runs"]["core"][1]
-            m = re.search(r"<!-- (?!files=)[^>]*? --><about ", doc)
-            if m:
-                return c, m
+            end = doc.find(" --><about ")
+            start = doc.rfind("<!-- ", 0, end) if end >= 0 else -1
+            if start >= 0 and "-->" not in doc[start:end]:
+                return c, (start, end + 4)
     return None, None
 
 def set_run(c, h, doc):
@@ -508,12 +517,21 @@ def set_run(c, h, doc):
 def m1(d):
     c, m = a_core_answer_with_carry(d)
     doc = c["runs"]["core"][1]
-    set_run(c, "core", doc[:m.start()] + "<about " + doc[m.end():])
+    set_run(c, "core", doc[:m[0]] + doc[m[1]:])
 def m2(d):
     m1(d)
     for c in d["cells"]:
         if "core" in c["runs"]:
             set_run(c, "core", c["runs"]["core"][1].replace('have="core"', 'have="full"'))
+def m2b(d):
+    for c in d["cells"]:
+        if "core" in c["runs"]:
+            set_run(c, "core", c["runs"]["core"][1].replace('have="core"', 'have="full"'))
+def m3b(d):
+    v = d["core"].version
+    d["core"] = Tier(d["core"].text.replace(v, v[:-1] + ("0" if v[-1] != "0" else "1"), 1))
+def m7c(d):
+    d["core"] = d["core"].rebuilt(d["core"].lines + ["under ref, a forty-byte structural line more"])
 def m3(d):
     keep = [l for l in d["core"].lines if not l.startswith("next=")]
     d["core"] = d["core"].rebuilt(keep, keep_version=True)
@@ -565,6 +583,10 @@ MUTANTS = [
     ("M9a", m9a, {"K5"},          "one row deleted"),
     ("M9b", m9b, {"K5"},          "one root attribute's value changed"),
     ("M10", m10, {"R0"},          "the roster is empty"),
+    # not among the registered eleven: three single-arm mutants, so K2c, K2a and K4a each have evidence of their own
+    ("M2b", m2b, {"K2c"},         "solo: have= over-claims and nothing else changes"),
+    ("M3b", m3b, {"K2a"},         "solo: the core's have= is one digit off its lines"),
+    ("M7c", m7c, {"K4a"},         "solo: one exempt line takes the core past 1,536 B"),
 ]
 
 # ── the run ──────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -641,7 +663,7 @@ if data["core"] and data["packs"].get("callers") and data["packs"].get("grep") a
         ok = must <= red
         extra = ""
         if name == "M1":
-            ok = ok and any("next=" in b or "root=" in b or ":" in b for b in F2["K1"])
+            ok = ok and any(re.search(r" under core: \S+.*— dropped", b) for b in F2["K1"])   # it names the definition lost
         if name == "M7a":
             ok = ok and "K1" not in red; extra = "; K1 stays green"
         if name == "M7b":

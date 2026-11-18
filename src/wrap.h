@@ -299,10 +299,11 @@ inline std::vector<std::string_view> wrapUseWhenBlurbLines( const bool readBefor
         "- Before writing a new fn/class/helper: `--exemplar=\"<what you're writing>\" --legend=compact` — duplicates are born on small tasks.",
         "- Before calling work done: `--quality-delta --legend=compact` (what you made worse), then `--test-gate --legend=compact`.",
         "- Trust notes: counts marked counts_floor are floors, not totals; a zero means \"none found\", never \"none exists\".",
-        "- Legend posture: the commands above ask for the compact legend (terse definitions of only the attributes present); add `--legend=full` when a definition's reasoning is needed — a term you do not recognise, a floor or cap you need explained, a map a human will read. On a LONG session only, `ripwire --legend-dict` read in FULL (line 1 names its `dictv=`) lets `--legend-have=<that dictv>` drop legend prose from every answer, nothing lost; it is about 130 KB and takes on the order of 140 calls to repay, the flag asserts you hold every line, and a dictv you merely looked up backs nothing — so on a short session pass none.",
-        // HONEST COST (2026-11-17): this line used to teach a first-line cut of the dictionary ("names its dictv="),
-        // 78 B read and 130 KB asserted, and called it a one-off that pays on every later call. It pays after about
-        // 140 calls (126,314 B against 896 B saved per call, measured over 453 answers), so the line now says who it is for.
+        "- Legend posture: the commands above ask for the compact legend (terse definitions of only the attributes present); add `--legend=full` when a definition's reasoning is needed — a term you do not recognise, a floor or cap you need explained, a map a human will read. On a session of about 10 or more ripwire calls, `ripwire --legend-dict=core` read in FULL (13 definitions, about 1.5 KB; its line 1 carries `have=`) lets `--legend-have=<that have>` leave those definitions out of every answer, nothing lost: a definition you do not hold stays in the answer that needs it. `ripwire --legend-dict=KEY` (callers, impact, grep…) is the core plus one verb's pack and repays within 3 calls of that verb. The flag asserts you read the lines, and a value you merely looked up backs nothing — so on a shorter session pass none.",
+        // HONEST COST (2026-11-17, lane dict-core-packs): this line first taught a first-line cut of the dictionary (78 B
+        // read, 130 KB asserted), then the whole dictionary (about 131 calls to repay). It now teaches the core TIER:
+        // 1,512 B, repaid in 11 calls over 453 measured answers (9 over the 388 that are not --for), and a verb's pack
+        // within 3 calls of that verb. The two comment lines below describe the legend's share, which is unchanged.
         // THE ONE-OFF THAT PAYS ON EVERY LATER CALL -- on a session long enough to repay it. The legend is a near-fixed per-answer cost (531-4,305 B,
         // median 1,796), so its SHARE grows as answers shrink: 14 % of a --for bundle, 62 % of a --whereis
         // answer. Measured -30 % over 80 recorded answers, and -31 % over the nine non-for verbs together.

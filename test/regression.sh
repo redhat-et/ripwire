@@ -688,6 +688,7 @@ for _g in \
     legenddriftcheck \
     legendhavecheck \
     legendrefcheck \
+    legendtiercheck \
     legobundlecheck \
     legocheck \
     legotransitivecheck \

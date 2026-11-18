@@ -50,7 +50,7 @@ Two limits apply to nearly everything here and are not repeated in every section
 
 **security — scan skill files for injection / exfiltration patterns (exit 2 = CRITICAL, 1 = WARN,** — [`--scan-skill`](#--scan-skillfile) · [`--scan-skills`](#--scan-skillsdir) · [`--force`](#--force)
 
-**knobs / modes** — [`--rank-by`](#--rank-bypagerankauthorityhubrrfchurnchurn-decay) · [`--in`](#--indir) · [`--format`](#--formatxmlcolumnarrows) · [`--format`](#--formatcandidates) · [`--legend`](#--legendfullcompactdictlast) · [`--legend-dict`](#--legend-dictroster) · [`--legend-have`](#--legend-havedictv) · [`--json`](#--json) · [`--limit`](#--limitn---offsetm) · [`--exclude`](#--excludesubstr) · [`--map-diff`](#--map-diff) · [`--cache`](#--cachepath) · [`--index-out`](#--index-outbase) · [`--no-cache`](#--no-cache) · [`--no-ignore`](#--no-ignore) · [`--max-file-size`](#--max-file-sizenkmg) · [`--max-memory`](#--max-memorynkmg) · [`--refetch`](#--refetch) · [`--scip`](#--scipindexscip) · [`--pin-census`](#--pin-censusfile) · [`--mcp`](#--mcp) · [`--mcp-legend`](#--mcp-legendwhen) · [`--mcp-tools`](#--mcp-toolslist) · [`--lsp`](#--lsp) · [`--listen`](#--listenhostport) · [`--mcp-token`](#--mcp-tokent) · [`--allow-remote-edits`](#--allow-remote-edits) · [`--eval-stray`](#--eval-strayfile) · [`--eval`](#--eval) · [`--eval-retrieval`](#--eval-retrieval) · [`--eval-mined`](#--eval-minedfile) · [`--eval-skills`](#--eval-skillsfile) · [`-h`](#-h---help) · [`-v`](#-v---version)
+**knobs / modes** — [`--rank-by`](#--rank-bypagerankauthorityhubrrfchurnchurn-decay) · [`--in`](#--indir) · [`--format`](#--formatxmlcolumnarrows) · [`--format`](#--formatcandidates) · [`--legend`](#--legendfullcompactdictlast) · [`--legend-dict`](#--legend-dictcorekey) · [`--legend-have`](#--legend-havehavehave) · [`--json`](#--json) · [`--limit`](#--limitn---offsetm) · [`--exclude`](#--excludesubstr) · [`--map-diff`](#--map-diff) · [`--cache`](#--cachepath) · [`--index-out`](#--index-outbase) · [`--no-cache`](#--no-cache) · [`--no-ignore`](#--no-ignore) · [`--max-file-size`](#--max-file-sizenkmg) · [`--max-memory`](#--max-memorynkmg) · [`--refetch`](#--refetch) · [`--scip`](#--scipindexscip) · [`--pin-census`](#--pin-censusfile) · [`--mcp`](#--mcp) · [`--mcp-legend`](#--mcp-legendwhen) · [`--mcp-tools`](#--mcp-toolslist) · [`--lsp`](#--lsp) · [`--listen`](#--listenhostport) · [`--mcp-token`](#--mcp-tokent) · [`--allow-remote-edits`](#--allow-remote-edits) · [`--eval-stray`](#--eval-strayfile) · [`--eval`](#--eval) · [`--eval-retrieval`](#--eval-retrieval) · [`--eval-mined`](#--eval-minedfile) · [`--eval-skills`](#--eval-skillsfile) · [`-h`](#-h---help) · [`-v`](#-v---version)
 
 ---
 
@@ -4608,7 +4608,7 @@ $ ./build/ripwire . --quality-delta --legend=full
 ... [23 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--legend-have`
+**Shaped by:** `--legend-dict`, `--legend-have`
 
 **Caveats (stated by the binary):**
 
@@ -4616,11 +4616,11 @@ $ ./build/ripwire . --quality-delta --legend=full
 - under --token-budget it never costs a row --legend=full would keep, unless its own header is the larger one and the row pays for <sigs next=> to fit.
 - ref is the MCP server's SESSION posture, not a CLI one: once a session reads the resource ripwire://legend-dict, answers list rows first, carry each definition once per session and end with <about legend="ref" dict= dictv=/>.
 
-### `--legend-dict[=roster]`
+### `--legend-dict[=core|KEY]`
 
-**Answers:** print the session legend dictionary, or with =roster the attributes it defines.
+**Answers:** print the legend dictionary, or one TIER of it to hold with --legend-have= Bare: the whole dictionary the MCP server serves as ripwire://legend-dict/full, one definition per line, headed by its dictv= (FNV-1a 64 of the lines).
 
-Prints the dictionary the MCP server serves as ripwire://legend-dict/full: one definition per line, headed by its dictv= (FNV-1a 64 of the lines, the version a ref answer's <about dictv=> names). =roster lists the completeness attributes it defines (attr, element, source), the roster test/legendrefcheck.sh reads. Answered wherever it stands on the command line; nothing else runs.
+=core: the 13 definitions every ref answer leans on (about 1.5 KB). =KEY, a schema key such as callers or impact: the core plus that verb's PACK, the definitions at least a third of its measured answers carried (+0.4 to +3.5 KB; census=0 means none was measured and the text is the core alone). Line 1 of a tier carries have=, the value --legend-have= takes; it hashes exactly the entries= lines after it. =tiers lists every tier (name, have=, entries, bytes, census); =roster the completeness attributes the dictionary defines; =index every entry by what it defines. Answered wherever it stands; nothing else runs.
 
 **Try it**
 
@@ -4628,7 +4628,7 @@ _The session legend dictionary the MCP server serves as ripwire://legend-dict/fu
 
 ```
 $ ./build/ripwire . --legend-dict
-ripwire legend dictionary ripwire.dict/v1 dictv=cf491fcb08dfcb9a entries=1149
+ripwire legend dictionary ripwire.dict/v1 dictv=77abbc34e11e55aa entries=1156
 <about legend="ref" dict= dictv=>: the answer's rows come first; its root keeps only task= changed= from= to=, and this LAST child carries every other root attribute unchanged (schema= included); legend="ref": a definition is sent once per session (this dictionary's core, or the first answer that ne … [line truncated: 83 more bytes on this line]
 schema=ripwire.KEY/v1: the line ripwire.KEY/v1 below reads the answer's rows
 window: shown= total= capped= has_more= next_offset= offset= limit= page a list (capped=1 cut; next_offset= pastes as offset=)
@@ -4647,15 +4647,17 @@ ripwire.pack-top-n/v1 <ctx>: the ranked map plus <src p=> bodies of the top-N sy
 
 **Shaped by:** `--legend`, `--legend-have`
 
-### `--legend-have=DICTV`
+### `--legend-have=HAVE[,HAVE]`
 
-**Answers:** you HOLD that legend dictionary: every line `ripwire --legend-dict` prints, read by you (about 130 KB;
+**Answers:** say which legend tiers you HOLD;
 
-its line 1 names dictv=). So this answer takes the ref posture: no legend prose, a closing <about legend="ref" dict= dictv=/> pointing at it, and the root and rows unchanged -- no fact is dropped or moved. The flag is an ASSERTION: a dictv= passed without the lines behind it leaves every dropped definition unread. Reading them takes on the order of 140 calls to repay, so on a short session pass nothing. Measured -30.4 % over 80 recorded answers (-8 % to -57 % by verb). A version that is not this binary's is REFUSED, naming both.
+their definitions are left out of the answer you HOLD those legend tiers: every line `ripwire --legend-dict=core` (or =KEY) printed, read by you. HAVE is the have= on that text's line 1; several join with commas. The answer takes the ref posture: rows first, the root unchanged, a closing <about legend="ref" have="core" …/> naming what was assumed. A definition you hold is left out; one you do NOT hold stays in THIS answer, in a comment after its rows — nothing is ever left to a dictionary you were only pointed at. The flag is an ASSERTION the binary cannot check: have= echoes argv, not receipt. Measured on 453 answers of 12 verbs, five corpora: the core repays in 11 calls (9 over the 388 that are not --for); a pack within 3 calls of its verb; core + the verb's pack keeps 86 % of what holding everything saves. --for answers are not reduced (0 of 65), and say so on stderr. Under about 10 calls pass nothing. REFUSED: an empty value; any value that is no tier of this binary, even beside a valid one; --mcp/--listen/--lsp; --legend=full. The whole dictionary's dictv= is a valid HAVE too (have="full"), about 130 KB and about 130 calls to repay.
+
+**Shaped by:** `--legend-dict`
 
 **Caveats (stated by the binary):**
 
-- A version that is not this binary's is REFUSED, naming both.
+- The flag is an ASSERTION the binary cannot check: have= echoes argv, not receipt.
 
 ### `--json`
 
@@ -5023,7 +5025,7 @@ $ ./build/ripwire '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' '{"jso
 ... [30 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--no-stable`, `--no-redact`, `--agent`, `--mcp-tools`, `--lsp`, `--listen`
+**Shaped by:** `--no-stable`, `--no-redact`, `--agent`, `--legend-have`, `--mcp-tools`, `--lsp`, `--listen`
 
 **Caveats (stated by the binary):**
 
@@ -5079,6 +5081,8 @@ $ ./build/ripwire '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' '{"jso
 
 saved-state answers, UTF-8 positions, counts are floors. Refuses --mcp/--listen (one protocol per stdin).
 
+**Shaped by:** `--legend-have`
+
 **Caveats (stated by the binary):**
 
 - saved-state answers, UTF-8 positions, counts are floors.
@@ -5090,7 +5094,7 @@ saved-state answers, UTF-8 positions, counts are floors. Refuses --mcp/--listen 
 
 Binds 127.0.0.1 by default (bare PORT = loopback); one listener serves ONE workspace fixed at startup. A non-loopback host (e.g. 0.0.0.0:8080) REQUIRES --mcp-token and refuses to start without it. No TLS — reverse-proxy it.
 
-**Shaped by:** `--no-stable`, `--lsp`, `--allow-remote-edits`
+**Shaped by:** `--no-stable`, `--legend-have`, `--lsp`, `--allow-remote-edits`
 
 **Caveats (stated by the binary):**
 

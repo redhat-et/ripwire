@@ -18691,3 +18691,105 @@ Not that a core makes the handshake pay for a short session. Not anything about 
 repayment figure. Not that the census is complete: schemas with no measured answer have no pack. Not
 that `--legend-have=` proves receipt — it is argv, echoed after validation. Nothing about envoy, vscode,
 llvm or any corpus outside the five.
+
+## READOUT — BAND K (tiers): the core repays in 11 calls on the registered cells, core + pack keeps 85.7 %, and no answer drops a definition its reader does not hold
+
+Built binary: `integration/byte-token-070` + lane `dict-core-packs`. Gate `test/legendtiercheck.sh` green;
+the same rules re-run over the 453 registered cells × five holdings (2,200 answers, one process per
+answer, private `TMPDIR`). Bytes only: no timing, no memory.
+
+### Amendment 11a — what moved between registration and the build, stated rather than absorbed
+
+- **The core is 13 lines, not 12.** `<about have=>` is a new attribute and needs a definition the reader
+  holds; it is an entry of the CLI's core tier and not of `kCoreEntries`, so the MCP session never carries
+  it. B is 1,512 B against the design's modelled 1,444.
+- **The inline-kept cell is required after all.** `--notes` and `--flags` have so little legend that the
+  reduced answer is not shorter; the gate counts them (4 across holdings) and zero is now a FAIL.
+- **Fixture, not bar.** The first fixture's `--callers` cells were simpler than any corpus answer (no
+  `<def ix=>` / `of_def=` rows) and put the callers pack at 3.27 against the bar of 3. A name defined twice
+  was added so the cells carry what corpus answers carry (2.27; 2.0 on the 39 corpus cells). The bar was
+  not moved.
+- **A pack line is printed once.** Two reading rows can spell one definition; the first build printed
+  `hop_tests=` twice in the callers pack (99 B). Tiers hold LINES, so the duplicate is dropped and both
+  rows count as held.
+- **Three mutants beyond the registered ones** (M2b, M3b, M7c) each change one thing, so K2(c) and K2(a)
+  have evidence of their own. **K2(b), K4(a), K4(b) and K4(c) still fire only beside another arm** — M4
+  cannot share a version without also breaking that pack's own hash, and any core that grows trips its
+  size, quotient and frequency arms together. Registered in advance as a limit of the evidence: they are
+  kept because each states a different bar, not because a mutant isolates them.
+
+### The registered rule, on the 453 cells
+
+| rule | result |
+| --- | --- |
+| K1 held or carried | **0 failures** over 1,552 ref answers (core 388, own pack 388, another pack 388, full 388; the 65 `--for` cells are not-applicable under every holding and byte-identical to the default) |
+| K5 nothing lost / never longer | 0 failures |
+| K4(a) B | 1,512 B ≤ 1,536 |
+| K4(b) ceil(B/S), pooled, n = 453 | S = 148.6 B per call → **11** ≤ 12 |
+| K4(c) | lowest core term on the 388 reducible cells: `est_tokens=` 143 = 36.9 % |
+| core + own pack, share of the full-dictionary saving | 849.8 / 991.8 = **85.7 %** ≥ 80 %: packs ship |
+
+Repayment before and after, per population — the pooled figure is the registered one; the rest are
+reported so nobody has to guess what it hides:
+
+| population | n | whole dictionary: S, calls | core: S, calls |
+| --- | ---: | --- | --- |
+| all registered cells | 453 | 991.8 B, 133 | 148.6 B, **11** (10.2) |
+| without `--for` | 388 | 1,158.0 B, 114 | 173.5 B, 9 (8.7) |
+| tmux | 119 | — | 134.6 B, 12 (11.2) |
+| koa | 84 | — | 93.4 B, **17** (16.2) |
+| nushell | 84 | — | 175.1 B, 9 (8.6) |
+| terraform | 83 | — | 172.1 B, 9 (8.8) |
+| cpython | 83 | — | 174.3 B, 9 (8.7) |
+
+**koa alone fails the bar of 12.** 26 of its 84 cells are `--for`, which nothing here reduces. The bar is
+registered on the pooled cells and is met there; it would not be met by a session shaped like koa's
+cells, and the sentence to publish is the pooled pair with its n — never "single-digit".
+
+K3, per pack, cell grain, on the corpus cells (cost = `bytes(--legend-dict=KEY) − bytes(--legend-dict=core)`):
+
+| pack | n | cost | gain per call over the core | calls of that verb to repay | share of the full saving kept |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| callers | 39 | 1,085 B | 550.0 B | 2.0 | 73.4 % |
+| callees | 39 | 787 | 403.5 | 2.0 | 64.8 % |
+| impact | 39 | 2,300 | 1,483.1 | 1.6 | 85.7 % |
+| uses | 39 | 415 | 324.9 | 1.3 | 87.7 % |
+| grep | 39 | 2,287 | 1,663.3 | 1.4 | 94.8 % |
+| around | 39 | 1,649 | 1,159.6 | 1.4 | 92.8 % |
+| expand | 39 | 783 | 566.2 | 1.4 | 96.1 % |
+| affected | 29 | 1,123 | 773.3 | 1.5 | 94.9 % |
+| pack-task | 65 | 1,501 | 748.9 | 2.0 | 80.7 % |
+| lego | 16 | 493 | 268.3 | 1.8 | 91.6 % |
+| dead-code | 5 | 693 | 477.4 | 1.5 | 84.4 % |
+
+40 more schemas have a pack from one to nine census answers each (three corpora, one cell apiece for
+most). **K3 was not measured for them** — the gate prints `ABSENT` — and their packs are floors on a
+census that small. 28 schema keys have no census and answer the core with `census=0`.
+
+### The gate's own cells (fixture, n = 62)
+
+B = 1,512, S = 150.8 B per call, `ceil(B/S)` = 11. K3 between 1.28 (uses) and 2.80 (impact) on the eight
+packs with five cells. Non-vacuity: 58 cells carry a definition inline under the core, 39 are fully
+covered by core + own pack, 2 not-applicable, 4 inline-kept, 12 with the module-scope clause, 4 whose
+schema key is not their flag's name, 4 on a schema with no census.
+
+### The premise, on the unchanged binary
+
+`--legend-dict=core` refused (K2a); K1 and K3 UNREACHABLE under any holding smaller than the dictionary;
+no answer says what it assumed (K2c, 57 answers); the mismatch refusal does not name the core (K2d); K4
+with B = 131,571 and `ceil(B/S)` = 151 on the gate's cells (131.3 on the 453); an inline answer under the
+handshake is silent (C4). K1 under the whole dictionary PASSES there: the `<file-scope>` defect the design
+measured is fixed on this train, and tiering keeps it fixed — M5 is that defect, re-created, and goes red
+as UNENTERED.
+
+### Not done, and not claimed
+
+- **No definition became unobtainable.** Every entry is a line of `ripwire --legend-dict`; the tiers are
+  subsets of it (K2a checks the subset), and an entry in no named tier is in the answer.
+- `--legend=dict` still drops every definition for a pointer to the whole dictionary. It is an explicit
+  opt-in posture with its own gate and was not changed; it is the one CLI path left that serves a reader
+  as if it held all 1,156 lines.
+- The session-level figures of the design (break-even at call 8–16 under assumed verb weights) were not
+  re-measured and are not gated.
+- The `have=` flag itself is caller output on every call (30 B and up); bytes only, no token price.
+- No sanitizer build was run for this band.

@@ -132,7 +132,7 @@ for v in VERBS:
     # every ORIGINAL pair must survive with its value ON THE ROOT; <about> is the legend pointer (legend=/dict=/dictv=)
     # and a root fact found only there counts as LOST, which is what it is to a reader of the prefix
     missing = [kv for kv in want if have.count(kv) < want.count(kv)]
-    missing += [kv for kv in pairs(ab.group(0) if ab else "") if kv[0] not in ("legend", "dict", "dictv")]
+    missing += [kv for kv in pairs(ab.group(0) if ab else "") if kv[0] not in ("legend", "have", "dict", "dictv")]
     if ba == body_b and not missing:
         ok += 1
         print("  PASS  (C1) %-22s LOSSLESS: body byte-identical, every root attribute kept ON THE ROOT with its value" % v)
@@ -364,25 +364,33 @@ teach = open(os.path.join(WORK, "teach.err"), encoding="utf-8").read()
 helpt = open(os.path.join(WORK, "help.txt"), encoding="utf-8", errors="replace").read()
 full  = subprocess.run([BIN, "--legend-dict"], capture_output=True).stdout
 def obtains(cmd):
-    """Run a taught command as written (ripwire -> BIN). Why it does NOT deliver the dictionary, or '' when it does."""
+    """Run a taught command as written (ripwire -> BIN). Why it does NOT deliver what its value asserts, or '' when it does.
+    The command may print the whole dictionary or one TIER of it (lane dict-core-packs: --legend-dict=core, =KEY). Either
+    way the bar is the same: line 1 names a version and entries=N, the N lines after it are ALL there and hash to that
+    version, and the handshake accepts it. test/legendtiercheck.sh (K1) holds what an answer may then drop."""
     got = subprocess.run(["sh", "-c", 'ripwire() { "$RW_BIN" "$@"; }; ' + cmd], capture_output=True,
                          env=dict(os.environ, RW_BIN=os.path.abspath(BIN))).stdout
-    text = got.decode("utf-8", "replace")
-    if got != full:
-        missing = [e for e in sorted(used) if e not in text.split("\n")]
-        return "prints %d B of the dictionary's %d B, and %d of the %d definitions the answers above dropped are not in it" % (
-            len(got), len(full), len(missing), len(used))
-    m = re.search(r"dictv=([0-9a-f]{16})", text.split("\n", 1)[0])
-    if not m or subprocess.run([BIN, ".", "--callers=main", "--legend-have=" + m.group(1)], capture_output=True).returncode != 0:
-        return "its line 1 names no dictv= the handshake accepts"
+    lines = got.decode("utf-8", "replace").split("\n")
+    m = re.search(r"\b(?:have|dictv)=([0-9a-f]{16})\b", lines[0])
+    n = re.search(r"\bentries=(\d+)\b", lines[0])
+    if not m or not n:
+        return "its line 1 names no have=/dictv= and entries="
+    body = lines[1:1 + int(n.group(1))]
+    h = 14695981039346656037
+    for b in ("".join(l + "\n" for l in body)).encode():
+        h = ((h ^ b) * 1099511628211) & 0xFFFFFFFFFFFFFFFF
+    if len(body) != int(n.group(1)) or "%016x" % h != m.group(1):
+        return "prints %d of the %s line(s) its version stands for (%d B)" % (len(body), n.group(1), len(got))
+    if subprocess.run([BIN, ".", "--callers=main", "--legend-have=" + m.group(1)], capture_output=True).returncode != 0:
+        return "its line 1 names a version the handshake refuses"
     return ""
 taught = [c for c in re.findall(r"`([^`]+)`", teach) if c.startswith("ripwire --legend-dict")]
 say(len(taught) >= 1, "T0", "the empty-value refusal teaches a `ripwire --legend-dict ...` command (%d found; zero fails this arm)" % len(taught))
 CUT = " | he" + "ad -1"   # spelled in two pieces so (T2) can scan this file
 for cmd in taught:
     why = obtains(cmd)
-    say(not why, "T1", "taught command `%s` delivers what --legend-have= asserts: all %d B, every dropped definition, an accepted dictv=%s"
-        % (cmd, len(full), "" if not why else " -- NO: " + why))
+    say(not why, "T1", "taught command `%s` delivers what --legend-have= asserts: every line its version hashes, and a value the handshake accepts%s"
+        % (cmd, "" if not why else " -- NO: " + why))
     why = obtains(cmd + CUT)
     say(bool(why), "T1x", "control: the same command cut to its first line is REJECTED (%s)" % (why or "it passed -- (T1) cannot see the defect"))
 
@@ -402,21 +410,26 @@ say(not hits, "T2", "no guidance site pipes the dictionary into a first-line cut
 say(len(sites) >= 8 and SCAN.search("ripwire --legend-dict" + CUT) is not None and SCAN.search("ripwire --legend-dict") is None, "T2x",
     "control: the scanner fires on a planted first-line cut and not on the bare command")
 
-COST = re.compile(r"about ([0-9]+) KB")
+# (T3) THE COST STATED IS THE COST. Every guidance site states what the CORE costs to read, and any size stated beside
+# the handshake is within 10 % of a text the binary really prints: the core tier, or the whole dictionary.
+core = subprocess.run([BIN, "--legend-dict=core"], capture_output=True).stdout
+COST = re.compile(r"about ([0-9]+(?:\.[0-9]+)?) KB")
 stated = []
 COST_SITES = ("the empty-value refusal", "--help=all", "skills/ripwire-router/SKILL.md", "skills/ripwire-mcp/SKILL.md", "src/wrap.h")
 for name in COST_SITES:
     text = sites.get(name, "")
     for m in re.finditer(r"legend-(?:have|dict)", text):
         for c in COST.finditer(text[max(0, m.start() - 700): m.end() + 700]):
-            stated.append((name, int(c.group(1))))
+            stated.append((name, float(c.group(1))))
 stated = sorted(set(stated))
-off = ["%s says about %d KB" % s for s in stated if abs(s[1] * 1000 - len(full)) * 10 > len(full)]
-mute = [n for n in COST_SITES if n not in {s[0] for s in stated}]
-say(not mute and not off, "T3",
-    "the cost stated beside the handshake is the cost: %d of %d guidance sites say %s; the dictionary is %d B (10 %% band)%s%s"
-    % (len(COST_SITES) - len(mute), len(COST_SITES), "/".join(sorted({"about %d KB" % s[1] for s in stated})) or "nothing", len(full),
-       "" if not off else " -- WRONG: " + "; ".join(off), "" if not mute else " -- SILENT on the cost: " + ", ".join(mute)))
+near = lambda kb, size: abs(kb * 1000 - size) * 10 <= size
+off = ["%s says about %g KB" % s for s in stated if not near(s[1], len(core)) and not near(s[1], len(full))]
+mute = [n for n in COST_SITES if not any(s[0] == n and near(s[1], len(core)) for s in stated)]
+say(bool(core) and not mute and not off, "T3",
+    "the cost stated beside the handshake is the cost: %d of %d guidance sites state the core's (%d B), every stated size is "
+    "within 10 %% of the core or of the whole dictionary (%d B)%s%s"
+    % (len(COST_SITES) - len(mute), len(COST_SITES), len(core), len(full),
+       "" if not off else " -- WRONG: " + "; ".join(off), "" if not mute else " -- SILENT on the core's cost: " + ", ".join(mute)))
 sys.exit(fail)
 PY
 [ $? -eq 0 ] || fail=1

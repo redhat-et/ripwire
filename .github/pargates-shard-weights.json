@@ -294,6 +294,7 @@
  "legenddefaultcheck.sh": 30.0,
  "legenddriftcheck.sh": 121.8,
  "legendrefcheck.sh": 4.3,
+ "legendtiercheck.sh": 30.0,
  "legobundlecheck.sh": 10.2,
  "legocheck.sh": 9.6,
  "legotransitivecheck.sh": 2.0,
