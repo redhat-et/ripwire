@@ -198,7 +198,10 @@ fi
 # overloads, prov="split").
 argtype(){   # argtype SYM "p= set" split|bound "why" — the callee p= set exactly, and whether its prepend/put/... rows are split arms
     local out got want split
-    out="$( callees "$FIX/argtype" "$1" )"
+    if ! out="$( callees "$FIX/argtype" "$1" )"; then
+        no "argtype --callees=$1 exited non-zero — $4"
+        return
+    fi
     got="$( printf '%s' "$out" | grep -oE '<s [^>]*p="buf\.cc:[0-9]+"[^>]*>' | grep -oE 'p="[^"]*"' | sed 's/^p="//; s/"$//' | sort | tr '\n' ' ' )"
     want="$( printf '%s\n' $2 | sort | tr '\n' ' ' )"
     split="$( printf '%s' "$out" | grep -oE '<s [^>]*p="buf\.cc:[0-9]+"[^>]*>' | grep -c 'prov="split"' )"
@@ -228,7 +231,7 @@ argtype farCaller                  "buf.cc:4 buf.cc:5"   split "[N] far::View sp
 # NAME-ONLY call through a field of an unindexed type (real_.relay) keep exactly today's edge onto the namesake sibling — the pick
 # never runs on a tier no lookup tied to the call (the envoy hand check found both shapes: context.h Buffer::set, FailingSignUtility)
 while read -r rgSite rgWant rgSym; do
-    RG="$( callees "$FIX/argtype" "@$rgSite" | grep -oE '<s [^>]*p="watermark\.cc:[0-9]+"[^>]*>' | grep -oE 'p="[^"]*"' | tr '\n' ' ' )"
+    RG="$( callees "$FIX/argtype" "@$rgSite" | grep -oE '<s [^>]*p="watermark\.cc:[0-9]+"[^>]*>' | grep -oE 'p="[^"]*"' | tr '\n' ' ' )"   # status: the exact p= set is the verdict; a failed run prints no row and FAILs the arm
     if [ "$RG" = "p=\"$rgWant\" " ]; then
         ok "argtype --callees=@$rgSite ($rgSym) = { $rgWant } unchanged (receiver guard)"
     else
@@ -239,11 +242,11 @@ watermark.cc:58 watermark.cc:59 Wrapped::wrap
 watermark.cc:66 watermark.cc:67 Relay::relay
 RGSITES
 # the callers side of the same edges: Owned::prepend( View ) is called by prependView and never by prependInstance
-CALLV="$( "$BIN" "$FIX/argtype" --callers=@buf.cc:4 --no-cache 2>/dev/null )"
-if printf '%s' "$CALLV" | grep -qE '<s [^>]*n="Watermark::prependView"' && ! printf '%s' "$CALLV" | grep -qE '<s [^>]*n="Watermark::prependInstance"'; then
+CALLV="$( "$BIN" "$FIX/argtype" --callers=@buf.cc:4 --no-cache 2>/dev/null )"; CALLRC=$?
+if [ "$CALLRC" = 0 ] && printf '%s' "$CALLV" | grep -qE '<s [^>]*n="Watermark::prependView"' && ! printf '%s' "$CALLV" | grep -qE '<s [^>]*n="Watermark::prependInstance"'; then
     ok "argtype --callers=@buf.cc:4 lists prependView, not prependInstance"
 else
-    no "argtype --callers=@buf.cc:4 rows: $( printf '%s' "$CALLV" | grep -oE '<s [^>]*n="[^"]*"' | tr '\n' ' ' )"
+    no "argtype --callers=@buf.cc:4 rc=$CALLRC rows: $( printf '%s' "$CALLV" | grep -oE '<s [^>]*n="[^"]*"' | tr '\n' ' ' )"
 fi
 
 # ── 4) determinism — byte-identical run-to-run over all three fixtures ──────────────────────────────
