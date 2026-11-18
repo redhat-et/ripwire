@@ -8680,7 +8680,7 @@ struct Narrower
         for( NodeId b : standingBases )
         {
             const std::uint32_t baseFile = IdentityNarrower::fileOf( b, ids );
-            if( baseFile == file || IdentityNarrower::includeNamesAsSuffix( file, baseFile, ids ) )
+            if( baseFile == file || IdentityNarrower::includeNamesAsSuffix( { .fromFile = file, .defFile = baseFile }, ids ) )
             {
                 direct = b;
                 ++directCount;
