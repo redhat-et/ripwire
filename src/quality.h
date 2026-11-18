@@ -3150,6 +3150,7 @@ constexpr std::uint32_t kIngestParserVerMirror    = 331;  // MUST equal ingest.c
                                                           //   cpp-ptr-alias (placeholder 321): a C++ Type / ParamType record whose declarator names the variable carries kDirectDeclaratorBit
                                                           //   overload-split (placeholder 329): a Go qualified generic instantiation keeps its package qualifier
                                                           //   small-edges-1118 (placeholder 323): a Go method expression `(*T).m` in a value position is a Value row (GO-METHOD-EXPR)
+                                                          //   edge-strays-1118 (placeholder 327): Rust `<T as Trait>::m` calls are qualified by T, else by Trait
                                                           // 309 = 2026-11-13 (lane macro-p0 placeholder: C-family macro invocations read as typeless declarators are uses, not defs; + macro-p1 trailing annotation macros; rich 310)
                                                           // 307 = 2026-11-11 (lane rust-macro-path placeholder: Rust path macro sites + `$crate::m!` in transcribers; rich 308)
                                                           // 305 = 2026-11-10 (#446 round 1: C++ base clauses as @reference.base captures; above main 303 and PR head 304; rich 306)

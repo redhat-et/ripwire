@@ -977,9 +977,93 @@ inline std::string rustEnclosingScopeOf( TSNode node, std::string_view src, bool
     return {};
 }
 
+// RUST-UFCS-QUALIFIED: is `name` a type parameter of an item enclosing `node` — `fn f<T>`, `impl<T> … for T`, `trait Tr<T>`? Each
+// parameter's own name is its first identifier (`T` in `T: Bound`), never a bound. A path written through one names no type.
+inline bool rustEnclosingTypeParam( TSNode node, std::string_view name, std::string_view src )
+{
+    for( TSNode p = parentOf( node ); !ts_node_is_null( p ); p = parentOf( p ) )
+    {
+        const char* t = ts_node_type( p );
+        if( !kindIs( t, "function_item" ) && !kindIs( t, "impl_item" ) && !kindIs( t, "trait_item" ) )
+        {
+            continue;
+        }
+        const TSNode params = fieldChild( p, NodeField::TypeParameters );
+        for( std::uint32_t i = 0, k = ts_node_is_null( params ) ? 0u : ts_node_named_child_count( params ); i < k; ++i )
+        {
+            TSNode id = ts_node_named_child( params, i );
+            if( !kindIs( ts_node_type( id ), "type_identifier" ) )
+            {
+                const TSNode named = fieldChild( id, NodeField::Name );
+                id = !ts_node_is_null( named ) ? named : ts_node_named_child_count( id ) > 0 ? ts_node_named_child( id, 0 ) : TSNode{};
+            }
+            if( !ts_node_is_null( id ) && kindIs( ts_node_type( id ), "type_identifier" ) && nodeTextOf( id, src ) == name )
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// RUST-UFCS-QUALIFIED: the ONE type a bracketed path's written type names — `Where`, `a::Where` and `Where<T>` → "Where", a
+// primitive `u8` → "u8", `Self` → the enclosing impl's type. "" when it names no one type: a type parameter, `Self` of an impl
+// for one, an associated type reached through either (`B::Owned`, `Self::Item`), and every shape that is not a path (`&T`,
+// `dyn Tr`, `[T]`, a tuple).
+inline std::string rustBracketedTypeName( TSNode type, TSNode at, std::string_view src )
+{
+    const TSNode base = kindIs( ts_node_type( type ), "generic_type" ) ? fieldChild( type, NodeField::Type ) : type;
+    if( ts_node_is_null( base ) )
+    {
+        return {};
+    }
+    const char*            kind = ts_node_type( base );
+    const std::string_view text = nodeTextOf( base, src );
+    if( kindIs( kind, "primitive_type" ) )
+    {
+        return std::string( text );
+    }
+    if( !kindIs( kind, "type_identifier" ) && !kindIs( kind, "scoped_type_identifier" ) )
+    {
+        return {};
+    }
+    const std::size_t      sep  = text.find( "::" );
+    const std::string_view root = sep == std::string_view::npos ? text : text.substr( 0, sep );
+    if( root == "Self" )
+    {
+        const std::string self = rustEnclosingScopeOf( at, src, /*includeModules=*/false );
+        return sep != std::string_view::npos || self.empty() || rustEnclosingTypeParam( at, self, src ) ? std::string{} : self;
+    }
+    return rustEnclosingTypeParam( at, root, src ) ? std::string{} : rustPathSegment( text );
+}
+
+// RUST-UFCS-QUALIFIED: the qualifier of a call whose path is a bracketed type. `<Where as Command>::run( .. )` names Where's impl of
+// Command::run and `<Where>::helper( .. )` Where's own helper, so the qualifier is the type's name, which keepRustQualifiedCandidates
+// (graph.h) holds the call to — a type the tree does not define declines it, never every same-named method. A written type that
+// names no one type (rustBracketedTypeName "") qualifies by the trait it is cast to or is (`<T as Tr>::m`, `<dyn Tr>::m`): the
+// call dispatches to Tr's implementors. "" for any other shape (`<&T>::m`), which keeps the bare-name resolution.
+inline std::string rustBracketedQualifier( TSNode bracketed, TSNode at, std::string_view src )
+{
+    const TSNode inner = ts_node_named_child_count( bracketed ) == 1 ? ts_node_named_child( bracketed, 0 ) : TSNode{};
+    if( ts_node_is_null( inner ) )
+    {
+        return {};
+    }
+    const bool   cast  = kindIs( ts_node_type( inner ), "qualified_type" );
+    const TSNode type  = cast ? fieldChild( inner, NodeField::Type ) : inner;
+    std::string  named = ts_node_is_null( type ) ? std::string{} : rustBracketedTypeName( type, at, src );
+    if( !named.empty() )
+    {
+        return named;
+    }
+    const TSNode trait = cast ? fieldChild( inner, NodeField::Alias )
+                       : kindIs( ts_node_type( inner ), "dynamic_type" ) ? fieldChild( inner, NodeField::Trait ) : TSNode{};
+    return ts_node_is_null( trait ) ? std::string{} : rustPathSegment( nodeTextOf( trait, src ) );
+}
+
 // Qualifier of a Rust CALL reference whose @name is the final segment of a `scoped_identifier`:
-// `Widget::new()` → "Widget", `util::deep::deepfn()` → "deep", `Vec::<u32>::new()` → "Vec".
-// Returns "" for every other shape (bare `free()`, `w.bump()`, `generic::<u32>()`, and the crate-root `::f()`
+// `Widget::new()` → "Widget", `util::deep::deepfn()` → "deep", `Vec::<u32>::new()` → "Vec", `<Where as Command>::run()` → "Where"
+// (rustBracketedQualifier). Returns "" for every other shape (bare `free()`, `w.bump()`, `generic::<u32>()`, and the crate-root `::f()`
 // spelling, which has no `path:` child) → those keep the pre-existing bare-name resolution untouched.
 // This is a CALL ref (isInherit=false). graph.h's Rust `impl Trait for T` CHA path reads `qualifier` too, but
 // only behind `if( !ir.isInherit ) continue;`, so the two uses of the field cannot collide — gated by
@@ -990,6 +1074,10 @@ inline std::string rustQualifierOf( TSNode nameNode, std::string_view src )
     if( ts_node_is_null( parent ) || !kindIs( ts_node_type( parent ), "scoped_identifier" ) )
     {
         return {};
+    }
+    if( const TSNode path = fieldChild( parent, NodeField::Path ); !ts_node_is_null( path ) && kindIs( ts_node_type( path ), "bracketed_type" ) )
+    {
+        return rustBracketedQualifier( path, nameNode, src );
     }
 
     std::string qualifier = rustPathSegment( nodeTextOf( fieldChild( parent, NodeField::Path ), src ) );
