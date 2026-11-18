@@ -780,6 +780,7 @@ for _g in \
     mcpwatchercheck \
     mdembedcheck \
     mdsectioncheck \
+    memceilingcheck \
     memguardcheck \
     memstatscheck \
     mentioncapcheck \

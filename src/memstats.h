@@ -11,6 +11,7 @@
 // test/memstatscheck.sh's plateau arm) cannot read an unknown as "nothing held" (CodeRabbit 4543019678).
 #include "infra/emit.h"   // rw::emitTo
 #include "infra/os.h"     // rw::os::mem_footprint / mem_footprint_peak
+#include "memceiling.h"   // lane M2 prototype: the phase a memory-ceiling refusal names
 
 #include <cstdint>
 #include <cstdlib>  // std::getenv
@@ -48,6 +49,7 @@ inline std::string reading( std::uint64_t bytes )
 // `unavailable`)
 inline void mark( std::string_view phase )
 {
+    memceiling::notePhase( phase.data() );   // every caller passes a string literal, so data() is NUL-terminated and lives forever
     if( !enabled() )
     {
         return;
