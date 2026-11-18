@@ -183,7 +183,7 @@ if [ -s "$DIR/p_fn.out" ]; then
     say $? "(5) [P] default legend: the answer that prints the row defines <def ix=" "(5) [P] default legend: <def ix= is printed and never defined"
 fi
 if run p_full py --impact=area --legend=full; then
-    grep -q 'the ONE definition group' "$DIR/p_full.out"
+    grep -q 'the ONE defs= group' "$DIR/p_full.out"
     say $? "(5) [P] --legend=full: the sole-definition clause rides" "(5) [P] --legend=full: no clause defines the sole <def> row"
     ! grep -q 'K~s' "$DIR/p_full.out"
     say $? "(5) [N] --legend=full: the multi-group of_def clause does not ride a one-group answer" \

@@ -706,7 +706,8 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // attrib-multidef (defattrib.h; graphlegend.h kDefTableLegend): the definition table of a multi-group selector, its rows'
     // ties, the cut table's count, and the columnar split column. Present-only, element-scoped. A row's prov="split" (Q1) reads
     // through the shared prov= row above, which already fires on any prov= in the payload.
-    { "ix",                "<def ix= t= sc= p= bodyless=1>: the groups defs= forms (a definition, then each declaration tied to it, same ix=; bodyless=1 no body)", true, "def" },
+    // DEF-READING-TRIM (lane s1-small, test/verbdefrowscheck.sh (11)): 133 -> 111 B, same readings (V1 measured the legend at ~2x the rows).
+    { "ix",                "<def ix= t= sc= p= bodyless=1>: defs= groups: definition, then tied declarations (same ix=; bodyless=1 no body)", true, "def" },
     { "defs_listed",       "defs_listed=N: above 16 groups, only the N this page's rows name are listed; K~n not enumerated: a bare ~n = also by name, a by-name-only row has no of_def" },
     { "of_def",            "of_def=K..: the def ix=K groups the row belongs to; K resolved edge, K~s edge labelled split, K~n by name alone, K~t into a primary template whose specialisation is listed; NOT a claim the edge is false", true, "s" },
     { "of_def",            "c of_def=K..: the def ix=K groups that caller belongs to (K~s split label, K~n by name, K~t primary template); NOT a claim the edge is false", true, "c" },

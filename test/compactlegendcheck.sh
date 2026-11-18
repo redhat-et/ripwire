@@ -405,6 +405,9 @@ echo "=== (A-PIN) --legend=full is BYTE-IDENTICAL to the pre-L1 default (pinned 
 # the rows <def ix="1" t="fn" p="geometry.cpp:4"/><def ix="1" t="fn" p="geometry.h:12" bodyless="1"/> after the root and the
 # sole-definition clause (graphlegend.h kSoleDefLegend); impact.xml by the tied declaration's row (geometry.h:12) and the clause's
 # rewording ("this radius" -> "this answer", the tied-declaration sentence). 3875 -> 4187 B and 4844 -> 4887 B. Five others unchanged.
+# RE-ANCHORED BY HAND 2026-11-18 (lane s1-small, DEF-READING-TRIM, by design; gate test/verbdefrowscheck.sh (11)), callers.xml and
+# impact.xml only: the old kSoleDefLegend sentence replaced by the shortened one (graphlegend.h), string for string, nothing else
+# (checked mechanically against a fresh --legend=full run, at= masked). 4197 -> 4144 B and 4903 -> 4850 B. Five others unchanged.
 PIN_DIR="$ROOT/test/compactlegendfix/pre_l1_full"
 # the one normalisation, in python on BOTH sides so no sed dialect decides it (BSD sed appends a final newline, GNU
 # sed does not): at="…" masked, trailing newlines dropped.

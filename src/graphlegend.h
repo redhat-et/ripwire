@@ -1322,14 +1322,16 @@ inline constexpr const char* kDefsListedLegend =
 // IMPACT-SOLE-DEF: the one-group row's own clause. The multi-group clause above reads of_def tokens no row of a one-group
 // answer carries, so it is not reused.
 // VERB-DEF-ROWS (lane v1-verbdef): the same clause on --callers and --uses, and the tied declarations' own rows.
+// DEF-READING-TRIM (lane s1-small, test/verbdefrowscheck.sh (11)): this clause and kUsesDefTableLegend were shortened with no
+// reading dropped (222 -> 169 B, 193 -> 153 B); the arm pins a byte ceiling AND the terms each must still carry.
 inline constexpr const char* kSoleDefLegend =
-    "<def ix=1 t= sc= p=> alone: the ONE definition group defs= forms, at file:line: the definition this answer was measured from, "
-    "then each tied declaration as its own row (same ix); bodyless=1 no body; no row carries of_def. ";
+    "<def ix=1 t= sc= p=> alone: the ONE defs= group: the definition measured, at file:line, then its tied declarations "
+    "(same ix); bodyless=1 no body; no row carries of_def. ";
 // VERB-DEF-ROWS: --uses with several groups. Its rows are use-sites, which name no group, so the multi-group clause's of_def reading
 // does not apply; above 16 groups it lists none.
 inline constexpr const char* kUsesDefTableLegend =
-    "<def ix= t= sc= p= bodyless=1> rows: the GROUPS the defs= definitions form, a definition then each tied declaration as its "
-    "own row (same ix); bodyless=1 no body. A use-site row names no group. ";
+    "<def ix= t= sc= p= bodyless=1> rows: the defs= GROUPS, a definition then tied declarations (same ix; bodyless=1 no body); "
+    "a use-site row names no group. ";
 inline constexpr const char* kUsesDefsListedLegend = "defs_listed=0: above 16 groups no group is listed (a use-site row names none). ";
 enum class DefLegendFor : std::uint8_t
 {

@@ -232,6 +232,29 @@ if [ -s "$DIR/p1_callers.body" ]; then
     say $? "(9) [C] --callers=area minus its <def> row is the parent's answer byte for byte" "(9) [C] --callers=area stripped: '$got'"
 fi
 
+# ── (11) [P] the <def> reading is short and still complete (lane S1, results/S1_SMALL_1118) ───────────────────────────
+# V1's own readout: on callers and uses the legend cost about twice the rows (+5.4 KB vs +2.7 KB, +7.3 KB vs +4.4 KB pooled
+# over 48 held-out cells). The readings were shortened with no meaning dropped; this arm pins both halves of that: a byte
+# ceiling (RED on V1's e6671f267: compact 133 B, one-group 220 B, --uses 160+42 B) and the terms each reading must still carry.
+# clause TAG START : the legend clause of TAG.out that begins with START, up to its terminator ('. ' or ' -->')
+clause(){ START="$2" perl -0ne 'my $s = index( $_, $ENV{START} ); exit 0 if $s < 0; my $r = substr( $_, $s ); $r =~ s/(\. | -->).*//s; print $r' "$DIR/$1.out"; }
+need(){ local txt="$1" what="$2"; shift 2; local w; for w in "$@"; do case "$txt" in *"$w"*) ;; *) no "(11) [P] $what lost '$w': '$txt'"; return 1;; esac; done; return 0; }
+c11="$( clause p2_callers '<def ix= t= sc= p= bodyless=1>:' )"
+if [ "${#c11}" -gt 0 ] && [ "${#c11}" -le 112 ]; then ok "(11) [P] compact <def> reading is ${#c11} B (ceiling 112)"; else no "(11) [P] compact <def> reading is ${#c11} B (ceiling 112): '$c11'"; fi
+need "$c11" "compact <def> reading" 'defs=' 'definition' 'tied declarations' 'same ix=' 'bodyless=1 no body' && ok "(11) [P] compact <def> reading keeps defs=, definition, tied declarations, same ix=, bodyless=1"
+if run p11_full c --callers=tally --legend=full; then
+    s11="$( clause p11_full '<def ix=1 t= sc= p=> alone:' )"
+    if [ "${#s11}" -gt 0 ] && [ "${#s11}" -le 175 ]; then ok "(11) [P] full one-group <def> clause is ${#s11} B (ceiling 175)"; else no "(11) [P] full one-group <def> clause is ${#s11} B (ceiling 175): '$s11'"; fi
+    need "$s11" "full one-group clause" 'ONE' 'defs=' 'file:line' 'measured' 'tied declaration' 'same ix' 'bodyless=1 no body' 'no row carries of_def' \
+        && ok "(11) [P] full one-group clause keeps ONE group, file:line, measured-from, tied declarations, bodyless=1, no of_def"
+fi
+if run p11_ufull multi --uses=render --legend=full; then
+    u11="$( clause p11_ufull '<def ix= t= sc= p= bodyless=1> rows:' )"
+    if [ "${#u11}" -gt 0 ] && [ "${#u11}" -le 155 ]; then ok "(11) [P] full --uses <def> clause is ${#u11} B (ceiling 155)"; else no "(11) [P] full --uses <def> clause is ${#u11} B (ceiling 155): '$u11'"; fi
+    need "$u11" "full --uses clause" 'GROUPS' 'defs=' 'definition' 'tied declaration' 'same ix' 'bodyless=1 no body' 'use-site row names no group' \
+        && ok "(11) [P] full --uses clause keeps groups, tied declarations, bodyless=1, use-site rows name no group"
+fi
+
 # ── (10) [C] determinism and well-formedness ────────────────────────────────────────────────────────────────────────
 if run c10 c --uses=tally; then
     cmp -s "$DIR/c10.out" "$DIR/p2_uses.out"
