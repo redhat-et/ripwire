@@ -551,6 +551,22 @@ struct CalleeEdgeTimes
     std::uint32_t times = 0;
 };
 
+// Walks a calleeEdgeTimes list beside pass 1's ascending edge loop: timesOf( e ) is how often edge e's name is scanned.
+struct CalleeTimesCursor
+{
+    const std::vector<CalleeEdgeTimes>& listed;
+    std::size_t                         at = 0;
+
+    std::uint32_t timesOf( std::uint32_t edge ) noexcept
+    {
+        if( at < listed.size() && listed[ at ].edge == edge )
+        {
+            return listed[ at++ ].times;
+        }
+        return 1u;
+    }
+};
+
 namespace calleefield
 {
 struct NamedEdge
@@ -558,7 +574,7 @@ struct NamedEdge
     std::string_view name;
     std::uint32_t    edge = 0;
 };
-struct SharedName   // one caller's edges that share a callee name: edges [ first, first + count ) of `NamedEdge` scratch
+struct SharedName   // one caller's out-edges that share a callee name (their indices: SharedNames::edges below)
 {
     NodeId           caller = kNoNode;
     std::string_view name;
@@ -575,45 +591,55 @@ struct CallerName
     }
 };
 
-// Every caller's groups of two or more out-edges whose targets share a name; `edges` receives the grouped edge
-// indices, each group's run ascending.
-inline std::vector<SharedName> sharedCalleeNames( const IngestResult& ing, const std::vector<std::uint32_t>& outOff,
-                                                  const std::vector<NodeId>& outTargets, std::vector<std::uint32_t>& edges )
+// Every caller's groups of two or more out-edges whose targets share a name, each group's edge run ascending.
+struct SharedNames
 {
-    std::vector<SharedName> groups;
-    std::vector<NamedEdge>  scratch;
-    const std::size_t       callers = outOff.empty() ? 0 : std::min( outOff.size() - 1, ing.symbols.size() );
+    std::vector<SharedName>    groups;
+    std::vector<std::uint32_t> edges;   // the grouped edge indices; group g owns [ g.firstEdge, g.firstEdge + g.edgeCount )
+
+    // `named` is ONE caller's out-edges; sorts them by (name, edge) and keeps each run of two or more.
+    void addCaller( NodeId caller, std::vector<NamedEdge>& named )
+    {
+        std::sort( named.begin(), named.end(), []( const NamedEdge& a, const NamedEdge& b )
+        {
+            const auto byName = sortutil::svCompare( a.name, b.name );
+            return byName != 0 ? byName < 0 : a.edge < b.edge;
+        } );
+        for( std::size_t runStart = 0, runEnd = 0; runStart < named.size(); runStart = runEnd )
+        {
+            for( runEnd = runStart + 1; runEnd < named.size() && named[ runEnd ].name == named[ runStart ].name; ++runEnd ) {}
+            if( runEnd - runStart < 2 )
+            {
+                continue;
+            }
+            groups.push_back( { caller, named[ runStart ].name, std::uint32_t( edges.size() ), std::uint32_t( runEnd - runStart ) } );
+            for( std::size_t k = runStart; k < runEnd; ++k )
+            {
+                edges.push_back( named[k].edge );
+            }
+        }
+    }
+};
+
+inline SharedNames sharedCalleeNames( const IngestResult& ing, const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets )
+{
+    SharedNames            shared;
+    std::vector<NamedEdge> named;
+    const std::size_t      callers = outOff.empty() ? 0 : std::min( outOff.size() - 1, ing.symbols.size() );
     for( std::size_t i = 0; i < callers; ++i )
     {
         if( outOff[i + 1] - outOff[i] < 2 )
         {
             continue;
         }
-        scratch.clear();
+        named.clear();
         for( std::uint32_t e = outOff[i]; e < outOff[i + 1]; ++e )
         {
-            scratch.push_back( { ing.symbols[ outTargets[e] ].name, e } );
+            named.push_back( { ing.symbols[ outTargets[e] ].name, e } );
         }
-        std::sort( scratch.begin(), scratch.end(), []( const NamedEdge& a, const NamedEdge& b )
-        {
-            const auto byName = sortutil::svCompare( a.name, b.name );
-            return byName != 0 ? byName < 0 : a.edge < b.edge;
-        } );
-        for( std::size_t a = 0, b = 0; a < scratch.size(); a = b )
-        {
-            for( b = a + 1; b < scratch.size() && scratch[b].name == scratch[a].name; ++b ) {}
-            if( b - a < 2 )
-            {
-                continue;
-            }
-            groups.push_back( { NodeId( i ), scratch[a].name, std::uint32_t( edges.size() ), std::uint32_t( b - a ) } );
-            for( std::size_t k = a; k < b; ++k )
-            {
-                edges.push_back( scratch[k].edge );
-            }
-        }
+        shared.addCaller( NodeId( i ), named );
     }
-    return groups;
+    return shared;
 }
 
 // The references the grouped callers make, as (caller, spelled name), sorted: one row per site.
@@ -640,23 +666,22 @@ inline std::vector<CallerName> groupedCallerSites( const IngestResult& ing, cons
 inline std::vector<CalleeEdgeTimes> calleeEdgeTimes( const IngestResult& ing, const std::vector<std::uint32_t>& outOff,
                                                      const std::vector<NodeId>& outTargets )
 {
-    std::vector<std::uint32_t>                 groupedEdges;
-    const std::vector<calleefield::SharedName> groups = calleefield::sharedCalleeNames( ing, outOff, outTargets, groupedEdges );
-    std::vector<CalleeEdgeTimes>               out;
-    if( groups.empty() )
+    const calleefield::SharedNames shared = calleefield::sharedCalleeNames( ing, outOff, outTargets );
+    std::vector<CalleeEdgeTimes>   out;
+    if( shared.groups.empty() )
     {
         return out;
     }
-    const std::vector<calleefield::CallerName> sites = calleefield::groupedCallerSites( ing, groups );
-    out.reserve( groupedEdges.size() );
-    for( const calleefield::SharedName& g : groups )
+    const std::vector<calleefield::CallerName> sites = calleefield::groupedCallerSites( ing, shared.groups );
+    out.reserve( shared.edges.size() );
+    for( const calleefield::SharedName& g : shared.groups )
     {
         const auto [ lo, hi ] = std::equal_range( sites.begin(), sites.end(), calleefield::CallerName{ g.caller, g.name } );
         const std::size_t   spelled = std::size_t( hi - lo );
         const std::uint32_t times   = spelled == 0 ? g.edgeCount : std::uint32_t( std::min<std::size_t>( spelled, g.edgeCount ) );
         for( std::uint32_t k = 0; k < g.edgeCount; ++k )
         {
-            out.push_back( { groupedEdges[ g.firstEdge + k ], k == 0 ? times : 0u } );
+            out.push_back( { shared.edges[ g.firstEdge + k ], k == 0 ? times : 0u } );
         }
     }
     std::sort( out.begin(), out.end(), []( const CalleeEdgeTimes& a, const CalleeEdgeTimes& b ) { return a.edge < b.edge; } );
@@ -925,7 +950,7 @@ inline std::vector<float> lexicalScoresTiered(const IngestResult& ing, const std
     // pass 1 — name (×kwName) + callee-name (×kwCallee) fields need no file text. The callee field counts a call SITE once
     // (CALLEE-FIELD-ONCE, calleeEdgeTimes above): edges sharing a name scan it as often as the caller spells it, at most.
     const std::vector<CalleeEdgeTimes> calleeTimes = calleeEdgeTimes( ing, outOff, outTargets );
-    std::size_t                        calleeTimesAt = 0;
+    CalleeTimesCursor                  calleeCursor{ calleeTimes };
     for( std::size_t i = 0; i < S; ++i )
     {
         scanField( i, ing.symbols[i].name, kwName );
@@ -951,12 +976,8 @@ inline std::vector<float> lexicalScoresTiered(const IngestResult& ing, const std
         }
         for( std::uint32_t e = outOff[i]; e < outOff[i + 1]; ++e )
         {
-            const bool          listed = calleeTimesAt < calleeTimes.size() && calleeTimes[ calleeTimesAt ].edge == e;
-            const std::uint32_t times  = listed ? calleeTimes[ calleeTimesAt++ ].times : 1u;
-            if( times > 0 )
-            {
-                scanField( i, ing.symbols[ outTargets[e] ].name, kwCallee * int( times ) );   // tf and dl are linear in the weight
-            }
+            const int times = int( calleeCursor.timesOf( e ) );   // 0 for a shared name's later edges: scanned once at its first
+            scanField( i, ing.symbols[ outTargets[e] ].name, kwCallee * times );   // tf and dl are linear in the weight
         }
     }
 
