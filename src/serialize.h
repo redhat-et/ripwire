@@ -388,6 +388,20 @@ inline std::string ctxRootOpen( std::string_view task, std::string_view routeNot
     return out;
 }
 
+// ctxRootOpen's output, split where a caller that RE-TAGS or extends the root needs it: { the attributes between "<ctx" and the
+// open tag's own '>', whatever follows that '>' } — the second is history_unread's definition comment when the walk was cut, ""
+// otherwise. The tag ends at its FIRST '>' (every attribute value above is escapeXml'd, so none holds one); splicing at the
+// string's LAST '>' lands inside that comment. Anything that is not a <ctx …> open tag splits to { "", "" }.
+inline std::pair<std::string_view, std::string_view> ctxRootOpenParts( std::string_view rootOpen ) noexcept
+{
+    const std::size_t tagEnd = rootOpen.starts_with( "<ctx" ) ? rootOpen.find( '>' ) : std::string_view::npos;
+    if( tagEnd == std::string_view::npos )
+    {
+        return {};
+    }
+    return { rootOpen.substr( 4, tagEnd - 4 ), rootOpen.substr( tagEnd + 1 ) };
+}
+
 // ── ctxRootOpen's JSON TWIN, and the reason it is one function rather than a rule ─────────────────────────
 // The header above promises the scrub fact is legible "from either one" of the two dialects. It was not: the
 // tree had ONE emitter of the JSON twin (the body writer's "xml_scrubbed") against THREE XML markers, so for
