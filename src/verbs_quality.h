@@ -1675,11 +1675,11 @@ inline constexpr const char* kQdMonsterLegend =
 // QD-SWAP-1117 — emitted only when a params row carries similar=. The compact dialect's reading is compactlegend.h's
 // "similar" row (it is in the session dictionary, --legend-dict).
 inline constexpr const char* kQdSimilarArgsLegend =
-    "similar=\"N\" on a params row: the function is new or its parameter list grew, and it now holds N adjacent "
+    "similar=\"N\" on a params row: the function is new or its parameter list grew, and it now holds N (3 or more) adjacent "
     "parameters of one written type with different names, so a call that swaps two of them compiles. similar= never gates "
     "and never changes a row's sev= or the exit status; a row it adds is sev=\"minor\": was= and now= are still parameter "
-    "counts, and now= may be under bar=. C and C++ only, read off the signature text: unnamed parameters, bool and iterator "
-    "types, and a pair named as a range (begin/end, from/to, a/b) are not counted, and two spellings of one type are two types. "
+    "counts, and now= may be under bar=. C and C++ only, read off the signature text: a run of two, unnamed parameters, and bool "
+    "and iterator types are not counted, and two spellings of one type are two types. "
     "Pass a small named struct, so the call names each field. ";
 
 // Emitted only when a clone-family row (duplication / new-clone-of-reused-helper) is in the document,
