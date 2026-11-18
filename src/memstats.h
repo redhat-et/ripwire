@@ -11,7 +11,7 @@
 // test/memstatscheck.sh's plateau arm) cannot read an unknown as "nothing held" (CodeRabbit 4543019678).
 #include "infra/emit.h"   // rw::emitTo
 #include "infra/os.h"     // rw::os::mem_footprint / mem_footprint_peak
-#include "memceiling.h"   // lane M2 prototype: the phase a memory-ceiling refusal names
+#include "memceiling.h"   // the phase a memory-ceiling refusal names; its reading count at graph-end
 
 #include <cstdint>
 #include <cstdlib>  // std::getenv
@@ -55,5 +55,10 @@ inline void mark( std::string_view phase )
         return;
     }
     rw::emitTo( stderr, "[mem] phase={} cur_mib={} peak_mib={}\n", phase, reading( os::mem_footprint() ), reading( os::mem_footprint_peak() ) );
+    if( phase == "graph-end" )   // the allocator line's cost on this run: footprint readings taken, and how many on a large block
+    {
+        rw::emitTo( stderr, "[mem] ceiling armed_mib={} readings={} large_readings={}\n", memceiling::budgetBytes() / memceiling::kMiB,
+                    memceiling::g_state.readings.load( std::memory_order_relaxed ), memceiling::g_state.largeReadings.load( std::memory_order_relaxed ) );
+    }
 }
 }   // namespace rw::memstats

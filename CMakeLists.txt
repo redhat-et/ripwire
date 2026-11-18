@@ -774,19 +774,26 @@ endif()
 # zone keeps freed large blocks resident (the file says why). Never beside a sanitizer (they own operator new) or
 # RIPWIRE_ALLOC_COUNT (which replaces the same functions); the toolchain's own LTO and strip are unaffected.
 option(RIPWIRE_LARGE_ALLOC "macOS: route large operator new through mmap so freed blocks leave the footprint" ON)
-if(RIPWIRE_LARGE_ALLOC AND APPLE AND NOT RIPWIRE_ALLOC_COUNT)
-  # the global flags and every configuration's own (CMAKE_CXX_FLAGS_<CONFIG> is spelled upper-case): a sanitizer in any of them keeps the route out
-  set(_ripwire_effective_flags "${CMAKE_CXX_FLAGS}")
-  foreach(_ripwire_config IN LISTS CMAKE_CONFIGURATION_TYPES CMAKE_BUILD_TYPE)
-    string(TOUPPER "${_ripwire_config}" _ripwire_config_upper)
-    string(APPEND _ripwire_effective_flags " ${CMAKE_CXX_FLAGS_${_ripwire_config_upper}}")
-  endforeach()
-  string(REGEX MATCH "-fsanitize=" _ripwire_sanitized "${_ripwire_effective_flags}")
-  if(NOT (RIPWIRE_ASAN OR RIPWIRE_TSAN OR RIPWIRE_FUZZ OR _ripwire_sanitized))
+# The memory ceiling (src/memceiling.h, on by default) reads the footprint inside operator new, so exactly ONE translation unit
+# that replaces the global allocation functions is linked: largealloc.cpp on macOS (it calls the ceiling's hook), else
+# memceiling_new.cpp (malloc/free plus the hook). Neither beside a sanitizer (they own operator new) or RIPWIRE_ALLOC_COUNT;
+# such a build leaves the ceiling disarmed (memguard's own readings still apply), and RIPWIRE_MEM_CEILING_HOOK stays undefined.
+# the global flags and every configuration's own (CMAKE_CXX_FLAGS_<CONFIG> is spelled upper-case): a sanitizer in any of them keeps both out
+set(_ripwire_effective_flags "${CMAKE_CXX_FLAGS}")
+foreach(_ripwire_config IN LISTS CMAKE_CONFIGURATION_TYPES CMAKE_BUILD_TYPE)
+  string(TOUPPER "${_ripwire_config}" _ripwire_config_upper)
+  string(APPEND _ripwire_effective_flags " ${CMAKE_CXX_FLAGS_${_ripwire_config_upper}}")
+endforeach()
+string(REGEX MATCH "-fsanitize=" _ripwire_sanitized "${_ripwire_effective_flags}")
+if(NOT RIPWIRE_ALLOC_COUNT AND NOT (RIPWIRE_ASAN OR RIPWIRE_TSAN OR RIPWIRE_FUZZ OR _ripwire_sanitized))
+  if(RIPWIRE_LARGE_ALLOC AND APPLE)
     target_sources(ripwire PRIVATE src/largealloc.cpp)
     # memguard.h reads the real peak for its overshoot disclosure only in a build that routes (freed blocks leave the reading)
     target_compile_definitions(ripwire PRIVATE RIPWIRE_LARGE_ALLOC_LINKED)
+  else()
+    target_sources(ripwire PRIVATE src/memceiling_new.cpp)
   endif()
+  target_compile_definitions(ripwire PRIVATE RIPWIRE_MEM_CEILING_HOOK)
 endif()
 
 # ---- global install: `cmake --install build --prefix /opt/homebrew --component ripwire` (see install.sh) ----

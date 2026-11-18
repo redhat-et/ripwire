@@ -21,7 +21,7 @@
 // direct caller, infra/sparseCsr.h, pairs it with the aligned delete, and those frees stay retained); malloc itself (tree-sitter's own, about 2 % of the large bytes).
 // RIPWIRE_TEST_LARGEALLOC=off turns the route off for one run, so the gate can compare the same binary with and without.
 #include "largealloc.h"
-#include "memceiling.h"   // lane M2 prototype: the allocator-level memory ceiling (default off)
+#include "memceiling.h"   // the memory guard's allocator line: onAllocate before every block
 #include <cstdlib>
 #include <new>
 
