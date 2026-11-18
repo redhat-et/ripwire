@@ -766,9 +766,62 @@ inline bool namespaceCompatible( RefRole role, SymKind kind ) noexcept
 // The call loop's namespace gate: namespaceCompatible, and EDGE-PRELUDE-VETO's one addition — in a language that invokes a macro only by a
 // site spelled as one (LangFacts::bangMacros: Rust `name!(..)`, role Macro), a role Call site never binds to a same-named `macro_rules!`.
 // A Clojure `defmacro` is invoked as `(name ..)`, a Call site, and the C family's call-shaped #define stays role Call unless retagged: both keep it.
+// RUST-USE-PRINT-NAMESPACE adds one more: a Rust role Call site never binds to a trait. Rust calls a function, a tuple struct or a
+// tuple variant by its name, and a trait is none of them (`Print( x )` over an in-tree `trait Print` is no call of it); a trait's
+// method is called by the METHOD's name (`Print::print( x )`, `x.print()`), so no Call site's name is the trait's.
 inline bool siteNamespaceCompatible( RefRole role, Lang lang, SymKind kind ) noexcept
 {
-    return namespaceCompatible( role, kind ) && !( kind == SymKind::Macro && role == RefRole::Call && langFacts( lang ).bangMacros );
+    return namespaceCompatible( role, kind ) && !( kind == SymKind::Macro && role == RefRole::Call && langFacts( lang ).bangMacros )
+        && !( kind == SymKind::Interface && role == RefRole::Call && std::ranges::find( kCallNeverNamesTrait, lang ) != kCallNeverNamesTrait.end() );
+}
+
+// RUST-USE-PRINT-NAMESPACE: does the bare Rust call `r` name an item from OUTSIDE the tree by a `use` — at least one `use` of the name
+// in force at the call (receiverevidence.h forEachRustUseAt: the innermost level holding one), every one of them provably leading out
+// (rustPathProvablyOutside: std / core / alloc, an external crate, an in-tree re-export of one), and its root no package directory of
+// the tree (rustRootNamesTreePackage: a crate with `[lib] path` the module layout cannot see)? `use crossterm::style::Print; Print( s )`
+// is crossterm's, never an in-tree `Print`: a `use` reaching an in-tree item leads into the tree, and a cut walk proves nothing.
+inline bool rustUseLeavesTree( const CallResultTypes& types, const Reference& r )
+{
+    bool any = false;
+    bool out = true;
+    types.forEachRustUseAt( r.fileId, r.startByte, r.calleeName, [ & ]( const Binding& b )
+    {
+        any = true;
+        out = out && types.rustPathProvablyOutside( r.fileId, b.startByte, b.importedName );
+    } );
+    return any && out && !types.rustRootNamesTreePackage( r.fileId, r.startByte, r.calleeName );
+}
+
+// RUST-USE-PRINT-NAMESPACE (the glob twin): may a glob `use` from OUTSIDE the tree (`use crossterm::style::*;`), in force at the bare
+// Rust call `r`, supply its name? Only when no `use` of the name is in force (a named `use` shadows every glob) and every glob at a level
+// of the call's chain (a fn body, then its module) provably leads out, at least one of them. Then an in-tree namesake the file's own
+// writing does not reach is no proven target: the glob may bind the name to the outside item, so the edge is kept by name only. A glob
+// that stays in the tree or cannot be placed (`use nu_test_support::prelude::*;` beside `use rstest::*;`) may be the binding, and two
+// globs supplying one used name do not compile (E0659): the ladder then answers as before.
+inline bool rustOutsideGlobMaySupply( const CallResultTypes& types, const Reference& r )
+{
+    bool named = false;
+    types.forEachRustUseAt( r.fileId, r.startByte, r.calleeName, [ & ]( const Binding& ) { named = true; } );
+    if( named )
+    {
+        return false;
+    }
+    bool outside = false;
+    bool other   = false;
+    types.forEachRustScopeAt( r.fileId, r.startByte, [ & ]( const CallResultTypes::Level& lv )
+    {
+        types.forEachImport( r.fileId, "*", [ & ]( const Binding& b )
+        {
+            if( b.kind == LocalBindKind::TypeImport && types.levelAt( r.fileId, b.startByte ) == lv )
+            {
+                const bool out = types.rustPathProvablyOutside( r.fileId, b.startByte, b.importedName )
+                              && !types.rustRootNamesTreePackage( r.fileId, b.startByte, b.importedName );
+                ( out ? outside : other ) = true;
+            }
+        } );
+        return other;   // an in-tree glob at an inner level already decides: no outer level is read
+    } );
+    return outside && !other;
 }
 
 // ---- aider-style name-quality prior weights --------------------------------------------------------
@@ -10882,6 +10935,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             }
             return !f.callerCls.empty() && narrower.coneProves( recvEv.inCone( f.callerCls, owner ), ref.lang, f.callerCls, owner, c );
         }
+        if( langFacts( ref.lang ).rule3NameProof == Rule3NameProof::RustUse && cs.fileId != ref.fileId && rustOutsideGlobMaySupply( recvEv.types, ref ) )
+        {
+            return recvEv.types.rustRule3Proves( ref, c, ownerIsClass( c ) );   // RUST-USE-PRINT-NAMESPACE: an outside glob may bind the name instead
+        }
         if( ref.lang == Lang::Rust || ref.lang == Lang::C )
         {
             return true;   // FE-A's rules already keep a receiverless call to what its scope reaches
@@ -12530,7 +12587,14 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                                         }
                                         return true;
                                     } );
-        const bool vetoFirstSite = preludeSite
+        // RUST-USE-PRINT-NAMESPACE: a bare call whose name every `use` in force there leads out of the tree (rustUseLeavesTree) names that outside
+        // item, whatever in-tree namesake shares its spelling: decided before Rule 3, counted external=. A namesake in the caller's own file (a
+        // nested fn item: in scope over any `use`) or a local of the caller keeps the ladder.
+        const bool rustUseOutsideSite = callerFacts.rule3NameProof == Rule3NameProof::RustUse && !scipPinned && !canonical && !narrowed && r.role == RefRole::Call
+                                        && r.qualifier.empty() && r.recv == RecvKind::None && !isMemberCallRef( r ) && bindingTier.empty() && it != byName.end()
+                                        && std::none_of( it->second.begin(), it->second.end(), [ & ]( NodeId c ) { return langCompatible( symLang[ c ], r.lang ) && symFileId[ c ] == r.fileId; } )
+                                        && !falseEdges.isLocalOfCaller( r ) && rustUseLeavesTree( recvEv.types, r );
+        const bool vetoFirstSite = preludeSite || rustUseOutsideSite
                                    || ( callerFacts.externalVetoBeforeRule3 && !scipPinned && !canonical && !narrowed && r.role == RefRole::Call && r.qualifier.empty()
                                         && bindingTier.empty() && it != byName.end() && !externalVeto.pythonStarImports( r ) && externalVeto.isExternalBound( r ) );
         bool rule3NoProof = false;   // RULE3-MEMBER-GUARD: Rule 3 fired, and nothing the language writes proves its answer
@@ -12614,7 +12678,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // ── Phase 5: the external-name veto — every evidence rule above has missed; refuse the spray when the
         // name or receiver is provably bound outside the tree (isExternalBound above). Role Call only: a Macro
         // site names an indexed #define, which IS in-repo evidence by construction.
-        if( preludeSite
+        if( preludeSite || rustUseOutsideSite
             || ( !scipPinned && !canonical && !narrowed && r.role == RefRole::Call && r.qualifier.empty() && bindingTier.empty()
                  && it != byName.end() && externalVeto.isExternalBound( r ) ) )
         {

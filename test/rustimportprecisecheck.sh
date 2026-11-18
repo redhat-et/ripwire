@@ -137,6 +137,79 @@ else
   skip "unit driver: CMake flags/link or driver missing under $BUILD_DIR (pipeline checks are primary)"
 fi
 
+# ── RUST-USE-PRINT-NAMESPACE: a bare call bound by a `use` of an OUTSIDE crate names that crate's item ─────────────
+# `use crossterm::style::Print; Print( s )` bound, with no hedge, to an in-tree `trait Print` of another workspace crate
+# (nushell legacy_input). Generated here (a two-crate workspace; crossterm is a registry dependency, not in the tree):
+#   (U1) outside `use`, in-tree TRAIT namesake          -> no edge (external=)
+#   (U2) outside `use` (a nested brace group, as legacy_input writes it), in-tree TUPLE-STRUCT namesake -> no edge
+#        (external=): the use path does not reach it
+#   (U3) outside glob, in-tree TRAIT namesake only      -> no edge: a Rust call never names a trait
+#   (N1) `use crate::ui::Draw` reaching an in-tree tuple struct -> binds it, no hedge
+#   (N2) `use a::Print` of the in-tree workspace crate   -> binds a's tuple struct, no hedge
+#   (N4) an in-tree glob bringing the name (a `pub use …::*` re-export) beside an outside glob -> binds, no hedge (E0659:
+#        two globs supplying one used name do not compile)
+#   (N3) outside glob + an in-tree tuple struct the file's writing does not reach -> kept, but via="name" (hedged)
+WS="$TMP/ws"; mkdir -p "$WS/a/src" "$WS/b/src" "$WS/c/src/ui" "$WS/t/src"
+printf '[workspace]\nmembers = ["a", "b", "c", "t"]\n' >"$WS/Cargo.toml"
+printf '[package]\nname = "a"\nversion = "0.1.0"\n' >"$WS/a/Cargo.toml"
+printf '[package]\nname = "t"\nversion = "0.1.0"\n' >"$WS/t/Cargo.toml"
+printf '[package]\nname = "b"\nversion = "0.1.0"\n[dependencies]\ncrossterm = "0.27"\na = { path = "../a" }\nt = { path = "../t" }\n' >"$WS/b/Cargo.toml"
+printf '[package]\nname = "c"\nversion = "0.1.0"\n[dependencies]\ncrossterm = "0.27"\n' >"$WS/c/Cargo.toml"
+printf 'pub trait Paint\n{\n    fn paint( &self );\n}\n' >"$WS/t/src/lib.rs"
+printf 'pub struct Print( pub String );\npub mod prelude;\nmod assertions;\n' >"$WS/a/src/lib.rs"
+printf 'pub use crate::assertions::*;\n' >"$WS/a/src/prelude.rs"
+printf 'pub fn assert_holds( _x: bool )\n{\n}\n' >"$WS/a/src/assertions.rs"
+cat >"$WS/b/src/lib.rs" <<'RS'
+mod outside_trait;
+mod outside_struct;
+mod glob_trait;
+mod glob_struct;
+mod inside_crate;
+mod two_globs;
+RS
+printf 'use a::prelude::*;\nuse crossterm::style::*;\n\npub fn n4_two_globs()\n{\n    assert_holds( true );\n}\n' >"$WS/b/src/two_globs.rs"
+printf 'use crossterm::style::Paint;\n\npub fn u1_trait()\n{\n    let _p = Paint( String::new() );\n}\n' >"$WS/b/src/outside_trait.rs"
+printf 'use crossterm::{\n    cursor,\n    style::Print,\n};\n\npub fn u2_struct()\n{\n    let _p = Print( String::new() );\n}\n' >"$WS/b/src/outside_struct.rs"
+printf 'use crossterm::style::*;\n\npub fn u3_glob_trait()\n{\n    let _p = Paint( String::new() );\n}\n' >"$WS/b/src/glob_trait.rs"
+printf 'use crossterm::style::*;\n\npub fn n3_glob_struct()\n{\n    let _p = Print( String::new() );\n}\n' >"$WS/b/src/glob_struct.rs"
+printf 'use a::Print;\n\npub fn n2_crate_use()\n{\n    let _p = Print( String::new() );\n}\n' >"$WS/b/src/inside_crate.rs"
+printf 'pub mod ui;\nmod user;\n' >"$WS/c/src/lib.rs"
+printf 'pub struct Draw( pub String );\n' >"$WS/c/src/ui/mod.rs"
+printf 'use crate::ui::Draw;\n\npub fn n1_local_use()\n{\n    let _p = Draw( String::new() );\n}\n' >"$WS/c/src/user.rs"
+ws_callees(){ "$BIN" "$WS" --callees="$1" --no-cache 2>/dev/null | sed 's/^<!--.*-->//'; }   # status: every arm greps for its <callees of=> header, so a failed run fails the arm
+for fn in u1_trait u2_struct u3_glob_trait; do
+  out="$( ws_callees "$fn" )"
+  if printf '%s' "$out" | grep -q "of=\"$fn\" defs=\"1\" count=\"0\"" && ! printf '%s' "$out" | grep -q '<s '; then
+    ok "$fn: an outside \`use\`/glob name binds no in-tree namesake (no <s> row)"
+  else
+    no "$fn: bound an in-tree namesake its outside \`use\` cannot reach"; printf '%s\n' "$out"
+  fi
+done
+out="$( ws_callees n1_local_use )"
+if printf '%s' "$out" | grep -q '<s t="cls" n="Draw" p="c/src/ui/mod.rs:1"/>'; then
+  ok "n1_local_use: \`use crate::ui::Draw\` still binds the in-tree tuple struct, no hedge"
+else
+  no "n1_local_use: the in-tree \`use\` lost its proven edge"; printf '%s\n' "$out"
+fi
+out="$( ws_callees n2_crate_use )"
+if printf '%s' "$out" | grep -q '<s t="cls" n="Print" p="a/src/lib.rs:1"/>'; then
+  ok "n2_crate_use: \`use a::Print\` of the workspace crate still binds a's tuple struct, no hedge"
+else
+  no "n2_crate_use: the workspace-crate \`use\` lost its proven edge"; printf '%s\n' "$out"
+fi
+out="$( ws_callees n4_two_globs )"
+if printf '%s' "$out" | grep -q '<s t="fn" n="assert_holds" p="a/src/assertions.rs:1"/>'; then
+  ok "n4_two_globs: an in-tree glob that brings the name binds it, no hedge, beside an outside glob"
+else
+  no "n4_two_globs: the in-tree glob's binding was hedged or lost"; printf '%s\n' "$out"
+fi
+out="$( ws_callees n3_glob_struct )"
+if printf '%s' "$out" | grep -q '<s t="cls" n="Print" p="a/src/lib.rs:1" via="name"/>' && ! printf '%s' "$out" | grep -qE '<s t="cls" n="Print" p="[^"]*"/>'; then
+  ok "n3_glob_struct: an outside glob keeps the in-tree namesake by name only (via=\"name\"), never unhedged, never dropped"
+else
+  no "n3_glob_struct: an outside glob's name must stay a hedged row"; printf '%s\n' "$out"
+fi
+
 # ── MONOTONICITY: NEW.ambiguous <= pre-change.ambiguous on the fixture ────────────────────────────
 monotonic_check()
 {

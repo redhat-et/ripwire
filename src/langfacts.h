@@ -590,4 +590,9 @@ constexpr std::uint8_t langFamilyOf( Lang l ) noexcept
                           : static_cast< std::uint8_t>( i );   // past the enum: its own singleton, like isCodeLang
 }
 
+/// RUST-USE-PRINT-NAMESPACE: the languages whose call site never names a trait. A call names a function, a tuple struct or a tuple
+/// variant; a trait's method is called by the METHOD's name (`Print::print( x )`, `x.print()`), so `Print( x )` over an in-tree
+/// `trait Print` is no call of it (graph.h siteNamespaceCompatible). Rust.
+inline constexpr std::array<Lang, 1> kCallNeverNamesTrait = { Lang::Rust };
+
 }   // namespace rw
