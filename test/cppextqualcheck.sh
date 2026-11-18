@@ -233,7 +233,7 @@ callee_rows n use_alias > "$TMP/n.xml"
 if unhedged "$TMP/n.xml" dir/util.h:2; then echo "  GAP   N namespace M = mine; M::make(3): now unhedged — the gap closed, make this arm a check"
 else echo "  GAP   N namespace M = mine; M::make(3): a via=\"name\" hedge (no namespace-alias record reaches the table; carded)"; fi
 
-# ── CPP-FREE-VS-MEMBER (D arms; graph.h FreeDeclReach, langfacts.h bareCallNeedsDeclaration) ──────────────────────────────────────
+# ── CPP-FREE-VS-MEMBER (D arms; graph.h FreeDeclReach, langfacts.h kBareCallNeedsDeclaration) ──────────────────────────────────────
 # A bare C++ call binds a free function its translation unit DECLARES: the body's own file or a prototype, in the caller's
 # file or one it includes. Envoy's shape: lib/util.h declares app::errorDetails and lib/util.cc defines it; codec/impl.cc
 # holds an unrelated struct's member of the name and its `#else` twin, which the parser reads as a free function. Main
