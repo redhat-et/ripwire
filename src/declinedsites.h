@@ -493,7 +493,10 @@ struct DeclinedSiteCut
     std::size_t shown = 0;
     std::string next;   // "" when nothing was cut
 };
-inline DeclinedSiteCut declinedSiteCut( std::size_t total, int pageLimit, std::string_view verbFlag, std::string_view selector, std::size_t rowWindow )
+// `columnar` (BAND DC): the asking answer is in the columnar form, so dc_next= keeps it — the page it names has the same form
+// (nextverb.h callHierarchyPageNext's rule), and past kDeclinedSiteCap sites that form carries them as the <dcols> arrays.
+inline DeclinedSiteCut declinedSiteCut( std::size_t total, int pageLimit, std::string_view verbFlag, std::string_view selector, std::size_t rowWindow,
+                                        bool columnar = false )
 {
     DeclinedSiteCut cut;
     const std::size_t cap = pageLimit > 0 ? std::size_t( pageLimit ) : kDeclinedSiteCap;
@@ -502,7 +505,7 @@ inline DeclinedSiteCut declinedSiteCut( std::size_t total, int pageLimit, std::s
     {
         // saturated at --limit's own ceiling, so the call it names is one the parser accepts (a billion sites is past any tree)
         const std::size_t limit = std::min( std::max( total, rowWindow ), std::size_t( kPageValueMax ) );
-        cut.next = nextFlag( verbFlag, selector ) + " --limit=" + std::to_string( limit );
+        cut.next = nextFlag( verbFlag, selector ) + ( columnar ? " --format=columnar" : "" ) + " --limit=" + std::to_string( limit );
     }
     ENSURES( cut.shown <= total && ( cut.shown == total ) == cut.next.empty() );
     return cut;
@@ -553,12 +556,13 @@ struct ImpactDeclinedRows
     std::vector<DeclinedSiteView> views;
 };
 inline ImpactDeclinedRows impactDeclinedRows( const IngestResult& ing, const Graph& g, std::span<const NodeId> targets, std::size_t calls,
-                                              int pageLimit, std::string_view sym, std::size_t rowWindow, const VrRender& vr, bool candidates )
+                                              int pageLimit, std::string_view sym, std::size_t rowWindow, const VrRender& vr, bool candidates,
+                                              bool columnar = false )
 {
     auto [ named, sites ] = declinedCallsAndSites( ing, g, targets, /*wantCallers=*/true );
     EXPECTS( named == calls, "the impact answer's declined_calls= counts the same set (graph.h declinedCallsNaming)" );
     ImpactDeclinedRows out;
-    out.cut   = declinedSiteCut( sites.size(), pageLimit, "--impact=", sym, rowWindow );
+    out.cut   = declinedSiteCut( sites.size(), pageLimit, "--impact=", sym, rowWindow, columnar );
     out.views = declinedSiteViews( ing, g, std::span<const std::uint32_t>( sites ).first( out.cut.shown ), /*callersForm=*/true, targets, DefGroups{}, vr,
                                    candidates );
     return out;

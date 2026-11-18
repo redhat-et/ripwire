@@ -721,7 +721,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "of_def",            "dc of_def=K: the def ix=K making the call; K~d: its candidates include group K, never a claim it calls K", true, "dc" },
     { "dc_shown",          "dc_shown=N: dc rows printed (callers: file-first); dc_next= lists every site" },
     // BAND DC (handoffwindow.h directRootAllNext): a windowing --callers / --impact root names the complete call; present-only
-    { "all_next",          "all_next=: the ONE call listing every row of total= and every declined site (same rows, columnar); next_offset= pages" },
+    { "all_next",          "all_next=: the ONE call listing every row of total= (same rows, columnar); next_offset= pages" },
     { "cand",              "dc cand=: the candidate defs as file:line (legend full only); cand_more= how many more", true, "dc" },
     // BAND DC (declinedsites.h declinedSitesColumnsXml): the columnar form carries the same sites as ONE <dcols> block, so the dc
     // rows above (element-scoped to <dc>) do not fire there and these read in their place: the block's reading on its via=, each

@@ -933,7 +933,7 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
          + implsKeyJson( chRows.contractSeeds, chRows.implBodies )   // BODILESS-SEED: the CLI root's impls= (callers direction only)
          + stdMemberCallsSpelling( chRows.stdCalls, /*json=*/true )       // the CLI callees answer's <stdm> line (callees direction only; absent when none)
          + symbolQueryNextField( referencingOnly, pwPrimary, rowTotal, page, name, chNextSelector )   // P3 (L7): the CLI root's next= (mcpattrparitycheck)
-         + nextFieldJson( referencingOnly ? directRootAllNext( "--callers=", name, pwPrimary.end < rowTotal, rowTotal, chRows.declinedSites.size() ) : std::string(),
+         + nextFieldJson( referencingOnly ? directRootAllNext( "--callers=", name, pwPrimary.end < rowTotal, rowTotal ) : std::string(),
                           "all_next" );   // BAND DC: the CLI root's all_next=, by the same rule (callers direction only)
     if( !referencingOnly && chRows.bodylessDefs > 0 )
     {
@@ -3534,7 +3534,7 @@ inline std::optional<std::string> impactText( const std::string& root, const std
     const bool          imHasVia    = std::any_of( show.begin() + ipw.begin, show.begin() + ipw.end, [ & ]( NodeId n ) { return impactRowNameOnly( proven, n ); } );
     const bool          imHasLink   = std::any_of( show.begin() + ipw.begin, show.begin() + ipw.end, [ & ]( NodeId n ) { return impactDirectLink( g, seeds, depth, n ); } );
     // BAND DC (handoffwindow.h): the complete call a windowing root names, the CLI root's all_next= by the same rule
-    const std::string   imAllNext   = directRootAllNext( "--impact=", symbol, ipw.end < show.size(), show.size(), declinedCalls );
+    const std::string   imAllNext   = directRootAllNext( "--impact=", symbol, ipw.end < show.size(), show.size() );
     rw::emitTo( mem, "{}{}. {}{}{}{}{}{}{}{}{}{}{}{}-->", kImpactLegendOpen, kPageRaiseCapClause,
                   reach.empty() ? "" : kImpactDepthLegend,           // 0.6.5: exactly when d=/by_depth= ride, as on the CLI
                   ( std::string( kImpactImportTierLegend ) + importersNextLegend( !imports.next.empty() )

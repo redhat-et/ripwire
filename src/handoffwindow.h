@@ -161,19 +161,22 @@ inline std::string completeCallInvocation( std::string_view flag, std::string_vi
 // every row. A root that windows now says it: all_next="--VERB=X --format=columnar --limit=N" (verbs_navigate.h, the MCP twins).
 // NO PREDICTION is made here: `windows` is the page window the verb has just computed for the answer it is printing, so the
 // attribute rides exactly the roots that carry has_more="1" (0 false positives and 0 false negatives by construction;
-// test/dccolumnarcheck.sh P1 counts both). N is the larger of the row total and the declined call sites: --limit sizes the
-// declined-site cut too, and on 12 of the 32 windowed impact cells of the registered population the call at --limit=<total>
-// still cut them (dc_shown=) and named a second call. "" when the page is the whole answer, or the lane is off.
-inline std::string directRootAllNext( std::string_view flag, std::string_view selector, bool windows, std::size_t rowTotal, std::size_t declinedSites )
+// test/dccolumnarcheck.sh P1 counts both). N is the row total, the hand-offs' own rule. NOT the larger of the rows and the
+// declined call sites (registered, measured, withdrawn: amendment 10b): --limit sizes the declined-site cut too, and a limit
+// that cleared it listed 61,381 more hedge rows on 12 of the 32 windowed impact cells of the registered population — 99 rows
+// and 4,005 declined sites on one — taking the median bytes to a complete answer from 77,821 to 145,532. The named call
+// therefore lists every ROW; where it holds more declined sites it says so (dc_shown=) and dc_next= names the call that
+// lists them all, in the same form. "" when the page is the whole answer, or the lane is off.
+inline std::string directRootAllNext( std::string_view flag, std::string_view selector, bool windows, std::size_t rowTotal )
 {
     const bool on = handoffWindowOn() && ( windows || handoffMutant() == HandoffMutant::AllNextAlways );
-    return on ? completeCallInvocation( flag, selector, std::max( rowTotal, declinedSites ) ) : std::string();
+    return on ? completeCallInvocation( flag, selector, rowTotal ) : std::string();
 }
 
 // Its clause, exactly beside the attribute (`allNext` is directRootAllNext's value). A trailing space: it joins a clause run.
 inline constexpr std::string_view kAllNextLegend =
-    "all_next=: the ONE call that lists every row of total= and every declined call site, the same rows in columnar form (a page at "
-    "next_offset= lists only the next shown=). ";
+    "all_next=: the ONE call that lists every row of total=, the same rows in columnar form (a page at next_offset= lists only the "
+    "next shown=). ";
 inline std::string_view allNextLegend( std::string_view allNext ) noexcept
 {
     return allNext.empty() ? std::string_view() : kAllNextLegend;

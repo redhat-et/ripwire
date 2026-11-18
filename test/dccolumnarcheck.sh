@@ -24,8 +24,9 @@
 #   (D4) n= equals every array's length; uncut it equals declined_calls=, cut it equals dc_shown=.
 #   (D5) the XML and --json forms print their rows as before (no <dcols>).
 #   (P1) all_next= rides exactly the roots that carry has_more="1": 0 false positives, 0 false negatives. Cell grain.
-#   (P2) the call all_next= names, run verbatim, does not window (no has_more="1") and has no dc_shown=, and its ( path, name, line ) rows equal the XML
-#        rows paged to the end in set, count and order. Symbol grain.
+#   (P2) the call all_next= names, run verbatim, does not window (no has_more="1"), and its ( path, name, line ) rows equal the
+#        XML rows paged to the end in set, count and order. Symbol grain. Its limit is the row total (amendment 10b): where it
+#        holds more declined sites than that it says so (dc_shown=), and its dc_next= keeps the columnar form and lists them all.
 #   (P3) a root that does not window carries no all_next=.
 #   (N)  non-vacuity: the fixtures yield a gate=, bound=, of_def=, cand=, cand_more= row, a cut answer and a windowed answer.
 #   (M)  the seven registered mutation controls, on the real binary: each makes its arm fail.
@@ -358,20 +359,31 @@ def pointer( env = None ):
             argv = shlex.split( nxt.replace( "&amp;", "&" ).replace( "&lt;", "<" ).replace( "&gt;", ">" ).replace( "&quot;", '"' ) )
             ra, a = run( root, argv, env )
             ar, got = root_tag( a ), s_rows_columnar( a )
-            if ra != 0 or attr( ar, "has_more" ) == "1" or attr( ar, "dc_shown" ) is not None or got != paged or "--format=columnar" not in argv:
-                inc.append( "%s -> %s: rc=%s has_more=%s dc_shown=%s rows %s vs %d paged" % (
-                    name, nxt, ra, attr( ar, "has_more" ), attr( ar, "dc_shown" ), "none" if got is None else len( got ), len( paged ) ) )
+            if ra != 0 or attr( ar, "has_more" ) == "1" or got != paged or "--format=columnar" not in argv:
+                inc.append( "%s -> %s: rc=%s has_more=%s rows %s vs %d paged" % (
+                    name, nxt, ra, attr( ar, "has_more" ), "none" if got is None else len( got ), len( paged ) ) )
     return fp, fn, inc, win
 fp, fn, inc, win = pointer()
 say( not fp and not fn and win >= 4, "(P1) exact", "all_next= rides exactly the windowed roots: %d false positives, %d false negatives on %d documents (%d windowed)" % (
      len( fp ), len( fn ), 2 * len( PCASES ), win ), "FP %s FN %s" % ( fp[ :3 ], fn[ :3 ] ) )
-say( not inc and win >= 4, "(P2) complete", "each named call, run verbatim: no has_more=\"1\", no dc_shown=, rows equal the XML rows paged to the end, in order", "; ".join( inc[ :2 ] ) )
+say( not inc and win >= 4, "(P2) complete", "each named call, run verbatim: no has_more=\"1\", rows equal the XML rows paged to the end, in order", "; ".join( inc[ :2 ] ) )
 say( not fp, "(P3) unwindowed", "a root that does not window carries no all_next=", str( fp[ :3 ] ) )
+# the declined tier of the named call: 301 rows and 360 declined sites, so the call at the row total cuts them and must say so
 rc, t = run( W, [ "--impact=leaf" ] )
 r = root_tag( t )
-say( rc == 0 and ( attr( r, "all_next" ) or "" ).endswith( "--limit=%s" % max( int( attr( r, "total" ) or 0 ), int( attr( r, "declined_calls" ) or 0 ) ) )
-     and int( attr( r, "declined_calls" ) or 0 ) > int( attr( r, "total" ) or 0 ) > 40, "(P2) both tiers",
-     "more declined sites than rows: the named limit is the larger, so the complete call cuts neither", r[ :400 ] )
+nxt = attr( r, "all_next" ) or ""
+ra, a = run( W, shlex.split( nxt ) ) if nxt else ( 1, "" )
+ar = root_tag( a )
+dn = attr( ar, "dc_next" ) or ""
+rd, d = run( W, shlex.split( dn ) ) if dn else ( 1, "" )
+_, dx = run( W, [ x for x in shlex.split( dn ) if x != "--format=columnar" ] ) if dn else ( 1, "" )   # the same call in the XML form
+total, declined = attr( r, "total" ), attr( r, "declined_calls" )
+say( rc == 0 and ra == 0 and nxt.endswith( "--limit=%s" % total ) and int( declined or 0 ) > int( total or 0 ) > 40 and attr( ar, "dc_shown" ) == total,
+     "(P2) declined tier cut, and said", "more declined sites (%s) than rows (%s): the named limit is the row total and the answer says dc_shown=" % ( declined, total ),
+     "all_next=%r root=%s" % ( nxt, ar[ :300 ] ) )
+say( "--format=columnar" in dn and rd == 0 and attr( root_tag( d ), "dc_shown" ) is None and Block( d ).rows() == xml_dc_rows( dx )
+     and len( xml_dc_rows( dx ) ) == int( declined or -1 ), "(P2) dc_next keeps the form",
+     "its dc_next= stays columnar and lists every declined site: the block rebuilds to the XML rows of the same call", "dc_next=%r rc=%s" % ( dn, rd ) )
 
 # ── (M) the registered mutation controls ──────────────────────────────────────────────────────────────────────────────────────
 print( "=== (M) each registered mutant makes its arm fail ===" )
