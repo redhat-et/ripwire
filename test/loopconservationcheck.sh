@@ -184,7 +184,12 @@ def walk( repo, base, ref, path = "test/regression.sh" ):
             # A NAME still in the child's loop stays red (arm H). For an ordinary commit `inherited` is
             # empty, so the rule is exactly the single-parent one.
             inherited = set().union( *( tombsOf[ q ] for q in parents if q != par ) )
-            unneeded = sorted( t for t in newTombs - vanished if t in childLoop or t not in inherited )
+            # A merge that DROPS a NAME another parent still lists, and declares its tombstone itself, is making the
+            # declaration for that side (integration 2026-11-18: a lane cut before the train retired phantomdefcheck
+            # with no tombstone, merged after it). That tombstone matches a vanish against the other parent, so it
+            # is not stale against this one. A tombstone no parent's loop held stays red (arm G).
+            droppedElsewhere = set().union( *( ( loop_names( loopAt( q ) ) or set() ) - childLoop for q in parents if q != par ) )
+            unneeded = sorted( t for t in newTombs - vanished if t in childLoop or ( t not in inherited and t not in droppedElsewhere ) )
             if unneeded:
                 stale.append( "%s (parent %s): tombstone(s) matching no vanish in that commit: %s" % (
                     child[ :12 ], par[ :12 ], ", ".join( unneeded ) ) )
