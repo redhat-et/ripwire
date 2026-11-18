@@ -4,4 +4,4 @@ A C or C++ function that is new in the change, or whose parameter list grew, and
 
 Counting runs of two, on the 83 bugprone-easily-swappable-parameters findings of #681 the scan scored precision 0.97 and recall 0.90; on a hand-labelled sample of the functions clang-tidy does not flag, 0.78. `--for`, the map and `--deps` are unchanged. The full and compact legends define `similar=` when a row carries it.
 
-Versions: the session legend dictionary moves to `dictv=80643186a3874c80 entries=1130` (the `similar=` reading); docs/COMMANDS.md and the 2026-11-13 showcase capture record the new pair.
+Versions: the session legend dictionary moves to `dictv=b7d529f275edfe8f entries=1130` (the `similar=` reading); docs/COMMANDS.md and the 2026-11-18 showcase capture record the new pair.
