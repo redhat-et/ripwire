@@ -235,7 +235,7 @@ ripwire --legend-dict=callers        # first line: have=<16 hex> pack=callers
 and pass that value instead: `--legend-have=<pack value>`. Holding several packs: join the values
 with commas. `ripwire --legend-dict=tiers` lists every pack and its size.
 
-**When it is worth it.** Measured over 453 answers of 12 verbs on five corpora: the core is 1,512 B and
+**When it is worth it.** Measured over 453 answers across twelve verbs on five corpora: the core is 1,512 B and
 removes 149 B per call, so it pays for itself after **11 calls** (9 over the 388 answers that are not
 `--for`; by corpus, 9 to 17). A pack pays for itself within 3 calls of its verb (1.3–2.0 measured) and
 removes most of that verb's legend, 0.3–1.7 KB per call. Core plus the verb's own pack keeps 86 % of
