@@ -1621,7 +1621,7 @@ inline bool rule3PicksPreprocessorAlternative( const IngestResult& ing, const st
     } );
 }
 
-// CPP-FREE-VS-MEMBER (langfacts.h bareCallNeedsDeclaration): which free functions an unqualified C++ call can name. The decl/def
+// CPP-FREE-VS-MEMBER (langfacts.h kBareCallNeedsDeclaration): which free functions an unqualified C++ call can name. The decl/def
 // collapse below evicts a prototype once its name has a body, so a bare `errorDetails( e )` whose header prototype the caller
 // includes was left with every bodied namesake of the tree and no evidence between them: Rule 3 reads the candidates' own
 // files, and a `.cc` is nobody's include. Envoy: `Envoy::errorDetails` (utility.cc, declared in utility.h) beside the `#else`
@@ -1706,7 +1706,7 @@ private:
     // the evicted prototypes of the bare C++ call `r`'s name when the declaration rule can decide it, else nullptr
     const rw::SmallVec<NodeId, 2>* prototypesOf( const Lookup& lk, const Reference& r, std::span<const NodeId> cand ) const
     {
-        const bool applies = bareCallNeedsDeclaration( r.lang ) && !isMemberCallRef( r ) && !lk.qualScopes.foreignByUsing( r );
+        const bool applies = std::ranges::find( kBareCallNeedsDeclaration, r.lang ) != kBareCallNeedsDeclaration.end() && !isMemberCallRef( r ) && !lk.qualScopes.foreignByUsing( r );
         if( !applies || prototypes.empty() || cand.size() < 2 || r.fromSymbol >= lk.ing.symbols.size() )
         {
             return nullptr;
