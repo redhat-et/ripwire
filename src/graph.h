@@ -2193,13 +2193,15 @@ inline void recordMemberTypeFact( HashMap<std::string, FlatRecvType>& table, con
     recordFlatRecvTypeFact( table, key, inStd ? std::string_view{} : std::string_view( cr.calleeName ), !cr.qualifier.empty(), cr.viaArrow );
 }
 
-inline FieldNarrowTables buildFieldNarrowTables( const IngestResult& ing, const HashMap<std::string, char>& classNames )
+inline FieldNarrowTables buildFieldNarrowTables( const IngestResult& ing, const HashMap<std::string, char>& classNames, const SmartAliasPeel* built = nullptr )
 {
     PROFILE_SCOPE_DESCRIBE( "buildGraph/2d: Rule-2b field-narrow tables" );
     FieldNarrowTables t;
     std::string       key;   // reused "Class#field" / "<fromSymbol>#var" key buffer
-    // lane iface-peel: a member written as a C++ smart-pointer alias in scope there (`Http::FilterSharedPtr handle_;`) is its pointee through `->`
-    const SmartAliasPeel aliasPeel( ing );
+    // lane iface-peel: a member written as a C++ smart-pointer alias in scope there (`Http::FilterSharedPtr handle_;`) is its pointee
+    // through `->`; `built` is the caller's own instance (buildGraph builds one for the declarations too), else one is built here
+    std::optional<SmartAliasPeel> own;
+    const SmartAliasPeel&         aliasPeel = built != nullptr ? *built : own.emplace( ing );
     for( const Reference& cr : ing.references )
     {
         if( !cr.isCompose || cr.fromSymbol == kNoNode || cr.fieldName().empty() || cr.calleeName.empty() )
@@ -4389,11 +4391,12 @@ inline std::string_view stdElementType( std::string_view written ) noexcept
 // svector keeps the ladder's hedge on svector::push_back, since the type may be that container, and so does a field written
 // that way, `this->items_` or one hop off a typed root, `b.items_`; a namespace-scope, file-static or extern variable,
 // `ns::List g_list; g_list.size()`; a `->` through a standard smart pointer or optional whose argument is the class,
-// `std::unique_ptr<ns::List> up; up->size()` (kCppStdArrowTemplates); a `->` through an in-tree class with its own
+// `std::unique_ptr<ns::List> up; up->size()` (kCppStdArrowTemplates; lane cpp-ptr-alias: Rule 2 types such a local or parameter
+// declared directly by its pointee first, smartPointeesOfBindings, so this exception is left the sites Rule 2 did not narrow); a `->` through an in-tree class with its own
 // `operator->`, `SP<ns::List>& p; p->size()`, or through a class the tree does not define, `QSharedPointer<ns::List>& p` —
 // their pointee is unrecorded; a `->` through a typedef or using alias whose recorded target is one of those, `typedef
-// std::shared_ptr<ns::List> ListSP; ListSP p; p->size()` (the alias record's target keeps no template argument — a MEMBER
-// written such an alias is typed by its pointee instead, lane iface-peel, resolve.h SmartAliasPeel — so `typedef
+// std::shared_ptr<ns::List> ListSP; ListSP p; p->size()` (the alias record's target keeps no template argument — a member, local
+// or parameter written such an alias is typed by its pointee instead, lanes iface-peel / cpp-ptr-alias, resolve.h SmartAliasPeel — so `typedef
 // std::unique_ptr<std::string> StrUP` keeps the hedge too); `HashMap<K, V> m; m.find( k )` reaching UnionFind::find by name,
 // `std::unique_ptr<std::string> p; p->size()`, `std::vector<int>* pv; pv->size()` and `IntVec* p; p->size()` through
 // `typedef std::vector<int> IntVec` do not keep it); ONE element access of a container whose recorded written type is a std
@@ -4564,6 +4567,52 @@ struct StdMemberGate
     }
 
 };
+
+// CPP-PTR-ALIAS: the pointee `->` reaches through a C++ LOCAL or PARAMETER declared directly (no pointer or array declarator: the
+// record's kDirectDeclaratorBit) as a std smart pointer or optional (`std::unique_ptr<ns::Codec> c` → Codec, written `ns::Codec`;
+// StdMemberGate::stdArrowPointee's rule: an argument written in std, a pointer or a non-class argument reads nothing) or as an
+// alias of a std smart pointer (`Event::TimerPtr t`, `const CodecPtr& c`; resolve.h SmartAliasPeel::pointeeOfWritten), keyed by
+// binding index. Rule 2's lexical lookup (resolve.h ScopedRecvDecls::arrowPointee) reads it: a `->` call narrows on the pointee
+// exactly as on `ns::Codec* c`, a `.` call reaches the pointer's own members and narrows on nothing.
+inline HashMap<std::uint32_t, WrittenPointeeText> smartPointeesOfBindings( const IngestResult& ing, const SmartAliasPeel& aliases )
+{
+    PROFILE_SCOPE_DESCRIBE( "buildGraph/1h: smart-pointer pointees of declarations" );
+    HashMap<std::uint32_t, WrittenPointeeText> out;
+    for( std::uint32_t index = 0; index < std::uint32_t( ing.bindings.size() ); ++index )
+    {
+        const Binding& b = ing.bindings[ index ];
+        if( ( b.kind != LocalBindKind::Type && b.kind != LocalBindKind::ParamType ) || ( b.unwrapDepth & kDirectDeclaratorBit ) == 0 || b.fromSymbol == kNoNode
+            || b.var.empty() || b.typeName.empty() || b.isFromAssignment || !langFacts( ing.symbols[ b.fromSymbol ].lang ).aliasPeelsSmartPointer )
+        {
+            continue;
+        }
+        const std::string_view written = b.importedName;
+        if( written.starts_with( "std::" ) )
+        {
+            const std::string_view pointee = StdMemberGate::stdArrowPointee( written );
+            if( pointee.empty() || pointee.data() < written.data() || pointee.data() + pointee.size() > written.data() + written.size() )
+            {
+                continue;
+            }
+            std::size_t from = std::size_t( pointee.data() - written.data() );   // back over `ns::` to the argument's first name
+            while( from > 0 && ( rw::namesplit::isIdentChar( written[ from - 1 ] ) || written[ from - 1 ] == ':' ) )
+            {
+                --from;
+            }
+            const std::string_view whole = written.substr( from, std::size_t( pointee.data() - written.data() ) + pointee.size() - from );
+            out.try_emplace( index, WrittenPointeeText{ std::string( pointee ), whole.find( "::" ) == std::string_view::npos ? std::string() : std::string( whole ) } );
+            continue;
+        }
+        // the alias's qualifier as a scope's innermost name: `Envoy::Event::TimerPtr` is looked up in a scope named Event
+        const std::size_t      cut       = written.rfind( "::" );
+        const std::string_view qualifier = cut == std::string_view::npos ? std::string_view{} : scopeLastSegment( written.substr( 0, cut ) );
+        if( std::optional<WrittenPointeeText> p = aliases.pointeeOfWritten( b.typeName, qualifier, b.fileId ) )
+        {
+            out.try_emplace( index, std::move( *p ) );
+        }
+    }
+    return out;
+}
 
 // The class a call runs against, keyed as canonByName and the inheritance graph key a class (its name). Inside a def it
 // is the def's scope. A Ruby call in a class or module BODY runs with that class as self — a DSL call there
@@ -9878,7 +9927,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
 
     // P2-D Rule 2b field-narrow tables (class#field → declared type, plus the local-shadow veto set) —
     // built by buildFieldNarrowTables above; consumed via Narrower::rule2bFieldRecvType in the resolve loop.
-    FieldNarrowTables fieldNarrow = buildFieldNarrowTables( ing, classNames );
+    // lane iface-peel + CPP-PTR-ALIAS: the C++ smart-pointer aliases, read for members (Rule 2b) and for locals and parameters (Rule 2)
+    const SmartAliasPeel                             aliasPeel( ing );
+    const HashMap<std::uint32_t, WrittenPointeeText> declPointees = smartPointeesOfBindings( ing, aliasPeel );
+    FieldNarrowTables fieldNarrow = buildFieldNarrowTables( ing, classNames, &aliasPeel );
 
     // Phase 5 external-name veto evidence (docs/EVALS.md "Phase 5") — built by buildExternalVetoTables above;
     // consumed by the veto step in the resolve loop, after every receiver rule has missed.
@@ -9997,7 +10049,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
 
     // P2-D one-hop type narrowing over the canonical scope::name map above (no new pass): Rule 1 pins `this->m()` / `self.m()` to the caller's enclosing class; Rule 2
     // pins `x.m()` to the variable's type (a parameter's through the lexical table); Rule 3 pins a call to the ONE included file defining it — all BEFORE the spray. See resolve.h.
-    ScopedRecvDecls scopedRecvDecls = buildScopedRecvDecls( ing );   // not const: (L) call-result typing fills an `auto` declaration's type
+    ScopedRecvDecls scopedRecvDecls = buildScopedRecvDecls( ing, &declPointees );   // not const: (L) call-result typing fills an `auto` declaration's type
     const HashMap<std::string, std::vector<std::string>> usingReexports = buildUsingReexports( ing );
     const Narrower narrower( canonByName, varType, scopedRecvDecls, fileIncludes, symFileId, usingReexports, &rule3Includes );
     HashMap<std::string, char> memberFields = Narrower::memberFieldNames( ing );   // Rule 2c's member-field veto and Rule 2b's declared-member set, "<Owner>#<field>" (C/C++)
@@ -11944,6 +11996,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             bool                   proven = true;
             bool                   statedField = false;   // TS-FIELD-SELF: the receiver is `this.f` with f stated as another type
             bool                   openList    = false;   // RUST-DYN-NAMESAKE: the candidates are the open trait's visible impl bodies
+            bool                   fieldSplit  = false;   // CPP-PTR-ALIAS: the candidates are a C++ member's dispatch split (Rule 2b)
             std::string_view       bound;
             const bool             cppSplit = narrowed;
             if( cppSplit )
@@ -11954,7 +12007,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                                                                                           fieldNarrow.localNameSet, classIds, chaUp ) )
             {
                 narrowTo( split, r, ifaceCand );
-                proven = false;   // a field's dispatch split: one candidate is no proof here (a mock's macro-made override is unseen)
+                proven     = false;   // a field's dispatch split: one candidate is no proof here (a mock's macro-made override is unseen)
+                fieldSplit = !ifaceCand.empty();
             }
             else if( const ReceiverEvidence::DispatchReceiver recv = recvEv.dispatchReceiverOf( r );
                      recv.type != kNoNode && !( langFacts( r.lang ).contractSignaturesUnindexed && StdMemberGate::tableIndexOf( r ) != StdMemberGate::kNotStd ) )
@@ -11987,7 +12041,9 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             // executor's own compileQuery); the row says cands="1" and names it, never an edge. The same for an OPEN Rust trait list
             // with one candidate (the trait's default): an implementor the tree cannot list may override it, and the name tiers would
             // bind an unrelated inherent `name` (RUST-DYN-NAMESAKE)
-            else if( ifaceCand.size() > 1 || ( ( statedField || openList ) && !proven && !cppSplit ) )
+            // CPP-PTR-ALIAS: the same for a C++ member typed as an interface whose split holds one body (`ConnectionSocketPtr socket_;
+            // socket_->isOpen()` → SocketImpl::isOpen alone): unproven, and the name tiers would list every `isOpen` in reach
+            else if( ifaceCand.size() > 1 || ( ( statedField || openList || fieldSplit ) && !proven && !cppSplit ) )
             {
                 recordDecline( r, std::span<const NodeId>( ifaceCand.data(), ifaceCand.size() ), DeclinedSiteKind::Iface );
                 if( !bound.empty() )
