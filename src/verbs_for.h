@@ -2571,6 +2571,45 @@ inline constexpr std::string_view kForHopsBudgetCutLegendCompact =
     "; hops: this budget left out the call-hop rows (one hop of callees for each of total= top rows)";
 static_assert( kForHopsBudgetCutLegendCompact.size() < kForHopsBudgetCutLegend.size(),
                "the compact hops clause is the shorter honest spelling of the full one" );
+// value_refs= on the hop rows: which function-valued hop nodes are used as a value, and how often. The same resolution --callers
+// prints as value_refs= (ValueRefIndex::valueRefsTo), through the narrow index over the hop nodes' names. Languages whose value uses
+// are not read at all never enter (the row writer says unread for them); a corpus with no value use pays one scan and no byte.
+inline rw::HopValueRefs forHopValueRefs( const rw::IngestResult& ing, const std::vector<rw::NodeId>& hopNodes )
+{
+    rw::HopValueRefs out;
+    std::vector<std::string_view> names;
+    for( const rw::NodeId id : hopNodes )
+    {
+        if( rw::hopRowIsFunction( ing, id ) && rw::valueRefFamily( ing.symbols[ id ].lang ) != rw::ValueRefFamily::None )
+        {
+            names.push_back( ing.symbols[ id ].name );
+        }
+    }
+    std::ranges::sort( names, rw::sortutil::svLess );
+    names.erase( std::ranges::unique( names ).begin(), names.end() );
+    const auto namesAValue = [ & ]( const rw::Reference& r )
+    { return r.role == rw::RefRole::Value && std::ranges::binary_search( names, std::string_view( r.calleeName ), rw::sortutil::svLess ); };
+    if( names.empty() || !std::ranges::any_of( ing.references, namesAValue ) )   // COST: no value use of any hop name, no index and no byte
+    {
+        return out;
+    }
+    const rw::ValueRefIndex vri = rw::ValueRefIndex::narrowFor( ing, names );
+    for( const rw::NodeId id : hopNodes )
+    {
+        if( !rw::hopRowIsFunction( ing, id ) || rw::valueRefFamily( ing.symbols[ id ].lang ) == rw::ValueRefFamily::None )
+        {
+            continue;
+        }
+        const std::size_t n = vri.valueRefsTo( std::span<const rw::NodeId>( &id, 1 ) ).size();
+        if( n > 0 )
+        {
+            out.counts.emplace_back( id, std::uint32_t( n ) );
+        }
+    }
+    std::ranges::sort( out.counts );
+    out.counts.erase( std::ranges::unique( out.counts ).begin(), out.counts.end() );
+    return out;
+}
 // the hops cut's continuation (` next="--for=TASK"`) — one spelling for the marker and the partial-cut splice
 inline std::string forHopsCutNextAttr( const rw::Config& cfg )
 {
@@ -2676,9 +2715,10 @@ ForAutoBodiesResult buildForCompactHops( const rw::Config& cfg, const rw::Ingest
     const std::vector<rw::NodeId> hopNodes = forOwnerHopNodes( ownerPlan, hopIds );
     const rw::HopOwners           owners   = forHopOwners( cfg, ing, ownerPlan, leftBytes, fcRootArg );
 
+    rw::HopValueRefs hopVals = forHopValueRefs( ing, hopNodes );   // value_refs= on a row, value_refs_unread_for_lang= on the section
     out.section = rw::chargeSection( [ & ]( std::FILE* f )
         { rw::packHops( f, ing, hopNodes, hopBudget, g.outOff, g.outTargets, rw::withAnchorEdge( rw::CalleeEdgeBytes( g.outNameOnly, &g.outProv, nullptr ), &g.outAnchorMiss ), redactPtr, &lensRank, fcRootArg,
-                        rw::CalleeLegendsInHead( viaLegendInHead, promised.splitLegendInHead ), &owners ); },   // g.outNameOnly also feeds the hop-slot rule (serialize.h noProvenEdge)
+                        rw::CalleeLegendsInHead( viaLegendInHead, promised.splitLegendInHead ), &owners, &hopVals ); },   // g.outNameOnly also feeds the hop-slot rule (serialize.h noProvenEdge)
         // MARKUP rate, not the body rate — and this is an honesty choice, not a copy-paste slip. The body
         // rate (3.80 B/tok) prices SOURCE TEXT; the compact section contains none, only tags, identifiers
         // and line numbers, which tokenize like the rest of the bundle. Charging structured markup at the

@@ -638,6 +638,7 @@ for _g in \
     hop1check \
     hopbodycheck \
     hopcontextcheck \
+    hopvaluerefscheck \
     hostilecheck \
     hotspotsincecheck \
     htmlcolorcheck \

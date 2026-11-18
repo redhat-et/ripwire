@@ -1458,6 +1458,22 @@ inline std::string splitArmCallsLegendComment()
 {
     return "<!--" + std::string( kForSplitClause ) + " -->";
 }
+// A --for hop row's value use (serialize.h HopValueRefs): the two attributes' readings, each its own comment beside the section
+// that carries it. No `--` inside an XML comment: the flag is named callers.
+inline constexpr std::string_view kForHopValueRefsClause =
+    " h value_refs=N: the function is used as a VALUE N times (stored or passed, matched by name), so a call through that slot is not an edge "
+    "and callers does not list it; no value_refs= means none found, never none exists.";
+inline constexpr std::string_view kForHopValueRefsUnreadClause =
+    " hops value_refs_unread_for_lang=L: a printed h row is in a language whose value uses this build does not read at all, so its missing "
+    "value_refs= is unknown, not zero.";
+inline std::string hopValueRefsLegendComment()
+{
+    return "<!--" + std::string( kForHopValueRefsClause ) + " -->";
+}
+inline std::string hopValueRefsUnreadLegendComment()
+{
+    return "<!--" + std::string( kForHopValueRefsUnreadClause ) + " -->";
+}
 // …as its own comment node, for the surfaces whose legend is written beside the rows (a <bodies>/<hops> block's <calls>)
 inline std::string viaNameLegendComment()
 {
