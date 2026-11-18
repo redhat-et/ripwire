@@ -12309,6 +12309,35 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                                        [ & ]( NodeId c ) { return langCompatible( symLang[ c ], r.lang ) && sameRoot( c, r.fileId ); } );
             canonical = !cand.empty();
         }
+        // RUST-PATH-OWNER (receiverevidence.h rustPathOwners): the tier matched a Rust path's scope NAME; the type the path resolves to
+        // where it is written decides among same-named types — the one it names, a decline, or a split over every candidate
+        bool rustPathHedge = false;
+        bool rustPathSplit = false;   // ... or a split no locality may narrow (the S6-C tie-break below skips it)
+        if( canonical )
+        {
+            switch( recvEv.rustPathOwners( r, cand ) )
+            {
+                case ReceiverEvidence::RustPathOwners::Keep:     break;
+                case ReceiverEvidence::RustPathOwners::Split:
+                {
+                    // the ladder keeps every candidate when tier 1 or 2 holds all of them or none (tier 3's canonical rescue): its own
+                    // split. A strict subset there would be a locality pick among types the path cannot tell apart: hedged instead
+                    std::size_t inFile = 0, inDir = 0;
+                    for( const NodeId c : cand )
+                    {
+                        inFile += symFileId[ c ] == r.fileId ? 1u : 0u;
+                        inDir  += fileDir[ symFileId[ c ] ] == fileDir[ r.fileId ] ? 1u : 0u;
+                    }
+                    rustPathHedge = inFile != 0 ? inFile < cand.size() : inDir != 0 && inDir < cand.size();
+                    rustPathSplit = !rustPathHedge;
+                    break;
+                }
+                case ReceiverEvidence::RustPathOwners::Decline:
+                    recordDecline( r, cand, DeclinedSiteKind::Ladder );
+                    disposition = CallDisposition::Declined;
+                    continue;
+            }
+        }
         // ── L3 fn-pointer/callback binding resolve — BEFORE Rule 1, because a local variable shadows a
         // same-named class member or global in real C++ name lookup. A bare call `fn()` whose name has ANY
         // var→function binding visible at this call site is a call THROUGH THE VARIABLE: it resolves via
@@ -13199,7 +13228,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // with none proven the call is NAME-ONLY: the tier below keeps every same-file and same-directory candidate (and a
         // member call's included-file ones) instead of one locality pick, each edge marked via="name" — D1 holds a single
         // candidate to the same rule, because one candidate is not evidence.
-        bool nameOnly = false;
+        bool nameOnly = rustPathHedge;   // RUST-PATH-OWNER: a hedged path call lists every candidate (the tier below)
         bool nameOnlyAnyFile = false, nameOnlyAnyDir = false;   // which rung the classic ladder would have stopped at (rank weight)
         // TRIAL (#373): the candidates Ruby's own lookup PROVES are the call's answer, like any other proof
         if( hedgeEligible && !narrowed && rubySelf != nullptr && !cand.empty() )
@@ -13385,8 +13414,9 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                     const bool dir  = fileDir[ ing.symbols[ c ].fileId ] == rdir;
                     const bool rule3File = std::find( memberRule3.begin(), memberRule3.end(), c ) != memberRule3.end();
                     // RULE3-MEMBER-GUARD: a call no written binding reaches names this file's own definition or Rule 3's file (hedged), never a directory
-                    // namesake; through a local or parameter Rule 3's file is no better a guess than the namesakes, so there only this file's own stay
-                    if( rule3NoProof ? ( file || ( rule3File && !rule3Local ) ) : ( file || dir || rule3File ) )
+                    // namesake; through a local or parameter Rule 3's file is no better a guess than the namesakes, so there only this file's own stay.
+                    // A hedged Rust path call (RUST-PATH-OWNER) keeps every candidate: each is a member of a type the path's name may mean
+                    if( rule3NoProof ? ( file || ( rule3File && !rule3Local ) ) : ( file || dir || rule3File || rustPathHedge ) )
                     {
                         tier.push_back( c );
                         anyFile = anyFile || file;
@@ -13605,7 +13635,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // declaring the member is a genuine split (the shape Rule 2c also keeps whole), not a locality race.
         if( !scipPinned && !bindingPinned && r.lang != Lang::Elixir && tier.size() > 1 && !ing.symbols[ r.fromSymbol ].scope.empty()
          && r.recv != RecvKind::FieldOfThis && r.recv != RecvKind::FieldOfVar && r.recv != RecvKind::SuperObj && !identityClaim
-         && !isJsTsLitRecv( r.recv ) && r.recv != RecvKind::JavaTypeCandidate && !nameOnly )   // FE-B: a name-only call keeps every candidate
+         && !isJsTsLitRecv( r.recv ) && r.recv != RecvKind::JavaTypeCandidate && !nameOnly   // FE-B: a name-only call keeps every candidate
+         && !rustPathSplit )   // RUST-PATH-OWNER: same-named types the path cannot tell apart are a genuine split (#74), not a locality race
         {
             const std::string& callerCanon = g.localityKeyAt( r.fromSymbol );   // == canonId here (the caller is scoped)
             const std::size_t localityCap = receiverLocalityCap( r, receiverTypeNarrowed, ing.files[ ing.symbols[ r.fromSymbol ].fileId ] );
