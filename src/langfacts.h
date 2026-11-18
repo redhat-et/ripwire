@@ -540,5 +540,10 @@ static_assert( !langFacts( Lang::Unknown ).implicitReceiver && !langFacts( Lang:
 static_assert( !langFacts( Lang::Unknown ).moduleCallReachesFunctionsOnly && !langFacts( Lang::Unknown ).classNameReceiver && !langFacts( Lang::Unknown ).hashComment );
 static_assert( !langFacts( static_cast<Lang>( 99 ) ).implicitReceiver && !langFacts( static_cast<Lang>( 99 ) ).hashComment );
 
+/// RUST-USE-PRINT-NAMESPACE: the languages whose call site never names a trait. A call names a function, a tuple struct or a tuple
+/// variant; a trait's method is called by the METHOD's name (`Print::print( x )`, `x.print()`), so `Print( x )` over an in-tree
+/// `trait Print` is no call of it (graph.h siteNamespaceCompatible). Rust.
+inline constexpr std::array<Lang, 1> kCallNeverNamesTrait = { Lang::Rust };
+
 
 }   // namespace rw
