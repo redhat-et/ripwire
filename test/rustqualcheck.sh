@@ -215,8 +215,10 @@ expect callers new 2 "but only 2 CALLERS — external_caller is not one of them"
 # ── §5b RUST-PATH-OWNER: a path names the ONE type it resolves to (test/rustpathownerfix, its own tree so §1-§9's counts hold) ──
 # The canonical tier matches a path call's SCOPE NAME: `TestClient::new( 1 )` held every in-tree `TestClient::new`, and the ladder
 # picked the one in the caller's directory, unhedged. Two classes are named TestClient (test_helpers/test_client.rs, the one the
-# `use`s name; other_helpers.rs, beside every caller). Literals read off test/rustpathownerfix/src/*.rs. RED on main 9087eb59c:
-# (a)-(d) bound other_helpers.rs unhedged.
+# `use`s name; other_helpers.rs, beside every caller), one PathBuf is in-tree (mypath.rs, nushell crates/nu-path/src/path.rs's
+# shape) beside std's, and src/ext/mod.rs holds `impl From<Wrap> for PathBuf` FOR std's PathBuf. Literals read off
+# test/rustpathownerfix/src/*.rs. RED on main 9087eb59c: (a)-(j), (o) and (r) bound other_helpers.rs / mypath.rs / errs.rs /
+# procs.rs unhedged.
 PO="test/rustpathownerfix"
 porows(){ run "$PO" "--callees=$1" --no-cache | grep -oE '<s t="[^>]*>' | sed -E 's/ (tested|test|of_def)="[^"]*"//g'; }
 poexpect(){   # $1 caller  $2 the exact rows, one per line  $3 prose
@@ -230,9 +232,20 @@ poexpect written "$TC" "(b) the written path crate::test_helpers::TestClient::ne
 poexpect turbo '<s t="method" n="Holder::new" p="src/test_helpers/test_client.rs:8"/>' "(c) a turbofish Holder::<u32>::new under its \`use\` names test_client.rs's"
 poexpect two_globs '<s t="method" n="TestClient::new" p="src/other_helpers.rs:4" via="name"/>
 <s t="method" n="TestClient::new" p="src/test_helpers/test_client.rs:3" via="name"/>' "(d) NEGATIVE: two globs bring a TestClient and no \`use\` chooses: both hedged, never a pick"
+poexpect std_new '' "(e) RUST-STD-PATH-FROM: \`use std::path::PathBuf; PathBuf::new()\` is std's, no row (external=), never mypath.rs's"
+poexpect std_written '' "(f) the written std::path::PathBuf::new() is std's, no row"
+poexpect std_from '<s t="method" n="PathBuf::from" p="src/ext/mod.rs:6" via="name"/>' "(g) \`PathBuf::from( \"x\" )\` under std's PathBuf: the in-tree impl FOR std's PathBuf hedged (its argument is not read), never mypath.rs's"
+poexpect far_std_from '<s t="method" n="PathBuf::from" p="src/ext/mod.rs:6" via="name"/>' "(h) the same from a directory of no candidate: no split onto mypath.rs"
+poexpect io_error '<s t="method" n="Error::from" p="src/errs.rs:9" via="name"/>' "(i) std::io::Error::from( .. ): errs.rs's Error implements a trait named Error (std::error::Error; the inheritance names keep the last segment), so its From impl is hedged — the stated floor — never bound"
+poexpect trait_next '<s t="method" n="Iterator::next" p="src/errs.rs:14" via="name"/>' "(j) the trait path std::iter::Iterator::next( it ) may run errs.rs's impl of that trait: hedged, not dropped"
 poexpect other_use "$OH" "(k) guard: \`use crate::other_helpers::TestClient\` keeps other_helpers.rs's, proven"
 poexpect written_other "$OH" "(l) guard: the written crate::other_helpers::TestClient::new keeps other_helpers.rs's"
 poexpect again "$TC" "(m) guard: Self::new() inside test_client.rs's impl stays its own"
+poexpect tree_from '<s t="method" n="PathBuf::from" p="src/mypath.rs:7"/>' "(n) guard: \`use crate::mypath::PathBuf\` keeps the in-tree From impl, proven"
+poexpect far_tree_from '<s t="method" n="PathBuf::from" p="src/mypath.rs:7"/>' "(o) the in-tree PathBuf from a far directory: mypath.rs's alone, the impl FOR std's PathBuf is no member of it"
+poexpect tree_new '<s t="method" n="PathBuf::new" p="src/mypath.rs:4"/>' "(p) guard: the in-tree PathBuf::new, proven"
+poexpect bare_from '' "(q) guard: a bare From::from( .. ) keeps the rule it had (main: no row)"
+poexpect std_command '' "(r) \`use std::process::Command; Command::new( .. )\` is std's: procs.rs's inherent impl is for gen.rs's in-tree Command (no indexed class, a \`use\` into the tree names it), never a hedge onto it"
 
 # ── §6 AMBIGUITY IS DISCLOSED, never silently resolved (plan §6) ───────────────────────────────────────
 # Canonical keying makes the honest cases precise, so the amb= path is exercised ON PURPOSE: two modules
