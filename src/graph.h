@@ -10341,21 +10341,11 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                     }
                     continue;
                 }
-                const bool          match = rt.resultIndex == cr.resultIndex && ( rule2Sink ? rt.unwrapDepth <= 1 : rt.unwrapDepth == cr.unwrapDepth )
-                                            && recvEv.rustQualifierTypes( r, cr.importedName, callee, rt.isFromAssignment );   // Rust T::f(): its T reaches f's class
+                const auto [ match, cls ] = recvEv.matchCallResult( r, cr, rt, callee, rule2Sink );
                 if( !match )
                 {
-                    // lane rust-self-chain: `let x = f().await` on a non-async `f`: the awaited class's IntoFuture / Future `Output`
-                    const NodeId awaited = rt.resultIndex == cr.resultIndex && recvEv.rustQualifierTypes( r, cr.importedName, callee, rt.isFromAssignment )
-                                         ? recvEv.rustAwaitedCallResult( cr, rt, cs.lang ) : kNoNode;
-                    if( awaited != kNoNode )
-                    {
-                        recvEv.typeCallResult( cr, ing.symbols[ awaited ].name, awaited );
-                        break;
-                    }
                     continue;
                 }
-                const NodeId cls = recvEv.types.resultClassOf( rt, cs.lang );
                 if( cls != kNoNode && rule2Sink )
                 {
                     typeRule2CallResult( cr, ri, rt.unwrapDepth == 1 );

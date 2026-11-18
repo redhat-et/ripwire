@@ -20,6 +20,7 @@
 // What it does NOT do: infer a function's return type (`s = self.get_screen(); s.refresh()`), follow a property, or type
 // a value that crossed a call boundary. Those receivers stay name-only — the honest answer, not a guess.
 
+#include "infra/hashutil.h"     // packPair: the chain tables' ( file, byte ) keys
 #include "infra/idkeyedmap.h"   // IdKeyedCsr: localType's packed ( scope, name ) → facts table (K1a LOCALTYPE-PACK)
 #include "infra/sortutil.h"   // svLess: the explicit byte order the operatorResult sort takes (portablebuildcheck #6)
 #include "langfacts.h"   // langFacts(l).overloadsWithoutArity — overloadedAbove's language column
@@ -3223,20 +3224,20 @@ struct ReceiverEvidence
     mutable std::vector<std::pair<NodeId, ChainValue>> chainAwaitOutputs; // class → its `.await` value (cls kNoNode: two impls disagree)
     mutable std::vector<std::pair<std::uint64_t, std::uint32_t>> chainRootRefs;  // the references at a chain root's start: ( key, index )
     mutable bool                                      chainTablesBuilt = false;
-    static std::uint64_t chainKey( std::uint32_t fileId, std::uint32_t at ) noexcept { return ( std::uint64_t( fileId ) << 32 ) | at; }
+    static std::uint64_t chainKey( std::uint32_t fileId, std::uint32_t at ) noexcept { return hashutil::packPair( fileId, at ); }
     static std::span<const KeyedRecord> recordsAt( const std::vector<KeyedRecord>& list, std::uint64_t key )
     {
         const auto lo = std::ranges::lower_bound( list, key, {}, &KeyedRecord::key );
         const auto hi = std::upper_bound( lo, list.end(), key, []( std::uint64_t k, const KeyedRecord& e ) { return k < e.key; } );
         return { lo, hi };
     }
-    void buildChainTables() const
+    // the records a chain walk reads, in one pass over the bindings: RecvCall, Rust whole-result ReturnType, and the
+    // `impl IntoFuture / Future for C` blocks with their `type Output = U;` items
+    void collectChainRecords( std::vector<const Binding*>& impls, std::vector<const Binding*>& outputs ) const
     {
-        chainTablesBuilt = true;
-        std::vector<const Binding*> impls;    // `impl IntoFuture for C` / `impl Future for C`
-        std::vector<const Binding*> outputs;  // `type Output = U;` items
         for( const Binding& b : ing.bindings )
         {
+            const std::string_view var = b.var;
             if( b.kind == LocalBindKind::RecvCall )   // Rust records it alone (ingest_binds.h captureRustRecvCall)
             {
                 chainRecvCalls.push_back( { chainKey( b.fileId, b.startByte ), &b } );
@@ -3246,11 +3247,11 @@ struct ReceiverEvidence
             {
                 chainReturnTypes.push_back( { chainKey( b.fileId, b.startByte ), &b } );
             }
-            else if( b.kind == LocalBindKind::ImplBlock && ( std::string_view( b.var ) == "IntoFuture" || std::string_view( b.var ) == "Future" ) && !b.typeName.empty() )
+            else if( b.kind == LocalBindKind::ImplBlock && ( var == "IntoFuture" || var == "Future" ) && !b.typeName.empty() )
             {
                 impls.push_back( &b );
             }
-            else if( b.kind == LocalBindKind::TypeAlias && std::string_view( b.var ) == "Output" && !b.importedName.empty() )
+            else if( b.kind == LocalBindKind::TypeAlias && var == "Output" && !b.importedName.empty() )
             {
                 outputs.push_back( &b );
             }
@@ -3258,7 +3259,11 @@ struct ReceiverEvidence
         const auto byKey = []( const KeyedRecord& a, const KeyedRecord& b ) { return a.key < b.key; };
         std::stable_sort( chainRecvCalls.begin(), chainRecvCalls.end(), byKey );
         std::stable_sort( chainReturnTypes.begin(), chainReturnTypes.end(), byKey );
-        std::vector<std::uint64_t> rootKeys;   // where a depth-1 record's inner call (a chain's root) starts
+    }
+    // the references at a chain ROOT's start (where a depth-1 record's inner call starts), by key
+    void indexChainRoots() const
+    {
+        std::vector<std::uint64_t> rootKeys;
         for( const KeyedRecord& e : chainRecvCalls )
         {
             if( e.b->resultIndex == 1 )
@@ -3276,49 +3281,65 @@ struct ReceiverEvidence
             }
         }
         std::ranges::sort( chainRootRefs );
+    }
+    // an IntoFuture / Future impl's own `type Output` (the item its span holds), resolved like a written result type when it is a
+    // plain path; no class for anything else (a generic, a reference, a tuple)
+    ChainValue implAwaitOutput( const Binding& impl, std::span<const Binding* const> outputs ) const
+    {
+        const auto inImpl = [ & ]( const Binding* o ) { return o->fileId == impl.fileId && o->startByte >= impl.spanStart && o->startByte < impl.spanEnd; };
+        const auto it     = std::ranges::find_if( outputs, inImpl );
+        if( it == outputs.end() )
+        {
+            return {};
+        }
+        const Binding&         o         = **it;
+        const std::string_view text      = o.importedName;
+        const bool             plainPath = std::ranges::all_of( text, []( char c ) { return std::isalnum( static_cast<unsigned char>( c ) ) || c == '_' || c == ':'; } );
+        const auto [ path, last ]        = CallResultTypes::splitLast( text, "::" );
+        return { plainPath ? types.rustResultClass( o.fileId, o.startByte, path.empty() ? std::string_view{} : text, last ) : kNoNode, 0, false };
+    }
+    // class → its `.await` value; a class with two impls whose outputs disagree awaits to nothing known (cls kNoNode)
+    void buildAwaitOutputs( std::span<const Binding* const> impls, std::span<const Binding* const> outputs ) const
+    {
+        for( const Binding* impl : impls )
+        {
+            const NodeId cls = types.rustResultClass( impl->fileId, impl->spanStart, {}, impl->typeName );
+            if( cls != kNoNode )
+            {
+                chainAwaitOutputs.emplace_back( cls, implAwaitOutput( *impl, outputs ) );
+            }
+        }
+        std::ranges::sort( chainAwaitOutputs, {}, &std::pair<NodeId, ChainValue>::first );
+        std::size_t kept = 0;
+        for( std::size_t i = 0; i < chainAwaitOutputs.size(); ++i )
+        {
+            const bool sameClass = kept > 0 && chainAwaitOutputs[ kept - 1 ].first == chainAwaitOutputs[ i ].first;
+            if( sameClass && chainAwaitOutputs[ kept - 1 ].second != chainAwaitOutputs[ i ].second )
+            {
+                chainAwaitOutputs[ kept - 1 ].second = ChainValue{};
+            }
+            if( !sameClass )
+            {
+                chainAwaitOutputs[ kept++ ] = chainAwaitOutputs[ i ];
+            }
+        }
+        chainAwaitOutputs.resize( kept );
+    }
+    void buildChainTables() const
+    {
+        chainTablesBuilt = true;
+        std::vector<const Binding*> impls;
+        std::vector<const Binding*> outputs;
+        collectChainRecords( impls, outputs );
+        indexChainRoots();
         // `.await` reads std's IntoFuture: an in-tree TRAIT of either name makes every such impl unknown (an impl's own associated
         // `type IntoFuture = …` is no trait)
         NodeId     one     = kNoNode;
         const auto isTrait = [ & ]( NodeId c ) { return ing.symbols[ c ].kind == SymKind::Interface; };
-        if( types.classesNamed( "IntoFuture", CallResultFamily::Rust, isTrait, one ) != 0 || types.classesNamed( "Future", CallResultFamily::Rust, isTrait, one ) != 0 )
+        if( types.classesNamed( "IntoFuture", CallResultFamily::Rust, isTrait, one ) == 0 && types.classesNamed( "Future", CallResultFamily::Rust, isTrait, one ) == 0 )
         {
-            return;
+            buildAwaitOutputs( impls, outputs );
         }
-        for( const Binding* impl : impls )
-        {
-            const NodeId cls = types.rustResultClass( impl->fileId, impl->spanStart, {}, impl->typeName );
-            ChainValue   out;
-            for( const Binding* o : outputs )   // the impl's own `type Output` (its span holds the item)
-            {
-                if( o->fileId == impl->fileId && o->startByte >= impl->spanStart && o->startByte < impl->spanEnd )
-                {
-                    const std::string_view text = o->importedName;
-                    const bool plainPath = std::ranges::all_of( text, []( char c ) { return std::isalnum( static_cast<unsigned char>( c ) ) || c == '_' || c == ':'; } );
-                    const auto [ path, last ] = CallResultTypes::splitLast( text, "::" );
-                    out.cls = plainPath ? types.rustResultClass( o->fileId, o->startByte, path.empty() ? std::string_view{} : text, last ) : kNoNode;
-                    break;
-                }
-            }
-            if( cls != kNoNode )
-            {
-                chainAwaitOutputs.emplace_back( cls, out );
-            }
-        }
-        std::ranges::sort( chainAwaitOutputs, {}, &std::pair<NodeId, ChainValue>::first );
-        std::size_t kept = 0;   // a class with two impls whose outputs disagree awaits to nothing known
-        for( std::size_t i = 0; i < chainAwaitOutputs.size(); ++i )
-        {
-            if( kept > 0 && chainAwaitOutputs[ kept - 1 ].first == chainAwaitOutputs[ i ].first )
-            {
-                if( chainAwaitOutputs[ kept - 1 ].second != chainAwaitOutputs[ i ].second )
-                {
-                    chainAwaitOutputs[ kept - 1 ].second = ChainValue{};
-                }
-                continue;
-            }
-            chainAwaitOutputs[ kept++ ] = chainAwaitOutputs[ i ];
-        }
-        chainAwaitOutputs.resize( kept );
     }
     // the value `.await` yields on a `cls` (no layer, not a future): its in-tree IntoFuture / Future impl's `Output`
     std::optional<ChainValue> rustAwaitOutput( NodeId cls ) const
@@ -3516,6 +3537,31 @@ struct ReceiverEvidence
         const NodeId cls = types.resultClassOf( rt, lang );
         const std::optional<ChainValue> out = cls == kNoNode ? std::nullopt : rustAwaitOutput( cls );
         return out.has_value() && out->layers == ( cr.unwrapDepth & kUnwrapLayersMask ) ? out->cls : kNoNode;
+    }
+    // graph.h typeCallResults, per ReturnType record `rt` of the ONE proven callee: does it describe what the call result `cr`
+    // binds — the same position, the unwrap depth the binding applies (a C++ rule-2 sink: the value or one pointer), and for a
+    // Rust `T::f()` a T that reaches the callee's class (rustQualifierTypes) — and the class the local then holds (kNoNode: matched,
+    // nothing to type). lane rust-self-chain: a Rust `let x = f().await` on a callee that is no `async fn` matches through the
+    // class's IntoFuture / Future `Output` (rustAwaitedCallResult).
+    struct CallResultMatch
+    {
+        bool   matched = false;
+        NodeId cls     = kNoNode;
+    };
+    CallResultMatch matchCallResult( const Reference& r, const Binding& cr, const Binding& rt, NodeId callee, bool rule2Sink ) const
+    {
+        if( rt.resultIndex != cr.resultIndex )
+        {
+            return {};
+        }
+        const Lang   lang    = ing.symbols[ callee ].lang;
+        const bool   direct  = rule2Sink ? rt.unwrapDepth <= 1 : rt.unwrapDepth == cr.unwrapDepth;
+        const NodeId awaited = direct ? kNoNode : rustAwaitedCallResult( cr, rt, lang );
+        if( ( !direct && awaited == kNoNode ) || !rustQualifierTypes( r, cr.importedName, callee, rt.isFromAssignment ) )
+        {
+            return {};
+        }
+        return { true, direct ? types.resultClassOf( rt, lang ) : awaited };
     }
     // lane L6 (interface-typed dispatch): the TYPE a member call's receiver is recorded as — the one class or interface the
     // dispatch tier (ifacedispatch.h) asks about — and, for a Rust generic, the bound that typed it. `type` kNoNode: nothing
