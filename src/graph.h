@@ -10298,10 +10298,10 @@ public:
     }
     // The tier's half: the candidates a proven standard receiver may not run leave what the ladder bound. True when nothing is
     // left: the call is declined on the candidates it may still run, which the ladder did not reach (a far trait method).
-    bool pruneTier( std::vector<NodeId>& tier ) const
+    bool pruneTier( std::vector<NodeId>& tier, bool bindingPinned ) const   // `bindingPinned`: a binding pinned the call, the tier stands
     {
         const auto mayNot = [ this ]( NodeId c ) { return !mayRunCandidate( c ); };
-        if( !head_.has_value() || std::none_of( tier.begin(), tier.end(), mayNot ) )
+        if( bindingPinned || !head_.has_value() || std::none_of( tier.begin(), tier.end(), mayNot ) )
         {
             return false;
         }
@@ -10532,6 +10532,22 @@ private:
     const Reference*                                     ref_ = nullptr;    // the call runsOnlyStd last read
     std::optional<std::string_view>                      head_;             // …and its receiver's proven standard type
 };
+
+// moved out of buildGraph by train 1117d2 (quality-delta): class-like kinds, compose / route edge dedup keys, PY-CLASS-SPRAY's ask
+// the inheritance overlay's class-like kinds: Class, Interface, Struct and the NamedType..FuncType range
+inline bool isClassLikeKind( SymKind k ) noexcept { return CallResultTypes::classKind( k ) || isStructOrNamedType( k ); }
+inline bool sameComposePair( const ComposeEdge& a, const ComposeEdge& b ) noexcept { return a.ownerSym == b.ownerSym && a.fieldName == b.fieldName; }
+inline bool sameRouteEdge( const RouteEdge& a, const RouteEdge& b ) noexcept { return a.fromSym == b.fromSym && a.toSym == b.toSym && a.path == b.path; }
+inline bool pythonScopePinAt( const PythonLexicalScopes& scopes, const IngestResult& ing, const ExternalVetoTables& veto, const Reference& r, std::vector<NodeId>& cand )
+{
+    const auto moduleUnread = [ & ]
+    {
+        std::string key;
+        return ( r.fileId < veto.pythonScopes.starTargets.size() && !veto.pythonScopes.starTargets[ r.fileId ].empty() )   // a star import
+            || veto.pythonModuleRebind.contains( fileNameKey( key, r.fileId, kPythonDynamicWrite ) );                       // `globals()` / `setattr`
+    };
+    return cand.empty() && !scopes.empty() && isPythonBareCall( r ) && pythonLexicalScopePin( scopes, ing, r, moduleUnread, cand );
+}
 
 inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = nullptr, bool census = false )
 {
@@ -10946,8 +10962,6 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     const RubyBaseScope rubyBases = buildRubyBaseScope( ing );
     g.rubyBasesUnscoped = rubyBases.disclosure.unscoped;   // ruby_bases_unscoped= (absent at zero)
     {
-        const auto isClassLikeK = []( SymKind k ) noexcept
-        { return k == SymKind::Class || isStructOrNamedType( k ) || k == SymKind::Interface; };
         PROFILE_SCOPE_DESCRIBE( "buildGraph/2h: CHA-lite inheritance name graph" );
         for( const Reference& ir : ing.references )
         {
@@ -10968,7 +10982,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             { // Rust impl → derived type name in qualifier
                 derivedName = ir.qualifier;
             }
-            else if( ir.fromSymbol != kNoNode && ( isClassLikeK( ing.symbols[ ir.fromSymbol ].kind )
+            else if( ir.fromSymbol != kNoNode && ( isClassLikeKind( ing.symbols[ ir.fromSymbol ].kind )
                                                    || BuiltinMethodGate::isClassLike( ing.symbols[ ir.fromSymbol ] ) ) )
             {
                 derivedName = ing.symbols[ ir.fromSymbol ].name;          // the derived class header — or a Ruby module's mixin
@@ -12537,18 +12551,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 importPinned = true;
             }
         }
-        // PY-CLASS-SPRAY: a bare Python call whose name the first binding scope of its chain (LEGB) binds by def or class statements
-        // alone names those definitions, never a namesake in another function or module (pythonLexicalScopePin states when it decides)
-        if( !scipPinned && !canonical && !narrowed && cand.empty() && !pyScopes.empty() && isPythonBareCall( r ) )
+        // PY-CLASS-SPRAY: a bare Python call binds what the first binding scope of its chain (LEGB) binds by def / class (pythonScopePinAt)
+        if( !scipPinned && !canonical && !narrowed )
         {
-            // the module's namespace is not read under a star import or a dynamic write (`globals()`, `setattr`): either may rebind the name
-            const auto moduleUnread = [ & ]
-            {
-                std::string key;
-                return ( r.fileId < extVeto.pythonScopes.starTargets.size() && !extVeto.pythonScopes.starTargets[ r.fileId ].empty() )
-                    || extVeto.pythonModuleRebind.contains( fileNameKey( key, r.fileId, kPythonDynamicWrite ) );
-            };
-            narrowed = pythonLexicalScopePin( pyScopes, ing, r, moduleUnread, cand );
+            narrowed = pythonScopePinAt( pyScopes, ing, extVeto, r, cand );
         }
         if( !scipPinned && r.role == RefRole::Call && r.recv == RecvKind::None && r.qualifier.empty()
             && ( r.lang == Lang::TypeScript || r.lang == Lang::JavaScript ) )
@@ -13928,7 +13934,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
 
         // std-namesake, the tier's half: the candidates a proven standard receiver may not run leave what the ladder bound; with
         // nothing left the call is declined on those it may still run (a far trait method): counted, no row
-        if( !bindingPinned && stdWritten.pruneTier( tier ) )
+        if( stdWritten.pruneTier( tier, bindingPinned ) )
         {
             recordDecline( r, stdWritten.declineList( cand ), DeclinedSiteKind::Ladder );
             disposition = CallDisposition::Declined;
@@ -14454,9 +14460,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                    return a.fieldName < b.fieldName;
                } );
     {
-        const auto samePair = []( const ComposeEdge& a, const ComposeEdge& b ) noexcept
-        { return a.ownerSym == b.ownerSym && a.fieldName == b.fieldName; };
-        g.composeEdges.erase( std::unique( g.composeEdges.begin(), g.composeEdges.end(), samePair ), g.composeEdges.end() );
+        g.composeEdges.erase( std::unique( g.composeEdges.begin(), g.composeEdges.end(), sameComposePair ), g.composeEdges.end() );
     }
 
     // B6.3 HTTP-route USE→DEF edges: match ing.routeUses against ing.routeDefs by (method, path) — see
@@ -14469,8 +14473,6 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // USEs (matching zero) synthesize NO edge — never a guess (mirrors the amb=/unresolved= honesty posture).
     {
         PROFILE_SCOPE_DESCRIBE( "buildGraph/8: HTTP-route edges" );
-        const auto isFunctionLike = []( SymKind k ) noexcept { return k == SymKind::Function || k == SymKind::Method; };
-
         std::vector<NodeId> defHandler( ing.routeDefs.size(), kNoNode );   // per-DEF resolved handler symbol
         for( std::size_t d = 0; d < ing.routeDefs.size(); ++d )
         {
@@ -14486,7 +14488,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             }
             for( NodeId cand : it->second )
             {
-                if( isFunctionLike( ing.symbols[ cand ].kind ) && ing.symbols[ cand ].fileId == rd.fileId )
+                if( ReceiverEvidence::callableKind( ing.symbols[ cand ].kind ) && ing.symbols[ cand ].fileId == rd.fileId )
                 { defHandler[d] = cand; break; }                           // ids ascending → lowest-id match (deterministic)
             }
         }
@@ -14548,8 +14550,6 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                        }
                        return a.path < b.path;
                    } );
-        const auto sameRouteEdge = []( const RouteEdge& a, const RouteEdge& b ) noexcept
-        { return a.fromSym == b.fromSym && a.toSym == b.toSym && a.path == b.path; };
         g.routeEdges.erase( std::unique( g.routeEdges.begin(), g.routeEdges.end(), sameRouteEdge ), g.routeEdges.end() );
     }
 
