@@ -104,6 +104,9 @@ PY
 "$BIN" docdemotefix --for="$BUGQ" --no-route --format=candidates --no-cache >"$TMP/noroute.xml" 2>/dev/null
 "$BIN" docdemotefix --for="$BUGQ"     --no-cache >"$TMP/bugfor.xml"    2>/dev/null
 "$BIN" docdemotefix --for="$TRACEQ"   --no-cache >"$TMP/tracefor.xml"  2>/dev/null
+# RE-PIN 2026-11-17 (BAND CF, lane callee-row-file; rule 4): docdemotegolden_for.xml 5985 -> 6040 B (est_tokens "2396" -> "2418").
+# The whole diff, read mechanically: est_tokens= and 55 B of the bundle legend, whose callee clause now reads "same-named callees
+# of one file, c p= that file when it is not the h row's". The golden's <hops> is shown="0" and prints no <c> row, so no row moved.
 # RE-PIN 2026-11-15 (lane NEXT-APOS-RAW; rule 4): docdemotegolden_for.xml 5999 -> 5989 B (est_tokens "2400" -> "2396") and
 # docdemotegolden_noroute.xml 9524 -> 9514 B ("3373" -> "3369"): nextAttrXml leaves ' raw inside the double-quoted next=
 # (2 entities each). Verified mechanically: &apos; -> ' inside next-family values, est_tokens= masked, gives each capture exactly.

@@ -18934,3 +18934,253 @@ as UNENTERED.
   re-measured and are not gated.
 - The `have=` flag itself is caller output on every call (30 B and up); bytes only, no token price.
 - No sanitizer build was run for this band.
+## PRE-REGISTRATION 2026-11-17 (amendment 11) — BAND CF: a hop-callee row prints a line and no file
+
+Registered before any `src/` change. The gate (`test/calleerowfilecheck.sh`) lands red in the same commit as
+this section; the fix and the readout follow in a later one.
+
+### The defect
+
+A `--for` answer's `<hops>` section lists each ranked symbol as `<h l= p= n=>` and its callees as `<c n= l=/>`.
+`l=` is the callee's DEFINITION line. Nothing says which file that line is in, and the legend does not say the
+row cannot be opened. The retrieval-gap partition of 2026-11-17 (class 4c) counted 15 required gold items whose
+only trace in the answer is such a row, with the line exact:
+
+```
+<h l="569" p="internal/command/init.go" n="getProviders">…<c n="EnsureProviderVersions" l="198"/>
+gold: internal/providercache/installer.go:198
+```
+
+The tool holds the file. `--callees` of the same owner prints
+`<s t="method" n="Installer.EnsureProviderVersions" p="internal/providercache/installer.go:198"/>`.
+
+**A second defect on the same row, found while reproducing.** The row merges same-named callees and comma-joins
+their lines. The merge key is the NAME, so lines from different files are joined:
+
+```
+src/app/page.ts   paintPage calls HtmlView.render (src/ui/html.ts:3) and TextView.render (src/ui/text.ts:9)
+answer            <c n="render" l="3,9"/>
+```
+
+Today that is unlocatable. With a file attribute added naively it becomes WRONG: one `p=` over two files' lines.
+So the file has to join the merge key, and the gate's first mutation is exactly the naive fix.
+
+### Reproduced before registering (train binary `93210787e`, full-question wording, one process, private `TMPDIR`)
+
+All 15 items reproduce as unlocated: 0 of 15 at item grain under the strict rule (same file, line within 3).
+The row that names each, and the file `--callees` prints for the same edge:
+
+| cell | item | owner `<h>` row | `<c>` row printed | file the tool holds |
+| --- | --- | --- | --- | --- |
+| ld-nushell-06 | R4 | `crates/nu-cli/src/repl.rs:375 finish_startup` | `eval_source l="243"` | `crates/nu-cli/src/util.rs` |
+| ld-terraform-03 | R3 | `internal/terraform/context_plan.go:791 planWalk` | `walk l="99"` | `internal/terraform/context_walk.go` |
+| ld-terraform-04 | R3 | `internal/command/init.go:569 getProviders` | `EnsureProviderVersions l="198"` | `internal/providercache/installer.go` |
+| ld-zed-02 | R2 | `crates/workspace/src/pane.rs:2256 save_item` | `save l="301,1068,1799" via="name"` | `crates/workspace/src/item.rs` (301, 1068) |
+| ld-zed-03 | R1 | `crates/editor/src/editor.rs:5257 backspace` | `insert l="949"` | `crates/editor/src/input.rs` |
+| ld2-angular-05 | R1 | `packages/core/src/di/r3_injector.ts:328 get` | `get l="17" via="name"` | `packages/core/src/di/null_injector.ts` |
+| ld2-django-04 | R1 | `django/contrib/auth/__init__.py:124 authenticate` | `authenticate l="18,67,273" via="name"` | `django/contrib/auth/backends.py` (all three) |
+| ld2-django-04 | R2 | `django/contrib/auth/handlers/modwsgi.py:23 check_password` | `check_password_with_timing_attack_mitigation l="391"` | `django/contrib/auth/__init__.py` |
+| ld2-django-06 | R3 | `django/db/models/sql/subqueries.py:22 do_query` | `get_compiler l="369"` | `django/db/models/sql/query.py` |
+| ld2-django-10 | R3 | `django/middleware/common.py:63 should_redirect_with_slash` | `is_valid_path l="169"` | `django/urls/base.py` |
+| ld2-django-13 | R3 | `django/template/backends/jinja2.py:64 render` | `render l="43,102" via="name"` | TWO files: `django/template/backends/dummy.py` (43), `django/template/backends/django.py` (102) |
+| mf1-fastify-03 | R1 | `fastify.js:89 fastify` | `Context l="22"` | `lib/context.js` |
+| mf1-fastify-03 | R2 | `fastify.js:89 fastify` | `createServer l="26"` | `lib/server.js` |
+| mf1-mdbook-03 | R5 | `src/cmd/serve.rs:58 execute` | `build_dir_for l="372"` | `crates/mdbook-driver/src/mdbook.rs` |
+| mf2-pydantic-07 | R1 | `pydantic/validate_call_decorator.py:83 validate_call` | `validate l="111,1685,1993" via="name"` | THREE files: the owner's own (111), `pydantic/main.py` (1685), `pydantic/types.py` (1993) |
+
+Five are `via="name"`: ld-zed-02, ld2-angular-05, ld2-django-04 R1, ld2-django-13, mf2-pydantic-07. Two of the five
+(ld2-django-13, mf2-pydantic-07) are the cross-file merge described above, on real answers: one `l=` joining
+lines of two and of three files.
+
+Two corrections to the figures this lane was handed:
+
+- The partition matched a row by the symbol indexed AT the gold line, not by the gold's `primary=` name. Five
+  of the 15 rows therefore carry another name than the item's primary (`is_valid_path`, `render`, `Context`,
+  `createServer`, `validate`). They are context definitions the gold cites. Nothing is wrong with the count.
+- On this train `--callees` prints `<s t= n= p="path:line">`. The `<c n= p="path:line">` row at
+  `src/verbs_navigate.h:1857` is `--safe-delete`'s caller row. The precedent holds either way.
+
+### The change being registered
+
+A names-only callee row prints `p="<file>"` when the callee's file is not its `<h>` row's own `p=`. A row with
+no `p=` is in the `<h>` row's file, and the legend says so. Same-named callees merge only within one file, so
+every line in one row's `l=` is a line of that row's file. Row order, the callee set, `total=` and `shown=` do
+not change. The path bytes are charged to the block's budget like every other byte the row prints.
+
+A `via="name"` row keeps `via="name"`. Its `p=` is the file of the definition whose line `l=` already prints:
+it is a fact about that candidate, and the hedge on the EDGE is unchanged. No path is derived from a name, an
+import or the owner.
+
+Out of scope, by instruction: the `<t>` pointer rows (classes 4a, 4b, 4f), `mem=` members (4d), and the
+signature rendering `<c n= l=>sig</c>` under `<b>` bodies. Nothing retrieved or ranked changes.
+
+### Populations, all at ITEM grain, never pooled with a symbol or file grain
+
+| name | cells | required items | query | role |
+| --- | --- | --- | --- | --- |
+| DEV | 13 | the 15 class-4c items | full question (`task=` of the stored WP2 answer) | shaped the fix; cannot judge it |
+| FRESH | 127 | 339 | the short wording stored as `argv` in `FIRE321_1116`, on every gold-backed cell that is not a DEV cell | decides |
+| DEV-CELLS-SHORT | 13 | 43 | the same short wording on the 13 DEV cells | reported apart, counted in neither |
+
+FRESH was counted before any FRESH answer was collected or read: 157 manifest cells, 17 without a locatable
+required item, 13 DEV. Its gold is the same manifest as DEV's; its questions and therefore its answers are not.
+The 127 cells' full-wording answers are where the partition found no further 4c item, so FRESH is not expected
+to repeat DEV's rate, and that is the point of drawing it.
+
+Instrument: `proto_locate_HANDCHECK_ONLY.claims`, unchanged, strict rule. It is a hand-check prototype, not a
+grader, and no figure here is a comparison number. It reads the FIRST number of a comma-joined `l=` and it
+needs a path inside the row's own tag, so two DEV items are predicted to stay unlocated BY THE INSTRUMENT while
+being readable by the legend's rule: ld2-django-04 R1 (line 67 is second of three) and mf2-pydantic-07 R1 (same
+file as its `<h>`). They are reported as what they are and the row format is not bent to the instrument.
+
+### Bars, set now
+
+- **DEV:** at least 12 of 15 located; 0 located through a wrong file.
+- **FRESH (decides):** at least 3 required items newly located of 339, and 0 lost. If FRESH and DEV disagree,
+  FRESH wins. Under 3, no located-item claim is made and the readout states the bytes paid per item so the
+  trade is the owner's.
+- **Byte cost accepted:** mean growth at most 3.0 % of the mean answer's bytes on each population. The maximum
+  single-answer growth and the legend's share are reported, not bounded. This band ADDS bytes; nothing here is
+  a saving.
+
+### Controls
+
+- **K1 row set.** On every answer of every population the multiset of (owner file, owner line, callee name,
+  callee line) is identical before and after, and so are `total=`, `shown=`, `capped=` on every `<calls>` and on
+  `<hops>`. With `<hops>` and the legend comment removed the two documents are byte-identical except the
+  `est_tokens=` header attribute.
+- **K2 no wrong file.** Every `<c>` row inside `<hops>` in every new answer, not only the gold ones: for each
+  line of `l=`, the source file named by `p=` (or by the `<h>` row when `p=` is absent) spells the callee's
+  name on that line or within the 3 lines after it. Bar: 0 failures by the mechanical read; every mismatch is
+  hand-read and reported. Counted separately for `via="name"` rows.
+- **K3** two runs byte-identical on every new answer; every new answer passes `xmllint --noout`.
+
+### Mutations that must go red in the gate
+
+| | mutation | arm that must fail |
+| --- | --- | --- |
+| M1 | the file leaves the merge key: a merged row prints its FIRST callee's file over every line | W — a row prints a file the tool did not resolve for that line |
+| M2 | every row prints its `<h>` row's file | W |
+| M3 | no row prints `p=` (the fix reverted) | A |
+| M4 | same-file rows print `p=` too | E — elision |
+| M5 | the legend clause is dropped | L |
+
+### Not claimed
+
+No timing, no memory, no cross-tool number. No claim about agents following the row. No claim about the
+signature rendering under `<b>`.
+
+## READOUT — BAND CF: 12 of 15 on the items that shaped it, 3 of 339 on the fresh draw, and a row that was joining two files' lines
+
+Measured on the lane binary against the train it branched from (`93210787e`), both built from clean trees
+without a build type. One process at a time, private `TMPDIR`. 153 answers a side, all rc 0. Two runs of the
+lane binary are byte-identical on 153 of 153 and all 153 pass `xmllint --noout`. No timing, no memory.
+
+### The registered rule
+
+| population | cells | required items located, before | after | gained | lost | registered bar | |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| DEV, the 15 class-4c items | 13 | 0 of 15 | 12 of 15 | 12 | 0 | at least 12 | met |
+| DEV, every required item of those cells | 13 | 18 of 43 | 30 of 43 | 12 | 0 | | |
+| **FRESH (decides)** | 127 | 186 of 339 | **189 of 339** | **3** | 0 | at least 3, 0 lost | **met at the minimum** |
+| DEV-CELLS-SHORT (reported apart) | 13 | 25 of 43 | 33 of 43 | 8 | 0 | none | |
+
+Item grain, strict rule, the hand-check extractor unchanged. **FRESH and DEV do not agree on size and FRESH
+wins:** the fix locates 3 further items in 339 (0.9 %, Wilson 95 % 0.3–2.6), not four fifths of a class. That
+is what the registration predicted and it is the number to carry. The three, each hand-read against the source:
+
+| cell | item | row that now locates it | source line |
+| --- | --- | --- | --- |
+| ld-vscode-02 | R1 | `<c n="run" l="327" p="src/vs/workbench/browser/actions/layoutActions.ts" prov="split"/>` | `run(accessor: ServicesAccessor): void {` |
+| ld-vscode-02 | R2 | `<c n="registerAction2" l="729" p="src/vs/platform/actions/common/actions.ts"/>` | `export function registerAction2(…` |
+| ld-zed-06 | R1 | `<c n="backspace" l="5257" p="crates/editor/src/editor.rs"/>` | `pub fn backspace(&mut self, …` |
+
+The first is a `prov="split"` row: the file is right for the line, and the edge is one arm of a split, as it was.
+The partition had filed these three under 4d, 4b and 6a on the full wording. A different question put them in
+a hop-callee row.
+
+**The three DEV items the instrument does not credit are printed correctly.** ld-zed-02 R2 and ld2-django-04 R1
+sit second in a comma-joined `l=` (`l="301,1068,1799" p="crates/workspace/src/item.rs"`,
+`l="18,67,273" p="django/contrib/auth/backends.py"`), and the extractor reads the first number. mf2-pydantic-07
+R1 is a same-file row with no `p=`. Two were predicted; ld-zed-02 was not. FRESH holds 2 more of the same-file
+kind (mf1-htop-01 R2, mf1-ninja-06 R4). None is counted as located anywhere above.
+
+### What it costs
+
+| population | mean answer before | after | growth | `p=` bytes per answer | legend per answer | largest single answer |
+| --- | --- | --- | --- | --- | --- | --- |
+| DEV | 41,004 B | 41,905 B | +901 B, **2.20 %** | 822 | 6 | +3,493 B, 9.2 % (ld-terraform-04) |
+| FRESH | 32,895 B | 33,430 B | +535 B, **1.63 %** | 463 | 5.4 | +5,861 B, 14.5 % (ld-zed-04) |
+| DEV-CELLS-SHORT | 37,468 B | 38,711 B | +1,243 B, **3.32 %** | 987 | 6 | +6,529 B, 17.8 % (ld-terraform-03) |
+
+The registered ceiling of 3.0 % holds on DEV and FRESH and **fails on DEV-CELLS-SHORT (3.32 %)**. The growth is
+more than the path bytes because a row that joined two files' lines is now two rows.
+
+**The trade, stated as bytes per located item.** DEV: 11,716 B over 13 answers for 12 items, about 1 KB each.
+FRESH: 67,913 B over 127 answers for 3 items, **about 22.6 KB each**. On the population that decides, this is
+an expensive way to locate an item, and whether to carry it is the owner's call, not a verdict of this band. The
+case for it that does not rest on the located count is the next section.
+
+### The row was wrong in a way the located count does not show
+
+On the 140 short-wording answers the train binary printed 2,249 hop-callee rows. 176 joined more than one line
+in `l=`, and **131 of those 176 joined lines of more than one file**: three of every four comma-joined rows named
+no single place. The fix makes them 283 further rows on FRESH (1,936 to 2,219), each in one file. Two of the 15
+DEV items were this shape on real answers (`render l="43,102"` over `dummy.py` and `django.py`;
+`validate l="111,1685,1993"` over three files).
+
+### Controls
+
+- **K2, no wrong file: 0 failures.** Every line of every hop-callee row was read against the source file its row
+  names: 2,402 lines on FRESH (833 `via="name"`), 477 on DEV (180), 483 on DEV-CELLS-SHORT (232). All spell the
+  callee's name on that line or within the three after it. No row prints its own `<h>` row's file.
+- **The five `via="name"` DEV rows.** ld2-angular-05 `get`: one row, `null_injector.ts`, correct. ld-zed-02
+  `save`: one row, three lines, all in `crates/workspace/src/item.rs`, correct. ld2-django-04 `authenticate`: one
+  row, three lines, all in `backends.py`, correct. ld2-django-13 `render`: **was one row over two files, now two
+  rows**, `django.py` (102) and `dummy.py` (43). mf2-pydantic-07 `validate`: **was one row over three files, now
+  three rows**. Each keeps `via="name"`. The path is read from the same symbol record as the line, so a wrong
+  file would need a wrong line; mutations M1 and M2 are the two ways to print one and both go red.
+- **K1, row set: holds.** The multiset of (owner file, owner line, callee name, callee line, hedge) and every
+  `total=`, `shown=`, `capped=` are identical before and after on 153 of 153.
+- **K1, bytes outside `<hops>`: FAILS on 3 of 153.** `<syms name_total=>` falls by 1 on ld-zed-03 (DEV),
+  ld-cpython-06 and ld-zed-04 (FRESH). That section offers symbols "the answer does not name" and reads the
+  answer's own words; a printed path adds words, so one candidate per cell left the COUNT. No `<syms>` row
+  changed in any of the 153. It is the registered control failing, on a count, and it is a second-order effect
+  on retrieval that this band said it would not have.
+- **K3:** above.
+
+### Mutations, each built from the lane source with one change and run through the gate
+
+| | mutation | gate result | arms red |
+| --- | --- | --- | --- |
+| M1 | the file leaves the merge key | 12 FAIL | (W) 4, (A) 4, (C) 4 |
+| M2 | every row prints its `<h>` row's file | 58 FAIL | (W) 12, (E) 21, (A) 20, (C) 5 |
+| M3 | no row prints `p=` | 38 FAIL | (A) 20, (W) 12, (C) 5, (L) 1 |
+| M4 | same-file rows print `p=` too | 2 FAIL | (E) 2 |
+| M5 | the compact legend clause dropped | 1 FAIL | (L) 1 |
+| — | lane source restored, rebuilt | PASS | |
+| — | the train binary `93210787e` | 39 FAIL | |
+
+### Departures from the registration
+
+- `p=` is printed AFTER `l=` (`<c n= l= p= via=/>`), so a reader keyed on `<c n= l=` still finds both.
+- The compact legend's clause is `c n= l= p= (p= if not h's; same-named joined, shown= counts them)`, 6 B longer
+  than the clause it replaces. A longer always-on clause took the fold-off legend pin past its 820 B target; a
+  present-only clause would have needed wiring through the header plan in `src/verbs_for.h`, which this lane was
+  told to stay out of. The pin now has 1 B of room. The full dialect and the dictionary state the rule in words.
+- Arm (L) accepts either spelling.
+
+### Not done, and not claimed
+
+- **The signature rendering is unchanged.** `<c n= l=>sig</c>` under a `<b>` body still prints a line and no
+  file: 20 rows in 5 of the 140 short-wording answers, and every body of `--expand` and `--pack-task`. Same
+  shape, same fix, its own legends and pins.
+- **Same-file rows carry no `p=`.** Printing it on every row would cost 179 B more per FRESH answer (359 on DEV)
+  and would let a row-local reader locate the 2 FRESH and 1 DEV items above. Not built; the figure is arithmetic
+  over the rows printed.
+- **A tight `--token-budget` can drop the hop section sooner**, because the path is charged: on the gate's
+  TypeScript fixture `--token-budget=1400` served the hop row before and discloses `capped="1" next=` after. No
+  default-budget answer lost a row.
+- **`test/showcasecapturecheck.sh` (I) is red on the train binary too** (capture `entries=1149`, train 1155, this
+  lane 1156). Not re-recorded here.
+- No agent was measured following the row. No peer answer was opened.

@@ -349,6 +349,7 @@ for _g in \
     cacheoffsetcheck \
     cachereservecheck \
     cachesplitcheck \
+    calleerowfilecheck \
     callerscheck \
     callformcheck \
     callsrankordercheck \
