@@ -17,8 +17,9 @@
 #   * The legend defines the row whenever it prints: the default (compact) legend's `def ix=` reading, and under --legend=full
 #     the sole-definition clause (not the multi-group clause, which describes of_def tokens no row here carries).
 #   * SCOPE — --impact only, by a stated reason: the blast radius of a change includes the file the change is made in, so the
-#     definition is part of this verb's answer set. --callers / --callees / --safe-delete keep the one-group answer without a
-#     table, as attribmultidefcheck pins ("every other answer carries no table").
+#     definition is part of this verb's answer set. --callees / --safe-delete keep the one-group answer without a table.
+#     (Lane v1-verbdef, test/verbdefrowscheck.sh, extended the rows to --callers and --uses and gave each tied declaration a
+#     row of its own after its group's row.)
 #   * A selector that matches nothing prints no <def> row; a multi-group selector is unchanged (its rows, its of_def tokens).
 #
 # Arm classes: [P] positive — the defect shape, RED on a binary without the row; [N] near miss — a shape the change must not
@@ -146,12 +147,14 @@ if run p_m py --impact=scale; then
            "(2) [P] --impact=scale: def rows = '$got' (expected one row, sc=\"Shape\" p=\"geo.py:6\")"
 fi
 
-# ── (3) [P] C declaration + definition are ONE group: one row, at the definition ────────────────────────────────────
+# ── (3) [P] C declaration + definition are ONE group: its row at the definition, then the declaration's own row ──────
+# RE-PIN 2026-11-18 (lane v1-verbdef, VERB-DEF-ROWS; gate test/verbdefrowscheck.sh): a tied declaration is a row of its own after
+# its definition (same ix, bodyless="1") — the header is a file a change to the definition must touch. Still ONE group (ix="1").
 if run p_c c --impact=tally; then
-    got="$( defrows p_c )"
-    [ "$got" = '<def ix="1" t="fn" p="proto.c:3"/>' ]
-    say $? "(3) [P] --impact=tally: prototype + definition are one group, named once at the definition (proto.c:3)" \
-           "(3) [P] --impact=tally: def rows = '$got' (expected exactly <def ix=\"1\" t=\"fn\" p=\"proto.c:3\"/>)"
+    got="$( defrows p_c | tr -d '\n' )"
+    [ "$got" = '<def ix="1" t="fn" p="proto.c:3"/><def ix="1" t="fn" p="proto.h:3" bodyless="1"/>' ]
+    say $? "(3) [P] --impact=tally: prototype + definition are one group, its row at the definition (proto.c:3), then the declaration (proto.h:3)" \
+           "(3) [P] --impact=tally: def rows = '$got' (expected proto.c:3 then proto.h:3 bodyless=\"1\", both ix=\"1\")"
 fi
 
 # ── (4) [P] every dialect of the verb carries it ────────────────────────────────────────────────────────────────────
@@ -188,7 +191,9 @@ if run p_full py --impact=area --legend=full; then
 fi
 
 # ── (6) [N] the verbs whose answer set does not include the definition stay as they were ────────────────────────────
-for v in "--callers=area" "--callees=room" "--safe-delete=area"; do
+# RE-PIN 2026-11-18 (lane v1-verbdef, VERB-DEF-ROWS): --callers now names its one group too (test/verbdefrowscheck.sh pins it);
+# --callees and --safe-delete keep the one-group answer table-less.
+for v in "--callees=room" "--safe-delete=area"; do
     tag="n_$( printf '%s' "$v" | tr -c 'a-z' '_' )"
     if run "$tag" py $v; then
         [ "$( ndef "$tag" )" = 0 ]

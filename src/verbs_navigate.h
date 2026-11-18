@@ -222,7 +222,7 @@ inline int emitCallHierarchyAlt( const rw::Config& cfg, const rw::IngestResult& 
                 pageOfDef.push_back( rw::ofDefColumnValue( chAttr.groups, chAttr.tokens, pw.begin + i ) );
             }
         }
-        const std::string chDefRows = rw::defTableXml( ing, chAttr.groups, chListing, chRootPrefix );
+        const std::string chDefRows = rw::defTableXml( ing, chAttr.groups, chListing, chRootPrefix, rw::callersDefRows( wantCallers ) );   // VERB-DEF-ROWS
         const rw::DeclinedColumnsOut chDcCols   = rw::declinedSitesColumnar( ing, page, chDc, wantCallers );   // BAND DC: the <dc> rows as <dcols> arrays
         const std::string            chDcInRows = chDcCols.block + chIn.rows;
         emitColumnarSymbolRows( stdout, ing, tag, attr, page, chRootPrefix, &chTested.testReach, nullptr,
@@ -239,7 +239,7 @@ inline int emitCallHierarchyAlt( const rw::Config& cfg, const rw::IngestResult& 
     }
     rw::emitTo( stdout, "{}{}{}", ( rw::unprovenDefsKeyJson( chRows.unprovenDefs ) + rw::implsKeyJson( chRows.contractSeeds, chRows.implBodies ) ).c_str(),
                  rw::crossKindKeyJson( chRows.crossKind ).c_str(),
-                 rw::defTableJson( ing, chAttr.groups, chListing, chRootPrefix, /*mcp=*/false ) );
+                 rw::defTableJson( ing, chAttr.groups, chListing, chRootPrefix, /*mcp=*/false, rw::callersDefRows( wantCallers ) ) );   // VERB-DEF-ROWS
     if( chSingleRoot ) { rw::emitTo( stdout, ",\"root\":\"{}\"", jsonStr( cfg.roots[0] ).c_str() ); }
     rw::emitTo( stdout, ",\"hop_tested\":{},\"hop_untested\":{}{}{}", chTested.tested, chTested.untested,
                  rw::countFieldOrEmpty( "hop_tests", chTested.tests, /*json=*/true )   // TIER-FOLLOWUP: the XML root's hop_tests=, absent at 0
@@ -474,7 +474,8 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
                            + rw::crossKindLegend( !chRows.crossKind.empty() )                      // hono-07: likewise for cross_kind=
                            + rw::viaNameLegend( chHasVia, false, cfg.columnar )                   // FE-B: likewise for via="name"
                            + rw::viaLinkLegend( chHasLink )
-                           + rw::defTableLegend( chAttr.groups.multi(), chListing.cut ) + rw::splitArmLegend( chHasSplit )   // attrib-multidef: likewise
+                           + rw::defTableLegend( chAttr.groups.multi(), chListing.cut, /*sole=*/wantCallers && chAttr.groups.size() == 1 )   // attrib-multidef; VERB-DEF-ROWS
+                           + rw::splitArmLegend( chHasSplit )
                            + rw::memberOwnerLegendFor( chOwnerRows ) ).c_str(),   // QUALNAME-1: likewise, exactly when a shown row names its owner
                          ( std::string( rw::modScopeLegend( chHasModScope ) )   // #60: likewise, exactly when a t="modscope" row is
                            + rw::callSitesAtLegend( chSites.any, chSites.anyCut, rw::kCallSitesPerRowCap ) ).c_str(),   // CALLSITE-AT: likewise for sites_at=/sites_total=
@@ -540,7 +541,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
                      rw::graphCountFloorAttrXml( g ).c_str(),
                      chNextAttr.c_str() );   // P3 (L7): callers → the SITES (--uses=SELECTOR, spelling mirrored); callees → the body (--expand=SYM)
         rw::writeMultiRootTable( stdout, ing );   // M12: the roots list this element's own root= cannot carry
-        rw::emitRaw( stdout, rw::defTableXml( ing, chAttr.groups, chListing, chRootPrefix ).c_str() );   // attrib-multidef: the groups the rows name, by ix=
+        rw::emitRaw( stdout, rw::defTableXml( ing, chAttr.groups, chListing, chRootPrefix, rw::callersDefRows( wantCallers ) ).c_str() );   // attrib-multidef: the groups the rows name, by ix=; VERB-DEF-ROWS: one group too on --callers
         for( std::size_t i = pw.begin; i < pw.end; ++i )
         {
             const Symbol&           s  = ing.symbols[ result[i] ];
@@ -1251,6 +1252,11 @@ std::optional<int> runUses( const MainDispatch& d )
               + rw::declinedCallsAttrXml( usDeclinedCalls )
             : std::string{};
 
+        // VERB-DEF-ROWS (lane v1-verbdef, test/verbdefrowscheck.sh): the definitions defs= counts, as the <def> rows --callers
+        // and --impact print (one group too). A use-site row names no group, so above the 16-group cap none is listed and
+        // defs_listed="0" says so.
+        const rw::UsesDefTable usDefs = rw::usesDefTable( ing, defs, usSingleRoot ? std::string_view( usRootPrefix ) : std::string_view() );
+
         std::vector<char> esc;
         const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
         // §P8 G1: the page window over the sorted sites; count= stays the un-windowed total (note above
@@ -1279,7 +1285,8 @@ std::optional<int> runUses( const MainDispatch& d )
                        + rw::valueRefsDepthLegend( usDepthCut.files > 0 )
                        + rw::aliasUsesLegend( usAliasFacts, cfg.columnar )   // XF-ALIAS-HOP: exactly when a site is written through an alias
                        + rw::unindexedRolesLegend( usUnindexed )   // B31: exactly when the root carries unindexed_roles=
-                       + rw::memberDeclScanLegend( usDeclCapped ) ).c_str(),   // exactly when the root carries decl_scan=
+                       + rw::memberDeclScanLegend( usDeclCapped )   // exactly when the root carries decl_scan=
+                       + usDefs.legend ).c_str(),   // VERB-DEF-ROWS: exactly when a <def> row (or defs_listed=) rides
                      rw::capLegendClause( rw::computePageDisclosure( pageRows, sites.size(), upw.end,
                                                                     cfg.pageLimit, cfg.pageOffset, usDiscloseCap ).active ),
                      rw::graphCountDisclosure( rw::graphGaugeClauses( g ) ).c_str(), rw::rootRelPathsLegend( usSingleRoot ),
@@ -1307,12 +1314,13 @@ std::optional<int> runUses( const MainDispatch& d )
                                    + rw::unprovenDefsAttrXml( usUnprovenDefs )   // H1: where the XML root carries it
                                    + selectorAttrs + usRootAttr + upage + rw::graphCountFloorAttrXml( g )   // §H4 §3.4
                                    + rw::valueRefsDepthAttrXml( ing, usDepthCut, rw::VrRender{ usSingleRoot, usRootPrefix } )   // the depth cut that makes count= a floor; absent when none
-                                   + rw::aliasUsesAttrXml( usAliasFacts, /*columnar=*/true );
-            emitColumnarUseSites( stdout, ing, attr, ufiles, ulines, uroles, uins, usRootPrefix );
+                                   + rw::aliasUsesAttrXml( usAliasFacts, /*columnar=*/true )
+                                   + usDefs.listedAttr;   // VERB-DEF-ROWS
+            emitColumnarUseSites( stdout, ing, attr, ufiles, ulines, uroles, uins, usRootPrefix, usDefs.rows );   // VERB-DEF-ROWS: before <cols>
             return 0;
         }
 
-        rw::emitTo( stdout, "<uses of=\"{}\" defs=\"{}\" external=\"{}\" count=\"{}\"{}{}{}{}{}{}{}{}{}{}>",
+        rw::emitTo( stdout, "<uses of=\"{}\" defs=\"{}\" external=\"{}\" count=\"{}\"{}{}{}{}{}{}{}{}{}{}{}>",
                      ex( sym ).c_str(), defs.size(), external ? 1 : 0, sites.size() - usHedged,
                      rw::unindexedRolesAttrXml( usUnindexed ),   // B31: beside the count it qualifies; absent when armed
                      rw::memberDeclScanAttrXml( usDeclCapped ),   // USES-DECL-SCAN-CAPPED: external="1" unchecked past the budget
@@ -1321,8 +1329,10 @@ std::optional<int> runUses( const MainDispatch& d )
                      selectorAttrs.c_str(), usRootAttr.c_str(), upage,
                      rw::graphCountFloorAttrXml( g ).c_str(),
                      rw::valueRefsDepthAttrXml( ing, usDepthCut, rw::VrRender{ usSingleRoot, usRootPrefix } ).c_str(),   // the depth cut that makes count= a floor; absent when none
-                     rw::aliasUsesAttrXml( usAliasFacts, /*columnar=*/false ).c_str() );   // XF-ALIAS-HOP; absent when no alias reaches
+                     rw::aliasUsesAttrXml( usAliasFacts, /*columnar=*/false ).c_str(),   // XF-ALIAS-HOP; absent when no alias reaches
+                     usDefs.listedAttr );   // VERB-DEF-ROWS: a cut table says so
         rw::writeMultiRootTable( stdout, ing );   // M12: the roots list this element's own root= cannot carry
+        rw::emitRaw( stdout, usDefs.rows.c_str() );   // VERB-DEF-ROWS: the definitions, before the use-site rows
         for( std::size_t siteIndex = upw.begin; siteIndex < upw.end; ++siteIndex )
         {
             const UseSite&          u  = sites[ siteIndex ];

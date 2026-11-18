@@ -1118,6 +1118,7 @@ for _g in \
     vendoredassetcheck \
     vendoredbundlecheck \
     vendorpatchcheck \
+    verbdefrowscheck \
     verifycheck \
     versioncheck \
     versionlabelcheck \

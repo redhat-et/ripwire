@@ -738,7 +738,7 @@ inline std::string calledByCutJson( std::string_view name, std::size_t total, co
 // `callsWindow` is empty (begin == end) on find_referencing_symbols, which marks the calledBy window only.
 inline std::string symbolQueryDefTableJson( const IngestResult& ing, const DefGroups& groups, const RowDefTokens& calledByTokens,
                                             const RowDefTokens& callsTokens, const PageWindow& calledByWindow, const PageWindow& callsWindow,
-                                            std::string_view rootPrefix )
+                                            std::string_view rootPrefix, DefRows when = DefRows::MultiOnly )
 {
     std::vector<char> named;
     defTableMarkNamed( named, groups, calledByTokens, calledByWindow.begin, calledByWindow.end );
@@ -747,10 +747,14 @@ inline std::string symbolQueryDefTableJson( const IngestResult& ing, const DefGr
         defTableMarkNamed( named, groups, callsTokens, callsWindow.begin, callsWindow.end );
     }
     const DefTableListing listing = defTableListing( groups, named );
-    std::string           out     = defTableJson( ing, groups, listing, rootPrefix, /*mcp=*/true );
+    std::string           out     = defTableJson( ing, groups, listing, rootPrefix, /*mcp=*/true, when );
     if( groups.multi() )
     {
         out += nextFieldJson( defTableLegend( true, listing.cut ), "def_note" );   // its reading, only when the table rides
+    }
+    else if( !out.empty() )
+    {
+        out += nextFieldJson( defTableLegend( false, false, /*sole=*/true ), "def_note" );   // VERB-DEF-ROWS: the one group's reading
     }
     return out;
 }
@@ -957,7 +961,8 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
     // attrib-multidef: the CLI root's <def> table, in this surface's row vocabulary (symbolQueryDefTableJson). The `symbol` object
     // above stays the first definition — def_table[0] — and this table rides beside it.
     out += symbolQueryDefTableJson( ing, chRows.attr.groups, calledByAttr.tokens, callsAttr.tokens, referencingOnly ? pwPrimary : pwSecond,
-                                    referencingOnly ? PageWindow{} : pwPrimary, sqRootPrefix );
+                                    referencingOnly ? PageWindow{} : pwPrimary, sqRootPrefix,
+                                    callersDefRows( referencingOnly ) );   // VERB-DEF-ROWS: find_referencing_symbols = --callers
     out += pageDisclosure( pab, sizeof( pab ), pwPrimary.end - pwPrimary.begin, rowTotal, pwPrimary.end,
                            page.limit, page.offset, discloseCap, kJsonPageSyntax );
     if( !referencingOnly )
@@ -3934,6 +3939,9 @@ inline std::optional<std::string> usesText( const std::string& root, const std::
     const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
     const bool usUnindexed = usesRolesUnindexed( ing, defs );   // B31: the CLI --uses' unindexed_roles=, same predicate
     const bool usDeclCapped = memberDeclScanCapped( ing, sym, external );   // USES-DECL-SCAN-CAPPED: the CLI's decl_scan=, same predicate
+    // VERB-DEF-ROWS: the CLI --uses' <def> rows, the same helper (root-relative exactly when the rows below are)
+    const std::string  usDefPrefix = ing.realPaths.empty() ? sarif::rootPrefixOf( root ) : std::string();
+    const UsesDefTable usDefs      = usesDefTable( ing, defs, usDefPrefix );
 
     rw::MemoryStream stream;
     std::FILE* const mem = stream.open();
@@ -3954,7 +3962,8 @@ inline std::optional<std::string> usesText( const std::string& root, const std::
                     + valueRefsDepthLegend( usDepthCut.files > 0 )
                     + declinedLiteralCallsLegend( declinedLiteralCalls > 0 )
                     + unindexedRolesLegend( usUnindexed )
-                    + memberDeclScanLegend( usDeclCapped ) ).c_str(),   // exactly when the root carries the depth disclosure / unindexed_roles=, as the CLI
+                    + memberDeclScanLegend( usDeclCapped )
+                    + usDefs.legend ).c_str(),   // exactly when the root carries the depth disclosure / unindexed_roles=, as the CLI; VERB-DEF-ROWS
                   capLegendClause( computePageDisclosure( upageRows, sites.size(), upw.end,
                                                           page.limit, page.offset, usDiscloseCap ).active ),
                   graphCountDisclosure( rw::graphGaugeClauses( ix.g ) ).c_str(),
@@ -3966,12 +3975,14 @@ inline std::optional<std::string> usesText( const std::string& root, const std::
     const bool         usSingleRoot = ing.realPaths.empty();
     const std::string  usRootPrefix = usSingleRoot ? sarif::rootPrefixOf( root ) : std::string();
     const std::string  usRootAttr   = usSingleRoot ? ( " root=\"" + ex( root ) + "\"" ) : std::string();
-    rw::emitTo( mem, "<uses of=\"{}\" defs=\"{}\" external=\"{}\" count=\"{}\"{}{}{}{}{}{}>",
+    rw::emitTo( mem, "<uses of=\"{}\" defs=\"{}\" external=\"{}\" count=\"{}\"{}{}{}{}{}{}{}>",
                   ex( symbol ).c_str(), defs.size(), external ? 1 : 0, sites.size(), unindexedRolesAttrXml( usUnindexed ),
                   memberDeclScanAttrXml( usDeclCapped ), usRootAttr.c_str(), upage,
                   graphCountFloorAttrXml( ix.g ).c_str(),
                   ( valueRefsDepthAttrXml( ing, usDepthCut, VrRender{ usSingleRoot, usRootPrefix } )
-                    + declinedLiteralCallsAttrXml( declinedLiteralCalls ) ).c_str() );   // of= echoes the selector as TYPED (an @-seed stays an @-seed)
+                    + declinedLiteralCallsAttrXml( declinedLiteralCalls ) ).c_str(),   // of= echoes the selector as TYPED (an @-seed stays an @-seed)
+                  usDefs.listedAttr );   // VERB-DEF-ROWS: a cut table says so, as on the CLI
+    rw::emitRaw( mem, usDefs.rows.c_str() );   // VERB-DEF-ROWS: the definitions, before the use-site rows, as on the CLI
     for( std::size_t siteIndex = upw.begin; siteIndex < upw.end; ++siteIndex )
     {
         const UseSite& u = sites[ siteIndex ];

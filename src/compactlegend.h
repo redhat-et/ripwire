@@ -417,7 +417,10 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "tsconfig_unread",   "tsconfig_unread=N: N configs not read (not in the tree, unparseable, above the root) could declare aliases; edges may be missing" },
     // #60: <bodies bodyless=N> — requested symbols with no body BY CONSTRUCTION (a module-scope owner), so
     // capped= stays 0. Absent at zero, like every term here.
-    { "bodyless",          "bodyless=N of total=: requested symbols with NO body by construction (t=modscope), never in shown=, never raising capped=", true },
+    // VERB-DEF-ROWS (lane v1-verbdef): element-scoped to <bodies>, the one element that carries this COUNT (serialize.h, packtask.h).
+    // Read anywhere it fired on a <def bodyless="1"> row too — a 107 B reading of an attribute that answer does not carry — and
+    // a C function's tied declaration row now carries bodyless="1" on every --callers/--uses/--impact answer.
+    { "bodyless",          "bodyless=N of total=: requested symbols with NO body by construction (t=modscope), never in shown=, never raising capped=", true, "bodies" },
     // --uses=Owner.field's member form (fielduses.h appends kUsesFieldLegend to that answer alone). owner_candidates= is a
     // row attribute that exists only beside member=, so one head term defines the whole form.
     { "member",            "member=Owner.field: rows use that field; pinned=/amb_sites= rows with one owner/with owner_candidates=K; owners_of_name= fields so named" },
@@ -703,7 +706,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // attrib-multidef (defattrib.h; graphlegend.h kDefTableLegend): the definition table of a multi-group selector, its rows'
     // ties, the cut table's count, and the columnar split column. Present-only, element-scoped. A row's prov="split" (Q1) reads
     // through the shared prov= row above, which already fires on any prov= in the payload.
-    { "ix",                "<def ix= t= sc= p= bodyless=1>: the groups defs= forms (a definition + the declarations tied to it; bodyless=1 tied to none)", true, "def" },
+    { "ix",                "<def ix= t= sc= p= bodyless=1>: the groups defs= forms (a definition, then each declaration tied to it, same ix=; bodyless=1 no body)", true, "def" },
     { "defs_listed",       "defs_listed=N: above 16 groups, only the N this page's rows name are listed; K~n not enumerated: a bare ~n = also by name, a by-name-only row has no of_def" },
     { "of_def",            "of_def=K..: the def ix=K groups the row belongs to; K resolved edge, K~s edge labelled split, K~n by name alone, K~t into a primary template whose specialisation is listed; NOT a claim the edge is false", true, "s" },
     { "of_def",            "c of_def=K..: the def ix=K groups that caller belongs to (K~s split label, K~n by name, K~t primary template); NOT a claim the edge is false", true, "c" },

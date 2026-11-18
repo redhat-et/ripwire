@@ -41,6 +41,7 @@
 
 #include "editcheck.h"   // editCheckGroupKeys' fold (editCheckDeclFoldTargets) — the C-family declaration identity
 #include "graph.h"
+#include "graphlegend.h"   // VERB-DEF-ROWS: defTableLegend, the reading usesDefTable hands its two emitters
 #include "hoprecord.h"   // HOP-CONTEXT-1: THE hop record — site= call= sig= on every hop row
 #include "langfacts.h"   // langFacts(l).overloadSignatures — the TypeScript overload-signature rule, as a column
 #include "memberowner.h"   // QUALNAME-1: MemberOwners / qualifiedMemberName — the one member-owner rule for every row
@@ -80,6 +81,8 @@ enum class DefMark : std::uint8_t
 struct DefGroups
 {
     std::vector<std::uint32_t> ofMatch;         // parallel to the matches: the group each one belongs to
+    std::vector<NodeId>        member;          // parallel to the matches: the match itself (VERB-DEF-ROWS: a group's other
+                                                // members — its tied declarations — print as rows of their own after its row)
     std::vector<NodeId>        rep;             // per group: the bodied member (the table's t=/sc=/p=), else its first match
     std::vector<char>          bodyless;        // per group: no member has a body (a declaration that declares no listed definition)
     std::vector<char>          primaryOfSpec;   // per group: its sc= is the template base of another group's sc= (the ~t mark)
@@ -269,6 +272,7 @@ inline DefGroups defGroupsOf( const IngestResult& ing, std::span<const NodeId> m
     if( matches.size() < 2 )
     {
         out.ofMatch.assign( matches.size(), 0 );
+        out.member.assign( matches.begin(), matches.end() );
         if( !matches.empty() )
         {
             out.rep.push_back( matches.front() );
@@ -296,6 +300,7 @@ inline DefGroups defGroupsOf( const IngestResult& ing, std::span<const NodeId> m
     {
         out.ofMatch[i] = groupOfKept[ target[i] ];
     }
+    out.member.assign( matches.begin(), matches.end() );
     out.primaryOfSpec.assign( out.rep.size(), 0 );
     for( std::size_t a = 0; a < out.rep.size(); ++a )
     {
@@ -307,7 +312,8 @@ inline DefGroups defGroupsOf( const IngestResult& ing, std::span<const NodeId> m
         }
     }
     out.untied = defGroupUntied( ing, matches, out );
-    ENSURES( out.ofMatch.size() == matches.size() && out.rep.size() <= matches.size() && out.untied.size() == out.rep.size() );
+    ENSURES( out.ofMatch.size() == matches.size() && out.member.size() == matches.size() && out.rep.size() <= matches.size()
+             && out.untied.size() == out.rep.size() );
     return out;
 }
 
@@ -722,17 +728,41 @@ inline const char* splitArmAttrXml( bool on ) noexcept { return on ? " prov=\"sp
 inline const char* splitArmKeyJson( bool on ) noexcept { return on ? ",\"prov\":\"split\"" : ""; }
 
 // IMPACT-SOLE-DEF (lane t2-rankdefects, gate test/impactsoledefcheck.sh): WHICH answers print the <def> rows. A multi-group
-// selector always does. A ONE-group selector does on the verb whose answer set includes the definition itself — --impact: the
+// selector always does. A ONE-group selector does on the verbs whose answer set includes the definition itself — --impact: the
 // radius of a change holds the file the change is made in, and `of="intersection" defs="1"` named that file only when a caller
-// happened to live in it — and on no other verb (attribmultidefcheck: every other one-group answer carries no table).
+// happened to live in it. VERB-DEF-ROWS (lane v1-verbdef, gate test/verbdefrowscheck.sh) extends it to --callers and --uses
+// and their MCP twins: on the held-out set 13 of the 16 gold groups a routed --callers/--uses/--impact answer lost were the file
+// that defines or declares the symbol. --callees, --safe-delete and find_symbol keep a one-group answer table-less.
 enum class DefRows : std::uint8_t
 {
     MultiOnly,
     SoleToo
 };
+// VERB-DEF-ROWS: --callers prints the one group's rows, --callees does not (a callees answer is another question).
+inline DefRows callersDefRows( bool wantCallers ) noexcept { return wantCallers ? DefRows::SoleToo : DefRows::MultiOnly; }
 inline bool defRowsPrint( const DefGroups& groups, DefRows when ) noexcept
 {
     return groups.multi() || ( when == DefRows::SoleToo && groups.size() == 1 );
+}
+// VERB-DEF-ROWS (lane v1-verbdef): the rows of the listed groups, in table order — each group's row (its bodied member, bodyless
+// when it has none), then each declaration tied to that definition as a row of its own with the group's ix (a prototype in a
+// header is a file a change to the definition must touch; a non-representative member has no body by construction). One walk
+// for both dialects, so XML and JSON cannot list different rows. `row( k, symbol, bodyless )` is called once per row.
+template<class RowFn>
+inline void forEachDefRow( const DefGroups& groups, const DefTableListing& listing, const IngestResult& ing, RowFn&& row )
+{
+    EXPECTS( groups.member.size() == groups.ofMatch.size(), "the groups are defGroupsOf( matches ): member is parallel to ofMatch" );
+    for( const std::uint32_t k : listing.listed )
+    {
+        row( k, ing.symbols[ groups.rep[k] ], groups.bodyless[k] != 0 );
+        for( std::size_t i = 0; i < groups.ofMatch.size(); ++i )
+        {
+            if( groups.ofMatch[i] == k && groups.member[i] != groups.rep[k] )
+            {
+                row( k, ing.symbols[ groups.member[i] ], true );
+            }
+        }
+    }
 }
 // The <def> rows (XML; the columnar form prints the same rows before its <cols>).
 inline std::string defTableXml( const IngestResult& ing, const DefGroups& groups, const DefTableListing& listing, std::string_view rootPrefix,
@@ -746,19 +776,15 @@ inline std::string defTableXml( const IngestResult& ing, const DefGroups& groups
     // defs_listed="0" says the table was cut to nothing.
     std::vector<char> esc;
     std::string       out;
-    for( const std::uint32_t k : listing.listed )
+    forEachDefRow( groups, listing, ing, [ & ]( std::uint32_t k, const Symbol& s, bool bodyless )
     {
-        const Symbol&          s   = ing.symbols[ groups.rep[k] ];
         const std::string_view raw = ing.files[ s.fileId ];
         const std::string_view rel = rootPrefix.empty() ? raw : sarif::rootRelativeUri( raw, rootPrefix );
         out += "<def ix=\"" + std::to_string( k + 1 ) + "\" t=\"" + symTag( s.kind ) + "\"";
-        if( !s.scope.empty() )
-        {
-            out += " sc=\"" + std::string( escapeXml( s.scope, esc ) ) + "\"";
-        }
+        out += s.scope.empty() ? std::string() : " sc=\"" + std::string( escapeXml( s.scope, esc ) ) + "\"";
         out += " p=\"" + std::string( escapeXml( rel, esc ) ) + ":" + std::to_string( s.line ) + "\"";
-        out += groups.bodyless[k] ? " bodyless=\"1\"/>" : "/>";
-    }
+        out += bodyless ? " bodyless=\"1\"/>" : "/>";
+    } );
     return out;
 }
 // The CLI JSON dialect: "def_table":[{"ix","t","sc","p"[,"bodyless"]}] (the XML attribute names); `mcp` spells the MCP row
@@ -770,25 +796,20 @@ inline std::string defTableJson( const IngestResult& ing, const DefGroups& group
     {
         return {};
     }
-    std::string out = ",\"def_table\":[";
-    for( std::size_t i = 0; i < listing.listed.size(); ++i )
+    std::string out   = ",\"def_table\":[";
+    bool        first = true;
+    forEachDefRow( groups, listing, ing, [ & ]( std::uint32_t k, const Symbol& s, bool bodyless )
     {
-        const std::uint32_t    k   = listing.listed[i];
-        const Symbol&          s   = ing.symbols[ groups.rep[k] ];
         const std::string_view raw = ing.files[ s.fileId ];
         const std::string_view rel = rootPrefix.empty() ? raw : sarif::rootRelativeUri( raw, rootPrefix );
-        out += ( i ? ",{\"ix\":" : "{\"ix\":" ) + std::to_string( k + 1 );
-        out += mcp ? ",\"kind\":\"" : ",\"t\":\"";
-        out += symTag( s.kind );
-        out += '"';
-        if( !s.scope.empty() )
-        {
-            out += ( mcp ? ",\"scope\":\"" : ",\"sc\":\"" ) + jsonStr( s.scope ) + "\"";
-        }
+        out += ( first ? "{\"ix\":" : ",{\"ix\":" ) + std::to_string( k + 1 );
+        first = false;
+        out += ( mcp ? ",\"kind\":\"" : ",\"t\":\"" ) + std::string( symTag( s.kind ) ) + "\"";
+        out += s.scope.empty() ? std::string() : ( mcp ? ",\"scope\":\"" : ",\"sc\":\"" ) + jsonStr( s.scope ) + "\"";
         out += mcp ? ",\"file\":\"" + jsonStr( rel ) + "\",\"line\":" + std::to_string( s.line )
                    : ",\"p\":\"" + jsonStr( rel ) + ":" + std::to_string( s.line ) + "\"";
-        out += groups.bodyless[k] ? ",\"bodyless\":1}" : "}";
-    }
+        out += bodyless ? ",\"bodyless\":1}" : "}";
+    } );
     out += "]";
     if( listing.cut )
     {
@@ -840,6 +861,7 @@ inline void defGroupsDropSilent( DefGroups& groups, RowDefTokens& tokens )
         kept.primaryOfSpec.push_back( groups.primaryOfSpec[k] );
         kept.untied.push_back( groups.untied[k] );
     }
+    kept.member = std::move( groups.member );   // parallel to ofMatch, which keeps every match (a silent one as UINT32_MAX)
     kept.ofMatch.reserve( groups.ofMatch.size() );
     for( const std::uint32_t g : groups.ofMatch )
     {
@@ -980,6 +1002,31 @@ inline void attachRollupOfDef( RollupT& rollup, const IngestResult& ing, const R
         rollup.rows[i].ofDefXml  = ofDefAttrXml( a.groups, fileTok, i );
         rollup.rows[i].ofDefJson = ofDefKeyJson( a.groups, fileTok, i );
     }
+}
+
+// VERB-DEF-ROWS (lane v1-verbdef, test/verbdefrowscheck.sh): the --uses answer's <def> table, built once for the CLI arm and
+// its MCP twin. --uses names no group on a row (its rows are use-sites), so no untied declaration is ever named: those drop
+// exactly as a one-group 1-hop answer drops them, and above the 16-group cap the listing is empty and defs_listed="0" says so.
+struct UsesDefTable
+{
+    std::string rows;         // the <def> rows (empty when the selector resolved no definition, or above the cap)
+    std::string listedAttr;   // " defs_listed=\"0\"" above the cap, else empty
+    std::string legend;       // the full-dialect clause, exactly when a row or defs_listed= rides
+};
+inline UsesDefTable usesDefTable( const IngestResult& ing, std::span<const NodeId> defs, std::string_view rootPrefix )
+{
+    UsesDefTable out;
+    DefGroups    groups = defGroupsOf( ing, defs );
+    RowDefTokens none;
+    defGroupsDropSilent( groups, none );
+    const DefTableListing listing = defTableListing( groups, std::vector<char>{} );
+    out.rows       = defTableXml( ing, groups, listing, rootPrefix, DefRows::SoleToo );
+    out.listedAttr = defsListedAttrXml( groups, listing );
+    if( !out.rows.empty() || !out.listedAttr.empty() )
+    {
+        out.legend = defTableLegend( groups.multi(), listing.cut, /*sole=*/groups.size() == 1, DefLegendFor::UseSites );
+    }
+    return out;
 }
 
 // ── --path endpoints ─────────────────────────────────────────────────────────────────────────────────────────────────

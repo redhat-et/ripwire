@@ -1308,8 +1308,9 @@ inline std::string crossKindKeyJson( const std::string& value )
 // path legends, CLI and MCP alike. No double hyphen anywhere: every one lands inside an XML comment (checklist 25).
 inline constexpr const char* kDefTableLegend =
     "<def ix= t= sc= p= bodyless=1> rows: the GROUPS the defs= definitions form, a definition with the declarations tied to it "
-    "(C family: the edit-check identity rule; TypeScript: its overload signatures); bodyless=1 a declaration tied to none of them "
-    "(another function, or the tie is unproven). of_def=K... on a row: the groups it belongs to, by ix. K = a resolved edge (the "
+    "(C family: the edit-check identity rule; TypeScript: its overload signatures), each tied declaration a row of its own after its "
+    "definition (same ix, bodyless=1); bodyless=1 on a group's only row: a declaration tied to none of them (another function, or "
+    "the tie is unproven). of_def=K... on a row: the groups it belongs to, by ix. K = a resolved edge (the "
     "resolver's binding, not a type check); K~s = its edge carries prov=split (a call along it was one arm of a call the resolver split "
     "between same-named definitions); K~n = every call along it bound by name alone; K~t = a resolved edge into a primary template "
     "while a specialisation of it is another group (which one the call reaches is unproven). On impact the tie is a chain of calls (a "
@@ -1320,13 +1321,29 @@ inline constexpr const char* kDefsListedLegend =
     "of_def (its via=name is the hedge). ";
 // IMPACT-SOLE-DEF: the one-group row's own clause. The multi-group clause above reads of_def tokens no row of a one-group
 // answer carries, so it is not reused.
+// VERB-DEF-ROWS (lane v1-verbdef): the same clause on --callers and --uses, and the tied declarations' own rows.
 inline constexpr const char* kSoleDefLegend =
-    "<def ix=1 t= sc= p=> alone: the ONE definition group defs= forms (a definition with the declarations tied to it), at "
-    "file:line: the definition this radius was measured from; bodyless=1 no member has a body; no row carries of_def. ";
-inline std::string defTableLegend( bool table, bool cut, bool sole = false )
+    "<def ix=1 t= sc= p=> alone: the ONE definition group defs= forms, at file:line: the definition this answer was measured from, "
+    "then each tied declaration as its own row (same ix); bodyless=1 no body; no row carries of_def. ";
+// VERB-DEF-ROWS: --uses with several groups. Its rows are use-sites, which name no group, so the multi-group clause's of_def reading
+// does not apply; above 16 groups it lists none.
+inline constexpr const char* kUsesDefTableLegend =
+    "<def ix= t= sc= p= bodyless=1> rows: the GROUPS the defs= definitions form, a definition then each tied declaration as its "
+    "own row (same ix); bodyless=1 no body. A use-site row names no group. ";
+inline constexpr const char* kUsesDefsListedLegend = "defs_listed=0: above 16 groups no group is listed (a use-site row names none). ";
+enum class DefLegendFor : std::uint8_t
+{
+    Rows,      // a verb whose rows carry of_def (callers, callees, safe-delete, impact)
+    UseSites   // --uses: rows that name no group
+};
+inline std::string defTableLegend( bool table, bool cut, bool sole = false, DefLegendFor rows = DefLegendFor::Rows )
 {
     std::string clause;
-    if( table )
+    if( rows == DefLegendFor::UseSites && ( table || cut ) )
+    {
+        clause = cut ? kUsesDefsListedLegend : kUsesDefTableLegend;
+    }
+    else if( table )
     {
         clause = kDefTableLegend;
         clause += cut ? kDefsListedLegend : "";
