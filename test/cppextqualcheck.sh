@@ -15,6 +15,10 @@
 #   T arms  twins that must still bind, unhedged: a namespace the tree defines through a class's member record (`ns::Widget()`,
 #           T1) and a type alias of an in-tree class template (`using Keys = Single<int>; Keys::get()`, T2), each reached through
 #           a root include, where main declined both.
+#   D arms  CPP-FREE-VS-MEMBER (graph.h FreeDeclReach): a bare call binds the free function its translation unit declares — the
+#           included prototype's body (D1, D6) — and decides nothing when two are declared (D2), none is (D3), a member in the
+#           caller's cone hides it (D4), the caller may be a macro-made member (D5), its own scope holds a namesake (D7) or a
+#           candidate is a friend scoped by its class (D9); D8, a member caller's class namespace, is a GAP line.
 # The member-call veto (b) — Rule 2's class identity and a member call's Rule 3 tier keep the includer-directory closure — is
 # pinned by arm M1 below; the bare-call twin is test/crootincludecheck.sh R9.
 #
@@ -228,5 +232,140 @@ int use_alias() { return M::make(3); }'
 callee_rows n use_alias > "$TMP/n.xml"
 if unhedged "$TMP/n.xml" dir/util.h:2; then echo "  GAP   N namespace M = mine; M::make(3): now unhedged — the gap closed, make this arm a check"
 else echo "  GAP   N namespace M = mine; M::make(3): a via=\"name\" hedge (no namespace-alias record reaches the table; carded)"; fi
+
+# ── CPP-FREE-VS-MEMBER (D arms; graph.h FreeDeclReach, langfacts.h bareCallNeedsDeclaration) ──────────────────────────────────────
+# A bare C++ call binds a free function its translation unit DECLARES: the body's own file or a prototype, in the caller's
+# file or one it includes. Envoy's shape: lib/util.h declares app::errorDetails and lib/util.cc defines it; codec/impl.cc
+# holds an unrelated struct's member of the name and its `#else` twin, which the parser reads as a free function. Main
+# declined every call (cands=2): the collapse evicts the prototype, and Rule 3 reads the bodies' own files.
+dbase(){ mka "$1" lib/util.h '#pragma once
+namespace app { int errorDetails(int code); }'
+mka "$1" lib/util.cc '#include "lib/util.h"
+namespace app { int errorDetails(int code) { return code; } }'
+mka "$1" codec/impl.cc 'namespace app { namespace codec {
+struct Values {
+#ifdef NG
+  int errorDetails(int code) const { return 1; }
+};
+#else
+  int errorDetails(int) const { return 2; }
+};
+#endif
+} }'; }
+drow(){ grep -o "<s t=\"[a-z]*\" n=\"[^\"]*$2\" p=\"$3\"[^>]*>" "$1"; }                      # the row of callee $2 at path:line $3
+dbound(){ local r; r="$( drow "$1" "$2" "$3" )"; [ -n "$r" ] && ! printf '%s' "$r" | grep -q 'via=\|prov='; }   # bound, unhedged
+dsite(){ grep -q "n=\"[^\"]*$2\"" "$1"; }                                                      # premise: the answer names the call at all
+dnone(){ ! grep -o "<s t=\"[a-z]*\" n=\"[^\"]*$2\" p=\"[^\"]*\"[^>]*>" "$1" | grep -v 'via=\|prov=' | grep -q .; }   # no unhedged row of $2
+dshow(){ head -c 700 "$1"; echo; }
+
+dbase d1; mka d1 net/conn.h '#pragma once
+#include "lib/util.h"
+namespace app { class Conn { public: int onWrite(); int n_; }; }'
+mka d1 net/conn.cc '#include "net/conn.h"
+namespace app {
+int Conn::onWrite() { return errorDetails(2); }
+int free_caller() { return errorDetails(3); }
+}'
+callee_rows d1 Conn::onWrite > "$TMP/d1m.xml"; callee_rows d1 free_caller > "$TMP/d1f.xml"
+if dbound "$TMP/d1m.xml" errorDetails lib/util.cc:2 && ! drow "$TMP/d1m.xml" errorDetails codec/impl.cc:7 | grep -q .; then
+  ok "D1 a member of an unrelated class: errorDetails(2) binds lib/util.cc's body alone, unhedged, through the included prototype (main declined)"
+else no "D1 Conn::onWrite's errorDetails(2) is not bound to lib/util.cc:2 alone"; dshow "$TMP/d1m.xml"; fi
+if dbound "$TMP/d1f.xml" errorDetails lib/util.cc:2 && ! drow "$TMP/d1f.xml" errorDetails codec/impl.cc:7 | grep -q .; then
+  ok "D1 a free function: errorDetails(3) binds lib/util.cc's body alone, unhedged (main declined)"
+else no "D1 free_caller's errorDetails(3) is not bound to lib/util.cc:2 alone"; dshow "$TMP/d1f.xml"; fi
+
+# [N] D2 two namesakes BOTH declared to the caller: the includes do not decide
+dbase d2; mka d2 other/o.h '#pragma once
+namespace other { int errorDetails(int code); }'
+mka d2 other/o.cc '#include "other/o.h"
+namespace other { int errorDetails(int code) { return -code; } }'
+mka d2 net/use.cc '#include "lib/util.h"
+#include "other/o.h"
+int use_both() { return errorDetails(4); }'
+callee_rows d2 use_both > "$TMP/d2.xml"
+if dsite "$TMP/d2.xml" errorDetails && dnone "$TMP/d2.xml" errorDetails; then
+  ok "D2 [N] two declared namesakes: errorDetails(4) binds neither unhedged"
+else no "D2 a call two included prototypes declare was bound unhedged (or the call site is missing from the answer)"; dshow "$TMP/d2.xml"; fi
+
+# [N] D3 no namesake declared to the caller: nothing to prefer
+dbase d3; mka d3 net/use.cc 'int use_none() { return errorDetails(5); }'
+callee_rows d3 use_none > "$TMP/d3.xml"
+if dsite "$TMP/d3.xml" errorDetails && dnone "$TMP/d3.xml" errorDetails; then
+  ok "D3 [N] no declaration in reach: errorDetails(5) binds nothing unhedged"
+else no "D3 a call with no declared namesake was bound unhedged (or the call site is missing)"; dshow "$TMP/d3.xml"; fi
+
+# [N] D4 inside the member's own class, and inside a class derived from it: the member hides the declared free function
+dbase d4; mka d4 codec/own.h '#pragma once
+#include "lib/util.h"
+namespace app { class Codec { public: int errorDetails(int code) const { return 7; } int describe() const { return errorDetails(1); } };
+class Derived : public Codec { public: int viaBase() const { return errorDetails(4); } }; }'
+callee_rows d4 Codec::describe > "$TMP/d4a.xml"; callee_rows d4 Derived::viaBase > "$TMP/d4b.xml"
+if dbound "$TMP/d4a.xml" errorDetails codec/own.h:3 && ! drow "$TMP/d4a.xml" errorDetails lib/util.cc:2 | grep -q . \
+   && dbound "$TMP/d4b.xml" errorDetails codec/own.h:3 && ! drow "$TMP/d4b.xml" errorDetails lib/util.cc:2 | grep -q .; then
+  ok "D4 [N] inside Codec and inside Derived : Codec, errorDetails() stays Codec::errorDetails, never the declared free function"
+else no "D4 a bare call inside the member's class cone left Codec::errorDetails"; dshow "$TMP/d4a.xml"; dshow "$TMP/d4b.xml"; fi
+
+# [N] D5 a macro-made member function (gtest TEST_F) is indexed as a free function: the fixture's own member is what it calls
+dbase d5; mka d5 other/o.cc 'namespace other { int errorDetails(int code) { return -code; } }'
+mka d5 test/fix_test.cc '#include "lib/util.h"
+using namespace app;
+namespace fixtures {
+class Fix { public: int errorDetails(int code) { return 9; } };
+TEST_F(Fix, Reads) { errorDetails(6); }
+}'
+callee_rows d5 TEST_F > "$TMP/d5.xml"
+if dsite "$TMP/d5.xml" errorDetails && ! dbound "$TMP/d5.xml" errorDetails lib/util.cc:2; then
+  ok "D5 [N] TEST_F( Fix, … ) { errorDetails(6); } beside Fix::errorDetails in its file: the declared free function is not bound unhedged"
+else no "D5 a macro-made member's bare call was bound unhedged to the free function (or the call site is missing)"; dshow "$TMP/d5.xml"; fi
+
+# D6 an internal-linkage namesake (`static`) of another file is declared by no prototype: the external body is the answer
+mka d6 lib/h.h '#pragma once
+int helper(int a);'
+mka d6 lib/h.cc '#include "lib/h.h"
+int helper(int a) { return a; }'
+mka d6 other/s.cc 'static int helper(int a) { return -a; }
+int s_user() { return helper(1); }'
+mka d6 app/use.cc '#include "lib/h.h"
+int use_h() { return helper(2); }'
+callee_rows d6 use_h > "$TMP/d6.xml"; callee_rows d6 s_user > "$TMP/d6s.xml"
+if dbound "$TMP/d6.xml" helper lib/h.cc:2 && ! drow "$TMP/d6.xml" helper other/s.cc:1 | grep -q .; then
+  ok "D6 helper(2) binds lib/h.cc's external body: another file's static helper is declared by no prototype (main declined)"
+else no "D6 use_h's helper(2) is not bound to lib/h.cc:2 alone"; dshow "$TMP/d6.xml"; fi
+if dbound "$TMP/d6s.xml" helper other/s.cc:1; then ok "D6 guard: the static helper's own file still calls it"
+else no "D6 s_user lost its own file's static helper"; dshow "$TMP/d6s.xml"; fi
+
+# [N] D7 an undeclared namesake in the caller's own innermost namespace would hide the declared one: nothing is cut
+dbase d7; mka d7 net/x.cc '#include "lib/util.h"
+namespace app { namespace codec { int in_codec() { return errorDetails(8); } } }'
+callee_rows d7 in_codec > "$TMP/d7.xml"
+if dsite "$TMP/d7.xml" errorDetails && ! dbound "$TMP/d7.xml" errorDetails lib/util.cc:2; then
+  ok "D7 [N] a caller in namespace codec beside codec's own undeclared namesake: lib/util.cc is not bound unhedged"
+else no "D7 the declared function was bound over a namesake of the caller's own scope (or the call site is missing)"; dshow "$TMP/d7.xml"; fi
+# D8 the member twin of D7, a GAP: a member of a class of namespace codec, defined out of line, is in codec's scope too, but
+# C++ keeps no namespace record to read the class's namespace from, so codec's undeclared namesake does not stop the cut
+dbase d8; mka d8 net/y.h '#pragma once
+#include "lib/util.h"
+namespace app { namespace codec { class Reader { public: int read(); }; } }'
+mka d8 net/y.cc '#include "net/y.h"
+namespace app { namespace codec { int Reader::read() { return errorDetails(9); } } }'
+callee_rows d8 Reader::read > "$TMP/d8.xml"
+if dsite "$TMP/d8.xml" errorDetails && ! dbound "$TMP/d8.xml" errorDetails lib/util.cc:2; then
+  echo "  GAP   D8 Reader::read of namespace codec: lib/util.cc is not bound over codec's undeclared namesake — the gap closed, make this arm a check"
+else echo "  GAP   D8 Reader::read of namespace codec: errorDetails(9) binds lib/util.cc although codec's own undeclared namesake would hide it behind an unresolvable include (no C++ namespace record; carded)"; fi
+
+# D9 a friend defined in its class (an unqualified declarator: indexed as a function, scoped by the class) is no namespace
+# function: where it is a candidate nothing is cut
+mka d9 lib/f.h '#pragma once
+int tally(int a);'
+mka d9 lib/f.cc '#include "lib/f.h"
+int tally(int a) { return a; }'
+mka d9 box/b.cc 'class Box { friend int tally(Box*) { return 3; } };'
+mka d9 other/t.cc 'int tally(long a) { return 4; }'
+mka d9 app/use.cc '#include "lib/f.h"
+int use_t() { return tally(2); }'
+callee_rows d9 use_t > "$TMP/d9.xml"
+if dsite "$TMP/d9.xml" tally && ! drow "$TMP/d9.xml" tally other/t.cc:1 | grep -v 'via=\|prov=' | grep -q .; then
+  ok "D9 [N] a friend namesake in Box: other/t.cc's undeclared tally is never bound unhedged"
+else no "D9 other/t.cc's undeclared tally was bound unhedged (or the call site is missing)"; dshow "$TMP/d9.xml"; fi
 
 if [ "$fail" -eq 0 ]; then echo "ALL PASS"; else echo "SOME CHECKS FAILED"; exit 1; fi
