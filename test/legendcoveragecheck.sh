@@ -755,6 +755,39 @@ g = gapsOf( tdoc( LB.replace( b'<!--', b'<e/><!--' ).replace( b't="fn"', b'' ) )
 tarm( "c@via" in g, f"(T8b) mutant: an element between the open tag and the comment -> c@via is a gap (gaps {g})" )
 g = gapsOf( tdoc( LB.replace( b't="fn"', b'' ) + b'<z via="1"/>' ), True )[ 3 ]
 tarm( "z@via" in g, f"(T8c) the block's comment defines nothing after the block (gaps {g})" )
+# (HU) A CUT HISTORY WALK, FORCED (HISTORY-UNREAD-LEGEND). history_unread="1" rides a --for/--metrics root only when the git walk
+# behind churn=/amp= was cut or failed, which on this tree happens only on a runner slow enough to hit the 20 s clock: the sweep
+# above then flaked red (#688, macos Release shard 2/4) on every row that printed it, since its definition comment opened
+# `<!--history_unread=`, a spelling the `defined` predicate cannot read, and the map put it behind the root where a full row does
+# not look. RIPWIRE_GIT_WALK_COMMITS=1 (gitmine.h THE BUDGET; the budget is in the walk cache's key, so nothing here is served
+# to another run) cuts the walk on any checkout with two commits in the window, so the property is held on every run instead.
+# Each document must parse, carry the attribute on its root (counted: zero is a FAIL), and define it in its own legend (gapsOf, the
+# sweep's own reader, in the row's posture).
+HU_ROWS = [ ( "for",      [ SMALL, "--for=rank symbols by pagerank" ] ),
+            ( "for-auto", [ SMALL, "--for=escapeXml" ] ),
+            ( "for-page", [ SMALL, "--for=rank symbols by pagerank", "--limit=10" ] ),
+            ( "metrics",  [ SMALL, "--metrics" ] ) ]
+huEnv, huJudged = dict( os.environ, RIPWIRE_GIT_WALK_COMMITS = "1" ), 0
+import xml.etree.ElementTree as ET
+for huName, huArgs in HU_ROWS:
+    for huPosture, huExtra in ( ( "default", [] ), ( "full", [ "--legend=full" ] ) ):
+        label = f"(HU) {huName} {huPosture}, walk cut at 1 commit"
+        try:
+            huDoc = subprocess.run( [ BIN ] + huArgs + huExtra, capture_output = True, timeout = CALL_TIMEOUT, env = huEnv ).stdout
+        except subprocess.TimeoutExpired:
+            tarm( False, f"{label}: TIMEOUT" );  continue
+        try:
+            ET.fromstring( huDoc )
+            wellFormed = True
+        except ET.ParseError as e:
+            wellFormed, huErr = False, str( e )
+        rootTag = re.match( rb'(?:\s*<!--.*?-->)*\s*<[\w-]+\b[^>]*>', huDoc, re.S )
+        if not rootTag or b' history_unread="1"' not in rootTag.group( 0 ):
+            tarm( False, f"{label}: premise: the root does not carry history_unread=\"1\" (the forced cut did not reach it): {huDoc[ :160 ]!r}" );  continue
+        huJudged += 1
+        undefined = [ k for k in gapsOf( huDoc, huPosture == "default" )[ 3 ] if k.endswith( "@history_unread" ) ]
+        tarm( wellFormed and not undefined, f"{label}: parses ({'yes' if wellFormed else huErr}) and its own legend defines history_unread= (undefined: {undefined or 'none'})" )
+tarm( huJudged == 2 * len( HU_ROWS ), f"(HU) premise: {huJudged} of {2 * len( HU_ROWS )} cut documents carried history_unread on the root" )
 # (HIST0) see buildHist: the premise counts, then the decoy that a leaking fixture would have written into
 tarm( histCounts[ 0 ] >= 5 and histCounts[ 1 ] == 1, f"(HIST0) premise: the history fixture holds {histCounts[ 0 ]} commits (want 5) and {histCounts[ 1 ]} side branch (want 1)" )
 tarm( decoyBefore[ 0 ] >= 1 and decoyAfter == decoyBefore,

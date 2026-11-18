@@ -222,7 +222,7 @@ if [ -f "$kgpobj" ] && [ -n "$khealthy" ]; then
     if grep -q 'history_unread=1: the git history walk.*(the walk stopped part-way), so churn= and amp= count only the commits that were read: both are floors' "$TMP/k_pre.out"; then
         ok "K51: the prefix comment names the cause and says churn=/amp= are floors"
     else
-        no "K51: the prefix comment does not call churn=/amp= floors: $( grep -o '<!--history_unread[^>]*' "$TMP/k_pre.out" | head -c 300 )"
+        no "K51: the prefix comment does not call churn=/amp= floors: $( grep -o '<!-- history_unread[^>]*' "$TMP/k_pre.out" | head -c 300 )"
     fi
     if [ -n "$kpre" ] && grep -q 'churn= is absent' "$TMP/k_pre.out"; then
         no "K51: the document prints churn=$kpre beside a comment that says churn= is absent"
@@ -246,7 +246,7 @@ fi
 if grep -q 'history_unread=1: the git history walk.*(the walk did not run), so churn= is absent and amp= counts callers only' "$TMP/k_nogit.out"; then
     ok "K51: the no-git comment names the cause (the walk did not run)"
 else
-    no "K51: the no-git comment does not name the cause: $( grep -o '<!--history_unread[^>]*' "$TMP/k_nogit.out" | head -c 300 )"
+    no "K51: the no-git comment does not name the cause: $( grep -o '<!-- history_unread[^>]*' "$TMP/k_nogit.out" | head -c 300 )"
 fi
 if grep -q ' churn="' "$TMP/k_nogit.out"; then
     no "K51: git missing from PATH still printed a churn= value"
