@@ -25,6 +25,7 @@
 # from the silent cut this register was built to find.
 kBaseScopeScanCap	INDEXING
 kChaConeCap	INDEXING
+kChainHopCap	INDEXING
 kChurnMergeBombMaxFiles	INDEXING
 kCoBoostMaxFilesPerCommit	INDEXING
 kCoBoostMaxPartnerFiles	INDEXING
