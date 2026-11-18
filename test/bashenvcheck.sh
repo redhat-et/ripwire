@@ -46,6 +46,8 @@
 # Generated in $TMP: a 100,000-level ${X:-${X:-…}} line (the review's crash input) must finish, exit 0 and disclose
 # nesting_cut="1". 160,000 `(X=1)` lines then 160,000 `: "$X"` (2.1 MB) must finish under a 20 s cap (about 0.3 s
 # linear; the quadratic lookup it guards took about 56 s).
+# Generated in $TMP: 160,000 nested `{ V=1` groups each closed by `} &` must finish under a 10 s cap (about 23 s when
+# each close re-walked every inner group's writes).
 #
 # Usage:  test/bashenvcheck.sh   |   RIPWIRE_BIN=asan/ripwire test/bashenvcheck.sh
 # Exit:   0 = clean · 1 = an arm failed · 2 = usage / missing prerequisite
@@ -225,6 +227,17 @@ case "$QR" in
     *)           no "expired writes: 160,000 + 160,000 lines: $QR (cap 20 s; quadratic before the fix)" ;;
 esac
 if grep -q '<gate name="X" [^>]*reads="160000"' "$TMP/quadout" 2>/dev/null; then ok 'expired writes: all 160,000 reads stay the caller'"'"'s'; else no "expired writes: X is not reads=\"160000\": $( grep -oE '<gate name=\"X\"[^>]*>' "$TMP/quadout" 2>/dev/null | head -c 300 )"; fi
+# Closing a background group visits each write once (#688 review, CodeRabbit 4614203147): 160,000 nested `{ V=1`
+# groups each closed by `} &` (1.6 MB) re-walked every inner group's writes at each close — about 23 s on 7253fb78e,
+# quadratic in the depth — and finish in well under a second now. Every write is still listed and none shadows V's read.
+mkdir -p "$TMP/nest" && python3 -c 'n=160000; print("#!/bin/bash"); print("{ V=1\n"*n, end=""); print("} &\n"*n, end=""); print(": \"${V:?}\"")' >"$TMP/nest/nest.sh" \
+    || no "could not write the nested-groups fixture"
+NR="$( python3 "$ROOT/test/lib/caprun.py" 10 --stdout "$TMP/nestout" --stderr /dev/null -- "$BIN" "$TMP/nest" --flags --no-cache 2>&1 | tail -1 )"
+case "$NR" in
+    "rc=0 ms="*) ok "nested background groups: 160,000 levels finish in ${NR#rc=0 ms=} ms (cap 10 s)" ;;
+    *)           no "nested background groups: 160,000 levels: $NR (cap 10 s; quadratic before the fix)" ;;
+esac
+if grep -q '<gate name="V" [^>]*reads="1" [^>]*writes="160000"' "$TMP/nestout" 2>/dev/null; then ok 'nested background groups: V keeps its read and lists all 160,000 writes'; else no "nested background groups: V wrong: $( grep -oE '<gate name=\"V\"[^>]*>' "$TMP/nestout" 2>/dev/null | head -c 300 )"; fi
 # A file the scan cannot read is disclosed, never silently skipped: unreadable="N" on the root, defined in the legend,
 # mirrored in JSON. (Root reads through a 000 mode, so this arm cannot run as root.)
 if [ "$( id -u )" -eq 0 ]; then

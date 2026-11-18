@@ -1372,6 +1372,11 @@ struct ShellScan
     std::vector<ShellFunctionWrite> functionWrites;    // every write inside a function body (shellCloseScopes)
     bool                       isLastPipe = false;     // `shopt -s lastpipe` in force in the shell the scan is in (a
                                                        // child shell's shopt is undone where it ends: #688 review)
+    // The scan-time narrowing chain over fh.writes (shellNarrowFrom): narrowNext[k] == k while write k has not been
+    // narrowed, else an index past it to jump to. Narrow points come in scan order, so a write narrowed once already
+    // ends before any later point and is never visited again; lastNarrow is that order, checked.
+    std::vector<std::size_t>   narrowNext;
+    std::pair<std::uint32_t, std::uint32_t> lastNarrow{ 0, 0 };
     NextStop                   wordEnd;                // the next blank or `;&|`
     NextStop                   bracket;                // the next `]`
 
@@ -1696,11 +1701,32 @@ inline void shellNarrowScope( FileHarvest::Read& w, std::uint32_t line, std::uin
 }
 
 // fh.writes[from, size) were made in a child shell that ends at (line, col): none of them shadows anything past it.
-inline void shellNarrowFrom( FileHarvest& fh, std::size_t from, std::uint32_t line, std::size_t col ) noexcept
+// Each write is visited ONCE over the whole scan: nested background groups (`{ V=1` … `} &` N deep) re-walked every
+// inner group's writes at each enclosing close, quadratic in the depth (#688 review, CodeRabbit 4614203147: 160,000
+// levels took 23 s). A write narrowed earlier already ends at or before (line, col), so st.narrowNext skips it.
+inline void shellNarrowFrom( ShellScan& st, FileHarvest& fh, std::size_t from, std::uint32_t line, std::size_t col )
 {
-    for( std::size_t k = from; k < fh.writes.size(); ++k )
+    DASSERT( std::pair( line, std::uint32_t( col ) ) >= st.lastNarrow );
+    st.lastNarrow = { line, std::uint32_t( col ) };
+    std::vector<std::size_t>& next = st.narrowNext;
+    const std::size_t         end  = fh.writes.size();
+    for( std::size_t k = next.size(); k <= end; ++k )
+    {
+        next.push_back( k );   // writes committed since the last call start open; next[end] is the end sentinel
+    }
+    const auto open = [ & ]( std::size_t k )   // the first open write at or after k (path halving)
+    {
+        while( next[k] != k )
+        {
+            next[k] = next[ next[k] ];
+            k       = next[k];
+        }
+        return k;
+    };
+    for( std::size_t k = open( std::min( from, end ) ); k < end; k = open( k ) )
     {
         shellNarrowScope( fh.writes[k], line, std::uint32_t( col ) );
+        next[k] = k + 1;
     }
 }
 
@@ -1756,7 +1782,7 @@ inline void shellCompoundWord( const ShellWord& w, std::uint32_t lineNo, std::si
     f.cmd.compounds.pop_back();
     if( closed.isAfterPipe && !closed.isLastPipeAtOpen )   // lastpipe as the pipeline started decides where it runs
     {
-        shellNarrowFrom( fh, closed.writesFrom, lineNo, at );
+        shellNarrowFrom( st, fh, closed.writesFrom, lineNo, at );
         st.isLastPipe = closed.isLastPipeAtOpen;
     }
     f.cmd.compoundFrom         = closed.writesFrom;
@@ -1901,7 +1927,7 @@ inline void shellEndCommand( ShellScan& st, ShellScan::Frame& f, FileHarvest& fh
     if( isChild )
     {
         const std::size_t from = sep == ShellSep::Background ? std::min( f.cmd.listFrom, f.cmd.writesFrom ) : f.cmd.writesFrom;
-        shellNarrowFrom( fh, std::min( from, fh.writes.size() ), lineNo, col );
+        shellNarrowFrom( st, fh, std::min( from, fh.writes.size() ), lineNo, col );
         // a shopt in the child changed the child's options: back to the value where the child began (the whole list
         // for a `&`, the compound command before a `|`, else this command)
         st.isLastPipe = sep == ShellSep::Background ? f.cmd.isLastPipeAtList
@@ -1910,7 +1936,7 @@ inline void shellEndCommand( ShellScan& st, ShellScan::Frame& f, FileHarvest& fh
     }
     if( isChildSep && f.cmd.compoundFrom != SIZE_MAX )
     {
-        shellNarrowFrom( fh, f.cmd.compoundFrom, lineNo, col );
+        shellNarrowFrom( st, fh, f.cmd.compoundFrom, lineNo, col );
     }
     // The list goes on past a `&&` / `||`, also onto the next line (`a &&` + `b`: that new line ends a command with
     // no word); a `|` is inside one of its pipelines. Anything else ended it.
