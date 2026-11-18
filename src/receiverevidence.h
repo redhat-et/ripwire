@@ -461,6 +461,26 @@ struct CallResultTypes
         }
         return false;
     }
+    // does C-family symbol `c`'s scope (Symbol::scope, the innermost segment) name a class rather than a namespace? C++ keeps
+    // no Namespace record (callResultFamilyOf is None for it), so the scope is read against the tree's classes: a template
+    // specialization's scope (`formatter<Status, char>`) or the name of an in-tree C-family class-like is a class; any other
+    // non-empty scope is the namespace around the definition. A namespace namesake of some class reads as a class: the
+    // caller decides nothing then (CPP-FREE-VS-MEMBER, graph.h FreeDeclReach)
+    bool cppScopeNamesClass( NodeId c ) const
+    {
+        const std::string_view scope = ing.symbols[ c ].scope;
+        if( scope.empty() )
+        {
+            return false;
+        }
+        if( scope.find( '<' ) != std::string_view::npos )
+        {
+            return true;
+        }
+        nameKey.assign( scope );
+        const auto it = classDefsByName.find( nameKey );
+        return it != classDefsByName.end() && std::ranges::any_of( it->second, [ & ]( NodeId k ) { return langFacts( ing.symbols[ k ].lang ).transitiveIncludes; } );
+    }
     // Is class `c` in scope by its bare name at byte `at` of file `f` (a callee's declaration)? In its own file every scope
     // enclosing it — an indexed symbol (class, module, function) or a Namespace record — must hold `at` too (inside, not at,
     // the scope's own start: a function's local class is not in scope in its own signature); from another file — its package,
