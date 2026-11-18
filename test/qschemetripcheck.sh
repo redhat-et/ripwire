@@ -34,6 +34,12 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-17, TRAIN-1117b (lanes land-426 + land-606 stacked over main c565a3fad): RE-PINNED with UPDATE_GOLDEN=1 in the train's
+#   re-pin commit. kParserVer and kIngestParserVerMirror 311 -> 313 (rich 314): ONE number for both members, above main's 311/312
+#   (#420, landed by TRAIN-1117a-r #686). kQSnapCacheScheme unchanged: the extraction key moves, the snapshot blob shape does not.
+#   - land-606 (#446 round 2, @SeddonShen; its placeholder 316): Java base clauses are read as @reference.base captures.
+#   - land-426 (#355, PR #426 by @conka8; its placeholders 216, then 311): the tags pass evaluates tags.scm's string
+#     predicates, and Elixir's keyword tables move into queries/elixir/tags.scm.
 # 2026-11-17, train 1117a-r (rebase-stack on main 9087eb59c: naming-wordy prefix, tidy-681, #420, #473, #540, ROW-MANIFEST): RE-PINNED ONCE
 #   with UPDATE_GOLDEN=1 from the composed build (hash d208bb4995…e892919). It carries the two entries below together: #420's parser tag
 #   311 (rich 312) and tidy-681's codeLocByNode text; each lane's own hash named below was that lane alone. No constant moves; #682 leaves it.

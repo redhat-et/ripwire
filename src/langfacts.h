@@ -126,10 +126,10 @@ struct LangFacts
     /// declared inheritance chain (graph.h).
     bool mixinAncestry = false;
 
-    /// C++ (#446): a class definition reads its base-clause types as @reference.base tags captures
-    /// (queries/cpp/tags.scm), not through captureBases' kind chain — captureSpecializationHeader
-    /// still walks for template specializations. The languages this port has not reached yet keep
-    /// the walk.
+    /// C++ and Java (#446): a class definition reads its base-clause types as @reference.base tags captures
+    /// (queries/cpp/tags.scm, queries/java/tags.scm), not through captureBases' kind chain — C++'s
+    /// captureSpecializationHeader still walks for template specializations. The languages this port has
+    /// not reached yet keep the walk.
     bool basesAsCaptures = false;
 
     /// Ruby: an element access `recv[ k ]` whose receiver the shape rules cannot classify (a call result, a richer expression) is
@@ -466,7 +466,7 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
       .writtenBindingUndecided = true, .objectLiteralMembers = true, .containmentOwners = true,
       .classNameReceiver = true, .fileEdges = FileEdges::Resolved, .localBraceNotData = true, .bracedPropertyRows = true, .singleQuoteStrings = true },
     { .lang = Lang::Bash, .hashComment = true, .fileEdges = FileEdges::Resolved, .shellScript = true },
-    { .lang = Lang::Java, .samLambdas = true, .samIgnoredMembers = kJavaObjectMethods, .anonymousImplementors = true, .baseImportEvidence = BaseImportEvidence::JvmImport,
+    { .lang = Lang::Java, .basesAsCaptures = true, .samLambdas = true, .samIgnoredMembers = kJavaObjectMethods, .anonymousImplementors = true, .baseImportEvidence = BaseImportEvidence::JvmImport,
       .writtenModule = WrittenModuleRule::DirsOnly,
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .memberDecl = MemberDecl::TypeFirst },
     { .lang = Lang::Ruby, .classObjectLookup = true, .mixinAncestry = true, .keepsUnshapedSubscript = true, .constantPathReceiver = true,

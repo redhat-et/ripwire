@@ -444,6 +444,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "unread_files",      "unread_files=N: N indexed files unreadable when scanned (hits= is a floor)" },
     { "scan_degraded",     "scan_degraded=1: the scan stopped part-way (hits= is a floor)" },
     { "unreadable",        "unreadable=N: N same-name definitions unreadable when this ran, absent from defs=", false, "layout" },
+    { "asserts_unreadable", "asserts_unreadable=N: N C-family files the static_assert scan could not read (asserts= is a floor)", false, "layout" },
     { "lines_skipped",     "lines_skipped=N: N sidecar lines unparsed, absent from notes=", false, "notes" },
     { "refused",           "refused=symlink: the sidecar is a symlink, refused unopened: no note was read", false, "notes" },
     { "baseline",          "baseline=symlink-refused: the sidecar is a symlink, refused unopened: every violation is new", false, "arch",
