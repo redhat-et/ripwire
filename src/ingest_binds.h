@@ -6521,6 +6521,19 @@ inline std::string rustCallQualifier( TSNode call, std::string_view src )
     return ts_node_is_null( path ) ? std::string{} : withoutBlanks( std::string( nodeTextOf( path, src ) ) );
 }
 
+// `x.unwrap()` / `x.expect( … )`: the `x` it strips one layer from; null for any other call.
+inline TSNode rustUnwrapMethodReceiver( TSNode call, std::string_view src )
+{
+    const TSNode fn = fieldChild( call, NodeField::Function );
+    if( ts_node_is_null( fn ) || !kindIs( ts_node_type( fn ), "field_expression" ) )
+    {
+        return {};
+    }
+    const TSNode           field = fieldChild( fn, NodeField::Field );
+    const std::string_view name  = ts_node_is_null( field ) ? std::string_view{} : nodeTextOf( field, src );
+    return name == "unwrap" || name == "expect" ? fieldChild( fn, NodeField::Value ) : TSNode{};
+}
+
 // Rust: the call a `let` value binds, through the unwrap operators applied to it — each `?` and each `.unwrap()` /
 // `.expect( … )` counts one into `depth`; any other method on the result (`.into_other()`, `.iter()`) is not stripped, so
 // that call is the one recorded (its own result: one level further, a floor). Null when the value is no call.
@@ -6529,44 +6542,35 @@ inline std::string rustCallQualifier( TSNode call, std::string_view src )
 inline TSNode rustUnwrappedCall( TSNode value, std::uint8_t& depth, std::string_view src )
 {
     depth = 0;
-    bool awaited = false;
     for( int guard = 0; guard < 8 && !ts_node_is_null( value ); ++guard )
     {
-        const char* t = ts_node_type( value );
-        if( awaited && !kindIs( t, "call_expression" ) )
+        const char* t        = ts_node_type( value );
+        const bool  oneChild = ts_node_named_child_count( value ) == 1;
+        if( oneChild && kindIs( t, "await_expression" ) )
         {
-            return {};   // an operator applied before the await (`f()?.await`): the awaited value is no call result this reads
+            // the await is the innermost operator this reads: the awaited value itself must be the call (an unwrap there is
+            // that call, not a layer)
+            depth |= kAwaitResultBit;
+            const TSNode awaitedValue = ts_node_named_child( value, 0 );
+            return kindIs( ts_node_type( awaitedValue ), "call_expression" ) ? awaitedValue : TSNode{};
         }
-        if( kindIs( t, "try_expression" ) && ts_node_named_child_count( value ) == 1 )
+        if( oneChild && kindIs( t, "try_expression" ) )
         {
             ++depth;
             value = ts_node_named_child( value, 0 );
             continue;
         }
-        if( kindIs( t, "await_expression" ) && ts_node_named_child_count( value ) == 1 )
+        if( !kindIs( t, "call_expression" ) )
         {
-            awaited = true;
-            depth |= kAwaitResultBit;
-            value = ts_node_named_child( value, 0 );
-            continue;
+            return {};
         }
-        if( kindIs( t, "call_expression" ) )
+        const TSNode unwrapped = rustUnwrapMethodReceiver( value, src );
+        if( ts_node_is_null( unwrapped ) )
         {
-            const TSNode fn = fieldChild( value, NodeField::Function );
-            if( !ts_node_is_null( fn ) && kindIs( ts_node_type( fn ), "field_expression" ) )
-            {
-                const TSNode           field = fieldChild( fn, NodeField::Field );
-                const std::string_view name  = ts_node_is_null( field ) ? std::string_view{} : nodeTextOf( field, src );
-                if( ( name == "unwrap" || name == "expect" ) && !awaited )
-                {
-                    ++depth;
-                    value = fieldChild( fn, NodeField::Value );
-                    continue;
-                }
-            }
             return value;
         }
-        return {};
+        ++depth;
+        value = unwrapped;
     }
     return {};
 }
