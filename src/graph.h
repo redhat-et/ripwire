@@ -15040,7 +15040,7 @@ inline std::vector<NodeId> statedScopeOnTierAnswer( const IngestResult& ing, std
     {
         return ids;
     }
-    LangAnchor anchor{ split.tag.value(), AnchorOrigin::Explicit };
+    LangAnchor anchor{ *split.tag, AnchorOrigin::Explicit };
     applyExplicitScope( ing, ids, anchor, true );
     if( anchorOut ) *anchorOut = anchor;
     return ids;
