@@ -1343,6 +1343,7 @@ Discloses: **none**
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
+| `kChainHopCap` | `64` | INDEXING | hops walked below one call; a longer chain is a floor (no class) |
 | `kWalkCap` | `64` | INDEXING | classes visited per base walk; deterministic (sorted chaUp) |
 
 ### `src/redact.h`
