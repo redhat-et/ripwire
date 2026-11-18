@@ -388,6 +388,8 @@ constexpr std::uint32_t kParserVer    = 313;          // bump on any grammar/.sc
                                                       //   - #355, PR #426 by @conka8, landed as lane/land-426 (its placeholders 216, then 311): the tags pass evaluates
                                                       //     tags.scm's string predicates (#eq?, #not-eq?, #any-of?, #not-any-of?; src/infra/tspredicates.h), and Elixir's
                                                       //     definition keywords and metadata attribute names move into queries/elixir/tags.scm.
+                                                      //   - #688 review (unreleased, same train, so 313 stays): a type-annotated Java superclass (`extends @M Base`)
+                                                      //     is captured inside annotated_type (CodeRabbit 4614203119).
                                                       // 311 = 2026-11-17 (#358 C# 1a, @LaimaWu; lands #420, rebased; was 198 on the PR, above main's 309/310): using
                                                       //   directives move to shared @import.path captures; import-free deep containers no longer disclose a cut or
                                                       //   lose whole-cache eligibility. Alias/edge facts unchanged; rich tag 312. kCacheVersion unchanged.

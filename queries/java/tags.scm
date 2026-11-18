@@ -108,6 +108,18 @@
   (superclass
     [ (type_identifier) (scoped_type_identifier) (generic_type) ] @name) @reference.base)
 
+; A TYPE-ANNOTATED superclass (`class Child extends @Mark Base {}`): the grammar wraps the type in
+; annotated_type, and the walk's one-level descent into that wrapper reached the type beside the
+; annotation, so this pattern takes the same type kinds one level down (#688 review, CodeRabbit
+; 4614203119). @reference.base stays on the clause so the class is still the owner. An annotated
+; `implements @Mark I` sits a level deeper (type_list → annotated_type), which the walk never read,
+; so it stays out like the shapes above.
+(class_declaration
+  name: (identifier)
+  (superclass
+    (annotated_type
+      [ (type_identifier) (scoped_type_identifier) (generic_type) ] @name)) @reference.base)
+
 (class_declaration
   name: (identifier)
   (super_interfaces
