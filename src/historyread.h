@@ -32,6 +32,11 @@
 // new host adds a DiscloseAs case here, never a sibling function. XmlAttrs and the comment form (LegendComment) go on every
 // XML root that prints the numbers; JsonKeys is the JSON twin. The comment is its own definition, so a first screen that
 // carries the attribute defines it (legendcoveragecheck), and it holds no "--" digraph and no "<" (it lives in an XML comment).
+// It opens `<!-- history_unread=` with the space, the house spelling of a definition (`<!-- shallow=`, `<!-- notes_degraded=`):
+// glued to `<!--`, the name sat behind a '-' that no `name=` reading of a legend counts as a definition, so every cut answer
+// read as undefined (HISTORY-UNREAD-LEGEND, a #688 CI flake). It carries data (the commit count, the cause), so the compact
+// dialect keeps it whole. WHERE: right behind a <ctx>/<files> root (ctxRootOpen; a caller that splices attributes onto that
+// open tag splices before its FIRST '>', never its last), and in the map's leading legend, before the <r> root it marks.
 //
 // STATE.  One process-wide report, written once by main.cpp's amp=/churn= block on the main thread, after the walks were
 // joined and before any emitter runs; emitters only read it. The MCP server never runs that block, so it never sets it.
@@ -89,11 +94,11 @@ inline std::string renderHistoryUnread( DiscloseAs as )
     }
     if( historyRead().cutRoots == historyRead().unreadRoots )
     {
-        return "<!--history_unread=1: the git history walk behind churn= and amp= hit its budget after the newest "
+        return "<!-- history_unread=1: the git history walk behind churn= and amp= hit its budget after the newest "
              + std::to_string( historyRead().cutCommits ) + " commits, so churn= and amp= count only those: both are floors, and an absent "
-             "churn= here is not zero churn. RIPWIRE_GIT_WALK_SECONDS and RIPWIRE_GIT_WALK_COMMITS raise the budget. Where the clock cut it, the prefix reached moves with machine load, so two runs can differ; a stored cut stands until HEAD moves, and a no-cache run walks again.-->";
+             "churn= here is not zero churn. RIPWIRE_GIT_WALK_SECONDS and RIPWIRE_GIT_WALK_COMMITS raise the budget. Where the clock cut it, the prefix reached moves with machine load, so two runs can differ; a stored cut stands until HEAD moves, and a no-cache run walks again. -->";
     }
-    std::string comment = "<!--history_unread=1: the git history walk behind churn= and amp= could not be read in full in this run (";
+    std::string comment = "<!-- history_unread=1: the git history walk behind churn= and amp= could not be read in full in this run (";
     if( historyRead().stoppedRoots + historyRead().cutRoots == 0 )
     {
         comment += "the walk did not run), so churn= is absent and amp= counts callers only (a floor)";
@@ -104,7 +109,7 @@ inline std::string renderHistoryUnread( DiscloseAs as )
         comment += historyRead().notRunRoots == 0 ? std::string( "the walk " ) + stopped : std::string( "the walk did not run for one root and " ) + stopped + " for another";
         comment += "), so churn= and amp= count only the commits that were read: both are floors";
     }
-    comment += "; an absent churn= here is not zero churn. The failed walk is not cached, so the next call walks again.-->";
+    comment += "; an absent churn= here is not zero churn. The failed walk is not cached, so the next call walks again. -->";
     return comment;
 }
 
