@@ -153,6 +153,14 @@ Discloses: `alias_depth_capped`
 | --- | --- | --- | --- |
 | `kAliasHopDepth` | `4` | — | hops past the asked alias (a runaway guard; real chains are 1-3) |
 
+### `src/argtypepick.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kArgTypeSigCap` | `16384` | — | --edit-check's kEditCheckSigCap: a longer signature is not read |
+
 ### `src/atoms.h`
 
 Discloses: `count_capped`
