@@ -493,7 +493,7 @@ for tool, root, sym in ( ( "find_symbol", GO, "doPackage" ), ( "find_referencing
         mbad.append( "%s declined_sites=%s" % ( tool, ds ) )
 say( not mbad, "[P] k_mcp_nocand", "MCP default \"declined_sites\" entries carry via=\"declined\" and no \"candidates\"", "; ".join( mbad ) )
 
-print( "=== (K) R5 the root keeps every base attribute (shown_dc/dc_next aside) ===" )
+print( "=== (K) R5 the root keeps every base attribute (shown_dc/dc_capped/dc_next aside) ===" )
 BASE_ROOTS = [
     ( "a_go", GO, "callees", "doPackage", { "schema": "ripwire.callees/v1", "of": "doPackage", "defs": "1", "count": "2", "hop_tested": "0", "hop_untested": "2",
       "declined_calls": "3", "graph_ambiguous": "0", "graph_unresolved": "0", "graph_unindexed": "1", "counts_floor": "1", "next": "--expand=doPackage" } ),
@@ -507,7 +507,7 @@ BASE_ROOTS = [
 ]
 for tag, root, verb, sel, want in BASE_ROOTS:
     x = ask( root, verb, sel )
-    got = { k: v for k, v in ( x.root.attrib.items() if x.root is not None else [] ) if k not in ( "root", "shown_dc", "dc_next" ) }
+    got = { k: v for k, v in ( x.root.attrib.items() if x.root is not None else [] ) if k not in ( "root", "shown_dc", "dc_capped", "dc_next" ) }
     say( x.ok and x.dc and got == want, "[P] k_root_%s" % tag, "%s --%s=%s: rows ride and every other root attribute is the base literal" % ( tag, verb, sel ),
          "got %s" % { k: ( got.get( k ), want.get( k ) ) for k in set( got ) | set( want ) if got.get( k ) != want.get( k ) } )
 
