@@ -13,7 +13,7 @@
 #
 # THE INVARIANT. Under the default, --legend=full, the handshake and an MCP session answer alike:
 #   - the root open tag carries every attribute the inline answer's root carries, same order, same values;
-#   - <about legend="ref" dict= dictv=/> is a POINTER: it carries those three attributes and nothing else;
+#   - <about legend="ref" [have=] dict= dictv=/> is a POINTER: it carries those attributes and nothing else;
 #   - the root open tag ends before the first row. Under ref it ends inside the first 2,048 bytes of the answer; inline
 #     it ends within 2,048 bytes of the end of the legend that precedes it (where an inline legend sits is --legend=last's
 #     business, not this gate's);
@@ -55,7 +55,7 @@ cat >"$TMP/arms.py" <<'PY'
 import json, re, subprocess, sys
 BIN, FX, BASE = sys.argv[1], sys.argv[2], sys.argv[3]
 PREFIX = 2048
-POINTER = ["legend", "dict", "dictv"]
+POINTER = ["legend", "have", "dict", "dictv"]   # have= (lane dict-core-packs): the tiers a CLI caller named — which definitions were left out, not a fact about the rows
 fails = []
 def ok(m):  print(f"  PASS  {m}")
 def no(m):  print(f"  FAIL  {m}"); fails.append(m)

@@ -58,8 +58,10 @@
 #include "fortailterms.h"       // kForFileTailTermsLegend
 #include "infra/Diagnostics.h"
 #include "infra/hashutil.h"
+#include "legendpacks.h"        // kLegendPackRows, kLegendPackCensus: the census's product (bench/legendtier/packs_build.py)
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
@@ -123,6 +125,16 @@ inline constexpr std::string_view kNameReadingEntries[] =
     kCompactModScopeReading,
 };
 
+// The CLI handshake's own reading (lane dict-core-packs, 2026-11-17): have= rides <about> only on a `--legend-have=`
+// answer, so its definition is an entry of the CLI's core TIER (coreTierIds) and NOT of kCoreEntries — the MCP session's
+// first ref answer carries every unserved kCoreEntries line, and a session answer never carries have=. LAST in the id
+// space, after the name readings, so no existing entry id moves.
+inline constexpr std::string_view kCliCoreEntries[] =
+{
+    "have= (on <about>): the tiers --legend-have= named: core, core+KEY or full; a definition in none of them is in this "
+    "answer, after its rows",
+};
+
 inline constexpr std::size_t kCoreCount     = std::size( kCoreEntries );
 inline constexpr std::size_t kPurposeCount  = std::size( kCompactLegendSpecs );
 inline constexpr std::size_t kTermCount     = kCompactReadingCount;   // BOTH reading tables, in compactlegend.h's joint order
@@ -132,7 +144,9 @@ inline constexpr std::size_t kTermBase      = kPurposeBase + kPurposeCount;
 inline constexpr std::size_t kNameCount     = std::size( kNameReadingEntries );
 inline constexpr std::size_t kForBase       = kTermBase + kTermCount;
 inline constexpr std::size_t kNameBase      = kForBase + kForCount;
-inline constexpr std::size_t kEntryCount    = kNameBase + kNameCount;
+inline constexpr std::size_t kCliCount      = std::size( kCliCoreEntries );
+inline constexpr std::size_t kCliBase       = kNameBase + kNameCount;
+inline constexpr std::size_t kEntryCount    = kCliBase + kCliCount;
 inline constexpr std::size_t kModScopeEntryId = kNameBase;   // kNameReadingEntries[ 0 ]
 
 // The bytes an answer carries for entry `id` (the purpose line WITHOUT its schema label — the compact legend spells the
@@ -144,7 +158,8 @@ inline std::string_view entryBody( std::size_t id ) noexcept
     if( id < kTermBase )    { return kCompactLegendSpecs[ id - kPurposeBase ].purpose; }
     if( id < kForBase )     { return compactReading( id - kTermBase ).reading; }
     if( id < kNameBase )    { return kForClauseEntries[ id - kForBase ]; }
-    return kNameReadingEntries[ id - kNameBase ];
+    if( id < kCliBase )     { return kNameReadingEntries[ id - kNameBase ]; }
+    return kCliCoreEntries[ id - kCliBase ];
 }
 
 // The entry's line in the dictionary text: purpose lines gain their schema label, `for` clauses lose their leading
@@ -186,24 +201,27 @@ inline std::string dictionaryBody( std::size_t firstId, std::size_t endId )
     return out;
 }
 
-// dictv=: FNV-1a 64 over the whole dictionary body, 16 lowercase hex digits. Computed once per process.
+// A version: FNV-1a 64 over the lines it stands for (each with its newline), 16 lowercase hex digits.
+inline std::string versionOfLines( std::string_view lines )
+{
+    std::uint64_t h = 14695981039346656037ull;
+    for( const char c : lines )
+    {
+        h = hashutil::fnv1aAbsorb( h, c );
+    }
+    static constexpr char kHex[] = "0123456789abcdef";
+    std::string s( 16, '0' );
+    for( std::size_t i = 0; i < 16; ++i )
+    {
+        s[ 15 - i ] = kHex[ ( h >> ( 4 * i ) ) & 0xFu ];
+    }
+    return s;
+}
+
+// dictv=: the version of the whole dictionary body. Computed once per process.
 inline const std::string& dictionaryVersion()
 {
-    static const std::string v = []
-    {
-        std::uint64_t h = 14695981039346656037ull;
-        for( const char c : dictionaryBody( 0, kEntryCount ) )
-        {
-            h = hashutil::fnv1aAbsorb( h, c );
-        }
-        static constexpr char kHex[] = "0123456789abcdef";
-        std::string s( 16, '0' );
-        for( std::size_t i = 0; i < 16; ++i )
-        {
-            s[ 15 - i ] = kHex[ ( h >> ( 4 * i ) ) & 0xFu ];
-        }
-        return s;
-    }();
+    static const std::string v = versionOfLines( dictionaryBody( 0, kEntryCount ) );
     return v;
 }
 
@@ -236,6 +254,283 @@ inline std::string coreDictionaryText()
                            "every other definition is sent once, the first time an answer in this session needs it, in a comment "
                            "after the rows; ripwire://legend-dict/full (or ripwire --legend-dict) holds all "
                            + std::to_string( kEntryCount ) + "\n" );
+}
+
+// ── the tiers (lane dict-core-packs, docs/EVALS.md BAND K (tiers), 2026-11-17) ─────────────────────────────────────
+//
+// WHY TIERS. `--legend-have=DICTV` let a CLI caller assert it holds the dictionary, and the only holding it could name
+// was all of it: 131,571 B for a saving of 1,002 B per call, 131 calls to repay (453 cells, five corpora). Every
+// guidance site therefore told a short session to pass nothing. A frequency-cut core cannot fix that, because the
+// distribution is block-diagonal: SIX entries cross verbs (root= next= counts_floor= the two resolver gauges
+// graph_unindexed= est_tokens=, each in 36.9-100 % of 388 answers) and nearly everything else belongs to one verb.
+// So a holding is one of:
+//   core        kCoreEntries, the reading of have=, and those six terms.
+//   core + KEY  the core and one schema key's PACK: the entries at least a third of that schema's measured answers
+//               carried (legendpacks.h, a build product of bench/legendtier/census.tsv).
+//   full        every line.
+//
+// IDENTITY IS THE HONESTY ARGUMENT. A tier's version is versionOfLines over exactly ITS OWN lines in id order; a pack's
+// covers core + pack, so a pack cannot be held without the core. One shared dictv would leave the binary unable to tell
+// a reader holding 13 lines from one holding 1,156, and then it must either drop every definition (claiming ones the
+// reader never read) or drop none. Two tiers share a version only when they are the same lines, where honouring either
+// is the same act. Measured churn between two builds days apart: 25 dictionary lines changed, dictv moved, every core
+// line was byte-identical, and 8 of 51 packs moved — so a per-tier version is also what lets a tier outlive a release.
+//
+// MEMBERSHIP IS A COST DECISION, NEVER A CORRECTNESS ONE. An entry outside every tier the caller named rides the answer
+// that carries it, verbatim, in the trailing comment applyRefPosture already writes for an unserved entry. That is why
+// a census taken on corpora this repository does not hold may decide a pack: a wrong guess costs bytes, not a reading.
+
+// The views `ripwire --legend-dict=FORM` prints besides a schema key's pack. A schema key spelled like one would make a
+// pack unreachable, so the collision stops the build.
+inline constexpr std::string_view kDictForms[] = { "core", "roster", "tiers", "index" };
+static_assert( std::ranges::none_of( kCompactLegendSpecs, []( const CompactLegendSpec& s ) { return std::ranges::contains( kDictForms, s.key ) || s.key == "full"; } ),
+               "a compact schema key is spelled like a --legend-dict= form (or like the have= label full): rename one" );
+
+// The six cross-verb terms of the core tier, named by attribute: the reading table row with that attr= and no element
+// or schema-key qualifier. Found at compile time so a renamed or duplicated row stops the build here, not in a gate.
+inline constexpr std::string_view kCoreTermAttrs[] =
+{
+    "counts_floor", "graph_ambiguous", "graph_unindexed", "est_tokens", "root", "next",
+};
+
+constexpr std::size_t unqualifiedReadingId( std::string_view attr ) noexcept
+{
+    std::size_t found = kEntryCount;
+    std::size_t hits  = 0;
+    const auto scan = [ & ]( const auto& table, std::size_t base )
+    {
+        for( std::size_t i = 0; i < std::size( table ); ++i )
+        {
+            if( table[ i ].attr == attr && table[ i ].onTag.empty() && table[ i ].onKey.empty() )
+            {
+                found = base + i;
+                ++hits;
+            }
+        }
+    };
+    scan( kCompactCompletenessTerms, kTermBase );
+    scan( kCompactAttributeReadings, kTermBase + kCompactTermCount );
+    return hits == 1 ? found : kEntryCount;
+}
+
+inline constexpr std::size_t kCoreTermIds[] =
+{
+    unqualifiedReadingId( kCoreTermAttrs[ 0 ] ), unqualifiedReadingId( kCoreTermAttrs[ 1 ] ), unqualifiedReadingId( kCoreTermAttrs[ 2 ] ),
+    unqualifiedReadingId( kCoreTermAttrs[ 3 ] ), unqualifiedReadingId( kCoreTermAttrs[ 4 ] ), unqualifiedReadingId( kCoreTermAttrs[ 5 ] ),
+};
+static_assert( std::size( kCoreTermIds ) == std::size( kCoreTermAttrs ), "one id per core term attribute — add both together" );
+static_assert( std::ranges::all_of( kCoreTermIds, []( std::size_t id ) { return id >= kTermBase && id < kForBase; } ),
+               "every core term names exactly ONE unqualified reading row of compactlegend.h — a row was renamed, removed or duplicated" );
+
+// The tier count the CLI core is pinned to: a thirteenth or fourteenth line is a decision with a price (BAND K, K4: the
+// core's whole text stays at or under 1,536 B and no term in it is in fewer than a quarter of the answers), so growing
+// it means editing this number beside the measurement that justifies it.
+inline constexpr std::size_t kCoreTierEntryCount = kCoreCount + kCliCount + std::size( kCoreTermIds );
+static_assert( kCoreTierEntryCount == 13, "the core tier is 13 lines: 6 ref-posture readings, have=, 6 cross-verb terms (docs/EVALS.md BAND K, K4)" );
+
+// The core tier's entry ids, ascending — a compile-time table, so a duplicate or an unsorted id cannot reach a run.
+inline constexpr std::array<std::size_t, kCoreTierEntryCount> kCoreTierIds = []
+{
+    std::array<std::size_t, kCoreTierEntryCount> ids{};
+    std::size_t                                  n = 0;
+    for( std::size_t id = 0; id < kCoreCount; ++id ) { ids[ n++ ] = id; }
+    for( const std::size_t id : kCoreTermIds )       { ids[ n++ ] = id; }
+    for( std::size_t k = 0; k < kCliCount; ++k )     { ids[ n++ ] = kCliBase + k; }
+    std::ranges::sort( ids );
+    return ids;
+}();
+static_assert( std::ranges::adjacent_find( kCoreTierIds ) == kCoreTierIds.end(), "a core entry is named once" );
+
+inline std::vector<std::size_t> coreTierIds()
+{
+    return { kCoreTierIds.begin(), kCoreTierIds.end() };
+}
+
+inline bool isSchemaKey( std::string_view key ) noexcept
+{
+    return std::ranges::find( kCompactLegendSpecs, key, &CompactLegendSpec::key ) != std::end( kCompactLegendSpecs );
+}
+
+// One schema key's tier: the core plus its pack, ascending. A pack row names a reading by what it defines — attribute,
+// element, and the listed item where the row has one — so a reworded definition stays in its pack (and moves the pack's
+// version, as it must) instead of silently leaving it; every reading row matching the handle on this key is held, a
+// superset by construction. `@purpose` is the schema's own line, `@file-scope` the module-scope name reading.
+// A key with no census is the core alone: zero measured answers is NOT a measured empty pack, and census says which.
+struct PackTier
+{
+    std::vector<std::size_t> ids;          // ascending, each line once
+    std::size_t              census = 0;   // how many answers of this schema the committed census measured
+};
+
+inline PackTier packTier( std::string_view key )
+{
+    PackTier                  tier{ coreTierIds(), 0 };
+    std::vector<std::size_t>& ids = tier.ids;
+    for( const LegendPackCensus& measured : kLegendPackCensus )
+    {
+        if( measured.key == key ) { tier.census = measured.answers; }
+    }
+    if( tier.census == 0 )
+    {
+        return tier;
+    }
+    for( const LegendPackRow& row : kLegendPackRows )
+    {
+        if( row.key != key )
+        {
+            continue;
+        }
+        if( row.attr == "@purpose" )
+        {
+            for( std::size_t s = 0; s < kPurposeCount; ++s )
+            {
+                if( kCompactLegendSpecs[ s ].key == key ) { ids.push_back( kPurposeBase + s ); }
+            }
+        }
+        else if( row.attr == "@file-scope" )
+        {
+            ids.push_back( kModScopeEntryId );
+        }
+        else
+        {
+            for( std::size_t i = 0; i < kCompactReadingCount; ++i )
+            {
+                const CompactCompletenessTerm& r = compactReading( i );
+                if( r.attr == row.attr && r.onTag == row.onTag && r.valueItem == row.valueItem && ( r.onKey.empty() || r.onKey == key ) )
+                {
+                    ids.push_back( kTermBase + i );
+                }
+            }
+        }
+    }
+    std::sort( ids.begin(), ids.end() );
+    ids.erase( std::unique( ids.begin(), ids.end() ), ids.end() );
+    // ONE LINE, ONCE. Two reading rows can spell the same definition (the same attribute on two elements); a handle then
+    // resolves to both, and the tier's text would print — and charge — the line twice. The first id stands for the line;
+    // serveTier serves by line, so the other row counts as held all the same.
+    std::vector<std::size_t> once;
+    for( const std::size_t id : ids )
+    {
+        if( std::ranges::none_of( once, [ & ]( std::size_t kept ) { return entryBody( kept ) == entryBody( id ) && ( kept >= kTermBase ) == ( id >= kTermBase ); } ) )
+        {
+            once.push_back( id );
+        }
+    }
+    ids = std::move( once );
+    return tier;
+}
+
+inline std::string tierBody( const std::vector<std::size_t>& ids )
+{
+    std::string out;
+    for( const std::size_t id : ids )
+    {
+        out += entryLine( id );
+        out += '\n';
+    }
+    return out;
+}
+
+inline std::string tierVersion( const std::vector<std::size_t>& ids )
+{
+    return versionOfLines( tierBody( ids ) );
+}
+
+// Line 1 of a tier's text. `have=` is the value to pass in --legend-have=; entries= says how many lines after this one
+// it hashes, of= how many the whole dictionary holds — a tier is never to be read as the full list.
+inline constexpr std::string_view kTierHeadOpen = "ripwire legend dictionary ripwire.dict/v1 have=";
+
+// `ripwire --legend-dict=core`.
+inline std::string coreTierText()
+{
+    const std::vector<std::size_t> ids  = coreTierIds();
+    const std::string              body = tierBody( ids );
+    std::string out( kTierHeadOpen );
+    out += versionOfLines( body ) + " core entries=" + std::to_string( ids.size() ) + " of=" + std::to_string( kEntryCount ) + '\n';
+    out += body;
+    out += "a definition not listed is in the answer that needs it, after its rows; --legend-dict=KEY adds one verb's pack\n";
+    return out;
+}
+
+// `ripwire --legend-dict=KEY`: the core's lines and the pack's, so the text is exactly what its have= hashes — a pack
+// printed without the core would make "I hold the pack and not the core" a thing a caller could say.
+inline std::string packTierText( std::string_view key )
+{
+    [[maybe_unused]] const bool keyIsSchema = isSchemaKey( key );   // read by EXPECTS alone, which a release build compiles out
+    EXPECTS( keyIsSchema, "a pack is named by a compact schema key" );
+    const PackTier                  tier   = packTier( key );
+    const std::vector<std::size_t>& ids    = tier.ids;
+    const std::string               body   = tierBody( ids );
+    const std::size_t               census = tier.census;
+    std::string out( kTierHeadOpen );
+    out += versionOfLines( body ) + " pack=" + std::string( key ) + " census=" + std::to_string( census ) + " entries=" + std::to_string( ids.size() )
+         + " of=" + std::to_string( kEntryCount ) + '\n';
+    out += body;
+    out += census == 0 ? "census=0: no answer of this schema was measured, so this is the core alone — not a measured empty pack; its other definitions are "
+                         "in each answer, after its rows\n"
+                       : "a pack is what at least a third of this schema's measured answers carried, not all it can emit; a definition not listed is in "
+                         "the answer that needs it, after its rows\n";
+    return out;
+}
+
+// `ripwire --legend-dict=tiers`: every holding this binary recognises — name, have=, entries, bytes of its text, census.
+inline std::string tiersText()
+{
+    std::string out;
+    const auto row = [ & ]( std::string_view name, std::string_view version, std::size_t entries, std::size_t bytes, std::size_t census )
+    {
+        out.append( name );
+        out += '\t';
+        out.append( version );
+        out += '\t' + std::to_string( entries ) + '\t' + std::to_string( bytes ) + '\t' + std::to_string( census ) + '\n';
+    };
+    const std::vector<std::size_t> core = coreTierIds();
+    row( "core", tierVersion( core ), core.size(), coreTierText().size(), 0 );
+    for( std::size_t s = 0; s < kPurposeCount; ++s )
+    {
+        const std::string_view key = kCompactLegendSpecs[ s ].key;
+        if( std::ranges::find( kCompactLegendSpecs, key, &CompactLegendSpec::key ) != &kCompactLegendSpecs[ s ] )
+        {
+            continue;   // a key two root tags share is one tier
+        }
+        const PackTier tier = packTier( key );
+        row( key, tierVersion( tier.ids ), tier.ids.size(), packTierText( key ).size(), tier.census );
+    }
+    row( "full", dictionaryVersion(), kEntryCount, fullDictionaryText().size(), 0 );
+    return out;
+}
+
+// `ripwire --legend-dict=index`: one line per entry — id, class, schema key, attribute, element, listed item, the line.
+// It is what lets a census name an entry by what it DEFINES (bench/legendtier/census.py), where the dictionary text alone
+// gives only its wording.
+inline std::string indexText()
+{
+    std::string out;
+    for( std::size_t id = 0; id < kEntryCount; ++id )
+    {
+        std::string_view cls = "cli", key, attr, tag, item;
+        if( id < kPurposeBase )   { cls = "core"; }
+        else if( id < kTermBase ) { cls = "purpose"; key = kCompactLegendSpecs[ id - kPurposeBase ].key; tag = kCompactLegendSpecs[ id - kPurposeBase ].rootTag; }
+        else if( id < kForBase )
+        {
+            const CompactCompletenessTerm& r = compactReading( id - kTermBase );
+            cls  = id - kTermBase < kCompactTermCount ? "term" : "attr";
+            key  = r.onKey;
+            attr = r.attr;
+            tag  = r.onTag;
+            item = r.valueItem;
+        }
+        else if( id < kNameBase ) { cls = "for"; }
+        else if( id < kCliBase )  { cls = "name"; attr = "@file-scope"; }
+        out += std::to_string( id ) + '\t';
+        for( const std::string_view field : { cls, key, attr, tag, item } )
+        {
+            out.append( field );
+            out += '\t';
+        }
+        out += entryLine( id ) + '\n';
+    }
+    return out;
 }
 
 // ── the roster ────────────────────────────────────────────────────────────────────────────────────────────────
@@ -293,6 +588,25 @@ struct LegendSession
         served.assign( kEntryCount, 1 );
         refOn = true;
     }
+    // A TIER's lines are with the reader (the CLI handshake, resolveHolding). Served is the LINES, not the ids: two
+    // reading rows that spell the same definition are one line of the tier's text, so both count as held.
+    void serveTier( const std::vector<std::size_t>& ids )
+    {
+        served.resize( kEntryCount, 0 );
+        std::vector<std::string_view> held;
+        for( const std::size_t id : ids )
+        {
+            EXPECTS( id < kEntryCount );
+            served[ id ] = 1;
+            if( id >= kTermBase && id < kForBase ) { held.push_back( entryBody( id ) ); }
+        }
+        std::sort( held.begin(), held.end() );
+        for( std::size_t id = kTermBase; id < kForBase; ++id )
+        {
+            if( served[ id ] == 0 && std::binary_search( held.begin(), held.end(), entryBody( id ) ) ) { served[ id ] = 1; }
+        }
+        refOn = true;
+    }
     bool isServed( std::size_t id ) const noexcept
     {
         EXPECTS( id < kEntryCount );
@@ -305,6 +619,88 @@ struct LegendSession
         served[ id ] = 1;
     }
 };
+
+// ── the CLI holding ───────────────────────────────────────────────────────────────────────────────────────────
+
+// What `--legend-have=V[,V…]` resolved to: the entries the caller said it holds (the UNION of the tiers named) and the
+// label the answer echoes in <about have=>. The label is argv after validation — it names what was ASSUMED, never what
+// was received; the binary cannot know the caller read anything.
+struct Holding
+{
+    LegendSession session;
+    std::string   label;        // "core", "core+callers+grep" (packs in schema-table order), or "full"
+};
+
+// Why a list did not resolve, for the refusal: the first value that is no tier of this binary, and the tiers the OTHER
+// values of the same list did name (so a caller with one stale value sees which ones are still good).
+struct HoldingRefusal
+{
+    bool        refused = false;
+    std::string unknown;       // may be EMPTY: `a,,b` and a trailing comma name a value that is nothing
+    std::string recognised;
+};
+
+// Every value must be a tier version of THIS binary, or the whole list is refused: honouring the valid ones beside a
+// stale one would leave the stale tier's definitions in the reader's context under a meaning this binary no longer has.
+// A pack version is honoured whatever the answer's schema turns out to be — the holding is true either way.
+inline std::optional<Holding> resolveHolding( std::string_view list, HoldingRefusal& refusal )
+{
+    const std::vector<std::size_t> core  = coreTierIds();
+    const std::string              corev = tierVersion( core );
+    Holding                        h;
+    bool                           isFull = false;
+    std::vector<std::size_t>       packs;      // spec indices, each named pack once
+    h.session.serveTier( core );               // every tier holds the core, so a resolved list always does
+    for( std::size_t at = 0; at <= list.size(); )
+    {
+        const std::size_t      comma = std::min( list.find( ',', at ), list.size() );
+        const std::string_view value = list.substr( at, comma - at );
+        at = comma + 1;
+        bool known = value == corev;
+        if( value == dictionaryVersion() )
+        {
+            isFull = known = true;
+        }
+        for( std::size_t s = 0; s < kPurposeCount && !known; ++s )
+        {
+            const std::string_view key = kCompactLegendSpecs[ s ].key;
+            if( std::ranges::find( kCompactLegendSpecs, key, &CompactLegendSpec::key ) != &kCompactLegendSpecs[ s ] )
+            {
+                continue;   // a key two root tags share is one tier
+            }
+            const PackTier tier = packTier( key );
+            if( tier.census > 0 && value == tierVersion( tier.ids ) )   // no census: that tier IS the core, matched above
+            {
+                known = true;
+                h.session.serveTier( tier.ids );
+                if( std::ranges::find( packs, s ) == packs.end() ) { packs.push_back( s ); }
+            }
+        }
+        if( !known && !refusal.refused )
+        {
+            refusal.refused = true;
+            refusal.unknown.assign( value );
+        }
+    }
+    std::sort( packs.begin(), packs.end() );
+    h.label = "core";
+    for( const std::size_t s : packs )
+    {
+        h.label += '+';
+        h.label.append( kCompactLegendSpecs[ s ].key );
+    }
+    if( isFull )
+    {
+        h.session.serveAll();
+        h.label = "full";
+    }
+    if( refusal.refused )
+    {
+        refusal.recognised = packs.empty() && !isFull && list.find( corev ) == std::string_view::npos ? std::string() : h.label;
+        return std::nullopt;
+    }
+    return h;
+}
 
 // ── the ref transform ─────────────────────────────────────────────────────────────────────────────────────────
 
@@ -572,6 +968,7 @@ struct RefShape
     std::string              closeTag;
     std::size_t              closeAt = 0;      // where the root's close begins (its open's end when self-closing)
     bool                     selfClosing = false;
+    std::string_view         have;             // the tiers a CLI caller named, for <about have=>; empty in a session
 };
 
 // Which legend family the answer carries, and where its root closes; nullopt when the dictionary cannot reduce it (not
@@ -787,6 +1184,21 @@ struct RefParts
     std::size_t bytes( const RefShape& s ) const noexcept { return prefix.size() + opened.size() + body.size() + trailer.size() + s.closeTag.size(); }
 };
 
+// The ref answer's last child. have= rides only a CLI handshake answer: it says which tiers the caller named, so a reader
+// of the answer (or of a transcript, later) can tell which definitions were left out on purpose. The session posture
+// passes none, and its pointer is the three attributes it always was.
+inline std::string aboutPointer( std::string_view have )
+{
+    std::string out = "<about legend=\"ref\"";
+    if( !have.empty() )
+    {
+        out += " have=\"";
+        out.append( have );
+        out += '"';
+    }
+    return out + " dict=\"ripwire --legend-dict\" dictv=\"" + dictionaryVersion() + "\"/>";
+}
+
 inline RefParts assembleRef( std::string_view view, const RefShape& s, const HeadReduction& r )
 {
     RefParts p;
@@ -818,7 +1230,7 @@ inline RefParts assembleRef( std::string_view view, const RefShape& s, const Hea
         p.body.assign( view.substr( bodyBegin, s.closeAt - bodyBegin ) );
     }
     for( const std::string& kept : r.residual ) { p.trailer += kept; }
-    p.trailer += "<about legend=\"ref\" dict=\"ripwire --legend-dict\" dictv=\"" + dictionaryVersion() + "\"/>";
+    p.trailer += aboutPointer( s.have );
     return p;
 }
 
@@ -827,16 +1239,17 @@ inline RefParts assembleRef( std::string_view view, const RefShape& s, const Hea
 // Reduce one finished inline answer to the ref posture, in place — see the header. `doc` is the answer as the inline
 // posture serves it: the compact dialect for a verb that declares `legend` (compactlegend.h already applied), the
 // native legend for MCP `for`. Only called once `session.refOn`.
-inline RefOutcome applyRefPosture( std::string& doc, LegendSession& session )
+inline RefOutcome applyRefPosture( std::string& doc, LegendSession& session, std::string_view have = {} )
 {
     EXPECTS( session.refOn, "the ref posture exists only once the session opened it (a core read, or its first inline answer)" );
     session.served.resize( kEntryCount, 0 );
     const std::string_view view = doc;
-    const std::optional<detail::RefShape> shape = detail::inferRefShape( view );
+    std::optional<detail::RefShape> shape = detail::inferRefShape( view );
     if( !shape )
     {
         return RefOutcome::NotApplicable;
     }
+    shape->have = have;
     std::optional<detail::HeadReduction> head = detail::reduceHead( view, *shape, session );
     if( !head )
     {

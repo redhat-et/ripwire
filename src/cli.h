@@ -52,7 +52,7 @@ struct Config
     bool             legendHaveSeen = false;     // --legend-have= was PRESENT. Absent and present-but-empty both leave
                                                  // legendHave empty, and they must not behave alike: absent is a no-op,
                                                  // an empty value is a refusal (§B5's owner ruling, 2026-07-29).
-    std::string_view legendHave;                 // --legend-have=DICTV: the CALLER asserts it already holds that dictionary
+    std::string_view legendHave;                 // --legend-have=HAVE[,HAVE]: the CALLER asserts it already holds those legend tiers
                                                  // version, so this answer may take the ref posture. The handshake is what
                                                  // makes a CLI ref answer honest AND deterministic: --legend=ref is refused
                                                  // because a CLI run has no session that was served anything, and output that
@@ -2853,19 +2853,30 @@ inline constexpr char kHelpTail[] =
         "                               resource ripwire://legend-dict, answers list rows first, carry each definition once\n"
         "                               per session and end with <about legend=\"ref\" dict= dictv=/>. A CLI run has no\n"
         "                               session to hold a definition, so --legend=ref refuses; --legend-dict prints them all.\n"
-        "    --legend-dict[=roster]     print the session legend dictionary, or with =roster the attributes it defines.\n"
-        "                               Prints the dictionary the MCP server serves as ripwire://legend-dict/full: one\n"
-        "                               definition per line, headed by its dictv= (FNV-1a 64 of the lines, the version a\n"
-        "                               ref answer's <about dictv=> names). =roster lists the completeness attributes it\n"
-        "                               defines (attr, element, source), the roster test/legendrefcheck.sh reads. Answered\n"
-        "                               wherever it stands on the command line; nothing else runs.\n"
-        "    --legend-have=DICTV        you HOLD that legend dictionary: every line `ripwire --legend-dict` prints, read by you\n"
-        "                               (about 130 KB; its line 1 names dictv=). So this answer takes the ref posture: no legend prose, a\n"
-        "                               closing <about legend=\"ref\" dict= dictv=/> pointing at it, and the root and rows unchanged -- no\n"
-        "                               fact is dropped or moved. The flag is an ASSERTION: a dictv= passed without the lines behind it\n"
-        "                               leaves every dropped definition unread. Reading them takes on the order of 140 calls to repay,\n"
-        "                               so on a short session pass nothing. Measured -30.4 % over 80 recorded answers (-8 % to -57 % by\n"
-        "                               verb). A version that is not this binary\'s is REFUSED, naming both.\n"
+        "    --legend-dict[=core|KEY]   print the legend dictionary, or one TIER of it to hold with --legend-have=\n"
+        "                               Bare: the whole dictionary the MCP server serves as ripwire://legend-dict/full, one\n"
+        "                               definition per line, headed by its dictv= (FNV-1a 64 of the lines). =core: the 13\n"
+        "                               definitions every ref answer leans on (about 1.5 KB). =KEY, a schema key such as callers\n"
+        "                               or impact: the core plus that verb's PACK, the definitions at least a third of its\n"
+        "                               measured answers carried (+0.4 to +3.5 KB; census=0 means none was measured and the text\n"
+        "                               is the core alone). Line 1 of a tier carries have=, the value --legend-have= takes; it\n"
+        "                               hashes exactly the entries= lines after it. =tiers lists every tier (name, have=,\n"
+        "                               entries, bytes, census); =roster the completeness attributes the dictionary defines;\n"
+        "                               =index every entry by what it defines. Answered wherever it stands; nothing else runs.\n"
+        "    --legend-have=HAVE[,HAVE]  say which legend tiers you HOLD; their definitions are left out of the answer\n"
+        "                               you HOLD those legend tiers: every line `ripwire --legend-dict=core` (or =KEY) printed,\n"
+        "                               read by you. HAVE is the have= on that text's line 1; several join with commas. The\n"
+        "                               answer takes the ref posture: rows first, the root unchanged, a closing <about\n"
+        "                               legend=\"ref\" have=\"core\" …/> naming what was assumed. A definition you hold is left\n"
+        "                               out; one you do NOT hold stays in THIS answer, in a comment after its rows — nothing is\n"
+        "                               ever left to a dictionary you were only pointed at. The flag is an ASSERTION the binary\n"
+        "                               cannot check: have= echoes argv, not receipt. Measured on 453 answers of 12 verbs, five\n"
+        "                               corpora: the core repays in 11 calls (9 over the 388 that are not --for); a pack within 3\n"
+        "                               calls of its verb; core + the verb's pack keeps 86 % of what holding everything saves.\n"
+        "                               --for answers are not reduced (0 of 65), and say so on stderr. Under about 10 calls pass\n"
+        "                               nothing. REFUSED: an empty value; any value that is no tier of this binary, even beside\n"
+        "                               a valid one; --mcp/--listen/--lsp; --legend=full. The whole dictionary's dictv= is a\n"
+        "                               valid HAVE too (have=\"full\"), about 130 KB and about 130 calls to repay.\n"
         "    --json                     emit JSON instead of XML; keys mirror the XML attribute names one to one\n"
         "                               machine-parseable JSON instead of XML, keys mirror the XML attr names 1:1. Every\n"
         "                               ROOT attribute survives; a verb that serves fewer SECTIONS than its XML form NAMES\n"
@@ -4664,19 +4675,19 @@ inline void refuseLegendHaveMisuse( Config& c )
     // just saved 30 % of the bytes. An earlier version of this flag treated an empty value as "asserts
     // nothing", and test/emptyvaluerefusecheck.sh was right to refuse that: 20 of the 21 hand-written arms
     // refuse, and the odd one out was mine. Flag NAMED, real problem stated, runnable example, stdout empty.
-    // THE REMEDY TEACHES THE WHOLE READ (2026-11-17). It used to say `--legend-dict` piped into a first-line cut:
-    // 78 B read, 130,243 B asserted, and its example's `tr -dc '0-9a-f'` also kept the hex letters of the words
-    // around the version, so the value it built was refused. The example now names WHERE the value is and leaves
-    // the read to the reader, because a substitution that computes dictv= puts no definition in anyone's context.
-    // The stated size is checked against the dictionary by test/legendhavecheck.sh (T3), 10 % band.
+    // THE REMEDY TEACHES A READ, AND THE CHEAPEST ONE (2026-11-17, twice). First it said `--legend-dict` piped into a
+    // first-line cut: 78 B read, 130 KB asserted. Then it said the whole dictionary, which is honest and takes about
+    // 131 calls to repay. It now names the core TIER (lane dict-core-packs): 13 definitions, read whole, whose line 1
+    // carries have= — the value to pass. cli.h cannot include legenddict.h, so the size here is written, not computed;
+    // test/legendhavecheck.sh (T3) holds it within 10 % of what `--legend-dict=core` prints.
     if( c.legendHaveSeen && c.legendHave.empty() )
     {
-        rw::emitRaw( stderr, "ripwire: --legend-have= needs the legend dictionary version you hold — an empty value names none "
+        rw::emitRaw( stderr, "ripwire: --legend-have= needs the version of the legend tier you hold — an empty value names none "
                              "(a shell variable that expanded to nothing?), and ignoring it would serve a full-price answer while "
-                             "you believed it was reduced. The flag ASSERTS you hold every definition, so obtain them first: run "
-                             "`ripwire --legend-dict` and read ALL of its output (about 130 KB, which takes on the order of 140 calls "
-                             "to repay: on a short session pass no --legend-have= at all). Its line 1 carries dictv=, the value to pass, "
-                             "e.g. ripwire . --callers=main --legend-have=<the dictv= on line 1>\n" );
+                             "you believed it was reduced. The flag ASSERTS the definitions are in your context, so read them first: run "
+                             "`ripwire --legend-dict=core` and read ALL of its output (13 definitions, about 1.5 KB). Its line 1 carries "
+                             "have=, the value to pass, e.g. ripwire . --callers=main --legend-have=<the have= on line 1>. On a session of "
+                             "fewer than about 10 ripwire calls pass no --legend-have= at all\n" );
         c.ok = false;
         return;
     }
