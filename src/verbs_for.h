@@ -6,6 +6,7 @@
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
 #include "forliteral.h" // MF1-LIT: a task naming a literal gets its byte-exact sites and owner bodies, appended
 #include "forpage.h"    // L-W: the --for --limit=N file page, coverage=, the thin rule and the widening next=
+#include "foranswerfirst.h" // ITEM R: a finished --for answer serves its ANSWER first (a permutation)
 #include "forbudgetfit.h" // TOKEN-BUDGET-MONOTONE: a budget sheds the unbudgeted answer, it never re-decides its posture
 #include "forowner.h"   // the question's owner (owner-hop's found set) and the one owner body of an explanatory question
 #include "forfold.h"    // body-fold: the whole bodies of the top ranked rows, appended to a compact-route answer
@@ -782,7 +783,7 @@ inline constexpr std::string_view kForCompactLegendRoute = rw::kForRouteCodeLege
 inline constexpr std::string_view kForCompactLegendConfidence =
     "; confidence=/margin_pct= head score drop (low=flat)";
 inline constexpr std::string_view kForCompactLegendHops =
-    "; h l= p= n=, c n= l= (joined for same-named callees, shown= counts them), noedge= no callee resolved";
+    "; h l= p= n=, c n= l= p= (p= if not h's; same-named joined, shown= counts them), noedge= no callee resolved";
 // owner-hop: present-only, right after the hops clause, on the same plan the rows come from. Says it is BY NAME (a lookup in
 // the ranked head, never a resolution), widens noedge= to the owners, and defines the two disclosures an owner cut carries.
 // What qword= does NOT mean: that the row is the only, or the true, implementation of the question's subject.
@@ -819,13 +820,13 @@ inline std::size_t ownerLegendExemptBytes( const ForLensHeaderParts& p, bool com
     return ownerHopLegend( p, compact ).size() + viaBytes;
 }
 inline constexpr std::string_view kForCompactLegendBodies =
-    "; b t= n= p= l= full bodies, c n= l= callee signatures";
+    "; b t= n= p= l= full bodies, c n= l= p= callee signatures (p= if not b's)";
 // for-body-slot: the compact dialect's reading of the ONE owner body (the full dialect's is forowner.h kForBodySlotLegend + the
 // root clause below), present-only (bodySlotPresent), right after the owner clause. No "--": it rides inside an XML comment.
 // FIX1 R3: it states what the full one states — what each pick= means and what reason=owner does NOT mean (the subject, the
 // whole answer): the default posture is this dialect, so this is the only reading most readers get.
 inline constexpr std::string_view kForCompactLegendBodySlot =
-    "; b t= n= p= l= full bodies, c n= l= callee signatures; bodies=1 reason=owner: ONE body, the question's owner by the rule "
+    "; b t= n= p= l= full bodies, c n= l= p= callee signatures (p= if not b's); bodies=1 reason=owner: ONE body, the question's owner by the rule "
     "(pick=name: its name is a question word; pick=member: a method so named of a ranked class), chosen by name not resolved; "
     "not necessarily the subject, not a claim it is the whole answer; shown=0 capped=1 next= when a budget skipped it";
 static_assert( kForCompactLegendBodySlot.starts_with( kForCompactLegendBodies ), "the slot's compact clause defines <b> as the bodies clause does" );
@@ -885,6 +886,8 @@ inline constexpr std::string_view callerHopClause( const ForLensHeaderParts& p, 
 inline std::string hopClauses( const ForLensHeaderParts& p, bool compact )
 {
     std::string out( callerHopClause( p, compact ) );
+    // WINDOW-AWARE HAND-OFF: rides with the hop and is erased when the rendered hop does not window (SIZE-1, runForLensPass)
+    out += presentOnlyClause( p.callerHopPresent && rw::handoffWindowOn(), compact, rw::kForCompactWindowHandoffLegend, rw::kForWindowHandoffLegend );
     out += presentOnlyClause( p.dispatchHopPresent, compact, rw::kForCompactDispatchHopLegend, rw::kForDispatchHopLegend );
     out += presentOnlyClause( p.selfHookPresent, compact, rw::kForCompactSelfHookLegend, rw::kForSelfHookLegend );
     return out;
@@ -1103,7 +1106,7 @@ inline constexpr std::string_view kForAutoBundleLegend =
     "(bodies=N on this root counts them; bodies=0 reason=budget when none fit the remaining budget "
     "whole; the signatures-only flag (no-bodies mode) opts out) — read them here instead of opening the files. The "
     "bodies element discloses the house way: total=requested, shown=printed, capped=1 when they "
-    "differ; each body's calls child lists its callee signatures, total= always, shown=/capped= only "
+    "differ; each body's calls child lists its callee signatures (c p= their file when it is not the body's), total= always, shown=/capped= only "
     "when that list is cut";
 
 // The clause defining the degraded reason, spliced into the header ONLY on that path (no "--": it rides in a comment).
@@ -1124,7 +1127,7 @@ inline constexpr std::string_view kForDegradedBundleNote =
 inline constexpr std::string_view kForCompactBundleLegend =
     "; bundle=compact: conceptual query, so this map ships one-hop EDGE context, no bodies (bodies=0, "
     "reason=compact-route or no_candidates). hops rows are h l=line p=file n=name, and a row's calls "
-    "child names its callees (c n= l=; l= comma-joins the lines of same-named callees, shown= counts callees). hops and calls disclose total=requested shown=printed capped=1 "
+    "child names its callees (c n= l=; l= comma-joins the lines of same-named callees of one file, c p= that file when it is not the h row's, shown= counts callees). hops and calls disclose total=requested shown=printed capped=1 "
     "when the BUDGET cut a listing; noedge=N counts ranked symbols with no RESOLVED callee found (never "
     "none exists). For a body: expand=p:n pasted off a row; the auto-bodies flag puts the bodies back";
 
@@ -2569,6 +2572,45 @@ inline constexpr std::string_view kForHopsBudgetCutLegendCompact =
     "; hops: this budget left out the call-hop rows (one hop of callees for each of total= top rows)";
 static_assert( kForHopsBudgetCutLegendCompact.size() < kForHopsBudgetCutLegend.size(),
                "the compact hops clause is the shorter honest spelling of the full one" );
+// value_refs= on the hop rows: which function-valued hop nodes are used as a value, and how often. The same resolution --callers
+// prints as value_refs= (ValueRefIndex::valueRefsTo), through the narrow index over the hop nodes' names. Languages whose value uses
+// are not read at all never enter (the row writer says unread for them); a corpus with no value use pays one scan and no byte.
+inline rw::HopValueRefs forHopValueRefs( const rw::IngestResult& ing, const std::vector<rw::NodeId>& hopNodes )
+{
+    rw::HopValueRefs out;
+    std::vector<std::string_view> names;
+    for( const rw::NodeId id : hopNodes )
+    {
+        if( rw::hopRowIsFunction( ing, id ) && rw::valueRefFamily( ing.symbols[ id ].lang ) != rw::ValueRefFamily::None )
+        {
+            names.push_back( ing.symbols[ id ].name );
+        }
+    }
+    std::ranges::sort( names, rw::sortutil::svLess );
+    names.erase( std::ranges::unique( names ).begin(), names.end() );
+    const auto namesAValue = [ & ]( const rw::Reference& r )
+    { return r.role == rw::RefRole::Value && std::ranges::binary_search( names, std::string_view( r.calleeName ), rw::sortutil::svLess ); };
+    if( names.empty() || !std::ranges::any_of( ing.references, namesAValue ) )   // COST: no value use of any hop name, no index and no byte
+    {
+        return out;
+    }
+    const rw::ValueRefIndex vri = rw::ValueRefIndex::narrowFor( ing, names );
+    for( const rw::NodeId id : hopNodes )
+    {
+        if( !rw::hopRowIsFunction( ing, id ) || rw::valueRefFamily( ing.symbols[ id ].lang ) == rw::ValueRefFamily::None )
+        {
+            continue;
+        }
+        const std::size_t n = vri.valueRefsTo( std::span<const rw::NodeId>( &id, 1 ) ).size();
+        if( n > 0 )
+        {
+            out.counts.emplace_back( id, std::uint32_t( n ) );
+        }
+    }
+    std::ranges::sort( out.counts );
+    out.counts.erase( std::ranges::unique( out.counts ).begin(), out.counts.end() );
+    return out;
+}
 // the hops cut's continuation (` next="--for=TASK"`) — one spelling for the marker and the partial-cut splice
 inline std::string forHopsCutNextAttr( const rw::Config& cfg )
 {
@@ -2674,9 +2716,10 @@ ForAutoBodiesResult buildForCompactHops( const rw::Config& cfg, const rw::Ingest
     const std::vector<rw::NodeId> hopNodes = forOwnerHopNodes( ownerPlan, hopIds );
     const rw::HopOwners           owners   = forHopOwners( cfg, ing, ownerPlan, leftBytes, fcRootArg );
 
+    rw::HopValueRefs hopVals = forHopValueRefs( ing, hopNodes );   // value_refs= on a row, value_refs_unread_for_lang= on the section
     out.section = rw::chargeSection( [ & ]( std::FILE* f )
         { rw::packHops( f, ing, hopNodes, hopBudget, g.outOff, g.outTargets, rw::withAnchorEdge( rw::CalleeEdgeBytes( g.outNameOnly, &g.outProv, nullptr ), &g.outAnchorMiss ), redactPtr, &lensRank, fcRootArg,
-                        rw::CalleeLegendsInHead( viaLegendInHead, promised.splitLegendInHead ), &owners ); },   // g.outNameOnly also feeds the hop-slot rule (serialize.h noProvenEdge)
+                        rw::CalleeLegendsInHead( viaLegendInHead, promised.splitLegendInHead ), &owners, &hopVals ); },   // g.outNameOnly also feeds the hop-slot rule (serialize.h noProvenEdge)
         // MARKUP rate, not the body rate — and this is an honesty choice, not a copy-paste slip. The body
         // rate (3.80 B/tok) prices SOURCE TEXT; the compact section contains none, only tags, identifiers
         // and line numbers, which tokenize like the rest of the bundle. Charging structured markup at the
@@ -3398,6 +3441,19 @@ inline void appendMetBridge( const MainDispatch& d, const rw::Config& sub, std::
     rw::emitRaw( stdout, ( rw::metBridgeCrossingXml( d.ing, *bridge ) + std::string( rw::kMetBridgeCloseXml ) ).c_str() );
 }
 
+// WINDOW-AWARE HAND-OFF (src/handoffwindow.h): a callers answer whose own root says it windows is not appended as a first page; the
+// tag is self-closed with the verb's total and the one call that lists every row (windows="1" next_total= next=). Returns whether
+// that stub went out; false = the verb's answer does not window (or is not the callers verb) and is appended as before.
+inline bool emitWindowingGraphVerb( const rw::GraphSubjectArgs& args, std::string_view doc )
+{
+    const rw::HandoffWindow win = args.form == rw::GraphSubjectForm::Callers ? rw::handoffWindowOfVerbDoc( doc, "<callers " ) : rw::HandoffWindow{};
+    if( win.windows )
+    {
+        rw::emitRaw( stdout, rw::graphSubjectOpenXml( args, rw::GraphSubjectOpen{ .windowTotal = win.total } ).c_str() );
+    }
+    return win.windows;
+}
+
 // FOR-ROUTE-DECLINED (src/forgraphverb.h): a task spelled `path from A to B` / `callers of X` / `common callers of A and B`
 // gets that verb's DEFAULT answer inside <graph_verb endpoints="subject">, just before </ctx>, on the graph this run built
 // (no re-index). Every byte before it is the ordinary answer; nothing resolves → nothing is printed. XML only (the
@@ -3465,6 +3521,10 @@ inline bool appendSubjectGraphVerbBlock( const MainDispatch& d, std::span<const 
     }
     else
     {
+        if( emitWindowingGraphVerb( *args, *doc ) )
+        {
+            return true;
+        }
         // the open tag goes out after the verb ran: name_test_hops= (S5) is read off the rows it printed
         const std::size_t nameTest = args->form == rw::GraphSubjectForm::Path ? rw::graphSubjectNameTestHops( *doc ) : 0;
         rw::emitRaw( stdout, rw::graphSubjectOpenXml( *args, rw::GraphSubjectOpen{ .nameTestHops = nameTest } ).c_str() );
@@ -3485,6 +3545,36 @@ inline bool appendSubjectGraphVerbBlock( const MainDispatch& d, std::span<const 
 inline constexpr std::string_view kReaskLegend =
     "<!-- ripwire for reask: the task names code in a sentence and asks for its callers or a call path, and this answer carries no "
     "callers or graph_verb block for it; next= is the same question in its bare form, the one call that answers it -->";
+// REASK-GRAIN: the sentence asks what a CHANGE to the code reaches (subjectanchor.h isChangeCue), which is the transitive radius, not
+// the one-hop callers: the impact verb is the bare form of that question. Its own legend, so the callers / path one keeps its bytes.
+inline constexpr std::string_view kReaskImpactLegend =
+    "<!-- ripwire for reask: the task names code in a sentence and asks what a change to it reaches, and this answer carries no "
+    "callers block for it; next= is the same question in its bare form, the transitive radius (the one-hop callers are its d=1 rows)";
+
+// WINDOW-AWARE HAND-OFF (src/handoffwindow.h): what the re-ask's verb would do at its default caps. The impact form is counted by
+// the verb's own walk; the callers form decides its own byte band, so the verb runs captured (default caps, as the graph_verb block
+// runs it) and its root is read. A capture that cannot be set up → not known: the re-ask is the bare call, as before.
+inline rw::HandoffWindow reaskHandoffWindow( const MainDispatch& d, std::string_view flag, const std::string& spelling )
+{
+    if( !rw::handoffWindowOn() )
+    {
+        return {};
+    }
+    if( flag == "--impact=" )
+    {
+        return rw::impactHandoffWindow( d.ing, d.g, spelling );
+    }
+    rw::Config sub = d.cfg;   // the verb as its own bare call (appendSubjectGraphVerbBlock's sub-config)
+    sub.forTask    = {};
+    sub.pageLimit  = 0;
+    sub.pageOffset = 0;
+    sub.callers    = spelling;
+    const MainDispatch sd{ sub, d.ing, d.g, d.root, d.multiRoot, d.ws, d.fanIn, d.fanInPtr, d.qmetrics, d.ampPtr, d.cboPtr, d.testedPtr,
+                           d.lcom4Ptr, d.impurePtr, d.forChurn, d.redactCounts, d.redactPtr, d.notesPtr, d.notesDegraded, d.grepPhases, d.valueUses };
+    const std::optional<std::string> doc = captureGraphVerbDoc( sub, [ & ] { (void)runCallHierarchy( sd ); } );
+    return doc ? rw::handoffWindowOfVerbDoc( *doc, "<callers " ) : rw::HandoffWindow{};
+}
+
 inline void appendSentenceReask( const MainDispatch& d, bool subjectBlockPrinted )
 {
     const rw::Config& cfg = d.cfg;
@@ -3493,12 +3583,25 @@ inline void appendSentenceReask( const MainDispatch& d, bool subjectBlockPrinted
         return;
     }
     const std::string invocation = rw::sentenceReaskInvocation( d.ing, cfg.forTask );
-    // the callers form stands in for <callers by="subject">, so the caller-hop A/B switch (RIPWIRE_NO_CALLER_HOP) turns it off with it
-    if( invocation.empty() || ( invocation.starts_with( "--callers=" ) && !rw::forCallerHopOn() ) )
+    const bool        impact     = invocation.starts_with( "--impact=" );
+    const bool        dependents = impact || invocation.starts_with( "--callers=" );
+    // the dependents forms stand in for <callers by="subject">, so the caller-hop A/B switch (RIPWIRE_NO_CALLER_HOP) turns them off with it
+    if( invocation.empty() || ( dependents && !rw::forCallerHopOn() ) )
     {
         return;
     }
-    rw::emitRaw( stdout, ( std::string( kReaskLegend ) + "<reask" + rw::nextAttrXml( invocation ) + "/>" ).c_str() );
+    const std::string_view legend = impact ? kReaskImpactLegend : kReaskLegend.substr( 0, kReaskLegend.size() - std::string_view( " -->" ).size() );
+    const std::string_view flag   = std::string_view( invocation ).substr( 0, invocation.find( '=' ) + 1 );
+    const std::string      spelling( invocation.substr( flag.size() ) );
+    const rw::HandoffWindow win   = dependents ? reaskHandoffWindow( d, flag, spelling ) : rw::HandoffWindow{};
+    if( !win.windows )
+    {
+        rw::emitRaw( stdout, ( std::string( legend ) + " --><reask" + rw::nextAttrXml( invocation ) + "/>" ).c_str() );
+        return;
+    }
+    // a windowing re-ask names the complete call instead of a first page; the spelling is the one sentenceReaskInvocation chose
+    rw::emitRaw( stdout, ( std::string( legend ) + std::string( rw::kWindowHandoffBlockLegend ) + " --><reask counts_floor=\"1\""
+                           + rw::handoffNextAttrsXml( flag, spelling, win ) + "/>" ).c_str() );
 }
 
 std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, const ForLensPassMode& mode )
@@ -5242,6 +5345,8 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         // section is rendered now, so a clause whose attribute no emitted row carries is erased before the document is priced.
         // A section streamed unbuffered (the degrade path) keeps its clause: its rows are not known here.
         rw::eraseAbsentClause( headerStr, kForCompactLegendLayer, !sigsPreRendered || sigsStr.contains( " layer=\"" ) );
+        rw::eraseAbsentClause( headerStr, headerParts.compactLegend ? rw::kForCompactWindowHandoffLegend : rw::kForWindowHandoffLegend,
+                               callerHop.xml.contains( " windows=\"1\"" ) );   // WINDOW-AWARE HAND-OFF: present only beside a windowing hop
         rw::eraseAbsentClause( headerStr, kForCompactLegendLego, !legoPreRendered || legoStr.contains( " implementors=\"" ) );
         rw::eraseAbsentClause( headerStr, kForCompactLegendCompose, !composePreRendered || composeStr.contains( "<field " ) );
         rw::eraseAbsentClause( headerStr, headerParts.compactLegend ? rw::kForCompactBodyFoldMembersClause : rw::kForBodyFoldMembersClause,
@@ -5622,7 +5727,24 @@ inline int runForLensFitted( const MainDispatch& d )
     {
         DISCLOSE( sink, ForBudgetFit::DisclosureWhy::NoRoot, "runForLensFitted: no <ctx> root in the unbudgeted answer" );
     }
-    const std::string& out = fit.verdict == rw::ForBudgetFitResult::Verdict::NoRoot ? printed->bytes : fit.xml;
+    // ITEM R (docs/EVALS.md amendment 8): the BUDGETED path renders its own whole document, so the
+    // permutation has to run here too. Without this it did not: --token-budget was byte-identical to
+    // RIPWIRE_FOR_LEGACY_ORDER=1 -- measured at 24,009 B either way on a budget that bound nothing -- so the
+    // feature was dead on exactly the path where ordering decides what survives a cut, while every arm on
+    // the default path stayed green. Same shape as the inverted capture predicate earlier in this lane.
+    //
+    // Safe after fitting, not before: answerFirst() permutes whole top-level blocks and changes no byte, so
+    // the fitted answer still measures the size the budget was fitted against. test/foranswerfirstcheck.sh
+    // (R7/R7n) pins both directions.
+    //
+    // MERGE 2026-11-18 (origin/main c565a3fad): main renamed this read to `printed`, and the permutation
+    // mutates, so `out` stays a non-const COPY rather than main's const reference. Both facts are needed:
+    // a reference here would not compile against answerFirst, and the old name no longer exists.
+    std::string out = fit.verdict == rw::ForBudgetFitResult::Verdict::NoRoot ? printed->bytes : fit.xml;
+    if( d.cfg.legendAnswerFirst )
+    {
+        (void)rw::answerfirst::answerFirst( out );
+    }
     std::fwrite( out.data(), 1, out.size(), stdout );
     return u.rc;
 }
@@ -5636,6 +5758,37 @@ std::optional<int> runForLens( const MainDispatch& d )
     if( forBudgetFitsAfterPosture( d ) )
     {
         return runForLensFitted( d );
+    }
+    // ITEM R (docs/EVALS.md amendment 8): the DEFAULT path buffers its answer so the permutation can run on a
+    // finished document. The budgeted path above already buffers through renderForPostureCaptured, so this
+    // reuses proven machinery rather than inverting any dependency. Measured: 0 of 216 recorded cells passed
+    // --token-budget, so the default path is where every one of them lives.
+    //
+    // A capture that cannot be taken is NOT an error: the answer is written straight through, unpermuted and
+    // complete. Only the reordering is missed, so this degrades to 0.6.x behaviour rather than to a failure.
+    if( d.cfg.legendAnswerFirst )
+    {
+        ForPostureRender r = renderForPostureCaptured( d );
+        replayForPostureNotices( r );
+        // capturedWhole() is the house predicate and the only correct one here: `restored` means the capture
+        // SUCCEEDED and handed its bytes back. An earlier version of this branch read `!restored`, the exact
+        // inverse, so the permutation never ran and the answer fell through to the write-it-anyway path
+        // below — a complete, unpermuted answer and a silently dead feature.
+        if( r.stdoutCaptured && capturedWhole( r.out ) )
+        {
+            std::string doc = r.out->bytes;
+            (void)rw::answerfirst::answerFirst( doc );
+            std::fwrite( doc.data(), 1, doc.size(), stdout );
+            return r.rc;
+        }
+        if( r.out && !r.out->bytes.empty() )
+        {
+            std::fwrite( r.out->bytes.data(), 1, r.out->bytes.size(), stdout );
+            return r.rc;
+        }
+        rw::answerfirst::AnswerFirstFallback afSink;
+        DISCLOSE( afSink, rw::answerfirst::AnswerFirstFallback::DisclosureWhy::NoWholeCapture,
+                  "runForLens: no whole capture for the default answer — serving it unpermuted" );
     }
     return runForLensPosture( d, nullptr );
 }

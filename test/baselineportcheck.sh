@@ -92,10 +92,12 @@ fi
 cp "$ARCH_FIXTURE/game/enemy.cpp.NEW" "$WORK/game/enemy.cpp"
 "$BIN" "$PWD" --arch=rules.txt --no-cache >"$TMPA/a_new.xml" 2>/dev/null
 rc_new=$?
-if [ "$rc_new" -eq 2 ] && grep -q 'new_violations="1"' "$TMPA/a_new.xml"; then
+# new_violations= is retired (2026-11-17): the count is the <v> rows without baselined="1" (test/abiarchretirecheck.sh (D)).
+new_rows="$( grep -o '<v from="[^>]*>' "$TMPA/a_new.xml" 2>/dev/null | grep -vc ' baselined="1"' )"
+if [ "$rc_new" -eq 2 ] && [ "$new_rows" = "1" ]; then
     ok "arch: a genuinely NEW violation still trips exit 2 under absolute root (fix didn't over-suppress)"
 else
-    no "arch: new violation under absolute root expected exit 2 + new_violations=\"1\", got exit $rc_new"
+    no "arch: new violation under absolute root expected exit 2 + one <v> row without baselined=\"1\", got exit $rc_new and $new_rows such row(s)"
 fi
 rm -f "$WORK/game/enemy.cpp"
 

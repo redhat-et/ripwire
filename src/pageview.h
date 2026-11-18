@@ -56,6 +56,11 @@
 //                           never a count (--abi used to print the dropped-row COUNT under this name; that
 //                           count is `dropped=` now). If a verb emits no shown=, it emits no capped= either
 //                           (--skill-scan emits the pair only on a capped scan; that is conformant).
+//                           A CUT-ONLY secondary listing (shown_dc=, shown_transitive=, shown_implementors=,
+//                           shown_alts=: printed only when the listing was cut) carries <noun>_capped="1" beside
+//                           it and nothing when whole: presence IS the cut, absence means whole. A listing that
+//                           prints shown_<noun>= on EVERY answer (shown_levels=, shown_d2=) prints its bit 0|1
+//                           always. Never the noun-first spelling <noun>_shown=: arm (I) of truncvocabcheck.
 //                           M2 (capture-audit 2026-09-04): capped="1" ⇒ the paging half (rule 6) is on the
 //                           SAME element, HOWEVER the window was set — a default display cap included. The
 //                           audited binary printed `shown="40" capped="1"` and nothing else on a bare
@@ -235,7 +240,7 @@ inline constexpr int kImportReachRowCap   = 40;
 // house quintet + next=. Explicit --limit=N raises any of them (effectiveRowCap).
 inline constexpr std::size_t kTreeSymbolsPerFile = 3;   // cut-fix E: --tree's <s> rows per <file>, disclosed by the root's shown_symbols=/symbols_capped=
 inline constexpr int kTreeRowCap            = 80;    // files, by best symbol's rank: 80 rows ≈ 11.5 KB on this repo (100 = 14.3 KB)
-inline constexpr int kZoomTopModuleCap      = 40;    // top-level modules, rank-mass desc then size desc then id (massSizeIdLess; their children ride along: levels_shown=2)
+inline constexpr int kZoomTopModuleCap      = 40;    // top-level modules, rank-mass desc then size desc then id (massSizeIdLess; their children ride along: shown_levels=2)
 inline constexpr std::size_t kZoomBridgeCap = 12;    // cut-fix E: --zoom's <bridge> rows (traffic desc), a secondary listing disclosed by secondaryCutAttrs
 inline constexpr int kExternalSurfaceRowCap = 100;   // names, by ref count (≈ 5.2 KB on this repo)
 

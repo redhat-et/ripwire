@@ -6,7 +6,7 @@
 #
 #   TRIGGER  CLI --for (XML, compact and full legends) on the name-exact route whose body candidates are ONE function (every
 #            candidate a function or method of the same name and scope), in the DEFAULT regime.
-#   WHAT     <callers of= shown= total= capped= [d2= d2_shown=] next="--impact=OF"> after the tail, before <bodies>: the
+#   WHAT     <callers of= shown= total= capped= [d2= shown_d2= d2_capped=] next="--impact=OF"> after the tail, before <bodies>: the
 #            callers verb's 1-hop rows <s t= n= [sc=] p=file:line [via="name"] [sites_at=]>, then d="2" rows (callers of the
 #            shown callers, at most 4); 16 first-hop rows at most, the rest counted (total=, capped="1").
 #   NOT      a struct, a variable, a conceptual question, --json, --signatures-only, --detail=1, --token-budget=N and
@@ -98,12 +98,12 @@ run "$FC" --for=start_server >"$TMP/p1"
 H1="$( hop "$TMP/p1" )"
 if [ -s "$TMP/p1" ] && grep -q 'route="name-exact(' "$TMP/p1"; then ok "(P1pre) --for=start_server routes name-exact"; else no "(P1pre) --for=start_server did not route name-exact — the fixture proves nothing"; fi
 case "$H1" in
-    *'n="connect_client" p="client.c:3" sites_at="client.c:5"'*'next="--impact=start_server"'*|*'next="--impact=start_server"'*'n="connect_client" p="client.c:3" sites_at="client.c:5"'*) ok "(P1a) connect_client is a caller row with its call site" ;;
-    *) no "(P1a) no connect_client caller row with sites_at=client.c:5: [$H1]" ;;
+    *'n="connect_client" p="client.c:3" sites_at="5"'*'next="--impact=start_server"'*|*'next="--impact=start_server"'*'n="connect_client" p="client.c:3" sites_at="5"'*) ok "(P1a) connect_client is a caller row with its call site" ;;
+    *) no "(P1a) no connect_client caller row p=client.c:3 with sites_at=5: [$H1]" ;;
 esac
-printf '%s' "$H1" | grep -q 'n="run_client" p="client.c:8" sites_at="client.c:13"'; verdict $? "(P1b) run_client is a caller row" "(P1b) no run_client caller row: [$H1]"
+printf '%s' "$H1" | grep -q 'n="run_client" p="client.c:8" sites_at="13"'; verdict $? "(P1b) run_client is a caller row" "(P1b) no run_client caller row: [$H1]"
 printf '%s' "$H1" | grep -q '<s t="fn" n="main" p="main.c:3" d="2"/>'; verdict $? "(P1c) main is the d=2 row" "(P1c) main is not a d=2 row: [$H1]"
-printf '%s' "$H1" | grep -q '<callers of="start_server" shown="2" total="2" capped="0" d2="1" d2_shown="1" next="--impact=start_server">'; verdict $? "(P1d) the element's counts and next=" "(P1d) the element's open tag: [${H1%%>*}>]"
+printf '%s' "$H1" | grep -q '<callers of="start_server" shown="2" total="2" capped="0" d2="1" shown_d2="1" d2_capped="0" next="--impact=start_server">'; verdict $? "(P1d) the element's counts and next=" "(P1d) the element's open tag: [${H1%%>*}>]"
 ! printf '%s' "$H1" | grep -q 'n="listen_socket"'; verdict $? "(P1e) no callee in the caller rows" "(P1e) a CALLEE (listen_socket) rode as a caller"
 # placement: after the tail, before the bodies
 python3 - "$TMP/p1" <<'PY'
@@ -122,7 +122,7 @@ n2="$( printf '%s' "$H2" | grep -o '<s ' | wc -l | tr -d ' ' )"
 # ── P3: entity identity — a same-named method of ANOTHER class is a different function ─────────────────────────────────────
 run "$FX" --for=Repaint >"$TMP/p3"
 H3="$( hop "$TMP/p3" )"
-printf '%s' "$H3" | grep -q '<callers of="Canvas::Repaint" shown="1" total="1"' && printf '%s' "$H3" | grep -q 'n="RefreshCanvas" p="canvas.cc:10" sites_at="canvas.cc:12"'; verdict $? "(P3a) a C++ method (Canvas::Repaint): its caller RefreshCanvas rides, of= qualified" "(P3a) Canvas::Repaint's hop: [$H3]"
+printf '%s' "$H3" | grep -q '<callers of="Canvas::Repaint" shown="1" total="1"' && printf '%s' "$H3" | grep -q 'n="RefreshCanvas" p="canvas.cc:10" sites_at="12"'; verdict $? "(P3a) a C++ method (Canvas::Repaint): its caller RefreshCanvas rides, of= qualified" "(P3a) Canvas::Repaint's hop: [$H3]"
 run "$FX" --for=Draw >"$TMP/p3d"
 if grep -q 'route="name-exact(Draw)' "$TMP/p3d" && [ "$( grep -o '<b t="method"' "$TMP/p3d" | wc -l | tr -d ' ' )" = "2" ]; then
     ! grep -q '<callers ' "$TMP/p3d"; verdict $? "(P3b) two same-named methods of two classes are not ONE function: no hop" "(P3b) --for=Draw bodies Widget::Draw AND Gadget::Draw (two functions) yet a hop rode"
@@ -132,7 +132,7 @@ fi
 # ── P8: the by-name hedge, as the callers verb decides it ──────────────────────────────────────────────────────────────────────
 run "test/forcallerhopfix/py" --for=handle_job >"$TMP/p8"
 H8="$( hop "$TMP/p8" )"
-printf '%s' "$H8" | grep -q 'n="dispatch_jobs" p="worker.py:6" via="name" sites_at="worker.py:8"'; verdict $? "(P8) a receiver-unproven caller carries via=\"name\"" "(P8) the by-name caller row: [$H8]"
+printf '%s' "$H8" | grep -q 'n="dispatch_jobs" p="worker.py:6" via="name" sites_at="8"'; verdict $? "(P8) a receiver-unproven caller carries via=\"name\"" "(P8) the by-name caller row: [$H8]"
 
 # ── P4: legend coverage, both dialects ───────────────────────────────────────────────────────────────────────────────────────
 run "$FC" --for=start_server --legend=full >"$TMP/p4f"
@@ -305,7 +305,7 @@ for q in "b3:test/forcallerhopfix/d2via:Ledger::post_entry" "p1:$FC:start_server
     run "$dir" --callers="$of" >"$TMP/q1.$f"
     out="$( parity "$TMP/$f" "$TMP/q1.$f" )"; verdict $? "(Q1) $f: every first-hop row's n= and p= equal --callers=$of's own row" "(Q1) $f: a hop row differs from --callers=$of: $out"
 done
-printf '%s' "$H3b" | grep -q '<s t="fn" n="Client.submit" p="m.py:7" sites_at="m.py:8"/>'; verdict $? "(Q1b) a member caller folds its owner into n= and prints no sc=" "(Q1b) the Client.submit hop row is not n=\"Client.submit\" without sc=: [$H3b]"
+printf '%s' "$H3b" | grep -q '<s t="fn" n="Client.submit" p="m.py:7" sites_at="8"/>'; verdict $? "(Q1b) a member caller folds its owner into n= and prints no sc=" "(Q1b) the Client.submit hop row is not n=\"Client.submit\" without sc=: [$H3b]"
 
 # ── R: UPWARD-2HOP, the ranked seed (forcallerhop.h forRankedCallerHopTargets; [P] arms RED on the train-40 binary 5163ffbdb) ──
 FR="test/forcallerhopfix/rank"

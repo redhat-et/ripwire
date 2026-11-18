@@ -34,6 +34,7 @@ run= check). deeptailcheck's `<t p=` rows are --for's TAIL listing, a different 
 
     python3 test/testrowpaths.py paths xml|json|text  [FILE]   # one path per line, emitted order
     python3 test/testrowpaths.py jsonlist             [FILE]   # the balanced "tests_to_run":[...] slice
+    python3 test/testrowpaths.py commands xml|json|text [FILE] # path<TAB>command per FILE, emitted order
 
 FILE defaults to stdin. Exit 0 even when nothing matches: "no rows" is an answer a gate may be asserting,
 and an empty stdout says it. Exit 2 only on a malformed document the reader cannot parse at all.
@@ -45,6 +46,17 @@ DIALECTS, and what counts as a row in each — the shapes testmap.h's seam emits
         an array of strings. The list is sliced by bracket depth, not by the first `]`.
   text  --situ's `        path [hops=N]   (run: …)` singles and its
         `        [hops=N] (n): a, b, c   (run: not derivable)` group lines.
+
+COMMANDS (affected-group-unjam, 2026-11-17). A row with a derivable runner used to be a single row always,
+because run= embeds the row's own path and so no two rows were ever equal. Rows whose command is EXACTLY
+"<head> <their own path>" now ride a group too, the head said once as a template:
+  xml   <g … n="3" p="a,b,c" run_each="pytest {p}"/>
+  json  {"p":["a","b","c"],…,"n":3,"run_each":"pytest {p}"}
+  text  [hops=2] (3): a, b, c   (run each: pytest {p})
+A member's command is the template with its ONE trailing {p} replaced by that member's path — expand_run_each
+below, the only place a gate may do it. `commands` (and the *_rows functions) return every file's command
+already expanded, None where the row says run_unknown, so a gate asserting "the command for X is Y" reads
+singles and groups alike. A tests_to_run <g> is therefore qualified by run_unknown="1" OR run_each=.
 
 A path is emitted VERBATIM, exactly as the document spelled it, except that XML entity references are
 decoded (`&amp;` `&lt;` `&gt;` `&quot;` `&#NN;`) — a gate compares paths against the file names it created,
@@ -77,26 +89,58 @@ def strip_comments( doc ):
     return re.sub( r"<!--.*?-->", "", doc, flags = re.S )
 
 
-def xml_paths( doc ):
-    """The test FILES an XML document names, in emitted order.
+RUN_EACH_SLOT = "{p}"
+
+
+def expand_run_each( template, path ):
+    """A group member's command: the template's ONE slot, which is its tail, replaced by the member's path.
+
+    Anything else is not a template this family emits (testmap.h groupRunHead builds "<head> {p}" and refuses a
+    head or a path that holds the slot itself), so it is a raise, never a best-effort substitution: a reader
+    that expanded a malformed template would hand a gate a command the document does not carry."""
+    if template.count( RUN_EACH_SLOT ) != 1 or not template.endswith( " " + RUN_EACH_SLOT ) or RUN_EACH_SLOT in path:
+        raise TestRowParseError( "run_each template %r is not '<head> {p}' with exactly one slot (member %r)" % ( template, path ) )
+    return template[ :-len( RUN_EACH_SLOT ) ] + path
+
+
+def _attrs( row ):
+    return dict( re.findall( r'\s([A-Za-z_]+)="([^"]*)"', row ) )
+
+
+def xml_rows( doc ):
+    """Every test FILE an XML document names, in emitted order, as ( path, command, grouped ): command is the
+    row's run= (a group member's is expanded from run_each=), None where the row says run_unknown="1", and
+    the string "<neither>" where a row carries no disclosure at all — testrowruncheck's subject, kept visible
+    here rather than read as a runner-less row.
 
     `<g` is NOT a tests_to_run element on its own: --flags spells a gate row `<g n="NAME" … p="src/x.h"/>`
-    with the same opener. A tests_to_run group is qualified by run_unknown="1", which every group row carries
-    by construction (a group exists only where no runner is derivable), so that is what this reader matches —
-    the same qualification the compact legend uses to keep the two readings of `<g>` apart."""
+    with the same opener. A tests_to_run group is qualified by run_unknown="1" or run_each=, one of which every
+    group row carries by construction (a group exists only where no runner is derivable or where every member's
+    command is the one template) — the same qualification the compact legend uses to keep the readings apart."""
     out = []
     for m in re.finditer( r'<(?:t|test|g)\b[^>]*?\bp="([^"]*)"[^>]*/>', strip_comments( doc ) ):
         row = m.group( 0 )
         raw = m.group( 1 )
+        at  = _attrs( row )
         if row.startswith( "<g " ):
-            if 'run_unknown="1"' not in row:
+            if at.get( "run_unknown" ) != "1" and "run_each" not in at:
                 continue                                        # --flags' own <g> gate row, not a test group
             # a group's p= is a comma-separated list; a path containing ',' is never grouped (testmap.h
             # refuses to), so splitting on ',' cannot split a path in half.
-            out.extend( xml_unescape( p ) for p in raw.split( "," ) if p != "" )
+            for p in raw.split( "," ):
+                if p == "":
+                    continue
+                path = xml_unescape( p )
+                out.append( ( path, expand_run_each( xml_unescape( at[ "run_each" ] ), path ) if "run_each" in at else None, True ) )
         else:
-            out.append( xml_unescape( raw ) )
+            cmd = xml_unescape( at[ "run" ] ) if "run" in at else ( None if at.get( "run_unknown" ) == "1" else "<neither>" )
+            out.append( ( xml_unescape( raw ), cmd, False ) )
     return out
+
+
+def xml_paths( doc ):
+    """The test FILES an XML document names, in emitted order (xml_rows, the paths alone)."""
+    return [ r[0] for r in xml_rows( doc ) ]
 
 
 class TestRowParseError( Exception ):
@@ -165,21 +209,26 @@ def json_list_slice( doc ):
                              '(%d bytes read from the field)' % ( depth, len( doc ) - i ) )
 
 
-def json_paths( doc ):
+def json_rows( doc ):
+    """json twin of xml_rows: ( path, command, grouped ) per file — "run", "run_each" (expanded) or run_unknown."""
     sl = json_list_slice( doc )
     if sl is None:
         return []
-    rows = json.loads( sl )
     out = []
-    for r in rows:
+    for r in json.loads( sl ):
         if not isinstance( r, dict ):
             continue
         p = r.get( "p", r.get( "test" ) )
         if isinstance( p, list ):
-            out.extend( str( x ) for x in p )
+            for x in p:
+                out.append( ( str( x ), expand_run_each( r[ "run_each" ], str( x ) ) if "run_each" in r else None, True ) )
         elif isinstance( p, str ):
-            out.append( p )
+            out.append( ( p, r[ "run" ] if "run" in r else ( None if r.get( "run_unknown" ) is True else "<neither>" ), False ) )
     return out
+
+
+def json_paths( doc ):
+    return [ r[0] for r in json_rows( doc ) ]
 
 
 # The text dialect's row grammar, spelled from the RENDERER rather than guessed at (testmap.h: the Text arm
@@ -187,7 +236,8 @@ def json_paths( doc ):
 #
 #     <indent><path>[ [changed]][ [partner]][ [hops=N]]   (run: <cmd>|not derivable)
 #
-# and a GROUP row replaces <path> with "<attrs> (n): a, b, c", its attrs leading. The three evidence
+# and a GROUP row replaces <path> with "<attrs> (n): a, b, c", its attrs leading, and closes with
+# "(run: not derivable)" or — where every member's command is one template — "(run each: <head> {p})". The three evidence
 # attributes are optional, but they are emitted in THAT ORDER and no other, and the run suffix always opens
 # with exactly three spaces. So the whole tail of a row is a closed, known shape.
 #
@@ -198,28 +248,45 @@ def json_paths( doc ):
 # The one ambiguity left is the dialect's, not the reader's — text carries NO escaping, so a path containing
 # the literal three-space "(run: " opener cannot be told from the suffix. XML and JSON are exact; a gate that
 # needs a path that adversarial should assert in one of those.
-_TEXT_RUN_OPEN = "   (run: "
+_TEXT_RUN_OPEN  = "   (run: "
+_TEXT_EACH_OPEN = "   (run each: "
 _TEXT_ATTR_TAIL = re.compile( r"(?: \[changed\])?(?: \[partner\])?(?: \[hops=\d+\])?$" )
-_TEXT_GROUP = re.compile( r"^\s*(?:\[[^\]]*\]\s*)*\((\d+)\):\s*(.*?)\s{2,}\(run: " )
+_TEXT_GROUP = re.compile( r"^\s*(?:\[[^\]]*\]\s*)*\((\d+)\):\s*(.*?)\s{2,}\(run(?: each)?: " )
+_TEXT_NOT_DERIVABLE = "not derivable"
 
 
-def text_paths( doc ):
+def text_rows( doc ):
+    """text twin of xml_rows: ( path, command, grouped ) per file."""
     out = []
     for line in doc.split( "\n" ):
-        if _TEXT_RUN_OPEN not in line or not line.rstrip( "\r" ).endswith( ")" ):
+        line = line.rstrip( "\r" )
+        each = _TEXT_EACH_OPEN in line
+        if not ( each or _TEXT_RUN_OPEN in line ) or not line.endswith( ")" ):
             continue
+        opener = _TEXT_EACH_OPEN if each else _TEXT_RUN_OPEN
+        tail   = line[ line.rindex( opener ) + len( opener ):-1 ]
         g = _TEXT_GROUP.match( line )
         if g:
-            out.extend( p.strip() for p in g.group( 2 ).split( "," ) if p.strip() )
+            for p in g.group( 2 ).split( "," ):
+                p = p.strip()
+                if p:
+                    out.append( ( p, expand_run_each( tail, p ) if each else None, True ) )
             continue
+        if each:
+            raise TestRowParseError( "a '(run each: …)' suffix on a line that is not a group row: %r" % line )
         # a SINGLE row: cut the run suffix, then the known attribute tail; what is left of the indent is the
         # path, verbatim — spaces and all.
         head = line[ :line.index( _TEXT_RUN_OPEN ) ]
         head = _TEXT_ATTR_TAIL.sub( "", head )
         path = head.strip()
         if path:
-            out.append( path )
+            cmd = line[ line.index( _TEXT_RUN_OPEN ) + len( _TEXT_RUN_OPEN ):-1 ]
+            out.append( ( path, None if cmd == _TEXT_NOT_DERIVABLE else cmd, False ) )
     return out
+
+
+def text_paths( doc ):
+    return [ r[0] for r in text_rows( doc ) ]
 
 
 def main( argv ):
@@ -237,27 +304,27 @@ def main( argv ):
             return 2
         sys.stdout.write( sl if sl else "" )
         return 0
-    if mode != "paths" or len( argv ) < 3:
+    if mode not in ( "paths", "commands" ) or len( argv ) < 3:
         sys.stderr.write( __doc__ )
         return 2
     dialect = argv[2]
     src = argv[3] if len( argv ) > 3 else None
     doc = open( src ).read() if src else sys.stdin.read()
+    # `paths` goes through the *_paths functions the gates import, `commands` through the *_rows ones beneath them
+    readers = ( { "xml": xml_rows, "json": json_rows, "text": text_rows } if mode == "commands"
+                else { "xml": xml_paths, "json": json_paths, "text": text_paths } )
+    if dialect not in readers:
+        sys.stderr.write( "testrowpaths: unknown dialect %r (xml|json|text)\n" % dialect )
+        return 2
     try:
-        if dialect == "xml":
-            paths = xml_paths( doc )
-        elif dialect == "json":
-            paths = json_paths( doc )
-        elif dialect == "text":
-            paths = text_paths( doc )
-        else:
-            sys.stderr.write( "testrowpaths: unknown dialect %r (xml|json|text)\n" % dialect )
-            return 2
+        rows = readers[ dialect ]( doc )
     except Exception as e:                                      # a document this reader cannot parse at all
         sys.stderr.write( "testrowpaths: %s dialect unreadable: %s\n" % ( dialect, e ) )
         return 2
-    for p in paths:
-        sys.stdout.write( p + "\n" )
+    for row in rows:
+        # `commands`: path<TAB>command; a runner-less file prints an EMPTY command field — the TAB is always
+        # there, so a path with no command is never mistaken for a `paths` line
+        sys.stdout.write( ( row if mode == "paths" else row[0] + "\t" + ( row[1] or "" ) ) + "\n" )
     return 0
 
 

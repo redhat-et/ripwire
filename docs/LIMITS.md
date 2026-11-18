@@ -51,7 +51,7 @@ cap do not both rewrite the same line; the per-file tables are re-read from `src
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 440 | 149 | 286 | **154** |
+| 440 | 149 | 288 | **152** |
 
 Plus 10 ranking and apportionment parameters, in their own table below: they are not caps, they
 are not counted as caps, and 440 + 10 is the 450 constants this generator parses out of `src/`.
@@ -271,7 +271,7 @@ Discloses: `capped`, `reads_capped`, `writes_capped`
 
 ### `src/declinedsites.h`
 
-Discloses: **none**
+Discloses: `dc_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
@@ -288,7 +288,7 @@ Discloses: **none**
 
 ### `src/defslookup.h`
 
-Discloses: `to_capped`
+Discloses: `alts_capped`, `to_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
@@ -466,7 +466,7 @@ Discloses: **none**
 
 ### `src/forcallerhop.h`
 
-Discloses: `capped`
+Discloses: `capped`, `d2_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
@@ -1215,7 +1215,7 @@ Discloses: `capped`, `count_capped`, `findings_capped`, `hits_capped`, `importer
 | `kTreeSymbolsPerFile` | `3` | — | cut-fix E: --tree's <s> rows per <file>, disclosed by the root's shown_symbols=/symbols_capped= |
 | `kUseSiteRowCap` | `100` | — | — |
 | `kZoomBridgeCap` | `12` | — | cut-fix E: --zoom's <bridge> rows (traffic desc), a secondary listing disclosed by secondaryCutAttrs |
-| `kZoomTopModuleCap` | `40` | — | top-level modules, rank-mass desc then size desc then id (massSizeIdLess; their children ride along: levels_shown=2) |
+| `kZoomTopModuleCap` | `40` | — | top-level modules, rank-mass desc then size desc then id (massSizeIdLess; their children ride along: shown_levels=2) |
 
 ### `src/partition.h`
 
@@ -1413,7 +1413,7 @@ Discloses: **none**
 
 ### `src/serialize.h`
 
-Discloses: `capped`, `calls_capped`, `dirs_capped`, `entries_capped`, `files_capped`, `importers_capped`, `inc_capped`, `members_capped`, `names_capped`, `sibs_capped`, `type_capped`
+Discloses: `capped`, `calls_capped`, `dirs_capped`, `entries_capped`, `files_capped`, `implementors_capped`, `importers_capped`, `inc_capped`, `members_capped`, `names_capped`, `sibs_capped`, `transitive_capped`, `type_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |

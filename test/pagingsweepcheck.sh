@@ -755,7 +755,7 @@ TABLE = {
     # construction and carries no quintet; the page itself (test/forwidencheck.sh) carries the full quintet.
     "--for":                ( [ "--for=escapeXml" ], None ),
     # lane lego-transitive (2026-10-10): --lego joins for its DEEPER implementor rows (depth >= 2) — --limit/--offset
-    # window those rows; the direct rows repeat on every page. The cut is disclosed on the CHILD <iface> (transitive_shown=
+    # window those rows; the direct rows repeat on every page. The cut is disclosed on the CHILD <iface> (shown_transitive=
     # has_more="1" next=), so the <ctx> root is uncut by construction and the "quintet absent" branch applies; the page
     # itself is test/legotransitivecheck.sh's arm.
     "--lego":               ( [ "--lego=CalleeCallsSink" ], None ),

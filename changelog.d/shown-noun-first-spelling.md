@@ -1,0 +1,7 @@
+### Changed — seven cut listings spell their count `shown_<noun>=` and carry `<noun>_capped`
+
+`dc_shown`, `levels_shown`, `transitive_shown`, `implementors_shown`, `alts_shown`, `cells_shown` and `d2_shown` were spelled noun-first, so a reader (or `truncvocabcheck`, which reads `shown_` prefixes) scanning for a capped bit on those cuts found none. They are now `shown_dc=`, `shown_levels=`, `shown_transitive=`, `shown_implementors=`, `shown_alts=`, `shown_cells=` and `shown_d2=`, the spelling `src/pageview.h` rule 1 already states, each beside its `<noun>_capped` bit.
+
+- The four cut-only listings (`dc`, `transitive`, `implementors`, `alts`) add `<noun>_capped="1"` on a cut answer and nothing otherwise. `shown_levels=` (every `--zoom`) and `shown_d2=` (every answer with a second hop) print their bit `0|1` always. `cells_capped` already existed.
+- Cost: the rename is length-neutral; the bit is about 13 B per cut answer, 15 B on every `--zoom` and about 13 B on an answer with a `d2` row. JSON `dc_shown` is renamed with its XML twin; `sigs_shown`/`sigs_total`/`sigs_next` are a separate surface and unchanged.
+- `test/truncvocabcheck.sh` arm (I) fails on any noun-first `_shown`, on a cut answer missing the bit, total or next, and on a dictionary row that does not spell them (read from `--legend-dict`, never the generic `X_capped=` gloss). It is exercised on one real cut answer per noun and was shown red on binaries with a row removed and with a row's companion removed.

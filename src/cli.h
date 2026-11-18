@@ -52,7 +52,7 @@ struct Config
     bool             legendHaveSeen = false;     // --legend-have= was PRESENT. Absent and present-but-empty both leave
                                                  // legendHave empty, and they must not behave alike: absent is a no-op,
                                                  // an empty value is a refusal (§B5's owner ruling, 2026-07-29).
-    std::string_view legendHave;                 // --legend-have=DICTV: the CALLER asserts it already holds that dictionary
+    std::string_view legendHave;                 // --legend-have=HAVE[,HAVE]: the CALLER asserts it already holds those legend tiers
                                                  // version, so this answer may take the ref posture. The handshake is what
                                                  // makes a CLI ref answer honest AND deterministic: --legend=ref is refused
                                                  // because a CLI run has no session that was served anything, and output that
@@ -74,8 +74,28 @@ struct Config
     bool             json            = false;              // --json (L2): the SAME content as the XML, machine-parseable, for the
                                                            // CORE verbs ONLY (default map, --for, --pack-task, --callers/--callees/
                                                            // --impact, --quality-delta, --test-gate). Keys mirror the XML attr names
-    std::string_view legend;                               // --legend=full|compact: the legend posture of every XML verb (P1, compactlegend.h);
+    std::string_view legend;                               // --legend=full|compact|dict|last: the legend posture of every XML verb (P1, compactlegend.h);
                                                            // an XML run that names none is RESOLVED to kDefaultLegendPosture (L1)
+    std::string_view legendSpelled;                        // the posture AS TYPED, for messages. `legend` is normalised
+                                                           // (dict -> compact), so a refusal built from it names a value the
+                                                           // caller never wrote: `--legend=dict --json` answered "--legend=compact
+                                                           // applies to the XML verbs only". Flag named means named as typed.
+    bool             legendAnswerFirst = false;            // item R, --legend=last: the ANSWER is emitted before the document legend (a pure
+                                                           // permutation — no byte changes). OPT-IN, not the default: measured on 50 --for
+                                                           // answers the shipped ordering left an active cut or floor disclosure outside the
+                                                           // 2 KB prefix on 9 of them, and the honesty invariant outranks the prefix win.
+                                                           // Orthogonal in principle to legendProseOff, but not combinable as a posture
+                                                           // VALUE; under --legend=dict the legend is a 493 B pointer whose position barely
+                                                           // matters, so the combination buys little and is deliberately not offered.
+    bool             legendProseOff = false;               // item D: the prose legend is replaced by a POINTER to --legend-dict. Set by the
+                                                           // DEFAULT and by the explicit spelling --legend=dict; cleared by an ASKED
+                                                           // --legend=compact, the registered opt-out (D3), which must reproduce the
+                                                           // pre-item-D default byte for byte. NOTE both spellings leave `legend` reading
+                                                           // "compact": 25 call sites across six files read `legend == "compact"` as "the
+                                                           // compact dialect is on", and a third VALUE there would turn every one of them
+                                                           // FALSE under the new default — a silent behaviour change in --for, --grep,
+                                                           // --slice and the reprice guard, none of it about prose. The posture that varies
+                                                           // is therefore carried by this bool and the dialect switch keeps its one value.
     bool             legendDefaulted = false;              // L1: legend was not asked for — validateLegendModifier resolved it to the default
                                                            // posture because the run answers XML. main.cpp reads it: a defaulted posture
                                                            // never refuses a run (it passes the output through), an asked one does.
@@ -284,7 +304,7 @@ struct Config
     bool             zoom        = false;                   // --zoom[=depth]: NESTED module hierarchy (multi-level Louvain) + top-level bridges (S5-D)
     int              zoomDepth   = 0;                       // --zoom=depth: cap the hierarchy at `depth` levels (0 = auto: contract until ≤10 top modules)
     int              zoomLevels  = 0;                       // --zoom-levels=N (P4, L7): how many levels the document PRINTS from the top
-                                                            // (0 = every level); the default prints 2 (levels_shown= discloses it)
+                                                            // (0 = every level); the default prints 2 (shown_levels= discloses it)
     bool             zoomLevelsSet = false;                 // did the caller pass --zoom-levels=? (the guard: it modifies --zoom only)
     bool             includeBuiltins = false;               // --include-builtins (P4, L7): --external-surface lists the sh builtins it drops by default
     bool             report      = false;                  // --report: auto architecture summary (markdown)
@@ -1083,7 +1103,12 @@ inline constexpr char kHelpHead[] =
         "                               A conceptual route whose subject names one function carries <callers by=\"subject\">, and so does a\n"
         "                               sentence that `backticks` one function and asks what calls or depends on it; a sentence that spells\n"
         "                               code and asks for callers or a path but gets no such block ends with <reask next=\"--callers=X\"/>\n"
-        "                               (or --path=A,B), the bare call that answers it. A shape\n"
+        "                               (--impact=X when it asks what a CHANGE reaches; or --path=A,B), the bare call that answers it.\n"
+        "                               A hand-off to --callers/--impact (that re-ask, the <graph_verb> callers block, the <callers> hop's\n"
+        "                               next=) counts the verb's rows first: when its default call would list only a first page, no page is\n"
+        "                               appended and the hand-off says windows=\"1\", next_total=N (the verb's own count, a floor) and\n"
+        "                               next= the one call that lists every row (the same rows in columnar form, limit N); a verb that does not\n"
+        "                               window is handed off as before (RIPWIRE_NO_WINDOW_HANDOFF=1 turns this off). A shape\n"
         "                               demotion appends \"; doc tier demoted (...)\". On the rows, sc= is the enclosing scope and the full id\n"
         "                               is p::sc::n (p= of the row or its <f>) - the spelling --expand/--callers/--impact/--uses accept; a member\n"
         "                               row folds its stored scope into n=Owner.name where the index defines that scope as a type or module (Owner::name C/C++/Rust, Owner#name Ruby): id p::n.\n"
@@ -1207,9 +1232,10 @@ inline constexpr char kHelpHead[] =
         "    --callers=SYM              show SYM's direct callers (1-hop in-edges)\n"
         "                               who calls SYM (1-hop in-edges). file:name disambiguates a same-named symbol across files (like --around/--lego);\n"
         "                               Scope::name picks one scope's definition — the sym= spelling edit-check prints resolves everywhere.\n"
-        "                               Each caller row's sites_at= lists its call sites as pasteable file:line tokens (16 at most: sites_total=)\n"
+        "                               Each caller row's sites_at= lists its call sites as lines in its p= file, else file:line (16 at most: sites_total=)\n"
         "                               A call the resolver DECLINED to bind whose candidates include SYM is a <dc in= p= via=\"declined\"> row:\n"
-        "                               a call site, never an edge or a count= row (16 at most, file-first: dc_shown=, dc_next=)\n"
+        "                               a call site, never an edge or a count= row (16 at most, file-first: shown_dc=, dc_next=).\n"
+        "                               A windowed answer (has_more=\"1\") names in all_next= the ONE call that lists every caller, in columnar form\n"
         "    --callees=SYM              what SYM calls (1-hop out-edges). file:name disambiguates like --callers; each call it makes that the\n"
         "                               resolver declined to bind is a <dc n= l= via=\"declined\"> row, never an edge or a count= row\n"
         "    --uses=SYM                 show every place SYM is used, not just called — reads, writes, imports, extends\n"
@@ -1256,6 +1282,9 @@ inline constexpr char kHelpHead[] =
         "                               — the indexed symbols that reach SYM (a floor, see counts_floor). file:name disambiguates like --callers\n"
         "                               rows run nearest first: d= is the hop depth (1 = a direct caller; printed where it changes), PageRank\n"
         "                               order within a depth; by_depth=k:n on the root counts reaches= per depth, so a cut drops the deepest first\n"
+        "                               A windowed answer (has_more=\"1\") names in all_next= the ONE call that lists every row of total=, in columnar form;\n"
+        "                               --limit sizes the declined call sites too: where that call holds more of them than rows it says shown_dc=\n"
+        "                               (of declined_calls=), and its dc_next= lists them all\n"
         "                               importers= is a SECOND, weaker reach beside it: the files that directly include/import a file defining SYM,\n"
         "                               emitted as <f via=\"import\" lazy=\"0|1\"> rows (format=columnar carries the count only; --limit sizes it). NEVER added to reaches= —\n"
         "                               files and symbols are different units, and an importer may use a different symbol from that file, or none at all.\n"
@@ -1803,7 +1832,7 @@ inline constexpr char kHelpHead[] =
         "                               nearest legal id -- a bad id is a typo, not an empty module\n"
         "    --zoom[=depth]             show the nested module hierarchy plus the bridges between modules\n"
         "                               NESTED module hierarchy (multi-level Louvain) + cross-module bridges; --zoom --mermaid = nested diagram.\n"
-        "                               Default window: the top 2 levels (levels_shown=; a module at the cut carries children= for its\n"
+        "                               Default window: the top 2 levels (shown_levels=; a module at the cut carries children= for its\n"
         "                               unprinted child modules; --zoom-levels=N prints N, 0 = all) over the 40 largest top modules\n"
         "                               (shown=/capped=/next_offset=, next= pastes the next page; --limit=N/--offset=M window them)\n"
         "    --report                   architecture summary (modules, god-files, cycles) as markdown\n"
@@ -2065,7 +2094,7 @@ inline constexpr char kHelpHead[] =
         "                               method with no body, whose implementors' same-named bodies it also reads (impls=K counts them).\n"
         "                               callers_floor=/uses_floor= mark a count the index holds\n"
         "                               evidence of a miss for, and next= is the call that lists the rest. A caller row's sites_at= is its\n"
-        "                               call sites as file:line tokens (p= stays the line where the caller is defined).\n"
+        "                               call sites as lines in its p= file, else file:line (p= stays the line where the caller is defined).\n"
         "    --slice=SYM[:VAR]          trace one variable's definitions and uses inside one function\n"
         "                               NAME-BASED intra-procedural def-use slice of variable VAR inside the ONE uniquely-resolved\n"
         "                               definition SYM (statement-level def-use edges as a queryable primitive — the ARISE result,\n"
@@ -2782,13 +2811,33 @@ inline constexpr char kHelpTail[] =
         "                               ~15-60% fewer tokens on multi-row results, by de-duplicating the repeated per-row markup + paths; results of a few rows\n"
         "                               can be LARGER — the paths/cols scaffold has a fixed cost). rows is an alias\n"
         "                               for columnar. Any OTHER verb refuses (exit 1) — it has no row list to re-encode. Map is\n"
-        "                               unaffected.\n"
+        "                               unaffected. More than 16 declined call sites (<dc>) ride as ONE <dcols> block of the same\n"
+        "                               parallel arrays (path indexes <paths>); 16 or fewer stay rows.\n"
         "    --format=candidates        (with --for/--query) a flat top-K export for an external reranker\n"
         "                               (with --for/--query) a FLAT top-K export for an EXTERNAL reranker: one\n"
         "                               <cand r= s= n= id= k= p= l=><sig>..</sig></cand> row per result — identity + score +\n"
         "                               signature only, no lens/quality extras, no doc bodies. Composes with --top-k.\n"
-        "    --legend=full|compact      legend posture for every XML verb — compact is the default; full restores the prose\n"
-        "                               output legend posture for EVERY XML verb. The DEFAULT is compact: the legend is a\n"
+        "    --legend=full|compact|dict|last legend posture for every XML verb — compact is the default; dict drops the prose\n"
+        "                               for a pointer; full restores the long form; last puts the ANSWER before the legend\n"
+        "                               --legend=dict (item D, 2026-11-17) drops the prose legend of ONE TIER — the core plus\n"
+        "                               this answer's own verb pack — and names that tier: every root attribute stays exactly\n"
+        "                               where it was, and legend=\"dict\" dict=\"ripwire --legend-dict=KEY\" dictv= is added, so one\n"
+        "                               bounded read (1.5-3.8 KB, not the 131 KB dictionary) resolves everything it left out and\n"
+        "                               its line 1 carries the have= for your next call. A definition outside that tier stays in\n"
+        "                               the answer. Until 2026-11-18 it dropped ALL 1,157 definitions and pointed at the whole\n"
+        "                               dictionary, which read 577 B SHORTER than the honest answer on cpython\n"
+        "                               --impact=PyObject_Str (7,219 B against 7,796 B) — bytes borrowed from the reader at 34x.\n"
+        "                               Cannot combine with --legend-have=: that is two postures for one answer. Lossless — 79 of 79 reduced\n"
+        "                               answers byte-identical outside the legend, -8.7% to -57.6% by verb. It is OPT-IN\n"
+        "                               rather than the default because the default flip reds 89 gates on one contract (every\n"
+        "                               attribute defined in ITS OWN answer's legend); the dictionary-backed contract lands\n"
+        "                               first. Measured first: the legend is\n"
+        "                               531..4,305 B per answer (median 1,796) — a near-FIXED tax, 14.0% of a --for bundle but\n"
+        "                               62.6% of a --whereis answer — and 93% of every clause emitted had already been sent to\n"
+        "                               the reader. At a 2 KB budget it cost 36 points of symbol-grain completeness and ALL of\n"
+        "                               the item grain's. --legend=compact is the OPT-OUT and reproduces the pre-item-D default\n"
+        "                               byte for byte; nothing is dropped from an answer, only the prose that repeats itself.\n"
+        "                               output legend posture for EVERY XML verb. compact: the legend is a\n"
         "                               FIXED ~3 KB of prose per call in its full form, so its share is a function of ANSWER\n"
         "                               SIZE, not of the verb: at least 40% of a small --callers/--uses/--impact/--affected\n"
         "                               answer (and more on --callees and --edit-check), a little of a large --for bundle —\n"
@@ -2815,17 +2864,30 @@ inline constexpr char kHelpTail[] =
         "                               resource ripwire://legend-dict, answers list rows first, carry each definition once\n"
         "                               per session and end with <about legend=\"ref\" dict= dictv=/>. A CLI run has no\n"
         "                               session to hold a definition, so --legend=ref refuses; --legend-dict prints them all.\n"
-        "    --legend-dict[=roster]     print the session legend dictionary, or with =roster the attributes it defines.\n"
-        "                               Prints the dictionary the MCP server serves as ripwire://legend-dict/full: one\n"
-        "                               definition per line, headed by its dictv= (FNV-1a 64 of the lines, the version a\n"
-        "                               ref answer's <about dictv=> names). =roster lists the completeness attributes it\n"
-        "                               defines (attr, element, source), the roster test/legendrefcheck.sh reads. Answered\n"
-        "                               wherever it stands on the command line; nothing else runs.\n"
-        "    --legend-have=DICTV        you already hold that legend dictionary (--legend-dict prints its dictv=), so this answer\n"
-        "                               takes the ref posture: rows and identity on the root, every other attribute on a trailing\n"
-        "                               <about legend=\"ref\" dict= dictv=/>, and no legend prose. Lossless -- nothing is dropped,\n"
-        "                               only moved. Measured -30.4 % over 80 recorded answers (-8 % to -57 % by verb). A version\n"
-        "                               that is not this binary\'s is REFUSED, naming both.\n"
+        "    --legend-dict[=core|KEY]   print the legend dictionary, or one TIER of it to hold with --legend-have=\n"
+        "                               Bare: the whole dictionary the MCP server serves as ripwire://legend-dict/full, one\n"
+        "                               definition per line, headed by its dictv= (FNV-1a 64 of the lines). =core: the 13\n"
+        "                               definitions every ref answer leans on (about 1.5 KB). =KEY, a schema key such as callers\n"
+        "                               or impact: the core plus that verb's PACK, the definitions at least a third of its\n"
+        "                               measured answers carried (+0.4 to +3.5 KB; census=0 means none was measured and the text\n"
+        "                               is the core alone). Line 1 of a tier carries have=, the value --legend-have= takes; it\n"
+        "                               hashes exactly the entries= lines after it. =tiers lists every tier (name, have=,\n"
+        "                               entries, bytes, census); =roster the completeness attributes the dictionary defines;\n"
+        "                               =index every entry by what it defines. Answered wherever it stands; nothing else runs.\n"
+        "    --legend-have=HAVE[,HAVE]  say which legend tiers you HOLD; their definitions are left out of the answer\n"
+        "                               you HOLD those legend tiers: every line `ripwire --legend-dict=core` (or =KEY) printed,\n"
+        "                               read by you. HAVE is the have= on that text's line 1; several join with commas. The\n"
+        "                               answer takes the ref posture: rows first, the root unchanged, a closing <about\n"
+        "                               legend=\"ref\" have=\"core\" …/> naming what was assumed. A definition you hold is left\n"
+        "                               out; one you do NOT hold stays in THIS answer, in a comment after its rows — nothing is\n"
+        "                               ever left to a dictionary you were only pointed at. The flag is an ASSERTION the binary\n"
+        "                               cannot check: have= echoes argv, not receipt. Measured on 453 answers of 12 verbs, five\n"
+        "                               corpora: the core repays in 11 calls (9 over the 388 that are not --for); a pack within 3\n"
+        "                               calls of its verb; core + the verb's pack keeps 86 % of what holding everything saves.\n"
+        "                               --for answers are not reduced (0 of 65), and say so on stderr. Under about 10 calls pass\n"
+        "                               nothing. REFUSED: an empty value; any value that is no tier of this binary, even beside\n"
+        "                               a valid one; --mcp/--listen/--lsp; --legend=full. The whole dictionary's dictv= is a\n"
+        "                               valid HAVE too (have=\"full\"), about 130 KB and about 130 calls to repay.\n"
         "    --json                     emit JSON instead of XML; keys mirror the XML attribute names one to one\n"
         "                               machine-parseable JSON instead of XML, keys mirror the XML attr names 1:1. Every\n"
         "                               ROOT attribute survives; a verb that serves fewer SECTIONS than its XML form NAMES\n"
@@ -3480,7 +3542,7 @@ inline constexpr ViewFlag kViewFlags[] =
 
     // search and the --for lens
     { "--query=",       &Config::query           , EmptyValue::Refuse, "search terms",                           "--query=\"teleport pagerank\"" },
-    { "--legend=",      &Config::legend          , EmptyValue::Refuse, "full or compact",                        "--legend=compact" },
+    { "--legend=",      &Config::legend          , EmptyValue::Refuse, "full, compact, dict or last",                  "--legend=compact" },
     { "--grep=",        &Config::grep            , EmptyValue::Refuse, "a literal string to search for",         "--grep=parseArgs",
       nullptr, nullptr, &Config::grepGiven, kGrepDupMessage },
     { "--match=",       &Config::match           , EmptyValue::Refuse, "a tree-sitter s-expression pattern",     "--match='(call_expression)'" },
@@ -3694,7 +3756,7 @@ inline constexpr IntFlag kIntFlags[] =
     // graph shaping
     { "--zoom=",             &Config::zoomDepth,     false, kIntFlagMax,       "a positive integer depth",   "--zoom=2",
       nullptr, nullptr, &Config::zoom },
-    // P4 (L7): how many hierarchy levels --zoom PRINTS from the top (the default is 2, disclosed as levels_shown=);
+    // P4 (L7): how many hierarchy levels --zoom PRINTS from the top (the default is 2, disclosed as shown_levels=);
     // 0 = every level. isSetFlag records explicitness so the bare modifier can be refused (it shapes --zoom only).
     { "--zoom-levels=",      &Config::zoomLevels,    true,  kIntFlagMax,       "a non-negative integer (0 = every level)", "--zoom-levels=0",
       nullptr, nullptr, &Config::zoomLevelsSet },
@@ -4570,9 +4632,46 @@ inline void validateLintSelectionModifierGuards( Config& c ) noexcept
 // header is its own dialect (verbs_for.h), and under a --token-budget it never loses a row --legend=full keeps
 // (compactlegendcheck (P1) asserts rows(default) ⊇ rows(--legend=full)) — with ONE ruled exemption (knob-honesty-068 round 3,
 // option B): a default whose header is larger than full's, that fits its budget and paid the row for its <sigs next=> (P1-B).
-inline constexpr std::string_view kLegendPostures[]     = { "full", "compact" };
+// ITEM D (owner decision 2026-11-17, prereg docs/EVALS.md amendment 4 + 4a). The prose goes by DEFAULT, and the
+// root keeps every attribute it had. Measured before the change: the legend is 531..4,305 B per answer, median
+// 1,796 — a near-FIXED tax, so 14.0 % of a --for bundle but 62.6 % of a --whereis answer, and 93 % of every clause
+// emitted had already been sent to the reader. On the budget axis, which is the one a context-limited agent lives
+// on, it cost 36 points of symbol-grain completeness at 2 KB and ALL of the item grain's.
+//
+// `dict` is the prose-free posture and `last` is answer-first ordering (item R); BOTH ARE OPT-IN, and `compact` is
+// the default. An earlier iteration shipped `dict` AS the default and this comment still said so after the owner
+// reversed it — see validateLegendModifier below, which is the authority. A stale sentence about a DEFAULT is not a
+// cosmetic defect: it is read as permission, and it nearly routed a later change the wrong way.
+// Every opt-in spelling resolves `legend` to "compact" and carries its difference in a Config flag of its own
+// (legendProseOff, legendAnswerFirst) — see the note there for the 25 call sites that would have silently flipped
+// had either been a third value of the dialect switch. `full` restores the long form as before.
+inline constexpr std::string_view kLegendPostures[]     = { "full", "compact", "dict", "last" };
 inline constexpr std::string_view kDefaultLegendPosture = "compact";
 static_assert( std::ranges::contains( kLegendPostures, kDefaultLegendPosture ), "the default is a registered posture" );
+// A posture's spelling lives in THREE places: this table, the flag-table hint ("full, compact, dict or last") and
+// validateLegendModifier's refusal. Adding `last` left both prose copies reading "full, compact or dict", so the
+// refusal named a value set that no longer existed and a correct --legend=last looked like a typo in the error text.
+// This count is the tripwire: raise it only together with both strings.
+static_assert( std::ranges::size( kLegendPostures ) == 4,
+               "a new --legend posture needs its spelling in the flag-table hint AND in validateLegendModifier's refusal" );
+
+// WHEN EACH OPT-IN COLLAPSES INTO THE DEFAULT. An option with no stated expiry criterion is a permanent flag, and
+// this tool's north star is one-step smart defaults: the posture list is a place to EXPLORE, not a place to settle.
+// Both current opt-ins are here because a measured default flip was unsafe, and each has a condition under which it
+// stops being a flag:
+//   dict — when the dictionary-backed coverage contract lands, the 80 gates asserting "defined in THIS answer's
+//          legend" move to "obtainable by the reader", and the flip falls out of the contract rather than fighting it.
+//   last — when the answer carries its disclosure readings in the prefix (root tag, then cuts and floors, then rows,
+//          then the schema dictionary). Measured 2026-11-17: as the DEFAULT this ordering left an active cut or floor
+//          outside 2 KB on 9 of 50 --for answers, and no prefix win pays for a reader that cannot tell it was cut.
+// Neither condition is a promise about a date. Each is a gate that must be green first, so the option retires on
+// evidence instead of accumulating.
+
+// Does this posture replace the prose legend with a pointer? True for the DEFAULT and for --legend=dict.
+[[nodiscard]] inline bool legendPostureDropsProse( std::string_view spelled, bool defaulted ) noexcept
+{
+    return defaulted || spelled == "dict";
+}
 
 // --legend-have= is a VERSION HANDSHAKE. Its VALUE is checked against the dictionary in main.cpp
 // (checkLegendHandshake), not here: cli.h is included early and pulling legenddict.h in shifts declaration order enough
@@ -4587,12 +4686,19 @@ inline void refuseLegendHaveMisuse( Config& c )
     // just saved 30 % of the bytes. An earlier version of this flag treated an empty value as "asserts
     // nothing", and test/emptyvaluerefusecheck.sh was right to refuse that: 20 of the 21 hand-written arms
     // refuse, and the odd one out was mine. Flag NAMED, real problem stated, runnable example, stdout empty.
+    // THE REMEDY TEACHES A READ, AND THE CHEAPEST ONE (2026-11-17, twice). First it said `--legend-dict` piped into a
+    // first-line cut: 78 B read, 130 KB asserted. Then it said the whole dictionary, which is honest and takes about
+    // 131 calls to repay. It now names the core TIER (lane dict-core-packs): 13 definitions, read whole, whose line 1
+    // carries have= — the value to pass. cli.h cannot include legenddict.h, so the size here is written, not computed;
+    // test/legendhavecheck.sh (T3) holds it within 10 % of what `--legend-dict=core` prints.
     if( c.legendHaveSeen && c.legendHave.empty() )
     {
-        rw::emitRaw( stderr, "ripwire: --legend-have= needs the legend dictionary version you hold — an empty value names none "
+        rw::emitRaw( stderr, "ripwire: --legend-have= needs the version of the legend tier you hold — an empty value names none "
                              "(a shell variable that expanded to nothing?), and ignoring it would serve a full-price answer while "
-                             "you believed it was reduced. Read the version with `ripwire --legend-dict | head -1` and pass it, "
-                             "e.g. ripwire . --callers=main --legend-have=$(ripwire --legend-dict | head -1 | tr -dc '0-9a-f')\n" );
+                             "you believed it was reduced. The flag ASSERTS the definitions are in your context, so read them first: run "
+                             "`ripwire --legend-dict=core` and read ALL of its output (13 definitions, about 1.5 KB). Its line 1 carries "
+                             "have=, the value to pass, e.g. ripwire . --callers=main --legend-have=<the have= on line 1>. On a session of "
+                             "fewer than about 10 ripwire calls pass no --legend-have= at all\n" );
         c.ok = false;
         return;
     }
@@ -4612,6 +4718,25 @@ inline void refuseLegendHaveMisuse( Config& c )
         rw::emitRaw( stderr, "ripwire: --legend-have= serves one finished answer, so it cannot combine with a server transport "
                              "(--mcp/--listen/--lsp): the server would answer into a capture the client never sees. The servers "
                              "already send each definition once per session — see --mcp-legend=session\n" );
+        c.ok = false;
+        return;
+    }
+    // TWO POSTURES IN ONE ANSWER, and it is a DISCLOSURE conflict rather than a missed saving (lane
+    // legend-session-default, 2026-11-18). An ASKED --legend=dict normalises to the default dialect and carries its
+    // difference in legendProseOff, so it slipped the --legend=full arm below and BOTH stages ran: applyCliRefPosture
+    // reduced the legend to the entries the holding does not cover and moved them after the rows, then
+    // applyCliDictPosture spliced its own pointer onto the root. MEASURED on this repo before the refusal was written:
+    // one 15,592 B answer at rc=0 carrying `legend="dict" dict="ripwire --legend-dict"` on the root AND
+    // `<about legend="ref" have="core" …/>` as its last child. A reader that believes the root ("the definitions are in
+    // the dictionary, not here") does not look in the trailing comment, which is where the unheld ones actually are, so
+    // the contradiction can cost it a reading, not just bytes. main.cpp's ordering comment asserted that "the two never
+    // both fire"; this is what makes that true. Keyed on the SPELLING, not on legendProseOff, so a later default flip
+    // does not turn this into a refusal of every --legend-have= run. test/legenddefaultcheck.sh arm (D7).
+    if( c.legendSpelled == "dict" )
+    {
+        rw::emitRaw( stderr, "ripwire: --legend-have= and --legend=dict are two legend postures for one answer — it would carry both "
+                             "pointers and they disagree about where the definitions are. --legend-have= already drops exactly the "
+                             "tiers you named; drop --legend=dict, or drop --legend-have= and read the tier the answer's dict= names\n" );
         c.ok = false;
         return;
     }
@@ -4694,8 +4819,35 @@ static inline void validateLegendModifier( Config& c ) noexcept
         {
             c.legend          = kDefaultLegendPosture;
             c.legendDefaulted = true;
+            // ITEM D IS OPT-IN, NOT THE DEFAULT (owner decision 2026-11-17, after the blast radius was measured).
+            // The posture is lossless and measured — see the readout — but making it the DEFAULT reds 89 of 849 gates,
+            // 80 of them on ONE contract: they assert that every attribute an answer emits is defined in THAT ANSWER'S
+            // legend, which a prose-free answer cannot satisfy by construction. Migrating those 80 to the old contract
+            // would be work done twice, because the right contract is the one test/legenddefaultcheck.sh (D5) already
+            // checks — defined somewhere the reader can OBTAIN it, i.e. --legend-dict. So the dictionary-backed
+            // contract lands first and the default flip falls out of it; until then the default is untouched.
         }
         return;
+    }
+    // --legend=dict is the prose-free posture, OPT-IN. It resolves to the same dialect value every downstream reader already
+    // asks about and carries its difference in legendProseOff, so naming it changes nothing except that
+    // legendDefaulted stays false: an ASKED posture refuses an answer the dialect cannot shape, where the default
+    // passes it through. That asymmetry is L1's and is deliberately left alone here.
+    if( c.legend == "dict" )
+    {
+        c.legendSpelled  = c.legend;   // before the normalisation below, so every message can name what was typed
+        c.legend         = kDefaultLegendPosture;
+        c.legendProseOff = true;
+    }
+    // --legend=last is ITEM R, spelled, and OPT-IN for the same reason item D is: the reordering is lossless by
+    // construction (a permutation) and wins rows under a budget, but as the DEFAULT it moved disclosure readings out
+    // of the prefix. Normalised to the default dialect exactly as `dict` is, so no downstream reader learns a fourth
+    // value; the difference rides Config::legendAnswerFirst alone.
+    if( c.legend == "last" )
+    {
+        c.legendSpelled     = c.legend;   // before the normalisation, so a refusal names what the caller typed
+        c.legend            = kDefaultLegendPosture;
+        c.legendAnswerFirst = true;
     }
     // r2-LO: legend=ref is a SESSION posture — definitions sent once per server process, after the session read the
     // dictionary (legenddict.h). A CLI run is one answer with no session to have been served anything, so a ref answer
@@ -4710,7 +4862,7 @@ static inline void validateLegendModifier( Config& c ) noexcept
     }
     if( !isLegendPosture( c.legend ) )
     {
-        rw::emitTo( stderr, "ripwire: --legend needs full or compact — got '{}', e.g. --legend=compact\n", std::string_view( c.legend.data(), c.legend.size() ) );
+        rw::emitTo( stderr, "ripwire: --legend needs full, compact, dict or last — got '{}', e.g. --legend=compact\n", std::string_view( c.legend.data(), c.legend.size() ) );
         c.ok = false;
     }
     // P1 (capture-audit 2026-09-04, L7): every XML verb honors --legend=compact (main.cpp's runWithCompactLegend

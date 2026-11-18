@@ -286,12 +286,14 @@ fi
 _absorb_listed=0; _absorb_ran=0
 for _g in \
     a9disclosurecheck \
+    abiarchretirecheck \
     abicheck \
     accessshapecheck \
     ackonlycheck \
     adaptivecheck \
     adaptivecutshapecheck \
     affectedcheck \
+    affectedgroupcheck \
     agentloopclaudecheck \
     agentloopcodexcheck \
     agentloopeditsuitecheck \
@@ -333,6 +335,7 @@ for _g in \
     bm25check \
     bodiesshowncheck \
     bodilessseedcheck \
+    bodycalleefilecheck \
     bodydialectcheck \
     budgetmonotonecheck \
     budgetpolicycheck \
@@ -347,6 +350,7 @@ for _g in \
     cacheoffsetcheck \
     cachereservecheck \
     cachesplitcheck \
+    calleerowfilecheck \
     callerscheck \
     callformcheck \
     callsrankordercheck \
@@ -423,6 +427,8 @@ for _g in \
     cyclecutcheck \
     danglingwarncheck \
     dartcheck \
+    dccolumnarcheck \
+    dctiercutcheck \
     deadcheck \
     deadcodescopecheck \
     deadfiltercheck \
@@ -531,6 +537,7 @@ for _g in \
     fnptrcheck \
     fnslotcheck \
     foranchornscheck \
+    foranswerfirstcheck \
     forautobodycheck \
     forblowupcheck \
     forbodyfoldcheck \
@@ -615,10 +622,12 @@ for _g in \
     guardmsgcheck \
     gvassemblycheck \
     handlerrulecheck \
+    handoffwindowcheck \
     hasacheck \
     hashsetcheck \
     hazardpatterncheck \
     headbinstagecheck \
+    headleakcheck \
     headsnapcachecheck \
     helpbudgetcheck \
     helptaskdeadlinecheck \
@@ -630,6 +639,7 @@ for _g in \
     hop1check \
     hopbodycheck \
     hopcontextcheck \
+    hopvaluerefscheck \
     hostilecheck \
     hotspotsincecheck \
     htmlcolorcheck \
@@ -679,12 +689,15 @@ for _g in \
     lcsidentitycheck \
     legendcostcheck \
     legendcoveragecheck \
+    legenddefaultcheck \
     legenddriftcheck \
     legendhavecheck \
     legendrefcheck \
+    legendtiercheck \
     legobundlecheck \
     legocheck \
     legotransitivecheck \
+    legounreadlangcheck \
     lexicalnoskipcheck \
     liftdisclosurecheck \
     limitstablecheck \
@@ -936,6 +949,7 @@ for _g in \
     redactcheck \
     redactfixcheck \
     reexportcheck \
+    refdisclosurecheck \
     refusaltailcheck \
     refwindowcheck \
     regexbombcheck \
@@ -1020,6 +1034,7 @@ for _g in \
     sincecochangecheck \
     sincewindowcheck \
     singledefcheck \
+    sitesatshortcheck \
     situdiffcheck \
     situhunkcheck \
     situshapecheck \

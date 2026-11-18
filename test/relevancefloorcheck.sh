@@ -181,6 +181,13 @@ echo "=== (4) byte ceiling on the fixture ==="
 # and the full legend gains the ~225 B clause defining e= — 2871 -> 3107 B. The 3000 B assertion is KEPT on the
 # answer with exactly those two additions normalised out (4), and the whole answer gets its own ceiling of
 # 3300 B (4b) — still far below the 5307 B padded answer this arm exists to keep out.
+# RE-PIN 2026-11-18 (lane dc-shown-vocab, by design; integration/byte-token-070): the caller hop's full-legend
+# clause now DEFINES d2_capped — a cut that previously shipped with no definition anywhere. The companion
+# rename d2_shown -> shown_d2 is length-neutral, so the whole +96 B (4130 -> 4226 measured) is the new
+# definition of a cut, not padding: (4b) moves 4200 -> 4300 B. Attributed by measuring the answer, not
+# assumed — the value_refs= clauses from lane value-bound-disclosure are ABSENT from this fixture's bundle
+# (the anchor is bound as a value nowhere), so that lane adds 0 B here. (4) and (4d) are unchanged; note
+# that (4d)'s twin now sits at 3449 B against its 3500 B ceiling, 51 B of headroom, and is the next to go.
 a_bytes="$( printf '%s' "$A_OUT" | wc -c | tr -d ' ' )"
 # RE-PIN 2026-10-15 (lane forbudget-soft round C, FOLD C; rule 4): the <tail> now carries page 0 of the --for file page — rows
 # `<t p=… sym=…/>` — and its full legend clause grew 391 -> 598 B to define them. (4) normalises those out too (the page rows,
@@ -202,8 +209,8 @@ a_norm_bytes="$( printf '%s' "$A_OUT" | python3 -c 'import re,sys; s=sys.stdin.r
 case "$a_bytes$a_norm_bytes" in *[!0-9]*|'') no "(4) byte counts are not numeric ('$a_bytes' / '$a_norm_bytes')"; a_bytes=999999; a_norm_bytes=999999 ;; esac
 [ "$a_norm_bytes" -lt 3000 ] && ok "(4) the floored bundle without e= and its clause is $a_norm_bytes B (< 3000; pre-fix was 5307 B on this fixture)" \
                              || no "(4) the floored bundle without e= and its clause is $a_norm_bytes B, over the 3000 B ceiling"
-[ "$a_bytes" -lt 4200 ] && ok "(4b) the whole floored bundle is $a_bytes B (< 4200 with e=, the tail page rows, the caller hop and their legend clauses)" \
-                        || no "(4b) the whole floored bundle is $a_bytes B, over the 4200 B ceiling"
+[ "$a_bytes" -lt 4300 ] && ok "(4b) the whole floored bundle is $a_bytes B (< 4300 with e=, the tail page rows, the caller hop and their legend clauses)" \
+                        || no "(4b) the whole floored bundle is $a_bytes B, over the 4300 B ceiling"
 A_OFF="$( RIPWIRE_NO_CALLER_HOP=1 rw --for=FLOORANCHOR_uniquefn --legend=full )"
 a_off_bytes="$( printf '%s' "$A_OFF" | wc -c | tr -d ' ' )"
 a_on_strip="$( printf '%s' "$A_OUT" | python3 -c 'import re,sys; s=sys.stdin.read(); s=re.sub(r"<callers [^>]*>.*?</callers>","",s,flags=re.S); s=re.sub(r"; callers of=:.*?next= lists the whole caller radius","",s,flags=re.S); s=re.sub(r" est_tokens=\"[0-9]+\"","",s); sys.stdout.write(s)' )"

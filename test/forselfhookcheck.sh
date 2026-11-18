@@ -517,7 +517,8 @@ class Y(Mix):
 E2
 H="$( run k7 "--for=what calls X.hk" | hook )"
 nx="$( printf '%s' "$H" | python3 -c 'import re,sys; print(re.search(r"n=.X.hk.[^>]*? next=.([^\"]+).", sys.stdin.read()).group(1))' )"
-if has "$( run k7 "$nx" )" 'lib/base.py:12'; then ok "(K7) the printed next= ($nx) lists the hidden site across directories"; else no "(K7) the printed next= ($nx) does not list lib/base.py:12"; fi
+# SITES-SHORT: the hidden site (lib/base.py line 12, inside Mix.e defined on line 11) is that row's bare line beside its own p= file
+if printf '%s' "$( run k7 "$nx" )" | grep -qE '<s [^>]*p="lib/base\.py:11"[^>]* sites_at="12"'; then ok "(K7) the printed next= ($nx) lists the hidden site across directories (lib/base.py line 12)"; else no "(K7) the printed next= ($nx) does not list line 12 on a p=lib/base.py:11 row"; fi
 mk k5/base.py <<'E2'
 class Base:
     def a(self):

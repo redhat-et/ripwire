@@ -8,12 +8,12 @@
 // offline before this code (reports/mf1-nx.md Stage 0): appending the callers verb's rows lifted 4 of the 7 name-exact
 // function rows by >= 1 required item under Rule C, and none of the 163 non-sealed round-5 rows routes name-exact at all.
 //
-// WHAT. <callers of= shown= total= capped= d2= d2_shown= next=> after the file tail and before the bodies (a prefix-budgeted
+// WHAT. <callers of= shown= total= capped= d2= shown_d2= next=> after the file tail and before the bodies (a prefix-budgeted
 // reader meets the callers before the body CDATA): the function's 1-hop callers — the callers verb's own rows
 // (callhierarchy.h oneHopCallerRows: every definition's in-edges, tier/path order, ranked before the cap), each <s t= n= sc=
 // p=file:line> with its call sites (sites_at=, the callers verb's CALLSITE-AT pass) and via="name" when the edge was matched by
 // name alone — then the callers of the SHOWN callers as d="2" rows (the same helper one hop further, by rank, at most
-// kForCallerHopDepth2Rows). shown=/total= count the first hop, d2_shown=/d2= the second; capped="1" when either was cut, and
+// kForCallerHopDepth2Rows). shown=/total= count the first hop, shown_d2=/d2= the second; capped="1" when either was cut, and
 // next= is the whole caller radius (--impact) either way. Counts are floors: resolved call edges only, as the callers verb says.
 //
 // WHEN. The name-exact route, the auto <bodies> bundle, and the callers verb's OWN resolution of the name is ONE function: its
@@ -33,6 +33,7 @@
 #include "docparse.h"        // detail::readWholeFile — the ranked seed reads the candidate's file
 #include "filter.h"          // pathTierOf — the ranked seed's noise gate (every first-hop caller a test or bench path)
 #include "graph.h"           // viaNameAttr
+#include "handoffwindow.h"   // WINDOW-AWARE HAND-OFF: next= names the complete radius call when the default one windows
 #include "infra/namesplit.h"   // isIdentChar — the ranked seed's task-word fold
 #include "lexical.h"         // splitRouteWords — the ranked seed's task words
 #include "memberowner.h"     // MemberOwners / qualifiedMemberName — n= as the callers verb prints it (QUALNAME-1, train 33)
@@ -401,37 +402,37 @@ inline std::vector<NodeId> forRankedCallerHopTargets( const IngestResult& ing, c
 // inside an XML comment.
 inline constexpr std::string_view kForCallerHopLegend =
     "; callers of=: the route named one function, so its callers follow its definition: s t= n= sc= p=file:line rows are its "
-    "1-hop callers (n=Owner.name with no sc= on a member whose owner the index defines, as the callers verb prints it; sites_at= their calls of it as file:line, sites_total= when that list was cut; via=name: matched by name "
-    "alone, the receiver unproven), shown= of total=; then d=2 rows, callers of the shown callers by rank (via=name if every path has a by-name hop), d2_shown= of d2=; "
+    "1-hop callers (n=Owner.name with no sc= on a member whose owner the index defines, as the callers verb prints it; sites_at= their calls of it as [file:]line (default file: p='s), sites_total= when that list was cut; via=name: matched by name "
+    "alone, the receiver unproven), shown= of total=; then d=2 rows, callers of the shown callers by rank (via=name if every path has a by-name hop), shown_d2= of d2= (d2_capped=1 if cut, else 0); "
     "capped=1 when either hop was cut; counts are floors (resolved calls only); next= lists the whole caller radius";
 inline constexpr std::string_view kForCompactCallerHopLegend =
-    "; callers of=: the one function's 1-hop callers, s t= n= sc= p=file:line (n=Owner.name folds sc= on a member; sites_at= its call sites, sites_total= if cut; "
-    "via=name by name only), shown= of total=; d=2 rows: their callers (via=name if every path has a by-name hop), d2_shown= of d2=; capped=1 if cut; floors; next= the radius";
+    "; callers of=: the one function's 1-hop callers, s t= n= sc= p=file:line (n=Owner.name folds sc= on a member; sites_at= its calls as [file:]line, sites_total= if cut; "
+    "via=name by name only), shown= of total=; d=2 rows: their callers (via=name if every path has a by-name hop), shown_d2= of d2= (d2_capped=1 if cut, else 0); capped=1 if cut; floors; next= the radius";
 
 // UPWARD-2HOP: the ranked seed's clauses (by="rank" on the element). Self-contained — the named-route clause never rides with them.
 inline constexpr std::string_view kForRankedCallerHopLegend =
     "; callers by=rank of=: the task names an error, not a function, so of= is an r=1..3 row that is one function with 1 to "
     "3 callers (the first whose body holds the task's words in one string, else the first; found by rank, a lead to check), and the chain above it follows: s t= n= sc= p=file:line rows are its 1-hop callers "
-    "(n=Owner.name with no sc= on a member whose owner the index defines; sites_at= their calls of it as file:line, sites_total= when "
+    "(n=Owner.name with no sc= on a member whose owner the index defines; sites_at= their calls of it as [file:]line (default file: p='s), sites_total= when "
     "that list was cut; via=name: matched by name alone, the receiver unproven), shown= of total=; then d=2 rows, callers of the "
-    "shown callers by rank (via=name if every path has a by-name hop), d2_shown= of d2=; capped=1 when either hop was cut; counts are floors (resolved calls only); next= lists "
+    "shown callers by rank (via=name if every path has a by-name hop), shown_d2= of d2= (d2_capped=1 if cut, else 0); capped=1 when either hop was cut; counts are floors (resolved calls only); next= lists "
     "the whole caller radius";
 inline constexpr std::string_view kForCompactRankedCallerHopLegend =
     "; callers by=rank of=: an error task's r=1..3 row that is one function with 1-3 callers (the first with the task's words in a body string, else the first; a lead by rank): its callers, s t= n= "
-    "sc= p=file:line (n=Owner.name folds sc= on a member; sites_at= its call sites, sites_total= if cut; via=name by name only), "
-    "shown= of total=; d=2 rows: their callers (via=name if every path has a by-name hop), d2_shown= of d2=; capped=1 if cut; floors; next= the radius";
+    "sc= p=file:line (n=Owner.name folds sc= on a member; sites_at= its calls as [file:]line, sites_total= if cut; via=name by name only), "
+    "shown= of total=; d=2 rows: their callers (via=name if every path has a by-name hop), shown_d2= of d2= (d2_capped=1 if cut, else 0); capped=1 if cut; floors; next= the radius";
 
 // SUBJECT-ANCHOR: the subject's named symbol (by="subject" on the element). Self-contained, as the ranked clauses are.
 inline constexpr std::string_view kForSubjectCallerHopLegend =
     "; callers by=subject of=: the subject names this function exactly (several: the first with callers), so its callers ride on the conceptual answer above: s t= n= sc= p=file:line rows are its 1-hop callers "
-    "(n=Owner.name with no sc= on a member whose owner the index defines; sites_at= their calls of it as file:line, sites_total= when "
+    "(n=Owner.name with no sc= on a member whose owner the index defines; sites_at= their calls of it as [file:]line (default file: p='s), sites_total= when "
     "that list was cut; via=name: matched by name alone, the receiver unproven), shown= of total=; then d=2 rows, callers of the "
-    "shown callers by rank (via=name if every path has a by-name hop), d2_shown= of d2=; capped=1 when either hop was cut; counts are floors (resolved calls only); next= lists "
+    "shown callers by rank (via=name if every path has a by-name hop), shown_d2= of d2= (d2_capped=1 if cut, else 0); capped=1 when either hop was cut; counts are floors (resolved calls only); next= lists "
     "the whole caller radius";
 inline constexpr std::string_view kForCompactSubjectCallerHopLegend =
     "; callers by=subject of=: the function the subject names (several: the first with callers), on top of the conceptual answer: its callers, s t= n= "
-    "sc= p=file:line (n=Owner.name folds sc= on a member; sites_at= its call sites, sites_total= if cut; via=name by name only), "
-    "shown= of total=; d=2 rows: their callers (via=name if every path has a by-name hop), d2_shown= of d2=; capped=1 if cut; floors; next= the radius";
+    "sc= p=file:line (n=Owner.name folds sc= on a member; sites_at= its calls as [file:]line, sites_total= if cut; via=name by name only), "
+    "shown= of total=; d=2 rows: their callers (via=name if every path has a by-name hop), shown_d2= of d2= (d2_capped=1 if cut, else 0); capped=1 if cut; floors; next= the radius";
 
 struct CallerHopRender
 {
@@ -613,9 +614,11 @@ inline CallerHopRender renderForCallerHop( const IngestResult& ing, const Graph&
     x += "\"";
     if( !second.empty() )
     {
-        x += " d2=\"" + std::to_string( second.size() ) + "\" d2_shown=\"" + std::to_string( secondShown ) + "\"";
+        x += " d2=\"" + std::to_string( second.size() ) + "\" shown_d2=\"" + std::to_string( secondShown ) + "\"" + " d2_capped=\"" + std::string( secondShown < second.size() ? "1" : "0" ) + "\"";
     }
-    x += nextAttrXml( nextFlag( "--impact=", sel ) );
+    // WINDOW-AWARE HAND-OFF (handoffwindow.h): the radius is counted for the definitions `--impact=sel` binds; a windowing one is
+    // pointed at whole (windows="1" next_total= and the columnar complete call), any other is the bare call as before
+    x += handoffNextAttrsXml( "--impact=", sel, impactHandoffWindow( ing, g, sel ) );
     x += '>';
     for( std::size_t i = 0; i < firstShown; ++i )
     {

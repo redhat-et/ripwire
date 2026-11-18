@@ -389,6 +389,12 @@ echo "=== (A-PIN) --legend=full is BYTE-IDENTICAL to the pre-L1 default (pinned 
 # RE-PIN 2026-11-15 (NEXT-APOS-RAW), for.xml only: the one next= value with a quote reads --for='…' (was &apos;…&apos;; nextverb.h
 # appendNextValueXml leaves ' raw in a "-delimited attribute) and est_tokens= falls 2227 -> 2223 with the 10 bytes it saves. Checked
 # mechanically: the old pin with &apos; -> ' inside next= and that est_tokens equals the lane's --legend=full output (at= masked).
+# RE-ANCHORED BY HAND 2026-11-17 (lane/sitesat-shortform, SITES-SHORT, by design), callers.xml only: its two <s> rows print
+# the call site as the bare line of the row's own p= file (sites_at="16", sites_at="10") and the sites_at= clause reads the
+# token as [file:]line ("as file:line tokens (...two calls on one line are one site)" -> "as [file:]line (...two calls on
+# a line are one site; no file: p='s)", +8 B, inside the 3769 B full:callers target). Checked mechanically
+# (test/sitesatshortcheck.sh arm B does the same on its own goldens): putting each row's p= file back in front of its bare
+# line and reversing that one phrase gives the previous pin byte for byte (at= masked), 3907 -> 3885 B.
 PIN_DIR="$ROOT/test/compactlegendfix/pre_l1_full"
 # the one normalisation, in python on BOTH sides so no sed dialect decides it (BSD sed appends a final newline, GNU
 # sed does not): at="…" masked, trailing newlines dropped.
@@ -465,8 +471,16 @@ probeFor()
         --for=)            printf '%s' '--for=geometry' ;;
         --pack-task=)      printf '%s' '--pack-task=geometry' ;;
         --task=)           printf '%s' '--task=geometry' ;;
-        --callers=|--callees=|--impact=|--uses=|--edit-check=|--safe-delete=|--slice=|--whereis=|--mentions=|--around=|--expand=|--owners=|--exemplar=)
+        --callers=|--callees=|--impact=|--uses=|--edit-check=|--safe-delete=|--slice=|--whereis=|--mentions=|--around=|--owners=|--exemplar=)
                            printf '%s' "${1}distance" ;;
+        # RE-PROBED 2026-11-17 (lane/w1-head-comment-skip): --expand=distance -> --expand=perimeter. The serving choice prices
+        # both candidates at their DELIVERED size (MED-7), and distance sat whole-file by 76 B only because its bundle's compact
+        # legend spelled scrubbed= and redacted= for an answer carrying neither (166 B, test/headleakcheck.sh). With the leak
+        # shut the bundle is the smaller document (1,395 B against the file's 1,485), so the DEFAULT serves it while full
+        # still serves the file — a posture split, which (FX9) covers and this rows-identical universe cannot read. perimeter
+        # has the same two definitions and reaches the same whole-file legend byte for byte (508 B, the expand-file pin's
+        # own measurement), in both postures. Its margin is 81 B: if a later legend change flips it too, the arm goes red here.
+        --expand=)         printf '%s' '--expand=perimeter' ;;
         --lego=|--field-affinity=|--layout=) printf '%s' "${1}Point" ;;
         --path=)           printf '%s' '--path=total_area,distance' ;;
         --connect=)        printf '%s' '--connect=total_area,distance,perimeter' ;;
@@ -691,7 +705,24 @@ probeFor()
 # main c3b678bf). The always-on health shape= reading now says what tangled means (cyclic_files= at 1 in 20 of dep_files=) instead
 # of the nccd>2 rule it replaced: +36 B on every --deps answer. The cyclic_files= and containment_edges= readings ride only when
 # their attribute does (absent at 0) and add nothing on this cycle-free, Rust-free probe.
+# PINNED 2026-11-17 (lane abiarch-retire-register): ripwire.abi/v1 2020 (measured 2003) and ripwire.arch/v1 1490 (measured 1477). Neither
+# schema had a pin: the (U) sweep reaches neither verb (--abi is a sub-verb of --stray-content and its probe refuses on this
+# fixture; --arch= needs a rules file and is not probed), so their compact legends were bounded by nothing and, until this
+# lane, defined almost nothing (35 and 30 attribute names undefined). The (U-ABIARCH) arm below is their probe, over the corpora
+# test/lib/abiarchfixture.sh builds. The arch pin is the answer of a tree with no no-file-edge language; the clauses a Go file
+# adds are present-only and registered in test/legend_over_target.tsv, so the second arch probe passes as EXPLAINED, not as headroom.
+# RE-PINNED 2026-11-18 (lane dc-shown-vocab, the rule-3 cut vocabulary): ripwire.zoom/v1 410 -> 480 (measured 467,
+# was 394). The seven noun-first <noun>_shown= attributes became shown_<noun>= beside a <noun>_capped bit, and
+# shown_levels= moved OUT of the zoom verb row's prose INTO its own dictionary row that spells its companion
+# (levels_capped=1 deeper ones unprinted): +57 B on every --zoom answer. A test/legend_over_target.tsv row would be
+# the WRONG remedy and was deliberately not written: that registry explains a PRESENT-ONLY clause, and shown_levels=
+# rides EVERY --zoom answer, so registering it would assert something false. This file's own header says the honest
+# alternative is exactly this one-line re-pin. What the 57 B buys: under the tiering posture the DICTIONARY is the
+# authority -- a reader holding core plus a pack never receives a verb-legend string -- so a definition that lived
+# only in the zoom verb row was unresolvable for precisely the readers the 0.7.0 posture work is for.
 PIN_TABLE='
+ripwire.abi/v1                   2020  2003
+ripwire.arch/v1                  1490  1477
 ripwire.edit-check/v1             650   636
 ripwire.map/v1                   1140  1129
 ripwire.map-diff/v1              970   953
@@ -710,7 +741,7 @@ ripwire.naming-consistency/v1     630   620
 ripwire.comment-coherence/v1      460   445
 ripwire.cochange/v1               540   521
 ripwire.communities/v1           820   807
-ripwire.zoom/v1                  410   394
+ripwire.zoom/v1                  480   467
 ripwire.tree/v1                  310   300
 ripwire.seams/v1                  720   703
 ripwire.handoff/v1                600   589
@@ -780,9 +811,9 @@ pinFor()
 sdtCut="$( python3 - "$TMP/sdt.c" "$TMP/sdt.cut" <<'PY'
 import re, sys
 doc = open( sys.argv[1], encoding = "utf-8", errors = "replace" ).read()
-reading = " c sites_at=: its calls of the leaf name, any receiver, as file:line (p= is its def line); not proof each binds."
+reading = " c sites_at=: its calls of the leaf name, any receiver, as [file:]line (p=: def line, default file); not proof each binds."
 body = re.sub( r"<!--.*?-->", "", doc, flags = re.S )
-if not re.search( r'<c [^>]*sites_at="[^"]*:[0-9]', body ):
+if not re.search( r'<c [^>]*sites_at="[^"]*[0-9]"', body ):
     print( "NOPREMISE no caller row carries sites_at=" ); sys.exit( 0 )
 if doc.count( reading ) != 1:
     print( "NOPREMISE the sites_at= reading occurs %d times, not once" % doc.count( reading ) ); sys.exit( 0 )
@@ -818,9 +849,9 @@ fi
 catCut="$( python3 - "$TMP/cat.c" "$TMP/cat.cut" <<'PY'
 import re, sys
 doc = open( sys.argv[1], encoding = "utf-8", errors = "replace" ).read()
-reading = " <s sites_at=>: its calls of the leaf name, any receiver, as file:line (p= is its def line); not proof each binds."
+reading = " <s sites_at=>: its calls of the leaf name, any receiver, as [file:]line (p=: def line, default file); not proof each binds."
 body = re.sub( r"<!--.*?-->", "", doc, flags = re.S )
-if not re.search( r'<s [^>]*sites_at="[^"]*:[0-9]', body ):
+if not re.search( r'<s [^>]*sites_at="[^"]*[0-9]"', body ):
     print( "NOPREMISE no caller row carries sites_at=" ); sys.exit( 0 )
 if doc.count( reading ) != 1:
     print( "NOPREMISE the sites_at= reading occurs %d times, not once" % doc.count( reading ) ); sys.exit( 0 )
@@ -876,8 +907,9 @@ fi
 # (U-twin-expand) the pre-2026-10-08 ripwire.expand-file/v1 pin (360 B), kept (PROCESS rule 4): the same --expand=distance probe
 # with exactly the two lean-default readings cut out of a copy of the compact answer must still fit the OLD pin. The cut is
 # taken only when BOTH readings occur once; any other premise FAILs (a cut that removes nothing proves nothing).
-( cd "$REPO" && "$BIN" . --expand=distance --legend=compact >"$TMP/xft.c" 2>/dev/null </dev/null \
-  && "$BIN" . --expand=distance --legend=full >"$TMP/xft.full" 2>/dev/null </dev/null ); rcXft=$?
+# The probe is --expand=perimeter since 2026-11-17 (see the universe's --expand= row above: distance now serves the bundle).
+( cd "$REPO" && "$BIN" . --expand=perimeter --legend=compact >"$TMP/xft.c" 2>/dev/null </dev/null \
+  && "$BIN" . --expand=perimeter --legend=full >"$TMP/xft.full" 2>/dev/null </dev/null ); rcXft=$?
 xftCut="$( python3 - "$TMP/xft.c" "$TMP/xft.cut" <<'PY'
 import sys
 doc = open( sys.argv[1], encoding = "utf-8", errors = "replace" ).read()
@@ -894,7 +926,7 @@ print( sum( len( r.encode() ) for r in readings ) )
 PY
 )"
 if [ "$rcXft" -ne 0 ]; then
-    no "(U-twin-expand) --expand=distance exited $rcXft — the twin cannot measure"
+    no "(U-twin-expand) --expand=perimeter exited $rcXft — the twin cannot measure"
 else
     case "$xftCut" in
         NOPREMISE*) no "(U-twin-expand) expand-file twin cannot measure: ${xftCut#NOPREMISE }" ;;
@@ -1055,6 +1087,29 @@ if [ "$rcMni" -eq 0 ] && [ "$( leg schema "$TMP/mnoinv.c" )" = "ripwire.map/v1" 
 else
     no "(U-TWIN) --top-k=3 --no-inventory compact PROSE legend is '${mniLb:-none}' B (pin 910; exit $rcMni): $( leg legend "$TMP/mnoinv.c" | head -c 200 )"
 fi
+
+# (U-ABIARCH) the two XML verbs the universe sweep cannot reach, on their own corpora (see the PINNED 2026-11-17 note above the
+# pin table). Same assertions as a (U) row: the schema id, the compact PROSE legend against its pin, rows byte-identical to the
+# full dialect's. The exit code is compared with the full dialect's, never with 0: both corpora carry a real finding (exit 2).
+. "$ROOT/test/lib/abiarchfixture.sh"
+( export GIT_AUTHOR_NAME=ripwire GIT_AUTHOR_EMAIL=ripwire@example.invalid GIT_COMMITTER_NAME=ripwire GIT_COMMITTER_EMAIL=ripwire@example.invalid
+  export GIT_AUTHOR_DATE="2026-01-01T00:00:00Z" GIT_COMMITTER_DATE="2026-01-01T00:00:00Z"
+  aaf_abi_repo "$TMP/aa_abi" ); aaf_arch_tree "$TMP/aa_plain"; aaf_arch_tree "$TMP/aa_go" go
+abiarchArm(){   # LABEL DIR SCHEMA args...
+    local label="$1" dir="$2" schema="$3" rcC rcF lb pin; shift 3
+    ( cd "$dir" && "$BIN" . "$@" --no-cache >"$TMP/aa.c" 2>/dev/null </dev/null ); rcC=$?
+    ( cd "$dir" && "$BIN" . "$@" --no-cache --legend=full >"$TMP/aa.f" 2>/dev/null </dev/null ); rcF=$?
+    lb="$( leg prose "$TMP/aa.c" "$TMP/aa.f" )"; pin="$( pinFor "$schema" )"
+    if [ "$rcC" -ne "$rcF" ] || [ "$( leg schema "$TMP/aa.c" )" != "$schema" ] || [ -z "$pin" ] || [ -z "$lb" ] || [ "$lb" -le 0 ] 2>/dev/null; then
+        no "(U-ABIARCH) $label: exit $rcC (full $rcF), schema '$( leg schema "$TMP/aa.c" )' (want $schema), pin '${pin:-none}', prose '${lb:-none}' B"; return
+    fi
+    lt_gate "(U-ABIARCH) $label $schema compact PROSE legend [all comments $( leg bytes "$TMP/aa.c" ) B, full $( leg bytes "$TMP/aa.f" ) B]" "$schema" "$lb" "$pin" "$( leg bytes "$TMP/aa.c" )" "$LT_GUARD_COMPACT" "$TMP/aa.c"
+    leg payload "$TMP/aa.f" >"$TMP/aa.fpay"; leg payload "$TMP/aa.c" >"$TMP/aa.cpay"
+    if cmp -s "$TMP/aa.fpay" "$TMP/aa.cpay"; then ok "(U-ABIARCH) $label: rows byte-identical under compact"; else no "(U-ABIARCH) $label rows are NOT byte-identical under compact: $( cmp "$TMP/aa.fpay" "$TMP/aa.cpay" 2>&1 | head -c 120 )"; fi
+}
+abiarchArm "--stray-content --abi"               "$TMP/aa_abi"   ripwire.abi/v1  --stray-content --abi
+abiarchArm "--arch=rules.txt"                    "$TMP/aa_plain" ripwire.arch/v1 --arch=rules.txt
+abiarchArm "--arch=rules.txt (a Go file beside)" "$TMP/aa_go"    ripwire.arch/v1 --arch=rules.txt
 
 echo
 echo "=== (F) the DEFAULT is the default posture; --legend=full restores MORE legend over the SAME payload (L1) ==="
@@ -2124,9 +2179,9 @@ done
 # ── THE THIRD SWEEP (2026-09-12): the verbs #185's last agent listed but did not fix, each RUN before any reading landed ──
 # (D13) UNCONDITIONAL root vocabulary that the full legend defines and the compact document did not: --tree's files= (the
 # indexed corpus, beside the files_unlisted= its purpose already named), and --zoom's symbols=/isolated=/top_modules= (the
-# identity its full legend says reconciles exactly) and levels_shown=. They ride EVERY answer of their root, so each reading
+# identity its full legend says reconciles exactly) and shown_levels=. They ride EVERY answer of their root, so each reading
 # lives in that root's purpose line, where files_unlisted= and levels= already were: present exactly when the root is.
-# (D14)..(D16) CONDITIONAL fields, each a present-only term: --zoom's <module children=> (only a module AT the levels_shown=
+# (D14)..(D16) CONDITIONAL fields, each a present-only term: --zoom's <module children=> (only a module AT the shown_levels=
 # cut, so the row lowers the cut to 1 on test/chafix, a two-level hierarchy), rank_by=churn-decay's <recent n= of=> file rows
 # with <rc age_d= w=> (single-root only), and the map's absent-when-default row fields lpin=, overloads=, prov= (defined only
 # inside the always-on `<!-- ripwire v1` legend). test/declinefix and test/lpinfix are (D10)'s own corpora: their maps
@@ -2139,7 +2194,7 @@ done
 # Stopped here on the (U) 400 B pin, and defined in the fourth sweep (D20) below once the owner raised the pins to fit honest
 # definitions: --communities' drill= and isolated=.
 condPair D13 "--tree (files= on its root)" "$FIX" "--tree" tree:files
-condPair D13 "--zoom (its root's counts)" "$FIX" "--zoom" zoom:symbols zoom:isolated zoom:top_modules zoom:levels_shown
+condPair D13 "--zoom (its root's counts)" "$FIX" "--zoom" zoom:symbols zoom:isolated zoom:top_modules zoom:shown_levels
 [ -d "$ROOT/test/chafix" ] || no "(D14) fixture missing: test/chafix — its children= row would be vacuous"
 condPair D14 "--zoom --zoom-levels=1 over test/chafix (modules AT the depth cut)" "$ROOT/test/chafix" "--zoom --zoom-levels=1" module:children
 condPair D15 "--rank-by=churn-decay (the <recent> file rows)" "$REPO" "--rank-by=churn-decay" recent:of rc:age_d rc:w
@@ -2731,7 +2786,7 @@ echo "=== (S) STRUCTURAL: every conditional attribute the graphlegend.h family, 
 # fix: deleting the declined row, making pr_iters header-only, or dropping ignored_dirs' header read each went red on
 # exactly that name, and on nothing else (landing commit).
 # Population 4 does NOT see unconditional root vocabulary (--tree's files=, --zoom's symbols=/isolated=/top_modules=/
-# levels_shown=), nor a conditional element whose clause is not a marked field of that legend (--zoom's children=,
+# shown_levels=), nor a conditional element whose clause is not a marked field of that legend (--zoom's children=,
 # churn-decay's <recent>): (D13)..(D15) guard those. RED on 3c89ac0b: lpin=, overloads= and prov= FAILed. Shown able to fail
 # on the fix: deleting the prov row, making overloads head-only, or making lpin header-only each went red on exactly that
 # name, and on nothing else (landing commit).

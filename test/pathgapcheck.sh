@@ -1319,7 +1319,8 @@ done
 echo "(M) MCP path_between carries the same clause"
 # Two MCP legend postures (lean-answers): the unchanged assertions run on --mcp-legend=inline, the pre-posture spelling
 # where every answer carries its root facts on <path>; a TWIN runs the default session posture, whose answers after the
-# first are legend="ref" and carry their root facts on the closing <about …/> instead. Both must match the CLI.
+# first are legend="ref": the legend is gone and a closing <about legend="ref"/> points at it, while the root facts stay
+# on <path> (ref-posture-disclosure). Both must match the CLI, read from the ROOT alone.
 for MPOST in inline session; do
 python3 - "$BIN" "$TMP" "$MPOST" <<'PY'
 import json, re, subprocess, sys
@@ -1344,9 +1345,8 @@ for line in p.stdout.splitlines():
 def head( t ):
     m = re.search( r'<path [^>]*>', t )
     return m.group( 0 ) if m else ""
-def facts( t ):   # the root's facts: <path …>, plus a legend="ref" answer's closing <about …/> (where they move)
-    ab = re.search( r'<about [^>]*legend="ref"[^>]*/>', t )
-    return head( t ) + ( ab.group( 0 ) if ab else "" )
+def facts( t ):   # the root's facts: <path …> and nothing else. This read <path> PLUS the closing <about …/>, because the
+    return head( t )   # ref posture had moved them there; a fact that left the root now fails the comparison below.
 def pick( t, name ):
     m = re.search( r'\s' + name + r'="([^"]*)"', facts( t ) )
     return m.group( 1 ) if m else None

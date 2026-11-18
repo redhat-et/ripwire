@@ -50,7 +50,7 @@ Two limits apply to nearly everything here and are not repeated in every section
 
 **security — scan skill files for injection / exfiltration patterns (exit 2 = CRITICAL, 1 = WARN,** — [`--scan-skill`](#--scan-skillfile) · [`--scan-skills`](#--scan-skillsdir) · [`--force`](#--force)
 
-**knobs / modes** — [`--rank-by`](#--rank-bypagerankauthorityhubrrfchurnchurn-decay) · [`--in`](#--indir) · [`--format`](#--formatxmlcolumnarrows) · [`--format`](#--formatcandidates) · [`--legend`](#--legendfullcompact) · [`--legend-dict`](#--legend-dictroster) · [`--legend-have`](#--legend-havedictv) · [`--json`](#--json) · [`--limit`](#--limitn---offsetm) · [`--exclude`](#--excludesubstr) · [`--map-diff`](#--map-diff) · [`--cache`](#--cachepath) · [`--index-out`](#--index-outbase) · [`--no-cache`](#--no-cache) · [`--no-ignore`](#--no-ignore) · [`--max-file-size`](#--max-file-sizenkmg) · [`--max-memory`](#--max-memorynkmg) · [`--refetch`](#--refetch) · [`--scip`](#--scipindexscip) · [`--pin-census`](#--pin-censusfile) · [`--mcp`](#--mcp) · [`--mcp-legend`](#--mcp-legendwhen) · [`--mcp-tools`](#--mcp-toolslist) · [`--lsp`](#--lsp) · [`--listen`](#--listenhostport) · [`--mcp-token`](#--mcp-tokent) · [`--allow-remote-edits`](#--allow-remote-edits) · [`--eval-stray`](#--eval-strayfile) · [`--eval`](#--eval) · [`--eval-retrieval`](#--eval-retrieval) · [`--eval-mined`](#--eval-minedfile) · [`--eval-skills`](#--eval-skillsfile) · [`-h`](#-h---help) · [`-v`](#-v---version)
+**knobs / modes** — [`--rank-by`](#--rank-bypagerankauthorityhubrrfchurnchurn-decay) · [`--in`](#--indir) · [`--format`](#--formatxmlcolumnarrows) · [`--format`](#--formatcandidates) · [`--legend`](#--legendfullcompactdictlast) · [`--legend-dict`](#--legend-dictcorekey) · [`--legend-have`](#--legend-havehavehave) · [`--json`](#--json) · [`--limit`](#--limitn---offsetm) · [`--exclude`](#--excludesubstr) · [`--map-diff`](#--map-diff) · [`--cache`](#--cachepath) · [`--index-out`](#--index-outbase) · [`--no-cache`](#--no-cache) · [`--no-ignore`](#--no-ignore) · [`--max-file-size`](#--max-file-sizenkmg) · [`--max-memory`](#--max-memorynkmg) · [`--refetch`](#--refetch) · [`--scip`](#--scipindexscip) · [`--pin-census`](#--pin-censusfile) · [`--mcp`](#--mcp) · [`--mcp-legend`](#--mcp-legendwhen) · [`--mcp-tools`](#--mcp-toolslist) · [`--lsp`](#--lsp) · [`--listen`](#--listenhostport) · [`--mcp-token`](#--mcp-tokent) · [`--allow-remote-edits`](#--allow-remote-edits) · [`--eval-stray`](#--eval-strayfile) · [`--eval`](#--eval) · [`--eval-retrieval`](#--eval-retrieval) · [`--eval-mined`](#--eval-minedfile) · [`--eval-skills`](#--eval-skillsfile) · [`-h`](#-h---help) · [`-v`](#-v---version)
 
 ---
 
@@ -348,7 +348,7 @@ $ ./build/ripwire . --for="tree-sitter parse of a source file" --auto-bodies
 
 **Answers:** (with --for) skip the query-shape router and always rank by subtoken+body BM25 (with --for/--query) force plain subtoken+body BM25.
 
-Routing is now the DEFAULT: a deterministic, confidence-gated query-shape router picks name-exact BM25 when the query NAMES a symbol (identifier syntax, or every content word is a symbol name) else subtoken+body, and prints which/why in the header. It only routes with a query (the plain map is unaffected). --no-route restores the old behavior. A name-exact header also names its EVIDENCE: anchors: word(defining/file) per anchoring word, +N when N further definitions share that name, or word(syntax) when the word routed on camel/snake SHAPE and names nothing. Paths deeper than two segments print top/.../basename. Discount a one-use test helper yourself. Routing also carries the QUERY-SHAPE document demotion: when the task text parses as a stack trace, sanitizer report or compiler diagnostic, or as a pasted issue-template form, the DOCUMENT tier scores down (repo meta-prose - issue templates, CONTRIBUTING, changelogs - twice as hard) and route= names the shape, its evidence and both factors. Demotion, never exclusion, and the mention anchor still lifts a document the task NAMES. --no-route has no route= to disclose it in, so it does not demote either. Routing also puts CHANGE LOGS (CHANGELOG*, CHANGES*, HISTORY*, NEWS*, RELEASES*, release-notes/) and TRANSLATIONS of a default-language doc (README.zh-CN.md beside README.md, docs/ja/x.md beside docs/en/x.md) LAST in doc-mention surfacing, lifted to x0.35 of the usual height; their own match score is untouched. A task about changes (added, changed, removed, release, version...), about translation, or naming the file or its language tag keeps the usual lift; --no-route turns it off. route= is a CODE: name-exact(X) = the task names symbol X (the anchors: clause after it is the evidence); subtoken+body = the conceptual ranker over names and bodies; subtoken+body:broad = a one- or two-word query where plain rg may also win; subtoken+body:declined(word;N-carriers,M-defs) = a name hit refused because the word is a common name (N names carry it, M definitions); a descriptive subject's plain words beside an exact symbol append "; dropped: word(N-defs) ..." (they are not anchors; ask for a word alone to read it as a name), and so do a question's call/invoke words beside an identifier with a source definition (the question words then do not rank either); a name-exact anchor no source file defines appends "; anchor has no source definition (...)" and confidence= reads low (with two or more such definitions the words rank instead: subtoken+body, ", not committed: ranked as words; hint anchors: ..."); so does one whose ranked head is neither the anchor nor in its file, appending "; anchor is not the ranked head (r=1 is X in P)". A conceptual route whose subject names one function carries <callers by="subject">, and so does a sentence that `backticks` one function and asks what calls or depends on it; a sentence that spells code and asks for callers or a path but gets no such block ends with <reask next="--callers=X"/> (or --path=A,B), the bare call that answers it. A shape demotion appends "; doc tier demoted (...)". On the rows, sc= is the enclosing scope and the full id is p::sc::n (p= of the row or its <f>) - the spelling --expand/--callers/--impact/--uses accept; a member row folds its stored scope into n=Owner.name where the index defines that scope as a type or module (Owner::name C/C++/Rust, Owner#name Ruby): id p::n.
+Routing is now the DEFAULT: a deterministic, confidence-gated query-shape router picks name-exact BM25 when the query NAMES a symbol (identifier syntax, or every content word is a symbol name) else subtoken+body, and prints which/why in the header. It only routes with a query (the plain map is unaffected). --no-route restores the old behavior. A name-exact header also names its EVIDENCE: anchors: word(defining/file) per anchoring word, +N when N further definitions share that name, or word(syntax) when the word routed on camel/snake SHAPE and names nothing. Paths deeper than two segments print top/.../basename. Discount a one-use test helper yourself. Routing also carries the QUERY-SHAPE document demotion: when the task text parses as a stack trace, sanitizer report or compiler diagnostic, or as a pasted issue-template form, the DOCUMENT tier scores down (repo meta-prose - issue templates, CONTRIBUTING, changelogs - twice as hard) and route= names the shape, its evidence and both factors. Demotion, never exclusion, and the mention anchor still lifts a document the task NAMES. --no-route has no route= to disclose it in, so it does not demote either. Routing also puts CHANGE LOGS (CHANGELOG*, CHANGES*, HISTORY*, NEWS*, RELEASES*, release-notes/) and TRANSLATIONS of a default-language doc (README.zh-CN.md beside README.md, docs/ja/x.md beside docs/en/x.md) LAST in doc-mention surfacing, lifted to x0.35 of the usual height; their own match score is untouched. A task about changes (added, changed, removed, release, version...), about translation, or naming the file or its language tag keeps the usual lift; --no-route turns it off. route= is a CODE: name-exact(X) = the task names symbol X (the anchors: clause after it is the evidence); subtoken+body = the conceptual ranker over names and bodies; subtoken+body:broad = a one- or two-word query where plain rg may also win; subtoken+body:declined(word;N-carriers,M-defs) = a name hit refused because the word is a common name (N names carry it, M definitions); a descriptive subject's plain words beside an exact symbol append "; dropped: word(N-defs) ..." (they are not anchors; ask for a word alone to read it as a name), and so do a question's call/invoke words beside an identifier with a source definition (the question words then do not rank either); a name-exact anchor no source file defines appends "; anchor has no source definition (...)" and confidence= reads low (with two or more such definitions the words rank instead: subtoken+body, ", not committed: ranked as words; hint anchors: ..."); so does one whose ranked head is neither the anchor nor in its file, appending "; anchor is not the ranked head (r=1 is X in P)". A conceptual route whose subject names one function carries <callers by="subject">, and so does a sentence that `backticks` one function and asks what calls or depends on it; a sentence that spells code and asks for callers or a path but gets no such block ends with <reask next="--callers=X"/> (--impact=X when it asks what a CHANGE reaches; or --path=A,B), the bare call that answers it. A hand-off to --callers/--impact (that re-ask, the <graph_verb> callers block, the <callers> hop's next=) counts the verb's rows first: when its default call would list only a first page, no page is appended and the hand-off says windows="1", next_total=N (the verb's own count, a floor) and next= the one call that lists every row (the same rows in columnar form, limit N); a verb that does not window is handed off as before (RIPWIRE_NO_WINDOW_HANDOFF=1 turns this off). A shape demotion appends "; doc tier demoted (...)". On the rows, sc= is the enclosing scope and the full id is p::sc::n (p= of the row or its <f>) - the spelling --expand/--callers/--impact/--uses accept; a member row folds its stored scope into n=Owner.name where the index defines that scope as a type or module (Owner::name C/C++/Rust, Owner#name Ruby): id p::n.
 
 **Try it**
 
@@ -795,7 +795,7 @@ $ ./build/ripwire . --around=rankGraphTeleport
 
 **Answers:** show SYM's direct callers (1-hop in-edges) who calls SYM (1-hop in-edges).
 
-file:name disambiguates a same-named symbol across files (like --around/--lego); Scope::name picks one scope's definition — the sym= spelling edit-check prints resolves everywhere. Each caller row's sites_at= lists its call sites as pasteable file:line tokens (16 at most: sites_total=) A call the resolver DECLINED to bind whose candidates include SYM is a <dc in= p= via="declined"> row: a call site, never an edge or a count= row (16 at most, file-first: dc_shown=, dc_next=)
+file:name disambiguates a same-named symbol across files (like --around/--lego); Scope::name picks one scope's definition — the sym= spelling edit-check prints resolves everywhere. Each caller row's sites_at= lists its call sites as lines in its p= file, else file:line (16 at most: sites_total=) A call the resolver DECLINED to bind whose candidates include SYM is a <dc in= p= via="declined"> row: a call site, never an edge or a count= row (16 at most, file-first: shown_dc=, dc_next=). A windowed answer (has_more="1") names in all_next= the ONE call that lists every caller, in columnar form
 
 **Try it**
 
@@ -812,7 +812,7 @@ $ ./build/ripwire . --callers=DoesNotExist
 **Caveats (stated by the binary):**
 
 - file:name disambiguates a same-named symbol across files (like --around/--lego);
-- Each caller row's sites_at= lists its call sites as pasteable file:line tokens (16 at most: sites_total=) A call the resolver DECLINED to bind whose candidates include SYM is a <dc in= p= via="declined"> row: a call site, never an edge or a count= row (16 at most, file-first: dc_shown=, dc_next=)
+- Each caller row's sites_at= lists its call sites as lines in its p= file, else file:line (16 at most: sites_total=) A call the resolver DECLINED to bind whose candidates include SYM is a <dc in= p= via="declined"> row: a call site, never an edge or a count= row (16 at most, file-first: shown_dc=, dc_next=).
 
 ### `--callees=SYM`
 
@@ -1037,7 +1037,7 @@ $ ./build/ripwire . --connect=rankGraphTeleport,runEval,getIndex
 
 **Answers:** show everything that reaches SYM — the transitive blast radius before a change — the indexed symbols that reach SYM (a floor, see counts_floor).
 
-file:name disambiguates like --callers rows run nearest first: d= is the hop depth (1 = a direct caller; printed where it changes), PageRank order within a depth; by_depth=k:n on the root counts reaches= per depth, so a cut drops the deepest first importers= is a SECOND, weaker reach beside it: the files that directly include/import a file defining SYM, emitted as <f via="import" lazy="0|1"> rows (format=columnar carries the count only; --limit sizes it). NEVER added to reaches= — files and symbols are different units, and an importer may use a different symbol from that file, or none at all. no_file_edges="go" on the root: SYM's file is in a language this build almost never resolves imports for, so importers= is a floor. lazy="1": every one of that importer's edges is written inside a closure — a TS/JS require()/import() inside a function body, a Ruby constant receiver or argument inside a method/lambda/block, a Ruby autoload or rescue class — not at load time: still a real dependency, weaker than a top-level one a CUT symbol window opens with <files files= shown_files=>: the WHOLE reach set by file (rf syms= d=, 20 by default, --limit sizes it); an umbrella header's importers are a count (importers_umbrella="1") SYM a class/struct/named type/interface: the walk also starts from every symbol that NAMES it in a type position (parser-read; C, C++, ObjC, Go, Rust, Java, TS/JS, Python) at d=1; <files> is emitted on every type impact, rf d="0" the defining file, via="type" a file reached only that way, type_users= the count; with no --limit the listing holds every file a type mention reaches (up to 200), not the 20
+file:name disambiguates like --callers rows run nearest first: d= is the hop depth (1 = a direct caller; printed where it changes), PageRank order within a depth; by_depth=k:n on the root counts reaches= per depth, so a cut drops the deepest first A windowed answer (has_more="1") names in all_next= the ONE call that lists every row of total=, in columnar form; --limit sizes the declined call sites too: where that call holds more of them than rows it says shown_dc= (of declined_calls=), and its dc_next= lists them all importers= is a SECOND, weaker reach beside it: the files that directly include/import a file defining SYM, emitted as <f via="import" lazy="0|1"> rows (format=columnar carries the count only; --limit sizes it). NEVER added to reaches= — files and symbols are different units, and an importer may use a different symbol from that file, or none at all. no_file_edges="go" on the root: SYM's file is in a language this build almost never resolves imports for, so importers= is a floor. lazy="1": every one of that importer's edges is written inside a closure — a TS/JS require()/import() inside a function body, a Ruby constant receiver or argument inside a method/lambda/block, a Ruby autoload or rescue class — not at load time: still a real dependency, weaker than a top-level one a CUT symbol window opens with <files files= shown_files=>: the WHOLE reach set by file (rf syms= d=, 20 by default, --limit sizes it); an umbrella header's importers are a count (importers_umbrella="1") SYM a class/struct/named type/interface: the walk also starts from every symbol that NAMES it in a type position (parser-read; C, C++, ObjC, Go, Rust, Java, TS/JS, Python) at d=1; <files> is emitted on every type impact, rf d="0" the defining file, via="type" a file reached only that way, type_users= the count; with no --limit the listing holds every file a type mention reaches (up to 200), not the 20
 
 **Try it**
 
@@ -2722,7 +2722,7 @@ $ ./build/ripwire . --community=0
 
 **Answers:** show the nested module hierarchy plus the bridges between modules NESTED module hierarchy (multi-level Louvain) + cross-module bridges;
 
---zoom --mermaid = nested diagram. Default window: the top 2 levels (levels_shown=; a module at the cut carries children= for its unprinted child modules; --zoom-levels=N prints N, 0 = all) over the 40 largest top modules (shown=/capped=/next_offset=, next= pastes the next page; --limit=N/--offset=M window them)
+--zoom --mermaid = nested diagram. Default window: the top 2 levels (shown_levels=; a module at the cut carries children= for its unprinted child modules; --zoom-levels=N prints N, 0 = all) over the 40 largest top modules (shown=/capped=/next_offset=, next= pastes the next page; --limit=N/--offset=M window them)
 
 **Try it**
 
@@ -3371,7 +3371,7 @@ $ ./build/ripwire . --edit-plan=<scratch>/aux/edit_plan.json --apply
 
 **Answers:** "can I delete this?" — one call joining callers, blast radius, tests and history "can I delete this?" — ONE call composing signals the tool already computes for one already-resolved SYM: 1-hop callers=, the transitive --impact blast radius (impact_reaches=), every --uses read/write/import/call/extends site (uses=), how much of the blast radius the tested= lens covers (tested_self=/radius_tested=/radius_untested=), and --dead-code's own zero-caller/internal-linkage shape at defs=1 (dead_code_candidate=).
 
-ambiguous_callers= names callers whose own calls include an ambiguously-resolved one (g.ambOut) — a caveat, not a count of proven-wrong edges. FACTS only: risk= names what was found — none-found (zero callers AND zero uses), possible-callers (none of either, but a call the resolver declined could have meant SYM: its <dc> rows), hedged (none of either, but a name-template lookup, a getattr with an f-string or this['compile' + t], could name SYM: its <pd> rows, or <pdw> for a template too wide to list candidates for), untested-radius (a radius exists and none of it is test-covered), tests-only (every symbol in the radius is a test definition), or uses-exist (a radius exists and some of it is tested) — never a go/no-go verdict; unmodelled when nothing was found for a kind used by reading or naming it (a variable, class, struct) whose uses those counts cannot see; contract when nothing was found for an interface or abstract method with no body, whose implementors' same-named bodies it also reads (impls=K counts them). callers_floor=/uses_floor= mark a count the index holds evidence of a miss for, and next= is the call that lists the rest. A caller row's sites_at= is its call sites as file:line tokens (p= stays the line where the caller is defined).
+ambiguous_callers= names callers whose own calls include an ambiguously-resolved one (g.ambOut) — a caveat, not a count of proven-wrong edges. FACTS only: risk= names what was found — none-found (zero callers AND zero uses), possible-callers (none of either, but a call the resolver declined could have meant SYM: its <dc> rows), hedged (none of either, but a name-template lookup, a getattr with an f-string or this['compile' + t], could name SYM: its <pd> rows, or <pdw> for a template too wide to list candidates for), untested-radius (a radius exists and none of it is test-covered), tests-only (every symbol in the radius is a test definition), or uses-exist (a radius exists and some of it is tested) — never a go/no-go verdict; unmodelled when nothing was found for a kind used by reading or naming it (a variable, class, struct) whose uses those counts cannot see; contract when nothing was found for an interface or abstract method with no body, whose implementors' same-named bodies it also reads (impls=K counts them). callers_floor=/uses_floor= mark a count the index holds evidence of a miss for, and next= is the call that lists the rest. A caller row's sites_at= is its call sites as lines in its p= file, else file:line (p= stays the line where the caller is defined).
 
 **Try it**
 
@@ -3728,7 +3728,7 @@ $ ./build/ripwire . --whereis=rankGraphTeleport
 ... [22 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--whereis-full-text`, `--whereis-listing`, `--with-history`, `--limit`
+**Shaped by:** `--whereis-full-text`, `--whereis-listing`, `--with-history`, `--legend`, `--limit`
 
 **Caveats (stated by the binary):**
 
@@ -4551,7 +4551,7 @@ $ ./build/ripwire . --rank-by=churn-decay --since=HEAD~4 --exclude=test --exclud
 
 **Answers:** choose the output shape for the flat list verbs output shape for the FLAT list verbs (--callers/--callees/--uses/--impact): xml (default, byte-identical) or columnar (a <paths> table + parallel arrays: fields= path,name,line,kind on --callers/--callees/--impact, path,line,role,in_id on --uses — the emitted block's own legend states the zip/n=/&#44;-escape contract;
 
-~15-60% fewer tokens on multi-row results, by de-duplicating the repeated per-row markup + paths; results of a few rows can be LARGER — the paths/cols scaffold has a fixed cost). rows is an alias for columnar. Any OTHER verb refuses (exit 1) — it has no row list to re-encode. Map is unaffected.
+~15-60% fewer tokens on multi-row results, by de-duplicating the repeated per-row markup + paths; results of a few rows can be LARGER — the paths/cols scaffold has a fixed cost). rows is an alias for columnar. Any OTHER verb refuses (exit 1) — it has no row list to re-encode. Map is unaffected. More than 16 declined call sites (<dc>) ride as ONE <dcols> block of the same parallel arrays (path indexes <paths>); 16 or fewer stay rows.
 
 **Try it**
 
@@ -4585,11 +4585,11 @@ $ ./build/ripwire . --callers=rankGraphTeleport --format=bogus
 
 **Shaped by:** `--top-k`, `--for`, `--pack-signatures`, `--json`, `--limit`
 
-### `--legend=full|compact`
+### `--legend=full|compact|dict|last`
 
 **Answers:** legend posture for every XML verb — compact is the default;
 
-full restores the prose output legend posture for EVERY XML verb. The DEFAULT is compact: the legend is a FIXED ~3 KB of prose per call in its full form, so its share is a function of ANSWER SIZE, not of the verb: at least 40% of a small --callers/--uses/--impact/--affected answer (and more on --callees and --edit-check), a little of a large --for bundle — and the callers who pay it are agents, scripts and harnesses making repeated calls. READING ONE MAP AS A HUMAN, or need a definition's reasoning (a term you do not recognise, a floor or cap explained)? pass --legend=full: it restores the full prose legend, byte-identical to the default of 0.6.1 and earlier. compact keeps every row byte and every data/completeness attribute (counts_floor= capped= shown= total= has_more= next_offset= est_tokens= at= root= graph_ambiguous= …), adds a versioned schema id on the root (schema="ripwire.<verb>/v1") and replaces the explanatory prose with ONE legend defining exactly the attributes the answer carries — the meanings live here and in the full legend. DATA comments stay (the map header, pack-task's body-omitted rows, +more). Per call this drops 2.8-5.8 KB on the navigation verbs (--edit-check's legend 7.4 KB -> 0.9 KB). --for compacts too (ripwire.for/v1 header); under --token-budget it never costs a row --legend=full would keep, unless its own header is the larger one and the row pays for <sigs next=> to fit. The MCP twin is the argument legend, compact by default there as well, legend:"full" restores the prose. Runs with nothing to compact ignore the default; an ASKED --legend=compact refuses there, naming the verb: prose/markdown/JSON answers (--situ --recall --report --mermaid --html --plan-lanes --sarif --eval* --json), where --legend=full is a no-op, and the writers and servers (edit verbs, --note-add, --quality-baseline/--quality-ack, --index-out, --export, the server transports), which refuse either posture. ref is the MCP server's SESSION posture, not a CLI one: once a session reads the resource ripwire://legend-dict, answers list rows first, carry each definition once per session and end with <about legend="ref" dict= dictv=/>. A CLI run has no session to hold a definition, so --legend=ref refuses; --legend-dict prints them all.
+dict drops the prose for a pointer; full restores the long form; last puts the ANSWER before the legend --legend=dict (item D, 2026-11-17) drops the prose legend of ONE TIER — the core plus this answer's own verb pack — and names that tier: every root attribute stays exactly where it was, and legend="dict" dict="ripwire --legend-dict=KEY" dictv= is added, so one bounded read (1.5-3.8 KB, not the 131 KB dictionary) resolves everything it left out and its line 1 carries the have= for your next call. A definition outside that tier stays in the answer. Until 2026-11-18 it dropped ALL 1,157 definitions and pointed at the whole dictionary, which read 577 B SHORTER than the honest answer on cpython --impact=PyObject_Str (7,219 B against 7,796 B) — bytes borrowed from the reader at 34x. Cannot combine with --legend-have=: that is two postures for one answer. Lossless — 79 of 79 reduced answers byte-identical outside the legend, -8.7% to -57.6% by verb. It is OPT-IN rather than the default because the default flip reds 89 gates on one contract (every attribute defined in ITS OWN answer's legend); the dictionary-backed contract lands first. Measured first: the legend is 531..4,305 B per answer (median 1,796) — a near-FIXED tax, 14.0% of a --for bundle but 62.6% of a --whereis answer — and 93% of every clause emitted had already been sent to the reader. At a 2 KB budget it cost 36 points of symbol-grain completeness and ALL of the item grain's. --legend=compact is the OPT-OUT and reproduces the pre-item-D default byte for byte; nothing is dropped from an answer, only the prose that repeats itself. output legend posture for EVERY XML verb. compact: the legend is a FIXED ~3 KB of prose per call in its full form, so its share is a function of ANSWER SIZE, not of the verb: at least 40% of a small --callers/--uses/--impact/--affected answer (and more on --callees and --edit-check), a little of a large --for bundle — and the callers who pay it are agents, scripts and harnesses making repeated calls. READING ONE MAP AS A HUMAN, or need a definition's reasoning (a term you do not recognise, a floor or cap explained)? pass --legend=full: it restores the full prose legend, byte-identical to the default of 0.6.1 and earlier. compact keeps every row byte and every data/completeness attribute (counts_floor= capped= shown= total= has_more= next_offset= est_tokens= at= root= graph_ambiguous= …), adds a versioned schema id on the root (schema="ripwire.<verb>/v1") and replaces the explanatory prose with ONE legend defining exactly the attributes the answer carries — the meanings live here and in the full legend. DATA comments stay (the map header, pack-task's body-omitted rows, +more). Per call this drops 2.8-5.8 KB on the navigation verbs (--edit-check's legend 7.4 KB -> 0.9 KB). --for compacts too (ripwire.for/v1 header); under --token-budget it never costs a row --legend=full would keep, unless its own header is the larger one and the row pays for <sigs next=> to fit. The MCP twin is the argument legend, compact by default there as well, legend:"full" restores the prose. Runs with nothing to compact ignore the default; an ASKED --legend=compact refuses there, naming the verb: prose/markdown/JSON answers (--situ --recall --report --mermaid --html --plan-lanes --sarif --eval* --json), where --legend=full is a no-op, and the writers and servers (edit verbs, --note-add, --quality-baseline/--quality-ack, --index-out, --export, the server transports), which refuse either posture. ref is the MCP server's SESSION posture, not a CLI one: once a session reads the resource ripwire://legend-dict, answers list rows first, carry each definition once per session and end with <about legend="ref" dict= dictv=/>. A CLI run has no session to hold a definition, so --legend=ref refuses; --legend-dict prints them all.
 
 **Try it**
 
@@ -4608,19 +4608,19 @@ $ ./build/ripwire . --quality-delta --legend=full
 ... [23 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--legend-have`
+**Shaped by:** `--legend-dict`, `--legend-have`
 
 **Caveats (stated by the binary):**
 
+- Cannot combine with --legend-have=: that is two postures for one answer.
 - READING ONE MAP AS A HUMAN, or need a definition's reasoning (a term you do not recognise, a floor or cap explained)? pass --legend=full: it restores the full prose legend, byte-identical to the default of 0.6.1 and earlier.
 - under --token-budget it never costs a row --legend=full would keep, unless its own header is the larger one and the row pays for <sigs next=> to fit.
-- ref is the MCP server's SESSION posture, not a CLI one: once a session reads the resource ripwire://legend-dict, answers list rows first, carry each definition once per session and end with <about legend="ref" dict= dictv=/>.
 
-### `--legend-dict[=roster]`
+### `--legend-dict[=core|KEY]`
 
-**Answers:** print the session legend dictionary, or with =roster the attributes it defines.
+**Answers:** print the legend dictionary, or one TIER of it to hold with --legend-have= Bare: the whole dictionary the MCP server serves as ripwire://legend-dict/full, one definition per line, headed by its dictv= (FNV-1a 64 of the lines).
 
-Prints the dictionary the MCP server serves as ripwire://legend-dict/full: one definition per line, headed by its dictv= (FNV-1a 64 of the lines, the version a ref answer's <about dictv=> names). =roster lists the completeness attributes it defines (attr, element, source), the roster test/legendrefcheck.sh reads. Answered wherever it stands on the command line; nothing else runs.
+=core: the 13 definitions every ref answer leans on (about 1.5 KB). =KEY, a schema key such as callers or impact: the core plus that verb's PACK, the definitions at least a third of its measured answers carried (+0.4 to +3.5 KB; census=0 means none was measured and the text is the core alone). Line 1 of a tier carries have=, the value --legend-have= takes; it hashes exactly the entries= lines after it. =tiers lists every tier (name, have=, entries, bytes, census); =roster the completeness attributes the dictionary defines; =index every entry by what it defines. Answered wherever it stands; nothing else runs.
 
 **Try it**
 
@@ -4628,7 +4628,7 @@ _The session legend dictionary the MCP server serves as ripwire://legend-dict/fu
 
 ```
 $ ./build/ripwire . --legend-dict
-ripwire legend dictionary ripwire.dict/v1 dictv=bb54dcf6ebdab4a1 entries=1130
+ripwire legend dictionary ripwire.dict/v1 dictv=3a03a2c74f654d09 entries=1164
 <about legend="ref" dict= dictv=>: the answer's rows come first; its root keeps only task= changed= from= to=, and this LAST child carries every other root attribute unchanged (schema= included); legend="ref": a definition is sent once per session (this dictionary's core, or the first answer that ne … [line truncated: 83 more bytes on this line]
 schema=ripwire.KEY/v1: the line ripwire.KEY/v1 below reads the answer's rows
 window: shown= total= capped= has_more= next_offset= offset= limit= page a list (capped=1 cut; next_offset= pastes as offset=)
@@ -4647,15 +4647,17 @@ ripwire.pack-top-n/v1 <ctx>: the ranked map plus <src p=> bodies of the top-N sy
 
 **Shaped by:** `--legend`, `--legend-have`
 
-### `--legend-have=DICTV`
+### `--legend-have=HAVE[,HAVE]`
 
-**Answers:** you already hold that legend dictionary (--legend-dict prints its dictv=), so this answer takes the ref posture: rows and identity on the root, every other attribute on a trailing <about legend="ref" dict= dictv=/>, and no legend prose.
+**Answers:** say which legend tiers you HOLD;
 
-Lossless -- nothing is dropped, only moved. Measured -30.4 % over 80 recorded answers (-8 % to -57 % by verb). A version that is not this binary's is REFUSED, naming both.
+their definitions are left out of the answer you HOLD those legend tiers: every line `ripwire --legend-dict=core` (or =KEY) printed, read by you. HAVE is the have= on that text's line 1; several join with commas. The answer takes the ref posture: rows first, the root unchanged, a closing <about legend="ref" have="core" …/> naming what was assumed. A definition you hold is left out; one you do NOT hold stays in THIS answer, in a comment after its rows — nothing is ever left to a dictionary you were only pointed at. The flag is an ASSERTION the binary cannot check: have= echoes argv, not receipt. Measured on 453 answers of 12 verbs, five corpora: the core repays in 11 calls (9 over the 388 that are not --for); a pack within 3 calls of its verb; core + the verb's pack keeps 86 % of what holding everything saves. --for answers are not reduced (0 of 65), and say so on stderr. Under about 10 calls pass nothing. REFUSED: an empty value; any value that is no tier of this binary, even beside a valid one; --mcp/--listen/--lsp; --legend=full. The whole dictionary's dictv= is a valid HAVE too (have="full"), about 130 KB and about 130 calls to repay.
+
+**Shaped by:** `--legend`, `--legend-dict`
 
 **Caveats (stated by the binary):**
 
-- A version that is not this binary's is REFUSED, naming both.
+- The flag is an ASSERTION the binary cannot check: have= echoes argv, not receipt.
 
 ### `--json`
 
@@ -5023,7 +5025,7 @@ $ ./build/ripwire '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' '{"jso
 ... [30 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--no-stable`, `--no-redact`, `--agent`, `--mcp-tools`, `--lsp`, `--listen`
+**Shaped by:** `--no-stable`, `--no-redact`, `--agent`, `--legend-have`, `--mcp-tools`, `--lsp`, `--listen`
 
 **Caveats (stated by the binary):**
 
@@ -5079,6 +5081,8 @@ $ ./build/ripwire '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' '{"jso
 
 saved-state answers, UTF-8 positions, counts are floors. Refuses --mcp/--listen (one protocol per stdin).
 
+**Shaped by:** `--legend-have`
+
 **Caveats (stated by the binary):**
 
 - saved-state answers, UTF-8 positions, counts are floors.
@@ -5090,7 +5094,7 @@ saved-state answers, UTF-8 positions, counts are floors. Refuses --mcp/--listen 
 
 Binds 127.0.0.1 by default (bare PORT = loopback); one listener serves ONE workspace fixed at startup. A non-loopback host (e.g. 0.0.0.0:8080) REQUIRES --mcp-token and refuses to start without it. No TLS — reverse-proxy it.
 
-**Shaped by:** `--no-stable`, `--lsp`, `--allow-remote-edits`
+**Shaped by:** `--no-stable`, `--legend-have`, `--lsp`, `--allow-remote-edits`
 
 **Caveats (stated by the binary):**
 

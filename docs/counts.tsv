@@ -3,16 +3,16 @@
 # re-takes it from the tree; `check` compares it with the tree. A feature PR leaves it alone, which is what keeps
 # two open PRs that each add a gate or a cap from conflicting on a total.
 taken	2026-11-18
-gates.scripts	839
+gates.scripts	854
 limits.boundary	46
 limits.caps	440
 limits.constants	450
-limits.disclosing	286
+limits.disclosing	288
 limits.files	149
 limits.indexing	51
 limits.output	46
 limits.parameters	10
-limits.silent	154
+limits.silent	152
 tuning.constexpr_live	12
 tuning.declarations	318
 tuning.duplicated	`kRowCap`

@@ -27,6 +27,7 @@
 #include "pageview.h"       // LB-G: pageWindow / effectiveRowCap / pagingDisclosure — the ONE paging vocabulary
 #include "editcheckdecl.h"   // the C/C++ declaration/definition identity: editCheckTieDeclaration / editCheckDeclDefaults
 #include "valuerefs.h"      // CALLSITE-AT: VrRender / vrPath — the one root-relative file spelling a site token shares with <vr> rows
+#include "sitetokens.h"     // SITES-SHORT: siteTokensFor — a site in the row's own file is a bare line, any other the full file:line
 
 #include <algorithm>
 #include <compare>
@@ -939,20 +940,29 @@ inline std::span<const CallSiteAt> callSitesOf( std::span<const CallSiteAt> site
     return { lo, hi };
 }
 
-// One caller's sites as pasteable `file:line` tokens, ascending, at most kCallSitesPerRowCap of them (pageview.h: a
-// runaway guard; the cut is disclosed by sites_total= and the uses verb lists the rest). `pathOf( fileId )` spells the file
-// exactly as the row's own p= does (valuerefs.h vrPath: root-relative on a single root). Unescaped: each dialect escapes its own way.
+// One caller's sites as tokens, ascending, at most kCallSitesPerRowCap of them (pageview.h: a runaway guard; the cut is
+// disclosed by sites_total= and the uses verb lists the rest). SITES-SHORT (sitetokens.h): a site whose file, spelled by
+// vrPath exactly as the row's own p= spells the caller's (root-relative on a single root), EQUALS that p= file is the bare
+// line; any other is the full `file:line`. The comparison is of the two printed strings, so it holds whatever put the site
+// there. The row is the slice's own caller (callSitesOf hands over one caller's sites; its p= is that symbol's file).
+// Unescaped: each dialect escapes its own way.
 static_assert( kCallSitesPerRowCap == 16, "compactlegend.h's sites_total= readings spell this cap as 16: change both together" );
 inline std::vector<std::string> callSiteTokens( const IngestResult& ing, std::span<const CallSiteAt> mine, const VrRender& rr )
 {
-    std::vector<std::string> tokens;
+    if( mine.empty() )
+    {
+        return {};
+    }
+    EXPECTS( mine.front().caller < ing.symbols.size() && mine.back().caller == mine.front().caller, "one indexed caller's slice" );
     const std::size_t        shown = std::min( mine.size(), kCallSitesPerRowCap );
-    tokens.reserve( shown );
+    std::vector<SpelledSite> spelled;
+    spelled.reserve( shown );
     for( std::size_t i = 0; i < shown; ++i )
     {
-        tokens.push_back( vrPath( ing, mine[i].fileId, rr ) + ":" + std::to_string( mine[i].line ) );
+        spelled.emplace_back( vrPath( ing, mine[i].fileId, rr ), mine[i].line );
     }
-    ENSURES( tokens.size() <= kCallSitesPerRowCap, "the per-row site cap holds" );
+    std::vector<std::string> tokens = siteTokensFor( vrPath( ing, ing.symbols[ mine.front().caller ].fileId, rr ), spelled );
+    ENSURES( tokens.size() == shown && tokens.size() <= kCallSitesPerRowCap, "one token per shown site, and the per-row site cap holds" );
     return tokens;
 }
 
@@ -986,8 +996,8 @@ inline RowCallSites rowCallSites( const IngestResult& ing, std::span<const NodeI
     return out;
 }
 
-// The XML row attributes for one caller: ` sites_at="f:l f:l"` (space-separated, XML-escaped) plus ` sites_total="N"` only when
-// the list was cut. "" when the pass found no site in this caller (the attribute is never printed empty).
+// The XML row attributes for one caller: ` sites_at="l l f:l"` (space-separated, XML-escaped; sitetokens.h: a bare line is in
+// the row's own p= file) plus ` sites_total="N"` only when the list was cut. "" when the pass found no site in this caller (the attribute is never printed empty).
 inline std::string callSitesAttrXml( const std::vector<std::string>& tokens, std::size_t total )
 {
     if( tokens.empty() )
@@ -1009,7 +1019,8 @@ inline std::string callSitesAttrXml( const std::vector<std::string>& tokens, std
     return out;
 }
 
-// The JSON twin (CLI --json rows and the MCP calledBy rows): `,"sites_at":["f:l",..]` plus `,"sites_total":N` only when cut.
+// The JSON twin (CLI --json rows and the MCP calledBy rows): `,"sites_at":["l","f:l",..]` (the same tokens, so a bare line
+// is a string too) plus `,"sites_total":N` only when cut.
 inline std::string callSitesKeyJson( const std::vector<std::string>& tokens, std::size_t total )
 {
     if( tokens.empty() )

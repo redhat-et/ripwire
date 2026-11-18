@@ -18,7 +18,9 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdlib>
 #include <iterator>
+#include <span>
 #include <string_view>
 
 namespace rw
@@ -70,6 +72,20 @@ inline const Row* findSortedByField( const Table& rows, Key Row::*field, const W
 {
     const auto it = std::lower_bound( std::begin( rows ), std::end( rows ), wanted, [field]( const Row& r, const Wanted& w ) { return r.*field < w; } );
     return it != std::end( rows ) && ( *it ).*field == wanted ? &*it : nullptr;
+}
+
+// A test hook's one-of-N switch: the 1-based position of environment variable `var`'s value in `names`, 0 when it is unset or
+// spells none of them. A hook's enum lists None first and its values in `names` order, so the answer casts to it. Two hooks
+// (handoffwindow.h, declinedsites.h) wrote this as the same ternary chain; --quality-delta flagged the second as a clone.
+inline std::size_t envChoice( const char* var, std::span<const std::string_view> names ) noexcept
+{
+    const char* const env = std::getenv( var );
+    if( env == nullptr )
+    {
+        return 0;
+    }
+    const auto hit = std::find( names.begin(), names.end(), std::string_view( env ) );
+    return hit == names.end() ? 0 : std::size_t( hit - names.begin() ) + 1;
 }
 
 }   // namespace rw
