@@ -242,9 +242,10 @@ rtcheck rt4m "$RT/t4m.xml" "$RT/t4m.err" WWWWWWWWWW '<hit [^>]*t="def deploy\(to
 TP="$( rtok ghp_ P 36 )"
 printf '# PLAN\n\n### T1\nRotate the deploy token.\n- owed: rotate the deploy token %s before release\n' "$TP" >"$RT/plan.md"
 ( cd "$RT" && "$BIN" "$RT" --no-cache --plan-lint="$RT/plan.md" </dev/null >"$RT/t5.xml" 2>"$RT/t5.err" ); rc5=$?
-[ "$rc5" -le 2 ] || no "(rt5) --plan-lint exited $rc5"
+[ "$rc5" = 2 ] || no "(rt5) --plan-lint exited $rc5, want 2 (the owed line is undischarged: a gating row)"
 rtcheck rt5 "$RT/t5.xml" "$RT/t5.err" PPPPPPPPPP '<owed line="5"[^>]*><!\[CDATA\[[^]]*\[REDACTED:github-token\]'
-( cd "$RT" && "$BIN" "$RT" --no-cache --plan-lint="$RT/plan.md" --no-redact </dev/null >"$RT/t5n.xml" 2>"$RT/t5n.err" )
+( cd "$RT" && "$BIN" "$RT" --no-cache --plan-lint="$RT/plan.md" --no-redact </dev/null >"$RT/t5n.xml" 2>"$RT/t5n.err" ); rc5n=$?
+[ "$rc5n" = 2 ] || no "(rt5) --plan-lint --no-redact exited $rc5n, want 2"
 rtraw rt5 "$RT/t5n.xml" "$RT/t5n.err" 'ghp_PPPPPPPPPPPP'
 
 echo
