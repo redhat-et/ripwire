@@ -10533,11 +10533,15 @@ private:
     std::optional<std::string_view>                      head_;             // …and its receiver's proven standard type
 };
 
-// moved out of buildGraph by train 1117d2 (quality-delta): class-like kinds, compose / route edge dedup keys, PY-CLASS-SPRAY's ask
-// the inheritance overlay's class-like kinds: Class, Interface, Struct and the NamedType..FuncType range
+// moved out of buildGraph by train 1117d2 (quality-delta). The inheritance overlay's class-like kinds: Class, Interface, Struct, NamedType..FuncType
 inline bool isClassLikeKind( SymKind k ) noexcept { return CallResultTypes::classKind( k ) || isStructOrNamedType( k ); }
 inline bool sameComposePair( const ComposeEdge& a, const ComposeEdge& b ) noexcept { return a.ownerSym == b.ownerSym && a.fieldName == b.fieldName; }
 inline bool sameRouteEdge( const RouteEdge& a, const RouteEdge& b ) noexcept { return a.fromSym == b.fromSym && a.toSym == b.toSym && a.path == b.path; }
+// the arity rule the dispatch tier shares with B2.2: a known argument count over an exact arity, or under `paramsMin` (its fewest)
+inline bool callArityCannotTake( const Reference& ref, const Symbol& cs, std::uint16_t paramsMin ) noexcept
+{
+    return ref.argCountKnown && ( ( cs.arityExact != 0 && ref.argCount > cs.params ) || ref.argCount < paramsMin );
+}
 inline bool pythonScopePinAt( const PythonLexicalScopes& scopes, const IngestResult& ing, const ExternalVetoTables& veto, const Reference& r, std::vector<NodeId>& cand )
 {
     const auto moduleUnread = [ & ]
@@ -12121,11 +12125,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // answer committed (outProv=6, rendered via="impl"); the arity rule it shares with the name tiers' B2.2 filter below.
     const IfaceDispatch          ifaceTier( ing, recvEv, g.implementors, g.implementorBound, implementorsOpen );   // reads ing.bindings' ImplBlock spans too
     std::vector<NodeId>          ifaceCand;   // reused: one call's dispatch candidates
-    const auto arityCannotTake = [ & ]( const Reference& ref, NodeId c ) noexcept
-    {
-        const Symbol& cs = ing.symbols[ c ];
-        return ref.argCountKnown && ( ( cs.arityExact != 0 && ref.argCount > cs.params ) || ref.argCount < paramsMinOf[ c ] );
-    };
+    const auto arityCannotTake = [ & ]( const Reference& ref, NodeId c ) noexcept { return callArityCannotTake( ref, ing.symbols[ c ], paramsMinOf[ c ] ); };
 
     // M0 MEM-STATS: the side-table plateau (the headline peak's base), and how full the tables sized at declaration are —
     // size / bucket count, where a bucket is 8 zero-filled bytes the reserve touched whether or not an entry ever lands in it
