@@ -626,7 +626,7 @@ printf 'int base( int p ){ return p; }\n' > "$CLEAN/src/c.cpp"
 ( cd "$CLEAN" && git add -A >/dev/null 2>&1 && git commit -qm base >/dev/null 2>&1 )
 printf 'int base( int p ){ return p; }\nint grow2( long n ){ return int( n ); }\n' > "$CLEAN/src/c.cpp"
 OCL="$( cd "$CLEAN" && "$BIN" . --quality-delta --no-cache --legend=compact 2>/dev/null )"; CLRC=$?
-{ [ -n "$OCL" ] && ! printf '%s' "$OCL" | grep -q 'similar='; } \
+{ [ "$CLRC" = 0 ] && [ -n "$OCL" ] && ! printf '%s' "$OCL" | grep -q 'similar='; } \
     && ok "similar: an answer with no similar= row carries no similar= reading (present-only)" || no "similar: the similar= reading rode an answer with no similar= row (rc $CLRC)"
 SDICT="$( "$BIN" --legend-dict 2>/dev/null )"; SDRC=$?
 { [ "$SDRC" = 0 ] && printf '%s' "$SDICT" | grep -q 'r similar=N: '; } \
@@ -636,12 +636,12 @@ SAK="$WORK/similar-kinds"; cp -R "$SA" "$SAK"
 ( cd "$SAK" && git add -A >/dev/null 2>&1 && git commit -qm after >/dev/null 2>&1 )
 OSR="$( cd "$SAK" && "$BIN" . --quality-delta=HEAD~1..HEAD --no-cache 2>/dev/null )"; SRRC=$?
 OSK="$( cd "$SAK" && "$BIN" . --quality-delta=HEAD~1..HEAD --no-cache --quality-kinds=complexity,verbosity,nesting 2>/dev/null )"; SKRC=$?
-if printf '%s' "$OSR" | grep -q ' similar="3"'; then
-    { [ -n "$OSK" ] && ! printf '%s' "$OSK" | grep -q 'similar=' && [ "$( rows "$OSK" | grep -c 'kind="params"' )" = 0 ]; } \
+if [ "$SRRC" = "$SARC" ] && printf '%s' "$OSR" | grep -q ' similar="3"'; then
+    { [ "$SKRC" = 0 ] && [ -n "$OSK" ] && ! printf '%s' "$OSK" | grep -q 'similar=' && [ "$( rows "$OSK" | grep -c 'kind="params"' )" = 0 ]; } \
         && ok "similar (kinds): the range carries similar= (rc $SRRC); --quality-kinds= without params prints no similar= and no params row (rc $SKRC)" \
-        || { no "similar (kinds): similar= or a params row under --quality-kinds= without params (rc $SKRC)"; rows "$OSK"; }
+        || { no "similar (kinds): similar= or a params row under --quality-kinds= without params, or rc $SKRC (want 0: no other kind gates)"; rows "$OSK"; }
 else
-    no "similar (kinds) PREMISE: the range HEAD~1..HEAD carries no similar=3 row (rc $SRRC)"; rows "$OSR"
+    no "similar (kinds) PREMISE: the range HEAD~1..HEAD carries no similar=3 row, or rc $SRRC differs from the working tree's $SARC"; rows "$OSR"
 fi
 OSA2="$( cd "$SA" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"; SA2RC=$?
 { [ "$OSA" = "$OSA2" ] && [ "$SA2RC" = "$SARC" ]; } \
