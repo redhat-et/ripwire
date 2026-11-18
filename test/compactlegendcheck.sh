@@ -711,6 +711,15 @@ probeFor()
 # lane, defined almost nothing (35 and 30 attribute names undefined). The (U-ABIARCH) arm below is their probe, over the corpora
 # test/lib/abiarchfixture.sh builds. The arch pin is the answer of a tree with no no-file-edge language; the clauses a Go file
 # adds are present-only and registered in test/legend_over_target.tsv, so the second arch probe passes as EXPLAINED, not as headroom.
+# RE-PINNED 2026-11-18 (lane dc-shown-vocab, the rule-3 cut vocabulary): ripwire.zoom/v1 410 -> 480 (measured 467,
+# was 394). The seven noun-first <noun>_shown= attributes became shown_<noun>= beside a <noun>_capped bit, and
+# shown_levels= moved OUT of the zoom verb row's prose INTO its own dictionary row that spells its companion
+# (levels_capped=1 deeper ones unprinted): +57 B on every --zoom answer. A test/legend_over_target.tsv row would be
+# the WRONG remedy and was deliberately not written: that registry explains a PRESENT-ONLY clause, and shown_levels=
+# rides EVERY --zoom answer, so registering it would assert something false. This file's own header says the honest
+# alternative is exactly this one-line re-pin. What the 57 B buys: under the tiering posture the DICTIONARY is the
+# authority -- a reader holding core plus a pack never receives a verb-legend string -- so a definition that lived
+# only in the zoom verb row was unresolvable for precisely the readers the 0.7.0 posture work is for.
 PIN_TABLE='
 ripwire.abi/v1                   2020  2003
 ripwire.arch/v1                  1490  1477
@@ -732,7 +741,7 @@ ripwire.naming-consistency/v1     630   620
 ripwire.comment-coherence/v1      460   445
 ripwire.cochange/v1               540   521
 ripwire.communities/v1           820   807
-ripwire.zoom/v1                  410   394
+ripwire.zoom/v1                  480   467
 ripwire.tree/v1                  310   300
 ripwire.seams/v1                  720   703
 ripwire.handoff/v1                600   589

@@ -92,7 +92,7 @@ E	callees	13	bodyless_defs
 E	callees	1	closures		
 E	callees	1	count	in	
 E	callees	6	cross_kind		
-E	callees	2	dc_shown		
+E	callees	2	shown_dc		
 E	callees	3	gate	dc	
 E	callees	39	hop_tested	callees	
 E	callees	4	hop_tests	callees	
@@ -118,7 +118,7 @@ E	callers	1	called_at	vr
 E	callers	1	called_by	vr	
 E	callers	1	cands	vr	
 E	callers	6	cross_kind		
-E	callers	4	dc_shown		
+E	callers	4	shown_dc		
 E	callers	20	hop_tests	callees	
 E	callers	20	hop_tests	callers	
 E	callers	2	into	vr	
@@ -332,7 +332,7 @@ E	impact	1	called_at	vr
 E	impact	1	called_by	vr	
 E	impact	1	cands	vr	
 E	impact	38	d	s	
-E	impact	20	dc_shown		
+E	impact	20	shown_dc		
 E	impact	1	gate	dc	
 E	impact	1	gate	dc	iface
 E	impact	7	importers_next	impact	

@@ -169,10 +169,10 @@ inline constexpr CompactLegendSpec kCompactLegendSpecs[] =
     // or out-edge (isolateStats); symbols= is ing.symbols.size(). The <bridge> row attributes are present-only terms below.
     { "communities",  "communities",  "call-graph modules (Louvain): <community id= size= dir= label=> of <member t= n= p=>; drill= the verb taking a row's id=; shown_modules=/shown_bridges= <community>/<bridge> rows listed; bridges= community pairs joined by a call edge; isolated= symbols with no call edge: isolated_doc= doc sections, isolated_decl= other bodyless, isolated_header= other header defs, isolated_source= the rest; modules= modules of 2+ symbols; connected_singletons= 1-symbol modules with a call edge; symbols= indexed symbols" },
     { "community",    "community",    "ONE module id=: <member t= n= p=> ranked members, its <bridge> edges; size= the TRUE count; dir= its members' most common directory (a top-level file's own path); label= dir::name@file:line:byte of its top fan-in member (non-accessors first) [up to 3 top name verbs]; bridges= modules a call edge joins to it; partition= module count incl. singletons (ids 0..partition-1); modules= those of 2+ symbols; shown_bridges= <bridge> rows listed" },
-    // zoom and tree (2026-09-12): symbols=/isolated=/top_modules=/levels_shown= and files= ride EVERY answer of their root and
+    // zoom and tree (2026-09-12): symbols=/isolated=/top_modules=/shown_levels= and files= ride EVERY answer of their root and
     // were defined only by the full legend, so they read here beside the levels=/files_unlisted= this line already named.
     // That line moved the (U) --zoom probe's compact legend from 324 to 394 B.
-    { "zoom",         "zoom",         "nested module hierarchy: <module level= id= size= dir= shown= capped=> of <member t= n= p=>; levels_shown= of levels= printed; symbols= = isolated= + size= of all top_modules=" },
+    { "zoom",         "zoom",         "nested module hierarchy: <module level= id= size= dir= shown= capped=> of <member t= n= p=>; symbols= = isolated= + size= of all top_modules=" },
     { "tree",         "tree",         "each file with its top 3 symbols by rank, files by best symbol: <file p= symbols=> of <s t= n=>; of files= indexed, files_unlisted= have none" },
     { "seams",        "seams",        "cross-directory call edges NO test reaches: <seam from= to= untested= shown= capped=> of <edge caller= p= callee= cp=>" },
     { "doc-drift",    "doc-drift",    "markdown anchors that no longer hold: <doc p=> of <a k= l= c= why= ref= want= got= tgt=>; unchecked/dated rows disclose the rest" },
@@ -527,10 +527,11 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "est_measured",      "est_measured=0: est_tokens is the MODELLED estimate (a charge buffer failed), typically below the emitted size", false, {}, MapHeaderRead::Also },
     { "fit_unmeasured",    "fit_unmeasured=1: the fit probe could not measure the map; the cap is unverified", false, {}, MapHeaderRead::Only },
     // THE THIRD SWEEP (2026-09-12), the same defect on conditional fields the first two sweeps never produced. --zoom's
-    // <module children=> rides only a module AT the levels_shown= cut, and a map's <recent> file rows only a single-root
+    { "shown_levels", "shown_levels=N: of levels= printed; levels_capped=1 deeper ones unprinted", true, "zoom", MapHeaderRead::No, {}, "zoom" },
+    // <module children=> rides only a module AT the shown_levels= cut, and a map's <recent> file rows only a single-root
     // rank_by=churn-decay (kChurnDecayRankLegend's `recent:` clause). Both clauses are prose. Both rows are ELEMENT-qualified:
     // of= on the map root is --around's seed, and n= is a name on every <s> row.
-    { "children",          "children=K: K child modules below the levels_shown= cut, unprinted", true, "module" },
+    { "children",          "children=K: K child modules below the shown_levels= cut, unprinted", true, "module" },
     { "of",                "<recent n= of=>: the n= newest-touched of of= touched files; <rc age_d=> days since its last commit, w= decayed weight", true, "recent" },
     // merge_bombs_skipped= (2026-09-12): the cut the churn-decay miner makes, disclosed on the block it shapes (gitmine.h
     // kChurnMergeBombMaxFiles). Always on <recent>, "0" included, so the term rides every churn-decay map.
@@ -719,7 +720,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
                            "K is a floor in TS)", true, "dc", MapHeaderRead::No, "iface" },
     { "bound",             "dc bound=G: T: a generic receiver bounded by trait T; the candidates are T's implementors', never by name", true, "dc" },
     { "of_def",            "dc of_def=K: the def ix=K making the call; K~d: its candidates include group K, never a claim it calls K", true, "dc" },
-    { "dc_shown",          "dc_shown=N: dc rows printed (callers: file-first); dc_next= lists every site" },
+    { "shown_dc",          "shown_dc=N: dc rows printed of declined_calls= (callers: file-first); dc_capped=1 the rest are cut; dc_next= lists every site" },
     // BAND DC (handoffwindow.h directRootAllNext): a windowing --callers / --impact root names the complete call; present-only
     { "all_next",          "all_next=: the ONE call listing every row of total= (same rows, columnar); next_offset= pages" },
     { "cand",              "dc cand=: the candidate defs as file:line (legend full only); cand_more= how many more", true, "dc" },
@@ -988,7 +989,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "side", "alts side=from|to of=: further definitions that endpoint's name binds, not printed above (the pick is not provably unique): <d p= sel= class=>, sel= pastes as that endpoint", true, "alts", MapHeaderRead::No, {}, "path" },
     { "decl_only", "alts d decl_only=1: no body (a header declaration or interface contract), not a second definition", true, "d", MapHeaderRead::No, {}, "path" },
     { "sel_proven", "alts d sel_proven=0: no spelling tried binds it alone; its sel= names the file and owner and may bind more than that definition", true, "d", MapHeaderRead::No, {}, "path" },
-    { "alts_shown", "alts alts_shown=K defs=N: K of the other rows shown; next= pages the rest", true, "alts", MapHeaderRead::No, {}, "path" },   // also defines defs= there
+    { "shown_alts", "alts shown_alts=K defs=N: K of the other rows shown; alts_capped=1 they are cut; next= pages the rest", true, "alts", MapHeaderRead::No, {}, "path" },   // also defines defs= there
     { "from_p", "from_p=/to_p=: the definitions from= and to= were bound to", false, "path", MapHeaderRead::No, {}, "path" },   // also defines to_p=
     { "from_defs", "from_defs=/to_defs=: definitions of each name, all searched; above 1, qualify file:name", false, "path", MapHeaderRead::No, {}, "path" },   // also defines to_defs=
     // TRACE-EP (src/pathpairs.h kPathPairsLegend), present only when several definition pairs reach: <pair> chains and <alt> rows
@@ -1232,13 +1233,15 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "sites_at", "c sites_at=: its calls of the leaf name, any receiver, as [file:]line (p=: def line, default file); not proof each binds", true, "c", MapHeaderRead::No, {}, "safe-delete" },
     { "sites_total", "c sites_total=N: N sites, sites_at= lists the first 16; the uses verb lists all", true, "c", MapHeaderRead::No, {}, "safe-delete" },
     // count-floor on the targeted lego verb (serialize.h packLego, countfloor.h implementorFloors): present-only.
+    { "shown_implementors", "shown_implementors=K: only K impl rows here of implementors=; implementors_capped=1 they are cut; implementors_next= lists all", true, "iface", MapHeaderRead::No, {}, "lego" },
+    { "shown_d2", "shown_d2=K: of d2= second-hop caller rows printed; d2_capped=1 when more were cut, 0 when whole; next= lists the whole radius", true, "callers", MapHeaderRead::No, {}, "for" },
     { "implementors_floor", "implementors_floor=1: an extends clause spelled like this interface bound nowhere; implementors= may be short (not proof of another)", true, "iface", MapHeaderRead::No, {}, "lego" },
     { "floor_next", "floor_next=: lists every extends site of the name, bound or not", true, "iface", MapHeaderRead::No, {}, "lego" },
     // lane lego-transitive: the deeper implementors (serialize.h legoClosurePage / legoClosureAttrs / writeLegoImplRow): present-only.
     // ONE term for the closure and its two row attributes (it rides whenever a via=/depth= row does): the reading costs a fixed
     // ~100 B on every answer with a deeper row, which on a small closure is most of the growth (lane report, K1/K2 bytes).
     { "transitive", "transitive=N: rows below a direct one, each once: impl via= its base, depth= hops; implementors= counts direct", true, "iface", MapHeaderRead::No, {}, "lego" },
-    { "transitive_shown", "transitive_shown=N: deeper rows on this page; has_more=1 with next= pages on", true, "iface", MapHeaderRead::No, {}, "lego" },
+    { "shown_transitive", "shown_transitive=N: deeper rows on this page of transitive=; transitive_capped=1 they are cut; has_more=1 with next= pages on", true, "iface", MapHeaderRead::No, {}, "lego" },
     { "transitive_offset", "transitive_offset=N: the first deeper row this page shows", true, "iface", MapHeaderRead::No, {}, "lego" },
     // fix 1: the hedge on a name-only deeper row and the count of name-collision rows left out (present-only, both)
     { "base_by", "base_by=name: that impl's extends clause names via= by spelling alone; not a proven subtype, not walked below", true, "impl", MapHeaderRead::No, {}, "lego" },
@@ -1754,7 +1757,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // LATENT cut/cap/refusal attributes: conditional, NOT in the src/ answer, readings from the emitter only (keep or drop)
     { "rows_capped", "rows_capped=1: a row list hit its 500-row ceiling; rows are a SAMPLE, every count stays exact", false, "skipped", MapHeaderRead::No, {}, "skipped" },
     { "cells_capped", "cells_capped=1: the cell universe hit its 2048 ceiling; cells beyond it are uncounted", false, "nonlocal_state", MapHeaderRead::No, {}, "nonlocal-state" },
-    { "cells_shown", "cells_shown=/cells_capped=1: only this many of cells_total= cell rows print (cap 12)", true, "fn", MapHeaderRead::No, {}, "nonlocal-state" },   // also defines cells_capped= on <fn>
+    { "shown_cells", "shown_cells=N: cell rows printed of cells_total= (cap 12); cells_capped=1 on the row is the cut", true, "fn", MapHeaderRead::No, {}, "nonlocal-state" },   // also defines cells_capped= on <fn>
     { "decls_capped", "decls_capped=1: a declaration query hit its match budget; cells may be missing", false, "nonlocal_state", MapHeaderRead::No, {}, "nonlocal-state" },
     { "undecided_decls", "undecided_decls=N: declarations whose mutability could not be decided; dropped, never guessed", false, "nonlocal_state", MapHeaderRead::No, {}, "nonlocal-state" },
     { "unanalyzed_langs", "unanalyzed_langs=/unanalyzed_files=: indexed languages (and their files) this lens skips; NOT zero cells", false, "nonlocal_state", MapHeaderRead::No, {}, "nonlocal-state" },   // also defines unanalyzed_files=
