@@ -2604,6 +2604,36 @@ inline void insertFileSyms( std::string& out, const IngestResult& ing, const Gra
     }
 }
 
+// MANIFEST-ROW on the MCP `for`, the CLI twin's renderer (CodeRabbit #686): under budget_tokens the block prints whole when the answer
+// (`answer`, ending </ctx>) plus the held blocks with it fit (the CLI fit's price, forHeldBlocksPrice), held otherwise; a held render's
+// redaction tally is not the run's. tokens= what the whole block takes from the budget (<doc_body> is served into what is left).
+struct McpManifestRows
+{
+    std::string xml;
+    std::size_t tokens = 0;
+};
+inline McpManifestRows mcpManifestRowsFitted( const IngestResult& ing, std::string_view task, RedactCounts* redact, std::string_view answer,
+                                              const ForDocBodyBudget& budget )
+{
+    std::optional<RedactCounts> tally = redact != nullptr ? std::optional<RedactCounts>( *redact ) : std::nullopt;
+    McpManifestRows whole{ renderForManifestRows( ing, task, tally ? &*tally : nullptr ) };
+    if( budget.active() && !whole.xml.empty() )
+    {
+        std::string withBlock( answer );
+        withBlock.insert( withBlock.size() - 6, whole.xml );
+        if( forHeldBlocksPrice( withBlock ) > budget.leftTokens() )   // est_tokens + the held blocks over budget_tokens
+        {
+            return { renderForManifestRows( ing, task, redact, /*held=*/true ) };
+        }
+        whole.tokens = tokensForEmittedBytes( whole.xml.size(), kBytesPerTokenDefault );
+    }
+    if( tally )
+    {
+        *redact = *tally;   // the whole block prints: its redactions are the run's
+    }
+    return whole;
+}
+
 inline std::optional<std::string> forTaskText( const std::string& root, const std::string& task, RedactCounts* redact = nullptr,
                                 std::size_t budgetTokens = 0, bool noRoute = false,
                                 McpPageArgs page = {},   // L-W: limit/offset select the FILE PAGE (forpage.h), the CLI --for --limit twin
@@ -3125,18 +3155,9 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     {
         out.insert( out.size() - 6, renderForDeclRows( ing, ix.g, task, /*held=*/budgetTokens > 0 ) );
         out.insert( out.size() - 6, renderForExemplarFamily( ing, ix.g, task, /*held=*/budgetTokens > 0 ) );   // EXEMPLAR-STAIRS, the CLI twin's renderer
-        // MANIFEST-ROW, the CLI twin's renderer. CodeRabbit #686: under budget_tokens the block prints whole when the answer plus the
-        // held blocks with it fit (the CLI fit's price, forHeldBlocksPrice), held otherwise; a held render's tally is not the run's
-        std::optional<RedactCounts> manifestTally = redact != nullptr ? std::optional<RedactCounts>( *redact ) : std::nullopt;
-        const std::string manifestWhole = renderForManifestRows( ing, task, manifestTally ? &*manifestTally : nullptr );
-        const bool manifestHeld = budgetTokens > 0 && !manifestWhole.empty()
-                               && answerEstTokens + forHeldBlocksPrice( std::string( out ).insert( out.size() - 6, manifestWhole ) ) > budgetTokens;
-        if( !manifestHeld && manifestTally )
-        {
-            *redact = *manifestTally;
-        }
-        out.insert( out.size() - 6, manifestHeld ? renderForManifestRows( ing, task, redact, /*held=*/true ) : manifestWhole );
-        manifestTokens = budgetTokens > 0 && !manifestHeld ? tokensForEmittedBytes( manifestWhole.size(), kBytesPerTokenDefault ) : 0;   // <doc_body> below is served into what is left
+        const McpManifestRows manifest = mcpManifestRowsFitted( ing, task, redact, out, ForDocBodyBudget{ budgetTokens, answerEstTokens } );   // MANIFEST-ROW
+        out.insert( out.size() - 6, manifest.xml );
+        manifestTokens = manifest.tokens;
     }
     // FOR-DOC-BODY (fordocbody.h): the CLI --for's <doc_body>, one renderer, before </ctx>, priced on its own root; under budget_tokens it is served into the budget left after the answer, as there
     if( out.ends_with( "</ctx>" ) )
