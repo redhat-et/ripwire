@@ -9331,7 +9331,7 @@ inline constexpr std::string_view kForSectionStubLegend =
 // same post-render splice as the stub clause above, in both --for dialects and the MCP twin. No "--" (G4).
 inline constexpr std::string_view kForLegoCountLegend =
     "; iface implementors=N counts every type an extends/implements clause binds to it (the lego verb's count), never the rows "
-    "listed: shown_implementors=K only K impl rows here, implementors_next= lists all; implementors_floor=1 an extends clause "
+    "listed: shown_implementors=K only K impl rows here (implementors_capped=1), implementors_next= lists all; implementors_floor=1 an extends clause "
     "spelled like it bound nowhere, so N may be short (not proof of another), floor_next= lists every extends site";
 
 // The prefix every attribute kForLegoCountLegend defines starts with (shown_implementors=/_next=/_floor=): a rendered

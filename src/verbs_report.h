@@ -3227,7 +3227,7 @@ std::optional<int> runZoom( const MainDispatch& d )
                      "On a level-0 module size= is its true member count and shown=/capped= describe the member list printed here, which is fixed at the 5 top-ranked members and is not widened by limit=/offset= (those page the TOP-LEVEL modules); "
                      "the community drill verb pages one module's full member list by its level-0 id. A module above level 0 lists every child module, so it carries no shown=/capped= pair. "
                      // P4 (L7): the two default ceilings, defined where the reader meets them
-                     "shown_levels= is how many of the levels= this document prints from the top (default 2; the zoom-levels flag sets it, 0 = all): a module AT the cut "
+                     "shown_levels= is how many of the levels= this document prints from the top (default 2; the zoom-levels flag sets it, 0 = all), levels_capped=1 when deeper ones are unprinted: a module AT the cut "
                      "carries children= (its child modules, none printed) instead of nesting. The top-level module rows are a WINDOW (shown=/capped=/total=/next_offset=, "
                      "default 40 by rank mass; limit=/offset= page it) and next= pastes the next page. {}{}-->",
                      bridge.size() > kZoomBridgeCap ? ", the 12 heaviest (shown_bridges=/bridges_capped=/bridges= of all pairs)" : "",

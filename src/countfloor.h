@@ -422,7 +422,7 @@ inline constexpr const char* kLegoClosureLegendComment =
     "through extends clauses the index PROVES name the type above (a same-file declaration in scope; a Python or JS/TS named "
     "import or require; a resolved include; the Java, Kotlin or Go package; a Java package qualifier. A Java or Kotlin import "
     "or a C# using is not a proof). The deeper rows are one page: "
-    "shown_transitive= rows printed when it is cut, transitive_offset= the first one shown, has_more=\"1\" and "
+    "shown_transitive= rows printed when it is cut (transitive_capped=1), transitive_offset= the first one shown, has_more=\"1\" and "
     "next= the call for the next page. -->";
 
 // lane lego-transitive fix 1: the hedge's own clause, present-only beside the one above (no double hyphen: an XML comment).

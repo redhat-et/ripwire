@@ -560,7 +560,7 @@ inline std::string defAltsLegend( const PathAlts& alts )
     return std::string( "<alts side= of=> lists further definitions the endpoint's name binds, not printed above (the pick is "
                         "not provably unique): sel= pastes as that endpoint to bind one alone" )
          + ( alts.unproven ? ", except on a sel_proven=0 row: no spelling tried binds that one alone, its sel= names the file and owner and may bind more" : "" )
-         + ", p= where it is, class=source|test; shown_alts=K defs=N: K of the other rows shown, next= pages the rest. "
+         + ", p= where it is, class=source|test; shown_alts=K defs=N: K of the other rows shown, alts_capped=1 they are cut, next= pages the rest. "
          + ( alts.declOnly ? "decl_only=1: no body (a header declaration or interface contract), not a second definition. " : "" );
 }
 
