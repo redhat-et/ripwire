@@ -1792,6 +1792,15 @@ enum class LocalBindKind : std::uint8_t
     // ONLY (the --for re-export hop rows): it is never a call edge and no resolver table reads it (every other binding reader
     // filters by kind). APPENDED (cache u8).
     ReExport,
+    // Lane rust-self-chain (test/receiverevidencecheck.sh RUST-SELF-CHAIN, root rust7): a Rust MEMBER call written on another
+    // call's result — each hop after the first of `Router::new().route( a ).layer( b )`, `T::open()?.read()`, `x.get().await.text()`.
+    // One record per such call: startByte = the call's own start (its Reference's; with typeName it names the call, as a CallResult's
+    // does), typeName = its callee name, var = the INNER call's callee name, spanStart = the inner call's start byte (spanEnd the
+    // same: no span), resultIndex = the call's hop depth (1: the inner call is the chain's ROOT — a path call `T::f()` or a member
+    // call on a named receiver, read through its own Reference; k: the inner call is itself the depth k-1 record's call),
+    // unwrapDepth = the `?` operators between the two, isFromAssignment = an `.await` applied to the inner result first.
+    // Read by receiverevidence.h ReceiverEvidence::rustChainReceiver ONLY. APPENDED (cache u8).
+    RecvCall,
 };
 // fix round 4: the TypeAlias rows that bind a spelling with no alias target (model.h LocalBindKind::TypeAlias, typeName)
 inline constexpr std::string_view kTypeBindForward  = "forward";
@@ -1799,7 +1808,7 @@ inline constexpr std::string_view kTypeBindShadow   = "shadow";
 inline constexpr std::string_view kTypeBindUnparsed = "unparsed";
 inline constexpr std::string_view kTypeBindUnrecorded = "unrecorded";
 // The number of LocalBindKind enumerators — the bound readBind validates a cached kind byte against (see kSymKindCount).
-inline constexpr std::size_t kLocalBindKindCount = static_cast<std::size_t>( LocalBindKind::ReExport ) + 1;
+inline constexpr std::size_t kLocalBindKindCount = static_cast<std::size_t>( LocalBindKind::RecvCall ) + 1;
 // FE-B: the kinds only graph.h ReceiverEvidence (and, for the two call-result kinds, its resolve loop) reads (see RecvType above).
 // L6's ImplBlock is in the set for the same reason: its var is the TRAIT / interface being implemented, never a name bound in the
 // enclosing function, so the generic binding readers (localNameSet, the fn-pointer tables, nonlocalstate) must skip it (its two
@@ -1811,7 +1820,8 @@ inline bool isReceiverEvidenceKind( LocalBindKind k ) noexcept
     // those: one run CallResult .. ImplBlock
     static_assert( std::uint8_t( LocalBindKind::StaticMember ) - std::uint8_t( LocalBindKind::RecvType ) == 4, "FE-B's five receiver-evidence kinds stay one run" );
     static_assert( std::uint8_t( LocalBindKind::ImplBlock ) - std::uint8_t( LocalBindKind::CallResult ) == 8, "the call-result, in-place, dispatch and impl-block kinds stay one run" );
-    return ( k >= LocalBindKind::RecvType && k <= LocalBindKind::StaticMember ) || ( k >= LocalBindKind::CallResult && k <= LocalBindKind::ImplBlock );
+    return ( k >= LocalBindKind::RecvType && k <= LocalBindKind::StaticMember ) || ( k >= LocalBindKind::CallResult && k <= LocalBindKind::ImplBlock )
+        || k == LocalBindKind::RecvCall;   // lane rust-self-chain: its var is the INNER callee's name, never a local
 }
 // The language family whose call results take a callee's declared result type (train 29 call-result typing), ONE row read
 // by ingest (which records CallResult / ReturnType / TypeImport) and by graph.h (where the type resolves, and which
@@ -1878,6 +1888,12 @@ inline constexpr std::uint8_t kDispatchResultBit = 0x80;
 // it (ingest_binds.h cppDirectDeclarator: `CodecPtr c`, `const CodecPtr& c`, never `CodecPtr* c`), so a smart-pointer type's `->`
 // reaches its pointee. 0 on every other record: a record that does not say so is never read through a smart pointer.
 inline constexpr std::uint8_t kDirectDeclaratorBit = 0x01;
+// lane rust-self-chain: the `.await` bit of a Rust call-result record's unwrapDepth. A ReturnType of an `async fn` carries it (its
+// declared result is what the call's FUTURE yields: a call that is not awaited holds no T), and so does a CallResult whose value is
+// `f().await` — the await applied to the call first, before any `?` (`f().await?`; `f()?.await` records nothing). The low bits stay
+// the Result/Option layers, so a plain depth compare matches an awaited `async fn` call and nothing else (graph.h typeCallResults).
+inline constexpr std::uint8_t kAwaitResultBit = 0x40;
+inline constexpr std::uint8_t kUnwrapLayersMask = 0x3F;   // the Result/Option layers below both bits
 // lane iface-peel fix 1 (B1): the memberVia of a C++ MEMBER record (isCompose, a field name) whose written type is a TEMPLATE
 // PARAMETER of an enclosing `template <…>` (`template <class Handle> class S { Handle h_; }`): the name is the parameter, never
 // the smart-pointer alias of that spelling in some namespace. resolve.h SmartAliasPeel::pointeeOf alone reads it, to keep the

@@ -30,6 +30,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -3846,17 +3847,26 @@ struct ReceiverEvidence
             return false;
         }
         const Chain ch = chainOf( r );
-        if( !ch.valid || !ch.ctor.empty() || ch.root.empty() )
+        if( !ch.valid && callResultFamilyOf( r.lang ) == CallResultFamily::Rust )
         {
-            return false;
+            const NodeId cls = rustChainReceiverClass( r );   // lane rust-self-chain: the receiver is another call's result
+            return cls != kNoNode && methodOf( ing.symbols[ cls ].name, r.calleeName, false, cls );
         }
-        NodeId cls = kNoNode;
-        if( ch.root == "self" )   // Rust's receiver keyword: `this` / `Self` are ordinary names here, read by their own binding below
+        if( !ch.valid || !ch.ctor.empty() || ch.root.empty() || ( ch.root == "self" && ch.path.empty() ) )
         {
-            if( ch.path.empty() )
-            {
-                return false;   // `self.m()`: the language's own rule (Rule 1) answers it
-            }
+            return false;   // `self.m()`: the language's own rule (Rule 1) answers it
+        }
+        const NodeId cls = typedReceiverClass( r, ch );
+        return cls != kNoNode && methodOf( ing.symbols[ cls ].name, r.calleeName, false, cls );
+    }
+    // the ONE class a Rust member call's NAMED receiver holds (narrowTypedLocal's reading): `self` (Rust's receiver keyword: `this` /
+    // `Self` are ordinary names, read by their own binding), a typed local or parameter, and the stated fields below either, each by
+    // the ONE class its written type resolved to (memberClass); kNoNode when unknown
+    NodeId typedReceiverClass( const Reference& r, const Chain& ch ) const
+    {
+        NodeId cls = kNoNode;
+        if( ch.root == "self" )
+        {
             cls = selfClass( r.fromSymbol );
         }
         else if( const std::optional<SeenLocal> t = localSeenAt( r.fromSymbol, ch.root, r.startByte ); t.has_value() && !t->type.empty() )
@@ -3871,7 +3881,331 @@ struct ReceiverEvidence
             const auto it = memberClass.find( keyOf( cls, '#', field ) );
             cls = it == memberClass.end() ? kNoNode : it->second;
         }
-        return cls != kNoNode && methodOf( ing.symbols[ cls ].name, r.calleeName, false, cls );
+        return cls;
+    }
+
+    // ── lane rust-self-chain (test/receiverevidencecheck.sh RUST-SELF-CHAIN): a member call on another call's result ────────────
+    // `Router::new().route( a ).layer( b )`: each hop's receiver is the value the call below it returns. The value is walked from
+    // the chain's ROOT — a path call `T::f()` whose written qualifier resolves to the class owning f (rustQualifierClass, as a
+    // call-result local's `T::f()` is read), or a member call on a named receiver (typedReceiverClass; `self` itself included) —
+    // through each hop's ONE callee (methodOf on the class the hop's receiver holds: the same lookup that proves that hop's own
+    // edge, so a hop the resolve loop leaves hedged or split stops the walk) and that callee's declared whole result
+    // (CallResultTypes::resultClassOf in its file; `Self` must name the very class the callee was found on). `?` / `.unwrap()` /
+    // `.expect( … )` strip one Result / Option layer each; `.await` takes an `async fn`'s declared result, or the `Output` an
+    // in-tree `impl IntoFuture` / `impl Future` states for the class (rustAwaitOutput). Anything else — a trait object or `impl
+    // Trait` result, a generic `-> T`, a future used without its `.await`, a layer left unstripped, two records of one call that
+    // disagree — is no class, and the call keeps its base reading.
+    struct ChainValue
+    {
+        NodeId       cls    = kNoNode;
+        std::uint8_t layers = 0;       // Result / Option layers still to strip
+        bool         future = false;   // an `async fn`'s call: the value is its future until `.await`
+        bool operator==( const ChainValue& ) const = default;
+    };
+    static constexpr int kChainHopCap = 64;   // hops walked below one call; a longer chain is a floor (no class)
+    struct KeyedRecord
+    {
+        std::uint64_t  key = 0;   // fileId << 32 | startByte
+        const Binding* b   = nullptr;
+    };
+    mutable std::vector<KeyedRecord>                  chainRecvCalls;    // RecvCall records by the call's start
+    mutable std::vector<KeyedRecord>                  chainReturnTypes;  // Rust ReturnType records by their def's start
+    mutable std::vector<std::pair<NodeId, ChainValue>> chainAwaitOutputs; // class → its `.await` value (cls kNoNode: two impls disagree)
+    mutable std::vector<std::pair<std::uint64_t, std::uint32_t>> chainRootRefs;  // the references at a chain root's start: ( key, index )
+    mutable bool                                      chainTablesBuilt = false;
+    static std::uint64_t chainKey( std::uint32_t fileId, std::uint32_t at ) noexcept { return ( std::uint64_t( fileId ) << 32 ) | at; }
+    static std::span<const KeyedRecord> recordsAt( const std::vector<KeyedRecord>& list, std::uint64_t key )
+    {
+        const auto lo = std::ranges::lower_bound( list, key, {}, &KeyedRecord::key );
+        const auto hi = std::upper_bound( lo, list.end(), key, []( std::uint64_t k, const KeyedRecord& e ) { return k < e.key; } );
+        return { lo, hi };
+    }
+    void buildChainTables() const
+    {
+        chainTablesBuilt = true;
+        std::vector<const Binding*> impls;    // `impl IntoFuture for C` / `impl Future for C`
+        std::vector<const Binding*> outputs;  // `type Output = U;` items
+        for( const Binding& b : ing.bindings )
+        {
+            if( b.kind == LocalBindKind::RecvCall )   // Rust records it alone (ingest_binds.h captureRustRecvCall)
+            {
+                chainRecvCalls.push_back( { chainKey( b.fileId, b.startByte ), &b } );
+            }
+            else if( b.kind == LocalBindKind::ReturnType && b.resultIndex == kWholeResult && !b.typeName.empty() && b.fromSymbol < ing.symbols.size()
+                     && callResultFamilyOf( ing.symbols[ b.fromSymbol ].lang ) == CallResultFamily::Rust )
+            {
+                chainReturnTypes.push_back( { chainKey( b.fileId, b.startByte ), &b } );
+            }
+            else if( b.kind == LocalBindKind::ImplBlock && ( std::string_view( b.var ) == "IntoFuture" || std::string_view( b.var ) == "Future" ) && !b.typeName.empty() )
+            {
+                impls.push_back( &b );
+            }
+            else if( b.kind == LocalBindKind::TypeAlias && std::string_view( b.var ) == "Output" && !b.importedName.empty() )
+            {
+                outputs.push_back( &b );
+            }
+        }
+        const auto byKey = []( const KeyedRecord& a, const KeyedRecord& b ) { return a.key < b.key; };
+        std::stable_sort( chainRecvCalls.begin(), chainRecvCalls.end(), byKey );
+        std::stable_sort( chainReturnTypes.begin(), chainReturnTypes.end(), byKey );
+        std::vector<std::uint64_t> rootKeys;   // where a depth-1 record's inner call (a chain's root) starts
+        for( const KeyedRecord& e : chainRecvCalls )
+        {
+            if( e.b->resultIndex == 1 )
+            {
+                rootKeys.push_back( chainKey( e.b->fileId, e.b->spanStart ) );
+            }
+        }
+        std::ranges::sort( rootKeys );
+        for( std::uint32_t i = 0; i < ing.references.size() && !rootKeys.empty(); ++i )
+        {
+            const std::uint64_t k = chainKey( ing.references[ i ].fileId, ing.references[ i ].startByte );
+            if( std::ranges::binary_search( rootKeys, k ) )
+            {
+                chainRootRefs.emplace_back( k, i );
+            }
+        }
+        std::ranges::sort( chainRootRefs );
+        // `.await` reads std's IntoFuture: an in-tree TRAIT of either name makes every such impl unknown (an impl's own associated
+        // `type IntoFuture = …` is no trait)
+        NodeId     one     = kNoNode;
+        const auto isTrait = [ & ]( NodeId c ) { return ing.symbols[ c ].kind == SymKind::Interface; };
+        if( types.classesNamed( "IntoFuture", CallResultFamily::Rust, isTrait, one ) != 0 || types.classesNamed( "Future", CallResultFamily::Rust, isTrait, one ) != 0 )
+        {
+            return;
+        }
+        for( const Binding* impl : impls )
+        {
+            const NodeId cls = types.rustResultClass( impl->fileId, impl->spanStart, {}, impl->typeName );
+            ChainValue   out;
+            for( const Binding* o : outputs )   // the impl's own `type Output` (its span holds the item)
+            {
+                if( o->fileId == impl->fileId && o->startByte >= impl->spanStart && o->startByte < impl->spanEnd )
+                {
+                    const std::string_view text = o->importedName;
+                    const bool plainPath = std::ranges::all_of( text, []( char c ) { return std::isalnum( static_cast<unsigned char>( c ) ) || c == '_' || c == ':'; } );
+                    const auto [ path, last ] = CallResultTypes::splitLast( text, "::" );
+                    out.cls = plainPath ? types.rustResultClass( o->fileId, o->startByte, path.empty() ? std::string_view{} : text, last ) : kNoNode;
+                    break;
+                }
+            }
+            if( cls != kNoNode )
+            {
+                chainAwaitOutputs.emplace_back( cls, out );
+            }
+        }
+        std::ranges::sort( chainAwaitOutputs, {}, &std::pair<NodeId, ChainValue>::first );
+        std::size_t kept = 0;   // a class with two impls whose outputs disagree awaits to nothing known
+        for( std::size_t i = 0; i < chainAwaitOutputs.size(); ++i )
+        {
+            if( kept > 0 && chainAwaitOutputs[ kept - 1 ].first == chainAwaitOutputs[ i ].first )
+            {
+                if( chainAwaitOutputs[ kept - 1 ].second != chainAwaitOutputs[ i ].second )
+                {
+                    chainAwaitOutputs[ kept - 1 ].second = ChainValue{};
+                }
+                continue;
+            }
+            chainAwaitOutputs[ kept++ ] = chainAwaitOutputs[ i ];
+        }
+        chainAwaitOutputs.resize( kept );
+    }
+    // the value `.await` yields on a `cls` (no layer, not a future): its in-tree IntoFuture / Future impl's `Output`
+    std::optional<ChainValue> rustAwaitOutput( NodeId cls ) const
+    {
+        if( !chainTablesBuilt )
+        {
+            buildChainTables();
+        }
+        const auto it = std::ranges::lower_bound( chainAwaitOutputs, cls, {}, &std::pair<NodeId, ChainValue>::first );
+        if( it == chainAwaitOutputs.end() || it->first != cls || it->second.cls == kNoNode )
+        {
+            return std::nullopt;
+        }
+        return it->second;
+    }
+    // the value a call to `callee` returns, by its declared WHOLE result (`owner`: the class it was found on, which a written `Self` must be)
+    std::optional<ChainValue> declaredResult( NodeId callee, NodeId owner ) const
+    {
+        const Symbol&  cs  = ing.symbols[ callee ];
+        const Binding* one = nullptr;
+        for( const KeyedRecord& e : recordsAt( chainReturnTypes, chainKey( cs.fileId, cs.sigStartByte ) ) )
+        {
+            if( one != nullptr )
+            {
+                return std::nullopt;
+            }
+            one = e.b;
+        }
+        if( one == nullptr || ( one->unwrapDepth & kDispatchResultBit ) != 0 )
+        {
+            return std::nullopt;   // no declared class: a unit, a generic `-> T`, a trait object / `impl Trait`
+        }
+        const NodeId cls = types.resultClassOf( *one, cs.lang );
+        if( cls == kNoNode || ( one->isFromAssignment && cls != owner ) )
+        {
+            return std::nullopt;
+        }
+        return ChainValue{ cls, std::uint8_t( one->unwrapDepth & kUnwrapLayersMask ), ( one->unwrapDepth & kAwaitResultBit ) != 0 };
+    }
+    // the operators a RecvCall record states between its inner call's value `v` and the receiver: `.await` first, then each `?`
+    std::optional<ChainValue> afterOperators( ChainValue v, const Binding& rec ) const
+    {
+        if( rec.isFromAssignment )
+        {
+            if( v.future )
+            {
+                v.future = false;
+            }
+            else if( v.layers == 0 )
+            {
+                const std::optional<ChainValue> out = rustAwaitOutput( v.cls );
+                if( !out.has_value() )
+                {
+                    return std::nullopt;
+                }
+                v = *out;
+            }
+            else
+            {
+                return std::nullopt;
+            }
+        }
+        if( v.future || rec.unwrapDepth > v.layers )
+        {
+            return std::nullopt;   // a method on a future, or more `?` than layers
+        }
+        v.layers = std::uint8_t( v.layers - rec.unwrapDepth );
+        return v;
+    }
+    // the ONE member `name` class `cls` itself owns (rustQualifiedTypeOwns' reading of `T::f`), kNoNode when none or several
+    NodeId ownedMember( NodeId cls, std::string_view name ) const
+    {
+        const auto m = methodsByType.find( typeKey( ing.symbols[ cls ].name, "::", name ) );
+        if( m == methodsByType.end() )
+        {
+            return kNoNode;
+        }
+        NodeId      one   = kNoNode;
+        std::size_t count = 0;
+        for( NodeId c : m->second )
+        {
+            if( ownedBy( c, cls ) )
+            {
+                one = c;
+                ++count;
+            }
+        }
+        return count == 1 ? one : kNoNode;
+    }
+    // the ONE callee of member `name` on `cls` (methodOf's lookup), kNoNode when none or several
+    NodeId uniqueMember( NodeId cls, std::string_view name ) const
+    {
+        return methodOf( ing.symbols[ cls ].name, name, false, cls ) && found.size() == 1 ? found[ 0 ] : kNoNode;
+    }
+    // the value the chain's ROOT call (`name` at byte `at`: a path call or a member call on a named receiver) returns. Every
+    // Reference of that (file, byte, name) in that shape must agree.
+    std::optional<ChainValue> chainRootValue( const Reference& r, std::uint32_t at, std::string_view name ) const
+    {
+        const std::uint64_t key = chainKey( r.fileId, at );
+        std::optional<ChainValue> agreed;
+        for( auto it = std::ranges::lower_bound( chainRootRefs, std::pair{ key, 0u } ); it != chainRootRefs.end() && it->first == key; ++it )
+        {
+            const Reference& root = ing.references[ it->second ];
+            if( root.role != RefRole::Call || std::string_view( root.calleeName ) != name || root.lang != r.lang )
+            {
+                continue;
+            }
+            NodeId cls    = kNoNode;
+            NodeId callee = kNoNode;
+            if( !root.qualifier.empty() )   // `T::f()`: the class the written qualifier names owns f (a path call: no member receiver)
+            {
+                cls = rustQualifierClass( root, rustWrittenQualifierOf( root ) );
+                callee = cls == kNoNode ? kNoNode : ownedMember( cls, name );
+            }
+            else if( root.memberCall && !root.memberRoot.empty() )   // `x.f()` / `self.f()` / `self.a.f()`
+            {
+                const Chain ch = chainOf( root );
+                cls    = ch.ctor.empty() ? typedReceiverClass( root, ch ) : kNoNode;
+                callee = cls == kNoNode ? kNoNode : uniqueMember( cls, name );
+            }
+            else
+            {
+                continue;   // a hop (its own receiver is a call) or a bare call: no root
+            }
+            const std::optional<ChainValue> v = callee == kNoNode ? std::nullopt : declaredResult( callee, cls );
+            if( !v.has_value() || ( agreed.has_value() && *agreed != *v ) )
+            {
+                return std::nullopt;
+            }
+            agreed = v;
+        }
+        return agreed;
+    }
+    // the value the RECEIVER of the call `name` at byte `at` holds: its RecvCall records at hop `depth` (0: any — a Reference cannot
+    // tell which of two same-named hops sharing a start byte it is, so all of them must agree), each read through its inner call
+    std::optional<ChainValue> rustChainReceiver( const Reference& r, std::uint32_t at, std::string_view name, std::uint8_t depth, int budget ) const
+    {
+        if( budget <= 0 )
+        {
+            return std::nullopt;
+        }
+        if( !chainTablesBuilt )
+        {
+            buildChainTables();
+        }
+        std::optional<ChainValue> agreed;
+        for( const KeyedRecord& e : recordsAt( chainRecvCalls, chainKey( r.fileId, at ) ) )
+        {
+            const Binding& rec = *e.b;
+            if( std::string_view( rec.typeName ) != name || ( depth != 0 && rec.resultIndex != depth ) )
+            {
+                continue;
+            }
+            std::optional<ChainValue> v;
+            if( rec.resultIndex <= 1 )
+            {
+                v = chainRootValue( r, rec.spanStart, rec.var );
+            }
+            else if( const std::optional<ChainValue> recv = rustChainReceiver( r, rec.spanStart, rec.var, std::uint8_t( rec.resultIndex - 1 ), budget - 1 ); recv.has_value() )
+            {
+                const bool unwrapCall = std::string_view( rec.var ) == "unwrap" || std::string_view( rec.var ) == "expect";
+                if( unwrapCall && recv->layers > 0 && !recv->future )
+                {
+                    v = ChainValue{ recv->cls, std::uint8_t( recv->layers - 1 ), false };   // `.unwrap()` strips a layer, as `?` does
+                }
+                else if( recv->layers == 0 && !recv->future )
+                {
+                    const NodeId callee = uniqueMember( recv->cls, rec.var );
+                    v = callee == kNoNode ? std::nullopt : declaredResult( callee, recv->cls );
+                }
+            }
+            v = v.has_value() ? afterOperators( *v, rec ) : std::nullopt;
+            if( !v.has_value() || ( agreed.has_value() && *agreed != *v ) )
+            {
+                return std::nullopt;
+            }
+            agreed = v;
+        }
+        return agreed;
+    }
+    // the ONE class a Rust member call's receiver holds when that receiver is another call's result; kNoNode otherwise
+    NodeId rustChainReceiverClass( const Reference& r ) const
+    {
+        const std::optional<ChainValue> v = rustChainReceiver( r, r.startByte, r.calleeName, 0, kChainHopCap );
+        return v.has_value() && v->layers == 0 && !v->future ? v->cls : kNoNode;
+    }
+    // graph.h typeCallResults: a `let x = f().await` whose callee `f` is no `async fn` (`rt` states no await) awaits the class its
+    // result names through that class's in-tree IntoFuture / Future impl (rustAwaitOutput); the class x then holds, kNoNode for none
+    NodeId rustAwaitedCallResult( const Binding& cr, const Binding& rt, Lang lang ) const
+    {
+        if( ( cr.unwrapDepth & kAwaitResultBit ) == 0 || rt.unwrapDepth != 0 || callResultFamilyOf( lang ) != CallResultFamily::Rust )
+        {
+            return kNoNode;
+        }
+        const NodeId cls = types.resultClassOf( rt, lang );
+        const std::optional<ChainValue> out = cls == kNoNode ? std::nullopt : rustAwaitOutput( cls );
+        return out.has_value() && out->layers == ( cr.unwrapDepth & kUnwrapLayersMask ) ? out->cls : kNoNode;
     }
     // lane L6 (interface-typed dispatch): the TYPE a member call's receiver is recorded as — the one class or interface the
     // dispatch tier (ifacedispatch.h) asks about — and, for a Rust generic, the bound that typed it. `type` kNoNode: nothing
