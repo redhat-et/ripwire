@@ -10488,9 +10488,9 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 {
                     typeRule2CallResult( cr, ri, rt.unwrapDepth == 1 );
                 }
-                else if( cls != kNoNode )
+                else
                 {
-                    recvEv.typeCallResult( cr, ing.symbols[ cls ].name, cls );
+                    recvEv.typeCallResultOf( cr, rt, cls, cs.lang );   // GO-CALLRESULT-LOCAL: or a type the tree has only methods of
                 }
                 break;
             }

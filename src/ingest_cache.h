@@ -380,7 +380,12 @@ constexpr std::uint32_t kCacheVersion = 52;           // 52: lane failure-defaul
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 313;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 331;          // bump on any grammar/.scm/extraction change
+                                                      // 331 = 2026-11-18 (train 1117d1; above main's 311/312, #688's 313/314 and the members' placeholders
+                                                      //   317/321/323/327/329): rich file tag 332. kCacheVersion unchanged. The members' extraction changes:
+                                                      //   go-cpp-edges (placeholder 317): a Go result type written as a generic instantiation (`Set[T]`, `*pkg.Set[string]`) records its
+                                                      //   ReturnType as the instantiated class (ingest_binds.h goResultClass); it recorded none. Rich file tag 318.
+                                                      //   kCacheVersion unchanged: no record changes shape.
                                                       // 313 = 2026-11-17 (TRAIN-1117b: ONE number for its two parser members, strictly above main c565a3fad's 311/312
                                                       //   (#420, landed by TRAIN-1117a-r #686)). Rich file tag 314. kCacheVersion unchanged.
                                                       //   - #446 round 2, @SeddonShen, landed as lane land-606 (its placeholder 316): Java base clauses read as

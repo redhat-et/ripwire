@@ -5110,18 +5110,24 @@ inline TSNode goReceiverTypeArguments( TSNode fn )
     return {};
 }
 
-// Go: the class one written result type names — `T`, `*T`, `pkg.T`, `*pkg.T` (`whole` = "pkg.T" for the qualified one) — or
-// "" for anything else (a slice, map, channel, function, generic instantiation, interface literal) or a type parameter of
+// Go: the class one written result type names — `T`, `*T`, `pkg.T`, `*pkg.T` (`whole` = "pkg.T" for the qualified one), and
+// a generic instantiation's own class (`Set[T]`, `*pkg.Set[string]`: a value of `Set[..]` has Set's methods whatever the
+// arguments are) — or "" for anything else (a slice, map, channel, function, interface literal) or a type parameter of
 // the definition (`fn`'s own `[T any]` or its receiver's `Ref[T]`).
 inline std::string_view goResultClass( TSNode type, TSNode fn, std::string_view src, std::string_view& whole )
 {
     whole = {};
-    for( int guard = 0; guard < 4 && !ts_node_is_null( type ); ++guard )
+    for( int guard = 0; guard < 5 && !ts_node_is_null( type ); ++guard )
     {
         const char* t = ts_node_type( type );
         if( kindIs( t, "pointer_type" ) || kindIs( t, "parenthesized_type" ) )
         {
             type = ts_node_named_child_count( type ) == 1 ? ts_node_named_child( type, 0 ) : TSNode{};
+            continue;
+        }
+        if( kindIs( t, "generic_type" ) )
+        {
+            type = fieldChild( type, NodeField::Type );   // `Set[T]` / `pkg.Set[T]`: the instantiated class, never an argument
             continue;
         }
         if( kindIs( t, "type_identifier" ) )
