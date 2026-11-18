@@ -14,6 +14,7 @@
 # passed an answer whose capped="1" sat after its last row; test/refdisclosurecheck.sh holds the placement.
 set -u
 BIN="${RIPWIRE_BIN:-${1:-./build/ripwire}}"
+. "$( cd "$( dirname "$0" )/.." && pwd )/test/lib/clean-env.sh"   # arm (S) builds a throwaway git repo (gitenvhermeticcheck (D))
 if [ ! -x "$BIN" ]; then echo "no ripwire binary at $BIN -- build first (cmake --build build -j)"; exit 2; fi
 fail=0
 pass() { printf '  PASS  %s\n' "$1"; }
