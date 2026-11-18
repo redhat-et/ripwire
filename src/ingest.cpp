@@ -212,6 +212,7 @@ extern "C"
 #include "ingest_valuerefs.h"
 #include "ingest_rustslots.h"   // FN-SLOT part 2: Rust's slot-join records (callSide ParenFieldCall)
 #include "ingest_sidecap.h"
+#include "ingest_rustmacroargs.h"   // RUST-MACRO-ARGS: the calls written inside a Rust macro invocation's arguments
 #include "ingest_prewarm.h"
 #include "ingest_parsepool.h"
 #include "ingest_docpass.h"

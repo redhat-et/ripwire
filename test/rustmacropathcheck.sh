@@ -16,6 +16,16 @@
 #   X arms  #610 (fixture by @soarkit, test/rustmacropathfix/rx-*): a `pub use` that resolves outside the tree carries no class, and two
 #           re-exports of the SAME class agree, so `make()`'s `crate::facade::Config` types `c.get()` (proven); two re-exports of DIFFERENT
 #           in-tree classes stay ambiguous (both rows by name, none proven; premise: two Config::get rows).
+#   A arms  RUST-MACRO-ARGS (fixture test/rustmacropathfix/args): a call written inside a macro invocation's arguments is a call of the
+#           enclosing function: `assert_eq!(probe(), 1)`, `format!("{}", render())`, `vec![probe(), 2]`, a `self.` call, a call on a
+#           later line than the macro's name (its own line), the block arm of a user macro (`tap!(self, mut this => { … })`, with the
+#           macro nested in it, and the method call on the macro-bound `this` hedged via=name), a struct-expression arm body
+#           (`remap!(self, this => Engine { … })`) and the first argument of a `matches!` nested in an `assert!`.
+#   B arms  negatives, each beside a premise that counts what the same answer DID read (FAILs on zero): a `quote!` body, a DSL body
+#           in braces, in parentheses and with a call-shaped word between commas, `stringify!`, a `macro_rules!` definition's transcriber, `cfg!(any(…))` and the pattern
+#           argument of `matches!` emit no call.
+#   C arms  the re-read's nesting bound (kMacroArgNestingDepth 16): a call under 3 nested macros is read; under 20 it is not, and the
+#           file is disclosed in --skipped as why="extract-partial". The file is generated here, never committed.
 # usage: bash test/rustmacropathcheck.sh [BIN]   (BIN falls back to RIPWIRE_BIN, then build/ripwire)
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -133,6 +143,50 @@ x3rows=$( printf '%s' "$x3" | grep -oE '<s [^>]*n="Config::get"[^>]*>' | grep -c
 x3proven=$( printf '%s' "$x3" | grep -oE '<s [^>]*n="Config::get"[^>]*>' | grep -vc 'via="name"' )
 if [ "$x3rows" -lt 2 ]; then echo "FAIL X3.premise want two Config::get rows (two in-tree classes), got $x3rows"; fail=1; else echo "PASS X3.premise (rows=$x3rows)"; fi
 if [ "$x3rows" -ge 2 ] && [ "$x3proven" = 0 ]; then echo "PASS X3.diffclass (ambiguous: $x3rows rows by name)"; else echo "FAIL X3.diffclass want every Config::get row via=\"name\", got $x3proven proven of $x3rows"; fail=1; fi
+
+# ---- A: RUST-MACRO-ARGS, calls written inside macro arguments (args/src/pos.rs)
+A=$T/args
+row     A1.assert      "$A" callees in_assert     src/lib.rs probe          proven
+row     A2.format      "$A" callees in_format     src/lib.rs render         proven
+row     A3.vec         "$A" callees in_vec        src/lib.rs probe          proven
+usesite A4.ownline     "$A" late_line src/pos.rs:15
+row     A5.selfcall    "$A" callees in_self_call  src/pos.rs Engine::own_len proven
+row     A6.blockarm    "$A" callees Engine::route src/lib.rs block_helper   proven
+row     A7.armmacro    "$A" callees Engine::route src/macros.rs checked     present
+usesite A8.armmethod   "$A" route_inner src/pos.rs:23
+row     A8.armhedge    "$A" callees Engine::route src/lib.rs Inner::route_inner name
+row     A9.nested      "$A" callees in_nested     src/lib.rs nested_helper  proven
+row     A10.matchfirst "$A" callees in_nested     src/lib.rs wrap           proven
+row     A11.armexpr    "$A" callees Engine::rebuilt src/lib.rs arm_helper   proven
+# ---- B: tokens that are not an expression of the enclosing function emit nothing (args/src/neg.rs, args/src/macros.rs)
+row     B0.premise     "$A" callers ghost_call    src/pos.rs live_control   proven
+row     B1.quote       "$A" callers ghost_call    src/neg.rs dsl_quote      none
+row     B2.dslbrace    "$A" callers ghost_call    src/neg.rs dsl_sql_block  none
+row     B3.dslparen    "$A" callers ghost_call    src/neg.rs dsl_sql_paren  none
+row     B4.stringify   "$A" callers ghost_call    src/neg.rs dsl_stringify  none
+row     B4.dsllist     "$A" callers ghost_call    src/neg.rs dsl_sql_list   none
+b5=$( ask "$A" callers ghost_call )
+b5rows=$( printf '%s' "$b5" | grep -oE '<(s|dc) [^>]*p="src/(neg|macros)\.rs[^>]*>' | grep -c . )
+b5all=$( printf '%s' "$b5" | grep -oE '<s [^>]*>' | grep -c . )
+if [ "$b5all" -ge 1 ] && [ "$b5rows" = 0 ]; then echo "PASS B5.defsite (callers=$b5all, none from neg.rs or the macro_rules! definitions)"
+else echo "FAIL B5.defsite --callers=ghost_call: $b5rows row(s) from neg.rs/macros.rs of $b5all (want 0 of >=1)"; fail=1; fi
+row     B6.premise     "$A" callers any           src/pos.rs any_control    proven
+row     B6.cfg         "$A" callers any           src/neg.rs in_cfg         none
+row     B7.premise     "$A" callees in_pattern    src/lib.rs wrap           proven
+row     B7.pattern     "$A" callees in_pattern    src/lib.rs Shape          none
+
+# ---- C: the nesting bound is disclosed (a generated file: 3 and 20 nested `dbg!`)
+D=$T/deep
+mkdir -p "$D/src"
+python3 -I -c '
+print("pub fn deep_leaf() -> u32 { 1 }")
+for name, depth in (("shallow", 3), ("deep", 20)):
+    print("pub fn " + name + "() -> u32 { " + "dbg!(" * depth + "deep_leaf()" + ")" * depth + " }")' >"$D/src/lib.rs"
+row     C1.shallow     "$D" callers deep_leaf     src/lib.rs shallow        proven
+row     C2.pastbound   "$D" callers deep_leaf     src/lib.rs deep           none
+c3=$( cd "$D" && "$BIN" "$D" --skipped --no-cache --legend=compact </dev/null 2>/dev/null )
+if printf '%s' "$c3" | grep -q '<f p="src/lib.rs" why="extract-partial"'; then echo "PASS C3.disclosed (--skipped lists src/lib.rs why=extract-partial)"
+else echo "FAIL C3.disclosed --skipped does not list src/lib.rs as extract-partial: the bound cut calls unsaid"; fail=1; fi
 
 if [ "$fail" = 0 ]; then echo "rustmacropathcheck: PASS"; else echo "rustmacropathcheck: FAIL"; fi
 exit "$fail"

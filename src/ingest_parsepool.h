@@ -549,6 +549,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
         lexScratch.reserve( 1024 );
     }
     MemberMacroReparse macroWork;                        // member-macro re-parse (src/macroreparse.h): per-worker scratch
+    MacroArgScratch    macroArgWork;                     // RUST-MACRO-ARGS (ingest_rustmacroargs.h): per-worker fragment parser and scratch
     RecordScratch              record;                   // WARM-DIRECT: one cache record's bytes, dictionary and decoded facts, reused across hits
     macroWork.captureValueUses = sh.captureValueUses;
     // CLONES-PERSIST: every family keys each new Function/Method body for findClones (rawDefCloneKey) from
@@ -594,10 +595,12 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                 const TSNode root = ts_tree_root_node( pending.tree );
                 const std::size_t firstNewDefIndex = out.defs.size();
                 ExtractShortfall  tagsShortfall;
+                const std::size_t firstTagsRefIndex = out.refs.size();
                 underExtractScope<ExtractPhase::TagsFacts>( pending.le->lang, [ & ]
                 {
                     captureTagsFacts( cursor, *pending.le, pending.fileId, pending.bytes, root, out.defs, out.refs, out.binds, out.incs, pending.ppDead, tagsShortfall,
                                       TagsCapture::Full, cjsExportStem( pending.le->lang, sh.files[ pending.fileId ] ) );
+                    rereadMacroArguments( macroArgWork, cursor, *pending.le, pending.fileId, pending.bytes, root, out.refs, firstTagsRefIndex, tagsShortfall );
                 } );
                 notePartialExtract( scan, pending.fileId, tagsShortfall, pending.bytes.size() );
                 finishNewDefs( out.defs, firstNewDefIndex, pending.bytes );   // B0.2: bytes still in memory
@@ -856,10 +859,12 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                     waitForQueryPrewarm( &sh.gate );
                 }
                 const std::size_t firstNewDefIndex = out.defs.size();
+                const std::size_t firstTagsRefIndex = out.refs.size();
                 underExtractScope<ExtractPhase::TagsFacts>( le->lang, [ & ]
                 {
                     captureTagsFacts( cursor, *le, static_cast<std::uint32_t>( fileId ), bytes, root, out.defs, out.refs, out.binds, out.incs, ppDead, shortfall,
                                       TagsCapture::Full, cjsExportStem( le->lang, path ) );
+                    rereadMacroArguments( macroArgWork, cursor, *le, static_cast<std::uint32_t>( fileId ), bytes, root, out.refs, firstTagsRefIndex, shortfall );
                 } );
                 notePartialExtract( scan, fileId, shortfall, bytes.size() );
                 finishNewDefs( out.defs, firstNewDefIndex, bytes );   // B0.2: bytes still in memory
