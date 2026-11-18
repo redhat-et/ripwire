@@ -1381,8 +1381,7 @@ struct ShellScan
     std::vector<ShellFunctionWrite> functionWrites;    // every write inside a function body (shellCloseScopes)
     bool                       isLastPipe = false;     // `shopt -s lastpipe` in force here (a child's is undone at its end)
     ShellNarrowChain           narrowed;               // shellNarrowFrom's visit-once chain over fh.writes
-    NextStop                   wordEnd;                // the next blank or `;&|`
-    NextStop                   bracket;                // the next `]`
+    NextStop                   wordEnd, bracket;       // the next blank or `;&|`, the next `]`
 
     std::uint32_t function() const noexcept { return braces.empty() ? kNoFunction : braces.back().function; }
 };
