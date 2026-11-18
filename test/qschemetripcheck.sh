@@ -34,6 +34,10 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-18, train 1117d1 (rebase-stack on main c565a3fad: cpp-base-by-name, go-cpp-edges, cpp-ptr-alias, overload-split,
+#   small-edges-1118, edge-strays-1118): RE-PINNED ONCE with UPDATE_GOLDEN=1 from the composed build (hash c1fefa06b4…f246ff2).
+#   kParserVer 331 (rich 332) replaces the members' placeholders 317/321/323/327/329 (entries below; each lane's hash was that
+#   lane alone), above main's 311/312 and #688's 313/314. kQSnapCacheScheme stays 34.
 # 2026-11-18, lane edge-strays-1118 (base main 9087eb59c): RE-PINNED with UPDATE_GOLDEN=1. kParserVer 309 -> 327 (placeholder above
 #   the open lanes; the train renumbers) with quality.h's kIngestParserVerMirror: a Rust call written through a bracketed type
 #   (`<Where as Command>::run`) is qualified by the type it names (ingest_names.h rustBracketedQualifier). kQSnapCacheScheme stays
