@@ -185,6 +185,12 @@ int caller( A& a, B& b )
     int y = b.get( 2, 3 );
     return x + y;
 }
+template <class T, class U> int generic( T& a, U& b )
+{
+    int x = a.get( 1 );
+    int y = b.get( 2, 3 );
+    return x + y;
+}
 X
 cat > "$F/py2/lib.py" <<'X'
 class Store:
@@ -209,6 +215,12 @@ def handler(s: Store, c: Cache):
 def withlambda(items):
     f = lambda v: calc(v, 2)
     return [f(i) for i in items]
+
+def untyped(s, c):
+    a = s.fetch("x")
+    b = c.fetch("y",
+                default=1)
+    return a, b
 X
 cat > "$F/qual/q.cpp" <<'X'
 namespace ns { struct W { static int make( int s ); }; }
@@ -325,7 +337,9 @@ CMDS=(
   "key_path|c|--path=usekey,leaf"
   "cpp2_path|cpp2|--path=caller,B::get"
   "cpp2_conn|cpp2|--connect=A::get,B::get"
+  "cpp2_name|cpp2|--path=generic,B::get"
   "py2_path|py2|--path=handler,Cache.fetch"
+  "py2_tie|py2|--path=untyped,Cache.fetch"
   "py2_alias|py2|--path=withlambda,compute"
   "qual_b1|qual|--path=b1,ns::W::make"
   "qual_b2|qual|--path=b2,W::make"
@@ -479,7 +493,7 @@ def row(t, n):   # the --path hop row naming n
 
 # (1) identity, with its positive twin
 names = ["c_path", "c_macro", "c_far", "c_conn", "cpp_path", "py_path", "pyd_conn", "ts_path", "go_path", "rs_path", "min_path", "crlf_path", "key_path", "self_path", "self_conn",
-         "cpp2_path", "cpp2_conn", "py2_path", "qual_b1", "qual_b2", "tsq_b", "tsq_a", "nf_path", "sec4", "sec5", "sec6", "sec7", "sec8", "sec9", "sec10"]
+         "cpp2_path", "cpp2_conn", "cpp2_name", "py2_path", "py2_tie", "qual_b1", "qual_b2", "tsq_b", "tsq_a", "nf_path", "sec4", "sec5", "sec6", "sec7", "sec8", "sec9", "sec10"]
 for n in names:
     if ran(n) and ran(n + ".off"):
         check(strip(rd(n)) == strip(rd(n + ".off")), "(1) %s: the answer minus the hop attributes is the kill-switch answer byte for byte" % n)
@@ -586,15 +600,22 @@ m = rd("mcp_pyd_conn")
 check(m != "" and rows(m, "e") == rows(rd("pyd_conn"), "e"), "(7) MCP connect prints the CLI's <e> rows byte for byte")
 
 # (6) the pick: owner first, an arity misfit last, a namesake tie and a misfit disclosed (review S1/S2)
+# PROVEN-SITE-KEEPS-NAMESAKES: a call a rule proved counts as a site of its own target only, so the typed callers (caller, handler)
+# have ONE site per row; the pick among same-named calls is exercised on the by-name twins (generic, untyped).
 t = rd("cpp2_path")
-check('site="m.cpp:8" sites="2" call="int y = b.get( 2, 3 );" sig="int B::get( int k, int j )"' in row(t, "B::get") and "site_by=" not in t,
-      "(6) caller -> B::get: the call whose argument count B::get accepts (b.get( 2, 3 )), not the first same-named one; decided, no site_by=")
+check('site="m.cpp:8" call="int y = b.get( 2, 3 );" sig="int B::get( int k, int j )"' in row(t, "B::get") and "sites=" not in row(t, "B::get") and "site_by=" not in t,
+      "(6) caller -> B::get: a.get( 1 ) is proven A::get's, so b.get( 2, 3 ) is B::get's only site (no sites=, no site_by=)")
+t = rd("cpp2_name")
+check('via="name" site="m.cpp:14" sites="2" call="int y = b.get( 2, 3 );" sig="int B::get( int k, int j )"' in row(t, "B::get") and "site_by=" not in t,
+      "(6) generic -> B::get (by name): the call whose argument count B::get accepts (b.get( 2, 3 )), not the first same-named one; decided, no site_by=")
 e = rows(rd("cpp2_conn"), "e")
 check(len(e) == 2 and any('tp="m.cpp:3" site="m.cpp:7"' in r and 'call="int x = a.get( 1 );"' in r for r in e)
       and any('tp="m.cpp:4" site="m.cpp:8"' in r and 'call="int y = b.get( 2, 3 );"' in r for r in e),
       "(6) --connect=A::get,B::get: each <e> row its own call (m.cpp:7 for A::get, m.cpp:8 for B::get), not one site twice")
 t = row(rd("py2_path"), "Cache.fetch")
-check('site="app.py:5" sites="2" site_by="first"' in t, "(6) Python s.fetch / c.fetch (an implicit receiver: arity cannot decide): the first site, the tie disclosed (site_by=first)")
+check('site="app.py:6"' in t and "sites=" not in t and "site_by=" not in t, "(6) Python typed s: Store / c: Cache: s.fetch is proven Store's, so c.fetch is Cache.fetch's only site")
+t = row(rd("py2_tie"), "Cache.fetch")
+check('site="app.py:15" sites="2" site_by="first"' in t, "(6) Python untyped s.fetch / c.fetch (by name, an implicit receiver: arity cannot decide): the first site, the tie disclosed (site_by=first)")
 check('site="q.cpp:7"' in row(rd("qual_b1"), "W::make") and 'call="return a + ns::W::make( 7 ); }"' in row(rd("qual_b1"), "W::make"),
       "(6) b1 -> ns::W::make: the call qualified by the owner (ns::W::make, line 7), not the earlier O::make (line 6)")
 check('site="q.cpp:10"' in row(rd("qual_b2"), "W::make"), "(6) b2 -> W::make (namespace dropped): the owner-qualified call (line 10), not O::make")
@@ -602,7 +623,7 @@ check('site="q.ts:5"' in row(rd("tsq_b"), "B.make") and 'site="q.ts:4"' in row(r
       "(6) TS A.make / B.make (owner by containment, no stored scope): each row its own class's call")
 check('site="n.cpp:5" site_by="nofit" call="return c.get( 1 );"' in row(rd("nf_path"), "C::get"),
       "(6) c.get( 1 ) beside C::get( a, b, c ): the only name match, its arity misfit disclosed (site_by=nofit)")
-for n in ("py2_path", "nf_path"):
+for n in ("py2_tie", "nf_path"):
     leg = "".join(re.findall(r'<!--.*?-->', rd(n), re.S))
     check("site_by=" in leg and "site_by=" in "".join(re.findall(r'<!--.*?-->', rd(n + ".full"), re.S)), "(6) %s: site_by= is defined in its compact and full legend" % n)
 check(rd("cpp2_path").count(' site="') > 0 and "site_by=" not in "".join(re.findall(r'<!--.*?-->', rd("cpp2_path"), re.S)),
