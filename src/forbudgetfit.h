@@ -308,16 +308,24 @@ struct ShedState
 };
 
 // Where held block `c` starts with its own legend: the XML comment right before it that names it (`<!-- syms: …-->`,
-// `<!-- reexports held="budget": …-->`), printed with the block and outside est_tokens like it; c.at when there is none.
-// childrenOf skips comments, so the block alone was charged (CodeRabbit #665: <syms>' 265 B legend rode free).
+// `<!-- reexports held="budget": …-->`, `<!-- ripwire for manifest_rows: …-->`), printed with the block and outside est_tokens
+// like it; c.at when there is none. childrenOf skips comments, so the block alone was charged (CodeRabbit #665: <syms>' 265 B
+// legend rode free; CodeRabbit #686: every `<!-- ripwire for NAME` legend did, syms, decl_rows, manifest_rows and the rest).
 inline std::size_t heldLegendAt( std::string_view answer, const Child& c )
 {
-    const std::size_t open = answer.substr( 0, c.at ).ends_with( "-->" ) ? answer.rfind( "<!-- ", c.at ) : std::string_view::npos;
-    if( open == std::string_view::npos || !answer.substr( open + 5 ).starts_with( c.name ) )
+    constexpr std::string_view kOpen = "<!-- ", kForPrefix = "ripwire for ";
+    const std::size_t open = answer.substr( 0, c.at ).ends_with( "-->" ) ? answer.rfind( kOpen, c.at ) : std::string_view::npos;
+    if( open == std::string_view::npos )
     {
         return c.at;
     }
-    const char after = answer[ open + 5 + c.name.size() ];
+    const std::string_view named = answer.substr( open + kOpen.size() );
+    const std::string_view name  = named.starts_with( kForPrefix ) ? named.substr( kForPrefix.size() ) : named;
+    if( name.size() <= c.name.size() || !name.starts_with( c.name ) )
+    {
+        return c.at;
+    }
+    const char after = name[c.name.size()];
     return after == ':' || after == ' ' ? open : c.at;
 }
 

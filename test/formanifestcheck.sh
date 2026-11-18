@@ -44,6 +44,8 @@
 # ARMS (CodeRabbit round on train #686)
 #   (rd1) a defining line is source text: a package.json script's token literals print redacted, also one past the raw 120-byte
 #         cut (redacted before the cut), and stderr counts every marker; (rd2) --no-redact prints them raw
+#   (b4) the fit prices the block's legend (heldLegendAt reads `<!-- ripwire for manifest_rows:`): one token under the whole
+#        price holds the block, the whole price prints the answer byte for byte
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
@@ -466,6 +468,15 @@ else no "(b2) budget 4000: $( grep -o '<manifest_rows.*' "$TMP/b2.xml" | head -c
 run acme "--for=add a new broker transport like NATS or MQTT to brokers" --token-budget=1400 >"$TMP/b3.xml" || no "(b3) the run exited $?"
 if grep -q '<manifest_rows files="2" held="budget"/></ctx>$' "$TMP/b3.xml" && ! grep -q '<r l=' "$TMP/b3.xml"; then ok "(b3) the fit prices the block: held at 1400"
 else no "(b3) budget 1400: $( grep -o '<manifest_rows.*' "$TMP/b3.xml" | head -c 300 )"; fi
+# (b4) CodeRabbit 4609415543: the held price carries the block's own legend (softbudget.py whole_price, the gate's twin of
+# heldBlocksPrice). Red before: heldLegendAt read only `<!-- manifest_rows`, so a budget one token under the whole price
+# still printed the whole answer, the legend over the budget.
+W="$( python3 -c 'import sys; sys.path.insert( 0, sys.argv[1] ); import softbudget; print( softbudget.whole_price( sys.argv[2] ) )' "$ROOT/test/lib" "$TMP/b2u.xml" )"
+run acme "--for=add a new broker transport like NATS or MQTT to brokers" --token-budget="$W" >"$TMP/b4w.xml" || no "(b4) the run exited $?"
+run acme "--for=add a new broker transport like NATS or MQTT to brokers" --token-budget="$(( W - 1 ))" >"$TMP/b4.xml" || no "(b4) the run exited $?"
+if cmp -s "$TMP/b4w.xml" "$TMP/b2u.xml" && grep -q '<manifest_rows files="2" held="budget"/></ctx>$' "$TMP/b4.xml" && ! grep -q '<r l=' "$TMP/b4.xml"; then
+    ok "(b4) the fit prices the legend: whole at $W, held at $(( W - 1 ))"
+else no "(b4) whole price $W: at W $( cmp -s "$TMP/b4w.xml" "$TMP/b2u.xml" && echo whole || echo changed ), at W-1 $( grep -o '<manifest_rows[^>]*>' "$TMP/b4.xml" | head -1 )"; fi
 # (rd1)/(rd2) CodeRabbit 4609415549: a defining line is source text, redacted like every served body (redact.h). The release line
 # is 147 bytes raw; its second token starts at byte 105: cut first, only `ghp_` and 11 bytes of it print, too short for the GitHub
 # rule, and leak. Redacted first, the first token's marker frees 34 bytes and both markers fit under the 120-byte cut.
