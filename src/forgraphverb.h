@@ -17,6 +17,7 @@
 #include "compactlegend.h"   // spanHasAttr — the ONE attribute-at-a-tag-boundary test
 #include "filter.h"      // pathTierOf — name_test_hops=: the verb's own test/fixture path classifier
 #include "graph.h"       // resolveAllByNameQualified / resolveFocus — the callers / connect resolvers
+#include "handoffwindow.h"   // WINDOW-AWARE HAND-OFF: a windowing callers block is a stub naming the complete call
 #include "lexical.h"     // parseGraphSubject — the subject-only half
 #include "nextverb.h"    // nextFlag / nextAttrXml — verb= is a pasteable invocation
 #include "packtask.h"    // findSectionOpenTag — an element's open tag, comments skipped
@@ -279,12 +280,15 @@ struct ConnectTerminalSpellings
 
 // How a block is opened (FOR-ROUTE fix1): `jsonDialect` = the body is the MCP callers twin's JSON in a CDATA section (S1);
 // `held` = a token budget is set, so the verb did NOT run here and the tag is self-closed with the verb= handle only (S2);
-// `nameTestHops` = path rows matched by name alone whose p= is a test or fixture path (S5), 0 = attribute absent.
+// `nameTestHops` = path rows matched by name alone whose p= is a test or fixture path (S5), 0 = attribute absent;
+// `windowTotal` = the callers verb ran and its default answer windows over this many rows (handoffwindow.h), so the tag is
+// self-closed with windows="1", next_total= and the complete call as next=; 0 = the verb's answer follows as before.
 struct GraphSubjectOpen
 {
     bool        jsonDialect  = false;
     bool        held         = false;
     std::size_t nameTestHops = 0;
+    std::size_t windowTotal  = 0;
 };
 
 // The candidate combinations, in the order they are tried (at most kGraphSubjectAttempts). A two-endpoint form ranks (a,b) by
@@ -467,8 +471,10 @@ inline std::string graphSubjectOpenXml( const GraphSubjectArgs& a, const GraphSu
     out += o.nameTestHops > 0 ? "; name_test_hops=N: N path hops were matched by name alone to a definition in a test or fixture path, so they may not be the call the source makes" : "";
     out += a.narrowed.empty() ? "" : "; narrowed= names the task spellings several definitions fit (refused as written): the ones in a test or fixture path "
                                      "and the bodyless ones were dropped, and verb= names the ONE source definition left by its own spelling";
+    out += o.windowTotal > 0 ? kWindowHandoffBlockLegend : std::string_view();
     out += o.held ? "; held=\"budget\": a token budget is set, so the verb did NOT run here: verb= is the one call to run; the answer above is unchanged --><graph_verb endpoints=\"subject\""
-                  : "; the verb's own legend follows; the answer above is unchanged, and these bytes are not in est_tokens --><graph_verb endpoints=\"subject\"";
+           : o.windowTotal > 0 ? "; verb= is the default call (that first page); the answer above is unchanged, and these bytes are not in est_tokens --><graph_verb endpoints=\"subject\""
+                               : "; the verb's own legend follows; the answer above is unchanged, and these bytes are not in est_tokens --><graph_verb endpoints=\"subject\"";
     const auto [ flag, value ] = graphSubjectVerbFlag( a );
     out += nextAttrXml( nextFlag( flag, value ), "verb" );
     out += graphSubjectSpanAttrs( a ) + graphSubjectTriedAttrs( a );
@@ -476,7 +482,11 @@ inline std::string graphSubjectOpenXml( const GraphSubjectArgs& a, const GraphSu
     out += o.held ? " held=\"budget\"" : "";
     out += o.nameTestHops > 0 ? " name_test_hops=\"" + std::to_string( o.nameTestHops ) + "\"" : "";
     out += narrowedAttrXml( a.narrowed );
-    out += o.held ? "/>" : ">";
+    if( o.windowTotal > 0 )
+    {
+        out += " counts_floor=\"1\"" + handoffNextAttrsXml( flag, value, HandoffWindow{ o.windowTotal, true } );
+    }
+    out += o.held || o.windowTotal > 0 ? "/>" : ">";
     return out;
 }
 
@@ -679,18 +689,8 @@ struct MetBridgePlan
 
 namespace metbridge_detail
 {
-// the value of attribute `name` in one printed row (its escaped bytes; "" when absent)
-inline std::string_view attrOf( std::string_view row, std::string_view name )
-{
-    const std::string key = " " + std::string( name ) + "=\"";
-    const std::size_t at  = row.find( key );
-    if( at == std::string_view::npos )
-    {
-        return {};
-    }
-    const std::string_view v = row.substr( at + key.size() );
-    return v.substr( 0, v.find( '"' ) );
-}
+// the value of attribute `name` in one printed row (handoffwindow.h printedAttrOf: one reader for both lanes)
+inline std::string_view attrOf( std::string_view row, std::string_view name ) { return printedAttrOf( row, name ); }
 // a printed `file:line` names file `fileId` at `line`: the path is the root-relative one, or the tail of the stored one
 inline bool namesPlace( const IngestResult& ing, std::string_view printed, std::uint32_t fileId, std::uint32_t line )
 {

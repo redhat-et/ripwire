@@ -617,6 +617,7 @@ for _g in \
     guardmsgcheck \
     gvassemblycheck \
     handlerrulecheck \
+    handoffwindowcheck \
     hasacheck \
     hashsetcheck \
     hazardpatterncheck \

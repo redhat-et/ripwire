@@ -33,6 +33,7 @@
 #include "docparse.h"        // detail::readWholeFile — the ranked seed reads the candidate's file
 #include "filter.h"          // pathTierOf — the ranked seed's noise gate (every first-hop caller a test or bench path)
 #include "graph.h"           // viaNameAttr
+#include "handoffwindow.h"   // WINDOW-AWARE HAND-OFF: next= names the complete radius call when the default one windows
 #include "infra/namesplit.h"   // isIdentChar — the ranked seed's task-word fold
 #include "lexical.h"         // splitRouteWords — the ranked seed's task words
 #include "memberowner.h"     // MemberOwners / qualifiedMemberName — n= as the callers verb prints it (QUALNAME-1, train 33)
@@ -615,7 +616,9 @@ inline CallerHopRender renderForCallerHop( const IngestResult& ing, const Graph&
     {
         x += " d2=\"" + std::to_string( second.size() ) + "\" d2_shown=\"" + std::to_string( secondShown ) + "\"";
     }
-    x += nextAttrXml( nextFlag( "--impact=", sel ) );
+    // WINDOW-AWARE HAND-OFF (handoffwindow.h): the radius is counted for the definitions `--impact=sel` binds; a windowing one is
+    // pointed at whole (windows="1" next_total= and the columnar complete call), any other is the bare call as before
+    x += handoffNextAttrsXml( "--impact=", sel, impactHandoffWindow( ing, g, sel ) );
     x += '>';
     for( std::size_t i = 0; i < firstShown; ++i )
     {
