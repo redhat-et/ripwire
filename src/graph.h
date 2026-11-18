@@ -1843,11 +1843,11 @@ struct FreeDeclReach
         }
     }
     // The bare call `r`: cut `cand` (the candidates the lookup proved, out of `all`) to the free functions `r`'s translation
-    // unit declares; true ⇒ it was cut. `ownerOf( c )`: the class the index knows c a member of, "" for none. `scratch` is reused.
+    // unit declares; true ⇒ it was cut. An empty `all` (the lookup proved none) cuts nothing. `ownerOf( c )`: the class the index knows c a member of, "" for none. `scratch` is reused.
     template <class OwnerOf>
     bool keepDeclared( const Lookup& lk, const Reference& r, std::span<const NodeId> all, std::vector<NodeId>& cand, OwnerOf&& ownerOf, std::vector<NodeId>& scratch ) const
     {
-        const rw::SmallVec<NodeId, 2>* const protos = prototypesOf( lk, r, cand );
+        const rw::SmallVec<NodeId, 2>* const protos = all.empty() ? nullptr : prototypesOf( lk, r, cand );   // nothing proven: a name-only call keeps its list
         if( protos == nullptr )
         {
             return false;
@@ -10067,6 +10067,35 @@ inline FnLocalReachIndex buildFnLocalReachIndex( const IngestResult& ing, const 
     return index;
 }
 
+// RUST-USE-PRINT-NAMESPACE, the site half of buildGraph's veto: is `r` a plain bare call (no qualifier, receiver or member call) whose
+// in-tree namesakes all sit outside the caller's own file (a nested fn item there is in scope over any `use`), that is no local of the
+// caller, and whose name every `use` in force leads out of the tree (rustUseLeavesTree)? Moved out of buildGraph unchanged by train
+// 1117d1: the six composed lanes together grew buildGraph past qd's monster bar.
+struct RustUseSiteFacts
+{
+    std::span<const NodeId>           namesakes;    // byName's candidates of the call's name
+    const std::vector<Lang>&          symLang;
+    const std::vector<std::uint32_t>& symFileId;
+    const FalseEdgeRules&             falseEdges;
+    const CallResultTypes&            types;
+};
+// RUST-USE-PRINT-NAMESPACE, the ladder's glob hedge: a Rust call `r` in another file than the candidate's (`calleeFile`) that an outside
+// glob may supply (rustOutsideGlobMaySupply) is proven only by Rule 3. Rust is the one language whose Rule 3 name proof is RustUse.
+inline bool rustOutsideGlobHedges( const Reference& r, std::uint32_t calleeFile, const CallResultTypes& types )
+{
+    return langFacts( r.lang ).rule3NameProof == Rule3NameProof::RustUse && calleeFile != r.fileId && rustOutsideGlobMaySupply( types, r );
+}
+
+inline bool rustUseOutsideBareCall( const Reference& r, const RustUseSiteFacts& f )
+{
+    if( r.role != RefRole::Call || !r.qualifier.empty() || r.recv != RecvKind::None || isMemberCallRef( r ) )
+    {
+        return false;
+    }
+    const bool ownFileNamesake = std::ranges::any_of( f.namesakes, [ & ]( NodeId c ) { return langCompatible( f.symLang[ c ], r.lang ) && f.symFileId[ c ] == r.fileId; } );
+    return !ownFileNamesake && !f.falseEdges.isLocalOfCaller( r ) && rustUseLeavesTree( f.types, r );
+}
+
 inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = nullptr, bool census = false )
 {
     PROFILE_SCOPE_DESCRIBE( "buildGraph: resolve refs + build CSR" );
@@ -10914,13 +10943,11 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             }
             return !f.callerCls.empty() && narrower.coneProves( recvEv.inCone( f.callerCls, owner ), ref.lang, f.callerCls, owner, c );
         }
-        if( langFacts( ref.lang ).rule3NameProof == Rule3NameProof::RustUse && cs.fileId != ref.fileId && rustOutsideGlobMaySupply( recvEv.types, ref ) )
-        {
-            return recvEv.types.rustRule3Proves( ref, c, ownerIsClass( c ) );   // RUST-USE-PRINT-NAMESPACE: an outside glob may bind the name instead
-        }
         if( ref.lang == Lang::Rust || ref.lang == Lang::C )
         {
-            return true;   // FE-A's rules already keep a receiverless call to what its scope reaches
+            // FE-A's rules already keep a receiverless call to what its scope reaches; RUST-USE-PRINT-NAMESPACE: unless an outside glob
+            // may bind the name instead (rustOutsideGlobHedges), when only Rule 3's proof keeps the candidate
+            return !rustOutsideGlobHedges( ref, cs.fileId, recvEv.types ) || recvEv.types.rustRule3Proves( ref, c, ownerIsClass( c ) );
         }
         if( falseEdges.isLocalOfCaller( ref ) )
         {
@@ -11745,7 +11772,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             disposition = CallDisposition::Declined;
             continue;
         }
-        const auto it = byName.find( r.calleeName );
+        const auto                     it          = byName.find( r.calleeName );
+        const rw::SmallVec<NodeId, 2>* namesakeIds = it != byName.end() ? &it->second : nullptr;   // the name's in-tree candidates (null: none)
         // EDGE-PRELUDE-VETO: a macro invocation binds to a macro, never to a function, module or type by name alone. Its targets: an indexed
         // macro of the name, or a function the language's written binding proves (a Rust procedural macro, `#[proc_macro] pub fn sql`, reached
         // through `use sqlez_macros::sql;`). A C-family Macro site names a #define by construction (retagMacroCallReferences); a Rust `assert!`
@@ -12343,7 +12371,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             {
                 narrowTo( split, r, ifaceCand );
                 proven     = false;   // a field's dispatch split: one candidate is no proof here (a mock's macro-made override is unseen)
-                fieldSplit = memberSplitDeclines( ifaceCand, it != byName.end() ? &it->second : nullptr, r.lang, ing.symbols );
+                fieldSplit = memberSplitDeclines( ifaceCand, namesakeIds, r.lang, ing.symbols );
             }
             else if( const ReceiverEvidence::DispatchReceiver recv = recvEv.dispatchReceiverOf( r );
                      recv.type != kNoNode && !( langFacts( r.lang ).contractSignaturesUnindexed && StdMemberGate::tableIndexOf( r ) != StdMemberGate::kNotStd ) )
@@ -12486,7 +12514,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // and filtered after the whole ladder has decided — see the post-filter just before the edge is committed.
         // FE-A (FalseEdgeRules above): a candidate the language's own name lookup cannot reach leaves the list here, before
         // Rule 3 and the ladder pick from it; a call left with none — or bound to a global or an outside package — is external=.
-        const rw::SmallVec<NodeId, 2>* baseIds = it != byName.end() ? &it->second : nullptr;
+        const rw::SmallVec<NodeId, 2>* baseIds = namesakeIds;
         if( !scipPinned && !canonical && !narrowed && baseIds != nullptr && bindingTier.empty() )
         {
             switch( falseEdges.decide( r, *baseIds, feKept ) )
@@ -12593,10 +12621,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // RUST-USE-PRINT-NAMESPACE: a bare call whose name every `use` in force there leads out of the tree (rustUseLeavesTree) names that outside
         // item, whatever in-tree namesake shares its spelling: decided before Rule 3, counted external=. A namesake in the caller's own file (a
         // nested fn item: in scope over any `use`) or a local of the caller keeps the ladder.
-        const bool rustUseOutsideSite = callerFacts.rule3NameProof == Rule3NameProof::RustUse && !scipPinned && !canonical && !narrowed && r.role == RefRole::Call
-                                        && r.qualifier.empty() && r.recv == RecvKind::None && !isMemberCallRef( r ) && bindingTier.empty() && it != byName.end()
-                                        && std::none_of( it->second.begin(), it->second.end(), [ & ]( NodeId c ) { return langCompatible( symLang[ c ], r.lang ) && symFileId[ c ] == r.fileId; } )
-                                        && !falseEdges.isLocalOfCaller( r ) && rustUseLeavesTree( recvEv.types, r );
+        const bool rustUseOutsideSite = callerFacts.rule3NameProof == Rule3NameProof::RustUse && !scipPinned && !canonical && !narrowed && bindingTier.empty()
+                                        && it != byName.end()
+                                        && rustUseOutsideBareCall( r, { .namesakes = std::span<const NodeId>( it->second.data(), it->second.size() ), .symLang = symLang,
+                                                                        .symFileId = symFileId, .falseEdges = falseEdges, .types = recvEv.types } );
         const bool vetoFirstSite = preludeSite || rustUseOutsideSite
                                    || ( callerFacts.externalVetoBeforeRule3 && !scipPinned && !canonical && !narrowed && r.role == RefRole::Call && r.qualifier.empty()
                                         && bindingTier.empty() && it != byName.end() && !externalVeto.pythonStarImports( r ) && externalVeto.isExternalBound( r ) );
@@ -12944,11 +12972,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                     cand.swap( provedScratch );
                 }
                 // CPP-FREE-VS-MEMBER: of several free functions, the ones the caller's translation unit declares. provedScratch holds
-                // the whole proven list here, swapped or not
-                if( !nameOnly )
-                {
-                    freeDeclReach.keepDeclared( freeDeclLookup, r, provedScratch, cand, ownerIsClass, declaredScratch );
-                }
+                // the whole proven list here, swapped or not; empty (a name-only call: nameOnly enters this block false) it cuts nothing
+                freeDeclReach.keepDeclared( freeDeclLookup, r, provedScratch, cand, ownerIsClass, declaredScratch );
             }
             // a name-only MEMBER call never reaches a free function where the language has no way to (Python, Go, C++,
             // Rust, Ruby, Java, C#, Swift: a function is reached through a member only as a method, or through a module
