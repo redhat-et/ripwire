@@ -163,11 +163,11 @@ inline void writePathAnswer( std::FILE* out, const IngestResult& ing, const Grap
     // the bodies of the route it names (bridge rows, handler_rule readers), every one a hedge. ONE printer for both.
     const std::string_view   pthBodyRoot  = sf.bodyRoot;
     const bool               pthBodiesOn  = !pthRows.empty() && hopBodiesOn();
-    const RouteBodiesXml pthHopBodyEl = pthBodiesOn ? pathHopBodiesXml( ing, pathMiddleHops( ing, g, pthShown, sf.served ), pthBodyRoot ) : RouteBodiesXml{};
+    const RouteBodiesXml pthHopBodyEl = pthBodiesOn ? pathHopBodiesXml( ing, pathMiddleHops( ing, g, pthShown, sf.served ), pthBodyRoot, sf.redact ) : RouteBodiesXml{};
     // GAIN GATE (fix1 fire table): never inside a --for graph-verb block — the --for answer serves its own bodies, and the one
     // in-sample fire there (LARGE-DEV vscode-03, +7.7 KB) named nothing its question asked for
     const RouteBodiesXml pthRouteEl   = path.empty() && !sf.inForBlock && hopBodiesOn()
-                                                ? pathRouteBodies( ing, g, pthBridge, pthHandler, pthBodyRoot ) : RouteBodiesXml{};
+                                                ? pathRouteBodies( ing, g, pthBridge, pthHandler, pthBodyRoot, sf.redact ) : RouteBodiesXml{};
     const std::string&       pthHopBodies = pthHopBodyEl.xml;
     // D2 part 5 (defslookup.h): the other definitions of an endpoint whose pick is not provably unique, inline — after the bodies, so a
     // definition a <bodies> element printed is not listed again

@@ -1673,7 +1673,8 @@ std::optional<int> runCrossRef( const MainDispatch& d )
             result.nearMiss = didYouMean( d.ing, whereisSel );
         }
         crossref::writeWhereisPage( stdout, result, cfg.detail ? SIZE_MAX : crossref::kWhereisHits, cfg.pageLimit, cfg.pageOffset,
-                                    crossref::whereisListingOf( cfg.whereisListing ) );
+                                    crossref::whereisListingOf( cfg.whereisListing ), d.redactPtr );
+        reportRedactions( stderr, d.redactCounts );   // REDACT-TOUCH: t= is a redacting seam
         return 0;
     }
     return std::nullopt;
@@ -1743,7 +1744,8 @@ std::optional<int> runPlanLint( const MainDispatch& d )
         }
         return 1;
     }
-    planlint::writePlanLint( stdout, res );
+    planlint::writePlanLint( stdout, res, d.redactPtr );
+    reportRedactions( stderr, d.redactCounts );   // REDACT-TOUCH: an <owed> line is a redacting seam
     return ( res.dialectDetected && planlint::gatingCount( res ) > 0 ) ? 2 : 0;
 }
 

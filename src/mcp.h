@@ -2440,7 +2440,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                         bool              seedFault = false;
                         SweepFault        sweepFault = SweepFault::None;
                         const std::string t = whereisText( path, symbol, kind, crossref::kWhereisHits, pg, &seedFault, listing, &sweepFault,
-                                                            whereisFullText );
+                                                            whereisFullText, redactPtr );
                         if( seedFault )
                         {
                             return errResultMsg( -32602, mcprefuse::notFound( getIndex( path ).ing, "symbol", symbol ) );
