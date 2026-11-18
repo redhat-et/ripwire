@@ -475,7 +475,7 @@ imp(){
         printf 'imp %s: rc=%s, impact answer %s\n' "$tgt" "$rc" "$( grep -q '<impact ' <<<"$out" && echo present || echo absent )" >>"$TMP/imp.err"
         printf 'IMPERR(rc=%s) ' "$rc"; return 0
     fi
-    grep -oE '<f via="[^"]*" p="[^"]*"' <<<"$out" | sed 's/.*p="//; s/"$//' | sort | tr '\n' ' '
+    grep -oE '<f p="[^"]*"' <<<"$out" | sed 's/.*p="//; s/"$//' | sort | tr '\n' ' '
 }
 IW="$( imp "$PB" pkg/mod.py )"; IM="$( imp "$PB" pkg/ma.py )"
 if [ "$IW" = "wide.py " ] && [ "$IM" = "multi.py " ]; then

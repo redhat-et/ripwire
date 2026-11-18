@@ -10964,9 +10964,14 @@ inline std::string jsonStr( std::string_view s )
 //
 // `lazy` (kParserVer 72, fnbody-require lane): parallel to `files` (same index, same size) — 1 ⇒ every
 // edge this importer has into the def set is a TS/JS function-body require/import (graph.h::ImportTier),
-// never a top-level one. Disclosed per row rather than folded into via= (a THIRD via= value would silently
-// widen a reader's existing `via="import"` match into two different claims); see
-// graphlegend.h::kImpactImportTierLegend for the definition a reader meets first.
+// never a top-level one. Disclosed per row; see graphlegend.h::kImpactImportTierLegend for the definition a reader meets first.
+//
+// IMPORT-ROW-SHORT (2026-11-18): the row is `<f p="…"/>`, and `<f p="…" lazy="1"/>` when lazy. It was
+// `<f via="import" p="…" lazy="0|1"/>`: via="import" was a literal of this one emitter, so it could not differ between two rows
+// (the <f> tag under <impact> already says "importer"), and lazy="0" was the default arm of a two-valued flag. Both are put back
+// by a rule that reads one row and nothing else — test/importrowshortcheck.sh rebuilds every row and compares the whole <impact>
+// element with the pre-change binary's. The --json twin below still spells via and lazy on every entry: it is that gate's second
+// reference, and a JSON reader has no tag to read the kind from.
 inline void emitImportRowsXml( std::FILE* out, const IngestResult& ing,
                                std::span<const std::uint32_t> files, std::string_view rootPrefix, std::span<const char> lazy = {} )
 {
@@ -10976,7 +10981,7 @@ inline void emitImportRowsXml( std::FILE* out, const IngestResult& ing,
         const std::string_view raw = ing.files[ files[i] ];
         const std::string_view rel = rootPrefix.empty() ? raw : rw::sarif::rootRelativeUri( raw, rootPrefix );
         const bool              isLazy = i < lazy.size() && lazy[i] != 0;
-        rw::emitTo( out, "<f via=\"import\" p=\"{}\" lazy=\"{}\"/>", std::string( escapeXml( rel, esc ) ).c_str(), isLazy ? "1" : "0" );
+        rw::emitTo( out, "<f p=\"{}\"{}/>", std::string( escapeXml( rel, esc ) ).c_str(), isLazy ? " lazy=\"1\"" : "" );
     }
 }
 

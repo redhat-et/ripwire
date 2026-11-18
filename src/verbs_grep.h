@@ -491,7 +491,7 @@ std::string grepRootNext( const rw::Config& cfg, const std::string& pat, bool is
 // nothing on the root counted. `window` is a slice of THIS list (the caller computes it with the same
 // pageWindow()/rowCap the indexed half uses) — never derived inside the collector, so the §A1 rule holds
 // here too: what was COLLECTED does not move with the page, only what is PRINTED does, which is why
-// count= reads the same on every page of a walk. The shape is --impact's <f via="import"> with
+// count= reads the same on every page of a walk. The shape is --impact's <f p=> importer row with
 // shown_importers=/importers_capped=, restated on an element of this sub-list's own.
 void emitGrepUnindexed( const std::vector<rw::GrepAuxHit>& hits, const rw::PageWindow& window, bool singleRoot,
                         const std::string& rootPrefix, std::vector<char>& esc )
