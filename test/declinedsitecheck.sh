@@ -21,7 +21,7 @@
 #     the called name (n="new"), never its `initialize` candidates.
 #   * NEVER an edge: count=, the <s> rows, hop_tested=/hop_untested= and every MCP "count" are exactly what the
 #     pre-change binary printed; a <dc> row is its own element and never carries via="name" or prov=.
-#   * Capped AND counted: declined_calls= stays the total; past the cap the root says dc_shown="N" (rows printed) and
+#   * Capped AND counted: declined_calls= stays the total; past the cap the root says shown_dc="N" (rows printed) and
 #     dc_next= (the pasteable call that lists every site); rows past the cap are chosen file-first (each file's first
 #     site before any file's second), so a cut still names every file it can.
 #   * Candidates are named only on --legend=full (cand="FILE:LINE ...", the definitions the call could have meant);
@@ -342,20 +342,20 @@ for f in range( 3 ):
 with open( os.path.join( G, "big", "big.py" ), "w" ) as h:
     h.write( "def big(x):\n" + "".join( "    x.poll()\n" for _ in range( 40 ) ) + "    return x\n" )
 x = ask( G, "callers", "alpha/a.py:poll" )
-shown = int( x.a( "dc_shown" ) or 0 ) if x.ok else 0
+shown = int( x.a( "shown_dc" ) or 0 ) if x.ok else 0
 files = { d.get( "p", "" ).rsplit( ":", 1 )[ 0 ] for d in x.dc }
 say( x.ok and x.a( "declined_calls" ) == "76" and 8 <= shown <= 24 and len( x.dc ) == shown and x.a( "dc_next" ),
-     "[P] g_callers_cut", "76 declined callers: dc_shown=N (8..24) rows printed, declined_calls=\"76\" the total, dc_next= present", x.why() )
+     "[P] g_callers_cut", "76 declined callers: shown_dc=N (8..24) rows printed, declined_calls=\"76\" the total, dc_next= present", x.why() )
 say( x.ok and files == { "callers/f0.py", "callers/f1.py", "callers/f2.py", "big/big.py" }, "[P] g_callers_files",
      "the cut is file-first: all four calling files are named", "files=%s" % sorted( files ) )
 x = ask( G, "callees", "big" )
-shown = int( x.a( "dc_shown" ) or 0 ) if x.ok else 0
+shown = int( x.a( "shown_dc" ) or 0 ) if x.ok else 0
 ls = [ int( d.get( "l", "0" ) ) for d in x.dc ]
 say( x.ok and x.a( "declined_calls" ) == "40" and 8 <= shown <= 24 and len( x.dc ) == shown and ls == sorted( ls ) and len( set( ls ) ) == len( ls )
-     and x.a( "dc_next" ), "[P] g_callees_cut", "40 declined calls in one body: dc_shown rows in line order, dc_next= present", x.why() )
+     and x.a( "dc_next" ), "[P] g_callees_cut", "40 declined calls in one body: shown_dc rows in line order, dc_next= present", x.why() )
 x = ask( G, "callees", "use_0_0" )
-say( x.ok and len( x.dc ) == 1 and x.a( "dc_shown" ) is None and x.a( "dc_next" ) is None, "[P] g_uncut",
-     "under the cap: every row, no dc_shown= and no dc_next=", x.why() )
+say( x.ok and len( x.dc ) == 1 and x.a( "shown_dc" ) is None and x.a( "dc_next" ) is None, "[P] g_uncut",
+     "under the cap: every row, no shown_dc= and no dc_next=", x.why() )
 
 # ── (H) the other verbs ────────────────────────────────────────────────────────────────────────────────────────────
 print( "=== (H) safe-delete, impact, for ===" )
@@ -459,7 +459,7 @@ uncut = [ ( "go callees doPackage", ask( GO, "callees", "doPackage" ) ), ( "rb c
           ( "sm callees stdAppend", ask( SM, "callees", "stdAppend" ) ), ( "ts callees dispatch", ask( TS, "callees", "dispatch" ) ),
           ( "cpp callees drive", ask( CPP, "callees", "drive" ) ), ( "df callers java", ask( DF, "callers", "java/alpha/Alpha.java:jbody" ) ) ]
 bad = [ "%s: rows=%d declined_calls=%s" % ( tag, len( x.dc ), x.a( "declined_calls" ) ) for tag, x in uncut
-        if not ( x.ok and x.a( "dc_shown" ) is None and len( x.dc ) > 0 and str( len( x.dc ) ) == x.a( "declined_calls" ) ) ]
+        if not ( x.ok and x.a( "shown_dc" ) is None and len( x.dc ) > 0 and str( len( x.dc ) ) == x.a( "declined_calls" ) ) ]
 say( not bad, "[P] k_rows_eq_declined", "on %d uncut answers the <dc> row count equals declined_calls= (every decline site records)" % len( uncut ), "; ".join( bad ) )
 for sel in ( "src/routers/trie/router.ts:match", "src/routers/router.ts:match" ):
     x = ask( TS, "callers", sel )
@@ -493,7 +493,7 @@ for tool, root, sym in ( ( "find_symbol", GO, "doPackage" ), ( "find_referencing
         mbad.append( "%s declined_sites=%s" % ( tool, ds ) )
 say( not mbad, "[P] k_mcp_nocand", "MCP default \"declined_sites\" entries carry via=\"declined\" and no \"candidates\"", "; ".join( mbad ) )
 
-print( "=== (K) R5 the root keeps every base attribute (dc_shown/dc_next aside) ===" )
+print( "=== (K) R5 the root keeps every base attribute (shown_dc/dc_next aside) ===" )
 BASE_ROOTS = [
     ( "a_go", GO, "callees", "doPackage", { "schema": "ripwire.callees/v1", "of": "doPackage", "defs": "1", "count": "2", "hop_tested": "0", "hop_untested": "2",
       "declined_calls": "3", "graph_ambiguous": "0", "graph_unresolved": "0", "graph_unindexed": "1", "counts_floor": "1", "next": "--expand=doPackage" } ),
@@ -507,7 +507,7 @@ BASE_ROOTS = [
 ]
 for tag, root, verb, sel, want in BASE_ROOTS:
     x = ask( root, verb, sel )
-    got = { k: v for k, v in ( x.root.attrib.items() if x.root is not None else [] ) if k not in ( "root", "dc_shown", "dc_next" ) }
+    got = { k: v for k, v in ( x.root.attrib.items() if x.root is not None else [] ) if k not in ( "root", "shown_dc", "dc_next" ) }
     say( x.ok and x.dc and got == want, "[P] k_root_%s" % tag, "%s --%s=%s: rows ride and every other root attribute is the base literal" % ( tag, verb, sel ),
          "got %s" % { k: ( got.get( k ), want.get( k ) ) for k in set( got ) | set( want ) if got.get( k ) != want.get( k ) } )
 

@@ -432,7 +432,7 @@ add(S4, f"{ABIN} . --lint --with-profile=report.txt", "Join MEASURED heat onto -
     post=f"{ABIN} . --lint --with-profile=report.txt 2>/dev/null | grep -o '<f rule=[^<]*</f>'",
     post_label="The joined finding — past the display cut above, extracted so the join is visible:")
 add(S4, f"{BIN} . --communities", "Cluster the call graph into cohesive modules.")
-add(S4, f"{BIN} . --zoom", "Nested module hierarchy (multi-level Louvain) + cross-module bridges — levels_shown=\"2\" of levels= BY DEFAULT over the 40 largest top modules (~8 KB, where the whole tree is ~220 KB); a module AT the cut carries children=.")
+add(S4, f"{BIN} . --zoom", "Nested module hierarchy (multi-level Louvain) + cross-module bridges — shown_levels=\"2\" of levels= BY DEFAULT over the 40 largest top modules (~8 KB, where the whole tree is ~220 KB); a module AT the cut carries children=.")
 add(S4, f"{BIN} . --zoom --zoom-levels=3", "The restoring knob: --zoom-levels=N prints N levels (0 = the whole tree); here three, ~11 KB.")
 add(S4, f"{BIN} . --report", "Architecture summary (modules, god-files, cycles) as markdown.")
 add(S4, f"{BIN} . --seams", "Cross-module call seams no test reaches. NOW carries seam_pairs/shown/capped.")

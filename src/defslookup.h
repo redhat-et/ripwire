@@ -476,7 +476,7 @@ struct PathAlts
 };
 
 // --path's inline alternatives for one endpoint (part 5): every definition the answer does NOT already show, up to the cap,
-// compact rows, then alts_shown=K defs=N next=--defs=NAME --offset=M when more exist (M: the first row not yet shown). Empty when the pick is provably unique or
+// compact rows, then shown_alts=K defs=N next=--defs=NAME --offset=M when more exist (M: the first row not yet shown). Empty when the pick is provably unique or
 // nothing is left to tell (0 bytes added). Not alternatives: the bound definition, a definition the answer prints as a pair
 // endpoint (`printed`), an untied C-family prototype (not a second candidate, as endpointDefinitionCount counts it).
 // `bound`: the definition the answer bound (kNoNode when it bound none: every candidate group is then an alternative).
@@ -524,7 +524,7 @@ inline void defAltsXml( PathAlts& acc, const IngestResult& ing, const DefLookup&
     std::string out = "<alts side=\"" + std::string( side ) + "\" of=\"" + std::string( escapeXml( L.spec, esc ) ) + "\"";
     if( shown < total )
     {
-        out += " alts_shown=\"" + std::to_string( shown ) + "\" defs=\"" + std::to_string( L.defs() ) + "\""
+        out += " shown_alts=\"" + std::to_string( shown ) + "\" alts_capped=\"1\" defs=\"" + std::to_string( L.defs() ) + "\""
              + nextAttrXml( nextFlag( "--defs=", L.spec ) + " --offset=" + std::to_string( nextOffset ) );   // past page 1, never a replay of it
     }
     acc.xml += out + ">" + rows + "</alts>";
@@ -560,7 +560,7 @@ inline std::string defAltsLegend( const PathAlts& alts )
     return std::string( "<alts side= of=> lists further definitions the endpoint's name binds, not printed above (the pick is "
                         "not provably unique): sel= pastes as that endpoint to bind one alone" )
          + ( alts.unproven ? ", except on a sel_proven=0 row: no spelling tried binds that one alone, its sel= names the file and owner and may bind more" : "" )
-         + ", p= where it is, class=source|test; alts_shown=K defs=N: K of the other rows shown, next= pages the rest. "
+         + ", p= where it is, class=source|test; shown_alts=K defs=N: K of the other rows shown, next= pages the rest. "
          + ( alts.declOnly ? "decl_only=1: no body (a header declaration or interface contract), not a second definition. " : "" );
 }
 

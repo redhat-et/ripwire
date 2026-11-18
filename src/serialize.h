@@ -9331,10 +9331,10 @@ inline constexpr std::string_view kForSectionStubLegend =
 // same post-render splice as the stub clause above, in both --for dialects and the MCP twin. No "--" (G4).
 inline constexpr std::string_view kForLegoCountLegend =
     "; iface implementors=N counts every type an extends/implements clause binds to it (the lego verb's count), never the rows "
-    "listed: implementors_shown=K only K impl rows here, implementors_next= lists all; implementors_floor=1 an extends clause "
+    "listed: shown_implementors=K only K impl rows here, implementors_next= lists all; implementors_floor=1 an extends clause "
     "spelled like it bound nowhere, so N may be short (not proof of another), floor_next= lists every extends site";
 
-// The prefix every attribute kForLegoCountLegend defines starts with (implementors_shown=/_next=/_floor=): a rendered
+// The prefix every attribute kForLegoCountLegend defines starts with (shown_implementors=/_next=/_floor=): a rendered
 // ranked <lego> block holding it needs the clause. Attribute values are escaped, so ` implementors_` can only open one.
 inline constexpr std::string_view kLegoCountAttrPrefix = " implementors_";
 
@@ -9994,7 +9994,7 @@ inline bool narrowLegoToRenderedSigs( const IngestResult& ing, std::vector<std::
 // closure) and depth= (hops below the interface; the direct rows are depth 1 and carry neither). The direct rows stay
 // uncapped as before; the deeper rows are one page of at most kLegoClosureRowCap, a RUNAWAY guard: the measured
 // closures of a library base class are 1-78 rows, while a framework root (a UI toolkit's node or widget class, 1.4-1.6 K
-// classes below it) would print ~170-190 KB, so it pages. A cut discloses transitive_shown= + has_more="1" + a next= that replays
+// classes below it) would print ~170-190 KB, so it pages. A cut discloses shown_transitive= + has_more="1" + a next= that replays
 // the verb with --offset.
 // --limit/--offset (MCP limit/offset) window these deeper rows; the direct rows repeat on every page.
 inline constexpr std::size_t kLegoClosureRowCap = 200;
@@ -10050,7 +10050,7 @@ inline std::string legoClosureAttrs( const LegoClosurePage& page, std::string_vi
     const std::size_t shown = page.window.end - page.window.begin;
     if( shown < total )
     {
-        out += " transitive_shown=\"" + std::to_string( shown ) + "\"";
+        out += " shown_transitive=\"" + std::to_string( shown ) + "\" transitive_capped=\"1\"";
     }
     if( page.window.begin > 0 )
     {
@@ -10170,7 +10170,7 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
                                                         // is what is LISTED, not how many there are: `<iface n="Router"
                                                         // implementors="1">` answered a tree with six. With this map the count is
                                                         // the targeted --lego=TYPE's own and a short list says so
-                                                        // (implementors_shown= + implementors_next=). Null keeps the old shape.
+                                                        // (shown_implementors= + implementors_next=). Null keeps the old shape.
 {
     EXPECTS( graphImplementors == nullptr || focusId == kNoNode );   // the targeted verb's map IS the graph's
     EXPECTS( focusId != kNoNode || ( targeted.pageLimit == 0 && targeted.pageOffset == 0 ) );   // the ranked bundle has no page to window
@@ -10276,7 +10276,7 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
             {
                 // a cut, not a floor: the rest exist and the named verb lists every one of them
                 const std::string selector = std::string( pathRel( isym.fileId ) ) + ":" + isym.name;
-                hdr += " implementors_shown=\"" + std::to_string( cap ) + "\"";
+                hdr += " shown_implementors=\"" + std::to_string( cap ) + "\" implementors_capped=\"1\"";
                 hdr += rw::nextAttrXml( nextFlag( "--lego=", selector ), "implementors_next" );
             }
         }

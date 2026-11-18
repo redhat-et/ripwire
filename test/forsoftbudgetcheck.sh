@@ -167,9 +167,9 @@ PRESENT_ONLY = re.compile( r'dropped_positive|docs_dropped|capped=[#1] with show
                            # count-floor) is present-only by design — verbs_for.h splices it only when the served <lego>
                            # carries an implementors_ attribute, and the lego is narrowed to the rendered rows' files. Measured:
                            # #572's Symbol::rankFlags pulls model.h rows into this query's wide head, where MEM-REF-SHRINK's
-                           # RefColdFields renders implementors="2" implementors_shown="1"; at N<=3000 those rows are past
+                           # RefColdFields renders implementors="2" shown_implementors="1"; at N<=3000 those rows are past
                            # the cut, the lego narrows away and the clause is rightly absent. Its two segments, below.
-                           r'implementors_shown=K only K impl rows|implementors_floor=# an extends clause|'
+                           r'shown_implementors=K only K impl rows|implementors_floor=# an extends clause|'
                            # the <c> row readings ride only with a row that carries them: a spent target's hops cut marker
                            # leaves none (via="name" since forbudget-soft, attrib-multidef's prov="split" since train 28)
                            r'on a <c> row|c prov=split|another arm|NOT mean the edge is false|NOT a claim the edge is false|'

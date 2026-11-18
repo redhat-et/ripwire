@@ -10,7 +10,7 @@
 # THE CONTRACT (src/pageview.h kTreeRowCap/kZoomTopModuleCap/kExternalSurfaceRowCap, src/prcontext.h PrBudget,
 # src/cli.h aroundDepth):
 #   --around=SYM        default depth 1 (root depth="1"); every row of the default is a row of --around-depth=2
-#   --zoom              levels_shown="2" of levels=; the 40 largest top modules (shown=/capped=/total=/next_offset=,
+#   --zoom              shown_levels="2" of levels=; the 40 largest top modules (shown=/capped=/total=/next_offset=,
 #                       next="--zoom --offset=40"); a module AT the cut carries children=; --zoom-levels=0 prints all
 #   --tree              the 80 best files (shown="80" capped="1" total= next_offset= next="--tree --offset=80"); the
 #                       first 30 rows are byte-identical to the uncapped (--limit=100000) tree's first 30
@@ -60,9 +60,9 @@ echo "=== (2) --zoom: two levels, 40 top modules, children= at the cut, next= pa
 run --zoom >"$TMP/z1"; run --zoom --zoom-levels=0 --limit=100000 >"$TMP/z0"
 [ "$( bytes "$TMP/z1" )" -le 12000 ] && ok "(2) --zoom at defaults is $( bytes "$TMP/z1" ) B (<= 12,000; every level of every module is $( bytes "$TMP/z0" ) B)" \
                                        || no "(2) --zoom at defaults is $( bytes "$TMP/z1" ) B (> 12,000)"
-L="$( rootattr "$TMP/z1" zoom levels )"; LS="$( rootattr "$TMP/z1" zoom levels_shown )"
+L="$( rootattr "$TMP/z1" zoom levels )"; LS="$( rootattr "$TMP/z1" zoom shown_levels )"
 if [ "$L" -ge 2 ] 2>/dev/null; then
-    if [ "$LS" = 2 ]; then ok "(2) levels_shown=\"2\" of levels=\"$L\""; else no "(2) levels_shown='$LS' (want 2 of $L)"; fi
+    if [ "$LS" = 2 ]; then ok "(2) shown_levels=\"2\" of levels=\"$L\""; else no "(2) shown_levels='$LS' (want 2 of $L)"; fi
     cut="$( grep -o '<module level="[0-9]*"[^>]*children="[0-9]*"' "$TMP/z1" | wc -l | tr -d ' ' )"
     if [ "$cut" -gt 0 ]; then ok "(2) $cut module rows at the cut carry children="; else no "(2) no module row carries children= although levels were cut"; fi
     deeper="$( grep -o '<module level="[0-9]*"' "$TMP/z1" | sort -u | wc -l | tr -d ' ' )"
@@ -75,7 +75,7 @@ fi
     || no "(2) top-module window not disclosed (shown='$( rootattr "$TMP/z1" zoom shown )' capped='$( rootattr "$TMP/z1" zoom capped )')"
 if nz="$( nextof "$TMP/z1" zoom )"; [ "$nz" = "--zoom --offset=40" ]; then ok "(2) next=\"$nz\""; else no "(2) next='$nz' (want --zoom --offset=40)"; fi
 if rc="$( runs "$nz" )"; { [ "$rc" = 0 ] || [ "$rc" = 4 ]; }; then ok "(2) next= runs (exit $rc)"; else no "(2) next= exits $rc"; fi
-if [ "$( rootattr "$TMP/z0" zoom levels_shown )" = "$L" ]; then ok "(2) --zoom-levels=0 prints every level (levels_shown=\"$L\")"; else no "(2) --zoom-levels=0 levels_shown='$( rootattr "$TMP/z0" zoom levels_shown )'"; fi
+if [ "$( rootattr "$TMP/z0" zoom shown_levels )" = "$L" ]; then ok "(2) --zoom-levels=0 prints every level (shown_levels=\"$L\")"; else no "(2) --zoom-levels=0 shown_levels='$( rootattr "$TMP/z0" zoom shown_levels )'"; fi
 # the top two levels' module rows are the SAME rows (minus children=) — the cut removed depth, not modules
 grep -o '<module level="[0-9]*" id="[0-9]*" size="[0-9]*"' "$TMP/z1" | sort >"$TMP/z1.m"
 top2="$( grep -o '<module level="[0-9]*"' "$TMP/z1" | sort -u | sed 's/.*level="//; s/"//' | sort -n | tr '\n' ' ' )"

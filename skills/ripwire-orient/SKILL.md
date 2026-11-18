@@ -147,7 +147,7 @@ boundary — one `--pack-task` and one agent is the honest answer there.
 ## When a flat module list is too coarse (big repos) — zoom out
 
 **7. Nested module hierarchy** — `ripwire <dir> --zoom --legend=compact` (`--zoom=DEPTH` to cap levels; the default prints the top 2
-levels of the 40 largest modules — `levels_shown=`/`shown=` disclose it, `next=` pastes the next page, `--zoom-levels=0`
+levels of the 40 largest modules — `shown_levels=`/`shown=` disclose it, `next=` pastes the next page, `--zoom-levels=0`
 prints every level): multi-level Louvain,
 `<module level=N id= size= dir=>`, indent = one level deeper, innermost `level="0"` lists top-ranked members.
 Read top-down; a `dir=` that doesn't match its parent's is a cross-cutting concern in the wrong place.

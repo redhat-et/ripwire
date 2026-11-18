@@ -82,7 +82,7 @@ then
     if printf '%s\n' "$OUT" | grep '<impl n="Default"' | grep -q 'via="SimpleFormatter" depth="2"'; then ok "Default carries via=\"SimpleFormatter\" depth=\"2\""; else no "Default row lacks via/depth: $( printf '%s\n' "$OUT" | grep '<impl n="Default"' )"; fi
     if printf '%s\n' "$OUT" | grep '<impl n="SimpleFormatter"' | grep -q 'via=\|depth='; then no "a DIRECT row carries via=/depth="; else ok "the direct rows carry neither via= nor depth="; fi
     if iface | grep -q 'implementors="2" transitive="3"'; then ok "implementors=\"2\" counts the direct rows, transitive=\"3\" the deeper ones"; else no "counts wrong: $( iface )"; fi
-    if iface | grep -q 'has_more=\|transitive_shown='; then no "an uncut closure says it was cut: $( iface )"; else ok "an uncut closure carries no cut attribute"; fi
+    if iface | grep -q 'has_more=\|shown_transitive='; then no "an uncut closure says it was cut: $( iface )"; else ok "an uncut closure carries no cut attribute"; fi
 fi
 if lego Top
 then
@@ -124,7 +124,7 @@ echo "=== (S1) the page: --limit/--offset window the deeper rows; next= pages on
 if lego BaseFormatter --limit=2
 then
     I="$( iface )"
-    if printf '%s' "$I" | grep -q 'transitive="3" transitive_shown="2" has_more="1"'; then ok "a cut page says transitive_shown=\"2\" has_more=\"1\""; else no "cut page: $I"; fi
+    if printf '%s' "$I" | grep -q 'transitive="3" shown_transitive="2" has_more="1"'; then ok "a cut page says shown_transitive=\"2\" has_more=\"1\""; else no "cut page: $I"; fi
     N="$( printf '%s' "$I" | sed -n 's/.* next="\([^"]*\)".*/\1/p' )"
     if [ "$N" = "--lego=py/formatters.py:BaseFormatter --limit=2 --offset=2" ]; then ok "next= replays the verb on the iface's file:name with the next offset"; else no "next= is '$N'"; fi
     if has '<impl n="SimpleFormatter"' && has '<impl n="Nothing"'; then ok "the direct rows ride every page"; else no "a direct row is missing from the page"; fi
@@ -136,7 +136,7 @@ N2="${N:---lego=py/formatters.py:BaseFormatter --limit=2 --offset=2}"
 if lego ${N2#--lego=}
 then
     I="$( iface )"
-    if printf '%s' "$I" | grep -q 'transitive_shown="1" transitive_offset="2"'; then ok "page 2: transitive_shown=\"1\" transitive_offset=\"2\""; else no "page 2: $I"; fi
+    if printf '%s' "$I" | grep -q 'shown_transitive="1" transitive_offset="2"'; then ok "page 2: shown_transitive=\"1\" transitive_offset=\"2\""; else no "page 2: $I"; fi
     if printf '%s' "$I" | grep -q 'has_more'; then no "the last page says has_more: $I"; else ok "the last page carries no has_more"; fi
     if has '<impl n="FilenameOnly"' && ! has '<impl n="Default"'; then ok "page 2 holds the third deeper row only"; else no "page 2 rows wrong"; fi
 fi
@@ -156,7 +156,7 @@ fi
 echo "=== (S1) MCP lego pages the same way ==="
 mcp(){ printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"lego\",\"arguments\":{\"path\":\"$FIX\",\"type\":\"BaseFormatter\"$1}}}" | "$BIN" --mcp 2>/dev/null; }
 M="$( mcp ',"limit":2' )"
-if printf '%s' "$M" | grep -q 'transitive_shown=\\"2\\" has_more=\\"1\\"'; then ok "MCP limit:2 cuts the deeper rows the same way"; else no "MCP limit:2: $( printf '%s' "$M" | head -c 300 )"; fi
+if printf '%s' "$M" | grep -q 'shown_transitive=\\"2\\" has_more=\\"1\\"'; then ok "MCP limit:2 cuts the deeper rows the same way"; else no "MCP limit:2: $( printf '%s' "$M" | head -c 300 )"; fi
 M="$( mcp '' )"
 if printf '%s' "$M" | grep -q 'transitive=\\"3\\"' && ! printf '%s' "$M" | grep -q 'has_more'; then ok "MCP without a window: the whole closure"; else no "MCP default: $( printf '%s' "$M" | head -c 300 )"; fi
 M="$( mcp ',"offset":-1' )"

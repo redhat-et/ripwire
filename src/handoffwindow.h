@@ -165,7 +165,7 @@ inline std::string completeCallInvocation( std::string_view flag, std::string_vi
 // declined call sites (registered, measured, withdrawn: amendment 10b): --limit sizes the declined-site cut too, and a limit
 // that cleared it listed 61,381 more hedge rows on 12 of the 32 windowed impact cells of the registered population — 99 rows
 // and 4,005 declined sites on one — taking the median bytes to a complete answer from 77,821 to 145,532. The named call
-// therefore lists every ROW; where it holds more declined sites it says so (dc_shown=) and dc_next= names the call that
+// therefore lists every ROW; where it holds more declined sites it says so (shown_dc=) and dc_next= names the call that
 // lists them all, in the same form. "" when the page is the whole answer, or the lane is off.
 inline std::string directRootAllNext( std::string_view flag, std::string_view selector, bool windows, std::size_t rowTotal )
 {

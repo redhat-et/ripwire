@@ -18338,7 +18338,7 @@ figures are corrected, each to a smaller or narrower one:
    changed**; no saving is claimed for it.
 3. **The "complete" call is not complete at the declined-call grain.** `--limit=<total>` sizes the `<dc>` cut
    too, and `total=` counts symbol rows: on **12 of the 32** impact cells the complete answer still cuts
-   `<dc>` (`dc_shown=` 184,317 of `declined_calls=` 245,698 pooled) and names a second call. This band's
+   `<dc>` (`shown_dc=` 184,317 of `declined_calls=` 245,698 pooled) and names a second call. This band's
    pointer has to name a limit that clears both.
 
 ### What changes
@@ -18375,13 +18375,13 @@ grain** (one reached definition row), P1 and D2 at the **cell grain** (one answe
   postures, keeps the sentence that a declined site is NOT an edge and that `cands=` proves no candidate,
   and carries `via="declined"` on the block.
 - **D4 — counts.** `n=` equals the length of every array; uncut, `n=` equals `declined_calls=`; cut, it
-  equals `dc_shown=`.
+  equals `shown_dc=`.
 - **D5 — nothing else moves.** The XML form of all 120 documents is byte-identical to the pre-change binary
   once ` all_next="…"` is removed from a windowed root.
 - **P1 — the pointer is exact: 0 false positives and 0 false negatives.** `all_next=` is present exactly on
   the roots that carry `has_more="1"`, on the 78 cells in both forms (156 documents). A pointer on a complete
   answer is the worse error and fails the band on one occurrence.
-- **P2 — the named call is complete.** Run verbatim, it answers with no `has_more=`, no `dc_shown=`, and
+- **P2 — the named call is complete.** Run verbatim, it answers with no `has_more=`, no `shown_dc=`, and
   ( path, name, line ) rows equal in set, count and order to the XML rows paged to the end, on 42 of 42.
 - **P3 — a root that does not window is byte for byte what it was**, on 36 of 36.
 
@@ -18412,7 +18412,7 @@ The headline is a pair: *k of n complete in one call*, and median bytes.
 | `RIPWIRE_TEST_HANDOFF_MUTANT=limitminus1` | the named limit is one short | P2 | completeness |
 
 Non-vacuity: the gate fails if its fixtures yield no `gate=`, no `bound=`, no `of_def=`, no `cand=` row, no
-cut (`dc_shown=`) answer or no windowed answer, so an arm cannot pass on rows that were never there.
+cut (`shown_dc=`) answer or no windowed answer, so an arm cannot pass on rows that were never there.
 
 **If `<dc>` cannot be rebuilt byte for byte from any columnar spelling, the band stops there and reports
 that**; a smaller answer that loses a declined-call fact is not a saving.
@@ -18469,11 +18469,11 @@ question about what DOES reach it is the wrong default.
 
 - **`N` is the row total**, the hand-offs' own rule, so the direct roots and the `--for` hand-offs spell the
   same call. The named call lists every row. Where it holds more declined sites than that, it says so
-  (`dc_shown=`) and `dc_next=` names the call that lists them all.
+  (`shown_dc=`) and `dc_next=` names the call that lists them all.
 - **`dc_next=` on a columnar answer keeps `--format=columnar`.** It dropped the form, so the declined-complete
   follow-up of a columnar answer came back as XML. This is the one change to a root that does not window:
   **P3 is evaluated with that 18-byte form marker removed.**
-- **P2 no longer requires the absence of `dc_shown=`**; it requires the cut to be said and `dc_next=`, run
+- **P2 no longer requires the absence of `shown_dc=`**; it requires the cut to be said and `dc_next=`, run
   verbatim, to list every declined site in the same form.
 - **The registered prediction "20 of 32 to 32 of 32 complete at both grains in the named call" is NOT met**,
   by this choice: it stays 20 of 32, and the other 12 are one named columnar call away.
@@ -18492,7 +18492,7 @@ binary was byte-identical on 240 of 240, and all 306 lane documents pass `xmllin
 | D2 bytes, 32 complete impact cells | cell | 30,101,002 B to 18,525,158 B, **−38.5 %** (registered: at least −35 %) |
 | D2 declined-call payload | cell | 17,479,478 B to 5,681,319 B, plus 220,125 B of new `<paths>` entries: **−66.2 %** (registered: at least −60 %) |
 | D2 no answer grows | cell | 0 of 120 columnar documents larger, pointer and form marker removed |
-| D3, D4 | cell | 23 of 23 blocks defined in the legend, `via="declined"` on each, `n=` equal to every array and to `dc_shown=` or `declined_calls=` |
+| D3, D4 | cell | 23 of 23 blocks defined in the legend, `via="declined"` on each, `n=` equal to every array and to `shown_dc=` or `declined_calls=` |
 | D5 | cell | 120 of 120 XML documents byte-identical with `all_next=` and its clause removed |
 | P1 | cell | **0 false positives, 0 false negatives** on 156 documents (84 windowed) |
 | P2 | symbol | 42 of 42 named calls do not window; 269,671 rows equal the XML rows in set, count and order |
@@ -18562,17 +18562,17 @@ is not the identical symbol list (amendment 10 counts 39), so the counts below a
 | declined sites listed of counted, pooled over the 32 | 184,317 of 245,698 | 167,293 of 243,336 |
 | the same, on the cut cells only | not stated | 102,979 of 179,022 (76,043 withheld) |
 
-On **15 of 15** cut answers the root carries all three facts: `dc_shown=` (which tier, and how many of it were
+On **15 of 15** cut answers the root carries all three facts: `shown_dc=` (which tier, and how many of it were
 printed; equal to `<dcols n=>` and to the row limit on 15 of 15), `declined_calls=` (the tier's real count, a
 floor under the `counts_floor="1"` beside it), and `dc_next=` (the call that lists every site, in the same form).
-The legend of each defines `dc_shown=` and `dc_next=`. On **17 of 17** windowed cells whose named call does not
+The legend of each defines `shown_dc=` and `dc_next=`. On **17 of 17** windowed cells whose named call does not
 cut the tier, neither attribute rides. On a generated tree (301 rows, 360 declined sites) the same three facts
 ride the XML form, the columnar form, `--json`, `--legend=full` and the MCP `impact` twin at the same limit.
 
 So the cut is **not silent**. What the reproduction does find, smaller and differently shaped:
 
 1. **The disclosure is asserted by one arm on one surface and no mutation has ever shown that arm can fail.**
-   `dccolumnarcheck` (P2) reads `dc_shown=` on one columnar answer of one fixture. Its seven registered mutants
+   `dccolumnarcheck` (P2) reads `shown_dc=` on one columnar answer of one fixture. Its seven registered mutants
    break the block, the pointer and the limit; none removes the disclosure. A binary that cut the tier and said
    nothing in `--json` or in the MCP twin would pass every gate in the tree.
 2. **One sentence of `--help` is unscoped.** `--impact`'s says a windowed answer names "the ONE call that lists
@@ -18613,18 +18613,18 @@ Grains: T1 to T4 at the **cell grain** (one answer), T3's row comparison at the 
 - **T1 — a cut tier is said, on every surface.** For each named call (`all_next=` of a windowed `--impact` and
   `--callers` root, and the `--for` hand-off's `next=` where `windows="1"`), and for the same question asked as
   XML at that limit, as `--json`, under `--legend=full`, and through the MCP `impact` twin: if the declined
-  sites printed are fewer than `declined_calls=`, the root carries `dc_shown=` and `dc_next=`. One answer that
+  sites printed are fewer than `declined_calls=`, the root carries `shown_dc=` and `dc_next=`. One answer that
   cuts and lacks either fails the band.
-- **T2 — the disclosure is arithmetic.** `dc_shown=` equals the sites actually printed (`<dc>` rows, `<dcols
-  n=>` and every array's length, the JSON list's length); `dc_shown` < `declined_calls`; `counts_floor="1"`
-  rides the same root; and the legend of that answer defines `dc_shown=` in both postures.
-- **T3 — `dc_next=`, run verbatim, clears BOTH tiers.** It answers rc 0 with no `dc_shown=`, no
+- **T2 — the disclosure is arithmetic.** `shown_dc=` equals the sites actually printed (`<dc>` rows, `<dcols
+  n=>` and every array's length, the JSON list's length); `shown_dc` < `declined_calls`; `counts_floor="1"`
+  rides the same root; and the legend of that answer defines `shown_dc=` in both postures.
+- **T3 — `dc_next=`, run verbatim, clears BOTH tiers.** It answers rc 0 with no `shown_dc=`, no
   `has_more="1"`, as many declined sites as the first answer's `declined_calls=`, and the same symbol rows as
   the named call, in the same form.
-- **T4 — no false alarm.** An answer whose declined tier is whole carries neither `dc_shown=` nor `dc_next=`,
+- **T4 — no false alarm.** An answer whose declined tier is whole carries neither `shown_dc=` nor `dc_next=`,
   on a named call whose rows outnumber its declined sites and on a small uncut answer.
 - **H1 — the help names the scope.** The `--impact` help paragraph that names `all_next=` also names `total=`,
-  `dc_shown=` and `dc_next=`.
+  `shown_dc=` and `dc_next=`.
 - **B1 — bytes: zero.** All 72 corpus documents of the lane binary are byte-identical to the base binary's
   (`93210787e`). Measured once outside the gate (it needs both binaries); T4 is its in-gate proxy.
 
@@ -18634,9 +18634,9 @@ Grains: T1 to T4 at the **cell grain** (one answer), T3's row comparison at the 
 
 | mutant | defect | arm that must fail | direction |
 | --- | --- | --- | --- |
-| `silentcut` | the tier is cut and the root says neither `dc_shown=` nor `dc_next=` | T1 | **reader: a cut answer reads as whole** |
+| `silentcut` | the tier is cut and the root says neither `shown_dc=` nor `dc_next=` | T1 | **reader: a cut answer reads as whole** |
 | `nextshort` | `dc_next=` names a limit one site short | T3 | **reader: the call named as listing every site does not** |
-| `cutalways` | `dc_shown=` / `dc_next=` ride an answer whose tier is whole | T4 | bytes, and a whole answer called cut |
+| `cutalways` | `shown_dc=` / `dc_next=` ride an answer whose tier is whole | T4 | bytes, and a whole answer called cut |
 | the pre-change binary's help | the unscoped sentence | H1 | **reader** (shown red on the unchanged binary) |
 
 Non-vacuity: the gate fails if its fixture yields no named call that cuts the tier, none that does not, no
@@ -18654,11 +18654,11 @@ calls a side, all rc 0, plus 15 `dc_next=` calls.
 | arm | grain | result |
 | --- | --- | --- |
 | red first | — | on the unchanged binary: T1 to T4 and (N) green, H1 and the three (M) arms red, as registered |
-| T1 said | cell | 18 of 18 cut fixture answers (6 surfaces of 3 named calls: an `--impact` root, a `--callers` root, a `--for` hand-off) carry `dc_shown=` and `dc_next=`; corpus: 15 of 15 |
-| T2 arithmetic | cell | 18 of 18: `dc_shown=` is the sites printed, below `declined_calls=`, `counts_floor` on the root, defined by the answer's legend or note |
+| T1 said | cell | 18 of 18 cut fixture answers (6 surfaces of 3 named calls: an `--impact` root, a `--callers` root, a `--for` hand-off) carry `shown_dc=` and `dc_next=`; corpus: 15 of 15 |
+| T2 arithmetic | cell | 18 of 18: `shown_dc=` is the sites printed, below `declined_calls=`, `counts_floor` on the root, defined by the answer's legend or note |
 | T3 `dc_next=` clears both tiers | item | fixture 18 of 18; corpus 15 of 15, **179,022 of 179,022** declined sites listed with the row count unchanged |
 | T4 no false alarm | cell | 9 of 9 whole answers carry neither attribute; corpus: 17 of 17 uncut named calls |
-| H1 help | — | the `--impact` sentence reads "every row of total=" and names `dc_shown=`, `declined_calls=`, `dc_next=` |
+| H1 help | — | the `--impact` sentence reads "every row of total=" and names `shown_dc=`, `declined_calls=`, `dc_next=` |
 | B1 bytes | cell | **72 of 72** corpus documents byte-identical to the base binary; 72 of 72 pass `xmllint --noout` |
 | (M) `silentcut` | — | T1 red, 18 failures |
 | (M) `nextshort` | — | T3 red, 18 failures |
@@ -18673,8 +18673,8 @@ changed, so no legend dictionary row was added.
 - **The population is this band's re-derivation, not amendment 10's symbol list** (40 cells against 39; 15 cut
   cells against 12). The 99-row, 4,005-site cell amendment 10b cites is not among them; the smallest cut cell
   here holds 602 rows and 8,864 declined sites.
-- **`dc_shown=` stays outside rule 3's `shown_<noun>=` / `<noun>_capped=` pair** (`src/pageview.h`): it is one of
-  seven noun-first `_shown` spellings in the tool, an absent `dc_shown=` means "not cut", and `truncvocabcheck`'s
+- **`shown_dc=` stays outside rule 3's `shown_<noun>=` / `<noun>_capped=` pair** (`src/pageview.h`): it is one of
+  seven noun-first `_shown` spellings in the tool, an absent `shown_dc=` means "not cut", and `truncvocabcheck`'s
   sweep matches `shown_` prefixes only. A reader that looks for a `capped="1"` bit alone finds none on a
   declined-tier cut. Folding those seven into the one vocabulary is a tool-wide change and is not made here.
 - **`dc_next=` on a `--json` answer does not carry `--json`**; the gate adds the form itself.

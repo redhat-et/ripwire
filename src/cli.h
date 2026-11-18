@@ -304,7 +304,7 @@ struct Config
     bool             zoom        = false;                   // --zoom[=depth]: NESTED module hierarchy (multi-level Louvain) + top-level bridges (S5-D)
     int              zoomDepth   = 0;                       // --zoom=depth: cap the hierarchy at `depth` levels (0 = auto: contract until ≤10 top modules)
     int              zoomLevels  = 0;                       // --zoom-levels=N (P4, L7): how many levels the document PRINTS from the top
-                                                            // (0 = every level); the default prints 2 (levels_shown= discloses it)
+                                                            // (0 = every level); the default prints 2 (shown_levels= discloses it)
     bool             zoomLevelsSet = false;                 // did the caller pass --zoom-levels=? (the guard: it modifies --zoom only)
     bool             includeBuiltins = false;               // --include-builtins (P4, L7): --external-surface lists the sh builtins it drops by default
     bool             report      = false;                  // --report: auto architecture summary (markdown)
@@ -1234,7 +1234,7 @@ inline constexpr char kHelpHead[] =
         "                               Scope::name picks one scope's definition — the sym= spelling edit-check prints resolves everywhere.\n"
         "                               Each caller row's sites_at= lists its call sites as lines in its p= file, else file:line (16 at most: sites_total=)\n"
         "                               A call the resolver DECLINED to bind whose candidates include SYM is a <dc in= p= via=\"declined\"> row:\n"
-        "                               a call site, never an edge or a count= row (16 at most, file-first: dc_shown=, dc_next=).\n"
+        "                               a call site, never an edge or a count= row (16 at most, file-first: shown_dc=, dc_next=).\n"
         "                               A windowed answer (has_more=\"1\") names in all_next= the ONE call that lists every caller, in columnar form\n"
         "    --callees=SYM              what SYM calls (1-hop out-edges). file:name disambiguates like --callers; each call it makes that the\n"
         "                               resolver declined to bind is a <dc n= l= via=\"declined\"> row, never an edge or a count= row\n"
@@ -1283,7 +1283,7 @@ inline constexpr char kHelpHead[] =
         "                               rows run nearest first: d= is the hop depth (1 = a direct caller; printed where it changes), PageRank\n"
         "                               order within a depth; by_depth=k:n on the root counts reaches= per depth, so a cut drops the deepest first\n"
         "                               A windowed answer (has_more=\"1\") names in all_next= the ONE call that lists every row of total=, in columnar form;\n"
-        "                               --limit sizes the declined call sites too: where that call holds more of them than rows it says dc_shown=\n"
+        "                               --limit sizes the declined call sites too: where that call holds more of them than rows it says shown_dc=\n"
         "                               (of declined_calls=), and its dc_next= lists them all\n"
         "                               importers= is a SECOND, weaker reach beside it: the files that directly include/import a file defining SYM,\n"
         "                               emitted as <f via=\"import\" lazy=\"0|1\"> rows (format=columnar carries the count only; --limit sizes it). NEVER added to reaches= —\n"
@@ -1832,7 +1832,7 @@ inline constexpr char kHelpHead[] =
         "                               nearest legal id -- a bad id is a typo, not an empty module\n"
         "    --zoom[=depth]             show the nested module hierarchy plus the bridges between modules\n"
         "                               NESTED module hierarchy (multi-level Louvain) + cross-module bridges; --zoom --mermaid = nested diagram.\n"
-        "                               Default window: the top 2 levels (levels_shown=; a module at the cut carries children= for its\n"
+        "                               Default window: the top 2 levels (shown_levels=; a module at the cut carries children= for its\n"
         "                               unprinted child modules; --zoom-levels=N prints N, 0 = all) over the 40 largest top modules\n"
         "                               (shown=/capped=/next_offset=, next= pastes the next page; --limit=N/--offset=M window them)\n"
         "    --report                   architecture summary (modules, god-files, cycles) as markdown\n"
@@ -3745,7 +3745,7 @@ inline constexpr IntFlag kIntFlags[] =
     // graph shaping
     { "--zoom=",             &Config::zoomDepth,     false, kIntFlagMax,       "a positive integer depth",   "--zoom=2",
       nullptr, nullptr, &Config::zoom },
-    // P4 (L7): how many hierarchy levels --zoom PRINTS from the top (the default is 2, disclosed as levels_shown=);
+    // P4 (L7): how many hierarchy levels --zoom PRINTS from the top (the default is 2, disclosed as shown_levels=);
     // 0 = every level. isSetFlag records explicitness so the bare modifier can be refused (it shapes --zoom only).
     { "--zoom-levels=",      &Config::zoomLevels,    true,  kIntFlagMax,       "a non-negative integer (0 = every level)", "--zoom-levels=0",
       nullptr, nullptr, &Config::zoomLevelsSet },

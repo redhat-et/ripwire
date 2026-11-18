@@ -637,17 +637,35 @@ fi
 #       I1  no `<noun>_shown` KEY anywhere: not in the dictionary, not on a cut answer's elements, not in src/'s
 #           emitters (the static sweep covers dc_, d2_ and implementors_, whose cuts need a heavy fixture owned by
 #           dctiercutcheck / countfloorcheck).
-#       I2  on four real cut answers (--zoom, --lego --limit, --nonlocal-state, --path) every shown_<noun>= is
-#           beside <noun>_capped="1", its total and, where it has one, its next.
+#       I2  on seven real cut answers, one per noun (--zoom, --lego --limit, --nonlocal-state, --path, --impact
+#           --limit=1, --for with its caller hop, --for --sections=lego,compose), every shown_<noun>= is beside
+#           <noun>_capped="1" (levels and d2 print theirs 0|1 always: those shown_ attributes are not cut-only),
+#           its total and, where it has one, its next. All seven nouns have a live fixture; none rides on the
+#           static sweep alone. The cheap dc fixture is `--impact=find --limit=1` on src (2,440 declined sites).
+#
+#     DELIBERATELY OUT OF SCOPE: the JSON keys sigs_shown / sigs_total / sigs_next (--for --json, MCP). That is a
+#     different surface with external consumers and a self-consistent noun-first family; it is the owner's call,
+#     not this arm's. Do not "finish the job" by extending the sweep to it. (dc's JSON twin, which the CLI --json
+#     and MCP print under the SAME name as the XML attribute, was renamed with it: attribute parity.)
+#
+#     ENUMERATION TRAP, kept on purpose: the first sweep for these attributes used the character class
+#     [a-z_]+ before _shown= and found SIX. d2_shown has a digit in it; the seventh was invisible to the sweep
+#     for exactly that reason and was found only by widening to [A-Za-z0-9_]+ and recounting. A sweep over
+#     attribute NAMES must allow digits; NOUN_FIRST below does ([a-z][a-z0-9]*(_[a-z0-9]+)*).
 #       I3  every such noun has a dictionary row that spells the companions.
 #     The arm can fail: the in-process mutations below run the same checker on a dictionary with a row deleted, a
 #     row's companions deleted, the generic gloss standing in, and the old spelling defined; each must be flagged.
 # ---------------------------------------------------------------------------------------------------
-NF_WORK="$TMP/nf"; mkdir -p "$NF_WORK/j" "$NF_WORK/c" "$NF_WORK/py"
+NF_WORK="$TMP/nf"; mkdir -p "$NF_WORK/j" "$NF_WORK/c" "$NF_WORK/py" "$NF_WORK/r"
+# implementors_ cut: --for's <lego> block lists 16 of a 40-implementor interface, but ONLY on the task phrase and the
+# --sections=lego,compose opt-in below (a bare --for stubs the block to <lego shown="0">; an interface-by-name task
+# did not render it at all — an empty capture here is fixture drift, and the arm says so rather than passing)
+printf 'interface Router { void run(); }\n' > "$NF_WORK/r/Router.java"
 printf 'interface I { void run(); }\n' > "$NF_WORK/j/I.java"
 i=0
 while [ $i -lt 40 ]; do
     printf 'class C%d implements I { public void run() { } }\n' "$i" > "$NF_WORK/j/C$i.java"
+    printf 'class Impl%d implements Router { public void run() { } }\n' "$i" > "$NF_WORK/r/Impl$i.java"
     printf 'class D%d extends C0 { }\n' "$i" > "$NF_WORK/j/D$i.java"       # a level BELOW the direct implementors: --lego's transitive= rows
     printf 'int dup( int x ) { return x + %d; }\n' "$i" > "$NF_WORK/c/f$i.c"
     i=$(( i + 1 ))
@@ -662,6 +680,9 @@ run "$BIG"            --zoom                           --legend=compact > "$TMP/
 run "$NF_WORK/j"      --lego=I --limit=10              --legend=compact > "$TMP/nf_lego.xml"
 run "$NF_WORK/py"     --nonlocal-state                 --legend=compact > "$TMP/nf_cells.xml"
 run "$NF_WORK/c"      --path=a1,dup                    --legend=compact > "$TMP/nf_alts.xml"
+run "$BIG"            --impact=find --limit=1          --legend=compact > "$TMP/nf_dc.xml"
+run "$BIG"            --for=escapeXml                  --legend=compact > "$TMP/nf_d2.xml"
+run "$NF_WORK/r"      '--for=which router classes implement the Router interface' --sections=lego,compose --legend=compact > "$TMP/nf_impl.xml"
 run --legend-dict                                                       > "$TMP/nf_dict.txt"
 python3 - "$TMP" "$ROOT/src" <<'PY'
 import os, re, sys
@@ -684,7 +705,7 @@ def dict_rows( text ):
     """{ key: [ row, ... ] }: a row is a dictionary line that DEFINES `key=` at its start."""
     rows = {}
     for line in text.splitlines():
-        m = re.match( r"([a-z][a-z0-9_]*)=", line )
+        m = re.match( r"(?:[a-z]+ )?([a-z][a-z0-9_]*)=", line )   # a row is key=... or tag-led: tag key=... (alts shown_alts=K)
         if m:
             rows.setdefault( m.group( 1 ), [] ).append( line )
     return rows
@@ -718,7 +739,8 @@ dict_text = open( os.path.join( tmp, "nf_dict.txt" ), encoding = "utf-8", errors
 problems += check_dict( dict_text, "I1/I3 dictionary" )
 
 seen = set()
-for name, noun in ( ( "nf_zoom", "levels" ), ( "nf_lego", "transitive" ), ( "nf_cells", "cells" ), ( "nf_alts", "alts" ) ):
+for name, noun in ( ( "nf_zoom", "levels" ), ( "nf_lego", "transitive" ), ( "nf_cells", "cells" ), ( "nf_alts", "alts" ),
+                    ( "nf_dc", "dc" ), ( "nf_d2", "d2" ), ( "nf_impl", "implementors" ) ):
     path = os.path.join( tmp, name + ".xml" )
     text = open( path, encoding = "utf-8", errors = "replace" ).read() if os.path.exists( path ) else ""
     if not text.strip():

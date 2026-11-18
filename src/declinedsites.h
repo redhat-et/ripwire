@@ -23,7 +23,7 @@
 // counts, so uncut, the row count equals it.
 //
 // CAPPED AND COUNTED. kDeclinedSiteCap rows by default (a raisable default: --limit=N lifts it, as every primary row cap
-// does); past it the root says dc_shown= (rows printed) and dc_next= (the same question with --limit raised to list every
+// does); past it the root says shown_dc= (rows printed) and dc_next= (the same question with --limit raised to list every
 // site). The callers form is cut FILE-FIRST — each calling file's first site, in path order, before any file's second —
 // so a cut still names every file it can; the callees form reads in file then line order, as the body does.
 
@@ -502,9 +502,9 @@ struct DeclinedSiteCut
 enum class DcCutMutant : std::uint8_t
 {
     None,
-    SilentCut,   // the sites are cut and the root says neither dc_shown= nor dc_next=: a cut answer reads as whole
+    SilentCut,   // the sites are cut and the root says neither shown_dc= nor dc_next=: a cut answer reads as whole
     NextShort,   // dc_next= names a limit one site short: the call named as listing every site does not
-    CutAlways,   // dc_shown= / dc_next= ride an answer whose sites are all printed: a whole answer is called cut
+    CutAlways,   // shown_dc= / dc_next= ride an answer whose sites are all printed: a whole answer is called cut
 };
 inline constexpr std::string_view kDcCutMutantNames[] = { "silentcut", "nextshort", "cutalways" };   // the enum's order after None
 inline DcCutMutant dcCutMutant() { return DcCutMutant( envChoice( "RIPWIRE_TEST_DCCUT_MUTANT", kDcCutMutantNames ) ); }
@@ -529,14 +529,14 @@ inline DeclinedSiteCut declinedSiteCut( std::size_t total, int pageLimit, std::s
 }
 inline std::string declinedSiteCutAttrXml( const DeclinedSiteCut& cut )
 {
-    // dc_shown= rides only beside its continuation; nextAttrXml (the one next= writer) is the dc_next= attribute itself
-    return cut.next.empty() ? std::string() : " dc_shown=\"" + std::to_string( cut.shown ) + "\"" + nextAttrXml( cut.next, "dc_next" );
+    // shown_dc= rides only beside its continuation; nextAttrXml (the one next= writer) is the dc_next= attribute itself
+    return cut.next.empty() ? std::string() : " shown_dc=\"" + std::to_string( cut.shown ) + "\" dc_capped=\"1\"" + nextAttrXml( cut.next, "dc_next" );
 }
 // The JSON twin of the two root attributes, the same names on the CLI --json and the MCP twins (the attribute-parity rule).
-// A cut prints at least one row (the cap and --limit are >= 1), so dc_shown is never the 0 countFieldOrEmpty leaves out.
+// A cut prints at least one row (the cap and --limit are >= 1), so shown_dc is never the 0 countFieldOrEmpty leaves out.
 inline std::string declinedSiteCutKeyJson( const DeclinedSiteCut& cut )
 {
-    return countFieldOrEmpty( "dc_shown", cut.next.empty() ? 0 : cut.shown, /*json=*/true ) + nextFieldJson( cut.next, "dc_next" );
+    return countFieldOrEmpty( "shown_dc", cut.next.empty() ? 0 : cut.shown, /*json=*/true ) + ( cut.next.empty() ? std::string() : std::string( ",\"dc_capped\":1" ) ) + nextFieldJson( cut.next, "dc_next" );
 }
 
 // What the legend must define, read off the rows an answer prints (graphlegend.h declinedSitesLegend).
