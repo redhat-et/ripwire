@@ -3219,14 +3219,23 @@ struct ReceiverEvidence
         return from < staticMember.size() && staticMember[ from ] != 0;
     }
 
-    // lane overload-split: the ONE class field `field` declared on `type` itself (not a base) resolved to through its QUALIFIED
-    // written type (memberTypeClass), else kNoNode. narrow() answers with that class's OWN members first — terraform's
-    // `d.suppressedModules.Add` is addrs.Set's Add, not every Set's — and, when it owns none (an interface, a method promoted
-    // from an embedded type), reads the field by name exactly as before.
-    NodeId qualifiedFieldClass( std::string_view type, std::string_view field ) const
+    // the class the stated field path `path` below `type` names (fieldOf, by name), "" once a field's class is unknown. `lastCls`
+    // (lane overload-split): the LAST field's ONE class when its QUALIFIED written type resolved to one (memberTypeClass, a field
+    // declared on its owner itself), else kNoNode — narrow() answers with that class's OWN members first (terraform's
+    // `d.suppressedModules.Add` is addrs.Set's Add, not every Set's) and, when it owns none (an interface, a method promoted from
+    // an embedded type), reads the field by name exactly as before.
+    std::string_view walkFields( std::string_view type, std::string_view path, NodeId& lastCls ) const
     {
-        const auto known = memberTypeClass.find( typeKey( type, "#", field ) );
-        return known == memberTypeClass.end() ? kNoNode : known->second;
+        while( !path.empty() && !type.empty() )
+        {
+            const std::size_t      dot   = path.find( '.' );
+            const std::string_view field = path.substr( 0, dot );
+            path = dot == std::string_view::npos ? std::string_view{} : path.substr( dot + 1 );
+            const auto known = memberTypeClass.find( typeKey( type, "#", field ) );
+            lastCls = known == memberTypeClass.end() ? kNoNode : known->second;
+            type    = fieldOf( type, field );
+        }
+        return type;
     }
 
     // RESOLVE: the definitions this member call's typed receiver reaches, in `found`; false when the receiver proves
@@ -3266,15 +3275,10 @@ struct ReceiverEvidence
         // the side the receiver names: the class object (a class-name receiver, or `this`/`super` inside a static member),
         // else an instance; a stated field below always holds an instance
         bool classSide = isStatic || ( ch.ctor.empty() && ( isThisRoot( ch.root ) || isSuperRoot( r, ch.root ) ) && callerIsStatic( r.fromSymbol ) );
-        std::string_view rest     = ch.path;
-        NodeId           fieldCls = kNoNode;   // the last field's ONE class when its qualified written type resolved to one
-        while( !rest.empty() )   // walk the stated field classes
+        NodeId fieldCls = kNoNode;   // the last field's ONE class (walkFields)
+        if( !ch.path.empty() )   // walk the stated field classes: a field always holds an instance
         {
-            const std::size_t dot = rest.find( '.' );
-            const std::string_view field = rest.substr( 0, dot );
-            rest = dot == std::string_view::npos ? std::string_view{} : rest.substr( dot + 1 );
-            fieldCls  = qualifiedFieldClass( type, field );
-            type      = fieldOf( type, field );
+            type      = walkFields( type, ch.path, fieldCls );
             superOnly = false;
             classSide = false;
             if( type.empty() )
@@ -3282,7 +3286,6 @@ struct ReceiverEvidence
                 return false;
             }
         }
-        // the field's ONE class answers first (qualifiedFieldClass); owning no such member, the field reads by name as before
         if( !( fieldCls != kNoNode && methodOf( type, r.calleeName, superOnly, fieldCls ) ) && !methodOf( type, r.calleeName, superOnly, cls ) )
         {
             return false;
