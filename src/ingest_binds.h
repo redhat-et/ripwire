@@ -2236,6 +2236,7 @@ struct DeclType
     std::string name;
     std::string qualified;
     bool        isFromAssignment = false;
+    bool        directDeclarator = false;   // CPP-PTR-ALIAS: the variable IS the written type or a reference to it (model.h kDirectDeclaratorBit)
 };
 
 // a type or constructor NAME node's DeclType
@@ -2731,6 +2732,7 @@ inline void pushTypedBind( std::uint32_t fileId, Lang lang, std::string_view var
     b.typeName     = type.name;
     b.importedName = type.qualified;
     b.isFromAssignment = type.isFromAssignment;
+    b.unwrapDepth      = ( type.directDeclarator && lang == Lang::Cpp && ( kind == LocalBindKind::Type || kind == LocalBindKind::ParamType ) ) ? kDirectDeclaratorBit : 0;
     binds.push_back( b );
 }
 
@@ -2903,9 +2905,32 @@ inline void emitShadowVarDecls( std::uint32_t fileId, Lang lang, TSNode decl, st
 // one DECLARATOR → both records: the Rule-2 var→type binding and the r9 VarDecl shadow record(s). The two
 // name reads stay separate on purpose — declaratorVarName descends into a function declarator (harmless
 // for narrowing), emitShadowVarDecls refuses it (load-bearing for suppression).
-inline void emitDeclBinds( std::uint32_t fileId, Lang lang, TSNode declNode, std::string_view src, const DeclType& type,
+// CPP-PTR-ALIAS: true when a C++ declarator names the variable itself or a reference to it (`T x`, `const T& x`, `T&& x`,
+// `T (x)`) — so `x->m()` on a smart-pointer type reaches the pointee — and false through a pointer, array or function
+// declarator (`T* x`, `T x[ 4 ]`, `T (*x)()`), where `->` reaches the written type itself. An unreadable shape is false.
+inline bool cppDirectDeclarator( TSNode d ) noexcept
+{
+    for( int guard = 0; guard < 8 && !ts_node_is_null( d ); ++guard )
+    {
+        const char* t = ts_node_type( d );
+        if( kindIs( t, "identifier" ) )
+        {
+            return true;
+        }
+        if( !kindIs( t, "reference_declarator" ) && !kindIs( t, "parenthesized_declarator" ) )
+        {
+            return false;
+        }
+        const TSNode inner = fieldChild( d, NodeField::Declarator );
+        d                  = !ts_node_is_null( inner ) ? inner : ( ts_node_named_child_count( d ) > 0 ? ts_node_named_child( d, 0 ) : TSNode{} );
+    }
+    return false;
+}
+
+inline void emitDeclBinds( std::uint32_t fileId, Lang lang, TSNode declNode, std::string_view src, DeclType type,
                            BindSite site, std::vector<RawBind>& binds )
 {
+    type.directDeclarator = cppDirectDeclarator( declNode );
     const std::string_view var = declaratorVarName( declNode, src );
     if( var.empty() && !type.name.empty() )
     {
@@ -2943,8 +2968,10 @@ inline void emitShadowParamDecls( TSNode params, std::uint32_t fileId, Lang lang
         // member-variable round (card A3): the parameter's WRITTEN type as a ParamType record (`Counter& c` →
         // c:Counter), read by the field use-site index and Rule 2's lexical lookup — see LocalBindKind::ParamType. `auto`, templated
         // and decltype types write nothing (writtenTypeOf's own refusal), and pushRawBind drops the record.
-        pushTypedBind( fileId, lang, paramDeclaratorVarName( declarator, src ), declTypeOfName( fieldChild( p, NodeField::Type ), src ),
-                       BindSite{ ts_node_start_byte( p ), 0u, 0u }, LocalBindKind::ParamType, binds );
+        DeclType written         = declTypeOfName( fieldChild( p, NodeField::Type ), src );
+        written.directDeclarator = cppDirectDeclarator( declarator );
+        pushTypedBind( fileId, lang, paramDeclaratorVarName( declarator, src ), std::move( written ), BindSite{ ts_node_start_byte( p ), 0u, 0u },
+                       LocalBindKind::ParamType, binds );
     }
 }
 

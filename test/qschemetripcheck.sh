@@ -72,6 +72,9 @@ PIN="$ROOT/test/qschemetrip.hash"
 #   change: the Snapshot gained bodyCidBySym (computeSnapshot records moveCidOf of every callable; serialize/deserialize carry it), and
 #   codeLocByNode returns that identity for every callable beside the over-bar one. The manifest gains recordMoveIdentity (the per-key MAX
 #   both identity maps record).
+# 2026-11-18, lane cpp-ptr-alias (base main 9087eb59c): RE-PINNED with UPDATE_GOLDEN=1. Watched text: kParserVer 309 -> 321 (PLACEHOLDER,
+#   mirrored in quality.h): a C++ Type / ParamType record carries kDirectDeclaratorBit (an EXTRACTION change); kQSnapCacheScheme stays:
+#   the parser key already keys the qsnap cache on extraction.
 # 2026-11-14, lane failure-default (merged with main be84a97de): RE-PINNED with UPDATE_GOLDEN=1 on the merged tree, kQSnapCacheScheme 29 -> 30 (landed as 30 -> 31 in TRAIN-1111h). A BLOB SHAPE change: the Snapshot
 #   gained failureDefaultBySym (serialize/deserialize carry it after maskReportBySym), and maskBySym / maskReportBySym now count the
 #   error-masking failure-default facet (constructCountsBySym through tallyMaskHit).

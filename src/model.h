@@ -1874,6 +1874,10 @@ inline constexpr std::uint8_t kWholeResult = 0xFF;
 // bit); graph.h typeCallResults alone reads it, and types the local as SOME implementor of the trait (ReceiverEvidence::LocalFact
 // iface). The low bits stay the Result/Option layers (always 0 today: a layered trait object is not read).
 inline constexpr std::uint8_t kDispatchResultBit = 0x80;
+// CPP-PTR-ALIAS: the unwrapDepth of a C++ Type / ParamType record whose declarator names the variable itself or a reference to
+// it (ingest_binds.h cppDirectDeclarator: `CodecPtr c`, `const CodecPtr& c`, never `CodecPtr* c`), so a smart-pointer type's `->`
+// reaches its pointee. 0 on every other record: a record that does not say so is never read through a smart pointer.
+inline constexpr std::uint8_t kDirectDeclaratorBit = 0x01;
 // lane iface-peel fix 1 (B1): the memberVia of a C++ MEMBER record (isCompose, a field name) whose written type is a TEMPLATE
 // PARAMETER of an enclosing `template <…>` (`template <class Handle> class S { Handle h_; }`): the name is the parameter, never
 // the smart-pointer alias of that spelling in some namespace. resolve.h SmartAliasPeel::pointeeOf alone reads it, to keep the
@@ -1935,7 +1939,7 @@ struct Binding
                                               //   that name exists (resolve.h assignmentNamesNoClass). Rides the padding after `kind`.
                                               // kind==ReturnType (Rust): the result is written `Self` (LocalBindKind::ReturnType).
     std::uint8_t  resultIndex = kWholeResult; // kind==CallResult/ReturnType: the result position (see LocalBindKind). Rides the padding.
-    std::uint8_t  unwrapDepth = 0;            // kind==CallResult/ReturnType: unwrap operators / layers (see LocalBindKind). Rides the padding.
+    std::uint8_t  unwrapDepth = 0;            // kind==CallResult/ReturnType: unwrap operators / layers (see LocalBindKind); C++ Type/ParamType: kDirectDeclaratorBit. Rides the padding.
     std::uint32_t startByte  = 0;         // the record's own position (RawBind::startByte). ONE declaration's
                                           //   VarDecl and its typed record (Type or ParamType) carry the SAME
                                           //   value — that shared byte is how Rule 2's lexical receiver lookup

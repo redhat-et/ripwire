@@ -386,6 +386,9 @@ constexpr std::uint32_t kParserVer    = 331;          // bump on any grammar/.sc
                                                       //   go-cpp-edges (placeholder 317): a Go result type written as a generic instantiation (`Set[T]`, `*pkg.Set[string]`) records its
                                                       //   ReturnType as the instantiated class (ingest_binds.h goResultClass); it recorded none. Rich file tag 318.
                                                       //   kCacheVersion unchanged: no record changes shape.
+                                                      //   cpp-ptr-alias (placeholder 321): a C++ Type /
+                                                      //   ParamType record whose declarator names the variable or a reference to it carries
+                                                      //   model.h kDirectDeclaratorBit in unwrapDepth (ingest_binds.h cppDirectDeclarator)
                                                       // 311 = 2026-11-17 (#358 C# 1a, @LaimaWu; lands #420, rebased; was 198 on the PR, above main's 309/310): using
                                                       //   directives move to shared @import.path captures; import-free deep containers no longer disclose a cut or
                                                       //   lose whole-cache eligibility. Alias/edge facts unchanged; rich tag 312. kCacheVersion unchanged.

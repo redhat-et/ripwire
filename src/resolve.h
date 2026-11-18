@@ -6187,6 +6187,14 @@ inline bool bodylessIsNoContract( std::string_view text, std::uint32_t from ) no
     return word( lead, "friend" ) || word( lead, "template" );
 }
 
+// CPP-PTR-ALIAS: a smart pointer's pointee as a declaration record spells a type — its last name, and its qualified text when it was
+// written qualified ("" otherwise), the pair Rule 2's class identity reads (Binding::typeName / importedName)
+struct WrittenPointeeText
+{
+    std::string type;
+    std::string qualified;
+};
+
 class SmartAliasPeel
 {
 public:
@@ -6216,8 +6224,9 @@ public:
             e.scope  = Scope( r.memberRoot );
             if( !r.memberCtor().empty() )
             {
-                e.kind    = r.memberVia() == "std" ? Kind::Refused : Kind::Pointer;   // `std::shared_ptr<std::string>`: no in-tree pointee
-                e.pointee = FlatRecvType{ r.memberCtor(), !r.memberVia().empty(), true };
+                e.kind       = r.memberVia() == "std" ? Kind::Refused : Kind::Pointer;   // `std::shared_ptr<std::string>`: no in-tree pointee
+                e.pointee    = FlatRecvType{ r.memberCtor(), !r.memberVia().empty(), true };
+                e.pointeeVia = r.memberVia();
                 anyPointer = anyPointer || e.kind == Kind::Pointer;
             }
             else if( !fieldTypeWrittenInStd( r ) && !r.calleeName.empty() )
@@ -6311,12 +6320,47 @@ public:
             return std::nullopt;
         }
         const std::optional<std::vector<const Entry*>> hits = reach( member.calleeName, member.qualifier, member.fileId, Scope( member.memberRoot ) );
-        std::optional<FlatRecvType>                    t    = hits ? agree( *hits, 0 ) : std::nullopt;
-        if( t && bases_.find( t->type ) != bases_.end() && abstract_.find( t->type ) == abstract_.end() )
+        const Entry* const                             end  = hits ? agree( *hits, 0 ) : nullptr;
+        if( end == nullptr || overridablePin( *end ) )
         {
-            return std::nullopt;   // a concrete class with derived classes: a virtual may be overridden, so no single static pin
+            return std::nullopt;
         }
-        return t;
+        return end->pointee;
+    }
+
+    // CPP-PTR-ALIAS: the pointee a LOCAL or PARAMETER written as a smart-pointer alias reaches through `->` — `Event::TimerPtr t`,
+    // `const CodecPtr& c` — spelled as a compose ref spells it: the pointee's last name and, when the alias wrote it qualified, its
+    // qualified text (`Event::Timer`); nullopt keeps the declaration's base reading. A body has no lexical scope this index models
+    // (kLocalScope), so the lookup is stricter than a member's: a QUALIFIED spelling reaches the aliases declared in a scope whose
+    // innermost name is the qualifier (pointeeOf's rule); an UNQUALIFIED one reads the alias only when every visible declaration of
+    // the name sits in ONE scope (two namespaces declaring `XPtr` may name two pointees — which one the body sees is unread) and no
+    // class declares a member alias of the name. The refusals pointeeOf applies hold here too.
+    std::optional<WrittenPointeeText> pointeeOfWritten( std::string_view name, std::string_view qualifier, std::uint32_t fileId ) const
+    {
+        if( byName_.empty() || name.empty() || realClass_.find( std::string( name ) ) != realClass_.end() )
+        {
+            return std::nullopt;
+        }
+        std::optional<std::vector<const Entry*>> hits;
+        if( !qualifier.empty() )
+        {
+            hits = reach( name, qualifier, fileId, Scope() );
+        }
+        else if( classScoped_.find( std::string( name ) ) == classScoped_.end() )
+        {
+            hits = visibleInOneScope( name, fileId );
+        }
+        const Entry* const end = ( hits && !hits->empty() ) ? agree( *hits, 0 ) : nullptr;
+        if( end == nullptr || overridablePin( *end ) )
+        {
+            return std::nullopt;
+        }
+        WrittenPointeeText out{ end->pointee.type, {} };
+        if( !end->pointeeVia.empty() )
+        {
+            out.qualified.assign( end->pointeeVia ).append( "::" ).append( end->pointee.type );
+        }
+        return out;
     }
 
 private:
@@ -6389,6 +6433,7 @@ private:
         Kind          kind   = Kind::Refused;
         std::uint32_t fileId = 0;
         FlatRecvType  pointee;                 // Pointer
+        std::string   pointeeVia;              // Pointer: the namespace the pointee was written in ("" = unqualified)
         std::string   target;                  // Plain: the alias it names, and the namespace it was written in
         std::string   targetQualifier;
         Scope         scope;                   // where the declaration sits
@@ -6441,35 +6486,68 @@ private:
         return hits.size() > kAliasPeelBranch ? std::nullopt : std::optional( std::move( hits ) );
     }
 
-    // the one pointee every declaration in `hits` names; nullopt when none does, or two differ
-    std::optional<FlatRecvType> agree( const std::vector<const Entry*>& hits, int depth ) const
+    // the smart-pointer declaration (a Pointer entry) every declaration in `hits` ends at, by pointee; nullptr when none does, or
+    // two name different pointees (the type, whether it was written qualified, and the namespace it was written in)
+    const Entry* agree( const std::vector<const Entry*>& hits, int depth ) const
     {
-        std::optional<FlatRecvType> out;
+        const Entry* out = nullptr;
         for( const Entry* e : hits )
         {
-            const std::optional<FlatRecvType> t = follow( *e, depth );
-            if( !t || ( out && ( out->type != t->type || out->writtenQualified != t->writtenQualified ) ) )
+            const Entry* const t = follow( *e, depth );
+            if( t == nullptr
+                || ( out != nullptr && ( out->pointee.type != t->pointee.type || out->pointee.writtenQualified != t->pointee.writtenQualified || out->pointeeVia != t->pointeeVia ) ) )
             {
-                return std::nullopt;
+                return nullptr;
             }
             out = t;
         }
         return out;
     }
 
-    // `e` is the (depth + 1)-th alias declaration of its chain
-    std::optional<FlatRecvType> follow( const Entry& e, int depth ) const
+    // `e` is the (depth + 1)-th alias declaration of its chain; the Pointer entry the chain ends at
+    const Entry* follow( const Entry& e, int depth ) const
     {
         if( e.kind == Kind::Pointer )
         {
-            return e.pointee;
+            return &e;
         }
         if( e.kind != Kind::Plain || depth + 2 > kAliasPeelDepth || realClass_.find( e.target ) != realClass_.end() )
         {
-            return std::nullopt;   // a refusal, or past the cap (a loop ends here too)
+            return nullptr;   // a refusal, or past the cap (a loop ends here too)
         }
         const std::optional<std::vector<const Entry*>> next = reach( e.target, e.targetQualifier, e.fileId, e.scope );
-        return next ? agree( *next, depth + 1 ) : std::nullopt;
+        return next ? agree( *next, depth + 1 ) : nullptr;
+    }
+
+    // a concrete pointee with derived classes: a virtual it declares may be overridden, so the static type would pin the base's body
+    bool overridablePin( const Entry& end ) const
+    {
+        return bases_.find( end.pointee.type ) != bases_.end() && abstract_.find( end.pointee.type ) == abstract_.end();
+    }
+
+    // CPP-PTR-ALIAS: every visible declaration of `name` (an anonymous namespace's in its own file only, none inside a body) when they
+    // all sit in one scope; nullopt when two scopes declare it (a body's lookup scope is unread), more than kAliasPeelBranch do, or none
+    std::optional<std::vector<const Entry*>> visibleInOneScope( std::string_view name, std::uint32_t fileId ) const
+    {
+        const auto all = byName_.find( std::string( name ) );
+        if( all == byName_.end() )
+        {
+            return std::nullopt;
+        }
+        std::vector<const Entry*> hits;
+        for( const Entry& e : all->second )
+        {
+            if( e.scope.local || ( e.scope.anon && e.fileId != fileId ) )
+            {
+                continue;
+            }
+            if( !hits.empty() && ( hits.front()->scope.path() != e.scope.path() || hits.front()->scope.anon != e.scope.anon ) )
+            {
+                return std::nullopt;
+            }
+            hits.push_back( &e );
+        }
+        return ( hits.empty() || hits.size() > kAliasPeelBranch ) ? std::nullopt : std::optional( std::move( hits ) );
     }
 
     HashMap<std::string, std::vector<Entry>> byName_;       // alias name → its declarations
@@ -6516,6 +6594,7 @@ struct RecvVarType
     std::string_view name;
     bool             writtenQualified = false;
     const Binding*   declared         = nullptr;
+    const WrittenPointeeText* pointee = nullptr;   // CPP-PTR-ALIAS: `declared` is a smart pointer and `name` its pointee (`->`)
 };
 
 // EDGE-FLAGS (speed audit card 6, mem-audit-fable-1111): what the sites that committed one (from, to) edge said about it, one bit
@@ -6587,6 +6666,9 @@ struct ScopedRecvDecls
     // with at least one ParamType record; every other name keeps the flat varType table, byte-identical.
     HashMap<std::string, rw::SmallVec<ScopedRecvDecl, 1>> byName;
     const std::vector<Binding>*                           bindings = nullptr;
+    // CPP-PTR-ALIAS: binding index → the pointee `->` reaches when the declaration's written type is a std smart pointer or an
+    // alias of one (graph.h smartPointeesOfBindings). Each such Type record's name is in byName too, so it is answered lexically.
+    const HashMap<std::uint32_t, WrittenPointeeText>*     arrowPointee = nullptr;
 };
 
 // ── P2-D Rule 2 PARAMETER receivers: building the lexical declaration table (2026-09-16, test/narrowcheck.sh arms 7-18) ──
@@ -6624,14 +6706,25 @@ inline bool isScopedBindRecord( const Binding& b ) noexcept
     return b.fromSymbol != kNoNode && !b.var.empty();
 }
 
-// the names the table covers: every "<fromSymbol>#<var>" with a ParamType record
+// the names the table covers: every "<fromSymbol>#<var>" with a ParamType record, or (CPP-PTR-ALIAS) a Type record whose written
+// smart-pointer type reaches a pointee (ScopedRecvDecls::arrowPointee: a local is then read at its declaration's scope too)
 inline void addParamTypedNames( const IngestResult& ing, ScopedRecvDecls& table, std::string& key )
 {
-    const auto isParamType = []( const Binding& b ) noexcept { return b.kind == LocalBindKind::ParamType && isScopedBindRecord( b ); };
-    table.byName.reserve( std::size_t( std::ranges::count_if( ing.bindings, isParamType ) ) );
-    for( const Binding& b : ing.bindings )
+    const auto covered = [ & ]( const Binding& b, std::uint32_t index )
     {
-        if( isParamType( b ) )
+        return isScopedBindRecord( b )
+            && ( b.kind == LocalBindKind::ParamType || ( b.kind == LocalBindKind::Type && table.arrowPointee != nullptr && table.arrowPointee->contains( index ) ) );
+    };
+    std::size_t n = 0;
+    for( std::uint32_t index = 0; index < std::uint32_t( ing.bindings.size() ); ++index )
+    {
+        n += covered( ing.bindings[ index ], index ) ? 1 : 0;
+    }
+    table.byName.reserve( n );
+    for( std::uint32_t index = 0; index < std::uint32_t( ing.bindings.size() ); ++index )
+    {
+        const Binding& b = ing.bindings[ index ];
+        if( covered( b, index ) )
         {
             buildShadowKey( key, b.fromSymbol, b.var );
             table.byName.try_emplace( key );
@@ -6688,12 +6781,13 @@ inline void attachRecvDeclTypes( const IngestResult& ing, ScopedRecvDecls& table
     }
 }
 
-inline ScopedRecvDecls buildScopedRecvDecls( const IngestResult& ing )
+inline ScopedRecvDecls buildScopedRecvDecls( const IngestResult& ing, const HashMap<std::uint32_t, WrittenPointeeText>* arrowPointee = nullptr )
 {
     PROFILE_SCOPE_DESCRIBE( "buildGraph/2j: Rule-2 lexical receiver declarations" );
     ASSUME( ing.bindings.size() < kRecvDeclConflicted );   // typeBinding indices stay clear of the two sentinels
     ScopedRecvDecls table;
-    table.bindings = &ing.bindings;
+    table.bindings     = &ing.bindings;
+    table.arrowPointee = ( arrowPointee != nullptr && !arrowPointee->empty() ) ? arrowPointee : nullptr;
     std::string key;
     addParamTypedNames( ing, table, key );
     if( !table.byName.empty() )
@@ -7620,21 +7714,29 @@ struct IdentityNarrower
 
     // the definitions under keyScope ("Class::callee") owned by class `cls` — or, when their owner is ambiguous or unknown,
     // plausibly it — appended to hits
-    void appendOwnedDefinitions( NodeId cls, const ClassIdentity& ids ) const
+    // true when `cls` owns a definition under keyScope, whether or not an earlier step of the walk appended it already
+    bool appendOwnedDefinitions( NodeId cls, const ClassIdentity& ids ) const
     {
         const auto it    = canonByName.find( keyScope );
         const auto named = ids.classesByName.find( ( *ids.symbols )[ cls ].name );
         if( it == canonByName.end() )
         {
-            return;
+            return false;
         }
+        bool owns = false;
         for( NodeId d : it->second )
         {
-            if( ownedBy( d, cls, named == ids.classesByName.end() ? nullptr : &named->second, ids ) && markSeen( d ) )
+            if( !ownedBy( d, cls, named == ids.classesByName.end() ? nullptr : &named->second, ids ) )
+            {
+                continue;
+            }
+            owns = true;
+            if( markSeen( d ) )
             {
                 hits.push_back( d );   // a definition plausible for two same-named classes of one walk is appended once
             }
         }
+        return owns;
     }
 
     bool ownedBy( NodeId def, NodeId cls, const rw::SmallVec<NodeId, 2>* sameNamed, const ClassIdentity& ids ) const
@@ -7814,9 +7916,72 @@ struct IdentityNarrower
             {
                 continue;   // d derives from another class of that name, or was reached already
             }
-            keyScope.assign( ( *ids.symbols )[ d ].name ).append( "::" ).append( r.calleeName );
-            appendOwnedDefinitions( d, ids );
+            if( !appendClassDefinitions( r, d, ids ) )
+            {
+                appendInheritedBody( r, d, ids );
+            }
             classNext.push_back( d );
+        }
+    }
+
+    // `cls`'s own definitions of the callee appended; true when it owns one. CPP-PTR-ALIAS (C1): a nested class defined OUT OF
+    // LINE (`class Mgr::RangeTimerImpl : public Timer { bool enabled() … }`) scopes its members by the written name,
+    // "Mgr::RangeTimerImpl", never by the class's own name alone; ownedBy keeps that class's definitions only (an in-class
+    // nested class keys by its own name, and the second key misses, harmlessly)
+    bool appendClassDefinitions( const Reference& r, NodeId cls, const ClassIdentity& ids ) const
+    {
+        const Symbol& c = ( *ids.symbols )[ cls ];
+        keyScope.assign( c.name ).append( "::" ).append( r.calleeName );
+        bool owns = appendOwnedDefinitions( cls, ids );
+        if( !c.scope.empty() )
+        {
+            keyScope.assign( c.scope ).append( "::" ).append( c.name ).append( "::" ).append( r.calleeName );
+            owns = appendOwnedDefinitions( cls, ids ) || owns;
+        }
+        return owns;
+    }
+
+    // CPP-PTR-ALIAS (C2): a real subclass `d` of the receiver class that defines no body of the callee runs the one it INHERITS
+    // through another base — `class ConnectionSocketImpl : public SocketImpl, public virtual ConnectionSocket` runs
+    // SocketImpl::isOpen on a ConnectionSocket receiver whose contract Socket declares. The shallowest ancestor level of `d`
+    // whose classes own a definition answers (several at one level: their union, the split lists them all); a level of
+    // declarations alone walks on. Bounded like the ancestor walk; its own visited list, so the subclass walk's state is kept.
+    void appendInheritedBody( const Reference& r, NodeId d, const ClassIdentity& ids ) const
+    {
+        std::vector<NodeId> level{ d };
+        std::vector<NodeId> next;
+        std::vector<NodeId> visited{ d };
+        for( int depth = 0; depth < 16 && !level.empty(); ++depth )
+        {
+            bool found = false;
+            next.clear();
+            for( NodeId c : level )
+            {
+                found = ( depth > 0 && appendClassDefinitions( r, c, ids ) ) || found;
+                const auto up = ids.realUp.find( c );
+                for( std::string_view base : ( up == ids.realUp.end() ) ? std::span<const std::string_view>{} : std::span<const std::string_view>( up->second ) )
+                {
+                    const auto bases = ids.classesByName.find( std::string( base ) );
+                    if( bases == ids.classesByName.end() )
+                    {
+                        continue;
+                    }
+                    plausibleClasses( std::span<const NodeId>( bases->second.data(), bases->second.size() ), fileOf( c, ids ), ids );
+                    for( NodeId b : plausible )
+                    {
+                        if( std::ranges::find( visited, b ) == visited.end() )
+                        {
+                            visited.push_back( b );
+                            next.push_back( b );
+                        }
+                    }
+                }
+            }
+            if( found )
+            {
+                return;
+            }
+            level.swap( next );
         }
     }
 };
@@ -9259,6 +9424,14 @@ struct Narrower
                 return RecvVarType{};   // no declaration in scope (a field or global of the name), a tie, or untyped/conflicted
             }
             const Binding& declared = ( *scopedDecls.bindings )[ innermost->typeBinding ];
+            if( scopedDecls.arrowPointee != nullptr )
+            {
+                if( const auto p = scopedDecls.arrowPointee->find( innermost->typeBinding ); p != scopedDecls.arrowPointee->end() )
+                {
+                    // CPP-PTR-ALIAS: a smart pointer — `->` reaches the pointee, `.` the pointer's own members (no in-tree class)
+                    return r.viaArrow ? RecvVarType{ p->second.type, !p->second.qualified.empty(), &declared, &p->second } : RecvVarType{};
+                }
+            }
             if( declared.kind == LocalBindKind::ReturnType )   // a call result's class, resolved to the one in-tree class (graph.h)
             {
                 return RecvVarType{ declared.typeName, false, &declared };
@@ -9277,6 +9450,10 @@ struct Narrower
     // keyBind still holds this site's key) — and false when the flat table's records disagree: identity then stays out
     std::pair<bool, std::string_view> writtenQualifier( const RecvVarType& bound, const ClassIdentity& ids ) const
     {
+        if( bound.pointee != nullptr )
+        {
+            return { true, std::string_view( bound.pointee->qualified ) };   // CPP-PTR-ALIAS: the pointee's own qualified text
+        }
         if( bound.declared != nullptr )
         {
             // a call result's written qualifier (`ns::T`) was already resolved to its one class: no final-segment question left
