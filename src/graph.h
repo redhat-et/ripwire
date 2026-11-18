@@ -1330,7 +1330,7 @@ inline bool keepRustQualifiedCandidates( const IngestResult& ing, ChaConeMemo& c
 inline void keepRustTraitImplementors( ChaConeMemo& chaCones, const IngestResult& ing, const Reference& r, std::vector<NodeId>& cand,
                                        std::vector<NodeId>& rule3Hedge )
 {
-    if( r.lang != Lang::Rust || r.qualifier.empty() )
+    if( !langFacts( r.lang ).traitImplBlocks || r.qualifier.empty() )   // a trait's methods sit in its own impl blocks: Rust
     {
         return;
     }
