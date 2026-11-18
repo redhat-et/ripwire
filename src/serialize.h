@@ -8559,7 +8559,7 @@ inline std::string hopUnreadAttr( HopValueRefs* vals )
     {
         return {};
     }
-    std::ranges::sort( vals->unread );
+    std::ranges::sort( vals->unread, rw::sortutil::svLess );
     vals->unread.erase( std::ranges::unique( vals->unread ).begin(), vals->unread.end() );
     std::string out = " value_refs_unread_for_lang=\"";
     for( std::size_t i = 0; i < vals->unread.size(); ++i )

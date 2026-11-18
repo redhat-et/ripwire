@@ -255,7 +255,7 @@ Discloses: `capped`, `reads_capped`, `writes_capped`
 
 ### `src/declinedsites.h`
 
-Discloses: **none**
+Discloses: `dc_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
@@ -272,7 +272,7 @@ Discloses: **none**
 
 ### `src/defslookup.h`
 
-Discloses: `to_capped`
+Discloses: `alts_capped`, `to_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
@@ -450,7 +450,7 @@ Discloses: **none**
 
 ### `src/forcallerhop.h`
 
-Discloses: `capped`
+Discloses: `capped`, `d2_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
@@ -1397,7 +1397,7 @@ Discloses: **none**
 
 ### `src/serialize.h`
 
-Discloses: `capped`, `calls_capped`, `dirs_capped`, `entries_capped`, `files_capped`, `importers_capped`, `inc_capped`, `members_capped`, `names_capped`, `sibs_capped`, `type_capped`
+Discloses: `capped`, `calls_capped`, `dirs_capped`, `entries_capped`, `files_capped`, `implementors_capped`, `importers_capped`, `inc_capped`, `members_capped`, `names_capped`, `sibs_capped`, `transitive_capped`, `type_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |

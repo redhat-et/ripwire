@@ -18366,7 +18366,7 @@ figures are corrected, each to a smaller or narrower one:
   present only when some row carries it). An empty cell is an absent attribute. `via="declined"` moves from
   every row to the block. The default XML, `--json` and the MCP twins keep their rows.
 - **DC2 — the direct roots point at the complete call.** A `--callers` / `--impact` root that windows
-  (`has_more="1"`) carries `all_next="--VERB=X --format=columnar --limit=N"`, spelled by
+  (`has_more="1"`) carries `all_next="--impact=X --format=columnar --limit=N"` (`--callers=X` on a `--callers` root), spelled by
   `handoffwindow.h`'s `completeCallInvocation`, with `N = max( total, declined call sites )` so the named
   call cuts neither tier. No prediction is made: the attribute is written from the window the verb already
   computed for that answer.
@@ -19253,7 +19253,7 @@ a definition it does not hold, and (c) same argv, same bytes — (c) being pinne
 | --- | --- | --- | --- |
 | state file keyed by (cwd, dictv) | yes | **no** — the cwd is not the reader: two lanes in one checkout, a human beside an agent, or a session after compaction all read a marker saying "served" with nothing in context | **no** |
 | env handshake | **no** — a child cannot set its parent's environment, so only an outside wrapper can carry it | no better than argv, and argv is in the transcript | yes |
-| explicit `--session=ID` | **no** (it is a flag) | partly | **no** |
+| an explicit session-ID flag (never built) | **no** (it is a flag) | partly | **no** |
 
 No mechanism passes all three, so the literal flip is not shipped. What ships instead costs no state and no
 flag: **a pointer names the cheapest read that resolves what that answer dropped.**

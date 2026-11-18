@@ -600,10 +600,10 @@ struct LegendSession
             served[ id ] = 1;
             if( id >= kTermBase && id < kForBase ) { held.push_back( entryBody( id ) ); }
         }
-        std::sort( held.begin(), held.end() );
+        std::sort( held.begin(), held.end(), rw::sortutil::svLess );
         for( std::size_t id = kTermBase; id < kForBase; ++id )
         {
-            if( served[ id ] == 0 && std::binary_search( held.begin(), held.end(), entryBody( id ) ) ) { served[ id ] = 1; }
+            if( served[ id ] == 0 && std::binary_search( held.begin(), held.end(), entryBody( id ), rw::sortutil::svLess ) ) { served[ id ] = 1; }
         }
         refOn = true;
     }
