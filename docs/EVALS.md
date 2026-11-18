@@ -21,7 +21,7 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 843 gate scripts (counts snapshot 2026-11-17) plus the determinism, cache-transparency and golden contracts. <!-- gatecount --> |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 852 gate scripts (counts snapshot 2026-11-18) plus the determinism, cache-transparency and golden contracts. <!-- gatecount --> |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -5888,7 +5888,7 @@ copy here would be exactly the dialect divergence that gate exists to catch. Com
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-(**843 gate scripts** at the counts snapshot 2026-11-17; `test/manifestcheck.sh` proves every listed name exists on disk). <!-- gatecount -->
+(**852 gate scripts** at the counts snapshot 2026-11-18; `test/manifestcheck.sh` proves every listed name exists on disk). <!-- gatecount -->
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -7008,7 +7008,7 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 843 at the counts snapshot 2026-11-17. The <!-- gatecount -->
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 852 at the counts snapshot 2026-11-18. The <!-- gatecount -->
   loop is the authority; the stale docstrings are a known drift. Since 2026-09-10 the number is not
   written by hand anywhere, and since 2026-11-02 it is the dated counts snapshot `docs/counts.tsv`
   (so two open changes that each add a gate never conflict on it): `docs/gatecount_build.py` rewrites
@@ -18216,109 +18216,14 @@ of what is available.** A previous band established why nothing buildable from e
 — a per-row gold-probability order maximises precision while completeness needs coverage of DISTINCT items —
 so the next ordering band must register that objective, not this one.
 
-## PRE-REGISTRATION 2026-11-17 (amendment 9) — ITEM S: an attribute macro costs a real definition
+## PRE-REGISTRATION 2026-11-17 (amendment 9) — ITEM S: moved to its own lane
 
-Registered before any `src/` or `queries/` change, from a defect found while auditing `--dead-code`'s
-answers and then reproduced in a 12-line fixture this band owns.
-
-### The defect, and it is three defects with one cause
-
-In C it is idiomatic to put a format-attribute macro between the return type and the function name:
-
-```c
-static int printflike(7, 8)
-window_customize_write_value(struct screen_write_ctx *ctx, u_int cx, ...)
-{
-	...
-		return (0);
-```
-
-The parser takes `printflike(7, 8)` as the function declarator, and three things follow:
-
-1. **The real definition is NEVER INDEXED.** `--defs=window_customize_write_value` answers `found="0"`,
-   so every call to it is unresolved.
-2. **A phantom takes its place and ABSORBS the real body.** `--grep` attributes the real definition line
-   to `in="printflike"`.
-3. **Rows from inside the absorbed body become symbols** — `return`, and in the fixture also `int`.
-
-`--dead-code` then lists the phantoms as deletion candidates. On tmux its only non-empty answer was **10 of
-10 wrong**: seven `printflike` and three `return`. **A wrong row in `--dead-code` tells an agent it is safe
-to delete live code**, which is the most expensive wrong answer this tool can produce.
-
-The tool is not silent about the cause — it flags the file `parse_degraded="1"` — but it ships the symbols
-anyway, so the disclosure does not reach the answer that uses them.
-
-### Measured population
-
-**8 definitions across 8 files in tmux** use the macro-on-its-own-line shape, and ripwire flags **9 files**
-`parse_degraded`. Each one costs one real function and mints at least one phantom. The shape is not
-tmux-specific — `__attribute__`, `printflike`, `__printflike` and warn-unused macros are common C idiom —
-but **8 of 8 is this band's whole measured denominator and no claim beyond tmux is registered.**
-
-### The decision rule, fixed before the fix
-
-- **S1 — the real definition must be INDEXED.** The fixture's `realwriter` and tmux's
-  `window_customize_write_value` must both resolve under `--defs`. **This is the half worth more than the
-  phantom**: a phantom is noise, a missing definition makes every call site unresolved. A fix that removes
-  the phantom and leaves the function missing FAILS S1.
-- **S2 — no indexed symbol is a reserved keyword.** 33 C/C++ keywords checked. A keyword can never be a
-  function name; this is a fact, not a heuristic, which is why it is gateable.
-- **S3 — no definition is minted from an all-integer-literal parameter list.** `f(3, 4)` at definition
-  position is an attribute macro, a vexing parse or a call — never a definition. Also a fact.
-- **S4 — THE CONTROL: a name that merely CONTAINS a keyword or the macro's name stays indexed.**
-  `returnValue` and `printflikeFmt` must survive. **A veto that also removes these is worse than the
-  defect**, and this arm is the only thing that tells the two apart.
-- **S5 — no regression in indexed symbol count on the other corpora.** A veto that quietly drops real
-  symbols elsewhere buys a clean fixture and a worse index. Report the per-corpus symbol count before and
-  after; any FALL that is not an identified phantom fails the band.
-
-### Controls
-
-- **Non-vacuity, and it has already fired once.** The fixture must carry the exact shape — macro on its own
-  line, real name below it, bare `return (0)` in the body. An earlier version of this arm grepped for the
-  macro with different arguments than the fixture used, so it went stale silently and `(S2)` passed for the
-  wrong reason. A non-vacuity arm that does not track its own fixture is the one arm that must never be
-  approximate.
-- **The fixture reproduces all three defects** before the fix: `realwriter` missing, `printflike` indexed,
-  `int` indexed. A fix is only believable against a fixture that was red for every one of them.
-
-### Amendment 9a, before any fix — S1 is NOT achievable this round, and the better fix is elsewhere
-
-Probing the fixture settled what a veto can and cannot buy, and it changes the band.
-
-**The error region swallows the whole definition.** On a 12-line fixture the indexed names are `int`, `main`
-and `printflike`. `realwriter` is absent, and **even its CALL SITE on line 12 is attributed to
-`in="printflike"`** — the phantom owns lines 4 through 12. So the parse failed over that whole region, and
-**vetoing a symbol does not re-parse it**: no veto can recover the definition.
-
-**S1 is therefore reclassified as measured-but-unfixable in this round**, not quietly dropped. Recovering it
-needs macro pre-expansion or a targeted re-parse of the error region, each of which is its own band and
-neither of which is an afternoon. The measured cost stands on the record: **8 definitions across 8 tmux
-files, 9 files flagged `parse_degraded`.**
-
-**And the probe found the better fix for the dangerous half.** The file is ALREADY flagged
-`parse_degraded="1"`. `--dead-code`'s rule is *internal linkage and no caller found in the index* — but in a
-file whose parse failed, **"no caller found" is not evidence of deadness, it is evidence the parse failed.**
-The tool holds that fact and does not use it.
-
-So the registered rule changes to:
-
-- **S1′ — `--dead-code` and `--safe-delete` must not offer a candidate from a file whose parse degraded**,
-  and must disclose how many candidates were withheld for that reason. This kills the dangerous answer at
-  its source rather than at its symptom: on tmux it removes all 10 wrong rows, because all 10 come from
-  parse-degraded files. A withheld count is a floor the reader can act on; a wrong deletion candidate is
-  not.
-- **S2, S3, S4 unchanged** — the keyword and all-literal vetoes, and the control that a name merely
-  containing a keyword survives.
-- **S5 unchanged** — no symbol-count regression on the other corpora.
-- **S6 — the withholding must be VISIBLE, not silent.** A verb that quietly serves fewer candidates has
-  swapped one dishonesty for another. `--dead-code` already carries `counts_floor="1"`; this adds a named
-  count, and the gate asserts the count is non-zero on a corpus that has such files.
-
-**What this does NOT fix, stated so the readout cannot be read as more than it is:** the 8 tmux functions
-are still missing from the index, so every call to them is still unresolved, and `--for`/`--callers` on them
-still answer nothing. `--dead-code` stops recommending deletions it cannot support; the index is no more
-complete than before.
+Item S (an attribute macro between the return type and the name costs the real definition) and its
+amendment 9a were pre-registered here and moved off the 0.7.0 train by owner decision on 2026-11-18, so the
+pre-registration lands together with its fix rather than as a red gate on `main`. The section and its gate
+are preserved verbatim on branch `lane/item-s-attribute-macro` (cut at `c7cc38cf8`), which will build the
+keyword and all-literal vetoes, the parse-degraded withholding for `--dead-code` / `--safe-delete` with a
+disclosed count, and re-point the definition-recovery arm at 9a's replacement criterion.
 
 ## PRE-REGISTRATION 2026-11-17 (amendment 10) — BAND DC: the declined-call rows bypass the columnar dialect
 

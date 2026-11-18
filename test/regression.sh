@@ -845,7 +845,6 @@ for _g in \
     pathroutecheck \
     patterncheck \
     perfharnesscheck \
-    phantomdefcheck \
     phpcheck \
     pincensuscheck \
     planlanescheck \
