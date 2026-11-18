@@ -280,6 +280,29 @@ if [ -d "$ROOT/$LEGO" ]; then
         || no "legofix Vehicle implementors changed: $LEGO_V"
 fi
 
+# ── §10 RUST-UFCS-QUALIFIED: a call written through a bracketed type (test/rustufcsfix, its own tree so §1-§8's counts hold) ──
+# `<Where as Command>::run( &Where, .. )` (nushell crates/nu-command/src/filters/filter.rs:50) names Where's impl of Command::run.
+# Before, the bracketed path left the qualifier empty and the call bound by name to every `run` in reach (main ac4ce4f6a: cast_call
+# count=5, all via=name, Runner::run among them). Literals read off test/rustufcsfix/src/*.rs; red on main for (a) (b) (c) (f).
+UF="test/rustufcsfix"
+ufrows(){ run "$UF" "--callees=src/calls.rs:$1" --no-cache | grep -oE '<s [^>]*>' | grep -v 't= n=' | sed -E 's/ tested="[0-9]"//'; }
+ufexpect(){   # $1 caller  $2 the exact rows, one per line  $3 prose
+    local got; got="$( ufrows "$1" )"
+    [ "$got" = "$2" ] && ok "§10 $1: $3" || no "§10 $1 expected [$2] got [$got] — $3"
+}
+ufexpect cast_call '<s t="method" n="Where::run" p="src/impls.rs:4"/>' "(a) <Where as Command>::run is Where's impl, one proven row"
+ufexpect inherent_call '<s t="method" n="Where::helper" p="src/impls.rs:7"/>' "(b) <Where>::helper is Where's own helper, proven"
+ufexpect twin_call '<s t="method" n="Twin::run" p="src/twins_a.rs:4" prov="split"/>
+<s t="method" n="Twin::run" p="src/twins_b.rs:4" prov="split"/>' "(c) NEGATIVE: Twin names two types, split over both, no other run"
+ufexpect external_call '' "(d) NEGATIVE: <String as Clone>::clone names no type of the tree, no row"
+ufexpect dyn_call '<s t="method" n="Sq::area" p="src/impls.rs:15" via="name"/>
+<s t="method" n="Ci::area" p="src/impls.rs:19" via="name"/>' "(e) NEGATIVE: <dyn Shape>::area stays hedged over Shape's implementors"
+ufexpect generic_call '<s t="method" n="Where::run" p="src/impls.rs:4" via="name"/>
+<s t="method" n="Other::run" p="src/impls.rs:11" via="name"/>' "(f) NEGATIVE: <T as Command>::run through a type parameter is Command's implementors, hedged, never Runner::run"
+RUNNER="$( run "$UF" --callers=src/impls.rs:Runner::run --no-cache )"
+[ "$( cnt "$RUNNER" )" = 0 ] && ok "§10 Runner::run (a namesake implementing no trait) has no caller" \
+    || no "§10 Runner::run gained a by-name caller: $RUNNER"
+
 # ── §9 hygiene: determinism, warm==cold, well-formed XML ───────────────────────────────────────────────
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 run "$FIX" --no-cache >"$TMP/d1"; run "$FIX" --no-cache >"$TMP/d2"

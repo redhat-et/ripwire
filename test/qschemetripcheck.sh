@@ -34,6 +34,10 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-18, lane edge-strays-1118 (base main 9087eb59c): RE-PINNED with UPDATE_GOLDEN=1. kParserVer 309 -> 327 (placeholder above
+#   the open lanes; the train renumbers) with quality.h's kIngestParserVerMirror: a Rust call written through a bracketed type
+#   (`<Where as Command>::run`) is qualified by the type it names (ingest_names.h rustBracketedQualifier). kQSnapCacheScheme stays
+#   34: no quality function on the manifest changed, and a cached Snapshot is keyed on the parser version already.
 # 2026-11-15, lane land-499-500 fix 1 (CodeRabbit on #668, merged over main d68b57456): RE-PINNED with UPDATE_GOLDEN=1,
 #   kQSnapCacheScheme 33 -> 34 (quality.h's v34 note). rustTestAttributed reads each top-level attribute on a line
 #   (classifyRustAttributeLine, rustAttributeClose: both join the manifest), so the Rust dead set moves; registeredMacroSymbolIds
