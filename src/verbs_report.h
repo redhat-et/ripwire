@@ -1940,7 +1940,7 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
                      "files= means two different things by DEPTH here and is deliberately not renamed: on the ROOT it is how "
                      "many files were ANALYSED; on the <uniform/> fold it is how many of them collapsed into that one row. "
                      "With a SYM, of= echoes it and defs= is how many DEFINITIONS that name has: this report covers the file "
-                     "holding the TOWER FRONT of them (most specific kind, leading language, then lowest node id), so defs= above 1 means "
+                     "holding the TOWER FRONT of them (most specific kind, leading language, then path, line, name), so defs= above 1 means "
                      "the other definitions' files were NOT analysed. Qualify with file:name to choose one. An @FILE:LINE "
                      "seed rebinds to the innermost definition enclosing that line (sym= names it) and covers exactly that "
                      "definition's file -->{}{}{}{}",
