@@ -1286,7 +1286,7 @@ inline constexpr char kHelpHead[] =
         "                               --limit sizes the declined call sites too: where that call holds more of them than rows it says shown_dc=\n"
         "                               (of declined_calls=), and its dc_next= lists them all\n"
         "                               importers= is a SECOND, weaker reach beside it: the files that directly include/import a file defining SYM,\n"
-        "                               emitted as <f via=\"import\" lazy=\"0|1\"> rows (format=columnar carries the count only; --limit sizes it). NEVER added to reaches= —\n"
+        "                               emitted as <f p=> rows, lazy=\"1\" on a lazy one (format=columnar carries the count only; --limit sizes it). NEVER added to reaches= —\n"
         "                               files and symbols are different units, and an importer may use a different symbol from that file, or none at all.\n"
         "                               no_file_edges=\"go\" on the root: SYM's file is in a language this build almost never resolves imports for, so importers= is a floor.\n"
         "                               lazy=\"1\": every one of that importer's edges is written inside a closure — a TS/JS require()/import()\n"

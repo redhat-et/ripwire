@@ -405,6 +405,11 @@ echo "=== (A-PIN) --legend=full is BYTE-IDENTICAL to the pre-L1 default (pinned 
 # the rows <def ix="1" t="fn" p="geometry.cpp:4"/><def ix="1" t="fn" p="geometry.h:12" bodyless="1"/> after the root and the
 # sole-definition clause (graphlegend.h kSoleDefLegend); impact.xml by the tied declaration's row (geometry.h:12) and the clause's
 # rewording ("this radius" -> "this answer", the tied-declaration sentence). 3875 -> 4187 B and 4844 -> 4887 B. Five others unchanged.
+# RE-ANCHORED BY HAND 2026-11-18 (lane/t3-lossless, IMPORT-ROW-SHORT, by design), impact.xml only: its importer rows print
+# <f p="…"/> (were <f via="import" p="…" lazy="0"/>) and the importers= sentence of the full legend names that row and reads
+# "no lazy= means at least one edge is load-time" (was lazy="0" means ...). Checked mechanically (test/importrowshortcheck.sh arm B
+# does the same on its own goldens): putting via="import" and lazy="0" back on each row and reversing those two phrases gives
+# the previous pin byte for byte (at= masked).
 PIN_DIR="$ROOT/test/compactlegendfix/pre_l1_full"
 # the one normalisation, in python on BOTH sides so no sed dialect decides it (BSD sed appends a final newline, GNU
 # sed does not): at="…" masked, trailing newlines dropped.
@@ -2357,9 +2362,14 @@ condPair D25 "--communities over test/chafix (a cross-module <bridge> row)" "$CH
 condPair D25 "--community=${chaModule:-0} over test/chafix (its peer <bridge> row)" "$CHA" "--community=${chaModule:-0}" '!bridge:to' '!bridge:to_label' '!bridge:edges'
 condPair D26 "--safe-delete=total_area (the rest of its root)" "$FIX" "--safe-delete=total_area" \
     safe-delete:t safe-delete:defs safe-delete:ambiguous_callers safe-delete:dead_code_candidate
-condPair D27 "--impact=distance (<f lazy=> importer rows)" "$FIX" "--impact=distance" f:lazy
-mcp_text impact "{\"path\":\"$FIX\",\"symbol\":\"distance\",\"legend\":\"full\"}" >"$TMP/d.full"
-mcp_text impact "{\"path\":\"$FIX\",\"symbol\":\"distance\"}" >"$TMP/d.comp"
+# IMPORT-ROW-SHORT (2026-11-18): an importer row prints lazy= only when it is 1, so the probe is the one committed corpus with a
+# lazy importer (test/impactimportfix: barrel.js and lazyimporter.js require ./Widget inside a function body). --impact=distance
+# over test/fixture now carries no lazy= at all, which is why it stays in (D30)'s mirror loop as an answer that LACKS the field.
+LAZYFIX="$ROOT/test/impactimportfix"
+[ -d "$LAZYFIX" ] || no "(D27) fixture missing: $LAZYFIX — the lazy= row reading would be vacuous"
+condPair D27 "--impact=Widget over test/impactimportfix (<f lazy=1> importer rows)" "$LAZYFIX" "--impact=Widget" f:lazy
+mcp_text impact "{\"path\":\"$LAZYFIX\",\"symbol\":\"Widget\",\"legend\":\"full\"}" >"$TMP/d.full"
+mcp_text impact "{\"path\":\"$LAZYFIX\",\"symbol\":\"Widget\"}" >"$TMP/d.comp"
 condArm D27 "MCP impact at its DEFAULT posture (compact) vs legend:\"full\"" "$TMP/d.full" "$TMP/d.comp" f:lazy
 condPair D28 "the flagless map (its always-on header)" "$FIX" "" '!#files' '!#symbols' '!#edges' '#shown' '!#ambiguous' '!#order'
 "$BIN" "$FIX" "$H1" >"$TMP/d.full" 2>/dev/null </dev/null
@@ -2386,9 +2396,9 @@ rrun --communities --legend=compact >"$TMP/d30.cm"
 rrun --impact=distance --format=columnar --legend=compact >"$TMP/d30.col"
 [ "$( ca carries "$TMP/d30.col" impact:importers )" = 1 ] && [ "$( ca carries "$TMP/d30.col" f:lazy )" != 1 ] \
     || no "(D30) control: the columnar --impact now prints an <f lazy=> row, so it no longer proves that reading is present-only"
-rrun --impact=distance --legend=compact >"$TMP/d30.imp"
+cdRun "$TMP/d30.imp" "$LAZYFIX" --impact=Widget --legend=compact
 [ "$( ca carries "$TMP/d30.imp" f:lazy )" = 1 ] && [ "$( ca carries "$TMP/d30.imp" "#files" )" != 1 ] && [ "$( ca carries "$TMP/d30.imp" lens )" != 1 ] \
-    || no "(D30) control: --impact=distance no longer carries <f lazy=> without a map header or lens=, so it proves nothing about the header-only and head readings"
+    || no "(D30) control: --impact=Widget over test/impactimportfix no longer carries <f lazy=> without a map header or lens=, so it proves nothing about the header-only and head readings"
 d30bad=0; d30n=0
 for v in "--from-trace=$TMP/trace.txt" "--communities" "--community=0" "--impact=distance --format=columnar" "--impact=distance" ""; do
     rrun $v --legend=compact >"$TMP/d30.c"

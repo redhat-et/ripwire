@@ -657,6 +657,7 @@ for _g in \
     impacttypecheck \
     importcapcheck \
     importnarrowcheck \
+    importrowshortcheck \
     importspellingcheck \
     includeanglecheck \
     includeprecisecheck \
