@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# calleerowfilecheck.sh — BAND CF (docs/EVALS.md, amendment 11): a --for hop-callee row names the FILE its line is in.
+# calleerowfilecheck.sh — BAND CF (docs/EVALS.md, amendment 11b): a --for hop-callee row names the FILE its line is in.
 #
 # THE DEFECT. `<hops>` listed a ranked symbol as <h l= p= n=> and each callee as <c n= l=/>: the callee's definition LINE and
 # no file, so the row could not be opened, and nothing said so. The same edge on --callees prints p="file:line".

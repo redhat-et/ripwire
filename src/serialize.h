@@ -7372,7 +7372,7 @@ inline std::vector<float> calleeNameSpecificity( const IngestResult& ing )
 // it is not the ranker's; they are sorted ascending, so a row's content depends on the row and not on how the
 // walk reached it. Row ORDER is unchanged: a merged row still sits where its first callee sat.
 //
-// THE ROW NAMES ITS FILE (BAND CF, docs/EVALS.md amendment 11). `l=` is a definition line, and a line with no file cannot
+// THE ROW NAMES ITS FILE (BAND CF, docs/EVALS.md amendment 11b). `l=` is a definition line, and a line with no file cannot
 // be opened: 15 required gold items of the 2026-11-17 retrieval-gap partition were present in an answer as exactly this row,
 // line exact, and lost. The row now prints p= when the callee is NOT in the file of the <h> row it sits under; a row with
 // no p= is in that <h> row's file, and the legend says so. The path is the callee SYMBOL's own indexed file — the same

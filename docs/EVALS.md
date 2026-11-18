@@ -18950,7 +18950,7 @@ as UNENTERED.
   re-measured and are not gated.
 - The `have=` flag itself is caller output on every call (30 B and up); bytes only, no token price.
 - No sanitizer build was run for this band.
-## PRE-REGISTRATION 2026-11-17 (amendment 11) — BAND CF: a hop-callee row prints a line and no file
+## PRE-REGISTRATION 2026-11-17 (amendment 11b) — BAND CF: a hop-callee row prints a line and no file
 
 Registered before any `src/` change. The gate (`test/calleerowfilecheck.sh`) lands red in the same commit as
 this section; the fix and the readout follow in a later one.
