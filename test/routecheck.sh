@@ -67,6 +67,11 @@ CONCEPT="how does resolution work"
 #    the pre-routing golden (captured from plain subtoken+body). The DEFAULT run only ADDS a "[routed:
 #    subtoken+body …]" header note, so we compare the --no-route run (identical bytes) to the golden AND
 #    assert the DEFAULT run's ranking body matches by stripping just the header comment. ──────────────────
+# RE-PIN 2026-11-18 (train byte-token-070, aeaacdad2 "a callee signature row under a <b> body names the file its line is in";
+# rule 4): golden_for.xml 4301 -> 4345 B, est_tokens "1643" -> "1661". The train changed the output and did not re-pin here:
+# the full legend's calls clause gains " (c p= their file when it is not the body's)" and a callee <c> row whose line is in another
+# file carries p=. Verified mechanically: deleting that clause and every <c ... l="N"> p= attribute from the new capture, with
+# est_tokens= masked, gives the previous golden byte for byte. No ranking, body, or route byte moved.
 # RE-PIN 2026-11-15 (NEXT-APOS-RAW): golden_for.xml 4303 -> 4293 B. Re-captured from the lane binary and checked mechanically:
 # the previous golden (== the main binary's output) with &apos; -> ' inside next= values and est_tokens "1647" -> "1643" is the
 # new golden byte for byte (nextverb.h leaves ' raw in a "-delimited attribute; the 10 bytes saved lower the price).
