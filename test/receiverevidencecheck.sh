@@ -234,6 +234,12 @@
 #            a glob re-export), never a private namesake of a sibling module and never a method. [N]: two types (or two
 #            functions) of one name behind two globs, a glob that does not reach the type, and (floor) an in-tree glob beside
 #            a glob of an outside crate, which may supply the name unseen. Each [N] arm first checks that the answer shows the call.
+#   (RM) RUST-MODALIAS-GLOB (root rsmodalias/, unpacked from rsmodalias.txt; three crates shaped like axum / axum-extra). A module
+#            re-exported by a `use` (`pub(crate) use base::test_helpers;`) is that module: a glob of it (`use crate::test_helpers::*;`)
+#            supplies what the module declares and re-exports (its own `pub use self::test_client::*;`), across crates, in one
+#            crate, through a chain of two aliases, for a parameter type, a `TestClient::new(..)` local and a `use`d free fn.
+#            [N]: an alias cycle (terminates, names nothing), two globs supplying the name, an alias of an outside crate's
+#            module, and an item of a private mod the alias's module does not re-export. Each [N] arm first checks the call shows.
 #   (Q) qualified annotations and in-place rebinding (lane h1-annot; roots qualannot/<lang>/, unpacked from qualannot.txt).
 #            A Python / TS parameter, annotated local or TS field written `q.T` / `q.T<…>` names the in-tree class T only when
 #            the qualifier's ROOT `q` is an in-tree module or namespace as the file sees it: an import that resolves into the
@@ -295,8 +301,9 @@ echo "receiverevidencecheck: BIN=$BIN  CORPUS=$CORPUS"
 
 # arm (L)'s roots (callresult/<lang>) live in one text bundle unpacked into the temp dir: committed as source trees they
 # joined the repo's own indexed map (readmedriftcheck G4's --max-tokens=3000 head lost two rows)
-# (arm (RS)'s root rsrecv/, arm (RX)'s root rsreexp/ and arm (Q)'s roots qualannot/<lang> the same way, from rsrecv.txt, rsreexp.txt and qualannot.txt)
-for bundle in "$CORPUS/callresult.txt:$TMP/fix/callresult" "$CORPUS/qualannot.txt:$TMP/fix/qualannot" "$CORPUS/rsrecv.txt:$TMP/fix" "$CORPUS/rsreexp.txt:$TMP/fix"; do
+# (arm (RS)'s root rsrecv/, arm (RX)'s root rsreexp/, arm (RM)'s root rsmodalias/ and arm (Q)'s roots qualannot/<lang> the same way,
+#  from rsrecv.txt, rsreexp.txt, rsmodalias.txt and qualannot.txt)
+for bundle in "$CORPUS/callresult.txt:$TMP/fix/callresult" "$CORPUS/qualannot.txt:$TMP/fix/qualannot" "$CORPUS/rsrecv.txt:$TMP/fix" "$CORPUS/rsreexp.txt:$TMP/fix" "$CORPUS/rsmodalias.txt:$TMP/fix"; do
 [ -f "${bundle%%:*}" ] || { echo "fixture missing: ${bundle%%:*}"; exit 2; }
 python3 -I - "${bundle%%:*}" "${bundle#*:}" <<'PY' || { echo "could not unpack ${bundle%%:*}"; exit 2; }
 import os, sys
@@ -314,7 +321,7 @@ sys.exit( 0 if n > 0 else 1 )
 PY
 done
 # rw ROOT ARGS… — run against one fixture root (every selector below is relative to that root's `.`)
-rw(){ local r="$1" d="$CORPUS/$1"; shift; case "$r" in callresult/*|qualannot/*|rsrecv|rsreexp) d="$TMP/fix/$r" ;; esac; ( cd "$d" && "$BIN" . --no-cache "$@" 2>/dev/null ); }
+rw(){ local r="$1" d="$CORPUS/$1"; shift; case "$r" in callresult/*|qualannot/*|rsrecv|rsreexp|rsmodalias) d="$TMP/fix/$r" ;; esac; ( cd "$d" && "$BIN" . --no-cache "$@" 2>/dev/null ); }
 
 # ── the one reader every predicate shares ─────────────────────────────────────────────────────────────────────
 # parse.py MODE FILE [ARGS] — prints one line per row; NOROOT when the document has no answer about a symbol.
@@ -1882,6 +1889,42 @@ for f in near_twin near_lone near_mixed; do   # two Twins behind two globs; a gl
 done
 rx_seen "$RXN:near_twin_fn" twin_fn
 notproven   rsreexp callees "$RXN:near_twin_fn" "twin_fn $RXE/t1.rs:1" "twin_fn $RXE/t2.rs:1"                    # [N] two fns behind two globs
+echo
+
+echo "=== (RM) RUST-MODALIAS-GLOB: a module re-exported by a \`use\`, then globbed, supplies its items ==="
+# rsmodalias/: base test_helpers/test_client.rs TestClient::new :3, get :4, post :5, RawClient::new :10, get :11, post :12 (one class of its
+# name, as axum's TestClient is; test_helpers/mod.rs `pub use self::test_client::*;`,
+# fn spawn_service :7, a private `mod inner { Secret::reveal :4 }`); other_helpers.rs holds a namesake of each (new :4, get :5,
+# post :6, spawn_service :8, Secret::reveal :10, Loop::spin :12), lockish.rs Mutex::lock :2, Loop::spin :4. extra/lib.rs
+# `pub(crate) use base::test_helpers; pub use base::test_helpers as helpers; pub(crate) use tokio::sync;`; third/lib.rs
+# `pub(crate) use extra::helpers;`. [P] arms are RED on lane/rust-reexport f59d1880a (declined, split or via="name").
+RMC="crates/base/src/test_helpers/test_client.rs"; RMO="crates/base/src/other_helpers.rs"
+for sel in "crates/extra/src/form.rs::tests::cross_param" "crates/base/src/user.rs:same_crate" "crates/third/src/chain.rs:chain_two" "crates/third/src/direct.rs:direct"; do
+    exactproven rsmodalias callees "$sel" "method get $RMC"                                                      # [P] (direct: guard)
+    proven      rsmodalias callees "$sel" "method get $RMC:4"
+    notproven   rsmodalias callees "$sel" "get $RMO:5"
+done
+proven      rsmodalias callees "crates/extra/src/form.rs::tests::cross_crate" "method new $RMC:10" "method get $RMC:11" "method post $RMC:12"   # [P] the `RawClient::new(..)` local
+notproven   rsmodalias callees "crates/extra/src/form.rs::tests::cross_crate" "get $RMC:4" "post $RMC:5" "get $RMO:5" "post $RMO:6"
+proven      rsmodalias callees "crates/base/src/user.rs:same_crate_new" "method new $RMC:10" "method post $RMC:12"     # [P]
+notproven   rsmodalias callees "crates/base/src/user.rs:same_crate_new" "post $RMC:5" "post $RMO:6"
+proven      rsmodalias callees "crates/extra/src/form.rs::tests::cross_fn" "fn spawn_service crates/base/src/test_helpers/mod.rs:7"   # [P] `use crate::test_helpers::spawn_service;`
+notproven   rsmodalias callees "crates/extra/src/form.rs::tests::cross_fn" "spawn_service $RMO:8"
+proven      rsmodalias callers "$RMC::TestClient::get" "method cross_param crates/extra/src/form.rs" "fn same_crate crates/base/src/user.rs" "fn chain_two crates/third/src/chain.rs"
+# [N] each arm's premise first (rm_seen): the answer shows the call, as a declined site or a row, so "never proves" is no empty pass
+rm_seen(){   # rm_seen SELECTOR NAME
+    local f; f="$( answer rsmodalias callees "$1" )"
+    if ran_ok "(rsmodalias) --callees=$1" "$f" && { grep -q "<dc n=\"$2\"" "$f" || grep -Eq "<s [^>]*n=\"([^\"]*::)?$2\"" "$f"; }; then ok "(rsmodalias) --callees=$1 shows the call of $2 (premise of the [N] arm)"
+    else no "(rsmodalias) --callees=$1 shows no call of $2: the [N] arm below would pass on nothing"; fi
+}
+rm_seen     "crates/extra/src/near.rs::two::two_globs" get
+notproven   rsmodalias callees "crates/extra/src/near.rs::two::two_globs" "get $RMC:4" "get $RMO:5"                    # [N] two globs supply TestClient
+rm_seen     "crates/extra/src/near.rs::ext::ext_alias" lock
+notproven   rsmodalias callees "crates/extra/src/near.rs::ext::ext_alias" "lock crates/base/src/lockish.rs:2"          # [N] an outside crate's module
+rm_seen     "crates/extra/src/near.rs::private::private_item" reveal
+notproven   rsmodalias callees "crates/extra/src/near.rs::private::private_item" "reveal crates/base/src/test_helpers/mod.rs:4" "reveal $RMO:10"   # [N] private mod
+rm_seen     "crates/base/src/cycuse.rs:cycle" spin
+notproven   rsmodalias callees "crates/base/src/cycuse.rs:cycle" "spin crates/base/src/lockish.rs:4" "spin $RMO:12"     # [N] an alias cycle terminates
 echo
 
 echo "=== (Q) qualified annotations and in-place rebinding (lane h1-annot) ==="
