@@ -2905,26 +2905,32 @@ inline void emitShadowVarDecls( std::uint32_t fileId, Lang lang, TSNode decl, st
 // one DECLARATOR → both records: the Rule-2 var→type binding and the r9 VarDecl shadow record(s). The two
 // name reads stay separate on purpose — declaratorVarName descends into a function declarator (harmless
 // for narrowing), emitShadowVarDecls refuses it (load-bearing for suppression).
-// CPP-PTR-ALIAS: true when a C++ declarator names the variable itself or a reference to it (`T x`, `const T& x`, `T&& x`,
-// `T (x)`) — so `x->m()` on a smart-pointer type reaches the pointee — and false through a pointer, array or function
-// declarator (`T* x`, `T x[ 4 ]`, `T (*x)()`), where `->` reaches the written type itself. An unreadable shape is false.
-inline bool cppDirectDeclarator( TSNode d ) noexcept
+// C++: the variable a declarator names under `&` / `&&` — and under `*` too when `throughPointer` (`const auto& c`, `auto* p`);
+// null for anything else (an array, a function declarator, a pointer when not asked for)
+inline TSNode cppDeclaratorName( TSNode d, bool throughPointer )
 {
-    for( int guard = 0; guard < 8 && !ts_node_is_null( d ); ++guard )
+    for( int guard = 0; guard < 4 && !ts_node_is_null( d ); ++guard )
     {
         const char* t = ts_node_type( d );
         if( kindIs( t, "identifier" ) )
         {
-            return true;
+            return d;
         }
-        if( !kindIs( t, "reference_declarator" ) && !kindIs( t, "parenthesized_declarator" ) )
+        if( !kindIs( t, "reference_declarator" ) && !( throughPointer && kindIs( t, "pointer_declarator" ) ) )
         {
-            return false;
+            return {};
         }
-        const TSNode inner = fieldChild( d, NodeField::Declarator );
-        d                  = !ts_node_is_null( inner ) ? inner : ( ts_node_named_child_count( d ) > 0 ? ts_node_named_child( d, 0 ) : TSNode{} );
+        d = ts_node_named_child_count( d ) > 0 ? ts_node_named_child( d, ts_node_named_child_count( d ) - 1 ) : TSNode{};
     }
-    return false;
+    return {};
+}
+
+// CPP-PTR-ALIAS: true when a C++ declarator names the variable itself or a reference to it (`T x`, `const T& x`, `T&& x`) — so
+// `x->m()` on a smart-pointer type reaches the pointee — and false through a pointer, array or function declarator (`T* x`,
+// `T x[ 4 ]`, `T (*x)()`), where `->` reaches the written type itself. An unreadable shape is false.
+inline bool cppDirectDeclarator( TSNode d )
+{
+    return !ts_node_is_null( cppDeclaratorName( d, /*throughPointer=*/false ) );
 }
 
 inline void emitDeclBinds( std::uint32_t fileId, Lang lang, TSNode declNode, std::string_view src, DeclType type,
@@ -5330,20 +5336,7 @@ inline void captureCppReturnType( BindCtx& cx, TSNode fn )
 // C++: the variable a declarator names under `&` / `*` / `&&` (`const auto& c`, `auto* p`); null for anything else
 inline TSNode cppDeclaredName( TSNode d )
 {
-    for( int guard = 0; guard < 4 && !ts_node_is_null( d ); ++guard )
-    {
-        const char* t = ts_node_type( d );
-        if( kindIs( t, "identifier" ) )
-        {
-            return d;
-        }
-        if( !kindIs( t, "pointer_declarator" ) && !kindIs( t, "reference_declarator" ) )
-        {
-            return {};
-        }
-        d = ts_node_named_child_count( d ) > 0 ? ts_node_named_child( d, ts_node_named_child_count( d ) - 1 ) : TSNode{};
-    }
-    return {};
+    return cppDeclaratorName( d, /*throughPointer=*/true );
 }
 
 // (L) Java `var x = m()`: the callee's declared result types x (a written type is Rule-2/FE-B's own record)
