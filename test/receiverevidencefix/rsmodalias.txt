@@ -1,0 +1,126 @@
+# arm (RM) RUST-MODALIAS-GLOB inputs, unpacked by test/receiverevidencecheck.sh into its temp dir (kept out of the indexed
+# tree, like rsreexp.txt). Each file starts at a line `@@@ <root>/<path>`. A three-crate workspace shaped like axum /
+# axum-extra: a module re-exported by a `use` (`pub(crate) use base::test_helpers;`) and then globbed, and its near misses.
+@@@ rsmodalias/Cargo.toml
+[workspace]
+members = ["crates/base", "crates/extra", "crates/third"]
+@@@ rsmodalias/crates/base/Cargo.toml
+[package]
+name = "base"
+version = "0.1.0"
+@@@ rsmodalias/crates/extra/Cargo.toml
+[package]
+name = "extra"
+version = "0.1.0"
+@@@ rsmodalias/crates/third/Cargo.toml
+[package]
+name = "third"
+version = "0.1.0"
+@@@ rsmodalias/crates/base/src/lib.rs
+pub mod test_helpers;
+pub mod other_helpers;
+pub mod reexp;
+pub mod user;
+pub mod cyc;
+pub mod cyc2;
+pub mod cycuse;
+pub mod lockish;
+@@@ rsmodalias/crates/base/src/test_helpers/mod.rs
+mod test_client;
+mod inner {
+    pub struct Secret;
+    impl Secret { pub fn reveal(&self) -> u32 { 7 } }
+}
+pub use self::test_client::*;
+pub fn spawn_service(a: u32) -> u32 { a }
+@@@ rsmodalias/crates/base/src/test_helpers/test_client.rs
+pub struct TestClient { pub n: u32 }
+impl TestClient {
+    pub fn new(n: u32) -> Self { TestClient { n } }
+    pub fn get(&self, u: &str) -> u32 { self.n + u.len() as u32 }
+    pub fn post(&self, u: &str) -> u32 { self.n + 1 + u.len() as u32 }
+}
+// one class of its name (axum's TestClient): `RawClient::new(..)` types the local it initialises
+pub struct RawClient { pub n: u32 }
+impl RawClient {
+    pub fn new(n: u32) -> Self { RawClient { n } }
+    pub fn get(&self, u: &str) -> u32 { self.n }
+    pub fn post(&self, u: &str) -> u32 { self.n + 1 }
+}
+@@@ rsmodalias/crates/base/src/other_helpers.rs
+// namesakes of what test_helpers supplies: every call below has two in-tree candidates by name
+pub struct TestClient;
+impl TestClient {
+    pub fn new(n: u32) -> Self { TestClient }
+    pub fn get(&self, u: &str) -> u32 { 0 }
+    pub fn post(&self, u: &str) -> u32 { 0 }
+}
+pub fn spawn_service(a: u32) -> u32 { a + 1 }
+pub struct Secret;
+impl Secret { pub fn reveal(&self) -> u32 { 8 } }
+pub struct Loop;
+impl Loop { pub fn spin(&self) -> u32 { 2 } }
+@@@ rsmodalias/crates/base/src/reexp.rs
+// a module alias in the same crate
+pub use crate::test_helpers;
+@@@ rsmodalias/crates/base/src/user.rs
+use crate::reexp::test_helpers::*;
+pub fn same_crate(c: &TestClient) -> u32 { c.get("/") }
+pub fn same_crate_new() -> u32 { let client = RawClient::new(1); client.post("/") }
+@@@ rsmodalias/crates/base/src/cyc.rs
+// [N] an alias cycle: cyc::m -> cyc2::m -> cyc::m (does not compile; must terminate and name nothing)
+pub use crate::cyc2::m;
+@@@ rsmodalias/crates/base/src/cyc2.rs
+pub use crate::cyc::m;
+@@@ rsmodalias/crates/base/src/cycuse.rs
+use crate::cyc::m::*;
+pub fn cycle(l: &Loop) -> u32 { l.spin() }
+@@@ rsmodalias/crates/base/src/lockish.rs
+pub struct Mutex;
+impl Mutex { pub fn lock(&self) -> u32 { 0 } }
+pub struct Loop;
+impl Loop { pub fn spin(&self) -> u32 { 1 } }
+@@@ rsmodalias/crates/extra/src/lib.rs
+pub(crate) use base::test_helpers;
+pub use base::test_helpers as helpers;
+pub(crate) use tokio::sync;
+mod form;
+mod near;
+@@@ rsmodalias/crates/extra/src/form.rs
+#[cfg(test)]
+mod tests {
+    use crate::test_helpers::*;
+    use crate::test_helpers::spawn_service;
+    fn cross_crate() -> u32 { let client = RawClient::new(1); client.get("/") + client.post("/") }
+    fn cross_param(c: &TestClient) -> u32 { c.get("/") }
+    fn cross_fn() -> u32 { spawn_service(1) }
+}
+@@@ rsmodalias/crates/extra/src/near.rs
+mod two {
+    // [N] two globs supply TestClient
+    use crate::test_helpers::*;
+    use base::other_helpers::*;
+    pub fn two_globs(c: &TestClient) -> u32 { c.get("/") }
+}
+mod ext {
+    // [N] an alias of an outside crate's module: no in-tree Mutex is reached
+    use crate::sync::*;
+    pub fn ext_alias(m: &Mutex) -> u32 { m.lock() }
+}
+mod private {
+    // [N] an item of a private mod behind the alias, which the alias's module does not re-export
+    use crate::test_helpers::*;
+    pub fn private_item(s: &Secret) -> u32 { s.reveal() }
+}
+@@@ rsmodalias/crates/third/src/lib.rs
+pub(crate) use extra::helpers;
+mod chain;
+mod direct;
+@@@ rsmodalias/crates/third/src/chain.rs
+// an alias chain of two: crate::helpers -> extra::helpers -> base::test_helpers
+use crate::helpers::*;
+pub fn chain_two(c: &TestClient) -> u32 { c.get("/") }
+@@@ rsmodalias/crates/third/src/direct.rs
+// guard: the module itself, no alias (proven before the lane)
+use base::test_helpers::*;
+pub fn direct(c: &TestClient) -> u32 { c.get("/") }

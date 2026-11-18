@@ -1234,7 +1234,7 @@ struct CallResultTypes
     }
     // the (crate, module) `modPath` (`crate::model`, `super::x`, `mdbook_core::book`, a `use`d `model`) names at byte `at` of
     // file `f` — relative to the module `at` sits in, an inline `mod` included (fix round 3: `super::` inside `mod m` is the
-    // file's module, `self::` is m)
+    // file's module, `self::` is m); a segment that is a `use`d module, not a child one, is followed (rustAliasedModuleOf)
     bool rustModuleOf( std::uint32_t f, std::uint32_t at, std::string_view modPath, std::uint32_t& crate, std::string& module, int depth ) const
     {
         if( !rust.built )
@@ -1313,11 +1313,56 @@ struct CallResultTypes
                 return false;   // `std`, an outside crate, an unknown name
             }
         }
-        for( ; i < segs.size(); ++i )
+        const std::string from = module;
+        for( std::size_t s = i; s < segs.size(); ++s )
         {
-            module = joinModule( module, segs[ i ] );
+            module = joinModule( module, segs[ s ] );
         }
-        return rustModuleExists( crate, module );
+        if( rustModuleExists( crate, module ) )
+        {
+            return true;
+        }
+        module = from;
+        return rustAliasedModuleOf( crate, module, std::span<const std::string_view>( segs ).subspan( i ), depth );
+    }
+    // RUST-MODALIAS-GLOB: rustModuleOf's tail when the path names no module of the layout as written: each segment that is no
+    // child module of the module reached so far is followed through the ONE `use` binding that name at that module's own level
+    // (axum-extra lib.rs `pub(crate) use axum::test_helpers;` makes `crate::test_helpers` axum's module, and a glob of it the
+    // items that module declares and re-exports). The `use` path reads from where it is written (rustModuleOf, one hop deeper:
+    // a chain of aliases and a cycle stop at its depth cap). A segment no module and no `use` (or two `use`s) binds, or a `use`
+    // that leads outside the tree, names nothing. A module only a glob brings in is not followed (stated floor).
+    bool rustAliasedModuleOf( std::uint32_t& crate, std::string& module, std::span<const std::string_view> segs, int depth ) const
+    {
+        for( const std::string_view seg : segs )
+        {
+            if( std::string child = joinModule( module, seg ); rustModuleExists( crate, child ) )
+            {
+                module = std::move( child );
+                continue;
+            }
+            NodeId         inlineMod = kNoNode;
+            std::uint32_t  ownFile   = 0;
+            const auto     mfs       = rustModuleFiles( crate, module, inlineMod, ownFile );
+            const Level    level     = rustModuleLevel( inlineMod );
+            const Binding* alias     = nullptr;
+            std::size_t    uses      = 0;
+            for( const std::uint32_t mf : mfs )
+            {
+                forEachImport( mf, seg, [ & ]( const Binding& b )
+                {
+                    if( b.kind == LocalBindKind::TypeImport && levelAt( mf, b.startByte ) == level )
+                    {
+                        ++uses;
+                        alias = &b;
+                    }
+                } );
+            }
+            if( uses != 1 || !rustModuleOf( alias->fileId, alias->startByte, alias->importedName, crate, module, depth + 1 ) )
+            {
+                return false;
+            }
+        }
+        return true;
     }
     // the ONE Rust class `cls` module `modPath` (seen from byte `at` of `f`) defines — or re-exports: a `use` of the name at
     // the module's own level (`pub use mdbook::MDBook;` in lib.rs) is followed to the module it names (depth-bounded), and
