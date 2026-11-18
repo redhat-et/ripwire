@@ -33,9 +33,20 @@ only one possible target, so SCIP cannot pick differently) — it is a sanity fl
 """
 import sys, re, subprocess, collections, os
 
+RUN_TIMEOUT_S = 3600   # one cold whole-repo map; generous on purpose
+
+
 def run(binp, repo, extra):
     cmd = [binp, repo, "--top-k=100000", "--no-cache"] + extra
-    return subprocess.run(cmd, capture_output=True, text=True).stdout
+    # Bounded, and a timeout or signal-kill (rc < 0, e.g. the OS killing a runaway run) is its own state:
+    # the script stops naming it, instead of parsing a partial or empty map as the answer.
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=RUN_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        sys.exit("TIMEOUT (%ds): %s" % (RUN_TIMEOUT_S, " ".join(cmd)))
+    if p.returncode < 0:
+        sys.exit("KILLED (signal=%d): %s" % (-p.returncode, " ".join(cmd)))
+    return p.stdout
 
 def parse(xml):
     """-> (buckets, defcount)
