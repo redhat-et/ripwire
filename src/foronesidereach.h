@@ -53,7 +53,7 @@ inline constexpr std::size_t kOneSideRootPathMaxHops = 6; // (M): the longest A 
 inline constexpr std::size_t kOneSideMaxEndpointDefs = 32; // (E): definitions one endpoint name may place (more: a namesake flood, the rule is off)
 
 inline constexpr std::string_view kOneSideReachLegend =
-    "<!-- one-side: a <t> among sigs, callers or syms rows is one-sided within 3 calls (it reaches only one of the two named endpoints, or "
+    "<!-- one-side: a <t> with ptr=side among sigs, callers or syms rows is one-sided within 3 calls (it reaches only one of the two named endpoints, or "
     "it reaches the sink and the root does not reach it) and is on no shortest path between them, a pointer (p= file, sym= name, r= rank), "
     "not the answer -->";
 
@@ -483,7 +483,7 @@ inline std::string pointerText( std::string_view text, const std::vector<const R
     {
         const std::string_view p = attrOf( r->attrs, "p" );
         const std::size_t colon = r->tag == 'd' ? std::string_view::npos : p.rfind( ':' ); // <s>/<y> p= is file:line; a pointer names the file
-        spans.push_back( { .at = r->at, .end = r->end, .p = p.substr( 0, colon ), .sym = attrOf( r->attrs, "n" ), .rank = attrOf( r->attrs, "r" ) } );
+        spans.push_back( { .at = r->at, .end = r->end, .p = p.substr( 0, colon ), .sym = attrOf( r->attrs, "n" ), .rank = attrOf( r->attrs, "r" ), .kind = "side" } );
     }
     std::string out = filesyms_detail::tailPointerText( text, spans, legend ? kOneSideReachLegend : std::string_view() );
     legend = legend && spans.empty();

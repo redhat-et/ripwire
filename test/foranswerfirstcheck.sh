@@ -502,21 +502,21 @@ fired = False
 for lbl, nn, on in (("conceptual", "a_new.xml", "a_old.xml"), ("routed", "b_new.xml", "b_old.xml"), ("literal", "l_new.xml", "l_old.xml")):
     n, o = rd(nn), rd(on); tn, to = tops(n), tops(o); m = mask(n)
     names_n = [x[0] for x in tn]; names_o = [x[0] for x in to]
-    # (A1) no section but <sigs>/<bodies> keeps a direct-child comment: A lifted them into the legend. <sigs> keeps its
-    # demote:/decl-twin:/one-side: notes IN PLACE (an AF1 deviation from AF2's spec: they label the pointer rows after them by
-    # position, fordemoteallcheck reads the kinds from exactly that order).
-    def direct_comments(x):
+    # (A1) no section but <bodies> keeps a direct-child comment: A lifted them into the legend. <sigs> keeps no
+    # demote:/decl-twin:/one-side: note either (AF4 T-C: the pointer's kind is its ptr=, so the notes define by attribute and may
+    # leave; AF1 had kept them in place because they labelled the rows after them by position). Another <sigs> comment stays.
+    def direct_comments(x, only=None):
         inner = n[n.find(">", x[1]) + 1:n.rfind("</", 0, x[2])] if not re.fullmatch(r"<[^>]*/>", n[x[1]:x[2]]) else ""
         inner = re.sub(r"<!\[CDATA\[.*?\]\]>", lambda q: " " * len(q.group(0)), inner, flags=re.S)
         c = 0; depth = 0
         for t in re.finditer(r"<!--.*?-->|<(/?)[A-Za-z_][\w-]*[^>]*?(/?)>", inner, re.S):
-            if t.group(0).startswith("<!--"): c += depth == 0
+            if t.group(0).startswith("<!--"): c += depth == 0 and (only is None or re.match(only, t.group(0)) is not None)
             elif t.group(1): depth -= 1
             elif not t.group(2): depth += 1
         return c
-    left = [(x[0], direct_comments(x)) for x in tn if x[0] not in ("sigs", "bodies")]
+    left = [(x[0], direct_comments(x, r"<!-- (demote|decl-twin|one-side):" if x[0] == "sigs" else None)) for x in tn if x[0] != "bodies"]
     left = [(nm, c) for nm, c in left if c]
-    say(not left, "(A1) %-10s no section but <sigs>/<bodies> keeps a direct-child comment%s" % (lbl, (" (%s)" % left) if left else ""))
+    say(not left, "(A1) %-10s no section but <bodies> keeps a direct-child comment (<sigs>: no pointer note)%s" % (lbl, (" (%s)" % left) if left else ""))
     if "tail" not in names_n: print("  INFO  (G) %-10s no <tail>" % lbl); continue
     ti = names_n.index("tail"); tb, te = tn[ti][1], tn[ti][2]
     stubs = [x for x in tn if x[0] in ("lego", "compose") and x[1] < tb and re.fullmatch(r"<[^>]*/>", n[x[1]:x[2]])]

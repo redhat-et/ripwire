@@ -240,8 +240,8 @@ inline constexpr std::string_view kNameChars = "abcdefghijklmnopqrstuvwxyzABCDEF
 // within 12 KB, design 70→75 of 99, held-out 32→33 of 39, 0 flips). Three moves on top of the two above, all of them still
 // a reordering of the same bytes:
 //   A  — every comment that is a DIRECT CHILD of a top-level section (the <graph_verb>/<reexports>/<fold> notes) joins the
-//        document legend, relative order kept. NOT <sigs>'s demote:/decl-twin:/one-side: notes, which the spec lists: they
-//        label the pointer rows after them by POSITION (see blockTextHoisting). Not moved either: a section's own
+//        document legend, relative order kept; in <sigs>, the demote:/decl-twin:/one-side: notes the spec lists (since AF4 T-C,
+//        which put the pointer kind on the row as ptr=; see blockTextHoisting). Not moved either: a section's own
 //        lead comment (declaredBlock — it travels with its block, R8), the <bodies> section's per-answer body-omitted note,
 //        and comments nested inside a row. A zero-row self-closing <lego/> or <compose/> stub between <sigs> and <tail> goes
 //        directly after </tail>.
@@ -256,23 +256,31 @@ inline constexpr std::size_t      kGuardTailRows          = 24;
 inline constexpr std::string_view kPromotable[] = { "lit", "dotted_strings", "graph_verb", "callers", "selfhooks", "manifest_rows",
                                                     "listed", "ep", "reexports", "exemplar_family" };
 
+// AF4 T-C: the <sigs> notes that define their pointer rows by ATTRIBUTE (ptr=), so A may lift them: the first word of each.
+inline constexpr std::string_view kSigsAttributeNotes[] = { "demote", "decl-twin", "one-side" };
+
 // One row block as it will be emitted: its own bytes minus the direct-child comments A hoists, which go to `hoisted`.
 [[nodiscard]] inline std::string blockTextHoisting( std::string_view view, const Block& b, std::vector<std::string_view>& hoisted )
 {
     const std::string_view text = view.substr( b.begin, b.end - b.begin );
     const std::size_t      open = view.find( '>', b.begin ) + 1;
-    // NOT <sigs> (AF1 deviation from the frozen spec, measured and reported in results/AF1_ANSWERFIRST_1118/READOUT.md): its
-    // demote:/decl-twin:/one-side: comments are POSITIONAL — each labels the <t> pointer rows that FOLLOW it (fordemoteallcheck
-    // reads the kind of rows 9-10 as decl-twin and 11-26 as demote from exactly that order). Lifted to the legend, every <t>
-    // reads as both kinds at once: a disclosure lost, which no byte saving pays for. The other sections' comments are readings.
-    if( b.comment || b.name == "bodies" || b.name == "sigs" || view[ open - 2 ] == '/' ) { return std::string( text ); }
+    // <sigs> (AF4 T-C, closing AF1's deviation from the frozen spec, results/AF1_ANSWERFIRST_1118/READOUT.md §6): its
+    // demote:/decl-twin:/one-side: notes used to be POSITIONAL — each labelled the <t> pointer rows that followed it, so lifted
+    // they made every <t> read as every kind. The kind is now on the row (forfilesyms.h TailPointerSpan::kind: ptr=twin,
+    // ptr=side, none for demote) and the notes define by attribute, so these three join the legend like any section's readings.
+    // Any OTHER comment in <sigs> stays where it is: only a note known to define by attribute may leave its rows.
+    if( b.comment || b.name == "bodies" || view[ open - 2 ] == '/' ) { return std::string( text ); }
     const std::size_t        close = view.rfind( "</", b.end - 1 );
     const std::vector<Block> kids  = close > open ? topLevelBlocks( view, open, close ) : std::vector<Block>{};
+    const auto               lifts = [ & ]( const Block& k )
+    {
+        return b.name != "sigs" || std::ranges::find( kSigsAttributeNotes, commentFirstWord( view, k ) ) != std::ranges::end( kSigsAttributeNotes );
+    };
     std::string out;
     std::size_t copied = b.begin;
     for( const Block& k : kids )
     {
-        if( !k.comment ) { continue; }
+        if( !k.comment || !lifts( k ) ) { continue; }
         out.append( view.substr( copied, k.begin - copied ) );
         hoisted.push_back( view.substr( k.begin, k.end - k.begin ) );
         copied = k.end;

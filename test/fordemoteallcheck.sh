@@ -10,7 +10,8 @@
 # mem= row among the picks), so the pointer sets of the dialects agree here.
 # ARMS (RED on a binary without the lane: (j), (j2), (jb), (b+), (xb); the rest hold on both)
 #   (d)  precondition: the CLI default answer prints >= 1 demote pointer and >= 1 decl-twin pointer in <sigs>
-#   (x)  MCP `for` (no budget): its <sigs> block is byte-identical to the CLI's
+#   (x)  MCP `for` (no budget): its <sigs> ROWS are byte-identical to the CLI's, and each pointer note it carries is in the CLI
+#        answer once (AF4 T-C: the CLI's answer-first order lifts the notes into its legend; MCP keeps them in place)
 #   (j)  --json: the pointer objects are at exactly the ranks the XML default points at, each rule named as the XML legend names it
 #        (the decl-twin ranks are the XML rows the decl-twin legend covers); (j2) each pointer's p / r are the off twin's row at that r,
 #        its sym the XML row's n= there, and every other row object is byte-identical to the off twin's
@@ -85,19 +86,21 @@ for i in range( 1, 6 ):
 PY
 
 cat >"$TMP/ranks.py" <<'PY'
-"""ranks.py FILE xml|json -> one line: rows pointers r-list (r+kind, answer order), kinds per pointer (xml: demote/decl from the legend)"""
+"""ranks.py FILE xml|json -> one line: rows pointers r-list (r+kind, answer order), kinds per pointer (xml: from each <t>'s ptr=)"""
 import json, re, sys
 f, kind = sys.argv[1], sys.argv[2]
 if kind == "json":
     d = json.load( open( f ) )
     ent = [ ( x["r"], "t" if "pointer" in x else "d", x.get( "pointer", "" ) ) for x in d["sigs"] ]
 else:
+    # AF4 T-C: a pointer's kind is its ptr= (twin = decl-twin, side = one-side, none = demote), read off the ROW. It used to be read
+    # from the legend comment before it, by position; the answer-first order now lifts those notes into the trailing legend.
     s = open( f ).read(); s = s[s.find( "<sigs" ):s.find( "</sigs>" )]
-    ent, rule = [], ""
-    for m in re.finditer( r'<!-- (demote|decl-twin):|<(d|t) ([^>]*?)/?>', s ):
-        if m.group( 1 ): rule = m.group( 1 ); continue
-        r = re.search( r'\br="(\d+)"', m.group( 3 ) )
-        if r: ent.append( ( int( r.group( 1 ) ), m.group( 2 ), rule if m.group( 2 ) == "t" else "" ) )
+    ent = []
+    for m in re.finditer( r'<(d|t) ([^>]*?)/?>', re.sub( r"<!--.*?-->", "", s, flags = re.S ) ):
+        r = re.search( r'\br="(\d+)"', m.group( 2 ) ); k = re.search( r'\bptr="([a-z]+)"', m.group( 2 ) )
+        rule = { None: "demote", "twin": "decl-twin", "side": "one-side" }.get( k and k.group( 1 ), "?" ) if m.group( 1 ) == "t" else ""
+        if r: ent.append( ( int( r.group( 1 ) ), m.group( 1 ), rule ) )
 rows = sum( 1 for e in ent if e[1] == "d" )
 print( rows, len( ent ), " ".join( "%d%s" % ( e[0], e[1] ) for e in ent ), " ".join( "%d:%s" % ( e[0], e[2] ) for e in ent if e[1] == "t" ) )
 PY
@@ -130,7 +133,18 @@ case "$dkinds" in *":demote "*) case "$dkinds" in *":decl-twin "*) ok "(d) the d
 
 # (x) MCP no-budget <sigs> == CLI
 mcp "$TMP/m.xml" "" env
-if [ -s "$TMP/m.xml" ] && [ "$( sigs "$TMP/m.xml" )" = "$( sigs "$TMP/on.xml" )" ]; then ok "(x) MCP for: <sigs> byte-identical to the CLI's"; else no "(x) MCP <sigs> differs from the CLI's"; fi
+# AF4 T-C: the CLI default is answer-first, which lifts <sigs>' pointer notes into its trailing legend (the kind is on the row as
+# ptr=); MCP `for` is not answer-first and keeps them in place. So the ROWS must be byte-identical, and each note the MCP <sigs>
+# carries must be in the CLI answer once.
+nocom(){ python3 -c 'import re, sys; print( re.sub( r"<!--.*?-->", "", sys.stdin.read(), flags = re.S ) )'; }
+xnotes="$( python3 - "$TMP/m.xml" "$TMP/on.xml" <<'PY'
+import re, sys
+m, c = open( sys.argv[1] ).read(), open( sys.argv[2] ).read(); s = m[m.find( "<sigs" ):m.find( "</sigs>" )]
+notes = re.findall( r"<!-- (?:demote|decl-twin|one-side):.*?-->", s, re.S )
+print( "ok" if notes and all( c.count( n ) == 1 for n in notes ) else "notes=%d in CLI=%s" % ( len( notes ), [ c.count( n ) for n in notes ] ) )
+PY
+)"
+if [ -s "$TMP/m.xml" ] && [ "$( sigs "$TMP/m.xml" | nocom )" = "$( sigs "$TMP/on.xml" | nocom )" ] && [ "$xnotes" = ok ]; then ok "(x) MCP for: <sigs> rows byte-identical to the CLI's; each pointer note it carries is in the CLI answer once"; else no "(x) MCP <sigs> rows differ from the CLI's, or a note is missing ($xnotes)"; fi
 
 # (j) --json pointers at the XML default's ranks, each named for its rule; (j2) the rows around them unchanged
 run --json >"$TMP/on.json"; runoff --json >"$TMP/off.json"; runoff >"$TMP/off.xml"
