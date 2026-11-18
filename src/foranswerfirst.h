@@ -207,12 +207,29 @@ inline constexpr std::string_view kNameChars = "abcdefghijklmnopqrstuvwxyzABCDEF
 // comment a --for answer carries. The DOCUMENT legend opens with the verb or the root (`<!-- ripwire for …`,
 // `<!-- root …`) and documents the answer as a whole; a BLOCK-LOCAL legend NAMES ITS OWN ELEMENT. Measured on
 // a --detail=5 answer: `ripwire`→<sigs> and `root`→<sigs> do not match, `syms`→<syms> does.
+//
+// AF1-fix (2026-11-18): a block-local legend has TWO spellings in src/, and both name their element: `<!-- syms: …` and
+// `<!-- ripwire for X: …` (doc_body, dotted_strings, exemplar_family, lit, manifest_rows, decl_rows, graph_verb, met_bridge,
+// path_gap, reask, syms). Reading only the first word sent every `ripwire for X:` legend to the trailing DOCUMENT legend, away
+// from its block — against the convention below and AF1's registered layout ("block-local legend comments stay in the stream,
+// glued to the block they declare"): fordocbodycheck (f1), forexemplarcheck and formanifestcheck (a1) read the block from its
+// legend and found nothing after it. So `ripwire for X` reads as X. The document legend's own `ripwire for schema=…` names no
+// element (schema= is an attribute: no `:` after the word), so it stays where it is.
+[[nodiscard]] inline std::string_view commentWordAt( std::string_view doc, std::size_t from, std::size_t end ) noexcept
+{
+    if( from == std::string_view::npos || from >= end ) { return {}; }
+    const std::size_t stop = doc.find_first_not_of( kNameChars, from );
+    return doc.substr( from, ( stop == std::string_view::npos ? end : std::min( stop, end ) ) - from );
+}
 [[nodiscard]] inline std::string_view commentFirstWord( std::string_view doc, const Block& b ) noexcept
 {
-    const std::size_t from = doc.find_first_of( kNameChars, b.begin + 4 );   // past the "<!--"
-    if( from == std::string_view::npos || from >= b.end ) { return {}; }
-    const std::size_t stop = doc.find_first_not_of( kNameChars, from );
-    return doc.substr( from, ( stop == std::string_view::npos ? b.end : std::min( stop, b.end ) ) - from );
+    const std::string_view first = commentWordAt( doc, doc.find_first_of( kNameChars, b.begin + 4 ), b.end );   // past the "<!--"
+    constexpr std::string_view kVerbLead = "ripwire for ";
+    const std::size_t          at        = first.empty() ? std::string_view::npos : static_cast<std::size_t>( first.data() - doc.data() );
+    if( first != "ripwire" || doc.compare( at, kVerbLead.size(), kVerbLead ) != 0 ) { return first; }
+    const std::string_view named = commentWordAt( doc, at + kVerbLead.size(), b.end );
+    const std::size_t      after = at + kVerbLead.size() + named.size();
+    return ( !named.empty() && after < b.end && doc[ after ] == ':' ) ? named : first;
 }
 
 // Which row block does this comment DECLARE, if any? The house convention is that a block's own legend sits

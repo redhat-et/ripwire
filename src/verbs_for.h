@@ -5744,9 +5744,13 @@ inline int runForLensFitted( const MainDispatch& d )
     // mutates, so `out` stays a non-const COPY rather than main's const reference. Both facts are needed:
     // a reference here would not compile against answerFirst, and the old name no longer exists.
     std::string out = fit.verdict == rw::ForBudgetFitResult::Verdict::NoRoot ? printed->bytes : fit.xml;
-    // AF1: the budget's answer is answer-first only when --legend=last was SPELLED (Config::legendAnswerFirstAsked). The default
-    // flip is the default PATH's; a budgeted answer keeps the legend-first shape its own gates hold, and is never paged.
-    if( d.cfg.legendAnswerFirstAsked )
+    // AF1-fix (2026-11-18): the budget's answer takes the SAME legend posture as the unbudgeted one — answer-first by default,
+    // legend-first under --legend=first — and is never paged. AF1 had kept it legend-first unless --legend=last was spelled, and
+    // that re-decided the posture under a budget: TOKEN-BUDGET-MONOTONE rule 4 ("a budget sheds the unbudgeted answer, it never
+    // re-decides its posture"; a budget the answer fits returns it byte for byte) went red in every gate that holds it
+    // (forcallerhopcheck N2t/R9t, fordispatchhopcheck, forheadrrcheck H5t, formembernamescheck F1t, forunusedcheck T5, ...).
+    // A budgeted answer is shed WHOLE — legend included — so moving its legend after the rows loses no definition.
+    if( d.cfg.legendAnswerFirst )
     {
         (void)rw::answerfirst::answerFirst( out );
     }

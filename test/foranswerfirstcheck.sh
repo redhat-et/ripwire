@@ -221,8 +221,9 @@ for label, new_n, old_n in (("conceptual", "a_new.xml", "a_old.xml"), ("routed",
         # R2+R8 say "the DOCUMENT legend is at the tail AND each block legend is exactly adjacent to its block",
         # which forbids strictly more arrangements. R8 is what makes this exemption safe, so if R8 is ever
         # deleted this exemption must go with it.
+        # AF1-fix: `<!-- ripwire for X: …` is the other spelling of a block-local legend (foranswerfirst.h commentFirstWord)
         def blockLocal( idx ):
-            m = re.match( r'<!--\s*([A-Za-z_][\w-]*)', b_new[ idx ][ 2 ] )
+            m = re.match( r'<!--\s*(?:ripwire for (?=[A-Za-z_][\w-]*:))?([A-Za-z_][\w-]*)', b_new[ idx ][ 2 ] )
             if not m:
                 return False
             for k2, n2, _ in b_new[ idx + 1: ]:
@@ -408,7 +409,7 @@ def selfNaming( raw ):
     The first word is the convention: a block-local legend names its own element, the document legend opens
     with the verb or the root instead."""
     out = []
-    for m in re.finditer( rb'<!--\s*([A-Za-z_][\w-]*)', raw ):
+    for m in re.finditer( rb'<!--\s*(?:ripwire for (?=[A-Za-z_][\w-]*:))?([A-Za-z_][\w-]*)', raw ):   # AF1-fix: both spellings
         word = m.group( 1 )
         end  = raw.find( b'-->', m.start() )
         if end < 0:

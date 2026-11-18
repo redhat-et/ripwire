@@ -96,10 +96,6 @@ struct Config
                                                            // Orthogonal in principle to legendProseOff, but not combinable as a posture
                                                            // VALUE; under --legend=dict the legend is a 493 B pointer whose position barely
                                                            // matters, so the combination buys little and is deliberately not offered.
-    bool             legendAnswerFirstAsked = false;       // AF1: --legend=last was SPELLED. The budgeted --for path (--token-budget /
-                                                           // --max-tokens, forbudgetfit.h) answers answer-first only then: a budget is a
-                                                           // shed with its own legend-first contract (forrankordercheck (8), formaxtokens-
-                                                           // check), so the default flip reaches the default PATH, not the budget's.
     bool             legendProseOff = false;               // item D: the prose legend is replaced by a POINTER to --legend-dict. Set by the
                                                            // DEFAULT and by the explicit spelling --legend=dict; cleared by an ASKED
                                                            // --legend=compact, the registered opt-out (D3), which must reproduce the
@@ -4870,7 +4866,6 @@ static inline void validateLegendModifier( Config& c ) noexcept
         c.legendSpelled     = c.legend;   // before the normalisation, so a refusal names what the caller typed
         c.legend            = kDefaultLegendPosture;
         c.legendAnswerFirst = true;
-        c.legendAnswerFirstAsked = true;
     }
     // AF1: a SPELLED --legend=compact is the default posture, so it answers --for as the default does — answer-first, paged.
     else if( c.legend == "compact" )
