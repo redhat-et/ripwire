@@ -594,5 +594,10 @@ constexpr std::uint8_t langFamilyOf( Lang l ) noexcept
 /// variant; a trait's method is called by the METHOD's name (`Print::print( x )`, `x.print()`), so `Print( x )` over an in-tree
 /// `trait Print` is no call of it (graph.h siteNamespaceCompatible). Rust.
 inline constexpr std::array<Lang, 1> kCallNeverNamesTrait = { Lang::Rust };
+/// GO-KIND-VETO: the languages where a selector reaches a TYPE only through a module alias (`pkg.T( v )`, a conversion the alias
+/// proves), so a name-only member call (`local.Type()`) never names an in-tree type (graph.h, beside memberNeverReachesFreeFunction). Go.
+inline constexpr std::array<Lang, 1> kSelectorTypeOnlyByModule = { Lang::Go };
+static_assert( langFacts( Lang::Go ).memberNeverReachesFreeFunction && langFacts( Lang::Go ).moduleCallReachesFunctionsOnly,
+               "GO-KIND-VETO is read inside the memberNeverReachesFreeFunction erase, on a call no module alias proved" );
 
 }   // namespace rw

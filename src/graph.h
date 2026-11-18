@@ -12956,8 +12956,17 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 {
                     modAttrNamesakes.assign( cand.begin(), cand.end() );   // the module attribute's namesakes, kept for the decline below
                 }
-                std::erase_if( cand, [ & ]( NodeId c ) { return ownerIsClass( c ).empty() && ing.symbols[ c ].kind == SymKind::Function; } );
-                std::erase_if( memberRule3, [ & ]( NodeId c ) { return ownerIsClass( c ).empty() && ing.symbols[ c ].kind == SymKind::Function; } );
+                // GO-KIND-VETO: nor, in Go, a TYPE. A selector reaches a type only as `pkg.T( v )` (a conversion through a module alias, proven
+                // above); `local.Type()` is a method of the local's type or a func-typed field, never a conversion to an in-tree `type Type`
+                const bool goTypes      = std::ranges::find( kSelectorTypeOnlyByModule, r.lang ) != kSelectorTypeOnlyByModule.end();
+                const auto unreachable = [ & ]( NodeId c )
+                {
+                    const SymKind k = ing.symbols[ c ].kind;
+                    return ownerIsClass( c ).empty()
+                        && ( k == SymKind::Function || ( goTypes && namespaceCompatible( RefRole::Type, k ) ) );
+                };
+                std::erase_if( cand, unreachable );
+                std::erase_if( memberRule3, unreachable );
                 if( cand.empty() && modAttrUnproven && !modAttrNamesakes.empty() )
                 {
                     // PY-MOD-CALL-SITES: `y.f()` through a from-imported submodule y is a module attribute, which a free function
