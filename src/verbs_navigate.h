@@ -475,6 +475,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
                            + rw::viaNameLegend( chHasVia, false, cfg.columnar )                   // FE-B: likewise for via="name"
                            + rw::viaLinkLegend( chHasLink )
                            + rw::defTableLegend( chAttr.groups.multi(), chListing.cut, /*sole=*/wantCallers && chAttr.groups.size() == 1 )   // attrib-multidef; VERB-DEF-ROWS
+                           + rw::untiedDeclLegend( wantCallers && !chAttr.groups.unattributed.empty() )   // BX1 FIX 7: exactly when the table lists one
                            + rw::splitArmLegend( chHasSplit )
                            + rw::memberOwnerLegendFor( chOwnerRows ) ).c_str(),   // QUALNAME-1: likewise, exactly when a shown row names its owner
                          ( std::string( rw::modScopeLegend( chHasModScope ) )   // #60: likewise, exactly when a t="modscope" row is
@@ -3533,6 +3534,7 @@ inline void emitImpactLegend( const rw::Config& cfg, const rw::IngestResult& ing
                    + rw::impactRollupLegend( !imFiles.rows.empty() && !cfg.columnar, imports.umbrella, rw::impactRollupHedged( imFiles ),
                                              !imports.next.empty() && !cfg.columnar, rw::ImpactRollupTypeClauses{ imFiles.typed, imFiles.typeDefs, imFiles.typeCapped } )
                    + rw::defTableLegend( imAttr.groups.multi(), imListing.cut, /*sole=*/imAttr.groups.size() == 1 )   // IMPACT-SOLE-DEF: the one-group row's clause
+                   + rw::untiedDeclLegend( !imAttr.groups.unattributed.empty() )   // BX1 FIX 7: exactly when the table lists one
                    + rw::memberOwnerLegendFor( rw::memberOwnerRows( ing, std::span<const rw::NodeId>( show ).subspan( imPage.begin, imPage.end - imPage.begin ) ) ) ).c_str(),   // QUALNAME-1
                  ( std::string( rw::valueRefsReachLegend( !imValueRefs.rows.empty() ) )
                    + rw::valueRefsDepthLegendFor( imValueRefs )

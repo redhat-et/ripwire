@@ -1356,6 +1356,12 @@ inline std::string defTableLegend( bool table, bool cut, bool sole = false, DefL
     }
     return clause;
 }
+// BX1 FIX 7 (defattrib.h DefGroups::unattributed, test/verbfixcheck.sh F7): exactly when a one-group table lists a declaration the
+// identity rule left untied, which used to be dropped while defs= still counted it.
+inline constexpr const char* kUntiedDeclRowLegend =
+    "<def ix=K bodyless=1> after the group's rows, K past them: a same-named declaration tied to none of the definitions (another "
+    "function, or the tie is unproven); no row is attributed to it, and the rows listed equal defs=. ";
+inline const char* untiedDeclLegend( bool on ) noexcept { return on ? kUntiedDeclRowLegend : ""; }
 inline constexpr const char* kSplitArmRowLegend =
     "prov=\"split\" on a row: its edge to of= (on a path, the hop into it) carries the resolver's split label, a call along it was one "
     "arm of a call split between same-named definitions, so the row may be another arm's; NOT a claim the edge is false. ";
