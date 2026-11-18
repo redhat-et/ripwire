@@ -508,7 +508,8 @@ if [ -n "$( block "$TMP/a1.xml" )" ] && [ "$( block "$TMP/x1.xml" )" = "$( block
 else no "(x1) MCP: $( block "$TMP/x1.xml" | head -c 300 )"; fi
 # (x2)/(x3) CodeRabbit 4609415554: MCP holds the block from the fit (the answer plus the block against budget_tokens), as the CLI's
 # b2 / b1. Red before: any budget_tokens printed the empty held="budget" element.
-mcpfor(){   # mcpfor OUT FIXTURE TASK BUDGET
+mcpfor(){   # mcpfor OUT FIXTURE TASK BUDGET (pipefail: a failed MCP run fails the arm)
+    set -o pipefail
     printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"%s","task":"%s","budget_tokens":%s}}}\n' "$F/$2" "$3" "$4" \
       | ( cd "$F/$2" || exit 1; "$BIN" --mcp 2>/dev/null ) \
       | python3 -c '
@@ -518,6 +519,7 @@ for line in sys.stdin:
     if d.get( "id" ) == 1:
         print( d["result"]["content"][0]["text"], end="" )
 ' >"$1"
+    local rc=$?; set +o pipefail; return $rc
 }
 mcpfor "$TMP/x2.xml" acme "add a new broker transport like NATS or MQTT to brokers" 4000 || no "(x2) the MCP run failed"
 if [ -n "$( block "$TMP/b2u.xml" )" ] && [ "$( block "$TMP/x2.xml" )" = "$( block "$TMP/b2u.xml" )" ]; then ok "(x2) MCP budget_tokens=4000: the block fits and prints whole, the CLI's bytes"
