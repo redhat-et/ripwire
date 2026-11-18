@@ -561,6 +561,7 @@ for _g in \
     forinitslotscheck \
     forlenscheck \
     forliteralcheck \
+    formanifestcheck \
     formatgatecheck \
     formaxtokenscheck \
     formembernamescheck \
@@ -970,6 +971,7 @@ for _g in \
     rootrelcheck \
     rootrelemitcheck \
     rootspellingcheck \
+    roundcderivecheck \
     routecheck \
     routeedgecheck \
     routehookcheck \
@@ -1085,6 +1087,7 @@ for _g in \
     testscopecheck \
     textdocscheck \
     textpoolcheck \
+    tiebreakcontentcheck \
     tiercallerscheck \
     timsortcheck \
     tokenbudgetcheck \

@@ -911,20 +911,20 @@ inline void emitReferences( IngestResult& result, std::vector<RawRef>& rawRefs, 
         ref.fileId      = r.fileId;
         ref.line        = r.line;        // ABS-3: 1-based use-site line for --uses p="file:line"
         ref.lang        = r.lang;
-        ref.calleeName  = std::move( r.name );
-        ref.qualifier   = std::move( r.qualifier );
+        ref.calleeName  = r.name;
+        ref.qualifier   = r.qualifier;
         ref.role        = r.role;        // ABS-3 use-site role (call/read/write/import/extends)
         ref.isInherit   = r.isInherit;
         ref.isDocLink   = r.isDocLink;
         ref.isCompose   = r.isCompose;   // S5-E: HAS-A member-variable type edge — NEVER enters call graph
         ref.recv        = r.recv;        // P2-D receiver shape (this/self/var) for one-hop narrowing
-        ref.recvVar     = std::move( r.recvVar );
+        ref.recvVar     = r.recvVar;
         ref.argCount    = r.argCount;        // B2.2: call-site positional arg count (when countable)
         ref.argCountKnown = r.argCountKnown; // B2.2: whether argCount is reliable (no spread/splat)
         ref.viaArrow    = r.viaArrow;    // a call written `->`; a compose ref's smart-pointer pointee (arm p)
         ref.qualifierRootsStd = r.qualifierRootsStd;   // #150: the FULL written qualifier chain is rooted at std
         ref.memberCall  = r.memberCall;                 // FE-A: a Go/JS/TS/Rust member call (recv stays None)
-        ref.memberRoot  = std::move( r.memberRoot );    // FE-A: its receiver chain's root identifier
+        ref.memberRoot  = r.memberRoot;    // FE-A: its receiver chain's root identifier
         ref.memberFactory = r.memberFactory;            // FE-B on #373: memberCtor names a FactoryBot factory
         ref.forwarded   = r.forwarded;                  // lane fcall-forward fix 1: an `f.call/f.apply` site standing for `f( … )`
         ref.trailingLambda = r.trailingLambda;          // #155: a Kotlin call whose lambda trails its argument list (scope-function arm)

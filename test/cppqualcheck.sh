@@ -415,6 +415,8 @@ rrun US --uses=selectBaseline && pin_derived "--uses=selectBaseline (incl. the m
 # counted, never read as empty), and walkImportSpec reads a state's file once (textOf, memoised) and a Python module's file once
 # (pyCache). Only when a --for task spells an import. No new fopen/fread.
 # 63 -> DERIVED 2026-11-12 (B43): the count is test/lib/sitecount.py's, see (§6-self) above; no further re-pins.
+# lane/manifest-row (#565, merged with main 2026-11-17): src/formanifest.h retargetCfgTouchLines adds one <u> row (a touch row's file read
+# only when that row's line is a cfg-use line, once per such row); the derived pin counts it. Same canonical helper, no new fopen/fread.
 rrun RW --uses=readWholeFile && pin_derived "--uses=readWholeFile (docparse::detail:: -- a seam the audit's rw::-anchored grep missed)" RW readWholeFile
 rrun WC --callers=writeTally \
 && { [ "$( cnt "$WC" )" -ge 1 ] 2>/dev/null \

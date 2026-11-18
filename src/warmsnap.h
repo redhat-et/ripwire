@@ -493,7 +493,8 @@ inline GitInputs collectGitInputs( const std::string& rootReal )
             std::string path( origin.substr( 5 ) );
             if( path.empty() || path.front() != '/' )
             {
-                path = rootReal + "/" + path;
+                path.insert( 0, 1, '/' );   // rootReal + "/" + path, built in place
+                path.insert( 0, rootReal );
             }
             if( std::ranges::none_of( g.files, [ & ]( const depwatch::Dep& d ) { return d.seam == depwatch::Seam::WholeFile && d.path == path; } ) )
             {
@@ -769,7 +770,7 @@ inline void openSnapshot( Session& s )
         return;
     }
     std::string_view* const sections[] = { &s.treeSection, &s.modelSection, &s.graphSection };
-    for( int i = 0; i < 3; ++i )
+    for( std::size_t i = 0; i < 3; ++i )
     {
         const std::uint64_t off = span[ 2 * i ], len = span[ 2 * i + 1 ];
         if( !VALIDATE( off <= s.file.size() && len <= s.file.size() - off, "warmsnap: a section lies outside the file" ) )

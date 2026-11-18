@@ -203,13 +203,15 @@ def whole_price( path ):
   s = open( path, 'rb' ).read().decode( 'latin-1' )   # byte offsets, as the binary counts them
   m = re.search( r'<ctx [^>]*?\best_tokens="(\d+)"', s )
   if not m: return None
-  held = ( "syms", "doc_body", "decl_rows", "exemplar_family", "graph_verb", "reexports", "shortkey", "aliases" )
+  held = ( "syms", "doc_body", "decl_rows", "exemplar_family", "manifest_rows", "graph_verb", "reexports", "shortkey", "aliases" )
   masked = re.sub( r'<!\[CDATA\[.*?\]\]>|<!--.*?-->', lambda x: ' ' * len( x.group( 0 ) ), s, flags = re.S )
   def legend_at( at, name ):
       # the block's own legend, the comment right before it that names it (forbudgetfit.h heldLegendAt): priced with the block
       if not s[ :at ].endswith( "-->" ): return at
       o = s.rfind( "<!-- ", 0, at )
-      return o if o >= 0 and s[ o + 5: ].startswith( name ) and s[ o + 5 + len( name ) ] in ": " else at
+      if o < 0: return at
+      n = o + 5 + ( len( "ripwire for " ) if s[ o + 5: ].startswith( "ripwire for " ) else 0 )   # `<!-- NAME` or `<!-- ripwire for NAME`
+      return o if s[ n: ].startswith( name ) and s[ n + len( name ) ] in ": " else at
   depth, heldp, open_at, open_tag, leg = 0, 0, None, None, 0
   for t in re.finditer( r'<(/?)([A-Za-z_][\w-]*)([^>]*?)(/?)>', masked ):
       close, name, attrs, selfc = t.groups()

@@ -437,6 +437,7 @@ inline bool inScope( std::string_view dir, std::string_view scope ) noexcept
 inline std::string scopeMembers( const IngestResult& ing, std::vector<ExemplarMember>& ms )
 {
     std::vector<std::string_view> dirs;
+    dirs.reserve( ms.size() );
     for( const ExemplarMember& m : ms )
     {
         dirs.push_back( includerDir( rootRelPath( ing, m.fileId ) ) );
@@ -549,6 +550,7 @@ inline bool memberEligible( const IngestResult& ing, const Symbol& s ) noexcept
 inline void orderTypical( const IngestResult& ing, std::vector<ExemplarMember>& ms )
 {
     std::vector<std::uint32_t> locs;
+    locs.reserve( ms.size() );
     for( const ExemplarMember& m : ms )
     {
         locs.push_back( m.loc );
@@ -619,6 +621,7 @@ inline std::string_view keyExpr( std::string_view k ) noexcept
 inline void nameRegistryEntries( std::vector<ExemplarMember>& ms )
 {
     std::vector<std::string_view> last;
+    last.reserve( ms.size() );
     for( const ExemplarMember& m : ms )
     {
         last.push_back( lastIdent( m.name ) );
@@ -1501,9 +1504,17 @@ inline int structuralBraces( std::string_view line, bool& inComment )
     return depth;
 }
 
-// The `name: type;` / `name?: type;` / `readonly name: type;` lines at the top brace depth of a holder's body (a TS interface).
-inline void propertyLineRows( std::string_view body, std::uint32_t fileId, std::uint32_t firstLine, ExemplarInto& into )
+// Where a holder's body starts: its file and the 1-based line of its first byte (two uint32_t, named at the call).
+struct HolderBodyAt
 {
+    std::uint32_t fileId    = 0;
+    std::uint32_t firstLine = 0;
+};
+// The `name: type;` / `name?: type;` / `readonly name: type;` lines at the top brace depth of a holder's body (a TS interface).
+inline void propertyLineRows( std::string_view body, HolderBodyAt holderAt, ExemplarInto& into )
+{
+    const std::uint32_t fileId    = holderAt.fileId;
+    const std::uint32_t firstLine = holderAt.firstLine;
     int depth = 0;
     bool inComment = false;
     std::uint32_t ln = firstLine;
@@ -1560,7 +1571,7 @@ inline void holderRows( const IngestResult& ing, const ExemplarMember& holder, E
         if( open != std::string_view::npos )
         {
             const std::uint32_t first = h.line + std::uint32_t( std::ranges::count( span.substr( 0, open ), '\n' ) );
-            propertyLineRows( span.substr( open ), h.fileId, first, into );
+            propertyLineRows( span.substr( open ), { .fileId = h.fileId, .firstLine = first }, into );
         }
     }
 }
@@ -1695,12 +1706,13 @@ inline std::string_view memberStem( const IngestResult& ing, const ExemplarMembe
 }
 
 // The dense unit id of each member for the keys given (the sorted distinct keys are the units, in key order).
-inline std::vector<std::uint32_t> unitIdsOf( std::vector<std::uint64_t> keys, std::vector<std::uint64_t>& distinct )
+inline std::vector<std::uint32_t> unitIdsOf( const std::vector<std::uint64_t>& keys, std::vector<std::uint64_t>& distinct )
 {
     distinct = keys;
     std::ranges::sort( distinct );
     distinct.erase( std::unique( distinct.begin(), distinct.end() ), distinct.end() );
     std::vector<std::uint32_t> ids;
+    ids.reserve( keys.size() );
     for( const std::uint64_t k : keys )
     {
         ids.push_back( std::uint32_t( std::ranges::lower_bound( distinct, k ) - distinct.begin() ) );
@@ -1961,12 +1973,20 @@ inline std::vector<ExemplarMember> typicalDirMembers( const IngestResult& ing, c
     std::vector<ExemplarMember> out;
     for( const ExemplarMember& m : fam.members )
     {
-        if( includerDir( rootRelPath( ing, m.fileId ) ) == dir )
+        if( m.fileId < ing.files.size() && includerDir( rootRelPath( ing, m.fileId ) ) == dir )   // an unindexed member (a manifest's feature) has no directory here
         {
             out.push_back( m ); // members[0] is in `dir` by construction, so it stays first: the typical member of the subset too
         }
     }
     return out.size() >= kExemplarFamilyMin && out.size() < fam.members.size() ? out : std::vector<ExemplarMember> {};
+}
+
+// The typical member's directory. MANIFEST-ROW: a family read off an UNINDEXED manifest (formanifest.h featureFamily: fileId
+// UINT32_MAX) has none: "", and typicalDirMembers skips its members, so no dir-local rows; the family-wide share still runs.
+inline std::string_view typicalMemberDir( const IngestResult& ing, const ExemplarFamily& fam )
+{
+    const std::uint32_t typicalFile = fam.members.front().fileId;
+    return typicalFile < ing.files.size() ? includerDir( rootRelPath( ing, typicalFile ) ) : std::string_view {};
 }
 
 // Larger share first (cross-multiplied), then the larger count, then the path.
@@ -2001,7 +2021,7 @@ inline ExemplarTouchList exemplarTouchList( const IngestResult& ing, const Exemp
     {
         return list; // too few distinct names and stems to call a mention a pattern
     }
-    const std::string_view typicalDir = includerDir( rootRelPath( ing, fam.members.front().fileId ) );
+    const std::string_view typicalDir = typicalMemberDir( ing, fam );
     ExemplarFamily dirFam { .rule = fam.rule };
     dirFam.members = typicalDirMembers( ing, fam, typicalDir );
     const TouchForms dirForms( dirFam.members.empty() ? TouchUnits {} : touchUnits( ing, dirFam ) );
@@ -2587,6 +2607,7 @@ inline std::string renderForExemplarFamily( const IngestResult& ing, const Graph
                "<exemplar_family of=\"" +
                std::string( escapeXml( t->phrase, esc ) ) + "\" held=\"budget\"/>";
     }
+    ASSUME( fam.has_value(), "t and fam are set together (the reading loop) and reset together (settleInto)" );
     fam->unread = scan.unread;
     fam->oversized = scan.oversized;
     return forExemplarFamilyXml( ing, *t, *fam, compactLegend );

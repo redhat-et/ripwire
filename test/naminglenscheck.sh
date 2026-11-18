@@ -262,4 +262,49 @@ print("PASS planted violations flagged, every near-miss silent, withdrawn rule s
 PY
 if [ $? -eq 0 ]; then ok "owners + counts + near-miss silences"; else no "owners/counts/near-miss assertions (see FAIL line above)"; fi
 
+# ── MARKER PREFIX: naming-wordy counts WORDS, and a scope/kind marker is not one (2026-11-17) ─────────
+# The calibration LIVE arm (test/namingcalibrationcheck.sh) found every naming-wordy fire on a developer's CHOSEN
+# spelling was a k constant that gained a unit word (kCMakeCallLines -> kCMakeMaxCallLines): five words plus the k.
+# A k + 5-word constant and a C-family g_ + 5-word global must stay silent; the SAME words without a marker, a k
+# constant with 6 words, a word that merely starts with k (kindOf…), and a Python g_ name (there g_ opens a real
+# word: g_loss is generator loss) must all still fire. Each name is first proven INDEXED, so a silence is never
+# the vacuous one of a symbol the lens never saw.
+MARK="$TMP/markers"
+mkdir -p "$MARK"
+cat >"$MARK/markers.cpp" <<'CPP'
+constexpr int kPathFromReachMaxNodes = 64;
+constexpr int kPathFromReachMaxNodesLimit = 64;
+constexpr int pathFromReachMaxNodesLimit = 64;
+constexpr int kindOfTotalWeightedScoreValue = 64;
+const int g_retryBackoffWindowLimitMs = 5;
+CPP
+cat >"$MARK/markers.py" <<'PY'
+g_generator_loss_running_mean_value = 0
+PY
+"$BIN" "$MARK" --no-cache >"$TMP/markers.map" 2>/dev/null          # status: the map is the verdict; a refusal indexes nothing and the arm below FAILs
+"$BIN" "$MARK" --lint --no-cache >"$TMP/markers.lint" 2>/dev/null  # status: the lint document is the verdict; a refusal fails the parse or the fire arms below
+python3 - "$TMP/markers.map" "$TMP/markers.lint" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+
+silent = [ "kPathFromReachMaxNodes", "g_retryBackoffWindowLimitMs" ]
+fires  = { "kPathFromReachMaxNodesLimit": 6, "pathFromReachMaxNodesLimit": 6, "kindOfTotalWeightedScoreValue": 6,
+           "g_generator_loss_running_mean_value": 6 }
+indexed = { node.get("n") for node in ET.parse(sys.argv[1]).getroot().iter("s") }
+seen = [ name for name in silent + list(fires) if name in indexed ]
+if len(seen) != len(silent) + len(fires):
+    raise SystemExit(f"FAIL marker arm saw {len(seen)} of {len(silent) + len(fires)} planted names indexed: {sorted((set(silent) | set(fires)) - set(seen))} missing")
+wordy = { node.get("in"): node.text for node in ET.parse(sys.argv[2]).getroot().findall("f") if node.get("rule") == "naming-wordy" }
+loud = [ name for name in silent if name in wordy ]
+if loud:
+    raise SystemExit(f"FAIL naming-wordy counted a marker prefix as a word: {[ wordy[name] for name in loud ]}")
+for name, words in fires.items():
+    if name not in wordy:
+        raise SystemExit(f"FAIL naming-wordy is silent on {name} ({words} words)")
+    if f"({words} words in one name)" not in wordy[name]:
+        raise SystemExit(f"FAIL naming-wordy states the wrong word count for {name}: {wordy[name]}")
+print(f"PASS marker arm: {len(seen)} planted names indexed, {len(silent)} marker-prefixed silent, {len(fires)} wordy names fire with the right count")
+PY
+if [ $? -eq 0 ]; then ok "naming-wordy: a marker prefix is not a word"; else no "naming-wordy marker-prefix arm (see FAIL line above)"; fi
+
 exit "$fail"

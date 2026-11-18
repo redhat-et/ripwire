@@ -1096,7 +1096,7 @@ inline void stampMemberReceiver( RawRef& r, TSNode access, Lang lang, std::strin
     const TSNode recvNode = memberAccessReceiver( access, lang );
     RecvShape    rs       = ts_node_is_null( recvNode ) ? RecvShape{} : classifyReceiver( recvNode, lang, src, /*allowChain=*/ true );
     r.recv      = rs.kind == RecvKind::None ? RecvKind::FieldOfVar : rs.kind;   // a member access is never a bare name
-    r.recvVar   = std::move( rs.var );
+    r.recvVar   = rs.var;
     r.setFieldName( std::move( rs.field ) );
 }
 
@@ -1658,7 +1658,7 @@ void captureSideFacts( const LangEntry& le, std::uint32_t fileId, std::string_vi
 #endif
 
         // Elixir directives share the lexical tags context below (ElixirContext), and as of #358 so do the
-        // C-family, Go, Python and TypeScript/JavaScript ones: their `@import.path` captures are normalised and emitted
+        // C-family, C#, Go, Python and TypeScript/JavaScript ones: their `@import.path` captures are normalised and emitted
         // by captureTagsFacts, and captureIncludes no longer reads a preproc_include / preproc_call /
         // import_statement / export_statement / require() call at all. The walk is pure cost for those
         // languages — it descends only allowlisted containers, and the tags query already reaches the same
@@ -2707,7 +2707,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                     {
                         std::string qualifier;
                         rustMacroPathOf( nodeTextOf( fieldChild( parent, NodeField::Path ), src ), qualifier, rustWritten );
-                        r.qualifier = std::move( qualifier );
+                        r.qualifier = qualifier;
                     }
                 }
                 else if( le.lang == Lang::Rust )
@@ -2727,10 +2727,10 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                     RecvShape rs = javaMethodRef
                                  ? javaMethodReferenceReceiver( roleNode, src )
                                  : receiverOf( nameNode, le.lang, src );                 // P2-D: `this`/`self`/`x`/`base.field` shape
-                    r.recv = rs.kind;  r.recvVar = std::move( rs.var );                  //   → one-hop narrowing in resolve.h
+                    r.recv = rs.kind;  r.recvVar = rs.var;                  //   → one-hop narrowing in resolve.h
                     r.setFieldName( std::move( rs.field ) );                                 //   depth-2 intermediate field; "" otherwise
                     r.viaArrow  = rs.viaArrow;                                           //   `p->m()`: Rule 2b's smart-pointer pointee needs it
-                    r.memberCall = rs.member;  r.memberRoot = std::move( rs.root );      //   FE-A: a Go/JS/TS/Rust member call and its receiver root
+                    r.memberCall = rs.member;  r.memberRoot = rs.root;      //   FE-A: a Go/JS/TS/Rust member call and its receiver root
                     r.setMemberPath( std::move( rs.path ) );  r.setMemberCtor( std::move( rs.ctor ) );   //   FE-B: the rest of that receiver chain
                     if( le.lang == Lang::Ruby && r.recv == RecvKind::NamedVar )
                     {

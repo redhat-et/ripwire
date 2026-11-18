@@ -1065,7 +1065,7 @@ struct RecallDocSections
     static constexpr std::uint32_t kNoRecallFileNode = 0xFFFFFFFFu;
 };
 
-inline RecallDocSections splitRecallDocSections( const IngestResult& ing, std::vector<std::uint32_t> secs )
+inline RecallDocSections splitRecallDocSections( const IngestResult& ing, const std::vector<std::uint32_t>& secs )
 {
     RecallDocSections out;
     std::uint32_t     widestEndByte = 0;
@@ -1117,7 +1117,7 @@ inline RecallDocSections recallDocSections( const IngestResult& ing, std::size_t
             secs.push_back( std::uint32_t( i ) );
         }
     }
-    return splitRecallDocSections( ing, std::move( secs ) );
+    return splitRecallDocSections( ing, secs );
 }
 
 inline std::size_t recallNonBlankBytes( std::string_view text ) noexcept

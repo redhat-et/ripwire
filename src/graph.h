@@ -14148,6 +14148,20 @@ inline AtSeed resolveAtSeed( const IngestResult& ing, std::string_view spec )
     return r;
 }
 
+// A symbol's canonical content key: (path, line, name), then the source byte range — two definitions on one line in different
+// scopes must not tie (CodeRabbit 4570577964; sigStartByte alone is no total order). A tie-break that names one of several
+// candidates keys on this, not on NodeId, so the choice is a fact about the code, not about how ids were handed out
+// (CodeRabbit #625 4546683506). The name tower (applyNameTower) breaks its last tie on it too (CodeRabbit #676 4588520057).
+inline auto symbolContentKey( const IngestResult& ing, NodeId id )
+{
+    const Symbol& s = ing.symbols[ id ];
+    return std::tuple<std::string_view, std::uint32_t, std::string_view, std::uint32_t, std::uint32_t>( ing.files[ s.fileId ], s.line, s.name,
+                                                                                                        s.sigStartByte, s.endByte );
+}
+
+// The Scope::name tier: every definition whose name matches and whose scope ends in the scope half, in symbolContentKey order
+// (path, line, name, byte range), never NodeId: the dotted tier hands a `Svc._make` spelling here, and the verbs seed their
+// walks in this order (CodeRabbit #676 4588520057; ids are label-major on a multi-root workspace, path bytes are not).
 inline std::vector<NodeId> resolveAllByScopeQualified( const IngestResult& ing, std::string_view spec )
 {
     std::vector<NodeId> out;
@@ -14164,6 +14178,10 @@ inline std::vector<NodeId> resolveAllByScopeQualified( const IngestResult& ing, 
         {
             out.push_back( s.id );
         }
+    }
+    if( out.size() > 1 )
+    {
+        std::ranges::sort( out, [ & ]( NodeId a, NodeId b ) { return std::pair( symbolContentKey( ing, a ), a ) < std::pair( symbolContentKey( ing, b ), b ); } );
     }
     return out;
 }
@@ -14605,7 +14623,10 @@ inline std::vector<int> nameTowerRanks( const IngestResult& ing, std::span<const
 // not hidden). Key: kindSpecificity DESC (the hoisted dedup ladder — a Method beats a Var beats a Section;
 // a constructor ranks just below its type, nameTowerRanks above), then the language of the most specific
 // symbol first — the tower's own leading symbol defines the reference language, so in a Ruby tree a Ruby def
-// leads a Python one on a same-kind tie — then id ASC for the deterministic tail. A list already in tower order
+// leads a Python one on a same-kind tie — then symbolContentKey (path, line, name, byte range) for the deterministic tail, never
+// NodeId: shortestPathAny seeds in this order, so two Svc._make copies that both reach sink give the --verify witness the
+// content order picks, not the one id assignment happened to pick (CodeRabbit #676 4588520057; on a multi-root workspace ids
+// are label-major, which is not path byte order: roots a and a-b). A list already in tower order
 // comes back untouched. DISTINCT from gitmine.h's §H6 "specificity-ordered mapper", which orders file PATHS on a
 // different axis.
 inline std::vector<NodeId> applyNameTower( const IngestResult& ing, std::vector<NodeId> ids )
@@ -14615,38 +14636,50 @@ inline std::vector<NodeId> applyNameTower( const IngestResult& ing, std::vector<
         return ids;
     }
     const std::vector<int> ranks = nameTowerRanks( ing, ids );
-    std::vector<std::pair<int, NodeId>> keyed;   // (rank, id): the comparator reads the rank without a lookup
+    using ContentKey = decltype( symbolContentKey( ing, NodeId{} ) );
+    struct Keyed
+    {
+        int        rank;
+        ContentKey content;   // the comparator reads both without a lookup
+        NodeId     id;
+    };
+    std::vector<Keyed> keyed;
     keyed.reserve( ids.size() );
     for( std::size_t i = 0; i < ids.size(); ++i )
     {
-        keyed.emplace_back( ranks[ i ], ids[ i ] );
+        keyed.push_back( { ranks[ i ], symbolContentKey( ing, ids[ i ] ), ids[ i ] } );
     }
-    std::pair<int, NodeId> reference = keyed.front();
-    for( const auto& k : keyed )
+    // the reference: the highest rank, content order among equals (the same tail the sort below uses)
+    const Keyed* reference = &keyed.front();
+    for( const Keyed& k : keyed )
     {
-        if( k.first > reference.first || ( k.first == reference.first && k.second < reference.second ) )
+        if( k.rank > reference->rank || ( k.rank == reference->rank && k.content < reference->content ) )
         {
-            reference = k;
+            reference = &k;
         }
     }
-    const Lang referenceLang = ing.symbols[ reference.second ].lang;
+    const Lang referenceLang = ing.symbols[ reference->id ].lang;
     std::sort( keyed.begin(), keyed.end(),
-               [ &ing, referenceLang ]( const std::pair<int, NodeId>& a, const std::pair<int, NodeId>& b ) noexcept
+               [ &ing, referenceLang ]( const Keyed& a, const Keyed& b ) noexcept
                {
-                   if( a.first != b.first )
+                   if( a.rank != b.rank )
                    {
-                       return a.first > b.first;
+                       return a.rank > b.rank;
                    }
-                   const bool refA = ing.symbols[ a.second ].lang == referenceLang, refB = ing.symbols[ b.second ].lang == referenceLang;
+                   const bool refA = ing.symbols[ a.id ].lang == referenceLang, refB = ing.symbols[ b.id ].lang == referenceLang;
                    if( refA != refB )
                    {
                        return refA;
                    }
-                   return a.second < b.second;
+                   if( a.content != b.content )
+                   {
+                       return a.content < b.content;
+                   }
+                   return a.id < b.id;   // reached only by two definitions alike in path, line, name and byte range
                } );
     for( std::size_t i = 0; i < ids.size(); ++i )
     {
-        ids[ i ] = keyed[ i ].second;
+        ids[ i ] = keyed[ i ].id;
     }
     return ids;
 }
@@ -15051,7 +15084,7 @@ inline void declToDefFollowThrough( const IngestResult& ing, std::string_view fi
     }
     // NodeId order is the widening's OWN postcondition, not a caller contract. The sole caller feeds this list to
     // applyNameTower on the very next statement, and that comparator is a TOTAL order (kind, leading language,
-    // id ASC) on distinct ids, so the tower's answer never reads this order - for today's call site the sort is
+    // symbolContentKey, id last) on distinct ids, so the tower's answer never reads this order - for today's call site the sort is
     // vestigial; it is kept so the widening leaves this function canonical when it runs.
     std::sort( sel.begin(), sel.end() );
 }
@@ -16317,7 +16350,7 @@ inline std::string memberSelectorUnservedRefusal( const IngestResult& ing, std::
 // and every tier the full resolver gains (canonical id, Scope::name) reaches the single-pick verbs in the same
 // commit. Declared here, below the full resolver, for exactly that reason.
 //
-// THE PICK is the tower front — the most specific kind, the leading language, then the lowest id — with ONE
+// THE PICK is the tower front — the most specific kind, the leading language, then path, line, name — with ONE
 // exception: a bodyless C/C++ front (a header prototype, an in-class method declaration, a forward-declared class) yields to
 // the TOWER-FRONT bodied definition of the SAME scope, when the set holds one: the scan walks the tower-ordered matches and
 // returns the FIRST bodied same-scope candidate OF THE FRONT'S FAMILY (a type follows to a type's body, a function to a
@@ -18848,7 +18881,7 @@ inline ConnectResult connectSubgraph( const Graph& g, const std::vector<NodeId>&
 // definition of the name is scored by how many OTHER terminals it reaches within the radius on the same undirected view
 // connectSubgraph walks, then by the fewest summed hops; resolveFocus's pick wins a tie it is part of, the tower front any
 // other tie: joinTerminalPicks hands the scan resolveAllByNameQualified's list, which applyNameTower sorts for the
-// name/file tier and leaves id-ascending for the canonical-id and Scope::name tiers. Two passes: the first scores against
+// name/file tier, id-ascending for the canonical-id tier and symbolContentKey order for the Scope::name tier. Two passes: the first scores against
 // every definition of the other names, the second re-scores against the
 // picks the first made — the nodes connectSubgraph will actually search from. A name none of whose definitions reaches
 // another terminal keeps resolveFocus's pick (so <unconnected> there is true of EVERY definition). tiedOut[i] > 1 says
@@ -18907,7 +18940,7 @@ inline std::vector<std::uint16_t> connectUndirectedDistances( const Graph& g, st
 // One terminal's choice among its definitions, against the other terminals' distance maps: the candidate reaching the
 // most of them, then the fewest summed hops; `preferred` (resolveFocus's pick) wins a tie it is part of, the first
 // candidate met any other tie — the scan keeps what it met first, and the list arrives tower-ordered for the name/file
-// tier (applyNameTower), id-ascending for the canonical-id and Scope::name tiers. reached == 0 ⇒ no candidate joins
+// tier (applyNameTower), id-ascending for the canonical-id tier, content order (symbolContentKey) for Scope::name. reached == 0 ⇒ no candidate joins
 // anything, and `chosen` is `preferred`.
 struct TerminalChoice { NodeId chosen = kNoNode; std::uint32_t reached = 0, hops = 0, tied = 1; };
 
@@ -19116,17 +19149,6 @@ inline ConnectPicks joinTerminalPicks( const IngestResult& ing, const Graph& g, 
         }
     }
     return out;
-}
-
-// A symbol's canonical content key: (path, line, name), then the source byte range — two definitions on one line in different
-// scopes must not tie (CodeRabbit 4570577964; sigStartByte alone is no total order). A tie-break that names one of several
-// candidates keys on this, not on NodeId, so the choice is a fact about the code, not about how ids were handed out
-// (CodeRabbit #625 4546683506).
-inline auto symbolContentKey( const IngestResult& ing, NodeId id )
-{
-    const Symbol& s = ing.symbols[ id ];
-    return std::tuple<std::string_view, std::uint32_t, std::string_view, std::uint32_t, std::uint32_t>( ing.files[ s.fileId ], s.line, s.name,
-                                                                                                        s.sigStartByte, s.endByte );
 }
 
 // The first test-class intermediary in `before` order (CONNECT-TESTJOINT-CONTENT-KEY: symbolContentKey, NodeId last) on a

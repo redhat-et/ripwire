@@ -658,6 +658,7 @@ inline std::vector<Line> collectLines( const IngestResult& ing, const RowFeature
 {
     filesyms_detail::FileLookup files( ing );
     std::vector<demote_detail::RowWant> wants;
+    wants.reserve( scan.rows.size() );
     for( const AnswerRow& r : scan.rows )
     {
         wants.push_back( demote_detail::rowWant( files, r ) );

@@ -691,9 +691,17 @@ namespace metbridge_detail
 {
 // the value of attribute `name` in one printed row (handoffwindow.h printedAttrOf: one reader for both lanes)
 inline std::string_view attrOf( std::string_view row, std::string_view name ) { return printedAttrOf( row, name ); }
-// a printed `file:line` names file `fileId` at `line`: the path is the root-relative one, or the tail of the stored one
-inline bool namesPlace( const IngestResult& ing, std::string_view printed, std::uint32_t fileId, std::uint32_t line )
+// A place: file id and 1-based line, two uint32_t that a positional call could swap unseen.
+struct FileLinePlace
 {
+    std::uint32_t fileId = 0;
+    std::uint32_t line   = 0;
+};
+// a printed `file:line` names file `place.fileId` at `place.line`: the path is the root-relative one, or the tail of the stored one
+inline bool namesPlace( const IngestResult& ing, std::string_view printed, FileLinePlace place )
+{
+    const std::uint32_t fileId = place.fileId;
+    const std::uint32_t line   = place.line;
     const std::size_t colon = printed.rfind( ':' );
     if( colon == std::string_view::npos || printed.substr( colon + 1 ) != std::to_string( line ) )
     {
@@ -739,7 +747,7 @@ inline void bindDeclinedSite( const IngestResult& ing, const Graph& g, std::stri
     {
         const Reference&    ref  = ing.references[ g.declinedSiteRef[k] ];
         const NodeId        by   = g.declinedSiteCaller[k];
-        if( by >= ing.symbols.size() || !namesPlace( ing, plan.site, ref.fileId, ref.line ) || escapeXml( ing.symbols[ by ].name, esc ) != inName )
+        if( by >= ing.symbols.size() || !namesPlace( ing, plan.site, { .fileId = ref.fileId, .line = ref.line } ) || escapeXml( ing.symbols[ by ].name, esc ) != inName )
         {
             continue;
         }
@@ -775,7 +783,7 @@ inline std::optional<MetBridgePlan> metBridgePlan( const IngestResult& ing, cons
     MetBridgePlan plan;
     plan.toP  = std::string( attrOf( row, "p" ) );
     plan.site = std::string( attrOf( row, "site" ) );
-    const auto at = std::ranges::find_if( dst, [ & ]( NodeId t ) { return metbridge_detail::namesPlace( ing, plan.toP, ing.symbols[ t ].fileId, ing.symbols[ t ].line ); } );
+    const auto at = std::ranges::find_if( dst, [ & ]( NodeId t ) { return metbridge_detail::namesPlace( ing, plan.toP, { .fileId = ing.symbols[ t ].fileId, .line = ing.symbols[ t ].line } ); } );
     plan.to = at != dst.end() ? *at : kNoNode;
     if( plan.to != kNoNode )
     {
@@ -808,7 +816,7 @@ struct MetBridgeShown
     void disclose( DisclosureWhy ) noexcept
     {
         prefixMissing = true;
-        rw::emitTo( stderr, "ripwire: --for: no capture buffer for the met_bridge proven prefix — it is not shown (missing=\"prefix\"), which is not empty\n" );
+        rw::emitRaw( stderr, "ripwire: --for: no capture buffer for the met_bridge proven prefix — it is not shown (missing=\"prefix\"), which is not empty\n" );
     }
 };
 

@@ -2859,7 +2859,7 @@ inline bool markTableRows( const IngestResult& ing, std::vector<Site>& rows, std
             }
             registrationOfRow( loadedText, rows[i], ctx );
             rows[i].regCall = !rows[i].tbl.empty();
-            drop[i]         = rows[i].longer && rows[i].tbl.empty();
+            drop[i]         = static_cast<char>( rows[i].longer && rows[i].tbl.empty() );
         }
         else if( rows[i].tbl == "item" )
         {
@@ -2883,7 +2883,7 @@ inline bool keepTailKeyRows( const IngestResult& ing, std::string_view tail, std
         const NodeId owner = enriched[i].enclosingId;
         const bool   def   = owner != kNoNode && ing.symbols[owner].name == tail && ing.symbols[owner].line == enriched[i].line;
         anyKey             = anyKey || rows[i].quotedKey;
-        drop[i]            = !( rows[i].quotedKey || def );
+        drop[i]            = static_cast<char>( !( rows[i].quotedKey || def ) );
     }
     if( !anyKey )
     {
@@ -3521,8 +3521,9 @@ inline std::string_view lineAtNumber( const std::string& text, const std::vector
 inline bool opensBlockAbove( const std::string& text, const std::vector<std::size_t>& starts, std::uint32_t l, std::uint32_t first, std::span<const std::string_view> words, bool aligned )
 {
     const std::size_t in = lintdetail::indentOf( lineAtNumber( text, starts, l ) );
-    for( std::uint32_t k = l; k-- > first && k > 0; )
+    for( std::uint32_t k = l; k > first && k > 1; )   // k steps down first: lines l-1 down to first, never line 0
     {
+        --k;
         const std::string_view line = lineAtNumber( text, starts, k );
         const std::string_view t    = trimWs( line );
         if( t.empty() )
@@ -4143,6 +4144,7 @@ inline std::vector<std::pair<int, GrepRawHit>> tableReadsInFiles( const IngestRe
                                                                   const std::string& table, std::span<const std::string_view> parts, TableReaders& out )
 {
     std::vector<std::string> paths;
+    paths.reserve( files.size() );
     for( const std::uint32_t f : files )
     {
         paths.push_back( diskPath( ing, f ) );

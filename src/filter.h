@@ -1190,7 +1190,7 @@ inline void applyIgnoreTests( IngestResult& ing )
             }
             c.fromSymbol = nf;
         }
-        keptBinds.push_back( std::move( c ) );
+        keptBinds.push_back( c );
     }
 
     ing.symbols    = std::move( keptSyms );

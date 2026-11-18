@@ -402,7 +402,7 @@ inline constexpr std::uint64_t kBaseChildMinIndexBytes = std::uint64_t( 1 ) << 2
 std::string gitDirAt( const std::string& dir, const rw::os::stat_t& dotGit )
 {
     using namespace rw;
-    const std::string gitDir = dir + "/.git";
+    std::string gitDir = dir + "/.git";   // not const: the early return below moves it out
     if( !S_ISREG( dotGit.st_mode ) )
     {
         return gitDir;
@@ -694,7 +694,7 @@ BaseChildResult tryBaseChild( const std::string& root, const rw::Config& cfg, co
     {
         constexpr std::string_view kOutcome[] = { "child", "failed", "fallback" };
         rw::emitTo( stderr, "ripwire: stats qbase-child outcome={} why={} child_peak_mib={} blob={}\n", kOutcome[ std::size_t( child.outcome ) ],
-                    child.why.empty() ? std::string_view( "-" ) : child.why, refs.childPeak / ( 1024 * 1024 ), child.blob.empty() ? std::string_view( "-" ) : child.blob );
+                    child.why.empty() ? std::string_view( "-" ) : child.why, refs.childPeak / ( std::uint64_t( 1024 ) * 1024 ), child.blob.empty() ? std::string_view( "-" ) : child.blob );
     }
     if( child.outcome == BaseChildOutcome::Fallback )
     {

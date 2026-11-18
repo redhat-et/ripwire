@@ -2027,7 +2027,7 @@ inline std::optional<RawRef> subscriptOperatorRef( TSNode access, TSNode recv, s
     r.role      = RefRole::Subscript;
     r.name      = op;
     r.recv      = rs.kind == RecvKind::None ? RecvKind::FieldOfVar : rs.kind;   // receiverOf's "too rich" member shape
-    r.recvVar   = std::move( rs.var );
+    r.recvVar   = rs.var;
     r.setFieldName( std::move( rs.field ) );
     if( langFacts( lang ).constantPathReceiver && r.recv == RecvKind::NamedVar )
     {
@@ -2713,7 +2713,7 @@ struct BindSite
 // ever reads a type off it), and so may an ImplBlock's (an implementor with no name), so the empty-typeName refusal applies to every OTHER kind, where it is
 // load-bearing for Rule 2 (an undecidable type must degrade to §2a, not mint a half-record). The DeclType's
 // qualified text rides importedName (see qualifiedNameText) — non-empty only on a declaration's Type/ParamType record.
-inline void pushTypedBind( std::uint32_t fileId, Lang lang, std::string_view var, DeclType type, BindSite site, LocalBindKind kind,
+inline void pushTypedBind( std::uint32_t fileId, Lang lang, std::string_view var, const DeclType& type, BindSite site, LocalBindKind kind,
                            std::vector<RawBind>& binds )
 {
     if( var.empty() || ( type.name.empty() && kind != LocalBindKind::VarDecl && kind != LocalBindKind::ImplBlock ) )
@@ -2728,10 +2728,10 @@ inline void pushTypedBind( std::uint32_t fileId, Lang lang, std::string_view var
     b.spanStart    = site.spanStart;
     b.spanEnd      = site.spanEnd;
     b.var.assign( var );
-    b.typeName     = std::move( type.name );
-    b.importedName = std::move( type.qualified );
+    b.typeName     = type.name;
+    b.importedName = type.qualified;
     b.isFromAssignment = type.isFromAssignment;
-    binds.push_back( std::move( b ) );
+    binds.push_back( b );
 }
 
 // the same record with no qualified text — every emitter but a declaration's Type/ParamType
@@ -2903,7 +2903,7 @@ inline void emitShadowVarDecls( std::uint32_t fileId, Lang lang, TSNode decl, st
 // one DECLARATOR → both records: the Rule-2 var→type binding and the r9 VarDecl shadow record(s). The two
 // name reads stay separate on purpose — declaratorVarName descends into a function declarator (harmless
 // for narrowing), emitShadowVarDecls refuses it (load-bearing for suppression).
-inline void emitDeclBinds( std::uint32_t fileId, Lang lang, TSNode declNode, std::string_view src, DeclType type,
+inline void emitDeclBinds( std::uint32_t fileId, Lang lang, TSNode declNode, std::string_view src, const DeclType& type,
                            BindSite site, std::vector<RawBind>& binds )
 {
     const std::string_view var = declaratorVarName( declNode, src );
@@ -2913,11 +2913,11 @@ inline void emitDeclBinds( std::uint32_t fileId, Lang lang, TSNode declNode, std
         // typed declaration Rule 2's flat table refuses (declaratorVarName cannot see through the unnamed reference
         // child). Recorded as a ParamType fact, so `s.name` resolves in the field use-site index and `s.m()` narrows
         // through Rule 2's LEXICAL lookup (resolve.h buildScopedRecvDecls) — only where this declaration is in scope.
-        pushTypedBind( fileId, lang, paramDeclaratorVarName( declNode, src ), std::move( type ), BindSite{ site.startByte, 0u, 0u }, LocalBindKind::ParamType, binds );
+        pushTypedBind( fileId, lang, paramDeclaratorVarName( declNode, src ), type, BindSite{ site.startByte, 0u, 0u }, LocalBindKind::ParamType, binds );
     }
     else
     {
-        pushTypedBind( fileId, lang, var, std::move( type ), BindSite{ site.startByte, 0u, 0u }, LocalBindKind::Type, binds );
+        pushTypedBind( fileId, lang, var, type, BindSite{ site.startByte, 0u, 0u }, LocalBindKind::Type, binds );
     }
     emitShadowVarDecls( fileId, lang, declNode, src, site, binds );
 }
@@ -4004,7 +4004,7 @@ inline void pushEvidenceBind( BindCtx& cx, LocalBindKind kind, std::string_view 
     b.var.assign( var );
     b.typeName.assign( type );
     b.importedName.assign( imported );
-    cx.binds->push_back( std::move( b ) );
+    cx.binds->push_back( b );
 }
 
 // the class a constructor-shaped initializer names — JS/TS `new Foo( … )`, Python `Foo( … )`, Go `Foo{ … }` / `&Foo{ … }`
@@ -4280,7 +4280,7 @@ inline void pushSiteEvidence( BindCtx& cx, LocalBindKind kind, std::string_view 
     b.var.assign( var );
     b.typeName.assign( type );
     b.importedName.assign( imported );
-    cx.binds->push_back( std::move( b ) );
+    cx.binds->push_back( b );
 }
 inline void pushLocalEvidence( BindCtx& cx, std::string_view var, std::string_view cls, BindSite site, bool flag = false, std::string_view whole = {} )
 {
@@ -4336,7 +4336,7 @@ inline void pushMemberTombstone( BindCtx& cx, std::string_view var, std::uint32_
     b.lang      = cx.lang;
     b.kind      = LocalBindKind::MemberType;
     b.var.assign( var );
-    cx.binds->push_back( std::move( b ) );
+    cx.binds->push_back( b );
 }
 
 // FE-B (review B3): one declarator's evidence — `name` declared with the class its written `type` names, else the class its
@@ -4437,7 +4437,7 @@ inline TSNode calleeNameNode( TSNode call )
 // One CallResult: `var` binds result `index` of `call` after `depth` unwrap operators, visible over `site`. A blank `_`, a
 // non-identifier name or a callee with no name node records nothing.
 // `written`: the qualifier a Rust path call is written with (rustCallQualifier; model.h LocalBindKind::CallResult)
-inline void pushCallResult( BindCtx& cx, TSNode var, TSNode call, std::uint8_t index, std::uint8_t depth, BindSite site, std::string written = {} )
+inline void pushCallResult( BindCtx& cx, TSNode var, TSNode call, std::uint8_t index, std::uint8_t depth, BindSite site, const std::string& written = {} )
 {
     const TSNode           callee = ts_node_is_null( call ) ? TSNode{} : calleeNameNode( call );
     const std::string_view name   = ts_node_is_null( var ) ? std::string_view{} : identifierText( var, cx.src );
@@ -4677,7 +4677,7 @@ inline void pushTypeBind( BindCtx& cx, std::uint32_t at, std::pair<std::uint32_t
     RawBind row{ .fileId = cx.fileId, .startByte = at, .lang = cx.lang, .kind = LocalBindKind::TypeAlias, .spanStart = span.first, .spanEnd = span.second };
     row.var.assign( var );
     row.typeName.assign( mark );
-    cx.binds->push_back( std::move( row ) );
+    cx.binds->push_back( row );
 }
 inline void captureShadowDecl( BindCtx& cx, TSNode n, const char* t )
 {
@@ -7561,7 +7561,7 @@ void bindsFinalize( BindCtx& cx )
         }
         for( RawBind& p : fnPos )
         {
-            binds.push_back( std::move( p ) );
+            binds.push_back( p );
         }
     }
 }
