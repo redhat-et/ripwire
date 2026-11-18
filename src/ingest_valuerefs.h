@@ -2095,14 +2095,23 @@ private:
 
     // IX1-V2 (Go): `recv.m` in a value position, where recv is the enclosing METHOD's own receiver (no closer scope redeclares
     // it): a Value row naming m with memberRoot = the receiver's type name, so the join resolves it to that type's method m
-    // only (valuerefindex.h resolveName), never to a same-named method of another type. Any other `x.m` stays a floor (x's
-    // type is not read here).
+    // only (valuerefindex.h resolveName), never to a same-named method of another type. A method expression `(*T).m` lands the
+    // same row with memberRoot T (methodExpressionType). Any other `x.m` stays a floor (x's type is not read here).
     void methodValueAt( std::size_t i )
     {
         const TSNode n   = m_anc[i].node;
         const TSNode op  = child( n, m_fOperand );
         const TSNode fld = child( n, m_fField );
-        if( ts_node_is_null( op ) || ts_node_is_null( fld ) || !kindIs( ts_node_type( op ), "identifier" ) || i < 2 )
+        if( ts_node_is_null( op ) || ts_node_is_null( fld ) || i < 2 )
+        {
+            return;
+        }
+        if( kindIs( ts_node_type( op ), "parenthesized_expression" ) )
+        {
+            landMethodValue( i, text( fld ), methodExpressionType( op ) );
+            return;
+        }
+        if( !kindIs( ts_node_type( op ), "identifier" ) )
         {
             return;
         }
@@ -2122,7 +2131,33 @@ private:
         {
             rt = ts_node_named_child( rt, 0 );
         }
-        const std::string_view owner = goTypeName( rt );
+        landMethodValue( i, text( fld ), goTypeName( rt ) );
+    }
+
+    // GO-METHOD-EXPR: the type T of a METHOD EXPRESSION's operand `( *T )`, T an identifier no closer scope declares; "" for any
+    // other parenthesised operand (`( x ).m`, `( *p ).m` on a local or parameter p: a method value of a variable, its type not read
+    // here). Its Value row joins like the receiver's: to T's method m in the caller's own package (valuerefindex.h ownedBy). Go lets
+    // no package-level name be both a type and anything else, and an import name collides with every package-level declaration, so
+    // an undeclared T owning a method m is that type. A plain `T.m` stays a floor: its operand is spelled like a package or a variable.
+    std::string_view methodExpressionType( TSNode op ) const noexcept
+    {
+        const TSNode deref = ts_node_named_child_count( op ) == 1 ? ts_node_named_child( op, 0 ) : TSNode{};
+        if( ts_node_is_null( deref ) || !kindIs( ts_node_type( deref ), "unary_expression" ) || text( child( deref, m_fOperator ) ) != "*" )
+        {
+            return {};
+        }
+        const TSNode type = child( deref, m_fOperand );
+        if( ts_node_is_null( type ) || !kindIs( ts_node_type( type ), "identifier" ) || declaringScope( text( type ) ) != 0 )
+        {
+            return {};
+        }
+        return text( type );
+    }
+
+    // IX1-V2 / GO-METHOD-EXPR: the Value row of method `name` of type `owner` at selector anc[i], when the selector sits in a value
+    // position; nothing for an empty owner, or for the callee of a call (`b.opPlan( x )`) or an operand
+    void landMethodValue( std::size_t i, std::string_view name, std::string_view owner )
+    {
         if( owner.empty() )
         {
             return;
@@ -2133,11 +2168,10 @@ private:
             --j;
         }
         Slot s;
-        if( !classify( i, j, s ) )
+        if( classify( i, j, s ) )
         {
-            return;   // the callee of a call (`b.opPlan( x )`), an operand: not a value use
+            landValue( i, j, name, s, false, owner );
         }
-        landValue( i, j, text( fld ), s, false, owner );
     }
 
     // FN-SLOT S2 (C++, model.h kVrSlotLangs memberPointers): `&Cls::m` in a value position — a Value row naming m with memberRoot
