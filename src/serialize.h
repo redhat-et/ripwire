@@ -7229,6 +7229,9 @@ struct CalleeCallsSink
     bool*                            splitLegendCharged = nullptr;
     const std::vector<std::uint8_t>* link = nullptr;   // Graph::outLink: via="link" on a callee row. nullptr ⇒ none
     const std::vector<std::uint8_t>* anchor = nullptr;   // Graph::outAnchorMiss: anchor="missing" on that row. nullptr ⇒ none
+    // BAND CF: the root prefix a names-only row's p= is made relative to (the <h> row's own pathRel rule); nullptr ⇒ the
+    // indexed path as it stands. Read by the names-only rendering alone.
+    const std::string*               rootPrefix = nullptr;
 };
 
 // The <calls> wrapper, written in front of the rows it describes (they have to be walked before `shown`
@@ -7368,10 +7371,24 @@ inline std::vector<float> calleeNameSpecificity( const IngestResult& ing )
 // same fact in two spellings, from a document that promises determinism. Line numbers have a natural order and
 // it is not the ranker's; they are sorted ascending, so a row's content depends on the row and not on how the
 // walk reached it. Row ORDER is unchanged: a merged row still sits where its first callee sat.
+//
+// THE ROW NAMES ITS FILE (BAND CF, docs/EVALS.md amendment 11). `l=` is a definition line, and a line with no file cannot
+// be opened: 15 required gold items of the 2026-11-17 retrieval-gap partition were present in an answer as exactly this row,
+// line exact, and lost. The row now prints p= when the callee is NOT in the file of the <h> row it sits under; a row with
+// no p= is in that <h> row's file, and the legend says so. The path is the callee SYMBOL's own indexed file — the same
+// record l= is read from — never one derived from a name, an import or the owner, so a via="name" row's p= is exactly as
+// hedged as its l= already was and no more.
+//
+// THE FILE IS PART OF THE MERGE KEY, and that is the half that was already wrong. Same-named callees used to merge by name
+// alone, so `h.render()` (html.ts:3) and `t.render()` (text.ts:9) came out as `<c n="render" l="3,9"/>`: two files' lines
+// under one row. Printing one file beside that list would turn an unlocatable row into a FALSE one (gate
+// test/calleerowfilecheck.sh arm (W), whose first mutation is that naive fix). Every line of one l= is now a line of one file.
 struct MergedCalleeNameRow
 {
     std::string_view           name;    // a view into ing.symbols — stable for the emitter's lifetime
-    std::vector<std::uint32_t> lines;   // every definition line of that name; joined ascending at append time
+    std::uint32_t              fileId = 0;   // the file every line below is in: part of the merge key
+    std::string_view           path;    // p=: that file, when it is not the <h> row's own; empty ⇒ none printed (a view into ing.files)
+    std::vector<std::uint32_t> lines;   // every definition line of that name IN THAT FILE; joined ascending at append time
     bool                       via = false;   // FE-B: these edges are name-only — merged only with rows of the same bit
     bool                       split = false;   // attrib-multidef Q1: these edges are split arms — likewise
     bool                       link = false;    // a markdown link — merged only with other link rows of the same name
@@ -7384,7 +7401,20 @@ struct CalleeRowMarks
     bool split = false;
     bool link  = false;
     bool miss  = false;
+    std::string_view path;   // BAND CF: the callee's file when it is not its <h> row's own (calleeRowPath); empty ⇒ the row prints no p=
 };
+// The path a names-only row prints for the callee `cs` of the symbol `owner`: empty when both are in one file (the row then
+// reads as "in the <h> row's file"), else the callee's own indexed file, root-relative under the caller's root= as the <h>
+// row's p= is. Never derived from anything but the callee symbol's own record.
+inline std::string_view calleeRowPath( const IngestResult& ing, const CalleeCallsSink& sink, const Symbol& owner, const Symbol& cs )
+{
+    if( cs.fileId == owner.fileId || cs.fileId >= ing.files.size() )
+    {
+        return {};
+    }
+    return sink.rootPrefix == nullptr ? std::string_view( ing.files[ cs.fileId ] ) : rw::sarif::rootRelativeUri( ing.files[ cs.fileId ], *sink.rootPrefix );
+}
+
 inline void collectCalleeNameRow( std::vector<MergedCalleeNameRow>& rows, const Symbol& cs,
                                   std::size_t& used, const CalleeCallsSink& sink, CalleeRowMarks mark = {} )
 {
@@ -7397,7 +7427,7 @@ inline void collectCalleeNameRow( std::vector<MergedCalleeNameRow>& rows, const 
     bool merged = false;
     for( MergedCalleeNameRow& r : rows )
     {
-        if( r.name == cs.name && r.via == via && r.split == split && r.link == link && r.miss == miss )
+        if( r.name == cs.name && r.fileId == cs.fileId && r.via == via && r.split == split && r.link == link && r.miss == miss )
         {
             r.lines.push_back( cs.line );  merged = true;
             break;
@@ -7405,11 +7435,12 @@ inline void collectCalleeNameRow( std::vector<MergedCalleeNameRow>& rows, const 
     }
     if( !merged )
     {
-        rows.push_back( MergedCalleeNameRow { cs.name, { cs.line }, via, split, link, miss } );
+        rows.push_back( MergedCalleeNameRow { cs.name, cs.fileId, mark.path, { cs.line }, via, split, link, miss } );
     }
     // the comma and the digits a merge appends, or the whole row it opens (FE-B: plus its 11-byte via="name"; Q1: its 13-byte
-    // prov="split"; a link row's via="link" is the same 11 bytes)
-    used += merged ? std::strlen( lb ) + 1 : cs.name.size() + 16 + ( ( via || link ) ? 11u : 0u ) + ( split ? 13u : 0u ) + ( miss ? 17u : 0u );
+    // prov="split"; a link row's via="link" is the same 11 bytes; BAND CF: plus ` p=""` and the path, on a row that prints one)
+    const std::size_t pathBytes = mark.path.empty() ? 0u : mark.path.size() + 5u;
+    used += merged ? std::strlen( lb ) + 1 : cs.name.size() + 16 + pathBytes + ( ( via || link ) ? 11u : 0u ) + ( split ? 13u : 0u ) + ( miss ? 17u : 0u );
     if( sink.recorded )
     {
         sink.recorded->push_back( EmittedBodyCall { cs.name, cs.line, std::string() } );   // §H5: no sig to record
@@ -7436,6 +7467,12 @@ inline void appendMergedCalleeNameRows( std::string& callsBody, std::vector<Merg
             callsBody += lb;
         }
         callsBody += "\"";
+        if( !r.path.empty() )
+        {
+            callsBody += " p=\"";   // after l=, so a reader keyed on `<c n= l=` still finds both
+            callsBody += escapeXml( r.path, esc );
+            callsBody += "\"";
+        }
         callsBody += viaEdgeAttr( r.via, r.link );
         callsBody += anchorMissAttr( r.miss );
         callsBody += r.split ? " prov=\"split\"" : "";   // attrib-multidef Q1
@@ -7498,6 +7535,18 @@ inline CalleeCallsSink withLinkBits( CalleeCallsSink sink, const std::vector<std
     sink.link   = link;
     sink.anchor = anchor;
     return sink;
+}
+
+// BAND CF: the sink a hop section passes, with the root prefix its rows' p= is relative to. No root= ⇒ the indexed path as it
+// stands, exactly the choice the section's own pathRel makes for its <h> rows.
+inline CalleeCallsSink withRowRoot( CalleeCallsSink sink, std::string_view rootArg, const std::string& rootPrefix ) noexcept
+{
+    sink.rootPrefix = rootArg.empty() ? nullptr : &rootPrefix;
+    return sink;
+}
+inline std::string calleeRowRootPrefix( std::string_view rootArg )
+{
+    return rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
 }
 
 // attrib-multidef Q1: is the <calls> row id → cid a split arm (and not by name alone: that row says via="name")? The first
@@ -7581,7 +7630,7 @@ inline bool appendOneCalleeCall( std::string& callsBody, std::vector<MergedCalle
     const std::string_view splitAttr = calleeRowSplitAttr( outOff, outTargets, id, cid, !viaAttr.empty(), used, sink );
     if( sink.namesOnly )
     {
-        collectCalleeNameRow( nameRows, cs, used, sink, CalleeRowMarks{ nameRow, !splitAttr.empty(), linkRow, missRow } );
+        collectCalleeNameRow( nameRows, cs, used, sink, CalleeRowMarks{ nameRow, !splitAttr.empty(), linkRow, missRow, calleeRowPath( ing, sink, ing.symbols[ id ], cs ) } );
         return true;
     }
     const std::string& csrc = contentOf( cs.fileId );
@@ -8479,6 +8528,7 @@ inline OwnerHopRows packOwnerHopRows( const IngestResult& ing, const std::vector
     {
         return out;
     }
+    const std::string rowRootPrefix = calleeRowRootPrefix( rootArg );   // BAND CF: the <c p=> rows' root
     EXPECTS( owners->words.size() == owners->rows, "one question word per owner row" );
     out.rows = std::min( owners->rows, nodes.size() );
     out.cut  = owners->capCut;
@@ -8509,8 +8559,9 @@ inline OwnerHopRows packOwnerHopRows( const IngestResult& ing, const std::vector
         }
         used += rowFixed;
         emitCalleeCallsBlock( row, id, outOff, outTargets, ing, contentOf, esc, used, budget,
-                              withLinkBits( withSplitArms( CalleeCallsSink{ redact, /*recorded=*/nullptr, /*namesOnly=*/true, rank, &outNameOnly, &via,
-                                                              kForOwnerHopNameGuard, next }, outEdges.prov, outEdges.splitLegendCharged ), outEdges.link, outEdges.anchor ) );
+                              withRowRoot( withLinkBits( withSplitArms( CalleeCallsSink{ redact, /*recorded=*/nullptr, /*namesOnly=*/true, rank, &outNameOnly, &via,
+                                                              kForOwnerHopNameGuard, next }, outEdges.prov, outEdges.splitLegendCharged ), outEdges.link, outEdges.anchor ),
+                                           rootArg, rowRootPrefix ) );
         out.xml += row;
         out.xml += "</h>";
         ++out.shown;
@@ -8689,9 +8740,10 @@ inline void packHops( std::FILE* out, const IngestResult& ing, const std::vector
         // the 1-hop callee signatures — the identical block a body carries, charged against the same
         // running `used` so the row identity bytes and the edge bytes share one budget.
         emitCalleeCallsBlock( row, id, outOff, outTargets, ing, contentOf, esc, used, budgetBytes,
-                              withLinkBits( withSplitArms( CalleeCallsSink{ redact, /*recorded=*/nullptr, /*namesOnly=*/true, rank, &outNameOnly, &viaLegendCharged,
-                                                                              CalleeCallsSink{}.rowCap, next },
-                                             outEdges.prov, &splitLegendCharged ), outEdges.link, outEdges.anchor ) );
+                              withRowRoot( withLinkBits( withSplitArms( CalleeCallsSink{ redact, /*recorded=*/nullptr, /*namesOnly=*/true, rank, &outNameOnly, &viaLegendCharged,
+                                                                                           CalleeCallsSink{}.rowCap, next },
+                                                          outEdges.prov, &splitLegendCharged ), outEdges.link, outEdges.anchor ),
+                                           rootArg, rootPrefix ) );
         row += "</h>";
         children += row;
         ++shownCount;

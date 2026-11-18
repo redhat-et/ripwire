@@ -47,6 +47,7 @@
  "cachelintcheck.sh": 3.9,
  "cacheoffsetcheck.sh": 8.6,
  "cachesplitcheck.sh": 5.3,
+ "calleerowfilecheck.sh": 3.0,
  "callerscheck.sh": 4.6,
  "callformcheck.sh": 53.8,
  "candheadcheck.sh": 0.7,

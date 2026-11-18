@@ -1903,6 +1903,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "task", "task=: the query", false, "ctx", MapHeaderRead::No, {}, "for" },
     { "n", "d n= l=: the symbol's name and def line", true, "d", MapHeaderRead::No, {}, "for" },
     { "t", "b t= n= p= l=: a served body's kind, name, file, first line", true, "b", MapHeaderRead::No, {}, "for" },
+    // BAND CF (serialize.h MergedCalleeNameRow): present-only, on a hop callee row whose definition is outside its h row's file
+    { "p", "c p=: the file a hop callee's l= lines are in, printed when it is not the h row's own (no p=: the h row's file)", true, "c", MapHeaderRead::No, {}, "for" },
     { "owner", "field name= type= owner= rel=: a member of owner=, rel=creates held by value, uses by reference/pointer", true, "field", MapHeaderRead::No, {}, "for" },
     { "pure", "d pure=1: const/constexpr signature (Swift: non-mutating) and no transitive side effect found; a hint", true, "d", MapHeaderRead::No, {}, "for" },
     { "h", "enc h=: the edit handle, sym#<16hex>@<16hex> (identity, file content hash); stale after any change to that file", true, "enc", MapHeaderRead::No, {}, "grep" },
