@@ -102,7 +102,20 @@ hasnt "$a" 'ix="2"' "(F7.10) [N] a tied prototype makes no second group"
 a="$( body "$( rw u --callees=close_exec )" )"
 hasnt "$a" '<def ' "(F7.11) [N] --callees keeps a one-group answer table-less"
 
-# [F3] and [F2] arms land with their fixes (BX1 commits 2 and 3).
+# ── [F3] a header static is visible to its includers ─────────────────────────────────────────────────────────────────
+echo "[F3] a C static in a header binds from the files that include it"
+a="$( body "$( rw h --uses=row_cmp )" )"
+has "$a" '<u role="value" p="t1.c:3"' "(F3.1) [P] a direct includer's value use binds the header static"
+has "$a" '<u role="value" p="t2.c:3"' "(F3.2) [P] a transitive includer (t2.c -> table.h -> row.h) binds it too"
+has "$a" '<u role="value" p="other.c:3"' "(F3.3) [N] other.c's own static still binds its own use"
+hasnt "$a" 'p="lone.c:' "(F3.4) [N] a file that includes no row.h binds nothing"
+a="$( rw h --callers=row.h:row_cmp )"
+has "$a" 'value_refs="2"' "(F3.5) [P] --callers=row.h:row_cmp counts the two includers' value uses"
+a="$( rw h --callers=other.c:row_cmp )"
+has "$a" 'value_refs="1"' "(F3.6) [N] a .c static stays private: other.c's row_cmp has its own file's use only"
+hasnt "$a" 't1.c' "(F3.7) [N] ... and never t1.c's"
+
+# [F2] arms land with their fix (BX1 commit 3).
 
 a1="$( rw m --callers=get_cb1 )"; a2="$( rw m --callers=get_cb1 )"
 if [ "$a1" = "$a2" ]; then ok "(D) [C] deterministic: two runs byte-identical"; else no "(D) two runs differ"; fi

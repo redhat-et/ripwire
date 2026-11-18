@@ -264,6 +264,27 @@ inline std::string_view includerDir( std::string_view includerPath ) noexcept
     return ( sl == std::string_view::npos ) ? std::string_view{} : includerPath.substr( 0, sl );
 }
 
+// A C/C++/ObjC translation-unit source (not a header): what it defines with internal linkage is visible only inside it (an
+// `#include "x.cpp"` is the rare exception). Moved here from aliashop.h (its alias bind) so the value-reference resolver
+// (valuerefindex.h, BX1 FIX 3: a header's `static` is visible to its includers) reads the same rule.
+inline bool cxxSourceFile( std::string_view path ) noexcept
+{
+    const std::size_t dot = path.rfind( '.' );
+    if( dot == std::string_view::npos || path.find( '/', dot ) != std::string_view::npos )
+    {
+        return false;
+    }
+    const std::string_view ext = path.substr( dot );
+    for( std::string_view e : { ".c", ".cc", ".cpp", ".cxx", ".c++", ".cu", ".m", ".mm", ".C" } )
+    {
+        if( ext == e )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 // ── Multi-root workspace include context (§3.1) ──────────────────────────────────────────────────────
 // Built by buildPreciseIncludeAdj when the IngestResult is a merged workspace (ing.fileRoot non-empty),
 // nullptr otherwise (single root — every function below is then byte-identical to today). Carries:
