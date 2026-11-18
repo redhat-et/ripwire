@@ -18,11 +18,10 @@
 // PRECISION BEFORE RECALL. Each of these answers "no run", a stated miss and never a finding:
 //   - a parameter with no name, a function-pointer parameter, a pack (`Args&&... args`), a C variadic `...`;
 //   - a type that is bool or ends in an iterator spelling (clang-tidy's own defaults: flags and iterator pairs);
-//   - a run of exactly two whose names are a range or a symmetric pair (kPairedNames: begin/end, from/to, a/b, …);
+//   - a run of two (kSimilarRunMin is 3: a pair such as begin/end, lhs/rhs or ( task, answer ) is not reported);
 //   - two parameters whose types are one type under an alias (NodeId beside std::uint32_t): written types are compared;
 //   - a signature whose name is not followed by `(` in the text (an operator, a macro-built definition).
-// It does not read the body, so it cannot tell that two parameters are used together (a comparator's ( a, b ) is
-// caught by the name list only).
+// It does not read the body, so it cannot tell that parameters are used together.
 
 #include <algorithm>
 #include <array>
@@ -37,20 +36,9 @@
 namespace rw::similarargs
 {
 
-// A run shorter than this is not a list of similar arguments.
-inline constexpr std::uint32_t kSimilarRunMin = 2;
-
-// Name pairs that say "a range" or "the two sides of one symmetric test": a run of exactly these two is not reported.
-struct PairedNames
-{
-    std::string_view first;
-    std::string_view second;
-};
-inline constexpr std::array<PairedNames, 15> kPairedNames = { {
-    { "begin", "end" }, { "first", "last" }, { "from", "to" }, { "lo", "hi" }, { "start", "stop" }, { "start", "end" }, { "open", "close" },
-    { "lhs", "rhs" },   { "a", "b" },        { "x", "y" },     { "i", "j" },   { "l", "r" },        { "left", "right" }, { "min", "max" },
-    { "u", "v" },
-} };
+// A run shorter than this is not a list of similar arguments --quality-delta reports. Three, the owner's call (2026-11-18):
+// on the tidy-681 ref pair 1bbfcebc1..b0f829d69 runs of two were 160 of the 184 similar= rows.
+inline constexpr std::uint32_t kSimilarRunMin = 3;
 
 // A word that can end a parameter without being its name: the parameter is unnamed (`const int`, `unsigned`).
 inline constexpr std::array<std::string_view, 16> kTypeWords = { "const", "volatile", "int",    "char",  "bool", "auto",     "unsigned", "signed",
@@ -193,21 +181,7 @@ inline bool isExcludedType( std::string_view type ) noexcept
     return type == "bool" || type == "const bool" || type.ends_with( "It" ) || type.ends_with( "terator" );
 }
 
-inline bool isPairedNames( std::string_view a, std::string_view b )
-{
-    const auto lower = []( std::string_view w )
-    {
-        std::string out( w );
-        std::ranges::transform( out, out.begin(), []( char c ) { return c >= 'A' && c <= 'Z' ? char( c - 'A' + 'a' ) : c; } );
-        return out;
-    };
-    const std::string la = lower( a );
-    const std::string lb = lower( b );
-    return std::ranges::any_of( kPairedNames, [ & ]( const PairedNames& pair )
-                                { return ( la == pair.first && lb == pair.second ) || ( la == pair.second && lb == pair.first ); } );
-}
-
-// Is the run params[first, past) one this file reports: named, one type, every name different, not an excluded type or pair?
+// Is the run params[first, past) one this file reports: kSimilarRunMin or longer, one type, every name different, not an excluded type?
 inline bool isReportedRun( const std::vector<Param>& params, TokSpan run )
 {
     const std::size_t count = run.past - run.first;
@@ -225,7 +199,7 @@ inline bool isReportedRun( const std::vector<Param>& params, TokSpan run )
             }
         }
     }
-    return !( count == 2 && isPairedNames( params[ run.first ].name, params[ run.first + 1 ].name ) );
+    return true;
 }
 } // namespace detail
 
