@@ -593,6 +593,11 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "type_capped", "type_capped=1: the type-mention walk stopped at its budget; type rows are a floor", true, "files", MapHeaderRead::No, {}, "impact" },
     { "via",         "rf via=type: every reached symbol in that file is reached only through a type mention (syms=0: the file names the type outside any indexed definition)", true, "rf", MapHeaderRead::No, "type" },
     { "by_type",     "rf by_type=K: K of its syms= are reached only through a type mention", true, "rf" },
+    // A19 (lane s1-small; test/legendcoveragecheck.sh row impact-rollup-name-default): a multi-definition --impact rollup's
+    // by-name hedge (serialize.h impactRollupHedgeXml) rode the default answer undefined; the full dialect's reading
+    // (graphlegend.h, fix27) in the compact form, element-qualified so the <e>/<s>/<c> via=name rows cannot answer for it.
+    { "via",         "rf via=name: of= has several definitions and every reached symbol there is reached by name alone (maybe a namesake's dependant)", true, "rf", MapHeaderRead::No, "name" },
+    { "by_name",     "rf by_name=K: K of its syms= are reached by name alone", true, "rf" },
     { "shown_bridges",     "shown_bridges=/bridges=: <bridge> rows printed (the 12 heaviest) / all pairs", false, "zoom", MapHeaderRead::No, {}, "zoom" },
     { "shown_symbols",     "shown_symbols=: <s> rows printed", false, "tree", MapHeaderRead::No, {}, "tree" },
     // THE SWEEP'S LAST PASS (2026-09-12) listed every attribute the compact --impact, --safe-delete, --communities,
