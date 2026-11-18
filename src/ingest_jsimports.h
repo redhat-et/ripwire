@@ -332,10 +332,10 @@ inline void captureGoImportFacts( TSNode root, Lang lang, std::uint32_t fileId, 
         bind.lang         = lang;
         bind.startByte    = ts_node_start_byte( node );
         bind.kind         = LocalBindKind::ModuleAlias;
-        bind.var          = std::move( local );
-        bind.typeName     = std::move( path );
+        bind.var          = local;
+        bind.typeName     = path;
         bind.importedName = "*";
-        binds.push_back( std::move( bind ) );
+        binds.push_back( bind );
     }
 }
 
@@ -568,7 +568,7 @@ inline void recordJsObjectLiterals( TSNode decl, Lang lang, std::uint32_t fileId
         bind.var       = std::string( pattern::nodeText( name, src ) );
         bind.spanStart = ts_node_start_byte( value );
         bind.spanEnd   = ts_node_end_byte( value );
-        binds.push_back( std::move( bind ) );
+        binds.push_back( bind );
     }
 }
 
@@ -581,20 +581,20 @@ inline void captureJsImportFacts( TSNode root, Lang lang, std::uint32_t fileId, 
     HashMap<std::string, char> imported;
     imported.reserve( children.size() );
     HashSet<std::uint32_t>       aliasDecls;   // FE-A: start bytes of the declarators that ARE a ModuleAlias — never their own shadow
-    const auto record = [ & ]( TSNode node, LocalBindKind kind, std::string name, TSNode scope )
+    const auto record = [ & ]( TSNode node, LocalBindKind kind, const std::string& name, TSNode scope )
     {
         RawBind bind;
         bind.fileId = fileId;
         bind.lang = lang;
         bind.startByte = ts_node_start_byte( node );
         bind.kind = kind;
-        bind.var = std::move( name );
+        bind.var = name;
         if( !ts_node_is_null( scope ) )
         {
             bind.spanStart = ts_node_start_byte( scope );
             bind.spanEnd = ts_node_end_byte( scope );
         }
-        binds.push_back( std::move( bind ) );
+        binds.push_back( bind );
     };
     for( TSNode stmt : children )
     {
@@ -619,7 +619,7 @@ inline void captureJsImportFacts( TSNode root, Lang lang, std::uint32_t fileId, 
                     if( !jsNodeIs( alias, "identifier" ) ) { continue; }
                     std::string local( pattern::nodeText( alias, src ) );
                     imported.try_emplace( local, 1 );
-                    record( stmt, LocalBindKind::JsImport, std::move( local ), {} );
+                    record( stmt, LocalBindKind::JsImport, local, {} );
                     binds.back().typeName = module;
                     if( !jsHasToken( stmt, "type" ) && !jsHasToken( node, "type" ) && jsNodeIs( name, "identifier" ) )
                     {
@@ -644,7 +644,7 @@ inline void captureJsImportFacts( TSNode root, Lang lang, std::uint32_t fileId, 
                         if( !jsNodeIs( kid, "identifier" ) ) { continue; }
                         std::string local( pattern::nodeText( kid, src ) );
                         imported.try_emplace( local, 1 );
-                        record( stmt, LocalBindKind::ModuleAlias, std::move( local ), {} );
+                        record( stmt, LocalBindKind::ModuleAlias, local, {} );
                         binds.back().typeName     = module;
                         binds.back().importedName = "*";
                     }
@@ -659,12 +659,12 @@ inline void captureJsImportFacts( TSNode root, Lang lang, std::uint32_t fileId, 
         else if( jsNodeIs( stmt, "lexical_declaration" ) || jsNodeIs( stmt, "variable_declaration" ) )
         {
             recordJsObjectLiterals( stmt, lang, fileId, src, binds );
-            captureJsModuleAliases( stmt, src, aliasDecls, [ & ]( TSNode declarator, std::string local, std::string source, std::string member, bool fromIdentifier )
+            captureJsModuleAliases( stmt, src, aliasDecls, [ & ]( TSNode declarator, const std::string& local, const std::string& source, const std::string& member, bool fromIdentifier )
             {
                 imported.try_emplace( local, 1 );
-                record( declarator, LocalBindKind::ModuleAlias, std::move( local ), {} );
-                binds.back().typeName         = std::move( source );
-                binds.back().importedName     = std::move( member );
+                record( declarator, LocalBindKind::ModuleAlias, local, {} );
+                binds.back().typeName         = source;
+                binds.back().importedName     = member;
                 binds.back().isFromAssignment = fromIdentifier;
             } );
         }
@@ -755,13 +755,13 @@ inline void captureJsImportFacts( TSNode root, Lang lang, std::uint32_t fileId, 
         const JsDecl    d = isAlias ? JsDecl{} : at.declarationOf( node );
         for( std::string name : jsPatternNames( d.binding, src ) )
         {
-            if( imported.find( name ) != imported.end() ) { record( node, LocalBindKind::JsShadow, std::move( name ), d.scope ); }
+            if( imported.find( name ) != imported.end() ) { record( node, LocalBindKind::JsShadow, name, d.scope ); }
         }
         // Hoisted local function/class declarations also hide imports, independently of their parameters.
         if( const JsDecl hoisted = at.hoistedDeclOf( node ); !ts_node_is_null( hoisted.binding ) )
         {
             std::string name( pattern::nodeText( hoisted.binding, src ) );
-            if( imported.find( name ) != imported.end() ) { record( node, LocalBindKind::JsShadow, std::move( name ), hoisted.scope ); }
+            if( imported.find( name ) != imported.end() ) { record( node, LocalBindKind::JsShadow, name, hoisted.scope ); }
         }
     } );
 }
@@ -1044,7 +1044,7 @@ inline void captureJsRebindFacts( TSNode root, Lang lang, std::uint32_t fileId, 
         bind.isFromAssignment = pinned;   // graph.h: a MEMBER call through the name is undecided only when a pinned declaration was replaced
         bind.spanStart = best != nullptr ? best->start : ts_node_start_byte( root );
         bind.spanEnd   = best != nullptr ? best->end : ts_node_end_byte( root );
-        binds.push_back( std::move( bind ) );
+        binds.push_back( bind );
     }
 }
 } // namespace

@@ -127,6 +127,7 @@ EXEMPT = {
     "strkerncheck.sh":           "drives the CMake target ripwire_test_strkern (test/verify_strkern.cpp) and two direct-compiled SIMD arms (mutated, x86_64 cross) — never invokes build/ripwire",
     "releaseinstallcheck.sh":    "tests install.sh against a FABRICATED release asset/stub server; independent of build/ripwire",
     "reusefirstworkflowcheck.sh":"checks skills/ripwire-reuse-first/SKILL.md content; pure file check",
+    "roundcderivecheck.sh":      "gates bench/roundc-h2h/derive_questions.py (#492, #540): it runs a COPY of that python harness against a stub git it writes itself and reads only the harness's exit code, stderr and questions.json; no ripwire binary is bound or executed -- the file contains neither RIPWIRE_BIN nor $BIN (verified by reading it), so a broken binary cannot turn it red",
     "ripwirepubliccheck.sh":     "checks git-tracked files for leaked private content; pure file/grep check",
     "skipclassifycheck.sh":      "meta-check of test/pargates.py's SKIPPED-vs-PASSED classification: it drives pargates.py over synthetic probe corpora with a fake binary it writes itself, so build/ripwire is never bound or executed — the file contains neither RIPWIRE_BIN nor $BIN (so (2b)'s static tell needs no exemption row for it), the same shape as pargatescheck above",
     "svectorcheck.sh":           "compiles isolated $CXX probes for the svector container; never invokes build/ripwire",

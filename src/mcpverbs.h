@@ -19,6 +19,7 @@
 #include "mention.h"       // B8: applyMentionBoost — the `for` verb's query-mention anchor (same default-on behavior as CLI --for)
 #include "filter.h"        // §P4: rankTierSymbolMultipliers — the fixture/present tier down-weight the CLI ranking lenses apply
 #include "redact.h"        // RedactCounts — the per-request redaction tally threaded through the body/doc verbs
+#include "forbudgetfit.h" // forHeldBlocksPrice — <manifest_rows> held from the CLI fit's price under budget_tokens
 #include "forpage.h"    // L-W: the --for file page, coverage= and the thin rule — shared with the CLI twin
 #include "forfilepage.h"   // FOR-FILE-ANCHOR: applyFileSubjectLift — the CLI twin's file-subject ranking rule
 #include "forowner.h"   // for-body-slot: the one owner body of an explanatory question — shared with the CLI twin
@@ -48,6 +49,7 @@
 #include "fordocbody.h"     // FOR-DOC-BODY: the `for` verb's doc sections (the CLI twin's renderer)
 #include "fordeclrow.h"     // DECL-ROW: the `for` verb's declaration rows (the CLI twin's renderer)
 #include "exemplarfamily.h" // EXEMPLAR-STAIRS: the `for` verb's sibling family (the CLI twin's renderer)
+#include "formanifest.h" // MANIFEST-ROW: the `for` verb's manifest lines (the CLI twin's renderer)
 #include "forfilesyms.h"    // K-WRONGSYM: the `for` verb's <syms> (the CLI twin's renderer)
 #include "foronesidereach.h" // ONE-SIDE-REACH: the CLI twin's answer edit, one renderer
 #include "forsiblingdemote.h" // SIBLING-DEMOTE: the CLI twin's answer edit, one renderer
@@ -2602,6 +2604,36 @@ inline void insertFileSyms( std::string& out, const IngestResult& ing, const Gra
     }
 }
 
+// MANIFEST-ROW on the MCP `for`, the CLI twin's renderer (CodeRabbit #686): under budget_tokens the block prints whole when the answer
+// (`answer`, ending </ctx>) plus the held blocks with it fit (the CLI fit's price, forHeldBlocksPrice), held otherwise; a held render's
+// redaction tally is not the run's. tokens= what the whole block takes from the budget (<doc_body> is served into what is left).
+struct McpManifestRows
+{
+    std::string xml;
+    std::size_t tokens = 0;
+};
+inline McpManifestRows mcpManifestRowsFitted( const IngestResult& ing, std::string_view task, RedactCounts* redact, std::string_view answer,
+                                              const ForDocBodyBudget& budget )
+{
+    std::optional<RedactCounts> tally = redact != nullptr ? std::optional<RedactCounts>( *redact ) : std::nullopt;
+    McpManifestRows whole{ renderForManifestRows( ing, task, tally ? &*tally : nullptr ) };
+    if( budget.active() && !whole.xml.empty() )
+    {
+        std::string withBlock( answer );
+        withBlock.insert( withBlock.size() - 6, whole.xml );
+        if( forHeldBlocksPrice( withBlock ) > budget.leftTokens() )   // est_tokens + the held blocks over budget_tokens
+        {
+            return { renderForManifestRows( ing, task, redact, /*held=*/true ) };
+        }
+        whole.tokens = tokensForEmittedBytes( whole.xml.size(), kBytesPerTokenDefault );
+    }
+    if( tally )
+    {
+        *redact = *tally;   // the whole block prints: its redactions are the run's
+    }
+    return whole;
+}
+
 inline std::optional<std::string> forTaskText( const std::string& root, const std::string& task, RedactCounts* redact = nullptr,
                                 std::size_t budgetTokens = 0, bool noRoute = false,
                                 McpPageArgs page = {},   // L-W: limit/offset select the FILE PAGE (forpage.h), the CLI --for --limit twin
@@ -3118,15 +3150,19 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     const auto [answerEstTokens, answerPrice] = priceForTaskRoot( out, chosen.cut.rowDropCut && budgetTokens == 0 ); // R1: est_tokens=; over_ceiling="1" only past the runaway guard
     // K-WRONGSYM (src/forfilesyms.h): the CLI --for's <syms> goes LAST before </ctx> (after the row blocks and the graph verb below, as on the CLI)
     // DECL-ROW (src/fordeclrow.h): the CLI --for's task-read row blocks, one renderer, before </ctx>, not priced; under a budget the tag is held="budget", as there
+    std::size_t manifestTokens = 0;   // the <manifest_rows> a budget prints whole: <doc_body> is served into the budget left after it
     if( out.ends_with( "</ctx>" ) )
     {
         out.insert( out.size() - 6, renderForDeclRows( ing, ix.g, task, /*held=*/budgetTokens > 0 ) );
         out.insert( out.size() - 6, renderForExemplarFamily( ing, ix.g, task, /*held=*/budgetTokens > 0 ) );   // EXEMPLAR-STAIRS, the CLI twin's renderer
+        const McpManifestRows manifest = mcpManifestRowsFitted( ing, task, redact, out, ForDocBodyBudget{ budgetTokens, answerEstTokens } );   // MANIFEST-ROW
+        out.insert( out.size() - 6, manifest.xml );
+        manifestTokens = manifest.tokens;
     }
     // FOR-DOC-BODY (fordocbody.h): the CLI --for's <doc_body>, one renderer, before </ctx>, priced on its own root; under budget_tokens it is served into the budget left after the answer, as there
     if( out.ends_with( "</ctx>" ) )
     {
-        out.insert( out.size() - 6, renderForDocBody( ForDocBodyInputs{ ing, ix.g.outOff, ix.g.outTargets, task, chosen.docPick, redact, flRootArg }, ForDocBodyBudget{ std::size_t( budgetTokens ), answerEstTokens }, ForDocDialect::Xml ) );
+        out.insert( out.size() - 6, renderForDocBody( ForDocBodyInputs{ ing, ix.g.outOff, ix.g.outTargets, task, chosen.docPick, redact, flRootArg }, ForDocBodyBudget{ std::size_t( budgetTokens ), answerEstTokens + manifestTokens }, ForDocDialect::Xml ) );
     }
     // FOR-ROUTE-DECLINED (src/forgraphverb.h): the CLI --for's <graph_verb endpoints="subject"> block, the same wrapper around
     // this surface's twin of the verb (path_between / find_referencing_symbols / connect), before </ctx>; priced like the CLI's (not)
@@ -4314,6 +4350,7 @@ inline std::string connectDeclinedJointsXml( const IngestResult& ing, const Conn
         out += "<dj n=\"" + ex( s.name ) + "\" t=\"" + std::string( symTag( s.kind ) ) + "\" p=\"" + ex( rp ) + ":" + std::to_string( s.line ) + "\">";
         // terminals that print the same name (`A.run`, `B.run`) get tp= as group edges do (CodeRabbit 4570578072)
         std::vector<ConnectEdge> rows;
+        rows.reserve( dj.links.size() );
         for( const ConnectResult::DeclinedLink& l : dj.links )
         {
             rows.push_back( ConnectEdge{ dj.fn, l.terminal } );

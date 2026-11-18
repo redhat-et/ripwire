@@ -736,7 +736,7 @@ struct ElixirContext
                     }
                     bind.importedName = pairs;
                 }
-                binds.push_back( std::move( bind ) );
+                binds.push_back( bind );
             }
         }
         for( TSNode identifier : identifiers )
@@ -793,7 +793,7 @@ void elixirExpandImplementations( const ElixirContext& context, std::vector<RawD
                 if( binds[j].startByte < begin || binds[j].startByte >= end || binds[j].kind == LocalBindKind::ElixirImport ) { continue; }
                 RawBind clone = binds[j];
                 replacePrefix( clone.typeName, names.front(), names[i] );
-                binds.push_back( std::move( clone ) );
+                binds.push_back( clone );
             }
         }
     }

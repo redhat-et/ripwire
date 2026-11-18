@@ -16,6 +16,7 @@
 #include "fordocbody.h"   // FOR-DOC-BODY: a prose task's top-ranked doc sections, before </ctx>
 #include "fordeclrow.h"   // DECL-ROW: a signature task's declaration rows, before </ctx>
 #include "exemplarfamily.h"   // EXEMPLAR-STAIRS: an add-a-new-X task's sibling family, before </ctx>
+#include "formanifest.h"     // MANIFEST-ROW: the manifest lines a task names, before </ctx>
 #include "forfilesyms.h"  // K-WRONGSYM: unnamed symbols of the shown files, before </ctx>
 #include "foronesidereach.h"  // ONE-SIDE-REACH: rows that reach one of two named endpoints become tail pointers (read off the captured answer)
 #include "forsiblingdemote.h"  // SIBLING-DEMOTE: deep same-file sibling rows become tail pointers (read off the answer after ONE-SIDE-REACH)
@@ -2997,6 +2998,7 @@ inline void appendForTaskRowBlocks( const MainDispatch& d )
     }
     rw::emitRaw( stdout, rw::renderForDeclRows( d.ing, d.g, cfg.forTask, /*held=*/forHeldBlocksBudget( cfg ) > 0 ).c_str() );
     rw::emitRaw( stdout, rw::renderForExemplarFamily( d.ing, d.g, cfg.forTask, /*held=*/forHeldBlocksBudget( cfg ) > 0, /*compactLegend=*/cfg.legend == "compact" ).c_str() );   // EXEMPLAR-STAIRS: "" unless the task adds one more X
+    rw::emitRaw( stdout, rw::renderForManifestRows( d.ing, cfg.forTask, d.redactPtr, /*held=*/forHeldBlocksBudget( cfg ) > 0, /*compactLegend=*/cfg.legend == "compact" ).c_str() );   // MANIFEST-ROW: "" unless the task names a manifest entry
 }
 
 // Runs `run` with stdout pointed at a temporary file and returns what it printed, compacted by the same applyCompactDialect +
@@ -3051,12 +3053,12 @@ struct PathGapSides
         if( why == DisclosureWhy::FromUncaptured )
         {
             fromMissing = true;
-            rw::emitTo( stderr, "ripwire: --for: no capture buffer for the path_gap callees side — it is not shown (named in missing=), which is not empty\n" );
+            rw::emitRaw( stderr, "ripwire: --for: no capture buffer for the path_gap callees side — it is not shown (named in missing=), which is not empty\n" );
         }
         else
         {
             toMissing = true;
-            rw::emitTo( stderr, "ripwire: --for: no capture buffer for the path_gap callers side — it is not shown (named in missing=), which is not empty\n" );
+            rw::emitRaw( stderr, "ripwire: --for: no capture buffer for the path_gap callers side — it is not shown (named in missing=), which is not empty\n" );
         }
     }
 };
@@ -3120,7 +3122,14 @@ struct StdoutCaptured
 inline std::string readBackAll( std::FILE* f, bool& failed )
 {
     std::string doc;
-    std::rewind( f );
+    // fseek, not std::rewind: rewind cannot report a failed seek, and the read below would then start wherever the
+    // writes left the stream (its end) and hand back a short or empty answer with `failed` unset, i.e. as whole.
+    if( std::fseek( f, 0, SEEK_SET ) != 0 )
+    {
+        failed = true;
+        return doc;
+    }
+    std::clearerr( f );   // rewind's other half, kept: the error flag is this read's, not the writes'
     char buf[ 65536 ];
     for( std::size_t got; ( got = std::fread( buf, 1, sizeof( buf ), f ) ) > 0; )
     {
@@ -3286,9 +3295,15 @@ struct CapturedForAnswer
 };
 
 // The capture holds the whole answer: a buffer, flushed and read back without error, and stdout restored.
+// wholeCapture is the same test handing back the capture itself (nullptr when not whole), so a read of its bytes needs no
+// second, unchecked look into the optional.
+inline const StdoutCaptured* wholeCapture( const std::optional<StdoutCaptured>& cap )
+{
+    return cap && !cap->failed && cap->restored ? &*cap : nullptr;
+}
 inline bool capturedWhole( const std::optional<StdoutCaptured>& cap )
 {
-    return cap && !cap->failed && cap->restored;
+    return wholeCapture( cap ) != nullptr;
 }
 
 // TOKEN-BUDGET-MONOTONE: the demote passes edit the captured answer after it was priced, and the root re-prices over
@@ -3327,15 +3342,16 @@ inline int appendForFileSyms( const MainDispatch& d, CapturedForAnswer answer )
     {
         rw::emitTo( stderr, "ripwire: --for: the answer's buffer failed to flush or read back whole — the answer may be short and the <syms> block is not rendered (held=\"uncaptured\")\n" );
     }
-    const bool        whole = capturedWhole( cap );   // restored: the branch above returned otherwise
+    const StdoutCaptured* const wholeCap = wholeCapture( cap );   // restored: the branch above returned otherwise
+    const bool        whole = wholeCap != nullptr;
     const bool        held  = cfg.tokenBudget > 0 || cfg.maxTokens > 0;   // the demote passes' read (shapedForFileSymsAnswer)
     const bool        symsHeld = held || cfg.forHoldBudget > 0;            // the block's: the fitted re-render holds it too (kForHeldBlocks)
     std::string       cut;   // the answer with the head files' tail-row names <syms> prints cut (R-DEDUP: <syms> has priority), "" when none is
     std::string       syms  = rw::renderForFileSyms(
-        d.ing, d.g, rw::FileSymsArgs{ .task = cfg.forTask, .answer = whole ? std::string_view( cap->bytes ) : std::string_view(), .held = symsHeld,
+        d.ing, d.g, rw::FileSymsArgs{ .task = cfg.forTask, .answer = whole ? std::string_view( wholeCap->bytes ) : std::string_view(), .held = symsHeld,
                                       .heldFlags = forHeldNextFlags( cfg ), .compactLegend = cfg.legend == "compact", .uncaptured = !whole, .answerOut = &cut,
                                       .cutWhenHeld = !held } );
-    const std::string  edited = whole ? shapedForFileSymsAnswer( d, cap->bytes, std::move( cut ), syms, price, held ) : std::string();
+    const std::string  edited = whole ? shapedForFileSymsAnswer( d, wholeCap->bytes, std::move( cut ), syms, price, held ) : std::string();
     ledgerFollowsEdit( answer.ledger, cap, edited );
     const std::string& bytes  = !edited.empty() ? edited : cap ? cap->bytes : edited;
     const std::size_t  at    = forSymsInsertAt( bytes, cfg.withGraph );   // the answer goes to stdout byte for byte, <syms> in front of the <graph> block
@@ -5491,10 +5507,19 @@ struct ForBudgetFit
     };
     void disclose( DisclosureWhy why ) noexcept
     {
-        rw::emitTo( stderr, "ripwire: --for: {}\n",
-                    why == DisclosureWhy::NoCapture ? "no buffer for the unbudgeted answer, so the budget re-shaped it (the pre-TOKEN-BUDGET-MONOTONE path)"
-                    : why == DisclosureWhy::NotWhole ? "the unbudgeted answer did not buffer whole, so it is written as it is, not shed to the budget"
-                                                      : "the unbudgeted answer has no root to shed from, so it is written as it is" );
+        // emitRaw (fputs) throws nothing; std::format/std::print could, out of a noexcept function (std::terminate)
+        switch( why )
+        {
+            case DisclosureWhy::NoCapture:
+                rw::emitRaw( stderr, "ripwire: --for: no buffer for the unbudgeted answer, so the budget re-shaped it (the pre-TOKEN-BUDGET-MONOTONE path)\n" );
+                return;
+            case DisclosureWhy::NotWhole:
+                rw::emitRaw( stderr, "ripwire: --for: the unbudgeted answer did not buffer whole, so it is written as it is, not shed to the budget\n" );
+                return;
+            case DisclosureWhy::NoRoot:
+                rw::emitRaw( stderr, "ripwire: --for: the unbudgeted answer has no root to shed from, so it is written as it is\n" );
+                return;
+        }
     }
 };
 
@@ -5568,17 +5593,23 @@ inline int runForLensFitted( const MainDispatch& d )
         DISCLOSE( sink, ForBudgetFit::DisclosureWhy::NoCapture, "runForLensFitted: no capture buffer for the unbudgeted answer" );
         return runForLensPosture( d, nullptr ).value_or( 0 );
     }
-    rw::ForBudgetFitResult fit = capturedWhole( u.out ) ? rw::fitForAnswerToBudget( u.out->bytes, ask, u.ledger ) : rw::ForBudgetFitResult{};
+    rw::ForBudgetFitResult fit{};
+    if( const StdoutCaptured* const firstWhole = wholeCapture( u.out ) )   // scoped: u is re-rendered below
+    {
+        fit = rw::fitForAnswerToBudget( firstWhole->bytes, ask, u.ledger );
+    }
     if( fit.verdict == rw::ForBudgetFitResult::Verdict::HoldBlocks )
     {
         d.redactCounts        = redactedBefore;   // the first render's tally is discarded with its answer: the run reports the one it prints
         posture.forHoldBudget = ask.targetTokens > 0 && ask.ceilingTokens > 0 ? std::min( ask.targetTokens, ask.ceilingTokens ) : std::max( ask.targetTokens, ask.ceilingTokens );
         ask.heldPass          = true;
         u                     = renderForPostureCaptured( pd );   // pd reads `posture`: the same posture, its held blocks held
-        fit = u.stdoutCaptured && capturedWhole( u.out ) ? rw::fitForAnswerToBudget( u.out->bytes, ask, u.ledger ) : rw::ForBudgetFitResult{};
+        const StdoutCaptured* const heldWhole = u.stdoutCaptured ? wholeCapture( u.out ) : nullptr;
+        fit = heldWhole != nullptr ? rw::fitForAnswerToBudget( heldWhole->bytes, ask, u.ledger ) : rw::ForBudgetFitResult{};
     }
     replayForPostureNotices( u );
-    if( !u.stdoutCaptured || !capturedWhole( u.out ) )
+    const StdoutCaptured* const printed = u.stdoutCaptured ? wholeCapture( u.out ) : nullptr;   // the render whose bytes go out
+    if( printed == nullptr )
     {
         DISCLOSE( sink, ForBudgetFit::DisclosureWhy::NotWhole, "runForLensFitted: the unbudgeted answer did not buffer whole" );
         if( u.out && u.out->restored )
@@ -5591,7 +5622,7 @@ inline int runForLensFitted( const MainDispatch& d )
     {
         DISCLOSE( sink, ForBudgetFit::DisclosureWhy::NoRoot, "runForLensFitted: no <ctx> root in the unbudgeted answer" );
     }
-    const std::string& out = fit.verdict == rw::ForBudgetFitResult::Verdict::NoRoot ? u.out->bytes : fit.xml;
+    const std::string& out = fit.verdict == rw::ForBudgetFitResult::Verdict::NoRoot ? printed->bytes : fit.xml;
     std::fwrite( out.data(), 1, out.size(), stdout );
     return u.rc;
 }

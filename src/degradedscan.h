@@ -301,7 +301,9 @@ inline LexicalDefHit lexicalDefHit( const IngestResult& ing, std::string_view na
         {
             continue;
         }
-        if( ++scannedFiles > kLexicalDefScanFiles || ( scannedBytes += bytes->size() ) > kLexicalDefScanBytes )
+        ++scannedFiles;
+        scannedBytes += bytes->size();   // read only below: past the file cap the scan returns either way
+        if( scannedFiles > kLexicalDefScanFiles || scannedBytes > kLexicalDefScanBytes )
         {
             LexicalDefHit capped;   // budget: what was read held no definition; the refusal says the scan stopped
             capped.capped = true;

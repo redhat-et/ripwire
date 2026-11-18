@@ -84,9 +84,13 @@ inline std::vector<ObjectSpan> arrayObjects( std::string_view arr )
         {
             at = i;
         }
-        else if( c == '}' && depth > 0 && --depth == 0 )
+        else if( c == '}' && depth > 0 )
         {
-            out.push_back( { .at = at, .end = i + 1 } );
+            --depth;
+            if( depth == 0 )
+            {
+                out.push_back( { .at = at, .end = i + 1 } );
+            }
         }
     }
     return out;

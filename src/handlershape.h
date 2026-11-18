@@ -1388,7 +1388,7 @@ inline bool lineHasComment( std::string_view src, std::uint32_t at ) noexcept
         }
         else if( line[i] == '"' || line[i] == '\'' )
         {
-            quote = quote == 0 ? line[i] : ( quote == line[i] ? 0 : quote );
+            quote = quote == 0 ? line[i] : ( quote == line[i] ? '\0' : quote );
         }
         else if( quote == 0 && line[i] == '/' && ( line[i + 1] == '/' || line[i + 1] == '*' ) )
         {

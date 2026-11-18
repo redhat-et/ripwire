@@ -1507,7 +1507,7 @@ inline RustCrateRoots buildRustCrateRoots( const IngestResult& ing, const HashMa
                 if( has( pre + "lib.rs" ) || has( pre + "main.rs" ) )
                 {
                     rr.dirOf[ f ]  = internDir( d );
-                    rr.isRoot[ f ] = rel == pre + "lib.rs" || rel == pre + "main.rs";
+                    rr.isRoot[ f ] = static_cast<char>( rel == pre + "lib.rs" || rel == pre + "main.rs" );
                     break;
                 }
                 if( d.empty() )
@@ -1550,7 +1550,7 @@ inline RustCrateRoots buildRustCrateRoots( const IngestResult& ing, const HashMa
             if( has( probe + "/main.rs" ) )   // `src/bin/x/main.rs` and its modules
             {
                 rr.dirOf[ f ]  = internDir( probe );
-                rr.isRoot[ f ] = sub.substr( sl + 1 ) == "main.rs";
+                rr.isRoot[ f ] = static_cast<char>( sub.substr( sl + 1 ) == "main.rs" );
             }
             else   // `tests/common/mod.rs`: a module of a root in the directory
             {
@@ -7547,13 +7547,21 @@ struct IdentityNarrower
         {
             return memo->second;
         }
-        memo->second = includeNamesAsSuffix( fromFile, defFile, ids );
+        memo->second = includeNamesAsSuffix( { .fromFile = fromFile, .defFile = defFile }, ids );
         return memo->second;
     }
 
-    // a DIRECT include of `fromFile` names `defFile`'s path as a suffix (fileVisibleFrom's last test; memoised there)
-    static bool includeNamesAsSuffix( std::uint32_t fromFile, std::uint32_t defFile, const ClassIdentity& ids )
+    // The includer and the file whose path it may name: two file ids, named at the call so they cannot trade places.
+    struct IncludeQuery
     {
+        std::uint32_t fromFile = 0;
+        std::uint32_t defFile  = 0;
+    };
+    // a DIRECT include of `fromFile` names `defFile`'s path as a suffix (fileVisibleFrom's last test; memoised there)
+    static bool includeNamesAsSuffix( IncludeQuery q, const ClassIdentity& ids )
+    {
+        const std::uint32_t fromFile = q.fromFile;
+        const std::uint32_t defFile  = q.defFile;
         const std::string_view path             = ( *ids.files )[ defFile ];
         const auto [ firstInclude, endInclude ] = std::ranges::equal_range( ids.includeTargets, fromFile, {}, &ClassIdentity::IncludeTarget::fileId );
         return std::any_of( firstInclude, endInclude, [ & ]( const ClassIdentity::IncludeTarget& include )
