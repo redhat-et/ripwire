@@ -15,8 +15,10 @@
 #   [F2] MACRO SEE-THROUGH (callhierarchy.h callHierarchyRows, verbs_navigate.h runUses). tmux's cmdq_get_callback1 is only
 #        ever called through `#define cmdq_get_callback(cb, data) cmdq_get_callback1(#cb, cb, data)`: --callers printed the
 #        macro row and stopped (1 of 9 files). The macro's own callers now follow the direct rows, each marked
-#        via="macro:NAME" (JSON "via":"macro:NAME", columnar <via> 3), through a chain of macros too; --uses appends the
-#        macro's call sites the same way and counts them in via_macro=. An answer with no macro row is unchanged.
+#        via="macro:NAME" (JSON "via":"macro:NAME", columnar <via> 3); --uses appends the macro's call sites the same way and
+#        counts them in via_macro=. An answer with no macro row is unchanged. BX2 (lane/bx2-verbfix) limits it to the FIRST macro
+#        hop and to C-preprocessor macros: a macro calling the macro is a row, its own callers are not (F2.4 / F2.16 re-pinned:
+#        start_b, two macros away, is no longer listed; count= 5 -> 4, via_macro= 3 -> 2). Rust: test/rustmacrocallcheck.sh [N6].
 #
 # Arm classes: [P] positive — RED on the parent binary (lane/v1-verbdef e6671f267); [N] near miss — a shape the change must
 # not touch; [C] control — holds on every binary (the pins were taken from the parent).
@@ -122,17 +124,17 @@ b="$( body "$a" )"
 has "$b" '<s t="macro" n="get_cb" p="q.h:2" role="macro" sites_at="2"/><s t="fn" n="direct" p="q.c:6" sites_at="8"/>' "(F2.1) [C] the direct rows lead, unchanged (the macro row stays)"
 has "$b" '<s t="fn" n="start_a" p="a.c:3" via="macro:get_cb"/>' "(F2.2) [P] a caller of the macro is a row, via=\"macro:get_cb\""
 has "$b" '<s t="macro" n="get_cb_twice" p="q.h:3" role="macro" via="macro:get_cb"/>' "(F2.3) [P] a macro calling the macro is a row too"
-has "$b" '<s t="fn" n="start_b" p="b.c:3" via="macro:get_cb_twice"/>' "(F2.4) [P] the chain's caller names the macro it invokes"
-has "$b" 'count="5"' "(F2.5) [P] count= counts the see-through rows"
+hasnt "$b" 'n="start_b"' "(F2.4) [N] BX2: the FIRST macro hop only — start_b calls get_cb_twice, which calls get_cb: two macros away, not listed"
+has "$b" 'count="4"' "(F2.5) [P] count= counts the see-through rows"
 rows="$( count "$b" '<s t=' )"
-if [ "$rows" = 5 ]; then ok "(F2.6) [P] five <s> rows"; else no "(F2.6) [P] $rows <s> rows, want 5"; fi
+if [ "$rows" = 4 ]; then ok "(F2.6) [P] four <s> rows"; else no "(F2.6) [P] $rows <s> rows, want 4"; fi
 has "$a" 'via=macro:' "(F2.7) [P] the default (compact) legend reads via=macro:"
 a="$( rw m --callers=get_cb1 --legend=full )"
 has "$a" 'via="macro:NAME"' "(F2.8) [P] the full legend reads via=\"macro:NAME\""
 a="$( rw m --callers=get_cb1 --json )"
 has "$a" '{"t":"fn","n":"start_a","p":"a.c:3","via":"macro:get_cb"}' "(F2.9) [P] --json carries \"via\":\"macro:get_cb\""
 a="$( rw m --callers=get_cb1 --format=columnar )"
-has "$a" '<via>0,0,3,3,3</via>' "(F2.10) [P] columnar marks the see-through rows <via> 3"
+has "$a" '<via>0,0,3,3</via>' "(F2.10) [P] columnar marks the see-through rows <via> 3"
 has "$a" '3 = via=' "(F2.11) [P] columnar's legend reads code 3"
 a="$( printf '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{}}\n{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"find_referencing_symbols","arguments":{"path":"%s","symbol":"get_cb1"}}}\n' "$DIR/m" | "$BIN" --mcp 2>/dev/null | tail -1 )"
 has "$a" '\"via\":\"macro:get_cb\"' "(F2.12) [P] MCP find_referencing_symbols carries the via"
@@ -141,13 +143,13 @@ a="$( rw m --uses=get_cb1 )"
 b="$( body "$a" )"
 has "$b" '<u role="call" p="q.h:2" in_id="get_cb"/><u role="call" p="q.c:8" in_id="direct"/>' "(F2.14) [C] the direct use rows lead, unchanged"
 has "$b" 'p="a.c:5" in_id="start_a" via="macro:get_cb"/>' "(F2.15) [P] --uses appends the macro's call site, via=\"macro:get_cb\""
-has "$b" 'p="b.c:5" in_id="start_b" via="macro:get_cb_twice"/>' "(F2.16) [P] ... through the chain"
+hasnt "$b" 'in_id="start_b"' "(F2.16) [N] BX2: ... not through a second macro"
 has "$b" 'p="q.h:3" in_id="get_cb_twice" via="macro:get_cb"/>' "(F2.17) [P] ... and the chain macro's own body site"
-has "$b" 'count="5"' "(F2.18) [P] --uses count= counts them"
-has "$b" 'via_macro="3"' "(F2.19) [P] --uses root: via_macro=\"3\""
+has "$b" 'count="4"' "(F2.18) [P] --uses count= counts them"
+has "$b" 'via_macro="2"' "(F2.19) [P] --uses root: via_macro=\"2\""
 has "$a" 'via_macro=' "(F2.20) [P] the compact legend reads via_macro="
 a="$( rw m --uses=get_cb1 --format=columnar )"
-has "$a" 'via_macro="3"' "(F2.21) [P] columnar --uses keeps the rows and says via_macro=\"3\""
+has "$a" 'via_macro="2"' "(F2.21) [P] columnar --uses keeps the rows and says via_macro=\"2\""
 a="$( body "$( rw h --callers=vec_index )" )"
 if [ "$a" = '<callers schema="ripwire.callers/v1" of="vec_index" defs="1" count="4" root="h" hop_tested="0" hop_untested="4" graph_ambiguous="0" graph_unresolved="0" counts_floor="1" next="--uses=vec_index"><def ix="1" t="fn" p="vec.h:1" bodyless="1"/><s t="fn" n="t4" p="lone.c:2" sites_at="2"/><s t="fn" n="t3" p="other.c:3" sites_at="3"/><s t="fn" n="t1" p="t1.c:3" sites_at="3"/><s t="fn" n="t2" p="t2.c:3" sites_at="3"/></callers>' ]; then
     ok "(F2.22) [C] an answer with no macro row is the parent's, byte for byte"

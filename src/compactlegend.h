@@ -682,7 +682,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "via",               "via=link: this edge is a markdown link, not a call", true, "s", MapHeaderRead::No, "link" },
     // BX1 FIX 2 (callhierarchy.h macroSeeThroughRows; graphlegend.h kViaMacroLegend): a see-through caller row. VALUE-prefix
     // qualified ("macro:" matches via="macro:NAME", quotedValueListsItem's trailing-colon rule).
-    { "via",               "via=macro:NAME: calls of= only through the function-like macro NAME (a t=macro row here, maybe via a macro chain); after the direct rows, in count=, with that macro row's of_def", true, "s", MapHeaderRead::No, "macro:" },
+    { "via",               "via=macro:NAME: calls of= only through the C function-like macro NAME (a t=macro row here; one macro hop); after the direct rows, in count=, with that macro row's of_def", true, "s", MapHeaderRead::No, "macro:" },
     // STRING-KEYED (src/pathgaps.h BridgeVia::NameKey): present-only, read only on a bridge <s via="name-key"> row
     { "via",               "s via=name-key cands=K: the previous row looks this row up by a name built from a template (getattr(o, 'do_' + c), o['handle' + e]) or posts a message class this row handles; K the definitions it can name; matched, never traced; a hedge", true, "s", MapHeaderRead::No, "name-key" },
     { "anchor",            "anchor=missing: the markdown link named a heading this file does not have, so the edge is the file", true, "s", MapHeaderRead::No, "missing" },

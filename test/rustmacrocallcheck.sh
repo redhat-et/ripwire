@@ -100,7 +100,10 @@ for f in decoy_fn string_fn matcher_fn shadow_fn; do
     hasnt "$a" 'p="src/top.rs' "[N] --callers=$f lists nothing in top.rs (comment, string, matcher, fn definition)"
 done
 a="$( rw . --callers=drop )"
-hasnt "$a" 'src/top.rs' "[N5] a metavariable call \$f( is no call of anything named f"
+hasnt "$a" '<s t="' "[N5] a metavariable call \$f( is no call of anything named f (no caller row; a found=0 answer may name the text)"
+
+a="$( rw . --callers=helper_fn )"
+hasnt "$a" 'via="macro:' "[N6] a Rust macro_rules! row is not seen through (the C-preprocessor macro hop of --callers only)"
 
 echo "[C] the macro's own row and determinism"
 a="$( rw . --callees=call_with_state )"
