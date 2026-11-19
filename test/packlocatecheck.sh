@@ -22,7 +22,11 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+# The house ok()/no() pair (every other gate spells it this way, and test/gateexitcheck.sh G1/G2 pin it):
+# a FAILED WRITE of the PASS line must set the accumulator, or a full disk turns a red arm green, and ok()
+# must return 0, so a verdict chain cannot report an ARM as failed because the write did. Verdicts in this
+# gate are if/else and never the one-line `cond AND-ok OR-no` shape, which gateexitcheck G2 forbids outright.
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -83,14 +87,38 @@ print('TAILCUT', 'yes' if pt is not None and pt.get('capped') == '1' and (pt.get
 print('OVER', pk.get('over_ceiling') or '0')
 EOF
 cat "$TMP/verdict.txt" | sed 's/^/        /'
-grep -q '^R25 .* named$'    "$TMP/verdict.txt" && ok "(1) --for's r=25 file is named" || no "(1) --for's r=25 file is not named by --pack-task"
-grep -q '^TAIL1 .* named$'  "$TMP/verdict.txt" && ok "(2a) --for's first tail file is named" || no "(2a) --for's first tail file is not named"
-grep -q '^TAIL10 .* named$' "$TMP/verdict.txt" && ok "(2b) --for's tenth tail file is named" || no "(2b) --for's tenth tail file is not named"
-grep -q '^HEAD40 equal$'    "$TMP/verdict.txt" && ok "(3) the first 40 ranking rows equal --for's" || no "(3) the first 40 ranking rows differ from --for's"
-grep -q '^TAILCUT yes$'     "$TMP/verdict.txt" && ok "(4) the cut tail says capped=\"1\" and carries next=" || no "(4) no disclosed tail cut"
+if grep -q '^R25 .* named$'    "$TMP/verdict.txt"; then
+    ok "(1) --for's r=25 file is named"
+else
+    no "(1) --for's r=25 file is not named by --pack-task"
+fi
+if grep -q '^TAIL1 .* named$'  "$TMP/verdict.txt"; then
+    ok "(2a) --for's first tail file is named"
+else
+    no "(2a) --for's first tail file is not named"
+fi
+if grep -q '^TAIL10 .* named$' "$TMP/verdict.txt"; then
+    ok "(2b) --for's tenth tail file is named"
+else
+    no "(2b) --for's tenth tail file is not named"
+fi
+if grep -q '^HEAD40 equal$'    "$TMP/verdict.txt"; then
+    ok "(3) the first 40 ranking rows equal --for's"
+else
+    no "(3) the first 40 ranking rows differ from --for's"
+fi
+if grep -q '^TAILCUT yes$'     "$TMP/verdict.txt"; then
+    ok "(4) the cut tail says capped=\"1\" and carries next="
+else
+    no "(4) no disclosed tail cut"
+fi
 bytes=$( wc -c < "$TMP/pack.xml" | tr -d ' ' )
 if [ "$bytes" -le 14160 ] && grep -q '^OVER 0$' "$TMP/verdict.txt"; then ok "(5) $bytes B <= 14160 B ceiling, no over_ceiling"; else no "(5) $bytes B against the 14160 B ceiling (or over_ceiling set)"; fi
-xmllint --noout "$TMP/pack.xml" 2>/dev/null && cmp -s "$TMP/pack.xml" "$TMP/pack2.xml" && ok "(6) well-formed and deterministic" || no "(6) malformed or non-deterministic"
+if xmllint --noout "$TMP/pack.xml" 2>/dev/null && cmp -s "$TMP/pack.xml" "$TMP/pack2.xml"; then
+    ok "(6) well-formed and deterministic"
+else
+    no "(6) malformed or non-deterministic"
+fi
 
 [ $fail -eq 0 ] && { echo "packlocatecheck: PASS"; exit 0; }
 echo "packlocatecheck: FAIL"; exit 1

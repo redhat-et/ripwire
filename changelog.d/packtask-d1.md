@@ -1,4 +1,4 @@
-### `--pack-task` is one bundle again: the `--for` head, the `--for` file tail, and ONE key body
+### Changed — `--pack-task` is one bundle again: the `--for` head, the file tail, and ONE key body
 
 `--pack-task` called the same ranker as `--for` and then threw most of its locating power away: a fixed
 12-row window in raw score order, every row more than one hop from its six bodies demoted to a name-only

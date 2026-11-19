@@ -91,19 +91,51 @@ print( 'TAG', 'ok' if c is not None and all( k in c.attrib for k in ( 'shown', '
 PY
 sed 's/^/        /' "$TMP/v.txt"
 
-grep -q '^OFTOP 1$'   "$TMP/v.txt" && ok "(1) of_top=\"1\": one anchor, the key body" || no "(1) of_top is not 1 — the section has more than one anchor again"
-grep -q '^RELS caller$' "$TMP/v.txt" && ok "(2) every row is rel=\"caller\" (the callees ride the body's own <calls>)" || no "(2) <callers> carries a non-caller row — the two-direction walk is back"
-grep -q '^SHARED absent$' "$TMP/v.txt" && ok "(3) shared= appears nowhere: with one anchor it could only read 1" || no "(3) shared= is still emitted — bytes with no information in them"
-grep -q '^NAMES callerOfSolo$' "$TMP/v.txt" && ok "(4) the rows are the SERVED body's callers, and only those" || no "(4) the rows are not exactly the served body's callers"
-grep -q '^SERVED anchorSolo$' "$TMP/v.txt" && ok "(4b) fixture armed: the served body is the task-named symbol" || no "(4b) fixture never armed: the served body is not anchorSolo, so arm (4) proves nothing"
-grep -q '^TAG ok$'    "$TMP/v.txt" && ok "(6) the section's shown=/total=/capped= agree" || no "(6) the section's shown=/total=/capped= contradict each other"
+if grep -q '^OFTOP 1$'   "$TMP/v.txt"; then
+    ok "(1) of_top=\"1\": one anchor, the key body"
+else
+    no "(1) of_top is not 1 — the section has more than one anchor again"
+fi
+if grep -q '^RELS caller$' "$TMP/v.txt"; then
+    ok "(2) every row is rel=\"caller\" (the callees ride the body's own <calls>)"
+else
+    no "(2) <callers> carries a non-caller row — the two-direction walk is back"
+fi
+if grep -q '^SHARED absent$' "$TMP/v.txt"; then
+    ok "(3) shared= appears nowhere: with one anchor it could only read 1"
+else
+    no "(3) shared= is still emitted — bytes with no information in them"
+fi
+if grep -q '^NAMES callerOfSolo$' "$TMP/v.txt"; then
+    ok "(4) the rows are the SERVED body's callers, and only those"
+else
+    no "(4) the rows are not exactly the served body's callers"
+fi
+if grep -q '^SERVED anchorSolo$' "$TMP/v.txt"; then
+    ok "(4b) fixture armed: the served body is the task-named symbol"
+else
+    no "(4b) fixture never armed: the served body is not anchorSolo, so arm (4) proves nothing"
+fi
+if grep -q '^TAG ok$'    "$TMP/v.txt"; then
+    ok "(6) the section's shown=/total=/capped= agree"
+else
+    no "(6) the section's shown=/total=/capped= contradict each other"
+fi
 
 # arm (5) — determinism x3, byte-identical, then G4.
 D1="$( run --pack-task="$TASK" --token-budget=6000 )"
 D2="$( run --pack-task="$TASK" --token-budget=6000 )"
 D3="$( run --pack-task="$TASK" --token-budget=6000 )"
-[ "$D1" = "$D2" ] && [ "$D2" = "$D3" ] && ok "(5) the bundle is deterministic (byte-identical x3)" || no "(5) the bundle is NOT deterministic across 3 runs"
-printf '%s' "$D1" | xmllint --noout - 2>/dev/null && ok "(5b) the bundle is xmllint-clean (G4)" || no "(5b) the bundle is NOT well-formed XML"
+if [ "$D1" = "$D2" ] && [ "$D2" = "$D3" ]; then
+    ok "(5) the bundle is deterministic (byte-identical x3)"
+else
+    no "(5) the bundle is NOT deterministic across 3 runs"
+fi
+if printf '%s' "$D1" | xmllint --noout - 2>/dev/null; then
+    ok "(5b) the bundle is xmllint-clean (G4)"
+else
+    no "(5b) the bundle is NOT well-formed XML"
+fi
 
 # arm (6b) — the same consistency at a TIGHT budget, where the section is the first thing the cascade starves.
 run --pack-task="$TASK" --token-budget=900 --legend=full > "$TMP/t.xml"
@@ -118,7 +150,11 @@ else:
     print( 'TIGHT', 'ok' if ( c.get( 'capped' ) == '1' ) == ( s < t ) and s <= t else 'bad' )
 PY
 cat "$TMP/t.txt" | sed 's/^/        /'
-grep -qE '^TIGHT (ok|absent)$' "$TMP/t.txt" && ok "(6b) at a tight budget the section is either absent or self-consistent" || no "(6b) at a tight budget the section contradicts itself"
+if grep -qE '^TIGHT (ok|absent)$' "$TMP/t.txt"; then
+    ok "(6b) at a tight budget the section is either absent or self-consistent"
+else
+    no "(6b) at a tight budget the section contradicts itself"
+fi
 
 [ $fail -eq 0 ] && { echo "packcallersharecheck: PASS"; exit 0; }
 echo "packcallersharecheck: FAIL"; exit 1

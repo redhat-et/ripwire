@@ -1222,7 +1222,9 @@ Discloses: `capped`, `mention_syms_capped`, `ranking_capped`
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kOverCeilingKeyBytes` | `22` | — | `,"over_ceiling":true` + the closing brace |
-| `kPackTaskRankTopN` | `12` | — | ranking = the top-12 head, not the full 40 — leaves budget for the later sections |
+| `kPackTaskFullHeadRows` | `10` | — | — |
+| `kPackTaskHeadFloorRows` | `4` | — | == forbudgetfit.h kForBudgetRowFloor (the rank 1..4 floor) |
+| `kPackTaskRankTopN` | `12` | — | a --partition slice's ranking window (partition.h; lanes.h brief claims) |
 
 ### `src/pageview.h`
 

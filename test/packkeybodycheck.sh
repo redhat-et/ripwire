@@ -24,7 +24,11 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+# The house ok()/no() pair (every other gate spells it this way, and test/gateexitcheck.sh G1/G2 pin it):
+# a FAILED WRITE of the PASS line must set the accumulator, or a full disk turns a red arm green, and ok()
+# must return 0, so a verdict chain cannot report an ARM as failed because the write did. Verdicts in this
+# gate are if/else and never the one-line `cond AND-ok OR-no` shape, which gateexitcheck G2 forbids outright.
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -82,12 +86,36 @@ verdict "$TMP/named.xml" round_invoice_tax > "$TMP/v1.txt"
 verdict "$TMP/plain.xml" ""                 > "$TMP/v2.txt"
 sed 's/^/        named: /' "$TMP/v1.txt"; sed 's/^/        plain: /' "$TMP/v2.txt"
 
-grep -q '^FULL 1$'   "$TMP/v1.txt" && grep -q '^FULL 1$' "$TMP/v2.txt" && ok "(1) exactly one body served" || no "(1) not exactly one body served"
-grep -q '^KEY .* ok$' "$TMP/v1.txt" && ok "(2) the backtick-named symbol's body is the key body" || no "(2) the key body is not the backtick-named symbol"
-grep -q '^PTROK yes$' "$TMP/v1.txt" && grep -q '^PTROK yes$' "$TMP/v2.txt" && ok "(3) every candidate not served is a <bn next=--expand=…/> pointer; total= counts served bodies and capped=\"0\" (no budget cut)" || no "(3) candidates not served lack <bn next=--expand> pointers, or total=/capped= disagree"
-grep -q '^LEDGER yes$' "$TMP/v1.txt" && ok "(4) the ledger counts the kept body and the pointers" || no "(4) the ledger does not count the pointers"
-grep -q '^KEY .* ok$' "$TMP/v2.txt" && ok "(5) no named symbol: the r=1 row's body" || no "(5) no named symbol: the key body is not the r=1 row"
-grep -q '^CALLERS callers-only$' "$TMP/v1.txt" && ok "(6) <callers> holds the key body's callers only" || no "(6) <callers> is not the key body's callers only"
+if grep -q '^FULL 1$'   "$TMP/v1.txt" && grep -q '^FULL 1$' "$TMP/v2.txt"; then
+    ok "(1) exactly one body served"
+else
+    no "(1) not exactly one body served"
+fi
+if grep -q '^KEY .* ok$' "$TMP/v1.txt"; then
+    ok "(2) the backtick-named symbol's body is the key body"
+else
+    no "(2) the key body is not the backtick-named symbol"
+fi
+if grep -q '^PTROK yes$' "$TMP/v1.txt" && grep -q '^PTROK yes$' "$TMP/v2.txt"; then
+    ok "(3) every candidate not served is a <bn next=--expand=…/> pointer; total= counts served bodies and capped=\"0\" (no budget cut)"
+else
+    no "(3) candidates not served lack <bn next=--expand> pointers, or total=/capped= disagree"
+fi
+if grep -q '^LEDGER yes$' "$TMP/v1.txt"; then
+    ok "(4) the ledger counts the kept body and the pointers"
+else
+    no "(4) the ledger does not count the pointers"
+fi
+if grep -q '^KEY .* ok$' "$TMP/v2.txt"; then
+    ok "(5) no named symbol: the r=1 row's body"
+else
+    no "(5) no named symbol: the key body is not the r=1 row"
+fi
+if grep -q '^CALLERS callers-only$' "$TMP/v1.txt"; then
+    ok "(6) <callers> holds the key body's callers only"
+else
+    no "(6) <callers> is not the key body's callers only"
+fi
 
 [ $fail -eq 0 ] && { echo "packkeybodycheck: PASS"; exit 0; }
 echo "packkeybodycheck: FAIL"; exit 1
