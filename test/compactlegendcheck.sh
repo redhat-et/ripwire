@@ -1437,13 +1437,19 @@ spfield(){ local re=" $2=([^ ]*)"; [[ " $1 " =~ $re ]] && printf '%s' "${BASH_RE
 # TOKEN-BUDGET-MONOTONE (2026-11-14): a budgeted answer is now the no-budget answer shed, demoted siblings included, so the
 # reference is that answer as served (the switch dropped here and on the P4 next= runs below): its <d> rows by r= are what a cut
 # keeps a prefix of (src 'rank symbols by pagerank' @3000: <d> r=1..10,13,14,15,18 — the demoted 11,12,16,17 ride as <t>).
+# AF1-fix (2026-11-18): the compact dialect is the DEFAULT posture, ANSWER-FIRST (and, unbudgeted, PAGED); the reader's U is "all
+# after </sigs>", which in an answer-first answer would count the trailing document legend as reserved sections. The rows a budget
+# keeps do not depend on the posture (answerFirst permutes after the shed), so the compact dialect is read through its
+# --legend=first twin — the same compact dialect, legend first, unpaged — and softPair (SPp) proves the default-posture answer is
+# a byte permutation of that twin. The full dialect is legend-first already.
+spPost(){ if [ "$1" = compact ]; then printf -- '--legend=first'; else printf -- '--legend=%s' "$1"; fi; }
 spRef(){
     local d; for d in compact full; do
         rm -f "$TMP/sp.ref.$1.$d.rows"
-        ( cd "$2" && "$BIN" "$3" --for="$4" --legend=$d ) >"$TMP/sp.ref.$1.$d" 2>/dev/null || no "spRef $1 $d: the no-budget run exited $?"
+        ( cd "$2" && "$BIN" "$3" --for="$4" "$( spPost $d )" ) >"$TMP/sp.ref.$1.$d" 2>/dev/null || no "spRef $1 $d: the no-budget run exited $?"
         python3 "$TMP/softp.py" "$TMP/sp.ref.$1.$d" 0 "$4" "$TMP/sp.ref.$1.$d.rows" >/dev/null
         rm -f "$TMP/sp.ref.$1.$d.so.rows"   # lane hrr: the RIPWIRE_NO_HEAD_RR=1 twin reference
-        ( cd "$2" && RIPWIRE_NO_HEAD_RR=1 "$BIN" "$3" --for="$4" --legend=$d ) >"$TMP/sp.ref.$1.$d.so" 2>/dev/null || no "spRef $1 $d [RIPWIRE_NO_HEAD_RR=1 twin]: the no-budget run exited $?"
+        ( cd "$2" && RIPWIRE_NO_HEAD_RR=1 "$BIN" "$3" --for="$4" "$( spPost $d )" ) >"$TMP/sp.ref.$1.$d.so" 2>/dev/null || no "spRef $1 $d [RIPWIRE_NO_HEAD_RR=1 twin]: the no-budget run exited $?"
         python3 "$TMP/softp.py" "$TMP/sp.ref.$1.$d.so" 0 "$4" "$TMP/sp.ref.$1.$d.so.rows" >/dev/null
     done
 }
@@ -1456,14 +1462,19 @@ softPair(){
     for d in compact full; do
         rm -f "$TMP/sp.$d.rows"
         rm -f "$TMP/sp.$d.so.rows"
-        ( cd "$dir" && RIPWIRE_NO_HEAD_RR=1 "$BIN" "$rootarg" --for="$task" --token-budget="$tb" --legend=$d ) >"$TMP/sp.$d.so" 2>/dev/null; rc=$?
+        ( cd "$dir" && RIPWIRE_NO_HEAD_RR=1 "$BIN" "$rootarg" --for="$task" --token-budget="$tb" "$( spPost $d )" ) >"$TMP/sp.$d.so" 2>/dev/null; rc=$?
         if [ "$rc" -ne 0 ]; then spWhy="$spWhy $d [RIPWIRE_NO_HEAD_RR=1 twin]: exit $rc;"
         else
             line="$( python3 "$TMP/softp.py" "$TMP/sp.$d.so" "$tb" "$task" "$TMP/sp.$d.so.rows" "$TMP/sp.ref.$lab.$d.so" )"
             case "$line" in OK*) ;; *) spWhy="$spWhy $d [RIPWIRE_NO_HEAD_RR=1 twin]: ${line:-no <ctx>/<sigs> in the answer or its no-budget reference};" ;; esac
         fi
-        ( cd "$dir" && "$BIN" "$rootarg" --for="$task" --token-budget="$tb" --legend=$d ) >"$TMP/sp.$d" 2>/dev/null; rc=$?
+        ( cd "$dir" && "$BIN" "$rootarg" --for="$task" --token-budget="$tb" "$( spPost $d )" ) >"$TMP/sp.$d" 2>/dev/null; rc=$?
         if [ "$rc" -ne 0 ]; then spWhy="$spWhy $d: exit $rc;"; continue; fi
+        if [ "$d" = compact ]; then   # (SPp) the answer as served (default posture) is a byte permutation of the twin read above
+            ( cd "$dir" && "$BIN" "$rootarg" --for="$task" --token-budget="$tb" --legend=compact ) >"$TMP/sp.$d.af" 2>/dev/null
+            python3 -c 'import sys; a,b=(open(p,"rb").read() for p in sys.argv[1:3]); sys.exit(0 if a and sorted(a)==sorted(b) else 1)' "$TMP/sp.$d.af" "$TMP/sp.$d" \
+                || spWhy="$spWhy $d: (SPp) the default-posture answer is not a byte permutation of its --legend=first twin;"
+        fi
         line="$( python3 "$TMP/softp.py" "$TMP/sp.$d" "$tb" "$task" "$TMP/sp.$d.rows" "$TMP/sp.ref.$lab.$d" "$TMP/sp.ref.$lab.$d.so" )"
         case "$line" in OK*) ;; *) spWhy="$spWhy $d: ${line:-no <ctx>/<sigs> in the answer or its no-budget reference};" ;; esac
         eval "spLine_$d=\"\$line\""
