@@ -1212,9 +1212,10 @@ inline std::uint32_t lineAtOffset( const std::string& text, std::size_t pos, std
         // on CRLF input the way rg's `--crlf` does rather than never matching.
         //
         // The engine can give up DURING a match (libc++'s error_complexity/error_stack) on a pattern the
-        // structural screen ADMITS — the multi-quantifier residual (a*a*a*a*a*b, docs/LIMITS.md) over a
-        // pathological line; the overlapping-alternation shape this note used to name ((a|a)+z) is refused at
-        // admission since M2-c, before a byte reaches an engine. Only
+        // structural screen ADMITS — an admitted pattern whose cost in the subject is super-linear, such as
+        // `(a|aa){1,100}b$`, over a pathological line; the multi-quantifier family (a*a*a*a*a*b) this note used
+        // to name is refused at admission since #484, and the overlapping-alternation shape ((a|a)+z) since
+        // M2-c, both before a byte reaches an engine. Only
         // construction was guarded before A4-F10, and an uncaught throw here reached std::terminate; A4-F10
         // then skipped the rest of the file, which kept the run alive but left a silent floor. GuardedRegex
         // now owns the catch and says Exhausted: this file's sites so far are kept, scanning it stops (as the
