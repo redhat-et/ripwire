@@ -15056,6 +15056,10 @@ inline std::vector<NodeId> statedScopeOnTierAnswer( const IngestResult& ing, std
     }
     LangAnchor anchor{ *split.tag, AnchorOrigin::Explicit };
     applyExplicitScope( ing, ids, anchor, true );
+    if( anchor.fellBack )
+    {   // a foreign fallback still fronts the stated language's family (#702 review: `A::f@c` answers C++ before Rust); the tier's own order breaks ties
+        std::ranges::stable_sort( ids, {}, [ & ]( NodeId id ) { return nameTowerLangTier( ing, id, anchor ); } );
+    }
     if( anchorOut ) *anchorOut = anchor;
     return ids;
 }
@@ -15074,6 +15078,18 @@ inline std::vector<NodeId> resolveAllByName( const IngestResult& ing, std::strin
 
     if( base.find( "::" ) != std::string_view::npos )
     {
+        if( selector )
+        {   // literal first, as qualifiedColonTierAnswer (#702 review): an indexed `notes.md::config::user@py` heading answers as itself
+            std::vector<NodeId> literal = resolveAllByCanonicalId( ing, name );
+            if( literal.empty() )
+            {
+                literal = resolveAllByScopeQualified( ing, name );
+            }
+            if( !literal.empty() )
+            {
+                return literal;
+            }
+        }
         std::vector<NodeId> byId = resolveAllByCanonicalId( ing, base );   // suffixed specs keep the canonical/scope tiers on their base
         if( !byId.empty() )
         {
@@ -16202,11 +16218,11 @@ inline bool nameSpecFileAdmits( const IngestResult& ing, const Symbol& s, std::s
 // read as the sequence of TIERS it is — quality-delta measured 26 in a function whose body was two tier lists and
 // this tail, and the tail is a paragraph, not a tier.
 inline std::vector<NodeId> finishAnchoredNameList( const IngestResult& ing, std::string_view spec, std::vector<NodeId> out,
-                                                   const NameSuffixSplit& split, bool selector, bool fileLane,
+                                                   const NameSuffixSplit& split, bool selector, std::optional<Lang> fileLaneLang,
                                                    const LangCensus& census, LangAnchor* anchorOut )
 {
     LangAnchor anchor = makeLangAnchor( ing, selector && split.tag.has_value(), split.tag.value_or( Lang::Unknown ),
-                                        fileLane, fileLane ? ing.symbols[ out.front() ].lang : Lang::Unknown, census );
+                                        fileLaneLang.has_value(), fileLaneLang.value_or( Lang::Unknown ), census );
     applyExplicitScope( ing, out, anchor, selector );   // the ONE scope rule, same contract in both lanes
     out = applyNameTower( ing, std::move( out ), anchor );   // the tower orders the name/file tier; the early tiers above stay as-is
     // Written-spelling and def-line (train 39-40 tiers) join the lane's tail: each acts only while the list is
@@ -16342,12 +16358,18 @@ inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, s
     LangCensus census;
     collectNameMatchesWithCensus( ing, name, file, out, census );
     out = preferExactFile( ing, file, std::move( out ) );   // `./lib.cpp` names lib.cpp, not also sub/lib.cpp
+    // A file-qualified query anchors to the NAMED file's language: its first match (id order), read before the widening
+    // below appends definitions from other files that could sort ahead of it (#702 review).
+    std::optional<Lang> fileLaneLang;
+    if( !file.empty() && !out.empty() )
+    {
+        fileLaneLang = ing.symbols[ out.front() ].lang;
+    }
 
     // #63: a header-qualified selector resolves to DECLARATIONS, which carry no call-graph edges.
     // Widen to the definitions they stand for. Full contract and its limits: declToDefFollowThrough above.
-    declToDefFollowThrough( ing, file, name, out, unprovenDefCountOut );
-    const bool fileLane = !file.empty() && !out.empty();   // a file-qualified query anchors to the first matching definition's language (deterministic: id order)
-    return finishAnchoredNameList( ing, spec, std::move( out ), split, selector, fileLane, census, anchorOut );
+    declToDefFollowThrough( ing, file, name, out, unprovenDefCountOut );   // keeps the declarations: a non-empty list stays non-empty
+    return finishAnchoredNameList( ing, spec, std::move( out ), split, selector, fileLaneLang, census, anchorOut );
 }
 
 // lane js-def-naming fix 1: how many definitions a selector that resolved to NOTHING was refused over (0 = it simply matched none). A

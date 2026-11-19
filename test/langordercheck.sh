@@ -22,6 +22,8 @@
 #   (A17) `Box.run@py` reaches the dotted tier tail-free, and the stated tag scopes that tier's answer (@js: disclosed fallback)
 #   (A18) literal first on the "::" tiers: an indexed `notes.md::config::user@py` heading answers as itself
 #   (A19) the refusal reads the NAME: `data.json:user@corp` and an @FILE:LINE seed whose path holds '@' resolve
+#   (A20) a tier's foreign fallback fronts the stated language's family: `A::f@c` over Rust a.rs + C++ z.cpp answers C++ first
+#   (A21) a file lane anchors to the NAMED file: `z.h:area` (z.h indexes as C++) fronts b.cpp, not the widened a.c that sorts first
 #
 # Usage:  bash test/langordercheck.sh [path/to/ripwire]
 set -u
@@ -239,6 +241,33 @@ case "$A19BRC|$A19B" in
     1\|*'unknown language after @'*) ok "(A19) control: Shape@bogus still refuses with the known tags" ;;
     *) no "(A19) control: Shape@bogus stopped refusing: rc=$A19BRC [$A19B]" ;;
 esac
+
+# ── (A20) the Scope::name tier's fallback keeps the family tier (#702 review): no C definition of A::f, so the foreign
+# rows answer, and C++ (C's edge family) leads Rust although a.rs comes first in content order ────────────────────
+FAMFIX="$TAILFIX/fam"; mkdir -p "$FAMFIX"
+printf 'mod A {\n    pub fn f() -> i32 { 1 }\n}\n' > "$FAMFIX/a.rs"
+printf 'namespace A {\nint f() { return 2; }\n}\n' > "$FAMFIX/z.cpp"
+A20="$( "$BIN" --around='A::f@c' "$FAMFIX" 2>&1 )"; A20RC=$?
+A20F="$( printf '%s' "$A20" | grep -m1 -o '<f p="[^"]*"><s [^>]*' )"
+case "$A20RC|$A20F|$A20" in
+    '0|<f p="z.cpp"><s t="fn" n="f" sc="A"'*'|'*'the matching language holds no definition'*)
+        ok "(A20) A::f@c: the fallback answers z.cpp (C's family) ahead of a.rs, and says C holds none" ;;
+    *) no "(A20) a tier's fallback lost the family tier: rc=$A20RC front=[$A20F]" ;;
+esac
+
+# ── (A21) the file lane's language comes from the file the selector names, read before the #63 widening appends the
+# definitions in other files (#702 review): a.c's definition has the lowest id but is not in z.h ──────────────────
+LANEFIX="$TAILFIX/lane"; mkdir -p "$LANEFIX"
+printf 'int area(void);\n' > "$LANEFIX/z.h"
+printf '#include "z.h"\nint area(void) { return 1; }\n' > "$LANEFIX/a.c"
+printf '#include "z.h"\nint area() { return 2; }\n' > "$LANEFIX/b.cpp"
+A21D="$( "$BIN" --defs='z.h:area' "$LANEFIX" 2>/dev/null | grep -o 'lang="[a-z]*"' | sort | tr '\n' ' ' )"   # status: a failed run prints no row, and the premise match below then fails the arm
+A21="$( "$BIN" --around='z.h:area' "$LANEFIX" 2>/dev/null | grep -m1 -o '<f p="[^"]*"><s [^>]*' )"   # status: a failed run prints no row, and the positive match below then fails the arm
+if [ "$A21D" != 'lang="c" lang="cpp" lang="cpp" ' ]; then no "(A21) premise: z.h:area should list z.h's C++ declaration and widen to the C and the C++ definition, got [$A21D]"
+else case "$A21" in
+    '<f p="b.cpp"><s t="fn" n="area"'*) ok "(A21) z.h:area fronts b.cpp: the lane anchored to z.h's C++, not to the widened a.c" ;;
+    *) no "(A21) the file lane anchored to a widened definition from another file: [$A21]" ;;
+esac; fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail
