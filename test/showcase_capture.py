@@ -892,8 +892,12 @@ subprocess.run( [ "git", "clone", "--local", "--quiet", REPO, CLEAN ], check=Tru
 # the clone carries REPO's own origin/main ref, so --quality-delta measures the SAME range there as here
 # (objects already exist via --local; this is ref metadata, no network, no new objects) — without it the
 # range mis-resolves and every historical ack reads stale, which would demo the flag honestly badly
-subprocess.run( [ "git", "-C", CLEAN, "update-ref", "refs/remotes/origin/main",
-                  subprocess.run( [ "git", "-C", REPO, "rev-parse", "origin/main" ], capture_output=True, text=True ).stdout.strip() ], check=True )
+_originMain = subprocess.run( [ "git", "-C", REPO, "rev-parse", "--verify", "--quiet", "origin/main^{commit}" ],
+                              capture_output=True, text=True ).stdout.strip()
+if not _originMain:
+    sys.exit( "showcase_capture: " + REPO + " has no origin/main ref (a --single-branch clone of another branch?): "
+              "`git fetch origin main:refs/remotes/origin/main` first, the --quality-delta captures measure that range" )
+subprocess.run( [ "git", "-C", CLEAN, "update-ref", "refs/remotes/origin/main", _originMain ], check=True )
 with open( os.path.join( CLEAN, ".ripwire_quality_acks" ), "a" ) as _ackf:
     _ackf.write( "ack api-surface 0123456789abcdef 1 showcase demo row: no current finding carries this key, so it folds silently until --show-stale prints it back\n" )
 subprocess.run( "git branch zz-orphan-lane $(git commit-tree 'HEAD^{tree}' -m 'zz-orphan-lane: parentless probe branch for the no-merge-base bucket')",

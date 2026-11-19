@@ -145,16 +145,16 @@ LW="$TMP/lblws"; mkdir -p "$LW/a" "$LW/a-b"
 printf 'int alpha( int x ) { return x + 1; }\n' >"$LW/a/x.c"
 printf 'int beta( int x ) { return x + 2; }\n'  >"$LW/a-b/y.c"
 run "$LW/a" "$LW/a-b" >"$TMP/lbl-multi.xml" 2>/dev/null; rlm=$?
-run "$LW/a-b" "$LW/a" >"$TMP/lbl-multi-rev.xml" 2>/dev/null   # status: compared byte-for-byte with the rc-checked a a-b run below
+run "$LW/a-b" "$LW/a" >"$TMP/lbl-multi-rev.xml" 2>/dev/null; rlr=$?
 run "$LW" >"$TMP/lbl-single.xml" 2>/dev/null; rls=$?
 lblm="$( grep -oE '<f p="[^"]*"' "$TMP/lbl-multi.xml" | tr '\n' ' ' )"
 lbls="$( grep -oE '<f p="[^"]*"' "$TMP/lbl-single.xml" | tr '\n' ' ' )"
-if [ $rlm -eq 0 ] && [ $rls -eq 0 ] && [ "$lbls" = '<f p="a-b/y.c" <f p="a/x.c" ' ]; then
+if [ $rlm -eq 0 ] && [ $rlr -eq 0 ] && [ $rls -eq 0 ] && [ "$lbls" = '<f p="a-b/y.c" <f p="a/x.c" ' ]; then
   [ "$lblm" = "$lbls" ] && ok "G-label-order: roots a + a-b list files as the parent root does ($lblm)" \
                         || no "G-label-order: workspace file order [$lblm] != the parent root's [$lbls]"
   diff -q "$TMP/lbl-multi.xml" "$TMP/lbl-multi-rev.xml" >/dev/null && ok "G-label-order: argv order still irrelevant" \
                                                                  || no "G-label-order: a a-b vs a-b a differ"
-else no "G-label-order premise: rc=$rlm/$rls, the parent root lists [$lbls] (want a-b/y.c then a/x.c)"; fi
+else no "G-label-order premise: rc=$rlm/$rlr/$rls, the parent root lists [$lbls] (want a-b/y.c then a/x.c)"; fi
 
 # ── G-edge: the cross-root evidence edge — cli's caller reaches svc's def through the escaped include ─
 run "$WS/svc" "$WS/cli" --callers=svc_handle >"$TMP/callers.xml" 2>/dev/null
