@@ -237,24 +237,9 @@ inline bool scopeEndsWith( const Symbol& s, std::string_view q )
 }
 
 // A C/C++ translation-unit source (not a header): what it defines is visible only inside it (an `#include "x.cpp"` is the rare
-// exception, so the bind below drops such a definition only when another one remains; cands= counts what is left).
-inline bool cxxSourceFile( std::string_view path ) noexcept
-{
-    const std::size_t dot = path.rfind( '.' );
-    if( dot == std::string_view::npos || path.find( '/', dot ) != std::string_view::npos )
-    {
-        return false;
-    }
-    const std::string_view ext = path.substr( dot );
-    for( std::string_view e : { ".c", ".cc", ".cpp", ".cxx", ".c++", ".cu", ".m", ".mm", ".C" } )
-    {
-        if( ext == e )
-        {
-            return true;
-        }
-    }
-    return false;
-}
+// exception, so the bind below drops such a definition only when another one remains; cands= counts what is left). The rule
+// lives in resolve.h (rw::cxxSourceFile), shared with the value-reference resolver.
+using rw::cxxSourceFile;
 
 // The per-answer caches the binds share: each file's lexical scope chains (cppscopechain.h's brace lexer; C++ records no namespace
 // body in the index: CallResultFamily::Cpp is off), keyed by (file, byte), and the namespace verdict per qualifier segment.

@@ -462,8 +462,8 @@ inline std::string graphSubjectTriedAttrs( const GraphSubjectArgs& a )
 inline std::string graphSubjectOpenXml( const GraphSubjectArgs& a, const GraphSubjectOpen& o = {} )
 {
     std::string out = "<!-- ripwire for graph_verb: the task is spelled as a graph question, so the verb it names ran too, on the built "
-                      "index with its default caps; endpoints=\"subject\": its endpoints were READ FROM THE TASK WORDS (the *_span= "
-                      "attributes, cut at the first for/with/via/in/on/when/using/during/at/near, sentence end, comma or clause word "
+                      "index with its default caps; endpoints=\"subject\": its endpoints were READ FROM THE TASK WORDS (from_span=/to_span= "
+                      "or of_span=/and_span=, cut at the first for/with/via/in/on/when/using/during/at/near, sentence end, comma or clause word "
                       "such as and/then/how/which), matched by name, not chosen "
                       "from the graph: check they are the symbols meant; verb= is the same call to paste";
     out += a.tried > 1 ? "; tried= combinations of the words were tried, the first that resolves ran; unresolved= names the spellings that did not resolve" : "";

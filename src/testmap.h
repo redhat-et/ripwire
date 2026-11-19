@@ -1569,7 +1569,11 @@ inline std::string runSuffixTextDisclosed( const TestRunnerIndex& idx, std::uint
 //
 // What the grouping may never change — test/testrowruncheck.sh arm 12 proves it on every dialect — is the
 // MULTISET of paths: every path verbatim (a reader's grep for a file name still hits; E3's brace-grouped
-// directories were disqualified on exactly that), each exactly once, in the order the single rows had. The
+// directories were disqualified on exactly that), each exactly once, in the order the single rows had.
+// "VERBATIM" IS SUPERSEDED 2026-11-18 for a row that says pf= (PATH-FOLD, below partitionTestRows): the owner
+// directive of that date approves a lossless fold even where it reverses this sentence. The multiset, the count and
+// the order are still exactly what this paragraph says — after the one mechanical expansion pf= names — and a row
+// that says p= is still verbatim. The
 // rules, stated once here because they decide every emitter:
 //   * a row WITH a runner stayed a single <t>/<test> row under E1 — "run= is per row". SUPERSEDED 2026-11-17
 //     (affected-group-unjam, below partitionTestRows' header): run= is per row only because it repeats the row's
@@ -1613,6 +1617,7 @@ struct TestRowShape
     RowDialect       dialect = RowDialect::Xml;
     std::string_view tag     = "t";   // XML element name ("t" | "test") or JSON key ("p" | "test")
     std::string_view indent  = "";    // text dialect: the line prefix
+    bool             fold    = false; // PATH-FOLD (below): a group row may say its paths folded — --affected, --test-gate, --situ
 };
 
 // One rendered row: the text, and how many test FILES it carries (1 for a single row, n for a group), so a
@@ -1620,7 +1625,8 @@ struct TestRowShape
 struct RenderedTestRow
 {
     std::string   text;
-    std::uint32_t files = 1;
+    std::uint32_t files  = 1;
+    bool          folded = false;   // PATH-FOLD: this group row carries pf= / "(n folded):" — the legend owes its reader the rule
 };
 
 // ── AFFECTED-GROUP-UNJAM (2026-11-17) — a row WITH a runner may ride a group too ──────────────────────────
@@ -1731,6 +1737,220 @@ inline std::vector<std::vector<std::uint32_t>> partitionTestRows( const TestRunn
     return groups;
 }
 
+// ── PATH-FOLD (2026-11-18) — a group row's paths said FOLDED, losslessly ─────────────────────────────────────────────
+// OWNER DIRECTIVE 2026-11-18: the objective is the complete answer in the fewest bytes, and a LOSSLESS form is approved
+// even where it reverses E1's "every path verbatim" (the header above; brace groups were disqualified there by name).
+// What E1 protected was a literal full-path grep of the raw answer. What this keeps is everything else: the multiset,
+// the order, n=, the commands, every count — and the path itself, one mechanical expansion away.
+//
+// MEASURED FIRST (408 --affected answers, 27 repositories): the <g> lists are 48.3 % of the verb's bytes; 0 of 15,743
+// listed paths repeats inside an answer, so a path table has nothing to index; what repeats is the DIRECTORY and the
+// EXTENSION of sibling files. Priced on the same answers, census / holdout share of all --affected bytes:
+//     flat per-directory runs  dir/{a,b}                12.5 % / 14.1 %     (the earlier, E1-blocked design)
+//     per-answer directory table                        13.5 % / 15.0 %
+//     nested directories       a/{b/{x,y},c}            16.4 % / 17.2 %
+//     nested + extension       a/{b/{x,y},c}.py         19.8 % / 20.7 %     <- this form
+//     the same with an any-character suffix             20.6 % / 22.2 %     (splits stems: {array,string}s.test.ts)
+// The chosen form cuts only at a '/' and at a '.', so every file's STEM is still one contiguous substring of the
+// answer — a grep for `arrays` or for a directory still hits; only a grep for the whole path needs the expansion.
+//
+// THE FORM.
+//     <g hops="2" n="4" pf="src/{a/{x,y}.test.ts,b.ts},README" run_each="node {p}"/>           XML
+//     [hops=2] (4 folded): src/{a/{x,y}.test.ts,b.ts}, README   (run each: node {p})            --situ text
+// stand for the four paths src/a/x.test.ts, src/a/y.test.ts, src/b.ts, README, in that order.
+//
+// THE READER'S RULE, which needs no ripwire: split the list on the commas OUTSIDE braces; in each item PRE{A,B,…}SUF
+// stands for PREASUF,PREBSUF,… in that order, and an alternative may itself hold a brace group. It is bash brace
+// expansion over comma lists. The row is RENAMED (pf=, "(n folded)") rather than p='s grammar changed, so a row that
+// says p= is verbatim exactly as before and a reader that knows only p= fails loudly on a folded row, never wrongly.
+// A list in which any path holds '{' or '}' is never folded, so a brace inside pf= is always structure.
+//
+// THE WRITER'S RULE (foldPathsInto), one left-to-right pass over a list already in evidence order: a RUN is the
+// maximal CONTIGUOUS stretch of items sharing their first path component; for a run of two or more, P is the longest
+// common DIRECTORY prefix and S the longest common suffix of what is left that starts at a '.', holds no '/' and
+// leaves every item a non-empty name; the run is written P{fold(rest)}S when that is strictly shorter than the run
+// joined by commas, else verbatim. Contiguous only — the reason the grouping itself is contiguous-only — so the
+// expansion reproduces the list's own order by construction and nothing is sorted or hashed.
+//
+// SMALL ANSWERS DO NOT MOVE. A row folds only when that saves kFoldRowMinSavedBytes, and a document only when its
+// folded rows save kFoldDocMinSavedBytes in total (both on the unescaped, comma-joined list, so the XML and the text
+// dialect of one change take one decision): below the bar the answer is byte-identical to the unfolded one and its
+// legend says nothing about a form it does not carry. These two are floors for "worth a second form", not caps.
+//
+// NOT BUILT, BY MEASUREMENT: complement encoding ("every test file under R except these N"). A large answer spreads
+// its files over a median 18 evidence keys, so at most one row could be a complement; with the EXCEPT list priced it
+// is a 0.55 % ceiling, and its universe (what the crawl indexed and isTestPath accepted) is not something a reader can
+// recompute from the answer or from the disk, so it could not be exact.
+//
+// Gate: test/affectedfoldcheck.sh — unfolds the new answer with test/lib/pathfold.py (a reader and a writer written
+// from this rule, sharing no line with this code) and with bash itself, and compares byte for byte against goldens
+// captured from the binary before this change.
+inline constexpr std::size_t kFoldRowMinSavedBytes = 8;
+inline constexpr std::size_t kFoldDocMinSavedBytes = 256;
+
+// The full legend's sentence, spliced after kRunHintLegendClause exactly when a row carries pf= (the compact dialect's
+// reading is compactlegend.h's `pf` row; --situ's is its own heading clause, situ.h).
+inline constexpr std::string_view kPathFoldLegendClause =
+    "pf= on a <g> row is p= folded: PRE{A,B}SUF stands for PREASUF,PREBSUF and braces nest (bash brace expansion), "
+    "so d/{a,s/{b,c}}.py is d/a.py,d/s/b.py,d/s/c.py; split on the commas outside braces and expand in order for "
+    "exactly the n= paths p= would list. A list with a literal { or } in a path is never folded. ";
+
+// The longest common suffix of `items` that starts at a '.', holds no '/', and leaves every item a non-empty file name
+// (shrunk to its next '.' until it does); empty when there is none. `items` holds two or more.
+inline std::string_view foldDotSuffix( std::span<const std::string_view> items ) noexcept
+{
+    std::string_view s = items[0];
+    for( const std::string_view x : items.subspan( 1 ) )
+    {
+        const auto diverge = std::mismatch( s.rbegin(), s.rend(), x.rbegin(), x.rend() ).first;
+        s.remove_prefix( s.size() - std::size_t( diverge - s.rbegin() ) );
+    }
+    if( const std::size_t slash = s.rfind( '/' ); slash != std::string_view::npos )
+    {
+        s.remove_prefix( slash + 1 );
+    }
+    const auto leavesNames = [ & ]( std::string_view suffix )
+    {
+        return std::ranges::all_of( items, [ & ]( std::string_view x ) { return x.size() > suffix.size() && x[ x.size() - suffix.size() - 1 ] != '/'; } );
+    };
+    for( std::size_t dot = s.find( '.' ); dot != std::string_view::npos; dot = s.find( '.', 1 ) )
+    {
+        s.remove_prefix( dot );
+        if( leavesNames( s ) )
+        {
+            return s;
+        }
+    }
+    return {};
+}
+
+inline void foldPathsInto( std::span<const std::string_view> items, std::string_view sep, std::string& out );
+
+// One run (two or more items sharing their first path component) as P{…}S; the caller keeps it only if it is shorter.
+inline std::string foldRun( std::span<const std::string_view> run )
+{
+    std::string_view prefix = run[0];
+    for( const std::string_view x : run.subspan( 1 ) )
+    {
+        prefix = prefix.substr( 0, std::size_t( std::ranges::mismatch( prefix, x ).in1 - prefix.begin() ) );
+    }
+    const std::size_t slash = prefix.rfind( '/' );
+    ASSUME( slash != std::string_view::npos );   // a run shares its first component "dir/", so the common prefix holds a '/'
+    prefix = prefix.substr( 0, slash + 1 );
+    std::vector<std::string_view> rest;
+    rest.reserve( run.size() );
+    for( const std::string_view x : run )
+    {
+        rest.push_back( x.substr( prefix.size() ) );
+    }
+    const std::string_view suffix = foldDotSuffix( rest );
+    for( std::string_view& x : rest )
+    {
+        x.remove_suffix( suffix.size() );
+    }
+    std::string folded( prefix );
+    folded += '{';
+    foldPathsInto( rest, ",", folded );
+    folded += '}';
+    folded += suffix;
+    return folded;
+}
+
+// One past the last item of the run that starts at `begin`: the maximal contiguous stretch sharing items[begin]'s
+// first path component. An item with no '/' is a run of one.
+inline std::size_t foldRunEnd( std::span<const std::string_view> items, std::size_t begin ) noexcept
+{
+    const std::size_t cut = items[begin].find( '/' );
+    std::size_t       end = begin + 1;
+    if( cut == std::string_view::npos )
+    {
+        return end;
+    }
+    const std::string_view first = items[begin].substr( 0, cut + 1 );
+    while( end < items.size() && items[end].starts_with( first ) )
+    {
+        ++end;
+    }
+    return end;
+}
+
+// How many bytes `items` take joined by one comma each: the width a fold is compared against, whatever separator the
+// dialect prints between top-level items. `items` is never empty.
+inline std::size_t commaJoinedBytes( std::span<const std::string_view> items ) noexcept
+{
+    std::size_t bytes = items.size() - 1;
+    for( const std::string_view x : items )
+    {
+        bytes += x.size();
+    }
+    return bytes;
+}
+
+// The writer's rule, appended to `out`: `sep` joins this level's items ("," inside a brace always; ", " at the top of a
+// text line). Recursion depth is the directory depth of the deepest path.
+inline void foldPathsInto( std::span<const std::string_view> items, std::string_view sep, std::string& out )
+{
+    const std::size_t levelStart = out.size();
+    const auto        piece      = [ & ]( std::string_view text )   // one top-level item of this level: a folded run, or a path as it stands
+    {
+        if( out.size() != levelStart ) { out += sep; }
+        out += text;
+    };
+    for( std::size_t i = 0; i < items.size(); )
+    {
+        const std::size_t                       end    = foldRunEnd( items, i );
+        const std::span<const std::string_view> run    = items.subspan( i, end - i );
+        const std::string                       folded = run.size() >= 2 ? foldRun( run ) : std::string();
+        if( !folded.empty() && folded.size() < commaJoinedBytes( run ) )
+        {
+            piece( folded );
+        }
+        else
+        {
+            std::ranges::for_each( run, piece );
+        }
+        i = end;
+    }
+}
+
+// One group row's folded list and what it saves over the comma-joined one. `text` is empty when the row keeps its
+// flat form: a '{' or '}' in any path (so a brace in pf= has one reading), or a saving under kFoldRowMinSavedBytes.
+struct FoldedPaths
+{
+    std::string text;
+    std::size_t savedBytes = 0;
+};
+
+inline FoldedPaths foldedGroupPaths( std::span<const TestRowOut> rows, std::span<const std::uint32_t> members, RowDialect dialect )
+{
+    std::vector<std::string_view> paths;
+    paths.reserve( members.size() );
+    for( const std::uint32_t k : members )
+    {
+        const std::string_view path = rows[k].path;
+        if( path.find_first_of( "{}" ) != std::string_view::npos )
+        {
+            return {};
+        }
+        paths.push_back( path );
+    }
+    const std::size_t flatBytes = commaJoinedBytes( paths );
+    std::string       commaJoined;
+    foldPathsInto( paths, ",", commaJoined );
+    if( commaJoined.size() + kFoldRowMinSavedBytes > flatBytes )
+    {
+        return {};
+    }
+    const std::size_t saved = flatBytes - commaJoined.size();
+    if( dialect != RowDialect::Text )
+    {
+        return { std::move( commaJoined ), saved };
+    }
+    std::string spaced;
+    foldPathsInto( paths, ", ", spaced );
+    return { std::move( spaced ), saved };
+}
+
 // A single row, in the dialect — the disclosure through the Disclosed wrappers above, never re-spelled.
 template<class EscapeFn>
 inline std::string renderSingleTestRow( const TestRunnerIndex& idx, const TestRowOut& r, const TestRowShape& shape, EscapeFn esc )
@@ -1769,6 +1989,36 @@ inline std::string groupRunTail( RowDialect dialect, std::string_view head, Esca
     return each.empty() ? std::string( "   (run: not derivable)\n" ) : "   (run each: " + each + ")\n";   // RowDialect::Text, no escaping
 }
 
+// How a text group line opens: the indent, then the shared attributes LEADING the line ("        [hops=2] ").
+// attrs are built with a LEADING space so every other dialect can append them straight after a tag name; this dialect
+// STARTS a line with them, so that one space is dropped. A view, not a substr copy. (Deliberately not lintrules.h's
+// ltrim: that header is the --lint verb's rule table and pulls ingest.h in with it — this shared emit seam must not
+// depend on a verb.)
+inline std::string textGroupLead( const TestRowShape& shape, std::string_view attrs )
+{
+    std::string s( shape.indent );
+    if( !attrs.empty() )
+    {
+        if( attrs.front() == ' ' ) { attrs.remove_prefix( 1 ); }
+        s.append( attrs );  s += ' ';   // " [hops=2]" -> "[hops=2] "
+    }
+    return s;
+}
+
+// PATH-FOLD: a group row's body when its paths are said FOLDED — the row is renamed (pf=, "(n folded):") so the
+// unfolded spelling above keeps its one meaning. `folded` is foldedGroupPaths' text for this dialect; XML escaping
+// never produces a ',' '{' or '}', so the escaped list expands exactly as the unescaped one does. JSON never folds.
+template<class EscapeFn>
+inline std::string renderFoldedTestRowGroup( std::string_view attrs, std::size_t n, const TestRowShape& shape, EscapeFn esc, std::string_view folded )
+{
+    EXPECTS( shape.dialect != RowDialect::Json && !folded.empty(), "a folded group row exists only in the XML and text dialects, and only with a folded list" );
+    if( shape.dialect == RowDialect::Xml )
+    {
+        return "<g" + std::string( attrs ) + " n=\"" + std::to_string( n ) + "\" pf=\"" + esc( folded ) + "\"";
+    }
+    return textGroupLead( shape, attrs ) + "(" + std::to_string( n ) + " folded): " + std::string( folded );
+}
+
 // A group row's BODY (≥2 members), in the dialect: everything but its run disclosure, which groupRunTail appends —
 // the split the single row already has (renderSingleTestRow + the Disclosed wrappers).
 template<class EscapeFn>
@@ -1803,17 +2053,7 @@ inline std::string renderTestRowGroup( std::span<const TestRowOut> rows, std::sp
         }
         case RowDialect::Text:
         {
-            s.append( shape.indent );
-            // attrs are built with a LEADING space so every other dialect can append them straight after a
-            // tag name; this dialect STARTS a line with them, so that one space is dropped. A view, not a
-            // substr copy. (Deliberately not lintrules.h's ltrim: that header is the --lint verb's rule table
-            // and pulls ingest.h in with it — this shared emit seam must not depend on a verb.)
-            if( !first.attrs.empty() )
-            {
-                std::string_view a( first.attrs );
-                if( a.front() == ' ' ) { a.remove_prefix( 1 ); }
-                s.append( a );  s += ' ';   // " [hops=2]" -> "[hops=2] "
-            }
+            s += textGroupLead( shape, first.attrs );
             s += '(';  s += std::to_string( members.size() );  s += "): ";
             for( std::size_t k = 0; k < members.size(); ++k )
             {
@@ -1853,6 +2093,63 @@ inline std::vector<TestRowOut> evidenceRowsOut( std::span<const TestRow> rows, E
     return out;
 }
 
+// Which groups of the partition are rendered as ONE row, and with which shared head: `[i]` engaged ⇔ group i is one
+// row; its value is the head every member shares (empty: runner-less).
+// RE-DECIDED HERE, per member, against the rows actually being rendered — never taken from the partition. A
+// caller may hand in a partition computed over ANOTHER spelling of the same files (pack-task groups its XML
+// section and renders the JSON tail through that partition), and a command that ends in one spelling of a path
+// need not end in the other. A group whose members do not all share one head in THIS spelling is served as
+// single rows, each with its full run=: more bytes, and no command a reader cannot reconstruct.
+inline std::vector<std::optional<std::string>> groupHeadsFor( const TestRunnerIndex& idx, std::span<const TestRowOut> rows,
+                                                               const std::vector<std::vector<std::uint32_t>>& groups )
+{
+    std::vector<std::optional<std::string>> heads( groups.size() );
+    for( std::size_t i = 0; i < groups.size(); ++i )
+    {
+        const std::vector<std::uint32_t>& members = groups[i];
+        GroupRun                          first   = groupRunHead( idx, rows[ members[0] ] );
+        const bool                        asOne   = members.size() >= 2 && first.ok
+                                                    && std::all_of( members.begin() + 1, members.end(), [ & ]( std::uint32_t k )
+                                                                    {
+                                                                        const GroupRun g = groupRunHead( idx, rows[k] );
+                                                                        return g.ok && g.head == first.head && rows[k].attrs == rows[ members[0] ].attrs;
+                                                                    } );
+        if( asOne )
+        {
+            heads[i] = std::move( first.head );
+        }
+    }
+    return heads;
+}
+
+// PATH-FOLD: each one-row group's folded list — for ALL of the listing's group rows or for none. The fold is a second
+// form, worth one only when the listing as a whole saves kFoldDocMinSavedBytes; below that every text is empty and
+// the listing is byte-identical to the unfolded one. JSON never folds ("p" is an array a program reads), and a shape
+// that did not opt in (every verb but --affected, --test-gate and --situ) never does.
+inline std::vector<FoldedPaths> groupFoldsFor( std::span<const TestRowOut> rows, const std::vector<std::vector<std::uint32_t>>& groups,
+                                               const std::vector<std::optional<std::string>>& heads, const TestRowShape& shape )
+{
+    std::vector<FoldedPaths> folds( groups.size() );
+    if( !shape.fold || shape.dialect == RowDialect::Json )
+    {
+        return folds;
+    }
+    std::size_t saved = 0;
+    for( std::size_t i = 0; i < groups.size(); ++i )
+    {
+        if( heads[i] )
+        {
+            folds[i] = foldedGroupPaths( rows, groups[i], shape.dialect );
+            saved   += folds[i].savedBytes;
+        }
+    }
+    if( saved < kFoldDocMinSavedBytes )
+    {
+        folds.assign( groups.size(), FoldedPaths{} );
+    }
+    return folds;
+}
+
 // THE SEAM every tests_to_run emitter calls (test/testrowruncheck.sh arm 0 censuses its call sites): the
 // partition and the rows, in the order the reader gets them. A caller that needs two dialects of ONE
 // partition (pack-task's XML section and its JSON tail) passes the partition it already has.
@@ -1862,25 +2159,19 @@ inline std::vector<RenderedTestRow> testRowsRendered( const TestRunnerIndex& idx
 {
     const std::vector<std::vector<std::uint32_t>> own = partition ? std::vector<std::vector<std::uint32_t>>{} : partitionTestRows( idx, rows );
     const std::vector<std::vector<std::uint32_t>>& groups = partition ? *partition : own;
-    std::vector<RenderedTestRow>                   out;
+    const std::vector<std::optional<std::string>> heads = groupHeadsFor( idx, rows, groups );
+    const std::vector<FoldedPaths>                folds = groupFoldsFor( rows, groups, heads, shape );
+    std::vector<RenderedTestRow> out;
     out.reserve( groups.size() );
-    for( const std::vector<std::uint32_t>& members : groups )
+    for( std::size_t i = 0; i < groups.size(); ++i )
     {
-        // RE-DECIDED HERE, per member, against the rows actually being rendered — never taken from the partition. A
-        // caller may hand in a partition computed over ANOTHER spelling of the same files (pack-task groups its XML
-        // section and renders the JSON tail through that partition), and a command that ends in one spelling of a path
-        // need not end in the other. A group whose members do not all share one head in THIS spelling is served as
-        // single rows, each with its full run=: more bytes, and no command a reader cannot reconstruct.
-        const GroupRun first = groupRunHead( idx, rows[ members[0] ] );
-        const bool     asOne = members.size() >= 2 && first.ok
-                               && std::all_of( members.begin() + 1, members.end(), [ & ]( std::uint32_t k )
-                                               {
-                                                   const GroupRun g = groupRunHead( idx, rows[k] );
-                                                   return g.ok && g.head == first.head && rows[k].attrs == rows[ members[0] ].attrs;
-                                               } );
-        if( asOne )
+        const std::vector<std::uint32_t>& members = groups[i];
+        if( heads[i] )
         {
-            out.push_back( { renderTestRowGroup( rows, members, shape, esc ) + groupRunTail( shape.dialect, first.head, esc ), std::uint32_t( members.size() ) } );
+            const bool        folded = !folds[i].text.empty();
+            const std::string body   = folded ? renderFoldedTestRowGroup( rows[ members[0] ].attrs, members.size(), shape, esc, folds[i].text )
+                                              : renderTestRowGroup( rows, members, shape, esc );
+            out.push_back( { body + groupRunTail( shape.dialect, *heads[i], esc ), std::uint32_t( members.size() ), folded } );
             continue;
         }
         for( const std::uint32_t k : members )
@@ -1903,7 +2194,8 @@ inline std::vector<RenderedTestRow> testRowsRendered( const TestRunnerIndex& idx
 struct JoinedTestRows
 {
     std::string text;
-    std::size_t files = 0;
+    std::size_t files  = 0;
+    bool        folded = false;   // PATH-FOLD: some row carries pf= / "(n folded):" — the caller's legend splices the rule
 };
 
 template<class EscapeFn>
@@ -1917,6 +2209,7 @@ inline JoinedTestRows testRowsList( const TestRunnerIndex& idx, std::span<const 
         first = false;
         out.text  += r.text;
         out.files += r.files;
+        out.folded = out.folded || r.folded;
     }
     return out;
 }
@@ -1958,6 +2251,13 @@ inline std::string runHintClauseIfRows( std::size_t testFilesRendered, bool root
         return {};
     }
     return std::string( kRunHintLegendClause ) + ( rootRelativeRuns ? std::string( kRunRootRelSentence ) : std::string() );
+}
+
+// PATH-FOLD: the same gate for a listing the seam folded — the run-hint clause, then the fold's own sentence exactly
+// when a row carries pf= (JoinedTestRows::folded), so an unfolded document's legend is byte-identical to before.
+inline std::string runHintClauseFor( const JoinedTestRows& listed, bool rootRelativeRuns )
+{
+    return runHintClauseIfRows( listed.files, rootRelativeRuns ) + ( listed.folded ? std::string( kPathFoldLegendClause ) : std::string() );
 }
 
 // ── P9 (capture-audit 2026-09-04) — the tests_to_run row set for ONE changed file ────────────────────
@@ -2144,7 +2444,7 @@ inline AffectedReportResult writeAffectedReport( std::FILE* out, const IngestRes
         row.changed           = false;
         afRows.push_back( { f, std::string( afPathRel( f ) ), std::string( answer.isSeedTestFile[f] ? " seed_kind=\"test\"" : "" ) + testRowEvidence( row, EvDialect::Xml ) } );
     }
-    const JoinedTestRows afRowsXml = testRowsList( runners, afRows, TestRowShape{ RowDialect::Xml, "test" }, ex );
+    const JoinedTestRows afRowsXml = testRowsList( runners, afRows, TestRowShape{ RowDialect::Xml, "test", {}, /*fold=*/true }, ex );
     const std::string    afRunFirst = runFirstField( answer.rows, answer.rows.size(), /*json=*/false );   // hono-20: the run-first head
     // IX-5 (hono-20): the class-new backstop, rendered apart from the proven rows above and counted in none of the root's counts
     const std::string    afClassNew = classNewGroupXml( ing, classNewTestRows( ing, g, sel, answer ), afRootPrefix, ex );
@@ -2164,7 +2464,7 @@ inline AffectedReportResult writeAffectedReport( std::FILE* out, const IngestRes
                  // so the sentence is decided by the very object that spelled the commands it describes.
                  "{}"     // hono-20/textual-20: the run-first clause, exactly when the root carries run_first=
                  "{}"     // IX-5: the class-new group's clause, exactly when the group renders
-                 "{}{}-->{}", kTestRowEvidenceLegend, runHintClauseIfRows( afRowsXml.files, runners.rootRelative() ),
+                 "{}{}-->{}", kTestRowEvidenceLegend, runHintClauseFor( afRowsXml, runners.rootRelative() ),
                  // H1: the decl→def residue resolveAffectedSeeds summed over the symbol items. A file:name item whose
                  // definitions were dropped seeded the walk with declarations alone, which reached the reader as a bare
                  // tests="0" — on the verb whose answer is the list of tests to run. Exactly when the root carries it.

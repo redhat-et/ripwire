@@ -35,10 +35,10 @@ cap do not both rewrite the same line; the per-file tables are re-read from `src
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 440 | 149 | 288 | **152** |
+| 441 | 149 | 289 | **152** |
 
 Plus 10 ranking and apportionment parameters, in their own table below: they are not caps, they
-are not counted as caps, and 440 + 10 is the 450 constants this generator parses out of `src/`.
+are not counted as caps, and 441 + 10 is the 451 constants this generator parses out of `src/`.
 
 ## INDEXING, OUTPUT or BOUNDARY — which half of the answer a cap bounds
 
@@ -56,8 +56,8 @@ None of them truncates anything, so none can be judged by `shown=`/`total=` and 
 a disclosure — labelling them OUTPUT would ask for a `capped="1"` that could never honestly fire.
 The distinction was named in review on #108 and the rows below now carry it.
 
-The `class` column below carries that answer where it is known. **143 of 440 caps are classified
-(51 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 297 render `—`, which means NOT YET
+The `class` column below carries that answer where it is known. **144 of 441 caps are classified
+(52 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 297 render `—`, which means NOT YET
 CLASSIFIED — never "neither".** Classifications live in `docs/limits_classes.tsv`, a sidecar with
 a known expiry:
 the tag belongs on the declaration itself, and this file exists only because the round that
@@ -755,6 +755,7 @@ Discloses: `files_capped`, `importers_capped`
 | `kImpactFileRollupCap` | `20` | — | — |
 | `kImpactTypeRollupBandMax` | `200` | — | — |
 | `kImportTierRollupDirDepth` | `2` | — | — |
+| `kMaxAliasDepth` | `8` | INDEXING | — |
 | `kMaxEdges` | `256` | — | total emitted edge cap |
 | `kMaxNodes` | `96` | — | total emitted node cap (§3 size caps) |
 | `kMaxRadius` | `12` | — | — |
@@ -1208,6 +1209,14 @@ Discloses: `capped`, `count_capped`, `findings_capped`, `hits_capped`, `importer
 | `kUseSiteRowCap` | `100` | — | — |
 | `kZoomBridgeCap` | `12` | — | cut-fix E: --zoom's <bridge> rows (traffic desc), a secondary listing disclosed by secondaryCutAttrs |
 | `kZoomTopModuleCap` | `40` | — | top-level modules, rank-mass desc then size desc then id (massSizeIdLess; their children ride along: shown_levels=2) |
+
+### `src/partialwarn.h`
+
+Discloses: `hits_capped`
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kFoldCap` | `16` | — | — |
 
 ### `src/partition.h`
 

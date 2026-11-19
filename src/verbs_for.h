@@ -5589,6 +5589,8 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
 // The --for lens: the ranking runs once, the render once (forbudget-soft: no payment-mode re-renders — the lens has no hard
 // ceiling left to land a charged continuation under).
 std::optional<int> runForLensPosture( const MainDispatch& d, rw::ForAnswerLedger* ledger );
+// RT2 ES (verbs_forroute.h): page 1 ended early after a leading callers block that proves itself complete, or nullopt.
+std::optional<std::string> forEarlyStopPage( const MainDispatch& d, const std::string& doc );
 
 // TOKEN-BUDGET-MONOTONE (forbudgetfit.h): the budgets this answer applies AFTER its posture — --token-budget, and --max-tokens
 // where --for reads it (under --detail=N) — on the XML answer of one root, unpaged. The other dialects and the budgeted page
@@ -5826,6 +5828,11 @@ std::optional<int> runForLens( const MainDispatch& d )
             std::string doc = r.out->bytes;
             // AF4 T-B: a who-calls question leads with its <callers by="subject"> block (foranswerfirst.h rowBlockOrder)
             (void)rw::answerfirst::answerFirst( doc, rw::subjectCallersCueLeads( d.cfg.forTask, rw::answerfirst::subjectCallersOf( doc ) ) );
+            if( const std::optional<std::string> early = forEarlyStopPage( d, doc ) )   // RT2 ES: a proven leading block ends page 1
+            {
+                std::fwrite( early->data(), 1, early->size(), stdout );
+                return r.rc;
+            }
             if( !serveForPage( d.cfg, doc ) )
             {
                 return 1;

@@ -102,7 +102,7 @@ inline constexpr CompactLegendSpec kCompactLegendSpecs[] =
     // transitiveCallers( defs ), the defs themselves excluded; radius_tested= counts isTestedByReach, which never counts a test
     // symbol (a seed), and a test in the reach set is counted apart in radius_tests= (IMPACT-TEST-TIER); importers= is impactImportTier's one-hop set of
     // files whose include/import resolves to a def's file. shown_importers= is a present-only term: the columnar form omits it.
-    { "impact",      "impact",      "transitive blast radius of of=: <s t= n= p=> reach set, <f via= p=> importers; defs= matched, reaches= their transitive callers, radius_tested= non-tests an indexed test reaches, radius_untested= the rest; importers= files that #include/import a def's file" },
+    { "impact",      "impact",      "transitive blast radius of of=: <s t= n= p=> reach set, <f p=> importers; defs= matched, reaches= their transitive callers, radius_tested= non-tests an indexed test reaches, radius_untested= the rest; importers= files that #include/import a def's file" },
     { "defs",        "defs",        "per <name q= defs=> the parsed definitions the name binds (defs= groups; a prototype with its definition is one): <d n= t= p= sel= lang= class=source|test in=>, sel= binds that one alone in any SYM verb, in= distinct callers (a floor); source first, then in=, then path" },
     { "path",        "path",        "one DIRECTED call path from= to to=, each <s t= n= p=> a hop; reachable=0 hops=0 when none shown" },
     { "connect",     "connect",     "minimal joining subgraph: <g> groups, <t> terminals, <s connects=> joins, <e f= t=> edges, <unconnected>" },
@@ -417,7 +417,10 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "tsconfig_unread",   "tsconfig_unread=N: N configs not read (not in the tree, unparseable, above the root) could declare aliases; edges may be missing" },
     // #60: <bodies bodyless=N> — requested symbols with no body BY CONSTRUCTION (a module-scope owner), so
     // capped= stays 0. Absent at zero, like every term here.
-    { "bodyless",          "bodyless=N of total=: requested symbols with NO body by construction (t=modscope), never in shown=, never raising capped=", true },
+    // VERB-DEF-ROWS (lane v1-verbdef): element-scoped to <bodies>, the one element that carries this COUNT (serialize.h, packtask.h).
+    // Read anywhere it fired on a <def bodyless="1"> row too — a 107 B reading of an attribute that answer does not carry — and
+    // a C function's tied declaration row now carries bodyless="1" on every --callers/--uses/--impact answer.
+    { "bodyless",          "bodyless=N of total=: requested symbols with NO body by construction (t=modscope), never in shown=, never raising capped=", true, "bodies" },
     // --uses=Owner.field's member form (fielduses.h appends kUsesFieldLegend to that answer alone). owner_candidates= is a
     // row attribute that exists only beside member=, so one head term defines the whole form.
     { "member",            "member=Owner.field: rows use that field; pinned=/amb_sites= rows with one owner/with owner_candidates=K; owners_of_name= fields so named" },
@@ -450,6 +453,11 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // without (p= splits into exactly n= paths; counts are FILES) beside the one it adds: the command is the TEMPLATE with {p}
     // replaced by each path. Gate: test/affectedgroupcheck.sh arm 6 (defined where carried, absent where not).
     { "run_each",          "<g n= p=a,b,c run_each=>: n rows with equal attrs as ONE row; each path's command is run_each= with {p} replaced by that path; p= splits on ',' into exactly n= paths; shown=/total= count test FILES", true, "g" },
+    // PATH-FOLD (2026-11-18, testmap.h foldPathsInto): a tests_to_run <g> row whose paths are said folded carries pf= in
+    // place of p=. Present-only and qualified to <g>: a document that folds nothing never pays, and this row is the
+    // compact dialect's ONLY reading of pf=, so it states the whole expansion rule a reader needs to get the n= paths.
+    // Gate: test/affectedfoldcheck.sh arm (L) (defined where carried, absent where not) and arm (H) (the rule is bash's).
+    { "pf",                "<g pf=>: p= folded; PRE{A,B}SUF = PREASUF,PREBSUF, braces nest (bash brace expansion): d/{a,s/{b,c}}.py = d/a.py,d/s/b.py,d/s/c.py; expand in order for exactly n= paths", true, "g" },
     { "hits_capped",       "hits_capped=1: hits= is a floor" },
     // --regex's long-line disclosure (search.h grepScanText / regexguard.h maxEngineSubjectBytes): the count rides every
     // regex answer, the bound only beside a nonzero count.
@@ -590,6 +598,11 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "type_capped", "type_capped=1: the type-mention walk stopped at its budget; type rows are a floor", true, "files", MapHeaderRead::No, {}, "impact" },
     { "via",         "rf via=type: every reached symbol in that file is reached only through a type mention (syms=0: the file names the type outside any indexed definition)", true, "rf", MapHeaderRead::No, "type" },
     { "by_type",     "rf by_type=K: K of its syms= are reached only through a type mention", true, "rf" },
+    // A19 (lane s1-small; test/legendcoveragecheck.sh row impact-rollup-name-default): a multi-definition --impact rollup's
+    // by-name hedge (serialize.h impactRollupHedgeXml) rode the default answer undefined; the full dialect's reading
+    // (graphlegend.h, fix27) in the compact form, element-qualified so the <e>/<s>/<c> via=name rows cannot answer for it.
+    { "via",         "rf via=name: of= has several definitions and every reached symbol there is reached by name alone (maybe a namesake's dependant)", true, "rf", MapHeaderRead::No, "name" },
+    { "by_name",     "rf by_name=K: K of its syms= are reached by name alone", true, "rf" },
     { "shown_bridges",     "shown_bridges=/bridges=: <bridge> rows printed (the 12 heaviest) / all pairs", false, "zoom", MapHeaderRead::No, {}, "zoom" },
     { "shown_symbols",     "shown_symbols=: <s> rows printed", false, "tree", MapHeaderRead::No, {}, "tree" },
     // THE SWEEP'S LAST PASS (2026-09-12) listed every attribute the compact --impact, --safe-delete, --communities,
@@ -617,7 +630,11 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     //     ELEMENT-qualified on <cols>: --from-trace's <trace format=> names a trace dialect. lens= names what one form of an
     //     answer withholds and another serves: the columnar --impact (shown_importers,importers_capped), --order=stable's
     //     <r> (k,est_tokens), the MCP for dialect (churn,amp,tested). Read on the head, with one meaning on all three.
-    { "lazy",              "<f lazy=1>: every edge from that importer into a def file is deferred (in a function/block body, or an autoload), firing only if reached; lazy=0: at least one is load-time", true, "f" },
+    // IMPORT-ROW-SHORT (2026-11-18): an importer row no longer prints lazy="0", so what a row WITHOUT lazy= claims is read where
+    // an <f p=> row is, and only there (an --impact answer with no importer row pays nothing; <f p=> on a map, a hotspots or a
+    // deps answer is another element, hence the schema key). The lazy=1 row below then reads only the rows that carry it.
+    { "p",                 "<f> with no lazy=: at least one of its edges into a def file is load-time", true, "f", MapHeaderRead::No, {}, "impact" },
+    { "lazy",              "<f lazy=1>: every edge from that importer into a def file is deferred (in a function/block body, or an autoload), firing only if reached", true, "f" },
     { "a",                 "<bridge a= b=>: two module ids joined by call edges", true, "bridge" },
     { "from_label",        "from_label=/to_label=: the label= of a=/b=", true, "bridge" },
     { "to",                "<bridge to= to_label=>: a peer module's id and label=", true, "bridge" },
@@ -658,7 +675,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // IMPACT-TEST-TIER: an impact row that is itself a test definition (radius_tests= counts them); never beside tested=1
     { "test",              "<s test=1>: a test or fixture definition (absent otherwise, never 0)", true, "s" },
     // FE-B (test/receiverevidencecheck.sh): via="name" on a call row — graphlegend.h kViaNameLegend is the full reading. ELEMENT-
-    // and VALUE-qualified (<s>/<c>/<e> whose via= lists name), so impact's <f via="import"> importer rows never pull it in; the
+    // and VALUE-qualified (<s>/<c>/<e> whose via= lists name), so impact's <f p=> importer rows (which carry no via= at all since IMPORT-ROW-SHORT) never pull it in; the
     // columnar form names it in fields= like the tested column.
     { "via",               "via=name: the target was matched by name alone (receiver unproven); every by-name candidate in reach is listed; NOT a claim the edge is false", true, "s", MapHeaderRead::No, "name" },
     { "via",               "via=impl: the receiver's interface/trait/abstract type has ONE implementor in the tree owning the target (an outside or macro-made one may exist)", true, "s", MapHeaderRead::No, "impl" },
@@ -703,7 +720,8 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // attrib-multidef (defattrib.h; graphlegend.h kDefTableLegend): the definition table of a multi-group selector, its rows'
     // ties, the cut table's count, and the columnar split column. Present-only, element-scoped. A row's prov="split" (Q1) reads
     // through the shared prov= row above, which already fires on any prov= in the payload.
-    { "ix",                "<def ix= t= sc= p= bodyless=1>: the groups defs= forms (a definition + the declarations tied to it; bodyless=1 tied to none)", true, "def" },
+    // DEF-READING-TRIM (lane s1-small, test/verbdefrowscheck.sh (11)): 133 -> 111 B, same readings (V1 measured the legend at ~2x the rows).
+    { "ix",                "<def ix= t= sc= p= bodyless=1>: defs= groups: definition, then tied declarations (same ix=; bodyless=1 no body)", true, "def" },
     { "defs_listed",       "defs_listed=N: above 16 groups, only the N this page's rows name are listed; K~n not enumerated: a bare ~n = also by name, a by-name-only row has no of_def" },
     { "of_def",            "of_def=K..: the def ix=K groups the row belongs to; K resolved edge, K~s edge labelled split, K~n by name alone, K~t into a primary template whose specialisation is listed; NOT a claim the edge is false", true, "s" },
     { "of_def",            "c of_def=K..: the def ix=K groups that caller belongs to (K~s split label, K~n by name, K~t primary template); NOT a claim the edge is false", true, "c" },
@@ -1926,6 +1944,16 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // pr-context (prcontext.h): a changed file's <s> rows and their <caller> rows print t= n=; seen only when the diff
     // touches a symbol, so a HEAD~1 roster row whose last commit is test-only cannot pin it either way.
     { "n", "s t= n= / caller t= n=: a changed symbol's / one of its callers' kind and name", true, "s", MapHeaderRead::No, {}, "pr-context" },
+    // RT1 (verbs_forroute.h): the <route> element a --for question answered by --callers / --uses / --impact carries as the
+    // root's first child. Element-qualified, not key-qualified: one element, one reading, on all three roots. Present-only,
+    // so a bare verb call's legend is unchanged (test/forverbroutecheck.sh (2)).
+    { "from", "route from=for kind=who-calls|where-used|direct-radius|transitive verb= task= complete=not-proven next=: this ranked-lens question (task=) was answered by verb= alone, kind= read from its wording; a verb lists call edges and definitions only, so registrations, closures, class installs, macro aliases and declined calls are not in it; next= is the ranked lens answer, unrouted", true, "route" },
+    { "warn", "route warn=1 why=: evidence this answer misses something a fold cannot list (macro:FILE:LINE a #define naming it; macro-row:NAME a caller that is a macro, whose callers are not listed; twin-defs:N same-stem definitions; value-hop:N:NAME a caller whose own callers are a floor; target-floor the symbol's callers are a floor, it is called through a slot; text-gap-capped:N / grep-capped the text-only list is cut; kind: no check ran); absent = none found, never proof of completeness", true, "route" },
+    { "why", "route why=unchecked: the evidence check could not run, so the absent warn= proves nothing", true, "route", MapHeaderRead::No, "unchecked" },
+    // RT2 (verbs_forroute.h foldElementXml): the text gap, folded into the routed answer right after <route>. Present-only.
+    { "n", "text_only n= capped=1: N files name the symbol as a whole word and no row above lists them (macro aliases, strings, shell, a call the resolver declined); text evidence, not resolved edges; capped=1: only the first 16 are listed", true, "text_only" },
+    { "p", "tx p=FILE:LINE: a text-only file and its first whole-word line", true, "tx" },
+    { "page1", "route page1=1: the first page of the ranked lens answer follows as this root's last child <ctx>, its legend inside, its next= the second page", true, "route" },
 };
 
 // the paging window: these five mean the same on every element (L4's one-attribute-one-reading law), so they are

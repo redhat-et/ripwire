@@ -553,6 +553,8 @@ struct MainDispatch
 #include "verbs_change.h"
 #include "verbs_report.h"
 #include "verbs_grep.h"
+#include "memceiling.h"          // the memory guard's allocator line (on by default; RIPWIRE_MEM_BUDGET_MB overrides it)
+#include "verbs_forroute.h"       // RT1: a --for question naming its symbol, answered by the verb it asks for (routed, disclosed)
 #include "memguard.h"            // #350 layer 3: the memory guard's limit (installed in main) and its verdicts after ingest
 #include "lsp.h"                 // the --lsp navigation-server section (Phase 1 PoC — docs/LSP.md); after the verb families so it can reuse the shared use-site scan
 
@@ -4173,6 +4175,15 @@ static bool checkLegendHandshake( const rw::Config& cfg )
     const bool                     everyValueIsATier = rw::legenddict::resolveHolding( cfg.legendHave, refusal ).has_value();
     if( VALIDATE( everyValueIsATier, "--legend-have= names only legend tiers THIS binary holds" ) )
     {
+        // A17 (lane s1-small, test/legendhavecheck.sh (S)): a prose/markdown/JSON/text surface never reaches
+        // applyCliRefPosture, so it answered exit 0, stdout unchanged, stderr EMPTY — the silence C4 there exists to
+        // prevent (lane A4: --situ, 33 of 33). Same line, naming the surface; stdout is untouched.
+        if( const char* surface = rw::legendNonXmlReadSurface( cfg ); surface != nullptr )
+        {
+            rw::emitTo( stderr, "ripwire: --legend-have=: not-applicable — {} answers with no XML legend the legend dictionary reduces, "
+                                "so it is served whole; nothing was saved\n",
+                        surface );
+        }
         return true;
     }
     // THE REMEDY NAMES THE CHEAPEST TIER AND ITS REAL SIZE. It used to prescribe the whole dictionary, a ~130 KB read to
@@ -4452,6 +4463,53 @@ static bool installMemoryGuard( const rw::Config& cfg )
     return true;
 }
 
+// The memory guard's allocator line (memceiling.h, on by default): installed straight after the guard, before any thread. Its
+// ceiling is the guard's hard limit (65% of RAM, --max-memory, RIPWIRE_MAX_MEMORY) unless RIPWIRE_MEM_BUDGET_MB names one for
+// this line alone (0 = off). A value that is not a whole MiB count of 0 or at least 64 refuses the run (exit 1), as
+// RIPWIRE_MAX_MEMORY does. Servers do not arm it (its refusal ends the process); nor can a build whose operator new is not
+// replaced. Either is said on stderr only when RIPWIRE_MEM_BUDGET_MB asked for the line explicitly.
+static bool installMemoryCeiling( const rw::Config& cfg )
+{
+    const rw::memceiling::Setting s = rw::memceiling::readSetting();
+    if( !VALIDATE( s.parse != rw::memceiling::Parse::Invalid, "RIPWIRE_MEM_BUDGET_MB is 0 or a whole number of MiB, at least 64" ) )
+    {
+        DISCLOSE( Diagnostics::answerRefused, "main: an unparseable RIPWIRE_MEM_BUDGET_MB refuses the run (exit 1, stderr names it)" );
+        rw::emitTo( stderr, "ripwire: RIPWIRE_MEM_BUDGET_MB needs 0 (off) or a whole number of MiB, at least {} — got '{}', e.g. RIPWIRE_MEM_BUDGET_MB=8000\n",
+                    rw::memceiling::kFloorMiB, std::getenv( "RIPWIRE_MEM_BUDGET_MB" ) );
+        return false;
+    }
+    if( s.parse == rw::memceiling::Parse::Off )
+    {
+        return true;
+    }
+#if defined( RIPWIRE_MEM_CEILING_HOOK )
+    constexpr bool kHookLinked = true;
+#else
+    constexpr bool kHookLinked = false;
+#endif
+    if( cfg.mcp || cfg.lsp || !kHookLinked )
+    {
+        if( s.parse == rw::memceiling::Parse::Armed )
+        {
+            rw::emitTo( stderr, "ripwire: RIPWIRE_MEM_BUDGET_MB is NOT armed ({}); only the memory guard's own limits apply to this run\n",
+                        !kHookLinked ? "this build does not replace operator new (a sanitizer or RIPWIRE_ALLOC_COUNT build)"
+                                     : "a server must survive a refused request, and the ceiling's refusal ends the process" );
+        }
+        return true;
+    }
+    if( s.parse == rw::memceiling::Parse::Armed )
+    {
+        rw::memceiling::arm( s.mib * rw::memceiling::kMiB, "RIPWIRE_MEM_BUDGET_MB=" + std::to_string( s.mib ) );
+        return true;
+    }
+    const rw::memguard::Limits& l = rw::memguard::limits();   // 0 = the machine's memory is unknown: no footprint cap, so none here
+    const std::string spelled = rw::memguard::limitSpelling( l.hardBytes );
+    rw::memceiling::arm( l.hardBytes, l.source == rw::memguard::Source::Flag  ? "--max-memory=" + spelled
+                                    : l.source == rw::memguard::Source::Env   ? "RIPWIRE_MAX_MEMORY=" + spelled
+                                                                              : "the default 65% of RAM, " + spelled );
+    return true;
+}
+
 // r2-LO: the session legend dictionary for a human (or a harness that holds a session of its own) — the text
 // ripwire://legend-dict/full serves, one TIER of it, or a view (legenddict.h). Like --version, answered wherever it
 // stands and nothing else runs. Returns the exit code, or -1 when no --legend-dict was asked.
@@ -4535,6 +4593,10 @@ int main( int argc, char** argv )
         return 1;   // the refusal is on stderr, and it names both dictionary versions
     }
     if( !installMemoryGuard( cfg ) )
+    {
+        return 1;   // the refusal is on stderr
+    }
+    if( !installMemoryCeiling( cfg ) )
     {
         return 1;   // the refusal is on stderr
     }
@@ -6004,6 +6066,12 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
     // Every verb from here on answers from the built graph: its query and its emit are this scope (the self-profile's
     // "after the graph" share; the verbs' own scopes nest inside it).
     PROFILE_SCOPE_DESCRIBE( "main: query + emit (the verb, after the graph)" );
+    // RT1 (verbs_forroute.h): a bare --for whose text names a symbol and asks who calls it / what it reaches / what breaks is
+    // answered by that verb, routed and disclosed; nullopt leaves the --for answer untouched.
+    if( std::optional<int> handled = runForVerbRoute( dsp ) )
+    {
+        return *handled;
+    }
     if( std::optional<int> handled = runForLens( dsp ) )
     {
         return *handled;

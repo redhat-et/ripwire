@@ -340,7 +340,13 @@ E	impact	7	importers_tests	impact
 E	impact	6	importers_umbrella	impact	
 E	impact	2	into	vr	
 E	impact	18	ix	def	
-E	impact	22	lazy	f	
+# AMENDED BY DERIVATION 2026-11-18 (lane/t3-lossless, IMPORT-ROW-SHORT), the two impact rows below and nothing else; the next
+# re-take with census.py supersedes this. Before that change every importer row printed lazy="0|1", so "carried lazy on <f>"
+# (22 of 39) meant "carried an importer row". An importer row is now <f p=> and its reading is the impact `p f` entry, carried by
+# exactly those 22 answers. `lazy f` is now carried only by an answer with a lazy="1" row; the census corpora are not in this
+# repository, so that count was NOT re-measured and the row is withdrawn rather than guessed (13 of 264 --impact answers carried
+# one on three other populations, under the one-third rule). An entry in no pack stays in the answer that carries it.
+E	impact	22	p	f	
 E	impact	8	no_file_edges		
 E	impact	16	of_def	rf	
 E	impact	17	of_def	s	

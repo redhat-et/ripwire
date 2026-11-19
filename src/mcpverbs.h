@@ -65,6 +65,7 @@
 #include "defslookup.h"    // D2 part 5: pathAltsOf — path_between's inline alternatives, as on the CLI
 
 #include <filesystem>      // §B6 M3: the shared root-path existence/directory check (mcpRootRefusal below)
+#include <functional>
 #include <optional>        // mcpAnswerText / usesText: nullopt is an answer buffer that failed, never an empty answer
 #include <span>            // std::span — connectemit::rebuildFromLegs reads the caller's retained-leg mask
 
@@ -738,7 +739,7 @@ inline std::string calledByCutJson( std::string_view name, std::size_t total, co
 // `callsWindow` is empty (begin == end) on find_referencing_symbols, which marks the calledBy window only.
 inline std::string symbolQueryDefTableJson( const IngestResult& ing, const DefGroups& groups, const RowDefTokens& calledByTokens,
                                             const RowDefTokens& callsTokens, const PageWindow& calledByWindow, const PageWindow& callsWindow,
-                                            std::string_view rootPrefix )
+                                            std::string_view rootPrefix, DefRows when = DefRows::MultiOnly )
 {
     std::vector<char> named;
     defTableMarkNamed( named, groups, calledByTokens, calledByWindow.begin, calledByWindow.end );
@@ -747,10 +748,14 @@ inline std::string symbolQueryDefTableJson( const IngestResult& ing, const DefGr
         defTableMarkNamed( named, groups, callsTokens, callsWindow.begin, callsWindow.end );
     }
     const DefTableListing listing = defTableListing( groups, named );
-    std::string           out     = defTableJson( ing, groups, listing, rootPrefix, /*mcp=*/true );
+    std::string           out     = defTableJson( ing, groups, listing, rootPrefix, /*mcp=*/true, when );
     if( groups.multi() )
     {
         out += nextFieldJson( defTableLegend( true, listing.cut ), "def_note" );   // its reading, only when the table rides
+    }
+    else if( !out.empty() )
+    {
+        out += nextFieldJson( defTableLegend( false, false, /*sole=*/true ) + untiedDeclLegend( !groups.unattributed.empty() ), "def_note" );   // VERB-DEF-ROWS: the one group's reading; BX1 FIX 7
     }
     return out;
 }
@@ -957,7 +962,8 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
     // attrib-multidef: the CLI root's <def> table, in this surface's row vocabulary (symbolQueryDefTableJson). The `symbol` object
     // above stays the first definition — def_table[0] — and this table rides beside it.
     out += symbolQueryDefTableJson( ing, chRows.attr.groups, calledByAttr.tokens, callsAttr.tokens, referencingOnly ? pwPrimary : pwSecond,
-                                    referencingOnly ? PageWindow{} : pwPrimary, sqRootPrefix );
+                                    referencingOnly ? PageWindow{} : pwPrimary, sqRootPrefix,
+                                    callersDefRows( referencingOnly ) );   // VERB-DEF-ROWS: find_referencing_symbols = --callers
     out += pageDisclosure( pab, sizeof( pab ), pwPrimary.end - pwPrimary.begin, rowTotal, pwPrimary.end,
                            page.limit, page.offset, discloseCap, kJsonPageSyntax );
     if( !referencingOnly )
@@ -2637,6 +2643,12 @@ inline McpManifestRows mcpManifestRowsFitted( const IngestResult& ing, std::stri
     return whole;
 }
 
+// RT2 MCP parity: a `for` task that names its symbol and asks a call-graph question, answered by the CLI's routed answer
+// (verbs_forroute.h defines it, later in this translation unit); `page` serves the ranked answer a warned route carries.
+// nullopt: not routed — serve forTaskText.
+std::optional<std::string> mcpForVerbRoute( const IngestResult& ing, const Graph& g, const std::string& root, const std::string& task,
+                                            const std::function<std::optional<std::string>()>& page );
+
 inline std::optional<std::string> forTaskText( const std::string& root, const std::string& task, RedactCounts* redact = nullptr,
                                 std::size_t budgetTokens = 0, bool noRoute = false,
                                 McpPageArgs page = {},   // L-W: limit/offset select the FILE PAGE (forpage.h), the CLI --for --limit twin
@@ -3591,7 +3603,8 @@ inline std::optional<std::string> impactText( const std::string& root, const std
                     + impactRingLegend( imRing, true )                     // HOP1: exactly when reaches_hedged= / <ring> ride, as on the CLI
                     + impactRollupLegend( !imFiles.rows.empty(), imports.umbrella, impactRollupHedged( imFiles ), !imports.next.empty(),
                                           ImpactRollupTypeClauses{ imFiles.typed, imFiles.typeDefs, imFiles.typeCapped } )   // idea #6; FIX1 R1; L7, as on the CLI
-                    + defTableLegend( imAttr.groups.multi(), imListing.cut )                                                         // attrib-multidef, as on the CLI
+                    + defTableLegend( imAttr.groups.multi(), imListing.cut, /*sole=*/imAttr.groups.size() == 1 )                     // attrib-multidef, as on the CLI; IMPACT-SOLE-DEF
+                    + untiedDeclLegend( !imAttr.groups.unattributed.empty() )                                          // BX1 FIX 7, as on the CLI
                     + memberOwnerLegendFor( memberOwnerRows( ing, std::span<const NodeId>( show ).subspan( ipw.begin, ipw.end - ipw.begin ) ) ) ).c_str(),   // QUALNAME-1, as on the CLI
                   graphCountDisclosure( rw::graphGaugeClauses( g ) ).c_str(), renderDisclosure( prD, DiscloseAs::LegendClause ).c_str() );
     // r27-emitters §P2.1: the listing is capped at 40 by rank. Without shown=/capped= a 40-row answer to
@@ -3614,7 +3627,7 @@ inline std::optional<std::string> impactText( const std::string& root, const std
                   graphCountFloorAttrXml( g ).c_str(), renderDisclosure( prD, DiscloseAs::XmlAttrs ).c_str(),   // M15: gauge + marker
                   nextAttrXml( impactRootNext( ing, imRing, VrRender{ imSingleRoot, imRootPrefix }, nextFlag( "--safe-delete=", symbol ) ) )   // P3 (L7): the CLI twin's next=, same rule (mcpclidiffcheck)
                     + nextAttrXml( imAllNext, "all_next" ) );   // BAND DC: the CLI twin's all_next=
-    rw::emitRaw( mem, defTableXml( ing, imAttr.groups, imListing, imSingleRoot ? std::string_view( imRootPrefix ) : std::string_view() ).c_str() );   // attrib-multidef
+    rw::emitRaw( mem, defTableXml( ing, imAttr.groups, imListing, imSingleRoot ? std::string_view( imRootPrefix ) : std::string_view(), DefRows::SoleToo ).c_str() );   // attrib-multidef; IMPACT-SOLE-DEF
     emitImpactFileRollupXml( mem, ing, imFiles, imSingleRoot ? std::string_view( imRootPrefix ) : std::string_view() );   // idea #6, as on the CLI
     const MemberOwners imOwners( ing );   // QUALNAME-1: n="Owner.name" on a member row, as on the CLI (memberowner.h)
     for( std::size_t i = ipw.begin; i < ipw.end; ++i )
@@ -3934,6 +3947,9 @@ inline std::optional<std::string> usesText( const std::string& root, const std::
     const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
     const bool usUnindexed = usesRolesUnindexed( ing, defs );   // B31: the CLI --uses' unindexed_roles=, same predicate
     const bool usDeclCapped = memberDeclScanCapped( ing, sym, external );   // USES-DECL-SCAN-CAPPED: the CLI's decl_scan=, same predicate
+    // VERB-DEF-ROWS: the CLI --uses' <def> rows, the same helper (root-relative exactly when the rows below are)
+    const std::string  usDefPrefix = ing.realPaths.empty() ? sarif::rootPrefixOf( root ) : std::string();
+    const UsesDefTable usDefs      = usesDefTable( ing, defs, usDefPrefix );
 
     rw::MemoryStream stream;
     std::FILE* const mem = stream.open();
@@ -3954,7 +3970,8 @@ inline std::optional<std::string> usesText( const std::string& root, const std::
                     + valueRefsDepthLegend( usDepthCut.files > 0 )
                     + declinedLiteralCallsLegend( declinedLiteralCalls > 0 )
                     + unindexedRolesLegend( usUnindexed )
-                    + memberDeclScanLegend( usDeclCapped ) ).c_str(),   // exactly when the root carries the depth disclosure / unindexed_roles=, as the CLI
+                    + memberDeclScanLegend( usDeclCapped )
+                    + usDefs.legend ).c_str(),   // exactly when the root carries the depth disclosure / unindexed_roles=, as the CLI; VERB-DEF-ROWS
                   capLegendClause( computePageDisclosure( upageRows, sites.size(), upw.end,
                                                           page.limit, page.offset, usDiscloseCap ).active ),
                   graphCountDisclosure( rw::graphGaugeClauses( ix.g ) ).c_str(),
@@ -3966,12 +3983,14 @@ inline std::optional<std::string> usesText( const std::string& root, const std::
     const bool         usSingleRoot = ing.realPaths.empty();
     const std::string  usRootPrefix = usSingleRoot ? sarif::rootPrefixOf( root ) : std::string();
     const std::string  usRootAttr   = usSingleRoot ? ( " root=\"" + ex( root ) + "\"" ) : std::string();
-    rw::emitTo( mem, "<uses of=\"{}\" defs=\"{}\" external=\"{}\" count=\"{}\"{}{}{}{}{}{}>",
+    rw::emitTo( mem, "<uses of=\"{}\" defs=\"{}\" external=\"{}\" count=\"{}\"{}{}{}{}{}{}{}>",
                   ex( symbol ).c_str(), defs.size(), external ? 1 : 0, sites.size(), unindexedRolesAttrXml( usUnindexed ),
                   memberDeclScanAttrXml( usDeclCapped ), usRootAttr.c_str(), upage,
                   graphCountFloorAttrXml( ix.g ).c_str(),
                   ( valueRefsDepthAttrXml( ing, usDepthCut, VrRender{ usSingleRoot, usRootPrefix } )
-                    + declinedLiteralCallsAttrXml( declinedLiteralCalls ) ).c_str() );   // of= echoes the selector as TYPED (an @-seed stays an @-seed)
+                    + declinedLiteralCallsAttrXml( declinedLiteralCalls ) ).c_str(),   // of= echoes the selector as TYPED (an @-seed stays an @-seed)
+                  usDefs.listedAttr );   // VERB-DEF-ROWS: a cut table says so, as on the CLI
+    rw::emitRaw( mem, usDefs.rows.c_str() );   // VERB-DEF-ROWS: the definitions, before the use-site rows, as on the CLI
     for( std::size_t siteIndex = upw.begin; siteIndex < upw.end; ++siteIndex )
     {
         const UseSite& u = sites[ siteIndex ];

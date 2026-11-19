@@ -395,6 +395,24 @@ echo "=== (A-PIN) --legend=full is BYTE-IDENTICAL to the pre-L1 default (pinned 
 # a line are one site; no file: p='s)", +8 B, inside the 3769 B full:callers target). Checked mechanically
 # (test/sitesatshortcheck.sh arm B does the same on its own goldens): putting each row's p= file back in front of its bare
 # line and reversing that one phrase gives the previous pin byte for byte (at= masked), 3907 -> 3885 B.
+# RE-ANCHORED BY HAND 2026-11-18 (lane t2-rankdefects, IMPACT-SOLE-DEF, by design), impact.xml only: a one-group --impact answer
+# names the definition it measured (test/impactsoledefcheck.sh). Checked mechanically: the previous pin equals the 994f0021f
+# binary's --legend=full output byte for byte (at= masked); the new pin differs by exactly two insertions, the row
+# <def ix="1" t="fn" p="geometry.cpp:4"/> after the root and the sole-definition legend clause (graphlegend.h kSoleDefLegend,
+# 230 B, registered in test/legend_over_target.tsv). 4575 -> 4844 B. The six other pins are unchanged.
+# RE-ANCHORED BY HAND 2026-11-18 (lane v1-verbdef, VERB-DEF-ROWS, by design; gate test/verbdefrowscheck.sh), callers.xml and
+# impact.xml only. Checked mechanically against the 57b4c3ee3 pins (at= masked): callers.xml differs by exactly two insertions,
+# the rows <def ix="1" t="fn" p="geometry.cpp:4"/><def ix="1" t="fn" p="geometry.h:12" bodyless="1"/> after the root and the
+# sole-definition clause (graphlegend.h kSoleDefLegend); impact.xml by the tied declaration's row (geometry.h:12) and the clause's
+# rewording ("this radius" -> "this answer", the tied-declaration sentence). 3875 -> 4187 B and 4844 -> 4887 B. Five others unchanged.
+# RE-ANCHORED BY HAND 2026-11-18 (lane/t3-lossless, IMPORT-ROW-SHORT, by design), impact.xml only: its importer rows print
+# <f p="…"/> (were <f via="import" p="…" lazy="0"/>) and the importers= sentence of the full legend names that row and reads
+# "no lazy= means at least one edge is load-time" (was lazy="0" means ...). Checked mechanically (test/importrowshortcheck.sh arm B
+# does the same on its own goldens): putting via="import" and lazy="0" back on each row and reversing those two phrases gives
+# the previous pin byte for byte (at= masked).
+# RE-ANCHORED BY HAND 2026-11-18 (lane s1-small, DEF-READING-TRIM, by design; gate test/verbdefrowscheck.sh (11)), callers.xml and
+# impact.xml only: the old kSoleDefLegend sentence replaced by the shortened one (graphlegend.h), string for string, nothing else
+# (checked mechanically against a fresh --legend=full run, at= masked). 4197 -> 4144 B and 4903 -> 4850 B. Five others unchanged.
 PIN_DIR="$ROOT/test/compactlegendfix/pre_l1_full"
 # the one normalisation, in python on BOTH sides so no sed dialect decides it (BSD sed appends a final newline, GNU
 # sed does not): at="…" masked, trailing newlines dropped.
@@ -1790,7 +1808,13 @@ echo
 # --for probe: its routed default answer now reorders its head and carries files_first= with its present-only compact clause
 # (kForFilesFirstNote); the other nine verbs unmoved. The old bar is kept as the twin: with RIPWIRE_NO_HEAD_RR=1 the same loop
 # still pays <= 8,200 B (LT). Same rule: the next multiple of 100 B.
-echo "=== (L) the canonical ten-verb edit loop: compact legend bill ≤ 8,400 B (34,716 B in full on the fixture) ==="
+# RE-ANCHORED 2026-11-18 (lane v1-verbdef, VERB-DEF-ROWS, by design; gate test/verbdefrowscheck.sh): 8,400 -> 8,800 B, measured
+# 8,789 (twin 8,200 -> 8,700 B, measured 8,644). The loop's --callers and --uses probes now print the <def> rows of `distance`
+# (geometry.cpp:4 and its geometry.h:12 declaration) and so carry the compact `def ix=` reading, which --impact alone carried;
+# the reading itself was reworded for the tied-declaration rows (126 -> 135 B). Three answers x 135 B is more than one
+# registry row can explain (legendtarget.py measures the clause once), so the bar moves instead. Same rule: the next
+# multiple of 100 B. The other seven verbs unmoved.
+echo "=== (L) the canonical ten-verb edit loop: compact legend bill ≤ 8,800 B (34,716 B in full on the fixture) ==="
 loopBytes=0; fullBytes=0; loopBytesT=0; : >"$TMP/l.all"; : >"$TMP/l.allt"
 for v in "--for=geometry distance" "--callers=distance" "--impact=distance" "--uses=distance" "--edit-check=total_area" \
          "--quality-delta" "--test-gate=geometry.cpp" "--affected=geometry.cpp" "--safe-delete=total_area" "--slice=total_area"; do
@@ -1800,8 +1824,8 @@ for v in "--for=geometry distance" "--callers=distance" "--impact=distance" "--u
     loopBytes=$(( loopBytes + b )); fullBytes=$(( fullBytes + f ))
     RIPWIRE_NO_HEAD_RR=1 rrun "$v" --legend=compact >"$TMP/l.ct"; cat "$TMP/l.ct" >>"$TMP/l.allt"; loopBytesT=$(( loopBytesT + $( leg bytes "$TMP/l.ct" ) ))
 done
-lt_gate "(L) ten-verb loop compact legend bill [full: $fullBytes B]" loop "$loopBytes" 8400 "$loopBytes" "$LT_GUARD_LOOP" "$TMP/l.all"
-lt_gate "(LT) [RIPWIRE_NO_HEAD_RR=1 twin] ten-verb loop compact legend bill (the pre-hrr bar)" loop "$loopBytesT" 8200 "$loopBytesT" "$LT_GUARD_LOOP" "$TMP/l.allt"
+lt_gate "(L) ten-verb loop compact legend bill [full: $fullBytes B]" loop "$loopBytes" 8800 "$loopBytes" "$LT_GUARD_LOOP" "$TMP/l.all"
+lt_gate "(LT) [RIPWIRE_NO_HEAD_RR=1 twin] ten-verb loop compact legend bill (the pre-hrr bar)" loop "$loopBytesT" 8700 "$loopBytesT" "$LT_GUARD_LOOP" "$TMP/l.allt"
 
 echo
 echo "=== (M) MCP: legend:\"compact\" on edit_check answers in ≤ 900 B on a clean tree; every XML verb takes the argument, within its per-verb legend pin ==="
@@ -2353,9 +2377,14 @@ condPair D25 "--communities over test/chafix (a cross-module <bridge> row)" "$CH
 condPair D25 "--community=${chaModule:-0} over test/chafix (its peer <bridge> row)" "$CHA" "--community=${chaModule:-0}" '!bridge:to' '!bridge:to_label' '!bridge:edges'
 condPair D26 "--safe-delete=total_area (the rest of its root)" "$FIX" "--safe-delete=total_area" \
     safe-delete:t safe-delete:defs safe-delete:ambiguous_callers safe-delete:dead_code_candidate
-condPair D27 "--impact=distance (<f lazy=> importer rows)" "$FIX" "--impact=distance" f:lazy
-mcp_text impact "{\"path\":\"$FIX\",\"symbol\":\"distance\",\"legend\":\"full\"}" >"$TMP/d.full"
-mcp_text impact "{\"path\":\"$FIX\",\"symbol\":\"distance\"}" >"$TMP/d.comp"
+# IMPORT-ROW-SHORT (2026-11-18): an importer row prints lazy= only when it is 1, so the probe is the one committed corpus with a
+# lazy importer (test/impactimportfix: barrel.js and lazyimporter.js require ./Widget inside a function body). --impact=distance
+# over test/fixture now carries no lazy= at all, which is why it stays in (D30)'s mirror loop as an answer that LACKS the field.
+LAZYFIX="$ROOT/test/impactimportfix"
+[ -d "$LAZYFIX" ] || no "(D27) fixture missing: $LAZYFIX — the lazy= row reading would be vacuous"
+condPair D27 "--impact=Widget over test/impactimportfix (<f lazy=1> importer rows)" "$LAZYFIX" "--impact=Widget" f:lazy
+mcp_text impact "{\"path\":\"$LAZYFIX\",\"symbol\":\"Widget\",\"legend\":\"full\"}" >"$TMP/d.full"
+mcp_text impact "{\"path\":\"$LAZYFIX\",\"symbol\":\"Widget\"}" >"$TMP/d.comp"
 condArm D27 "MCP impact at its DEFAULT posture (compact) vs legend:\"full\"" "$TMP/d.full" "$TMP/d.comp" f:lazy
 condPair D28 "the flagless map (its always-on header)" "$FIX" "" '!#files' '!#symbols' '!#edges' '#shown' '!#ambiguous' '!#order'
 "$BIN" "$FIX" "$H1" >"$TMP/d.full" 2>/dev/null </dev/null
@@ -2382,9 +2411,9 @@ rrun --communities --legend=compact >"$TMP/d30.cm"
 rrun --impact=distance --format=columnar --legend=compact >"$TMP/d30.col"
 [ "$( ca carries "$TMP/d30.col" impact:importers )" = 1 ] && [ "$( ca carries "$TMP/d30.col" f:lazy )" != 1 ] \
     || no "(D30) control: the columnar --impact now prints an <f lazy=> row, so it no longer proves that reading is present-only"
-rrun --impact=distance --legend=compact >"$TMP/d30.imp"
+cdRun "$TMP/d30.imp" "$LAZYFIX" --impact=Widget --legend=compact
 [ "$( ca carries "$TMP/d30.imp" f:lazy )" = 1 ] && [ "$( ca carries "$TMP/d30.imp" "#files" )" != 1 ] && [ "$( ca carries "$TMP/d30.imp" lens )" != 1 ] \
-    || no "(D30) control: --impact=distance no longer carries <f lazy=> without a map header or lens=, so it proves nothing about the header-only and head readings"
+    || no "(D30) control: --impact=Widget over test/impactimportfix no longer carries <f lazy=> without a map header or lens=, so it proves nothing about the header-only and head readings"
 d30bad=0; d30n=0
 for v in "--from-trace=$TMP/trace.txt" "--communities" "--community=0" "--impact=distance --format=columnar" "--impact=distance" ""; do
     rrun $v --legend=compact >"$TMP/d30.c"

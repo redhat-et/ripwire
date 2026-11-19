@@ -1,0 +1,19 @@
+ripwire situational-awareness — 1 changed file(s), 1 symbols in them
+root: odd
+  change_set: granularity=file changed_symbols=1 file_symbols=1 files_narrowed=0 files_file_granular=1 diff_hunks=0 diff_hunks_located=0 diff_hunks_unlocated=0 evidence=0 — seeds = symbols a diff -U0-vs-HEAD hunk overlaps (function/method body spans only); an unlocated hunk (module-level, deletion, rename) returns its file to file-granular
+  [1] blast radius: 17 symbols across 17 files transitively depend on these changes (showing 8 of 17 files — shown=8 total=17 capped=1 prcontext_cap=20 (--pr-context's own per-file list is cut at 20 too); next: --situ=pkg/core.py --limit=17)
+        counts_floor=1 graph_ambiguous=0 graph_unresolved=0 (the map header's own gauges) — every count above is a FLOOR, never a total: call edges are name-based, so dynamic dispatch, callbacks and macros can be missing; a zero is "none found", never "none exists"
+        pkg/mid.py  (1 dependent symbols)
+        tests/a_rather_long_directory_name_so_the_fold_pays/a&b/test_1.spec.py  (1 dependent symbols)
+        tests/a_rather_long_directory_name_so_the_fold_pays/a&b/test_2.spec.py  (1 dependent symbols)
+        tests/a_rather_long_directory_name_so_the_fold_pays/a&b/test_3.spec.py  (1 dependent symbols)
+        tests/a_rather_long_directory_name_so_the_fold_pays/deep/er/other.py  (1 dependent symbols)
+        tests/a_rather_long_directory_name_so_the_fold_pays/deep/er/still/test_d1.py  (1 dependent symbols)
+        tests/a_rather_long_directory_name_so_the_fold_pays/deep/er/still/test_d2.py  (1 dependent symbols)
+        tests/a_rather_long_directory_name_so_the_fold_pays/sub.py  (1 dependent symbols)
+  [2] tests to run (12) order=evidence: [changed] you edited it, [partner] named after a changed file, then hops asc (1 = direct); "(n): a, b" = n runner-less files sharing that evidence; a (run: …) is relative to root:
+        [hops=1] (12): tests/a_rather_long_directory_name_so_the_fold_pays/a&b/test_1.spec.py, tests/a_rather_long_directory_name_so_the_fold_pays/a&b/test_2.spec.py, tests/a_rather_long_directory_name_so_the_fold_pays/a&b/test_3.spec.py, tests/a_rather_long_directory_name_so_the_fold_pays/deep/er/other.py, tests/a_rather_long_directory_name_so_the_fold_pays/deep/er/still/test_d1.py, tests/a_rather_long_directory_name_so_the_fold_pays/deep/er/still/test_d2.py, tests/a_rather_long_directory_name_so_the_fold_pays/sub.py, tests/a_rather_long_directory_name_so_the_fold_pays/sub/w.y.py, tests/a_rather_long_directory_name_so_the_fold_pays/sub/x.py, tests/a_rather_long_directory_name_so_the_fold_pays/x.py, tests/a_rather_long_directory_name_so_the_fold_pays/x.y.py, tests/a_rather_long_directory_name_so_the_fold_pays/x.y.z.py   (run: not derivable)
+        script_gates_unmodelled=0 — test/*.sh gates never appear above: script-to-binary edges are not call edges (a path count)
+  [3] co-change — usually edited with these but NOT in your diff (0) window="18mo" commits="0":
+        (the window above mined 0 commits — no git history reached it, so this zero is NOT a measurement of coupling)
+  next: --test-gate

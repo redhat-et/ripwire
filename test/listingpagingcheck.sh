@@ -405,10 +405,11 @@ for text, which in ( ( d, "bare" ), ( a, "--limit=1000000" ) ):
     hdr = [ l for l in text.splitlines() if l.startswith( "  [2] tests to run" ) ]
     line = hdr[ 0 ] if hdr else ""
     total = int( re.search( r'\((\d+)\)', line ).group( 1 ) ) if re.search( r'\((\d+)\)', line ) else 0
-    # E1 (2026-09-12): a `[hops=N] (n): a, b, …` line serves n files on one line — count FILES, not lines
+    # E1 (2026-09-12): a `[hops=N] (n): a, b, …` line serves n files on one line — count FILES, not lines.
+    # PATH-FOLD (2026-11-18): the same line with its paths folded says `(n folded):`; n is still the file count.
     served = 0
     for r in rows( text, "  [2] tests to run", r'^        \S' ):
-        gm = re.match( r'^        (?:\[[^\]]*\] )*\((\d+)\): ', r )
+        gm = re.match( r'^        (?:\[[^\]]*\] )*\((\d+)(?: folded)?\): ', r )
         served += int( gm.group( 1 ) ) if gm else 1
     served -= 1   # minus the script-gates disclosure line
     if total <= 25:

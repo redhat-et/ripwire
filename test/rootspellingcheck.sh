@@ -171,7 +171,7 @@ every_spelling 'control: handler is the one caller of pkg/store.py:load (the imp
 every_spelling 'control: the same-directory app/local.py:load has count="0" callers (the name ladder did not bind it)' \
     "pyfour --callers=local" 'count="0"'
 every_spelling 'control: --impact names app/views.py as the importer of pkg/store.py (importers="1")' \
-    "pyfour --impact=store" '<f via="import" p="app/views.py" lazy="0"/>'
+    "pyfour --impact=store" '<f p="app/views.py"/>'
 every_spelling 'control: the resolver gauge reads graph_ambiguous="0"' \
     "pyfour --callers=store" 'graph_ambiguous="0"'
 every_spelling 'control: --quality-delta on the unchanged tree reports regressions="0" on its root element' \

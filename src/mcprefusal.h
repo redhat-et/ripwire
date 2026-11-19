@@ -372,6 +372,8 @@ inline constexpr McpValueSpec kMcpValueFields[] = {
     // answered and given no way to ask for the other one. Advertised as a real boolean, not a string, so a
     // quoted "true" refuses instead of being guessed at (mcpBoolArg).
     { "no_route",      "a BOOLEAN: true forces plain subtoken+body BM25 (omit it for the default router)", "no_route=true", "boolean" },
+    // RT2 MCP parity: the CLI --no-verb-route twin, the opt-out a routed `for` answer's next= names. Terse: it rides tools/list.
+    { "no_verb_route", "a BOOLEAN: true never routes to a verb", "no_verb_route=true", "boolean" },
     // whereis-lean (review C1): the CLI --whereis-full-text twin, the replay a <t_cut next=> names. Terse: it rides tools/list.
     { "full_text",     "a BOOLEAN: true prints every t= line whole", "full_text=true", "boolean" },
     // lane lean2b: the CLI --show-stale twin, the replay quality_delta's stale_next names. Terse: it rides tools/list.
@@ -1068,7 +1070,7 @@ inline constexpr McpVerbFields kMcpVerbFields[] = {
     { "memory_recall",            "path task top_k budget_tokens" },
     { "situational_awareness",    "path diff files limit offset" },
     { "mentions",                 "path paths symbol limit offset" },
-    { "for",                      "path paths task budget_tokens no_route limit offset sections" },   // L-W: limit/offset = the file page; L2: sections = the CLI --sections= twin
+    { "for",                      "path paths task budget_tokens no_route no_verb_route limit offset sections" },   // L-W: limit/offset = the file page; L2: sections = the CLI --sections= twin
     { "lego",                     "path paths type limit offset legend" },
     { "owners",                   "path symbol limit offset legend" },
     { "fetch_body",               "path handle start_line end_line" },

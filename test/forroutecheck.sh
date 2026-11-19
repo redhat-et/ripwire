@@ -182,7 +182,9 @@ for arm in "n5|path from startEntry to leaf_sink. Afterwards summarise other_cal
            "s4c|callers of leaf_sink？ nothing else|--callers=leaf_sink|of_span=leaf_sink|-"
 do
     IFS='|' read -r id q want sp1 sp2 <<<"$arm"
-    run --for="$q" >"$TMP/$id.xml"
+    # --no-verb-route: s4a's backticked `dict()` is a symbol rule E2 routes to --callers=dict (verbs_forroute.h, RT2); this
+    # arm reads the --for answer's <graph_verb> block, which a routed answer replaces
+    run --for="$q" --no-verb-route >"$TMP/$id.xml"
     v="$( attr "$TMP/$id.xml" verb )"; a1="$( attr "$TMP/$id.xml" "${sp1%%=*}" )"; a2="-"
     [ "$sp2" != "-" ] && a2="$( attr "$TMP/$id.xml" "${sp2%%=*}" )"
     if [ "$v" = "$want" ] && [ "$a1" = "${sp1#*=}" ] && { [ "$sp2" = "-" ] || [ "$a2" = "${sp2#*=}" ]; } && [ "$( grep -c '<graph_verb ' "$TMP/$id.xml" )" = 1 ]

@@ -24,7 +24,8 @@
 #     impact <rf> rollup row: the union of its symbols' tokens, the strongest mark per K. Above 16 groups the table
 #     lists the groups the page's rows name and the root says defs_listed=N; there a row prints its K, K~s and K~t tokens
 #     and ONE bare ~n when it also has by-name ties (a row tied by name alone prints no of_def: its via="name" hedges it).
-#   * Every other answer (one definition, or one definition with its own declarations) carries no table and no of_def;
+#   * Every other answer (one definition, or one definition with its own declarations) carries no table and no of_def
+#     (--impact alone names its one group as a single <def ix="1"/> row and still no of_def: test/impactsoledefcheck.sh);
 #     its rows that are one arm of a split call carry prov="split" (the map's per-edge vocabulary), whatever defs= is.
 #   * --path: a to= with several definitions carries no to_p= unless a proven hop bound it (unreached, or the hop into
 #     it is a split arm or by name: dropped); a from= with several definitions carries no from_p= when unreached.
@@ -116,8 +117,12 @@ if form == 'xml':
     defs = re.findall(r'<def\s[^>]*?/?>', body)
     for d in defs:
         a = attrs(d)
+        if a.get('ix', '?') in table:   # VERB-DEF-ROWS: a later row of a listed ix is one of its tied declarations, not a group
+            print('MEMBER\t%s\t%s\t%s\t%s' % (a.get('ix', '?'), a.get('p', '?'), a.get('bodyless', '0'), a.get('sc', '')))
+            continue
         table[a.get('ix', '?')] = a.get('p', '?')
         print('DEF\t%s\t%s\t%s\t%s' % (a.get('ix', '?'), a.get('p', '?'), a.get('bodyless', '0'), a.get('sc', '')))
+    defs = list(table)
     print('ROOT\tok\tdefs=%s\tgroups=%d\tto_p=%s\tfrom_p=%s\tcount=%s\tdefs_listed=%s\tnext_offset=%s' % (
           root.get('defs', root.get('to_defs', '?')), len(defs), root.get('to_p', '-'), root.get('from_p', '-'),
           root.get('count', root.get('reaches', root.get('callers', '?'))), root.get('defs_listed', '-'), root.get('next_offset', '-')))
@@ -136,8 +141,12 @@ else:
     table = {}
     for d in tab:
         p = d.get('p') or ('%s:%s' % (d.get('file', '?'), d.get('line', '?')))
+        if str(d.get('ix')) in table:   # VERB-DEF-ROWS: a tied declaration's own entry, not a group
+            print('MEMBER\t%s\t%s\t%s\t%s' % (d.get('ix'), p, d.get('bodyless', 0), d.get('sc', d.get('scope', ''))))
+            continue
         table[str(d.get('ix'))] = p
         print('DEF\t%s\t%s\t%s\t%s' % (d.get('ix'), p, d.get('bodyless', 0), d.get('sc', d.get('scope', ''))))
+    tab = list(table)
     print('ROOT\tok\tdefs=%s\tgroups=%d\tto_p=%s\tfrom_p=%s\tcount=%s\tdefs_listed=%s\tnext_offset=%s' % (
           j.get('defs', j.get('to_defs', '?')), len(tab), j.get('to_p', '-'), j.get('from_p', '-'),
           j.get('count', j.get('reaches', '?')), j.get('defs_listed', '-'), j.get('next_offset', '-')))
@@ -202,6 +211,27 @@ plain(){
        && { [ -n "$allow" ] || ! awk -F'\t' '$1=="ROW" && $4 ~ /prov=split/ { f=1 } END { exit !f }' "$DIR/$tag.rows"; } \
        && [ "$( nrows "$tag" )" -gt 0 ]; then ok "[$cls] $tag: one definition group — no <def> table, no of_def$( [ -n "$allow" ] || printf ', no prov' ) ($( nrows "$tag" ) rows)"
     else no "[$cls] $tag: a one-group answer grew attribution: groups=$( groups "$tag" ), rows: $( grep '^ROW' "$DIR/$tag.rows" | cut -f2,3,4 | tr '\t\n' '= ' )"; fi
+}
+# plainSole CLASS TAG [MEMBERS] : a one-group --impact or --callers answer (IMPACT-SOLE-DEF; VERB-DEF-ROWS) — exactly ONE group row
+# (plus MEMBERS tied-declaration rows of the same ix, default 0), no of_def and no prov="split" on any row
+members(){ grep -c '^MEMBER' "$DIR/$1.rows"; }
+plainSole(){
+    local cls="$1" tag="$2" want="${3:-0}"
+    if [ "$( groups "$tag" )" = 1 ] && [ "$( members "$tag" )" = "$want" ] && ! awk -F'\t' '$1=="ROW" && $3!="-" { f=1 } END { exit !f }' "$DIR/$tag.rows" \
+       && ! awk -F'\t' '$1=="ROW" && $4 ~ /prov=split/ { f=1 } END { exit !f }' "$DIR/$tag.rows" \
+       && [ "$( nrows "$tag" )" -gt 0 ]; then ok "[$cls] $tag: one definition group — one group row + $want declaration row(s), no of_def, no prov ($( nrows "$tag" ) rows)"
+    else no "[$cls] $tag: a one-group answer: groups=$( groups "$tag" ) (want 1), declaration rows=$( members "$tag" ) (want $want), rows: $( grep '^ROW' "$DIR/$tag.rows" | cut -f2,3,4 | tr '\t\n' '= ' )"; fi
+}
+# untiedSole CLASS TAG : RE-PIN 2026-11-18 (lane bx1-verbfix, BX1 FIX 7; gate test/verbfixcheck.sh). The untied declaration a
+# one-group answer used to drop while defs= still counted it (the tmux/ninja prototype shape) is now listed as a bodyless <def>
+# row of its own, ix=2; it stays out of the attribution: one attributed group, still no of_def and no prov on any row.
+untiedSole(){
+    local cls="$1" tag="$2"
+    if [ "$( groups "$tag" )" = 2 ] && [ "$( awk -F'\t' '$1=="DEF" && $2=="2" { print $4; exit }' "$DIR/$tag.rows" )" = 1 ] \
+       && ! awk -F'\t' '$1=="ROW" && $3!="-" { f=1 } END { exit !f }' "$DIR/$tag.rows" \
+       && ! awk -F'\t' '$1=="ROW" && $4 ~ /prov=split/ { f=1 } END { exit !f }' "$DIR/$tag.rows" \
+       && [ "$( nrows "$tag" )" -gt 0 ]; then ok "[$cls] $tag: one attributed group + the untied declaration listed (ix=2 bodyless=1), no of_def, no prov"
+    else no "[$cls] $tag: want one attributed group + an ix=2 bodyless row: groups=$( groups "$tag" ), rows: $( grep '^ROW' "$DIR/$tag.rows" | cut -f2,3,4 | tr '\t\n' '= ' )"; fi
 }
 # rowset CLASS TAG COUNT NAMES : attribution adds attributes and never removes a row — the root count and the sorted row-name
 # multiset equal the base binary's (pinned from base d4325a8c)
@@ -312,13 +342,15 @@ if ans b_norm cpp callers s xml -- --callers=Normalize; then
         "[N] b_norm: <def> rows=$( groups b_norm ), want 2"
     hedged P b_norm ManifestParser::ParseDefault "util.cc:9 util.cc:12"
 fi
-if ans b_rp cpp callers s xml -- --callers=ReadPath; then plain N b_rp; fi
+# RE-PIN 2026-11-18 (lane v1-verbdef, VERB-DEF-ROWS; gate test/verbdefrowscheck.sh): a one-group --callers answer names the
+# definitions it measured, as --impact does — one group row, then a row per tied declaration — and still no of_def / prov.
+if ans b_rp cpp callers s xml -- --callers=ReadPath; then plainSole N b_rp 1; fi   # ReadPath: a declaration + its definition
 # UsesPiece is declared in piece_user.cc with no #include that ties it to parser.cc's definition: the identity rule answers
 # Unproven (may declare it, cannot prove it), and no row ties to that declaration (DrivePiece's call binds the definition), so
-# the declaration is silent and the answer stays one group — the tmux/ninja prototype shape (a variadic or template-qualified
+# the declaration was silent and the answer stayed one group — the tmux/ninja prototype shape; BX1 FIX 7 lists it (untiedSole) (a variadic or template-qualified
 # declarator is Unproven the same way). A FOREIGN declaration (c_tal, c_hlp below: provably another function) is always listed.
-if ans b_up cpp callers s xml -- --callers=UsesPiece; then plain N b_up; fi
-if ans b_q cpp callers s xml -- --callers=string_piece.h:empty; then plain N b_q; fi
+if ans b_up cpp callers s xml -- --callers=UsesPiece; then untiedSole N b_up; fi   # RE-PIN BX1 FIX 7: listed, not silent
+if ans b_q cpp callers s xml -- --callers=string_piece.h:empty; then plainSole N b_q; fi
 # Q1 (orchestrator ruling): the split-arm hedge rides single-definition answers too (by-design byte change on them)
 if ans b_one cpp callees s xml -- --callees=PutInt; then
     plain N b_one split
@@ -382,14 +414,16 @@ if ans c_hlp c callers s xml -- --callers=helper; then
     defbody N c_hlp helper_a.c:2 0
     invariant N c_hlp
 fi
-if ans c_lost c callers s xml -- --callers=lost; then plain N c_lost; fi          # C prototype + definition: one group
-if ans c_pick ts callers s xml -- --callers=pick; then plain N c_pick; fi         # TS overload signatures + implementation
+# RE-PIN 2026-11-18 (lane v1-verbdef, VERB-DEF-ROWS; gate test/verbdefrowscheck.sh): a one-group --callers answer names the
+# definitions it measured, as --impact does — one group row, then a row per tied declaration — and still no of_def / prov.
+if ans c_lost c callers s xml -- --callers=lost; then plainSole N c_lost 1; fi          # C prototype + definition: one group
+if ans c_pick ts callers s xml -- --callers=pick; then plainSole N c_pick 2; fi         # TS overload signatures + implementation
 # langfacts-fold (train 29) pins, green on the build before the fold and after it: the TS overload-signature rule names TypeScript
 # alone (src/defattrib.h). A TS method overload set is one group; a TS abstract / ambient member is a contract, a group of its
 # own; and the same bodyless shape in Java, Go and Rust is never folded (a Java or Go interface method is its own group; a Rust
 # trait requirement is no definition at all).
 if ans lf_stash lf callers s xml -- --callers=stash; then
-    plain N lf_stash; [ "$( rootf lf_stash defs )" = 3 ]; say $? "[N] lf_stash: a TS class method's three overload declarations are ONE group (defs=3, no table)" \
+    plainSole N lf_stash 2; [ "$( rootf lf_stash defs )" = 3 ]; say $? "[N] lf_stash: a TS class method's three overload declarations are ONE group (defs=3: one group row + two declaration rows)" \
         "[N] lf_stash: defs=$( rootf lf_stash defs ), want 3"
 fi
 for c in measure:box.ts:7:box.ts:8 ring:box.ts:9:box.ts:10 doIt:Doer.java:2:Doer.java:3 Foo:fooer.go:4:fooer.go:7; do
@@ -401,7 +435,9 @@ for c in measure:box.ts:7:box.ts:8 ring:box.ts:9:box.ts:10 doIt:Doer.java:2:Doer
         defbody N "$tg" "$p2:$l2" 0
     fi
 done
-if ans lf_baz lf callers s xml -- --callers=baz; then plain N lf_baz; fi   # a Rust trait requirement is no definition: one def, one group
+# RE-PIN 2026-11-18 (lane v1-verbdef, VERB-DEF-ROWS; gate test/verbdefrowscheck.sh): a one-group --callers answer names the
+# definitions it measured, as --impact does — one group row, then a row per tied declaration — and still no of_def / prov.
+if ans lf_baz lf callers s xml -- --callers=baz; then plainSole N lf_baz; fi   # a Rust trait requirement is no definition: one def, one group
 if ( cd "$FIX/cpp" && "$BIN" . --no-cache --for=empty ) >"$DIR/c_for.out" 2>/dev/null; then
     # QUALNAME-1: a member's scope folds into n= (no sc=): each definition is its own Owner::empty row
     n_d="$( grep -oE '<d [^>]*n="(EvalString|StringPiece)::empty"[^>]*>' "$DIR/c_for.out" | grep -vc 'sc="' )"
@@ -430,7 +466,10 @@ if ans d_impj cpp - reach json -- --impact=empty --json; then
     expect P d_impj DrivePiece "$SP"
 fi
 if mcp d_mcp cpp s impact '"symbol":"empty"'; then expect P d_mcp DriveEval "$EV"; fi
-if ans d_one cpp impact s xml -- --impact=string_piece.h:empty; then plain N d_one; fi
+# RE-PIN 2026-11-18 (lane t2-rankdefects, IMPACT-SOLE-DEF; gate test/impactsoledefcheck.sh): a one-group --impact answer names the
+# ONE definition it measured as a single <def ix="1"/> row (the radius of a change holds the file the change is made in). The arm
+# keeps what it was for — no of_def and no prov on any row of a one-group answer — and pins the table at exactly one row.
+if ans d_one cpp impact s xml -- --impact=string_piece.h:empty; then plainSole N d_one; fi
 
 # ── (E) --path endpoints ──────────────────────────────────────────────────────────────────────────────────────────────
 echo "(E) C++ --path endpoints"
@@ -533,8 +572,9 @@ if ans f_objc objc callers s xml -- --callers=area; then
 fi
 if ans f_py1 py callers s xml -- --callers=draw_widget; then
     # a single definition with no caller: the root, no rows — read the table count only
-    [ "$( groups f_py1 )" = 0 ]; say $? "[N] f_py1: single definition, no <def> table" \
-        "[N] f_py1: <def> rows on a single definition"
+    # RE-PIN 2026-11-18 (lane v1-verbdef, VERB-DEF-ROWS): a single --callers definition is named by ONE <def> row, no member row
+    { [ "$( groups f_py1 )" = 1 ] && [ "$( members f_py1 )" = 0 ]; }; say $? "[N] f_py1: single definition, one <def> row" \
+        "[N] f_py1: groups=$( groups f_py1 ) declaration rows=$( members f_py1 ) on a single definition (want 1 and 0)"
 fi
 
 # ── (H) the definition-table cap: 20 same-named definitions, 12 callers — the table lists what the page names ─────────
@@ -632,10 +672,12 @@ fi
 if ans j_u2i u2 impact s xml -- --impact=scan_tok; then
     [ "$( groups j_u2i )" = 3 ]; say $? "[P] j_u2i: impact lists the three groups" "[P] j_u2i: <def> rows=$( groups j_u2i ), want 3"
 fi
-# the one-group sibling (u1 = prog1 + prog2): dropping the untied prototype leaves one group, so the answer stays plain
+# the one-group sibling (u1 = prog1 + prog2): dropping the untied prototype leaves one group, so no row carries of_def (BX1 FIX 7: it is still listed)
 mkdir -p "$DIR/u1/prog1" "$DIR/u1/prog2"; cp "$FIX/u2/prog1/util.c" "$DIR/u1/prog1/"; cp "$FIX/u2/prog2/main.c" "$DIR/u1/prog2/"
 FIXSAVE="$FIX"; FIX="$DIR"
-if ans j_u1 u1 callers s xml -- --callers=scan_tok; then plain C j_u1; fi
+# RE-PIN 2026-11-18 (lane v1-verbdef, VERB-DEF-ROWS; gate test/verbdefrowscheck.sh): a one-group --callers answer names the
+# definitions it measured, as --impact does — one group row, then a row per tied declaration — and still no of_def / prov.
+if ans j_u1 u1 callers s xml -- --callers=scan_tok; then untiedSole C j_u1; fi   # RE-PIN BX1 FIX 7: listed, not silent
 FIX="$FIXSAVE"
 
 # ── (I) Q1 on --for: a body's <calls> row (and a hop's) whose edge is a resolver split arm carries prov="split", defined in the

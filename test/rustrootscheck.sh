@@ -310,7 +310,7 @@ importers(){
   if [ "$rc" -ne 0 ] || ! grep -q '<impact ' "$out"; then
     no "--impact=$2 on $(basename "$1"): exit $rc or no <impact> answer"; sed -n '1,5p' "$TMP/imp.err"; return 1
   fi
-  grep -oE '<f via="[a-z]+" p="[^"]+"' "$out" | sed -E 's/.* p="([^"]+)"/\1/' | sort > "$TMP/imp"
+  grep -oE '<f p="[^"]+"' "$out" | sed -E 's/.* p="([^"]+)"/\1/' | sort > "$TMP/imp"
   return 0
 }
 has(){   # arm tree file importer

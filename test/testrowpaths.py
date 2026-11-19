@@ -62,11 +62,22 @@ A path is emitted VERBATIM, exactly as the document spelled it, except that XML 
 decoded (`&amp;` `&lt;` `&gt;` `&quot;` `&#NN;`) — a gate compares paths against the file names it created,
 which are unescaped. Note that a path containing ',' is never grouped (testmap.h refuses to), so splitting
 a group's p= on ',' cannot split a path in half.
+
+THE FOLDED LIST (PATH-FOLD, 2026-11-18). On --affected, --test-gate and --situ a group row may carry its paths folded:
+  xml   <g … n="3" pf="dir/{a,b}.py,c.py" …/>          text  [hops=2] (3 folded): dir/{a,b}.py, c.py   (run: …)
+PRE{A,B}SUF stands for PREASUF,PREBSUF (braces nest); a row that says p= / "(n):" is verbatim as before. The readers
+below expand a folded row through test/lib/pathfold.py — the one place a gate may do it — so every gate that asks for
+the files named gets the same full paths, in the same order, whichever form the row took. A malformed folded list is
+a raise (exit 2), never a best-effort split.
 """
 
 import json
+import os
 import re
 import sys
+
+sys.path.insert( 0, os.path.join( os.path.dirname( os.path.abspath( __file__ ) ), "lib" ) )
+import pathfold   # noqa: E402 — the folded-list reference (expand, expand_text_list)
 
 _ENT = { "amp": "&", "lt": "<", "gt": ">", "quot": '"', "apos": "'" }
 
@@ -107,6 +118,27 @@ def _attrs( row ):
     return dict( re.findall( r'\s([A-Za-z_]+)="([^"]*)"', row ) )
 
 
+def _unfolded_pf( row, raw ):
+    """A <g> row's pf= list as the comma-joined p= list it stands for (PATH-FOLD). XML escapes never produce ',', '{'
+    or '}', so the escaped list expands as it stands."""
+    if not row.startswith( "<g " ):
+        raise TestRowParseError( "pf= on a row that is not a <g> group: %r" % row[:120] )
+    try:
+        return ",".join( pathfold.expand( raw ) )
+    except ValueError as e:
+        raise TestRowParseError( "malformed pf= list: %s" % e )
+
+
+def _text_group_members( listed, folded ):
+    """The paths a text group line names: split on ',' as before, or — "(n folded):" — expanded (PATH-FOLD)."""
+    if not folded:
+        return listed.split( "," )
+    try:
+        return pathfold.expand_text_list( listed )
+    except ValueError as e:
+        raise TestRowParseError( "malformed '(n folded):' list: %s" % e )
+
+
 def xml_rows( doc ):
     """Every test FILE an XML document names, in emitted order, as ( path, command, grouped ): command is the
     row's run= (a group member's is expanded from run_each=), None where the row says run_unknown="1", and
@@ -118,10 +150,12 @@ def xml_rows( doc ):
     group row carries by construction (a group exists only where no runner is derivable or where every member's
     command is the one template) — the same qualification the compact legend uses to keep the readings apart."""
     out = []
-    for m in re.finditer( r'<(?:t|test|g)\b[^>]*?\bp="([^"]*)"[^>]*/>', strip_comments( doc ) ):
+    for m in re.finditer( r'<(?:t|test|g)\b[^>]*?\b(pf?)="([^"]*)"[^>]*/>', strip_comments( doc ) ):
         row = m.group( 0 )
-        raw = m.group( 1 )
+        raw = m.group( 2 )
         at  = _attrs( row )
+        if m.group( 1 ) == "pf":
+            raw = _unfolded_pf( row, raw )
         if row.startswith( "<g " ):
             if at.get( "run_unknown" ) != "1" and "run_each" not in at:
                 continue                                        # --flags' own <g> gate row, not a test group
@@ -251,7 +285,7 @@ def json_paths( doc ):
 _TEXT_RUN_OPEN  = "   (run: "
 _TEXT_EACH_OPEN = "   (run each: "
 _TEXT_ATTR_TAIL = re.compile( r"(?: \[changed\])?(?: \[partner\])?(?: \[hops=\d+\])?$" )
-_TEXT_GROUP = re.compile( r"^\s*(?:\[[^\]]*\]\s*)*\((\d+)\):\s*(.*?)\s{2,}\(run(?: each)?: " )
+_TEXT_GROUP = re.compile( r"^\s*(?:\[[^\]]*\]\s*)*\((\d+)( folded)?\):\s*(.*?)\s{2,}\(run(?: each)?: " )
 _TEXT_NOT_DERIVABLE = "not derivable"
 
 
@@ -267,7 +301,7 @@ def text_rows( doc ):
         tail   = line[ line.rindex( opener ) + len( opener ):-1 ]
         g = _TEXT_GROUP.match( line )
         if g:
-            for p in g.group( 2 ).split( "," ):
+            for p in _text_group_members( g.group( 3 ), g.group( 2 ) ):
                 p = p.strip()
                 if p:
                     out.append( ( p, expand_run_each( tail, p ) if each else None, True ) )

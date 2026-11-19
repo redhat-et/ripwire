@@ -314,6 +314,46 @@ struct Stream
 }
 } // namespace detail
 
+// ES (lane RT2, results/RT2_ROUTE_1118/PREREG.md §ES): page 1 ENDED EARLY, right after stream block `blockIdx`, because that
+// block proved itself complete (the caller's test). It is still a page of THIS answer and says so the AF1-fix way: page="1"
+// pages=N (the answer's own pagination at this size), withheld_bytes= every row byte it does not carry, deferred= every section
+// that starts later, plus early="proven". Its legend is `blockLegend` (the clause the block needs, from the caller) and the early
+// page's own clause — not the whole document legend. Its next= is the FULL page 1 (a spelled --page-bytes never ends early), so
+// no row is more than one call away. nullopt: not a pageable answer-first document, or nothing would be saved.
+[[nodiscard]] inline std::optional<std::string> earlyFirstPage( std::string_view doc, const PageAsk& ask, std::size_t blockIdx, std::string_view blockLegend )
+{
+    const std::optional<detail::Stream> st = ask.pageBytes == 0 ? std::nullopt : detail::readStream( doc );
+    if( !st || blockIdx >= st->streamBlocks || st->blocks[ blockIdx ].comment )
+    {
+        return std::nullopt;
+    }
+    const std::size_t      pages    = detail::pageEnds( st->cuts, ask.pageBytes ).size();
+    const detail::Cut      end{ st->blocks[ blockIdx ].end, std::string_view::npos };
+    const std::string_view rootOpen = doc.substr( st->openAt, st->openEnd - st->openAt );
+    std::string out = "<ctx";
+    for( const std::string_view name : { "task", "at", "schema", "est_tokens" } )
+    {
+        out.append( detail::rootAttr( rootOpen, name ) );
+    }
+    out += " page=\"1\" pages=\"" + std::to_string( pages ) + "\" withheld_bytes=\"" + std::to_string( st->cuts.back().at - end.at ) + "\" early=\"proven\"";
+    out += detail::sectionAttrs( *st, end );
+    out += nextAttrXml( std::string( ask.call ) + " --page-bytes=" + std::to_string( ask.pageBytes ) + ":1" );
+    out += '>';
+    out.append( doc.substr( st->openEnd + 1, end.at - ( st->openEnd + 1 ) ) );
+    out.append( blockLegend );
+    out += "<!-- page=1 early=proven: an answer-first page 1 ENDED EARLY after its first block, because that block proved itself"
+           " complete (shown= equals total=, nothing capped, and no evidence of a miss was found); pages= the answer's pages at "
+         + std::to_string( ask.pageBytes ) + " B, withheld_bytes= its row bytes not on this page, deferred= the sections that start"
+           " later; est_tokens= prices this page; root next= is the FULL page 1, whose own next= is page 2 -->";
+    out += "</ctx>";
+    if( out.size() >= doc.size() )
+    {
+        return std::nullopt;
+    }
+    detail::pricePage( out );
+    return out;
+}
+
 // Cut one finished answer-first --for document to the asked page, in place. See the header.
 inline PageResult pageAnswer( std::string& doc, const PageAsk& ask )
 {

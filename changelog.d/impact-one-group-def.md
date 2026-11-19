@@ -1,0 +1,3 @@
+### Fixed — a one-group `--impact` answer names the definition it measured
+
+When `--impact=SYM` resolved to a single definition group, the answer measured that group but never said which definition it was, so a reader holding a symbol with a declaration in a header and a body in a source file could not tell which one the blast radius was taken from. The one-group answer now prints the same `<def>` row a multi-group answer already printed. Development result on the 298 graded cells of the 0.7.0 token round: 211 to 213 complete, 0 regressions, +0.06 % bytes, cross-gold 253 of 1,742 unchanged; it was confirmed on the held-out gold as part of the `--callers`/`--uses` change below. Lane T2 (`57b4c3ee3`); `test/impactsoledefcheck.sh` pins it.
