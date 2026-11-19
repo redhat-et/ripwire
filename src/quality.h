@@ -4550,7 +4550,12 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 // rustTestAttributed tests EVERY top-level attribute on a line (classifyRustAttributeLine), so `#[tokio::test(x)] #[allow(unused)]`
 // now exempts the fn below it, and a `#[` inside a string is text, so `#[doc = "#[tokio::test(x)]"]` no longer does. A v33 blob
 // holds the old set, so it is rejected. Bumped 33 -> 34. kParserVer stays: no extraction change.
-constexpr std::uint32_t kQSnapCacheScheme = 34;
+// v35 (2026-11-19, lane QD-VA-FORMS, E0) — no blob shape change; the defect-shape SITE set moved for Bash. defectSitesOf reads
+// every test script (the grep prefilter is gone) and the vacuous-assert facet is a status-dataflow walk on the B43 matcher's
+// port (shstatus.h): pipe without pipefail, redirected file, dropped wrapper status, FAIL reporter in $( ), unread rc=$?,
+// `| head || fallback`. A v34 blob holds the old grep-only sites, so a head scan would read every new-form site as added; it is
+// rejected. Bumped 34 -> 35. kParserVer stays: no extraction change.
+constexpr std::uint32_t kQSnapCacheScheme = 35;
 constexpr char          kQSnapMagic[4]    = { 'Q', 'S', 'N', 'P' };
 
 // The qsnap EXCLUDES-config key folds the qsnap SCHEME (independent of the ingest cache's kHeadSnapCacheScheme)
