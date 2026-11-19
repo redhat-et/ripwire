@@ -15064,6 +15064,33 @@ inline std::vector<NodeId> statedScopeOnTierAnswer( const IngestResult& ing, std
     return ids;
 }
 
+// The bare lane's "::" tiers, canonical id then Scope::name. A tail that could be a selector reads as a language only
+// when the WHOLE spelling owns nothing (literal first, as qualifiedColonTierAnswer; #702 review: an indexed
+// `notes.md::config::user@py` heading answers as itself); the tail-free base is then probed and the stated tag scopes
+// its answer. Empty = no tier answered, and the name walk decides.
+inline std::vector<NodeId> bareLaneColonTiers( const IngestResult& ing, std::string_view name, std::string_view base,
+                                               const NameSuffixSplit& split, bool selector, LangAnchor* anchorOut )
+{
+    if( base.find( "::" ) == std::string_view::npos )
+    {
+        return {};
+    }
+    const auto idThenScope = [ &ing ]( std::string_view spec )
+    {
+        std::vector<NodeId> byId = resolveAllByCanonicalId( ing, spec );
+        return byId.empty() ? resolveAllByScopeQualified( ing, spec ) : byId;   // Scope::name tier — see its contract
+    };
+    if( selector )
+    {
+        if( std::vector<NodeId> literal = idThenScope( name ); !literal.empty() )
+        {
+            return literal;
+        }
+    }
+    std::vector<NodeId> tier = idThenScope( base );   // suffixed specs keep the canonical/scope tiers on their base
+    return tier.empty() ? tier : statedScopeOnTierAnswer( ing, std::move( tier ), split, selector, anchorOut );
+}
+
 inline std::vector<NodeId> resolveAllByName( const IngestResult& ing, std::string_view name, const LangAnchor& context = {},
                                              LangAnchor* anchorOut = nullptr )
 {
@@ -15076,30 +15103,9 @@ inline std::vector<NodeId> resolveAllByName( const IngestResult& ing, std::strin
     }
     const std::string_view base = selector ? split.base : name;
 
-    if( base.find( "::" ) != std::string_view::npos )
+    if( std::vector<NodeId> tier = bareLaneColonTiers( ing, name, base, split, selector, anchorOut ); !tier.empty() )
     {
-        if( selector )
-        {   // literal first, as qualifiedColonTierAnswer (#702 review): an indexed `notes.md::config::user@py` heading answers as itself
-            std::vector<NodeId> literal = resolveAllByCanonicalId( ing, name );
-            if( literal.empty() )
-            {
-                literal = resolveAllByScopeQualified( ing, name );
-            }
-            if( !literal.empty() )
-            {
-                return literal;
-            }
-        }
-        std::vector<NodeId> byId = resolveAllByCanonicalId( ing, base );   // suffixed specs keep the canonical/scope tiers on their base
-        if( !byId.empty() )
-        {
-            return statedScopeOnTierAnswer( ing, std::move( byId ), split, selector, anchorOut );
-        }
-        std::vector<NodeId> byScope = resolveAllByScopeQualified( ing, base );   // Scope::name tier — see its contract
-        if( !byScope.empty() )
-        {
-            return statedScopeOnTierAnswer( ing, std::move( byScope ), split, selector, anchorOut );
-        }
+        return tier;   // a "::" tier answered for itself
     }
 
     std::vector<NodeId> out;
