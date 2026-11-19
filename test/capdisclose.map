@@ -12,7 +12,6 @@
 # function and finds otherwise reclassifies the row to pending. #614's depth cap and #613's reader cap are the two rows read
 # by hand (CodeRabbit 4542271958 and 4540061421): both lanes' red revisions FAIL their row and the fixed revisions PASS.
 # A new cap constant on the answer path needs a row here in the same commit.
-kAnswerPageBytesDefault	none:the default page stop the answer-first ORDER rules read (AF2 G, TL1 M3 bodiesLeadInPlace): a block moves, every row is still emitted once (answerFirst's size ENSURES); the page cut itself is disclosed by page= pages= withheld_bytes= next= (forpages.h)
 kImportSpecDepth	sink:atDepthCap
 kReaderCallerReaders	sink:readersMore
 kAliasHopChains	sink:cut,shown
@@ -164,6 +163,7 @@ kGrepLiftRowCap	pending:B43 grep lift row cap, not audited yet (LARGE-PARTIAL-1 
 kGrepMatchedLineMaxBytes	sink:cut
 kGrepRefSitesScanned	pending:B43 grep ref-site scan bound, not audited yet (LARGE-PARTIAL-1 scope widening)
 kGrepTierFileBudget	pending:B43 disclosed elsewhere: tier_budget= / tier_partial= on the grep root (Stage 0 row 10)
+kGrepHeldFilesListed	sink:heldFiles
 kGuardTailRows	none:AF2 G's ORDER guard (foranswerfirst.h promoteGuarded): a promoted section moves ahead of <tail> only while tail row 24 still ends inside the default page; it reorders, every row is still emitted once (answerFirst's size ENSURES; forpagescheck P2 row identity)
 kHeadDefLineAbove	none:a shape window of the whereis def-line test, not a cut
 kHealthWsSampleBytes	none:a sample size for the file-health whitespace heuristic, not a cut
