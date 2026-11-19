@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """tanglefixtures.py STAGE DIR — write the tanglecheck.sh fixture tree for one history stage.
 
-STAGE: v1 (the tagged release), c2 (one commit after it), wt (the working tree the gate judges).
+STAGE: v1 (the tagged release), wip then c2 (two commits of a side branch merged --no-ff after it), wt (the working tree the gate
+judges).
 Each function lives in its own file so a row's p= names it alone. Shapes (C++):
   tangled   — new in wt: a depth-6 region, a steering flag set inside it and read 60 statements later (a row).
   sequential — new in wt: 150 flat statements (score 0, no row).
@@ -19,6 +20,9 @@ Each function lives in its own file so a row's p= names it alone. Shapes (C++):
           (+5), together over it — the ratchet's row.
   shrink — tangled at v1/c2; wt removes its deep region: credited in <improved> (tangle), no row.
   simplify — ccx 21 at v1/c2, ccx 11 in wt: credited in <improved> (complexity).
+  nudge — tangled at v1/c2 (40 deep lines); wt drops 2 of them: under the rise step, so no <improved> entry (and no row).
+  The wip stage cuts creep to 5 deep lines on the side branch, whose next commit (c2) grows it back: a version the first-parent
+  line never stood at, so it must not become creep's best (r1 would read deep 8->49).
 """
 import os
 import sys
@@ -65,6 +69,16 @@ def shrink(deep):
 def simplify(branches):
     arms = "".join(f"    if( x == {k} )\n    {{\n        y += {k};\n    }}\n" for k in range(branches))
     return "int simplify( int x )\n{\n    int y = 0;\n" + arms + "    return y;\n}\n"
+
+
+def nudge(deep):
+    inner = deep_block(deep, 20)
+    tail = "".join(f"    total = total * 11 + {k};\n" for k in range(70))
+    return ("int nudge( const std::vector<int>& xs )\n{\n    int total = 0;\n"
+            "    for( int x : xs )\n    {\n        if( x > 2 )\n        {\n"
+            "            for( int y = 0; y < x; ++y )\n            {\n"
+            "                if( y % 5 )\n                {\n" + inner +
+            "                }\n            }\n        }\n    }\n" + tail + "    return total;\n}\n")
 
 
 def tangled():
@@ -170,10 +184,11 @@ def main():
     stage, d = sys.argv[1], sys.argv[2]
     os.makedirs(os.path.join(d, "src"), exist_ok=True)
     hdr = "#include <vector>\n"
-    extra = {"v1": 0, "c2": 3, "wt": 6}[stage]
+    extra = {"v1": 0, "wip": -35, "c2": 3, "wt": 6}[stage]
     write(d, "creep.cpp", hdr + creep(extra))
     write(d, "shrink.cpp", hdr + shrink(stage != "wt"))
     write(d, "simplify.cpp", simplify(20 if stage != "wt" else 10))
+    write(d, "nudge.cpp", hdr + nudge(40 if stage != "wt" else 38))
     if stage == "wt":
         write(d, "tangled.cpp", hdr + tangled())
         write(d, "sequential.cpp", sequential())

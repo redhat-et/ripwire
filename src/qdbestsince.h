@@ -43,8 +43,10 @@ inline bool rootRelOfGitPath( std::string_view gitPath, std::string_view prefix,
     return true;
 }
 
-// The versions of `relPaths` since `refSha`: each file's blob at the reference first, then every blob a non-merge commit in refSha..tip
-// wrote, newest first; distinct (sha, path) pairs. nullopt when git could not list them.
+// The versions of `relPaths` since `refSha`: each file's blob at the reference first, then every blob a FIRST-PARENT commit in refSha..tip
+// wrote (a merge read against its first parent), newest first; distinct (sha, path) pairs. nullopt when git could not list them. The
+// first-parent line is the history a branch actually stood at: a lane's work-in-progress commits never set a "best" (replay 11-19: 50
+// versions of graph.h since v0.6.10 over every commit, 20 on the first-parent line).
 inline std::optional<std::vector<HistoryBlob>> bestSinceBlobs( const std::string& root, const std::string& refSha, const std::string& tipSha,
                                                                const std::vector<std::string>& relPaths, std::string_view prefix )
 {
@@ -70,7 +72,7 @@ inline std::optional<std::vector<HistoryBlob>> bestSinceBlobs( const std::string
             out.push_back( { std::string( fields[2] ), rel } );
         }
     }
-    const crossref::GitListing log = crossref::gitListChecked( root, "--literal-pathspecs log --format= --raw --no-abbrev --no-renames " + refSha + ".." + tipSha + " --" + pathspec );
+    const crossref::GitListing log = crossref::gitListChecked( root, "--literal-pathspecs log --first-parent -m --format= --raw --no-abbrev --no-renames " + refSha + ".." + tipSha + " --" + pathspec );
     if( !log.ok )
     {
         return std::nullopt;
