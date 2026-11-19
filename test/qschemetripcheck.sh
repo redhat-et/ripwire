@@ -34,6 +34,9 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-18, lane BX2 FIX 8 (C-family parameter slot facts): parser tag 313 -> 315 (rich 316) and mirror move together
+#   (a placeholder the train renumbers). kCacheVersion and kQSnapCacheScheme stay unchanged. Re-derived ONCE with UPDATE_GOLDEN=1
+#   (hash ddac96863e…ed98cff).
 # 2026-11-18, lane BX2 FIX 5 (Rust transcriber calls, base integration/0.6.11-batch 259352fc0): parser tag 311 -> 313 (rich 314)
 #   and mirror move together (a placeholder the train renumbers). kCacheVersion and kQSnapCacheScheme stay unchanged. Re-derived
 #   ONCE with UPDATE_GOLDEN=1 (hash 29a3c7f42e…5c4f976).

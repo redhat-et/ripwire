@@ -380,7 +380,10 @@ constexpr std::uint32_t kCacheVersion = 52;           // 52: lane failure-defaul
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 313;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 315;          // bump on any grammar/.scm/extraction change
+                                                      // 315 = 2026-11-18 (lane BX2 FIX 8, PLACEHOLDER: the train renumbers): a C-family parameter stored into a
+                                                      //   struct field (`tp->signalcb = signalcb`) records the IX1-V2 slot fact Go and Rust record (ingest_valuerefs.h
+                                                      //   paramSlotFact). Rich file tag 316. kCacheVersion unchanged.
                                                       // 313 = 2026-11-18 (lane BX2 FIX 5, PLACEHOLDER: the train renumbers; above the batch's 311/312): a
                                                       //   Rust `macro_rules!` transcriber's call-shaped `name(` / `.name(` / `a::name(` / `$crate::a::name(` is a
                                                       //   Call reference of its macro (ingest_names.h scanTranscriberCalls). Rich file tag 314. kCacheVersion unchanged.

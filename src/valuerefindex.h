@@ -707,7 +707,10 @@ class ParamSlots
 {
 public:
     void take( std::uint32_t refIdx ) { m_refs.push_back( refIdx ); }
-    void build( const IngestResult& ing, TypeKeys& keys )
+    // `slotOfFact( q )`: the (type key, field) fact q's store lands in — SlotIndex::endOf, the rule a function stored there is keyed
+    // by (own-keyed types: TypeKeys; the C family: the object's declared struct type through the typedef / field facts; BX2 FIX 8).
+    template<class SlotOfFact>
+    void build( const IngestResult& ing, const SlotOfFact& slotOfFact )
     {
         for( const std::uint32_t q : m_refs )
         {
@@ -718,7 +721,8 @@ public:
             {
                 continue;   // a method registrar no call of its language reaches by name, or a fact outside its own function's definition
             }
-            const std::string to   = keys.keyOf( r ) + "#" + r.memberPath();
+            const auto [ type, field ] = slotOfFact( q );
+            const std::string to       = type + "#" + field;
             std::string&      have = m_slot[ jsImportKey( r.fromSymbol, std::to_string( r.argCount ) ) ];
             have = have.empty() || have == to ? to : std::string( kConflict );
         }
@@ -834,7 +838,11 @@ public:
     void build( const IngestResult& ing, std::span<const std::uint32_t> values, std::span<const std::vector<NodeId>> targets )
     {
         m_keys.build( ing );
-        m_params.build( ing, m_keys );
+        m_params.build( ing, [ & ]( std::uint32_t q )
+        {
+            End e = endOf( ing, q );
+            return std::pair{ std::move( e.type ), std::move( e.field ) };
+        } );
         for( std::size_t k = 0; k < values.size(); ++k )
         {
             if( targets[k].empty() )

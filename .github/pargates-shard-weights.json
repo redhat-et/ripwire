@@ -428,6 +428,7 @@
  "paginationcheck.sh": 53.0,
  "pagingsweepcheck.sh": 267.3,
  "panellegendcheck.sh": 18.2,
+ "paramslotcheck.sh": 1.5,
  "pargatescheck.sh": 8.9,
  "parsehealthcheck.sh": 1.9,
  "partitioncheck.sh": 7.2,

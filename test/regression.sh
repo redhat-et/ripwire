@@ -841,6 +841,7 @@ for _g in \
     paginationcheck \
     pagingsweepcheck \
     panellegendcheck \
+    paramslotcheck \
     parentcachecheck \
     pargatescheck \
     parsehealthcheck \
