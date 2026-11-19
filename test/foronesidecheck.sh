@@ -29,6 +29,9 @@
 #   (g)  two sinks with 10 common callers (more than the 8 whose paths were once kept): no caller's middle row is a pointer, byte-identical
 #   (h)  two C++ members named run on ONE line (SameQ::run reaches the left sink only, SameP::run both): SameQ::run is a pointer and
 #        SameP::run a row — each row's scope comes from its own n= qualifier, not from the first `run` at the line
+# A THIRD tree (off.ts):
+#   (u)  a path-walk node calls a function the other side never reaches (hop count kUnreached): the answer comes back (rc 0, well formed,
+#        no sanitizer report) — red under the ASan binary before the addShortestPathNodes overflow fix, both root/sink and two sinks
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
@@ -249,6 +252,26 @@ if grep -q 'n="many_mid_10"' "$TMP/g.on"; then ok "(g) many_mid_10 (the 10th com
 twin h 'same_left_value + same_right_value' SameQ::run
 arm h ptr SameQ::run "reaches the left sink only; its scope from its own qualifier"
 arm h row SameP::run "reaches both, on the same line as SameQ::run"
+# (u) A THIRD tree: a node on the path walk calls a function the other side's walk never reaches (hop count kUnreached = UINT32_MAX).
+#     addShortestPathNodes once tested `toSink[v] + 1 == toSink[u]`, which wraps there: an unsigned overflow the ASan build
+#     (-fsanitize=integer, -fno-sanitize-recover=all) aborts on, so the answer came back empty. The plain build answered the same
+#     before the fix (the wrapped 0 never equals a hop count > 0), so this arm is red under the ASan binary only.
+TREE=t3; mkdir -p "$TMP/t3"
+cat >"$TMP/t3/off.ts" <<'EOF'
+export function off_side_log(n: number): number { return n * 7; }
+export function off_sink_end(n: number): number { return n; }
+export function off_mid_step(n: number): number { return off_sink_end(n); }
+export function off_root_go(n: number): number { return off_mid_step(n) + off_side_log(n); }
+export function off_left_value(n: number): number { return n; }
+export function off_right_value(n: number): number { return n + 5; }
+export function off_driver(n: number): number { return off_left_value(n) + off_right_value(n) + off_side_log(n); }
+EOF
+for task in 'off_root_go + off_sink_end' 'off_left_value + off_right_value'; do
+    run "--for=$task" --page-bytes=0 >"$TMP/u.on" 2>"$TMP/u.err"; rc=$?
+    if [ "$rc" = 0 ] && [ -s "$TMP/u.on" ] && xmllint --noout "$TMP/u.on" 2>/dev/null && ! grep -q 'runtime error' "$TMP/u.err"; then
+        ok "(u) '$task': a walk node with an unreached callee answers (rc 0, well formed, no sanitizer report)"
+    else no "(u) '$task': rc=$rc $( grep -m1 'runtime error' "$TMP/u.err" | head -c 300 )"; fi
+done
 TREE=ts
 
 for arm in a a2; do
