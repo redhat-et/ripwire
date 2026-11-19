@@ -11386,11 +11386,12 @@ struct TangleDetailReader
     }
 };
 
-// QD-CREDIT-ROW for tangle (STAGE0 2.5): over the bar at the baseline, an input fell and none rose, and the score is lower.
+// QD-CREDIT-ROW for tangle (STAGE0 2.5): over the bar at the baseline, an input fell by the rise rule (tangleRise read backwards) and none rose, and the score is lower.
 inline bool tangleCredited( const TangleInputs& was, const TangleInputs& now ) noexcept
 {
-    const bool fell = now.nest < was.nest || now.deep < was.deep || now.steer < was.steer;
-    return tangleScore10( was ) >= kTangleBar10 && fell && !tangleRise( was, now ).any() && tangleScore10( now ) < tangleScore10( was );
+    // The rise rule read backwards (a level past the free ones, kTangleDeepRise deep lines, a steering local): a credit is as big a
+    // step as a row. Replay 11-19: "an input fell" alone credited buildGraph 56.9 -> 56.8 for one deep line.
+    return tangleScore10( was ) >= kTangleBar10 && tangleRise( now, was ).any() && !tangleRise( was, now ).any() && tangleScore10( now ) < tangleScore10( was );
 }
 
 // D4 RATCHET (report-only): each `ratchetable` key — over the bar now, existing at the baseline, inputs moved by this change — against its

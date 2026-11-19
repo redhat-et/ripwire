@@ -1717,7 +1717,7 @@ inline constexpr const char* kQdTangleLegend =
 // sentence defines both.
 inline constexpr const char* kQdRatchetLegend =
     "ratchet_ref= is the reference point the tangle ratchet read, the last tag reachable from HEAD: each function over the tangle bar "
-    "whose inputs this change moved is compared with its BEST since that tag (the lowest of each input and of the score over every "
+    "whose inputs this change moved is compared with its BEST since that tag (the lowest of each input and of the score over every first-parent "
     "version since it, or since the function's creation); ratchet_judged= counts those that had history, ratchet_unread= versions "
     "that could not be measured, ratchet_cut=\"1\" that only the 512 newest versions were read. ratchet=\"TAG\" on a tangle row: "
     "the score is above its best since TAG and an input rose over its minimum by the rise rule, so a function that crept up across "
@@ -1727,7 +1727,7 @@ inline constexpr const char* kQdRatchetLegend =
 inline constexpr const char* kQdImprovedLegend =
     "improved lists what this change made BETTER; it is never a row, never counted in regressions= and never gating. Each i is a "
     "function over its kind's bar at the baseline (complexity 15, verbosity 60, nesting 4, params 5, tangle 6) that is lower now by "
-    "at least the kind's minor delta (tangle: an input fell and none rose); kind= sym= was= now= p= read as on a row, n= is the "
+    "at least the kind's minor delta (tangle: an input fell by its rise step and none rose); kind= sym= was= now= p= read as on a row, n= is the "
     "count and more= the entries past the first 20 (in path and line order). ";
 
 // QD-MONSTER-GROWTH — emitted only when a monster="1" row is in the document.

@@ -2,7 +2,8 @@
 # tanglecheck.sh — QD-TANGLE gate: the tangle kind (report-only), its steering-local fact, the D4 best-since ratchet and the
 # QD-CREDIT-ROW <improved> section (STAGE0 2.1-2.8; quality.h appendTangleRows / appendTangleRatchet, qdbestsince.h).
 #
-# One seeded C++ repo, three stages (test/lib/tanglefixtures.py): v1 (tagged), c2 (committed), the working tree (judged).
+# One seeded C++ repo, four stages (test/lib/tanglefixtures.py): v1 (tagged); a side branch with wip (cuts creep) then c2,
+# merged --no-ff; the working tree (judged).
 #   (t1) TANGLED NEW: a depth-6 function with a steering flag rows: kind="tangle" sev="minor" origin="new-symbol", why= names the
 #        nesting, fix= an extraction with its lines, locals= the flag.
 #   (n1) LONG SEQUENTIAL, (n2) LONG ORCHESTRATOR, (n3) FLAT DISPATCHER, (n4) SHORT NESTED HELPER: no tangle row. Each counts its
@@ -16,13 +17,16 @@
 #        later: no steer= (premise: steerscope in --metrics). Census 11-19: genPathOf's `a`.
 #   (r1) RATCHET: creep gained 3 deep lines at c2 and 3 more in the working tree — each step under the rise rule (+5), so no
 #        baseline row reason exists, but against its best since v1 it rose 6: a tangle row with ratchet="v1"; root ratchet_ref="v1".
+#        The wip side branch's 5-deep-line creep is not its best: the ratchet reads the first-parent line (replay 11-19).
 #   (r2) CREDIT: shrink lost its deep region: listed in <improved> as kind="tangle", and no tangle row.
+#   (r4) NO CREDIT FOR A NUDGE: nudge (over the bar) lost 2 of its 40 deep lines, under the rise step: no <improved> entry
+#        (premise: nudge over the bar in --metrics). Replay 11-19: buildGraph 56.9 -> 56.8 was credited for one deep line.
 #   (r3) NEW FN: the tangled new function's row carries no ratchet= (a symbol created after the tag has no history here).
 #   (c1) CREDIT: simplify ccx 21 -> 11: listed in <improved> as kind="complexity".
 #   (g)  report-only: gating="0" on the root although tangle rows are present (premise: >= 1 tangle row).
 #   (j)  --json carries the same tangle rows (count) and "improved".
 #   (d)  determinism: the working-tree run twice is byte-identical.
-# Red before the lane (main's bin): t1 r1 r2 r3 c1 s1 (no tangle kind, no steer=, no improved); red before the census fixes (11-19): n5 s3 s4.
+# Red before the lane (main's bin): t1 r1 r2 r3 c1 s1 (no tangle kind, no steer=, no improved); red before the census fixes (11-19): n5 s3 s4; before the replay fixes (11-19): r1 (wip best) r4.
 # Usage: test/tanglecheck.sh [BIN]
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -42,8 +46,13 @@ G=( git -c user.name=t -c user.email=t@t -c commit.gpgsign=false -c tag.gpgsign=
 R="$TMP/repo"; mkdir -p "$R"; "${G[@]}" -C "$R" init -q
 python3 "$ROOT/test/lib/tanglefixtures.py" v1 "$R" || { echo "fixture writer failed"; exit 2; }
 "${G[@]}" -C "$R" add -A && "${G[@]}" -C "$R" commit -qm v1 && "${G[@]}" -C "$R" tag v1
+main="$( "${G[@]}" -C "$R" symbolic-ref --short HEAD )"
+"${G[@]}" -C "$R" checkout -qb wip
+python3 "$ROOT/test/lib/tanglefixtures.py" wip "$R" || { echo "fixture writer failed"; exit 2; }
+"${G[@]}" -C "$R" commit -qam wip
 python3 "$ROOT/test/lib/tanglefixtures.py" c2 "$R" || { echo "fixture writer failed"; exit 2; }
 "${G[@]}" -C "$R" add -A && "${G[@]}" -C "$R" commit -qm c2
+"${G[@]}" -C "$R" checkout -q "$main" && "${G[@]}" -C "$R" merge -q --no-ff -m "merge wip" wip || { echo "fixture merge failed"; exit 2; }
 python3 "$ROOT/test/lib/tanglefixtures.py" wt "$R" || { echo "fixture writer failed"; exit 2; }
 
 Q="$TMP/qd.xml"
@@ -111,6 +120,12 @@ grep -qE '<i kind="tangle" sym="[^"]*shrink"' "$Q" && ok "(r2) shrink credited i
 [ -z "$( trow shrink )" ] && ok "(r2) shrink: no tangle row" || no "(r2) shrink: unexpected tangle row $( trow shrink )"
 grep -qE '<i kind="complexity" sym="[^"]*simplify" was="2[0-9]" now="1[0-9]"' "$Q" && ok "(c1) simplify credited in <improved> (complexity)" \
     || no "(c1) simplify: no <i kind=\"complexity\"> entry ($( grep -oE '<improved[^>]*>' "$Q" ))"
+# (r4)
+mg="$( mrow nudge )"
+if [ -z "$mg" ] || [ -z "$( attr "$mg" tangle )" ] || [ "$( printf '%s' "$( attr "$mg" tangle )" | cut -d. -f1 )" -lt 6 ]; then
+    no "(r4) PREMISE: nudge should be over the tangle bar in --metrics, got '${mg:-none}'"
+elif grep -qE '<i kind="tangle" sym="[^"]*nudge"' "$Q"; then no "(r4) nudge: a 2-line fall credited: $( grep -oE '<i kind="tangle" sym="[^"]*nudge"[^>]*>' "$Q" )"
+else ok "(r4) nudge (tangle=$( attr "$mg" tangle ), 2 deep lines fewer): no <improved> entry"; fi
 # (r3)
 r="$( trow tangled )"; [ -n "$r" ] && [ -z "$( attr "$r" ratchet )" ] && ok "(r3) tangled (new): no ratchet=" || no "(r3) tangled: want a row without ratchet=, got '${r:-none}'"
 # (g) report-only: no tangle row gates (other kinds' rows on these fixtures may)
