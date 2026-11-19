@@ -3016,18 +3016,8 @@ inline HashMap<std::string, char> pythonBaseClauseNames( const IngestResult& ing
 // pkg's __init__ may bind). pythonReexportChain and pythonImportedBases read the bindings of exactly these (a renamed hop, a package
 // that binds the submodule's name). PY-IMPORT-ALIAS-CALL adds the member of EVERY renamed
 // member import (`from m import f as g`: f), whose bindings in m pythonRenamedImportPin reads (pythonEndpointBindsOnlyByClass).
-// IMPORT-PROVED-SPLITS adds the name of every plain module-scope `from m import C` whose C names Python classes in two or more files
-// (pythonMultiFileClassNames): pythonRenamedImportPin reads m's own bindings of it too.
-inline void addPythonLookupNames( const IngestResult& ing, HashMap<std::string, char>& names, const HashMap<std::string, char>& multi )
+inline void addPythonLookupNames( const IngestResult& ing, HashMap<std::string, char>& names )
 {
-    for( const Binding& b : ing.bindings )
-    {
-        if( b.kind == LocalBindKind::Import && b.importedName.empty() && multi.contains( b.var ) && b.fileId < ing.files.size()
-            && isPythonSourcePath( rootRelPath( ing, b.fileId ) ) )   // a Python file's import (another language's names no Python binding)
-        {
-            names.try_emplace( b.var, '\0' );
-        }
-    }
     for( const Reference& r : ing.references )
     {
         if( r.isInherit && !r.memberRoot.empty() && r.fileId < ing.files.size() && isPythonSourcePath( rootRelPath( ing, r.fileId ) ) )
@@ -3049,6 +3039,20 @@ inline void addPythonLookupNames( const IngestResult& ing, HashMap<std::string, 
     }
 }
 
+// IMPORT-PROVED-SPLITS: the name of every plain `from m import C` in a Python file whose C names Python classes in two or more files
+// (`multi`: pythonMultiFileClassNames) — buildPythonNameBinds reads its bindings, so pythonRenamedImportPin can ask m's own bindings of it
+inline void addPythonMultiFileImportNames( const IngestResult& ing, const HashMap<std::string, char>& multi, HashMap<std::string, char>& names )
+{
+    for( const Binding& b : ing.bindings )
+    {
+        if( b.kind == LocalBindKind::Import && b.importedName.empty() && multi.contains( b.var ) && b.fileId < ing.files.size()
+            && isPythonSourcePath( rootRelPath( ing, b.fileId ) ) )   // a Python file's import (another language's names no Python binding)
+        {
+            names.try_emplace( b.var, '\0' );
+        }
+    }
+}
+
 // the scope a Python binding sits in: its enclosing def or class, kNoNode for module scope (including every binding at byte 0 —
 // pythonBindAtFileStart: a `global Base` rebinding inside a def that starts the file, and that def's own name).
 inline NodeId pythonBindScope( const IngestResult& ing, const Binding& b ) noexcept
@@ -3064,15 +3068,14 @@ inline NodeId pythonBindScope( const IngestResult& ing, const Binding& b ) noexc
 // PythonScopeFacts::nameBinds: every binding of a name a Python class's base clause starts with (the bare base, else its
 // qualifier) or is looked up under (addPythonLookupNames), per file and scope. buildPythonModuleRebindVetoes keeps only the module-scope facts; the base-name rule (pythonBaseNameProven)
 // needs the scoped ones too, because a class statement resolves its base in ITS lexical scope chain, not the module's.
-inline HashMap<std::string, std::vector<PythonNameBind>> buildPythonNameBinds( const IngestResult& ing, HashMap<std::string, char> wanted,
-                                                                               const HashMap<std::string, char>& multi )
+inline HashMap<std::string, std::vector<PythonNameBind>> buildPythonNameBinds( const IngestResult& ing, HashMap<std::string, char> wanted = {} )
 {
     HashMap<std::string, std::vector<PythonNameBind>> binds;
     for( auto& [ name, c ] : pythonBaseClauseNames( ing ) )
     {
         wanted.try_emplace( name, c );
     }
-    addPythonLookupNames( ing, wanted, multi );
+    addPythonLookupNames( ing, wanted );
     std::string                                       key;
     for( const Binding& b : ing.bindings )
     {
@@ -3616,7 +3619,8 @@ inline PythonImportVetoes buildPythonImportVetoes( const IngestResult& ing, cons
     HashMap<std::string, char> callees = pythonSubmoduleCalleeNames( ing, t.submodules );
     addScopedSubmoduleCalleeNames( ing, t.scopedSubmodules, callees );
     t.multiFileClasses   = pythonMultiFileClassNames( ing );
-    t.scopes.nameBinds   = buildPythonNameBinds( ing, std::move( callees ), t.multiFileClasses );
+    addPythonMultiFileImportNames( ing, t.multiFileClasses, callees );
+    t.scopes.nameBinds   = buildPythonNameBinds( ing, std::move( callees ) );
     return t;
 }
 
@@ -3937,7 +3941,18 @@ struct JsImportTables
 inline bool spanCoversAt( const HashMap<std::string, std::vector<VarSpan>>& spans, const std::string& key, std::uint32_t at )
 {
     const auto it = spans.find( key );
-    return it != spans.end() && std::ranges::any_of( it->second, [ at ]( const VarSpan& s ) { return at >= s.startByte && at < s.endByte; } );
+    if( it == spans.end() )
+    {
+        return false;
+    }
+    for( const VarSpan& s : it->second )
+    {
+        if( at >= s.startByte && at < s.endByte )
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 // FC3: is this BARE call made through a name WRITTEN after its declaration, at a byte that declaration's scope holds
@@ -6978,9 +6993,7 @@ struct FalseEdgeRules
     }
     bool shadowedAt( const Reference& r, std::string_view name ) const
     {
-        const auto it = shadows.find( fileNameKey( key, r.fileId, name ) );
-        return it != shadows.end()
-            && std::any_of( it->second.begin(), it->second.end(), [ & ]( const VarSpan& s ) { return r.startByte >= s.startByte && r.startByte < s.endByte; } );
+        return spanCoversAt( shadows, fileNameKey( key, r.fileId, name ), r.startByte );
     }
     // the file binds `name` at this site: an import or alias of it, or a declaration whose scope holds the site
     bool jsFileBinds( const Reference& r, std::string_view name ) const
