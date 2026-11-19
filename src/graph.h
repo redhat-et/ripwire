@@ -2808,6 +2808,7 @@ struct ExternalVetoTables
     HashMap<std::string, std::uint32_t> scopedImportBindFile;
     HashMap<std::string, std::uint32_t> scopedSubmoduleBindFile;
     HashMap<std::string, char>          scopedImportNames;   // "<fileId>#y": some def or class in the file imports y (pythonEnclosingDefBinds' pre-test)
+    HashMap<std::string, char>          pythonMultiFileClasses;   // IMPORT-PROVED-SPLITS: pythonMultiFileClassNames, built once per run
 };
 
 // the ONE module file `import X [as y]` binds y to (Step-A's `resolved`, else the root-scoped suffix match of an absolute spec), kNoFile when
@@ -3001,9 +3002,8 @@ inline HashMap<std::string, char> pythonBaseClauseNames( const IngestResult& ing
 // member import (`from m import f as g`: f), whose bindings in m pythonRenamedImportPin reads (pythonEndpointBindsOnlyByClass).
 // IMPORT-PROVED-SPLITS adds the name of every plain module-scope `from m import C` whose C names Python classes in two or more files
 // (pythonMultiFileClassNames): pythonRenamedImportPin reads m's own bindings of it too.
-inline void addPythonLookupNames( const IngestResult& ing, HashMap<std::string, char>& names )
+inline void addPythonLookupNames( const IngestResult& ing, HashMap<std::string, char>& names, const HashMap<std::string, char>& multi )
 {
-    const HashMap<std::string, char> multi = pythonMultiFileClassNames( ing );
     for( const Binding& b : ing.bindings )
     {
         if( b.kind == LocalBindKind::Import && b.importedName.empty() && multi.contains( b.var ) )
@@ -3047,14 +3047,15 @@ inline NodeId pythonBindScope( const IngestResult& ing, const Binding& b ) noexc
 // PythonScopeFacts::nameBinds: every binding of a name a Python class's base clause starts with (the bare base, else its
 // qualifier) or is looked up under (addPythonLookupNames), per file and scope. buildPythonModuleRebindVetoes keeps only the module-scope facts; the base-name rule (pythonBaseNameProven)
 // needs the scoped ones too, because a class statement resolves its base in ITS lexical scope chain, not the module's.
-inline HashMap<std::string, std::vector<PythonNameBind>> buildPythonNameBinds( const IngestResult& ing, HashMap<std::string, char> wanted = {} )
+inline HashMap<std::string, std::vector<PythonNameBind>> buildPythonNameBinds( const IngestResult& ing, HashMap<std::string, char> wanted,
+                                                                               const HashMap<std::string, char>& multi )
 {
     HashMap<std::string, std::vector<PythonNameBind>> binds;
     for( auto& [ name, c ] : pythonBaseClauseNames( ing ) )
     {
         wanted.try_emplace( name, c );
     }
-    addPythonLookupNames( ing, wanted );
+    addPythonLookupNames( ing, wanted, multi );
     std::string                                       key;
     for( const Binding& b : ing.bindings )
     {
@@ -3098,6 +3099,7 @@ struct PythonImportVetoes
     HashMap<std::string, std::uint32_t>     memberImportFile;
     std::vector<std::vector<std::uint32_t>> importFiles;
     PythonScopeFacts                        scopes;
+    HashMap<std::string, char>              multiFileClasses;   // pythonMultiFileClassNames (ExternalVetoTables::pythonMultiFileClasses)
 };
 
 // FE-A: resolvePythonModuleSuffix scans every indexed path, and FE-A asks it about every UNRESOLVED absolute import (the
@@ -3597,7 +3599,8 @@ inline PythonImportVetoes buildPythonImportVetoes( const IngestResult& ing, cons
     t.scopes             = buildPythonStarTargets( ing, fileIndex, memo );
     HashMap<std::string, char> callees = pythonSubmoduleCalleeNames( ing, t.submodules );
     addScopedSubmoduleCalleeNames( ing, t.scopedSubmodules, callees );
-    t.scopes.nameBinds   = buildPythonNameBinds( ing, std::move( callees ) );
+    t.multiFileClasses   = pythonMultiFileClassNames( ing );
+    t.scopes.nameBinds   = buildPythonNameBinds( ing, std::move( callees ), t.multiFileClasses );
     return t;
 }
 
@@ -3669,6 +3672,7 @@ inline ExternalVetoTables buildExternalVetoTables( const IngestResult& ing )
         t.memberImportFile    = std::move( iv.memberImportFile );
         t.importFiles         = std::move( iv.importFiles );
         t.pythonScopes        = std::move( iv.scopes );
+        t.pythonMultiFileClasses = std::move( iv.multiFileClasses );
         finalizePythonSubmoduleBinds( iv.submodules, t );
         finalizePythonScopedBinds( ing, iv, t );
     }
@@ -3908,6 +3912,9 @@ struct JsImportTables
     HashMap<std::string, std::vector<VarSpan>> shadows;
     HashMap<std::string, std::vector<VarSpan>> rebinds;   // FC3: "<fileId>#name" → JsRebind spans (model.h): a call there is undecided
     HashMap<std::string, std::vector<VarSpan>> pinnedRebinds;   // FC3: the rebinds whose declaration already bound a value: a MEMBER call through the name has no receiver at all there (jsMemberRootWritten)
+    std::vector<char>                          importingFiles;  // per fileId: 1 when the file has an ES import binding (a `targets` key)
+    // can `targets` hold a key of file `f`? (no "<fileId>#name" key is built for a file with no ES import)
+    [[nodiscard]] bool importsIn( std::uint32_t f ) const noexcept { return f < importingFiles.size() && importingFiles[ f ] != 0; }
 };
 
 // FC3: is this BARE call made through a name WRITTEN after its declaration, at a byte that declaration's scope holds
@@ -4168,6 +4175,7 @@ inline JsImportTables buildJsImportTables( const IngestResult& ing, const WsIncl
         return tables;
     }
     tables.targets.reserve( bindCounts.allOf( LocalBindKind::JsImport ) );
+    tables.importingFiles.assign( ing.files.size(), 0 );
     JsExportTables ex = buildJsExportTablesSized( ing, bindCounts );
     for( const Binding& b : ing.bindings )
     {
@@ -4176,6 +4184,7 @@ inline JsImportTables buildJsImportTables( const IngestResult& ing, const WsIncl
         // the name it binds is T's, so a field or local written `T` finds T's module (an interface's: receiverevidence.h importedTypeClass)
         JsImportTarget target = pinJsImport( ing, ex, workspace, b.fileId, b.typeName, b.isFromAssignment ? std::string_view( b.var ) : std::string_view( b.importedName ) );
         target.renamed        = b.importedName != b.var && !b.isFromAssignment;
+        tables.importingFiles[ b.fileId ] = 1;
         const auto [ found, inserted ] = tables.targets.try_emplace( jsImportKey( b.fileId, b.var ), target );
         if( !inserted )
         {
@@ -9331,7 +9340,10 @@ struct PythonRenamedImports
     HashMap<std::string, std::string> renamed;
     HashMap<std::string, char>        plainClasses;
     std::vector<PythonAliasShadow>    shadows;
+    std::vector<char>                 importingFiles;   // per fileId: 1 when some module-scope import there named a member (a superset of the keyed files)
     [[nodiscard]] bool                empty() const noexcept { return renamed.empty() && plainClasses.empty(); }
+    // can `renamed` / `plainClasses` hold a key of file `f`? (no "<fileId>#name" key is built for a file with none)
+    [[nodiscard]] bool importsIn( std::uint32_t f ) const noexcept { return f < importingFiles.size() && importingFiles[ f ] != 0; }
     [[nodiscard]] bool                binds( const std::string& key ) const { return renamed.contains( key ) || plainClasses.contains( key ); }
     // the member `key` ("<fileId>#name") imports and whether it is a plain import of a class (the member is the name itself); "" for none
     struct Member
@@ -9377,11 +9389,12 @@ inline std::string pythonImportMember( const IngestResult& ing, const Binding& b
     return b.importedName.empty() && multi.contains( b.var ) ? std::string( b.var ) : std::string{};
 }
 
-inline PythonRenamedImports buildPythonRenamedImports( const IngestResult& ing )
+// `multi`: ExternalVetoTables::pythonMultiFileClasses (pythonMultiFileClassNames)
+inline PythonRenamedImports buildPythonRenamedImports( const IngestResult& ing, const HashMap<std::string, char>& multi )
 {
-    PythonRenamedImports             out;
-    std::string                      key;
-    const HashMap<std::string, char> multi = pythonMultiFileClassNames( ing );
+    PythonRenamedImports out;
+    std::string          key;
+    out.importingFiles.assign( ing.files.size(), 0 );
     for( const Binding& b : ing.bindings )
     {
         if( b.kind != LocalBindKind::Import || b.var.empty() || b.fileId >= ing.files.size() || !isPythonSourcePath( rootRelPath( ing, b.fileId ) ) )
@@ -9389,6 +9402,7 @@ inline PythonRenamedImports buildPythonRenamedImports( const IngestResult& ing )
             continue;
         }
         const std::string member = pythonImportMember( ing, b, multi );
+        out.importingFiles[ b.fileId ] = member.empty() ? out.importingFiles[ b.fileId ] : char( 1 );
         const auto [ it, fresh ] = out.renamed.try_emplace( fileNameKey( key, b.fileId, b.var ), member );
         if( !fresh && it->second != member )
         {
@@ -9440,6 +9454,10 @@ inline NodeId pythonRenamedImportPin( const IngestResult& ing, const PythonRenam
                                       const ExternalVeto& veto, const HashMap<std::string, rw::SmallVec<NodeId, 2>>& byName, const Reference& r,
                                       std::string_view name )
 {
+    if( !imports.importsIn( r.fileId ) )
+    {
+        return kNoNode;   // no module-scope member import in r's file: no key to build
+    }
     std::string key;
     const auto [ member, plain ] = imports.memberOf( fileNameKey( key, r.fileId, name ), name );   // plain: IMPORT-PROVED-SPLITS' `from m import C`
     if( member.empty() || r.fromSymbol == kNoNode || r.fromSymbol >= ing.symbols.size()
@@ -10520,6 +10538,10 @@ struct ImportProvedClass
     // table names it) — not where a local declaration shadows the import or a write rebinds the name (FC3) at r's byte
     NodeId jsClass( const Reference& r, std::string_view name ) const
     {
+        if( !jsImports.importsIn( r.fileId ) )
+        {
+            return kNoNode;   // no ES import in r's file: no key to build
+        }
         const std::string key = jsImportKey( r.fileId, name );
         const auto        pin = jsImports.targets.find( key );
         if( pin == jsImports.targets.end() || pin->second.outcome != JsImportOutcome::Pinned || pin->second.node == kNoNode
@@ -10886,7 +10908,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // ExternalVeto above buildGraph; `vetoExternal` is the refusal: no edge, one header count, one `C external`
     // census row with no target.
     const ExternalVeto externalVeto{ ing, canonByName, fieldNarrow.localNameSet, extVeto };
-    const PythonRenamedImports pyRenamedImports = buildPythonRenamedImports( ing );   // PY-IMPORT-ALIAS-CALL (pythonRenamedImportPin)
+    const PythonRenamedImports pyRenamedImports = buildPythonRenamedImports( ing, extVeto.pythonMultiFileClasses );   // PY-IMPORT-ALIAS-CALL (pythonRenamedImportPin)
     const PythonLexicalScopes  pyScopes         = buildPythonLexicalScopes( ing, byName );   // PY-CLASS-SPRAY (pythonLexicalScopePin)
     // The builtin-method name gate (BuiltinMethodGate above): decides, in Rule 3's place, the calls whose name is a
     // method of the caller language's builtin map/list/set/string type. Inert (active=false) on a corpus with no
