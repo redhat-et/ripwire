@@ -617,6 +617,7 @@ for _g in \
     grepcheck \
     grepcontextcheck \
     grepcorpuscheck \
+    grepdegradedcheck \
     grepfastcheck \
     grepfollowupcheck \
     grepignorecheck \
@@ -820,6 +821,7 @@ for _g in \
     notecanoncheck \
     notescheck \
     notesdegradecheck \
+    notfoundtextcheck \
     nsfiltercheck \
     nulbytecheck \
     numericrefusecheck \
@@ -843,6 +845,7 @@ for _g in \
     paginationcheck \
     pagingsweepcheck \
     panellegendcheck \
+    paramslotcheck \
     parentcachecheck \
     pargatescheck \
     parsehealthcheck \
@@ -1011,6 +1014,7 @@ for _g in \
     runtracecheck \
     rustanccheck \
     rustimportprecisecheck \
+    rustmacrocallcheck \
     rustmacropathcheck \
     rustqualcheck \
     rustrootscheck \

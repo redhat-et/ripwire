@@ -1198,6 +1198,15 @@ Discloses: `cells_capped`, `decls_capped`
 | `kMaxCells` | `2048` | — | — |
 | `kRowCap` | `40` | — | — |
 
+### `src/notfoundtext.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kNotFoundTextFiles` | `512` | — | hit files read for the whole-word test |
+| `kNotFoundTextRows` | `20` | — | <text> rows printed (text_files= counts every file) |
+
 ### `src/packtask.h`
 
 Discloses: `capped`, `mention_syms_capped`, `ranking_capped`

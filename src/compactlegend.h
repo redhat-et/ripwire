@@ -1215,6 +1215,10 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "suppressed_string", "suppressed_string=N: string-tier hits held back, not in hits=; the grep-in=any flag serves them", false, "grep", MapHeaderRead::No, {}, "grep" },
     { "tier_parsed", "tier_parsed=N: hit files parsed to classify hits as code/comment/string (budgeted; see tier_budget=)", false, "grep", MapHeaderRead::No, {}, "grep" },
     { "tier_unclassified", "tier_unclassified=N: hits in files never classified; nonzero = tier label unproven for them", false, "grep", MapHeaderRead::No, {}, "grep" },
+    // BX2 step 2 (verbs_grep.h grepHeldAttrs): present only when a file's every hit was held back.
+    { "held_files", "held_files=N: files whose every hit was held back (no row names them)", false, "grep", MapHeaderRead::No, {}, "grep" },
+    { "held", "held=: the first 5 of those paths", false, "grep", MapHeaderRead::No, {}, "grep" },
+    { "held_next", "held_next=: the call that serves them (every tier)", false, "grep", MapHeaderRead::No, {}, "grep" },
     // cut-fix lane D: three attributes the grep root and rows emit that the compact dialect never read. tier_parsed='s own
     // reading pointed at tier_budget= ("see tier_budget=") and no row defined it; tier= labelled a comment-only answer
     // undefined; and line_bytes= — the one disclosure that a row's matched text was CUT (search.h kGrepMatchedLineMaxBytes)
@@ -1376,6 +1380,16 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "near", "near=: the indexed name to retry with", false, "impact", MapHeaderRead::No, {}, "impact" },
     { "near_renamed", "near_renamed=1: a definition of the selector left a changed file that now defines near= (a rename, not a mention)", false, "impact", MapHeaderRead::No, {}, "impact" },
     { "refused", "refused=N: N definitions fit the selector and it cannot pick one (a refusal, not an absence; found=0 counts the rows listed)", false, "impact", MapHeaderRead::No, {}, "impact" },
+    // BX2 FIX 9 (notfoundtext.h): present only on a not-found answer that found the name as text.
+    { "text_hits", "text_hits=N: beside found=0, the name as a whole word on N lines: PLAIN TEXT, never a call or use", false, "callers", MapHeaderRead::No, {}, "callers" },
+    { "text_files", "text_files=K: the files holding them (<text> rows, at most 20)", false, "callers", MapHeaderRead::No, {}, "callers" },
+    { "n", "<text p=FILE:LINE n=N>: one file of that text, its first such line, n= its lines (text, not a call)", true, "text", MapHeaderRead::No, {}, "callers" },
+    { "text_hits", "text_hits=N: beside found=0, the name as a whole word on N lines: PLAIN TEXT, never a call or use", false, "uses", MapHeaderRead::No, {}, "uses" },
+    { "text_files", "text_files=K: the files holding them (<text> rows, at most 20)", false, "uses", MapHeaderRead::No, {}, "uses" },
+    { "n", "<text p=FILE:LINE n=N>: one file of that text, its first such line, n= its lines (text, not a call)", true, "text", MapHeaderRead::No, {}, "uses" },
+    { "text_hits", "text_hits=N: beside found=0, the name as a whole word on N lines: PLAIN TEXT, never a call or use", false, "impact", MapHeaderRead::No, {}, "impact" },
+    { "text_files", "text_files=K: the files holding them (<text> rows, at most 20)", false, "impact", MapHeaderRead::No, {}, "impact" },
+    { "n", "<text p=FILE:LINE n=N>: one file of that text, its first such line, n= its lines (text, not a call)", true, "text", MapHeaderRead::No, {}, "impact" },
     { "found", "found=0: no indexed definition matched the selector, nothing listed or counted (zero = none found, not none exists); exit stays 1", false, "defs", MapHeaderRead::No, {}, "defs" },
     { "of", "of=: the name asked for", false, "defs", MapHeaderRead::No, {}, "defs" },
     { "near", "near=: the indexed name to retry with", false, "defs", MapHeaderRead::No, {}, "defs" },

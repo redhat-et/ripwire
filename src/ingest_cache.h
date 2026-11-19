@@ -380,7 +380,14 @@ constexpr std::uint32_t kCacheVersion = 52;           // 52: lane failure-defaul
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 313;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 317;          // bump on any grammar/.scm/extraction change
+                                                      // 317 = 2026-11-19 (INT1, the 0.7.0 candidate integration/070-candidate: ONE number for lane BX2's two parser members, strictly
+                                                      //   above main d65f60c6d's 313/314 (TRAIN-1117b) and above both BX2 placeholders 313 and 315, so no cache a lane binary wrote
+                                                      //   under a placeholder reads as this tree's). Rich file tag 318. kCacheVersion unchanged.
+                                                      //   - BX2 FIX 5 (its placeholder 313): a Rust `macro_rules!` transcriber's call-shaped `name(` / `.name(` / `a::name(` /
+                                                      //     `$crate::a::name(` is a Call reference of its macro (ingest_names.h scanTranscriberCalls).
+                                                      //   - BX2 FIX 8 (its placeholder 315): a C-family parameter stored into a struct field (`tp->signalcb = signalcb`) records
+                                                      //     the IX1-V2 slot fact Go and Rust record (ingest_valuerefs.h paramSlotFact).
                                                       // 313 = 2026-11-17 (TRAIN-1117b: ONE number for its two parser members, strictly above main c565a3fad's 311/312
                                                       //   (#420, landed by TRAIN-1117a-r #686)). Rich file tag 314. kCacheVersion unchanged.
                                                       //   - #446 round 2, @SeddonShen, landed as lane land-606 (its placeholder 316): Java base clauses read as

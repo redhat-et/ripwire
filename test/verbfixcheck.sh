@@ -12,11 +12,10 @@
 #        to nothing, because the value resolver kept every internal-linkage definition private to its own FILE. Linkage is per
 #        translation unit: a header's static is in every unit that #includes it, directly or through another header.
 #        A static in a .c file stays private; a file that does not include the header binds nothing.
-#   [F2] MACRO SEE-THROUGH (callhierarchy.h callHierarchyRows, verbs_navigate.h runUses). tmux's cmdq_get_callback1 is only
-#        ever called through `#define cmdq_get_callback(cb, data) cmdq_get_callback1(#cb, cb, data)`: --callers printed the
-#        macro row and stopped (1 of 9 files). The macro's own callers now follow the direct rows, each marked
-#        via="macro:NAME" (JSON "via":"macro:NAME", columnar <via> 3), through a chain of macros too; --uses appends the
-#        macro's call sites the same way and counts them in via_macro=. An answer with no macro row is unchanged.
+#   [F2] MACRO SEE-THROUGH IS HELD (INT1, the 0.7.0 candidate). BX1/BX2 FIX 2 (via="macro:NAME" rows behind a function-like
+#        macro's row on --callers / --uses) failed its pre-registered byte bar on T5e and is reverted on this branch (the revert
+#        of BX2's 3556e0d4e and of its merge 86c33ba52). Until it lands, the arms below assert its absence: no via="macro:"
+#        row, no via_macro= count, and --callers=get_cb1 prints the macro row and stops.
 #
 # Arm classes: [P] positive — RED on the parent binary (lane/v1-verbdef e6671f267); [N] near miss — a shape the change must
 # not touch; [C] control — holds on every binary (the pins were taken from the parent).
@@ -115,7 +114,21 @@ a="$( rw h --callers=other.c:row_cmp )"
 has "$a" 'value_refs="1"' "(F3.6) [N] a .c static stays private: other.c's row_cmp has its own file's use only"
 hasnt "$a" 't1.c' "(F3.7) [N] ... and never t1.c's"
 
-# [F2] arms land with their fix (BX1 commit 3).
+# ── [F2] HELD: no macro see-through row may be printed (INT1 hold of BX2 FIX 2) ───────────────────────────────────────
+echo "[F2] macro see-through is held: no via=\"macro:\" row"
+for v in callers uses; do
+    for f in json columnar xml; do
+        [ "$v.$f" = uses.json ] && continue   # --uses has no --json (it refuses the flag)
+        case "$f" in json) a="$( rw m --$v=get_cb1 --json )" ;; columnar) a="$( rw m --$v=get_cb1 --format=columnar )" ;; *) a="$( rw m --$v=get_cb1 --legend=full )" ;; esac
+        has "$a" 'get_cb1' "(F2H-$v-$f.0) [C] --$v=get_cb1 ($f) answered"
+        hasnt "$a" 'macro:' "(F2H-$v-$f.1) [N] --$v ($f) prints no via=\"macro:NAME\" see-through row"
+        hasnt "$a" 'via_macro' "(F2H-$v-$f.2) [N] --$v ($f) carries no via_macro= count"
+    done
+done
+a="$( body "$( rw m --callers=get_cb1 )" )"
+has "$a" 'p="q.c:' "(F2H.3) [C] the direct caller direct() is listed"
+hasnt "$a" 'p="a.c:' "(F2H.4) [N] start_a (through get_cb) is not listed: the macro row is where the answer stops"
+hasnt "$a" 'p="b.c:' "(F2H.5) [N] start_b (through a two-macro chain) is not listed"
 
 a1="$( rw m --callers=get_cb1 )"; a2="$( rw m --callers=get_cb1 )"
 if [ "$a1" = "$a2" ]; then ok "(D) [C] deterministic: two runs byte-identical"; else no "(D) two runs differ"; fi

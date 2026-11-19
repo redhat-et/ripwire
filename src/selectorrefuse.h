@@ -350,6 +350,25 @@ inline std::string withRenameClause( std::string msg, const NotFoundNear& near, 
 // The answer document a not-found refusal prints on stdout beside its exit 1. `echo` is the selector in the verb's
 // own attribute names (of=, or from=/to= for path), `missing` names the endpoint that matched nothing — "from", "to" or
 // "both" ("" for a one-selector verb); near= then retries the first endpoint it names. XML under the verb's root tag with its legend comment, or one JSON object under --json.
+// BX2 FIX 9 (notfoundtext.h, test/notfoundtextcheck.sh): a bare selector as PLAIN TEXT, when the graph found nothing —
+// whole-word lines, the files holding them, one row per file (its first line, its line count). Never a call or a use: fastify's
+// `kReplyHijacked` is an object-literal key, no definition, so every graph verb answered found="0" while two files read it.
+struct NotFoundText
+{
+    struct Row
+    {
+        std::string   path;
+        std::uint32_t line  = 0;   // the file's first whole-word line
+        std::uint32_t lines = 0;   // its whole-word lines
+    };
+    std::string      term;           // the name searched (a bare selector); "" = no evidence was sought
+    std::size_t      hits  = 0;      // whole-word lines, every file read
+    std::size_t      files = 0;      // files holding one
+    bool             floor = false;  // the scan stopped at a budget: both counts are floors
+    std::vector<Row> rows;           // at most kNotFoundTextRows, in the grep's order (source, tests, docs; then path)
+    bool             mcpKeys = false;  // the JSON rows in MCP's "file" / "line" keys (the MCP twins), not the CLI-JSON "p":"F:L"
+};
+
 struct NotFoundAnswer
 {
     std::string_view                                       tag;
@@ -358,6 +377,7 @@ struct NotFoundAnswer
     NotFoundNear                                           near;
     std::size_t                                            refused = 0;   // N != 0 (> 1): N definitions fit the selector and none was chosen (a refusal, not an absence); found= stays 0, the contract
     std::size_t                                            nearMatches = 0;   // IMPACT-PATH: N > 1 indexed files end with the path selector; near= is the first by path (matches=N)
+    NotFoundText                                           text;              // BX2 FIX 9: empty unless a callers / uses / impact miss found the name as text
 
     // the legend sentence of a refused answer (refused != 0), spelled with the JSON/XML member by countFieldOrEmpty
     std::string_view refusedLegend() const
@@ -365,6 +385,49 @@ struct NotFoundAnswer
         return refused != 0 ? " refused=N: found=0 counts what was listed; N indexed definitions fit the selector and it cannot pick one (a refusal, not an absence), and stderr names them." : "";
     }
 };
+
+// BX2 FIX 9: the text evidence in each dialect — JSON members; XML root attributes and the <text> rows; the legend clause.
+inline std::string notFoundTextJson( const NotFoundText& t )
+{
+    if( t.hits == 0 )
+    {
+        return {};
+    }
+    std::string body = ",\"text_hits\":" + std::to_string( t.hits ) + ",\"text_files\":" + std::to_string( t.files ) + ( t.floor ? ",\"counts_floor\":true" : "" ) + ",\"text\":[";
+    for( std::size_t k = 0; k < t.rows.size(); ++k )
+    {
+        const std::string at = t.mcpKeys ? "\"file\":\"" + jsonStr( t.rows[k].path ) + "\",\"line\":" + std::to_string( t.rows[k].line )
+                                         : "\"p\":\"" + jsonStr( t.rows[k].path ) + ":" + std::to_string( t.rows[k].line ) + "\"";
+        body += ( k == 0 ? "{" : ",{" ) + at + ",\"n\":" + std::to_string( t.rows[k].lines ) + "}";
+    }
+    return body + "],\"next\":\"--grep=" + jsonStr( t.term ) + "\"";
+}
+inline std::string notFoundTextRootXml( const NotFoundText& t, std::vector<char>& esc )
+{
+    return t.hits == 0 ? std::string()
+                       : " text_hits=\"" + std::to_string( t.hits ) + "\" text_files=\"" + std::to_string( t.files ) + "\"" + ( t.floor ? " counts_floor=\"1\"" : "" )
+                             + " next=\"--grep=" + std::string( escapeXml( t.term, esc ) ) + "\"";
+}
+// The element's close: `/>` with no row, else `>` + the <text> rows + `</tag>`.
+inline std::string notFoundTextCloseXml( const NotFoundText& t, std::string_view tag, std::vector<char>& esc )
+{
+    if( t.hits == 0 )
+    {
+        return "/>";
+    }
+    std::string rows = ">";
+    for( const NotFoundText::Row& r : t.rows )
+    {
+        rows += "<text p=\"" + std::string( escapeXml( r.path, esc ) ) + ":" + std::to_string( r.line ) + "\" n=\"" + std::to_string( r.lines ) + "\"/>";
+    }
+    return rows + "</" + std::string( tag ) + ">";
+}
+inline constexpr std::string_view kNotFoundTextLegend =
+    " text_hits=N text_files=K: the selector (a bare name) is a whole word on N lines of K indexed files. PLAIN TEXT, not a call or use the "
+    "graph proved (a comment, a string, a property key, code no definition resolved); each <text p=FILE:LINE n=> is one file, its first "
+    "such line and n= its lines (at most 20 rows, source files first; counts_floor=1: a scan budget stopped, the counts are floors); next= "
+    "runs that grep.";
+inline std::string_view notFoundTextLegend( const NotFoundText& t ) noexcept { return t.hits == 0 ? std::string_view() : kNotFoundTextLegend; }
 
 inline void writeNotFoundAnswer( std::FILE* out, const NotFoundAnswer& a, bool json )
 {
@@ -379,7 +442,7 @@ inline void writeNotFoundAnswer( std::FILE* out, const NotFoundAnswer& a, bool j
         if( !a.missing.empty() ) { body += ",\"missing\":\"" + std::string( a.missing ) + "\""; }
         if( !a.near.name.empty() ) { body += ",\"near\":\"" + jsonStr( a.near.name ) + "\""; }
         if( a.near.renamed ) { body += ",\"near_renamed\":true"; }
-        body += countFieldOrEmpty( "matches", a.nearMatches, /*json=*/true );
+        body += countFieldOrEmpty( "matches", a.nearMatches, /*json=*/true ) + notFoundTextJson( a.text );   // BX2 FIX 9: plain text, never calls
         rw::emitTo( out, "{}}}\n", body );
         return;
     }
@@ -393,17 +456,18 @@ inline void writeNotFoundAnswer( std::FILE* out, const NotFoundAnswer& a, bool j
     if( !a.missing.empty() ) { root += " missing=\"" + std::string( a.missing ) + "\""; }
     if( !a.near.name.empty() ) { root += " near=\"" + std::string( escapeXml( a.near.name, esc ) ) + "\""; }
     if( a.near.renamed ) { root += " near_renamed=\"1\""; }
-    root += countAttrXmlOrEmpty( "matches", a.nearMatches );
+    root += countAttrXmlOrEmpty( "matches", a.nearMatches ) + notFoundTextRootXml( a.text, esc );   // BX2 FIX 9
+    const std::string close = notFoundTextCloseXml( a.text, a.tag, esc );
     rw::emitTo( out, "<!-- ripwire {}: NOT FOUND, an answer and a refusal at once. found=0: no indexed definition matched the "
                      "selector echoed on this element, so nothing was listed or counted. Zero means none found, not none exists: "
                      "an unindexed file, a typo or an uncommitted rename can each hide the definition.{}{} near=: the indexed name "
                      "to retry with; near_renamed=1: the working tree renamed the selector to it (a DEFINITION of the selector left "
                      "a changed file that now defines near=; a mere mention is not a rename). On the CLI the exit status stays 1, a "
-                     "refusal, and stderr carries the same diagnosis; over MCP this document rides the refusal's error data.{} -->{}/>",
+                     "refusal, and stderr carries the same diagnosis; over MCP this document rides the refusal's error data.{}{} -->{}{}",
                  a.tag, a.refusedLegend(),
                  a.missing.empty() ? "" : " missing=from|to|both: the endpoint(s) that matched nothing; near= retries the first.",
                  a.nearMatches != 0 ? " matches=N: N indexed files end with the path selector and it cannot pick one; near= is the first by path, one whole path answers." : "",
-                 root );
+                 notFoundTextLegend( a.text ), root, close );
 }
 
 }   // namespace rw

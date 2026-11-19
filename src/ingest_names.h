@@ -1231,11 +1231,185 @@ inline RawRef cratePathMacroRef( std::string_view src, std::uint32_t at, std::ui
     }
     return r;
 }
+
+// BX2 FIX 5 — CALLS IN A TRANSCRIBER (test/rustmacrocallcheck.sh). axum calls Route::oneshot_inner_owned twice only inside the
+// fn-local `call!` macro_rules of MethodRouter::call_with_state (`return route.oneshot_inner_owned($req);`): a token tree is not
+// parsed, so no tags pattern saw the call and --callers missed the file. The same lexical floor the C macro-body scan keeps
+// (ingest_relations.h captureMacroBodyCalls), over each rule's TRANSCRIBER only (the right of `=>`; a matcher holds fragment
+// specifiers, never calls): a call-shaped `name(`, `.name(` (a member call) or `a::b::name(` / `$crate::a::name(` (a path call,
+// its qualifier and written path read as a macro path's are, `$crate` as `crate`), one Call reference at the name's byte, so the
+// macro's span owns it and the graph connects THROUGH the macro, as it does for C. Not read: a metavariable (`$f(`), a keyword
+// (`if (`, `match (`), a definition (`fn name(`), a macro (`name!(`), a turbofish or generic path segment (`Vec::<T>::new(`,
+// a floor), anything in a literal or comment. `Self::` names the impl of the EXPANSION site: read as a bare name.
+inline constexpr std::array<std::string_view, 32> kTranscriberKeywords = {
+    "if", "while", "match", "for", "return", "loop", "in", "as", "let", "mut", "ref", "move", "unsafe", "async", "await", "fn",
+    "impl", "where", "dyn", "else", "break", "continue", "struct", "enum", "union", "type", "use", "mod", "pub", "const", "static", "trait" };
+// The previous non-blank byte before `at` within [begin, at), or '\0'; `before` receives its index.
+inline char prevNonBlank( std::string_view src, std::uint32_t begin, std::uint32_t at, std::uint32_t& before ) noexcept
+{
+    for( std::uint32_t k = at; k > begin; --k )
+    {
+        if( !rw::isJsonWs( src[ k - 1 ] ) )
+        {
+            before = k - 1;
+            return src[ k - 1 ];
+        }
+    }
+    before = begin;
+    return '\0';
+}
+// True when the word right before `at` (blanks skipped) is `fn`: `fn name(` defines, it does not call.
+inline bool afterFnKeyword( std::string_view src, std::uint32_t begin, std::uint32_t at ) noexcept
+{
+    std::uint32_t before = 0;
+    if( prevNonBlank( src, begin, at, before ) != 'n' || before < begin + 1 || src[ before - 1 ] != 'f' )
+    {
+        return false;
+    }
+    return before - 1 == begin || !namesplit::isIdentChar( src[ before - 2 ] );
+}
+// One path `seg ( :: seg )*` starting at `at` (an identifier or `$crate`): moves `at` past it, the last segment's bytes into
+// [nameAt, nameEnd). False when a segment is not an identifier (a metavariable, a turbofish `::<`): `at` then sits past what was read.
+inline bool readCallPath( std::string_view src, std::uint32_t& at, std::uint32_t end, std::uint32_t& nameAt, std::uint32_t& nameEnd ) noexcept
+{
+    for( bool first = true;; first = false )
+    {
+        std::uint32_t k = at;
+        if( first && src[ k ] == '$' )
+        {
+            k += 6;   // `$crate`, checked by the caller
+        }
+        else
+        {
+            while( k < end && namesplit::isIdentChar( src[ k ] ) )
+            {
+                ++k;
+            }
+        }
+        if( k == at )
+        {
+            return false;
+        }
+        nameAt  = at;
+        nameEnd = k;
+        at      = k;
+        const std::uint32_t sep = skipBlanks( src, k, end );
+        if( sep + 1 >= end || src[ sep ] != ':' || src[ sep + 1 ] != ':' )
+        {
+            return true;
+        }
+        at = skipBlanks( src, sep + 2, end );
+        if( at >= end || !namesplit::isIdentChar( src[ at ] ) )
+        {
+            return false;   // `Vec::<T>`, `x::$m`: not a plain path
+        }
+    }
+}
+// The Call reference for the call whose path starts at `pathAt` and whose last segment is [nameAt, nameEnd).
+inline RawRef transcriberCallRef( std::string_view src, std::uint32_t pathAt, std::uint32_t nameAt, std::uint32_t nameEnd, bool member,
+                                  std::uint32_t fileId, std::uint32_t line )
+{
+    RawRef r;
+    r.fileId     = fileId;
+    r.startByte  = nameAt;
+    r.line       = line;
+    r.lang       = Lang::Rust;
+    r.role       = RefRole::Call;
+    r.memberCall = member;
+    r.name       = std::string( src.substr( nameAt, nameEnd - nameAt ) );
+    if( nameAt > pathAt )
+    {
+        std::string_view path = src.substr( pathAt, nameAt - pathAt );   // `a::b::` — its trailing `::` dropped
+        while( !path.empty() && ( rw::isJsonWs( path.back() ) || path.back() == ':' ) )
+        {
+            path.remove_suffix( 1 );
+        }
+        std::string qualifier;
+        std::string written;
+        rustMacroPathOf( path, qualifier, written );
+        if( qualifier != "Self" )
+        {
+            r.qualifier = qualifier;
+            if( !written.empty() )
+            {
+                r.setFieldName( std::move( written ) );   // the whole written qualifier, as a path call's (model.h Reference::fieldName)
+            }
+        }
+    }
+    return r;
+}
+// The calls one transcriber token tree [begin, end) spells, starting on 1-based line `line`.
+inline void scanTranscriberCalls( std::string_view src, std::uint32_t begin, std::uint32_t end, std::uint32_t line, std::uint32_t fileId,
+                                  std::vector<RawRef>& refs )
+{
+    std::uint32_t i = begin;
+    while( i < end )
+    {
+        if( src[ i ] == '\n' )
+        {
+            ++line;
+            ++i;
+            continue;
+        }
+        if( skipLiteralOrComment( src, i, end, line ) )
+        {
+            continue;
+        }
+        const bool atCrate = src[ i ] == '$' && src.substr( i, 6 ) == "$crate" && !( i + 6 < end && namesplit::isIdentChar( src[ i + 6 ] ) );
+        const bool atWord  = namesplit::isIdentChar( src[ i ] ) && !( src[ i ] >= '0' && src[ i ] <= '9' ) && ( i == begin || !namesplit::isIdentChar( src[ i - 1 ] ) );
+        if( !atCrate && !atWord )
+        {
+            ++i;
+            continue;
+        }
+        if( atWord && i > begin && src[ i - 1 ] == '$' )
+        {
+            while( i < end && namesplit::isIdentChar( src[ i ] ) )   // a metavariable `$name`: never a callee here
+            {
+                ++i;
+            }
+            continue;
+        }
+        std::uint32_t       before  = 0;
+        const char          prev    = prevNonBlank( src, begin, i, before );
+        const bool          member  = prev == '.' && !( before > begin && src[ before - 1 ] == '.' );   // `x.f(`, never a range `..f(`
+        const bool          pathed  = prev == ':' && before > begin && src[ before - 1 ] == ':';       // mid-path: a start this scan does not read
+        const std::uint32_t pathAt  = i;
+        std::uint32_t       nameAt  = 0;
+        std::uint32_t       nameEnd = 0;
+        const bool          plain   = readCallPath( src, i, end, nameAt, nameEnd );
+        const std::uint32_t toName  = static_cast<std::uint32_t>( std::count( src.begin() + pathAt, src.begin() + nameAt, '\n' ) );
+        const std::uint32_t inPath  = static_cast<std::uint32_t>( std::count( src.begin() + pathAt, src.begin() + i, '\n' ) );
+        const std::uint32_t next    = skipBlanks( src, i, end );
+        const bool          call    = plain && !pathed && next < end && src[ next ] == '(' && !( atCrate && nameAt == pathAt )
+                                   && !std::ranges::contains( kTranscriberKeywords, src.substr( nameAt, nameEnd - nameAt ) ) && !( nameAt == pathAt && afterFnKeyword( src, begin, pathAt ) );
+        if( call )
+        {
+            refs.push_back( transcriberCallRef( src, pathAt, nameAt, nameEnd, member && nameAt == pathAt, fileId, line + toName ) );
+        }
+        line += inPath;   // the scan resumes past the path; a newline inside it is counted here
+    }
+}
+// Each rule's transcriber (`macro_rule`'s right:) of `macroDef`, in source order.
+inline void scanMacroTranscribers( TSNode macroDef, std::uint32_t fileId, std::string_view src, std::vector<RawRef>& refs )
+{
+    const std::uint32_t rules = ts_node_named_child_count( macroDef );
+    for( std::uint32_t c = 0; c < rules; ++c )
+    {
+        const TSNode rule  = ts_node_named_child( macroDef, c );
+        const TSNode right = kindIs( ts_node_type( rule ), "macro_rule" ) ? fieldChild( rule, NodeField::Right ) : TSNode{};
+        if( !ts_node_is_null( right ) && ts_node_end_byte( right ) <= src.size() )
+        {
+            scanTranscriberCalls( src, ts_node_start_byte( right ), ts_node_end_byte( right ), ts_node_start_point( right ).row + 1, fileId, refs );
+        }
+    }
+}
 }   // namespace rust_transcriber_scan
 
 inline void captureRustTranscriberMacroCalls( TSNode macroDef, std::uint32_t fileId, std::string_view src, std::vector<RawRef>& refs )
 {
     using namespace rust_transcriber_scan;
+    scanMacroTranscribers( macroDef, fileId, src, refs );   // BX2 FIX 5: the calls each transcriber spells
     const std::uint32_t end  = std::min<std::uint32_t>( ts_node_end_byte( macroDef ), static_cast<std::uint32_t>( src.size() ) );
     std::uint32_t       line = ts_node_start_point( macroDef ).row + 1;
     std::uint32_t       i    = ts_node_start_byte( macroDef );
