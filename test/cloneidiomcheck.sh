@@ -39,6 +39,12 @@
 #       group carries no idiom); a pair identical once its parameters are renamed gates although it shares
 #       no other identifier at all, also when its signature is generic (`name<T>(…)`, `name[T any](…)`) or one default holds a template comma or a less-than; a pair sharing a MEMBER spelled like a parameter gates. The quality-delta half: the demoted pair is minor, the shared-constant
 #       pair gates. The real-history replays live in test/dupshortcheck.sh.
+#   (P) THE FIFTH IDIOM, call-sequence (QD-FALSE-ROWS-E0): the reused sortUnique helper and a four-call stream
+#       writer — two call runs with no callee in common, the shape that gated a sort-unique lane twice —
+#       demote; the writer beside a twin that calls the SAME writer methods gates; the first pair in one file and
+#       one namespace gates; a std-only run identical once its parameter is renamed gates; a twin whose last
+#       statement is an assignment carries no idiom at all. The quality-delta half: the demoted pair is minor and
+#       not gating, its document defines call-sequence, and the shared-callee pair still gates.
 #
 # Usage:  bash test/cloneidiomcheck.sh            |   RIPWIRE_BIN=asan/ripwire bash test/cloneidiomcheck.sh
 # Exits non-zero on any failure; prints PASS/FAIL per check and ALL PASS on success.
@@ -62,6 +68,200 @@ command -v git >/dev/null 2>&1 || { echo "git required"; exit 2; }
 # duplication kind exempts it as a fixture path, which would make every arm below vacuously green.
 CORPUS="$TMP/corpus"; mkdir -p "$CORPUS"
 cp -R "$FIX/." "$CORPUS/"
+
+# (P) THE CALL-SEQUENCE FIXTURES ARE WRITTEN HERE, NOT COMMITTED under test/cloneidiomfix: they copy real call runs
+# (warmsnap writeStream, the sortUnique helper) on purpose, and a committed copy would sit in the repo as a NEW clone of
+# src/ code that this repo's own quality-delta reports beside every change (a mixed src/fixture group is not exempt).
+mkfix(){ mkdir -p "$CORPUS/$1"; cat >"$CORPUS/$1/$2"; }
+mkfix callseq_demote frame.h <<'FIXEOF'
+#pragma once
+// call-sequence fixture: a row stream's frame writer, four calls on one writer. Normalized it is `$I . $I ( … ) ;`
+// four times, which is all sortutil.h's helper is too.
+#include <cstdint>
+#include <string>
+#include <vector>
+namespace frame
+{
+struct Out
+{
+    void u64( std::uint64_t ) {}
+    void vec( const std::vector<std::uint64_t>& ) {}
+    void put( const char*, std::size_t ) {}
+};
+inline void writeStream( Out& o, std::size_t rowCount, const std::vector<std::uint64_t>& chunkAt, const std::string& bytes )
+{
+    o.u64( rowCount );
+    o.vec( chunkAt );
+    o.u64( bytes.size() );
+    o.put( bytes.data(), bytes.size() );
+}
+}
+FIXEOF
+mkfix callseq_demote sortutil.h <<'FIXEOF'
+#pragma once
+// call-sequence fixture (QD-FALSE-ROWS-E0): the reused sort-then-unique helper. Its body only CALLS things, and
+// nothing it calls (sort, erase, unique) is called by frame.h's stream writer: two call runs, no shared callee.
+#include <algorithm>
+#include <functional>
+namespace sortutil
+{
+template< class Container, class Less = std::less<> >
+inline void sortUnique( Container& values, Less less = {} )
+{
+    std::sort( values.begin(), values.end(), less );
+    values.erase( std::unique( values.begin(), values.end() ), values.end() );
+}
+}
+FIXEOF
+mkfix callseq_sharedcallee frame.h <<'FIXEOF'
+#pragma once
+// call-sequence fixture: the stream writer again. Its twin (header.h) calls the SAME writer methods (u64, put):
+// that is a copy of the framing, so the pair classifies but must keep gating.
+#include <cstdint>
+#include <string>
+#include <vector>
+namespace frame
+{
+struct Out
+{
+    void u64( std::uint64_t ) {}
+    void vec( const std::vector<std::uint64_t>& ) {}
+    void put( const char*, std::size_t ) {}
+};
+inline void writeStream( Out& o, std::size_t rowCount, const std::vector<std::uint64_t>& chunkAt, const std::string& bytes )
+{
+    o.u64( rowCount );
+    o.vec( chunkAt );
+    o.u64( bytes.size() );
+    o.put( bytes.data(), bytes.size() );
+}
+}
+FIXEOF
+mkfix callseq_sharedcallee header.h <<'FIXEOF'
+#pragma once
+#include "frame.h"
+namespace header
+{
+inline void writeHeader( frame::Out& w, std::size_t version, const std::vector<std::uint64_t>& offsets, const std::string& name )
+{
+    w.u64( version );
+    w.vec( offsets );
+    w.u64( name.size() );
+    w.put( name.data(), name.size() );
+}
+}
+FIXEOF
+mkfix callseq_samefile pair.h <<'FIXEOF'
+#pragma once
+// call-sequence fixture: two call runs that share no callee, but in ONE file and ONE namespace — copy-paste next
+// door is copy-paste, so the pair classifies and keeps gating.
+#include <algorithm>
+#include <functional>
+#include <cstdint>
+#include <string>
+#include <vector>
+namespace near
+{
+struct Out
+{
+    void u64( std::uint64_t ) {}
+    void vec( const std::vector<std::uint64_t>& ) {}
+    void put( const char*, std::size_t ) {}
+};
+template< class Container, class Less = std::less<> >
+inline void sortUnique( Container& values, Less less = {} )
+{
+    std::sort( values.begin(), values.end(), less );
+    values.erase( std::unique( values.begin(), values.end() ), values.end() );
+}
+inline void writeStream( Out& o, std::size_t rowCount, const std::vector<std::uint64_t>& chunkAt, const std::string& bytes )
+{
+    o.u64( rowCount );
+    o.vec( chunkAt );
+    o.u64( bytes.size() );
+    o.put( bytes.data(), bytes.size() );
+}
+}
+FIXEOF
+mkfix callseq_alpha order.h <<'FIXEOF'
+#pragma once
+// call-sequence fixture: a call run over standard vocabulary only. Its twin (rank.h) is the same body with the
+// parameter renamed — no identifier is left to share once parameters and std:: chains are set aside, so only the
+// alpha-rename refusal can say it is a copy, and it must.
+#include <algorithm>
+#include <vector>
+namespace order
+{
+inline void sortDescending( std::vector<int>& values )
+{
+    std::sort( values.begin(), values.end() );
+    std::reverse( values.begin(), values.end() );
+    std::rotate( values.begin(), values.begin(), values.end() );
+}
+}
+FIXEOF
+mkfix callseq_alpha rank.h <<'FIXEOF'
+#pragma once
+#include <algorithm>
+#include <vector>
+namespace rank
+{
+inline void rankHighFirst( std::vector<int>& scores )
+{
+    std::sort( scores.begin(), scores.end() );
+    std::reverse( scores.begin(), scores.end() );
+    std::rotate( scores.begin(), scores.begin(), scores.end() );
+}
+}
+FIXEOF
+mkfix callseq_assign frame.h <<'FIXEOF'
+#pragma once
+// call-sequence fixture: a row stream's frame writer, four calls on one writer. Normalized it is `$I . $I ( … ) ;`
+// four times, which is all sortutil.h's helper is too.
+#include <cstdint>
+#include <string>
+#include <vector>
+namespace frame
+{
+struct Out
+{
+    void u64( std::uint64_t ) {}
+    void vec( const std::vector<std::uint64_t>& ) {}
+    void put( const char*, std::size_t ) {}
+};
+inline void writeStream( Out& o, std::size_t rowCount, const std::vector<std::uint64_t>& chunkAt, const std::string& bytes )
+{
+    o.u64( rowCount );
+    o.vec( chunkAt );
+    o.u64( bytes.size() );
+    o.put( bytes.data(), bytes.size() );
+}
+}
+FIXEOF
+mkfix callseq_assign sink.h <<'FIXEOF'
+#pragma once
+// call-sequence fixture: frame.h's writer beside a near twin whose last statement is an ASSIGNMENT. A body with
+// an assignment is not a call run, so the group carries no idiom and keeps gating.
+#include <cstdint>
+#include <string>
+#include <vector>
+namespace sink
+{
+struct Log
+{
+    void tag( std::uint64_t ) {}
+    void list( const std::vector<std::uint64_t>& ) {}
+    std::size_t mark = 0;
+};
+inline void recordBatch( Log& log, std::size_t batchId, const std::vector<std::uint64_t>& ids, const std::string& label )
+{
+    log.tag( batchId );
+    log.list( ids );
+    log.tag( label.size() );
+    log.mark = label.size() + ids.size();
+}
+}
+FIXEOF
 
 echo "cloneidiomcheck: BIN=$BIN"
 
@@ -118,13 +318,19 @@ expect_row onestmt_alpha_tdefault widthBetween gapOf one-statement no    # (O) t
 expect_row onestmt_alpha_ltdefault widthBetween gapOf one-statement no   # (O) the same, with a less-than in one default (`hi = kLo < kHi`: the `<` opens no template, `pad` is still a parameter)
 expect_row onestmt_alpha_gogeneric WidthBetween GapOf one-statement no   # (O) the same through Go type parameters (`GapOf[T int | int64](…)`)
 expect_row onestmt_memberparam rowFits     cellFits    one-statement no    # (O) a shared MEMBER spelled like a parameter
+expect_row callseq_demote       sortUnique     writeStream   call-sequence yes   # (P) two call runs, no callee in common
+expect_row callseq_sharedcallee writeStream    writeHeader   call-sequence no    # (P) the same writer methods called: a copy
+expect_row callseq_samefile     sortUnique     writeStream   call-sequence no    # (P) one file, one namespace
+expect_row callseq_alpha        sortDescending rankHighFirst call-sequence no    # (P) identical after renaming the parameter
+expect_row callseq_assign       writeStream    recordBatch   NONE          no    # (P) an assignment is not a call statement
 
 # ── (G) true-positive preservation: the row stream itself is untouched ────────────────────────────────
 # Demotion is an ANNOTATION. Every fixture must still yield exactly ONE group of exactly TWO members —
 # the shape each yielded before any of this existed. A classifier that suppressed a row would pass every
 # attribute arm above and fail here.
 for d in ladder_demote ladder_sharedids ladder_samefile switchtable paramstruct nonidiom \
-         onestmt_demote onestmt_sharedconst onestmt_samefile onestmt_expects onestmt_ifreturn onestmt_alpha onestmt_alpha_generic onestmt_alpha_gogeneric onestmt_alpha_tdefault onestmt_alpha_ltdefault onestmt_memberparam; do
+         onestmt_demote onestmt_sharedconst onestmt_samefile onestmt_expects onestmt_ifreturn onestmt_alpha onestmt_alpha_generic onestmt_alpha_gogeneric onestmt_alpha_tdefault onestmt_alpha_ltdefault onestmt_memberparam \
+         callseq_demote callseq_sharedcallee callseq_samefile callseq_alpha callseq_assign; do
     n="$( rows "$d" | wc -l | tr -d ' ' )"
     m="$( rows "$d" | grep -c 'n="2"' )"
     if [ "$n" = 1 ] && [ "$m" = 1 ]; then
@@ -285,6 +491,31 @@ CROW="$( qd qd_onestmt_const | tr '<' '\n' | grep 'kind="duplication"' | grep 's
 case "$CROW" in
     *'idiom="one-statement"'*'gating="1"'*|*'gating="1"'*'idiom="one-statement"'*) ok "quality-delta: the shared-constant one-statement pair still gates";;
     *) no "quality-delta: the shared-constant one-statement pair stopped gating (row: ${CROW:-<none>})";;
+esac
+
+# (P) the quality-delta half of the fifth idiom. The writer is committed and the helper arrives in the working tree,
+# so the pair is preexisting-worse (the writer existed) — the shape that gated: without call-sequence it is a gating row.
+mkrepo qd_callseq "callseq_demote/frame.h" "callseq_demote/sortutil.h" || { echo "git fixture setup failed"; exit 2; }
+QROW="$( qd qd_callseq | tr '<' '\n' | grep 'kind="duplication"' | grep 'sortUnique' )"   # status: --quality-delta exits 0 or 2 (gating) by design; the row's sev= is the verdict, and an empty row FAILs
+case "$QROW" in
+    '')                                                                              no "quality-delta: no row for the call-sequence pair at all — the arms below are vacuous";;
+    *'idiom="call-sequence"'*'sev="minor"'*|*'sev="minor"'*'idiom="call-sequence"'*) ok "quality-delta: the no-shared-callee call-sequence pair is minor, idiom named";;
+    *)                                                                               no "quality-delta: the no-shared-callee call-sequence pair is not a minor call-sequence row (row: $QROW)";;
+esac
+case "$QROW" in
+    *'gating="1"'*) no "quality-delta: the demoted call-sequence pair still gates";;
+    '')             ;;
+    *)              ok "quality-delta: the demoted call-sequence pair does not gate";;
+esac
+case "$( qdfull qd_callseq )" in
+    *'call-sequence is a body of call statements only'*) ok "quality-delta: the call-sequence row's document defines the idiom's narrowed test";;
+    *) no "quality-delta: a document with a call-sequence row never defines the narrowed test";;
+esac
+mkrepo qd_callseq_shared "callseq_sharedcallee/frame.h" "callseq_sharedcallee/header.h" || { echo "git fixture setup failed"; exit 2; }
+KROW="$( qd qd_callseq_shared | tr '<' '\n' | grep 'kind="duplication"' | grep 'writeHeader' )"   # status: --quality-delta exits 2 here by design (the pair gates); the row's gating= is the verdict, and an empty row FAILs
+case "$KROW" in
+    *'idiom="call-sequence"'*'gating="1"'*|*'gating="1"'*'idiom="call-sequence"'*) ok "quality-delta: the shared-callee call-sequence pair still gates";;
+    *) no "quality-delta: the shared-callee call-sequence pair is not a gating call-sequence row (row: ${KROW:-<none>})";;
 esac
 
 # ── (J) determinism ───────────────────────────────────────────────────────────────────────────────────
