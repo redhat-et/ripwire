@@ -4710,36 +4710,41 @@ struct ReceiverEvidence
     }
     // IMPORT-PROVED-SPLITS: the shared hook. Same-named classes in two or more files give a call one candidate per class, and what
     // the call WRITES may name one of them: a Rust path's type (rustPathOwners, when the canonical tier answered), or a receiver
-    // spelled as the class, `C.m()`, whose C the caller file's import binds (importPathOwners, when a receiver rule answered).
+    // spelled as the class, `C.m()`, whose C the caller file's import binds (narrowImportProved, when a receiver rule answered: Keep).
     // `classOf( r, name )` is the per-language resolver: the ONE in-tree class `name` names where `r` is written, through the
     // caller file's own import of it; kNoNode for none, several, an outside class or a name something else binds there
     // (graph.h ImportProvedClass). Rust reads its own (rustQualifierClass).
     template <class ClassOf>
     PathOwners pathOwners( const Reference& r, std::vector<NodeId>& cand, bool canonical, const ClassOf& classOf ) const
     {
-        return callResultFamilyOf( r.lang ) == CallResultFamily::Rust ? rustPathOwners( r, cand, canonical ) : importPathOwners( r, cand, canonical, classOf );
+        if( callResultFamilyOf( r.lang ) == CallResultFamily::Rust )
+        {
+            return rustPathOwners( r, cand, canonical );
+        }
+        narrowImportProved( r, cand, canonical, classOf );
+        return PathOwners::Keep;
     }
     // IMPORT-PROVED-SPLITS: a receiver rule's answer for `C.m()` (the receiver chain is the one name C: not `this`/`self`/`cls`/
     // `super`, no field path, no construction) that holds members of two or more classes keeps the members of the ONE class the
     // file's import of C proves (`classOf`). Only ever narrows, and only to a non-empty strict subset: a class the import names
     // that owns none of them (an inherited member, a re-export the resolver cannot follow), a class of the caller's own file (its
-    // scoping is not an import's), or no proof at all leaves `cand` as the rule left it. Always Keep.
+    // scoping is not an import's), or no proof at all leaves `cand` as the rule left it.
     template <class ClassOf>
-    PathOwners importPathOwners( const Reference& r, std::vector<NodeId>& cand, bool canonical, const ClassOf& classOf ) const
+    void narrowImportProved( const Reference& r, std::vector<NodeId>& cand, bool canonical, const ClassOf& classOf ) const
     {
         if( canonical || cand.size() < 2 || !r.qualifier.empty() )   // the cheap tests first: chainOf below reads the receiver chain
         {
-            return PathOwners::Keep;
+            return;
         }
         const Chain ch = chainOf( r );
         if( !ch.valid || ch.root.empty() || !ch.path.empty() || !ch.ctor.empty() || isThisRoot( ch.root ) || isSuperRoot( r, ch.root ) || ch.root == "cls" )
         {
-            return PathOwners::Keep;
+            return;
         }
         const NodeId cls = classOf( r, ch.root );
         if( cls == kNoNode || ing.symbols[ cls ].fileId == r.fileId )
         {
-            return PathOwners::Keep;
+            return;
         }
         const auto owned = [ & ]( NodeId c ) { return ing.symbols[ c ].fileId == ing.symbols[ cls ].fileId && types.classHolding( ing.symbols[ c ].fileId, ing.symbols[ c ].sigStartByte ) == cls; };
         const std::size_t kept = std::size_t( std::ranges::count_if( cand, owned ) );
@@ -4747,7 +4752,6 @@ struct ReceiverEvidence
         {
             std::erase_if( cand, [ & ]( NodeId c ) { return !owned( c ); } );
         }
-        return PathOwners::Keep;
     }
     // rust-receivers: the ONE class `self` names inside `from` (or the method enclosing it): the in-tree class of the method's
     // owner name that owns the method (memberOwnerRuleOf — Rust: its own file and item scope, or the only class of the name);
