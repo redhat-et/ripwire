@@ -7,6 +7,7 @@
 #include "forliteral.h" // MF1-LIT: a task naming a literal gets its byte-exact sites and owner bodies, appended
 #include "forpage.h"    // L-W: the --for --limit=N file page, coverage=, the thin rule and the widening next=
 #include "foranswerfirst.h" // ITEM R: a finished --for answer serves its ANSWER first (a permutation)
+#include "forsigx.h"        // SIGX (TL1 M1): the sigs rows past rank 10 keep l n p r on page 1; the rest follows the rows
 #include "forpages.h"       // AF1: the answer-first --for answer, served in pages (page= pages= withheld_bytes= next=)
 #include "forbudgetfit.h" // TOKEN-BUDGET-MONOTONE: a budget sheds the unbudgeted answer, it never re-decides its posture
 #include "forowner.h"   // the question's owner (owner-hop's found set) and the one owner body of an explanatory question
@@ -5680,6 +5681,51 @@ inline void replayForPostureNotices( const ForPostureRender& r )
     }
 }
 
+// The answer-first order knobs for one finished --for answer: T-B's cue read off the task, TL1 M2 / M3's A/B handles.
+inline rw::answerfirst::AnswerFirstAsk forAnswerFirstAsk( const rw::Config& cfg, std::string_view doc )
+{
+    return { .callersLead = rw::subjectCallersCueLeads( cfg.forTask, rw::answerfirst::subjectCallersOf( doc ) ),
+             .tailSameDir = rw::answerfirst::tailSameDirOn(),
+             .bodyLead    = rw::answerfirst::bodyLeadOn() };
+}
+
+// The budgeted answer (the fit's, or `u`'s whole capture when it had no root; the caller checked it is whole) in the posture's order.
+inline std::string fittedAnswerFirst( const MainDispatch& d, const ForPostureRender& u, const rw::ForBudgetFitResult& fit, const rw::ForBudgetAsk& ask )
+{
+    std::string out = fit.verdict == rw::ForBudgetFitResult::Verdict::NoRoot ? wholeCapture( u.out )->bytes : fit.xml;
+    // ITEM R (docs/EVALS.md amendment 8): the BUDGETED path renders its own whole document, so the
+    // permutation has to run here too. Without this it did not: --token-budget was byte-identical to
+    // RIPWIRE_FOR_LEGACY_ORDER=1 -- measured at 24,009 B either way on a budget that bound nothing -- so the
+    // feature was dead on exactly the path where ordering decides what survives a cut, while every arm on
+    // the default path stayed green. Same shape as the inverted capture predicate earlier in this lane.
+    //
+    // Safe after fitting, not before: answerFirst() permutes whole top-level blocks and changes no byte, so
+    // the fitted answer still measures the size the budget was fitted against. test/foranswerfirstcheck.sh
+    // (R7/R7n) pins both directions.
+    //
+    // MERGE 2026-11-18 (origin/main c565a3fad): main renamed this read to `printed`, and the permutation
+    // mutates, so `out` stays a non-const COPY rather than main's const reference. Both facts are needed:
+    // a reference here would not compile against answerFirst, and the old name no longer exists. (TL1: hoisted out of
+    // runForLensFitted with the SIGX step, which held that function over its complexity and length bars.)
+    // AF1-fix (2026-11-18): the budget's answer takes the SAME legend posture as the unbudgeted one — answer-first by default,
+    // legend-first under --legend=first — and is never paged. AF1 had kept it legend-first unless --legend=last was spelled, and
+    // that re-decided the posture under a budget: TOKEN-BUDGET-MONOTONE rule 4 ("a budget sheds the unbudgeted answer, it never
+    // re-decides its posture"; a budget the answer fits returns it byte for byte) went red in every gate that holds it
+    // (forcallerhopcheck N2t/R9t, fordispatchhopcheck, forheadrrcheck H5t, formembernamescheck F1t, forunusedcheck T5, ...).
+    // A budgeted answer is shed WHOLE — legend included — so moving its legend after the rows loses no definition.
+    if( d.cfg.legendAnswerFirst )
+    {
+        (void)rw::answerfirst::answerFirst( out, forAnswerFirstAsk( d.cfg, out ) );
+        // SIGX (TL1 M1, forsigx.h): a budget that fitted the answer whole returns the unbudgeted (compacted) answer when that still fits
+        if( fit.verdict == rw::ForBudgetFitResult::Verdict::Whole && !d.cfg.signaturesOnly && rw::sigx::sigxOn() )
+        {
+            (void)rw::sigx::compactSigsWithin( out, ask.targetTokens > 0 && ask.ceilingTokens > 0 ? std::min( ask.targetTokens, ask.ceilingTokens )
+                                                                                                 : std::max( ask.targetTokens, ask.ceilingTokens ), &u.ledger );
+        }
+    }
+    return out;
+}
+
 // The answer under a budget: the posture's answer (no budget) rendered into a buffer, then shed to the budget. An answer that
 // prints blocks a budget holds (forbudgetfit.h kForHeldBlocks) and does not fit whole is rendered once more with them held.
 inline int runForLensFitted( const MainDispatch& d )
@@ -5732,30 +5778,7 @@ inline int runForLensFitted( const MainDispatch& d )
     {
         DISCLOSE( sink, ForBudgetFit::DisclosureWhy::NoRoot, "runForLensFitted: no <ctx> root in the unbudgeted answer" );
     }
-    // ITEM R (docs/EVALS.md amendment 8): the BUDGETED path renders its own whole document, so the
-    // permutation has to run here too. Without this it did not: --token-budget was byte-identical to
-    // RIPWIRE_FOR_LEGACY_ORDER=1 -- measured at 24,009 B either way on a budget that bound nothing -- so the
-    // feature was dead on exactly the path where ordering decides what survives a cut, while every arm on
-    // the default path stayed green. Same shape as the inverted capture predicate earlier in this lane.
-    //
-    // Safe after fitting, not before: answerFirst() permutes whole top-level blocks and changes no byte, so
-    // the fitted answer still measures the size the budget was fitted against. test/foranswerfirstcheck.sh
-    // (R7/R7n) pins both directions.
-    //
-    // MERGE 2026-11-18 (origin/main c565a3fad): main renamed this read to `printed`, and the permutation
-    // mutates, so `out` stays a non-const COPY rather than main's const reference. Both facts are needed:
-    // a reference here would not compile against answerFirst, and the old name no longer exists.
-    std::string out = fit.verdict == rw::ForBudgetFitResult::Verdict::NoRoot ? printed->bytes : fit.xml;
-    // AF1-fix (2026-11-18): the budget's answer takes the SAME legend posture as the unbudgeted one — answer-first by default,
-    // legend-first under --legend=first — and is never paged. AF1 had kept it legend-first unless --legend=last was spelled, and
-    // that re-decided the posture under a budget: TOKEN-BUDGET-MONOTONE rule 4 ("a budget sheds the unbudgeted answer, it never
-    // re-decides its posture"; a budget the answer fits returns it byte for byte) went red in every gate that holds it
-    // (forcallerhopcheck N2t/R9t, fordispatchhopcheck, forheadrrcheck H5t, formembernamescheck F1t, forunusedcheck T5, ...).
-    // A budgeted answer is shed WHOLE — legend included — so moving its legend after the rows loses no definition.
-    if( d.cfg.legendAnswerFirst )
-    {
-        (void)rw::answerfirst::answerFirst( out, rw::subjectCallersCueLeads( d.cfg.forTask, rw::answerfirst::subjectCallersOf( out ) ) );
-    }
+    const std::string out = fittedAnswerFirst( d, u, fit, ask );   // `printed` is u's whole capture: checked non-null above
     std::fwrite( out.data(), 1, out.size(), stdout );
     return u.rc;
 }
@@ -5827,7 +5850,12 @@ std::optional<int> runForLens( const MainDispatch& d )
         {
             std::string doc = r.out->bytes;
             // AF4 T-B: a who-calls question leads with its <callers by="subject"> block (foranswerfirst.h rowBlockOrder)
-            (void)rw::answerfirst::answerFirst( doc, rw::subjectCallersCueLeads( d.cfg.forTask, rw::answerfirst::subjectCallersOf( doc ) ) );
+            (void)rw::answerfirst::answerFirst( doc, forAnswerFirstAsk( d.cfg, doc ) );
+            // SIGX (TL1 M1, forsigx.h): after the permutation and before paging, so every page size windows the same document
+            if( !d.cfg.signaturesOnly && rw::sigx::sigxOn() )
+            {
+                (void)rw::sigx::compactSigs( doc, &r.ledger );
+            }
             if( const std::optional<std::string> early = forEarlyStopPage( d, doc ) )   // RT2 ES: a proven leading block ends page 1
             {
                 std::fwrite( early->data(), 1, early->size(), stdout );

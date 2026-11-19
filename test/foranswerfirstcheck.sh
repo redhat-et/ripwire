@@ -38,6 +38,10 @@
 #   (R9)  --legend=first is the legend-first order: the legend precedes the rows
 #   (R9d) AF1 (owner decision 2026-11-18): the DEFAULT is answer-first -- its rows precede its legend
 set -u
+# SIGX (src/forsigx.h, TL1 M1) runs AFTER this permutation and is lossless but not a permutation (it adds the <x r=R> envelopes and
+# the <sigx> block). This gate pins the PERMUTATION alone, so SIGX is off here; test/forsigxcheck.sh pins SIGX, and its (S1) rebuilds
+# this gate's answer-first document from the default one byte for byte.
+export RIPWIRE_NO_SIGX=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${RIPWIRE_BIN:-${1:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
@@ -618,6 +622,93 @@ cut = c_new[:k] + c_new[c_new.find("/>", k) + 2:] if k > 0 else c_new
 say(units(cut) != units(c_old), "(CL4n) dropping one <callers> row DOES break CL4 -- CL4 can fail")
 sys.exit(1 if bad else 0)
 PY_CL
+[ $? -eq 0 ] || fail=1
+
+# (SD) TL1 M2 -- SAME-DIRECTORY TAIL LEAD (foranswerfirst.h tailSameDirFirst; lane TL1 PREREG M2, F1's post-hoc P1t lead). Inside
+# <tail>, rows 1..24 keep their place; rows past 24 are stably partitioned, rows whose p= directory is the directory of a <sigs> <d>
+# row with r <= 5 first. ORDER-ONLY: the answer is a permutation of its RIPWIRE_NO_TAIL_SAMEDIR=1 twin and of --legend=first.
+TASK_S="legend posture"
+cap "$WORK/s_new.xml" "$TASK_S" $OPTIN $WHOLE
+RIPWIRE_NO_TAIL_SAMEDIR=1 cap "$WORK/s_off.xml" "$TASK_S" $OPTIN $WHOLE
+cap "$WORK/s_old.xml" "$TASK_S" $LEGACY
+python3 - "$WORK" <<'PY_SD'
+import re, sys, os
+W = sys.argv[1]; bad = 0
+def rd(n): return open(os.path.join(W, n), "rb").read().decode("latin-1")
+def say(ok, msg):
+    global bad
+    print("  %s  %s" % ("PASS" if ok else "FAIL", msg)); bad += 0 if ok else 1
+def attr(tag, k):
+    m = re.search(r' %s="([^"]*)"' % k, tag); return m.group(1) if m else ""
+def tail_rows(d):
+    i = d.find("<tail"); i = d.find(">", i) + 1; j = d.find("</tail>", i)
+    return [m.group(0) for m in re.finditer(r"<([A-Za-z_][\w-]*)\b[^>]*?/>|<([A-Za-z_][\w-]*)\b[^>]*>.*?</\2>", d[i:j], re.S)]
+def dirof(p):
+    p = re.sub(r":[0-9:-]+$", "", p); return p[:p.rfind("/")] if "/" in p else ""
+def heads(d):
+    i = d.find("<sigs"); s = d[i:d.find("</sigs>", i)]
+    return {dirof(attr(t, "p")) for t in re.findall(r"<d [^>]*>", s) if attr(t, "r").isdigit() and int(attr(t, "r")) <= 5 and attr(t, "p")}
+new, off, old = rd("s_new.xml"), rd("s_off.xml"), rd("s_old.xml")
+rn, ro = tail_rows(new), tail_rows(off); H = heads(off)
+near = lambda r: dirof(attr(r[:r.find(">") + 1], "p")) in H
+want = ro[:24] + [r for r in ro[24:] if near(r)] + [r for r in ro[24:] if not near(r)]
+fires = len(ro) > 24 and want != ro
+say(fires, "(SD0) the fixture FIRES: %d tail rows, %d past row 24 sit in a top-5 sigs directory (%s), and the twin's order differs -- if not, SD is untested" % (len(ro), sum(near(r) for r in ro[24:]), ",".join(sorted(H))))
+say(rn[:24] == ro[:24], "(SD1) tail rows 1-24 are the twin's rows 1-24, in place")
+say(rn == want, "(SD1) rows past 24: same-directory rows first, each part in the twin's own order")
+units = lambda d: sorted(re.findall(r"<[^>]*>|[^<]+", d))
+say(len(new) == len(off) and units(new) == units(off) and len(new) == len(old) and sorted(new) == sorted(old),
+    "(SD2) a permutation: %d B, the same units as the RIPWIRE_NO_TAIL_SAMEDIR=1 twin and the same bytes as --legend=first" % len(new))
+cut = new.replace(rn[-1], "", 1) if rn else new
+say(units(cut) != units(off), "(SD2n) dropping one tail row DOES break SD2 -- SD2 can fail")
+sys.exit(1 if bad else 0)
+PY_SD
+[ $? -eq 0 ] || fail=1
+
+# (BL) TL1 M3 -- A LATE ASKED BODY LEADS THE TAIL (foranswerfirst.h bodiesLeadInPlace; lane TL1 PREREG M3). A top-level <bodies> that
+# starts at or past the default page stop (12,000 B) moves, with its lead comment, directly ahead of <tail>; one that starts inside the
+# first page stays. ORDER-ONLY: a permutation of the RIPWIRE_NO_BODY_LEAD=1 twin. <hops>/<fold> never move (registered null).
+TASK_D="rank symbols by pagerank and serialize the map"
+"$BIN" src --for="$TASK_D" --detail=3 $WHOLE >"$WORK/b_new.xml" 2>/dev/null
+RIPWIRE_NO_BODY_LEAD=1 "$BIN" src --for="$TASK_D" --detail=3 $WHOLE >"$WORK/b_off.xml" 2>/dev/null
+"$BIN" src --for="$TASK_D" --detail=3 >"$WORK/b_page.xml" 2>/dev/null
+"$BIN" src --for="pageRankDouble" $WHOLE >"$WORK/n_new.xml" 2>/dev/null
+RIPWIRE_NO_BODY_LEAD=1 "$BIN" src --for="pageRankDouble" $WHOLE >"$WORK/n_off.xml" 2>/dev/null
+python3 - "$WORK" <<'PY_BL'
+import re, sys, os
+W = sys.argv[1]; bad = 0
+def rd(n): return open(os.path.join(W, n), "rb").read().decode("latin-1")
+def say(ok, msg):
+    global bad
+    print("  %s  %s" % ("PASS" if ok else "FAIL", msg)); bad += 0 if ok else 1
+def mask(d): return re.sub(r"<!\[CDATA\[.*?\]\]>|<!--.*?-->", lambda m: " " * len(m.group(0)), d, flags=re.S)
+def tops(d):
+    """top-level element names of <ctx> with their start offsets, comments and CDATA masked"""
+    m = mask(d); r = re.search(r"<ctx\b[^>]*>", m); i = r.end(); end = m.rfind("</ctx>"); out = []; depth = 0
+    for t in re.finditer(r"<(/?)([A-Za-z_][\w-]*)[^>]*?(/?)>", m[i:end]):
+        if t.group(1): depth -= 1
+        elif t.group(3):
+            if depth == 0: out.append((t.group(2), i + t.start()))
+        else:
+            if depth == 0: out.append((t.group(2), i + t.start()))
+            depth += 1
+    return out
+new, off, page, nn, no_ = rd("b_new.xml"), rd("b_off.xml"), rd("b_page.xml"), rd("n_new.xml"), rd("n_off.xml")
+to, tn = tops(off), tops(new)
+names = lambda t: [x[0] for x in t]
+at = lambda t, n: next((x[1] for x in t if x[0] == n), -1)
+say("bodies" in names(to) and at(to, "bodies") >= 12000 and names(to).index("bodies") > names(to).index("tail"),
+    "(BL0) the --detail=3 twin's <bodies> starts past the first page (at %d) after <tail> -- if not, BL is untested" % at(to, "bodies"))
+say("bodies" in names(tn) and names(tn).index("bodies") + 1 == names(tn).index("tail"), "(BL1) <bodies> directly precedes <tail> (order %s)" % names(tn)[:5])
+say([n for n in names(tn) if n != "bodies"] == [n for n in names(to) if n != "bodies"], "(BL1) every other block keeps its relative order")
+say(len(new) == len(off) and sorted(new) == sorted(off), "(BL2) a permutation of the RIPWIRE_NO_BODY_LEAD=1 twin (%d B)" % len(new))
+i = new.find("<bodies"); cut = new[:i] + new[new.find(">", i) + 1:]
+say(not (len(cut) == len(off) and sorted(cut) == sorted(off)), "(BL2n) dropping the <bodies> open tag DOES break BL2 -- BL2 can fail")
+say("<bodies" in page, "(BL3) the default 12 KB page 1 carries <bodies>")
+say(nn == no_ and "bodies" in names(tops(nn)) and at(tops(nn), "bodies") < 12000, "(BL4) a <bodies> that starts inside the first page (name-exact, at %d) stays: byte-identical to the twin" % at(tops(nn), "bodies"))
+say("hops" not in names(tn) or names(tn).index("hops") > names(tn).index("tail"), "(BL5) <hops> is not moved ahead of <tail>")
+sys.exit(1 if bad else 0)
+PY_BL
 [ $? -eq 0 ] || fail=1
 
 if [ "$fail" -ne 0 ]; then echo "foranswerfirstcheck: FAILURES"; exit 1; fi

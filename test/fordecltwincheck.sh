@@ -32,6 +32,10 @@
 #   (e)  est_tokens= is re-priced on the final bytes (estchargecheck holds the rate); (w) well formed; (l) the legend once, no "--" inside
 #   (sd) with SIBLING-DEMOTE on, (a) on its result;  (x) MCP `for` (one renderer): (a) on the MCP answer and its off twin
 set -u
+# TL1 M1 (SIGX, src/forsigx.h): the default answer-first --for answer moves the attributes and text of sigs rows past r=10 into a
+# <sigx> block after the rows (lossless; test/forsigxcheck.sh pins it, (S1) rebuilds the unmoved answer byte for byte). This gate
+# reads those rows in place for another rule, so SIGX is off here.
+export RIPWIRE_NO_SIGX=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"

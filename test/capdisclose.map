@@ -12,6 +12,7 @@
 # function and finds otherwise reclassifies the row to pending. #614's depth cap and #613's reader cap are the two rows read
 # by hand (CodeRabbit 4542271958 and 4540061421): both lanes' red revisions FAIL their row and the fixed revisions PASS.
 # A new cap constant on the answer path needs a row here in the same commit.
+kAnswerPageBytesDefault	none:the default page stop the answer-first ORDER rules read (AF2 G, TL1 M3 bodiesLeadInPlace): a block moves, every row is still emitted once (answerFirst's size ENSURES); the page cut itself is disclosed by page= pages= withheld_bytes= next= (forpages.h)
 kImportSpecDepth	sink:atDepthCap
 kReaderCallerReaders	sink:readersMore
 kAliasHopChains	sink:cut,shown
@@ -140,9 +141,11 @@ kReexportUseCap	pending:B43 SILENT CUT, follow-up card: 0 fires
 kRowFeaturesMaxHops	none:a dev-only TSV dump (RIPWIRE_ROW_FEATURES), never an answer (Stage 0 audit)
 kRowFeaturesMaxPath	sink:DISCLOSE
 kRunTraceRelevantLinesCap	sink:isCapped
+kSameDirHeadRank	none:TL1 M2's ORDER key (foranswerfirst.h headRowDirs): the directories of sigs rows r <= 5 lead the tail past row 24; a permutation, every row emitted once (answerFirst ENSURES; foranswerfirstcheck SD2)
 kShortKeyBodyBytes	legend
 kShortKeyRows	legend
 kShown	sink:truncated,selfExecutablePath
+kSigxKeepRank	none:SIGX (forsigx.h): rows past this rank MOVE their attributes and text to <sigx> after the rows, verbatim; nothing is cut (forsigxcheck S1 rebuilds the unmoved answer byte for byte)
 kSketchHashes	none:the minhash sketch width, not a cut (Stage 0 audit)
 kSupport	none:a minimum-commits threshold, not a cut (Stage 0 audit)
 kType3MaxBucket	pending:B43 SILENT CUT by design (quadratic bucket), follow-up card: fires on every clones run
