@@ -171,7 +171,10 @@ UTF-8 positions; refuses to combine with `--mcp`/`--listen` — one protocol per
 its locked decisions live in `docs/LSP.md`. A document's language comes from its path by convention
 (`.h` reads as C++); when the editor declares `textDocument.languageId` in `didOpen` and that
 declaration passes the alias map, the declaration replaces the path guess for definition, references,
-and hover — an explicit `@lang` in the query still beats it, and an unmappable id changes nothing.
+and hover — only on a document whose suffix the map's `[overrule] suffixes` list names (default `.h`,
+`.hpp`, `.hh`, `.hxx`, where the path language is only a convention; a Rust declaration on a `.c`
+document keeps the indexed C anchor). An explicit `@lang` in the query still beats it, and an
+unmappable id changes nothing.
 The map is config, not code: compiled defaults seeded from the Zed extension's grammar names, extended
 `--lsp-langmap=FILE`, `$XDG_CONFIG_HOME/ripwire/lsp-langmap.toml`, `<root>/.ripwire/lsp-langmap.toml`
 or `~/.config/ripwire/lsp-langmap.toml` (a small TOML subset of

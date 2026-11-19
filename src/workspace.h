@@ -175,7 +175,8 @@ inline bool buildWorkspaceRoots( const std::vector<std::string>& args, std::vect
     }
 
     // 4) canonical order: sort by `<label>/` (byte order) — argv order can never leak into output (§2.1), and the
-    //    merged files stay byte-sorted (wsdetail::labelPathOrderLess).
+    //    merged files stay byte-sorted unless one label is another's whole-segment prefix (`a` and `a/b`: their files
+    //    interleave under any root order — wsdetail::labelPathOrderLess states that exception).
     std::sort( out.begin(), out.end(),
                []( const WorkspaceRoot& a, const WorkspaceRoot& b ) { return wsdetail::labelPathOrderLess( a.label, b.label ); } );
     return true;
