@@ -5104,6 +5104,10 @@ inline std::pair<std::string, std::string> qualityDeltaJson( const std::string& 
         {
             out += ",\"ceiling\":" + std::to_string( r.ceiling ); // QD-ENTRY-CEILING (mirrors the XML)
         }
+        if( !r.call.empty() )
+        {
+            out += ",\"call\":\"" + mcpdetail::jsonEscape( r.call ) + "\""; // QD-UNCHECKED-STATUS (mirrors the XML)
+        }
         for( const auto& [ name, text ] : { std::pair<const char*, const std::string*>{ "why", &r.why }, { "fix", &r.fix }, { "locals", &r.locals } } )
         {
             if( !text->empty() )
