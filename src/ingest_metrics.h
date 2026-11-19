@@ -358,6 +358,7 @@ struct CcAccum
     std::vector<SteerSlot> slots;
     TangleDetailFacts*     detail       = nullptr;
     std::uint32_t          deepDispatch = 0;       // the part of deepLoc inside short arms of a flat dispatch (dispatch_* below)
+    std::uint32_t          nestOutArm   = 0;       // deepest control nesting reached OUTSIDE those arms (the tangle's nest; census 11-19: parseArgs)
 };
 
 // QD-TANGLE FLAT DISPATCH (the false-positive class STAGE0 2.4 named: parseArgs, an `if( a == "--flag" )` chain; envoy's 40-case
@@ -886,6 +887,35 @@ inline void steer_noteNode( CcAccum& acc, TSNode n, const char* t, Lang lang, st
 
 // A branch's condition: every identifier it reads (a member's own name and a callee's name are not reads of a local). The
 // condition is small, so a bounded explicit stack is enough; a slot that steers is counted once.
+// A read that is a POSITION, not a decision (census 11-19, the cursor class: lexCpp's `j < s.size()`, buildGraph's `mdLinkPin[ siteIndex ]`):
+// an operand of an order comparison (< <= > >=) bounds a scan, and an index picks an element. Neither makes a local steer.
+inline bool steer_isOrderComparison( TSNode c, const char* t, std::string_view src )
+{
+    const auto isOrder = []( std::string_view op ) { return op == "<" || op == "<=" || op == ">" || op == ">="; };
+    if( kindIs( t, "binary_expression" ) || kindIs( t, "binary_operator" ) )
+    {
+        return isOrder( nodeFieldText( c, NodeField::Operator, src ) );
+    }
+    if( kindIs( t, "comparison_operator" ) )   // Python: the operators are the node's anonymous children
+    {
+        const std::uint32_t kids = ts_node_child_count( c );
+        for( std::uint32_t i = 0; i < kids; ++i )
+        {
+            const TSNode k = ts_node_child( c, i );
+            if( !ts_node_is_named( k ) && isOrder( ts_node_type( k ) ) )
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+inline bool steer_isSubscript( const char* t ) noexcept
+{
+    return kindIs( t, "subscript_expression" ) || kindIs( t, "subscript" ) || kindIs( t, "index_expression" ) || kindIs( t, "element_access_expression" )
+        || kindIs( t, "array_access" );
+}
+
 inline void steer_noteCondition( CcAccum& acc, TSNode branch, std::string_view src )
 {
     if( !acc.anyRewritten )
@@ -922,9 +952,18 @@ inline void steer_noteCondition( CcAccum& acc, TSNode branch, std::string_view s
             }
             continue;
         }
-        // a member access reads its OBJECT only (Python `self.done`, Java `this.done`, C# `x.Done`); a call's callee is no local
+        if( steer_isOrderComparison( c, t, src ) )
+        {
+            continue;   // a bound, not a decision (steer_isOrderComparison)
+        }
+        // a member access reads its OBJECT only (Python `self.done`, Java `this.done`, C# `x.Done`); a call's callee is no local; a
+        // subscript reads its container only (the index is a position)
         TSNode only = TSNode{};
-        if( kindIs( t, "attribute" ) || kindIs( t, "field_access" ) )
+        if( steer_isSubscript( t ) )
+        {
+            only = ts_node_named_child_count( c ) > 0 ? ts_node_named_child( c, 0 ) : TSNode{};
+        }
+        else if( kindIs( t, "attribute" ) || kindIs( t, "field_access" ) )
         {
             only = fieldChild( c, NodeField::Object );
         }
@@ -1713,6 +1752,10 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
             {
                 acc.maxNest = childNest; // Q4: deepest control nesting reached
             }
+            if( frame.chain != ChainState::Arm && childNest > acc.nestOutArm )
+            {
+                acc.nestOutArm = childNest;   // QD-TANGLE: a short dispatch arm's own nesting is the arm's business, like its deep lines
+            }
             cc_noteHump( n, nesting, childNest, acc, frame.chain == ChainState::Arm );   // profile: did THIS control cross the bar?
             const bool link = acc.tangleOn && dispatch_opensOrLinks( n, t, frame.chain, elseIf );
             if( acc.steerOn )
@@ -1781,6 +1824,10 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
             {
                 acc.maxNest = nesting + 1; // Q4: a lambda/closure body deepens nesting
             }
+            if( frame.chain != ChainState::Arm && nesting + 1 > acc.nestOutArm )
+            {
+                acc.nestOutArm = nesting + 1;   // QD-TANGLE (the control branch above)
+            }
             cc_noteHump( n, nesting, nesting + 1, acc, frame.chain == ChainState::Arm );
             collectChildren( n, cursor.cur, kids );
             for( std::size_t i = kids.size(); i > 0; --i )
@@ -1802,7 +1849,7 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
         }
     }
 }
-struct Complexity { std::uint32_t cx; std::uint32_t ccx; std::uint32_t maxNest; std::uint32_t locals; std::uint32_t ppAlt; std::uint32_t humps; std::uint32_t deepLoc; std::uint32_t ev; std::array<std::uint8_t, kEvWhyTagCount> evWhy; std::uint32_t steer; std::uint32_t deepDispatch; };
+struct Complexity { std::uint32_t cx; std::uint32_t ccx; std::uint32_t maxNest; std::uint32_t locals; std::uint32_t ppAlt; std::uint32_t humps; std::uint32_t deepLoc; std::uint32_t ev; std::array<std::uint8_t, kEvWhyTagCount> evWhy; std::uint32_t steer; std::uint32_t deepDispatch; std::uint32_t nestArmCut; };
 // `lang`: Phase 1 (local-variable-indexing) gates the locals accumulator to model.h's localsCountedLang
 // (C/C++ only, MVP scope) INSIDE the same fused walk — every other language pays one branch-not-taken
 // per node and gets locals=0, which the caller (this file, RawDef→Symbol) leaves at 0 and serialize.h
@@ -1838,7 +1885,7 @@ inline Complexity complexityOf( TSNode root, std::string_view src, Lang lang, Ta
     // locals = Phase 1 floor count ; ppAlt = preproc alternative branches (model.h Symbol::ppAlt) ;
     // humps/deepLoc = the nesting profile ; ev/evWhy = essential complexity (model.h Symbol) —
     // 0 outside evCountedLang, >= 1 inside it.
-    Complexity out{ 1u + acc.cyclo, acc.cog, acc.maxNest, acc.locals, acc.ppAlt, acc.humps, acc.deepLoc, 0u, {}, acc.steered, acc.deepDispatch };
+    Complexity out{ 1u + acc.cyclo, acc.cog, acc.maxNest, acc.locals, acc.ppAlt, acc.humps, acc.deepLoc, 0u, {}, acc.steered, acc.deepDispatch, acc.maxNest - std::min( acc.maxNest, acc.nestOutArm ) };
     if( evPtr != nullptr )
     {
         ev_finalize( evCtx, out.ev, out.evWhy );

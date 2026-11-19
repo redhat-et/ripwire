@@ -7,8 +7,11 @@
 #        nesting, fix= an extraction with its lines, locals= the flag.
 #   (n1) LONG SEQUENTIAL, (n2) LONG ORCHESTRATOR, (n3) FLAT DISPATCHER, (n4) SHORT NESTED HELPER: no tangle row. Each counts its
 #        premise in --metrics first (the function is there, and n3/n4 really reach depth 4+) and FAILS on a zero premise.
+#   (n5) ARM NESTING: a 6-arm else-if chain whose short arms nest to depth 7, beside one depth-4 region outside it: no tangle row
+#        (premise: nest 7 in --metrics, deep lines present). Census 11-19 (parseArgs): only the depth OUTSIDE the arms is the body's.
 #   (s1) STEER FAR: a flag set, then tested 12 statements later: steer="1" in --metrics. (s2) STEER NEAR: tested in the next
-#        statement: no steer=.
+#        statement: no steer=. (s3) CURSOR: a local advanced, then read 12 statements later only as a bound (`pos < limit`) and as
+#        an index (`xs[ pos ]`): no steer= (premise: steercursor in --metrics). Census 11-19: lexCpp's `j`, buildGraph's indices.
 #   (r1) RATCHET: creep gained 3 deep lines at c2 and 3 more in the working tree — each step under the rise rule (+5), so no
 #        baseline row reason exists, but against its best since v1 it rose 6: a tangle row with ratchet="v1"; root ratchet_ref="v1".
 #   (r2) CREDIT: shrink lost its deep region: listed in <improved> as kind="tangle", and no tangle row.
@@ -17,7 +20,8 @@
 #   (g)  report-only: gating="0" on the root although tangle rows are present (premise: >= 1 tangle row).
 #   (j)  --json carries the same tangle rows (count) and "improved".
 #   (d)  determinism: the working-tree run twice is byte-identical.
-# Red before the lane (main's bin): t1 r1 r2 r3 c1 s1 (no tangle kind, no steer=, no improved). Usage: test/tanglecheck.sh [BIN]
+# Red before the lane (main's bin): t1 r1 r2 r3 c1 s1 (no tangle kind, no steer=, no improved); red before the census fixes (11-19): n5 s3.
+# Usage: test/tanglecheck.sh [BIN]
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
@@ -74,6 +78,10 @@ neg n1 sequential long
 neg n2 orchestrator long
 neg n3 dispatcher deep
 neg n4 shorthelper deep
+m5="$( mrow armnest )"
+if [ -z "$m5" ] || [ "$( attr "$m5" nest )" != 7 ] || [ -z "$( attr "$m5" deep )" ]; then no "(n5) PREMISE: armnest should reach nest 7 with deep lines, got '${m5:-none}'"
+elif [ -z "$( trow armnest )" ]; then ok "(n5) armnest: no tangle row (premise: $( attr "$m5" loc ) lines, nest 7, deep $( attr "$m5" deep ), tangle=$( attr "$m5" tangle ))"
+else no "(n5) armnest: want no tangle row, got $( trow armnest )"; fi
 
 # (s1)/(s2)
 mf="$( mrow steerfar )"; mn="$( mrow steernear )"
@@ -82,6 +90,9 @@ else
     [ "$( attr "$mf" steer )" = 1 ] && ok "(s1) steerfar: steer=\"1\"" || no "(s1) steerfar: want steer=\"1\", got $mf"
     [ -z "$( attr "$mn" steer )" ] && ok "(s2) steernear: no steer=" || no "(s2) steernear: want no steer=, got $mn"
 fi
+mc="$( mrow steercursor )"
+if [ -z "$mc" ] || [ "$( attr "$mc" loc )" -le 50 ]; then no "(s3) PREMISE: steercursor (over 50 lines) missing from --metrics, got '${mc:-none}'"
+else [ -z "$( attr "$mc" steer )" ] && ok "(s3) steercursor: no steer= (bound + index reads)" || no "(s3) steercursor: want no steer=, got $mc"; fi
 
 # (r1)
 r="$( trow creep )"
