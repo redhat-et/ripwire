@@ -177,5 +177,15 @@ say $? "(b2) [P] batch, warned item: route, rows and a carried page as the top-l
 BL="$( mcpbatch "$DIR/plain" "$( python3 -c 'import json,sys; print(json.dumps([{"verb":"for","task":sys.argv[1],"limit":5}]))' "$QW" )" 0 )"
 case "$BL" in *"<route "*) no "(b3) [N] batch item with limit= was routed" ;; ERR:*) no "(b3) [N] batch item with limit= refused: '${BL:0:200}'" ;; *) ok "(b3) [N] batch item with limit=: a file page, never routed" ;; esac
 
+# ── CALLEES VETO over MCP (v1–v2): the shared decide() refuses a callees question on both MCP surfaces ─────────────
+QV='What does `run_main` call?'
+MV="$( mcpfor "$DIR/plain" "$QV" )"
+case "$MV" in *"<route "*) no "(v1) [N] MCP for routed a callees question" ;; *"<ctx"*) ok "(v1) [N] MCP for: a callees question is the ranked <ctx>, no <route>" ;; *) no "(v1) [N] no answer: '${MV:0:200}'" ;; esac
+BV="$( mcpbatch "$DIR/plain" "$( python3 -c 'import json,sys; print(json.dumps([{"verb":"for","task":sys.argv[1]},{"verb":"for","task":"Who calls `compute_total`?"}]))' "$QV" )" 0 )"
+BW="$( mcpbatch "$DIR/plain" "$( python3 -c 'import json,sys; print(json.dumps([{"verb":"for","task":sys.argv[1]},{"verb":"for","task":"Who calls `compute_total`?"}]))' "$QV" )" 1 )"
+case "$BV" in *"<route "*) no "(v2) [N] batch routed a callees item" ;; *"<ctx"*) ok "(v2) [N] batch: the callees item is the ranked <ctx>, no <route>" ;; *) no "(v2) [N] batch item: '${BV:0:200}'" ;; esac
+[ "$( attr "$( printf '%s' "$BW" | routeOf )" kind )" = who-calls ]
+say $? "(v2) [P] batch: the who-calls item beside it still routes" "(v2) [P] batch who-calls item: '${BW:0:200}'"
+
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "FAILURES ABOVE"; fi
 exit "$fail"
