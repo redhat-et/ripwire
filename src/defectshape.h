@@ -2006,6 +2006,14 @@ public:
     std::vector<Site> sites() const;
 
 private:
+    // the five shapes; each appends the start byte of every site it finds
+    void vacuousJudgmentSites( std::vector<std::uint32_t>& at ) const;
+    void lostReporterSites( std::vector<std::uint32_t>& at ) const;
+    void unreadRcSites( std::vector<std::uint32_t>& at ) const;
+    void unreadRcFileSites( std::vector<std::uint32_t>& at ) const;
+    void deadFallbackSites( std::vector<std::uint32_t>& at ) const;
+
+private:
     std::string_view                              src_;
     const sh::Tree&                               t_;
     const sh::Analysis&                           a_;
@@ -2087,6 +2095,76 @@ private:
     {
         return ao.empty() || ao[0].cmds.empty() ? 0 : node( ao[0].cmds[0] ).pos;
     }
+    // a simple command's bindings (assignments, local / declare / export, read / mapfile), its rc captures (X=$?,
+    // local X=$?) and the calls inside its $( )
+    void indexSimple( std::uint32_t c, const sh::Node& n, std::uint32_t scope, const std::vector<Judgment::Reach>& reach, bool cond )
+    {
+        for( std::size_t a = 0; a < n.assigns.size(); ++a )
+        {
+            const std::string& tx = n.assigns[a].text;
+            assigns_.push_back( { tx.substr( 0, tx.find_first_of( "+=[" ) ), c, -1 - static_cast<std::int32_t>( a ), n.pos, scope, cond, reach } );
+        }
+        const std::string cw = n.words.empty() ? std::string() : sh::detail::unq( n.words[0].text );
+        if( cw == "local" || cw == "declare" || cw == "export" || cw == "readonly" || cw == "typeset" )
+        {
+            for( std::size_t w = 1; w < n.words.size(); ++w )
+            {
+                const std::string& tx = n.words[w].text;
+                if( !tx.empty() && tx[0] == '-' )
+                {
+                    continue;
+                }
+                const std::size_t eq = tx.find( '=' );
+                if( eq != std::string::npos )
+                {
+                    assigns_.push_back( { tx.substr( 0, eq ), c, static_cast<std::int32_t>( w ), n.pos, scope, cond, reach } );
+                }
+            }
+        }
+        else if( cw == "read" || cw == "mapfile" || cw == "readarray" )
+        {
+            for( std::size_t w = 1; w < n.words.size(); ++w )
+            {
+                if( !n.words[w].text.empty() && n.words[w].text[0] != '-' )
+                {
+                    assigns_.push_back( { n.words[w].text, c, INT32_MIN, n.pos, scope, cond, reach } );
+                }
+            }
+        }
+        if( n.words.empty() && n.assigns.size() == 1 )
+        {
+            const std::string& tx = n.assigns[0].text;
+            const std::size_t  eq = tx.find( '=' );
+            const std::string  v  = sh::detail::unq( tx.substr( eq + 1 ) );
+            if( v == "$?" || v == "${?}" )
+            {
+                captures_.push_back( c );
+            }
+        }
+        else if( n.words.size() == 2 && cw == "local" )
+        {
+            const std::string& tx = n.words[1].text;
+            const std::size_t  eq = tx.find( '=' );
+            if( eq != std::string::npos )
+            {
+                const std::string v = sh::detail::unq( tx.substr( eq + 1 ) );
+                if( v == "$?" || v == "${?}" )
+                {
+                    captures_.push_back( c );
+                }
+            }
+        }
+        for( const std::vector<sh::Word>* ws : { &n.assigns, &n.words } )
+        {
+            for( const sh::Word& w : *ws )
+            {
+                for( const sh::Sub& s : w.subs )
+                {
+                    visitSub( s.list, scope, c );
+                }
+            }
+        }
+    }
     void visitCmd( std::uint32_t c, std::uint32_t scope, const std::vector<Judgment::Reach>& reach, const sh::Item* item, std::size_t stage, bool cond )
     {
         scope_[c]         = scope;
@@ -2103,71 +2181,7 @@ private:
         {
             case sh::NodeKind::Simple:
             {
-                for( std::size_t a = 0; a < n.assigns.size(); ++a )
-                {
-                    const std::string& tx = n.assigns[a].text;
-                    assigns_.push_back( { tx.substr( 0, tx.find_first_of( "+=[" ) ), c, -1 - static_cast<std::int32_t>( a ), n.pos, scope, cond, reach } );
-                }
-                const std::string cw = n.words.empty() ? std::string() : sh::detail::unq( n.words[0].text );
-                if( cw == "local" || cw == "declare" || cw == "export" || cw == "readonly" || cw == "typeset" )
-                {
-                    for( std::size_t w = 1; w < n.words.size(); ++w )
-                    {
-                        const std::string& tx = n.words[w].text;
-                        if( !tx.empty() && tx[0] == '-' )
-                        {
-                            continue;
-                        }
-                        const std::size_t eq = tx.find( '=' );
-                        if( eq != std::string::npos )
-                        {
-                            assigns_.push_back( { tx.substr( 0, eq ), c, static_cast<std::int32_t>( w ), n.pos, scope, cond, reach } );
-                        }
-                    }
-                }
-                else if( cw == "read" || cw == "mapfile" || cw == "readarray" )
-                {
-                    for( std::size_t w = 1; w < n.words.size(); ++w )
-                    {
-                        if( !n.words[w].text.empty() && n.words[w].text[0] != '-' )
-                        {
-                            assigns_.push_back( { n.words[w].text, c, INT32_MIN, n.pos, scope, cond, reach } );
-                        }
-                    }
-                }
-                if( n.words.empty() && n.assigns.size() == 1 )
-                {
-                    const std::string& tx = n.assigns[0].text;
-                    const std::size_t  eq = tx.find( '=' );
-                    const std::string  v  = sh::detail::unq( tx.substr( eq + 1 ) );
-                    if( v == "$?" || v == "${?}" )
-                    {
-                        captures_.push_back( c );
-                    }
-                }
-                else if( n.words.size() == 2 && cw == "local" )
-                {
-                    const std::string& tx = n.words[1].text;
-                    const std::size_t  eq = tx.find( '=' );
-                    if( eq != std::string::npos )
-                    {
-                        const std::string v = sh::detail::unq( tx.substr( eq + 1 ) );
-                        if( v == "$?" || v == "${?}" )
-                        {
-                            captures_.push_back( c );
-                        }
-                    }
-                }
-                for( const std::vector<sh::Word>* ws : { &n.assigns, &n.words } )
-                {
-                    for( const sh::Word& w : *ws )
-                    {
-                        for( const sh::Sub& s : w.subs )
-                        {
-                            visitSub( s.list, scope, c );
-                        }
-                    }
-                }
+                indexSimple( c, n, scope, reach, cond );
                 break;
             }
             case sh::NodeKind::Func:
@@ -3814,26 +3828,20 @@ private:
     }
 };
 
-inline std::vector<Site> Script::sites() const
+inline void Script::vacuousJudgmentSites( std::vector<std::uint32_t>& at ) const
 {
-    std::vector<Site> out;
-    const auto emit = [ & ]( std::uint32_t pos )
-    {
-        const ShLine l = shSiteLine( src_, pos );
-        std::string text = collapseSpaces( l.text );
-        if( !text.empty() )
-        {
-            out.push_back( { Facet::VacuousAssert, l.startByte, std::move( text ) } );
-        }
-    };
     // (1) an assertion that passes on an empty text, read off a run whose failure nothing reports
     for( std::size_t ji = 0; ji < judgments_.size(); ++ji )
     {
         if( vacuous( ji ) )
         {
-            emit( judgments_[ji].pos );
+            at.push_back( judgments_[ji].pos );
         }
     }
+}
+
+inline void Script::lostReporterSites( std::vector<std::uint32_t>& at ) const
+{
     // (2) a FAIL reporter that sets the failure flag, called inside a $( ) whose status nothing reads
     for( const auto& [ host, call ] : subCalls_ )
     {
@@ -3844,9 +3852,13 @@ inline std::vector<Site> Script::sites() const
         }
         if( reportsByFlag( f, 0 ) )
         {
-            emit( node( host ).pos );
+            at.push_back( node( host ).pos );
         }
     }
+}
+
+inline void Script::unreadRcSites( std::vector<std::uint32_t>& at ) const
+{
     // (3) rc=$? captured and never tested before it is overwritten (B43's H2, per capture)
     for( std::uint32_t cap : captures_ )
     {
@@ -3877,16 +3889,20 @@ inline std::vector<Site> Script::sites() const
                 }
                 if( !rcTested( name, scope_[c], node( c ).pos, until, 0 ) )
                 {
-                    emit( node( c ).pos );
+                    at.push_back( node( c ).pos );
                 }
             }
             continue;
         }
         if( !rcTested( name, scope, pos, nextAssignPos( name, scope, pos, reachOf( cap ) ), 0 ) )
         {
-            emit( pos );
+            at.push_back( pos );
         }
     }
+}
+
+inline void Script::unreadRcFileSites( std::vector<std::uint32_t>& at ) const
+{
     // (3b) `echo $? > "$TMP/$1.rc"` after a run: an rc FILE no command reads (per call site of the function that writes it)
     for( std::uint32_t c = 0; c < t_.nodes.size(); ++c )
     {
@@ -3930,16 +3946,20 @@ inline std::vector<Site> Script::sites() const
                 const std::string bound = bindArgs( target, callArgs( call ) );
                 if( !bound.empty() && bound != target && !fileRead( bound, c ) )
                 {
-                    emit( node( call ).pos );
+                    at.push_back( node( call ).pos );
                 }
             }
             continue;
         }
         if( !fileRead( target, c ) )
         {
-            emit( n.pos );
+            at.push_back( n.pos );
         }
     }
+}
+
+inline void Script::deadFallbackSites( std::vector<std::uint32_t>& at ) const
+{
     // (4) `RUN | head -1 || fallback`: the || reads the last stage's status, which always succeeds
     for( std::size_t q = 0; q < andOrs_.size(); ++q )
     {
@@ -3962,8 +3982,28 @@ inline std::vector<Site> Script::sites() const
             sh::AndOr  rhs{ ao[j + 1] };
             if( reads && !sh::detail::isTrivialOr( sh::detail::itemsText( t_, rhs ) ) )
             {
-                emit( posOf( ao ) );
+                at.push_back( posOf( ao ) );
             }
+        }
+    }
+}
+
+inline std::vector<Site> Script::sites() const
+{
+    std::vector<std::uint32_t> at;   // the byte each site's statement starts at, shape by shape
+    vacuousJudgmentSites( at );
+    lostReporterSites( at );
+    unreadRcSites( at );
+    unreadRcFileSites( at );
+    deadFallbackSites( at );
+    std::vector<Site> out;
+    for( const std::uint32_t pos : at )
+    {
+        const ShLine l    = shSiteLine( src_, pos );
+        std::string  text = collapseSpaces( l.text );
+        if( !text.empty() )
+        {
+            out.push_back( { Facet::VacuousAssert, l.startByte, std::move( text ) } );
         }
     }
     std::sort( out.begin(), out.end(), []( const Site& a, const Site& b ) { return a.startByte != b.startByte ? a.startByte < b.startByte : a.text < b.text; } );
