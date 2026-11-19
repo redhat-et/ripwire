@@ -568,7 +568,7 @@ std::string grepTierLegend( const rw::GrepTierReport& tier )
            "under a fixed budget: tier_parsed= how many were classified, tier_budget= which ceiling stopped it (files or bytes, "
            "present only then, beside tier_files= the hit files it had to cover — and the root then also carries counts_floor=\"1\": "
            "the tier counts are floors while hits= stays exact and every row is served), tier_unclassified= hits in files nothing "
-           "classified — always EMITTED, never suppressed. " ) + liftClause;
+           "classified or parse_degraded — always EMITTED, never suppressed. " ) + liftClause;
 }
 
 // Present only when this answer actually held something back or stopped short — absent-means-nothing-was-

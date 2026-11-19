@@ -2728,7 +2728,10 @@ inline GrepCollection grepApplySpanTiers( const IngestResult& ing, GrepCollectio
     {
         const GrepRawHit&   r     = collected.raw[h];
         const std::uint32_t index = batchIndexOf[r.fileId];
-        if( index == UINT32_MAX || !batch.perFile[index].isParsed )
+        // BX2 FIX 6 (test/grepdegradedcheck.sh): a hit in a file whose indexed parse DEGRADED (fileParseDegraded, the row's
+        // parse_degraded="1") is unclassified too. Its span tier comes from the same grammar that failed there — fzf's
+        // completion.zsh, parsed as bash, held real code back as "string" (lane BS1, fzf-02) — so the tier is no evidence.
+        if( index == UINT32_MAX || !batch.perFile[index].isParsed || fileParseDegraded( ing, r.fileId ) )
         {
             ++report.unclassifiedHits;
             continue;   // stays unclassified — and unclassified is never suppressible

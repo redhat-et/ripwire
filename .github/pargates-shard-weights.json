@@ -239,6 +239,7 @@
  "grepcheck.sh": 5.7,
  "grepcontextcheck.sh": 8.5,
  "grepcorpuscheck.sh": 2.5,
+ "grepdegradedcheck.sh": 1.0,
  "grepfastcheck.sh": 2.1,
  "grepfollowupcheck.sh": 5.7,
  "grephandlecheck.sh": 3.3,

@@ -615,6 +615,7 @@ for _g in \
     grepcheck \
     grepcontextcheck \
     grepcorpuscheck \
+    grepdegradedcheck \
     grepfastcheck \
     grepfollowupcheck \
     grepignorecheck \
