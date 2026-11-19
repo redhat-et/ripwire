@@ -105,11 +105,17 @@ fill_ok=1; fill_arm_armed=0
 for tb in $LADDER; do
     OUT="$TMP/b$tb.json"
     runw --pack-task="$TASK" --token-budget="$tb" --json > "$OUT"
-    read -r bt bk ct ck nt nk tt tk <<PYEOF
+    # TWO body denominators, deliberately (PB1, 2026-11-19). `bt` is the CANDIDATE set, which is what the
+    # monotonicity and fixture-arming arms are about; `bst` is bodies_total, what qualified to be SERVED, which
+    # is what the capped test below must read. Reading the candidate count as "capped" made arm (b) accuse a
+    # correct bundle of stranding its budget: --pack-task serves one body BY DESIGN and the rest are pointer
+    # rows, so kept < candidates is permanently true and says nothing about the budget.
+    read -r bt bst bk ct ck nt nk tt tk <<PYEOF
 $( python3 -c "
 import json
 d = json.load(open('$OUT'))
-print(d.get('bodies_candidates', d.get('bodies_total',0)), d.get('bodies_kept',0), d.get('callers_total',0), d.get('callers_kept',0),
+print(d.get('bodies_candidates', d.get('bodies_total',0)), d.get('bodies_total',0), d.get('bodies_kept',0),
+      d.get('callers_total',0), d.get('callers_kept',0),
       d.get('notes_total',0), d.get('notes_kept',0), d.get('tests_total',0), d.get('tests_kept',0))
 " )
 PYEOF
@@ -161,7 +167,7 @@ PYEOF
     # header states: token target x kMinBytesPerToken(2.36) x kBudgetHeadroom(0.90).
     BYTES="$( wc -c < "$TMP/x$tb.xml" | tr -d ' ' )"
     CAPPED=0
-    [ "$bk" -lt "$bt" ] && CAPPED=1
+    [ "$bk" -lt "$bst" ] && CAPPED=1   # the SERVED total, not the candidate set — see the read above
     [ "$ck" -lt "$ct" ] && CAPPED=1
     [ "$nk" -lt "$nt" ] && CAPPED=1
     [ "$tk" -lt "$tt" ] && CAPPED=1

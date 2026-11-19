@@ -163,7 +163,6 @@ grep -oE '<callers[^>]*>.*</callers>' "$BUN" | grep -qF 'n="run_budget_tests"' \
 FLAT="$( tr '\n' ' ' < "$BUN" )"
 CALLERS_BLOCK="$( printf '%s' "$FLAT" | grep -oE '<callers[^>]*>.*</callers>' )"
 BODIES_BLOCK="$(  printf '%s' "$FLAT" | grep -oE '<bodies [^>]*>.*</bodies>'   )"
-FAR_BLOCK="$(     printf '%s' "$FLAT" | grep -oE '<far[^>]*>.*</far>'          )"
 printf '%s' "$BODIES_BLOCK" | grep -qF 'n="parseBudget"' \
     && ok "R2 d0: parseBudget (an anchor) has a FULL BODY" || no "R2 d0: parseBudget missing from <bodies>"
 
@@ -176,14 +175,15 @@ printf '%s' "$BODIES_BLOCK" | grep -qF 'n="run_budget_tests"' \
     && no "R2 REGRESSION: run_budget_tests (d1) got a FULL BODY too — d1 must stay signature-only" \
     || ok "R2 d1: run_budget_tests never gets a body, even though the budget could afford one"
 
-# d2+ (decoyBudgetSix / unrelatedHelper: no call edge to any anchor): a bare NAME-ONLY row in <far>, nested
-# just inside </sigs> (still section 1, not a 6th top-level section) — no signature, no doc, no body anywhere.
-printf '%s' "$FAR_BLOCK" | grep -qE '<s t="fn" n="unrelatedHelper" p="[^"]*"/>' \
-    && ok "R2 d2+: unrelatedHelper is a bare NAME-ONLY row in <far>" || no "R2 d2+: unrelatedHelper missing/not name-only in <far>"
-printf '%s' "$BODIES_BLOCK"  | grep -qF 'n="unrelatedHelper"' && no "R2 REGRESSION: unrelatedHelper (d2+) got a body"  || ok "R2 d2+: unrelatedHelper has no body"
-printf '%s' "$CALLERS_BLOCK" | grep -qF 'n="unrelatedHelper"' && no "R2 REGRESSION: unrelatedHelper (d2+) got a signature row in <callers>" || ok "R2 d2+: unrelatedHelper has no signature row"
-grep -qF '<far ' "$BUN" && grep -oE '<sigs.*</sigs>' "$BUN" | grep -qF '<far ' \
-    && ok "R2: <far> nests INSIDE <sigs> (section 1), not a 6th top-level section" || no "R2: <far> is not nested inside <sigs>"
+# PB1 (2026-11-19): there is no <far> tier and no distance mask any more. The bundle's ranking IS --for's head,
+# so a symbol with no call edge to the key body is not demoted to a name-only row — it keeps whatever row shape
+# the head's own ladder gives it, which is the point of sharing the head. What survives from this arm is the
+# part that is still a contract: a symbol that is neither the key body nor one of its callers gets NO body and
+# NO caller row, however it is ranked.
+printf '%s' "$BODIES_BLOCK"  | grep -qF 'n="unrelatedHelper"' && no "unrelatedHelper (not the key body) got a body"  || ok "unrelatedHelper is not served a body"
+printf '%s' "$CALLERS_BLOCK" | grep -qF 'n="unrelatedHelper"' && no "unrelatedHelper (not a caller of the key body) got a row in <callers>" || ok "unrelatedHelper has no <callers> row"
+grep -qF '<far ' "$BUN" \
+    && no "the removed <far> tier is back in the bundle" || ok "no <far> tier: the ranking is --for's head, not a distance-masked window"
 
 # section 4: the field note surfaces as a dated CDATA <note> on the top symbol
 grep -oE '<notes[^>]*>.*</notes>' "$BUN" \
@@ -200,7 +200,7 @@ grep -oE '<tests[^>]*>.*</tests>' "$BUN" | grep -qF 'test/test_budget.cpp' \
 if xmllint --noout "$BUN" 2>/dev/null; then ok "fixture bundle is xmllint-clean (G4)"; else no "fixture bundle is not well-formed"; fi
 
 # the header names every truncation (no silent caps): it must carry the per-section report line
-grep -q 'sections in FIXED order ranking > bodies > callers > notes > tests' "$BUN" \
+grep -q 'sections in FIXED order ranking > key body > callers > notes > tests > tail' "$BUN" \
     && grep -qE 'ranking: (full|capped) \| bodies: .* \| callers: .* \| notes: .* \| tests: ' "$BUN" \
     && ok "header carries the per-section truncation report (no silent caps)" || no "header truncation report missing/incomplete"
 
@@ -218,10 +218,13 @@ if { [ "$D1" = "$D2" ] && [ "$D2" = "$D3" ]; }; then ok "bundle is deterministic
 # only tightens the <bodies> assertion, from "absent" to "present with shown=0/capped=1/the true total".
 TINY="$TMP/tiny.xml"
 "$BIN" "$ROOT/src" --no-cache --pack-task="serialize signatures budget" --token-budget=50 --legend=full > "$TINY" 2>/dev/null
+# PB1: total= on <bodies> is what qualified to be SERVED — 1 when a bodied key body exists — and the candidates
+# not served are <bn> pointer rows inside the element, so a tiny budget reads shown="0" total="1" capped="1".
+# The assertion this arm exists for is unchanged: the element is PRESENT, not absent, and says it kept nothing.
 if grep -qF '<sigs' "$TINY" \
-   && grep -qE '<bodies shown="0" total="[1-9][0-9]*" capped="1"></bodies>' "$TINY" \
+   && grep -qE '<bodies shown="0" total="1" capped="1"[^>]*>' "$TINY" \
    && ! grep -qF '<callers ' "$TINY" && ! grep -qF '<tests ' "$TINY" \
-   && grep -qE 'bodies: kept 0 of [1-9]' "$TINY"; then
+   && grep -qE 'bodies: kept 0 of 1' "$TINY"; then
     ok "tiny budget: <sigs> survives, <bodies shown=\"0\"> is PRESENT (not absent), other sections omitted"
 else
     no "tiny-budget degradation wrong (expected <sigs> + <bodies shown=\"0\" total=\"N\" capped=\"1\">)"
