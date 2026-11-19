@@ -1573,7 +1573,17 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     //    shown=/total=/capped= on <sigs> with the call that serves it uncut (next=).
     const std::size_t   sigsBudget = sectionBudget( kPackTaskQuotaRankingPct, /*carryIn=*/0 );
     const std::size_t   rowDropBudget = std::max( sigsBudget, std::min( remaining, quotaOf( kPackTaskHeadRowDropPct ) ) );
-    const SigLensRules  headRules  = packTaskHeadRules( ing, task, lr, in.softTarget ? budgetTokens : 0u );
+    // THE HEAD'S RULES ARE THE LENS'S, NOT THE CALLER'S BUDGET'S. Passing the caller's explicit budget here made
+    // `--pack-task --token-budget=6000` serve different sections from the DEFAULT --pack-task, whose budget is also
+    // 6000: forHeadRoundRobinOn() reads the ceiling and returns false at 6000, so the default (which passed 0) emitted
+    // files_first= and the explicit twin did not. That contradicts this verb's documented contract — "an explicit 6000
+    // serves the default's sections byte for byte" (kPackTaskHardBudgetSentence's own comment) — and forsoftbudgetcheck
+    // (P2) pins it. It also silently disabled, for every explicit budget, the head round robin by file that PT1 measured
+    // as one of D1's two locating mechanisms.
+    // 0, not budgetTokens, because the DEFAULT's verdicts are the ones both paths must share and the default has no
+    // caller budget to read. The byte budget still cuts the section; these predicates only decide whether the head
+    // spends bytes on e=, the docs reorder and the round robin, and that decision is the same bundle either way.
+    const SigLensRules  headRules  = packTaskHeadRules( ing, task, lr, 0u );
     PackHead head = renderPackHead( ing, rank, PackHeadInputs{ rankTopN, rowDropBudget, headRules, task, &in, &forClone } );
     const std::string& sigsStr    = head.sigsStr;   // a reference: the head's reflow lap below may widen it
     const bool         sigsCapped = head.capped;     // the FIRST lap's verdict — what the section shares were charged by
