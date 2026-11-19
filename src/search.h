@@ -20,6 +20,7 @@
 // carries its enclosing symbol chain, its matched line, and optional context lines.
 
 #include "infra/stackthreads.h" // rw::runOnStackThreads — the scan threads, with a stack the regex line bound is computed for
+#include "infra/sortutil.h"   // sortUnique
 #include "infra/Diagnostics.h"  // DISCLOSE — graceful-degrade when regex matching throws mid-scan (never terminate)
 #include "didyoumean.h"         // R1a: the ONE near-miss suggester — the zero-hit follow-up reuses it, never a second one
 #include "docparse.h"           // docparse::detail::readWholeFile — the canonical whole-file byte read (reused, not re-rolled)
@@ -200,8 +201,7 @@ inline constexpr std::size_t kMaxAffixSet = 8;     // cap on prefix/suffix set s
 // sorted-unique a small string set (determinism + dedup) and report whether it stayed within `cap`.
 inline bool normSet( std::vector<std::string>& v, std::size_t cap )
 {
-    std::sort( v.begin(), v.end() );
-    v.erase( std::unique( v.begin(), v.end() ), v.end() );
+    rw::sortutil::sortUnique( v );
     return v.size() <= cap;
 }
 
@@ -3061,8 +3061,7 @@ inline std::vector<GrepEncRow> grepEnclosingRows( const IngestResult& ing, const
                 callerIds.push_back( inColIndex[k] );
             }
         }
-        std::sort( callerIds.begin(), callerIds.end() );
-        callerIds.erase( std::unique( callerIds.begin(), callerIds.end() ), callerIds.end() );
+        rw::sortutil::sortUnique( callerIds );
         row.callerCount = std::uint32_t( callerIds.size() );
         row.defCount    = std::uint32_t( row.ids.size() );
     }

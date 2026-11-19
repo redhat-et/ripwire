@@ -75,6 +75,7 @@
 // produced in the caller's group order.
 
 #include "arch.h"      // rw::fnv1a64 — THE whole-string FNV-1a; the identifier set is keyed with it, never a second copy of it
+#include "infra/sortutil.h"   // sortUnique
 #include "clones.h"    // scanCodeTokens / CodeTokenKind — THE one code scanner; this is a second projection of it
 #include "docparse.h"  // docparse::detail::readWholeFile — the canonical whole-file byte read (never re-rolled)
 #include "model.h"
@@ -875,8 +876,7 @@ inline OneStatementFacts oneStatementFacts( const std::vector<IdiomTok>& body, c
         }
         f.ids.push_back( fnv1a64( w ) );
     }
-    std::sort( f.ids.begin(), f.ids.end() );
-    f.ids.erase( std::unique( f.ids.begin(), f.ids.end() ), f.ids.end() );
+    sortutil::sortUnique( f.ids );
     f.alpha = fnv1a64( renamed );
     return f;
 }
@@ -962,8 +962,7 @@ inline std::vector<CloneIdiomVerdict> classifyCloneGroupIdioms( const IngestResu
             }
         }
     }
-    std::sort( want.begin(), want.end() );
-    want.erase( std::unique( want.begin(), want.end() ), want.end() );
+    sortutil::sortUnique( want );
     if( want.empty() )
     {
         return out;
@@ -1031,8 +1030,7 @@ inline std::vector<CloneIdiomVerdict> classifyCloneGroupIdioms( const IngestResu
                 ids.push_back( fnv1a64( t.text ) );
             }
         }
-        std::sort( ids.begin(), ids.end() );
-        ids.erase( std::unique( ids.begin(), ids.end() ), ids.end() );
+        sortutil::sortUnique( ids );
         shapes[k].ids = ids;
     }
 

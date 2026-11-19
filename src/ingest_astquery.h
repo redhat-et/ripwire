@@ -834,8 +834,7 @@ static void collectPredicateRegexRefusals( const HashMap<const TSLanguage*, Gram
     {
         if( group.regexRefusedOut != nullptr )
         {
-            std::sort( group.regexRefusedOut->begin(), group.regexRefusedOut->end() );
-            group.regexRefusedOut->erase( std::unique( group.regexRefusedOut->begin(), group.regexRefusedOut->end() ), group.regexRefusedOut->end() );
+            rw::sortutil::sortUnique( *group.regexRefusedOut );
         }
     }
 }

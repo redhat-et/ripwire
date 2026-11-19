@@ -1,5 +1,6 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/sortutil.h"   // sortUnique
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
 
@@ -589,8 +590,7 @@ inline std::vector<FamilyHit> collectLintHits( const IngestResult& ing, const Sy
     }
     bindFindings( ing, byFile, pack.findings, kFamConfusion, hits );
 
-    std::sort( scan.floorRules.begin(), scan.floorRules.end() );
-    scan.floorRules.erase( std::unique( scan.floorRules.begin(), scan.floorRules.end() ), scan.floorRules.end() );
+    rw::sortutil::sortUnique( scan.floorRules );
     std::sort( hits.begin(), hits.end(), []( const FamilyHit& a, const FamilyHit& b ) noexcept
                {
                    if( a.id != b.id )         { return a.id < b.id; }

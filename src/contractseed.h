@@ -209,8 +209,7 @@ inline std::vector<NodeId> methodSetImplementors( const IngestResult& ing, NodeI
             names.push_back( s.name );
         }
     }
-    std::sort( names.begin(), names.end(), sortutil::svLess );
-    names.erase( std::unique( names.begin(), names.end() ), names.end() );
+    sortutil::sortUnique( names, sortutil::svLess );
     if( names.empty() )
     {
         return {};
@@ -231,10 +230,9 @@ inline std::vector<NodeId> methodSetImplementors( const IngestResult& ing, NodeI
             covered.emplace_back( o, ing.symbols[ b ].name );
         }
     }
-    std::sort( covered.begin(), covered.end(), []( const auto& a, const auto& b ) {
+    sortutil::sortUnique( covered, []( const auto& a, const auto& b ) {
         return a.first != b.first ? a.first < b.first : sortutil::svLess( a.second, b.second );
     } );
-    covered.erase( std::unique( covered.begin(), covered.end() ), covered.end() );
     std::vector<NodeId> out;
     for( std::size_t i = 0; i < covered.size(); )
     {
@@ -320,8 +318,7 @@ inline ContractSeeds widenContractSeeds( const IngestResult& ing, const Graph& g
             }
         }
     }
-    std::sort( implBodies.begin(), implBodies.end() );
-    implBodies.erase( std::unique( implBodies.begin(), implBodies.end() ), implBodies.end() );
+    sortutil::sortUnique( implBodies );
     out.impls = implBodies.size();
     const std::size_t   matchCount = out.seeds.size();
     std::vector<NodeId> sortedSeeds( out.seeds );

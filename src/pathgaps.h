@@ -134,8 +134,7 @@ inline void countUnlistedNamesakes( const IngestResult& ing, const Graph& g, std
     {
         return;
     }
-    std::ranges::sort( names, sortutil::svLess );
-    names.erase( std::ranges::unique( names ).begin(), names.end() );
+    sortutil::sortUnique( names, sortutil::svLess );
     std::vector<char> searched( ing.symbols.size(), 0 );   // the cone, by symbol id
     for( const NodeId u : cone )
     {
@@ -986,8 +985,7 @@ inline PathNearSink pathNearSink( const IngestResult& ing, const Graph& g, std::
                 }
             }
         }
-        std::ranges::sort( nameHits );
-        nameHits.erase( std::ranges::unique( nameHits ).begin(), nameHits.end() );
+        sortutil::sortUnique( nameHits );
         if( !nameHits.empty() )
         {
             // the call site: the caller's first call reference of the row's name that is not builtin-spelled (K5 rule 1)
@@ -1011,8 +1009,7 @@ inline PathNearSink pathNearSink( const IngestResult& ing, const Graph& g, std::
                 }
             }
         }
-        std::ranges::sort( withheld );
-        withheld.erase( std::ranges::unique( withheld ).begin(), withheld.end() );
+        sortutil::sortUnique( withheld );
         for( const auto& hit : withheld )
         {
             ++out.rows[ hit.second ].nameWithheld;
@@ -1603,8 +1600,7 @@ inline PathHandlerRule pathHandlerRule( const IngestResult& ing, const NameKeyHo
     {
         toNames.push_back( ing.symbols[d].name );
     }
-    std::ranges::sort( toNames, sortutil::svLess );
-    toNames.erase( std::ranges::unique( toNames ).begin(), toNames.end() );
+    sortutil::sortUnique( toNames, sortutil::svLess );
     std::vector<std::string> hit;   // the handler names a counted post site carries that to= names
     for( const HandlerPostSite& site : hr.sites() )
     {
@@ -1638,8 +1634,7 @@ inline PathHandlerRule pathHandlerRule( const IngestResult& ing, const NameKeyHo
     {
         return out;
     }
-    std::ranges::sort( hit, sortutil::svLess );
-    hit.erase( std::ranges::unique( hit ).begin(), hit.end() );
+    sortutil::sortUnique( hit, sortutil::svLess );
     for( const NodeId d : dstDefs )
     {
         if( std::ranges::binary_search( hit, std::string_view( ing.symbols[d].name ), sortutil::svLess ) && hr.classes().ownerOf( d ) != kNoNode )

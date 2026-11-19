@@ -3877,7 +3877,7 @@ std::optional<int> runMentions( const MainDispatch& d )
                 }
             }
         }
-        std::sort( docs.begin(), docs.end() );  docs.erase( std::unique( docs.begin(), docs.end() ), docs.end() );
+        rw::sortutil::sortUnique( docs );
         const std::size_t           sectionCount = docs.size();
         std::vector<MentionFileRow> fileRows     = collapseMentionsToFileRows( ing, docs );
         const UnbacktickedDocs      unbackticked = unbacktickedDocsFor( ing, defs, fileRows, mnSingleRoot );

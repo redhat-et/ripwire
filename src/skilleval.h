@@ -1,5 +1,6 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/sortutil.h"   // sortUnique
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
 
@@ -635,8 +636,7 @@ inline OraclePoint oracleFireAbstain( const std::vector<RowOutcome>& outcomes, c
     {
         thresholds.push_back( o.top1Score );
     }
-    std::sort( thresholds.begin(), thresholds.end() );
-    thresholds.erase( std::unique( thresholds.begin(), thresholds.end() ), thresholds.end() );
+    rw::sortutil::sortUnique( thresholds );
 
     OraclePoint best;                                              // ascending scan ⇒ ties keep the smallest th
     for( const double th : thresholds )

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "mcpedit.h"
+#include "infra/sortutil.h"   // sortUnique
 #include "infra/os.h"   // rw::os::realpath / getcwd / lstat — plan-directory confinement and the symlink-target refusal
 #include "nextverb.h"   // E4: nextFlag — the shell-safe spelling of the rollback message's one next:
 
@@ -388,8 +389,7 @@ inline std::size_t callersUnionSize( const std::vector<Edit>& edits )
     {
         union_.insert( union_.end(), e.callers.begin(), e.callers.end() );
     }
-    std::sort( union_.begin(), union_.end() );
-    union_.erase( std::unique( union_.begin(), union_.end() ), union_.end() );
+    rw::sortutil::sortUnique( union_ );
     return union_.size();
 }
 

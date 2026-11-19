@@ -523,8 +523,7 @@ struct ElixirContext
         {
             if( auto target = moduleOf( ts_node_named_child( targets, i ), node ); !target.empty() ) { out.push_back( protocol + "." + target ); }
         }
-        std::sort( out.begin(), out.end() );
-        out.erase( std::unique( out.begin(), out.end() ), out.end() );
+        rw::sortutil::sortUnique( out );
         return out;
     }
 

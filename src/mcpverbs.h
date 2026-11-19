@@ -1,5 +1,6 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/sortutil.h"   // sortUnique
 #include "infra/os.h"   // rw::os::open_memstream — the verb response buffers
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
@@ -1957,7 +1958,7 @@ inline std::string mentionsJson( const std::string& root, const std::string& sym
             }
         }
     }
-    std::sort( docs.begin(), docs.end() );  docs.erase( std::unique( docs.begin(), docs.end() ), docs.end() );
+    rw::sortutil::sortUnique( docs );
 
     // §A8.4 (same fix as CLI --mentions): one entry per FILE via the shared collapse — the old payload
     // emitted one entry per markdown SECTION, duplicating "file" values up to 3x. docs=/sections= mirror
@@ -4224,8 +4225,7 @@ namespace connectemit
         { return a.from != b.from ? a.from < b.from : a.to < b.to; };
         const auto edgeEq   = []( const ConnectEdge& a, const ConnectEdge& b ) noexcept
         { return a.from == b.from && a.to == b.to; };
-        std::sort( u.nodes.begin(), u.nodes.end() );
-        u.nodes.erase( std::unique( u.nodes.begin(), u.nodes.end() ), u.nodes.end() );
+        rw::sortutil::sortUnique( u.nodes );
         std::sort( u.edges.begin(), u.edges.end(), edgeLess );
         u.edges.erase( std::unique( u.edges.begin(), u.edges.end(), edgeEq ), u.edges.end() );
         return u;

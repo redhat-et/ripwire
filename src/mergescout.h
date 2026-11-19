@@ -1,5 +1,6 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/sortutil.h"   // sortUnique
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
 
@@ -310,8 +311,7 @@ inline std::vector<ChangedSym> diffTreeIndex( const SymTreeIndex& base, const Sy
     keys.reserve( base.bodyHash.size() + ref.bodyHash.size() );
     for( const auto& [ k, v ] : base.bodyHash ) { (void)v; keys.push_back( k ); }
     for( const auto& [ k, v ] : ref.bodyHash )  { (void)v; keys.push_back( k ); }
-    std::sort( keys.begin(), keys.end() );
-    keys.erase( std::unique( keys.begin(), keys.end() ), keys.end() );
+    rw::sortutil::sortUnique( keys );
 
     std::vector<ChangedSym> out;
     out.reserve( keys.size() );

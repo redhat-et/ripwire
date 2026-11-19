@@ -1258,8 +1258,7 @@ std::optional<int> expandScopeDiff( rw::quality::Scope& scope, bool refPair, con
                               "  this index does not carry), so the scope owns nothing and an exit 0 under it would say nothing about your change\n" );
         return 1;
     }
-    std::sort( expanded.begin(), expanded.end() );
-    expanded.erase( std::unique( expanded.begin(), expanded.end() ), expanded.end() );
+    rw::sortutil::sortUnique( expanded );
     scope.patterns.swap( expanded );
     return std::nullopt;
 }
@@ -3523,8 +3522,7 @@ inline void dropTestOnlySpelledInLibrary( const rw::IngestResult& ing, std::vect
     std::vector<std::string_view> names;
     names.reserve( testOnly.size() );
     for( NodeId id : testOnly ) { names.push_back( ing.symbols[ id ].name ); }
-    std::ranges::sort( names, sortutil::svLess );
-    names.erase( std::ranges::unique( names ).begin(), names.end() );
+    sortutil::sortUnique( names, sortutil::svLess );
     std::vector<std::string_view> spelled;
     std::vector<std::string>      globbed;   // module tails a library file glob-imports (owned: the file text is gone after its turn)
     std::vector<std::uint32_t>    unread;   // library files the index lists that this vetting could not read

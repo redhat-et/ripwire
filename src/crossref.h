@@ -343,8 +343,7 @@ inline std::vector<std::uint64_t> minhashSketch( std::string_view src )
         }
     }
 
-    std::sort( all.begin(), all.end() );
-    all.erase( std::unique( all.begin(), all.end() ), all.end() );
+    sortutil::sortUnique( all );
     if( all.size() > kSketchSize )
     {
         all.resize( kSketchSize ); // bottom-k
@@ -757,8 +756,7 @@ public:
         {
             return;
         }
-        std::sort( pending_.begin(), pending_.end() );                       // determinism: batch order is sha order
-        pending_.erase( std::unique( pending_.begin(), pending_.end() ), pending_.end() );
+        sortutil::sortUnique( pending_ );   // determinism: batch order is sha order
 
         std::vector<std::string> todo;
         todo.reserve( pending_.size() );
@@ -794,8 +792,7 @@ public:
             const std::vector<std::uint64_t> sketch = minhashSketch( piece.bytes );
             pieceFacts_.lineHashes.insert( pieceFacts_.lineHashes.end(), lines.begin(), lines.end() );
             pieceFacts_.sketch.insert( pieceFacts_.sketch.end(), sketch.begin(), sketch.end() );
-            std::sort( pieceFacts_.sketch.begin(), pieceFacts_.sketch.end() );
-            pieceFacts_.sketch.erase( std::unique( pieceFacts_.sketch.begin(), pieceFacts_.sketch.end() ), pieceFacts_.sketch.end() );
+            sortutil::sortUnique( pieceFacts_.sketch );
             if( pieceFacts_.sketch.size() > kSketchSize )
             {
                 pieceFacts_.sketch.resize( kSketchSize );
@@ -2972,8 +2969,7 @@ inline bool catFileBatch( const std::string& root, const std::vector<std::string
 // The root tree of every distinct commit in `tips` (`tree <id>` heads a commit object), or nullopt.
 inline std::optional<gtl::btree_map<std::string, std::string>> rootTreesOf( const std::string& root, std::vector<std::string> tips )
 {
-    std::sort( tips.begin(), tips.end() );
-    tips.erase( std::unique( tips.begin(), tips.end() ), tips.end() );
+    sortutil::sortUnique( tips );
     gtl::btree_map<std::string, std::string> rootOf;   // commit → its tree
     const bool read = catFileBatch( root, tips, [ & ]( const std::string& sha, std::string_view type, std::string_view bytes )
     {
@@ -2999,8 +2995,7 @@ inline std::optional<GitTreeTable> readTreeLevels( const std::string& root, std:
     GitTreeTable trees;
     while( !level.empty() )
     {
-        std::sort( level.begin(), level.end() );
-        level.erase( std::unique( level.begin(), level.end() ), level.end() );
+        sortutil::sortUnique( level );
         std::vector<std::string> next;
         const bool               read = catFileBatch( root, level, [ & ]( const std::string& sha, std::string_view type, std::string_view bytes )
         {
@@ -3523,8 +3518,7 @@ inline GitListing worktreeChangedPaths( const std::string& root, const std::stri
     GitListing others  = gitListChecked( root, "ls-files --others --exclude-standard" );
     changed.ok         = changed.ok && others.ok;
     changed.lines.insert( changed.lines.end(), others.lines.begin(), others.lines.end() );
-    std::sort( changed.lines.begin(), changed.lines.end() );
-    changed.lines.erase( std::unique( changed.lines.begin(), changed.lines.end() ), changed.lines.end() );
+    sortutil::sortUnique( changed.lines );
     return changed;
 }
 
@@ -3763,8 +3757,7 @@ inline std::vector<std::string> identWordsOf( std::string_view name )
         cur.push_back( static_cast<char>( std::tolower( c ) ) );
     }
     if( !cur.empty() ) { words.push_back( std::move( cur ) ); }
-    std::sort( words.begin(), words.end() );
-    words.erase( std::unique( words.begin(), words.end() ), words.end() );
+    sortutil::sortUnique( words );
     return words;
 }
 
@@ -4078,8 +4071,7 @@ inline TipListings listDistinctTips( const std::string& root, const std::vector<
     {
         out.distinctTips.push_back( ref.tip );
     }
-    std::sort( out.distinctTips.begin(), out.distinctTips.end() );
-    out.distinctTips.erase( std::unique( out.distinctTips.begin(), out.distinctTips.end() ), out.distinctTips.end() );
+    sortutil::sortUnique( out.distinctTips );
     out.rowsByTip.resize( out.distinctTips.size() );
     ParallelSweep sweep;
     parallelIndexed( out.distinctTips.size(), [ & ]( std::size_t tipIndex ) { out.rowsByTip[ tipIndex ] = lsTree( root, out.distinctTips[ tipIndex ] ); }, sweep );
@@ -4420,8 +4412,7 @@ inline EvalReport evalStray( const std::string& root, const std::string& labelsP
     {
         pinned.push_back( c.ref );
     }
-    std::sort( pinned.begin(), pinned.end() );
-    pinned.erase( std::unique( pinned.begin(), pinned.end() ), pinned.end() );
+    sortutil::sortUnique( pinned );
 
     const StrayResult res = computeStrayContent( root, {}, { .pinned = pinned } );
     if( !res.ok ) { rep.ok = false; rep.blobsUnread = res.blobsUnread; return rep; }

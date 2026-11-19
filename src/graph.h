@@ -1016,8 +1016,7 @@ struct ChaConeMemo
             names_.push_back( k );
             names_.insert( names_.end(), v.begin(), v.end() );
         }
-        std::sort( names_.begin(), names_.end() );
-        names_.erase( std::unique( names_.begin(), names_.end() ), names_.end() );
+        sortutil::sortUnique( names_ );
         idOf_.reserve( names_.size() );
         for( std::uint32_t i = 0; i < names_.size(); ++i )
         {
@@ -1047,8 +1046,7 @@ struct ChaConeMemo
             walk( down_, root, downScratch_ );   // {recvType} ∪ descendants — a SEPARATE walk, never chaDown out of an ancestor
             std::vector<std::uint32_t> cone( upScratch_ );
             cone.insert( cone.end(), downScratch_.begin(), downScratch_.end() );
-            std::sort( cone.begin(), cone.end() );
-            cone.erase( std::unique( cone.begin(), cone.end() ), cone.end() );
+            sortutil::sortUnique( cone );
             coneIndex_[ root ] = std::uint32_t( cones_.size() );
             cones_.push_back( std::move( cone ) );
         }
@@ -3069,8 +3067,7 @@ inline std::vector<std::vector<std::uint32_t>> buildPythonImportFiles( const Ing
     }
     for( std::vector<std::uint32_t>& list : files )
     {
-        std::sort( list.begin(), list.end() );
-        list.erase( std::unique( list.begin(), list.end() ), list.end() );
+        sortutil::sortUnique( list );
     }
     return files;
 }
@@ -3752,8 +3749,7 @@ inline JsExportTables buildJsExportTablesSized( const IngestResult& ing, const B
     }
     for( auto& [ localKey, keys ] : byLocal )
     {
-        std::sort( keys.begin(), keys.end() );                              // one definition may answer one export ONCE:
-        keys.erase( std::unique( keys.begin(), keys.end() ), keys.end() );  //   a repeat would tombstone it as ambiguous
+        sortutil::sortUnique( keys );   // one definition may answer one export ONCE: a repeat would tombstone it as ambiguous
     }
     for( const Symbol& symbol : ing.symbols )
     {
@@ -4700,8 +4696,7 @@ inline RubyCha buildRubyCha( const IngestResult& ing, const RubyBaseScope& bases
     {
         for( auto& [ k, v ] : *lists )
         {
-            std::sort( v.begin(), v.end() );
-            v.erase( std::unique( v.begin(), v.end() ), v.end() );
+            sortutil::sortUnique( v );
         }
     }
     return out;
@@ -6378,13 +6373,11 @@ inline void collectFileClassEvidence( const IngestResult& ing, const std::vector
     }
     for( std::vector<std::uint32_t>& named : gate.fileClasses )
     {
-        std::sort( named.begin(), named.end() );
-        named.erase( std::unique( named.begin(), named.end() ), named.end() );
+        sortutil::sortUnique( named );
     }
     for( std::vector<std::uint32_t>& named : gate.fileRefClasses )
     {
-        std::sort( named.begin(), named.end() );
-        named.erase( std::unique( named.begin(), named.end() ), named.end() );
+        sortutil::sortUnique( named );
     }
 }
 
@@ -10106,7 +10099,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         }
         const auto dedup = [ & ]( HashMap<std::string, rw::SmallVec<NodeId, 2>>& m )
         {
-            for( auto& [ k, v ] : m ) { std::sort( v.begin(), v.end() ); v.erase( std::unique( v.begin(), v.end() ), v.end() ); }
+            for( auto& [ k, v ] : m ) { sortutil::sortUnique( v ); }
         };
         dedup( pybindAlias );
         dedup( externCAlias );
@@ -10262,8 +10255,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             }
         }
         addTypeAliasBases( ing, chaUp );   // a typedef / using alias continues at its target class; dedup below is order-independent
-        for( auto& [ k, v ] : chaUp )   { std::sort( v.begin(), v.end() ); v.erase( std::unique( v.begin(), v.end() ), v.end() ); }
-        for( auto& [ k, v ] : chaDown ) { std::sort( v.begin(), v.end() ); v.erase( std::unique( v.begin(), v.end() ), v.end() ); }
+        for( auto& [ k, v ] : chaUp )   { sortutil::sortUnique( v ); }
+        for( auto& [ k, v ] : chaDown ) { sortutil::sortUnique( v ); }
     }
     const RubyCha                  rubyCha   = buildRubyCha( ing, rubyBases, chaUp, chaDown );
     const ChaUpNames&              rubyUp    = rubyCha.merged ? rubyCha.up : chaUp;     // a Ruby call to self reads mixins too
@@ -11346,8 +11339,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     }
     for( std::vector<NodeId>& v : g.implementors )
     {
-        std::sort( v.begin(), v.end() );
-        v.erase( std::unique( v.begin(), v.end() ), v.end() );
+        sortutil::sortUnique( v );
     }
     // lane L6 fix round 1 (B1): an implementor no class the index keeps names — a Java anonymous class, a Kotlin object expression or
     // `fun interface`, a Rust trait a mock attribute implements (model.h LocalBindKind::ImplBlock, typeName "") — opens the type's
@@ -13552,8 +13544,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     }
     for( std::vector<NodeId>& v : g.mentions )
     {
-        std::sort( v.begin(), v.end() );
-        v.erase( std::unique( v.begin(), v.end() ), v.end() );
+        sortutil::sortUnique( v );
     }
 
     // S5-E HAS-A composition edges: isCompose refs (owner class → member type name) → composeEdges.
@@ -14299,8 +14290,7 @@ inline std::vector<NodeId> resolveAllByScopeQualified( const IngestResult& ing, 
 // Deterministic: sort + unique over ids, then an ascending scan. `dropped` is consumed (sorted in place).
 inline std::uint32_t egoFanoutCut( const std::vector<int>& dist, std::vector<NodeId>& dropped )
 {
-    std::sort( dropped.begin(), dropped.end() );
-    dropped.erase( std::unique( dropped.begin(), dropped.end() ), dropped.end() );
+    sortutil::sortUnique( dropped );
     std::uint32_t missing = 0;
     for( NodeId v : dropped )
     {
@@ -15566,8 +15556,7 @@ inline std::vector<NodeId> resolveAllByWrittenSpelling( const IngestResult& ing,
             ownerFiles.push_back( ing.symbols[ id ].fileId );
         }
     }
-    std::sort( ownerFiles.begin(), ownerFiles.end() );
-    ownerFiles.erase( std::unique( ownerFiles.begin(), ownerFiles.end() ), ownerFiles.end() );
+    sortutil::sortUnique( ownerFiles );
     std::vector<NodeId> types;
     for( const Symbol& t : ownerFiles.empty() ? std::span<const Symbol>{} : std::span<const Symbol>( ing.symbols ) )
     {
@@ -16355,8 +16344,7 @@ inline std::string memberOwnerRefusal( const IngestResult& ing, std::span<const 
             spellings.push_back( ing.fields[ f ].scope + "." + ing.fields[ f ].name );
         }
     }
-    std::sort( spellings.begin(), spellings.end() );
-    spellings.erase( std::unique( spellings.begin(), spellings.end() ), spellings.end() );
+    sortutil::sortUnique( spellings );
     if( spellings.size() < 2 )
     {
         return {};
@@ -17200,8 +17188,7 @@ inline ContainmentCut rustContainmentCut( const IngestResult& ing, const rw::Fil
     {
         declaredNames.push_back( d.name );
     }
-    std::sort( declaredNames.begin(), declaredNames.end(), sortutil::svLess );
-    declaredNames.erase( std::unique( declaredNames.begin(), declaredNames.end() ), declaredNames.end() );
+    sortutil::sortUnique( declaredNames, sortutil::svLess );
 
     // rule (2) reads the resolver's own `mod:` base, which knows a manifest's crate roots (`[lib] path`, src/bin/*.rs): the run's
     // shared table when an earlier pass built it. The path index is built only when it is needed (no shared table yet, or a
@@ -17705,8 +17692,7 @@ inline ImportTier impactImportTier( const IngestResult& ing, const std::vector<N
     {
         defFiles.push_back( ing.symbols[s].fileId );
     }
-    std::sort( defFiles.begin(), defFiles.end() );
-    defFiles.erase( std::unique( defFiles.begin(), defFiles.end() ), defFiles.end() );
+    sortutil::sortUnique( defFiles );
     return impactImportTierOfFiles( ing, defFiles );
 }
 
@@ -18619,8 +18605,7 @@ inline ConnectResult connectSubgraph( const Graph& g, const std::vector<NodeId>&
             res.terminals.push_back( t );
         }
     }
-    std::sort( res.terminals.begin(), res.terminals.end() );
-    res.terminals.erase( std::unique( res.terminals.begin(), res.terminals.end() ), res.terminals.end() );
+    sortutil::sortUnique( res.terminals );
     if( res.terminals.size() > connectcfg::kMaxTerminals )
     {
         res.terminals.resize( connectcfg::kMaxTerminals );
@@ -18883,8 +18868,7 @@ inline ConnectResult connectSubgraph( const Graph& g, const std::vector<NodeId>&
                 nodeScratch.insert( nodeScratch.end(), pb.nodes.begin(), pb.nodes.end() );
                 edgeScratch.insert( edgeScratch.end(), pb.edges.begin(), pb.edges.end() );
             }
-            std::sort( nodeScratch.begin(), nodeScratch.end() );
-            nodeScratch.erase( std::unique( nodeScratch.begin(), nodeScratch.end() ), nodeScratch.end() );
+            sortutil::sortUnique( nodeScratch );
             std::sort( edgeScratch.begin(), edgeScratch.end(), edgeLess );
             edgeScratch.erase( std::unique( edgeScratch.begin(), edgeScratch.end(), edgeEq ), edgeScratch.end() );
             nodeTotal += std::uint32_t( nodeScratch.size() );
@@ -18958,8 +18942,7 @@ inline ConnectResult connectSubgraph( const Graph& g, const std::vector<NodeId>&
             nodeScratch.insert( nodeScratch.end(), pb.nodes.begin(), pb.nodes.end() );
             grp.edges.insert( grp.edges.end(), pb.edges.begin(), pb.edges.end() );
         }
-        std::sort( nodeScratch.begin(), nodeScratch.end() );
-        nodeScratch.erase( std::unique( nodeScratch.begin(), nodeScratch.end() ), nodeScratch.end() );
+        sortutil::sortUnique( nodeScratch );
         for( NodeId v : nodeScratch )
         {
             if( !std::binary_search( grp.terminals.begin(), grp.terminals.end(), v ) )
@@ -19483,8 +19466,7 @@ inline std::vector<std::vector<WEdge>> symbolAdjacency( const Graph& g )
                 nb.push_back( inCi[k] );
             }
         }
-        std::sort( nb.begin(), nb.end() );
-        nb.erase( std::unique( nb.begin(), nb.end() ), nb.end() );
+        sortutil::sortUnique( nb );
         adj[u].reserve( nb.size() );
         for( NodeId v : nb )
         {

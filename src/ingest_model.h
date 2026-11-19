@@ -1076,8 +1076,7 @@ inline void keepMacroNamespaceRenames( const IngestResult& result, std::vector<s
         asked.push_back( result.bindings[ i ].typeName );
         asked.push_back( result.bindings[ i ].var );
     }
-    std::ranges::sort( asked, sortutil::svLess );   // a byte order (portablebuildcheck #6: libstdc++'s default string_view order aborts the G1 leg)
-    asked.erase( std::ranges::unique( asked ).begin(), asked.end() );
+    sortutil::sortUnique( asked, sortutil::svLess );   // a byte order (portablebuildcheck #6: libstdc++'s default string_view order aborts the G1 leg)
     std::vector<std::uint8_t> macroNamed( asked.size(), 0 ), itemNamed( asked.size(), 0 );
     using FileMacro = std::pair<std::uint32_t, std::string_view>;   // (fileId, name) of an asked-about Rust macro
     std::vector<FileMacro> fileMacros;

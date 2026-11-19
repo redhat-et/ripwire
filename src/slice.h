@@ -2516,8 +2516,7 @@ inline void sliceComputeReach( SliceScan& scan, TSNode root, const SliceWalkCtx&
     }
     // svLess, not operator<: see infra/sortutil.h. The sort and the lower_bound below MUST name the same
     // comparator, or the slot numbering silently stops being a pure function of the scan.
-    std::sort( unboundNames.begin(), unboundNames.end(), rw::sortutil::svLess );
-    unboundNames.erase( std::unique( unboundNames.begin(), unboundNames.end() ), unboundNames.end() );
+    rw::sortutil::sortUnique( unboundNames, rw::sortutil::svLess );
     w.slotOf.resize( scan.all.size() );
     for( std::uint32_t occIndex = 0; occIndex < scan.all.size(); ++occIndex )
     {
@@ -3231,10 +3230,9 @@ inline std::vector<std::uint32_t> sliceDefUseRowOrder( const SliceScan& scan, co
             lineNames.emplace_back( no.occ.line, no.name );
         }
     }
-    std::sort( lineNames.begin(), lineNames.end(),
+    rw::sortutil::sortUnique( lineNames,
                []( const std::pair<std::uint32_t, std::string_view>& x, const std::pair<std::uint32_t, std::string_view>& y )
                { return x.first != y.first ? x.first < y.first : rw::sortutil::svLess( x.second, y.second ); } );
-    lineNames.erase( std::unique( lineNames.begin(), lineNames.end() ), lineNames.end() );
 
     std::vector<std::uint32_t> coverage( rows.size(), 0 );
     std::vector<std::uint32_t> order( rows.size() );

@@ -1,5 +1,6 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/sortutil.h"   // sortUnique
 #include "gitcmd.h"         // rw::gitCmd — every git child starts with --no-optional-locks -c core.fsmonitor=false
 #include "langfacts.h"
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
@@ -647,12 +648,9 @@ inline RegisterMacrosConfig readRegisterMacrosConfig( std::string_view root )
         }
         appendConfigValueTokens( line.substr( eq + 1 ), isVendor, out );
     }
-    std::sort( out.names.begin(), out.names.end() );
-    out.names.erase( std::unique( out.names.begin(), out.names.end() ), out.names.end() );
-    std::sort( out.vendoredPaths.begin(), out.vendoredPaths.end() );
-    out.vendoredPaths.erase( std::unique( out.vendoredPaths.begin(), out.vendoredPaths.end() ), out.vendoredPaths.end() );
-    std::sort( out.unrecognizedKeys.begin(), out.unrecognizedKeys.end() );
-    out.unrecognizedKeys.erase( std::unique( out.unrecognizedKeys.begin(), out.unrecognizedKeys.end() ), out.unrecognizedKeys.end() );
+    rw::sortutil::sortUnique( out.names );
+    rw::sortutil::sortUnique( out.vendoredPaths );
+    rw::sortutil::sortUnique( out.unrecognizedKeys );
     return out;
 }
 
@@ -675,8 +673,7 @@ inline std::vector<std::string> mergeBuiltinsWithConfig( std::span<const std::st
     {
         out.push_back( std::move( extra ) );
     }
-    std::sort( out.begin(), out.end() );
-    out.erase( std::unique( out.begin(), out.end() ), out.end() );
+    rw::sortutil::sortUnique( out );
     return out;
 }
 
@@ -806,8 +803,7 @@ inline std::vector<std::uint64_t> topLevelCalleeNameHashes( const IngestResult& 
         }
         hashes.push_back( fnv1a64( r.calleeName ) );
     }
-    std::sort( hashes.begin(), hashes.end() );
-    hashes.erase( std::unique( hashes.begin(), hashes.end() ), hashes.end() );
+    rw::sortutil::sortUnique( hashes );
     return hashes;
 }
 
@@ -1571,11 +1567,10 @@ inline std::vector<std::pair<NodeId, std::string_view>> pythonDispatchRequests( 
             requests.emplace_back( scopes.owner[ scope ], r.calleeName );
         }
     }
-    std::sort( requests.begin(), requests.end(), []( const auto& a, const auto& b )
+    rw::sortutil::sortUnique( requests, []( const auto& a, const auto& b )
     {
         return a.first != b.first ? a.first < b.first : rw::sortutil::svLess( a.second, b.second );
     } );
-    requests.erase( std::unique( requests.begin(), requests.end() ), requests.end() );
     return requests;
 }
 
@@ -1632,8 +1627,7 @@ inline std::vector<NodeId> pythonDispatchedMethodIds( const IngestResult& ing, c
             }
         }
     }
-    std::sort( result.begin(), result.end() );
-    result.erase( std::unique( result.begin(), result.end() ), result.end() );
+    rw::sortutil::sortUnique( result );
     return result;
 }
 
@@ -5817,8 +5811,7 @@ inline ChangedFiles changedFilesBetween( const std::string& root, const std::str
     }
     for( std::vector<std::string>* list : { &out.base, &out.target } )
     {
-        std::sort( list->begin(), list->end() );
-        list->erase( std::unique( list->begin(), list->end() ), list->end() );
+        rw::sortutil::sortUnique( *list );
     }
     std::sort( out.targetTree.begin(), out.targetTree.end() );
     out.ok = true;
@@ -6446,8 +6439,7 @@ inline std::vector<std::uint64_t> baselineCloneGroupHashes( const IngestResult& 
     const HeldClonePairSink sink{ out, ing, root, fileInBaseline };
     pushExactGroupPairs( sink, exact );
     pushTwinWidenedPairs( sink, exact, type3 );
-    std::sort( out.begin(), out.end() );
-    out.erase( std::unique( out.begin(), out.end() ), out.end() );
+    rw::sortutil::sortUnique( out );
     return out;
 }
 
@@ -6578,8 +6570,7 @@ inline std::vector<std::string> cFamilyMacroNames( const IngestResult& ing )
             names.push_back( s.name );
         }
     }
-    std::sort( names.begin(), names.end() );
-    names.erase( std::unique( names.begin(), names.end() ), names.end() );
+    rw::sortutil::sortUnique( names );
     return names;
 }
 
@@ -6776,8 +6767,7 @@ inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::s
 
     std::sort( snap.dead.begin(),        snap.dead.end() );
     std::sort( snap.cloneGroups.begin(), snap.cloneGroups.end() );
-    std::sort( snap.publicApi.begin(),   snap.publicApi.end() );
-    snap.publicApi.erase( std::unique( snap.publicApi.begin(), snap.publicApi.end() ), snap.publicApi.end() );  // overloads collapse to one canonId
+    rw::sortutil::sortUnique( snap.publicApi );   // overloads collapse to one canonId
     return snap;
 }
 
@@ -7953,8 +7943,7 @@ inline std::uint32_t churnEditWindowCommitCount( DiffHunkMemo& memo, const std::
             unreadOut = true;   // keep reading the other hunks: their commits still count, but the total is now a floor
         }
     }
-    std::sort( shas.begin(), shas.end() );
-    shas.erase( std::unique( shas.begin(), shas.end() ), shas.end() );   // a commit spanning two hunks of one symbol counts ONCE
+    rw::sortutil::sortUnique( shas );   // a commit spanning two hunks of one symbol counts ONCE
     return std::uint32_t( shas.size() );
 }
 
@@ -9416,8 +9405,7 @@ inline void noteRenamedIdentities( Snapshot& base, const IdentityAliases& al )
             base.renamedKeys.push_back( to );
         }
     }
-    std::sort( base.renamedKeys.begin(), base.renamedKeys.end() );
-    base.renamedKeys.erase( std::unique( base.renamedKeys.begin(), base.renamedKeys.end() ), base.renamedKeys.end() );
+    rw::sortutil::sortUnique( base.renamedKeys );
 }
 
 // The defect-shape records: a renamed definition's sites are re-filed under its current anchor, add-never-
@@ -9540,8 +9528,7 @@ inline std::size_t remapSnapshotIdentity( Snapshot& base, const IdentityAliases&
         if( !add.empty() )
         {
             v.insert( v.end(), add.begin(), add.end() );
-            std::sort( v.begin(), v.end() );
-            v.erase( std::unique( v.begin(), v.end() ), v.end() );
+            rw::sortutil::sortUnique( v );
         }
     };
     healSet( base.dead );
@@ -10514,8 +10501,7 @@ inline std::vector<std::string> cloneMemberPaths( const CloneGroup& cg, const In
             paths.emplace_back( relForHash( ing.files[ ing.symbols[m].fileId ], root ) );
         }
     }
-    std::sort( paths.begin(), paths.end() );
-    paths.erase( std::unique( paths.begin(), paths.end() ), paths.end() );
+    rw::sortutil::sortUnique( paths );
     return paths;
 }
 

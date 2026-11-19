@@ -1,5 +1,6 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/sortutil.h"   // sortUnique
 
 
 // partition.h — `--pack-task="TASK" --partition=N`, the FAN-OUT form of the task bundle.
@@ -449,8 +450,7 @@ inline BundleOut renderMaskedBundle( const BundleRenderCtx& ctx, const std::vect
 
     out.xml = packTaskBundleText( *ctx.ing, *ctx.g, *ctx.task, masked, in, ctx.wantJson ? &out.json : nullptr, &out.surface, &out.testsKept,
                                   &out.bodyReadings );
-    std::sort( out.surface.begin(), out.surface.end() );
-    out.surface.erase( std::unique( out.surface.begin(), out.surface.end() ), out.surface.end() );
+    sortutil::sortUnique( out.surface );
     return out;
 }
 
