@@ -1258,9 +1258,11 @@ PYEOF
 srRun(){
     local tag="$1" copy="$2" sel="$3"; shift 3
     rm -rf "${SR:?}/${tag:?}.mark" "${SR:?}/${tag:?}.tmp"; mkdir -p "$SR/$tag.mark" "$SR/$tag.tmp"
-    SR_MARK="$SR/$tag.mark" TMPDIR="$SR/$tag.tmp" python3 "$copy" "$SC" "$FAKEBIN" --only "$sel" "$@" >"$SR/$tag.out" 2>&1
+    # an enclosing pargates' bin/mktemp shim is dropped from PATH, so the no-shim control sees the real mktemp
+    SR_MARK="$SR/$tag.mark" TMPDIR="$SR/$tag.tmp" PATH="$SRPATH" python3 "$copy" "$SC" "$FAKEBIN" --only "$sel" "$@" >"$SR/$tag.out" 2>&1
     echo $? > "$SR/$tag.rc"
 }
+SRPATH="$( printf '%s\n' "$PATH" | tr ':' '\n' | grep -v '/rwpg-[0-9]*-[^/]*/bin$' | paste -sd: - )"
 # what a run left in its private TMPDIR, besides pargates' own timings/failure-log files
 srLeft(){ ls -A "$SR/$1.tmp" | grep -v '^ripwire-pargates-' | tr '\n' ' '; }
 srOpen(){ chmod -R u+rwx "$SR/$1.tmp" 2>/dev/null; }     # a red control may leave a mode-000 dir behind; let cleanup remove it
