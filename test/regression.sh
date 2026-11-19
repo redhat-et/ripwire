@@ -892,6 +892,7 @@ for _g in \
     qdentryceilingcheck \
     qdgitrenamehealcheck \
     qdmonstercheck \
+    qdrangecheck \
     qdrefpaircheck \
     qdrenameidentitycheck \
     qdtestdeadcheck \
