@@ -11,6 +11,8 @@ Each function lives in its own file so a row's p= names it alone. Shapes (C++):
   steerfar / steernear — new in wt: a flag set then tested 12 statements later (counted) vs in the next statement (not).
   steercursor — new in wt: a cursor advanced, then read 12 statements later only as a bound (`pos < limit`) and an index
           (`xs[ pos ]`): a position, not a decision (census 11-19, lexCpp's `j`): no steer.
+  steerscope — new in wt: a counter `a` rewritten inside a block that then closes; 12 statements later a for head declares a new
+          `a` and the loop tests it: the closed block's `a` is out of scope (census 11-19, genPathOf): no steer.
   armnest — new in wt: a 6-arm else-if chain whose short arms nest to depth 7, beside one depth-4 region outside it: the
           arms' nesting is theirs (census 11-19, parseArgs): no row.
   creep — tangled at v1 (depth 4, 40 deep lines); +3 deep lines at c2 and +3 more in wt: each step under the rise rule
@@ -131,6 +133,17 @@ def steercursor():
             + between + "    if( pos < limit && xs[ pos ] == 3 )\n    {\n        total += 1;\n    }\n" + after + "    return total;\n}\n")
 
 
+def steerscope():
+    before = "".join(f"    total = total + {k};\n" for k in range(30))
+    between = "".join(f"    total = total * 2 + {k};\n" for k in range(12))
+    after = "".join(f"    total = total - {k};\n" for k in range(30))
+    return ("int steerscope( const std::vector<int>& xs )\n{\n    int total = 0;\n" + before +
+            "    {\n        int a = 0;\n        for( int x : xs )\n        {\n            if( x == 3 )\n            {\n                a += 1;\n"
+            "            }\n        }\n        total += a;\n    }\n"
+            + between + "    for( int a = 0;; )\n    {\n        if( a == 5 )\n        {\n            break;\n        }\n        a = a + 1;\n    }\n"
+            + after + "    return total;\n}\n")
+
+
 def armnest():
     arms = ""
     for k in range(6):
@@ -171,6 +184,7 @@ def main():
         write(d, "steernear.cpp", hdr + steer("steernear", 0))
         write(d, "steercursor.cpp", hdr + steercursor())
         write(d, "armnest.cpp", armnest())
+        write(d, "steerscope.cpp", hdr + steerscope())
 
 
 if __name__ == "__main__":

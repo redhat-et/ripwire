@@ -351,6 +351,7 @@ struct CcAccum
         std::string_view name;
         std::uint32_t    lastWrite    = 0;   // statement ordinal of the latest write so far (the declaration counts as one)
         std::uint32_t    lastWriteRow = 0;   // 1-based line of that write (detail only)
+        std::uint32_t    scopeEnd     = UINT32_MAX;   // end byte of the block that declares it (steer_scopeEndOf): no read or write past it
         bool             prim         = false;
         bool             rewritten    = false;
         bool             steered      = false;
@@ -556,10 +557,11 @@ inline void cc_noteHump( TSNode n, std::uint32_t fromNesting, std::uint32_t toNe
 // A STEERING LOCAL is a local of a primitive written type that is written again after its declaration and read in a branch
 // condition 10 or more statements after its last preceding write: the flag or counter set in one step that steers a branch in
 // another. A flag set and tested in the same step does not count, and neither does a loop's own induction variable (a
-// declaration in a for head is no slot). Three facts per node, read in the fused walk's document order: is it a STATEMENT (the
-// distance clock), a DECLARATION of a primitive local (a new slot), or a WRITE to a slot; and at every branch, the identifiers
-// its condition reads. Per-language shapes, verified against the vendored grammars by test/tanglecheck.sh's fixtures; a shape
-// this table does not know is no slot (fewer steering locals, never a wrong one).
+// declaration in a for head, like a const one, is no candidate: only a name that hides an outer one while in scope). Three
+// facts per node, read in the fused walk's document order: is it a STATEMENT (the distance clock), a DECLARATION of a local
+// (a new slot, live until its block closes), or a WRITE to a slot; and at every branch, the identifiers its condition reads.
+// Per-language shapes, verified against the vendored grammars by test/tanglecheck.sh's fixtures; a shape this table does not
+// know is no slot (fewer steering locals, never a wrong one).
 inline constexpr std::uint32_t kSteerStmts = 10;   // the distance, in statements, that makes a read "far" from its write
 
 inline bool steer_isStatement( const char* t ) noexcept
@@ -621,11 +623,13 @@ inline bool steer_isPrimitiveType( TSNode type, std::string_view src ) noexcept
     return std::find( std::begin( kNames ), std::end( kNames ), text ) != std::end( kNames );
 }
 
-inline CcAccum::SteerSlot* steer_find( CcAccum& acc, std::string_view name ) noexcept
+// The newest slot named `name` whose block is still open at byte `at` (census 11-19: genPathOf's `b == a` read the `a` of a block
+// that had closed 30 lines earlier, the for-head `a` in scope being no slot).
+inline CcAccum::SteerSlot* steer_find( CcAccum& acc, std::string_view name, std::uint32_t at ) noexcept
 {
     for( std::size_t i = acc.slots.size(); i > 0; --i )
     {
-        if( acc.slots[ i - 1 ].name == name )
+        if( acc.slots[ i - 1 ].name == name && at < acc.slots[ i - 1 ].scopeEnd )
         {
             return &acc.slots[ i - 1 ];
         }
@@ -633,7 +637,26 @@ inline CcAccum::SteerSlot* steer_find( CcAccum& acc, std::string_view name ) noe
     return nullptr;
 }
 
-inline void steer_declare( CcAccum& acc, TSNode nameNode, bool prim, std::string_view src )
+// The end byte of the block a declaration lives in: the nearest enclosing block or for-loop (a for-head name lives in the loop).
+// Python scopes by function, so its slots never close.
+inline std::uint32_t steer_scopeEndOf( TSNode n, Lang lang ) noexcept
+{
+    if( lang == Lang::Python )
+    {
+        return UINT32_MAX;
+    }
+    for( TSNode p = parentOf( n ); !ts_node_is_null( p ); p = parentOf( p ) )
+    {
+        const char* pt = ts_node_type( p );
+        if( kindIs( pt, "compound_statement" ) || kindIs( pt, "block" ) || kindIs( pt, "statement_block" ) || std::strncmp( pt, "for", 3 ) == 0 )
+        {
+            return ts_node_end_byte( p );
+        }
+    }
+    return UINT32_MAX;
+}
+
+inline void steer_declare( CcAccum& acc, TSNode nameNode, bool prim, std::string_view src, std::uint32_t scopeEnd = UINT32_MAX )
 {
     if( ts_node_is_null( nameNode ) || !kindIs( ts_node_type( nameNode ), "identifier" ) )
     {
@@ -644,6 +667,7 @@ inline void steer_declare( CcAccum& acc, TSNode nameNode, bool prim, std::string
     slot.lastWrite    = acc.stmt;
     slot.lastWriteRow = ts_node_start_point( nameNode ).row + 1u;
     slot.prim         = prim;
+    slot.scopeEnd     = scopeEnd;
     acc.slots.push_back( slot );
 }
 
@@ -653,7 +677,7 @@ inline void steer_write( CcAccum& acc, TSNode target, std::string_view src )
     {
         return;   // a member, an element or a dereference: not a local's own write
     }
-    if( CcAccum::SteerSlot* slot = steer_find( acc, nodeTextOf( target, src ) ) )
+    if( CcAccum::SteerSlot* slot = steer_find( acc, nodeTextOf( target, src ), ts_node_start_byte( target ) ) )
     {
         slot->rewritten    = true;
         slot->lastWrite    = acc.stmt;
@@ -674,8 +698,9 @@ inline bool steer_inForHead( TSNode n ) noexcept
     return std::strncmp( pt, "for", 3 ) == 0;   // for_statement, for_range_loop, for_in_statement, for_clause
 }
 
-// The C-family declaration: `[const] TYPE a = 1, b;` — every declarator slot, primitive by the written type, never a const one.
-inline void steer_cDeclaration( CcAccum& acc, TSNode n, std::string_view src )
+// The C-family declaration: `[const] TYPE a = 1, b;` — every declarator slot, primitive by the written type. A const one, or one in
+// a for head (`shadow`), is no candidate but still a slot: it hides an outer local of the same name for as long as it is in scope.
+inline void steer_cDeclaration( CcAccum& acc, TSNode n, std::string_view src, bool shadow )
 {
     bool isConst = false;
     {
@@ -686,21 +711,19 @@ inline void steer_cDeclaration( CcAccum& acc, TSNode n, std::string_view src )
             return !isConst;
         } );
     }
-    if( isConst )
-    {
-        return;
-    }
-    const bool prim = steer_isPrimitiveType( fieldChild( n, NodeField::Type ), src );
+    const bool          prim     = !shadow && !isConst && steer_isPrimitiveType( fieldChild( n, NodeField::Type ), src );
+    const std::uint32_t scopeEnd = steer_scopeEndOf( n, Lang::Cpp );
     forEachDeclaratorSlot( n, [ & ]( TSNode d )
     {
-        steer_declare( acc, kindIs( ts_node_type( d ), "init_declarator" ) ? fieldChild( d, NodeField::Declarator ) : d, prim, src );
+        steer_declare( acc, kindIs( ts_node_type( d ), "init_declarator" ) ? fieldChild( d, NodeField::Declarator ) : d, prim, src, scopeEnd );
     } );
 }
 
 // One declarator list (JS/TS variable_declarator, Java/C# variable_declarator): the name, and primitive by the declaration's
-// written type or, untyped, by its initializer.
-inline void steer_declaratorList( CcAccum& acc, TSNode n, bool typePrim, std::string_view src )
+// written type or, untyped, by its initializer; a `shadow` list (const / final, a for head) only hides outer names (steer_cDeclaration).
+inline void steer_declaratorList( CcAccum& acc, TSNode n, bool typePrim, std::string_view src, bool shadow )
 {
+    const std::uint32_t scopeEnd = steer_scopeEndOf( n, Lang::Cpp );
     ChildCursor cursor( n );
     forEachChild( n, cursor.cur, [ & ]( TSNode c )
     {
@@ -714,9 +737,9 @@ inline void steer_declaratorList( CcAccum& acc, TSNode n, bool typePrim, std::st
             name = ts_node_named_child( c, 0 );   // C#: the identifier is the declarator's first named child
         }
         const TSNode value = fieldChild( c, NodeField::Value );
-        const bool   prim  = typePrim || steer_isPrimitiveType( fieldChild( c, NodeField::Type ), src )
-                          || ( !ts_node_is_null( value ) && steer_isPrimitiveLiteral( ts_node_type( value ) ) );
-        steer_declare( acc, name, prim, src );
+        const bool   prim  = !shadow && ( typePrim || steer_isPrimitiveType( fieldChild( c, NodeField::Type ), src )
+                                          || ( !ts_node_is_null( value ) && steer_isPrimitiveLiteral( ts_node_type( value ) ) ) );
+        steer_declare( acc, name, prim, src, scopeEnd );
         return true;
     } );
 }
@@ -735,7 +758,7 @@ inline void steer_pythonAssignment( CcAccum& acc, TSNode n, std::string_view src
     {
         return;
     }
-    if( steer_find( acc, name ) != nullptr || kindIs( ts_node_type( n ), "augmented_assignment" ) )
+    if( steer_find( acc, name, ts_node_start_byte( left ) ) != nullptr || kindIs( ts_node_type( n ), "augmented_assignment" ) )
     {
         steer_write( acc, left, src );
         return;
@@ -773,49 +796,38 @@ inline bool steer_noteDeclaration( CcAccum& acc, TSNode n, const char* t, Lang l
     const bool cFamily = lang == Lang::Cpp || lang == Lang::C || lang == Lang::ObjC;
     if( cFamily && kindIs( t, "declaration" ) )
     {
-        if( !steer_inForHead( n ) )
-        {
-            steer_cDeclaration( acc, n, src );
-        }
+        steer_cDeclaration( acc, n, src, steer_inForHead( n ) );
         return true;
     }
     if( ( lang == Lang::TypeScript || lang == Lang::JavaScript ) && ( kindIs( t, "lexical_declaration" ) || kindIs( t, "variable_declaration" ) ) )
     {
-        if( !steer_inForHead( n ) && !nodeTextOf( n, src ).starts_with( "const" ) )
-        {
-            steer_declaratorList( acc, n, false, src );
-        }
+        steer_declaratorList( acc, n, false, src, steer_inForHead( n ) || nodeTextOf( n, src ).starts_with( "const" ) );
         return true;
     }
     if( lang == Lang::Java && kindIs( t, "local_variable_declaration" ) )
     {
-        if( !steer_inForHead( n ) && !nodeTextOf( n, src ).starts_with( "final" ) )
-        {
-            steer_declaratorList( acc, n, steer_isPrimitiveType( fieldChild( n, NodeField::Type ), src ), src );
-        }
+        steer_declaratorList( acc, n, steer_isPrimitiveType( fieldChild( n, NodeField::Type ), src ), src,
+                              steer_inForHead( n ) || nodeTextOf( n, src ).starts_with( "final" ) );
         return true;
     }
     if( lang == Lang::CSharp && kindIs( t, "variable_declaration" ) )
     {
         const TSNode p = parentOf( n );
-        if( !ts_node_is_null( p ) && kindIs( ts_node_type( p ), "local_declaration_statement" ) && !nodeTextOf( p, src ).starts_with( "const" ) )
-        {
-            steer_declaratorList( acc, n, steer_isPrimitiveType( fieldChild( n, NodeField::Type ), src ), src );
-        }
+        const bool local = !ts_node_is_null( p ) && kindIs( ts_node_type( p ), "local_declaration_statement" );
+        steer_declaratorList( acc, n, steer_isPrimitiveType( fieldChild( n, NodeField::Type ), src ), src, !local || nodeTextOf( p, src ).starts_with( "const" ) );
         return true;
     }
     if( lang == Lang::Go && kindIs( t, "short_var_declaration" ) )
     {
-        if( !steer_inForHead( n ) )
+        const bool          shadow   = steer_inForHead( n );
+        const std::uint32_t scopeEnd = steer_scopeEndOf( n, lang );
+        const TSNode        left     = fieldChild( n, NodeField::Left );
+        const TSNode        right    = fieldChild( n, NodeField::Right );
+        const std::uint32_t names    = ts_node_is_null( left ) ? 0u : ts_node_named_child_count( left );
+        for( std::uint32_t i = 0; i < names; ++i )
         {
-            const TSNode left  = fieldChild( n, NodeField::Left );
-            const TSNode right = fieldChild( n, NodeField::Right );
-            const std::uint32_t names = ts_node_is_null( left ) ? 0u : ts_node_named_child_count( left );
-            for( std::uint32_t i = 0; i < names; ++i )
-            {
-                const TSNode value = ts_node_is_null( right ) ? TSNode{} : ts_node_named_child( right, i );
-                steer_declare( acc, ts_node_named_child( left, i ), !ts_node_is_null( value ) && steer_isPrimitiveLiteral( ts_node_type( value ) ), src );
-            }
+            const TSNode value = ts_node_is_null( right ) ? TSNode{} : ts_node_named_child( right, i );
+            steer_declare( acc, ts_node_named_child( left, i ), !shadow && !ts_node_is_null( value ) && steer_isPrimitiveLiteral( ts_node_type( value ) ), src, scopeEnd );
         }
         return true;
     }
@@ -824,18 +836,16 @@ inline bool steer_noteDeclaration( CcAccum& acc, TSNode n, const char* t, Lang l
         const TSNode value = fieldChild( n, NodeField::Value );
         const bool   prim  = steer_isPrimitiveType( fieldChild( n, NodeField::Type ), src )
                           || ( !ts_node_is_null( value ) && ts_node_named_child_count( value ) > 0 && steer_isPrimitiveLiteral( ts_node_type( ts_node_named_child( value, 0 ) ) ) );
-        steer_declare( acc, fieldChild( n, NodeField::Name ), prim, src );
+        steer_declare( acc, fieldChild( n, NodeField::Name ), prim, src, steer_scopeEndOf( n, lang ) );
         return true;
     }
     if( lang == Lang::Rust && kindIs( t, "let_declaration" ) )
     {
-        if( !ts_node_is_null( firstChildOfType( n, "mutable_specifier" ) ) )
-        {
-            const TSNode value = fieldChild( n, NodeField::Value );
-            const bool   prim  = steer_isPrimitiveType( fieldChild( n, NodeField::Type ), src )
-                              || ( !ts_node_is_null( value ) && steer_isPrimitiveLiteral( ts_node_type( value ) ) );
-            steer_declare( acc, fieldChild( n, NodeField::Pattern ), prim, src );
-        }
+        const bool   mut   = !ts_node_is_null( firstChildOfType( n, "mutable_specifier" ) );   // an immutable `let` only shadows
+        const TSNode value = fieldChild( n, NodeField::Value );
+        const bool   prim  = mut && ( steer_isPrimitiveType( fieldChild( n, NodeField::Type ), src )
+                                      || ( !ts_node_is_null( value ) && steer_isPrimitiveLiteral( ts_node_type( value ) ) ) );
+        steer_declare( acc, fieldChild( n, NodeField::Pattern ), prim, src, steer_scopeEndOf( n, lang ) );
         return true;
     }
     return false;
@@ -940,7 +950,7 @@ inline void steer_noteCondition( CcAccum& acc, TSNode branch, std::string_view s
         const char*  t = ts_node_type( c );
         if( kindIs( t, "identifier" ) )
         {
-            CcAccum::SteerSlot* slot = steer_find( acc, nodeTextOf( c, src ) );
+            CcAccum::SteerSlot* slot = steer_find( acc, nodeTextOf( c, src ), ts_node_start_byte( c ) );
             if( slot != nullptr && slot->prim && slot->rewritten && !slot->steered && acc.stmt - slot->lastWrite >= kSteerStmts )
             {
                 slot->steered = true;
