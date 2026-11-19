@@ -59,6 +59,14 @@ has "$a" '"text_hits":' "[P-json] the JSON dialect carries text_hits"
 a="$( body "$( rw . --callers=Reply.kKeyHijacked )" )"
 hasnt "$a" 'text_hits' "[N3] a QUALIFIED selector seeks no text: an unknown qualifier is never read as the bare name (qualendpointcheck (h))"
 
+q='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"find_referencing_symbols","arguments":{"path":"'"$DIR"'","symbol":"kKeyHijacked"}}}'
+a="$( printf '%s\n%s\n' '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{}}' "$q" | "$BIN" --mcp 2>/dev/null )"
+has "$a" 'text_hits' "[P-mcp] MCP find_referencing_symbols' not-found document carries the text evidence"
+has "$a" '{\"file\":\"lib/reply.js\",\"line\":2,\"n\":3}' "[P-mcp] ... in MCP's own \"file\" / \"line\" keys, as every MCP row (BX2 step 1)"
+hasnt "$a" '\"p\":\"lib/' "[N-mcp] ... never the CLI-JSON \"p\":\"F:L\""
+a="$( rw . --callers=kKeyHijacked --json )"
+has "$a" '{"p":"lib/reply.js:2","n":3}' "[C-json] the CLI --json dialect keeps \"p\":\"F:L\""
+
 echo "[N] a name no file holds: the answer is unchanged"
 a="$( body "$( rw . --callers=noSuchNameAnywhere )" )"
 hasnt "$a" 'text_hits' "[N1] no text_hits= when no file holds the name"

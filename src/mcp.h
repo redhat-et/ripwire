@@ -1833,6 +1833,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             {
                 msg = withRenameClause( std::move( msg ), answer.near, answer.missing );   // the batch arm's rule too
                 attachNotFoundText( getIndex( path ).ing, answer );   // BX2 FIX 9: the CLI twin's plain-text occurrences (callers / uses / impact)
+                answer.text.mcpKeys = true;                            // ... their JSON rows in MCP's "file" / "line" keys
                 std::string doc = captureXml( [ & ]( std::FILE* f ) { writeNotFoundAnswer( f, answer, json ); } );
                 while( !doc.empty() && doc.back() == '\n' ) { doc.pop_back(); }
                 return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"error\":{\"code\":-32602,\"message\":\""

@@ -366,6 +366,7 @@ struct NotFoundText
     std::size_t      files = 0;      // files holding one
     bool             floor = false;  // the scan stopped at a budget: both counts are floors
     std::vector<Row> rows;           // at most kNotFoundTextRows, in the grep's order (source, tests, docs; then path)
+    bool             mcpKeys = false;  // the JSON rows in MCP's "file" / "line" keys (the MCP twins), not the CLI-JSON "p":"F:L"
 };
 
 struct NotFoundAnswer
@@ -395,7 +396,9 @@ inline std::string notFoundTextJson( const NotFoundText& t )
     std::string body = ",\"text_hits\":" + std::to_string( t.hits ) + ",\"text_files\":" + std::to_string( t.files ) + ( t.floor ? ",\"counts_floor\":true" : "" ) + ",\"text\":[";
     for( std::size_t k = 0; k < t.rows.size(); ++k )
     {
-        body += ( k == 0 ? "{\"p\":\"" : ",{\"p\":\"" ) + jsonStr( t.rows[k].path ) + ":" + std::to_string( t.rows[k].line ) + "\",\"n\":" + std::to_string( t.rows[k].lines ) + "}";
+        const std::string at = t.mcpKeys ? "\"file\":\"" + jsonStr( t.rows[k].path ) + "\",\"line\":" + std::to_string( t.rows[k].line )
+                                         : "\"p\":\"" + jsonStr( t.rows[k].path ) + ":" + std::to_string( t.rows[k].line ) + "\"";
+        body += ( k == 0 ? "{" : ",{" ) + at + ",\"n\":" + std::to_string( t.rows[k].lines ) + "}";
     }
     return body + "],\"next\":\"--grep=" + jsonStr( t.term ) + "\"";
 }
