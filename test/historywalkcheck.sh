@@ -18,7 +18,8 @@
 #   (H3) --pr-context=REF on a DIRTY blobless tree lists the files; a diff git cannot read at all is a refusal naming the cause, not files="0".
 #   (B) a long fixture (fast-import) under RIPWIRE_GIT_WALK_COMMITS: --for carries history_unread and the count; a warm second run still
 #       does (the cut is cached; --no-cache walks again); --cochange carries history_cut on stdout and stderr; --json stays parseable, the cut on stderr only;
-#       a budget above the history is silent, and byte-identical to no budget at all.
+#       a budget above the history is silent, and byte-identical to no budget at all; (B8) --pack-task/--from-trace --metrics roots stay
+#       well-formed under a cut, every spliced attribute on the root (ROOT-SPLICE-SIZE-1).
 #   (T) a git shim that prints the first commits of the real walk and then goes silent for longer than the budget: --for, --cochange exit inside the
 #       time budget's reach, disclosed; a shim silent from the first byte ends the same way.
 #   (M) --mcp: no comment line on the protocol stream, the cut in the answer's envelope; a stalled walk's short prefix is not stored; the cut
@@ -237,6 +238,29 @@ for big in 18446744073709551615 1000000001 99999999999999999999; do
 done
 RIPWIRE_GIT_WALK_COMMITS=18446744073709551615 rw --no-cache --cochange=m1.c >"$TMP/out" 2>"$TMP/err"
 check "(B7b) ... and --cochange under COMMITS=UINT64_MAX reads the history (commits found), not an empty one" 'grep -q "<cochange [^>]*commits=\"[1-9]" "$TMP/out"'
+# (B8) ROOT-SPLICE-SIZE-1: --pack-task --metrics and --from-trace --metrics run the walk too, and their roots take attributes after
+# ctxRootOpen built them (packtask.h appendPackTaskRootExtras; tracelocus.h notes_degraded= and next=). A cut walk's definition
+# comment follows the root's '>', so a splice at size()-1 landed inside it (`.-- notes_degraded="1">`, ill-formed). A degraded
+# .ripwire_notes makes both owe notes_degraded=; the trace frame makes --from-trace owe next=. Each document must parse and carry
+# every one ON its root (counted: an absent attribute fails, so a run that splices nothing cannot pass).
+printf 'm1.c::f1\t2026-01-01\tkept note\nthis line has no tabs at all\n' > "$LONG/.ripwire_notes"
+printf '==1==ERROR: AddressSanitizer: heap-use-after-free\n    #0 0x1 in f1 %s/m1.c:1\n    #1 0x2 in caller1 %s/m1.c:2\n' "$LONG" "$LONG" > "$TMP/trace.txt"
+rootattrs() { python3 -I - "$TMP/out" "$@" <<'PY2'
+import sys, xml.etree.ElementTree as ET
+try:
+    root = ET.parse(sys.argv[1]).getroot()
+except ET.ParseError as e:
+    print("     does not parse:", e); sys.exit(1)
+miss = [a for a in sys.argv[2:] if a not in root.attrib]
+print("     root <%s>: %d of %d attribute(s) present%s" % (root.tag, len(sys.argv) - 2 - len(miss), len(sys.argv) - 2, (" missing " + " ".join(miss)) if miss else ""))
+sys.exit(1 if miss else 0)
+PY2
+}
+RIPWIRE_GIT_WALK_COMMITS=100 rw --no-cache --pack-task="caller f1" --metrics >"$TMP/out" 2>/dev/null; rc=$?
+check "(B8a) --pack-task --metrics under a cut walk: well-formed, history_unread= and notes_degraded= on the root (rc=$rc)" '[ "$rc" = 0 ] && rootattrs history_unread notes_degraded'
+RIPWIRE_GIT_WALK_COMMITS=100 rw --no-cache --from-trace="$TMP/trace.txt" --metrics >"$TMP/out" 2>/dev/null; rc=$?
+check "(B8b) --from-trace --metrics under a cut walk: well-formed, history_unread=, notes_degraded= and next= on the root (rc=$rc)" '[ "$rc" = 0 ] && rootattrs history_unread notes_degraded next'
+rm -f "$LONG/.ripwire_notes"
 
 # ── (T) the time budget against a git that stops talking ──
 SHIMT="$TMP/shim-stall"; mkdir -p "$SHIMT"
