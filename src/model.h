@@ -863,10 +863,11 @@ struct Symbol
     // tangle score is 0 at 50 lines or fewer, so a shorter body is not walked for it) in steerCountedLang's languages. 0 elsewhere,
     // and absent (never a bare 0) on --metrics there. Saturates at 255.
     std::uint8_t  steer        = 0;
-    // QD-TANGLE FLAT DISPATCH: the share of deepLoc (in 255ths; 255 exactly when ALL of it) that lies inside short arms of a flat
-    // dispatch — a switch, or an if / else-if chain, of 4+ arms whose arm is at most 40 lines (ingest_metrics.h ChainState). Such an
-    // arm reads alone, like a row of a table, so the tangle score leaves those lines out (and the nesting past the bar with them,
-    // when every deep line is such an arm's). deepLoc itself is unchanged. Walked with `steer`, so 0 under the same conditions.
+    // QD-TANGLE FLAT DISPATCH, two facts in one byte (tangleDispatchShare packs, tangleInputsFrom unpacks): the low 5 bits are the
+    // share of deepLoc (in 31sts; 31 exactly when ALL of it) that lies inside short arms of a flat dispatch — a switch, or an if /
+    // else-if chain, of 4+ arms whose arm is at most 40 lines (ingest_metrics.h ChainState); the high 3 bits are how much of maxNest
+    // only such an arm reaches (saturating at 7). An arm reads alone, like a row of a table, so the tangle score leaves its lines and
+    // its nesting out. deepLoc and maxNest themselves are unchanged. Walked with `steer`, so 0 under the same conditions.
     std::uint8_t  dispatchShare = 0;
     // PPALT DISCLOSURE — count of ALTERNATIVE-introducing preprocessor nodes (`#else`/`#elif`/`#elifdef`)
     // inside the def, filled by the SAME fused cc_walk DFS that computes cx/ccx/maxNest/locals (zero new
@@ -1182,7 +1183,7 @@ struct LocalNameFact
 struct TangleInputs
 {
     std::uint32_t loc   = 0;   // physical lines (Symbol::loc)
-    std::uint32_t nest  = 0;   // max control nesting, the tangle reading (3 at most when every deep line is a dispatch arm's)
+    std::uint32_t nest  = 0;   // max control nesting, the tangle reading outside short dispatch arms (3 at most when every deep line is an arm's)
     std::uint32_t deep  = 0;   // deep lines the score counts: deepLoc less the short dispatch arms' share
     std::uint32_t steer = 0;   // steering locals
 };
@@ -1190,36 +1191,37 @@ inline constexpr std::uint32_t kTangleAmpLoc   = 50;   // the length the amplifi
 inline constexpr std::uint32_t kTangleNestFree = 3;    // nesting levels that score nothing (quality::kNestBar - 1, asserted in quality.h)
 inline constexpr std::uint32_t kTangleBar10    = 60;   // the bar, S >= 6, in tenths
 
-// The dispatch share Symbol::dispatchShare stores: deepDispatch of deepLoc in 255ths, 255 only when every deep line is an arm's.
-inline std::uint8_t tangleDispatchShare( std::uint32_t deepLoc, std::uint32_t deepDispatch ) noexcept
+// The byte Symbol::dispatchShare stores: ( nest cut << 5 ) | the arms' share of deepLoc in 31sts (31 only when every deep line is an arm's).
+inline constexpr std::uint32_t kTangleShareAll = 31;
+inline std::uint8_t tangleDispatchShare( std::uint32_t deepLoc, std::uint32_t deepDispatch, std::uint32_t nestArmCut ) noexcept
 {
-    if( deepDispatch == 0 || deepLoc == 0 )
+    std::uint32_t share = 0;
+    if( deepDispatch > 0 && deepLoc > 0 )
     {
-        return 0;
+        share = deepDispatch >= deepLoc ? kTangleShareAll
+                                        : std::min<std::uint32_t>( kTangleShareAll - 1u, ( deepDispatch * kTangleShareAll + deepLoc / 2u ) / deepLoc );
     }
-    if( deepDispatch >= deepLoc )
-    {
-        return 255;
-    }
-    return std::uint8_t( std::min<std::uint32_t>( 254u, ( deepDispatch * 255u + deepLoc / 2u ) / deepLoc ) );
+    return std::uint8_t( ( std::min<std::uint32_t>( nestArmCut, 7u ) << 5 ) | share );
 }
 
 // The inputs from the raw facts — the ONE rule a Symbol (tangleInputsOf) and a history blob's definition (ingest.h tangleInputsOfBlob) share.
 inline TangleInputs tangleInputsFrom( std::uint32_t loc, std::uint32_t maxNest, std::uint32_t deepLoc, std::uint32_t steer, std::uint8_t dispatchShare ) noexcept
 {
+    const std::uint32_t share = dispatchShare & 31u;
+    const std::uint32_t cut   = std::uint32_t( dispatchShare ) >> 5;
     TangleInputs in;
     in.loc   = loc;
     in.steer = steer;
-    in.nest  = maxNest;
+    in.nest  = maxNest - std::min( maxNest, cut );   // the nesting outside short dispatch arms
     in.deep  = deepLoc;
-    if( dispatchShare == 255 )
+    if( share == kTangleShareAll )
     {
         in.deep = 0;
         in.nest = in.nest < kTangleNestFree ? in.nest : kTangleNestFree;   // every deep line is a dispatch arm's: no depth past the bar is the body's
     }
-    else if( dispatchShare > 0 )
+    else if( share > 0 )
     {
-        in.deep = deepLoc - ( deepLoc * dispatchShare + 127u ) / 255u;
+        in.deep = deepLoc - ( deepLoc * share + kTangleShareAll / 2u ) / kTangleShareAll;
     }
     return in;
 }

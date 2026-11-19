@@ -9,6 +9,10 @@ Each function lives in its own file so a row's p= names it alone. Shapes (C++):
   dispatcher — new in wt: a 30-arm switch, each short arm nesting to depth 4 (flat dispatch: no row).
   shorthelper — new in wt: 30 lines at depth 6 (50 lines or fewer: no row).
   steerfar / steernear — new in wt: a flag set then tested 12 statements later (counted) vs in the next statement (not).
+  steercursor — new in wt: a cursor advanced, then read 12 statements later only as a bound (`pos < limit`) and an index
+          (`xs[ pos ]`): a position, not a decision (census 11-19, lexCpp's `j`): no steer.
+  armnest — new in wt: a 6-arm else-if chain whose short arms nest to depth 7, beside one depth-4 region outside it: the
+          arms' nesting is theirs (census 11-19, parseArgs): no row.
   creep — tangled at v1 (depth 4, 40 deep lines); +3 deep lines at c2 and +3 more in wt: each step under the rise rule
           (+5), together over it — the ratchet's row.
   shrink — tangled at v1/c2; wt removes its deep region: credited in <improved> (tangle), no row.
@@ -118,6 +122,37 @@ def steer(name, gap):
             + between + "    if( seen )\n    {\n        total += 1;\n    }\n" + after + "    return total;\n}\n")
 
 
+def steercursor():
+    before = "".join(f"    total = total + {k};\n" for k in range(30))
+    between = "".join(f"    total = total * 2 + {k};\n" for k in range(12))
+    after = "".join(f"    total = total - {k};\n" for k in range(30))
+    return ("int steercursor( const std::vector<int>& xs, int limit )\n{\n    int total = 0;\n    int pos = 0;\n" + before +
+            "    for( int x : xs )\n    {\n        if( x == 3 )\n        {\n            pos += 2;\n        }\n    }\n"
+            + between + "    if( pos < limit && xs[ pos ] == 3 )\n    {\n        total += 1;\n    }\n" + after + "    return total;\n}\n")
+
+
+def armnest():
+    arms = ""
+    for k in range(6):
+        kw = "if" if k == 0 else "else if"
+        arms += (f"    {kw}( op == {k} )\n    {{\n"
+                 f"        for( int a = 0; a < x; ++a )\n        {{\n"
+                 f"            if( a > {k} )\n            {{\n"
+                 f"                while( total < a )\n                {{\n"
+                 f"                    if( total == {k} )\n                    {{\n"
+                 f"                        for( int b = 0; b < a; ++b )\n                        {{\n"
+                 f"                            if( b == {k} )\n                            {{\n"
+                 f"                                total += {k};\n"
+                 f"                            }}\n                        }}\n                    }}\n"
+                 f"                    total += 1;\n                }}\n            }}\n        }}\n    }}\n")
+    outside = ("    for( int a = 0; a < x; ++a )\n    {\n        if( a > 2 )\n        {\n"
+               "            for( int b = 0; b < a; ++b )\n            {\n                if( b == 1 )\n                {\n"
+               "                    total += a;\n                    total *= 3;\n"
+               "                }\n            }\n        }\n    }\n")
+    tail = "".join(f"    total = total * 3 + {k};\n" for k in range(30))
+    return "int armnest( int op, int x )\n{\n    int total = 0;\n" + arms + outside + tail + "    return total;\n}\n"
+
+
 def main():
     stage, d = sys.argv[1], sys.argv[2]
     os.makedirs(os.path.join(d, "src"), exist_ok=True)
@@ -134,6 +169,8 @@ def main():
         write(d, "shorthelper.cpp", hdr + shorthelper())
         write(d, "steerfar.cpp", hdr + steer("steerfar", 12))
         write(d, "steernear.cpp", hdr + steer("steernear", 0))
+        write(d, "steercursor.cpp", hdr + steercursor())
+        write(d, "armnest.cpp", armnest())
 
 
 if __name__ == "__main__":
