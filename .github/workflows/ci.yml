@@ -44,6 +44,13 @@ name: CI
 #   earlier green nightly — and a nightly `schedule` against main. See the report-failure/report-green jobs
 #   at the bottom for where a red scheduled run is reported: its OWN tracking issue (label
 #   nightly-full-matrix, alongside the shared nightly-failure), separate from nightly.yml's TSan issue.
+#
+# ci-gate (the LAST job) is the ONE check to mark required in branch protection on main (Settings -> Branches ->
+# main -> Require status checks -> `ci-gate`). It needs every gating job, runs `if: always()`, fails when any of them
+# FAILED or was CANCELLED, and passes on success or SKIPPED — a skip is the light plan's design, so one required
+# name works for light and full runs alike. Why: on 2026-11-18 #687 was merged by hand over red checks (zoomcheck,
+# anchorcheck, routecheck, loopconservationcheck, windows-package, xplat-diff) because main had no required status
+# checks. The advisory/report jobs (tidy-advisory-report, report-failure, report-green) are deliberately NOT needed.
 
 on:
   push:
@@ -1241,3 +1248,26 @@ jobs:
             gh issue comment "$n" --repo "$REPO" --body "green again at $HEAD_SHA ($RUN_URL, ci.yml full matrix)"
             gh issue close "$n" --repo "$REPO"
           done
+
+  # ─── ci-gate: the single required check — see the header comment ─────────────────────────────────────────────
+  #
+  # failure/cancelled fail the gate; success/skipped pass it. `if: always()` so an upstream failure still yields a
+  # verdict here instead of a skipped (= unprotected-looking) gate. windows-package is a reusable-workflow call
+  # (uses: ./.github/workflows/windows-package.yml), so it is a job of THIS workflow and can be needed here.
+  ci-gate:
+    name: ci-gate
+    needs: [plan, style, release, fallback-emitter, rhel, asan, windows, windows-package, xplat-diff]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any needed job failed or was cancelled
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          jq -r 'to_entries | map("\(.key)=\(.value.result)") | "ci-gate: " + join(" ")' <<<"$NEEDS_JSON"
+          bad="$( jq -r 'to_entries[] | select(.value.result != "success" and .value.result != "skipped") | "\(.key)=\(.value.result)"' <<<"$NEEDS_JSON" )"
+          if [ -n "$bad" ]; then
+            echo "ci-gate FAILED: $bad"
+            exit 1
+          fi
+          echo "ci-gate passed (success or skipped everywhere)"
