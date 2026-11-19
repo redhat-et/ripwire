@@ -104,10 +104,10 @@ struct LangMap
 // The tiny TOML subset we accept (the zero-dep rule): `key = "value"` client-map rows and an
 // [overrule] `suffixes = [".h", ...]` single-line string array. See the file header for what is
 // ignored and why; lowering at parse time keeps the lookup one comparison.
-// A row's key: the text left of '=', trimmed, with a TOML quoted key's pair stripped ("c++" names the same thing as its bare spelling).
-inline std::string langMapKey( std::string_view raw )
+// The text between a row's blanks (space, tab, and the CR a CRLF file leaves before the split's '\n').
+inline std::string_view langMapTrim( std::string_view raw ) noexcept
 {
-    while( !raw.empty() && ( raw.back() == ' ' || raw.back() == '\t' ) )
+    while( !raw.empty() && ( raw.back() == ' ' || raw.back() == '\t' || raw.back() == '\r' ) )
     {
         raw.remove_suffix( 1 );
     }
@@ -115,6 +115,13 @@ inline std::string langMapKey( std::string_view raw )
     {
         raw.remove_prefix( 1 );
     }
+    return raw;
+}
+
+// A row's key: the text left of '=', trimmed, with a TOML quoted key's pair stripped ("c++" names the same thing as its bare spelling).
+inline std::string langMapKey( std::string_view raw )
+{
+    raw = langMapTrim( raw );
     if( raw.size() >= 2 && raw.front() == '"' && raw.back() == '"' )
     {
         raw = raw.substr( 1, raw.size() - 2 );
@@ -122,19 +129,44 @@ inline std::string langMapKey( std::string_view raw )
     return std::string( raw );
 }
 
-// [overrule] `suffixes = [".h", ...]`: every double-quoted string of the value. A listed list replaces the default set,
-// an empty one keeps it (the section exists to scope the set).
-inline void langMapSuffixes( LangMap& m, const std::string& val )
+// A value with its trailing `# comment` cut and its edges trimmed: the first '#' OUTSIDE a double-quoted string starts the
+// comment, so `".h" # ".cpp"` keeps `".h"` and `"c#"` keeps its '#'.
+inline std::string_view langMapValue( std::string_view val ) noexcept
 {
-    std::vector<std::string> suf;
-    for( std::size_t p = 0; ( p = val.find( '"', p ) ) != std::string::npos; )
+    bool inString = false;
+    for( std::size_t i = 0; i < val.size(); ++i )
     {
-        const std::size_t e = val.find( '"', p + 1 );
-        if( e == std::string::npos )
+        if( val[ i ] == '"' )
         {
+            inString = !inString;
+        }
+        else if( val[ i ] == '#' && !inString )
+        {
+            val = val.substr( 0, i );
             break;
         }
-        suf.push_back( val.substr( p + 1, e - p - 1 ) );
+    }
+    return langMapTrim( val );
+}
+
+// [overrule] `suffixes = [".h", ...]`: every double-quoted string of the value. A listed list replaces the default set,
+// an empty one keeps it (the section exists to scope the set). A value that is not one whole `[ ... ]` array with closed
+// strings is an unknown shape: ignored, the defaults stand — a partial suffix set is never installed.
+inline void langMapSuffixes( LangMap& m, std::string_view val )
+{
+    if( val.size() < 2 || val.front() != '[' || val.back() != ']' )
+    {
+        return;
+    }
+    std::vector<std::string> suf;
+    for( std::size_t p = 0; ( p = val.find( '"', p ) ) != std::string_view::npos; )
+    {
+        const std::size_t e = val.find( '"', p + 1 );
+        if( e == std::string_view::npos )
+        {
+            return;
+        }
+        suf.emplace_back( val.substr( p + 1, e - p - 1 ) );
         p = e + 1;
     }
     if( !suf.empty() )
@@ -144,15 +176,13 @@ inline void langMapSuffixes( LangMap& m, const std::string& val )
 }
 
 // A client-map row `key = "tag"`: a tag outside the vocabulary is kept in rejects for the disclosure, never guessed.
-inline void langMapAliasRow( LangMap& m, const std::string& key, const std::string& val )
+inline void langMapAliasRow( LangMap& m, const std::string& key, std::string_view val )
 {
-    const std::size_t q1 = val.find( '"' );
-    const std::size_t q2 = val.rfind( '"' );
-    if( q1 == std::string::npos || q2 <= q1 )
+    if( val.size() < 2 || val.front() != '"' || val.back() != '"' )
     {
-        return;
+        return;   // not one quoted string once the comment is cut: an unknown shape, ignored
     }
-    const std::string tag  = val.substr( q1 + 1, q2 - q1 - 1 );
+    const std::string tag( val.substr( 1, val.size() - 2 ) );
     Lang              lang = Lang::Unknown;
     if( !langFromTag( tag, lang ) || tag == "?" )   // '?' is langTag(Unknown)'s own spelling — refuse to register the sentinel as a real alias
     {
@@ -186,8 +216,8 @@ inline void langMapLine( LangMap& m, std::string_view line, bool& inOverrule )
     {
         return;
     }
-    const std::string key = langMapKey( line.substr( 0, eq ) );
-    const std::string val( line.substr( eq + 1 ) );
+    const std::string      key = langMapKey( line.substr( 0, eq ) );
+    const std::string_view val = langMapValue( line.substr( eq + 1 ) );
     if( !inOverrule )
     {
         langMapAliasRow( m, key, val );

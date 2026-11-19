@@ -89,7 +89,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 # A dialogue that ends on shutdown exits 0. An arm that reads a failed run's frames would compare empty answers, so the
-# task D/E dialogues (27)-(44) test the exit status where they run (LAND-440, the gate-status rule).
+# task D/E dialogues (27)-(46) test the exit status where they run (LAND-440, the gate-status rule).
 lspRc(){ no "--lsp exited non-zero on dialogue $1: the arm below reads a failed run"; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -993,13 +993,45 @@ printf 'myroot-c = "c"\n' > "$WORK/loh/.ripwire/lsp-langmap.toml"
   lid_def
   lid_tail
 } > "$WORK/d44"
-"$BIN" "$WORK/loh" --lsp < "$WORK/d44" > "$WORK/raw44" 2>/dev/null || lspRc d44
+mkdir -p "$WORK/noxdg"   # the loader reads $XDG_CONFIG_HOME's map BEFORE the root's: a developer's own map must not answer here
+XDG_CONFIG_HOME="$WORK/noxdg" "$BIN" "$WORK/loh" --lsp < "$WORK/d44" > "$WORK/raw44" 2>/dev/null || lspRc d44
 decodeFrames "$WORK/raw44" > "$WORK/r44" 2>/dev/null
 R7144="$( grep '"id":71,' "$WORK/r44" )"
 first44="$( printf '%s' "$R7144" | grep -o '"uri":"[^"]*"' | head -1 )"
 [ "$first44" = "\"uri\":\"file://$WORK/loh/shape.c\"" ] \
     && ok "(44) <root>/.ripwire/lsp-langmap.toml maps MyRoot-C to c: the workspace slot from the plan is live" \
     || { no "(44) root-local map not honored: first=$first44"; printf '%s\n' "$R7144" | head -c 240; }
+
+# ── (45) the same workspace slot when the editor names the root by initialize.rootUri ALONE (`ripwire --lsp`, no ───
+# ────── command-line root): the map loads after the root is known, so <root>/.ripwire/lsp-langmap.toml still rides ─
+XDG_CONFIG_HOME="$WORK/noxdg" "$BIN" --lsp < "$WORK/d44" > "$WORK/raw45" 2>/dev/null || lspRc d45
+decodeFrames "$WORK/raw45" > "$WORK/r45" 2>/dev/null
+first45="$( grep '"id":71,' "$WORK/r45" | grep -o '"uri":"[^"]*"' | head -1 )"
+[ "$first45" = "\"uri\":\"file://$WORK/loh/shape.c\"" ] \
+    && ok "(45) rootUri-only session: <root>/.ripwire/lsp-langmap.toml maps MyRoot-C to c — the map loads after the root resolves" \
+    || no "(45) rootUri-only session skipped the root-local map: first=$first45"
+
+# ── (46) a trailing `# comment` is no part of a value: an alias whose comment holds quotes keeps working, and a ────
+# ────── suffix list's comment installs no suffix (`".c"` in the comment must not let a declaration override shape.c) ─
+printf 'mycomment-c = "c" # "C mode"\nmyrust = "rs"\n[overrule]\nsuffixes = [".h"] # ".c"\n' > "$WORK/loh-comment.toml"
+{
+  lid_init
+  lid_open "MyComment-C"
+  lid_def
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://$WORK/loh/shape.c\",\"languageId\":\"MyRust\",\"version\":1,\"text\":\"struct Shape { int x; };\\n\"}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":72,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://$WORK/loh/shape.c\"},\"position\":{\"line\":0,\"character\":8}}}"
+  lid_tail
+} > "$WORK/d46"
+XDG_CONFIG_HOME="$WORK/noxdg" "$BIN" --lsp --lsp-langmap="$WORK/loh-comment.toml" < "$WORK/d46" > "$WORK/raw46" 2>/dev/null || lspRc d46
+decodeFrames "$WORK/raw46" > "$WORK/r46" 2>/dev/null
+first46a="$( grep '"id":71,' "$WORK/r46" | grep -o '"uri":"[^"]*"' | head -1 )"
+first46b="$( grep '"id":72,' "$WORK/r46" | grep -o '"uri":"[^"]*"' | head -1 )"
+[ "$first46a" = "\"uri\":\"file://$WORK/loh/shape.c\"" ] \
+    && ok "(46a) mycomment-c = \"c\" # \"C mode\": the alias maps — the comment's quotes are not the value's" \
+    || no "(46a) an alias with a quoted comment stopped mapping: first=$first46a"
+[ "$first46b" = "\"uri\":\"file://$WORK/loh/shape.c\"" ] \
+    && ok "(46b) suffixes = [\".h\"] # \".c\": a Rust declaration on shape.c keeps the indexed C anchor — the comment installed no suffix" \
+    || no "(46b) the comment's \".c\" became an override suffix: first=$first46b"
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

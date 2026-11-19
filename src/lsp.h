@@ -996,9 +996,10 @@ inline void lspRecordDidOpen( const std::string& root, const std::string& cwd, c
     const std::string     openUri    = lspDocUri( params );
     const std::string     openLangId = rw::mcpdetail::findString( rw::mcpdetail::findObject( params, "textDocument" ), "languageId" );
     std::uint32_t         fileId     = 0;
-    if( openUri.empty() || openLangId.empty() || !lspFindFile( mix.ing, cwd, openUri, fileId ) )
+    if( !VALIDATE( !openUri.empty() && !openLangId.empty(), "lsp: a didOpen names its document's uri and languageId" )
+        || !lspFindFile( mix.ing, cwd, openUri, fileId ) )
     {
-        return;
+        return;   // a malformed notification records nothing; a document outside the index has no fileId to key
     }
     const std::string recPath = mix.ing.files[ static_cast< std::size_t >( fileId ) ];
     for( auto it = gLangMap.decls.rbegin(); it != gLangMap.decls.rend(); ++it )
@@ -1044,11 +1045,11 @@ inline std::string lspHandleWorkspaceSymbol( const rw::McpIndex& mix, const std:
     const std::string   wsClause = wsDecides
         ? std::string( " \u2014 reflang=\\\"" ) + rw::langTag( wsAnchor.lang ) + "\\\" origin=\\\"" + rw::anchorOriginName( wsAnchor.origin ) + "\\\""
         : std::string();
-    if( total > kLspWorkspaceCap ) lspWriteMessage( stdout, lspWorkspaceCapNotice( query, total, wsClause ) );
+    const std::string   fallback = "the matching language holds no definition; " + std::to_string( wsAnchor.others ) + " in others, answering anyway";
+    if( total > kLspWorkspaceCap )   // the cap notice is the one notice: a foreign fallback rides it, or the capped rows would read as the stated language's
+        lspWriteMessage( stdout, lspWorkspaceCapNotice( query, total, ( wsAnchor.fellBack ? "; " + fallback : std::string() ) + wsClause ) );
     else if( wsDecides && total > 0 )   // an empty answer discloses nothing — there is no foreign pick to name (arm (34))
-        lspWriteMessage( stdout, lspLogMessageFrame( wsAnchor.fellBack
-            ? "ripwire: the matching language holds no definition; " + std::to_string( wsAnchor.others ) + " in others, answering anyway" + wsClause
-            : "ripwire: answer anchored" + wsClause ) );
+        lspWriteMessage( stdout, lspLogMessageFrame( wsAnchor.fellBack ? "ripwire: " + fallback + wsClause : "ripwire: answer anchored" + wsClause ) );
     return items;
 }
 
@@ -1062,8 +1063,8 @@ inline int runLsp( const std::string& cliRoot, std::string_view langMapPath )
     std::string       root;
     // task E: the client's declared language, recorded per OPEN document by fileId (didOpen is the only
     // writer; answers keep reading saved state — this map holds a STRING the client typed, nothing more).
-    gLangMap = rw::lspmap::loadLangMap( langMapPath, cliRoot );   // once per session, before any hint can be read
-    rw::lspmap::discloseMap( gLangMap );
+    // The map loads ONCE, at the first successful initialize: only then is the workspace root known when the
+    // editor names it by rootUri alone, and no request before initialize reads a hint (didOpen needs a root).
 
     for( ;; )
     {
@@ -1126,6 +1127,8 @@ inline int runLsp( const std::string& cliRoot, std::string_view langMapPath )
                     else
                     {
                         root        = canon;
+                        gLangMap    = rw::lspmap::loadLangMap( langMapPath, cliRoot.empty() ? root : cliRoot );   // the command-line root keeps its slot
+                        rw::lspmap::discloseMap( gLangMap );
                         const rw::McpIndex& mix = rw::getIndex( root );   // warm-up HERE, not on the first navigation request
                         initialized = true;
                         rw::emitTo( stderr, "ripwire --lsp: serving {} (files={} symbols={}; utf-8 positions, saved-state answers — counts are floors)\n",
