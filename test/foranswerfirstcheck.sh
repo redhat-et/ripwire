@@ -42,6 +42,9 @@ set -u
 # the <sigx> block). This gate pins the PERMUTATION alone, so SIGX is off here; test/forsigxcheck.sh pins SIGX, and its (S1) rebuilds
 # this gate's answer-first document from the default one byte for byte.
 export RIPWIRE_NO_SIGX=1
+# KB1 (src/forkeybody.h) likewise runs after the permutation and ADDS the key-body group, so it is off here too; test/forkeybodycheck.sh
+# (K3n) proves the default answer minus that group is this gate's document byte for byte (est_tokens= aside).
+export RIPWIRE_NO_KEY_BODY=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${RIPWIRE_BIN:-${1:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"

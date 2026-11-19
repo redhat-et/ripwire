@@ -127,9 +127,10 @@ else
     no "(1) [P] --for='$Q_WHO' exited non-zero: $( head -c 300 "$DIR/a1.err" )"
 fi
 
-# ── (2) [P] the routed answer IS the verb's answer: minus <route> and the legend it is --callers byte for byte ───────
+# ── (2) [P] the routed answer IS the verb's answer: minus <route>, KB1's <bodies of="key"> (src/forkeybody.h; forkeybodycheck
+# pins it) and the legend it is --callers byte for byte ───────
 if run a2 plain --callers=compute_total; then
-    A="$( fromRoot "$DIR/a1.out" | python3 -c 'import re,sys; sys.stdout.write(re.sub(r"<route [^>]*/>","",sys.stdin.read(),count=1))' )"
+    A="$( fromRoot "$DIR/a1.out" | python3 -c 'import re,sys; d=re.sub(r"<route [^>]*/>","",sys.stdin.read(),count=1); sys.stdout.write(re.sub(r"<bodies of=\"key\"[^>]*>.*?</bodies>","",d,count=1,flags=re.S))' )"
     B="$( fromRoot "$DIR/a2.out" )"
     [ -n "$B" ] && grep -q '<route ' "$DIR/a1.out" && [ "$A" = "$B" ]
     say $? "(2) [P] routed body minus <route> == --callers=compute_total body (byte for byte)" "(2) [P] routed body differs from --callers: '${A:0:200}' vs '${B:0:200}'"
