@@ -140,7 +140,10 @@ def baseOf( h ):
 cells, answers, problems = [], [], []
 for sym in SYMS:
     for tid, tpl in TASKS:
-        args = [ '--for=' + tpl.format( sym ) ]
+        # --no-verb-route: `who calls \`X\`?` and `Is it safe to change \`X\`? What depends on it?` name a symbol and ask a
+        # call-graph question, which the route answers with --callers / --impact (RT1/RT2, verbs_forroute.h); this gate reads
+        # the --for answer's hand-off to those verbs. (ES, a default page 1 ending early, holds no hand-off here either way.)
+        args = [ '--for=' + tpl.format( sym ), '--no-verb-route' ]
         rc, doc = run( args )
         _, off  = run( args, { 'RIPWIRE_NO_WINDOW_HANDOFF': '1' } )
         text = doc.decode( 'utf8', 'replace' )

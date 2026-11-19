@@ -32,7 +32,10 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 echo "sentencesubjectcheck: BIN=$BIN"
-ask(){ ( cd "$1" && "$BIN" "$1" --no-cache "--for=$2" 2>/dev/null ) </dev/null; }
+# --no-verb-route --page-bytes=12000: this gate reads the --for answer's subject blocks; a backticked symbol with a who-calls /
+# change cue is otherwise ROUTED to the verb (verbs_forroute.h, RT1/RT2), and a default page 1 may END EARLY after a proven
+# callers block (RT2 ES). Both are forverbroutecheck's; here the full ranked page is the subject.
+ask(){ ( cd "$1" && "$BIN" "$1" --no-cache "--for=$2" --no-verb-route --page-bytes=12000 2>/dev/null ) </dev/null; }
 has(){ case "$1" in *"$2"*) ok "$3";; *) no "$3 (missing: $2)";; esac; }
 hasnt(){ case "$1" in *"$2"*) no "$3 (present: $2)";; *) ok "$3";; esac; }
 blk(){ printf '%s' "$1" | python3 -c 'import re,sys; m=re.search(r"<callers by=\"subject\".*?</callers>",sys.stdin.read(),re.S); print(m.group(0) if m else "")'; }
@@ -86,7 +89,7 @@ X
 # ── C: a code-marked sentence naming ONE function and asking who calls it ──
 additive(){ # $1 root $2 task $3 label: the answer minus the block equals the no-hop answer
     local A="$3"
-    local B; B="$( cd "$1" && RIPWIRE_NO_CALLER_HOP=1 "$BIN" "$1" --no-cache "--for=$2" 2>/dev/null </dev/null )" || no "C $4: the no-hop answer exited $?"
+    local B; B="$( cd "$1" && RIPWIRE_NO_CALLER_HOP=1 "$BIN" "$1" --no-cache "--for=$2" --no-verb-route --page-bytes=12000 2>/dev/null </dev/null )" || no "C $4: the no-hop answer exited $?"
     if python3 - "$A" "$B" <<'X'
 import re,sys
 a,b=sys.argv[1:3]

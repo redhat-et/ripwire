@@ -20,7 +20,8 @@ allowed-tools: Bash, Read
 ## The decision: name it in backticks and ask `--for` — it routes itself
 
 Who calls `X`, where it is used, what breaks if it changes (any depth): `ripwire <dir> --for="<question, X in
-backticks>"` answers with `--callers` / `--uses` / `--impact`; `warn="1"` = a likely miss, the ranked page rides along.
+backticks>"` answers with `--callers` / `--uses` / `--impact`; `warn="1"` = a likely miss, the ranked page rides along;
+`--no-verb-route` = the ranked answer instead.
 
 | Anything else | Run |
 |---|---|

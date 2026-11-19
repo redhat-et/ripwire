@@ -27,7 +27,9 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 echo "subjectanchorcheck: BIN=$BIN"
-ask(){ ( cd "$1" && "$BIN" "$1" --no-cache "--for=$2" 2>/dev/null ) </dev/null; }
+# --page-bytes=12000: the default page SPELLED, so page 1 never ends early (RT2 ES ends a default page 1 right after a
+# proven <callers by="subject"> block, which would read here as "the rest of the answer displaced"; forverbroutecheck owns ES)
+ask(){ ( cd "$1" && "$BIN" "$1" --no-cache "--for=$2" --page-bytes=12000 2>/dev/null ) </dev/null; }
 route(){ printf '%s' "$1" | python3 -c 'import re,sys; b=sys.stdin.read(); m=re.search(r"route=\"([^\"]*)\"",b); print(m.group(1) if m else "@@NONE")'; }
 has(){ case "$1" in *"$2"*) ok "$3";; *) no "$3 (missing: $2)";; esac; }
 hasnt(){ case "$1" in *"$2"*) no "$3 (present: $2)";; *) ok "$3";; esac; }
@@ -171,7 +173,7 @@ nat(){ # $1 root $2 subject $3 caller row $4 label: callers ride, no flip, and t
     has "$A" '<callers by="subject"' "SC $4: callers ride by subject"
     has "$( blk "$A" )" "$3" "SC $4: the caller row"
     hasnt "$( route "$A" )" 'dropped:' "SC $4: the route is not flipped"
-    if python3 - "$A" "$( cd "$1" && RIPWIRE_NO_CALLER_HOP=1 "$BIN" "$1" --no-cache "--for=$2" 2>/dev/null </dev/null )" <<'X'
+    if python3 - "$A" "$( cd "$1" && RIPWIRE_NO_CALLER_HOP=1 "$BIN" "$1" --no-cache "--for=$2" --page-bytes=12000 2>/dev/null </dev/null )" <<'X'
 import re,sys
 a,b=sys.argv[1:3]
 m=lambda s:re.sub(r' est_tokens="\d+"| at="[^"]*"','',s)

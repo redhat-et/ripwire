@@ -278,8 +278,10 @@ std::optional<std::string> forEarlyStopPage( const MainDispatch& d, const std::s
     {
         return std::nullopt;
     }
+    // the block's own clause, and the window-aware hand-off's beside it when the block carries windows= (verbs_for.h header rule)
+    const std::string_view windowClause = attrOf( open, "windows" ) == "1" ? rw::kForCompactWindowHandoffLegend : std::string_view{};
     const std::string legend = "<!-- ripwire for schema=ripwire.for/v1 (page 1, early): task= the query, at= this commit"
-                             + std::string( rw::kForCompactSubjectCallerHopLegend ) + " -->";
+                             + std::string( rw::kForCompactSubjectCallerHopLegend ) + std::string( windowClause ) + " -->";
     const std::string call = forUnbudgetedCall( cfg );
     return rw::forpages::earlyFirstPage( doc, { .pageBytes = cfg.forPageBytes, .page = 1, .call = call }, lead, legend );
 }

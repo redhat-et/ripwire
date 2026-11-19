@@ -29,6 +29,9 @@ repo root or the subsystem; a `git-url` or several roots (`ripwire dir1 dir2 --r
 | everything at once under a budget: ranking + top bodies + callers + notes + tests | `ripwire <dir> --pack-task="<task>" --legend=compact` |
 | a file-by-file view, or cohesive modules | `ripwire <dir> --tree --legend=compact` · `ripwire <dir> --communities --legend=compact` |
 
+A `--for` answer comes answer-first in ~12 KB pages; stop once the answer is in hand, else its `next=` (`--page-bytes=N:K`)
+is the next page.
+
 After the orient call, look up lean: `--expand` / `--outline` / `--whereis` / `--callers` answer with no
 ride-along map. Then read only the files ripwire ranks highest (god-files and hotspots first) — not a grep sweep.
 

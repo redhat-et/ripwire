@@ -1210,6 +1210,14 @@ Discloses: `capped`, `count_capped`, `findings_capped`, `hits_capped`, `importer
 | `kZoomBridgeCap` | `12` | — | cut-fix E: --zoom's <bridge> rows (traffic desc), a secondary listing disclosed by secondaryCutAttrs |
 | `kZoomTopModuleCap` | `40` | — | top-level modules, rank-mass desc then size desc then id (massSizeIdLess; their children ride along: shown_levels=2) |
 
+### `src/partialwarn.h`
+
+Discloses: `hits_capped`
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kFoldCap` | `16` | — | — |
+
 ### `src/partition.h`
 
 Discloses: **none**
