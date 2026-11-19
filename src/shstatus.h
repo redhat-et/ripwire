@@ -1011,15 +1011,18 @@ private:
     {
         return k < t_.size() ? &t_[k] : nullptr;
     }
-    bool kw( std::string_view a ) const noexcept
+    bool peekIs( TokKind kind, std::string_view text ) const noexcept   // the next token is this word / this operator
     {
         const Tok& p = peek();
-        return p.kind == TokKind::Word && p.word.text == a;
+        return p.kind == kind && ( kind == TokKind::Op ? p.op : p.word.text ) == text;
+    }
+    bool kw( std::string_view a ) const noexcept
+    {
+        return peekIs( TokKind::Word, a );
     }
     bool isOp( std::string_view o ) const noexcept
     {
-        const Tok& p = peek();
-        return p.kind == TokKind::Op && p.op == o;
+        return peekIs( TokKind::Op, o );
     }
     bool stopped( const Stops& stops ) const noexcept
     {
