@@ -27,6 +27,9 @@
 #include "resolve.h"       // canonicalId — note-target keying
 #include "arch.h"          // relForHash — note-target keying
 #include "testmap.h"       // §A9.5 / §P11.4: TestRunnerIndex / runAttr — the run= hint on a named test row
+#include "forpage.h"       // PB1: computeFileTail / renderFileTailXml — --for's file tail, the same rows
+#include "nextverb.h"      // PB1: nextFlag / nextAttrXml — a dropped candidate's next=--expand
+#include "mention.h"       // PB1: taskNamesIndexedFile — the head round robin's verdict, as --for takes it
 
 #include <algorithm>
 #include <cstdio>
@@ -98,7 +101,8 @@ struct LensRanking
 };
 
 inline constexpr int         kPackTaskDefaultTokens  = 6000;   // the default budget when no explicit budget is given
-inline constexpr int         kPackTaskRankTopN       = 12;     // ranking = the top-12 head, not the full 40 — leaves budget for the later sections
+inline constexpr int         kPackTaskRankTopN       = 12;     // a --partition slice's ranking window (partition.h; lanes.h brief claims)
+inline constexpr int         kPackTaskHeadRows       = kForLensDefaultTopN;   // PB1: the ranking = --for's 40-row head (PT1 design D1)
 inline constexpr std::size_t kPackTaskBodyCandidates = 6;      // top-K heads that get FULL bodies (byte budget trims further)
 inline constexpr std::size_t kPackTaskSectionFloor   = 64;     // a section is only attempted when this many bytes remain
 // RE-MEASURED 1024 -> 1600 (2026-09-04, capture-audit M11): the header comment alone was 1511 B at a 2040-token
@@ -147,14 +151,22 @@ static_assert( double( kForAnchorBodyBudgetBytes ) >= double( kPackTaskDefaultTo
 // integer percent, not double fractions — five decimal literals summing to 1.0 in floating point is not
 // guaranteed bit-exact, and a static_assert is the whole point of naming the split (catch a typo'd share at
 // compile time, not by re-deriving the finding at runtime).
-inline constexpr int kPackTaskQuotaRankingPct = 40;
-inline constexpr int kPackTaskQuotaBodiesPct  = 30;
-inline constexpr int kPackTaskQuotaCallersPct = 15;
-inline constexpr int kPackTaskQuotaNotesPct   = 5;
-inline constexpr int kPackTaskQuotaTestsPct   = 10;   // the cascaded remainder shares this name only in spirit —
-                                                        // tests never CAPS at this share, it only starts there.
+// PB1 (PT1 design D1): the split moved to the locating surface. The head is --for's 40 rows (PT1 measured that block at a
+// median 4,594 B on SUB1's tasks), one key body replaced six, the callers are that body's only, and the file tail — new —
+// takes its own share plus everything the sections before it leave (it is filled LAST, to the ceiling).
+inline constexpr int kPackTaskQuotaRankingPct = 45;
+inline constexpr int kPackTaskQuotaBodiesPct  = 20;
+inline constexpr int kPackTaskQuotaCallersPct = 8;
+inline constexpr int kPackTaskQuotaNotesPct   = 2;
+inline constexpr int kPackTaskQuotaTestsPct   = 5;
+inline constexpr int kPackTaskQuotaTailPct    = 20;   // the tail never CAPS at this share: it absorbs every carry and leftover
 static_assert( kPackTaskQuotaRankingPct + kPackTaskQuotaBodiesPct + kPackTaskQuotaCallersPct
-             + kPackTaskQuotaNotesPct + kPackTaskQuotaTestsPct == 100, "pack-task section quotas must sum to 100%" );
+             + kPackTaskQuotaNotesPct + kPackTaskQuotaTestsPct + kPackTaskQuotaTailPct == 100, "pack-task section quotas must sum to 100%" );
+// The head's row drop (step F) aims here, not at its share: rows past the share are kept (shrunk to pointer rows by the ladder)
+// until this bound, so the 40 rows survive a long-signature corpus while the key body keeps its share.
+inline constexpr int kPackTaskHeadRowDropPct  = 60;
+static_assert( kPackTaskHeadRowDropPct >= kPackTaskQuotaRankingPct && kPackTaskHeadRowDropPct + kPackTaskQuotaBodiesPct <= 100,
+               "the head's row-drop bound must sit at or above its share and leave the key body its share" );
 
 // E1 / review of #214: one entry, one unit again. The <tests> section is CUT over single rows — one row per
 // test file, whose rendered bytes are exactly what the cut measures — and only the KEPT prefix is grouped
@@ -192,64 +204,28 @@ struct PackTaskHeaderParts
 // stated ONCE by the partitioned document's outer legend (partition.h) — inner bundles carry no legend of their
 // own (--pack-task --partition=3 used to print it 4x: 9,646 B of a 34,164 B answer, lens 8 table 1).
 inline constexpr const char* kPackTaskBundleLegendBody =
-    ": one-call orientation under ONE budget — sections in FIXED order ranking > bodies > callers > notes > tests, "
-         // F1 (graphrag harvest 2026-08-15): each section holds a FIXED, up-front proportional quota of the
-         // budget rather than competing for whatever a strict cascade left it — the old shape let ranking
-         // (the first section) swallow the WHOLE remaining budget at small --token-budget values, zeroing
-         // bodies/callers/notes/tests even though they were "just" capped, never actually reserved anything.
-         // Stated tersely, matching trap #8's own precedent (a fixed-size addition, priced once, absorbed by
-         // estchargecheck A11's self-tuning ladder): the split and the roll-forward rule, nothing more.
-         "quotas per section are FIXED (rank40/body30/caller15/note5/test10, percent of budget), unused quota "
-         "ROLLS FORWARD to the next section — a small budget still zeroes a section, but never past its own share. "
-         // §B8.3, the half wave 2 did NOT close. packTaskListSection was fixed to EMIT shown=/total=/capped=
-         // (see its own comment below), and <bodies>/<calls> carry the same trio — but the vocabulary was
-         // defined only in src/pageview.h, which no reader of this bundle holds. Live before this line: a
-         // 881 B legend containing the words `shown` and `total` ZERO times, above a document opening
-         // `<bodies shown="4" total="6" capped="1">`. Defined here, once, for every section that carries it,
-         // because this is the screen the reader meets them on. Deliberately ONE clause: trap #8 — this rides
-         // in EVERY bundle at EVERY budget and is charged against the ceiling it describes, and this addition
-         // is +88 B measured with `wc -c` — legend 881 → 969 B AND whole document 9473 → 9561 B on the src/
-         // fixture, the same delta twice, which is trap #19's signature of a fixed-size addition rather than a
-         // re-measurement. estchargecheck A11's self-tuning ladder absorbs it by moving its operating point.
-         "each truncates rank-adaptively; every truncation reported here (no silent caps): on every section "
-         "shown=rows kept, total=rows that qualified, capped=1 when they differ. "
-         // §H5 sub-finding: bodies fill TOP-RANK-FIRST, so a larger budget can admit a large high-rank body and
-         // thereby keep fewer, bigger ones — a falling count is not lost content, and the reader should not have
-         // to infer that from a number that went down. Stated once, here, where the count itself is printed.
-         "bodies fill rank-first, so a bigger budget can keep FEWER, larger bodies — the count is not a quality measure. "
-         // t14-cleanup #6 / rv-t12-3.md LOW-1: bodyless= can ride EITHER <bodies> shape this bundle emits —
-         // the packBodies-rendered one (its own kBodylessBodiesLegend rides beside it, gated on the count)
-         // and the bare-wrapper placeholder a too-tight budget falls back to (which never calls packBodies,
-         // so it cannot write that comment itself). Defined here, unconditionally, once, so neither shape
-         // can emit it undefined.
-         "bodies: bodyless=N of total= are module-scope owners with no body by construction, never in shown=, never raising capped=. "
-         // §B7.5 (CA4): this dictionary is EXPLICIT — it says "Row keys:" and then lists three of them — so
-         // every key it omits reads as "not a row key" rather than "look elsewhere". It omitted l=, cx= and
-         // ccx=, which every ranking row carries, plus t=/p=/rel= on the name-only rows, and left the whole
-         // <far> element and of_top= undefined. of_top= is the one that needed care: it appears on TWO
-         // sections with DIFFERENT denominators (far divides into the ranked pool, callers into the bodies
-         // set), so a single gloss would have been wrong on one of them — each is named separately.
-         // Kept DELIBERATELY terse, on kMaxTokensFitLegend's precedent: this rides in EVERY bundle at every
-         // budget and is charged against the very ceiling it describes. Trap #8 fired TWICE on this one
-         // addition while it was being written — a 538 B first draft pushed the 600-token fixture bundle onto
-         // the over_ceiling rung, and a 266 B second draft pushed estchargecheck's A11 CONTROL (the bare
-         // bundle at token-budget=800, which must stay conformant for that arm to mean anything) from 2072 B
-         // to 2338 B against a 2171 B allowance. The headroom that existed was 99 B and this form is +85 B,
-         // measured, not estimated. Every key is still named; the prose around them is what went.
-         // deep-tail d1 (2026-08-29): r= joins the explicit dictionary — same trap-#8 terseness, one key
-         // (the full deep-tail contract lives in the --for legend's own clause, docs/EVALS.md registration).
+    // PB1 (PT1 design D1, 2026-11-19): the sections and their split, the --for head and file tail this bundle now carries, the one
+    // key body and its pointer rows, and ONE conversion between budget_tokens= and est_tokens=. Kept terse for trap #8's reason
+    // (this rides in every bundle at every budget and is charged against the ceiling it describes); the history of each clause it
+    // replaced is in git (the R2 distance mask and <far>, the six-body monotone selection, the corroborated caller sort).
+    ": one-call orientation under ONE budget — sections in FIXED order ranking > key body > callers > notes > tests > tail, "
+         "quotas per section are FIXED (rank45/body20/caller8/note2/test5/tail20, percent of budget), unused quota "
+         "ROLLS FORWARD to the next section and the tail is filled LAST with everything left. "
+         "every truncation reported here (no silent caps): on every section "
+         "shown=rows kept, total=rows that qualified, capped=1 when the BUDGET cut the difference. "
+         "ranking: the for head for this task (its 40 rows, its order); "
+         "bodies: ONE body served BY DESIGN — the symbol the task names in backticks, else the top-ranked one that has a body. "
+         "<b>=that served body, and shown=/total= count only bodies SERVED (total=1 when a bodied key body exists); every other "
+         "candidate is a <bn t= n= p= l= next=> pointer row naming the expand call that serves it — a design choice, not a budget "
+         "casualty, so capped=1 only when the served body itself did not fit; bodyless=N of the candidates have no body by "
+         "construction (a module-scope owner) and can never be shown. "
+         "tail: file-grain rows, weaker evidence than the ranked rows (the files the ranking did not show, then the file page), "
+         "sym= their top symbols; capped=1 next= the file page from the first row not printed. "
          "Row keys: n=name (chain it), sc=enclosing scope (when scoped; the full id is p::sc::n), in=reuse-count (absent = not measured, never a false 0)"
-         ", l=line, p=path, t=kind, cx=cyclomatic, ccx=cognitive, rel=caller|callee, r=rank in this ranking "
-         "(rows in r= order); far=ranked but over 1 hop out; "
-         "of_top denominator is per-section. "
-         // graphrag-recon.md idea #1 (2026-08-20, S-effort harvest pick): callers corroborated by SEVERAL
-         // top-K anchors outrank one tied to a single anchor — a pure re-sort of the SAME d1 edges, no new
-         // graph walk, no pooling. Kept to one clause, same trap-#8 discipline as the rest of this legend.
-         "callers: sorted by shared desc (ties=site order); shared=# of top-K anchors reached, omitted at 1. "
-         // M11: the root's machine-readable price, defined where the ledger prose below states the byte figures.
-         "On the root: est_tokens= prices the delivered bundle in tokens (markup at the map rate, bodies at the body rate), "
-         // F2: over_ceiling= is now the property those two numbers state, on every rung — not only the
-         // last-rung case the old wording described. Same length class, one clause, unconditional as before.
+         ", l=line, e=end line, p=path, t=kind, cx=cyclomatic, ccx=cognitive, rel=caller, r=rank in this ranking "
+         "(rows in r= order); callers: the key body's 1-hop callers (of_top=1). "
+         "On the root: dropped_positive=N (present only when nonzero) is the ranked candidates the ceiling cut; "
+         "est_tokens= is the delivered bytes at the rate the budget is converted at (2.36 B/token, the densest language: an upper bound), "
          "budget_tokens= is the token target; over_ceiling= is 1 when est_tokens exceeds it (the bundle is then complete, not trimmed). ";
 // forbudget-soft (owner decision 2026-10-14): the reading of budget_tokens= on a bundle whose budget the CALLER passed — a SOFT
 // target. The section shares are the default's own cascade (an explicit 6000 serves the default's sections byte for byte), but
@@ -466,23 +442,6 @@ inline PackTaskSection packTaskTestsSection( const rw::TestRunnerIndex& runners,
     return out;
 }
 
-// §H5, the direction the finding did not name: the XML names each over-budget skip in a
-// `<!-- body omitted (over budget): NAME -->` comment and the JSON dialect named none of them. Same set, same
-// reason, spelled for a parser. The key is OMITTED (not `[]`) when nothing was skipped, matching the
-// silence-means-nothing-happened convention route/mention/boost/over_ceiling already use in this dialect.
-inline std::string packTaskOmittedBodiesJson( const IngestResult& ing, const rw::EmittedBodies& emitted )
-{
-    if( emitted.omitted.empty() )
-    {
-        return {};
-    }
-    std::string out = ",\"bodies_omitted\":[";
-    appendJoinedSymbolNames( out, ing, emitted.omitted, ",", []( std::string& o, std::string_view name )
-    {
-        o += "\"" + jsonStr( name ) + "\"";   // serialize.h's one join loop, this dialect's quoting
-    } );
-    return out + "]";
-}
 
 // optional Q3/redaction/notes inputs the bundle folds in when the caller has them; every field defaults to
 // "not available" and each is handled by a graceful degrade downstream (packSignatures' own
@@ -602,6 +561,10 @@ struct PackTaskInputs
     // row this bundle renders (packSignatures/packBodies/the D1 caller rows/the far-tier name-only rows) so
     // CLI (runPackTask) and MCP (mcpverbs.h's packTaskText) cannot diverge — one assembler, one root.
     std::string_view                   rootArg;
+
+    // PB1: KB1's key body for this task (forkeybody.h keyBodyFor), resolved by the caller — the first bodied source definition
+    // the question's backtick spans (or its rule-E2 symbol) place. kNoNode: none placed, the top positive-score head serves.
+    NodeId                             keyBody = kNoNode;
 };
 
 // R2: the anchors' 1-hop neighbors, EITHER direction (g.inEdges = symbols that CALL an anchor; g.outOff/
@@ -884,41 +847,6 @@ inline D1Rows renderD1CallerRows( const IngestResult& ing, const D1Neighbors& d1
     return out;
 }
 
-// R2: a bare NAME-ONLY `<s .../>` row per id (no signature, no doc) — the d2plus tier.
-template<class EscFn>
-inline std::vector<std::string> renderNameOnlyRows( const IngestResult& ing, const std::vector<NodeId>& ids, EscFn&& ex,
-                                                     std::string_view rootPrefix = {} )
-{
-    std::vector<std::string> rows;
-    rows.reserve( ids.size() );
-    for( NodeId id : ids )
-    {
-        const Symbol& s = ing.symbols[id];
-        const std::string_view rp = rootPrefix.empty() ? std::string_view( ing.files[ s.fileId ] ) : rw::sarif::rootRelativeUri( ing.files[ s.fileId ], rootPrefix );
-        std::string   row = "<s t=\"";                                   // §B14 — std::string, not char[512]
-        row += symTag( s.kind );
-        row += "\" n=\"";   row += ex( s.name );
-        row += "\" p=\"";   row += ex( rp );
-        row += ":";         row += std::to_string( s.line );
-        row += "\"/>";
-        rows.emplace_back( std::move( row ) );
-    }
-    return rows;
-}
-
-// R2: which of `topRanked` keep full signature+doc detail (d0 ∪ d1 ⇒ eligible, section 1) vs which get
-// demoted to a bare name row (d2plus, the <far> sub-block) — a pure partition, no rendering.
-inline void partitionByEligibility( const std::vector<NodeId>& topRanked, const std::vector<char>& d0Mark,
-                                    const std::vector<char>& d1Mark,
-                                    std::vector<NodeId>& eligibleIds, std::vector<NodeId>& d2plusIds )
-{
-    ASSUME_NO_ALIAS3( topRanked, eligibleIds, d2plusIds );
-    for( NodeId id : topRanked )
-    {
-        ( ( id < d0Mark.size() && d0Mark[id] ) || ( id < d1Mark.size() && d1Mark[id] ) ? eligibleIds : d2plusIds ).push_back( id );
-    }
-}
-
 // R2: everything outside `eligibleIds` is pinned to -1 (below any real, non-negative score) so
 // packSignatures' own internal top-N selection naturally lands on exactly `eligibleIds`, in their original
 // relative order — no pull-up of a lower-ranked, still-ineligible candidate to fill the gap.
@@ -961,28 +889,6 @@ inline PackTaskRendered packTaskRender( Emit&& emit, PackTaskRenderFaults* fault
     return PackTaskRendered{ std::move( r.text ), r.ok };
 }
 
-// R2: section 1 as ONE cohesive unit — the distance-masked packSignatures call (eligibleIds only) PLUS the
-// d2plus <far> splice just inside </sigs> (still section 1, never a 6th top-level section). Grouped into a
-// small input struct (not individual params) so this stays comfortably under the params-regression bar.
-struct RankingSectionInputs
-{
-    const std::vector<NodeId>*        eligibleIds;
-    const std::vector<NodeId>*        d2plusIds;
-    const std::vector<NodeId>*        topRanked;
-    const std::vector<float>*         maskedRank;
-    std::size_t                       sigsBudget;
-    const PackTaskInputs*             in;
-    const std::vector<std::uint8_t>*  forClone;
-};
-struct RankingSection
-{
-    std::string sigsStr;        // final, post-<far>-splice <sigs>…</sigs>
-    bool        capped = false;
-    std::size_t farTotal = 0, farKept = 0;
-    std::string farXml;         // the raw <far>…</far> (or "" if omitted) — for the header's listStatus
-    std::size_t droppedPositive = 0;   // A2 (survey card, 2026-09-03): rank>0 eligibleIds cut by the ladder's step F
-    rw::SigsCutReport sigsCut;         // cut-fix lane A: the <sigs> tag's cut readings — their clauses ride the ledger
-};
 // WHERE packBodies' OWN `<bodies …>` OPEN TAG STARTS AND ENDS — by structure, never by punctuation.
 // The document is `<!-- legend --><!-- legend --><bodies …>…</bodies>`: packBodies writes zero or more
 // COMMENT nodes ahead of the tag, and since #60 one of them (kBodylessBodiesLegend) contains
@@ -1006,42 +912,6 @@ inline std::size_t countBodylessCandidates( const IngestResult& ing, const std::
         n += ( id < ing.symbols.size() && ing.symbols[id].kind == SymKind::ModuleScope ) ? 1u : 0u;
     }
     return n;
-}
-
-struct SectionOpenTag
-{
-    std::size_t start = std::string::npos;   // offset of the element's '<'
-    std::size_t end   = std::string::npos;   // offset of the '>' that closes THAT tag
-};
-inline SectionOpenTag findSectionOpenTag( std::string_view xml, std::string_view element ) noexcept
-{
-    SectionOpenTag t;
-    std::size_t    i = 0;
-    while( i < xml.size() )
-    {
-        if( xml.compare( i, 4, "<!--" ) == 0 )
-        {
-            const std::size_t close = xml.find( "-->", i );
-            if( close == std::string_view::npos )
-            {
-                return t;   // an unterminated comment: refuse rather than guess where the element begins
-            }
-            i = close + 3;
-            continue;
-        }
-        if( xml.compare( i, element.size(), element ) == 0 )
-        {
-            const std::size_t close = xml.find( '>', i );
-            if( close != std::string_view::npos )
-            {
-                t.start = i;
-                t.end   = close;
-            }
-            return t;
-        }
-        return t;   // something other than a comment or the element we restate — refuse
-    }
-    return t;
 }
 
 // P10 (partitioncheck): packBodies writes kTruncatedBodyLegend, then kOverCeilingBodyLegend, right after the <bodies …>
@@ -1068,90 +938,9 @@ inline void hoistBodyReadings( std::string& bodiesXml )
 }
 
 
-template<class EscFn>
-inline RankingSection renderRankingWithFar( const IngestResult& ing, const RankingSectionInputs& ri, EscFn&& ex )
-{
-    RankingSection out;
-    out.sigsStr = ri.eligibleIds->empty() ? std::string( "<sigs></sigs>" ) : packTaskRender<PackTaskRenderFaults::DisclosureWhy::RankingRenderFailed>( [ & ]( std::FILE* m )
-    {
-        packSignatures( m, ing, *ri.maskedRank, int( ri.eligibleIds->size() ), ri.in->sigLadderBudgetBytes, /*metrics=*/true,
-                        ri.in->fanIn, ri.in->impure, ri.in->redact,
-                        ri.in->churn, ri.forClone, ri.in->tested, ri.in->amp,
-                        /*rankAdaptivePayload=*/true, /*payloadBudgetBytes=*/ri.sigsBudget,
-                        /*noteIndex=*/nullptr,       // notes are a DEDICATED section (4), never inline here (avoids double-emit)
-                        ri.in->rootArg,
-                        rw::SigLensRules::None,      // no LB-A floor, no e=. R2: eligibleIds is ALREADY the curated set (d0∪d1 depth mask),
-                                                     //   not a floor-narrowed topN — droppedPositiveCount re-checks
-                                                     //   rank>0 per symbol regardless, so this is unaffected either way
-                        &out.droppedPositive,        // A2: exact count, see droppedPositiveCount (serialize.h)
-                        /*shownIdsOut=*/nullptr, /*cappedOut=*/nullptr, /*topRowNext=*/{},
-                        &out.sigsCut );              // cut-fix lane A: docs_dropped= / shrunk readings (defined in the ledger)
-    }, ri.in->renderFaults ).text;
-    if( !ri.eligibleIds->empty() && out.sigsStr.empty() )
-    {
-        out.sigsStr = "<sigs render_failed=\"1\"></sigs>";   // the section is there and says why it is empty
-        return out;
-    }
-    // §P8 vocabulary: the ladder's marker is `<sigs shown="S" total="T" capped="1">` (src/pageview.h, THE
-    // TRUNCATION VOCABULARY, rule 5) — it was payload="capped", and THIS was the string-match that made a
-    // string enum load-bearing. Read off the OPENING TAG only, so a capped= on any nested child can never
-    // be read as the ranking section's own verdict.
-    {
-        // Structural, not positional. This read was already safe — it required the string to START with
-        // `<sigs `, so no leading comment could move the '>' — but that is the same coupling that broke the
-        // <bodies> splice below the moment packBodies grew a legend comment ahead of its tag. Both now go
-        // through findSectionOpenTag, so a future legend written before <sigs> cannot repeat it.
-        const SectionOpenTag sigsTag = findSectionOpenTag( out.sigsStr, "<sigs " );
-        out.capped = sigsTag.end != std::string::npos
-                  && std::string_view( out.sigsStr ).substr( sigsTag.start, sigsTag.end - sigsTag.start ).find( " capped=\"1\"" ) != std::string_view::npos;
-    }
-
-    const std::vector<std::string> farRows = renderNameOnlyRows( ing, *ri.d2plusIds, ex, ri.in->rootArg );
-    char farAttr[ 32 ];  rw::formatTo( farAttr, sizeof( farAttr ), " of_top=\"{}\"", ri.topRanked->size() );
-    const std::size_t     sigsLeftover = ri.sigsBudget > out.sigsStr.size() ? ri.sigsBudget - out.sigsStr.size() : 0;
-    const PackTaskSection far          = packTaskListSection( "far", farAttr, farRows, sigsLeftover, kPackTaskWrapReserve );
-    out.farTotal = farRows.size();
-    out.farKept  = far.kept;
-    out.farXml   = far.xml;
-
-    if( !far.xml.empty() && out.sigsStr.size() >= 7 && out.sigsStr.compare( out.sigsStr.size() - 7, 7, "</sigs>" ) == 0 )
-    {
-        out.sigsStr.insert( out.sigsStr.size() - 7, far.xml );
-    }
-    else if( !far.xml.empty() )
-    {
-        DISCLOSE( "pack-task: <sigs> did not end with the expected closing tag — <far> omitted" );
-    }
-    return out;
-}
-
-// ── W2-K: budget-cliff smoothing ────────────────────────────────────────────────────────────────────────
-// E4's sweep found bodies_shown NON-monotonic in --token-budget (5 bodies at 4000, 2 at 4500, on ripwire-src,
-// reproduced on both a pre- and post-harvest binary). The orchestrator's kill clause required a SHARED
-// mechanism, not a corpus artifact, before funding a fix — measured here (RW_W2K_DEBUG instrumentation,
-// discarded): at budgetTokens=3500..5000 on this exact task, ranking is "full" (never capped: <sigs> never
-// truncates) and its unspent share (`carry`, rolled into bodies) is STRICTLY INCREASING the whole way
-// (244 -> 669 -> 1093 -> 1518), so bodiesBudget itself is ALSO strictly increasing (2112 -> 2856 -> 3598 ->
-// 4342) — the cross-section "ranking eats its own share" theory in exp-e4.md does not hold for this cliff.
-// The real cause is the one packBodies' own §H5 comment already names and defends as NOT a defect: bodies
-// fill top-rank-first via a STREAMING SKIP-AND-CONTINUE walk (admit a candidate if it fits the budget
-// remaining so far, else skip and try the next), and that walk is providably not monotone in its own total
-// budget — a bigger budget can newly admit ONE large, high-rank candidate that then starves several smaller,
-// lower-rank ones the smaller budget had room for. Worked counter-example (rank order, fixed costs):
-// costs=[10,3,3,3,3,3], budget=9 -> skip the 10, admit three 3's, count=3; budget=10 -> admit the 10 (just
-// fits), remaining=0, count=1. Bigger budget, fewer bodies, with NOTHING about ranking involved.
-// §H5's own conclusion — "rank priority is the retrieval contract, count is not a quality measure" — is still
-// right for a SINGLE evaluation, and this fix does not relitigate it: the top-ranked candidate is still
-// preferred whenever a choice exists. What changes is WHICH admission strategy earns that preference. A
-// streaming walk is one strategy; it happens to not be monotone. Below is a DIFFERENT strategy — maximize the
-// COUNT of candidates admitted within the budget, tie-broken toward the higher-ranked ones — that keeps the
-// same "prefer top rank" spirit but IS monotone by construction: the set of budgets for which a given subset
-// fits only grows as the budget grows, so the best COUNT achievable over that growing set cannot fall.
-// Bounded by kPackTaskBodyCandidates (today 6), so brute-force 2^N subset enumeration is exact and cheap —
-// no heuristic, no new tuned constant. Scoped entirely to --pack-task's OWN pre-selection of which of its
-// already-ranked candidates to hand packBodies: packBodies' general per-call streaming contract — the one
-// EVERY OTHER caller (--expand, MCP `exemplar`, --detail, --around) relies on — is untouched and
-// byte-identical; only the LIST this one caller passes it changes.
+// ── W2-K: monotone section shares ─────────────────────────────────────────────────────────────────────────
+// Every section share below is `quota + carry`, and a section only donates its unspent share forward when it was not itself
+// cut — so each share, and each kept count, is a non-decreasing function of budgetTokens (packtaskmonotoncheck).
 struct MonotoneRoll { std::size_t charge = 0, carry = 0; };
 
 // A section's unspent SHARE only rolls FORWARD to the next section when the section was not itself
@@ -1165,7 +954,7 @@ inline MonotoneRoll monotoneRoll( bool sectionCapped, std::size_t granted, std::
 {
     if( sectionCapped )
     {
-        return { granted, 0 };
+        return { std::max( granted, consumed ), 0 };   // PB1: the head keeps rows past its target up to its row-drop bound
     }
     return { consumed, granted > consumed ? granted - consumed : 0 };
 }
@@ -1218,235 +1007,428 @@ inline std::size_t reflowListSection( PackTaskSection& section, std::string_view
     return section.kept < entries.size() || budget <= section.xml.size() ? 0 : budget - section.xml.size();
 }
 
-// the exact bytes packBodies would emit for ONE node alone, minus the fixed <bodies ...></bodies> wrapper
-// (`wrapperLen`, measured once by the caller) — i.e. this node's own share of `children`. Called under the
-// caller's RedactTallyFreeze, so a probe never bills the redaction tally a second time (§B10.2's rule).
-inline std::size_t probeBodyCost( const IngestResult& ing, const Graph& g, NodeId id, const PackTaskInputs& in,
-                                  std::size_t wrapperLen )
+// ── PB1 (PT1 design D1, owner-approved 2026-11-19): the ranking section is --for's head ─────────────────────────────────
+// PT1 (results/PT1_PACKTASK_1119/READOUT.md §1) traced why --pack-task named 89 of SUB1's 165 gold files where --for page 1
+// named 148: the SAME ranker, then a fixed 12-row window in raw score order with every row past one hop of the six bodies
+// demoted to a name-only <far> row, and no file-grain tail. 19 gold files sat at r 13-40, 4 more were --for head rows
+// only through its round robin by file, and 37 were ranked at file grain only. The budget cut no ranking row in 52/52.
+// So the section is now --for's own head: packSignatures over the UNMASKED rank, kPackTaskHeadRows rows, the --for lens's
+// rules (relevance floor, e=, docs after code, the round robin by file — each under the same verdict --for applies), and
+// the ladder's row drop bounded so the head cannot starve the key body. The <far> tier is gone with the mask that fed it.
+// THE ROW SHAPE (PT1 §2: --for page 1's 40-row block is "about 10 full rows and 30 pointer rows", a median 4,594 B on SUB1's
+// tasks). The first kPackTaskFullHeadRows rows print whole (doc, signature, lens facts); every row past them is a POINTER ROW,
+// `<d l= n= [sc=] p= r=/>` — its name and place, the --expand selector's parts, nothing else. Rows are never reordered and none
+// is added: the r= sequence is --for's own. Only when even that shape is over the head's bound are rows dropped, lowest rank
+// first, and the <sigs> tag then says shown= total= capped="1" with next= the --for call that serves all of them.
+//
+// THE SHAPE IS A LADDER, NOT A CONSTANT, and rows are the LAST thing it sheds. A long task echo is charged exactly, so a
+// 900-character task against a 1,200-token budget collapses `remaining` to its floor — and the first draft of this pass
+// answered that by keeping ONE row at FULL detail (2,961 B on w3fixbudgetcheck's fixture, more payload than the same
+// bundle served for a SHORT task: "bytes riding free"). The order is now text first, rows last, and never below the floor:
+//   1. the largest full-row prefix (kPackTaskFullHeadRows down to 0) whose rendering fits the bound; everything past it
+//      is a pointer row, so a tight bound shrinks ROW TEXT before it costs a single file its name;
+//   2. only then rows, lowest rank first, and never below kPackTaskHeadFloorRows — --for's own "rank 1..4 always ship"
+//      floor (forbudgetfit.h kForBudgetRowFloor), which this head shares because it IS --for's head.
+inline constexpr std::size_t kPackTaskFullHeadRows  = 10;
+inline constexpr std::size_t kPackTaskHeadFloorRows = 4;   // == forbudgetfit.h kForBudgetRowFloor (the rank 1..4 floor)
+struct PackHeadInputs
 {
-    EmittedBodies     dummy;
-    // in.calleeRank is threaded through the PROBE, not only the real render: it decides WHICH callee rows
-    // survive the <calls> cut, and different rows are different signature bytes. A probe run without it
-    // would price a listing the bundle will never emit, and every fit decision downstream inherits that.
-    const PackTaskRendered one = packTaskRender<PackTaskRenderFaults::DisclosureWhy::BodyProbeRenderFailed>( [ & ]( std::FILE* m )
-    {
-        packBodies( m, ing, { id }, SIZE_MAX, g.outOff, g.outTargets, g.outNameOnly, in.compress, in.redact, nullptr, nullptr, &dummy,
-                   /*truncateOversizedFirst=*/true, /*withFileContext=*/false, in.rootArg, in.calleeRank );
-    }, in.renderFaults );
-    if( !one.ok )
-    {
-        return SIZE_MAX;   // an unmeasured body is never "free": priced out, it is omitted like any over-budget body
-    }
-    return one.text.size() > wrapperLen ? one.text.size() - wrapperLen : 0;
-}
+    int                               topN         = 0;
+    std::size_t                       boundBytes   = 0;   // the head's ceiling: rows past it are dropped, lowest rank first
+    SigLensRules                      rules        = SigLensRules::None;
+    std::string_view                  task;
+    const PackTaskInputs*             in           = nullptr;
+    const std::vector<std::uint8_t>*  forClone     = nullptr;
+};
+struct PackHead
+{
+    std::string         sigsStr;
+    bool                capped          = false;
+    std::size_t         droppedPositive = 0;
+    std::vector<NodeId> shownIds;   // the rows printed, printed order — the tail excludes their files, as --for's does
+    SigsCutReport       cut;
+};
 
-// a mask's "keep the higher ranks" tie-break score: bit i (rank i, 0 = top) contributes a MORE significant
-// bit the LOWER i is, so among equal-count masks the one preserving more of the front of the rank order
-// always compares higher — a total order, so the tie-break is deterministic.
-inline std::uint32_t bodyMaskRankScore( std::uint32_t mask, std::size_t n )
+// `<d …>…</d>` → `<d l= n= sc= p= r=/>` (the attributes it has of those, in that order).
+inline std::string packTaskPointerRow( std::string_view openTag )
 {
-    std::uint32_t score = 0;
-    for( std::size_t i = 0; i < n; ++i )
+    std::string row = "<d";
+    for( const std::string_view a : { std::string_view( "l" ), std::string_view( "n" ), std::string_view( "sc" ), std::string_view( "p" ), std::string_view( "r" ) } )
     {
-        if( mask & ( 1u << i ) )
+        const std::string_view v = attrOf( openTag, a );
+        if( !v.empty() )
         {
-            score |= ( 1u << ( n - 1 - i ) );
+            row += " ";  row += a;  row += "=\"";  row += v;  row += "\"";
         }
     }
-    return score;
+    return row + "/>";
 }
 
-// packBodies only ever sees the pre-selected subset (selectMonotoneBodySubset, below), so its own <bodies
-// shown=/total=/capped=> wrapper and its per-item "<!-- body omitted (over budget) -->" markers describe
-// THAT smaller request, not the true candidate set (bodyIds) — total= undercounts and capped="0" is a lie
-// whenever the pre-selection itself dropped a candidate packBodies never even saw. Restated here from the
-// TRUE candidate list against `emitted.kept` (what actually got shown, not the intended selection — robust
-// to any probe/render mismatch), so §H5's per-item disclosure ("the XML names each over-budget skip in a
-// comment; the JSON lists bodies_omitted") still holds for candidates OUR pre-selection dropped, not only
-// ones packBodies itself would have dropped. A no-op (bodiesXml returned unchanged) when every candidate
-// was shown — the common case once the budget clears the whole set.
+// Remove one attribute from an open tag, if it carries it. Returns true when something was removed.
+// The ADDRESS of the value attrOf (serialize.h) already finds is what locates the span to erase: a second
+// hand-rolled ` name="` find here is the same seven lines handoffwindow.h's printedAttrOf already spells, and
+// --quality-delta's clone detector matched them at 109 tokens the first time this was written that way.
+inline bool stripOpenTagAttr( std::string& xml, std::string_view name )
+{
+    const std::string_view v = attrOf( xml, name );
+    if( v.data() == nullptr )
+    {
+        return false;
+    }
+    const std::size_t at    = std::size_t( v.data() - xml.data() );   // attrOf returns a view INTO xml
+    const std::size_t start = at - ( name.size() + 3 );               // back over ` name="`
+    xml.erase( start, ( at + v.size() + 1 ) - start );                // forward over the closing quote
+    return true;
+}
 
+// Replace (or append before the closing '>') one attribute of an open tag.
+inline void setOpenTagAttr( std::string& tag, std::string_view name, std::string_view value )
+{
+    const std::string key = " " + std::string( name ) + "=\"";
+    const std::size_t at  = tag.find( key );
+    if( at != std::string::npos )
+    {
+        const std::size_t close = tag.find( '"', at + key.size() );
+        tag.replace( at + key.size(), close - ( at + key.size() ), value );
+        return;
+    }
+    tag.insert( tag.size() - 1, key + std::string( value ) + "\"" );
+}
+
+// The row-shape ladder and the bound, over the rendered <sigs> block (rows in `shownIds` order, one row element each).
+inline void packTaskShapeHead( PackHead& h, std::size_t boundBytes, std::string_view task )
+{
+    const SectionOpenTag open = findSectionOpenTag( h.sigsStr, "<sigs" );
+    if( open.end == std::string::npos || !h.sigsStr.ends_with( "</sigs>" ) || h.sigsStr[ open.end - 1 ] == '/' )
+    {
+        return;   // an empty or unexpected block is left as rendered
+    }
+    std::string              tag( h.sigsStr.substr( open.start, open.end + 1 - open.start ) );
+    std::vector<std::string> rowsFull, rowsPtr;
+    std::string              lead;   // comments ahead of the first row (a reading packSignatures wrote), kept verbatim
+    const std::size_t        bodyEnd = h.sigsStr.size() - 7;
+    for( std::size_t i = open.end + 1; i < bodyEnd; )
+    {
+        if( h.sigsStr.compare( i, 4, "<!--" ) == 0 )
+        {
+            const std::size_t e = h.sigsStr.find( "-->", i );
+            if( e == std::string::npos )
+            {
+                DISCLOSE( "pack-task: <sigs> held an unterminated comment — the block is left as rendered" );
+                return;   // refuse rather than guess where it ends, exactly as findSectionOpenTag does
+            }
+            if( rowsFull.empty() ) { lead += h.sigsStr.substr( i, e + 3 - i ); }
+            else { rowsFull.back() += h.sigsStr.substr( i, e + 3 - i );  rowsPtr.back() += h.sigsStr.substr( i, e + 3 - i ); }
+            i = e + 3;
+            continue;
+        }
+        const std::size_t gt = h.sigsStr.find( '>', i );
+        if( gt == std::string::npos || h.sigsStr[i] != '<' )
+        {
+            DISCLOSE( "pack-task: <sigs> held a child the head pass does not know — the block is left as rendered" );
+            return;
+        }
+        // A ROW is packSignatures' `<d …>…</d>` / `<d …/>`, or a row the LADDER already shrank past anything a
+        // pointer row would say — the touch tier's `<t p= sym= r=/>`, which arrives self-closed and minimal. Only a
+        // <d> row is re-spelled as a pointer row; any other self-closed row is kept verbatim.
+        // Before this, one `<t>` row made the whole pass bail, so on exactly the corpora where the ladder has to
+        // shrink (the long-signature ones) the head kept its full rows AND its byte bound went unapplied — the
+        // budget then rode on the tail re-cut alone. The shownIds disagreement below stays the backstop for a
+        // shape neither branch knows.
+        const bool             isD     = h.sigsStr.compare( i, 3, "<d " ) == 0;
+        const std::string_view openRow = std::string_view( h.sigsStr ).substr( i, gt + 1 - i );
+        std::size_t            end     = gt + 1;
+        if( h.sigsStr[ gt - 1 ] != '/' )
+        {
+            const std::size_t close = isD ? h.sigsStr.find( "</d>", gt ) : std::string::npos;
+            if( close == std::string::npos )
+            {
+                DISCLOSE( "pack-task: a <sigs> row did not close where the head pass expects — the block is left as rendered" );
+                return;
+            }
+            end = close + 4;
+        }
+        // BOTH spellings of every row are kept: the ladder below chooses how many print whole, and a row that cannot
+        // be re-spelled (anything but a <d> row) is already at its pointer size, so the two forms are the same string.
+        rowsFull.emplace_back( h.sigsStr.substr( i, end - i ) );
+        rowsPtr.emplace_back( isD ? packTaskPointerRow( openRow ) : rowsFull.back() );
+        i = end;
+    }
+    if( rowsFull.size() != h.shownIds.size() )
+    {
+        DISCLOSE( "pack-task: <sigs> rows and the shown ids disagree — the head pass keeps the block as rendered" );
+        return;
+    }
+    const std::size_t totalRows = rowsFull.size();
+    const std::size_t fixed     = tag.size() + lead.size() + 7;
+    // STEP 1 — the largest full-row prefix that fits. fullCount counts down, so the result is the most detail the bound
+    // holds and never more; at 0 every row is a pointer row, which is this section's smallest honest shape.
+    std::size_t fullCount = std::min( totalRows, kPackTaskFullHeadRows );
+    const auto  bytesFor  = [ & ]( std::size_t fulls, std::size_t keptRows ) -> std::size_t
+    {
+        std::size_t n = fixed;
+        for( std::size_t k = 0; k < keptRows; ++k )
+        {
+            n += ( k < fulls ? rowsFull : rowsPtr )[k].size();
+        }
+        return n;
+    };
+    while( fullCount > 0 && bytesFor( fullCount, totalRows ) > boundBytes )
+    {
+        --fullCount;
+    }
+    // STEP 2 — only now rows, lowest rank first, and never below --for's own rank 1..4 floor.
+    const std::size_t floorRows = std::min( totalRows, kPackTaskHeadFloorRows );
+    std::size_t       kept      = totalRows;
+    while( kept > floorRows && bytesFor( fullCount, kept ) > boundBytes )
+    {
+        --kept;
+    }
+    std::vector<std::string> rows;
+    rows.reserve( kept );
+    for( std::size_t k = 0; k < kept; ++k )
+    {
+        rows.emplace_back( k < fullCount ? rowsFull[k] : rowsPtr[k] );
+    }
+    if( kept < totalRows )
+    {
+        const std::size_t total = std::max<std::size_t>( totalRows, h.cut.total );
+        setOpenTagAttr( tag, "shown", std::to_string( kept ) );
+        setOpenTagAttr( tag, "total", std::to_string( total ) );
+        setOpenTagAttr( tag, "capped", "1" );
+        h.cut.next = nextFlag( "--for=", task );
+        std::string nextValue;
+        appendNextValueXml( nextValue, h.cut.next );   // nextverb.h: the ONE next= value escape
+        setOpenTagAttr( tag, "next", nextValue );
+        h.cut.isCapped = true;  h.cut.shown = kept;  h.cut.total = total;
+        h.capped       = true;
+        h.shownIds.resize( kept );
+    }
+    std::string out = tag + lead;
+    for( std::size_t k = 0; k < kept; ++k )
+    {
+        out += rows[k];
+    }
+    h.sigsStr = out + "</sigs>";
+}
+
+inline PackHead renderPackHead( const IngestResult& ing, const std::vector<float>& rank, const PackHeadInputs& hi )
+{
+    PackHead out;
+    out.sigsStr = packTaskRender<PackTaskRenderFaults::DisclosureWhy::RankingRenderFailed>( [ & ]( std::FILE* m )
+    {
+        packSignatures( m, ing, rank, hi.topN, hi.in->sigLadderBudgetBytes, /*metrics=*/true, hi.in->fanIn, hi.in->impure, hi.in->redact,
+                        // payloadBudgetBytes IS the head's bound: the ladder's TEXT-shrink steps (drop docs, shrink signatures,
+                        // the touch tier) must aim at it, and only then does packTaskShapeHead's pointer-row pass and row drop
+                        // run against the same number. Passing 0 here left the ladder unbudgeted, so under a tight budget — a
+                        // long task echo collapses `remaining` to its floor — the one surviving row kept its FULL text and the
+                        // payload grew with the header instead of shrinking (w3fixbudgetcheck arm 4: "bytes riding free").
+                        hi.in->churn, hi.forClone, hi.in->tested, hi.in->amp, /*rankAdaptivePayload=*/true, /*payloadBudgetBytes=*/hi.boundBytes,
+                        /*noteIndex=*/nullptr,   // notes are a DEDICATED section, never inline here (avoids double-emit)
+                        hi.in->rootArg, hi.rules, &out.droppedPositive, &out.shownIds, &out.capped, /*topRowNext=*/{}, &out.cut );
+    }, hi.in->renderFaults ).text;
+    if( out.sigsStr.empty() )
+    {
+        out.sigsStr = "<sigs render_failed=\"1\"></sigs>";   // the section is there and says why it is empty
+        out.shownIds.clear();
+        return out;
+    }
+    packTaskShapeHead( out, hi.boundBytes, hi.task );
+    return out;
+}
+
+// The verdicts --for takes for its head rules, taken here from the bundle's own inputs (no Config): the docs reorder on a routed
+// question that does not ask about docs, e= and the round robin under the same budget rule. `budgetTokens` is the caller's
+// explicit budget (a soft target) or 0 for the default, as --for passes cfg.tokenBudget.
+inline SigLensRules packTaskHeadRules( const IngestResult& ing, const std::string& task, const LensRanking& lr, std::size_t budgetTokens )
+{
+    const bool routed        = lr.routeTag != nullptr && std::strcmp( lr.routeTag, "no-route" ) != 0;
+    const bool conceptual    = lr.routeTag != nullptr && std::strcmp( lr.routeTag, "subtoken+body" ) == 0;
+    const bool docsAfterCode = routed && !taskAsksAboutDocs( task ) && std::getenv( "RIPWIRE_NO_DOCS_AFTER_CODE" ) == nullptr
+                               && docsAfterCodeFitsCeiling( budgetTokens, false );
+    return forLensRules( docsAfterCode, endLinesFitCeiling( budgetTokens, false ),
+                         forHeadRoundRobinOn( conceptual, taskNamesIndexedFile( ing, task ), budgetTokens, false ) );
+}
+
+// ── PB1: ONE body, the key one ───────────────────────────────────────────────────────────────────────────────────────────
+// PT1 §2: body 1's file was a changed file in 28/52, body 2's in 20/45, bodies 3-6 in 26/117 — the lesser five spent 35% of
+// the answer at a 22% hit rate, the bytes the file tail needs. The key body is KB1's (forkeybody.h): the first definition the
+// question's backtick spans (or its rule-E2 symbol) place, else the top positive-score head. Every other candidate — the old
+// six-head set — rides as a `<bn … next="--expand=…"/>` pointer inside <bodies>: counted in total=, never in shown=.
+// KB1's pick arrives as PackTaskInputs::keyBody (the callers run forkeybody.h, which this header cannot include: subjectanchor.h
+// reaches back here through forcallerhop.h). It is taken when this bundle's rank does not mask it out — a --partition slice pins
+// every symbol outside the slice to -1 — else the top positive-score head that HAS a body: a module-scope owner stays a
+// candidate (total=/bodyless= count it) but cannot be the one served row, since it has no body to serve (#60).
+inline NodeId packTaskKeyBody( const IngestResult& ing, NodeId keyed, const std::vector<float>& rank, const std::vector<NodeId>& heads )
+{
+    if( keyed != kNoNode && keyed < rank.size() && rank[keyed] >= 0.0f && ing.symbols[keyed].kind != SymKind::ModuleScope )
+    {
+        return keyed;
+    }
+    for( NodeId id : heads )
+    {
+        if( ing.symbols[id].kind != SymKind::ModuleScope )
+        {
+            return id;
+        }
+    }
+    return kNoNode;
+}
+
+// The --expand selector of one definition, as the answer spells p= — hopbody.h expandSelectorOf's spelling (p:l:n), which this
+// header cannot include for the same reason.
+inline std::string packTaskExpandSelector( const IngestResult& ing, NodeId id, std::string_view rootArg )
+{
+    const Symbol& s = ing.symbols[id];
+    return nextFlag( "--expand=", lensRowPath( ing, s.fileId, rootArg ) + ":" + std::to_string( s.line ) + ":" + s.name );
+}
+
+// The body candidates: the key body first, then the top positive-score heads, each once, at most
+// kPackTaskBodyCandidates. Module-scope owners STAY in the set — they have no body by construction, so they can
+// never be `shown`, but `total=` counts them and `bodyless=` says how many of total= they are (#60's contract,
+// gated by xmlwellformed #60 and subjectanchorcheck F10). Only the SERVED body has to be a bodied symbol.
+inline std::vector<NodeId> packTaskBodyCandidates( const IngestResult& ing, const std::vector<NodeId>& order, const std::vector<float>& rank,
+                                                   NodeId keyId )
+{
+    std::vector<NodeId> out;
+    if( keyId != kNoNode )
+    {
+        out.push_back( keyId );
+    }
+    for( std::size_t k = 0; k < order.size() && out.size() < kPackTaskBodyCandidates; ++k )
+    {
+        const NodeId id = order[k];
+        if( rank[id] <= 0.0f )
+        {
+            break;
+        }
+        if( id != keyId )
+        {
+            out.push_back( id );
+        }
+    }
+    ( void )ing;
+    return out;
+}
+
+// THE ROW TAG IS `<bn …/>`, NOT `<b …/>`. A `<b>` row is a SERVED body and `<bodies shown=>` counts exactly those:
+// five bodyless `<b>` rows under `shown="1"` is a section contradicting itself, which is what the truncation
+// vocabulary (test/truncvocabcheck.sh arm (E), pageview.h rule 5) reads shown= against. A candidate the bundle did
+// not serve is a different kind of row — a pointer to the call that would serve it — so it gets its own name and is
+// counted in total= and in the ledger instead: `<bn t= n= p= l= next="--expand=p:l:n"/>`.
 template<class EscFn>
-inline std::string restatePackTaskBodiesWrapper( const IngestResult& ing, const std::string& bodiesXml,
-                                                  const std::vector<NodeId>& bodyIds, EmittedBodies& emitted, EscFn&& ex,
-                                                  bool compress = false )
+inline std::string packTaskBodyPointers( const IngestResult& ing, const std::vector<NodeId>& ids, EscFn&& ex, std::string_view rootArg )
 {
-    const std::size_t bodylessOwners = countBodylessCandidates( ing, bodyIds );   // #60
-    if( bodiesXml.empty() || emitted.kept.size() + bodylessOwners >= bodyIds.size() )
+    std::string out;
+    for( NodeId id : ids )
     {
-        return bodiesXml;   // nothing was actually dropped: packBodies' own tag already says so
+        const Symbol& s = ing.symbols[id];
+        out += "<bn t=\"";  out += symTag( s.kind );
+        out += "\" n=\"";   out += ex( s.name );
+        out += "\" p=\"";   out += ex( lensRowPath( ing, s.fileId, rootArg ) );
+        out += "\" l=\"";   out += std::to_string( s.line );
+        out += "\"";        out += nextAttrXml( packTaskExpandSelector( ing, id, rootArg ) );
+        out += "/>";
     }
-    std::vector<char> keptMark( ing.symbols.size(), 0 );
-    for( const EmittedBody& b : emitted.kept )
-    {
-        if( b.id < keptMark.size() )
-        {
-            keptMark[b.id] = 1;
-        }
-    }
-    std::string markers;
-    for( NodeId id : bodyIds )
-    {
-        if( id < keptMark.size() && !keptMark[id] && ing.symbols[id].kind != SymKind::ModuleScope )
-        {
-            markers += "<!-- body omitted (over budget): ";
-            markers += ex( xmlCommentText( ing.symbols[id].name ) );
-            markers += " -->";
-            emitted.omitted.push_back( id );
-        }
-    }
-    const SectionOpenTag    tag         = findSectionOpenTag( bodiesXml, "<bodies" );
-    const bool              closesRight = bodiesXml.size() >= 9 && bodiesXml.compare( bodiesXml.size() - 9, 9, "</bodies>" ) == 0;
+    return out;
+}
+
+// packBodies' own `<bodies …>` tag describes the one id it was handed; this restates it over the true candidate set and puts the
+// pointers inside. Everything before the tag (packBodies' legend comments) is kept verbatim; compress="1" survives the rewrite.
+// `shown` is taken BY REFERENCE because the degrade path below changes the answer: a shape this cannot lift the served body out
+// of loses that body, and a `shown="1"` over a section with no body in it is a WRONG ANSWER, not a cosmetic one (the same rule
+// that makes a false capped= a defect). The count is restated to 0, the key body's own next= pointer goes in beside the others
+// so nothing is silently dropped, and the caller reads the zero back for the ledger and the JSON dialect.
+// CAPPED= IS A BUDGET VERDICT, NOT `shown != total`, and the truncation vocabulary enforces exactly that equivalence
+// (test/truncvocabcheck.sh arm (E): `capped="1"` iff `shown < total` or a served row was itself cut). This section serves
+// ONE body BY DESIGN, so total= is what QUALIFIED to be served — 1 when a bodied key body exists, 0 when none does — and
+// the other candidates are not casualties of the budget. They ride as `<bn>` pointer rows and are counted by `next_rows=`,
+// so the arithmetic and the bit agree and a candidate is never reported as a cut the budget did not make. `bodyless=` keeps
+// #60's meaning: of the candidate set, those with no body by construction ("a bodyless owner is not an over-budget cut").
+struct PackBodiesTag
+{
+    std::size_t served      = 0;       // shown= : bodies actually emitted (0 or 1)
+    std::size_t servedTotal = 0;       // total= : bodies that qualified to be served
+    std::size_t candidates  = 0;       // the whole candidate set: the served body plus every <bn> pointer row
+    std::size_t bodyless    = 0;       // of candidates=: no body by construction (a module-scope owner)
+    bool        compress    = false;   // the per-bundle compression disclosure must survive the rewrite
+};
+// `served` is read back by the caller because the degrade path below changes the answer: a shape this cannot lift the served
+// body out of loses that body, and a `shown="1"` over a section with no body in it is a WRONG ANSWER, not a cosmetic one.
+// The count is restated to 0, the key body's own next= pointer goes in beside the others so nothing is silently dropped,
+// and the caller reads the zero back for the ledger, the section charge and the JSON dialect.
+inline std::string restatePackTaskBodies( std::string_view bodiesXml, PackBodiesTag& t, std::string_view keyPointer, std::string_view pointers )
+{
+    const SectionOpenTag tag         = findSectionOpenTag( bodiesXml, "<bodies" );
+    const bool           closesRight = bodiesXml.ends_with( "</bodies>" );
     if( tag.end == std::string::npos || !closesRight )
     {
-        DISCLOSE( "pack-task: <bodies> did not have the expected open/close shape — restated omissions dropped" );
-        return bodiesXml;
+        DISCLOSE( "pack-task: <bodies> did not have the expected open/close shape — the served body is dropped and shown= restated to 0" );
+        t.served = 0;
     }
-    // compress="1" restated with shown=/total=: this wrapper REPLACES packBodies' own open tag, so the
-    // per-bundle compression disclosure (serialize.h packBodies) must survive the rewrite or the restated
-    // bundle would silently claim uncompressed bodies (test/forcompresscheck.sh arm 5). Everything BEFORE
-    // the tag — packBodies' legend comments, including the bodyless clause — is kept verbatim.
-    // 40, not 32: ' bodyless="' + '"' is 12 B and bodylessOwners is a std::size_t, 20 digits at absolute
-    // most, so 32 B of text needs 33 with the NUL. formatTo truncates rather than overruns, but a cut here
-    // drops the closing quote and the document stops being well-formed — 39 usable leaves 7 B of margin
-    // and no arithmetic to re-check (test/fixedbufsweep.sh's TABLE states it).
+    // 40, not 32, for each: ' bodyless="' + '"' is 12 B and the count is a std::size_t, 20 digits at absolute most, so 32 B
+    // of text needs 33 with the NUL. formatTo truncates rather than overruns, but a cut here drops the closing quote and the
+    // document stops being well-formed (test/fixedbufsweep.sh's TABLE states the rule).
     char bodylessAttr[ 40 ] = { 0 };
-    if( bodylessOwners > 0 )
+    if( t.bodyless > 0 )
     {
-        rw::formatTo( bodylessAttr, sizeof( bodylessAttr ), " bodyless=\"{}\"", bodylessOwners );   // #60, absent at zero
+        rw::formatTo( bodylessAttr, sizeof( bodylessAttr ), " bodyless=\"{}\"", t.bodyless );   // #60, absent at zero
     }
-    char open[ 160 ];
-    rw::formatTo( open, sizeof( open ), "<bodies shown=\"{}\" total=\"{}\" capped=\"{}\"{}{}>",
-                   emitted.kept.size(), bodyIds.size(),
-                   emitted.kept.size() + bodylessOwners < bodyIds.size() ? 1 : 0,
-                   rw::cstr( bodylessAttr ), compress ? " compress=\"1\"" : "" );
-    std::string out = bodiesXml.substr( 0, tag.start );
+    // THE POINTER ROWS ARE NOT GIVEN A COUNT ATTRIBUTE, deliberately. They are already one row each, every row names the
+    // call that serves it, and the ledger line below states the number ("kept 1 of 1, 5 as next="). A `next_rows=` here
+    // would also wedge a new attribute between capped= and bodyless=, which is the exact pair #60's own arm
+    // (test/xmlwellformed.sh) and subjectanchorcheck F10 read as the bodyless verdict — so the cheapest honest spelling is
+    // the one that adds no attribute at all. bodyless= stays the last count on this tag.
+    char open[ 176 ];
+    rw::formatTo( open, sizeof( open ), "<bodies shown=\"{}\" total=\"{}\" capped=\"{}\"{}{}>", t.served, t.servedTotal,
+                  t.served < t.servedTotal ? 1 : 0, rw::cstr( bodylessAttr ), t.compress ? " compress=\"1\"" : "" );
+    if( tag.end == std::string::npos || !closesRight )
+    {
+        return std::string( open ) + std::string( keyPointer ) + std::string( pointers ) + "</bodies>";
+    }
+    std::string out( bodiesXml.substr( 0, tag.start ) );
     out += open;
     out += bodiesXml.substr( tag.end + 1, bodiesXml.size() - 9 - ( tag.end + 1 ) );
-    out += markers;
+    if( t.served == 0 )
+    {
+        out += keyPointer;   // the key body was not served (a share under the floor): it is a pointer like the rest
+    }
+    out += pointers;
     out += "</bodies>";
     return out;
 }
 
-// THE FIX: the admissible subset of `bodyIds` (rank order, already <= kPackTaskBodyCandidates) that
-// maximizes COUNT within `bodiesBudget`, tie-broken toward keeping the higher-ranked members and then toward
-// the smaller total cost (more carry left for callers). See the section comment above for why this — not
-// packBodies' own streaming admission — is what makes bodies_shown monotone in budgetTokens.
-//
-// §W2-K.2 (verifier FINDING K1, 2026-08-19) — COUNT-monotone is not the same as RELEVANCE-monotone, and the
-// first shipped shape traded the second away without noticing. On this gate's OWN fixture, raising the budget
-// 900 -> 1200 DELETED the body of the function the task literally names (`cliffProbeTargetFunction`, cost 3225)
-// and substituted two one-line helpers (cost 129 each) that scored a higher COUNT — and it stayed deleted
-// through 4000. "Bigger budget, worse answer" is exactly the defect W2-K set out to remove; a pure max-count
-// objective just moved it from the counter, where packtaskmonotoncheck can see it, to the content, where it
-// could not.
-//
-// The corrected objective: **the top-ranked candidate is ADMITTED, not entered into the count contest.** Its
-// cost is reserved off the top and the remaining pool maximizes count over the rest (same tie-breaks). When it
-// does not fit WHOLE it is still the only thing rendered, and packBodies' truncate-the-first-oversized-one
-// floor shows as much of it as the pool holds — a partial view of the symbol the task named beats two complete
-// one-liners it did not.
-//
-// That floor is also what keeps the count monotone, and this is the whole subtlety of the fix. A constraint
-// alone ("admit rank 0 whenever ANY admissible subset contains it, else maximize count freely") is NOT monotone
-// in count: just below cost[0] the free maximum can be 5 cheap bodies, and the first pool that can afford
-// rank 0 drops to 1 + (whatever the leftover buys). Measured on this fixture: 5 at budget 3500 -> 4 at 4000,
-// which reds this gate. Forcing rank 0 in at EVERY pool removes the discontinuity instead of stepping over it:
-//   pool <  cost[0]  ->  shown = 1            (rank 0 alone, truncated to fit)
-//   pool >= cost[0]  ->  shown = 1 + maxCount( rest, pool - cost[0] ),  non-decreasing in pool
-//   at the crossing  ->  1 -> 1 + k, k >= 0
-// so bodies_shown is still non-decreasing in budgetTokens BY CONSTRUCTION, not by measurement. The price is
-// paid at the small-budget end (a truncated top body instead of several complete lesser ones), which is the
-// side of the trade the retrieval contract wants to be on.
-inline std::vector<NodeId> selectMonotoneBodySubset( const IngestResult& ing, const Graph& g,
-                                                      const std::vector<NodeId>& bodyIds, std::size_t bodiesBudget,
-                                                      const PackTaskInputs& in )
+// ── PB1: the file-grain tail, filled LAST to the bundle's ceiling ─────────────────────────────────────────────────────────
+// --for's <tail> (forpage.h computeFileTail): the positive-score files the head did not show, then the file page's rows. Cut at a
+// row boundary to the bytes left once every other section is served — the largest row count whose rendering fits — so the cut
+// is a byte rule, deterministic, and disclosed by the element itself (shown= total= capped="1" next= the file page from its
+// first unprinted row).
+inline std::size_t packTaskTailRowsToFit( const FileTail& t, std::size_t budget, std::vector<char>& esc )
 {
-    if( bodyIds.empty() )
+    std::size_t lo = 0, hi = t.paths.size();
+    while( lo < hi )
     {
-        return {};
-    }
-    const std::size_t        n = bodyIds.size();   // kPackTaskBodyCandidates today — small by construction
-    // the subset enumeration below shifts 1u by n: n must stay under the mask's width, which the constant guarantees
-    static_assert( kPackTaskBodyCandidates < std::numeric_limits<std::uint32_t>::digits,
-                   "selectMonotoneBodySubset enumerates subsets in a std::uint32_t — 1u << kPackTaskBodyCandidates must fit" );
-    ASSUME( n <= kPackTaskBodyCandidates );
-    std::vector<std::size_t> cost( n, 0 );
-    std::size_t               wrapperLen = 0;
-    {
-        const RedactTallyFreeze freeze( in.redact );   // every probe below is off the books
-        EmittedBodies            dummy;
-        wrapperLen = packTaskRender<PackTaskRenderFaults::DisclosureWhy::BodyProbeRenderFailed>( [ & ]( std::FILE* m )
+        const std::size_t mid = lo + ( hi - lo + 1 ) / 2;
+        if( renderFileTailXml( t, mid, esc ).size() <= budget )
         {
-            packBodies( m, ing, {}, SIZE_MAX, g.outOff, g.outTargets, g.outNameOnly, in.compress, in.redact, nullptr, nullptr, &dummy );
-        }, in.renderFaults ).text.size();
-        for( std::size_t i = 0; i < n; ++i )
+            lo = mid;
+        }
+        else
         {
-            cost[i] = probeBodyCost( ing, g, bodyIds[i], in, wrapperLen );
+            hi = mid - 1;
         }
     }
-    // reserve the measured wrapper cost PLUS kPackTaskWrapReserve's existing generous margin (digit-width
-    // slop, escaping slop) — the same named constant packTaskListSection already reserves for its own
-    // shown=/total=/capped= wrapper, reused here rather than inventing a new one.
-    const std::size_t pool = bodiesBudget > wrapperLen + kPackTaskWrapReserve ? bodiesBudget - wrapperLen - kPackTaskWrapReserve : 0;
-
-    // §W2-K.2: rank 0 does not fit whole — it is STILL the one thing rendered, truncated by packBodies' own
-    // oversized-first floor. Returning the max-count subset of the OTHERS here is what deleted the task-named
-    // body (FINDING K1) and is also what makes the count non-monotone at this exact boundary.
-    if( cost[0] > pool )
-    {
-        return { bodyIds[0] };
-    }
-
-    std::uint32_t bestMask = 0, bestScore = 0;
-    std::size_t   bestCount = 0, bestCost = SIZE_MAX;
-    for( std::uint32_t mask = 1u; mask < ( 1u << n ); mask += 2u )   // §W2-K.2: bit 0 set — rank 0 is admitted, not contested
-    {
-        std::size_t count = 0, total = 0;
-        for( std::size_t i = 0; i < n; ++i )
-        {
-            if( mask & ( 1u << i ) )
-            {
-                ++count;
-                total += cost[i];
-            }
-        }
-        if( total > pool )
-        {
-            continue;
-        }
-        const std::uint32_t score  = bodyMaskRankScore( mask, n );
-        const bool           better = count > bestCount
-                                    || ( count == bestCount && score > bestScore )
-                                    || ( count == bestCount && score == bestScore && total < bestCost );
-        if( better )
-        {
-            bestMask = mask;  bestScore = score;  bestCount = count;  bestCost = total;
-        }
-    }
-
-    std::vector<NodeId> chosen;
-    chosen.reserve( bestCount );
-    for( std::size_t i = 0; i < n; ++i )
-    {
-        if( bestMask & ( 1u << i ) )
-        {
-            chosen.push_back( bodyIds[i] );
-        }
-    }
-    return chosen;
+    return lo;
 }
-
-// THE bundle assembler: builds the fixed 5-section budget-shared bundle (ranking > bodies > callers > notes >
-// tests) for `task`, given an already-computed LensRanking, and returns the whole <ctx>…</ctx> XML document
-// as a string — never touches stdout (the caller owns the sink: the CLI fwrites it, MCP wraps it as a
-// JSON-RPC text result). The Q3 clone-membership lens (`forClone`) is computed HERE, once, from `ing` alone
-// (findClones needs no git) — both callers get identical clone data with zero duplicated logic.
-// `surfaceOut`, when given, receives the ids this bundle actually NAMES — its ranking window (incl. the
-// name-only <far> tier) ∪ its full-body anchors ∪ their 1-hop callers/callees (which is also where the inline
-// <c> callee signatures come from). §6 --partition measures cross-bundle overlap from it, so the number it
-// reports is derived from the same selection the XML was rendered from rather than a re-derivation. It is the
-// PRE-budget-trim surface (a trimmed tail names slightly fewer) — an honest ceiling, documented as one.
+// THE bundle assembler: builds the budget-shared bundle (ranking > key body > callers > notes > tests > file tail) for
+// `task`, given an already-computed LensRanking, and returns the whole <ctx>…</ctx> XML document as a string — never
+// touches stdout (the caller owns the sink: the CLI fwrites it, MCP wraps it as a JSON-RPC text result). The Q3
+// clone-membership lens (`forClone`) is computed HERE, once, from `ing` alone (findClones needs no git) — both callers
+// get identical clone data with zero duplicated logic.
+// `surfaceOut`, when given, receives the ids this bundle actually NAMES — its shown ranking rows ∪ its body candidates
+// (the key body and the pointers) ∪ the key body's 1-hop callers. §6 --partition measures cross-bundle overlap from it,
+// so the number it reports is derived from the same selection the XML was rendered from rather than a re-derivation.
+// It is the PRE-budget-trim callers list (a trimmed section names slightly fewer) — an honest ceiling, documented as one.
 inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, const std::string& task,
                                        const LensRanking& lr, const PackTaskInputs& inArg,
                                        std::string* jsonOut = nullptr, std::vector<NodeId>* surfaceOut = nullptr,
@@ -1465,57 +1447,37 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
 
     const std::vector<float>& rank     = lr.rank;
     in.calleeRank                      = &rank;   // this bundle HAS a query: its bodies' <calls> listings are cut by relevance, not by node id
-    const int                 rankTopN = in.rankTopN > 0 ? int( in.rankTopN ) : kPackTaskRankTopN;
+    // PB1: --for's 40-row head; a --partition slice passes its own (kPackTaskRankTopN, the slice window)
+    const int                 rankTopN = in.rankTopN > 0 ? int( in.rankTopN ) : kPackTaskHeadRows;
 
-    // top ranked ids (score desc, id asc). Body candidates = the top heads with a POSITIVE score.
+    // top ranked ids (score desc, id asc). Body candidates = the key body, then the top heads with a POSITIVE score.
     std::vector<NodeId> order( ing.symbols.size() );
     for( NodeId i = 0; i < order.size(); ++i )
     {
         order[i] = i;
     }
     sortutil::radixSortByScoreDescId( order, rank );
-    std::vector<NodeId> bodyIds;
-    for( std::size_t k = 0; k < order.size() && bodyIds.size() < kPackTaskBodyCandidates; ++k )
-    {
-        if( rank[order[k]] <= 0.0f )
-        {
-            break;
-        }
-        bodyIds.push_back( order[k] );
-    }
+    const NodeId              keyId   = packTaskKeyBody( ing, in.keyBody, rank, packTaskBodyCandidates( ing, order, rank, kNoNode ) );
+    const std::vector<NodeId> bodyIds = packTaskBodyCandidates( ing, order, rank, keyId );
 
-    // ── R2: distance-aware detail allocation ────────────────────────────────────────────────────────────────
-    // The bundle's detail LEVEL is a function of graph distance from the anchor set (bodyIds, d0), not a flat
-    // per-section cut: d0 (the anchors themselves) already get the maximal tier — a full body (section 2,
-    // above/below, unchanged). d1 (any symbol one call-graph hop from an anchor, caller OR callee) gets
-    // signature-level detail. Everything else considered by the ranking pool but NOT within 1 hop of any
-    // anchor (d2+) is demoted to a bare name-only row — still surfaced (no silent loss), just cheaper.
+    // PB1: the <callers> section is the key body's own 1-hop CALLERS — its wiring sites. Its callees already ride the body's
+    // <calls> listing, and the other candidates' neighbourhoods went with their bodies (each is a next= pointer now).
     std::vector<char> d0Mark( ing.symbols.size(), 0 );
-    for( NodeId b : bodyIds )
+    if( keyId != kNoNode )
     {
-        if( b < d0Mark.size() )
+        d0Mark[keyId] = 1;
+    }
+    D1Neighbors d1;
+    {
+        const D1Neighbors both = computeD1Neighbors( ing, g, keyId != kNoNode ? std::vector<NodeId>{ keyId } : std::vector<NodeId>{}, d0Mark );
+        for( std::size_t i = 0; i < both.ids.size(); ++i )
         {
-            d0Mark[b] = 1;
+            if( both.isCaller[i] != 0 )
+            {
+                d1.ids.push_back( both.ids[i] );  d1.isCaller.push_back( 1 );  d1.shared.push_back( both.shared[i] );
+            }
         }
     }
-
-    const D1Neighbors  d1 = computeD1Neighbors( ing, g, bodyIds, d0Mark );
-    std::vector<char> d1Mark( ing.symbols.size(), 0 );
-    for( NodeId n : d1.ids )
-    {
-        if( n < d1Mark.size() )
-        {
-            d1Mark[n] = 1;
-        }
-    }
-
-    // the ranking pool: the same top-rankTopN window --for would show for this task (unmasked). Partition it
-    // into ELIGIBLE (d0 ∪ d1 — keeps full signature+doc detail in section 1) and d2plus (demoted to a bare
-    // name row in the <far> sub-block, section 1 §below).
-    const std::size_t       topRankedN = std::min<std::size_t>( std::size_t( rankTopN ), order.size() );
-    const std::vector<NodeId> topRanked( order.begin(), order.begin() + topRankedN );
-    std::vector<NodeId> eligibleIds, d2plusIds;
-    partitionByEligibility( topRanked, d0Mark, d1Mark, eligibleIds, d2plusIds );
 
     // Q3 clone-membership lens — a pure function of `ing`, computed once here for both callers (or handed in
     // already computed by a fan-out that assembles several bundles from one index; see in.cloneMember).
@@ -1590,44 +1552,35 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     std::vector<char> esc;
     const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
 
-    // ── section 1 — routed+anchored ranking, now DISTANCE-MASKED (R2): only d0∪d1 members of the topRanked
-    //    window keep full signature+doc detail; d2plus is a bare name-only <far> sub-block spliced just
-    //    inside </sigs> (still section 1, never a 6th top-level section) — see renderRankingWithFar above.
-    const std::vector<float>  maskedRank = buildMaskedRank( ing, rank, eligibleIds );
-    const std::size_t         sigsBudget = sectionBudget( kPackTaskQuotaRankingPct, /*carryIn=*/0 );
-    const RankingSectionInputs rankIn{ &eligibleIds, &d2plusIds, &topRanked, &maskedRank, sigsBudget, &in, &forClone };
-    RankingSection             rankOut   = renderRankingWithFar( ing, rankIn, ex );
-
-    std::string        sigsStr    = rankOut.sigsStr;
-    bool                sigsCapped = rankOut.capped;
-    std::size_t         farTotal   = rankOut.farTotal;
-    std::size_t         farKept    = rankOut.farKept;
-    // §W2-K: monotoneRoll (see its own comment) — eligibleIds never depends on budgetTokens, so when ranking
-    // is NOT capped its consumed bytes are a fixed constant and its unspent share safely rolls forward; when
-    // capped, the whole granted share is charged and nothing rolls forward.
+    // ── section 1 — the ranking: --for's head (PB1; renderPackHead above). The text-shrink steps aim at the section's
+    //    share; rows are dropped only past kPackTaskHeadRowDropPct, so a long head keeps its rows and the cut it takes is
+    //    shown=/total=/capped= on <sigs> with the call that serves it uncut (next=).
+    const std::size_t   sigsBudget = sectionBudget( kPackTaskQuotaRankingPct, /*carryIn=*/0 );
+    const std::size_t   rowDropBudget = std::max( sigsBudget, std::min( remaining, quotaOf( kPackTaskHeadRowDropPct ) ) );
+    const SigLensRules  headRules  = packTaskHeadRules( ing, task, lr, in.softTarget ? budgetTokens : 0u );
+    PackHead head = renderPackHead( ing, rank, PackHeadInputs{ rankTopN, rowDropBudget, headRules, task, &in, &forClone } );
+    const std::string& sigsStr    = head.sigsStr;   // a reference: the head's reflow lap below may widen it
+    const bool         sigsCapped = head.capped;     // the FIRST lap's verdict — what the section shares were charged by
+    // §W2-K: monotoneRoll (see its own comment) — when ranking is NOT capped its consumed bytes are a fixed constant and its
+    // unspent share safely rolls forward; when capped, at least the whole granted share is charged and nothing rolls forward.
     const MonotoneRoll sigsRoll = monotoneRoll( sigsCapped, sigsBudget, sigsStr.size() );
     remaining = remaining > sigsRoll.charge ? remaining - sigsRoll.charge : 0;
     std::size_t carry = sigsRoll.carry;
 
-    // ── section 2 — full bodies of the top-K ranked symbols. DECLARED here (its `total` is the denominator of
-    //    <callers of_top=> below and the emit order is fixed: sigs, bodies, callers, notes, tests) but ALLOCATED
-    //    and RENDERED LAST — see "§W2-K.2 (K2): the allocation order" where it happens, for why.
+    // ── section 2 — the key body, and a next= pointer for every other candidate. DECLARED here (the emit order is fixed:
+    //    sigs, bodies, callers, notes, tests, tail) but ALLOCATED after tests — see "§W2-K.2 (K2): the allocation order".
     std::string        bodiesStr;
     rw::EmittedBodies emittedBodies;
     const std::size_t  bodiesTotal = bodyIds.size();
-    // #60: candidates that have NO BODY BY CONSTRUCTION (a module-scope owner). They can never be `kept`,
-    // so without this the ledger below reads "kept 1 of 2 (capped)" and the roll reads "capped" on a bundle
-    // the budget did not cut — contradicting the <bodies capped="0" bodyless="1"> the same document emits.
-    const std::size_t  bodiesBodyless = countBodylessCandidates( ing, bodyIds );
     std::size_t        bodiesKept  = 0;
     std::uint8_t       bodyReadings = 0;   // kBodyReading* bits the kept bodies carry: partition.h's outer-legend gate
 
-    // ── section 3 — d1: the anchors' 1-hop callers+callees (computed above), each shown with its OWN one-line
-    //    SIGNATURE (R2: d1's detail tier) + its declaration site — never a full body (that stays d0-only).
+    // ── section 3 — the key body's 1-hop callers (computed above), each shown with its OWN one-line SIGNATURE + its
+    //    declaration site — never a full body. of_top= is the anchor count: 1 (the key body), 0 when there is none.
     const D1Rows d1Rendered = renderD1CallerRows( ing, d1, ex, in.redact, in.rootArg );
     const std::vector<std::string>& callerRows = d1Rendered.xml;
     const std::vector<std::string>& d1SigRaw   = d1Rendered.rawSig;   // unescaped — the L2 --json tail reuses these verbatim
-    char callersAttr[ 32 ];  rw::formatTo( callersAttr, sizeof( callersAttr ), " of_top=\"{}\"", bodiesTotal );
+    char callersAttr[ 32 ];  rw::formatTo( callersAttr, sizeof( callersAttr ), " of_top=\"{}\"", keyId != kNoNode ? 1 : 0 );
     std::size_t       callersBudget = sectionBudget( kPackTaskQuotaCallersPct, carry );
     PackTaskSection   callers       = packTaskListSection( "callers", callersAttr, callerRows, callersBudget, kPackTaskWrapReserveWide );
     const std::size_t callersTotal  = callerRows.size();
@@ -1758,34 +1711,49 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     carry     = testsRoll.carry;
     remaining = remaining > testsRoll.charge ? remaining - testsRoll.charge : 0;
 
-    // ── §W2-K.2 (K2): section 2 is EMITTED second and ALLOCATED last — reflowListSection above carries the
-    //    finding, the measurement and the monotonicity argument for why. ──────────────────────────────────────
+    // ── §W2-K.2 (K2): section 2 is EMITTED second and ALLOCATED after the fine-grained sections — reflowListSection above
+    //    carries the finding. PB1: ONE body, the key one, whole when its share holds it, else cut by packBodies' oversized-first
+    //    floor (a partial view of the symbol the question names beats none); every other candidate is a pointer row. ─────────
     const std::size_t bodiesBudget = sectionBudget( kPackTaskQuotaBodiesPct, carry );
-    if( !bodyIds.empty() && bodiesBudget >= kPackTaskSectionFloor )
+    if( !bodyIds.empty() )
     {
-        // §W2-K: pre-select the admissible subset (selectMonotoneBodySubset, above) instead of handing
-        // packBodies the full candidate list — this is what makes bodies_shown monotone. The selection is
-        // never empty for a non-empty candidate list (§W2-K.2: rank 0 is always in it, truncated by
-        // packBodies' oversized-first floor when the pool cannot hold it whole), so there is no fall-back to
-        // the full list here — that would hand the decision back to packBodies' own streaming walk over
-        // MULTIPLE candidates, reintroducing the exact non-monotonicity this fix removes (measured: it did,
-        // on memgraph, at the 900/1200/1600 floor).
-        // §H5: `emittedBodies` is packBodies' own report of what it emitted. It is the ONE answer to "which
-        // bodies?" — the XML is those bytes, the JSON tail below re-serializes the same record, and bodiesKept
-        // counts it.
-        const std::vector<NodeId> renderIds = selectMonotoneBodySubset( ing, g, bodyIds, bodiesBudget, in );
-        const PackTaskRendered bodies = packTaskRender<PackTaskRenderFaults::DisclosureWhy::BodiesRenderFailed>( [ & ]( std::FILE* m )
+        const std::string pointers   = packTaskBodyPointers( ing, std::vector<NodeId>( bodyIds.begin() + 1, bodyIds.end() ), ex, in.rootArg );
+        // the key body's OWN pointer, built unconditionally: it rides whenever the body is not served — a share under the
+        // floor, a failed render, or a <bodies> shape the restate cannot lift the body out of. A candidate counted in
+        // total= but reachable from nowhere in the document would be a dead end, so no path may drop it silently.
+        const std::string keyPointer = packTaskBodyPointers( ing, { bodyIds.front() }, ex, in.rootArg );
+        // the pointers are the section's disclosure, never its price: the key body gets the whole share (less the wrapper), and the
+        // pointer bytes are charged to the bundle with the rest of the section (the tail, filled last, is what absorbs them)
+        const std::size_t bodyBudget = bodiesBudget > kPackTaskWrapReserve ? bodiesBudget - kPackTaskWrapReserve : 0;
+        const PackTaskRendered bodies = bodyBudget < kPackTaskSectionFloor ? PackTaskRendered{ {}, true }
+            : packTaskRender<PackTaskRenderFaults::DisclosureWhy::BodiesRenderFailed>( [ & ]( std::FILE* m )
+              {
+                  packBodies( m, ing, { bodyIds.front() }, bodyBudget, g.outOff, g.outTargets, g.outNameOnly, in.compress, in.redact,
+                              /*ranges=*/nullptr, /*noteIndex=*/nullptr, &emittedBodies, /*truncateOversizedFirst=*/true,
+                              /*withFileContext=*/false, in.rootArg, in.calleeRank );
+              }, in.renderFaults );
+        if( !bodies.ok )
         {
-            packBodies( m, ing, renderIds, bodiesBudget, g.outOff, g.outTargets, g.outNameOnly, in.compress, in.redact,
-                        /*ranges=*/nullptr, /*noteIndex=*/nullptr, &emittedBodies, /*truncateOversizedFirst=*/true,
-                        /*withFileContext=*/false, in.rootArg, in.calleeRank );
-        }, in.renderFaults );
-        if( bodies.ok )
+            emittedBodies = EmittedBodies{};   // nothing was emitted, so nothing was kept: the JSON tail re-serializes this record
+            char tag[ 144 ];
+            rw::formatTo( tag, sizeof( tag ), "<bodies shown=\"0\" total=\"{}\" capped=\"{}\" render_failed=\"1\">",
+                          keyId != kNoNode ? 1 : 0, keyId != kNoNode ? 1 : 0 );
+            bodiesStr = std::string( tag ) + keyPointer + pointers + "</bodies>";
+        }
+        else
         {
             bodiesKept = emittedBodies.kept.size();
-            // §W2-K: restate total=/capped= and splice in omission markers for whatever OUR pre-selection
-            // dropped that packBodies itself never saw — see restatePackTaskBodiesWrapper's own comment.
-            bodiesStr  = restatePackTaskBodiesWrapper( ing, bodies.text, bodyIds, emittedBodies, ex, in.compress );
+            // restatePackTaskBodies may ZERO bodiesKept (an unrecognised <bodies> shape drops the served body) — so the
+            // ledger, the monotoneRoll charge and the JSON dialect below all read the count the XML actually printed.
+            const std::size_t keptBefore = bodiesKept;
+            PackBodiesTag     bodiesTag{ bodiesKept, keyId != kNoNode ? 1u : 0u, bodiesTotal,
+                                         countBodylessCandidates( ing, bodyIds ), in.compress };
+            bodiesStr  = restatePackTaskBodies( bodies.text, bodiesTag, keyPointer, pointers );
+            bodiesKept = bodiesTag.served;
+            if( keptBefore > 0 && bodiesKept == 0 )
+            {
+                emittedBodies = EmittedBodies{};   // the XML dropped it, so the JSON twin must not claim it either
+            }
             for( const EmittedBody& e : emittedBodies.kept )
             {
                 bodyReadings |= ( e.isTruncated ? kBodyReadingTruncated : 0u ) | ( e.isOverCeiling ? kBodyReadingOverCeiling : 0u );
@@ -1795,68 +1763,67 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
                 hoistBodyReadings( bodiesStr );   // P10: a partition slice's readings ride the outer legend once
             }
         }
-        else
-        {
-            // Nothing was emitted, so nothing was kept: the JSON tail re-serializes this same (empty) record.
-            emittedBodies = EmittedBodies{};
-            char tag[ 112 ];
-            rw::formatTo( tag, sizeof( tag ), "<bodies shown=\"0\" total=\"{}\" render_failed=\"1\"></bodies>", bodyIds.size() );
-            bodiesStr = tag;
-        }
     }
     else
     {
-        // R9 fix (W3-S, 2026-08-19): bodiesStr used to stay empty here — no candidates at all, or a
-        // budget too tight even for the section wrapper — so the WHOLE <bodies> element was absent
-        // from the bundle; only <ctx bundle="auto" bodies="0" ...> (--for's twin of this branch) spoke
-        // to it, and pack-task's <ctx> carries no such attribute at all. "A zero means none found,
-        // never none exists" (CONTRIBUTING #3) applies to elements, not only counts.
-        //
-        // Deliberately NOT a packBodies() call: an earlier version of this fix routed through
-        // packBodies with truncateOversizedFirst=false so it could reuse the per-item "body omitted
-        // (over budget)" comment packBodies already writes — but that comment is UNBUDGETED (it does
-        // not check its own bytes against anything), so up to kPackTaskBodyCandidates (6) of them
-        // could add several hundred bytes nothing in monotoneRoll's carry-forward accounted for,
-        // which is exactly how packtaskcheck.sh's own ceiling arm caught it (--token-budget=2000 came
-        // back 5692 B against a 5428 B allowance). The bare wrapper tag is a FIXED, small cost — the
-        // same shape restatePackTaskBodiesWrapper hand-formats a few lines below for the same reason
-        // (it cannot call packBodies again either) — so it is safe to emit unconditionally here.
-        //
-        // rv-t12-3.md LOW-1 / t14-cleanup #6: this tag used to omit bodyless= even when bodyIds held
-        // module-scope owners (no body by construction, never a budget casualty), which made TWO things
-        // wrong at once — the attribute was silently absent, AND capped="1" was a FALSE positive whenever
-        // every candidate here was bodyless (nothing was actually cut). bodiesBodyless is already computed
-        // above (line ~1546, countBodylessCandidates) for the monotoneRoll below, so it costs nothing extra
-        // to read it here too. The definition lives in kPackTaskBundleLegendBody (this bundle's ONE
-        // unconditional legend, appended to every shape of the header) rather than packBodies' own
-        // kBodylessBodiesLegend, because this path never calls packBodies to write that comment.
-        char bodylessAttr[ 40 ] = { 0 };
-        if( bodiesBodyless > 0 )
-        {
-            rw::formatTo( bodylessAttr, sizeof( bodylessAttr ), " bodyless=\"{}\"", bodiesBodyless );
-        }
-        char tag[ 160 ];
-        rw::formatTo( tag, sizeof( tag ), "<bodies shown=\"0\" total=\"{}\" capped=\"{}\"{}{}></bodies>",
-                       bodyIds.size(), bodiesBodyless < bodyIds.size() ? 1 : 0,
-                       rw::cstr( bodylessAttr ), in.compress ? " compress=\"1\"" : "" );
-        bodiesStr = tag;
-        // bodiesKept stays 0 (its declared default) — matches shown="0" exactly.
+        // R9 fix (W3-S, 2026-08-19): no candidate at all still emits the element — "a zero means none found, never none
+        // exists" (CONTRIBUTING #3) applies to elements, not only counts.
+        bodiesStr = in.compress ? "<bodies shown=\"0\" total=\"0\" capped=\"0\" compress=\"1\"></bodies>" : "<bodies shown=\"0\" total=\"0\" capped=\"0\"></bodies>";
     }
-    // §W2-K: bodyIds (the candidate SET) never depends on budgetTokens either, so the same monotoneRoll
-    // treatment applies at this handoff too.
-    const MonotoneRoll bodiesRoll = monotoneRoll( bodiesKept + bodiesBodyless < bodiesTotal, bodiesBudget, bodiesStr.size() );
+    // §W2-K: bodyIds (the candidate SET) never depends on budgetTokens, so the same monotoneRoll treatment applies here too.
+    // "capped" here is the same BUDGET verdict the tag prints, not shown != total: the pointer rows are by design.
+    const MonotoneRoll bodiesRoll = monotoneRoll( keyId != kNoNode && bodiesKept == 0, bodiesBudget, bodiesStr.size() );
     remaining = remaining > bodiesRoll.charge ? remaining - bodiesRoll.charge : 0;
 
-    // ── §W2-K.2 (K2): the reflow lap — see reflowListSection above for the finding and the argument ──────────
-    std::size_t reflow = remaining;
-    if( reflow > 0 && sigsCapped )
+    // ── section 6 — the file-grain tail (PB1): filled LAST, with everything the sections above left, cut at a row boundary ──
+    //    (packTaskTailRowsToFit). A --partition slice carries none: its rank is masked to the slice, and the outer document's
+    //    core states the task's files once.
+    std::string tailStr;
+    std::string tailJson;
+    std::size_t tailShown = 0, tailTotal = 0;
+    bool        tailCapped = false;
+    bool        tailNextDropped = false;   // the echo the element could not afford — disclosed in the ledger below
+    FileTail    tail;
+    if( !in.innerBundle )
     {
-        RankingSectionInputs rankIn2 = rankIn;
-        rankIn2.sigsBudget           = sigsBudget + reflow;
-        rankOut                       = renderRankingWithFar( ing, rankIn2, ex );
-        sigsStr = rankOut.sigsStr;  sigsCapped = rankOut.capped;  farTotal = rankOut.farTotal;  farKept = rankOut.farKept;
-        reflow  = sigsCapped || rankIn2.sigsBudget <= sigsStr.size() ? 0 : rankIn2.sigsBudget - sigsStr.size();
+        tail = computeFileTail( ing, rank, lr.evidence, head.shownIds, in.rootArg, task );
+        // the whole tail fits with bytes to spare while the head is cut: the head takes them first (W2-K.2's lap, the head's
+        // turn), and the tail is rebuilt from the rows the wider head shows — a file can only move from the tail into the head.
+        if( sigsCapped && renderFileTailXml( tail, tail.paths.size(), esc ).size() < remaining )
+        {
+            const std::size_t spare = remaining - renderFileTailXml( tail, tail.paths.size(), esc ).size();
+            PackHead wider = renderPackHead( ing, rank, PackHeadInputs{ rankTopN, rowDropBudget + spare, headRules, task, &in, &forClone } );
+            if( wider.sigsStr.size() > head.sigsStr.size() && wider.sigsStr.size() - head.sigsStr.size() <= spare )
+            {
+                remaining -= wider.sigsStr.size() - head.sigsStr.size();
+                head = std::move( wider );
+                tail = computeFileTail( ing, rank, lr.evidence, head.shownIds, in.rootArg, task );
+            }
+        }
+        tailShown = packTaskTailRowsToFit( tail, remaining, esc );
+        tailStr   = renderFileTailXml( tail, tailShown, esc );
+        // THE TAIL'S next= ECHOES THE TASK, so it is a user-length PAYLOAD part — the same shape W3FIX M1 charged in the
+        // header while this one rode free below it. MEASURED on test/fixture at --token-budget=1200: a 900-character task
+        // bought a 971 B <tail> where a short task paid 87 B, all of it the echo, so a longer header bought MORE payload
+        // (w3fixbudgetcheck arm 4, "bytes riding free"). When the element does not fit the bytes the sections above left,
+        // the ECHO is the first thing dropped — the same order the ceiling ladder drops the header's own echo — and the
+        // element still discloses total=, shown= and capped=. The root's task= stays the one verbatim copy of the task.
+        if( tailStr.size() > remaining )
+        {
+            tailNextDropped = stripOpenTagAttr( tailStr, "next" );
+        }
+        tailTotal = tail.total;
+        // the shell alone may not fit a budget the sections above spent: it is still emitted (the element is the disclosure)
+        remaining  = remaining > tailStr.size() ? remaining - tailStr.size() : 0;
+        if( tailShown < tail.paths.size() )
+        {
+            remaining = 0;   // the tail took what it could; nothing is left to reflow
+        }
     }
+
+    // ── §W2-K.2 (K2): the reflow lap — see reflowListSection above for the finding and the argument. PB1: the ranking is not
+    //    re-rendered (the tail was cut from its shown rows), so the lap tops up the fine-grained list sections only. ────────
+    std::size_t reflow = remaining;
     reflow = reflowListSection( callers, "callers", callersAttr, callerRows, callersBudget, kPackTaskWrapReserveWide, reflow );
     reflow = reflowListSection( notes,   "notes",   "",          noteEntries, notesBudget,   kPackTaskWrapReserve,     reflow );
     // The tests section's own reflow lap — reflowListSection's rule (top up a section the first lap capped,
@@ -1875,6 +1842,22 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     const std::string& testsStr   = tests.xml;
     const std::size_t  testsKept  = tests.kept;
 
+    // ── PB1: the document is assembled by `finish` for a given tail row count, so the tail can be re-cut to what is DELIVERED:
+    //    the header is sized above by a fixed reserve (kPackTaskHeaderReserve), and the compact posture delivers a different
+    //    legend than the one that reserve was measured on. The tail is the one section cut last, so it is the one re-cut. ──────
+    const auto finish = [ & ]( std::size_t tailRows ) -> std::string
+    {
+    if( !in.innerBundle )
+    {
+        tailShown  = tailRows;
+        tailStr    = renderFileTailXml( tail, tailShown, esc );
+        if( tailNextDropped )
+        {
+            stripOpenTagAttr( tailStr, "next" );   // the echo this bundle could not afford stays dropped on every re-cut
+        }
+        tailCapped = tailShown < tail.total;
+        tailJson   = jsonOut ? "," + renderFileTailJson( tail, tailShown ) : std::string();
+    }
     // ── L2 --json tail: the SAME section decisions (kept/capped counts computed above), re-shaped as JSON.
     //    One computation path, two serializations — the JSON reports the identical truncation the XML header
     //    reports. Emitters that already exist for other verbs (packSignaturesJson/packBodiesJson) render into
@@ -1937,11 +1920,18 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
         { char b[ 128 ];  rw::formatTo( b, sizeof( b ), ",\"budget_tokens\":{},\"budget_bytes\":{},\"budget_ceiling_bytes\":{}",
                                          budgetTokens, bundleBudget, rw::declaredByteCeiling( budgetTokens )  );  j += b; }
 
-        // R2: the SAME distance mask the XML <sigs> used (eligibleIds only) — one eligibility decision, two shapes.
-        j += std::string( ",\"ranking_capped\":" ) + ( sigsCapped ? "true" : "false" ) + ",\"ranking\":";
-        const PackTaskRendered rankingJson = eligibleIds.empty() ? PackTaskRendered{ "[]", true } : packTaskRender<PackTaskRenderFaults::DisclosureWhy::RankingRenderFailed>( [ & ]( std::FILE* m )
+        // PB1: the rows the XML <sigs> printed (head.shownIds), in score order — one selection, two shapes.
+        j += std::string( ",\"ranking_capped\":" ) + ( head.capped ? "true" : "false" ) + ",\"ranking\":";
+        const std::vector<float> shownRank   = buildMaskedRank( ing, rank, head.shownIds );
+        // A FAILED RANKING RENDER IS `null`, NOT `[]`. renderPackHead clears shownIds when its render faults, so the
+        // empty-list shortcut below would turn "this section could not be rendered" into "this section found nothing" —
+        // two different answers, and CONTRIBUTING #3's rule is that a zero means none found, never none exists. The XML
+        // twin already says it with <sigs render_failed="1">; the mask is the one fact both dialects read.
+        const bool               rankingFailed = renderFaults.hasFailed( PackTaskRenderFaults::DisclosureWhy::RankingRenderFailed );
+        const PackTaskRendered   rankingJson = rankingFailed ? PackTaskRendered{ "null", true }
+                                             : head.shownIds.empty() ? PackTaskRendered{ "[]", true } : packTaskRender<PackTaskRenderFaults::DisclosureWhy::RankingRenderFailed>( [ & ]( std::FILE* m )
         {
-            packSignaturesJson( m, ing, maskedRank, int( eligibleIds.size() ),
+            packSignaturesJson( m, ing, shownRank, int( head.shownIds.size() ),
                                 JsonSigLens{ /*metrics=*/true, in.fanIn, in.impure, in.churn, &forClone,
                                              in.tested, in.amp, /*rankAdaptivePayload=*/true },
                                 in.redact,   // §B0: the same redaction the XML <sigs> above already applied
@@ -1950,30 +1940,30 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
         }, in.renderFaults );
         j += rankingJson.ok ? rankingJson.text : std::string( "null" );   // null, never an empty value after its key
 
-        // R2: d2plus — the topRanked members NOT within 1 hop of an anchor, name-only (mirrors XML's <far>).
-        const std::size_t farShown = std::min( farKept, d2plusIds.size() );
-        { char b[ 128 ];  rw::formatTo( b, sizeof( b ), ",\"far_total\":{},\"far_kept\":{},\"far_of_top\":{},\"far\":[",
-                                         farTotal, farShown, topRanked.size()  );  j += b; }
-        for( std::size_t i = 0; i < farShown; ++i )
-        {
-            const Symbol& s = ing.symbols[ d2plusIds[i] ];
-            j += ( i == 0 ? "" : "," );
-            j += "{\"t\":\"" + std::string( symTag( s.kind ) ) + "\",\"n\":\"" + jsonStr( s.name )
-               + "\",\"p\":\"" + jsonStr( std::string( jPathRel( s.fileId ) ) ) + ":" + std::to_string( s.line ) + "\"}";
-        }
-        j += "]";
-
         // §H5 — the bodies the XML section ACTUALLY emitted, re-serialized. This used to re-slice the first
         // `bodies_kept` ids in RANK order, but packBodies emits grouped by FILE and stops on a BYTE budget, so
         // the two dialects reported different SETS under one bodies_kept — and packBodiesJson emitted each body
         // WHOLE, against no budget at all (MEASURED: XML 8 100 B vs JSON 42 200 B under a stated 11 800 B
         // ceiling). Both halves are gone by construction: there is one selection, and this is its record.
-        { char b[ 96 ];  rw::formatTo( b, sizeof( b ), ",\"bodies_total\":{},\"bodies_kept\":{},\"bodies\":",
-                                        bodiesTotal, emittedBodies.kept.size()  );  j += b; }
+        // bodies_total IS THE XML'S total=, not the candidate count. The two dialects have to report the same cut or a
+        // consumer reading the JSON sees a capped section where the XML says none: before this it read the 6-candidate
+        // set against an XML total= of 1, and packtaskmonotoncheck's fill-floor arm (which reads the JSON) called a
+        // bundle "capped" that nothing had cut. The candidates not served are bodies_next[], the <bn> rows' own twin.
+        { char b[ 112 ];  rw::formatTo( b, sizeof( b ), ",\"bodies_total\":{},\"bodies_kept\":{},\"bodies_candidates\":{},\"bodies\":",
+                                        keyId != kNoNode ? 1 : 0, emittedBodies.kept.size(), bodiesTotal  );  j += b; }
         const PackTaskRendered bodiesJson = packTaskRender<PackTaskRenderFaults::DisclosureWhy::BodiesRenderFailed>( [ & ]( std::FILE* m ) { packBodiesJson( m, ing, emittedBodies, in.rootArg ); },
                                                             in.renderFaults );
         j += bodiesJson.ok && !renderFaults.hasFailed( PackTaskRenderFaults::DisclosureWhy::BodiesRenderFailed ) ? bodiesJson.text : std::string( "null" );
-        j += packTaskOmittedBodiesJson( ing, emittedBodies );   // §H5 — see its header
+        // PB1: the XML pointer rows' twin — the --expand of every candidate not served, key first when it was not
+        if( bodiesKept < bodiesTotal )
+        {
+            j += ",\"bodies_next\":[";
+            for( std::size_t i = bodiesKept == 0 ? 0 : 1, n = 0; i < bodyIds.size(); ++i, ++n )
+            {
+                j += std::string( n == 0 ? "" : "," ) + "\"" + jsonStr( packTaskExpandSelector( ing, bodyIds[i], in.rootArg ) ) + "\"";
+            }
+            j += "]";
+        }
         if( renderFaults.failedMask != 0 )
         {
             j += ",\"render_failed\":\"" + renderFaults.names() + "\"";   // the sections a null above stands for, and any failed probe
@@ -1981,7 +1971,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
 
         const std::size_t callersShown = std::min( callersKept, d1.ids.size() );
         { char b[ 128 ];  rw::formatTo( b, sizeof( b ), ",\"callers_total\":{},\"callers_kept\":{},\"callers_of_top\":{},\"callers\":[",
-                                         callersTotal, callersShown, bodiesTotal  );  j += b; }
+                                         callersTotal, callersShown, keyId != kNoNode ? 1 : 0  );  j += b; }
         for( std::size_t i = 0; i < callersShown; ++i )
         {
             const Symbol& s = ing.symbols[ d1.ids[i] ];
@@ -2038,6 +2028,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
             jFirstTest = false;
         }
         j += "]";
+        j += tailJson;   // PB1: the file tail's JSON twin (forpage.h renderFileTailJson), the same shown count; "" on a partition slice
 
         // W3FIX M1 — the JSON sibling of the XML header's over_ceiling sentence. §B1.6 gave this dialect
         // budget_ceiling_bytes so a consumer could CHECK the bundle itself; that check silently fails on a long
@@ -2067,15 +2058,24 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     { char b[ 160 ];  rw::formatTo( b, sizeof( b ), "{} bytes ({}-token target, ceiling {}) | ",
                                     bundleBudget, budgetTokens, rw::declaredByteCeiling( budgetTokens )  );  report += b; }
     const bool isRankingFailed = renderFaults.hasFailed( PackTaskRenderFaults::DisclosureWhy::RankingRenderFailed );
-    report += std::string( "ranking: " ) + ( isRankingFailed ? "render-failed" : sigsCapped ? "capped" : "full" ) + " | ";
-    report += "bodies: "  + listStatus( bodiesTotal,  bodiesStr,  bodiesKept )  + ( bodiesTotal > 0 && !bodiesStr.empty() && bodiesKept + bodiesBodyless < bodiesTotal ? " (capped)" : "" ) + " | ";
+    report += std::string( "ranking: " ) + ( isRankingFailed ? "render-failed" : head.capped ? "capped" : "full" ) + " | ";
+    // PB1: one body is served; every other candidate is counted here AND rides <bodies> as a next= pointer row
+    { char b[ 96 ];
+      if( bodiesTotal == 0 ) { rw::formatTo( b, sizeof( b ), "none" ); }
+      else { rw::formatTo( b, sizeof( b ), "kept {} of {}{}, {} as next=", bodiesKept, keyId != kNoNode ? 1 : 0,
+                           keyId != kNoNode && bodiesKept == 0 ? " (capped)" : "", bodiesTotal - bodiesKept ); }
+      report += "bodies: ";  report += b;  report += " | "; }
     report += "callers: " + listStatus( callersTotal, callersStr, callersKept ) + " | ";
     report += "notes: "   + listStatus( notesTotal,   notesStr,   notesKept )   + " | ";
     report += "tests: "   + listStatus( testsTotal, testsStr, testsKept );   // E1: test files, as the section's shown=/total= say
-    report += " | far: "  + listStatus( farTotal,      rankOut.farXml, farKept );   // R2: d2plus name-only tier (nested in <sigs>)
+    if( !in.innerBundle )   // PB1: the file tail (a partition slice has none)
+    {
+        report += " | tail: " + listStatus( tailTotal, tailStr, tailShown )
+                + ( tailCapped ? ( tailNextDropped ? " (capped; next= dropped: the task echo did not fit the bytes left)" : " (capped, next= on <tail>)" ) : "" );
+    }
     // cut-fix lane A: the <sigs> tag's cut readings, the --for twin's clauses verbatim (serialize.h sigsCutLegendNotes),
     // present only when the tag carries the case; absorbed by kPackTaskHeaderReserve like the ledger around them.
-    report += rw::sigsCutLegendNotes( rankOut.sigsCut.isCapped, rankOut.sigsCut.shown, rankOut.sigsCut.total, rankOut.sigsCut.docsDropped );
+    report += rw::sigsCutReportLegend( head.cut );   // PB1: every reading the --for head's tag can carry (files_first=, docs_after_code=, next=…)
     // A2 (survey card, 2026-09-03) — the pack-task twin of --for's dropped_positive= root fact: how many
     // rank>0 eligibleIds the section-1 ladder cut. Emitted ONLY when nonzero (the pr_converged precedent,
     // src/prconverge.h) — its bytes are absorbed by kPackTaskHeaderReserve's generous fixed allowance (see
@@ -2092,9 +2092,9 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     // mcpattrparitycheck sees one name on both roots; the ledger prose keeps the per-section counts, which
     // ARE legend and which compact is entitled to drop.
     std::string droppedPositiveAttr;
-    if( rankOut.droppedPositive > 0 )
+    if( head.droppedPositive > 0 )
     {
-        char b[ 96 ];  rw::formatTo( b, sizeof( b ), " dropped_positive=\"{}\"", rankOut.droppedPositive );
+        char b[ 96 ];  rw::formatTo( b, sizeof( b ), " dropped_positive=\"{}\"", head.droppedPositive );
         droppedPositiveAttr = b;
     }
     // The indexing caps that cut this ranking belong on the root as ATTRIBUTES, not only inside the prose
@@ -2151,13 +2151,14 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     const std::string headerStr = buildHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
 
     std::string whole;
-    whole.reserve( headerStr.size() + sigsStr.size() + bodiesStr.size() + callersStr.size() + notesStr.size() + testsStr.size() + 8 );
+    whole.reserve( headerStr.size() + sigsStr.size() + bodiesStr.size() + callersStr.size() + notesStr.size() + testsStr.size() + tailStr.size() + 8 );
     whole += headerStr;
     whole += sigsStr;
     whole += bodiesStr;
     whole += callersStr;
     whole += notesStr;
     whole += testsStr;
+    whole += tailStr;
     whole += "</ctx>";
 
     // §B1.7 fixup (bundleidcheck), rewritten by W3FIX M1 — the ceiling ladder (rungs + rationale: serialize.h
@@ -2193,9 +2194,14 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
         // number the root will PRINT and never from a second estimate.
         const auto rootAttrsFor = [ & ]( const std::string& doc, bool lastRungFired ) -> std::string
         {
-            const std::size_t markupBytes = doc.size() + in.trailingSectionBytes - std::min( bodiesStr.size(), doc.size() );
+            // PB1 — ONE CONVERSION. The budget is converted to bytes at kMinBytesPerToken (x kBudgetHeadroom, the fill line),
+            // and est_tokens= used to price the result at 2.50 for markup and 3.80 for bodies: SUB1's 52 answers spent 91% of
+            // their bytes and read est_tokens 3,975 of budget_tokens 6000 — a third unspent in tokens. The root now prices
+            // every delivered byte at the rate the budget was converted at, so a full bundle reads ~90% of its budget and
+            // est_tokens > budget_tokens exactly when the bytes pass declaredByteCeiling. It is an upper bound (the densest
+            // language's rate), the same side of the error every budget here is sized on.
             std::size_t       estTokens   = 0;
-            std::string       attrs       = rw::pricedRootAttr( markupBytes, rw::kBytesPerTokenDefault, bodiesStr.size(), &estTokens );
+            std::string       attrs       = rw::pricedRootAttrTokens( doc.size() + in.trailingSectionBytes, rw::kMinBytesPerToken, 0, &estTokens );
             attrs += " budget_tokens=\"" + std::to_string( budgetTokens ) + "\"";
             // forbudget-soft: a soft target (the caller's own budget) is never "over"; the default budget keeps the label
             if( !in.softTarget && ( lastRungFired || ( budgetTokens > 0 && estTokens > budgetTokens ) ) ) { attrs += " over_ceiling=\"1\""; }
@@ -2235,7 +2241,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
                                                                    // verbatim task echo because the echo rung was against a ceiling
                                                                    // 15% looser than the verdict. The free rungs now aim at what the
                                                                    // root promises; route= and the label keep the tolerance.
-                                                                   rw::ceilingBytes( budgetTokens ),
+                                                                   rw::declaredByteCeiling( budgetTokens ),   // PB1: the ceiling est_tokens= is priced against
                                                                    rw::ceilingAllowanceBytes( budgetTokens ),
                                                                    /*hasRouteAttr=*/!lr.routeNote.empty(), kNotes );
         if( chosen.header != headerStr )
@@ -2261,6 +2267,19 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
             whole.insert( rootOpenEnd + 1, rw::kEstModelledLegend );
         }
     }
+    return whole;
+    };
+    std::string whole = finish( tailShown );
+    if( !in.innerBundle && jsonOut == nullptr && tailShown > 0 )
+    {
+        const std::size_t compacted = in.compactLegend ? rw::compactDeliveredBytes( whole, "pack-task" ) : 0u;
+        const std::size_t delivered = ( compacted > 0 ? compacted : whole.size() ) + in.trailingSectionBytes;
+        if( delivered > bundleBudget )
+        {
+            const std::size_t over = delivered - bundleBudget;
+            whole = finish( packTaskTailRowsToFit( tail, tailStr.size() > over ? tailStr.size() - over : 0, esc ) );
+        }
+    }
 
     // §6 --partition: the bundle's own surface (see the contract above). topRanked already contains bodyIds
     // (bodies are the positive-score head of the SAME order), so the union is topRanked ∪ d2plus ∪ d1.
@@ -2279,9 +2298,8 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     if( surfaceOut )
     {
         surfaceOut->clear();
-        surfaceOut->reserve( topRanked.size() + d2plusIds.size() + d1.ids.size() + bodyIds.size() );
-        surfaceOut->insert( surfaceOut->end(), topRanked.begin(),  topRanked.end() );
-        surfaceOut->insert( surfaceOut->end(), d2plusIds.begin(),  d2plusIds.end() );
+        surfaceOut->reserve( head.shownIds.size() + d1.ids.size() + bodyIds.size() );
+        surfaceOut->insert( surfaceOut->end(), head.shownIds.begin(), head.shownIds.end() );
         surfaceOut->insert( surfaceOut->end(), bodyIds.begin(),    bodyIds.end() );
         surfaceOut->insert( surfaceOut->end(), d1.ids.begin(),     d1.ids.end() );
         std::sort( surfaceOut->begin(), surfaceOut->end() );

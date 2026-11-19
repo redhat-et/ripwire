@@ -843,6 +843,8 @@ for _g in \
     ownerhopcheck \
     ownerscheck \
     packcallersharecheck \
+    packkeybodycheck \
+    packlocatecheck \
     packtaskcheck \
     packtaskmonotoncheck \
     packtaskquotacheck \

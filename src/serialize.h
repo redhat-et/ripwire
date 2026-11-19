@@ -698,23 +698,13 @@ inline constexpr std::size_t ceilingAllowanceBytes( std::size_t budgetTokens ) n
     return std::size_t( double( budgetTokens ) * kMinBytesPerToken * kCeilingFirstEntryTolerance );
 }
 
-// THE EXACT CEILING, IN THE UNIT THE ROOT PRINTS. Both task lenses label a root over_ceiling="1" on
-// `est_tokens > budget_tokens`, and est_tokens prices the delivered document at kBytesPerTokenDefault — so the
-// largest document that keeps the root silent is budgetTokens x kBytesPerTokenDefault, NOT the allowance above
-// and NOT budgetTokens x kMinBytesPerToken.
-//
-// WHY THIS EXISTS (2026-09-13, PR #215 review item 1). The ladder's free rungs were priced at kMinBytesPerToken
-// (2.36) while the verdict they exist to avoid is priced at kBytesPerTokenDefault (2.50), a 6% disagreement in
-// the direction that makes the lens trim a document its own root calls conformant. MEASURED on the pre-fix
-// binary: `test/cppqualfix --for="widget ping make box" --token-budget=1200` printed est_tokens="778" with no
-// over_ceiling= — comfortably inside its budget — and had still dropped three legend clauses "(ceiling)"; at
-// --token-budget=1300 the same query kept every clause at est_tokens="1146". A lens must not pay a rung for a
-// ceiling it is not against. The tolerance above is for the residual a lens cannot trim (a first signature is
-// not divisible) and still governs the rungs that COST something — see climbCeilingLadderBy, which takes both.
-inline constexpr std::size_t ceilingBytes( std::size_t budgetTokens ) noexcept
-{
-    return std::size_t( double( budgetTokens ) * kBytesPerTokenDefault );
-}
+// WHY THERE IS NO SECOND CEILING ANY MORE (PB1, 2026-11-19). A `ceilingBytes()` lived here, budgetTokens x
+// kBytesPerTokenDefault (2.50), because the task lenses used to price est_tokens= at 2.50 while converting the
+// budget at 2.36 — so the largest document that kept a root silent was a different number from the one the
+// bundle published. That 6% disagreement is the defect PT1 measured from the other end: a --pack-task answer
+// that had spent 91% of its bytes read est_tokens="3975" against budget_tokens="6000". --pack-task now prices
+// every delivered byte at the rate its budget is converted at, so the ceiling it is judged against and the
+// ceiling it declares are ONE number, the one below, and ceilingBytes had no caller left.
 
 // The conservative hard byte ceiling a token target implies at the DENSEST language rate — a different number
 // from ceilingBytes above, with a different job: --pack-task PUBLISHES it (`budget_ceiling_bytes` in the JSON
@@ -6128,6 +6118,47 @@ inline std::string_view attrOf( std::string_view tag, std::string_view name )
         }
     }
     return {};
+}
+
+
+// WHERE AN ELEMENT'S OPEN TAG STARTS AND ENDS — by structure, never by punctuation: skip leading comment nodes (a legend can
+// carry a tag-like NAME in prose, e.g. `n=<file-scope>`), then take the '>' that closes the element found. Moved here from
+// packtask.h (PB1) so the headers that read it (handoffwindow.h, forgraphverb.h) no longer include the bundle assembler, which
+// now includes forpage.h — a chain that reaches back to them.
+struct SectionOpenTag
+{
+    std::size_t start = std::string::npos;   // offset of the element's '<'
+    std::size_t end   = std::string::npos;   // offset of the '>' that closes THAT tag
+};
+inline SectionOpenTag findSectionOpenTag( std::string_view xml, std::string_view element ) noexcept
+{
+    SectionOpenTag t;
+    std::size_t    i = 0;
+    while( i < xml.size() )
+    {
+        if( xml.compare( i, 4, "<!--" ) == 0 )
+        {
+            const std::size_t close = xml.find( "-->", i );
+            if( close == std::string_view::npos )
+            {
+                return t;   // an unterminated comment: refuse rather than guess where the element begins
+            }
+            i = close + 3;
+            continue;
+        }
+        if( xml.compare( i, element.size(), element ) == 0 )
+        {
+            const std::size_t close = xml.find( '>', i );
+            if( close != std::string_view::npos )
+            {
+                t.start = i;
+                t.end   = close;
+            }
+            return t;
+        }
+        return t;   // something other than a comment or the element we restate — refuse
+    }
+    return t;
 }
 
 

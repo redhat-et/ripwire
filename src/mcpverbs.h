@@ -26,6 +26,7 @@
 #include "forowner.h"   // for-body-slot: the one owner body of an explanatory question — shared with the CLI twin
 #include "packtask.h"      // L4: the shared --pack-task / MCP explore+pack_task bundle assembler (packTaskBundleText)
 #include "partition.h"     // the explore verb's `partition` argument (packTaskPartitionText)
+#include "forkeybody.h"    // PB1: keybody::keyBodyFor — the pack_task bundle's one key body (KB1's pick)
 #include "tracelocus.h"    // L4: the shared --from-trace / MCP from_trace bundle assembler (fromTraceBundleText)
 #include "countfloor.h"     // count-floor: a row's callers=/implementors= floor marker and its follow-up (CLI and MCP share it)
 #include "grepcarrier.h"    // L4: a grep enclosing row's carrier reads/vals (CLI and MCP share it)
@@ -5396,6 +5397,7 @@ inline std::string packTaskText( const std::string& root, const std::string& tas
     // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h) — the
     // CLI twin (main.cpp runPackTask) sets the identical field so the two dialects cannot diverge.
     in.rootArg = ing.realPaths.empty() ? std::string_view( root ) : std::string_view();
+    in.keyBody = keybody::keyBodyFor( ing, task, in.rootArg );   // PB1: KB1's key body, the CLI twin's same call
     if( partitionCount >= packpartition::kMinPartitions && partitionCount <= packpartition::kMaxPartitions )
     {
         return packpartition::packTaskPartitionText( ing, g, task, lr, in, partitionCount );

@@ -77,21 +77,21 @@ inline constexpr CompactLegendSpec kCompactLegendSpecs[] =
     // all, so that line described a shape the document does not contain — and was LONGER than the full dialect's
     // own clause, which compactlegendcheck's "compact must shrink" arm reads as the contradiction it is.
     { "ctx", "expand-file", "the file's own text: <src p= sym=>; <s n= sc= l=/> per scoped symbol; full id = p::sc::n" },
-    // pack-task (2026-09-12, the lane's end): the bundle's own vocabulary reads here, checked against packtask.h. task= is the task
-    // text (a bare --pack-task refuses); <far> is the ranked name-only tier inside <sigs> (renderNameOnlyRows: t= n= p=), of_top=
-    // there the ranked rows it was cut from (topRanked); <calls><c> are a body's callee signatures; <callers> rows are the bodies'
-    // 1-hop neighbours in either direction, rel= which one, of_top= there the bodies that qualified (bodiesTotal), shared= how many
-    // of them a row neighbours (emitted above 1); run= rides a <test> row only when a runner is derivable (testmap.h runHint). The
-    // <d> lens facts and route= ride only some answers and are present-only terms below. compactlegendcheck (D36).
+    // pack-task (2026-09-12; PB1 2026-11-19): the bundle's own vocabulary reads here, checked against packtask.h. task= is the task
+    // text (a bare --pack-task refuses); <sigs> is the --for head (e= the end line, files_first= its round robin by file);
+    // <bodies> holds ONE served <b> and a <bn next=> pointer row per candidate not served (bodyless= those with no body at all);
+    // <calls><c> are a body's callee signatures; <callers> rows are the key body's 1-hop callers, of_top=1; <tail> is --for's
+    // file tail; run= rides a <test> row only when a runner is derivable (testmap.h runHint).
+    // The <d> lens facts and route= ride only some answers and are present-only terms below. compactlegendcheck (D36).
     // ── the budgeted-bundle candidate page (root <sigs>; issue #294 / PR #362) — hinted by the window
     // flag pair that rode along, and reached from the pack-task hint too (the root-attr adjust below):
     // one spec for both verbs and both dialects, because the page is ONE document shape.
     { "sigs", "candidate-page",
       "budgeted-bundle candidate page: a resumable window over the ranked candidate set the bundle cuts, for task= under budget_tokens=, one tier per page, ranks global across pages" },
-    { "ctx", "pack-task",  "one-call task bundle for task= under budget_tokens=: <sigs><d n= sc= l= p=> ranking, <far><s t= n= p=> ranked but over 1 hop out (of_top= ranked rows) > <bodies><b t= n= p= l=> with <calls><c n= l= p=> callees > <callers><s rel=caller|callee shared=> 1-hop from the bodies (of_top= bodies; shared= bodies reached, absent at 1) > notes > <tests><test p= run=> (run= when derivable)" },
+    { "ctx", "pack-task",  "one-call task bundle for task= under budget_tokens=: <sigs><d n= sc= l= e= p=> ranking (the for head) > <bodies><b t= n= p= l=> the ONE key body served, with <calls><c n= l= p=> callees; <bn t= n= p= l= next=> a candidate not served (next= its expand); shown=/total= count SERVED bodies only; bodyless= of the candidates have no body at all > <callers><s rel=caller> the key body's 1-hop callers (of_top=1) > notes > <tests><test p= run=> (run= when derivable) > <tail><t p= sym=> file-grain rows, weaker than ranked rows: total= positive-score files, next= the file page from the first row not printed" },
     { "ctx", "from-trace", "trace frames mapped to indexed symbols, innermost first; the innermost in-corpus body included" },
     { "ctx", "exemplar",   "the best-in-class instance of kind= for the task, chosen by role: <exemplar n= p= in= ccx= tested=>, <bodies><b> to imitate" },
-    { "ctx-partitions", "pack-task", "N minimally overlapping agent bundles carved along call-graph communities plus one shared core; each <bundle> wraps a <ctx>; bundle role=core|partition i= symbols= modules= bytes= tokens=: one agent's ctx, symbols= ids assigned, bytes= its size; tokens= = est_tokens= = bytes/2.36 (flat, the densest rate; the inner ctx est_tokens= is language-weighted). Inner ctx task= root= budget_tokens= dropped_positive=: the task, p= base, the slice's token target, ranked candidates its budget cut. of_top=: rows ranked (far) / bodies (callers); s rel=caller|callee shared=: 1-hop edge, bodies reached (absent at 1)" },
+    { "ctx-partitions", "pack-task", "N minimally overlapping agent bundles carved along call-graph communities plus one shared core; each <bundle> wraps a <ctx>; bundle role=core|partition i= symbols= modules= bytes= tokens=: one agent's ctx, symbols= ids assigned, bytes= its size; tokens= = est_tokens= = bytes/2.36 (flat, the densest rate, the inner ctx est_tokens= too). Inner ctx task= root= budget_tokens= dropped_positive=: the task, p= base, the slice's token target, ranked candidates its budget cut. of_top=: the key body (callers); s rel=caller: its 1-hop callers; d e=: the definition's end line; sigs files_first=: the head's round robin by file; sigs docs_dropped=: shown rows whose doc comment the ladder shed; bn t= n=: a body candidate not served, next= the expand call that serves it" },
     // ── navigation ──
     { "callers",     "callers",     "1-hop CALLERS of of= (defs= matched, count= distinct symbols): <s t= n= p=>; hop_tested=/hop_untested=" },
     { "callees",     "callees",     "1-hop CALLEES of of= (defs= matched, count= distinct symbols): <s t= n= p= role= tested=>" },

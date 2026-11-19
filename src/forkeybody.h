@@ -200,6 +200,25 @@ inline KeyBodies keyBodies( const IngestResult& ing, std::string_view task, std:
     return { r.xml, r.ids.size() };
 }
 
+// PB1: the --pack-task twin's ONE key body — the first definition keyBodies would serve (round robin over the spans takes the first
+// span's first definition first), or kNoNode when no span places one or RIPWIRE_NO_KEY_BODY is set. The bundle (packtask.h) falls
+// back to its top positive-score head; it cannot include this header, so its callers resolve the pick and hand it in.
+inline NodeId keyBodyFor( const IngestResult& ing, std::string_view task, std::string_view rootArg )
+{
+    if( !keyBodyOn() )
+    {
+        return kNoNode;
+    }
+    for( const std::vector<NodeId>& defs : keyCandidates( ing, task, {}, {}, rootArg ) )
+    {
+        if( !defs.empty() )
+        {
+            return defs.front();
+        }
+    }
+    return kNoNode;
+}
+
 // THE UNROUTED ANSWER: insert the key block (its legend comment, then the element) right after the first top-level row block of a
 // finished answer-first --for document, when that block ends inside the default page. est_tokens= is re-priced: the element at the body
 // rate and the legend as markup, exactly through `ledger` when it converged, else at the densest markup rate (an upper bound). Returns

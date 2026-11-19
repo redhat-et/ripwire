@@ -558,12 +558,13 @@ struct Config
                                                              // handler and refuses loudly rather than falling through to the map)
     std::string_view packTask;                              // --pack-task="TASK" (B11/L4): the budget-shared task bundle — ONE call
                                                              // assembling, under ONE deterministic budget (default 6K tokens;
-                                                             // --token-budget overrides), the 5-call orientation dance in FIXED order:
-                                                             // (1) routed+anchored ranking, (2) top-K full bodies, (3) their 1-hop
-                                                             // caller signatures, (4) their field notes, (5) tests_to_run for the top
-                                                             // files, in FIXED order ranking>bodies>callers>notes>tests. Each section
-                                                             // holds a FIXED, up-front proportional quota of the budget (rank40/
-                                                             // body30/caller15/note5/test10, pct); an under-spent section's leftover
+                                                             // --token-budget overrides), the orientation dance in FIXED order:
+                                                             // (1) --for's own 40-row ranked head, (2) ONE full body — the key one,
+                                                             // (3) its 1-hop caller signatures, (4) field notes, (5) tests_to_run,
+                                                             // (6) --for's file-grain tail, filled LAST with everything left, in
+                                                             // FIXED order ranking>body>callers>notes>tests>tail. Each section holds
+                                                             // a FIXED, up-front proportional quota of the budget (rank45/body20/
+                                                             // caller8/note2/test5/tail20, pct); an under-spent section's leftover
                                                              // quota rolls forward, so a small budget still zeroes a section
                                                              // eventually but never past its own fair share. Each section truncates
                                                              // rank-adaptively and the header reports EVERY truncation.
@@ -2628,14 +2629,17 @@ inline constexpr char kHelpTail[] =
         "    --pack-task=\"TASK\"         the whole orientation dance in ONE call, under ONE shared budget\n"
         "                               the budget-shared task bundle: ONE call assembling, under ONE deterministic budget\n"
         "                               (default 6K tokens; --token-budget overrides), the whole orientation dance in FIXED order —\n"
-        "                               (1) routed+anchored ranking, (2) top-K full bodies, (3) their 1-hop caller signatures,\n"
-        "                               (4) their field notes, (5) tests_to_run for the top files, emitted in FIXED order\n"
-        "                               ranking>bodies>callers>notes>tests. Each section holds a FIXED, up-front proportional quota\n"
-        "                               of the budget (rank40/body30/caller15/note5/test10, percent); an under-spent section's\n"
-        "                               leftover quota ROLLS FORWARD to the next section, so a small budget still zeroes a section\n"
-        "                               eventually but never past its own fair share. Each section truncates rank-adaptively and\n"
-        "                               the header reports EVERY truncation (no silent caps). A tiny budget degrades to\n"
-        "                               ranking-only WITH the truncation note. Refuses loudly without a task string.\n"
+        "                               (1) --for's own 40-row ranked head (its order, its rules; rows past the first ten are\n"
+        "                               pointer rows), (2) ONE full body, the key one — the symbol the task names, else the\n"
+        "                               top-ranked; every other candidate is a <b next=--expand=...> pointer, (3) that body's\n"
+        "                               1-hop caller signatures, (4) field notes, (5) tests_to_run, (6) --for's file-grain tail,\n"
+        "                               filled LAST with everything the sections above leave, in FIXED order\n"
+        "                               ranking>body>callers>notes>tests>tail. Each section holds a FIXED, up-front proportional\n"
+        "                               quota of the budget (rank45/body20/caller8/note2/test5/tail20, percent); an under-spent\n"
+        "                               section's leftover quota ROLLS FORWARD to the next section, so a small budget still zeroes\n"
+        "                               a section eventually but never past its own fair share. Each section truncates\n"
+        "                               rank-adaptively and the header reports EVERY truncation (no silent caps). A tiny budget\n"
+        "                               degrades to ranking-only WITH the truncation note. Refuses loudly without a task string.\n"
         "    --partition=N              (with --pack-task, N=2..16) FAN OUT: one shared core plus N per-agent slices, not one bundle\n"
         "                               (with --pack-task, N=2..16) FAN-OUT form: instead of one bundle, emit ONE shared common core\n"
         "                               plus N per-agent slices, so N parallel agents stop re-deriving the same orientation. The\n"

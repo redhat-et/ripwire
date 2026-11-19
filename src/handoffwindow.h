@@ -33,7 +33,7 @@
 #include "infra/tablelookup.h"   // envChoice — the test hook's one-of-N switch
 #include "model.h"
 #include "nextverb.h"        // nextFlag / nextAttrXml
-#include "packtask.h"        // findSectionOpenTag — an element's open tag, comments skipped
+#include "serialize.h"        // findSectionOpenTag — an element's open tag, comments skipped
 #include "pageview.h"        // kCallHierarchyRowCap — the impact page's own default
 #include "typeuse.h"         // typeUseTier / impactReachWithTypes — the impact verb's own walk
 
