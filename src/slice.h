@@ -1578,7 +1578,7 @@ struct SliceRdWalker
         seqFrom( kids, 0, state, skip, std::move( done ) );
     }
 
-    // --clones residue kept on purpose: the *From child iterators share a bounds-check / fetch-child / recurse-on-i+1 skeleton; folding it needs a per-child callback template.
+    // --clones residue: the *From child iterators (gid 146)
     void seqFrom( std::shared_ptr<std::vector<TSNode>> kids, std::size_t i, SliceRdState& state, TSNode skip, SliceRdStep done )
     {
         if( state.dead || i >= kids->size() )
