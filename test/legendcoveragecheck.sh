@@ -573,6 +573,14 @@ def legendOf( doc, anyRoot = False ):
     # was recorded with.
     wrap = rb'[\w-]+' if anyRoot else rb'(?:ctx|files)'
     m2   = re.match( rb'\A\s*<' + wrap + rb'\b[^>]*>((?:\s*<!--.*?-->)+)', rest, re.S )
+    # INT1 (2026-11-19, the 0.7.0 candidate): on an answer-first DEFAULT document whose FIRST block is a trailing block
+    # (TRAILING below: <graph_verb> on a --for spelled as a path question), the comment run right after the root's open tag
+    # is THAT BLOCK's legend, standing immediately before its tag — trailingBlocks() reads it for the block's own elements.
+    # It is not the document legend, which is still the trailing run before the root closes (m3). Reading it as the head
+    # legend skipped m3 and reported every attribute the document legend defines as a gap: 63 on for-graph-path-default,
+    # born of the batch's A19 row (S1) meeting AF1-fix's answer-first order. Arm (T9) pins both directions.
+    if m2 and anyRoot and re.match( rb'\s*<(?:' + b"|".join( TRAILING ) + rb')[\s/>]', rest[ m2.end(): ] ):
+        m2 = None
     if m2: lead += m2.group( 1 )
     # AF1 (2026-11-18): the DEFAULT --for answer is answer-first — its document legend is the trailing run of comments before
     # the root closes, inside the same answer (page 1 keeps it whole). A comment that cannot span "-->" keeps rows out of it.
@@ -819,6 +827,18 @@ g = gapsOf( tdoc( SK ), True )[ 3 ]
 tarm( g == [], f"(T10) two adjacent comments before <shortkey> both count (gaps {g})" )
 g = gapsOf( tdoc( SK.replace( b'--><!-- shortkey gen', b'--><e/><!-- shortkey gen' ) ), True )[ 3 ]
 tarm( g == [ "shortkey@found" ], f"(T10b) mutant: an element between them cuts the run, found= is a gap (gaps {g})" )
+# (T11) INT1: an answer-first DEFAULT document whose FIRST block is a trailing block. The comment right after the root's open tag
+# stands immediately before <graph_verb>, so it is that block's legend; the document legend is the trailing run before </ctx>.
+def fdoc( lead, tail ): return b'<ctx task="x">' + lead + b'<graph_verb a="1"><path hops="2"/></graph_verb><d n="x" q="1"/>' + tail + b'</ctx>'
+GVL, DOCL = b'<!-- gv: a= the verb -->', b'<!-- ripwire for: task= the query, n= its name, q= a head attribute, hops= hops -->'
+g = gapsOf( fdoc( GVL, DOCL ), True )[ 3 ]
+tarm( g == [], f"(T11) a leading <graph_verb> block's comment is its block legend; the trailing run is the document legend (gaps {g})" )
+g = gapsOf( fdoc( GVL, DOCL.replace( b'q= a head attribute, ', b'' ) ), True )[ 3 ]
+tarm( g == [ "d@q" ], f"(T11b) mutant: the trailing document legend loses q= -> d@q is a gap, so the trailing run is what is read (gaps {g})" )
+g = gapsOf( fdoc( GVL.replace( b'a= the verb', b'a= the verb, q= not here' ), DOCL.replace( b'q= a head attribute, ', b'' ) ), True )[ 3 ]
+tarm( g == [ "d@q" ], f"(T11c) the leading block's comment defines nothing outside its block (gaps {g})" )
+g = gapsOf( b'<ctx task="x"><!-- head: task= the query, n= its name, q= a head attribute --><d n="x" q="1"/></ctx>', True )[ 3 ]
+tarm( g == [], f"(T11d) control: a comment after the root's open tag that stands before no trailing block is still the head legend (gaps {g})" )
 # (HIST0) see buildHist: the premise counts, then the decoy that a leaking fixture would have written into
 tarm( histCounts[ 0 ] >= 5 and histCounts[ 1 ] == 1, f"(HIST0) premise: the history fixture holds {histCounts[ 0 ]} commits (want 5) and {histCounts[ 1 ]} side branch (want 1)" )
 tarm( decoyBefore[ 0 ] >= 1 and decoyAfter == decoyBefore,
