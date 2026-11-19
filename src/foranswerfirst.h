@@ -306,7 +306,7 @@ inline constexpr std::string_view kSigsAttributeNotes[] = { "demote", "decl-twin
     return out;
 }
 
-// ── AF4 T-B, CALLERS FIRST UNDER A CALLERS CUE (results/P1_VERBROUTE_1118/SPEC.md §2; pre-registered in
+// ── AF4 T-B, CALLERS FIRST UNDER A CALLERS CUE (the P1 verb-route spec, section 2 (local results, not shipped); pre-registered in
 // results/AF4_TOPLOAD_1118/PREREG.md). A who-calls question ("which functions call `f` directly?") is answered by the
 // <callers by="subject"> block, which the assembly emits after <sigs>; on P1's three such held-out cells, emitted first it moved
 // bytes-to-all-gold 5,387→726, 6,629→935 and 11,112→743 with the same bytes and groups. The CUE is the caller's to read
