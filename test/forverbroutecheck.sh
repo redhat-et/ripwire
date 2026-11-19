@@ -392,5 +392,62 @@ if run e25 plain --for='Trace the transitive callers of compute_total.' && run e
     say $? "(25) [N] ES: a transitive question is today's page" "(25) [N] ES fired on a transitive question"
 fi
 
+# ── CALLEES route arms (26–29): "what does X call" → --callees (RT2-C, results/RT2_ROUTE_1118/PREREG_CALLEES.md) ─────
+mkdir -p "$DIR/rmac"
+cat >"$DIR/rmac/lib.rs" <<'R'
+macro_rules! wrap {
+    ($e:expr) => {
+        $e
+    };
+}
+pub fn helper() -> u32 {
+    1
+}
+pub fn direct() -> u32 {
+    2
+}
+pub fn outer() -> u32 {
+    direct() + wrap!(helper())
+}
+R
+# (26) [P] what-it-calls → --callees, no warn on a plain chain
+if run c26 plain --for='What does `run_main` call?'; then
+    F="$( firstChild "$DIR/c26.out" )"
+    case "$( rootOpen "$DIR/c26.out" )" in "<callees "*) ok "(26) [P] what-it-calls answers with the --callees root" ;; *) no "(26) [P] root is '$( rootOpen "$DIR/c26.out" | head -c 120 )'" ;; esac
+    [ "$( attr "$F" kind )" = what-it-calls ] && [ "$( attr "$F" verb )" = "--callees=run_main" ] && [ -z "$( attr "$F" warn )" ] && ! grep -q '<ctx task=' "$DIR/c26.out"
+    say $? "(26) [P] route kind=what-it-calls verb=--callees=run_main, no warn, no page" "(26) [P] route reads '$F'"
+fi
+# (27) [P] the order: "what does X call" is what-it-calls even with a transitive or radius word; "who calls" / "what calls" stay who-calls
+if run c27 plain --for='What does `run_main` call, and which files are affected?' && run c27b plain --for='What calls `compute_total`?'; then
+    [ "$( attr "$( firstChild "$DIR/c27.out" )" kind )" = what-it-calls ] && [ "$( attr "$( firstChild "$DIR/c27b.out" )" kind )" = who-calls ]
+    say $? "(27) [P] rule R2: what-it-calls is checked first; 'what calls X' stays who-calls" "(27) [P] '$( firstChild "$DIR/c27.out" )' / '$( firstChild "$DIR/c27b.out" )'"
+fi
+# (27b) [P] a dotted symbol does not end the sentence: "What does `a.b` call?" is what-it-calls
+mkdir -p "$DIR/pyc"; printf 'def helper():
+    return 1
+
+
+class App:
+    def initialize(self):
+        return helper()
+' >"$DIR/pyc/app.py"
+if run c27c pyc --for='What does `App.initialize` call in this app? List the modules.'; then
+    [ "$( attr "$( firstChild "$DIR/c27c.out" )" kind )" = what-it-calls ]
+    say $? "(27b) [P] rule R2: 'What does App.initialize call' (backticked) is what-it-calls: a dotted name is not a sentence end" "(27b) [P] '$( firstChild "$DIR/c27c.out" )'"
+fi
+# (28) [P] a call the callees rows miss (inside a macro_rules invocation): warn=1 why=body-gap:1:helper, page carried
+if run c28 rmac --for='What does `outer` call?'; then
+    F="$( firstChild "$DIR/c28.out" )"
+    [ "$( attr "$F" kind )" = what-it-calls ] && [ "$( attr "$F" warn )" = 1 ] && printf '%s' "$( attr "$F" why )" | grep -q 'body-gap:1:helper' \
+        && [ "$( attr "$F" page1 )" = 1 ] && grep -q '<ctx task=' "$DIR/c28.out"
+    say $? "(28) [P] body gap: warn=1 why=body-gap:1:helper, page1=1, page carried" "(28) [P] route reads '$F'"
+fi
+# (29) [C] the callees route's answers are well-formed and deterministic
+for t in c26 c28; do
+    if command -v xmllint >/dev/null 2>&1 && [ -s "$DIR/$t.out" ]; then xmllint --noout "$DIR/$t.out" 2>/dev/null; say $? "(29) [C] $t is well-formed" "(29) [C] $t is not well-formed"; fi
+done
+run c28d rmac --for='What does `outer` call?'; cmp -s "$DIR/c28.out" "$DIR/c28d.out"
+say $? "(29) [C] two runs of c28 are byte-identical" "(29) [C] c28 runs differ"
+
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "FAILURES ABOVE"; fi
 exit "$fail"

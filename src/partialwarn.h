@@ -738,4 +738,107 @@ inline void nonGapReasons( std::string_view why, std::string& out )
     }
     return ev;
 }
+// ── RT2-C (results/RT2_ROUTE_1118/PREREG_CALLEES.md): the what-it-calls route's evidence ─────────────────────────────────────
+// BODY GAP: the names X's own body CALLS (an identifier followed by `(`, or by `!` and a bracket: a Rust macro), keywords
+// aside, that have an in-repo definition (the caller's test) and that the --callees answer names nowhere — no <s> row (its
+// last segment), no <dc>, no <stdm>, no <vr to=>, no <in> closure, and not X itself. A call the graph did not bind (inside a
+// macro_rules invocation, through a local the resolver cannot type) shows here as a name the answer omits: residual reason
+// `body-gap:N:FIRST`, which warns and carries the first --for page. It reads text, not the graph: a local variable that shares
+// a definition's name can be a false alarm (a page of bytes), never a silent miss of a name the body spells.
+namespace detail
+{
+inline constexpr std::string_view kCallKeywords[] = { "if", "for", "while", "switch", "return", "sizeof", "catch", "match", "elif", "and", "or",
+                                                      "not", "in", "case", "do", "else", "new", "typeof", "await", "yield", "assert", "defined",
+                                                      "alignof", "decltype", "static_assert", "loop", "where", "unless", "until", "lambda" };
+} // namespace detail
+
+namespace detail
+{
+// The end of the identifier at `i` when it is CALL-SHAPED — followed by `(`, or by `!` and a bracket (a Rust macro) — else 0.
+[[nodiscard]] inline std::size_t callShapedEnd( std::string_view body, std::size_t i, std::size_t j )
+{
+    std::size_t k = j;
+    const bool bang = k < body.size() && body[ k ] == '!';
+    k += bang ? 1 : 0;
+    while( k < body.size() && ( body[ k ] == ' ' || body[ k ] == '\t' ) )
+    {
+        ++k;
+    }
+    const bool open = k < body.size() && ( body[ k ] == '(' || ( bang && ( body[ k ] == '[' || body[ k ] == '{' ) ) );
+    return open && j > i ? j : 0;
+}
+} // namespace detail
+
+// The distinct call-shaped names in `body`, in first-seen order.
+[[nodiscard]] inline std::vector<std::string> bodyCallNames( std::string_view body )
+{
+    std::vector<std::string> out;
+    for( std::size_t i = 0; i < body.size(); )
+    {
+        const bool starts = detail::isIdentChar( body[ i ] ) && !( i > 0 && detail::isIdentChar( body[ i - 1 ] ) ) && !rw::forroute::detail::isAsciiDigit( body[ i ] );
+        if( !starts )
+        {
+            ++i;
+            continue;
+        }
+        std::size_t j = i;
+        while( j < body.size() && detail::isIdentChar( body[ j ] ) )
+        {
+            ++j;
+        }
+        const std::string_view name = body.substr( i, j - i );
+        if( detail::callShapedEnd( body, i, j ) != 0 && !detail::listed( detail::kCallKeywords, name ) && std::ranges::find( out, name ) == out.end() )
+        {
+            out.emplace_back( name );
+        }
+        i = j;
+    }
+    return out;
+}
+
+// Every name a --callees answer accounts for: <s n=> (last segment), <dc n=>, <stdm n="a,b">, <vr to=>, <in n=>; sorted.
+[[nodiscard]] inline std::vector<std::string> calleeAnswerNames( std::string_view answer )
+{
+    const std::string        body = detail::stripComments( answer );
+    std::vector<std::string> out;
+    for( const std::string_view tag : { std::string_view( "<s " ), std::string_view( "<dc " ), std::string_view( "<in " ) } )
+    {
+        for( const std::string_view span : detail::tagSpans( body, tag ) )
+        {
+            out.emplace_back( rw::forroute::lastSegment( detail::attrOf( span, "n" ) ) );
+        }
+    }
+    for( const std::string_view span : detail::tagSpans( body, "<vr " ) )
+    {
+        out.emplace_back( rw::forroute::lastSegment( detail::attrOf( span, "to" ) ) );
+    }
+    for( const std::string_view span : detail::tagSpans( body, "<stdm " ) )
+    {
+        for( std::string_view list = detail::attrOf( span, "n" ); !list.empty(); )
+        {
+            const std::size_t comma = list.find( ',' );
+            out.emplace_back( list.substr( 0, comma ) );
+            list = comma == std::string_view::npos ? std::string_view{} : list.substr( comma + 1 );
+        }
+    }
+    std::ranges::sort( out );
+    return out;
+}
+
+// The body-gap reason, "" when every defined call-shaped name is accounted for. `defined` answers "does the repo define it".
+template <class Defined>
+[[nodiscard]] inline std::string bodyGapReason( const std::vector<std::string>& calls, std::string_view answer, std::string_view self, Defined defined )
+{
+    const std::vector<std::string> named = calleeAnswerNames( answer );
+    std::vector<std::string>       gap;
+    for( const std::string& c : calls )
+    {
+        if( c != self && !std::ranges::binary_search( named, c ) && defined( c ) )
+        {
+            gap.push_back( c );
+        }
+    }
+    return gap.empty() ? std::string() : detail::countedReason( "body-gap", gap.size(), gap.front() );
+}
+
 } // namespace rw::partialwarn

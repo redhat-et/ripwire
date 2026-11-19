@@ -39,6 +39,7 @@ enum class RouteKind : std::uint8_t
     DirectRadius,   // → --uses
     WhoCalls,       // → --callers
     WhereUsed,      // → --uses (RT2)
+    WhatItCalls,    // → --callees (RT2-C)
 };
 
 // One row per routed kind, indexed by RouteKind: its name and the verb flag that answers it, spelled as a selector flag takes it.
@@ -54,8 +55,9 @@ inline constexpr KindRow kKindRows[] =
     { "direct-radius", "--uses=" },       // DirectRadius
     { "who-calls", "--callers=" },        // WhoCalls
     { "where-used", "--uses=" },          // WhereUsed
+    { "what-it-calls", "--callees=" },    // WhatItCalls
 };
-static_assert( std::size( kKindRows ) == std::size_t( RouteKind::WhereUsed ) + 1, "one row per RouteKind, in enum order" );
+static_assert( std::size( kKindRows ) == std::size_t( RouteKind::WhatItCalls ) + 1, "one row per RouteKind, in enum order" );
 [[nodiscard]] constexpr std::string_view kindName( RouteKind k ) noexcept { return kKindRows[ std::size_t( k ) ].name; }
 [[nodiscard]] constexpr std::string_view verbFlag( RouteKind k ) noexcept { return kKindRows[ std::size_t( k ) ].verbFlag; }
 
@@ -257,6 +259,79 @@ template <class OkAt>
     } );
 }
 
+// Where the sentence that `from` sits in ends: the first '?', or the first '.' that ends a sentence (followed by whitespace or the
+// end) — a '.' inside a dotted name (`Application.initialize`) does not (Python's (?:[^?.]|\.(?!\s|$))*).
+[[nodiscard]] inline std::size_t sentenceEnd( std::string_view lq, std::size_t from )
+{
+    for( std::size_t i = from; i < lq.size(); ++i )
+    {
+        if( lq[ i ] == '?' )
+        {
+            return i;
+        }
+        if( lq[ i ] == '.' && ( i + 1 == lq.size() || lq[ i + 1 ] == ' ' || lq[ i + 1 ] == '\t' || lq[ i + 1 ] == '\n' || lq[ i + 1 ] == '\r' ) )
+        {
+            return i;
+        }
+    }
+    return std::string_view::npos;
+}
+
+// "call" with a \b on both sides between `from` and the end of its sentence (sentenceEnd).
+[[nodiscard]] inline bool callWordBefore( std::string_view lq, std::size_t from )
+{
+    const std::size_t stop = sentenceEnd( lq, from );
+    const std::string_view span = lq.substr( from, stop == std::string_view::npos ? std::string_view::npos : stop - from );
+    return occursWhere( span, "call", [ & ]( std::size_t at ) { return isBoundary( lq, from + at ) && isBoundary( lq, from + at + 4 ); } );
+}
+
+// \bwhich (functions|methods|routines)\b S \b(does|do)\b S \bcall\b (see the header).
+[[nodiscard]] inline bool whichDoCall( std::string_view lq )
+{
+    for( const std::string_view head : { std::string_view( "which functions" ), std::string_view( "which methods" ), std::string_view( "which routines" ) } )
+    {
+        const bool hit = occursWhere( lq, head, [ & ]( std::size_t at )
+        {
+            if( !isBoundary( lq, at ) || !isBoundary( lq, at + head.size() ) )
+            {
+                return false;
+            }
+            const std::size_t from = at + head.size();
+            const std::size_t stop = sentenceEnd( lq, from );
+            const std::string_view span = lq.substr( from, stop == std::string_view::npos ? std::string_view::npos : stop - from );
+            return occursWhere( span, "do", [ & ]( std::size_t d )
+            {
+                const std::size_t a = from + d;
+                const bool does = lq.substr( a, 4 ) == "does" && isBoundary( lq, a ) && isBoundary( lq, a + 4 );
+                const bool doW  = isBoundary( lq, a ) && isBoundary( lq, a + 2 );
+                return ( does && callWordBefore( lq, a + 4 ) ) || ( doW && callWordBefore( lq, a + 2 ) );
+            } );
+        } );
+        if( hit )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// rule R2's what-it-calls cues (RT2-C; see the header for the pattern this transcribes).
+[[nodiscard]] inline bool isWhatItCalls( std::string_view lq )
+{
+    if( hasBoundedWord( lq, "callee", true ) || hasBoundedWord( lq, "callees", true ) )
+    {
+        return true;
+    }
+    for( const std::string_view aux : { std::string_view( "what does" ), std::string_view( "what do" ), std::string_view( "what did" ) } )
+    {
+        if( occursWhere( lq, aux, [ & ]( std::size_t at ) { return isBoundary( lq, at ) && isBoundary( lq, at + aux.size() ) && callWordBefore( lq, at + aux.size() ); } ) )
+        {
+            return true;
+        }
+    }
+    return whichDoCall( lq );
+}
+
 // rule R's direct-radius cues: plain substrings.
 inline constexpr std::string_view kDirectRadiusCues[] = { "blast radius", "what breaks", "at risk", "affected", "must change", "have to change", "which files" };
 } // namespace detail
@@ -315,6 +390,10 @@ inline void forEachBacktickSpan( std::string_view q, OnSpan onSpan )
 [[nodiscard]] inline RouteKind kindOf( std::string_view q )
 {
     const std::string lq = rw::routeLower( q );   // re.I on these all-ASCII patterns
+    if( detail::isWhatItCalls( lq ) )
+    {
+        return RouteKind::WhatItCalls;
+    }
     if( detail::isTransitive( lq ) )
     {
         return RouteKind::Transitive;

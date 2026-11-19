@@ -119,6 +119,7 @@ pair r2 gap   'Which files are affected if `compute_total` changes?'            
 pair r3 hop   'Trace the transitive callers of `report_error`, including callback registrations.' transitive 1 0
 pair r4 mac   'Who calls `compute_total`?'                                      who-calls     1 0
 pair r5 plain 'Where is `compute_total` used?'                                  where-used    0 0
+pair r6 plain 'What does `run_main` call?'                                      what-it-calls 0 0
 
 # [N] unrouted: no symbol named — the ranked <ctx>, no <route>
 U="$( mcpfor "$DIR/plain" 'How does the total get computed?' )"
