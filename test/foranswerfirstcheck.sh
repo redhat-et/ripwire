@@ -221,9 +221,9 @@ for label, new_n, old_n in (("conceptual", "a_new.xml", "a_old.xml"), ("routed",
         # R2+R8 say "the DOCUMENT legend is at the tail AND each block legend is exactly adjacent to its block",
         # which forbids strictly more arrangements. R8 is what makes this exemption safe, so if R8 is ever
         # deleted this exemption must go with it.
-        # AF1-fix: `<!-- ripwire for X: …` is the other spelling of a block-local legend (foranswerfirst.h commentFirstWord)
+        # AF1-fix: `<!-- ripwire for X …` is the other spelling of a block-local legend (foranswerfirst.h commentFirstWord)
         def blockLocal( idx ):
-            m = re.match( r'<!--\s*(?:ripwire for (?=[A-Za-z_][\w-]*:))?([A-Za-z_][\w-]*)', b_new[ idx ][ 2 ] )
+            m = re.match( r'<!--\s*(?:ripwire for )?([A-Za-z_][\w-]*)', b_new[ idx ][ 2 ] )
             if not m:
                 return False
             for k2, n2, _ in b_new[ idx + 1: ]:
@@ -409,7 +409,7 @@ def selfNaming( raw ):
     The first word is the convention: a block-local legend names its own element, the document legend opens
     with the verb or the root instead."""
     out = []
-    for m in re.finditer( rb'<!--\s*(?:ripwire for (?=[A-Za-z_][\w-]*:))?([A-Za-z_][\w-]*)', raw ):   # AF1-fix: both spellings
+    for m in re.finditer( rb'<!--\s*(?:ripwire for )?([A-Za-z_][\w-]*)', raw ):   # AF1-fix: both spellings
         word = m.group( 1 )
         end  = raw.find( b'-->', m.start() )
         if end < 0:
@@ -473,7 +473,10 @@ PY_EOF
 # (12,000 B, src/foranswerfirst.h kAnswerPageBytesDefault), and tail row 24 still ends within it. The lit task is the
 # fixture G must FIRE on (a quoted message gives a late <lit>); if this tree stops producing one, (G0) says so rather than
 # passing on nothing.
-TASK_L="where is the message 'the answer did not buffer whole' printed"
+# AF1-fix (2026-11-18): re-authored. A block legend spelled `ripwire for lit:` now travels with its <lit> (foranswerfirst.h
+# commentFirstWord), so G sizes the old fixture's <lit> WITH its three legend comments (1,798 + 1,529 B) and the guard rightly
+# declines it (tail row 24 would leave the stop); G is unchanged. This task's <lit> fits with its legend, so G fires again.
+TASK_L="where is RIPWIRE_NO_SHORT_KEY read"
 cap "$WORK/l_new.xml" "$TASK_L" $OPTIN $WHOLE
 cap "$WORK/l_old.xml" "$TASK_L" $LEGACY
 python3 - "$WORK" <<'PY_AF2'

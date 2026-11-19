@@ -5761,10 +5761,12 @@ inline int runForLensFitted( const MainDispatch& d )
 // AF1 (forpages.h): the default --for answer, permuted answer-first, served as the asked PAGE. Paging applies on this path
 // only — the budgeted path sheds instead (forbudgetfit.h) — and only to the XML answer of the answer-first posture; every
 // other shape is served whole. Returns false when the asked page does not exist (the refusal is on stderr, stdout empty).
+// AF1-fix (2026-11-18): the ONE rule for "may this answer be paged" is the rule that refuses a typed --page-bytes
+// (cli.h pageBytesConflict). This used to restate it and dropped the budget clause, so `--signatures-only --token-budget=N`
+// — a budget the default path serves — came back as page 1 of 2 with a next= that dropped the budget.
 inline bool forPagingApplies( const rw::Config& cfg ) noexcept
 {
-    return cfg.legendAnswerFirst && cfg.forPageBytes > 0 && !cfg.json && !cfg.columnar && !cfg.candidates && cfg.pageLimit == 0
-        && cfg.pageOffset == 0 && cfg.legendHave.empty();
+    return cfg.forPageBytes > 0 && rw::pageBytesConflict( cfg ) == nullptr;
 }
 inline bool serveForPage( const rw::Config& cfg, std::string& doc )
 {
@@ -5804,7 +5806,17 @@ std::optional<int> runForLens( const MainDispatch& d )
     if( d.cfg.legendAnswerFirst )
     {
         ForPostureRender r = renderForPostureCaptured( d );
-        replayForPostureNotices( r );
+        // AF1-fix (2026-11-18): a capture that FAILED (a short write or read-back: StdoutCaptured::failed) holds a short, possibly
+        // reordered answer. Item R wrote those bytes anyway, which was an opt-in's corner; as the default it served a malformed
+        // answer — forfilesymscheck (c2), RLIMIT_FSIZE on the capture buffer, printed 8,108 B with the inner stub and </ctx> in
+        // the middle and a truncated root at the end. With stdout restored, the answer is rendered once more STRAIGHT THROUGH:
+        // complete, unpermuted, unpaged, with the posture's own notices (the failed render's are not replayed, or each would
+        // print twice), and the NoWholeCapture disclosure below says so.
+        const bool retry = r.stdoutCaptured && r.out && r.out->failed && r.out->restored && d.cfg.forPage == 1;
+        if( !retry )
+        {
+            replayForPostureNotices( r );
+        }
         // capturedWhole() is the house predicate and the only correct one here: `restored` means the capture
         // SUCCEEDED and handed its bytes back. An earlier version of this branch read `!restored`, the exact
         // inverse, so the permutation never ran and the answer fell through to the write-it-anyway path
@@ -5826,7 +5838,7 @@ std::optional<int> runForLens( const MainDispatch& d )
                                 "--page-bytes=0 serves the whole answer\n", d.cfg.forPageBytes, d.cfg.forPage );
             return 1;
         }
-        if( r.out && !r.out->bytes.empty() )
+        if( !retry && r.out && !r.out->bytes.empty() )
         {
             std::fwrite( r.out->bytes.data(), 1, r.out->bytes.size(), stdout );
             return r.rc;

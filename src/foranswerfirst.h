@@ -213,8 +213,9 @@ inline constexpr std::string_view kNameChars = "abcdefghijklmnopqrstuvwxyzABCDEF
 // path_gap, reask, syms). Reading only the first word sent every `ripwire for X:` legend to the trailing DOCUMENT legend, away
 // from its block — against the convention below and AF1's registered layout ("block-local legend comments stay in the stream,
 // glued to the block they declare"): fordocbodycheck (f1), forexemplarcheck and formanifestcheck (a1) read the block from its
-// legend and found nothing after it. So `ripwire for X` reads as X. The document legend's own `ripwire for schema=…` names no
-// element (schema= is an attribute: no `:` after the word), so it stays where it is.
+// legend and found nothing after it. So `ripwire for X` reads as X, whatever follows X (`ripwire for doc_body held="budget":`,
+// `ripwire for lit callers:` are block legends too); declaredBlock still requires the next block to BE an <X>. The document
+// legend's own `ripwire for schema=…` names no element the answer opens, so it stays where it is.
 [[nodiscard]] inline std::string_view commentWordAt( std::string_view doc, std::size_t from, std::size_t end ) noexcept
 {
     if( from == std::string_view::npos || from >= end ) { return {}; }
@@ -228,8 +229,7 @@ inline constexpr std::string_view kNameChars = "abcdefghijklmnopqrstuvwxyzABCDEF
     const std::size_t          at        = first.empty() ? std::string_view::npos : static_cast<std::size_t>( first.data() - doc.data() );
     if( first != "ripwire" || doc.compare( at, kVerbLead.size(), kVerbLead ) != 0 ) { return first; }
     const std::string_view named = commentWordAt( doc, at + kVerbLead.size(), b.end );
-    const std::size_t      after = at + kVerbLead.size() + named.size();
-    return ( !named.empty() && after < b.end && doc[ after ] == ':' ) ? named : first;
+    return named.empty() ? first : named;
 }
 
 // Which row block does this comment DECLARE, if any? The house convention is that a block's own legend sits
