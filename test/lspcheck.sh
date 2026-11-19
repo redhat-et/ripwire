@@ -70,6 +70,10 @@
 #   (35) the language tier never rescues a declaration: cpp body, cpp decl, higher-rung C struct in that
 #        byte order — language tier and the same-scope yield compose
 #   (36) suffix case is tolerated, name case is NOT: 'Shape@CPP' = Shape@cpp; 'shape@rs' matches nothing
+#   (47) workspace/symbol probes the WHOLE "::" spelling first: an indexed `notes.md::config::user@py` heading answers as
+#        itself, not its tail-stripped twin `user` (#702 review)
+#   (48) a suffix array with a non-string element installs nothing: `[".h", 123, ".c"]` keeps the default set (#702 review)
+#   (49) the `tsx` languageId maps to TypeScript, the language .tsx files index as (#702 review)
 #   (24) a constructor never outranks its class (maintainer, #432 review): Java `public Shape() {}` inside class Shape
 #        and C++ `Widget::Widget()` beside a header-first class Widget — --lego names the class and its implementor,
 #        --around focuses the class row; a near-miss Java method named like ANOTHER class keeps the Method rung
@@ -89,12 +93,15 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 # A dialogue that ends on shutdown exits 0. An arm that reads a failed run's frames would compare empty answers, so the
-# task D/E dialogues (27)-(46) test the exit status where they run (LAND-440, the gate-status rule).
+# task D/E dialogues (27)-(49) test the exit status where they run (LAND-440, the gate-status rule).
 lspRc(){ no "--lsp exited non-zero on dialogue $1: the arm below reads a failed run"; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 
 WORK="$( cd "$( mktemp -d )" && pwd -P )"; trap 'rm -rf "$WORK"' EXIT
+# The language-map loader reads $XDG_CONFIG_HOME/ripwire/ and ~/.config/ripwire/lsp-langmap.toml: a developer's own map
+# (an [overrule] list without .h, say) must not answer any dialogue here, so both point into the work dir.
+mkdir -p "$WORK/noxdg" "$WORK/nohome"; export XDG_CONFIG_HOME="$WORK/noxdg" HOME="$WORK/nohome"
 mkdir -p "$WORK/src"
 
 # C++ fixture — line numbers below are load-bearing (the arms address them):
@@ -1032,6 +1039,54 @@ first46b="$( grep '"id":72,' "$WORK/r46" | grep -o '"uri":"[^"]*"' | head -1 )"
 [ "$first46b" = "\"uri\":\"file://$WORK/loh/shape.c\"" ] \
     && ok "(46b) suffixes = [\".h\"] # \".c\": a Rust declaration on shape.c keeps the indexed C anchor — the comment installed no suffix" \
     || no "(46b) the comment's \".c\" became an override suffix: first=$first46b"
+
+# ── (47) literal first on workspace/symbol's "::" tiers: the heading `user@py` under `# config` answers as itself ────
+mkdir -p "$WORK/lit"
+printf '# config\n\n## user\n\ntext\n\n## user@py\n\nmore\n' > "$WORK/lit/notes.md"
+printf 'def corp_seed():\n    return 4\n' > "$WORK/lit/seed.py"
+{
+  msg "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":\"file://$WORK/lit\",\"capabilities\":{}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":75,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"notes.md::config::user@py\"}}"
+  lid_tail
+} > "$WORK/d47"
+"$BIN" --lsp < "$WORK/d47" > "$WORK/raw47" 2>/dev/null || lspRc d47
+R75="$( decodeFrames "$WORK/raw47" | grep '"id":75,' )"
+printf '%s' "$R75" | grep -q '"name":"user@py"' && ! printf '%s' "$R75" | grep -q '"name":"user"' \
+    && ok "(47) workspace/symbol notes.md::config::user@py answers the heading user@py — the whole spelling is probed before the tail reads as a language" \
+    || { no "(47) the literal id lost to its tail-stripped twin"; printf '%s\n' "$R75" | head -c 240; }
+
+# ── (48) an [overrule] array with a non-string element is an unknown shape: nothing installs, the default set stands ─
+printf 'myrust = "rs"\n[overrule]\nsuffixes = [".h", 123, ".c"]\n' > "$WORK/loh-badarray.toml"
+{
+  lid_init
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://$WORK/loh/shape.c\",\"languageId\":\"MyRust\",\"version\":1,\"text\":\"struct Shape { int x; };\\n\"}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":72,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://$WORK/loh/shape.c\"},\"position\":{\"line\":0,\"character\":8}}}"
+  lid_tail
+} > "$WORK/d48"
+"$BIN" --lsp --lsp-langmap="$WORK/loh-badarray.toml" < "$WORK/d48" > "$WORK/raw48" 2>/dev/null || lspRc d48
+first48="$( decodeFrames "$WORK/raw48" | grep '"id":72,' | grep -o '"uri":"[^"]*"' | head -1 )"
+[ "$first48" = "\"uri\":\"file://$WORK/loh/shape.c\"" ] \
+    && ok "(48) suffixes = [\".h\", 123, \".c\"]: a Rust declaration on shape.c keeps the indexed C anchor — a malformed array installs no suffix" \
+    || no "(48) a malformed suffix array installed its strings: first=$first48"
+
+# ── (49) languageId tsx on a .h buffer anchors TypeScript: shape.ts leads shape.js (both define class Shape) ────────
+mkdir -p "$WORK/lotsx"
+printf 'typedef struct Shape Shape;\n' > "$WORK/lotsx/shape.h"
+printf 'class Shape {}\n' > "$WORK/lotsx/a_shape.js"
+printf 'class Shape {}\n' > "$WORK/lotsx/b_shape.ts"
+{
+  msg "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":\"file://$WORK/lotsx\",\"capabilities\":{}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://$WORK/lotsx/shape.h\",\"languageId\":\"tsx\",\"version\":1,\"text\":\"typedef struct Shape Shape;\\n\"}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":71,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://$WORK/lotsx/shape.h\"},\"position\":{\"line\":0,\"character\":17}}}"
+  lid_tail
+} > "$WORK/d49"
+"$BIN" --lsp < "$WORK/d49" > "$WORK/raw49" 2>/dev/null || lspRc d49
+first49="$( decodeFrames "$WORK/raw49" | grep '"id":71,' | grep -o '"uri":"[^"]*"' | head -1 )"
+[ "$first49" = "\"uri\":\"file://$WORK/lotsx/b_shape.ts\"" ] \
+    && ok "(49) languageId tsx: b_shape.ts leads a_shape.js — tsx names TypeScript, the language .tsx files index as" \
+    || no "(49) tsx anchored another language: first=$first49"
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

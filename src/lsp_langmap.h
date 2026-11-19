@@ -77,7 +77,7 @@ inline const std::vector<std::pair<std::string, std::string>>& defaultLangAliase
 {
     static const std::vector<std::pair<std::string, std::string>> rows = {
         { "c", "c" }, { "c++", "cpp" }, { "cpp", "cpp" }, { "csharp", "cs" }, { "objective c", "objc" },
-        { "objective-c", "objc" }, { "javascript", "js" }, { "typescript", "ts" }, { "tsx", "js" },
+        { "objective-c", "objc" }, { "javascript", "js" }, { "typescript", "ts" }, { "tsx", "ts" },
         { "python", "py" }, { "ruby", "rb" }, { "rust", "rs" }, { "go", "go" }, { "java", "java" },
         { "kotlin", "kt" }, { "swift", "swift" }, { "elixir", "ex" }, { "shellscript", "sh" },
         { "bash", "sh" }, { "markdown", "md" }, { "json", "json" }, { "yaml", "yaml" },
@@ -135,25 +135,32 @@ inline std::string_view langMapValue( std::string_view val ) noexcept
     return trimWs( val );
 }
 
-// [overrule] `suffixes = [".h", ...]`: every double-quoted string of the value. A listed list replaces the default set,
-// an empty one keeps it (the section exists to scope the set). A value that is not one whole `[ ... ]` array with closed
-// strings is an unknown shape: ignored, the defaults stand — a partial suffix set is never installed.
+// [overrule] `suffixes = [".h", ...]`: a `[ ... ]` array of double-quoted strings separated by commas (a trailing comma
+// allowed). A listed list replaces the default set, an empty one keeps it (the section exists to scope the set). Any other
+// element or separator (`[".h", 123, ".c"]`, an unclosed string) makes the whole value an unknown shape: ignored, the
+// defaults stand — a partial suffix set is never installed.
 inline void langMapSuffixes( LangMap& m, std::string_view val )
 {
     if( val.size() < 2 || val.front() != '[' || val.back() != ']' )
     {
         return;
     }
+    std::string_view         rest = trimWs( val.substr( 1, val.size() - 2 ) );
     std::vector<std::string> suf;
-    for( std::size_t p = 0; ( p = val.find( '"', p ) ) != std::string_view::npos; )
+    while( !rest.empty() )
     {
-        const std::size_t e = val.find( '"', p + 1 );
+        const std::size_t e = rest.front() == '"' ? rest.find( '"', 1 ) : std::string_view::npos;
         if( e == std::string_view::npos )
         {
-            return;
+            return;   // an element that is not one closed string
         }
-        suf.emplace_back( val.substr( p + 1, e - p - 1 ) );
-        p = e + 1;
+        suf.emplace_back( rest.substr( 1, e - 1 ) );
+        rest = trimWs( rest.substr( e + 1 ) );
+        if( !rest.empty() && rest.front() != ',' )
+        {
+            return;   // two elements with no comma between them
+        }
+        rest = rest.empty() ? rest : trimWs( rest.substr( 1 ) );
     }
     if( !suf.empty() )
     {
