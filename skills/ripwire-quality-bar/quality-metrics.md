@@ -73,8 +73,10 @@ degrades on (large-N studies):
 - **Defect shapes** (`defect-shape`; measured on this project's own review findings, not the literature): a
   literal format whose fields do not match its arguments (`format-arity` — the one row that gates on new code
   too), a byte cap plus an ellipsis with no
-  UTF-8 back-off (`utf8-cut`), a keep-first dedup over a severity field (`dedup-first`), and a test
-  script's absence assertion that passes on a crash (`vacuous-assert`). The last three are `sev="minor"`.
+  UTF-8 back-off (`utf8-cut`), a keep-first dedup over a severity field (`dedup-first`), a test
+  script's absence assertion that passes on a crash (`vacuous-assert`), and a dropped I/O or child status
+  (`unchecked-status`: `pclose`, `rename`, `fclose` of a written stream, `subprocess.run` with no `check=`).
+  The last four are `sev="minor"`.
 - **Pass-rate ≠ design quality**: fewer than half of test-passing agent patches satisfy design constraints
   (DesignBench) — tests passing is not evidence the delta is clean.
 - One-time "write good code" prompting cuts initial verbosity/erosion by about a third but does **not**
