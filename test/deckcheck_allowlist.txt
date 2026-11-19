@@ -146,3 +146,5 @@
 --max-drift	flag of this repo's own docs/counts_snapshot.py (check --max-drift, the drift-bounded staleness gate; CONTRIBUTING, docs/EVALS.md), never a ripwire flag
 --max-pods	the kubelet flag (kubernetes), quoted in a --for task in a changelog worked example (forliteral-3 FLAG-SHAPE-LIT)
 --stdin	git's own diff-tree option ("git diff-tree --stdin", one process fed every revision pair) quoted in changelog.d/large-partial-1.md's REF-WINDOW-COST entry - a foreign tool flag, not a ripwire flag
+--hook-legend-seen	skills/install.sh's own flag (lane LS1): the OPT-IN legend-seen hook that rewrites ripwire commands to add --legend-seen= (hooks/ripwire-legend-seen.sh and its Codex/opencode ports, gated by test/legendseenhookcheck.sh and test/legendseenportcheck.sh), printed as a comment by `ripwire wrap` — not a ripwire binary flag
+--opencode	skills/install.sh's opencode target (lane LS1), valid only beside --hook-legend-seen: it writes the legend-seen plugin loader under ${XDG_CONFIG_HOME:-~/.config}/opencode/plugin — not a ripwire binary flag

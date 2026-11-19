@@ -31,8 +31,9 @@
 #
 # Opt-out: RIPWIRE_LEGEND_SEEN=0. State: ${RIPWIRE_LEGEND_STATE:-${RIPWIRE_HOME:-~/.ripwire}/legend-seen}/SESSION/AGENT/
 # {seen,compacts}, keyed by agent_id too (a subagent shares session_id, not context). Dirs older than 2 days expire.
-# Gate: test/legendseenhookcheck.sh. Registered by skills/install.sh --hook (PreToolUse/PostToolUse matcher Bash,
-# SessionStart and PreCompact matcher *).
+# Gate: test/legendseenhookcheck.sh. OPT-IN on its own — it rewrites commands, so plain --hook never installs it:
+# skills/install.sh --hook-legend-seen (PreToolUse/PostToolUse matcher Bash, SessionStart and PreCompact matcher *).
+# Codex: hooks/ripwire-codex-legend-seen.sh; opencode: hooks/opencode/ripwire-legend-seen.js (test/legendseenportcheck.sh).
 set -u
 
 [ "${RIPWIRE_LEGEND_SEEN:-1}" = 0 ] && exit 0

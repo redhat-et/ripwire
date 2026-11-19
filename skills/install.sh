@@ -10,6 +10,8 @@
 # Add --hook explicitly to install the advisory PreToolUse + SessionStart hook for the selected client:
 # skills/install.sh --hook (Claude) or skills/install.sh --codex --hook (Codex). --openclaw installs to
 # that same cross-agent root (openclaw's own "compatibility skill root"); it has no hook slot.
+# The legend-seen hook REWRITES ripwire commands (it adds --legend-seen=<session file>), so it is its own opt-in:
+# skills/install.sh --hook-legend-seen (Claude), --codex --hook-legend-seen, or --opencode --hook-legend-seen.
 set -eu
 src="$( cd "$( dirname "$0" )" && pwd )"
 
@@ -361,8 +363,7 @@ install_claude_hook()
         any((.hooks.PreToolUse // [])[]?.hooks[]?; isScript($n))' \
         "$settings" >/dev/null 2>&1; then
         refresh_hook_matcher "$settings" "$hookCmd" "$hookMatcher" || return $?
-        install_claude_route "$settings" || return $?
-        install_claude_legend_seen "$settings"
+        install_claude_route "$settings"
         return $?
     fi
 
@@ -404,8 +405,84 @@ install_claude_hook()
         echo "skills/install.sh: could not merge $settings (is it valid JSON?); nothing changed." >&2
         exit 1
     fi
-    install_claude_route "$settings" || return $?
-    install_claude_legend_seen "$settings"
+    install_claude_route "$settings"
+}
+
+# ── --hook-legend-seen: the legend-seen hook, OPT-IN on its own (lane LS1, until the owner rules on a default) ──────
+# It is the one hook here that REWRITES a tool call (it inserts --legend-seen=FILE after the binary word of a ripwire
+# command), so plain --hook — advisory-only by its own promise — never installs it. One function per client.
+install_claude_legend_seen_hook()
+{
+    settings="$( abs_root "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "${CLAUDE_CONFIG_DIR:-}" )/settings.json" || exit 2
+    find_jq
+    [ -n "$jqBin" ] || { echo "skills/install.sh --hook-legend-seen needs jq on PATH to safely merge $settings (not found)." >&2; exit 1; }
+    mkdir -p "$( dirname "$settings" )"
+    [ -f "$settings" ] || ( umask 077; echo '{}' >"$settings" )
+    settings="$( resolve_link "$settings" )" || exit 1
+    install_claude_legend_seen "$settings" || exit 1
+}
+
+install_codex_legend_seen_hook()
+{
+    settings="$( abs_root "${CODEX_HOME:-$HOME/.codex}" "${CODEX_HOME:-}" )/hooks.json" || exit 2
+    adapter="$( dirname "$src" )/hooks/ripwire-codex-legend-seen.sh"
+    shared="$( dirname "$src" )/hooks/ripwire-legend-seen.sh"
+    [ -f "$adapter" ] && [ -f "$shared" ] || { echo "skills/install.sh: hooks/ripwire-codex-legend-seen.sh or its shared hook is missing beside $src" >&2; exit 1; }
+    chmod +x "$adapter" "$shared" 2>/dev/null || true
+    cmd="$( hook_cmd "$adapter" )" || exit 1
+    find_jq
+    [ -n "$jqBin" ] || { echo "skills/install.sh --codex --hook-legend-seen needs jq on PATH to safely merge $settings (not found)." >&2; exit 1; }
+    mkdir -p "$( dirname "$settings" )"
+    [ -f "$settings" ] || ( umask 077; echo '{}' >"$settings" )
+    settings="$( resolve_link "$settings" )" || exit 1
+    echo "skills/install.sh --codex --hook-legend-seen will add or refresh these entries in $settings:"
+    echo "  PreToolUse / PostToolUse (^Bash\$) and SessionStart (startup|resume|clear|compact) -> $cmd"
+    echo "  behavior: REWRITES a ripwire Bash command, only by inserting --legend-seen=<session file> after the binary"
+    echo "            word, so its answer leaves out legend definitions this session already received (rows unchanged)."
+    echo "            Never a permission decision. RIPWIRE_LEGEND_SEEN=0 turns it off."
+    mk_tmp "$settings"
+    if "$jqBin" --arg cmd "$cmd" --arg n "ripwire-codex-legend-seen.sh" "$jqIsScript"'
+        .hooks //= {} |
+        .hooks |= with_entries( .value |= map( .hooks |= map( if isScript($n) then .command = $cmd else . end ) ) ) |
+        reduce (["PreToolUse","^Bash$"], ["PostToolUse","^Bash$"], ["SessionStart","^(startup|resume|clear|compact)$"]) as [$k, $m] (.;
+            if any((.hooks[$k] // [])[]?.hooks[]?; isScript($n)) then .
+            else .hooks[$k] = ((.hooks[$k] // []) + [{ matcher: $m, hooks: [{ type: "command", command: $cmd, timeout: 10,
+                statusMessage: "Ripwire legend-seen" }] }]) end )
+    ' "$settings" >"$tmp" && [ -s "$tmp" ] && mv "$tmp" "$settings"; then
+        echo "done. Registered ripwire's legend-seen hook in $settings. Open /hooks in Codex to review and trust it."
+    else
+        rm -f "$tmp"
+        echo "skills/install.sh: could not merge $settings (is it valid JSON?); nothing changed." >&2
+        exit 1
+    fi
+}
+
+# opencode loads plugin modules, not shell hooks: write ONE loader file into its global plugin dir that imports this
+# checkout's plugin (hooks/opencode/ripwire-legend-seen.js), so the plugin and the shell hook it calls stay version-
+# controlled here. Rewriting the loader is idempotent.
+install_opencode_legend_seen_hook()
+{
+    plugin="$( dirname "$src" )/hooks/opencode/ripwire-legend-seen.js"
+    [ -f "$plugin" ] && [ -f "$( dirname "$src" )/hooks/ripwire-legend-seen.sh" ] || {
+        echo "skills/install.sh: hooks/opencode/ripwire-legend-seen.js or its shared hook is missing beside $src" >&2; exit 1; }
+    chmod +x "$( dirname "$src" )/hooks/ripwire-legend-seen.sh" 2>/dev/null || true
+    pdir="$( abs_root "${XDG_CONFIG_HOME:-$HOME/.config}" "${XDG_CONFIG_HOME:-}" )/opencode/plugin" || exit 2
+    find_jq
+    [ -n "$jqBin" ] || { echo "skills/install.sh --opencode --hook-legend-seen needs jq on PATH to quote the plugin path (not found)." >&2; exit 1; }
+    mkdir -p "$pdir"
+    loader="$pdir/ripwire-legend-seen.js"
+    quoted="$( printf '%s' "$plugin" | "$jqBin" -Rs . )" || exit 1
+    echo "skills/install.sh --opencode --hook-legend-seen will write $loader, a loader for $plugin:"
+    echo "  behavior: REWRITES a ripwire bash command, only by inserting --legend-seen=<session file> after the binary"
+    echo "            word, so its answer leaves out legend definitions this session already received (rows unchanged)."
+    echo "            RIPWIRE_LEGEND_SEEN=0 turns it off; delete $loader to remove it."
+    mk_tmp "$loader"
+    {
+        echo "// ripwire legend-seen loader — written by skills/install.sh --opencode --hook-legend-seen; delete this file to remove it."
+        echo "import { pathToFileURL } from \"node:url\";"
+        echo "export const { RipwireLegendSeen } = await import( pathToFileURL( $quoted ).href );"
+    } >"$tmp" && [ -s "$tmp" ] && mv "$tmp" "$loader" || { rm -f "$tmp"; echo "skills/install.sh: could not write $loader" >&2; exit 1; }
+    echo "done. Registered ripwire's legend-seen plugin for opencode in $loader."
 }
 
 install_codex_hook()
@@ -472,11 +549,14 @@ install_codex_hook()
 mode="claude"
 explicitMode=0
 wantHook=0
+wantLegendSeen=0
 wantContributor=0
 explicitPath=""
 for arg in "$@"; do
     case "$arg" in
         --hook) wantHook=1 ;;
+        --hook-legend-seen) wantLegendSeen=1 ;;
+        --opencode) mode="opencode"; explicitMode=1 ;;
         --contributor) wantContributor=1 ;;
         --codex) mode="codex"; explicitMode=1 ;;
         --openclaw) mode="openclaw"; explicitMode=1 ;;
@@ -488,6 +568,21 @@ for arg in "$@"; do
            explicitPath="$arg"; mode="path"; explicitMode=1 ;;
     esac
 done
+
+# --hook-legend-seen is hook-only too, for the client named (Claude by default): it never installs skills.
+if [ "$wantLegendSeen" -eq 1 ]; then
+    case "$mode" in
+        claude)              [ "$wantHook" -eq 0 ] || install_claude_hook; install_claude_legend_seen_hook ;;
+        codex|codex-legacy)  [ "$wantHook" -eq 0 ] || install_codex_hook; install_codex_legend_seen_hook ;;
+        opencode)            install_opencode_legend_seen_hook ;;
+        *) echo "skills/install.sh: --hook-legend-seen takes --claude (the default), --codex or --opencode" >&2; exit 2 ;;
+    esac
+    exit 0
+fi
+if [ "$mode" = "opencode" ]; then
+    echo "skills/install.sh: --opencode installs only the legend-seen plugin (pass --hook-legend-seen); opencode reads ripwire's skills through AGENTS.md (ripwire wrap opencode)" >&2
+    exit 2
+fi
 
 # Preserve the established hook-only invocation: `--hook` changes settings but does not also install skills.
 if [ "$wantHook" -eq 1 ] && [ "$explicitMode" -eq 0 ]; then

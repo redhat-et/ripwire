@@ -40,6 +40,16 @@ constexpr std::string_view commentBody( std::string_view whole ) noexcept
     return whole;
 }
 
+// The text of a present-only legend BETWEEN two of its erasable clauses (an empty name = the legend's start or end).
+// An emitter that erases a clause its rows do not carry (rw::eraseAbsentClause) prints the base minus that clause, which
+// is no single constant — but it is always a run of these pieces and the clauses kept, each an entry of its own.
+constexpr std::string_view piece( std::string_view whole, std::string_view after, std::string_view before ) noexcept
+{
+    const std::size_t from = after.empty() ? 0 : whole.find( after ) + after.size();
+    const std::size_t to   = before.empty() ? whole.size() : whole.find( before );
+    return whole.substr( from, to - from );
+}
+
 // The page clause at the DEFAULT page size: its text carries the size, so a caller paging at another size meets a
 // clause that is no entry and keeps it inline — a missed saving, never a wrong reading.
 const std::string kForDocPageClause = rw::forpages::detail::pageClause( rw::forpages::kForPageBytesDefault );
@@ -67,7 +77,8 @@ const std::string_view kForDocList[] =
     // the present-only riders from the for*.h headers
     commentBody( rw::kForCompactCoverageClause ),
     commentBody( rw::kForCompactMemberNamesLegend ),
-    commentBody( rw::kForCompactBodyFoldLegend ),
+    piece( rw::kForCompactBodyFoldLegend, {}, rw::kForCompactBodyFoldMembersClause ),
+    piece( rw::kForCompactBodyFoldLegend, rw::kForCompactBodyFoldMembersClause, {} ),
     commentBody( rw::kForCompactBodyFoldMembersClause ),
     commentBody( rw::kForCompactFoldFollowLegend ),
     commentBody( rw::kForCompactCtorHopLegend ),
@@ -91,7 +102,7 @@ const std::string_view kForDocList[] =
     commentBody( rw::kForCompactCallerHopLegend ),
     commentBody( rw::kForCompactRankedCallerHopLegend ),
     commentBody( rw::kForCompactSubjectCallerHopLegend ),
-    commentBody( rw::kForCompactLiteralLegend ),
+    commentBody( piece( rw::kForCompactLiteralLegend, {}, rw::kForCompactLiteralBodyClause ) ),
     commentBody( rw::kForCompactLiteralCutLegend ),
     commentBody( rw::kForCompactLiteralBodyClause ),
     commentBody( rw::kForCompactSelfHookLegend ),
@@ -109,12 +120,28 @@ const std::string_view kForDocList[] =
     // the BLOCK-LOCAL legends: a --for section carries its own "<!-- ripwire for X …" with it (AF1-fix), so a held one
     // must be left out where it stands — on page 1 or on the later page its block lands on
     commentBody( rw::kForDeclLegend ),
-    commentBody( rw::kForFileSymsLegend ),
+    commentBody( piece( rw::kForFileSymsLegendCompact, {}, rw::kForFileSymsTestClauseCompact ) ),
+    piece( rw::kForFileSymsLegendCompact, rw::kForFileSymsTestClauseCompact, rw::kForFileSymsReadClauseCompact ),
+    commentBody( piece( rw::kForFileSymsLegendCompact, rw::kForFileSymsReadClauseCompact, {} ) ),
+    rw::kForFileSymsTestClauseCompact,
+    rw::kForFileSymsReadClauseCompact,
     commentBody( rw::kForFileSymsHeldLegend ),
-    commentBody( rw::kForDocBodyLegend ),
-    commentBody( rw::kForDottedStringsLegend ),
+    commentBody( piece( rw::kForDocBodyLegend, {}, rw::kForDocBodyHeldClause ) ),
+    commentBody( piece( rw::kForDocBodyLegend, rw::kForDocBodyHeldClause, {} ) ),
+    rw::kForDocBodyHeldClause,
+    commentBody( piece( rw::kForDottedStringsLegend, {}, rw::kForDottedSinkClause ) ),
+    commentBody( piece( rw::kForDottedStringsLegend, rw::kForDottedTemplateClause, {} ) ),
+    rw::kForDottedSinkClause,
+    rw::kForDottedLoaderClause,
+    rw::kForDottedTemplateClause,
     commentBody( rw::kReaderCallersLegend ),
-    commentBody( rw::kForExemplarFamilyCompactLegend ),
+    commentBody( piece( rw::kForExemplarFamilyCompactLegend, {}, rw::kExemplarCompactScanSkipClause ) ),
+    piece( rw::kForExemplarFamilyCompactLegend, rw::kExemplarCompactScanSkipClause, rw::kExemplarCompactDirTouchClause ),
+    piece( rw::kForExemplarFamilyCompactLegend, rw::kExemplarCompactDirTouchClause, rw::kExemplarCompactContractClause ),
+    rw::kExemplarCompactScanSkipClause,
+    rw::kExemplarCompactDirTouchClause,
+    rw::kExemplarCompactContractClause,
+    rw::kExemplarCompactContractUnreadClause,
     commentBody( rw::kForExemplarNoFamilyLegend ),
     commentBody( rw::kForManifestRowsCompactLegend ),
     commentBody( rw::kForLiteralKeyLegend ),
@@ -128,6 +155,11 @@ const std::string_view kForDocList[] =
     commentBody( rw::kForLiteralSubscriptLegend ),
     commentBody( kReaskLegend ),
     commentBody( kReaskImpactLegend ),
+    // verbs_for.h — the est_tokens= sentence, by the ceilings the root names
+    kForEstTokensNote,
+    kForEstTokensBudgetCeilingNote,
+    kForEstTokensBudgetNote,
+    kForEstTokensCeilingNote,
     // forpages.h — the page clause, at the default page size
     commentBody( kForDocPageClause ),
 };

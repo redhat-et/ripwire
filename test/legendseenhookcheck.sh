@@ -180,14 +180,18 @@ SP="$TMP/sp ace"; mkdir -p "$SP/S5/main"; cp "$TMP/want.seen" "$SP/S5/main/seen"
 PRE="$( printf '%s' "$( prejson S5 "" "$C1" )" | env HOME="$TMP/home" PATH="$HPATH" RIPWIRE_LEGEND_STATE="$SP" bash "$HOOK" )"
 if [ -z "$PRE" ]; then ok "(b) a state path holding a space is never spliced into a command"; else no "(b) spliced an unquotable path: $PRE"; fi
 
-# ═══ (i) skills/install.sh --hook registers it on the four events, once, and a second run does not double it ═══════
+# ═══ (i) the hook is its OWN opt-in: plain --hook never installs it; --hook-legend-seen registers it on the four
+#     events, once, and a second run does not double it ═════════════════════════════════════════════════════════════
 IH="$TMP/ihome"; mkdir -p "$IH"
-HOME="$IH" PATH="$HPATH" bash "$ROOT/skills/install.sh" --hook >"$TMP/i1" 2>&1; r1=$?
-HOME="$IH" PATH="$HPATH" bash "$ROOT/skills/install.sh" --hook >"$TMP/i2" 2>&1; r2=$?
+HOME="$IH" PATH="$HPATH" bash "$ROOT/skills/install.sh" --hook >/dev/null 2>&1
+n0="$( jq '[.. | objects | select(has("command")) | .command | select(test("ripwire-legend-seen"))] | length' "$IH/.claude/settings.json" 2>/dev/null )"
+if [ "$n0" = 0 ]; then ok "(i) plain --hook (advisory-only) installs no legend-seen entry"; else no "(i) plain --hook installed $n0 legend-seen entries"; fi
+HOME="$IH" PATH="$HPATH" bash "$ROOT/skills/install.sh" --hook-legend-seen >"$TMP/i1" 2>&1; r1=$?
+HOME="$IH" PATH="$HPATH" bash "$ROOT/skills/install.sh" --hook-legend-seen >"$TMP/i2" 2>&1; r2=$?
 iset="$IH/.claude/settings.json"
 counts="$( jq -r '[("PreToolUse","PostToolUse","SessionStart","PreCompact") as $k | [(.hooks[$k] // [])[] | .hooks[]? | select(.command | test("ripwire-legend-seen[.]sh"))] | length] | map(tostring) | join(" ")' "$iset" 2>/dev/null )"
-if [ "$r1" -eq 0 ] && [ "$r2" -eq 0 ] && [ "$counts" = "1 1 1 1" ]; then ok "(i) --hook registers PreToolUse/PostToolUse/SessionStart/PreCompact once each, twice run"
-else no "(i) --hook registration: rc=$r1/$r2 counts=[$counts]"; fi
+if [ "$r1" -eq 0 ] && [ "$r2" -eq 0 ] && [ "$counts" = "1 1 1 1" ]; then ok "(i) --hook-legend-seen registers PreToolUse/PostToolUse/SessionStart/PreCompact once each, twice run"
+else no "(i) --hook-legend-seen registration: rc=$r1/$r2 counts=[$counts]"; fi
 if jq -e '([.hooks.PreToolUse[] | select(any(.hooks[]?; .command | test("ripwire-legend-seen"))) | .matcher] == ["Bash"]) and ([.hooks.PreCompact[] | select(any(.hooks[]?; .command | test("ripwire-legend-seen"))) | .matcher] == ["*"])' "$iset" >/dev/null 2>&1 \
    && grep -q "REWRITES a ripwire Bash command" "$TMP/i1"; then
     ok "(i) matchers Bash / *, and the installer says it rewrites a command before it does"
