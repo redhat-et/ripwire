@@ -105,6 +105,21 @@ def _skip_brace( s, i ):
         i += 1
     return i
 
+def _dq_literal_quotes( s ):
+    """A double-quoted text with its own single quotes blanked: they are literal there ("don't"), but a quote inside a
+    $( ) or ` ` it holds is live ("$( grep -o '<r ' f )" keeps '<r ' one word, not a < redirect)."""
+    out, i = list( s ), 0
+    while i < len( s ):
+        c = s[i]
+        if c == "\\": i += 2; continue
+        if s.startswith( "$(", i ):
+            i = _skip_paren( s, i + 1 ); continue
+        if c == "`":
+            j = s.find( "`", i + 1 ); i = len( s ) if j < 0 else j + 1; continue
+        if c == "'": out[i] = " "
+        i += 1
+    return "".join( out )
+
 def _subs_in( raw, line ):
     """Command substitutions $( ... ) and ` ... ` inside one word (outside single quotes), with their lines."""
     out, i = [], 0
@@ -124,7 +139,7 @@ def _subs_in( raw, line ):
         if c == '"':
             # descend: substitutions inside double quotes are live
             j = _skip_quote( raw, i, '"' )
-            for inner, ln in _subs_in( raw[i + 1:j - 1].replace( "'", " " ), line + raw.count( "\n", 0, i ) ):
+            for inner, ln in _subs_in( _dq_literal_quotes( raw[i + 1:j - 1] ), line + raw.count( "\n", 0, i ) ):
                 out.append( ( inner, ln ) )
             i = j; continue
         i += 1
