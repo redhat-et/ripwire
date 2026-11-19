@@ -152,15 +152,21 @@ inline std::vector<std::size_t> pageEnds( const std::vector<Cut>& cuts, std::siz
 }
 [[nodiscard]] inline std::string closeTagOf( const answerfirst::Block& b ) { return "</" + std::string( b.name ) + ">"; }
 
-// The page disclosure on the root: page= pages= withheld_bytes=, the page's SECTION disclosure (`sections`, sectionAttrs) and,
-// on every page but the last, next=.
-[[nodiscard]] inline std::string pageAttrs( const PageAsk& ask, std::size_t page, std::size_t pages, std::size_t withheld, std::string_view sections )
+// Where one page sits in the answer: its index, the page count, the row bytes after it, and its SECTION disclosure (sectionAttrs).
+struct PageAt
 {
-    std::string a = " page=\"" + std::to_string( page ) + "\" pages=\"" + std::to_string( pages ) + "\" withheld_bytes=\"" + std::to_string( withheld ) + "\"";
-    a += sections;
-    if( page < pages )
+    std::size_t      page = 1, pages = 1, withheld = 0;
+    std::string_view sections;
+};
+
+// The page disclosure on the root: page= pages= withheld_bytes=, continued=/deferred= and, on every page but the last, next=.
+[[nodiscard]] inline std::string pageAttrs( const PageAsk& ask, const PageAt& at )
+{
+    std::string a = " page=\"" + std::to_string( at.page ) + "\" pages=\"" + std::to_string( at.pages ) + "\" withheld_bytes=\"" + std::to_string( at.withheld ) + "\"";
+    a += at.sections;
+    if( at.page < at.pages )
     {
-        a += nextAttrXml( std::string( ask.call ) + " --page-bytes=" + std::to_string( ask.pageBytes ) + ":" + std::to_string( page + 1 ) );
+        a += nextAttrXml( std::string( ask.call ) + " --page-bytes=" + std::to_string( ask.pageBytes ) + ":" + std::to_string( at.page + 1 ) );
     }
     return a;
 }
@@ -277,7 +283,8 @@ struct Stream
     std::string out;
     out.reserve( end.at + ( st.closeAt - legendAt ) + 1024 );
     out.append( v.substr( 0, st.openEnd ) );
-    out += pageAttrs( ask, 1, pages, st.cuts.back().at - end.at, sectionAttrs( st, end ) );
+    const std::string sections = sectionAttrs( st, end );
+    out += pageAttrs( ask, { .page = 1, .pages = pages, .withheld = st.cuts.back().at - end.at, .sections = sections } );
     out += '>';
     out.append( v.substr( st.openEnd + 1, end.at - ( st.openEnd + 1 ) ) );
     if( end.openSec != std::string_view::npos ) { out += closeTagOf( st.blocks[ end.openSec ] ); }
@@ -295,7 +302,8 @@ struct Stream
     const std::string_view rootOpen = v.substr( st.openAt, st.openEnd - st.openAt );   // without its '>'
     std::string out = "<ctx";
     for( const std::string_view name : { "task", "at", "schema", "est_tokens" } ) { out.append( rootAttr( rootOpen, name ) ); }
-    out += pageAttrs( ask, ask.page, pages, st.cuts.back().at - end.at, sectionAttrs( st, end ) );
+    const std::string sections = sectionAttrs( st, end );
+    out += pageAttrs( ask, { .page = ask.page, .pages = pages, .withheld = st.cuts.back().at - end.at, .sections = sections } );
     out += '>';
     if( start.openSec != std::string_view::npos ) { out.append( openTagOf( v, st.blocks[ start.openSec ] ) ); }
     out.append( v.substr( start.at, end.at - start.at ) );
