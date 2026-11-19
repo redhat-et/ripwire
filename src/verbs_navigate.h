@@ -482,7 +482,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
                            + rw::viaNameLegend( chHasVia, false, cfg.columnar )                   // FE-B: likewise for via="name"
                            + rw::viaMacroLegend( chHasMacro ) + rw::viaMacroCappedLegend( chRows.viaMacroWithheld > 0 )   // BX1 FIX 2; the ceiling's disclosure
                            + rw::viaLinkLegend( chHasLink )
-                           + rw::defTableLegend( chAttr.groups.multi(), chListing.cut, /*sole=*/wantCallers && chAttr.groups.size() == 1 )   // attrib-multidef; VERB-DEF-ROWS
+                           + rw::defTableLegend( { .table = chAttr.groups.multi(), .cut = chListing.cut, .sole = wantCallers && chAttr.groups.size() == 1 } )   // attrib-multidef; VERB-DEF-ROWS
                            + rw::untiedDeclLegend( wantCallers && !chAttr.groups.unattributed.empty() )   // BX1 FIX 7: exactly when the table lists one
                            + rw::splitArmLegend( chHasSplit )
                            + rw::memberOwnerLegendFor( chOwnerRows ) ).c_str(),   // QUALNAME-1: likewise, exactly when a shown row names its owner
@@ -1552,7 +1552,7 @@ inline std::string safeDeleteFloorLegend( const SafeDeleteLegendFlags& flags, st
     {
         clause += "next= is that uses call. ";   // runSafeDelete names it exactly then (sdNextAttr)
     }
-    clause += rw::defTableLegend( flags.defTable, flags.defTableCut ) + rw::splitArmLegend( flags.splitArms );   // attrib-multidef
+    clause += rw::defTableLegend( { .table = flags.defTable, .cut = flags.defTableCut } ) + rw::splitArmLegend( flags.splitArms );   // attrib-multidef
     clause += rw::viaLinkLegend( flags.linkRows );
     clause += rw::anchorMissLegend( flags.anchorRows );
     clause += rw::implsLegend( flags.contract );
@@ -3633,7 +3633,7 @@ inline void emitImpactLegend( const rw::Config& cfg, const rw::IngestResult& ing
                  ( std::string( rw::modScopeLegend( imHasModScope ) )
                    + rw::impactRollupLegend( !imFiles.rows.empty() && !cfg.columnar, imports.umbrella, rw::impactRollupHedged( imFiles ),
                                              !imports.next.empty() && !cfg.columnar, rw::ImpactRollupTypeClauses{ imFiles.typed, imFiles.typeDefs, imFiles.typeCapped } )
-                   + rw::defTableLegend( imAttr.groups.multi(), imListing.cut, /*sole=*/imAttr.groups.size() == 1 )   // IMPACT-SOLE-DEF: the one-group row's clause
+                   + rw::defTableLegend( { .table = imAttr.groups.multi(), .cut = imListing.cut, .sole = imAttr.groups.size() == 1 } )   // IMPACT-SOLE-DEF: the one-group row's clause
                    + rw::untiedDeclLegend( !imAttr.groups.unattributed.empty() )   // BX1 FIX 7: exactly when the table lists one
                    + rw::memberOwnerLegendFor( rw::memberOwnerRows( ing, std::span<const rw::NodeId>( show ).subspan( imPage.begin, imPage.end - imPage.begin ) ) ) ).c_str(),   // QUALNAME-1
                  ( std::string( rw::valueRefsReachLegend( !imValueRefs.rows.empty() ) )

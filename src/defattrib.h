@@ -832,6 +832,23 @@ inline std::string defsListedAttrXml( const DefGroups& groups, const DefTableLis
     return ( groups.multi() && listing.cut ) ? " defs_listed=\"" + std::to_string( listing.listed.size() ) + "\"" : std::string();
 }
 
+// BX1 FIX 7: one pass over the matches, because a dropped group's member is exactly the declaration a printed table must still
+// list. ofMatch is renumbered into the kept groups (UINT32_MAX = a silent group's member, no row ties to it), and every match
+// that lands on one is appended to kept.unattributed in match order. Its own function so defGroupsDropSilent, which only needs
+// the result, does not carry this loop's two decision points on top of its own.
+inline void defGroupsRenumberMatches( const DefGroups& groups, const std::vector<std::uint32_t>& renum, DefGroups& kept )
+{
+    kept.ofMatch.reserve( groups.ofMatch.size() );
+    for( std::size_t i = 0; i < groups.ofMatch.size(); ++i )
+    {
+        kept.ofMatch.push_back( renum[ groups.ofMatch[i] ] );
+        if( kept.ofMatch.back() == UINT32_MAX )
+        {
+            kept.unattributed.push_back( groups.member[i] );
+        }
+    }
+}
+
 // An answer's groups once its ties are known: the untied groups (defGroupUntied) no row names are dropped ONLY when that leaves
 // one group — the tmux/ninja prototype + definition answer stays one group with no table. When two or more groups would remain
 // the table is printed anyway, and it claims to list every group defs= forms, so nothing is dropped: each untied declaration
@@ -871,15 +888,7 @@ inline void defGroupsDropSilent( DefGroups& groups, RowDefTokens& tokens )
         kept.primaryOfSpec.push_back( groups.primaryOfSpec[k] );
         kept.untied.push_back( groups.untied[k] );
     }
-    kept.ofMatch.reserve( groups.ofMatch.size() );
-    for( std::size_t i = 0; i < groups.ofMatch.size(); ++i )
-    {
-        kept.ofMatch.push_back( renum[ groups.ofMatch[i] ] );   // UINT32_MAX: a silent group's member (no row ties to it)
-        if( kept.ofMatch.back() == UINT32_MAX )
-        {
-            kept.unattributed.push_back( groups.member[i] );   // BX1 FIX 7: still listed by a printed table, in match order
-        }
-    }
+    defGroupsRenumberMatches( groups, renum, kept );   // BX1 FIX 7: ofMatch renumbered, and the dropped groups' members collected
     kept.member = std::move( groups.member );   // parallel to ofMatch, which keeps every match (a silent one as UINT32_MAX)
     for( std::uint32_t& t : tokens.tok )
     {
@@ -1087,7 +1096,7 @@ inline UsesDefTable usesDefTable( const IngestResult& ing, std::span<const NodeI
     out.listedAttr = defsListedAttrXml( groups, listing );
     if( !out.rows.empty() || !out.listedAttr.empty() )
     {
-        out.legend = defTableLegend( groups.multi(), listing.cut, /*sole=*/groups.size() == 1, DefLegendFor::UseSites )
+        out.legend = defTableLegend( { .table = groups.multi(), .cut = listing.cut, .sole = groups.size() == 1, .rows = DefLegendFor::UseSites } )
                    + untiedDeclLegend( !groups.unattributed.empty() );   // BX1 FIX 7
     }
     return out;

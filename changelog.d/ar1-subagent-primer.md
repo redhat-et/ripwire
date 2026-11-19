@@ -6,7 +6,7 @@ measured orchestrator session, none received any hook output. One had a ripwire 
 five tool calls. The generic guidance (CLAUDE.md, MCP instructions, deferred tools) was present and not acted on.
 
 - `skills/install.sh --hook-subagent-primer` registers `hooks/ripwire-subagent-primer.sh` on `SubagentStart`. It
-  adds ~660 B to each new subagent's context. It says to orient first with `ripwire <dir> --for="…" --legend=compact`.
+  adds ~660 B to each new subagent's context. It says to orient first with `ripwire <dir> --for="…"`.
   After the last edit and before reporting, it says to commit, run `--quality-delta=BASE..HEAD --legend=compact` and
   then `--test-gate --legend=compact`, and run the gates that names. A committed range catches a regression made in
   two steps. It cannot block a subagent. It is

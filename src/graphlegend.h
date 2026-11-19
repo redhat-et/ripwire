@@ -1355,19 +1355,30 @@ enum class DefLegendFor : std::uint8_t
     Rows, // a verb whose rows carry of_def (callers, callees, safe-delete, impact)
     UseSites // --uses: rows that name no group
 };
-inline std::string defTableLegend( bool table, bool cut, bool sole = false, DefLegendFor rows = DefLegendFor::Rows )
+// One struct rather than four positional parameters (the QualityDeltaLegendParts shape): every field is a property OF THE
+// ANSWER whose <def> rows are being introduced, three of the four are booleans, and a caller that has to remember which
+// bool comes second is the seam where a legend starts describing a table it is not attached to. Defaults make the
+// two-field call sites — `{ .table = true, .cut = listing.cut }` — read as they did.
+struct DefTableLegendParts
+{
+    bool         table = false;                 // several groups: the table is printed, and its rows carry of_def
+    bool         cut   = false;                 // above 16 groups: only the groups this page's rows name are listed
+    bool         sole  = false;                 // IMPACT-SOLE-DEF: exactly one group, so the one-group clause reads
+    DefLegendFor rows  = DefLegendFor::Rows;    // whose rows they are — of_def-carrying rows, or --uses' use-sites
+};
+inline std::string defTableLegend( const DefTableLegendParts& p )
 {
     std::string clause;
-    if( rows == DefLegendFor::UseSites && ( table || cut ) )
+    if( p.rows == DefLegendFor::UseSites && ( p.table || p.cut ) )
     {
-        clause = cut ? kUsesDefsListedLegend : kUsesDefTableLegend;
+        clause = p.cut ? kUsesDefsListedLegend : kUsesDefTableLegend;
     }
-    else if( table )
+    else if( p.table )
     {
         clause = kDefTableLegend;
-        clause += cut ? kDefsListedLegend : "";
+        clause += p.cut ? kDefsListedLegend : "";
     }
-    else if( sole )
+    else if( p.sole )
     {
         clause = kSoleDefLegend;
     }
