@@ -23,8 +23,9 @@
 //                 or a 1-hop-callers question: no route (asksPath).
 //   LITERAL veto  a double-quoted literal outside every backtick span (an error string, a printed message): no route — the
 //                 answer needs where the literal is built first (quotesLiteral).
-//   bare blast radius  "blast radius" with no who-calls and no where-used word is TRANSITIVE (→ --impact); with one it stays
-//                 direct-radius (→ --uses), as RT2 confirmed it (isBareBlastRadius).
+//   bare blast radius  HELD (owner ruling 2026-11-19: off until IMB1, --impact ⊇ --uses, lands and T5h measures it). When on,
+//                 "blast radius" with no who-calls and no where-used word is TRANSITIVE (→ --impact); with one it stays
+//                 direct-radius (→ --uses). Off (kBareBlastRadiusOn = false): every "blast radius" is direct-radius, as RT2 had it.
 // A vetoed question is answered as every unrouted question is: the --for answer, byte for byte.
 #pragma once
 
@@ -352,6 +353,8 @@ template <class OkAt>
 // RT3 BARE BLAST RADIUS (class B): "blast radius" with no who-calls word (\bcall(s|ed|ers?)?\b) and no where-used cue is the
 // TRANSITIVE radius (→ --impact). A question that names the direct relation ("every file that calls it", "decorates a class
 // with it") keeps the direct-radius kind (→ --uses), as RT2 confirmed it.
+// HELD (owner 2026-11-19): rule B is off until IMB1 lands and T5h measures it. Re-enable by setting this to true.
+inline constexpr bool kBareBlastRadiusOn = false;
 [[nodiscard]] inline bool isBareBlastRadius( std::string_view lq )
 {
     return lq.find( "blast radius" ) != std::string_view::npos && !hasCallWord( lq ) && !isWhereUsed( lq );
@@ -511,7 +514,7 @@ inline constexpr std::string_view kAsciiSpace = " \t\n\r\f\v";   // Python's \s 
     {
         return RouteKind::Transitive;
     }
-    if( detail::isBareBlastRadius( lq ) )
+    if( detail::kBareBlastRadiusOn && detail::isBareBlastRadius( lq ) )
     {
         return RouteKind::Transitive;   // RT3: a bare "blast radius" is the transitive radius
     }

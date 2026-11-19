@@ -196,13 +196,14 @@ QB='What is the blast radius of changing `compute_total`?'
 MA="$( mcpfor "$DIR/plain" "$QA" )"; MC="$( mcpfor "$DIR/msg" "$QC" )"; MB="$( mcpfor "$DIR/plain" "$QB" )"
 case "$MA" in *"<route "*) no "(t1) [P] MCP for routed a call-chain question: '$( printf '%s' "$MA" | routeOf )'" ;; *"<ctx"*) ok "(t1) [P] MCP for: a call-chain question is the ranked <ctx>, no <route>" ;; *) no "(t1) [P] no answer: '${MA:0:200}'" ;; esac
 case "$MC" in *"<route "*) no "(t1) [P] MCP for routed a quoted-literal question: '$( printf '%s' "$MC" | routeOf )'" ;; *"<ctx"*) ok "(t1) [P] MCP for: a quoted-literal question is the ranked <ctx>, no <route>" ;; *) no "(t1) [P] no answer: '${MC:0:200}'" ;; esac
-[ "$( attr "$( printf '%s' "$MB" | routeOf )" kind )" = transitive ] && [ "$( attr "$( printf '%s' "$MB" | routeOf )" verb )" = "--impact=compute_total" ]
-say $? "(t2) [P] MCP for: blast radius routes to --impact" "(t2) [P] MCP blast radius: '$( printf '%s' "$MB" | routeOf )'"
+# rule B is HELD (owner 2026-11-19; forroute.h kBareBlastRadiusOn = false): t2/t3 pin the RT2 behaviour, a bare blast radius → --uses
+[ "$( attr "$( printf '%s' "$MB" | routeOf )" kind )" = direct-radius ] && [ "$( attr "$( printf '%s' "$MB" | routeOf )" verb )" = "--uses=compute_total" ]
+say $? "(t2) [N] MCP for: rule B held, blast radius routes to --uses (RT2)" "(t2) [N] MCP blast radius: '$( printf '%s' "$MB" | routeOf )'"
 QT="$( python3 -c 'import json,sys; print(json.dumps([{"verb":"for","task":sys.argv[1]},{"verb":"for","task":sys.argv[2]},{"verb":"for","task":"Who calls `compute_total`?"}]))' "$QA" "$QB" )"
 T0="$( mcpbatch "$DIR/plain" "$QT" 0 )"; T1="$( mcpbatch "$DIR/plain" "$QT" 1 )"; T2="$( mcpbatch "$DIR/plain" "$QT" 2 )"
 case "$T0" in *"<route "*) no "(t3) [P] batch routed a call-chain item" ;; *"<ctx"*) ok "(t3) [P] batch: the call-chain item is the ranked <ctx>, no <route>" ;; *) no "(t3) [P] batch item: '${T0:0:200}'" ;; esac
-[ "$( printf '%s' "$T1" | routeOf )" = "$( printf '%s' "$MB" | routeOf )" ] && [ -n "$( printf '%s' "$T1" | routeOf )" ] && [ "$( attr "$( printf '%s' "$T1" | routeOf )" verb )" = "--impact=compute_total" ]
-say $? "(t3) [P] batch: the blast-radius item routes as the top-level MCP for (--impact)" "(t3) [P] batch blast item: '${T1:0:200}'"
+[ "$( printf '%s' "$T1" | routeOf )" = "$( printf '%s' "$MB" | routeOf )" ] && [ -n "$( printf '%s' "$T1" | routeOf )" ] && [ "$( attr "$( printf '%s' "$T1" | routeOf )" verb )" = "--uses=compute_total" ]
+say $? "(t3) [N] batch: the blast-radius item routes as the top-level MCP for (--uses; rule B held)" "(t3) [P] batch blast item: '${T1:0:200}'"
 [ "$( attr "$( printf '%s' "$T2" | routeOf )" kind )" = who-calls ]
 say $? "(t3) [N] batch: the who-calls item beside them still routes" "(t3) [N] batch who-calls item: '${T2:0:200}'"
 

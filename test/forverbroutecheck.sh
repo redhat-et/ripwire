@@ -426,8 +426,8 @@ say $? "(29) [C] two runs of a vetoed question are byte-identical" "(29) [C] vet
 
 # ── RT3 arms (30–35): three question kinds the RT2 rule sent to the wrong verb (results/RT3_VETOES_1119) ────────────
 # (A) a call PATH / CHAIN question is not a radius or a 1-hop-callers question: the PATH veto, no route.
-# (B) a BARE "blast radius" (no who-calls, no where-used word) is the transitive radius: --impact (it went to --uses);
-#     one that names the direct relation ("every file that calls it") stays direct-radius → --uses.
+# (B) HELD — a BARE "blast radius" as the transitive radius (--impact) is built but switched off (forroute.h
+#     kBareBlastRadiusOn); arm 32 pins the RT2 behaviour (--uses) until the owner re-enables it.
 # (C) a double-quoted literal (a message, an error string) outside every backtick span: the LITERAL veto, no route — the
 #     answer needs where the literal is built first. Each [P] arm is RED on the RT2 base (2f5561c26): that is the control.
 mkdir -p "$DIR/msg"
@@ -455,12 +455,14 @@ vetoArm v30d plain 'Show the call-chain between `run_main` and `compute_total`; 
 # (31) [P] class C: a double-quoted literal (straight or curly quotes) is vetoed
 vetoArm v31a msg 'Running `run_tool` prints "usage: tool [-v] FILE"; where is that message built and who calls it?'
 vetoArm v31b msg 'Which function calls `print_usage` to print “usage: tool”?'
-# (32) [P] class B: "blast radius" → --impact (transitive), not --uses
+# (32) [N] class B is HELD (owner ruling 2026-11-19: until IMB1, --impact ⊇ --uses, lands and T5h measures it; forroute.h
+#      kBareBlastRadiusOn = false). These arms pin the RT2 behaviour: a bare "blast radius" routes direct-radius → --uses.
+#      When rule B is re-enabled, flip them back to kind=transitive verb=--impact=compute_total.
 for q in 'What is the blast radius of changing `compute_total`?' 'What is the blast radius of changing `compute_total`, the helper that adds one?'; do
     run b32 plain --for="$q"
     F="$( firstChild "$DIR/b32.out" )"
-    [ "$( attr "$F" kind )" = transitive ] && [ "$( attr "$F" verb )" = "--impact=compute_total" ]
-    say $? "(32) [P] blast radius routes to --impact: '$q'" "(32) [P] '$q' reads '$F'"
+    [ "$( attr "$F" kind )" = direct-radius ] && [ "$( attr "$F" verb )" = "--uses=compute_total" ]
+    say $? "(32) [N] rule B held: bare blast radius still routes to --uses (RT2): '$q'" "(32) [N] '$q' reads '$F'"
 done
 # (33) [N] the routes that should still fire still fire, each to the verb RT2 chose
 routeIs(){ # $1 fixture $2 question $3 kind $4 verb
