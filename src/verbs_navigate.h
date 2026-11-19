@@ -1153,7 +1153,7 @@ inline std::size_t appendMacroUseSites( const rw::IngestResult& ing, const rw::G
     {
         for( std::uint32_t k = ro[n]; k < ro[n + 1]; ++k )
         {
-            if( const NodeId c = ci[k]; c < seen.size() && !seen[c] && rw::seeThroughMacro( ing, c ) )
+            if( const NodeId c = ci[k]; c < seen.size() && !seen[c] && rw::seeThroughMacro( ing.symbols[c] ) )
             {
                 seen[c] = 1;
                 macros.push_back( c );

@@ -1241,13 +1241,9 @@ inline RawRef cratePathMacroRef( std::string_view src, std::uint32_t at, std::ui
 // macro's span owns it and the graph connects THROUGH the macro, as it does for C. Not read: a metavariable (`$f(`), a keyword
 // (`if (`, `match (`), a definition (`fn name(`), a macro (`name!(`), a turbofish or generic path segment (`Vec::<T>::new(`,
 // a floor), anything in a literal or comment. `Self::` names the impl of the EXPANSION site: read as a bare name.
-inline bool transcriberKeyword( std::string_view w ) noexcept
-{
-    static constexpr std::string_view kw[] = { "if", "while", "match", "for", "return", "loop", "in", "as", "let", "mut", "ref", "move",
-                                               "unsafe", "async", "await", "fn", "impl", "where", "dyn", "else", "break", "continue",
-                                               "struct", "enum", "union", "type", "use", "mod", "pub", "const", "static", "trait" };
-    return std::find( std::begin( kw ), std::end( kw ), w ) != std::end( kw );
-}
+inline constexpr std::array<std::string_view, 32> kTranscriberKeywords = {
+    "if", "while", "match", "for", "return", "loop", "in", "as", "let", "mut", "ref", "move", "unsafe", "async", "await", "fn",
+    "impl", "where", "dyn", "else", "break", "continue", "struct", "enum", "union", "type", "use", "mod", "pub", "const", "static", "trait" };
 // The previous non-blank byte before `at` within [begin, at), or '\0'; `before` receives its index.
 inline char prevNonBlank( std::string_view src, std::uint32_t begin, std::uint32_t at, std::uint32_t& before ) noexcept
 {
@@ -1386,7 +1382,7 @@ inline void scanTranscriberCalls( std::string_view src, std::uint32_t begin, std
         const std::uint32_t inPath  = static_cast<std::uint32_t>( std::count( src.begin() + pathAt, src.begin() + i, '\n' ) );
         const std::uint32_t next    = skipBlanks( src, i, end );
         const bool          call    = plain && !pathed && next < end && src[ next ] == '(' && !( atCrate && nameAt == pathAt )
-                                   && !transcriberKeyword( src.substr( nameAt, nameEnd - nameAt ) ) && !( nameAt == pathAt && afterFnKeyword( src, begin, pathAt ) );
+                                   && !std::ranges::contains( kTranscriberKeywords, src.substr( nameAt, nameEnd - nameAt ) ) && !( nameAt == pathAt && afterFnKeyword( src, begin, pathAt ) );
         if( call )
         {
             refs.push_back( transcriberCallRef( src, pathAt, nameAt, nameEnd, member && nameAt == pathAt, fileId, line + toName ) );
@@ -1394,13 +1390,11 @@ inline void scanTranscriberCalls( std::string_view src, std::uint32_t begin, std
         line += inPath;   // the scan resumes past the path; a newline inside it is counted here
     }
 }
-}   // namespace rust_transcriber_scan
-
-inline void captureRustTranscriberMacroCalls( TSNode macroDef, std::uint32_t fileId, std::string_view src, std::vector<RawRef>& refs )
+// Each rule's transcriber (`macro_rule`'s right:) of `macroDef`, in source order.
+inline void scanMacroTranscribers( TSNode macroDef, std::uint32_t fileId, std::string_view src, std::vector<RawRef>& refs )
 {
-    using namespace rust_transcriber_scan;
     const std::uint32_t rules = ts_node_named_child_count( macroDef );
-    for( std::uint32_t c = 0; c < rules; ++c )   // BX2 FIX 5: each rule's transcriber (`macro_rule`'s right:), in source order
+    for( std::uint32_t c = 0; c < rules; ++c )
     {
         const TSNode rule  = ts_node_named_child( macroDef, c );
         const TSNode right = kindIs( ts_node_type( rule ), "macro_rule" ) ? fieldChild( rule, NodeField::Right ) : TSNode{};
@@ -1409,6 +1403,13 @@ inline void captureRustTranscriberMacroCalls( TSNode macroDef, std::uint32_t fil
             scanTranscriberCalls( src, ts_node_start_byte( right ), ts_node_end_byte( right ), ts_node_start_point( right ).row + 1, fileId, refs );
         }
     }
+}
+}   // namespace rust_transcriber_scan
+
+inline void captureRustTranscriberMacroCalls( TSNode macroDef, std::uint32_t fileId, std::string_view src, std::vector<RawRef>& refs )
+{
+    using namespace rust_transcriber_scan;
+    scanMacroTranscribers( macroDef, fileId, src, refs );   // BX2 FIX 5: the calls each transcriber spells
     const std::uint32_t end  = std::min<std::uint32_t>( ts_node_end_byte( macroDef ), static_cast<std::uint32_t>( src.size() ) );
     std::uint32_t       line = ts_node_start_point( macroDef ).row + 1;
     std::uint32_t       i    = ts_node_start_byte( macroDef );

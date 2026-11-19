@@ -464,9 +464,9 @@ inline std::vector<NodeId> oneHopCallerRows( const IngestResult& ing, const Grap
 // walk printed second-order sites past the question (a confirmation cell's +1.8 KB through a macro calling a macro, no group
 // gained), so a caller of a direct macro row that is itself a macro is listed (via="macro:NAME") but not walked. A Rust
 // `macro_rules!` row (LangFacts::bangMacros) is not seen through: its transcriber's calls already sit in the macro's own file.
-inline bool seeThroughMacro( const IngestResult& ing, NodeId r ) noexcept
+inline bool seeThroughMacro( const Symbol& s ) noexcept
 {
-    return r < ing.symbols.size() && ing.symbols[r].kind == SymKind::Macro && !langFacts( ing.symbols[r].lang ).bangMacros;
+    return s.kind == SymKind::Macro && !langFacts( s.lang ).bangMacros;
 }
 struct MacroSeeThrough
 {
@@ -479,7 +479,7 @@ inline MacroSeeThrough macroSeeThroughRows( const IngestResult& ing, const Graph
     std::vector<NodeId> frontier;
     for( const NodeId r : direct )
     {
-        if( seeThroughMacro( ing, r ) )
+        if( r < ing.symbols.size() && seeThroughMacro( ing.symbols[r] ) )
         {
             frontier.push_back( r );
         }

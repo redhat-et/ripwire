@@ -385,6 +385,46 @@ struct NotFoundAnswer
     }
 };
 
+// BX2 FIX 9: the text evidence in each dialect — JSON members; XML root attributes and the <text> rows; the legend clause.
+inline std::string notFoundTextJson( const NotFoundText& t )
+{
+    if( t.hits == 0 )
+    {
+        return {};
+    }
+    std::string body = ",\"text_hits\":" + std::to_string( t.hits ) + ",\"text_files\":" + std::to_string( t.files ) + ( t.floor ? ",\"counts_floor\":true" : "" ) + ",\"text\":[";
+    for( std::size_t k = 0; k < t.rows.size(); ++k )
+    {
+        body += ( k == 0 ? "{\"p\":\"" : ",{\"p\":\"" ) + jsonStr( t.rows[k].path ) + ":" + std::to_string( t.rows[k].line ) + "\",\"n\":" + std::to_string( t.rows[k].lines ) + "}";
+    }
+    return body + "],\"next\":\"--grep=" + jsonStr( t.term ) + "\"";
+}
+inline std::string notFoundTextRootXml( const NotFoundText& t, std::vector<char>& esc )
+{
+    return t.hits == 0 ? std::string()
+                       : " text_hits=\"" + std::to_string( t.hits ) + "\" text_files=\"" + std::to_string( t.files ) + "\"" + ( t.floor ? " counts_floor=\"1\"" : "" )
+                             + " next=\"--grep=" + std::string( escapeXml( t.term, esc ) ) + "\"";
+}
+// The element's close: `/>` with no row, else `>` + the <text> rows + `</tag>`.
+inline std::string notFoundTextCloseXml( const NotFoundText& t, std::string_view tag, std::vector<char>& esc )
+{
+    if( t.hits == 0 )
+    {
+        return "/>";
+    }
+    std::string rows = ">";
+    for( const NotFoundText::Row& r : t.rows )
+    {
+        rows += "<text p=\"" + std::string( escapeXml( r.path, esc ) ) + ":" + std::to_string( r.line ) + "\" n=\"" + std::to_string( r.lines ) + "\"/>";
+    }
+    return rows + "</" + std::string( tag ) + ">";
+}
+inline constexpr std::string_view kNotFoundTextLegend =
+    " text_hits=N text_files=K: the selector's last name is a whole word on N lines of K indexed files. PLAIN TEXT, not a call or use the "
+    "graph proved (a comment, a string, a property key, code no definition resolved); each <text p=FILE:LINE n=> is one file, its first "
+    "such line and n= its lines (at most 20 rows, source files first; counts_floor=1: a scan budget stopped, the counts are floors); next= "
+    "runs that grep.";
+
 inline void writeNotFoundAnswer( std::FILE* out, const NotFoundAnswer& a, bool json )
 {
     if( json )
@@ -398,18 +438,7 @@ inline void writeNotFoundAnswer( std::FILE* out, const NotFoundAnswer& a, bool j
         if( !a.missing.empty() ) { body += ",\"missing\":\"" + std::string( a.missing ) + "\""; }
         if( !a.near.name.empty() ) { body += ",\"near\":\"" + jsonStr( a.near.name ) + "\""; }
         if( a.near.renamed ) { body += ",\"near_renamed\":true"; }
-        body += countFieldOrEmpty( "matches", a.nearMatches, /*json=*/true );
-        if( a.text.hits > 0 )   // BX2 FIX 9: plain-text occurrences, never calls
-        {
-            body += ",\"text_hits\":" + std::to_string( a.text.hits ) + ",\"text_files\":" + std::to_string( a.text.files )
-                  + ( a.text.floor ? ",\"counts_floor\":true" : "" ) + ",\"text\":[";
-            for( std::size_t k = 0; k < a.text.rows.size(); ++k )
-            {
-                body += ( k == 0 ? "{\"p\":\"" : ",{\"p\":\"" ) + jsonStr( a.text.rows[k].path ) + ":" + std::to_string( a.text.rows[k].line )
-                      + "\",\"n\":" + std::to_string( a.text.rows[k].lines ) + "}";
-            }
-            body += "],\"next\":\"--grep=" + jsonStr( a.text.term ) + "\"";
-        }
+        body += countFieldOrEmpty( "matches", a.nearMatches, /*json=*/true ) + notFoundTextJson( a.text );   // BX2 FIX 9: plain text, never calls
         rw::emitTo( out, "{}}}\n", body );
         return;
     }
@@ -423,18 +452,8 @@ inline void writeNotFoundAnswer( std::FILE* out, const NotFoundAnswer& a, bool j
     if( !a.missing.empty() ) { root += " missing=\"" + std::string( a.missing ) + "\""; }
     if( !a.near.name.empty() ) { root += " near=\"" + std::string( escapeXml( a.near.name, esc ) ) + "\""; }
     if( a.near.renamed ) { root += " near_renamed=\"1\""; }
-    root += countAttrXmlOrEmpty( "matches", a.nearMatches );
-    std::string textRows;   // BX2 FIX 9: the <text> rows, and the root then closes the element after them
-    if( a.text.hits > 0 )
-    {
-        root += " text_hits=\"" + std::to_string( a.text.hits ) + "\" text_files=\"" + std::to_string( a.text.files ) + "\""
-              + ( a.text.floor ? " counts_floor=\"1\"" : "" ) + " next=\"--grep=" + std::string( escapeXml( a.text.term, esc ) ) + "\"";
-        for( const NotFoundText::Row& r : a.text.rows )
-        {
-            textRows += "<text p=\"" + std::string( escapeXml( r.path, esc ) ) + ":" + std::to_string( r.line ) + "\" n=\"" + std::to_string( r.lines ) + "\"/>";
-        }
-    }
-    const std::string close = textRows.empty() ? std::string( "/>" ) : ">" + textRows + "</" + std::string( a.tag ) + ">";
+    root += countAttrXmlOrEmpty( "matches", a.nearMatches ) + notFoundTextRootXml( a.text, esc );   // BX2 FIX 9
+    const std::string close = notFoundTextCloseXml( a.text, a.tag, esc );
     rw::emitTo( out, "<!-- ripwire {}: NOT FOUND, an answer and a refusal at once. found=0: no indexed definition matched the "
                      "selector echoed on this element, so nothing was listed or counted. Zero means none found, not none exists: "
                      "an unindexed file, a typo or an uncommitted rename can each hide the definition.{}{} near=: the indexed name "
@@ -444,11 +463,7 @@ inline void writeNotFoundAnswer( std::FILE* out, const NotFoundAnswer& a, bool j
                  a.tag, a.refusedLegend(),
                  a.missing.empty() ? "" : " missing=from|to|both: the endpoint(s) that matched nothing; near= retries the first.",
                  a.nearMatches != 0 ? " matches=N: N indexed files end with the path selector and it cannot pick one; near= is the first by path, one whole path answers." : "",
-                 a.text.hits == 0 ? "" : " text_hits=N text_files=K: the selector's last name is a whole word on N lines of K indexed files. PLAIN TEXT, "
-                                         "not a call or use the graph proved (a comment, a string, a property key, code no definition resolved); each "
-                                         "<text p=FILE:LINE n=> is one file, its first such line and n= its lines (at most 20 rows, source files first; "
-                                         "counts_floor=1: a scan budget stopped, the counts are floors); next= runs that grep.",
-                 root, close );
+                 a.text.hits == 0 ? std::string_view() : kNotFoundTextLegend, root, close );
 }
 
 }   // namespace rw
