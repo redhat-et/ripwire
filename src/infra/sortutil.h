@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 namespace rw::sortutil
@@ -49,6 +50,21 @@ constexpr std::strong_ordering svCompare( std::string_view a, std::string_view b
 }
 constexpr bool svLess( std::string_view a, std::string_view b ) noexcept { return svCompare( a, b ) < 0; }
 
+// Sort, then drop the duplicates: the ONE spelling (query.h's node sets, shstatus.h's name lists). Strings order through
+// svLess for the reason above: std::string's default compare wraps on libstdc++ the same way.
+template<class T>
+inline void sortUnique( std::vector<T>& v )
+{
+    if constexpr( std::is_convertible_v<const T&, std::string_view> )
+    {
+        std::sort( v.begin(), v.end(), []( const T& a, const T& b ) { return svLess( a, b ); } );
+    }
+    else
+    {
+        std::sort( v.begin(), v.end() );
+    }
+    v.erase( std::unique( v.begin(), v.end() ), v.end() );
+}
 
 inline bool lessByScoreDescId( const std::vector<float>& scores, std::uint32_t a, std::uint32_t b ) noexcept
 {
