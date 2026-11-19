@@ -38,8 +38,14 @@ GIT="$( command -v git )" || { echo "subagentprimercheck: git is required"; exit
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 PBIN="$TMP/pbin"; mkdir -p "$PBIN"; ln -s "$BIN" "$PBIN/ripwire"; ln -s "$JQ" "$PBIN/jq"; ln -s "$GIT" "$PBIN/git"
-NORW="$TMP/norw"; mkdir -p "$NORW"; ln -s "$JQ" "$NORW/jq"; ln -s "$GIT" "$NORW/git"
-NOJQ="$TMP/nojq"; mkdir -p "$NOJQ"; ln -s "$BIN" "$NOJQ/ripwire"; ln -s "$GIT" "$NOJQ/git"
+# (G)/(H) need a PATH with every tool the hook uses EXCEPT the one under test, and nothing else: macOS ships
+# /usr/bin/jq, so a PATH that keeps /usr/bin can never prove the no-jq arm.
+NORW="$TMP/norw"; NOJQ="$TMP/nojq"; mkdir -p "$NORW" "$NOJQ"
+for tool in cat tr awk date mkdir wc dirname cksum; do
+    tp="$( command -v "$tool" )" || { echo "subagentprimercheck: $tool is required"; exit 2; }
+    ln -s "$tp" "$NORW/$tool"; ln -s "$tp" "$NOJQ/$tool"
+done
+ln -s "$JQ" "$NORW/jq"; ln -s "$GIT" "$NORW/git"; ln -s "$BIN" "$NOJQ/ripwire"; ln -s "$GIT" "$NOJQ/git"
 HPATH="$PBIN:/usr/bin:/bin"
 FHOME="$TMP/home"; mkdir -p "$FHOME"
 LOG="$TMP/rows.jsonl"
@@ -136,13 +142,17 @@ hook "$( payload "$REPO/.git" agent-f2 )"
 
 echo "(G) no ripwire / (H) no jq"
 : >"$LOG"
-HOUT="$( printf '%s' "$( payload "$REPO" agent-g1 )" | env HOME="$FHOME" PATH="$NORW:/usr/bin:/bin" RIPWIRE_SUBAGENT_LOG="$LOG" bash "$HOOK" )"; rc=$?
-if command -v -p ripwire >/dev/null 2>&1; then echo "  SKIP  a ripwire in /usr/bin or /bin makes (G) unprovable here"
-else [ "$rc" = 0 ] && [ -z "$HOUT" ] && ok "no ripwire on PATH: silent, rc 0" || no "no ripwire: rc $rc, out '${HOUT:0:40}'"
-     [ "$( "$JQ" -s '[.[] | select(.reason=="no-ripwire")] | length' "$LOG" )" = 1 ] && ok "counted as no-ripwire" || no "no-ripwire row missing"; fi
-HOUT="$( printf '%s' "$( payload "$REPO" agent-h1 )" | env HOME="$FHOME" PATH="$NOJQ:/usr/bin:/bin" RIPWIRE_SUBAGENT_LOG="$LOG" bash "$HOOK" )"; rc=$?
-if [ -x /usr/bin/jq ] || [ -x /bin/jq ]; then echo "  SKIP  a jq in /usr/bin or /bin makes (H) unprovable here"
-else [ "$rc" = 0 ] && [ -z "$HOUT" ] && ok "no jq on PATH: silent, rc 0" || no "no jq: rc $rc"; fi
+BASH_BIN="$( command -v bash )"
+HOUT="$( printf '%s' "$( payload "$REPO" agent-g1 )" | env HOME="$FHOME" PATH="$NORW" RIPWIRE_SUBAGENT_LOG="$LOG" "$BASH_BIN" "$HOOK" )"; rc=$?
+[ "$rc" = 0 ] && [ -z "$HOUT" ] && ok "no ripwire on PATH: silent, rc 0" || no "no ripwire: rc $rc, out '${HOUT:0:40}'"
+[ "$( "$JQ" -s '[.[] | select(.reason=="no-ripwire")] | length' "$LOG" )" = 1 ] && ok "counted as no-ripwire" || no "no-ripwire row missing"
+HOUT="$( printf '%s' "$( payload "$REPO" agent-h1 )" | env HOME="$FHOME" PATH="$NOJQ" RIPWIRE_SUBAGENT_LOG="$LOG" "$BASH_BIN" "$HOOK" )"; rc=$?
+[ "$rc" = 0 ] && [ -z "$HOUT" ] && ok "no jq on PATH: silent, rc 0" || no "no jq: rc $rc"
+# mutation control: the same minimal PATH plus jq and ripwire DOES speak, so the two arms above are not silent for a
+# reason the sandbox itself created
+ln -s "$BIN" "$NORW/ripwire"
+HOUT="$( printf '%s' "$( payload "$REPO" agent-g2 )" | env HOME="$FHOME" PATH="$NORW" RIPWIRE_SUBAGENT_LOG="$LOG" "$BASH_BIN" "$HOOK" )"
+[ "$HOUT" = "$REF" ] && ok "control: the minimal PATH with both tools speaks" || no "control: the minimal PATH is silent anyway"
 
 echo "(I) malformed or empty input / (J) other events"
 : >"$LOG"
