@@ -720,8 +720,8 @@ inline void addRenamedImportBases( const IngestResult& ing, std::vector<std::pai
     {
         return;
     }
-    const PythonRenamedImports imports = buildPythonRenamedImports( ing );
     const ExternalVetoTables   veto    = buildExternalVetoTables( ing );
+    const PythonRenamedImports imports = buildPythonRenamedImports( ing, veto.pythonMultiFileClasses );
     // the module-level classes by (name, file), to find the one a member names
     std::vector<std::tuple<std::string_view, std::uint32_t, NodeId>> classes;
     for( NodeId c = 0; c < ing.symbols.size(); ++c )
