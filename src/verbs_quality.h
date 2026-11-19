@@ -90,6 +90,7 @@ struct RefPairDelta
     rw::quality::RefTree      targetTree;
     rw::quality::Snapshot     baseSnapshot;          // the floor: computeSnapshot over the base tree, which is gone
     bool                  sameRef = false;
+    bool                  staleTree = false;                 // D3 QD-STALE-HEADER: the working tree is not target_ref's tree (rangeTreeIsStale)
     std::string           attrs;                     // XML:  ` base_ref="…" target_ref="…" churn="unavailable"`
     std::string           jsonAttrs;                 // JSON: the SAME three facts — built beside attrs so the
                                                      // two emitters cannot disclose different things
@@ -941,6 +942,22 @@ void releaseFullTrees( RefPairDelta& out )
     std::swap( dropped.p, out.targetGuard.p );   // its destructor removes the cut tree's temp dir now
 }
 
+// D3 QD-STALE-HEADER — a range answer judges target_ref's COMMITTED tree, while a reader acts on the files in front of
+// it: a check run before the last edit (or before a commit moved HEAD) cannot pass for the current tree, and nothing
+// in the document said which one it was. True when HEAD's tree is not target_ref's tree, or the working tree has
+// tracked changes or untracked files (the porcelain listing gitstamp's +dirty reads). False when git cannot say:
+// the attribute is a disclosure that may only appear on evidence, never a guess. Two git subprocesses per range call.
+inline bool rangeTreeIsStale( const std::string& root, const std::string& targetSha )
+{
+    const std::string headTree   = rw::quality::gitOneLine( root, "rev-parse --verify --quiet HEAD^{tree} 2>/dev/null" );
+    const std::string targetTree = rw::quality::gitOneLine( root, "rev-parse --verify --quiet " + targetSha + "^{tree} 2>/dev/null" );
+    if( headTree.empty() || targetTree.empty() )
+    {
+        return false;
+    }
+    return headTree != targetTree || !rw::quality::gitOneLine( root, "status --porcelain --ignore-submodules=dirty 2>/dev/null" ).empty();
+}
+
 // Resolve the spec and materialize both sides. Returns an EXIT CODE on any refusal or environment failure
 // (already reported on stderr), or nullopt when `out` is ready to compare. Splitting user error from
 // environment failure is the same line --dmm's handler draws: a revision that does not resolve is a typo the
@@ -1018,6 +1035,16 @@ std::optional<int> loadRefPairDelta( const std::string& root, std::string_view s
     // reasoning gitstamp::atAttr states for its own hex value.
     out.attrs     = " base_ref=\"" + ref.baseSha + "\" target_ref=\"" + ref.targetSha + "\" churn=\"unavailable\"";
     out.jsonAttrs = ",\"base_ref\":\"" + ref.baseSha + "\",\"target_ref\":\"" + ref.targetSha + "\",\"churn\":\"unavailable\"";
+    // D3: present only when true (absent means the working tree IS target_ref's tree, or git could not say); the base
+    // child's document is never the answer, so it asks git nothing.
+    out.staleTree = !role.child && rangeTreeIsStale( root, ref.targetSha );
+    if( out.staleTree )
+    {
+        out.attrs += " stale_tree=\"1\"";
+        out.jsonAttrs += ",\"stale_tree\":1";
+        rw::emitRaw( stderr, "ripwire: --quality-delta: stale_tree=1 - the working tree is not the target commit's tree (uncommitted edits, or "
+                             "HEAD is elsewhere), so this answer is about the target commit, not the files on disk\n" );
+    }
     // R1: the same two resolved shas as a range, for the rename record. Empty when the target IS the working
     // tree — `A..` is not a range git will walk, and the working-tree form's own uncommitted+window query is
     // the right scope there anyway.
@@ -1532,6 +1559,11 @@ inline constexpr const char* kQdBaseRefPair =
     "that one kind, short-horizon-churn, cannot be measured at all in that form: it needs git "
     "history at the tree being judged, and both trees are materialized OUT of the repo into temp dirs. Its "
     "silence in such a report is not evidence that nothing churned. ";
+// D3 QD-STALE-HEADER — emitted ONLY when stale_tree= is on the root (a range answer whose target is not the tree on disk).
+inline constexpr const char* kQdStaleTreeLegend =
+    "stale_tree=\"1\" means the working tree is NOT target_ref's tree: it has uncommitted edits or untracked files, or HEAD "
+    "is another commit. This answer is about target_ref as committed, so a clean result here does not pass the files on "
+    "disk; commit and re-run, or run the bare form on the working tree. Never gating. ";
 // #228 — emitted only when head_basis= is on the root, i.e. only when the identity basis produced the floor.
 // The attribute exists because a zero from a self-comparison and a zero from an archived comparison are
 // DIFFERENT CLAIMS, and the honesty rule is that a zero means "none found", never "none exists". Its absence
@@ -1687,23 +1719,24 @@ inline constexpr const char* kQdSimilarArgsLegend =
 inline constexpr const char* kQdCloneLegend =
     "CLONE ROWS name the whole group rather than one symbol: members= is the member list and tokens= its "
     "shared normalized-token count (the same per-group pair the clones verb reports). idiom= names a "
-    "RECOGNIZED BODY SHAPE every member spells, out of a closed set of four (threshold-ladder, "
-    "switch-name-table, builder-chain, one-statement). idiom= alone changes nothing; a group that ALSO shares no "
+    "RECOGNIZED BODY SHAPE every member spells, from a closed set of five (threshold-ladder, "
+    "switch-name-table, builder-chain, one-statement, call-sequence). idiom= alone changes nothing; a group that ALSO shares no "
     "non-keyword identifier between any two members, sits in pairwise-distinct enclosing contexts, and "
     "stays under 80 normalized tokens is an idiom COLLISION rather than a copy, and is reported minor "
     "instead of gating. Break any one of those and it gates as before, idiom= and all: two bucketing "
     "ladders over the SAME enum are a copy. The shape is read off the body's token stream and not a parse "
     "tree, so a macro-assembled body classifies as whatever its raw tokens spell — the name is printed so "
-    "the call can be overruled by reading. ";
+    "a reader can overrule it. ";
 
-// The one-statement half of the clone paragraph, printed only when a row carries idiom="one-statement": its
-// narrowed shared-identifier test is the one rule a reader of THAT row needs, and a ladder-only document
-// should not pay for it (the same G4 rule as every conditional section here).
+// The one-statement / call-sequence half of the clone paragraph, printed only when a row carries one of those two
+// idioms: their narrowed shared-identifier test is the one rule a reader of THAT row needs, and a ladder-only
+// document should not pay for it (the same G4 rule as every conditional section here).
 inline constexpr const char* kQdOneStatementLegend =
     "one-statement is a body of one return statement (leading EXPECTS/ASSUME/DASSERT/VALIDATE asserts aside); "
-    "its shared-identifier test leaves out each member's own parameter names, every std:: chain and standard "
-    "container/string words (size, find, npos, first, second and the like), and a pair identical once its "
-    "parameters are renamed always gates. ";
+    "call-sequence is a body of call statements only (no return, declaration, assignment or control flow), where the "
+    "callees are the meaning; for both, the shared-identifier test leaves out each member's own parameter names, "
+    "every std:: chain and standard container/string words (size, find, npos, first, second and the like), and a "
+    "pair identical once its parameters are renamed always gates. ";
 
 // P1 — the SCOPE half of the quality-delta legend, printed ONLY when the report actually contains a
 // scope partition or a foreign-ack row. That is a G4 (token density) decision, not a hedge: the
@@ -1772,6 +1805,7 @@ struct QualityDeltaLegendParts
     bool                                          memorySkippedShare      = false;   // ... memory_skipped= (skipped_why="selector,memory")
     bool                                          historyUnread           = false;   // hwh-fix4 (N1): unread_history= is on the root
     bool                                          anyRustTestExcluded     = false;   // issue #499: the excluded set holds Rust test functions
+    bool                                          staleTree               = false;   // D3 QD-STALE-HEADER: stale_tree= is on the root
 };
 
 // qd-memory-degrade — present-only: each rides only with the attributes it defines. No double dash anywhere in them
@@ -1829,9 +1863,10 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
         }
         return false;
     };
-    const auto anyOneStatementRow = [] ( const std::vector<rw::quality::Regression>& v )
+    const auto anyNarrowIdiomRow = [] ( const std::vector<rw::quality::Regression>& v )
     {
-        return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return r.facet == rw::cloneIdiomName( rw::CloneIdiom::OneStatement ); } );
+        return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r )
+                            { return r.facet == rw::cloneIdiomName( rw::CloneIdiom::OneStatement ) || r.facet == rw::cloneIdiomName( rw::CloneIdiom::CallSequence ); } );
     };
     const auto anyMinorMaskRow = [] ( const std::vector<rw::quality::Regression>& v )
     {
@@ -1871,6 +1906,10 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
     else if( p.marker == "git-HEAD (symlinked sidecar refused)" ) { std::fputs( kQdBaseHeadSymlinkRefused, out ); }
     else if( p.marker == "git-HEAD (foreign sidecar ignored)"   ) { std::fputs( kQdBaseHeadForeign, out ); }
     else                                                      { std::fputs( kQdBaseHead,        out ); }
+    if( p.staleTree )
+    {
+        std::fputs( kQdStaleTreeLegend, out );   // D3 — the attribute that says the answer is not about the files on disk
+    }
     if( p.baselineAbsorbed > 0 )
     {
         std::fputs( kQdBaselineAbsorbedLegend, out );   // H11 — the attribute that re-reads the exit code
@@ -1953,7 +1992,7 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
         if( anyCloneRow( p.rows ) || anyCloneRow( p.disclosedRows ) )
         {
             std::fputs( kQdCloneLegend, out );
-            if( anyOneStatementRow( p.rows ) || anyOneStatementRow( p.disclosedRows ) )
+            if( anyNarrowIdiomRow( p.rows ) || anyNarrowIdiomRow( p.disclosedRows ) )
             {
                 std::fputs( kQdOneStatementLegend, out );
             }
@@ -3083,7 +3122,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                                       basis.headBasis, basis.declinedCallExcluded > 0, basis.valueRefExcluded > 0, collapse,
                                       refs.kinds != quality::kAllKinds, refs.degraded, !refs.memoryStop.empty(), kd.peakOver != 0,
                                       kd.memorySkipped != 0 && refs.selected != quality::kAllKinds, basis.historyUnread.any(),
-                                      basis.rustTestExcluded }, out );
+                                      basis.rustTestExcluded, refs.staleTree }, out );
             const char* baseMarker = baseSel.marker;    // R3: ditto — one seam decides staleness AND names it
             // 2026-09-06: what the sidecar readers skipped, on the root (absent means none) — see kQdBaseHeadUnreadable
             std::string sidecarHealthAttrs;
