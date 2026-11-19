@@ -555,7 +555,8 @@ jobs:
         # sharded runs). The scale applies to the default only; GATE_BUDGET_SEC's explicit entries stay as declared.
         # `skiplist` (macOS plain only): a committed list of platform-independent gates this leg does not run —
         # see .github/pargates-macos-plain-skip.txt for the measurement and the per-gate reason.
-        run: python3 test/pargates.py . build/ripwire -j 3 --shard ${{ matrix.shard }}/${{ matrix.shards }} --budget-scale 4 ${{ matrix.skiplist && format('--exclude-list {0}', matrix.skiplist) || '' }}
+        # --no-alone-retry: pargates' alone retry (default on for --shard) stays off on CI until the owner opts CI in.
+        run: python3 test/pargates.py . build/ripwire -j 3 --shard ${{ matrix.shard }}/${{ matrix.shards }} --budget-scale 4 --no-alone-retry ${{ matrix.skiplist && format('--exclude-list {0}', matrix.skiplist) || '' }}
 
       - name: det-gate — 2-run byte-identical diff
         run: |
