@@ -34,6 +34,10 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-19, lane QD-VA-FORMS (E0, over main 33f7a1eac): RE-PINNED with UPDATE_GOLDEN=1. kQSnapCacheScheme 34 -> 35: defectSitesOf
+#   drops its `grep` prefilter for Bash (every test script is read) and the vacuous-assert facet it calls (defectshape.h, outside
+#   the manifest) now walks exit-status dataflow, so the stored site set moves; a v34 blob would read every new-form site as added.
+#   No blob shape change; kParserVer / kCacheVersion unchanged. The train may renumber the scheme.
 # 2026-11-19, lane QD-TANGLE (stacked on lane/qd-false-rows): RE-PINNED with UPDATE_GOLDEN=1. kQSnapCacheScheme 34 -> 36 (35 is
 #   lane qd-va-forms'): the snapshot gains the tangle map (tangleBySym) and its known byte; computeSnapshot records it
 #   (recordTangleOf), serialize/deserializeSnapshot carry it, and kCacheVersion 54 carries RawDef::steer/deepDispatch/nestArmCut.

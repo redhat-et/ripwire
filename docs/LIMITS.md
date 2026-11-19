@@ -294,6 +294,14 @@ Discloses: **none**
 | --- | --- | --- | --- |
 | `kDefTableCap` | `16` | — | — |
 
+### `src/defectshape.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kMaxDepth` | `24` | — | each hop (a word, a variable, a stage, a call) adds one |
+
 ### `src/defslookup.h`
 
 Discloses: `alts_capped`, `to_capped`
@@ -1475,6 +1483,14 @@ Discloses: `capped`, `calls_capped`, `dirs_capped`, `entries_capped`, `files_cap
 | `kMaxPrunedPackagesShown` | `8` | — | — |
 | `kMaxSig` | `240` | OUTPUT | — |
 | `kWithGraphNodeCap` | `8` | — | — |
+
+### `src/shstatus.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kMaxSubDepth` | `40` | — | nested $( ) parsed past this depth are left unparsed (an empty list) |
 
 ### `src/siblift.h`
 
