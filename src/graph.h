@@ -10535,6 +10535,18 @@ inline bool callArityCannotTake( const Reference& ref, const Symbol& cs, std::ui
 {
     return ref.argCountKnown && ( ( cs.arityExact != 0 && ref.argCount > cs.params ) || ref.argCount < paramsMin );
 }
+// IMPORT-PROVED-SPLITS: ReceiverEvidence::pathOwners' per-language resolver — the ONE in-tree class `name` names where `r` is
+// written, through the caller file's own import of the name; kNoNode for none, several, or a language with no resolver here.
+struct ImportProvedClass
+{
+    NodeId operator()( const Reference& r, std::string_view name ) const
+    {
+        static_cast<void>( r );
+        static_cast<void>( name );
+        return kNoNode;
+    }
+};
+
 inline bool pythonScopePinAt( const PythonLexicalScopes& scopes, const IngestResult& ing, const ExternalVetoTables& veto, const Reference& r, std::vector<NodeId>& cand )
 {
     const auto moduleUnread = [ & ]
@@ -11029,6 +11041,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         }
     }
     ReceiverEvidence         recvEv( ing, chaUp, classNames );
+    const ImportProvedClass  importClass{};   // IMPORT-PROVED-SPLITS: recvEv.pathOwners' per-language resolver
     HashMap<std::string, char> qualifierVerdicts = buildQualifierVerdicts( ing, extVeto, falseEdges );   // h1-annot
     {
         PROFILE_SCOPE_DESCRIBE( "buildGraph/2i: receiver-evidence tables" );
@@ -12429,22 +12442,22 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                                        [ & ]( NodeId c ) { return langCompatible( symLang[ c ], r.lang ) && sameRoot( c, r.fileId ); } );
             canonical = !cand.empty();
         }
-        // RUST-PATH-OWNER (receiverevidence.h rustPathOwners): the tier matched a Rust path's scope NAME; the type the path resolves to
+        // RUST-PATH-OWNER (receiverevidence.h pathOwners, the Rust arm rustPathOwners): the tier matched a Rust path's scope NAME; the type the path resolves to
         // where it is written decides among same-named types — the one it names, external=, a decline, a hedge over every candidate
         // (nameOnly below), or the ladder's own split that no locality tie-break narrows
-        const ReceiverEvidence::RustPathOwners rustPath = recvEv.rustPathOwners( r, cand, canonical );
-        if( rustPath == ReceiverEvidence::RustPathOwners::External )
+        const ReceiverEvidence::PathOwners rustPath = recvEv.pathOwners( r, cand, canonical, importClass );
+        if( rustPath == ReceiverEvidence::PathOwners::External )
         {
             disposition = vetoExternal( r );
             continue;
         }
-        if( rustPath == ReceiverEvidence::RustPathOwners::Decline )
+        if( rustPath == ReceiverEvidence::PathOwners::Decline )
         {
             recordDecline( r, cand, DeclinedSiteKind::Ladder );
             disposition = CallDisposition::Declined;
             continue;
         }
-        const bool rustPathHedge = rustPath == ReceiverEvidence::RustPathOwners::Hedge;
+        const bool rustPathHedge = rustPath == ReceiverEvidence::PathOwners::Hedge;
         // ── L3 fn-pointer/callback binding resolve — BEFORE Rule 1, because a local variable shadows a
         // same-named class member or global in real C++ name lookup. A bare call `fn()` whose name has ANY
         // var→function binding visible at this call site is a call THROUGH THE VARIABLE: it resolves via
@@ -12758,6 +12771,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                   && recvEv.types.jvmHides( r.fileId, r.startByte, std::string_view( r.recvVar ).substr( 0, std::min( r.recvVar.str().find( '.' ), r.recvVar.size() ) ) ) ) )
         {
             narrowed = narrowTo( narrower.rule2cClassNameRecv( r, ing.symbols[ r.fromSymbol ].scope, { classNames, fieldNarrow.localNameSet, memberFields }, chaUp ), r, cand );
+            recvEv.pathOwners( r, cand, canonical, importClass );   // IMPORT-PROVED-SPLITS: `C.m()` over same-named classes keeps the one C's import proves
         }
         // P2-D Rule 2b (receiver-FIELD type, W1-P1-12): a named-receiver call `f.m()` / `f->m()` whose receiver names a FIELD of the caller's
         // enclosing class — or of the one base declaring it, when the class declares none — resolves to the method on the field's DECLARED
@@ -12786,6 +12800,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                     cand.push_back( c );
                 }
             }
+            recvEv.pathOwners( r, cand, canonical, importClass );   // IMPORT-PROVED-SPLITS, as after Rule 2c
             narrowed = !cand.empty() && !kotlinScopeUndo();
         }
         // lane L6 (ifacedispatch.h): the receiver's recorded type is an interface, a trait or a class declaring the callee with
@@ -13748,7 +13763,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         if( !scipPinned && !bindingPinned && r.lang != Lang::Elixir && tier.size() > 1 && !ing.symbols[ r.fromSymbol ].scope.empty()
          && r.recv != RecvKind::FieldOfThis && r.recv != RecvKind::FieldOfVar && r.recv != RecvKind::SuperObj && !identityClaim
          && !isJsTsLitRecv( r.recv ) && r.recv != RecvKind::JavaTypeCandidate && !nameOnly   // FE-B: a name-only call keeps every candidate
-         && rustPath != ReceiverEvidence::RustPathOwners::Split )   // RUST-PATH-OWNER: same-named types the path cannot tell apart are a genuine split (#74)
+         && rustPath != ReceiverEvidence::PathOwners::Split )   // RUST-PATH-OWNER: same-named types the path cannot tell apart are a genuine split (#74)
         {
             const std::string& callerCanon = g.localityKeyAt( r.fromSymbol );   // == canonId here (the caller is scoped)
             const std::size_t localityCap = receiverLocalityCap( r, receiverTypeNarrowed, ing.files[ ing.symbols[ r.fromSymbol ].fileId ] );

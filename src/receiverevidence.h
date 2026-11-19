@@ -4614,16 +4614,16 @@ struct ReceiverEvidence
     //     caller's own crate, or a member there it cannot place beside another, split: every candidate stays (rustLadderSplit:
     //     the ladder's own split when locality would keep them all, else hedged) — never a locality pick. One there, a crate the layout cannot
     //     place, or a module's item among the candidates (`util::tool()`: the module path decides it) keeps the tier as before.
-    enum class RustPathOwners : std::uint8_t { Keep, Hedge, Split, External, Decline };
+    enum class PathOwners : std::uint8_t { Keep, Hedge, Split, External, Decline };
     static constexpr NodeId kRustOwnerUnread  = kNoNode - 1;   // rustPathOwnerMemo: not read yet
     static constexpr NodeId kRustOwnerOutside = kNoNode - 2;   // an owner: the impl's own type name leads out of the tree where the impl is written
     static constexpr NodeId kRustOwnerInTree  = kNoNode - 3;   // an owner: no indexed class, but the impl's type name is a `use` into the tree
     mutable std::vector<NodeId> rustPathOwnerMemo;              // per symbol: its owner as rustPathOwners reads it (sized on first use)
-    RustPathOwners rustPathOwners( const Reference& r, std::vector<NodeId>& cand, bool canonical ) const
+    PathOwners rustPathOwners( const Reference& r, std::vector<NodeId>& cand, bool canonical ) const
     {
         if( !canonical || callResultFamilyOf( r.lang ) != CallResultFamily::Rust || r.qualifier.empty() || cand.empty() )
         {
-            return RustPathOwners::Keep;
+            return PathOwners::Keep;
         }
         const std::string_view written = rustWrittenQualifierOf( r );
         const NodeId           cls     = rustQualifierClass( r, written );
@@ -4666,10 +4666,10 @@ struct ReceiverEvidence
             }
             if( !any )
             {
-                return RustPathOwners::Decline;   // cand untouched: the declined site lists the namesakes it refused
+                return PathOwners::Decline;   // cand untouched: the declined site lists the namesakes it refused
             }
             keepWhere( mine );
-            return RustPathOwners::Keep;
+            return PathOwners::Keep;
         }
         if( rustPathHeadLeavesTree( r.fileId, r.startByte, written ) )
         {
@@ -4683,19 +4683,19 @@ struct ReceiverEvidence
                 forEachBase( ownerClass[ cand[ i ] ], [ & ]( std::string_view b ) { implementsTail = implementsTail || CallResultTypes::splitLast( b, "::" ).second == tail; } );
                 return owners[ i ] == kRustOwnerOutside || owners[ i ] == kNoNode || implementsTail;
             } );
-            return cand.empty() ? RustPathOwners::External : RustPathOwners::Hedge;
+            return cand.empty() ? PathOwners::External : PathOwners::Hedge;
         }
         // a module's item among them (`util::tool()`, an inline mod's fn) is the module path's question, not a type's: the tier as before
         if( cand.size() < 2 || std::ranges::any_of( cand, [ & ]( NodeId c ) { return ownerClass[ c ].empty(); } ) )
         {
-            return RustPathOwners::Keep;
+            return PathOwners::Keep;
         }
         // the types a path no `use` chooses may mean are the caller's own crate's (another crate's needs a `use` or its name); a crate the
         // layout cannot place, or one of them in it, leaves the tier as before
         const std::uint32_t crate = types.rustCrateOfFile( r.fileId );
         if( crate == CallResultTypes::kNoCrate )
         {
-            return RustPathOwners::Keep;
+            return PathOwners::Keep;
         }
         std::size_t inCrate = 0;
         NodeId      first   = kNoNode;
@@ -4710,12 +4710,12 @@ struct ReceiverEvidence
             differ = differ || owners[ i ] != first || owners[ i ] == kNoNode || owners[ i ] == kRustOwnerOutside || owners[ i ] == kRustOwnerInTree;
             ++inCrate;
         }
-        return inCrate >= 2 && differ ? rustLadderSplit( r, cand ) : RustPathOwners::Keep;
+        return inCrate >= 2 && differ ? rustLadderSplit( r, cand ) : PathOwners::Keep;
     }
     // RUST-PATH-OWNER: how the ladder keeps a Split's candidates. Tier 1 or 2 holding all of them or none (tier 3's canonical rescue)
     // is its own split (Split: no locality tie-break narrows it); a strict subset there would be a locality pick among types the path
     // cannot tell apart, so every candidate is hedged instead (Hedge)
-    RustPathOwners rustLadderSplit( const Reference& r, const std::vector<NodeId>& cand ) const
+    PathOwners rustLadderSplit( const Reference& r, const std::vector<NodeId>& cand ) const
     {
         const std::string_view dir    = includerDir( ing.files[ r.fileId ] );
         std::size_t            inFile = 0;
@@ -4727,7 +4727,45 @@ struct ReceiverEvidence
             inDir  += includerDir( ing.files[ f ] ) == dir ? 1u : 0u;
         }
         const bool subset = inFile != 0 ? inFile < cand.size() : inDir != 0 && inDir < cand.size();
-        return subset ? RustPathOwners::Hedge : RustPathOwners::Split;
+        return subset ? PathOwners::Hedge : PathOwners::Split;
+    }
+    // IMPORT-PROVED-SPLITS: the shared hook. Same-named classes in two or more files give a call one candidate per class, and what
+    // the call WRITES may name one of them: a Rust path's type (rustPathOwners, when the canonical tier answered), or a receiver
+    // spelled as the class, `C.m()`, whose C the caller file's import binds (importPathOwners, when a receiver rule answered).
+    // `classOf( r, name )` is the per-language resolver: the ONE in-tree class `name` names where `r` is written, through the
+    // caller file's own import of it; kNoNode for none, several, an outside class or a name something else binds there
+    // (graph.h ImportProvedClass). Rust reads its own (rustQualifierClass).
+    template <class ClassOf>
+    PathOwners pathOwners( const Reference& r, std::vector<NodeId>& cand, bool canonical, const ClassOf& classOf ) const
+    {
+        return callResultFamilyOf( r.lang ) == CallResultFamily::Rust ? rustPathOwners( r, cand, canonical ) : importPathOwners( r, cand, canonical, classOf );
+    }
+    // IMPORT-PROVED-SPLITS: a receiver rule's answer for `C.m()` (the receiver chain is the one name C: not `this`/`self`/`cls`/
+    // `super`, no field path, no construction) that holds members of two or more classes keeps the members of the ONE class the
+    // file's import of C proves (`classOf`). Only ever narrows, and only to a non-empty strict subset: a class the import names
+    // that owns none of them (an inherited member, a re-export the resolver cannot follow), a class of the caller's own file (its
+    // scoping is not an import's), or no proof at all leaves `cand` as the rule left it. Always Keep.
+    template <class ClassOf>
+    PathOwners importPathOwners( const Reference& r, std::vector<NodeId>& cand, bool canonical, const ClassOf& classOf ) const
+    {
+        const Chain ch = chainOf( r );
+        if( canonical || cand.size() < 2 || !r.qualifier.empty() || !ch.valid || ch.root.empty() || !ch.path.empty() || !ch.ctor.empty()
+            || isThisRoot( ch.root ) || isSuperRoot( r, ch.root ) || ch.root == "cls" )
+        {
+            return PathOwners::Keep;
+        }
+        const NodeId cls = classOf( r, ch.root );
+        if( cls == kNoNode || ing.symbols[ cls ].fileId == r.fileId )
+        {
+            return PathOwners::Keep;
+        }
+        const auto owned = [ & ]( NodeId c ) { return ing.symbols[ c ].fileId == ing.symbols[ cls ].fileId && types.classHolding( ing.symbols[ c ].fileId, ing.symbols[ c ].sigStartByte ) == cls; };
+        const std::size_t kept = std::size_t( std::ranges::count_if( cand, owned ) );
+        if( kept != 0 && kept != cand.size() )
+        {
+            std::erase_if( cand, [ & ]( NodeId c ) { return !owned( c ); } );
+        }
+        return PathOwners::Keep;
     }
     // rust-receivers: the ONE class `self` names inside `from` (or the method enclosing it): the in-tree class of the method's
     // owner name that owns the method (memberOwnerRuleOf — Rust: its own file and item scope, or the only class of the name);
