@@ -14275,6 +14275,11 @@ inline auto symbolContentKey( const IngestResult& ing, NodeId id )
     return std::tuple<std::string_view, std::uint32_t, std::string_view, std::uint32_t, std::uint32_t>( ing.files[ s.fileId ], s.line, s.name,
                                                                                                         s.sigStartByte, s.endByte );
 }
+// symbolContentKey's order as a strict total one: the content key, then the id only for two symbols the key cannot tell apart.
+inline bool contentKeyBefore( const IngestResult& ing, NodeId a, NodeId b )
+{
+    return std::pair( symbolContentKey( ing, a ), a ) < std::pair( symbolContentKey( ing, b ), b );
+}
 
 // The Scope::name tier: every definition whose name matches and whose scope ends in the scope half, in symbolContentKey order
 // (path, line, name, byte range), never NodeId: the dotted tier hands a `Svc._make` spelling here, and the verbs seed their
@@ -14298,7 +14303,7 @@ inline std::vector<NodeId> resolveAllByScopeQualified( const IngestResult& ing, 
     }
     if( out.size() > 1 )
     {
-        std::ranges::sort( out, [ & ]( NodeId a, NodeId b ) { return std::pair( symbolContentKey( ing, a ), a ) < std::pair( symbolContentKey( ing, b ), b ); } );
+        std::ranges::sort( out, [ & ]( NodeId a, NodeId b ) { return contentKeyBefore( ing, a, b ); } );
     }
     return out;
 }
@@ -14770,53 +14775,62 @@ inline const char* anchorOriginName( AnchorOrigin origin ) noexcept
     return i < kOriginNames.size() ? kOriginNames[ i ] : "none";   // a value past the enum is disclosed as the
 }   // least-claiming word, never a wrong specific one
 
-// The corpus census: per code language, its def count and first def id — recorded INSIDE the symbol walk the name
-// resolvers already perform (increments only; resolveAllByName already touches every symbol, so the per-query
-// census costs no second walk of the model). Data and document formats are barred from ever owning the anchor: a
-// YAML-heavy corpus stays code-anchored, or the disclosure lane the campaign just built would reorder itself.
+// The corpus census: per code language, its def count — recorded INSIDE the symbol walk the name resolvers already
+// perform (increments only; resolveAllByName already touches every symbol, so the per-query census costs no second
+// walk of the model). Data and document formats are barred from ever owning the anchor: a YAML-heavy corpus stays
+// code-anchored, or the disclosure lane the campaign just built would reorder itself.
 struct LangCensus
 {
     std::array<std::uint32_t, kLangCount> counts{};
-    std::array<NodeId, kLangCount>        firstId{};   // indexed by the same live entries as counts — never read where count is 0
 
     constexpr void record( const Symbol& s ) noexcept
     {
-        if( !isCodeLang( s.lang ) )
+        if( isCodeLang( s.lang ) )
         {
-            return;
-        }
-        std::uint32_t& c = counts[ static_cast< std::size_t >( s.lang ) ];
-        NodeId&        f = firstId[ static_cast< std::size_t >( s.lang ) ];
-        if( c++ == 0 )
-        {
-            f = s.id;
-        }
-        else if( s.id < f )
-        {
-            f = s.id;
+            ++counts[ static_cast< std::size_t >( s.lang ) ];
         }
     }
 
-    constexpr LangAnchor resolve() const noexcept   // count DESC, then first-def id ASC — a surviving tie is id-ordered, never coin-flipped
+    // count DESC; an EQUAL top count goes to the tied language whose first definition in symbolContentKey order (path,
+    // line, name, byte range) comes first — a fact about the code, not about how NodeIds were handed out, so renumbering
+    // the same symbols cannot move the anchor. Only a tie pays the walk over the model; the untied path stays walk-free.
+    LangAnchor resolve( const IngestResult& ing ) const
     {
         LangAnchor best;
+        bool       tied = false;
         for( std::size_t i = 0; i < kLangCount; ++i )
         {
-            if( counts[ i ] == 0 )
+            const std::uint32_t lead = best.origin == AnchorOrigin::None ? 0 : counts[ static_cast< std::size_t >( best.lang ) ];
+            if( counts[ i ] > lead )
             {
-                continue;
+                best = { static_cast< Lang >( i ), AnchorOrigin::Corpus };
+                tied = false;
             }
-            const bool better = best.origin == AnchorOrigin::None
-                             || counts[ i ] > counts[ static_cast< std::size_t >( best.lang ) ]
-                             || ( counts[ i ] == counts[ static_cast< std::size_t >( best.lang ) ]
-                                  && firstId[ i ] < firstId[ static_cast< std::size_t >( best.lang ) ] );
-            if( better )
+            else if( counts[ i ] != 0 && counts[ i ] == lead )
             {
-                best.lang   = static_cast< Lang >( i );
-                best.origin = AnchorOrigin::Corpus;
+                tied = true;
             }
         }
+        if( tied )
+        {
+            best.lang = firstTiedLangByContent( ing, counts[ static_cast< std::size_t >( best.lang ) ] );
+        }
         return best;
+    }
+
+private:
+    Lang firstTiedLangByContent( const IngestResult& ing, std::uint32_t top ) const
+    {
+        NodeId first = kNoNode;
+        for( const Symbol& s : ing.symbols )
+        {
+            const bool contender = isCodeLang( s.lang ) && counts[ static_cast< std::size_t >( s.lang ) ] == top;
+            if( contender && ( first == kNoNode || contentKeyBefore( ing, s.id, first ) ) )
+            {
+                first = s.id;
+            }
+        }
+        return ing.symbols[ first ].lang;   // a tie means two languages counted top > 0 definitions, so `first` was set
     }
 };
 
@@ -14824,8 +14838,8 @@ struct LangCensus
 // none is needed — the census is FOLDED into the walk the resolver already does (see resolveAllByName), and a warm
 // cache replay still walks symbols, so the anchor is derived identically cold and warm (lspcheck arm (33)'s class
 // of bug cannot exist by construction here).
-constexpr LangAnchor makeLangAnchor( bool hasExplicit, Lang explicitLang, bool hasContext, Lang contextLang,
-                                     const LangCensus& census ) noexcept
+inline LangAnchor makeLangAnchor( const IngestResult& ing, bool hasExplicit, Lang explicitLang, bool hasContext, Lang contextLang,
+                                  const LangCensus& census )
 {
     if( hasExplicit )
     {
@@ -14835,7 +14849,7 @@ constexpr LangAnchor makeLangAnchor( bool hasExplicit, Lang explicitLang, bool h
     {
         return { contextLang, AnchorOrigin::Context };
     }
-    return census.resolve();
+    return census.resolve( ing );
 }
 
 // The tower (RIPWIRE-RUBY task C, re-tiered by task D, ordered by the adopted #440 rule): ONE total order
@@ -15082,7 +15096,7 @@ inline std::vector<NodeId> resolveAllByName( const IngestResult& ing, std::strin
             out.push_back( s.id );
         }
     }
-    LangAnchor anchor = makeLangAnchor( selector && split.tag.has_value(), split.tag.value_or( Lang::Unknown ),
+    LangAnchor anchor = makeLangAnchor( ing, selector && split.tag.has_value(), split.tag.value_or( Lang::Unknown ),
                                                context.active(), context.lang, census );
     applyExplicitScope( ing, out, anchor, selector );   // the ONE scope rule (see its contract)
     out = applyNameTower( ing, std::move( out ), anchor );   // the tower orders this tier; the "::" tiers above are their own answers
@@ -16191,17 +16205,21 @@ inline std::vector<NodeId> finishAnchoredNameList( const IngestResult& ing, std:
                                                    const NameSuffixSplit& split, bool selector, bool fileLane,
                                                    const LangCensus& census, LangAnchor* anchorOut )
 {
-    LangAnchor anchor = makeLangAnchor( selector && split.tag.has_value(), split.tag.value_or( Lang::Unknown ),
+    LangAnchor anchor = makeLangAnchor( ing, selector && split.tag.has_value(), split.tag.value_or( Lang::Unknown ),
                                         fileLane, fileLane ? ing.symbols[ out.front() ].lang : Lang::Unknown, census );
     applyExplicitScope( ing, out, anchor, selector );   // the ONE scope rule, same contract in both lanes
     out = applyNameTower( ing, std::move( out ), anchor );   // the tower orders the name/file tier; the early tiers above stay as-is
     // Written-spelling and def-line (train 39-40 tiers) join the lane's tail: each acts only while the list is
-    // still empty, so the order they held inline — dotted, written, def-line — is kept exactly.
-    out = preferCodeOverDocUnits( ing, spec, std::move( out ) );   // a doc heading spelled like code never hides the code
-    out = resolveAllByDottedScope( ing, spec, std::move( out ) );   // `Class.method` / `Class#method`, only when `out` is empty
-    out = resolveAllByWrittenSpelling( ing, spec, std::move( out ) );   // the source's own spelling, only when still empty
-    out = preferCodeOverDocUnits( ing, spec, std::move( out ) );        // the dotted tier reads the Scope::name tier: same rule
-    out = resolveAllByDefLine( ing, spec, std::move( out ) );            // a printed p= (`file:LINE`), last, only when still empty
+    // still empty, so the order they held inline — dotted, written, def-line — is kept exactly. A tail read as a
+    // language is no part of any spelling these tiers compare (`Box.run@py` names `Box.run`), so they get the spec
+    // without it, and the stated language then scopes whatever they found by the same one rule as the head.
+    const std::string_view tierSpec = selector && split.tag.has_value() ? spec.substr( 0, spec.rfind( '@' ) ) : spec;
+    out = preferCodeOverDocUnits( ing, tierSpec, std::move( out ) );   // a doc heading spelled like code never hides the code
+    out = resolveAllByDottedScope( ing, tierSpec, std::move( out ) );   // `Class.method` / `Class#method`, only when `out` is empty
+    out = resolveAllByWrittenSpelling( ing, tierSpec, std::move( out ) );   // the source's own spelling, only when still empty
+    out = preferCodeOverDocUnits( ing, tierSpec, std::move( out ) );        // the dotted tier reads the Scope::name tier: same rule
+    out = resolveAllByDefLine( ing, tierSpec, std::move( out ) );            // a printed p= (`file:LINE`), last, only when still empty
+    applyExplicitScope( ing, out, anchor, selector );   // idempotent on the head's answer; scopes a tail tier's
     if( anchorOut ) *anchorOut = anchor;   // AFTER the tail: the tiers cannot re-anchor, but tieBroke belongs to the anchor that ordered the head
     return out;
 }
@@ -16221,8 +16239,9 @@ inline std::vector<NodeId> resolveAllByColonTiers( const IngestResult& ing, std:
     std::vector<NodeId> byId = resolveAllByCanonicalId( ing, base );
     if( !byId.empty() )
     {
-        answered = true;
-        return byId;
+        answered = true;   // content order, as the Scope::name tier below: a root-relative id two workspace roots both hold
+        std::ranges::sort( byId, [ & ]( NodeId a, NodeId b ) { return contentKeyBefore( ing, a, b ); } );
+        return byId;       // must not front whichever root was ingested first
     }
     std::vector<NodeId> byScope = resolveAllByScopeQualified( ing, base );   // Scope::name tier — see its contract
     answered  = !byScope.empty();
@@ -16249,14 +16268,21 @@ inline void collectNameMatchesWithCensus( const IngestResult& ing, std::string_v
 // The "::" tiers as the QUALIFIED lane answers them. A stated @lang tail must not blind the canonical/scope tiers: they
 // compare against symbol names, which carry no tail (CodeRabbit #440: `path::scope::name@rs` matched neither its own id nor
 // the scope spelling and fell through to a NAME-only lookup), so the tiers get the tail-free spec; a badTag spec passes
-// through untouched so the shared refusal still fires downstream. On a tier answer, a doc heading spelled like code never
+// through untouched so the shared refusal still fires downstream. The literal-first rule holds here too: the COMPLETE
+// spelling is probed first, so an indexed `notes.md::config::user@py` (a heading that carries '@') answers as itself, and
+// the tail reads as a language only when that spelling owns nothing. On a tier answer, a doc heading spelled like code never
 // hides the code (Scope::name tier only), and then the stated tag scopes the tiers too (#440).
 inline std::vector<NodeId> qualifiedColonTierAnswer( const IngestResult& ing, std::string_view spec, bool& answered, LangAnchor* anchorOut )
 {
     bool                   scopeTier = false;
     const NameSuffixSplit  specTail  = nameSuffixSplit( spec );
-    const std::string_view tierSpec  = specTail.tag.has_value() ? specTail.base : spec;
-    std::vector<NodeId>    tier      = resolveAllByColonTiers( ing, tierSpec, answered, scopeTier );
+    std::vector<NodeId>    tier      = resolveAllByColonTiers( ing, spec, answered, scopeTier );
+    const bool             literal   = answered || !specTail.tag.has_value();
+    const std::string_view tierSpec  = literal ? spec : specTail.base;
+    if( !literal )
+    {
+        tier = resolveAllByColonTiers( ing, tierSpec, answered, scopeTier );
+    }
     if( !answered )
     {
         return {};
@@ -16265,7 +16291,7 @@ inline std::vector<NodeId> qualifiedColonTierAnswer( const IngestResult& ing, st
     {
         tier = preferCodeOverDocUnits( ing, tierSpec, std::move( tier ) );
     }
-    return statedScopeOnTierAnswer( ing, std::move( tier ), specTail, specTail.tag.has_value(), anchorOut );
+    return statedScopeOnTierAnswer( ing, std::move( tier ), specTail, !literal, anchorOut );
 }
 
 inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, std::string_view spec,

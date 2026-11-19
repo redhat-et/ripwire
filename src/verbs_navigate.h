@@ -3913,10 +3913,18 @@ std::optional<int> runMentions( const MainDispatch& d )
 // from the parser's own vocabulary. True = the caller must return 1; the message was already written.
 // Extracted because runAround was ALREADY over the complexity bar before D touched it — the gate told me
 // so, and growing an over-bar function is how bars stop meaning anything.
+// The literal-first check reads the NAME the resolver reads: an @FILE:LINE seed carries no language tail (`@src/user@corp.cpp:12`
+// is a path), and in `data.json:user@corp` the indexed name `user@corp` is what must exist, not the whole selector.
 inline bool refuseUnknownLangTail( const rw::IngestResult& ing, std::string_view spec, std::string_view verb )
 {
-    const rw::NameSuffixSplit as = rw::nameSuffixSplit( spec );
-    if( !( as.badTag && rw::suffixActsAsSelector( ing, spec, as ) ) )
+    if( !spec.empty() && spec.front() == '@' )
+    {
+        return false;
+    }
+    std::string_view file, name;
+    rw::splitQualifiedSpec( spec, file, name );
+    const rw::NameSuffixSplit as = rw::nameSuffixSplit( name );
+    if( !( as.badTag && rw::suffixActsAsSelector( ing, name, as ) ) )
     {
         return false;
     }

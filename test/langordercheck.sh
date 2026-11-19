@@ -19,6 +19,9 @@
 #   (A13) a stated @lang must scope the Scope::name tier too — A::f@rs answers RUST, not the id accident
 #   (A14) a file lane that names one place is silent          (A15) so is an @FILE:LINE seed
 #   (A16) the majority reorders a LOWER rung only: the front did not move, the root is silent
+#   (A17) `Box.run@py` reaches the dotted tier tail-free, and the stated tag scopes that tier's answer (@js: disclosed fallback)
+#   (A18) literal first on the "::" tiers: an indexed `notes.md::config::user@py` heading answers as itself
+#   (A19) the refusal reads the NAME: `data.json:user@corp` and an @FILE:LINE seed whose path holds '@' resolve
 #
 # Usage:  bash test/langordercheck.sh [path/to/ripwire]
 set -u
@@ -202,6 +205,39 @@ case "$A16C" in
             *) ok "(A16) low: Class fronts on kind, js orders ahead of py one rung down, and the root is silent (the front did not move)" ;;
         esac ;;
     *) no "(A16) low order wrong (want cls c_low.py, then z_low.js ahead of d_low.py): $A16C" ;;
+esac
+
+# ── (A17)-(A19): a generated fixture (no committed file joins the repo's own index) ─────────────────────────────────
+TAILFIX="$( mktemp -d )"; trap 'rm -rf "$TAILFIX"' EXIT
+printf 'class Box:\n    def run(self):\n        return 1\n' > "$TAILFIX/box.py"
+printf 'class Box {\n    run() { return 2; }\n}\n' > "$TAILFIX/box.js"   # a JS method carries no Symbol::scope
+printf '{\n  "config": {\n    "user@corp": 3\n  }\n}\n' > "$TAILFIX/data.json"
+printf '# config\n\n## user\n\ntext\n\n## user@py\n\nmore\n' > "$TAILFIX/notes.md"
+printf 'def corp_seed():\n    return 4\n' > "$TAILFIX/user@corp.py"
+front(){ "$BIN" --around="$1" "$TAILFIX" 2>/dev/null | grep -m1 -o '<f p="[^"]*"><s [^>]*'; }   # status: a failed run prints no row, and the positive match on it below then fails the arm
+# The dotted tier reads Symbol::scope, which Python records and JavaScript does not, so `Box.run` finds box.py's method
+# alone: @py answers it with no fallback note, and @js must SAY the stated language holds none (the tag scoped the tier).
+A17P="$( front 'Box.run@py' )"; A17PE="$( "$BIN" --around='Box.run@py' "$TAILFIX" 2>&1 >/dev/null )"
+A17J="$( front 'Box.run@js' )"; A17JE="$( "$BIN" --around='Box.run@js' "$TAILFIX" 2>&1 >/dev/null )"
+case "$A17P|$A17PE|$A17J|$A17JE" in
+    '<f p="box.py"><s t="fn" n="run" sc="Box"'*'||<f p="box.py">'*'|'*'the matching language holds no definition'*)
+        ok "(A17) Box.run@py answers box.py's method silently; Box.run@js discloses the fallback — the dotted tier saw Box.run and the tag scoped it" ;;
+    *) no "(A17) a language tail blinded the dotted tier or did not scope it: py=[$A17P] [$A17PE] js=[$A17J] [$A17JE]" ;;
+esac
+A18="$( front 'notes.md::config::user@py' )"
+case "$A18" in
+    '<f p="notes.md"><s t="sec" n="user@py"'*) ok "(A18) notes.md::config::user@py answers the heading user@py — the whole spelling is probed before the tail reads as a language" ;;
+    *) no "(A18) the literal id lost to its tail-stripped twin: [$A18]" ;;
+esac
+A19Q="$( front 'data.json:user@corp' )"; A19S="$( front '@user@corp.py:2' )"
+case "$A19Q|$A19S" in
+    '<f p="data.json"><s t="sec" n="user@corp"'*'|<f p="user@corp.py"><s t="fn" n="corp_seed"'*) ok "(A19) data.json:user@corp and @user@corp.py:2 resolve — the literal-first check read the name, not the whole selector" ;;
+    *) no "(A19) a real name or a line seed was refused as a bad language tail: [$A19Q] [$A19S]" ;;
+esac
+A19B="$( "$BIN" --around='Shape@bogus' "$FIX" 2>&1 >/dev/null )"; A19BRC=$?
+case "$A19BRC|$A19B" in
+    1\|*'unknown language after @'*) ok "(A19) control: Shape@bogus still refuses with the known tags" ;;
+    *) no "(A19) control: Shape@bogus stopped refusing: rc=$A19BRC [$A19B]" ;;
 esac
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
