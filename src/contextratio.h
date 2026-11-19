@@ -1,5 +1,6 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/sortutil.h"   // sortUnique
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
 
@@ -196,8 +197,7 @@ inline void foldEntityPairs( const std::vector<std::uint64_t>& pairs, const Inge
             }
             ++scan;
         }
-        std::sort( entFiles.begin(), entFiles.end() );
-        entFiles.erase( std::unique( entFiles.begin(), entFiles.end() ), entFiles.end() );
+        rw::sortutil::sortUnique( entFiles );
         row.files = std::uint32_t( entFiles.size() );
         for( const std::uint32_t fileId : entFiles )
         {
@@ -410,8 +410,7 @@ inline Scan computeContextRatio( const IngestResult& ing )
     for( std::vector<std::uint64_t>* stream : { &facts.symEnt, &facts.fileEnt, &facts.symExt,
                                                 &facts.fileExt, &facts.symAmb, &facts.fileAmb } )
     {
-        std::sort( stream->begin(), stream->end() );
-        stream->erase( std::unique( stream->begin(), stream->end() ), stream->end() );
+        rw::sortutil::sortUnique( *stream );
     }
 
     detail::foldEntityPairs( facts.symEnt, ing, tokOfSym,

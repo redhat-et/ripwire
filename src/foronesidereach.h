@@ -28,6 +28,7 @@
 // est_tokens= is re-priced over the rewritten bytes (serialize.h repriceRootAfterCut, signed); <syms> is outside the price.
 // RIPWIRE_NO_ONE_SIDE_REACH=1 turns it off (byte identity and the gate's twins).
 #include "forfilesyms.h" // filesyms_detail::FileLookup / DeclHome / leafName / unescapeXmlAttr / bodylessHeaderDecl (attrOf: serialize.h)
+#include "infra/sortutil.h"   // sortUnique
 #include "graph.h" // shortestPathAny, expandCallers
 #include "lexical.h" // splitRouteWords, isRouteStopword, routeLower, detail::graphSubjectTrimWord
 #include "model.h"
@@ -450,8 +451,7 @@ inline std::optional<Sides> computeSides( const Graph& g, const Endpoints& ep, c
     }
     if( !s.rootSink ) // one walk per side from all of them: the union of their shortest paths, however many rows reach both
     {
-        std::ranges::sort( sources );
-        sources.erase( std::ranges::unique( sources ).begin(), sources.end() );
+        rw::sortutil::sortUnique( sources );
         addShortestPathNodes( g, sources, s.one, s.onPath );
         addShortestPathNodes( g, sources, s.two, s.onPath );
     }

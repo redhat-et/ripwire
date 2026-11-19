@@ -40,6 +40,7 @@
 // not a tuned number: the routing-loop ladder measures them, and a later round moves them with a measured reason.
 
 #include "mention.h"     // ForNamedHeaderRow — forHdrRowsXml below renders the resolver's rows
+#include "infra/sortutil.h"   // sortUnique
 #include "infra/enumcount.h" // enumCountIsExact — TailPageRowFate's count beside the enum
 #include "exemplarfamily.h" // exemplarTasksOf — the add-a-new-X reading keeps a tail's docs and config listed
 #include "fortailterms.h" // tailTaskTerms / tailTermMask — TAIL-SYM-TERMS' task words and name/path evidence
@@ -1117,8 +1118,7 @@ inline TailHeadFileSyms tailHeadFileSyms( const IngestResult& ing, const std::ve
             out.files.push_back( ing.symbols[id].fileId );
         }
     }
-    std::ranges::sort( out.files );
-    out.files.erase( std::unique( out.files.begin(), out.files.end() ), out.files.end() );
+    rw::sortutil::sortUnique( out.files );
     out.syms.assign( out.files.size(), std::string() );
     out.slotOfFile.assign( ing.files.size(), std::uint32_t( out.files.size() ) );
     for( std::size_t k = 0; k < out.files.size(); ++k )

@@ -460,8 +460,7 @@ inline FewestUnprovenChain pathFewestUnproven( const IngestResult& ing, const Gr
             equal.push_back( searches[ f.first ].chainOf( f.second ) );
         }
     }
-    std::ranges::sort( equal );
-    equal.erase( std::unique( equal.begin(), equal.end() ), equal.end() );
+    sortutil::sortUnique( equal );
     out.equalCount = std::uint32_t( equal.size() - std::size_t( std::ranges::binary_search( equal, out.chain ) ? 1 : 0 ) );
     return out;
 }

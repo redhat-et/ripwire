@@ -1108,8 +1108,7 @@ inline OneStatementFacts oneStatementFacts( const std::vector<IdiomTok>& body, c
         }
         f.ids.push_back( fnv1a64( w ) );
     }
-    std::sort( f.ids.begin(), f.ids.end() );
-    f.ids.erase( std::unique( f.ids.begin(), f.ids.end() ), f.ids.end() );
+    sortutil::sortUnique( f.ids );
     f.alpha = fnv1a64( renamed );
     return f;
 }

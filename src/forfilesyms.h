@@ -210,8 +210,7 @@ inline std::vector<std::string> matchWords( std::string_view text )
             out.push_back( suffixStem( std::move( w ), kLightStemSuffixes ) );
         }
     }
-    std::ranges::sort( out );
-    out.erase( std::unique( out.begin(), out.end() ), out.end() );
+    rw::sortutil::sortUnique( out );
     return out;
 }
 
@@ -260,8 +259,7 @@ inline std::vector<std::string_view> answerTokens( std::string_view text )
         }
         pushRunVariants( out, text, i, j );
     }
-    std::ranges::sort( out, rw::sortutil::svLess );
-    out.erase( std::unique( out.begin(), out.end() ), out.end() );
+    rw::sortutil::sortUnique( out, rw::sortutil::svLess );
     return out;
 }
 

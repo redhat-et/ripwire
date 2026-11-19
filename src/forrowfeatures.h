@@ -291,8 +291,7 @@ inline std::vector<std::pair<NodeId, NodeId>> declinedPairs( const Graph& g, std
             }
         }
     }
-    std::ranges::sort( out );
-    out.erase( std::unique( out.begin(), out.end() ), out.end() );
+    rw::sortutil::sortUnique( out );
     return out;
 }
 
