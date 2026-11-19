@@ -264,9 +264,13 @@ d5a="$( mcpq "$F1" find_referencing_symbols )"; d5b="$( mcpq "$F1N" find_referen
 if [ "$( rc d3 )" = 0 ] && [ "$d5a" = "ok narrowed=ApplicationRef.tick note=1 defs=1 calledBy=bootApp" ]; then
     ok "(d5) MCP find_referencing_symbols narrows like --callers (d3): $d5a"
 else no "(d5) MCP find_referencing_symbols ApplicationRef.tick: want the CLI's narrowed answer, got [$d5a]"; fi
+# The refusal must be THE refusal: a -32602 symbol-not-found error for the selector. "err no response" (the subprocess died or
+# hung up), a malformed result, or any other error is a FAIL, not a pass by default.
 case "$d5b" in
+    'err {"code": -32602, "message": "symbol not found: '"'ApplicationRef.tick'"*)
+        ok "(d5) negative: two source definitions left, MCP still refuses like --callers: [$d5b]" ;;
     ok\ *) no "(d5) negative: two source definitions left, MCP must still refuse like --callers (d4): [$d5b]" ;;
-    *)     ok "(d5) negative: two source definitions left, MCP still refuses like --callers" ;;
+    *)     no "(d5) negative: want the -32602 symbol-not-found refusal for ApplicationRef.tick, got [$d5b]" ;;
 esac
 
 # (b1) met bridge across a declined virtual call
