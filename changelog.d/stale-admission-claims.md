@@ -1,9 +1,9 @@
-### Fixed — two source comments still call the multi-quantifier family admitted
+### Fixed — two source comments still called the multi-quantifier family admitted
 
-`src/arch.h:153` and `src/search.h:1215` describe the multi-quantifier family as one the structural screen
+`src/arch.h:153` and `src/search.h:1215` described the multi-quantifier family as one the structural screen
 admits — "the multi-quantifier residual `a*a*a*a*a*b`, which the screen admits by construction" and "the
 structural screen ADMITS". Since #484 landed (#688), it does not: `--regex='a*a*a*a*a*b'` is refused at
-byte 2, by name, before any engine sees it. Both comments now name a family member that is refused as if the
+byte 2, by name, before any engine sees it. Both comments named a family member that is refused as if the
 gap were still open, on the same lines that explain what `RegexVerdict::Exhausted` is for.
 
 The paragraph still needs a real example of an admitted pattern whose cost in the subject is super-linear,
