@@ -15,7 +15,11 @@
 #      test/importrowshortfix/golden/. (First taken at 994f0021f; RE-CAPTURED 2026-11-18 at integration from the composed
 #      tree just before this change, 1ddf1c29a, because lane V1's <def> rows (one-group --impact answers name their
 #      definition, XML and --json def_table) land in the same batch: the only difference from the 994f0021f goldens is
-#      those <def> rows and def_table, checked by diff with the legend comment and at= masked.) The comparison is over the WHOLE <impact> element, so a row that moved, a count
+#      those <def> rows and def_table, checked by diff with the legend comment and at= masked.) RE-ANCHORED BY HAND 2026-11-19
+#      (lane im1-impact, test/impactfirstwindowcheck.sh): js.impact.xml and js.impact.json.golden only, their importer rows
+#      PERMUTED and nothing else — an importer holding a reached symbol now leads its path tier (declinedsites.h
+#      orderImportersByEvidence), so lib/user.js moves from last to first. Checked: the permuted golden, shortened by this
+#      gate's own rule, equals the new <impact> element, and the permuted JSON golden equals the new --json byte for byte. The comparison is over the WHOLE <impact> element, so a row that moved, a count
 #      that moved, or a neighbour that moved are all the same failure.
 #   2. the --json dialect's import_reach array for the same selector, from the binary under test (a different emitter,
 #      which still spells via and lazy on every entry).
@@ -142,9 +146,9 @@ case "$PYB" in *'<f p="my dir/sp.py"/>'*)
             no "(F) premise: the golden does not hold the spaced row"
         fi ;;
     *) no "(F) the spaced row: $( printf '%s' "$PYB" | grep -o '<f [^>]*sp\.py[^>]*>' )" ;; esac
-nolazy="$( printf '%s' "$JSB" | grep -o '<f p="[^"]*"/>' | tr '\n' ' ' )"
+nolazy="$( printf '%s' "$JSB" | grep -o '<f p="[^"]*"/>' | tr '\n' ' ' )"   # IM1: user.js (a reached symbol's file) leads the tier
 case "$nolazy" in *barrel.js*|*lazyimporter.js*) no "(F) a lazy importer is printed with no lazy=: $nolazy" ;;
-    *'lib/alpha.js'*'lib/beta.js'*'lib/delta.js'*'lib/gamma.js'*'lib/user.js'*) ok "(F) absence keeps one meaning: the five rows with no lazy= are the five top-level importers, never a lazy one" ;;
+    *'lib/user.js'*'lib/alpha.js'*'lib/beta.js'*'lib/delta.js'*'lib/gamma.js'*) ok "(F) absence keeps one meaning: the five rows with no lazy= are the five top-level importers, never a lazy one" ;;
     *) no "(F) the rows with no lazy=: $nolazy" ;; esac
 
 # ── (G) mutation controls: each must go RED, and for the stated reason ───────────────────────────────────────────────
