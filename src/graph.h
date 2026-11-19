@@ -10539,11 +10539,30 @@ inline bool callArityCannotTake( const Reference& ref, const Symbol& cs, std::ui
 // written, through the caller file's own import of the name; kNoNode for none, several, or a language with no resolver here.
 struct ImportProvedClass
 {
+    const JsImportTables& jsImports;
+    const IngestResult&   ing;
+
     NodeId operator()( const Reference& r, std::string_view name ) const
     {
-        static_cast<void>( r );
-        static_cast<void>( name );
-        return kNoNode;
+        return r.lang == Lang::TypeScript || r.lang == Lang::JavaScript ? jsClass( r, name ) : kNoNode;
+    }
+    // TS/JS: the class an ES named import of `name` (renamed or not) pins in r's file (buildJsImportTables: Pinned, the module's export
+    // table names it) — not where a local declaration shadows the import or a write rebinds the name (FC3) at r's byte
+    NodeId jsClass( const Reference& r, std::string_view name ) const
+    {
+        const std::string key = jsImportKey( r.fileId, name );
+        const auto        pin = jsImports.targets.find( key );
+        if( pin == jsImports.targets.end() || pin->second.outcome != JsImportOutcome::Pinned || pin->second.node == kNoNode
+            || !ReceiverEvidence::classLike( ing.symbols[ pin->second.node ].kind ) )
+        {
+            return kNoNode;
+        }
+        const auto covers = [ & ]( const HashMap<std::string, std::vector<VarSpan>>& spans )
+        {
+            const auto it = spans.find( key );
+            return it != spans.end() && std::ranges::any_of( it->second, [ & ]( const VarSpan& s ) { return r.startByte >= s.startByte && r.startByte < s.endByte; } );
+        };
+        return covers( jsImports.shadows ) || covers( jsImports.rebinds ) ? kNoNode : pin->second.node;
     }
 };
 
@@ -11041,7 +11060,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         }
     }
     ReceiverEvidence         recvEv( ing, chaUp, classNames );
-    const ImportProvedClass  importClass{};   // IMPORT-PROVED-SPLITS: recvEv.pathOwners' per-language resolver
+    const ImportProvedClass  importClass{ jsImports, ing };   // IMPORT-PROVED-SPLITS: recvEv.pathOwners' per-language resolver
     HashMap<std::string, char> qualifierVerdicts = buildQualifierVerdicts( ing, extVeto, falseEdges );   // h1-annot
     {
         PROFILE_SCOPE_DESCRIBE( "buildGraph/2i: receiver-evidence tables" );
