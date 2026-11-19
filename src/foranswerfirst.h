@@ -548,50 +548,11 @@ inline void tailSameDirInPlace( std::string& doc )
     doc.replace( tail->begin, permuted.size(), permuted );
 }
 
-// ── TL1 M3, A LATE ASKED BODY LEADS THE TAIL (the AF1-fix "order follow-ups" finding; lane TL1's PREREG M3, confirmed once on T5e). A
-// top-level <bodies> rides only when the call or the question asked for a body: --detail=N, the name-exact route's anchor body, or
-// the ONE owner body of an explanatory question (forowner.h). When that block STARTS at or past the default page stop
-// (kAnswerPageBytesDefault — the constant G reads, so every page size windows the same document) it moves, with its own lead legend
-// comment, directly ahead of <tail> and that block's lead comment: the asked body is on page 1 instead of behind ~12 KB of
-// weaker-evidence tail rows. A body that already starts inside the first page stays put (on a small name-exact answer, moving it
-// ahead of the tail only pushed the tail's and callers' gold later: 6 dev cells, 1,051 -> 4,565 B worst).
-// NOT the compact route's <hops> or <fold>: they ride every conceptual answer whether or not the question needs them, no wording
-// separates the cells whose gold sits in them, and moving them ahead of the tail — even under G's guard — took dev cells out of
-// 12 KB (registered null; they stay disclosed through deferred=). Order only, on the assembled document, after T-B and G: same bytes
-// (ENSURES). RIPWIRE_NO_BODY_LEAD (any value) turns it off — the A/B handle.
-[[nodiscard]] inline bool bodyLeadOn() noexcept { return std::getenv( "RIPWIRE_NO_BODY_LEAD" ) == nullptr; }
-
-// The first block of `k`'s group: `k` itself, or the first of the comments directly in front of it that declare it (declaredBlock).
-[[nodiscard]] inline std::size_t groupStart( std::string_view doc, const std::vector<Block>& bl, std::size_t k ) noexcept
-{
-    std::size_t s = k;
-    while( s > 0 && bl[ s - 1 ].comment && declaredBlock( doc, bl, s - 1 ) == k ) { --s; }
-    return s;
-}
-
-inline void bodiesLeadInPlace( std::string& doc )
-{
-    const std::optional<RootBody> rb = rootBody( doc );
-    const std::vector<Block>      bl = rb ? topLevelBlocks( doc, rb->openEnd + 1, rb->closeAt ) : std::vector<Block>{};
-    const auto is = []( std::string_view n ) { return [ n ]( const Block& b ) { return !b.comment && b.name == n; }; };
-    const auto tail   = std::ranges::find_if( bl, is( "tail" ) );
-    const auto bodies = tail == bl.end() ? bl.end() : std::find_if( tail, bl.end(), is( "bodies" ) );
-    if( bodies == bl.end() || bodies->begin < kAnswerPageBytesDefault ) { return; }
-    const Block&      t = bl[ groupStart( doc, bl, std::size_t( tail - bl.begin() ) ) ];
-    const Block&      b = bl[ groupStart( doc, bl, std::size_t( bodies - bl.begin() ) ) ];
-    const std::string moved = doc.substr( b.begin, bodies->end - b.begin );
-    const std::string between = doc.substr( t.begin, b.begin - t.begin );
-    const std::size_t was = doc.size();
-    doc.replace( t.begin, bodies->end - t.begin, moved + between );
-    ENSURES( doc.size() == was, "bodiesLeadInPlace moves one group of blocks: the document's size cannot move" );
-}
-
 // The order knobs a caller hands answerFirst (each read from argv or the A/B environment by the caller, never here).
 struct AnswerFirstAsk
 {
     bool callersLead = false;   // T-B: the task asks who calls the <callers by="subject"> block's subject
     bool tailSameDir = false;   // TL1 M2
-    bool bodyLead    = false;   // TL1 M3
 };
 
 // T-B: the of= of the answer's top-level <callers by="subject"> block, still XML-escaped as the answer prints it; "" when there is
@@ -611,8 +572,7 @@ struct AnswerFirstAsk
 }
 
 // Permute one finished --for answer in place. Returns whether it was rewritten. `ask.callersLead` (T-B): the task asks who calls the
-// subject the <callers by="subject"> block answers, so that block leads; `ask.tailSameDir` (TL1 M2): the tail's same-directory lead;
-// `ask.bodyLead` (TL1 M3): a late asked <bodies> leads the tail.
+// subject the <callers by="subject"> block answers, so that block leads; `ask.tailSameDir` (TL1 M2): the tail's same-directory lead.
 //
 // Every byte of every block is copied unchanged; only their order moves. The ENSURES below is the contract:
 // a permutation that changed the document's size would be a different change wearing this one's name.
@@ -627,7 +587,7 @@ inline bool answerFirst( std::string& doc, const AnswerFirstAsk& ask = {} )
     if( blocks.empty() ) { return false; }   // not a shape this pass understands: served unchanged
 
     const std::size_t lead = ask.callersLead ? subjectCallersBlock( view, blocks ) : std::string_view::npos;
-    if( lead == std::string_view::npos && !ask.tailSameDir && !ask.bodyLead && !permutationWouldMove( view, blocks ) ) { return false; }
+    if( lead == std::string_view::npos && !ask.tailSameDir && !permutationWouldMove( view, blocks ) ) { return false; }
 
     std::string out;
     out.reserve( doc.size() );
@@ -636,7 +596,6 @@ inline bool answerFirst( std::string& doc, const AnswerFirstAsk& ask = {} )
     appendAnswerFirst( view, blocks, out, lead );
     out.append( view.substr( closeAt ) );
     if( ask.tailSameDir ) { tailSameDirInPlace( out ); }   // TL1 M2, on the assembled document (its root closed)
-    if( ask.bodyLead ) { bodiesLeadInPlace( out ); }       // TL1 M3, after T-B and G: it reads their stream offsets
 
     // THE PERMUTATION CONTRACT. Not an assertion of taste: if this ever fails, the pass has dropped or
     // duplicated a block, and the band's whole safety argument — no row removed, so no gold lost — is void.

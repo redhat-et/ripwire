@@ -5685,8 +5685,7 @@ inline void replayForPostureNotices( const ForPostureRender& r )
 inline rw::answerfirst::AnswerFirstAsk forAnswerFirstAsk( const rw::Config& cfg, std::string_view doc )
 {
     return { .callersLead = rw::subjectCallersCueLeads( cfg.forTask, rw::answerfirst::subjectCallersOf( doc ) ),
-             .tailSameDir = rw::answerfirst::tailSameDirOn(),
-             .bodyLead    = rw::answerfirst::bodyLeadOn() };
+             .tailSameDir = rw::answerfirst::tailSameDirOn() };
 }
 
 // The budgeted answer (the fit's, or `u`'s whole capture when it had no root; the caller checked it is whole) in the posture's order.
