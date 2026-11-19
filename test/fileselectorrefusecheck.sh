@@ -134,6 +134,7 @@ echo
 echo "=== G: multi-root --situ — one refusal-or-answer per SELECTOR, never a per-root false zero ==="
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════════
 FIX2="$( mktemp -d )/betaroot"; mkdir -p "$FIX2"
+trap 'rm -rf "$( dirname "$FIX2" )"' EXIT
 printf 'int beta( int x ) { return x + 1; }\n' >"$FIX2/beta.cpp"
 LBL2="$( basename "$FIX2" )"
 "$BIN" "$FIX" "$FIX2" "--situ=$GOOD" --no-cache >"$FIX2.out" 2>"$FIX2.err"; rc=$?
