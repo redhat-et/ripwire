@@ -483,6 +483,9 @@ probeFor()
 {
     case "$1" in
         --help|--version|--mcp|--listen=|--mcp-token=|--allow-remote-edits|--refetch) return 1 ;;
+        # --legend-seen=FILE names a caller's file, not a verb: an unreadable FILE serves the default answer (never a refusal)
+        # while --legend=full refuses the pairing, so the rows-identical universe has nothing to compare. legendseencheck owns it.
+        --legend-seen=) return 1 ;;
         --cache=|--index-out=|--pin-census=|--note-add=|--export=|--quality-baseline|--quality-ack=|--quality-ack|--ack-only=) return 1 ;;
         --replace-symbol-body=|--insert-after-symbol=|--insert-before-symbol=|--edit-payload=|--edit-plan=|--edit-target-file=|--run-trace=|--baseline|--baseline-update|--arch=|--scan-skill=|--scan-skills=|--lint-rules=) return 1 ;;
         --eval|--eval-retrieval|--eval=knownitem|--eval=*|--eval-skills|--eval-mined=|--eval-stray=|--doctor|--wrap) return 1 ;;

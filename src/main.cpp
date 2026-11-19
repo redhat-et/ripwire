@@ -56,6 +56,7 @@
                                    //   is what lets the MCP edit_check verb mirror it from mcpverbs.h
 #include "slicediff.h"            // card A4: --slice=SYM:VAR --since=REV — the def-use slice as a DEPENDENCE diff
 #include "mcp.h"
+#include "legendseen.h"            // LS1: --legend-seen=FILE and --legend-dict=seen (the per-definition handshake)
 #include "compactlegend.h"         // P1 (L7): the --legend=compact dialect layer for every XML verb (runWithCompactLegend)
 #include "mcpserver.h"             // the optional remote MCP transport (--listen), picked below
 #include "editplan.h"              // CLI-first versioned multi-edit transactions
@@ -548,6 +549,7 @@ struct MainDispatch
 #include "verbs_doctor.h"
 #include "verbs_lint.h"
 #include "verbs_for.h"
+#include "forlegendentries.h"   // LS1: verbs_for.h's --for legend clauses as legend-dictionary entries (legenddict::kForDocEntries)
 #include "verbs_navigate.h"
 #include "verbs_quality.h"
 #include "verbs_change.h"
@@ -4239,6 +4241,65 @@ static void applyCliRefPosture( const rw::Config& cfg, std::string& doc )
     }
 }
 
+// LS1: --legend-seen=FILE, applied to a finished answer in the default posture (legendseen.h). FILE is EXTERNAL INPUT and
+// is distrusted whole on any doubt — missing, unreadable, not a regular file, over the size cap, or a line that is no
+// entry hash — and then the answer is served whole, said on stderr: a stale or corrupt holding costs bytes, never a
+// reading and never the call. Read with a plain stream, not docparse::readWholeFile, which would register FILE as a
+// dependency of the warm snapshot and invalidate it every time the caller appends to FILE.
+static std::optional<rw::legendseen::Holding> loadLegendSeen( const rw::Config& cfg )
+{
+    const std::string path( cfg.legendSeen );
+    std::error_code   ec;
+    const bool        regular = std::filesystem::is_regular_file( path, ec ) && !ec;
+    const auto        size    = regular ? std::filesystem::file_size( path, ec ) : std::uintmax_t( 0 );
+    const auto        degrade = [ & ]( std::string_view why )
+    {
+        DISCLOSE( Diagnostics::answerUnchanged, "the whole answer is a correct superset of the reduced one: only the cost stays",
+                  "loadLegendSeen: FILE untrusted — every definition is served inline" );
+        rw::emitTo( stderr, "ripwire: --legend-seen={}: {} — every definition is served inline, nothing was left out\n", path, why );
+        return std::optional<rw::legendseen::Holding>();
+    };
+    if( !VALIDATE( regular && !ec, "--legend-seen= names a readable regular file" ) )
+    {
+        return degrade( "not a readable regular file" );
+    }
+    if( !VALIDATE( size <= rw::legendseen::kMaxFileBytes, "--legend-seen= FILE is within the size cap" ) )
+    {
+        return degrade( "larger than 4 MiB, which is no holding one call at a time writes" );
+    }
+    rw::OwnedFile fp = rw::openOwnedFile( path.c_str(), "rb" );
+    std::string   bytes;
+    char          buf[ 65536 ];
+    for( std::size_t got; fp && ( got = std::fread( buf, 1, sizeof( buf ), fp.file ) ) > 0 && bytes.size() <= rw::legendseen::kMaxFileBytes; )
+    {
+        bytes.append( buf, got );
+    }
+    if( !VALIDATE( fp && std::ferror( fp.file ) == 0 && bytes.size() <= rw::legendseen::kMaxFileBytes, "--legend-seen= FILE reads whole" ) )
+    {
+        return degrade( "could not be read whole" );
+    }
+    rw::legendseen::Holding held = rw::legendseen::parseHolding( bytes );
+    if( !VALIDATE( held.badLine == 0, "--legend-seen= FILE holds only entry hashes, blank lines and # comments" ) )
+    {
+        return degrade( "line " + std::to_string( held.badLine ) + " is not a legend-entry hash (16 lowercase hex, as ripwire --legend-dict=seen "
+                        "prints), so the file is not trusted" );
+    }
+    return held;
+}
+
+static void applyCliSeenPosture( const rw::Config& cfg, std::string& doc )
+{
+    if( !cfg.legendSeenGiven || doc.empty() )
+    {
+        return;
+    }
+    const std::optional<rw::legendseen::Holding> held = loadLegendSeen( cfg );
+    if( held )
+    {
+        (void)rw::legendseen::applySeenPosture( doc, *held );   // Unchanged/NotApplicable: the answer IS the default one
+    }
+}
+
 // ITEM D: the prose-free DEFAULT, applied to a finished compact answer. Runs when nobody asked for a posture, or when
 // --legend=dict named this one; an asked --legend=compact clears legendProseOff and is the registered opt-out (D3).
 static void applyCliDictPosture( const rw::Config& cfg, std::string& doc )
@@ -4311,6 +4372,7 @@ static int finishCompactCapture( const rw::Config& cfg, std::string& doc, int rc
             // root attributes this one promises not to touch. applyDictPosture then finds no legend left to drop and
             // leaves the ref answer alone, so the order is safe either way rather than merely untested.
             applyCliDictPosture( cfg, doc );
+            applyCliSeenPosture( cfg, doc );   // LS1: refused beside either posture above, so at most one of the three reduces
             return emitCaptured();
         case rw::CompactOutcome::NotXml:
             if( cfg.legendDefaulted )
@@ -4397,7 +4459,10 @@ static int runWithCompactLegend( const rw::Config& cfg, char** argv )
     // stage would have silently rewritten the answer on the way. So this path captures and applies the ref stage ALONE,
     // leaving the compact path byte-identical to a run without the flag.
     const bool refOnlyCapture = !cfg.legendHave.empty() && !compactCaptures( cfg, argv );
-    if( !compactCaptures( cfg, argv ) && !refOnlyCapture )
+    // LS1: --legend-seen= on a NATIVE-compact verb (--for above all: its answer-first page carries the largest legend) takes
+    // the same own capture, for the same reason — the compact path would rewrite the answer on the way.
+    const bool seenOnlyCapture = cfg.legendSeenGiven && !compactCaptures( cfg, argv );
+    if( !compactCaptures( cfg, argv ) && !refOnlyCapture && !seenOnlyCapture )
     {
         return dispatchMain( cfg, argv );
     }
@@ -4433,9 +4498,10 @@ static int runWithCompactLegend( const rw::Config& cfg, char** argv )
         doc.append( buf, got );
     }
     std::fclose( capture );
-    if( refOnlyCapture )
+    if( refOnlyCapture || seenOnlyCapture )
     {
         applyCliRefPosture( cfg, doc );
+        applyCliSeenPosture( cfg, doc );   // refused beside --legend-have=, so at most one of the two reduces
         return emitCapturedDoc( doc, rc );
     }
     return finishCompactCapture( cfg, doc, rc );   // the ref stage runs INSIDE it, after the compact dialect
@@ -4533,11 +4599,11 @@ static int answerLegendDict( int argc, char** argv )
         {
             const std::string_view v = a.substr( 14 );
             if( !VALIDATE( std::ranges::contains( legenddict::kDictForms, v ) || legenddict::isSchemaKey( v ),
-                           "--legend-dict= names a form it takes: roster, tiers, index, core or a schema key" ) )
+                           "--legend-dict= names a form it takes: roster, tiers, index, seen, core or a schema key" ) )
             {
                 rw::emitTo( stderr, "ripwire: --legend-dict= takes core (the {}-definition core tier), a schema KEY such as callers (the core plus "
-                                    "that verb's pack; --legend-dict=tiers lists them), roster, tiers or index — got '{}'; bare --legend-dict "
-                                    "prints the whole dictionary\n", legenddict::kCoreTierEntryCount, v );
+                                    "that verb's pack; --legend-dict=tiers lists them), roster, tiers, index or seen (the entry hashes of the answers "
+                                    "on stdin) — got '{}'; bare --legend-dict prints the whole dictionary\n", legenddict::kCoreTierEntryCount, v );
                 return 1;
             }
             formsDiffer = formsDiffer || ( !wantForm.empty() && wantForm != v );
@@ -4550,6 +4616,22 @@ static int answerLegendDict( int argc, char** argv )
         rw::emitRaw( stderr, "ripwire: --legend-dict prints the dictionary and --legend-dict=FORM one view of it (core, a schema KEY, roster, "
                              "tiers, index) — pass one, not both\n" );
         return 1;
+    }
+    if( wantForm == "seen" )
+    {
+        // LS1: the hashes of the entries the answers on stdin carry — the lines --legend-seen=FILE takes. stdin is what the
+        // caller RECEIVED; reading it whole is the point (a comment cut short is not counted, legendseen.h receivedComments).
+        std::string received;
+        char        buf[ 65536 ];
+        for( std::size_t got; ( got = std::fread( buf, 1, sizeof( buf ), stdin ) ) > 0; ) { received.append( buf, got ); }
+        if( std::ferror( stdin ) != 0 )
+        {
+            rw::emitRaw( stderr, "ripwire: --legend-dict=seen could not read stdin — pipe the answers you received into it, e.g. "
+                                 "ripwire . --callers=main | ripwire --legend-dict=seen >>seen.txt\n" );
+            return 1;
+        }
+        rw::emitRaw( stdout, legendseen::seenHashesText( received ).c_str() );
+        return 0;
     }
     if( wantFull || !wantForm.empty() )
     {

@@ -48,7 +48,8 @@ return a stable `handle=` instead of the body — `fetch_body` it only when you 
 
 The session's first answer defines its attributes inline; later answers carry a definition only the first time
 the session meets it. On the CLI the same saving is opt-in: read the core once (`ripwire --legend-dict=core`,
-13 definitions, about 1.5 KB) and pass its `have=` as `--legend-have=` (`session-legend.md`).
+13 definitions, about 1.5 KB) and pass its `have=` as `--legend-have=`, or name the definitions you received with
+`--legend-seen=FILE` (both in `session-legend.md`).
 
 ## Stop rule
 

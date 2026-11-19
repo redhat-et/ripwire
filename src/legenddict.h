@@ -66,6 +66,7 @@
 #include <cstdint>
 #include <iterator>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -135,6 +136,23 @@ inline constexpr std::string_view kCliCoreEntries[] =
     "answer, after its rows",
 };
 
+// THE CLI `--for` DOCUMENT LEGEND (lane LS1, 2026-11-18): the fixed clauses the answer-first `--for` answer carries in
+// its trailing legend — the compact dialect's `kForCompact*` clauses (verbs_for.h and the for*.h headers), the notes
+// and the page clause. Until this lane none was an entry, so no stateless handshake could leave one out and the
+// largest answer of a session (`--for`, 64 % of P4's session bytes) re-sent all of its ~4 KB every call. They are
+// entries now so `--legend-seen=FILE` (legendseen.h) can leave out the ones the caller holds, and so the dictionary
+// still resolves every clause such an answer omits.
+//
+// WHY extern AND NOT A TABLE HERE. Most of these constants live in verbs_for.h, a SECTION of main.cpp (its unnamed
+// namespace, RIPWIRE_MAIN_TU), and the rest in headers that include this one (forpages.h, foranswerfirst.h) or pull
+// half the --for stack. Including them here is a cycle; copying their text here is a clone that drifts. So the COUNT is
+// fixed here (the id space and dictv need it) and main.cpp defines the table, right after verbs_for.h, from the
+// constants themselves (forlegendentries.h). LAST in the id space, after the CLI core entries: no existing id moves,
+// so no tier hash and no pack moves; dictv= does.
+// A span of STATIC extent: main.cpp's table must hold exactly kForDocCount clauses or it does not compile.
+inline constexpr std::size_t kForDocCount = 78;
+extern const std::span<const std::string_view, kForDocCount> kForDocEntries;
+
 inline constexpr std::size_t kCoreCount     = std::size( kCoreEntries );
 inline constexpr std::size_t kPurposeCount  = std::size( kCompactLegendSpecs );
 inline constexpr std::size_t kTermCount     = kCompactReadingCount;   // BOTH reading tables, in compactlegend.h's joint order
@@ -146,7 +164,8 @@ inline constexpr std::size_t kForBase       = kTermBase + kTermCount;
 inline constexpr std::size_t kNameBase      = kForBase + kForCount;
 inline constexpr std::size_t kCliCount      = std::size( kCliCoreEntries );
 inline constexpr std::size_t kCliBase       = kNameBase + kNameCount;
-inline constexpr std::size_t kEntryCount    = kCliBase + kCliCount;
+inline constexpr std::size_t kForDocBase    = kCliBase + kCliCount;
+inline constexpr std::size_t kEntryCount    = kForDocBase + kForDocCount;
 inline constexpr std::size_t kModScopeEntryId = kNameBase;   // kNameReadingEntries[ 0 ]
 
 // The bytes an answer carries for entry `id` (the purpose line WITHOUT its schema label — the compact legend spells the
@@ -159,7 +178,15 @@ inline std::string_view entryBody( std::size_t id ) noexcept
     if( id < kForBase )     { return compactReading( id - kTermBase ).reading; }
     if( id < kNameBase )    { return kForClauseEntries[ id - kForBase ]; }
     if( id < kCliBase )     { return kNameReadingEntries[ id - kNameBase ]; }
-    return kCliCoreEntries[ id - kCliBase ];
+    if( id < kForDocBase )  { return kCliCoreEntries[ id - kCliBase ]; }
+    return kForDocEntries[ id - kForDocBase ];
+}
+
+// Is `id` a `for` clause — the MCP dialect's or the CLI document legend's? Both are spelled with their leading
+// punctuation in an answer and labelled "for:" in the dictionary.
+constexpr bool isForClauseId( std::size_t id ) noexcept
+{
+    return ( id >= kForBase && id < kNameBase ) || ( id >= kForDocBase && id < kEntryCount );
 }
 
 // The entry's line in the dictionary text: purpose lines gain their schema label, `for` clauses lose their leading
@@ -172,7 +199,7 @@ inline std::string entryLine( std::size_t id )
         const CompactLegendSpec& s = kCompactLegendSpecs[ id - kPurposeBase ];
         return "ripwire." + std::string( s.key ) + "/v1 <" + std::string( s.rootTag ) + ">: " + std::string( s.purpose );
     }
-    if( id >= kForBase && id < kNameBase )
+    if( isForClauseId( id ) )
     {
         std::string_view body = entryBody( id );
         while( !body.empty() && ( body.front() == ' ' || body.front() == ';' || body.front() == ':' || body.front() == '[' ) )
@@ -282,7 +309,7 @@ inline std::string coreDictionaryText()
 
 // The views `ripwire --legend-dict=FORM` prints besides a schema key's pack. A schema key spelled like one would make a
 // pack unreachable, so the collision stops the build.
-inline constexpr std::string_view kDictForms[] = { "core", "roster", "tiers", "index" };
+inline constexpr std::string_view kDictForms[] = { "core", "roster", "tiers", "index", "seen" };   // seen: legendseen.h, reads stdin
 static_assert( std::ranges::none_of( kCompactLegendSpecs, []( const CompactLegendSpec& s ) { return std::ranges::contains( kDictForms, s.key ) || s.key == "full"; } ),
                "a compact schema key is spelled like a --legend-dict= form (or like the have= label full): rename one" );
 
@@ -522,6 +549,7 @@ inline std::string indexText()
         }
         else if( id < kNameBase ) { cls = "for"; }
         else if( id < kCliBase )  { cls = "name"; attr = "@file-scope"; }
+        else if( id >= kForDocBase ) { cls = "for-doc"; }
         out += std::to_string( id ) + '\t';
         for( const std::string_view field : { cls, key, attr, tag, item } )
         {
@@ -1150,6 +1178,9 @@ inline std::optional<HeadReduction> reduceHead( std::string_view view, const Ref
     if( s.isFor )
     {
         for( std::size_t k = 0; k < kForCount; ++k ) { forOrder.push_back( kForBase + k ); }
+        // LS1: the CLI document legend's clauses are entries too, and some (the files_first= and docs_after_code= notes,
+        // the demote comment) ride the MCP bundle verbatim — once served they must not reach the session again.
+        for( std::size_t k = 0; k < kForDocCount; ++k ) { forOrder.push_back( kForDocBase + k ); }
         for( const std::uint16_t t : compactPresentTerms( compactDocHead( view, s.root ), view ) ) { forOrder.push_back( kTermBase + t ); }
         std::sort( forOrder.begin(), forOrder.end(), []( std::size_t a, std::size_t b )
                    { return entryBody( a ).size() != entryBody( b ).size() ? entryBody( a ).size() > entryBody( b ).size() : a < b; } );
@@ -1234,6 +1265,48 @@ inline RefParts assembleRef( std::string_view view, const RefShape& s, const Hea
     return p;
 }
 
+// LS1: a `for` answer also carries whole-comment legends AFTER its first row (the sibling-demote comment, which AF1 moved
+// beside the rows it reads), and reduceHead reads head comments only. Once such a comment is a dictionary entry the
+// session would be sent it on every answer, so a body comment that IS one entry, whole, is treated as reduceHead treats
+// a head entry: touched (served once this answer goes out) and dropped where the session already holds it. CDATA is
+// stepped over — ripwire's own source spells these comments as string literals.
+inline void dropServedBodyComments( std::string& body, const LegendSession& session, std::vector<std::size_t>& touched )
+{
+    std::string out;
+    std::size_t copied = 0;
+    for( std::size_t i = 0; i < body.size(); )
+    {
+        const std::size_t c = body.find( "<!-- ", i );
+        const std::size_t d = body.find( "<![CDATA[", i );
+        if( c == std::string::npos && d == std::string::npos ) { break; }
+        const bool        cdata = d < c;
+        const std::size_t close = cdata ? body.find( "]]>", d + 9 ) : body.find( " -->", c + 5 );
+        if( close == std::string::npos ) { break; }
+        const std::size_t end = close + ( cdata ? 3 : 4 );
+        if( !cdata )
+        {
+            const std::string_view inner = std::string_view( body ).substr( c + 5, close - c - 5 );
+            for( std::size_t id = kForDocBase; id < kEntryCount; ++id )
+            {
+                if( entryBody( id ) != inner ) { continue; }
+                touched.push_back( id );
+                if( session.isServed( id ) )
+                {
+                    out.append( body, copied, c - copied );
+                    copied = end;
+                }
+                break;
+            }
+        }
+        i = end;
+    }
+    if( copied != 0 )
+    {
+        out.append( body, copied, std::string::npos );
+        body.swap( out );
+    }
+}
+
 } // namespace detail
 
 // Reduce one finished inline answer to the ref posture, in place — see the header. `doc` is the answer as the inline
@@ -1276,6 +1349,10 @@ inline RefOutcome applyRefPosture( std::string& doc, LegendSession& session, std
         head->residual.insert( head->residual.begin(), "<!-- " + core + " -->" );
     }
     detail::RefParts  parts    = detail::assembleRef( view, *shape, *head );
+    if( shape->isFor )
+    {
+        detail::dropServedBodyComments( parts.body, session, head->touched );
+    }
     const std::size_t refBytes = parts.bytes( *shape );
     for( const std::size_t id : head->touched ) { session.markServed( id ); }   // sent now, in either posture
     if( refBytes > doc.size() )
@@ -1422,7 +1499,14 @@ inline bool openSessionWith( std::string_view doc, LegendSession& session )
     {
         return false;
     }
-    for( const std::size_t id : head->touched ) { session.markServed( id ); }   // sent now, inline
+    std::vector<std::size_t> touched = head->touched;
+    if( shape->isFor )
+    {
+        // the whole-comment entries after the rows went out inline too (a copy: only the touched list is wanted)
+        std::string body( doc.substr( shape->root.openEnd ) );
+        detail::dropServedBodyComments( body, session, touched );
+    }
+    for( const std::size_t id : touched ) { session.markServed( id ); }   // sent now, inline
     session.refOn = true;
     return true;
 }
