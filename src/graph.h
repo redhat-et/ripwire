@@ -3935,14 +3935,19 @@ struct JsImportTables
     [[nodiscard]] bool importsIn( std::uint32_t f ) const noexcept { return f < importingFiles.size() && importingFiles[ f ] != 0; }
 };
 
+// does a "<fileId>#name"-keyed span table hold a span of `key` that covers byte `at`? (JsImportTables' shadows / rebinds / pinnedRebinds)
+inline bool spanCoversAt( const HashMap<std::string, std::vector<VarSpan>>& spans, const std::string& key, std::uint32_t at )
+{
+    const auto it = spans.find( key );
+    return it != spans.end() && std::ranges::any_of( it->second, [ at ]( const VarSpan& s ) { return at >= s.startByte && at < s.endByte; } );
+}
+
 // FC3: is this BARE call made through a name WRITTEN after its declaration, at a byte that declaration's scope holds
 // (`Eng = Foo; new Eng()`)? Such a call is undecided: the name no longer names what it was declared as.
 inline bool jsCallThroughWrittenBinding( const JsImportTables& tables, const Reference& r )
 {
     if( r.role != RefRole::Call || r.memberCall || r.recv != RecvKind::None || !r.qualifier.empty() ) { return false; }
-    const auto spans = tables.rebinds.find( jsImportKey( r.fileId, r.calleeName ) );
-    return spans != tables.rebinds.end()
-        && std::any_of( spans->second.begin(), spans->second.end(), [ & ]( const VarSpan& span ) { return r.startByte >= span.startByte && r.startByte < span.endByte; } );
+    return spanCoversAt( tables.rebinds, jsImportKey( r.fileId, r.calleeName ), r.startByte );
 }
 
 // FC3: what a MEMBER call's ROOT name (`tank` of `tank.spill()`, `Eng` of `Eng.make()`) holds at the call's byte. A root WRITTEN
@@ -3956,13 +3961,9 @@ enum class JsWrittenRoot : std::uint8_t { None, Unpinned, Pinned };
 inline JsWrittenRoot jsMemberRootWritten( const JsImportTables& tables, const Reference& r )
 {
     if( r.role != RefRole::Call || !r.memberCall || r.memberRoot.empty() ) { return JsWrittenRoot::None; }
-    const auto holds = [ & ]( const HashMap<std::string, std::vector<VarSpan>>& byName )
-    {
-        const auto spans = byName.find( jsImportKey( r.fileId, r.memberRoot ) );
-        return spans != byName.end()
-            && std::any_of( spans->second.begin(), spans->second.end(), [ & ]( const VarSpan& span ) { return r.startByte >= span.startByte && r.startByte < span.endByte; } );
-    };
-    return holds( tables.pinnedRebinds ) ? JsWrittenRoot::Pinned : holds( tables.rebinds ) ? JsWrittenRoot::Unpinned : JsWrittenRoot::None;
+    const std::string key = jsImportKey( r.fileId, r.memberRoot );
+    return spanCoversAt( tables.pinnedRebinds, key, r.startByte ) ? JsWrittenRoot::Pinned
+         : spanCoversAt( tables.rebinds, key, r.startByte )       ? JsWrittenRoot::Unpinned : JsWrittenRoot::None;
 }
 
 // `utils.ts` and `utils` name the same module, so the vocabulary probe below has to compare stems.
@@ -10685,12 +10686,7 @@ struct ImportProvedClass
         {
             return kNoNode;
         }
-        const auto covers = [ & ]( const HashMap<std::string, std::vector<VarSpan>>& spans )
-        {
-            const auto it = spans.find( key );
-            return it != spans.end() && std::ranges::any_of( it->second, [ & ]( const VarSpan& s ) { return r.startByte >= s.startByte && r.startByte < s.endByte; } );
-        };
-        return covers( jsImports.shadows ) || covers( jsImports.rebinds ) ? kNoNode : pin->second.node;
+        return spanCoversAt( jsImports.shadows, key, r.startByte ) || spanCoversAt( jsImports.rebinds, key, r.startByte ) ? kNoNode : pin->second.node;
     }
 };
 
