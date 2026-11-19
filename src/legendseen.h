@@ -41,11 +41,9 @@
 #include "compactlegend.h"   // findCompactRoot, repriceEstTokensIn
 #include "forpages.h"        // forpages::pricePage — est_tokens= on a --for page prices every byte of it
 #include "infra/Diagnostics.h"
-#include "infra/hashutil.h"
 #include "legenddict.h"
 
 #include <algorithm>
-#include <charconv>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -62,25 +60,17 @@ inline constexpr std::size_t kMinEntryBytes = 12;
 
 // ── hashes ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
-inline std::uint64_t lineHash( std::string_view line ) noexcept
+// An entry's hash is the dictionary's own version function over its one line: versionOfLines( line + '\n' ), the
+// 16 lowercase hex a caller can recompute from `ripwire --legend-dict` alone.
+inline std::string entryHashOf( std::size_t id )
 {
-    std::uint64_t h = 14695981039346656037ull;
-    for( const char c : line ) { h = hashutil::fnv1aAbsorb( h, c ); }
-    return hashutil::fnv1aAbsorb( h, '\n' );
-}
-
-inline std::string hex16( std::uint64_t h )
-{
-    static constexpr char kHex[] = "0123456789abcdef";
-    std::string s( 16, '0' );
-    for( std::size_t i = 0; i < 16; ++i ) { s[ 15 - i ] = kHex[ ( h >> ( 4 * i ) ) & 0xFu ]; }
-    return s;
+    return legenddict::versionOfLines( legenddict::entryLine( id ) + '\n' );
 }
 
 // Per entry id: its hash, and the match order (longest body first, then id). Built once per process.
 struct EntryIndex
 {
-    std::vector<std::uint64_t> hash;    // by id
+    std::vector<std::string>   hash;    // by id: 16 lowercase hex
     std::vector<std::size_t>   order;   // ids of matchable entries, longest body first
 };
 
@@ -92,7 +82,7 @@ inline const EntryIndex& entryIndex()
         x.hash.resize( legenddict::kEntryCount );
         for( std::size_t id = 0; id < legenddict::kEntryCount; ++id )
         {
-            x.hash[ id ] = lineHash( legenddict::entryLine( id ) );
+            x.hash[ id ] = entryHashOf( id );
             if( legenddict::entryBody( id ).size() >= kMinEntryBytes ) { x.order.push_back( id ); }
         }
         std::sort( x.order.begin(), x.order.end(), []( std::size_t a, std::size_t b )
@@ -199,7 +189,7 @@ inline std::vector<std::string_view> receivedComments( std::string_view text )
 // The hashes of the entries `received` carries, sorted, one per line — what a caller appends to FILE.
 inline std::string seenHashesText( std::string_view received )
 {
-    std::vector<std::uint64_t> hs;
+    std::vector<std::string_view> hs;
     for( const std::string_view comment : receivedComments( received ) )
     {
         for( const Match& m : entriesIn( comment ) ) { hs.push_back( entryIndex().hash[ m.id ] ); }
@@ -207,7 +197,11 @@ inline std::string seenHashesText( std::string_view received )
     std::sort( hs.begin(), hs.end() );
     hs.erase( std::unique( hs.begin(), hs.end() ), hs.end() );
     std::string out;
-    for( const std::uint64_t h : hs ) { out += hex16( h ) + '\n'; }
+    for( const std::string_view h : hs )
+    {
+        out.append( h );
+        out += '\n';
+    }
     return out;
 }
 
@@ -226,7 +220,7 @@ inline Holding parseHolding( std::string_view bytes )
 {
     Holding h;
     h.held.assign( legenddict::kEntryCount, 0 );
-    std::vector<std::uint64_t> named;
+    std::vector<std::string_view> named;
     std::size_t lineNo = 0;
     for( std::size_t at = 0; at < bytes.size() && h.badLine == 0; )
     {
@@ -236,11 +230,9 @@ inline Holding parseHolding( std::string_view bytes )
         ++lineNo;
         if( line.ends_with( '\r' ) ) { line.remove_suffix( 1 ); }
         if( line.empty() || line.front() == '#' ) { continue; }
-        std::uint64_t v = 0;
-        const bool hex = line.size() == 16 && std::all_of( line.begin(), line.end(), []( char c ) { return ( c >= '0' && c <= '9' ) || ( c >= 'a' && c <= 'f' ); } )
-                      && std::from_chars( line.data(), line.data() + 16, v, 16 ).ec == std::errc();
+        const bool hex = line.size() == 16 && std::all_of( line.begin(), line.end(), []( char c ) { return ( c >= '0' && c <= '9' ) || ( c >= 'a' && c <= 'f' ); } );
         if( !hex ) { h.badLine = lineNo; break; }
-        named.push_back( v );
+        named.push_back( line );
     }
     if( h.badLine != 0 ) { return h; }
     std::sort( named.begin(), named.end() );
