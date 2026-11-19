@@ -819,6 +819,11 @@ PLANT = {
     "h3_twin":      ( 'run(){ ( cd "$T" && @BIN@ . "$@" ); }\nrunoff(){ ( cd "$T" && "${OFF[@]}" @BIN@ . "$@" ); }\n'
                       'run --token-budget=9 > b.xml; runoff --token-budget=9 > b.off\n[ "$( rk b.xml )" -ge "$( rk b.off )" ] && ok b || no b\n',
                       [ ( 3, "unchecked" ), ( 3, "unchecked" ) ] ),
+    # (QD-VA-FORMS) a single quote inside "$( … )" is a live quote: '<r ' stays one word, so the next statement's
+    # rc=$? is read and compared (jsverbscheck:42 read as unchecked while the quotes were blanked), and a quoted
+    # `./build/ripwire` pattern word is no call (argvdiffcheck:258)
+    "h2_dq_quote":  ( 'G="$( @BIN@ . --x=\'callees(name("a"),2)\' )"\nRC=$?\n[ $RC -eq 0 ] || no rc\n'
+                      'R="$( grep -oE \'^## `\\./build/ripwire [^`]*\' f )"\n', [ ( 1, "checked" ) ] ),
 }
 BINVAR = "$" + "BIN"
 PLANT = { k: ( src.replace( "@BIN@", '"%s"' % BINVAR ), want ) for k, ( src, want ) in PLANT.items() }
@@ -829,7 +834,7 @@ for name, ( src, want ) in PLANT.items():
         ctl_bad += 1
         no( "(H0 control) planted %s: the matcher says %s, the shape is %s -- H1/H2 below cannot be trusted" % ( name, got, want ) )
 if not ctl_bad:
-    ok( "(H0 control) %d planted gates classified as their CodeRabbit shapes: an unchecked harness and a never-compared rc are found, the six checked forms are not, the #616 twin is seen, errexit is read per call, a printed $? is not a test" % len( PLANT ) )
+    ok( "(H0 control) %d planted gates classified as their CodeRabbit shapes: an unchecked harness and a never-compared rc are found, the seven checked forms are not, the #616 twin is seen, errexit is read per call, a printed $? is not a test" % len( PLANT ) )
 
 gates = sorted( glob.glob( os.path.join( ROOT, "test", "*.sh" ) ) )
 CMDPOS = re.compile( r'(?:^\s*|[;&|(]\s*|\$\(\s*|\bthen\s+|\bdo\s+|\belse\s+)(?:[A-Z_]+=\S*\s+)*"\$' r'BIN"\s' )
