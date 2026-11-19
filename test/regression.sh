@@ -570,6 +570,7 @@ for _g in \
     fornotesbudgetcheck \
     fornotesjsoncheck \
     foronesidecheck \
+    forpagescheck \
     forrankordercheck \
     forreadercallerscheck \
     forregrowcheck \
@@ -585,6 +586,7 @@ for _g in \
     fortailfoldcheck \
     fortailwidecheck \
     forunusedcheck \
+    forverbroutecheck \
     forwidencheck \
     freshclonecheck \
     freshnesscheck \

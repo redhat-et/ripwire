@@ -19,7 +19,8 @@
 #       them too (PATH-AMBIG-VC, the same src/graph.h ownerSpellingFittedDefs: rc 0, the tick terminal searched defs="4" and moved onto
 #       the definition that joins, as for any many-definition name)
 #   M3 MET-BRIDGE: an unreached path whose search reached a caller of to= prints the proven prefix and the one crossing.
-#   (b1) onFileEvent -> ConnectionManagerImpl::onData (a virtual `filter->onData( 1 )` the graph declines): <met_bridge reachable="0"
+#   (b1) onFileEvent -> ConnectionManagerImpl::onData (a virtual `filter->onData( 1 )` the graph declines): AF2 E1 puts the bridge AHEAD
+#        of <path_gap> (after_gap=0); <met_bridge reachable="0"
 #        in="onContinueReading" via="declined"> holding the path verb's reachable="1" answer onFileEvent -> onContinueReading (its
 #        FilterManagerImpl::onRead hop included), then <s via="declined" n="onData" in="onContinueReading">; inside the graph block,
 #        after path_gap, once; well-formed, legend without `--`; the prefix equals the bare --path call to in='s spelling
@@ -144,7 +145,11 @@ count(){ python3 -c 'import sys; print(open(sys.argv[1], encoding="utf8", errors
 # (e1) path form narrowed to the one source definition
 RIPWIRE_NO_HOP_BODY=1 run "$F1" e1 --for="path from ApplicationRef.tick to refreshView"
 RIPWIRE_NO_HOP_BODY=1 run "$F1" e1v --path=src/app/application_ref.ts:tick,refreshView
-verb="$( gvattr e1 verb )"; nar="$( gvattr e1 narrowed )"; body="$( gvbody e1 )"; bare="$( cat "$TMP/e1v.xml" )"
+# AF2 A (2026-11-18, results/AF2_FIRST12K_1118 §SPEC): a comment that is a direct child of <graph_verb> joins the document legend
+# in the answer-first --for answer, so the embedded verb answer equals the bare one with its comments out (they are in the
+# answer's legend, once — foranswerfirstcheck (R1)/(R2) pin that no comment is lost or duplicated).
+nocomment(){ python3 -c 'import re,sys; print(re.sub(r"<!--.*?-->", "", sys.stdin.read(), flags=re.S), end="")'; }
+verb="$( gvattr e1 verb )"; nar="$( gvattr e1 narrowed )"; body="$( gvbody e1 | nocomment )"; bare="$( nocomment <"$TMP/e1v.xml" )"
 if [ "$( rc e1 )" = 0 ] && [ "$( rc e1v )" = 0 ] && [ "$verb" = "--path=src/app/application_ref.ts:tick,refreshView" ] && [ "$nar" = "ApplicationRef.tick" ] \
    && printf '%s' "$body" | grep -q 'reachable="1"' && printf '%s' "$body" | grep -q 'n="ApplicationRef.tickImpl"' && [ -n "$bare" ] && [ "$body" = "$bare" ] \
    && grep -q 'narrowed= names the task spellings' "$TMP/e1.xml"; then
@@ -236,7 +241,7 @@ s = open( sys.argv[1], encoding="utf8", errors="replace" ).read()
 bare = open( sys.argv[2], encoding="utf8", errors="replace" ).read()
 gv = re.search( r'<graph_verb [^>]*>(.*)</graph_verb>', s, re.S )
 inner = gv.group( 1 ) if gv else ''
-leg = re.search( r'<!-- ripwire for met_bridge:(.*?)-->', inner, re.S )
+leg = re.search( r'<!-- ripwire for met_bridge:(.*?)-->', s, re.S )   # AF2 A: the bridge legend joins the document legend
 mb = re.search( r'<met_bridge ([^>]*)>(.*)</met_bridge>', inner, re.S )
 a = mb.group( 1 ) if mb else ''
 body = mb.group( 2 ) if mb else ''
@@ -252,7 +257,7 @@ print( "n=%d after_gap=%d reach0=%d in=%s via=%s prefix_reached=%d hop=%d cross_
 PY
 )"
 if [ "$( rc b1 )" = 0 ] && [ "$( rc b1v )" = 0 ] \
-   && [ "$facts" = "n=1 after_gap=1 reach0=1 in=onContinueReading via=declined prefix_reached=1 hop=1 cross_n=onData cross_in=onContinueReading prefix_eq=1 legdash=0" ] \
+   && [ "$facts" = "n=1 after_gap=0 reach0=1 in=onContinueReading via=declined prefix_reached=1 hop=1 cross_n=onData cross_in=onContinueReading prefix_eq=1 legdash=0" ] \
    && xmlok "$TMP/b1.xml"; then
     ok "(b1) met bridge: proven prefix to the reached caller + one declined crossing ($facts)"
 else no "(b1) rc=$( rc b1 )/$( rc b1v ) facts='$facts'"; fi

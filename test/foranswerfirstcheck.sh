@@ -35,7 +35,8 @@
 #   (R4)  byte-for-byte identical totals: a permutation changes no byte count
 #   (R5)  determinism -- two runs byte-identical, and the order depends on argv alone
 #   (R6)  the default order is reproducible
-#   (R9)  ITEM R IS OFF BY DEFAULT -- the legend precedes the rows unless --legend=last asked
+#   (R9)  --legend=first is the legend-first order: the legend precedes the rows
+#   (R9d) AF1 (owner decision 2026-11-18): the DEFAULT is answer-first -- its rows precede its legend
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${RIPWIRE_BIN:-${1:-$ROOT/build/ripwire}}"
@@ -51,7 +52,12 @@ echo "foranswerfirstcheck: BIN=$BIN"
 # The opt-out knob is GATE ENVIRONMENT ONLY, never a binary knob -- the same posture test/legendtarget.sh's
 # RIPWIRE_LEGEND_PINS=strict uses. Without a legacy baseline R1 has nothing to compare against, and a
 # permutation gate with no baseline is a gate that cannot fail.
-OPTIN="--legend=last"   # ITEM R IS OPT-IN: the DEFAULT is legend-first, --legend=last asks for answer-first
+# AF1 (owner decision 2026-11-18): answer-first IS the default now, and the default answer is PAGED (src/forpages.h,
+# test/forpagescheck.sh). This gate compares WHOLE answers, so the answer-first side asks --page-bytes=0, and the legacy
+# baseline is the opt-out --legend=first. The budgeted path (R7) does not page, so it takes $OPTIN alone.
+OPTIN="--legend=last"   # answer-first, spelled
+WHOLE="--page-bytes=0"  # the whole answer in one call: the permutation is judged on whole documents
+LEGACY="--legend=first" # the legend-first order the permutation is measured against
 
 # Two tasks: one conceptual (the 84 % population) and one that resolves a routed section (the 13-cell shape
 # the band's largest effect comes from). If the second never resolves on this tree, (R3) says so rather than
@@ -64,10 +70,10 @@ cap(){  # cap FILE TASK [extra-args-to-the-binary]
     "$BIN" . --for="$t" "$@" >"$f" 2>/dev/null
 }
 
-cap "$WORK/a_new.xml" "$TASK_A" $OPTIN
-cap "$WORK/a_old.xml" "$TASK_A"
-cap "$WORK/b_new.xml" "$TASK_B" $OPTIN
-cap "$WORK/b_old.xml" "$TASK_B"
+cap "$WORK/a_new.xml" "$TASK_A" $OPTIN $WHOLE
+cap "$WORK/a_old.xml" "$TASK_A" $LEGACY
+cap "$WORK/b_new.xml" "$TASK_B" $OPTIN $WHOLE
+cap "$WORK/b_old.xml" "$TASK_B" $LEGACY
 for f in a_new a_old b_new b_old; do
     [ -s "$WORK/$f.xml" ] || { no "(R0) $f.xml is empty -- nothing to check"; echo "FAILURES"; exit 1; }
 done
@@ -137,8 +143,29 @@ def blocks(doc):
         i += 1
     return open_tag, out, doc[endAt:]
 
+def kids(text):
+    """Direct children of one container element's text, as (kind, name, exact text): the same CDATA-safe scan,
+    run on the element's interior (a wrapper root lets blocks() do it)."""
+    i = text.find(">") + 1; j = text.rfind("</")
+    if text.endswith("/>") and i == len(text): return []
+    _, out, _ = blocks("<w>" + text[i:j] + "</w>")
+    return out or []
+
+def units(bs):
+    """AF2 (results/AF2_FIRST12K_1118 §SPEC): a unit is each top-level block's open tag, close tag and each of its
+    DIRECT children (rows and comments) -- a top-level comment or self-closing element is one unit. AF2's move A
+    lifts direct-child comments out of a section into the legend, so a whole-block multiset can no longer be
+    equal; the UNIT multiset must be, and that still fails on any dropped row (R1n)."""
+    out = []
+    for k, n, t in bs:
+        if k == "comment" or t.endswith("/>") and t.find(">") + 1 == len(t):
+            out.append(t); continue
+        out.append(t[:t.find(">") + 1]); out.append(t[t.rfind("</"):])
+        out += [c for _, _, c in kids(t)]
+    return out
+
 def multiset(bs):
-    return sorted(t for _, _, t in bs)
+    return sorted(units(bs))
 
 def names(bs):
     return [n for k, n, _ in bs if k == "element"]
@@ -156,12 +183,12 @@ for label, new_n, old_n in (("conceptual", "a_new.xml", "a_old.xml"), ("routed",
 
     # (R1) THE PERMUTATION. Same blocks, byte for byte, in some order. Root open tag and trailer identical.
     if multiset(b_new) == multiset(b_old) and o_new == o_old and t_new == t_old:
-        print("  PASS  (R1) %-11s permutation: %d top-level blocks identical byte for byte, root and trailer unchanged"
-              % (label, len(b_new)))
+        print("  PASS  (R1) %-11s permutation: %d units identical byte for byte (AF2: open/close tags + direct children), root and trailer unchanged"
+              % (label, len(multiset(b_new))))
     else:
         lost = [t[:60] for t in multiset(b_old) if t not in multiset(b_new)]
-        print("  FAIL  (R1) %-11s NOT a permutation -- %d blocks vs %d; first missing: %s"
-              % (label, len(b_new), len(b_old), (lost[:1] or ["<root/trailer differs>"])[0]))
+        print("  FAIL  (R1) %-11s NOT a permutation -- %d units vs %d; first missing: %s"
+              % (label, len(multiset(b_new)), len(multiset(b_old)), (lost[:1] or ["<root/trailer differs>"])[0]))
         bad += 1
 
     # (R4) A permutation changes no byte count.
@@ -173,7 +200,13 @@ for label, new_n, old_n in (("conceptual", "a_new.xml", "a_old.xml"), ("routed",
 
     # (R2) THE LEGEND IS LAST, and still present. G4 constrains COUNT, so the count must not move either.
     cn, co = comments(b_new), comments(b_old)
-    if len(cn) != len(co):
+    # AF2 A: a comment lifted out of a section becomes a top-level legend comment, so G4's COUNT is over every comment a
+    # unit can be (top-level + direct children of a section), never over the top level alone.
+    allc = lambda bs: sum(1 for u in units(bs) if u.startswith("<!--"))
+    if allc(b_new) != allc(b_old):
+        print("  FAIL  (R2) %-11s comment count moved %d -> %d -- G4 is about count" % (label, allc(b_old), allc(b_new)))
+        bad += 1
+    elif False:
         print("  FAIL  (R2) %-11s legend comment count moved %d -> %d -- G4 is about count" % (label, len(co), len(cn)))
         bad += 1
     elif not cn:
@@ -263,8 +296,8 @@ PY
 [ $? -eq 0 ] || fail=1
 
 # (R5) DETERMINISM. The order depends on argv and the tree alone -- never on whether an earlier call happened.
-cap "$WORK/z1.xml" "$TASK_A" $OPTIN
-cap "$WORK/z2.xml" "$TASK_A" $OPTIN
+cap "$WORK/z1.xml" "$TASK_A" $OPTIN $WHOLE
+cap "$WORK/z2.xml" "$TASK_A" $OPTIN $WHOLE
 if cmp -s "$WORK/z1.xml" "$WORK/z2.xml"; then
     ok "(R5) two runs byte-identical"
 else
@@ -272,14 +305,14 @@ else
 fi
 
 # (R6) THE DEFAULT IS REPRODUCIBLE, so the baseline every arm above rests on is itself trustworthy.
-cap "$WORK/r1.xml" "$TASK_A"
+cap "$WORK/r1.xml" "$TASK_A" $LEGACY
 if cmp -s "$WORK/r1.xml" "$WORK/a_old.xml"; then
     ok "(R6) the default order is reproducible byte for byte"
 else
     no "(R6) two default runs differ -- the gate's own baseline is unstable"
 fi
 
-# (R9) ITEM R IS OFF UNLESS ASKED FOR. This is the arm the owner's opt-in decision rests on, and no other arm
+# (R9) THE OPT-OUT IS LEGEND-FIRST. Until AF1 this was the arm the owner's opt-in decision rested on, and no other arm
 # implies it: R1-R8 all compare an opt-in answer against the default, and every one of them would still pass if
 # the permutation ALSO ran by default. Measured 2026-11-17: as the default this ordering left an active cut or
 # floor disclosure outside the 2 KB prefix on 9 of 50 --for answers, so "off by default" is a correctness
@@ -292,11 +325,25 @@ print( d.find( b'<!-- ripwire for' ), d.find( b'<sigs' ) )
 " "$WORK/$subj.xml" )
     set -- $legAt
     if [ "$1" -ge 0 ] && [ "$2" -ge 0 ] && [ "$1" -lt "$2" ]; then
-        ok "(R9) $subj: the DEFAULT serves its legend BEFORE the rows (legend@$1 < sigs@$2) -- item R is opt-in"
+        ok "(R9) $subj: --legend=first serves its legend BEFORE the rows (legend@$1 < sigs@$2)"
     else
-        no "(R9) $subj: the default no longer puts the legend first (legend@$1 sigs@$2) -- item R leaked into the default"
+        no "(R9) $subj: --legend=first no longer puts the legend first (legend@$1 sigs@$2) -- the opt-out leaked answer-first"
     fi
 done
+# (R9d) AF1: the DEFAULT is answer-first. Without this arm R1-R8 would all pass with the flip reverted, because they
+# compare two ASKED postures; this is the arm that makes "the default is answer-first" checkable.
+cap "$WORK/dflt.xml" "$TASK_A"
+legAt=$( python3 -c "
+import sys
+d = open( sys.argv[ 1 ], 'rb' ).read()
+print( d.find( b'<!-- ripwire for' ), d.find( b'<sigs' ) )
+" "$WORK/dflt.xml" )
+set -- $legAt
+if [ "$1" -ge 0 ] && [ "$2" -ge 0 ] && [ "$2" -lt "$1" ]; then
+    ok "(R9d) the DEFAULT serves its rows BEFORE its legend (sigs@$2 < legend@$1) -- answer-first is the default"
+else
+    no "(R9d) the default is not answer-first (legend@$1 sigs@$2)"
+fi
 
 # (R7) THE BUDGETED PATH -- the regime where ordering actually decides what survives, and the one every arm
 # above missed. runForLens() routes a fitting budget to runForLensFitted(), a SECOND code path that renders
@@ -344,8 +391,8 @@ fi
 # judge strips one self-declaring trailing block before pricing and its pattern requires comment-then-block,
 # so with the comment relocated 1,447 B stopped being stripped and est_tokens looked like it under-charged by
 # exactly 579 tokens. That was not an est_tokens defect at all -- it was this adjacency.
-"$BIN" . --for="legend posture" --detail=5 $OPTIN >"$WORK/rich_new.xml" 2>/dev/null
-"$BIN" . --for="legend posture" --detail=5 >"$WORK/rich_old.xml" 2>/dev/null
+"$BIN" . --for="legend posture" --detail=5 $OPTIN $WHOLE >"$WORK/rich_new.xml" 2>/dev/null
+"$BIN" . --for="legend posture" --detail=5 $LEGACY >"$WORK/rich_old.xml" 2>/dev/null
 python3 - "$WORK" <<'PY_EOF'
 import os, re, sys
 WORK = sys.argv[1]
@@ -417,6 +464,77 @@ else:
 
 sys.exit( 1 if bad else 0 )
 PY_EOF
+[ $? -eq 0 ] || fail=1
+
+# (A1/A2/G) AF2's ORDER SPEC (results/AF2_FIRST12K_1118/READOUT.md §SPEC, built by lane AF1 2026-11-18). A: a comment that is
+# a direct child of a top-level section joins the document legend; a zero-row <lego/>/<compose/> stub goes after </tail>.
+# G: a RES section after </tail> moves ahead of <tail> only if the tail has more than 24 rows, ends past the page stop
+# (12,000 B, src/foranswerfirst.h kAnswerPageBytesDefault), and tail row 24 still ends within it. The lit task is the
+# fixture G must FIRE on (a quoted message gives a late <lit>); if this tree stops producing one, (G0) says so rather than
+# passing on nothing.
+TASK_L="where is the message 'the answer did not buffer whole' printed"
+cap "$WORK/l_new.xml" "$TASK_L" $OPTIN $WHOLE
+cap "$WORK/l_old.xml" "$TASK_L" $LEGACY
+python3 - "$WORK" <<'PY_AF2'
+import re, sys, os
+W = sys.argv[1]; STOP = 12000; K = 24; bad = 0
+RES = ("lit", "dotted_strings", "graph_verb", "callers", "selfhooks", "manifest_rows", "listed", "ep", "reexports", "exemplar_family")
+def rd(n): return open(os.path.join(W, n), "rb").read().decode("latin-1")
+def mask(d): return re.sub(r"<!--.*?-->|<!\[CDATA\[.*?\]\]>", lambda m: " " * len(m.group(0)), d, flags=re.S)
+def tops(d):
+    """top-level children of <ctx> as (name, begin, end) -- comments and CDATA masked first"""
+    m = mask(d); r = re.search(r"<ctx\b[^>]*>", m); i = r.end(); end = m.rfind("</ctx>"); out = []; depth = 0; start = 0; name = ""
+    for t in re.finditer(r"<(/?)([A-Za-z_][\w-]*)[^>]*?(/?)>", m[i:end]):
+        a, b = i + t.start(), i + t.end()
+        if t.group(1):
+            depth -= 1
+            if depth == 0: out.append((name, start, b))
+        elif t.group(3):
+            if depth == 0: out.append((t.group(2), a, b))
+        else:
+            if depth == 0: start, name = a, t.group(2)
+            depth += 1
+    return out
+def say(ok, msg):
+    global bad
+    print("  %s  %s" % ("PASS" if ok else "FAIL", msg)); bad += 0 if ok else 1
+fired = False
+for lbl, nn, on in (("conceptual", "a_new.xml", "a_old.xml"), ("routed", "b_new.xml", "b_old.xml"), ("literal", "l_new.xml", "l_old.xml")):
+    n, o = rd(nn), rd(on); tn, to = tops(n), tops(o); m = mask(n)
+    names_n = [x[0] for x in tn]; names_o = [x[0] for x in to]
+    # (A1) no section but <sigs>/<bodies> keeps a direct-child comment: A lifted them into the legend. <sigs> keeps its
+    # demote:/decl-twin:/one-side: notes IN PLACE (an AF1 deviation from AF2's spec: they label the pointer rows after them by
+    # position, fordemoteallcheck reads the kinds from exactly that order).
+    def direct_comments(x):
+        inner = n[n.find(">", x[1]) + 1:n.rfind("</", 0, x[2])] if not re.fullmatch(r"<[^>]*/>", n[x[1]:x[2]]) else ""
+        inner = re.sub(r"<!\[CDATA\[.*?\]\]>", lambda q: " " * len(q.group(0)), inner, flags=re.S)
+        c = 0; depth = 0
+        for t in re.finditer(r"<!--.*?-->|<(/?)[A-Za-z_][\w-]*[^>]*?(/?)>", inner, re.S):
+            if t.group(0).startswith("<!--"): c += depth == 0
+            elif t.group(1): depth -= 1
+            elif not t.group(2): depth += 1
+        return c
+    left = [(x[0], direct_comments(x)) for x in tn if x[0] not in ("sigs", "bodies")]
+    left = [(nm, c) for nm, c in left if c]
+    say(not left, "(A1) %-10s no section but <sigs>/<bodies> keeps a direct-child comment%s" % (lbl, (" (%s)" % left) if left else ""))
+    if "tail" not in names_n: print("  INFO  (G) %-10s no <tail>" % lbl); continue
+    ti = names_n.index("tail"); tb, te = tn[ti][1], tn[ti][2]
+    stubs = [x for x in tn if x[0] in ("lego", "compose") and x[1] < tb and re.fullmatch(r"<[^>]*/>", n[x[1]:x[2]])]
+    say(not stubs, "(A2) %-10s no zero-row lego/compose stub sits ahead of <tail>" % lbl)
+    rows = [q.end() + tb for q in re.finditer(r"<t\b[^>]*/>", m[tb:te])]
+    si = names_n.index("sigs") if "sigs" in names_n else -1   # G places between <sigs> and <tail>; item R's routed move goes ahead of <sigs>
+    moved = [x[0] for x in tn[si + 1:ti] if x[0] in RES and x[0] in names_o and names_o.index(x[0]) > names_o.index("tail")]
+    if moved:
+        fired = fired or lbl == "literal"
+        say(len(rows) > K and rows[K - 1] <= STOP and te > STOP,
+            "(G1) %-10s moved %s ahead of <tail>: tail has %d rows, row %d ends at %s <= %d, </tail> at %d > %d"
+            % (lbl, ",".join(moved), len(rows), K, rows[K - 1] if len(rows) >= K else "?", STOP, te, STOP))
+    else:
+        print("  INFO  (G) %-10s nothing promoted (tail rows %d, </tail> at %d)" % (lbl, len(rows), te))
+    if te <= STOP: say(not moved, "(G2) %-10s </tail> ends inside the stop, so nothing moved" % lbl)
+say(fired, "(G0) the literal fixture FIRES G (a late <lit> promoted) -- if not, the tree drifted and G is untested here")
+sys.exit(1 if bad else 0)
+PY_AF2
 [ $? -eq 0 ] || fail=1
 
 if [ "$fail" -ne 0 ]; then echo "foranswerfirstcheck: FAILURES"; exit 1; fi

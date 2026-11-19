@@ -122,10 +122,13 @@ git status --porcelain 2>/dev/null | grep -vE '^\?\? (build|asan|tsan)' | LC_ALL
 # TOKEN-BUDGET-MONOTONE (2026-11-14, 23->25): TWO new reads, both --for's. `forBudgetFitsAfterPosture` (src/verbs_for.h) reads
 # cfg.maxTokens beside cfg.tokenBudget to route a budgeted XML answer through the fitter, and `runForLensFitted` reads it as the
 # ceiling it sheds against. --for already honours both flags in kShapingVerbs, so this is a re-pin, not a column change.
+# lane/rt1-route (2026-11-18, 25->26): ONE new read, --for's. `forVerbRouteApplies` (src/verbs_forroute.h) reads cfg.maxTokens only to
+# STAND ASIDE: a budgeted --for is never routed to a verb, so the budget keeps shaping the --for answer it always shaped. --for already
+# honours both flags in kShapingVerbs, so this is a re-pin, not a column change.
 MAXSITES="$( grep -c 'cfg\.maxTokens\|c\.maxTokens' src/main.cpp src/verbs_*.h src/mcpserver.h 2>/dev/null | awk -F: '{s+=$2} END{print s+0}' )"
 TOPSITES="$( grep -c 'cfg\.topK\|c\.topK'           src/main.cpp src/verbs_*.h src/mcpserver.h 2>/dev/null | awk -F: '{s+=$2} END{print s+0}' )"
-[ "$MAXSITES" = 25 ] && ok "(A) --max-tokens has 25 read sites outside cli.h (grep 'cfg\\.maxTokens' src/main.cpp src/verbs_*.h src/mcpserver.h)" \
-                     || no "(A) --max-tokens read sites moved 25 -> $MAXSITES: a verb gained or lost the budget, so kShapingVerbs' honorsMaxTokens column must be re-decided (and this number re-pinned)"
+[ "$MAXSITES" = 26 ] && ok "(A) --max-tokens has 26 read sites outside cli.h (grep 'cfg\\.maxTokens' src/main.cpp src/verbs_*.h src/mcpserver.h)" \
+                     || no "(A) --max-tokens read sites moved 26 -> $MAXSITES: a verb gained or lost the budget, so kShapingVerbs' honorsMaxTokens column must be re-decided (and this number re-pinned)"
 [ "$TOPSITES" = 15 ] && ok "(A) --top-k has 15 read sites outside cli.h" \
                      || no "(A) --top-k read sites moved 15 -> $TOPSITES: re-decide kShapingVerbs' honorsTopK column and re-pin this number"
 # no OTHER file may read them: a third file would be a verb family this table has never heard of.

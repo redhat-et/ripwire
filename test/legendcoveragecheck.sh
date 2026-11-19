@@ -574,6 +574,10 @@ def legendOf( doc, anyRoot = False ):
     wrap = rb'[\w-]+' if anyRoot else rb'(?:ctx|files)'
     m2   = re.match( rb'\A\s*<' + wrap + rb'\b[^>]*>((?:\s*<!--.*?-->)+)', rest, re.S )
     if m2: lead += m2.group( 1 )
+    # AF1 (2026-11-18): the DEFAULT --for answer is answer-first — its document legend is the trailing run of comments before
+    # the root closes, inside the same answer (page 1 keeps it whole). A comment that cannot span "-->" keeps rows out of it.
+    m3   = re.search( rb'((?:<!--(?:(?!-->).)*-->\s*)+)</[\w-]+>\s*\Z', rest, re.S )
+    if m3 and not m2: lead += m3.group( 1 )
     return lead.decode( 'utf-8', 'replace' )
 
 # TRAILING BLOCKS (K-LEGEND, 2026-11-05). A block a verb appends AFTER its ordinary answer — <syms> (forfilesyms.h), <decl_rows>
@@ -1011,6 +1015,10 @@ def legendOf( doc ):
     rest = doc[ len( lead ): ]
     m2   = re.match( rb'\A\s*<ctx\b[^>]*>((?:\s*<!--.*?-->)+)', rest, re.S )
     if m2: lead += m2.group( 1 )
+    # AF1 (2026-11-18): the DEFAULT --for answer is answer-first — its document legend is the trailing run of comments before
+    # the root closes, inside the same answer (page 1 keeps it whole). A comment that cannot span "-->" keeps rows out of it.
+    m3   = re.search( rb'((?:<!--(?:(?!-->).)*-->\s*)+)</[\w-]+>\s*\Z', rest, re.S )
+    if m3 and not m2: lead += m3.group( 1 )
     return lead.decode( 'utf-8', 'replace' )
 
 def defined( a, legend ): return re.search( r'(?<![\w:.-])' + re.escape( a ) + r'\s*=', legend ) is not None

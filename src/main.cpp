@@ -554,6 +554,7 @@ struct MainDispatch
 #include "verbs_report.h"
 #include "verbs_grep.h"
 #include "memceiling.h"          // the memory guard's allocator line (on by default; RIPWIRE_MEM_BUDGET_MB overrides it)
+#include "verbs_forroute.h"       // RT1: a --for question naming its symbol, answered by the verb it asks for (routed, disclosed)
 #include "memguard.h"            // #350 layer 3: the memory guard's limit (installed in main) and its verdicts after ingest
 #include "lsp.h"                 // the --lsp navigation-server section (Phase 1 PoC — docs/LSP.md); after the verb families so it can reuse the shared use-site scan
 
@@ -6065,6 +6066,12 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
     // Every verb from here on answers from the built graph: its query and its emit are this scope (the self-profile's
     // "after the graph" share; the verbs' own scopes nest inside it).
     PROFILE_SCOPE_DESCRIBE( "main: query + emit (the verb, after the graph)" );
+    // RT1 (verbs_forroute.h): a bare --for whose text names a symbol and asks who calls it / what it reaches / what breaks is
+    // answered by that verb, routed and disclosed; nullopt leaves the --for answer untouched.
+    if( std::optional<int> handled = runForVerbRoute( dsp ) )
+    {
+        return *handled;
+    }
     if( std::optional<int> handled = runForLens( dsp ) )
     {
         return *handled;

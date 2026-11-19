@@ -7,6 +7,7 @@
 #include "forliteral.h" // MF1-LIT: a task naming a literal gets its byte-exact sites and owner bodies, appended
 #include "forpage.h"    // L-W: the --for --limit=N file page, coverage=, the thin rule and the widening next=
 #include "foranswerfirst.h" // ITEM R: a finished --for answer serves its ANSWER first (a permutation)
+#include "forpages.h"       // AF1: the answer-first --for answer, served in pages (page= pages= withheld_bytes= next=)
 #include "forbudgetfit.h" // TOKEN-BUDGET-MONOTONE: a budget sheds the unbudgeted answer, it never re-decides its posture
 #include "forowner.h"   // the question's owner (owner-hop's found set) and the one owner body of an explanatory question
 #include "forfold.h"    // body-fold: the whole bodies of the top ranked rows, appended to a compact-route answer
@@ -3531,8 +3532,10 @@ inline bool appendSubjectGraphVerbBlock( const MainDispatch& d, std::span<const 
         std::fwrite( doc->data(), 1, doc->size(), stdout );
         if( args->form == rw::GraphSubjectForm::Path && rw::graphSubjectPathUnreachable( *doc ) )
         {
-            appendPathGapSides( sd, *args );
+            // AF2 E1 (results/AF2_FIRST12K_1118 §SPEC, 2026-11-18): the met bridge — the RESOLVED half, when there is one — is
+            // emitted ahead of the path gap's two sides, so a reader that stops early meets the answer before the failed search.
             appendMetBridge( d, sub, served, *args, *doc );   // GV-ASSEMBLY M3: "" unless the search reached a caller of to= (src/forgraphverb.h metBridgePlan)
+            appendPathGapSides( sd, *args );
         }
     }
     rw::emitRaw( stdout, std::string( rw::kGraphSubjectCloseXml ).c_str() );
@@ -5741,12 +5744,40 @@ inline int runForLensFitted( const MainDispatch& d )
     // mutates, so `out` stays a non-const COPY rather than main's const reference. Both facts are needed:
     // a reference here would not compile against answerFirst, and the old name no longer exists.
     std::string out = fit.verdict == rw::ForBudgetFitResult::Verdict::NoRoot ? printed->bytes : fit.xml;
-    if( d.cfg.legendAnswerFirst )
+    // AF1: the budget's answer is answer-first only when --legend=last was SPELLED (Config::legendAnswerFirstAsked). The default
+    // flip is the default PATH's; a budgeted answer keeps the legend-first shape its own gates hold, and is never paged.
+    if( d.cfg.legendAnswerFirstAsked )
     {
         (void)rw::answerfirst::answerFirst( out );
     }
     std::fwrite( out.data(), 1, out.size(), stdout );
     return u.rc;
+}
+
+// AF1 (forpages.h): the default --for answer, permuted answer-first, served as the asked PAGE. Paging applies on this path
+// only — the budgeted path sheds instead (forbudgetfit.h) — and only to the XML answer of the answer-first posture; every
+// other shape is served whole. Returns false when the asked page does not exist (the refusal is on stderr, stdout empty).
+inline bool forPagingApplies( const rw::Config& cfg ) noexcept
+{
+    return cfg.legendAnswerFirst && cfg.forPageBytes > 0 && !cfg.json && !cfg.columnar && !cfg.candidates && cfg.pageLimit == 0
+        && cfg.pageOffset == 0 && cfg.legendHave.empty();
+}
+inline bool serveForPage( const rw::Config& cfg, std::string& doc )
+{
+    if( !forPagingApplies( cfg ) )
+    {
+        return true;
+    }
+    const std::string           call = forUnbudgetedCall( cfg );
+    const rw::forpages::PageAsk ask{ .pageBytes = cfg.forPageBytes, .page = cfg.forPage, .call = call };
+    const rw::forpages::PageResult res = rw::forpages::pageAnswer( doc, ask );
+    const bool exists = res.outcome == rw::forpages::PageResult::Outcome::Paged || cfg.forPage == 1;
+    if( !exists )
+    {
+        rw::emitTo( stderr, "ripwire: --page-bytes={}:{}: this answer has {} page{} at that size — the root's next= names each one\n",
+                    cfg.forPageBytes, cfg.forPage, res.pages, res.pages == 1 ? "" : "s" );
+    }
+    return exists;
 }
 
 std::optional<int> runForLens( const MainDispatch& d )
@@ -5778,8 +5809,18 @@ std::optional<int> runForLens( const MainDispatch& d )
         {
             std::string doc = r.out->bytes;
             (void)rw::answerfirst::answerFirst( doc );
+            if( !serveForPage( d.cfg, doc ) )
+            {
+                return 1;
+            }
             std::fwrite( doc.data(), 1, doc.size(), stdout );
             return r.rc;
+        }
+        if( d.cfg.forPage > 1 )   // a continuation page names a cut of the WHOLE answer: without it there is no page to serve
+        {
+            rw::emitTo( stderr, "ripwire: --page-bytes={}:{}: the answer did not buffer whole, so no page of it can be cut; "
+                                "--page-bytes=0 serves the whole answer\n", d.cfg.forPageBytes, d.cfg.forPage );
+            return 1;
         }
         if( r.out && !r.out->bytes.empty() )
         {

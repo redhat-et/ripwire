@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <charconv>
+#include <system_error>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -74,19 +76,30 @@ struct Config
     bool             json            = false;              // --json (L2): the SAME content as the XML, machine-parseable, for the
                                                            // CORE verbs ONLY (default map, --for, --pack-task, --callers/--callees/
                                                            // --impact, --quality-delta, --test-gate). Keys mirror the XML attr names
-    std::string_view legend;                               // --legend=full|compact|dict|last: the legend posture of every XML verb (P1, compactlegend.h);
+    std::string_view legend;                               // --legend=full|compact|dict|last|first: the legend posture of every XML verb (P1, compactlegend.h);
                                                            // an XML run that names none is RESOLVED to kDefaultLegendPosture (L1)
     std::string_view legendSpelled;                        // the posture AS TYPED, for messages. `legend` is normalised
                                                            // (dict -> compact), so a refusal built from it names a value the
                                                            // caller never wrote: `--legend=dict --json` answered "--legend=compact
                                                            // applies to the XML verbs only". Flag named means named as typed.
-    bool             legendAnswerFirst = false;            // item R, --legend=last: the ANSWER is emitted before the document legend (a pure
-                                                           // permutation — no byte changes). OPT-IN, not the default: measured on 50 --for
-                                                           // answers the shipped ordering left an active cut or floor disclosure outside the
-                                                           // 2 KB prefix on 9 of them, and the honesty invariant outranks the prefix win.
+    std::string_view pageBytesSpec;                        // AF1 --page-bytes=N[:K] as typed: the page size of an answer-first --for answer
+                                                           // (0 = the whole answer in one call) and, after a colon, which page (forpages.h)
+    std::size_t      forPageBytes = 12000;                 // AF1: the page size the default --for answer is served in (forpages.h
+                                                           // kForPageBytesDefault, the owner's 12 KB); 0 = unpaged
+    std::size_t      forPage      = 1;                     // AF1: the 1-based page asked (`--page-bytes=N:K`); a page's next= spells K+1
+    bool             legendAnswerFirst = false;            // item R: the ANSWER is emitted before the document legend (a pure permutation —
+                                                           // no byte changes). THE --for DEFAULT since AF1 (owner decision 2026-11-18), set by
+                                                           // the compact posture (defaulted or spelled) and by --legend=last; --legend=first,
+                                                           // full and dict leave it off. It was opt-in because a TRUNCATED answer-first prefix
+                                                           // loses the readings of its cuts (137 of 154 design cells at 12 KB); the default
+                                                           // answer is now PAGED (forpages.h) and every page keeps the definitions it needs.
                                                            // Orthogonal in principle to legendProseOff, but not combinable as a posture
                                                            // VALUE; under --legend=dict the legend is a 493 B pointer whose position barely
                                                            // matters, so the combination buys little and is deliberately not offered.
+    bool             legendAnswerFirstAsked = false;       // AF1: --legend=last was SPELLED. The budgeted --for path (--token-budget /
+                                                           // --max-tokens, forbudgetfit.h) answers answer-first only then: a budget is a
+                                                           // shed with its own legend-first contract (forrankordercheck (8), formaxtokens-
+                                                           // check), so the default flip reaches the default PATH, not the budget's.
     bool             legendProseOff = false;               // item D: the prose legend is replaced by a POINTER to --legend-dict. Set by the
                                                            // DEFAULT and by the explicit spelling --legend=dict; cleared by an ASKED
                                                            // --legend=compact, the registered opt-out (D3), which must reproduce the
@@ -196,6 +209,7 @@ struct Config
     std::vector<std::string> outline;                      // --outline=NAME,...: control-flow skeletons (L3 scoped snippet)
     std::string_view forTask;                              // --for=TASK: the task lens — ranked signatures inventory + metrics, framed for reuse
     bool             anchor = false;                       // --anchor (with --for, EXPERIMENTAL): seed PPR personalization from the lexical anchors and blend graph expansion into the lens rank (LARGER-style; graph.h anchoredLexicalRank)
+    bool             noVerbRoute = false;                  // RT1 --no-verb-route (with --for): never answer a --for question with the verb it names (verbs_forroute.h); the routed answer's next= spells it
     bool             noRoute = false;                      // --no-route (with --for/--query): force plain subtoken+body BM25 (the pre-default-routing behavior). Routing is the DEFAULT: a deterministic confidence-gated query-shape classifier picks name-exact vs subtoken+body and prints which/why in the header (lexical.h chooseForRanker). --route is still accepted (now a no-op: routing is already on). Routing also carries the QUERY-SHAPE document demotion: when the task text parses as a stack trace / sanitizer report / compiler diagnostic, or as a pasted issue-template form, the document tier scores down (repo meta-docs — issue templates, CONTRIBUTING, changelogs — twice as hard) and route= says so; --no-route has no route= to disclose it in, so it does not demote either. Routing also orders doc-mention surfacing (filter.h docNoiseSymbolMultipliers): change logs and translated duplicates of a default-language doc are lifted last and to x0.35 of the usual height (BM25 untouched), unless the task asks about changes or translations or names the file.
     bool             adaptive = false;                      // --adaptive (with --for/--query): cut the returned set at the largest relative score gap (Adaptive-k) with a floor (~5) + the existing top-k ceiling, so a sharp query returns few and a flat/broad one hits the ceiling; prints the cut in the header
     bool             noMentionBoost = false;                // --no-mention-boost (with --for): disable the B8 query-mention anchor — by default, files / dotted modules literally NAMED in the task text have their SCORE lifted to within 5% of the top score (the measured #1 competitor-win bucket; bench/headtohead) — a score promise, not a rank one: on a flat/tied head the anchored hit can still land several ranks below #1; a directly named symbol (Scope.symbol, ns::fn, a verbatim identifier — mention.h NAMED IDENTIFIERS) takes the same first slot. Inert when the text names nothing indexed (byte-identical). Env RIPWIRE_NO_MENTION=1 disables everywhere (incl. the MCP `for` verb).
@@ -2812,8 +2826,9 @@ inline constexpr char kHelpTail[] =
         "                               (with --for/--query) a FLAT top-K export for an EXTERNAL reranker: one\n"
         "                               <cand r= s= n= id= k= p= l=><sig>..</sig></cand> row per result — identity + score +\n"
         "                               signature only, no lens/quality extras, no doc bodies. Composes with --top-k.\n"
-        "    --legend=full|compact|dict|last legend posture for every XML verb — compact is the default; dict drops the prose\n"
-        "                               for a pointer; full restores the long form; last puts the ANSWER before the legend\n"
+        "    --legend=full|compact|dict|last|first legend posture for every XML verb — compact is the default; dict drops the\n"
+        "                               prose for a pointer; full restores the long form; --for answers ANSWER-FIRST and in\n"
+        "                               pages by default (last spells that); first is the legend-first order, unpaged\n"
         "                               --legend=dict (item D, 2026-11-17) drops the prose legend of ONE TIER — the core plus\n"
         "                               this answer's own verb pack — and names that tier: every root attribute stays exactly\n"
         "                               where it was, and legend=\"dict\" dict=\"ripwire --legend-dict=KEY\" dictv= is added, so one\n"
@@ -2859,6 +2874,17 @@ inline constexpr char kHelpTail[] =
         "                               resource ripwire://legend-dict, answers list rows first, carry each definition once\n"
         "                               per session and end with <about legend=\"ref\" dict= dictv=/>. A CLI run has no\n"
         "                               session to hold a definition, so --legend=ref refuses; --legend-dict prints them all.\n"
+        "    --page-bytes=N[:K]         (with --for) the page size of the answer-first --for answer: 12000 by default, 0 =\n"
+        "                               the whole answer in one call. The answer is rendered whole and cut at row boundaries\n"
+        "                               into pages of about N bytes; the root says page= pages= withheld_bytes= and next=,\n"
+        "                               which is this flag with :K, the next page. Page 1 keeps the whole legend after its\n"
+        "                               rows; a later page re-sends none and ends <about legend=\"ref\" have=\"page1\"/>.\n"
+        "                               Every page's rows, joined, are the whole answer's rows byte for byte. --legend=first\n"
+        "                               (legend-first, unpaged) and --token-budget= (a shed, not a page) do not page.\n"
+        "    --no-verb-route            (with --for) never ROUTE: a bare --for whose text names a symbol in backticks and asks who\n"
+        "                               calls it, what it reaches or what breaks is answered by --callers/--impact/--uses, the\n"
+        "                               route disclosed as the root's first child <route … next=>; warn=1 there carries the first\n"
+        "                               --for page too. This flag is that next=: the ranked --for answer, unrouted.\n"
         "    --legend-dict[=core|KEY]   print the legend dictionary, or one TIER of it to hold with --legend-have=\n"
         "                               Bare: the whole dictionary the MCP server serves as ripwire://legend-dict/full, one\n"
         "                               definition per line, headed by its dictv= (FNV-1a 64 of the lines). =core: the 13\n"
@@ -3452,6 +3478,7 @@ inline constexpr BoolFlag kBoolFlags[] =
     // the --for lens modifiers (each refused alone by validateConfig)
     { "--anchor",             &Config::anchor             },
     { "--no-route",           &Config::noRoute            },
+    { "--no-verb-route",      &Config::noVerbRoute        },   // RT1: the --for answer even when the question names a symbol a verb answers
     { "--adaptive",           &Config::adaptive           },
     { "--no-mention-boost",   &Config::noMentionBoost     },
     { "--cochange-boost",     &Config::cochangeBoost      },
@@ -3523,6 +3550,7 @@ inline constexpr ViewFlag kViewFlags[] =
     { "--arch=",        &Config::archRules       , EmptyValue::Refuse, "a layering-rules file path",             "--arch=arch_rules.txt" },
     { "--path=",        &Config::pathSpec        , EmptyValue::Refuse, "two symbol names, FROM,TO",              "--path=main,rankGraph" },
     { "--defs=",        &Config::defsSpec        , EmptyValue::Refuse, "up to 16 symbol names, A[,B…]",          "--defs=parseArgs,rankGraph" },
+    { "--page-bytes=",  &Config::pageBytesSpec   , EmptyValue::Refuse, "a page size in bytes, N or N:K (0 = the whole answer)", "--page-bytes=6000" },
     { "--connect=",     &Config::connectSpec     , EmptyValue::Refuse, "two or more symbol names, A,B[,C]",      "--connect=parseArgs,serialize,rankGraph" },
     { "--impact=",      &Config::impactSym       , EmptyValue::Refuse, "a symbol name",                          "--impact=parseArgs" },
     { "--mentions=",    &Config::mentionsSym     , EmptyValue::Refuse, "a symbol name",                          "--mentions=parseArgs" },
@@ -3540,7 +3568,7 @@ inline constexpr ViewFlag kViewFlags[] =
 
     // search and the --for lens
     { "--query=",       &Config::query           , EmptyValue::Refuse, "search terms",                           "--query=\"teleport pagerank\"" },
-    { "--legend=",      &Config::legend          , EmptyValue::Refuse, "full, compact, dict or last",                  "--legend=compact" },
+    { "--legend=",      &Config::legend          , EmptyValue::Refuse, "full, compact, dict, last or first",         "--legend=compact" },
     { "--grep=",        &Config::grep            , EmptyValue::Refuse, "a literal string to search for",         "--grep=parseArgs",
       nullptr, nullptr, &Config::grepGiven, kGrepDupMessage },
     { "--match=",       &Config::match           , EmptyValue::Refuse, "a tree-sitter s-expression pattern",     "--match='(call_expression)'" },
@@ -3831,7 +3859,7 @@ inline constexpr IntFlag kIntFlags[] =
 //                              nowhere to keep)
 //   • a bare no-op / bare pair --route, --quality-ack (the =REASON form is a kViewFlags row)
 inline constexpr std::size_t kHandWrittenFlagArms = 27;   // +1 lane/legend-ref-cli (2026-11-16): --legend-have= (value arm taking a dictionary version, same shape as --mcp-legend= but open-valued: the value is checked against legenddict::dictionaryVersion() in main.cpp, not against a closed set here, because cli.h cannot include legenddict.h without shifting declaration order); +2 lane/lean-answers-068 (2026-10-07): --whereis-listing= and --mcp-legend= (closed-value arms, same shape as --grep-in=); +1 #350 (2026-09-28): --max-memory= (byte-size arm, same shape as --max-file-size=); +1: --color-by= (enum-value arm); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (repeatable-value arms, same shape as --exclude=); +1 R-H: --grep-in= (closed-value arm, same shape as --grep-scope=); +1 lane/flag-biggest-first (2026-09-23): --readability (deprecation-warning alias, same shape as --stable/--most-important-last/--no-auto-order) — its kBoolFlags row is renamed to --biggest-first (same Config::readability member), so the old spelling moves OUT of the table and becomes a hand-written arm, per the house rule that deprecation-warning aliases stay hand-written
-inline constexpr std::size_t kTotalFlagArms = 225;  // +1 lane/legend-ref-cli (2026-11-16): --legend-have= (hand-written value arm, see kHandWrittenFlagArms); +1 lane/route-hook-cold (2026-11-10, issue #594): --deadline-ms= (kIntFlags row) — --help-task answers in time or abstains while a detached child warms the index; +1 lane/defs-lookup (2026-10-27): --defs= (kViewFlags row) — the definitions each name binds (defslookup.h); +1 lane/qd-memory-degrade (2026-10-14): --quality-kinds= (kViewFlags row) — run only the named quality kinds of the range form (the replay a degraded answer names); +1 lane/whereis-lean (2026-10-10, review C1): --whereis-full-text (kBoolFlags row) — the same --whereis page with every t= line whole, the <t_cut next=> replay; +1 lane/lean-trio (2026-10-10): --show-stale (kBoolFlags row) — prints the stale-ack rows a regression-free --quality-delta collapses; +1 lane/map-inventory-d7 (2026-10-08): --no-inventory (kBoolFlags row) — the default map without its <inv> tier; +1 knob-honesty-068 (2026-10-07): --lint-max-per-rule= (kIntFlags row) — the per-rule lint budget a floored answer's findings_next= names; +2 lane/lean-answers-068 (2026-10-07): --whereis-listing= and --mcp-legend= (hand-written closed-value arms, see kHandWrittenFlagArms); +1 lane/mcp-tool-profile-065 (2026-09-26): --mcp-tools= (kViewFlags row) — list only a subset of the MCP tools (names and/or the core/full profiles); +1 #350 (2026-09-28): --max-memory= (hand-written byte-size arm, see kHandWrittenFlagArms); +1 lane/flag-biggest-first (2026-09-23): --readability renamed to --biggest-first, kept working as a hand-written deprecated alias (see kHandWrittenFlagArms); +1 lane/r1-for-sections-stub (2026-09-19, L2/B1): --sections= (kViewFlags row) — the closed-set opt-in that restores the <lego>/<compose> sections --for collapses to a counted stub by default; +1 --lsp (kBoolFlags row, 2026-09-15): the navigation LSP server stdio entry point — Phase 1 PoC, docs/LSP.md; +1 lane/recent-scope (2026-09-12, C1-b): --in= (kViewFlags row) — the directory-scoped <recent scope=> block of --rank-by=churn-decay; +2 P4 (capture-audit 2026-09-04, lane L7): --zoom-levels= (kIntFlags row, the printed-levels ceiling) and --include-builtins (kBoolFlags row, the external-surface builtin opt-in); +1 P9 (capture-audit 2026-09-04, lane L8): --no-post-check (kBoolFlags row, the edit receipt's folded verification opt-out); +1 lane/ca-L2 (2026-09-04, H11): --allow-dirty (kBoolFlags row) — the explicit consent --quality-baseline needs before it pins a floor on a tree that differs from HEAD; +1 lane/n6-c (2026-09-03): --no-ignore (kBoolFlags row, the .gitignore-by-default escape hatch); +1 lane/af-scope (2026-08-29): --scope= (kViewFlags row, the quality-delta ownership partition); +1 --quality-delta= (kViewFlags, R-I ref-pair form); +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out); +3 L7: --lint-catalog (kBoolFlags), --lint-select= and --lint-ignore= (kViewFlags); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (hand-written arms); +1 R-H: --grep-in= (hand-written arm); +1 R2: --pattern= (kViewFlags row, the code-shaped structural search); +1 lane/safe-delete (2026-08-21): --safe-delete= (kViewFlags row, the composed "can I delete this?" read); +1 lane/compact-conceptual (2026-08-22): --auto-bodies (kBoolFlags row, the compact-conceptual-serving opt-out); +5 CLI edit bridge (2026-08-27): --replace-symbol-body=/--insert-before-symbol=/--insert-after-symbol=/--edit-payload=/--edit-target-file= (kViewFlags rows); +1 --handles (kBoolFlags row, grep edit handles); +1 --legend= (kViewFlags row, compact schema dialect); +3 edit-plan: --edit-plan= (kViewFlags) and --dry-run/--apply (kBoolFlags rows); +1 --agent= (kViewFlags row, the --doctor Codex surface); +1 lane/paper-slice (2026-08-28): --slice= (kViewFlags row, the ARISE-motivated def-use slice); +1 lane/af-planlint (2026-08-29): --plan-lint= (kViewFlags row, the PLAN-format structure gate, P3.2); +2 lane/or-arise (2026-08-30): --slice-flow= (kViewFlags row) and --slice-depth= (kIntFlags row) — the ARISE rung-2 cross-statement data-flow slice; +1 lane/at-seed (2026-08-30): --at= (kViewFlags row) — the FILE:LINE enclosing-chain report, with the @FILE:LINE selector spelling resolved in graph.h (no flag arm of its own); +1 CARD-1 phase 2 (2026-08-31): --pin-census= (kViewFlags row) — the eval-only S6-C silent-pin census, written beside the map and never into it
+inline constexpr std::size_t kTotalFlagArms = 227;  // +1 lane/rt1-route (2026-11-18): --no-verb-route (kBoolFlags row) — the --for answer, never routed to the verb the question names (verbs_forroute.h); +1 lane/af1-answerfirst (2026-11-18): --page-bytes= (kViewFlags row) — the page size (and page) of the answer-first --for answer, forpages.h; +1 lane/legend-ref-cli (2026-11-16): --legend-have= (hand-written value arm, see kHandWrittenFlagArms); +1 lane/route-hook-cold (2026-11-10, issue #594): --deadline-ms= (kIntFlags row) — --help-task answers in time or abstains while a detached child warms the index; +1 lane/defs-lookup (2026-10-27): --defs= (kViewFlags row) — the definitions each name binds (defslookup.h); +1 lane/qd-memory-degrade (2026-10-14): --quality-kinds= (kViewFlags row) — run only the named quality kinds of the range form (the replay a degraded answer names); +1 lane/whereis-lean (2026-10-10, review C1): --whereis-full-text (kBoolFlags row) — the same --whereis page with every t= line whole, the <t_cut next=> replay; +1 lane/lean-trio (2026-10-10): --show-stale (kBoolFlags row) — prints the stale-ack rows a regression-free --quality-delta collapses; +1 lane/map-inventory-d7 (2026-10-08): --no-inventory (kBoolFlags row) — the default map without its <inv> tier; +1 knob-honesty-068 (2026-10-07): --lint-max-per-rule= (kIntFlags row) — the per-rule lint budget a floored answer's findings_next= names; +2 lane/lean-answers-068 (2026-10-07): --whereis-listing= and --mcp-legend= (hand-written closed-value arms, see kHandWrittenFlagArms); +1 lane/mcp-tool-profile-065 (2026-09-26): --mcp-tools= (kViewFlags row) — list only a subset of the MCP tools (names and/or the core/full profiles); +1 #350 (2026-09-28): --max-memory= (hand-written byte-size arm, see kHandWrittenFlagArms); +1 lane/flag-biggest-first (2026-09-23): --readability renamed to --biggest-first, kept working as a hand-written deprecated alias (see kHandWrittenFlagArms); +1 lane/r1-for-sections-stub (2026-09-19, L2/B1): --sections= (kViewFlags row) — the closed-set opt-in that restores the <lego>/<compose> sections --for collapses to a counted stub by default; +1 --lsp (kBoolFlags row, 2026-09-15): the navigation LSP server stdio entry point — Phase 1 PoC, docs/LSP.md; +1 lane/recent-scope (2026-09-12, C1-b): --in= (kViewFlags row) — the directory-scoped <recent scope=> block of --rank-by=churn-decay; +2 P4 (capture-audit 2026-09-04, lane L7): --zoom-levels= (kIntFlags row, the printed-levels ceiling) and --include-builtins (kBoolFlags row, the external-surface builtin opt-in); +1 P9 (capture-audit 2026-09-04, lane L8): --no-post-check (kBoolFlags row, the edit receipt's folded verification opt-out); +1 lane/ca-L2 (2026-09-04, H11): --allow-dirty (kBoolFlags row) — the explicit consent --quality-baseline needs before it pins a floor on a tree that differs from HEAD; +1 lane/n6-c (2026-09-03): --no-ignore (kBoolFlags row, the .gitignore-by-default escape hatch); +1 lane/af-scope (2026-08-29): --scope= (kViewFlags row, the quality-delta ownership partition); +1 --quality-delta= (kViewFlags, R-I ref-pair form); +1 --help-task= (kViewFlags); +2 VT-1: --run-trace= (kViewFlags) and --run-timeout= (kIntFlags); +1: --handoff (kBoolFlags row); +1 --readability (kBoolFlags row); +2 §CLIO: --cochange-groups (kBoolFlags), --cochange-recur= (kIntFlags); +1 --context-ratio (kBoolFlags row); +1 --nonlocal-state (kBoolFlags row); +2 --field-affinity (kBoolFlags) and --field-affinity= (kViewFlags); +1 --comment-coherence (kBoolFlags row); +2 --dmm (kBoolFlags) and --dmm= (kViewFlags); +2 --quality-panel (kBoolFlags) and --quality-panel= (kViewFlags); +1 --naming-consistency (kBoolFlags row); +1 --naming-locals (kBoolFlags row, local-variable-indexing plan Phase 2); +1 --skipped (kBoolFlags row, §P0.5d itemization); +1 --with-profile= (kViewFlags row, the --lint × #PROF_TSV heat join); +1 --color-by= (hand-written enum-value arm); +1 --sarif (kBoolFlags row, W1-SARIF: SARIF 2.1.0 export for --lint); +1 --signatures-only (kBoolFlags row, T3 terminal-by-default --for opt-out); +3 L7: --lint-catalog (kBoolFlags), --lint-select= and --lint-ignore= (kViewFlags); +3 G3 (2026-08-15 harvest): --and=/--not=/--grep-scope= (hand-written arms); +1 R-H: --grep-in= (hand-written arm); +1 R2: --pattern= (kViewFlags row, the code-shaped structural search); +1 lane/safe-delete (2026-08-21): --safe-delete= (kViewFlags row, the composed "can I delete this?" read); +1 lane/compact-conceptual (2026-08-22): --auto-bodies (kBoolFlags row, the compact-conceptual-serving opt-out); +5 CLI edit bridge (2026-08-27): --replace-symbol-body=/--insert-before-symbol=/--insert-after-symbol=/--edit-payload=/--edit-target-file= (kViewFlags rows); +1 --handles (kBoolFlags row, grep edit handles); +1 --legend= (kViewFlags row, compact schema dialect); +3 edit-plan: --edit-plan= (kViewFlags) and --dry-run/--apply (kBoolFlags rows); +1 --agent= (kViewFlags row, the --doctor Codex surface); +1 lane/paper-slice (2026-08-28): --slice= (kViewFlags row, the ARISE-motivated def-use slice); +1 lane/af-planlint (2026-08-29): --plan-lint= (kViewFlags row, the PLAN-format structure gate, P3.2); +2 lane/or-arise (2026-08-30): --slice-flow= (kViewFlags row) and --slice-depth= (kIntFlags row) — the ARISE rung-2 cross-statement data-flow slice; +1 lane/at-seed (2026-08-30): --at= (kViewFlags row) — the FILE:LINE enclosing-chain report, with the @FILE:LINE selector spelling resolved in graph.h (no flag arm of its own); +1 CARD-1 phase 2 (2026-08-31): --pin-census= (kViewFlags row) — the eval-only S6-C silent-pin census, written beside the map and never into it
 static_assert( std::size( kBoolFlags ) + std::size( kViewFlags ) + std::size( kIntFlags ) + kHandWrittenFlagArms == kTotalFlagArms,
                "a --flag arm was added or removed without updating the ledger above — count the arms in parseArgs and fix the counter" );
 
@@ -4643,14 +4671,14 @@ inline void validateLintSelectionModifierGuards( Config& c ) noexcept
 // Every opt-in spelling resolves `legend` to "compact" and carries its difference in a Config flag of its own
 // (legendProseOff, legendAnswerFirst) — see the note there for the 25 call sites that would have silently flipped
 // had either been a third value of the dialect switch. `full` restores the long form as before.
-inline constexpr std::string_view kLegendPostures[]     = { "full", "compact", "dict", "last" };
+inline constexpr std::string_view kLegendPostures[]     = { "full", "compact", "dict", "last", "first" };
 inline constexpr std::string_view kDefaultLegendPosture = "compact";
 static_assert( std::ranges::contains( kLegendPostures, kDefaultLegendPosture ), "the default is a registered posture" );
-// A posture's spelling lives in THREE places: this table, the flag-table hint ("full, compact, dict or last") and
+// A posture's spelling lives in THREE places: this table, the flag-table hint ("full, compact, dict, last or first") and
 // validateLegendModifier's refusal. Adding `last` left both prose copies reading "full, compact or dict", so the
 // refusal named a value set that no longer existed and a correct --legend=last looked like a typo in the error text.
 // This count is the tripwire: raise it only together with both strings.
-static_assert( std::ranges::size( kLegendPostures ) == 4,
+static_assert( std::ranges::size( kLegendPostures ) == 5,
                "a new --legend posture needs its spelling in the flag-table hint AND in validateLegendModifier's refusal" );
 
 // WHEN EACH OPT-IN COLLAPSES INTO THE DEFAULT. An option with no stated expiry criterion is a permanent flag, and
@@ -4662,6 +4690,10 @@ static_assert( std::ranges::size( kLegendPostures ) == 4,
 //   last — when the answer carries its disclosure readings in the prefix (root tag, then cuts and floors, then rows,
 //          then the schema dictionary). Measured 2026-11-17: as the DEFAULT this ordering left an active cut or floor
 //          outside 2 KB on 9 of 50 --for answers, and no prefix win pays for a reader that cannot tell it was cut.
+//          COLLAPSED 2026-11-18 (AF1, owner decision): the default --for answer is answer-first AND paged (forpages.h).
+//          A page is not a truncated prefix: its own cut rides the ROOT (page= pages= withheld_bytes= next=) and page 1
+//          keeps the whole legend before </ctx>, so a reader holds every reading of every marker it was served.
+//          `last` stays as a spelling of the default; `first` is the opt-out (today's legend-first order, unpaged).
 // Neither condition is a promise about a date. Each is a gate that must be green first, so the option retires on
 // evidence instead of accumulating.
 
@@ -4815,8 +4847,9 @@ static inline void validateLegendModifier( Config& c ) noexcept
         const bool servesStdout = c.mcp || !c.listen.empty() || c.lsp;
         if( !servesStdout && !c.json )
         {
-            c.legend          = kDefaultLegendPosture;
-            c.legendDefaulted = true;
+            c.legend            = kDefaultLegendPosture;
+            c.legendDefaulted   = true;
+            c.legendAnswerFirst = true;   // AF1: answer-first (and paged) is the --for default; only --for reads it
             // ITEM D IS OPT-IN, NOT THE DEFAULT (owner decision 2026-11-17, after the blast radius was measured).
             // The posture is lossless and measured — see the readout — but making it the DEFAULT reds 89 of 849 gates,
             // 80 of them on ONE contract: they assert that every attribute an answer emits is defined in THAT ANSWER'S
@@ -4846,6 +4879,20 @@ static inline void validateLegendModifier( Config& c ) noexcept
         c.legendSpelled     = c.legend;   // before the normalisation, so a refusal names what the caller typed
         c.legend            = kDefaultLegendPosture;
         c.legendAnswerFirst = true;
+        c.legendAnswerFirstAsked = true;
+    }
+    // AF1: a SPELLED --legend=compact is the default posture, so it answers --for as the default does — answer-first, paged.
+    else if( c.legend == "compact" )
+    {
+        c.legendAnswerFirst = true;
+    }
+    // AF1: --legend=first is the OPT-OUT — the legend-first order this tool served before the default flip, unpaged, byte for
+    // byte. Normalised exactly as `last` is; the difference is that legendAnswerFirst stays false.
+    if( c.legend == "first" )
+    {
+        c.legendSpelled     = c.legend;
+        c.legend            = kDefaultLegendPosture;
+        c.legendAnswerFirst = false;
     }
     // r2-LO: legend=ref is a SESSION posture — definitions sent once per server process, after the session read the
     // dictionary (legenddict.h). A CLI run is one answer with no session to have been served anything, so a ref answer
@@ -4860,7 +4907,7 @@ static inline void validateLegendModifier( Config& c ) noexcept
     }
     if( !isLegendPosture( c.legend ) )
     {
-        rw::emitTo( stderr, "ripwire: --legend needs full, compact, dict or last — got '{}', e.g. --legend=compact\n", std::string_view( c.legend.data(), c.legend.size() ) );
+        rw::emitTo( stderr, "ripwire: --legend needs full, compact, dict, last or first — got '{}', e.g. --legend=compact\n", std::string_view( c.legend.data(), c.legend.size() ) );
         c.ok = false;
     }
     // P1 (capture-audit 2026-09-04, L7): every XML verb honors --legend=compact (main.cpp's runWithCompactLegend
@@ -5023,6 +5070,61 @@ inline bool activeSinceHostNeedsBaseline( const Config& c ) noexcept
     return anySinceHostActive( c, /*baselineOnly=*/true );
 }
 
+// AF1 --page-bytes=N[:K] (forpages.h): N is the page size in bytes (0 = the whole answer), K the 1-based page. It shapes the
+// answer-first --for answer on its default path only, so every other combination REFUSES rather than being accepted and
+// ignored: a budget is a shed with its own contract (forbudgetfit.h), the legend-first postures are unpaged by definition,
+// and the other dialects and the file page carry no answer-first document to cut.
+// The value's grammar, N or N:K: false on anything else (a page from 1; 0:K is not a page).
+[[nodiscard]] inline bool parsePageBytesSpec( std::string_view spec, std::size_t& bytes, std::size_t& page ) noexcept
+{
+    const auto parse = []( std::string_view v, std::size_t& out ) noexcept
+    {
+        const auto [ end, ec ] = std::from_chars( v.data(), v.data() + v.size(), out );
+        return !v.empty() && ec == std::errc() && end == v.data() + v.size() && out <= 100000000u;
+    };
+    const std::size_t colon = spec.find( ':' );
+    page = 1;
+    if( !parse( spec.substr( 0, colon ), bytes ) ) { return false; }
+    if( colon != std::string_view::npos && !( parse( spec.substr( colon + 1 ), page ) && page >= 1 ) ) { return false; }
+    return bytes > 0 || page == 1;
+}
+
+// Why --page-bytes cannot shape this run, or nullptr when it can.
+[[nodiscard]] inline const char* pageBytesConflict( const Config& c ) noexcept
+{
+    if( c.forTask.empty() )                                     { return "pages a --for answer only"; }
+    if( !c.legendAnswerFirst )                                  { return "pages the answer-first order only (not --legend=first, full or dict)"; }
+    if( c.tokenBudget > 0 || ( c.maxTokens > 0 && c.detail > 0 ) ) { return "does not combine with a token budget, which sheds the answer instead"; }
+    if( c.json || c.columnar || c.candidates )                  { return "pages the XML answer only"; }
+    if( c.pageLimit > 0 || c.pageOffset > 0 )                   { return "does not combine with --limit/--offset, the file-grain page"; }
+    if( !c.legendHave.empty() )                                 { return "does not combine with --legend-have=, a second posture for one answer"; }
+    return nullptr;
+}
+
+inline void validatePageBytes( Config& c ) noexcept
+{
+    if( c.pageBytesSpec.empty() || !c.ok )
+    {
+        return;
+    }
+    std::size_t bytes = 0, page = 1;
+    if( !parsePageBytesSpec( c.pageBytesSpec, bytes, page ) )
+    {
+        rw::emitTo( stderr, "ripwire: --page-bytes needs a page size in bytes, N or N:K (K a page from 1; 0 = the whole answer) — got '{}', "
+                            "e.g. --page-bytes=6000\n", c.pageBytesSpec );
+        c.ok = false;
+        return;
+    }
+    if( const char* why = pageBytesConflict( c ) )
+    {
+        rw::emitTo( stderr, "ripwire: --page-bytes {}\n", why );
+        c.ok = false;
+        return;
+    }
+    c.forPageBytes = bytes;
+    c.forPage      = page;
+}
+
 inline void validateModifierGuards( Config& c ) noexcept
 {
     validatePagingHonored( c );      // §P8/G2: --limit/--offset on a verb that windows nothing (see its header)
@@ -5033,6 +5135,7 @@ inline void validateModifierGuards( Config& c ) noexcept
     validateLspShaping( c );         // the server transport refuses the shaping knobs outright — see its header
 
     validateLegendModifier( c );
+    validatePageBytes( c );          // AF1: after the posture, which decides whether the answer is answer-first at all
     validateSectionsModifier( c );   // L2 (round-1 lever B1): --sections= modifies --for only, closed set
     validateGrepHandleModifier( c );
     validateDefaultCeilingModifiers( c );   // P4 (L7): --zoom-levels / --include-builtins ride their verb only
@@ -5436,6 +5539,13 @@ inline void validateConfig( Config& c ) noexcept
     if( c.noRoute && c.forTask.empty() && c.query.empty() )
     {
         rw::emitRaw( stderr, "ripwire: --no-route modifies --for=TASK or --query=TERMS — pass one (e.g. ripwire <dir> --for=\"task\" --no-route)\n" );
+        c.ok = false;
+    }
+
+    // --no-verb-route shapes only --for; alone it does nothing — refuse loudly, as --no-route does.
+    if( c.noVerbRoute && c.forTask.empty() )
+    {
+        rw::emitRaw( stderr, "ripwire: --no-verb-route modifies --for=TASK — pass both (e.g. ripwire <dir> --for=\"task\" --no-verb-route)\n" );
         c.ok = false;
     }
 

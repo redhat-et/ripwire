@@ -1941,6 +1941,13 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // pr-context (prcontext.h): a changed file's <s> rows and their <caller> rows print t= n=; seen only when the diff
     // touches a symbol, so a HEAD~1 roster row whose last commit is test-only cannot pin it either way.
     { "n", "s t= n= / caller t= n=: a changed symbol's / one of its callers' kind and name", true, "s", MapHeaderRead::No, {}, "pr-context" },
+    // RT1 (verbs_forroute.h): the <route> element a --for question answered by --callers / --uses / --impact carries as the
+    // root's first child. Element-qualified, not key-qualified: one element, one reading, on all three roots. Present-only,
+    // so a bare verb call's legend is unchanged (test/forverbroutecheck.sh (2)).
+    { "from", "route from=for kind=who-calls|direct-radius|transitive verb= task= complete=not-proven next=: this ranked-lens question (task=) was answered by verb= alone, kind= read from its wording; a verb lists call edges and definitions only, so registrations, closures, class installs, macro aliases and declined calls are not in it; next= is the ranked lens answer, unrouted", true, "route" },
+    { "warn", "route warn=1 why=: evidence this answer misses something (text-gap:N:FILE files naming the symbol no row names; macro:FILE:LINE a #define naming it; twin-defs:N same-stem definitions; value-hop:N:NAME a caller whose own callers are a floor, a value or closure hop; target-floor its own callers count is a floor; kind: no check ran); absent = none found, never proof of completeness", true, "route" },
+    { "why", "route why=unchecked: the evidence check could not run, so the absent warn= proves nothing", true, "route", MapHeaderRead::No, "unchecked" },
+    { "page1", "route page1=1: the first page of the ranked lens answer follows as this root's last child <ctx>, its legend inside, its next= the second page", true, "route" },
 };
 
 // the paging window: these five mean the same on every element (L4's one-attribute-one-reading law), so they are

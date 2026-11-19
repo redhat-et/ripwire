@@ -129,7 +129,9 @@ silent n5 "--for=add a new argument to fold_tested"
 silent n6 "--for=change the signature of data_var"
 silent n6 '--for=change the signature of `Fwd`'
 silent n4 '--for=add a new argument to `jfn`'
-silent n8 '--for=if `solo_fn` gains a new parameter, what happens to run_it callers'
+# n8 names `solo_fn` in backticks and asks about callers, so a BARE call is answered by --callers=solo_fn since lane/rt1-route
+# (verbs_forroute.h, test/forverbroutecheck.sh). This arm measures the --for answer's <decl_rows>, so it asks for that answer.
+silent n8 '--for=if `solo_fn` gains a new parameter, what happens to run_it callers' --no-verb-route
 run "--for=change the signature of many_fn" >"$TMP/c1.xml"
 if python3 - "$TMP/c1.xml" <<'PY'
 import re, sys
