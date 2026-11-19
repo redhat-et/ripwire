@@ -567,6 +567,41 @@ inline std::size_t skipBrace( std::string_view s, std::size_t i )   // s[i] == '
     return i;
 }
 
+// A double-quoted text with its own single quotes blanked: they are literal there ("don't"), but a quote inside a $( )
+// or ` ` it holds is live ("$( grep -o '<r ' f )" keeps '<r ' one word, not a < redirect). exitstatus.py's
+// _dq_literal_quotes.
+inline std::string dqLiteralQuotes( std::string_view s )
+{
+    std::string out( s );
+    std::size_t i = 0;
+    while( i < s.size() )
+    {
+        const char c = s[i];
+        if( c == '\\' )
+        {
+            i += 2;
+            continue;
+        }
+        if( startsAt( s, i, "$(" ) )
+        {
+            i = skipParen( s, i + 1 );
+            continue;
+        }
+        if( c == '`' )
+        {
+            const std::size_t j = s.find( '`', i + 1 );
+            i                   = j == std::string_view::npos ? s.size() : j + 1;
+            continue;
+        }
+        if( c == '\'' )
+        {
+            out[i] = ' ';
+        }
+        ++i;
+    }
+    return out;
+}
+
 // Command substitutions $( ... ) and ` ... ` inside one word (outside single quotes), with their lines and positions.
 inline void subsIn( std::string_view raw, std::uint32_t line, std::uint32_t base, std::vector<Sub>& out )
 {
@@ -608,9 +643,7 @@ inline void subsIn( std::string_view raw, std::uint32_t line, std::uint32_t base
         {
             // descend: substitutions inside double quotes are live (single quotes inside them are not quotes)
             const std::size_t j     = skipQuote( raw, i, '"' );
-            std::string       inner( sliceOf( raw, i + 1, j - 1 ) );
-            std::replace( inner.begin(), inner.end(), '\'', ' ' );
-            subsIn( inner, static_cast<std::uint32_t>( line + countNl( raw, 0, i ) ), static_cast<std::uint32_t>( base + i + 1 ), out );
+            subsIn( dqLiteralQuotes( sliceOf( raw, i + 1, j - 1 ) ), static_cast<std::uint32_t>( line + countNl( raw, 0, i ) ), static_cast<std::uint32_t>( base + i + 1 ), out );
             i = j;
             continue;
         }
