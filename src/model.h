@@ -17,6 +17,7 @@
 #include "refnames.h"   // rw::InternedText — Reference::calleeName / qualifier / recvVar (MEM-REF-SHRINK step 2)
 #include "infra/sharedOnce.h"   // rw::sharedOnce — RefColdFields::block, the cold text block made on its first write
 
+#include <cmath>       // std::log2 — tangleScore10
 #include <algorithm>   // std::sort — symbolsByFile below; std::binary_search — isJsTsBuiltinMember
 #include <memory>      // IngestResult::rustCrateRoots — the per-run Rust crate-root table
 #include <tuple>       // std::tie — lessUnindexedExt's mixed-direction compare
@@ -945,7 +946,22 @@ struct Symbol
     // with no declarator (a local forward decl, e.g. `struct Foo;`) now correctly counts as 0 rather than
     // the pre-fix "1". `--metrics` emits it as locals="N" locals_floor="1" (never a bare 0 for an
     // uncovered language — see localsCountedLang).
-    std::uint32_t locals       = 0;
+    // u16, SATURATING at 65535 in ingest_model.h::assignSymbols (the cache record keeps the full u32): a def past that many local
+    // declarators is beyond every triage threshold, and the count is a floor already. Narrowed from u32 so `steer` below lands in the
+    // freed bytes and Symbol does not grow (the static_assert below holds unchanged).
+    std::uint16_t locals       = 0;
+    // QD-TANGLE STEERING LOCALS (--quality-delta's tangle kind; gate test/tanglecheck.sh): how many locals of a primitive written type
+    // (bool/int/size_t/char/…; never `auto`, never const) are written again after their declaration AND read in a branch condition
+    // (if/while/for/switch/elif) 10 or more statements after their last preceding write — a flag or counter set in one place that
+    // steers a branch far away. Counted by the SAME fused cc_walk DFS (no new parse), only for functions/methods over 50 lines (the
+    // tangle score is 0 at 50 lines or fewer, so a shorter body is not walked for it) in steerCountedLang's languages. 0 elsewhere,
+    // and absent (never a bare 0) on --metrics there. Saturates at 255.
+    std::uint8_t  steer        = 0;
+    // QD-TANGLE FLAT DISPATCH: the share of deepLoc (in 255ths; 255 exactly when ALL of it) that lies inside short arms of a flat
+    // dispatch — a switch, or an if / else-if chain, of 4+ arms whose arm is at most 40 lines (ingest_metrics.h ChainState). Such an
+    // arm reads alone, like a row of a table, so the tangle score leaves those lines out (and the nesting past the bar with them,
+    // when every deep line is such an arm's). deepLoc itself is unchanged. Walked with `steer`, so 0 under the same conditions.
+    std::uint8_t  dispatchShare = 0;
     // PPALT DISCLOSURE — count of ALTERNATIVE-introducing preprocessor nodes (`#else`/`#elif`/`#elifdef`)
     // inside the def, filled by the SAME fused cc_walk DFS that computes cx/ccx/maxNest/locals (zero new
     // tree-sitter queries). When > 0 the body carries branches that never coexist at compile time, so every
@@ -1195,6 +1211,14 @@ inline bool localsCountedLang( Lang lang ) noexcept
     return lang == Lang::Cpp || lang == Lang::C;
 }
 
+// QD-TANGLE steering locals (Symbol::steer): the languages whose declaration, assignment and condition shapes the walk reads
+// (ingest_metrics.h steer_*). Every other language keeps steer 0, and the tangle score there is nesting and deep share alone.
+inline bool steerCountedLang( Lang lang ) noexcept
+{
+    return    lang == Lang::Cpp || lang == Lang::C || lang == Lang::ObjC || lang == Lang::Python || lang == Lang::TypeScript
+           || lang == Lang::JavaScript || lang == Lang::Java || lang == Lang::CSharp || lang == Lang::Go || lang == Lang::Rust;
+}
+
 // Essential-complexity coverage: 12 of the 18 CODE languages — every one EXCEPT Bash, PHP, Lua, Elixir, Dart and
 // Kotlin (Elixir and Dart landed without joining it, so their ev is withheld the same way). Bash (the
 // essential-complexity design note, §3.2.8: `break N`/`continue N` take a numeric
@@ -1238,6 +1262,109 @@ struct LocalNameFact
     std::string   name;
     std::uint32_t line      = 0;   // 1-based, absolute file line (not the re-parsed substring's own row)
     std::uint8_t  declDepth = 0;
+};
+
+// QD-TANGLE SCORE (STAGE0 2.1; --quality-delta's tangle kind, --metrics tangle=). LENGTH AMPLIFIES TANGLE, NEVER STANDS ALONE:
+//   T (length-free) = max(0, nest - 3)      one point per nesting level past 3 (quality::kNestBar 4 is the first counted)
+//                   + 20 * deep / loc       one point per 5 % of lines inside regions at nesting >= 4 (short flat-dispatch arms left out)
+//                   + 100 * steer / loc     one point per steering local per 100 lines (Symbol::steer)
+//   S               = T * max(0, log2(loc / 50))   0 at 50 lines or fewer, +1 multiplier per doubling of length; the bar is S >= 6
+// A short nested helper scores 0 (no length to amplify), and a long flat body or an orchestrator of named steps scores 0 (no tangle).
+// Each input counts in units of an existing bar: a nesting level past kNestBar - 1, 1 in 20 lines inside a deep region, 1 steering
+// local per 100 lines (the prototype's 1 per 50 statements: a body runs about two lines a statement). Kept in tenths, so every
+// surface prints the same rounded number and a ratchet compares integers.
+struct TangleInputs
+{
+    std::uint32_t loc   = 0;   // physical lines (Symbol::loc)
+    std::uint32_t nest  = 0;   // max control nesting, the tangle reading (3 at most when every deep line is a dispatch arm's)
+    std::uint32_t deep  = 0;   // deep lines the score counts: deepLoc less the short dispatch arms' share
+    std::uint32_t steer = 0;   // steering locals
+};
+inline constexpr std::uint32_t kTangleAmpLoc   = 50;   // the length the amplifier starts above
+inline constexpr std::uint32_t kTangleNestFree = 3;    // nesting levels that score nothing (quality::kNestBar - 1, asserted in quality.h)
+inline constexpr std::uint32_t kTangleBar10    = 60;   // the bar, S >= 6, in tenths
+
+// The dispatch share Symbol::dispatchShare stores: deepDispatch of deepLoc in 255ths, 255 only when every deep line is an arm's.
+inline std::uint8_t tangleDispatchShare( std::uint32_t deepLoc, std::uint32_t deepDispatch ) noexcept
+{
+    if( deepDispatch == 0 || deepLoc == 0 )
+    {
+        return 0;
+    }
+    if( deepDispatch >= deepLoc )
+    {
+        return 255;
+    }
+    return std::uint8_t( std::min<std::uint32_t>( 254u, ( deepDispatch * 255u + deepLoc / 2u ) / deepLoc ) );
+}
+
+// The inputs from the raw facts — the ONE rule a Symbol (tangleInputsOf) and a history blob's definition (ingest.h tangleInputsOfBlob) share.
+inline TangleInputs tangleInputsFrom( std::uint32_t loc, std::uint32_t maxNest, std::uint32_t deepLoc, std::uint32_t steer, std::uint8_t dispatchShare ) noexcept
+{
+    TangleInputs in;
+    in.loc   = loc;
+    in.steer = steer;
+    in.nest  = maxNest;
+    in.deep  = deepLoc;
+    if( dispatchShare == 255 )
+    {
+        in.deep = 0;
+        in.nest = in.nest < kTangleNestFree ? in.nest : kTangleNestFree;   // every deep line is a dispatch arm's: no depth past the bar is the body's
+    }
+    else if( dispatchShare > 0 )
+    {
+        in.deep = deepLoc - ( deepLoc * dispatchShare + 127u ) / 255u;
+    }
+    return in;
+}
+
+inline TangleInputs tangleInputsOf( const Symbol& s ) noexcept
+{
+    return tangleInputsFrom( s.loc, s.maxNest, s.deepLoc, s.steer, s.dispatchShare );
+}
+
+// T (length-free) as a real, and T and S in tenths — rounded half up, so every surface prints the same number.
+inline double tangleT( const TangleInputs& in ) noexcept
+{
+    if( in.loc == 0 )
+    {
+        return 0.0;
+    }
+    return double( in.nest > kTangleNestFree ? in.nest - kTangleNestFree : 0u ) + 20.0 * double( in.deep ) / double( in.loc )
+         + 100.0 * double( in.steer ) / double( in.loc );
+}
+inline std::uint32_t tangleT10( const TangleInputs& in ) noexcept
+{
+    return std::uint32_t( tangleT( in ) * 10.0 + 0.5 );
+}
+inline std::uint32_t tangleScore10( const TangleInputs& in ) noexcept
+{
+    if( in.loc <= kTangleAmpLoc )
+    {
+        return 0;
+    }
+    return std::uint32_t( tangleT( in ) * std::log2( double( in.loc ) / double( kTangleAmpLoc ) ) * 10.0 + 0.5 );
+}
+
+// QD-TANGLE detail (ingest.h tangleDetailOf): what a tangle row names, read by re-walking ONE function at --quality-delta time — never
+// stored on a Symbol, never cached. A steering local with the line of the write before the far read and the read itself; a deep region
+// (a hump: a control-nesting region that first reaches quality::kNestBar) with its 1-based line span.
+struct TangleSteerHit
+{
+    std::string   name;
+    std::uint32_t setLine  = 0;
+    std::uint32_t readLine = 0;
+};
+struct TangleHumpSpan
+{
+    std::uint32_t startLine = 0;
+    std::uint32_t endLine   = 0;
+};
+struct TangleDetailFacts
+{
+    bool                        ok = false;   // false: the file did not parse or no node spans the function — the row then names no locals or span
+    std::vector<TangleSteerHit> steer;        // in first-read order
+    std::vector<TangleHumpSpan> humps;        // in document order
 };
 
 // An unresolved reference (call/usage). Resolved into an edge in the graph stage.

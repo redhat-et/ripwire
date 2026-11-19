@@ -1096,6 +1096,9 @@ struct DeltaBasis
     // --show-stale snapshot all read the same ingest, so the clone and construct passes run once between them. Unbound
     // (never read) in the ref-pair form, whose two trees are other ingests.
     rw::quality::TreePasses                  passes;
+    // D4 best-since source (working-tree form only: the ref-pair form judges two committed trees and reads no ratchet) and what
+    // computeDelta hands back beside the rows: the QD-CREDIT-ROW improvements and the ratchet's disclosure.
+    rw::quality::DeltaExtras                 extras;
 };
 
 // The REF-PAIR floor's comparison, once loadRefPairDelta has both sides: the base snapshot is the floor, tree B the judged
@@ -1122,7 +1125,7 @@ void refPairBasis( const rw::Config& cfg, const std::string& root, RefPairDelta&
     out.regs    = quality::computeDelta( refs.target().ing, refs.target().g, out.baseSel.snapshot,
                                          out.deltaRoot, cfg.excludes, cfg.maxFileBytes, &out.registerMacroExcluded, &out.apiNewSurface,
                                          cfg.qualityAck ? &out.cloneIdioms : nullptr, &out.declinedCallExcluded, &out.valueRefExcluded,
-                                         quality::KindScope{ refs.kinds, refs.macroOverride() }, &out.historyUnread );
+                                         quality::KindScope{ refs.kinds, refs.macroOverride() }, &out.historyUnread, nullptr, &out.extras );
     out.rustTestExcluded = out.registerMacroExcluded > 0 && quality::anyRustTestScopeDef( refs.target().ing );
 }
 
@@ -1227,8 +1230,10 @@ std::optional<int> resolveDeltaBasis( const MainDispatch& d, const std::string& 
     out.acks    = quality::readAckRecords( quality::acksPath( root ), out.acksBadLines );
     out.healing = quality::healIdentity( out.baseSel.snapshot, out.acks, d.ing, d.g,
                                          std::string( cfg.rootPath ), root, cfg.qualityAck );
+    const std::string ratchetRoot( cfg.rootPath );
+    out.extras.bestSince = [ ratchetRoot ]( const std::vector<std::string>& relPaths ) { return quality::tangleBestSince( ratchetRoot, "HEAD", relPaths ); };
     out.regs = quality::computeDelta( d.ing, d.g, out.baseSel.snapshot, cfg.rootPath, cfg.excludes, cfg.maxFileBytes, &out.registerMacroExcluded, &out.apiNewSurface,
-                                      &out.cloneIdioms, &out.declinedCallExcluded, &out.valueRefExcluded, quality::KindScope{}, &out.historyUnread, &out.passes );
+                                      &out.cloneIdioms, &out.declinedCallExcluded, &out.valueRefExcluded, quality::KindScope{}, &out.historyUnread, &out.passes, &out.extras );
     out.rustTestExcluded = out.registerMacroExcluded > 0 && quality::anyRustTestScopeDef( d.ing );
     // hwh-fix4 (N1): against a pinned sidecar the rename record re-files baseline rows; refused on a partial clone, it is unread history
     out.historyUnread.renames = out.healing.renames.refusedPartial && out.baseSel.marker == std::string_view( "sidecar" );
@@ -1447,7 +1452,7 @@ std::optional<int> refuseForeignAckSelection( const rw::Config& cfg, const rw::q
 // this prose either: several gates grep the header counters (regressions=, gating=, stale=) and a
 // quoted example here would be matched ahead of the real one.
 
-// Always. The verb, the twelve kinds, the three axes, the exit predicate, and the two counters that are
+// Always. The verb, the thirteen kinds, the three axes, the exit predicate, and the two counters that are
 // printed even at zero. Every row in the document — finding rows and stale-ack rows alike — carries
 // kind=, so it is defined here rather than in either conditional row dictionary.
 // P8 (L7): the bar= literals in emitRow mirror quality.h's constants — pinned here so a moved bar cannot drift the row
@@ -1457,10 +1462,10 @@ static_assert( rw::quality::kCcxBar == 15 && rw::quality::kLocBar == 60 && rw::q
 inline constexpr const char* kQdLegendCore =
     "<!-- ripwire quality-delta: only what a change made WORSE against the floor baseline= names below. "
     "Descriptive: weigh and fix the real ones, do not game the number (a wrong abstraction beats a low "
-    "score). TWELVE KINDS, and kind= on every row names which one: complexity over the ccx bar, verbosity "
+    "score). THIRTEEN KINDS, and kind= on every row names which one: complexity over the ccx bar, verbosity "
     "(LOC), nesting, params, duplication, dead-code, api-surface (new public contract drift), "
     "error-masking, short-horizon-churn, new-clone-of-reused-helper, placeholder (added stub/TODO), "
-    "defect-shape (defect= names it). "
+    "defect-shape (defect= names it), tangle (a long function's nesting, deep share and steering locals; report-only). "
     "THREE independent axes, in this "
     "order: (1) acked findings are suppressed entirely (acked= counts them); (2) ORIGIN — a finding on a "
     "symbol that EXISTED at the baseline is preexisting-worse (no origin attribute), one that exists only "
@@ -1698,6 +1703,33 @@ inline constexpr const char* kQdFailureDefaultLegend =
     "every language: a caller reads the failure as \"none\". A comment on the handler or the value_or line, a log call, or an "
     "if that tests the read first refuses it. ";
 
+// QD-TANGLE — emitted only when a tangle row is in the document.
+inline constexpr const char* kQdTangleLegend =
+    "tangle rows are REPORT-ONLY (always sev=\"minor\", never gating). was= and now= are the score S = T x log2(loc/50), "
+    "T = nesting levels past 3 + deep%/5 + steering locals per 100 lines (deep%: the share of lines inside regions at nesting 4+, "
+    "short arms of a flat switch or else-if chain of 4+ arms left out); bar= 6. Length only AMPLIFIES: a function of 50 lines or "
+    "fewer, a long flat body and an orchestrator of named steps all score 0. A row means the change made it so: the function is "
+    "new, crossed the bar, or an input rose (nesting +1, deep lines +5, a new steering local); why= names those inputs, fix= the "
+    "shape the rise calls for with its lines, locals= the steering locals: a primitive local written again after its "
+    "declaration and read by a branch condition 10 or more statements after that write. ";
+
+// D4 — present when the ratchet read its reference point (ratchet_ref= on the root). A ratchet= facet needs that read, so this one
+// sentence defines both.
+inline constexpr const char* kQdRatchetLegend =
+    "ratchet_ref= is the reference point the tangle ratchet read, the last tag reachable from HEAD: each function over the tangle bar "
+    "whose inputs this change moved is compared with its BEST since that tag (the lowest of each input and of the score over every "
+    "version since it, or since the function's creation); ratchet_judged= counts those that had history, ratchet_unread= versions "
+    "that could not be measured, ratchet_cut=\"1\" that only the 512 newest versions were read. ratchet=\"TAG\" on a tangle row: "
+    "the score is above its best since TAG and an input rose over its minimum by the rise rule, so a function that crept up across "
+    "changes is named; why= then adds \"best since TAG: ...\", and on a row of its own was= is that best score. Report-only. ";
+
+// QD-CREDIT-ROW — present when the document carries an <improved> section.
+inline constexpr const char* kQdImprovedLegend =
+    "improved lists what this change made BETTER; it is never a row, never counted in regressions= and never gating. Each i is a "
+    "function over its kind's bar at the baseline (complexity 15, verbosity 60, nesting 4, params 5, tangle 6) that is lower now by "
+    "at least the kind's minor delta (tangle: an input fell and none rose); kind= sym= was= now= p= read as on a row, n= is the "
+    "count and more= the entries past the first 20 (in path and line order). ";
+
 // QD-MONSTER-GROWTH — emitted only when a monster="1" row is in the document.
 inline constexpr const char* kQdMonsterLegend =
     "monster=\"1\" marks a complexity row on a function over 5x the ccx bar (was= 75 or more) that grew by now= minus was= "
@@ -1806,6 +1838,8 @@ struct QualityDeltaLegendParts
     bool                                          historyUnread           = false;   // hwh-fix4 (N1): unread_history= is on the root
     bool                                          anyRustTestExcluded     = false;   // issue #499: the excluded set holds Rust test functions
     bool                                          staleTree               = false;   // D3 QD-STALE-HEADER: stale_tree= is on the root
+    bool                                          ratchetRead             = false;   // D4: ratchet_ref= is on the root
+    bool                                          anyImproved             = false;   // QD-CREDIT-ROW: the <improved> section is in the document
 };
 
 // qd-memory-degrade — present-only: each rides only with the attributes it defines. No double dash anywhere in them
@@ -1891,6 +1925,10 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
     const auto anyMonsterRow = [] ( const std::vector<rw::quality::Regression>& v )
     {
         return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return r.kind == "complexity" && !r.facet.empty(); } );
+    };
+    const auto anyTangleRow = [] ( const std::vector<rw::quality::Regression>& v )
+    {
+        return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return r.kind == "tangle"; } );
     };
 
     std::fputs( kQdLegendCore, out );
@@ -2021,6 +2059,18 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
         {
             rw::emitRaw( out, kQdSimilarArgsLegend );
         }
+        if( anyTangleRow( p.rows ) || anyTangleRow( p.disclosedRows ) )
+        {
+            rw::emitRaw( out, kQdTangleLegend );
+        }
+    }
+    if( p.ratchetRead )
+    {
+        rw::emitRaw( out, kQdRatchetLegend );   // D4 — ratchet_ref= and the ratchet= facet it can put on a tangle row
+    }
+    if( p.anyImproved )
+    {
+        rw::emitRaw( out, kQdImprovedLegend );   // QD-CREDIT-ROW
     }
 
     if( p.scoped )
@@ -2908,7 +2958,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                          "\"preexisting-worse\":{},\"new-symbol\":{},\"gating\":{}{},\"api-new-surface\":{},\"at\":{}{}{}{}{}{}{}{},\"r\":[",
                          jsonStr( baseMarkerJ ).c_str(), regs.size(), minorCount, ackedCount, staleJ,
                          preexistingCount, newSymbolCount, gatingCount, rmeJ, basis.apiNewSurface, atJsonJ.c_str(), refs.jsonAttrs.c_str(),
-                         identityJson.c_str(), scopeJson.c_str(), configWarnJson.c_str(), absorbedJson.c_str(), headBasisJson.c_str(), kd.json + historyJson );
+                         identityJson.c_str(), scopeJson.c_str(), configWarnJson.c_str(), absorbedJson.c_str(), headBasisJson.c_str(), kd.json + historyJson + quality::ratchetAttrsJson( basis.extras ) );
             // P1: one row emitter, called for both halves of the scope partition — the disclosed rows carry
             // the identical key set, so nothing about a row changes by being someone else's. `gatingAllowed`
             // is the ONE difference: an out-of-scope row is not what the exit code fires on, so claiming
@@ -2925,7 +2975,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                     rw::emitTo( stdout, ",\"sym\":\"{}\"", jsonStr( quality::displaySym( r.sym, deltaRoot ) ).c_str() );
                     if( !( r.kind == "dead-code" ) && !( r.kind == "api-surface" && r.was == r.now ) )
                     {
-                        rw::emitTo( stdout, ",\"was\":{},\"now\":{}", r.was, r.now );
+                        rw::emitTo( stdout, ",\"was\":{},\"now\":{}", quality::rowValueText( r, r.was ), quality::rowValueText( r, r.now ) );
                     }
                 }
                 if( !r.path.empty() )
@@ -2955,6 +3005,13 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                 if( r.ceiling != 0 )
                 {
                     rw::emitTo( stdout, ",\"ceiling\":{}", r.ceiling ); // QD-ENTRY-CEILING (mirrors the XML)
+                }
+                for( const auto& [ name, text ] : { std::pair<const char*, const std::string*>{ "why", &r.why }, { "fix", &r.fix }, { "locals", &r.locals } } )
+                {
+                    if( !text->empty() )
+                    {
+                        rw::emitTo( stdout, ",\"{}\":\"{}\"", name, jsonStr( *text ).c_str() );   // QD-TANGLE (mirrors the XML)
+                    }
                 }
                 rw::emitRaw( stdout, "}" );
             };
@@ -2989,6 +3046,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                 rw::emitRaw( stdout, "]," );
             }
             std::fputs( quality::staleAcksJsonArray( saRows ).c_str(), stdout );   // L2 — "sa":[...], same taxonomy as the XML sa= rows below
+            std::fputs( quality::improvedJson( basis.extras.improved, deltaRoot ).c_str(), stdout );   // QD-CREDIT-ROW (absent when none)
             rw::emitRaw( stdout, "}" );
             return qualityDeltaExit( gatingCount, refs.degraded || basis.historyUnread.any() );
         }
@@ -3047,7 +3105,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                 const char* facetName = quality::facetAttrName( r.kind );
                 if( facetName )
                 {
-                    facetAttr = std::string( " " ) + facetName + "=\"" + r.facet + "\"";
+                    facetAttr = std::string( " " ) + facetName + "=\"" + ex( r.facet ) + "\"";   // escaped: a ratchet facet is a tag name
                 }
             }
             // r26 — the ORIGIN axis, emitted LAST so the existing attribute order is untouched. Present only
@@ -3073,7 +3131,17 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             // P8 (L7): the threshold beside the number it judges — bar= on the four numeric kinds (quality.h's
             // kCcxBar/kLocBar/kNestBar/kParamBar), so was=/now= read without the legend.
             const char* barAttr = r.kind == "complexity" ? " bar=\"15\"" : r.kind == "verbosity" ? " bar=\"60\""
-                                : r.kind == "nesting"    ? " bar=\"4\""  : r.kind == "params"    ? " bar=\"5\""  : "";
+                                : r.kind == "nesting"    ? " bar=\"4\""  : r.kind == "params"    ? " bar=\"5\""
+                                : r.kind == "tangle"     ? " bar=\"6\""  : "";
+            // QD-TANGLE: why= / fix= / locals=, appended last (present-only; empty on every other kind)
+            std::string tangleAttrs;
+            for( const auto& [ name, text ] : { std::pair<const char*, const std::string*>{ "why", &r.why }, { "fix", &r.fix }, { "locals", &r.locals } } )
+            {
+                if( !text->empty() )
+                {
+                    tangleAttrs += std::string( " " ) + name + "=\"" + ex( *text ) + "\"";
+                }
+            }
             // P3 (L7, nextverb.h): a GATING row hands the agent the body to fix — --expand=FILE:NAME (the file-qualified
             // selector, so a same-named symbol elsewhere cannot answer). The name is the sym key's last :: segment;
             // duplication rows name a SET (members=) and carry no single body to open, nor does a FILE-anchored
@@ -3103,7 +3171,9 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             }
             else
             {
-                rw::emitTo( out, "<r kind=\"{}\" sym=\"{}\" was=\"{}\" now=\"{}\"{}{}{}{}{}{}{}{}/>", r.kind.c_str(), ex( quality::displaySym( r.sym, deltaRoot ) ).c_str(), r.was, r.now, barAttr, sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr, ceilingAttr.c_str(), nextAttr.c_str() );
+                rw::emitTo( out, "<r kind=\"{}\" sym=\"{}\" was=\"{}\" now=\"{}\"{}{}{}{}{}{}{}{}{}/>", r.kind.c_str(), ex( quality::displaySym( r.sym, deltaRoot ) ).c_str(),
+                            quality::rowValueText( r, r.was ), quality::rowValueText( r, r.now ), barAttr, sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr,
+                            ceilingAttr.c_str(), nextAttr.c_str(), tangleAttrs );
             }
         };
         // Fix round 1 (rv-lean-trio item 5, owner ruling 5): a fold ships only when it PAYS (compactlegend.h foldPays: shorter
@@ -3122,7 +3192,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                                       basis.headBasis, basis.declinedCallExcluded > 0, basis.valueRefExcluded > 0, collapse,
                                       refs.kinds != quality::kAllKinds, refs.degraded, !refs.memoryStop.empty(), kd.peakOver != 0,
                                       kd.memorySkipped != 0 && refs.selected != quality::kAllKinds, basis.historyUnread.any(),
-                                      basis.rustTestExcluded, refs.staleTree }, out );
+                                      basis.rustTestExcluded, refs.staleTree, !basis.extras.ratchetRef.empty(), !basis.extras.improved.empty() }, out );
             const char* baseMarker = baseSel.marker;    // R3: ditto — one seam decides staleness AND names it
             // 2026-09-06: what the sidecar readers skipped, on the root (absent means none) — see kQdBaseHeadUnreadable
             std::string sidecarHealthAttrs;
@@ -3144,11 +3214,12 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                          // target_ref= are the anchor there, and they carry FULL shas because a wave measurement
                          // gets quoted into handoffs where a 9-char prefix is one collision from unverifiable.
                          atAttrs.c_str(), refs.attrs.c_str(), identityAttrs.c_str(),
-                         scopeAttrs.c_str(), configWarnAttr.c_str(), baselineAbsorbedAttr.c_str(), ( sidecarHealthAttrs + ( collapse ? staleCollapseAttrs : std::string() ) + kd.xml + historyAttrs ).c_str() );
+                         scopeAttrs.c_str(), configWarnAttr.c_str(), baselineAbsorbedAttr.c_str(), ( sidecarHealthAttrs + ( collapse ? staleCollapseAttrs : std::string() ) + kd.xml + historyAttrs + quality::ratchetAttrsXml( basis.extras, ex ) ).c_str() );
             for( const quality::Regression& r : regs )
             {
                 emitRow( out, r, /*gatingAllowed=*/true );
             }
+            std::fputs( quality::improvedXml( basis.extras.improved, deltaRoot, ex ).c_str(), out );   // QD-CREDIT-ROW: never a row, never gating
             if( scope.active() )
             {
                 // P1 — the DISCLOSURE half. Dropping these rows would make a scoped report a quieter lie than

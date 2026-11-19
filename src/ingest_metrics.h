@@ -337,7 +337,167 @@ struct CcAccum
     std::uint32_t humps   = 0;   // regions reaching quality::kNestBar → Symbol::humps   (see model.h)
     std::uint32_t deepLoc = 0;   // lines inside those regions        → Symbol::deepLoc  (a FLOOR)
     std::uint32_t deepEnd = 0;   // 1-based end row of the last counted hump — the anti-double-count clamp
+    // QD-TANGLE steering locals (model.h Symbol::steer) — the walk's one new fact, filled only when `steerOn` (a function over 50
+    // lines in steerCountedLang). `stmt` is the statement ordinal in document order (the DFS pops left to right), the clock the
+    // 10-statement distance is measured on; `slots` are the candidate locals seen so far, searched newest first (a shadowing
+    // redeclaration wins). `detail` is null in ingest; tangleDetailOf (--quality-delta time, one function) points it at the names.
+    bool                   tangleOn     = false;   // a body over 50 lines: the flat-dispatch tagging below runs (every language)
+    bool                   steerOn      = false;   // ... and in steerCountedLang: the steering locals too
+    bool                   anyRewritten = false;   // some slot was written after its declaration: until then no condition can steer
+    std::uint32_t          stmt         = 0;
+    std::uint32_t          steered      = 0;       // distinct slots that steered a branch → Symbol::steer (saturated by the caller)
+    struct SteerSlot
+    {
+        std::string_view name;
+        std::uint32_t    lastWrite    = 0;   // statement ordinal of the latest write so far (the declaration counts as one)
+        std::uint32_t    lastWriteRow = 0;   // 1-based line of that write (detail only)
+        bool             prim         = false;
+        bool             rewritten    = false;
+        bool             steered      = false;
+    };
+    std::vector<SteerSlot> slots;
+    TangleDetailFacts*     detail       = nullptr;
+    std::uint32_t          deepDispatch = 0;       // the part of deepLoc inside short arms of a flat dispatch (dispatch_* below)
 };
+
+// QD-TANGLE FLAT DISPATCH (the false-positive class STAGE0 2.4 named: parseArgs, an `if( a == "--flag" )` chain; envoy's 40-case
+// switch). A switch with kDispatchMinArms or more case arms, or an if / else-if chain with that many arms, whose arm is at most
+// kDispatchArmMaxRows lines: each arm reads alone, like a row of a table, so the depth it reaches is the arm's own business. The
+// walk tags every frame with where it sits in such a construct; a deep region that first crosses the bar inside a short arm is
+// billed to deepLoc as always (the published metric is unchanged) AND to deepDispatch, which the tangle score leaves out.
+enum class ChainState : std::uint8_t
+{
+    None,         // not inside a dispatch construct
+    Structure,    // the construct's own frame: a condition, an else clause, the link between arms
+    Arm,          // inside one short arm — a deep region here is exempt from the tangle score
+    SwitchBody,   // a switch's body: its children are the case arms
+};
+inline constexpr std::uint32_t kDispatchMinArms    = 4;
+inline constexpr std::uint32_t kDispatchArmMaxRows = 40;
+
+inline std::uint32_t dispatch_rows( TSNode n ) noexcept
+{
+    return ts_node_end_point( n ).row - ts_node_start_point( n ).row + 1u;
+}
+inline ChainState dispatch_armState( TSNode arm ) noexcept
+{
+    return dispatch_rows( arm ) <= kDispatchArmMaxRows ? ChainState::Arm : ChainState::None;
+}
+inline bool dispatch_isBlock( const char* t ) noexcept
+{
+    return kindIs( t, "compound_statement" ) || kindIs( t, "block" ) || kindIs( t, "statement_block" );
+}
+inline bool dispatch_isIf( const char* t ) noexcept
+{
+    return kindIs( t, "if_statement" ) || kindIs( t, "if_expression" );
+}
+inline bool dispatch_isSwitch( const char* t ) noexcept
+{
+    return kindIs( t, "switch_statement" ) || kindIs( t, "switch_expression" ) || kindIs( t, "match_expression" );
+}
+inline bool dispatch_isCaseArm( const char* t ) noexcept
+{
+    static constexpr std::string_view kArms[] = { "case_statement", "switch_case", "switch_default", "switch_block_statement_group", "switch_rule",
+                                                  "switch_section", "match_arm" };
+    return std::find( std::begin( kArms ), std::end( kArms ), std::string_view( t ) ) != std::end( kArms );
+}
+
+// The arms of the if / else-if chain that starts at `n`: Python counts its elif/else clauses, every other grammar follows the
+// alternative links (an else_clause wrapper in C, C++, JS/TS and Rust; the bare statement in Java, C# and Go).
+inline std::uint32_t dispatch_ifChainArms( TSNode n )
+{
+    std::uint32_t arms = 1;
+    bool          clauses = false;   // Python: the elif / else clauses are the if's own children, not a chain of ifs
+    {
+        ChildCursor cursor( n );
+        forEachChild( n, cursor.cur, [ & ]( TSNode c )
+        {
+            const char* t = ts_node_type( c );
+            if( kindIs( t, "elif_clause" ) || ( kindIs( t, "else_clause" ) && !ts_node_is_null( fieldChild( c, NodeField::Body ) ) ) )
+            {
+                ++arms;
+                clauses = true;
+            }
+            return true;
+        } );
+    }
+    for( TSNode cur = n; !clauses && arms < 1000u; )
+    {
+        TSNode alt = fieldChild( cur, NodeField::Alternative );
+        if( ts_node_is_null( alt ) )
+        {
+            break;
+        }
+        if( kindIs( ts_node_type( alt ), "else_clause" ) && ts_node_named_child_count( alt ) > 0 )
+        {
+            alt = ts_node_named_child( alt, ts_node_named_child_count( alt ) - 1u );
+        }
+        ++arms;
+        if( !dispatch_isIf( ts_node_type( alt ) ) )
+        {
+            break;   // the final else
+        }
+        cur = alt;
+    }
+    return arms;
+}
+
+inline std::uint32_t dispatch_switchArms( TSNode n )
+{
+    const TSNode  body = fieldChild( n, NodeField::Body );
+    const TSNode  box  = ts_node_is_null( body ) ? n : body;
+    std::uint32_t arms = 0;
+    ChildCursor   cursor( box );
+    forEachChild( box, cursor.cur, [ & ]( TSNode c ) { arms += dispatch_isCaseArm( ts_node_type( c ) ) ? 1u : 0u; return true; } );
+    return arms;
+}
+
+// True when the control `n`, popped in state `st`, opens a dispatch (state None, enough arms) or continues one (an else-if link a
+// grammar walks as its own frame, state Structure). Only ever asked inside a tangle walk (tangleOn).
+inline bool dispatch_opensOrLinks( TSNode n, const char* t, ChainState st, bool elseIf )
+{
+    if( st == ChainState::Structure )
+    {
+        return dispatch_isIf( t );
+    }
+    if( st != ChainState::None )
+    {
+        return false;
+    }
+    if( dispatch_isIf( t ) )
+    {
+        return !elseIf && dispatch_ifChainArms( n ) >= kDispatchMinArms;
+    }
+    return dispatch_isSwitch( t ) && dispatch_switchArms( n ) >= kDispatchMinArms;
+}
+
+// The state a child of `parent` is pushed with. `link`: `parent` opened or continues a dispatch (dispatch_opensOrLinks), so its
+// consequence and its final else block are arms, a switch's body holds the arms, and the rest is the construct's structure.
+inline ChainState dispatch_childState( TSNode parent, ChainState parentState, bool link, TSNode child )
+{
+    const char* ct = ts_node_type( child );
+    if( link )
+    {
+        if( ts_node_eq( child, fieldChild( parent, NodeField::Consequence ) )
+            || ( dispatch_isBlock( ct ) && ts_node_eq( child, fieldChild( parent, NodeField::Alternative ) ) ) )
+        {
+            return dispatch_armState( child );
+        }
+        if( dispatch_isSwitch( ts_node_type( parent ) ) && ts_node_eq( child, fieldChild( parent, NodeField::Body ) ) )
+        {
+            return ChainState::SwitchBody;
+        }
+        return ChainState::Structure;
+    }
+    switch( parentState )
+    {
+        case ChainState::SwitchBody: return dispatch_isCaseArm( ct ) ? dispatch_armState( child ) : ChainState::Structure;
+        case ChainState::Structure:  return dispatch_isBlock( ct ) ? dispatch_armState( child ) : ChainState::Structure;   // an else / elif clause's body
+        case ChainState::Arm:        return ChainState::Arm;
+        case ChainState::None:       return ChainState::None;
+    }
+    return ChainState::None;
+}
 
 
 // An ALTERNATIVE-introducing preprocessor node: `#else` / `#elif` / `#elifdef` inside the def mean the
@@ -365,7 +525,7 @@ inline bool cc_isPreprocAlternative( const char* t ) noexcept
 // children in reverse, so pops run left to right), so a hump starting on the line the previous one ended is
 // clamped to start after it. The clamp can only ever SUBTRACT: if the order assumption is ever violated the
 // result is an under-count, never an over-count, which is exactly why deepLoc is published as a floor.
-inline void cc_noteHump( TSNode n, std::uint32_t fromNesting, std::uint32_t toNesting, CcAccum& acc ) noexcept
+inline void cc_noteHump( TSNode n, std::uint32_t fromNesting, std::uint32_t toNesting, CcAccum& acc, bool inDispatchArm = false ) noexcept
 {
     if( fromNesting >= quality::kNestBar || toNesting < quality::kNestBar )
     {
@@ -378,10 +538,421 @@ inline void cc_noteHump( TSNode n, std::uint32_t fromNesting, std::uint32_t toNe
     if( endRow >= from )
     {
         acc.deepLoc += endRow - from + 1u;
+        acc.deepDispatch += inDispatchArm ? endRow - from + 1u : 0u;   // QD-TANGLE: a short dispatch arm's own depth (ChainState)
     }
     if( endRow > acc.deepEnd )
     {
         acc.deepEnd = endRow;
+    }
+    if( acc.detail != nullptr && endRow >= from && !inDispatchArm )
+    {
+        acc.detail->humps.push_back( { from, endRow } );   // the span deepLoc billed — the region a tangle row's fix= names
+    }
+}
+
+// ═══ QD-TANGLE steering locals (STAGE0 2.1; model.h Symbol::steer) ═══════════════════════════════════════════════════
+//
+// A STEERING LOCAL is a local of a primitive written type that is written again after its declaration and read in a branch
+// condition 10 or more statements after its last preceding write: the flag or counter set in one step that steers a branch in
+// another. A flag set and tested in the same step does not count, and neither does a loop's own induction variable (a
+// declaration in a for head is no slot). Three facts per node, read in the fused walk's document order: is it a STATEMENT (the
+// distance clock), a DECLARATION of a primitive local (a new slot), or a WRITE to a slot; and at every branch, the identifiers
+// its condition reads. Per-language shapes, verified against the vendored grammars by test/tanglecheck.sh's fixtures; a shape
+// this table does not know is no slot (fewer steering locals, never a wrong one).
+inline constexpr std::uint32_t kSteerStmts = 10;   // the distance, in statements, that makes a read "far" from its write
+
+inline bool steer_isStatement( const char* t ) noexcept
+{
+    const std::size_t n = std::strlen( t );
+    constexpr std::string_view kStmt = "_statement";
+    if( n > kStmt.size() && std::string_view( t + n - kStmt.size(), kStmt.size() ) == kStmt )
+    {
+        return !kindIs( t, "compound_statement" );   // a C-family block is a container, not a step
+    }
+    return kindIs( t, "declaration" ) || kindIs( t, "lexical_declaration" ) || kindIs( t, "variable_declaration" )
+        || kindIs( t, "local_variable_declaration" ) || kindIs( t, "short_var_declaration" ) || kindIs( t, "let_declaration" );
+}
+
+// A literal of a primitive value (number, boolean, string, char) in any steered grammar — the initializer that makes an untyped
+// declaration (Python, an untyped `let`, Go's `:=`) a primitive local.
+inline bool steer_isPrimitiveLiteral( const char* t ) noexcept
+{
+    static constexpr std::string_view kLits[] = {
+        "number_literal", "number", "integer", "float", "true", "false", "string", "string_literal", "char_literal",
+        "decimal_integer_literal", "hex_integer_literal", "decimal_floating_point_literal", "integer_literal", "real_literal",
+        "boolean_literal", "int_literal", "float_literal", "interpreted_string_literal", "raw_string_literal", "character_literal",
+    };
+    const std::string_view v( t );
+    return std::find( std::begin( kLits ), std::end( kLits ), v ) != std::end( kLits );
+}
+
+// A written type that names a primitive: the grammar's own primitive node, or a typedef spelling of one (size_t, uint32_t, u32 …
+// arrive as type_identifier in some grammars and as std::size_t qualified in C++).
+inline bool steer_isPrimitiveType( TSNode type, std::string_view src ) noexcept
+{
+    if( ts_node_is_null( type ) )
+    {
+        return false;
+    }
+    const char* t = ts_node_type( type );
+    if( kindIs( t, "primitive_type" ) || kindIs( t, "sized_type_specifier" ) || kindIs( t, "integral_type" ) || kindIs( t, "floating_point_type" )
+        || kindIs( t, "boolean_type" ) )
+    {
+        return true;
+    }
+    std::string_view text = nodeTextOf( type, src );
+    if( kindIs( t, "type_annotation" ) )   // TS `: number` — the annotation wraps the type
+    {
+        const TSNode inner = ts_node_named_child( type, 0 );
+        text = nodeTextOf( inner, src );
+    }
+    if( text.starts_with( "std::" ) )
+    {
+        text.remove_prefix( 5 );
+    }
+    static constexpr std::string_view kNames[] = {
+        "size_t", "ssize_t", "ptrdiff_t", "intptr_t", "uintptr_t", "int8_t", "int16_t", "int32_t", "int64_t", "uint8_t", "uint16_t",
+        "uint32_t", "uint64_t", "u8", "u16", "u32", "u64", "i8", "i16", "i32", "i64", "u_int", "u_char", "u_short", "u_long",
+        "int", "uint", "bool", "char", "long", "short", "float", "double", "number", "boolean", "string", "usize", "isize", "byte",
+        "rune", "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64", "float32", "float64", "sbyte", "ushort",
+        "ulong", "decimal", "str",
+    };
+    return std::find( std::begin( kNames ), std::end( kNames ), text ) != std::end( kNames );
+}
+
+inline CcAccum::SteerSlot* steer_find( CcAccum& acc, std::string_view name ) noexcept
+{
+    for( std::size_t i = acc.slots.size(); i > 0; --i )
+    {
+        if( acc.slots[ i - 1 ].name == name )
+        {
+            return &acc.slots[ i - 1 ];
+        }
+    }
+    return nullptr;
+}
+
+inline void steer_declare( CcAccum& acc, TSNode nameNode, bool prim, std::string_view src )
+{
+    if( ts_node_is_null( nameNode ) || !kindIs( ts_node_type( nameNode ), "identifier" ) )
+    {
+        return;   // a pattern, a pointer or a destructuring declarator: no single name, no slot
+    }
+    CcAccum::SteerSlot slot;
+    slot.name         = nodeTextOf( nameNode, src );
+    slot.lastWrite    = acc.stmt;
+    slot.lastWriteRow = ts_node_start_point( nameNode ).row + 1u;
+    slot.prim         = prim;
+    acc.slots.push_back( slot );
+}
+
+inline void steer_write( CcAccum& acc, TSNode target, std::string_view src )
+{
+    if( ts_node_is_null( target ) || !kindIs( ts_node_type( target ), "identifier" ) )
+    {
+        return;   // a member, an element or a dereference: not a local's own write
+    }
+    if( CcAccum::SteerSlot* slot = steer_find( acc, nodeTextOf( target, src ) ) )
+    {
+        slot->rewritten    = true;
+        slot->lastWrite    = acc.stmt;
+        slot->lastWriteRow = ts_node_start_point( target ).row + 1u;
+        acc.anyRewritten   = acc.anyRewritten || slot->prim;
+    }
+}
+
+// True when `n` is in a for-loop head (an induction variable, never a slot).
+inline bool steer_inForHead( TSNode n ) noexcept
+{
+    const TSNode p = parentOf( n );
+    if( ts_node_is_null( p ) )
+    {
+        return false;
+    }
+    const char* pt = ts_node_type( p );
+    return std::strncmp( pt, "for", 3 ) == 0;   // for_statement, for_range_loop, for_in_statement, for_clause
+}
+
+// The C-family declaration: `[const] TYPE a = 1, b;` — every declarator slot, primitive by the written type, never a const one.
+inline void steer_cDeclaration( CcAccum& acc, TSNode n, std::string_view src )
+{
+    bool isConst = false;
+    {
+        ChildCursor cursor( n );
+        forEachChild( n, cursor.cur, [ & ]( TSNode c )
+        {
+            if( kindIs( ts_node_type( c ), "type_qualifier" ) && nodeTextOf( c, src ).starts_with( "const" ) ) { isConst = true; }
+            return !isConst;
+        } );
+    }
+    if( isConst )
+    {
+        return;
+    }
+    const bool prim = steer_isPrimitiveType( fieldChild( n, NodeField::Type ), src );
+    forEachDeclaratorSlot( n, [ & ]( TSNode d )
+    {
+        steer_declare( acc, kindIs( ts_node_type( d ), "init_declarator" ) ? fieldChild( d, NodeField::Declarator ) : d, prim, src );
+    } );
+}
+
+// One declarator list (JS/TS variable_declarator, Java/C# variable_declarator): the name, and primitive by the declaration's
+// written type or, untyped, by its initializer.
+inline void steer_declaratorList( CcAccum& acc, TSNode n, bool typePrim, std::string_view src )
+{
+    ChildCursor cursor( n );
+    forEachChild( n, cursor.cur, [ & ]( TSNode c )
+    {
+        if( !kindIs( ts_node_type( c ), "variable_declarator" ) )
+        {
+            return true;
+        }
+        TSNode name = fieldChild( c, NodeField::Name );
+        if( ts_node_is_null( name ) )
+        {
+            name = ts_node_named_child( c, 0 );   // C#: the identifier is the declarator's first named child
+        }
+        const TSNode value = fieldChild( c, NodeField::Value );
+        const bool   prim  = typePrim || steer_isPrimitiveType( fieldChild( c, NodeField::Type ), src )
+                          || ( !ts_node_is_null( value ) && steer_isPrimitiveLiteral( ts_node_type( value ) ) );
+        steer_declare( acc, name, prim, src );
+        return true;
+    } );
+}
+
+// Python has no declaration: the FIRST binding of a bare name is its declaration (primitive by a literal, a len()/int()/str()/
+// float()/bool() call, or an int/str/bool/float annotation); every later one is a write.
+inline void steer_pythonAssignment( CcAccum& acc, TSNode n, std::string_view src )
+{
+    const TSNode left = fieldChild( n, NodeField::Left );
+    if( ts_node_is_null( left ) || !kindIs( ts_node_type( left ), "identifier" ) )
+    {
+        return;
+    }
+    const std::string_view name = nodeTextOf( left, src );
+    if( name == "self" || name == "cls" )
+    {
+        return;
+    }
+    if( steer_find( acc, name ) != nullptr || kindIs( ts_node_type( n ), "augmented_assignment" ) )
+    {
+        steer_write( acc, left, src );
+        return;
+    }
+    const TSNode right = fieldChild( n, NodeField::Right );
+    bool prim = steer_isPrimitiveType( fieldChild( n, NodeField::Type ), src );
+    if( !prim && !ts_node_is_null( right ) )
+    {
+        const char* rt = ts_node_type( right );
+        if( steer_isPrimitiveLiteral( rt ) )
+        {
+            prim = true;
+        }
+        else if( kindIs( rt, "call" ) )
+        {
+            const std::string_view fn = nodeFieldText( right, NodeField::Function, src );
+            prim = fn == "len" || fn == "int" || fn == "str" || fn == "float" || fn == "bool";
+        }
+    }
+    steer_declare( acc, left, prim, src );
+}
+
+// The declaration shapes, per grammar. True when `n` was a declaration (its children are still walked: an initializer can write).
+inline bool steer_noteDeclaration( CcAccum& acc, TSNode n, const char* t, Lang lang, std::string_view src )
+{
+    if( lang == Lang::Python )
+    {
+        if( kindIs( t, "assignment" ) || kindIs( t, "augmented_assignment" ) )
+        {
+            steer_pythonAssignment( acc, n, src );
+            return true;
+        }
+        return false;
+    }
+    const bool cFamily = lang == Lang::Cpp || lang == Lang::C || lang == Lang::ObjC;
+    if( cFamily && kindIs( t, "declaration" ) )
+    {
+        if( !steer_inForHead( n ) )
+        {
+            steer_cDeclaration( acc, n, src );
+        }
+        return true;
+    }
+    if( ( lang == Lang::TypeScript || lang == Lang::JavaScript ) && ( kindIs( t, "lexical_declaration" ) || kindIs( t, "variable_declaration" ) ) )
+    {
+        if( !steer_inForHead( n ) && !nodeTextOf( n, src ).starts_with( "const" ) )
+        {
+            steer_declaratorList( acc, n, false, src );
+        }
+        return true;
+    }
+    if( lang == Lang::Java && kindIs( t, "local_variable_declaration" ) )
+    {
+        if( !steer_inForHead( n ) && !nodeTextOf( n, src ).starts_with( "final" ) )
+        {
+            steer_declaratorList( acc, n, steer_isPrimitiveType( fieldChild( n, NodeField::Type ), src ), src );
+        }
+        return true;
+    }
+    if( lang == Lang::CSharp && kindIs( t, "variable_declaration" ) )
+    {
+        const TSNode p = parentOf( n );
+        if( !ts_node_is_null( p ) && kindIs( ts_node_type( p ), "local_declaration_statement" ) && !nodeTextOf( p, src ).starts_with( "const" ) )
+        {
+            steer_declaratorList( acc, n, steer_isPrimitiveType( fieldChild( n, NodeField::Type ), src ), src );
+        }
+        return true;
+    }
+    if( lang == Lang::Go && kindIs( t, "short_var_declaration" ) )
+    {
+        if( !steer_inForHead( n ) )
+        {
+            const TSNode left  = fieldChild( n, NodeField::Left );
+            const TSNode right = fieldChild( n, NodeField::Right );
+            const std::uint32_t names = ts_node_is_null( left ) ? 0u : ts_node_named_child_count( left );
+            for( std::uint32_t i = 0; i < names; ++i )
+            {
+                const TSNode value = ts_node_is_null( right ) ? TSNode{} : ts_node_named_child( right, i );
+                steer_declare( acc, ts_node_named_child( left, i ), !ts_node_is_null( value ) && steer_isPrimitiveLiteral( ts_node_type( value ) ), src );
+            }
+        }
+        return true;
+    }
+    if( lang == Lang::Go && kindIs( t, "var_spec" ) )
+    {
+        const TSNode value = fieldChild( n, NodeField::Value );
+        const bool   prim  = steer_isPrimitiveType( fieldChild( n, NodeField::Type ), src )
+                          || ( !ts_node_is_null( value ) && ts_node_named_child_count( value ) > 0 && steer_isPrimitiveLiteral( ts_node_type( ts_node_named_child( value, 0 ) ) ) );
+        steer_declare( acc, fieldChild( n, NodeField::Name ), prim, src );
+        return true;
+    }
+    if( lang == Lang::Rust && kindIs( t, "let_declaration" ) )
+    {
+        if( !ts_node_is_null( firstChildOfType( n, "mutable_specifier" ) ) )
+        {
+            const TSNode value = fieldChild( n, NodeField::Value );
+            const bool   prim  = steer_isPrimitiveType( fieldChild( n, NodeField::Type ), src )
+                              || ( !ts_node_is_null( value ) && steer_isPrimitiveLiteral( ts_node_type( value ) ) );
+            steer_declare( acc, fieldChild( n, NodeField::Pattern ), prim, src );
+        }
+        return true;
+    }
+    return false;
+}
+
+// A write to a bare name, in any steered grammar: assignment (plain and compound) and increment/decrement.
+inline void steer_noteWrite( CcAccum& acc, TSNode n, const char* t, std::string_view src )
+{
+    if( kindIs( t, "assignment_expression" ) || kindIs( t, "augmented_assignment_expression" ) || kindIs( t, "compound_assignment_expr" ) )
+    {
+        steer_write( acc, fieldChild( n, NodeField::Left ), src );
+    }
+    else if( kindIs( t, "assignment_statement" ) )   // Go: `a, b = …` / `a += …`
+    {
+        const TSNode left = fieldChild( n, NodeField::Left );
+        const std::uint32_t names = ts_node_is_null( left ) ? 0u : ts_node_named_child_count( left );
+        for( std::uint32_t i = 0; i < names; ++i )
+        {
+            steer_write( acc, ts_node_named_child( left, i ), src );
+        }
+    }
+    else if( kindIs( t, "update_expression" ) || kindIs( t, "inc_statement" ) || kindIs( t, "dec_statement" ) )
+    {
+        const TSNode arg = fieldChild( n, NodeField::Argument );
+        steer_write( acc, ts_node_is_null( arg ) ? ts_node_named_child( n, 0 ) : arg, src );
+    }
+    else if( kindIs( t, "postfix_unary_expression" ) || kindIs( t, "prefix_unary_expression" ) )   // C#: only ++ / -- write
+    {
+        const std::string_view text = nodeTextOf( n, src );
+        if( text.starts_with( "++" ) || text.starts_with( "--" ) || text.ends_with( "++" ) || text.ends_with( "--" ) )
+        {
+            steer_write( acc, ts_node_named_child( n, 0 ), src );
+        }
+    }
+}
+
+// Per named node, before the walk dispatches on it: the statement clock, then a declaration or a write.
+inline void steer_noteNode( CcAccum& acc, TSNode n, const char* t, Lang lang, std::string_view src )
+{
+    if( steer_isStatement( t ) )
+    {
+        ++acc.stmt;
+    }
+    if( !steer_noteDeclaration( acc, n, t, lang, src ) )
+    {
+        steer_noteWrite( acc, n, t, src );
+    }
+}
+
+// A branch's condition: every identifier it reads (a member's own name and a callee's name are not reads of a local). The
+// condition is small, so a bounded explicit stack is enough; a slot that steers is counted once.
+inline void steer_noteCondition( CcAccum& acc, TSNode branch, std::string_view src )
+{
+    if( !acc.anyRewritten )
+    {
+        return;   // nothing written since its declaration yet: no read can be far from a rewrite
+    }
+    TSNode cond = fieldChild( branch, NodeField::Condition );
+    if( ts_node_is_null( cond ) )
+    {
+        cond = fieldChild( branch, NodeField::Value );   // JS/TS switch, Go expression switch
+    }
+    if( ts_node_is_null( cond ) )
+    {
+        return;
+    }
+    TSNode stack[ 64 ];
+    std::size_t depth = 0;
+    stack[ depth++ ] = cond;
+    while( depth > 0 )
+    {
+        const TSNode c = stack[ --depth ];
+        const char*  t = ts_node_type( c );
+        if( kindIs( t, "identifier" ) )
+        {
+            CcAccum::SteerSlot* slot = steer_find( acc, nodeTextOf( c, src ) );
+            if( slot != nullptr && slot->prim && slot->rewritten && !slot->steered && acc.stmt - slot->lastWrite >= kSteerStmts )
+            {
+                slot->steered = true;
+                ++acc.steered;
+                if( acc.detail != nullptr )
+                {
+                    acc.detail->steer.push_back( { std::string( slot->name ), slot->lastWriteRow, ts_node_start_point( c ).row + 1u } );
+                }
+            }
+            continue;
+        }
+        // a member access reads its OBJECT only (Python `self.done`, Java `this.done`, C# `x.Done`); a call's callee is no local
+        TSNode only = TSNode{};
+        if( kindIs( t, "attribute" ) || kindIs( t, "field_access" ) )
+        {
+            only = fieldChild( c, NodeField::Object );
+        }
+        else if( kindIs( t, "member_access_expression" ) )
+        {
+            only = fieldChild( c, NodeField::Expression );
+        }
+        else if( kindIs( t, "call_expression" ) || kindIs( t, "call" ) || kindIs( t, "method_invocation" ) || kindIs( t, "invocation_expression" ) )
+        {
+            only = fieldChild( c, NodeField::Arguments );
+        }
+        else if( kindIs( t, "lambda_expression" ) || kindIs( t, "lambda" ) || kindIs( t, "arrow_function" ) || kindIs( t, "closure_expression" ) )
+        {
+            continue;
+        }
+        if( !ts_node_is_null( only ) )
+        {
+            if( depth < std::size( stack ) )
+            {
+                stack[ depth++ ] = only;
+            }
+            continue;
+        }
+        const std::uint32_t kids = ts_node_named_child_count( c );
+        for( std::uint32_t i = kids; i > 0 && depth < std::size( stack ); --i )
+        {
+            stack[ depth++ ] = ts_node_named_child( c, i - 1 );
+        }
     }
 }
 
@@ -1049,10 +1620,14 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
     // iterative pre-order DFS — an EXPLICIT frame stack, not recursion: worker threads get 512 KB stacks on
     // macOS, so a deep AST overflows the call stack well inside the depth guard. Children are pushed in
     // reverse so pops preserve the original left-to-right visit order; the guard bounds the heap stack.
-    struct CcFrame { TSNode node; std::uint32_t nesting; std::uint32_t ctrl; std::uint16_t depth; };   // ctrl: innermost enclosing ev arena index (kNoCtrl at root)
+    // ctrl: innermost enclosing ev arena index (kNoCtrl at root); chain: where the frame sits in a flat dispatch (tangle walks only)
+    struct CcFrame { TSNode node; std::uint32_t nesting; std::uint32_t ctrl; std::uint16_t depth; ChainState chain; };
     std::vector<CcFrame> stack;
     stack.reserve( 64 );
-    stack.push_back( { start, startNesting, kNoCtrl, static_cast<std::uint16_t>( startDepth ) } );
+    stack.push_back( { start, startNesting, kNoCtrl, static_cast<std::uint16_t>( startDepth ), ChainState::None } );
+    // the state each child is pushed with: None for every walk outside the tangle score (tangleOn), so nothing else changes
+    const auto childChain = [ &acc ]( TSNode parent, ChainState st, bool link, TSNode child )
+    { return acc.tangleOn ? dispatch_childState( parent, st, link, child ) : ChainState::None; };
     ChildCursor         cursor( start );
     std::vector<TSNode> kids;       kids.reserve( 64 );
     std::vector<TSNode> elifKids;   elifKids.reserve( 64 );   // the else-if grandchild descent below nests inside a kids iteration
@@ -1091,6 +1666,11 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
         if( elixirKeyword == "quote" )
         {
             continue; // quoted AST is not executed control flow
+        }
+        // QD-TANGLE: the statement clock, a declaration or a write — before the dispatch below, so every named node is seen once.
+        if( acc.steerOn && isNamed )
+        {
+            steer_noteNode( acc, n, t, lang, src );
         }
         const bool elixirDecision = elixirKeyword == "if" || elixirKeyword == "unless" || elixirKeyword == "for" || elixirKeyword == "with";
         const bool elixirControl = elixirDecision || elixirKeyword == "case" || elixirKeyword == "cond" || elixirKeyword == "receive" || elixirKeyword == "try";
@@ -1133,11 +1713,16 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
             {
                 acc.maxNest = childNest; // Q4: deepest control nesting reached
             }
-            cc_noteHump( n, nesting, childNest, acc );   // profile: did THIS control cross the bar?
+            cc_noteHump( n, nesting, childNest, acc, frame.chain == ChainState::Arm );   // profile: did THIS control cross the bar?
+            const bool link = acc.tangleOn && dispatch_opensOrLinks( n, t, frame.chain, elseIf );
+            if( acc.steerOn )
+            {
+                steer_noteCondition( acc, n, src );   // QD-TANGLE: the locals this branch's condition reads
+            }
             collectChildren( n, cursor.cur, kids );
             for( std::size_t i = kids.size(); i > 0; --i )
             {
-                stack.push_back( { kids[i - 1], childNest, ctrl, childDepth } );
+                stack.push_back( { kids[i - 1], childNest, ctrl, childDepth, childChain( n, frame.chain, link, kids[i - 1] ) } );
             }
             continue;
         }
@@ -1145,6 +1730,10 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
                          || kindIs( t, "elsif" ) ) )   // else / elif / else-if (+ Ruby `elsif`): flat +1 (cognitive)
         {
             acc.cog += 1u;
+            if( acc.steerOn )
+            {
+                steer_noteCondition( acc, n, src );   // QD-TANGLE: Python's elif_clause carries its own condition (an else carries none)
+            }
             collectChildren( n, cursor.cur, kids );
             for( std::size_t i = kids.size(); i > 0; --i )
             {
@@ -1152,6 +1741,11 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
                 const char*  ct = ts_node_type( c );
                 if( kindIs( ct, "if_statement" ) || kindIs( ct, "if_expression" ) )
                 {
+                    if( acc.steerOn )
+                    {
+                        steer_noteNode( acc, c, ct, lang, src );   // QD-TANGLE: the C-family else-if never becomes a frame — clock and condition here
+                        steer_noteCondition( acc, c, src );
+                    }
                     // C-family `else if`: descend into the if's CHILDREN so cognitive doesn't re-score it as a
                     // fresh control — but cyclomatic still counts that `if` as a decision (parity with the old walk).
                     // ev: that if never becomes a frame, so it gets its arena node HERE (Branch, weight 1 — 1:1
@@ -1159,9 +1753,10 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
                     ++acc.cyclo;
                     const std::uint32_t elifCtrl = ( evCtx != nullptr ) ? ev_appendCtrl( *evCtx, c, CtrlKind::Branch, 1, ctrl, lang, src ) : ctrl;
                     collectChildren( c, cursor.cur, elifKids );   // NOT kids — that iteration is still live
+                    const bool link = frame.chain == ChainState::Structure;   // an else-if link of a dispatch chain
                     for( std::size_t j = elifKids.size(); j > 0; --j )
                     {
-                        stack.push_back( { elifKids[j - 1], nesting, elifCtrl, childDepth } );
+                        stack.push_back( { elifKids[j - 1], nesting, elifCtrl, childDepth, childChain( c, frame.chain, link, elifKids[j - 1] ) } );
                     }
                 }
                 else
@@ -1175,7 +1770,7 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
                     // the parent construct recorded this depth when IT crossed, and a clause opens no new
                     // depth (matches Java/Go/C#, whose grammars have no clause node and were always flat).
                     // (ev rides along untouched: `ctrl` is the clause's own arena index from ev_noteNode.)
-                    stack.push_back( { c, nesting, ctrl, childDepth } );
+                    stack.push_back( { c, nesting, ctrl, childDepth, childChain( n, frame.chain, false, c ) } );
                 }
             }
             continue;
@@ -1186,11 +1781,11 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
             {
                 acc.maxNest = nesting + 1; // Q4: a lambda/closure body deepens nesting
             }
-            cc_noteHump( n, nesting, nesting + 1, acc );
+            cc_noteHump( n, nesting, nesting + 1, acc, frame.chain == ChainState::Arm );
             collectChildren( n, cursor.cur, kids );
             for( std::size_t i = kids.size(); i > 0; --i )
             {
-                stack.push_back( { kids[i - 1], nesting + 1, ctrl, childDepth } );
+                stack.push_back( { kids[i - 1], nesting + 1, ctrl, childDepth, childChain( n, frame.chain, false, kids[i - 1] ) } );
             }
             continue;
         }
@@ -1203,19 +1798,25 @@ inline void cc_walk( TSNode start, std::uint32_t startNesting, std::string_view 
         collectChildren( n, cursor.cur, kids );
         for( std::size_t i = kids.size(); i > 0; --i )
         {
-            stack.push_back( { kids[i - 1], nesting, ctrl, childDepth } );
+            stack.push_back( { kids[i - 1], nesting, ctrl, childDepth, childChain( n, frame.chain, false, kids[i - 1] ) } );
         }
     }
 }
-struct Complexity { std::uint32_t cx; std::uint32_t ccx; std::uint32_t maxNest; std::uint32_t locals; std::uint32_t ppAlt; std::uint32_t humps; std::uint32_t deepLoc; std::uint32_t ev; std::array<std::uint8_t, kEvWhyTagCount> evWhy; };
+struct Complexity { std::uint32_t cx; std::uint32_t ccx; std::uint32_t maxNest; std::uint32_t locals; std::uint32_t ppAlt; std::uint32_t humps; std::uint32_t deepLoc; std::uint32_t ev; std::array<std::uint8_t, kEvWhyTagCount> evWhy; std::uint32_t steer; std::uint32_t deepDispatch; };
 // `lang`: Phase 1 (local-variable-indexing) gates the locals accumulator to model.h's localsCountedLang
 // (C/C++ only, MVP scope) INSIDE the same fused walk — every other language pays one branch-not-taken
 // per node and gets locals=0, which the caller (this file, RawDef→Symbol) leaves at 0 and serialize.h
 // never emits (absent, not a bare "0" — see localsCountedLang's own comment).
-inline Complexity complexityOf( TSNode root, std::string_view src, Lang lang )   // one fused DFS → cx, ccx, maxNest, locals, ppAlt, the nesting profile, AND ev
+// QD-TANGLE: the steering-locals fact is walked only where the tangle score can be non-zero — a body over kTangleAmpLoc lines
+// (S = T × log2(loc/50), so 0 at 50 or fewer) — in steerCountedLang. `detail` (tangleDetailOf only) collects the names and spans.
+inline constexpr std::uint32_t kSteerMinRows = 51;
+inline Complexity complexityOf( TSNode root, std::string_view src, Lang lang, TangleDetailFacts* detail = nullptr )   // one fused DFS → cx, ccx, maxNest, locals, ppAlt, the nesting profile, ev AND steer
 {
     PROFILE_SCOPE_DESCRIBE( "ingest/metrics: complexityOf one function (fused DFS)" );                                                                     // A4-F25: NOT noexcept — cc_walk (and kids here) allocate
     CcAccum acc;
+    acc.tangleOn = ts_node_end_point( root ).row - ts_node_start_point( root ).row + 1u >= kSteerMinRows;
+    acc.steerOn  = acc.tangleOn && steerCountedLang( lang );
+    acc.detail  = detail;
     const bool countLocals = localsCountedLang( lang );
     // essential complexity rides the SAME walk (zero new tree-sitter queries). ONE arena/label/pending set
     // across all top-level children — a goto and its label can sit in sibling statements — finalized once
@@ -1237,7 +1838,7 @@ inline Complexity complexityOf( TSNode root, std::string_view src, Lang lang )  
     // locals = Phase 1 floor count ; ppAlt = preproc alternative branches (model.h Symbol::ppAlt) ;
     // humps/deepLoc = the nesting profile ; ev/evWhy = essential complexity (model.h Symbol) —
     // 0 outside evCountedLang, >= 1 inside it.
-    Complexity out{ 1u + acc.cyclo, acc.cog, acc.maxNest, acc.locals, acc.ppAlt, acc.humps, acc.deepLoc, 0u, {} };
+    Complexity out{ 1u + acc.cyclo, acc.cog, acc.maxNest, acc.locals, acc.ppAlt, acc.humps, acc.deepLoc, 0u, {}, acc.steered, acc.deepDispatch };
     if( evPtr != nullptr )
     {
         ev_finalize( evCtx, out.ev, out.evWhy );

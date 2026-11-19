@@ -82,6 +82,7 @@ static_assert( rw::kTestGateCcxBarMirror == rw::quality::kCcxBar, "situ.h kTestG
 #include "binstale.h"              // --doctor's tracked-binary-staleness check (git-order, not mtime)
 #include "codexdoctor.h"           // --doctor --agent=codex: live binary/skills/hooks/MCP surface parity
 #include "crossref.h"              // --stray-content / --whereis — the cross-branch content index
+#include "qdbestsince.h"           // D4: quality::tangleBestSince — the --quality-delta ratchet's history reader
 #include "darkflags.h"             // --flags — the dark-content (compile/cmake/env gate) dashboard
 #include "flipimpact.h"            // --flags --flip=NAME: the blast radius of turning ONE of those gates ON
 #include "layout.h"                // --layout=STRUCT — computed field offsets + tripwires + mirror drift
