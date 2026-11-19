@@ -87,7 +87,7 @@ struct Node
     std::vector<Redir>             fredirs;   // every redirect, Simple and compound (facet)
     std::vector<std::uint32_t>     conds;     // list ids
     std::vector<std::uint32_t>     bodies;    // list ids
-    std::string                    name;      // func: its name; case: subject + pattern words (Python's spelling)
+    std::string                    name;      // func: its name; case: subject + pattern words (Python's spelling); for: its loop variable (facet)
     std::string                    caseSubject;                 // facet
     std::vector<std::vector<std::string>> casePats;             // facet: each arm's pattern words
 };
@@ -1152,6 +1152,8 @@ private:
             if( tx == "for" || tx == "select" )
             {
                 ++i_;
+                // the loop variable (facet-only: it binds a name the facet must not trace through)
+                std::string var = peek().kind == TokKind::Word ? peek().word.text : std::string();
                 while( !( kw( "do" ) || peek().kind == TokKind::Eof ) )
                 {
                     ++i_;
@@ -1161,6 +1163,7 @@ private:
                 n.kind = NodeKind::For;
                 n.line = ln;
                 n.pos  = pos;
+                n.name = std::move( var );
                 n.bodies.push_back( addList( parseList( Stops{ { "done" } } ) ) );
                 if( kw( "done" ) )
                 {
