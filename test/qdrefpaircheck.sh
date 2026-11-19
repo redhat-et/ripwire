@@ -166,8 +166,8 @@ hdr "$TMP/syn.xml" | grep -q ' stale_tree=' \
 [ "$( attr "$TMP/stale_head.xml" stale_tree )" = "1" ] \
     && ok "(B2) target_ref is not HEAD's tree: stale_tree=\"1\"" \
     || { no "(B2) target_ref A is not HEAD (B), yet stale_tree= is '$( attr "$TMP/stale_head.xml" stale_tree )'"; hdr "$TMP/stale_head.xml"; }
-[ "$staleHeadRc" = 0 ] && ok "(B2) stale_tree= never gates (A..A still exits 0)" || no "(B2) A..A exit was $staleHeadRc, expected 0"
-grep -q 'stale_tree=1' "$TMP/stale_head.err" && ok "(B2) the stale note is on stderr" || no "(B2) no stale_tree note on stderr: $( head -c 300 "$TMP/stale_head.err" )"
+if [ "$staleHeadRc" = 0 ]; then ok "(B2) stale_tree= never gates (A..A still exits 0)"; else no "(B2) A..A exit was $staleHeadRc, expected 0"; fi
+if grep -q 'stale_tree=1' "$TMP/stale_head.err"; then ok "(B2) the stale note is on stderr"; else no "(B2) no stale_tree note on stderr: $( head -c 300 "$TMP/stale_head.err" )"; fi
 printf '// an edit after the commit\n' >> lib.h
 "$BIN" . "--quality-delta=$A_SHA..$B_SHA" >"$TMP/stale_dirty.xml" 2>/dev/null; staleDirtyRc=$?
 "$BIN" . "--quality-delta=$A_SHA..$B_SHA" --legend=full >"$TMP/stale_dirty_full.xml" 2>/dev/null   # status: exits 2 like the run above (same rows); only its legend is read
@@ -178,8 +178,8 @@ git checkout -q -- lib.h
 [ "$staleDirtyRc" = "$synRc" ] && [ "$( attr "$TMP/stale_dirty.xml" gating )" = "$( attr "$TMP/syn.xml" gating )" ] \
     && ok "(B2) the same rows and exit ($staleDirtyRc) with and without stale_tree= (a disclosure, never a gate)" \
     || no "(B2) stale_tree= moved the answer: exit $staleDirtyRc vs $synRc, gating $( attr "$TMP/stale_dirty.xml" gating ) vs $( attr "$TMP/syn.xml" gating )"
-grep -q 'stale_tree=1:' "$TMP/stale_dirty.xml" && ok "(B2) the compact legend defines stale_tree=" || no "(B2) the compact legend never defines stale_tree="
-grep -qF 'stale_tree="1" means' "$TMP/stale_dirty_full.xml" && ok "(B2) the full legend defines stale_tree=" || no "(B2) the full legend never defines stale_tree="
+if grep -q 'stale_tree=1:' "$TMP/stale_dirty.xml"; then ok "(B2) the compact legend defines stale_tree="; else no "(B2) the compact legend never defines stale_tree="; fi
+if grep -qF 'stale_tree="1" means' "$TMP/stale_dirty_full.xml"; then ok "(B2) the full legend defines stale_tree="; else no "(B2) the full legend never defines stale_tree="; fi
 grep -q 'stale_tree' "$TMP/syn.xml" && no "(B2) a document without stale_tree= pays for its legend" || ok "(B2) no stale_tree legend without the attribute"
 
 # ── (C) refusals: a bad ref, the three-dot form, and a half-typed value ───────────────────────────────────
