@@ -700,7 +700,51 @@ inline bool asksDependentsOf( const std::vector<std::string_view>& words, std::s
 {
     return dependentsAskOf( words, spelling ).asks;
 }
+// AF4 T-B: words that make a dependents question a TRANSITIVE or RADIUS one, which a one-hop callers block does not answer first.
+// P1's rule R order 1 (transitive|hops|levels|trace|depends on) plus the blast-radius words; "depends" is already a change cue.
+inline constexpr std::string_view kCallersLeadVetoWords[] = { "transitive", "transitively", "indirect", "indirectly", "hop", "hops", "levels",
+                                                              "trace", "chain", "radius", "impact", "impacted", "risk" };
+// The last segment of a printed name (`rw::answerfirst::topLevelBlocks`, `Owner.method`): the name after the last `::` or `.`.
+inline std::string_view printedNameLeaf( std::string_view name )
+{
+    const std::size_t colons = name.rfind( "::" );
+    const std::size_t dot    = name.rfind( '.' );
+    const std::size_t from   = std::max( colons == std::string_view::npos ? 0 : colons + 2, dot == std::string_view::npos ? 0 : dot + 1 );
+    return name.substr( std::min( from, name.size() ) );
+}
 }   // namespace subject_detail
+
+// AF4 T-B (results/P1_VERBROUTE_1118/SPEC.md §2): does `task` ask WHO CALLS `subject` — the of= of the answer's <callers
+// by="subject"> block, as printed — so that block may lead the answer-first document (foranswerfirst.h rowBlockOrder)? A
+// dependents cue governs the subject (dependentsAskOf, read on the whole of= or on its leaf when the leaf is itself a name: the
+// block prints `rw::answerfirst::topLevelBlocks` where the sentence spells `topLevelBlocks`), no governing cue is a CHANGE cue,
+// and no word makes it a transitive or radius question. P1 measured the reason for each clause: who-calls cells 5,387→726,
+// 6,629→935, 11,112→743 bytes-to-all-gold; the change-risk cell 5,965→6,451, worse.
+inline bool subjectCallersCueLeads( std::string_view task, std::string_view subject )
+{
+    using namespace subject_detail;
+    if( subject.empty() )
+    {
+        return false;
+    }
+    const std::vector<std::string_view> words = splitRouteWords( task );
+    if( std::ranges::any_of( words, []( std::string_view w ) { return wordIn( detail::graphSubjectTrimWord( w ).text, kCallersLeadVetoWords ); } ) )
+    {
+        return false;
+    }
+    // Read the whole of= AND its leaf, then decide once: a change cue on EITHER spelling vetoes. Deciding per spelling let a
+    // pronoun call cue ("... defines or calls it") pass on the whole of= while the change cue sat on the leaf the sentence spells
+    // (T5d hb-rake-01/02, "What breaks if I change `X`? ..."; foranswerfirstcheck CL5).
+    DependentsAsk          ask  = dependentsAskOf( words, subject );
+    const std::string_view leaf = printedNameLeaf( subject );
+    if( leaf.size() < subject.size() && hasNameSyntax( leaf ) )
+    {
+        const DependentsAsk onLeaf = dependentsAskOf( words, leaf );
+        ask.asks                   = ask.asks || onLeaf.asks;
+        ask.change                 = ask.change || onLeaf.change;
+    }
+    return ask.asks && !ask.change;
+}
 
 inline SubjectReading subjectReading( const IngestResult& ing, std::string_view task )
 {

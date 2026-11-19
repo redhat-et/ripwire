@@ -116,11 +116,12 @@ export function delta_left_only_caller(n: any): number {
 }
 EOF
 
-# check.py OFF ON NAMES -> PASS/FAIL: ON is OFF with every <d>/<s>/<y> row named in NAMES (in <sigs>/<callers>/<syms>) a pointer, the
-# legend before the first, est_tokens= aside; then `ptr`/`rows` lines (the pointer names and the row names of ON, in order).
+# check.py OFF ON NAMES -> PASS/FAIL: ON is OFF with every <d>/<s>/<y> row named in NAMES (in <sigs>/<callers>/<syms>) a pointer
+# <t … ptr="side"/>, est_tokens= aside, comments compared apart (ON's = OFF's + the one-side legend once; AF4 T-C: the kind is on the
+# row, so where the legend sits is the order's business); then `ptr`/`rows` lines (the pointer names and the row names of ON, in order).
 cat >"$TMP/check.py" <<'PY'
 import re, sys
-LEG = ( "<!-- one-side: a <t> among sigs, callers or syms rows is one-sided within 3 calls (it reaches only one of the two named endpoints, or "
+LEG = ( "<!-- one-side: a <t> with ptr=side among sigs, callers or syms rows is one-sided within 3 calls (it reaches only one of the two named endpoints, or "
         "it reaches the sink and the root does not reach it) and is on no shortest path between them, a pointer (p= file, sym= name, r= rank), "
         "not the answer -->" )
 ATTR = re.compile( r'([\w:-]+)="([^"]*)"' )
@@ -139,12 +140,16 @@ exp, at, first = [], 0, True
 for s, e, a in rows( off ):
     if a.get( "n" ) not in names: continue
     p = a.get( "p", "" ); p = p.rsplit( ":", 1 )[0] if ":" in p and p.rsplit( ":", 1 )[1].isdigit() else p
-    exp += [ off[at:s], LEG if first else "", '<t p="%s" sym="%s"%s/>' % ( p, a["n"], ' r="%s"' % a["r"] if "r" in a else "" ) ]; at = e; first = False
+    # AF4 T-C: the pointer carries its kind (ptr="side"); the legend is compared apart from the rows: its PLACE is the order's
+    # (legend-first: before the first pointer; answer-first: lifted into the trailing legend), not the rule's
+    exp += [ off[at:s], '<t p="%s" sym="%s"%s ptr="side"/>' % ( p, a["n"], ' r="%s"' % a["r"] if "r" in a else "" ) ]; at = e; first = False
 exp = "".join( exp ) + off[at:]
 est = lambda s: re.sub( r' est_tokens="\d+"', "", s, count = 1 )
-print( ( "PASS" if not first and est( exp ) == est( on ) else "FAIL" ) + " expected-rewrite" )
+nocom = lambda s: re.sub( r"<!--.*?-->", "", est( s ), flags = re.S )
+coms = lambda s: sorted( re.findall( r"<!--.*?-->", re.sub( r"<!\[CDATA\[.*?\]\]>", "", s, flags = re.S ), re.S ) )
+print( ( "PASS" if not first and nocom( exp ) == nocom( on ) and coms( on ) == sorted( coms( off ) + [ LEG ] ) else "FAIL" ) + " expected-rewrite" )
 t = mask( on )
-print( "ptr " + ",".join( re.findall( r'<t p="[^"]*" sym="([^",]*)"(?: r="\d+")?/>', t ) ) )
+print( "ptr " + ",".join( re.findall( r'<t p="[^"]*" sym="([^",]*)"(?: r="\d+")? ptr="side"/>', t ) ) )
 print( "rows " + ",".join( a.get( "n", "" ) for _, _, a in rows( on ) ) )
 PY
 
