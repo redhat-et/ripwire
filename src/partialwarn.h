@@ -26,6 +26,7 @@
 #include <cstddef>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -535,4 +536,206 @@ struct Floors
     return w;
 }
 
+// ── RT2 (results/RT2_ROUTE_1118, frozen in its PREREG.md): W2 — the evidence a ROUTED answer acts on ─────────────────────────
+// F1 above is unchanged and still runs. W2 adds three clauses (BS1 fix 1) and FOLDS the text gap instead of warning on it:
+//   fold      = text-only files: F1's text-gap files (its corpus scan) united with the files of --grep=LAST --grep-in=any — the
+//               index's own files AND its <unindexed> section — whose hit line names LAST as a whole word; minus test paths (F1's
+//               frozen isTestPath), vendored prefixes, prose documents (md markdown rst txt adoc rdoc) and every file the answer
+//               names (p=, bind=) or --defs names. Each prints as <tx p="FILE:LINE"/> (first whole-word line), sorted by path.
+//   residual  = reasons a fold cannot answer, in this order: F1's non-text-gap reasons (target-floor, macro:F:L, twin-defs:N,
+//               value-hop:N:NAME); macro-row:NAME (a --callers row is a function-like macro, so its own callers are callers the
+//               answer does not list); target-floor (a --uses answer to a who-calls / where-used question whose target's
+//               callers are a floor: it is called through a slot the graph cannot follow); text-gap-capped:N (more than
+//               kFoldCap fold files); grep-capped (the exhaustive grep was itself cut, so the fold is a floor).
+// A routed answer with a residual reason says warn="1" why=<residual> and carries the first --for page; a fold alone does not.
+inline constexpr std::size_t kFoldCap = 16;
+
+struct FoldRow
+{
+    std::string file;
+    int         line = 0;
+};
+struct RouteEvidence
+{
+    std::string          residual;   // the residual reasons, comma-joined in their fixed order ("" = none: no warning)
+    std::vector<FoldRow> fold;       // every text-only file, sorted by path; the caller prints the first kFoldCap
+};
+
+namespace detail
+{
+inline constexpr std::string_view kProseExt[] = { "md", "markdown", "rst", "txt", "adoc", "rdoc" };
+
+// Every value of `attr="…"` (attr with no word byte before it), cut at its first ':'.
+inline void attrFiles( std::string_view body, std::string_view attrEq, std::vector<std::string>& out )
+{
+    for( std::size_t at = body.find( attrEq ); at != std::string_view::npos; at = body.find( attrEq, at + 1 ) )
+    {
+        const std::size_t close = body.find( '"', at + attrEq.size() );
+        if( close == std::string_view::npos )
+        {
+            return;
+        }
+        if( ( at == 0 || !isAsciiWord( body[ at - 1 ] ) ) && close > at + attrEq.size() )
+        {
+            const std::string_view v = body.substr( at + attrEq.size(), close - at - attrEq.size() );
+            out.emplace_back( v.substr( 0, v.find( ':' ) ) );
+        }
+    }
+}
+[[nodiscard]] inline bool foldable( std::string_view rel ) noexcept
+{
+    for( const std::string_view v : kVendor )
+    {
+        if( rel.starts_with( v ) )
+        {
+            return false;
+        }
+    }
+    const std::string_view base = baseOf( rel );
+    std::string ext( base.find( '.' ) == std::string_view::npos ? std::string_view{} : extOf( base ) );
+    std::ranges::transform( ext, ext.begin(), []( char c ) { return c >= 'A' && c <= 'Z' ? char( c - 'A' + 'a' ) : c; } );
+    return !isFrozenTestPath( rel ) && !listed( kProseExt, std::string_view( ext ) );
+}
+// The line number of the first <hit l="N"> in `fileBody` whose CDATA names `last` as a whole word; 0 when none does.
+[[nodiscard]] inline int firstWordHitLine( std::string_view fileBody, std::string_view last )
+{
+    constexpr std::string_view kHit = "<hit l=\"", kCd = "<![CDATA[", kCdEnd = "]]>";
+    for( std::size_t h = fileBody.find( kHit ); h != std::string_view::npos; h = fileBody.find( kHit, h + 1 ) )
+    {
+        const std::size_t cd = fileBody.find( kCd, h );
+        const std::size_t ce = cd == std::string_view::npos ? std::string_view::npos : fileBody.find( kCdEnd, cd );
+        if( ce == std::string_view::npos )
+        {
+            return 0;
+        }
+        if( hasIdentWord( fileBody.substr( cd + kCd.size(), ce - cd - kCd.size() ), last ) )
+        {
+            int line = 0;
+            for( std::size_t k = h + kHit.size(); k < fileBody.size() && rw::forroute::detail::isAsciiDigit( fileBody[ k ] ); ++k )
+            {
+                line = line * 10 + ( fileBody[ k ] - '0' );
+            }
+            return line;
+        }
+    }
+    return 0;
+}
+// --grep-in=any's files whose hit line names `last` as a whole word: (file, first such line), in the answer's order.
+inline void grepAnyWordFiles( std::string_view g, std::string_view last, std::vector<FoldRow>& out )
+{
+    constexpr std::string_view kF = "<f p=\"";
+    for( std::size_t at = g.find( kF ); at != std::string_view::npos; )
+    {
+        const std::size_t pEnd = g.find( '"', at + kF.size() );
+        const std::size_t fEnd = pEnd == std::string_view::npos ? std::string_view::npos : g.find( "</f>", pEnd );
+        if( fEnd == std::string_view::npos )
+        {
+            return;
+        }
+        if( const int line = firstWordHitLine( g.substr( pEnd, fEnd - pEnd ), last ); line > 0 )
+        {
+            out.push_back( { std::string( g.substr( at + kF.size(), pEnd - at - kF.size() ) ), line } );
+        }
+        at = g.find( kF, fEnd + 4 );
+    }
+}
+[[nodiscard]] inline bool grepCapped( std::string_view g )
+{
+    const std::size_t at = g.find( "<grep " );
+    const std::size_t gt = at == std::string_view::npos ? std::string_view::npos : g.find( '>', at );
+    if( gt == std::string_view::npos )
+    {
+        return false;
+    }
+    const std::string_view open = g.substr( at, gt - at );
+    return attrOf( open, "capped" ) == "1" || attrOf( open, "hits_capped" ) == "1";
+}
+// The first --callers row that is a function-like macro: its n=, or "".
+[[nodiscard]] inline std::string_view macroCallerRow( std::string_view body )
+{
+    for( const std::string_view s : tagSpans( body, "<s " ) )
+    {
+        if( attrOf( s, "t" ) == "macro" )
+        {
+            return attrOf( s, "n" );
+        }
+    }
+    return {};
+}
+} // namespace detail
+
+namespace detail
+{
+inline void addReason( std::string& why, std::string_view r )
+{
+    why += why.empty() ? "" : ",";
+    why += r;
+}
+// F1's reasons a fold cannot answer: every comma-separated reason but text-gap:…, in F1's order.
+inline void nonGapReasons( std::string_view why, std::string& out )
+{
+    while( !why.empty() )
+    {
+        const std::size_t      comma = why.find( ',' );
+        const std::string_view r     = why.substr( 0, comma );
+        if( !r.starts_with( "text-gap:" ) )
+        {
+            addReason( out, r );
+        }
+        why = comma == std::string_view::npos ? std::string_view{} : why.substr( comma + 1 );
+    }
+}
+// The fold: F1's corpus hits and --grep-in=any's whole-word files, one row per file (its first line), foldable and unnamed.
+[[nodiscard]] inline std::vector<FoldRow> foldRows( const F1Inputs& in, std::string_view answerBody, std::string_view grepAny )
+{
+    AnswerFiles af = answerFiles( in.answer, in.defs );
+    attrFiles( answerBody, "bind=\"", af.files );
+    std::ranges::sort( af.files );
+    std::vector<FoldRow> cand;
+    for( const CorpusHit& h : in.hits )
+    {
+        cand.push_back( { h.file, h.line } );
+    }
+    grepAnyWordFiles( grepAny, in.last, cand );
+    std::ranges::sort( cand, []( const FoldRow& a, const FoldRow& b ) { return std::tie( a.file, a.line ) < std::tie( b.file, b.line ); } );
+    std::vector<FoldRow> fold;
+    std::string_view     prev;
+    for( const FoldRow& r : cand )
+    {
+        if( r.file != prev && foldable( r.file ) && !std::ranges::binary_search( af.files, r.file ) )
+        {
+            fold.push_back( r );
+        }
+        prev = r.file;
+    }
+    return fold;
+}
+} // namespace detail
+
+// W2. `whoCallsAsk`: the question asks who calls / where it is used (rule R2's who-calls and where-used kinds).
+[[nodiscard]] inline RouteEvidence rt2Evidence( const F1Inputs& in, std::string_view grepAny, bool whoCallsAsk )
+{
+    RouteEvidence ev;
+    detail::nonGapReasons( frozenF1( in ).why, ev.residual );
+    const std::string answer = detail::stripComments( in.answer );
+    const std::string any    = detail::stripComments( grepAny );
+    ev.fold = detail::foldRows( in, answer, any );
+    if( const std::string_view m = in.verb == "callers" ? detail::macroCallerRow( answer ) : std::string_view{}; !m.empty() )
+    {
+        detail::addReason( ev.residual, "macro-row:" + std::string( m ) );
+    }
+    if( in.verb == "uses" && whoCallsAsk && detail::grepFloors( in.grep, in.last ).targetFloor )
+    {
+        detail::addReason( ev.residual, "target-floor" );
+    }
+    if( ev.fold.size() > kFoldCap )
+    {
+        detail::addReason( ev.residual, "text-gap-capped:" + std::to_string( ev.fold.size() ) );
+    }
+    if( detail::grepCapped( any ) )
+    {
+        detail::addReason( ev.residual, "grep-capped" );
+    }
+    return ev;
+}
 } // namespace rw::partialwarn

@@ -19,7 +19,7 @@ word that names code (`` `F` ``) so it routes by name.
 | The moment you're in | Enter | Its opening move |
 |---|---|---|
 | cold start in an unfamiliar repo; "how does X work / where is Y"; resuming after a compaction; one answer out of a pile of dumped output; a symbol missing from the map | **ripwire-orient** | `ripwire <dir>` once, `--recall`, `--for="X"` · resume: `--recall` → `--situ` → `--notes` |
-| a NAMED symbol: callers, callees, path A→B, "safe to rename X", an exact literal, a closed claim, 3+ symbols | **ripwire-navigate** | `--impact` + `--uses` · `--grep` · `--verify` · `--connect` |
+| a NAMED symbol: callers, callees, path A→B, "safe to rename X", an exact literal, a closed claim, 3+ symbols | **ripwire-navigate** | `--for` (routes itself) · `--grep` · `--verify` · `--connect` |
 | a symptom: crash, stack trace, wrong output, "it broke after my edit" | **ripwire-find-bug** | `--from-trace=FILE` · `--situ` · `--for="symptom"` |
 | about to write ONE symbol, or add a dependency | **ripwire-reuse-first** | `--for` then optionally `--exemplar` |
 | planning a FEATURE; implementing an interface | **ripwire-before-you-build** | `--pack-task` · `--lego=I` |

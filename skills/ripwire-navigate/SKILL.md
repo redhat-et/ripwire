@@ -17,12 +17,13 @@ allowed-tools: Bash, Read
 `<dir>` = the repo or subsystem; calls are warm after the first parse. Split checkout: pass every root
 (`ripwire dir1 dir2 --impact=SYM`).
 
-## The decision: one question, one verb — run it, then stop
+## The decision: name it in backticks and ask `--for` — it routes itself
 
-| Your question | Run |
+Who calls `X`, where it is used, what breaks if it changes (any depth): `ripwire <dir> --for="<question, X in
+backticks>"` answers with `--callers` / `--uses` / `--impact`; `warn="1"` = a likely miss, the ranked page rides along.
+
+| Anything else | Run |
 |---|---|
-| **Is it safe to change, rename or delete X?** — the WHOLE blast radius | `ripwire <dir> --impact=SYM --legend=compact` + `ripwire <dir> --uses=SYM --legend=compact` |
-| who calls X, one hop (a sanity check, not a safety judgment) | `ripwire <dir> --callers=SYM --legend=compact` |
 | what X calls | `ripwire <dir> --callees=SYM --legend=compact` |
 | X's full body + its callees' signatures | `ripwire <dir> --expand=SYM --legend=compact` |
 | an exact literal: error text, config key, emitted string | `ripwire <dir> --grep=STR --legend=compact` (literal + enclosing symbol) |
@@ -32,9 +33,6 @@ allowed-tools: Bash, Read
 | a closed claim: does A call B, is X unused | `ripwire <dir> --verify='calls(A,B)' --legend=compact` |
 | a variable's story inside one function | `--slice=SYM:VAR` (`--slice-flow=back\|fwd\|both` for where its value flows) |
 | you have a FILE:LINE, not a name | `--at=FILE:LINE`, or `@FILE:LINE` as the operand of any verb above |
-
-`--callers` alone under-counts on purpose: a caller two hops away, a read or write that never calls X, or an
-`#include` all fall outside it. For "safe to change", run both `--impact` (depth) and `--uses` (breadth).
 
 ## Stop rule and trust
 

@@ -5,8 +5,10 @@
 #
 #   test/forverbroutecheck.sh [BIN]     # BIN defaults to $RIPWIRE_BIN, then build/ripwire; BASE_BIN= adds the base arms
 #
-# Lane RT1 (results/RT1_ROUTE_1118). The rule is frozen in src/forroute.h (rule E: the symbol, rule R: the kind — lane P1's
-# rules.py, transcribed) and src/partialwarn.h (lane W1's frozen F1, frozen_f1.py). The route fires only on a BARE
+# Lane RT1 (results/RT1_ROUTE_1118), revised by lane RT2 (results/RT2_ROUTE_1118). The rule is frozen in src/forroute.h
+# (rule E2: the symbol, rule R2: the kind — RT2's rules2.py, transcribed) and src/partialwarn.h (lane W1's frozen F1 plus RT2's
+# W2 clauses). A text gap is FOLDED into the answer as <text_only> rows; the first --for page rides along only when a reason a
+# fold cannot answer remains (warn="1"). The route fires only on a BARE
 # `--for=Q` (no flag that shapes the --for answer); --no-verb-route is the opt-out and is the unrouted answer byte for byte.
 # Not to be confused with test/forroutecheck.sh (FOR-ROUTE-DECLINED: the <graph_verb> block APPENDED inside a --for answer).
 #
@@ -165,12 +167,14 @@ sys.exit(0 if i > 0 and j > i and d[i:j + 6] == o.rstrip("\n") and d.rstrip("\n"
     fi
 fi
 
-# ── (5) [P] a file naming the symbol that no row lists warns text-gap (direct-radius → --uses) ─────────────────────
+# ── (5) [P] RT2: a file naming the symbol that no row lists is FOLDED as a <text_only> row; no warn, no page ────────
 if run a5 gap --for="$Q_GAP"; then
     F="$( firstChild "$DIR/a5.out" )"
-    [ "$( attr "$F" kind )" = direct-radius ] && [ "$( attr "$F" verb )" = "--uses=compute_total" ] && [ "$( attr "$F" warn )" = 1 ] \
-        && [ "$( attr "$F" why )" = "text-gap:1:names.c" ] && grep -q '<ctx task=' "$DIR/a5.out"
-    say $? "(5) [P] text gap: kind=direct-radius verb=--uses warn=1 why=text-gap:1:names.c, page carried" "(5) [P] route reads '$F'"
+    [ "$( attr "$F" kind )" = direct-radius ] && [ "$( attr "$F" verb )" = "--uses=compute_total" ] && [ -z "$( attr "$F" warn )" ] \
+        && ! grep -q '<ctx task=' "$DIR/a5.out"
+    say $? "(5) [P] text gap: kind=direct-radius verb=--uses, no warn=, no page carried" "(5) [P] route reads '$F'"
+    python3 -c 'import re,sys; d=re.sub(r"<!--.*?-->","",open(sys.argv[1]).read(),flags=re.S); sys.exit(0 if re.search(r"<route [^>]*/><text_only n=\"1\"><tx p=\"names\.c:1\"/></text_only>",d) else 1)' "$DIR/a5.out"
+    say $? "(5) [P] <text_only n=1><tx p=names.c:1/></text_only> follows <route> directly" "(5) [P] no fold row right after <route>"
 fi
 
 # ── (6) [N] no symbol named: the answer is the unrouted --for byte for byte ─────────────────────────────────────────
@@ -201,7 +205,7 @@ fi
 # ── (9) rule E and rule R, as frozen ────────────────────────────────────────────────────────────────────────────────
 if run a9 plain --for="$Q_PLAINWORD" && run a9o plain --for="$Q_PLAINWORD" --no-verb-route; then
     cmp -s "$DIR/a9.out" "$DIR/a9o.out"
-    say $? "(9) [N] rule E: a backticked plain word (\`compute\`) is not code-shaped — not routed" "(9) [N] a plain word was routed"
+    say $? "(9) [N] rule E2: a backticked plain word no verb resolves (\`compute\`) is not routed" "(9) [N] an unresolved plain word was routed"
 else
     no "(9) [N] a run exited non-zero: $( head -c 200 "$DIR/a9o.err" )"
 fi
@@ -264,6 +268,90 @@ if [ -n "$BASE" ] && [ -x "$BASE" ]; then
 else
     ok "(14) [N] BASE_BIN not set: the base-identity arms are run by the lane (results/RT1_ROUTE_1118/gates), not here"
 fi
+
+# ── RT2 arms (15–21): rule E2/R2, the fold, and the W2 clauses ──────────────────────────────────────────────────────
+mkdir -p "$DIR/word" "$DIR/gap2" "$DIR/gap2/tests" "$DIR/mac" "$DIR/many"
+cat >"$DIR/word/w.c" <<'C'
+int widget( void )
+{
+    return 1;
+}
+int caller_w( void )
+{
+    return widget();
+}
+C
+cp "$DIR/gap/lib.h" "$DIR/gap/lib.c" "$DIR/gap/main.c" "$DIR/gap/names.c" "$DIR/gap2/"
+printf 'compute_total adds one.\n' >"$DIR/gap2/README.md"
+printf 'const char* kT = "compute_total";\n' >"$DIR/gap2/tests/t.c"
+cp "$DIR/plain/lib.c" "$DIR/mac/"
+cat >"$DIR/mac/lib.h" <<'C'
+int compute_total( int a );
+#define TOTAL( x ) compute_total( x )
+C
+for f in a b; do printf '#include "lib.h"\nint use_%s( void )\n{\n    return TOTAL( 1 );\n}\n' "$f" >"$DIR/mac/$f.c"; done
+cp "$DIR/plain/lib.h" "$DIR/plain/lib.c" "$DIR/plain/main.c" "$DIR/many/"
+for i in 01 02 03 04 05 06 07 08 09 10 11 12 13 14 15 16 17; do printf 'const char* kName%s = "compute_total";\n' "$i" >"$DIR/many/n$i.c"; done
+
+# (15) [P] where-used → --uses
+if run a15 plain --for='Where is `compute_total` used?'; then
+    F="$( firstChild "$DIR/a15.out" )"
+    [ "$( attr "$F" kind )" = where-used ] && [ "$( attr "$F" verb )" = "--uses=compute_total" ] && [ -z "$( attr "$F" warn )" ]
+    say $? "(15) [P] rule R2: 'where is … used' is kind=where-used, verb=--uses, no warn on a plain fixture" "(15) [P] route reads '$F'"
+fi
+# (15b) [N] "used by" is passive: it names the user, not a where-used question — not routed
+if run a15b plain --for='Change the signature of `compute_total` used by `run_main`.' && run a15bo plain --for='Change the signature of `compute_total` used by `run_main`.' --no-verb-route; then
+    cmp -s "$DIR/a15b.out" "$DIR/a15bo.out"
+    say $? "(15b) [N] rule R2: 'used by' is not a where-used cue (the --for answer, byte for byte)" "(15b) [N] 'used by' was routed: '$( firstChild "$DIR/a15b.out" )'"
+fi
+# (16) [P] rule E2 tier 2: a backticked plain word the verb resolves is routed; a code-shaped span still wins
+if run a16 word --for='Who calls `widget`?'; then
+    [ "$( attr "$( firstChild "$DIR/a16.out" )" verb )" = "--callers=widget" ]
+    say $? "(16) [P] rule E2: a plain word (\`widget\`) the verb resolves is routed" "(16) [P] '$( firstChild "$DIR/a16.out" )'"
+fi
+if run a16b word --for='Who calls `caller_w` and `widget`?'; then
+    [ "$( attr "$( firstChild "$DIR/a16b.out" )" verb )" = "--callers=caller_w" ]
+    say $? "(16) [P] rule E2: the last CODE-SHAPED span outranks a later plain word" "(16) [P] '$( firstChild "$DIR/a16b.out" )'"
+fi
+# (17) [P] rule E2: a trailing () or ! is not part of the symbol
+if run a17 plain --for='Who calls `compute_total()`?' && run a17b plain --for='Where is `compute_total!` used?'; then
+    [ "$( attr "$( firstChild "$DIR/a17.out" )" verb )" = "--callers=compute_total" ] && [ "$( attr "$( firstChild "$DIR/a17b.out" )" verb )" = "--uses=compute_total" ]
+    say $? "(17) [P] rule E2: \`compute_total()\` and \`compute_total!\` route as compute_total" "(17) [P] '$( firstChild "$DIR/a17.out" )' / '$( firstChild "$DIR/a17b.out" )'"
+fi
+# (18) [P] the fold skips prose documents and test paths
+if run a18 gap2 --for="$Q_GAP"; then
+    python3 -c 'import re,sys; d=re.sub(r"<!--.*?-->","",open(sys.argv[1]).read(),flags=re.S); m=re.search(r"<text_only [^>]*>(.*?)</text_only>",d); sys.exit(0 if m and re.findall(r"<tx p=\"([^\"]+)\"/>",m.group(1))==["names.c:1"] and "README" not in d and "tests/t.c" not in d else 1)' "$DIR/a18.out"
+    say $? "(18) [P] fold rows: names.c only — README.md (prose) and tests/t.c (a test path) are not folded" "(18) [P] fold reads '$( grep -o '<text_only.*</text_only>' "$DIR/a18.out" | head -c 300 )'"
+fi
+# (19) [P] a caller row that is a function-like macro: warn=1 why=macro-row:TOTAL and the page rides along
+if run a19 mac --for='Who calls `compute_total`?'; then
+    F="$( firstChild "$DIR/a19.out" )"
+    [ "$( attr "$F" warn )" = 1 ] && printf '%s' "$( attr "$F" why )" | grep -q 'macro-row:TOTAL' && [ "$( attr "$F" page1 )" = 1 ] && grep -q '<ctx task=' "$DIR/a19.out"
+    say $? "(19) [P] macro caller row: warn=1 why=…macro-row:TOTAL…, page1=1, page carried" "(19) [P] route reads '$F'"
+fi
+# (20) [P] target-floor on --uses for a who-calls / where-used question only
+if run a20 hop --for='Where is `handle_failure` used?' && run a20b hop --for='Which files are affected if `handle_failure` changes?'; then
+    F="$( firstChild "$DIR/a20.out" )"; G="$( firstChild "$DIR/a20b.out" )"
+    [ "$( attr "$F" verb )" = "--uses=handle_failure" ] && [ "$( attr "$F" warn )" = 1 ] && printf '%s' "$( attr "$F" why )" | grep -q 'target-floor' \
+        && [ "$( attr "$G" verb )" = "--uses=handle_failure" ] && ! printf '%s' "$( attr "$G" why )" | grep -q 'target-floor'
+    say $? "(20) [P] where-used on a value-registered function warns target-floor; the direct-radius question does not" "(20) [P] '$F' / '$G'"
+fi
+# (21) [P] more than 16 text-only files: 16 rows, capped=1, warn=1 why=…text-gap-capped:17…, page carried
+if run a21 many --for="$Q_GAP"; then
+    F="$( firstChild "$DIR/a21.out" )"
+    python3 -c 'import re,sys; d=re.sub(r"<!--.*?-->","",open(sys.argv[1]).read(),flags=re.S); m=re.search(r"<text_only n=\"17\" capped=\"1\">(.*?)</text_only>",d); sys.exit(0 if m and len(re.findall(r"<tx p=",m.group(1)))==16 else 1)' "$DIR/a21.out" \
+        && [ "$( attr "$F" warn )" = 1 ] && printf '%s' "$( attr "$F" why )" | grep -q 'text-gap-capped:17' && grep -q '<ctx task=' "$DIR/a21.out"
+    say $? "(21) [P] fold cap: 16 of 17 rows, capped=1, warn=1 why=text-gap-capped:17, page carried" "(21) [P] route reads '$F'"
+fi
+for t in a15 a18 a19 a20 a21; do
+    if command -v xmllint >/dev/null 2>&1 && [ -s "$DIR/$t.out" ]; then
+        xmllint --noout "$DIR/$t.out" 2>/dev/null
+        say $? "(21) [C] $t is one well-formed XML document" "(21) [C] $t is not well-formed XML"
+    fi
+done
+LG="$( legendOf "$DIR/a21.out" )"
+printf '%s' "$LG" | grep -q 'text_only n=' && ! printf '%s' "$( legendOf "$DIR/a1.out" )" | grep -q 'text_only n='
+say $? "(21) [P] the legend defines <text_only n= capped=> / <tx p=> when a fold is printed (present-only)" "(21) [P] text_only undefined in the legend"
 
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "FAILURES ABOVE"; fi
 exit "$fail"

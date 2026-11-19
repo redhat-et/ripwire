@@ -28,6 +28,12 @@
 // is what keeps every page's next= (`--for='…' --page-bytes=N:K`) a page of the --for answer.
 // MCP `for` is UNCHANGED (AF1 left MCP unpaged, and the fallback contract here is "the first page + next="); an MCP client
 // already holds find_referencing_symbols / uses / impact as tools of their own.
+// RT2 (results/RT2_ROUTE_1118, frozen in its PREREG.md): rule E2/R2 (forroute.h: a where-used kind → --uses; a plain word
+// or a `name!` / `name()` span the verb resolves), and W2 (partialwarn.h rt2Evidence): a TEXT GAP — files that name the symbol
+// as a whole word and no row lists — is FOLDED into the answer as <text_only n=><tx p=FILE:LINE/>…</text_only> right after
+// <route>; the first --for page rides along only on a reason a fold cannot answer (warn="1" why=<residual>). F1 alone priced
+// a text gap at a whole page (~16 KB) where its rows cost ~40 B each; on RT1's confirmation set the fold kept every text-gap
+// cell's gold (results/RT2_ROUTE_1118/DEV.md).
 // Gate: test/forverbroutecheck.sh.
 
 namespace
@@ -83,6 +89,7 @@ inline RouteRender renderRoutedVerb( const MainDispatch& d, rw::forroute::RouteK
     {
         case rw::forroute::RouteKind::WhoCalls:     c.callers   = spelling; break;
         case rw::forroute::RouteKind::DirectRadius: c.usesSym   = spelling; break;
+        case rw::forroute::RouteKind::WhereUsed:    c.usesSym   = spelling; break;
         case rw::forroute::RouteKind::Transitive:   c.impactSym = spelling; break;
         case rw::forroute::RouteKind::None:         return {};
     }
@@ -93,6 +100,7 @@ inline RouteRender renderRoutedVerb( const MainDispatch& d, rw::forroute::RouteK
         {
             case rw::forroute::RouteKind::WhoCalls:     return runCallHierarchy( vd ).value_or( 1 );
             case rw::forroute::RouteKind::DirectRadius: return runUses( vd ).value_or( 1 );
+            case rw::forroute::RouteKind::WhereUsed:    return runUses( vd ).value_or( 1 );
             case rw::forroute::RouteKind::Transitive:   return runImpact( vd ).value_or( 1 );
             case rw::forroute::RouteKind::None:         break;
         }
@@ -133,9 +141,10 @@ inline std::vector<rw::partialwarn::CorpusHit> routeCorpusHits( const MainDispat
     return hits;
 }
 
-// F1 on the routed answer; nullopt when an evidence render could not run (the caller falls back to the kind: P1's hybrid).
-inline std::optional<rw::partialwarn::Warn> routeEvidence( const MainDispatch& d, rw::forroute::RouteKind kind, const std::string& spelling,
-                                                           const std::string& answer )
+// W2 on the routed answer (F1 inside it); nullopt when an evidence render could not run (the caller falls back to the kind:
+// P1's hybrid).
+inline std::optional<rw::partialwarn::RouteEvidence> routeEvidence( const MainDispatch& d, rw::forroute::RouteKind kind, const std::string& spelling,
+                                                                    const std::string& answer )
 {
     const std::string last = rw::partialwarn::answerTarget( answer );
     if( last.empty() )
@@ -153,19 +162,43 @@ inline std::optional<rw::partialwarn::Warn> routeEvidence( const MainDispatch& d
     gc.grep       = last;
     const MainDispatch gd   = routeDispatch( d, gc );
     const RouteRender  grep = renderRouteCaptured( [ & ] { return runGrep( gd ).value_or( 1 ); } );
+    gc.grepIn = "any";   // RT2: the exhaustive view — every tier, and the <unindexed> section — for the fold
+    const MainDispatch ad      = routeDispatch( d, gc );
+    const RouteRender  grepAny = renderRouteCaptured( [ & ] { return runGrep( ad ).value_or( 1 ); } );
     d.redactCounts = before;
-    if( !defs.captured || !grep.captured || grep.rc != 0 )
+    if( !defs.captured || !grep.captured || grep.rc != 0 || !grepAny.captured || grepAny.rc != 0 )
     {
         return std::nullopt;
     }
-    const std::string_view verb = kind == rw::forroute::RouteKind::WhoCalls ? "callers" : kind == rw::forroute::RouteKind::DirectRadius ? "uses" : "impact";
+    using rw::forroute::RouteKind;
+    const std::string_view verb = kind == RouteKind::WhoCalls ? "callers" : kind == RouteKind::Transitive ? "impact" : "uses";
     const std::vector<rw::partialwarn::CorpusHit> hits = routeCorpusHits( d, last );
-    return rw::partialwarn::frozenF1( { .verb = verb, .answer = answer, .defs = defs.out, .grep = grep.out, .last = last, .hits = hits } );
+    return rw::partialwarn::rt2Evidence( { .verb = verb, .answer = answer, .defs = defs.out, .grep = grep.out, .last = last, .hits = hits }, grepAny.out,
+                                         kind == RouteKind::WhoCalls || kind == RouteKind::WhereUsed );
+}
+
+// The <text_only> fold: every text-only file up to kFoldCap, sorted by path ("" when there is none).
+inline std::string foldElementXml( const rw::partialwarn::RouteEvidence& ev )
+{
+    if( ev.fold.empty() )
+    {
+        return {};
+    }
+    std::vector<char> esc;
+    std::string       x = "<text_only n=\"" + std::to_string( ev.fold.size() ) + "\"";
+    x += ev.fold.size() > rw::partialwarn::kFoldCap ? " capped=\"1\">" : ">";
+    for( std::size_t i = 0; i < ev.fold.size() && i < rw::partialwarn::kFoldCap; ++i )
+    {
+        x += "<tx p=\"";
+        x += rw::escapeXml( ev.fold[ i ].file, esc );
+        x += ':' + std::to_string( ev.fold[ i ].line ) + "\"/>";
+    }
+    return x + "</text_only>";
 }
 
 // The <route …/> element.
-inline std::string routeElementXml( const rw::Config& cfg, rw::forroute::RouteKind kind, const std::string& spelling, const std::optional<rw::partialwarn::Warn>& w,
-                                    bool page1 )
+inline std::string routeElementXml( const rw::Config& cfg, rw::forroute::RouteKind kind, const std::string& spelling,
+                                    const std::optional<rw::partialwarn::RouteEvidence>& w, bool page1 )
 {
     std::vector<char> esc;
     std::string       x = "<route from=\"for\" kind=\"";
@@ -179,10 +212,10 @@ inline std::string routeElementXml( const rw::Config& cfg, rw::forroute::RouteKi
     {
         x += kind == rw::forroute::RouteKind::WhoCalls ? " why=\"unchecked\"" : " warn=\"1\" why=\"kind\"";
     }
-    else if( w->warn )
+    else if( !w->residual.empty() )
     {
         x += " warn=\"1\" why=\"";
-        x += rw::escapeXml( w->why, esc );
+        x += rw::escapeXml( w->residual, esc );
         x += '"';
     }
     x += page1 ? " page1=\"1\"" : "";
@@ -214,8 +247,8 @@ std::optional<int> runForVerbRoute( const MainDispatch& d )
     {
         return std::nullopt;   // the --for answer, byte for byte (the verb's notices are dropped with its answer)
     }
-    const std::optional<rw::partialwarn::Warn> w = routeEvidence( d, rd.kind, spelling, verb.out );
-    const bool wantPage = w ? w->warn : rd.kind != rw::forroute::RouteKind::WhoCalls;
+    const std::optional<rw::partialwarn::RouteEvidence> w = routeEvidence( d, rd.kind, spelling, verb.out );
+    const bool wantPage = w ? !w->residual.empty() : rd.kind != rw::forroute::RouteKind::WhoCalls;
 
     // the first --for page, rendered as the opted-out call would serve it
     RouteRender page;
@@ -227,7 +260,7 @@ std::optional<int> runForVerbRoute( const MainDispatch& d )
 
     std::string doc = std::move( verb.out );
     const rw::CompactRootInfo root = rw::findCompactRoot( doc );
-    doc.insert( root.openEnd, routeElementXml( d.cfg, rd.kind, spelling, w, hasPage ) );
+    doc.insert( root.openEnd, routeElementXml( d.cfg, rd.kind, spelling, w, hasPage ) + ( w ? foldElementXml( *w ) : std::string() ) );
     (void)rw::applyCompactDialect( doc, ::compactLegendHint( d.cfg, doc ) );   // the bare call's dialect: main.cpp's layer skips --for
     if( hasPage )
     {

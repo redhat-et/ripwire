@@ -38,6 +38,7 @@ enum class RouteKind : std::uint8_t
     Transitive,     // → --impact
     DirectRadius,   // → --uses
     WhoCalls,       // → --callers
+    WhereUsed,      // → --uses (RT2)
 };
 
 // One row per routed kind, indexed by RouteKind: its name and the verb flag that answers it, spelled as a selector flag takes it.
@@ -52,8 +53,9 @@ inline constexpr KindRow kKindRows[] =
     { "transitive", "--impact=" },        // Transitive
     { "direct-radius", "--uses=" },       // DirectRadius
     { "who-calls", "--callers=" },        // WhoCalls
+    { "where-used", "--uses=" },          // WhereUsed
 };
-static_assert( std::size( kKindRows ) == std::size_t( RouteKind::WhoCalls ) + 1, "one row per RouteKind, in enum order" );
+static_assert( std::size( kKindRows ) == std::size_t( RouteKind::WhereUsed ) + 1, "one row per RouteKind, in enum order" );
 [[nodiscard]] constexpr std::string_view kindName( RouteKind k ) noexcept { return kKindRows[ std::size_t( k ) ].name; }
 [[nodiscard]] constexpr std::string_view verbFlag( RouteKind k ) noexcept { return kKindRows[ std::size_t( k ) ].verbFlag; }
 
@@ -169,10 +171,10 @@ template <class OkAt>
 {
     return std::ranges::any_of( cues, [ & ]( std::string_view cue ) { return lq.find( cue ) != std::string_view::npos; } );
 }
-// `word` with \b after it (no \b before: `hops?\b` and `depends? on` are unanchored on the left).
-[[nodiscard]] inline bool hasWithBoundaryAfter( std::string_view lq, std::string_view word )
+// `word` with \b after it, and also before it when `before` (`hops?\b` and `depends? on` are unanchored on the left).
+[[nodiscard]] inline bool hasBoundedWord( std::string_view lq, std::string_view word, bool before )
 {
-    return occursWhere( lq, word, [ & ]( std::size_t at ) { return isBoundary( lq, at + word.size() ); } );
+    return occursWhere( lq, word, [ & ]( std::size_t at ) { return ( !before || isBoundary( lq, at ) ) && isBoundary( lq, at + word.size() ); } );
 }
 // `\bcall(s|ed|ers?)?\b`: a \b before "call" and after one of its suffixes (the empty one included).
 [[nodiscard]] inline bool hasCallWord( std::string_view lq )
@@ -194,7 +196,7 @@ template <class OkAt>
     {
         return true;
     }
-    if( hasWithBoundaryAfter( lq, "hop" ) || hasWithBoundaryAfter( lq, "hops" ) )
+    if( hasBoundedWord( lq, "hop", false ) || hasBoundedWord( lq, "hops", false ) )
     {
         return true;
     }
@@ -206,45 +208,106 @@ template <class OkAt>
     return upTo || occursWhere( lq, "trace", [ & ]( std::size_t at ) { return isBoundary( lq, at ) && isBoundary( lq, at + 5 ); } );
 }
 
+// rule R2's where-used cues (RT2; see the header for the pattern this transcribes).
+[[nodiscard]] inline bool isWhereUsed( std::string_view lq )
+{
+    constexpr std::string_view kWords[] = { "usage", "usages", "reference", "references", "referenced", "referencing", "pass", "passes",
+                                            "passed", "passing", "apply", "applies", "applied", "invoke", "invokes", "invoked" };
+    if( std::ranges::any_of( kWords, [ & ]( std::string_view w ) { return hasBoundedWord( lq, w, true ); } ) )
+    {
+        return true;
+    }
+    if( occursWhere( lq, "decorat", [ & ]( std::size_t at ) { return isBoundary( lq, at ); } ) )
+    {
+        return true;
+    }
+    // \bused\b(?!\s+by\b): "used by X" names the user, not where the subject is used
+    const bool usedNotBy = occursWhere( lq, "used", [ & ]( std::size_t at )
+    {
+        if( !isBoundary( lq, at ) || !isBoundary( lq, at + 4 ) )
+        {
+            return false;
+        }
+        std::size_t k = at + 4;
+        while( k < lq.size() && ( lq[ k ] == ' ' || lq[ k ] == '\t' || lq[ k ] == '\n' || lq[ k ] == '\r' || lq[ k ] == '\f' || lq[ k ] == '\v' ) )
+        {
+            ++k;
+        }
+        return k == at + 4 || !( lq.substr( k, 2 ) == "by" && isBoundary( lq, k + 2 ) );
+    } );
+    if( usedNotBy )
+    {
+        return true;
+    }
+    // \bwhere is\b[^?]*\buse: "use" with a \b before it, after "where is" and before any '?'
+    return occursWhere( lq, "where is", [ & ]( std::size_t at )
+    {
+        if( !isBoundary( lq, at ) || !isBoundary( lq, at + 8 ) )
+        {
+            return false;
+        }
+        const std::size_t q    = lq.find( '?', at + 8 );
+        const std::string_view rest = lq.substr( at + 8, q == std::string_view::npos ? std::string_view::npos : q - at - 8 );
+        const std::size_t base = at + 8;
+        return occursWhere( rest, "use", [ & ]( std::size_t u ) { return isBoundary( lq, base + u ); } );
+    } );
+}
+
 // rule R's direct-radius cues: plain substrings.
 inline constexpr std::string_view kDirectRadiusCues[] = { "blast radius", "what breaks", "at risk", "affected", "must change", "have to change", "which files" };
 } // namespace detail
 
-// Rule E: the symbol the question names, or "" (no route).
-[[nodiscard]] inline std::string extractSymbol( std::string_view q )
+namespace detail
 {
-    std::string_view kept;
-    // re.findall(r"`([^`\n]+)`"): leftmost match, then the scan resumes after it; a backtick that opens nothing is skipped
-    for( std::size_t i = 0; i < q.size(); )
+// A span's trailing "()" or "!" (a call or a Rust macro spelling) is not part of the symbol.
+[[nodiscard]] constexpr std::string_view trimCallSuffix( std::string_view span ) noexcept
+{
+    if( span.ends_with( "()" ) )
     {
-        if( q[ i ] != '`' )
+        span.remove_suffix( 2 );
+    }
+    else if( span.ends_with( '!' ) )
+    {
+        span.remove_suffix( 1 );
+    }
+    return span;
+}
+// re.findall(r"`([^`\n]+)`"): each span, leftmost first; the scan resumes after a match, and a backtick that opens nothing is skipped.
+template <class OnSpan>
+inline void forEachBacktickSpan( std::string_view q, OnSpan onSpan )
+{
+    for( std::size_t i = q.find( '`' ); i != std::string_view::npos; )
+    {
+        const std::size_t j = q.find_first_of( "`\n", i + 1 );
+        if( j != std::string_view::npos && q[ j ] == '`' && j > i + 1 )
         {
-            ++i;
-            continue;
-        }
-        std::size_t j = i + 1;
-        while( j < q.size() && q[ j ] != '`' && q[ j ] != '\n' )
-        {
-            ++j;
-        }
-        if( j < q.size() && q[ j ] == '`' && j > i + 1 )
-        {
-            const std::string_view span = q.substr( i + 1, j - i - 1 );
-            if( detail::isIdentPath( span ) && detail::isCodeShaped( span ) )
-            {
-                kept = span;
-            }
-            i = j + 1;
+            onSpan( q.substr( i + 1, j - i - 1 ) );
+            i = q.find( '`', j + 1 );
         }
         else
         {
-            ++i;
+            i = q.find( '`', i + 1 );
         }
     }
-    return std::string( kept );
+}
+} // namespace detail
+
+// Rule E2: the symbol the question names, or "" (no route): the last code-shaped span, else the last identifier span.
+[[nodiscard]] inline std::string extractSymbol( std::string_view q )
+{
+    std::string_view codeShaped, plain;
+    detail::forEachBacktickSpan( q, [ & ]( std::string_view raw )
+    {
+        const std::string_view span = detail::trimCallSuffix( raw );
+        if( detail::isIdentPath( span ) )
+        {
+            ( detail::isCodeShaped( span ) ? codeShaped : plain ) = span;
+        }
+    } );
+    return std::string( codeShaped.empty() ? plain : codeShaped );
 }
 
-// Rule R: the question's kind by its wording alone.
+// Rule R2: the question's kind by its wording alone.
 [[nodiscard]] inline RouteKind kindOf( std::string_view q )
 {
     const std::string lq = rw::routeLower( q );   // re.I on these all-ASCII patterns
@@ -255,6 +318,10 @@ inline constexpr std::string_view kDirectRadiusCues[] = { "blast radius", "what 
     if( detail::hasAnyCue( lq, detail::kDirectRadiusCues ) )
     {
         return RouteKind::DirectRadius;
+    }
+    if( detail::isWhereUsed( lq ) )
+    {
+        return RouteKind::WhereUsed;
     }
     if( detail::hasCallWord( lq ) )
     {
