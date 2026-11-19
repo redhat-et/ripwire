@@ -818,6 +818,7 @@ for _g in \
     notecanoncheck \
     notescheck \
     notesdegradecheck \
+    notfoundtextcheck \
     nsfiltercheck \
     nulbytecheck \
     numericrefusecheck \

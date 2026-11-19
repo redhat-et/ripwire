@@ -406,6 +406,7 @@
  "notecanoncheck.sh": 20.8,
  "notescheck.sh": 43.4,
  "notesdegradecheck.sh": 1.7,
+ "notfoundtextcheck.sh": 2.0,
  "nsfiltercheck.sh": 2.5,
  "nulbytecheck.sh": 0.6,
  "numericrefusecheck.sh": 2.7,

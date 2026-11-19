@@ -12,6 +12,7 @@
 #include "contractseed.h" // BODILESS-SEED: a contract method seeds --impact/--callers/--safe-delete/--path from its implementors' bodies
 #include "forgraphverb.h" // GV-PATH-BIND: narrowRefusedSpelling — the --for block's M1 rule on the direct --path/--connect/--callers
 #include "aliashop.h"  // XF-ALIAS-HOP: --uses lists the sites written through an alias of the definition
+#include "notfoundtext.h"   // BX2 FIX 9: a callers / uses / impact miss carries the name's plain-text occurrences
 #include "infra/sortutil.h"   // svLess: the explicit byte order the alias-name table is sorted and binary-searched by (portablebuildcheck #6)
 #include <string_view>       // std::string_view — the %.*s (precision, pointer) pair collapses to one view
 
@@ -163,6 +164,7 @@ inline int refuseNotFoundWithAnswer( const rw::IngestResult& ing, const rw::Conf
 {
     rw::emitTo( stderr, "{}{}{}{}\n", prefix, spec, rw::notFoundRenameClause( answer.near ), rw::selectorFaultClause( ing, spec, retryForm ) );
     answer.refused = rw::refusedMatchCount( ing, spec );   // js-def-naming fix 1: several definitions fit and none was chosen: refused=N beside found=0
+    rw::attachNotFoundText( ing, answer );                  // BX2 FIX 9: callers / uses / impact only; plain text, never calls
     rw::writeNotFoundAnswer( stdout, answer, cfg.json );
     return 1;
 }
@@ -1237,7 +1239,9 @@ std::optional<int> runUses( const MainDispatch& d )
             const rw::NotFoundNear near = rw::notFoundNear( ing, sel.suggestName, notFoundGitRoot( ing, cfg ) );
             const std::string      msg  = "ripwire: --uses selector matched no indexed definition: " + std::string( sym ) + rw::notFoundRenameClause( near );
             rw::emitTo( stderr, "{}\n", near.renamed ? msg : withDidYouMean( ing, sel.suggestName, msg ) );
-            rw::writeNotFoundAnswer( stdout, rw::NotFoundAnswer{ "uses", { { "of", std::string( sym ) } }, {}, near }, cfg.json );
+            rw::NotFoundAnswer answer{ "uses", { { "of", std::string( sym ) } }, {}, near };
+            rw::attachNotFoundText( ing, answer );   // BX2 FIX 9
+            rw::writeNotFoundAnswer( stdout, answer, cfg.json );
             return 1;
         }
 

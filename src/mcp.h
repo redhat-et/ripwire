@@ -22,6 +22,7 @@
 #include "compactlegend.h"   // P1 (L7): the legend:"compact" rewrite applied in textResult
 #include "legenddict.h"      // r2-LO: the session dictionary and the legend="ref" posture (resources/read, textResult)
 #include "mcpedit.h"       // the edit verbs + runEditVerb runMcp dispatches to
+#include "notfoundtext.h"   // BX2 FIX 9: a not-found answer's plain-text occurrences, as the CLI twin's
 
 #include "infra/stdinline.h"     // R4: readByteSafeLine — the byte-safe stdin line reader the request loop runs on
 #include "infra/blanktext.h"     // §S3: hasVisibleContent / blankPayloadSpelling + the derived kBlankRanges table
@@ -1831,6 +1832,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             const auto notFoundAnswered = [ & ]( std::string msg, NotFoundAnswer answer, bool json ) -> std::string
             {
                 msg = withRenameClause( std::move( msg ), answer.near, answer.missing );   // the batch arm's rule too
+                attachNotFoundText( getIndex( path ).ing, answer );   // BX2 FIX 9: the CLI twin's plain-text occurrences (callers / uses / impact)
                 std::string doc = captureXml( [ & ]( std::FILE* f ) { writeNotFoundAnswer( f, answer, json ); } );
                 while( !doc.empty() && doc.back() == '\n' ) { doc.pop_back(); }
                 return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"error\":{\"code\":-32602,\"message\":\""
