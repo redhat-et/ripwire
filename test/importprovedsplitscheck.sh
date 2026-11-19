@@ -40,11 +40,11 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "FAIL: no binary at $BIN"; exit 1; }
-echo "importprovedsplitscheck: $( "$BIN" --version 2>/dev/null )"
+echo "importprovedsplitscheck: $( "$BIN" --version 2>/dev/null )"   # status: banner only; every arm below checks its own run
 
 # ── fixtures ──
 TS="$TMP/ts"; mkdir -p "$TS/a" "$TS/b" "$TS/c"
@@ -176,7 +176,8 @@ neg ts viabarrel.ts file 3 "a/uri.ts::file b/uri.ts::file" split
 neg ts shadow.ts file 3 "a/uri.ts::file"
 neg tslocal local.ts file 5 "local.ts::file"
 neg ts ren.ts h 3 "c/other.ts::helper" import
-( cd "$TS" && "$BIN" . --no-cache --callers=file --legend=compact ) >"$TMP/loose.callers" 2>/dev/null || no "loose: the --callers=file run failed"
+( cd "$TS" && "$BIN" . --no-cache --callers=file --legend=compact ) >"$TMP/loose.callers" 2>/dev/null; rc=$?
+[ "$rc" -eq 0 ] || no "loose: the --callers=file run failed (rc=$rc)"
 ndc=$( grep -o '<dc [^>]*p="loose.ts:[68]"[^>]*>' "$TMP/loose.callers" | grep -c 'via="declined"' )
 if [ "$ndc" -eq 2 ] && ! grep -q '<s [^>]*p="loose.ts:[68]"' "$TMP/loose.callers"; then ok "loose.ts:6/8 this.u.file() / v.file() stay declined (2 dc rows, no caller row)"
 else no "loose.ts: want 2 declined sites and no caller row, got $ndc"; sed 's/<!--.*-->//; s/^/        | /' "$TMP/loose.callers" | head -5; fi
