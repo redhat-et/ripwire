@@ -456,18 +456,10 @@ inline std::vector<NodeId> oneHopCallerRows( const IngestResult& ing, const Grap
 // replacement text is scanned, ingest_relations.h captureMacroBodyCalls) and --impact walks it, but --callers printed the macro
 // row and stopped — 1 of the 9 files that call it. A function-like macro is not a caller of its own: what calls the code it
 // expands to is whatever invokes it. So after the direct rows, the callers of every caller row that is a macro (t="macro") are
-// rows too (BX1 walked a chain of macros; BX2 keeps the first hop, below), each marked with the macro it
+// rows too, through a chain of macros (a macro row's own callers are walked when they are macros), each marked with the macro it
 // invokes (via="macro:NAME"). Each node once, never a match or a direct row; the walk ends because every node is visited once.
 // The block keeps the direct rows' order rule (oneHopCallerRows: tier, path, then ranked before the cap) and follows them, so
 // the direct rows keep their positions and an answer with no macro row is unchanged.
-// BX2 (the held FIX 2, limited — test/verbfixcheck.sh F2): the FIRST macro hop only, and C-preprocessor macros only. BX1's chain
-// walk printed second-order sites past the question (a confirmation cell's +1.8 KB through a macro calling a macro, no group
-// gained), so a caller of a direct macro row that is itself a macro is listed (via="macro:NAME") but not walked. A Rust
-// `macro_rules!` row (LangFacts::bangMacros) is not seen through: its transcriber's calls already sit in the macro's own file.
-inline bool seeThroughMacro( const Symbol& s ) noexcept
-{
-    return s.kind == SymKind::Macro && !langFacts( s.lang ).bangMacros;
-}
 struct MacroSeeThrough
 {
     std::vector<NodeId> rows;   // the see-through callers, in served order
@@ -479,7 +471,7 @@ inline MacroSeeThrough macroSeeThroughRows( const IngestResult& ing, const Graph
     std::vector<NodeId> frontier;
     for( const NodeId r : direct )
     {
-        if( r < ing.symbols.size() && seeThroughMacro( ing.symbols[r] ) )
+        if( r < ing.symbols.size() && ing.symbols[r].kind == SymKind::Macro )
         {
             frontier.push_back( r );
         }
@@ -499,7 +491,7 @@ inline MacroSeeThrough macroSeeThroughRows( const IngestResult& ing, const Graph
     HashMap<NodeId, NodeId> viaOf;
     const auto*             ro = g.inEdges.rowOffsets();
     const auto*             ci = g.inEdges.colIndices();
-    for( std::size_t at = 0; at < frontier.size(); ++at )   // the direct macro rows only (BX2: one hop; a macro found here is a row, not walked)
+    for( std::size_t at = 0; at < frontier.size(); ++at )   // frontier grows as macro callers are found: a chain of macros
     {
         const NodeId m = frontier[at];
         for( std::uint32_t k = ro[m]; k < ro[m + 1]; ++k )
@@ -509,6 +501,10 @@ inline MacroSeeThrough macroSeeThroughRows( const IngestResult& ing, const Graph
                 seen[c] = 1;
                 out.rows.push_back( c );
                 viaOf.emplace( c, m );
+                if( ing.symbols[c].kind == SymKind::Macro )
+                {
+                    frontier.push_back( c );
+                }
             }
         }
     }
