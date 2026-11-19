@@ -2405,6 +2405,8 @@ enum class GrepIn : std::uint8_t { Code = 0, Any = 1 };
 
 // Everything the emitters must DISCLOSE about a tier pass, and nothing they can infer. Counts are per-run
 // facts of the corpus, not of thread timing.
+inline constexpr std::size_t kGrepHeldFilesListed = 5;   // held= paths listed; held_files= counts every one
+
 struct GrepTierReport
 {
     std::uint32_t suppressedComment = 0;   // classified hits held back because a tighter tier was non-empty
@@ -2418,6 +2420,10 @@ struct GrepTierReport
                                                    // served hits are string-tier (string_hits=); 0 on main's plain literal lift
     const char*   budgetHit         = nullptr;       // nullptr | "files" | "bytes" — E5's disclosed bail-out
     bool          didRun            = false;         // false under --grep-in=any: no tier vocabulary may be emitted
+    // BX2 step 2 (test/grepdegradedcheck.sh P3-P7): the files whose EVERY hit was held back — no row of the answer names them, so
+    // the answer does (held_files= the count, held= the first kGrepHeldFilesListed in collection order, held_next= serves them).
+    std::uint32_t              heldFiles = 0;
+    std::vector<std::uint32_t> heldFileIds;
 
     // Is there anything a reader MUST be told? The emitters gate both the attributes and the legend prose on
     // this one predicate, so a run that held nothing back stays byte-identical to an untiered answer (and
@@ -2648,6 +2654,20 @@ inline std::vector<char> grepFilesHoldingCode( const IngestResult& ing, const st
     return fileHasCode;
 }
 
+// BX2 step 2: one hit file closed by the tier filter — counted (and listed, up to kGrepHeldFilesListed) when none of its hits was kept.
+inline void grepNoteHeldFile( GrepTierReport& report, std::uint32_t fileId, bool nothingKept )
+{
+    if( !nothingKept )
+    {
+        return;
+    }
+    ++report.heldFiles;
+    if( report.heldFileIds.size() < kGrepHeldFilesListed )
+    {
+        report.heldFileIds.push_back( fileId );
+    }
+}
+
 // Filters `collected.raw` order-preserving (already tier-then-path sorted — filtering never reorders), the
 // same post-filter shape as grepApplyBooleanTerms above, and runs AFTER it: tiering the survivors of a
 // boolean query is both cheaper and the only reading that matches what the answer will print.
@@ -2785,8 +2805,14 @@ inline GrepCollection grepApplySpanTiers( const IngestResult& ing, GrepCollectio
     const std::vector<char> fileHasCode = ranked ? grepFilesHoldingCode( ing, collected.raw, hitTier ) : std::vector<char>();   // idea #5's rank key
     std::vector<GrepRawHit> kept;
     kept.reserve( collected.raw.size() );
+    std::size_t keptAtFileStart = 0;   // BX2 step 2: kept.size() when the current file's hits began (a file's hits are contiguous)
     for( std::size_t h = 0; h < collected.raw.size(); ++h )
     {
+        if( h > 0 && collected.raw[h].fileId != collected.raw[h - 1].fileId )
+        {
+            grepNoteHeldFile( report, collected.raw[h - 1].fileId, kept.size() == keptAtFileStart );
+            keptAtFileStart = kept.size();
+        }
         if( hitTier[h] == kUnclassifiedTier || ( serveMask & std::uint8_t( 1u << hitTier[h] ) ) != 0 )
         {
             kept.push_back( collected.raw[h] );
@@ -2801,6 +2827,7 @@ inline GrepCollection grepApplySpanTiers( const IngestResult& ing, GrepCollectio
             ++report.suppressedString;
         }
     }
+    grepNoteHeldFile( report, collected.raw.back().fileId, kept.size() == keptAtFileStart );   // raw is non-empty (checked on entry)
     collected.raw = std::move( kept );
     if( ranked )   // a Served lift keeps main's bytes: no order, no window, no string_hits=, no ref= (all key on servedString)
     {

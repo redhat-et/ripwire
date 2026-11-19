@@ -1217,6 +1217,10 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "suppressed_string", "suppressed_string=N: string-tier hits held back, not in hits=; the grep-in=any flag serves them", false, "grep", MapHeaderRead::No, {}, "grep" },
     { "tier_parsed", "tier_parsed=N: hit files parsed to classify hits as code/comment/string (budgeted; see tier_budget=)", false, "grep", MapHeaderRead::No, {}, "grep" },
     { "tier_unclassified", "tier_unclassified=N: hits in files never classified; nonzero = tier label unproven for them", false, "grep", MapHeaderRead::No, {}, "grep" },
+    // BX2 step 2 (verbs_grep.h grepHeldAttrs): present only when a file's every hit was held back.
+    { "held_files", "held_files=N: files whose every hit was held back (no row names them)", false, "grep", MapHeaderRead::No, {}, "grep" },
+    { "held", "held=: the first 5 of those paths", false, "grep", MapHeaderRead::No, {}, "grep" },
+    { "held_next", "held_next=: the call that serves them (every tier)", false, "grep", MapHeaderRead::No, {}, "grep" },
     // cut-fix lane D: three attributes the grep root and rows emit that the compact dialect never read. tier_parsed='s own
     // reading pointed at tier_budget= ("see tier_budget=") and no row defined it; tier= labelled a comment-only answer
     // undefined; and line_bytes= — the one disclosure that a row's matched text was CUT (search.h kGrepMatchedLineMaxBytes)

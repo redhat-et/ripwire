@@ -1205,6 +1205,22 @@ inline std::string grepUnindexedKeys( const GrepAuxCollection& aux )
 // surfaces cannot report the same run differently (mcpclidiffcheck's LENS2 fact parity). Lifted out for the
 // same reason grepUnindexedKeys above was: a payload key fragment is a helper's job, not the verb body's.
 // `floorAlreadyEmitted` (N2): the CLI grepTierAttrs twin — tier_budget floors the root unless hits_capped already did.
+// BX2 step 2: the CLI grepHeldAttrs twin (this verb is literal-only): the files whose every hit the tier held back.
+template<class PathFor>
+inline std::string grepHeldKeys( const GrepTierReport& tier, const std::string& pattern, PathFor&& pathFor )
+{
+    if( tier.heldFiles == 0 )
+    {
+        return {};
+    }
+    std::string keys = ",\"held_files\":" + std::to_string( tier.heldFiles ) + ",\"held\":[";
+    for( std::size_t k = 0; k < tier.heldFileIds.size(); ++k )
+    {
+        keys += ( k == 0 ? "\"" : ",\"" ) + mcpdetail::jsonEscape( std::string( pathFor( tier.heldFileIds[k] ) ) ) + "\"";
+    }
+    return keys + "],\"held_next\":\"" + mcpdetail::jsonEscape( nextFlag( "--grep=", pattern ) + " --grep-in=any" ) + "\"";
+}
+
 inline std::string grepTierKeys( const GrepTierReport& tier, bool floorAlreadyEmitted )
 {
     if( !tier.hasDisclosure() )
@@ -1422,7 +1438,7 @@ inline std::string grepHitsJson( const std::string& root, const std::string& pat
     // R-H: the CLI tierAttr twin (helper above) — empty when nothing was held back.
     // N2: hits_capped puts the floor on this root through the disclosure (L4's found-not-fixed MCP twin, closed here);
     // tier_budget adds it when the disclosure did not — never both.
-    const std::string tierKeys = grepTierKeys( tierReport, /*floorAlreadyEmitted=*/collected.isBudgetReached );
+    std::string tierKeys = grepTierKeys( tierReport, /*floorAlreadyEmitted=*/collected.isBudgetReached );
 
     // G1 (2026-08-15 harvest, report-memgraph §F6): `file` is root-relative when this is a single-root
     // index (ing.realPaths empty — the same condition the CLI emitter gates on), reusing sarif.h's strip
@@ -1434,6 +1450,7 @@ inline std::string grepHitsJson( const std::string& root, const std::string& pat
     {
         return singleRootJ ? sarif::rootRelativeUri( ing.files[ fileId ], rootPrefixJ ) : std::string_view( ing.files[ fileId ] );
     };
+    tierKeys += grepHeldKeys( tierReport, pattern, pathForJ );   // BX2 step 2: the CLI held_files= / held= / held_next= twin
 
     std::string out = "{\"pattern\":\"" + mcpdetail::jsonEscape( pattern )
                     // G1: mirrors the CLI <grep root="…"> — same condition (singleRootJ), same fact, right

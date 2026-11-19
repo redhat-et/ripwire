@@ -30,10 +30,12 @@ echo "grepdegradedcheck: BIN=$BIN"
 # use.c     calls frob_widget() nine times (code-tier hits; eight or more, so no thin-code lift serves strings beside them).
 # broken.c  names "frob_widget" in a string AND does not parse (an unbalanced declaration: ERROR nodes, parse_degraded).
 # clean.c   names "frob_widget" in a string and parses cleanly: its hit stays held back (suppressed_string=1).
+# note.c    names it in a comment only: held back (suppressed_comment=1). clean.c and note.c are the held files (BX2 step 2).
 mkdir -p "$DIR/src"
 { printf 'int frob_widget(void);\nint use(void)\n{\n    int n = 0;\n'; for k in 1 2 3 4 5 6 7 8 9; do printf '    n += frob_widget();\n'; done; printf '    return n;\n}\n'; } >"$DIR/src/use.c"
 printf 'const char *name = "frob_widget";\nint broken( {\n' >"$DIR/src/broken.c"
 printf 'const char *label = "frob_widget";\n' >"$DIR/src/clean.c"
+printf '/* frob_widget is documented elsewhere */\nint note;\n' >"$DIR/src/note.c"
 cd "$DIR" || exit 1
 export TMPDIR="$DIR/tmp"; mkdir -p "$TMPDIR"
 rw(){ "$BIN" "$@" 2>/dev/null; }
@@ -44,6 +46,16 @@ has "$a" 'p="src/broken.c" parse_degraded="1"' "[P1] the degraded file's hit is 
 has "$a" 'tier_unclassified="1"' "[P2] the degraded file's hit counts as unclassified"
 hasnt "$a" 'p="src/clean.c"' "[N1] a string hit in a clean file stays held back"
 has "$a" 'suppressed_string="1"' "[N2] suppressed_string= counts the clean file's hit only"
+has "$a" 'suppressed_comment="1"' "[N2b] suppressed_comment= counts note.c's comment hit"
+# BX2 step 2: a file whose EVERY hit was held back is named — a count, a bounded list, and a next= that serves it.
+has "$a" 'held_files="2"' "[P3] held_files= counts the files whose every hit was held back (clean.c, note.c)"
+has "$a" 'held="src/clean.c,src/note.c"' "[P4] held= names them, in the answer's file order"
+has "$a" 'held_next="--grep=frob_widget --grep-in=any"' "[P5] held_next= serves every tier"
+hasnt "$a" 'held="src/use.c' "[N3] a file that kept a hit is not 'held'"
+q='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"grep","arguments":{"path":"'"$DIR"'","pattern":"frob_widget"}}}'
+m="$( printf '%s\n%s\n' '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{}}' "$q" | "$BIN" --mcp 2>/dev/null )"
+has "$m" '\"held_files\":2' "[P6] the MCP grep twin carries held_files"
+has "$m" '\"held\":[\"src/clean.c\",\"src/note.c\"]' "[P7] ... and the held list"
 a="$( body "$( rw . --grep=frob_widget --grep-in=any )" )"
 has "$a" 'p="src/clean.c"' "[C2] --grep-in=any serves every tier"
 if [ "$( rw . --grep=frob_widget )" = "$( rw . --grep=frob_widget )" ]; then ok "[C3] two runs byte-identical"; else no "[C3] two runs differ"; fi
