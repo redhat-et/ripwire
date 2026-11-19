@@ -424,5 +424,73 @@ vetoArm v28b plain 'Which functions does `run_main` call transitively?'
 run v29 plain --for='What does `run_main` call?'; cmp -s "$DIR/v29.out" "$DIR/v26a.out"
 say $? "(29) [C] two runs of a vetoed question are byte-identical" "(29) [C] vetoed runs differ"
 
+# ── RT3 arms (30–35): three question kinds the RT2 rule sent to the wrong verb (results/RT3_VETOES_1119) ────────────
+# (A) a call PATH / CHAIN question is not a radius or a 1-hop-callers question: the PATH veto, no route.
+# (B) a BARE "blast radius" (no who-calls, no where-used word) is the transitive radius: --impact (it went to --uses);
+#     one that names the direct relation ("every file that calls it") stays direct-radius → --uses.
+# (C) a double-quoted literal (a message, an error string) outside every backtick span: the LITERAL veto, no route — the
+#     answer needs where the literal is built first. Each [P] arm is RED on the RT2 base (2f5561c26): that is the control.
+mkdir -p "$DIR/msg"
+cat >"$DIR/msg/tool.c" <<'C'
+#include <stdio.h>
+static void print_usage( void )
+{
+    fprintf( stderr, "usage: tool [-v] FILE\n" );
+}
+int run_tool( int argc )
+{
+    if( argc < 2 )
+    {
+        print_usage();
+        return 2;
+    }
+    return 0;
+}
+C
+# (30) [P] class A: a call-chain / call-path / path-from question is vetoed — the --for answer byte for byte, no <route>
+vetoArm v30a plain 'What is the exact call chain from `outer_entry` to `compute_total`?'
+vetoArm v30b plain 'Which call path from `outer_entry` triggers `compute_total`?'
+vetoArm v30c plain 'Trace the path from `outer_entry` to `compute_total`.'
+vetoArm v30d plain 'Show the call-chain between `run_main` and `compute_total`; who calls what?'
+# (31) [P] class C: a double-quoted literal (straight or curly quotes) is vetoed
+vetoArm v31a msg 'Running `run_tool` prints "usage: tool [-v] FILE"; where is that message built and who calls it?'
+vetoArm v31b msg 'Which function calls `print_usage` to print “usage: tool”?'
+# (32) [P] class B: "blast radius" → --impact (transitive), not --uses
+for q in 'What is the blast radius of changing `compute_total`?' 'What is the blast radius of changing `compute_total`, the helper that adds one?'; do
+    run b32 plain --for="$q"
+    F="$( firstChild "$DIR/b32.out" )"
+    [ "$( attr "$F" kind )" = transitive ] && [ "$( attr "$F" verb )" = "--impact=compute_total" ]
+    say $? "(32) [P] blast radius routes to --impact: '$q'" "(32) [P] '$q' reads '$F'"
+done
+# (33) [N] the routes that should still fire still fire, each to the verb RT2 chose
+routeIs(){ # $1 fixture $2 question $3 kind $4 verb
+    run r33 "$1" --for="$2"
+    F="$( firstChild "$DIR/r33.out" )"
+    [ "$( attr "$F" kind )" = "$3" ] && [ "$( attr "$F" verb )" = "$4" ]
+    say $? "(33) [N] still routed $3 → $4: '$2'" "(33) [N] '$2' reads '$F'"
+}
+routeIs plain 'Who calls `compute_total`?'                                  who-calls     --callers=compute_total
+routeIs plain 'Where is `compute_total` used?'                              where-used    --uses=compute_total
+routeIs plain 'What breaks if I change `compute_total`?'                    direct-radius --uses=compute_total
+routeIs plain 'Which files are affected if `compute_total` changes?'        direct-radius --uses=compute_total
+routeIs plain 'If I change `compute_total`, which files have to change?'    direct-radius --uses=compute_total
+routeIs plain 'Trace the transitive callers of `compute_total`.'            transitive    --impact=compute_total
+routeIs plain 'Which functions reach `compute_total` within two hops?'      transitive    --impact=compute_total
+routeIs plain 'What is the transitive blast radius of changing `compute_total`?' transitive --impact=compute_total
+routeIs plain 'What is the blast radius of changing `compute_total`? List every file that calls it.' direct-radius --uses=compute_total
+routeIs plain 'What is the blast radius of changing `compute_total`? List every module that references it.' direct-radius --uses=compute_total
+# near-misses of the two vetoes: a bare "path"/"chain" word, an apostrophe, quotes INSIDE a backtick span
+routeIs plain 'Which files on the include path call `compute_total`?'       direct-radius --uses=compute_total
+routeIs plain 'Who calls `compute_total` in the chain of helpers?'          who-calls     --callers=compute_total
+routeIs plain "Who calls the lib's \`compute_total\`?"                       who-calls     --callers=compute_total
+routeIs msg   'Who calls `print_usage` from `fprintf(stderr, "x")`?'        who-calls     --callers=print_usage
+# (34) [P] the vetoes are ahead of every kind: a path question with a transitive or radius word is still not routed
+vetoArm v34a plain 'Trace the call path from `outer_entry` to `compute_total`, hop by hop.'
+vetoArm v34b plain 'What is the blast radius along the call chain from `outer_entry` to `compute_total`?'
+vetoArm v34c msg   'What breaks if the "usage: tool" text built by `print_usage` changes?'
+# (35) [C] determinism of a vetoed answer
+run v35 plain --for='What is the exact call chain from `outer_entry` to `compute_total`?'; cmp -s "$DIR/v35.out" "$DIR/v30a.out"
+say $? "(35) [C] two runs of a path-vetoed question are byte-identical" "(35) [C] path-vetoed runs differ"
+
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "FAILURES ABOVE"; fi
 exit "$fail"

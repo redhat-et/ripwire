@@ -187,5 +187,24 @@ case "$BV" in *"<route "*) no "(v2) [N] batch routed a callees item" ;; *"<ctx"*
 [ "$( attr "$( printf '%s' "$BW" | routeOf )" kind )" = who-calls ]
 say $? "(v2) [P] batch: the who-calls item beside it still routes" "(v2) [P] batch who-calls item: '${BW:0:200}'"
 
+# ── RT3 over MCP (t1–t3): the PATH and LITERAL vetoes and "blast radius" → --impact, through the shared decide() ─────
+mkdir -p "$DIR/msg"
+printf '#include <stdio.h>\nstatic void print_usage( void )\n{\n    fprintf( stderr, "usage: tool [-v] FILE\\n" );\n}\nint run_tool( int argc )\n{\n    if( argc < 2 )\n    {\n        print_usage();\n        return 2;\n    }\n    return 0;\n}\n' >"$DIR/msg/tool.c"
+QA='What is the exact call chain from `run_main` to `compute_total`?'
+QC='Running `run_tool` prints "usage: tool [-v] FILE"; where is that message built and who calls it?'
+QB='What is the blast radius of changing `compute_total`?'
+MA="$( mcpfor "$DIR/plain" "$QA" )"; MC="$( mcpfor "$DIR/msg" "$QC" )"; MB="$( mcpfor "$DIR/plain" "$QB" )"
+case "$MA" in *"<route "*) no "(t1) [P] MCP for routed a call-chain question: '$( printf '%s' "$MA" | routeOf )'" ;; *"<ctx"*) ok "(t1) [P] MCP for: a call-chain question is the ranked <ctx>, no <route>" ;; *) no "(t1) [P] no answer: '${MA:0:200}'" ;; esac
+case "$MC" in *"<route "*) no "(t1) [P] MCP for routed a quoted-literal question: '$( printf '%s' "$MC" | routeOf )'" ;; *"<ctx"*) ok "(t1) [P] MCP for: a quoted-literal question is the ranked <ctx>, no <route>" ;; *) no "(t1) [P] no answer: '${MC:0:200}'" ;; esac
+[ "$( attr "$( printf '%s' "$MB" | routeOf )" kind )" = transitive ] && [ "$( attr "$( printf '%s' "$MB" | routeOf )" verb )" = "--impact=compute_total" ]
+say $? "(t2) [P] MCP for: blast radius routes to --impact" "(t2) [P] MCP blast radius: '$( printf '%s' "$MB" | routeOf )'"
+QT="$( python3 -c 'import json,sys; print(json.dumps([{"verb":"for","task":sys.argv[1]},{"verb":"for","task":sys.argv[2]},{"verb":"for","task":"Who calls `compute_total`?"}]))' "$QA" "$QB" )"
+T0="$( mcpbatch "$DIR/plain" "$QT" 0 )"; T1="$( mcpbatch "$DIR/plain" "$QT" 1 )"; T2="$( mcpbatch "$DIR/plain" "$QT" 2 )"
+case "$T0" in *"<route "*) no "(t3) [P] batch routed a call-chain item" ;; *"<ctx"*) ok "(t3) [P] batch: the call-chain item is the ranked <ctx>, no <route>" ;; *) no "(t3) [P] batch item: '${T0:0:200}'" ;; esac
+[ "$( printf '%s' "$T1" | routeOf )" = "$( printf '%s' "$MB" | routeOf )" ] && [ -n "$( printf '%s' "$T1" | routeOf )" ] && [ "$( attr "$( printf '%s' "$T1" | routeOf )" verb )" = "--impact=compute_total" ]
+say $? "(t3) [P] batch: the blast-radius item routes as the top-level MCP for (--impact)" "(t3) [P] batch blast item: '${T1:0:200}'"
+[ "$( attr "$( printf '%s' "$T2" | routeOf )" kind )" = who-calls ]
+say $? "(t3) [N] batch: the who-calls item beside them still routes" "(t3) [N] batch who-calls item: '${T2:0:200}'"
+
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "FAILURES ABOVE"; fi
 exit "$fail"

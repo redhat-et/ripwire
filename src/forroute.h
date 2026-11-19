@@ -17,6 +17,15 @@
 // (U+00A0-U+00BF, U+00D7, U+00F7) or General Punctuation (U+2000-U+206F: dashes, quotes, ellipsis), and re.I's two non-ASCII
 // folds (the Kelvin sign to k, the long s to s) are not made. results/RT1_ROUTE_1118 checks this file against rules.py on every
 // question of the development and confirmation sets.
+//
+// RT3 (results/RT3_VETOES_1119, frozen in its PREREG.md) — three kinds the RT2 rule sent to the wrong verb:
+//   PATH veto     a call-path / call-chain question ("the call chain from A to B", "which call path from main") is not a radius
+//                 or a 1-hop-callers question: no route (asksPath).
+//   LITERAL veto  a double-quoted literal outside every backtick span (an error string, a printed message): no route — the
+//                 answer needs where the literal is built first (quotesLiteral).
+//   bare blast radius  "blast radius" with no who-calls and no where-used word is TRANSITIVE (→ --impact); with one it stays
+//                 direct-radius (→ --uses), as RT2 confirmed it (isBareBlastRadius).
+// A vetoed question is answered as every unrouted question is: the --for answer, byte for byte.
 #pragma once
 
 #include <algorithm>
@@ -340,6 +349,53 @@ template <class OkAt>
     return whatSubjectCalls( lq );
 }
 
+// RT3 BARE BLAST RADIUS (class B): "blast radius" with no who-calls word (\bcall(s|ed|ers?)?\b) and no where-used cue is the
+// TRANSITIVE radius (→ --impact). A question that names the direct relation ("every file that calls it", "decorates a class
+// with it") keeps the direct-radius kind (→ --uses), as RT2 confirmed it.
+[[nodiscard]] inline bool isBareBlastRadius( std::string_view lq )
+{
+    return lq.find( "blast radius" ) != std::string_view::npos && !hasCallWord( lq ) && !isWhereUsed( lq );
+}
+
+// RT3 PATH veto (class A): a question that asks for a call PATH between two points — not a radius, not 1-hop callers:
+//   \b(call|code|execution)[- ]?(chain|path)s?\b | \b(chain|path)s?\s+(from|between)\b
+// Does one of `words` start at lq[k] and end on a \b?
+[[nodiscard]] inline bool wordStartsAt( std::string_view lq, std::size_t k, std::span<const std::string_view> words )
+{
+    return std::ranges::any_of( words, [ & ]( std::string_view w ) { return lq.substr( k, w.size() ) == w && isBoundary( lq, k + w.size() ); } );
+}
+inline constexpr std::string_view kPathNouns[] = { "chains", "chain", "paths", "path" };
+// \b(call|code|execution)[- ]?(chain|path)s?\b
+[[nodiscard]] inline bool headThenPathNoun( std::string_view lq )
+{
+    return std::ranges::any_of( std::array<std::string_view, 3>{ "call", "code", "execution" }, [ & ]( std::string_view head )
+    {
+        return occursWhere( lq, head, [ & ]( std::size_t at )
+        {
+            const std::size_t k = at + head.size();
+            const std::size_t n = k < lq.size() && ( lq[ k ] == '-' || lq[ k ] == ' ' ) ? k + 1 : k;
+            return isBoundary( lq, at ) && wordStartsAt( lq, n, kPathNouns );
+        } );
+    } );
+}
+// \b(chain|path)s?\s+(from|between)\b
+[[nodiscard]] inline bool pathNounThenPrep( std::string_view lq )
+{
+    constexpr std::string_view kPreps[] = { "from", "between" };
+    return std::ranges::any_of( kPathNouns, [ & ]( std::string_view noun )
+    {
+        return occursWhere( lq, noun, [ & ]( std::size_t at )
+        {
+            const std::size_t k = afterBoundedWord( lq, at, noun.size() );
+            return k != std::string_view::npos && k != at + noun.size() && wordStartsAt( lq, k, kPreps );   // the bounded word, then whitespace
+        } );
+    } );
+}
+[[nodiscard]] inline bool asksPath( std::string_view lq )
+{
+    return headThenPathNoun( lq ) || pathNounThenPrep( lq );
+}
+
 // rule R's direct-radius cues: plain substrings.
 inline constexpr std::string_view kDirectRadiusCues[] = { "blast radius", "what breaks", "at risk", "affected", "must change", "have to change", "which files" };
 } // namespace detail
@@ -377,6 +433,59 @@ inline void forEachBacktickSpan( std::string_view q, OnSpan onSpan )
         }
     }
 }
+// The question with each backtick span (re.findall's spans, backticks included) blanked to one space.
+[[nodiscard]] inline std::string withoutBacktickSpans( std::string_view q )
+{
+    std::string out;
+    std::size_t from = 0;
+    forEachBacktickSpan( q, [ & ]( std::string_view span )
+    {
+        const std::size_t open = std::size_t( span.data() - q.data() ) - 1;
+        out.append( q.substr( from, open - from ) );
+        out += ' ';
+        from = open + span.size() + 2;
+    } );
+    out.append( q.substr( from ) );
+    return out;
+}
+inline constexpr std::string_view kAsciiSpace = " \t\n\r\f\v";   // Python's \s on the ASCII range
+// RT3 LITERAL veto (class C): a double-quoted span — straight "…" or curly “…” — with a non-space byte, outside every backtick
+// span (a quote inside `code` is code). The answer needs where the literal is built first, which no call-graph verb lists.
+// Python: re.search(r'"[^"]*\S[^"]*"|“[^”]*\S[^”]*”', re.sub(r"`[^`\n]+`", " ", q)); \S is ASCII-whitespace-only here.
+[[nodiscard]] inline bool quotesLiteral( std::string_view q )
+{
+    const std::string t = withoutBacktickSpans( q );
+    const std::string_view v( t );
+    // straight quotes: each quote closes at the next one; an all-space pair fails and its closer is tried as an opener
+    for( std::size_t i = v.find( '"' ); i != std::string_view::npos; )
+    {
+        const std::size_t j = v.find( '"', i + 1 );
+        if( j == std::string_view::npos )
+        {
+            break;
+        }
+        if( v.substr( i + 1, j - i - 1 ).find_first_not_of( kAsciiSpace ) != std::string_view::npos )
+        {
+            return true;
+        }
+        i = j;
+    }
+    // curly quotes: U+201C opens, the next U+201D closes
+    constexpr std::string_view kOpen = "\xE2\x80\x9C", kClose = "\xE2\x80\x9D";
+    for( std::size_t i = v.find( kOpen ); i != std::string_view::npos; i = v.find( kOpen, i + kOpen.size() ) )
+    {
+        const std::size_t j = v.find( kClose, i + kOpen.size() );
+        if( j == std::string_view::npos )
+        {
+            break;
+        }
+        if( v.substr( i + kOpen.size(), j - i - kOpen.size() ).find_first_not_of( kAsciiSpace ) != std::string_view::npos )
+        {
+            return true;
+        }
+    }
+    return false;
+}
 } // namespace detail
 
 // Rule E2: the symbol the question names, or "" (no route): the last code-shaped span, else the last identifier span.
@@ -401,6 +510,10 @@ inline void forEachBacktickSpan( std::string_view q, OnSpan onSpan )
     if( detail::isTransitive( lq ) )
     {
         return RouteKind::Transitive;
+    }
+    if( detail::isBareBlastRadius( lq ) )
+    {
+        return RouteKind::Transitive;   // RT3: a bare "blast radius" is the transitive radius
     }
     if( detail::hasAnyCue( lq, detail::kDirectRadiusCues ) )
     {
@@ -433,9 +546,14 @@ struct RouteDecision
 // Both rules: a route only when E names a symbol AND R reads a kind.
 [[nodiscard]] inline RouteDecision decide( std::string_view q )
 {
-    if( detail::asksCallees( rw::routeLower( q ) ) )
+    const std::string lq = rw::routeLower( q );
+    if( detail::asksCallees( lq ) )
     {
         return {};   // RT2-V: a callees question is never routed (the header)
+    }
+    if( detail::asksPath( lq ) || detail::quotesLiteral( q ) )
+    {
+        return {};   // RT3: a call-path question, or one that quotes a literal, is never routed (the --for answer, byte for byte)
     }
     RouteDecision d;
     d.sym = extractSymbol( q );
