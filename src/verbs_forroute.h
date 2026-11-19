@@ -367,17 +367,26 @@ inline std::string assembleRouted( const MainDispatch& d, RoutedAnswer& ra, std:
     std::string doc = std::move( ra.verb.out );
     const rw::CompactRootInfo root = rw::findCompactRoot( doc );
     doc.insert( root.openEnd, routeElementXml( d.cfg, ra.rd.kind, ra.spelling, ra.w, !page.empty() ) + ( ra.w ? foldElementXml( *ra.w ) : std::string() ) );
-    // KB1 (forkeybody.h): the routed symbol's definition body (and a second named symbol's) after the verb's rows, before a carried page
+    // KB1 (forkeybody.h): the routed symbol's definition body (and a second named symbol's) after the verb's rows, before a carried page.
+    // A carried --for page carries its own key group (the same spans, the same printer); it moves up here, so the answer holds it once.
+    std::string carried( page );
     if( rw::keybody::keyBodyOn() )
     {
         const std::string_view          keyRoot = d.ing.realPaths.empty() && d.cfg.roots.size() == 1 ? d.cfg.roots[0] : std::string_view();
         const rw::keybody::KeyBodies    kb      = rw::keybody::keyBodies( d.ing, d.cfg.forTask, ra.spelling, {}, keyRoot );
         doc.insert( doc.rfind( "</" ), kb.xml );
+        std::size_t keyBegin = 0, keyEnd = 0;
+        if( const std::optional<rw::forpages::detail::Stream> st = rw::forpages::detail::readStream( carried ); st && !kb.xml.empty() )
+        {
+            keyBegin = st->keyBegin;
+            keyEnd   = st->keyEnd;
+        }
+        carried.erase( keyBegin, keyEnd - keyBegin );
     }
     (void)rw::applyCompactDialect( doc, ::compactLegendHint( d.cfg, doc ) );   // the bare call's dialect: main.cpp's layer skips --for
-    if( !page.empty() )
+    if( !carried.empty() )
     {
-        doc.insert( doc.rfind( "</" ), page );
+        doc.insert( doc.rfind( "</" ), carried );
     }
     return doc;
 }

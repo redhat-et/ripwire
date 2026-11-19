@@ -11,7 +11,8 @@
 // dropped — forroute.h's own span reader), rule E2's symbol first (the routed verb's spelling when a route answered), then the
 // others in question order, each once. A span is KEYED when it places 1..kSubjectMaxDefs bodied SOURCE definitions (subjectanchor.h
 // placeCandidates / sourceClassDef: never a test, tool, vendored or non-source file, never a bodyless declaration or a module scope);
-// a span that places none, or a namesake flood, has no body here. At most kKeyBodyMax bodies ride, in key order then NodeId order.
+// a span that places none, or a namesake flood, has no body here. At most kKeyBodyMax bodies ride: round robin over the key spans (each
+// symbol's first body before any symbol's second), within a span a multi-line body before a one-line one (an @overload stub), then NodeId.
 //
 // THE BLOCK. ONE <bodies of="key" shown= total= capped= [next=]> through the ONE route-body printer (hopbody.h routeBodiesXml: each
 // <b t= l= p= n=> is the --expand body element, no callee rows, no file context, whole up to kHopBodyCapBytes; a longer one is cut at a
@@ -142,17 +143,39 @@ struct KeyBodies
 // (a body there is not repeated). `rootArg`: the single root the answer's paths are relative to ("" otherwise), as every --for body.
 inline KeyBodies keyBodies( const IngestResult& ing, std::string_view task, std::string_view first, std::string_view served, std::string_view rootArg )
 {
-    std::vector<RouteBody> want;
+    // per span: its definitions not already served, a multi-line body ahead of a one-line one (a Python @overload stub `...`, a
+    // declaration-shaped one-liner) and NodeId order within each, so the slot goes to the body that does the work
+    std::vector<std::vector<NodeId>> perSpan;
     for( const std::string& span : keySpans( task, first ) )
     {
+        std::vector<NodeId> defs;
         for( const NodeId id : keyDefs( ing, span ) )
         {
             const Symbol&     s    = ing.symbols[ id ];
             const std::string path = rootArg.empty() ? std::string( ing.files[ s.fileId ] )
                                                      : std::string( sarif::rootRelativeUri( ing.files[ s.fileId ], sarif::rootPrefixOf( rootArg ) ) );
-            if( std::ranges::find( want, id, &RouteBody::id ) == want.end() && !bodyServed( served, path, s.line ) )
+            if( !bodyServed( served, path, s.line ) )
             {
-                want.push_back( { id, {} } );
+                defs.push_back( id );
+            }
+        }
+        std::ranges::stable_partition( defs, [ & ]( NodeId id ) { return ing.symbols[ id ].loc > 1; } );
+        perSpan.push_back( std::move( defs ) );
+    }
+    // round robin over the spans (each named symbol's first body before any symbol's second), key order within a round
+    std::vector<RouteBody> want;
+    for( std::size_t round = 0, added = 1; added > 0; ++round )
+    {
+        added = 0;
+        for( const std::vector<NodeId>& defs : perSpan )
+        {
+            if( round < defs.size() )
+            {
+                ++added;
+                if( std::ranges::find( want, defs[ round ], &RouteBody::id ) == want.end() )
+                {
+                    want.push_back( { defs[ round ], {} } );
+                }
             }
         }
     }

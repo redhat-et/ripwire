@@ -24,6 +24,8 @@
 #         definitions); a definition only in a test file; --legend=first; --signatures-only; --token-budget
 #   (K8)  a body the page already carries is not repeated (the name-exact anchor body): no key block, and the arm is not vacuous
 #   (K9)  well formed (xmllint) and deterministic (two runs byte-identical)
+#   (K10) ordering: a Python @overload pair of one-line stubs and the real definition -> the real (multi-line) body takes the first slot
+#   (K11) a warned routed answer (who-calls through a macro: the --for page is carried) holds ONE key block: the carried page's moves up
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${RIPWIRE_BIN:-${1:-$ROOT/build/ripwire}}"
@@ -54,6 +56,42 @@ printf '#include "lib.h"\nint run_main( void )\n{\n    return compute_total( 2 )
 for i in $( seq 1 13 ); do printf 'int flood_fn%s( void );\nint flood_fn( void )\n{\n    return %d;\n}\n' "" "$i" >"$F/flood/f$i.c"; done
 printf 'int only_in_test( void )\n{\n    return 7;\n}\nint test_main( void )\n{\n    return only_in_test();\n}\n' >"$F/tests/test_lib.c"
 
+P="$DIR/py"; mkdir -p "$P/pkg"
+cat >"$P/pkg/util.py" <<'PYSRC'
+from typing import overload
+
+
+@overload
+def pick_one(x: int) -> int: ...
+@overload
+def pick_one(x: str) -> str: ...
+def pick_one(x):
+    if isinstance(x, int):
+        return x + 1
+    return x.strip()
+PYSRC
+printf 'from pkg.util import pick_one
+
+
+def run():
+    return pick_one(1)
+' >"$P/pkg/main.py"
+M="$DIR/mac"; mkdir -p "$M"
+printf '#include "lib.h"
+int compute_total( int a )
+{
+    return a + 1;
+}
+' >"$M/lib.c"
+printf 'int compute_total( int a );
+#define TOTAL( x ) compute_total( x )
+' >"$M/lib.h"
+for f in a b; do printf '#include "lib.h"
+int use_%s( void )
+{
+    return TOTAL( 1 );
+}
+' "$f" >"$M/$f.c"; done
 cli(){ ( cd "$F" && "$BIN" . --no-cache --for="$1" "${@:2}" 2>/dev/null ); }
 off(){ ( cd "$F" && RIPWIRE_NO_KEY_BODY=1 "$BIN" . --no-cache --for="$1" "${@:2}" 2>/dev/null ); }
 mcpfor(){ python3 - "$BIN" "$1" "$2" <<'PY'
@@ -94,6 +132,8 @@ for arm in "--legend=first" "--signatures-only" "--token-budget=3000"; do
     n=$(( n + 1 )); cli "$QU" $arm >"$DIR/neg$n.on"; off "$QU" $arm >"$DIR/neg$n.off"
 done
 cli '`compute_total`' >"$DIR/dup.on"; off '`compute_total`' >"$DIR/dup.off"
+( cd "$P" && "$BIN" . --no-cache --for='Who calls `pick_one`?' 2>/dev/null ) >"$DIR/ovl.on"
+( cd "$M" && "$BIN" . --no-cache --for='Who calls `compute_total`?' 2>/dev/null ) >"$DIR/mac.on"
 
 python3 - "$DIR" <<'PY'
 import os, re, sys
@@ -202,6 +242,14 @@ for i, lab in enumerate(labels, 1):
 don, doff = rd("dup.on"), rd("dup.off")
 carried = re.search(r'<b [^>]*n="compute_total"', doff[:12000]) is not None
 say(carried and don == doff, "(K8) the name-exact answer already carries compute_total's body on page 1: no key block (not vacuous: %s)" % carried)
+# (K10) overload ordering
+ov = KEY.findall(rd("ovl.on"))
+bl = re.findall(r'<b [^>]*\bl="(\d+)"', ov[0]) if ov else []
+say(bool(ov) and bl and "if isinstance(x, int):" in ov[0].split("</b>")[0], "(K10) the multi-line pick_one takes the first slot ahead of the @overload stubs (l=%s)" % bl)
+# (K11) warned routed: one key block
+mac = rd("mac.on")
+say('warn="1"' in mac and 'page1="1"' in mac and len(KEY.findall(mac)) == 1 and mac.find('<bodies of="key"') < mac.find("<ctx task="),
+    "(K11) a warned routed answer with a carried page holds one key block, ahead of the carried page")
 # (K9)
 say(ron == rd("r.on2") and uon == rd("u.on2"), "(K9) two runs byte-identical (routed, unrouted)")
 sys.exit(1 if bad else 0)
