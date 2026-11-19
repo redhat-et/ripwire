@@ -73,6 +73,7 @@ struct EntryIndex
 {
     std::vector<std::string>   hash;    // by id: 16 lowercase hex
     std::vector<std::size_t>   order;   // ids of matchable entries, longest body first
+    std::vector<std::size_t>   spaceLed;   // ids whose body opens with a space: a clause that follows another with no separator
 };
 
 inline const EntryIndex& entryIndex()
@@ -85,6 +86,7 @@ inline const EntryIndex& entryIndex()
         {
             x.hash[ id ] = entryHashOf( id );
             if( legenddict::entryBody( id ).size() >= kMinEntryBytes ) { x.order.push_back( id ); }
+            if( legenddict::entryBody( id ).size() >= kMinEntryBytes && legenddict::entryBody( id ).front() == ' ' ) { x.spaceLed.push_back( id ); }
         }
         std::sort( x.order.begin(), x.order.end(), []( std::size_t a, std::size_t b )
                    {
@@ -121,7 +123,11 @@ inline bool rightBoundary( std::string_view t, std::size_t e, std::string_view b
     if( e >= t.size() ) { return false; }
     const std::string_view rest = t.substr( e );
     if( rest.starts_with( " -->" ) || rest.starts_with( "-->" ) || rest.starts_with( " [" ) || t[ e ] == ']' ) { return true; }
-    return ( t[ e ] == '.' || t[ e ] == ';' ) && ( e + 1 == t.size() || t[ e + 1 ] == ' ' );
+    if( ( t[ e ] == '.' || t[ e ] == ';' ) && ( e + 1 == t.size() || t[ e + 1 ] == ' ' ) ) { return true; }
+    // a clause the composer appends with only its own leading space (" est_tokens= prices …" after the section-stub
+    // clause): the next clause begins here, so this one ends here
+    return t[ e ] == ' ' && std::any_of( entryIndex().spaceLed.begin(), entryIndex().spaceLed.end(),
+                                         [ & ]( std::size_t id ) { return rest.starts_with( legenddict::entryBody( id ) ); } );
 }
 
 }   // namespace detail
@@ -281,7 +287,11 @@ inline std::string referInPlace( std::string_view reduced, std::size_t n )
     {
         return "<!-- " + ref + " -->";
     }
-    std::string out( reduced.substr( 0, reduced.size() - 3 ) );
+    // what a removal leaves at the comment's start (". ; lego/compose …" once the clauses before it went) is punctuation
+    // with nothing before it: trimmed, as legenddict::tidyComment trims the MCP twin's
+    std::string_view inner = reduced.substr( 4, reduced.size() - 7 );
+    while( !inner.empty() && ( inner.front() == ' ' || inner.front() == '.' || inner.front() == ';' || inner.front() == ':' ) ) { inner.remove_prefix( 1 ); }
+    std::string out = "<!-- " + std::string( inner );
     while( !out.empty() && out.back() == ' ' ) { out.pop_back(); }
     return out + " [" + ref + "] -->";
 }

@@ -236,5 +236,14 @@ else bad "(S12) block-local legends: $nlit in the plain answer, $nref referred t
 if [ "$(py lossless "$WORK/lit.plain" "$WORK/lit.red")" = 1 ] && xmllint --noout "$WORK/lit.red" 2>/dev/null; then pass "(S12) rows byte-identical, well-formed"
 else bad "(S12) the block-legend reduction moved a row or broke the XML"; fi
 
+# ── (S13) the pieces: the est_tokens= sentence and a legend cut down per answer are entries too ────────────────────
+ne=$(grep -c "est_tokens= prices this bundle in tokens" "$WORK/for.plain"); nr=$(grep -c "est_tokens= prices this bundle in tokens" "$WORK/for.red")
+if [ "$ne" -gt 0 ] && [ "$nr" -eq 0 ]; then pass "(S13) the est_tokens= sentence is an entry: carried by the plain answer, left out once held"
+else bad "(S13) est_tokens= sentence: $ne in the plain answer, $nr still in the reduced one"; fi
+if grep -qF "for: fold kind=bodies: b t= n= p= l= top ranked rows' whole bodies, not the answer; served= of total= in budget_bytes=; slice/skip p= n= l=;" "$DICT" \
+   && ! grep -qF "slice/skip p= n= l=; slice members= of=" "$DICT"; then
+    pass "(S13) a legend whose present-only clause is erased per answer is held as its pieces, not as one string no answer prints"
+else bad "(S13) the body-fold legend is not split at its present-only members clause"; fi
+
 if [ "$fail" -eq 0 ]; then echo "legendseencheck: all arms PASS"; exit 0; fi
 echo "legendseencheck: FAILURES"; exit 1

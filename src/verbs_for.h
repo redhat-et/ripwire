@@ -746,6 +746,14 @@ using rw::deriveForConfidence;
 // root carries it (the ladder's rung (c) drops the attribute, and then its reading goes with it); the
 // confidence, sc=/route= and tail clauses always ride (forbudget-soft: no ceiling ladder sheds them); the compact bundle's hops/calls/noedge clause and the auto bundle's bodies clause are
 // mutually exclusive by construction (planForEnrichment).
+// The est_tokens= sentence the header's last comment carries, by which ceilings the root names (runForLens, #61). Named so
+// the legend dictionary can hold them (forlegendentries.h, lane LS1): --legend-seen leaves out only text that IS an entry.
+inline constexpr std::string_view kForEstTokensNote = " est_tokens= prices this bundle in tokens";
+inline constexpr std::string_view kForEstTokensBudgetCeilingNote =
+    " est_tokens= prices this bundle in tokens; budget_tokens=/max_tokens= the soft row target (rows stop once it is reached)/body ceiling asked";
+inline constexpr std::string_view kForEstTokensBudgetNote =
+    " est_tokens= prices this bundle in tokens; budget_tokens= the soft row target asked (rows stop once it is reached)";
+inline constexpr std::string_view kForEstTokensCeilingNote = " est_tokens= prices this bundle in tokens; max_tokens= the body ceiling asked";
 inline constexpr std::string_view kForCompactLegendRoot =
     "bundle=/bodies=/reason= the body posture; ";
 inline constexpr std::string_view kForCompactLegendRows =
@@ -4592,11 +4600,11 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         // compact clause names the ones THIS root carries; the full dialect's bytes are unchanged (compactlegendcheck A-PIN).
         const bool compactEstLegend = cfg.legend == "compact";
         const std::string_view kForEstTokensLegend =
-            !compactEstLegend                   ? std::string_view( " est_tokens= prices this bundle in tokens" )
-            : forGateBudget && forBodyCeiling   ? std::string_view( " est_tokens= prices this bundle in tokens; budget_tokens=/max_tokens= the soft row target (rows stop once it is reached)/body ceiling asked" )
-            : forGateBudget                     ? std::string_view( " est_tokens= prices this bundle in tokens; budget_tokens= the soft row target asked (rows stop once it is reached)" )
-            : forBodyCeiling                    ? std::string_view( " est_tokens= prices this bundle in tokens; max_tokens= the body ceiling asked" )
-                                                : std::string_view( " est_tokens= prices this bundle in tokens" );
+            !compactEstLegend                   ? kForEstTokensNote
+            : forGateBudget && forBodyCeiling   ? kForEstTokensBudgetCeilingNote
+            : forGateBudget                     ? kForEstTokensBudgetNote
+            : forBodyCeiling                    ? kForEstTokensCeilingNote
+                                                : kForEstTokensNote;
         // F2: spliced ONLY onto a document that actually carries over_ceiling="1" (the attribute is now
         // reachable from every rung, not just the ladder's last), so a bundle inside its budget keeps every
         // byte it had. Defines the attribute in the same unit the root prints both numbers in.
