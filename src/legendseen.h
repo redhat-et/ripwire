@@ -41,6 +41,7 @@
 #include "compactlegend.h"   // findCompactRoot, repriceEstTokensIn
 #include "forpages.h"        // forpages::pricePage — est_tokens= on a --for page prices every byte of it
 #include "infra/Diagnostics.h"
+#include "infra/sortutil.h"   // svLess — the portable string_view order (portablebuildcheck #6b)
 #include "legenddict.h"
 
 #include <algorithm>
@@ -194,7 +195,7 @@ inline std::string seenHashesText( std::string_view received )
     {
         for( const Match& m : entriesIn( comment ) ) { hs.push_back( entryIndex().hash[ m.id ] ); }
     }
-    std::sort( hs.begin(), hs.end() );
+    std::sort( hs.begin(), hs.end(), rw::sortutil::svLess );
     hs.erase( std::unique( hs.begin(), hs.end() ), hs.end() );
     std::string out;
     for( const std::string_view h : hs )
@@ -235,13 +236,13 @@ inline Holding parseHolding( std::string_view bytes )
         named.push_back( line );
     }
     if( h.badLine != 0 ) { return h; }
-    std::sort( named.begin(), named.end() );
+    std::sort( named.begin(), named.end(), rw::sortutil::svLess );
     named.erase( std::unique( named.begin(), named.end() ), named.end() );
     h.hashes = named.size();
     const EntryIndex& idx = entryIndex();
     for( std::size_t id = 0; id < legenddict::kEntryCount; ++id )
     {
-        if( std::binary_search( named.begin(), named.end(), idx.hash[ id ] ) ) { h.held[ id ] = 1; ++h.known; }
+        if( std::binary_search( named.begin(), named.end(), std::string_view( idx.hash[ id ] ), rw::sortutil::svLess ) ) { h.held[ id ] = 1; ++h.known; }
     }
     return h;
 }

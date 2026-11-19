@@ -21,7 +21,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 unset RIPWIRE_LEGEND_SEEN RIPWIRE_LEGEND_STATE BASH_MAX_OUTPUT_LENGTH
 HOOK="$ROOT/hooks/ripwire-legend-seen.sh"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -x "$HOOK" ] || { echo "legendseenhookcheck: $HOOK missing or not executable"; exit 2; }
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"

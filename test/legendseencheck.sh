@@ -17,7 +17,7 @@ set -u
 BIN="${RIPWIRE_BIN:-${1:-./build/ripwire}}"
 if [ ! -x "$BIN" ]; then echo "no ripwire binary at $BIN -- build first (cmake --build build -j)"; exit 2; fi
 fail=0
-pass() { printf '  PASS  %s\n' "$1"; }
+pass() { printf '  PASS  %s\n' "$1" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$1"; }; return 0; }
 bad()  { printf '  FAIL  %s\n' "$1"; fail=1; }
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 
@@ -75,8 +75,8 @@ py() { python3 "$WORK/chk.py" "$@"; }
 
 # ── (S0) the dictionary holds the CLI --for document legend ─────────────────────────────────────────────────────────
 for clause in "for: t p= file outside sigs (weaker)" "for: d: cx= ccx= complexity" "for: page=K of pages=N: an answer-first page"; do
-    if grep -qF -- "$clause" "$DICT"; then pass "(S0) the dictionary holds the --for clause \"$clause…\""
-    else bad "(S0) the dictionary has no line \"$clause…\" — the CLI --for legend is not dictionary-backed"; fi
+    if grep -qF -- "$clause" "$DICT"; then pass "(S0) the dictionary holds the --for clause \"${clause}…\""
+    else bad "(S0) the dictionary has no line \"${clause}…\" — the CLI --for legend is not dictionary-backed"; fi
 done
 
 TASK="how is a compact legend reduced to the ref posture"
