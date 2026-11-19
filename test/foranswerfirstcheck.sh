@@ -42,6 +42,9 @@ set -u
 # the <sigx> block). This gate pins the PERMUTATION alone, so SIGX is off here; test/forsigxcheck.sh pins SIGX, and its (S1) rebuilds
 # this gate's answer-first document from the default one byte for byte.
 export RIPWIRE_NO_SIGX=1
+# TL1 M2 (src/fortailorder.h) reorders the tail AND adds the legend clause that states the order, so it is no longer a permutation of
+# --legend=first either: the permutation arms run with it off, and the (SD) arms below switch it back on.
+export RIPWIRE_NO_TAIL_SAMEDIR=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${RIPWIRE_BIN:-${1:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
@@ -627,8 +630,12 @@ PY_CL
 # (SD) TL1 M2 -- SAME-DIRECTORY TAIL LEAD (foranswerfirst.h tailSameDirFirst; lane TL1 PREREG M2, F1's post-hoc P1t lead). Inside
 # <tail>, rows 1..24 keep their place; rows past 24 are stably partitioned, rows whose p= directory is the directory of a <sigs> <d>
 # row with r <= 5 first. ORDER-ONLY: the answer is a permutation of its RIPWIRE_NO_TAIL_SAMEDIR=1 twin and of --legend=first.
+# (SD3) the LEGEND states the order actually served: an answer whose tail is reordered carries the order clause in its document legend,
+# and one served in rank order (the RIPWIRE_NO_TAIL_SAMEDIR=1 twin, and a budget that sheds) does not. Red before the clause existed.
 TASK_S="legend posture"
+unset RIPWIRE_NO_TAIL_SAMEDIR
 cap "$WORK/s_new.xml" "$TASK_S" $OPTIN $WHOLE
+cap "$WORK/s_bud.xml" "$TASK_S" --token-budget=8000   # sheds part of the tail, keeps > 24 rows
 RIPWIRE_NO_TAIL_SAMEDIR=1 cap "$WORK/s_off.xml" "$TASK_S" $OPTIN $WHOLE
 cap "$WORK/s_old.xml" "$TASK_S" $LEGACY
 python3 - "$WORK" <<'PY_SD'
@@ -656,11 +663,29 @@ fires = len(ro) > 24 and want != ro
 say(fires, "(SD0) the fixture FIRES: %d tail rows, %d past row 24 sit in a top-5 sigs directory (%s), and the twin's order differs -- if not, SD is untested" % (len(ro), sum(near(r) for r in ro[24:]), ",".join(sorted(H))))
 say(rn[:24] == ro[:24], "(SD1) tail rows 1-24 are the twin's rows 1-24, in place")
 say(rn == want, "(SD1) rows past 24: same-directory rows first, each part in the twin's own order")
+CLAUSE = "; t order past row 24: files in the directory of a sigs row with r<=5 first, then the rest, each part in the order above"
+def legend(d):
+    """the document legend: the trailing run of top-level comments after the last row block"""
+    body = d[:d.rfind("</ctx>")]; i = len(body)
+    while body[:i].endswith("-->"):
+        j = body.rfind("<!--", 0, i)
+        if j < 0: break
+        i = j
+    return body[i:]
 units = lambda d: sorted(re.findall(r"<[^>]*>|[^<]+", d))
-say(len(new) == len(off) and units(new) == units(off) and len(new) == len(old) and sorted(new) == sorted(old),
-    "(SD2) a permutation: %d B, the same units as the RIPWIRE_NO_TAIL_SAMEDIR=1 twin and the same bytes as --legend=first" % len(new))
+strip = lambda d: d.replace(CLAUSE, "", 1)
+estless = lambda d: re.sub(r' est_tokens="\d+"', "", d, count=1)
+say(len(strip(new)) - len(off) in range(-8, 9) and units(estless(strip(new))) == units(estless(off)),
+    "(SD2) the same rows and blocks as the RIPWIRE_NO_TAIL_SAMEDIR=1 twin, in another tail order, plus the order clause (est_tokens= masked: the clause is priced)")
 cut = new.replace(rn[-1], "", 1) if rn else new
-say(units(cut) != units(off), "(SD2n) dropping one tail row DOES break SD2 -- SD2 can fail")
+say(units(estless(strip(cut))) != units(estless(off)), "(SD2n) dropping one tail row DOES break SD2 -- SD2 can fail")
+say(CLAUSE in legend(new) and rn != ro, "(SD3) the reordered answer's document legend states its order (the order clause rides with the tail clause)")
+say(CLAUSE not in off and rn != ro, "(SD3) the rank-order twin carries no order clause")
+say(not (CLAUSE in legend(strip(new))), "(SD3n) the reordered answer with its clause deleted FAILS the legend arm -- SD3 can fail")
+bud = rd("s_bud.xml"); rb = tail_rows(bud); pos = {r: k for k, r in enumerate(ro)}
+inrank = all(pos.get(a, -1) < pos.get(b, -1) for a, b in zip(rb, rb[1:]))
+say(len(rb) > 24 and (CLAUSE in legend(bud)) == (not inrank),
+    "(SD3) a budget that sheds (%d tail rows kept) states the order it serves: clause %s, rows in rank order %s" % (len(rb), "present" if CLAUSE in legend(bud) else "absent", inrank))
 sys.exit(1 if bad else 0)
 PY_SD
 [ $? -eq 0 ] || fail=1
