@@ -188,8 +188,9 @@ fi
 # ── (7) [N] the opt-out: no <route>, and it is AF1's default page (the --page-bytes=12000 spelling) ─────────────────
 if run a7 plain --for="$Q_WHO" --no-verb-route && run a7p plain --for="$Q_WHO" --page-bytes=12000; then
     case "$( rootOpen "$DIR/a7.out" )" in "<ctx "*) ok "(7) [N] --no-verb-route answers the --for <ctx>" ;; *) no "(7) [N] opt-out root is not <ctx>" ;; esac
-    cmp -s "$DIR/a7.out" "$DIR/a7p.out" && ! grep -q '<route ' "$DIR/a7.out"
-    say $? "(7) [N] --no-verb-route == --page-bytes=12000 (a spelled page never routes), no <route>" "(7) [N] the opt-out differs from the paged --for"
+    # RT2 ES: an unrouted page 1 may END EARLY (early="proven", arms 22–25); a spelled page never does
+    { cmp -s "$DIR/a7.out" "$DIR/a7p.out" || [ "$( attr "$( rootOpen "$DIR/a7.out" )" early )" = proven ]; } && ! grep -q '<route ' "$DIR/a7.out"
+    say $? "(7) [N] --no-verb-route == --page-bytes=12000 (a spelled page never routes) or its early-ended page 1, no <route>" "(7) [N] the opt-out differs from the paged --for"
 else
     no "(7) [N] a run exited non-zero: $( head -c 200 "$DIR/a7.err" )"
 fi
@@ -352,6 +353,44 @@ done
 LG="$( legendOf "$DIR/a21.out" )"
 printf '%s' "$LG" | grep -q 'text_only n=' && ! printf '%s' "$( legendOf "$DIR/a1.out" )" | grep -q 'text_only n='
 say $? "(21) [P] the legend defines <text_only n= capped=> / <tx p=> when a fold is printed (present-only)" "(21) [P] text_only undefined in the legend"
+
+# ── ES arms (22–25): page 1 ends early after a leading <callers by="subject"> block that proves itself complete ─────
+Q_ES='Who calls compute_total?'
+if run e22 plain --for="$Q_ES" && run e22f plain --for="$Q_ES" --page-bytes=12000; then
+    R="$( rootOpen "$DIR/e22.out" )"
+    [ "$( attr "$R" early )" = proven ] && [ "$( attr "$R" page )" = 1 ] && [ -n "$( attr "$R" deferred )" ] && [ -n "$( attr "$R" withheld_bytes )" ] \
+        && [ "$( wc -c <"$DIR/e22.out" )" -lt "$( wc -c <"$DIR/e22f.out" )" ]
+    say $? "(22) [P] ES: page 1 ends early (early=proven page=1 deferred= withheld_bytes=), shorter than the full page" "(22) [P] root reads '${R:0:300}'"
+    python3 -c 'import re,sys; d=re.sub(r"<!--.*?-->","",open(sys.argv[1]).read(),flags=re.S); m=re.search(r"<ctx [^>]*>(.*)</ctx>$",d.strip(),re.S); sys.exit(0 if m and re.fullmatch(r"<callers by=\"subject\"[^>]*>.*</callers>",m.group(1),re.S) else 1)' "$DIR/e22.out"
+    say $? "(22) [P] ES: the early page holds the callers block and nothing after it" "(22) [P] the early page holds more than the block"
+    NEXT="$( attr "$R" next | python3 -c 'import html,sys; sys.stdout.write(html.unescape(sys.stdin.read().strip()))' )"
+    case "$NEXT" in
+        *"--page-bytes=12000:1") eval "\"\$BIN\" \"\$DIR/plain\" $NEXT" >"$DIR/e22n.out" 2>/dev/null; cmp -s "$DIR/e22n.out" "$DIR/e22f.out"
+            say $? "(22) [P] ES: next= is the FULL page 1 (a spelled page never ends early)" "(22) [P] next= replay differs from the full page 1" ;;
+        *) no "(22) [P] ES: next= is not the full page 1: '$NEXT'" ;;
+    esac
+    LG="$( python3 -c 'import re,sys; print(" ".join(re.findall(r"<!--.*?-->",open(sys.argv[1]).read(),re.S)))' "$DIR/e22.out" )"
+    printf '%s' "$LG" | grep -q 'callers by=subject of=' && printf '%s' "$LG" | grep -q 'early=proven' && printf '%s' "$LG" | grep -q 'deferred='
+    say $? "(22) [P] ES: the early page's legend defines the callers block and early= / deferred= / withheld_bytes=" "(22) [P] ES legend incomplete"
+    if command -v xmllint >/dev/null 2>&1; then xmllint --noout "$DIR/e22.out" 2>/dev/null; say $? "(22) [C] the early page is well-formed XML" "(22) [C] the early page is not well-formed"; fi
+    run e22d plain --for="$Q_ES"; cmp -s "$DIR/e22.out" "$DIR/e22d.out"
+    say $? "(22) [C] ES: two runs are byte-identical" "(22) [C] ES runs differ"
+fi
+# (23) [N] a text-only file naming the subject: no early stop (the full page, byte for byte)
+if run e23 gap --for="$Q_ES" && run e23f gap --for="$Q_ES" --page-bytes=12000; then
+    cmp -s "$DIR/e23.out" "$DIR/e23f.out"
+    say $? "(23) [N] ES: a fold-worthy text gap vetoes the early stop" "(23) [N] ES fired with a text gap: '$( rootOpen "$DIR/e23.out" | head -c 200 )'"
+fi
+# (24) [N] a macro caller row: no early stop
+if run e24 mac --for="$Q_ES" && run e24f mac --for="$Q_ES" --page-bytes=12000; then
+    cmp -s "$DIR/e24.out" "$DIR/e24f.out"
+    say $? "(24) [N] ES: a macro caller row vetoes the early stop" "(24) [N] ES fired through a macro: '$( rootOpen "$DIR/e24.out" | head -c 200 )'"
+fi
+# (25) [N] a transitive question never leads with the callers block, so never ends early
+if run e25 plain --for='Trace the transitive callers of compute_total.' && run e25f plain --for='Trace the transitive callers of compute_total.' --page-bytes=12000; then
+    cmp -s "$DIR/e25.out" "$DIR/e25f.out"
+    say $? "(25) [N] ES: a transitive question is today's page" "(25) [N] ES fired on a transitive question"
+fi
 
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "FAILURES ABOVE"; fi
 exit "$fail"

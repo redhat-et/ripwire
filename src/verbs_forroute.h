@@ -224,6 +224,66 @@ inline std::string routeElementXml( const rw::Config& cfg, rw::forroute::RouteKi
     return x;
 }
 
+// RT2 ES (results/RT2_ROUTE_1118/PREREG.md §ES; owner-approved 2026-11-18): the default page 1 of an unrouted --for answer ENDS
+// EARLY when its first block is AF4 T-B's <callers by="subject" of=S> and that block PROVES itself complete: shown= equals total=,
+// capped="0", d2_capped absent or "0", and W2 (rt2Evidence, the block's own rows read as a --callers answer) finds neither a
+// residual reason nor a text-only file. Anything short of that is today's page. A spelled --page-bytes never ends early, which
+// is what the early page's next= (the full page 1) relies on. Gate: test/forverbroutecheck.sh (ES arms).
+std::optional<std::string> forEarlyStopPage( const MainDispatch& d, const std::string& doc )
+{
+    const rw::Config& cfg = d.cfg;
+    if( cfg.forTask.empty() || d.multiRoot || cfg.roots.size() != 1 || !cfg.pageBytesSpec.empty() || cfg.forPage != 1 || cfg.tokenBudget != 0
+        || cfg.maxTokens != 0 || !cfg.legendDefaulted || !forPagingApplies( cfg ) )
+    {
+        return std::nullopt;
+    }
+    const std::optional<rw::forpages::detail::Stream> st = rw::forpages::detail::readStream( doc );
+    if( !st )
+    {
+        return std::nullopt;
+    }
+    std::size_t lead = 0;
+    while( lead < st->streamBlocks && st->blocks[ lead ].comment )
+    {
+        ++lead;
+    }
+    if( lead >= st->streamBlocks || st->blocks[ lead ].name != "callers" )
+    {
+        return std::nullopt;
+    }
+    const std::string_view block = std::string_view( doc ).substr( st->blocks[ lead ].begin, st->blocks[ lead ].end - st->blocks[ lead ].begin );
+    const std::string_view open  = block.substr( 0, block.find( '>' ) );
+    using rw::partialwarn::detail::attrOf;
+    const std::string_view d2cap = attrOf( open, "d2_capped" );
+    if( attrOf( open, "by" ) != "subject" || attrOf( open, "shown" ) != attrOf( open, "total" ) || attrOf( open, "capped" ) != "0" || !( d2cap.empty() || d2cap == "0" ) )
+    {
+        return std::nullopt;
+    }
+    const std::string subject( attrOf( open, "of" ) );
+    const RouteRender verb = subject.empty() ? RouteRender{} : renderRoutedVerb( d, rw::forroute::RouteKind::WhoCalls, subject );
+    if( routedVerbRefused( verb ) )
+    {
+        return std::nullopt;
+    }
+    // the block's rows, read as a --callers answer: plus the verb's own <def> rows (V1), which name the definition's and tied
+    // declarations' files — the block prints none, and a header prototype must not read as a text-only file
+    std::string answer( block.substr( 0, block.rfind( "</" ) ) );
+    for( const std::string_view def : rw::partialwarn::detail::tagSpans( rw::partialwarn::detail::stripComments( verb.out ), "<def " ) )
+    {
+        answer += "<def " + std::string( def ) + ">";
+    }
+    answer += "</callers>";
+    const std::optional<rw::partialwarn::RouteEvidence> ev = routeEvidence( d, rw::forroute::RouteKind::WhoCalls, subject, answer );
+    if( !ev || !ev->residual.empty() || !ev->fold.empty() )
+    {
+        return std::nullopt;
+    }
+    const std::string legend = "<!-- ripwire for schema=ripwire.for/v1 (page 1, early): task= the query, at= this commit"
+                             + std::string( rw::kForCompactSubjectCallerHopLegend ) + " -->";
+    const std::string call = forUnbudgetedCall( cfg );
+    return rw::forpages::earlyFirstPage( doc, { .pageBytes = cfg.forPageBytes, .page = 1, .call = call }, lead, legend );
+}
+
 std::optional<int> runForVerbRoute( const MainDispatch& d )
 {
     if( !forVerbRouteApplies( d ) )
@@ -254,7 +314,12 @@ std::optional<int> runForVerbRoute( const MainDispatch& d )
     RouteRender page;
     if( wantPage )
     {
-        page = renderRouteCaptured( [ & ] { return runForLens( d ).value_or( 1 ); } );
+        // the FULL page 1, as the spelled default page serves it: the carried page never ends early (ES is page 1 of an UNROUTED answer)
+        static_assert( rw::answerfirst::kAnswerPageBytesDefault == 12000, "the spelled default page below is the default page size" );
+        rw::Config pc    = d.cfg;
+        pc.pageBytesSpec = "12000";
+        const MainDispatch pd = routeDispatch( d, pc );
+        page = renderRouteCaptured( [ & ] { return runForLens( pd ).value_or( 1 ); } );
     }
     const bool hasPage = wantPage && page.captured && page.rc == 0 && rw::findCompactRoot( page.out ).tag == "ctx";
 
