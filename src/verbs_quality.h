@@ -1629,8 +1629,11 @@ inline constexpr const char* kQdDefectShapeLegend =
     "fields do not match its arguments), utf8-cut (C++ display text cut at a byte cap and given an ellipsis "
     "with no UTF-8 boundary back-off in the function), dedup-first (C++ std::unique keeping the first of a "
     "run over a type with a severity field that neither the predicate nor the sort before it reads) and "
-    "vacuous-assert (a Bash test script's absence assertion read off a command whose failure is never "
-    "checked, so a crash reads as PASS). A site is new only when its normalized text occurs more often than "
+    "vacuous-assert (a Bash test script's assertion that PASSES on an empty text - an absence grep, [ -z ], a "
+    "cmp/diff/= of two texts - read off a run whose failure nothing checks: a capture, a pipe without pipefail, a "
+    "file it redirected into, a wrapper whose status is dropped; also a FAIL reporter called inside $( ), whose "
+    "flag dies with the subshell, an rc=$? no test reads, and a `| head || fallback` that reads head's status), "
+    "so a crash reads as PASS. A site is new only when its normalized text occurs more often than "
     "at the baseline (repo-wide, per shape), so a moved or renamed one is not; was= and now= count the shape's sites "
     "in the anchor, the innermost definition or, for top-level code, the file (then sym= is the path). "
     "format-arity gates on any origin: a placeholder/argument mismatch is a defect, not debt. utf8-cut, "
@@ -1641,8 +1644,8 @@ inline constexpr const char* kQdDefectShapeLegend =
     "seen), a call with a preprocessor directive inside it or under a literal #if 0 (#if false, #if (0), #if 0 && X "
     "and the #else of #if 1 read as live), an escape that "
     "spells a brace, an unqualified format() call, a named dedup predicate, a utf8 cut in a function that "
-    "backs off a continuation byte anywhere, or a vacuous-assert absence read off a FILE a run redirected "
-    "into: no row there is no verdict. ";
+    "backs off a continuation byte anywhere, or a vacuous-assert comparison of counts (a failed run counts 0 rows), "
+    "a text read off stderr, or a sentinel a helper prints on failure: no row there is no verdict. ";
 
 // Emitted only when a placeholder row is in the document: why every one of them carries origin="new-symbol",
 // including one that landed in a symbol that existed at the baseline.
