@@ -12,6 +12,8 @@
 #   (s1) STEER FAR: a flag set, then tested 12 statements later: steer="1" in --metrics. (s2) STEER NEAR: tested in the next
 #        statement: no steer=. (s3) CURSOR: a local advanced, then read 12 statements later only as a bound (`pos < limit`) and as
 #        an index (`xs[ pos ]`): no steer= (premise: steercursor in --metrics). Census 11-19: lexCpp's `j`, buildGraph's indices.
+#        (s4) SCOPE: a counter rewritten in a block that closes, then a for-head local of the same name tested 12 statements
+#        later: no steer= (premise: steerscope in --metrics). Census 11-19: genPathOf's `a`.
 #   (r1) RATCHET: creep gained 3 deep lines at c2 and 3 more in the working tree — each step under the rise rule (+5), so no
 #        baseline row reason exists, but against its best since v1 it rose 6: a tangle row with ratchet="v1"; root ratchet_ref="v1".
 #   (r2) CREDIT: shrink lost its deep region: listed in <improved> as kind="tangle", and no tangle row.
@@ -20,7 +22,7 @@
 #   (g)  report-only: gating="0" on the root although tangle rows are present (premise: >= 1 tangle row).
 #   (j)  --json carries the same tangle rows (count) and "improved".
 #   (d)  determinism: the working-tree run twice is byte-identical.
-# Red before the lane (main's bin): t1 r1 r2 r3 c1 s1 (no tangle kind, no steer=, no improved); red before the census fixes (11-19): n5 s3.
+# Red before the lane (main's bin): t1 r1 r2 r3 c1 s1 (no tangle kind, no steer=, no improved); red before the census fixes (11-19): n5 s3 s4.
 # Usage: test/tanglecheck.sh [BIN]
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -93,6 +95,9 @@ fi
 mc="$( mrow steercursor )"
 if [ -z "$mc" ] || [ "$( attr "$mc" loc )" -le 50 ]; then no "(s3) PREMISE: steercursor (over 50 lines) missing from --metrics, got '${mc:-none}'"
 else [ -z "$( attr "$mc" steer )" ] && ok "(s3) steercursor: no steer= (bound + index reads)" || no "(s3) steercursor: want no steer=, got $mc"; fi
+ms="$( mrow steerscope )"
+if [ -z "$ms" ] || [ "$( attr "$ms" loc )" -le 50 ]; then no "(s4) PREMISE: steerscope (over 50 lines) missing from --metrics, got '${ms:-none}'"
+else [ -z "$( attr "$ms" steer )" ] && ok "(s4) steerscope: no steer= (closed block's local)" || no "(s4) steerscope: want no steer=, got $ms"; fi
 
 # (r1)
 r="$( trow creep )"
