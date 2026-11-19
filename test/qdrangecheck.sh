@@ -26,7 +26,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 SCRIPT="$ROOT/scripts/qd_range.sh"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -x "$BIN" ] || { echo "qdrangecheck: no ripwire binary at $BIN"; exit 2; }
 [ -f "$SCRIPT" ] || { echo "qdrangecheck: FAIL — no $SCRIPT"; exit 1; }
@@ -189,11 +189,11 @@ job="$( awk '/^  qd-range:$/{on=1; print; next} on && /^  [a-z0-9_-]+:$/{exit} o
 if [ -z "$job" ]; then
     no "(G) ci.yml has no qd-range job"
 else
-    printf '%s\n' "$job" | grep -q 'bash scripts/qd_range.sh ' && ok "(G) the qd-range job runs scripts/qd_range.sh" || no "(G) the qd-range job does not call scripts/qd_range.sh"
-    printf '%s\n' "$job" | grep -q 'fetch-depth: 0' && ok "(G) its checkout fetches full history (fetch-depth: 0)" || no "(G) the qd-range checkout is not fetch-depth: 0 — the merge-base may be unreachable"
+    if printf '%s\n' "$job" | grep -q 'bash scripts/qd_range.sh '; then ok "(G) the qd-range job runs scripts/qd_range.sh"; else no "(G) the qd-range job does not call scripts/qd_range.sh"; fi
+    if printf '%s\n' "$job" | grep -q 'fetch-depth: 0'; then ok "(G) its checkout fetches full history (fetch-depth: 0)"; else no "(G) the qd-range checkout is not fetch-depth: 0 — the merge-base may be unreachable"; fi
 fi
 needs="$( awk '/^  ci-gate:$/{on=1} on && /^    needs:/{print; exit}' "$CI" )"
-printf '%s\n' "$needs" | grep -q '[[ ,]qd-range[],]' && ok "(G) ci-gate needs qd-range" || no "(G) ci-gate's needs does not list qd-range: $needs"
+if printf '%s\n' "$needs" | grep -q '[[ ,]qd-range[],]'; then ok "(G) ci-gate needs qd-range"; else no "(G) ci-gate's needs does not list qd-range: $needs"; fi
 
 [ "$fail" = 0 ] && echo "qdrangecheck: PASS" || echo "qdrangecheck: FAIL"
 exit "$fail"
