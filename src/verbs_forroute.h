@@ -91,7 +91,6 @@ inline RouteRender renderRoutedVerb( const MainDispatch& d, rw::forroute::RouteK
         case rw::forroute::RouteKind::DirectRadius: c.usesSym   = spelling; break;
         case rw::forroute::RouteKind::WhereUsed:    c.usesSym   = spelling; break;
         case rw::forroute::RouteKind::Transitive:   c.impactSym = spelling; break;
-        case rw::forroute::RouteKind::WhatItCalls:  c.callees   = spelling; break;
         case rw::forroute::RouteKind::None:         return {};
     }
     const MainDispatch vd = routeDispatch( d, c );
@@ -103,7 +102,6 @@ inline RouteRender renderRoutedVerb( const MainDispatch& d, rw::forroute::RouteK
             case rw::forroute::RouteKind::DirectRadius: return runUses( vd ).value_or( 1 );
             case rw::forroute::RouteKind::WhereUsed:    return runUses( vd ).value_or( 1 );
             case rw::forroute::RouteKind::Transitive:   return runImpact( vd ).value_or( 1 );
-            case rw::forroute::RouteKind::WhatItCalls:  return runCallHierarchy( vd ).value_or( 1 );
             case rw::forroute::RouteKind::None:         break;
         }
         return 1;
@@ -143,85 +141,11 @@ inline std::vector<rw::partialwarn::CorpusHit> routeCorpusHits( const MainDispat
     return hits;
 }
 
-// The call-shaped names in the bodies of every code definition `spelling` matches (documentation sections and declarations aside).
-inline std::vector<std::string> bodyCallsOf( const MainDispatch& d, const std::string& spelling )
-{
-    const rw::CallHierarchyRows ch = rw::callHierarchyRows( d.ing, d.g, spelling, /*wantCallers=*/false );
-    std::vector<std::string>    calls;
-    for( const rw::NodeId m : ch.matches )
-    {
-        const rw::Symbol& sym = d.ing.symbols[ m ];
-        if( sym.endByte <= sym.sigStartByte || sym.kind == rw::SymKind::Section )
-        {
-            continue;   // a declaration (no body), or a documentation section: its prose calls nothing
-        }
-        const std::optional<std::string> text = rw::docparse::detail::readWholeFile( rw::diskPath( d.ing, sym.fileId ) );
-        if( !text || sym.endByte > text->size() )
-        {
-            continue;
-        }
-        for( std::string& c : rw::partialwarn::bodyCallNames( std::string_view( *text ).substr( sym.sigStartByte, sym.endByte - sym.sigStartByte ) ) )
-        {
-            if( std::ranges::find( calls, c ) == calls.end() )
-            {
-                calls.push_back( std::move( c ) );
-            }
-        }
-    }
-    return calls;
-}
-
-// Of `names`, the ones the index defines as something callable (function, method, macro, class, struct); sorted.
-inline std::vector<std::string> definedCallables( const rw::IngestResult& ing, std::vector<std::string> names )
-{
-    std::ranges::sort( names );
-    std::vector<char> hit( names.size(), 0 );
-    for( const rw::Symbol& sym : ing.symbols )
-    {
-        const bool callable = sym.kind == rw::SymKind::Function || sym.kind == rw::SymKind::Method || sym.kind == rw::SymKind::Macro
-                           || sym.kind == rw::SymKind::Class || sym.kind == rw::SymKind::Struct;
-        const auto it = callable ? std::ranges::lower_bound( names, sym.name ) : names.end();
-        if( it != names.end() && *it == sym.name )
-        {
-            hit[ std::size_t( it - names.begin() ) ] = 1;
-        }
-    }
-    std::vector<std::string> out;
-    for( std::size_t i = 0; i < names.size(); ++i )
-    {
-        if( hit[ i ] )
-        {
-            out.push_back( std::move( names[ i ] ) );
-        }
-    }
-    return out;
-}
-
-// RT2-C: the what-it-calls route's evidence — the body gap (partialwarn.h bodyGapReason) over every definition `spelling`
-// matches. nullopt when no definition with a readable body was found (the caller falls back to the kind: no page).
-inline std::optional<rw::partialwarn::RouteEvidence> calleesEvidence( const MainDispatch& d, const std::string& spelling, const std::string& answer )
-{
-    const std::vector<std::string> calls = bodyCallsOf( d, spelling );
-    if( calls.empty() )
-    {
-        return std::nullopt;
-    }
-    const std::vector<std::string> defined = definedCallables( d.ing, calls );
-    rw::partialwarn::RouteEvidence ev;
-    ev.residual = rw::partialwarn::bodyGapReason( calls, answer, rw::forroute::lastSegment( spelling ),
-                                                  [ & ]( const std::string& n ) { return std::ranges::binary_search( defined, n ); } );
-    return ev;
-}
-
 // W2 on the routed answer (F1 inside it); nullopt when an evidence render could not run (the caller falls back to the kind:
-// P1's hybrid). The what-it-calls route reads its own evidence (calleesEvidence).
+// P1's hybrid).
 inline std::optional<rw::partialwarn::RouteEvidence> routeEvidence( const MainDispatch& d, rw::forroute::RouteKind kind, const std::string& spelling,
                                                                     const std::string& answer )
 {
-    if( kind == rw::forroute::RouteKind::WhatItCalls )
-    {
-        return calleesEvidence( d, spelling, answer );
-    }
     const std::string last = rw::partialwarn::answerTarget( answer );
     if( last.empty() )
     {
@@ -286,7 +210,7 @@ inline std::string routeElementXml( const rw::Config& cfg, rw::forroute::RouteKi
     x += "\" complete=\"not-proven\"";
     if( !w )   // F1 could not run: P1's hybrid — who-calls is served alone, the other kinds warn by kind
     {
-        x += kind == rw::forroute::RouteKind::WhoCalls || kind == rw::forroute::RouteKind::WhatItCalls ? " why=\"unchecked\"" : " warn=\"1\" why=\"kind\"";
+        x += kind == rw::forroute::RouteKind::WhoCalls ? " why=\"unchecked\"" : " warn=\"1\" why=\"kind\"";
     }
     else if( !w->residual.empty() )
     {
@@ -413,7 +337,7 @@ inline std::optional<RoutedAnswer> routeQuestion( const MainDispatch& d )
         return std::nullopt;   // the verb's notices are dropped with its answer
     }
     ra.w        = routeEvidence( d, ra.rd.kind, ra.spelling, ra.verb.out );
-    ra.wantPage = ra.w ? !ra.w->residual.empty() : ra.rd.kind != rw::forroute::RouteKind::WhoCalls && ra.rd.kind != rw::forroute::RouteKind::WhatItCalls;
+    ra.wantPage = ra.w ? !ra.w->residual.empty() : ra.rd.kind != rw::forroute::RouteKind::WhoCalls;
     return ra;
 }
 
