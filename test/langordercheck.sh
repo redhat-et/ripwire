@@ -217,8 +217,8 @@ printf 'def corp_seed():\n    return 4\n' > "$TAILFIX/user@corp.py"
 front(){ "$BIN" --around="$1" "$TAILFIX" 2>/dev/null | grep -m1 -o '<f p="[^"]*"><s [^>]*'; }   # status: a failed run prints no row, and the positive match on it below then fails the arm
 # The dotted tier reads Symbol::scope, which Python records and JavaScript does not, so `Box.run` finds box.py's method
 # alone: @py answers it with no fallback note, and @js must SAY the stated language holds none (the tag scoped the tier).
-A17P="$( front 'Box.run@py' )"; A17PE="$( "$BIN" --around='Box.run@py' "$TAILFIX" 2>&1 >/dev/null )"
-A17J="$( front 'Box.run@js' )"; A17JE="$( "$BIN" --around='Box.run@js' "$TAILFIX" 2>&1 >/dev/null )"
+A17P="$( front 'Box.run@py' )"; A17PE="$( "$BIN" --around='Box.run@py' "$TAILFIX" 2>&1 >/dev/null )"   # status: stderr is what this arm reads; the front() match on the same query fails the arm on a failed run
+A17J="$( front 'Box.run@js' )"; A17JE="$( "$BIN" --around='Box.run@js' "$TAILFIX" 2>&1 >/dev/null )"   # status: stderr is what this arm reads; the front() match on the same query fails the arm on a failed run
 case "$A17P|$A17PE|$A17J|$A17JE" in
     '<f p="box.py"><s t="fn" n="run" sc="Box"'*'||<f p="box.py">'*'|'*'the matching language holds no definition'*)
         ok "(A17) Box.run@py answers box.py's method silently; Box.run@js discloses the fallback — the dotted tier saw Box.run and the tag scoped it" ;;
