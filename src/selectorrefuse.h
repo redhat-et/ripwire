@@ -424,6 +424,7 @@ inline constexpr std::string_view kNotFoundTextLegend =
     "graph proved (a comment, a string, a property key, code no definition resolved); each <text p=FILE:LINE n=> is one file, its first "
     "such line and n= its lines (at most 20 rows, source files first; counts_floor=1: a scan budget stopped, the counts are floors); next= "
     "runs that grep.";
+inline std::string_view notFoundTextLegend( const NotFoundText& t ) noexcept { return t.hits == 0 ? std::string_view() : kNotFoundTextLegend; }
 
 inline void writeNotFoundAnswer( std::FILE* out, const NotFoundAnswer& a, bool json )
 {
@@ -463,7 +464,7 @@ inline void writeNotFoundAnswer( std::FILE* out, const NotFoundAnswer& a, bool j
                  a.tag, a.refusedLegend(),
                  a.missing.empty() ? "" : " missing=from|to|both: the endpoint(s) that matched nothing; near= retries the first.",
                  a.nearMatches != 0 ? " matches=N: N indexed files end with the path selector and it cannot pick one; near= is the first by path, one whole path answers." : "",
-                 a.text.hits == 0 ? std::string_view() : kNotFoundTextLegend, root, close );
+                 notFoundTextLegend( a.text ), root, close );
 }
 
 }   // namespace rw
