@@ -10,6 +10,8 @@
 # Add --hook explicitly to install the advisory PreToolUse + SessionStart hook for the selected client:
 # skills/install.sh --hook (Claude) or skills/install.sh --codex --hook (Codex). --openclaw installs to
 # that same cross-agent root (openclaw's own "compatibility skill root"); it has no hook slot.
+# The legend-seen hook REWRITES ripwire commands (it adds --legend-seen=<session file>), so it is its own opt-in:
+# skills/install.sh --hook-legend-seen (Claude Code).
 set -eu
 src="$( cd "$( dirname "$0" )" && pwd )"
 
@@ -361,8 +363,7 @@ install_claude_hook()
         any((.hooks.PreToolUse // [])[]?.hooks[]?; isScript($n))' \
         "$settings" >/dev/null 2>&1; then
         refresh_hook_matcher "$settings" "$hookCmd" "$hookMatcher" || return $?
-        install_claude_route "$settings" || return $?
-        install_claude_legend_seen "$settings"
+        install_claude_route "$settings"
         return $?
     fi
 
@@ -404,8 +405,21 @@ install_claude_hook()
         echo "skills/install.sh: could not merge $settings (is it valid JSON?); nothing changed." >&2
         exit 1
     fi
-    install_claude_route "$settings" || return $?
-    install_claude_legend_seen "$settings"
+    install_claude_route "$settings"
+}
+
+# ── --hook-legend-seen: the legend-seen hook, OPT-IN on its own (lane LS1, until the owner rules on a default) ──────
+# It is the one hook here that REWRITES a tool call (it inserts --legend-seen=FILE after the binary word of a ripwire
+# command), so plain --hook — advisory-only by its own promise — never installs it. One function per client.
+install_claude_legend_seen_hook()
+{
+    settings="$( abs_root "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "${CLAUDE_CONFIG_DIR:-}" )/settings.json" || exit 2
+    find_jq
+    [ -n "$jqBin" ] || { echo "skills/install.sh --hook-legend-seen needs jq on PATH to safely merge $settings (not found)." >&2; exit 1; }
+    mkdir -p "$( dirname "$settings" )"
+    [ -f "$settings" ] || ( umask 077; echo '{}' >"$settings" )
+    settings="$( resolve_link "$settings" )" || exit 1
+    install_claude_legend_seen "$settings" || exit 1
 }
 
 install_codex_hook()
@@ -472,11 +486,13 @@ install_codex_hook()
 mode="claude"
 explicitMode=0
 wantHook=0
+wantLegendSeen=0
 wantContributor=0
 explicitPath=""
 for arg in "$@"; do
     case "$arg" in
         --hook) wantHook=1 ;;
+        --hook-legend-seen) wantLegendSeen=1 ;;
         --contributor) wantContributor=1 ;;
         --codex) mode="codex"; explicitMode=1 ;;
         --openclaw) mode="openclaw"; explicitMode=1 ;;
@@ -488,6 +504,15 @@ for arg in "$@"; do
            explicitPath="$arg"; mode="path"; explicitMode=1 ;;
     esac
 done
+
+# --hook-legend-seen is hook-only too, for the client named (Claude by default): it never installs skills.
+if [ "$wantLegendSeen" -eq 1 ]; then
+    case "$mode" in
+        claude)              [ "$wantHook" -eq 0 ] || install_claude_hook; install_claude_legend_seen_hook ;;
+        *) echo "skills/install.sh: --hook-legend-seen is ported to Claude Code only (the default target)" >&2; exit 2 ;;
+    esac
+    exit 0
+fi
 
 # Preserve the established hook-only invocation: `--hook` changes settings but does not also install skills.
 if [ "$wantHook" -eq 1 ] && [ "$explicitMode" -eq 0 ]; then

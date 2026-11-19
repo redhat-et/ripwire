@@ -937,10 +937,9 @@ if [ -z "$STRIP" ]; then
 else
     for _h in home home2; do ( cd "$S" && env HOME="$S/$_h" sh -c "$STRIP" ) >"$S/strip-$_h.out" 2>&1; done
     cntAfter="$( countRw "$S/home/.claude/settings.json" ),$( countRw "$S/home/.codex/hooks.json" ),$( countRw "$S/home2/.claude/settings.json" ),$( countRw "$S/home2/.codex/hooks.json" )"
-    # Claude: nudge PreToolUse + SessionStart, the prompt router, and the legend-seen hook on four events (LS1) = 7; Codex 3.
-    { [ "$cntBefore" = "7,3,7,3" ] && [ "$cntAfter" = "0,0,0,0" ]; } \
+    { [ "$cntBefore" = "3,3,3,3" ] && [ "$cntAfter" = "0,0,0,0" ]; } \
         && ok "(R) the documented hook strip removes ripwire's entries from Claude and Codex configs, space path and ordinary path alike" \
-        || no "(R) hook strip: ripwire entries before $cntBefore, after $cntAfter (settings, hooks.json for the space-path home, then the ordinary home; want 7,3,7,3 then 0,0,0,0)"
+        || no "(R) hook strip: ripwire entries before $cntBefore, after $cntAfter (settings, hooks.json for the space-path home, then the ordinary home; want 3,3,3,3 then 0,0,0,0)"
     otherKept="$( jq --arg c "$mine" '[.. | objects | select(.command? == $c)] | length' "$S/home/.claude/settings.json" 2>/dev/null ),$( jq --arg c "$mine" '[.. | objects | select(.command? == $c)] | length' "$S/home/.codex/hooks.json" 2>/dev/null )"
     [ "$otherKept" = "1,1" ] \
         && ok "(R) the same strip keeps a user's own hook (quoted, with spaces) in both files" \
