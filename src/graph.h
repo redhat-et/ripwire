@@ -9697,6 +9697,124 @@ inline FnLocalReachIndex buildFnLocalReachIndex( const IngestResult& ing, const 
     return index;
 }
 
+// NAME-WALKS over the C++ type-alias records (lane M1 2026-11-18). typeAliasTargets is keyed by alias NAME, so one name
+// stands for every same-named alias in the tree (`iterator`, `value_type`), and the two recursive walks this replaced
+// re-entered a name once per PATH to it — the product of the fan-outs over 8 levels. The element walk pushed one element
+// type per path (a plain llvm-project map climbed past 12 GB once the class-name walk was bounded); the arrow walk did the
+// same work in time. Both answers are unchanged: an element type is collected into a list every reader takes as a set, and
+// an arrow verdict is an OR of one test per (name, level). test/namewalkcheck.sh holds the bounds as exact counts
+// (RIPWIRE_STATS prints them).
+struct AliasNameWalk
+{
+    const HashMap<std::string, rw::SmallVec<std::uint32_t, 1>>& targets;   // alias name -> its records (reference indices)
+    const std::vector<Reference>&                                refs;
+    std::vector<std::string_view>                                level;     // reused per call, with the three below
+    std::vector<std::string_view>                                nextLevel;
+    HashSet<std::string_view>                                    seen;
+    std::string                                                  key;
+    std::size_t elementCalls = 0, elementPushes = 0, elements = 0, arrowCalls = 0, arrowVisits = 0;   // RIPWIRE_STATS [mem] lines
+
+    static constexpr int kMaxAliasDepth = 8;
+
+    // `name`'s alias records; empty when it is no alias (a name the table holds has at least one)
+    std::span<const std::uint32_t> recordsOf( std::string_view name )
+    {
+        key.assign( name );
+        if( const auto it = targets.find( key ); it != targets.end() )
+        {
+            return { it->second.data(), it->second.size() };
+        }
+        return {};
+    }
+
+    // every element-type text `type`'s alias records name, alias to alias: each alias name read once, at its shortest
+    // distance, so the names read are exactly those within kMaxAliasDepth steps
+    template<class OnElement>
+    void elementTexts( std::string_view type, const OnElement& onElement )
+    {
+        if( type.empty() )
+        {
+            return;
+        }
+        ++elementCalls;
+        seen.clear();
+        seen.insert( type );
+        level.assign( 1, type );
+        for( int depth = 0; depth < kMaxAliasDepth && !level.empty(); ++depth )
+        {
+            nextLevel.clear();
+            for( const std::string_view name : level )
+            {
+                for( const std::uint32_t i : recordsOf( name ) )
+                {
+                    const Reference& r = refs[ i ];
+                    if( !r.memberPath().empty() )
+                    {
+                        ++elements;
+                        onElement( std::string_view( r.memberPath() ) );
+                    }
+                    else if( const std::string_view to = r.calleeName; !fieldTypeWrittenInStd( r ) && seen.insert( to ).second )   // a self-alias is seen already
+                    {
+                        ++elementPushes;
+                        nextLevel.push_back( to );
+                    }
+                }
+            }
+            level.swap( nextLevel );
+        }
+    }
+
+    // a `->` through `type`: opaque when one of its alias records targets a std smart pointer or optional, or when
+    // `nameOpaque( name, aliased )` holds for a name reached in d alias steps, d = 0..kMaxAliasDepth (one SET of names per
+    // level: a name's own test depends only on whether its level is under the bound — at the bound an alias reads as
+    // unaliased — so one test per (name, level) is the OR the per-path recursion computed)
+    template<class NameOpaque>
+    bool anyOpaque( std::string_view type, const NameOpaque& nameOpaque )
+    {
+        ++arrowCalls;
+        level.assign( 1, type );
+        for( int depth = 0; depth <= kMaxAliasDepth && !level.empty(); ++depth )
+        {
+            nextLevel.clear();
+            seen.clear();
+            for( const std::string_view name : level )
+            {
+                ++arrowVisits;
+                const std::span<const std::uint32_t> records = depth < kMaxAliasDepth ? recordsOf( name ) : std::span<const std::uint32_t>{};
+                if( queueTargets( name, records ) || nameOpaque( name, !records.empty() ) )
+                {
+                    return true;
+                }
+            }
+            level.swap( nextLevel );
+        }
+        return false;
+    }
+
+private:
+    // anyOpaque's alias step for one name: true when a record targets a std smart pointer or optional; every other
+    // non-std target not yet queued at the next level is queued
+    bool queueTargets( std::string_view name, std::span<const std::uint32_t> records )
+    {
+        for( const std::uint32_t i : records )
+        {
+            const Reference& r = refs[ i ];
+            if( fieldTypeWrittenInStd( r ) )
+            {
+                if( StdMemberGate::isStdArrowTemplate( r.calleeName ) )
+                {
+                    return true;
+                }
+            }
+            else if( const std::string_view to = r.calleeName; to != name && seen.insert( to ).second )
+            {
+                nextLevel.push_back( to );
+            }
+        }
+        return false;
+    }
+};
+
 inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = nullptr, bool census = false )
 {
     PROFILE_SCOPE_DESCRIBE( "buildGraph: resolve refs + build CSR" );
@@ -10619,40 +10737,32 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             }
         }
     }
+    AliasNameWalk aliasWalk{ typeAliasTargets, ing.references };
     // a `->` through a written non-std type: may it reach a class the declaration does not name? An ALIAS answers by its
     // recorded target (one rule for typedef and using): a std target is opaque when it is a smart pointer or optional
     // (kCppStdArrowTemplates — the record keeps no template argument, so the pointee is unrecorded) and is a raw pointer to a
     // std type otherwise (`typedef std::vector<int> IntVec; IntVec* p; p->size()`); a non-std target answers as that class
     // does (an in-tree class with its own `operator->`, a class the tree does not define). Any target that is opaque makes
     // the alias opaque. Aliases of aliases follow to a fixed depth.
-    const auto arrowOpaqueAt = [ & ]( const auto& self, std::string_view type, int depth ) -> bool
+    // aliases are read by aliasWalk (AliasNameWalk: one evaluation per name per level); a name's own test is here
+    std::string arrowKey;   // reused
+    const auto  arrowIsOpaque = [ & ]( std::string_view type ) -> bool
     {
-        const std::string key( type );
-        bool              aliased = false;
-        if( const auto ait = typeAliasTargets.find( key ); ait != typeAliasTargets.end() && depth < 8 )
+        return aliasWalk.anyOpaque( type, [ & ]( std::string_view name, bool aliased )
         {
-            aliased = true;
-            for( const std::uint32_t i : ait->second )
+            arrowKey.assign( name );
+            if( !aliased && !classNames.contains( arrowKey ) && !chaUp.contains( arrowKey ) )
             {
-                const Reference& r = ing.references[ i ];
-                if( fieldTypeWrittenInStd( r ) ? StdMemberGate::isStdArrowTemplate( r.calleeName ) : ( r.calleeName != type && self( self, r.calleeName, depth + 1 ) ) )
-                {
-                    return true;
-                }
+                return true;   // a class the tree does not define: its `->` is unknown
             }
-        }
-        if( !aliased && !classNames.contains( key ) && !chaUp.contains( key ) )
-        {
-            return true;   // a class the tree does not define: its `->` is unknown
-        }
-        if( arrowOperators == nullptr )
-        {
-            return false;
-        }
-        const ChaConeMemo::Cone cone = chaCones.coneFor( type );
-        return std::any_of( arrowOperators->begin(), arrowOperators->end(), [ & ]( NodeId c ) { return chaCones.contains( cone, type, ing.symbols[ c ].scope ); } );
+            if( arrowOperators == nullptr )
+            {
+                return false;
+            }
+            const ChaConeMemo::Cone cone = chaCones.coneFor( name );
+            return std::any_of( arrowOperators->begin(), arrowOperators->end(), [ & ]( NodeId c ) { return chaCones.contains( cone, name, ing.symbols[ c ].scope ); } );
+        } );
     };
-    const auto arrowIsOpaque = [ & ]( std::string_view type ) -> bool { return arrowOpaqueAt( arrowOpaqueAt, type, 0 ); };
     // one written type into the receiver facts: the type itself, and for a `->` call its pointee or its opacity
     const auto addWritten = [ & ]( StdMemberGate::Receiver& out, std::string_view typeName, std::string_view qualified, bool viaArrow )
     {
@@ -10774,27 +10884,11 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             out.types.push_back( element );
         }
     };
-    const auto elementOfAliasAt = [ & ]( const auto& self, StdMemberGate::Receiver& out, std::string_view type, int depth ) -> void
+    // a written type's element types through its alias records, alias to alias up to 8 steps (AliasNameWalk)
+    const auto addElementOfAlias = [ & ]( StdMemberGate::Receiver& out, std::string_view type )
     {
-        const auto it = type.empty() || depth >= 8 ? typeAliasTargets.end() : typeAliasTargets.find( std::string( type ) );
-        if( it == typeAliasTargets.end() )
-        {
-            return;
-        }
-        for( const std::uint32_t i : it->second )
-        {
-            const Reference& r = ing.references[ i ];
-            if( !r.memberPath().empty() )
-            {
-                addElementOfText( out, r.memberPath() );
-            }
-            else if( !fieldTypeWrittenInStd( r ) && r.calleeName != type )
-            {
-                self( self, out, r.calleeName, depth + 1 );
-            }
-        }
+        aliasWalk.elementTexts( type, [ & ]( std::string_view written ) { addElementOfText( out, written ); } );
     };
-    const auto addElementOfAlias = [ & ]( StdMemberGate::Receiver& out, std::string_view type ) { elementOfAliasAt( elementOfAliasAt, out, type, 0 ); };
     // a field of `cls` (final segment, as Rule 2b keys it) as a container: its "elem" record, else its recorded type as an alias.
     // true ⇒ the class declares that member with a record of either kind
     const auto addElementOfField = [ & ]( StdMemberGate::Receiver& out, std::string_view cls, std::string_view member ) -> bool
@@ -13219,6 +13313,11 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             g.keptForwards.push_back( std::uint32_t( siteIndex ) );   // ascending: the loop walks the references in order
         }
         disposition = CallDisposition::Bound;
+    }
+    if( memstats::enabled() )
+    {
+        rw::emitTo( stderr, "[mem] alias_walk calls={} pushes={} elements={}\n", aliasWalk.elementCalls, aliasWalk.elementPushes, aliasWalk.elements );
+        rw::emitTo( stderr, "[mem] arrow_walk calls={} visits={}\n", aliasWalk.arrowCalls, aliasWalk.arrowVisits );
     }
     std::sort( g.stdMemberDeclines.begin(), g.stdMemberDeclines.end() );   // grouped by caller: stdMemberCallsMadeBy's equal_range
     // A reference that left the loop naming no disposition is a resolver bug behind a correct-looking map: the

@@ -59,6 +59,8 @@
 #include "infra/depwatch.h"     // readConfigBytes and hasEntry report to the warm snapshot's dependency log when one is armed
 #include "infra/os.h"           // os::realpath / os::stat — the ancestor-config walk (#220: configs above the crawl root)
 #include "infra/sharedOnce.h"   // sharedOnce — rustCrateRootsOf
+#include "infra/emit.h"          // rw::emitTo — RIPWIRE_STATS's `[mem] cha_walk` line
+#include "memstats.h"            // memstats::enabled — RIPWIRE_STATS gates it
 #include "infra/Diagnostics.h"   // ASSUME — buildScopedRecvDecls' index-range precondition
 #include "extentsuspect.h"       // extent::inSet with kHeadRuleLangs / kExtentClassKinds — class identity's C-family and class-kind tables
 
@@ -6860,32 +6862,27 @@ inline std::string_view qualifierOuterName( std::string_view qualified ) noexcep
     return trimWs( outer.substr( 0, std::min( outer.size(), outer.find( '<' ) ) ) );
 }
 
-// does class NAME `derived` reach class NAME `base` up the name-keyed chaUp graph? Bounded. A same-name collision only ever
-// ENLARGES the answer, which on both callers is the conservative side (a class stays nameable, an edge stays a namesake).
-inline bool derivesFromName( std::string_view derived, std::string_view base, const ChaUpNames& chaUp )
+// NAMESAKE-MEMO (lane M1 2026-11-18): addRealInheritance asks derivesFromName( O, N ) — does class NAME O reach class NAME N
+// within 12 chaUp steps? — for every nested candidate of every inherit reference. It was a function: a breadth-first walk
+// with NO visited set, so every level appended every base of every frontier name, duplicates included, and where names fan
+// out (one `Impl` / `Base` name merging the bases of every same-named class) the frontier grew as the PRODUCT of the
+// fan-outs; a plain llvm-project map climbed past 149 GB in it. The answer is a pure function of O (chaUp is fixed for the
+// loop), so each distinct outer name now walks once, through IdentityNarrower::collectAncestorNames (each name entered once,
+// at its shortest distance: the same "within 12 steps"), and every probe is one set lookup. Keys and set members are views
+// into ing.symbols names and chaUp's base strings, both held still for the loop. The counters feed RIPWIRE_STATS's
+// `[mem] cha_walk` line (test/namewalkcheck.sh) and never reach output.
+struct NamesakeWalk
 {
-    std::vector<std::string_view> frontier{ derived };
-    std::vector<std::string_view> next;
-    for( int depth = 0; depth < 12 && !frontier.empty(); ++depth )
-    {
-        next.clear();
-        for( std::string_view name : frontier )
-        {
-            const auto it = chaUp.find( std::string( name ) );
-            if( it == chaUp.end() )
-            {
-                continue;
-            }
-            if( std::ranges::find( it->second, base ) != it->second.end() )
-            {
-                return true;
-            }
-            next.insert( next.end(), it->second.begin(), it->second.end() );
-        }
-        frontier.swap( next );
-    }
-    return false;
-}
+    HashMap<std::string_view, HashSet<std::string_view>> ancestorsOf;
+    std::size_t                                           probes   = 0;   // derives-from questions asked
+    std::size_t                                           walks    = 0;   // distinct outer names walked
+    std::size_t                                           pushes   = 0;   // names those walks entered
+    std::size_t                                           namesake = 0;   // inherit edges judged namesakes
+
+    // derivesFromName( outerName, base ) — does class NAME outerName reach class NAME base within 12 chaUp steps? — as one
+    // set probe once outerName has been walked (defined after IdentityNarrower, whose visited walk it shares)
+    bool derives( std::string_view outerName, std::string_view base, const ChaUpNames& chaUp );
+};
 
 // a class DEFINITION only: a forward declaration (`class Iterator;`, five at rocksdb's namespace scope) names no class body,
 // and counted as one it made every bare `Iterator` look like several namesakes
@@ -7088,7 +7085,8 @@ inline void addIncludeTargets( const IngestResult& ing, ClassIdentity& ids )
 // encloses `derived`, or inherited into one? `class Iterator : public MemTableRep::Iterator` inside SkipListRep (which
 // derives from MemTableRep) is; `class DBIter : public Iterator` at namespace scope is not. `derived` itself never counts:
 // a class cannot be its own base, so a bare self-name must mean some other class.
-inline bool isNamesakeBaseEdge( const IngestResult& ing, const ClassIdentity& ids, NodeId derived, std::string_view baseName, const ChaUpNames& chaUp )
+inline bool isNamesakeBaseEdge( const IngestResult& ing, const ClassIdentity& ids, NodeId derived, std::string_view baseName, const ChaUpNames& chaUp,
+                                NamesakeWalk& walk )
 {
     const auto nested = ids.nestedByName.find( std::string( baseName ) );
     if( nested == ids.nestedByName.end() )
@@ -7101,7 +7099,7 @@ inline bool isNamesakeBaseEdge( const IngestResult& ing, const ClassIdentity& id
         const auto         inScope   = [ & ]( NodeId n )
         {
             const std::string& nOuter = ing.symbols[ ids.enclosingClass[ n ] ].name;
-            return n != derived && ( nOuter == outerName || derivesFromName( outerName, nOuter, chaUp ) );
+            return n != derived && ( nOuter == outerName || walk.derives( outerName, nOuter, chaUp ) );
         };
         if( std::ranges::any_of( nested->second, inScope ) )
         {
@@ -7115,6 +7113,7 @@ inline bool isNamesakeBaseEdge( const IngestResult& ing, const ClassIdentity& id
 // class id (the walk to ancestors)
 inline void addRealInheritance( const IngestResult& ing, ClassIdentity& ids, const ChaUpNames& chaUp )
 {
+    NamesakeWalk walk;
     for( const Reference& ir : ing.references )
     {
         if( !ir.isInherit || ir.fromSymbol == kNoNode || ir.calleeName.empty() || !ir.qualifier.empty() )
@@ -7122,8 +7121,13 @@ inline void addRealInheritance( const IngestResult& ing, ClassIdentity& ids, con
             continue;
         }
         const Symbol& d = ing.symbols[ ir.fromSymbol ];
-        if( !extent::inSet( extent::kHeadRuleLangs, d.lang ) || !extent::inSet( extent::kExtentClassKinds, d.kind ) || isNamesakeBaseEdge( ing, ids, d.id, ir.calleeName, chaUp ) )
+        if( !extent::inSet( extent::kHeadRuleLangs, d.lang ) || !extent::inSet( extent::kExtentClassKinds, d.kind ) )
         {
+            continue;
+        }
+        if( isNamesakeBaseEdge( ing, ids, d.id, ir.calleeName, chaUp, walk ) )
+        {
+            ++walk.namesake;
             continue;
         }
         rw::SmallVec<NodeId, 4>& down = ids.realDown[ ir.calleeName ];
@@ -7136,6 +7140,10 @@ inline void addRealInheritance( const IngestResult& ing, ClassIdentity& ids, con
         {
             up.push_back( ir.calleeName );
         }
+    }
+    if( memstats::enabled() )
+    {
+        rw::emitTo( stderr, "[mem] cha_walk probes={} walks={} pushes={} namesake={}\n", walk.probes, walk.walks, walk.pushes, walk.namesake );
     }
 }
 
@@ -7814,6 +7822,19 @@ struct IdentityNarrower
         }
     }
 };
+
+inline bool NamesakeWalk::derives( std::string_view outerName, std::string_view base, const ChaUpNames& chaUp )
+{
+    ++probes;
+    const auto [ at, inserted ] = ancestorsOf.try_emplace( outerName );
+    if( inserted )
+    {
+        IdentityNarrower::collectAncestorNames( outerName, chaUp, at->second );
+        ++walks;
+        pushes += at->second.size();
+    }
+    return at->second.contains( base );
+}
 
 // One-hop receiver narrowing over the canonical scope::name → definition-ids map (built once by buildGraph).
 // Holds only const references to maps buildGraph owns — no state, no allocation, no copy of the symbol table.

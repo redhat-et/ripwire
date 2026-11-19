@@ -383,6 +383,7 @@
  "namedfileinputcheck.sh": 3.5,
  "nameinfocheck.sh": 3.3,
  "namekeyhopcheck.sh": 3.0,
+ "namewalkcheck.sh": 1.0,
  "namingcalibrationcheck.sh": 18.6,
  "namingconsistencycheck.sh": 1.3,
  "naminglenscheck.sh": 2.4,
