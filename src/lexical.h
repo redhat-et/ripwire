@@ -94,8 +94,7 @@ inline std::ptrdiff_t subtokenOverlap( std::string_view name, const std::vector<
     {
         t = suffixStem( std::move( t ), stemSuffixes );
     }
-    std::ranges::sort( toks );
-    toks.erase( std::unique( toks.begin(), toks.end() ), toks.end() );
+    sortutil::sortUnique( toks );
     return std::ranges::count_if( toks, [ & ]( const std::string& t ) { return std::ranges::find( words, t ) != words.end(); } );
 }
 
@@ -1845,8 +1844,7 @@ inline std::size_t applyDefOverDeclTiebreak( const IngestResult& ing, std::vecto
     {
         return 0;
     }
-    std::sort( distinct.begin(), distinct.end() );
-    distinct.erase( std::unique( distinct.begin(), distinct.end() ), distinct.end() );
+    sortutil::sortUnique( distinct );
 
     // which distinct values hold a body-carrying member, and which hold a bodyless one
     std::vector<std::uint8_t> sawBody( distinct.size(), 0 );

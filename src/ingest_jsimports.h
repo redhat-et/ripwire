@@ -88,8 +88,7 @@ inline std::vector<std::string> jsPatternNames( TSNode pattern, std::string_view
             for( TSNode child : children ) { pending.push_back( child ); }
         }
     }
-    std::sort( names.begin(), names.end() );
-    names.erase( std::unique( names.begin(), names.end() ), names.end() );
+    rw::sortutil::sortUnique( names );
     return names;
 }
 

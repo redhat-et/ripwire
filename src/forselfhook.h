@@ -799,8 +799,7 @@ inline std::vector<NodeId> classesWithUnprovenBase( const Graph& g )
             }
         }
     }
-    std::ranges::sort( out );
-    out.erase( std::ranges::unique( out ).begin(), out.end() );
+    sortutil::sortUnique( out );
     return out;
 }
 // Breadth-first up the proven edges from `cls`, each base once at its shallowest depth; `cls` itself is never listed.
@@ -1257,8 +1256,7 @@ struct RowWriter
         {
             unread.push_back( lost );
         }
-        std::ranges::sort( unread );
-        unread.erase( std::ranges::unique( unread ).begin(), unread.end() );
+        sortutil::sortUnique( unread );
         x += " defs=\"" + std::to_string( d.defs ) + '"';
         if( d.testDefs > 0 )
         {

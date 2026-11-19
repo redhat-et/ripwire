@@ -1115,13 +1115,11 @@ inline AnchorSet anchorSetOf( const IngestResult& ing, std::span<const NodeId> i
     }
     const auto dedup = []( auto& v )
     {
-        std::ranges::sort( v );
-        v.erase( std::ranges::unique( v ).begin(), v.end() );
+        sortutil::sortUnique( v );
     };
     dedup( a.syms );
     dedup( a.files );
-    std::ranges::sort( a.dirs, sortutil::svLess );   // portablebuildcheck #6b: never the default sv comparator
-    a.dirs.erase( std::ranges::unique( a.dirs ).begin(), a.dirs.end() );
+    sortutil::sortUnique( a.dirs, sortutil::svLess );   // portablebuildcheck #6b: never the default sv comparator
     const auto* ro = g != nullptr ? g->inEdges.rowOffsets() : nullptr;
     for( const NodeId s : a.syms )
     {
@@ -4065,8 +4063,7 @@ inline std::vector<std::uint32_t> readerFilesOf( const IngestResult& ing, const 
     {
         callerFiles.push_back( ing.symbols[ci[e]].fileId );
     }
-    std::sort( callerFiles.begin(), callerFiles.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return std::tie( ing.files[a], a ) < std::tie( ing.files[b], b ); } );
-    callerFiles.erase( std::unique( callerFiles.begin(), callerFiles.end() ), callerFiles.end() );
+    sortutil::sortUnique( callerFiles, [ & ]( std::uint32_t a, std::uint32_t b ) { return std::tie( ing.files[a], a ) < std::tie( ing.files[b], b ); } );
     callerFiles.erase( std::remove( callerFiles.begin(), callerFiles.end(), rowFile ), callerFiles.end() );
     floor = callerFiles.size() > kForTableReaderFiles;
     files.insert( files.end(), callerFiles.begin(), callerFiles.begin() + std::ptrdiff_t( std::min( callerFiles.size(), kForTableReaderFiles ) ) );

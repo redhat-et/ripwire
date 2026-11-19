@@ -432,8 +432,7 @@ inline std::vector<Tok> lexCpp( std::string_view s, CppPreproc* pp = nullptr )
     }
     if( pp != nullptr )
     {
-        std::sort( pp->macros.begin(), pp->macros.end() );
-        pp->macros.erase( std::unique( pp->macros.begin(), pp->macros.end() ), pp->macros.end() );
+        rw::sortutil::sortUnique( pp->macros );
     }
     return out;
 }

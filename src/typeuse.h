@@ -1,5 +1,6 @@
 #pragma once
 #include "infra/emit.h"   // house rule: every header that may grow an emitter starts from THE emitter
+#include "infra/sortutil.h"   // sortUnique
 // typeuse.h — L7 type-use impact: the symbols that NAME a type, read by the parser, so --impact of a class / struct /
 // named type / interface starts its walk from them and not from call edges alone.
 //
@@ -161,8 +162,7 @@ inline TypeUseTier typeUseTier( const IngestResult& ing, std::span<const NodeId>
         return tier;   // no type seed: the caller's walk is the plain call walk, byte-identical
     }
     tier.armed = true;
-    std::sort( tier.defFiles.begin(), tier.defFiles.end() );
-    tier.defFiles.erase( std::unique( tier.defFiles.begin(), tier.defFiles.end() ), tier.defFiles.end() );
+    rw::sortutil::sortUnique( tier.defFiles );
     for( const Symbol& s : ing.symbols )
     {
         tier.typeDefs += std::size_t( isTypeImpactKind( s.kind ) && typeMentionName( s.name ) == name );
@@ -275,10 +275,8 @@ inline TypeUseTier typeUseTier( const IngestResult& ing, std::span<const NodeId>
         }
     }
     tier.sitesCapped = std::any_of( perTag.begin(), perTag.end(), []( std::size_t n ) { return n >= kTypeMentionMatchBudget; } );
-    std::sort( tier.users.begin(), tier.users.end() );
-    tier.users.erase( std::unique( tier.users.begin(), tier.users.end() ), tier.users.end() );
-    std::sort( tier.scopeFiles.begin(), tier.scopeFiles.end() );
-    tier.scopeFiles.erase( std::unique( tier.scopeFiles.begin(), tier.scopeFiles.end() ), tier.scopeFiles.end() );
+    rw::sortutil::sortUnique( tier.users );
+    rw::sortutil::sortUnique( tier.scopeFiles );
     std::erase_if( tier.scopeFiles, [ & ]( std::uint32_t f ) { return std::binary_search( tier.defFiles.begin(), tier.defFiles.end(), f ); } );
     ENSURES( std::is_sorted( tier.users.begin(), tier.users.end() ), "users ascend (the reach merge below relies on it)" );
     return tier;

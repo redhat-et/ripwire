@@ -1,5 +1,6 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/sortutil.h"   // sortUnique
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
 
@@ -504,8 +505,7 @@ inline void buildClaims( const IngestResult& ing, const Graph& g, const ClaimLen
 
     // Every OTHER definition sharing a claimed key is claimed too — the key is what the conflict test compares,
     // so a lane that owns one overload owns them all, and its blast radius/tests must say so.
-    std::sort( lane.claimNodes.begin(), lane.claimNodes.end() );
-    lane.claimNodes.erase( std::unique( lane.claimNodes.begin(), lane.claimNodes.end() ), lane.claimNodes.end() );
+    sortutil::sortUnique( lane.claimNodes );
 }
 
 // ── the file rows on a lane ───────────────────────────────────────────────────────────────────────────────
@@ -1107,8 +1107,7 @@ inline void measureLaneOverlap( const IngestResult& ing, const std::vector<Lane>
                 surface.push_back( n );
             }
         }
-        std::sort( surface.begin(), surface.end() );
-        surface.erase( std::unique( surface.begin(), surface.end() ), surface.end() );
+        sortutil::sortUnique( surface );
         surfaces.push_back( std::move( surface ) );
     }
 

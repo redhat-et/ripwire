@@ -27,6 +27,7 @@
 // decision.
 
 #include "model.h"
+#include "infra/sortutil.h"   // sortUnique
 #include "filter.h"   // isTestSymbol — a declined list names the non-test implementors first
 #include "langfacts.h"
 #include "receiverevidence.h"
@@ -350,8 +351,7 @@ private:
     // testsuite's Spy). Order only: the set, its count and the one-candidate proof are unchanged.
     void settle( IfaceDispatchAnswer& out ) const
     {
-        std::sort( out.cand.begin(), out.cand.end() );
-        out.cand.erase( std::unique( out.cand.begin(), out.cand.end() ), out.cand.end() );
+        rw::sortutil::sortUnique( out.cand );
         std::stable_partition( out.cand.begin(), out.cand.end(), [ & ]( NodeId c ) { return !isTestSymbol( ing_, c ); } );
         out.fired = !out.cand.empty();
     }

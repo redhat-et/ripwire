@@ -456,8 +456,7 @@ inline std::string scopeMembers( const IngestResult& ing, std::vector<ExemplarMe
             }
         }
     }
-    std::ranges::sort( anc, sortutil::svLess );
-    anc.erase( std::unique( anc.begin(), anc.end() ), anc.end() );
+    sortutil::sortUnique( anc, sortutil::svLess );
     const std::size_t need = std::max( kExemplarFamilyMin, ( ms.size() + 1 ) / 2 );
     std::string_view best;
     std::size_t bestDepth = 0;
@@ -1710,8 +1709,7 @@ inline std::string_view memberStem( const IngestResult& ing, const ExemplarMembe
 inline std::vector<std::uint32_t> unitIdsOf( const std::vector<std::uint64_t>& keys, std::vector<std::uint64_t>& distinct )
 {
     distinct = keys;
-    std::ranges::sort( distinct );
-    distinct.erase( std::unique( distinct.begin(), distinct.end() ), distinct.end() );
+    sortutil::sortUnique( distinct );
     std::vector<std::uint32_t> ids;
     ids.reserve( keys.size() );
     for( const std::uint64_t k : keys )
@@ -1775,10 +1773,8 @@ inline TouchUnits touchUnits( const IngestResult& ing, const ExemplarFamily& fam
         u.typicalName = m == 0 ? nameUnit : u.typicalName;
         u.typicalStem = m == 0 ? stemUnit : u.typicalStem;
     }
-    std::ranges::sort( u.forms );
-    u.forms.erase( std::unique( u.forms.begin(), u.forms.end() ), u.forms.end() );
-    std::ranges::sort( u.homes );
-    u.homes.erase( std::unique( u.homes.begin(), u.homes.end() ), u.homes.end() );
+    sortutil::sortUnique( u.forms );
+    sortutil::sortUnique( u.homes );
     return u;
 }
 

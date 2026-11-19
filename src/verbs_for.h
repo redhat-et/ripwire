@@ -4,6 +4,7 @@
 #endif
 
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/sortutil.h"   // sortUnique
 #include "forliteral.h" // MF1-LIT: a task naming a literal gets its byte-exact sites and owner bodies, appended
 #include "forpage.h"    // L-W: the --for --limit=N file page, coverage=, the thin rule and the widening next=
 #include "foranswerfirst.h" // ITEM R: a finished --for answer serves its ANSWER first (a permutation)
@@ -2586,8 +2587,7 @@ inline rw::HopValueRefs forHopValueRefs( const rw::IngestResult& ing, const std:
             names.push_back( ing.symbols[ id ].name );
         }
     }
-    std::ranges::sort( names, rw::sortutil::svLess );
-    names.erase( std::ranges::unique( names ).begin(), names.end() );
+    rw::sortutil::sortUnique( names, rw::sortutil::svLess );
     const auto namesAValue = [ & ]( const rw::Reference& r )
     { return r.role == rw::RefRole::Value && std::ranges::binary_search( names, std::string_view( r.calleeName ), rw::sortutil::svLess ); };
     if( names.empty() || !std::ranges::any_of( ing.references, namesAValue ) )   // COST: no value use of any hop name, no index and no byte
@@ -2607,8 +2607,7 @@ inline rw::HopValueRefs forHopValueRefs( const rw::IngestResult& ing, const std:
             out.counts.emplace_back( id, std::uint32_t( n ) );
         }
     }
-    std::ranges::sort( out.counts );
-    out.counts.erase( std::ranges::unique( out.counts ).begin(), out.counts.end() );
+    rw::sortutil::sortUnique( out.counts );
     return out;
 }
 // the hops cut's continuation (` next="--for=TASK"`) — one spelling for the marker and the partial-cut splice

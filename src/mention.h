@@ -622,8 +622,7 @@ inline std::uint32_t mentionFilesNamedTotal( const IngestResult& ing, const std:
         mentionUnkeptFiles( ing, m, kept, named );
     }
     named.insert( named.end(), stemNamed.begin(), stemNamed.end() );   // FOR-FILE-ANCHOR: the stem-named files (resolveStemFile)
-    std::sort( named.begin(), named.end() );
-    named.erase( std::unique( named.begin(), named.end() ), named.end() );
+    rw::sortutil::sortUnique( named );
     return std::uint32_t( named.size() );
 }
 
@@ -1481,8 +1480,7 @@ inline bool applyMentionBoost( const IngestResult& ing, std::string_view task, s
         if( lensRank[id] < target ) { lensRank[id] = target; ++liftedSymbolCount; }
     };
 
-    std::sort( directSymbols.begin(), directSymbols.end() );
-    directSymbols.erase( std::unique( directSymbols.begin(), directSymbols.end() ), directSymbols.end() );
+    rw::sortutil::sortUnique( directSymbols );
     for( const NodeId id : directSymbols )
     {
         lift( id, 0 );
@@ -1712,8 +1710,7 @@ inline bool applyDocMentionBoost( const Graph& g, std::vector<float>& lensRank, 
     std::vector<NodeId>& refusedDocs = tally.refusedDocs;
     const std::uint32_t  liftedDocs  = tally.liftedDocs;
     const std::uint32_t  usedAnchors = tally.usedAnchors;
-    std::sort( refusedDocs.begin(), refusedDocs.end() );      // one doc under two anchors is ONE refusal
-    refusedDocs.erase( std::unique( refusedDocs.begin(), refusedDocs.end() ), refusedDocs.end() );
+    rw::sortutil::sortUnique( refusedDocs );   // one doc under two anchors is ONE refusal
     // doc_mentions_total= is lifted + refused: how many docs the caps had to choose from. It was nullptr —
     // a bare boolean saying content was withheld and neither how much nor how to get it, which is §9-3 of
     // docs/METHODOLOGY.md unmet by the same file whose mention_tokens_capped/mention_syms_capped both pass

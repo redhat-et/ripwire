@@ -805,8 +805,7 @@ inline ManifestSet readManifests( const IngestResult& ing )
             addManifest( std::string( rel ), f, std::string( disk ), *fmt, docs );
         }
     }
-    std::ranges::sort( dirs, sortutil::svLess );
-    dirs.erase( std::unique( dirs.begin(), dirs.end() ), dirs.end() );
+    sortutil::sortUnique( dirs, sortutil::svLess );
     readUnindexedManifests( rootPrefix, dirs, docs );
     return docs;
 }

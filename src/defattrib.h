@@ -510,8 +510,7 @@ inline ReachBits reachBitsets( const Graph& g, const DefGroups& groups, std::spa
     ReachBits bits;
     bits.dense.assign( reach.begin(), reach.end() );
     bits.dense.insert( bits.dense.end(), seeds.begin(), seeds.end() );
-    std::sort( bits.dense.begin(), bits.dense.end() );
-    bits.dense.erase( std::unique( bits.dense.begin(), bits.dense.end() ), bits.dense.end() );
+    sortutil::sortUnique( bits.dense );
     bits.words = ( groups.size() + 63 ) / 64;
     bits.p.assign( bits.dense.size() * bits.words, 0 );
     bits.s = bits.p;

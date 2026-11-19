@@ -1,5 +1,6 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/sortutil.h"   // sortUnique
 #include "infra/os.h"   // rw::os::popen / pclose — the diff name-status walk
 #include "gitcmd.h"         // rw::gitCmd — every git child starts with --no-optional-locks -c core.fsmonitor=false
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
@@ -260,8 +261,7 @@ inline bool nameOnlyChangedPaths( const std::string& root, const std::string& re
             return false;
         }
         paths.insert( paths.end(), dirty.lines.begin(), dirty.lines.end() );
-        std::sort( paths.begin(), paths.end() );
-        paths.erase( std::unique( paths.begin(), paths.end() ), paths.end() );
+        rw::sortutil::sortUnique( paths );
     }
     return true;
 }
@@ -1338,8 +1338,7 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
                             callers.push_back( c );
                         }
                     }
-                    std::sort( callers.begin(), callers.end() );
-                    callers.erase( std::unique( callers.begin(), callers.end() ), callers.end() );
+                    rw::sortutil::sortUnique( callers );
                     std::sort( callers.begin(), callers.end(), [ & ]( NodeId a, NodeId b )
                                { const Symbol& sa = ing.symbols[a]; const Symbol& sb = ing.symbols[b];
                         if( sa.fileId != sb.fileId )

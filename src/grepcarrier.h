@@ -241,8 +241,7 @@ inline void fillReads( const IngestResult& ing, const IngestResult& rd, std::spa
             names.push_back( ing.symbols[ rows[r].ids.front() ].name );
         }
     }
-    std::ranges::sort( names, sortutil::svLess );   // byte order: the default string_view < aborts the Linux G1 leg (portablebuildcheck #6)
-    names.erase( std::unique( names.begin(), names.end() ), names.end() );
+    sortutil::sortUnique( names, sortutil::svLess );   // byte order: the default string_view < aborts the Linux G1 leg (portablebuildcheck #6)
     const std::vector<ReadHit> hits = readSitesOf( rd, names );
     for( std::size_t r = 0; r < rows.size(); ++r )
     {

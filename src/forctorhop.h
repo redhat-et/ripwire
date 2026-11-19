@@ -142,8 +142,7 @@ inline std::size_t spliceCtorHop( std::string& sigs, const IngestResult& ing, co
             names.emplace_back( ing.symbols[t].name );
         }
     }
-    std::ranges::sort( names, sortutil::svLess );   // the byte order operator< defines; the DEFAULT comparator aborts the Linux sanitizer leg (portablebuildcheck #6b)
-    names.erase( std::unique( names.begin(), names.end() ), names.end() );
+    sortutil::sortUnique( names, sortutil::svLess );   // the byte order operator< defines; the DEFAULT comparator aborts the Linux sanitizer leg (portablebuildcheck #6b)
     std::vector<std::string_view> calls;
     std::size_t                   more = 0;
     for( const std::string_view n : names )

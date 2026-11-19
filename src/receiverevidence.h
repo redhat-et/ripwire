@@ -341,8 +341,7 @@ struct CallResultTypes
         {
             return a->fileId != b->fileId ? a->fileId < b->fileId : a->startByte < b->startByte;
         } );
-        std::sort( cppUsingFiles.begin(), cppUsingFiles.end() );
-        cppUsingFiles.erase( std::unique( cppUsingFiles.begin(), cppUsingFiles.end() ), cppUsingFiles.end() );
+        sortutil::sortUnique( cppUsingFiles );
     }
     // the import path the file-scope name `name` binds in file `fileId` ("" when none, or rebound)
     std::string_view importPathOf( std::uint32_t fileId, std::string_view name ) const

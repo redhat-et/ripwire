@@ -1,5 +1,6 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/sortutil.h"   // sortUnique
 #include "gitcmd.h"         // rw::gitCmd — every git child starts with --no-optional-locks -c core.fsmonitor=false
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 #include <format>            // gitWalkCutSentence
@@ -2035,8 +2036,7 @@ struct CommitWindowCensus
 inline void recordCommitFileSet( std::vector<std::uint32_t>& cur, std::size_t maxFiles,
                                  std::vector<std::vector<std::uint32_t>>& sets, CommitWindowCensus* census )
 {
-    std::sort( cur.begin(), cur.end() );
-    cur.erase( std::unique( cur.begin(), cur.end() ), cur.end() );
+    rw::sortutil::sortUnique( cur );
     if( cur.empty() )
     {
         cur.clear();
@@ -2235,8 +2235,7 @@ inline std::vector<std::vector<std::uint32_t>> resolveCommitStream(
                 cur.push_back( f );
             }
         }
-        std::sort( cur.begin(), cur.end() );
-        cur.erase( std::unique( cur.begin(), cur.end() ), cur.end() );
+        rw::sortutil::sortUnique( cur );
         if( cur.size() >= 1 && cur.size() <= maxFiles )
         {
             sets.push_back( std::move( cur ) ); // keep 1..max (freq needs size-1 too)
@@ -2378,8 +2377,7 @@ inline std::vector<std::uint32_t> gitFileCommitCountsInDayWindow( const std::str
                 cur.push_back( f );
             }
         }
-        std::sort( cur.begin(), cur.end() );
-        cur.erase( std::unique( cur.begin(), cur.end() ), cur.end() );
+        rw::sortutil::sortUnique( cur );
         for( std::uint32_t f : cur )
         {
             ++counts[f];
@@ -2586,8 +2584,7 @@ inline DecayedChurnMined gitLogDecayedFileMining( const std::string& root, const
                 cur.push_back( f );
             }
         }
-        std::sort( cur.begin(), cur.end() );
-        cur.erase( std::unique( cur.begin(), cur.end() ), cur.end() );
+        rw::sortutil::sortUnique( cur );
         if( cur.size() >= 1 && cur.size() <= maxFiles )
         {
             for( std::uint32_t f : cur )

@@ -558,8 +558,7 @@ inline SituSiblings lexicalSiblings( const IngestResult& ing, const std::vector<
     {
         consider( sk.path );
     }
-    std::sort( out.paths.begin(), out.paths.end() );
-    out.paths.erase( std::unique( out.paths.begin(), out.paths.end() ), out.paths.end() );
+    rw::sortutil::sortUnique( out.paths );
     // Review of #219: this used to be gated on a NON-EMPTY result, and the emitter suppressed an empty
     // block — so when the crawl's 500-row cut removed the only candidate, the report said nothing at all.
     // That is the silent zero non-negotiable #3 forbids: the cut is a property of the CANDIDATE LIST, not
@@ -1425,8 +1424,7 @@ inline SituationFacts computeSituationFacts( const std::string& root, const Inge
             const std::size_t sl = p.find( '/' );
             mods.emplace_back( sl == std::string_view::npos ? std::string( "(root)" ) : std::string( p.substr( 0, sl ) ) );
         }
-        std::sort( mods.begin(), mods.end() );
-        mods.erase( std::unique( mods.begin(), mods.end() ), mods.end() );
+        rw::sortutil::sortUnique( mods );
         facts.modulesTouched = std::move( mods );
     }
     return facts;
