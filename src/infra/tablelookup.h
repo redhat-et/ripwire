@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdlib>
+#include <initializer_list>
 #include <iterator>
 #include <span>
 #include <string_view>
@@ -72,6 +73,13 @@ inline const Row* findSortedByField( const Table& rows, Key Row::*field, const W
 {
     const auto it = std::lower_bound( std::begin( rows ), std::end( rows ), wanted, [field]( const Row& r, const Wanted& w ) { return r.*field < w; } );
     return it != std::end( rows ) && ( *it ).*field == wanted ? &*it : nullptr;
+}
+
+// Is `word` one of `set`? `set` is a table (C array, std::array, span) or a braced list: isOneOf( w, { "a", "b" } ).
+template< typename Set = std::initializer_list<std::string_view> >
+constexpr bool isOneOf( std::string_view word, const Set& set ) noexcept
+{
+    return std::ranges::find( set, word ) != std::ranges::end( set );
 }
 
 // A test hook's one-of-N switch: the 1-based position of environment variable `var`'s value in `names`, 0 when it is unset or

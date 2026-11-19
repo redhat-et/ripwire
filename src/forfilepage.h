@@ -27,7 +27,7 @@
 #include "filter.h"      // isTestPath, isDemoOrGeneratedPath — the tier label on a listed file
 #include "resolve.h"     // trimWs — the one blank-trimmer
 #include "redact.h"      // redactInPlace — the top-level text is file text, redacted like any served body
-#include "taskroute.h"   // taskroute::isOneOf — the one "is this word in the table" predicate
+#include "infra/tablelookup.h"   // isOneOf — the one "is this word in the table" predicate
 #include "serialize.h"   // escapeXml, appendCdataSafe, cleanSig, truncateUtf8WithEllipsis
 
 #include <algorithm>
@@ -93,7 +93,7 @@ inline bool isFileNoun( std::string_view lw ) noexcept
 {
     static constexpr std::string_view kNouns[] = { "file", "files", "package", "pkg", "module", "dir", "directory", "folder",
                                                    "script", "source", "header", "crate" };
-    return taskroute::isOneOf( lw, kNouns, std::size( kNouns ) );
+    return isOneOf( lw, kNouns );
 }
 
 inline bool isListableCodeFile( std::string_view path ) noexcept

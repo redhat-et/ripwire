@@ -57,7 +57,7 @@ inline constexpr std::array<std::string_view, 124> kKnownVerbs = {
 // breaks the ascending-sort contract std::binary_search (below, at the one call site) depends on fails
 // the build, not just the gate. There is deliberately no isKnownVerb() wrapper here: a bare one-line
 // `return std::algorithm(...)` forwarder over a small fixed container is exactly the shape
-// naminglens::ncAnyOf and notes::sortNotes already are, and adding a third structurally-identical
+// rw::isOneOf and notes::sortNotes already are, and adding a third structurally-identical
 // wrapper is a clone, not a new primitive — src/main.cpp's communityVerbSuffix (the table's one caller)
 // calls std::binary_search directly against kKnownVerbs instead.
 static_assert( []() constexpr {
