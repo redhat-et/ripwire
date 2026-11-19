@@ -392,5 +392,36 @@ if run e25 plain --for='Trace the transitive callers of compute_total.' && run e
     say $? "(25) [N] ES: a transitive question is today's page" "(25) [N] ES fired on a transitive question"
 fi
 
+# ── CALLEES VETO arms (26–29): a question that asks what X CALLS is never routed (RT2-V, forroute.h asksCallees) ─────
+# The what-it-calls ROUTE (RT2-C) failed its single confirmation and was reverted; the shipped rule used to send these to
+# --callers through the who-calls cue. Now: the --for answer, byte for byte, and who-calls phrasing still routes.
+mkdir -p "$DIR/pyv"; printf 'def helper():\n    return 1\n\n\nclass App:\n    def initialize(self):\n        return helper()\n' >"$DIR/pyv/app.py"
+vetoArm(){ # $1 id $2 fixture $3 question
+    if run "$1" "$2" --for="$3" && run "$1o" "$2" --for="$3" --no-verb-route; then
+        cmp -s "$DIR/$1.out" "$DIR/$1o.out" && ! grep -q '<route ' "$DIR/$1.out"
+        say $? "($1) [N] callees veto: '$3' is the --for answer byte for byte, no <route>" "($1) [N] '$3' was routed: '$( firstChild "$DIR/$1.out" )'"
+    else
+        no "($1) [N] a run exited non-zero: $( head -c 200 "$DIR/$1o.err" )"
+    fi
+}
+vetoArm v26a plain 'What does `run_main` call?'
+vetoArm v26b plain 'Which helpers does `run_main` call directly?'
+vetoArm v26c plain 'List the callees of `run_main`.'
+vetoArm v26d plain 'What `run_main` calls, file by file.'
+vetoArm v26e pyv   'What does `App.initialize` call in this app? List the modules.'
+# (27) [P] who-calls near-misses keep routing to --callers
+for q in 'Who calls `compute_total`?' 'What calls `compute_total`?' 'Callers of `compute_total`, please.' '`compute_total` is called by which functions?' 'Which functions call `compute_total`?'; do
+    run w27 plain --for="$q"
+    F="$( firstChild "$DIR/w27.out" )"
+    [ "$( attr "$F" kind )" = who-calls ] && [ "$( attr "$F" verb )" = "--callers=compute_total" ]
+    say $? "(27) [P] who-calls near-miss routes to --callers: '$q'" "(27) [P] '$q' reads '$F'"
+done
+# (28) [P] the veto is ahead of every kind: a callees question with a radius or transitive word is still not routed
+vetoArm v28a plain 'What does `run_main` call, and which files are affected?'
+vetoArm v28b plain 'Which functions does `run_main` call transitively?'
+# (29) [C] determinism of a vetoed answer
+run v29 plain --for='What does `run_main` call?'; cmp -s "$DIR/v29.out" "$DIR/v26a.out"
+say $? "(29) [C] two runs of a vetoed question are byte-identical" "(29) [C] vetoed runs differ"
+
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "FAILURES ABOVE"; fi
 exit "$fail"

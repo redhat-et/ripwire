@@ -20,6 +20,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -208,21 +209,28 @@ template <class OkAt>
     return upTo || occursWhere( lq, "trace", [ & ]( std::size_t at ) { return isBoundary( lq, at ) && isBoundary( lq, at + 5 ); } );
 }
 
+// The first non-space byte after `lq[at, at+len)` when that word is bounded on both sides; npos when it is not.
+[[nodiscard]] inline std::size_t afterBoundedWord( std::string_view lq, std::size_t at, std::size_t len )
+{
+    if( !isBoundary( lq, at ) || !isBoundary( lq, at + len ) )
+    {
+        return std::string_view::npos;
+    }
+    std::size_t k = at + len;
+    while( k < lq.size() && ( lq[ k ] == ' ' || lq[ k ] == '\t' || lq[ k ] == '\n' || lq[ k ] == '\r' || lq[ k ] == '\f' || lq[ k ] == '\v' ) )
+    {
+        ++k;
+    }
+    return k;
+}
+
 // \bused\b(?!\s+by\b): "used", unless it is passive "used by X" (that names the user, not where the subject is used).
 [[nodiscard]] inline bool hasUsedNotBy( std::string_view lq )
 {
     return occursWhere( lq, "used", [ & ]( std::size_t at )
     {
-        if( !isBoundary( lq, at ) || !isBoundary( lq, at + 4 ) )
-        {
-            return false;
-        }
-        std::size_t k = at + 4;
-        while( k < lq.size() && ( lq[ k ] == ' ' || lq[ k ] == '\t' || lq[ k ] == '\n' || lq[ k ] == '\r' || lq[ k ] == '\f' || lq[ k ] == '\v' ) )
-        {
-            ++k;
-        }
-        return k == at + 4 || !( lq.substr( k, 2 ) == "by" && isBoundary( lq, k + 2 ) );
+        const std::size_t k = afterBoundedWord( lq, at, 4 );
+        return k != std::string_view::npos && ( k == at + 4 || !( lq.substr( k, 2 ) == "by" && isBoundary( lq, k + 2 ) ) );
     } );
 }
 
@@ -255,6 +263,81 @@ template <class OkAt>
         const std::size_t base = at + 8;
         return occursWhere( rest, "use", [ & ]( std::size_t u ) { return isBoundary( lq, base + u ); } );
     } );
+}
+
+// Where the sentence that `from` sits in ends: the first '?', or the first '.' followed by whitespace or the end — a '.' inside a
+// dotted name (`Application.initialize`) does not end it (Python's (?:[^?.]|\.(?!\s|$))*). npos: the text's end.
+[[nodiscard]] inline std::size_t sentenceEnd( std::string_view lq, std::size_t from )
+{
+    for( std::size_t i = from; i < lq.size(); ++i )
+    {
+        const bool spaceNext = i + 1 == lq.size() || lq[ i + 1 ] == ' ' || lq[ i + 1 ] == '\t' || lq[ i + 1 ] == '\n' || lq[ i + 1 ] == '\r'
+                            || lq[ i + 1 ] == '\f' || lq[ i + 1 ] == '\v';
+        if( lq[ i ] == '?' || ( lq[ i ] == '.' && spaceNext ) )
+        {
+            return i;
+        }
+    }
+    return std::string_view::npos;
+}
+
+// `word`, bounded on both sides, at an offset in [from, the end of from's sentence).
+[[nodiscard]] inline bool wordInSentence( std::string_view lq, std::size_t from, std::string_view word )
+{
+    const std::size_t      stop = sentenceEnd( lq, from );
+    const std::string_view span = lq.substr( from, stop == std::string_view::npos ? std::string_view::npos : stop - from );
+    return occursWhere( span, word, [ & ]( std::size_t at ) { return isBoundary( lq, from + at ) && isBoundary( lq, from + at + word.size() ); } );
+}
+
+// \b(does|do|did)\b S \bcall\b starting at `from`, within one sentence.
+[[nodiscard]] inline bool auxThenCall( std::string_view lq, std::size_t from )
+{
+    const std::size_t      stop = sentenceEnd( lq, from );
+    const std::string_view span = lq.substr( from, stop == std::string_view::npos ? std::string_view::npos : stop - from );
+    return std::ranges::any_of( std::array<std::string_view, 3>{ "does", "do", "did" }, [ & ]( std::string_view aux )
+    {
+        return occursWhere( span, aux, [ & ]( std::size_t at )
+        {
+            const std::size_t a = from + at;
+            return isBoundary( lq, a ) && isBoundary( lq, a + aux.size() ) && wordInSentence( lq, a + aux.size(), "call" );
+        } );
+    } );
+}
+
+// \bwhat\s+(?!calls\b)\S S \bcalls\b: "what X calls" — never "what calls X".
+[[nodiscard]] inline bool whatSubjectCalls( std::string_view lq )
+{
+    return occursWhere( lq, "what", [ & ]( std::size_t at )
+    {
+        const std::size_t k = afterBoundedWord( lq, at, 4 );
+        if( k == std::string_view::npos || k == at + 4 || k >= lq.size() )
+        {
+            return false;   // not the word "what", no space after it, or nothing after the space
+        }
+        const bool callsNext = lq.substr( k, 5 ) == "calls" && isBoundary( lq, k + 5 );
+        return !callsNext && wordInSentence( lq, k + 1, "calls" );
+    } );
+}
+
+// RT2-V: does the question ask what X CALLS (its callees)? See the header for the pattern this transcribes.
+[[nodiscard]] inline bool asksCallees( std::string_view lq )
+{
+    if( hasBoundedWord( lq, "callee", true ) || hasBoundedWord( lq, "callees", true ) )
+    {
+        return true;
+    }
+    for( const std::string_view aux : { std::string_view( "what does" ), std::string_view( "what do" ), std::string_view( "what did" ) } )
+    {
+        if( occursWhere( lq, aux, [ & ]( std::size_t at ) { return isBoundary( lq, at ) && isBoundary( lq, at + aux.size() ) && wordInSentence( lq, at + aux.size(), "call" ); } ) )
+        {
+            return true;
+        }
+    }
+    if( occursWhere( lq, "which", [ & ]( std::size_t at ) { return isBoundary( lq, at ) && isBoundary( lq, at + 5 ) && auxThenCall( lq, at + 5 ); } ) )
+    {
+        return true;
+    }
+    return whatSubjectCalls( lq );
 }
 
 // rule R's direct-radius cues: plain substrings.
@@ -350,6 +433,10 @@ struct RouteDecision
 // Both rules: a route only when E names a symbol AND R reads a kind.
 [[nodiscard]] inline RouteDecision decide( std::string_view q )
 {
+    if( detail::asksCallees( rw::routeLower( q ) ) )
+    {
+        return {};   // RT2-V: a callees question is never routed (the header)
+    }
     RouteDecision d;
     d.sym = extractSymbol( q );
     if( d.sym.empty() )
