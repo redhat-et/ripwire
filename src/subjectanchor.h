@@ -714,7 +714,7 @@ inline std::string_view printedNameLeaf( std::string_view name )
 }
 }   // namespace subject_detail
 
-// AF4 T-B (results/P1_VERBROUTE_1118/SPEC.md §2): does `task` ask WHO CALLS `subject` — the of= of the answer's <callers
+// AF4 T-B (the P1 verb-route spec, section 2 (local results, not shipped)): does `task` ask WHO CALLS `subject` — the of= of the answer's <callers
 // by="subject"> block, as printed — so that block may lead the answer-first document (foranswerfirst.h rowBlockOrder)? A
 // dependents cue governs the subject (dependentsAskOf, read on the whole of= or on its leaf when the leaf is itself a name: the
 // block prints `rw::answerfirst::topLevelBlocks` where the sentence spells `topLevelBlocks`), no governing cue is a CHANGE cue,

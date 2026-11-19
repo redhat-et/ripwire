@@ -541,7 +541,7 @@ sys.exit(1 if bad else 0)
 PY_AF2
 [ $? -eq 0 ] || fail=1
 
-# (CL) AF4 T-B -- CALLERS FIRST UNDER A CALLERS CUE (results/P1_VERBROUTE_1118/SPEC.md §2, results/AF4_TOPLOAD_1118/PREREG.md).
+# (CL) AF4 T-B -- CALLERS FIRST UNDER A CALLERS CUE (the P1 verb-route spec, section 2 (local results, not shipped), results/AF4_TOPLOAD_1118/PREREG.md).
 # A who-calls question's <callers by="subject"> block is the FIRST row block of the answer-first document; a change / blast-radius
 # or transitive question keeps it where it was. ORDER-ONLY: the who-calls answer is still a permutation of its legacy order
 # (equal length, identical unit multiset). (CL1) is RED on the parent binary (f6288ec32 emits the block after <sigs>).
