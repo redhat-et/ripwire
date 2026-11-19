@@ -2665,6 +2665,9 @@ inline McpManifestRows mcpManifestRowsFitted( const IngestResult& ing, std::stri
 // nullopt: not routed — serve forTaskText.
 std::optional<std::string> mcpForVerbRoute( const IngestResult& ing, const Graph& g, const std::string& root, const std::string& task,
                                             const std::function<std::optional<std::string>()>& page );
+// RT3-F1: offset=K on a `for` call that routes — the routed verb's window at K (the CLI's `--for=Q --offset=K`), never a carried
+// page. nullopt: not routed — serve forTaskText's file page.
+std::optional<std::string> mcpForVerbContinue( const IngestResult& ing, const Graph& g, const std::string& root, const std::string& task, int offset );
 
 inline std::optional<std::string> forTaskText( const std::string& root, const std::string& task, RedactCounts* redact = nullptr,
                                 std::size_t budgetTokens = 0, bool noRoute = false,
@@ -3251,12 +3254,19 @@ struct McpForRouteAsk
 };
 inline std::optional<std::string> mcpRoutedFor( const McpForRouteAsk& a, RedactCounts* redactPtr )
 {
-    const bool shaped = a.budgetPresent || mcpdetail::findRawValue( a.args, "limit" ).isPresent || mcpdetail::findRawValue( a.args, "offset" ).isPresent;
+    // RT3-F1: offset= alone (no limit=, no budget) continues a routed answer's window, as the CLI's `--for=Q --offset=K` does
+    const McpIntArg offset  = mcpIntArg( a.args, "offset", 0, kMcpPageValueMax );
+    const bool      cont    = offset.isPresent && offset.refusal.empty() && offset.value > 0;
+    const bool      shaped  = a.budgetPresent || mcpdetail::findRawValue( a.args, "limit" ).isPresent || ( offset.isPresent && !cont );
     if( a.noVerbRoute || shaped || !a.sections.empty() )
     {
         return std::nullopt;
     }
     const McpIndex& ix = getIndex( a.path );
+    if( cont )
+    {
+        return mcpForVerbContinue( ix.ing, ix.g, a.path, a.task, int( offset.value ) );
+    }
     return mcpForVerbRoute( ix.ing, ix.g, a.path, a.task, [ & ] { return forTaskText( a.path, a.task, redactPtr, 0, a.noRoute, McpPageArgs{}, a.sections ); } );
 }
 

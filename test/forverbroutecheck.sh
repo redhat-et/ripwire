@@ -424,5 +424,114 @@ vetoArm v28b plain 'Which functions does `run_main` call transitively?'
 run v29 plain --for='What does `run_main` call?'; cmp -s "$DIR/v29.out" "$DIR/v26a.out"
 say $? "(29) [C] two runs of a vetoed question are byte-identical" "(29) [C] vetoed runs differ"
 
+# ── RT3 arms (30–35): three question kinds the RT2 rule sent to the wrong verb (results/RT3_VETOES_1119) ────────────
+# (A) a call PATH / CHAIN question is not a radius or a 1-hop-callers question: the PATH veto, no route.
+# (B) HELD — a BARE "blast radius" as the transitive radius (--impact) is built but switched off (forroute.h
+#     kBareBlastRadiusOn); arm 32 pins the RT2 behaviour (--uses) until the owner re-enables it.
+# (C) a double-quoted literal (a message, an error string) outside every backtick span: the LITERAL veto, no route — the
+#     answer needs where the literal is built first. Each [P] arm is RED on the RT2 base (2f5561c26): that is the control.
+mkdir -p "$DIR/msg"
+cat >"$DIR/msg/tool.c" <<'C'
+#include <stdio.h>
+static void print_usage( void )
+{
+    fprintf( stderr, "usage: tool [-v] FILE\n" );
+}
+int run_tool( int argc )
+{
+    if( argc < 2 )
+    {
+        print_usage();
+        return 2;
+    }
+    return 0;
+}
+C
+# (30) [P] class A: a call-chain / call-path / path-from question is vetoed — the --for answer byte for byte, no <route>
+vetoArm v30a plain 'What is the exact call chain from `outer_entry` to `compute_total`?'
+vetoArm v30b plain 'Which call path from `outer_entry` triggers `compute_total`?'
+vetoArm v30c plain 'Trace the path from `outer_entry` to `compute_total`.'
+vetoArm v30d plain 'Show the call-chain between `run_main` and `compute_total`; who calls what?'
+# (31) [P] class C: a double-quoted literal (straight or curly quotes) is vetoed
+vetoArm v31a msg 'Running `run_tool` prints "usage: tool [-v] FILE"; where is that message built and who calls it?'
+vetoArm v31b msg 'Which function calls `print_usage` to print “usage: tool”?'
+# (32) [N] class B is HELD (owner ruling 2026-11-19: until IMB1, --impact ⊇ --uses, lands and T5h measures it; forroute.h
+#      kBareBlastRadiusOn = false). These arms pin the RT2 behaviour: a bare "blast radius" routes direct-radius → --uses.
+#      When rule B is re-enabled, flip them back to kind=transitive verb=--impact=compute_total.
+for q in 'What is the blast radius of changing `compute_total`?' 'What is the blast radius of changing `compute_total`, the helper that adds one?'; do
+    run b32 plain --for="$q"
+    F="$( firstChild "$DIR/b32.out" )"
+    [ "$( attr "$F" kind )" = direct-radius ] && [ "$( attr "$F" verb )" = "--uses=compute_total" ]
+    say $? "(32) [N] rule B held: bare blast radius still routes to --uses (RT2): '$q'" "(32) [N] '$q' reads '$F'"
+done
+# (33) [N] the routes that should still fire still fire, each to the verb RT2 chose
+routeIs(){ # $1 fixture $2 question $3 kind $4 verb
+    run r33 "$1" --for="$2"
+    F="$( firstChild "$DIR/r33.out" )"
+    [ "$( attr "$F" kind )" = "$3" ] && [ "$( attr "$F" verb )" = "$4" ]
+    say $? "(33) [N] still routed $3 → $4: '$2'" "(33) [N] '$2' reads '$F'"
+}
+routeIs plain 'Who calls `compute_total`?'                                  who-calls     --callers=compute_total
+routeIs plain 'Where is `compute_total` used?'                              where-used    --uses=compute_total
+routeIs plain 'What breaks if I change `compute_total`?'                    direct-radius --uses=compute_total
+routeIs plain 'Which files are affected if `compute_total` changes?'        direct-radius --uses=compute_total
+routeIs plain 'If I change `compute_total`, which files have to change?'    direct-radius --uses=compute_total
+routeIs plain 'Trace the transitive callers of `compute_total`.'            transitive    --impact=compute_total
+routeIs plain 'Which functions reach `compute_total` within two hops?'      transitive    --impact=compute_total
+routeIs plain 'What is the transitive blast radius of changing `compute_total`?' transitive --impact=compute_total
+routeIs plain 'What is the blast radius of changing `compute_total`? List every file that calls it.' direct-radius --uses=compute_total
+routeIs plain 'What is the blast radius of changing `compute_total`? List every module that references it.' direct-radius --uses=compute_total
+# near-misses of the two vetoes: a bare "path"/"chain" word, an apostrophe, quotes INSIDE a backtick span
+routeIs plain 'Which files on the include path call `compute_total`?'       direct-radius --uses=compute_total
+routeIs plain 'Who calls `compute_total` in the chain of helpers?'          who-calls     --callers=compute_total
+routeIs plain "Who calls the lib's \`compute_total\`?"                       who-calls     --callers=compute_total
+routeIs msg   'Who calls `print_usage` from `fprintf(stderr, "x")`?'        who-calls     --callers=print_usage
+# (34) [P] the vetoes are ahead of every kind: a path question with a transitive or radius word is still not routed
+vetoArm v34a plain 'Trace the call path from `outer_entry` to `compute_total`, hop by hop.'
+vetoArm v34b plain 'What is the blast radius along the call chain from `outer_entry` to `compute_total`?'
+vetoArm v34c msg   'What breaks if the "usage: tool" text built by `print_usage` changes?'
+# (35) [C] determinism of a vetoed answer
+run v35 plain --for='What is the exact call chain from `outer_entry` to `compute_total`?'; cmp -s "$DIR/v35.out" "$DIR/v30a.out"
+say $? "(35) [C] two runs of a path-vetoed question are byte-identical" "(35) [C] path-vetoed runs differ"
+
+# ── RT3-F1 arms (36–40): a WINDOWED routed answer continues ITSELF (coordinator follow-up F1) ────────────────────────
+# The verb windows its rows (--uses 100, --impact 40: has_more="1" next_offset=K). The routed root's next= used to name
+# another lens (--safe-delete / none), and `--for=Q --offset=K` answered with a --for <files> page. Now the root's next= is
+# `--for=Q --offset=K`, and that call routes the same question to the verb's window at K: the <route> (verb= spells the
+# offset) and the verb's rows at --offset=K. An unwindowed routed answer and an unrouted --for are untouched.
+mkdir -p "$DIR/wide"
+printf 'int target_fn( int a )\n{\n    return a;\n}\n' >"$DIR/wide/t.c"
+for i in $( seq -w 1 120 ); do printf 'int target_fn( int a );\nint caller_%s( void )\n{\n    return target_fn( %d );\n}\n' "$i" "$((10#$i))" >"$DIR/wide/c$i.c"; done
+rootNext(){ python3 -c 'import html,re,sys; d=re.sub(r"<!--.*?-->","",open(sys.argv[1]).read(),flags=re.S); m=re.search(r"<[A-Za-z][^>]*>",d); n=re.search(r"\snext=\"([^\"]*)\"",m.group(0)) if m else None; sys.stdout.write(html.unescape(n.group(1)) if n else "")' "$1"; }
+# the verb's rows: the answer from the root on, the <route> element, KB1's key group and the root's own open tag set aside
+verbRows(){ python3 -c 'import re,sys; d=re.sub(r"<!--.*?-->","",open(sys.argv[1]).read(),flags=re.S); d=re.sub(r"<route [^>]*/>","",d); d=re.sub(r"<bodies of=\"key\".*?</bodies>","",d,flags=re.S); m=re.search(r"<[A-Za-z][^>]*>",d); sys.stdout.write(d[m.end():] if m else "")' "$1"; }
+contArm(){ # $1 id $2 question $3 verb flag (--uses / --impact) $4 kind $5 window K
+    local q="$2" want
+    want="$( python3 -c 'import shlex,sys; print("--for=" + shlex.quote(sys.argv[1]) + " --offset=" + sys.argv[2])' "$q" "$5" )"
+    run "$1" wide --for="$q"
+    [ "$( rootNext "$DIR/$1.out" )" = "$want" ]
+    say $? "($1) [P] windowed $4 answer: root next= continues it ($want)" "($1) [P] root next= is '$( rootNext "$DIR/$1.out" )', want '$want'"
+    run "$1c" wide --for="$q" --offset="$5"; run "$1v" wide "$3=target_fn" --offset="$5"
+    F="$( firstChild "$DIR/$1c.out" )"
+    [ "$( attr "$F" kind )" = "$4" ] && [ "$( attr "$F" verb )" = "$3=target_fn --offset=$5" ]
+    say $? "($1) [P] --for=Q --offset=$5 routes to the verb's window: <route kind=$4 verb=\"$3=target_fn --offset=$5\">" "($1) [P] continuation route reads '$F'"
+    [ -n "$( verbRows "$DIR/$1v.out" )" ] && [ "$( verbRows "$DIR/$1c.out" )" = "$( verbRows "$DIR/$1v.out" )" ]
+    say $? "($1) [P] the continuation's rows are $3=target_fn --offset=$5's rows, byte for byte" "($1) [P] continuation rows differ from the verb's window"
+    if grep -q '<ctx task=\|<text_only' "$DIR/$1c.out"; then no "($1) [P] a continuation carries a --for page or a fold"; else ok "($1) [P] a continuation carries no --for page and no fold"; fi
+}
+contArm f36 'Where is `target_fn` used?' --uses where-used 100
+contArm f37 'Trace the transitive callers of `target_fn`.' --impact transitive 40
+# (38) [N] an unwindowed routed answer keeps the verb's own root next= (no has_more)
+run f38 plain --for='Who calls `compute_total`?'; run f38v plain --callers=compute_total
+[ "$( rootNext "$DIR/f38.out" )" = "$( rootNext "$DIR/f38v.out" )" ]
+say $? "(38) [N] unwindowed routed answer: root next= is the verb's own ('$( rootNext "$DIR/f38v.out" )')" "(38) [N] root next= became '$( rootNext "$DIR/f38.out" )'"
+# (39) [N] an unrouted question with --offset is the --for file page, as before (the opt-out spelling of the same call)
+run f39 plain --for='How does the total get computed?' --offset=1; run f39o plain --for='How does the total get computed?' --offset=1 --no-verb-route
+cmp -s "$DIR/f39.out" "$DIR/f39o.out" && ! grep -q '<route ' "$DIR/f39.out"
+say $? "(39) [N] an unrouted --for --offset is the --for file page byte for byte" "(39) [N] unrouted --offset answer changed"
+# (40) [N] --no-verb-route with --offset on a routed question is the --for file page (never routed)
+run f40 wide --for='Where is `target_fn` used?' --offset=100 --no-verb-route
+if grep -q '<route ' "$DIR/f40.out"; then no "(40) [N] --no-verb-route --offset routed"; else ok "(40) [N] --no-verb-route --offset is the --for file page, never routed"; fi
+
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "FAILURES ABOVE"; fi
 exit "$fail"
