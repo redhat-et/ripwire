@@ -206,6 +206,3 @@ kVrTextCap	sink:cut
 kWhereisParseMaxBlobs	pending:B43 disclosed elsewhere: <unparsed blobs= rows= next=> on the whereis answer
 kWhereisTextPreviewCapBytes	sink:cutAttr,shownCount
 kWhereisTextWholeMaxBytes	none:the whole-line threshold of the t= preview; the cut itself is disclosed by t_bytes= and <t_cut>
-kNotFoundTextRows	sink:files
-kNotFoundTextFiles	sink:floor
-kNotFoundTextBytes	sink:floor
