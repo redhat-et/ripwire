@@ -4090,12 +4090,6 @@ inline constexpr std::array<std::string_view, 9>  kFdWriters     = { "write", "p
 // open(2) flags that make the descriptor a written one.
 inline constexpr std::array<std::string_view, 5>  kWriteOpenFlags = { "O_WRONLY", "O_RDWR", "O_CREAT", "O_APPEND", "O_TRUNC" };
 
-template<std::size_t N>
-inline bool inNames( const std::array<std::string_view, N>& names, std::string_view w ) noexcept
-{
-    return std::find( names.begin(), names.end(), w ) != names.end();
-}
-
 // The '(' that the ')' at `close` closes (round brackets only), or toks.size().
 inline std::size_t matchOpenParen( std::string_view src, const std::vector<Tok>& toks, std::size_t close ) noexcept
 {
@@ -4194,7 +4188,7 @@ inline bool writtenThrough( std::string_view src, const std::vector<Tok>& toks, 
 {
     for( std::size_t k = from; k + 1 < to; ++k )
     {
-        if( toks[k].kind != TokKind::Ident || !tokIs( src, toks[k + 1], "(" ) || !inNames( writers, tokText( src, toks[k] ) ) )
+        if( toks[k].kind != TokKind::Ident || !tokIs( src, toks[k + 1], "(" ) || !rw::inSet( writers, tokText( src, toks[k] ) ) )
         {
             continue;
         }
@@ -4243,7 +4237,7 @@ inline bool openedForWrite( std::string_view src, const std::vector<Tok>& toks, 
             continue;
         }
         if( std::any_of( toks.begin() + static_cast<std::ptrdiff_t>( k + 2 ), toks.begin() + static_cast<std::ptrdiff_t>( close ),
-                         [ & ]( const Tok& t ) { return t.kind == TokKind::Ident && inNames( kWriteOpenFlags, tokText( src, t ) ); } ) )
+                         [ & ]( const Tok& t ) { return t.kind == TokKind::Ident && rw::inSet( kWriteOpenFlags, tokText( src, t ) ); } ) )
         {
             return true;
         }
@@ -4434,7 +4428,7 @@ inline bool pyStatementStartsAt( std::string_view src, const std::vector<Tok>& t
     static constexpr std::array<std::string_view, 9> kCompound = { "if", "elif", "else", "for", "while", "with", "try", "except", "finally" };
     const bool lambda = std::any_of( toks.begin() + static_cast<std::ptrdiff_t>( b ), toks.begin() + static_cast<std::ptrdiff_t>( k ),
                                      [ & ]( const Tok& t ) { return tokIs( src, t, "lambda" ); } );
-    return inNames( kCompound, tokText( src, toks[b] ) ) && !lambda;
+    return rw::inSet( kCompound, tokText( src, toks[b] ) ) && !lambda;
 }
 
 inline bool pyStatementEndsAt( std::string_view src, const std::vector<Tok>& toks, std::size_t k ) noexcept
@@ -4539,66 +4533,60 @@ inline void scanUncheckedStatusPython( std::string_view src, const std::vector<T
     }
 }
 
-// Each function span's token range [from, to), non-empty ones only.
-template<class Fn>
-inline void forEachSpanTokens( const std::vector<Tok>& toks, const std::vector<Span>& fnSpans, Fn&& fn )
+// The C family's scan: format-arity over the whole file and utf8-cut / dedup-first inside each function span when
+// `cppShapes` (C++), unchecked-status inside each span always. A site found in nested spans is reported once (the
+// scan of each span is independent; the caller anchors by byte).
+inline std::vector<Site> scanCFamily( std::string_view src, const std::vector<Span>& fnSpans, const std::vector<std::string>* treeMacros, bool cppShapes )
 {
+    std::vector<Site>      out;
+    CppPreproc             pp;
+    const std::vector<Tok> toks = lexCpp( src, &pp );
+    if( cppShapes )
+    {
+        scanFormatArityCpp( src, toks, pp, treeMacros, out );
+    }
     for( const Span& sp : fnSpans )
     {
-        const auto        first = std::lower_bound( toks.begin(), toks.end(), sp.begin, []( const Tok& t, std::uint32_t b ) { return t.begin < b; } );
-        const auto        last  = std::lower_bound( toks.begin(), toks.end(), sp.end, []( const Tok& t, std::uint32_t b ) { return t.begin < b; } );
-        const std::size_t from  = static_cast<std::size_t>( first - toks.begin() );
-        const std::size_t to    = static_cast<std::size_t>( last - toks.begin() );
-        if( from < to )
+        const auto first = std::lower_bound( toks.begin(), toks.end(), sp.begin, []( const Tok& t, std::uint32_t b ) { return t.begin < b; } );
+        const auto last  = std::lower_bound( toks.begin(), toks.end(), sp.end, []( const Tok& t, std::uint32_t b ) { return t.begin < b; } );
+        const std::size_t from = static_cast<std::size_t>( first - toks.begin() );
+        const std::size_t to   = static_cast<std::size_t>( last - toks.begin() );
+        if( from >= to )
         {
-            fn( from, to );
+            continue;
         }
+        if( cppShapes )
+        {
+            scanUtf8CutFunction( src, toks, from, to, out );
+            scanDedupFirstFunction( src, toks, from, to, out );
+        }
+        scanUncheckedStatusCpp( src, toks, from, to, out );
     }
-}
-
-// Byte order, and a site found in nested spans once (the scan of each span is independent).
-inline void sortUniqueSites( std::vector<Site>& out )
-{
     std::sort( out.begin(), out.end(), []( const Site& a, const Site& b ) { return a.startByte != b.startByte ? a.startByte < b.startByte : a.text < b.text; } );
     out.erase( std::unique( out.begin(), out.end(), []( const Site& a, const Site& b ) { return a.facet == b.facet && a.startByte == b.startByte && a.text == b.text; } ),
                out.end() );
+    return out;
 }
 
 }   // namespace detail
 
 // ─── the per-language entry points ──────────────────────────────────────────────────────────────────────
 
-// C++: format-arity over the whole file; utf8-cut, dedup-first and unchecked-status inside each function span. A site found
-// in nested spans is reported once (the scan of each span is independent; the caller anchors by byte).
+// C++: format-arity over the whole file; utf8-cut, dedup-first and unchecked-status inside each function span.
 // `treeMacros`: the macro names the index holds across the tree (sorted, unique), for format-arity's F1 skip.
 inline std::vector<Site> scanCpp( std::string_view src, const std::vector<Span>& fnSpans, const std::vector<std::string>* treeMacros = nullptr )
 {
-    std::vector<Site>              out;
-    detail::CppPreproc             pp;
-    const std::vector<detail::Tok> toks = detail::lexCpp( src, &pp );
-    detail::scanFormatArityCpp( src, toks, pp, treeMacros, out );
-    detail::forEachSpanTokens( toks, fnSpans, [ & ]( std::size_t from, std::size_t to )
-    {
-        detail::scanUtf8CutFunction( src, toks, from, to, out );
-        detail::scanDedupFirstFunction( src, toks, from, to, out );
-        detail::scanUncheckedStatusCpp( src, toks, from, to, out );
-    } );
-    detail::sortUniqueSites( out );
-    return out;
+    return detail::scanCFamily( src, fnSpans, treeMacros, /*cppShapes=*/true );
 }
 
 // C: unchecked-status alone, inside each function span (the C++ shapes name C++ library calls).
 inline std::vector<Site> scanC( std::string_view src, const std::vector<Span>& fnSpans )
 {
-    std::vector<Site>              out;
-    const std::vector<detail::Tok> toks = detail::lexCpp( src );
-    detail::forEachSpanTokens( toks, fnSpans, [ & ]( std::size_t from, std::size_t to ) { detail::scanUncheckedStatusCpp( src, toks, from, to, out ); } );
-    detail::sortUniqueSites( out );
-    return out;
+    return detail::scanCFamily( src, fnSpans, nullptr, /*cppShapes=*/false );
 }
 
 // Python: format-arity over the whole file; unchecked-status reads `fnSpans` for the scope a bound name lives in.
-inline std::vector<Site> scanPython( std::string_view src, const std::vector<Span>& fnSpans )
+inline std::vector<Site> scanPython( std::string_view src, const std::vector<Span>& fnSpans = {} )
 {
     std::vector<Site>              out;
     const std::vector<detail::Tok> toks = detail::lexPython( src );
@@ -4624,8 +4612,8 @@ inline std::vector<Site> scanBashTestScript( std::string_view src, const std::ve
 // pclose, "write" its own.)
 inline bool mayHoldStatusCalls( std::string_view src ) noexcept
 {
-    static constexpr std::array<std::string_view, 6> kNeedles = { "close", "rename", "write", "waitpid", "system", "fflush" };
-    return std::any_of( kNeedles.begin(), kNeedles.end(), [ & ]( std::string_view n ) { return src.find( n ) != std::string_view::npos; } );
+    return src.find( "close" ) != std::string_view::npos || src.find( "rename" ) != std::string_view::npos || src.find( "write" ) != std::string_view::npos
+        || src.find( "waitpid" ) != std::string_view::npos || src.find( "system" ) != std::string_view::npos || src.find( "fflush" ) != std::string_view::npos;
 }
 
 // A cheap byte prefilter: can this C++ file hold any of the four C++ shapes at all?

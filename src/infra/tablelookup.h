@@ -17,6 +17,7 @@
 // "optimize" this into a hash without a measurement showing one of these tables grew enough to matter.
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdlib>
 #include <iterator>
@@ -72,6 +73,14 @@ inline const Row* findSortedByField( const Table& rows, Key Row::*field, const W
 {
     const auto it = std::lower_bound( std::begin( rows ), std::end( rows ), wanted, [field]( const Row& r, const Wanted& w ) { return r.*field < w; } );
     return it != std::end( rows ) && ( *it ).*field == wanted ? &*it : nullptr;
+}
+
+// Membership in a small constexpr table of values (enum kinds, languages, names). Moved here from extentsuspect.h when
+// defectshape.h's unchecked-status needed the same lookup (--quality-delta named the second copy a clone of a reused helper).
+template<class T, std::size_t N>
+constexpr bool inSet( const std::array<T, N>& set, T value ) noexcept
+{
+    return std::find( set.begin(), set.end(), value ) != set.end();
 }
 
 // A test hook's one-of-N switch: the 1-based position of environment variable `var`'s value in `names`, 0 when it is unset or
