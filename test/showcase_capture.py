@@ -45,6 +45,19 @@ def explode(text):
             lines.append(ln)
     return lines, exploded
 
+def trailing_legend_start(lines):
+    """Index where a cut block's kept TRAILING legend starts (len(lines) when it keeps none).
+
+    INT1 (2026-11-19): an answer-first --for document ENDS in its legend (the trailing comments before the root closes),
+    so the 30-line window cut every legend clause a caption may name ([adaptive: …], [doc mentions: …]) and
+    showcasecapturecheck (G) went red. The trailing run of comment lines (and the closing tags among them) is kept after
+    the marker, like the head comments the preamble already promises in full; the marker counts only the lines between.
+    A block whose trailing run holds no comment (every legend-first answer) is cut exactly as before."""
+    k = len(lines)
+    while k > 30 and (lines[k - 1].lstrip().startswith("<!--") or re.match(r'^\s*</[\w-]+>\s*$', lines[k - 1])):
+        k -= 1
+    return k if any(ln.lstrip().startswith("<!--") for ln in lines[k:]) else len(lines)
+
 def fmt_block(data):
     text = data.decode("utf-8", "replace").rstrip("\n")
     if not text:
@@ -56,18 +69,8 @@ def fmt_block(data):
     marker = None
     tail = []
     if len(lines) > 40:
-        # INT1 (2026-11-19): an answer-first --for document ENDS in its legend (the trailing comments before the root closes),
-        # so the 30-line window cut every legend clause a caption may name ([adaptive: …], [doc mentions: …]) and
-        # showcasecapturecheck (G) went red. The trailing run of comment lines (and the closing tags among them) is kept after
-        # the marker, like the head comments the preamble already promises in full; the marker counts only the lines between.
-        # A block whose trailing run holds no comment (every legend-first answer) is cut exactly as before.
-        k = len(lines)
-        while k > 30 and ( lines[k - 1].lstrip().startswith("<!--") or re.match(r'^\s*</[\w-]+>\s*$', lines[k - 1]) ):
-            k -= 1
-        if any(ln.lstrip().startswith("<!--") for ln in lines[k:]):
-            tail = lines[k:]
-        else:
-            k = len(lines)
+        k = trailing_legend_start(lines)
+        tail = lines[k:]
         shown = lines[:30]
         if exploded:
             marker = f"… [{k-30} more display lines; full output is {total_bytes} bytes on {raw_line_count} raw line(s)]"
