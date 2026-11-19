@@ -1135,8 +1135,8 @@ inline rw::AliasUsesFacts appendAliasUseSites( const rw::IngestResult& ing, cons
 }
 
 // BX1 FIX 2 — MACRO SEE-THROUGH on --uses (test/verbfixcheck.sh F2; the --callers rule is callhierarchy.h macroSeeThroughRows). The
-// function-like macros whose replacement text calls one of `defs` — the defs' callers of kind macro, then the macros calling
-// those, each once — are the spellings the definition is used through: tmux uses cmdq_get_callback1 only as
+// C function-like macros whose replacement text calls one of `defs` — the defs' callers of kind macro (BX2: those alone, the first
+// macro hop; not the macros calling those), each once — are the spellings the definition is used through: tmux uses cmdq_get_callback1 only as
 // `cmdq_get_callback( cb, data )`. Their call-shaped sites (role call or macro, the uses verb's own filters) are appended after
 // the direct and alias rows, ranked as those are, each tagged with the macro it invokes, and counted in count=. A site of an
 // unrelated same-named macro is matched by name, as every name-matched role here is. They go in ahead of the last `hedgedTail`
@@ -1153,7 +1153,7 @@ inline std::size_t appendMacroUseSites( const rw::IngestResult& ing, const rw::G
     {
         for( std::uint32_t k = ro[n]; k < ro[n + 1]; ++k )
         {
-            if( const NodeId c = ci[k]; c < seen.size() && !seen[c] && ing.symbols[c].kind == SymKind::Macro )
+            if( const NodeId c = ci[k]; c < seen.size() && !seen[c] && rw::seeThroughMacro( ing.symbols[c] ) )
             {
                 seen[c] = 1;
                 macros.push_back( c );
@@ -1167,11 +1167,7 @@ inline std::size_t appendMacroUseSites( const rw::IngestResult& ing, const rw::G
             walk( d );
         }
     }
-    for( std::size_t at = 0; at < macros.size(); ++at )   // grows as macros invoking a listed macro are found
-    {
-        walk( macros[at] );
-    }
-    if( macros.empty() )
+    if( macros.empty() )   // BX2: the defs' own macro callers only — the first macro hop (callhierarchy.h seeThroughMacro)
     {
         return 0;
     }
