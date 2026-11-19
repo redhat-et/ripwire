@@ -11126,6 +11126,13 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // for `class C(A, B)` Python's MRO puts A's chain before B's, so when both A and B define `m`, `super().m()`
     // in C names A::m. chaUp is sorted for its membership uses and cannot say which base came first.
     HashMap<std::string, std::vector<std::string>> chaUpDeclared;
+    // QUAL-NS-CALL-BIND: does the caller's own scope — its class or a base of it, or its namespace — define the callee's name? C++
+    // lookup finds that one before a namespace-scope using-declaration of the name, so the declaration does not decide the call.
+    const auto callerScopeDeclares = [ & ]( const Reference& r ) -> bool
+    {
+        const std::string_view scope = r.fromSymbol < ing.symbols.size() ? std::string_view( ing.symbols[ r.fromSymbol ].scope ) : std::string_view{};
+        return !scope.empty() && narrower.methodOnTypeOrBases( scope, r, chaUp ) != nullptr;
+    };
     // Ruby bases, SCOPED by Ruby's own constant lookup (resolve.h::RubyBaseScope; test/rubyinheritcheck.sh floor
     // (c)). Read here — a base the tree never opens (`< ActiveRecord::Base`) adds no CHA edge, so its class's walk
     // cannot reach an unrelated in-tree `Base` — and by the implementor pass below. Empty on a Ruby-free corpus.
@@ -12598,9 +12605,17 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         //   * with nothing visible from the primary, only a split of two or more specializations answers.
         // No answer leaves `cand` empty, so the bare-name ladder decides exactly as it did before the family fallback,
         // and no family answer ever reaches a same-named definition outside the template.
-        if( !scipPinned && r.lang != Lang::Elixir && !r.qualifier.empty() )
+        // QUAL-NS-CALL-BIND: a C++ call whose scope a declaration in force names (CallResultTypes::cppScopeNamedAt) is keyed by that
+        // scope instead — an alias shadows the qualifier it spells (`namespace h = rw::hashutil;` makes `h::f()` hashutil's), and a
+        // using-declaration (`using rw::hashutil::f;`) gives a bare `f()` its scope unless the caller's own scope or a base declares
+        // the name (found first by C++ lookup). No such declaration, or two that disagree: the written qualifier, as before.
+        const std::string declScope = !scipPinned && r.role == RefRole::Call && langFacts( r.lang ).qualifierNamesScope && !isMemberCallRef( r )
+                                          ? recvEv.types.cppScopeNamedAt( r ) : std::string();
+        const bool declNames = !declScope.empty() && ( !r.qualifier.empty() || !callerScopeDeclares( r ) );
+        const std::string_view canonQualifier = declNames ? std::string_view( declScope ) : std::string_view( r.qualifier );
+        if( !scipPinned && r.lang != Lang::Elixir && !canonQualifier.empty() )
         {
-            appendCanonicalCandidates( cand, qkey, r, CanonicalScopes { canonByName, canonFamilyByName, specializationsWithBases, narrower, chaUp, ing.symbols },
+            appendCanonicalCandidates( cand, qkey, canonQualifier, r, CanonicalScopes { canonByName, canonFamilyByName, specializationsWithBases, narrower, chaUp, ing.symbols },
                                        [ & ]( NodeId c ) { return langCompatible( symLang[ c ], r.lang ) && sameRoot( c, r.fileId ); } );
             canonical = !cand.empty();
         }
