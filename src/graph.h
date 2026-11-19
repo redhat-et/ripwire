@@ -2928,7 +2928,7 @@ inline HashMap<std::string, char> pythonMultiFileClassNames( const IngestResult&
     HashMap<std::string, std::uint32_t> firstFile;   // name → the first file defining a class of it; UINT32_MAX once a second file does
     for( const Symbol& s : ing.symbols )
     {
-        if( s.lang != Lang::Python || s.kind != SymKind::Class )
+        if( langFacts( s.lang ).baseImportEvidence != BaseImportEvidence::PythonImport || s.kind != SymKind::Class )   // Python's import grammar
         {
             continue;
         }
@@ -10508,12 +10508,13 @@ struct ImportProvedClass
 
     NodeId operator()( const Reference& r, std::string_view name ) const
     {
-        if( r.lang == Lang::Python )
+        const BaseImportEvidence grammar = langFacts( r.lang ).baseImportEvidence;   // which import tables can name the class
+        if( grammar == BaseImportEvidence::PythonImport )
         {
             const NodeId pin = pythonRenamedImportPin( ing, pyImports, extVeto, externalVeto, byName, r, name );
             return pin != kNoNode && ing.symbols[ pin ].kind == SymKind::Class ? pin : kNoNode;   // Python: a plain or renamed member import of a class
         }
-        return r.lang == Lang::TypeScript || r.lang == Lang::JavaScript ? jsClass( r, name ) : kNoNode;
+        return grammar == BaseImportEvidence::JsImport ? jsClass( r, name ) : kNoNode;
     }
     // TS/JS: the class an ES named import of `name` (renamed or not) pins in r's file (buildJsImportTables: Pinned, the module's export
     // table names it) — not where a local declaration shadows the import or a write rebinds the name (FC3) at r's byte
