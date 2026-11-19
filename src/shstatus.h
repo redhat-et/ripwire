@@ -24,7 +24,12 @@
 // Regular expressions are spelled as small hand matchers (the binary links no regex engine for this); each names the
 // Python pattern it implements.
 
+#include "infra/namesplit.h"   // isIdentChar / isIdentStart — the ONE ASCII identifier-character pair
+#include "infra/shellword.h"   // trimView / shellIsRedirect — shared with darkflags.h
+#include "infra/sortutil.h"    // sortUnique / svLess
+
 #include <algorithm>
+#include <charconv>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -118,18 +123,14 @@ struct Tree
 namespace detail
 {
 
+using rw::namesplit::isIdentChar;    // [A-Za-z0-9_]
+using rw::namesplit::isIdentStart;   // [A-Za-z_]
+using rw::shellword::shellIsRedirect;
+using rw::shellword::trimView;
+using rw::sortutil::sortUnique;
 inline bool isWordChar( char c ) noexcept   // Python's \w on str: ASCII word characters, and any non-ASCII byte
 {
-    const unsigned char u = static_cast<unsigned char>( c );
-    return ( c >= 'A' && c <= 'Z' ) || ( c >= 'a' && c <= 'z' ) || ( c >= '0' && c <= '9' ) || c == '_' || u >= 0x80;
-}
-inline bool isAsciiIdent( char c ) noexcept
-{
-    return ( c >= 'A' && c <= 'Z' ) || ( c >= 'a' && c <= 'z' ) || ( c >= '0' && c <= '9' ) || c == '_';
-}
-inline bool isIdentHead( char c ) noexcept
-{
-    return ( c >= 'A' && c <= 'Z' ) || ( c >= 'a' && c <= 'z' ) || c == '_';
+    return isIdentChar( c ) || static_cast<unsigned char>( c ) >= 0x80;
 }
 inline bool isUpperIdent( char c ) noexcept   // [A-Z0-9_]
 {
@@ -146,10 +147,6 @@ inline bool isDigitC( char c ) noexcept
 inline bool startsAt( std::string_view s, std::size_t i, std::string_view p ) noexcept
 {
     return i <= s.size() && s.substr( i, p.size() ) == p;
-}
-inline bool contains( std::string_view s, std::string_view p ) noexcept
-{
-    return s.find( p ) != std::string_view::npos;
 }
 inline std::size_t countNl( std::string_view s, std::size_t b, std::size_t e ) noexcept
 {
@@ -181,12 +178,12 @@ inline std::string unq( std::string_view s )
 // ^[A-Za-z_][A-Za-z0-9_]*(\[[^]]*\])?\+?=
 inline bool isAssign( std::string_view s ) noexcept
 {
-    if( s.empty() || !isIdentHead( s[0] ) )
+    if( s.empty() || !isIdentStart( s[0] ) )
     {
         return false;
     }
     std::size_t i = 1;
-    while( i < s.size() && isAsciiIdent( s[i] ) )
+    while( i < s.size() && isIdentChar( s[i] ) )
     {
         ++i;
     }
@@ -217,12 +214,12 @@ inline std::string_view bareVar( std::string_view w ) noexcept
     {
         ++i;
     }
-    if( i >= w.size() || !isIdentHead( w[i] ) )
+    if( i >= w.size() || !isIdentStart( w[i] ) )
     {
         return {};
     }
     const std::size_t b = i;
-    while( i < w.size() && isAsciiIdent( w[i] ) )
+    while( i < w.size() && isIdentChar( w[i] ) )
     {
         ++i;
     }
@@ -669,12 +666,12 @@ inline std::size_t heredocDelim( std::string_view s, std::size_t k, std::string&
         {
             ++i;
         }
-        if( i >= s.size() || !isIdentHead( s[i] ) )
+        if( i >= s.size() || !isIdentStart( s[i] ) )
         {
             return std::string_view::npos;
         }
         const std::size_t b = i;
-        while( i < s.size() && isAsciiIdent( s[i] ) )
+        while( i < s.size() && isIdentChar( s[i] ) )
         {
             ++i;
         }
@@ -702,225 +699,266 @@ inline std::size_t heredocDelim( std::string_view s, std::size_t k, std::string&
     return tryQuote( 0 );
 }
 
-struct Lexed
+// The tokenizer: one step per token class, heredoc bodies skipped as DATA at the end of their line.
+class Lexer
 {
-    std::vector<Tok> toks;
-};
+public:
+    Lexer( std::string_view src, std::uint32_t line0, std::uint32_t base ) : src_( src ), n_( src.size() ), line_( line0 ), base_( base ) {}
 
-inline std::vector<Tok> lex( std::string_view src, std::uint32_t line0, std::uint32_t base )
-{
-    std::vector<Tok>                         toks;
-    std::size_t                              i    = 0;
-    std::uint32_t                            line = line0;
-    const std::size_t                        n    = src.size();
-    std::vector<std::pair<bool, std::string>> pending;   // heredoc delimiters waiting for the end of this line
-    bool                                     prevBlank = true;
-    const auto push = [ & ]( Tok t )
+    std::vector<Tok> run()
     {
-        t.glued   = !prevBlank;
-        prevBlank = false;
-        toks.push_back( std::move( t ) );
-    };
-    while( i < n )
+        while( i_ < n_ )
+        {
+            step();
+        }
+        Tok t;
+        t.kind = TokKind::Nl;
+        t.line = line_;
+        t.pos  = posAt( n_ );
+        toks_.push_back( std::move( t ) );
+        return std::move( toks_ );
+    }
+
+private:
+    std::string_view                          src_;
+    std::size_t                               n_;
+    std::size_t                               i_ = 0;
+    std::uint32_t                             line_;
+    std::uint32_t                             base_;
+    std::vector<std::pair<bool, std::string>> pending_;   // heredoc delimiters waiting for the end of this line
+    bool                                      prevBlank_ = true;
+    std::vector<Tok>                          toks_;
+
+    std::uint32_t posAt( std::size_t at ) const noexcept
     {
-        const char c = src[i];
+        return static_cast<std::uint32_t>( base_ + at );
+    }
+    void push( Tok t )
+    {
+        t.glued    = !prevBlank_;
+        prevBlank_ = false;
+        toks_.push_back( std::move( t ) );
+    }
+    void pushOp( std::string op )
+    {
+        Tok t;
+        t.kind = TokKind::Op;
+        t.op   = std::move( op );
+        t.line = line_;
+        t.pos  = posAt( i_ );
+        push( std::move( t ) );
+    }
+    // the word src[b, e) starting on line sl; its $( ) / backtick bodies are indexed when withSubs
+    void pushWord( std::size_t b, std::size_t e, bool withSubs )
+    {
+        Tok t;
+        t.kind      = TokKind::Word;
+        t.word.text = std::string( src_.substr( b, e - b ) );
+        t.word.line = line_;
+        t.word.pos  = posAt( b );
+        if( withSubs )
+        {
+            subsIn( t.word.text, line_, t.word.pos, t.word.subs );
+        }
+        t.line = line_;
+        t.pos  = t.word.pos;
+        push( std::move( t ) );
+        line_ += static_cast<std::uint32_t>( countNl( src_, b, e ) );
+    }
+
+    void step()
+    {
+        const char c = src_[i_];
         if( c == '\n' )
         {
-            Tok t;
-            t.kind = TokKind::Nl;
-            t.line = line;
-            t.pos  = static_cast<std::uint32_t>( base + i );
-            push( std::move( t ) );
-            prevBlank = true;
-            ++line;
-            ++i;
-            for( const auto& [ strip, delim ] : pending )   // heredoc bodies are DATA
-            {
-                while( i < n )
-                {
-                    std::size_t j = src.find( '\n', i );
-                    j             = j == std::string_view::npos ? n : j;
-                    std::string_view body = src.substr( i, j - i );
-                    i = j + 1;
-                    ++line;
-                    if( strip )
-                    {
-                        while( !body.empty() && body.front() == '\t' )
-                        {
-                            body.remove_prefix( 1 );
-                        }
-                    }
-                    if( body == delim )
-                    {
-                        break;
-                    }
-                }
-            }
-            pending.clear();
-            continue;
+            newline();
+            return;
         }
         if( c == ' ' || c == '\t' )
         {
-            prevBlank = true;
-            ++i;
-            continue;
+            prevBlank_ = true;
+            ++i_;
+            return;
         }
-        if( c == '\\' && i + 1 < n && src[i + 1] == '\n' )
+        if( c == '\\' && i_ + 1 < n_ && src_[i_ + 1] == '\n' )
         {
-            prevBlank = true;
-            i += 2;
-            ++line;
-            continue;
+            prevBlank_ = true;
+            i_ += 2;
+            ++line_;
+            return;
         }
         if( c == '#' )
         {
-            const std::size_t j = src.find( '\n', i );
-            i = j == std::string_view::npos ? n : j;
-            continue;
+            const std::size_t j = src_.find( '\n', i_ );
+            i_                  = j == std::string_view::npos ? n_ : j;
+            return;
         }
-        std::string_view op;
-        if( isOpChar( c ) )
+        const std::string_view op = opAt();
+        if( !op.empty() )
         {
-            for( std::string_view o : kOps )
+            operatorTok( op );
+            return;
+        }
+        word();
+    }
+
+    void newline()
+    {
+        Tok t;
+        t.kind = TokKind::Nl;
+        t.line = line_;
+        t.pos  = posAt( i_ );
+        push( std::move( t ) );
+        prevBlank_ = true;
+        ++line_;
+        ++i_;
+        skipHeredocBodies();
+    }
+    void skipHeredocBodies()   // heredoc bodies are DATA
+    {
+        for( const auto& [ strip, delim ] : pending_ )
+        {
+            while( i_ < n_ )
             {
-                if( startsAt( src, i, o ) )
+                std::size_t j = src_.find( '\n', i_ );
+                j             = j == std::string_view::npos ? n_ : j;
+                std::string_view body = src_.substr( i_, j - i_ );
+                i_ = j + 1;
+                ++line_;
+                if( strip )
                 {
-                    op = o;
+                    while( !body.empty() && body.front() == '\t' )
+                    {
+                        body.remove_prefix( 1 );
+                    }
+                }
+                if( body == delim )
+                {
                     break;
                 }
             }
         }
-        if( !op.empty() )
-        {
-            if( op == "<<" || op == "<<-" )
-            {
-                std::size_t k = i + op.size();
-                while( k < n && ( src[k] == ' ' || src[k] == '\t' ) )
-                {
-                    ++k;
-                }
-                std::string       name;
-                const std::size_t e = heredocDelim( src, k, name );
-                if( e != std::string_view::npos )
-                {
-                    pending.emplace_back( op == "<<-", name );
-                    Tok t;
-                    t.kind = TokKind::Op;
-                    t.op   = "<<";
-                    t.line = line;
-                    t.pos  = static_cast<std::uint32_t>( base + i );
-                    push( std::move( t ) );
-                    i = e;
-                    continue;
-                }
-            }
-            if( op == "(" && startsAt( src, i, "((" ) )   // arithmetic command (( ... ))
-            {
-                std::size_t j = src.find( "))", i );
-                j             = j == std::string_view::npos ? n : j + 2;
-                Tok t;
-                t.kind      = TokKind::Word;
-                t.word.text = std::string( src.substr( i, j - i ) );
-                t.word.line = line;
-                t.word.pos  = static_cast<std::uint32_t>( base + i );
-                t.line      = line;
-                t.pos       = t.word.pos;
-                push( std::move( t ) );
-                line += static_cast<std::uint32_t>( countNl( src, i, j ) );
-                i = j;
-                continue;
-            }
-            Tok t;
-            t.kind = TokKind::Op;
-            t.op   = std::string( op );
-            t.line = line;
-            t.pos  = static_cast<std::uint32_t>( base + i );
-            push( std::move( t ) );
-            i += op.size();
-            continue;
-        }
-        // a word
-        const std::size_t   start = i;
-        const std::uint32_t sl    = line;
-        if( startsAt( src, i, "[[" ) && ( i + 2 >= n || src[i + 2] == ' ' || src[i + 2] == '\t' ) )
-        {
-            std::size_t j = src.find( "]]", i );
-            j             = j == std::string_view::npos ? n : j + 2;
-            Tok t;
-            t.kind      = TokKind::Word;
-            t.word.text = std::string( src.substr( i, j - i ) );
-            t.word.line = sl;
-            t.word.pos  = static_cast<std::uint32_t>( base + i );
-            subsIn( t.word.text, sl, t.word.pos, t.word.subs );
-            t.line = sl;
-            t.pos  = t.word.pos;
-            push( std::move( t ) );
-            line += static_cast<std::uint32_t>( countNl( src, i, j ) );
-            i = j;
-            continue;
-        }
-        while( i < n )
-        {
-            const char d = src[i];
-            if( d == ' ' || d == '\t' || d == '\n' )
-            {
-                break;
-            }
-            if( d == '\\' )
-            {
-                i += 2;
-                continue;
-            }
-            if( d == '\'' || d == '"' )
-            {
-                i = skipQuote( src, i, d );
-                continue;
-            }
-            if( d == '`' )
-            {
-                const std::size_t j = src.find( '`', i + 1 );
-                i = j == std::string_view::npos ? n : j + 1;
-                continue;
-            }
-            if( d == '$' && startsAt( src, i, "$(" ) )
-            {
-                i = skipParen( src, i + 1 );
-                continue;
-            }
-            if( d == '$' && startsAt( src, i, "${" ) )
-            {
-                i = skipBrace( src, i + 1 );
-                continue;
-            }
-            if( d == '(' && i > start && src[i - 1] == '=' )   // array assignment X=( ... )
-            {
-                i = skipParen( src, i );
-                continue;
-            }
-            if( isOpChar( d ) )
-            {
-                break;
-            }
-            ++i;
-        }
-        i = std::min( i, n );
-        Tok t;
-        t.kind      = TokKind::Word;
-        t.word.text = std::string( src.substr( start, i - start ) );
-        t.word.line = sl;
-        t.word.pos  = static_cast<std::uint32_t>( base + start );
-        subsIn( t.word.text, sl, t.word.pos, t.word.subs );
-        t.line = sl;
-        t.pos  = t.word.pos;
-        line += static_cast<std::uint32_t>( countNl( t.word.text, 0, t.word.text.size() ) );
-        push( std::move( t ) );
+        pending_.clear();
     }
-    Tok t;
-    t.kind = TokKind::Nl;
-    t.line = line;
-    t.pos  = static_cast<std::uint32_t>( base + n );
-    toks.push_back( std::move( t ) );
-    return toks;
+
+    std::string_view opAt() const noexcept
+    {
+        if( !isOpChar( src_[i_] ) )
+        {
+            return {};
+        }
+        for( std::string_view o : kOps )
+        {
+            if( startsAt( src_, i_, o ) )
+            {
+                return o;
+            }
+        }
+        return {};
+    }
+    void operatorTok( std::string_view op )
+    {
+        if( ( op == "<<" || op == "<<-" ) && heredocStart( op ) )
+        {
+            return;
+        }
+        if( op == "(" && startsAt( src_, i_, "((" ) )   // arithmetic command (( ... ))
+        {
+            closedWord( "))", false );
+            return;
+        }
+        pushOp( std::string( op ) );
+        i_ += op.size();
+    }
+    bool heredocStart( std::string_view op )
+    {
+        std::size_t k = i_ + op.size();
+        while( k < n_ && ( src_[k] == ' ' || src_[k] == '\t' ) )
+        {
+            ++k;
+        }
+        std::string       name;
+        const std::size_t e = heredocDelim( src_, k, name );
+        if( e == std::string_view::npos )
+        {
+            return false;
+        }
+        pending_.emplace_back( op == "<<-", name );
+        pushOp( "<<" );
+        i_ = e;
+        return true;
+    }
+    // (( ... )) and [[ ... ]]: one word through the closer (or to the end)
+    void closedWord( std::string_view closer, bool withSubs )
+    {
+        std::size_t j = src_.find( closer, i_ );
+        j             = j == std::string_view::npos ? n_ : j + closer.size();
+        const std::size_t b = i_;
+        i_                  = j;
+        pushWord( b, j, withSubs );
+    }
+
+    void word()
+    {
+        if( startsAt( src_, i_, "[[" ) && ( i_ + 2 >= n_ || src_[i_ + 2] == ' ' || src_[i_ + 2] == '\t' ) )
+        {
+            closedWord( "]]", true );
+            return;
+        }
+        const std::size_t start = i_;
+        i_                      = std::min( wordEnd( start ), n_ );
+        pushWord( start, i_, true );
+    }
+    std::size_t wordEnd( std::size_t start ) const
+    {
+        std::size_t i = start;
+        while( i < n_ )
+        {
+            const char d = src_[i];
+            if( d == ' ' || d == '\t' || d == '\n' || ( isOpChar( d ) && !( d == '(' && i > start && src_[i - 1] == '=' ) ) )
+            {
+                break;
+            }
+            i = wordStep( i, start );
+        }
+        return i;
+    }
+    // past the word byte at i: a quote, backtick, $( ), ${ } or an array X=( ... ) as a whole
+    std::size_t wordStep( std::size_t i, std::size_t start ) const
+    {
+        const char d = src_[i];
+        if( d == '\\' )
+        {
+            return i + 2;
+        }
+        if( d == '\'' || d == '"' )
+        {
+            return skipQuote( src_, i, d );
+        }
+        if( d == '`' )
+        {
+            const std::size_t j = src_.find( '`', i + 1 );
+            return j == std::string_view::npos ? n_ : j + 1;
+        }
+        if( startsAt( src_, i, "$(" ) )
+        {
+            return skipParen( src_, i + 1 );
+        }
+        if( startsAt( src_, i, "${" ) )
+        {
+            return skipBrace( src_, i + 1 );
+        }
+        if( d == '(' && i > start && src_[i - 1] == '=' )   // array assignment X=( ... )
+        {
+            return skipParen( src_, i );
+        }
+        return i + 1;
+    }
+};
+
+inline std::vector<Tok> lex( std::string_view src, std::uint32_t line0, std::uint32_t base )
+{
+    return Lexer( src, line0, base ).run();
 }
 
 // ── parser ──────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -1206,7 +1244,7 @@ private:
     }
     static bool isFuncName( std::string_view t ) noexcept   // ^[A-Za-z_][\w.:-]*$
     {
-        if( t.empty() || !isIdentHead( t[0] ) )
+        if( t.empty() || !isIdentStart( t[0] ) )
         {
             return false;
         }
@@ -1245,19 +1283,10 @@ private:
             }
             n.fredirs.push_back( std::move( r ) );
         }
-        while( peek().kind == TokKind::Word && isDigitRedirWord( peek().word.text ) )
+        while( peek().kind == TokKind::Word && shellIsRedirect( peek().word.text ) )
         {
             ++i_;
         }
-    }
-    static bool isDigitRedirWord( std::string_view w ) noexcept   // ^\d*[<>]
-    {
-        std::size_t k = 0;
-        while( k < w.size() && isDigitC( w[k] ) )
-        {
-            ++k;
-        }
-        return k < w.size() && ( w[k] == '<' || w[k] == '>' );
     }
     std::uint32_t parseSimple()
     {
@@ -1292,7 +1321,8 @@ private:
                 if( p.glued && !n.words.empty() && !n.words.back().text.empty()
                     && std::all_of( n.words.back().text.begin(), n.words.back().text.end(), isDigitC ) && n.words.back().text.size() <= 2 )
                 {
-                    r.fd = std::stoi( n.words.back().text );
+                    const std::string& fd = n.words.back().text;
+                    (void)std::from_chars( fd.data(), fd.data() + fd.size(), r.fd );   // 1-2 digits: no overflow, no error
                 }
                 ++i_;
                 if( peek().kind == TokKind::Word )
@@ -1473,14 +1503,9 @@ struct Analysis
 namespace detail
 {
 
-inline void sortUnique( std::vector<std::string>& v )
-{
-    std::sort( v.begin(), v.end() );
-    v.erase( std::unique( v.begin(), v.end() ), v.end() );
-}
 inline bool hasName( const std::vector<std::string>& sorted, std::string_view n )
 {
-    return std::binary_search( sorted.begin(), sorted.end(), n, []( std::string_view a, std::string_view b ) { return a < b; } );
+    return std::binary_search( sorted.begin(), sorted.end(), n, rw::sortutil::svLess );
 }
 
 inline std::string textOf( const Tree& t, std::uint32_t node );
@@ -1676,31 +1701,13 @@ inline std::string firstPipelineText( const Tree& t, const AndOr& ao )
 // ^\s*(?:true|:)\s*$
 inline bool isTrivialOr( std::string_view s ) noexcept
 {
-    std::size_t b = 0, e = s.size();
-    while( b < e && isSp( s[b] ) )
-    {
-        ++b;
-    }
-    while( e > b && isSp( s[e - 1] ) )
-    {
-        --e;
-    }
-    const std::string_view m = s.substr( b, e - b );
+    const std::string_view m = trimView( s );
     return m == "true" || m == ":";
 }
 
 inline std::string strip( std::string_view s )
 {
-    std::size_t b = 0, e = s.size();
-    while( b < e && isSp( s[b] ) )
-    {
-        ++b;
-    }
-    while( e > b && isSp( s[e - 1] ) )
-    {
-        --e;
-    }
-    return std::string( s.substr( b, e - b ) );
+    return std::string( trimView( s ) );
 }
 
 // \$\{?([A-Za-z_][A-Za-z0-9_]*)  findall
@@ -1717,10 +1724,10 @@ inline void vrefs( std::string_view s, std::vector<std::string>& out )
         {
             ++j;
         }
-        if( j < s.size() && isIdentHead( s[j] ) )
+        if( j < s.size() && isIdentStart( s[j] ) )
         {
             const std::size_t b = j;
-            while( j < s.size() && isAsciiIdent( s[j] ) )
+            while( j < s.size() && isIdentChar( s[j] ) )
             {
                 ++j;
             }
@@ -1746,7 +1753,7 @@ inline void boundedIdents( std::string_view s, std::vector<std::string>& out )
             ++j;
         }
         const std::string_view run = s.substr( i, j - i );
-        if( isIdentHead( run[0] ) && std::all_of( run.begin(), run.end(), isAsciiIdent ) )
+        if( isIdentStart( run[0] ) && std::all_of( run.begin(), run.end(), isIdentChar ) )
         {
             out.emplace_back( run );
         }
@@ -1757,7 +1764,7 @@ inline void boundedIdents( std::string_view s, std::vector<std::string>& out )
 inline std::string_view rcSuffixClose( std::string_view s, std::size_t dot, std::size_t& endOut ) noexcept
 {
     std::size_t k = dot + 1;
-    while( k < s.size() && isAsciiIdent( s[k] ) )
+    while( k < s.size() && isIdentChar( s[k] ) )
     {
         ++k;
     }
@@ -1859,7 +1866,7 @@ struct Walker
         }
         std::string lower = w;
         std::transform( lower.begin(), lower.end(), lower.begin(), []( char c ) { return ( c >= 'A' && c <= 'Z' ) ? static_cast<char>( c - 'A' + 'a' ) : c; } );
-        if( contains( lower, "harness" ) && ( contains( w, "/" ) || contains( w, "$" ) ) )
+        if( lower.contains( "harness" ) && ( w.contains( "/" ) || w.contains( "$" ) ) )
         {
             return "harness";
         }
@@ -1888,6 +1895,10 @@ struct Walker
     void walkAndOr( const AndOr& ao, const Consumer& consumer );
     void walkPipeline( const Item& it, Consumer consumer );
     void walkCmd( std::uint32_t node, Consumer consumer );
+    void walkCompound( const Node& c, const Consumer& consumer );
+    void applySet( const Node& c );
+    void walkSubstitutions( const Node& c, std::size_t k, const Consumer& consumer );
+    void recordCall( std::uint32_t node, const Node& c, const std::string& cw, const Consumer& consumer );
     Consumer resolve( const Consumer& c ) const
     {
         if( c.v == Verdict::Errexit )
@@ -1898,92 +1909,106 @@ struct Walker
     }
 };
 
+// ^\$\{?[A-Z_]*TIMEOUT[A-Z_]*\}?$ : a timeout wrapper held in a variable
+inline bool isTimeoutVarWord( std::string_view w ) noexcept
+{
+    if( w.empty() || w[0] != '$' )
+    {
+        return false;
+    }
+    w.remove_prefix( 1 );
+    if( !w.empty() && w.front() == '{' )
+    {
+        w.remove_prefix( 1 );
+    }
+    if( !w.empty() && w.back() == '}' )
+    {
+        w.remove_suffix( 1 );
+    }
+    const std::size_t p = w.find( "TIMEOUT" );
+    return p != std::string_view::npos && std::all_of( w.begin(), w.end(), []( char c ) { return ( c >= 'A' && c <= 'Z' ) || c == '_'; } );
+}
+
+// ^"?\$\{?(?:@|\*|[A-Za-z_]\w*\[[@*]\])\}?"?$ : a spread ("$@", ${ARGS[@]}) whose first word is the command
+inline bool isSpreadPrefixWord( std::string_view w ) noexcept
+{
+    if( !w.empty() && w.front() == '"' )
+    {
+        w.remove_prefix( 1 );
+    }
+    if( !w.empty() && w.back() == '"' )
+    {
+        w.remove_suffix( 1 );
+    }
+    if( w.empty() || w[0] != '$' )
+    {
+        return false;
+    }
+    w.remove_prefix( 1 );
+    if( !w.empty() && w.front() == '{' )
+    {
+        w.remove_prefix( 1 );
+    }
+    if( !w.empty() && w.back() == '}' )
+    {
+        w.remove_suffix( 1 );
+    }
+    if( w == "@" || w == "*" )
+    {
+        return true;
+    }
+    if( w.size() < 4 || !isIdentStart( w[0] ) || w.back() != ']' || ( w[w.size() - 2] != '@' && w[w.size() - 2] != '*' ) || w[w.size() - 3] != '[' )
+    {
+        return false;
+    }
+    return std::all_of( w.begin() + 1, w.end() - 3, isWordChar );
+}
+
+inline bool isRunPrefixWord( std::string_view w ) noexcept   // env/command/exec/nice/time/nohup/stdbuf/caffeinate
+{
+    return w == "env" || w == "command" || w == "exec" || w == "nice" || w == "time" || w == "nohup" || w == "stdbuf" || w == "caffeinate";
+}
+
+// past the options (and env's NAME=value words) of the run prefix `w` at ws[k - 1]
+inline std::size_t skipRunPrefixArgs( const std::vector<Word>& ws, std::size_t k, std::string_view w )
+{
+    while( k < ws.size() )
+    {
+        const std::string& a  = ws[k].text;
+        bool               go = !a.empty() && a[0] == '-';
+        go                    = go || isAssign( a );
+        if( !go && w == "env" )
+        {
+            const std::string ua = unq( a );
+            go                   = ua.substr( 0, ua.find( '/' ) ).find( '=' ) != std::string::npos;
+        }
+        if( !go )
+        {
+            break;
+        }
+        if( ( a == "-u" || a == "-C" || a == "-S" ) && k + 1 < ws.size() )
+        {
+            ++k;
+        }
+        ++k;
+    }
+    return k;
+}
+
 // The command word of a simple command, skipping env/timeout/command/exec/nice/time/sudo/stdbuf prefixes; npos if none.
 inline std::size_t cmdWordIndex( const Node& s )
 {
     const std::vector<Word>& ws = s.words;
     std::size_t              k  = 0;
-    const auto isTimeoutVar = []( std::string_view w ) noexcept   // ^\$\{?[A-Z_]*TIMEOUT[A-Z_]*\}?$
-    {
-        if( w.empty() || w[0] != '$' )
-        {
-            return false;
-        }
-        w.remove_prefix( 1 );
-        if( !w.empty() && w.front() == '{' )
-        {
-            w.remove_prefix( 1 );
-        }
-        if( !w.empty() && w.back() == '}' )
-        {
-            w.remove_suffix( 1 );
-        }
-        const std::size_t p = w.find( "TIMEOUT" );
-        return p != std::string_view::npos && std::all_of( w.begin(), w.end(), []( char c ) { return ( c >= 'A' && c <= 'Z' ) || c == '_'; } );
-    };
-    const auto isSpreadPrefix = []( std::string_view w ) noexcept   // ^"?\$\{?(?:@|\*|[A-Za-z_]\w*\[[@*]\])\}?"?$
-    {
-        if( !w.empty() && w.front() == '"' )
-        {
-            w.remove_prefix( 1 );
-        }
-        if( !w.empty() && w.back() == '"' )
-        {
-            w.remove_suffix( 1 );
-        }
-        if( w.empty() || w[0] != '$' )
-        {
-            return false;
-        }
-        w.remove_prefix( 1 );
-        const bool brace = !w.empty() && w.front() == '{';
-        if( brace )
-        {
-            w.remove_prefix( 1 );
-        }
-        if( !w.empty() && w.back() == '}' )
-        {
-            w.remove_suffix( 1 );
-        }
-        if( w == "@" || w == "*" )
-        {
-            return true;
-        }
-        if( w.size() < 4 || !isIdentHead( w[0] ) || w.back() != ']' || ( w[w.size() - 2] != '@' && w[w.size() - 2] != '*' ) || w[w.size() - 3] != '[' )
-        {
-            return false;
-        }
-        return std::all_of( w.begin() + 1, w.end() - 3, isWordChar );
-    };
     while( k < ws.size() )
     {
         const std::string w = unq( ws[k].text );
-        if( w == "env" || w == "command" || w == "exec" || w == "nice" || w == "time" || w == "nohup" || w == "stdbuf" || w == "caffeinate" )
+        if( isRunPrefixWord( w ) )
         {
-            ++k;
-            while( k < ws.size() )
-            {
-                const std::string& a  = ws[k].text;
-                bool               go = !a.empty() && a[0] == '-';
-                go                    = go || isAssign( a );
-                if( !go && w == "env" )
-                {
-                    const std::string ua = unq( a );
-                    go                   = ua.substr( 0, ua.find( '/' ) ).find( '=' ) != std::string::npos;
-                }
-                if( !go )
-                {
-                    break;
-                }
-                if( ( a == "-u" || a == "-C" || a == "-S" ) && k + 1 < ws.size() )
-                {
-                    ++k;
-                }
-                ++k;
-            }
+            k = skipRunPrefixArgs( ws, k + 1, w );
             continue;
         }
-        if( w == "timeout" || w == "gtimeout" || isTimeoutVar( w ) )
+        if( w == "timeout" || w == "gtimeout" || isTimeoutVarWord( w ) )
         {
             ++k;
             while( k < ws.size() && !ws[k].text.empty() && ws[k].text[0] == '-' )
@@ -1993,12 +2018,7 @@ inline std::size_t cmdWordIndex( const Node& s )
             ++k;   // the duration
             continue;
         }
-        if( isAssign( ws[k].text ) )
-        {
-            ++k;
-            continue;
-        }
-        if( isSpreadPrefix( ws[k].text ) && k + 1 < ws.size() )
+        if( isAssign( ws[k].text ) || ( isSpreadPrefixWord( ws[k].text ) && k + 1 < ws.size() ) )
         {
             ++k;
             continue;
@@ -2008,125 +2028,151 @@ inline std::size_t cmdWordIndex( const Node& s )
     return std::string::npos;
 }
 
-inline void Walker::collectTargets( std::uint32_t list )
+// Every command of a list in source order, each before what it encloses ($( ) bodies, conditions, bodies):
+// visit( node, fn ), fn the name of the function the command sits in (empty at top level).
+template<class Visit>
+inline void forEachCmd( const Tree& t, std::uint32_t list, const std::string& fn, Visit& visit )
 {
     if( list == kNone )
     {
         return;
     }
-    for( const AndOr& ao : tree.lists[list] )
+    for( const AndOr& ao : t.lists[list] )
     {
         for( const Item& it : ao )
         {
             for( std::uint32_t c : it.cmds )
             {
-                const Node& n = tree.nodes[c];
+                const Node& n = t.nodes[c];
+                visit( c, fn );
                 if( n.kind == NodeKind::Simple )
                 {
-                    const std::size_t k = cmdWordIndex( n );
-                    if( k != std::string::npos && isCompiler( unq( n.words[k].text ) ) )
-                    {
-                        std::vector<std::string> ws;
-                        for( const Word& w : n.words )
-                        {
-                            ws.push_back( unq( w.text ) );
-                        }
-                        for( std::size_t j = 0; j < ws.size(); ++j )
-                        {
-                            std::string tgt;
-                            bool        have = false;
-                            if( ws[j] == "-o" && j + 1 < ws.size() )
-                            {
-                                tgt  = ws[j + 1];
-                                have = true;
-                            }
-                            else if( ws[j].rfind( "-o", 0 ) == 0 && ws[j].size() > 2 )
-                            {
-                                tgt  = ws[j].substr( 2 );
-                                have = true;
-                            }
-                            if( !have || tgt.empty() )
-                            {
-                                continue;
-                            }
-                            // \.(?:o|obj|ll|s|bc|pch|gch|d)$|^/dev/null$
-                            bool skip = tgt == "/dev/null";
-                            for( std::string_view ext : { ".o", ".obj", ".ll", ".s", ".bc", ".pch", ".gch", ".d" } )
-                            {
-                                skip = skip || ( tgt.size() >= ext.size() && tgt.compare( tgt.size() - ext.size(), ext.size(), ext ) == 0 );
-                            }
-                            if( skip )
-                            {
-                                continue;
-                            }
-                            // re.sub( \$\{?[A-Za-z_0-9@*#?]+\}?, "*" )
-                            std::string pat;
-                            for( std::size_t q = 0; q < tgt.size(); )
-                            {
-                                if( tgt[q] == '$' )
-                                {
-                                    std::size_t r = q + 1;
-                                    const auto inCls = []( char ch ) { return isAsciiIdent( ch ) || ch == '@' || ch == '*' || ch == '#' || ch == '?'; };
-                                    std::size_t r0 = r;
-                                    if( r < tgt.size() && tgt[r] == '{' )
-                                    {
-                                        ++r;
-                                    }
-                                    std::size_t e = r;
-                                    while( e < tgt.size() && inCls( tgt[e] ) )
-                                    {
-                                        ++e;
-                                    }
-                                    if( e == r && r != r0 )
-                                    {
-                                        r = r0;   // `\{?` backtracks: '{' is not in the class either
-                                        e = r;
-                                    }
-                                    if( e > r )
-                                    {
-                                        if( e < tgt.size() && tgt[e] == '}' )
-                                        {
-                                            ++e;
-                                        }
-                                        pat.push_back( '*' );
-                                        q = e;
-                                        continue;
-                                    }
-                                }
-                                pat.push_back( tgt[q] );
-                                ++q;
-                            }
-                            const std::size_t sl   = pat.rfind( '/' );
-                            const std::string base = sl == std::string::npos ? pat : pat.substr( sl + 1 );
-                            const bool        lit  = std::all_of( base.begin(), base.end(), []( char ch ) { return ch == '*' || ch == '/'; } );
-                            targets.push_back( lit ? tgt : pat );
-                        }
-                    }
                     for( const std::vector<Word>* ws : { &n.words, &n.assigns } )
                     {
                         for( const Word& w : *ws )
                         {
                             for( const Sub& s : w.subs )
                             {
-                                collectTargets( s.list );
+                                forEachCmd( t, s.list, fn, visit );
                             }
                         }
                     }
+                    continue;
                 }
-                else
+                const std::string& inner = n.kind == NodeKind::Func ? n.name : fn;
+                for( std::uint32_t l : n.conds )
                 {
-                    for( std::uint32_t l : n.conds )
-                    {
-                        collectTargets( l );
-                    }
-                    for( std::uint32_t l : n.bodies )
-                    {
-                        collectTargets( l );
-                    }
+                    forEachCmd( t, l, inner, visit );
+                }
+                for( std::uint32_t l : n.bodies )
+                {
+                    forEachCmd( t, l, inner, visit );
                 }
             }
         }
     }
+}
+
+// \.(?:o|obj|ll|s|bc|pch|gch|d)$|^/dev/null$ : a compiler output that is not a runnable binary
+inline bool isObjectOutput( std::string_view tgt ) noexcept
+{
+    bool skip = tgt == "/dev/null";
+    for( std::string_view ext : { ".o", ".obj", ".ll", ".s", ".bc", ".pch", ".gch", ".d" } )
+    {
+        skip = skip || ( tgt.size() >= ext.size() && tgt.compare( tgt.size() - ext.size(), ext.size(), ext ) == 0 );
+    }
+    return skip;
+}
+
+// re.sub( \$\{?[A-Za-z_0-9@*#?]+\}?, "*" ): every variable in a target path a glob star
+inline std::string varsAsGlob( std::string_view tgt )
+{
+    const auto  inCls = []( char ch ) { return isIdentChar( ch ) || ch == '@' || ch == '*' || ch == '#' || ch == '?'; };
+    std::string pat;
+    for( std::size_t q = 0; q < tgt.size(); )
+    {
+        if( tgt[q] == '$' )
+        {
+            std::size_t       r  = q + 1;
+            const std::size_t r0 = r;
+            if( r < tgt.size() && tgt[r] == '{' )
+            {
+                ++r;
+            }
+            std::size_t e = r;
+            while( e < tgt.size() && inCls( tgt[e] ) )
+            {
+                ++e;
+            }
+            if( e == r && r != r0 )
+            {
+                r = r0;   // `\{?` backtracks: '{' is not in the class either
+                e = r;
+            }
+            if( e > r )
+            {
+                if( e < tgt.size() && tgt[e] == '}' )
+                {
+                    ++e;
+                }
+                pat.push_back( '*' );
+                q = e;
+                continue;
+            }
+        }
+        pat.push_back( tgt[q] );
+        ++q;
+    }
+    return pat;
+}
+
+// the -o / -oFILE outputs of one compiler command, as the names (or globs) that later run them
+inline void compilerOutputs( const Node& n, std::vector<std::string>& targets )
+{
+    std::vector<std::string> ws;
+    for( const Word& w : n.words )
+    {
+        ws.push_back( unq( w.text ) );
+    }
+    for( std::size_t j = 0; j < ws.size(); ++j )
+    {
+        std::string tgt;
+        if( ws[j] == "-o" && j + 1 < ws.size() )
+        {
+            tgt = ws[j + 1];
+        }
+        else if( ws[j].rfind( "-o", 0 ) == 0 && ws[j].size() > 2 )
+        {
+            tgt = ws[j].substr( 2 );
+        }
+        if( tgt.empty() || isObjectOutput( tgt ) )
+        {
+            continue;
+        }
+        const std::string pat  = varsAsGlob( tgt );
+        const std::size_t sl   = pat.rfind( '/' );
+        const std::string base = sl == std::string::npos ? pat : pat.substr( sl + 1 );
+        const bool        lit  = std::all_of( base.begin(), base.end(), []( char ch ) { return ch == '*' || ch == '/'; } );
+        targets.push_back( lit ? tgt : pat );
+    }
+}
+
+inline void Walker::collectTargets( std::uint32_t list )
+{
+    auto visit = [ & ]( std::uint32_t c, const std::string& )
+    {
+        const Node& n = tree.nodes[c];
+        if( n.kind != NodeKind::Simple )
+        {
+            return;
+        }
+        const std::size_t k = cmdWordIndex( n );
+        if( k != std::string::npos && isCompiler( unq( n.words[k].text ) ) )
+        {
+            compilerOutputs( n, targets );
+        }
+    };
+    forEachCmd( tree, list, std::string(), visit );
 }
 
 // capture regexes ------------------------------------------------------------------------------------------------------
@@ -2140,12 +2186,12 @@ inline std::string rcCaptureName( std::string_view h )
     }
     const auto tryAt = [ & ]( std::size_t p ) -> std::string
     {
-        if( p >= h.size() || !isIdentHead( h[p] ) )
+        if( p >= h.size() || !isIdentStart( h[p] ) )
         {
             return {};
         }
         std::size_t q = p;
-        while( q < h.size() && isAsciiIdent( h[q] ) )
+        while( q < h.size() && isIdentChar( h[q] ) )
         {
             ++q;
         }
@@ -2241,10 +2287,10 @@ inline std::string rcFileSuffix( std::string_view h )
         }
         for( std::size_t k = i; k < h.size() && h[k] != '"' && !isSp( h[k] ); ++k )
         {
-            if( h[k] == '.' && k + 1 < h.size() && isAsciiIdent( h[k + 1] ) )
+            if( h[k] == '.' && k + 1 < h.size() && isIdentChar( h[k + 1] ) )
             {
                 std::size_t m = k + 1;
-                while( m < h.size() && isAsciiIdent( h[m] ) )
+                while( m < h.size() && isIdentChar( h[m] ) )
                 {
                     ++m;
                 }
@@ -2406,11 +2452,11 @@ inline std::optional<Consumer> Walker::capture( const std::string& nxt, const st
 {
     const std::size_t      cut  = nxt.find( " ; " );
     const std::string_view head = cut == std::string::npos ? std::string_view( nxt ) : std::string_view( nxt ).substr( 0, cut );
-    if( contains( head, "PIPESTATUS" ) )
+    if( head.contains( "PIPESTATUS" ) )
     {
         return Consumer{ Verdict::Checked, "PIPESTATUS read" };
     }
-    if( !contains( head, "$?" ) && !contains( head, "${?}" ) )
+    if( !head.contains( "$?" ) && !head.contains( "${?}" ) )
     {
         return std::nullopt;
     }
@@ -2425,7 +2471,7 @@ inline std::optional<Consumer> Walker::capture( const std::string& nxt, const st
         return hasName( *compared, "file:" + suf ) ? Consumer{ Verdict::Checked, "rc file ." + suf + " compared" }
                                                    : Consumer{ Verdict::Unchecked, "rc file ." + suf + " written, never compared" };
     }
-    if( !contains( first, "$?" ) && !contains( first, "${?}" ) )
+    if( !first.contains( "$?" ) && !first.contains( "${?}" ) )
     {
         return std::nullopt;
     }
@@ -2530,134 +2576,123 @@ inline void Walker::walkPipeline( const Item& it, Consumer consumer )
     }
 }
 
-inline void Walker::walkCmd( std::uint32_t node, Consumer consumer )
+// ^[-+][a-zA-Z]*e : a `set` flag word (sign '-' sets, '+' clears) that names errexit
+inline bool setFlagsHaveE( std::string_view a, char sign ) noexcept
 {
-    const Node& c = tree.nodes[node];
-    if( c.kind != NodeKind::Simple )
+    if( a.size() < 2 || a[0] != sign )
     {
-        if( c.kind == NodeKind::Func )
+        return false;
+    }
+    for( std::size_t q = 1; q < a.size(); ++q )
+    {
+        if( a[q] == 'e' )
         {
-            if( !isFunc( c.name ) )
-            {
-                funcs.push_back( c.name );
-            }
-            const bool savedE = errexit, savedP = pipefail;
-            funcStack.push_back( c.name );
-            for( std::uint32_t l : c.bodies )
-            {
-                const Consumer fn{ Verdict::Fn, c.name };
-                walkList( l, &fn, false );
-            }
-            funcStack.pop_back();
-            errexit  = savedE;
-            pipefail = savedP;
-            return;
+            return true;
         }
-        for( std::uint32_t l : c.conds )
+        if( !( ( a[q] >= 'a' && a[q] <= 'z' ) || ( a[q] >= 'A' && a[q] <= 'Z' ) ) )
         {
-            const Consumer cc = c.kind == NodeKind::If ? Consumer{ Verdict::Checked, "if" } : Consumer{ Verdict::Checked, "while/until" };
-            walkList( l, &cc, false );
+            return false;
         }
-        const bool passes = c.kind == NodeKind::If || c.kind == NodeKind::Case || c.kind == NodeKind::Subshell || c.kind == NodeKind::Group
-                         || c.kind == NodeKind::Loop || c.kind == NodeKind::For;
+    }
+    return false;
+}
+
+// a `set` naming pipefail: on when a ^-[a-z]*o$ word sets an option and no +o clears one
+inline bool setsPipefail( const Node& c )
+{
+    bool dashO = false;
+    for( std::size_t a = 1; a < c.words.size(); ++a )
+    {
+        const std::string u = unq( c.words[a].text );
+        if( u.size() >= 2 && u[0] == '-' && u.back() == 'o' && std::all_of( u.begin() + 1, u.end(), []( char ch ) { return ch >= 'a' && ch <= 'z'; } ) )
+        {
+            dashO = true;
+        }
+    }
+    const bool plusO = std::any_of( c.words.begin(), c.words.end(), []( const Word& w ) { return w.text == "+o"; } );
+    return dashO && !plusO;
+}
+
+// `set -e` / `set +e` / `set -o errexit|pipefail` / `set +o ...`: the options later commands run under
+inline void Walker::applySet( const Node& c )
+{
+    for( std::size_t a = 1; a < c.words.size(); ++a )
+    {
+        const std::string a2 = unq( c.words[a].text );
+        if( setFlagsHaveE( a2, '-' ) )
+        {
+            errexit = true;
+        }
+        if( setFlagsHaveE( a2, '+' ) )
+        {
+            errexit = false;
+        }
+    }
+    if( std::any_of( c.words.begin(), c.words.end(), []( const Word& w ) { return w.text.contains( "pipefail" ); } ) )
+    {
+        pipefail = setsPipefail( c );
+    }
+    for( std::size_t j = 1; j < c.words.size(); ++j )
+    {
+        const std::string u = unq( c.words[j].text );
+        if( u == "-o" && j + 1 < c.words.size() && unq( c.words[j + 1].text ) == "errexit" )
+        {
+            errexit = true;
+        }
+        if( u == "+o" && j + 1 < c.words.size() && unq( c.words[j + 1].text ) == "errexit" )
+        {
+            errexit = false;
+        }
+    }
+}
+
+// a function definition, or a compound command: conditions are checked, bodies pass the consumer on (or not)
+inline void Walker::walkCompound( const Node& c, const Consumer& consumer )
+{
+    if( c.kind == NodeKind::Func )
+    {
+        if( !isFunc( c.name ) )
+        {
+            funcs.push_back( c.name );
+        }
+        const bool savedE = errexit, savedP = pipefail;
+        funcStack.push_back( c.name );
         for( std::uint32_t l : c.bodies )
         {
-            const Consumer bc = passes ? consumer : Consumer{ Verdict::Errexit, {} };
-            walkList( l, &bc, false );
+            const Consumer fn{ Verdict::Fn, c.name };
+            walkList( l, &fn, false );
         }
+        funcStack.pop_back();
+        errexit  = savedE;
+        pipefail = savedP;
         return;
     }
-    if( !c.words.empty() && unq( c.words[0].text ) == "set" )
+    for( std::uint32_t l : c.conds )
     {
-        std::string joined;
-        for( std::size_t a = 0; a < c.words.size(); ++a )
-        {
-            if( a > 0 )
-            {
-                joined.push_back( ' ' );
-            }
-            joined += c.words[a].text;
-        }
-        for( std::size_t a = 1; a < c.words.size(); ++a )
-        {
-            const std::string a2 = unq( c.words[a].text );
-            const auto flagE = [ & ]( char sign )   // ^[-+][a-zA-Z]*e
-            {
-                if( a2.size() < 2 || a2[0] != sign )
-                {
-                    return false;
-                }
-                for( std::size_t q = 1; q < a2.size(); ++q )
-                {
-                    if( a2[q] == 'e' )
-                    {
-                        return true;
-                    }
-                    if( !( ( a2[q] >= 'a' && a2[q] <= 'z' ) || ( a2[q] >= 'A' && a2[q] <= 'Z' ) ) )
-                    {
-                        return false;
-                    }
-                }
-                return false;
-            };
-            if( flagE( '-' ) )
-            {
-                errexit = true;
-            }
-            if( flagE( '+' ) )
-            {
-                errexit = false;
-            }
-        }
-        if( contains( joined, "pipefail" ) )
-        {
-            bool dashO = false;
-            for( std::size_t a = 1; a < c.words.size(); ++a )   // ^-[a-z]*o$
-            {
-                const std::string u = unq( c.words[a].text );
-                if( u.size() >= 2 && u[0] == '-' && u.back() == 'o' && std::all_of( u.begin() + 1, u.end(), []( char ch ) { return ch >= 'a' && ch <= 'z'; } ) )
-                {
-                    dashO = true;
-                }
-            }
-            const bool plusO = std::any_of( c.words.begin(), c.words.end(), []( const Word& w ) { return w.text == "+o"; } );
-            pipefail         = dashO && !plusO;
-        }
-        for( std::size_t j = 1; j < c.words.size(); ++j )
-        {
-            const std::string u = unq( c.words[j].text );
-            if( u == "-o" && j + 1 < c.words.size() && unq( c.words[j + 1].text ) == "errexit" )
-            {
-                errexit = true;
-            }
-            if( u == "+o" && j + 1 < c.words.size() && unq( c.words[j + 1].text ) == "errexit" )
-            {
-                errexit = false;
-            }
-        }
+        const Consumer cc = c.kind == NodeKind::If ? Consumer{ Verdict::Checked, "if" } : Consumer{ Verdict::Checked, "while/until" };
+        walkList( l, &cc, false );
     }
-    const std::size_t k = cmdWordIndex( c );
-    // substitutions: an assignment-only command carries its $( )'s status; anywhere else it is discarded
-    const bool assignOnly = k == std::string::npos && std::none_of( c.words.begin(), c.words.end(), []( const Word& w ) { return w.text.empty(); } );
-    const std::string w0 = c.words.empty() ? std::string() : unq( c.words[0].text );
-    const bool localAssign = !c.words.empty() && ( w0 == "local" || w0 == "export" || w0 == "declare" || w0 == "readonly" || w0 == "typeset" );
-    const auto walkSubs = [ & ]( const Word& w, bool isAssignWord )
+    const bool passes = c.kind == NodeKind::If || c.kind == NodeKind::Case || c.kind == NodeKind::Subshell || c.kind == NodeKind::Group
+                     || c.kind == NodeKind::Loop || c.kind == NodeKind::For;
+    for( std::uint32_t l : c.bodies )
+    {
+        const Consumer bc = passes ? consumer : Consumer{ Verdict::Errexit, {} };
+        walkList( l, &bc, false );
+    }
+}
+
+// the $( ) bodies of a simple command: an assignment-only command carries its $( )'s status; anywhere else it is discarded
+inline void Walker::walkSubstitutions( const Node& c, std::size_t k, const Consumer& consumer )
+{
+    const bool        assignOnly  = k == std::string::npos && std::none_of( c.words.begin(), c.words.end(), []( const Word& w ) { return w.text.empty(); } );
+    const std::string w0          = c.words.empty() ? std::string() : unq( c.words[0].text );
+    const bool        localAssign = !c.words.empty() && ( w0 == "local" || w0 == "export" || w0 == "declare" || w0 == "readonly" || w0 == "typeset" );
+    const Consumer    inWord      = localAssign ? Consumer{ Verdict::Unchecked, w0 + " x=$(...) (status masked)" } : Consumer{ Verdict::Unchecked, "$(...) argument (status discarded)" };
+    const Consumer    inAssign    = assignOnly ? consumer : inWord;
+    const auto        walkSubs    = [ & ]( const Word& w, const Consumer& sc )
     {
         for( const Sub& s : w.subs )
         {
-            Consumer sc;
-            if( assignOnly && isAssignWord )
-            {
-                sc = consumer;
-            }
-            else if( localAssign )
-            {
-                sc = Consumer{ Verdict::Unchecked, w0 + " x=$(...) (status masked)" };
-            }
-            else
-            {
-                sc = Consumer{ Verdict::Unchecked, "$(...) argument (status discarded)" };
-            }
             ++substDepth;
             walkList( s.list, &sc, false );
             --substDepth;
@@ -2665,23 +2700,19 @@ inline void Walker::walkCmd( std::uint32_t node, Consumer consumer )
     };
     for( const Word& w : c.assigns )
     {
-        walkSubs( w, true );
+        walkSubs( w, inAssign );
     }
     for( const Word& w : c.words )
     {
-        walkSubs( w, false );
+        walkSubs( w, inWord );
     }
-    if( k == std::string::npos )
-    {
-        return;
-    }
-    if( consumer.v == Verdict::Errexit )
-    {
-        consumer = resolve( consumer );
-    }
-    const std::string& cw   = c.words[k].text;
-    std::string        kind = underTest( cw );
-    std::string        call;
+}
+
+// a run of the code under test (or of a wrapper around it) is a call; every command's facts are noted
+inline void Walker::recordCall( std::uint32_t node, const Node& c, const std::string& cw, const Consumer& consumer )
+{
+    std::string kind = underTest( cw );
+    std::string call;
     if( !kind.empty() )
     {
         call = cw;
@@ -2707,71 +2738,84 @@ inline void Walker::walkCmd( std::uint32_t node, Consumer consumer )
     }
 }
 
-// Variables, and rc-file suffixes, that some TEST in the script reads (Python Walker._compared_names).
-inline std::vector<std::string> comparedNames( const Tree& t )
+inline void Walker::walkCmd( std::uint32_t node, Consumer consumer )
 {
-    struct S
+    const Node& c = tree.nodes[node];
+    if( c.kind != NodeKind::Simple )
     {
-        std::uint32_t node;   // kNone: a synthetic `case SUBJECT` command
-        std::string   synthetic;
-        std::string   fn;
-    };
-    std::vector<S>           allc;
-    std::vector<std::string> funcs;
-    const auto simples = [ & ]( auto& self, std::uint32_t list, const std::string& fn ) -> void
+        walkCompound( c, consumer );
+        return;
+    }
+    if( !c.words.empty() && unq( c.words[0].text ) == "set" )
     {
-        if( list == kNone )
+        applySet( c );
+    }
+    const std::size_t k = cmdWordIndex( c );
+    walkSubstitutions( c, k, consumer );
+    if( k == std::string::npos )
+    {
+        return;
+    }
+    if( consumer.v == Verdict::Errexit )
+    {
+        consumer = resolve( consumer );
+    }
+    recordCall( node, c, c.words[k].text, consumer );
+}
+
+// One command comparedNames reads: a simple command, or the synthetic `case SUBJECT` a case statement tests.
+struct CmdSite
+{
+    std::uint32_t node;   // kNone: a synthetic `case SUBJECT` command
+    std::string   synthetic;
+    std::string   fn;
+};
+using RcFuncs = std::vector<std::pair<std::string, std::string>>;   // FN -> rc-file suffix, insertion order
+
+// every simple command (and case subject) in source order with its function, and the names of the functions defined
+inline void collectCmdSites( const Tree& t, std::vector<CmdSite>& allc, std::vector<std::string>& funcs )
+{
+    auto visit = [ & ]( std::uint32_t c, const std::string& fn )
+    {
+        const Node& n = t.nodes[c];
+        if( n.kind == NodeKind::Simple )
         {
+            allc.push_back( { c, {}, fn } );
             return;
         }
-        for( const AndOr& ao : t.lists[list] )
+        if( n.kind == NodeKind::Func )
         {
-            for( const Item& it : ao )
-            {
-                for( std::uint32_t c : it.cmds )
-                {
-                    const Node& n = t.nodes[c];
-                    if( n.kind == NodeKind::Simple )
-                    {
-                        allc.push_back( { c, {}, fn } );
-                        for( const std::vector<Word>* ws : { &n.words, &n.assigns } )
-                        {
-                            for( const Word& w : *ws )
-                            {
-                                for( const Sub& s : w.subs )
-                                {
-                                    self( self, s.list, fn );
-                                }
-                            }
-                        }
-                    }
-                    else
-                    {
-                        if( n.kind == NodeKind::Func )
-                        {
-                            funcs.push_back( n.name );
-                        }
-                        if( n.kind == NodeKind::Case && !n.name.empty() )
-                        {
-                            allc.push_back( { kNone, "case " + n.name, fn } );
-                        }
-                        const std::string& inner = n.kind == NodeKind::Func ? n.name : fn;
-                        for( std::uint32_t l : n.conds )
-                        {
-                            self( self, l, inner );
-                        }
-                        for( std::uint32_t l : n.bodies )
-                        {
-                            self( self, l, inner );
-                        }
-                    }
-                }
-            }
+            funcs.push_back( n.name );
+        }
+        if( n.kind == NodeKind::Case && !n.name.empty() )
+        {
+            allc.push_back( { kNone, "case " + n.name, fn } );
         }
     };
-    simples( simples, t.top, std::string() );
-    std::vector<std::pair<std::string, std::string>> rcfuncs;   // insertion order, last write wins per key
-    for( const S& s : allc )
+    forEachCmd( t, t.top, std::string(), visit );
+}
+
+// \.([A-Za-z0-9_]+)"?$ : the suffix of the file a word names, or empty
+inline std::string trailingSuffix( std::string_view word )
+{
+    std::string_view body = word;
+    if( !body.empty() && body.back() == '"' )
+    {
+        body.remove_suffix( 1 );
+    }
+    const std::size_t dot = body.rfind( '.' );
+    if( dot == std::string_view::npos || dot + 1 >= body.size() || !std::all_of( body.begin() + static_cast<std::ptrdiff_t>( dot + 1 ), body.end(), isIdentChar ) )
+    {
+        return {};
+    }
+    return std::string( body.substr( dot + 1 ) );
+}
+
+// the functions whose body cats a status file (`cat "$d/x.rc"`): a test of `$( FN )` reads that file (last cat wins)
+inline RcFuncs rcFileFuncs( const Tree& t, const std::vector<CmdSite>& allc )
+{
+    RcFuncs rcfuncs;
+    for( const CmdSite& s : allc )
     {
         if( s.node == kNone || s.fn.empty() )
         {
@@ -2782,20 +2826,12 @@ inline std::vector<std::string> comparedNames( const Tree& t )
         {
             continue;
         }
-        // \.([A-Za-z0-9_]+)"?$ on the last word
-        std::string_view last = n.words.back().text;
-        std::string_view body = last;
-        if( !body.empty() && body.back() == '"' )
-        {
-            body.remove_suffix( 1 );
-        }
-        const std::size_t dot = body.rfind( '.' );
-        if( dot == std::string_view::npos || dot + 1 >= body.size() || !std::all_of( body.begin() + static_cast<std::ptrdiff_t>( dot + 1 ), body.end(), isAsciiIdent ) )
+        const std::string suf = trailingSuffix( n.words.back().text );
+        if( suf.empty() )
         {
             continue;
         }
-        const std::string suf( body.substr( dot + 1 ) );
-        bool              found = false;
+        bool found = false;
         for( auto& [ fn, sf ] : rcfuncs )
         {
             if( fn == s.fn )
@@ -2809,32 +2845,95 @@ inline std::vector<std::string> comparedNames( const Tree& t )
             rcfuncs.emplace_back( s.fn, suf );
         }
     }
-    std::vector<std::string> names;
-    for( const S& s : allc )
+    return rcfuncs;
+}
+
+// \$\(\s*FN\b : the text runs FN in a substitution
+inline bool runsInSubst( std::string_view text, std::string_view fn )
+{
+    for( std::size_t p = text.find( "$(" ); p != std::string_view::npos; p = text.find( "$(", p + 1 ) )
     {
-        std::vector<std::string_view> words;
-        std::vector<std::string>      synth;
-        if( s.node == kNone )
+        std::size_t q = p + 2;
+        while( q < text.size() && isSp( text[q] ) )
         {
-            synth = { "case", s.synthetic.substr( 5 ) };
-            for( const std::string& w : synth )
-            {
-                words.push_back( w );
-            }
+            ++q;
         }
-        else
+        if( startsAt( text, q, fn ) && ( q + fn.size() >= text.size() || !isWordChar( text[q + fn.size()] ) ) )
         {
-            for( const Word& w : t.nodes[s.node].words )
-            {
-                words.push_back( w.text );
-            }
+            return true;
         }
-        if( words.empty() )
+    }
+    return false;
+}
+
+inline bool isTestWord( std::string_view cw ) noexcept   // [ test case exit return [[ ((
+{
+    return cw == "[" || cw == "test" || cw == "case" || cw == "exit" || cw == "return" || cw.starts_with( "[[" ) || cw.starts_with( "((" );
+}
+
+// the names a test command reads: $VARS, (( bare idents )), cat'd rc files, and the files an rc-reading FN returns
+inline void namesInTest( std::string_view text, std::string_view cw, const RcFuncs& rcfuncs, std::vector<std::string>& names )
+{
+    vrefs( text, names );
+    if( cw.starts_with( "((" ) )
+    {
+        boundedIdents( text, names );
+    }
+    std::vector<std::string> sufs;
+    catSuffixes( text, sufs );
+    for( const std::string& suf : sufs )
+    {
+        names.push_back( "file:" + suf );
+    }
+    for( const auto& [ fn, suf ] : rcfuncs )
+    {
+        if( runsInSubst( text, fn ) )
         {
-            continue;
+            names.push_back( "file:" + suf );
         }
-        const std::string cw = unq( words[0] );
-        std::string       text;
+    }
+}
+
+// a call of a script function (a checker): its "$VAR" arguments, and the $VARS of a single-quoted code argument it evals
+inline void namesPassedToChecker( const std::vector<std::string_view>& words, std::vector<std::string>& names )
+{
+    for( std::size_t k = 1; k < words.size(); ++k )
+    {
+        const std::string_view n = quotedBareVar( words[k] );
+        if( !n.empty() )
+        {
+            names.emplace_back( n );
+        }
+        else if( !words[k].empty() && words[k][0] == '\'' )
+        {
+            vrefs( words[k], names );   // code the checker evals
+        }
+    }
+}
+
+inline void namesOfSite( const Tree& t, const CmdSite& s, const std::vector<std::string>& funcs, const RcFuncs& rcfuncs, std::vector<std::string>& names )
+{
+    std::vector<std::string_view> words;
+    const std::string             subject = s.node == kNone ? s.synthetic.substr( 5 ) : std::string();
+    if( s.node == kNone )
+    {
+        words = { std::string_view( "case" ), std::string_view( subject ) };
+    }
+    else
+    {
+        for( const Word& w : t.nodes[s.node].words )
+        {
+            words.push_back( w.text );
+        }
+    }
+    if( words.empty() )
+    {
+        return;
+    }
+    const std::string cw = unq( words[0] );
+    if( isTestWord( cw ) )
+    {
+        std::string text;
         for( std::size_t k = 0; k < words.size(); ++k )
         {
             if( k > 0 )
@@ -2843,56 +2942,64 @@ inline std::vector<std::string> comparedNames( const Tree& t )
             }
             text.append( words[k] );
         }
-        if( cw == "[" || cw == "test" || cw == "case" || cw == "exit" || cw == "return" || cw.rfind( "[[", 0 ) == 0 || cw.rfind( "((", 0 ) == 0 )
+        namesInTest( text, cw, rcfuncs, names );
+    }
+    else if( std::find( funcs.begin(), funcs.end(), cw ) != funcs.end() )
+    {
+        namesPassedToChecker( words, names );
+    }
+}
+
+// ="?\$\(\s*cat\s+[^)]*?\.([A-Za-z0-9_]+)"?\s*\)"?$ : the suffix of the status file an assignment value cats, or empty
+inline std::string catAssignSuffix( std::string_view v )
+{
+    if( !v.empty() && v.front() == '"' )
+    {
+        v.remove_prefix( 1 );
+    }
+    if( v.substr( 0, 2 ) != "$(" )
+    {
+        return {};
+    }
+    std::size_t i = 2;
+    while( i < v.size() && isSp( v[i] ) )
+    {
+        ++i;
+    }
+    if( !startsAt( v, i, "cat" ) || i + 3 >= v.size() || !isSp( v[i + 3] ) )
+    {
+        return {};
+    }
+    for( std::size_t k = i + 4; k < v.size() && v[k] != ')'; ++k )
+    {
+        if( v[k] != '.' )
         {
-            vrefs( text, names );
-            if( cw.rfind( "((", 0 ) == 0 )
-            {
-                boundedIdents( text, names );
-            }
-            std::vector<std::string> sufs;
-            catSuffixes( text, sufs );
-            for( const std::string& suf : sufs )
-            {
-                names.push_back( "file:" + suf );
-            }
-            for( const auto& [ fn, suf ] : rcfuncs )
-            {
-                // \$\(\s*FN\b
-                for( std::size_t p = text.find( "$(" ); p != std::string::npos; p = text.find( "$(", p + 1 ) )
-                {
-                    std::size_t q = p + 2;
-                    while( q < text.size() && isSp( text[q] ) )
-                    {
-                        ++q;
-                    }
-                    if( startsAt( text, q, fn ) && ( q + fn.size() >= text.size() || !isWordChar( text[q + fn.size()] ) ) )
-                    {
-                        names.push_back( "file:" + suf );
-                        break;
-                    }
-                }
-            }
+            continue;
         }
-        else if( std::find( funcs.begin(), funcs.end(), cw ) != funcs.end() )
+        std::size_t            end = 0;
+        const std::string_view suf = rcSuffixClose( v, k, end );
+        if( suf.empty() )
         {
-            for( std::size_t k = 1; k < words.size(); ++k )
-            {
-                const std::string_view n = quotedBareVar( words[k] );
-                if( !n.empty() )
-                {
-                    names.emplace_back( n );
-                }
-                else if( !words[k].empty() && words[k][0] == '\'' )
-                {
-                    vrefs( words[k], names );   // code the checker evals
-                }
-            }
+            continue;
+        }
+        std::size_t e = end;
+        if( e < v.size() && v[e] == '"' )
+        {
+            ++e;
+        }
+        if( e == v.size() )
+        {
+            return std::string( suf );
         }
     }
-    // an alias `rcFull=$rcDef` hands the status on: a test of the alias is a test of the original
+    return {};
+}
+
+// an alias `rcFull=$rcDef` (or `rc=$(cat x.rc)`) hands the status on: ( source, alias ) pairs in source order
+inline std::vector<std::pair<std::string, std::string>> statusAliases( const Tree& t, const std::vector<CmdSite>& allc )
+{
     std::vector<std::pair<std::string, std::string>> alias;   // ( src, dst )
-    for( const S& s : allc )
+    for( const CmdSite& s : allc )
     {
         if( s.node == kNone )
         {
@@ -2902,7 +3009,7 @@ inline std::vector<std::string> comparedNames( const Tree& t )
         {
             const std::string_view tx = a.text;
             const std::size_t      eq = tx.find( '=' );
-            if( eq == std::string_view::npos || eq == 0 || !isIdentHead( tx[0] ) || !std::all_of( tx.begin(), tx.begin() + static_cast<std::ptrdiff_t>( eq ), isAsciiIdent ) )
+            if( eq == std::string_view::npos || eq == 0 || !isIdentStart( tx[0] ) || !std::all_of( tx.begin(), tx.begin() + static_cast<std::ptrdiff_t>( eq ), isIdentChar ) )
             {
                 continue;
             }
@@ -2913,49 +3020,19 @@ inline std::vector<std::string> comparedNames( const Tree& t )
             {
                 alias.emplace_back( std::string( sv ), dst );
             }
-            // ="?\$\(\s*cat\s+[^)]*?\.([A-Za-z0-9_]+)"?\s*\)"?$
-            std::string_view v = val;
-            if( !v.empty() && v.front() == '"' )
+            const std::string suf = catAssignSuffix( val );
+            if( !suf.empty() )
             {
-                v.remove_prefix( 1 );
-            }
-            if( v.substr( 0, 2 ) == "$(" )
-            {
-                std::size_t i = 2;
-                while( i < v.size() && isSp( v[i] ) )
-                {
-                    ++i;
-                }
-                if( startsAt( v, i, "cat" ) && i + 3 < v.size() && isSp( v[i + 3] ) )
-                {
-                    for( std::size_t k = i + 4; k < v.size() && v[k] != ')'; ++k )
-                    {
-                        if( v[k] != '.' )
-                        {
-                            continue;
-                        }
-                        std::size_t            end = 0;
-                        const std::string_view suf = rcSuffixClose( v, k, end );
-                        if( suf.empty() )
-                        {
-                            continue;
-                        }
-                        std::size_t e = end;
-                        if( e < v.size() && v[e] == '"' )
-                        {
-                            ++e;
-                        }
-                        if( e == v.size() )
-                        {
-                            alias.emplace_back( "file:" + std::string( suf ), dst );
-                            break;
-                        }
-                    }
-                }
+                alias.emplace_back( "file:" + suf, dst );
             }
         }
     }
-    sortUnique( names );
+    return alias;
+}
+
+// a test of the alias is a test of the original: add each source whose alias is read (4 rounds, as Python does)
+inline void closeOverAliases( std::vector<std::string>& names, const std::vector<std::pair<std::string, std::string>>& alias )
+{
     std::vector<std::string> order;   // alias sources in first-insertion order (Python's dict order)
     for( const auto& [ src, dst ] : alias )
     {
@@ -2977,7 +3054,121 @@ inline std::vector<std::string> comparedNames( const Tree& t )
             }
         }
     }
+}
+
+// Variables, and rc-file suffixes, that some TEST in the script reads (Python Walker._compared_names).
+inline std::vector<std::string> comparedNames( const Tree& t )
+{
+    std::vector<CmdSite>     allc;
+    std::vector<std::string> funcs;
+    collectCmdSites( t, allc, funcs );
+    const RcFuncs            rcfuncs = rcFileFuncs( t, allc );
+    std::vector<std::string> names;
+    for( const CmdSite& s : allc )
+    {
+        namesOfSite( t, s, funcs, rcfuncs, names );
+    }
+    sortUnique( names );
+    closeOverAliases( names, statusAliases( t, allc ) );
     return names;
+}
+
+// ^\s*(?:(?:local|export|readonly)\s+)?NAME= : the assignment a line opens with, as ( NAME, value ); empty NAME if none
+inline std::pair<std::string_view, std::string_view> lineAssignment( std::string_view l )
+{
+    std::size_t i = 0;
+    while( i < l.size() && isSp( l[i] ) )
+    {
+        ++i;
+    }
+    for( std::string_view kwd : { std::string_view( "local" ), std::string_view( "export" ), std::string_view( "readonly" ) } )
+    {
+        if( startsAt( l, i, kwd ) && i + kwd.size() < l.size() && isSp( l[i + kwd.size()] ) )
+        {
+            std::size_t j = i + kwd.size();
+            while( j < l.size() && isSp( l[j] ) )
+            {
+                ++j;
+            }
+            // (?:kw\s+)? is optional: keep it only when an assignment follows
+            std::size_t q = j;
+            if( q < l.size() && isIdentStart( l[q] ) )
+            {
+                while( q < l.size() && isIdentChar( l[q] ) )
+                {
+                    ++q;
+                }
+                if( q < l.size() && l[q] == '=' )
+                {
+                    i = j;
+                }
+            }
+            break;
+        }
+    }
+    if( i >= l.size() || !isIdentStart( l[i] ) )
+    {
+        return {};
+    }
+    std::size_t q = i;
+    while( q < l.size() && isIdentChar( l[q] ) )
+    {
+        ++q;
+    }
+    if( q >= l.size() || l[q] != '=' )
+    {
+        return {};
+    }
+    return { l.substr( i, q - i ), l.substr( q + 1 ) };
+}
+
+// build[^ ]*/ripwire\b | RIPWIRE_BIN | ^"?\$\{?BIN\}?"?$ : a value that names the binary
+inline bool valueNamesBinary( std::string_view val )
+{
+    bool hit = val.contains( "RIPWIRE_BIN" );
+    for( std::size_t p = val.find( "build" ); !hit && p != std::string_view::npos; p = val.find( "build", p + 1 ) )
+    {
+        for( std::size_t r = val.find( "/ripwire", p + 5 ); r != std::string_view::npos; r = val.find( "/ripwire", r + 1 ) )
+        {
+            if( val.substr( p + 5, r - ( p + 5 ) ).find( ' ' ) != std::string_view::npos )
+            {
+                break;
+            }
+            if( r + 8 >= val.size() || !isWordChar( val[r + 8] ) )
+            {
+                hit = true;
+                break;
+            }
+        }
+    }
+    if( hit )
+    {
+        return true;
+    }
+    std::string_view v = val;
+    if( !v.empty() && v.front() == '"' )
+    {
+        v.remove_prefix( 1 );
+    }
+    if( !v.empty() && v.back() == '"' )
+    {
+        v.remove_suffix( 1 );
+    }
+    return bareVar( v ) == "BIN" || v == "$BIN}" || v == "${BIN";
+}
+
+// /ripwire/ or a \.(xml|out|txt|log)\b : a value that names an OUTPUT of the binary, not the binary
+inline bool valueNamesOutput( std::string_view val )
+{
+    bool veto = val.contains( "/ripwire/" );
+    for( std::string_view ext : { std::string_view( ".xml" ), std::string_view( ".out" ), std::string_view( ".txt" ), std::string_view( ".log" ) } )
+    {
+        for( std::size_t p = val.find( ext ); !veto && p != std::string_view::npos; p = val.find( ext, p + 1 ) )
+        {
+            veto = p + ext.size() >= val.size() || !isWordChar( val[p + ext.size()] );
+        }
+    }
+    return veto;
 }
 
 // binvars: names assigned a value that names the binary (never one that RUNS it)
@@ -2992,110 +3183,12 @@ inline std::vector<std::string> binVars( std::string_view src )
         {
             e = src.size();
         }
-        std::string_view l = src.substr( b, e - b );
-        b                  = e + 1;
-        std::size_t i      = 0;
-        while( i < l.size() && isSp( l[i] ) )
+        const auto [ name, val ] = lineAssignment( src.substr( b, e - b ) );
+        b                        = e + 1;
+        if( !name.empty() && !val.contains( "$(" ) && !val.contains( "`" ) && !isNotBin( name )
+            && ( isBinVar( name ) || ( valueNamesBinary( val ) && !valueNamesOutput( val ) ) ) )
         {
-            ++i;
-        }
-        for( std::string_view kwd : { std::string_view( "local" ), std::string_view( "export" ), std::string_view( "readonly" ) } )
-        {
-            if( startsAt( l, i, kwd ) && i + kwd.size() < l.size() && isSp( l[i + kwd.size()] ) )
-            {
-                std::size_t j = i + kwd.size();
-                while( j < l.size() && isSp( l[j] ) )
-                {
-                    ++j;
-                }
-                // (?:kw\s+)? is optional: keep it only when an assignment follows
-                std::size_t q = j;
-                if( q < l.size() && isIdentHead( l[q] ) )
-                {
-                    while( q < l.size() && isAsciiIdent( l[q] ) )
-                    {
-                        ++q;
-                    }
-                    if( q < l.size() && l[q] == '=' )
-                    {
-                        i = j;
-                    }
-                }
-                break;
-            }
-        }
-        if( i >= l.size() || !isIdentHead( l[i] ) )
-        {
-            if( e >= src.size() )
-            {
-                break;
-            }
-            continue;
-        }
-        std::size_t q = i;
-        while( q < l.size() && isAsciiIdent( l[q] ) )
-        {
-            ++q;
-        }
-        if( q >= l.size() || l[q] != '=' )
-        {
-            if( e >= src.size() )
-            {
-                break;
-            }
-            continue;
-        }
-        const std::string_view name = l.substr( i, q - i );
-        const std::string_view val  = l.substr( q + 1 );
-        if( !contains( val, "$(" ) && !contains( val, "`" ) && !isNotBin( name ) )
-        {
-            bool named = isBinVar( name );
-            if( !named )
-            {
-                // build[^ ]*/ripwire\b | RIPWIRE_BIN | ^"?\$\{?BIN\}?"?$
-                bool hit = contains( val, "RIPWIRE_BIN" );
-                for( std::size_t p = val.find( "build" ); !hit && p != std::string_view::npos; p = val.find( "build", p + 1 ) )
-                {
-                    for( std::size_t r = val.find( "/ripwire", p + 5 ); r != std::string_view::npos; r = val.find( "/ripwire", r + 1 ) )
-                    {
-                        if( val.substr( p + 5, r - ( p + 5 ) ).find( ' ' ) != std::string_view::npos )
-                        {
-                            break;
-                        }
-                        if( r + 8 >= val.size() || !isWordChar( val[r + 8] ) )
-                        {
-                            hit = true;
-                            break;
-                        }
-                    }
-                }
-                if( !hit )
-                {
-                    std::string_view v = val;
-                    if( !v.empty() && v.front() == '"' )
-                    {
-                        v.remove_prefix( 1 );
-                    }
-                    if( !v.empty() && v.back() == '"' )
-                    {
-                        v.remove_suffix( 1 );
-                    }
-                    hit = bareVar( v ) == "BIN" || v == "$BIN}" || v == "${BIN";
-                }
-                bool veto = contains( val, "/ripwire/" );
-                for( std::string_view ext : { std::string_view( ".xml" ), std::string_view( ".out" ), std::string_view( ".txt" ), std::string_view( ".log" ) } )
-                {
-                    for( std::size_t p = val.find( ext ); !veto && p != std::string_view::npos; p = val.find( ext, p + 1 ) )
-                    {
-                        veto = p + ext.size() >= val.size() || !isWordChar( val[p + ext.size()] );
-                    }
-                }
-                named = hit && !veto;
-            }
-            if( named )
-            {
-                out.emplace_back( name );
-            }
+            out.emplace_back( name );
         }
         if( e >= src.size() )
         {

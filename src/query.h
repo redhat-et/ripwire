@@ -259,8 +259,7 @@ struct Eval
 
     static void sortUniq( std::vector<NodeId>& v )
     {
-        std::sort( v.begin(), v.end() );
-        v.erase( std::unique( v.begin(), v.end() ), v.end() );
+        rw::sortutil::sortUnique( v );
     }
 
     // ── sources ───────────────────────────────────────────────────────────────────────────────────────
