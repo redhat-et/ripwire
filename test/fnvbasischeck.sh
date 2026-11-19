@@ -87,11 +87,11 @@ EOF
 cp "$SRC/infra/hashutil.h" "$TMP/probe/infra/hashutil.h"
 python3 "$TMP/scan.py" "$TMP/probe" > "$TMP/probe.txt" 2>/dev/null
 pb="$( grep -c '^bad.h:' "$TMP/probe.txt" )"; pg="$( grep -c '^good.h:' "$TMP/probe.txt" )"; ph="$( grep -c '^infra/hashutil.h:' "$TMP/probe.txt" )"
-[ "$pb" -eq 4 ] && ok "(n) all 4 spellings in the probe fire (decimal 20- and 17-digit, either suffix case, hex, unsuffixed)" \
-    || { no "(n) the probe's 4 literals gave $pb hits"; cat "$TMP/probe.txt"; }
-[ "$pg" -eq 0 ] && ok "(n) the named twin, a comment quote and a longer number stay silent" \
-    || { no "(n) the compliant twin fired $pg time(s)"; cat "$TMP/probe.txt"; }
-[ "$ph" -eq 0 ] && ok "(n) infra/hashutil.h — the one home — is exempt" || no "(n) the home file was scanned"
+if [ "$pb" -eq 4 ]; then ok "(n) all 4 spellings in the probe fire (decimal 20- and 17-digit, either suffix case, hex, unsuffixed)"
+else no "(n) the probe's 4 literals gave $pb hits"; cat "$TMP/probe.txt"; fi
+if [ "$pg" -eq 0 ]; then ok "(n) the named twin, a comment quote and a longer number stay silent"
+else no "(n) the compliant twin fired $pg time(s)"; cat "$TMP/probe.txt"; fi
+if [ "$ph" -eq 0 ]; then ok "(n) infra/hashutil.h — the one home — is exempt"; else no "(n) the home file was scanned"; fi
 
 echo
 echo "=== (b) the two constants and the test vectors, digit for digit ==="
@@ -115,8 +115,10 @@ for text, hexv in vec:
     want = fnv( text.encode(), 14695981039346656037 )
     print( 'vector', repr( text ), 'ok' if want == int( hexv, 16 ) else 'BAD want %016x' % want )
 PY
-grep -q '^offset ok$' "$TMP/b.txt" && ok "(b) kFnv1aOffset64 = 14695981039346656037, the published FNV-1a 64 basis" || { no "(b) kFnv1aOffset64 is not the published basis"; cat "$TMP/b.txt"; }
-grep -q '^legacy ok$' "$TMP/b.txt" && ok "(b) kFnv1aLegacySeed64 = 1469598103934665603, the stored seed every on-disk key was written with" || { no "(b) kFnv1aLegacySeed64 moved — every stored key would be orphaned"; cat "$TMP/b.txt"; }
+if grep -q '^offset ok$' "$TMP/b.txt"; then ok "(b) kFnv1aOffset64 = 14695981039346656037, the published FNV-1a 64 basis"
+else no "(b) kFnv1aOffset64 is not the published basis"; cat "$TMP/b.txt"; fi
+if grep -q '^legacy ok$' "$TMP/b.txt"; then ok "(b) kFnv1aLegacySeed64 = 1469598103934665603, the stored seed every on-disk key was written with"
+else no "(b) kFnv1aLegacySeed64 moved — every stored key would be orphaned"; cat "$TMP/b.txt"; fi
 nv="$( sed -n 's/^vectors //p' "$TMP/b.txt" )"
 if [ "${nv:-0}" -ge 3 ] && ! grep -q '^vector .* BAD' "$TMP/b.txt"; then ok "(b) $nv static_assert test vectors match a reference FNV-1a 64"
 else no "(b) static_assert vectors: ${nv:-0} found (want >= 3) or one disagrees with the reference"; cat "$TMP/b.txt"; fi
