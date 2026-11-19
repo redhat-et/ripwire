@@ -440,6 +440,14 @@ Discloses: `capped`, `depth_capped`
 | --- | --- | --- | --- |
 | `kAliasHopSigBytes` | `240` | — | a declaration's text is cut here (cut="1"); a runaway guard |
 
+### `src/foranswerfirst.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kGuardTailRows` | `24` | — | — |
+
 ### `src/forbudgetfit.h`
 
 Discloses: **none**
