@@ -9,11 +9,12 @@
 #   (B) a TWO-STEP contract change, 2 -> 3 -> 4 parameters (defTableLegend's shape): each commit alone is a minor,
 #       never-gating row, so a per-commit check passes both; the range is red. Its mutation control (M) runs a copy
 #       of the script that compares only the last commit and must go green on (B), so (B) can fail;
-#   (C) the printed ack command, run as printed with a reason, turns (A) green with acked=1; worsening past the ack
-#       turns it red again;
+#   (C) the printed ack command, run as printed (from outside the repo, for a check run with -C and a named HEAD) with
+#       a reason, turns (A) green with acked=1; worsening past the ack turns it red again;
 #   (D) clean ranges: new-symbol rows only (counted: zero rows seen is a FAIL, the arm saw nothing), and an empty range;
 #   (E) the check cannot be made: an unknown base, a shallow clone without the base (CI needs fetch-depth: 0);
-#   (F) no answer is never a pass: a binary that prints nothing, and one that answers a different range;
+#   (F) no answer is never a pass: a binary that prints nothing, one that answers a different range, and an
+#       incomplete answer (no closing element, or fewer rows than regressions=) — with a complete stub as the control;
 #   (G) the CI wiring: ci.yml's qd-range job calls this script with full history, and ci-gate needs it.
 # The real-history replay (chooseInWindow over #693's range, etc.) is on the PR that added this gate; it needs this
 # repo's full history and ~1 min per range, so it is not re-run here.
@@ -125,13 +126,22 @@ else
 fi
 
 # ── (C) ack with a reason: the printed command, run as printed, turns (A) green; worsening past it is red again ───────
+# The check is run with a named HEAD (cx) and the command is run from OUTSIDE the repo, so the printed command must
+# carry the checked invocation itself — the binary, -C DIR and the range's own revisions — not `ripwire .` and HEAD.
 git checkout -q cx
-ackOnly="$( verdict "$TMP/a.out" | sed -n "s/.*--ack-only='\([^']*\)'.*/\1/p" )"
-reason="qdrangecheck arm C: steer's four branches are the fixture's deliberate growth"
-"$BIN" . "--quality-delta=$( git merge-base main HEAD )..HEAD" "--quality-ack=$reason" "--ack-only=$ackOnly" >"$TMP/c.ack" 2>&1; ackRc=$?
-grep -qF "$reason" .ripwire_quality_acks 2>/dev/null && [ "$ackRc" = 0 ] \
-    && ok "(C) the printed ack command (--ack-only='$ackOnly') wrote a ledger row with its reason" \
-    || { no "(C) the ack command exited $ackRc and/or wrote no row with the reason"; show "$TMP/c.ack"; }
+( cd "$TMP" && qd "$TMP/c0.out" -C "$R" main cx ); rc=$?
+ackCmd="$( verdict "$TMP/c0.out" | sed -n 's/.*and commit the ledger: //p' )"
+reason="qdrangecheck arm C: the four new steer branches are the fixture deliberate growth"
+ackCmd="${ackCmd/<why this is deliberate>/$reason}"
+if [ "$rc" != 2 ] || [ -z "$ackCmd" ]; then
+    no "(C) the check from outside the repo (-C, HEAD named cx) expected exit 2 with an ack command, got exit $rc"; show "$TMP/c0.out"
+fi
+( cd "$TMP" && eval "$ackCmd" ) >"$TMP/c.ack" 2>&1; ackRc=$?
+if [ "$ackRc" = 0 ] && grep -qF "$reason" .ripwire_quality_acks 2>/dev/null && git diff --cached --name-only | grep -qx '.ripwire_quality_acks'; then
+    ok "(C) the printed ack command, run as printed from outside the repo, wrote a ledger row with its reason and staged it"
+else
+    no "(C) the printed ack command exited $ackRc and/or wrote no staged row with the reason: $ackCmd"; show "$TMP/c.ack"
+fi
 git add .ripwire_quality_acks && git commit -qm 'ack steer'
 qd "$TMP/c.out" -C "$R" main; rc=$?
 if [ "$rc" = 0 ] && verdict "$TMP/c.out" | grep -q '^qd-range: PASS — 0 gating rows .*, 1 acked)' && grep -q '^qd-range: rows seen=.* gating=0 .* acked=1 ' "$TMP/c.out"; then
@@ -182,6 +192,23 @@ printf '#!/bin/sh\necho "<quality-delta schema=\\"ripwire.quality-delta/v1\\" ga
 bash "$SCRIPT" --bin "$TMP/other" -C "$R" main >"$TMP/f2.out" 2>&1; rc=$?
 [ "$rc" = 1 ] && verdict "$TMP/f2.out" | grep -q 'no --quality-delta answer' \
     && ok "(F) a clean answer for a DIFFERENT range: exit 1" || { no "(F) wrong-range answer expected exit 1, got exit $rc"; show "$TMP/f2.out"; }
+
+# An answer must be COMPLETE: the closing element present, and every row the root counts (regressions=) read. Each stub
+# answers the asked range (base_ref/target_ref from its own argument) and exits 0; the control stub is complete.
+stub(){ printf '#!/bin/sh\nr="${2#--quality-delta=}"; b="${r%%%%..*}"; t="${r##*..}"\nprintf %%s "<quality-delta schema=\\"ripwire.quality-delta/v1\\" %s base_ref=\\"$b\\" target_ref=\\"$t\\">%s"\n' "$2" "$3" >"$TMP/$1"; chmod +x "$TMP/$1"; }
+oneRow='<r kind=\"complexity\" sym=\"steer\" was=\"12\" now=\"13\" p=\"lib.h:2\" sev=\"minor\"/>'
+stub open 'regressions=\"1\" gating=\"0\" minor=\"1\"' ''
+stub short 'regressions=\"2\" gating=\"0\" minor=\"2\"' "$oneRow</quality-delta>"
+stub whole 'regressions=\"1\" gating=\"0\" minor=\"1\"' "$oneRow</quality-delta>"
+bash "$SCRIPT" --bin "$TMP/whole" -C "$R" main >"$TMP/f5.out" 2>&1; rc=$?
+[ "$rc" = 0 ] && [ "$( seen "$TMP/f5.out" )" = 1 ] && verdict "$TMP/f5.out" | grep -q '^qd-range: PASS' \
+    && ok "(F) control: a complete stub answer (1 row, regressions=1, closed) passes, exit 0" || { no "(F) complete stub answer expected exit 0 with 1 row, got exit $rc"; show "$TMP/f5.out"; }
+bash "$SCRIPT" --bin "$TMP/open" -C "$R" main >"$TMP/f3.out" 2>&1; rc=$?
+[ "$rc" = 1 ] && verdict "$TMP/f3.out" | grep -q 'incomplete' \
+    && ok "(F) the root element alone (regressions=1, no row, no closing element): exit 1, 'incomplete'" || { no "(F) unclosed answer expected exit 1 'incomplete', got exit $rc"; show "$TMP/f3.out"; }
+bash "$SCRIPT" --bin "$TMP/short" -C "$R" main >"$TMP/f4.out" 2>&1; rc=$?
+[ "$rc" = 1 ] && verdict "$TMP/f4.out" | grep -q 'incomplete' \
+    && ok "(F) a closed answer with fewer rows than regressions= (1 of 2): exit 1, 'incomplete'" || { no "(F) short answer expected exit 1 'incomplete', got exit $rc"; show "$TMP/f4.out"; }
 
 # ── (G) CI wiring ──────────────────────────────────────────────────────────────────────────────────────────────────
 CI="$ROOT/.github/workflows/ci.yml"

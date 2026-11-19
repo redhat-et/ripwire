@@ -24,10 +24,11 @@
 set -u
 BIN="${RIPWIRE_BIN:-}"
 DIR=""
+DIRARG=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --bin) BIN="${2:?--bin needs a path}"; shift 2 ;;
-        -C)    DIR="${2:?-C needs a directory}"; shift 2 ;;
+        -C)    DIR="${2:?-C needs a directory}"; DIRARG="$DIR"; shift 2 ;;
         -h|--help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         --*)   echo "qd-range: unknown option '$1' (usage: qd_range.sh [--bin BIN] [-C DIR] BASE [HEAD])" >&2; exit 1 ;;
         *)     break ;;
@@ -40,6 +41,7 @@ if [ -z "$DIR" ]; then
     DIR="$( git rev-parse --show-toplevel 2>/dev/null )" || { echo "qd-range: FAIL — not inside a git checkout (pass -C DIR)"; exit 1; }
 fi
 DIR="$( cd "$DIR" && pwd )" || { echo "qd-range: FAIL — no directory $DIR"; exit 1; }
+BINARG="$BIN"
 [ -n "$BIN" ] || BIN="$DIR/build/ripwire"
 case "$BIN" in /*) ;; *) BIN="$PWD/$BIN" ;; esac
 [ -x "$BIN" ] || { echo "qd-range: FAIL — no ripwire binary at $BIN (build it, or pass --bin / RIPWIRE_BIN)"; exit 1; }
@@ -75,8 +77,9 @@ fi
 
 # One row per line. Rows carry kind=, then sym= (or members= for a clone group), was=/now=/bar=, p=, and the markers
 # gating="1" | sev="minor" | origin="new-symbol". Acked findings are not <r> rows (the root's acked= counts them); <sa>
-# rows are stale ledger entries and never gate.
-grep -o '<r [^>]*>' "$TMP/body" >"$TMP/rows" || true
+# rows are stale ledger entries and never gate. A scoped run's <out-of-scope> rows are disclosed, never gating, and not
+# in regressions=, so they are dropped before counting.
+sed 's|<out-of-scope [^>]*>.*</out-of-scope>||' "$TMP/body" | grep -o '<r [^>]*>' >"$TMP/rows" || true
 unesc() { sed -e 's/&quot;/"/g' -e "s/&apos;/'/g" -e 's/&lt;/</g' -e 's/&gt;/>/g' -e 's/&amp;/\&/g'; }
 seen=0; gating=0; : >"$TMP/gating"
 printf '  %-5s %-26s %-11s %s  (%s)\n' "tier" "kind" "was->now" "symbol" "p"
@@ -101,6 +104,12 @@ if [ "$rc" = 6 ] || [ -n "$skipped" ]; then
     echo "qd-range: FAIL — a PARTIAL answer (ripwire exit $rc, kinds_skipped=$skipped): the skipped kinds are unmeasured, so this range cannot be certified clean; rerun where memory allows"
     exit 1
 fi
+# Complete, or no verdict: the document closes, and the rows read are every row the root counts. A root element alone
+# (or a cut-off stream) with gating="0" is not a clean range. A complete zero-row answer stays valid.
+if ! grep -q '</quality-delta>' "$TMP/body" || [ "$seen" != "$( attr "$root" regressions )" ]; then
+    echo "qd-range: FAIL — an incomplete answer (ripwire exit $rc): read $seen row(s) but regressions=$( attr "$root" regressions ), closing element $( grep -q '</quality-delta>' "$TMP/body" && echo present || echo MISSING ); the rows were not all read"
+    exit 1
+fi
 if [ "$gating" != "$( attr "$root" gating )" ]; then
     echo "qd-range: FAIL — counted $gating gating row(s) but the answer says gating=$( attr "$root" gating ) (ripwire exit $rc): the rows were not all read"
     exit 1
@@ -117,11 +126,22 @@ esac
 
 # The FAIL line: each gating row, then the one command that acks them all with a reason (run it where the branch is
 # checked out, review the ledger diff, commit it). --ack-only matches a row's kind, canonical id or facet by substring.
+# The command repeats the checked invocation — the binary, -C DIR and the range's own revisions, each shell-quoted —
+# so it acks the same repository and range that failed. Run from the top of the checkout without -C/--bin (CI does),
+# the defaults print as `.` and ./build/ripwire, so the line read off a CI log runs as-is in a developer's clone.
 ids=""; named=""
 while IFS="$( printf '\t' )" read -r kind sym p was now; do
     named="${named:+$named; }$kind $sym ($p, $was->$now)"
     id="$sym"; case "$id" in *" | "*) id="${id%% | *}" ;; esac
     ids="${ids:+$ids,}$id"
 done <"$TMP/gating"
-echo "qd-range: FAIL — $gating gating row(s) over ${mb:0:12}..${headSha:0:12}: $named. Fix each, or ack it with a reason and commit the ledger: ripwire . --quality-delta=\$(git merge-base $BASE HEAD)..HEAD --quality-ack='<why this is deliberate>' --ack-only='$ids' && git add .ripwire_quality_acks"
+q() { printf "'%s'" "$( printf '%s' "$1" | sed "s/'/'\\\\''/g" )"; }
+dirGiven="$DIRARG"
+if [ -z "$dirGiven" ]; then   # no -C: DIR is the checkout holding the cwd — `.` from its top, else its absolute path
+    if [ "$( pwd -P )" = "$( cd "$DIR" && pwd -P )" ]; then dirGiven=.; else dirGiven="$DIR"; fi
+fi
+dirShown="$( q "$dirGiven" )"
+if [ -n "$BINARG" ]; then binShown="$( q "$BINARG" )"; else binShown="$( q "$dirGiven/build/ripwire" )"; fi
+ackCmd="$binShown $dirShown --quality-delta=\"\$(git -C $dirShown merge-base $( q "$BASE" ) $( q "$HEADREV" ))\"..$( q "$HEADREV" ) --quality-ack='<why this is deliberate>' --ack-only=$( q "$ids" ) && git -C $dirShown add .ripwire_quality_acks"
+echo "qd-range: FAIL — $gating gating row(s) over ${mb:0:12}..${headSha:0:12}: $named. Fix each, or ack it with a reason and commit the ledger: $ackCmd"
 exit 2
