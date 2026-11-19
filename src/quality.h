@@ -395,6 +395,15 @@ inline void recordTangle( gtl::btree_map<std::uint64_t, std::uint64_t>& m, std::
     }
 }
 
+// A callable's record (recordTangle); any other kind has no tangle.
+inline void recordTangleOf( gtl::btree_map<std::uint64_t, std::uint64_t>& m, std::uint64_t key, const Symbol& s )
+{
+    if( s.kind == SymKind::Function || s.kind == SymKind::Method )
+    {
+        recordTangle( m, key, tangleInputsOf( s ) );
+    }
+}
+
 // ─── THE THIRTEEN KINDS AS A SET (qd-memory-degrade) ─────────────────────────────────────────────────────────
 // --quality-kinds=K[,K] runs a subset of the kinds (the replay a degraded --quality-delta=A..B hands back), and the
 // degraded range form runs the subset its changed files can decide. Each kind stays a separately reported, separately
@@ -6824,10 +6833,7 @@ inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::s
         { std::uint32_t& slot = snap.locBySym[ key ];    slot = std::max( slot, codeLoc[i] ); }   // Q-DIAL-3: CODE lines, not the physical span
         { std::uint32_t& slot = snap.nestBySym[ key ];   slot = std::max( slot, std::uint32_t( s.maxNest ) ); }
         { std::uint32_t& slot = snap.paramsBySym[ key ]; slot = std::max( slot, std::uint32_t( s.params ) ); }
-        if( s.kind == SymKind::Function || s.kind == SymKind::Method )
-        {
-            recordTangle( snap.tangleBySym, key, tangleInputsOf( s ) );   // QD-TANGLE: the highest-scoring overload's inputs
-        }
+        recordTangleOf( snap.tangleBySym, key, s );   // QD-TANGLE: a callable's inputs, the highest-scoring overload's
         recordMoveIdentity( snap.moveCidBySym, key, moveCid[i] );       // overloads share a key: the MAX, so the record is order-independent
         recordMoveIdentity( snap.bodyCidBySym, key, moveIds.body[i] );   // QD-RENAME-IDENTITY: every callable (an overload set never matches)
         // THE ONE KIND THAT IS NOT A MAX, and the reason is the MAX itself. Every metric above collapses the
@@ -7188,6 +7194,20 @@ inline void writeDefectSiteLines( std::ostream& f, const std::vector<DefectSiteK
     }
 }
 
+// QD-TANGLE's records: "tangleon 1" when the inputs were recorded (an empty map then means no function scores), then
+// "tangle <key> <packed>" (packTangle), both hex.
+inline void writeTangleLines( std::ostream& f, const Snapshot& s )
+{
+    if( s.tangleKnown )
+    {
+        f << "tangleon 1\n";
+    }
+    for( const auto& [h, v] : s.tangleBySym )
+    {
+        f << "tangle " << std::hex << h << ' ' << v << std::dec << '\n';
+    }
+}
+
 inline bool writeBaseline( const Snapshot& s, const std::string& path, std::string_view headSha = {},
                            std::size_t absorbedGating = 0 )
 {
@@ -7274,14 +7294,7 @@ inline bool writeBaseline( const Snapshot& s, const std::string& path, std::stri
     {
         f << "stub " << std::hex << h << std::dec << ' ' << v << '\n'; // the placeholder count
     }
-    if( s.tangleKnown )
-    {
-        f << "tangleon 1\n";   // QD-TANGLE: the inputs were recorded (an empty map then means no function scores)
-    }
-    for( const auto& [h, v] : s.tangleBySym )
-    {
-        f << "tangle " << std::hex << h << ' ' << v << std::dec << '\n'; // QD-TANGLE packed inputs (packTangle)
-    }
+    writeTangleLines( f, s );
     for( const auto& [h, v] : s.defsBySym )
     {
         f << "defs " << std::hex << h << std::dec << ' ' << v << '\n'; // overload-set CARDINALITY (a count, not a max)
@@ -8074,8 +8087,8 @@ struct BestSinceStore
     bool                      cut    = false;   // the blob cap stopped the walk: minima are over the newest blobs only
     const BestSinceRow* find( std::uint64_t key ) const noexcept
     {
-        const auto it = std::lower_bound( rows.begin(), rows.end(), key, []( const BestSinceRow& r, std::uint64_t k ) { return r.key < k; } );
-        return it != rows.end() && it->key == key ? &*it : nullptr;
+        const auto hit = std::ranges::equal_range( rows, key, {}, &BestSinceRow::key );
+        return hit.empty() ? nullptr : &hit.front();
     }
 };
 // Tangle's best: the per-input minima (nest 8 | deep 16 | steer 8) and the lowest score (tenths, 24 bits) over every version measured.
@@ -8129,6 +8142,13 @@ struct Improvement
     std::string   path;       // root-relative, "" = no locator
     std::uint32_t line = 0;
 };
+// The entry for `at`, located like a row (root-relative path, "" when the symbol names no file).
+inline Improvement improvementAt( std::string_view kind, const std::string& sym, std::uint32_t was, std::uint32_t now, const IngestResult& ing,
+                                  NodeId at, std::string_view root )
+{
+    const Symbol& s = ing.symbols[ at ];
+    return { std::string( kind ), sym, was, now, s.fileId < ing.files.size() ? std::string( relForHash( ing.files[ s.fileId ], root ) ) : std::string(), s.line };
+}
 // A metric value as every surface prints it: the integer, or a tangle score's tenths as a decimal ("48.4").
 inline std::string metricValueText( std::string_view kind, std::uint32_t v )
 {
@@ -8146,6 +8166,17 @@ struct DeltaExtras
     std::uint32_t            ratchetUnread = 0;   // history blobs that could not be measured
     bool                     ratchetCut    = false;
 };
+
+// QD-CREDIT-ROW for the four numeric kinds: over the bar at the baseline and lower now by at least the kind's minor delta (1 at
+// least) — listed, never a row. `credit` is null when nothing is collected or the kind is not selected; `entry` builds the record.
+template<class Entry>
+inline void creditMetricFall( DeltaExtras* credit, const MaterialityBar& mb, bool atBaseline, std::uint32_t was, std::uint32_t now, Entry&& entry )
+{
+    if( credit != nullptr && atBaseline && was > mb.bar && now + std::max( mb.minorDelta, 1u ) <= was )
+    {
+        credit->improved.push_back( entry() );
+    }
+}
 
 // one reported regression (something the change made WORSE).
 struct Regression
@@ -9694,6 +9725,23 @@ inline std::size_t rekeyMoveRecords( Map& m, const IdentityAliases& al )
 // ADD, NEVER OVERWRITE. A current key that the baseline ALREADY holds is left exactly as it is: that is a
 // symbol which genuinely exists at this identity on both sides, and letting a rename alias overwrite it
 // would substitute one symbol's history for another's. The alias only ever fills a HOLE.
+// One map's holes filled from the alias table (ADD, NEVER OVERWRITE, as below); how many keys it filled.
+template<class KeyedMap>
+inline std::size_t fillAliasHoles( KeyedMap& m, const IdentityAliases& al )
+{
+    std::size_t filled = 0;
+    for( const auto& [ from, to ] : al.toCurrent )
+    {
+        const auto src = m.find( from );
+        if( src != m.end() && m.find( to ) == m.end() )
+        {
+            m[ to ] = src->second;
+            ++filled;
+        }
+    }
+    return filled;
+}
+
 inline std::size_t remapSnapshotIdentity( Snapshot& base, const IdentityAliases& al )
 {
     if( al.toCurrent.empty() )
@@ -9701,18 +9749,7 @@ inline std::size_t remapSnapshotIdentity( Snapshot& base, const IdentityAliases&
         return 0;
     }
     std::size_t moved = 0;
-    const auto  healMap = [ & ]( auto& m )
-    {
-        for( const auto& [ from, to ] : al.toCurrent )
-        {
-            const auto src = m.find( from );
-            if( src != m.end() && m.find( to ) == m.end() )
-            {
-                m[ to ] = src->second;
-                ++moved;
-            }
-        }
-    };
+    const auto  healMap = [ & ]( auto& m ) { moved += fillAliasHoles( m, al ); };
     healMap( base.ccxBySym );
     healMap( base.locBySym );
     healMap( base.nestBySym );
@@ -9723,14 +9760,7 @@ inline std::size_t remapSnapshotIdentity( Snapshot& base, const IdentityAliases&
     healMap( base.failureDefaultBySym );
     healMap( base.placeholderBySym );
     healMap( base.bodyHashBySym );
-    for( const auto& [ from, to ] : al.toCurrent )   // QD-TANGLE: re-filed like the metric maps, not counted (the count predates the kind)
-    {
-        const auto src = base.tangleBySym.find( from );
-        if( src != base.tangleBySym.end() && !base.tangleBySym.contains( to ) )
-        {
-            base.tangleBySym[ to ] = src->second;
-        }
-    }
+    (void) fillAliasHoles( base.tangleBySym, al );   // QD-TANGLE: re-filed like the metric maps, not counted (the count predates the kind)
     moved += rekeyMoveRecords( base.moveCidBySym, al );
     (void) rekeyMoveRecords( base.bodyCidBySym, al );      // QD-RENAME-IDENTITY: re-keyed like the move record, so the old key is no vacated body
     (void) rekeyMoveRecords( base.moveSketchBySym, al );   // its sketch follows it; not a separate healed key in the count
@@ -10316,6 +10346,22 @@ inline const char* staleAckWhyToken( StaleAckWhy why ) noexcept
 //
 // complexity/verbosity/nesting/params share one shape: locBySym is the existence oracle, then the kind's
 // own metric map decides whether it still crosses that kind's bar.
+// QD-TANGLE: existence by locBySym, then whether the score is still at or over the bar (a floor that recorded no inputs: unknown, kept).
+inline std::optional<StaleAckWhy> staleForTangle( std::uint64_t key, const Snapshot& snap )
+{
+    if( !snap.locBySym.contains( key ) )
+    {
+        return StaleAckWhy::TargetGone;
+    }
+    const auto it = snap.tangleBySym.find( key );
+    const bool over = it != snap.tangleBySym.end() && tangleScore10( unpackTangle( it->second ) ) >= kTangleBar10;
+    if( !snap.tangleKnown || over )
+    {
+        return std::nullopt;
+    }
+    return StaleAckWhy::FindingGone;
+}
+
 inline std::optional<StaleAckWhy> staleForMetricKind( std::string_view base, std::uint64_t key, const Snapshot& snap )
 {
     if( snap.locBySym.find( key ) == snap.locBySym.end() )
@@ -10414,11 +10460,7 @@ inline std::optional<StaleAckWhy> staleWhyForKind( std::string_view base, std::u
     }
     else if( base == "tangle" )
     {
-        // QD-TANGLE: existence by locBySym, then whether the score is still at or over the bar
-        const auto it = snap.tangleBySym.find( key );
-        why = !snap.locBySym.contains( key ) ? std::optional<StaleAckWhy>( StaleAckWhy::TargetGone )
-            : ( !snap.tangleKnown || ( it != snap.tangleBySym.end() && tangleScore10( unpackTangle( it->second ) ) >= kTangleBar10 ) ) ? std::nullopt
-            : std::optional<StaleAckWhy>( StaleAckWhy::FindingGone );
+        why = staleForTangle( key, snap );
     }
     else if( base == "dead-code" )
     {
@@ -10720,8 +10762,7 @@ inline std::string staleAcksJsonArray( const std::vector<StaleAck>& staleAcks ) 
 // at most kImprovedShown entries, the rest counted in more=. Never a row: regressions= / gating= / the exit code never read it.
 inline std::vector<Improvement> improvementsInPlaceOrder( std::vector<Improvement> v )
 {
-    std::sort( v.begin(), v.end(), []( const Improvement& a, const Improvement& b )
-               { return std::tie( a.path, a.line, a.kind, a.sym ) < std::tie( b.path, b.line, b.kind, b.sym ); } );
+    std::ranges::sort( v, {}, []( const Improvement& m ) { return std::tie( m.path, m.line, m.kind, m.sym ); } );
     return v;
 }
 template<class Escape>
@@ -10776,6 +10817,26 @@ inline std::string improvedJson( const std::vector<Improvement>& improved, std::
     if( v.size() > kImprovedShown )
     {
         out += ",\"improved_more\":" + std::to_string( v.size() - kImprovedShown );
+    }
+    return out;
+}
+
+// QD-TANGLE — a tangle row's why= / fix= / locals= (XML) or "why" / "fix" / "locals" (JSON), appended last; present-only, so every
+// other kind's row is unchanged. `esc` is the dialect's escape.
+template<class Escape>
+inline std::string tangleRowAttrs( const Regression& r, bool json, Escape&& esc )
+{
+    std::string out;
+    for( const auto& [ name, text ] : { std::pair<const char*, const std::string*>{ "why", &r.why }, { "fix", &r.fix }, { "locals", &r.locals } } )
+    {
+        if( !text->empty() )
+        {
+            out += json ? ",\"" : " ";
+            out += name;
+            out += json ? "\":\"" : "=\"";
+            out += esc( *text );
+            out += "\"";
+        }
     }
     return out;
 }
@@ -11457,10 +11518,17 @@ inline void appendTangleRatchet( std::vector<Regression>& regs, const IngestResu
 // The rows, appended to `regs` (stamped by the caller's `stamp( NodeId )`). `existed` and `movedAt` are computeDelta's own origin
 // oracles, so a tangle row's origin= reads exactly as every other per-symbol kind's. With `extras`, also the tangle credits and the
 // D4 ratchet (appendTangleRatchet).
+// Judged only when the kind is selected and against a floor that recorded the tangle inputs — an older sidecar or blob has none, and
+// reading every function as new would bury the answer in rows that are not about this change.
 template<class Existed, class MovedAt, class Stamp>
 inline void appendTangleRows( std::vector<Regression>& regs, const IngestResult& ing, const Graph& g, const std::vector<std::uint64_t>& keyByNode,
-                              const Snapshot& base, std::string_view root, Existed&& existed, MovedAt&& movedAt, Stamp&& stamp, DeltaExtras* extras )
+                              const Snapshot& base, std::string_view root, const KindScope& scope, Existed&& existed, MovedAt&& movedAt, Stamp&& stamp,
+                              DeltaExtras* extras )
 {
+    if( !kindSelected( scope.kinds, "tangle" ) || !base.tangleKnown )
+    {
+        return;
+    }
     const gtl::btree_map<std::uint64_t, TangleNow> nowByKey = tangleNowByKey( ing, g, keyByNode );
     TangleDetailReader                             detailOf{ ing };
     gtl::btree_map<std::uint64_t, std::size_t>     rowOfKey;     // the row this pass emitted for a key (the ratchet adds its facet there)
@@ -11473,8 +11541,7 @@ inline void appendTangleRows( std::vector<Regression>& regs, const IngestResult&
         const std::uint32_t now10 = tangleScore10( best.in );
         if( extras != nullptr && !isNew && tangleCredited( was, best.in ) )
         {
-            const Symbol& s = ing.symbols[ best.at ];
-            extras->improved.push_back( { "tangle", g.canonId[ best.at ], was10, now10, std::string( relForHash( ing.files[ s.fileId ], root ) ), s.line } );
+            extras->improved.push_back( improvementAt( "tangle", g.canonId[ best.at ], was10, now10, ing, best.at, root ) );
         }
         if( now10 < kTangleBar10 )
         {
@@ -11738,6 +11805,7 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
         [ & ]( const MaterialityBar& mb, std::uint32_t ceilingAt, const gtl::btree_map<std::uint64_t, std::uint32_t>& baseMap, auto metricOf )
     {
         const std::uint32_t           bar      = mb.bar;
+        DeltaExtras* const            credit   = kindSelected( scope.kinds, mb.kind ) ? extras : nullptr;   // QD-CREDIT-ROW (creditMetricFall)
         ScratchMap<MetricMaxAt>       nowBySym = metricMaxByKey( ing, g, keyByNode, metricOf );
         ScratchMap<std::uint8_t> reported( ing.symbols.size() );
         for( NodeId i = 0; i < ing.symbols.size(); ++i )
@@ -11759,12 +11827,7 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
             const std::uint32_t now = nowIt->second.now;
             const auto          it  = baseMap.find( key );
             const std::uint32_t was = ( it == baseMap.end() ) ? 0u : it->second;
-            if( extras != nullptr && kindSelected( scope.kinds, mb.kind ) && it != baseMap.end() && was > bar && now + std::max( mb.minorDelta, 1u ) <= was )
-            {
-                // QD-CREDIT-ROW: over the bar at the baseline and lower now by at least the kind's minor delta — listed, never a row
-                const Symbol& at = ing.symbols[ nowIt->second.at ];
-                extras->improved.push_back( { std::string( mb.kind ), g.canonId[i], was, now, at.fileId < ing.files.size() ? std::string( relForHash( ing.files[ at.fileId ], root ) ) : std::string(), at.line } );
-            }
+            creditMetricFall( credit, mb, it != baseMap.end(), was, now, [ & ] { return improvementAt( mb.kind, g.canonId[i], was, now, ing, nowIt->second.at, root ); } );
             if( now <= was )
             {
                 continue;   // nothing got worse on this axis
@@ -11807,12 +11870,7 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
     perSymbolKind( kMaterialityBars[1], newSymbolCeiling( kLocBar ), base.locBySym,    [ & ]( NodeId i ){ return nowCodeLoc[i]; } );
     perSymbolKind( kMaterialityBars[2], 0,                           base.nestBySym,   [ & ]( NodeId i ){ return std::uint32_t( ing.symbols[i].maxNest ); } );
     perSymbolKind( kMaterialityBars[3], 0,                           base.paramsBySym, [ & ]( NodeId i ){ return std::uint32_t( ing.symbols[i].params ); } );
-    // QD-TANGLE (report-only): judged only against a floor that recorded the tangle inputs — an older sidecar or blob has none, and
-    // reading every function as new would bury the answer in rows that are not about this change.
-    if( kindSelected( scope.kinds, "tangle" ) && base.tangleKnown )
-    {
-        appendTangleRows( regs, ing, g, keyByNode, base, root, existedAtBaseline, [ & ]( NodeId at ) { return moved.isMoved( at ); }, stampLoc, extras );
-    }
+    appendTangleRows( regs, ing, g, keyByNode, base, root, scope, existedAtBaseline, [ & ]( NodeId at ) { return moved.isMoved( at ); }, stampLoc, extras );   // QD-TANGLE
 
     // PERF (P5W2) — the working-tree clone pass is the dominant --quality-delta cost: on a large private C++ corpus the
     // Type-3 pass alone is ~2.7-3.2 s (60 M intra-bucket pair-visits; tokenization is only ~3 %). It is a PURE

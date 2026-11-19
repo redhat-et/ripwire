@@ -1905,7 +1905,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                        std::string_view fileStem = {} )   // the file's stem: the name of a bare `module.exports = <anonymous fn>` (JS)
 {
     const bool full  = mode == TagsCapture::Full;
-    const bool shape = full || mode == TagsCapture::DefinitionsAndShape;   // the callables' cc_walk facts
+    const bool shape = mode != TagsCapture::DefinitionsOnly;   // the callables' cc_walk facts (Full or DefinitionsAndShape)
     if( cursor == nullptr )
     {
         return;
@@ -2440,9 +2440,10 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             // answer than either). Runs on defNode, whose ancestors are the enclosing scopes.
             d.testScope = isTestMacroBlock ? std::uint8_t( 1 ) : std::uint8_t( inFileTestScope( defNode, src, le.lang ) );   // LB-E: a test macro IS the in-file convention
             d.maxNest   = fnOrMethod ? std::uint8_t( nestVal > 255u ? 255u : nestVal ) : std::uint8_t( 0 );
-            d.steer     = fnOrMethod ? std::uint8_t( steerVal > 255u ? 255u : steerVal ) : std::uint8_t( 0 );   // QD-TANGLE (model.h Symbol::steer)
-            d.deepDispatch = fnOrMethod ? std::uint16_t( dispatchVal > 65535u ? 65535u : dispatchVal ) : std::uint16_t( 0 );   // QD-TANGLE (model.h Symbol::dispatchShare)
-            d.nestArmCut   = fnOrMethod ? std::uint8_t( nestCutVal > 255u ? 255u : nestCutVal ) : std::uint8_t( 0 );    // QD-TANGLE (model.h Symbol::dispatchShare)
+            // QD-TANGLE (model.h Symbol::steer, ::dispatchShare): 0 off a callable, where complexityOf did not run
+            d.steer        = saturatedTo<std::uint8_t>( steerVal );
+            d.deepDispatch = saturatedTo<std::uint16_t>( dispatchVal );
+            d.nestArmCut   = saturatedTo<std::uint8_t>( nestCutVal );
             // The nesting profile (model.h Symbol::humps/deepLoc). Saturating at 65535 on purpose: a def past
             // either bound is beyond every triage threshold, and deepLoc is a floor already, so a clamp there
             // stays honest in the direction the attribute already claims.

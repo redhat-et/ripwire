@@ -9,6 +9,7 @@
 #include <bit>               // std::endian — the cache blob's arch tag, without a compiler-specific macro
 #include <memory>            // std::unique_ptr — CacheRecords holds its open frame
 #include <optional>          // std::optional — cacheBlobIdentity: "this blob's identity" vs "there is no blob to identify"
+#include <limits>            // std::numeric_limits — saturatedTo
 
 // ingest_cache.h — the raw-facts model + incremental cache, moved VERBATIM from ingest.cpp in the
 // 2026-08-29 split: RawDef (the pre-id-assignment definition record), the extraction identity
@@ -24,6 +25,13 @@ namespace rw
 
 namespace
 {
+
+// A walk count stored in a narrower RawDef field: clamped to the field's maximum (every such count is past every bar there).
+template<class Narrow>
+inline constexpr Narrow saturatedTo( std::uint32_t v ) noexcept
+{
+    return Narrow( std::min<std::uint32_t>( v, std::numeric_limits<Narrow>::max() ) );
+}
 
 // ---- a raw definition pulled from one query match (pre-id-assignment) ----
 struct RawDef
