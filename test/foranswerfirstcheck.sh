@@ -38,6 +38,10 @@
 #   (R9)  --legend=first is the legend-first order: the legend precedes the rows
 #   (R9d) AF1 (owner decision 2026-11-18): the DEFAULT is answer-first -- its rows precede its legend
 set -u
+# SIGX (src/forsigx.h, TL1 M1) runs AFTER this permutation and is lossless but not a permutation (it adds the <x r=R> envelopes and
+# the <sigx> block). This gate pins the PERMUTATION alone, so SIGX is off here; test/forsigxcheck.sh pins SIGX, and its (S1) rebuilds
+# this gate's answer-first document from the default one byte for byte.
+export RIPWIRE_NO_SIGX=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${RIPWIRE_BIN:-${1:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"

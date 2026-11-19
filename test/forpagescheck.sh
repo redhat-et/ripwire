@@ -81,6 +81,10 @@ chain 6000 || no "(P2) the 6000 B page chain could not be followed"
 "$BIN" . --for="$TASK" --page-bytes=0                    >"$WORK/whole.xml" 2>/dev/null
 "$BIN" . --for="$TASK" --legend=last --page-bytes=0      >"$WORK/whole_last.xml" 2>/dev/null
 "$BIN" . --for="$TASK" --legend=first                    >"$WORK/first.xml" 2>/dev/null
+# SIGX (src/forsigx.h, TL1 M1) is LOSSLESS but not a permutation: it adds the <x r=R> envelopes, the <sigx> block and its legend after
+# the rows. (P6) is about the PERMUTATION, so it compares --legend=first with the whole answer-first answer under RIPWIRE_NO_SIGX=1;
+# test/forsigxcheck.sh (S1) proves the default whole answer rebuilds that twin byte for byte.
+RIPWIRE_NO_SIGX=1 "$BIN" . --for="$TASK" --page-bytes=0  >"$WORK/whole_nosigx.xml" 2>/dev/null
 "$BIN" . --for="$TASK" --page-bytes=3000                 >"$WORK/again_1.xml" 2>/dev/null
 "$BIN" . --for="$TASK" --page-bytes=3000:2               >"$WORK/again_2.xml" 2>/dev/null
 "$BIN" . --for="$TASK" --page-bytes=100000000            >"$WORK/onepage.xml" 2>/dev/null
@@ -240,7 +244,8 @@ for size in ("3000", "6000"):
 first = rd(os.path.join(W, "first.xml")); fr = root_open(first).group(0)
 say(" page=" not in fr and " next=" not in fr, "(P6) --legend=first carries no page disclosure")
 say(first.find("<!--") < first.find("<sigs"), "(P6) --legend=first serves its legend BEFORE <sigs>")
-say(len(first) == len(whole) and sorted(first) == sorted(whole), "(P6) --legend=first is a permutation of the --page-bytes=0 answer (same bytes, other order)")
+wns = rd(os.path.join(W, "whole_nosigx.xml"))
+say(len(first) == len(wns) and sorted(first) == sorted(wns), "(P6) --legend=first is a permutation of the --page-bytes=0 answer under RIPWIRE_NO_SIGX=1 (same bytes, other order)")
 sys.exit(1 if bad else 0)
 PY
 [ $? -eq 0 ] || fail=1

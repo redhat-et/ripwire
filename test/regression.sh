@@ -579,6 +579,7 @@ for _g in \
     forselfhookcheck \
     forsiblingdemotecheck \
     forsigspancheck \
+    forsigxcheck \
     forsizetrimcheck \
     forsoftbudgetcheck \
     fortailfoldcheck \

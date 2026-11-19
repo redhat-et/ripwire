@@ -7,6 +7,7 @@
 #include "forliteral.h" // MF1-LIT: a task naming a literal gets its byte-exact sites and owner bodies, appended
 #include "forpage.h"    // L-W: the --for --limit=N file page, coverage=, the thin rule and the widening next=
 #include "foranswerfirst.h" // ITEM R: a finished --for answer serves its ANSWER first (a permutation)
+#include "forsigx.h"        // SIGX (TL1 M1): the sigs rows past rank 10 keep l n p r on page 1; the rest follows the rows
 #include "forpages.h"       // AF1: the answer-first --for answer, served in pages (page= pages= withheld_bytes= next=)
 #include "forbudgetfit.h" // TOKEN-BUDGET-MONOTONE: a budget sheds the unbudgeted answer, it never re-decides its posture
 #include "forowner.h"   // the question's owner (owner-hop's found set) and the one owner body of an explanatory question
@@ -5826,6 +5827,11 @@ std::optional<int> runForLens( const MainDispatch& d )
             std::string doc = r.out->bytes;
             // AF4 T-B: a who-calls question leads with its <callers by="subject"> block (foranswerfirst.h rowBlockOrder)
             (void)rw::answerfirst::answerFirst( doc, rw::subjectCallersCueLeads( d.cfg.forTask, rw::answerfirst::subjectCallersOf( doc ) ) );
+            // SIGX (TL1 M1, forsigx.h): after the permutation and before paging, so every page size windows the same document
+            if( !d.cfg.signaturesOnly && rw::sigx::sigxOn() )
+            {
+                (void)rw::sigx::compactSigs( doc );
+            }
             if( !serveForPage( d.cfg, doc ) )
             {
                 return 1;
