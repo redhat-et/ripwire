@@ -665,5 +665,51 @@ sys.exit(1 if bad else 0)
 PY_SD
 [ $? -eq 0 ] || fail=1
 
+# (BL) TL1 M3 -- A LATE ASKED BODY LEADS THE TAIL (foranswerfirst.h bodiesLeadInPlace; lane TL1 PREREG M3). A top-level <bodies> that
+# starts at or past the default page stop (12,000 B) moves, with its lead comment, directly ahead of <tail>; one that starts inside the
+# first page stays. ORDER-ONLY: a permutation of the RIPWIRE_NO_BODY_LEAD=1 twin. <hops>/<fold> never move (registered null).
+TASK_D="rank symbols by pagerank and serialize the map"
+"$BIN" src --for="$TASK_D" --detail=3 $WHOLE >"$WORK/b_new.xml" 2>/dev/null
+RIPWIRE_NO_BODY_LEAD=1 "$BIN" src --for="$TASK_D" --detail=3 $WHOLE >"$WORK/b_off.xml" 2>/dev/null
+"$BIN" src --for="$TASK_D" --detail=3 >"$WORK/b_page.xml" 2>/dev/null
+"$BIN" src --for="pageRankDouble" $WHOLE >"$WORK/n_new.xml" 2>/dev/null
+RIPWIRE_NO_BODY_LEAD=1 "$BIN" src --for="pageRankDouble" $WHOLE >"$WORK/n_off.xml" 2>/dev/null
+python3 - "$WORK" <<'PY_BL'
+import re, sys, os
+W = sys.argv[1]; bad = 0
+def rd(n): return open(os.path.join(W, n), "rb").read().decode("latin-1")
+def say(ok, msg):
+    global bad
+    print("  %s  %s" % ("PASS" if ok else "FAIL", msg)); bad += 0 if ok else 1
+def mask(d): return re.sub(r"<!\[CDATA\[.*?\]\]>|<!--.*?-->", lambda m: " " * len(m.group(0)), d, flags=re.S)
+def tops(d):
+    """top-level element names of <ctx> with their start offsets, comments and CDATA masked"""
+    m = mask(d); r = re.search(r"<ctx\b[^>]*>", m); i = r.end(); end = m.rfind("</ctx>"); out = []; depth = 0
+    for t in re.finditer(r"<(/?)([A-Za-z_][\w-]*)[^>]*?(/?)>", m[i:end]):
+        if t.group(1): depth -= 1
+        elif t.group(3):
+            if depth == 0: out.append((t.group(2), i + t.start()))
+        else:
+            if depth == 0: out.append((t.group(2), i + t.start()))
+            depth += 1
+    return out
+new, off, page, nn, no_ = rd("b_new.xml"), rd("b_off.xml"), rd("b_page.xml"), rd("n_new.xml"), rd("n_off.xml")
+to, tn = tops(off), tops(new)
+names = lambda t: [x[0] for x in t]
+at = lambda t, n: next((x[1] for x in t if x[0] == n), -1)
+say("bodies" in names(to) and at(to, "bodies") >= 12000 and names(to).index("bodies") > names(to).index("tail"),
+    "(BL0) the --detail=3 twin's <bodies> starts past the first page (at %d) after <tail> -- if not, BL is untested" % at(to, "bodies"))
+say("bodies" in names(tn) and names(tn).index("bodies") + 1 == names(tn).index("tail"), "(BL1) <bodies> directly precedes <tail> (order %s)" % names(tn)[:5])
+say([n for n in names(tn) if n != "bodies"] == [n for n in names(to) if n != "bodies"], "(BL1) every other block keeps its relative order")
+say(len(new) == len(off) and sorted(new) == sorted(off), "(BL2) a permutation of the RIPWIRE_NO_BODY_LEAD=1 twin (%d B)" % len(new))
+i = new.find("<bodies"); cut = new[:i] + new[new.find(">", i) + 1:]
+say(not (len(cut) == len(off) and sorted(cut) == sorted(off)), "(BL2n) dropping the <bodies> open tag DOES break BL2 -- BL2 can fail")
+say("<bodies" in page, "(BL3) the default 12 KB page 1 carries <bodies>")
+say(nn == no_ and "bodies" in names(tops(nn)) and at(tops(nn), "bodies") < 12000, "(BL4) a <bodies> that starts inside the first page (name-exact, at %d) stays: byte-identical to the twin" % at(tops(nn), "bodies"))
+say("hops" not in names(tn) or names(tn).index("hops") > names(tn).index("tail"), "(BL5) <hops> is not moved ahead of <tail>")
+sys.exit(1 if bad else 0)
+PY_BL
+[ $? -eq 0 ] || fail=1
+
 if [ "$fail" -ne 0 ]; then echo "foranswerfirstcheck: FAILURES"; exit 1; fi
 echo "foranswerfirstcheck: ALL PASS"

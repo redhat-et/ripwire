@@ -5754,7 +5754,8 @@ inline int runForLensFitted( const MainDispatch& d )
     if( d.cfg.legendAnswerFirst )
     {
         (void)rw::answerfirst::answerFirst( out, { .callersLead = rw::subjectCallersCueLeads( d.cfg.forTask, rw::answerfirst::subjectCallersOf( out ) ),
-                                                    .tailSameDir = rw::answerfirst::tailSameDirOn() } );
+                                                    .tailSameDir = rw::answerfirst::tailSameDirOn(),
+                                                    .bodyLead    = rw::answerfirst::bodyLeadOn() } );
     }
     std::fwrite( out.data(), 1, out.size(), stdout );
     return u.rc;
@@ -5828,7 +5829,8 @@ std::optional<int> runForLens( const MainDispatch& d )
             std::string doc = r.out->bytes;
             // AF4 T-B: a who-calls question leads with its <callers by="subject"> block (foranswerfirst.h rowBlockOrder)
             (void)rw::answerfirst::answerFirst( doc, { .callersLead = rw::subjectCallersCueLeads( d.cfg.forTask, rw::answerfirst::subjectCallersOf( doc ) ),
-                                                    .tailSameDir = rw::answerfirst::tailSameDirOn() } );
+                                                    .tailSameDir = rw::answerfirst::tailSameDirOn(),
+                                                    .bodyLead    = rw::answerfirst::bodyLeadOn() } );
             // SIGX (TL1 M1, forsigx.h): after the permutation and before paging, so every page size windows the same document
             if( !d.cfg.signaturesOnly && rw::sigx::sigxOn() )
             {
