@@ -186,11 +186,9 @@ SOLO="$( rw --for=widgetSoloProbe )"
 # AF1-fix (2026-11-18): the default --for answer is served in 12 KB PAGES (src/forpages.h); the anchor body this arm funds is
 # ~11 KB, so it starts past page 1's cut. (7)..(7b2) are about the ANSWER the allowance funds, so MID reads --page-bytes=0 —
 # the whole answer in one call, row-identical to the joined pages (forpagescheck P2) — and (7p) holds the default PAGE to
-# present-or-disclosed-deferred. (7c): TOKEN-BUDGET-MONOTONE's U is the whole LEGEND-FIRST answer a budget sheds (AF1 kept
-# the budgeted path legend-first and unpaged; budgetmonotonecheck (a) re-pinned the same way), i.e. --legend=first.
+# present-or-disclosed-deferred. (7c): a budget is never paged, so the whole answer a fitting budget returns is MID.
 MID="$( rw --for=widgetMidProbe --page-bytes=0 )"         # the anchor-resolved allowance's own shape
 MIDPAGE="$( rw --for=widgetMidProbe )"                    # the default page
-MIDFIRST="$( rw --for=widgetMidProbe --legend=first )"    # the legend-first whole answer a budget sheds
 MIDCAP="$( rw --for=widgetMidProbe --token-budget=6000 )" # …with an explicit ceiling: stays hard
 TWIN="$( rw --for=widgetTwinProbe )"                      # multi-candidate anchor: no raise
 # COMPACT conceptual serving (docs/EVALS.md, the T3 route-narrowing round) moved the rank-first BODY
@@ -295,7 +293,7 @@ elif printf '%s' "$MIDPAGE" | python3 -c 'import re,sys; r=re.match(r"<ctx\b[^>]
     ok "(7p) the default page does not hold the anchor's body and says so: deferred= names <bodies>, next= reaches it"
 else no "(7p) the default page neither carries the anchor's body nor names <bodies> in deferred=/continued= (a silent drop)"; fi
 { printf '%s' "$MIDCAP" | grep -q '<b t="fn" [^>]*p="a_src/mid\.py" n="widgetMidProbe"><!\[CDATA\[' \
-  && [ "$MIDCAP" = "$MIDFIRST" ]; } \
+  && [ "$MIDCAP" = "$MID" ]; } \
     && ok "(7c) an explicit --token-budget the answer fits returns it byte for byte: the anchor's body (the answer) still rides" \
     || no "(7c) --token-budget=6000 lost the anchor's own body or is not the unbudgeted answer (root: $( rootbodies "$MIDCAP" ) bodies)"
 { [ "$( bodycount "$BIG" )" = "0" ] && printf '%s' "$BIG" | grep -q '<!-- body omitted (over budget): widgetAnchorProbe -->'; } \

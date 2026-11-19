@@ -633,7 +633,9 @@ open( f"{root}/base.py", "w" ).write( "class Base:\n    def run_it(self):\n     
 for k in range( 6 ):
     open( f"{root}/impl{k}.py", "w" ).write( f"from base import Base\n\nclass Impl{k}(Base):\n    def process_item(self):\n        total = 0\n{filler}        return total\n" )
 PY
-run u "--for=how do impl classes process items" --auto-bodies >"$TMP/u"
+# AF1-fix (2026-11-18): this answer is ~13 KB, so the default serves it in two pages (src/forpages.h) with <bodies> continued past page 1's
+# cut; "a body the answer printed" is the WHOLE answer's, so the arm reads --page-bytes=0 (row-identical to the joined pages, forpagescheck P2)
+run u "--for=how do impl classes process items" --auto-bodies --page-bytes=0 >"$TMP/u"
 python3 - "$TMP/u" <<'PY'
 import re, sys
 t = open( sys.argv[1], encoding="utf-8", errors="replace" ).read()

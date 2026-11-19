@@ -405,11 +405,16 @@ isnum(){ case "${1:-}" in ''|*[!0-9]*) return 1;; esac; return 0; }
 
 # The no-budget answers, one per dialect the arms below read: the REF each cut's maximality and rank prefix are measured
 # against, and the DH arm's subject.
-"$BIN" "$CORPUS" --for="$TASK"                  > "$TMP/def.xml"     2>/dev/null
-"$BIN" "$CORPUS" --for="$TASK" --legend=compact > "$TMP/def.compact" 2>/dev/null
+# AF1-fix (2026-11-18): the flagless --for answer is served in 12 KB PAGES (src/forpages.h); this 40-row, note-heavy head is split
+# by page 1's cut (continued="sigs"). The no-budget references and (DH) are about the ANSWER, so the XML/compact ones read
+# --page-bytes=0 — the whole answer in one call, row-identical to the joined pages (forpagescheck P2/P11); (DP) below holds the
+# DEFAULT page to present-or-disclosed-deferred. --json is never paged.
+"$BIN" "$CORPUS" --for="$TASK" --page-bytes=0                  > "$TMP/def.xml"     2>/dev/null
+"$BIN" "$CORPUS" --for="$TASK" --legend=compact --page-bytes=0 > "$TMP/def.compact" 2>/dev/null
+"$BIN" "$CORPUS" --for="$TASK"                                 > "$TMP/def.page"    2>/dev/null
 "$BIN" "$CORPUS" --for="$TASK" --json           > "$TMP/def.json"    2>/dev/null
-RIPWIRE_NO_HEAD_RR=1 "$BIN" "$CORPUS" --for="$TASK"                  > "$TMP/def_so.xml"     2>/dev/null   # lane hrr: the RP twin's references
-RIPWIRE_NO_HEAD_RR=1 "$BIN" "$CORPUS" --for="$TASK" --legend=compact > "$TMP/def_so.compact" 2>/dev/null
+RIPWIRE_NO_HEAD_RR=1 "$BIN" "$CORPUS" --for="$TASK" --page-bytes=0                  > "$TMP/def_so.xml"     2>/dev/null   # lane hrr: the RP twin's references
+RIPWIRE_NO_HEAD_RR=1 "$BIN" "$CORPUS" --for="$TASK" --legend=compact --page-bytes=0 > "$TMP/def_so.compact" 2>/dev/null
 RIPWIRE_NO_HEAD_RR=1 "$BIN" "$CORPUS" --for="$TASK" --json           > "$TMP/def_so.json"    2>/dev/null
 for dialect in xml compact json; do
   soft "$TMP/def_so.$dialect" 0 "$TMP/def_so_$dialect.rows" >/dev/null || no "the RIPWIRE_NO_HEAD_RR=1 no-budget answer ($dialect) has no <sigs> block — the RP twin lacks its reference"
@@ -435,6 +440,10 @@ for dialect in xml json; do
     no "(DH) default ($dialect): rows=$dr total=$dt notes=$dn over=$dov past_target='$pt' — the default must ship the whole head with every note, past the target disclosed, unlabelled"
   fi
 done
+# (DP) AF1-fix: the DEFAULT page holds the whole <sigs> head, or its root says the head goes on (continued="sigs") beside a next=
+if python3 -c 'import re,sys; d=open(sys.argv[1]).read(); r=re.match(r"<ctx\b[^>]*>",d); r=r.group(0) if r else ""; n=" ".join(re.findall(r"\s(?:deferred|continued)=\"([^\"]*)\"",r)).split(); sys.exit(0 if ("</sigs>" in d and "sigs" not in n) or ("sigs" in n and " next=" in r) else 1)' "$TMP/def.page"; then
+    ok "(DP) the default page carries the whole head or names <sigs> in continued=/deferred= beside next="
+else no "(DP) the default page cut the head with no continued=/deferred= naming <sigs> (a silent drop)"; fi
 
 # ── arm 1: notes are CHARGED against the budget, in BOTH dialects ─────────────────────────────────
 # REPLACED — forbudget-soft (rule 4). Was: "est_tokens <= --token-budget" in XML and JSON at 1200/1640/3000 (the whole
@@ -654,7 +663,7 @@ case "$bare" in *"<note "*) no "a tree with no .ripwire_notes still emitted a <n
 # 1200 7/18 (JSON 7/17), 1640 10/25 (10/24), 3000 19/40 (18/40). RED on base (d4325a8c): 7 rows default vs 6 full (CF), each a
 # cut short of T (ST). The NOTES twins are green on both binaries — W3-N2 held before the soft target and holds after it.
 "$BIN" "$CORPUS" --for="$TASK" --token-budget=900 --legend=full > "$TMP/b_900.full" 2>/dev/null
-"$BIN" "$CORPUS" --for="$TASK"                                  > "$TMP/b_def.xml"  2>/dev/null
+"$BIN" "$CORPUS" --for="$TASK" --page-bytes=0                   > "$TMP/b_def.xml"  2>/dev/null   # AF1-fix: the whole answer
 "$BIN" "$CORPUS" --for="$TASK" --json                           > "$TMP/b_def.json" 2>/dev/null
 printf '%s' "$bare" > "$TMP/b_900.xml"
 for posture in xml full; do

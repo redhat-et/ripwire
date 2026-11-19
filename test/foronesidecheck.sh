@@ -208,9 +208,9 @@ ident d2 'What does alpha_start do?'
 # (t) TOKEN-BUDGET-MONOTONE (2026-11-14): the budget no longer switches the demote off — it was posture under a budget (the
 # old arm wanted "no pointer, no legend" at --token-budget=4000). The budget now trims the answer asked without it, so an
 # answer that fits comes back byte for byte, the pointer and its legend included (test/budgetmonotonecheck.sh (a)).
-# AF1 (2026-11-18): the unbudgeted DEFAULT is answer-first and paged; a budget sheds the WHOLE legend-first answer, so that answer
-# (--legend=first) is the one a budget that fits must return byte for byte (the same U as budgetmonotonecheck (a)).
-run "--for=sink_left_value + sink_right_value" --legend=first >"$TMP/t.off" || no "(t) the unbudgeted run exited $?"
+# AF1 (2026-11-18): the unbudgeted DEFAULT is answer-first and paged; a budget sheds the WHOLE answer in the same posture and is
+# never paged, so --page-bytes=0 is the one a budget that fits returns byte for byte (the same U as budgetmonotonecheck (a)).
+run "--for=sink_left_value + sink_right_value" --page-bytes=0 >"$TMP/t.off" || no "(t) the unbudgeted run exited $?"
 run "--for=sink_left_value + sink_right_value" --token-budget=100000 >"$TMP/t.on" || no "(t) the budgeted run exited $?"
 if [ -s "$TMP/t.on" ] && grep -q '<!-- one-side:' "$TMP/t.off" && cmp -s "$TMP/t.on" "$TMP/t.off"; then ok "(t) --token-budget=100000: the demoted answer byte for byte ($( wc -c <"$TMP/t.on" | tr -d ' ' ) B)"; else no "(t) the budgeted answer is not the demoted unbudgeted one (or the unbudgeted one has no pointer: vacuous)"; fi
 

@@ -186,7 +186,9 @@ E = [ ( "dead-code filter",   fx + "/dead",   [ "--dead-code=pkg/util.py" ],    
       ( "value refs <vrs>",   fx + "/vr",     [ "--callers=hot" ],                                             "vrs",        "next",    False ),
       ( "slot <vs> (uses)",   fx + "/slot",   [ "--callees=drive" ],                                           "vs",         "next",    False ),
       ( "slot <vs> (regex)",  fx + "/slotd",  [ "--callees=drive" ],                                           "vs",         "next",    True ),
-      ( "body cut <b>",       T + "/forbodyslotfix", [ "--for=How does render_screen draw the screen?" ],      "b",          "next",    False ),
+      # AF1-fix (2026-11-18): this answer is served in 12 KB PAGES and its cut body starts past page 1 (deferred="bodies"), so the
+      # emitter is read on the whole answer, --page-bytes=0 (row-identical to the joined pages, forpagescheck P2/P11)
+      ( "body cut <b>",       T + "/forbodyslotfix", [ "--for=How does render_screen draw the screen?", "--page-bytes=0" ], "b", "next",   False ),
       ( "cut <calls>",        T + "/forbodyfoldfix/web", [ "--for=How is a request dispatched?" ],             "calls",      "next",    False ),
       ( "owner hop cut",      T + "/ownerhopfix/py", [ "--for=How do invoke_watcher, schedule_refresh, record_signal and notify work?" ], "hops", "next", False ),
       ( "declined dc_next",   fx + "/dc",     [ "--callers=alpha dir/a.py:poll" ],                             "callers",    "dc_next", True ),

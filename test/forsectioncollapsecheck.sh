@@ -405,8 +405,15 @@ LCQ="how do render stage classes arrange and reflow widgets"
 lc_shown(){ grep -o '<sigs shown="[0-9]*"' "$1" | head -1 | grep -o '[0-9][0-9]*'; }
 lc_est(){ grep -o 'est_tokens="[0-9]*"' "$1" | head -1 | grep -o '[0-9][0-9]*'; }
 lc_sigs(){ grep -o '<sigs .*</sigs>' "$1"; }
-"$BIN" test/legochargefix --no-cache --for="$LCQ" >"$TMP/lc_def.xml" 2>/dev/null;                                  rc_def=$?
-"$BIN" test/legochargefix --no-cache --for="$LCQ" --sections=lego,compose >"$TMP/lc_rest.xml" 2>/dev/null;         rc_rest=$?
+# AF1-fix (2026-11-18): the flagless --for answer is served in 12 KB PAGES (src/forpages.h); the restored <lego> straddles page 1's
+# cut (continued="lego"), so the two no-budget answers (13a-c are about the ANSWER) read --page-bytes=0 — the whole answer,
+# row-identical to the joined pages (forpagescheck P2/P11); (13p) holds the DEFAULT page to present-or-disclosed-deferred.
+"$BIN" test/legochargefix --no-cache --for="$LCQ" --page-bytes=0 >"$TMP/lc_def.xml" 2>/dev/null;                     rc_def=$?
+"$BIN" test/legochargefix --no-cache --for="$LCQ" --sections=lego,compose --page-bytes=0 >"$TMP/lc_rest.xml" 2>/dev/null; rc_rest=$?
+"$BIN" test/legochargefix --no-cache --for="$LCQ" --sections=lego,compose >"$TMP/lc_restpage.xml" 2>/dev/null
+if python3 -c 'import re,sys; d=open(sys.argv[1]).read(); r=re.match(r"<ctx\b[^>]*>",d); r=r.group(0) if r else ""; n=" ".join(re.findall(r"\s(?:deferred|continued)=\"([^\"]*)\"",r)).split(); sys.exit(0 if ("</lego>" in d and "lego" not in n) or ("lego" in n and " next=" in r) else 1)' "$TMP/lc_restpage.xml"; then
+    ok "(13p) the default page of the restore carries the whole <lego> or names it in continued=/deferred= beside next="
+else no "(13p) the default page of the restore cut <lego> with no continued=/deferred= naming it (a silent drop)"; fi
 "$BIN" test/legochargefix --no-cache --for="$LCQ" --token-budget=6000 >"$TMP/lc_tb.xml" 2>/dev/null;               rc_tb=$?
 "$BIN" test/legochargefix --no-cache --for="$LCQ" --token-budget=6000 --sections=lego,compose >"$TMP/lc_tbrest.xml" 2>/dev/null; rc_tbrest=$?
 LC_DEF="$( lc_shown "$TMP/lc_def.xml" )"; LC_REST="$( lc_shown "$TMP/lc_rest.xml" )"
