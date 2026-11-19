@@ -104,24 +104,10 @@ struct LangMap
 // The tiny TOML subset we accept (the zero-dep rule): `key = "value"` client-map rows and an
 // [overrule] `suffixes = [".h", ...]` single-line string array. See the file header for what is
 // ignored and why; lowering at parse time keeps the lookup one comparison.
-// The text between a row's blanks (space, tab, and the CR a CRLF file leaves before the split's '\n').
-inline std::string_view langMapTrim( std::string_view raw ) noexcept
-{
-    while( !raw.empty() && ( raw.back() == ' ' || raw.back() == '\t' || raw.back() == '\r' ) )
-    {
-        raw.remove_suffix( 1 );
-    }
-    while( !raw.empty() && ( raw.front() == ' ' || raw.front() == '\t' ) )
-    {
-        raw.remove_prefix( 1 );
-    }
-    return raw;
-}
-
 // A row's key: the text left of '=', trimmed, with a TOML quoted key's pair stripped ("c++" names the same thing as its bare spelling).
 inline std::string langMapKey( std::string_view raw )
 {
-    raw = langMapTrim( raw );
+    raw = trimWs( raw );   // resolve.h: spaces, tabs and the CR a CRLF file leaves before the split's '\n'
     if( raw.size() >= 2 && raw.front() == '"' && raw.back() == '"' )
     {
         raw = raw.substr( 1, raw.size() - 2 );
@@ -146,7 +132,7 @@ inline std::string_view langMapValue( std::string_view val ) noexcept
             break;
         }
     }
-    return langMapTrim( val );
+    return trimWs( val );
 }
 
 // [overrule] `suffixes = [".h", ...]`: every double-quoted string of the value. A listed list replaces the default set,
