@@ -138,7 +138,13 @@ for i in $( seq -w 0 15 ); do EXPECT_NODEID="${EXPECT_NODEID:+$EXPECT_NODEID }le
 # ── (1) --pack-task keeps the callee the task NAMES ───────────────────────────────────────────────────────
 # L1 (2026-09-19): the CLI default legend is compact and spells <calls ...> inside its comment; arms (1)/(4) read the
 # real <calls> element, so those two runs ask for the full legend.
-PT="$( "$BIN" "$FX" --pack-task="$TASK" --token-budget=9000 --legend=full 2>/dev/null )"
+# PB1 (2026-11-19): the task NAMES hub_dispatch in backticks. --pack-task serves ONE body now (PT1 design D1),
+# chosen by KB1's rule — the symbol the question names in backticks, else the top-ranked one. This arm is about
+# the CALLEE LISTING of the body that has twenty-one callees, so it has to pin WHICH body is served or it is
+# asserting about whichever symbol happened to head the ranking (which has no callees at all, hence "found 0").
+# The prose words stay: they are what makes quarantine_ledger_sweep the task-named CALLEE the cut must keep.
+PTTASK="$TASK, in \`hub_dispatch\`"
+PT="$( "$BIN" "$FX" --pack-task="$PTTASK" --token-budget=9000 --legend=full 2>/dev/null )"
 V="$( rows_of "$PT" )"
 if [ -z "$V" ] || [ "${V#OK}" = "$V" ]; then
     no "(1) --pack-task: $V"
@@ -270,7 +276,7 @@ fi
 # ── (7) determinism + well-formedness on all four routes ──────────────────────────────────────────────────
 det_fail=0
 d(){ A="$( eval "$1" )"; B="$( eval "$1" )"; [ "$A" = "$B" ] || { no "(7) not byte-identical across two runs: $2"; det_fail=1; }; }
-d "\"$BIN\" \"$FX\" --pack-task=\"$TASK\" --token-budget=9000 2>/dev/null" "--pack-task"
+d "\"$BIN\" \"$FX\" --pack-task=\"$PTTASK\" --token-budget=9000 2>/dev/null" "--pack-task"
 d "\"$BIN\" \"$FX\" --from-trace=\"$TMP/trace.txt\" 2>/dev/null" "--from-trace"
 d "\"$BIN\" \"$FX4\" --expand=hub_dispatch --top-k=0 2>/dev/null" "--expand"
 d "\"$BIN\" \"$FX\" --for=\"$CONC\" 2>/dev/null" "--for compact"

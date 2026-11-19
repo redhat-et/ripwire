@@ -119,19 +119,28 @@ for task in TASKS:
         if any(b.text and "<!-- truncated -->" in b.text for b in (bodiesEl.findall("b") if bodiesEl is not None else [])):
             bad.append(f"{task!r}@{bud}: a '<!-- truncated -->' marker is still written inside a CDATA")
 
-        # omission parity: the XML names each over-budget skip in a comment (and, since lane/cutfix-bodies, the
-        # bodies met after the budget was spent in ONE "bodies omitted (budget spent): a, b" list); the JSON lists
-        # bodies_omitted.
+        # OMISSION PARITY. PB1 (2026-11-19): --pack-task serves ONE body by design, so a candidate it does not
+        # serve is not an over-budget SKIP announced in a comment any more — it is a `<bn next="--expand=…"/>`
+        # pointer row, whose JSON twin is bodies_next[]. The property this arm exists for is unchanged: the two
+        # dialects must name the same set.
+        # The comparison is on the SELECTOR, not on a name recovered from it. A candidate can be a markdown
+        # heading whose own name contains ": " (MEASURED on this repo: `--expand='docs/EVALS.md:10359:Phase 4,
+        # RUN — the pin disclosed and the tie-break shipped: ACCEPT on the one band, …'`), so splitting a
+        # selector to recover a name lands in the middle of the name. Both dialects carry the selector verbatim,
+        # so comparing it needs no parsing and cannot be fooled by a name. The old comment markers are still
+        # read, so a verb that keeps them stays covered by this same arm.
         xomit = []
         for c in (list(bodiesEl) if bodiesEl is not None else []):
             if isinstance(c.tag, str):
+                if c.tag == "bn" and c.get("next"):
+                    xomit.append(c.get("next"))
                 continue
             if "body omitted (over budget)" in (c.text or ""):
                 xomit.append(c.text.split(": ", 1)[1].strip())
             elif "bodies omitted (budget spent)" in (c.text or ""):
                 xomit += [n.strip() for n in c.text.split(": ", 1)[1].split(", ")]
         xomit = sorted(xomit)
-        jomit = sorted(d.get("bodies_omitted", []))
+        jomit = sorted(d.get("bodies_omitted", []) + d.get("bodies_next", []))
         omitSeen += len(xomit)
         if xomit != jomit:
             bad.append(f"{task!r}@{bud}: OMISSION differs — XML {xomit} vs JSON {jomit}")
@@ -169,13 +178,18 @@ done
 # This is the sweep-widening the finding asks for: truncvocabcheck's universal arm keys on shown=, so an
 # element that emits NO shown= is invisible to it. Here the roster is named, so a section that drops the
 # triple is a FAILURE rather than an absence.
-"$BIN" "$ROOT/src" --pack-task="rank symbols by pagerank" >"$TMP/sec.xml" 2>/dev/null
+# The task names computeLensRanking in backticks: <callers> is the KEY BODY's own 1-hop callers (PT1 design D1),
+# so a task that pins no body asserts about whichever symbol headed the ranking — and if that one has no callers
+# the section is legitimately absent and this roster arm proves nothing.
+"$BIN" "$ROOT/src" --pack-task="rank symbols by pagerank in \`computeLensRanking\`" >"$TMP/sec.xml" 2>/dev/null
 python3 - "$TMP/sec.xml" <<'PY'
 import sys, xml.etree.ElementTree as ET
 root = ET.parse(sys.argv[1]).getroot()
 # <sigs> is rule 5 (a bare capped="1" on a byte-trimmed payload, no row total) and is deliberately excluded.
-ROSTER = ["bodies", "callers", "far"]     # notes/tests are absent on a corpus with no .ripwire_notes / no tests
-ROWTAG = {"bodies": "b", "callers": "s", "far": "s", "notes": "target", "tests": "test"}
+# PB1 (2026-11-19): "far" is out of the roster — --pack-task's name-only <far> tier went with the distance mask
+# that fed it when the bundle took --for's own 40-row head, so the entry could only ever report "absent".
+ROSTER = ["bodies", "callers"]            # notes/tests are absent on a corpus with no .ripwire_notes / no tests
+ROWTAG = {"bodies": "b", "callers": "s", "notes": "target", "tests": "test"}
 bad = []
 seen = 0
 for tag in ROSTER + ["notes", "tests"]:
@@ -195,7 +209,12 @@ for tag in ROSTER + ["notes", "tests"]:
         rows = len(el.findall(ROWTAG[tag]))
         if a["shown"] != str(rows):
             bad.append(f'<{tag} shown="{a["shown"]}"> but {rows} <{ROWTAG[tag]}> rows emitted (the disclosure must be arithmetic)')
-        if (a["capped"] == "1") != (int(a["shown"]) < int(a["total"])):
+        # "ROWS ALL PRESENT BUT ONE IS CUT" is also capped="1" — with shown == total. That is the reading this
+        # gate's OWN arm (A) demands a line above ("a truncated body under <bodies capped=0> — a cut must say
+        # capped=1") and the reading truncvocabcheck spells for this element, so without the allowance the two
+        # arms contradict each other and no binary can satisfy both. PB1 (2026-11-19).
+        shrunk = any(c.get("truncated") == "1" for c in el.findall(ROWTAG[tag]))
+        if (a["capped"] == "1") != (int(a["shown"]) < int(a["total"]) or shrunk):
             bad.append(f'<{tag} shown={a["shown"]} total={a["total"]} capped="{a["capped"]}"> — the bit disagrees with the arithmetic')
 print(f"  ..    checked {seen} section elements")
 for b in bad: print("  FAIL  (C) " + b)

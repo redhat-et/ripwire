@@ -87,9 +87,15 @@ BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 # the lane's 51 and is already in sink form; the lane's mcpedit lock site took main's new wording in its sink form.
 # train7-fix1 (2026-09-19): docdrift.h's collectRepoPaths root-walk site converted to the RepoPaths sink (RootWalkFailed),
 # the doc-drift twin of the darkflags conversion above. 50 -> 49.
+# PB1 (2026-11-19): 48 -> 46. --pack-task's five sink-less sites — the four <sigs> head-shape guards and the
+# <bodies> open/close-shape guard — took the PackTaskRenderFaults sink (HeadShapeUnknown / BodiesShapeUnknown).
+# Three of those guards are NEW code, so the first build of them pushed the count 48 -> 51 and this arm went UP.
+# The pin was NOT bumped to absorb that: this ratchet counts the sites that are SILENT IN RELEASE and its stated
+# target is 0, so a higher pin records a bigger backlog, not more disclosure. Converting them instead took the
+# count below the old pin, and the pin follows it down.
 # lane/cutfix-correctness (2026-09-24): clones.h's Type-3 pair-cap site converted to the Type3Stats sink (PairCapHit) —
 # the one-argument trace compiled out under NDEBUG, so the shipped binary never said the cap fired. 49 -> 48.
-DISCLOSE_SINKLESS_PIN=48
+DISCLOSE_SINKLESS_PIN=46
 WORK="$( mktemp -d "${TMPDIR:-/tmp}/selfcheck.XXXXXX" )"
 trap 'rm -rf "$WORK"' EXIT
 T=$'\t'

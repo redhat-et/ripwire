@@ -845,6 +845,7 @@ for _g in \
     packcallersharecheck \
     packkeybodycheck \
     packlocatecheck \
+    packtailsharecheck \
     packtaskcheck \
     packtaskmonotoncheck \
     packtaskquotacheck \

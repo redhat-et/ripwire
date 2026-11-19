@@ -165,8 +165,21 @@ static_assert( kPackTaskQuotaRankingPct + kPackTaskQuotaBodiesPct + kPackTaskQuo
 // The head's row drop (step F) aims here, not at its share: rows past the share are kept (shrunk to pointer rows by the ladder)
 // until this bound, so the 40 rows survive a long-signature corpus while the key body keeps its share.
 inline constexpr int kPackTaskHeadRowDropPct  = 60;
-static_assert( kPackTaskHeadRowDropPct >= kPackTaskQuotaRankingPct && kPackTaskHeadRowDropPct + kPackTaskQuotaBodiesPct <= 100,
-               "the head's row-drop bound must sit at or above its share and leave the key body its share" );
+static_assert( kPackTaskHeadRowDropPct >= kPackTaskQuotaRankingPct
+               && kPackTaskHeadRowDropPct + kPackTaskQuotaBodiesPct + kPackTaskQuotaTailPct <= 100,
+               "the head's row-drop bound must sit at or above its share and leave the key body AND THE TAIL theirs" );
+// THE TAIL'S SHARE IS A FLOOR, RESERVED BEFORE ANY SECTION SPENDS — and this is the defect that made it one.
+// PT1's design sentence was "the tail takes its own share plus everything the sections before it leave", and the
+// first build implemented only the second half: the tail was the leftover, with no floor, while the head was
+// allowed up to kPackTaskHeadRowDropPct (60%) of the post-header budget instead of its own 45% share, and
+// monotoneRoll charges a cut section its whole granted share. On a corpus with a long task echo and long
+// signatures the leftover was nothing. MEASURED on LocBench's 303 tasks (results/PB1_PACKTASK_1119 §5a): the
+// tail declared a 20% share and received 0.6% — a median `shown="0"` of `total="512"` files — and on 82 of the
+// 84 tasks D1 failed to complete, the gold file it needed was in that cut tail. Completion is counted in FILES
+// and the tail is the section that names files, so starving it is not a tuning shortfall, it is a bug.
+// The reserve is withheld from the spendable pool up front and handed back to the tail at the end, so the tail
+// still absorbs every leftover as well. A --partition slice reserves nothing: it carries no tail.
+// Gate: test/packtailsharecheck.sh.
 
 // E1 / review of #214: one entry, one unit again. The <tests> section is CUT over single rows — one row per
 // test file, whose rendered bytes are exactly what the cut measures — and only the KEPT prefix is grouped
@@ -205,32 +218,28 @@ struct PackTaskHeaderParts
 // own (--pack-task --partition=3 used to print it 4x: 9,646 B of a 34,164 B answer, lens 8 table 1).
 inline constexpr const char* kPackTaskBundleLegendBody =
     // PB1 (PT1 design D1, 2026-11-19): the sections and their split, the --for head and file tail this bundle now carries, the one
-    // key body and its pointer rows, and ONE conversion between budget_tokens= and est_tokens=. Kept terse for trap #8's reason
-    // (this rides in every bundle at every budget and is charged against the ceiling it describes); the history of each clause it
-    // replaced is in git (the R2 distance mask and <far>, the six-body monotone selection, the corroborated caller sort).
+    // key body and its pointer rows, and ONE conversion between budget_tokens= and est_tokens=.
+    // TERSE ON PURPOSE, and re-tightened once (compactlegendcheck (U) measured the compact form 216 B over its 990 B target).
+    // Trap #8 is the reason: this rides in EVERY bundle at EVERY budget and is charged against the very ceiling it describes, so
+    // prose costs the reader bytes it could have spent on rows. Nothing was CUT to get under the bar — every attribute the answer
+    // can emit still has its reading here, which is what legendcoveragecheck pins; what went was the wording around them.
     ": one-call orientation under ONE budget — sections in FIXED order ranking > key body > callers > notes > tests > tail, "
-         "quotas per section are FIXED (rank45/body20/caller8/note2/test5/tail20, percent of budget), unused quota "
-         "ROLLS FORWARD to the next section and the tail is filled LAST with everything left. "
-         "every truncation reported here (no silent caps): on every section "
-         "shown=rows kept, total=rows that qualified, capped=1 when the BUDGET cut the difference. "
-         "ranking: the for head for this task (its 40 rows, its order); "
-         "bodies: ONE body served BY DESIGN — the symbol the task names in backticks, else the top-ranked one that has a body. "
-         "<b>=that served body, and shown=/total= count only bodies SERVED (total=1 when a bodied key body exists); every other "
-         "candidate is a <bn t= n= p= l= next=> pointer row naming the expand call that serves it — a design choice, not a budget "
-         "casualty, so capped=1 only when the served body did not fit or was itself cut short (truncated=1 on it); "
-         "bodyless=N of the candidates have no body by construction (a module-scope owner) and can never be shown. "
-         "tail: file-grain rows, weaker evidence than the ranked rows (the files the ranking did not show, then the file page), "
-         "sym= their top symbols; capped=1 next= the file page from the first row not printed. "
-         "Row keys: n=name (chain it), sc=enclosing scope (when scoped; the full id is p::sc::n), in=reuse-count (absent = not measured, never a false 0)"
-         ", l=line, e=end line, p=path, t=kind, cx=cyclomatic, ccx=cognitive, rel=caller, r=rank in this ranking "
-         "(rows in r= order); callers: the key body's 1-hop callers (of_top=1). "
-         "On the root: dropped_positive=N (present only when nonzero) is the ranked candidates the ceiling cut; "
-         "est_tokens= is the delivered bytes at the rate the budget is converted at (2.36 B/token, the densest language: an upper bound), "
+         "quotas per section are FIXED (rank45/body20/caller8/note2/test5/tail20, pct of budget), unspent quota ROLLS FORWARD; the tail's share is a "
+         "FLOOR and it is filled LAST with every leftover. Every truncation is reported (no silent caps): per section shown=rows kept, "
+         "total=rows that qualified, capped=1 when the BUDGET cut the difference. "
+         "ranking: the for head for this task (its 40 rows, its order). "
+         "bodies: ONE body served by design — the task's backticked symbol, else the top-ranked bodied one. <b>=it, and shown=/total= "
+         "count SERVED bodies only; <bn t= n= p= l= next=>=a candidate not served, next= its expand call — by design, not a cut, so "
+         "capped=1 only if the served body did not fit or was itself cut (truncated=1 on it). bodyless=N: of the candidates, those with "
+         "no body by construction (a module-scope owner), never shown. "
+         "callers: the key body's 1-hop callers (of_top=1). "
+         "tail: file-grain rows, weaker than the ranked rows (files the ranking did not show, then the file page), sym= their top "
+         "symbols; capped=1 next= the file page from the first row not printed. "
+         "Row keys: n=name (chain it), sc=enclosing scope (when scoped; full id p::sc::n), in=reuse-count (absent = not measured, "
+         "never a false 0), l=line, e=end line, p=path, t=kind, cx=cyclomatic, ccx=cognitive, rel=caller, r=rank (rows in r= order). "
+         "On the root: dropped_positive=N (present only when nonzero) is the ranked candidates the ceiling cut; est_tokens= is the "
+         "delivered bytes at the rate the budget is converted at (2.36 B/token, the densest language: an upper bound); "
          "budget_tokens= is the token target; over_ceiling= is 1 when est_tokens exceeds it (the bundle is then complete, not trimmed). ";
-// forbudget-soft (owner decision 2026-10-14): the reading of budget_tokens= on a bundle whose budget the CALLER passed — a SOFT
-// target. The section shares are the default's own cascade (an explicit 6000 serves the default's sections byte for byte), but
-// nothing is labelled over_ceiling and the header (task echo, route=) is never dropped for it. Replaces the legend body's last
-// sentence on such a bundle (packTaskHeaderText); the default (hard) bundle and the partitioned document keep that sentence.
 inline constexpr std::string_view kPackTaskHardBudgetSentence =
     "budget_tokens= is the token target; over_ceiling= is 1 when est_tokens exceeds it (the bundle is then complete, not trimmed). ";
 inline constexpr std::string_view kPackTaskSoftBudgetSentence =
@@ -460,6 +469,12 @@ struct PackTaskRenderFaults
         RankingRenderFailed,
         BodiesRenderFailed,
         BodyProbeRenderFailed,
+        // PB1 2026-11-19: the SHAPE surprises, which are not render failures — the block rendered fine and this
+        // code then could not recognise it. They were sink-less DISCLOSE( msg ) sites, i.e. silent in Release,
+        // and selfcheckcheck's ratchet counts those with a stated target of ZERO. A sink is what makes the
+        // degrade reach a release user, so they take one.
+        HeadShapeUnknown,
+        BodiesShapeUnknown,
     };
     std::uint8_t failedMask = 0;   // bit i ⇔ DisclosureWhy value i
     void disclose( DisclosureWhy why ) noexcept
@@ -473,7 +488,9 @@ struct PackTaskRenderFaults
     // "ranking,bodies,body-probe" in DisclosureWhy order — the root attribute's value ("" when nothing failed)
     std::string names() const
     {
-        static constexpr const char* kNames[] = { "ranking", "bodies", "body-probe" };
+        static constexpr const char* kNames[] = { "ranking", "bodies", "body-probe", "head-shape", "bodies-shape" };
+        static_assert( std::size( kNames ) == unsigned( DisclosureWhy::BodiesShapeUnknown ) + 1,
+                       "every DisclosureWhy needs a name: the root prints these and an unnamed bit would read as nothing" );
         std::string out;
         for( unsigned i = 0; i < std::size( kNames ); ++i )
         {
@@ -1096,7 +1113,7 @@ inline void setOpenTagAttr( std::string& tag, std::string_view name, std::string
 }
 
 // The row-shape ladder and the bound, over the rendered <sigs> block (rows in `shownIds` order, one row element each).
-inline void packTaskShapeHead( PackHead& h, std::size_t boundBytes, std::string_view task )
+inline void packTaskShapeHead( PackHead& h, std::size_t boundBytes, std::string_view task, PackTaskRenderFaults& faults )
 {
     const SectionOpenTag open = findSectionOpenTag( h.sigsStr, "<sigs" );
     if( open.end == std::string::npos || !h.sigsStr.ends_with( "</sigs>" ) || h.sigsStr[ open.end - 1 ] == '/' )
@@ -1114,7 +1131,7 @@ inline void packTaskShapeHead( PackHead& h, std::size_t boundBytes, std::string_
             const std::size_t e = h.sigsStr.find( "-->", i );
             if( e == std::string::npos )
             {
-                DISCLOSE( "pack-task: <sigs> held an unterminated comment — the block is left as rendered" );
+                DISCLOSE( faults, PackTaskRenderFaults::DisclosureWhy::HeadShapeUnknown, "pack-task: <sigs> held an unterminated comment — the block is left as rendered" );
                 return;   // refuse rather than guess where it ends, exactly as findSectionOpenTag does
             }
             if( rowsFull.empty() ) { lead += h.sigsStr.substr( i, e + 3 - i ); }
@@ -1125,7 +1142,7 @@ inline void packTaskShapeHead( PackHead& h, std::size_t boundBytes, std::string_
         const std::size_t gt = h.sigsStr.find( '>', i );
         if( gt == std::string::npos || h.sigsStr[i] != '<' )
         {
-            DISCLOSE( "pack-task: <sigs> held a child the head pass does not know — the block is left as rendered" );
+            DISCLOSE( faults, PackTaskRenderFaults::DisclosureWhy::HeadShapeUnknown, "pack-task: <sigs> held a child the head pass does not know — the block is left as rendered" );
             return;
         }
         // A ROW is packSignatures' `<d …>…</d>` / `<d …/>`, or a row the LADDER already shrank past anything a
@@ -1143,7 +1160,7 @@ inline void packTaskShapeHead( PackHead& h, std::size_t boundBytes, std::string_
             const std::size_t close = isD ? h.sigsStr.find( "</d>", gt ) : std::string::npos;
             if( close == std::string::npos )
             {
-                DISCLOSE( "pack-task: a <sigs> row did not close where the head pass expects — the block is left as rendered" );
+                DISCLOSE( faults, PackTaskRenderFaults::DisclosureWhy::HeadShapeUnknown, "pack-task: a <sigs> row did not close where the head pass expects — the block is left as rendered" );
                 return;
             }
             end = close + 4;
@@ -1156,7 +1173,7 @@ inline void packTaskShapeHead( PackHead& h, std::size_t boundBytes, std::string_
     }
     if( rowsFull.size() != h.shownIds.size() )
     {
-        DISCLOSE( "pack-task: <sigs> rows and the shown ids disagree — the head pass keeps the block as rendered" );
+        DISCLOSE( faults, PackTaskRenderFaults::DisclosureWhy::HeadShapeUnknown, "pack-task: <sigs> rows and the shown ids disagree — the head pass keeps the block as rendered" );
         return;
     }
     const std::size_t totalRows = rowsFull.size();
@@ -1233,7 +1250,8 @@ inline PackHead renderPackHead( const IngestResult& ing, const std::vector<float
         out.shownIds.clear();
         return out;
     }
-    packTaskShapeHead( out, hi.boundBytes, hi.task );
+    PackTaskRenderFaults headFaultsFallback;   // a caller that asked for no fault record gets a local one: never silent
+    packTaskShapeHead( out, hi.boundBytes, hi.task, hi.in->renderFaults ? *hi.in->renderFaults : headFaultsFallback );
     return out;
 }
 
@@ -1365,7 +1383,8 @@ struct PackBodiesTag
 // body out of loses that body, and a `shown="1"` over a section with no body in it is a WRONG ANSWER, not a cosmetic one.
 // The count is restated to 0, the key body's own next= pointer goes in beside the others so nothing is silently dropped,
 // and the caller reads the zero back for the ledger, the section charge and the JSON dialect.
-inline std::string restatePackTaskBodies( std::string_view bodiesXml, PackBodiesTag& t, std::string_view keyPointer, std::string_view pointers )
+inline std::string restatePackTaskBodies( std::string_view bodiesXml, PackBodiesTag& t, std::string_view keyPointer, std::string_view pointers,
+                                          PackTaskRenderFaults& faults )
 {
     const SectionOpenTag tag         = findSectionOpenTag( bodiesXml, "<bodies" );
     const bool           closesRight = bodiesXml.ends_with( "</bodies>" );
@@ -1379,7 +1398,8 @@ inline std::string restatePackTaskBodies( std::string_view bodiesXml, PackBodies
     }
     else if( tag.end == std::string::npos || !closesRight )
     {
-        DISCLOSE( "pack-task: <bodies> did not have the expected open/close shape — the served body is dropped and shown= restated to 0" );
+        DISCLOSE( faults, PackTaskRenderFaults::DisclosureWhy::BodiesShapeUnknown,
+                  "pack-task: <bodies> did not have the expected open/close shape — the served body is dropped and shown= restated to 0" );
         t.served = 0;
     }
     // 40, not 32, for each: ' bodyless="' + '"' is 12 B and the count is a std::size_t, 20 digits at absolute most, so 32 B
@@ -1556,6 +1576,12 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     // F1 — the kPackTaskQuota*Pct shares above, applied to `quotaBase` (see their own comment for why). `carry`
     // (threaded through sections 1-4 below) is an under-filled section's unspent quota, rolled FORWARD.
     const std::size_t quotaBase = remaining;
+    // The tail's floor, taken off the spendable pool before the first section is granted anything. quotaBase stays
+    // the FULL post-header budget so every other share keeps its own percentage of it (45+20+8+2+5 = 80 = the pool
+    // that is left once the tail's 20 is reserved, so nothing is over-committed by construction).
+    const std::size_t tailReserve = in.innerBundle ? 0u
+                                  : std::min( remaining, quotaBase * std::size_t( kPackTaskQuotaTailPct ) / 100 );
+    remaining = remaining > tailReserve ? remaining - tailReserve : 0;
     const auto quotaOf = [ & ]( int pct ) -> std::size_t { return std::max<std::size_t>( 1, std::min( remaining, quotaBase * std::size_t( pct ) / 100 ) ); };
     const auto sectionBudget = [ & ]( int pct, std::size_t carryIn ) -> std::size_t { return std::min( remaining, quotaOf( pct ) + carryIn ); };
 
@@ -1779,7 +1805,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
                                                                      []( const EmittedBody& e ) { return e.isTruncated; } ),
                                          .bodyless    = countBodylessCandidates( ing, bodyIds ),
                                          .compress    = in.compress };
-            bodiesStr  = restatePackTaskBodies( bodies.text, bodiesTag, keyPointer, pointers );
+            bodiesStr  = restatePackTaskBodies( bodies.text, bodiesTag, keyPointer, pointers, renderFaults );
             bodiesKept = bodiesTag.served;
             if( keptBefore > 0 && bodiesKept == 0 )
             {
@@ -1817,6 +1843,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     FileTail    tail;
     if( !in.innerBundle )
     {
+        remaining += tailReserve;   // the tail's own share, back on top of whatever the sections above left
         tail = computeFileTail( ing, rank, lr.evidence, head.shownIds, in.rootArg, task );
         // the whole tail fits with bytes to spare while the head is cut: the head takes them first (W2-K.2's lap, the head's
         // turn), and the tail is rebuilt from the rows the wider head shows — a file can only move from the tail into the head.
@@ -2103,7 +2130,11 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     if( !in.innerBundle )   // PB1: the file tail (a partition slice has none)
     {
         report += " | tail: " + listStatus( tailTotal, tailStr, tailShown )
-                + ( tailCapped ? ( tailNextDropped ? " (capped; next= dropped: the task echo did not fit the bytes left)" : " (capped, next= on <tail>)" ) : "" );
+                // NO '>' IN THE KEPT LEDGER. The ledger rides the compact answer as a DATA comment that consumers parse,
+                // and more than one of them slices it with `<!-- ledger: [^>]*-->` (compactlegendcheck FX4 among them), so a
+                // '>' anywhere inside truncates the slice to nothing and the whole disclosure reads as absent. The clause
+                // used to say "next= on <tail>", which is both redundant — it IS the tail's clause — and a parse hazard.
+                + ( tailCapped ? ( tailNextDropped ? " (capped; next= dropped: the task echo did not fit the bytes left)" : " (capped; next= on the tail)" ) : "" );
     }
     // cut-fix lane A: the <sigs> tag's cut readings, the --for twin's clauses verbatim (serialize.h sigsCutLegendNotes),
     // present only when the tag carries the case; absorbed by kPackTaskHeaderReserve like the ledger around them.
