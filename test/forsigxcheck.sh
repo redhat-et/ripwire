@@ -16,7 +16,7 @@
 #   (S5)  well formed (xmllint) and deterministic (two runs byte-identical)
 #   (S6)  not applied: --legend=first, --signatures-only and a budget that sheds (--token-budget=4000) are byte-identical with and
 #         without the knob; (S6b) a budget the compacted answer fits returns it byte for byte (TOKEN-BUDGET-MONOTONE rule 4)
-#   (S7)  est_tokens= rises by the added bytes at the densest rate (2.36 B/token, ceil), never falls
+#   (S7)  est_tokens= rises by the added bytes at the emitter's markup rate (the render's ledger, serialize.h repriceRootAfterCut)
 #   (S8)  the default PAGE 1 carries the short rows: its first r > 10 <d> is self-closing with l n p r only
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -25,7 +25,7 @@ BIN="${RIPWIRE_BIN:-${1:-$ROOT/build/ripwire}}"
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN -- build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "forsigxcheck: python3 required"; exit 2; }
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
 echo "forsigxcheck: BIN=$BIN"
@@ -108,8 +108,8 @@ say(on[:xi].endswith("-->") and on.rfind("<!-- sigx:", 0, xi) > on.rfind("</tail
     "(S4) <sigx> follows the rows (after </tail>), its legend comment directly before it, only comments after it")
 est = lambda d: int(re.search(r' est_tokens="(\d+)"', d[:d.find(">")]).group(1))
 added = len(on) - len(off)
-say(est(on) > est(off) and abs(est(on) - est(off) - math.ceil(added / 2.36)) <= 1,
-    "(S7) est_tokens %d -> %d for %d added bytes (ceil(%d / 2.36) = %d)" % (est(off), est(on), added, added, math.ceil(added / 2.36)))
+say(est(on) > est(off) and abs(est(on) - est(off) - round(added / 2.50)) <= 1,
+    "(S7) est_tokens %d -> %d for %d added markup bytes (the emitter's own markup rate: %d / 2.50 = %d, +-1 for the fixpoint's rounding)" % (est(off), est(on), added, added, round(added / 2.50)))
 p1rows = [r for r in drows(sigs(p1) if "</sigs>" in p1 else p1[p1.find("<sigs"):]) if rank(r) > 10]
 say(bool(p1rows) and p1rows[0].endswith("/>") and set(k for k, _ in ATTR.findall(p1rows[0])) <= {"l", "n", "p", "r"},
     "(S8) the default page 1's first r > 10 <d> row is the short form: %s" % (p1rows[0][:120] if p1rows else "none"))

@@ -47,6 +47,7 @@
 #pragma once
 
 #include <algorithm>
+#include <charconv>
 #include <cstddef>
 #include <cstdlib>
 #include <optional>
@@ -54,6 +55,7 @@
 #include <string_view>
 #include <vector>
 
+#include "infra/sortutil.h"   // svLess — the one string_view order (portablebuildcheck #6b)
 #include "serialize.h"   // attrOf — the one reader of a printed tag's attribute value
 #include "infra/Diagnostics.h"
 #include "infra/emit.h"
@@ -498,11 +500,12 @@ inline constexpr std::size_t kSameDirHeadRank = 5;
         const std::string_view tag  = k.comment || k.name != "d" ? std::string_view() : view.substr( k.begin, view.find( '>', k.begin ) + 1 - k.begin );
         const std::string_view r    = attrOf( tag, "r" );
         const std::string_view p    = attrOf( tag, "p" );
-        const bool             rank = !r.empty() && r.size() <= 2 && r.find_first_not_of( "0123456789" ) == std::string_view::npos
-                                      && std::size_t( std::stoul( std::string( r ) ) ) <= kSameDirHeadRank;
+        std::size_t            rv   = 0;
+        const auto [ end, ec ]      = std::from_chars( r.data(), r.data() + r.size(), rv );
+        const bool             rank = !r.empty() && ec == std::errc() && end == r.data() + r.size() && rv <= kSameDirHeadRank;
         if( rank && !p.empty() ) { dirs.push_back( pathDirOf( p ) ); }
     }
-    std::ranges::sort( dirs );
+    std::ranges::sort( dirs, rw::sortutil::svLess );
     dirs.erase( std::ranges::unique( dirs ).begin(), dirs.end() );
     return dirs;
 }
@@ -518,7 +521,7 @@ inline constexpr std::size_t kSameDirHeadRank = 5;
     const auto near = [ & ]( const Block& r )
     {
         const std::string_view p = attrOf( view.substr( r.begin, view.find( '>', r.begin ) + 1 - r.begin ), "p" );
-        return !p.empty() && std::ranges::binary_search( dirs, pathDirOf( p ) );
+        return !p.empty() && std::ranges::binary_search( dirs, pathDirOf( p ), rw::sortutil::svLess );
     };
     std::string out( view.substr( 0, rows[ kGuardTailRows ].begin ) );
     for( const bool pass : { true, false } )

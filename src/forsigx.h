@@ -7,7 +7,8 @@
 // last top-level row block, before the trailing legend comments, rows in sigs order. A row with nothing to move is unchanged and gets
 // no <x>. Rows r <= 10, <t> pointer rows and every other block are untouched. A block-local legend comment (kSigxLegend) is glued in
 // front of <sigx> (the house convention: foranswerfirst.h declaredBlock), and the root's est_tokens= is re-priced over the added bytes
-// (compactlegend.h repriceEstTokensIn: added bytes at the densest markup rate, so the price never under-reads the document).
+// (exactly, through the render's ledger: serialize.h repriceRootAfterCut; without a ledger, compactlegend.h repriceEstTokensIn at the
+// densest markup rate, an upper bound).
 //
 // LOSSLESS, NOT A PERMUTATION. No byte of a row is dropped: moving each <x>'s attributes and text back onto its <d r=R> and deleting
 // the block (and its legend) rebuilds the unmoved answer byte for byte, est_tokens= aside. test/forsigxcheck.sh (S1) does exactly
@@ -28,6 +29,7 @@
 #pragma once
 
 #include <algorithm>
+#include <charconv>
 #include <cstddef>
 #include <cstdlib>
 #include <optional>
@@ -36,6 +38,7 @@
 #include <vector>
 
 #include "compactlegend.h"    // repriceEstTokensIn — the one added-bytes reprice
+#include "forbudgetfit.h"     // forHeldBlocksPrice — what a budget holds beside est_tokens=
 #include "foranswerfirst.h"   // topLevelBlocks / rootBody — the one CDATA-safe scanner of a --for answer's blocks
 
 namespace rw::sigx
@@ -132,8 +135,22 @@ struct SplitRow
     return out;
 }
 
-// Rewrite `doc` (a finished answer-first --for answer) in place. Returns whether it changed.
-inline bool compactSigs( std::string& doc )
+// The root's est_tokens= over `out`, an answer that grew from `pricedBytes` by added markup: exactly through a converged ledger (the
+// emitter's own fixpoint), else at the densest markup rate (an upper bound).
+inline void repriceAddedMarkup( std::string& out, const ForAnswerLedger* ledger, std::size_t pricedBytes )
+{
+    if( ledger != nullptr && ledger->priced )
+    {
+        repriceRootAfterCut( out, PricedRootInputs{ ledger->markupBytes, ledger->bodyTokens }, pricedBytes );
+        return;
+    }
+    (void)repriceEstTokensIn( out, 0, out.find( '>', out.find( "<ctx" ) ), pricedBytes, out.size() );
+}
+
+// Rewrite `doc` (a finished answer-first --for answer) in place. Returns whether it changed. `ledger`: the render's priced ledger —
+// when it converged, est_tokens= is re-priced EXACTLY over the added markup (serialize.h repriceRootAfterCut, the fixpoint the emitter
+// priced with, so formaxtokenscheck's byte accounting holds); without one, at the densest markup rate (an upper bound).
+inline bool compactSigs( std::string& doc, const ForAnswerLedger* ledger = nullptr )
 {
     const std::string_view                       view = doc;
     const std::optional<answerfirst::RootBody>   rb   = answerfirst::rootBody( view );
@@ -162,8 +179,7 @@ inline bool compactSigs( std::string& doc )
     out.reserve( doc.size() + deferred.size() + kSigxLegend.size() + 64 );
     out.append( view.substr( 0, sigs->begin ) ).append( sigsOut ).append( view.substr( sigs->end, at - sigs->end ) );
     out.append( kSigxLegend ).append( "<sigx>" ).append( deferred ).append( "</sigx>" ).append( view.substr( at ) );
-    const std::size_t rootEnd = out.find( '>', out.find( "<ctx" ) );
-    (void)repriceEstTokensIn( out, 0, rootEnd, doc.size(), out.size() );
+    repriceAddedMarkup( out, ledger, doc.size() );
     doc.swap( out );
     return true;
 }
@@ -171,15 +187,16 @@ inline bool compactSigs( std::string& doc )
 // TOKEN-BUDGET-MONOTONE rule 4 ("a budget the answer fits returns it byte for byte"): on the budgeted path, a budget that fitted the
 // answer WHOLE (nothing shed) returns the compacted answer too — when its re-priced est_tokens= still fits `budgetTokens`. A budget
 // between the two prices sheds as before (the compacted answer does not fit it). Returns whether `doc` was compacted.
-inline bool compactSigsWithin( std::string& doc, std::size_t budgetTokens )
+inline bool compactSigsWithin( std::string& doc, std::size_t budgetTokens, const ForAnswerLedger* ledger )
 {
     std::string c = doc;
-    if( !compactSigs( c ) ) { return false; }
+    if( !compactSigs( c, ledger ) ) { return false; }
     const std::size_t      rootEnd = c.find( '>', c.find( "<ctx" ) );
     const std::string_view est     = attrOf( std::string_view( c ).substr( 0, rootEnd + 1 ), "est_tokens" );
     std::size_t            tokens  = 0;
-    for( const char ch : est ) { tokens = ch >= '0' && ch <= '9' ? tokens * 10 + std::size_t( ch - '0' ) : SIZE_MAX; }
-    if( est.empty() || tokens > budgetTokens ) { return false; }
+    const auto [ end, ec ]         = std::from_chars( est.data(), est.data() + est.size(), tokens );
+    // the price a budget holds is est_tokens= plus the blocks printed outside it (forbudgetfit.h fitsWhole's own sum)
+    if( est.empty() || ec != std::errc() || end != est.data() + est.size() || tokens + forHeldBlocksPrice( c ) > budgetTokens ) { return false; }
     doc.swap( c );
     return true;
 }

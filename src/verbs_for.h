@@ -5687,9 +5687,10 @@ inline rw::answerfirst::AnswerFirstAsk forAnswerFirstAsk( const rw::Config& cfg,
              .bodyLead    = rw::answerfirst::bodyLeadOn() };
 }
 
-// The budgeted answer `out` (the fit's, or the unbudgeted one when it had no root) in the posture's order.
-inline std::string fittedAnswerFirst( const MainDispatch& d, const rw::ForBudgetFitResult& fit, const rw::ForBudgetAsk& ask, std::string out )
+// The budgeted answer (the fit's, or `u`'s whole capture when it had no root; the caller checked it is whole) in the posture's order.
+inline std::string fittedAnswerFirst( const MainDispatch& d, const ForPostureRender& u, const rw::ForBudgetFitResult& fit, const rw::ForBudgetAsk& ask )
 {
+    std::string out = fit.verdict == rw::ForBudgetFitResult::Verdict::NoRoot ? wholeCapture( u.out )->bytes : fit.xml;
     // ITEM R (docs/EVALS.md amendment 8): the BUDGETED path renders its own whole document, so the
     // permutation has to run here too. Without this it did not: --token-budget was byte-identical to
     // RIPWIRE_FOR_LEGACY_ORDER=1 -- measured at 24,009 B either way on a budget that bound nothing -- so the
@@ -5717,7 +5718,7 @@ inline std::string fittedAnswerFirst( const MainDispatch& d, const rw::ForBudget
         if( fit.verdict == rw::ForBudgetFitResult::Verdict::Whole && !d.cfg.signaturesOnly && rw::sigx::sigxOn() )
         {
             (void)rw::sigx::compactSigsWithin( out, ask.targetTokens > 0 && ask.ceilingTokens > 0 ? std::min( ask.targetTokens, ask.ceilingTokens )
-                                                                                                 : std::max( ask.targetTokens, ask.ceilingTokens ) );
+                                                                                                 : std::max( ask.targetTokens, ask.ceilingTokens ), &u.ledger );
         }
     }
     return out;
@@ -5775,7 +5776,7 @@ inline int runForLensFitted( const MainDispatch& d )
     {
         DISCLOSE( sink, ForBudgetFit::DisclosureWhy::NoRoot, "runForLensFitted: no <ctx> root in the unbudgeted answer" );
     }
-    const std::string out = fittedAnswerFirst( d, fit, ask, fit.verdict == rw::ForBudgetFitResult::Verdict::NoRoot ? printed->bytes : fit.xml );
+    const std::string out = fittedAnswerFirst( d, u, fit, ask );   // `printed` is u's whole capture: checked non-null above
     std::fwrite( out.data(), 1, out.size(), stdout );
     return u.rc;
 }
@@ -5851,7 +5852,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             // SIGX (TL1 M1, forsigx.h): after the permutation and before paging, so every page size windows the same document
             if( !d.cfg.signaturesOnly && rw::sigx::sigxOn() )
             {
-                (void)rw::sigx::compactSigs( doc );
+                (void)rw::sigx::compactSigs( doc, &r.ledger );
             }
             if( !serveForPage( d.cfg, doc ) )
             {
