@@ -3553,7 +3553,7 @@ inline std::optional<std::string> impactText( const std::string& root, const std
         return std::string{}; // symbol not found → caller reports not-found
     }
 
-    // 0.6.5: the CLI --impact's walk, keeping each node's hop depth, and its order (graph.h orderByDepthThenRank).
+    // 0.6.5: the CLI --impact's walk, keeping each node's hop depth, and its order (graph.h orderImpactRows).
     // L7 (typeuse.h): the CLI's type tier, by the same calls — a type seed's walk also starts from the symbols naming it
     const TypeUseTier                typeTier = typeUseTier( ing, seeds );
     ImpactReach                      walk     = impactReachWithTypes( g, seeds, typeTier );
@@ -3563,7 +3563,7 @@ inline std::optional<std::string> impactText( const std::string& root, const std
     const auto [ rank, prIters, prConverged ] = rankGraph( g );
     const RankDisclosure             prD{ prIters, prConverged, true };   // W2-F: CLI --impact discloses this; so does its twin
     std::vector<NodeId>              show  = reach;
-    orderByDepthThenRank( show, depth, rank );   // ranked before the page window cuts, exactly as on the CLI
+    orderImpactRows( ing, show, depth, rank );   // ranked before the page window cuts, exactly as on the CLI
     const std::vector<std::uint32_t> byDepth = depthCounts( reach, depth );
 
     // A6: the identical isTestSymbol-seeded lens the CLI --impact now runs (graph.h::testSymbolForwardReach)
@@ -3604,6 +3604,7 @@ inline std::optional<std::string> impactText( const std::string& root, const std
     sizeImportTier( imports, page.limit, symbol );   // cut-fix C: limit sizes the tier, as on the CLI
     // Reference-as-value round: SYM's binding sites, the CLI --impact's value_refs=/<vrs> by the same call.
     const ValueRefRows  imValueRefs = valueRefCallerRows( ing, valueRefIndexOf( ix ), seeds );
+    orderImportersByEvidence( ing, imports, impactEvidenceFiles( ing, g, reach, imDc, imValueRefs ) );   // IM1: evidence importers first within a tier, as on the CLI
     const BackwardHops  imBackHops( ing, g, valueRefIndexOf( ix ) );                  // HOP1: the CLI --impact's hedged slot ring, by the same calls
     const PageWindow    ipw         = pageWindow( show.size(), effectiveRowCap( page.limit, 40 ), page.offset );
     ImpactRing          imRing      = impactSlotRing( ing, imBackHops, seeds, reach, ImpactRingLens{ &impTestReach, rank } );

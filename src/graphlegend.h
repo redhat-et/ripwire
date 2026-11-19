@@ -499,7 +499,7 @@ inline constexpr const char* kImpactLegendOpen =
 // these closure-written directives; lazy="0" means at least one is load-time (an ordinary top-level
 // require/import, a class-body or file-level receiver), so the dependency also holds at load.
 inline constexpr const char* kImpactImportTierLegend =
-    "importers= is a SECOND, weaker reach: the files that directly include/import a file defining SYM, as <f p=\"…\"/> rows after the symbol rows — not call reach, never added to reaches= (different units, files vs symbols; an importer may use a different symbol from that file, or none at all). DIRECT (one hop), never the transitive include cone. lazy=\"1\" means every one of that importer's edges into SYM's file is written INSIDE A CLOSURE (a TS/JS require()/import() in a function body, a Ruby constant receiver or argument in a method/lambda/block, a Ruby autoload or rescue class), firing only if and when it runs; no lazy= means at least one edge is load-time. shown_importers=/importers_capped= disclose that listing's own truncation (importers= stays the full count); most-imported first; limit= sizes it, offset= windows the symbol rows only. ";
+    "importers= is a SECOND, weaker reach: the files that directly include/import a file defining SYM, as <f p=\"…\"/> rows after the symbol rows — not call reach, never added to reaches= (different units, files vs symbols; an importer may use a different symbol from that file, or none at all). DIRECT (one hop), never the transitive include cone. lazy=\"1\" means every one of that importer's edges into SYM's file is written INSIDE A CLOSURE (a TS/JS require()/import() in a function body, a Ruby constant receiver or argument in a method/lambda/block, a Ruby autoload or rescue class), firing only if and when it runs; no lazy= means at least one edge is load-time. shown_importers=/importers_capped= disclose that listing's own truncation (importers= stays the full count); files holding a reached row, a counted declined call or a SYM binding first, then most-imported; limit= sizes it, offset= windows the symbol rows only. ";
 
 // cut-fix E's importers_next= (graph.h sizeImportTier), present-only: it rides a CUT import listing alone, and the full
 // legend never defined it (legendcoveragecheck (A) found it once SYM's file passed 40 importers on this tree).
@@ -1015,11 +1015,11 @@ inline std::string byDepthKeyJson( std::span<const std::uint32_t> counts )
 // Emitted INSIDE an XML comment: no double hyphen.
 inline constexpr const char* kImpactDepthLegend =
     "d=N on <s>: hop depth (1 = calls SYM directly; the shortest call chain), printed on the first row and where it changes "
-    "(a row without d= has the depth above it). Rows run d=1 first, PageRank order within a depth, so a cut drops the deepest "
+    "(a row without d= has the depth above it). Rows run d=1 first, non-tests first within a depth, then PageRank, so a cut drops the deepest "
     "rows first; by_depth=k:n,… counts reaches= per depth and sums to it, so a capped answer states the depth it stopped in. ";
 inline constexpr const char* kImpactDepthColumnarLegend =
     "the depth column: each row's hop depth (1 = calls SYM directly; the shortest call chain). Rows run depth 1 first, "
-    "PageRank order within a depth, so a cut drops the deepest rows first; by_depth=k:n,… counts reaches= per depth and sums "
+    "non-tests first within a depth, then PageRank, so a cut drops the deepest rows first; by_depth=k:n,… counts reaches= per depth and sums "
     "to it, so a capped answer states the depth it stopped in. ";
 // idea #6 (lane lean-trio): the per-file rollup and the umbrella-header count, each said exactly when it rides — the
 // rollup whenever the reach set is non-empty (XML forms only: the JSON form carries it as "files", columnar not at all),

@@ -301,6 +301,11 @@ echo "=== (A-PIN) --legend=full is BYTE-IDENTICAL to the pre-L1 default (pinned 
 # most-called first, then by path", +28 B) and impact.xml's import-tier clause ("limit=/offset= window the symbol rows only"
 # -> "most-imported first; limit= sizes it, offset= windows the symbol rows only", +32 B). Both
 # restate the rows' new order and the tier's new --limit reach; the rows of both pins are unchanged on this fixture.
+# RE-ANCHORED BY HAND 2026-11-19 (lane im1-impact, test/impactfirstwindowcheck.sh), impact.xml only, two sentences and nothing
+# else: kImpactDepthLegend "PageRank order within a depth" -> "non-tests first within a depth, then PageRank" and the import-tier
+# clause "most-imported first" -> "files holding a reached row, a counted declined call or a SYM binding first, then
+# most-imported". Both restate the rows' new order; the pin's rows (perimeter, diagonal; geometry.cpp, sub/consumer.cpp) are
+# unchanged on this fixture: no test row, and both importers hold a reached row.
 # RE-ANCHORED BY HAND 2026-09-24 (CodeRabbit on #331), one sentence: test-gate.xml's legend gains the N=0 definition of
 # untested_modscope= ("untested_modscope=0: no <file-scope> owner excluded from untested= (#324). ", +75 B) before its
 # closing "-->". The root already printed untested_modscope="0"; the full legend now defines it. Checked: the pin equals
@@ -634,7 +639,7 @@ probeFor()
 # --impact importers_next= readings are present-only and ride neither probe).
 # RE-PINNED 2026-09-26 (lane impact-depth-065, depth-labelled --impact): ripwire.impact/v1 810 -> 940 (measured 924, the
 # --impact=distance probe; 797 on the base binary b343b988). The answer now carries by_depth= on the root and d= on its
-# first <s> row (the listing runs nearest first, graph.h orderByDepthThenRank), and the compact legend reads both: the
+# first <s> row (the listing runs nearest first, graph.h orderImpactRows), and the compact legend reads both: the
 # present-only <s d=N> row (+64 B with its separator) and by_depth= (+63 B). Both are absent at reaches="0". No other schema moved.
 # RE-PINNED 2026-10-04 (lane count-floor-068, CALLSITE-LINE): ripwire.safe-delete/v1 720 -> 820 (measured 805, the
 # --safe-delete=distance probe; 715 on the base binary 255dc199). Each caller row now carries sites_l=, its call-site LINES

@@ -3767,7 +3767,7 @@ std::optional<int> runImpact( const MainDispatch& d )
         const auto [ rank, prIters, prConverged ] = rankGraph( g );
         const rw::RankDisclosure         prD{ prIters, prConverged, true };   // W2-F: the listing is PageRank-ordered within a depth
         std::vector<NodeId>              show  = reach;
-        rw::orderByDepthThenRank( show, imDepth, rank );   // ranked BEFORE the page window below cuts: the nearest rows (fewest hops) go first
+        rw::orderImpactRows( ing, show, imDepth, rank );   // ranked BEFORE the page window below cuts: the nearest rows (fewest hops) go first
         const std::vector<std::uint32_t> imByDepth = rw::depthCounts( reach, imDepth );
 
         // A6 (survey card A6, agent-lsp): tested/untested partition of the blast radius, over the FULL
@@ -3789,8 +3789,6 @@ std::optional<int> runImpact( const MainDispatch& d )
         // and a separate row tag.
         rw::ImportTier       imports        = rw::impactImportTier( ing, seeds );
         rw::sizeImportTier( imports, cfg.pageLimit, cfg.impactSym );   // cut-fix C: --limit sizes the tier too (offset= does not move it)
-        const auto           importPage     = std::span<const std::uint32_t>( imports.files ).first( imports.shown );
-        const auto           importLazyPage = std::span<const char>( imports.lazy ).first( imports.shown );
 
         // The ONE page window this answer emits. It was spelled inline in the ImpactView initialiser below,
         // which left the legend predicate with nothing to read but the whole `show` set — CodeRabbit
@@ -3825,6 +3823,10 @@ std::optional<int> runImpact( const MainDispatch& d )
         const rw::ImpactDeclinedRows imDc = rw::impactDeclinedRows( ing, g, imDeclineTargets, imDeclinedCalls, cfg.pageLimit, cfg.impactSym,
                                                                     std::size_t( effectiveRowCap( cfg.pageLimit, rw::kCallHierarchyRowCap ) ),
                                                                     rw::VrRender{ imSingleRoot, imRootPrefix }, /*candidates=*/false, cfg.columnar );
+        // IM1 (declinedsites.h): within a path tier, the importers this answer has other evidence for go first — then the page
+        rw::orderImportersByEvidence( ing, imports, rw::impactEvidenceFiles( ing, g, reach, imDc, imValueRefs ) );
+        const auto           importPage     = std::span<const std::uint32_t>( imports.files ).first( imports.shown );
+        const auto           importLazyPage = std::span<const char>( imports.lazy ).first( imports.shown );
 
         emitImpactLegend( cfg, ing, g, reach, show, imPage, imWalk, imports, seeds, imDepth, imProven, imUnprovenDefs,
                           imDeclinedCalls, imDeclinedIface, imFiles, imAttr, imListing, imValueRefs, prD, imDc, imRing,

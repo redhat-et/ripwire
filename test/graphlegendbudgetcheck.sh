@@ -135,8 +135,16 @@ budgetFor(){
         # (this probe's window is cut). Shortened from a 330 B draft to 197 B before the pin moved. Measured on this probe:
         # 4288 B on main (0852bc0f), 4485 B on this lane (+197 B, exactly the sentence); 4533 keeps impact's 48 B headroom.
         # The gate's RED-on-1dc7b01 property rests on the uses pin (4114 < 4303), which does not move.
+        # RE-PINNED impact +92 (2026-11-19, lane im1-impact, test/impactfirstwindowcheck.sh): two order sentences restate what
+        # CHANGED about the rows, each in its shortest honest form. kImpactDepthLegend "PageRank order within a depth" ->
+        # "non-tests first within a depth, then PageRank" (+16 B): test="1" rows now follow a depth's production rows. The
+        # import-tier clause "most-imported first" -> "files holding a reached row, a counted declined call or a SYM binding
+        # first, then most-imported" (+76 B): an importer the answer has other evidence for now leads its tier. A legend that
+        # still says "PageRank order" / "most-imported first" is the false claim. Measured on this probe: 4803 B on the base
+        # (2f5561c26), 4895 B on this lane (+92 B, exactly the two sentences); 4625 keeps the previous excess-over-pin shape
+        # (the 309 B of registered present-only clauses still cover what they covered).
         callers) echo 3769 ;;
-        impact)  echo 4533 ;;
+        impact)  echo 4625 ;;
         uses)    echo 4114 ;;
     esac
 }

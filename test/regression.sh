@@ -656,6 +656,7 @@ for _g in \
     ifacedispatchcheck \
     ifacepeelcheck \
     impactdepthcheck \
+    impactfirstwindowcheck \
     impactimportcheck \
     impactpartitioncheck \
     impactsoledefcheck \
