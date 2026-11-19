@@ -694,6 +694,8 @@ for _g in \
     legenddriftcheck \
     legendhavecheck \
     legendrefcheck \
+    legendseencheck \
+    legendseenhookcheck \
     legendtiercheck \
     legobundlecheck \
     legocheck \

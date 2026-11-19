@@ -252,7 +252,7 @@ the definitions it stands for.
 Refusals, all deliberate: an empty value; a value this binary does not recognise, even beside a valid
 one (the tier changed — run the `--legend-dict=core` command the message names); `--mcp`/`--listen`/`--lsp`
 (the server already sends each definition once); `--legend=full`. The whole dictionary still works as a
-holding (`ripwire --legend-dict`, its `dictv=`; about 130 KB and about 130 calls to repay) and is not the
+holding (`ripwire --legend-dict`, its `dictv=`; about 146 KB; about 130 calls to repay, measured when it was 131 KB) and is not the
 handshake to reach for.
 
 ## The 3 MCP edit verbs — the warm-server counterpart to the preferred CLI

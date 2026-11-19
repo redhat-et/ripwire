@@ -284,6 +284,56 @@ install_claude_route()
     fi
 }
 
+# ── install_claude_legend_seen SETTINGS — register hooks/ripwire-legend-seen.sh (lane LS1, 2026-11-18).
+# The one hook this installer registers that REWRITES a tool call: before a `ripwire` Bash command it inserts
+# --legend-seen=<this session's file>, so the answer leaves out legend definitions the agent already received; after
+# it, it records which definitions the received stdout carried. Four events: PreToolUse + PostToolUse on Bash, and
+# SessionStart + PreCompact on every source, which forget the file (a compacted or resumed context no longer holds what
+# it read). Called from BOTH paths of install_claude_hook for the reason install_claude_route gives, and idempotent the
+# same way: an event that already names this script has its command refreshed in place, never a second entry.
+install_claude_legend_seen()
+{
+    seenScript="$( dirname "$src" )/hooks/ripwire-legend-seen.sh"
+    [ -f "$seenScript" ] || {
+        echo "skills/install.sh: hooks/ripwire-legend-seen.sh is missing beside $src; legend-seen hook not registered." >&2
+        return 1
+    }
+    chmod +x "$seenScript" 2>/dev/null || true
+    seenCmd="$( hook_cmd "$seenScript" )" || return 1
+
+    if "$jqBin" -e --arg n "ripwire-legend-seen.sh" "$jqIsScript"'
+        . as $root | all(("PreToolUse","PostToolUse","SessionStart","PreCompact"); . as $k | any(($root.hooks[$k] // [])[]?.hooks[]?; isScript($n)))' \
+        "$1" >/dev/null 2>&1; then
+        seenWas="already registered in $1 — command refreshed to $seenCmd."
+    else
+        seenWas="registered in $1."
+        echo "skills/install.sh --hook will add the legend-seen entries to $1:"
+        echo "  hooks.PreToolUse / PostToolUse += [{ matcher: \"Bash\", hooks: [{ type: \"command\", command: \"$seenCmd\" }] }]"
+        echo "  hooks.SessionStart / PreCompact += [{ matcher: \"*\", hooks: [{ type: \"command\", command: \"$seenCmd\" }] }]"
+        echo "  behavior: REWRITES a ripwire Bash command, only by inserting --legend-seen=<session file> after the binary"
+        echo "            word, so its answer leaves out legend definitions this session already received (rows unchanged)."
+        echo "            Never a permission decision: the rewritten call goes through your normal permission flow."
+        echo "  state:    entry hashes only, under ~/.ripwire/legend-seen/<session>/; forgotten on resume/clear/compact."
+        echo "            RIPWIRE_LEGEND_SEEN=0 turns it off."
+    fi
+
+    # One pass: refresh the command of every entry that names this script, add the events that have none.
+    mk_tmp "$1"
+    if "$jqBin" --arg n "ripwire-legend-seen.sh" --arg cmd "$seenCmd" "$jqIsScript"'
+        .hooks //= {} |
+        .hooks |= with_entries( .value |= map( .hooks |= map( if isScript($n) then .command = $cmd else . end ) ) ) |
+        reduce (["PreToolUse","Bash"], ["PostToolUse","Bash"], ["SessionStart","*"], ["PreCompact","*"]) as [$k, $m] (.;
+            if any((.hooks[$k] // [])[]?.hooks[]?; isScript($n)) then .
+            else .hooks[$k] = ((.hooks[$k] // []) + [{ matcher: $m, hooks: [{ type: "command", command: $cmd, timeout: 10 }] }]) end )
+    ' "$1" >"$tmp" && [ -s "$tmp" ] && mv "$tmp" "$1"; then
+        echo "ripwire legend-seen hook $seenWas"
+    else
+        rm -f "$tmp"
+        echo "skills/install.sh: could not merge the legend-seen hook into $1 (is it valid JSON?); nothing changed." >&2
+        return 1
+    fi
+}
+
 # ── --hook: register hooks/ripwire-nudge.sh as a PreToolUse hook in ~/.claude/settings.json ──
 # Advisory-only (see the script's own header): never blocks/denies/rewrites a tool call, fires at most
 # once per session per pattern. Idempotent — re-running does not duplicate the settings.json entry.
@@ -311,7 +361,8 @@ install_claude_hook()
         any((.hooks.PreToolUse // [])[]?.hooks[]?; isScript($n))' \
         "$settings" >/dev/null 2>&1; then
         refresh_hook_matcher "$settings" "$hookCmd" "$hookMatcher" || return $?
-        install_claude_route "$settings"
+        install_claude_route "$settings" || return $?
+        install_claude_legend_seen "$settings"
         return $?
     fi
 
@@ -353,7 +404,8 @@ install_claude_hook()
         echo "skills/install.sh: could not merge $settings (is it valid JSON?); nothing changed." >&2
         exit 1
     fi
-    install_claude_route "$settings"
+    install_claude_route "$settings" || return $?
+    install_claude_legend_seen "$settings"
 }
 
 install_codex_hook()
