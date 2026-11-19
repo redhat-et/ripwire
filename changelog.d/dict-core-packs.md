@@ -32,4 +32,4 @@ Guidance: `--help`, the empty-value refusal, `ripwire wrap`'s primer line and th
 
 Gate: `test/legendtiercheck.sh` (BAND K (tiers), docs/EVALS.md amendment 11) — held-or-carried at bar 0 over every cell and holding, tier identity, the refusals, a pack costs at most 3x its per-call gain, and the repayment pin (core at most 1,536 B, `ceil(B/S)` at most 12, no core term under 25 % of the cells), with twelve registered mutants and three single-arm ones re-run on every invocation. `src/legendpacks.h` is a build product of `bench/legendtier/census.tsv`.
 
-Versions: the legend dictionary's release pair is stated once in the `versions` entry (`dictv=c5c2e437a41fbf2c entries=1287`); docs/COMMANDS.md and the newest showcase capture record it.
+Versions: the legend dictionary's release pair is stated once in the `versions` entry (`dictv=cd0a012a40de1479 entries=1294`); docs/COMMANDS.md and the newest showcase capture record it.
