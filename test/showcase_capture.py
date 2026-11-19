@@ -562,6 +562,11 @@ _IN_LIMIT    = 3
 _IN_EXCLUDES = "--exclude=test --exclude=docs --exclude=skills --exclude=changelog.d"
 
 _IN_LIMIT_NARROW = 2   # the page size the last-resort pass tries (see chooseInWindow)
+# SHOWCASE-LIMIT-1 (2026-11-19): the page size of the LAST passes, tried only after every --limit=3 and --limit=2 pass and the
+# lane-merge pass have refused. A lane whose change window holds only two src/ files (M1, #693: graph.h and resolve.h) cannot
+# cut a page of 2, and every wider HEAD~N spans the previous train; the same refusal hit main right after #687 merged. The
+# published command spells --limit=1 and the caption says it was the last resort, so a reader sees which page size was used.
+_IN_LIMIT_LAST = 1
 
 def inCaseCmd( n, limit=_IN_LIMIT ):
     """n: HEAD~n, or a revision spelled as-is (the lane-merge pass's commit, see laneMergeSince)."""
@@ -669,13 +674,27 @@ def chooseInWindow( lo=1, hi=14, unshown=None, mergeHolds=None, laneSince=None )
         print( f"showcase_capture: --in= case window derived as {rev} (no HEAD~N shows: the newest first-parent merge took in "
                f"main; the window is this branch's own commits since that main tip)", file=sys.stderr )
         return rev, _IN_LIMIT
+    last = [
+        ( _IN_LIMIT_LAST, lambda n: both( n, _IN_LIMIT_LAST ),
+          lambda n: f"--limit={_IN_LIMIT_LAST}, LAST RESORT: margin HEAD~{n-1} holds; no larger page cuts in any window" ),
+        ( _IN_LIMIT_LAST, lambda n: not unshown( n, _IN_LIMIT_LAST ) and mergeHolds( n - 1 ),
+          lambda n: f"--limit={_IN_LIMIT_LAST}, LAST RESORT: margin HEAD~{n-1} holds as the merge HEAD~{n-1}; no larger page cuts in any window" ),
+    ]
+    for lim, ok, why in last:
+        n = firstWindow( lo, hi, ok )
+        if n is not None:
+            print( f"showcase_capture: --in= case window derived as HEAD~{n} ({why( n )})", file=sys.stderr )
+            return n, lim
     tried = [ f"HEAD~{n}: {'; '.join( unshown( n, _IN_LIMIT ) ) or 'shows everything'} (margin HEAD~{n-1}: {'; '.join( unshown( n - 1, _IN_LIMIT ) ) or 'shows everything'})"
               for n in range( lo + 1, hi + 1 ) ]
     sys.exit( "showcase_capture: refusing to write — no --since=HEAD~N in [%d,%d] shows what the --in=%s case promises:\n  %s"
               % ( lo + 1, hi, _IN_DIR, "\n  ".join( tried ) ) )
 
 _inN, _inLimit = chooseInWindow()
-add(S7, inCaseCmd( _inN, _inLimit ), "Scope the recent-changes answer to ONE directory. The global <recent> block stays byte-identical, a second <recent scope=\"src\"> page follows it — n=/of= are its counts (of= IS the total, so the paging half carries no total=), capped=\"1\" has_more=\"1\" next_offset= offset= limit= page it, and next= replays THIS run's own corpus flags (--since/--exclude) so the page it names is a page of the same answer. The symbol map collapses to a disclosed <symbols stubbed=\"1\" would_show= next=/> stub — the map was not asked for and was not ranked at all, which is why the header carries no pr_iters=. merge_bombs_skipped= stays on the global block: it counts the window's skipped commits, not the directory's.")
+_inLimitNote = ( "" if _inLimit == _IN_LIMIT else
+    f" This page holds {_inLimit} row(s), not the usual {_IN_LIMIT}: no change window on this branch held enough src/ files "
+    f"for a larger page to cut, so the generator fell back to a smaller one (see chooseInWindow)." )
+add(S7, inCaseCmd( _inN, _inLimit ), "Scope the recent-changes answer to ONE directory. The global <recent> block stays byte-identical, a second <recent scope=\"src\"> page follows it — n=/of= are its counts (of= IS the total, so the paging half carries no total=), capped=\"1\" has_more=\"1\" next_offset= offset= limit= page it, and next= replays THIS run's own corpus flags (--since/--exclude) so the page it names is a page of the same answer. The symbol map collapses to a disclosed <symbols stubbed=\"1\" would_show= next=/> stub — the map was not asked for and was not ranked at all, which is why the header carries no pr_iters=. merge_bombs_skipped= stays on the global block: it counts the window's skipped commits, not the directory's." + _inLimitNote)
 add(S7, f"{BIN} . --rank-by=bogus --top-k=5", "An unknown value REFUSES (exit 1), NAMED, with the supported set listed.")
 add(S7, f"{BIN} . --callers=rankGraphTeleport --format=columnar", "Columnar output: paths table + parallel arrays, ~15-60% fewer tokens on MANY-row lists — small results can be LARGER (the columnar legend is a fixed cost).")
 add(S7, f'{BIN} . --for="cache invalidation" --format=candidates --top-k=5', "Flat top-K export for an external reranker.")
@@ -1035,7 +1054,7 @@ doc.append(f"- **Sandbox diff** (the last section only): `{sandbox_diffstat}` �
 doc.append("")
 doc.append("**How to read the blocks:** ripwire's real XML output is minified — often ONE long line. For scanability, long minified lines are displayed re-wrapped with a line break at every tag seam (`><`). Header COMMENT lines (the legends) always appear in full — they are exempt from the per-line cut; any OTHER display line over 300 bytes is cut with a `… [line truncated: N more bytes]` marker, which can hit a long root element or row. `--plan-lanes` emits JSON and is re-wrapped at object seams the same way. Long outputs are cut to their first ~30 display lines with a `… [N more display lines; full output is M bytes]` marker giving the true size. Exit codes are recorded when non-zero; wall time when >1s.")
 doc.append("")
-doc.append(f"**Not run (and why):** `ripwire <git-url>` (network clone), `--listen` / `--mcp-token` / `--allow-remote-edits` (the HTTP-server posture; `--mcp` itself IS captured in its own section as a one-shot stdio JSON-RPC exchange, and `wrap claude` shows the wiring), `--arch --baseline[-update]` (state writer against the read-only repo — `--note-add` / `--quality-baseline` / `--quality-ack` / the three edit verbs / `--edit-plan` ARE shown, inside the throwaway sandbox clone; `--index-out` / `--pin-census` write to scratch), `--eval-mined` (needs a `minedpair.jsonl` artifact from `bench/mine_traces.py`; none present in the tree), `--refetch` (git-url only), `--lsp` (the editor transport — its one-shot dialogues are gated by `test/lspcheck.sh`, not by showcase blocks), `--max-memory` (the memory guard is silent on this repo by construction; its stops are gated by `test/memguardcheck.sh`), `--force` (wrap-only modifier), `--deadline-ms` (a timing modifier on `--help-task`: a warm index prints exactly the `--help-task` blocks shown only when it finishes within the deadline (a warm run past it abstains as well), and the cold abstention depends on wall-clock timing; gated by `test/helptaskdeadlinecheck.sh`), `--scan-skills` bare form (would sweep `~/.claude/skills`; the explicit-DIR form is shown instead), `--help` ({help_line_count} lines — read it from the binary).")
+doc.append(f"**Not run (and why):** `ripwire <git-url>` (network clone), `--legend-have` (a per-CALLER handshake — the caller names the legend dictionary version it already holds — so a one-shot capture has nothing to hold and nothing to show; gated by `test/legendhavecheck.sh`), `--listen` / `--mcp-token` / `--allow-remote-edits` (the HTTP-server posture; `--mcp` itself IS captured in its own section as a one-shot stdio JSON-RPC exchange, and `wrap claude` shows the wiring), `--arch --baseline[-update]` (state writer against the read-only repo — `--note-add` / `--quality-baseline` / `--quality-ack` / the three edit verbs / `--edit-plan` ARE shown, inside the throwaway sandbox clone; `--index-out` / `--pin-census` write to scratch), `--eval-mined` (needs a `minedpair.jsonl` artifact from `bench/mine_traces.py`; none present in the tree), `--refetch` (git-url only), `--lsp` (the editor transport — its one-shot dialogues are gated by `test/lspcheck.sh`, not by showcase blocks), `--max-memory` (the memory guard is silent on this repo by construction; its stops are gated by `test/memguardcheck.sh`), `--force` (wrap-only modifier), `--deadline-ms` (a timing modifier on `--help-task`: a warm index prints exactly the `--help-task` blocks shown only when it finishes within the deadline (a warm run past it abstains as well), and the cold abstention depends on wall-clock timing; gated by `test/helptaskdeadlinecheck.sh`), `--scan-skills` bare form (would sweep `~/.claude/skills`; the explicit-DIR form is shown instead), `--help` ({help_line_count} lines — read it from the binary).")
 doc.append("")
 
 cur_section = None

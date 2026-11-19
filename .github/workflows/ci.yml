@@ -960,10 +960,15 @@ jobs:
 
       # One step, because vcvars64.bat exports the INCLUDE/LIB/PATH the compilers need into its own process
       # only. vswhere locates the install rather than a hard-coded "2022\Enterprise" path, so a runner-image
-      # edition bump does not silently red this leg. The standalone LLVM on the image is preferred over the
-      # one bundled with Visual Studio when it is present (it is the newer clang, and the one the contributor
-      # reported against); either way vcvars has already supplied the MSVC headers and import libraries it
-      # compiles against, which is what makes clang-cl an MSVC-ABI compiler and not a second toolchain.
+      # edition bump does not silently red this leg. The clang-cl bundled with Visual Studio is preferred over
+      # the image's standalone LLVM, which is only the fallback: the MSVC STL static_asserts a MINIMUM clang
+      # (STL1000), and only the bundled one ships in lockstep with that STL. Measured 2026-11-18, CI run
+      # 44390371541: image win25-vs2026/20261116.315 brought MSVC 14.52.37025, whose yvals_core.h requires
+      # Clang >= 22, while C:\Program Files\LLVM was still 20.1.8 — the windows-package leg went red on every
+      # TU (the 20261103 image's 14.51 still took 20.1.8). The standalone LLVM lags the STL on every such bump
+      # (actions/runner-images #8153, #10001, #12435). Either way vcvars has already supplied the MSVC headers
+      # and import libraries it compiles against, which is what makes clang-cl an MSVC-ABI compiler and not a
+      # second toolchain.
       - name: Configure and build (${{ matrix.toolchain }}, Ninja, plain flavour)
         shell: cmd
         run: |
@@ -972,11 +977,12 @@ jobs:
           if not defined VSINSTALL ( echo ci: no Visual Studio install with the x64 C++ tools & exit /b 1 )
           echo VSINSTALL=%VSINSTALL%
           call "%VSINSTALL%\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
-          set "RW_LLVM=%VSINSTALL%\VC\Tools\Llvm\x64\bin"
-          if exist "C:\Program Files\LLVM\bin\clang-cl.exe" set "RW_LLVM=C:\Program Files\LLVM\bin"
+          set "RW_LLVM=C:\Program Files\LLVM\bin"
+          if exist "%VSINSTALL%\VC\Tools\Llvm\x64\bin\clang-cl.exe" set "RW_LLVM=%VSINSTALL%\VC\Tools\Llvm\x64\bin"
           set "RW_TC=-DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl"
           if "${{ matrix.toolchain }}"=="clang-cl" set "RW_TC=-DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl"
           if "${{ matrix.toolchain }}"=="clang-cl" set "PATH=%RW_LLVM%;%PATH%"
+          if "${{ matrix.toolchain }}"=="clang-cl" ( clang-cl --version || exit /b 1 )
           cmake --version || exit /b 1
           cmake -S . -B build -G Ninja %RW_TC% -DCMAKE_BUILD_TYPE= -DRIPWIRE_TESTS=ON || exit /b 1
           cmake --build build -j || exit /b 1
@@ -1097,8 +1103,8 @@ jobs:
           @echo on
           for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSINSTALL=%%i"
           call "%VSINSTALL%\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
-          set "RW_LLVM=%VSINSTALL%\VC\Tools\Llvm\x64\bin"
-          if exist "C:\Program Files\LLVM\bin\clang-cl.exe" set "RW_LLVM=C:\Program Files\LLVM\bin"
+          set "RW_LLVM=C:\Program Files\LLVM\bin"
+          if exist "%VSINSTALL%\VC\Tools\Llvm\x64\bin\clang-cl.exe" set "RW_LLVM=%VSINSTALL%\VC\Tools\Llvm\x64\bin"
           set "PATH=%RW_LLVM%;%PATH%"
           cmake -S . -B build-asan -G Ninja -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DCMAKE_BUILD_TYPE= -DRIPWIRE_ASAN=ON || exit /b 1
           cmake --build build-asan --target ripwire_probe || exit /b 1
