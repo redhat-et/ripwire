@@ -269,8 +269,9 @@ ripwire ROOT --for="OTHER TASK" --legend-seen=seen.txt
 The answer leaves out exactly the definitions `seen.txt` names — `--for`'s trailing legend and block legends
 included — and says so where it left them (`[legend-seen: N held]`) and once with the `dictv=` of the
 dictionary that holds them all. Rows are byte-identical. A missing or corrupt file serves the whole answer
-(stderr says so); it never refuses. In Claude Code, `skills/install.sh --hook` keeps this file for you per
-session (the legend-seen hook under hooks/) and forgets it on compaction. Pass only what you received whole: an
+(stderr says so); it never refuses. `skills/install.sh --hook-legend-seen` (Claude Code; add `--codex` or
+`--opencode` for those clients) installs a hook that keeps this file per session and forgets it on compaction. It is
+its OWN opt-in, not part of `--hook`: it rewrites your ripwire commands (only to add `--legend-seen=`). Pass only what you received whole: an
 answer you cut with `| head` should be scanned as cut.
 
 ## The 3 MCP edit verbs — the warm-server counterpart to the preferred CLI
