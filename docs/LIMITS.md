@@ -582,6 +582,14 @@ Discloses: **none**
 | `kImportSpecDepth` | `12` | — | statements one walk follows from the entry |
 | `kImportSpecMaxStates` | `256` | — | (file, name) states one walk visits; past it the walk says capped="1" |
 
+### `src/forkeybody.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kKeyBodyMax` | `2` | — | key bodies one answer carries; past it the block says capped="1" and next= the first not shown |
+
 ### `src/forliteral.h`
 
 Discloses: `capped`, `lit_capped`

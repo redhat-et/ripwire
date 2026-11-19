@@ -561,6 +561,7 @@ for _g in \
     forhdrshapecheck \
     forheadrrcheck \
     forinitslotscheck \
+    forkeybodycheck \
     forlenscheck \
     forliteralcheck \
     formanifestcheck \

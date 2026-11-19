@@ -45,6 +45,9 @@ export RIPWIRE_NO_SIGX=1
 # TL1 M2 (src/fortailorder.h) reorders the tail AND adds the legend clause that states the order, so it is no longer a permutation of
 # --legend=first either: the permutation arms run with it off, and the (SD) arms below switch it back on.
 export RIPWIRE_NO_TAIL_SAMEDIR=1
+# KB1 (src/forkeybody.h) likewise runs after the permutation and ADDS the key-body group, so it is off here too; test/forkeybodycheck.sh
+# (K3n) proves the default answer minus that group is this gate's document byte for byte (est_tokens= aside).
+export RIPWIRE_NO_KEY_BODY=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${RIPWIRE_BIN:-${1:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"

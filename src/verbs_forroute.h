@@ -4,6 +4,7 @@
 #endif
 
 #include "forroute.h"      // rule E + rule R (lane P1, transcribed)
+#include "forkeybody.h"    // KB1: the routed symbol's definition body rides the routed answer
 #include "partialwarn.h"   // F1, the partial-answer evidence (lane W1, frozen)
 
 // verbs_forroute.h — RT1 (owner decision 2026-11-18): a --for question that NAMES its symbol and asks a call-graph question is
@@ -258,6 +259,19 @@ inline std::optional<LeadBlock> leadingProvenCallers( std::string_view doc )
     return LeadBlock{ lead, block };
 }
 
+// KB1: the stream block the early page ends at — the key-body group's <bodies> when it sits directly behind block `lead` (its legend
+// comment glued in front of it), else `lead` itself.
+inline std::size_t keyGroupEndBlock( std::string_view doc, std::size_t lead )
+{
+    const std::optional<rw::forpages::detail::Stream> st = rw::forpages::detail::readStream( doc );
+    if( !st || st->keyEnd <= st->keyBegin || st->keyBegin != st->blocks[ lead ].end )
+    {
+        return lead;
+    }
+    const auto at = std::ranges::find_if( st->blocks, [ & ]( const rw::answerfirst::Block& b ) { return b.end == st->keyEnd; } );
+    return at == st->blocks.end() ? lead : std::size_t( at - st->blocks.begin() );
+}
+
 // RT2 ES (results/RT2_ROUTE_1118/PREREG.md §ES; owner-approved 2026-11-18): the default page 1 of an unrouted --for answer ENDS
 // EARLY when its first block is AF4 T-B's <callers by="subject" of=S> and that block PROVES itself complete: shown= equals total=,
 // capped="0", d2_capped absent or "0", and W2 (rt2Evidence, the block's own rows read as a --callers answer) finds neither a
@@ -303,7 +317,7 @@ std::optional<std::string> forEarlyStopPage( const MainDispatch& d, const std::s
     const std::string legend = "<!-- ripwire for schema=ripwire.for/v1 (page 1, early): task= the query, at= this commit"
                              + std::string( rw::kForCompactSubjectCallerHopLegend ) + std::string( windowClause ) + " -->";
     const std::string call = forUnbudgetedCall( cfg );
-    return rw::forpages::earlyFirstPage( doc, { .pageBytes = cfg.forPageBytes, .page = 1, .call = call }, lead->index, legend );
+    return rw::forpages::earlyFirstPage( doc, { .pageBytes = cfg.forPageBytes, .page = 1, .call = call }, keyGroupEndBlock( doc, lead->index ), legend );
 }
 
 // The route decided and the verb answered: what runForVerbRoute (CLI) and mcpForVerbRoute (MCP `for`) both assemble from.
@@ -341,6 +355,18 @@ inline std::optional<RoutedAnswer> routeQuestion( const MainDispatch& d )
     return ra;
 }
 
+// KB1: remove a --for page's key-body group (its legend comment and <bodies of="key">), when it has one.
+inline void dropKeyGroup( std::string& page )
+{
+    std::size_t keyBegin = 0, keyEnd = 0;
+    if( const std::optional<rw::forpages::detail::Stream> st = rw::forpages::detail::readStream( page ) )
+    {
+        keyBegin = st->keyBegin;
+        keyEnd   = st->keyEnd;
+    }
+    page.erase( keyBegin, keyEnd - keyBegin );
+}
+
 // The routed document: the verb's answer with <route> (page1="1" when `page` is carried) and the fold as the root's first
 // children, compacted as the bare call is, and `page` (a ranked --for answer, "" = none) as the root's last child.
 inline std::string assembleRouted( const MainDispatch& d, RoutedAnswer& ra, std::string_view page )
@@ -352,10 +378,23 @@ inline std::string assembleRouted( const MainDispatch& d, RoutedAnswer& ra, std:
     std::string doc = std::move( ra.verb.out );
     const rw::CompactRootInfo root = rw::findCompactRoot( doc );
     doc.insert( root.openEnd, routeElementXml( d.cfg, ra.rd.kind, ra.spelling, ra.w, !page.empty() ) + ( ra.w ? foldElementXml( *ra.w ) : std::string() ) );
-    (void)rw::applyCompactDialect( doc, ::compactLegendHint( d.cfg, doc ) );   // the bare call's dialect: main.cpp's layer skips --for
-    if( !page.empty() )
+    // KB1 (forkeybody.h): the routed symbol's definition body (and a second named symbol's) after the verb's rows, before a carried page.
+    // A carried --for page carries its own key group (the same spans, the same printer); it moves up here, so the answer holds it once.
+    std::string carried( page );
+    if( rw::keybody::keyBodyOn() )
     {
-        doc.insert( doc.rfind( "</" ), page );
+        const std::string_view          keyRoot = d.ing.realPaths.empty() && d.cfg.roots.size() == 1 ? d.cfg.roots[0] : std::string_view();
+        const rw::keybody::KeyBodies    kb      = rw::keybody::keyBodies( d.ing, d.cfg.forTask, ra.spelling, {}, keyRoot );
+        doc.insert( doc.rfind( "</" ), kb.xml );
+        if( !kb.xml.empty() )
+        {
+            dropKeyGroup( carried );
+        }
+    }
+    (void)rw::applyCompactDialect( doc, ::compactLegendHint( d.cfg, doc ) );   // the bare call's dialect: main.cpp's layer skips --for
+    if( !carried.empty() )
+    {
+        doc.insert( doc.rfind( "</" ), carried );
     }
     return doc;
 }

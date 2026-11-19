@@ -13,7 +13,8 @@
 // element, after each child of a section, after a section's close) — never right after a comment (a block-local legend
 // travels with its block) and never right after a section's open tag (no page opens an empty section). Page 1 is the
 // largest cut <= P counted from byte 0 (the root open tag counts, as in T6's measurement); page k the largest cut
-// <= c(k-1) + P; a unit larger than P is served whole rather than split.
+// <= c(k-1) + P; a unit larger than P is served whole rather than split. KB1 (forkeybody.h): the key-body group is not counted
+// by the page it starts on.
 //
 // WHERE THE LEGEND SITS, and why. 5ee3ddb38 made answer-first opt-in because, as a default, it moved the READINGS of the
 // cuts and floors out of the prefix (measured for AF1: a bare 12 KB answer-first prefix shows a marker with no definition
@@ -82,6 +83,7 @@ struct Cut
 {
     std::size_t at      = 0;
     std::size_t openSec = std::string_view::npos;
+    std::size_t free    = 0;   // KB1: key-body group bytes before `at` that no page counts (readStream; 0 without a key group)
 };
 
 // The admissible cuts of the row stream (blocks [0, streamEnd)). A section's interior is scanned with the same
@@ -112,8 +114,19 @@ inline std::vector<Cut> streamCuts( std::string_view doc, const std::vector<answ
     return cuts;
 }
 
+// KB1 (forkeybody.h): the key-body block's legend comment opens with this; the block it declares is <bodies of="key">.
+inline constexpr std::string_view kKeyBodyLegendLead = "<!-- bodies of=key:";
+
+// The bytes of [begin, end) that lie before `at`: what page 1 does not count of the key-body group (KB1).
+[[nodiscard]] constexpr std::size_t uncountedBefore( std::size_t at, std::size_t begin, std::size_t end ) noexcept
+{
+    return at <= begin ? 0 : std::min( at, end ) - begin;
+}
+
 // The page boundaries: indices into `cuts` of each page's last cut. Page 1 is measured from byte 0, page k from the
-// previous page's end; every page takes at least one cut.
+// previous page's end; every page takes at least one cut. KB1: a page measures its bytes without the key-body group (Cut::free), so the
+// page the group starts on (page 1 at the default size, forkeybody.h) ends at the row it ended at without it, the group is never split
+// across pages, and every other page holds the same rows.
 inline std::vector<std::size_t> pageEnds( const std::vector<Cut>& cuts, std::size_t pageBytes )
 {
     std::vector<std::size_t> ends;
@@ -121,9 +134,9 @@ inline std::vector<std::size_t> pageEnds( const std::vector<Cut>& cuts, std::siz
     while( i < cuts.size() )
     {
         std::size_t last = i;
-        while( last + 1 < cuts.size() && cuts[ last + 1 ].at <= from + pageBytes ) { ++last; }
+        while( last + 1 < cuts.size() && cuts[ last + 1 ].at - cuts[ last + 1 ].free <= from + pageBytes ) { ++last; }
         ends.push_back( last );
-        from = cuts[ last ].at;
+        from = cuts[ last ].at - cuts[ last ].free;
         i    = last + 1;
     }
     return ends;
@@ -220,7 +233,25 @@ struct Stream
     std::vector<answerfirst::Block> blocks;
     std::size_t                     streamBlocks = 0;   // blocks [0, streamBlocks) are rows; the rest is the document legend
     std::vector<Cut>                cuts;
+    std::size_t                     keyBegin = 0, keyEnd = 0;   // KB1: the key-body group (legend comment + <bodies of="key">), or empty
 };
+
+// KB1: find the key-body group (its legend comment, then <bodies of="key">) among the stream's blocks and mark every cut with the group
+// bytes before it, which no page counts (pageEnds).
+inline void markKeyGroup( Stream& st )
+{
+    for( std::size_t k = 0; k + 1 < st.streamBlocks; ++k )
+    {
+        const answerfirst::Block& c = st.blocks[ k ];
+        if( c.comment && st.view.substr( c.begin ).starts_with( kKeyBodyLegendLead ) && !st.blocks[ k + 1 ].comment && st.blocks[ k + 1 ].name == "bodies" )
+        {
+            st.keyBegin = c.begin;
+            st.keyEnd   = st.blocks[ k + 1 ].end;
+            for( Cut& cut : st.cuts ) { cut.free = uncountedBefore( cut.at, st.keyBegin, st.keyEnd ); }
+            return;
+        }
+    }
+}
 
 // The stream ends where the trailing run of DOCUMENT legend comments begins. A document legend comment anywhere inside the
 // stream means the answer is not answer-first: not a shape this pass pages (nullopt), and the answer is served unchanged.
@@ -240,6 +271,7 @@ struct Stream
     }
     st.cuts = streamCuts( view, st.blocks, st.streamBlocks );
     if( st.cuts.empty() ) { return std::nullopt; }
+    markKeyGroup( st );
     return st;
 }
 

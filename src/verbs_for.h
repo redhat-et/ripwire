@@ -8,6 +8,7 @@
 #include "forpage.h"    // L-W: the --for --limit=N file page, coverage=, the thin rule and the widening next=
 #include "foranswerfirst.h" // ITEM R: a finished --for answer serves its ANSWER first (a permutation)
 #include "forsigx.h"        // SIGX (TL1 M1): the sigs rows past rank 10 keep l n p r on page 1; the rest follows the rows
+#include "forkeybody.h"     // KB1: the key-symbol body right after the answer block, on page 1 (page 1 does not count it)
 #include "forpages.h"       // AF1: the answer-first --for answer, served in pages (page= pages= withheld_bytes= next=)
 #include "forbudgetfit.h" // TOKEN-BUDGET-MONOTONE: a budget sheds the unbudgeted answer, it never re-decides its posture
 #include "forowner.h"   // the question's owner (owner-hop's found set) and the one owner body of an explanatory question
@@ -5871,12 +5872,16 @@ std::optional<int> runForLens( const MainDispatch& d )
             std::string doc = r.out->bytes;
             // AF4 T-B: a who-calls question leads with its <callers by="subject"> block (foranswerfirst.h rowBlockOrder)
             (void)rw::answerfirst::answerFirst( doc, forAnswerFirstAsk( d.cfg, doc ) );
-            // SIGX (TL1 M1, forsigx.h): after the permutation and before paging, so every page size windows the same document —
-            // the RT2 ES early page included (INT1 merge: SIGX runs first, so the early page and the full page 1 its next= names
-            // are cut from one document)
+            // SIGX (TL1 M1, forsigx.h): after the permutation and before paging, so every page size windows the same document
             if( !d.cfg.signaturesOnly && rw::sigx::sigxOn() )
             {
                 (void)rw::sigx::compactSigs( doc, &r.ledger );
+            }
+            // KB1 (forkeybody.h): after the permutation and SIGX, before ES and paging, so every page size windows the same document
+            if( !d.cfg.signaturesOnly && rw::keybody::keyBodyOn() )
+            {
+                const std::string_view keyRoot = d.ing.realPaths.empty() && d.cfg.roots.size() == 1 ? d.cfg.roots[0] : std::string_view();
+                (void)rw::keybody::insertKeyBodies( doc, d.ing, d.cfg.forTask, keyRoot, &r.ledger );
             }
             if( const std::optional<std::string> early = forEarlyStopPage( d, doc ) )   // RT2 ES: a proven leading block ends page 1
             {
