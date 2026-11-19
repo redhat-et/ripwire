@@ -1656,6 +1656,181 @@ vpair n_sqsub t_redir "a single-quoted pattern inside \"\$( )\" is a word, not a
     || no "$L: $vpairs of 12 negative arms passed beside a firing twin (want all; zero means nothing was judged)"
 gating_split "$L" 0
 
+# ── 4c) UNCHECKED-STATUS (QD-UNCHECKED-STATUS): a dropped I/O or child status, C/C++ and Python ─────────────────
+#   A call whose return IS the status (pclose, rename, write, system, fflush; fclose / close of a stream or descriptor
+#   the function wrote; waitpid with the child's status dropped too; Python subprocess.run with no check=,
+#   subprocess.call, os.system) made where the value reaches nothing. Every function exists at the baseline with an
+#   empty body and the edit adds the call, so a row is preexisting-worse and must STILL be sev="minor" (report-only).
+#   p= is the SITE's line (not the definition's) and call= names the call. Each negative is a positive's twin with
+#   the status read, cast to (void), returned, tested, or the stream/descriptor not written; the arm counts the twins
+#   whose positive fired and fails short of all of them (an arm whose premise did not fire proves nothing).
+fx_init ucs
+UC_FNS_C="p_pclose p_rename p_write p_system p_fflush p_fclose p_close p_waitpid p_label p_std n_void n_assign n_return n_cond n_fclose_read n_close_unwritten n_waitpid_read n_fflush_stderr n_member n_helper n_ns n_cast_std"
+UC_FNS_PY="p_run p_call p_system p_stdout p_bound p_bare p_alias n_check n_check_false n_rc n_return n_cond n_kwargs n_underscore n_rc_attr n_bound_returned"
+{ printf '#include <stdio.h>\n'; for f in $UC_FNS_C; do printf 'void %s( int fd, FILE* p ) { }\n' "$f"; done; } >"$WORK/ucs/a.c"
+{ printf 'import os\nimport subprocess\n'; for f in $UC_FNS_PY; do printf 'def %s(cmd):\n    return None\n' "$f"; done; } >"$WORK/ucs/t.py"
+printf 'void cpp_base( int fd ) { }\n' >"$WORK/ucs/b.cpp"
+fx_commit ucs
+cat >"$WORK/ucs/a.c" <<'EOF'
+#include <stdio.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/wait.h>
+void p_pclose( int fd, FILE* p ) { pclose( p ); }
+void p_rename( int fd, FILE* p ) { rename( "a", "b" ); }
+void p_write( int fd, FILE* p ) { write( fd, "x", 1 ); }
+void p_system( int fd, FILE* p ) { if( fd ) system( "ls" ); }
+void p_fflush( int fd, FILE* p ) { fflush( p ); }
+void p_fclose( int fd, FILE* p ) { FILE* f = fopen( "o", "w" ); fputs( "x", f ); fclose( f ); }
+void p_close( int fd, FILE* p ) { int w = open( "o", O_WRONLY | O_CREAT, 0600 ); close( w ); }
+void p_waitpid( int fd, FILE* p ) { waitpid( fd, NULL, 0 ); }
+void p_label( int fd, FILE* p ) { if( !p ) goto out; out: pclose( p ); }
+void p_std( int fd, FILE* p ) { }
+void n_void( int fd, FILE* p ) { (void)pclose( p ); }
+void n_assign( int fd, FILE* p ) { int rc = rename( "a", "b" ); if( rc ) { return; } }
+int n_return( int fd, FILE* p ) { return write( fd, "x", 1 ); }
+void n_cond( int fd, FILE* p ) { if( system( "ls" ) != 0 ) { return; } }
+void n_fclose_read( int fd, FILE* p ) { FILE* f = fopen( "o", "r" ); fclose( f ); }
+void n_close_unwritten( int fd, FILE* p ) { int r = open( "o", O_RDONLY ); close( r ); }
+void n_waitpid_read( int fd, FILE* p ) { int st; waitpid( fd, &st, 0 ); if( WIFEXITED( st ) ) { return; } }
+void n_fflush_stderr( int fd, FILE* p ) { fflush( stderr ); }
+void n_member( int fd, FILE* p ) { struct { void ( *pclose )( FILE* ); } s; s.pclose( p ); }
+static int xclose( FILE* p ) { return pclose( p ); }
+void n_helper( int fd, FILE* p ) { if( xclose( p ) ) { return; } }
+void n_ns( int fd, FILE* p ) { }
+void n_cast_std( int fd, FILE* p ) { }
+EOF
+cat >"$WORK/ucs/b.cpp" <<'EOF'
+#include <cstdio>
+#include <cstdlib>
+namespace pool { int close( int ); }
+void cpp_base( int fd ) { std::system( "ls" ); }
+void cpp_ns( int fd ) { pool::close( fd ); }
+void cpp_cast( int fd ) { static_cast<void>( std::system( "ls" ) ); }
+EOF
+cat >"$WORK/ucs/t.py" <<'EOF'
+import os
+import subprocess
+import subprocess as sp
+from subprocess import call as pcall
+def p_run(cmd):
+    subprocess.run(cmd)
+def p_call(cmd):
+    subprocess.call(cmd)
+def p_system(cmd):
+    os.system(cmd)
+def p_stdout(cmd):
+    return subprocess.run(cmd, capture_output=True, text=True).stdout
+def p_bound(cmd):
+    r = subprocess.run(cmd, capture_output=True)
+    print(r.stdout)
+def p_bare(cmd):
+    pcall(cmd)
+def p_alias(cmd):
+    if cmd: sp.run(cmd)
+def n_check(cmd):
+    subprocess.run(cmd, check=True)
+def n_check_false(cmd):
+    subprocess.run(cmd, check=False)
+def n_rc(cmd):
+    r = subprocess.run(cmd)
+    if r.returncode != 0:
+        raise SystemExit(1)
+def n_return(cmd):
+    return subprocess.run(cmd)
+def n_cond(cmd):
+    if subprocess.call(cmd) != 0:
+        raise SystemExit(1)
+def n_kwargs(cmd, **kw):
+    subprocess.run(cmd, **kw)
+def n_underscore(cmd):
+    _ = os.system(cmd)
+def n_rc_attr(cmd):
+    return subprocess.run(cmd).returncode
+def n_bound_returned(cmd):
+    r = subprocess.run(cmd, capture_output=True)
+    print(r.stdout)
+    return r
+EOF
+L="unchecked-status"
+fx_run ucs
+uc_row(){ ds_rows | grep 'defect="unchecked-status"' | grep " sym=\"$1\"" | grep " p=\"$2:"; }   # SYM PATH
+uc_has(){    # SYM PATH LINE CALL — one minor row, p= at the SITE's line, call= the call
+    local row; row="$( uc_row "$1" "$2" )"
+    if [ -z "$row" ]; then no "$L: no unchecked-status row on $1 ($2)"; return 1; fi
+    [ "$( printf '%s\n' "$row" | wc -l | tr -d ' ' )" = 1 ] || { no "$L: more than one unchecked-status row on $1 ($2): $row"; return 1; }
+    ds_judge "$L: $1 ($2)" "$row" minor
+    printf '%s' "$row" | grep -q " p=\"$2:$3\"" && ok "$L: $1 p=$2:$3 (the site's line)" || no "$L: $1 p= should be the site $2:$3: $row"
+    printf '%s' "$row" | grep -q " call=\"$4\"" && ok "$L: $1 call=$4" || no "$L: $1 call= should be $4: $row"
+    return 0
+}
+uc_none(){   # SYM PATH WHY
+    [ "$QD_OK" = 1 ] || { no "$L: cannot read an absence on $1 off a failed run"; return; }
+    local row; row="$( uc_row "$1" "$2" )"
+    if [ -z "$row" ]; then ok "$L: no unchecked-status row on $1 ($3)"; else no "$L: false positive on $1 ($3): $row"; fi
+}
+if [ "$QD_OK" = 1 ]; then
+    uc_has p_pclose a.c 5 pclose; uc_has p_rename a.c 6 rename; uc_has p_write a.c 7 write; uc_has p_system a.c 8 system
+    uc_has p_fflush a.c 9 fflush; uc_has p_fclose a.c 10 fclose; uc_has p_close a.c 11 close; uc_has p_waitpid a.c 12 waitpid
+    uc_has p_label a.c 13 pclose; uc_has cpp_base b.cpp 4 system
+    uc_has p_run t.py 6 subprocess.run; uc_has p_call t.py 8 subprocess.call; uc_has p_system t.py 10 os.system
+    uc_has p_stdout t.py 12 subprocess.run; uc_has p_bound t.py 14 subprocess.run; uc_has p_bare t.py 17 subprocess.call
+    uc_has p_alias t.py 19 subprocess.run
+    #   the twins: NEGATIVE [premise POSITIVE] — the positive's row above is what makes the negative's silence mean something
+    seen=0; pairs=0
+    for pair in "n_void:p_pclose:a.c:(void) is a stated decision" "n_assign:p_rename:a.c:assigned and compared" \
+                "n_return:p_write:a.c:the value is returned" "n_cond:p_system:a.c:used in a condition" \
+                "n_fclose_read:p_fclose:a.c:a read stream's close loses nothing" "n_close_unwritten:p_close:a.c:a read-only descriptor" \
+                "n_waitpid_read:p_waitpid:a.c:the child's status is read" "n_fflush_stderr:p_fflush:a.c:a failed flush of stderr has nowhere to go" \
+                "n_member:p_pclose:a.c:a member named pclose is not libc's" "n_helper:p_pclose:a.c:a helper whose status is read" \
+                "cpp_ns:cpp_base:b.cpp:another namespace's close" "cpp_cast:cpp_base:b.cpp:static_cast<void> is a stated decision" \
+                "n_check:p_run:t.py:check=True" "n_check_false:p_run:t.py:check=False is a stated decision" \
+                "n_rc:p_bound:t.py:returncode is read" "n_return:p_run:t.py:the result is returned" \
+                "n_cond:p_call:t.py:used in a condition" "n_kwargs:p_run:t.py:**kwargs may carry check=" \
+                "n_underscore:p_system:t.py:bound to _" "n_rc_attr:p_stdout:t.py:.returncode read off the call" \
+                "n_bound_returned:p_bound:t.py:the bound result is returned"; do
+        neg="${pair%%:*}"; rest="${pair#*:}"; pos="${rest%%:*}"; rest="${rest#*:}"; path="${rest%%:*}"; why="${rest#*:}"
+        pairs=$(( pairs + 1 ))
+        [ -n "$( uc_row "$pos" "$path" )" ] && seen=$(( seen + 1 ))
+        uc_none "$neg" "$path" "$why"
+    done
+    if [ "$seen" = "$pairs" ] && [ "$pairs" -gt 0 ]; then ok "$L: every negative's positive twin fired ($seen/$pairs): each silence is read off a shape the scanner sees"
+    else no "$L: only $seen/$pairs negatives' positive twins fired — a silent negative proves nothing without its twin"; fi
+    #   never gating: the report-only facet carries no gating= even on a preexisting symbol
+    if ds_rows | grep 'defect="unchecked-status"' | grep -q 'gating='; then no "$L: an unchecked-status row gates: $( ds_rows | grep 'defect="unchecked-status"' | grep 'gating=' | head -1 )"
+    else ok "$L: no unchecked-status row gates ($( ds_rows | grep -c 'defect="unchecked-status"' ) rows)"; fi
+fi
+#   the legend: unchecked-status and call= are defined on an answer that carries the row, and only there
+ULEG="$( cd "$WORK/ucs" && "$BIN" . --quality-delta --no-cache --legend=full 2>/dev/null )"
+if printf '%s' "$ULEG" | grep -q 'unchecked-status: a call whose return' && printf '%s' "$ULEG" | grep -q 'call= the call'; then ok "$L: the full legend defines unchecked-status and call="
+else no "$L: the full legend does not define unchecked-status / call="; fi
+UCLEG="$( cd "$WORK/ucs" && "$BIN" . --quality-delta --no-cache --legend=compact 2>/dev/null )"
+if printf '%s' "$UCLEG" | grep -q 'r call=: the call an unchecked-status row'; then ok "$L: the compact legend defines r call="; else no "$L: the compact legend does not define r call="; fi
+FLEG="$( cd "$WORK/fmt_cpp" && "$BIN" . --quality-delta --no-cache --legend=full 2>/dev/null )"
+if printf '%s' "$FLEG" | grep -q '<quality-delta ' && ! printf '%s' "$FLEG" | grep -q 'unchecked-status: a call whose return'; then ok "$L: an answer with no unchecked-status row carries no unchecked-status legend"
+else no "$L: the unchecked-status legend rides on an answer without the row (or the run failed)"; fi
+#   the JSON twin carries call= too
+UJ="$( cd "$WORK/ucs" && "$BIN" . --quality-delta --no-cache --json 2>/dev/null )"
+if printf '%s' "$UJ" | grep -q '"defect":"unchecked-status"' && printf '%s' "$UJ" | grep -q '"call":"pclose"'; then ok "$L: --json rows carry defect=unchecked-status and call"
+else no "$L: --json rows do not carry the unchecked-status facet and call"; fi
+#   recall replay, reversed: a fix that checked the status, read backwards (FIX..FIX^), adds the discard back
+fx_init ucfix
+printf '#include <stdio.h>\nint run( FILE* p ) { return pclose( p ) != 0; }\n' >"$WORK/ucfix/r.c"
+printf 'import subprocess\ndef run(cmd):\n    subprocess.run(cmd, check=True)\n' >"$WORK/ucfix/r.py"
+fx_commit ucfix
+( cd "$WORK/ucfix" && printf '#include <stdio.h>\nint run( FILE* p ) { pclose( p ); return 0; }\n' >r.c \
+  && printf 'import subprocess\ndef run(cmd):\n    subprocess.run(cmd)\n' >r.py && git add -A >/dev/null 2>&1 && git commit -qm "drop the checks" >/dev/null 2>&1 ) || no "$L: the recall fixture's second commit failed"
+fx_run_ref ucfix HEAD^..HEAD
+if [ "$QD_OK" = 1 ]; then
+    n="$( ds_rows | grep 'defect="unchecked-status"' | grep -c ' sym="run"' )"
+    [ "$n" = 2 ] && ok "$L: the range that dropped both checks prints both rows (C and Python)" || no "$L: the range that dropped both checks printed $n unchecked-status rows, want 2"
+fi
+fx_run_ref ucfix HEAD..HEAD^
+if [ "$QD_OK" = 1 ]; then
+    n="$( ds_rows | grep -c 'defect="unchecked-status"' )"
+    [ "$n" = 0 ] && ok "$L: the fixing direction prints no unchecked-status row" || no "$L: the fixing direction printed $n unchecked-status rows"
+fi
+
 # ── 5) SURFACES: legend, help, MCP, skill and docs; JSON twin; MCP; the ack identity of a facet ───────────
 #   D2: format-arity is the one exception to "new-symbol rows never gate", and every surface that states the
 #   rule states the exception in ONE fixed phrase (PHRASE below), so no surface still reads unqualified.
