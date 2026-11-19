@@ -1665,11 +1665,11 @@ gating_split "$L" 0
 #   the status read, cast to (void), returned, tested, or the stream/descriptor not written; the arm counts the twins
 #   whose positive fired and fails short of all of them (an arm whose premise did not fire proves nothing).
 fx_init ucs
-UC_FNS_C="p_pclose p_rename p_write p_system p_fflush p_fclose p_close p_waitpid p_label p_std n_void n_assign n_return n_cond n_fclose_read n_close_unwritten n_waitpid_read n_fflush_stderr n_member n_helper n_ns n_cast_std"
+UC_FNS_C="p_pclose p_rename p_write p_system p_fflush p_fclose p_close p_waitpid p_label p_append n_void n_assign n_return n_cond n_fclose_read n_close_unwritten n_waitpid_read n_fflush_stderr n_member n_helper n_fclose_failed n_fflush_stdout"
 UC_FNS_PY="p_run p_call p_system p_stdout p_bound p_bare p_alias n_check n_check_false n_rc n_return n_cond n_kwargs n_underscore n_rc_attr n_bound_returned"
 { printf '#include <stdio.h>\n'; for f in $UC_FNS_C; do printf 'void %s( int fd, FILE* p ) { }\n' "$f"; done; } >"$WORK/ucs/a.c"
 { printf 'import os\nimport subprocess\n'; for f in $UC_FNS_PY; do printf 'def %s(cmd):\n    return None\n' "$f"; done; } >"$WORK/ucs/t.py"
-printf 'void cpp_base( int fd ) { }\n' >"$WORK/ucs/b.cpp"
+printf 'void cpp_base( int fd ) { }\nvoid cpp_os( int fd ) { }\nvoid cpp_multi( int fd ) { }\n' >"$WORK/ucs/b.cpp"
 fx_commit ucs
 cat >"$WORK/ucs/a.c" <<'EOF'
 #include <stdio.h>
@@ -1682,23 +1682,23 @@ void p_write( int fd, FILE* p ) { write( fd, "x", 1 ); }
 void p_system( int fd, FILE* p ) { if( fd ) system( "ls" ); }
 void p_fflush( int fd, FILE* p ) { fflush( p ); }
 void p_fclose( int fd, FILE* p ) { FILE* f = fopen( "o", "w" ); fputs( "x", f ); fclose( f ); }
-void p_close( int fd, FILE* p ) { int w = open( "o", O_WRONLY | O_CREAT, 0600 ); close( w ); }
+void p_close( int fd, FILE* p ) { if( write( fd, "x", 1 ) < 0 ) { return; } close( fd ); }
 void p_waitpid( int fd, FILE* p ) { waitpid( fd, NULL, 0 ); }
 void p_label( int fd, FILE* p ) { if( !p ) goto out; out: pclose( p ); }
-void p_std( int fd, FILE* p ) { }
+void p_append( int fd, FILE* p ) { FILE* f = fopen( "o", "a" ); fclose( f ); }
 void n_void( int fd, FILE* p ) { (void)pclose( p ); }
 void n_assign( int fd, FILE* p ) { int rc = rename( "a", "b" ); if( rc ) { return; } }
 int n_return( int fd, FILE* p ) { return write( fd, "x", 1 ); }
 void n_cond( int fd, FILE* p ) { if( system( "ls" ) != 0 ) { return; } }
 void n_fclose_read( int fd, FILE* p ) { FILE* f = fopen( "o", "r" ); fclose( f ); }
-void n_close_unwritten( int fd, FILE* p ) { int r = open( "o", O_RDONLY ); close( r ); }
+void n_close_unwritten( int fd, FILE* p ) { int w = open( "/dev/null", O_RDWR ); close( w ); }
 void n_waitpid_read( int fd, FILE* p ) { int st; waitpid( fd, &st, 0 ); if( WIFEXITED( st ) ) { return; } }
 void n_fflush_stderr( int fd, FILE* p ) { fflush( stderr ); }
 void n_member( int fd, FILE* p ) { struct { void ( *pclose )( FILE* ); } s; s.pclose( p ); }
 static int xclose( FILE* p ) { return pclose( p ); }
 void n_helper( int fd, FILE* p ) { if( xclose( p ) ) { return; } }
-void n_ns( int fd, FILE* p ) { }
-void n_cast_std( int fd, FILE* p ) { }
+void n_fclose_failed( int fd, FILE* p ) { if( fwrite( "x", 1, 1, p ) != 1 ) { fclose( p ); return; } if( fclose( p ) ) { return; } }
+void n_fflush_stdout( int fd, FILE* p ) { fflush( stdout ); }
 EOF
 cat >"$WORK/ucs/b.cpp" <<'EOF'
 #include <cstdio>
@@ -1707,6 +1707,15 @@ namespace pool { int close( int ); }
 void cpp_base( int fd ) { std::system( "ls" ); }
 void cpp_ns( int fd ) { pool::close( fd ); }
 void cpp_cast( int fd ) { static_cast<void>( std::system( "ls" ) ); }
+namespace rw::os { int pclose( FILE* ); }
+void cpp_os( int fd ) { rw::os::pclose( nullptr ); }
+void cpp_multi( int fd )
+{
+    std::system( "a" );
+    std::system( "b" );
+    std::system( "c" );
+    std::system( "d" );
+}
 EOF
 cat >"$WORK/ucs/t.py" <<'EOF'
 import os
@@ -1772,7 +1781,9 @@ uc_none(){   # SYM PATH WHY
 if [ "$QD_OK" = 1 ]; then
     uc_has p_pclose a.c 5 pclose; uc_has p_rename a.c 6 rename; uc_has p_write a.c 7 write; uc_has p_system a.c 8 system
     uc_has p_fflush a.c 9 fflush; uc_has p_fclose a.c 10 fclose; uc_has p_close a.c 11 close; uc_has p_waitpid a.c 12 waitpid
-    uc_has p_label a.c 13 pclose; uc_has cpp_base b.cpp 4 system
+    uc_has p_label a.c 13 pclose; uc_has p_append a.c 14 fclose; uc_has cpp_base b.cpp 4 system; uc_has cpp_os b.cpp 8 pclose
+    uc_has cpp_multi b.cpp 11 system   # four sites: p= is the EARLIEST line, not the first in site-identity order
+    ds_wasnow "$L" unchecked-status cpp_multi 0 4
     uc_has p_run t.py 6 subprocess.run; uc_has p_call t.py 8 subprocess.call; uc_has p_system t.py 10 os.system
     uc_has p_stdout t.py 12 subprocess.run; uc_has p_bound t.py 14 subprocess.run; uc_has p_bare t.py 17 subprocess.call
     uc_has p_alias t.py 19 subprocess.run
@@ -1780,9 +1791,11 @@ if [ "$QD_OK" = 1 ]; then
     seen=0; pairs=0
     for pair in "n_void:p_pclose:a.c:(void) is a stated decision" "n_assign:p_rename:a.c:assigned and compared" \
                 "n_return:p_write:a.c:the value is returned" "n_cond:p_system:a.c:used in a condition" \
-                "n_fclose_read:p_fclose:a.c:a read stream's close loses nothing" "n_close_unwritten:p_close:a.c:a read-only descriptor" \
+                "n_fclose_read:p_fclose:a.c:a read stream's close loses nothing" "n_close_unwritten:p_close:a.c:opened for writing (/dev/null), never written" \
+                "n_fclose_failed:p_fclose:a.c:the cleanup close in a failed-write branch" "n_fflush_stdout:p_fflush:a.c:a flush of stdout is not judged" \
                 "n_waitpid_read:p_waitpid:a.c:the child's status is read" "n_fflush_stderr:p_fflush:a.c:a failed flush of stderr has nowhere to go" \
-                "n_member:p_pclose:a.c:a member named pclose is not libc's" "n_helper:p_pclose:a.c:a helper whose status is read" \
+                "n_member:p_pclose:a.c:a member named pclose is not libc's" "xclose:p_pclose:a.c:a helper that returns the status" \
+                "n_helper:p_pclose:a.c:a helper call whose status is read" \
                 "cpp_ns:cpp_base:b.cpp:another namespace's close" "cpp_cast:cpp_base:b.cpp:static_cast<void> is a stated decision" \
                 "n_check:p_run:t.py:check=True" "n_check_false:p_run:t.py:check=False is a stated decision" \
                 "n_rc:p_bound:t.py:returncode is read" "n_return:p_run:t.py:the result is returned" \

@@ -11164,10 +11164,14 @@ inline void appendDefectShapeRows( std::vector<Regression>& regs, const IngestRe
         }
         ex->second -= std::min( ex->second, headA - baseA );
         const defectshape::Facet f = defectFacetOf( key.site );
-        const bool seen = std::any_of( credited.begin(), credited.end(), [ & ]( const Credited& c ) { return c.anchor == key.anchor && c.facet == f; } );
-        if( !seen )
+        const auto seen = std::find_if( credited.begin(), credited.end(), [ & ]( const Credited& c ) { return c.anchor == key.anchor && c.facet == f; } );
+        if( seen == credited.end() )
         {
             credited.push_back( { key.anchor, f, &at } );
+        }
+        else if( f == defectshape::Facet::UncheckedStatus && at.line < seen->first->line )
+        {
+            seen->first = &at;   // the row names its earliest new site (p= is the site's line); key order is not line order
         }
     }
     for( const Credited& c : credited )
