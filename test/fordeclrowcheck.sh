@@ -198,7 +198,8 @@ sys.exit( 0 if "p=\"api.h:1\"" in r.stdout and "decl_only=\"1\"" in r.stdout els
 run "--for=run_it" --json >"$TMP/s1.json"
 if [ -s "$TMP/s1.json" ] && ! grep -q 'decl_rows' "$TMP/s1.json"; then ok "(s1) --json carries no block"; else no "(s1) --json"; fi
 run "--for=run_it" --token-budget=100 >"$TMP/s2.xml" || no "(s2) the budgeted run exited $?"
-if [ -s "$TMP/s2.xml" ] && grep -q '<decl_rows of="run_it" held="budget" next="--for=run_it"/></ctx>$' "$TMP/s2.xml" && ! grep -q '</decl_rows>' "$TMP/s2.xml"; then ok "(s2) a token budget holds the block: held=\"budget\" and next=, no rows"; else no "(s2) budget: $( grep -o '<decl_rows.*' "$TMP/s2.xml" | head -c 300 )"; fi
+# AF1-fix (2026-11-18): a budget keeps the default posture, answer-first, so only the trailing document legend may follow the held block
+if [ -s "$TMP/s2.xml" ] && python3 -c 'import re,sys; sys.exit(0 if re.search(r"<decl_rows of=\"run_it\" held=\"budget\" next=\"--for=run_it\"/>(?:<!--(?:(?!-->).)*-->)*</ctx>\s*\Z",open(sys.argv[1]).read(),re.S) else 1)' "$TMP/s2.xml" && ! grep -q '</decl_rows>' "$TMP/s2.xml"; then ok "(s2) a token budget holds the block: held=\"budget\" and next=, no rows"; else no "(s2) budget: $( grep -o '<decl_rows.*' "$TMP/s2.xml" | head -c 300 )"; fi
 if python3 -c '
 import sys, xml.dom.minidom as M
 s = open( sys.argv[1], encoding="utf8" ).read()

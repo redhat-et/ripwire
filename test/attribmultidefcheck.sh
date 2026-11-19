@@ -736,7 +736,9 @@ for lg in compact full; do
         s2="$( python3 -c '
 import re, sys
 d = open( sys.argv[ 1 ], encoding="utf-8", errors="replace" ).read()
-head = d.split( "<sigs", 1 )[ 0 ]
+# AF1-fix (2026-11-18): a budget keeps the default posture, ANSWER-FIRST under --legend=compact, so the legend is every comment of the
+# answer (CDATA masked) wherever it sits; ahead of <sigs> was the legend-first shape (--legend=full still is).
+head = "".join( re.findall( r"<!--.*?-->", re.sub( r"<!\[CDATA\[.*?\]\]>", "", d, flags = re.S ), re.S ) )
 clause = int( "c prov=split" in head or "prov=\"split\" on a <c> row" in head )
 rows = len( re.findall( r"<c [^>]*prov=\"split\"", d ) )
 marker = int( bool( re.search( r"<hops shown=\"0\"[^>]*capped=\"1\"", d ) ) )
