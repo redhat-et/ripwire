@@ -10,10 +10,15 @@
 #               both.ts     import { URI } from a + { URI as URI2 } from b; URI.file(); URI2.parse()  → a's file, b's parse
 #               shadow.ts   a closure inside the importing function: URI.parse()             → a's parse
 #               tslocal/    app.ts as above beside a THIRD, unexported URI in local.ts      → a's file (base: local.ts's, unhedged)
+#               tscascade/  const u = URI.file( 'x' ) (annotated `: URI`); u.toString()      → a's toString (base: no row); URI.file / URI.plain → a's
 #     NEGATIVE  neither.ts  no import of URI                                                → still the split of both
 #               viabarrel.ts import { URI } from './reexp' (export { URI } from './a/uri')   → still the split (a re-export is not followed)
-#               loose.ts    this.u.file() / v.file() on untyped receivers                    → still declined (dc rows), never bound
-#               shadow.ts   a parameter named URI: URI.file()                               → unchanged (no class-name reading)
+#     (each arm below imports a's URI AND b's as U2, so a pin to a's would show)
+#               shadow.ts   namespace N { const URI: any = U2; URI.file() }                 → still the split (FC3 shadow span; guard off: a's)
+#               tsshadow/   const X = class URI { static go() { URI.file() } }              → still the split (guard off: a's)
+#               shadow.ts   a parameter named URI: URI.file()                               → declined (dc row), never bound
+#               loose.ts    this.u.file() / v.file() / URI.inner.file()                     → declined (dc rows), never bound
+#               tscascade/  const w = URI.plain( 'y' ) (no return annotation); w.toString()  → declined (dc row): nothing types w
 #               tslocal/local.ts  the class of the caller's own file                       → its own file's file, unchanged
 #               ren.ts      import { helper as h }; h()                                     → the renamed import still pins (mech import)
 #   Python (fixture py/):  pa/client.py and pb/client.py each `class Client: @staticmethod make()`; pk/timer.py and pk/events.py each `class Timer`
@@ -21,16 +26,25 @@
 #               renamed.py  from pb.client import Client as BClient; BClient.make(6)      → pb's make
 #               pk/pump.py  from pk.timer import Timer (events.py imported too); Timer(..)  → pk/timer.py's Timer (prov import; base: split)
 #               pylocal/    app.py as above beside a THIRD Client in local.py              → pa's make (base: local.py's, unhedged)
+#               pyown/      BClient.make() beside the file's own class Client              → pb's make (base: the own class's, a locality pick)
 #     NEGATIVE  neither.py  no import of Client                                            → still the split
 #               star.py     `from pa.client import *` and `from pb.client import *`         → still the split
 #               pk/nopump.py `from pk import timer` (a module, not the class): Timer(..)    → still the split
 #               pk/repump.py from pk.retimer import Timer, where retimer.py rebinds Timer   → still the split (m's binding is not only the class)
-#               shadow.py   def shadowed(Client): Client.make(10)                          → unchanged (base: unique pa)
-#               loose.py    self.c.make() / v.make()                                       → unchanged (base: unique pa)
+#     (each arm below imports pa's Client AND pb's as BClient, so a pin to pa's would show)
+#               shadow.py   [Client.make() for Client in xs] / lambda Client: Client.make()  → still the split (guard off: pa's)
+#               shadow.py   def shadowed(Client): Client.make()                             → declined (dc row), never bound
+#               loose.py    self.c.make() / v.make() / Client.inner.make()                  → declined (dc rows), never bound
+#               pyalt/      try/except or if/else imports of pa's and pb's Client           → still the split (two modules bind the name)
+#               pyassign/   module-scope `Client = BClient` after the import               → still the split (guard off: pa's)
+#               pyown/      the caller file's own module-level `class Client`             → its own make (guard off: pa's)
+#               pyfn/       from pk.ftimer import Timer, a def there (a class in 2 other files) → unchanged receiver-rule (guard off: mech import)
 #               fn.py       from pc.other import helper; helper()                          → unchanged (a plain import pins only a class)
 #               renamed.py  from pc.other import helper as h; h()                         → the renamed import still pins (mech import)
 #               pylocal/local.py  the class of the caller's own file                       → its own make, unchanged
-# Every negative arm counts the rows it read and fails when it read none (a vacuous arm proves nothing).
+# Every negative arm counts the rows it read and fails when it read none (a vacuous arm proves nothing). The "guard off" arms were
+# checked red against a build with the arm's guard removed (the shadow / local-binding test, the module-scope rebind test, the
+# own-file test, the class-only test of a plain import); the declined arms never reach the import hook (a pin would add a caller row).
 #
 # Usage: bash test/importprovedsplitscheck.sh [BIN]     (default build/ripwire; exits non-zero on any failure)
 set -u
@@ -73,6 +87,7 @@ export function twice(): number {
 EOF
 cat >"$TS/shadow.ts" <<'EOF'
 import { URI } from './a/uri';
+import { URI as U2 } from './b/uri';
 export function shadowed( URI: any ): number {
     return URI.file( 's' ) ? 1 : 0;
 }
@@ -80,6 +95,20 @@ export function inner(): number {
     const run = () => URI.parse( 'i' );
     return run() ? 1 : 0;
 }
+export namespace N {
+    const URI: any = U2;
+    export function go(): number { return URI.file( 'nv' ); }
+}
+EOF
+TH="$TMP/tsshadow"; mkdir -p "$TH/a" "$TH/b"
+cp "$TS/a/uri.ts" "$TH/a/"; cp "$TS/b/uri.ts" "$TH/b/"
+cat >"$TH/classexpr.ts" <<'EOF'
+import { URI } from './a/uri';
+import { URI as U2 } from './b/uri';
+export const X = class URI {
+    static file( p: string ): number { return 1; }
+    static go(): number { U2.parse( 'y' ); return URI.file( 'ce' ); }
+};
 EOF
 cat >"$TS/neither.ts" <<'EOF'
 import { helper } from './c/other';
@@ -106,6 +135,9 @@ class Holder {
     }
 }
 function pick() { return Math.random() > 0.5 ? URI : U2; }
+export function deep(): number {
+    return URI.inner.file( 'd' ) ? 1 : 0;
+}
 EOF
 cat >"$TS/ren.ts" <<'EOF'
 import { helper as h } from './c/other';
@@ -133,9 +165,9 @@ printf 'from pa.client import Client\n\n\ndef open_one():\n    return Client.mak
 printf 'from pb.client import Client as BClient\nfrom pc.other import helper as h\n\n\ndef ren():\n    h()\n    return BClient.make(6)\n' >"$PY/renamed.py"
 printf 'from pc.other import helper\n\n\ndef none():\n    helper()\n    return Client.make(2)\n' >"$PY/neither.py"
 printf 'from pa.client import *\nfrom pb.client import *\n\n\ndef starred():\n    return Client.make(3)\n' >"$PY/star.py"
-printf 'from pa.client import Client\n\n\ndef shadowed(Client):\n    return Client.make(10)\n' >"$PY/shadow.py"
+printf 'from pa.client import Client\nfrom pb.client import Client as BClient\n\n\ndef shadowed(Client):\n    return Client.make(10)\n\n\ndef comp(xs):\n    return [Client.make(11) for Client in xs]\n\n\ndef lam():\n    g = lambda Client: Client.make(12)\n    return g, BClient\n' >"$PY/shadow.py"
 printf 'from pc.other import helper\n\n\ndef plain_fn():\n    return helper()\n' >"$PY/fn.py"
-printf 'from pa.client import Client\nfrom pb import client as bmod\n\n\nclass Holder:\n    def __init__(self, c):\n        self.c = c\n\n    def go(self, v):\n        self.c.make(4)\n        v.make(5)\n        return Client, bmod\n' >"$PY/loose.py"
+printf 'from pa.client import Client\nfrom pb.client import Client as BClient\n\n\nclass Holder:\n    def __init__(self, c):\n        self.c = c\n\n    def go(self, v):\n        self.c.make(4)\n        v.make(5)\n        Client.inner.make(12)\n        return BClient\n' >"$PY/loose.py"
 printf 'class Timer:\n    def __init__(self, owner, delay):\n        self.owner = owner\n        self.delay = delay\n' >"$PY/pk/timer.py"
 cp "$PY/pk/timer.py" "$PY/pk/events.py"; printf '\n\nclass Event:\n    pass\n' >>"$PY/pk/events.py"
 cp "$PY/pk/timer.py" "$PY/pk/retimer.py"; printf '\n\nTimer = type("Timer", (Timer,), {})\n' >>"$PY/pk/retimer.py"
@@ -144,6 +176,41 @@ printf 'from pk import events\nfrom pk import timer\n\n\nclass NoPump:\n    def 
 printf 'from pk import events\nfrom pk.events import Event\nfrom pk.retimer import Timer\n\n\nclass RePump:\n    def set_timer(self, delay):\n        return Timer(self, delay), events, Event\n' >"$PY/pk/repump.py"
 PL="$TMP/pylocal"; mkdir -p "$PL"; cp -R "$PY/pa" "$PY/pb" "$PY/app.py" "$PL/"
 printf 'class Client:\n    @staticmethod\n    def make(n):\n        return Client()\n\n\ndef same():\n    return Client.make(7)\n' >"$PL/local.py"
+
+# (a) the call-result typing cascade: `const u = URI.file( 'x' )` types u by file's return annotation, so u.toString() binds a's
+TC="$TMP/tscascade"; mkdir -p "$TC/a" "$TC/b"
+cat >"$TC/a/uri.ts" <<'EOF'
+export class URI {
+    static file( p: string ): URI { return new URI(); }
+    static plain( p: string ) { return new URI(); }
+    toString(): string { return 'u'; }
+}
+EOF
+cp "$TC/a/uri.ts" "$TC/b/uri.ts"
+cat >"$TC/app.ts" <<'EOF'
+import { URI } from './a/uri';
+import { URI as U2 } from './b/uri';
+export function cascade(): number {
+    const u = URI.file( 'x' );
+    const w = URI.plain( 'y' );
+    const n = u.toString();
+    const m = w.toString();
+    return n.length + m.length + ( U2 ? 1 : 0 );
+}
+EOF
+# (b) (c) two modules' Client under one name, or the caller's own module-scope binding of it
+PA="$TMP/pyalt"; mkdir -p "$PA"; cp -R "$PY/pa" "$PY/pb" "$PA/"
+printf 'try:\n    from pa.client import Client\nexcept ImportError:\n    from pb.client import Client\n\n\ndef f():\n    return Client.make(1)\n' >"$PA/viatry.py"
+printf 'import sys\nif sys.version_info > (3,):\n    from pa.client import Client\nelse:\n    from pb.client import Client\n\n\ndef f():\n    return Client.make(2)\n' >"$PA/viaif.py"
+PS="$TMP/pyassign"; mkdir -p "$PS"; cp -R "$PY/pa" "$PY/pb" "$PS/"
+printf 'from pa.client import Client\nfrom pb.client import Client as BClient\n\nClient = BClient\n\n\ndef f():\n    return Client.make(3)\n' >"$PS/assign.py"
+PO="$TMP/pyown"; mkdir -p "$PO"; cp -R "$PY/pa" "$PY/pb" "$PO/"
+printf 'from pa.client import Client\nfrom pb.client import Client as BClient\n\n\nclass Client:\n    @staticmethod\n    def make(n):\n        return n\n\n\ndef f():\n    BClient.make(5)\n    return Client.make(4)\n' >"$PO/owncls.py"
+# (d) Timer is a class in two files, but the module the caller imports it from defines it as a def
+PF="$TMP/pyfn"; mkdir -p "$PF/pk"; touch "$PF/pk/__init__.py"
+cp "$PY/pk/timer.py" "$PY/pk/events.py" "$PF/pk/"
+printf 'def Timer(owner, delay):\n    return (owner, delay)\n' >"$PF/pk/ftimer.py"
+printf 'from pk.ftimer import Timer\n\n\ndef go():\n    return Timer(None, 1)\n' >"$PF/pk/fpump.py"
 
 # census DIR → $TMP/<name>.census (rc checked: a failed run would make every arm below vacuous)
 census(){ ( cd "$1" && "$BIN" . --no-cache --pin-census="$TMP/$2.census" >/dev/null 2>"$TMP/$2.err" ); local rc=$?
@@ -161,46 +228,71 @@ census "$TS" ts || exit 1
 census "$TL" tslocal || exit 1
 census "$PY" py || exit 1
 census "$PL" pylocal || exit 1
+census "$TC" tscascade || exit 1
+census "$PA" pyalt || exit 1
+census "$PF" pyfn || exit 1
+census "$PS" pyassign || exit 1
+census "$PO" pyown || exit 1
+census "$TH" tsshadow || exit 1
+# declined NAME DIR CALLEE FILE:LINE... — each site is a declined call (one `<dc via="declined">` row of --callers) and has no census C
+# row (a pin would add one; --callers' sites_at= lists a declined site too, so the census is what says "never bound")
+declined(){ local nm="$1" d="$2" c="$3"; shift 3; local out="$TMP/declined.$c.$nm"
+            "$BIN" "$d" --no-cache --callers="$c" --legend=compact >"$out" 2>/dev/null || { no "declined: the --callers=$c run on $nm failed"; return 0; }
+            local p n
+            for p in "$@"; do
+                n=$( grep -o "<dc [^>]*p=\"$p\"[^>]*>" "$out" | grep -c 'via="declined"' )
+                row "$nm" "${p%%:*}" "$c" "${p##*:}" >/dev/null
+                if [ "$n" -eq 1 ] && [ "$( cat "$TMP/rows" )" = 0 ]; then ok "$nm $p $c stays declined (1 dc row, no C row)"
+                else no "$nm $p $c: want 1 declined site and no C row, got $n dc rows, $( cat "$TMP/rows" ) C rows"; fi
+                seen=$(( seen + n ))
+            done; }
 
 echo "── TypeScript: the import proves one class ──"
 expect ts app.ts file 3 "a/uri.ts::file"
 expect ts both.ts file 4 "a/uri.ts::file"
 expect ts both.ts parse 5 "b/uri.ts::parse"
-expect ts shadow.ts parse 6 "a/uri.ts::parse"
+expect ts shadow.ts parse 7 "a/uri.ts::parse" receiver-rule
 expect tslocal app.ts file 3 "a/uri.ts::file"
+expect tscascade app.ts file 4 "a/uri.ts::file" receiver-rule
+expect tscascade app.ts plain 5 "a/uri.ts::plain" receiver-rule
+expect tscascade app.ts toString 6 "a/uri.ts::toString" receiver-rule
 
 echo "── TypeScript: nothing proves one class, or the receiver is not the class ──"
 neg(){ expect "$@"; seen=$(( seen + $( cat "$TMP/rows" ) )); }
 neg ts neither.ts file 4 "a/uri.ts::file b/uri.ts::file" split
 neg ts viabarrel.ts file 3 "a/uri.ts::file b/uri.ts::file" split
-neg ts shadow.ts file 3 "a/uri.ts::file"
+neg ts shadow.ts file 12 "a/uri.ts::file b/uri.ts::file" split
+neg tsshadow classexpr.ts file 5 "a/uri.ts::file b/uri.ts::file" split
 neg tslocal local.ts file 5 "local.ts::file"
 neg ts ren.ts h 3 "c/other.ts::helper" import
-"$BIN" "$TS" --no-cache --callers=file --legend=compact >"$TMP/loose.callers" 2>/dev/null || no "loose: the --callers=file run failed"
-ndc=$( grep -o '<dc [^>]*p="loose.ts:[68]"[^>]*>' "$TMP/loose.callers" | grep -c 'via="declined"' )
-if [ "$ndc" -eq 2 ] && ! grep -q '<s [^>]*p="loose.ts:[68]"' "$TMP/loose.callers"; then ok "loose.ts:6/8 this.u.file() / v.file() stay declined (2 dc rows, no caller row)"
-else no "loose.ts: want 2 declined sites and no caller row, got $ndc"; sed 's/<!--.*-->//; s/^/        | /' "$TMP/loose.callers" | head -5; fi
-seen=$(( seen + ndc ))
+declined ts "$TS" file shadow.ts:4 loose.ts:6 loose.ts:8 loose.ts:13
+declined tscascade "$TC" toString app.ts:7
 
 echo "── Python: the import proves one class ──"
 expect py app.py make 5 "pa/client.py::Client::make"
 expect py renamed.py make 7 "pb/client.py::Client::make"
 expect py pk/pump.py Timer 8 "pk/timer.py::Timer::Timer" import
 expect pylocal app.py make 5 "pa/client.py::Client::make"
+expect pyown owncls.py make 12 "pb/client.py::Client::make" receiver-rule
 
 echo "── Python: nothing proves one class, or the receiver is not the class ──"
 neg py neither.py make 6 "pa/client.py::Client::make pb/client.py::Client::make" split
 neg py star.py make 6 "pa/client.py::Client::make pb/client.py::Client::make" split
 neg py pk/nopump.py Timer 7 "pk/events.py::Timer::Timer pk/retimer.py::Timer::Timer pk/timer.py::Timer::Timer" split
 neg py pk/repump.py Timer 8 "pk/events.py::Timer::Timer pk/retimer.py::Timer::Timer" split
-neg py shadow.py make 5 "pa/client.py::Client::make" unique
-neg py loose.py make 10 "pa/client.py::Client::make" unique
-neg py loose.py make 11 "pa/client.py::Client::make" unique
+neg py shadow.py make 10 "pa/client.py::Client::make pb/client.py::Client::make" split
+neg py shadow.py make 14 "pa/client.py::Client::make pb/client.py::Client::make" split
+declined py "$PY" make shadow.py:6 loose.py:10 loose.py:11 loose.py:12
+neg pyalt viatry.py make 8 "pa/client.py::Client::make pb/client.py::Client::make" split
+neg pyalt viaif.py make 9 "pa/client.py::Client::make pb/client.py::Client::make" split
+neg pyassign assign.py make 8 "pa/client.py::Client::make pb/client.py::Client::make" split
+neg pyown owncls.py make 13 "owncls.py::Client::make" receiver-rule
+neg pyfn pk/fpump.py Timer 5 "pk/ftimer.py::Timer" receiver-rule
 neg py fn.py helper 5 "pc/other.py::helper" unique
 neg py renamed.py h 6 "pc/other.py::helper" import
 neg pylocal local.py make 8 "local.py::Client::make"
 
-if [ "$seen" -ge 17 ]; then ok "the negative arms read $seen rows (premise: none vacuous)"; else no "the negative arms read only $seen rows (want >= 17)"; fi
+if [ "$seen" -ge 29 ]; then ok "the negative arms read $seen rows (premise: none vacuous)"; else no "the negative arms read only $seen rows (want >= 29)"; fi
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME FAILED"
 exit "$fail"
