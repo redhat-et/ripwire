@@ -190,11 +190,12 @@ Discloses: **none**
 
 ### `src/callhierarchy.h`
 
-Discloses: `capped`, `closures_capped`
+Discloses: `capped`, `closures_capped`, `via_macro_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kClosureRows` | `8` | — | rows per block; count= is the closure's distinct callees, capped="1" past it |
+| `kMacroSeeThroughFiles` | `16` | — | — |
 
 ### `src/cli.h`
 

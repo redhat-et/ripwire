@@ -781,6 +781,23 @@ inline constexpr const char* kDeclinedSitesIfaceClauseMcp =
 inline constexpr const char* kViaImplLegend =
     "via=\"impl\" on a row: the receiver's recorded type is an interface, trait or abstract class whose only implementor in this tree owns the called method, so the edge is to it; an implementor outside the tree, or one a macro writes, may exist. ";
 inline const char* viaImplLegend( bool on ) noexcept { return on ? kViaImplLegend : ""; }
+// BX1 FIX 2 (callhierarchy.h macroSeeThroughRows, test/verbfixcheck.sh F2): exactly when a callers row is a see-through row.
+inline constexpr const char* kViaMacroLegend =
+    "via=\"macro:NAME\" on a row: it calls of= only through the C function-like macro NAME (a t=macro row here) whose text calls "
+    "of= (scanned, not expanded); one macro hop; after the direct callers, in count=, with that macro row's of_def. ";
+inline constexpr const char* kViaMacroColumnarClause = "format=columnar carries it as the <via> column (3 = via=\"macro:NAME\", NAME the t=macro row it calls). ";
+inline const char* viaMacroLegend( bool on ) noexcept { return on ? kViaMacroLegend : ""; } // the columnar clause rides at the call site
+// The --uses twin: exactly when the root carries via_macro=.
+inline constexpr const char* kUsesViaMacroLegend =
+    "via=\"macro:NAME\" on a <u> row: the site invokes the C function-like macro NAME, whose replacement text uses of= (one macro "
+    "hop); via_macro=N: N such rows, after the direct and alias ones, counted in count= (the columnar form lists them last, "
+    "with no name). ";
+inline const char* usesViaMacroLegend( bool on ) noexcept { return on ? kUsesViaMacroLegend : ""; }
+// lane bx2-fix2-ceiling (callhierarchy.h macroCeiling): exactly when the root carries via_macro_capped=.
+inline constexpr const char* kViaMacroCappedLegend =
+    "Per macro one row per file, at most 16 files: via_macro_capped=N more are not listed (nor in count=); via_macro_next= lists "
+    "the macro with most whole. ";
+inline const char* viaMacroCappedLegend( bool on ) noexcept { return on ? kViaMacroCappedLegend : ""; }
 inline constexpr const char* kDeclinedSitesOfDefCallees =
     "of_def=K on a <dc>: the definition (ix=K) making the call, a fact. ";
 inline constexpr const char* kDeclinedSitesOfDefCallers =

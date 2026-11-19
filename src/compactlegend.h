@@ -681,6 +681,9 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "via",               "via=name: the target was matched by name alone (receiver unproven); every by-name candidate in reach is listed; NOT a claim the edge is false", true, "s", MapHeaderRead::No, "name" },
     { "via",               "via=impl: the receiver's interface/trait/abstract type has ONE implementor in the tree owning the target (an outside or macro-made one may exist)", true, "s", MapHeaderRead::No, "impl" },
     { "via",               "via=link: this edge is a markdown link, not a call", true, "s", MapHeaderRead::No, "link" },
+    // BX1 FIX 2 (callhierarchy.h macroSeeThroughRows; graphlegend.h kViaMacroLegend): a see-through caller row. VALUE-prefix
+    // qualified ("macro:" matches via="macro:NAME", quotedValueListsItem's trailing-colon rule).
+    { "via",               "via=macro:NAME: calls of= only through the C function-like macro NAME (a t=macro row here; one macro hop); after the direct rows, in count=, with that macro row's of_def", true, "s", MapHeaderRead::No, "macro:" },
     // STRING-KEYED (src/pathgaps.h BridgeVia::NameKey): present-only, read only on a bridge <s via="name-key"> row
     { "via",               "s via=name-key cands=K: the previous row looks this row up by a name built from a template (getattr(o, 'do_' + c), o['handle' + e]) or posts a message class this row handles; K the definitions it can name; matched, never traced; a hedge", true, "s", MapHeaderRead::No, "name-key" },
     { "anchor",            "anchor=missing: the markdown link named a heading this file does not have, so the edge is the file", true, "s", MapHeaderRead::No, "missing" },
@@ -758,7 +761,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "fields",            "dcols cand: the candidate defs as file:line (legend full only); cand_more how many more", true, "dcols", MapHeaderRead::No, "cand" },
     { "fields",            "<of_def> column: each row's def ix=K groups (K~s split label, K~n by name, K~t primary template), space-separated", true, "cols", MapHeaderRead::No, "of_def" },
     { "fields",            "<split> column: 1 where the row's edge to of= carries the resolver's split label (may be another arm's)", true, "cols", MapHeaderRead::No, "split" },
-    { "fields",            "<via> column: 1 = via=name, the row's edge matched by name alone (receiver unproven); 2 = via=link, a markdown link; NOT a claim the edge is false", true, "cols", MapHeaderRead::No, "via" },
+    { "fields",            "<via> column: 1 = via=name, the row's edge matched by name alone (receiver unproven); 2 = via=link, a markdown link; 3 = via=macro:NAME, calls of= through a t=macro row; NOT a claim the edge is false", true, "cols", MapHeaderRead::No, "via" },
     // DEPTH-LABELLED --impact (0.6.5): graph.h transitiveCallersDepth's hop per row. The <s> row prints d= run-length
     // (graph.h depthRunAttrXml: the window's first row and each depth change), the columnar form a dense <depth> column, and
     // the root by_depth= (graphlegend.h byDepthAttrXml) partitions reaches= by depth; all three are absent at reaches="0".
@@ -1454,6 +1457,14 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "alias_depth_capped", "alias_depth_capped=1: the alias walk stopped at 4 hops with an alias still to follow (via_alias= a floor)", true, "uses", MapHeaderRead::No, {}, "uses" },
     { "alias", "u alias=: the alias definition's name the site is written as (via=alias)", true, "u", MapHeaderRead::No, {}, "uses" },
     { "via_alias", "via_alias=N: N of the counted rows are written through an alias in scope (via=alias)", true, "uses", MapHeaderRead::No, {}, "uses" },
+    // BX1 FIX 2 (verbs_navigate.h appendMacroUseSites; graphlegend.h kUsesViaMacroLegend), present-only
+    { "via", "<u via=\"macro:NAME\">: the site invokes the function-like macro NAME, whose text (or a macro it invokes) uses of=; after the direct and alias rows, in count=", true, "u", MapHeaderRead::No, "macro:", "uses" },
+    { "via_macro", "via_macro=N: N counted rows reach of= through a function-like macro (via=macro:NAME on each; the columnar form lists them last)", true, "uses", MapHeaderRead::No, {}, "uses" },
+    // lane bx2-fix2-ceiling (callhierarchy.h macroCeiling): present only when the per-macro ceiling withheld a row.
+    { "via_macro_capped", "via_macro_capped=N: N more rows reach of= via a macro, not listed (one per file per macro, at most 16 files; not in count=)", false, "uses", MapHeaderRead::No, {}, "uses" },
+    { "via_macro_next", "via_macro_next=: lists the macro with most of them whole", false, "uses", MapHeaderRead::No, {}, "uses" },
+    { "via_macro_capped", "via_macro_capped=N: N more rows reach of= via a macro, not listed (one per file per macro, at most 16 files; not in count=)", false, "callers", MapHeaderRead::No, {}, "callers" },
+    { "via_macro_next", "via_macro_next=: lists the macro with most of them whole", false, "callers", MapHeaderRead::No, {}, "callers" },
     { "alias_namesakes", "alias_namesakes=K: K definitions share a listed alias's name and reach none of of=; their sites are name-matched in too (a hedge)", true, "uses", MapHeaderRead::No, {}, "uses" },
     { "alias_sites_held", "alias_sites_held=N: N sites written through an alias of of= are not in the columnar rows (the XML form lists them, via=alias)", true, "uses", MapHeaderRead::No, {}, "uses" },
     { "alias_unread", "alias_unread=N: N alias declarations could not be read, so whether they reach of= is unknown (count= a floor)", true, "uses", MapHeaderRead::No, {}, "uses" },
@@ -2150,14 +2161,16 @@ inline bool isElementNamed( std::string_view tag, std::string_view name ) noexce
 
 // Does the quoted value that opens `value` (up to its closing quote) list `item` as one whole comma-separated entry? An empty
 // item accepts any value: only a valueItem term asks what the attribute holds rather than whether it is there.
+// An item ending in ':' names a FAMILY of values and matches any entry it prefixes (BX1 FIX 2: "macro:" matches via="macro:NAME").
 inline bool quotedValueListsItem( std::string_view value, std::string_view item ) noexcept
 {
     if( item.empty() )
     {
         return true;
     }
-    const std::string_view list  = value.substr( 0, value.find( '"' ) );
-    std::size_t            begin = 0;
+    const bool             prefix = item.back() == ':';
+    const std::string_view list   = value.substr( 0, value.find( '"' ) );
+    std::size_t            begin  = 0;
     while( begin <= list.size() )
     {
         std::size_t end = list.find( ',', begin );
@@ -2165,7 +2178,7 @@ inline bool quotedValueListsItem( std::string_view value, std::string_view item 
         {
             end = list.size();
         }
-        if( list.substr( begin, end - begin ) == item )
+        if( const std::string_view entry = list.substr( begin, end - begin ); entry == item || ( prefix && entry.starts_with( item ) ) )
         {
             return true;
         }
