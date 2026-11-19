@@ -4749,9 +4749,12 @@ struct ReceiverEvidence
     template <class ClassOf>
     PathOwners importPathOwners( const Reference& r, std::vector<NodeId>& cand, bool canonical, const ClassOf& classOf ) const
     {
+        if( canonical || cand.size() < 2 || !r.qualifier.empty() )   // the cheap tests first: chainOf below reads the receiver chain
+        {
+            return PathOwners::Keep;
+        }
         const Chain ch = chainOf( r );
-        if( canonical || cand.size() < 2 || !r.qualifier.empty() || !ch.valid || ch.root.empty() || !ch.path.empty() || !ch.ctor.empty()
-            || isThisRoot( ch.root ) || isSuperRoot( r, ch.root ) || ch.root == "cls" )
+        if( !ch.valid || ch.root.empty() || !ch.path.empty() || !ch.ctor.empty() || isThisRoot( ch.root ) || isSuperRoot( r, ch.root ) || ch.root == "cls" )
         {
             return PathOwners::Keep;
         }
