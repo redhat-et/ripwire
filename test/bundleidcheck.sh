@@ -179,7 +179,7 @@ for B in 600 1200 6000; do
     "$BIN" "$FIX" --no-cache --pack-task="$TASK" --token-budget=$B --legend=full >"$TMP/b.$B" 2>/dev/null
     BYTES="$( wc -c < "$TMP/b.$B" | tr -d ' ' )"
     BUDGET="$( grep -o 'budget=[0-9]* bytes' "$TMP/b.$B" | head -1 | tr -dc '0-9' )"
-    CEIL="$( grep -o 'ceiling [0-9]*' "$TMP/b.$B" | head -1 | tr -dc '0-9' )"
+    CEIL="$( grep -o 'ceiling [0-9][0-9]*' "$TMP/b.$B" | head -1 | tr -dc '0-9' )"
     # §B1.7 fixup (2026-07-29): the strict BYTES<=CEIL arm was passing by a 28-byte accident — the DESIGN
     # contract has always been ceiling + the single-entry overshoot tolerance (the ranking section emits its
     # first entry whole; partitioncheck.sh committed the same TOL=1.15 for the same reason). The verbatim
@@ -227,7 +227,7 @@ done
 # (twin) the DEFAULT --pack-task (no --token-budget) keeps its HARD ceiling: the biconditional this arm used to state for every
 # budget — the document fits ceiling*1.15 iff it carries no over_ceiling label (a fitting answer that claims over_ceiling fails too).
 "$BIN" "$FIX" --no-cache --pack-task="$TASK" --legend=full >"$TMP/b.def" 2>/dev/null
-D_BYTES="$( wc -c < "$TMP/b.def" | tr -d ' ' )"; D_CEIL="$( grep -o 'ceiling [0-9]*' "$TMP/b.def" | head -1 | tr -dc '0-9' )"
+D_BYTES="$( wc -c < "$TMP/b.def" | tr -d ' ' )"; D_CEIL="$( grep -o 'ceiling [0-9][0-9]*' "$TMP/b.def" | head -1 | tr -dc '0-9' )"
 D_LBL="$( sed -n 's/.*<!-- ripwire task bundle\(.*\)-->.*/\1/p' "$TMP/b.def" | grep -cE 'over_ceiling(="1"|:)' )"
 grep -qE '^<ctx [^>]* over_ceiling="1"' "$TMP/b.def" && D_LBL=1
 if [ -z "$D_CEIL" ] || [ -z "$D_BYTES" ]; then
@@ -252,7 +252,7 @@ else
     for B in 600 1200; do
         "$BIN" "$FIX" --no-cache --pack-task="$LONGTASK" --token-budget=$B --legend=full >"$TMP/lt.$B" 2>/dev/null
         LT_BYTES="$( wc -c < "$TMP/lt.$B" | tr -d ' ' )"
-        LT_CEIL="$( grep -o 'ceiling [0-9]*' "$TMP/lt.$B" | head -1 | tr -dc '0-9' )"
+        LT_CEIL="$( grep -o 'ceiling [0-9][0-9]*' "$TMP/lt.$B" | head -1 | tr -dc '0-9' )"
         # forbudget-soft (rule 4): "fit ceiling*1.15 or SAY over_ceiling" is gone on an explicit budget (a soft target labels
         # nothing; the old grep -q 'over_ceiling' then passed on the legend's own "no over_ceiling" words). Replaced by HL + NOLBL
         # + the floor: the 320-byte task rides VERBATIM in task= and in the header echo, no clause is dropped "(ceiling)", no

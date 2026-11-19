@@ -217,8 +217,8 @@ inline constexpr const char* kPackTaskBundleLegendBody =
          "bodies: ONE body served BY DESIGN — the symbol the task names in backticks, else the top-ranked one that has a body. "
          "<b>=that served body, and shown=/total= count only bodies SERVED (total=1 when a bodied key body exists); every other "
          "candidate is a <bn t= n= p= l= next=> pointer row naming the expand call that serves it — a design choice, not a budget "
-         "casualty, so capped=1 only when the served body itself did not fit; bodyless=N of the candidates have no body by "
-         "construction (a module-scope owner) and can never be shown. "
+         "casualty, so capped=1 only when the served body did not fit or was itself cut short (truncated=1 on it); "
+         "bodyless=N of the candidates have no body by construction (a module-scope owner) and can never be shown. "
          "tail: file-grain rows, weaker evidence than the ranked rows (the files the ranking did not show, then the file page), "
          "sym= their top symbols; capped=1 next= the file page from the first row not printed. "
          "Row keys: n=name (chain it), sc=enclosing scope (when scoped; the full id is p::sc::n), in=reuse-count (absent = not measured, never a false 0)"
@@ -1342,14 +1342,22 @@ inline std::string packTaskBodyPointers( const IngestResult& ing, const std::vec
 // CAPPED= IS A BUDGET VERDICT, NOT `shown != total`, and the truncation vocabulary enforces exactly that equivalence
 // (test/truncvocabcheck.sh arm (E): `capped="1"` iff `shown < total` or a served row was itself cut). This section serves
 // ONE body BY DESIGN, so total= is what QUALIFIED to be served — 1 when a bodied key body exists, 0 when none does — and
-// the other candidates are not casualties of the budget. They ride as `<bn>` pointer rows and are counted by `next_rows=`,
-// so the arithmetic and the bit agree and a candidate is never reported as a cut the budget did not make. `bodyless=` keeps
-// #60's meaning: of the candidate set, those with no body by construction ("a bodyless owner is not an over-budget cut").
+// the other candidates are not casualties of the budget. They ride as `<bn>` pointer rows, so the arithmetic and the bit
+// agree and a candidate is never reported as a cut the budget did not make. `bodyless=` keeps #60's meaning: of the
+// candidate set, those with no body by construction ("a bodyless owner is not an over-budget cut").
+//
+// BUT A SERVED BODY THAT WAS TRUNCATED IS A CUT, and the first form of this rule missed it: capped= read only
+// `served < servedTotal`, so a body emitted and then cut short reported `capped="0"`. MEASURED over this lane's 596 dev
+// answers: 194 of them (33%) carried `<b … truncated="1">` under `<bodies capped="0">` — a truncation the document did not
+// admit to, which is the same defect class as a false cap with the sign flipped. It is the reading truncvocabcheck already
+// spells for this element ("rows all present but one is CUT: capped=1 with shown == total") and bodydialectcheck enforces.
+// capped= is now `served < servedTotal || servedCut`.
 struct PackBodiesTag
 {
     std::size_t served      = 0;       // shown= : bodies actually emitted (0 or 1)
     std::size_t servedTotal = 0;       // total= : bodies that qualified to be served
     std::size_t candidates  = 0;       // the whole candidate set: the served body plus every <bn> pointer row
+    bool        servedCut   = false;   // the served body was emitted but TRUNCATED — a cut, and it must say so
     std::size_t bodyless    = 0;       // of candidates=: no body by construction (a module-scope owner)
     bool        compress    = false;   // the per-bundle compression disclosure must survive the rewrite
 };
@@ -1389,7 +1397,7 @@ inline std::string restatePackTaskBodies( std::string_view bodiesXml, PackBodies
     // the one that adds no attribute at all. bodyless= stays the last count on this tag.
     char open[ 176 ];
     rw::formatTo( open, sizeof( open ), "<bodies shown=\"{}\" total=\"{}\" capped=\"{}\"{}{}>", t.served, t.servedTotal,
-                  t.served < t.servedTotal ? 1 : 0, rw::cstr( bodylessAttr ), t.compress ? " compress=\"1\"" : "" );
+                  t.served < t.servedTotal || t.servedCut ? 1 : 0, rw::cstr( bodylessAttr ), t.compress ? " compress=\"1\"" : "" );
     if( bodiesXml.empty() || tag.end == std::string::npos || !closesRight )
     {
         return std::string( open ) + std::string( keyPointer ) + std::string( pointers ) + "</bodies>";
@@ -1754,8 +1762,13 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
             // restatePackTaskBodies may ZERO bodiesKept (an unrecognised <bodies> shape drops the served body) — so the
             // ledger, the monotoneRoll charge and the JSON dialect below all read the count the XML actually printed.
             const std::size_t keptBefore = bodiesKept;
-            PackBodiesTag     bodiesTag{ bodiesKept, keyId != kNoNode ? 1u : 0u, bodiesTotal,
-                                         countBodylessCandidates( ing, bodyIds ), in.compress };
+            PackBodiesTag     bodiesTag{ .served      = bodiesKept,
+                                         .servedTotal = keyId != kNoNode ? 1u : 0u,
+                                         .candidates  = bodiesTotal,
+                                         .servedCut   = std::any_of( emittedBodies.kept.begin(), emittedBodies.kept.end(),
+                                                                     []( const EmittedBody& e ) { return e.isTruncated; } ),
+                                         .bodyless    = countBodylessCandidates( ing, bodyIds ),
+                                         .compress    = in.compress };
             bodiesStr  = restatePackTaskBodies( bodies.text, bodiesTag, keyPointer, pointers );
             bodiesKept = bodiesTag.served;
             if( keptBefore > 0 && bodiesKept == 0 )
@@ -2071,7 +2084,8 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     { char b[ 96 ];
       if( bodiesTotal == 0 ) { rw::formatTo( b, sizeof( b ), "none" ); }
       else { rw::formatTo( b, sizeof( b ), "kept {} of {}{}, {} as next=", bodiesKept, keyId != kNoNode ? 1 : 0,
-                           keyId != kNoNode && bodiesKept == 0 ? " (capped)" : "", bodiesTotal - bodiesKept ); }
+                           ( keyId != kNoNode && bodiesKept == 0 ) || ( bodyReadings & kBodyReadingTruncated ) != 0 ? " (capped)" : "",
+                           bodiesTotal - bodiesKept ); }
       report += "bodies: ";  report += b;  report += " | "; }
     report += "callers: " + listStatus( callersTotal, callersStr, callersKept ) + " | ";
     report += "notes: "   + listStatus( notesTotal,   notesStr,   notesKept )   + " | ";
