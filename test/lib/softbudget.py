@@ -11,7 +11,9 @@ import json, re
 # stub, each with the legend comment right before it). A soft-target reader leaves them out of the sections it reserves from T.
 # AF1 (2026-11-18): the default --for answer is answer-first, so the appended block may be followed by the trailing DOCUMENT legend
 # (comments only) before </ctx> — still the last ROW block.
-APPENDED = re.compile( r"<!-- (?:ripwire for )?syms:(?:(?!-->).)*-->(?:<syms [^>]*/>|<syms .*?</syms>)(?=<graph fmt=|(?:<!--(?:(?!-->).)*-->)*</ctx>)", re.S )
+# TL1 M1 (SIGX, src/forsigx.h): the moved sigs bytes (<!-- sigx: --><sigx>…</sigx>) ride after the last row block, so they may sit
+# between an appended <syms> and </ctx> like the trailing legend does; they are priced (inside est_tokens) and are not stripped.
+APPENDED = re.compile( r"<!-- (?:ripwire for )?syms:(?:(?!-->).)*-->(?:<syms [^>]*/>|<syms .*?</syms>)(?=<graph fmt=|(?:<!--(?:(?!-->).)*-->|<sigx>.*?</sigx>)*</ctx>)", re.S )
 def strip_appended( t ):
     """The answer text less its appended, unpriced blocks (APPENDED)."""
     return APPENDED.sub( "", t )

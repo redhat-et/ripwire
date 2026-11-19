@@ -122,6 +122,7 @@ assert a[ :i ] + a[ j: ] == b
 PY
 then ok "(f3) the answer minus the block is byte-identical to the RIPWIRE_NO_FOR_DOC_BODY=1 answer"; else no "(f3) the answer before/after the block moved"; fi
 
+# TL1 M1 (SIGX, src/forsigx.h): the moved sigs bytes (<!-- sigx: --><sigx>) ride after the last row block too, beside the trailing legend
 # (f4) well formed; no double hyphen in the comment; last before </ctx>
 if [ -s "$TMP/f1.xml" ] && python3 - "$TMP/f1.xml" <<'PY' 2>/dev/null
 import re, sys, xml.dom.minidom as M
@@ -130,7 +131,7 @@ M.parseString( s )
 i = s.index( "<!-- ripwire for doc_body:" )
 assert "--" not in s[ i + 4: s.index( "-->", i ) ]
 # AF1 (2026-11-18): answer-first — the block is the last ROW element; only the trailing DOCUMENT legend (comments) may follow it
-assert re.search( r"</doc_body>(?:<!--(?:(?!-->).)*-->)*</ctx>$", s, re.S )
+assert re.search( r"</doc_body>(?:<!--(?:(?!-->).)*-->|<sigx>.*?</sigx>)*</ctx>$", s, re.S )   # + TL1 SIGX block
 PY
 then ok "(f4) well formed XML; the comment holds no double hyphen; the block closes right before </ctx>"; else no "(f4) well-formedness or placement"; fi
 

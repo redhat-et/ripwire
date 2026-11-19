@@ -34,6 +34,10 @@
 # Exits non-zero on any failure.
 
 set -u
+# TL1 M1 (SIGX, src/forsigx.h): the default answer-first --for answer moves the attributes and text of sigs rows past r=10 into a
+# <sigx> block after the rows (lossless; test/forsigxcheck.sh pins it, (S1) rebuilds the unmoved answer byte for byte). This gate
+# reads those rows in place for another rule, so SIGX is off here.
+export RIPWIRE_NO_SIGX=1
 # SIBLING-DEMOTE / DECL-TWIN (every dialect since DEMOTE-ALL-DIALECTS, fordemoteall.h) stay OFF here, because this gate's readings
 # legitimately differ under them: <sigs shown= docs_dropped=> count the rows the ladder served BEFORE the rules print some as
 # <t p= sym= r=/> pointers (a pointer carries no <doc>), and (6)/(8) check those counts against the printed <d> rows. The rules are

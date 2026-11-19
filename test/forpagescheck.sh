@@ -136,7 +136,7 @@ def page_body(d):
 whole = rd(os.path.join(W, "whole.xml")); wm = root_open(whole)
 wbody = whole[wm.end():whole.rfind("</ctx>")]
 stream = wbody[:trailing_comments_start(wbody)]
-opens = set(re.findall(r"<[A-Za-z_][\w-]*\b[^<>]*[^/]>", stream))  # candidate section open tags
+opens = set(re.findall(r"<[A-Za-z_][\w-]*(?:\s[^<>]*[^/])?>", stream))  # candidate section open tags (SIGX: <sigx> has no attribute)
 ENDS = []   # the stream offset each page of the last join() ended at
 def join(pages):
     """rows of every page joined, envelopes removed against the whole stream. -> (joined_ok, detail)"""
@@ -146,7 +146,7 @@ def join(pages):
         if not stream.startswith(b, cur):
             # a continuation page may open with a re-opened section tag; a page may end with a synthetic close
             if k > 1:
-                m = re.match(r"<[A-Za-z_][\w-]*\b[^<>]*[^/]>", b)
+                m = re.match(r"<[A-Za-z_][\w-]*(?:\s[^<>]*[^/])?>", b)
                 if m and m.group(0) in opens and not stream.startswith(b[:len(m.group(0))], cur): b = b[m.end():]
             if not stream.startswith(b, cur):
                 m = re.search(r"</[A-Za-z_][\w-]*>$", b)

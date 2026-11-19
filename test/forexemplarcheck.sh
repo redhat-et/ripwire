@@ -807,6 +807,7 @@ for line in sys.stdin:
 if [ -n "$( block "$TMP/a1.xml" )" ] && [ "$( block "$TMP/x1.xml" )" = "$( block "$TMP/a1.xml" )" ]; then ok "(x1) MCP for: the same element bytes"
 else no "(x1) MCP: $( block "$TMP/x1.xml" | head -c 300 )"; fi
 cp "$TMP/c1.xml" "$TMP/c1a.xml"
+# TL1 M1 (SIGX, src/forsigx.h): the moved sigs bytes (<!-- sigx: --><sigx>) ride after the last row block too, beside the trailing legend
 for f in a1 s2 c1a e_goa l_full a2 a2f v4 u1 u2 i1 i2 i3b i6 i7 i8 r1 r1n r2 r2u r2u0; do
     if [ ! -s "$TMP/$f.xml" ]; then echo "  SKIP  (a1) $f: the arm that writes it did not run"; continue; fi
     if python3 - "$TMP/$f.xml" <<'PY'
@@ -817,7 +818,7 @@ i = s.index( "<!-- ripwire for exemplar_family:" )
 legend = s[ i: s.index( "-->", i ) ]
 if "--" in legend[ 4: ]: sys.exit( "double hyphen in the legend" )
 # AF1 (2026-11-18): answer-first — the block is the last ROW element; only the trailing DOCUMENT legend (comments) may follow it
-m = re.search( r'(<exemplar_family .*?(?:/>|</exemplar_family>))(?:<!--(?:(?!-->).)*-->)*</ctx>$', s, re.S )
+m = re.search( r'(<exemplar_family .*?(?:/>|</exemplar_family>))(?:<!--(?:(?!-->).)*-->|<sigx>.*?</sigx>)*</ctx>$', s, re.S )
 if not m: sys.exit( "the block does not close right before </ctx>" )
 for tag, attrs in re.findall( r'<(exemplar_family|m|touch_list|touch|rows|asserts) ([^>]*?)/?>', m.group( 1 ) ):
     for a in re.findall( r'(\w+)="', attrs ):

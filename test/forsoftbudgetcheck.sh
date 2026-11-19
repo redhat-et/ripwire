@@ -60,6 +60,14 @@
 # Exits non-zero on any failure.
 
 set -u
+# TL1 M1 (SIGX, src/forsigx.h): the default answer-first --for answer moves the attributes and text of sigs rows past r=10 into a
+# <sigx> block after the rows (lossless; test/forsigxcheck.sh pins it, (S1) rebuilds the unmoved answer byte for byte). This gate
+# reads those rows in place for another rule, so SIGX is off here.
+export RIPWIRE_NO_SIGX=1
+# TL1 M2 (foranswerfirst.h tailSameDirFirst): the default answer-first XML tail lists same-directory files first past row 24; the
+# --json / MCP tails and the file page keep rank order (an owner call, lane TL1 READOUT). This gate pins tail ORDER across surfaces,
+# so M2 is off here; test/foranswerfirstcheck.sh (SD) pins M2.
+export RIPWIRE_NO_TAIL_SAMEDIR=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"   # gitenvhermeticcheck (D): no ambient GIT_* reaches the RP10 fixture repos
 # SIBLING-DEMOTE (2026-11-08) is a post-cut pass that prints deep same-file <d> rows as <t> pointers; this gate pins
