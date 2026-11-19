@@ -643,9 +643,12 @@ inline bool steer_isPrimitiveType( TSNode type, std::string_view src ) noexcept
 // that had closed 30 lines earlier, the for-head `a` in scope being no slot).
 inline CcAccum::SteerSlot* steer_find( CcAccum& acc, std::string_view name, std::uint32_t at ) noexcept
 {
-    const auto it = std::find_if( acc.slots.rbegin(), acc.slots.rend(),
-                                  [ & ]( const CcAccum::SteerSlot& slot ) { return slot.name == name && at < slot.scopeEnd; } );
-    return it == acc.slots.rend() ? nullptr : &*it;
+    CcAccum::SteerSlot* newest = nullptr;   // slots are declared in document order: the last match is the innermost
+    for( CcAccum::SteerSlot& slot : acc.slots )
+    {
+        newest = slot.name == name && at < slot.scopeEnd ? &slot : newest;
+    }
+    return newest;
 }
 
 // The end byte of the block a declaration lives in: the nearest enclosing block or for-loop (a for-head name lives in the loop).

@@ -7202,10 +7202,7 @@ inline void writeTangleLines( std::ostream& f, const Snapshot& s )
     {
         f << "tangleon 1\n";
     }
-    for( const auto& [h, v] : s.tangleBySym )
-    {
-        f << "tangle " << std::hex << h << ' ' << v << std::dec << '\n';
-    }
+    writeHexPairLines( f, "tangle", s.tangleBySym );
 }
 
 inline bool writeBaseline( const Snapshot& s, const std::string& path, std::string_view headSha = {},
