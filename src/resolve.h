@@ -6135,7 +6135,7 @@ struct FlatRecvType
 //     as a member alias when the member sits in a class (a base class may supply it).
 // FLOORS (the base reading is kept, never a wrong row): a using-directive is not followed (`using namespace sc;`); a using-declaration
 // (`using extlib::Socket;`), a forward declaration or an enum of the alias's name in a NEARER scope than the alias is not seen
-// (the C++ call-result bindings that record them are off, model.h callResultFamilyOf), so an in-tree alias further out would be
+// (no binding row is read here: the C++ call-result bindings are off, model.h callResultFamilyOf), so an in-tree alias further out would be
 // read there; the same-named class-like symbol guard below is the one global check.
 // NO READING (the member keeps its base reading) when: the reachable aliases disagree (two same-scope aliases of one name with
 // different pointees: a tie is refused, never picked); the pointee was written in `std` (`std::shared_ptr<std::string>`); the chain
@@ -9677,6 +9677,35 @@ struct Rule3FileMemo
 // a declaration too — also marks that specialization as EXISTING, under the scope text prefixed with '\x01' (a byte
 // no scope or family key can hold): a call through an existing specialization that does not itself define the name
 // must never fall back to its siblings.
+// QUAL-NS-CALL-BIND: a C-family scope WRITTEN with `::` — the C++17 nested namespace `namespace rw::hashutil { … }`, an
+// out-of-line nested class `struct Tree<T>::Leaf { … }` — is indexed under its LAST segment as well, because that is the
+// one segment a call's qualifier keeps (ingest's H4 re-split): `hashutil::fnv1a64( s )`, `rw::hashutil::fnv1a64( s )` and
+// `::rw::hashutil::fnv1a64( s )` all arrive with qualifier "hashutil", which the whole-scope key "rw::hashutil::fnv1a64"
+// never matched — the call fell to the bare-name ladder and bound arch.h's same-named `rw::fnv1a64` (QUAL-NS-CALL-BIND
+// Stage 0, test/qualnscallcheck.sh). The classic nesting `namespace rw { namespace hashutil { … } }` already scopes its
+// members "hashutil", so both spellings of one namespace now key alike. Only the C family: another language's scope text
+// is not a `::` path a qualifier re-splits.
+inline void indexCanonicalScopeText( HashMap<std::string, rw::SmallVec<NodeId, 2>>& byScope, HashMap<std::string, rw::SmallVec<NodeId, 2>>& byFamily,
+                                     std::string& key, std::string_view scope, const Symbol& s, bool definition )
+{
+    if( scope.back() == '>' )
+    {
+        key.assign( 1, '\x01' ).append( scope );
+        byFamily[ key ];
+    }
+    if( !definition )
+    {
+        return;
+    }
+    key.clear();
+    key.append( scope ).append( "::" ).append( s.name );
+    byScope[ key ].push_back( s.id );
+    if( appendTemplateFamilyKey( key, scope, s.name ) )
+    {
+        byFamily[ key ].push_back( s.id );
+    }
+}
+
 inline void indexCanonicalScope( HashMap<std::string, rw::SmallVec<NodeId, 2>>& byScope, HashMap<std::string, rw::SmallVec<NodeId, 2>>& byFamily,
                                  std::string& key, const Symbol& s )
 {
@@ -9684,21 +9713,12 @@ inline void indexCanonicalScope( HashMap<std::string, rw::SmallVec<NodeId, 2>>& 
     {
         return;
     }
-    if( s.scope.back() == '>' )
+    const bool definition = isDefinitionNotDeclaration( s );
+    indexCanonicalScopeText( byScope, byFamily, key, s.scope, s, definition );
+    const std::size_t sep = langFacts( s.lang ).transitiveIncludes ? namesplit::lastTopLevelScopeSep( s.scope ) : std::string_view::npos;
+    if( sep != std::string_view::npos && sep + 2 < s.scope.size() )
     {
-        key.assign( 1, '\x01' ).append( s.scope );
-        byFamily[ key ];
-    }
-    if( !isDefinitionNotDeclaration( s ) )
-    {
-        return;
-    }
-    key.clear();
-    key.append( s.scope ).append( "::" ).append( s.name );
-    byScope[ key ].push_back( s.id );
-    if( appendTemplateFamilyKey( key, s.scope, s.name ) )
-    {
-        byFamily[ key ].push_back( s.id );
+        indexCanonicalScopeText( byScope, byFamily, key, std::string_view( s.scope ).substr( sep + 2 ), s, definition );
     }
 }
 
@@ -9801,23 +9821,26 @@ inline void widenToTemplateFamilies( CandidateSink<Admit>& sink, std::string& ke
 // "No answer" leaves `cand` untouched, so the bare-name ladder decides exactly as it did before this fallback existed.
 // More than one candidate is a split the caller discloses with amb=; a call through a template-id never lands on a
 // same-named definition outside the template. `key` is the caller's reused buffer.
+// `qualifier` is the call's written one, or the scope a declaration in force names for it (QUAL-NS-CALL-BIND: graph.h, from
+// CallResultTypes::cppScopeNamedAt).
 template< class Admit >
-inline void appendCanonicalCandidates( std::vector<NodeId>& cand, std::string& key, const Reference& r, const CanonicalScopes& scopes, Admit&& admit )
+inline void appendCanonicalCandidates( std::vector<NodeId>& cand, std::string& key, std::string_view qualifier, const Reference& r, const CanonicalScopes& scopes,
+                                       Admit&& admit )
 {
     CandidateSink<Admit> sink { cand, cand.size(), admit };
     key.clear();
-    key.append( r.qualifier ).append( "::" ).append( r.calleeName );
+    key.append( qualifier ).append( "::" ).append( r.calleeName );
     if( const auto it = scopes.byScope.find( key ); it != scopes.byScope.end() )
     {
         sink.add( &it->second );
     }
-    if( cand.size() != sink.before || !appendTemplateFamilyKey( key, r.qualifier, r.calleeName ) )
+    if( cand.size() != sink.before || !appendTemplateFamilyKey( key, qualifier, r.calleeName ) )
     {
         return;
     }
-    key.assign( 1, '\x01' ).append( r.qualifier );
-    const bool existingSpecialization = scopes.byFamily.find( key ) != scopes.byFamily.end() || scopes.chaUp.find( r.qualifier ) != scopes.chaUp.end();
-    const std::string_view family = existingSpecialization ? std::string_view( r.qualifier ) : namesplit::stripTemplateArgs( r.qualifier );
+    key.assign( 1, '\x01' ).append( qualifier );
+    const bool existingSpecialization = scopes.byFamily.find( key ) != scopes.byFamily.end() || scopes.chaUp.find( std::string( qualifier ) ) != scopes.chaUp.end();
+    const std::string_view family = existingSpecialization ? qualifier : namesplit::stripTemplateArgs( qualifier );
     sink.add( scopes.narrower.methodOnTypeOrBases( family, r, scopes.chaUp, /*skipSelf=*/existingSpecialization, /*unionOnMulti=*/true ) );
     const bool primarySupplies = cand.size() != sink.before;
     if( existingSpecialization && !primarySupplies )

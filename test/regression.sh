@@ -932,6 +932,7 @@ for _g in \
     qualitysymcheck \
     qualnamecheck \
     qualnewcheck \
+    qualnscallcheck \
     querycheck \
     queryfilescancheck \
     queuehopcheck \

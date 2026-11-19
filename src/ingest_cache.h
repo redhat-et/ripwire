@@ -393,7 +393,10 @@ constexpr std::uint32_t kCacheVersion = 54;           // 54: lane qd-tangle — 
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 333;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 335;          // bump on any grammar/.scm/extraction change
+                                                      // 335 = lane qual-ns-call-bind (placeholder above the 333/334 pair; the train renumbers): C++ / ObjC
+                                                      //   using-declarations and namespace aliases are recorded while the call-result family is off
+                                                      //   (ingest_binds.h kCppCallScopeFacts), read by receiverevidence.h CallResultTypes::cppScopeNamedAt.
                                                       // 333 = 2026-11-18 (train 1117d2, stacked on train 1117d1's 331/332; above the members' placeholders): rich file tag 334.
                                                       //   The members' extraction changes (each lane's number was a placeholder):
                                                       //   std-namesake (placeholder 317): a Rust local, parameter or field written as a standard type that names no class (`Option<T>`,
