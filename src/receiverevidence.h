@@ -254,6 +254,7 @@ struct CallResultTypes
     std::vector<std::string_view>                         filePackage;
     HashMap<std::string, std::vector<std::uint32_t>>      packageFiles;
     HashMap<std::string, std::vector<const Binding*>>     aliasesByName;
+    HashMap<std::string, char>                            cppUsingDeclared;   // QUAL-NS-CALL-BIND: every name a C++ using-declaration binds (cppScopeNamedAt's gate)
     HashMap<std::string, rw::SmallVec<NodeId, 2>>         goReceiverWitness;   // GO-CALLRESULT-LOCAL: Go receiver type name → one method per package directory (goDeclLessType)
     // RULE3-MEMBER-GUARD: the package directory of a Rust source path (`crates/settings/src/file.rs` → `crates/settings`), empty for a path outside src/, tests/, benches/, examples/
     static std::string_view rustPackageDirOf( std::string_view path )
@@ -284,6 +285,7 @@ struct CallResultTypes
     mutable std::string                                   aliasKey;   // importPathOf's / the TS pin lookup's
     mutable std::vector<std::string_view>                 usingPath;  // forEachCppUsing's per-row namespace path
     mutable std::string                                   moduleKey;  // rustModuleKey's buffer
+    mutable std::string                                   scopeKey;   // cppScopeNamedAt's gate lookup buffer
     mutable bool                                          pathCut = false;   // fc1 fix 3: a rustPathOutside walk hit its depth cap — its false then means "cut", not "stays in the tree"
 
     explicit CallResultTypes( const IngestResult& i ) : ing( i ) {}
@@ -318,6 +320,10 @@ struct CallResultTypes
             if( isCppScopeRow( b ) && ( cppUsingFiles.empty() || cppUsingFiles.back() != b.fileId ) )
             {
                 cppUsingFiles.push_back( b.fileId );
+            }
+            if( b.kind == LocalBindKind::TypeImport && isCppScopeRow( b ) && b.var != "*" )
+            {
+                cppUsingDeclared.try_emplace( b.var, char( 1 ) );
             }
         }
     }
@@ -2309,6 +2315,58 @@ struct CallResultTypes
         bool aliased = false;
         forEachCppUsing( f, at, calleePath, [ & ]( const Binding& b ) { aliased = aliased || ( b.kind == LocalBindKind::TypeAlias && b.var == head ); } );
         return aliased;
+    }
+
+    // QUAL-NS-CALL-BIND: the scope a C++ call names through a declaration IN FORCE at its site, spelled as the one segment the
+    // canonical tier keys (a call qualifier's own shape, ingest's H4 re-split) — "" when no declaration says, or two disagree:
+    //   * a qualified call `h::f()` under a namespace alias `namespace h = rw::hashutil;` (or a type alias `using h = X;`)
+    //     names the alias's target: "hashutil";
+    //   * a bare call `f()` under a using-declaration `using rw::hashutil::f;` names the declaration's scope: "hashutil".
+    //     A using-directive (`using namespace a;`) names no one scope and is not read here.
+    // In force is forEachCppUsing's rule: the call's own file's rows declared before it in a scope that holds it, and the
+    // namespace- or file-scope rows of an in-tree header it includes whose namespace leads the call's. A name no alias or
+    // using-declaration in the tree binds never walks (the two name sets are built once, in noteImport).
+    std::string cppScopeNamedAt( const Reference& r ) const
+    {
+        const bool             qualified = !r.qualifier.empty();
+        const std::string_view name      = qualified ? std::string_view( r.qualifier ) : std::string_view( r.calleeName );
+        scopeKey.assign( name );
+        if( qualified ? !aliasesByName.contains( scopeKey ) : !cppUsingDeclared.contains( scopeKey ) )
+        {
+            return {};
+        }
+        std::vector<std::string_view> calleePath;
+        namespacePathAt( r.fileId, r.startByte, calleePath );
+        std::string_view named;
+        bool             agree = true;
+        forEachCppUsing( r.fileId, r.startByte, calleePath, [ & ]( const Binding& b )
+        {
+            const bool fits = qualified ? b.kind == LocalBindKind::TypeAlias && !bindsWithoutTarget( b )
+                                        : b.kind == LocalBindKind::TypeImport && b.var != "*";
+            // an included header's row only at file scope: no C++ Namespace row is recorded while the family is off, so its
+            // namespace path is not read and a header's `namespace a { using x::f; }` might not lead to the call's
+            const bool fileScope = b.fileId == r.fileId || ( b.spanStart == 0 && b.spanEnd == 0xFFFFFFFFu );
+            if( !fits || !fileScope || b.var != name )
+            {
+                return;
+            }
+            const std::string_view scope = qualified ? lastScopeSegment( b.importedName ) : lastScopeSegment( scopeHalf( b.importedName ) );
+            agree = agree && !scope.empty() && ( named.empty() || named == scope );
+            named = scope;
+        } );
+        return agree ? std::string( named ) : std::string();
+    }
+    // `a::b::f` → `a::b` (the part before the last top-level `::`), "" when there is none
+    static std::string_view scopeHalf( std::string_view written ) noexcept
+    {
+        const std::size_t sep = namesplit::lastTopLevelScopeSep( written );
+        return sep == std::string_view::npos ? std::string_view{} : written.substr( 0, sep );
+    }
+    // `::a::b` → `b`, `a::B<x::y>` → `B<x::y>`: the last top-level segment
+    static std::string_view lastScopeSegment( std::string_view written ) noexcept
+    {
+        const std::size_t sep = namesplit::lastTopLevelScopeSep( written );
+        return sep == std::string_view::npos ? written : written.substr( sep + 2 );
     }
 
     // the class a ReturnType record's written type resolves to in its own (the callee's) file — kNoNode for none or several

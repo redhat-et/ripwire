@@ -4612,6 +4612,22 @@ inline const ScopeFactNode* scopeFactRow( Lang lang, const char* t )
     const auto row = std::ranges::find_if( kScopeFactNodes, [ & ]( const ScopeFactNode& r ) { return r.family == callResultFamilyOf( lang ) && r.kind == t; } );
     return row == std::end( kScopeFactNodes ) ? nullptr : &*row;
 }
+// QUAL-NS-CALL-BIND (kParserVer 335): the two C++ scope facts a CALL's binding reads (receiverevidence.h
+// CallResultTypes::cppScopeNamedAt), recorded even while the C++ call-result family is off (model.h callResultFamilyOf): a
+// using-declaration `using a::b::f;` (a TypeImport over its scope) and a namespace alias `namespace h = a::b;` (a TypeAlias over
+// its scope). Neither types a call result, and no Namespace row is recorded, so the family's readers see what they saw.
+inline constexpr ScopeFactNode kCppCallScopeFacts[] = {
+    { CallResultFamily::Cpp, "using_declaration", ScopeFactRole::Scope }, { CallResultFamily::Cpp, "namespace_alias_definition", ScopeFactRole::Alias },
+};
+inline const ScopeFactNode* cppCallScopeFactRow( Lang lang, const char* t )
+{
+    if( ( lang != Lang::Cpp && lang != Lang::ObjC ) || callResultFamilyOf( lang ) == CallResultFamily::Cpp )
+    {
+        return nullptr;   // not C++, or the family's own rows (kScopeFactNodes) already record them
+    }
+    const auto row = std::ranges::find_if( kCppCallScopeFacts, [ & ]( const ScopeFactNode& r ) { return r.kind == t; } );
+    return row == std::end( kCppCallScopeFacts ) ? nullptr : &*row;
+}
 
 // the C++ scope a declaration `n` is in force over: a namespace body, a class body (only when `classScope` admits one), a
 // function body (fix round 4: a local class's member result is declared inside it), or the whole file (0 .. 0xFFFFFFFF)
@@ -4649,7 +4665,7 @@ inline void captureTypeAlias( BindCtx& cx, TSNode n, const char* t )
 {
     std::uint32_t spanStart = 0;
     std::uint32_t spanEnd   = 0;
-    if( callResultFamilyOf( cx.lang ) == CallResultFamily::Cpp )
+    if( cx.lang == Lang::Cpp || cx.lang == Lang::ObjC )   // the family's rows, and kCppCallScopeFacts' while the family is off
     {
         std::tie( spanStart, spanEnd ) = cppDeclScope( n, true );
         if( spanEnd == 0 )
@@ -7894,7 +7910,9 @@ void bindsVisitNode( BindCtx& cx, TSNode n, const char* t )
     }
     // (L) fix round 2: a namespace body, a C++ using-directive / using-declaration — the scope a bare result type resolves in
     // (fix round 3) an alias, (fix round 4) a declaration the index keeps no class for, or a region it cannot read
-    if( const ScopeFactNode* row = scopeFactRow( lang, t ) )
+    const ScopeFactNode* row = scopeFactRow( lang, t );
+    row                      = row != nullptr ? row : cppCallScopeFactRow( lang, t );
+    if( row != nullptr )
     {
         switch( row->role )
         {
