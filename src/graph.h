@@ -9343,7 +9343,50 @@ struct PythonRenamedImports
     HashMap<std::string, char>        plainClasses;
     std::vector<PythonAliasShadow>    shadows;
     [[nodiscard]] bool                empty() const noexcept { return renamed.empty() && plainClasses.empty(); }
+    [[nodiscard]] bool                binds( const std::string& key ) const { return renamed.contains( key ) || plainClasses.contains( key ); }
+    // the member `key` ("<fileId>#name") imports and whether it is a plain import of a class (the member is the name itself); "" for none
+    struct Member
+    {
+        std::string_view name;
+        bool             plain = false;
+    };
+    [[nodiscard]] Member memberOf( const std::string& key, std::string_view name ) const
+    {
+        if( const auto it = renamed.find( key ); it != renamed.end() )
+        {
+            return { it->second, false };
+        }
+        return plainClasses.contains( key ) ? Member{ name, true } : Member{};
+    }
+    // moves every entry whose member is its own local name (a plain import) from `renamed` to `plainClasses`, and drops the poisoned ones
+    void splitPlain()
+    {
+        std::erase_if( renamed, [ & ]( const auto& kv )
+        {
+            const bool plain = !kv.second.empty() && std::string_view( kv.first ).substr( kv.first.find( '#' ) + 1 ) == kv.second;
+            if( plain )
+            {
+                plainClasses.try_emplace( kv.first, '\0' );
+            }
+            return kv.second.empty() || plain;
+        } );
+    }
 };
+
+// the member a Python import binding names under its local name, at module scope only: x for `from m import x as y`, and for a plain
+// `from m import x` when x names classes in two or more files (`multi`: IMPORT-PROVED-SPLITS); "" for any other import (it poisons the name)
+inline std::string pythonImportMember( const IngestResult& ing, const Binding& b, const HashMap<std::string, char>& multi )
+{
+    if( pythonBindScope( ing, b ) != kNoNode )
+    {
+        return {};
+    }
+    if( b.importedName.str().starts_with( kPythonFromMemberMark ) )
+    {
+        return b.importedName.substr( kPythonFromMemberMark.size() );
+    }
+    return b.importedName.empty() && multi.contains( b.var ) ? std::string( b.var ) : std::string{};
+}
 
 inline PythonRenamedImports buildPythonRenamedImports( const IngestResult& ing )
 {
@@ -9356,25 +9399,14 @@ inline PythonRenamedImports buildPythonRenamedImports( const IngestResult& ing )
         {
             continue;
         }
-        const bool moduleScope = pythonBindScope( ing, b ) == kNoNode;
-        const bool renamed     = b.importedName.str().starts_with( kPythonFromMemberMark ) && moduleScope;
-        const bool plain       = b.importedName.empty() && moduleScope && multi.contains( b.var );   // IMPORT-PROVED-SPLITS: member == the name
-        const std::string member = renamed ? b.importedName.substr( kPythonFromMemberMark.size() ) : plain ? std::string( b.var ) : std::string{};
+        const std::string member = pythonImportMember( ing, b, multi );
         const auto [ it, fresh ] = out.renamed.try_emplace( fileNameKey( key, b.fileId, b.var ), member );
         if( !fresh && it->second != member )
         {
             it->second.clear();   // two imports of one name that disagree: never decided
         }
     }
-    std::erase_if( out.renamed, [ & ]( const auto& kv )
-    {
-        const bool plain = !kv.second.empty() && kv.first.ends_with( kv.second ) && kv.first.size() > kv.second.size() && kv.first[ kv.first.size() - kv.second.size() - 1 ] == '#';
-        if( plain )
-        {
-            out.plainClasses.try_emplace( kv.first, '\0' );
-        }
-        return kv.second.empty() || plain;
-    } );
+    out.splitPlain();
     if( out.empty() )
     {
         return out;
@@ -9382,12 +9414,30 @@ inline PythonRenamedImports buildPythonRenamedImports( const IngestResult& ing )
     for( const Binding& b : ing.bindings )
     {
         if( b.kind == LocalBindKind::RecvType && b.fromSymbol != kNoNode && !b.var.empty() && b.fileId < ing.files.size()
-            && ( out.renamed.contains( fileNameKey( key, b.fileId, b.var ) ) || out.plainClasses.contains( key ) ) )
+            && out.binds( fileNameKey( key, b.fileId, b.var ) ) )
         {
             out.shadows.push_back( PythonAliasShadow{ b.fromSymbol, b.var, VarSpan{ b.spanStart, b.spanEnd } } );
         }
     }
     return out;
+}
+
+// PY-IMPORT-ALIAS-CALL: is `name` bound where `r` runs by something other than the file's module-scope import of it — a local or parameter
+// of the caller (localNameSet, which also holds a def-scoped import), of a def enclosing it (a closure reads that), or a comprehension
+// target / lambda parameter whose span covers the call (PythonRenamedImports::shadows: the site-spanned records localNameSet skips)
+inline bool pythonNameBoundLocally( const IngestResult& ing, const PythonRenamedImports& imports, const ExternalVeto& veto, const Reference& r, std::string_view name )
+{
+    if( veto.hasLocal( r, name ) || std::ranges::any_of( imports.shadows, [ &r, name ]( const PythonAliasShadow& s )
+                                                          { return s.sym == r.fromSymbol && s.var == name && r.startByte >= s.span.startByte && r.startByte < s.span.endByte; } ) )
+    {
+        return true;
+    }
+    return std::ranges::any_of( pythonClassScopeChain( ing, r.fromSymbol ), [ & ]( NodeId outer )
+    {
+        Reference at = r;
+        at.fromSymbol = outer;
+        return veto.hasLocal( at, name );
+    } );
 }
 
 // PY-IMPORT-ALIAS-CALL: the ONE definition a bare Python call `y()` reaches through `from m import x as y`, else kNoNode. Decided only
@@ -9402,25 +9452,12 @@ inline NodeId pythonRenamedImportPin( const IngestResult& ing, const PythonRenam
                                       std::string_view name )
 {
     std::string key;
-    const auto  rit   = imports.renamed.find( fileNameKey( key, r.fileId, name ) );
-    const bool  plain = rit == imports.renamed.end() && imports.plainClasses.contains( key );   // IMPORT-PROVED-SPLITS: `from m import C`, C's own name
-    const std::string_view member = plain ? name : rit == imports.renamed.end() ? std::string_view{} : std::string_view( rit->second );
+    const auto [ member, plain ] = imports.memberOf( fileNameKey( key, r.fileId, name ), name );   // plain: IMPORT-PROVED-SPLITS' `from m import C`
     if( member.empty() || r.fromSymbol == kNoNode || r.fromSymbol >= ing.symbols.size()
         || v.pythonModuleRebind.contains( key ) || v.pythonModuleRebind.contains( fileNameKey( key, r.fileId, kPythonDynamicWrite ) )
-        || ( r.fileId < v.pythonScopes.starTargets.size() && !v.pythonScopes.starTargets[ r.fileId ].empty() ) || veto.hasLocal( r, name )
-        || std::ranges::any_of( imports.shadows, [ &r, name ]( const PythonAliasShadow& s )
-                                 { return s.sym == r.fromSymbol && s.var == name && r.startByte >= s.span.startByte && r.startByte < s.span.endByte; } ) )
+        || ( r.fileId < v.pythonScopes.starTargets.size() && !v.pythonScopes.starTargets[ r.fileId ].empty() ) || pythonNameBoundLocally( ing, imports, veto, r, name ) )
     {
         return kNoNode;
-    }
-    for( NodeId outer : pythonClassScopeChain( ing, r.fromSymbol ) )
-    {
-        Reference at = r;
-        at.fromSymbol = outer;
-        if( veto.hasLocal( at, name ) )
-        {
-            return kNoNode;   // an enclosing def binds the name: a closure reads that, not the import
-        }
     }
     const auto mf = v.memberImportFile.find( fileNameKey( key, r.fileId, name ) );
     const auto dit = byName.find( std::string( member ) );
@@ -9433,7 +9470,7 @@ inline NodeId pythonRenamedImportPin( const IngestResult& ing, const PythonRenam
     {
         const Symbol& s = ing.symbols[ c ];
         // module scope = no enclosing def or class by span (a Python class's Symbol::scope is its own name, so scope.empty() cannot say it)
-        if( s.fileId == mf->second && s.lang == Lang::Python && ( s.kind == SymKind::Function || s.kind == SymKind::Class )
+        if( s.fileId == mf->second && s.lang == Lang::Python && ( s.kind == SymKind::Class || ( s.kind == SymKind::Function && !plain ) )   // a plain import pins only a class
             && pythonClassScopeChain( ing, c ).empty() )
         {
             if( only != kNoNode )
@@ -9455,7 +9492,7 @@ inline NodeId pythonRenamedImportPin( const IngestResult& ing, const PythonRenam
     {
         return kNoNode;
     }
-    return plain && only != kNoNode && ing.symbols[ only ].kind != SymKind::Class ? kNoNode : only;   // a plain import pins only a class
+    return only;
 }
 
 // tier 2, JS/TS: a bare name an ES named import pins, or a CommonJS `const { Node } = require('./a')` (a ModuleAlias, not
