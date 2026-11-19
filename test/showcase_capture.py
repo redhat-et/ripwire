@@ -54,12 +54,25 @@ def fmt_block(data):
     lines, exploded = explode(text)
     shown = lines
     marker = None
+    tail = []
     if len(lines) > 40:
+        # INT1 (2026-11-19): an answer-first --for document ENDS in its legend (the trailing comments before the root closes),
+        # so the 30-line window cut every legend clause a caption may name ([adaptive: …], [doc mentions: …]) and
+        # showcasecapturecheck (G) went red. The trailing run of comment lines (and the closing tags among them) is kept after
+        # the marker, like the head comments the preamble already promises in full; the marker counts only the lines between.
+        # A block whose trailing run holds no comment (every legend-first answer) is cut exactly as before.
+        k = len(lines)
+        while k > 30 and ( lines[k - 1].lstrip().startswith("<!--") or re.match(r'^\s*</[\w-]+>\s*$', lines[k - 1]) ):
+            k -= 1
+        if any(ln.lstrip().startswith("<!--") for ln in lines[k:]):
+            tail = lines[k:]
+        else:
+            k = len(lines)
         shown = lines[:30]
         if exploded:
-            marker = f"… [{len(lines)-30} more display lines; full output is {total_bytes} bytes on {raw_line_count} raw line(s)]"
+            marker = f"… [{k-30} more display lines; full output is {total_bytes} bytes on {raw_line_count} raw line(s)]"
         else:
-            marker = f"… [{len(lines)-30} more lines, {total_bytes} bytes total]"
+            marker = f"… [{k-30} more lines, {total_bytes} bytes total]"
     out = []
     for ln in shown:
         # §B11.2: header COMMENTS are exempt from the 300-byte display cut — the preamble promises they
@@ -87,6 +100,7 @@ def fmt_block(data):
             out.append(ln)
     if marker:
         out.append(marker)
+        out.extend(tail)   # the trailing legend comments of an answer-first document (never cut: they are comment lines)
     return "\n".join(out)
 
 def publish_block(data):
@@ -1064,7 +1078,7 @@ doc.append(f"- **Repo:** the ripwire repo @ `{sha}` — **{dirty_note}**. The di
 doc.append(f"- **Corpus:** the ripwire repo itself (dogfood), via `./build/ripwire`")
 doc.append(f"- **Sandbox diff** (the last section only): `{sandbox_diffstat}` — one preexisting function made deeply nested, one function's arity changed 1 -> 2, one copy-paste duplicate helper, one new 8-parameter public function.")
 doc.append("")
-doc.append("**How to read the blocks:** ripwire's real XML output is minified — often ONE long line. For scanability, long minified lines are displayed re-wrapped with a line break at every tag seam (`><`). Header COMMENT lines (the legends) always appear in full — they are exempt from the per-line cut; any OTHER display line over 300 bytes is cut with a `… [line truncated: N more bytes]` marker, which can hit a long root element or row. `--plan-lanes` emits JSON and is re-wrapped at object seams the same way. Long outputs are cut to their first ~30 display lines with a `… [N more display lines; full output is M bytes]` marker giving the true size. Exit codes are recorded when non-zero; wall time when >1s.")
+doc.append("**How to read the blocks:** ripwire's real XML output is minified — often ONE long line. For scanability, long minified lines are displayed re-wrapped with a line break at every tag seam (`><`). Header COMMENT lines (the legends) always appear in full — they are exempt from the per-line cut; any OTHER display line over 300 bytes is cut with a `… [line truncated: N more bytes]` marker, which can hit a long root element or row. `--plan-lanes` emits JSON and is re-wrapped at object seams the same way. Long outputs are cut to their first ~30 display lines with a `… [N more display lines; full output is M bytes]` marker giving the true size; an answer that ENDS in its legend (the answer-first `--for` document) keeps those trailing comment lines after the marker, and N counts only the lines between. Exit codes are recorded when non-zero; wall time when >1s.")
 doc.append("")
 doc.append(f"**Not run (and why):** `ripwire <git-url>` (network clone), `--legend-have` (a per-CALLER handshake — the caller names the legend dictionary version it already holds — so a one-shot capture has nothing to hold and nothing to show; gated by `test/legendhavecheck.sh`), `--listen` / `--mcp-token` / `--allow-remote-edits` (the HTTP-server posture; `--mcp` itself IS captured in its own section as a one-shot stdio JSON-RPC exchange, and `wrap claude` shows the wiring), `--arch --baseline[-update]` (state writer against the read-only repo — `--note-add` / `--quality-baseline` / `--quality-ack` / the three edit verbs / `--edit-plan` ARE shown, inside the throwaway sandbox clone; `--index-out` / `--pin-census` write to scratch), `--eval-mined` (needs a `minedpair.jsonl` artifact from `bench/mine_traces.py`; none present in the tree), `--refetch` (git-url only), `--lsp` (the editor transport — its one-shot dialogues are gated by `test/lspcheck.sh`, not by showcase blocks), `--max-memory` (the memory guard is silent on this repo by construction; its stops are gated by `test/memguardcheck.sh`), `--force` (wrap-only modifier), `--deadline-ms` (a timing modifier on `--help-task`: a warm index prints exactly the `--help-task` blocks shown only when it finishes within the deadline (a warm run past it abstains as well), and the cold abstention depends on wall-clock timing; gated by `test/helptaskdeadlinecheck.sh`), `--scan-skills` bare form (would sweep `~/.claude/skills`; the explicit-DIR form is shown instead), `--help` ({help_line_count} lines — read it from the binary).")
 doc.append("")
