@@ -382,11 +382,15 @@ inline void addShortestPathNodes( const Graph& g, std::span<const NodeId> from, 
     {
         out.insert( out.end(), level.begin(), level.end() );
         std::vector<NodeId> next;
+        // One hop nearer is `toSink[u] - 1`, compared on u's side: every node in `level` is reached (toSink[u] < kUnreached) and the loop
+        // runs only while toSink[u] > 0, so the subtraction cannot wrap. The old `toSink[v] + 1 == toSink[u]` wrapped to 0 for a callee
+        // the walk never reached (toSink[v] == kUnreached) — no wrong row, since 0 never equals a hop count > 0, but an unsigned
+        // overflow the ASan build aborts on (foronesidecheck (a2), (u)).
         for( const NodeId u : level )
         {
             for( std::uint32_t k = g.outOff[u]; k < g.outOff[u + 1] && toSink[u] > 0; ++k )
             {
-                if( const NodeId v = g.outTargets[k]; toSink[v] + 1 == toSink[u] && !std::ranges::contains( next, v ) )
+                if( const NodeId v = g.outTargets[k]; toSink[v] == toSink[u] - 1 && !std::ranges::contains( next, v ) )
                 {
                     next.push_back( v );
                 }

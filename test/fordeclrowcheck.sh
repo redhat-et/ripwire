@@ -93,6 +93,7 @@ silent(){ # arm, argv...
     local arm="$1"; shift
     if run "$@" >"$TMP/o" && ! grep -q 'decl_rows' "$TMP/o" && grep -q '</ctx>$' "$TMP/o"; then ok "($arm) silent: $*"; else no "($arm) must be silent: $*"; fi
 }
+# TL1 M1 (SIGX, src/forsigx.h): the moved sigs bytes (<!-- sigx: --><sigx>) ride after the last row block too, beside the trailing legend
 two_rows(){ # file, subject: rows="2", the definition row, the header row decl_only, closes before </ctx>
     python3 - "$1" "$2" <<'PY'
 import re, sys
@@ -100,7 +101,7 @@ s = open( sys.argv[1], encoding="utf8" ).read()
 # a trailing <shortkey> (the out-of-band fallback ladder, gate barrelshortkeycheck: `app::run_it` is unproven under namespace app)
 # whose legend declares it outside est_tokens may follow; nothing else may — except, since AF1 (2026-11-18), the answer-first
 # DOCUMENT legend: the trailing run of comments the default --for answer ends with, inside the same answer. No row may.
-m = re.search( r'<decl_rows of="([^"]*)" rows="(\d+)">(.*?)</decl_rows>(?:<!-- shortkey[^>]*?not in est_tokens[^>]*?-->(?:<shortkey [^>]*/>|<shortkey [^>]*>.*?</shortkey>))?(?:<!--(?:(?!-->).)*-->)*</ctx>$', s, re.S )
+m = re.search( r'<decl_rows of="([^"]*)" rows="(\d+)">(.*?)</decl_rows>(?:<!-- shortkey[^>]*?not in est_tokens[^>]*?-->(?:<shortkey [^>]*/>|<shortkey [^>]*>.*?</shortkey>))?(?:<!--(?:(?!-->).)*-->|<sigx>.*?</sigx>)*</ctx>$', s, re.S )
 if not m or m.group( 1 ) != sys.argv[2] or m.group( 2 ) != "2": sys.exit( 1 )
 rows = re.findall( r'<d [^>]*/>', m.group( 3 ) )
 if len( rows ) != 2: sys.exit( 1 )
