@@ -33,6 +33,7 @@
 #include "callhierarchy.h"  // H14/M13: the shared 1-hop call-hierarchy computation — find_symbol / find_referencing_symbols
 #include "graphlegend.h"   // §H4 §3.4: the ONE counts_floor= marker + shared graph-count legend wording (CLI ≡ MCP)
 #include "crossref.h"      // the shared cross-branch content index (whereis / stray_content)
+#include "qdbestsince.h"   // D4: quality::tangleBestSince — quality_delta's ratchet (CLI parity)
 #include "darkflags.h"     // the shared dark-content gate harvest (flags)
 #include "flipimpact.h"    // the flags verb's `symbol` argument: one gate's flip blast radius
 #include "typeuse.h"       // L7: the impact verb's type tier (CLI ≡ MCP)
@@ -4759,7 +4760,7 @@ inline std::string connectText( const std::string& root, const std::vector<std::
 //
 // quality_baseline WRITES the `.ripwire_quality_baseline` sidecar (a side-effect verb, like the edit verbs),
 // stamping the current HEAD sha. quality_delta is READ-ONLY: it reports ONLY what the working tree made WORSE
-// vs the baseline (12 kinds), honoring the exact precedence the CLI --quality-delta uses:
+// vs the baseline (13 kinds), honoring the exact precedence the CLI --quality-delta uses:
 //   (1) an explicit sidecar (from quality_baseline) wins — UNLESS it is STALE (pinned at a different HEAD),
 //   (2) else auto-compare vs git HEAD (computeHeadSnapshot), (3) else degrade with a clear message.
 // Both reuse quality::computeSnapshot / writeBaseline / selectBaseline / computeHeadSnapshot / gitHeadSha /
@@ -4818,6 +4819,7 @@ struct QualityDeltaOutcome
     // hwh-fix4 (N1): the CLI root's unread_history= twin (quality::historyUnreadDisclosure), present-only. An MCP client has no exit
     // code, so this field is the only way it learns that "gating":0 is a floor over history that could not be read.
     std::string                       historyJson;
+    rw::quality::DeltaExtras          extras;   // D4 ratchet source + disclosure, QD-CREDIT-ROW improvements (the CLI's DeltaBasis::extras)
 };
 
 // §B6 M10 — a CORRUPT sidecar used to read as "no sidecar". readBaseline reports a file that yields no header,
@@ -4944,8 +4946,9 @@ inline QualityDeltaOutcome computeQualityDelta( const std::string& root )
     const auto heal = rw::quality::healIdentity( baseSel.snapshot, acks, ing, g, root, root, /*wantContentIds=*/false );
 
     rw::quality::HistoryUnread historyUnread;
+    oc.extras.bestSince = [ root ]( const std::vector<std::string>& relPaths ) { return rw::quality::tangleBestSince( root, "HEAD", relPaths ); };   // the CLI's source
     oc.regs       = rw::quality::computeDelta( ing, g, baseSel.snapshot, root, {}, rw::kDefaultMaxFileBytes, &oc.registerMacroExcluded, &oc.apiNewSurface,
-                                               nullptr, &oc.declinedCallExcluded, &oc.valueRefExcluded, rw::quality::KindScope{}, &historyUnread, &passes );
+                                               nullptr, &oc.declinedCallExcluded, &oc.valueRefExcluded, rw::quality::KindScope{}, &historyUnread, &passes, &oc.extras );
     historyUnread.renames = heal.renames.refusedPartial && baseSel.marker == std::string_view( "sidecar" );   // the CLI's own rule
     oc.historyJson = rw::quality::historyUnreadDisclosure( historyUnread ).second;
 
@@ -5039,6 +5042,7 @@ inline std::pair<std::string, std::string> qualityDeltaJson( const std::string& 
                     // #228 — the CLI root's head_basis= twin, present-only: absent means the archived HEAD tree.
                     + ( oc.headBasis == nullptr ? std::string() : std::string( ",\"head_basis\":\"" ) + mcpdetail::jsonEscape( oc.headBasis ) + "\"" )
                     + oc.historyJson
+                    + rw::quality::ratchetAttrsJson( oc.extras )
                     + ",\"at\":" + atJson + ",\"r\":[";
     bool first = true;
     for( const rw::quality::Regression& r : oc.regs )
@@ -5061,7 +5065,7 @@ inline std::pair<std::string, std::string> qualityDeltaJson( const std::string& 
             out += ",\"sym\":\"" + mcpdetail::jsonEscape( rw::quality::displaySym( r.sym, root ) ) + "\"";
             if( !( r.kind == "dead-code" ) && !( r.kind == "api-surface" && r.was == r.now ) )
             {
-                out += ",\"was\":" + std::to_string( r.was ) + ",\"now\":" + std::to_string( r.now );
+                out += ",\"was\":" + rw::quality::rowValueText( r, r.was ) + ",\"now\":" + rw::quality::rowValueText( r, r.now );
             }
         }
         if( !r.path.empty() )
@@ -5092,6 +5096,13 @@ inline std::pair<std::string, std::string> qualityDeltaJson( const std::string& 
         {
             out += ",\"ceiling\":" + std::to_string( r.ceiling ); // QD-ENTRY-CEILING (mirrors the XML)
         }
+        for( const auto& [ name, text ] : { std::pair<const char*, const std::string*>{ "why", &r.why }, { "fix", &r.fix }, { "locals", &r.locals } } )
+        {
+            if( !text->empty() )
+            {
+                out += ",\"" + std::string( name ) + "\":\"" + mcpdetail::jsonEscape( *text ) + "\"";   // QD-TANGLE (mirrors the XML)
+            }
+        }
         out += "}";
     }
     out += "],";
@@ -5100,9 +5111,10 @@ inline std::pair<std::string, std::string> qualityDeltaJson( const std::string& 
     if( !showStale && oc.regs.empty() && !oc.staleAcks.empty() )
     {
         folded = out + "\"stale_by_kind\":\"" + mcpdetail::jsonEscape( rw::quality::staleByKindValue( oc.staleAcks ) )
-               + "\",\"stale_next\":\"" + mcpdetail::jsonEscape( rw::nextFlag( "show_stale=", "true" ) ) + "\"}";
+               + "\",\"stale_next\":\"" + mcpdetail::jsonEscape( rw::nextFlag( "show_stale=", "true" ) ) + "\"" + rw::quality::improvedJson( oc.extras.improved, root ) + "}";
     }
     out += rw::quality::staleAcksJsonArray( oc.staleAcks );   // L2 — "sa":[...], same taxonomy the CLI's <sa kind= key= why=/> rows carry
+    out += rw::quality::improvedJson( oc.extras.improved, root );   // QD-CREDIT-ROW (the CLI's own renderer; absent when none)
     out += "}";
     if( !folded.empty() && rw::foldPays( folded, out ) )
     {

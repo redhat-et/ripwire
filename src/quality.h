@@ -59,11 +59,13 @@
 #include <cstring>      // std::memcpy / std::memcmp — POD (de)serialization of the qsnap blob
 #include <filesystem>
 #include <fstream>
+#include <functional>   // D4: BestSinceSource — the verb hands computeDelta its history reader
 #include <limits>       // std::numeric_limits<std::size_t>::max() — "no count cap" sentinel (evictOldCacheFamily)
 #include <mutex>        // Phase-M: serialize concurrent ingest() (prefetch worker vs request thread)
 #include <optional>     // L2 — computeStaleAcks' per-kind dispatch: nullopt = "not stale"
 #include <sstream>
 #include <string>
+#include <tuple>        // std::tie — the improved section's place order
 #include <type_traits>  // std::is_trivially_copyable_v — the qsnap POD put/get static_assert
 #include <utility>
 #include <span>          // mergeBuiltinsWithConfig — a non-owning view over either built-in list
@@ -85,7 +87,8 @@ constexpr std::uint32_t   kCcxBar         = 15;     // P8 (L7): situ.h spells th
 // kCcxBar): defensible defaults, the loop applies judgment; report numbers, never gate a normal run.
 constexpr std::uint32_t   kLocBar         = 60;     // "large function" LOC bar (below Sonar's 75 default) — a verbosity regression must END UP over it (SIZE is the master variable, §1d)
 constexpr std::uint32_t   kNestBar        = 4;      // max-nesting-depth bar — deep nesting (>3-4) is the structural-erosion signal; a regression must end up over it
-constexpr std::uint32_t   kParamBar       = 5;      // param-count bar — a REGRESSION (grew AND now high), NOT the debunked absolute 7±2 rule (§1d kill-list); the growth is the signal, the bar just suppresses tiny-fn noise
+constexpr std::uint32_t   kParamBar       = 5;
+static_assert( kTangleNestFree == kNestBar - 1, "model.h's tangle score counts nesting from the nesting bar: one point per level past kNestBar - 1" );      // param-count bar — a REGRESSION (grew AND now high), NOT the debunked absolute 7±2 rule (§1d kill-list); the growth is the signal, the bar just suppresses tiny-fn noise
 
 // §D#4 / §E-17 — three GitClear-2026-backed kinds. Each fires ONLY on a regression vs baseline (the
 // quality-delta contract), never on pre-existing debt. See the per-kind comments in computeSnapshot/computeDelta.
@@ -334,6 +337,11 @@ struct Snapshot
     gtl::btree_map<std::uint64_t, std::uint64_t> bodyHashBySym; // §D#4 short-horizon-churn — pathQualifiedKey(path,scope,name) → fnv1a64 of the RAW body bytes (change detection; literal-only edits move NO metric, so metrics can't detect them). Path-qualified since v6: a bare canonId key folded every scope-less same-named symbol ACROSS FILES into one join identity (the W1-S2 cross-file churn misattribution)
     gtl::btree_map<std::uint64_t, std::uint64_t> moveCidBySym;  // QD-ENTRY-CEILING MOVED-BODY — qualityKey → moveCidOf (the scrubbed hash of the callable's BODY), recorded only for a function or method over the ccx or the line bar: the baseline half of "this new function is a body the same diff removed elsewhere" (origin="moved"). A sidecar or blob without it recognizes no move
     gtl::btree_map<std::uint64_t, std::uint64_t> bodyCidBySym;  // QD-RENAME-IDENTITY — qualityKey → moveCidOf of EVERY function or method (the MAX over overloads, read only where defsBySym is 1): the baseline half of "this new key is a vacated key's body under a new name or file" (ContentMoves). A sidecar or blob without it matches no rename
+    // QD-TANGLE — qualityKey → packTangle( tangleInputsOf ) of the overload with the highest score: recorded for a function or method over
+    // 50 lines, reaching the nesting bar, or with a steering local (tangleRecorded) — every other one scores 0 and reads as absent. A
+    // sidecar or blob without it (tangleKnown false) judges no tangle row.
+    gtl::btree_map<std::uint64_t, std::uint64_t> tangleBySym;
+    bool                                         tangleKnown = false;
     gtl::btree_map<std::uint64_t, CloneSketch>   moveSketchBySym; // QD-ENTRY-CEILING MOVES — qualityKey → the clone matcher's minhash sketch (cloneSketchOfStream, 128 B) of the same body moveCidBySym identifies, so a body moved WITH a small edit is still recognized (MovedBodies). A sidecar or blob without it recognizes exact moves only
     std::vector<std::uint64_t>             cloneGroups; // sorted hash(sorted member canonIds)
     std::vector<std::uint64_t>             dead;        // sorted hash(canonId) of dead-candidate symbols
@@ -345,7 +353,48 @@ struct Snapshot
     std::vector<std::uint64_t>                            renamedKeys;   // sorted: the current keys the rename record re-filed (dead-code rows on them read origin="moved")
 };
 
-// ─── THE TWELVE KINDS AS A SET (qd-memory-degrade) ─────────────────────────────────────────────────────────
+// QD-TANGLE's snapshot record: one u64 per key — loc (24 bits) | nest (8) | deep (16) | steer (8), each saturating (owner 11-05:
+// packed per-symbol words). The inputs, not the score: a row says WHICH input rose, and the score is recomputed from them.
+inline std::uint64_t packTangle( const TangleInputs& in ) noexcept
+{
+    return ( std::uint64_t( std::min( in.loc, 0xFFFFFFu ) ) << 32 ) | ( std::uint64_t( std::min( in.nest, 0xFFu ) ) << 24 )
+         | ( std::uint64_t( std::min( in.deep, 0xFFFFu ) ) << 8 ) | std::uint64_t( std::min( in.steer, 0xFFu ) );
+}
+inline TangleInputs unpackTangle( std::uint64_t v ) noexcept
+{
+    TangleInputs in;
+    in.loc   = std::uint32_t( v >> 32 ) & 0xFFFFFFu;
+    in.nest  = std::uint32_t( v >> 24 ) & 0xFFu;
+    in.deep  = std::uint32_t( v >> 8 ) & 0xFFFFu;
+    in.steer = std::uint32_t( v ) & 0xFFu;
+    return in;
+}
+// Worth a record: anything that can score, or that a row's why= would name as the was= side of a rise. A key with no record has
+// inputs nest < kNestBar, deep 0, steer 0, and 50 lines or fewer — S 0.
+inline bool tangleRecorded( const TangleInputs& in ) noexcept
+{
+    return in.loc > kTangleAmpLoc || in.nest >= kNestBar || in.steer > 0;
+}
+// The overload set shares a key: keep the member with the highest score (then the larger packed word), so the record is order-independent.
+inline bool tangleOutranks( const TangleInputs& a, const TangleInputs& b ) noexcept
+{
+    const std::uint32_t sa = tangleScore10( a ), sb = tangleScore10( b );
+    return sa != sb ? sa > sb : packTangle( a ) > packTangle( b );
+}
+inline void recordTangle( gtl::btree_map<std::uint64_t, std::uint64_t>& m, std::uint64_t key, const TangleInputs& in )
+{
+    if( !tangleRecorded( in ) )
+    {
+        return;
+    }
+    const auto [ it, fresh ] = m.try_emplace( key, packTangle( in ) );
+    if( !fresh && tangleOutranks( in, unpackTangle( it->second ) ) )
+    {
+        it->second = packTangle( in );
+    }
+}
+
+// ─── THE THIRTEEN KINDS AS A SET (qd-memory-degrade) ─────────────────────────────────────────────────────────
 // --quality-kinds=K[,K] runs a subset of the kinds (the replay a degraded --quality-delta=A..B hands back), and the
 // degraded range form runs the subset its changed files can decide. Each kind stays a separately reported, separately
 // skippable unit: the mask decides which passes run and which rows are kept, never how a row is computed — a kind that
@@ -353,12 +402,12 @@ struct Snapshot
 // of them (kinds_skipped=, the refusal, the help) is spelled in.
 inline constexpr std::string_view kQualityKindNames[] = {
     "api-surface", "complexity", "dead-code", "defect-shape", "duplication", "error-masking", "nesting",
-    "new-clone-of-reused-helper", "params", "placeholder", "short-horizon-churn", "verbosity",
+    "new-clone-of-reused-helper", "params", "placeholder", "short-horizon-churn", "tangle", "verbosity",
 };
 using KindMask = std::uint16_t;
 inline constexpr KindMask kAllKinds = KindMask( ( 1u << std::size( kQualityKindNames ) ) - 1u );
-static_assert( std::size( kQualityKindNames ) == 12 && std::size( kQualityKindNames ) <= 16, "one bit per kind" );
-// the kind's bit, or 0 for a name that is not one of the twelve
+static_assert( std::size( kQualityKindNames ) == 13 && std::size( kQualityKindNames ) <= 16, "one bit per kind" );
+// the kind's bit, or 0 for a name that is not one of the thirteen
 inline constexpr KindMask kindBit( std::string_view kind ) noexcept
 {
     const auto* const at = std::find( std::begin( kQualityKindNames ), std::end( kQualityKindNames ), kind );
@@ -3143,7 +3192,7 @@ inline std::string cacheRootKeyHex( const std::string& root )
 // `static_assert( quality::kIngestParserVerMirror == kParserVer && … )`, so a missed mirror now fails the build. It does
 // not include this header; it relies on ingest.cpp including quality.h (line 13) before ingest_cache.h, and a reorder
 // that broke that fails the build on the undeclared name rather than passing.
-constexpr std::uint32_t kIngestCacheVersionMirror   = 52;   // MUST equal ingest.cpp's kCacheVersion (gated); 52 = lane failure-default (construct-hit failure-default tag), 51 = lane qd-constructs (FILE record construct-hit family), 50 = lane clones-persist (Function/Method def record clone key), 49 = lane warm-direct (FILE record head family counts), 48 = train 42b (alias-import LocalBindKind ReExport; its placeholder 47), 46 = train 40 (js-def-naming JsObjectLiteral; its placeholder 45), 44 = train 37b (rust-degraded FileHealth::useBoundsBlanked; its placeholder 42), 43 = train 36 (#155 trailingLambda ref byte; above main 40, #438's placeholder 41, rust-degraded's 42), 40 = train 34 (fc3-js-rebind JsRebind; above main 39), 39 = train 33 (above main 36 and l6-iface 38), 38 = train 32 lane l6-iface fix round 1: LocalBindKind ImplBlock (train renumbers), 37 = train 32 lane l6-iface: LocalBindKind DispatchType (train renumbers), 36 = train 30 (above call-result-typing's and fcall-forward's 33, name-template-dispatch's 35, main's 34), 34 = train 29 (above lane arity-min's and call-result-typing's 33), 33 = train 29 lane arity-min: def record paramsMin (the train renumbers), 33 = lane call-result-typing: RawBind resultIndex + unwrapDepth, 33 = lane fcall-forward: ref `forwarded` byte, 35 = lane name-template-dispatch: RefRole Pattern 11, 32 = train 28: RefRole Subscript 9 + Inert 10, 31 = train 27: lego-transitive's inherit-ref baseBind (the lane's 30), 29 = FE-B ref memberPath/memberCtor + 4 bind kinds, 28 = FE-A ref memberCall/memberRoot, 27 = corrected fnScope values, 26 = function-local def scope span (25 = #157 + #150)
+constexpr std::uint32_t kIngestCacheVersionMirror   = 53;   // MUST equal ingest.cpp's kCacheVersion (gated); 53 = lane qd-tangle (def record steering-locals byte), 52 = lane failure-default (construct-hit failure-default tag), 51 = lane qd-constructs (FILE record construct-hit family), 50 = lane clones-persist (Function/Method def record clone key), 49 = lane warm-direct (FILE record head family counts), 48 = train 42b (alias-import LocalBindKind ReExport; its placeholder 47), 46 = train 40 (js-def-naming JsObjectLiteral; its placeholder 45), 44 = train 37b (rust-degraded FileHealth::useBoundsBlanked; its placeholder 42), 43 = train 36 (#155 trailingLambda ref byte; above main 40, #438's placeholder 41, rust-degraded's 42), 40 = train 34 (fc3-js-rebind JsRebind; above main 39), 39 = train 33 (above main 36 and l6-iface 38), 38 = train 32 lane l6-iface fix round 1: LocalBindKind ImplBlock (train renumbers), 37 = train 32 lane l6-iface: LocalBindKind DispatchType (train renumbers), 36 = train 30 (above call-result-typing's and fcall-forward's 33, name-template-dispatch's 35, main's 34), 34 = train 29 (above lane arity-min's and call-result-typing's 33), 33 = train 29 lane arity-min: def record paramsMin (the train renumbers), 33 = lane call-result-typing: RawBind resultIndex + unwrapDepth, 33 = lane fcall-forward: ref `forwarded` byte, 35 = lane name-template-dispatch: RefRole Pattern 11, 32 = train 28: RefRole Subscript 9 + Inert 10, 31 = train 27: lego-transitive's inherit-ref baseBind (the lane's 30), 29 = FE-B ref memberPath/memberCtor + 4 bind kinds, 28 = FE-A ref memberCall/memberRoot, 27 = corrected fnScope values, 26 = function-local def scope span (25 = #157 + #150)
 constexpr std::uint32_t kIngestParserVerMirror    = 313;  // MUST equal ingest.cpp's kParserVer   (gated)
                                                           // 313 = 2026-11-17 (TRAIN-1117b, one number for two members, above main 311/312 (#420 via #686); rich 314;
                                                           //   see the kParserVer note): #446 round 2 (@SeddonShen, lane land-606, its placeholder 316): Java base clauses as
@@ -4550,7 +4599,7 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 // rustTestAttributed tests EVERY top-level attribute on a line (classifyRustAttributeLine), so `#[tokio::test(x)] #[allow(unused)]`
 // now exempts the fn below it, and a `#[` inside a string is text, so `#[doc = "#[tokio::test(x)]"]` no longer does. A v33 blob
 // holds the old set, so it is rejected. Bumped 33 -> 34. kParserVer stays: no extraction change.
-constexpr std::uint32_t kQSnapCacheScheme = 34;
+constexpr std::uint32_t kQSnapCacheScheme = 35;   // 35: lane qd-tangle — the tangle map (tangleBySym) and its known byte, after bodyCidBySym
 constexpr char          kQSnapMagic[4]    = { 'Q', 'S', 'N', 'P' };
 
 // The qsnap EXCLUDES-config key folds the qsnap SCHEME (independent of the ingest cache's kHeadSnapCacheScheme)
@@ -4681,6 +4730,8 @@ inline std::string serializeSnapshot( const Snapshot& s, const std::string& head
     putHashMap( s.bodyHashBySym );
     putHashMap( s.moveCidBySym );   // v28 (MOVED-BODY)
     putHashMap( s.bodyCidBySym );   // v30 (QD-RENAME-IDENTITY)
+    putHashMap( s.tangleBySym );    // v35 (QD-TANGLE), then whether it was recorded at all
+    qsnapPut( buf, std::uint8_t( s.tangleKnown ? 1 : 0 ) );
     qsnapPut( buf, std::uint32_t( s.moveSketchBySym.size() ) );   // v29 (MOVES): key, then the 128 sketch bytes
     for( const auto& [ k, sk ] : s.moveSketchBySym )
     {
@@ -4781,6 +4832,16 @@ inline bool deserializeSnapshot( const std::string& blob, const std::string& hea
         }
         return true;
     };
+    const auto getTangleKnown = [ & ]() -> bool
+    {
+        std::uint8_t known = 0;
+        if( !qsnapGet( p, end, known ) )
+        {
+            return false;
+        }
+        s.tangleKnown = known != 0;
+        return true;
+    };
     const auto getHashMap = [ & ]( gtl::btree_map<std::uint64_t, std::uint64_t>& m ) -> bool
     {
         std::uint32_t n = 0;
@@ -4858,7 +4919,7 @@ inline bool deserializeSnapshot( const std::string& blob, const std::string& hea
         return true;
     };
 
-    if( !getValMap( s.ccxBySym ) || !getValMap( s.locBySym ) || !getValMap( s.nestBySym ) || !getValMap( s.paramsBySym ) || !getValMap( s.defsBySym ) || !getValMap( s.maskBySym ) || !getValMap( s.maskReportBySym ) || !getValMap( s.failureDefaultBySym ) || !getValMap( s.placeholderBySym ) || !getHashMap( s.bodyHashBySym ) || !getHashMap( s.moveCidBySym ) || !getHashMap( s.bodyCidBySym ) || !getSketchMap( s.moveSketchBySym ) || !getVec( s.cloneGroups ) || !getVec( s.dead ) || !getVec( s.publicApi )
+    if( !getValMap( s.ccxBySym ) || !getValMap( s.locBySym ) || !getValMap( s.nestBySym ) || !getValMap( s.paramsBySym ) || !getValMap( s.defsBySym ) || !getValMap( s.maskBySym ) || !getValMap( s.maskReportBySym ) || !getValMap( s.failureDefaultBySym ) || !getValMap( s.placeholderBySym ) || !getHashMap( s.bodyHashBySym ) || !getHashMap( s.moveCidBySym ) || !getHashMap( s.bodyCidBySym ) || !getHashMap( s.tangleBySym ) || !getTangleKnown() || !getSketchMap( s.moveSketchBySym ) || !getVec( s.cloneGroups ) || !getVec( s.dead ) || !getVec( s.publicApi )
         || !getDefectSites( s.defectSites ) )
     {
         return false;
@@ -6720,6 +6781,7 @@ inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::s
                                  const std::vector<char>* fileInBaseline, const KindScope& scope, TreePasses* passes )
 {
     Snapshot snap;
+    snap.tangleKnown = true;                                                             // QD-TANGLE: this binary records the tangle inputs
     MoveIdentities moveIds;                                                              // MOVED-BODY: the move identity of every body over a bar
     std::vector<std::uint32_t> codeLoc = codeLocByNode( ing, &moveIds );                 // Q-DIAL-3: the verbosity kind's metric is CODE lines
     const std::vector<std::uint64_t>& moveCid = moveIds.cid;
@@ -6751,6 +6813,10 @@ inline Snapshot computeSnapshot( const IngestResult& ing, const Graph& g, std::s
         { std::uint32_t& slot = snap.locBySym[ key ];    slot = std::max( slot, codeLoc[i] ); }   // Q-DIAL-3: CODE lines, not the physical span
         { std::uint32_t& slot = snap.nestBySym[ key ];   slot = std::max( slot, std::uint32_t( s.maxNest ) ); }
         { std::uint32_t& slot = snap.paramsBySym[ key ]; slot = std::max( slot, std::uint32_t( s.params ) ); }
+        if( s.kind == SymKind::Function || s.kind == SymKind::Method )
+        {
+            recordTangle( snap.tangleBySym, key, tangleInputsOf( s ) );   // QD-TANGLE: the highest-scoring overload's inputs
+        }
         recordMoveIdentity( snap.moveCidBySym, key, moveCid[i] );       // overloads share a key: the MAX, so the record is order-independent
         recordMoveIdentity( snap.bodyCidBySym, key, moveIds.body[i] );   // QD-RENAME-IDENTITY: every callable (an overload set never matches)
         // THE ONE KIND THAT IS NOT A MAX, and the reason is the MAX itself. Every metric above collapses the
@@ -7197,6 +7263,14 @@ inline bool writeBaseline( const Snapshot& s, const std::string& path, std::stri
     {
         f << "stub " << std::hex << h << std::dec << ' ' << v << '\n'; // the placeholder count
     }
+    if( s.tangleKnown )
+    {
+        f << "tangleon 1\n";   // QD-TANGLE: the inputs were recorded (an empty map then means no function scores)
+    }
+    for( const auto& [h, v] : s.tangleBySym )
+    {
+        f << "tangle " << std::hex << h << ' ' << v << std::dec << '\n'; // QD-TANGLE packed inputs (packTangle)
+    }
     for( const auto& [h, v] : s.defsBySym )
     {
         f << "defs " << std::hex << h << std::dec << ' ' << v << '\n'; // overload-set CARDINALITY (a count, not a max)
@@ -7386,7 +7460,7 @@ inline bool readBaseline( const std::string& path, Snapshot& out, BaselineReadSt
           if( is.fail() ) { DISCLOSE( stats, BaselineReadStats::DisclosureWhy::MalformedLine ); return; } m[h] = v; };
 
         if( kind == "ccx" || kind == "loc" || kind == "nest" || kind == "params" || kind == "mask" || kind == "maskr" || kind == "maskfd" || kind == "stub" || kind == "body" || kind == "clone" || kind == "dead" || kind == "api" || kind == "head" || kind == "defs"
-         || kind == "producer" || kind == "defect" )
+         || kind == "producer" || kind == "defect" || kind == "tangle" || kind == "tangleon" )
         {
             ++recognizedLineCount;                                    // structure seen — this file IS a baseline
         }
@@ -7394,6 +7468,14 @@ inline bool readBaseline( const std::string& path, Snapshot& out, BaselineReadSt
         if( kind == "ccx" )
         {
             readValMap( out.ccxBySym );
+        }
+        else if( kind == "tangleon" )
+        {
+            out.tangleKnown = true;   // QD-TANGLE: a sidecar without this line was written before the kind and judges no tangle row
+        }
+        else if( kind == "tangle" )
+        {
+            readHashMap( out.tangleBySym );
         }
         else if( kind == "loc" )
         {
@@ -7958,6 +8040,102 @@ inline std::uint32_t churnEditWindowCommitCount( DiffHunkMemo& memo, const std::
     return std::uint32_t( shas.size() );
 }
 
+// ─── D4 BEST-SINCE — each symbol's best (lowest) value of a metric since a reference point (#697 idea 2; STAGE0 2.8) ─────────────────
+//
+// The reference point is the last release tag (`git describe --tags --abbrev=0`); a symbol created after it is judged from its creation.
+// The store is computed from git history on demand by the verb (qdbestsince.h reads the blobs and the index's own extraction measures
+// them), over the files of the symbols a row could be about only, and handed to computeDelta as flat sorted data: one (key, packed
+// best) pair per symbol. Tangle is its first metric; a metric is a value packing plus a fold, so ccx / nest / params can join as rows of
+// BestMetric with their own packing. A ratchet row is REPORT-ONLY (sev="minor") like every tangle row.
+enum class BestMetric : std::uint8_t { Tangle };
+struct BestSinceRow
+{
+    std::uint64_t key   = 0;   // qualityKey (pathQualifiedKey of the current path)
+    std::uint64_t value = 0;   // the metric's packed best: Tangle = packTangleBest
+};
+struct BestSinceStore
+{
+    BestMetric                metric = BestMetric::Tangle;
+    std::string               ref;          // the reference point's name ("" = none: no tag, not a git repo, history unreadable)
+    std::vector<BestSinceRow> rows;         // sorted by key
+    std::uint32_t             blobs  = 0;   // history blobs measured
+    std::uint32_t             unread = 0;   // history blobs that could not be measured (a parse degrade, a missing object): their minima are absent
+    bool                      cut    = false;   // the blob cap stopped the walk: minima are over the newest blobs only
+    const BestSinceRow* find( std::uint64_t key ) const noexcept
+    {
+        const auto it = std::lower_bound( rows.begin(), rows.end(), key, []( const BestSinceRow& r, std::uint64_t k ) { return r.key < k; } );
+        return it != rows.end() && it->key == key ? &*it : nullptr;
+    }
+};
+// Tangle's best: the per-input minima (nest 8 | deep 16 | steer 8) and the lowest score (tenths, 24 bits) over every version measured.
+inline std::uint64_t packTangleBest( const TangleInputs& minima, std::uint32_t minScore10 ) noexcept
+{
+    return ( std::uint64_t( std::min( minScore10, 0xFFFFFFu ) ) << 32 ) | ( std::uint64_t( std::min( minima.nest, 0xFFu ) ) << 24 )
+         | ( std::uint64_t( std::min( minima.deep, 0xFFFFu ) ) << 8 ) | std::uint64_t( std::min( minima.steer, 0xFFu ) );
+}
+struct TangleBest
+{
+    TangleInputs  minima;   // loc 0: a minimum line count is not an input the ratchet reads
+    std::uint32_t score10 = 0;
+};
+inline TangleBest unpackTangleBest( std::uint64_t v ) noexcept
+{
+    TangleBest b;
+    b.score10      = std::uint32_t( v >> 32 ) & 0xFFFFFFu;
+    b.minima.nest  = std::uint32_t( v >> 24 ) & 0xFFu;
+    b.minima.deep  = std::uint32_t( v >> 8 ) & 0xFFFFu;
+    b.minima.steer = std::uint32_t( v ) & 0xFFu;
+    return b;
+}
+// Fold one version's inputs into a key's running best (`seen` false = the first version).
+inline std::uint64_t foldTangleBest( std::uint64_t best, bool seen, const TangleInputs& version ) noexcept
+{
+    const std::uint32_t score10 = tangleScore10( version );
+    if( !seen )
+    {
+        return packTangleBest( version, score10 );
+    }
+    TangleBest b = unpackTangleBest( best );
+    b.minima.nest  = std::min( b.minima.nest, version.nest );
+    b.minima.deep  = std::min( b.minima.deep, version.deep );
+    b.minima.steer = std::min( b.minima.steer, version.steer );
+    return packTangleBest( b.minima, std::min( b.score10, score10 ) );
+}
+
+// The store's source: given the root-relative paths of the files whose symbols a ratchet row could be about, the best-since rows of
+// every symbol in them. Empty = no source (the ref-pair form, a caller that reads no history): no ratchet is judged.
+using BestSinceSource = std::function<BestSinceStore( const std::vector<std::string>& relPaths )>;
+
+// QD-CREDIT-ROW — one improvement this change made (STAGE0 2.5 "credit"; QD_LESSONS 11-19: a fix's gain was invisible): a symbol that was
+// over a kind's bar at the baseline and is lower now by at least the kind's minor delta. Never a row, never gating; listed in the
+// answer's <improved> section so a refactor lane and the ratchet see the credit.
+struct Improvement
+{
+    std::string   kind;   // complexity | verbosity | nesting | params | tangle
+    std::string   sym;    // canonical id (display-normalized by the surface, like a row's sym)
+    std::uint32_t was  = 0;
+    std::uint32_t now  = 0;   // a tangle score in tenths (rowValueText's rule)
+    std::string   path;       // root-relative, "" = no locator
+    std::uint32_t line = 0;
+};
+// A metric value as every surface prints it: the integer, or a tangle score's tenths as a decimal ("48.4").
+inline std::string metricValueText( std::string_view kind, std::uint32_t v )
+{
+    return kind == "tangle" ? std::to_string( v / 10u ) + "." + std::to_string( v % 10u ) : std::to_string( v );
+}
+inline constexpr std::size_t kImprovedShown = 20;   // the section lists at most this many (largest fall first), then more=N
+
+// What computeDelta reads and writes beyond its rows: the D4 source (in) and the improvements plus the ratchet's disclosure (out).
+struct DeltaExtras
+{
+    BestSinceSource          bestSince;
+    std::vector<Improvement> improved;
+    std::string              ratchetRef;          // the reference point the ratchet read ("" = not consulted: no candidate, or no source)
+    std::uint32_t            ratchetJudged = 0;   // symbols judged against their best
+    std::uint32_t            ratchetUnread = 0;   // history blobs that could not be measured
+    bool                     ratchetCut    = false;
+};
+
 // one reported regression (something the change made WORSE).
 struct Regression
 {
@@ -7994,6 +8172,12 @@ struct Regression
     // function, so the members= text carries no path segment for exactly the symbols most likely to clone.
     // Empty for every other kind (their `path` IS the whole answer) and empty when no member resolved.
     std::vector<std::string> memberPaths;
+    // QD-TANGLE — the tangle kind's three texts (empty on every other kind, and then emitted by no surface): why= the inputs that
+    // rose (or, on a new function, the inputs it has), fix= the shape the rise calls for with its lines, locals= the steering locals.
+    // was/now carry the score in TENTHS on a tangle row (every surface prints them as decimals).
+    std::string why;
+    std::string fix;
+    std::string locals;
 
     // P0.3 (r27) — ZERO MAGNITUDE. A finding with was == now == 0 carries no magnitude at all, so the ack
     // ratchet's `now <= ackNow` test degenerates to `0 <= 0` = "always suppressed" — a permanent blank check,
@@ -8011,6 +8195,12 @@ struct Regression
 inline const char* originValue( const Regression& r ) noexcept
 {
     return !r.isNewSymbol ? nullptr : r.isMoved ? "moved" : "new-symbol";
+}
+
+// A row's was= / now= as every surface prints it (metricValueText).
+inline std::string rowValueText( const Regression& r, std::uint32_t v )
+{
+    return metricValueText( r.kind, v );
 }
 
 inline bool rowGates( const Regression& r ) noexcept
@@ -8039,6 +8229,7 @@ inline constexpr FacetAttr kFacetAttrs[] = {
     { "defect-shape",               "defect"  },   // format-arity / utf8-cut / dedup-first / vacuous-assert
     { "error-masking",              "facet"   },   // failure-default: the growth includes a read failure returned as an empty success
     { "complexity",                 "monster" },   // QD-MONSTER-GROWTH: "1" when isMonsterGrowth made (or would make) the row major
+    { "tangle",                     "ratchet" },   // D4: the reference point (a tag) whose best this function is above (appendTangleRatchet)
     { "new-clone-of-reused-helper", "idiom"   },   // T13/fix2 gave this kind duplication's idiom demotion (Regression::facet
                                                     // is populated the same way, from the same CloneIdiomVerdict); this row was
                                                     // missing, so a demoted row's idiom name never reached the reader even
@@ -9520,6 +9711,14 @@ inline std::size_t remapSnapshotIdentity( Snapshot& base, const IdentityAliases&
     healMap( base.failureDefaultBySym );
     healMap( base.placeholderBySym );
     healMap( base.bodyHashBySym );
+    for( const auto& [ from, to ] : al.toCurrent )   // QD-TANGLE: re-filed like the metric maps, not counted (the count predates the kind)
+    {
+        const auto src = base.tangleBySym.find( from );
+        if( src != base.tangleBySym.end() && !base.tangleBySym.contains( to ) )
+        {
+            base.tangleBySym[ to ] = src->second;
+        }
+    }
     moved += rekeyMoveRecords( base.moveCidBySym, al );
     (void) rekeyMoveRecords( base.bodyCidBySym, al );      // QD-RENAME-IDENTITY: re-keyed like the move record, so the old key is no vacated body
     (void) rekeyMoveRecords( base.moveSketchBySym, al );   // its sketch follows it; not a separate healed key in the count
@@ -10201,6 +10400,14 @@ inline std::optional<StaleAckWhy> staleWhyForKind( std::string_view base, std::u
     {
         why = staleForMetricKind( base, key, snap );
     }
+    else if( base == "tangle" )
+    {
+        // QD-TANGLE: existence by locBySym, then whether the score is still at or over the bar
+        const auto it = snap.tangleBySym.find( key );
+        why = !snap.locBySym.contains( key ) ? std::optional<StaleAckWhy>( StaleAckWhy::TargetGone )
+            : ( !snap.tangleKnown || ( it != snap.tangleBySym.end() && tangleScore10( unpackTangle( it->second ) ) >= kTangleBar10 ) ) ? std::nullopt
+            : std::optional<StaleAckWhy>( StaleAckWhy::FindingGone );
+    }
     else if( base == "dead-code" )
     {
         why = staleForSetMembership( key, snap, snap.dead );
@@ -10494,6 +10701,95 @@ inline std::string staleAcksJsonArray( const std::vector<StaleAck>& staleAcks ) 
         out += "\"}";
     }
     out += "]";
+    return out;
+}
+
+// QD-CREDIT-ROW — the <improved> section, one renderer per dialect shared by the CLI and MCP surfaces. In place order (path, line, kind),
+// at most kImprovedShown entries, the rest counted in more=. Never a row: regressions= / gating= / the exit code never read it.
+inline std::vector<Improvement> improvementsInPlaceOrder( std::vector<Improvement> v )
+{
+    std::sort( v.begin(), v.end(), []( const Improvement& a, const Improvement& b )
+               { return std::tie( a.path, a.line, a.kind, a.sym ) < std::tie( b.path, b.line, b.kind, b.sym ); } );
+    return v;
+}
+template<class Escape>
+inline std::string improvedXml( const std::vector<Improvement>& improved, std::string_view root, Escape&& ex )
+{
+    if( improved.empty() )
+    {
+        return {};
+    }
+    const std::vector<Improvement> v = improvementsInPlaceOrder( improved );
+    std::string out = "<improved n=\"" + std::to_string( v.size() ) + "\"";
+    if( v.size() > kImprovedShown )
+    {
+        out += " more=\"" + std::to_string( v.size() - kImprovedShown ) + "\"";
+    }
+    out += ">";
+    for( std::size_t i = 0; i < v.size() && i < kImprovedShown; ++i )
+    {
+        const Improvement& m = v[i];
+        out += "<i kind=\"" + m.kind + "\" sym=\"" + ex( displaySym( m.sym, root ) ) + "\" was=\"" + metricValueText( m.kind, m.was ) + "\" now=\""
+             + metricValueText( m.kind, m.now ) + "\"";
+        if( !m.path.empty() )
+        {
+            out += " p=\"" + ex( m.path ) + ":" + std::to_string( m.line ) + "\"";
+        }
+        out += "/>";
+    }
+    out += "</improved>";
+    return out;
+}
+inline std::string improvedJson( const std::vector<Improvement>& improved, std::string_view root )   // `,"improved":[...]` (and "improved_more"), "" when none
+{
+    if( improved.empty() )
+    {
+        return {};
+    }
+    const std::vector<Improvement> v = improvementsInPlaceOrder( improved );
+    std::string out = ",\"improved\":[";
+    for( std::size_t i = 0; i < v.size() && i < kImprovedShown; ++i )
+    {
+        const Improvement& m = v[i];
+        out += i == 0 ? "" : ",";
+        out += "{\"kind\":\"" + m.kind + "\",\"sym\":\"" + rw::jsonesc::escapeMcp( displaySym( m.sym, root ) ) + "\",\"was\":" + metricValueText( m.kind, m.was )
+             + ",\"now\":" + metricValueText( m.kind, m.now );
+        if( !m.path.empty() )
+        {
+            out += ",\"p\":\"" + rw::jsonesc::escapeMcp( m.path ) + ":" + std::to_string( m.line ) + "\"";
+        }
+        out += "}";
+    }
+    out += "]";
+    if( v.size() > kImprovedShown )
+    {
+        out += ",\"improved_more\":" + std::to_string( v.size() - kImprovedShown );
+    }
+    return out;
+}
+
+// D4 — the ratchet's disclosure on the root: the reference point it read, and what it could not read. "" when it was not consulted.
+template<class Escape>
+inline std::string ratchetAttrsXml( const DeltaExtras& x, Escape&& ex )
+{
+    if( x.ratchetRef.empty() )
+    {
+        return {};
+    }
+    std::string out = " ratchet_ref=\"" + ex( x.ratchetRef ) + "\" ratchet_judged=\"" + std::to_string( x.ratchetJudged ) + "\"";
+    out += x.ratchetUnread > 0 ? " ratchet_unread=\"" + std::to_string( x.ratchetUnread ) + "\"" : std::string();
+    out += x.ratchetCut ? " ratchet_cut=\"1\"" : "";
+    return out;
+}
+inline std::string ratchetAttrsJson( const DeltaExtras& x )
+{
+    if( x.ratchetRef.empty() )
+    {
+        return {};
+    }
+    std::string out = ",\"ratchet_ref\":\"" + rw::jsonesc::escapeMcp( x.ratchetRef ) + "\",\"ratchet_judged\":" + std::to_string( x.ratchetJudged );
+    out += x.ratchetUnread > 0 ? ",\"ratchet_unread\":" + std::to_string( x.ratchetUnread ) : std::string();
+    out += x.ratchetCut ? ",\"ratchet_cut\":1" : "";
     return out;
 }
 
@@ -10828,6 +11124,276 @@ inline std::uint32_t newSymbolCeilingGate( const Regression& r, SymKind measured
     return gates ? ceilingAt : 0;
 }
 
+// ─── QD-TANGLE — the thirteenth kind, REPORT-ONLY (STAGE0 2; owner 11-19: length amplifies tangle, never stands alone) ───────────
+//
+// A row when a function's tangle score (model.h tangleScore10) is at or over the bar (S >= 6) AND the change made it so: the function
+// is new, it crossed the bar, or an input rose — nesting +1, deep lines +kTangleDeepRise, or a new steering local. The trigger reads
+// the INPUTS, not the score, on purpose: the score is a share, so 12 deep lines added to a 4000-line function move it a tenth, and a
+// score trigger would let a monster grow forever (QD-MONSTER-GROWTH's lesson). Every row is sev="minor" and never gates in this
+// stage; why= names the inputs that rose, fix= the shape the rise calls for (with its lines, from a re-walk of the ONE function:
+// tangleDetailOf), locals= the steering locals. A long orchestrator of named steps or a long flat body scores 0 and never rows.
+inline constexpr std::uint32_t kTangleDeepRise = 5;   // deep lines that count as a rise (STAGE0 2.5's "worse" tier)
+
+struct TangleRise
+{
+    bool nest  = false;
+    bool deep  = false;
+    bool steer = false;
+    bool any() const noexcept { return nest || deep || steer; }
+};
+inline TangleRise tangleRise( const TangleInputs& was, const TangleInputs& now ) noexcept
+{
+    return { now.nest > was.nest && now.nest > kTangleNestFree, now.deep >= was.deep + kTangleDeepRise, now.steer > was.steer };
+}
+
+// "nest 3->6, deep 0->39 lines, steer 1->2, 120->180 lines": each input that changed (all of them on a new function, single values).
+inline std::string tangleWhy( const TangleInputs& was, const TangleInputs& now, bool isNew )
+{
+    std::string out;
+    const auto add = [ & ]( std::string_view label, std::uint32_t w, std::uint32_t n, std::string_view unit )
+    {
+        if( isNew ? n == 0 : w == n )
+        {
+            return;
+        }
+        out += out.empty() ? "" : ", ";
+        out += label;
+        out += isNew ? std::to_string( n ) : std::to_string( w ) + "->" + std::to_string( n );
+        out += unit;
+    };
+    add( "nest ", was.nest, now.nest, "" );
+    add( "deep ", was.deep, now.deep, " lines" );
+    add( "steer ", was.steer, now.steer, "" );
+    out += out.empty() ? "" : ", ";
+    out += ( isNew || was.loc == 0 || was.loc == now.loc ) ? std::to_string( now.loc ) + " lines" : std::to_string( was.loc ) + "->" + std::to_string( now.loc ) + " lines";
+    return out;
+}
+
+// The fix each rise calls for, with its lines: a new steering local → split the step that sets it from the branch that reads it; a
+// deep rise → extract the largest deep region; a crossing by length alone → split into named phases. At most two, most specific first.
+inline std::string tangleFix( const TangleRise& rise, bool isNew, const TangleInputs& now, const TangleDetailFacts& d )
+{
+    std::vector<std::string> fixes;
+    if( ( rise.steer || ( isNew && now.steer > 0 ) ) && !d.steer.empty() )
+    {
+        const TangleSteerHit& h = d.steer.back();
+        fixes.push_back( "split the step that sets " + h.name + " (L" + std::to_string( h.setLine ) + ") from the branch that reads it (L"
+                         + std::to_string( h.readLine ) + "), or pass " + h.name + " to a named step" );
+    }
+    if( ( rise.nest || rise.deep || ( isNew && now.deep > 0 ) ) && !d.humps.empty() )
+    {
+        const auto widest = std::max_element( d.humps.begin(), d.humps.end(), []( const TangleHumpSpan& a, const TangleHumpSpan& b )
+                                              { return a.endLine - a.startLine < b.endLine - b.startLine; } );
+        fixes.push_back( "extract the " + std::to_string( widest->endLine - widest->startLine + 1u ) + "-line deep region at L"
+                         + std::to_string( widest->startLine ) + "..L" + std::to_string( widest->endLine )
+                         + " into a named function, or invert it into guard clauses" );
+    }
+    if( fixes.empty() )
+    {
+        fixes.push_back( "split into named phases, an orchestrator of steps that each read locally" );
+    }
+    std::string out = fixes[0];
+    if( fixes.size() > 1 )
+    {
+        out += "; " + fixes[1];
+    }
+    return out;
+}
+
+// locals= — the steering locals by name, first-read order, at most six then +N.
+inline std::string tangleLocals( const TangleDetailFacts& d )
+{
+    std::string out;
+    std::size_t shown = 0;
+    for( const TangleSteerHit& h : d.steer )
+    {
+        if( shown == 6 )
+        {
+            out += ",+" + std::to_string( d.steer.size() - shown );
+            break;
+        }
+        out += out.empty() ? "" : ",";
+        out += h.name;
+        ++shown;
+    }
+    return out;
+}
+
+// Each callable key's current inputs: the highest-scoring overload, as computeSnapshot records it.
+struct TangleNow
+{
+    TangleInputs in;
+    NodeId       at = kNoNode;
+};
+inline gtl::btree_map<std::uint64_t, TangleNow> tangleNowByKey( const IngestResult& ing, const Graph& g, const std::vector<std::uint64_t>& keyByNode )
+{
+    gtl::btree_map<std::uint64_t, TangleNow> nowByKey;
+    for( NodeId i = 0; i < ing.symbols.size(); ++i )
+    {
+        const Symbol& s = ing.symbols[i];
+        if( i >= g.canonId.size() || g.canonId[i].empty() || ( s.kind != SymKind::Function && s.kind != SymKind::Method ) )
+        {
+            continue;
+        }
+        const TangleInputs in   = tangleInputsOf( s );
+        TangleNow&         slot = nowByKey[ keyByNode[i] ];
+        if( slot.at == kNoNode || tangleOutranks( in, slot.in ) )
+        {
+            slot = { in, i };
+        }
+    }
+    return nowByKey;
+}
+
+// A key's baseline inputs: its record, else (under every recording bar) only its nesting is known.
+inline TangleInputs tangleBaseInputs( const Snapshot& base, std::uint64_t key )
+{
+    TangleInputs was;
+    if( const auto it = base.tangleBySym.find( key ); it != base.tangleBySym.end() )
+    {
+        was = unpackTangle( it->second );
+    }
+    else if( const auto nest = base.nestBySym.find( key ); nest != base.nestBySym.end() )
+    {
+        was.nest = nest->second;   // no record: under the nesting bar, 50 lines or fewer, no deep line, no steering local
+    }
+    return was;
+}
+
+// The re-walk of ONE function for its row's fix= and locals= (ingest.h tangleDetailOf), reading each file once across a key-ordered pass.
+struct TangleDetailReader
+{
+    const IngestResult& ing;
+    std::string         fileBytes;
+    std::uint32_t       fileOf = 0xFFFFFFFFu;
+    TangleDetailFacts   of( const Symbol& s )
+    {
+        if( s.fileId != fileOf )
+        {
+            fileOf    = s.fileId;
+            fileBytes = docparse::detail::readWholeFile( diskPath( ing, s.fileId ) ).value_or( std::string() );
+        }
+        return tangleDetailOf( fileBytes, diskPath( ing, s.fileId ), s.sigStartByte, s.endByte );
+    }
+};
+
+// QD-CREDIT-ROW for tangle (STAGE0 2.5): over the bar at the baseline, an input fell and none rose, and the score is lower.
+inline bool tangleCredited( const TangleInputs& was, const TangleInputs& now ) noexcept
+{
+    const bool fell = now.nest < was.nest || now.deep < was.deep || now.steer < was.steer;
+    return tangleScore10( was ) >= kTangleBar10 && fell && !tangleRise( was, now ).any() && tangleScore10( now ) < tangleScore10( was );
+}
+
+// D4 RATCHET (report-only): each `ratchetable` key — over the bar now, existing at the baseline, inputs moved by this change — against its
+// best since the reference point (extras.bestSince over those keys' files only). It fires when the score is above its best AND an input
+// rose over its minimum by the same rise rule the baseline row uses (nest +1 past the free levels, deep +kTangleDeepRise, a new steering
+// local): a function that crept up across merges, each step under the rise rule, is named once it has crept that far. On a key this
+// pass already rowed, the ratchet adds its facet (ratchet="<ref>") and its reading to why=; otherwise it is a row of its own, was= the
+// best score. A key the history never held (created in this working tree) is not judged.
+template<class Stamp>
+inline void appendTangleRatchet( std::vector<Regression>& regs, const IngestResult& ing, const Graph& g, const gtl::btree_map<std::uint64_t, TangleNow>& nowByKey,
+                                 const std::vector<std::uint64_t>& ratchetable, const gtl::btree_map<std::uint64_t, std::size_t>& rowOfKey,
+                                 TangleDetailReader& detailOf, Stamp&& stamp, std::string_view root, DeltaExtras& extras )
+{
+    std::vector<std::string> paths;
+    for( const std::uint64_t key : ratchetable )
+    {
+        paths.emplace_back( relForHash( ing.files[ ing.symbols[ nowByKey.at( key ).at ].fileId ], root ) );
+    }
+    std::sort( paths.begin(), paths.end() );
+    paths.erase( std::unique( paths.begin(), paths.end() ), paths.end() );
+    const BestSinceStore store = extras.bestSince( paths );
+    extras.ratchetRef          = store.ref;
+    extras.ratchetUnread       = store.unread;
+    extras.ratchetCut          = store.cut;
+    if( store.ref.empty() )
+    {
+        return;
+    }
+    for( const std::uint64_t key : ratchetable )
+    {
+        const BestSinceRow* row = store.find( key );
+        if( row == nullptr )
+        {
+            continue;
+        }
+        ++extras.ratchetJudged;
+        const TangleNow&    now   = nowByKey.at( key );
+        const TangleBest    best  = unpackTangleBest( row->value );
+        const std::uint32_t now10 = tangleScore10( now.in );
+        const TangleRise    rise  = tangleRise( best.minima, now.in );
+        if( now10 <= best.score10 || !rise.any() )
+        {
+            continue;
+        }
+        const std::string since = "best since " + store.ref + ": " + tangleWhy( best.minima, now.in, /*isNew=*/false );
+        if( const auto it = rowOfKey.find( key ); it != rowOfKey.end() )
+        {
+            Regression& r = regs[ it->second ];
+            r.facet       = store.ref;
+            r.why        += "; " + since;
+            continue;
+        }
+        const TangleDetailFacts detail = detailOf.of( ing.symbols[ now.at ] );
+        Regression r{ "tangle", g.canonId[ now.at ], best.score10, now10, key, /*isMinor=*/true, store.ref, /*isNewSymbol=*/false, /*isMoved=*/false };
+        r.why    = since;
+        r.fix    = tangleFix( rise, /*isNew=*/false, now.in, detail );
+        r.locals = tangleLocals( detail );
+        regs.push_back( std::move( r ) );
+        stamp( now.at );
+    }
+}
+
+// The rows, appended to `regs` (stamped by the caller's `stamp( NodeId )`). `existed` and `movedAt` are computeDelta's own origin
+// oracles, so a tangle row's origin= reads exactly as every other per-symbol kind's. With `extras`, also the tangle credits and the
+// D4 ratchet (appendTangleRatchet).
+template<class Existed, class MovedAt, class Stamp>
+inline void appendTangleRows( std::vector<Regression>& regs, const IngestResult& ing, const Graph& g, const std::vector<std::uint64_t>& keyByNode,
+                              const Snapshot& base, std::string_view root, Existed&& existed, MovedAt&& movedAt, Stamp&& stamp, DeltaExtras* extras )
+{
+    const gtl::btree_map<std::uint64_t, TangleNow> nowByKey = tangleNowByKey( ing, g, keyByNode );
+    TangleDetailReader                             detailOf{ ing };
+    gtl::btree_map<std::uint64_t, std::size_t>     rowOfKey;     // the row this pass emitted for a key (the ratchet adds its facet there)
+    std::vector<std::uint64_t>                     ratchetable;   // over the bar, existed, and the change moved its inputs
+    for( const auto& [ key, best ] : nowByKey )
+    {
+        const bool          isNew = !existed( key );
+        const TangleInputs  was   = tangleBaseInputs( base, key );
+        const std::uint32_t was10 = tangleScore10( was );
+        const std::uint32_t now10 = tangleScore10( best.in );
+        if( extras != nullptr && !isNew && tangleCredited( was, best.in ) )
+        {
+            const Symbol& s = ing.symbols[ best.at ];
+            extras->improved.push_back( { "tangle", g.canonId[ best.at ], was10, now10, std::string( relForHash( ing.files[ s.fileId ], root ) ), s.line } );
+        }
+        if( now10 < kTangleBar10 )
+        {
+            continue;   // under the bar now: no row, whatever it was
+        }
+        if( !isNew && packTangle( was ) != packTangle( best.in ) )
+        {
+            ratchetable.push_back( key );
+        }
+        const TangleRise rise = tangleRise( was, best.in );
+        if( !isNew && was10 >= kTangleBar10 && !rise.any() )
+        {
+            continue;   // already over the bar and nothing rose: the change did not make it so
+        }
+        const TangleDetailFacts detail = detailOf.of( ing.symbols[ best.at ] );
+        Regression r{ "tangle", g.canonId[ best.at ], isNew ? 0u : was10, now10, key, /*isMinor=*/true, {}, isNew, isNew && movedAt( best.at ) };
+        r.why    = tangleWhy( was, best.in, isNew );
+        r.fix    = tangleFix( rise, isNew, best.in, detail );
+        r.locals = tangleLocals( detail );
+        rowOfKey[ key ] = regs.size();
+        regs.push_back( std::move( r ) );
+        stamp( best.at );
+    }
+    if( extras != nullptr && extras->bestSince && !ratchetable.empty() )
+    {
+        appendTangleRatchet( regs, ing, g, nowByKey, ratchetable, rowOfKey, detailOf, stamp, root, *extras );
+    }
+}
+
 // `root` = the ingest root exactly as invoked; every baseline COMPARISON key is the root-relative
 // baselineCanonId (S2) so a committed baseline matches regardless of how the root was spelled on either run.
 // The human-readable `Regression.sym` keeps the FULL g.canonId (display only — never hashed/compared), so the
@@ -10846,7 +11412,8 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
                                              std::size_t* valueRefExcludedOut = nullptr,              // ... ONLY because a table/field/argument holds them as a VALUE
                                              const KindScope& scope = {},                             // qd-memory-degrade: the kinds to report (see computeSnapshot)
                                              HistoryUnread* historyUnreadOut = nullptr,               // hwh-fix4 (N1): history a gating kind could not read
-                                             TreePasses* sharedPasses = nullptr )                     // QD-IDENTITY-ONCE: pure passes over `ing` another consumer may already hold
+                                             TreePasses* sharedPasses = nullptr,                      // QD-IDENTITY-ONCE: pure passes over `ing` another consumer may already hold
+                                             DeltaExtras* extras = nullptr )                          // D4 best-since source in; QD-CREDIT-ROW improvements + ratchet disclosure out
 {
     TreePasses  ownPasses;
     TreePasses& passes = sharedPasses != nullptr ? *sharedPasses : ownPasses;
@@ -11082,6 +11649,12 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
             const std::uint32_t now = nowIt->second.now;
             const auto          it  = baseMap.find( key );
             const std::uint32_t was = ( it == baseMap.end() ) ? 0u : it->second;
+            if( extras != nullptr && kindSelected( scope.kinds, mb.kind ) && it != baseMap.end() && was > bar && now + std::max( mb.minorDelta, 1u ) <= was )
+            {
+                // QD-CREDIT-ROW: over the bar at the baseline and lower now by at least the kind's minor delta — listed, never a row
+                const Symbol& at = ing.symbols[ nowIt->second.at ];
+                extras->improved.push_back( { std::string( mb.kind ), g.canonId[i], was, now, at.fileId < ing.files.size() ? std::string( relForHash( ing.files[ at.fileId ], root ) ) : std::string(), at.line } );
+            }
             if( now <= was )
             {
                 continue;   // nothing got worse on this axis
@@ -11124,6 +11697,12 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
     perSymbolKind( kMaterialityBars[1], newSymbolCeiling( kLocBar ), base.locBySym,    [ & ]( NodeId i ){ return nowCodeLoc[i]; } );
     perSymbolKind( kMaterialityBars[2], 0,                           base.nestBySym,   [ & ]( NodeId i ){ return std::uint32_t( ing.symbols[i].maxNest ); } );
     perSymbolKind( kMaterialityBars[3], 0,                           base.paramsBySym, [ & ]( NodeId i ){ return std::uint32_t( ing.symbols[i].params ); } );
+    // QD-TANGLE (report-only): judged only against a floor that recorded the tangle inputs — an older sidecar or blob has none, and
+    // reading every function as new would bury the answer in rows that are not about this change.
+    if( kindSelected( scope.kinds, "tangle" ) && base.tangleKnown )
+    {
+        appendTangleRows( regs, ing, g, keyByNode, base, root, existedAtBaseline, [ & ]( NodeId at ) { return moved.isMoved( at ); }, stampLoc, extras );
+    }
 
     // PERF (P5W2) — the working-tree clone pass is the dominant --quality-delta cost: on a large private C++ corpus the
     // Type-3 pass alone is ~2.7-3.2 s (60 M intra-bucket pair-visits; tokenization is only ~3 %). It is a PURE

@@ -1073,6 +1073,7 @@ for _g in \
     swiftshapecheck \
     tagspredicatecheck \
     tailsymtermscheck \
+    tanglecheck \
     taskechocheck \
     tempfilesymlinkcheck \
     termmargincheck \

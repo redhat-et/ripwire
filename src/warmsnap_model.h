@@ -44,7 +44,7 @@ struct SymRow
     std::uint8_t  kind, lang;
     std::array<std::uint8_t, kEvWhyTagCount> evWhy;
     std::uint8_t  maxNest, arityExact, bits, paramsMin, extentSuspect, rankFlags;   // bits: testScope 1, internalLinkage 2, scopeRootsStd 4, fnLocal 8
-    std::uint8_t  pad[ 2 ];
+    std::uint8_t  steer, dispatchShare;                                             // QD-TANGLE (model.h Symbol::steer / ::dispatchShare)
 };
 static_assert( RawRow<SymRow> && sizeof( SymRow ) == 64, "SymRow is a raw 64 B row" );
 
@@ -222,7 +222,7 @@ inline void writeSymbolFamily( Out& o, const std::vector<Symbol>& family )
         rows[ i ] = SymRow{ s.fileId, s.line, s.sigStartByte, s.sigEndByte, s.endByte, s.cx, s.ccx, s.loc, s.locals, s.ppAlt, s.humps, s.deepLoc, s.ev, s.params,
                             std::uint8_t( s.kind ), std::uint8_t( s.lang ), s.evWhy, s.maxNest, s.arityExact,
                             std::uint8_t( s.testScope | ( s.internalLinkage << 1 ) | ( s.scopeRootsStd << 2 ) | ( s.fnLocal << 3 ) ), std::uint8_t( s.paramsMin ),
-                            std::uint8_t( s.extentSuspect ), std::uint8_t( s.rankFlags ), { 0, 0 } };
+                            std::uint8_t( s.extentSuspect ), std::uint8_t( s.rankFlags ), s.steer, s.dispatchShare };
         names.push_back( s.name );
         scopes.push_back( s.scope );
     }
@@ -458,6 +458,7 @@ inline bool readSymbolFamily( In& in, std::vector<Symbol>& family, std::size_t f
         s.evWhy = r.evWhy;               s.params = r.params;             s.maxNest = r.maxNest;             s.arityExact = r.arityExact;
         s.testScope = r.bits & 1;        s.internalLinkage = ( r.bits >> 1 ) & 1;  s.scopeRootsStd = ( r.bits >> 2 ) & 1;  s.fnLocal = ( r.bits >> 3 ) & 1;
         s.paramsMin = r.paramsMin & 15;  s.extentSuspect = r.extentSuspect & 15;   s.rankFlags = r.rankFlags & 15;
+        s.steer = r.steer;               s.dispatchShare = r.dispatchShare;
         s.name  = textAt( nameEnds, nameBlob, i );
         s.scope = textAt( scopeEnds, scopeBlob, i );
     } );

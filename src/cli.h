@@ -357,7 +357,7 @@ struct Config
     bool             qualityDelta    = false;              // --quality-delta: report only code-quality regressions vs that baseline (exit 2 if any MAJOR unacked one)
     std::string_view qualityDeltaRange;                    // --quality-delta=REV|A..B (R-I): compare two COMMITTED trees instead of the working
                                                             // tree vs a baseline — the WAVE-level measurement. Same grammar --dmm= takes
-                                                            // (quality::resolveRefSpec owns it), same 12 kinds/gating/ack contract out
+                                                            // (quality::resolveRefSpec owns it), same 13 kinds/gating/ack contract out
     bool             qualityAck      = false;              // --quality-ack[=REASON]: accept the current findings into .ripwire_quality_acks (per-finding ratchet); shares qualityDelta's baseline resolution
     std::string_view qualityAckReason;                     // the reason recorded next to each acked finding
     std::string_view qualityAckOnly;                       // --ack-only=SUBSTR[,SUBSTR]: ack only findings whose kind, canonical id or facet (e.g. format-arity) contains one of these (default: all)
@@ -1875,8 +1875,8 @@ inline constexpr char kHelpHead[] =
         "    --show-stale               (with --quality-delta) print the stale-ack rows and the full header a clean answer collapses\n"
         "                               — a regression-free answer keeps only stale= and stale_by_kind= (its <sa> rows collapsed), and on a tree\n"
         "                               that IS its HEAD only the verdict; either fold only when it saves a quarter of the bytes. Refused alone.\n"
-        "    --quality-delta            before a PR: report ONLY what your change made worse, across 12 kinds\n"
-        "                               — pair with --test-gate. Each kind is measured against the baseline (complexity/verbosity/nesting/params/dup/dead/api-surface + error-masking/short-horizon-churn/new-clone-of-reused-helper + placeholder + defect-shape);\n"
+        "    --quality-delta            before a PR: report ONLY what your change made worse, across 13 kinds\n"
+        "                               — pair with --test-gate. Each kind is measured against the baseline (complexity/verbosity/nesting/params/dup/dead/api-surface + error-masking/short-horizon-churn/new-clone-of-reused-helper + placeholder + defect-shape + tangle, report-only);\n"
         "                               every finding is classified by ORIGIN: a symbol that EXISTED at the baseline and got worse (preexisting-worse=\"N\", no attribute on the row) vs one that exists only\n"
         "                               because the code is NEW (new-symbol=\"N\", origin=\"new-symbol\" on the row). A small numeric delta is additionally sev=\"minor\". EXIT 2 ONLY on a major AND unacked row that is\n"
         "                               preexisting-worse, defect-shape format-arity (any origin) or a new function at the ceiling — the gating=\"N\" header count. New-symbol rows are still PRINTED (they are the debt you are adding — read them);\n"

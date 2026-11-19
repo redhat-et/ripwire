@@ -930,6 +930,12 @@ inline bool astQueryNestsTooDeep( std::string_view query )
 // local to the re-parsed substring.
 std::vector<LocalNameFact> collectGatedLocalNames( std::string_view defBytes, std::uint32_t defStartLine, Lang lang );
 
+// ---- QD-TANGLE detail: the steering locals and deep regions a tangle row names (model.h TangleDetailFacts) ----
+// Re-parses the whole file `fileBytes` (its grammar from `path`'s extension, the crawl's .h → ObjC reroute included) and re-runs the
+// ingest walk on the node spanning [startByte, endByte) — Symbol::sigStartByte / endByte. Called only for the rows a --quality-delta
+// answer emits, never cached; `ok` is false when the file does not parse or no node spans the def.
+TangleDetailFacts tangleDetailOf( std::string_view fileBytes, std::string_view path, std::uint32_t startByte, std::uint32_t endByte );
+
 // ---- --whereis on other refs: where the TAGS PATH defines one name inside blobs the index never read ----
 // HEAD's rows take kind="def" from the index; a row on another ref comes from a git blob the index never saw. This
 // runs the index's own extraction on such a blob — the crawl's extension → grammar rule (with the .h → ObjC content
@@ -959,5 +965,22 @@ struct BlobDefinitions
 // the process-global query cache BEFORE any worker starts — the single-writer rule ingest() itself follows — so a
 // long-lived server must call this under quality::headSnapshotIngestMutex, like every other ingest call site.
 std::vector<BlobDefinitions> definitionLinesInBlobs( std::span<const BlobText> blobs, std::string_view name );
+
+// QD-TANGLE D4 (quality's best-since store): every callable definition of each blob with its tangle inputs (model.h TangleInputs),
+// by the same extraction as definitionLinesInBlobs plus the callables' cc_walk — so a history blob's inputs are the ones HEAD's
+// index would give the same bytes. `defs` is empty unless `status` is Parsed. Same pool, same single-writer rule.
+struct BlobTangleDef
+{
+    std::string  scope;
+    std::string  name;
+    TangleInputs in;
+};
+struct BlobTangleDefs
+{
+    std::vector<BlobTangleDef> defs;
+    Lang                       lang   = Lang::Unknown;
+    BlobDefsStatus             status = BlobDefsStatus::Failed;
+};
+std::vector<BlobTangleDefs> tangleInputsInBlobs( std::span<const BlobText> blobs );
 
 }   // namespace rw
