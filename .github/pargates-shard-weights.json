@@ -543,6 +543,7 @@
  "runhintcheck.sh": 2.8,
  "runtracecheck.sh": 3.8,
  "rustimportprecisecheck.sh": 11.1,
+ "rustmacrocallcheck.sh": 2.0,
  "rustqualcheck.sh": 3.7,
  "safedeletecheck.sh": 2.8,
  "sarifcheck.sh": 5.2,

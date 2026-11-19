@@ -380,7 +380,10 @@ constexpr std::uint32_t kCacheVersion = 52;           // 52: lane failure-defaul
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 311;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 313;          // bump on any grammar/.scm/extraction change
+                                                      // 313 = 2026-11-18 (lane BX2 FIX 5, PLACEHOLDER: the train renumbers; above the batch's 311/312): a
+                                                      //   Rust `macro_rules!` transcriber's call-shaped `name(` / `.name(` / `a::name(` / `$crate::a::name(` is a
+                                                      //   Call reference of its macro (ingest_names.h scanTranscriberCalls). Rich file tag 314. kCacheVersion unchanged.
                                                       // 311 = 2026-11-17 (#358 C# 1a, @LaimaWu; lands #420, rebased; was 198 on the PR, above main's 309/310): using
                                                       //   directives move to shared @import.path captures; import-free deep containers no longer disclose a cut or
                                                       //   lose whole-cache eligibility. Alias/edge facts unchanged; rich tag 312. kCacheVersion unchanged.
