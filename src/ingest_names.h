@@ -2174,7 +2174,7 @@ inline FnScope enclosingFunctionScope( TSNode root, TSNode defNode ) noexcept
     for( TSNode n = root; !ts_node_is_null( n ) && !ts_node_is_null( defNode ) && !ts_node_eq( n, defNode ); n = ts_node_child_with_descendant( n, defNode ) )
     {
         const char* t = ts_node_type( n );
-        if( namesNode( kMemberContainerKinds, t ) )
+        if( isOneOf( t, kMemberContainerKinds ) )
         {
             scope = {};   // a member of a class/impl body below here, unless a function nests deeper still
         }
