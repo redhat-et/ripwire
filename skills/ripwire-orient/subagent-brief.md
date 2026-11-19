@@ -11,7 +11,7 @@ brief itself.
 subagent:
 
 ```text
-Orient first: run `ripwire <dir> --for="<your task in words; paste paths and symbols from this brief verbatim>" --legend=compact` and read only the files it ranks, before any grep or whole-file read.
+Orient first: run `ripwire <dir> --for="<your task in words; paste paths and symbols from this brief verbatim>"` and read only the files it ranks, before any grep or whole-file read.
 Before you report, after your LAST edit: commit, then run `ripwire <dir> --quality-delta=BASE..HEAD --legend=compact` (BASE = where your branch started; the range catches a regression made in two steps) and then `ripwire <dir> --test-gate --legend=compact`, and run the gates it names. A check followed by another edit proves nothing about that edit.
 ```
 

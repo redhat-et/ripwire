@@ -121,7 +121,7 @@ insideWorkTree="$( git -C "$dir" rev-parse --is-inside-work-tree 2>/dev/null )" 
 # THE TEXT. A constant; <dir> and <task> are for the subagent to fill. Keep it to the two steps: its whole hypothesis
 # is that a short, specific instruction is acted on where a long catalogue is not.
 primer='ripwire — your user installed this for every subagent. Two steps, in this order:
-1. Orient first: `ripwire <dir> --for="<your task; paste paths and symbols from the brief verbatim>" --legend=compact` (<dir> = the tree you will change). Read only the files it ranks, before any grep or whole-file read.
+1. Orient first: `ripwire <dir> --for="<your task; paste paths and symbols from the brief verbatim>"` (<dir> = the tree you will change). Read only the files it ranks, before any grep or whole-file read.
 2. Before you report, after your LAST edit: commit, then run `ripwire <dir> --quality-delta=BASE..HEAD --legend=compact` (BASE = where your branch started; the range catches a regression made in two steps) and then `ripwire <dir> --test-gate --legend=compact`, and run the gates it names. A check followed by another edit proves nothing about that edit.'
 
 out="$( jq -cn --arg m "$primer" '{hookSpecificOutput:{hookEventName:"SubagentStart",additionalContext:$m}}' 2>/dev/null )" \
