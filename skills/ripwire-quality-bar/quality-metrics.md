@@ -59,7 +59,7 @@ defect- and vulnerability-prone files in the empirical literature. Push hardest 
 | **Resolution ambiguity `amb=`** | the map's OWN honesty signal — K calls the resolver guessed | verify high-`amb` in source | header `ambiguous=`, per-symbol `amb=` | read the source before trusting a high-`amb` edge |
 | **Cache-friendly data layout (DOD)** | hot-path perf + this codebase's house value: SoA over AoS, smallest type that fits, 32-bit ids | contextual | `--field-affinity[=STRUCT]` for co-accessed-but-far-apart fields (`split-line`/`straddle`); `--for` finds the hot struct. A static HYPOTHESIS, not a measurement — see `ripwire-perf-target` for what it cannot see | mirror the surrounding hot-path layout; don't AoS a hot loop — confirm on hardware counters before changing a layout |
 
-## Why `--quality-delta`'s 12 kinds — the measured agent failure modes
+## Why `--quality-delta`'s 13 kinds — the measured agent failure modes
 Not a generic lint list; each targets what the 2025-26 literature found agent-written code actually
 degrades on (large-N studies):
 - **Verbosity**: agent code runs **2.3× more verbose** than human code on matched tasks.
