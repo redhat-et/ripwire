@@ -5679,12 +5679,11 @@ inline void replayForPostureNotices( const ForPostureRender& r )
     }
 }
 
-// The answer-first order knobs for one finished --for answer: T-B's cue read off the task, TL1 M2 / M3's A/B handles.
+// The answer-first order knobs for one finished --for answer: T-B's cue read off the task, TL1 M2's A/B handle.
 inline rw::answerfirst::AnswerFirstAsk forAnswerFirstAsk( const rw::Config& cfg, std::string_view doc )
 {
     return { .callersLead = rw::subjectCallersCueLeads( cfg.forTask, rw::answerfirst::subjectCallersOf( doc ) ),
-             .tailSameDir = rw::answerfirst::tailSameDirOn(),
-             .bodyLead    = rw::answerfirst::bodyLeadOn() };
+             .tailSameDir = rw::answerfirst::tailSameDirOn() };
 }
 
 // The budgeted answer (the fit's, or `u`'s whole capture when it had no root; the caller checked it is whole) in the posture's order.
