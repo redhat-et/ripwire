@@ -25,7 +25,7 @@
 #             hashutil::widen( x ) — the inline namespace v2 elided                 → still the split (inline-ness is not recorded: card)
 #             fnv1a64( s ) under `using namespace rw::hashutil;` (a directive)      → still the split
 #             fnv1a64( s ) in namespace rw, whose own scope defines fnv1a64, under `using hashutil::fnv1a64;` → arch.h's
-#                                                                                  (guard: graph.h callerScopeDeclares)
+#                                                                                  (guard: graph.h canonicalCallQualifier's caller-scope check)
 #             a using-declaration of the name in ANOTHER function's body            → still the split (not in force there)
 #             an alias `namespace late = …;` declared AFTER the call                → still the split (not yet in force)
 #             an included header's `namespace q { using rw::hashutil::fnv1a64; }`  → still the split: no C++ Namespace row is
@@ -200,7 +200,7 @@ neg fx "$U" widen 10 "$A::rw::widen $H::v2::widen" split # inline namespace elid
 neg fx "$U" fnv1a64 11 "$AF $HF" split                   # alias declared after the call
 neg fx "$U" fnv1a64 30 "$AF $HF" split                   # the using-declaration is in another function's body
 neg fx "$U" fnv1a64 34 "$AF $HF" split                   # using-directive
-neg fx "$U" fnv1a64 40 "$AF"                             # the caller's own scope defines the name (callerScopeDeclares)
+neg fx "$U" fnv1a64 40 "$AF"                             # the caller's own scope defines the name (caller-scope check)
 neg fx src/nsmore.cpp fnv1a64 4 "$AF $HF" split          # a header's namespace-scope using (fileScope guard)
 neg fx "$U" make 17 "$A::Klass::make" qualified          # class-static
 neg fx "$U" make 18 "$A::Holder::make" qualified         # template-qualified

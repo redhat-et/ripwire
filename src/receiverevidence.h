@@ -317,14 +317,24 @@ struct CallResultTypes
             {
                 aliasesByName[ b.var ].push_back( &b );
             }
-            if( isCppScopeRow( b ) && ( cppUsingFiles.empty() || cppUsingFiles.back() != b.fileId ) )
-            {
-                cppUsingFiles.push_back( b.fileId );
-            }
-            if( b.kind == LocalBindKind::TypeImport && isCppScopeRow( b ) && b.var != "*" )
-            {
-                cppUsingDeclared.try_emplace( b.var, char( 1 ) );
-            }
+            noteCppScopeRow( b );
+        }
+    }
+    // a C++ row that carries its scope's span: its file joins cppUsingFiles (bindings arrive sorted by file), and a
+    // using-declaration's name joins cppUsingDeclared (QUAL-NS-CALL-BIND, cppScopeNamedAt's gate)
+    void noteCppScopeRow( const Binding& b )
+    {
+        if( !isCppScopeRow( b ) )
+        {
+            return;
+        }
+        if( cppUsingFiles.empty() || cppUsingFiles.back() != b.fileId )
+        {
+            cppUsingFiles.push_back( b.fileId );
+        }
+        if( b.kind == LocalBindKind::TypeImport && b.var != "*" )
+        {
+            cppUsingDeclared.try_emplace( b.var, char( 1 ) );
         }
     }
     // a C++ using-directive / using-declaration, or (fix round 3) a C++ alias: the rows that carry their scope's span (model.h)
@@ -2325,8 +2335,13 @@ struct CallResultTypes
     // In force is forEachCppUsing's rule: the call's own file's rows declared before it in a scope that holds it, and the
     // namespace- or file-scope rows of an in-tree header it includes whose namespace leads the call's. A name no alias or
     // using-declaration in the tree binds never walks (the two name sets are built once, in noteImport).
-    std::string cppScopeNamedAt( const Reference& r ) const
+    // The view points into the deciding row's importedName (the ingest result's storage), never into a scratch buffer.
+    std::string_view cppScopeNamedAt( const Reference& r ) const
     {
+        if( r.lang != Lang::Cpp && r.lang != Lang::ObjC )
+        {
+            return {};
+        }
         const bool             qualified = !r.qualifier.empty();
         const std::string_view name      = qualified ? std::string_view( r.qualifier ) : std::string_view( r.calleeName );
         scopeKey.assign( name );
@@ -2349,23 +2364,17 @@ struct CallResultTypes
             {
                 return;
             }
-            const std::string_view scope = qualified ? lastScopeSegment( b.importedName ) : lastScopeSegment( scopeHalf( b.importedName ) );
+            // the scope's path: an alias's target (`rw::hashutil`), a using-declaration's name less its last segment
+            // (`rw::hashutil::f` → `rw::hashutil`); keyed by its last top-level segment (`hashutil`, `B<x::y>`)
+            std::string_view path = b.importedName;
+            const std::size_t cut = qualified ? std::string_view::npos : namesplit::lastTopLevelScopeSep( path );
+            path = qualified ? path : cut == std::string_view::npos ? std::string_view{} : path.substr( 0, cut );
+            const std::size_t      sep   = namesplit::lastTopLevelScopeSep( path );
+            const std::string_view scope = sep == std::string_view::npos ? path : path.substr( sep + 2 );
             agree = agree && !scope.empty() && ( named.empty() || named == scope );
             named = scope;
         } );
-        return agree ? std::string( named ) : std::string();
-    }
-    // `a::b::f` → `a::b` (the part before the last top-level `::`), "" when there is none
-    static std::string_view scopeHalf( std::string_view written ) noexcept
-    {
-        const std::size_t sep = namesplit::lastTopLevelScopeSep( written );
-        return sep == std::string_view::npos ? std::string_view{} : written.substr( 0, sep );
-    }
-    // `::a::b` → `b`, `a::B<x::y>` → `B<x::y>`: the last top-level segment
-    static std::string_view lastScopeSegment( std::string_view written ) noexcept
-    {
-        const std::size_t sep = namesplit::lastTopLevelScopeSep( written );
-        return sep == std::string_view::npos ? written : written.substr( sep + 2 );
+        return agree ? named : std::string_view{};
     }
 
     // the class a ReturnType record's written type resolves to in its own (the callee's) file — kNoNode for none or several
