@@ -624,5 +624,46 @@ sys.exit(1 if bad else 0)
 PY_CL
 [ $? -eq 0 ] || fail=1
 
+# (SD) TL1 M2 -- SAME-DIRECTORY TAIL LEAD (foranswerfirst.h tailSameDirFirst; lane TL1 PREREG M2, F1's post-hoc P1t lead). Inside
+# <tail>, rows 1..24 keep their place; rows past 24 are stably partitioned, rows whose p= directory is the directory of a <sigs> <d>
+# row with r <= 5 first. ORDER-ONLY: the answer is a permutation of its RIPWIRE_NO_TAIL_SAMEDIR=1 twin and of --legend=first.
+TASK_S="legend posture"
+cap "$WORK/s_new.xml" "$TASK_S" $OPTIN $WHOLE
+RIPWIRE_NO_TAIL_SAMEDIR=1 cap "$WORK/s_off.xml" "$TASK_S" $OPTIN $WHOLE
+cap "$WORK/s_old.xml" "$TASK_S" $LEGACY
+python3 - "$WORK" <<'PY_SD'
+import re, sys, os
+W = sys.argv[1]; bad = 0
+def rd(n): return open(os.path.join(W, n), "rb").read().decode("latin-1")
+def say(ok, msg):
+    global bad
+    print("  %s  %s" % ("PASS" if ok else "FAIL", msg)); bad += 0 if ok else 1
+def attr(tag, k):
+    m = re.search(r' %s="([^"]*)"' % k, tag); return m.group(1) if m else ""
+def tail_rows(d):
+    i = d.find("<tail"); i = d.find(">", i) + 1; j = d.find("</tail>", i)
+    return [m.group(0) for m in re.finditer(r"<([A-Za-z_][\w-]*)\b[^>]*?/>|<([A-Za-z_][\w-]*)\b[^>]*>.*?</\2>", d[i:j], re.S)]
+def dirof(p):
+    p = re.sub(r":[0-9:-]+$", "", p); return p[:p.rfind("/")] if "/" in p else ""
+def heads(d):
+    i = d.find("<sigs"); s = d[i:d.find("</sigs>", i)]
+    return {dirof(attr(t, "p")) for t in re.findall(r"<d [^>]*>", s) if attr(t, "r").isdigit() and int(attr(t, "r")) <= 5 and attr(t, "p")}
+new, off, old = rd("s_new.xml"), rd("s_off.xml"), rd("s_old.xml")
+rn, ro = tail_rows(new), tail_rows(off); H = heads(off)
+near = lambda r: dirof(attr(r[:r.find(">") + 1], "p")) in H
+want = ro[:24] + [r for r in ro[24:] if near(r)] + [r for r in ro[24:] if not near(r)]
+fires = len(ro) > 24 and want != ro
+say(fires, "(SD0) the fixture FIRES: %d tail rows, %d past row 24 sit in a top-5 sigs directory (%s), and the twin's order differs -- if not, SD is untested" % (len(ro), sum(near(r) for r in ro[24:]), ",".join(sorted(H))))
+say(rn[:24] == ro[:24], "(SD1) tail rows 1-24 are the twin's rows 1-24, in place")
+say(rn == want, "(SD1) rows past 24: same-directory rows first, each part in the twin's own order")
+units = lambda d: sorted(re.findall(r"<[^>]*>|[^<]+", d))
+say(len(new) == len(off) and units(new) == units(off) and len(new) == len(old) and sorted(new) == sorted(old),
+    "(SD2) a permutation: %d B, the same units as the RIPWIRE_NO_TAIL_SAMEDIR=1 twin and the same bytes as --legend=first" % len(new))
+cut = new.replace(rn[-1], "", 1) if rn else new
+say(units(cut) != units(off), "(SD2n) dropping one tail row DOES break SD2 -- SD2 can fail")
+sys.exit(1 if bad else 0)
+PY_SD
+[ $? -eq 0 ] || fail=1
+
 if [ "$fail" -ne 0 ]; then echo "foranswerfirstcheck: FAILURES"; exit 1; fi
 echo "foranswerfirstcheck: ALL PASS"

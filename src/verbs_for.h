@@ -5753,7 +5753,8 @@ inline int runForLensFitted( const MainDispatch& d )
     // A budgeted answer is shed WHOLE — legend included — so moving its legend after the rows loses no definition.
     if( d.cfg.legendAnswerFirst )
     {
-        (void)rw::answerfirst::answerFirst( out, rw::subjectCallersCueLeads( d.cfg.forTask, rw::answerfirst::subjectCallersOf( out ) ) );
+        (void)rw::answerfirst::answerFirst( out, { .callersLead = rw::subjectCallersCueLeads( d.cfg.forTask, rw::answerfirst::subjectCallersOf( out ) ),
+                                                    .tailSameDir = rw::answerfirst::tailSameDirOn() } );
     }
     std::fwrite( out.data(), 1, out.size(), stdout );
     return u.rc;
@@ -5826,7 +5827,8 @@ std::optional<int> runForLens( const MainDispatch& d )
         {
             std::string doc = r.out->bytes;
             // AF4 T-B: a who-calls question leads with its <callers by="subject"> block (foranswerfirst.h rowBlockOrder)
-            (void)rw::answerfirst::answerFirst( doc, rw::subjectCallersCueLeads( d.cfg.forTask, rw::answerfirst::subjectCallersOf( doc ) ) );
+            (void)rw::answerfirst::answerFirst( doc, { .callersLead = rw::subjectCallersCueLeads( d.cfg.forTask, rw::answerfirst::subjectCallersOf( doc ) ),
+                                                    .tailSameDir = rw::answerfirst::tailSameDirOn() } );
             // SIGX (TL1 M1, forsigx.h): after the permutation and before paging, so every page size windows the same document
             if( !d.cfg.signaturesOnly && rw::sigx::sigxOn() )
             {

@@ -48,11 +48,13 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdlib>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "serialize.h"   // attrOf — the one reader of a printed tag's attribute value
 #include "infra/Diagnostics.h"
 #include "infra/emit.h"
 
@@ -455,6 +457,101 @@ struct RootBody
     return RootBody{ openEnd, closeAt };
 }
 
+// ── TL1 M2, SAME-DIRECTORY TAIL LEAD (results/F1_TAILRANK_1118/READOUT.md §3, the one post-hoc lead with zero flips on both design
+// halves; pre-registered FRESH as lane TL1's PREREG M2, confirmed once on T5e). Inside the top-level <tail>, rows 1..kGuardTailRows
+// keep their place — they are the rows G's guard protects and on F1's design set every in-12 KB tail-only group sat at row <= 27 — and
+// rows past it are stably partitioned: a row whose p= file sits in the DIRECTORY of a top-kSameDirHeadRank <sigs> <d> row first, then
+// every other row, each part in its own order. F1's measure of that signal (P1t): 2.29x the needed-row base rate pooled, covering
+// 36-56 % of the needed tail rows; the broad signals that also reorder rows 1-24 (P1, R1, F1) flipped cells out of 12 KB, which is why
+// the first 24 rows are fixed. Order only: the tail's rows are permuted inside its own text, so its size, G's guard (it reads tail
+// row kGuardTailRows) and the document's size are unchanged — answerFirst's ENSURES holds it. The tail legend's "rank order" wording
+// is not changed (no byte added: the T-B / G precedent); past row kGuardTailRows the order is this one. RIPWIRE_NO_TAIL_SAMEDIR (any
+// value) turns it off — the A/B handle.
+inline constexpr std::size_t kSameDirHeadRank = 5;
+[[nodiscard]] inline bool tailSameDirOn() noexcept { return std::getenv( "RIPWIRE_NO_TAIL_SAMEDIR" ) == nullptr; }
+
+// The directory of a printed path: everything before its last '/', "" for a root-level file; a trailing :line (:line-line,
+// :line:col) suffix is not part of the path.
+[[nodiscard]] inline std::string_view pathDirOf( std::string_view p ) noexcept
+{
+    const std::size_t slash = p.rfind( '/' );
+    const std::size_t colon = p.find( ':', slash == std::string_view::npos ? 0 : slash );
+    if( colon != std::string_view::npos && p.find_first_not_of( "0123456789:-", colon ) == std::string_view::npos ) { p = p.substr( 0, colon ); }
+    const std::size_t cut = p.rfind( '/' );
+    return cut == std::string_view::npos ? std::string_view() : p.substr( 0, cut );
+}
+
+// The direct-child row blocks of block `b` (its open tag to its close tag); empty for a self-closing block.
+[[nodiscard]] inline std::vector<Block> childBlocks( std::string_view text, std::size_t begin, std::size_t end )
+{
+    const std::size_t open  = text.find( '>', begin ) + 1;
+    const std::size_t close = text.rfind( "</", end - 1 );
+    return open >= 2 && text[ open - 2 ] != '/' && close > open && close != std::string_view::npos ? topLevelBlocks( text, open, close ) : std::vector<Block>{};
+}
+
+// The directories of the <sigs> <d> rows ranked r <= kSameDirHeadRank (sorted, unique), read off the block's own rows.
+[[nodiscard]] inline std::vector<std::string_view> headRowDirs( std::string_view view, const Block& sigs )
+{
+    std::vector<std::string_view> dirs;
+    for( const Block& k : childBlocks( view, sigs.begin, sigs.end ) )
+    {
+        const std::string_view tag  = k.comment || k.name != "d" ? std::string_view() : view.substr( k.begin, view.find( '>', k.begin ) + 1 - k.begin );
+        const std::string_view r    = attrOf( tag, "r" );
+        const std::string_view p    = attrOf( tag, "p" );
+        const bool             rank = !r.empty() && r.size() <= 2 && r.find_first_not_of( "0123456789" ) == std::string_view::npos
+                                      && std::size_t( std::stoul( std::string( r ) ) ) <= kSameDirHeadRank;
+        if( rank && !p.empty() ) { dirs.push_back( pathDirOf( p ) ); }
+    }
+    std::ranges::sort( dirs );
+    dirs.erase( std::ranges::unique( dirs ).begin(), dirs.end() );
+    return dirs;
+}
+
+// The <tail> block's text with rows past kGuardTailRows partitioned same-directory first (unchanged when nothing qualifies, the tail
+// has kGuardTailRows rows or fewer, or its rows are not one contiguous run of elements).
+[[nodiscard]] inline std::string tailSameDirFirst( const std::string& tail, const std::vector<std::string_view>& dirs )
+{
+    const std::vector<Block> rows = childBlocks( tail, 0, tail.size() );
+    const bool contiguous = std::ranges::adjacent_find( rows, []( const Block& a, const Block& b ) { return a.end != b.begin || a.comment || b.comment; } ) == rows.end();
+    if( dirs.empty() || rows.size() <= kGuardTailRows || !contiguous ) { return tail; }
+    const std::string_view view = tail;
+    const auto near = [ & ]( const Block& r )
+    {
+        const std::string_view p = attrOf( view.substr( r.begin, view.find( '>', r.begin ) + 1 - r.begin ), "p" );
+        return !p.empty() && std::ranges::binary_search( dirs, pathDirOf( p ) );
+    };
+    std::string out( view.substr( 0, rows[ kGuardTailRows ].begin ) );
+    for( const bool pass : { true, false } )
+    {
+        for( std::size_t i = kGuardTailRows; i < rows.size(); ++i )
+        {
+            if( near( rows[ i ] ) == pass ) { out.append( view.substr( rows[ i ].begin, rows[ i ].end - rows[ i ].begin ) ); }
+        }
+    }
+    out.append( view.substr( rows.back().end ) );
+    return out;
+}
+
+// M2 on an assembled answer-first document: its top-level <tail> rewritten in place (same bytes, so every offset outside it holds).
+inline void tailSameDirInPlace( std::string& doc )
+{
+    const std::optional<RootBody> rb = rootBody( doc );
+    const std::vector<Block>      bl = rb ? topLevelBlocks( doc, rb->openEnd + 1, rb->closeAt ) : std::vector<Block>{};
+    const auto named = [ & ]( std::string_view n ) { return std::ranges::find_if( bl, [ & ]( const Block& b ) { return !b.comment && b.name == n; } ); };
+    const auto tail = named( "tail" ), sigs = named( "sigs" );
+    if( tail == bl.end() || sigs == bl.end() ) { return; }
+    const std::string permuted = tailSameDirFirst( doc.substr( tail->begin, tail->end - tail->begin ), headRowDirs( doc, *sigs ) );
+    ENSURES( permuted.size() == tail->end - tail->begin, "tailSameDirFirst permutes the tail's rows: its size cannot move" );
+    doc.replace( tail->begin, permuted.size(), permuted );
+}
+
+// The order knobs a caller hands answerFirst (each read from argv or the A/B environment by the caller, never here).
+struct AnswerFirstAsk
+{
+    bool callersLead = false;   // T-B: the task asks who calls the <callers by="subject"> block's subject
+    bool tailSameDir = false;   // TL1 M2
+};
+
 // T-B: the of= of the answer's top-level <callers by="subject"> block, still XML-escaped as the answer prints it; "" when there is
 // none. Read from the TOP-LEVEL scan, never a text search: a CDATA body can spell the same open tag.
 [[nodiscard]] inline std::string_view subjectCallersOf( std::string_view doc )
@@ -471,12 +568,12 @@ struct RootBody
     return to == std::string_view::npos ? std::string_view() : open.substr( from, to - from );
 }
 
-// Permute one finished --for answer in place. Returns whether it was rewritten. `callersLead` (T-B): the task asks who calls the
-// subject the <callers by="subject"> block answers, so that block leads.
+// Permute one finished --for answer in place. Returns whether it was rewritten. `ask.callersLead` (T-B): the task asks who calls the
+// subject the <callers by="subject"> block answers, so that block leads; `ask.tailSameDir` (TL1 M2): the tail's same-directory lead.
 //
 // Every byte of every block is copied unchanged; only their order moves. The ENSURES below is the contract:
 // a permutation that changed the document's size would be a different change wearing this one's name.
-inline bool answerFirst( std::string& doc, bool callersLead = false )
+inline bool answerFirst( std::string& doc, const AnswerFirstAsk& ask = {} )
 {
     const std::string_view        view = doc;
     const std::optional<RootBody> rb   = rootBody( view );
@@ -486,8 +583,8 @@ inline bool answerFirst( std::string& doc, bool callersLead = false )
     const std::vector<Block> blocks = topLevelBlocks( view, openEnd + 1, closeAt );
     if( blocks.empty() ) { return false; }   // not a shape this pass understands: served unchanged
 
-    const std::size_t lead = callersLead ? subjectCallersBlock( view, blocks ) : std::string_view::npos;
-    if( lead == std::string_view::npos && !permutationWouldMove( view, blocks ) ) { return false; }
+    const std::size_t lead = ask.callersLead ? subjectCallersBlock( view, blocks ) : std::string_view::npos;
+    if( lead == std::string_view::npos && !ask.tailSameDir && !permutationWouldMove( view, blocks ) ) { return false; }
 
     std::string out;
     out.reserve( doc.size() );
@@ -495,6 +592,7 @@ inline bool answerFirst( std::string& doc, bool callersLead = false )
 
     appendAnswerFirst( view, blocks, out, lead );
     out.append( view.substr( closeAt ) );
+    if( ask.tailSameDir ) { tailSameDirInPlace( out ); }   // TL1 M2, on the assembled document (its root closed)
 
     // THE PERMUTATION CONTRACT. Not an assertion of taste: if this ever fails, the pass has dropped or
     // duplicated a block, and the band's whole safety argument — no row removed, so no gold lost — is void.
@@ -509,6 +607,7 @@ inline bool answerFirst( std::string& doc, bool callersLead = false )
                   "foranswerfirst: the permuted answer changed size — serving the original, unpermuted" );
         return false;
     }
+    if( out == doc ) { return false; }   // nothing moved (an ask that found nothing to reorder)
     doc.swap( out );
     return true;
 }
