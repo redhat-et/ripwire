@@ -1155,4 +1155,194 @@ for _g in expandrangecheck diagnoticecheck; do
     orphan_case "$_g" KILL 2 5
 done
 
+# ── (S) SCRATCH + (R) ALONE RETRY (2026-11-19, GATE-TMP-LEAK / PARGATES-ALONE-RETRY) ─────────────────────────────────────
+# (S) every gate runs with TMPDIR=<per-run root>/<gate>.XXXXXX, and pargates removes that dir the moment the gate is over --
+#     including a gate KILLed at its budget, whose own EXIT trap never runs -- after making every subdir u+rwx, so a
+#     mode-000 subdir a gate left goes too; the run root itself goes at exit. Measured before the fix: 890 tmp.* dirs
+#     (8.7 GB) in $TMPDIR after ~3 days of train shard runs. Each run below gets a private TMPDIR of its own, so "nothing
+#     left" is read from a directory nothing else writes to.
+#       S1 a gate that ignores TERM (so the stop ends in KILL) and sleeps past a 3 s budget leaves no dir behind; premise:
+#          its mktemp dir was made INSIDE pargates' per-gate dir and existed while it ran
+#       S2 the per-gate dir is gone BEFORE the next gate starts (an observer gate run after it, -j 1, sees no sibling)
+#       S3 a gate whose own `trap 'rm -rf'` cannot remove a non-empty mode-000 subdir (worka/blind) leaves nothing behind
+# (R) after the parallel pass, each TIMEOUT -- and each red gate named in .github/pargates-load-timing.txt -- reruns
+#     once ALONE; a pass then is PASS(alone-retry), counted in alone_retry= and never in pass=, and the last line is not
+#     ALL PASS. A plain red is not retried. Default on for --shard runs; --no-alone-retry turns it off.
+#       R1 a gate that times out on its first run and passes on its second: PASS(alone-retry), pass=0 alone_retry=1, rc 0
+#       R2 the same gate under --no-alone-retry: red (fail=1), run once
+#       R3 a plain FAIL (not a TIMEOUT, not listed) runs ONCE and stays red; a listed gate that fails then passes is retried
+#       R4 without --shard (and no --alone-retry) nothing is retried
+# Controls (a negative arm must be able to fail), each a copy with ONE mutation, each required to go red:
+#   no-tmpdir   the gate is not handed TMPDIR               -> S1 leaves its mktemp dir in pargates' own TMPDIR
+#   no-shim     (macOS only) no bin/mktemp on the gate's PATH -> S1's bare `mktemp -d` lands in the per-user T/ dir
+#   no-drop     the per-gate dir is not removed at gate exit -> S2's observer sees the KILLed gate's dir
+#   no-chmod    removal does not open subdirs first          -> S3 leaves the mode-000 subdir
+#   retry-all   every red is retried                         -> R3's plain FAIL runs twice
+#   clean-pass  an alone pass is counted as a clean pass     -> R1 reads pass=1 alone_retry=0
+SR="$TMP/scratch"; mkdir -p "$SR"
+SC="$SR/corpus"; mkdir -p "$SC/test" "$SC/.github"
+cat > "$SC/test/probesk1check.sh" <<'EOF'
+#!/usr/bin/env bash
+# ignores TERM, so pargates' stop ends in KILL and no trap of ours could have run; records where its mktemp landed
+trap '' TERM
+d="$( mktemp -d )"; touch "$d/payload"
+printf '%s\n%s\n' "$TMPDIR" "$d" > "$SR_MARK/akill.where"
+[ -d "$d" ] && echo "$d" > "$SR_MARK/akill.existed"
+exec sleep 30
+EOF
+cat > "$SC/test/probesk2check.sh" <<'EOF'
+#!/usr/bin/env bash
+# runs after probesk1check at -j 1: lists every sibling dir in the per-run root
+ls -A "$( dirname "$TMPDIR" )" | grep -v -e "^$( basename "$TMPDIR" )\$" -e "^bin\$" > "$SR_MARK/observe.siblings"
+echo "observed"; exit 0
+EOF
+cat > "$SC/test/probeblindcheck.sh" <<'EOF'
+#!/usr/bin/env bash
+d="$( mktemp -d )"; trap 'rm -rf "${d:?}" 2>/dev/null' EXIT
+mkdir -p "$d/worka/blind"; touch "$d/worka/blind/f"; chmod 000 "$d/worka/blind"
+echo "$d" > "$SR_MARK/blind.where"
+echo "  PASS  made a mode-000 subdir"; exit 0
+EOF
+cat > "$SC/test/probeflakycheck.sh" <<'EOF'
+#!/usr/bin/env bash
+# times out on its first run, passes on every later one
+n="$( cat "$SR_MARK/flaky.n" 2>/dev/null || echo 0 )"; n=$(( n + 1 )); echo "$n" > "$SR_MARK/flaky.n"
+[ "$n" -eq 1 ] && exec sleep 30
+echo "  PASS  run $n"; exit 0
+EOF
+cat > "$SC/test/probeplainredcheck.sh" <<'EOF'
+#!/usr/bin/env bash
+# a plain FAIL: never a TIMEOUT, never listed
+echo x >> "$SR_MARK/red.runs"
+echo "  FAIL  arm (Q) a real red"; exit 1
+EOF
+cat > "$SC/test/probelistedcheck.sh" <<'EOF'
+#!/usr/bin/env bash
+# named in the load-timing list: fails its first run (no TIMEOUT), passes the next
+echo x >> "$SR_MARK/listed.runs"
+[ "$( wc -l < "$SR_MARK/listed.runs" )" -eq 1 ] && { echo "  FAIL  arm (W) timing under load"; exit 1; }
+echo "  PASS  alone"; exit 0
+EOF
+chmod +x "$SC"/test/*.sh
+printf 'probelistedcheck.sh   # pargatescheck (R3): fails under load, passes alone\n' > "$SC/.github/pargates-load-timing.txt"
+
+# srCopy <out> <mutation>: the REAL script with DEFAULT_TIMEOUT_SEC 3 s and KILL_GRACE_SEC 0.5 s, plus at most one mutation
+srCopy(){
+    python3 - "$PARGATES" "$1" "$2" <<'PYEOF'
+import sys
+src, dst, mut = sys.argv[1], sys.argv[2], sys.argv[3]
+t = open(src).read()
+def sub(a, b):
+    global t
+    assert t.count(a) == 1, "pargatescheck (S/R): expected exactly one %r in pargates.py" % a
+    t = t.replace(a, b)
+sub("DEFAULT_TIMEOUT_SEC = 300", "DEFAULT_TIMEOUT_SEC = 3")
+sub("KILL_GRACE_SEC = 10", "KILL_GRACE_SEC = 0.5")
+if mut == "no-tmpdir":
+    sub('env["TMPDIR"] = gtmp', 'pass')
+elif mut == "no-shim":
+    sub('if sys.platform == "darwin" and real:', 'if False:')
+elif mut == "no-drop":
+    sub("        _drop_gate_tmpdir(gtmp)\n", "        pass\n")
+elif mut == "no-chmod":
+    sub("os.chmod(sub, st.st_mode | stat.S_IRWXU)", "pass")
+    sub("os.chmod(path, st.st_mode | stat.S_IRWXU)", "pass")
+elif mut == "retry-all":
+    sub("(r[0] in timed_out or r[0] in load_timing_gates)", "True")
+elif mut == "clean-pass":
+    sub("alone_passed = sorted(g for g, (_first, r) in alone.items() if r[1] == 0 and not r[4])", "alone_passed = []")
+open(dst, "w").write(t)
+PYEOF
+}
+# srRun <tag> <copy> <only> [pargates args...]: fresh marks dir and a private TMPDIR; output in $SR/<tag>.out, rc in $SR/<tag>.rc
+srRun(){
+    local tag="$1" copy="$2" sel="$3"; shift 3
+    rm -rf "${SR:?}/${tag:?}.mark" "${SR:?}/${tag:?}.tmp"; mkdir -p "$SR/$tag.mark" "$SR/$tag.tmp"
+    SR_MARK="$SR/$tag.mark" TMPDIR="$SR/$tag.tmp" python3 "$copy" "$SC" "$FAKEBIN" --only "$sel" "$@" >"$SR/$tag.out" 2>&1
+    echo $? > "$SR/$tag.rc"
+}
+# what a run left in its private TMPDIR, besides pargates' own timings/failure-log files
+srLeft(){ ls -A "$SR/$1.tmp" | grep -v '^ripwire-pargates-' | tr '\n' ' '; }
+srOpen(){ chmod -R u+rwx "$SR/$1.tmp" 2>/dev/null; }     # a red control may leave a mode-000 dir behind; let cleanup remove it
+
+# Every pargates run below is independent (own marks dir, own TMPDIR), so they all run at once and are read after `wait`:
+# the arms cost one budget's wall, not a dozen. S1 + S2 share one run (-j 1: probesk1, then probesk2); S3 its own.
+for _m in "" no-tmpdir no-shim no-drop no-chmod retry-all clean-pass; do srCopy "$SR/pg${_m:+-$_m}.py" "$_m"; done
+srRun real.ab "$SR/pg.py" probesk -j 1 --no-alone-retry &
+srRun real.c "$SR/pg.py" probeblind -j 1 &
+srRun r1 "$SR/pg.py" probeflaky --shard 1/1 &
+srRun r2 "$SR/pg.py" probeflaky --shard 1/1 --no-alone-retry &
+srRun r3e "$SR/pg.py" probeplainred --shard 1/1 &
+srRun r3f "$SR/pg.py" probelisted --shard 1/1 &
+srRun r4 "$SR/pg.py" probeflaky &
+srRun mt.ab "$SR/pg-no-tmpdir.py" probesk -j 1 --no-alone-retry &
+[ "$( uname -s )" = Darwin ] && { srRun ms.ab "$SR/pg-no-shim.py" probesk -j 1 --no-alone-retry & }
+srRun md.ab "$SR/pg-no-drop.py" probesk -j 1 --no-alone-retry &
+srRun mc.c "$SR/pg-no-chmod.py" probeblind -j 1 &
+srRun mr "$SR/pg-retry-all.py" probeplainred --shard 1/1 &
+srRun mp "$SR/pg-clean-pass.py" probeflaky --shard 1/1 &
+wait
+where="$( sed -n 2p "$SR/real.ab.mark/akill.where" 2>/dev/null )"; gtd="$( sed -n 1p "$SR/real.ab.mark/akill.where" 2>/dev/null )"
+if [ -n "$where" ] && [ -s "$SR/real.ab.mark/akill.existed" ] && grep -q 'TIMEOUT after 3s' "$SR/real.ab.out" \
+   && case "$where" in "$SR/real.ab.tmp/rwpg-"*/probesk1check.*/*) true ;; *) false ;; esac; then
+    ok "(S1) premise: the KILLed gate made its mktemp dir inside pargates' per-gate dir ($( basename "$gtd" )) and was stopped at its 3 s budget"
+else
+    no "(S1) premise: expected a TIMEOUT'd gate whose mktemp dir lay under $SR/real.ab.tmp/rwpg-*/probesk1check.*/ -- where='$where'"; sed 's/^/    /' "$SR/real.ab.out" | head -20
+fi
+left="$( srLeft real.ab )"
+[ -n "$where" ] && [ -z "$left" ] && [ ! -e "$where" ] \
+    && ok "(S1) a gate KILLed at its budget (no trap of its could run) leaves nothing in TMPDIR: no tmp.*, no run root" \
+    || no "(S1) the KILLed gate's scratch survived the run -- left in TMPDIR: '${left}' (its dir: $where)"
+[ -f "$SR/real.ab.mark/observe.siblings" ] && [ ! -s "$SR/real.ab.mark/observe.siblings" ] \
+    && ok "(S2) the KILLed gate's per-gate dir was gone before the next gate started (observer saw no sibling)" \
+    || no "(S2) the observer gate saw sibling dir(s) in the run root: '$( tr '\n' ' ' < "$SR/real.ab.mark/observe.siblings" 2>/dev/null )' (or never ran)"
+bw="$( cat "$SR/real.c.mark/blind.where" 2>/dev/null )"; left="$( srLeft real.c )"
+[ -n "$bw" ] && [ "$( cat "$SR/real.c.rc" )" = 0 ] && [ -z "$left" ] && [ ! -e "$bw" ] \
+    && ok "(S3) a gate whose trap cannot remove its mode-000 worka/blind leaves nothing behind (rc 0)" \
+    || { no "(S3) the mode-000 subdir survived (or the gate never made it): where='$bw' left='${left}' rc=$( cat "$SR/real.c.rc" )"; sed 's/^/    /' "$SR/real.c.out" | head -12; }
+srOpen real.c
+
+# R1 / R2: the flaky gate, retried and not
+out="$( cat "$SR/r1.out" )"
+printf '%s\n' "$out" | grep -qE '^gates=1 pass=0 alone_retry=1 skip=0 fail=0 ' && printf '%s\n' "$out" | grep -qE '^  PASS\(alone-retry\)  probeflakycheck\.sh  first run: TIMEOUT' \
+   && [ "$( cat "$SR/r1.rc" )" = 0 ] && [ "$( cat "$SR/r1.mark/flaky.n" )" = 2 ] && ! printf '%s\n' "$out" | grep -qx 'ALL PASS' \
+    && ok "(R1) a TIMEOUT that passes alone is PASS(alone-retry): pass=0 alone_retry=1, rc 0, two runs, and the run does not say ALL PASS" \
+    || { no "(R1) expected pass=0 alone_retry=1 + PASS(alone-retry) row + rc 0 + 2 runs, got rc=$( cat "$SR/r1.rc" ) runs=$( cat "$SR/r1.mark/flaky.n" 2>/dev/null ):"; printf '%s\n' "$out" | sed 's/^/    /' | head -20; }
+grep -qE '^gates=1 pass=0 alone_retry=0 skip=0 fail=1 ' "$SR/r2.out" && [ "$( cat "$SR/r2.rc" )" != 0 ] && [ "$( cat "$SR/r2.mark/flaky.n" )" = 1 ] \
+    && ok "(R2) --no-alone-retry: the same TIMEOUT stays red and runs once" \
+    || { no "(R2) --no-alone-retry did not leave the TIMEOUT red after one run (rc=$( cat "$SR/r2.rc" ), runs=$( cat "$SR/r2.mark/flaky.n" 2>/dev/null ))"; sed 's/^/    /' "$SR/r2.out" | head -12; }
+# R3: a plain red, then a listed one
+[ "$( wc -l < "$SR/r3e.mark/red.runs" | tr -d ' ' )" = 1 ] && grep -qE '^gates=1 pass=0 alone_retry=0 skip=0 fail=1 ' "$SR/r3e.out" && ! grep -q 'ALONE-RETRY' "$SR/r3e.out" \
+    && ok "(R3) a plain FAIL (not a TIMEOUT, not listed) runs once and stays red, with no ALONE-RETRY section" \
+    || { no "(R3) the plain FAIL was retried or lost its red (runs=$( wc -l < "$SR/r3e.mark/red.runs" 2>/dev/null | tr -d ' ' )):"; sed 's/^/    /' "$SR/r3e.out" | head -12; }
+grep -qE '^gates=1 pass=0 alone_retry=1 skip=0 fail=0 ' "$SR/r3f.out" && grep -qE '^  PASS\(alone-retry\)  probelistedcheck\.sh  first run: rc=1 \(named in' "$SR/r3f.out" \
+    && ok "(R3) a red gate named in the load-timing list is retried alone and reads PASS(alone-retry)" \
+    || { no "(R3) the listed gate was not retried as PASS(alone-retry):"; sed 's/^/    /' "$SR/r3f.out" | head -12; }
+grep -qE '^gates=1 pass=0 alone_retry=0 skip=0 fail=1 ' "$SR/r4.out" && [ "$( cat "$SR/r4.mark/flaky.n" )" = 1 ] \
+    && ok "(R4) without --shard the retry is off by default: the TIMEOUT stays red after one run" \
+    || { no "(R4) a non-shard run retried (runs=$( cat "$SR/r4.mark/flaky.n" 2>/dev/null )):"; sed 's/^/    /' "$SR/r4.out" | head -8; }
+
+# controls: each mutation must turn its arm red
+w="$( sed -n 2p "$SR/mt.ab.mark/akill.where" 2>/dev/null )"
+[ -n "$w" ] && [ -e "$w" ] && ok "(S control) no-tmpdir: the KILLed gate's mktemp dir is left in TMPDIR ($( basename "$w" )) -- S1 can fail" \
+    || no "(S control) no-tmpdir did not leak the KILLed gate's mktemp dir -- S1 cannot fail (where='$w')"
+if [ "$( uname -s )" = Darwin ]; then
+    w="$( sed -n 2p "$SR/ms.ab.mark/akill.where" 2>/dev/null )"
+    case "$w" in
+        "$SR/"*|"") no "(S control) no-shim: the bare mktemp -d still landed under the private TMPDIR ('$w') -- the shim arm cannot fail" ;;
+        *) ok "(S control) no-shim: macOS mktemp -d ignores \$TMPDIR and lands in $( dirname "$w" ) -- S1's premise can fail"
+           case "$( basename "$w" )" in tmp.*) [ -d "$w" ] && rm -rf "${w:?}" ;; esac ;;
+    esac
+fi
+[ -s "$SR/md.ab.mark/observe.siblings" ] && ok "(S control) no-drop: the observer sees the KILLed gate's dir ($( head -1 "$SR/md.ab.mark/observe.siblings" )) -- S2 can fail" \
+    || no "(S control) no-drop: the observer saw no sibling -- S2 cannot fail"
+bw="$( cat "$SR/mc.c.mark/blind.where" 2>/dev/null )"
+[ -n "$bw" ] && [ -n "$( srLeft mc.c )" ] && ok "(S control) no-chmod: the mode-000 subdir survives ('$( srLeft mc.c )') -- S3 can fail" \
+    || no "(S control) no-chmod still removed the mode-000 subdir -- S3 cannot fail"
+srOpen mc.c
+[ "$( wc -l < "$SR/mr.mark/red.runs" 2>/dev/null | tr -d ' ' )" = 2 ] && ok "(R control) retry-all: the plain FAIL runs twice -- R3's not-retried arm can fail" \
+    || no "(R control) retry-all did not rerun the plain FAIL -- R3 cannot fail"
+grep -qE '^gates=1 pass=1 alone_retry=0 ' "$SR/mp.out" && ok "(R control) clean-pass: the alone pass reads pass=1 alone_retry=0 -- R1 can fail" \
+    || { no "(R control) clean-pass did not change R1's counts -- R1 cannot fail"; grep -E '^gates=' "$SR/mp.out" | sed 's/^/    /'; }
+
 [ "$fail" -eq 0 ] && echo "pargatescheck: ALL PASS" || { echo "pargatescheck: SOME CHECKS FAILED"; exit 1; }
