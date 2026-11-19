@@ -47,6 +47,7 @@
 #include "infra/Diagnostics.h"
 #include "infra/namesplit.h"   // the ONE ASCII identifier-character pair and the quote-pair strip
 #include "infra/sortutil.h"    // svLess: the string_view order a comparator lambda may use (portablebuildcheck #6c)
+#include "infra/tablelookup.h"  // findByField: an assignment by its node
 #include "shstatus.h"          // vacuous-assert: the B43 exit-status matcher (one matcher, common code)
 
 namespace rw::defectshape
@@ -2751,7 +2752,7 @@ private:
     {
         static constexpr std::string_view kSilent[] = { "cd", "export", "local", "set", "shift", "true", ":", "rm", "mkdir", "cp", "mv", "touch", "unset",
                                                         "declare", "readonly", "trap", "wait", "sleep", "[", "test", "chmod", "ln", "pushd", "popd", "exec" };
-        return std::find( std::begin( kSilent ), std::end( kSilent ), w ) != std::end( kSilent );
+        return std::ranges::contains( kSilent, w );
     }
     // the output of stage j of a pipeline (its stdin is stage j-1's); `ignoreRedirect` reads a writer's own output
     Prov provStage( const sh::Item& it, std::size_t j, const Env& env, int depth, bool ignoreRedirect ) const
@@ -2925,7 +2926,7 @@ private:
         {
             return Prov::opaque();
         }
-        if( ( w == "awk" || w == "gawk" ) && !operands.empty() && sh::detail::contains( operands[0]->text, "END" ) )
+        if( ( w == "awk" || w == "gawk" ) && !operands.empty() && operands[0]->text.contains( "END" ) )
         {
             return Prov::opaque();
         }
@@ -3098,21 +3099,9 @@ private:
         {
             return Tri::U;
         }
-        const std::uint32_t c = it.cmds.back();
-        const sh::Node&     n = node( c );
-        // under pipefail a failed stage before the last makes the whole pipeline false, whatever the last one reads
-        bool pipeFailed = false;
-        for( std::size_t j = 0; j + 1 < it.cmds.size(); ++j )
-        {
-            if( isRun( it.cmds[j] ) )
-            {
-                if( ev.collect != nullptr )
-                {
-                    ev.collect->push_back( it.cmds[j] );
-                }
-                pipeFailed = pipeFailed || ( ev.s != nullptr && std::find( ev.s->begin(), ev.s->end(), it.cmds[j] ) != ev.s->end() && a_.facts[c].pipefail );
-            }
-        }
+        const std::uint32_t c          = it.cmds.back();
+        const sh::Node&     n          = node( c );
+        const bool          pipeFailed = pipeFailedBefore( it, ev, c );
         if( n.kind == sh::NodeKind::Group || n.kind == sh::NodeKind::Subshell )
         {
             if( n.bodies.empty() || n.bodies[0] == kNone || t_.lists[n.bodies[0]].empty() )
@@ -3130,28 +3119,11 @@ private:
         {
             return Tri::U;
         }
-        const std::string w  = sh::detail::unq( n.words[k].text );
-        Tri               v  = Tri::U;
-        const auto        st = [ & ]() -> Prov { return it.cmds.size() > 1 ? provStage( it, it.cmds.size() - 2, env, depth + 1, false ) : ( env.hasIn ? env.in : Prov::opaque() ); };
+        const std::string w = sh::detail::unq( n.words[k].text );
+        Tri               v = Tri::U;
         if( w == "grep" || w == "egrep" || w == "fgrep" )
         {
-            bool quiet = std::any_of( n.fredirs.begin(), n.fredirs.end(), []( const sh::Redir& r ) { return isStdoutRedir( r ) && r.target == "/dev/null"; } );
-            for( std::size_t a = k + 1; a < n.words.size(); ++a )
-            {
-                const std::string u = sh::detail::unq( n.words[a].text );
-                if( u == "--quiet" || u == "--silent" || ( u.size() > 1 && u[0] == '-' && u[1] != '-' && u.find( 'q' ) != std::string::npos ) )
-                {
-                    quiet = true;
-                }
-                if( u.size() > 1 && u[0] == '-' && u[1] != '-' && ( u.find( 'c' ) != std::string::npos || u.find( 'L' ) != std::string::npos ) )
-                {
-                    return pipeFailed ? Tri::F : Tri::U;
-                }
-            }
-            if( quiet )
-            {
-                v = ofInput( provFilter( c, n, k, "grep", st, env, depth + 1 ), ev, Tri::F );
-            }
+            v = evalGrep( it, c, n, k, ev, env, depth );
         }
         else if( w == "[" || w == "test" )
         {
@@ -3159,35 +3131,89 @@ private:
         }
         else if( w == "cmp" || w == "diff" )
         {
-            std::vector<Prov> files;
-            for( std::size_t a = k + 1; a < n.words.size(); ++a )
-            {
-                const std::string u = sh::detail::unq( n.words[a].text );
-                if( n.words[a].text.empty() || isFdWord( n, n.words[a].text ) || ( u.size() > 1 && u[0] == '-' ) )
-                {
-                    continue;
-                }
-                files.push_back( provFile( normTarget( n.words[a].text ), n.pos, scope_[c], env, depth + 1 ) );
-            }
-            if( files.size() == 2 )
-            {
-                const Tri a = ofInput( files[0], ev, Tri::T );
-                const Tri b = ofInput( files[1], ev, Tri::T );
-                v           = ( a == Tri::T && b == Tri::T ) ? Tri::T : Tri::U;
-            }
+            v = evalCmp( c, n, k, ev, env, depth );
         }
         else
         {
-            const std::uint32_t f = funcNode( w );
-            const sh::List*     body = funcBody( f );
-            // a helper whose body is one pipeline (has(){ grep -qF -- "$2" <<<"$1"; }): judged with $1.. bound here
-            if( body != nullptr && body->size() == 1 && ( *body )[0].size() == 1 && !isKindRun( c ) )
-            {
-                const auto in = [ & ]() -> Prov { return it.cmds.size() > 1 ? provStage( it, it.cmds.size() - 2, env, depth + 1, false ) : ( env.hasIn ? env.in : Prov::opaque() ); };
-                v = evalItem( ( *body )[0][0], ev, callEnv( c, n, k, env, depth, in ), depth + 1 );
-            }
+            v = evalHelperCall( it, c, n, k, w, ev, env, depth );
         }
         return pipeFailed ? Tri::F : v;
+    }
+    // under pipefail a failed stage before the last makes the whole pipeline false, whatever the last one reads
+    bool pipeFailedBefore( const sh::Item& it, const Eval& ev, std::uint32_t last ) const
+    {
+        bool failed = false;
+        for( std::size_t j = 0; j + 1 < it.cmds.size(); ++j )
+        {
+            if( !isRun( it.cmds[j] ) )
+            {
+                continue;
+            }
+            if( ev.collect != nullptr )
+            {
+                ev.collect->push_back( it.cmds[j] );
+            }
+            failed = failed || ( ev.s != nullptr && std::find( ev.s->begin(), ev.s->end(), it.cmds[j] ) != ev.s->end() && a_.facts[last].pipefail );
+        }
+        return failed;
+    }
+    // what the last stage of a pipeline reads: the stage before it, or what the caller fed in
+    Prov stdinOfLast( const sh::Item& it, const Env& env, int depth ) const
+    {
+        return it.cmds.size() > 1 ? provStage( it, it.cmds.size() - 2, env, depth + 1, false ) : ( env.hasIn ? env.in : Prov::opaque() );
+    }
+    // grep -q (or grep >/dev/null) passes on found text: an empty input FAILS it; a count (-c) or list (-L) is no verdict
+    Tri evalGrep( const sh::Item& it, std::uint32_t c, const sh::Node& n, std::size_t k, const Eval& ev, const Env& env, int depth ) const
+    {
+        bool quiet = std::any_of( n.fredirs.begin(), n.fredirs.end(), []( const sh::Redir& r ) { return isStdoutRedir( r ) && r.target == "/dev/null"; } );
+        for( std::size_t a = k + 1; a < n.words.size(); ++a )
+        {
+            const std::string u = sh::detail::unq( n.words[a].text );
+            if( u == "--quiet" || u == "--silent" || ( u.size() > 1 && u[0] == '-' && u[1] != '-' && u.find( 'q' ) != std::string::npos ) )
+            {
+                quiet = true;
+            }
+            if( u.size() > 1 && u[0] == '-' && u[1] != '-' && ( u.find( 'c' ) != std::string::npos || u.find( 'L' ) != std::string::npos ) )
+            {
+                return Tri::U;
+            }
+        }
+        if( !quiet )
+        {
+            return Tri::U;
+        }
+        return ofInput( provFilter( c, n, k, "grep", [ & ]() -> Prov { return stdinOfLast( it, env, depth ); }, env, depth + 1 ), ev, Tri::F );
+    }
+    // cmp / diff of two files: true when both are empty under the failure set
+    Tri evalCmp( std::uint32_t c, const sh::Node& n, std::size_t k, const Eval& ev, const Env& env, int depth ) const
+    {
+        std::vector<Prov> files;
+        for( std::size_t a = k + 1; a < n.words.size(); ++a )
+        {
+            const std::string u = sh::detail::unq( n.words[a].text );
+            if( n.words[a].text.empty() || isFdWord( n, n.words[a].text ) || ( u.size() > 1 && u[0] == '-' ) )
+            {
+                continue;
+            }
+            files.push_back( provFile( normTarget( n.words[a].text ), n.pos, scope_[c], env, depth + 1 ) );
+        }
+        if( files.size() != 2 )
+        {
+            return Tri::U;
+        }
+        const Tri a = ofInput( files[0], ev, Tri::T );
+        const Tri b = ofInput( files[1], ev, Tri::T );
+        return ( a == Tri::T && b == Tri::T ) ? Tri::T : Tri::U;
+    }
+    // a helper whose body is one pipeline (has(){ grep -qF -- "$2" <<<"$1"; }): judged with $1.. bound here
+    Tri evalHelperCall( const sh::Item& it, std::uint32_t c, const sh::Node& n, std::size_t k, const std::string& w, const Eval& ev, const Env& env, int depth ) const
+    {
+        const sh::List* body = funcBody( funcNode( w ) );
+        if( body == nullptr || body->size() != 1 || ( *body )[0].size() != 1 || isKindRun( c ) )
+        {
+            return Tri::U;
+        }
+        return evalItem( ( *body )[0][0], ev, callEnv( c, n, k, env, depth, [ & ]() -> Prov { return stdinOfLast( it, env, depth ); } ), depth + 1 );
     }
     Tri evalTest( const sh::Node& n, std::size_t k, const Eval& ev, const Env& env, int depth ) const
     {
@@ -3686,14 +3712,8 @@ private:
     }
     const std::vector<ReachStep>* reachOf( std::uint32_t c ) const
     {
-        for( const Assign& a : assigns_ )
-        {
-            if( a.node == c )
-            {
-                return &a.reach;
-            }
-        }
-        return nullptr;
+        const Assign* a = rw::findByField( assigns_, &Assign::node, c );
+        return a == nullptr ? nullptr : &a->reach;
     }
     // the operands a call passes as $1.. (no redirect-target subs, no glued fds), normalized
     std::vector<std::string> callArgs( std::uint32_t c ) const
