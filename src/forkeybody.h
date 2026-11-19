@@ -139,12 +139,11 @@ struct KeyBodies
     std::size_t shown = 0;
 };
 
-// The key-body element for `task`. `first`: the routed spelling ("" on an unrouted answer). `served`: bytes the page already carries
-// (a body there is not repeated). `rootArg`: the single root the answer's paths are relative to ("" otherwise), as every --for body.
-inline KeyBodies keyBodies( const IngestResult& ing, std::string_view task, std::string_view first, std::string_view served, std::string_view rootArg )
+// Per key span: its definitions not already in `served`, a multi-line body ahead of a one-line one (a Python @overload stub `...`, a
+// declaration-shaped one-liner), NodeId order within each — so the slot goes to the body that does the work.
+inline std::vector<std::vector<NodeId>> keyCandidates( const IngestResult& ing, std::string_view task, std::string_view first, std::string_view served,
+                                                       std::string_view rootArg )
 {
-    // per span: its definitions not already served, a multi-line body ahead of a one-line one (a Python @overload stub `...`, a
-    // declaration-shaped one-liner) and NodeId order within each, so the slot goes to the body that does the work
     std::vector<std::vector<NodeId>> perSpan;
     for( const std::string& span : keySpans( task, first ) )
     {
@@ -162,23 +161,36 @@ inline KeyBodies keyBodies( const IngestResult& ing, std::string_view task, std:
         std::ranges::stable_partition( defs, [ & ]( NodeId id ) { return ing.symbols[ id ].loc > 1; } );
         perSpan.push_back( std::move( defs ) );
     }
-    // round robin over the spans (each named symbol's first body before any symbol's second), key order within a round
+    return perSpan;
+}
+
+// Round robin over the spans (each named symbol's first body before any symbol's second), key order within a round, each id once.
+inline std::vector<RouteBody> roundRobin( const std::vector<std::vector<NodeId>>& perSpan )
+{
     std::vector<RouteBody> want;
-    for( std::size_t round = 0, added = 1; added > 0; ++round )
+    std::size_t            longest = 0;
+    for( const std::vector<NodeId>& defs : perSpan )
     {
-        added = 0;
+        longest = std::max( longest, defs.size() );
+    }
+    for( std::size_t round = 0; round < longest; ++round )
+    {
         for( const std::vector<NodeId>& defs : perSpan )
         {
-            if( round < defs.size() )
+            if( round < defs.size() && std::ranges::find( want, defs[ round ], &RouteBody::id ) == want.end() )
             {
-                ++added;
-                if( std::ranges::find( want, defs[ round ], &RouteBody::id ) == want.end() )
-                {
-                    want.push_back( { defs[ round ], {} } );
-                }
+                want.push_back( { defs[ round ], {} } );
             }
         }
     }
+    return want;
+}
+
+// The key-body element for `task`. `first`: the routed spelling ("" on an unrouted answer). `served`: bytes the page already carries
+// (a body there is not repeated). `rootArg`: the single root the answer's paths are relative to ("" otherwise), as every --for body.
+inline KeyBodies keyBodies( const IngestResult& ing, std::string_view task, std::string_view first, std::string_view served, std::string_view rootArg )
+{
+    const std::vector<RouteBody> want = roundRobin( keyCandidates( ing, task, first, served, rootArg ) );
     if( want.empty() )
     {
         return {};

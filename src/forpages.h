@@ -83,6 +83,7 @@ struct Cut
 {
     std::size_t at      = 0;
     std::size_t openSec = std::string_view::npos;
+    std::size_t free    = 0;   // KB1: key-body group bytes before `at` that no page counts (readStream; 0 without a key group)
 };
 
 // The admissible cuts of the row stream (blocks [0, streamEnd)). A section's interior is scanned with the same
@@ -123,20 +124,19 @@ inline constexpr std::string_view kKeyBodyLegendLead = "<!-- bodies of=key:";
 }
 
 // The page boundaries: indices into `cuts` of each page's last cut. Page 1 is measured from byte 0, page k from the
-// previous page's end; every page takes at least one cut. KB1: the page the key-body group [keyBegin, keyEnd) starts on (empty when
-// the answer has none; page 1 at the default size, forkeybody.h) does not count it, so that page ends at the row it ended at without
-// it, the group is never split across pages, and every other page holds the same rows.
-inline std::vector<std::size_t> pageEnds( const std::vector<Cut>& cuts, std::size_t pageBytes, std::size_t keyBegin = 0, std::size_t keyEnd = 0 )
+// previous page's end; every page takes at least one cut. KB1: a page measures its bytes without the key-body group (Cut::free), so the
+// page the group starts on (page 1 at the default size, forkeybody.h) ends at the row it ended at without it, the group is never split
+// across pages, and every other page holds the same rows.
+inline std::vector<std::size_t> pageEnds( const std::vector<Cut>& cuts, std::size_t pageBytes )
 {
     std::vector<std::size_t> ends;
     std::size_t from = 0, i = 0;
     while( i < cuts.size() )
     {
         std::size_t last = i;
-        const auto  counted = [ & ]( std::size_t at ) { return from <= keyBegin ? at - uncountedBefore( at, keyBegin, keyEnd ) : at; };
-        while( last + 1 < cuts.size() && counted( cuts[ last + 1 ].at ) <= from + pageBytes ) { ++last; }
+        while( last + 1 < cuts.size() && cuts[ last + 1 ].at - cuts[ last + 1 ].free <= from + pageBytes ) { ++last; }
         ends.push_back( last );
-        from = cuts[ last ].at;
+        from = cuts[ last ].at - cuts[ last ].free;
         i    = last + 1;
     }
     return ends;
@@ -236,6 +236,23 @@ struct Stream
     std::size_t                     keyBegin = 0, keyEnd = 0;   // KB1: the key-body group (legend comment + <bodies of="key">), or empty
 };
 
+// KB1: find the key-body group (its legend comment, then <bodies of="key">) among the stream's blocks and mark every cut with the group
+// bytes before it, which no page counts (pageEnds).
+inline void markKeyGroup( Stream& st )
+{
+    for( std::size_t k = 0; k + 1 < st.streamBlocks; ++k )
+    {
+        const answerfirst::Block& c = st.blocks[ k ];
+        if( c.comment && st.view.substr( c.begin ).starts_with( kKeyBodyLegendLead ) && !st.blocks[ k + 1 ].comment && st.blocks[ k + 1 ].name == "bodies" )
+        {
+            st.keyBegin = c.begin;
+            st.keyEnd   = st.blocks[ k + 1 ].end;
+            for( Cut& cut : st.cuts ) { cut.free = uncountedBefore( cut.at, st.keyBegin, st.keyEnd ); }
+            return;
+        }
+    }
+}
+
 // The stream ends where the trailing run of DOCUMENT legend comments begins. A document legend comment anywhere inside the
 // stream means the answer is not answer-first: not a shape this pass pages (nullopt), and the answer is served unchanged.
 [[nodiscard]] inline std::optional<Stream> readStream( std::string_view view )
@@ -254,16 +271,7 @@ struct Stream
     }
     st.cuts = streamCuts( view, st.blocks, st.streamBlocks );
     if( st.cuts.empty() ) { return std::nullopt; }
-    for( std::size_t k = 0; k + 1 < st.streamBlocks; ++k )
-    {
-        const answerfirst::Block& c = st.blocks[ k ];
-        if( c.comment && view.substr( c.begin ).starts_with( kKeyBodyLegendLead ) && !st.blocks[ k + 1 ].comment && st.blocks[ k + 1 ].name == "bodies" )
-        {
-            st.keyBegin = c.begin;
-            st.keyEnd   = st.blocks[ k + 1 ].end;
-            break;
-        }
-    }
+    markKeyGroup( st );
     return st;
 }
 
@@ -351,7 +359,7 @@ struct Stream
     {
         return std::nullopt;
     }
-    const std::size_t      pages    = detail::pageEnds( st->cuts, ask.pageBytes, st->keyBegin, st->keyEnd ).size();
+    const std::size_t      pages    = detail::pageEnds( st->cuts, ask.pageBytes ).size();
     const detail::Cut      end{ st->blocks[ blockIdx ].end, std::string_view::npos };
     const std::string_view rootOpen = doc.substr( st->openAt, st->openEnd - st->openAt );
     std::string out = "<ctx";
@@ -383,7 +391,7 @@ inline PageResult pageAnswer( std::string& doc, const PageAsk& ask )
 {
     const std::optional<detail::Stream> st = ask.pageBytes == 0 ? std::nullopt : detail::readStream( doc );
     if( !st ) { return {}; }
-    const std::vector<std::size_t> ends  = detail::pageEnds( st->cuts, ask.pageBytes, st->keyBegin, st->keyEnd );
+    const std::vector<std::size_t> ends  = detail::pageEnds( st->cuts, ask.pageBytes );
     const std::size_t              pages = ends.size();
     if( ask.page == 0 || ask.page > pages || ( pages == 1 && ask.page != 1 ) ) { return { PageResult::Outcome::PastLast, pages }; }
     if( pages == 1 ) { return { PageResult::Outcome::Whole, 1 }; }

@@ -259,6 +259,19 @@ inline std::optional<LeadBlock> leadingProvenCallers( std::string_view doc )
     return LeadBlock{ lead, block };
 }
 
+// KB1: the stream block the early page ends at — the key-body group's <bodies> when it sits directly behind block `lead` (its legend
+// comment glued in front of it), else `lead` itself.
+inline std::size_t keyGroupEndBlock( std::string_view doc, std::size_t lead )
+{
+    const std::optional<rw::forpages::detail::Stream> st = rw::forpages::detail::readStream( doc );
+    if( !st || st->keyEnd <= st->keyBegin || st->keyBegin != st->blocks[ lead ].end )
+    {
+        return lead;
+    }
+    const auto at = std::ranges::find_if( st->blocks, [ & ]( const rw::answerfirst::Block& b ) { return b.end == st->keyEnd; } );
+    return at == st->blocks.end() ? lead : std::size_t( at - st->blocks.begin() );
+}
+
 // RT2 ES (results/RT2_ROUTE_1118/PREREG.md §ES; owner-approved 2026-11-18): the default page 1 of an unrouted --for answer ENDS
 // EARLY when its first block is AF4 T-B's <callers by="subject" of=S> and that block PROVES itself complete: shown= equals total=,
 // capped="0", d2_capped absent or "0", and W2 (rt2Evidence, the block's own rows read as a --callers answer) finds neither a
@@ -304,21 +317,7 @@ std::optional<std::string> forEarlyStopPage( const MainDispatch& d, const std::s
     const std::string legend = "<!-- ripwire for schema=ripwire.for/v1 (page 1, early): task= the query, at= this commit"
                              + std::string( rw::kForCompactSubjectCallerHopLegend ) + std::string( windowClause ) + " -->";
     const std::string call = forUnbudgetedCall( cfg );
-    // KB1: the key-body group directly behind the proven block rides the early page too (its legend comment is glued in front of it)
-    std::size_t endIdx = lead->index;
-    if( const std::optional<rw::forpages::detail::Stream> st = rw::forpages::detail::readStream( doc );
-        st && st->keyEnd > st->keyBegin && st->keyBegin == st->blocks[ lead->index ].end )
-    {
-        for( std::size_t k = lead->index + 1; k < st->streamBlocks; ++k )
-        {
-            if( st->blocks[ k ].end == st->keyEnd )
-            {
-                endIdx = k;
-                break;
-            }
-        }
-    }
-    return rw::forpages::earlyFirstPage( doc, { .pageBytes = cfg.forPageBytes, .page = 1, .call = call }, endIdx, legend );
+    return rw::forpages::earlyFirstPage( doc, { .pageBytes = cfg.forPageBytes, .page = 1, .call = call }, keyGroupEndBlock( doc, lead->index ), legend );
 }
 
 // The route decided and the verb answered: what runForVerbRoute (CLI) and mcpForVerbRoute (MCP `for`) both assemble from.
@@ -356,6 +355,18 @@ inline std::optional<RoutedAnswer> routeQuestion( const MainDispatch& d )
     return ra;
 }
 
+// KB1: remove a --for page's key-body group (its legend comment and <bodies of="key">), when it has one.
+inline void dropKeyGroup( std::string& page )
+{
+    std::size_t keyBegin = 0, keyEnd = 0;
+    if( const std::optional<rw::forpages::detail::Stream> st = rw::forpages::detail::readStream( page ) )
+    {
+        keyBegin = st->keyBegin;
+        keyEnd   = st->keyEnd;
+    }
+    page.erase( keyBegin, keyEnd - keyBegin );
+}
+
 // The routed document: the verb's answer with <route> (page1="1" when `page` is carried) and the fold as the root's first
 // children, compacted as the bare call is, and `page` (a ranked --for answer, "" = none) as the root's last child.
 inline std::string assembleRouted( const MainDispatch& d, RoutedAnswer& ra, std::string_view page )
@@ -375,13 +386,10 @@ inline std::string assembleRouted( const MainDispatch& d, RoutedAnswer& ra, std:
         const std::string_view          keyRoot = d.ing.realPaths.empty() && d.cfg.roots.size() == 1 ? d.cfg.roots[0] : std::string_view();
         const rw::keybody::KeyBodies    kb      = rw::keybody::keyBodies( d.ing, d.cfg.forTask, ra.spelling, {}, keyRoot );
         doc.insert( doc.rfind( "</" ), kb.xml );
-        std::size_t keyBegin = 0, keyEnd = 0;
-        if( const std::optional<rw::forpages::detail::Stream> st = rw::forpages::detail::readStream( carried ); st && !kb.xml.empty() )
+        if( !kb.xml.empty() )
         {
-            keyBegin = st->keyBegin;
-            keyEnd   = st->keyEnd;
+            dropKeyGroup( carried );
         }
-        carried.erase( keyBegin, keyEnd - keyBegin );
     }
     (void)rw::applyCompactDialect( doc, ::compactLegendHint( d.cfg, doc ) );   // the bare call's dialect: main.cpp's layer skips --for
     if( !carried.empty() )
