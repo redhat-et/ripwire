@@ -2409,7 +2409,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             // A literal-bound name measures its LITERAL; every other def measures defNode, as before.
             const bool   literalBound = !ts_node_is_null( own.literal );
             const TSNode metricNode   = literalBound ? own.literal : defNode;
-            const auto [ cxVal, ccxVal, nestVal, localsVal, ppAltVal, humpsVal, deepVal, evVal, evWhyVal, steerVal, dispatchVal ] = fnOrMethod && shape ? complexityOf( spanThroughBody ? body : metricNode, src, le.lang ) : Complexity{ 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, {}, 0u, 0u };
+            const auto [ cxVal, ccxVal, nestVal, localsVal, ppAltVal, humpsVal, deepVal, evVal, evWhyVal, steerVal, dispatchVal, nestCutVal ] = fnOrMethod && shape ? complexityOf( spanThroughBody ? body : metricNode, src, le.lang ) : Complexity{ 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, {}, 0u, 0u, 0u };
             d.cx        = cxVal;
             d.ccx       = ccxVal;
             d.locals    = localsVal;   // Phase 1: floor count, C/C++ only (model.h localsCountedLang) — 0 elsewhere, never emitted there
@@ -2442,6 +2442,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             d.maxNest   = fnOrMethod ? std::uint8_t( nestVal > 255u ? 255u : nestVal ) : std::uint8_t( 0 );
             d.steer     = fnOrMethod ? std::uint8_t( steerVal > 255u ? 255u : steerVal ) : std::uint8_t( 0 );   // QD-TANGLE (model.h Symbol::steer)
             d.deepDispatch = fnOrMethod ? std::uint16_t( dispatchVal > 65535u ? 65535u : dispatchVal ) : std::uint16_t( 0 );   // QD-TANGLE (model.h Symbol::dispatchShare)
+            d.nestArmCut   = fnOrMethod ? std::uint8_t( nestCutVal > 255u ? 255u : nestCutVal ) : std::uint8_t( 0 );    // QD-TANGLE (model.h Symbol::dispatchShare)
             // The nesting profile (model.h Symbol::humps/deepLoc). Saturating at 65535 on purpose: a def past
             // either bound is beyond every triage threshold, and deepLoc is a floor already, so a clamp there
             // stays honest in the direction the attribute already claims.
