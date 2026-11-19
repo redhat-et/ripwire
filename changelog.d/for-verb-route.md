@@ -11,10 +11,3 @@ the `--for` answer (`--page-bytes`, a budget, `--json`, several roots) keep it u
 
 Lanes RT1 (`1ede0078b`) and RT2 (`lane/rt2-route`); `test/forverbroutecheck.sh`. Measured on held-out gold:
 `results/RT2_ROUTE_1118/READOUT.md`.
-
-### Added — page 1 of a who-calls `--for` answer ends early when its callers block proves itself complete
-
-When the default page 1 of an unrouted `--for` answer leads with `<callers by="subject">` and that block shows every caller it
-counts (`shown=` equals `total=`, nothing capped) and no evidence of a miss is found, the page ends right after the block:
-`early="proven"`, `withheld_bytes=` and `deferred=` say what it leaves out, and `next=` is the full page 1. Lane RT2;
-`test/forverbroutecheck.sh` (ES arms). Its confirmation is pending on a fresh gold set.
