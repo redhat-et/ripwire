@@ -149,8 +149,19 @@ def xml_rows( doc ):
     with the same opener. A tests_to_run group is qualified by run_unknown="1" or run_each=, one of which every
     group row carries by construction (a group exists only where no runner is derivable or where every member's
     command is the one template) — the same qualification the compact legend uses to keep the readings apart."""
+    # `<t` IS NOT A tests_to_run ROW OUTSIDE <tests> (PB1, 2026-11-19). --for's file-grain tail — which
+    # --pack-task now carries too — spells its rows `<t p= sym= r=/>`, the same opener this reader took as a
+    # test file: on a pack-task bundle it returned src/mid.cpp and src/leaf.cpp as "test files this fixture
+    # does not have" (testrowruncheck arm 12). The short tag is the ambiguous one, so it is read only inside
+    # the <tests> element that declares what it means; `<test` and a qualified `<g` stay document-wide,
+    # because no other section spells either.
+    body = strip_comments( doc )
+    ts, te = body.find( "<tests" ), body.find( "</tests>" )
+    scope  = ( ts, te + len( "</tests>" ) ) if ts != -1 and te > ts else ( 0, len( body ) )
     out = []
-    for m in re.finditer( r'<(?:t|test|g)\b[^>]*?\b(pf?)="([^"]*)"[^>]*/>', strip_comments( doc ) ):
+    for m in re.finditer( r'<(?:t|test|g)\b[^>]*?\b(pf?)="([^"]*)"[^>]*/>', body ):
+        if m.group( 0 ).startswith( "<t " ) and not ( scope[0] <= m.start() < scope[1] ):
+            continue          # a file-tail row, not a tests_to_run row — see the note above
         row = m.group( 0 )
         raw = m.group( 2 )
         at  = _attrs( row )

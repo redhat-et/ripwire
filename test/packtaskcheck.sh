@@ -124,25 +124,31 @@ GIT_DATE="$( cd "$WORK" && git log -1 --format=%cs HEAD )"
 BUN="$TMP/bundle.xml"
 # L1 (2026-09-19): the CLI default legend is compact — it spells <callers ...>/<sigs ...> inside its comment and omits the full
 # legend's per-section truncation prose; the bundle/tiny/lens arms read real sections and that prose, so they ask for the full legend.
-runw --pack-task="parse budget planner decoy" --legend=full > "$BUN"
+# PB1 (2026-11-19): the task NAMES applyBudget in backticks. <callers> is now the KEY BODY's own 1-hop callers
+# (PT1 design D1), so the arms below — which are about run_budget_tests, the fixture's genuine 1-hop caller of
+# applyBudget — have to pin WHICH body is served, or they are asserting a relationship to whichever decoy the
+# ranker happened to head. KB1's rule (forkeybody.h) is the backtick span, so naming it is how a gate says
+# "this body". The decoy words stay: they are what keeps run_budget_tests out of the candidate set itself.
+runw --pack-task="parse budget planner decoy \`applyBudget\`" --legend=full > "$BUN"
 
 # section presence
-for tag in "<sigs" "<bodies " "<callers " "<notes " "<tests "; do
+for tag in "<sigs" "<bodies " "<callers " "<notes " "<tests " "<tail "; do
     if grep -qF -- "$tag" "$BUN"; then ok "section present: ${tag}…"; else no "section missing: ${tag}"; fi
 done
 
-# section ORDER (fixed): ranking < bodies < callers < notes < tests, by first byte offset
+# section ORDER (fixed): ranking < bodies < callers < notes < tests < tail, by first byte offset
 p_sigs="$(   byte_off "$BUN" "<sigs" )"
 p_bodies="$( byte_off "$BUN" "<bodies " )"
 p_callers="$(byte_off "$BUN" "<callers " )"
 p_notes="$(  byte_off "$BUN" "<notes " )"
 p_tests="$(  byte_off "$BUN" "<tests " )"
-if [ -n "$p_sigs" ] && [ -n "$p_bodies" ] && [ -n "$p_callers" ] && [ -n "$p_notes" ] && [ -n "$p_tests" ] \
+p_tail="$(   byte_off "$BUN" "<tail " )"
+if [ -n "$p_sigs" ] && [ -n "$p_bodies" ] && [ -n "$p_callers" ] && [ -n "$p_notes" ] && [ -n "$p_tests" ] && [ -n "$p_tail" ] \
    && [ "$p_sigs" -lt "$p_bodies" ] && [ "$p_bodies" -lt "$p_callers" ] \
-   && [ "$p_callers" -lt "$p_notes" ] && [ "$p_notes" -lt "$p_tests" ]; then
-    ok "sections emitted in the FIXED order ranking < bodies < callers < notes < tests"
+   && [ "$p_callers" -lt "$p_notes" ] && [ "$p_notes" -lt "$p_tests" ] && [ "$p_tests" -lt "$p_tail" ]; then
+    ok "sections emitted in the FIXED order ranking < bodies < callers < notes < tests < tail"
 else
-    no "section order is wrong (sigs=$p_sigs bodies=$p_bodies callers=$p_callers notes=$p_notes tests=$p_tests)"
+    no "section order is wrong (sigs=$p_sigs bodies=$p_bodies callers=$p_callers notes=$p_notes tests=$p_tests tail=$p_tail)"
 fi
 
 # section 3: a 1-hop caller of the top symbols surfaces (run_budget_tests calls applyBudget, an anchor,
