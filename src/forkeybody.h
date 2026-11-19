@@ -59,7 +59,7 @@ namespace rw::keybody
 {
 
 // At most this many key bodies on one answer (the question names one or two symbols; a third is a list, not a key).
-inline constexpr std::size_t kKeyBodyMax = 2;
+inline constexpr std::size_t kKeyBodyMax = 2;   // key bodies one answer carries; past it the block says capped="1" and next= the first not shown
 static_assert( kHopBodyCapBytes == 4000 && kKeyBodyMax == 2, "the key-body legend spells both bounds: re-word it with the knobs" );
 
 // The block's own legend comment (the house convention: it travels with its block, foranswerfirst.h declaredBlock). No "--".
@@ -105,8 +105,9 @@ inline std::vector<NodeId> keyDefs( const IngestResult& ing, std::string_view sp
     {
         return {};
     }
-    std::vector<NodeId> out;
-    for( const NodeId id : subject_detail::placeCandidates( ing, { sp } ).front() )
+    std::vector<NodeId>                    out;
+    const std::vector<std::vector<NodeId>> placed = subject_detail::placeCandidates( ing, { sp } );   // named: a range-for over a temporary's element dangles on GCC 13/14
+    for( const NodeId id : placed.front() )
     {
         const Symbol& s = ing.symbols[ id ];
         if( s.kind != SymKind::ModuleScope && s.endByte > s.sigEndByte && subject_detail::sourceClassDef( ing, id ) )

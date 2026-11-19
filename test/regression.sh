@@ -561,6 +561,7 @@ for _g in \
     forhdrshapecheck \
     forheadrrcheck \
     forinitslotscheck \
+    forkeybodycheck \
     forlenscheck \
     forliteralcheck \
     formanifestcheck \
@@ -582,7 +583,6 @@ for _g in \
     forsiblingdemotecheck \
     forsigspancheck \
     forsigxcheck \
-    forkeybodycheck \
     forsizetrimcheck \
     forsoftbudgetcheck \
     fortailfoldcheck \
