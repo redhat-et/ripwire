@@ -1118,14 +1118,6 @@ inline bool localsCountedLang( Lang lang ) noexcept
     return lang == Lang::Cpp || lang == Lang::C;
 }
 
-// QD-TANGLE steering locals (Symbol::steer): the languages whose declaration, assignment and condition shapes the walk reads
-// (ingest_metrics.h steer_*). Every other language keeps steer 0, and the tangle score there is nesting and deep share alone.
-inline bool steerCountedLang( Lang lang ) noexcept
-{
-    return    lang == Lang::Cpp || lang == Lang::C || lang == Lang::ObjC || lang == Lang::Python || lang == Lang::TypeScript
-           || lang == Lang::JavaScript || lang == Lang::Java || lang == Lang::CSharp || lang == Lang::Go || lang == Lang::Rust;
-}
-
 // Essential-complexity coverage: 12 of the 18 CODE languages — every one EXCEPT Bash, PHP, Lua, Elixir, Dart and
 // Kotlin (Elixir and Dart landed without joining it, so their ev is withheld the same way). Bash (the
 // essential-complexity design note, §3.2.8: `break N`/`continue N` take a numeric
@@ -1150,6 +1142,14 @@ inline bool evCountedLang( Lang lang ) noexcept
     return    lang == Lang::Cpp  || lang == Lang::C     || lang == Lang::ObjC || lang == Lang::Python
            || lang == Lang::TypeScript || lang == Lang::JavaScript || lang == Lang::Go || lang == Lang::Rust
            || lang == Lang::Swift || lang == Lang::Java || lang == Lang::Ruby || lang == Lang::CSharp;
+}
+
+// QD-TANGLE steering locals (Symbol::steer): the languages whose declaration, assignment and condition shapes the walk reads
+// (ingest_metrics.h steer_*) — the essential-complexity set without Swift and Ruby. Every other language keeps steer 0, and the
+// tangle score there is nesting and deep share alone.
+inline bool steerCountedLang( Lang lang ) noexcept
+{
+    return evCountedLang( lang ) && lang != Lang::Swift && lang != Lang::Ruby;
 }
 
 // local-variable-indexing plan Phase 2 (docs/LOCALS_INDEXING.md): one CAPTURED local-variable NAME,

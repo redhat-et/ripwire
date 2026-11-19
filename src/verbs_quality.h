@@ -1458,6 +1458,16 @@ std::optional<int> refuseForeignAckSelection( const rw::Config& cfg, const rw::q
 static_assert( rw::quality::kCcxBar == 15 && rw::quality::kLocBar == 60 && rw::quality::kNestBar == 4 && rw::quality::kParamBar == 5,
                "verbs_quality.h emitRow spells the four bars as literals — update them with quality.h" );
 
+// P8 (L7): bar= beside the number it judges, on the numeric kinds (the literals the static_assert above pins), "" on every other kind.
+inline const char* qdBarAttrOf( std::string_view kind ) noexcept
+{
+    static constexpr std::pair<std::string_view, const char*> kBars[] = {
+        { "complexity", " bar=\"15\"" }, { "verbosity", " bar=\"60\"" }, { "nesting", " bar=\"4\"" }, { "params", " bar=\"5\"" }, { "tangle", " bar=\"6\"" },
+    };
+    const auto* it = std::find_if( std::begin( kBars ), std::end( kBars ), [ kind ]( const auto& b ) { return b.first == kind; } );
+    return it == std::end( kBars ) ? "" : it->second;
+}
+
 inline constexpr const char* kQdLegendCore =
     "<!-- ripwire quality-delta: only what a change made WORSE against the floor baseline= names below. "
     "Descriptive: weigh and fix the real ones, do not game the number (a wrong abstraction beats a low "
@@ -2987,13 +2997,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                 {
                     rw::emitTo( stdout, ",\"ceiling\":{}", r.ceiling ); // QD-ENTRY-CEILING (mirrors the XML)
                 }
-                for( const auto& [ name, text ] : { std::pair<const char*, const std::string*>{ "why", &r.why }, { "fix", &r.fix }, { "locals", &r.locals } } )
-                {
-                    if( !text->empty() )
-                    {
-                        rw::emitTo( stdout, ",\"{}\":\"{}\"", name, jsonStr( *text ).c_str() );   // QD-TANGLE (mirrors the XML)
-                    }
-                }
+                std::fputs( quality::tangleRowAttrs( r, /*json=*/true, []( std::string_view s ) { return jsonStr( s ); } ).c_str(), stdout );   // QD-TANGLE (mirrors the XML)
                 rw::emitRaw( stdout, "}" );
             };
             bool firstR = true;
@@ -3111,18 +3115,8 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             const std::string ceilingAttr = r.ceiling != 0 ? " ceiling=\"" + std::to_string( r.ceiling ) + "\"" : std::string();
             // P8 (L7): the threshold beside the number it judges — bar= on the four numeric kinds (quality.h's
             // kCcxBar/kLocBar/kNestBar/kParamBar), so was=/now= read without the legend.
-            const char* barAttr = r.kind == "complexity" ? " bar=\"15\"" : r.kind == "verbosity" ? " bar=\"60\""
-                                : r.kind == "nesting"    ? " bar=\"4\""  : r.kind == "params"    ? " bar=\"5\""
-                                : r.kind == "tangle"     ? " bar=\"6\""  : "";
-            // QD-TANGLE: why= / fix= / locals=, appended last (present-only; empty on every other kind)
-            std::string tangleAttrs;
-            for( const auto& [ name, text ] : { std::pair<const char*, const std::string*>{ "why", &r.why }, { "fix", &r.fix }, { "locals", &r.locals } } )
-            {
-                if( !text->empty() )
-                {
-                    tangleAttrs += std::string( " " ) + name + "=\"" + ex( *text ) + "\"";
-                }
-            }
+            const char* barAttr = qdBarAttrOf( r.kind );
+            const std::string tangleAttrs = quality::tangleRowAttrs( r, /*json=*/false, ex );   // QD-TANGLE: why= / fix= / locals=
             // P3 (L7, nextverb.h): a GATING row hands the agent the body to fix — --expand=FILE:NAME (the file-qualified
             // selector, so a same-named symbol elsewhere cannot answer). The name is the sym key's last :: segment;
             // duplication rows name a SET (members=) and carry no single body to open, nor does a FILE-anchored
