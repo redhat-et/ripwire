@@ -595,7 +595,7 @@ inline ImpactDeclinedRows impactDeclinedRows( const IngestResult& ing, const Gra
 // measurement: the file holds a reached symbol (a reaches= row), a declined call site declined_calls= counts (a <dc> row's
 // universe), or one of SYM's value-binding sites (value_refs=, a <vr> row). Within each path tier (source, then test/bench,
 // then docs: filter.h's LB-G key, unchanged) the evidence importers move first, and the old order holds inside both halves
-// (a stable sort). A pure permutation of the tier: importers=, shown_importers=, importers_capped= and importers_next= are
+// (a stable sort). A pure permutation of the tier: its counts, its window and its continuation are
 // unchanged, `lazy` travels with its file, and every dialect and the MCP twin read the one reordered tier.
 // Gate: test/impactfirstwindowcheck.sh arm (4). impactEvidenceFiles: per file id, 1 = the answer holds evidence for that file.
 inline std::vector<char> impactEvidenceFiles( const IngestResult& ing, const Graph& g, std::span<const NodeId> reach, const ImpactDeclinedRows& dc,
