@@ -1599,7 +1599,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "locals", "r locals=: a tangle row's steering locals (set in one step, read by a branch 10+ statements later)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "ratchet", "r ratchet=TAG: a tangle row above its best since TAG (an input rose over its minimum); why= adds best since TAG", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "n", "improved n= more=: what this change made better, never a row or gating; i kind= sym= was= now= p=: over the kind's bar at baseline, lower now", true, "improved", MapHeaderRead::No, {}, "quality-delta" },
-    { "defect", "r defect=: a defect-shape row's shape: format-arity (gates, any origin) or utf8-cut / dedup-first / vacuous-assert (always sev=minor)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
+    { "defect", "r defect=: a defect-shape row's shape: format-arity (gates, any origin) or utf8-cut / dedup-first / vacuous-assert / unchecked-status (always sev=minor)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
+    { "call", "r call=: the call an unchecked-status row drops the status of; its p= is that site's line. Fix: check it (check=True) or (void) it with a reason", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     // --expand's bundle (src/main.cpp runDefaultMap): the ride-along note and the map it carries inside the <ctx>.
     { "note", "note=: the ranked map rides along with the payload; top-k=0 serves the payload alone", false, "ctx", MapHeaderRead::No, {}, "expand" },
     { "pr_iters", "r root= pr_iters=: the ride-along map; root= its p= base, pr_iters= PageRank iterations", true, "r", MapHeaderRead::No, {}, "expand" },   // also defines root= on <r>

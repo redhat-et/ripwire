@@ -21,6 +21,12 @@
 //                   redirected into, a pipe or a wrapper — when nothing reads that run's status and no other
 //                   check in the scope fails on the same empty text; and three status shapes beside it: a FAIL
 //                   reporter's flag set inside $( ), an rc=$? no test reads, a `| head || fallback`.
+//   unchecked-status C/C++: a call whose return IS an I/O or child status — pclose, rename, write, system,
+//                   fflush, fclose on a stream this function wrote, close on a descriptor it wrote, waitpid
+//                   with the child's status dropped too — made as a whole statement, so the status reaches
+//                   nothing ((void) is a stated decision: no site). Python: subprocess.run with no check=,
+//                   subprocess.call and os.system, as a whole statement or bound to a name no later line
+//                   reads, and subprocess.run( ... ).stdout / .stderr (the output read, the status not).
 //
 // Each scanner returns SITES: a facet, the byte the offending text starts at (the caller anchors it on the
 // innermost enclosing definition, or on the file), and the offending text NORMALIZED (comments dropped,
@@ -55,13 +61,14 @@ namespace rw::defectshape
 
 enum class Facet : std::uint8_t
 {
-    FormatArity   = 0,
-    Utf8Cut       = 1,
-    DedupFirst    = 2,
-    VacuousAssert = 3,
+    FormatArity     = 0,
+    Utf8Cut         = 1,
+    DedupFirst      = 2,
+    VacuousAssert   = 3,
+    UncheckedStatus = 4,
 };
-inline constexpr std::size_t kFacetCount = 4;
-inline constexpr std::array<std::string_view, kFacetCount> kFacetNames = { "format-arity", "utf8-cut", "dedup-first", "vacuous-assert" };
+inline constexpr std::size_t kFacetCount = 5;
+inline constexpr std::array<std::string_view, kFacetCount> kFacetNames = { "format-arity", "utf8-cut", "dedup-first", "vacuous-assert", "unchecked-status" };
 
 inline constexpr std::string_view facetName( Facet f ) noexcept
 {
@@ -70,7 +77,7 @@ inline constexpr std::string_view facetName( Facet f ) noexcept
 
 // The one facet whose rows gate, on ANY origin: a placeholder/argument mismatch on a literal format has no
 // legitimate intent (an argument the format never prints is dropped output; a field with no argument is a
-// compile error or a run-time exception), so it is a defect, not debt. The other three are report-only.
+// compile error or a run-time exception), so it is a defect, not debt. The other four are report-only.
 inline constexpr bool facetGatesOnAnyOrigin( Facet f ) noexcept
 {
     return f == Facet::FormatArity;
@@ -78,9 +85,10 @@ inline constexpr bool facetGatesOnAnyOrigin( Facet f ) noexcept
 
 struct Site
 {
-    Facet         facet     = Facet::FormatArity;
-    std::uint32_t startByte = 0;
-    std::string   text;
+    Facet            facet     = Facet::FormatArity;
+    std::uint32_t    startByte = 0;
+    std::string      text;
+    std::string_view call;   // unchecked-status: the call whose status is dropped (a static spelling); empty otherwise
 };
 
 // A definition's byte span [begin, end) in the scanned file — the function bodies the per-function rules
@@ -4045,11 +4053,522 @@ inline std::vector<Site> scanVacuousAssertBash( std::string_view src, const std:
     return script.sites();
 }
 
+// ─── unchecked-status, C/C++ and Python ─────────────────────────────────────────────────────────────────
+//
+// A call whose return value IS the status of an I/O or child operation, made where that value reaches nothing:
+// a failed write, rename, flush or close, or a child that exited non-zero, reads exactly like success. The shape
+// is a DATAFLOW fact about one value, decided from tokens: the call is the whole expression statement (C/C++,
+// Python), or (Python) it is bound to a name no later token of the function reads, or only its output is read.
+// An explicit `(void)` cast and a `_ =` binding are stated decisions, not this shape. A call wrapped in a macro
+// or a helper is an argument, not a statement, so it is never judged (the helper's own `return close( fd );`
+// hands the status on).
+
+enum class StatusNeed : std::uint8_t
+{
+    Always,          // the return is the only report of the failure
+    WrittenStream,   // fclose: only on a stream this function wrote (closing a read stream loses nothing)
+    WrittenFd,       // close: only on a descriptor this function wrote
+    ChildStatus,     // waitpid: only when the child's status is dropped too (a null status, or one never read)
+};
+
+struct StatusCall
+{
+    std::string_view name;
+    std::size_t      arity;   // the libc arity: a same-named project function of another arity is not this call
+    StatusNeed       need;
+};
+
+inline constexpr std::array<StatusCall, 8> kCStatusCalls = { {
+    { "pclose", 1, StatusNeed::Always },        { "fclose", 1, StatusNeed::WrittenStream }, { "rename", 2, StatusNeed::Always },
+    { "write", 3, StatusNeed::Always },         { "waitpid", 3, StatusNeed::ChildStatus },  { "system", 1, StatusNeed::Always },
+    { "fflush", 1, StatusNeed::Always },        { "close", 1, StatusNeed::WrittenFd },
+} };
+
+// The calls whose arguments name a stream or a descriptor this function WROTE.
+inline constexpr std::array<std::string_view, 10> kStreamWriters = { "fprintf", "vfprintf", "fputs", "fputc", "putc", "fwrite", "fflush", "fputws", "fwprintf", "putwc" };
+inline constexpr std::array<std::string_view, 9>  kFdWriters     = { "write", "pwrite", "writev", "pwritev", "send", "sendto", "sendmsg", "dprintf", "ftruncate" };
+// open(2) flags that make the descriptor a written one.
+inline constexpr std::array<std::string_view, 5>  kWriteOpenFlags = { "O_WRONLY", "O_RDWR", "O_CREAT", "O_APPEND", "O_TRUNC" };
+
+template<std::size_t N>
+inline bool inNames( const std::array<std::string_view, N>& names, std::string_view w ) noexcept
+{
+    return std::find( names.begin(), names.end(), w ) != names.end();
+}
+
+// The '(' that the ')' at `close` closes (round brackets only), or toks.size().
+inline std::size_t matchOpenParen( std::string_view src, const std::vector<Tok>& toks, std::size_t close ) noexcept
+{
+    int depth = 0;
+    for( std::size_t k = close + 1; k-- > 0; )
+    {
+        depth += tokIs( src, toks[k], ")" ) ? 1 : tokIs( src, toks[k], "(" ) ? -1 : 0;
+        if( depth == 0 )
+        {
+            return k;
+        }
+    }
+    return toks.size();
+}
+
+inline bool isStmtBoundary( std::string_view src, const Tok& t ) noexcept
+{
+    return tokIs( src, t, ";" ) || tokIs( src, t, "{" ) || tokIs( src, t, "}" );
+}
+
+// Does the ':' at `colon` end a label (`name:`, `default:`, `case X:`), not a ternary's or an initializer's?
+inline bool cppLabelEndsAt( std::string_view src, const std::vector<Tok>& toks, std::size_t colon ) noexcept
+{
+    std::size_t b = colon;
+    while( b > 0 && !isStmtBoundary( src, toks[b - 1] ) )
+    {
+        --b;
+    }
+    if( b == colon )
+    {
+        return false;
+    }
+    if( tokIs( src, toks[b], "case" ) )
+    {
+        return std::none_of( toks.begin() + static_cast<std::ptrdiff_t>( b ), toks.begin() + static_cast<std::ptrdiff_t>( colon ),
+                             [ & ]( const Tok& t ) { return tokIs( src, t, "?" ); } );
+    }
+    return colon - b == 1 && toks[b].kind == TokKind::Ident;
+}
+
+// Does a C/C++ expression statement start at token `k`? After `;`, a brace, `else`, `do`, a label, or the
+// closing parenthesis of an if / while / for head. Any other ')' — a `(void)` cast above all — is not.
+inline bool cppStatementStartsAt( std::string_view src, const std::vector<Tok>& toks, std::size_t k ) noexcept
+{
+    if( k == 0 )
+    {
+        return true;
+    }
+    const Tok& p = toks[k - 1];
+    if( isStmtBoundary( src, p ) || tokIs( src, p, "else" ) || tokIs( src, p, "do" ) )
+    {
+        return true;
+    }
+    if( tokIs( src, p, ")" ) )
+    {
+        const std::size_t open = matchOpenParen( src, toks, k - 1 );
+        return open > 0 && open < toks.size() && ( tokIs( src, toks[open - 1], "if" ) || tokIs( src, toks[open - 1], "while" ) || tokIs( src, toks[open - 1], "for" ) );
+    }
+    return tokIs( src, p, ":" ) && cppLabelEndsAt( src, toks, k - 1 );
+}
+
+// The status call named at token `k` (`name (`, `::name (` or `std::name (`), with `head` set to the first
+// token of its spelling; nullptr for a member call, another namespace's or class's function, or no such name.
+inline const StatusCall* cStatusCallAt( std::string_view src, const std::vector<Tok>& toks, std::size_t k, std::size_t& head ) noexcept
+{
+    if( toks[k].kind != TokKind::Ident || k + 1 >= toks.size() || !tokIs( src, toks[k + 1], "(" ) )
+    {
+        return nullptr;
+    }
+    const StatusCall* call = rw::findByField( kCStatusCalls, &StatusCall::name, tokText( src, toks[k] ) );
+    head                   = k;
+    if( call == nullptr || k == 0 )
+    {
+        return call;
+    }
+    if( tokIs( src, toks[k - 1], "." ) || tokIs( src, toks[k - 1], "->" ) )
+    {
+        return nullptr;   // obj.close(), stream->write( … ): a method
+    }
+    if( tokIs( src, toks[k - 1], "::" ) )
+    {
+        const bool viaStd = k >= 2 && tokIs( src, toks[k - 2], "std" ) && !( k >= 3 && tokIs( src, toks[k - 3], "::" ) );
+        if( k >= 2 && toks[k - 2].kind == TokKind::Ident && !viaStd )
+        {
+            return nullptr;   // ns::close( … ), Class::write( … ): not libc's
+        }
+        head = viaStd ? k - 2 : k - 1;
+    }
+    return call;
+}
+
+// Does a call to one of `writers` in tokens [from, to) take `arg` (normalized text) as a whole argument?
+template<std::size_t N>
+inline bool writtenThrough( std::string_view src, const std::vector<Tok>& toks, std::size_t from, std::size_t to, const std::string& arg,
+                            const std::array<std::string_view, N>& writers )
+{
+    for( std::size_t k = from; k + 1 < to; ++k )
+    {
+        if( toks[k].kind != TokKind::Ident || !tokIs( src, toks[k + 1], "(" ) || !inNames( writers, tokText( src, toks[k] ) ) )
+        {
+            continue;
+        }
+        const std::size_t close = matchClose( src, toks, k + 1 );
+        if( close >= to )
+        {
+            continue;
+        }
+        const std::vector<ArgRange> args = splitArgs( src, toks, k + 1, close );
+        if( std::any_of( args.begin(), args.end(), [ & ]( const ArgRange& a ) { return !a.empty() && joinTokens( src, toks, a.first, a.last ) == arg; } ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Is `name` assigned, in tokens [from, to), from an open that writes: fopen / fdopen with a "w", "a" or "+"
+// mode literal, open / openat with a write flag, or creat?
+inline bool openedForWrite( std::string_view src, const std::vector<Tok>& toks, std::size_t from, std::size_t to, std::string_view name )
+{
+    for( std::size_t k = from + 2; k + 1 < to; ++k )
+    {
+        const std::size_t eq = ( tokIs( src, toks[k - 1], "::" ) && k >= from + 4 && tokIs( src, toks[k - 2], "std" ) ) ? k - 3 : k - 1;
+        if( !tokIs( src, toks[k + 1], "(" ) || !tokIs( src, toks[eq], "=" ) || eq == 0 || !tokIs( src, toks[eq - 1], name ) )
+        {
+            continue;
+        }
+        const std::string_view fn    = tokText( src, toks[k] );
+        const std::size_t      close = matchClose( src, toks, k + 1 );
+        if( fn == "creat" )
+        {
+            return true;
+        }
+        if( close >= to || ( fn != "fopen" && fn != "fdopen" && fn != "open" && fn != "openat" ) )
+        {
+            continue;
+        }
+        if( fn.front() == 'f' )
+        {
+            const Tok& mode = toks[close - 1];
+            if( mode.kind == TokKind::String && tokContent( src, mode ).find_first_of( "wa+" ) != std::string_view::npos )
+            {
+                return true;
+            }
+            continue;
+        }
+        if( std::any_of( toks.begin() + static_cast<std::ptrdiff_t>( k + 2 ), toks.begin() + static_cast<std::ptrdiff_t>( close ),
+                         [ & ]( const Tok& t ) { return t.kind == TokKind::Ident && inNames( kWriteOpenFlags, tokText( src, t ) ); } ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// waitpid( pid, STATUS, options ): is the child's status dropped too — STATUS a null pointer, or the address of a
+// name no token after the call (to `to`) reads?
+inline bool childStatusDropped( std::string_view src, const std::vector<Tok>& toks, const ArgRange& status, std::size_t close, std::size_t to )
+{
+    if( status.first == status.last )
+    {
+        const std::string_view w = tokText( src, toks[status.first] );
+        return w == "NULL" || w == "nullptr" || w == "0";
+    }
+    if( status.last != status.first + 1 || !tokIs( src, toks[status.first], "&" ) || toks[status.last].kind != TokKind::Ident )
+    {
+        return false;
+    }
+    const std::string_view name = tokText( src, toks[status.last] );
+    return std::none_of( toks.begin() + static_cast<std::ptrdiff_t>( close ), toks.begin() + static_cast<std::ptrdiff_t>( to ),
+                         [ & ]( const Tok& t ) { return tokIs( src, t, name ); } );
+}
+
+// Does this discarded call lose a status that matters? `head` is the call's first token, [from, to) its function.
+inline bool cStatusMatters( std::string_view src, const std::vector<Tok>& toks, const StatusCall& call, const std::vector<ArgRange>& args, std::size_t from,
+                            std::size_t head, std::size_t close, std::size_t to )
+{
+    const std::string arg0 = joinTokens( src, toks, args[0].first, args[0].last );
+    const bool        name = args[0].first == args[0].last && toks[args[0].first].kind == TokKind::Ident;
+    switch( call.need )
+    {
+        case StatusNeed::Always:
+            return !( call.name == "fflush" && arg0 == "stderr" );   // nowhere left to report a failed flush of stderr
+        case StatusNeed::WrittenStream:
+            return writtenThrough( src, toks, from, head, arg0, kStreamWriters ) || ( name && openedForWrite( src, toks, from, head, arg0 ) );
+        case StatusNeed::WrittenFd:
+            return writtenThrough( src, toks, from, head, arg0, kFdWriters ) || ( name && openedForWrite( src, toks, from, head, arg0 ) );
+        case StatusNeed::ChildStatus:
+            return childStatusDropped( src, toks, args[1], close, to );
+    }
+    return false;
+}
+
+// One function's tokens [from, to): every discarded status call in it.
+inline void scanUncheckedStatusCpp( std::string_view src, const std::vector<Tok>& toks, std::size_t from, std::size_t to, std::vector<Site>& out )
+{
+    for( std::size_t k = from; k + 1 < to; ++k )
+    {
+        std::size_t             head = k;
+        const StatusCall* const call = cStatusCallAt( src, toks, k, head );
+        if( call == nullptr || head < from || !cppStatementStartsAt( src, toks, head ) )
+        {
+            continue;
+        }
+        const std::size_t close = matchClose( src, toks, k + 1 );
+        if( close + 1 >= to || !tokIs( src, toks[close + 1], ";" ) )
+        {
+            continue;   // the value feeds an operator, a comma or a cast: read, or not decidable here
+        }
+        const std::vector<ArgRange> args = splitArgs( src, toks, k + 1, close );
+        if( args.size() == call->arity && cStatusMatters( src, toks, *call, args, from, head, close, to ) )
+        {
+            out.push_back( { Facet::UncheckedStatus, toks[head].begin, joinTokens( src, toks, head, close ), call->name } );
+        }
+    }
+}
+
+// ── Python ──
+
+enum class PyStatus : std::uint8_t
+{
+    None,
+    Run,      // subprocess.run: a CompletedProcess whose returncode is the status; check= raises instead
+    Call,     // subprocess.call: the exit code itself
+    System,   // os.system: the wait status itself
+};
+
+struct PyStatusName
+{
+    std::string_view name;
+    PyStatus         call;
+};
+
+inline constexpr std::array<std::string_view, 4> kPyStatusDisplay = { "", "subprocess.run", "subprocess.call", "os.system" };
+
+// The spellings this file reaches the three calls by: the modules (`subprocess`, `os`, or an `import … as X`
+// alias) and the bare names a `from subprocess import run [as r]` / `from os import system` binds.
+struct PyStatusNames
+{
+    std::vector<std::string_view> subprocessMods = { "subprocess" };
+    std::vector<std::string_view> osMods         = { "os" };
+    std::vector<PyStatusName>     bare;
+};
+
+inline PyStatus pyMemberStatus( std::string_view module, std::string_view member ) noexcept
+{
+    if( module == "subprocess" )
+    {
+        return member == "run" ? PyStatus::Run : member == "call" ? PyStatus::Call : PyStatus::None;
+    }
+    return module == "os" && member == "system" ? PyStatus::System : PyStatus::None;
+}
+
+// The names one `from M import a [as b], …` line (tokens from `k`, at `import`) binds to a status call of M.
+inline void pyFromImports( std::string_view src, const std::vector<Tok>& toks, std::size_t k, std::string_view module, PyStatusNames& names )
+{
+    for( std::size_t j = k + 1; j < toks.size() && !tokIs( src, toks[j], "\n" ) && !tokIs( src, toks[j], ";" ); ++j )
+    {
+        const PyStatus call = toks[j].kind == TokKind::Ident ? pyMemberStatus( module, tokText( src, toks[j] ) ) : PyStatus::None;
+        if( call == PyStatus::None )
+        {
+            continue;
+        }
+        const bool aliased = j + 2 < toks.size() && tokIs( src, toks[j + 1], "as" ) && toks[j + 2].kind == TokKind::Ident;
+        names.bare.push_back( { tokText( src, toks[aliased ? j + 2 : j] ), call } );
+        j += aliased ? 2 : 0;
+    }
+}
+
+inline PyStatusNames pyStatusNames( std::string_view src, const std::vector<Tok>& toks )
+{
+    PyStatusNames names;
+    for( std::size_t k = 0; k + 3 < toks.size(); ++k )
+    {
+        const bool lineStart = k == 0 || tokIs( src, toks[k - 1], "\n" ) || tokIs( src, toks[k - 1], ";" );
+        if( !lineStart )
+        {
+            continue;
+        }
+        const std::string_view m = tokText( src, toks[k + 1] );
+        if( tokIs( src, toks[k], "import" ) && ( m == "subprocess" || m == "os" ) && tokIs( src, toks[k + 2], "as" ) )
+        {
+            ( m == "os" ? names.osMods : names.subprocessMods ).push_back( tokText( src, toks[k + 3] ) );
+        }
+        else if( tokIs( src, toks[k], "from" ) && ( m == "subprocess" || m == "os" ) && tokIs( src, toks[k + 2], "import" ) )
+        {
+            pyFromImports( src, toks, k + 2, m, names );
+        }
+    }
+    return names;
+}
+
+// The status call spelled at token `k` (`MOD.run (`, `MOD.system (`, or a bare imported name), with `open` set
+// to its '(' — PyStatus::None for anything else, an attribute of another object included.
+inline PyStatus pyStatusCallAt( std::string_view src, const std::vector<Tok>& toks, const PyStatusNames& names, std::size_t k, std::size_t& open ) noexcept
+{
+    if( toks[k].kind != TokKind::Ident || ( k > 0 && ( tokIs( src, toks[k - 1], "." ) || tokIs( src, toks[k - 1], "def" ) ) ) )
+    {
+        return PyStatus::None;
+    }
+    const std::string_view w = tokText( src, toks[k] );
+    if( k + 1 < toks.size() && tokIs( src, toks[k + 1], "(" ) )
+    {
+        const PyStatusName* hit = rw::findByField( names.bare, &PyStatusName::name, w );
+        open                    = k + 1;
+        return hit != nullptr ? hit->call : PyStatus::None;
+    }
+    if( k + 3 >= toks.size() || !tokIs( src, toks[k + 1], "." ) || !tokIs( src, toks[k + 3], "(" ) )
+    {
+        return PyStatus::None;
+    }
+    open                         = k + 3;
+    const std::string_view member = tokText( src, toks[k + 2] );
+    const bool isSub = std::find( names.subprocessMods.begin(), names.subprocessMods.end(), w ) != names.subprocessMods.end();
+    const bool isOs  = std::find( names.osMods.begin(), names.osMods.end(), w ) != names.osMods.end();
+    return isSub ? pyMemberStatus( "subprocess", member ) : isOs ? pyMemberStatus( "os", member ) : PyStatus::None;
+}
+
+// Does a Python statement start at token `k`? After a logical line's end or `;`, or after the ':' of a one-line
+// compound statement (`if x: f()`), never a lambda's.
+inline bool pyStatementStartsAt( std::string_view src, const std::vector<Tok>& toks, std::size_t k ) noexcept
+{
+    if( k == 0 || tokIs( src, toks[k - 1], "\n" ) || tokIs( src, toks[k - 1], ";" ) )
+    {
+        return true;
+    }
+    if( !tokIs( src, toks[k - 1], ":" ) )
+    {
+        return false;
+    }
+    std::size_t b = k - 1;
+    while( b > 0 && !tokIs( src, toks[b - 1], "\n" ) )
+    {
+        --b;
+    }
+    static constexpr std::array<std::string_view, 9> kCompound = { "if", "elif", "else", "for", "while", "with", "try", "except", "finally" };
+    const bool lambda = std::any_of( toks.begin() + static_cast<std::ptrdiff_t>( b ), toks.begin() + static_cast<std::ptrdiff_t>( k ),
+                                     [ & ]( const Tok& t ) { return tokIs( src, t, "lambda" ); } );
+    return inNames( kCompound, tokText( src, toks[b] ) ) && !lambda;
+}
+
+inline bool pyStatementEndsAt( std::string_view src, const std::vector<Tok>& toks, std::size_t k ) noexcept
+{
+    return k >= toks.size() || tokIs( src, toks[k], "\n" ) || tokIs( src, toks[k], ";" );
+}
+
+// A `check=` keyword (any value: check=False is a stated decision) or a `**kwargs` that may carry one.
+inline bool pyCallStatesCheck( std::string_view src, const std::vector<Tok>& toks, std::size_t open, std::size_t close )
+{
+    const std::vector<ArgRange> args = splitArgs( src, toks, open, close );
+    return std::any_of( args.begin(), args.end(), [ & ]( const ArgRange& a )
+                        { return !a.empty() && ( tokIs( src, toks[a.first], "**" ) || ( tokIs( src, toks[a.first], "check" ) && a.first < a.last && tokIs( src, toks[a.first + 1], "=" ) ) ); } );
+}
+
+// Is the attribute at `dot` (a '.' token) one that reads a CompletedProcess's output, never its status?
+inline bool pyOutputAttrAt( std::string_view src, const std::vector<Tok>& toks, std::size_t dot ) noexcept
+{
+    return dot + 1 < toks.size() && tokIs( src, toks[dot], "." )
+        && ( tokIs( src, toks[dot + 1], "stdout" ) || tokIs( src, toks[dot + 1], "stderr" ) || tokIs( src, toks[dot + 1], "args" ) );
+}
+
+// `name` bound to the call's result at the statement ending at `from`: does no token in [from, to) read its
+// status — every later use (until a rebinding) an output attribute of a subprocess.run result, or none at all?
+inline bool pyNameStatusUnread( std::string_view src, const std::vector<Tok>& toks, std::size_t from, std::size_t to, std::string_view name, PyStatus call )
+{
+    for( std::size_t k = from; k < to; ++k )
+    {
+        if( !tokIs( src, toks[k], name ) || tokIs( src, toks[k - 1], "." ) )
+        {
+            continue;
+        }
+        if( call == PyStatus::Run && pyOutputAttrAt( src, toks, k + 1 ) )
+        {
+            continue;
+        }
+        return pyStatementStartsAt( src, toks, k ) && k + 1 < to && tokIs( src, toks[k + 1], "=" );   // rebound before any read, or read
+    }
+    return true;
+}
+
+// The token index one past the innermost definition span holding byte `at` (toks.size() at top level).
+inline std::size_t pyScopeEnd( const std::vector<Tok>& toks, const std::vector<Span>& fnSpans, std::uint32_t at )
+{
+    std::uint32_t end = UINT32_MAX;
+    for( const Span& sp : fnSpans )
+    {
+        if( sp.begin <= at && at < sp.end && sp.end < end )
+        {
+            end = sp.end;
+        }
+    }
+    const auto it = std::lower_bound( toks.begin(), toks.end(), end, []( const Tok& t, std::uint32_t b ) { return t.begin < b; } );
+    return static_cast<std::size_t>( it - toks.begin() );
+}
+
+// Is the status of the call at [k, close] dropped — the whole statement, `.stdout`/`.stderr` read off a
+// subprocess.run, or `name = call` with the name never read for its status? Sets the site text's first and last
+// token when it is.
+inline bool pyStatusSiteAt( std::string_view src, const std::vector<Tok>& toks, const std::vector<Span>& fnSpans, PyStatus call, std::size_t k, std::size_t close,
+                            std::size_t& first, std::size_t& last )
+{
+    first = k;
+    last  = close;
+    if( pyStatementStartsAt( src, toks, k ) && pyStatementEndsAt( src, toks, close + 1 ) )
+    {
+        return true;
+    }
+    if( call == PyStatus::Run && pyOutputAttrAt( src, toks, close + 1 ) && !tokIs( src, toks[close + 2], "args" ) )
+    {
+        last = close + 2;
+        return true;
+    }
+    const bool bound = k >= 2 && tokIs( src, toks[k - 1], "=" ) && toks[k - 2].kind == TokKind::Ident && !tokIs( src, toks[k - 2], "_" )
+                    && pyStatementStartsAt( src, toks, k - 2 ) && pyStatementEndsAt( src, toks, close + 1 );
+    if( !bound )
+    {
+        return false;
+    }
+    first = k - 2;
+    return pyNameStatusUnread( src, toks, close + 1, pyScopeEnd( toks, fnSpans, toks[k].begin ), tokText( src, toks[k - 2] ), call );
+}
+
+inline void scanUncheckedStatusPython( std::string_view src, const std::vector<Tok>& toks, const std::vector<Span>& fnSpans, std::vector<Site>& out )
+{
+    const PyStatusNames names = pyStatusNames( src, toks );
+    for( std::size_t k = 0; k + 1 < toks.size(); ++k )
+    {
+        std::size_t    open = 0;
+        const PyStatus call = pyStatusCallAt( src, toks, names, k, open );
+        if( call == PyStatus::None )
+        {
+            continue;
+        }
+        const std::size_t close = matchClose( src, toks, open );
+        std::size_t       first = k;
+        std::size_t       last  = close;
+        if( close < toks.size() && !pyCallStatesCheck( src, toks, open, close ) && pyStatusSiteAt( src, toks, fnSpans, call, k, close, first, last ) )
+        {
+            out.push_back( { Facet::UncheckedStatus, toks[first].begin, joinTokens( src, toks, first, last ), kPyStatusDisplay[ static_cast<std::size_t>( call ) ] } );
+        }
+    }
+}
+
+// Each function span's token range [from, to), non-empty ones only.
+template<class Fn>
+inline void forEachSpanTokens( const std::vector<Tok>& toks, const std::vector<Span>& fnSpans, Fn&& fn )
+{
+    for( const Span& sp : fnSpans )
+    {
+        const auto        first = std::lower_bound( toks.begin(), toks.end(), sp.begin, []( const Tok& t, std::uint32_t b ) { return t.begin < b; } );
+        const auto        last  = std::lower_bound( toks.begin(), toks.end(), sp.end, []( const Tok& t, std::uint32_t b ) { return t.begin < b; } );
+        const std::size_t from  = static_cast<std::size_t>( first - toks.begin() );
+        const std::size_t to    = static_cast<std::size_t>( last - toks.begin() );
+        if( from < to )
+        {
+            fn( from, to );
+        }
+    }
+}
+
+// Byte order, and a site found in nested spans once (the scan of each span is independent).
+inline void sortUniqueSites( std::vector<Site>& out )
+{
+    std::sort( out.begin(), out.end(), []( const Site& a, const Site& b ) { return a.startByte != b.startByte ? a.startByte < b.startByte : a.text < b.text; } );
+    out.erase( std::unique( out.begin(), out.end(), []( const Site& a, const Site& b ) { return a.facet == b.facet && a.startByte == b.startByte && a.text == b.text; } ),
+               out.end() );
+}
+
 }   // namespace detail
 
 // ─── the per-language entry points ──────────────────────────────────────────────────────────────────────
 
-// C++: format-arity over the whole file; utf8-cut and dedup-first inside each function span. A site found
+// C++: format-arity over the whole file; utf8-cut, dedup-first and unchecked-status inside each function span. A site found
 // in nested spans is reported once (the scan of each span is independent; the caller anchors by byte).
 // `treeMacros`: the macro names the index holds across the tree (sorted, unique), for format-arity's F1 skip.
 inline std::vector<Site> scanCpp( std::string_view src, const std::vector<Span>& fnSpans, const std::vector<std::string>* treeMacros = nullptr )
@@ -4058,29 +4577,39 @@ inline std::vector<Site> scanCpp( std::string_view src, const std::vector<Span>&
     detail::CppPreproc             pp;
     const std::vector<detail::Tok> toks = detail::lexCpp( src, &pp );
     detail::scanFormatArityCpp( src, toks, pp, treeMacros, out );
-    for( const Span& sp : fnSpans )
+    detail::forEachSpanTokens( toks, fnSpans, [ & ]( std::size_t from, std::size_t to )
     {
-        const auto first = std::lower_bound( toks.begin(), toks.end(), sp.begin, []( const detail::Tok& t, std::uint32_t b ) { return t.begin < b; } );
-        const auto last  = std::lower_bound( toks.begin(), toks.end(), sp.end, []( const detail::Tok& t, std::uint32_t b ) { return t.begin < b; } );
-        const std::size_t from = static_cast<std::size_t>( first - toks.begin() );
-        const std::size_t to   = static_cast<std::size_t>( last - toks.begin() );
-        if( from >= to )
-        {
-            continue;
-        }
         detail::scanUtf8CutFunction( src, toks, from, to, out );
         detail::scanDedupFirstFunction( src, toks, from, to, out );
-    }
-    std::sort( out.begin(), out.end(), []( const Site& a, const Site& b ) { return a.startByte != b.startByte ? a.startByte < b.startByte : a.text < b.text; } );
-    out.erase( std::unique( out.begin(), out.end(), []( const Site& a, const Site& b ) { return a.facet == b.facet && a.startByte == b.startByte && a.text == b.text; } ),
-               out.end() );
+        detail::scanUncheckedStatusCpp( src, toks, from, to, out );
+    } );
+    detail::sortUniqueSites( out );
     return out;
 }
 
-inline std::vector<Site> scanPython( std::string_view src )
+// C: unchecked-status alone, inside each function span (the C++ shapes name C++ library calls).
+inline std::vector<Site> scanC( std::string_view src, const std::vector<Span>& fnSpans )
 {
-    std::vector<Site> out;
-    detail::scanFormatArityPython( src, detail::lexPython( src ), out );
+    std::vector<Site>              out;
+    const std::vector<detail::Tok> toks = detail::lexCpp( src );
+    detail::forEachSpanTokens( toks, fnSpans, [ & ]( std::size_t from, std::size_t to ) { detail::scanUncheckedStatusCpp( src, toks, from, to, out ); } );
+    detail::sortUniqueSites( out );
+    return out;
+}
+
+// Python: format-arity over the whole file; unchecked-status reads `fnSpans` for the scope a bound name lives in.
+inline std::vector<Site> scanPython( std::string_view src, const std::vector<Span>& fnSpans )
+{
+    std::vector<Site>              out;
+    const std::vector<detail::Tok> toks = detail::lexPython( src );
+    if( src.find( ".format" ) != std::string_view::npos )
+    {
+        detail::scanFormatArityPython( src, toks, out );
+    }
+    if( src.find( "subprocess" ) != std::string_view::npos || src.find( "system" ) != std::string_view::npos )
+    {
+        detail::scanUncheckedStatusPython( src, toks, fnSpans, out );
+    }
     return out;
 }
 
@@ -4091,13 +4620,21 @@ inline std::vector<Site> scanBashTestScript( std::string_view src, const std::ve
     return detail::scanVacuousAssertBash( src, fnSpans );
 }
 
-// A cheap byte prefilter: can this C++ file hold any of the three C++ shapes at all?
+// A cheap byte prefilter for unchecked-status: does the file name any of its calls? ("close" covers fclose and
+// pclose, "write" its own.)
+inline bool mayHoldStatusCalls( std::string_view src ) noexcept
+{
+    static constexpr std::array<std::string_view, 6> kNeedles = { "close", "rename", "write", "waitpid", "system", "fflush" };
+    return std::any_of( kNeedles.begin(), kNeedles.end(), [ & ]( std::string_view n ) { return src.find( n ) != std::string_view::npos; } );
+}
+
+// A cheap byte prefilter: can this C++ file hold any of the four C++ shapes at all?
 inline bool cppMayHoldShapes( std::string_view src ) noexcept
 {
     static constexpr std::array<std::string_view, 7> kNeedles = { "format", "print", "emitTo", "unique", "...", "\xE2\x80\xA6", "u2026" };
     // "format" also covers formatTo; the escaped ellipsis "\xE2\x80\xA6" is found through its "xE2" bytes below
     return std::any_of( kNeedles.begin(), kNeedles.end(), [ & ]( std::string_view n ) { return src.find( n ) != std::string_view::npos; } )
-        || src.find( "xE2" ) != std::string_view::npos;
+        || src.find( "xE2" ) != std::string_view::npos || mayHoldStatusCalls( src );
 }
 
 }   // namespace rw::defectshape

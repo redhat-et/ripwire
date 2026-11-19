@@ -1698,6 +1698,17 @@ inline constexpr const char* kQdDefectShapeLegend =
     "backs off a continuation byte anywhere, or a vacuous-assert comparison of counts (a failed run counts 0 rows), "
     "a text read off stderr, or a sentinel a helper prints on failure: no row there is no verdict. ";
 
+// Emitted only when a defect-shape unchecked-status row is in the document (beside kQdDefectShapeLegend): the shape, what
+// its p= and call= name, the fix, and the floors.
+inline constexpr const char* kQdUncheckedStatusLegend =
+    "unchecked-status: a call whose return is an I/O or child status, dropped, so a failure reads as success - C/C++ "
+    "pclose, rename, write, system or fflush, an fclose of a stream or a close of a descriptor the function wrote, or a waitpid "
+    "that drops the child's status too, made as a whole statement; Python subprocess.run with no check=, subprocess.call or "
+    "os.system as a whole statement or bound to a name no later line reads, or subprocess.run( ... ).stdout. p= is the first new "
+    "site's line and call= the call. Fix: check the status (check=True), or cast to (void) / bind to _ with a reason. Not "
+    "checked: a call inside a macro or helper argument, a stream written through another spelling, Go's _ = f() and Rust's "
+    "let _ = f(): no row there is no verdict. ";
+
 // Emitted only when a placeholder row is in the document: why every one of them carries origin="new-symbol",
 // including one that landed in a symbol that existed at the baseline.
 inline constexpr const char* kQdPlaceholderLegend =
@@ -1981,6 +1992,10 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
     {
         return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return r.kind == "params" && !r.facet.empty(); } );
     };
+    const auto anyUncheckedStatusRow = [] ( const std::vector<rw::quality::Regression>& v )
+    {
+        return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return !r.call.empty(); } );
+    };
     const auto anyMonsterRow = [] ( const std::vector<rw::quality::Regression>& v )
     {
         return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return r.kind == "complexity" && !r.facet.empty(); } );
@@ -2111,6 +2126,10 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
         if( anyDefectShapeRow( p.rows ) || anyDefectShapeRow( p.disclosedRows ) )
         {
             rw::emitRaw( out, kQdDefectShapeLegend );
+        }
+        if( anyUncheckedStatusRow( p.rows ) || anyUncheckedStatusRow( p.disclosedRows ) )
+        {
+            rw::emitRaw( out, kQdUncheckedStatusLegend );
         }
         if( anyMonsterRow( p.rows ) || anyMonsterRow( p.disclosedRows ) )
         {
@@ -3071,6 +3090,10 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                 {
                     rw::emitTo( stdout, ",\"ceiling\":{}", r.ceiling ); // QD-ENTRY-CEILING (mirrors the XML)
                 }
+                if( !r.call.empty() )
+                {
+                    rw::emitTo( stdout, ",\"call\":\"{}\"", jsonStr( r.call ).c_str() ); // QD-UNCHECKED-STATUS (mirrors the XML)
+                }
                 std::fputs( quality::tangleRowAttrs( r, /*json=*/true, []( std::string_view s ) { return jsonStr( s ); } ).c_str(), stdout );   // QD-TANGLE (mirrors the XML)
                 rw::emitRaw( stdout, "}" );
             };
@@ -3187,6 +3210,8 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             const char* gatingAttr = ( gatingAllowed && quality::rowGates( r ) ) ? " gating=\"1\"" : "";
             // QD-ENTRY-CEILING: the ceiling a NEW function reached, beside the gating= it causes (present-only)
             const std::string ceilingAttr = r.ceiling != 0 ? " ceiling=\"" + std::to_string( r.ceiling ) + "\"" : std::string();
+            // QD-UNCHECKED-STATUS: the call whose status a defect-shape unchecked-status row drops (present-only)
+            const std::string callAttr = r.call.empty() ? std::string() : " call=\"" + ex( r.call ) + "\"";
             // P8 (L7): the threshold beside the number it judges — bar= on the four numeric kinds (quality.h's
             // kCcxBar/kLocBar/kNestBar/kParamBar), so was=/now= read without the legend.
             const char* barAttr = qdBarAttrOf( r.kind );
@@ -3221,9 +3246,9 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             }
             else
             {
-                rw::emitTo( out, "<r kind=\"{}\" sym=\"{}\" was=\"{}\" now=\"{}\"{}{}{}{}{}{}{}{}{}/>", r.kind.c_str(), ex( quality::displaySym( r.sym, deltaRoot ) ).c_str(),
+                rw::emitTo( out, "<r kind=\"{}\" sym=\"{}\" was=\"{}\" now=\"{}\"{}{}{}{}{}{}{}{}{}{}/>", r.kind.c_str(), ex( quality::displaySym( r.sym, deltaRoot ) ).c_str(),
                             quality::rowValueText( r, r.was ), quality::rowValueText( r, r.now ), barAttr, sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr,
-                            ceilingAttr.c_str(), nextAttr.c_str(), tangleAttrs );
+                            ceilingAttr.c_str(), callAttr.c_str(), nextAttr.c_str(), tangleAttrs );
             }
         };
         // Fix round 1 (rv-lean-trio item 5, owner ruling 5): a fold ships only when it PAYS (compactlegend.h foldPays: shorter
