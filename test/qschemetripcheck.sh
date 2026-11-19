@@ -39,6 +39,10 @@ PIN="$ROOT/test/qschemetrip.hash"
 #   RE-PINNED ONCE with UPDATE_GOLDEN=1 from the rebased build (hash 14b63d9888…d246329). kParserVer 333 (rich 334) replaces the
 #   members' placeholders 315/317/319 (each lane's hash was that lane alone), above main's 331/332 (train 1117d1). kCacheVersion
 #   53 (rust-self-chain's RecvCall, its placeholder kept: no other member moves it; main 52). kQSnapCacheScheme stays 34.
+# 2026-11-19, lane QD-VA-FORMS (E0, over main 33f7a1eac): RE-PINNED with UPDATE_GOLDEN=1. kQSnapCacheScheme 34 -> 35: defectSitesOf
+#   drops its `grep` prefilter for Bash (every test script is read) and the vacuous-assert facet it calls (defectshape.h, outside
+#   the manifest) now walks exit-status dataflow, so the stored site set moves; a v34 blob would read every new-form site as added.
+#   No blob shape change; kParserVer / kCacheVersion unchanged. The train may renumber the scheme.
 # 2026-11-19, lane QD-TANGLE (stacked on lane/qd-false-rows): RE-PINNED with UPDATE_GOLDEN=1. kQSnapCacheScheme 34 -> 36 (35 is
 #   lane qd-va-forms'): the snapshot gains the tangle map (tangleBySym) and its known byte; computeSnapshot records it
 #   (recordTangleOf), serialize/deserializeSnapshot carry it, and kCacheVersion 54 carries RawDef::steer/deepDispatch/nestArmCut.
