@@ -156,11 +156,16 @@ def xml_rows( doc ):
     # the <tests> element that declares what it means; `<test` and a qualified `<g` stay document-wide,
     # because no other section spells either.
     body = strip_comments( doc )
-    ts, te = body.find( "<tests" ), body.find( "</tests>" )
-    scope  = ( ts, te + len( "</tests>" ) ) if ts != -1 and te > ts else ( 0, len( body ) )
+    # The exclusion is scoped to the <tail> ELEMENT, not to an inclusion inside <tests>. Admitting only the
+    # <t> rows inside <tests> looked equivalent and was not: --test-gate spells tests_to_run rows that are not
+    # wrapped in a <tests> element at all, so the inclusive form silently dropped them and turned
+    # selectorchaincheck (d2) red. Excluding exactly the rows inside the one element that spells the other
+    # meaning cannot drop a row from a document that has no tail.
+    tl, tle = body.find( "<tail" ), body.find( "</tail>" )
+    tail    = ( tl, tle + len( "</tail>" ) ) if tl != -1 and tle > tl else ( -1, -1 )
     out = []
     for m in re.finditer( r'<(?:t|test|g)\b[^>]*?\b(pf?)="([^"]*)"[^>]*/>', body ):
-        if m.group( 0 ).startswith( "<t " ) and not ( scope[0] <= m.start() < scope[1] ):
+        if m.group( 0 ).startswith( "<t " ) and tail[0] <= m.start() < tail[1]:
             continue          # a file-tail row, not a tests_to_run row — see the note above
         row = m.group( 0 )
         raw = m.group( 2 )
