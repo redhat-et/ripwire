@@ -1590,7 +1590,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "idiom", "r idiom=: the recognized clone-body shape of a duplication row", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "facet", "r facet=failure-default: an error-masking row whose growth includes a read/parse/spawn failure returned as an empty success; it never gates by itself", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "monster", "r monster=1: over 5x the ccx bar and grew by now-was (10+): major at any %; put the new branch in a helper", true, "r", MapHeaderRead::No, {}, "quality-delta" },
-    { "defect", "r defect=: a defect-shape row's shape: format-arity (gates, any origin) or utf8-cut / dedup-first / vacuous-assert (always sev=minor)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
+    { "defect", "r defect=: a defect-shape row's shape: format-arity (gates, any origin) or utf8-cut / dedup-first / vacuous-assert / unchecked-status (always sev=minor)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
+    { "call", "r call=: the call an unchecked-status row drops the status of; its p= is that site's line. Fix: check it (check=True) or (void) it with a reason", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     // --expand's bundle (src/main.cpp runDefaultMap): the ride-along note and the map it carries inside the <ctx>.
     { "note", "note=: the ranked map rides along with the payload; top-k=0 serves the payload alone", false, "ctx", MapHeaderRead::No, {}, "expand" },
     { "pr_iters", "r root= pr_iters=: the ride-along map; root= its p= base, pr_iters= PageRank iterations", true, "r", MapHeaderRead::No, {}, "expand" },   // also defines root= on <r>
