@@ -85,7 +85,7 @@ fi
 
 # (r1)
 r="$( trow creep )"
-dw="$( attr "$r" why | sed -nE 's/.*best since v1: deep ([0-9]+)->([0-9]+) lines.*/\1 \2/p' )"
+dw="$( attr "$r" why | sed -nE 's/.*best since v1: deep ([0-9]+)-&gt;([0-9]+) lines.*/\1 \2/p' )"
 if [ -n "$r" ] && [ "$( attr "$r" ratchet )" = v1 ] && [ -n "$dw" ] && [ $(( ${dw#* } - ${dw% *} )) = 6 ]; then
     ok "(r1) creep: ratchet=\"v1\" row: $r"
 else no "(r1) creep: want a tangle row with ratchet=\"v1\" and why=best since v1: deep N->N+6 lines, got '${r:-none}'"; fi
@@ -97,13 +97,14 @@ grep -qE '<i kind="complexity" sym="[^"]*simplify" was="2[0-9]" now="1[0-9]"' "$
     || no "(c1) simplify: no <i kind=\"complexity\"> entry ($( grep -oE '<improved[^>]*>' "$Q" ))"
 # (r3)
 r="$( trow tangled )"; [ -n "$r" ] && [ -z "$( attr "$r" ratchet )" ] && ok "(r3) tangled (new): no ratchet=" || no "(r3) tangled: want a row without ratchet=, got '${r:-none}'"
-# (g)
-if [ "$tangles" -ge 1 ] && grep -qE '<quality-delta [^>]*gating="0"' "$Q"; then ok "(g) report-only: gating=\"0\" with $tangles tangle row(s)"
-else no "(g) want gating=\"0\" with >= 1 tangle row (rows: $tangles; root: $( grep -oE '<quality-delta [^>]*>' "$Q" | head -c 300 ))"; fi
-# (j)
-jt="$( grep -oE '"kind":"tangle"' "$TMP/qd.json" | wc -l | tr -d ' ' )"
-if [ "$jt" = "$tangles" ] && [ "$jt" -ge 1 ] && grep -q '"improved":\[' "$TMP/qd.json"; then ok "(j) --json: $jt tangle row(s) and \"improved\""
-else no "(j) --json: $jt tangle rows (XML $tangles), improved: $( grep -c '"improved"' "$TMP/qd.json" )"; fi
+# (g) report-only: no tangle row gates (other kinds' rows on these fixtures may)
+tg="$( grep -oE '<r kind="tangle"[^>]*>' "$Q" | grep -c 'gating="1"' )"; tm="$( grep -oE '<r kind="tangle"[^>]*>' "$Q" | grep -c 'sev="minor"' )"
+if [ "$tangles" -ge 1 ] && [ "$tg" = 0 ] && [ "$tm" = "$tangles" ]; then ok "(g) report-only: $tangles tangle row(s), all sev=\"minor\", none gating"
+else no "(g) tangle rows $tangles: gating $tg, minor $tm"; fi
+# (j) the JSON twin: the same tangle rows in "r" and an "improved" list
+jt="$( python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(sum(1 for r in d["r"] if r.get("kind")=="tangle"), len(d.get("improved",[])))' "$TMP/qd.json" 2>/dev/null )"
+if [ "${jt% *}" = "$tangles" ] && [ "${jt#* }" -ge 2 ]; then ok "(j) --json: ${jt% *} tangle row(s) and ${jt#* } improved entries"
+else no "(j) --json: '$jt' (tangle rows, improved) vs XML $tangles rows"; fi
 # (d)
 cmp -s "$Q" "$Q.2" && ok "(d) two runs byte-identical" || no "(d) two runs differ"
 

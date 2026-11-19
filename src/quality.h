@@ -4610,7 +4610,7 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 // rustTestAttributed tests EVERY top-level attribute on a line (classifyRustAttributeLine), so `#[tokio::test(x)] #[allow(unused)]`
 // now exempts the fn below it, and a `#[` inside a string is text, so `#[doc = "#[tokio::test(x)]"]` no longer does. A v33 blob
 // holds the old set, so it is rejected. Bumped 33 -> 34. kParserVer stays: no extraction change.
-constexpr std::uint32_t kQSnapCacheScheme = 35;   // 35: lane qd-tangle — the tangle map (tangleBySym) and its known byte, after bodyCidBySym
+constexpr std::uint32_t kQSnapCacheScheme = 36;   // 36: lane qd-tangle (35 is lane qd-va-forms') — the tangle map (tangleBySym) and its known byte, after bodyCidBySym
 constexpr char          kQSnapMagic[4]    = { 'Q', 'S', 'N', 'P' };
 
 // The qsnap EXCLUDES-config key folds the qsnap SCHEME (independent of the ingest cache's kHeadSnapCacheScheme)

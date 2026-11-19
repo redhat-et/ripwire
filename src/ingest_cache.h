@@ -2765,7 +2765,7 @@ inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8
 // verifyCacheRecordMinimaTripwire() below derives these
 // same numbers from the REAL writer functions at runtime so the next field added to writeDef/writeRef
 // can't silently stale them.
-inline constexpr std::size_t kMinDefRecordBytesLean      = 93;   // 17×u32 + 17×u8 + 2×str(len u32, empty) (paramsMin u32: 88 -> 92, kCacheVersion 33; clone-key presence u8: 92 -> 93, v50)
+inline constexpr std::size_t kMinDefRecordBytesLean      = 98;   // 18×u32 + 18×u8 + 2×str(len u32, empty) (paramsMin u32: 88 -> 92, kCacheVersion 33; clone-key presence u8: 92 -> 93, v50; QD-TANGLE steer u8 + deepDispatch u32: 93 -> 98, v54)
 inline constexpr std::size_t kMinDefRecordBytesRichExtra =  9;   // v10 rich withLex extra: dlWeighted u32 + tokenCount u32 + tfWidth u8
 inline constexpr std::size_t kMinRefRecordBytes          = 61;   // 3×u32 + 13×u8 + 9×str(len u32, empty)
 
