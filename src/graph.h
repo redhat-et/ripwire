@@ -3024,7 +3024,8 @@ inline void addPythonLookupNames( const IngestResult& ing, HashMap<std::string, 
 {
     for( const Binding& b : ing.bindings )
     {
-        if( b.kind == LocalBindKind::Import && b.importedName.empty() && multi.contains( b.var ) )
+        if( b.kind == LocalBindKind::Import && b.importedName.empty() && multi.contains( b.var ) && b.fileId < ing.files.size()
+            && isPythonSourcePath( rootRelPath( ing, b.fileId ) ) )   // a Python file's import (another language's names no Python binding)
         {
             names.try_emplace( b.var, '\0' );
         }
