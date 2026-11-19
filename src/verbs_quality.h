@@ -1671,7 +1671,7 @@ inline constexpr const char* kQdRowLegend =
     "Every row the header's gating= counter counts also carries a gating attribute "
     "set to 1 — marked positively, never by the ABSENCE of sev or origin. ";
 
-// Emitted only when a defect-shape row is in the document: the four facets defect= names, which one gates and
+// Emitted only when a defect-shape row is in the document: the facets defect= names, which one gates and
 // why, what a file-anchored row's sym= is, and what the kind does NOT check (so no row is not a verdict there).
 inline constexpr const char* kQdDefectShapeLegend =
     "defect-shape rows name a known defect SHAPE this change added, in defect=: format-arity (a literal "

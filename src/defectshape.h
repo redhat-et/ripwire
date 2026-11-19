@@ -4085,10 +4085,10 @@ inline constexpr std::array<StatusCall, 8> kCStatusCalls = { {
 } };
 
 // The calls whose arguments name a stream or a descriptor this function WROTE.
-inline constexpr std::array<std::string_view, 10> kStreamWriters = { "fprintf", "vfprintf", "fputs", "fputc", "putc", "fwrite", "fflush", "fputws", "fwprintf", "putwc" };
+// (emitTo / emitRaw / print: the std::print family and ripwire's own rw::emitTo, which take the FILE* first.)
+inline constexpr std::array<std::string_view, 14> kStreamWriters = { "fprintf", "vfprintf", "fputs", "fputc", "putc", "fwrite", "fflush", "fputws",
+                                                                     "fwprintf", "putwc", "print", "println", "emitTo", "emitRaw" };
 inline constexpr std::array<std::string_view, 9>  kFdWriters     = { "write", "pwrite", "writev", "pwritev", "send", "sendto", "sendmsg", "dprintf", "ftruncate" };
-// open(2) flags that make the descriptor a written one.
-inline constexpr std::array<std::string_view, 5>  kWriteOpenFlags = { "O_WRONLY", "O_RDWR", "O_CREAT", "O_APPEND", "O_TRUNC" };
 
 // The '(' that the ')' at `close` closes (round brackets only), or toks.size().
 inline std::size_t matchOpenParen( std::string_view src, const std::vector<Tok>& toks, std::size_t close ) noexcept
@@ -4151,8 +4151,9 @@ inline bool cppStatementStartsAt( std::string_view src, const std::vector<Tok>& 
     return tokIs( src, p, ":" ) && cppLabelEndsAt( src, toks, k - 1 );
 }
 
-// The status call named at token `k` (`name (`, `::name (` or `std::name (`), with `head` set to the first
-// token of its spelling; nullptr for a member call, another namespace's or class's function, or no such name.
+// The status call named at token `k` (`name (`, `::name (`, `std::name (`, or an OS shim's `os::name (` /
+// `rw::os::name (`, the thin libc layer a portable tree calls through), with `head` set to the first token of its
+// spelling; nullptr for a member call, another namespace's or class's function, or no such name.
 inline const StatusCall* cStatusCallAt( std::string_view src, const std::vector<Tok>& toks, std::size_t k, std::size_t& head ) noexcept
 {
     if( toks[k].kind != TokKind::Ident || k + 1 >= toks.size() || !tokIs( src, toks[k + 1], "(" ) )
@@ -4169,15 +4170,19 @@ inline const StatusCall* cStatusCallAt( std::string_view src, const std::vector<
     {
         return nullptr;   // obj.close(), stream->write( … ): a method
     }
-    if( tokIs( src, toks[k - 1], "::" ) )
+    if( !tokIs( src, toks[k - 1], "::" ) )
     {
-        const bool viaStd = k >= 2 && tokIs( src, toks[k - 2], "std" ) && !( k >= 3 && tokIs( src, toks[k - 3], "::" ) );
-        if( k >= 2 && toks[k - 2].kind == TokKind::Ident && !viaStd )
-        {
-            return nullptr;   // ns::close( … ), Class::write( … ): not libc's
-        }
-        head = viaStd ? k - 2 : k - 1;
+        return call;
     }
+    if( k >= 2 && toks[k - 2].kind == TokKind::Ident && !tokIs( src, toks[k - 2], "std" ) && !tokIs( src, toks[k - 2], "os" ) )
+    {
+        return nullptr;   // ns::close( … ), Class::write( … ): not libc's
+    }
+    while( head >= 2 && tokIs( src, toks[head - 1], "::" ) && toks[head - 2].kind == TokKind::Ident )
+    {
+        head -= 2;   // rw::os::close: the spelling starts at its first qualifier
+    }
+    head -= ( head >= 1 && tokIs( src, toks[head - 1], "::" ) ) ? 1 : 0;   // ::close, ::std::fclose
     return call;
 }
 
@@ -4206,43 +4211,67 @@ inline bool writtenThrough( std::string_view src, const std::vector<Tok>& toks, 
     return false;
 }
 
-// Is `name` assigned, in tokens [from, to), from an open that writes: fopen / fdopen with a "w", "a" or "+"
-// mode literal, open / openat with a write flag, or creat?
-inline bool openedForWrite( std::string_view src, const std::vector<Tok>& toks, std::size_t from, std::size_t to, std::string_view name )
+// Is `name` assigned, in tokens [from, to), from an fopen / fdopen whose mode literal writes ("w", "a", "+")? A
+// written FILE*'s fclose flushes its buffer, whatever wrote into it. (An open(2) flag is not evidence: a lock file
+// or /dev/null is opened for writing and never written.)
+inline bool fopenedForWrite( std::string_view src, const std::vector<Tok>& toks, std::size_t from, std::size_t to, std::string_view name )
 {
     for( std::size_t k = from + 2; k + 1 < to; ++k )
     {
         const std::size_t eq = ( tokIs( src, toks[k - 1], "::" ) && k >= from + 4 && tokIs( src, toks[k - 2], "std" ) ) ? k - 3 : k - 1;
-        if( !tokIs( src, toks[k + 1], "(" ) || !tokIs( src, toks[eq], "=" ) || eq == 0 || !tokIs( src, toks[eq - 1], name ) )
+        const bool opens = tokIs( src, toks[k], "fopen" ) || tokIs( src, toks[k], "fdopen" );
+        if( !opens || !tokIs( src, toks[k + 1], "(" ) || eq == 0 || !tokIs( src, toks[eq], "=" ) || !tokIs( src, toks[eq - 1], name ) )
         {
             continue;
         }
-        const std::string_view fn    = tokText( src, toks[k] );
-        const std::size_t      close = matchClose( src, toks, k + 1 );
-        if( fn == "creat" )
-        {
-            return true;
-        }
-        if( close >= to || ( fn != "fopen" && fn != "fdopen" && fn != "open" && fn != "openat" ) )
-        {
-            continue;
-        }
-        if( fn.front() == 'f' )
-        {
-            const Tok& mode = toks[close - 1];
-            if( mode.kind == TokKind::String && tokContent( src, mode ).find_first_of( "wa+" ) != std::string_view::npos )
-            {
-                return true;
-            }
-            continue;
-        }
-        if( std::any_of( toks.begin() + static_cast<std::ptrdiff_t>( k + 2 ), toks.begin() + static_cast<std::ptrdiff_t>( close ),
-                         [ & ]( const Tok& t ) { return t.kind == TokKind::Ident && rw::inSet( kWriteOpenFlags, tokText( src, t ) ); } ) )
+        const std::size_t close = matchClose( src, toks, k + 1 );
+        if( close < to && toks[close - 1].kind == TokKind::String && tokContent( src, toks[close - 1] ).find_first_of( "wa+" ) != std::string_view::npos )
         {
             return true;
         }
     }
     return false;
+}
+
+// The '{' that opens the innermost block holding token `k` within [from, k), or `from` when there is none.
+inline std::size_t enclosingBlockOpen( std::string_view src, const std::vector<Tok>& toks, std::size_t from, std::size_t k ) noexcept
+{
+    int depth = 0;
+    for( std::size_t j = k; j-- > from; )
+    {
+        depth += tokIs( src, toks[j], "}" ) ? 1 : 0;
+        if( tokIs( src, toks[j], "{" ) && depth-- == 0 )
+        {
+            return j;
+        }
+    }
+    return from;
+}
+
+// Is the statement at `head` the branch of an `if` whose condition already tested a write through one of
+// `writers` — `if( fwrite( … ) != n ) { fclose( f ); return; }` — so the failure is reported and the close is
+// cleanup? Braced and braceless branches both.
+template<std::size_t N>
+inline bool inWriteFailureBranch( std::string_view src, const std::vector<Tok>& toks, std::size_t from, std::size_t head,
+                                  const std::array<std::string_view, N>& writers )
+{
+    if( head <= from )
+    {
+        return false;
+    }
+    const std::size_t open  = enclosingBlockOpen( src, toks, from, head );
+    const std::size_t close = tokIs( src, toks[head - 1], ")" ) ? head - 1 : ( open > from && tokIs( src, toks[open - 1], ")" ) ) ? open - 1 : 0;
+    if( close == 0 )
+    {
+        return false;
+    }
+    const std::size_t cond = matchOpenParen( src, toks, close );
+    if( cond == 0 || cond >= toks.size() || !tokIs( src, toks[cond - 1], "if" ) )
+    {
+        return false;
+    }
+    return std::any_of( toks.begin() + static_cast<std::ptrdiff_t>( cond ), toks.begin() + static_cast<std::ptrdiff_t>( close ),
+                        [ & ]( const Tok& t ) { return t.kind == TokKind::Ident && rw::inSet( writers, tokText( src, t ) ); } );
 }
 
 // waitpid( pid, STATUS, options ): is the child's status dropped too — STATUS a null pointer, or the address of a
@@ -4271,12 +4300,14 @@ inline bool cStatusMatters( std::string_view src, const std::vector<Tok>& toks, 
     const bool        name = args[0].first == args[0].last && toks[args[0].first].kind == TokKind::Ident;
     switch( call.need )
     {
-        case StatusNeed::Always:
-            return !( call.name == "fflush" && arg0 == "stderr" );   // nowhere left to report a failed flush of stderr
-        case StatusNeed::WrittenStream:
-            return writtenThrough( src, toks, from, head, arg0, kStreamWriters ) || ( name && openedForWrite( src, toks, from, head, arg0 ) );
+        case StatusNeed::Always:   // a flush of the standard streams is not judged: stderr has nowhere left to report, and a
+                                   // CLI's stdout flush is a progress point whose failure the exit path sees
+            return !( call.name == "fflush" && ( arg0 == "stderr" || arg0 == "stdout" ) );
+        case StatusNeed::WrittenStream:   // the cleanup close inside `if( fwrite( … ) != n ) { … }` follows a failure already seen
+            return ( writtenThrough( src, toks, from, head, arg0, kStreamWriters ) || ( name && fopenedForWrite( src, toks, from, head, arg0 ) ) )
+                && !inWriteFailureBranch( src, toks, from, head, kStreamWriters );
         case StatusNeed::WrittenFd:
-            return writtenThrough( src, toks, from, head, arg0, kFdWriters ) || ( name && openedForWrite( src, toks, from, head, arg0 ) );
+            return writtenThrough( src, toks, from, head, arg0, kFdWriters ) && !inWriteFailureBranch( src, toks, from, head, kFdWriters );
         case StatusNeed::ChildStatus:
             return childStatusDropped( src, toks, args[1], close, to );
     }
