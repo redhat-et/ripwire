@@ -1416,7 +1416,7 @@ private:
     };
     static bool isDeclaratorWrapper( const char* t ) noexcept
     {
-        return std::ranges::find( kDeclaratorWrappers, std::string_view( t ) ) != std::ranges::end( kDeclaratorWrappers );
+        return isOneOf( t, kDeclaratorWrappers );
     }
 
     // Is node kind `t` (about to be entered; its parent is m_anc.back()) a parameter list, or a parameter of one, that
