@@ -6,8 +6,10 @@ measured orchestrator session, none received any hook output. One had a ripwire 
 five tool calls. The generic guidance (CLAUDE.md, MCP instructions, deferred tools) was present and not acted on.
 
 - `skills/install.sh --hook-subagent-primer` registers `hooks/ripwire-subagent-primer.sh` on `SubagentStart`. It
-  adds ~470 B to each new subagent's context: orient first with `ripwire <dir> --for="…" --legend=compact`, and run
-  `--quality-delta --legend=compact` then `--test-gate` before calling it done. It cannot block a subagent. It is
+  adds ~660 B to each new subagent's context. It says to orient first with `ripwire <dir> --for="…" --legend=compact`.
+  After the last edit and before reporting, it says to commit, run `--quality-delta=BASE..HEAD --legend=compact` and
+  then `--test-gate --legend=compact`, and run the gates that names. A committed range catches a regression made in
+  two steps. It cannot block a subagent. It is
   silent outside a git work tree or without ripwire. `RIPWIRE_SUBAGENT_PRIMER=0` turns it off, and `=auto`
   randomizes per subagent. One row per subagent start goes to `~/.ripwire/subagent_primer.jsonl` (ids and arm, never
   text), and `RIPWIRE_SUBAGENT_METER=0` stops it. The plain `--hook` does not install this hook.

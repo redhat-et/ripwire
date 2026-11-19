@@ -1639,7 +1639,7 @@ without an argument. `hooks/ripwire-subagent-primer.sh` speaks once, into an emp
 It carries two runnable commands and the order to run them in. Gate: `test/subagentprimercheck.sh`.
 
 **Arms (unit = one fresh subagent on one focused task; paired by task).** A: plain brief, hook off. B: plain
-brief, hook on (`RIPWIRE_SUBAGENT_PRIMER=on`). C: plain brief plus the same two lines pasted into it, hook off. C is
+brief, hook on (`RIPWIRE_SUBAGENT_PRIMER=on`). C: plain brief plus the same two lines pasted into it, hook off. Both carry CK1's check line (after the last edit: commit, `--quality-delta=BASE..HEAD`, then `--test-gate`); the primer is 657 B. C is
 the placement the owner's evidence credits. B against C asks whether the hook can stand in for the brief. The arm is
 set per orchestrator session by environment, one session per arm. Briefs are fixed text, passed verbatim. Task order
 is shuffled per session. Every other hook and the meter arm are pinned identical across the three sessions.

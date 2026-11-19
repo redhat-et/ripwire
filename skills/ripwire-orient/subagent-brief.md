@@ -12,13 +12,15 @@ subagent:
 
 ```text
 Orient first: run `ripwire <dir> --for="<your task in words; paste paths and symbols from this brief verbatim>" --legend=compact` and read only the files it ranks, before any grep or whole-file read.
-Before you call it done: run `ripwire <dir> --quality-delta --legend=compact`, then `ripwire <dir> --test-gate`; fix what they flag, or say in your report why not.
+Before you report, after your LAST edit: commit, then run `ripwire <dir> --quality-delta=BASE..HEAD --legend=compact` (BASE = where your branch started; the range catches a regression made in two steps) and then `ripwire <dir> --test-gate --legend=compact`, and run the gates it names. A check followed by another edit proves nothing about that edit.
 ```
 
 - `<dir>` is the tree the subagent will change. For a worktree lane, that is the worktree, not the main checkout.
 - `--for` page 1 named every file a commit later changed in 39 of 52 pilot tasks (SUB1). `--pack-task` did so in
   20 of 52, so for orientation use `--for`.
-- Run `--quality-delta` before `--test-gate`. Clean code that runs the wrong tests still regresses.
+- The check runs on a committed range, after the last edit. `BASE..HEAD` sees a regression made in two steps
+  that a working-tree diff against the last commit misses. A check followed by another edit proves nothing about
+  that edit. Run `--quality-delta` before `--test-gate`: clean code that runs the wrong tests still regresses.
 - Splitting one task across N subagents? Run `--pack-task="<task>" --partition=N` once and hand each subagent its
   slice (`partition-zoom.md`). Keep the two lines in each brief too.
 

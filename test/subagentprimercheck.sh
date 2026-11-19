@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # subagentprimercheck.sh — gate for hooks/ripwire-subagent-primer.sh, the OPT-IN Claude Code SubagentStart hook that
-# puts the two-line ripwire brief (orient with --for; --quality-delta then --test-gate before done) into every
+# puts the two-line ripwire brief (orient with --for; after the last edit, commit, --quality-delta=BASE..HEAD, --test-gate) into every
 # subagent's context. Fed recorded SubagentStart payloads in the shape code.claude.com/docs/en/hooks documents.
 #
 # What it must do, and must never do, and the arms that hold it:
@@ -85,8 +85,9 @@ evn="$( printf '%s' "$HOUT" | "$JQ" -r '.hookSpecificOutput.hookEventName // emp
 [ "$evn" = "SubagentStart" ] && ok "hookEventName is SubagentStart" || no "hookEventName: '$evn'"
 [ "$( printf '%s\n' "$HOUT" | wc -l | tr -d ' ' )" = 1 ] && ok "one JSON line on stdout" || no "stdout is not one line"
 case "$ctx" in *'ripwire <dir> --for="'*) ok "step 1 names --for";; *) no "step 1 --for missing";; esac
-case "$ctx" in *'ripwire <dir> --quality-delta --legend=compact'*) ok "step 2 names --quality-delta --legend=compact";; *) no "step 2 --quality-delta missing";; esac
-case "$ctx" in *'ripwire <dir> --test-gate'*) ok "step 2 names --test-gate";; *) no "--test-gate missing";; esac
+case "$ctx" in *'ripwire <dir> --quality-delta=BASE..HEAD --legend=compact'*) ok "step 2 names --quality-delta=BASE..HEAD --legend=compact";; *) no "step 2 --quality-delta=BASE..HEAD missing";; esac
+case "$ctx" in *'after your LAST edit: commit'*) ok "step 2 runs after the last edit, on a commit";; *) no "step 2 does not pin the check after the last edit";; esac
+case "$ctx" in *'ripwire <dir> --test-gate --legend=compact'*) ok "step 2 names --test-gate --legend=compact";; *) no "--test-gate --legend=compact missing";; esac
 pf="${ctx%%--for=*}"; pq="${ctx%%--quality-delta*}"
 [ "${#pf}" -lt "${#pq}" ] && ok "orient comes before the quality check" || no "step order wrong"
 nb="$( printf '%s' "$ctx" | wc -c | tr -d ' ' )"
@@ -213,9 +214,11 @@ c1="$( "$JQ" -r '.hooks.SubagentStart[0].hooks[0].command' "$CFG/settings.json" 
 echo "(O) the pasted commands run"
 "$BIN" "$REPO" --for="helper caller_one" --legend=compact >"$TMP/o1" 2>&1; r=$?
 [ "$r" = 0 ] && grep -q 'helper' "$TMP/o1" && ok "--for=... --legend=compact: rc 0, names the symbol" || no "--for rc $r"
-( cd "$REPO" && "$BIN" . --quality-delta --legend=compact >"$TMP/o2" 2>&1 ); r=$?
-case "$r" in 0|2) ok "--quality-delta --legend=compact: rc $r";; *) no "--quality-delta rc $r: $( head -c 200 "$TMP/o2" )";; esac
-( cd "$REPO" && "$BIN" . --test-gate >"$TMP/o3" 2>&1 ); r=$?
+printf 'def helper_two(y):\n    return helper(y) * 2\n' >>"$REPO/app.py"
+git -C "$REPO" -c user.name=t -c user.email=t@t commit -qam second || no "fixture: second commit"
+( cd "$REPO" && "$BIN" . --quality-delta=HEAD~1..HEAD --legend=compact >"$TMP/o2" 2>&1 ); r=$?
+case "$r" in 0|2) ok "--quality-delta=BASE..HEAD --legend=compact: rc $r";; *) no "--quality-delta=BASE..HEAD rc $r: $( head -c 200 "$TMP/o2" )";; esac
+( cd "$REPO" && "$BIN" . --test-gate --legend=compact >"$TMP/o3" 2>&1 ); r=$?
 case "$r" in 0|4) ok "--test-gate: rc $r";; *) no "--test-gate rc $r: $( head -c 200 "$TMP/o3" )";; esac
 
 [ "$fail" = 0 ] && echo "subagentprimercheck: ALL PASS" || echo "subagentprimercheck: FAIL"

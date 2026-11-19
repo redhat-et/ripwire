@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # hooks/ripwire-subagent-primer.sh — OPT-IN Claude Code SubagentStart hook. Puts the two-line ripwire brief into the
-# context of every subagent the session spawns: orient with `--for` before reading, run `--quality-delta` then
-# `--test-gate` before calling it done. Advisory-only; it cannot block a subagent and degrades to silence on any error.
+# context of every subagent the session spawns: orient with `--for` before reading; after the LAST edit, commit and run
+# `--quality-delta=BASE..HEAD` then `--test-gate` before reporting. Advisory-only; it cannot block a subagent and degrades to silence on any error.
 #
 # WHY THIS EXISTS (lane AR1, 2026-11-19). Lane SUB1 mined the 25 product-implementing subagents of one orchestrator
 # session: orientation was 40.6% of their input tokens and each orientation token was re-read ~165 times, yet they
@@ -122,7 +122,7 @@ insideWorkTree="$( git -C "$dir" rev-parse --is-inside-work-tree 2>/dev/null )" 
 # is that a short, specific instruction is acted on where a long catalogue is not.
 primer='ripwire — your user installed this for every subagent. Two steps, in this order:
 1. Orient first: `ripwire <dir> --for="<your task; paste paths and symbols from the brief verbatim>" --legend=compact` (<dir> = the tree you will change). Read only the files it ranks, before any grep or whole-file read.
-2. Before you call it done: `ripwire <dir> --quality-delta --legend=compact`, then `ripwire <dir> --test-gate`. Fix what they flag, or say in your report why not.'
+2. Before you report, after your LAST edit: commit, then run `ripwire <dir> --quality-delta=BASE..HEAD --legend=compact` (BASE = where your branch started; the range catches a regression made in two steps) and then `ripwire <dir> --test-gate --legend=compact`, and run the gates it names. A check followed by another edit proves nothing about that edit.'
 
 out="$( jq -cn --arg m "$primer" '{hookSpecificOutput:{hookEventName:"SubagentStart",additionalContext:$m}}' 2>/dev/null )" \
     || { logRow 0 jq-failed 0; exit 0; }
