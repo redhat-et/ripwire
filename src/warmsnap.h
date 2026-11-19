@@ -79,7 +79,7 @@ namespace rw::warmsnap
 
 inline constexpr std::uint64_t kMagic   = 0x0150'414e'5357'52ull;   // "RWSNAP\x01"
 inline constexpr std::uint32_t kVersion = 4;                        // bump on ANY layout change in the three sections
-                                                                    // 4: train ge2 — lane qd-tangle's SymRow steer/dispatchShare bytes (its 3) on main's 3
+                                                                    // 4: lane qd-tangle — SymRow's two pad bytes carry Symbol::steer and ::dispatchShare (3 is held by in-flight lanes)
                                                                     // 3: the GRAPH section carries Graph::provenSites (PROVEN-SITE-KEEPS-NAMESAKES)
                                                                     // 2: the MODEL section dropped its stored stat signature of the blob — the
                                                                     //    blob's identity is in this file's NAME, so that binding is structural
