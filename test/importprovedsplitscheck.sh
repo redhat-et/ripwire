@@ -16,6 +16,20 @@
 #               shadow.ts   a parameter named URI: URI.file()                               → unchanged (no class-name reading)
 #               tslocal/local.ts  the class of the caller's own file                       → its own file's file, unchanged
 #               ren.ts      import { helper as h }; h()                                     → the renamed import still pins (mech import)
+#   Python (fixture py/):  pa/client.py and pb/client.py each `class Client: @staticmethod make()`; pk/timer.py and pk/events.py each `class Timer`
+#     POSITIVE  app.py      from pa.client import Client; Client.make(1)                   → pa's make
+#               renamed.py  from pb.client import Client as BClient; BClient.make(6)      → pb's make
+#               pk/pump.py  from pk.timer import Timer (events.py imported too); Timer(..)  → pk/timer.py's Timer (prov import; base: split)
+#               pylocal/    app.py as above beside a THIRD Client in local.py              → pa's make (base: local.py's, unhedged)
+#     NEGATIVE  neither.py  no import of Client                                            → still the split
+#               star.py     `from pa.client import *` and `from pb.client import *`         → still the split
+#               pk/nopump.py `from pk import timer` (a module, not the class): Timer(..)    → still the split
+#               pk/repump.py from pk.retimer import Timer, where retimer.py rebinds Timer   → still the split (m's binding is not only the class)
+#               shadow.py   def shadowed(Client): Client.make(10)                          → unchanged (base: unique pa)
+#               loose.py    self.c.make() / v.make()                                       → unchanged (base: unique pa)
+#               fn.py       from pc.other import helper; helper()                          → unchanged (a plain import pins only a class)
+#               renamed.py  from pc.other import helper as h; h()                         → the renamed import still pins (mech import)
+#               pylocal/local.py  the class of the caller's own file                       → its own make, unchanged
 # Every negative arm counts the rows it read and fails when it read none (a vacuous arm proves nothing).
 #
 # Usage: bash test/importprovedsplitscheck.sh [BIN]     (default build/ripwire; exits non-zero on any failure)
@@ -110,6 +124,27 @@ export function same(): URI {
 }
 EOF
 
+PY="$TMP/py"; mkdir -p "$PY/pa" "$PY/pb" "$PY/pc" "$PY/pk"
+touch "$PY/pa/__init__.py" "$PY/pb/__init__.py" "$PY/pc/__init__.py" "$PY/pk/__init__.py"
+printf 'class Client:\n    @staticmethod\n    def make(n):\n        return Client()\n\n    def run(self):\n        return 1\n' >"$PY/pa/client.py"
+cp "$PY/pa/client.py" "$PY/pb/client.py"
+printf 'def helper():\n    return 1\n' >"$PY/pc/other.py"
+printf 'from pa.client import Client\n\n\ndef open_one():\n    return Client.make(1)\n' >"$PY/app.py"
+printf 'from pb.client import Client as BClient\nfrom pc.other import helper as h\n\n\ndef ren():\n    h()\n    return BClient.make(6)\n' >"$PY/renamed.py"
+printf 'from pc.other import helper\n\n\ndef none():\n    helper()\n    return Client.make(2)\n' >"$PY/neither.py"
+printf 'from pa.client import *\nfrom pb.client import *\n\n\ndef starred():\n    return Client.make(3)\n' >"$PY/star.py"
+printf 'from pa.client import Client\n\n\ndef shadowed(Client):\n    return Client.make(10)\n' >"$PY/shadow.py"
+printf 'from pc.other import helper\n\n\ndef plain_fn():\n    return helper()\n' >"$PY/fn.py"
+printf 'from pa.client import Client\nfrom pb import client as bmod\n\n\nclass Holder:\n    def __init__(self, c):\n        self.c = c\n\n    def go(self, v):\n        self.c.make(4)\n        v.make(5)\n        return Client, bmod\n' >"$PY/loose.py"
+printf 'class Timer:\n    def __init__(self, owner, delay):\n        self.owner = owner\n        self.delay = delay\n' >"$PY/pk/timer.py"
+cp "$PY/pk/timer.py" "$PY/pk/events.py"; printf '\n\nclass Event:\n    pass\n' >>"$PY/pk/events.py"
+cp "$PY/pk/timer.py" "$PY/pk/retimer.py"; printf '\n\nTimer = type("Timer", (Timer,), {})\n' >>"$PY/pk/retimer.py"
+printf 'from pk import events\nfrom pk.events import Event\nfrom pk.timer import Timer\n\n\nclass Pump:\n    def set_timer(self, delay):\n        return Timer(self, delay), events, Event\n' >"$PY/pk/pump.py"
+printf 'from pk import events\nfrom pk import timer\n\n\nclass NoPump:\n    def set_timer(self, delay):\n        return Timer(self, delay), events, timer\n' >"$PY/pk/nopump.py"
+printf 'from pk import events\nfrom pk.events import Event\nfrom pk.retimer import Timer\n\n\nclass RePump:\n    def set_timer(self, delay):\n        return Timer(self, delay), events, Event\n' >"$PY/pk/repump.py"
+PL="$TMP/pylocal"; mkdir -p "$PL"; cp -R "$PY/pa" "$PY/pb" "$PY/app.py" "$PL/"
+printf 'class Client:\n    @staticmethod\n    def make(n):\n        return Client()\n\n\ndef same():\n    return Client.make(7)\n' >"$PL/local.py"
+
 # census DIR → $TMP/<name>.census (rc checked: a failed run would make every arm below vacuous)
 census(){ ( cd "$1" && "$BIN" . --no-cache --pin-census="$TMP/$2.census" >/dev/null 2>"$TMP/$2.err" ); local rc=$?
           [ "$rc" -eq 0 ] || { no "$2: the --pin-census run failed (rc=$rc)"; return 1; }; return 0; }
@@ -124,6 +159,8 @@ expect(){ local r; r=$( row "$1" "$2" "$3" "$4" ); local n; n=$( cat "$TMP/rows"
 
 census "$TS" ts || exit 1
 census "$TL" tslocal || exit 1
+census "$PY" py || exit 1
+census "$PL" pylocal || exit 1
 
 echo "── TypeScript: the import proves one class ──"
 expect ts app.ts file 3 "a/uri.ts::file"
@@ -144,7 +181,26 @@ ndc=$( grep -o '<dc [^>]*p="loose.ts:[68]"[^>]*>' "$TMP/loose.callers" | grep -c
 if [ "$ndc" -eq 2 ] && ! grep -q '<s [^>]*p="loose.ts:[68]"' "$TMP/loose.callers"; then ok "loose.ts:6/8 this.u.file() / v.file() stay declined (2 dc rows, no caller row)"
 else no "loose.ts: want 2 declined sites and no caller row, got $ndc"; sed 's/<!--.*-->//; s/^/        | /' "$TMP/loose.callers" | head -5; fi
 seen=$(( seen + ndc ))
-if [ "$seen" -ge 7 ]; then ok "the negative arms read $seen rows (premise: none vacuous)"; else no "the negative arms read only $seen rows (want >= 7)"; fi
+
+echo "── Python: the import proves one class ──"
+expect py app.py make 5 "pa/client.py::Client::make"
+expect py renamed.py make 7 "pb/client.py::Client::make"
+expect py pk/pump.py Timer 8 "pk/timer.py::Timer::Timer" import
+expect pylocal app.py make 5 "pa/client.py::Client::make"
+
+echo "── Python: nothing proves one class, or the receiver is not the class ──"
+neg py neither.py make 6 "pa/client.py::Client::make pb/client.py::Client::make" split
+neg py star.py make 6 "pa/client.py::Client::make pb/client.py::Client::make" split
+neg py pk/nopump.py Timer 7 "pk/events.py::Timer::Timer pk/retimer.py::Timer::Timer pk/timer.py::Timer::Timer" split
+neg py pk/repump.py Timer 8 "pk/events.py::Timer::Timer pk/retimer.py::Timer::Timer" split
+neg py shadow.py make 5 "pa/client.py::Client::make" unique
+neg py loose.py make 10 "pa/client.py::Client::make" unique
+neg py loose.py make 11 "pa/client.py::Client::make" unique
+neg py fn.py helper 5 "pc/other.py::helper" unique
+neg py renamed.py h 6 "pc/other.py::helper" import
+neg pylocal local.py make 8 "local.py::Client::make"
+
+if [ "$seen" -ge 17 ]; then ok "the negative arms read $seen rows (premise: none vacuous)"; else no "the negative arms read only $seen rows (want >= 17)"; fi
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME FAILED"
 exit "$fail"
