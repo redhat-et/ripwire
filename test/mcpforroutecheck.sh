@@ -206,5 +206,18 @@ say $? "(t3) [P] batch: the blast-radius item routes as the top-level MCP for (-
 [ "$( attr "$( printf '%s' "$T2" | routeOf )" kind )" = who-calls ]
 say $? "(t3) [N] batch: the who-calls item beside them still routes" "(t3) [N] batch who-calls item: '${T2:0:200}'"
 
+# ── RT3-F1 over MCP (t4): a windowed routed answer continues itself — MCP `for` with offset= routes to the verb's window ──
+mkdir -p "$DIR/wide"
+printf 'int target_fn( int a )\n{\n    return a;\n}\n' >"$DIR/wide/t.c"
+for i in $( seq -w 1 120 ); do printf 'int target_fn( int a );\nint caller_%s( void )\n{\n    return target_fn( %d );\n}\n' "$i" "$((10#$i))" >"$DIR/wide/c$i.c"; done
+QU='Where is `target_fn` used?'
+M0="$( mcpfor "$DIR/wide" "$QU" )"; MO="$( mcpfor "$DIR/wide" "$QU" ',"offset":100' )"
+( cd "$DIR" && "$BIN" "$DIR/wide" --for="$QU" --offset=100 2>/dev/null ) >"$DIR/f1cli.out"
+NX="$( printf '%s' "$M0" | python3 -c 'import html,re,sys; d=re.sub(r"<!--.*?-->","",sys.stdin.read(),flags=re.S); m=re.search(r"<[A-Za-z][^>]*>",d); n=re.search(r"\snext=\"([^\"]*)\"",m.group(0)) if m else None; sys.stdout.write(html.unescape(n.group(1)) if n else "")' )"
+[ "$NX" = "--for='Where is \`target_fn\` used?' --offset=100" ]
+say $? "(t4) [P] MCP for: a windowed routed answer's root next= continues it" "(t4) [P] MCP root next= is '$NX'"
+[ "$( attr "$( printf '%s' "$MO" | routeOf )" verb )" = "--uses=target_fn --offset=100" ] && [ "$( printf '%s' "$MO" | rows )" = "$( rows <"$DIR/f1cli.out" )" ]
+say $? "(t4) [P] MCP for offset=100: the routed continuation, rows equal the CLI's --for=Q --offset=100" "(t4) [P] MCP offset answer: '$( printf '%s' "$MO" | routeOf )'"
+
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "FAILURES ABOVE"; fi
 exit "$fail"

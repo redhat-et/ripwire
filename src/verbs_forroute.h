@@ -367,6 +367,45 @@ inline void dropKeyGroup( std::string& page )
     page.erase( keyBegin, keyEnd - keyBegin );
 }
 
+// RT3-F1: a WINDOWED verb answer (its root says has_more="1" next_offset=K) continues ITSELF: the routed root's next= becomes
+// `--for=Q --offset=K`, the call that routes the same question to the verb's window at K (runForVerbRoute). An unwindowed
+// root keeps the verb's own next=, byte for byte.
+inline void continueRootNext( std::string& doc, std::string_view task )
+{
+    const rw::CompactRootInfo root = rw::findCompactRoot( doc );
+    if( root.tag.empty() )
+    {
+        return;
+    }
+    const std::string_view open = std::string_view( doc ).substr( root.openBegin, root.openEnd - root.openBegin );
+    const std::string_view k    = rw::partialwarn::detail::attrOf( open, "next_offset" );
+    if( rw::partialwarn::detail::attrOf( open, "has_more" ) != "1" || k.empty() )
+    {
+        return;
+    }
+    const std::string next = rw::nextAttrXml( rw::nextFlag( "--for=", task ) + " --offset=" + std::string( k ) );
+    const std::size_t at   = open.find( " next=\"" );
+    if( at == std::string_view::npos )
+    {
+        doc.insert( root.openEnd - ( open.ends_with( "/>" ) ? 2 : 1 ), next );
+        return;
+    }
+    const std::size_t close = open.find( '"', at + 7 );
+    doc.replace( root.openBegin + at, close + 1 - at, next );
+}
+
+// RT3-F1: `--for=Q --offset=K` on a question that routes, and otherwise the bare call: the offset K, else 0.
+inline int routeContinueOffset( const MainDispatch& d )
+{
+    if( d.cfg.pageOffset <= 0 || d.cfg.pageLimit > 0 )
+    {
+        return 0;
+    }
+    rw::Config bare = d.cfg;
+    bare.pageOffset = 0;
+    return forVerbRouteApplies( routeDispatch( d, bare ) ) ? d.cfg.pageOffset : 0;
+}
+
 // The routed document: the verb's answer with <route> (page1="1" when `page` is carried) and the fold as the root's first
 // children, compacted as the bare call is, and `page` (a ranked --for answer, "" = none) as the root's last child.
 inline std::string assembleRouted( const MainDispatch& d, RoutedAnswer& ra, std::string_view page )
@@ -376,6 +415,7 @@ inline std::string assembleRouted( const MainDispatch& d, RoutedAnswer& ra, std:
         page.remove_suffix( 1 );
     }
     std::string doc = std::move( ra.verb.out );
+    continueRootNext( doc, d.cfg.forTask );
     const rw::CompactRootInfo root = rw::findCompactRoot( doc );
     doc.insert( root.openEnd, routeElementXml( d.cfg, ra.rd.kind, ra.spelling, ra.w, !page.empty() ) + ( ra.w ? foldElementXml( *ra.w ) : std::string() ) );
     // KB1 (forkeybody.h): the routed symbol's definition body (and a second named symbol's) after the verb's rows, before a carried page.
@@ -399,8 +439,51 @@ inline std::string assembleRouted( const MainDispatch& d, RoutedAnswer& ra, std:
     return doc;
 }
 
+// RT3-F1: the routed verb's window at `offset` — <route> (its verb= spells the offset) and the verb's rows, compacted as the
+// bare call is. No evidence, fold, key body or carried page: those belong to the first window. nullopt: the question does not
+// route, or the verb refuses both spellings (the caller serves the --for file page, as before).
+inline std::optional<std::string> routedContinuation( const MainDispatch& d, int offset, RouteRender& verbOut )
+{
+    const rw::forroute::RouteDecision rd = rw::forroute::decide( d.cfg.forTask );
+    if( rd.kind == rw::forroute::RouteKind::None )
+    {
+        return std::nullopt;
+    }
+    std::string spelling = rd.sym;
+    verbOut = renderRoutedVerb( d, rd.kind, spelling );   // d.cfg carries --offset into the verb's own window
+    if( routedVerbRefused( verbOut ) && rw::forroute::lastSegment( rd.sym ) != rd.sym )
+    {
+        spelling = std::string( rw::forroute::lastSegment( rd.sym ) );
+        verbOut  = renderRoutedVerb( d, rd.kind, spelling );
+    }
+    if( routedVerbRefused( verbOut ) )
+    {
+        return std::nullopt;
+    }
+    std::string doc = std::move( verbOut.out );
+    continueRootNext( doc, d.cfg.forTask );
+    const rw::CompactRootInfo root = rw::findCompactRoot( doc );
+    std::string route = routeElementXml( d.cfg, rd.kind, spelling, rw::partialwarn::RouteEvidence{}, false );
+    route.insert( route.find( '"', route.find( " verb=\"" ) + 7 ), " --offset=" + std::to_string( offset ) );   // verb= spells the window
+    doc.insert( root.openEnd, route );
+    (void)rw::applyCompactDialect( doc, ::compactLegendHint( d.cfg, doc ) );
+    return doc;
+}
+
 std::optional<int> runForVerbRoute( const MainDispatch& d )
 {
+    if( const int offset = routeContinueOffset( d ); offset > 0 )
+    {
+        RouteRender                      verb;
+        const std::optional<std::string> doc = routedContinuation( d, offset, verb );
+        if( !doc )
+        {
+            return std::nullopt;
+        }
+        std::fwrite( doc->data(), 1, doc->size(), stdout );
+        std::fwrite( verb.err.data(), 1, verb.err.size(), stderr );
+        return verb.rc;
+    }
     if( !forVerbRouteApplies( d ) )
     {
         return std::nullopt;
@@ -441,14 +524,17 @@ std::optional<int> runForVerbRoute( const MainDispatch& d )
 // Gate: test/mcpforroutecheck.sh.
 namespace rw
 {
-std::optional<std::string> mcpForVerbRoute( const IngestResult& ing, const Graph& g, const std::string& root, const std::string& task,
-                                            const std::function<std::optional<std::string>()>& page )
+// The dispatch a bare CLI --for run builds — fan-in from the in-edge CSR and computeQMetrics, nothing git-mined — over the
+// server's warm index, handed to `use`. `offset` > 0: the run is `--for=Q --offset=K` (RT3-F1's continuation).
+template <class Use>
+std::optional<std::string> withMcpRouteDispatch( const IngestResult& ing, const Graph& g, const std::string& root, const std::string& task, int offset, Use&& use )
 {
     Config cfg;
     cfg.roots           = { std::string_view( root ) };
     cfg.rootPath        = cfg.roots.front();
     cfg.forTask         = task;
     cfg.legendDefaulted = true;
+    cfg.pageOffset      = offset;
     std::vector<std::uint32_t> fanIn( ing.symbols.size(), 0 );
     const auto* ro = g.inEdges.rowOffsets();
     for( std::size_t i = 0; i < ing.symbols.size(); ++i )
@@ -461,16 +547,35 @@ std::optional<std::string> mcpForVerbRoute( const IngestResult& ing, const Graph
     RedactCounts                       redactCounts;
     const MainDispatch d{ cfg, ing, g, root, false, ws, fanIn, &fanIn, qmetrics, nullptr, &qmetrics.cbo, &qmetrics.tested, &qmetrics.lcom4,
                           nullptr, forChurn, redactCounts, nullptr, nullptr, false, nullptr, true };
-    std::optional<RoutedAnswer> ra = routeQuestion( d );
-    if( !ra )
+    return use( d );
+}
+
+std::optional<std::string> mcpForVerbRoute( const IngestResult& ing, const Graph& g, const std::string& root, const std::string& task,
+                                            const std::function<std::optional<std::string>()>& page )
+{
+    return withMcpRouteDispatch( ing, g, root, task, 0, [ & ]( const MainDispatch& d ) -> std::optional<std::string>
     {
-        return std::nullopt;
-    }
-    std::optional<std::string> carried;
-    if( ra->wantPage )
+        std::optional<RoutedAnswer> ra = routeQuestion( d );
+        if( !ra )
+        {
+            return std::nullopt;
+        }
+        std::optional<std::string> carried;
+        if( ra->wantPage )
+        {
+            carried = page();
+        }
+        return assembleRouted( d, *ra, carried ? std::string_view( *carried ) : std::string_view{} );
+    } );
+}
+
+// RT3-F1: MCP `for` with offset=K (and no limit=): the routed verb's window at K, as the CLI's `--for=Q --offset=K` serves it.
+std::optional<std::string> mcpForVerbContinue( const IngestResult& ing, const Graph& g, const std::string& root, const std::string& task, int offset )
+{
+    return withMcpRouteDispatch( ing, g, root, task, offset, [ & ]( const MainDispatch& d )
     {
-        carried = page();
-    }
-    return assembleRouted( d, *ra, carried ? std::string_view( *carried ) : std::string_view{} );
+        RouteRender verb;
+        return routedContinuation( d, offset, verb );
+    } );
 }
 }   // namespace rw

@@ -492,5 +492,44 @@ vetoArm v34c msg   'What breaks if the "usage: tool" text built by `print_usage`
 run v35 plain --for='What is the exact call chain from `outer_entry` to `compute_total`?'; cmp -s "$DIR/v35.out" "$DIR/v30a.out"
 say $? "(35) [C] two runs of a path-vetoed question are byte-identical" "(35) [C] path-vetoed runs differ"
 
+# ── RT3-F1 arms (36–40): a WINDOWED routed answer continues ITSELF (coordinator follow-up F1) ────────────────────────
+# The verb windows its rows (--uses 100, --impact 40: has_more="1" next_offset=K). The routed root's next= used to name
+# another lens (--safe-delete / none), and `--for=Q --offset=K` answered with a --for <files> page. Now the root's next= is
+# `--for=Q --offset=K`, and that call routes the same question to the verb's window at K: the <route> (verb= spells the
+# offset) and the verb's rows at --offset=K. An unwindowed routed answer and an unrouted --for are untouched.
+mkdir -p "$DIR/wide"
+printf 'int target_fn( int a )\n{\n    return a;\n}\n' >"$DIR/wide/t.c"
+for i in $( seq -w 1 120 ); do printf 'int target_fn( int a );\nint caller_%s( void )\n{\n    return target_fn( %d );\n}\n' "$i" "$((10#$i))" >"$DIR/wide/c$i.c"; done
+rootNext(){ python3 -c 'import html,re,sys; d=re.sub(r"<!--.*?-->","",open(sys.argv[1]).read(),flags=re.S); m=re.search(r"<[A-Za-z][^>]*>",d); n=re.search(r"\snext=\"([^\"]*)\"",m.group(0)) if m else None; sys.stdout.write(html.unescape(n.group(1)) if n else "")' "$1"; }
+# the verb's rows: the answer from the root on, the <route> element, KB1's key group and the root's own open tag set aside
+verbRows(){ python3 -c 'import re,sys; d=re.sub(r"<!--.*?-->","",open(sys.argv[1]).read(),flags=re.S); d=re.sub(r"<route [^>]*/>","",d); d=re.sub(r"<bodies of=\"key\".*?</bodies>","",d,flags=re.S); m=re.search(r"<[A-Za-z][^>]*>",d); sys.stdout.write(d[m.end():] if m else "")' "$1"; }
+contArm(){ # $1 id $2 question $3 verb flag (--uses / --impact) $4 kind $5 window K
+    local q="$2" want
+    want="$( python3 -c 'import shlex,sys; print("--for=" + shlex.quote(sys.argv[1]) + " --offset=" + sys.argv[2])' "$q" "$5" )"
+    run "$1" wide --for="$q"
+    [ "$( rootNext "$DIR/$1.out" )" = "$want" ]
+    say $? "($1) [P] windowed $4 answer: root next= continues it ($want)" "($1) [P] root next= is '$( rootNext "$DIR/$1.out" )', want '$want'"
+    run "$1c" wide --for="$q" --offset="$5"; run "$1v" wide "$3=target_fn" --offset="$5"
+    F="$( firstChild "$DIR/$1c.out" )"
+    [ "$( attr "$F" kind )" = "$4" ] && [ "$( attr "$F" verb )" = "$3=target_fn --offset=$5" ]
+    say $? "($1) [P] --for=Q --offset=$5 routes to the verb's window: <route kind=$4 verb=\"$3=target_fn --offset=$5\">" "($1) [P] continuation route reads '$F'"
+    [ -n "$( verbRows "$DIR/$1v.out" )" ] && [ "$( verbRows "$DIR/$1c.out" )" = "$( verbRows "$DIR/$1v.out" )" ]
+    say $? "($1) [P] the continuation's rows are $3=target_fn --offset=$5's rows, byte for byte" "($1) [P] continuation rows differ from the verb's window"
+    if grep -q '<ctx task=\|<text_only' "$DIR/$1c.out"; then no "($1) [P] a continuation carries a --for page or a fold"; else ok "($1) [P] a continuation carries no --for page and no fold"; fi
+}
+contArm f36 'Where is `target_fn` used?' --uses where-used 100
+contArm f37 'Trace the transitive callers of `target_fn`.' --impact transitive 40
+# (38) [N] an unwindowed routed answer keeps the verb's own root next= (no has_more)
+run f38 plain --for='Who calls `compute_total`?'; run f38v plain --callers=compute_total
+[ "$( rootNext "$DIR/f38.out" )" = "$( rootNext "$DIR/f38v.out" )" ]
+say $? "(38) [N] unwindowed routed answer: root next= is the verb's own ('$( rootNext "$DIR/f38v.out" )')" "(38) [N] root next= became '$( rootNext "$DIR/f38.out" )'"
+# (39) [N] an unrouted question with --offset is the --for file page, as before (the opt-out spelling of the same call)
+run f39 plain --for='How does the total get computed?' --offset=1; run f39o plain --for='How does the total get computed?' --offset=1 --no-verb-route
+cmp -s "$DIR/f39.out" "$DIR/f39o.out" && ! grep -q '<route ' "$DIR/f39.out"
+say $? "(39) [N] an unrouted --for --offset is the --for file page byte for byte" "(39) [N] unrouted --offset answer changed"
+# (40) [N] --no-verb-route with --offset on a routed question is the --for file page (never routed)
+run f40 wide --for='Where is `target_fn` used?' --offset=100 --no-verb-route
+if grep -q '<route ' "$DIR/f40.out"; then no "(40) [N] --no-verb-route --offset routed"; else ok "(40) [N] --no-verb-route --offset is the --for file page, never routed"; fi
+
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "FAILURES ABOVE"; fi
 exit "$fail"
