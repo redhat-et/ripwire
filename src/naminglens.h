@@ -61,6 +61,7 @@
 #include "model.h"
 #include "ingest.h"              // AstMatch — naming findings ride the shared lint finding shape
 #include "lexindex.h"            // lexSubtokenHash — the SAME normalized-token hash the BM25 postings path uses
+#include "infra/tablelookup.h"   // isOneOf
 #include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED, ((void)0) in the normal build
 
 namespace rw
@@ -75,14 +76,6 @@ inline bool ncDigit( char c ) noexcept { return c >= '0' && c <= '9'; }
 inline bool ncAlpha( char c ) noexcept { return ncUpper( c ) || ncLower( c ); }
 inline bool ncAlnum( char c ) noexcept { return ncAlpha( c ) || ncDigit( c ); }
 inline bool ncIdent( char c ) noexcept { return ncAlnum( c ) || c == '_'; }
-
-// the one set-membership primitive this unit uses — the bool-type names, the C-family non-type keywords
-// and the width suffixes are all "is this token one of a fixed list", and each spelling it out separately
-// was three copies of the same loop.
-inline bool ncAnyOf( std::string_view token, std::initializer_list<std::string_view> set ) noexcept
-{
-    return std::find( set.begin(), set.end(), token ) != set.end();
-}
 
 inline bool ncAllAscii( std::string_view name ) noexcept
 {
@@ -209,7 +202,7 @@ inline bool ncWidthSuffix( std::string_view name ) noexcept
     {
         return false;
     }
-    return ncAnyOf( name.substr( base.size() ), { "8", "16", "32", "64", "128", "256", "512" } );
+    return isOneOf( name.substr( base.size() ), { "8", "16", "32", "64", "128", "256", "512" } );
 }
 
 // ---- return-type recovery from the SIGNATURE bytes (the index stores a symbol's signature span but
@@ -224,7 +217,7 @@ struct ReturnTypeFact
 
 inline bool ncBoolTypeName( std::string_view token ) noexcept
 {
-    return ncAnyOf( token, { "bool", "_Bool", "Bool", "BOOL", "boolean", "Boolean", "jboolean" } );
+    return isOneOf( token, { "bool", "_Bool", "Bool", "BOOL", "boolean", "Boolean", "jboolean" } );
 }
 
 // a bare identifier token, or empty view if the text is anything more structured (generics,
@@ -256,7 +249,7 @@ inline std::string_view bareIdentifierOnly( std::string_view text ) noexcept
 // tokens that mean "the token before the name is NOT a usable return type" in C-family signatures.
 inline bool ncCFamilyNonType( std::string_view token ) noexcept
 {
-    return ncAnyOf( token, { "auto", "decltype", "const", "constexpr", "consteval", "constinit", "static", "inline", "virtual",
+    return isOneOf( token, { "auto", "decltype", "const", "constexpr", "consteval", "constinit", "static", "inline", "virtual",
                              "extern", "friend", "explicit", "typename", "mutable", "register", "volatile", "thread_local",
                              "signed", "unsigned", "long", "short", "operator", "template", "typedef", "using", "struct",
                              "class", "enum", "union", "public", "private", "protected", "final", "abstract", "synchronized",

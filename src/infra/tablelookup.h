@@ -20,6 +20,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdlib>
+#include <initializer_list>
 #include <iterator>
 #include <span>
 #include <string_view>
@@ -81,6 +82,13 @@ template<class T, std::size_t N>
 constexpr bool inSet( const std::array<T, N>& set, T value ) noexcept
 {
     return std::find( set.begin(), set.end(), value ) != set.end();
+}
+
+// Is `word` one of `set`? `set` is a table (C array, std::array, span) or a braced list: isOneOf( w, { "a", "b" } ).
+template< typename Set = std::initializer_list<std::string_view> >
+constexpr bool isOneOf( std::string_view word, const Set& set ) noexcept
+{
+    return std::ranges::find( set, word ) != std::ranges::end( set );
 }
 
 // A test hook's one-of-N switch: the 1-based position of environment variable `var`'s value in `names`, 0 when it is unset or

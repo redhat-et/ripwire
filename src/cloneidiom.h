@@ -240,7 +240,7 @@ inline bool idiomEatThresholdCond( const std::vector<IdiomTok>& t, std::size_t& 
     while( i < t.size() && t[i].text != ")" )
     {
         // The two membership tests are spelled INLINE rather than wrapped in a predicate each: a one-line
-        // std::find wrapper is the single most duplicated body shape in this tree (naminglens' ncAnyOf,
+        // std::find wrapper is the single most duplicated body shape in this tree (rw::isOneOf,
         // notes' sortNotes, three more), and --quality-delta named this file as the next copy of it the
         // moment the wrapper existed. Two uses do not need a symbol.
         const std::string_view w = t[i].text;
