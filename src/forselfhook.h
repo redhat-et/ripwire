@@ -23,7 +23,7 @@
 //
 // BASES. The proven implementors edges, plus the edge buildGraph never draws: a base clause spelled with a RENAMED import
 // (`from m import Command as RunserverCommand`; class Command(RunserverCommand)), where no class has the written name so the map holds
-// nothing. That one is read here, for this element only, under the resolver's own rule for a renamed import (buildPythonRenamedImports,
+// nothing. That one is read here, for this element only, under the resolver's own rule for a renamed import (buildPythonImportPins,
 // the module-scope rebind table, the star-import and dynamic-namespace marks, the endpoint's one binding: the tables pythonRenamedImportPin
 // reads) and a full module path; it enters no graph table (--lego keeps its answer).
 //
@@ -720,8 +720,8 @@ inline void addRenamedImportBases( const IngestResult& ing, std::vector<std::pai
     {
         return;
     }
-    const ExternalVetoTables   veto    = buildExternalVetoTables( ing );
-    const PythonRenamedImports imports = buildPythonRenamedImports( ing, veto.pythonMultiFileClasses );
+    const ExternalVetoTables veto    = buildExternalVetoTables( ing );
+    const PythonImportPins   imports = buildPythonImportPins( ing, veto.pythonMultiFileClasses );
     // the module-level classes by (name, file), to find the one a member names
     std::vector<std::tuple<std::string_view, std::uint32_t, NodeId>> classes;
     for( NodeId c = 0; c < ing.symbols.size(); ++c )

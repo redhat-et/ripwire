@@ -9344,10 +9344,11 @@ struct PythonAliasShadow
     VarSpan     span;   // [startByte, endByte): where the name is the comprehension target or lambda parameter
 };
 
-// IMPORT-PROVED-SPLITS: `plainClasses`: "<fileId>#C" for every Python file where EVERY import of C is one module-scope plain `from m
-// import C` and C names Python classes in two or more files (pythonMultiFileClassNames): pythonRenamedImportPin pins such a C only
-// to a class.
-struct PythonRenamedImports
+// the module-scope member imports pythonRenamedImportPin may pin through, per "<fileId>#name". `renamed`: `from m import x as y` (PY-IMPORT-
+// ALIAS-CALL: y → x). IMPORT-PROVED-SPLITS `plainClasses`: "<fileId>#C" for every Python file where EVERY import of C is one module-scope
+// plain `from m import C` and C names Python classes in two or more files (pythonMultiFileClassNames): pythonRenamedImportPin pins such a
+// C only to a class.
+struct PythonImportPins
 {
     HashMap<std::string, std::string> renamed;
     HashMap<std::string, char>        plainClasses;
@@ -9402,10 +9403,10 @@ inline std::string pythonImportMember( const IngestResult& ing, const Binding& b
 }
 
 // `multi`: ExternalVetoTables::pythonMultiFileClasses (pythonMultiFileClassNames)
-inline PythonRenamedImports buildPythonRenamedImports( const IngestResult& ing, const HashMap<std::string, char>& multi )
+inline PythonImportPins buildPythonImportPins( const IngestResult& ing, const HashMap<std::string, char>& multi )
 {
-    PythonRenamedImports out;
-    std::string          key;
+    PythonImportPins out;
+    std::string      key;
     out.importingFiles.assign( ing.files.size(), 0 );
     for( const Binding& b : ing.bindings )
     {
@@ -9439,8 +9440,8 @@ inline PythonRenamedImports buildPythonRenamedImports( const IngestResult& ing, 
 
 // PY-IMPORT-ALIAS-CALL: is `name` bound where `r` runs by something other than the file's module-scope import of it — a local or parameter
 // of the caller (localNameSet, which also holds a def-scoped import), of a def enclosing it (a closure reads that), or a comprehension
-// target / lambda parameter whose span covers the call (PythonRenamedImports::shadows: the site-spanned records localNameSet skips)
-inline bool pythonNameBoundLocally( const IngestResult& ing, const PythonRenamedImports& imports, const ExternalVeto& veto, const Reference& r, std::string_view name )
+// target / lambda parameter whose span covers the call (PythonImportPins::shadows: the site-spanned records localNameSet skips)
+inline bool pythonNameBoundLocally( const IngestResult& ing, const PythonImportPins& imports, const ExternalVeto& veto, const Reference& r, std::string_view name )
 {
     if( veto.hasLocal( r, name ) || std::ranges::any_of( imports.shadows, [ &r, name ]( const PythonAliasShadow& s )
                                                           { return s.sym == r.fromSymbol && s.var == name && r.startByte >= s.span.startByte && r.startByte < s.span.endByte; } ) )
@@ -9461,8 +9462,11 @@ inline bool pythonNameBoundLocally( const IngestResult& ing, const PythonRenamed
 // namespace write: pythonModuleRebind; the caller file's own `__getattr__` is never consulted for a name it binds), and no star import in the file (it may bind y after the rename); and only when m resolves to ONE
 // indexed file (memberImportFile) whose module scope binds x ONLY by that one function or class (pythonEndpointBindsOnlyByClass). A package that
 // re-exports x defines none there: no decision, the call falls to the unchanged ladder (a floor, not a guess). A comprehension target or lambda parameter
-// named y that covers the call byte is a binding too (PythonRenamedImports::shadows: the site-spanned records localNameSet skips).
-inline NodeId pythonRenamedImportPin( const IngestResult& ing, const PythonRenamedImports& imports, const ExternalVetoTables& v,
+// named y that covers the call byte is a binding too (PythonImportPins::shadows: the site-spanned records localNameSet skips).
+// `name` is the local name the call is written through: r.calleeName for the bare call `y()`, or, for IMPORT-PROVED-SPLITS
+// (ImportProvedClass), the receiver root C of a member call `C.m()` / the class of `C()`; there a plain `from m import C` (PythonImportPins::
+// plainClasses) pins too, but only to a class.
+inline NodeId pythonRenamedImportPin( const IngestResult& ing, const PythonImportPins& imports, const ExternalVetoTables& v,
                                       const ExternalVeto& veto, const HashMap<std::string, rw::SmallVec<NodeId, 2>>& byName, const Reference& r,
                                       std::string_view name )
 {
@@ -10649,7 +10653,7 @@ struct ImportProvedClass
 {
     const JsImportTables&                                 jsImports;
     const IngestResult&                                   ing;
-    const PythonRenamedImports&                           pyImports;
+    const PythonImportPins&                              pyImports;
     const ExternalVetoTables&                             extVeto;
     const ExternalVeto&                                   externalVeto;
     const HashMap<std::string, rw::SmallVec<NodeId, 2>>& byName;
@@ -11033,7 +11037,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // ExternalVeto above buildGraph; `vetoExternal` is the refusal: no edge, one header count, one `C external`
     // census row with no target.
     const ExternalVeto externalVeto{ ing, canonByName, fieldNarrow.localNameSet, extVeto };
-    const PythonRenamedImports pyRenamedImports = buildPythonRenamedImports( ing, extVeto.pythonMultiFileClasses );   // PY-IMPORT-ALIAS-CALL (pythonRenamedImportPin)
+    const PythonImportPins pyImportPins = buildPythonImportPins( ing, extVeto.pythonMultiFileClasses );   // PY-IMPORT-ALIAS-CALL (pythonRenamedImportPin)
     const PythonLexicalScopes  pyScopes         = buildPythonLexicalScopes( ing, byName );   // PY-CLASS-SPRAY (pythonLexicalScopePin)
     // The builtin-method name gate (BuiltinMethodGate above): decides, in Rule 3's place, the calls whose name is a
     // method of the caller language's builtin map/list/set/string type. Inert (active=false) on a corpus with no
@@ -11177,7 +11181,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         }
     }
     ReceiverEvidence         recvEv( ing, chaUp, classNames );
-    const ImportProvedClass  importClass{ jsImports, ing, pyRenamedImports, extVeto, externalVeto, byName };   // IMPORT-PROVED-SPLITS: recvEv.pathOwners' per-language resolver
+    const ImportProvedClass  importClass{ jsImports, ing, pyImportPins, extVeto, externalVeto, byName };   // IMPORT-PROVED-SPLITS: recvEv.pathOwners' per-language resolver
     HashMap<std::string, char> qualifierVerdicts = buildQualifierVerdicts( ing, extVeto, falseEdges );   // h1-annot
     {
         PROFILE_SCOPE_DESCRIBE( "buildGraph/2i: receiver-evidence tables" );
@@ -12683,10 +12687,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // PY-IMPORT-ALIAS-CALL: `from m import x as y; y()` — the Python twin for a RENAMED member import (pythonRenamedImportPin
         // states when it decides). A plain `from m import x` keeps the ladder (the call's own spelling already names x), unless x is a
         // class other files define too (IMPORT-PROVED-SPLITS: `Timer( .. )` binds the imported Timer, not every Timer).
-        if( !scipPinned && !canonical && !narrowed && !pyRenamedImports.empty() && r.role == RefRole::Call && r.recv == RecvKind::None
+        if( !scipPinned && !canonical && !narrowed && !pyImportPins.empty() && r.role == RefRole::Call && r.recv == RecvKind::None
             && r.qualifier.empty() && !r.memberCall && r.lang == Lang::Python )
         {
-            if( const NodeId pin = pythonRenamedImportPin( ing, pyRenamedImports, extVeto, externalVeto, byName, r, r.calleeName ); pin != kNoNode )
+            if( const NodeId pin = pythonRenamedImportPin( ing, pyImportPins, extVeto, externalVeto, byName, r, r.calleeName ); pin != kNoNode )
             {
                 cand.push_back( pin );
                 narrowed     = true;
