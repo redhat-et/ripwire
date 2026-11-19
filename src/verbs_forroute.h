@@ -224,19 +224,15 @@ inline std::string routeElementXml( const rw::Config& cfg, rw::forroute::RouteKi
     return x;
 }
 
-// RT2 ES (results/RT2_ROUTE_1118/PREREG.md §ES; owner-approved 2026-11-18): the default page 1 of an unrouted --for answer ENDS
-// EARLY when its first block is AF4 T-B's <callers by="subject" of=S> and that block PROVES itself complete: shown= equals total=,
-// capped="0", d2_capped absent or "0", and W2 (rt2Evidence, the block's own rows read as a --callers answer) finds neither a
-// residual reason nor a text-only file. Anything short of that is today's page. A spelled --page-bytes never ends early, which
-// is what the early page's next= (the full page 1) relies on. Gate: test/forverbroutecheck.sh (ES arms).
-std::optional<std::string> forEarlyStopPage( const MainDispatch& d, const std::string& doc )
+// The first row block of an answer-first --for document when it is a <callers by="subject"> block whose own counts prove it
+// whole: shown= equals total=, capped="0", d2_capped absent or "0". nullopt otherwise.
+struct LeadBlock
 {
-    const rw::Config& cfg = d.cfg;
-    if( cfg.forTask.empty() || d.multiRoot || cfg.roots.size() != 1 || !cfg.pageBytesSpec.empty() || cfg.forPage != 1 || cfg.tokenBudget != 0
-        || cfg.maxTokens != 0 || !cfg.legendDefaulted || !forPagingApplies( cfg ) )
-    {
-        return std::nullopt;
-    }
+    std::size_t      index = 0;
+    std::string_view block;
+};
+inline std::optional<LeadBlock> leadingProvenCallers( std::string_view doc )
+{
     const std::optional<rw::forpages::detail::Stream> st = rw::forpages::detail::readStream( doc );
     if( !st )
     {
@@ -251,7 +247,7 @@ std::optional<std::string> forEarlyStopPage( const MainDispatch& d, const std::s
     {
         return std::nullopt;
     }
-    const std::string_view block = std::string_view( doc ).substr( st->blocks[ lead ].begin, st->blocks[ lead ].end - st->blocks[ lead ].begin );
+    const std::string_view block = doc.substr( st->blocks[ lead ].begin, st->blocks[ lead ].end - st->blocks[ lead ].begin );
     const std::string_view open  = block.substr( 0, block.find( '>' ) );
     using rw::partialwarn::detail::attrOf;
     const std::string_view d2cap = attrOf( open, "d2_capped" );
@@ -259,6 +255,30 @@ std::optional<std::string> forEarlyStopPage( const MainDispatch& d, const std::s
     {
         return std::nullopt;
     }
+    return LeadBlock{ lead, block };
+}
+
+// RT2 ES (results/RT2_ROUTE_1118/PREREG.md §ES; owner-approved 2026-11-18): the default page 1 of an unrouted --for answer ENDS
+// EARLY when its first block is AF4 T-B's <callers by="subject" of=S> and that block PROVES itself complete: shown= equals total=,
+// capped="0", d2_capped absent or "0", and W2 (rt2Evidence, the block's own rows read as a --callers answer) finds neither a
+// residual reason nor a text-only file. Anything short of that is today's page. A spelled --page-bytes never ends early, which
+// is what the early page's next= (the full page 1) relies on. Gate: test/forverbroutecheck.sh (ES arms).
+std::optional<std::string> forEarlyStopPage( const MainDispatch& d, const std::string& doc )
+{
+    const rw::Config& cfg = d.cfg;
+    if( cfg.forTask.empty() || d.multiRoot || cfg.roots.size() != 1 || !cfg.pageBytesSpec.empty() || cfg.forPage != 1 || cfg.tokenBudget != 0
+        || cfg.maxTokens != 0 || !cfg.legendDefaulted || !forPagingApplies( cfg ) )
+    {
+        return std::nullopt;
+    }
+    const std::optional<LeadBlock> lead = leadingProvenCallers( doc );
+    if( !lead )
+    {
+        return std::nullopt;
+    }
+    const std::string_view block = lead->block;
+    const std::string_view open  = block.substr( 0, block.find( '>' ) );
+    using rw::partialwarn::detail::attrOf;
     const std::string subject( attrOf( open, "of" ) );
     const RouteRender verb = subject.empty() ? RouteRender{} : renderRoutedVerb( d, rw::forroute::RouteKind::WhoCalls, subject );
     if( routedVerbRefused( verb ) )
@@ -283,7 +303,7 @@ std::optional<std::string> forEarlyStopPage( const MainDispatch& d, const std::s
     const std::string legend = "<!-- ripwire for schema=ripwire.for/v1 (page 1, early): task= the query, at= this commit"
                              + std::string( rw::kForCompactSubjectCallerHopLegend ) + std::string( windowClause ) + " -->";
     const std::string call = forUnbudgetedCall( cfg );
-    return rw::forpages::earlyFirstPage( doc, { .pageBytes = cfg.forPageBytes, .page = 1, .call = call }, lead, legend );
+    return rw::forpages::earlyFirstPage( doc, { .pageBytes = cfg.forPageBytes, .page = 1, .call = call }, lead->index, legend );
 }
 
 std::optional<int> runForVerbRoute( const MainDispatch& d )

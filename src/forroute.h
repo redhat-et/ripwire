@@ -208,6 +208,24 @@ template <class OkAt>
     return upTo || occursWhere( lq, "trace", [ & ]( std::size_t at ) { return isBoundary( lq, at ) && isBoundary( lq, at + 5 ); } );
 }
 
+// \bused\b(?!\s+by\b): "used", unless it is passive "used by X" (that names the user, not where the subject is used).
+[[nodiscard]] inline bool hasUsedNotBy( std::string_view lq )
+{
+    return occursWhere( lq, "used", [ & ]( std::size_t at )
+    {
+        if( !isBoundary( lq, at ) || !isBoundary( lq, at + 4 ) )
+        {
+            return false;
+        }
+        std::size_t k = at + 4;
+        while( k < lq.size() && ( lq[ k ] == ' ' || lq[ k ] == '\t' || lq[ k ] == '\n' || lq[ k ] == '\r' || lq[ k ] == '\f' || lq[ k ] == '\v' ) )
+        {
+            ++k;
+        }
+        return k == at + 4 || !( lq.substr( k, 2 ) == "by" && isBoundary( lq, k + 2 ) );
+    } );
+}
+
 // rule R2's where-used cues (RT2; see the header for the pattern this transcribes).
 [[nodiscard]] inline bool isWhereUsed( std::string_view lq )
 {
@@ -221,21 +239,7 @@ template <class OkAt>
     {
         return true;
     }
-    // \bused\b(?!\s+by\b): "used by X" names the user, not where the subject is used
-    const bool usedNotBy = occursWhere( lq, "used", [ & ]( std::size_t at )
-    {
-        if( !isBoundary( lq, at ) || !isBoundary( lq, at + 4 ) )
-        {
-            return false;
-        }
-        std::size_t k = at + 4;
-        while( k < lq.size() && ( lq[ k ] == ' ' || lq[ k ] == '\t' || lq[ k ] == '\n' || lq[ k ] == '\r' || lq[ k ] == '\f' || lq[ k ] == '\v' ) )
-        {
-            ++k;
-        }
-        return k == at + 4 || !( lq.substr( k, 2 ) == "by" && isBoundary( lq, k + 2 ) );
-    } );
-    if( usedNotBy )
+    if( hasUsedNotBy( lq ) )
     {
         return true;
     }
