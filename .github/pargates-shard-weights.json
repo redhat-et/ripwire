@@ -461,6 +461,7 @@
  "qchurncheck.sh": 3.7,
  "qchurnmemocheck.sh": 4.3,
  "qddegradecheck.sh": 20.0,
+ "qdrangecheck.sh": 30.0,
  "qdrefpaircheck.sh": 92.2,
  "qextractionkeycheck.sh": 2.8,
  "qoriginoraclecheck.sh": 8.7,
