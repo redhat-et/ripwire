@@ -749,6 +749,7 @@ for _g in \
     mcpeditracecheck \
     mcpflagshipcheck \
     mcpforparitycheck \
+    mcpforroutecheck \
     mcpframehonestycheck \
     mcpgrepdegradedcheck \
     mcphandlecheck \

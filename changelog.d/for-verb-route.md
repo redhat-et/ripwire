@@ -7,7 +7,8 @@ Files that name the symbol only as text (a macro alias, a string, a shell script
 `<text_only>` rows. When the evidence says the verb is likely to miss something a text list cannot show (a macro caller,
 a callback slot, twin definitions, a value hop, a cut list), the route says `warn="1" why=` and the first `--for` page
 rides inside the answer. An absent `warn=` means no evidence was found, never that the answer is complete. Flags that shape
-the `--for` answer (`--page-bytes`, a budget, `--json`, several roots) keep it unrouted; MCP `for` is unchanged.
+the `--for` answer (`--page-bytes`, a budget, `--json`, several roots) keep it unrouted. MCP `for` routes by the same rule and
+carries the same rows (its warned answer carries MCP's own `for` answer); its `no_verb_route` argument is the opt-out.
 
-Lanes RT1 (`1ede0078b`) and RT2 (`lane/rt2-route`); `test/forverbroutecheck.sh`. Measured on held-out gold:
+Lanes RT1 (`1ede0078b`) and RT2 (`lane/rt2-route`); `test/forverbroutecheck.sh`, `test/mcpforroutecheck.sh`. Measured on held-out gold:
 `results/RT2_ROUTE_1118/READOUT.md`.

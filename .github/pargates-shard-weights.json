@@ -198,6 +198,7 @@
  "foranswerfirstcheck.sh": 45.0,
  "forpagescheck.sh": 40.0,
  "forverbroutecheck.sh": 2.0,
+ "mcpforroutecheck.sh": 2.0,
  "forautobodycheck.sh": 21.6,
  "forblowupcheck.sh": 1.0,
  "forbodyfoldcheck.sh": 60.0,

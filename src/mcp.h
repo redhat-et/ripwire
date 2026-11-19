@@ -1146,6 +1146,30 @@ struct McpDispatchResult
     std::string timingVerb;           // the method, refined to the tool name for tools/call (MEASURE-FIRST timing attribution)
 };
 
+// RT2 MCP parity: a `for` call the CLI would route — no budget and no file page (a shaped call), the default sections, routing not
+// opted out — answered by the CLI's routed answer (verbs_forroute.h mcpForVerbRoute); a warned one carries this verb's own
+// answer as its page. nullopt: serve the ranked answer.
+struct McpForRouteAsk
+{
+    const std::string& path;
+    const std::string& task;
+    const std::string& sections;
+    const std::string& args;              // the call's arguments object: a limit= / offset= file page is a shaped call
+    bool               noRoute       = false;
+    bool               noVerbRoute   = false;
+    bool               budgetPresent = false;
+};
+inline std::optional<std::string> mcpRoutedFor( const McpForRouteAsk& a, RedactCounts* redactPtr )
+{
+    const bool shaped = a.budgetPresent || mcpdetail::findRawValue( a.args, "limit" ).isPresent || mcpdetail::findRawValue( a.args, "offset" ).isPresent;
+    if( a.noVerbRoute || shaped || !a.sections.empty() )
+    {
+        return std::nullopt;
+    }
+    const McpIndex& ix = getIndex( a.path );
+    return mcpForVerbRoute( ix.ing, ix.g, a.path, a.task, [ & ] { return forTaskText( a.path, a.task, redactPtr, 0, a.noRoute, McpPageArgs{}, a.sections ); } );
+}
+
 // Handle ONE JSON-RPC request line and build its response. This is the SINGLE request-handling path both
 // the stdio loop (runMcp) and the HTTP server (runMcpHttp, mcpserver.h) route through, so a given JSON-RPC
 // body returns byte-identical bytes regardless of transport ("the
@@ -1529,6 +1553,9 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             const bool postCheck = !postCheckArg.isPresent || postCheckArg.value;
             // F-R1-07: the CLI --no-route over MCP, on the verbs that ROUTE (for / explore / pack_task).
             const bool noRoute = boolArg( "no_route" ).value;
+            // RT2 MCP parity: the CLI --no-verb-route over MCP — the ranked `for` answer even when the task names a symbol and asks
+            // who calls it, where it is used or what breaks (the routed answer's next= names the CLI spelling of this opt-out).
+            const bool noVerbRoute = boolArg( "no_verb_route" ).value;
             const std::string text    = strArg( "text" );     // insert_before/after
             const std::string handle  = strArg( "handle" );   // T4 fetch_body
             const std::string kind    = strArg( "kind" );     // exemplar kind token; whereis/stray_content/flags/doc_drift name filter
@@ -2407,7 +2434,10 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     // L-W: limit/offset select the FILE PAGE (the CLI --for --limit=N twin), read by the same
                     // mcpPageArgs every paging twin uses; a budget beside a page is refused, as the CLI refuses
                     // --token-budget beside --limit — the page has no byte ceiling to shape against.
-                    resp = pagedResult( [ & ]( McpPageArgs pg )
+                    // RT2 MCP parity: the CLI's routed answer on the call shapes the CLI routes (mcpRoutedFor)
+                    const std::optional<std::string> routed = mcpRoutedFor( { .path = path, .task = task, .sections = sections, .args = args, .noRoute = noRoute,
+                                                                              .noVerbRoute = noVerbRoute, .budgetPresent = budgetArg.isPresent }, redactPtr );
+                    resp = routed ? textResult( *routed ) : pagedResult( [ & ]( McpPageArgs pg )
                     {
                         // PAGING-POC follow-up (issue #294): budget + window no longer refuses —
                         // forTaskText serves the budgeted-bundle CANDIDATE PAGE for it (the CLI twin's

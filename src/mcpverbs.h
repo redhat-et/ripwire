@@ -65,6 +65,7 @@
 #include "defslookup.h"    // D2 part 5: pathAltsOf — path_between's inline alternatives, as on the CLI
 
 #include <filesystem>      // §B6 M3: the shared root-path existence/directory check (mcpRootRefusal below)
+#include <functional>
 #include <optional>        // mcpAnswerText / usesText: nullopt is an answer buffer that failed, never an empty answer
 #include <span>            // std::span — connectemit::rebuildFromLegs reads the caller's retained-leg mask
 
@@ -2641,6 +2642,12 @@ inline McpManifestRows mcpManifestRowsFitted( const IngestResult& ing, std::stri
     }
     return whole;
 }
+
+// RT2 MCP parity: a `for` task that names its symbol and asks a call-graph question, answered by the CLI's routed answer
+// (verbs_forroute.h defines it, later in this translation unit); `page` serves the ranked answer a warned route carries.
+// nullopt: not routed — serve forTaskText.
+std::optional<std::string> mcpForVerbRoute( const IngestResult& ing, const Graph& g, const std::string& root, const std::string& task,
+                                            const std::function<std::optional<std::string>()>& page );
 
 inline std::optional<std::string> forTaskText( const std::string& root, const std::string& task, RedactCounts* redact = nullptr,
                                 std::size_t budgetTokens = 0, bool noRoute = false,

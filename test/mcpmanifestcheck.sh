@@ -349,7 +349,10 @@ tools = json.loads( line )[ "result" ][ "tools" ]
 # legend still carries whole). grep keeps "hits_capped means total is a floor": it is the floor disclosure, and
 # docs/limits_build.py credits src/mcp.h's disclosure to that token. Lowered per rule (1) above; mcplisttrimcheck carries
 # the same figure. Headroom: 30 B.
-CEILING = 39970
+# RT2 MCP parity (2026-11-19): +90 B, every byte attributed — `for` gains the no_verb_route boolean (the CLI --no-verb-route twin,
+# the opt-out a routed `for` answer's next= names): measured 39,940 -> 40,030 B, descriptions unchanged at 15,133 B, the 33 first
+# sentences unchanged. Ceiling = measured + 30 B, the same margin.
+CEILING = 40060
 manifest = len( json.dumps( { "tools": tools }, separators = ( ",", ":" ) ) )
 descBytes   = sum( len( t[ "description" ] ) for t in tools )
 schemaBytes = sum( len( json.dumps( t[ "inputSchema" ], separators = ( ",", ":" ) ) ) for t in tools )

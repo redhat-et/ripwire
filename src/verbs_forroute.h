@@ -306,35 +306,74 @@ std::optional<std::string> forEarlyStopPage( const MainDispatch& d, const std::s
     return rw::forpages::earlyFirstPage( doc, { .pageBytes = cfg.forPageBytes, .page = 1, .call = call }, lead->index, legend );
 }
 
+// The route decided and the verb answered: what runForVerbRoute (CLI) and mcpForVerbRoute (MCP `for`) both assemble from.
+struct RoutedAnswer
+{
+    rw::forroute::RouteDecision                     rd;
+    std::string                                     spelling;
+    RouteRender                                     verb;
+    std::optional<rw::partialwarn::RouteEvidence>   w;
+    bool                                            wantPage = false;   // a residual reason (or no evidence run on a non-who-calls kind)
+};
+
+// Rule E2 + R2 on d.cfg.forTask, the verb (as typed, else its last segment: P1's spelling fallback) and W2. nullopt: not
+// routed — no kind, no symbol, or neither spelling resolves (the caller serves its unrouted answer).
+inline std::optional<RoutedAnswer> routeQuestion( const MainDispatch& d )
+{
+    RoutedAnswer ra{ .rd = rw::forroute::decide( d.cfg.forTask ) };
+    if( ra.rd.kind == rw::forroute::RouteKind::None )
+    {
+        return std::nullopt;
+    }
+    ra.spelling = ra.rd.sym;
+    ra.verb     = renderRoutedVerb( d, ra.rd.kind, ra.spelling );
+    if( routedVerbRefused( ra.verb ) && rw::forroute::lastSegment( ra.rd.sym ) != ra.rd.sym )
+    {
+        ra.spelling = std::string( rw::forroute::lastSegment( ra.rd.sym ) );
+        ra.verb     = renderRoutedVerb( d, ra.rd.kind, ra.spelling );
+    }
+    if( routedVerbRefused( ra.verb ) )
+    {
+        return std::nullopt;   // the verb's notices are dropped with its answer
+    }
+    ra.w        = routeEvidence( d, ra.rd.kind, ra.spelling, ra.verb.out );
+    ra.wantPage = ra.w ? !ra.w->residual.empty() : ra.rd.kind != rw::forroute::RouteKind::WhoCalls;
+    return ra;
+}
+
+// The routed document: the verb's answer with <route> (page1="1" when `page` is carried) and the fold as the root's first
+// children, compacted as the bare call is, and `page` (a ranked --for answer, "" = none) as the root's last child.
+inline std::string assembleRouted( const MainDispatch& d, RoutedAnswer& ra, std::string_view page )
+{
+    while( !page.empty() && page.back() == '\n' )
+    {
+        page.remove_suffix( 1 );
+    }
+    std::string doc = std::move( ra.verb.out );
+    const rw::CompactRootInfo root = rw::findCompactRoot( doc );
+    doc.insert( root.openEnd, routeElementXml( d.cfg, ra.rd.kind, ra.spelling, ra.w, !page.empty() ) + ( ra.w ? foldElementXml( *ra.w ) : std::string() ) );
+    (void)rw::applyCompactDialect( doc, ::compactLegendHint( d.cfg, doc ) );   // the bare call's dialect: main.cpp's layer skips --for
+    if( !page.empty() )
+    {
+        doc.insert( doc.rfind( "</" ), page );
+    }
+    return doc;
+}
+
 std::optional<int> runForVerbRoute( const MainDispatch& d )
 {
     if( !forVerbRouteApplies( d ) )
     {
         return std::nullopt;
     }
-    const rw::forroute::RouteDecision rd = rw::forroute::decide( d.cfg.forTask );
-    if( rd.kind == rw::forroute::RouteKind::None )
+    std::optional<RoutedAnswer> ra = routeQuestion( d );
+    if( !ra )
     {
-        return std::nullopt;
+        return std::nullopt;   // the --for answer, byte for byte
     }
-    // the verb, as typed, else its last segment (P1's spelling fallback); a symbol neither spelling resolves is not routed
-    std::string spelling = rd.sym;
-    RouteRender verb     = renderRoutedVerb( d, rd.kind, spelling );
-    if( routedVerbRefused( verb ) && rw::forroute::lastSegment( rd.sym ) != rd.sym )
-    {
-        spelling = std::string( rw::forroute::lastSegment( rd.sym ) );
-        verb     = renderRoutedVerb( d, rd.kind, spelling );
-    }
-    if( routedVerbRefused( verb ) )
-    {
-        return std::nullopt;   // the --for answer, byte for byte (the verb's notices are dropped with its answer)
-    }
-    const std::optional<rw::partialwarn::RouteEvidence> w = routeEvidence( d, rd.kind, spelling, verb.out );
-    const bool wantPage = w ? !w->residual.empty() : rd.kind != rw::forroute::RouteKind::WhoCalls;
-
     // the first --for page, rendered as the opted-out call would serve it
     RouteRender page;
-    if( wantPage )
+    if( ra->wantPage )
     {
         // the FULL page 1, as the spelled default page serves it: the carried page never ends early (ES is page 1 of an UNROUTED answer)
         static_assert( rw::answerfirst::kAnswerPageBytesDefault == 12000, "the spelled default page below is the default page size" );
@@ -343,29 +382,56 @@ std::optional<int> runForVerbRoute( const MainDispatch& d )
         const MainDispatch pd = routeDispatch( d, pc );
         page = renderRouteCaptured( [ & ] { return runForLens( pd ).value_or( 1 ); } );
     }
-    const bool hasPage = wantPage && page.captured && page.rc == 0 && rw::findCompactRoot( page.out ).tag == "ctx";
-
-    std::string doc = std::move( verb.out );
-    const rw::CompactRootInfo root = rw::findCompactRoot( doc );
-    doc.insert( root.openEnd, routeElementXml( d.cfg, rd.kind, spelling, w, hasPage ) + ( w ? foldElementXml( *w ) : std::string() ) );
-    (void)rw::applyCompactDialect( doc, ::compactLegendHint( d.cfg, doc ) );   // the bare call's dialect: main.cpp's layer skips --for
-    if( hasPage )
-    {
-        const std::size_t close = doc.rfind( "</" );
-        std::string_view  p     = page.out;
-        while( !p.empty() && p.back() == '\n' )
-        {
-            p.remove_suffix( 1 );
-        }
-        doc.insert( close, p );
-    }
+    const bool        hasPage = ra->wantPage && page.captured && page.rc == 0 && rw::findCompactRoot( page.out ).tag == "ctx";
+    const std::string doc     = assembleRouted( d, *ra, hasPage ? std::string_view( page.out ) : std::string_view{} );
     std::fwrite( doc.data(), 1, doc.size(), stdout );
-    std::fwrite( verb.err.data(), 1, verb.err.size(), stderr );
+    std::fwrite( ra->verb.err.data(), 1, ra->verb.err.size(), stderr );
     if( hasPage )
     {
         std::fwrite( page.err.data(), 1, page.err.size(), stderr );
     }
-    return verb.rc;
+    return ra->verb.rc;
 }
 
 }   // namespace — verbs_forroute.h section of main.cpp
+
+// RT2 MCP PARITY (coordinator 2026-11-19): MCP `for` routes by the SAME frozen rule. The server's warm index answers through
+// the CLI's own route (routeQuestion / assembleRouted above) on a dispatch built the way a bare CLI --for run builds its own —
+// fan-in from the in-edge CSR and computeQMetrics, nothing git-mined — so a routed MCP payload carries the CLI routed answer's
+// rows. The carried page is `page()`: MCP's own `for` answer (MCP serves `for` unpaged). Declared in mcpverbs.h.
+// Gate: test/mcpforroutecheck.sh.
+namespace rw
+{
+std::optional<std::string> mcpForVerbRoute( const IngestResult& ing, const Graph& g, const std::string& root, const std::string& task,
+                                            const std::function<std::optional<std::string>()>& page )
+{
+    Config cfg;
+    cfg.roots           = { std::string_view( root ) };
+    cfg.rootPath        = cfg.roots.front();
+    cfg.forTask         = task;
+    cfg.legendDefaulted = true;
+    std::vector<std::uint32_t> fanIn( ing.symbols.size(), 0 );
+    const auto* ro = g.inEdges.rowOffsets();
+    for( std::size_t i = 0; i < ing.symbols.size(); ++i )
+    {
+        fanIn[ i ] = ro[ i + 1 ] - ro[ i ];
+    }
+    const QMetrics                     qmetrics = computeQMetrics( ing, g );
+    const std::vector<WorkspaceRoot>   ws;
+    std::vector<std::uint32_t>         forChurn;
+    RedactCounts                       redactCounts;
+    const MainDispatch d{ cfg, ing, g, root, false, ws, fanIn, &fanIn, qmetrics, nullptr, &qmetrics.cbo, &qmetrics.tested, &qmetrics.lcom4,
+                          nullptr, forChurn, redactCounts, nullptr, nullptr, false, nullptr, true };
+    std::optional<RoutedAnswer> ra = routeQuestion( d );
+    if( !ra )
+    {
+        return std::nullopt;
+    }
+    std::optional<std::string> carried;
+    if( ra->wantPage )
+    {
+        carried = page();
+    }
+    return assembleRouted( d, *ra, carried ? std::string_view( *carried ) : std::string_view{} );
+}
+}   // namespace rw

@@ -106,7 +106,10 @@ check( all( t.get( "description", "" ).strip() for t in tools ), "(1) every tool
 # ── (2) CEILING ──────────────────────────────────────────────────────────────────────────────────────
 # P2 2026-11-18: 47,411 B at base (82ed4c8bf) -> 39,940 B measured after the trim (-7,471 B, -15.8%),
 # descriptions 22,498 -> 15,133 B (UTF-8), no schema byte moved. Ceiling = measured + 30 B, the #214-sized margin.
-CEILING = 39970
+# RT2 MCP parity (2026-11-19): +90 B, every byte attributed — `for` gains the no_verb_route boolean (the CLI --no-verb-route twin,
+# the opt-out a routed `for` answer's next= names): measured 39,940 -> 40,030 B, descriptions unchanged at 15,133 B, the 33 first
+# sentences unchanged. Ceiling = measured + 30 B, the same margin.
+CEILING = 40060
 manifest = len( json.dumps( { "tools": tools }, separators = ( ",", ":" ) ) )
 print( "  INFO  manifest %d B (ensure_ascii metric), wire line %d B, descriptions %d B"
        % ( manifest, len( first.encode( "utf-8" ) ), sum( len( t[ "description" ].encode( "utf-8" ) ) for t in tools ) ) )
