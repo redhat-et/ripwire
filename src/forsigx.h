@@ -168,4 +168,20 @@ inline bool compactSigs( std::string& doc )
     return true;
 }
 
+// TOKEN-BUDGET-MONOTONE rule 4 ("a budget the answer fits returns it byte for byte"): on the budgeted path, a budget that fitted the
+// answer WHOLE (nothing shed) returns the compacted answer too — when its re-priced est_tokens= still fits `budgetTokens`. A budget
+// between the two prices sheds as before (the compacted answer does not fit it). Returns whether `doc` was compacted.
+inline bool compactSigsWithin( std::string& doc, std::size_t budgetTokens )
+{
+    std::string c = doc;
+    if( !compactSigs( c ) ) { return false; }
+    const std::size_t      rootEnd = c.find( '>', c.find( "<ctx" ) );
+    const std::string_view est     = attrOf( std::string_view( c ).substr( 0, rootEnd + 1 ), "est_tokens" );
+    std::size_t            tokens  = 0;
+    for( const char ch : est ) { tokens = ch >= '0' && ch <= '9' ? tokens * 10 + std::size_t( ch - '0' ) : SIZE_MAX; }
+    if( est.empty() || tokens > budgetTokens ) { return false; }
+    doc.swap( c );
+    return true;
+}
+
 }   // namespace rw::sigx

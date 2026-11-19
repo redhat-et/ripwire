@@ -14,7 +14,8 @@
 #   (S4)  one <x> per row that had something to move, in sigs order; <sigx> follows the last row block, its legend comment right
 #         before it, and only comments after it
 #   (S5)  well formed (xmllint) and deterministic (two runs byte-identical)
-#   (S6)  not applied: --legend=first, --signatures-only and --token-budget answers are byte-identical with and without the knob
+#   (S6)  not applied: --legend=first, --signatures-only and a budget that sheds (--token-budget=4000) are byte-identical with and
+#         without the knob; (S6b) a budget the compacted answer fits returns it byte for byte (TOKEN-BUDGET-MONOTONE rule 4)
 #   (S7)  est_tokens= rises by the added bytes at the densest rate (2.36 B/token, ceil), never falls
 #   (S8)  the default PAGE 1 carries the short rows: its first r > 10 <d> is self-closing with l n p r only
 set -u
@@ -43,6 +44,10 @@ for arm in "--legend=first" "--signatures-only" "--token-budget=4000"; do
         ok "(S6) $arm: byte-identical with and without RIPWIRE_NO_SIGX, no <sigx>"
     else no "(S6) $arm: the answer changed with the knob or carries <sigx>"; fi
 done
+# (S6b) TOKEN-BUDGET-MONOTONE rule 4: a budget the (compacted) answer fits returns it byte for byte, <sigx> included
+rw --token-budget=100000 >"$WORK/b_big.xml"
+if grep -q '<sigx>' "$WORK/b_big.xml" && cmp -s "$WORK/b_big.xml" "$WORK/on.xml"; then ok "(S6b) --token-budget=100000 returns the --page-bytes=0 answer byte for byte, <sigx> included"
+else no "(S6b) a budget the answer fits does not return it byte for byte"; fi
 if xmllint --noout "$WORK/on.xml" 2>/dev/null; then ok "(S5) well formed"; else no "(S5) xmllint rejects the answer"; fi
 if cmp -s "$WORK/on.xml" "$WORK/on2.xml"; then ok "(S5) two runs byte-identical"; else no "(S5) two runs differ"; fi
 python3 - "$WORK" <<'PY'
