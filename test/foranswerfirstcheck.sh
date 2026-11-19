@@ -544,10 +544,14 @@ PY_AF2
 TASK_C="Which functions call \`topLevelBlocks\` directly?"
 TASK_X="What is the blast radius of changing \`topLevelBlocks\`?"
 TASK_T="Which functions call \`topLevelBlocks\` transitively?"
+# (CL5) the T5d misfire shape (hb-rake-01/02): a change cue on the LEAF the sentence spells, then a pronoun call cue. The block's
+# of= is qualified (rw::answerfirst::topLevelBlocks), so a change cue read only on the whole of= misses it while "calls it" matches.
+TASK_R="What breaks if I change \`topLevelBlocks\`? List every non-test source file that defines or calls it."   # hb-rake-02's wording
 cap "$WORK/c_new.xml" "$TASK_C" $OPTIN $WHOLE
 cap "$WORK/c_old.xml" "$TASK_C" $LEGACY
 cap "$WORK/x_new.xml" "$TASK_X" $OPTIN $WHOLE
 cap "$WORK/t_new.xml" "$TASK_T" $OPTIN $WHOLE
+cap "$WORK/r_new.xml" "$TASK_R" $OPTIN $WHOLE
 python3 - "$WORK" <<'PY_CL'
 import re, sys, os
 W = sys.argv[1]; bad = 0
@@ -592,15 +596,17 @@ def say(ok, msg):
 def leads(d):
     t = tops(d)
     return bool(t) and t[0][0] == "callers" and ' by="subject"' in t[0][1], [x[0] for x in t][:4]
-c_new, c_old, x_new, t_new = rd("c_new.xml"), rd("c_old.xml"), rd("x_new.xml"), rd("t_new.xml")
+c_new, c_old, x_new, t_new, r_new = rd("c_new.xml"), rd("c_old.xml"), rd("x_new.xml"), rd("t_new.xml"), rd("r_new.xml")
 has = lambda d: any(n == "callers" and ' by="subject"' in o for n, o in tops(d))
-say(has(c_new) and has(x_new) and has(t_new), "(CL0) all three fixture answers carry <callers by=\"subject\"> -- if not, the tree drifted and CL is untested")
+say(has(c_new) and has(x_new) and has(t_new) and has(r_new), "(CL0) all four fixture answers carry <callers by=\"subject\"> -- if not, the tree drifted and CL is untested")
 ok, order = leads(c_new)
 say(ok, "(CL1) who-calls: <callers by=\"subject\"> is the FIRST row block (order %s)" % order)
 ok, order = leads(x_new)
 say(not ok, "(CL2) blast-radius / change cue: the block does NOT lead (order %s)" % order)
 ok, order = leads(t_new)
 say(not ok, "(CL3) transitive cue: the block does NOT lead (order %s)" % order)
+ok, order = leads(r_new)
+say(not ok, "(CL5) change cue on the leaf + pronoun call cue (\"what breaks if I change X ... calls it\"): the block does NOT lead (order %s)" % order)
 say(len(c_new) == len(c_old) and units(c_new) == units(c_old),
     "(CL4) the who-calls answer is a permutation of its legacy order: %d B vs %d B, %d units identical" % (len(c_new), len(c_old), len(units(c_new))))
 i = c_new.find('<callers by="subject"'); j = c_new.find("</callers>", i); k = c_new.rfind("<s ", i, j)

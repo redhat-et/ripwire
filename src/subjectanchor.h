@@ -732,13 +732,18 @@ inline bool subjectCallersCueLeads( std::string_view task, std::string_view subj
     {
         return false;
     }
-    const auto reads = [ & ]( std::string_view spelling )
-    {
-        const DependentsAsk ask = dependentsAskOf( words, spelling );
-        return ask.asks && !ask.change;
-    };
+    // Read the whole of= AND its leaf, then decide once: a change cue on EITHER spelling vetoes. Deciding per spelling let a
+    // pronoun call cue ("... defines or calls it") pass on the whole of= while the change cue sat on the leaf the sentence spells
+    // (T5d hb-rake-01/02, "What breaks if I change `X`? ..."; foranswerfirstcheck CL5).
+    DependentsAsk          ask  = dependentsAskOf( words, subject );
     const std::string_view leaf = printedNameLeaf( subject );
-    return reads( subject ) || ( leaf.size() < subject.size() && hasNameSyntax( leaf ) && reads( leaf ) );
+    if( leaf.size() < subject.size() && hasNameSyntax( leaf ) )
+    {
+        const DependentsAsk onLeaf = dependentsAskOf( words, leaf );
+        ask.asks                   = ask.asks || onLeaf.asks;
+        ask.change                 = ask.change || onLeaf.change;
+    }
+    return ask.asks && !ask.change;
 }
 
 inline SubjectReading subjectReading( const IngestResult& ing, std::string_view task )
