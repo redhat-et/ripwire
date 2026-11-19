@@ -9,7 +9,9 @@ import json, re
 
 # K-WRONGSYM / K-LEGEND: blocks appended after the ranked answer on their own allowance, outside est_tokens (the <syms> block, or its held
 # stub, each with the legend comment right before it). A soft-target reader leaves them out of the sections it reserves from T.
-APPENDED = re.compile( r"<!-- (?:ripwire for )?syms:(?:(?!-->).)*-->(?:<syms [^>]*/>|<syms .*?</syms>)(?=<graph fmt=|</ctx>)", re.S )
+# AF1 (2026-11-18): the default --for answer is answer-first, so the appended block may be followed by the trailing DOCUMENT legend
+# (comments only) before </ctx> — still the last ROW block.
+APPENDED = re.compile( r"<!-- (?:ripwire for )?syms:(?:(?!-->).)*-->(?:<syms [^>]*/>|<syms .*?</syms>)(?=<graph fmt=|(?:<!--(?:(?!-->).)*-->)*</ctx>)", re.S )
 def strip_appended( t ):
     """The answer text less its appended, unpriced blocks (APPENDED)."""
     return APPENDED.sub( "", t )

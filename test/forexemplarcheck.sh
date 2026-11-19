@@ -413,6 +413,8 @@ PY
 
 run(){ local fx="$1"; shift; ( cd "$F/$fx" || exit 1; "$BIN" "$F/$fx" --no-cache "$@" 2>/dev/null </dev/null ); }
 block(){ grep -o '<exemplar_family .*</exemplar_family>' "$1" | head -1; }
+# AF1 (2026-11-18): LITERAL is the last ROW element before </ctx>; the answer-first DOCUMENT legend (comments only) may sit between them
+lastrow(){ python3 -c 'import re,sys; s=open(sys.argv[2],encoding="utf8").read(); sys.exit(0 if re.search(re.escape(sys.argv[1])+r"(?:<!--(?:(?!-->).)*-->)*</ctx>$", s, re.S) else 1)' "$1" "$2"; }
 # fam ARM FIXTURE TASK RULE KEY N — the block fires with rule=, key=, n=
 fam(){
     local arm="$1" fx="$2" task="$3" rule="$4" key="$5" n="$6"
@@ -575,14 +577,17 @@ if grep -q 'listing order' "$TMP/e_go.xml" && grep -q 'matched=' "$TMP/e_go.xml"
 # l1: --legend=full prints the long legend, the default (compact) the short one; both define every attribute (a1 below)
 run rs "--for=add a new scalar function" --legend=full >"$TMP/l_full.xml"
 if python3 - "$TMP/e_rs.xml" "$TMP/l_full.xml" <<'PY'
-import sys
+import re, sys
 def legend( path ):
     s = open( path, encoding="utf8" ).read()
     i = s.index( "<!-- ripwire for exemplar_family:" )
     return s[ i: s.index( "-->", i ) ], s[ :i ] + s[ s.index( "-->", i ): ]
 a, ra = legend( sys.argv[1] ); b, rb = legend( sys.argv[2] )
 if not len( a ) < len( b ): sys.exit( "compact legend %d B is not shorter than full %d B" % ( len( a ), len( b ) ) )
-if ra.split( "<exemplar_family", 1 )[1] != rb.split( "<exemplar_family", 1 )[1]: sys.exit( "the block rows differ between legends" )
+# AF1 (2026-11-18): the default answer is answer-first, so its DOCUMENT legend trails the block (the full posture is legend-first): the
+# rows compared are the element itself, open tag to close, in each answer
+el = lambda r: ( re.search( r'<exemplar_family [^>]*/>|<exemplar_family .*?</exemplar_family>', r, re.S ) or re.search( r'', '' ) ).group( 0 )
+if el( ra ) != el( rb ): sys.exit( "the block rows differ between legends" )
 PY
 then ok "(l1) default legend is shorter than --legend=full; the block rows are the same"; else no "(l1) legend posture"; fi
 
@@ -607,7 +612,7 @@ no_touch v5 "$TMP/v5.xml" app/handlers/json_handler.py "a member file that impor
 has_touch v5 "$TMP/v5.xml" app/handlers/__init__.py 4/4
 # v4: a registry over 4000 lines is skipped, and the answer says so (found="0" when nothing else resolves); a normal run says nothing of it
 run big "--for=add a new plugin" >"$TMP/v4.xml"
-if grep -q '<exemplar_family of="plugin" found="0" oversized="1"/></ctx>$' "$TMP/v4.xml"; then ok "(v4) no family and one registry over 4000 lines: found=\"0\" oversized=\"1\""
+if lastrow '<exemplar_family of="plugin" found="0" oversized="1"/>' "$TMP/v4.xml"; then ok "(v4) no family and one registry over 4000 lines: found=\"0\" oversized=\"1\""
 else no "(v4) oversized: $( grep -o '<exemplar_family[^>]*>' "$TMP/v4.xml" | head -c 300 )"; fi
 if [ -n "$( block "$TMP/e_go.xml" )" ] && ! block "$TMP/e_go.xml" | grep -qE 'oversized=|unread=|floor='; then ok "(v4) positive twin: a clean scan prints no oversized=, unread= or floor="
 else no "(v4) a clean run carries a skip attribute: $( grep -o '<exemplar_family [^>]*>' "$TMP/e_go.xml" | head -c 300 )"; fi
@@ -629,7 +634,7 @@ fi
 runc go "--for=write a plugin" >"$TMP/u2prime.xml"
 if unreadable "$F/go/plugins/registry.go"; then
     runc go "--for=write a plugin" >"$TMP/u2.xml"; chmod 644 "$F/go/plugins/registry.go"
-    if grep -q '<exemplar_family of="plugin" found="0" unread="1"/></ctx>$' "$TMP/u2.xml"; then ok "(u2) the registry's file cannot be read: no family, found=\"0\" unread=\"1\""
+    if lastrow '<exemplar_family of="plugin" found="0" unread="1"/>' "$TMP/u2.xml"; then ok "(u2) the registry's file cannot be read: no family, found=\"0\" unread=\"1\""
     else no "(u2) unreadable registry file: $( grep -o '<exemplar_family[^>]*>' "$TMP/u2.xml" | head -c 300 )"; fi
 else
     echo "  SKIP  (u2) cannot make a file unreadable here (root?): the unread-registry arm did not run"
@@ -788,7 +793,7 @@ if [ -s "$TMP/s1.json" ] && ! grep -q 'exemplar_family' "$TMP/s1.json"; then ok 
 # TOKEN-BUDGET-MONOTONE (2026-11-14): a budget holds the block only when the answer plus the block does not fit it (the old
 # 4000 held it at any budget; that answer fits 4000 whole now, so it comes back byte for byte, block and all): 100 forces the hold.
 run ts "--for=add a new dialect" --token-budget=100 >"$TMP/s2.xml" || no "(s2) the budgeted run exited $?"
-if grep -q '<exemplar_family of="dialect" held="budget"/></ctx>$' "$TMP/s2.xml" && ! grep -q '<m n=' "$TMP/s2.xml"; then ok "(s2) a token budget holds the block"
+if lastrow '<exemplar_family of="dialect" held="budget"/>' "$TMP/s2.xml" && ! grep -q '<m n=' "$TMP/s2.xml"; then ok "(s2) a token budget holds the block"
 else no "(s2) budget: $( grep -o '<exemplar_family.*' "$TMP/s2.xml" | head -c 300 )"; fi
 run ts "--for=add a new dialect" >"$TMP/a1.xml"
 printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"%s","task":"add a new dialect"}}}\n' "$F/ts" \
@@ -811,7 +816,8 @@ M.parseString( s )
 i = s.index( "<!-- ripwire for exemplar_family:" )
 legend = s[ i: s.index( "-->", i ) ]
 if "--" in legend[ 4: ]: sys.exit( "double hyphen in the legend" )
-m = re.search( r'(<exemplar_family .*?(?:/>|</exemplar_family>))</ctx>$', s, re.S )
+# AF1 (2026-11-18): answer-first — the block is the last ROW element; only the trailing DOCUMENT legend (comments) may follow it
+m = re.search( r'(<exemplar_family .*?(?:/>|</exemplar_family>))(?:<!--(?:(?!-->).)*-->)*</ctx>$', s, re.S )
 if not m: sys.exit( "the block does not close right before </ctx>" )
 for tag, attrs in re.findall( r'<(exemplar_family|m|touch_list|touch|rows|asserts) ([^>]*?)/?>', m.group( 1 ) ):
     for a in re.findall( r'(\w+)="', attrs ):

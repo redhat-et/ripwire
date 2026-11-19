@@ -1932,6 +1932,9 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "p", "c p=: the file a body callee's l= is in, printed when it is not the b row's own (no p=: the b's file)", true, "c", MapHeaderRead::No, {}, "exemplar" },
     { "owner", "field name= type= owner= rel=: a member of owner=, rel=creates held by value, uses by reference/pointer", true, "field", MapHeaderRead::No, {}, "for" },
     { "pure", "d pure=1: const/constexpr signature (Swift: non-mutating) and no transitive side effect found; a hint", true, "d", MapHeaderRead::No, {}, "for" },
+    // AF4 T-C (forfilesyms.h TailPointerSpan::kind): a pointer's kind is on its row, so the three pointer notes define by attribute
+    // and may join the trailing legend instead of labelling the rows after them by position.
+    { "ptr", "t ptr=: a pointer's kind, twin = decl-twin, side = one-side; a sigs <t> with no ptr= is a demote pointer", true, "t", MapHeaderRead::No, {}, "for" },
     { "h", "enc h=: the edit handle, sym#<16hex>@<16hex> (identity, file content hash); stale after any change to that file", true, "enc", MapHeaderRead::No, {}, "grep" },
     { "inert_rules", "inert_rules=N: rules none of whose languages this corpus holds; their rule rows say applicable=0 (count=0 is structural, never a clean bill)", false, "lint", MapHeaderRead::No, {}, "lint" },   // also defines applicable=
     { "unavailable", "unavailable=/unavailable_why=: families that could not be measured here, and why; s unavail=: those for that row (absent from fired= is then no evidence)", false, "ensemble", MapHeaderRead::No, {}, "ensemble" },

@@ -28,8 +28,8 @@
 
 namespace rw
 {
-inline constexpr std::string_view kDeclTwinLegend = "<!-- decl-twin: a <t> in sigs is a one-line Owner.member declaration whose bodied same-name row is "
-                                                    "in this answer, a pointer (p= file, sym= name, r= rank), not the answer -->";
+inline constexpr std::string_view kDeclTwinLegend = "<!-- decl-twin: a <t> in sigs with ptr=twin is a one-line Owner.member declaration whose bodied same-name "
+                                                    "row is in this answer, a pointer (p= file, sym= name, r= rank), not the answer -->";
 
 inline bool declTwinOn()
 {
@@ -115,7 +115,7 @@ inline std::string pointDeclTwins( std::string_view task, std::string_view answe
         if( oneLineOwnerDecl( r, name ) && !keptRow( r, name, words )
             && std::ranges::binary_search( bodied, filesyms_detail::leafName( name ) ) )
         {
-            spans.push_back( { .at = r.at, .end = r.end, .p = attrOf( r.attrs, "p" ), .sym = attrOf( r.attrs, "n" ), .rank = attrOf( r.attrs, "r" ) } );
+            spans.push_back( { .at = r.at, .end = r.end, .p = attrOf( r.attrs, "p" ), .sym = attrOf( r.attrs, "n" ), .rank = attrOf( r.attrs, "r" ), .kind = "twin" } );
         }
     }
     return filesyms_detail::tailPointerText( answer, spans, kDeclTwinLegend );

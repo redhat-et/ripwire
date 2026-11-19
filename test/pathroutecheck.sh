@@ -492,7 +492,9 @@ if [ -z "$blk" ]; then
     no "(F) no <graph_verb> block on the --for path subject"
 elif pblk="$( python3 -c 'import re,sys; m=re.search(r"<path [^>]*>.*?</path>",sys.stdin.read(),re.S); print(m.group(0) if m else "")' <<<"$blk" )" \
      && [ -n "$pblk" ] && [ "$( attr route_hedged <<<"$pblk" )" = not-proven ] && [ -z "$( rows <<<"$pblk" )" ] \
-     && grep -q '<path_gap from="start_entry" to="Sink.sink_call" reachable="0">' <<<"$blk" && grep -qF 'route_hedged="not-proven" refused the one it found' <<<"$blk"; then
+     && grep -q '<path_gap from="start_entry" to="Sink.sink_call" reachable="0">' <<<"$blk" && grep -qF 'route_hedged="not-proven" refused the one it found' <<<"$F"; then
+    # AF2 A (2026-11-18, kept by AF1): a comment that is a direct child of <graph_verb> (the <path_gap> legend) joins the answer-first
+    # document legend, once — so the refusal reading is read from the whole --for answer, not from inside the block
     ok "(F) the --for <graph_verb> block refuses the same chain (no <s> in its <path>); its <path_gap> sides follow and their legend names the refusal"
 else
     no "(F) $( grep -o '<path [^>]*>' <<<"$blk" )"

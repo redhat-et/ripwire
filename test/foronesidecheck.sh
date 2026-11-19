@@ -116,11 +116,12 @@ export function delta_left_only_caller(n: any): number {
 }
 EOF
 
-# check.py OFF ON NAMES -> PASS/FAIL: ON is OFF with every <d>/<s>/<y> row named in NAMES (in <sigs>/<callers>/<syms>) a pointer, the
-# legend before the first, est_tokens= aside; then `ptr`/`rows` lines (the pointer names and the row names of ON, in order).
+# check.py OFF ON NAMES -> PASS/FAIL: ON is OFF with every <d>/<s>/<y> row named in NAMES (in <sigs>/<callers>/<syms>) a pointer
+# <t … ptr="side"/>, est_tokens= aside, comments compared apart (ON's = OFF's + the one-side legend once; AF4 T-C: the kind is on the
+# row, so where the legend sits is the order's business); then `ptr`/`rows` lines (the pointer names and the row names of ON, in order).
 cat >"$TMP/check.py" <<'PY'
 import re, sys
-LEG = ( "<!-- one-side: a <t> among sigs, callers or syms rows is one-sided within 3 calls (it reaches only one of the two named endpoints, or "
+LEG = ( "<!-- one-side: a <t> with ptr=side among sigs, callers or syms rows is one-sided within 3 calls (it reaches only one of the two named endpoints, or "
         "it reaches the sink and the root does not reach it) and is on no shortest path between them, a pointer (p= file, sym= name, r= rank), "
         "not the answer -->" )
 ATTR = re.compile( r'([\w:-]+)="([^"]*)"' )
@@ -139,12 +140,16 @@ exp, at, first = [], 0, True
 for s, e, a in rows( off ):
     if a.get( "n" ) not in names: continue
     p = a.get( "p", "" ); p = p.rsplit( ":", 1 )[0] if ":" in p and p.rsplit( ":", 1 )[1].isdigit() else p
-    exp += [ off[at:s], LEG if first else "", '<t p="%s" sym="%s"%s/>' % ( p, a["n"], ' r="%s"' % a["r"] if "r" in a else "" ) ]; at = e; first = False
+    # AF4 T-C: the pointer carries its kind (ptr="side"); the legend is compared apart from the rows: its PLACE is the order's
+    # (legend-first: before the first pointer; answer-first: lifted into the trailing legend), not the rule's
+    exp += [ off[at:s], '<t p="%s" sym="%s"%s ptr="side"/>' % ( p, a["n"], ' r="%s"' % a["r"] if "r" in a else "" ) ]; at = e; first = False
 exp = "".join( exp ) + off[at:]
 est = lambda s: re.sub( r' est_tokens="\d+"', "", s, count = 1 )
-print( ( "PASS" if not first and est( exp ) == est( on ) else "FAIL" ) + " expected-rewrite" )
+nocom = lambda s: re.sub( r"<!--.*?-->", "", est( s ), flags = re.S )
+coms = lambda s: sorted( re.findall( r"<!--.*?-->", re.sub( r"<!\[CDATA\[.*?\]\]>", "", s, flags = re.S ), re.S ) )
+print( ( "PASS" if not first and nocom( exp ) == nocom( on ) and coms( on ) == sorted( coms( off ) + [ LEG ] ) else "FAIL" ) + " expected-rewrite" )
 t = mask( on )
-print( "ptr " + ",".join( re.findall( r'<t p="[^"]*" sym="([^",]*)"(?: r="\d+")?/>', t ) ) )
+print( "ptr " + ",".join( re.findall( r'<t p="[^"]*" sym="([^",]*)"(?: r="\d+")? ptr="side"/>', t ) ) )
 print( "rows " + ",".join( a.get( "n", "" ) for _, _, a in rows( on ) ) )
 PY
 
@@ -208,9 +213,9 @@ ident d2 'What does alpha_start do?'
 # (t) TOKEN-BUDGET-MONOTONE (2026-11-14): the budget no longer switches the demote off — it was posture under a budget (the
 # old arm wanted "no pointer, no legend" at --token-budget=4000). The budget now trims the answer asked without it, so an
 # answer that fits comes back byte for byte, the pointer and its legend included (test/budgetmonotonecheck.sh (a)).
-# AF1 (2026-11-18): the unbudgeted DEFAULT is answer-first and paged; a budget sheds the WHOLE legend-first answer, so that answer
-# (--legend=first) is the one a budget that fits must return byte for byte (the same U as budgetmonotonecheck (a)).
-run "--for=sink_left_value + sink_right_value" --legend=first >"$TMP/t.off" || no "(t) the unbudgeted run exited $?"
+# AF1 (2026-11-18): the unbudgeted DEFAULT is answer-first and paged; a budget sheds the WHOLE answer in the same posture and is
+# never paged, so --page-bytes=0 is the one a budget that fits returns byte for byte (the same U as budgetmonotonecheck (a)).
+run "--for=sink_left_value + sink_right_value" --page-bytes=0 >"$TMP/t.off" || no "(t) the unbudgeted run exited $?"
 run "--for=sink_left_value + sink_right_value" --token-budget=100000 >"$TMP/t.on" || no "(t) the budgeted run exited $?"
 if [ -s "$TMP/t.on" ] && grep -q '<!-- one-side:' "$TMP/t.off" && cmp -s "$TMP/t.on" "$TMP/t.off"; then ok "(t) --token-budget=100000: the demoted answer byte for byte ($( wc -c <"$TMP/t.on" | tr -d ' ' ) B)"; else no "(t) the budgeted answer is not the demoted unbudgeted one (or the unbudgeted one has no pointer: vacuous)"; fi
 

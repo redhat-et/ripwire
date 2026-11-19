@@ -824,10 +824,14 @@ est_11(){
 # A7/A8 — the two appended --for sections must be INSIDE the delivered document's rate band. The --detail
 # shape is a BODY shape (bodies dominate the bytes and are charged at kBytesPerTokenBody), so it takes the
 # 4.20 body ceiling; the graph block is markup. An uncharged section pushes the rate straight out of band.
+# AF1-fix (2026-11-18): the flagless --for answer is served in 12 KB PAGES (src/forpages.h) and a page's est_tokens prices THAT
+# page (forpagescheck, formaxtokenscheck (B)); on src the --detail/--with-graph sections start past page 1's cut. Every arm in
+# #11 is about the WHOLE answer's estimate (and its files are the no-budget references the twins below shed), so each reads
+# --page-bytes=0: the whole answer in one call, row-identical to the joined pages (forpagescheck P2).
 for entry in "for:320:" "for_graph:320:--with-graph" "for_detail:420:--detail=20" "for_both:420:--detail=20 --with-graph"; do
     label="${entry%%:*}"; rest="${entry#*:}"; hi="${rest%%:*}"; args="${rest#*:}"
     # shellcheck disable=SC2086
-    rw src --for="$FOR_TASK" $args >"$TMP/f_$label.out" 2>/dev/null
+    rw src --for="$FOR_TASK" $args --page-bytes=0 >"$TMP/f_$label.out" 2>/dev/null
     B="$( bytes_of "$TMP/f_$label.out" )"
     E="$( forest_of "$TMP/f_$label.out" )"
     if [ -z "$E" ] || [ "$E" -le 0 ] 2>/dev/null; then
@@ -866,7 +870,7 @@ ALLOW="$( awk "BEGIN{printf \"%d\", $TBF*2.36*1.15}" )"   # still read by the no
 # lane hrr (rule 4): the score-order twins of the no-budget references the A7 twin / A7B arms read
 for entry in "for:" "for_graph:--with-graph" "for_detail:--detail=20" "for_both:--detail=20 --with-graph"; do
     # shellcheck disable=SC2086
-    RIPWIRE_NO_HEAD_RR=1 rw src --for="$FOR_TASK" ${entry#*:} >"$TMP/f_${entry%%:*}_so.out" 2>/dev/null
+    RIPWIRE_NO_HEAD_RR=1 rw src --for="$FOR_TASK" ${entry#*:} --page-bytes=0 >"$TMP/f_${entry%%:*}_so.out" 2>/dev/null
 done
 for HRR in twin on; do
 rwm src --for="$FOR_TASK" --token-budget=$TBF >"$TMP/f_tbp.out" 2>/dev/null
@@ -1353,7 +1357,7 @@ PY
 }
 # T3 (contract update, same wave): the bare --for is terminal by default and carries auto BODIES at the
 # 3.80 body rate, so the markup-only 2.50 identity now lives on the --signatures-only shape…
-rw src --for="$FOR_TASK" --signatures-only >"$TMP/f_sigonly.out" 2>/dev/null
+rw src --for="$FOR_TASK" --signatures-only --page-bytes=0 >"$TMP/f_sigonly.out" 2>/dev/null
 if out="$( selfconsistent "$TMP/f_sigonly.out" )"; then
     ok "#11 A9/A10 --for --signatures-only: est_tokens is self-consistent — bytes/est/expected = $out (its own attributes are charged)"
 else
@@ -1381,7 +1385,7 @@ PY
 # multi-word conceptual query — serve <hops> instead of <bodies> by default, so the AUTO-BODY shape this
 # arm is about now lives behind --auto-bodies. Re-anchored there rather than deleted: the mixed-rate
 # identity is the only arm that can catch a mis-rated body span.
-rw src --for="$FOR_TASK" --auto-bodies >"$TMP/f_forauto.out" 2>/dev/null
+rw src --for="$FOR_TASK" --auto-bodies --page-bytes=0 >"$TMP/f_forauto.out" 2>/dev/null
 if out="$( mixedconsistent "$TMP/f_forauto.out" )"; then
     ok "#11 A9/A10 --for --auto-bodies: est_tokens matches markup@2.50 + bodies@3.80 — bytes/span/est/expected = $out"
 else
@@ -1415,7 +1419,7 @@ else
     fold_out="$( foldconsistent "$TMP/f_for.out" 2>/dev/null || true )"
     no "#11 A9/A10 --for (compact route, fold): mixed-rate identity broken — bytes/span/est/expected = ${fold_out:-unreadable} (the fold is mischarged)"
 fi
-RIPWIRE_NO_BODY_FOLD=1 rw src --for="$FOR_TASK" >"$TMP/f_for_nofold.out" 2>/dev/null
+RIPWIRE_NO_BODY_FOLD=1 rw src --for="$FOR_TASK" --page-bytes=0 >"$TMP/f_for_nofold.out" 2>/dev/null
 if out="$( selfconsistent "$TMP/f_for_nofold.out" )"; then
     ok "#11 A9/A10 --for (compact route): est_tokens = round(bytes/2.50) — bytes/est/expected = $out (the <hops> section is charged at the markup rate)"
 else

@@ -21,6 +21,9 @@
 #   (P7)  determinism: page 1 and page 2, two runs each, byte-identical
 #   (P8)  an answer that fits one page is served whole (no page attributes), byte-identical to --page-bytes=0
 #   (P10) the flagless default is --page-bytes=12000's page 1 (one default constant)
+#   (P11) PRESENT OR DISCLOSED-DEFERRED (AF1-fix): every page but the last names on its root the section its cut leaves open
+#         (continued=) and every top-level element that starts on a later page (deferred=, each name once, in order) — exactly,
+#         against the whole answer's own blocks — and page 1's legend defines both; (P11n) a page 1 with deferred= removed fails
 #   (P9)  refusals: empty / malformed / page 0 / 0:K / without --for / with --legend=first / with a token budget /
 #         a page past the last — each exits 1 with empty stdout and names --page-bytes
 set -u
@@ -130,9 +133,10 @@ whole = rd(os.path.join(W, "whole.xml")); wm = root_open(whole)
 wbody = whole[wm.end():whole.rfind("</ctx>")]
 stream = wbody[:trailing_comments_start(wbody)]
 opens = set(re.findall(r"<[A-Za-z_][\w-]*\b[^<>]*[^/]>", stream))  # candidate section open tags
+ENDS = []   # the stream offset each page of the last join() ended at
 def join(pages):
     """rows of every page joined, envelopes removed against the whole stream. -> (joined_ok, detail)"""
-    cur = 0
+    cur = 0; del ENDS[:]
     for k, d in enumerate(pages, 1):
         b = page_body(d)
         if not stream.startswith(b, cur):
@@ -145,7 +149,7 @@ def join(pages):
                 if m: b = b[:m.start()]
         if not stream.startswith(b, cur):
             return False, "page %d's rows do not continue the stream at byte %d" % (k, cur)
-        cur += len(b)
+        cur += len(b); ENDS.append(cur)
     return cur == len(stream), "joined %d of %d stream bytes" % (cur, len(stream))
 for size in ("3000", "6000"):
     n = int(open(os.path.join(W, "p%s.n" % size)).read())
@@ -190,6 +194,48 @@ for size in ("3000", "6000"):
         else:
             say(a.get("withheld_bytes") == "0" and "next" not in a, "(P4) %s B page %d (last): withheld_bytes=0, no next=" % (size, k))
     print("  INFO  %s B: continuation-page envelopes (page bytes minus its rows): %s" % (size, ", ".join(str(e - 0) for e in [len(d) - len(page_body(d)) for d in pages[1:]])))
+# (P11) the section disclosure, judged against the whole stream's own top-level blocks (comments and CDATA masked)
+def blocks(st):
+    """[(begin, end, name)] of the stream's top-level elements"""
+    m = mask(st); out = []; depth = 0; start = 0; name = ""
+    for t in re.finditer(r"<(/?)([A-Za-z_][\w-]*)[^<>]*?(/?)>", m):
+        if t.group(1):
+            depth -= 1
+            if depth == 0: out.append((start, t.end(), name))
+        elif t.group(3):
+            if depth == 0: out.append((t.start(), t.end(), t.group(2)))
+        else:
+            if depth == 0: start, name = t.start(), t.group(2)
+            depth += 1
+    return out
+BL = blocks(stream)
+def expect(end):
+    later = []
+    for b, e, n in BL:
+        if b >= end and n not in later: later.append(n)
+    cont = [n for b, e, n in BL if b < end < e]
+    return (cont[0] if cont else None), later
+def disclosed(d):
+    a = dict(re.findall(r'\s([a-z_]+)="([^"]*)"', root_open(d).group(0)))
+    return a.get("continued"), (a.get("deferred", "").split() if "deferred" in a else [])
+def p11(pages):
+    okj, _ = join(pages)
+    if not okj: return False, "the join failed"
+    for k, d in enumerate(pages, 1):
+        want = expect(ENDS[k - 1]); got = disclosed(d)
+        if want != got: return False, "page %d: continued=%s deferred=%s, the stream says continued=%s deferred=%s" % (k, got[0], got[1], want[0], want[1])
+    return True, ""
+for size in ("3000", "6000"):
+    n = int(open(os.path.join(W, "p%s.n" % size)).read())
+    pages = [rd(os.path.join(W, "p%s_%d.xml" % (size, k))) for k in range(1, n + 1)]
+    okd, why = p11(pages)
+    nd = sum(1 for d in pages if disclosed(d)[1])
+    say(okd and nd >= 1, "(P11) %s B: every page's continued=/deferred= is exactly what starts or goes on past its cut (%d page(s) defer a section) %s" % (size, nd, why))
+    leg = pages[0][pages[0].rfind("<!-- page=K"):]
+    say(all(re.search(r"(?<![\w-])%s=" % a, leg) for a in ("continued", "deferred")), "(P11) %s B page 1's page clause defines continued= and deferred=" % size)
+    cut = re.sub(r'\sdeferred="[^"]*"', "", pages[0], count=1)
+    okn, _ = p11([cut] + pages[1:])
+    say(not okn, "(P11n) %s B: page 1 with its deferred= removed FAILS (P11) — the arm can fail" % size)
 # (P6) --legend=first: legend-first, unpaged, a permutation of the whole answer-first answer
 first = rd(os.path.join(W, "first.xml")); fr = root_open(first).group(0)
 say(" page=" not in fr and " next=" not in fr, "(P6) --legend=first carries no page disclosure")

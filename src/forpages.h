@@ -152,23 +152,38 @@ inline std::vector<std::size_t> pageEnds( const std::vector<Cut>& cuts, std::siz
 }
 [[nodiscard]] inline std::string closeTagOf( const answerfirst::Block& b ) { return "</" + std::string( b.name ) + ">"; }
 
-// The page disclosure on the root: page= pages= withheld_bytes= and, on every page but the last, next=.
-[[nodiscard]] inline std::string pageAttrs( const PageAsk& ask, std::size_t page, std::size_t pages, std::size_t withheld )
+// Where one page sits in the answer: its index, the page count, the row bytes after it, and its SECTION disclosure (sectionAttrs).
+struct PageAt
 {
-    std::string a = " page=\"" + std::to_string( page ) + "\" pages=\"" + std::to_string( pages ) + "\" withheld_bytes=\"" + std::to_string( withheld ) + "\"";
-    if( page < pages )
+    std::size_t      page = 1, pages = 1, withheld = 0;
+    std::string_view sections;
+};
+
+// The page disclosure on the root: page= pages= withheld_bytes=, continued=/deferred= and, on every page but the last, next=.
+[[nodiscard]] inline std::string pageAttrs( const PageAsk& ask, const PageAt& at )
+{
+    std::string a = " page=\"" + std::to_string( at.page ) + "\" pages=\"" + std::to_string( at.pages ) + "\" withheld_bytes=\"" + std::to_string( at.withheld ) + "\"";
+    a += at.sections;
+    if( at.page < at.pages )
     {
-        a += nextAttrXml( std::string( ask.call ) + " --page-bytes=" + std::to_string( ask.pageBytes ) + ":" + std::to_string( page + 1 ) );
+        a += nextAttrXml( std::string( ask.call ) + " --page-bytes=" + std::to_string( ask.pageBytes ) + ":" + std::to_string( at.page + 1 ) );
     }
     return a;
 }
 
 // The one clause page 1 adds to the document legend. Defines the four root attributes the page carries.
+// AF1-fix: it also defines continued= and deferred= (sectionAttrs), and says what est_tokens= and every OTHER root attribute
+// describe on a page: est_tokens= is the page's own price (pricePage, every byte — a block the whole answer prices outside its
+// est_tokens, such as <shortkey>, is inside a page's), every other root attribute is the whole answer's.
 [[nodiscard]] inline std::string pageClause( std::size_t pageBytes )
 {
     return "<!-- page=K of pages=N: an answer-first page, its rows stopped at a row boundary near " + std::to_string( pageBytes )
-         + " B; withheld_bytes= row bytes after this page; root next= is the next page: the same rows in the same order, no legend"
-           " (this one defines them), ending <about legend=\"ref\" have=\"page1\"/>; the page-bytes=0 flag is the whole answer in one call -->";
+         + " B; withheld_bytes= row bytes after this page; continued= the section whose rows go on past this page; deferred= the"
+           " sections that start on a later page, each named once (absent: none); est_tokens= prices this page, every byte of it;"
+           " every other root attribute, and the open tag of a continued or re-opened section, counts the WHOLE answer; root next="
+           " is the next page: the same rows in the same"
+           " order, no legend (this one defines them), ending <about legend=\"ref\" have=\"page1\"/>; the page-bytes=0 flag is the"
+           " whole answer in one call -->";
 }
 // est_tokens= PRICES THE PAGE AS DELIVERED, in the emitter's own two rates: markup at kBytesPerTokenDefault, the <bodies>
 // section at kBytesPerTokenBody, the attribute's own digits inside the markup it prices (pricedRootAttrTokens' fixpoint).
@@ -228,6 +243,37 @@ struct Stream
     return st;
 }
 
+// THE PAGE'S SECTION DISCLOSURE (AF1-fix, 2026-11-18). A page is a window, so a section that starts past the cut is simply
+// not in it — and the root it rides keeps the WHOLE answer's attributes (bundle= bodies= reason= …), which name sections the
+// page does not hold. Without this, page 1 of a compact-route answer said bodies="0" bundle="compact" and carried no <hops>,
+// the edge context that bundle IS (compactroutecheck (2)); a --detail=3 page carried no <bodies> (detailcheck); a name-exact
+// page said bodies="1" and held no body (anchorbodycheck (7b)). The integrator read those as silent drops, and on the page
+// alone they were. So every page but the last names, on its root, what it does not hold:
+//   continued="X"   the section left open at the cut: its rows go on on the next page, and its open tag counts the whole
+//                   section (shown= on a continued <tail> is the whole tail's, not this page's);
+//   deferred="A B"  every top-level element that STARTS on a later page, each name once, in answer order.
+// Present or disclosed-deferred: a reader of page 1 holds either the section or its name and the next= that reaches it.
+[[nodiscard]] inline std::string sectionAttrs( const Stream& st, const Cut& end )
+{
+    std::string a;
+    if( end.openSec != std::string_view::npos ) { a += " continued=\"" + std::string( st.blocks[ end.openSec ].name ) + "\""; }
+    std::vector<std::string_view> later;
+    for( std::size_t k = 0; k < st.streamBlocks; ++k )
+    {
+        const answerfirst::Block& b = st.blocks[ k ];
+        if( !b.comment && b.begin >= end.at && std::ranges::find( later, b.name ) == later.end() ) { later.push_back( b.name ); }
+    }
+    if( later.empty() ) { return a; }
+    a += " deferred=\"";
+    for( std::size_t i = 0; i < later.size(); ++i )
+    {
+        if( i > 0 ) { a += ' '; }
+        a.append( later[ i ] );
+    }
+    a += '"';
+    return a;
+}
+
 // Page 1: the whole root plus the page disclosure, rows [0, end), the close of a section left open, the whole document legend
 // and the page clause.
 [[nodiscard]] inline std::string firstPage( const Stream& st, const PageAsk& ask, const Cut& end, std::size_t pages )
@@ -237,7 +283,8 @@ struct Stream
     std::string out;
     out.reserve( end.at + ( st.closeAt - legendAt ) + 1024 );
     out.append( v.substr( 0, st.openEnd ) );
-    out += pageAttrs( ask, 1, pages, st.cuts.back().at - end.at );
+    const std::string sections = sectionAttrs( st, end );
+    out += pageAttrs( ask, { .page = 1, .pages = pages, .withheld = st.cuts.back().at - end.at, .sections = sections } );
     out += '>';
     out.append( v.substr( st.openEnd + 1, end.at - ( st.openEnd + 1 ) ) );
     if( end.openSec != std::string_view::npos ) { out += closeTagOf( st.blocks[ end.openSec ] ); }
@@ -255,7 +302,8 @@ struct Stream
     const std::string_view rootOpen = v.substr( st.openAt, st.openEnd - st.openAt );   // without its '>'
     std::string out = "<ctx";
     for( const std::string_view name : { "task", "at", "schema", "est_tokens" } ) { out.append( rootAttr( rootOpen, name ) ); }
-    out += pageAttrs( ask, ask.page, pages, st.cuts.back().at - end.at );
+    const std::string sections = sectionAttrs( st, end );
+    out += pageAttrs( ask, { .page = ask.page, .pages = pages, .withheld = st.cuts.back().at - end.at, .sections = sections } );
     out += '>';
     if( start.openSec != std::string_view::npos ) { out.append( openTagOf( v, st.blocks[ start.openSec ] ) ); }
     out.append( v.substr( start.at, end.at - start.at ) );
