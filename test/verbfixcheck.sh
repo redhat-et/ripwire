@@ -161,6 +161,37 @@ hasnt "$a" 'via="macro:' "(F2.23) [N] --callees is unchanged"
 a="$( rw m --impact=get_cb1 )"
 hasnt "$a" 'via="macro:' "(F2.24) [N] --impact is unchanged (it already walks the macro edge)"
 
+# ── [F2C] the per-macro ceiling (lane bx2-fix2-ceiling): one row per FILE per macro, at most 16 files; the rest disclosed ─────
+# mc/: many.h `#define get_many(x) many_impl(x)`; f01.c .. f18.c each call get_many once (18 files); f01.c calls it from a
+# second function too (twice in one file). Expected: 16 see-through rows (16 files), 3 withheld (2 files past the ceiling +
+# the second f01.c caller), via_macro_capped="3", via_macro_next="--callers=get_many".
+mkdir -p "$DIR/mc"
+printf 'int many_impl(int);\n#define get_many(x) many_impl(x)\n' >"$DIR/mc/many.h"
+printf '#include "many.h"\nint many_impl(int x)\n{\n    return x;\n}\n' >"$DIR/mc/impl.c"
+for k in 01 02 03 04 05 06 07 08 09 10 11 12 13 14 15 16 17 18; do
+    printf '#include "many.h"\nint use_%s(void)\n{\n    return get_many(%s);\n}\n' "$k" "$k" >"$DIR/mc/f$k.c"
+done
+printf 'int use_01b(void)\n{\n    return get_many(1);\n}\n' >>"$DIR/mc/f01.c"
+a="$( rw mc --callers=many_impl )"; b="$( body "$a" )"
+if [ "$( count "$b" 'via="macro:get_many"' )" = 16 ]; then ok "(F2C.1) [P] 16 see-through rows: one per file, at most 16 files"; else no "(F2C.1) [P] $( count "$b" 'via="macro:get_many"' ) see-through rows, want 16"; fi
+has "$b" 'via_macro_capped="3"' "(F2C.2) [P] via_macro_capped= counts the 3 withheld (2 files past the ceiling, 1 second caller in a listed file)"
+has "$b" 'via_macro_next="--callers=get_many"' "(F2C.3) [P] via_macro_next= lists the macro's callers whole"
+hasnt "$b" 'n="use_01b"' "(F2C.4) [P] a second caller in an already-listed file is withheld"
+has "$b" 'count="17"' "(F2C.5) [P] count= counts the rows listed (1 direct macro row + 16)"
+has "$a" 'via_macro_capped' "(F2C.6) [P] the legend reads via_macro_capped="
+a="$( rw mc --uses=many_impl )"; b="$( body "$a" )"
+if [ "$( count "$b" 'via="macro:get_many"' )" = 16 ]; then ok "(F2C.7) [P] --uses: 16 see-through sites, one per file"; else no "(F2C.7) [P] --uses: $( count "$b" 'via="macro:get_many"' ) sites, want 16"; fi
+has "$b" 'via_macro="16"' "(F2C.8) [P] --uses via_macro= counts the listed sites"
+has "$b" 'via_macro_capped="3"' "(F2C.9) [P] --uses via_macro_capped= counts the withheld sites"
+has "$b" 'via_macro_next="--uses=get_many"' "(F2C.10) [P] --uses via_macro_next= lists the macro's sites whole"
+a="$( rw mc --callers=many_impl --json )"
+has "$a" '"via_macro_capped":3' "(F2C.11) [P] --json carries via_macro_capped"
+q='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"find_referencing_symbols","arguments":{"path":"'"$DIR/mc"'","symbol":"many_impl"}}}'
+a="$( printf '%s\n%s\n' '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{}}' "$q" | "$BIN" --mcp 2>/dev/null )"
+has "$a" '\"via_macro_capped\":3' "(F2C.12) [P] MCP find_referencing_symbols carries via_macro_capped"
+a="$( rw m --callers=get_cb1 )"
+hasnt "$a" 'via_macro_capped' "(F2C.13) [N] under the ceiling nothing is withheld and nothing is said"
+
 a1="$( rw m --callers=get_cb1 )"; a2="$( rw m --callers=get_cb1 )"
 if [ "$a1" = "$a2" ]; then ok "(D) [C] deterministic: two runs byte-identical"; else no "(D) two runs differ"; fi
 if command -v xmllint >/dev/null 2>&1; then

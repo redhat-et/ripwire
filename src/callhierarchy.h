@@ -123,6 +123,10 @@ struct CallHierarchyRows
     // for them (the root's impls=; absent when contractSeeds is 0)
     std::size_t                contractSeeds = 0;
     std::size_t                implBodies    = 0;
+    // lane bx2-fix2-ceiling (macroCeiling below): the see-through callers NOT listed, and the macro with the most of them (its
+    // own --callers lists them whole: the root's via_macro_next=); 0 / kNoNode when every see-through caller is a row.
+    std::size_t                viaMacroWithheld = 0;
+    NodeId                     viaMacroNext     = kNoNode;
 };
 
 // ── CLOSURE BLOCKS (lane ix2-slice, IX-2 P2): what the functions written INSIDE of='s body call ───────────────────────────
@@ -468,10 +472,71 @@ inline bool seeThroughMacro( const Symbol& s ) noexcept
 {
     return s.kind == SymKind::Macro && !langFacts( s.lang ).bangMacros;
 }
+// lane bx2-fix2-ceiling (test/verbfixcheck.sh F2C): THE PER-MACRO CEILING. BX2's T5e confirmation failed the byte bar on one
+// cell: cpython's _Py_RemoteDebug_IsFatalReadError is called through `set_exception_cause` at 46 functions in 8 files (and
+// `_set_debug_exception_cause` at 13 in 1), so --callers grew 3 -> 62 rows (+7 KB, +12.5 KB on --uses) with no group gained —
+// one hop, so the hop limit could not bound it. Per macro, the see-through rows are now ONE PER FILE (the first in served
+// order), at most kMacroSeeThroughFiles files: the answer still names every file a macro reaches up to the ceiling (tmux-01's
+// 9 files from 15 rows; dev T5c / T5e: every group kept, bytes about halved). The rest are withheld, never silent: the root
+// says how many (via_macro_capped=) and which call lists one macro's callers whole (via_macro_next=, the macro with most).
+inline constexpr std::size_t kMacroSeeThroughFiles = 16;
+struct MacroCeilingCut
+{
+    std::size_t withheld = 0;         // rows the ceiling dropped
+    NodeId      next     = kNoNode;   // the macro with the most dropped (the first such in served order)
+};
+// `via[i]` the macro row i invokes and `fileOf( i )` its file, in served order; `keep[i]` is set for the rows listed.
+template<class FileOf>
+MacroCeilingCut macroCeiling( std::span<const NodeId> via, FileOf&& fileOf, std::vector<char>& keep )
+{
+    MacroCeilingCut                        cut;
+    HashMap<std::uint64_t, char>           seen;      // (macro, file) already listed
+    HashMap<NodeId, std::size_t>           files;     // files listed per macro
+    HashMap<NodeId, std::size_t>           dropped;   // rows withheld per macro
+    std::size_t                            most = 0;
+    keep.assign( via.size(), 0 );
+    for( std::size_t i = 0; i < via.size(); ++i )
+    {
+        const std::uint64_t key   = ( std::uint64_t( via[i] ) << 32 ) | std::uint64_t( fileOf( i ) );
+        std::size_t&        count = files[ via[i] ];
+        if( !seen.contains( key ) && count < kMacroSeeThroughFiles )
+        {
+            seen.emplace( key, 1 );
+            ++count;
+            keep[i] = 1;
+            continue;
+        }
+        ++cut.withheld;
+        if( const std::size_t d = ++dropped[ via[i] ]; d > most )
+        {
+            most     = d;
+            cut.next = via[i];
+        }
+    }
+    return cut;
+}
+// The root's disclosure of a cut, in each dialect: ` via_macro_capped="N" via_macro_next="--VERB=MACRO"`; "" when nothing was cut.
+inline std::string viaMacroCappedAttrXml( const IngestResult& ing, const MacroCeilingCut& cut, std::string_view verbFlag )
+{
+    if( cut.withheld == 0 || cut.next >= ing.symbols.size() )
+    {
+        return {};
+    }
+    std::vector<char> esc;
+    return " via_macro_capped=\"" + std::to_string( cut.withheld ) + "\" via_macro_next=\""
+         + std::string( escapeXml( nextFlag( verbFlag, ing.symbols[ cut.next ].name ), esc ) ) + "\"";
+}
+inline std::string viaMacroCappedKeyJson( const IngestResult& ing, const MacroCeilingCut& cut, std::string_view verbFlag )
+{
+    return cut.withheld == 0 || cut.next >= ing.symbols.size()
+         ? std::string()
+         : ",\"via_macro_capped\":" + std::to_string( cut.withheld ) + ",\"via_macro_next\":\"" + jsonStr( nextFlag( verbFlag, ing.symbols[ cut.next ].name ) ) + "\"";
+}
 struct MacroSeeThrough
 {
     std::vector<NodeId> rows;   // the see-through callers, in served order
     std::vector<NodeId> via;    // parallel: the macro each one invokes
+    MacroCeilingCut     cut;    // the ceiling's withheld rows (macroCeiling)
 };
 inline MacroSeeThrough macroSeeThroughRows( const IngestResult& ing, const Graph& g, std::span<const NodeId> matches, std::span<const NodeId> direct )
 {
@@ -518,6 +583,23 @@ inline MacroSeeThrough macroSeeThroughRows( const IngestResult& ing, const Graph
     for( const NodeId r : out.rows )
     {
         out.via.push_back( viaOf.find( r )->second );
+    }
+    std::vector<char> keep;
+    out.cut = macroCeiling( out.via, [ & ]( std::size_t i ) { return ing.symbols[ out.rows[i] ].fileId; }, keep );
+    if( out.cut.withheld > 0 )
+    {
+        std::size_t w = 0;
+        for( std::size_t i = 0; i < out.rows.size(); ++i )
+        {
+            if( keep[i] )
+            {
+                out.rows[w] = out.rows[i];
+                out.via[w]  = out.via[i];
+                ++w;
+            }
+        }
+        out.rows.resize( w );
+        out.via.resize( w );
     }
     ENSURES( out.via.size() == out.rows.size(), "one macro per see-through row" );
     return out;
@@ -568,6 +650,8 @@ inline CallHierarchyRows callHierarchyRows( const IngestResult& ing, const Graph
             viaMacro.assign( out.rows.size(), kNoNode );
             out.rows.insert( out.rows.end(), seeThrough.rows.begin(), seeThrough.rows.end() );
             viaMacro.insert( viaMacro.end(), seeThrough.via.begin(), seeThrough.via.end() );
+            out.viaMacroWithheld = seeThrough.cut.withheld;   // lane bx2-fix2-ceiling: the root's via_macro_capped= / via_macro_next=
+            out.viaMacroNext     = seeThrough.cut.next;
         }
     }
     else

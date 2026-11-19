@@ -938,6 +938,7 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
          + ",\"hop_tested\":" + std::to_string( chTested.tested )
          + ",\"hop_untested\":" + std::to_string( chTested.untested )
          + countFieldOrEmpty( "hop_tests", chTested.tests, /*json=*/true )   // TIER-FOLLOWUP: the CLI root's hop_tests=, absent at 0
+         + viaMacroCappedKeyJson( ing, { chRows.viaMacroWithheld, chRows.viaMacroNext }, "--callers=" )   // lane bx2-fix2-ceiling: the CLI root's twin
          + declinedCallsKeyJson( chRows.declinedCalls )   // the CLI root's declined_calls=, for the direction count= describes
          + declinedSiteCutKeyJson( sqDcCut )              // the CLI root's shown_dc= / dc_next=, absent when nothing was cut
          + declinedIfaceKeyJson( chRows.declinedIface )   // the CLI root's declined_iface= (callers direction only)
@@ -982,7 +983,7 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
     out += symbolQueryNotes( anyVia, anyLink, anyMiss );
     out += nextFieldJson( splitArmLegend( anySplit ), "split_note" );   // attrib-multidef Q1: likewise for "prov":"split"
     out += nextFieldJson( viaImplLegend( anyImpl ), "impl_note" );      // lane L6: likewise for "via":"impl"
-    out += nextFieldJson( viaMacroLegend( anyMacro ), "via_macro_note" );   // BX1 FIX 2: likewise for "via":"macro:NAME"
+    out += nextFieldJson( std::string( viaMacroLegend( anyMacro ) ) + viaMacroCappedLegend( chRows.viaMacroWithheld > 0 ), "via_macro_note" );   // BX1 FIX 2; + the ceiling
     out += declinedSitesJson( sqDc, referencingOnly, /*mcp=*/true );   // lane declined-sites: the CLI <dc> rows, never in calls/calledBy or count
     out += nextFieldJson( declinedSitesLegend( declinedSitesLegendFlags( sqDc, referencingOnly, sqDcCut ), /*mcp=*/true ), "declined_note" );   // their reading, only when they ride
     out += nextFieldJson( callSitesAtLegend( calledBySites.any, calledBySites.anyCut, kCallSitesPerRowCap ), "sites_note" );   // CALLSITE-AT: its reading, only when a row carries it (nextFieldJson: "" -> no key, JSON-escaped)

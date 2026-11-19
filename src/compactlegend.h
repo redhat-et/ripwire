@@ -1460,6 +1460,11 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // BX1 FIX 2 (verbs_navigate.h appendMacroUseSites; graphlegend.h kUsesViaMacroLegend), present-only
     { "via", "<u via=\"macro:NAME\">: the site invokes the function-like macro NAME, whose text (or a macro it invokes) uses of=; after the direct and alias rows, in count=", true, "u", MapHeaderRead::No, "macro:", "uses" },
     { "via_macro", "via_macro=N: N counted rows reach of= through a function-like macro (via=macro:NAME on each; the columnar form lists them last)", true, "uses", MapHeaderRead::No, {}, "uses" },
+    // lane bx2-fix2-ceiling (callhierarchy.h macroCeiling): present only when the per-macro ceiling withheld a row.
+    { "via_macro_capped", "via_macro_capped=N: N more rows reach of= via a macro, not listed (one per file per macro, at most 16 files; not in count=)", false, "uses", MapHeaderRead::No, {}, "uses" },
+    { "via_macro_next", "via_macro_next=: lists the macro with most of them whole", false, "uses", MapHeaderRead::No, {}, "uses" },
+    { "via_macro_capped", "via_macro_capped=N: N more rows reach of= via a macro, not listed (one per file per macro, at most 16 files; not in count=)", false, "callers", MapHeaderRead::No, {}, "callers" },
+    { "via_macro_next", "via_macro_next=: lists the macro with most of them whole", false, "callers", MapHeaderRead::No, {}, "callers" },
     { "alias_namesakes", "alias_namesakes=K: K definitions share a listed alias's name and reach none of of=; their sites are name-matched in too (a hedge)", true, "uses", MapHeaderRead::No, {}, "uses" },
     { "alias_sites_held", "alias_sites_held=N: N sites written through an alias of of= are not in the columnar rows (the XML form lists them, via=alias)", true, "uses", MapHeaderRead::No, {}, "uses" },
     { "alias_unread", "alias_unread=N: N alias declarations could not be read, so whether they reach of= is unknown (count= a floor)", true, "uses", MapHeaderRead::No, {}, "uses" },

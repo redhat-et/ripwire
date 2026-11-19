@@ -794,6 +794,11 @@ inline constexpr const char* kUsesViaMacroLegend =
     "hop); via_macro=N: N such rows, after the direct and alias ones, counted in count= (the columnar form lists them last, "
     "with no name). ";
 inline const char* usesViaMacroLegend( bool on ) noexcept { return on ? kUsesViaMacroLegend : ""; }
+// lane bx2-fix2-ceiling (callhierarchy.h macroCeiling): exactly when the root carries via_macro_capped=.
+inline constexpr const char* kViaMacroCappedLegend =
+    "Per macro only ONE row per file is listed, at most 16 files; via_macro_capped=N: N more rows reach of= through a macro and are not "
+    "listed (not in count=); via_macro_next= lists one macro's (the one with most) whole. ";
+inline const char* viaMacroCappedLegend( bool on ) noexcept { return on ? kViaMacroCappedLegend : ""; }
 inline constexpr const char* kDeclinedSitesOfDefCallees =
     "of_def=K on a <dc>: the definition (ix=K) making the call, a fact. ";
 inline constexpr const char* kDeclinedSitesOfDefCallers =

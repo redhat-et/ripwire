@@ -246,6 +246,7 @@ inline int emitCallHierarchyAlt( const rw::Config& cfg, const rw::IngestResult& 
     if( chSingleRoot ) { rw::emitTo( stdout, ",\"root\":\"{}\"", jsonStr( cfg.roots[0] ).c_str() ); }
     rw::emitTo( stdout, ",\"hop_tested\":{},\"hop_untested\":{}{}{}", chTested.tested, chTested.untested,
                  rw::countFieldOrEmpty( "hop_tests", chTested.tests, /*json=*/true )   // TIER-FOLLOWUP: the XML root's hop_tests=, absent at 0
+                   + rw::viaMacroCappedKeyJson( ing, { chRows.viaMacroWithheld, chRows.viaMacroNext }, "--callers=" )   // lane bx2-fix2-ceiling
                    + rw::declinedCallsKeyJson( chRows.declinedCalls ) + rw::declinedSiteCutKeyJson( chDcCut )
                    + rw::declinedIfaceKeyJson( chRows.declinedIface )
                    + rw::stdMemberCallsSpelling( chRows.stdCalls, /*json=*/true ),
@@ -479,7 +480,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
                            + rw::implsLegend( chRows.contractSeeds > 0 )                           // BODILESS-SEED: likewise for impls=
                            + rw::crossKindLegend( !chRows.crossKind.empty() )                      // hono-07: likewise for cross_kind=
                            + rw::viaNameLegend( chHasVia, false, cfg.columnar )                   // FE-B: likewise for via="name"
-                           + rw::viaMacroLegend( chHasMacro )                                       // BX1 FIX 2: likewise for via="macro:NAME"
+                           + rw::viaMacroLegend( chHasMacro ) + rw::viaMacroCappedLegend( chRows.viaMacroWithheld > 0 )   // BX1 FIX 2; the ceiling's disclosure
                            + rw::viaLinkLegend( chHasLink )
                            + rw::defTableLegend( chAttr.groups.multi(), chListing.cut, /*sole=*/wantCallers && chAttr.groups.size() == 1 )   // attrib-multidef; VERB-DEF-ROWS
                            + rw::untiedDeclLegend( wantCallers && !chAttr.groups.unattributed.empty() )   // BX1 FIX 7: exactly when the table lists one
@@ -518,7 +519,8 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
             : rw::nextAttrXml( chHintCall ) )
             + rw::nextAttrXml( chAllNext, "all_next" );   // BAND DC: a windowing root names the complete call
         // The tier-3 declines count= does not include (callhierarchy.h), on every dialect; absent at zero.
-        const std::string chDeclinedAttr = rw::declinedCallsAttrXml( chRows.declinedCalls ) + rw::declinedSiteCutAttrXml( chDcCut )   // + the <dc> cut, beside the count it cuts
+        const std::string chDeclinedAttr = rw::viaMacroCappedAttrXml( ing, { chRows.viaMacroWithheld, chRows.viaMacroNext }, "--callers=" )   // lane bx2-fix2-ceiling
+                                         + rw::declinedCallsAttrXml( chRows.declinedCalls ) + rw::declinedSiteCutAttrXml( chDcCut )   // + the <dc> cut, beside the count it cuts
                                          + rw::declinedIfaceAttrXml( chRows.declinedIface );
         // Reference-as-value round: value_refs= beside count= (never in it), absent at zero; the <vrs> window after the rows.
         const rw::VrRender   chVr { chSingleRoot, chRootPrefix };
@@ -1142,7 +1144,7 @@ inline rw::AliasUsesFacts appendAliasUseSites( const rw::IngestResult& ing, cons
 // unrelated same-named macro is matched by name, as every name-matched role here is. They go in ahead of the last `hedgedTail`
 // rows (the alias rows hedged by name, which stay last and out of count=). Returns how many were added.
 inline std::size_t appendMacroUseSites( const rw::IngestResult& ing, const rw::Graph& g, std::span<const rw::NodeId> defs, std::string_view rootForId,
-                                        std::vector<UseSite>& sites, std::size_t hedgedTail )
+                                        std::vector<UseSite>& sites, std::size_t hedgedTail, rw::MacroCeilingCut& cut )
 {
     using namespace rw;
     std::vector<NodeId> macros;
@@ -1192,11 +1194,16 @@ inline std::size_t appendMacroUseSites( const rw::IngestResult& ing, const rw::G
     (void)callsOfName;
     std::erase_if( got, []( const UseSite& u ) { return u.role != RefRole::Call && u.role != RefRole::Macro; } );
     rankUseSites( ing, g, got );
+    std::vector<NodeId> via;
     for( UseSite& u : got )
     {
         u.viaMacro = u.viaAlias;   // collectUseSites carries the matched name's tag in viaAlias; here it is the macro
         u.viaAlias = kNoNode;
+        via.push_back( u.viaMacro );
     }
+    std::vector<char> keep;   // lane bx2-fix2-ceiling: one site per file per macro, at most kMacroSeeThroughFiles (callhierarchy.h macroCeiling)
+    cut = macroCeiling( via, [ & ]( std::size_t i ) { return got[i].fileId; }, keep );
+    std::erase_if( got, [ &, k = std::size_t( 0 ) ]( const UseSite& ) mutable { return keep[ k++ ] == 0; } );
     EXPECTS( hedgedTail <= sites.size(), "the hedged alias rows are the tail of `sites`" );
     sites.insert( sites.end() - std::ptrdiff_t( hedgedTail ), got.begin(), got.end() );
     return got.size();
@@ -1297,8 +1304,10 @@ std::optional<int> runUses( const MainDispatch& d )
         const rw::ValueRefIndex::DepthCuts usDepthCut = usVri.depthCutsFor( defs );
         rw::rankUseSites( ing, g, sites );   // cut-fix C: most-depended-on sites first, so the cap drops the lightest
         const rw::AliasUsesFacts usAliasFacts = appendAliasUseSites( ing, g, defs, usRootForId, cfg.columnar, sites );
-        const std::size_t        usViaMacro   = appendMacroUseSites( ing, g, defs, usRootForId, sites, cfg.columnar ? 0 : usAliasFacts.hedged );   // BX1 FIX 2: after the direct and alias rows
-        const std::string        usViaMacroAttr = usViaMacro > 0 ? " via_macro=\"" + std::to_string( usViaMacro ) + "\"" : std::string();
+        rw::MacroCeilingCut      usMacroCut;   // lane bx2-fix2-ceiling: the sites the per-macro ceiling withheld
+        const std::size_t        usViaMacro   = appendMacroUseSites( ing, g, defs, usRootForId, sites, cfg.columnar ? 0 : usAliasFacts.hedged, usMacroCut );   // BX1 FIX 2: after the direct and alias rows
+        const std::string        usViaMacroAttr = ( usViaMacro > 0 ? " via_macro=\"" + std::to_string( usViaMacro ) + "\"" : std::string() )
+                                                + rw::viaMacroCappedAttrXml( ing, usMacroCut, "--uses=" );
         const std::size_t        usHedged     = usAliasFacts.hedged;   // M1: listed last, never in count=
         const bool               usUnindexed  = rw::usesRolesUnindexed( ing, defs );   // B31: count= cannot see this kind's reads
         const bool               usDeclCapped = rw::memberDeclScanCapped( ing, sym, external );   // USES-DECL-SCAN-CAPPED
@@ -1370,7 +1379,7 @@ std::optional<int> runUses( const MainDispatch& d )
                        + rw::usesValueRoleLegend( std::any_of( sites.begin(), sites.end(), []( const UseSite& u ) { return u.role == RefRole::Value; } ) )
                        + rw::valueRefsDepthLegend( usDepthCut.files > 0 )
                        + rw::aliasUsesLegend( usAliasFacts, cfg.columnar )   // XF-ALIAS-HOP: exactly when a site is written through an alias
-                       + rw::usesViaMacroLegend( usViaMacro > 0 )             // BX1 FIX 2: exactly when the root carries via_macro=
+                       + rw::usesViaMacroLegend( usViaMacro > 0 ) + rw::viaMacroCappedLegend( usMacroCut.withheld > 0 )   // BX1 FIX 2; the ceiling's disclosure
                        + rw::unindexedRolesLegend( usUnindexed )   // B31: exactly when the root carries unindexed_roles=
                        + rw::memberDeclScanLegend( usDeclCapped )   // exactly when the root carries decl_scan=
                        + usDefs.legend ).c_str(),   // VERB-DEF-ROWS: exactly when a <def> row (or defs_listed=) rides
