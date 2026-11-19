@@ -1597,7 +1597,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "why", "r why=: a tangle row's inputs that rose (nest, deep lines, steer, length); fix=: the shape that rise calls for, with lines", true, "r", MapHeaderRead::No, {}, "quality-delta" },   // also defines fix=
     { "locals", "r locals=: a tangle row's steering locals (set in one step, read by a branch 10+ statements later)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "ratchet", "r ratchet=TAG: a tangle row above its best since TAG (an input rose over its minimum); why= adds best since TAG", true, "r", MapHeaderRead::No, {}, "quality-delta" },
-    { "improved", "improved n= more=: what this change made better, never a row or gating; i kind= sym= was= now= p=: over the kind's bar at baseline, lower now", true, "improved", MapHeaderRead::No, {}, "quality-delta" },
+    { "n", "improved n= more=: what this change made better, never a row or gating; i kind= sym= was= now= p=: over the kind's bar at baseline, lower now", true, "improved", MapHeaderRead::No, {}, "quality-delta" },
     { "defect", "r defect=: a defect-shape row's shape: format-arity (gates, any origin) or utf8-cut / dedup-first / vacuous-assert (always sev=minor)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     // --expand's bundle (src/main.cpp runDefaultMap): the ride-along note and the map it carries inside the <ctx>.
     { "note", "note=: the ranked map rides along with the payload; top-k=0 serves the payload alone", false, "ctx", MapHeaderRead::No, {}, "expand" },
