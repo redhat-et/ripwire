@@ -221,6 +221,14 @@ BRIEF = ("add a --since filter to the doc-drift verb\n"
 brief_path = os.path.join(AUX, "lanes_brief.txt")
 open(brief_path, "w").write(BRIEF)
 
+# --legend-seen=FILE (lane LS1): the file a caller keeps of the legend definitions it already RECEIVED. Made here the way a caller
+# makes it — the S1 `--for="rankGraphTeleport"` answer piped into `--legend-dict=seen` — so the captured block shows that same
+# answer with those definitions left out. (Built at setup because a block's pre= runs after its command.)
+seen_path = os.path.join(AUX, "legend_seen.txt")
+with open(seen_path, "w") as _seen:
+    subprocess.run(f'{BIN} . --for="rankGraphTeleport" | {BIN} --legend-dict=seen', shell=True, cwd=REPO, stdout=_seen,
+                   stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, timeout=300)
+
 # A minimal two-file corpus for the --lint --with-profile heat-join demo: one function with a
 # pointer-chase loop (trips cache-pointer-chase-loop) and a PROFILE_SCOPE site above it, plus a
 # fabricated report whose #PROF_TSV row names that site. Fabricated because a real RIPWIRE_PROFILE
@@ -364,6 +372,10 @@ add(S1, f'{BIN} . --for="{_batchWord1} {_batchWord2} {_batchWord3} when a file c
 add(S1, f'{BIN} . --for="rankGraphTeleport"', "Name-shaped query: the router picks name-exact BM25 (header says which/why).")
 add(S1, f'{BIN} . --for="rankGraphTeleport" --no-route', "Same query with routing forced OFF (plain subtoken+body BM25) — contrast with the routed run.")
 add(S1, f'{BIN} . --for="rankGraphTeleport" --signatures-only', "T3 opt-out: the signatures-only lens (no auto bodies, no bundle=\"auto\" attribute) — contrast with the terminal default above.")
+add(S1, f'{BIN} . --for="rankGraphTeleport" --legend-seen={seen_path}', "The same --for answer for a caller that already RECEIVED the first one: the file (that answer piped into `--legend-dict=seen`, shown above) names the legend definitions it holds, and they are left out — each place says so ([legend-seen: N held]) and the trailer names the dictv= that holds them all. Rows unchanged.", pre=f"cat {seen_path}")
+add(S1, f"{BIN} . --for='who calls `rankGraphTeleport`'", "A --for question that names its symbol in backticks and asks a call-graph question is ROUTED: the verb it asks for answers (here --callers), under a <route> row: kind=, the verb it ran, complete=not-proven, next= the unrouted --for call; a reason the row names (why=) also brings page 1 of the --for answer (page1=1).")
+add(S1, f"{BIN} . --for='who calls `rankGraphTeleport`' --no-verb-route", "Same question, never routed: the --for answer itself, answer-first and paged — contrast with the routed run above.")
+add(S1, f'{BIN} . --for="rankGraphTeleport" --page-bytes=4000:2', "Page 2 of the answer-first --for answer cut at 4,000-byte pages: page=/pages= on the root, and what page 1 deferred (here its bodies and syms blocks) arrives here.")
 add(S1, f'{BIN} . --for="tree-sitter parse of a source file" --adaptive', "Cut the result at the relevance cliff (Adaptive-k) — on a flat ranking nothing is cut and the header says so ([adaptive: kept N of N]).")
 add(S1, f'{BIN} . --for="why does src/lexical.h chooseForRanker pick name-exact BM25"', "Mention anchoring (default-on): a path and a Symbol literally named in the task get lifted; the header says what anchored.")
 add(S1, f'{BIN} . --for="why does src/lexical.h chooseForRanker pick name-exact BM25" --no-mention-boost', "Same task with the anchor disabled — the contrast the flag exists for.")
