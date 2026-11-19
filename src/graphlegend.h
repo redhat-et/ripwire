@@ -787,7 +787,7 @@ inline constexpr const char* kViaMacroLegend =
     "replacement text calls of=; one macro hop (a macro row calling NAME is listed, its own callers are not); these rows follow the "
     "direct callers, count in count=, and carry the macro row's of_def. The macro text is scanned lexically, not expanded. ";
 inline constexpr const char* kViaMacroColumnarClause = "format=columnar carries it as the <via> column (3 = via=\"macro:NAME\", NAME the t=macro row it calls). ";
-inline const char* viaMacroLegend( bool on ) noexcept { return on ? kViaMacroLegend : ""; }   // the columnar clause rides at the call site
+inline const char* viaMacroLegend( bool on ) noexcept { return on ? kViaMacroLegend : ""; } // the columnar clause rides at the call site
 // The --uses twin: exactly when the root carries via_macro=.
 inline constexpr const char* kUsesViaMacroLegend =
     "via=\"macro:NAME\" on a <u> row: the site invokes the C function-like macro NAME, whose replacement text uses of= (one macro "

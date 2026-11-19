@@ -350,7 +350,7 @@ inline std::string withRenameClause( std::string msg, const NotFoundNear& near, 
 // The answer document a not-found refusal prints on stdout beside its exit 1. `echo` is the selector in the verb's
 // own attribute names (of=, or from=/to= for path), `missing` names the endpoint that matched nothing — "from", "to" or
 // "both" ("" for a one-selector verb); near= then retries the first endpoint it names. XML under the verb's root tag with its legend comment, or one JSON object under --json.
-// BX2 FIX 9 (notfoundtext.h, test/notfoundtextcheck.sh): the selector's last name as PLAIN TEXT, when the graph found nothing —
+// BX2 FIX 9 (notfoundtext.h, test/notfoundtextcheck.sh): a bare selector as PLAIN TEXT, when the graph found nothing —
 // whole-word lines, the files holding them, one row per file (its first line, its line count). Never a call or a use: fastify's
 // `kReplyHijacked` is an object-literal key, no definition, so every graph verb answered found="0" while two files read it.
 struct NotFoundText
@@ -361,7 +361,7 @@ struct NotFoundText
         std::uint32_t line  = 0;   // the file's first whole-word line
         std::uint32_t lines = 0;   // its whole-word lines
     };
-    std::string      term;           // the name searched (the selector's last segment); "" = no evidence was sought
+    std::string      term;           // the name searched (a bare selector); "" = no evidence was sought
     std::size_t      hits  = 0;      // whole-word lines, every file read
     std::size_t      files = 0;      // files holding one
     bool             floor = false;  // the scan stopped at a budget: both counts are floors
@@ -420,7 +420,7 @@ inline std::string notFoundTextCloseXml( const NotFoundText& t, std::string_view
     return rows + "</" + std::string( tag ) + ">";
 }
 inline constexpr std::string_view kNotFoundTextLegend =
-    " text_hits=N text_files=K: the selector's last name is a whole word on N lines of K indexed files. PLAIN TEXT, not a call or use the "
+    " text_hits=N text_files=K: the selector (a bare name) is a whole word on N lines of K indexed files. PLAIN TEXT, not a call or use the "
     "graph proved (a comment, a string, a property key, code no definition resolved); each <text p=FILE:LINE n=> is one file, its first "
     "such line and n= its lines (at most 20 rows, source files first; counts_floor=1: a scan budget stopped, the counts are floors); next= "
     "runs that grep.";

@@ -56,6 +56,9 @@ done
 a="$( rw . --callers=kKeyHijacked --json )"
 has "$a" '"text_hits":' "[P-json] the JSON dialect carries text_hits"
 
+a="$( body "$( rw . --callers=Reply.kKeyHijacked )" )"
+hasnt "$a" 'text_hits' "[N3] a QUALIFIED selector seeks no text: an unknown qualifier is never read as the bare name (qualendpointcheck (h))"
+
 echo "[N] a name no file holds: the answer is unchanged"
 a="$( body "$( rw . --callers=noSuchNameAnywhere )" )"
 hasnt "$a" 'text_hits' "[N1] no text_hits= when no file holds the name"
