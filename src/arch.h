@@ -681,12 +681,7 @@ inline bool archViolates( const ArchRules& r, int la, int lb )
 
 inline std::uint64_t fnv1a64( std::string_view s ) noexcept
 {
-    std::uint64_t h = 14695981039346656037ull;
-    for( const char c : s )
-    {
-        h = hashutil::fnv1aAbsorb( h, c );
-    }
-    return h;
+    return hashutil::fnv1a64( s );
 }
 
 // The ONE `*`/`?` wildcard match over a whole string (`*` spans any run, '/' included; a failed suffix backtracks one
@@ -784,7 +779,7 @@ inline std::uint64_t archViolHash( std::string_view srcFile,
                                    std::string_view ruleLabel ) noexcept
 {
     // Concatenate with NUL separators so "a/b" + "c" and "a" + "b/c" produce different hashes.
-    std::uint64_t h = 14695981039346656037ull;
+    std::uint64_t h = hashutil::kFnv1aOffset64;
     const auto mix = [ &h ]( std::string_view sv ) noexcept
     {
         for( const char c : sv )

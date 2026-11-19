@@ -3098,7 +3098,7 @@ inline void finalizeLayout( BodyWalk& w )
 // `spellShape` minus the field NAMES: same positional slots, same types, whatever they are called.
 inline void computeShapes( LayoutDef& def )
 {
-    std::uint64_t byteHash = 14695981039346656037ull, spellHash = byteHash, slotHash = byteHash;   // FNV-1a 64 offset basis
+    std::uint64_t byteHash = hashutil::kFnv1aOffset64, spellHash = byteHash, slotHash = byteHash;
     const auto    fold = []( std::uint64_t& h, std::uint64_t part )
     {
         h ^= part;
