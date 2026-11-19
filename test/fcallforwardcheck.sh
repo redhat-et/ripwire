@@ -238,6 +238,7 @@ else no "(S4) MCP uses should answer 3 calls and list no dropped forward: ${MU:0
 #     (no graph reached the references provider, so every forwarded reference stayed out). Near miss: the --uses answer agrees.
 #     The LSP index runs on a copy (it may cache under its root; the fixture stays untouched).
 LW="$( cd "$( mktemp -d )" && pwd -P )"; cp -R "$CORPUS/js" "$LW/js"   # pwd -P: the uri must name the path the server indexes
+trap 'rm -rf ${LW:+"$LW"}' EXIT
 LDEF="$( grep -n '^function localDecl ' "$LW/js/route.js" | head -1 | cut -d: -f1 )"
 LR="$( python3 - "$BIN" "$LW/js" "$(( LDEF - 1 ))" <<'PY'
 import json, subprocess, sys
