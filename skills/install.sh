@@ -12,6 +12,8 @@
 # that same cross-agent root (openclaw's own "compatibility skill root"); it has no hook slot.
 # The legend-seen hook REWRITES ripwire commands (it adds --legend-seen=<session file>), so it is its own opt-in:
 # skills/install.sh --hook-legend-seen (Claude), --codex --hook-legend-seen, or --opencode --hook-legend-seen.
+# The subagent primer (a SubagentStart hook: the two-line ripwire brief in every subagent's context) is its own opt-in
+# too, Claude only: skills/install.sh --hook-subagent-primer.
 set -eu
 src="$( cd "$( dirname "$0" )" && pwd )"
 
@@ -336,6 +338,64 @@ install_claude_legend_seen()
     fi
 }
 
+# ── install_claude_subagent_primer SETTINGS — register hooks/ripwire-subagent-primer.sh (lane AR1, 2026-11-19).
+# A SubagentStart hook: it puts the two-line ripwire brief (orient with --for; --quality-delta then --test-gate before
+# done) into every subagent's context at spawn. Its own opt-in, NOT part of --hook: it is the instrument of a registered
+# A/B (docs/EVALS.md, "Subagent primer"), and an operator must be able to install the main-session hooks without it.
+# Idempotent the way install_claude_legend_seen is: an entry that names this script, from any copy, has its command
+# refreshed in place; otherwise exactly one entry is added. Never touches another event.
+install_claude_subagent_primer()
+{
+    primerScript="$( dirname "$src" )/hooks/ripwire-subagent-primer.sh"
+    [ -f "$primerScript" ] || {
+        echo "skills/install.sh: hooks/ripwire-subagent-primer.sh is missing beside $src; subagent primer not registered." >&2
+        return 1
+    }
+    chmod +x "$primerScript" 2>/dev/null || true
+    primerCmd="$( hook_cmd "$primerScript" )" || return 1
+
+    if "$jqBin" -e --arg n "ripwire-subagent-primer.sh" "$jqIsScript"'
+        any((.hooks.SubagentStart // [])[]?.hooks[]?; isScript($n))' "$1" >/dev/null 2>&1; then
+        primerWas="already registered in $1 — command refreshed to $primerCmd."
+    else
+        primerWas="registered in $1."
+        echo "skills/install.sh --hook-subagent-primer will add this OPT-IN, advisory-only entry to $1:"
+        echo "  hooks.SubagentStart += [{ matcher: \"*\", hooks: [{ type: \"command\", command: \"$primerCmd\" }] }]"
+        echo "  behavior: adds ~660 B of context to each new subagent (orient with --for first; after the last edit, commit,"
+        echo "            --quality-delta=BASE..HEAD, --test-gate). Cannot block a subagent; silent outside a git work tree or without ripwire."
+        echo "  switch:   RIPWIRE_SUBAGENT_PRIMER=0 (or subagent_primer=off in ~/.ripwire/meter.conf) turns it off;"
+        echo "            =auto randomizes per subagent for the registered A/B."
+        echo "  counting: one row per subagent start in ~/.ripwire/subagent_primer.jsonl (session id, agent id and type,"
+        echo "            arm, delivered) — never the brief or any text. RIPWIRE_SUBAGENT_METER=0 opts out of counting."
+    fi
+
+    mk_tmp "$1"
+    if "$jqBin" --arg n "ripwire-subagent-primer.sh" --arg cmd "$primerCmd" "$jqIsScript"'
+        .hooks //= {} |
+        if any((.hooks.SubagentStart // [])[]?.hooks[]?; isScript($n))
+        then .hooks.SubagentStart |= map( .hooks |= map( if isScript($n) then .command = $cmd else . end ) )
+        else .hooks.SubagentStart = ((.hooks.SubagentStart // []) + [{ matcher: "*", hooks: [{ type: "command", command: $cmd, timeout: 5 }] }])
+        end
+    ' "$1" >"$tmp" && [ -s "$tmp" ] && mv "$tmp" "$1"; then
+        echo "ripwire subagent primer hook $primerWas"
+    else
+        rm -f "$tmp"
+        echo "skills/install.sh: could not merge the subagent primer hook into $1 (is it valid JSON?); nothing changed." >&2
+        return 1
+    fi
+}
+
+install_claude_subagent_primer_hook()
+{
+    settings="$( abs_root "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "${CLAUDE_CONFIG_DIR:-}" )/settings.json" || exit 2
+    find_jq
+    [ -n "$jqBin" ] || { echo "skills/install.sh --hook-subagent-primer needs jq on PATH to safely merge $settings (not found)." >&2; exit 1; }
+    mkdir -p "$( dirname "$settings" )"
+    [ -f "$settings" ] || ( umask 077; echo '{}' >"$settings" )
+    settings="$( resolve_link "$settings" )" || exit 1
+    install_claude_subagent_primer "$settings" || exit 1
+}
+
 # ── --hook: register hooks/ripwire-nudge.sh as a PreToolUse hook in ~/.claude/settings.json ──
 # Advisory-only (see the script's own header): never blocks/denies/rewrites a tool call, fires at most
 # once per session per pattern. Idempotent — re-running does not duplicate the settings.json entry.
@@ -550,12 +610,14 @@ mode="claude"
 explicitMode=0
 wantHook=0
 wantLegendSeen=0
+wantSubagentPrimer=0
 wantContributor=0
 explicitPath=""
 for arg in "$@"; do
     case "$arg" in
         --hook) wantHook=1 ;;
         --hook-legend-seen) wantLegendSeen=1 ;;
+        --hook-subagent-primer) wantSubagentPrimer=1 ;;
         --opencode) mode="opencode"; explicitMode=1 ;;
         --contributor) wantContributor=1 ;;
         --codex) mode="codex"; explicitMode=1 ;;
@@ -569,6 +631,17 @@ for arg in "$@"; do
     esac
 done
 
+# --hook-subagent-primer is hook-only and Claude-only (SubagentStart is a Claude Code event): it never installs skills.
+# It composes with --hook and --hook-legend-seen in one run.
+if [ "$wantSubagentPrimer" -eq 1 ]; then
+    case "$mode" in
+        claude) [ "$wantHook" -eq 0 ] || install_claude_hook
+                [ "$wantLegendSeen" -eq 0 ] || install_claude_legend_seen_hook
+                install_claude_subagent_primer_hook ;;
+        *) echo "skills/install.sh: --hook-subagent-primer is a Claude Code hook (SubagentStart); it takes --claude (the default) only" >&2; exit 2 ;;
+    esac
+    exit 0
+fi
 # --hook-legend-seen is hook-only too, for the client named (Claude by default): it never installs skills.
 if [ "$wantLegendSeen" -eq 1 ]; then
     case "$mode" in

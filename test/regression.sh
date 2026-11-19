@@ -1081,6 +1081,7 @@ for _g in \
     stdqualcheck \
     strkerncheck \
     structlayoutcheck \
+    subagentprimercheck \
     subjectanchorcheck \
     sublistcountcheck \
     subscriptopcheck \

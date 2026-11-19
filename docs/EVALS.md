@@ -1621,6 +1621,51 @@ local, never committed), precision ≥ 0.95. Arm assignment is the meter's `arm`
 two routers never disagree inside one session. The readout uses `bench/routing_ab_report.py` with a
 `router=` column; the two arms are read separately and never pooled.
 
+### Subagent primer — a SubagentStart hook with the two-line brief — PRE-REGISTERED 2026-11-19 (before any live run)
+
+**Why.** Lane SUB1 mined the 25 product-implementing subagents of one orchestrator session. Orientation was 40.6% of
+their input tokens, and each orientation token was re-read ~165 times. Yet they made a median of one ripwire
+navigation call before the first edit, and 12 of 25 made none. Lane AR1 then counted what reached all 83 subagent
+contexts of that session. No hook output reached any of them. SessionStart does not fire for a subagent. The prompt
+router runs on the parent side. PreToolUse does fire inside subagents, but its advice was retired (above). The
+session's meter arm was also `control`, so even its main session got no primer. The generic guidance did arrive:
+the CLAUDE.md use-when protocol (81 of 83), the MCP server's instructions (83 of 83), and 33 deferred ripwire MCP
+tools (83 of 83, none loaded). It was not acted on. The owner reports one earlier, unrecorded run in which telling
+the orchestrator to tell its subagents "orient with ripwire, check with --quality-delta" used "about half the
+tokens". No transcript or readout of that run was found. This registration is designed to reproduce or refute it.
+
+**What differs from the retired nudge.** The nudge spoke mid-task, after a tool was chosen, and named a verb
+without an argument. `hooks/ripwire-subagent-primer.sh` speaks once, into an empty context, before the first tool.
+It carries two runnable commands and the order to run them in. Gate: `test/subagentprimercheck.sh`.
+
+**Arms (unit = one fresh subagent on one focused task; paired by task).** A: plain brief, hook off. B: plain
+brief, hook on (`RIPWIRE_SUBAGENT_PRIMER=on`). C: plain brief plus the same two lines pasted into it, hook off. Both carry CK1's check line (after the last edit: commit, `--quality-delta=BASE..HEAD`, then `--test-gate`); the primer is 657 B. C is
+the placement the owner's evidence credits. B against C asks whether the hook can stand in for the brief. The arm is
+set per orchestrator session by environment, one session per arm. Briefs are fixed text, passed verbatim. Task order
+is shuffled per session. Every other hook and the meter arm are pinned identical across the three sessions.
+
+**Tasks.** 16 tasks drawn from the SUB1 pilot's 52 commit-tasks (`results/SUB1_SUBAGENT_ORIENT_1119/tasks_all.json`,
+local). Each starts at the parent commit in a fresh worktree, with a brief written without the diff. Success is the
+task's own gate passing at the end.
+
+**Outcomes (the PG6 spec's definitions: k_o from the dirty-file tap, never from Edit/Write alone).**
+P1, behaviour: a ripwire navigation verb before the first edit (yes/no). In the SUB1 session 1 of 83 subagents had
+one among its first five calls. P2, cost: Σ ctx_t to completion, and B_o, as paired ratios B/A and C/A (median,
+with a bootstrap interval over tasks). Secondary: k_o, `--quality-delta` run before the final report (yes/no),
+turns after the first claim of done, success.
+
+**Bands, registered now.** Success guard: B or C may lose at most 1 of 16 tasks against A, or its cost reading is
+void. KEEP the hook (recommend it in `--hook`'s output) if B/A ≤ 0.75 on Σ ctx and P1 rises ≥ +30 pp. MOVE TO THE
+BRIEF (build the `Agent`-prompt rewrite arm) if C/A ≤ 0.75 while B/A > 0.90. REMOVE the hook if B/A > 0.90 and P1
+rises < +20 pp. Anything else is REWORD and re-run once.
+
+**Power.** P1, by exact two-sided Fisher at α = 0.05, from a 2% base: at 16 per arm a rise to 50% has power 0.89
+and a rise to 40% has 0.72. At 12 per arm those fall to 0.71 and 0.47, which is why the round runs 16. P2: SUB1's
+unpaired log-scale spread of B_o is σ ≈ 0.64 (IQR 65K–155K). Paired by task, assume σ_diff 0.5–0.7. Halving
+(δ = ln 2) then needs 4–8 pairs at α = 0.05 and power 0.8, so 16 tasks resolve "about half" with margin. A 25% cut
+needs 23–46 pairs, and this round cannot see it. That is stated now so that a null on a small effect is not read as
+"no effect".
+
 ### Terminal-by-default `--for` — T3 round, PRE-REGISTERED 2026-08-12 (before the change)
 
 **The mechanism under test.** `--for` becomes terminal by default: after the ranked signatures, the
