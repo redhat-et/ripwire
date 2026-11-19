@@ -1954,6 +1954,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "n", "text_only n= capped=1: N files name the symbol as a whole word and no row above lists them (macro aliases, strings, shell, a call the resolver declined); text evidence, not resolved edges; capped=1: only the first 16 are listed", true, "text_only" },
     { "p", "tx p=FILE:LINE: a text-only file and its first whole-word line", true, "tx" },
     { "page1", "route page1=1: the first page of the ranked lens answer follows as this root's last child <ctx>, its legend inside, its next= the second page", true, "route" },
+    // KB1 (src/forkeybody.h): present-only, read only on a routed answer's <bodies of="key"> (value-qualified, any routed verb)
+    { "of", "bodies of=key: the definition body of each symbol the question names in backticks (at most 2), b t= l= p= n= as expand prints it, no callee rows, whole up to 4000 B (longer: truncated=1 lines= next=)", true, "bodies", MapHeaderRead::No, "key" },
 };
 
 // the paging window: these five mean the same on every element (L4's one-attribute-one-reading law), so they are

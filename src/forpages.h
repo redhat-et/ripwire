@@ -13,7 +13,8 @@
 // element, after each child of a section, after a section's close) — never right after a comment (a block-local legend
 // travels with its block) and never right after a section's open tag (no page opens an empty section). Page 1 is the
 // largest cut <= P counted from byte 0 (the root open tag counts, as in T6's measurement); page k the largest cut
-// <= c(k-1) + P; a unit larger than P is served whole rather than split.
+// <= c(k-1) + P; a unit larger than P is served whole rather than split. KB1 (forkeybody.h): the key-body group is not counted
+// by the page it starts on.
 //
 // WHERE THE LEGEND SITS, and why. 5ee3ddb38 made answer-first opt-in because, as a default, it moved the READINGS of the
 // cuts and floors out of the prefix (measured for AF1: a bare 12 KB answer-first prefix shows a marker with no definition
@@ -112,16 +113,28 @@ inline std::vector<Cut> streamCuts( std::string_view doc, const std::vector<answ
     return cuts;
 }
 
+// KB1 (forkeybody.h): the key-body block's legend comment opens with this; the block it declares is <bodies of="key">.
+inline constexpr std::string_view kKeyBodyLegendLead = "<!-- bodies of=key:";
+
+// The bytes of [begin, end) that lie before `at`: what page 1 does not count of the key-body group (KB1).
+[[nodiscard]] constexpr std::size_t uncountedBefore( std::size_t at, std::size_t begin, std::size_t end ) noexcept
+{
+    return at <= begin ? 0 : std::min( at, end ) - begin;
+}
+
 // The page boundaries: indices into `cuts` of each page's last cut. Page 1 is measured from byte 0, page k from the
-// previous page's end; every page takes at least one cut.
-inline std::vector<std::size_t> pageEnds( const std::vector<Cut>& cuts, std::size_t pageBytes )
+// previous page's end; every page takes at least one cut. KB1: the page the key-body group [keyBegin, keyEnd) starts on (empty when
+// the answer has none; page 1 at the default size, forkeybody.h) does not count it, so that page ends at the row it ended at without
+// it, the group is never split across pages, and every other page holds the same rows.
+inline std::vector<std::size_t> pageEnds( const std::vector<Cut>& cuts, std::size_t pageBytes, std::size_t keyBegin = 0, std::size_t keyEnd = 0 )
 {
     std::vector<std::size_t> ends;
     std::size_t from = 0, i = 0;
     while( i < cuts.size() )
     {
         std::size_t last = i;
-        while( last + 1 < cuts.size() && cuts[ last + 1 ].at <= from + pageBytes ) { ++last; }
+        const auto  counted = [ & ]( std::size_t at ) { return from <= keyBegin ? at - uncountedBefore( at, keyBegin, keyEnd ) : at; };
+        while( last + 1 < cuts.size() && counted( cuts[ last + 1 ].at ) <= from + pageBytes ) { ++last; }
         ends.push_back( last );
         from = cuts[ last ].at;
         i    = last + 1;
@@ -220,6 +233,7 @@ struct Stream
     std::vector<answerfirst::Block> blocks;
     std::size_t                     streamBlocks = 0;   // blocks [0, streamBlocks) are rows; the rest is the document legend
     std::vector<Cut>                cuts;
+    std::size_t                     keyBegin = 0, keyEnd = 0;   // KB1: the key-body group (legend comment + <bodies of="key">), or empty
 };
 
 // The stream ends where the trailing run of DOCUMENT legend comments begins. A document legend comment anywhere inside the
@@ -240,6 +254,16 @@ struct Stream
     }
     st.cuts = streamCuts( view, st.blocks, st.streamBlocks );
     if( st.cuts.empty() ) { return std::nullopt; }
+    for( std::size_t k = 0; k + 1 < st.streamBlocks; ++k )
+    {
+        const answerfirst::Block& c = st.blocks[ k ];
+        if( c.comment && view.substr( c.begin ).starts_with( kKeyBodyLegendLead ) && !st.blocks[ k + 1 ].comment && st.blocks[ k + 1 ].name == "bodies" )
+        {
+            st.keyBegin = c.begin;
+            st.keyEnd   = st.blocks[ k + 1 ].end;
+            break;
+        }
+    }
     return st;
 }
 
@@ -327,7 +351,7 @@ struct Stream
     {
         return std::nullopt;
     }
-    const std::size_t      pages    = detail::pageEnds( st->cuts, ask.pageBytes ).size();
+    const std::size_t      pages    = detail::pageEnds( st->cuts, ask.pageBytes, st->keyBegin, st->keyEnd ).size();
     const detail::Cut      end{ st->blocks[ blockIdx ].end, std::string_view::npos };
     const std::string_view rootOpen = doc.substr( st->openAt, st->openEnd - st->openAt );
     std::string out = "<ctx";
@@ -359,7 +383,7 @@ inline PageResult pageAnswer( std::string& doc, const PageAsk& ask )
 {
     const std::optional<detail::Stream> st = ask.pageBytes == 0 ? std::nullopt : detail::readStream( doc );
     if( !st ) { return {}; }
-    const std::vector<std::size_t> ends  = detail::pageEnds( st->cuts, ask.pageBytes );
+    const std::vector<std::size_t> ends  = detail::pageEnds( st->cuts, ask.pageBytes, st->keyBegin, st->keyEnd );
     const std::size_t              pages = ends.size();
     if( ask.page == 0 || ask.page > pages || ( pages == 1 && ask.page != 1 ) ) { return { PageResult::Outcome::PastLast, pages }; }
     if( pages == 1 ) { return { PageResult::Outcome::Whole, 1 }; }

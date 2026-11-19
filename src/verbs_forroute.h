@@ -4,6 +4,7 @@
 #endif
 
 #include "forroute.h"      // rule E + rule R (lane P1, transcribed)
+#include "forkeybody.h"    // KB1: the routed symbol's definition body rides the routed answer
 #include "partialwarn.h"   // F1, the partial-answer evidence (lane W1, frozen)
 
 // verbs_forroute.h — RT1 (owner decision 2026-11-18): a --for question that NAMES its symbol and asks a call-graph question is
@@ -303,7 +304,21 @@ std::optional<std::string> forEarlyStopPage( const MainDispatch& d, const std::s
     const std::string legend = "<!-- ripwire for schema=ripwire.for/v1 (page 1, early): task= the query, at= this commit"
                              + std::string( rw::kForCompactSubjectCallerHopLegend ) + std::string( windowClause ) + " -->";
     const std::string call = forUnbudgetedCall( cfg );
-    return rw::forpages::earlyFirstPage( doc, { .pageBytes = cfg.forPageBytes, .page = 1, .call = call }, lead->index, legend );
+    // KB1: the key-body group directly behind the proven block rides the early page too (its legend comment is glued in front of it)
+    std::size_t endIdx = lead->index;
+    if( const std::optional<rw::forpages::detail::Stream> st = rw::forpages::detail::readStream( doc );
+        st && st->keyEnd > st->keyBegin && st->keyBegin == st->blocks[ lead->index ].end )
+    {
+        for( std::size_t k = lead->index + 1; k < st->streamBlocks; ++k )
+        {
+            if( st->blocks[ k ].end == st->keyEnd )
+            {
+                endIdx = k;
+                break;
+            }
+        }
+    }
+    return rw::forpages::earlyFirstPage( doc, { .pageBytes = cfg.forPageBytes, .page = 1, .call = call }, endIdx, legend );
 }
 
 // The route decided and the verb answered: what runForVerbRoute (CLI) and mcpForVerbRoute (MCP `for`) both assemble from.
@@ -352,6 +367,13 @@ inline std::string assembleRouted( const MainDispatch& d, RoutedAnswer& ra, std:
     std::string doc = std::move( ra.verb.out );
     const rw::CompactRootInfo root = rw::findCompactRoot( doc );
     doc.insert( root.openEnd, routeElementXml( d.cfg, ra.rd.kind, ra.spelling, ra.w, !page.empty() ) + ( ra.w ? foldElementXml( *ra.w ) : std::string() ) );
+    // KB1 (forkeybody.h): the routed symbol's definition body (and a second named symbol's) after the verb's rows, before a carried page
+    if( rw::keybody::keyBodyOn() )
+    {
+        const std::string_view          keyRoot = d.ing.realPaths.empty() && d.cfg.roots.size() == 1 ? d.cfg.roots[0] : std::string_view();
+        const rw::keybody::KeyBodies    kb      = rw::keybody::keyBodies( d.ing, d.cfg.forTask, ra.spelling, {}, keyRoot );
+        doc.insert( doc.rfind( "</" ), kb.xml );
+    }
     (void)rw::applyCompactDialect( doc, ::compactLegendHint( d.cfg, doc ) );   // the bare call's dialect: main.cpp's layer skips --for
     if( !page.empty() )
     {
