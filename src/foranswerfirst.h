@@ -466,9 +466,9 @@ struct RootBody
 // every other row, each part in its own order. F1's measure of that signal (P1t): 2.29x the needed-row base rate pooled, covering
 // 36-56 % of the needed tail rows; the broad signals that also reorder rows 1-24 (P1, R1, F1) flipped cells out of 12 KB, which is why
 // the first 24 rows are fixed. Order only: the tail's rows are permuted inside its own text, so its size, G's guard (it reads tail
-// row kGuardTailRows) and the document's size are unchanged — answerFirst's ENSURES holds it. The tail legend's "rank order" wording
-// is not changed (no byte added: the T-B / G precedent); past row kGuardTailRows the order is this one. RIPWIRE_NO_TAIL_SAMEDIR (any
-// value) turns it off — the A/B handle.
+// row kGuardTailRows) and the tail's size are unchanged. The tail's own legend says how its rows were collected, so the reorder rides
+// with a clause that states it (kTailSameDirClause, below): the emitter writes it into the answer-first document legend and this pass reorders only where it
+// is, so the legend and the order cannot disagree. RIPWIRE_NO_TAIL_SAMEDIR (any value) turns both off.
 inline constexpr std::size_t kSameDirHeadRank = 5;
 [[nodiscard]] inline bool tailSameDirOn() noexcept { return std::getenv( "RIPWIRE_NO_TAIL_SAMEDIR" ) == nullptr; }
 
@@ -536,16 +536,37 @@ inline constexpr std::size_t kSameDirHeadRank = 5;
 }
 
 // M2 on an assembled answer-first document: its top-level <tail> rewritten in place (same bytes, so every offset outside it holds).
-inline void tailSameDirInPlace( std::string& doc )
+// The clause that states M2's order. The emitter puts it in the answer-first document legend, right after the tail clauses, exactly
+// where this pass will run (verbs_for.h tailSameDirLegend: the answer-first posture, the A/B handle unset, a tail that walks past page
+// 0); this pass reorders a tail ONLY when the document legend carries it, so an order is never served without the sentence that
+// states it, and --legend=first / --json / the MCP twin keep both their rank order and their wording.
+inline constexpr std::string_view kTailSameDirClause =
+    "; t order past row 24: files in the directory of a sigs row with r<=5 first, then the rest, each part in the order above";
+static_assert( !kTailSameDirClause.contains( "--" ), "a legend clause rides inside an XML comment: no double hyphen (G4)" );
+
+// Does the document legend (the comments after the last row block; a CDATA body can spell the same text) state M2's order?
+[[nodiscard]] inline bool legendStatesTailSameDir( std::string_view doc, const std::vector<Block>& bl ) noexcept
+{
+    const auto last = std::ranges::find_if( bl.rbegin(), bl.rend(), []( const Block& b ) { return !b.comment; } );
+    const std::size_t from = last == bl.rend() ? 0 : last->end;
+    return std::any_of( bl.begin(), bl.end(), [ & ]( const Block& b )
+                        { return b.comment && b.begin >= from && doc.substr( b.begin, b.end - b.begin ).contains( kTailSameDirClause ); } );
+}
+
+// Returns whether the tail's order changed (never without the legend clause that states it).
+inline bool tailSameDirInPlace( std::string& doc )
 {
     const std::optional<RootBody> rb = rootBody( doc );
     const std::vector<Block>      bl = rb ? topLevelBlocks( doc, rb->openEnd + 1, rb->closeAt ) : std::vector<Block>{};
+    if( !legendStatesTailSameDir( doc, bl ) ) { return false; }
     const auto named = [ & ]( std::string_view n ) { return std::ranges::find_if( bl, [ & ]( const Block& b ) { return !b.comment && b.name == n; } ); };
     const auto tail = named( "tail" ), sigs = named( "sigs" );
-    if( tail == bl.end() || sigs == bl.end() ) { return; }
+    if( tail == bl.end() || sigs == bl.end() ) { return false; }
     const std::string permuted = tailSameDirFirst( doc.substr( tail->begin, tail->end - tail->begin ), headRowDirs( doc, *sigs ) );
     ENSURES( permuted.size() == tail->end - tail->begin, "tailSameDirFirst permutes the tail's rows: its size cannot move" );
+    if( doc.compare( tail->begin, permuted.size(), permuted ) == 0 ) { return false; }
     doc.replace( tail->begin, permuted.size(), permuted );
+    return true;
 }
 
 // ── TL1 M3, A LATE ASKED BODY LEADS THE TAIL (the AF1-fix "order follow-ups" finding; lane TL1's PREREG M3, confirmed once on T5e). A
@@ -590,7 +611,7 @@ inline void bodiesLeadInPlace( std::string& doc )
 struct AnswerFirstAsk
 {
     bool callersLead = false;   // T-B: the task asks who calls the <callers by="subject"> block's subject
-    bool tailSameDir = false;   // TL1 M2
+    bool tailSameDir = false;   // TL1 M2 (only where the document legend states it: tailSameDirInPlace)
     bool bodyLead    = false;   // TL1 M3
 };
 
@@ -635,7 +656,7 @@ inline bool answerFirst( std::string& doc, const AnswerFirstAsk& ask = {} )
 
     appendAnswerFirst( view, blocks, out, lead );
     out.append( view.substr( closeAt ) );
-    if( ask.tailSameDir ) { tailSameDirInPlace( out ); }   // TL1 M2, on the assembled document (its root closed)
+    if( ask.tailSameDir ) { (void)tailSameDirInPlace( out ); }   // TL1 M2, on the assembled document (its root closed)
     if( ask.bodyLead ) { bodiesLeadInPlace( out ); }       // TL1 M3, after T-B and G: it reads their stream offsets
 
     // THE PERMUTATION CONTRACT. Not an assertion of taste: if this ever fails, the pass has dropped or

@@ -1471,7 +1471,9 @@ softPair(){
         ( cd "$dir" && "$BIN" "$rootarg" --for="$task" --token-budget="$tb" "$( spPost $d )" ) >"$TMP/sp.$d" 2>/dev/null; rc=$?
         if [ "$rc" -ne 0 ]; then spWhy="$spWhy $d: exit $rc;"; continue; fi
         if [ "$d" = compact ]; then   # (SPp) the answer as served (default posture) is a byte permutation of the twin read above
-            ( cd "$dir" && "$BIN" "$rootarg" --for="$task" --token-budget="$tb" --legend=compact ) >"$TMP/sp.$d.af" 2>/dev/null
+            # TL1 M2 adds its order clause to the answer-first legend where it reorders the tail (foranswerfirst.h kTailSameDirClause),
+            # so the posture is a permutation of the twin with M2 off; foranswerfirstcheck (SD) pins M2 and its clause
+            ( cd "$dir" && RIPWIRE_NO_TAIL_SAMEDIR=1 "$BIN" "$rootarg" --for="$task" --token-budget="$tb" --legend=compact ) >"$TMP/sp.$d.af" 2>/dev/null
             python3 -c 'import sys; a,b=(open(p,"rb").read() for p in sys.argv[1:3]); sys.exit(0 if a and sorted(a)==sorted(b) else 1)' "$TMP/sp.$d.af" "$TMP/sp.$d" \
                 || spWhy="$spWhy $d: (SPp) the default-posture answer is not a byte permutation of its --legend=first twin;"
         fi
