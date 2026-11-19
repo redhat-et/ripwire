@@ -176,8 +176,7 @@ neg ts viabarrel.ts file 3 "a/uri.ts::file b/uri.ts::file" split
 neg ts shadow.ts file 3 "a/uri.ts::file"
 neg tslocal local.ts file 5 "local.ts::file"
 neg ts ren.ts h 3 "c/other.ts::helper" import
-( cd "$TS" && "$BIN" . --no-cache --callers=file --legend=compact ) >"$TMP/loose.callers" 2>/dev/null; rc=$?
-[ "$rc" -eq 0 ] || no "loose: the --callers=file run failed (rc=$rc)"
+"$BIN" "$TS" --no-cache --callers=file --legend=compact >"$TMP/loose.callers" 2>/dev/null || no "loose: the --callers=file run failed"
 ndc=$( grep -o '<dc [^>]*p="loose.ts:[68]"[^>]*>' "$TMP/loose.callers" | grep -c 'via="declined"' )
 if [ "$ndc" -eq 2 ] && ! grep -q '<s [^>]*p="loose.ts:[68]"' "$TMP/loose.callers"; then ok "loose.ts:6/8 this.u.file() / v.file() stay declined (2 dc rows, no caller row)"
 else no "loose.ts: want 2 declined sites and no caller row, got $ndc"; sed 's/<!--.*-->//; s/^/        | /' "$TMP/loose.callers" | head -5; fi
