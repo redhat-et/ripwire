@@ -1361,7 +1361,15 @@ inline std::string restatePackTaskBodies( std::string_view bodiesXml, PackBodies
 {
     const SectionOpenTag tag         = findSectionOpenTag( bodiesXml, "<bodies" );
     const bool           closesRight = bodiesXml.ends_with( "</bodies>" );
-    if( tag.end == std::string::npos || !closesRight )
+    if( bodiesXml.empty() )
+    {
+        // NOT a degrade: the share was under kPackTaskSectionFloor, so packBodies was never called and there is
+        // nothing to lift out. The key body rides as a pointer like any other candidate and shown= is honestly 0.
+        // (This case used to take the branch below and print its disclosure on every --partition slice, which is
+        // a degrade alert for a path that is working as designed — ASan run, 2026-11-19.)
+        t.served = 0;
+    }
+    else if( tag.end == std::string::npos || !closesRight )
     {
         DISCLOSE( "pack-task: <bodies> did not have the expected open/close shape — the served body is dropped and shown= restated to 0" );
         t.served = 0;
@@ -1382,7 +1390,7 @@ inline std::string restatePackTaskBodies( std::string_view bodiesXml, PackBodies
     char open[ 176 ];
     rw::formatTo( open, sizeof( open ), "<bodies shown=\"{}\" total=\"{}\" capped=\"{}\"{}{}>", t.served, t.servedTotal,
                   t.served < t.servedTotal ? 1 : 0, rw::cstr( bodylessAttr ), t.compress ? " compress=\"1\"" : "" );
-    if( tag.end == std::string::npos || !closesRight )
+    if( bodiesXml.empty() || tag.end == std::string::npos || !closesRight )
     {
         return std::string( open ) + std::string( keyPointer ) + std::string( pointers ) + "</bodies>";
     }
