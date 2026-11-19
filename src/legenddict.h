@@ -150,7 +150,7 @@ inline constexpr std::string_view kCliCoreEntries[] =
 // constants themselves (forlegendentries.h). LAST in the id space, after the CLI core entries: no existing id moves,
 // so no tier hash and no pack moves; dictv= does.
 // A span of STATIC extent: main.cpp's table must hold exactly kForDocCount clauses or it does not compile.
-inline constexpr std::size_t kForDocCount = 58;
+inline constexpr std::size_t kForDocCount = 78;
 extern const std::span<const std::string_view, kForDocCount> kForDocEntries;
 
 inline constexpr std::size_t kCoreCount     = std::size( kCoreEntries );
@@ -1265,6 +1265,48 @@ inline RefParts assembleRef( std::string_view view, const RefShape& s, const Hea
     return p;
 }
 
+// LS1: a `for` answer also carries whole-comment legends AFTER its first row (the sibling-demote comment, which AF1 moved
+// beside the rows it reads), and reduceHead reads head comments only. Once such a comment is a dictionary entry the
+// session would be sent it on every answer, so a body comment that IS one entry, whole, is treated as reduceHead treats
+// a head entry: touched (served once this answer goes out) and dropped where the session already holds it. CDATA is
+// stepped over — ripwire's own source spells these comments as string literals.
+inline void dropServedBodyComments( std::string& body, const LegendSession& session, std::vector<std::size_t>& touched )
+{
+    std::string out;
+    std::size_t copied = 0;
+    for( std::size_t i = 0; i < body.size(); )
+    {
+        const std::size_t c = body.find( "<!-- ", i );
+        const std::size_t d = body.find( "<![CDATA[", i );
+        if( c == std::string::npos && d == std::string::npos ) { break; }
+        const bool        cdata = d < c;
+        const std::size_t close = cdata ? body.find( "]]>", d + 9 ) : body.find( " -->", c + 5 );
+        if( close == std::string::npos ) { break; }
+        const std::size_t end = close + ( cdata ? 3 : 4 );
+        if( !cdata )
+        {
+            const std::string_view inner = std::string_view( body ).substr( c + 5, close - c - 5 );
+            for( std::size_t id = kForDocBase; id < kEntryCount; ++id )
+            {
+                if( entryBody( id ) != inner ) { continue; }
+                touched.push_back( id );
+                if( session.isServed( id ) )
+                {
+                    out.append( body, copied, c - copied );
+                    copied = end;
+                }
+                break;
+            }
+        }
+        i = end;
+    }
+    if( copied != 0 )
+    {
+        out.append( body, copied, std::string::npos );
+        body.swap( out );
+    }
+}
+
 } // namespace detail
 
 // Reduce one finished inline answer to the ref posture, in place — see the header. `doc` is the answer as the inline
@@ -1307,6 +1349,10 @@ inline RefOutcome applyRefPosture( std::string& doc, LegendSession& session, std
         head->residual.insert( head->residual.begin(), "<!-- " + core + " -->" );
     }
     detail::RefParts  parts    = detail::assembleRef( view, *shape, *head );
+    if( shape->isFor )
+    {
+        detail::dropServedBodyComments( parts.body, session, head->touched );
+    }
     const std::size_t refBytes = parts.bytes( *shape );
     for( const std::size_t id : head->touched ) { session.markServed( id ); }   // sent now, in either posture
     if( refBytes > doc.size() )
@@ -1453,7 +1499,14 @@ inline bool openSessionWith( std::string_view doc, LegendSession& session )
     {
         return false;
     }
-    for( const std::size_t id : head->touched ) { session.markServed( id ); }   // sent now, inline
+    std::vector<std::size_t> touched = head->touched;
+    if( shape->isFor )
+    {
+        // the whole-comment entries after the rows went out inline too (a copy: only the touched list is wanted)
+        std::string body( doc.substr( shape->root.openEnd ) );
+        detail::dropServedBodyComments( body, session, touched );
+    }
+    for( const std::size_t id : touched ) { session.markServed( id ); }   // sent now, inline
     session.refOn = true;
     return true;
 }

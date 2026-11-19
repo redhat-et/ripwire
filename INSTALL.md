@@ -185,7 +185,7 @@ itself never writes there. This removes only ripwire's own entries, then the dir
 
 ```bash
 h="${RIPWIRE_HOME:-$HOME/.ripwire}"
-rm -rf "$h/substitution.jsonl" "$h/routing.jsonl" "$h/routing-pending" "$h/meter.conf"
+rm -rf "$h/substitution.jsonl" "$h/routing.jsonl" "$h/routing-pending" "$h/meter.conf" "$h/legend-seen"
 rmdir "$h" 2>/dev/null || true
 ```
 

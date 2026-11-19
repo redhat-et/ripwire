@@ -24,11 +24,11 @@
 // itself: a `| head`, a grep or a display limit means the reader did NOT receive the whole answer, and only the
 // consumer knows what it received. The answer is therefore a pure function of argv and FILE's bytes.
 //
-// WHAT THE ANSWER LOSES. Exactly the entry texts FILE holds, from the answer's TOP-LEVEL comments only (before the
-// root, or direct children of it — never inside a row, never inside CDATA, where ripwire's own source carries
-// legend-shaped string literals). An entry is matched verbatim at a clause boundary, LONGEST FIRST, and a match claims
-// its span, so a shorter entry nested in a longer clause is never cut out of it. A comment left with only punctuation
-// is removed. Rows, CDATA and every root attribute but est_tokens= are byte-identical; est_tokens= is repriced to the
+// WHAT THE ANSWER LOSES. Exactly the entry texts FILE holds, from the answer's comments — before the root, between its
+// rows, and the block-local legends a --for section carries with it — never inside CDATA, where ripwire's own source
+// carries legend-shaped string literals. An entry is matched verbatim at a clause boundary, LONGEST FIRST, and a match claims
+// its span, so a shorter entry nested in a longer clause is never cut out of it. Each reduced comment says so in
+// place (" [legend-seen: N held]", or that alone when nothing else is left). Rows, CDATA and every root attribute but est_tokens= are byte-identical; est_tokens= is repriced to the
 // bytes delivered (the page's own pricer on a --for page, the dict posture's proportional reprice elsewhere). One
 // comment marks the omission where it happened, with its count and the dictionary that holds every definition:
 //     <!-- legend-seen: N definitions you hold were left out; the legend-dict flag prints every one (dictv=…) -->
@@ -39,7 +39,6 @@
 // Gate: test/legendseencheck.sh. The hook that keeps FILE for a Claude Code session: hooks/ripwire-legend-seen.sh.
 
 #include "compactlegend.h"   // findCompactRoot, repriceEstTokensIn
-#include "foranswerfirst.h"  // answerfirst::topLevelBlocks — the CDATA-safe scanner of a root's children
 #include "forpages.h"        // forpages::pricePage — est_tokens= on a --for page prices every byte of it
 #include "infra/Diagnostics.h"
 #include "infra/hashutil.h"
@@ -278,6 +277,22 @@ inline std::string reduceComment( std::string_view comment, const std::vector<Ma
     return t;
 }
 
+// A reduced comment REFERS to what it left out, where it left it: " [legend-seen: N held]" before its close, or, when
+// nothing else is left, the reference alone. A reader of any one block — a later page included — sees in place that
+// definitions were omitted, and the answer's one marker says which dictionary holds them.
+inline bool hollow( std::string_view comment ) noexcept;
+inline std::string referInPlace( std::string_view reduced, std::size_t n )
+{
+    const std::string ref = "legend-seen: " + std::to_string( n ) + " held";
+    if( hollow( reduced ) )
+    {
+        return "<!-- " + ref + " -->";
+    }
+    std::string out( reduced.substr( 0, reduced.size() - 3 ) );
+    while( !out.empty() && out.back() == ' ' ) { out.pop_back(); }
+    return out + " [" + ref + "] -->";
+}
+
 // Only separators and space left between the markers: nothing to say.
 inline bool hollow( std::string_view comment ) noexcept
 {
@@ -286,48 +301,32 @@ inline bool hollow( std::string_view comment ) noexcept
     return std::all_of( inner.begin(), inner.end(), []( char c ) { return c == ' ' || c == '.' || c == ';' || c == ':' || c == ','; } );
 }
 
-// The top-level comment spans of an answer: before the root, and the root's direct children. Empty `ok` = a shape the
-// scanner does not understand (the answer is then served unchanged).
+// Every comment span of an answer outside CDATA: before the root, between its rows, and INSIDE a block — a block-local
+// legend (`<!-- ripwire for X …` on a --for section) travels with its block and is reduced where it stands. Only entry
+// text is ever removed, so a data comment (`+more`, the map header) loses nothing. `ok` false = an unterminated comment
+// or CDATA, a shape this pass does not cut (the answer is then served unchanged).
 struct Spans
 {
-    bool                                       ok = false;
+    bool                                             ok = false;
     std::vector<std::pair<std::size_t, std::size_t>> comments;
-    CompactRootInfo                            root;
+    CompactRootInfo                                  root;
 };
 
-inline Spans topLevelComments( std::string_view doc )
+inline Spans answerComments( std::string_view doc )
 {
     Spans s;
     s.root = findCompactRoot( doc );
     if( s.root.tag.empty() || s.root.openEnd > doc.size() ) { return s; }
-    for( std::size_t i = 0; i < s.root.openBegin; )
+    for( std::size_t i = 0; i < doc.size(); )
     {
         const std::size_t c = doc.find( "<!--", i );
-        if( c == std::string_view::npos || c >= s.root.openBegin ) { break; }
-        const std::size_t close = doc.find( "-->", c + 4 );
-        if( close == std::string_view::npos || close + 3 > s.root.openBegin ) { return s; }
-        s.comments.emplace_back( c, close + 3 );
+        const std::size_t d = doc.find( "<![CDATA[", i );
+        if( c == std::string_view::npos && d == std::string_view::npos ) { break; }
+        const bool        cdata = d < c;
+        const std::size_t close = cdata ? doc.find( "]]>", d + 9 ) : doc.find( "-->", c + 4 );
+        if( close == std::string_view::npos ) { return s; }
+        if( !cdata ) { s.comments.emplace_back( c, close + 3 ); }
         i = close + 3;
-    }
-    const bool selfClosing = s.root.openEnd >= 2 && doc.compare( s.root.openEnd - 2, 2, "/>" ) == 0;
-    if( !selfClosing )
-    {
-        const std::string closeTag = "</" + std::string( s.root.tag ) + ">";
-        const std::size_t closeAt  = doc.rfind( closeTag );
-        if( closeAt == std::string_view::npos || closeAt < s.root.openEnd
-            || doc.substr( closeAt + closeTag.size() ).find_first_not_of( " \n\r\t" ) != std::string_view::npos )
-        {
-            return s;
-        }
-        if( closeAt > s.root.openEnd )
-        {
-            const std::vector<answerfirst::Block> kids = answerfirst::topLevelBlocks( doc, s.root.openEnd, closeAt );
-            if( kids.empty() ) { return s; }   // the scanner's "not understood"
-            for( const answerfirst::Block& b : kids )
-            {
-                if( b.comment ) { s.comments.emplace_back( b.begin, b.end ); }
-            }
-        }
     }
     s.ok = true;
     return s;
@@ -359,7 +358,7 @@ inline Result applySeenPosture( std::string& doc, const Holding& h )
 {
     Result r;
     const std::string_view view = doc;
-    const detail::Spans    spans = detail::topLevelComments( view );
+    const detail::Spans    spans = detail::answerComments( view );
     if( !spans.ok )
     {
         return r;
@@ -385,7 +384,7 @@ inline Result applySeenPosture( std::string& doc, const Holding& h )
         }
         out.append( view.substr( copied, b - copied ) );
         if( markAt == std::string::npos ) { markAt = out.size(); }
-        if( !detail::hollow( reduced ) ) { out += reduced; }
+        out += detail::referInPlace( reduced, r.omitted - before );
         copied = e;
     }
     r.outcome = Outcome::Unchanged;

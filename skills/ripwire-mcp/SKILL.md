@@ -252,8 +252,26 @@ the definitions it stands for.
 Refusals, all deliberate: an empty value; a value this binary does not recognise, even beside a valid
 one (the tier changed — run the `--legend-dict=core` command the message names); `--mcp`/`--listen`/`--lsp`
 (the server already sends each definition once); `--legend=full`. The whole dictionary still works as a
-holding (`ripwire --legend-dict`, its `dictv=`; about 146 KB; about 130 calls to repay, measured when it was 131 KB) and is not the
+holding (`ripwire --legend-dict`, its `dictv=`; about 160 KB; about 130 calls to repay, measured when it was 131 KB) and is not the
 handshake to reach for.
+
+### Or name the definitions you RECEIVED: `--legend-seen=FILE`
+
+Per definition, no tiers to read first. Pipe each answer you received into `ripwire --legend-dict=seen`
+and append what it prints to a file; pass that file on later calls:
+
+```
+ripwire ROOT --for="TASK" | tee answer.xml          # read it as usual
+ripwire --legend-dict=seen <answer.xml >>seen.txt   # the entry hashes it carried
+ripwire ROOT --for="OTHER TASK" --legend-seen=seen.txt
+```
+
+The answer leaves out exactly the definitions `seen.txt` names — `--for`'s trailing legend and block legends
+included — and says so where it left them (`[legend-seen: N held]`) and once with the `dictv=` of the
+dictionary that holds them all. Rows are byte-identical. A missing or corrupt file serves the whole answer
+(stderr says so); it never refuses. In Claude Code, `skills/install.sh --hook` keeps this file for you per
+session (the legend-seen hook under hooks/) and forgets it on compaction. Pass only what you received whole: an
+answer you cut with `| head` should be scanned as cut.
 
 ## The 3 MCP edit verbs — the warm-server counterpart to the preferred CLI
 

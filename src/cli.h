@@ -2904,7 +2904,7 @@ inline constexpr char kHelpTail[] =
         "                               --for answers are not reduced (0 of 65), and say so on stderr. Under about 10 calls pass\n"
         "                               nothing. REFUSED: an empty value; any value that is no tier of this binary, even beside\n"
         "                               a valid one; --mcp/--listen/--lsp; --legend=full. The whole dictionary's dictv= is a\n"
-        "                               valid HAVE too (have=\"full\"), about 146 KB (about 130 calls to repay, measured at 131 KB).\n"
+        "                               valid HAVE too (have=\"full\"), about 160 KB (about 130 calls to repay, measured at 131 KB).\n"
         "    --legend-seen=FILE         leave out the legend definitions FILE says you already hold\n"
         "                               FILE: one entry hash per line (16 hex), the hashes `ripwire --legend-dict=seen` prints for\n"
         "                               answers you RECEIVED (stdin; their comments, CDATA skipped) — append them as you go:\n"

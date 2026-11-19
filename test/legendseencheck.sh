@@ -203,5 +203,38 @@ else bad "(S11) holding everything lost the compact opener or a row"; fi
 if [ -z "$(comm -13 "$WORK/for.seen" "$WORK/red.seen")" ] || [ ! -s "$WORK/red.seen" ]; then pass "(S11b) a reduced answer carries no entry its plain answer did not"
 else bad "(S11b) the reduced answer yields hashes the plain one did not: $(comm -13 "$WORK/for.seen" "$WORK/red.seen" | head -3 | tr '\n' ' ')"; fi
 
+# ── (S12) a BLOCK-LOCAL legend (`<!-- ripwire for lit …`, carried with its section) is left out WHERE IT STANDS ──────
+LQ="the --page-bytes flag"
+run --for="$LQ" >"$WORK/lit.plain"
+"$BIN" --legend-dict=seen <"$WORK/lit.plain" >"$WORK/lit.held"
+run --for="$LQ" --legend-seen="$WORK/lit.held" >"$WORK/lit.red"
+nb=$(grep -o '<!-- ripwire for lit' "$WORK/lit.plain" | wc -l | tr -d ' ')
+if [ "$nb" -gt 0 ]; then pass "(S12) non-vacuous: the plain answer carries $nb block-local lit legend(s)"; else bad "(S12) no block-local legend on the probe — the arm below asserts nothing"; fi
+python3 - "$WORK/lit.plain" "$WORK/lit.red" >"$WORK/lit.pos" <<'PY'
+import re, sys
+def blocks(path):
+    d = open(path).read()
+    # the position of each comment, as the index of the element it precedes (CDATA stripped)
+    d = re.sub(r"<!\[CDATA\[.*?\]\]>", "", d, flags=re.S)
+    out, k = [], 0
+    for m in re.finditer(r"<!--.*?-->|<[a-zA-Z_]", d, re.S):
+        if m.group().startswith("<!--"): out.append((k, m.group()))
+        else: k += 1
+    return out
+p, r = blocks(sys.argv[1]), blocks(sys.argv[2])
+lit = [k for k, c in p if c.startswith("<!-- ripwire for lit")]
+ref = {k for k, c in r if "legend-seen: " in c}
+left = [c for k, c in r if c.startswith("<!-- ripwire for lit")]
+print(len(lit), sum(1 for k in lit if k in ref), len(left))
+PY
+read -r nlit nref nleft <"$WORK/lit.pos"
+# A block legend whose emitted text is no entry (a present-only clause cut from a constant) stays whole — a missed
+# saving, never a missing definition; every one that WAS left out must say so where it stood.
+if [ "${nlit:-0}" -gt 0 ] && [ "$nref" -gt 0 ] && [ "$nref" -ge $(( nlit - nleft )) ]; then
+    pass "(S12) $(( nlit - nleft )) of $nlit block-local legends left out in place, each place says legend-seen ($nleft not an entry, kept whole)"
+else bad "(S12) block-local legends: $nlit in the plain answer, $nref referred to in place, $nleft still whole"; fi
+if [ "$(py lossless "$WORK/lit.plain" "$WORK/lit.red")" = 1 ] && xmllint --noout "$WORK/lit.red" 2>/dev/null; then pass "(S12) rows byte-identical, well-formed"
+else bad "(S12) the block-legend reduction moved a row or broke the XML"; fi
+
 if [ "$fail" -eq 0 ]; then echo "legendseencheck: all arms PASS"; exit 0; fi
 echo "legendseencheck: FAILURES"; exit 1
