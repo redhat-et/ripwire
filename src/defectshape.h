@@ -16,8 +16,11 @@
 //                   severity-like field (a bounded name token sev / severity / priority / prio), where neither
 //                   the predicate nor a sort before it in the function reads that field: the FIRST row of a
 //                   run survives, not the most severe.
-//   vacuous-assert  Bash test scripts: an ABSENCE assertion (grep -q PAT whose match is the failure branch)
-//                   read off a command whose failure is never checked, so a crash reads as PASS.
+//   vacuous-assert  Bash test scripts: an assertion (grep -q, [ -s ] / [ -n ] / [ = ], cmp / diff, case) that
+//                   PASSES on the empty text a crashed run under test leaves — through a capture, a file it
+//                   redirected into, a pipe or a wrapper — when nothing reads that run's status and no other
+//                   check in the scope fails on the same empty text; and three status shapes beside it: a FAIL
+//                   reporter's flag set inside $( ), an rc=$? no test reads, a `| head || fallback`.
 //
 // Each scanner returns SITES: a facet, the byte the offending text starts at (the caller anchors it on the
 // innermost enclosing definition, or on the file), and the offending text NORMALIZED (comments dropped,
@@ -44,6 +47,7 @@
 #include "infra/Diagnostics.h"
 #include "infra/namesplit.h"   // the ONE ASCII identifier-character pair and the quote-pair strip
 #include "infra/sortutil.h"    // svLess: the string_view order a comparator lambda may use (portablebuildcheck #6c)
+#include "shstatus.h"          // vacuous-assert: the B43 exit-status matcher (one matcher, common code)
 
 namespace rw::defectshape
 {
@@ -1732,1216 +1736,68 @@ inline void scanDedupFirstFunction( std::string_view src, const std::vector<Tok>
 
 // ─── vacuous-assert, Bash test scripts ──────────────────────────────────────────────────────────────────
 
-// One logical line of a shell script: continuation lines joined, comments dropped, heredoc bodies and the
-// tails of multi-line quotes removed (they are data, not code).
+// The site a finding names: the physical line holding byte `pos`, with the backslash-continued lines around it
+// joined and a trailing comment dropped (a # after a blank, outside quotes). Its text is the site's identity.
 struct ShLine
 {
     std::uint32_t startByte = 0;
     std::string   text;
 };
 
-inline std::vector<ShLine> shLogicalLines( std::string_view s )
+inline ShLine shSiteLine( std::string_view s, std::uint32_t pos )
 {
-    std::vector<ShLine>      out;
-    std::vector<std::string> heredocEnds;     // pending terminators, in order
-    bool                     heredocStrip = false;
-    char                     openQuote    = 0; // a quote left open at the end of the previous physical line
-    std::size_t              i            = 0;
-    ShLine                   cur;
-    bool                     haveCur = false;
-    while( i < s.size() )
+    pos                 = std::min<std::uint32_t>( pos, static_cast<std::uint32_t>( s.size() ) );
+    const auto lineOpen = [ & ]( std::size_t at )   // the first byte of the physical line holding `at`
     {
-        std::size_t e = s.find( '\n', i );
-        if( e == std::string_view::npos )
-        {
-            e = s.size();
-        }
-        std::string_view phys = s.substr( i, e - i );
-        const std::uint32_t physStart = static_cast<std::uint32_t>( i );
-        i = e + 1;
-        if( !heredocEnds.empty() )
-        {
-            std::string_view t = phys;
-            while( heredocStrip && !t.empty() && t.front() == '\t' )
-            {
-                t.remove_prefix( 1 );
-            }
-            if( t == heredocEnds.front() )
-            {
-                heredocEnds.erase( heredocEnds.begin() );
-            }
-            continue;
-        }
-        // code bytes of this physical line: quotes tracked, comments dropped
-        std::string code;
-        std::size_t k = 0;
-        if( openQuote != 0 )
-        {
-            const std::size_t close = phys.find( openQuote );
-            if( close == std::string_view::npos )
-            {
-                continue;   // the whole line is inside a multi-line literal
-            }
-            k         = close + 1;
-            openQuote = 0;
-            code.append( "\"\"" );
-        }
-        char q = 0;
-        for( ; k < phys.size(); ++k )
-        {
-            const char c = phys[k];
-            if( q == 0 && c == '#' && ( k == 0 || isSpace( phys[k - 1] ) || phys[k - 1] == ';' ) )
-            {
-                break;
-            }
-            if( c == '\\' && q != '\'' && k + 1 < phys.size() )
-            {
-                code.push_back( c );
-                code.push_back( phys[k + 1] );
-                ++k;
-                continue;
-            }
-            if( q == 0 && ( c == '\'' || c == '"' ) )
-            {
-                q = c;
-            }
-            else if( q == c )
-            {
-                q = 0;
-            }
-            code.push_back( c );
-        }
-        if( q != 0 )
-        {
-            openQuote = q;   // a literal that runs on: the rest of it is data
-        }
-        // heredoc operators on this line (not here-strings)
-        for( std::size_t h = code.find( "<<" ); h != std::string::npos; h = code.find( "<<", h + 2 ) )
-        {
-            if( h + 2 < code.size() && code[h + 2] == '<' )
-            {
-                h += 1;
-                continue;
-            }
-            std::size_t p = h + 2;
-            const bool  strip = p < code.size() && code[p] == '-';
-            p += strip ? 1 : 0;
-            while( p < code.size() && code[p] == ' ' )
-            {
-                ++p;
-            }
-            std::string word;
-            while( p < code.size() && !isSpace( code[p] ) && code[p] != ';' && code[p] != ')' && code[p] != '|' && code[p] != '&' && code[p] != '>' )
-            {
-                if( code[p] != '\'' && code[p] != '"' && code[p] != '\\' )
-                {
-                    word.push_back( code[p] );
-                }
-                ++p;
-            }
-            // a terminator is a word ( << 2 inside $(( )) is a shift, not a heredoc )
-            if( !word.empty() && isIdentStart( word[0] ) && std::all_of( word.begin(), word.end(), []( char ch ) { return isIdentChar( ch ); } ) )
-            {
-                heredocEnds.push_back( word );
-                heredocStrip = strip;
-            }
-        }
-        const bool continues = !code.empty() && code.back() == '\\' && openQuote == 0;
-        if( continues )
-        {
-            code.pop_back();
-        }
-        if( !haveCur )
-        {
-            cur     = ShLine{ physStart, {} };
-            haveCur = true;
-        }
-        cur.text.append( code );
-        if( continues && heredocEnds.empty() )
-        {
-            cur.text.push_back( ' ' );
-            continue;
-        }
-        out.push_back( std::move( cur ) );
-        cur     = ShLine{};
-        haveCur = false;
-    }
-    if( haveCur )
-    {
-        out.push_back( std::move( cur ) );
-    }
-    return out;
-}
-
-// A shell word or operator, quote- and $( )-aware.
-struct ShTok
-{
-    std::string text;
-    bool        op = false;
-};
-
-inline std::vector<ShTok> shTokens( std::string_view l )
-{
-    std::vector<ShTok> out;
-    std::size_t        i = 0;
-    while( i < l.size() )
-    {
-        const char c = l[i];
-        if( isSpace( c ) )
-        {
-            ++i;
-            continue;
-        }
-        if( l.substr( i, 2 ) == "&&" || l.substr( i, 2 ) == "||" || l.substr( i, 2 ) == ";;" )
-        {
-            out.push_back( { std::string( l.substr( i, 2 ) ), true } );
-            i += 2;
-            continue;
-        }
-        if( c == '|' || c == ';' || c == '&' || ( c == '!' && ( i + 1 >= l.size() || isSpace( l[i + 1] ) ) ) )
-        {
-            out.push_back( { std::string( 1, c ), true } );
-            ++i;
-            continue;
-        }
-        std::string w;
-        int         paren = 0;
-        char        q     = 0;
-        while( i < l.size() )
-        {
-            const char d = l[i];
-            if( q == 0 && paren == 0 && ( isSpace( d ) || d == '|' || d == ';' || d == '&' ) )
-            {
-                break;
-            }
-            if( d == '\\' && q != '\'' && i + 1 < l.size() )
-            {
-                w.push_back( d );
-                w.push_back( l[i + 1] );
-                i += 2;
-                continue;
-            }
-            // A "$( … )" capture's inner quotes are balanced, so plain toggling keeps the word whole; an UNQUOTED
-            // $( … ) with spaces inside is held together by the paren depth.
-            if( q == 0 && d == '$' && i + 1 < l.size() && l[i + 1] == '(' )
-            {
-                ++paren;
-                w.append( "$(" );
-                i += 2;
-                continue;
-            }
-            if( q == 0 && paren > 0 && d == '(' )
-            {
-                ++paren;
-            }
-            else if( q == 0 && paren > 0 && d == ')' )
-            {
-                --paren;
-            }
-            else if( q == 0 && ( d == '\'' || d == '"' ) )
-            {
-                q = d;
-            }
-            else if( q != 0 && d == q )
-            {
-                q = 0;
-            }
-            w.push_back( d );
-            ++i;
-        }
-        out.push_back( { std::move( w ), false } );
-    }
-    return out;
-}
-
-using ShLineToks = std::vector<std::vector<ShTok>>;   // every logical line's tokens, computed once per script
-
-inline std::string_view unquoted( std::string_view w ) noexcept
-{
-    return rw::namesplit::stripQuotePair( w );
-}
-
-// "$VAR" / "${VAR}" / $VAR → VAR, else empty.
-inline std::string_view varRef( std::string_view w ) noexcept
-{
-    w = unquoted( w );
-    if( w.size() < 2 || w[0] != '$' )
-    {
-        return {};
-    }
-    w.remove_prefix( 1 );
-    if( !w.empty() && w.front() == '{' && w.back() == '}' )
-    {
-        w = w.substr( 1, w.size() - 2 );
-    }
-    if( w.empty() || !isIdentStart( w[0] ) )
-    {
-        return {};
-    }
-    for( char c : w )
-    {
-        if( !isIdentChar( c ) )
-        {
-            return {};
-        }
-    }
-    return w;
-}
-
-enum class Reporter : std::uint8_t
-{
-    None,
-    Pass,
-    Fail,
-};
-
-// A reporter is named by its tokens (ok / pass vs no / fail …), or is an echo / printf of PASS / FAIL text,
-// an exit / return with a nonzero status, or a fail-flag assignment.
-inline Reporter reporterOf( const std::vector<ShTok>& t, std::size_t k, const std::vector<std::pair<std::string, Reporter>>& defined )
-{
-    while( k < t.size() && ( ( !t[k].op && ( t[k].text == "{" || t[k].text == "then" || t[k].text == "else" ) ) || ( t[k].op && t[k].text == ";" ) ) )
-    {
-        ++k;   // the branch's opening words and the line breaks (joined as ';') before its first command
-    }
-    if( k >= t.size() || t[k].op )
-    {
-        return Reporter::None;
-    }
-    const std::string& w = t[k].text;
-    for( const auto& [ name, r ] : defined )
-    {
-        if( name == w && r != Reporter::None )
-        {
-            return r;
-        }
-    }
-    if( w == "echo" || w == "printf" )
-    {
-        for( std::size_t a = k + 1; a < t.size() && !t[a].op; ++a )
-        {
-            std::string_view u = unquoted( t[a].text );
-            while( !u.empty() && ( u.front() == ' ' || u.front() == '[' ) )
-            {
-                u.remove_prefix( 1 );
-            }
-            if( u.starts_with( "FAIL" ) )
-            {
-                return Reporter::Fail;
-            }
-            if( u.starts_with( "PASS" ) || u.starts_with( "ok " ) )
-            {
-                return Reporter::Pass;
-            }
-        }
-        return Reporter::None;
-    }
-    if( ( w == "exit" || w == "return" ) && k + 1 < t.size() && !t[k + 1].op && t[k + 1].text != "0" )
-    {
-        return Reporter::Fail;
-    }
-    if( w.find( '=' ) != std::string::npos )
-    {
-        const std::string lhs = w.substr( 0, w.find( '=' ) );
-        const std::string rhs = w.substr( w.find( '=' ) + 1 );
-        for( const std::string& tk : nameTokens( lhs ) )
-        {
-            if( ( tk == "fail" || tk == "failed" || tk == "failures" || tk == "status" ) && rhs != "0" )
-            {
-                return Reporter::Fail;
-            }
-        }
-        return Reporter::None;
-    }
-    for( const std::string& tk : nameTokens( w ) )
-    {
-        if( tk == "ok" || tk == "pass" || tk == "passed" || tk == "good" )
-        {
-            return Reporter::Pass;
-        }
-        if( tk == "no" || tk == "fail" || tk == "failed" || tk == "bad" || tk == "die" )
-        {
-            return Reporter::Fail;
-        }
-    }
-    return Reporter::None;
-}
-
-// The grep -q assertion of one pipeline [b, e) of tokens: its producer and polarity.
-struct GrepPipe
-{
-    bool             ok        = false;
-    bool             negated   = false;   // a leading `!`
-    bool             direct    = false;   // the producer is a command (not a variable's text)
-    std::string      var;                 // the variable whose text is grepped, when not direct
-};
-
-inline bool isQuietGrep( const std::vector<ShTok>& t, std::size_t b, std::size_t e, std::size_t& operands )
-{
-    if( b >= e || t[b].op || t[b].text != "grep" )
-    {
-        return false;
-    }
-    bool quiet = false;
-    operands   = 0;
-    bool afterDashE = false;
-    for( std::size_t k = b + 1; k < e; ++k )
-    {
-        const std::string& w = t[k].text;
-        if( afterDashE )
-        {
-            ++operands;
-            afterDashE = false;
-            continue;
-        }
-        if( w == "--quiet" || w == "--silent" )
-        {
-            quiet = true;
-        }
-        else if( w == "-e" )
-        {
-            afterDashE = true;
-        }
-        else if( w.size() > 1 && w[0] == '-' && w[1] != '-' )
-        {
-            quiet = quiet || w.find( 'q' ) != std::string::npos;
-        }
-        else if( w == "--" )
-        {
-            continue;
-        }
-        else if( w.rfind( "<<<", 0 ) == 0 || w.rfind( "2>", 0 ) == 0 || w.rfind( ">", 0 ) == 0 )
-        {
-            continue;
-        }
-        else
-        {
-            ++operands;
-        }
-    }
-    return quiet;
-}
-
-// Is the command at [b, e) a RUN UNDER TEST? Past `cd DIR &&`, environment assignments and the wrappers env /
-// nice / timeout / command / exec / time / stdbuf, the command must be spelled through a variable ("$BIN")
-// or a path. Not judged (stated floors): a text utility or builtin over a file — its input's provenance is
-// not on this line — and a function the script defines, which may wrap a run or only read a variable.
-inline bool isRunUnderTest( const std::vector<ShTok>& t, std::size_t b, std::size_t e )
-{
-    std::size_t k = b;
-    while( k < e )
-    {
-        const std::string& w = t[k].text;
-        if( !t[k].op && w == "cd" )
-        {
-            while( k < e && !( t[k].op && t[k].text == "&&" ) )
-            {
-                ++k;
-            }
-            ++k;
-            continue;
-        }
-        if( !t[k].op && ( w == "env" || w == "nice" || w == "timeout" || w == "command" || w == "exec" || w == "time" || w == "stdbuf"
-                          || ( !w.empty() && w[0] == '-' ) || ( !w.empty() && isDigit( w[0] ) )
-                          || ( w.find( '=' ) != std::string::npos && w[0] != '$' && w[0] != '"' && w[0] != '\'' ) ) )
-        {
-            ++k;
-            continue;
-        }
-        break;
-    }
-    if( k >= e || t[k].op )
-    {
-        return false;
-    }
-    const std::string_view head = unquoted( t[k].text );
-    return !head.empty() && ( head.front() == '$' || head.find( '/' ) != std::string_view::npos );
-}
-
-inline GrepPipe grepPipe( const std::vector<ShTok>& t, std::size_t b, std::size_t e )
-{
-    GrepPipe g;
-    while( b < e && !t[b].op && ( t[b].text == "{" || t[b].text == "(" ) )
-    {
-        ++b;   // a brace group or subshell around the pipe: { echo "$V" | grep -q P && … ; }
-    }
-    if( b < e && t[b].op && t[b].text == "!" )
-    {
-        g.negated = true;
-        ++b;
-    }
-    // stage boundaries
-    std::vector<std::size_t> stages{ b };
-    for( std::size_t k = b; k < e; ++k )
-    {
-        if( t[k].op && t[k].text == "|" )
-        {
-            stages.push_back( k + 1 );
-        }
-    }
-    const std::size_t last = stages.back();
-    std::size_t       operands = 0;
-    if( !isQuietGrep( t, last, e, operands ) )
-    {
-        return g;
-    }
-    if( stages.size() == 1 )
-    {
-        // grep -q PAT <<< "$V" reads a variable; grep -q PAT FILE reads a file (not this shape)
-        for( std::size_t k = last + 1; k < e; ++k )
-        {
-            if( t[k].text == "<<<" && k + 1 < e )
-            {
-                g.var = std::string( varRef( t[k + 1].text ) );
-            }
-            else if( t[k].text.rfind( "<<<", 0 ) == 0 )
-            {
-                g.var = std::string( varRef( std::string_view( t[k].text ).substr( 3 ) ) );
-            }
-        }
-        g.ok = !g.var.empty();
-        return g;
-    }
-    if( operands > 1 )
-    {
-        return g;   // the last grep reads files, not the pipe
-    }
-    const std::size_t p0  = stages.front();
-    const std::size_t p0e = stages[1] - 1;
-    if( p0 >= p0e )
-    {
-        return g;
-    }
-    const std::string& cmd = t[p0].text;
-    if( cmd == "printf" || cmd == "echo" )
-    {
-        // printf '%s' "$V" / echo "$V" — the text of one variable; anything else printed is not a run's output
-        std::string_view v;
-        std::size_t      vars = 0;
-        for( std::size_t k = p0 + 1; k < p0e; ++k )
-        {
-            const std::string_view r = varRef( t[k].text );
-            if( !r.empty() )
-            {
-                v = r;
-                ++vars;
-            }
-            else if( t[k].text.find( "$(" ) != std::string::npos )
-            {
-                const std::vector<ShTok> inner = shTokens( std::string_view( t[k].text ).substr( t[k].text.find( "$(" ) + 2 ) );
-                std::size_t              innerEnd = 0;
-                while( innerEnd < inner.size() && !( inner[innerEnd].op && inner[innerEnd].text == "|" ) )
-                {
-                    ++innerEnd;
-                }
-                if( !isRunUnderTest( inner, 0, innerEnd ) )
-                {
-                    return g;   // printf "$( wrapper … )": not a run under test
-                }
-                g.direct = true;
-            }
-        }
-        if( g.direct )
-        {
-            g.ok = true;
-            return g;
-        }
-        if( vars != 1 )
-        {
-            return g;
-        }
-        g.var = std::string( v );
-        g.ok  = true;
-        return g;
-    }
-    if( !isRunUnderTest( t, p0, p0e ) )
-    {
-        return g;   // a direct pipe judges only a run under test
-    }
-    g.direct = true;
-    g.ok     = true;
-    return g;
-}
-
-// The shape of one list: `PIPE && R1 || R2`. Returns the grep pipe and the two reporters.
-struct AndOr
-{
-    GrepPipe pipe;
-    Reporter onTrue  = Reporter::None;
-    Reporter onFalse = Reporter::None;
-};
-
-inline bool andOrShape( const std::vector<ShTok>& t, const std::vector<std::pair<std::string, Reporter>>& defined, AndOr& out )
-{
-    std::size_t andAt = t.size();
-    std::size_t orAt  = t.size();
-    for( std::size_t k = 0; k < t.size(); ++k )
-    {
-        if( t[k].op && t[k].text == "&&" && andAt == t.size() )
-        {
-            andAt = k;
-        }
-        else if( t[k].op && t[k].text == "||" && andAt != t.size() && orAt == t.size() )
-        {
-            orAt = k;
-        }
-        else if( t[k].op && ( t[k].text == ";" || t[k].text == ";;" ) && andAt == t.size() )
-        {
-            return false;
-        }
-    }
-    if( andAt == t.size() || orAt == t.size() )
-    {
-        return false;
-    }
-    out.pipe    = grepPipe( t, 0, andAt );
-    out.onTrue  = reporterOf( t, andAt + 1, defined );
-    out.onFalse = reporterOf( t, orAt + 1, defined );
-    return out.pipe.ok;
-}
-
-// Is a list an ABSENCE assertion (the grep matching is the failure branch)? Or a REQUIREMENT on the same
-// text (a match is the pass branch, or no match is the failure branch)?
-enum class Polarity : std::uint8_t
-{
-    None,
-    Absence,
-    Requirement,
-};
-
-inline Polarity polarityOf( bool negated, Reporter onMatch, Reporter onNoMatch ) noexcept
-{
-    if( negated )
-    {
-        std::swap( onMatch, onNoMatch );
-    }
-    if( onMatch == Reporter::Fail && onNoMatch == Reporter::Pass )
-    {
-        return Polarity::Absence;
-    }
-    if( onMatch == Reporter::Pass || onNoMatch == Reporter::Fail )
-    {
-        return Polarity::Requirement;
-    }
-    return Polarity::None;
-}
-
-// Every grep assertion in a script: the line, its pipe, its polarity.
-struct ShAssert
-{
-    std::size_t line = 0;
-    GrepPipe    pipe;
-    Polarity    pol  = Polarity::None;
-    bool        sameCapture = false;   // a guard-only requirement (shGuardRequirements): it guards only the capture that reaches it
-};
-
-inline std::vector<ShAssert> shAssertions( const ShLineToks& lt, const std::vector<std::pair<std::string, Reporter>>& defined )
-{
-    std::vector<ShAssert> out;
-    for( std::size_t li = 0; li < lt.size(); ++li )
-    {
-        const std::vector<ShTok>& t = lt[li];
-        if( t.empty() )
-        {
-            continue;
-        }
-        // case arm: `pattern) LIST ;;` — read the list after the arm's ')'
-        std::size_t from = 0;
-        if( !t[0].op && t[0].text.size() > 1 && t[0].text.back() == ')' && t[0].text.find( "$(" ) == std::string::npos )
-        {
-            from = 1;
-        }
-        if( from >= t.size() )
-        {
-            continue;   // a case pattern alone on its line: no list to read
-        }
-        if( !t[from].op && ( t[from].text == "elif" || t[from].text == "while" ) )
-        {
-            continue;   // an elif / while condition is not judged (a stated floor)
-        }
-        if( !t[from].op && t[from].text == "if" )
-        {
-            std::size_t condEnd = from + 1;
-            while( condEnd < t.size() && !( t[condEnd].op && ( t[condEnd].text == ";" || t[condEnd].text == "&&" || t[condEnd].text == "||" ) )
-                   && !( !t[condEnd].op && t[condEnd].text == "then" ) )
-            {
-                ++condEnd;
-            }
-            const GrepPipe g = grepPipe( t, from + 1, condEnd );
-            if( !g.ok || ( condEnd < t.size() && t[condEnd].op && ( t[condEnd].text == "&&" || t[condEnd].text == "||" ) ) )
-            {
-                continue;
-            }
-            // the whole if … fi, lines joined with ';': its top-level then / elif / else, nested ifs skipped
-            std::vector<ShTok> st;
-            for( std::size_t j = li; j < lt.size() && j < li + 80; ++j )
-            {
-                st.insert( st.end(), lt[j].begin(), lt[j].end() );
-                st.push_back( { ";", true } );
-            }
-            std::size_t thenAt = st.size(), elseAt = st.size();
-            bool        hasElif = false;
-            int         depth   = 0;
-            for( std::size_t k = 0; k < st.size(); ++k )
-            {
-                if( st[k].op )
-                {
-                    continue;
-                }
-                const std::string& w = st[k].text;
-                if( w == "if" )
-                {
-                    ++depth;
-                }
-                else if( w == "fi" )
-                {
-                    if( --depth == 0 )
-                    {
-                        break;
-                    }
-                }
-                else if( depth == 1 && w == "then" && thenAt == st.size() )
-                {
-                    thenAt = k;
-                }
-                else if( depth == 1 && w == "elif" )
-                {
-                    hasElif = true;
-                }
-                else if( depth == 1 && w == "else" )
-                {
-                    elseAt = k;
-                }
-            }
-            if( thenAt == st.size() || hasElif )
-            {
-                continue;   // no then found, or an elif chain (its branches are not judged)
-            }
-            const Reporter onThen = reporterOf( st, thenAt + 1, defined );
-            const Reporter onElse = elseAt < st.size() ? reporterOf( st, elseAt + 1, defined ) : Reporter::None;
-            out.push_back( { li, g, polarityOf( g.negated, onThen, onElse ) } );
-            continue;
-        }
-        std::vector<ShTok> list( t.begin() + static_cast<std::ptrdiff_t>( from ), t.end() );
-        AndOr              ao;
-        if( andOrShape( list, defined, ao ) )
-        {
-            out.push_back( { li, ao.pipe, polarityOf( ao.pipe.negated, ao.onTrue, ao.onFalse ) } );
-            continue;
-        }
-        // `PIPE || R` / `PIPE && R` alone
-        for( std::size_t k = 0; k < list.size(); ++k )
-        {
-            if( list[k].op && ( list[k].text == "||" || list[k].text == "&&" ) )
-            {
-                const GrepPipe g = grepPipe( list, 0, k );
-                const Reporter r = reporterOf( list, k + 1, defined );
-                if( g.ok && r != Reporter::None )
-                {
-                    const bool onMatch = list[k].text == "&&";
-                    out.push_back( { li, g, polarityOf( g.negated, onMatch ? r : Reporter::None, onMatch ? Reporter::None : r ) } );
-                }
-                break;
-            }
-        }
-    }
-    return out;
-}
-
-// Requirements the absence scan does not read as assertions but that still GUARD a capture (rv-cr-qd-kinds-068
-// §1c, the kind's own rule: a crash empties the text, so a positive on that text fails the script): an if / elif
-// condition of &&-joined greps on the text whose then-branch passes (if echo "$V" | grep -q A && echo "$V" |
-// grep -qF B; then ok), and a grep on the text through a function the script defines (rows "$V" | grep -q P &&
-// ok). Requirements only — never an absence row — and each guards only the SAME capture (the assignment of the
-// variable that reaches it is the one that reaches the absence; a reassigned variable is a different run). Not
-// read as guards (a crash can still pass): a condition with || in it, a helper the script does not define, a
-// helper given more than one variable.
-inline GrepPipe guardPipe( const std::vector<ShTok>& t, std::size_t b, std::size_t e, const std::vector<std::pair<std::string, Reporter>>& defined )
-{
-    GrepPipe g = grepPipe( t, b, e );
-    if( g.ok )
-    {
-        return g;
-    }
-    GrepPipe    h;
-    std::size_t s = b;
-    while( s < e && !t[s].op && ( t[s].text == "{" || t[s].text == "(" ) )
-    {
-        ++s;
-    }
-    if( s < e && t[s].op && t[s].text == "!" )
-    {
-        h.negated = true;
-        ++s;
-    }
-    if( s >= e || t[s].op
-        || std::none_of( defined.begin(), defined.end(), [ & ]( const std::pair<std::string, Reporter>& d ) { return d.first == t[s].text; } ) )
-    {
-        return h;
-    }
-    std::size_t p0e = s + 1;
-    while( p0e < e && !( t[p0e].op && t[p0e].text == "|" ) )
-    {
-        ++p0e;
-    }
-    if( p0e >= e )
-    {
-        return h;
-    }
-    std::string_view v;
-    std::size_t      vars = 0;
-    for( std::size_t k = s + 1; k < p0e; ++k )
-    {
-        const std::string_view r = varRef( t[k].text );
-        if( !r.empty() )
-        {
-            v = r;
-            ++vars;
-        }
-        else if( t[k].text.find( "$(" ) != std::string::npos )
-        {
-            return h;
-        }
-    }
-    std::size_t last = p0e + 1;
-    for( std::size_t k = p0e + 1; k < e; ++k )
-    {
-        if( t[k].op && t[k].text == "|" )
-        {
-            last = k + 1;
-        }
-    }
-    std::size_t operands = 0;
-    if( vars != 1 || !isQuietGrep( t, last, e, operands ) || operands > 1 )
-    {
-        return h;
-    }
-    h.var = std::string( v );
-    h.ok  = true;
-    return h;
-}
-
-inline std::vector<ShAssert> shGuardRequirements( const ShLineToks& lt, const std::vector<std::pair<std::string, Reporter>>& defined )
-{
-    std::vector<ShAssert> out;
-    const auto keep = [ & ]( std::size_t li, const GrepPipe& g, Reporter onMatchSide, Reporter onOther )
-    {
-        if( g.ok && !g.direct && !g.var.empty() && polarityOf( g.negated, onMatchSide, onOther ) == Polarity::Requirement )
-        {
-            out.push_back( { li, g, Polarity::Requirement, true } );
-        }
+        const std::size_t nl = at == 0 ? std::string_view::npos : s.rfind( '\n', at - 1 );
+        return nl == std::string_view::npos ? std::size_t{ 0 } : nl + 1;
     };
-    for( std::size_t li = 0; li < lt.size(); ++li )
+    const auto continued = [ & ]( std::size_t lineEnd ) { return lineEnd > 0 && s[lineEnd - 1] == '\\'; };
+    std::size_t b = lineOpen( pos );
+    while( b >= 2 && continued( b - 1 ) )
     {
-        const std::vector<ShTok>& t = lt[li];
-        if( t.empty() || t[0].op )
+        b = lineOpen( b - 1 );
+    }
+    std::size_t e = s.find( '\n', pos );
+    while( e != std::string_view::npos && continued( e ) )
+    {
+        e = s.find( '\n', e + 1 );
+    }
+    const std::string_view raw = s.substr( b, ( e == std::string_view::npos ? s.size() : e ) - b );
+    std::string            text;
+    char                   quote = 0;
+    for( std::size_t i = 0; i < raw.size(); ++i )
+    {
+        const char c = raw[i];
+        if( quote == 0 && c == '#' && ( i == 0 || isSpace( raw[i - 1] ) ) )
         {
-            continue;
-        }
-        if( t[0].text == "if" || t[0].text == "elif" )
-        {
-            std::vector<ShTok> st;
-            for( std::size_t j = li; j < lt.size() && j < li + 80; ++j )
-            {
-                st.insert( st.end(), lt[j].begin(), lt[j].end() );
-                st.push_back( { ";", true } );
-            }
-            std::size_t thenAt = 1;
-            while( thenAt < st.size() && !( !st[thenAt].op && st[thenAt].text == "then" ) )
-            {
-                ++thenAt;
-            }
-            std::size_t condEnd = thenAt;
-            while( condEnd > 1 && st[condEnd - 1].op && st[condEnd - 1].text == ";" )
-            {
-                --condEnd;
-            }
-            const bool hasOr = std::any_of( st.begin() + 1, st.begin() + static_cast<std::ptrdiff_t>( condEnd ),
-                                            []( const ShTok& w ) { return w.op && ( w.text == "||" || w.text == ";" ); } );
-            if( thenAt >= st.size() || hasOr )
-            {
-                continue;
-            }
-            // the else reporter only for an `if` with no elif chain (an elif's else is the chain's)
-            Reporter onElse = Reporter::None;
-            if( t[0].text == "if" )
-            {
-                std::size_t elseAt  = st.size();
-                bool        hasElif = false;
-                int         depth   = 0;
-                for( std::size_t k = 0; k < st.size(); ++k )
-                {
-                    if( st[k].op )
-                    {
-                        continue;
-                    }
-                    const std::string& w = st[k].text;
-                    if( w == "if" )
-                    {
-                        ++depth;
-                    }
-                    else if( w == "fi" && --depth == 0 )
-                    {
-                        break;
-                    }
-                    else if( depth == 1 && w == "elif" )
-                    {
-                        hasElif = true;
-                    }
-                    else if( depth == 1 && w == "else" )
-                    {
-                        elseAt = k;
-                    }
-                }
-                onElse = ( !hasElif && elseAt < st.size() ) ? reporterOf( st, elseAt + 1, defined ) : Reporter::None;
-            }
-            const Reporter onThen = reporterOf( st, thenAt + 1, defined );
-            std::size_t    cb     = 1;
-            for( std::size_t k = 1; k <= condEnd; ++k )
-            {
-                if( k == condEnd || ( st[k].op && st[k].text == "&&" ) )
-                {
-                    keep( li, guardPipe( st, cb, k, defined ), onThen, onElse );
-                    cb = k + 1;
-                }
-            }
-            continue;
-        }
-        // `HELPER "$V" | grep -q P && R1 || R2` and `… && R` / `… || R`: the helper spelling grepPipe does not read
-        std::size_t andAt = t.size(), orAt = t.size();
-        for( std::size_t k = 0; k < t.size(); ++k )
-        {
-            if( t[k].op && t[k].text == "&&" && andAt == t.size() && orAt == t.size() )
-            {
-                andAt = k;
-            }
-            else if( t[k].op && t[k].text == "||" && orAt == t.size() )
-            {
-                orAt = k;
-            }
-            else if( t[k].op && ( t[k].text == ";" || t[k].text == ";;" ) )
+            const std::size_t nl = raw.find( '\n', i );
+            if( nl == std::string_view::npos )
             {
                 break;
             }
-        }
-        const std::size_t pipeEnd = std::min( andAt, orAt );
-        if( pipeEnd == t.size() )
-        {
+            i = nl - 1;   // a comment on a continued line ends at its newline
             continue;
         }
-        const GrepPipe g       = guardPipe( t, 0, pipeEnd, defined );
-        const Reporter onTrue  = andAt < t.size() && andAt == pipeEnd ? reporterOf( t, andAt + 1, defined ) : Reporter::None;
-        const Reporter onFalse = orAt < t.size() ? reporterOf( t, orAt + 1, defined ) : Reporter::None;
-        keep( li, g, onTrue, onFalse );
-    }
-    return out;
-}
-
-// The innermost span (function) holding `byte`, or spans.size() for top-level code.
-inline std::size_t scopeOf( const std::vector<Span>& spans, std::uint32_t byte ) noexcept
-{
-    std::size_t   best    = spans.size();
-    std::uint32_t bestLen = UINT32_MAX;
-    for( std::size_t k = 0; k < spans.size(); ++k )
-    {
-        if( byte >= spans[k].begin && byte < spans[k].end && spans[k].end - spans[k].begin < bestLen )
+        if( c == '\\' && quote != '\'' && i + 1 < raw.size() )
         {
-            best    = k;
-            bestLen = spans[k].end - spans[k].begin;
-        }
-    }
-    return best;
-}
-
-// The assignment of `v` that reaches line `li` within its scope: the last such line before it, or npos.
-inline std::size_t assignmentOf( const ShLineToks& lt, const std::vector<std::size_t>& scope, std::size_t li, std::string_view v )
-{
-    const std::string eq = std::string( v ) + "=";
-    for( std::size_t back = li; back > 0; --back )
-    {
-        const std::size_t k = back - 1;   // walk upward without an unsigned wrap at line 0
-        if( scope[k] != scope[li] )
-        {
-            continue;
-        }
-        const std::vector<ShTok>& t = lt[k];
-        for( std::size_t w = 0; w < t.size(); ++w )
-        {
-            if( !t[w].op && t[w].text.rfind( eq, 0 ) == 0 )
+            if( raw[i + 1] == '\n' )
             {
-                return k;
-            }
-        }
-    }
-    return std::string::npos;
-}
-
-// Is the text of `v` required somewhere in the absence's scope: a presence test (-n / -z / ${#v}), a case on
-// it, or a requirement assertion (a match is the pass branch, or no match the failure branch) on it?
-inline bool contentRequired( const std::vector<ShLine>& lines, const ShLineToks& lt, const std::vector<std::size_t>& scope,
-                             const std::vector<ShAssert>& asserts, std::size_t absenceLine, std::string_view v )
-{
-    const std::string q1 = "\"$" + std::string( v ) + "\"";
-    const std::string q2 = "\"${" + std::string( v ) + "}\"";
-    const std::string q3 = "$" + std::string( v );
-    const std::string q4 = "${#" + std::string( v ) + "}";
-    for( std::size_t k = 0; k < lines.size(); ++k )
-    {
-        if( scope[k] != scope[absenceLine] || k == absenceLine )
-        {
-            continue;
-        }
-        const std::string& l = lines[k].text;
-        for( const char* test : { "-n ", "-z " } )
-        {
-            for( std::size_t p = l.find( test ); p != std::string::npos; p = l.find( test, p + 1 ) )
-            {
-                const std::string_view rest = std::string_view( l ).substr( p + 3 );
-                if( rest.starts_with( q1 ) || rest.starts_with( q2 ) || ( rest.starts_with( q3 ) && ( rest.size() == q3.size() || !isIdentChar( rest[q3.size()] ) ) ) )
-                {
-                    return true;
-                }
-            }
-        }
-        if( l.find( q4 ) != std::string::npos )
-        {
-            return true;
-        }
-        const std::vector<ShTok>& ct = lt[k];
-        if( ct.size() >= 3 && ct[0].text == "case" && varRef( ct[1].text ) == v )
-        {
-            return true;
-        }
-    }
-    for( const ShAssert& a : asserts )
-    {
-        if( a.line != absenceLine && scope[a.line] == scope[absenceLine] && a.pol == Polarity::Requirement && !a.pipe.direct && a.pipe.var == v
-            && ( !a.sameCapture || assignmentOf( lt, scope, a.line, v ) == assignmentOf( lt, scope, absenceLine, v ) ) )
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
-// Is the variable's capture guarded — its failure checked or its content required somewhere in scope?
-inline bool captureGuarded( const std::vector<ShLine>& lines, const ShLineToks& lt, const std::vector<std::size_t>& scope,
-                            const std::vector<ShAssert>& asserts, std::size_t absenceLine, std::size_t assignLine, std::string_view v, bool errexit )
-{
-    const std::string eq = std::string( v ) + "=";
-    const std::vector<ShTok>& t = lt[assignLine];
-    bool        plainAssign = false;
-    std::size_t at          = t.size();
-    for( std::size_t w = 0; w < t.size(); ++w )
-    {
-        if( !t[w].op && t[w].text.rfind( eq, 0 ) == 0 )
-        {
-            at          = w;
-            plainAssign = w == 0 || ( t[w - 1].op ) || t[w - 1].text == "if" || t[w - 1].text == "elif" || t[w - 1].text == "while";
-            break;
-        }
-    }
-    // if ! V="$( … )"; then / while V=… — the rc decides a branch
-    if( at > 0 && at < t.size() && ( t[at - 1].text == "if" || t[at - 1].text == "elif" || t[at - 1].text == "while" || ( t[at - 1].op && t[at - 1].text == "!" ) ) )
-    {
-        return true;
-    }
-    // V="$( … )" || … / && … on the capture, or an rc read right after it on the same line
-    for( std::size_t w = at + 1; w < t.size(); ++w )
-    {
-        if( t[w].op && ( t[w].text == "||" || t[w].text == "&&" ) )
-        {
-            return true;
-        }
-        if( t[w].text.find( "$?" ) != std::string::npos || t[w].text.find( "PIPESTATUS" ) != std::string::npos )
-        {
-            return true;
-        }
-    }
-    // the next line in scope reads $? / PIPESTATUS
-    for( std::size_t k = assignLine + 1; k < lines.size(); ++k )
-    {
-        if( scope[k] != scope[assignLine] )
-        {
-            continue;
-        }
-        if( lines[k].text.find( "$?" ) != std::string::npos || lines[k].text.find( "PIPESTATUS" ) != std::string::npos )
-        {
-            return true;
-        }
-        break;
-    }
-    // errexit aborts the script on a plain capture's failure (local / declare / export mask the rc)
-    if( errexit && plainAssign )
-    {
-        return true;
-    }
-    // a presence test, a case on the text, or a requirement on the text anywhere in scope — on the variable
-    // itself or on one DERIVED from it (W="$( printf '%s' "$V" | … )" then a check on W): a check that W is
-    // non-empty or carries a pattern is a check that V had content.
-    if( contentRequired( lines, lt, scope, asserts, absenceLine, v ) )
-    {
-        return true;
-    }
-    const std::string ref1 = "\"$" + std::string( v ) + "\"";
-    for( std::size_t k = 0; k < lines.size(); ++k )
-    {
-        if( scope[k] != scope[absenceLine] || k == absenceLine || lt[k].empty() || lt[k][0].op )
-        {
-            continue;
-        }
-        const std::string& w0 = lt[k][0].text;
-        const std::size_t  eqAt = w0.find( '=' );
-        if( eqAt == std::string::npos || eqAt == 0 || w0.find( "$(" ) == std::string::npos )
-        {
-            continue;
-        }
-        const std::string_view rhs = std::string_view( w0 ).substr( eqAt + 1 );
-        const std::size_t      cap = rhs.find( "$(" );
-        if( cap == std::string_view::npos )
-        {
-            continue;
-        }
-        const std::string_view in = rhs.substr( cap + 2 );
-        std::size_t            b   = 0;
-        while( b < in.size() && isSpace( in[b] ) )
-        {
-            ++b;
-        }
-        if( ( in.substr( b ).starts_with( "printf" ) || in.substr( b ).starts_with( "echo" ) ) && in.find( ref1 ) != std::string_view::npos )
-        {
-            const std::string w = w0.substr( 0, eqAt );
-            if( w != v && contentRequired( lines, lt, scope, asserts, absenceLine, w ) )
-            {
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
-// Does the absence's own line read an rc ($?, or a variable named like rc / status) — `if [ "$RC" = 0 ] && ! …`?
-inline bool lineReadsRc( std::string_view l )
-{
-    if( l.find( "$?" ) != std::string_view::npos || l.find( "PIPESTATUS" ) != std::string_view::npos )
-    {
-        return true;
-    }
-    for( std::size_t p = l.find( '$' ); p != std::string_view::npos; p = l.find( '$', p + 1 ) )
-    {
-        std::size_t q = p + 1;
-        if( q < l.size() && l[q] == '{' )
-        {
-            ++q;
-        }
-        std::size_t e = q;
-        while( e < l.size() && isIdentChar( l[e] ) )
-        {
-            ++e;
-        }
-        for( const std::string& tk : nameTokens( l.substr( q, e - q ) ) )
-        {
-            if( tk == "rc" || tk == "status" || tk == "ret" || tk == "exit" )
-            {
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
-// Script-defined reporter functions, classified by name tokens, else by body signal (prints FAIL / sets a
-// failure flag → fail; prints PASS → pass).
-inline std::vector<std::pair<std::string, Reporter>> shDefinedReporters( std::string_view src, const std::vector<ShLine>& lines, const ShLineToks& lt,
-                                                                         const std::vector<Span>& spans )
-{
-    std::vector<std::pair<std::string, Reporter>> out;
-    for( std::size_t li = 0; li < lines.size(); ++li )
-    {
-        const ShLine&             l = lines[li];
-        const std::vector<ShTok>& t = lt[li];
-        if( t.empty() || t[0].op )
-        {
-            continue;
-        }
-        std::string name;
-        if( t[0].text == "function" && t.size() > 1 )
-        {
-            name = t[1].text;
-        }
-        else if( t[0].text.size() > 2 && t[0].text.find( "()" ) != std::string::npos && t[0].text.find( '$' ) == std::string::npos )
-        {
-            name = t[0].text.substr( 0, t[0].text.find( "()" ) );
-        }
-        else if( t.size() > 1 && t[1].text.rfind( "()", 0 ) == 0 )
-        {
-            name = t[0].text;
-        }
-        while( !name.empty() && name.back() == '(' )
-        {
-            name.pop_back();
-        }
-        if( name.empty() || !std::all_of( name.begin(), name.end(), []( char c ) { return isIdentChar( c ) || c == '-'; } ) )
-        {
-            continue;
-        }
-        std::vector<ShTok> probe{ { name, false } };
-        Reporter           r = reporterOf( probe, 0, {} );
-        if( r == Reporter::None )
-        {
-            const std::size_t s = scopeOf( spans, l.startByte );
-            const std::string_view body = s < spans.size() ? src.substr( spans[s].begin, spans[s].end - spans[s].begin ) : std::string_view( l.text );
-            if( body.find( "FAIL" ) != std::string_view::npos || body.find( "fail=1" ) != std::string_view::npos )
-            {
-                r = Reporter::Fail;
-            }
-            else if( body.find( "PASS" ) != std::string_view::npos )
-            {
-                r = Reporter::Pass;
-            }
-        }
-        out.emplace_back( name, r );
-    }
-    return out;
-}
-
-// errexit state at each logical line: a top-level `set -e…` / `set -o errexit` turns it on, `set +e` off.
-inline std::vector<char> shErrexit( const std::vector<ShLine>& lines, const ShLineToks& lt )
-{
-    std::vector<char> out( lines.size(), 0 );
-    bool              on = false;
-    if( !lines.empty() && lines[0].text.rfind( "#!", 0 ) == 0 )
-    {
-        on = lines[0].text.find( " -e" ) != std::string::npos;
-    }
-    for( std::size_t k = 0; k < lines.size(); ++k )
-    {
-        const std::vector<ShTok>& t = lt[k];
-        for( std::size_t w = 0; w + 1 < t.size(); ++w )
-        {
-            if( t[w].op || t[w].text != "set" )
-            {
+                text.push_back( ' ' );
+                ++i;
                 continue;
             }
-            for( std::size_t a = w + 1; a < t.size() && !t[a].op; ++a )
-            {
-                const std::string& f = t[a].text;
-                if( f.size() > 1 && f[0] == '-' && f[1] != 'o' && f.find( 'e' ) != std::string::npos )
-                {
-                    on = true;
-                }
-                else if( f.size() > 1 && f[0] == '+' && f.find( 'e' ) != std::string::npos )
-                {
-                    on = false;
-                }
-                else if( f == "-o" && a + 1 < t.size() && t[a + 1].text == "errexit" )
-                {
-                    on = true;
-                }
-            }
+            text.push_back( c );
+            text.push_back( raw[++i] );
+            continue;
         }
-        out[k] = on ? 1 : 0;
+        if( ( c == '"' || c == '\'' ) && ( quote == 0 || quote == c ) )
+        {
+            quote = quote == 0 ? c : 0;
+        }
+        text.push_back( c );
     }
-    return out;
+    return { static_cast<std::uint32_t>( b ), std::move( text ) };
 }
 
 inline std::string collapseSpaces( std::string_view s )
@@ -2965,96 +1821,2168 @@ inline std::string collapseSpaces( std::string_view s )
     return out;
 }
 
-inline std::vector<Site> scanVacuousAssertBash( std::string_view src, const std::vector<Span>& spans )
+// ── the status-dataflow walk: every assertion names the commands whose output it reads ──────────────────────────────
+// The script is parsed once by the B43 matcher's port (shstatus.h), which also says what every command's exit status
+// reaches. The MODEL: a run under test that fails prints nothing (or is cut short), so the text it feeds is EMPTY. A
+// producer whose status nothing reads (shstatus: unchecked) may fail silently; one whose status is read (|| no, if,
+// rc=$? compared, set -e) reports its own failure and never fails silently. For a failure set S of silent producers:
+//   * a judgment (an and-or list ending in reporters, an if chain, a case) DEFINITELY PASSES when every branch it can
+//     take with S's outputs empty is a PASS reporter: an absence grep, [ -s F ] / [ -n "$V" ] read as failure, a parity
+//     ([ "$A" = "$B" ], cmp, diff) of two empty texts;
+//   * another judgment in the same scope (the function body, or the top level) GUARDS S when it definitely FAILS under
+//     S (a presence check, a positive grep on the same text, an enclosing if whose condition the empty text falsifies).
+// A judgment that definitely passes under some S no guard catches is a vacuous-assert site. Text flows through captures
+// (V="$( … )"), files a command redirected into (> F, a function that writes "$TMP/$1.out" called with mod1), pipes,
+// filters that keep an empty input empty (grep -o, sed, awk without END, tr, cut, head, tail, sort, uniq, an inline
+// python3 -c), a function that only filters its argument, and a wrapper (shstatus: a function whose status IS a run's).
+// Three status shapes need no assertion at all: a FAIL reporter that sets the gate's failure flag, called inside $( )
+// whose status nothing reads (the flag dies with the subshell); an rc captured (rc=$?) whose value no test reads before
+// it is overwritten (B43's H2, per capture: printing it in a FAIL message is not a test); and a `|| fallback` after a
+// pipeline whose last stage always succeeds (head, sort, tr, …), which reads that stage's status, never the run's.
+namespace va
 {
-    std::vector<Site>         out;
-    const std::vector<ShLine> lines = shLogicalLines( src );
-    if( lines.empty() )
+
+namespace sh = rw::shstatus;
+using sh::kNone;
+
+enum class Rep : std::uint8_t
+{
+    None,
+    Pass,
+    Fail,
+};
+
+enum class Tri : std::uint8_t
+{
+    F,
+    T,
+    U,
+};
+
+inline Tri triNot( Tri v ) noexcept
+{
+    return v == Tri::T ? Tri::F : ( v == Tri::F ? Tri::T : Tri::U );
+}
+inline Tri triAnd( Tri a, Tri b ) noexcept
+{
+    if( a == Tri::F || b == Tri::F )
     {
-        return out;
+        return Tri::F;
     }
-    std::vector<std::size_t> scope( lines.size() );
-    ShLineToks               lt( lines.size() );
-    for( std::size_t k = 0; k < lines.size(); ++k )
+    return ( a == Tri::T && b == Tri::T ) ? Tri::T : Tri::U;
+}
+inline Tri triOr( Tri a, Tri b ) noexcept
+{
+    if( a == Tri::T || b == Tri::T )
     {
-        scope[k] = scopeOf( spans, lines[k].startByte );
-        lt[k]    = shTokens( lines[k].text );
+        return Tri::T;
     }
-    const std::vector<std::pair<std::string, Reporter>> defined = shDefinedReporters( src, lines, lt, spans );
-    const std::vector<ShAssert>                         asserts = shAssertions( lt, defined );
-    const std::vector<char>                             errexit = shErrexit( lines, lt );
-    std::vector<ShAssert>                               guards  = asserts;   // what guards a capture: every assertion plus the guard-only requirements
+    return ( a == Tri::F && b == Tri::F ) ? Tri::F : Tri::U;
+}
+
+// Where a text comes from: the silent-failable producers it is made of. EMPTY under S when nothing else feeds it
+// (`unknown` false), some producer feeds it, and every producer is in S.
+struct Prov
+{
+    bool                       unknown = false;
+    std::vector<std::uint32_t> leaves;
+
+    void add( const Prov& o )
     {
-        const std::vector<ShAssert> extra = shGuardRequirements( lt, defined );
-        guards.insert( guards.end(), extra.begin(), extra.end() );
+        unknown = unknown || o.unknown;
+        leaves.insert( leaves.end(), o.leaves.begin(), o.leaves.end() );
     }
-    for( const ShAssert& a : asserts )
+    static Prov opaque()
     {
-        if( a.pol != Polarity::Absence || lineReadsRc( lines[a.line].text ) )
+        Prov p;
+        p.unknown = true;
+        return p;
+    }
+    bool emptyUnder( const std::vector<std::uint32_t>& s ) const
+    {
+        return !unknown && !leaves.empty()
+            && std::all_of( leaves.begin(), leaves.end(), [ & ]( std::uint32_t l ) { return std::find( s.begin(), s.end(), l ) != s.end(); } );
+    }
+};
+
+struct Env   // a function's positional arguments and its stdin, bound at a call site
+{
+    std::vector<Prov> args;      // $1..
+    bool              bound = false;
+    bool              hasIn = false;
+    Prov              in;        // the caller's stdin: its pipe, its <<< or < redirect
+};
+
+struct ReachStep   // an enclosing if / case, and the body index a statement sits in
+{
+    std::uint32_t node;
+    std::size_t   branch;
+};
+
+struct Assign
+{
+    std::string            name;
+    std::uint32_t          node   = kNone;
+    std::int32_t           word   = -1;    // index in node.words / -1 - index in node.assigns; INT32_MIN = an opaque binding (read, for)
+    std::uint32_t          pos    = 0;
+    std::uint32_t          scope  = kNone;
+    bool                   cond   = false;   // right of && / || in its statement: it may not run
+    std::vector<ReachStep> reach;            // the if / case branches it sits in
+};
+
+struct Writer
+{
+    std::string   target;       // normalized
+    std::uint32_t scope = kNone;
+    std::uint32_t pos   = 0;
+    std::uint32_t node  = kNone;  // the writing command (Simple or compound)
+    const sh::Item* item  = nullptr;   // its pipeline, when it is a stage of one
+    std::size_t     stage = 0;
+};
+
+struct Judgment
+{
+    enum class Kind : std::uint8_t
+    {
+        AndOr,
+        If,
+        Case,
+    };
+    Kind                 kind  = Kind::AndOr;
+    const sh::AndOr*     ao    = nullptr;
+    std::uint32_t        node  = kNone;   // If / Case node
+    std::uint32_t        pos   = 0;
+    std::uint32_t        scope = kNone;
+    using Reach = ReachStep;
+    std::vector<Reach>   reach;
+};
+
+inline std::string normTarget( std::string_view w )
+{
+    std::string u = sh::detail::unq( w );
+    std::string out;
+    for( std::size_t i = 0; i < u.size(); ++i )
+    {
+        if( u[i] == '$' && i + 1 < u.size() && u[i + 1] == '{' )
         {
-            continue;
-        }
-        bool vacuous = a.pipe.direct;
-        if( !vacuous )
-        {
-            // follow a derived capture (V="$( printf '%s' "$W" | … )") back to its source, up to three steps: the
-            // absence is vacuous only when the chain ends in a capture of a RUN UNDER TEST and no step of it is
-            // guarded (its failure checked, or its content required).
-            std::string var = a.pipe.var;
-            bool        guard = false;
-            bool        runSource = false;
-            for( int step = 0; step < 3 && !guard && !runSource; ++step )
+            const std::size_t close = u.find( '}', i + 2 );
+            const std::string inner = close == std::string::npos ? std::string() : u.substr( i + 2, close - i - 2 );
+            if( !inner.empty() && std::all_of( inner.begin(), inner.end(), []( char c ) { return isIdentChar( c ); } ) )
             {
-                const std::size_t as = assignmentOf( lt, scope, a.line, var );
-                if( as == std::string::npos )
+                out += "$" + inner;
+                i = close;
+                continue;
+            }
+        }
+        out.push_back( u[i] );
+    }
+    return out;
+}
+
+inline bool isStdoutRedir( const sh::Redir& r )
+{
+    if( r.op == ">" || r.op == ">>" || r.op == ">|" )
+    {
+        return r.fd == -1 || r.fd == 1;
+    }
+    if( r.op == "&>" || r.op == "&>>" )
+    {
+        return true;
+    }
+    return r.op == ">&" && ( r.fd == -1 || r.fd == 1 ) && r.target != "1";
+}
+
+class Script
+{
+public:
+    Script( std::string_view src, const sh::Tree& t, const sh::Analysis& a ) : src_( src ), t_( t ), a_( a )
+    {
+        scope_.assign( t.nodes.size(), kNone );
+        visit( t.top, kNone, {} );
+        classifyReporters();
+        proveRunWrappers();
+    }
+
+    std::vector<Site> sites() const;
+
+private:
+    std::string_view                              src_;
+    const sh::Tree&                               t_;
+    const sh::Analysis&                           a_;
+    std::vector<std::uint32_t>                    scope_;      // per node: the enclosing function node, kNone at top level
+    std::vector<std::pair<std::string, std::uint32_t>> funcs_;  // name -> Func node (the last definition)
+    std::vector<std::pair<std::string, Rep>>      reporters_;
+    std::vector<std::string>                      flagReporters_;   // FAIL reporters that set a failure flag
+    std::vector<std::string>                      runWrappers_;     // sorted: functions whose status is a run's
+    std::vector<Assign>                           assigns_;
+    std::vector<Writer>                           writers_;
+    std::vector<Judgment>                         judgments_;
+    std::vector<std::uint32_t>                    captures_;   // assign-only `X=$?` simple commands
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> subCalls_;   // ( host simple, a call inside one of its $( ) )
+    std::vector<const sh::AndOr*>                 andOrs_;     // every statement, for the fallback shape
+    std::vector<std::uint32_t>                    andOrScope_;
+    mutable bool                                  inReachCheck_ = false;   // provVar's reach check does not nest
+
+    const sh::Node& node( std::uint32_t n ) const
+    {
+        return t_.nodes[n];
+    }
+    std::size_t cmdIdx( const sh::Node& n ) const
+    {
+        return n.kind == sh::NodeKind::Simple ? sh::detail::cmdWordIndex( n ) : std::string::npos;
+    }
+    std::string cmdWord( std::uint32_t n ) const
+    {
+        const sh::Node&   nd = node( n );
+        const std::size_t k  = cmdIdx( nd );
+        return k == std::string::npos ? std::string() : sh::detail::unq( nd.words[k].text );
+    }
+    std::uint32_t funcNode( std::string_view name ) const
+    {
+        for( auto it = funcs_.rbegin(); it != funcs_.rend(); ++it )
+        {
+            if( it->first == name )
+            {
+                return it->second;
+            }
+        }
+        return kNone;
+    }
+    const sh::List* funcBody( std::uint32_t f ) const
+    {
+        if( f == kNone || node( f ).bodies.empty() || node( f ).bodies[0] == kNone )
+        {
+            return nullptr;
+        }
+        return &t_.lists[node( f ).bodies[0]];
+    }
+
+    // ── the index: scopes, functions, assignments, writers, judgments ──────────────────────────────────────────────
+    void visit( std::uint32_t list, std::uint32_t scope, std::vector<Judgment::Reach> reach )
+    {
+        if( list == kNone )
+        {
+            return;
+        }
+        const sh::List& l = t_.lists[list];
+        for( std::size_t k = 0; k < l.size(); ++k )
+        {
+            const sh::AndOr& ao = l[k];
+            andOrs_.push_back( &ao );
+            andOrScope_.push_back( scope );
+            if( ao.size() > 1 )
+            {
+                judgments_.push_back( { Judgment::Kind::AndOr, &ao, kNone, posOf( ao ), scope, reach } );
+            }
+            for( const sh::Item& it : ao )
+            {
+                for( std::size_t j = 0; j < it.cmds.size(); ++j )
                 {
-                    break;
+                    visitCmd( it.cmds[j], scope, reach, &it, j, &it != &ao.front() );
                 }
-                const std::string&     al  = lines[as].text;
-                const std::size_t      eq  = al.find( var + "=" );
-                const std::string_view rhs = std::string_view( al ).substr( eq + var.size() + 1 );
-                if( rhs.find( "$(" ) == std::string_view::npos )
+            }
+        }
+    }
+    std::uint32_t posOf( const sh::AndOr& ao ) const
+    {
+        return ao.empty() || ao[0].cmds.empty() ? 0 : node( ao[0].cmds[0] ).pos;
+    }
+    void visitCmd( std::uint32_t c, std::uint32_t scope, const std::vector<Judgment::Reach>& reach, const sh::Item* item, std::size_t stage, bool cond )
+    {
+        scope_[c]         = scope;
+        const sh::Node& n = node( c );
+        for( const sh::Redir& r : n.fredirs )
+        {
+            if( isStdoutRedir( r ) && !r.target.empty() && r.target != "/dev/null" && r.target[0] != '&'
+                && !std::all_of( r.target.begin(), r.target.end(), []( char ch ) { return ch >= '0' && ch <= '9'; } ) )
+            {
+                writers_.push_back( { normTarget( r.target ), scope, n.pos, c, item, stage } );
+            }
+        }
+        switch( n.kind )
+        {
+            case sh::NodeKind::Simple:
+            {
+                for( std::size_t a = 0; a < n.assigns.size(); ++a )
                 {
-                    break;   // a literal or a copy: not a run under test
+                    const std::string& tx = n.assigns[a].text;
+                    assigns_.push_back( { tx.substr( 0, tx.find_first_of( "+=[" ) ), c, -1 - static_cast<std::int32_t>( a ), n.pos, scope, cond, reach } );
                 }
-                const std::vector<ShTok> inner = shTokens( rhs.substr( rhs.find( "$(" ) + 2 ) );
-                std::size_t              innerEnd = 0;
-                while( innerEnd < inner.size() && !( inner[innerEnd].op && inner[innerEnd].text == "|" ) )
+                const std::string cw = n.words.empty() ? std::string() : sh::detail::unq( n.words[0].text );
+                if( cw == "local" || cw == "declare" || cw == "export" || cw == "readonly" || cw == "typeset" )
                 {
-                    ++innerEnd;
-                }
-                guard = captureGuarded( lines, lt, scope, guards, a.line, as, var, errexit[as] != 0 );
-                if( isRunUnderTest( inner, 0, innerEnd ) )
-                {
-                    runSource = true;
-                    break;
-                }
-                std::string next;
-                if( !inner.empty() && ( inner[0].text == "printf" || inner[0].text == "echo" ) )
-                {
-                    for( std::size_t w = 1; w < inner.size() && !inner[w].op; ++w )
+                    for( std::size_t w = 1; w < n.words.size(); ++w )
                     {
-                        const std::string_view r = varRef( inner[w].text );
-                        if( !r.empty() )
+                        const std::string& tx = n.words[w].text;
+                        if( !tx.empty() && tx[0] == '-' )
                         {
-                            next = std::string( r );
+                            continue;
+                        }
+                        const std::size_t eq = tx.find( '=' );
+                        if( eq != std::string::npos )
+                        {
+                            assigns_.push_back( { tx.substr( 0, eq ), c, static_cast<std::int32_t>( w ), n.pos, scope, cond, reach } );
                         }
                     }
                 }
-                if( next.empty() )
+                else if( cw == "read" || cw == "mapfile" || cw == "readarray" )
                 {
-                    break;   // a text utility over a file, or a wrapper function: not judged
+                    for( std::size_t w = 1; w < n.words.size(); ++w )
+                    {
+                        if( !n.words[w].text.empty() && n.words[w].text[0] != '-' )
+                        {
+                            assigns_.push_back( { n.words[w].text, c, INT32_MIN, n.pos, scope, cond, reach } );
+                        }
+                    }
                 }
-                var = next;
+                if( n.words.empty() && n.assigns.size() == 1 )
+                {
+                    const std::string& tx = n.assigns[0].text;
+                    const std::size_t  eq = tx.find( '=' );
+                    const std::string  v  = sh::detail::unq( tx.substr( eq + 1 ) );
+                    if( v == "$?" || v == "${?}" )
+                    {
+                        captures_.push_back( c );
+                    }
+                }
+                else if( n.words.size() == 2 && cw == "local" )
+                {
+                    const std::string& tx = n.words[1].text;
+                    const std::size_t  eq = tx.find( '=' );
+                    if( eq != std::string::npos )
+                    {
+                        const std::string v = sh::detail::unq( tx.substr( eq + 1 ) );
+                        if( v == "$?" || v == "${?}" )
+                        {
+                            captures_.push_back( c );
+                        }
+                    }
+                }
+                for( const std::vector<sh::Word>* ws : { &n.assigns, &n.words } )
+                {
+                    for( const sh::Word& w : *ws )
+                    {
+                        for( const sh::Sub& s : w.subs )
+                        {
+                            visitSub( s.list, scope, c );
+                        }
+                    }
+                }
+                break;
             }
-            vacuous = runSource && !guard;
-        }
-        if( vacuous )
-        {
-            out.push_back( { Facet::VacuousAssert, lines[a.line].startByte, collapseSpaces( lines[a.line].text ) } );
+            case sh::NodeKind::Func:
+            {
+                funcs_.emplace_back( n.name, c );
+                for( std::uint32_t b : n.bodies )
+                {
+                    visit( b, c, {} );
+                }
+                break;
+            }
+            case sh::NodeKind::If:
+            {
+                judgments_.push_back( { Judgment::Kind::If, nullptr, c, n.pos, scope, reach } );
+                for( std::uint32_t cl : n.conds )
+                {
+                    visit( cl, scope, reach );
+                }
+                for( std::size_t b = 0; b < n.bodies.size(); ++b )
+                {
+                    std::vector<Judgment::Reach> r = reach;
+                    r.push_back( { c, b } );
+                    visit( n.bodies[b], scope, r );
+                }
+                break;
+            }
+            case sh::NodeKind::Case:
+            {
+                judgments_.push_back( { Judgment::Kind::Case, nullptr, c, n.pos, scope, reach } );
+                for( std::size_t b = 0; b < n.bodies.size(); ++b )
+                {
+                    std::vector<Judgment::Reach> r = reach;
+                    r.push_back( { c, b } );
+                    visit( n.bodies[b], scope, r );
+                }
+                break;
+            }
+            case sh::NodeKind::For:
+            {
+                if( !n.name.empty() )
+                {
+                    assigns_.push_back( { n.name, c, INT32_MIN, n.pos, scope, cond, reach } );
+                }
+                for( std::uint32_t b : n.bodies )
+                {
+                    visit( b, scope, reach );
+                }
+                break;
+            }
+            default:
+            {
+                for( std::uint32_t cl : n.conds )
+                {
+                    visit( cl, scope, reach );
+                }
+                for( std::uint32_t b : n.bodies )
+                {
+                    visit( b, scope, reach );
+                }
+                break;
+            }
         }
     }
+    // inside a $( ): only calls are indexed (the lost-reporter shape); assertions there are not judged
+    void visitSub( std::uint32_t list, std::uint32_t scope, std::uint32_t host )
+    {
+        if( list == kNone )
+        {
+            return;
+        }
+        for( const sh::AndOr& ao : t_.lists[list] )
+        {
+            andOrs_.push_back( &ao );
+            andOrScope_.push_back( scope );
+            for( const sh::Item& it : ao )
+            {
+                for( std::uint32_t c : it.cmds )
+                {
+                    scope_[c] = scope;
+                    const sh::Node& n = node( c );
+                    if( n.kind == sh::NodeKind::Simple )
+                    {
+                        subCalls_.emplace_back( host, c );
+                        for( const std::vector<sh::Word>* ws : { &n.assigns, &n.words } )
+                        {
+                            for( const sh::Word& w : *ws )
+                            {
+                                for( const sh::Sub& s : w.subs )
+                                {
+                                    visitSub( s.list, scope, host );
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        for( std::uint32_t cl : n.conds )
+                        {
+                            visitSub( cl, scope, host );
+                        }
+                        for( std::uint32_t b : n.bodies )
+                        {
+                            visitSub( b, scope, host );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ── reporters ──────────────────────────────────────────────────────────────────────────────────────────────────
+    static Rep repByName( std::string_view w )
+    {
+        for( const std::string& tk : nameTokens( w ) )
+        {
+            if( tk == "ok" || tk == "pass" || tk == "passed" || tk == "good" )
+            {
+                return Rep::Pass;
+            }
+            if( tk == "no" || tk == "fail" || tk == "failed" || tk == "bad" || tk == "die" )
+            {
+                return Rep::Fail;
+            }
+        }
+        return Rep::None;
+    }
+    static bool isCheckName( std::string_view w )
+    {
+        for( const std::string& tk : nameTokens( w ) )
+        {
+            if( tk == "check" || tk == "assert" || tk == "expect" || tk == "want" || tk == "has" || tk == "match" || tk == "verify" || tk == "require" )
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    static bool isFlagName( std::string_view lhs )
+    {
+        for( const std::string& tk : nameTokens( lhs ) )
+        {
+            if( tk == "fail" || tk == "failed" || tk == "failures" || tk == "failure" || tk == "fails" || tk == "status" || tk == "errors" || tk == "bad" )
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    void classifyReporters()
+    {
+        for( const auto& [ name, f ] : funcs_ )
+        {
+            // a body that reports BOTH ways is a check of its own (check(){ if …; then echo PASS; else echo FAIL; fi; }),
+            // not a reporter; a name that says it checks is one too (assert_no_match, expect_no_rows)
+            const std::string body    = node( f ).bodies.empty() ? std::string() : sh::detail::listText( t_, node( f ).bodies[0] );
+            const bool        sayFail = body.find( "FAIL" ) != std::string::npos || body.find( "fail=1" ) != std::string::npos;
+            const bool        sayPass = body.find( "PASS" ) != std::string::npos;
+            // (the name decides first: ok(){ printf PASS || { fail=1; printf FAIL; }; } is the PASS reporter, G1's contract)
+            Rep r = isCheckName( name ) ? Rep::None : repByName( name );
+            if( r == Rep::None && !( sayFail && sayPass ) && !isCheckName( name ) )
+            {
+                r = sayFail ? Rep::Fail : ( sayPass ? Rep::Pass : Rep::None );
+            }
+            reporters_.emplace_back( name, r );
+            if( r == Rep::Fail && setsFlag( f ) )
+            {
+                flagReporters_.push_back( name );
+            }
+        }
+    }
+    bool setsFlag( std::uint32_t f ) const
+    {
+        bool hit = false;
+        forEachSimple( node( f ).bodies.empty() ? kNone : node( f ).bodies[0], [ & ]( std::uint32_t c )
+                       {
+                           const sh::Node& n = node( c );
+                           for( const sh::Word& a : n.assigns )
+                           {
+                               const std::string lhs = a.text.substr( 0, a.text.find_first_of( "+=[" ) );
+                               hit = hit || isFlagName( lhs );
+                           }
+                           for( const sh::Word& w : n.words )
+                           {
+                               hit = hit || ( w.text.rfind( "((", 0 ) == 0 && isFlagName( w.text.substr( 2 ) ) );
+                           }
+                       } );
+        return hit;
+    }
+    template <class F>
+    void forEachSimple( std::uint32_t list, F&& f ) const
+    {
+        if( list == kNone )
+        {
+            return;
+        }
+        for( const sh::AndOr& ao : t_.lists[list] )
+        {
+            for( const sh::Item& it : ao )
+            {
+                for( std::uint32_t c : it.cmds )
+                {
+                    const sh::Node& n = node( c );
+                    if( n.kind == sh::NodeKind::Simple )
+                    {
+                        f( c );
+                    }
+                    else if( n.kind != sh::NodeKind::Func )
+                    {
+                        for( std::uint32_t cl : n.conds )
+                        {
+                            forEachSimple( cl, f );
+                        }
+                        for( std::uint32_t b : n.bodies )
+                        {
+                            forEachSimple( b, f );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // The reporter a command is: a reporter function by name, an echo / printf of PASS / FAIL, exit / return non-zero, a
+    // failure-flag assignment; a { …; } group by its first command.
+    Rep repOfCmd( std::uint32_t c ) const
+    {
+        const sh::Node& n = node( c );
+        if( n.kind == sh::NodeKind::Group || n.kind == sh::NodeKind::Subshell )
+        {
+            return n.bodies.empty() ? Rep::None : repOfList( n.bodies[0] );
+        }
+        if( n.kind != sh::NodeKind::Simple )
+        {
+            return Rep::None;
+        }
+        if( n.words.empty() )
+        {
+            for( const sh::Word& a : n.assigns )
+            {
+                const std::size_t eq  = a.text.find( '=' );
+                const std::string lhs = a.text.substr( 0, a.text.find_first_of( "+=[" ) );
+                if( isFlagName( lhs ) && eq != std::string::npos && sh::detail::unq( a.text.substr( eq + 1 ) ) != "0" )
+                {
+                    return Rep::Fail;
+                }
+            }
+            return Rep::None;
+        }
+        const std::string w = sh::detail::unq( n.words[0].text );
+        for( const auto& [ name, r ] : reporters_ )
+        {
+            if( name == w && r != Rep::None )
+            {
+                return r;
+            }
+        }
+        if( w == "echo" || w == "printf" )
+        {
+            for( std::size_t a = 1; a < n.words.size(); ++a )
+            {
+                std::string_view u = n.words[a].text;
+                u                  = rw::namesplit::stripQuotePair( u );
+                while( !u.empty() && ( u.front() == ' ' || u.front() == '[' ) )
+                {
+                    u.remove_prefix( 1 );
+                }
+                if( u.starts_with( "FAIL" ) )
+                {
+                    return Rep::Fail;
+                }
+                if( u.starts_with( "PASS" ) || u.starts_with( "ok " ) )
+                {
+                    return Rep::Pass;
+                }
+            }
+            return Rep::None;
+        }
+        if( ( w == "exit" || w == "return" ) && n.words.size() > 1 && sh::detail::unq( n.words[1].text ) != "0" )
+        {
+            return Rep::Fail;
+        }
+        if( w.rfind( "((", 0 ) == 0 )
+        {
+            const std::string body = w.substr( 2 );   // ((fail++)) / (( fails += 1 ))
+            const std::size_t op   = body.find_first_of( "+=" );
+            return op != std::string::npos && isFlagName( body.substr( 0, op ) ) ? Rep::Fail : Rep::None;
+        }
+        if( funcNode( w ) == kNone && !isCheckName( w ) )
+        {
+            return repByName( w );   // an undefined helper named ok / fail (a sourced library's)
+        }
+        return Rep::None;
+    }
+    Rep repOfList( std::uint32_t list ) const
+    {
+        if( list == kNone || t_.lists[list].empty() || t_.lists[list][0].empty() || t_.lists[list][0][0].cmds.empty() )
+        {
+            return Rep::None;
+        }
+        return repOfCmd( t_.lists[list][0][0].cmds[0] );
+    }
+    Rep repOfItem( const sh::Item& it ) const
+    {
+        return it.cmds.size() == 1 ? repOfCmd( it.cmds[0] ) : Rep::None;
+    }
+
+    // ── what runs under test ───────────────────────────────────────────────────────────────────────────────────────
+    // The matcher's kinds (the binary, a compiled harness, a wrapper of one), and — the facet's wider net, as before —
+    // any command spelled through a variable or a path, an interpreter running a script path, and xargs of those.
+    bool isRun( std::uint32_t c ) const
+    {
+        if( c >= a_.facts.size() || !a_.facts[c].seen )
+        {
+            return false;
+        }
+        if( isKindRun( c ) )
+        {
+            return true;
+        }
+        const sh::Node&   n = node( c );
+        std::size_t       k = cmdIdx( n );
+        if( k == std::string::npos )
+        {
+            return false;
+        }
+        std::string w = sh::detail::unq( n.words[k].text );
+        if( w == "xargs" )
+        {
+            ++k;
+            while( k < n.words.size() && !n.words[k].text.empty() && n.words[k].text[0] == '-' )
+            {
+                ++k;
+            }
+            if( k >= n.words.size() )
+            {
+                return false;
+            }
+            w = sh::detail::unq( n.words[k].text );
+        }
+        if( funcNode( w ) != kNone )
+        {
+            return false;
+        }
+        if( w == "python3" || w == "python" || w == "node" || w == "bash" || w == "sh" || w == "perl" || w == "ruby" )
+        {
+            for( std::size_t a = k + 1; a < n.words.size(); ++a )
+            {
+                const std::string u = sh::detail::unq( n.words[a].text );
+                if( u == "-c" || u == "-e" || u == "-" )
+                {
+                    return false;   // an inline program is a filter, not a run
+                }
+                if( !u.empty() && u[0] == '-' )
+                {
+                    continue;
+                }
+                return u.find( '/' ) != std::string::npos || ( !u.empty() && u[0] == '$' );
+            }
+            return false;
+        }
+        return !w.empty() && ( w[0] == '$' || w.find( '/' ) != std::string::npos );
+    }
+    // the matcher's own kinds: the binary, a harness, an extra, or a call of a function the fixpoint proved a wrapper
+    // (facts name every call of a defined function "wrapper"; Analysis::wrappers holds the proved ones)
+    bool isKindRun( std::uint32_t c ) const
+    {
+        const std::string& kind = a_.facts[c].kind;
+        return !kind.empty() && ( kind != "wrapper" || sh::detail::hasName( a_.wrappers, cmdWord( c ) ) || sh::detail::hasName( runWrappers_, cmdWord( c ) ) );
+    }
+    // The facet's wrappers, beside the matcher's: a function holding a run (or a call of one) that prints to its stdout
+    // and whose status nothing inside reads — it IS the function's, or it is dropped — so the function's output is that
+    // run's: run(){ ( cd "$FIX" || exit 1; "$BIN" "$FIX" "$@" ) 2>"$TMP/err"; }.
+    void proveRunWrappers()
+    {
+        for( bool grew = true; grew; )
+        {
+            grew = false;
+            for( std::uint32_t c = 0; c < a_.facts.size() && c < t_.nodes.size(); ++c )
+            {
+                const std::uint32_t f = scope_[c];
+                const sh::Verdict v = a_.facts[c].seen ? a_.facts[c].cons.v : sh::Verdict::Checked;
+                if( f == kNone || ( v != sh::Verdict::Fn && v != sh::Verdict::Unchecked ) || !isKindRun( c )
+                    || std::any_of( node( c ).fredirs.begin(), node( c ).fredirs.end(), isStdoutRedir ) )
+                {
+                    continue;
+                }
+                const std::string& name = node( f ).name;
+                if( !sh::detail::hasName( runWrappers_, name ) )
+                {
+                    runWrappers_.insert( std::lower_bound( runWrappers_.begin(), runWrappers_.end(), name ), name );
+                    grew = true;
+                }
+            }
+        }
+    }
+    bool silentFailable( std::uint32_t c ) const
+    {
+        return isRun( c ) && ( a_.facts[c].cons.v == sh::Verdict::Unchecked || a_.facts[c].cons.v == sh::Verdict::Fn );
+    }
+
+    // ── provenance ─────────────────────────────────────────────────────────────────────────────────────────────────
+    static constexpr int kMaxDepth = 24;   // each hop (a word, a variable, a stage, a call) adds one
+
+    Prov provWord( const sh::Word& w, std::uint32_t pos, std::uint32_t scope, const Env& env, int depth ) const
+    {
+        if( depth > kMaxDepth )
+        {
+            return Prov::opaque();
+        }
+        std::string_view x = w.text;
+        if( x.size() >= 2 && x.front() == '"' && x.back() == '"' )
+        {
+            x = x.substr( 1, x.size() - 2 );
+        }
+        if( w.subs.size() == 1 && ( ( x.starts_with( "$(" ) && x.ends_with( ")" ) && x.size() == w.subs[0].inner.size() + 3 )
+                                    || ( x.starts_with( "`" ) && x.ends_with( "`" ) && x.size() == w.subs[0].inner.size() + 2 ) ) )
+        {
+            return provList( w.subs[0].list, env, depth + 1 );
+        }
+        if( ( x.size() == 2 && x[0] == '$' && x[1] >= '1' && x[1] <= '9' ) || ( x.size() == 4 && x.starts_with( "${" ) && x[2] >= '1' && x[2] <= '9' && x[3] == '}' ) )
+        {
+            return provVar( x.substr( x.size() == 2 ? 1 : 2, 1 ), pos, scope, env, depth + 1 );
+        }
+        const std::string_view v = sh::detail::bareVar( x );
+        if( !v.empty() )
+        {
+            return provVar( v, pos, scope, env, depth + 1 );
+        }
+        if( x == "$@" || x == "$*" || x == "${@}" || x == "${*}" )
+        {
+            return provVar( "1", pos, scope, env, depth + 1 );
+        }
+        return Prov::opaque();
+    }
+    Prov provVar( std::string_view name, std::uint32_t pos, std::uint32_t scope, const Env& env, int depth ) const
+    {
+        if( depth > kMaxDepth )
+        {
+            return Prov::opaque();
+        }
+        if( name.size() == 1 && name[0] >= '1' && name[0] <= '9' )
+        {
+            const std::size_t i = static_cast<std::size_t>( name[0] - '1' );
+            return env.bound && i < env.args.size() ? env.args[i] : Prov::opaque();
+        }
+        const Assign* best = nullptr;
+        for( const std::uint32_t want : { scope, kNone } )
+        {
+            for( const Assign& a : assigns_ )
+            {
+                if( a.name == name && a.scope == want && a.pos < pos && ( best == nullptr || a.pos >= best->pos ) )
+                {
+                    best = &a;
+                }
+            }
+            if( best != nullptr || want == kNone )
+            {
+                break;
+            }
+        }
+        if( best == nullptr || best->word == INT32_MIN )
+        {
+            return Prov::opaque();
+        }
+        const sh::Node& n   = node( best->node );
+        const sh::Word& w   = best->word < 0 ? n.assigns[static_cast<std::size_t>( -1 - best->word )] : n.words[static_cast<std::size_t>( best->word )];
+        const std::size_t eq = w.text.find( '=' );
+        if( eq == std::string::npos || ( eq > 0 && w.text[eq - 1] == '+' ) )
+        {
+            return Prov::opaque();
+        }
+        sh::Word value;
+        value.text = w.text.substr( eq + 1 );
+        value.subs = w.subs;
+        if( value.text.empty() )
+        {
+            return Prov::opaque();
+        }
+        Prov p = provWord( value, best->pos, best->scope, env, depth + 1 );
+        // assigned only behind a check its own producers' empty text fails (if grep -q X <<<"$o"; then KEPT="$o"):
+        // when they fail it is never assigned, so it never carries their empty text
+        if( !best->reach.empty() && !p.unknown && !p.leaves.empty() && !inReachCheck_ )
+        {
+            inReachCheck_ = true;
+            Eval ev;
+            ev.s                = &p.leaves;
+            const bool reached = reachableAt( best->reach, ev );
+            inReachCheck_       = false;
+            if( !reached )
+            {
+                return Prov::opaque();
+            }
+        }
+        return p;
+    }
+    Prov provList( std::uint32_t list, const Env& env, int depth ) const
+    {
+        Prov out;
+        if( list == kNone || depth > kMaxDepth )
+        {
+            return Prov::opaque();
+        }
+        for( const sh::AndOr& ao : t_.lists[list] )
+        {
+            for( const sh::Item& it : ao )
+            {
+                if( !it.cmds.empty() )
+                {
+                    out.add( provStage( it, it.cmds.size() - 1, env, depth + 1, false ) );
+                }
+            }
+        }
+        return out;
+    }
+    // the environment a call binds: its arguments' texts as $1.., and its stdin (a <<< / < redirect, else the pipe or
+    // the caller's own stdin)
+    template <class StdinOf>
+    Env callEnv( std::uint32_t c, const sh::Node& n, std::size_t k, const Env& env, int depth, StdinOf&& stdinOf ) const
+    {
+        Env inner;
+        inner.bound = true;
+        for( std::size_t a = k + 1; a < n.words.size(); ++a )
+        {
+            if( !n.words[a].text.empty() && !isFdWord( n, n.words[a].text ) )
+            {
+                inner.args.push_back( provWord( n.words[a], n.pos, scope_[c], env, depth + 1 ) );
+            }
+        }
+        inner.hasIn = true;
+        bool redirected = false;
+        for( const sh::Redir& r : n.fredirs )
+        {
+            if( r.op == "<<<" || r.op == "<" )
+            {
+                inner.in   = r.op == "<" ? provFile( normTarget( r.target ), n.pos, scope_[c], env, depth + 1 ) : hereString( n, r, env, depth );
+                redirected = true;
+            }
+        }
+        if( !redirected )
+        {
+            inner.in = stdinOf();
+        }
+        return inner;
+    }
+    Prov hereString( const sh::Node& n, const sh::Redir& r, const Env& env, int depth ) const
+    {
+        sh::Word hw;
+        hw.text = r.target;
+        for( const sh::Word& ww : n.words )
+        {
+            if( ww.text.empty() && ww.pos == r.targetPos )
+            {
+                hw.subs = ww.subs;
+            }
+        }
+        return provWord( hw, n.pos, scopeOfPos( n ), env, depth + 1 );
+    }
+    static bool isFdWord( const sh::Node& n, std::string_view tx )
+    {
+        if( tx.empty() || tx.size() > 2 || !std::all_of( tx.begin(), tx.end(), []( char ch ) { return ch >= '0' && ch <= '9'; } ) )
+        {
+            return false;
+        }
+        const int fd = tx.size() == 1 ? tx[0] - '0' : ( tx[0] - '0' ) * 10 + ( tx[1] - '0' );
+        return std::any_of( n.fredirs.begin(), n.fredirs.end(), [ & ]( const sh::Redir& r ) { return r.fd == fd; } );
+    }
+    static bool isSilentCmd( std::string_view w )
+    {
+        static constexpr std::string_view kSilent[] = { "cd", "export", "local", "set", "shift", "true", ":", "rm", "mkdir", "cp", "mv", "touch", "unset",
+                                                        "declare", "readonly", "trap", "wait", "sleep", "[", "test", "chmod", "ln", "pushd", "popd", "exec" };
+        return std::find( std::begin( kSilent ), std::end( kSilent ), w ) != std::end( kSilent );
+    }
+    // the output of stage j of a pipeline (its stdin is stage j-1's); `ignoreRedirect` reads a writer's own output
+    Prov provStage( const sh::Item& it, std::size_t j, const Env& env, int depth, bool ignoreRedirect ) const
+    {
+        if( depth > kMaxDepth )
+        {
+            return Prov::opaque();
+        }
+        const std::uint32_t c = it.cmds[j];
+        const sh::Node&     n = node( c );
+        if( !ignoreRedirect && std::any_of( n.fredirs.begin(), n.fredirs.end(), isStdoutRedir ) )
+        {
+            return {};   // its output went to a file: it prints nothing here
+        }
+        const auto stdinOf = [ & ]() -> Prov { return j > 0 ? provStage( it, j - 1, env, depth + 1, false ) : ( env.hasIn ? env.in : Prov::opaque() ); };
+        if( n.kind == sh::NodeKind::Subshell || n.kind == sh::NodeKind::Group )
+        {
+            return n.bodies.empty() ? Prov::opaque() : provList( n.bodies[0], env, depth + 1 );
+        }
+        if( n.kind != sh::NodeKind::Simple )
+        {
+            return Prov::opaque();
+        }
+        const std::size_t k = cmdIdx( n );
+        if( k == std::string::npos )
+        {
+            return {};   // an assignment prints nothing
+        }
+        if( isRun( c ) )
+        {
+            Prov p;
+            if( silentFailable( c ) || ( j + 1 < it.cmds.size() ) )
+            {
+                p.leaves.push_back( c );
+            }
+            else
+            {
+                p.unknown = true;   // its failure is reported: its output is never silently empty
+            }
+            return p;
+        }
+        const std::string w = sh::detail::unq( n.words[k].text );
+        if( isSilentCmd( w ) )
+        {
+            return {};
+        }
+        const std::uint32_t f = funcNode( w );
+        if( f != kNone )
+        {
+            // a function that only filters its arguments (or stdin): its output with $1.. bound here
+            Env inner = callEnv( c, n, k, env, depth, stdinOf );
+            const sh::Node& fn = node( f );
+            return fn.bodies.empty() ? Prov::opaque() : throughCall( c, f, provList( fn.bodies[0], inner, depth + 1 ) );
+        }
+        if( w == "echo" || w == "printf" )
+        {
+            Prov        p;
+            std::size_t a = k + 1;
+            while( w == "echo" && a < n.words.size() && ( n.words[a].text == "-n" || n.words[a].text == "-e" || n.words[a].text == "-ne" ) )
+            {
+                ++a;
+            }
+            if( w == "printf" && a < n.words.size() )
+            {
+                const std::string fmt = sh::detail::unq( n.words[a].text );
+                if( fmt != "%s" && fmt != "%s\\n" && fmt != "%s\\n\\n" )
+                {
+                    return Prov::opaque();
+                }
+                ++a;
+            }
+            for( ; a < n.words.size(); ++a )
+            {
+                p.add( provWord( n.words[a], n.pos, scope_[c], env, depth + 1 ) );
+            }
+            return p;
+        }
+        return provFilter( c, n, k, w, stdinOf, env, depth );
+    }
+    // A run inside function F whose status IS F's (the matcher's Fn verdict) fails silently only when the CALL's status
+    // is dropped too: out="$( run_hook … )"; rc=$? then a test of rc reports it. The call stands in for that run.
+    Prov throughCall( std::uint32_t call, std::uint32_t f, Prov p ) const
+    {
+        if( call >= a_.facts.size() || !a_.facts[call].seen )
+        {
+            return p;
+        }
+        const bool callSilent = a_.facts[call].cons.v == sh::Verdict::Unchecked || a_.facts[call].cons.v == sh::Verdict::Fn;
+        for( std::uint32_t& l : p.leaves )
+        {
+            if( scope_[l] != f || a_.facts[l].cons.v != sh::Verdict::Fn )
+            {
+                continue;
+            }
+            if( !callSilent )
+            {
+                p.unknown = true;   // reported at the call: never silently empty
+            }
+            else if( isRun( call ) )
+            {
+                l = call;
+            }
+        }
+        return p;
+    }
+    template <class StdinOf>
+    Prov provFilter( std::uint32_t c, const sh::Node& n, std::size_t k, const std::string& w, StdinOf&& stdinOf, const Env& env, int depth ) const
+    {
+        struct F
+        {
+            std::string_view name;
+            int              skipFirst;       // 1: the first operand is a pattern / program
+            std::string_view valueOpts;       // one-letter options that take a value
+        };
+        static constexpr F kFilters[] = { { "grep", 1, "efmABCd" }, { "egrep", 1, "efmABC" }, { "fgrep", 1, "efmABC" }, { "sed", 1, "ef" }, { "awk", 1, "Fvf" },
+                                          { "gawk", 1, "Fvf" }, { "tr", 0, "" }, { "cut", 0, "dfcb" }, { "head", 0, "nc" }, { "tail", 0, "nc" },
+                                          { "sort", 0, "ktoS" }, { "uniq", 0, "fs" }, { "cat", 0, "" }, { "jq", 1, "" }, { "tee", 0, "" },
+                                          { "rev", 0, "" }, { "python3", 0, "" }, { "python", 0, "" }, { "xmllint", 0, "" } };
+        const F* spec = nullptr;
+        for( const F& f : kFilters )
+        {
+            if( f.name == w )
+            {
+                spec = &f;
+            }
+        }
+        if( spec == nullptr )
+        {
+            return Prov::opaque();
+        }
+        bool        inlineProg = false;
+        bool        hasE       = false;
+        std::vector<const sh::Word*> operands;
+        for( std::size_t a = k + 1; a < n.words.size(); ++a )
+        {
+            const std::string& tx = n.words[a].text;
+            if( tx.empty() || isFdWord( n, tx ) )
+            {
+                continue;   // a redirect target's substitutions, or the fd glued before a redirect (2>)
+            }
+            const std::string u = sh::detail::unq( tx );
+            if( u.size() > 1 && u[0] == '-' && u != "--" )
+            {
+                if( w == "grep" && u.find( 'c' ) != std::string::npos && u[1] != '-' )
+                {
+                    return Prov::opaque();   // a count of an empty text is "0", not empty
+                }
+                if( ( w == "python3" || w == "python" ) && ( u == "-c" || u.find( 'c' ) != std::string::npos ) )
+                {
+                    inlineProg = true;
+                    ++a;   // the program
+                    continue;
+                }
+                if( u == "-e" || u == "-f" )
+                {
+                    hasE = true;
+                }
+                if( u.size() == 2 && spec->valueOpts.find( u[1] ) != std::string_view::npos )
+                {
+                    ++a;
+                }
+                continue;
+            }
+            if( u == "--" )
+            {
+                continue;
+            }
+            operands.push_back( &n.words[a] );
+        }
+        if( ( w == "python3" || w == "python" ) && !inlineProg )
+        {
+            return Prov::opaque();
+        }
+        if( ( w == "awk" || w == "gawk" ) && !operands.empty() && sh::detail::contains( operands[0]->text, "END" ) )
+        {
+            return Prov::opaque();
+        }
+        std::size_t from = ( spec->skipFirst != 0 && !hasE && !operands.empty() ) ? 1 : 0;
+        Prov        p;
+        bool        sawInput = false;
+        if( w != "tr" && !( w == "python3" || w == "python" ) )
+        {
+            for( std::size_t o = from; o < operands.size(); ++o )
+            {
+                const std::string u = sh::detail::unq( operands[o]->text );
+                if( ( w == "awk" || w == "gawk" ) && u.find( '=' ) != std::string::npos )
+                {
+                    continue;
+                }
+                p.add( provFile( normTarget( operands[o]->text ), n.pos, scope_[c], env, depth + 1 ) );
+                sawInput = true;
+            }
+        }
+        for( const sh::Redir& r : n.fredirs )
+        {
+            if( r.op == "<<<" )
+            {
+                p.add( hereString( n, r, env, depth ) );
+                sawInput = true;
+            }
+            else if( r.op == "<" )
+            {
+                p.add( provFile( normTarget( r.target ), n.pos, scope_[c], env, depth + 1 ) );
+                sawInput = true;
+            }
+        }
+        if( !sawInput )
+        {
+            p.add( stdinOf() );
+        }
+        return p;
+    }
+    // The text a FILE holds at `pos`: its last writer before it, in this scope or at the top level, or a call of a
+    // function whose writer's target, with $1.. bound to the call's arguments, spells this file.
+    Prov provFile( const std::string& target, std::uint32_t pos, std::uint32_t scope, const Env& env, int depth ) const
+    {
+        if( depth > kMaxDepth || target.empty() )
+        {
+            return Prov::opaque();
+        }
+        const Writer* best     = nullptr;
+        std::uint32_t bestPos  = 0;
+        std::uint32_t callNode = kNone;
+        for( const std::uint32_t want : { scope, kNone } )
+        {
+            for( const Writer& wr : writers_ )
+            {
+                if( wr.scope == want && wr.pos < pos && wr.target == target && ( best == nullptr || wr.pos >= bestPos ) )
+                {
+                    best     = &wr;
+                    bestPos  = wr.pos;
+                    callNode = kNone;
+                }
+            }
+            // a function call that writes it: run_qd mod1 with run_qd's `> "$TMP/$1.out"`
+            for( std::uint32_t c = 0; c < t_.nodes.size(); ++c )
+            {
+                const sh::Node& n = node( c );
+                if( n.kind != sh::NodeKind::Simple || scope_[c] != want || n.pos >= pos || ( best != nullptr && n.pos < bestPos ) )
+                {
+                    continue;
+                }
+                const std::size_t k = cmdIdx( n );
+                if( k == std::string::npos )
+                {
+                    continue;
+                }
+                const std::uint32_t f = funcNode( sh::detail::unq( n.words[k].text ) );
+                if( f == kNone )
+                {
+                    continue;
+                }
+                std::vector<std::string> args;
+                for( std::size_t a = k + 1; a < n.words.size(); ++a )
+                {
+                    if( !n.words[a].text.empty() && !isFdWord( n, n.words[a].text ) )
+                    {
+                        args.push_back( normTarget( n.words[a].text ) );
+                    }
+                }
+                for( const Writer& wr : writers_ )
+                {
+                    if( wr.scope != f || wr.target.find( '$' ) == std::string::npos )
+                    {
+                        continue;
+                    }
+                    if( bindArgs( wr.target, args ) == target )
+                    {
+                        best     = &wr;
+                        bestPos  = n.pos;
+                        callNode = c;
+                    }
+                }
+            }
+            if( best != nullptr )
+            {
+                break;
+            }
+        }
+        if( best == nullptr )
+        {
+            return Prov::opaque();
+        }
+        Env use = env;
+        if( callNode != kNone )
+        {
+            const sh::Node& n = node( callNode );
+            use               = callEnv( callNode, n, cmdIdx( n ), env, depth, [] { return Prov::opaque(); } );
+        }
+        const sh::Node& wn = node( best->node );
+        if( wn.kind == sh::NodeKind::Subshell || wn.kind == sh::NodeKind::Group )
+        {
+            return wn.bodies.empty() ? Prov::opaque() : provList( wn.bodies[0], use, depth + 1 );
+        }
+        if( best->item == nullptr )
+        {
+            return Prov::opaque();
+        }
+        return provStage( *best->item, best->stage, use, depth + 1, true );
+    }
+    static std::string bindArgs( const std::string& pattern, const std::vector<std::string>& args )
+    {
+        std::string out;
+        for( std::size_t i = 0; i < pattern.size(); ++i )
+        {
+            if( pattern[i] == '$' && i + 1 < pattern.size() && pattern[i + 1] >= '1' && pattern[i + 1] <= '9' )
+            {
+                const std::size_t a = static_cast<std::size_t>( pattern[i + 1] - '1' );
+                if( a >= args.size() )
+                {
+                    return {};
+                }
+                out += args[a];
+                ++i;
+                continue;
+            }
+            out.push_back( pattern[i] );
+        }
+        return out;
+    }
+
+    // ── conditions ─────────────────────────────────────────────────────────────────────────────────────────────────
+    struct Eval
+    {
+        const std::vector<std::uint32_t>* s       = nullptr;
+        std::vector<std::uint32_t>*       collect = nullptr;   // when set: gather every producer an input reads
+    };
+    Tri ofInput( const Prov& p, const Eval& ev, Tri onEmpty ) const
+    {
+        if( ev.collect != nullptr )
+        {
+            ev.collect->insert( ev.collect->end(), p.leaves.begin(), p.leaves.end() );
+        }
+        return ( ev.s != nullptr && p.emptyUnder( *ev.s ) ) ? onEmpty : Tri::U;
+    }
+    Tri evalItem( const sh::Item& it, const Eval& ev, const Env& env, int depth ) const
+    {
+        Tri v = evalStage( it, ev, env, depth );
+        return it.neg ? triNot( v ) : v;
+    }
+    Tri evalStage( const sh::Item& it, const Eval& ev, const Env& env, int depth ) const
+    {
+        if( it.cmds.empty() || depth > kMaxDepth )
+        {
+            return Tri::U;
+        }
+        const std::uint32_t c = it.cmds.back();
+        const sh::Node&     n = node( c );
+        // under pipefail a failed stage before the last makes the whole pipeline false, whatever the last one reads
+        bool pipeFailed = false;
+        for( std::size_t j = 0; j + 1 < it.cmds.size(); ++j )
+        {
+            if( isRun( it.cmds[j] ) )
+            {
+                if( ev.collect != nullptr )
+                {
+                    ev.collect->push_back( it.cmds[j] );
+                }
+                pipeFailed = pipeFailed || ( ev.s != nullptr && std::find( ev.s->begin(), ev.s->end(), it.cmds[j] ) != ev.s->end() && a_.facts[c].pipefail );
+            }
+        }
+        if( n.kind == sh::NodeKind::Group || n.kind == sh::NodeKind::Subshell )
+        {
+            if( n.bodies.empty() || n.bodies[0] == kNone || t_.lists[n.bodies[0]].empty() )
+            {
+                return Tri::U;
+            }
+            return evalAndOr( t_.lists[n.bodies[0]].back(), ev, env, depth + 1 );
+        }
+        if( n.kind != sh::NodeKind::Simple )
+        {
+            return Tri::U;
+        }
+        const std::size_t k = cmdIdx( n );
+        if( k == std::string::npos )
+        {
+            return Tri::U;
+        }
+        const std::string w  = sh::detail::unq( n.words[k].text );
+        Tri               v  = Tri::U;
+        const auto        st = [ & ]() -> Prov { return it.cmds.size() > 1 ? provStage( it, it.cmds.size() - 2, env, depth + 1, false ) : ( env.hasIn ? env.in : Prov::opaque() ); };
+        if( w == "grep" || w == "egrep" || w == "fgrep" )
+        {
+            bool quiet = std::any_of( n.fredirs.begin(), n.fredirs.end(), []( const sh::Redir& r ) { return isStdoutRedir( r ) && r.target == "/dev/null"; } );
+            for( std::size_t a = k + 1; a < n.words.size(); ++a )
+            {
+                const std::string u = sh::detail::unq( n.words[a].text );
+                if( u == "--quiet" || u == "--silent" || ( u.size() > 1 && u[0] == '-' && u[1] != '-' && u.find( 'q' ) != std::string::npos ) )
+                {
+                    quiet = true;
+                }
+                if( u.size() > 1 && u[0] == '-' && u[1] != '-' && ( u.find( 'c' ) != std::string::npos || u.find( 'L' ) != std::string::npos ) )
+                {
+                    return pipeFailed ? Tri::F : Tri::U;
+                }
+            }
+            if( quiet )
+            {
+                v = ofInput( provFilter( c, n, k, "grep", st, env, depth + 1 ), ev, Tri::F );
+            }
+        }
+        else if( w == "[" || w == "test" )
+        {
+            v = evalTest( n, k, ev, env, depth );
+        }
+        else if( w == "cmp" || w == "diff" )
+        {
+            std::vector<Prov> files;
+            for( std::size_t a = k + 1; a < n.words.size(); ++a )
+            {
+                const std::string u = sh::detail::unq( n.words[a].text );
+                if( n.words[a].text.empty() || isFdWord( n, n.words[a].text ) || ( u.size() > 1 && u[0] == '-' ) )
+                {
+                    continue;
+                }
+                files.push_back( provFile( normTarget( n.words[a].text ), n.pos, scope_[c], env, depth + 1 ) );
+            }
+            if( files.size() == 2 )
+            {
+                const Tri a = ofInput( files[0], ev, Tri::T );
+                const Tri b = ofInput( files[1], ev, Tri::T );
+                v           = ( a == Tri::T && b == Tri::T ) ? Tri::T : Tri::U;
+            }
+        }
+        else
+        {
+            const std::uint32_t f = funcNode( w );
+            const sh::List*     body = funcBody( f );
+            // a helper whose body is one pipeline (has(){ grep -qF -- "$2" <<<"$1"; }): judged with $1.. bound here
+            if( body != nullptr && body->size() == 1 && ( *body )[0].size() == 1 && !isKindRun( c ) )
+            {
+                const auto in = [ & ]() -> Prov { return it.cmds.size() > 1 ? provStage( it, it.cmds.size() - 2, env, depth + 1, false ) : ( env.hasIn ? env.in : Prov::opaque() ); };
+                v = evalItem( ( *body )[0][0], ev, callEnv( c, n, k, env, depth, in ), depth + 1 );
+            }
+        }
+        return pipeFailed ? Tri::F : v;
+    }
+    Tri evalTest( const sh::Node& n, std::size_t k, const Eval& ev, const Env& env, int depth ) const
+    {
+        std::vector<const sh::Word*> ws;
+        for( std::size_t a = k + 1; a < n.words.size(); ++a )
+        {
+            if( !n.words[a].text.empty() )
+            {
+                ws.push_back( &n.words[a] );
+            }
+        }
+        if( !ws.empty() && ws.back()->text == "]" )
+        {
+            ws.pop_back();
+        }
+        bool neg = false;
+        if( !ws.empty() && ws.front()->text == "!" )
+        {
+            neg = true;
+            ws.erase( ws.begin() );
+        }
+        const std::uint32_t scope = scope_.size() > 0 ? scopeOfPos( n ) : kNone;
+        const auto val = [ & ]( const sh::Word* w ) { return provWord( *w, n.pos, scope, env, depth + 1 ); };
+        Tri v = Tri::U;
+        if( ws.size() == 2 )
+        {
+            const std::string op = ws[0]->text;
+            if( op == "-s" )
+            {
+                v = ofInput( provFile( normTarget( ws[1]->text ), n.pos, scope, env, depth + 1 ), ev, Tri::F );
+            }
+            else if( op == "-n" )
+            {
+                v = ofInput( val( ws[1] ), ev, Tri::F );
+            }
+            else if( op == "-z" )
+            {
+                v = ofInput( val( ws[1] ), ev, Tri::T );
+            }
+        }
+        else if( ws.size() == 1 )
+        {
+            v = ofInput( val( ws[0] ), ev, Tri::F );
+        }
+        else if( ws.size() == 3 && ( ws[1]->text == "=" || ws[1]->text == "==" || ws[1]->text == "!=" ) )
+        {
+            const Tri  a  = ofInput( val( ws[0] ), ev, Tri::T );
+            const Tri  b  = ofInput( val( ws[2] ), ev, Tri::T );
+            const bool eq = a == Tri::T && b == Tri::T;   // two empty texts are equal
+            v             = eq ? ( ws[1]->text == "!=" ? Tri::F : Tri::T ) : Tri::U;
+        }
+        return neg ? triNot( v ) : v;
+    }
+    std::uint32_t scopeOfPos( const sh::Node& n ) const
+    {
+        const std::size_t idx = static_cast<std::size_t>( &n - t_.nodes.data() );
+        return idx < scope_.size() ? scope_[idx] : kNone;
+    }
+    Tri evalAndOr( const sh::AndOr& ao, const Eval& ev, const Env& env, int depth ) const
+    {
+        Tri v = Tri::U;
+        for( std::size_t j = 0; j < ao.size(); ++j )
+        {
+            const Tri x = evalItem( ao[j], ev, env, depth );
+            v           = j == 0 ? x : ( ao[j].op == sh::Link::And ? triAnd( v, x ) : triOr( v, x ) );
+        }
+        return v;
+    }
+    Tri evalCondList( std::uint32_t list, const Eval& ev ) const
+    {
+        if( list == kNone || t_.lists[list].empty() )
+        {
+            return Tri::U;
+        }
+        // earlier statements of a condition list are evaluated for what they read; the last one decides
+        const sh::List& l = t_.lists[list];
+        for( std::size_t k = 0; k + 1 < l.size(); ++k )
+        {
+            if( ev.collect != nullptr )
+            {
+                (void)evalAndOr( l[k], ev, Env{}, 0 );
+            }
+        }
+        return evalAndOr( l.back(), ev, Env{}, 0 );
+    }
+
+    // ── judgments ──────────────────────────────────────────────────────────────────────────────────────────────────
+    struct Outcomes
+    {
+        bool pass = false, fail = false, none = false;
+        void add( Rep r )
+        {
+            pass = pass || r == Rep::Pass;
+            fail = fail || r == Rep::Fail;
+            none = none || r == Rep::None;
+        }
+        bool onlyPass() const
+        {
+            return pass && !fail && !none;
+        }
+        bool onlyFail() const
+        {
+            return fail && !pass && !none;
+        }
+    };
+    // the reporter split of a statement: items [0, r) are the condition, r.. are reporters
+    bool splitAndOr( const sh::AndOr& ao, std::size_t& r ) const
+    {
+        for( r = 1; r < ao.size(); ++r )
+        {
+            if( repOfItem( ao[r] ) != Rep::None )
+            {
+                break;
+            }
+        }
+        if( r >= ao.size() || repOfItem( ao[0] ) != Rep::None )
+        {
+            return false;
+        }
+        for( std::size_t q = r; q < ao.size(); ++q )
+        {
+            if( repOfItem( ao[q] ) == Rep::None )
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+    Outcomes outcomes( const Judgment& j, const Eval& ev ) const
+    {
+        Outcomes o;
+        if( j.kind == Judgment::Kind::AndOr )
+        {
+            std::size_t r = 0;
+            if( !splitAndOr( *j.ao, r ) )
+            {
+                o.none = true;
+                return o;
+            }
+            sh::AndOr cond( j.ao->begin(), j.ao->begin() + static_cast<std::ptrdiff_t>( r ) );
+            const Tri v       = evalAndOr( cond, ev, Env{}, 0 );
+            Rep       onTrue  = Rep::None;
+            Rep       onFalse = Rep::None;
+            if( ( *j.ao )[r].op == sh::Link::And )
+            {
+                onTrue = repOfItem( ( *j.ao )[r] );
+                if( r + 1 < j.ao->size() && ( *j.ao )[r + 1].op == sh::Link::Or )
+                {
+                    onFalse = repOfItem( ( *j.ao )[r + 1] );
+                }
+            }
+            else
+            {
+                onFalse = repOfItem( ( *j.ao )[r] );
+            }
+            if( v != Tri::F )
+            {
+                o.add( onTrue );
+            }
+            if( v != Tri::T )
+            {
+                o.add( onFalse );
+            }
+            return o;
+        }
+        const sh::Node& n = node( j.node );
+        if( j.kind == Judgment::Kind::If )
+        {
+            bool open = true;
+            for( std::size_t i = 0; i < n.conds.size() && open; ++i )
+            {
+                const Tri v = evalCondList( n.conds[i], ev );
+                if( v != Tri::F )
+                {
+                    o.add( i < n.bodies.size() ? repOfList( n.bodies[i] ) : Rep::None );
+                }
+                open = v != Tri::T;
+            }
+            if( open )
+            {
+                o.add( n.bodies.size() > n.conds.size() ? repOfList( n.bodies.back() ) : Rep::None );
+            }
+            return o;
+        }
+        // case: an empty subject takes the first arm whose pattern matches the empty string
+        const sh::Word subj{ n.caseSubject, n.line, n.pos, {} };
+        const Prov     p     = provWord( subj, n.pos, j.scope, Env{}, 0 );
+        const bool     empty = ofInput( p, ev, Tri::T ) == Tri::T;
+        const auto     takesAll = [ & ]( std::size_t b )   // a `*)` arm: every subject, the empty one too, can reach it
+        {
+            return b < n.casePats.size() && std::any_of( n.casePats[b].begin(), n.casePats[b].end(), []( const std::string& pt )
+                                                         {
+                                                             const std::string u = sh::detail::unq( pt );
+                                                             return std::all_of( u.begin(), u.end(), []( char ch ) { return ch == '*'; } );
+                                                         } );
+        };
+        bool catchAll = false;
+        for( std::size_t b = 0; b < n.bodies.size(); ++b )
+        {
+            if( !empty )
+            {
+                o.add( repOfList( n.bodies[b] ) );
+                catchAll = catchAll || takesAll( b );
+                continue;
+            }
+            if( takesAll( b ) )
+            {
+                o.add( repOfList( n.bodies[b] ) );
+                return o;
+            }
+        }
+        // no `*)` arm: a subject no pattern matches takes no arm and reports nothing
+        if( empty || !catchAll )
+        {
+            o.none = true;
+        }
+        return o;
+    }
+    // Can the judgment be reached under S? Not when an enclosing if's condition takes another branch for sure, or an
+    // enclosing case's empty subject takes another arm.
+    bool reachable( const Judgment& j, const Eval& ev ) const
+    {
+        return reachableAt( j.reach, ev );
+    }
+    bool reachableAt( const std::vector<ReachStep>& reach, const Eval& ev ) const
+    {
+        for( const ReachStep& r : reach )
+        {
+            const sh::Node& n = node( r.node );
+            if( n.kind == sh::NodeKind::If )
+            {
+                for( std::size_t i = 0; i < n.conds.size(); ++i )
+                {
+                    const Tri v = evalCondList( n.conds[i], ev );
+                    if( i < r.branch && v == Tri::T )
+                    {
+                        return false;
+                    }
+                    if( i == r.branch )
+                    {
+                        if( v == Tri::F )
+                        {
+                            return false;
+                        }
+                        break;
+                    }
+                }
+            }
+            else if( n.kind == sh::NodeKind::Case )
+            {
+                const sh::Word subj{ n.caseSubject, n.line, n.pos, {} };
+                const Prov     p = provWord( subj, n.pos, scope_[r.node], Env{}, 0 );
+                if( ofInput( p, ev, Tri::T ) == Tri::T )
+                {
+                    for( std::size_t b = 0; b < n.casePats.size(); ++b )
+                    {
+                        const bool matches = std::any_of( n.casePats[b].begin(), n.casePats[b].end(), []( const std::string& pt )
+                                                          {
+                                                              const std::string u = sh::detail::unq( pt );
+                                                              return std::all_of( u.begin(), u.end(), []( char ch ) { return ch == '*'; } );
+                                                          } );
+                        if( matches )
+                        {
+                            if( b != r.branch )
+                            {
+                                return false;
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        return true;
+    }
+    bool vacuous( std::size_t ji ) const
+    {
+        const Judgment&            j = judgments_[ji];
+        std::vector<std::uint32_t> leaves;
+        Eval                       col;
+        col.collect = &leaves;
+        (void)outcomes( j, col );
+        std::sort( leaves.begin(), leaves.end() );
+        leaves.erase( std::unique( leaves.begin(), leaves.end() ), leaves.end() );
+        leaves.erase( std::remove_if( leaves.begin(), leaves.end(), [ & ]( std::uint32_t l ) { return !isRun( l ); } ), leaves.end() );
+        if( leaves.empty() )
+        {
+            return false;
+        }
+        const std::vector<std::uint32_t> none;
+        Eval                             base;
+        base.s = &none;
+        if( outcomes( j, base ).onlyPass() )
+        {
+            return false;   // it passes whatever its producers do: no failure makes it vacuous
+        }
+        std::vector<std::vector<std::uint32_t>> sets;
+        if( leaves.size() <= 4 )
+        {
+            for( std::uint32_t m = 1; m < ( 1u << leaves.size() ); ++m )
+            {
+                std::vector<std::uint32_t> s;
+                for( std::size_t b = 0; b < leaves.size(); ++b )
+                {
+                    if( ( m >> b ) & 1u )
+                    {
+                        s.push_back( leaves[b] );
+                    }
+                }
+                sets.push_back( std::move( s ) );
+            }
+        }
+        else
+        {
+            for( std::uint32_t l : leaves )
+            {
+                sets.push_back( { l } );
+            }
+            sets.push_back( leaves );
+        }
+        for( const std::vector<std::uint32_t>& s : sets )
+        {
+            // a producer that is not silent (its status is read) is never in S: a pipe stage counts, its pipeline is the judgment
+            if( std::any_of( s.begin(), s.end(), [ & ]( std::uint32_t l ) { return !silentFailable( l ) && !inOwnPipeline( j, l ); } ) )
+            {
+                continue;
+            }
+            Eval ev;
+            ev.s = &s;
+            if( !reachable( j, ev ) || !outcomes( j, ev ).onlyPass() )
+            {
+                continue;
+            }
+            bool guarded = false;
+            for( std::size_t ki = 0; ki < judgments_.size() && !guarded; ++ki )
+            {
+                const Judgment& k = judgments_[ki];
+                if( ki == ji || k.scope != j.scope || !reachable( k, ev ) )
+                {
+                    continue;
+                }
+                guarded = outcomes( k, ev ).onlyFail();
+            }
+            if( !guarded )
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    bool inOwnPipeline( const Judgment& j, std::uint32_t l ) const
+    {
+        const auto inAo = [ & ]( const sh::AndOr& ao )
+        {
+            return std::any_of( ao.begin(), ao.end(), [ & ]( const sh::Item& it ) { return it.cmds.size() > 1 && std::find( it.cmds.begin(), it.cmds.end() - 1, l ) != it.cmds.end() - 1; } );
+        };
+        if( j.kind == Judgment::Kind::AndOr )
+        {
+            return inAo( *j.ao );
+        }
+        const sh::Node& n = node( j.node );
+        for( std::uint32_t cl : n.conds )
+        {
+            if( cl != kNone && std::any_of( t_.lists[cl].begin(), t_.lists[cl].end(), inAo ) )
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // ── the three status shapes ────────────────────────────────────────────────────────────────────────────────────
+    bool reportsByFlag( std::uint32_t f, int depth ) const
+    {
+        bool hit = false;
+        if( f == kNone || depth > 2 )
+        {
+            return false;
+        }
+        forEachSimple( node( f ).bodies.empty() ? kNone : node( f ).bodies[0], [ & ]( std::uint32_t c )
+                       {
+                           const sh::Node& n = node( c );
+                           if( n.words.empty() )
+                           {
+                               hit = hit || repOfCmd( c ) == Rep::Fail;
+                               return;
+                           }
+                           const std::string w = sh::detail::unq( n.words[0].text );
+                           if( std::find( flagReporters_.begin(), flagReporters_.end(), w ) != flagReporters_.end() )
+                           {
+                               // a reporter whose output is sent to stderr still sets the flag in the subshell only
+                               hit = true;
+                               return;
+                           }
+                           const std::uint32_t g = funcNode( w );
+                           if( g != kNone && g != f && repOfCmd( c ) == Rep::None )
+                           {
+                               hit = hit || reportsByFlag( g, depth + 1 );
+                           }
+                       } );
+        return hit;
+    }
+    // rc=$? at `cap`: is its value TESTED before it is overwritten? `after` is where the window opens.
+    bool rcTested( const std::string& name, std::uint32_t scope, std::uint32_t after, std::uint32_t until, int depth ) const
+    {
+        bool tested = false;
+        for( std::uint32_t c = 0; c < t_.nodes.size() && !tested; ++c )
+        {
+            const sh::Node& n = node( c );
+            if( scope_[c] != scope || n.pos <= after || n.pos >= until )
+            {
+                continue;
+            }
+            std::vector<std::string> refs;
+            std::string              text;
+            if( n.kind == sh::NodeKind::Case )
+            {
+                text = n.name;
+            }
+            else if( n.kind == sh::NodeKind::Simple )
+            {
+                for( const sh::Word& w : n.words )
+                {
+                    text += w.text + " ";
+                }
+            }
+            else
+            {
+                continue;
+            }
+            sh::detail::vrefs( text, refs );
+            const bool mentions = std::find( refs.begin(), refs.end(), name ) != refs.end();
+            if( n.kind == sh::NodeKind::Case )
+            {
+                tested = mentions;
+                continue;
+            }
+            // an alias hands it on: r1=$rc, then a test of r1
+            for( const sh::Word& a : n.assigns )
+            {
+                const std::size_t eq = a.text.find( '=' );
+                if( eq != std::string::npos && sh::detail::quotedBareVar( a.text.substr( eq + 1 ) ) == name && depth < 2 )
+                {
+                    tested = tested || rcTested( a.text.substr( 0, eq ), scope, n.pos, UINT32_MAX, depth + 1 );
+                }
+                std::vector<std::string> ar;
+                sh::detail::vrefs( a.text, ar );
+                if( a.text.find( "$((" ) != std::string::npos && std::find( ar.begin(), ar.end(), name ) != ar.end() )
+                {
+                    tested = true;   // fail=$(( fail | rc )): accumulated into the verdict
+                }
+            }
+            if( !mentions || n.words.empty() )
+            {
+                continue;
+            }
+            const std::string cw = sh::detail::unq( n.words[0].text );
+            if( cw == "[" || cw == "test" || cw == "exit" || cw == "return" || cw.rfind( "[[", 0 ) == 0 || cw.rfind( "((", 0 ) == 0 || cw == "echo" || cw == "printf"
+                || ( cw == "local" && text.find( "$((" ) != std::string::npos ) )
+            {
+                // echo $rc: into an rc file the gate compares later (the matcher's checked form); to the terminal it is a message
+                tested = ( cw != "echo" && cw != "printf" ) || std::any_of( n.fredirs.begin(), n.fredirs.end(), isStdoutRedir );
+                continue;
+            }
+            if( repOfCmd( c ) == Rep::None )
+            {
+                for( std::size_t w = 1; w < n.words.size(); ++w )
+                {
+                    tested = tested || sh::detail::quotedBareVar( n.words[w].text ) == name;   // a checker: expect "C4" "$rc" 1
+                }
+            }
+        }
+        return tested;
+    }
+    // The next assignment that surely overwrites NAME after the capture: not a conditional one (`|| rc=1`), and, when
+    // the capture's branch path is known, one on that path or outside it (an if / case branch the capture is not in,
+    // the other arm of its own if included, does not run after it on every path).
+    std::uint32_t nextAssignPos( const std::string& name, std::uint32_t scope, std::uint32_t after, const std::vector<ReachStep>* capReach = nullptr ) const
+    {
+        const auto onPath = [ & ]( const Assign& a )
+        {
+            return capReach == nullptr
+                || ( a.reach.size() <= capReach->size()
+                     && std::equal( a.reach.begin(), a.reach.end(), capReach->begin(),
+                                    []( const ReachStep& x, const ReachStep& y ) { return x.node == y.node && x.branch == y.branch; } ) );
+        };
+        std::uint32_t best = UINT32_MAX;
+        for( const Assign& a : assigns_ )
+        {
+            if( a.name == name && a.scope == scope && a.pos > after && a.pos < best && !a.cond && onPath( a ) )
+            {
+                best = a.pos;
+            }
+        }
+        return best;
+    }
+    const std::vector<ReachStep>* reachOf( std::uint32_t c ) const
+    {
+        for( const Assign& a : assigns_ )
+        {
+            if( a.node == c )
+            {
+                return &a.reach;
+            }
+        }
+        return nullptr;
+    }
+    // the operands a call passes as $1.. (no redirect-target subs, no glued fds), normalized
+    std::vector<std::string> callArgs( std::uint32_t c ) const
+    {
+        std::vector<std::string> args;
+        const sh::Node&          n = node( c );
+        const std::size_t        k = cmdIdx( n );
+        for( std::size_t a = k == std::string::npos ? n.words.size() : k + 1; a < n.words.size(); ++a )
+        {
+            if( !n.words[a].text.empty() && !isFdWord( n, n.words[a].text ) )
+            {
+                args.push_back( normTarget( n.words[a].text ) );
+            }
+        }
+        return args;
+    }
+    bool inReporterMessage( std::uint32_t d ) const
+    {
+        return std::any_of( subCalls_.begin(), subCalls_.end(), [ & ]( const std::pair<std::uint32_t, std::uint32_t>& hc ) { return hc.second == d && repOfCmd( hc.first ) != Rep::None; } );
+    }
+    std::vector<std::uint32_t> callsOf( std::uint32_t f ) const
+    {
+        std::vector<std::uint32_t> out;
+        for( std::uint32_t c = 0; c < t_.nodes.size(); ++c )
+        {
+            if( node( c ).kind == sh::NodeKind::Simple && scope_[c] != f && cmdWord( c ) == node( f ).name )
+            {
+                out.push_back( c );
+            }
+        }
+        return out;
+    }
+    // Does any command read FILE (an operand, a < redirect), directly or through a function's "$TMP/$1.rc" bound at a
+    // call? A read inside a reporter's message ($( cat "$TMP/$1.rc" ) in a FAIL line) prints it; it tests nothing.
+    bool fileRead( const std::string& target, std::uint32_t writer ) const
+    {
+        for( std::uint32_t d = 0; d < t_.nodes.size(); ++d )
+        {
+            const sh::Node& n = node( d );
+            if( d == writer || n.kind != sh::NodeKind::Simple || inReporterMessage( d ) )
+            {
+                continue;
+            }
+            std::vector<std::string> reads = callArgs( d );
+            for( const sh::Redir& r : n.fredirs )
+            {
+                if( r.op == "<" )
+                {
+                    reads.push_back( normTarget( r.target ) );
+                }
+            }
+            for( const std::string& t : reads )
+            {
+                if( t == target )
+                {
+                    return true;
+                }
+                if( scope_[d] == kNone || t.find( '$' ) == std::string::npos )
+                {
+                    continue;
+                }
+                for( std::uint32_t c : callsOf( scope_[d] ) )
+                {
+                    if( bindArgs( t, callArgs( c ) ) == target )
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+    std::string captureName( std::uint32_t c ) const
+    {
+        const sh::Node&    n  = node( c );
+        const std::string& tx = n.words.empty() ? n.assigns[0].text : n.words[1].text;
+        return tx.substr( 0, tx.find( '=' ) );
+    }
+    bool isLocalIn( const std::string& name, std::uint32_t f ) const
+    {
+        return std::any_of( assigns_.begin(), assigns_.end(), [ & ]( const Assign& a ) { return a.scope == f && a.name == name && a.word >= 0; } )
+            || std::any_of( t_.nodes.begin(), t_.nodes.end(), [ & ]( const sh::Node& n )
+                            {
+                                const std::size_t idx = static_cast<std::size_t>( &n - t_.nodes.data() );
+                                return scope_[idx] == f && n.kind == sh::NodeKind::Simple && n.words.size() >= 2 && n.words[0].text == "local"
+                                    && std::any_of( n.words.begin() + 1, n.words.end(), [ & ]( const sh::Word& w ) { return w.text == name; } );
+                            } );
+    }
+    bool isLastOfFunc( std::uint32_t c, std::uint32_t f ) const
+    {
+        const sh::List* body = funcBody( f );
+        if( body == nullptr || body->empty() )
+        {
+            return false;
+        }
+        const sh::List* inner = body;
+        // `run(){ …; rc=$?; }`: the body is a group; its list's last statement
+        if( inner->size() == 1 && ( *inner )[0].size() == 1 && ( *inner )[0][0].cmds.size() == 1 )
+        {
+            const sh::Node& g = node( ( *inner )[0][0].cmds[0] );
+            if( ( g.kind == sh::NodeKind::Group || g.kind == sh::NodeKind::Subshell ) && !g.bodies.empty() && g.bodies[0] != kNone )
+            {
+                inner = &t_.lists[g.bodies[0]];
+            }
+        }
+        if( inner->empty() )
+        {
+            return false;
+        }
+        const sh::AndOr& last = inner->back();
+        return last.size() == 1 && last[0].cmds.size() == 1 && last[0].cmds[0] == c;
+    }
+    bool previousRuns( std::uint32_t cap ) const   // the statement before the capture runs something under test
+    {
+        for( const sh::Call& call : a_.calls )
+        {
+            if( call.node != kNone && call.node < a_.facts.size() && call.how.find( "=$? " ) != std::string::npos
+                && call.how.rfind( captureName( cap ) + "=$?", 0 ) == 0 && scope_[call.node] == scope_[cap] && node( call.node ).pos < node( cap ).pos )
+            {
+                return true;
+            }
+        }
+        for( std::uint32_t c = 0; c < a_.facts.size(); ++c )
+        {
+            if( a_.facts[c].seen && isRun( c ) && scope_[c] == scope_[cap] && node( c ).pos < node( cap ).pos && node( c ).line + 1 >= node( cap ).line
+                && a_.facts[c].cons.how.rfind( captureName( cap ) + "=$?", 0 ) == 0 )
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+};
+
+inline std::vector<Site> Script::sites() const
+{
+    std::vector<Site> out;
+    const auto emit = [ & ]( std::uint32_t pos )
+    {
+        const ShLine l = shSiteLine( src_, pos );
+        std::string text = collapseSpaces( l.text );
+        if( !text.empty() )
+        {
+            out.push_back( { Facet::VacuousAssert, l.startByte, std::move( text ) } );
+        }
+    };
+    // (1) an assertion that passes on an empty text, read off a run whose failure nothing reports
+    for( std::size_t ji = 0; ji < judgments_.size(); ++ji )
+    {
+        if( vacuous( ji ) )
+        {
+            emit( judgments_[ji].pos );
+        }
+    }
+    // (2) a FAIL reporter that sets the failure flag, called inside a $( ) whose status nothing reads
+    for( const auto& [ host, call ] : subCalls_ )
+    {
+        const std::uint32_t f = funcNode( cmdWord( call ) );
+        if( f == kNone || call >= a_.facts.size() || !a_.facts[call].seen || a_.facts[call].cons.v == sh::Verdict::Checked || repOfCmd( call ) != Rep::None )
+        {
+            continue;
+        }
+        if( reportsByFlag( f, 0 ) )
+        {
+            emit( node( host ).pos );
+        }
+    }
+    // (3) rc=$? captured and never tested before it is overwritten (B43's H2, per capture)
+    for( std::uint32_t cap : captures_ )
+    {
+        const std::string   name  = captureName( cap );
+        const std::uint32_t scope = scope_[cap];
+        if( !previousRuns( cap ) )
+        {
+            continue;
+        }
+        const std::uint32_t pos = node( cap ).pos;
+        if( scope != kNone && isLastOfFunc( cap, scope ) && !isLocalIn( name, scope ) )
+        {
+            // an rc-setter (run(){ …; rc=$?; }): each call site's window, until the next call of it or the next assignment
+            const std::string fname = node( scope ).name;
+            for( std::uint32_t c = 0; c < t_.nodes.size(); ++c )
+            {
+                if( node( c ).kind != sh::NodeKind::Simple || cmdWord( c ) != fname || scope_[c] == scope )
+                {
+                    continue;
+                }
+                std::uint32_t until = nextAssignPos( name, scope_[c], node( c ).pos );
+                for( std::uint32_t d = 0; d < t_.nodes.size(); ++d )
+                {
+                    if( d != c && node( d ).kind == sh::NodeKind::Simple && scope_[d] == scope_[c] && node( d ).pos > node( c ).pos && cmdWord( d ) == fname )
+                    {
+                        until = std::min( until, node( d ).pos );
+                    }
+                }
+                if( !rcTested( name, scope_[c], node( c ).pos, until, 0 ) )
+                {
+                    emit( node( c ).pos );
+                }
+            }
+            continue;
+        }
+        if( !rcTested( name, scope, pos, nextAssignPos( name, scope, pos, reachOf( cap ) ), 0 ) )
+        {
+            emit( pos );
+        }
+    }
+    // (3b) `echo $? > "$TMP/$1.rc"` after a run: an rc FILE no command reads (per call site of the function that writes it)
+    for( std::uint32_t c = 0; c < t_.nodes.size(); ++c )
+    {
+        const sh::Node& n = node( c );
+        const std::string cw = cmdWord( c );
+        if( n.kind != sh::NodeKind::Simple || ( cw != "echo" && cw != "printf" )
+            || std::none_of( n.words.begin(), n.words.end(), []( const sh::Word& w ) { const std::string u = sh::detail::unq( w.text ); return u == "$?" || u == "${?}"; } ) )
+        {
+            continue;
+        }
+        std::string target;
+        for( const sh::Redir& r : n.fredirs )
+        {
+            if( isStdoutRedir( r ) && !r.target.empty() && r.target != "/dev/null" && r.target[0] != '&' )
+            {
+                target = normTarget( r.target );
+            }
+        }
+        const std::uint32_t scope = scope_[c];
+        const bool afterRun = std::any_of( a_.calls.begin(), a_.calls.end(), [ & ]( const sh::Call& call )
+                                           { return call.node != kNone && scope_[call.node] == scope && call.how.rfind( "rc file", 0 ) == 0 && node( call.node ).pos < n.pos; } )
+                           || [ & ]
+                              {
+                                  for( std::uint32_t d = 0; d < a_.facts.size(); ++d )
+                                  {
+                                      if( a_.facts[d].seen && scope_[d] == scope && node( d ).pos < n.pos && isRun( d ) && a_.facts[d].cons.how.rfind( "rc file", 0 ) == 0 )
+                                      {
+                                          return true;
+                                      }
+                                  }
+                                  return false;
+                              }();
+        if( target.empty() || !afterRun )
+        {
+            continue;
+        }
+        if( scope != kNone && target.find( '$' ) != std::string::npos )
+        {
+            for( std::uint32_t call : callsOf( scope ) )
+            {
+                const std::string bound = bindArgs( target, callArgs( call ) );
+                if( !bound.empty() && bound != target && !fileRead( bound, c ) )
+                {
+                    emit( node( call ).pos );
+                }
+            }
+            continue;
+        }
+        if( !fileRead( target, c ) )
+        {
+            emit( n.pos );
+        }
+    }
+    // (4) `RUN | head -1 || fallback`: the || reads the last stage's status, which always succeeds
+    for( std::size_t q = 0; q < andOrs_.size(); ++q )
+    {
+        const sh::AndOr& ao = *andOrs_[q];
+        for( std::size_t j = 0; j + 1 < ao.size(); ++j )
+        {
+            const sh::Item& it = ao[j];
+            if( ao[j + 1].op != sh::Link::Or || it.cmds.size() < 2 || it.neg )
+            {
+                continue;
+            }
+            const std::uint32_t last = it.cmds.back();
+            const std::string   lw   = cmdWord( last );
+            static constexpr std::string_view kAlways[] = { "head", "tail", "tr", "cut", "sort", "uniq", "wc", "cat", "tee", "rev", "paste", "column" };
+            if( last >= a_.facts.size() || a_.facts[last].pipefail || std::find( std::begin( kAlways ), std::end( kAlways ), lw ) == std::end( kAlways ) )
+            {
+                continue;
+            }
+            const bool reads = std::any_of( it.cmds.begin(), it.cmds.end() - 1, [ & ]( std::uint32_t c ) { return isRun( c ) || cmdWord( c ) == "grep"; } );
+            sh::AndOr  rhs{ ao[j + 1] };
+            if( reads && !sh::detail::isTrivialOr( sh::detail::itemsText( t_, rhs ) ) )
+            {
+                emit( posOf( ao ) );
+            }
+        }
+    }
+    std::sort( out.begin(), out.end(), []( const Site& a, const Site& b ) { return a.startByte != b.startByte ? a.startByte < b.startByte : a.text < b.text; } );
+    out.erase( std::unique( out.begin(), out.end(), []( const Site& a, const Site& b ) { return a.startByte == b.startByte && a.text == b.text; } ), out.end() );
     return out;
+}
+
+}   // namespace va
+
+inline std::vector<Site> scanVacuousAssertBash( std::string_view src, const std::vector<Span>& /*spans*/ )
+{
+    if( src.empty() )
+    {
+        return {};
+    }
+    const rw::shstatus::Tree     tree = rw::shstatus::parse( src );
+    const rw::shstatus::Analysis an   = rw::shstatus::analyze( tree, src );
+    const va::Script             script( src, tree, an );
+    return script.sites();
 }
 
 }   // namespace detail

@@ -6209,8 +6209,21 @@ on the Python 3.13 standard library (405 calls) and on libc++'s std::format test
 deliberately ill-formed `.verify.cpp` calls); vacuous-assert sample precision 30/30 on this tree's gates
 (46 rows, Wilson 95% lower bound 0.89) after fix round 1 (2026-10-08) taught the guard the positive on the same
 capture spelled as an `if`/`elif` `&&` condition or through a script-defined function — before it, 3 of 49 rows were
-such false positives and the seeded sample read 28/30 (lower bound 0.79), not the 30/30 first published. Floor: an
-absence read off a file a run redirected into is not judged (`redactcheck.sh:81`, `namingcalibrationcheck.sh:292`).
+such false positives and the seeded sample read 28/30 (lower bound 0.79), not the 30/30 first published.
+QD-VA-FORMS (2026-11-19) rebuilt vacuous-assert as a status-dataflow walk on the B43 exit-status matcher
+(`src/shstatus.h`, the C++ port of `test/lib/exitstatus.py`, held equal by `gateexitcheck` H4): an assertion that
+passes on an empty text (absence grep, `[ -z ]`, a `cmp`/`diff`/`=` parity) read off a run whose status nothing reads,
+through a capture, a pipe without pipefail, a file the run redirected into or a wrapper whose status is dropped; plus
+a FAIL reporter inside `$( )`, an `rc=$?` no test reads, and `| head || fallback`. Replaying the 11 fix commits of
+the review threads it was built from (reversed range `FIX..FIX^`): 8 of 11 give rows (was 0); the fixes themselves
+add 0. Misses: a comparison of counts (`fordemoteallcheck`, a failed twin counts 0 rows), a premise loop that skipped
+one mark (`edgemarkcheck`, content, not status) and an any-of loop (`fordocbodycheck`). On this tree's `test/*.sh`
+the facet reports 963 sites (was 61), most of them determinism parities and absences of unchecked runs; 60 rows
+hand-checked in three seeded samples: 4 false positives fixed in the lane (a conditional `|| rc=1`, a text kept only
+behind a presence check, a wrapper call whose rc is compared, an rc captured in both arms of an if), and of the 56
+still reported, every status fact holds while 5 arms still fail on that site's failure (a helper's sentinel, a
+compare against a constant), so the row names a lost status, not a vacuous arm. Floors: a comparison of counts, a
+text read off stderr, and what a helper's failure sentinel feeds.
 Two format-arity floors (a delta review, 2026-10-08; 0 hits on the three corpora above): the macro skip sees a name this
 file `#define`s and a function-like macro the tree defines, not a lower-case object-like macro defined only in another
 file; and only a literal `#if 0` is skipped, so `#if false`, `#if (0)`, `#if 0 && …` and the `#else` of `#if 1` are

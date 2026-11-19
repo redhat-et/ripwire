@@ -13,9 +13,12 @@
 #   dedup-first    — C++: std::unique / std::ranges::unique with a predicate over a type that carries a
 #                    severity-like field, where neither the predicate nor the sort before it reads that field,
 #                    so the FIRST row of a run survives, not the most severe. REPORT-ONLY.
-#   vacuous-assert — Bash, test-script paths only: an ABSENCE assertion (grep -q PAT whose match is the failure
-#                    branch) read off a command whose failure is never checked, so a crash reads as PASS.
-#                    REPORT-ONLY.
+#   vacuous-assert — Bash, test-script paths only: an assertion that PASSES on an empty text (an absence grep,
+#                    [ -z ], a cmp/diff/= parity of two texts) read off a run whose failure is never checked —
+#                    through a capture, a pipe without pipefail, a file it redirected into or a wrapper whose
+#                    status is dropped — so a crash reads as PASS; and three status shapes: a FAIL reporter
+#                    called inside $( ) (its flag dies with the subshell), an rc=$? no test reads, and a
+#                    `| head || fallback` (the || reads head's status). REPORT-ONLY.
 # Like every kind, a row fires only on what THIS change introduced, never on pre-existing debt: a site is new
 # when its normalized text occurs more often than among the baseline's sites of that facet (repo-wide), so an untouched,
 # MOVED or RENAMED mismatch gives no row and a swap (one fixed, one added in the same function) still does.
@@ -33,7 +36,8 @@
 # #else of #if 1 read as live), an escape that spells a brace (§1d); an unqualified format()/print();
 # the std::print ostream overload; a dedup whose sort reads severity in the MILD-first direction, or whose
 # predicate/comparator is a named function (skipped, never guessed); a utf8 cut with no ellipsis; a
-# vacuous-assert absence read off a file a run redirected into (§4 n_fileredirect). And the
+# vacuous-assert comparison of COUNTS (a failed run counts 0 rows), a text read off stderr, or a sentinel a helper
+# prints on failure (§4b). And the
 # utf8/dedup fixtures cannot see an exit-only bug on their own (their clone near-misses gate duplication) —
 # §4 vac and §5 both carry the exit judgment for the report-only facets.
 #
@@ -1149,8 +1153,8 @@ gating_split "$L" 0
 #   the absence, an enclosing if/case that requires content of the same capture, a plain capture under set -e
 #   (errexit aborts on its failure), the match-is-pass polarity, a literal producer, a commented-out shape, a
 #   pre-existing vacuous line, a sound if, a new function with a handled capture, the same shape in a script
-#   outside a test path, a text utility over a file, a script-defined wrapper (stated floor), a presence test
-#   on a variable derived from the capture, a requirement inside a { …; } group, and an elif chain. A capture
+#   outside a test path, a presence test on a variable derived from the capture, a requirement inside a
+#   { …; } group, and an elif chain. A capture
 #   derived from another capture (TAG="$( printf '%s' "$OUT" | grep -o … )") is followed back to its run.
 fx_init vac
 mkdir -p "$WORK/vac/test" "$WORK/vac/scripts"
@@ -1166,7 +1170,7 @@ EOF
 )"
 VHDR="$VHDR
 "
-for f in t_var t_pipe t_pipefail t_if t_cont t_neg t_names t_fn t_setelocal t_setepipe t_derived n_rc n_orno n_presence n_positive n_polarity n_literal n_comment n_legacy n_ifok n_posafter n_nestif n_case n_casealone n_sete n_seteuo n_filepipe n_wrapper n_derivedguard n_bracegroup n_elif n_ifand n_elifpos n_helper n_fileredirect t_orcond t_undefhelper t_reassign; do
+for f in t_var t_pipe t_pipefail t_if t_cont t_neg t_names t_fn t_setelocal t_setepipe t_derived n_rc n_orno n_presence n_positive n_polarity n_literal n_comment n_legacy n_ifok n_posafter n_nestif n_case n_casealone n_sete n_seteuo t_filepipe t_wrapper n_derivedguard n_bracegroup n_elif n_ifand n_elifpos n_helper t_fileredirect t_orcond t_undefhelper t_reassign; do
     printf '%s' "$VHDR" >"$WORK/vac/test/$f.sh"
 done
 for f in t_setepipe n_sete; do printf 'set -e\n' >>"$WORK/vac/test/$f.sh"; done
@@ -1353,11 +1357,11 @@ OUT="$( "$BIN" --list 2>/dev/null )"
 TAG="$( printf '%s' "$OUT" | grep -o '<list[^>]*>' )"
 printf '%s' "$TAG" | grep -q 'bad=' && no "bad= present" || ok "bad= absent"
 EOF
-cat >>"$WORK/vac/test/n_filepipe.sh" <<'EOF'
+cat >>"$WORK/vac/test/t_filepipe.sh" <<'EOF'
 "$BIN" --list >"$TMPDIR/out.txt" 2>/dev/null
 grep -v '^#' "$TMPDIR/out.txt" | grep -q 'bad' && no "bad present" || ok "bad absent"
 EOF
-cat >>"$WORK/vac/test/n_wrapper.sh" <<'EOF'
+cat >>"$WORK/vac/test/t_wrapper.sh" <<'EOF'
 runit(){ "$BIN" "$@" 2>/dev/null; }
 W="$( runit --list )"
 printf '%s' "$W" | grep -q 'bad' && no "bad present" || ok "bad absent"
@@ -1387,7 +1391,7 @@ EOF
 #   spelled as an if condition of &&-joined greps (wrapverbscheck:266), as an elif condition (ensemblecheck:366) or
 #   through a function the script defines (qddialscheck:320). Near-miss positives: a || condition (a crash can take
 #   the other branch's pass), a helper the script does not define, and a positive on an EARLIER capture of a
-#   reassigned variable. Stated floor: an absence read off a FILE a run redirected into (redactcheck:81).
+#   reassigned variable.
 cat >>"$WORK/vac/test/n_ifand.sh" <<'EOF'
 C_OUT="$( "$BIN" --list 2>/dev/null )"
 if echo "$C_OUT" | grep -q '<list ' && echo "$C_OUT" | grep -qF '</list>'; then
@@ -1445,7 +1449,7 @@ fi
 RA="$( "$BIN" --list --other 2>/dev/null )"
 printf '%s' "$RA" | grep -q 'bad' && no "bad present" || ok "bad absent"
 EOF
-cat >>"$WORK/vac/test/n_fileredirect.sh" <<'EOF'
+cat >>"$WORK/vac/test/t_fileredirect.sh" <<'EOF'
 "$BIN" --list >"$TMPDIR/exp.xml" 2>/dev/null
 grep -q 'secret' "$TMPDIR/exp.xml" && no "the secret leaked" || ok "no secret"
 EOF
@@ -1475,18 +1479,181 @@ ds_none_p "$L" test/n_case.sh     "the absence is nested in a case arm that requ
 ds_none_p "$L" test/n_casealone.sh "a case pattern alone on its line (the scanner must not read past it), the absence on the next line"
 ds_none_p "$L" test/n_sete.sh     "set -e: a failed plain capture aborts the script"
 ds_none_p "$L" test/n_seteuo.sh   "set -euo pipefail: a failed plain capture aborts the script"
-ds_none_p "$L" test/n_filepipe.sh "a text utility over a file is not a run under test (its input's provenance is not on the line)"
-ds_none_p "$L" test/n_wrapper.sh  "a capture through a script-defined wrapper is not judged (stated floor)"
 ds_none_p "$L" test/n_derivedguard.sh "a presence test on a variable DERIVED from the capture requires the capture's text"
 ds_none_p "$L" test/n_bracegroup.sh "a requirement inside a { …; } group on the same capture"
 ds_none_p "$L" test/n_elif.sh     "an elif chain: a crash takes the final else (a failure), not a pass"
 ds_none_p "$L" test/n_ifand.sh    "a positive on the same capture in an if condition of &&-joined greps guards it (rv §1c, wrapverbscheck:271)"
 ds_none_p "$L" test/n_elifpos.sh  "a positive on the same capture in an elif condition guards it (rv §1c, ensemblecheck:371)"
 ds_none_p "$L" test/n_helper.sh   "a positive on the same capture through a script-defined function guards it (rv §1c, qddialscheck:323)"
-ds_none_p "$L" test/n_fileredirect.sh "an absence read off a FILE a run redirected into is not judged (stated floor, redactcheck:81)"
-for f in t_orcond t_undefhelper t_reassign; do
+#   QD-VA-FORMS (2026-11-19): the three former floors are positives now — a filter over a file the run wrote
+#   (t_filepipe), a capture through a script-defined wrapper (t_wrapper), an absence read off a FILE a run
+#   redirected into (t_fileredirect; redactcheck:81 was the shape).
+for f in t_orcond t_undefhelper t_reassign t_filepipe t_wrapper t_fileredirect; do
     ds_has_p "$L" vacuous-assert "test/$f.sh" minor
 done
+gating_split "$L" 0
+
+# ── 4b) VACUOUS-ASSERT FORMS (QD-VA-FORMS): the status-dataflow walk on the B43 matcher's port ──────────────────
+#   One status model (src/shstatus.h = test/lib/exitstatus.py, held equal by gateexitcheck H4): a run whose status
+#   nothing reads may fail silently, and its text is then EMPTY. Positives, one per form: an absence read off a file
+#   the run redirected into; `|| no` after a pipe without pipefail (it reads the last stage); a wrapper whose status
+#   is dropped; a cmp parity of two failed runs' files; a FAIL reporter inside $( ) (the flag dies with the
+#   subshell); rc=$? only echoed; `| head -1 || fallback`; a text kept in a loop; a capture of a wrapper call. Each
+#   negative is a positive twin with the status read or the text guarded; the twin's row is the premise that the
+#   form is read, so the arm counts its pairs and fails short of all. The last five are census false positives
+#   fixed in this lane (the site in parentheses).
+fx_init vaf
+mkdir -p "$WORK/vaf/test"
+for f in t_redir t_nopipefail t_wrapdrop t_parity t_lostflag t_rcunread t_headfallback t_ungated t_callnorc n_pipefail n_redirrc n_redirorfail n_wrapchecked n_parityguard n_rcread n_rccondreassign n_rcbranches n_headtrue n_presencegated n_callrc n_sqsub; do
+    printf '%s' "$VHDR" >"$WORK/vaf/test/$f.sh"
+done
+fx_commit vaf
+cat >>"$WORK/vaf/test/t_redir.sh" <<'EOF'
+"$BIN" --list >"$TMPDIR/o.txt" 2>/dev/null
+grep -q 'bad' "$TMPDIR/o.txt" && no "bad present" || ok "bad absent"
+EOF
+cat >>"$WORK/vaf/test/t_nopipefail.sh" <<'EOF'
+"$BIN" --list 2>/dev/null | sed 's/x/y/' >"$TMPDIR/o.txt" || no "the list run failed"
+grep -q 'bad' "$TMPDIR/o.txt" && no "bad present" || ok "bad absent"
+EOF
+cat >>"$WORK/vaf/test/t_wrapdrop.sh" <<'EOF'
+runit(){ "$BIN" "$@" 2>/dev/null; }
+runit --list >"$TMPDIR/o.txt"
+grep -q 'bad' "$TMPDIR/o.txt" && no "bad present" || ok "bad absent"
+EOF
+cat >>"$WORK/vaf/test/t_parity.sh" <<'EOF'
+"$BIN" --list >"$TMPDIR/a.txt" 2>/dev/null
+"$BIN" --list >"$TMPDIR/b.txt" 2>/dev/null
+cmp -s "$TMPDIR/a.txt" "$TMPDIR/b.txt" && ok "deterministic" || no "nondeterministic"
+EOF
+cat >>"$WORK/vaf/test/t_lostflag.sh" <<'EOF'
+ask(){ local o; o="$( "$BIN" --list 2>/dev/null )" || { no "the list run failed"; return 0; }; printf '%s' "$o"; }
+A="$( ask )"
+printf '%s' "$A" | grep -q 'bad' && no "bad present" || ok "bad absent"
+EOF
+cat >>"$WORK/vaf/test/t_rcunread.sh" <<'EOF'
+OUT="$( "$BIN" --list 2>/dev/null )"; rc=$?
+echo "the list run exited $rc"
+printf '%s' "$OUT" | grep -q '<list' && ok "a list" || no "no list"
+EOF
+cat >>"$WORK/vaf/test/t_headfallback.sh" <<'EOF'
+FIRST="$( "$BIN" --list 2>/dev/null | head -1 || echo 'no output' )"
+case "$FIRST" in '<list'*) ok "a list first" ;; *) no "first line: $FIRST" ;; esac
+EOF
+cat >>"$WORK/vaf/test/t_ungated.sh" <<'EOF'
+KEEP=""; HIT=""
+for n in 1 2 3; do
+    o="$( "$BIN" --list --n=$n 2>/dev/null )"
+    HIT="$n"; KEEP="$o"
+done
+if [ -z "$HIT" ]; then
+    no "no run"
+else
+    printf '%s' "$KEEP" | grep -q 'bad' && no "bad present" || ok "bad absent"
+fi
+EOF
+cat >>"$WORK/vaf/test/t_callnorc.sh" <<'EOF'
+run_hook(){ printf '%s' "$1" | bash "$HOOK"; }
+OUT="$( run_hook '{}' )"
+if [ -z "$OUT" ]; then ok "silent"; else no "fired: $OUT"; fi
+EOF
+cat >>"$WORK/vaf/test/n_pipefail.sh" <<'EOF'
+set -o pipefail
+"$BIN" --list 2>/dev/null | sed 's/x/y/' >"$TMPDIR/o.txt" || no "the list run failed"
+grep -q 'bad' "$TMPDIR/o.txt" && no "bad present" || ok "bad absent"
+EOF
+cat >>"$WORK/vaf/test/n_redirrc.sh" <<'EOF'
+"$BIN" --list >"$TMPDIR/o.txt" 2>/dev/null; rc=$?
+[ "$rc" = 0 ] || no "the list run failed (rc=$rc)"
+grep -q 'bad' "$TMPDIR/o.txt" && no "bad present" || ok "bad absent"
+EOF
+cat >>"$WORK/vaf/test/n_redirorfail.sh" <<'EOF'
+"$BIN" --list >"$TMPDIR/o.txt" 2>/dev/null || no "the list run failed"
+grep -q 'bad' "$TMPDIR/o.txt" && no "bad present" || ok "bad absent"
+EOF
+cat >>"$WORK/vaf/test/n_wrapchecked.sh" <<'EOF'
+runit(){ "$BIN" "$@" 2>/dev/null; }
+runit --list >"$TMPDIR/o.txt" || no "the list run failed"
+grep -q 'bad' "$TMPDIR/o.txt" && no "bad present" || ok "bad absent"
+EOF
+cat >>"$WORK/vaf/test/n_parityguard.sh" <<'EOF'
+"$BIN" --list >"$TMPDIR/a.txt" 2>/dev/null
+"$BIN" --list >"$TMPDIR/b.txt" 2>/dev/null
+[ -s "$TMPDIR/a.txt" ] && [ -s "$TMPDIR/b.txt" ] || no "a run printed nothing"
+cmp -s "$TMPDIR/a.txt" "$TMPDIR/b.txt" && ok "deterministic" || no "nondeterministic"
+EOF
+cat >>"$WORK/vaf/test/n_rcread.sh" <<'EOF'
+OUT="$( "$BIN" --list 2>/dev/null )"; rc=$?
+[ "$rc" = 0 ] || no "the list run exited $rc"
+printf '%s' "$OUT" | grep -q '<list' && ok "a list" || no "no list"
+EOF
+cat >>"$WORK/vaf/test/n_rccondreassign.sh" <<'EOF'
+"$BIN" --list >"$TMPDIR/v" 2>&1; prc=$?
+"$BIN" --other >>"$TMPDIR/v" 2>&1 || prc=1
+[ "$prc" = 0 ] && ok "both ran" || no "a run failed"
+EOF
+cat >>"$WORK/vaf/test/n_rcbranches.sh" <<'EOF'
+if [ -n "${WIDE:-}" ]; then
+    OUT="$( "$BIN" --list --wide 2>/dev/null )"; rc=$?
+else
+    OUT="$( "$BIN" --list 2>/dev/null )"; rc=$?
+fi
+[ "$rc" = 0 ] && printf '%s' "$OUT" | grep -q '<list' && ok "a list" || no "rc=$rc or no list"
+EOF
+cat >>"$WORK/vaf/test/n_headtrue.sh" <<'EOF'
+FIRST="$( "$BIN" --list 2>/dev/null | head -1 || true )"
+case "$FIRST" in '<list'*) ok "a list first" ;; *) no "first line: $FIRST" ;; esac
+EOF
+cat >>"$WORK/vaf/test/n_presencegated.sh" <<'EOF'
+KEEP=""; HIT=""
+for n in 1 2 3; do
+    o="$( "$BIN" --list --n=$n 2>/dev/null )"
+    if printf '%s' "$o" | grep -q '<list'; then HIT="$n"; KEEP="$o"; break; fi
+done
+if [ -z "$HIT" ]; then
+    no "no run printed a list"
+else
+    printf '%s' "$KEEP" | grep -q 'bad' && no "bad present" || ok "bad absent"
+fi
+EOF
+cat >>"$WORK/vaf/test/n_callrc.sh" <<'EOF'
+run_hook(){ printf '%s' "$1" | bash "$HOOK"; }
+OUT="$( run_hook '{}' )"; RC=$?
+if [ "$RC" -eq 0 ]; then ok "exit 0"; else no "exit was $RC"; fi
+if [ -z "$OUT" ]; then ok "silent"; else no "fired: $OUT"; fi
+EOF
+cat >>"$WORK/vaf/test/n_sqsub.sh" <<'EOF'
+"$BIN" --list >"$TMPDIR/u.xml" 2>/dev/null
+OFF="$( grep -bo '<r ' "$TMPDIR/u.xml" | head -1 | cut -d: -f1 )"
+if [ -z "$OFF" ]; then no "no row"; fi
+grep -q 'note=' "$TMPDIR/u.xml" && no "note present" || ok "no note"
+EOF
+fx_run vaf
+L="vacuous-assert forms"
+for f in t_redir t_nopipefail t_wrapdrop t_parity t_lostflag t_rcunread t_headfallback t_ungated t_callnorc; do
+    ds_has_p "$L" vacuous-assert "test/$f.sh" minor
+done
+vpairs=0
+vpair(){  # NEG TWIN WHY — the negative prints no row, and its positive twin's row proves the form was read
+    [ "$QD_OK" = 1 ] || { no "$L: cannot read an absence in $1 off a failed run"; return; }
+    if [ -z "$( ds_any_p "test/$2.sh" )" ]; then no "$L: $1: the premise twin $2 printed no row, so its absence proves nothing"; return; fi
+    ds_none_p "$L" "test/$1.sh" "$3; twin $2 fires"
+    [ -z "$( ds_any_p "test/$1.sh" )" ] && vpairs=$(( vpairs + 1 ))
+}
+vpair n_pipefail t_nopipefail "set -o pipefail: the || after the pipe reads the run's status"
+vpair n_redirrc t_redir "rc=\$? after the redirected run is compared"
+vpair n_redirorfail t_redir "|| no on the redirected run"
+vpair n_wrapchecked t_wrapdrop "the wrapper call's status is read (|| no)"
+vpair n_parityguard t_parity "[ -s ] on both files guards the parity"
+vpair n_rcread t_rcunread "the captured rc is compared"
+vpair n_rccondreassign t_rcunread "a conditional \`|| prc=1\` keeps the capture live until its test (pincensuscheck:414)"
+vpair n_rcbranches t_rcunread "rc=\$? captured in both arms of an if, tested after fi: the else arm never overwrites the then arm (qualitycheck:231)"
+vpair n_headtrue t_headfallback "\`|| true\` is no fallback"
+vpair n_presencegated t_ungated "the text is assigned only behind a presence check on it (prcontextcheck:226)"
+vpair n_callrc t_callnorc "rc=\$? of the wrapper call is compared (hookcheck:345)"
+vpair n_sqsub t_redir "a single-quoted pattern inside \"\$( )\" is a word, not a < redirect (expandbodyfirstcheck:122)"
+[ "$vpairs" = 12 ] && ok "$L: all $vpairs negative arms print 0 rows beside a firing twin" \
+    || no "$L: $vpairs of 12 negative arms passed beside a firing twin (want all; zero means nothing was judged)"
 gating_split "$L" 0
 
 # ── 5) SURFACES: legend, help, MCP, skill and docs; JSON twin; MCP; the ack identity of a facet ───────────

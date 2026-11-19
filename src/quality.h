@@ -6721,7 +6721,7 @@ inline std::vector<DefectSiteAt> defectSitesOf( const IngestResult& ing, std::st
         {
             sites = defectshape::scanPython( src );
         }
-        else if( lang == Lang::Bash && src.find( "grep" ) != std::string_view::npos )
+        else if( lang == Lang::Bash )   // a test script: every assertion form (grep, [ ], cmp, case, rc=$?) is read
         {
             sites = defectshape::scanBashTestScript( src, fnSpans );
         }
