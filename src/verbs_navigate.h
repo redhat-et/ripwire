@@ -216,7 +216,8 @@ inline int emitCallHierarchyAlt( const rw::Config& cfg, const rw::IngestResult& 
         std::vector<std::string> pageOfDef;
         for( std::size_t i = 0; i < page.size(); ++i )
         {
-            pageVia[ i ]   = hopViaCode( oneHopRowIsLink( g, matches, result[ pw.begin + i ], wantCallers ), chAttr.nameOnly( pw.begin + i ) );
+            pageVia[ i ]   = chAttr.viaMacro( pw.begin + i ) != kNoNode ? char( 3 )   // BX1 FIX 2: a see-through row, <via> 3
+                                                                          : hopViaCode( oneHopRowIsLink( g, matches, result[ pw.begin + i ], wantCallers ), chAttr.nameOnly( pw.begin + i ) );
             pageSplit[ i ] = chAttr.splitArm( pw.begin + i ) ? 1 : 0;
             pageTest[ i ]  = isTestSymbol( ing, page[ i ] ) ? 1 : 0;
             if( chAttr.groups.multi() )
@@ -264,12 +265,13 @@ inline int emitCallHierarchyAlt( const rw::Config& cfg, const rw::IngestResult& 
     std::vector<std::string> chAtKeys( result.size() );
     for( std::size_t i = pw.begin; i < pw.end; ++i )
     {
-        chVia[ i ] = hopViaCode( oneHopRowIsLink( g, matches, result[ i ], wantCallers ), chAttr.nameOnly( i ) );
+        chVia[ i ] = chAttr.viaMacro( i ) != kNoNode ? char( 0 ) : hopViaCode( oneHopRowIsLink( g, matches, result[ i ], wantCallers ), chAttr.nameOnly( i ) );
         chHasLink = chHasLink || ( chVia[ i ] == 2 );
         if( chSites.any )
         {
             chAtKeys[ i ] = rw::callSitesKeyJson( chSites.tokens[ i - pw.begin ], chSites.totals[ i - pw.begin ] );
         }
+        chAtKeys[ i ] = rw::viaMacroKeyJson( ing, chAttr.viaMacro( i ) ) + chAtKeys[ i ];   // BX1 FIX 2: "via":"macro:NAME", the via slot
         chAtKeys[ i ] += rw::ofDefKeyJson( chAttr.groups, chAttr.tokens, i ) + rw::splitArmKeyJson( chAttr.splitArm( i ) );
         chAtKeys[ i ] += rw::isTestSymbol( ing, result[ i ] ) ? ",\"test\":true" : "";   // TIER-FOLLOWUP: the XML row's test="1"
         if( oneHopRowIsLink( g, matches, result[ i ], wantCallers, &g.outAnchorMiss ) )
@@ -450,10 +452,12 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
             const bool chHasModScope = anyModuleScopeRow( ing, chPage ) || anyModuleScopeRow( ing, matches );
             // FE-B: exactly when a row on THIS page is via="name"
             bool chHasVia = false, chHasImpl = false;
-            bool chHasLink = false;
-            for( std::size_t i = pw.begin; i < pw.end && ( !chHasVia || !chHasLink || !chHasImpl ); ++i )
+            bool chHasLink = false, chHasMacro = false;
+            for( std::size_t i = pw.begin; i < pw.end; ++i )
             {
-                chHasVia  = chHasVia || chAttr.nameOnly( i );   // FE-B's via="name": every edge to the matches by name (defattrib.h, one pass)
+                const bool macroRow = chAttr.viaMacro( i ) != kNoNode;   // BX1 FIX 2: its via="macro:" replaces via="name"
+                chHasMacro = chHasMacro || macroRow;
+                chHasVia  = chHasVia || ( chAttr.nameOnly( i ) && !macroRow );   // FE-B's via="name": every edge to the matches by name (defattrib.h, one pass)
                 chHasImpl = chHasImpl || chAttr.viaImpl( i );   // lane L6: via="impl", the one implementor in the tree
                 chHasLink = chHasLink || oneHopRowIsLink( g, matches, result[ i ], wantCallers );
             }
@@ -475,6 +479,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
                            + rw::implsLegend( chRows.contractSeeds > 0 )                           // BODILESS-SEED: likewise for impls=
                            + rw::crossKindLegend( !chRows.crossKind.empty() )                      // hono-07: likewise for cross_kind=
                            + rw::viaNameLegend( chHasVia, false, cfg.columnar )                   // FE-B: likewise for via="name"
+                           + rw::viaMacroLegend( chHasMacro )                                       // BX1 FIX 2: likewise for via="macro:NAME"
                            + rw::viaLinkLegend( chHasLink )
                            + rw::defTableLegend( chAttr.groups.multi(), chListing.cut, /*sole=*/wantCallers && chAttr.groups.size() == 1 )   // attrib-multidef; VERB-DEF-ROWS
                            + rw::untiedDeclLegend( wantCallers && !chAttr.groups.unattributed.empty() )   // BX1 FIX 7: exactly when the table lists one
@@ -492,6 +497,10 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
             if( cfg.columnar && chHasLink )
             {
                 rw::emitTo( stdout, "<!-- {}-->", rw::kViaLinkColumnarClause );
+            }
+            if( cfg.columnar && chHasMacro )
+            {
+                rw::emitTo( stdout, "<!-- {}-->", rw::kViaMacroColumnarClause );   // BX1 FIX 2: <via> 3
             }
             if( chHasMiss )
             {
@@ -553,7 +562,8 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
             // already follows everywhere else (serialize.h/verbs_for.h), so an untested row costs 0 bytes.
             rw::emitTo( stdout, "<s t=\"{}\" n=\"{}\" p=\"{}:{}\"{}{}{}{}{}{}/>", symTag( s.kind ), ex( rw::qualifiedMemberName( chOwners, s ) ).c_str(), ex( rp ).c_str(), s.line,
                          macroRoleAttr( s.kind ), rw::radiusTierRowAttrXml( ing, chTested.testReach, result[i] ),   // TIER-FOLLOWUP: tested="1" | test="1" | nothing
-                         std::string( viaEdgeAttr( chAttr.nameOnly( i ), oneHopRowIsLink( g, matches, result[ i ], wantCallers ) ) )
+                         chAttr.viaMacro( i ) != kNoNode ? rw::viaMacroAttrXml( ing, chAttr.viaMacro( i ) )   // BX1 FIX 2: a see-through row
+                         : std::string( viaEdgeAttr( chAttr.nameOnly( i ), oneHopRowIsLink( g, matches, result[ i ], wantCallers ) ) )
                            + viaImplAttr( chAttr.viaImpl( i ) )   // lane L6: via="impl"
                            + anchorMissAttr( oneHopRowIsLink( g, matches, result[ i ], wantCallers, &g.outAnchorMiss ) ),
                          rw::splitArmAttrXml( chAttr.splitArm( i ) ), rw::ofDefAttrXml( chAttr.groups, chAttr.tokens, i ),   // attrib-multidef
@@ -823,7 +833,8 @@ inline std::vector<char> usesChosenCallers( const rw::IngestResult& ing, const r
 }
 
 // ONE use-site row: (file, line, role, enclosing canonical id). File scope ⇒ `in` empty.
-struct UseSite { std::uint32_t fileId; std::uint32_t line; rw::RefRole role; std::string in; rw::NodeId from; rw::NodeId viaAlias = rw::kNoNode; bool aliasHedged = false; };   // from: the enclosing symbol (kNoNode at file scope) — rankUseSites' weight; viaAlias: the alias the site is written as (XF-ALIAS-HOP), kNoNode for a direct site
+struct UseSite { std::uint32_t fileId; std::uint32_t line; rw::RefRole role; std::string in; rw::NodeId from; rw::NodeId viaAlias = rw::kNoNode; bool aliasHedged = false;
+                 rw::NodeId viaMacro = rw::kNoNode; };   // BX1 FIX 2: the function-like macro the site invokes (appendMacroUseSites), kNoNode for every other site   // from: the enclosing symbol (kNoNode at file scope) — rankUseSites' weight; viaAlias: the alias the site is written as (XF-ALIAS-HOP), kNoNode for a direct site
 
 // XF-ALIAS-HOP (aliashop.h AliasReach): the use-sites written as an alias whose chain reaches one of `defs` (`ColumnPtr` for
 // IColumn), each marked with the alias, ranked as the direct sites are and kept AFTER them (the direct rows keep their order and
@@ -1123,6 +1134,78 @@ inline rw::AliasUsesFacts appendAliasUseSites( const rw::IngestResult& ing, cons
     return alias.facts;
 }
 
+// BX1 FIX 2 — MACRO SEE-THROUGH on --uses (test/verbfixcheck.sh F2; the --callers rule is callhierarchy.h macroSeeThroughRows). The
+// function-like macros whose replacement text calls one of `defs` — the defs' callers of kind macro, then the macros calling
+// those, each once — are the spellings the definition is used through: tmux uses cmdq_get_callback1 only as
+// `cmdq_get_callback( cb, data )`. Their call-shaped sites (role call or macro, the uses verb's own filters) are appended after
+// the direct and alias rows, ranked as those are, each tagged with the macro it invokes, and counted in count=. A site of an
+// unrelated same-named macro is matched by name, as every name-matched role here is. They go in ahead of the last `hedgedTail`
+// rows (the alias rows hedged by name, which stay last and out of count=). Returns how many were added.
+inline std::size_t appendMacroUseSites( const rw::IngestResult& ing, const rw::Graph& g, std::span<const rw::NodeId> defs, std::string_view rootForId,
+                                        std::vector<UseSite>& sites, std::size_t hedgedTail )
+{
+    using namespace rw;
+    std::vector<NodeId> macros;
+    std::vector<char>   seen( ing.symbols.size(), 0 );
+    const auto*         ro = g.inEdges.rowOffsets();
+    const auto*         ci = g.inEdges.colIndices();
+    const auto          walk = [ & ]( NodeId n )
+    {
+        for( std::uint32_t k = ro[n]; k < ro[n + 1]; ++k )
+        {
+            if( const NodeId c = ci[k]; c < seen.size() && !seen[c] && ing.symbols[c].kind == SymKind::Macro )
+            {
+                seen[c] = 1;
+                macros.push_back( c );
+            }
+        }
+    };
+    for( const NodeId d : defs )
+    {
+        if( d < seen.size() )
+        {
+            walk( d );
+        }
+    }
+    for( std::size_t at = 0; at < macros.size(); ++at )   // grows as macros invoking a listed macro are found
+    {
+        walk( macros[at] );
+    }
+    if( macros.empty() )
+    {
+        return 0;
+    }
+    std::vector<std::pair<std::string_view, NodeId>> byName;   // sorted by name (byte order), then id: matchSiteName's binary search
+    for( const NodeId m : macros )
+    {
+        byName.emplace_back( ing.symbols[m].name, m );
+    }
+    std::ranges::sort( byName, []( const auto& a, const auto& b ) { return a.first != b.first ? rw::sortutil::svLess( a.first, b.first ) : a.second < b.second; } );
+    byName.erase( std::unique( byName.begin(), byName.end(), []( const auto& a, const auto& b ) { return a.first == b.first; } ), byName.end() );
+    std::vector<std::string_view> names;
+    std::vector<NodeId>           tags;
+    for( const auto& [ n, m ] : byName )
+    {
+        names.push_back( n );
+        tags.push_back( m );
+    }
+    UsesSelector mSel{};
+    mSel.anyOfNames = names;
+    mSel.anyOfTags  = tags;
+    auto [ got, callsOfName ] = collectUseSites( ing, mSel, std::span<const char>{}, rootForId, {}, nullptr, g.keptForwards );
+    (void)callsOfName;
+    std::erase_if( got, []( const UseSite& u ) { return u.role != RefRole::Call && u.role != RefRole::Macro; } );
+    rankUseSites( ing, g, got );
+    for( UseSite& u : got )
+    {
+        u.viaMacro = u.viaAlias;   // collectUseSites carries the matched name's tag in viaAlias; here it is the macro
+        u.viaAlias = kNoNode;
+    }
+    EXPECTS( hedgedTail <= sites.size(), "the hedged alias rows are the tail of `sites`" );
+    sites.insert( sites.end() - std::ptrdiff_t( hedgedTail ), got.begin(), got.end() );
+    return got.size();
+}
+
 // XF-ALIAS-HOP: a <u> row written as an alias whose chain reaches the definition says so (via="alias" alias=, hedge="name" when
 // the alias in scope there is not proven to be one that reaches); a direct site adds nothing.
 template <class Escape>
@@ -1218,6 +1301,8 @@ std::optional<int> runUses( const MainDispatch& d )
         const rw::ValueRefIndex::DepthCuts usDepthCut = usVri.depthCutsFor( defs );
         rw::rankUseSites( ing, g, sites );   // cut-fix C: most-depended-on sites first, so the cap drops the lightest
         const rw::AliasUsesFacts usAliasFacts = appendAliasUseSites( ing, g, defs, usRootForId, cfg.columnar, sites );
+        const std::size_t        usViaMacro   = appendMacroUseSites( ing, g, defs, usRootForId, sites, cfg.columnar ? 0 : usAliasFacts.hedged );   // BX1 FIX 2: after the direct and alias rows
+        const std::string        usViaMacroAttr = usViaMacro > 0 ? " via_macro=\"" + std::to_string( usViaMacro ) + "\"" : std::string();
         const std::size_t        usHedged     = usAliasFacts.hedged;   // M1: listed last, never in count=
         const bool               usUnindexed  = rw::usesRolesUnindexed( ing, defs );   // B31: count= cannot see this kind's reads
         const bool               usDeclCapped = rw::memberDeclScanCapped( ing, sym, external );   // USES-DECL-SCAN-CAPPED
@@ -1289,6 +1374,7 @@ std::optional<int> runUses( const MainDispatch& d )
                        + rw::usesValueRoleLegend( std::any_of( sites.begin(), sites.end(), []( const UseSite& u ) { return u.role == RefRole::Value; } ) )
                        + rw::valueRefsDepthLegend( usDepthCut.files > 0 )
                        + rw::aliasUsesLegend( usAliasFacts, cfg.columnar )   // XF-ALIAS-HOP: exactly when a site is written through an alias
+                       + rw::usesViaMacroLegend( usViaMacro > 0 )             // BX1 FIX 2: exactly when the root carries via_macro=
                        + rw::unindexedRolesLegend( usUnindexed )   // B31: exactly when the root carries unindexed_roles=
                        + rw::memberDeclScanLegend( usDeclCapped )   // exactly when the root carries decl_scan=
                        + usDefs.legend ).c_str(),   // VERB-DEF-ROWS: exactly when a <def> row (or defs_listed=) rides
@@ -1319,13 +1405,13 @@ std::optional<int> runUses( const MainDispatch& d )
                                    + rw::unprovenDefsAttrXml( usUnprovenDefs )   // H1: where the XML root carries it
                                    + selectorAttrs + usRootAttr + upage + rw::graphCountFloorAttrXml( g )   // §H4 §3.4
                                    + rw::valueRefsDepthAttrXml( ing, usDepthCut, rw::VrRender{ usSingleRoot, usRootPrefix } )   // the depth cut that makes count= a floor; absent when none
-                                   + rw::aliasUsesAttrXml( usAliasFacts, /*columnar=*/true )
+                                   + rw::aliasUsesAttrXml( usAliasFacts, /*columnar=*/true ) + usViaMacroAttr   // BX1 FIX 2
                                    + usDefs.listedAttr;   // VERB-DEF-ROWS
             emitColumnarUseSites( stdout, ing, attr, ufiles, ulines, uroles, uins, usRootPrefix, usDefs.rows );   // VERB-DEF-ROWS: before <cols>
             return 0;
         }
 
-        rw::emitTo( stdout, "<uses of=\"{}\" defs=\"{}\" external=\"{}\" count=\"{}\"{}{}{}{}{}{}{}{}{}{}{}>",
+        rw::emitTo( stdout, "<uses of=\"{}\" defs=\"{}\" external=\"{}\" count=\"{}\"{}{}{}{}{}{}{}{}{}{}{}{}>",
                      ex( sym ).c_str(), defs.size(), external ? 1 : 0, sites.size() - usHedged,
                      rw::unindexedRolesAttrXml( usUnindexed ),   // B31: beside the count it qualifies; absent when armed
                      rw::memberDeclScanAttrXml( usDeclCapped ),   // USES-DECL-SCAN-CAPPED: external="1" unchecked past the budget
@@ -1335,6 +1421,7 @@ std::optional<int> runUses( const MainDispatch& d )
                      rw::graphCountFloorAttrXml( g ).c_str(),
                      rw::valueRefsDepthAttrXml( ing, usDepthCut, rw::VrRender{ usSingleRoot, usRootPrefix } ).c_str(),   // the depth cut that makes count= a floor; absent when none
                      rw::aliasUsesAttrXml( usAliasFacts, /*columnar=*/false ).c_str(),   // XF-ALIAS-HOP; absent when no alias reaches
+                     usViaMacroAttr,   // BX1 FIX 2: absent when no macro reaches
                      usDefs.listedAttr );   // VERB-DEF-ROWS: a cut table says so
         rw::writeMultiRootTable( stdout, ing );   // M12: the roots list this element's own root= cannot carry
         rw::emitRaw( stdout, usDefs.rows.c_str() );   // VERB-DEF-ROWS: the definitions, before the use-site rows
@@ -1352,6 +1439,10 @@ std::optional<int> runUses( const MainDispatch& d )
                 rw::emitTo( stdout, " in_id=\"{}\"", ex( u.in ).c_str() );
             }
             emitUseSiteAliasAttrs( ing, u, ex );
+            if( u.viaMacro != kNoNode )
+            {
+                rw::emitTo( stdout, "{}", rw::viaMacroAttrXml( ing, u.viaMacro ) );   // BX1 FIX 2
+            }
             rw::emitTo( stdout, "/>" );
         }
         rw::emitTo( stdout, "</uses>" );

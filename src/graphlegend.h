@@ -781,6 +781,19 @@ inline constexpr const char* kDeclinedSitesIfaceClauseMcp =
 inline constexpr const char* kViaImplLegend =
     "via=\"impl\" on a row: the receiver's recorded type is an interface, trait or abstract class whose only implementor in this tree owns the called method, so the edge is to it; an implementor outside the tree, or one a macro writes, may exist. ";
 inline const char* viaImplLegend( bool on ) noexcept { return on ? kViaImplLegend : ""; }
+// BX1 FIX 2 (callhierarchy.h macroSeeThroughRows, test/verbfixcheck.sh F2): exactly when a callers row is a see-through row.
+inline constexpr const char* kViaMacroLegend =
+    "via=\"macro:NAME\" on a row: it calls of= only through the function-like macro NAME (itself a row here, t=macro, possibly through "
+    "a chain of macros), whose replacement text calls of=; these rows follow the direct callers, count in count=, and carry the "
+    "macro row's of_def. The macro text is scanned lexically, not expanded. ";
+inline constexpr const char* kViaMacroColumnarClause = "format=columnar carries it as the <via> column (3 = via=\"macro:NAME\", NAME the t=macro row it calls). ";
+inline const char* viaMacroLegend( bool on ) noexcept { return on ? kViaMacroLegend : ""; } // the columnar clause rides at the call site
+// The --uses twin: exactly when the root carries via_macro=.
+inline constexpr const char* kUsesViaMacroLegend =
+    "via=\"macro:NAME\" on a <u> row: the site invokes the function-like macro NAME, whose replacement text (or a macro it invokes) "
+    "uses of=; via_macro=N: N such rows, after the direct and alias ones, counted in count= (the columnar form lists them last, "
+    "with no name). ";
+inline const char* usesViaMacroLegend( bool on ) noexcept { return on ? kUsesViaMacroLegend : ""; }
 inline constexpr const char* kDeclinedSitesOfDefCallees =
     "of_def=K on a <dc>: the definition (ix=K) making the call, a fact. ";
 inline constexpr const char* kDeclinedSitesOfDefCallers =
