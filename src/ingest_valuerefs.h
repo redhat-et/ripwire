@@ -76,7 +76,7 @@ inline constexpr std::size_t   kVrTextCap    = 96;    // a written slot / callee
 // whose bodies of one tag read the same are one type; bodies that differ are two (valuerefindex.h SlotIndex::addFact).
 inline std::string vrBodyDigest( std::string_view body )
 {
-    std::uint64_t h = 14695981039346656037ull;
+    std::uint64_t h = hashutil::kFnv1aOffset64;
     for( const char c : body )
     {
         if( c != ' ' && c != '\t' && c != '\n' && c != '\r' && c != '\f' && c != '\v' )

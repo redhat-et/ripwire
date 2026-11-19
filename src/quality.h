@@ -3084,7 +3084,7 @@ constexpr std::uint32_t kHeadSnapCacheScheme = 1;
 // every blob it takes (it has no disclosure line at all — see evictBySizeBudget's note on why only the
 // byte-budget pass speaks), so an orphan is treated exactly as any other aged-out blob, with no special
 // case in either direction.
-inline constexpr std::uint64_t kCacheRootKeySeed = 1469598103934665603ull;
+inline constexpr std::uint64_t kCacheRootKeySeed = rw::hashutil::kFnv1aLegacySeed64;
 
 inline std::string cacheRootKeyHex( const std::string& root )
 {

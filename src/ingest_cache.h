@@ -1990,15 +1990,10 @@ static_assert( quality::ingestParserVerFor( false ) == parserVerFor( false ) && 
 // T5: renamed from fnv1a64 to contentHash64 to avoid an ODR clash now that this file also includes
 // arch.h (which defines its OWN fnv1a64 for the baseline-hash path, quality.h's canonId hashing, etc.
 // — same FNV-1a family, DIFFERENT offset-basis constant; this is ingest's file-content-hash cache
-// KEY and must not change bit-for-bit, so it keeps its own constant rather than switching to arch.h's).
+// KEY and must not change bit-for-bit, so it keeps the stored seed, hashutil::kFnv1aLegacySeed64, not arch.h's).
 inline std::uint64_t contentHash64( std::string_view s ) noexcept
 {
-    std::uint64_t h = 1469598103934665603ull;
-    for( const char c : s )
-    {
-        h = hashutil::fnv1aAbsorb( h, c );
-    }
-    return h;
+    return hashutil::fnv1a64( s, hashutil::kFnv1aLegacySeed64 );
 }
 
 // BONUS (S): a whole-blob checksum for the cache trailer. The single-lane contentHash64 above is the file-content
@@ -2008,7 +2003,7 @@ inline std::uint64_t contentHash64( std::string_view s ) noexcept
 // FNV-1a). Purpose is integrity detection (fuzzer-found bit-flips inside cached strings), not the cache key.
 inline std::uint64_t blobChecksum( std::string_view s ) noexcept
 {
-    std::uint64_t lane[ 8 ] = { 1469598103934665603ull, 1099511628211ull, 0x100000001b3ull, 0x9e3779b97f4a7c15ull,
+    std::uint64_t lane[ 8 ] = { hashutil::kFnv1aLegacySeed64, 1099511628211ull, 0x100000001b3ull, 0x9e3779b97f4a7c15ull,
                                 0xc2b2ae3d27d4eb4full, 0x165667b19e3779f9ull, 0xff51afd7ed558ccdull, 0xc4ceb9fe1a85ec53ull };
     const unsigned char* p = reinterpret_cast<const unsigned char*>( s.data() );
     const std::size_t    n = s.size();
@@ -2019,7 +2014,7 @@ inline std::uint64_t blobChecksum( std::string_view s ) noexcept
     }
     for( int k = 0; i < n; ++i, ++k ) { lane[ k ] ^= p[ i ]; lane[ k ] = hashutil::fnv1aMultiply( lane[ k ] ); }   // tail (< 8 bytes)
 
-    std::uint64_t h = 1469598103934665603ull;                   // fold the 8 lanes into one 64-bit digest
+    std::uint64_t h = hashutil::kFnv1aLegacySeed64;             // fold the 8 lanes into one 64-bit digest (stored: the trailer)
     for( int k = 0; k < 8; ++k ) { h ^= lane[ k ]; h = hashutil::fnv1aMultiply( h ); }
     return h;
 }

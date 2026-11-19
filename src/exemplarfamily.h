@@ -1647,9 +1647,9 @@ namespace exemplar_detail
 {
 inline std::uint64_t foldHashStep( std::uint64_t h, char c ) noexcept
 {
-    return ( h ^ std::uint64_t( lexLowerByte( static_cast<unsigned char>( c ) ) ) ) * 1099511628211ull;
+    return hashutil::fnv1aMultiply( h ^ std::uint64_t( lexLowerByte( static_cast<unsigned char>( c ) ) ) );
 }
-inline constexpr std::uint64_t kFoldHashSeed = 14695981039346656037ull;
+inline constexpr std::uint64_t kFoldHashSeed = hashutil::kFnv1aOffset64;
 
 // The folded hash of a spelling and its folded length: `_` and `-` dropped, letters lowercased.
 inline std::pair<std::uint64_t, std::size_t> foldHash( std::string_view s ) noexcept

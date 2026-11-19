@@ -204,11 +204,7 @@ inline std::string dictionaryBody( std::size_t firstId, std::size_t endId )
 // A version: FNV-1a 64 over the lines it stands for (each with its newline), 16 lowercase hex digits.
 inline std::string versionOfLines( std::string_view lines )
 {
-    std::uint64_t h = 14695981039346656037ull;
-    for( const char c : lines )
-    {
-        h = hashutil::fnv1aAbsorb( h, c );
-    }
+    std::uint64_t h = hashutil::fnv1a64( lines );
     static constexpr char kHex[] = "0123456789abcdef";
     std::string s( 16, '0' );
     for( std::size_t i = 0; i < 16; ++i )
