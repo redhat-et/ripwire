@@ -490,7 +490,7 @@ template<class FileOf>
 MacroCeilingCut macroCeiling( std::span<const NodeId> via, FileOf&& fileOf, std::vector<char>& keep )
 {
     MacroCeilingCut                        cut;
-    HashMap<std::uint64_t, char>           seen;      // (macro, file) already listed
+    HashSet<std::uint64_t>                 seen;      // (macro, file) already listed — membership only (test/hashsetcheck.sh S)
     HashMap<NodeId, std::size_t>           files;     // files listed per macro
     HashMap<NodeId, std::size_t>           dropped;   // rows withheld per macro
     std::size_t                            most = 0;
@@ -501,7 +501,7 @@ MacroCeilingCut macroCeiling( std::span<const NodeId> via, FileOf&& fileOf, std:
         std::size_t&        count = files[ via[i] ];
         if( !seen.contains( key ) && count < kMacroSeeThroughFiles )
         {
-            seen.emplace( key, 1 );
+            seen.insert( key );
             ++count;
             keep[i] = 1;
             continue;

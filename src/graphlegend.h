@@ -1361,10 +1361,10 @@ enum class DefLegendFor : std::uint8_t
 // two-field call sites — `{ .table = true, .cut = listing.cut }` — read as they did.
 struct DefTableLegendParts
 {
-    bool         table = false;                 // several groups: the table is printed, and its rows carry of_def
-    bool         cut   = false;                 // above 16 groups: only the groups this page's rows name are listed
-    bool         sole  = false;                 // IMPACT-SOLE-DEF: exactly one group, so the one-group clause reads
-    DefLegendFor rows  = DefLegendFor::Rows;    // whose rows they are — of_def-carrying rows, or --uses' use-sites
+    bool table = false; // several groups: the table is printed, and its rows carry of_def
+    bool cut = false; // above 16 groups: only the groups this page's rows name are listed
+    bool sole = false; // IMPACT-SOLE-DEF: exactly one group, so the one-group clause reads
+    DefLegendFor rows = DefLegendFor::Rows; // whose rows they are — of_def-carrying rows, or --uses' use-sites
 };
 inline std::string defTableLegend( const DefTableLegendParts& p )
 {
