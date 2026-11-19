@@ -1456,6 +1456,345 @@ inline std::size_t packTaskTailRowsToFit( const FileTail& t, std::size_t budget,
     }
     return lo;
 }
+// ── THE --json TAIL, ITS OWN FUNCTION ────────────────────────────────────────────────────────────────────────
+// The JSON dialect re-serializes the SAME section decisions the XML above already made, so it needs those
+// decisions and nothing else. Its inputs are a PARTS RECORD, the idiom verbs_quality.h's QualityDeltaLegendParts
+// already spells: a flat record of already-computed values, const references for the containers, one comment per
+// field, no std::function and no owning copies — it is read once, inside one call, and every source outlives it.
+// WHY IT MOVED (owner ruling, 2026-11-19): packTaskBundleText was 878 lines at a cognitive complexity of 348
+// against a 226 baseline, and the sizing showed only +27 of that +122 was new logic — the rest was nesting
+// weight. Moving this block and the ceiling ladder out is the decomposition that lowers the number; renaming the
+// body would only have moved the finding onto a new symbol, which is not a fix.
+struct PackTaskJsonParts
+{
+    const IngestResult&                      ing;
+    const LensRanking&                       lr;
+    const PackTaskInputs&                    in;
+    const std::string&                       task;
+    PackTaskRenderFaults&                    renderFaults;    // a failed probe inside the tail records here
+    const std::vector<float>&                rank;
+    const std::vector<std::uint8_t>&         forClone;        // &p.forClone is the JsonSigLens clone lens
+    const std::vector<NodeId>&               bodyIds;         // the candidate set, in rank order
+    const D1Neighbors&                       d1;              // the key body's 1-hop callers
+    const std::vector<std::string>&          d1SigRaw;        // their unescaped signatures, reused verbatim
+    const rw::EmittedBodies&                 emittedBodies;   // what packBodies actually emitted
+    const PackHead&                          head;            // the ranking's shown rows and its cut report
+    const PackTaskSection&                   notes;
+    const std::vector<std::pair<std::string, std::vector<std::pair<std::string, std::string>>>>& noteEntriesData;
+    const std::vector<std::uint32_t>&        testFiles;
+    std::vector<std::vector<std::uint32_t>>& testPartition;   // testRowsRendered takes its ADDRESS, so non-const
+    const std::string&                       tailJson;        // the file tail's JSON twin, "" on a --partition slice
+    const std::string&                       mentionNote;
+    const std::string&                       boostNote;
+    const std::string&                       sibliftNote;
+    const std::string&                       expandNote;
+    const std::string&                       docMentionNote;
+    NodeId                                   keyId;
+    std::size_t                              budgetTokens;
+    std::size_t                              bundleBudget;
+    std::size_t                              bodiesTotal;
+    std::size_t                              bodiesKept;
+    std::size_t                              callersTotal;
+    std::size_t                              callersKept;
+    std::size_t                              notesTotal;
+    std::size_t                              notesKept;
+    std::size_t                              testsTotal;
+    std::size_t                              testsKept;
+};
+
+inline void packTaskJsonTail( std::string& j, const PackTaskJsonParts& p )
+{
+    // R-E (2026-08-17 harvest): the JSON dialect's pathRel — same rootArg every XML row above already used.
+    const std::string       jRootPrefix = p.in.rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( p.in.rootArg );
+    const auto               jPathRel   = [ & ]( std::uint32_t fileId ) -> std::string_view
+    {
+        return p.in.rootArg.empty() ? std::string_view( p.ing.files[ fileId ] ) : rw::sarif::rootRelativeUri( p.ing.files[ fileId ], jRootPrefix );
+    };
+    j = "{\"task\":\"" + jsonStr( p.task ) + "\"";
+    if( !p.lr.routeNote.empty() )
+    {
+        j += ",\"route\":\"" + jsonStr( p.lr.routeNote ) + "\"";
+    }
+    // The scrub disclosure travels WITH the two fields it describes: `task` and `route` are XML-scrubbed
+    // copies (xmlSafeByte maps C0 except \t\n\r to a space, invalid UTF-8 to '?'), and a consumer holding
+    // only the JSON is owed that fact from the JSON. ctxRootJsonScrubKeys is ctxRootOpen's twin — same two
+    // strings, same single predicate — so a call site cannot emit the field without the disclosure. Absent
+    // on clean input, so no ordinary document moves a byte. This closes the residual bodydialectcheck's
+    // arm (H) pinned as a SET; that arm is built to go RED when this lands, naming the pin to delete.
+    j += ctxRootJsonScrubKeys( p.task, p.lr.routeNote );
+    if( !p.lr.mentionNote.empty() )
+    {
+        j += ",\"mention\":\"" + jsonStr( p.lr.mentionNote ) + "\"";
+    }
+    if( !p.lr.boostNote.empty() )
+    {
+        j += ",\"boost\":\"" + jsonStr( p.lr.boostNote ) + "\"";
+    }
+    appendLiftJsonKeys( j, p.lr.sibliftNote, p.lr.expandNote );
+    j += p.lr.capJson;                       // the --json twin of the root cap attrs; "" unless a cap fired
+    if( !p.lr.docMentionNote.empty() )
+    {
+        j += ",\"doc_mention\":\"" + jsonStr( p.lr.docMentionNote ) + "\"";
+    }
+    // R-E follow-up (2026-08-19): the JSON dialect's OWN root disclosure. Every `p` in this tail was
+    // already root-relative (the XML twin's root= is suppressed for --json), so a consumer holding only
+    // the JSON had relative paths and nothing saying what they were relative to — the mirror of the
+    // "root= with no legend" gap the round closed on the XML side. Same value, same single-root-only
+    // condition, spelled as this dialect spells things. Absent on a multi-root run, exactly as root= is.
+    if( !p.in.rootArg.empty() )
+    {
+        j += ",\"root\":\"" + jsonStr( p.in.rootArg ) + "\"";
+    }
+    // §B1.6: all THREE budget facts the XML header states ("budget=N bytes (T-token target, ceiling C)").
+    // budget_ceiling_bytes was the one number with no JSON key — the hard byte ceiling the token target
+    // implies, which is what a consumer checks the bundle against; budget_bytes is the WORKING budget
+    // after the headroom factor, and is always the smaller of the two. Same expression as the XML line
+    // below, so the two serializations cannot report different ceilings.
+    { char b[ 128 ];  rw::formatTo( b, sizeof( b ), ",\"budget_tokens\":{},\"budget_bytes\":{},\"budget_ceiling_bytes\":{}",
+                                     p.budgetTokens, p.bundleBudget, rw::declaredByteCeiling( p.budgetTokens )  );  j += b; }
+
+    // PB1: the rows the XML <sigs> printed (head.shownIds), in score order — one selection, two shapes.
+    j += std::string( ",\"ranking_capped\":" ) + ( p.head.capped ? "true" : "false" ) + ",\"ranking\":";
+    const std::vector<float> shownRank   = buildMaskedRank( p.ing, p.rank, p.head.shownIds );
+    // A FAILED RANKING RENDER IS `null`, NOT `[]`. renderPackHead clears shownIds when its render faults, so the
+    // empty-list shortcut below would turn "this section could not be rendered" into "this section found nothing" —
+    // two different answers, and CONTRIBUTING #3's rule is that a zero means none found, never none exists. The XML
+    // twin already says it with <sigs render_failed="1">; the mask is the one fact both dialects read.
+    const bool               rankingFailed = p.renderFaults.hasFailed( PackTaskRenderFaults::DisclosureWhy::RankingRenderFailed );
+    const PackTaskRendered   rankingJson = rankingFailed ? PackTaskRendered{ "null", true }
+                                         : p.head.shownIds.empty() ? PackTaskRendered{ "[]", true } : packTaskRender<PackTaskRenderFaults::DisclosureWhy::RankingRenderFailed>( [ & ]( std::FILE* m )
+    {
+        packSignaturesJson( m, p.ing, shownRank, int( p.head.shownIds.size() ),
+                            JsonSigLens{ /*metrics=*/true, p.in.fanIn, p.in.impure, p.in.churn, &p.forClone,
+                                         p.in.tested, p.in.amp, /*rankAdaptivePayload=*/true },
+                            p.in.redact,   // §B0: the same redaction the XML <sigs> above already applied
+                            /*budgetBytes=*/0, /*payloadBudgetBytes=*/0, /*outCapped=*/nullptr, /*outNotes=*/nullptr,
+                            p.in.rootArg );
+    }, p.in.renderFaults );
+    j += rankingJson.ok ? rankingJson.text : std::string( "null" );   // null, never an empty value after its key
+
+    // §H5 — the bodies the XML section ACTUALLY emitted, re-serialized. This used to re-slice the first
+    // `bodies_kept` ids in RANK order, but packBodies emits grouped by FILE and stops on a BYTE budget, so
+    // the two dialects reported different SETS under one bodies_kept — and packBodiesJson emitted each body
+    // WHOLE, against no budget at all (MEASURED: XML 8 100 B vs JSON 42 200 B under a stated 11 800 B
+    // ceiling). Both halves are gone by construction: there is one selection, and this is its record.
+    // bodies_total IS THE XML'S total=, not the candidate count. The two dialects have to report the same cut or a
+    // consumer reading the JSON sees a capped section where the XML says none: before this it read the 6-candidate
+    // set against an XML total= of 1, and packtaskmonotoncheck's fill-floor arm (which reads the JSON) called a
+    // bundle "capped" that nothing had cut. The candidates not served are bodies_next[], the <bn> rows' own twin.
+    { char b[ 112 ];  rw::formatTo( b, sizeof( b ), ",\"bodies_total\":{},\"bodies_kept\":{},\"bodies_candidates\":{},\"bodies\":",
+                                    p.keyId != kNoNode ? 1 : 0, p.emittedBodies.kept.size(), p.bodiesTotal  );  j += b; }
+    const PackTaskRendered bodiesJson = packTaskRender<PackTaskRenderFaults::DisclosureWhy::BodiesRenderFailed>( [ & ]( std::FILE* m ) { packBodiesJson( m, p.ing, p.emittedBodies, p.in.rootArg ); },
+                                                        p.in.renderFaults );
+    j += bodiesJson.ok && !p.renderFaults.hasFailed( PackTaskRenderFaults::DisclosureWhy::BodiesRenderFailed ) ? bodiesJson.text : std::string( "null" );
+    // PB1: the XML pointer rows' twin — the --expand of every candidate not served, key first when it was not
+    if( p.bodiesKept < p.bodiesTotal )
+    {
+        j += ",\"bodies_next\":[";
+        for( std::size_t i = p.bodiesKept == 0 ? 0 : 1, n = 0; i < p.bodyIds.size(); ++i, ++n )
+        {
+            j += std::string( n == 0 ? "" : "," ) + "\"" + jsonStr( packTaskExpandSelector( p.ing, p.bodyIds[i], p.in.rootArg ) ) + "\"";
+        }
+        j += "]";
+    }
+    if( p.renderFaults.failedMask != 0 )
+    {
+        j += ",\"render_failed\":\"" + p.renderFaults.names() + "\"";   // the sections a null above stands for, and any failed probe
+    }
+
+    const std::size_t callersShown = std::min( p.callersKept, p.d1.ids.size() );
+    { char b[ 128 ];  rw::formatTo( b, sizeof( b ), ",\"callers_total\":{},\"callers_kept\":{},\"callers_of_top\":{},\"callers\":[",
+                                     p.callersTotal, callersShown, p.keyId != kNoNode ? 1 : 0  );  j += b; }
+    for( std::size_t i = 0; i < callersShown; ++i )
+    {
+        const Symbol& s = p.ing.symbols[ p.d1.ids[i] ];
+        j += ( i == 0 ? "" : "," );
+        j += "{\"t\":\"" + std::string( symTag( s.kind ) ) + "\",\"n\":\"" + jsonStr( s.name )
+           + "\",\"p\":\"" + jsonStr( std::string( jPathRel( s.fileId ) ) ) + ":" + std::to_string( s.line )
+           + "\",\"rel\":\"" + ( p.d1.isCaller[i] ? "caller" : "callee" ) + "\""
+           // JSON twin of buildD1Row's XML shared= attribute — same economy rule (omitted at the
+           // uncorroborated default of 1), composed from the SAME primitive overloadsAttr uses
+           // (countFieldIfAbove, serialize.h) rather than re-deriving an equivalent ternary.
+           + countFieldIfAbove( p.d1.shared[i], 1, ",\"shared\":" );
+        if( !p.d1SigRaw[i].empty() )
+        {
+            j += ",\"sig\":\"" + jsonStr( p.d1SigRaw[i] ) + "\"";
+        }
+        j += "}";
+    }
+    j += "]";
+
+    const std::size_t notesShown = std::min( p.notesKept, p.noteEntriesData.size() );
+    { char b[ 96 ];  rw::formatTo( b, sizeof( b ), ",\"notes_total\":{},\"notes_kept\":{},\"notes\":[", p.notesTotal, notesShown );  j += b; }
+    for( std::size_t i = 0; i < notesShown; ++i )
+    {
+        j += ( i == 0 ? "" : "," );
+        j += "{\"target\":\"" + jsonStr( p.noteEntriesData[i].first ) + "\",\"notes\":[";
+        const auto& raw = p.noteEntriesData[i].second;
+        for( std::size_t k = 0; k < raw.size(); ++k )
+        {
+            j += std::string( k == 0 ? "" : "," ) + "{\"d\":\"" + jsonStr( raw[k].first ) + "\",\"text\":\"" + jsonStr( raw[k].second ) + "\"}";
+        }
+        j += "]}";
+    }
+    j += "]";
+    // L3 follow-up (CodeRabbit 4053600616): the JSON twin of the XML root's notes_degraded= — absent on a
+    // clean read, same condition droppedPositiveAttr above tests.
+    if( p.in.notesDegraded )
+    {
+        j += std::string( notes::kNotesDegradedJsonKey );
+    }
+
+    // E1: tests_total/tests_kept count test FILES exactly as the XML section's total=/shown= do — one entry
+    // per file on both sides of the cut. The JSON tail renders the SAME kept prefix through the SAME
+    // partition the XML body was grouped by, so the two dialects cannot list different rows.
+    { char b[ 96 ];  rw::formatTo( b, sizeof( b ), ",\"tests_total\":{},\"tests_kept\":{},\"tests_to_run\":[", p.testsTotal, p.testsKept );  j += b; }
+    // §A9.5: the JSON sibling of the XML run= above — situ's tests_to_run already carries it, and one
+    // computation path must not serialize two different obligations.
+    const rw::TestRunnerIndex   jsonRunners( p.ing, p.in.rootArg );
+    const auto                  jrun = [ & ]( std::string_view s ) { return jsonStr( s ); };
+    const std::vector<rw::TestRowOut> jKeptRows = rw::testRowsOutOf( std::span( p.testFiles ).first( std::min( p.testsKept, p.testFiles.size() ) ), jPathRel );
+    bool jFirstTest = true;
+    for( const rw::RenderedTestRow& r : rw::testRowsRendered( jsonRunners, jKeptRows, rw::TestRowShape{ rw::RowDialect::Json, "p" }, jrun, &p.testPartition ) )
+    {
+        j += std::string( jFirstTest ? "" : "," ) + r.text;
+        jFirstTest = false;
+    }
+    j += "]";
+    j += p.tailJson;   // PB1: the file tail's JSON twin (forpage.h renderFileTailJson), the same shown count; "" on a partition slice
+
+    // W3FIX M1 — the JSON sibling of the XML header's over_ceiling sentence. §B1.6 gave this dialect
+    // budget_ceiling_bytes so a consumer could CHECK the bundle itself; that check silently fails on a long
+    // task, because the envelope's own task echo is part of what it must measure. Absent ⇒ within the
+    // ceiling (the silence-means-nothing-happened convention route/mention/boost use above), never "not
+    // measured". Measured on the FINISHED document, so the key's own bytes are part of what it reports on.
+    constexpr std::size_t kOverCeilingKeyBytes = 22;   // `,"over_ceiling":true` + the closing brace
+    if( !p.in.softTarget && j.size() + kOverCeilingKeyBytes > rw::ceilingAllowanceBytes( p.budgetTokens ) )   // forbudget-soft: never on a soft target
+    {
+        j += ",\"over_ceiling\":true";
+    }
+    j += "}";
+}
+
+// ── SETTLING THE ROOT: THE CEILING LADDER AND THE PRICED ROOT ATTRIBUTES ─────────────────────────────────────
+// The last step of the assembly, and its own function since the owner's 2026-11-19 ruling on this lane: given the
+// finished document and the header it was built with, climb the ceiling ladder, splice the priced root attributes
+// the chosen rung implies, and (on a caller-spliced tail) define est_measured= inside the root it qualifies.
+// Six inputs and NO parts record: this block reads only the ranking's route note, the bundle's inputs, the token
+// budget, the header it has, and the header BUILDER — which arrives as a template parameter because
+// climbCeilingLadderBy already takes it as a callable, so nothing here needs std::function or an allocation.
+template<class BuildHeaderFn>
+inline void packTaskSettleRoot( std::string& whole, const std::string& headerStr, BuildHeaderFn&& buildHeader,
+                                const LensRanking& lr, const PackTaskInputs& in, std::size_t budgetTokens )
+{
+// §B1.7 fixup (bundleidcheck), rewritten by W3FIX M1 — the ceiling ladder (rungs + rationale: serialize.h
+// climbCeilingLadder / ceilingAllowanceBytes). The fixup dropped the verbatim route= attribute
+// UNCONDITIONALLY and printed "route_attr: dropped (ceiling)" whether or not the drop achieved anything —
+// a sentence that reads as a remedy, on a document still 1.9x over. It dropped the wrong bytes first (the
+// task text is in the document TWICE, so the comment echo is a pure DUPLICATE while route= is the only copy
+// of the routing reason in the machine surface), and it claimed a remedy it never measured. Both fixed by
+// the shared ladder; the bar is the stated ceiling PLUS the single-entry overshoot the design allows, so a
+// lens never "remedies" an overshoot its own contract permits.
+{
+    static constexpr CeilingLadderNotes kNotes{
+        " | task_echo: dropped (ceiling)", " | task_echo + route_attr: dropped (ceiling)",
+        " | over_ceiling: the header floor (verbatim task echo + fixed legend) exceeds this budget"
+        " - no section left to trim" };
+    // §F1: + in.trailingSectionBytes — the ladder prices the document the CALLER will emit, which includes
+    // the tail it splices in before "</ctx>". Pricing `whole` alone is what let --with-graph land 12.6% past
+    // the allowance wearing no label.
+    // M11: the PRICED ROOT — est_tokens= (markup at the map rate, bodies at the body rate, the caller's
+    // trailing section included exactly as the ladder prices it), budget_tokens= (the target, the same
+    // unit), over_ceiling="1" when the ladder's last rung fired. The ledger prose keeps its byte figures;
+    // this is the machine-readable twin a parser that drops comments still gets. The attributes are
+    // PRICED INTO THE LADDER: their widest possible spelling (the pre-ladder estimate's digits — the
+    // ladder only shrinks the header — plus the two optional attributes) rides in the measured bytes, so
+    // a bundle the ladder calls conformant is conformant WITH its root attributes on (packtaskcheck's
+    // ceiling arm caught the 4-byte overshoot of the first, unpriced version).
+    // F2 (capture-audit verify-wave2 2026-09-05): over_ceiling= is no longer "the ladder's last rung
+    // fired" — it is the PROPERTY the root's own two numbers state. --pack-task carried the same defect
+    // --for did, measured on w3fixbudgetcheck's corpus: `budget_tokens="1200" est_tokens="1215"` and
+    // `budget_tokens="1600" est_tokens="1713"`, both unlabelled, because the last rung had not fired.
+    // Same rule, same unit, both task lenses: over_ceiling="1" whenever est_tokens > budget_tokens.
+    // The number is read back through pricedRootAttr's outTokens, so the decision is made from the
+    // number the root will PRINT and never from a second estimate.
+    const auto rootAttrsFor = [ & ]( const std::string& doc, bool lastRungFired ) -> std::string
+    {
+        // PB1 — ONE CONVERSION. The budget is converted to bytes at kMinBytesPerToken (x kBudgetHeadroom, the fill line),
+        // and est_tokens= used to price the result at 2.50 for markup and 3.80 for bodies: SUB1's 52 answers spent 91% of
+        // their bytes and read est_tokens 3,975 of budget_tokens 6000 — a third unspent in tokens. The root now prices
+        // every delivered byte at the rate the budget was converted at, so a full bundle reads ~90% of its budget and
+        // est_tokens > budget_tokens exactly when the bytes pass declaredByteCeiling. It is an upper bound (the densest
+        // language's rate), the same side of the error every budget here is sized on.
+        std::size_t       estTokens   = 0;
+        std::string       attrs       = rw::pricedRootAttrTokens( doc.size() + in.trailingSectionBytes, rw::kMinBytesPerToken, 0, &estTokens );
+        attrs += " budget_tokens=\"" + std::to_string( budgetTokens ) + "\"";
+        // forbudget-soft: a soft target (the caller's own budget) is never "over"; the default budget keeps the label
+        if( !in.softTarget && ( lastRungFired || ( budgetTokens > 0 && estTokens > budgetTokens ) ) ) { attrs += " over_ceiling=\"1\""; }
+        if( in.isTrailingUncharged ) { attrs += " est_measured=\"0\""; }   // defined by the comment spliced in below
+        return attrs;
+    };
+    const std::size_t             rootAttrsBound = rootAttrsFor( whole, /*lastRungFired=*/true ).size();
+    // L1 fix round: under the compact posture a rung fits when the DELIVERED document does — the candidate header plus
+    // the rendered sections, its widest root attributes spliced, compacted by the layer that will print it.
+    const std::string restOfWhole = in.compactLegend ? whole.substr( headerStr.size() ) : std::string();
+    const auto deliveredFits = [ & ]( std::size_t ceiling )
+    {
+        return [ &, ceiling ]( std::string_view header )
+        {
+            std::string candidate = std::string( header ) + restOfWhole;
+            rw::spliceRootAttrs( candidate, rootAttrsFor( candidate, /*lastRungFired=*/true ) );
+            const std::size_t delivered = rw::compactDeliveredBytes( candidate, "pack-task" );
+            return ( delivered > 0 ? delivered : candidate.size() ) + in.trailingSectionBytes <= ceiling;
+        };
+    };
+    // The FREE rung (drop the task echo) buys nothing here: the echo lives in prose the compact layer never delivers, so
+    // judging the as-built header at the exact ceiling would take a rung whose note claims a drop the reader cannot
+    // see. Under the compact posture the as-built answer stands when it fits the allowance; route= (a delivered root
+    // attribute) and the over_ceiling rung keep their meaning (compactlegendcheck (FX4)).
+    // forbudget-soft: a soft target climbs no ladder — the header as built ships (echo, route= and every clause)
+    const rw::CeilingLadderChoice chosen = in.softTarget ? rw::CeilingLadderChoice{ headerStr, rw::CeilingRung::AsBuilt }
+                                         : in.compactLegend && !in.innerBundle
+        ? rw::climbCeilingLadderBy( buildHeader, headerStr, deliveredFits( rw::ceilingAllowanceBytes( budgetTokens ) ),
+                                    deliveredFits( rw::ceilingAllowanceBytes( budgetTokens ) ), /*hasRouteAttr=*/!lr.routeNote.empty(), kNotes )
+        : climbCeilingLadder( buildHeader, headerStr,
+                                                               whole.size() - headerStr.size() + in.trailingSectionBytes + rootAttrsBound,
+                                                               // TWO CEILINGS (PR #215 review item 1). This root labels itself
+                                                               // over_ceiling="1" on `estTokens > budgetTokens` — priced at
+                                                               // kBytesPerTokenDefault — while every rung was judged at
+                                                               // kMinBytesPerToken x 1.15, so this lens had --for's defect in the
+                                                               // same words: a bundle whose root will say it overflowed kept its
+                                                               // verbatim task echo because the echo rung was against a ceiling
+                                                               // 15% looser than the verdict. The free rungs now aim at what the
+                                                               // root promises; route= and the label keep the tolerance.
+                                                               rw::declaredByteCeiling( budgetTokens ),   // PB1: the ceiling est_tokens= is priced against
+                                                               rw::ceilingAllowanceBytes( budgetTokens ),
+                                                               /*hasRouteAttr=*/!lr.routeNote.empty(), kNotes );
+    if( chosen.header != headerStr )
+    {
+        whole.replace( 0, headerStr.size(), chosen.header );
+    }
+    // M3 (0.6.1): the rung ARRIVES, and is never recovered from the chosen text. This read
+    // `chosen.find( "over_ceiling:" ) != npos` — the marker word from kNotes, 13 characters, searched for in
+    // a header that echoes the caller's task VERBATIM by contract. So `--token-budget=100000
+    // --pack-task='why does over_ceiling: fire on this root'` shipped `est_tokens="11329"
+    // budget_tokens="100000" over_ceiling="1"`: a root labelled over a ceiling it states itself to be 9x
+    // inside, decided by the caller's own words. The same task without the colon carried no label, which is
+    // what makes it a forgery rather than a coincidence. --for had this defect and had it fixed; this lens
+    // shared the ladder and kept it, because the fixed-payload wrapper returned only a string. It returns the
+    // rung now (serialize.h CeilingLadderChoice). The token comparison beside it is unchanged and is still
+    // what labels an honest overshoot the ladder did not fire on. Gate: test/ceilingverdictcheck.sh (6)-(8).
+    rw::spliceRootAttrs( whole, rootAttrsFor( whole, chosen.rung == rw::CeilingRung::OverCeiling ) );
+    if( in.isTrailingUncharged )
+    {
+        // est_measured= is defined where it is met: the clause rides first inside the root it qualifies
+        const std::size_t rootOpenEnd = whole.find( '>', whole.find( "<ctx" ) );
+        ASSUME( rootOpenEnd != std::string::npos );   // this function composed the <ctx …> start tag itself, above
+        whole.insert( rootOpenEnd + 1, rw::kEstModelledLegend );
+    }
+}
+}
+
 // THE bundle assembler: builds the budget-shared bundle (ranking > key body > callers > notes > tests > file tail) for
 // `task`, given an already-computed LensRanking, and returns the whole <ctx>…</ctx> XML document as a string — never
 // touches stdout (the caller owns the sink: the CLI fwrites it, MCP wraps it as a JSON-RPC text result). The Q3
@@ -1927,178 +2266,12 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     // packBodies' already-redacted text. The freeze covers packSignaturesJson and the d1 signature reuse.)
     if( jsonOut )
     {
-        const RedactTallyFreeze tallyFreeze( in.redact );
-        std::string&            j = *jsonOut;
-        // R-E (2026-08-17 harvest): the JSON dialect's pathRel — same rootArg every XML row above already used.
-        const std::string       jRootPrefix = in.rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( in.rootArg );
-        const auto               jPathRel   = [ & ]( std::uint32_t fileId ) -> std::string_view
-        {
-            return in.rootArg.empty() ? std::string_view( ing.files[ fileId ] ) : rw::sarif::rootRelativeUri( ing.files[ fileId ], jRootPrefix );
-        };
-        j = "{\"task\":\"" + jsonStr( task ) + "\"";
-        if( !lr.routeNote.empty() )
-        {
-            j += ",\"route\":\"" + jsonStr( lr.routeNote ) + "\"";
-        }
-        // The scrub disclosure travels WITH the two fields it describes: `task` and `route` are XML-scrubbed
-        // copies (xmlSafeByte maps C0 except \t\n\r to a space, invalid UTF-8 to '?'), and a consumer holding
-        // only the JSON is owed that fact from the JSON. ctxRootJsonScrubKeys is ctxRootOpen's twin — same two
-        // strings, same single predicate — so a call site cannot emit the field without the disclosure. Absent
-        // on clean input, so no ordinary document moves a byte. This closes the residual bodydialectcheck's
-        // arm (H) pinned as a SET; that arm is built to go RED when this lands, naming the pin to delete.
-        j += ctxRootJsonScrubKeys( task, lr.routeNote );
-        if( !lr.mentionNote.empty() )
-        {
-            j += ",\"mention\":\"" + jsonStr( lr.mentionNote ) + "\"";
-        }
-        if( !lr.boostNote.empty() )
-        {
-            j += ",\"boost\":\"" + jsonStr( lr.boostNote ) + "\"";
-        }
-        appendLiftJsonKeys( j, lr.sibliftNote, lr.expandNote );
-        j += lr.capJson;                       // the --json twin of the root cap attrs; "" unless a cap fired
-        if( !lr.docMentionNote.empty() )
-        {
-            j += ",\"doc_mention\":\"" + jsonStr( lr.docMentionNote ) + "\"";
-        }
-        // R-E follow-up (2026-08-19): the JSON dialect's OWN root disclosure. Every `p` in this tail was
-        // already root-relative (the XML twin's root= is suppressed for --json), so a consumer holding only
-        // the JSON had relative paths and nothing saying what they were relative to — the mirror of the
-        // "root= with no legend" gap the round closed on the XML side. Same value, same single-root-only
-        // condition, spelled as this dialect spells things. Absent on a multi-root run, exactly as root= is.
-        if( !in.rootArg.empty() )
-        {
-            j += ",\"root\":\"" + jsonStr( in.rootArg ) + "\"";
-        }
-        // §B1.6: all THREE budget facts the XML header states ("budget=N bytes (T-token target, ceiling C)").
-        // budget_ceiling_bytes was the one number with no JSON key — the hard byte ceiling the token target
-        // implies, which is what a consumer checks the bundle against; budget_bytes is the WORKING budget
-        // after the headroom factor, and is always the smaller of the two. Same expression as the XML line
-        // below, so the two serializations cannot report different ceilings.
-        { char b[ 128 ];  rw::formatTo( b, sizeof( b ), ",\"budget_tokens\":{},\"budget_bytes\":{},\"budget_ceiling_bytes\":{}",
-                                         budgetTokens, bundleBudget, rw::declaredByteCeiling( budgetTokens )  );  j += b; }
-
-        // PB1: the rows the XML <sigs> printed (head.shownIds), in score order — one selection, two shapes.
-        j += std::string( ",\"ranking_capped\":" ) + ( head.capped ? "true" : "false" ) + ",\"ranking\":";
-        const std::vector<float> shownRank   = buildMaskedRank( ing, rank, head.shownIds );
-        // A FAILED RANKING RENDER IS `null`, NOT `[]`. renderPackHead clears shownIds when its render faults, so the
-        // empty-list shortcut below would turn "this section could not be rendered" into "this section found nothing" —
-        // two different answers, and CONTRIBUTING #3's rule is that a zero means none found, never none exists. The XML
-        // twin already says it with <sigs render_failed="1">; the mask is the one fact both dialects read.
-        const bool               rankingFailed = renderFaults.hasFailed( PackTaskRenderFaults::DisclosureWhy::RankingRenderFailed );
-        const PackTaskRendered   rankingJson = rankingFailed ? PackTaskRendered{ "null", true }
-                                             : head.shownIds.empty() ? PackTaskRendered{ "[]", true } : packTaskRender<PackTaskRenderFaults::DisclosureWhy::RankingRenderFailed>( [ & ]( std::FILE* m )
-        {
-            packSignaturesJson( m, ing, shownRank, int( head.shownIds.size() ),
-                                JsonSigLens{ /*metrics=*/true, in.fanIn, in.impure, in.churn, &forClone,
-                                             in.tested, in.amp, /*rankAdaptivePayload=*/true },
-                                in.redact,   // §B0: the same redaction the XML <sigs> above already applied
-                                /*budgetBytes=*/0, /*payloadBudgetBytes=*/0, /*outCapped=*/nullptr, /*outNotes=*/nullptr,
-                                in.rootArg );
-        }, in.renderFaults );
-        j += rankingJson.ok ? rankingJson.text : std::string( "null" );   // null, never an empty value after its key
-
-        // §H5 — the bodies the XML section ACTUALLY emitted, re-serialized. This used to re-slice the first
-        // `bodies_kept` ids in RANK order, but packBodies emits grouped by FILE and stops on a BYTE budget, so
-        // the two dialects reported different SETS under one bodies_kept — and packBodiesJson emitted each body
-        // WHOLE, against no budget at all (MEASURED: XML 8 100 B vs JSON 42 200 B under a stated 11 800 B
-        // ceiling). Both halves are gone by construction: there is one selection, and this is its record.
-        // bodies_total IS THE XML'S total=, not the candidate count. The two dialects have to report the same cut or a
-        // consumer reading the JSON sees a capped section where the XML says none: before this it read the 6-candidate
-        // set against an XML total= of 1, and packtaskmonotoncheck's fill-floor arm (which reads the JSON) called a
-        // bundle "capped" that nothing had cut. The candidates not served are bodies_next[], the <bn> rows' own twin.
-        { char b[ 112 ];  rw::formatTo( b, sizeof( b ), ",\"bodies_total\":{},\"bodies_kept\":{},\"bodies_candidates\":{},\"bodies\":",
-                                        keyId != kNoNode ? 1 : 0, emittedBodies.kept.size(), bodiesTotal  );  j += b; }
-        const PackTaskRendered bodiesJson = packTaskRender<PackTaskRenderFaults::DisclosureWhy::BodiesRenderFailed>( [ & ]( std::FILE* m ) { packBodiesJson( m, ing, emittedBodies, in.rootArg ); },
-                                                            in.renderFaults );
-        j += bodiesJson.ok && !renderFaults.hasFailed( PackTaskRenderFaults::DisclosureWhy::BodiesRenderFailed ) ? bodiesJson.text : std::string( "null" );
-        // PB1: the XML pointer rows' twin — the --expand of every candidate not served, key first when it was not
-        if( bodiesKept < bodiesTotal )
-        {
-            j += ",\"bodies_next\":[";
-            for( std::size_t i = bodiesKept == 0 ? 0 : 1, n = 0; i < bodyIds.size(); ++i, ++n )
-            {
-                j += std::string( n == 0 ? "" : "," ) + "\"" + jsonStr( packTaskExpandSelector( ing, bodyIds[i], in.rootArg ) ) + "\"";
-            }
-            j += "]";
-        }
-        if( renderFaults.failedMask != 0 )
-        {
-            j += ",\"render_failed\":\"" + renderFaults.names() + "\"";   // the sections a null above stands for, and any failed probe
-        }
-
-        const std::size_t callersShown = std::min( callersKept, d1.ids.size() );
-        { char b[ 128 ];  rw::formatTo( b, sizeof( b ), ",\"callers_total\":{},\"callers_kept\":{},\"callers_of_top\":{},\"callers\":[",
-                                         callersTotal, callersShown, keyId != kNoNode ? 1 : 0  );  j += b; }
-        for( std::size_t i = 0; i < callersShown; ++i )
-        {
-            const Symbol& s = ing.symbols[ d1.ids[i] ];
-            j += ( i == 0 ? "" : "," );
-            j += "{\"t\":\"" + std::string( symTag( s.kind ) ) + "\",\"n\":\"" + jsonStr( s.name )
-               + "\",\"p\":\"" + jsonStr( std::string( jPathRel( s.fileId ) ) ) + ":" + std::to_string( s.line )
-               + "\",\"rel\":\"" + ( d1.isCaller[i] ? "caller" : "callee" ) + "\""
-               // JSON twin of buildD1Row's XML shared= attribute — same economy rule (omitted at the
-               // uncorroborated default of 1), composed from the SAME primitive overloadsAttr uses
-               // (countFieldIfAbove, serialize.h) rather than re-deriving an equivalent ternary.
-               + countFieldIfAbove( d1.shared[i], 1, ",\"shared\":" );
-            if( !d1SigRaw[i].empty() )
-            {
-                j += ",\"sig\":\"" + jsonStr( d1SigRaw[i] ) + "\"";
-            }
-            j += "}";
-        }
-        j += "]";
-
-        const std::size_t notesShown = std::min( notesKept, noteEntriesData.size() );
-        { char b[ 96 ];  rw::formatTo( b, sizeof( b ), ",\"notes_total\":{},\"notes_kept\":{},\"notes\":[", notesTotal, notesShown );  j += b; }
-        for( std::size_t i = 0; i < notesShown; ++i )
-        {
-            j += ( i == 0 ? "" : "," );
-            j += "{\"target\":\"" + jsonStr( noteEntriesData[i].first ) + "\",\"notes\":[";
-            const auto& raw = noteEntriesData[i].second;
-            for( std::size_t k = 0; k < raw.size(); ++k )
-            {
-                j += std::string( k == 0 ? "" : "," ) + "{\"d\":\"" + jsonStr( raw[k].first ) + "\",\"text\":\"" + jsonStr( raw[k].second ) + "\"}";
-            }
-            j += "]}";
-        }
-        j += "]";
-        // L3 follow-up (CodeRabbit 4053600616): the JSON twin of the XML root's notes_degraded= — absent on a
-        // clean read, same condition droppedPositiveAttr above tests.
-        if( in.notesDegraded )
-        {
-            j += std::string( notes::kNotesDegradedJsonKey );
-        }
-
-        // E1: tests_total/tests_kept count test FILES exactly as the XML section's total=/shown= do — one entry
-        // per file on both sides of the cut. The JSON tail renders the SAME kept prefix through the SAME
-        // partition the XML body was grouped by, so the two dialects cannot list different rows.
-        { char b[ 96 ];  rw::formatTo( b, sizeof( b ), ",\"tests_total\":{},\"tests_kept\":{},\"tests_to_run\":[", testsTotal, testsKept );  j += b; }
-        // §A9.5: the JSON sibling of the XML run= above — situ's tests_to_run already carries it, and one
-        // computation path must not serialize two different obligations.
-        const rw::TestRunnerIndex   jsonRunners( ing, in.rootArg );
-        const auto                  jrun = [ & ]( std::string_view s ) { return jsonStr( s ); };
-        const std::vector<rw::TestRowOut> jKeptRows = rw::testRowsOutOf( std::span( testFiles ).first( std::min( testsKept, testFiles.size() ) ), jPathRel );
-        bool jFirstTest = true;
-        for( const rw::RenderedTestRow& r : rw::testRowsRendered( jsonRunners, jKeptRows, rw::TestRowShape{ rw::RowDialect::Json, "p" }, jrun, &testPartition ) )
-        {
-            j += std::string( jFirstTest ? "" : "," ) + r.text;
-            jFirstTest = false;
-        }
-        j += "]";
-        j += tailJson;   // PB1: the file tail's JSON twin (forpage.h renderFileTailJson), the same shown count; "" on a partition slice
-
-        // W3FIX M1 — the JSON sibling of the XML header's over_ceiling sentence. §B1.6 gave this dialect
-        // budget_ceiling_bytes so a consumer could CHECK the bundle itself; that check silently fails on a long
-        // task, because the envelope's own task echo is part of what it must measure. Absent ⇒ within the
-        // ceiling (the silence-means-nothing-happened convention route/mention/boost use above), never "not
-        // measured". Measured on the FINISHED document, so the key's own bytes are part of what it reports on.
-        constexpr std::size_t kOverCeilingKeyBytes = 22;   // `,"over_ceiling":true` + the closing brace
-        if( !in.softTarget && j.size() + kOverCeilingKeyBytes > rw::ceilingAllowanceBytes( budgetTokens ) )   // forbudget-soft: never on a soft target
-        {
-            j += ",\"over_ceiling\":true";
-        }
-        j += "}";
+        const RedactTallyFreeze tallyFreeze( in.redact );   // §B10.2: this second rendering must not re-bill the tally
+        packTaskJsonTail( *jsonOut, PackTaskJsonParts{ ing, lr, in, task, renderFaults, rank, forClone, bodyIds, d1, d1SigRaw,
+                                                       emittedBodies, head, notes, noteEntriesData, testFiles, testPartition,
+                                                       tailJson, mentionNote, boostNote, sibliftNote, expandNote, docMentionNote,
+                                                       keyId, budgetTokens, bundleBudget, bodiesTotal, bodiesKept, callersTotal,
+                                                       callersKept, notesTotal, notesKept, testsTotal, testsKept } );
     }
 
     const auto listStatus = []( std::size_t total, const std::string& body, std::size_t kept ) -> std::string
@@ -2224,112 +2397,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     whole += tailStr;
     whole += "</ctx>";
 
-    // §B1.7 fixup (bundleidcheck), rewritten by W3FIX M1 — the ceiling ladder (rungs + rationale: serialize.h
-    // climbCeilingLadder / ceilingAllowanceBytes). The fixup dropped the verbatim route= attribute
-    // UNCONDITIONALLY and printed "route_attr: dropped (ceiling)" whether or not the drop achieved anything —
-    // a sentence that reads as a remedy, on a document still 1.9x over. It dropped the wrong bytes first (the
-    // task text is in the document TWICE, so the comment echo is a pure DUPLICATE while route= is the only copy
-    // of the routing reason in the machine surface), and it claimed a remedy it never measured. Both fixed by
-    // the shared ladder; the bar is the stated ceiling PLUS the single-entry overshoot the design allows, so a
-    // lens never "remedies" an overshoot its own contract permits.
-    {
-        static constexpr CeilingLadderNotes kNotes{
-            " | task_echo: dropped (ceiling)", " | task_echo + route_attr: dropped (ceiling)",
-            " | over_ceiling: the header floor (verbatim task echo + fixed legend) exceeds this budget"
-            " - no section left to trim" };
-        // §F1: + in.trailingSectionBytes — the ladder prices the document the CALLER will emit, which includes
-        // the tail it splices in before "</ctx>". Pricing `whole` alone is what let --with-graph land 12.6% past
-        // the allowance wearing no label.
-        // M11: the PRICED ROOT — est_tokens= (markup at the map rate, bodies at the body rate, the caller's
-        // trailing section included exactly as the ladder prices it), budget_tokens= (the target, the same
-        // unit), over_ceiling="1" when the ladder's last rung fired. The ledger prose keeps its byte figures;
-        // this is the machine-readable twin a parser that drops comments still gets. The attributes are
-        // PRICED INTO THE LADDER: their widest possible spelling (the pre-ladder estimate's digits — the
-        // ladder only shrinks the header — plus the two optional attributes) rides in the measured bytes, so
-        // a bundle the ladder calls conformant is conformant WITH its root attributes on (packtaskcheck's
-        // ceiling arm caught the 4-byte overshoot of the first, unpriced version).
-        // F2 (capture-audit verify-wave2 2026-09-05): over_ceiling= is no longer "the ladder's last rung
-        // fired" — it is the PROPERTY the root's own two numbers state. --pack-task carried the same defect
-        // --for did, measured on w3fixbudgetcheck's corpus: `budget_tokens="1200" est_tokens="1215"` and
-        // `budget_tokens="1600" est_tokens="1713"`, both unlabelled, because the last rung had not fired.
-        // Same rule, same unit, both task lenses: over_ceiling="1" whenever est_tokens > budget_tokens.
-        // The number is read back through pricedRootAttr's outTokens, so the decision is made from the
-        // number the root will PRINT and never from a second estimate.
-        const auto rootAttrsFor = [ & ]( const std::string& doc, bool lastRungFired ) -> std::string
-        {
-            // PB1 — ONE CONVERSION. The budget is converted to bytes at kMinBytesPerToken (x kBudgetHeadroom, the fill line),
-            // and est_tokens= used to price the result at 2.50 for markup and 3.80 for bodies: SUB1's 52 answers spent 91% of
-            // their bytes and read est_tokens 3,975 of budget_tokens 6000 — a third unspent in tokens. The root now prices
-            // every delivered byte at the rate the budget was converted at, so a full bundle reads ~90% of its budget and
-            // est_tokens > budget_tokens exactly when the bytes pass declaredByteCeiling. It is an upper bound (the densest
-            // language's rate), the same side of the error every budget here is sized on.
-            std::size_t       estTokens   = 0;
-            std::string       attrs       = rw::pricedRootAttrTokens( doc.size() + in.trailingSectionBytes, rw::kMinBytesPerToken, 0, &estTokens );
-            attrs += " budget_tokens=\"" + std::to_string( budgetTokens ) + "\"";
-            // forbudget-soft: a soft target (the caller's own budget) is never "over"; the default budget keeps the label
-            if( !in.softTarget && ( lastRungFired || ( budgetTokens > 0 && estTokens > budgetTokens ) ) ) { attrs += " over_ceiling=\"1\""; }
-            if( in.isTrailingUncharged ) { attrs += " est_measured=\"0\""; }   // defined by the comment spliced in below
-            return attrs;
-        };
-        const std::size_t             rootAttrsBound = rootAttrsFor( whole, /*lastRungFired=*/true ).size();
-        // L1 fix round: under the compact posture a rung fits when the DELIVERED document does — the candidate header plus
-        // the rendered sections, its widest root attributes spliced, compacted by the layer that will print it.
-        const std::string restOfWhole = in.compactLegend ? whole.substr( headerStr.size() ) : std::string();
-        const auto deliveredFits = [ & ]( std::size_t ceiling )
-        {
-            return [ &, ceiling ]( std::string_view header )
-            {
-                std::string candidate = std::string( header ) + restOfWhole;
-                rw::spliceRootAttrs( candidate, rootAttrsFor( candidate, /*lastRungFired=*/true ) );
-                const std::size_t delivered = rw::compactDeliveredBytes( candidate, "pack-task" );
-                return ( delivered > 0 ? delivered : candidate.size() ) + in.trailingSectionBytes <= ceiling;
-            };
-        };
-        // The FREE rung (drop the task echo) buys nothing here: the echo lives in prose the compact layer never delivers, so
-        // judging the as-built header at the exact ceiling would take a rung whose note claims a drop the reader cannot
-        // see. Under the compact posture the as-built answer stands when it fits the allowance; route= (a delivered root
-        // attribute) and the over_ceiling rung keep their meaning (compactlegendcheck (FX4)).
-        // forbudget-soft: a soft target climbs no ladder — the header as built ships (echo, route= and every clause)
-        const rw::CeilingLadderChoice chosen = in.softTarget ? rw::CeilingLadderChoice{ headerStr, rw::CeilingRung::AsBuilt }
-                                             : in.compactLegend && !in.innerBundle
-            ? rw::climbCeilingLadderBy( buildHeader, headerStr, deliveredFits( rw::ceilingAllowanceBytes( budgetTokens ) ),
-                                        deliveredFits( rw::ceilingAllowanceBytes( budgetTokens ) ), /*hasRouteAttr=*/!lr.routeNote.empty(), kNotes )
-            : climbCeilingLadder( buildHeader, headerStr,
-                                                                   whole.size() - headerStr.size() + in.trailingSectionBytes + rootAttrsBound,
-                                                                   // TWO CEILINGS (PR #215 review item 1). This root labels itself
-                                                                   // over_ceiling="1" on `estTokens > budgetTokens` — priced at
-                                                                   // kBytesPerTokenDefault — while every rung was judged at
-                                                                   // kMinBytesPerToken x 1.15, so this lens had --for's defect in the
-                                                                   // same words: a bundle whose root will say it overflowed kept its
-                                                                   // verbatim task echo because the echo rung was against a ceiling
-                                                                   // 15% looser than the verdict. The free rungs now aim at what the
-                                                                   // root promises; route= and the label keep the tolerance.
-                                                                   rw::declaredByteCeiling( budgetTokens ),   // PB1: the ceiling est_tokens= is priced against
-                                                                   rw::ceilingAllowanceBytes( budgetTokens ),
-                                                                   /*hasRouteAttr=*/!lr.routeNote.empty(), kNotes );
-        if( chosen.header != headerStr )
-        {
-            whole.replace( 0, headerStr.size(), chosen.header );
-        }
-        // M3 (0.6.1): the rung ARRIVES, and is never recovered from the chosen text. This read
-        // `chosen.find( "over_ceiling:" ) != npos` — the marker word from kNotes, 13 characters, searched for in
-        // a header that echoes the caller's task VERBATIM by contract. So `--token-budget=100000
-        // --pack-task='why does over_ceiling: fire on this root'` shipped `est_tokens="11329"
-        // budget_tokens="100000" over_ceiling="1"`: a root labelled over a ceiling it states itself to be 9x
-        // inside, decided by the caller's own words. The same task without the colon carried no label, which is
-        // what makes it a forgery rather than a coincidence. --for had this defect and had it fixed; this lens
-        // shared the ladder and kept it, because the fixed-payload wrapper returned only a string. It returns the
-        // rung now (serialize.h CeilingLadderChoice). The token comparison beside it is unchanged and is still
-        // what labels an honest overshoot the ladder did not fire on. Gate: test/ceilingverdictcheck.sh (6)-(8).
-        rw::spliceRootAttrs( whole, rootAttrsFor( whole, chosen.rung == rw::CeilingRung::OverCeiling ) );
-        if( in.isTrailingUncharged )
-        {
-            // est_measured= is defined where it is met: the clause rides first inside the root it qualifies
-            const std::size_t rootOpenEnd = whole.find( '>', whole.find( "<ctx" ) );
-            ASSUME( rootOpenEnd != std::string::npos );   // this function composed the <ctx …> start tag itself, above
-            whole.insert( rootOpenEnd + 1, rw::kEstModelledLegend );
-        }
-    }
+    packTaskSettleRoot( whole, headerStr, buildHeader, lr, in, budgetTokens );
     return whole;
     };
     std::string whole = finish( tailShown );
