@@ -109,7 +109,9 @@ check( all( t.get( "description", "" ).strip() for t in tools ), "(1) every tool
 # RT2 MCP parity (2026-11-19): +90 B, every byte attributed — `for` gains the no_verb_route boolean (the CLI --no-verb-route twin,
 # the opt-out a routed `for` answer's next= names): measured 39,940 -> 40,030 B, descriptions unchanged at 15,133 B, the 33 first
 # sentences unchanged. Ceiling = measured + 30 B, the same margin.
-CEILING = 40060
+# RT2 batch parity (2026-11-19): +35 B — the batch item schema gains no_verb_route (the batch `for` item routes like the live
+# verb, so its opt-out rides the item too): measured 40,030 -> 40,065 B, descriptions unchanged. Ceiling = measured + 30 B.
+CEILING = 40095
 manifest = len( json.dumps( { "tools": tools }, separators = ( ",", ":" ) ) )
 print( "  INFO  manifest %d B (ensure_ascii metric), wire line %d B, descriptions %d B"
        % ( manifest, len( first.encode( "utf-8" ) ), sum( len( t[ "description" ].encode( "utf-8" ) ) for t in tools ) ) )

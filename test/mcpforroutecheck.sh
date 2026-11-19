@@ -8,6 +8,9 @@
 #
 #   test/mcpforroutecheck.sh [BIN]     # BIN defaults to $RIPWIRE_BIN, then build/ripwire
 #
+# BATCH (coordinator 2026-11-19): the `batch` sub-verb `for` routes by the same path and call-shape conditions — a batch item's
+# routed rows equal the top-level MCP `for` rows for the same question (arms b1–b3; red before the batch arm routed).
+#
 # Arms: [P] routed (who-calls, plain), [P] folded (direct-radius, a text-only file), [P] warned + carried (transitive, a
 # callback hop; and who-calls through a macro), [N] unrouted (no symbol) — no <route>, the ranked <ctx>, [N] no_verb_route
 # and budget_tokens — never routed, [C] determinism and well-formedness. Every [P] arm is RED on a binary whose MCP `for`
@@ -129,6 +132,50 @@ case "$B" in *"<route "*) no "(n3) [N] a budgeted for was routed" ;; *"<ctx"*) o
 M2="$( mcpfor "$DIR/hop" 'Trace the transitive callers of `report_error`, including callback registrations.' )"
 [ "$M2" = "$( cat "$DIR/r3.mcp" )" ]
 say $? "(c1) [C] two MCP runs of the warned arm are byte-identical" "(c1) [C] MCP runs differ"
+
+# ── BATCH arms (b1–b3): the batch sub-verb `for` routes exactly as the top-level MCP `for` does ─────────────────────
+# one batch call; prints sub-answer i's payload (CDATA unwrapped, the split `]]>` rejoined), or ERR:<text> for a failed item
+mcpbatch(){ python3 - "$BIN" "$1" "$2" "$3" <<'PY'
+import json, re, subprocess, sys
+binp, path, queries, want = sys.argv[1], sys.argv[2], json.loads(sys.argv[3]), int(sys.argv[4])
+req = [ {"jsonrpc": "2.0", "id": 1, "method": "initialize"},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "batch", "arguments": {"path": path, "queries": queries}}} ]
+p = subprocess.run([binp, "--mcp"], input="".join(json.dumps(r) + "\n" for r in req), capture_output=True, text=True)
+text = ""
+for line in p.stdout.splitlines():
+    try:
+        r = json.loads(line)
+    except ValueError:
+        continue
+    if r.get("id") == 2:
+        text = "".join(c.get("text", "") for c in r.get("result", {}).get("content", []))
+m = re.search(r'<q i="%d"[^>]*ok="1"[^>]*>(.*?)</q>' % want, text, re.S)
+if not m:
+    e = re.search(r'<q i="%d"[^>]*>(.*?)</q>' % want, text, re.S)
+    sys.stdout.write("ERR:" + (e.group(1)[:300] if e else text[:300])); sys.exit(0)
+body = m.group(1)
+parts = re.findall(r"<!\[CDATA\[(.*?)\]\]>", body, re.S)
+sys.stdout.write("".join(parts) if parts else body)
+PY
+}
+QW='Who calls `compute_total`?'
+QS="$( python3 -c 'import json,sys; print(json.dumps([{"verb":"for","task":sys.argv[1]},{"verb":"for","task":"How does the total get computed?"},{"verb":"for","task":sys.argv[1],"no_verb_route":True}]))' "$QW" )"
+B0="$( mcpbatch "$DIR/plain" "$QS" 0 )"; B1="$( mcpbatch "$DIR/plain" "$QS" 1 )"; B2="$( mcpbatch "$DIR/plain" "$QS" 2 )"
+T0="$( cat "$DIR/r1.mcp" )"
+[ -n "$( printf '%s' "$B0" | routeOf )" ] && [ "$( printf '%s' "$B0" | routeOf )" = "$( printf '%s' "$T0" | routeOf )" ] && [ "$( printf '%s' "$B0" | rows )" = "$( printf '%s' "$T0" | rows )" ]
+say $? "(b1) [P] mixed batch, routed item: its <route> and rows equal the top-level MCP for's" "(b1) [P] batch item 0: '${B0:0:300}'"
+case "$B1" in *"<route "*) no "(b1) [N] mixed batch, unnamed item was routed" ;; *"<ctx"*) ok "(b1) [N] mixed batch, unnamed item: the ranked <ctx>, no <route>" ;; *) no "(b1) [N] unnamed item: '${B1:0:200}'" ;; esac
+case "$B2" in *"<route "*) no "(b1) [N] mixed batch, no_verb_route item was routed" ;; ERR:*) no "(b1) [N] no_verb_route item refused: '${B2:0:200}'" ;; *"<ctx"*) ok "(b1) [N] mixed batch, no_verb_route=true item: the ranked <ctx>, never routed" ;; *) no "(b1) [N] no_verb_route item: '${B2:0:200}'" ;; esac
+# (b2) a warned + carried item: the same route and rows as the top-level warned answer, and a carried page
+QH='Trace the transitive callers of `report_error`, including callback registrations.'
+BH="$( mcpbatch "$DIR/hop" "$( python3 -c 'import json,sys; print(json.dumps([{"verb":"for","task":sys.argv[1]}]))' "$QH" )" 0 )"
+TH="$( cat "$DIR/r3.mcp" )"
+[ -n "$( printf '%s' "$BH" | routeOf )" ] && [ "$( printf '%s' "$BH" | routeOf )" = "$( printf '%s' "$TH" | routeOf )" ] && [ "$( printf '%s' "$BH" | rows )" = "$( printf '%s' "$TH" | rows )" ] \
+    && printf '%s' "$BH" | grep -q '<ctx task='
+say $? "(b2) [P] batch, warned item: route, rows and a carried page as the top-level MCP for" "(b2) [P] batch warned item: '${BH:0:300}'"
+# (b3) a file-paged item (limit=) is a shaped call: never routed, as at the top level
+BL="$( mcpbatch "$DIR/plain" "$( python3 -c 'import json,sys; print(json.dumps([{"verb":"for","task":sys.argv[1],"limit":5}]))' "$QW" )" 0 )"
+case "$BL" in *"<route "*) no "(b3) [N] batch item with limit= was routed" ;; ERR:*) no "(b3) [N] batch item with limit= refused: '${BL:0:200}'" ;; *) ok "(b3) [N] batch item with limit=: a file page, never routed" ;; esac
 
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "FAILURES ABOVE"; fi
 exit "$fail"

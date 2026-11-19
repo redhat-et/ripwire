@@ -1238,6 +1238,8 @@ inline constexpr std::string_view kBatchSubQueryFields[] = {
     // on the live MCP verb — an MCP-only agent that reads suppressed_comment= has no CLI to re-ask from —
     // applies verbatim here, and this was the surface that had NO fallback at all.
     "in",
+    // RT2 MCP parity (2026-11-19): the batch `for` item routes like the live verb, so its opt-out rides here too.
+    "no_verb_route",
 };
 
 // The build-time floor EVERY McpVerbRule table stands on: each row must name a verb kMcpVerbFields knows,

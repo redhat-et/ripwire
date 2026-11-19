@@ -1146,30 +1146,6 @@ struct McpDispatchResult
     std::string timingVerb;           // the method, refined to the tool name for tools/call (MEASURE-FIRST timing attribution)
 };
 
-// RT2 MCP parity: a `for` call the CLI would route — no budget and no file page (a shaped call), the default sections, routing not
-// opted out — answered by the CLI's routed answer (verbs_forroute.h mcpForVerbRoute); a warned one carries this verb's own
-// answer as its page. nullopt: serve the ranked answer.
-struct McpForRouteAsk
-{
-    const std::string& path;
-    const std::string& task;
-    const std::string& sections;
-    const std::string& args;              // the call's arguments object: a limit= / offset= file page is a shaped call
-    bool               noRoute       = false;
-    bool               noVerbRoute   = false;
-    bool               budgetPresent = false;
-};
-inline std::optional<std::string> mcpRoutedFor( const McpForRouteAsk& a, RedactCounts* redactPtr )
-{
-    const bool shaped = a.budgetPresent || mcpdetail::findRawValue( a.args, "limit" ).isPresent || mcpdetail::findRawValue( a.args, "offset" ).isPresent;
-    if( a.noVerbRoute || shaped || !a.sections.empty() )
-    {
-        return std::nullopt;
-    }
-    const McpIndex& ix = getIndex( a.path );
-    return mcpForVerbRoute( ix.ing, ix.g, a.path, a.task, [ & ] { return forTaskText( a.path, a.task, redactPtr, 0, a.noRoute, McpPageArgs{}, a.sections ); } );
-}
-
 // Handle ONE JSON-RPC request line and build its response. This is the SINGLE request-handling path both
 // the stdio loop (runMcp) and the HTTP server (runMcpHttp, mcpserver.h) route through, so a given JSON-RPC
 // body returns byte-identical bytes regardless of transport ("the

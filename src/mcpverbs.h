@@ -3218,6 +3218,31 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     return out;
 }
 
+// RT2 MCP parity: a `for` call the CLI would route — no budget and no file page (a shaped call), the default sections, routing not
+// opted out — answered by the CLI's routed answer (verbs_forroute.h mcpForVerbRoute); a warned one carries this verb's own
+// answer as its page. nullopt: serve the ranked answer. ONE test for both MCP surfaces that serve `for`: the live verb
+// (mcp.h) and the batch sub-verb (runBatchSub), so the two cannot disagree about which calls route.
+struct McpForRouteAsk
+{
+    const std::string& path;
+    const std::string& task;
+    const std::string& sections;
+    const std::string& args;              // the call's arguments object: a limit= / offset= file page is a shaped call
+    bool               noRoute       = false;
+    bool               noVerbRoute   = false;
+    bool               budgetPresent = false;
+};
+inline std::optional<std::string> mcpRoutedFor( const McpForRouteAsk& a, RedactCounts* redactPtr )
+{
+    const bool shaped = a.budgetPresent || mcpdetail::findRawValue( a.args, "limit" ).isPresent || mcpdetail::findRawValue( a.args, "offset" ).isPresent;
+    if( a.noVerbRoute || shaped || !a.sections.empty() )
+    {
+        return std::nullopt;
+    }
+    const McpIndex& ix = getIndex( a.path );
+    return mcpForVerbRoute( ix.ing, ix.g, a.path, a.task, [ & ] { return forTaskText( a.path, a.task, redactPtr, 0, a.noRoute, McpPageArgs{}, a.sections ); } );
+}
+
 // `lego` verb: the TARGETED interface→impls "Lego" view for ONE named interface/base — its signature,
 // method contract (where sound), and EVERY implementor (own-language only), with p= file paths. Mirrors
 // the CLI --lego=TYPE exactly (same packLego + resolveFocus + <lego> schema). `type` may be "file:name"
@@ -6459,7 +6484,20 @@ inline BatchSub runBatchSub( const std::string& root, const std::string& obj, in
         {
             return bad( missingField( "for" ) );
         }
-        std::optional<std::string> forAnswer = forTaskText( root, task, redactPtr, 0, false, pageParse.page );   // L-W: the batch arm pages the file page too
+        // RT2 MCP parity: the batch item routes exactly as the live verb does (mcpRoutedFor: same path, same call-shape test);
+        // a batch item has no budget_tokens / sections / no_route of its own, so those are the defaults here
+        const McpBoolArg noVerbRoute = mcpBoolArg( obj, "no_verb_route" );
+        if( !noVerbRoute.refusal.empty() )
+        {
+            return bad( noVerbRoute.refusal );
+        }
+        const std::string          noSections;   // a batch item carries no sections= (kBatchSubQueryFields)
+        std::optional<std::string> forAnswer = mcpRoutedFor( { .path = root, .task = task, .sections = noSections, .args = obj, .noVerbRoute = noVerbRoute.value },
+                                                             redactPtr );
+        if( !forAnswer )
+        {
+            forAnswer = forTaskText( root, task, redactPtr, 0, false, pageParse.page );   // L-W: the batch arm pages the file page too
+        }
         if( !forAnswer )
         {
             return bad( "internal error: the for answer buffer lost bytes — no answer served" );
