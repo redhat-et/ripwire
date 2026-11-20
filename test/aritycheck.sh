@@ -187,6 +187,73 @@ else
     no "65,536-argument --callees=call_big rc=$CRC = { $CGOT} want { a.py:1 b.py:1 } — $( head -c 400 "$TMP/callw.err" )"
 fi
 
+# ── 3d) B2.3 argument-type pick (src/argtypepick.h): one class's same-arity overloads, picked by the arguments' declared types ──
+# argtype/ (lane overload-split; the envoy audit row: WatermarkBuffer::prepend( absl::string_view data ) calls
+# OwnedImpl::prepend( data ) and was split onto both OwnedImpl::prepend overloads). When every argument is the calling
+# definition's own parameter and exactly ONE non-template overload takes each by the identity conversion (its declared type,
+# nothing added), C++ selects that overload: the edge is bound alone, no prov="split". Every NEGATIVE keeps today's split:
+# an argument that is not a name, a derived-class argument two overloads accept, a template overload in the set, a user
+# conversion, a pointer against a reference overload, a const argument against a non-const reference, a parameter hidden by
+# a block-scope declaration, and the same spelling in another namespace; a NAME-ONLY or foreign-qualified call never runs it. The [P] arms were RED on main 9087eb59c (both
+# overloads, prov="split").
+argtype(){   # argtype SYM "p= set" split|bound "why" — the callee p= set exactly, and whether its prepend/put/... rows are split arms
+    local out got want split
+    if ! out="$( callees "$FIX/argtype" "$1" )"; then
+        no "argtype --callees=$1 exited non-zero — $4"
+        return
+    fi
+    got="$( printf '%s' "$out" | grep -oE '<s [^>]*p="buf\.cc:[0-9]+"[^>]*>' | grep -oE 'p="[^"]*"' | sed 's/^p="//; s/"$//' | sort | tr '\n' ' ' )"
+    want="$( printf '%s\n' $2 | sort | tr '\n' ' ' )"
+    split="$( printf '%s' "$out" | grep -oE '<s [^>]*p="buf\.cc:[0-9]+"[^>]*>' | grep -c 'prov="split"' )"
+    splitAt="$( printf '%s' "$out" | grep -oE '<s [^>]*p="buf\.cc:[0-9]+"[^>]*>' | grep 'prov="split"' | grep -oE 'p="[^"]*"' | sed 's/^p="//; s/"$//' | sort | tr '\n' ' ' )"
+    if [ "$got" != "$want" ]; then
+        no "argtype --callees=$1 = { $got} want { $want} — $4"
+    elif [ "$3" = bound ] && [ "$split" != 0 ]; then
+        no "argtype --callees=$1 = { $got} but still prov=\"split\" — $4"
+    elif [ "$3" = split ] && [ "$splitAt" != "$want" ]; then
+        no "argtype --callees=$1 = { $got} but prov=\"split\" only on { $splitAt} (a negative keeps the split on every overload row) — $4"
+    else
+        ok "argtype --callees=$1 = { $got} $3 — $4"
+    fi
+}
+echo "── B2.3 argument-type pick (P = one overload by declared type; N = the split stands) ──"
+argtype Watermark::prependView     "buf.cc:4"            bound "[P] View data → Owned::prepend( View ) alone (the envoy string_view row)"
+argtype Watermark::prependInstance "buf.cc:5"            bound "[P] Instance& data → Owned::prepend( Instance& ) alone"
+argtype Watermark::pairBoth        "buf.cc:17"           bound "[P] ( View a, Instance& b ) → Owned::pair( View, Instance& ) alone (two arguments)"
+argtype unknownArg                 "buf.cc:4 buf.cc:5"   split "[N] an argument that is a call, not a declared name"
+argtype derivedArg                 "buf.cc:6 buf.cc:7"   split "[N] a Derived& both put( Base& ) and put( Other& ) accept"
+argtype templateArg                "buf.cc:10 buf.cc:11" split "[N] a template overload push( T ) in the set"
+argtype convArg                    "buf.cc:8 buf.cc:9"   split "[N] Conv reaches take( View ) only by a user conversion"
+argtype ptrArg                     "buf.cc:12 buf.cc:13" split "[N] an Instance* is not ptr( Instance& )'s type (ptr( Base* ) is the target)"
+argtype constArg                   "buf.cc:14 buf.cc:15" split "[N] a const Instance& cannot bind cref( Instance& )"
+argtype Watermark::shadowed        "buf.cc:4 buf.cc:5"   split "[N] the View parameter is hidden by a block-scope Instance& of the same name"
+argtype farCaller                  "buf.cc:4 buf.cc:5"   split "[N] far::View spelled View in another namespace is not lib::View"
+# receiver guards (regression arms, green on main too): a qualified call naming a class outside the tree (ext::Base::wrap) and a
+# NAME-ONLY call through a field of an unindexed type (real_.relay) keep exactly today's edge onto the namesake sibling — the pick
+# never runs on a tier no lookup tied to the call (the envoy hand check found both shapes: context.h Buffer::set, FailingSignUtility)
+while read -r rgSite rgWant rgSym; do
+    if ! RGOUT="$( callees "$FIX/argtype" "@$rgSite" )"; then
+        no "argtype --callees=@$rgSite ($rgSym) exited non-zero (receiver guard)"
+        continue
+    fi
+    RG="$( printf '%s' "$RGOUT" | grep -oE '<s [^>]*p="watermark\.cc:[0-9]+"[^>]*>' | grep -oE 'p="[^"]*"' | tr '\n' ' ' )"   # the exact p= set is the verdict
+    if [ "$RG" = "p=\"$rgWant\" " ]; then
+        ok "argtype --callees=@$rgSite ($rgSym) = { $rgWant } unchanged (receiver guard)"
+    else
+        no "argtype --callees=@$rgSite ($rgSym) = { $RG} want { p=\"$rgWant\" } (receiver guard)"
+    fi
+done <<'RGSITES'
+watermark.cc:58 watermark.cc:59 Wrapped::wrap
+watermark.cc:66 watermark.cc:67 Relay::relay
+RGSITES
+# the callers side of the same edges: Owned::prepend( View ) is called by prependView and never by prependInstance
+CALLV="$( "$BIN" "$FIX/argtype" --callers=@buf.cc:4 --no-cache 2>/dev/null )"; CALLRC=$?
+if [ "$CALLRC" = 0 ] && printf '%s' "$CALLV" | grep -qE '<s [^>]*n="Watermark::prependView"' && ! printf '%s' "$CALLV" | grep -qE '<s [^>]*n="Watermark::prependInstance"'; then
+    ok "argtype --callers=@buf.cc:4 lists prependView, not prependInstance"
+else
+    no "argtype --callers=@buf.cc:4 rc=$CALLRC rows: $( printf '%s' "$CALLV" | grep -oE '<s [^>]*n="[^"]*"' | tr '\n' ' ' )"
+fi
+
 # ── 4) determinism — byte-identical run-to-run over all three fixtures ──────────────────────────────
 echo "── determinism (byte-identical, two --no-cache runs) ──"
 detfail=0

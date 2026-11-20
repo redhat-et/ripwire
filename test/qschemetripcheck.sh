@@ -34,6 +34,27 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-18, train 1117d1-r (the 1117d1 stack rebased onto main 7f461e33b, #687): RE-PINNED ONCE with UPDATE_GOLDEN=1 from the
+#   rebased build (hash c1fefa06b4…f246ff2). kParserVer 331 (rich 332) stays, above main's 313/314 (#688): the 331 note now sits
+#   above main's 313 note in ingest_cache.h and the quality.h mirror. kQSnapCacheScheme stays 34.
+# 2026-11-18, train 1117d1 (rebase-stack on main c565a3fad: cpp-base-by-name, go-cpp-edges, cpp-ptr-alias, overload-split,
+#   small-edges-1118, edge-strays-1118): RE-PINNED ONCE with UPDATE_GOLDEN=1 from the composed build (hash c1fefa06b4…f246ff2).
+#   kParserVer 331 (rich 332) replaces the members' placeholders 317/321/323/327/329 (entries below; each lane's hash was that
+#   lane alone), above main's 311/312 and #688's 313/314. kQSnapCacheScheme stays 34.
+# 2026-11-18, lane edge-strays-1118 (base main 9087eb59c): RE-PINNED with UPDATE_GOLDEN=1. kParserVer 309 -> 327 (placeholder above
+#   the open lanes; the train renumbers) with quality.h's kIngestParserVerMirror: a Rust call written through a bracketed type
+#   (`<Where as Command>::run`) is qualified by the type it names (ingest_names.h rustBracketedQualifier). kQSnapCacheScheme stays
+#   34: no quality function on the manifest changed, and a cached Snapshot is keyed on the parser version already.
+# 2026-11-18, lane small-edges-1118 (base main 9087eb59c): RE-PINNED with UPDATE_GOLDEN=1. kParserVer 309 -> 323 (PLACEHOLDER, the train
+#   renumbers; mirrored in quality.h): a Go method expression `(*T).m` is a Value row (ingest_valuerefs.h methodValueAt). kQSnapCacheScheme
+#   stays: the parser key already keys the qsnap cache on extraction.
+# 2026-11-18, lane overload-split (base main 9087eb59c; PLACEHOLDER, the train renumbers): RE-PINNED with UPDATE_GOLDEN=1.
+#   Watched text: kParserVer 309 -> 329 (mirrored in quality.h's kIngestParserVerMirror): ingest_binds.h goQualifiedWhole unwraps a Go
+#   generic_type, so a field `addrs.Set[addrs.Module]` records its qualified class. kQSnapCacheScheme stays: the parser key already
+#   keys the qsnap cache on extraction.
+# 2026-11-17, lane go-cpp-edges (base main 9087eb59c): RE-PINNED with UPDATE_GOLDEN=1. Watched text: kParserVer 309 -> 317
+#   (placeholder, mirrored in quality.h): a Go result written as a generic instantiation records its ReturnType. kQSnapCacheScheme
+#   stays: the parser key already keys the qsnap cache on extraction, and no watched function moved.
 # 2026-11-17, TRAIN-1117b (lanes land-426 + land-606 stacked over main c565a3fad): RE-PINNED with UPDATE_GOLDEN=1 in the train's
 #   re-pin commit. kParserVer and kIngestParserVerMirror 311 -> 313 (rich 314): ONE number for both members, above main's 311/312
 #   (#420, landed by TRAIN-1117a-r #686). kQSnapCacheScheme unchanged: the extraction key moves, the snapshot blob shape does not.
@@ -75,6 +96,9 @@ PIN="$ROOT/test/qschemetrip.hash"
 #   change: the Snapshot gained bodyCidBySym (computeSnapshot records moveCidOf of every callable; serialize/deserialize carry it), and
 #   codeLocByNode returns that identity for every callable beside the over-bar one. The manifest gains recordMoveIdentity (the per-key MAX
 #   both identity maps record).
+# 2026-11-18, lane cpp-ptr-alias (base main 9087eb59c): RE-PINNED with UPDATE_GOLDEN=1. Watched text: kParserVer 309 -> 321 (PLACEHOLDER,
+#   mirrored in quality.h): a C++ Type / ParamType record carries kDirectDeclaratorBit (an EXTRACTION change); kQSnapCacheScheme stays:
+#   the parser key already keys the qsnap cache on extraction.
 # 2026-11-14, lane failure-default (merged with main be84a97de): RE-PINNED with UPDATE_GOLDEN=1 on the merged tree, kQSnapCacheScheme 29 -> 30 (landed as 30 -> 31 in TRAIN-1111h). A BLOB SHAPE change: the Snapshot
 #   gained failureDefaultBySym (serialize/deserialize carry it after maskReportBySym), and maskBySym / maskReportBySym now count the
 #   error-masking failure-default facet (constructCountsBySym through tallyMaskHit).

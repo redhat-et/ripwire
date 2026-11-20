@@ -52,6 +52,25 @@
 #      member is `operator= … = delete`, `operator== … = default`, a `friend` declaration or a member-template declaration (its only
 #      definition a specialization) keeps its override as a candidate, never one typed Base::act pin (runtime fixture). Twins: a pure
 #      virtual written `= 0` and one written through a macro (`#define PURE = 0`, the Envoy spelling) still decline gate="iface".
+#   CPP-PTR-ALIAS (fixture test/ifacepeelfix/ptralias; envoy's `Event::TimerPtr` / `ConnectionSocketPtr` shapes). [P] red on main ac4ce4f6a:
+#   PA1 [P] a member typed `Event::TimerPtr` in a BASE class, called from the derived class: the interface's implementors include one
+#       defined OUT OF LINE as a nested class (`class ScaledMgr::RangeTimerImpl : public Timer`, scoped "ScaledMgr::RangeTimerImpl"):
+#       gate="iface" cands="2", never the namesake Stats::Gauge (main counted TimerImpl alone, fell to the name ladder)
+#   PA2 [P] a LOCAL / PARAMETER written as a smart-pointer alias (`Event::TimerPtr t`, `const Event::TimerPtr& t`, `WidgetPtr w`,
+#       `WidgetSharedPtr s` typedef, `WidgetConstSharedPtr k`) on an interface → gate="iface" cands="2", no via="name"
+#   PA3 [P] the same of a CONCRETE class (`CodecPtr c`, `app::CodecPtr d`, `const CodecPtr& c`) → the typed edge Codec::encode, never
+#       the namesake Gadget::encode
+#   PA4 [P] a local / parameter written `std::unique_ptr<Codec>` / `std::shared_ptr<Widget>` → typed exactly as through the alias
+#   PA5 [P] `ConnectionSocketPtr socket_; socket_->isOpen()`: the contract is declared by a BASE of the pointee (Socket) and the one
+#       implementor inherits its body through a sibling base (ConnectionSocketImpl : SocketImpl) → the split holds SocketImpl::isOpen,
+#       one unproven body behind a member: gate="iface" cands="1", never the namesakes IoSocketHandleImpl / ListenSocketImpl (by name on main)
+#   NA1 a POINTER to the alias (`CodecPtr* p; p->encode()`: `->` reaches the unique_ptr) is never typed as Codec
+#   NA2 `.` on an alias local (`c.reset()`) reaches the smart pointer's own member: no typed Codec::reset
+#   NA3 an alias of a non-pointer class (`using CodecAlias = Codec;`) keeps today's reading (Codec::encode by name, no Gadget)
+#   NA4 an unqualified alias two namespaces declare for two different Items (`ItemPtr p; p->run()`) is never typed: both by-name rows stay
+#   NA5 STATED FLOORS, never a typed (unhedged) edge: a template alias (`Ptr<Codec> p`), `c.get()->encode()`, `(*c).encode()`
+#   NA6 the PA5 decline needs a namesake: `socket_->setDetected()`, whose split holds the one body ConnectionSocketImpl::setDetected and
+#       whose name no other definition carries, keeps the name tiers' one by-name row (ninja `status_->BuildFinished()`), no decline
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
@@ -225,6 +244,57 @@ o="$( callees "$R1" "a.h::UPu::go" )"
 say "$( isiface "$o" )" "R1 twin: a pure-virtual (\`= 0\`) base in the same tree still declines gate=iface"
 o="$( callees "$R1" "a.h::UMa::go" )"
 say "$( isiface "$o" )" "R1 twin: a pure virtual spelled through a macro (\`PURE\`, Envoy) still declines gate=iface"
+# ── CPP-PTR-ALIAS ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+PA="$FIX/ptralias"
+o="$( callees "$PA" "conn.cc:onWriteReady" )"
+case "$o" in *'<dc n="enabled" l="6" cands="2" via="declined" gate="iface"/>'*) say 1 "PA1 member Event::TimerPtr (base class): enabled gate=iface cands=2";; *) say 0 "PA1 member Event::TimerPtr (base class): enabled gate=iface cands=2";; esac
+case "$o" in *'<dc n="enableTimer" l="7" cands="2" via="declined" gate="iface"/>'*) say 1 "PA1 enableTimer gate=iface cands=2 (the out-of-line nested RangeTimerImpl counted)";; *) say 0 "PA1 enableTimer gate=iface cands=2 (the out-of-line nested RangeTimerImpl counted)";; esac
+say "$( hasnt "$o" 'Gauge::' )" "PA1 the namesake Stats::Gauge is never a row"
+for f in localTimer paramTimer; do
+  o="$( callees "$PA" "conn.cc:$f" )"
+  case "$o" in *'cands="2" via="declined" gate="iface"/>'*) say 1 "PA2 $f (Event::TimerPtr local/param): gate=iface cands=2";; *) say 0 "PA2 $f (Event::TimerPtr local/param): gate=iface cands=2";; esac
+  say "$( hasnt "$o" 'via="name"' )" "PA2 $f: no via=name guess"
+done
+for f in localIface localTypedef localConst; do
+  o="$( callees "$PA" "widget.cc:$f" )"
+  case "$o" in *'<dc n="draw" '*'cands="2" via="declined" gate="iface"/>'*) say 1 "PA2 $f: draw gate=iface cands=2";; *) say 0 "PA2 $f: draw gate=iface cands=2";; esac
+  say "$( hasnt "$o" 'Gadget::draw' )" "PA2 $f: never the namesake Gadget::draw"
+done
+for f in localConcrete localQualified rawLocal; do
+  o="$( callees "$PA" "widget.cc:$f" )"
+  say "$( has "$o" '<s t="method" n="Codec::encode" p="widget.h:7"/>' )" "PA3/PA4 $f: the typed edge Codec::encode"
+  say "$( hasnt "$o" 'Gadget::encode' )" "PA3/PA4 $f: never the namesake Gadget::encode"
+done
+for f in paramAlias rawParam; do
+  o="$( callees "$PA" "widget.cc:$f" )"
+  say "$( has "$o" '<s t="method" n="Codec::encode" p="widget.h:7"/>' )" "PA3/PA4 $f: the typed edge Codec::encode"
+  case "$o" in *'<dc n="draw" '*'cands="2" via="declined" gate="iface"/>'*) say 1 "PA2/PA4 $f: draw gate=iface cands=2";; *) say 0 "PA2/PA4 $f: draw gate=iface cands=2";; esac
+  say "$( hasnt "$o" 'Gadget::' )" "PA3/PA4 $f: no Gadget namesake"
+done
+o="$( callees "$PA" "socket.cc:onRead" )"
+say "$( has "$o" '<dc n="isOpen" l="5" cands="1" via="declined" gate="iface"/>' )" "PA5 a base-declared contract with an inherited body: isOpen gate=iface cands=1"
+say "$( hasnt "$o" 'IoSocketHandleImpl::isOpen' )" "PA5 never the IoHandle namesake"
+say "$( hasnt "$o" 'ListenSocketImpl::isOpen' )" "PA5 never ListenSocketImpl (no ConnectionSocket)"
+say "$( has "$o" 'n="ConnectionSocketImpl::setDetected" p="socket.h:12" via="name"' )" "NA6 a lone definition of the name keeps its by-name row"
+say "$( hasnt "$o" '<dc n="setDetected"' )" "NA6 ... and is no decline"
+o="$( callees "$PA" "widget.cc:ptrToAlias" )"
+say "$( hasnt "$o" '<s t="method" n="Codec::encode" p="widget.h:7"/>' )" "NA1 a pointer to the alias is never typed as Codec (no unhedged Codec::encode)"
+say "$( has "$o" 'n="Codec::encode" p="widget.h:7" via="name"' )" "NA1 positive: its by-name row stays"
+o="$( callees "$PA" "widget.cc:dotOnAlias" )"
+say "$( has "$o" 'of="widget.cc:dotOnAlias" defs="1"' )" "NA2 the callee query answers for dotOnAlias (so the absence below is read off a real answer)"
+say "$( has "$o" '::reset" p="widget.h:7" via="name"/>' )" "NA2 ... and its reset() call is in that answer (the hedged by-name row)"
+say "$( hasnt "$o" '<s t="method" n="Codec::reset" p="widget.h:7"/>' )" "NA2 \`.\` on an alias local is the pointer's own member: no typed Codec::reset"
+o="$( callees "$PA" "widget.cc:plainAlias" )"
+say "$( has "$o" 'n="Codec::encode" p="widget.h:7"' )" "NA3 a non-pointer alias keeps its reading: the Codec::encode row"
+say "$( hasnt "$o" 'Gadget::encode' )" "NA3 no Gadget namesake"
+o="$( callees "$PA" "widget.cc:ambiguousAlias" )"
+say "$( has "$o" '<s t="method" n="Item::run" p="widget.h:21" via="name"/>' )" "NA4 an alias two namespaces declare stays a hedge (na::Item::run via=name)"
+say "$( has "$o" '<s t="method" n="Item::run" p="widget.h:22" via="name"/>' )" "NA4 ... and nb::Item::run via=name"
+for f in tmplAlias viaGet viaDeref; do
+  o="$( callees "$PA" "widget.cc:$f" )"
+  say "$( hasnt "$o" 'p="widget.h:7"/>' )" "NA5 floor $f: no unhedged Codec::encode"
+  say "$( has "$o" 'n="Codec::encode" p="widget.h:7" via="name"' )" "NA5 floor $f: the by-name row stays (stated floor)"
+done
 echo "ifacepeelcheck: $npass passed, $nfail failed"
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit "$fail"

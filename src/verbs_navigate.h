@@ -358,7 +358,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         // C2 (train 31): so is a CALLERS list whose estimated row bytes fit kCallersBandMaxBytes (callhierarchy.h callersByteBand,
         // whose site pass the page below reuses when it serves every row).
         rw::CallersByteBand chBand = wantCallers ? rw::callersByteBand( ing, matches, result, rw::VrRender{ chSingleRoot, chRootPrefix }, cfg.pageLimit,
-                                                                           chTested.testReach, chRows.attr, g.keptForwards )
+                                                                           chTested.testReach, chRows.attr, g )
                                                  : rw::CallersByteBand{};
         const PageWindow  pw = pageWindow( result.size(), rw::callHierarchyRowCap( cfg.pageLimit, result.size(), chBand.rowBytes ), cfg.pageOffset );
         const bool        chDiscloseCap = ( pw.end - pw.begin ) < result.size();
@@ -380,7 +380,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         const std::span<const NodeId> chPage = std::span<const NodeId>( result ).subspan( pw.begin, pw.end - pw.begin );
         const rw::RowCallSites chSites = !wantCallers ? rw::RowCallSites{}
                                        : ( chBand.rowBytes > 0 && pw.begin == 0 && chPage.size() == result.size() ) ? std::move( chBand.sites )   // C2: the band's pass
-                                                                                                                       : rw::rowCallSites( ing, matches, chPage, rw::VrRender{ chSingleRoot, chRootPrefix }, g.keptForwards );
+                                                                                                                       : rw::rowCallSites( ing, matches, chPage, rw::VrRender{ chSingleRoot, chRootPrefix }, g );
         // attrib-multidef (defattrib.h): the definition table this page lists (every group up to the cap, else the ones its rows
         // name) and whether a row on it is a split arm of a one-group answer (Q1) — computed once for every dialect below.
         const rw::OneHopAttribution& chAttr = chRows.attr;
@@ -848,11 +848,12 @@ struct LiteralUseFilter
 // ing.files[...] path, so a relative-root run's in_id carried a leading "./" (`in_id="./src/eval.h::…"`)
 // that never matched the row's own root-relative p=, the map's id=, or a git path — the M6/L1/M0-5 finding.
 //
+// `proven` is Graph::provenSites: on a narrowed selector a call proven to another definition of the name is not one of its sites.
 // `keptForwards` is Graph::keptForwards: a FORWARDED call reference (`f.call( … )` standing for `f( … )`) is a use-site only
 inline std::pair<std::vector<UseSite>, std::size_t>
 collectUseSites( const rw::IngestResult& ing, const UsesSelector& sel, std::span<const char> isChosenCaller,
                  std::string_view rootForId = {}, std::span<const rw::NodeId> valueDefs = {}, const rw::ValueRefIndex* valueIndex = nullptr,
-                 std::span<const std::uint32_t> keptForwards = {}, LiteralUseFilter literals = {} )
+                 std::span<const std::uint32_t> keptForwards = {}, LiteralUseFilter literals = {}, std::span<const rw::ProvenSite> proven = {} )
 {
     using namespace rw;
     std::vector<UseSite> sites;
@@ -895,7 +896,9 @@ collectUseSites( const rw::IngestResult& ing, const UsesSelector& sel, std::span
         // (scopeNarrowed, the same file:name semantics off a scope-qualified selector). A file-scope call site
         // (fromSymbol==kNoNode) carries no resolved edge to test, so it cannot be SHOWN to reach the chosen
         // def and is dropped with the rest — call_sites_of_name= keeps the size of what was dropped visible.
-        if( ( sel.fileQualified || sel.scopeNarrowed ) && r.role == RefRole::Call && ( r.fromSymbol >= isChosenCaller.size() || !isChosenCaller[r.fromSymbol] ) )
+        // PROVEN-SITE-KEEPS-NAMESAKES: and a call proven to another definition of the name (Graph::provenSites) is no site of these
+        if( ( sel.fileQualified || sel.scopeNarrowed ) && r.role == RefRole::Call
+            && ( r.fromSymbol >= isChosenCaller.size() || !isChosenCaller[r.fromSymbol] || !provenSiteCountsFor( proven, refIndex, valueDefs ) ) )
         {
             continue;
         }
@@ -1187,7 +1190,7 @@ std::optional<int> runUses( const MainDispatch& d )
         std::size_t usDeclinedLiteralCalls = 0;
         const std::string_view usRootForId = usSingleRoot ? std::string_view( cfg.roots[0] ) : std::string_view{};
         auto [ sites, callSitesOfName ] = collectUseSites( ing, sel, isChosenCaller,
-                                                           usRootForId, defs, &usVri, g.keptForwards, { literalDefs, &usDeclinedLiteralCalls } );
+                                                           usRootForId, defs, &usVri, g.keptForwards, { literalDefs, &usDeclinedLiteralCalls }, g.provenSites );
         const rw::ValueRefIndex::DepthCuts usDepthCut = usVri.depthCutsFor( defs );
         rw::rankUseSites( ing, g, sites );   // cut-fix C: most-depended-on sites first, so the cap drops the lightest
         const rw::AliasUsesFacts usAliasFacts = appendAliasUseSites( ing, g, defs, usRootForId, cfg.columnar, sites );
@@ -1652,7 +1655,7 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
     const std::vector<NodeId> literalDefs = rw::resolveAllByName( ing, sel.siteMatchName );
     std::size_t sdDeclinedLiteralCalls = 0;
     const auto                sitesPair      = collectUseSites( ing, sel, isChosenCaller,
-                                                                 sdSingleRoot ? std::string_view( cfg.roots[0] ) : std::string_view{}, defs, nullptr, g.keptForwards, { literalDefs, &sdDeclinedLiteralCalls } );
+                                                                 sdSingleRoot ? std::string_view( cfg.roots[0] ) : std::string_view{}, defs, nullptr, g.keptForwards, { literalDefs, &sdDeclinedLiteralCalls }, g.provenSites );
                                                                                                // .second (the un-narrowed
                                                                                                // call-site total) is not read here;
                                                                                                // .in_id is unused on this verb too, root
@@ -1772,7 +1775,7 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
     // file:line tokens (editcheck.h rowCallSites: the uses verb's call-role filters, one scan of the reference table, the
     // callers verb's own sites_at= pass) over every caller row this page prints.
     const rw::RowCallSites sdSites =
-        rw::rowCallSites( ing, defs, std::span<const NodeId>( callerIds ).subspan( sdLw.begin, sdLw.end - sdLw.begin ), sdVr, g.keptForwards );
+        rw::rowCallSites( ing, defs, std::span<const NodeId>( callerIds ).subspan( sdLw.begin, sdLw.end - sdLw.begin ), sdVr, g );
 
     // Designated (train 27): two lanes each inserted a bool here at a different position; named fields keep two adjacent
     // bools from trading places silently in a positional aggregate.
@@ -2456,7 +2459,7 @@ std::optional<int> runVerify( const MainDispatch& d )
         const std::vector<NodeId> literalDefs = rw::resolveAllByName( ing, sel.siteMatchName );
         std::size_t vfDeclinedLiteralCalls = 0;
         const auto [ sites, callSitesOfName ]    = collectUseSites( ing, sel, isChosenCaller,
-                                                                     verSingleRoot ? std::string_view( cfg.roots[0] ) : std::string_view{}, defs, nullptr, g.keptForwards, { literalDefs, &vfDeclinedLiteralCalls } );
+                                                                     verSingleRoot ? std::string_view( cfg.roots[0] ) : std::string_view{}, defs, nullptr, g.keptForwards, { literalDefs, &vfDeclinedLiteralCalls }, g.provenSites );
         (void) callSitesOfName;
         if( defs.empty() && sites.empty() )
         {

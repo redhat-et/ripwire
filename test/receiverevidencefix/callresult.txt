@@ -2532,3 +2532,154 @@ impl D {
     pub fn hit53(&self) -> usize { 0 }
     pub fn hit56(&self) -> usize { 0 }
 }
+@@@ go6/go.mod
+module example.com/cr6
+
+go 1.22
+@@@ go6/src/pb/tenant.go
+package pb
+
+// GenID is declared in a generated file the tree leaves out (a proto message); its hand-written methods are here.
+
+func (t GenID) IsSet() bool    { return t.v != 0 }
+func (t GenID) String() string { return "pb" }
+
+func FromContext(ctx int) (id GenID, ok bool) {
+	return
+}
+
+func Pair(ctx int) (a, b GenID, err error) {
+	return
+}
+@@@ go6/src/pb2/tenant.go
+package pb2
+
+// a second package's declaration-less GenID: its methods never answer pb.GenID
+
+func (t GenID) IsSet() bool    { return false }
+func (t GenID) String() string { return "pb2" }
+func (t GenID) OnlyHere() bool { return false }
+@@@ go6/src/decl/tenant.go
+package decl
+
+// this package DECLARES GenID inside a function only: the declaration decides, and it is out of reach
+func (t GenID) IsSet() bool { return true }
+
+func Make(ctx int) (GenID, bool) {
+	return GenID{}, true
+}
+
+func scope() {
+	type GenID struct{}
+	_ = GenID{}
+}
+@@@ go6/src/collections/set.go
+package collections
+
+type Set[T comparable] struct{ m map[T]struct{} }
+
+func NewSetCmp[T comparable]() Set[T]  { return Set[T]{m: map[T]struct{}{}} }
+func NewSetPtr[T comparable]() *Set[T] { return &Set[T]{m: map[T]struct{}{}} }
+
+func (s Set[T]) Add(v T) { s.m[v] = struct{}{} }
+@@@ go6/src/other/other.go
+package other
+
+type Graph struct{}
+
+func (g *Graph) Add(v string)   {}
+func (g *Graph) IsSet() bool    { return true }
+func (g *Graph) String() string { return "g" }
+@@@ go6/src/app/app.go
+package app
+
+import (
+	"example.com/cr6/src/collections"
+	"example.com/cr6/src/decl"
+	"example.com/cr6/src/pb"
+)
+
+func UseNamed(ctx int) string {
+	id, _ := pb.FromContext(ctx)
+	if id.IsSet() {
+		return id.String()
+	}
+	return ""
+}
+
+func UseGroupedSecond(ctx int) bool {
+	_, second, err := pb.Pair(ctx)
+	_ = err
+	return second.IsSet()
+}
+
+func UseParam(id pb.GenID) bool {
+	return id.IsSet()
+}
+
+func UseSet() {
+	vars := collections.NewSetCmp[string]()
+	vars.Add("k")
+}
+
+func UseSetPtr() {
+	p := collections.NewSetPtr[string]()
+	p.Add("k")
+}
+
+func NearOtherPkg(ctx int) bool {
+	id, _ := pb.FromContext(ctx)
+	return id.OnlyHere()
+}
+
+func NearPosition(ctx int) string {
+	_, ok := pb.FromContext(ctx)
+	return ok.String()
+}
+
+func NearLocalDecl(ctx int) bool {
+	id, _ := decl.Make(ctx)
+	return id.IsSet()
+}
+@@@ go7/a/gen/f.go
+package gen
+
+type RA struct{}
+
+func (RA) M() int { return 1 }
+
+func F() (RA, error) { return RA{}, nil }
+
+func (Less) M() int { return 1 }
+
+func G() (Less, error) { return Less{}, nil }
+@@@ go7/b/gen/f.go
+package gen
+
+type RB struct{}
+
+func (RB) M() int { return 2 }
+
+func F() (RB, error) { return RB{}, nil }
+
+func (Less) M() int { return 2 }
+
+func G() (Less, error) { return Less{}, nil }
+@@@ go7/use/use.go
+package use
+
+import "gen"
+
+func AmbF() int {
+	a, _ := gen.F()
+	return a.M()
+}
+
+func AmbG() int {
+	a, _ := gen.G()
+	return a.M()
+}
+
+func AmbParam(p gen.Less) int {
+	return p.M()
+}

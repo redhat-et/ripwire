@@ -380,7 +380,22 @@ constexpr std::uint32_t kCacheVersion = 52;           // 52: lane failure-defaul
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 313;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 331;          // bump on any grammar/.scm/extraction change
+                                                      // 331 = 2026-11-18 (train 1117d1; above main's 311/312, #688's 313/314 and the members' placeholders
+                                                      //   317/321/323/327/329): rich file tag 332. kCacheVersion unchanged. The members' extraction changes:
+                                                      //   go-cpp-edges (placeholder 317): a Go result type written as a generic instantiation (`Set[T]`, `*pkg.Set[string]`) records its
+                                                      //   ReturnType as the instantiated class (ingest_binds.h goResultClass); it recorded none.
+                                                      //   kCacheVersion unchanged: no record changes shape.
+                                                      //   cpp-ptr-alias (placeholder 321): a C++ Type / ParamType record whose declarator names the variable or a reference to it
+                                                      //   carries model.h kDirectDeclaratorBit in unwrapDepth (ingest_binds.h cppDirectDeclarator).
+                                                      //   overload-split (placeholder 329): a Go type written as a qualified generic instantiation (`addrs.Set[addrs.Module]`) keeps its
+                                                      //   package qualifier on the field / parameter / local record (ingest_binds.h goQualifiedWhole).
+                                                      //   kCacheVersion unchanged: no record changes shape.
+                                                      //   small-edges-1118 (placeholder 323): a Go method expression `(*T).m` in a value position is a Value row naming m with
+                                                      //   memberRoot T (ingest_valuerefs.h methodValueAt, GO-METHOD-EXPR); it recorded none. kCacheVersion unchanged.
+                                                      //   edge-strays-1118 (placeholder 327): a Rust call written through a bracketed type (`<Where as Command>::run( .. )`, `<Where>::f( .. )`) is qualified by
+                                                      //   the type it names, or by the trait when the type names none (ingest_names.h rustBracketedQualifier).
+                                                      //   Rich file tag 328. kCacheVersion unchanged.
                                                       // 313 = 2026-11-17 (TRAIN-1117b: ONE number for its two parser members, strictly above main c565a3fad's 311/312
                                                       //   (#420, landed by TRAIN-1117a-r #686)). Rich file tag 314. kCacheVersion unchanged.
                                                       //   - #446 round 2, @SeddonShen, landed as lane land-606 (its placeholder 316): Java base clauses read as

@@ -564,6 +564,15 @@ static_assert( []() constexpr
     return true;
 }(), "Slice 6c: all 5 columns in kLangFacts must match the exact original language predicate sets" );
 static_assert( !langFacts( Lang::Unknown ).implicitReceiver && !langFacts( Lang::Unknown ).memberNeverReachesFreeFunction );
+
+/// The inverse of memberNeverReachesFreeFunction (CPP-FREE-VS-MEMBER): an unqualified call binds a free function only when the
+/// caller's translation unit DECLARES it — in the caller's own file or a file it includes, as the body or as a prototype. A
+/// namesake defined in a source file the caller never includes, with no prototype in reach, is not what the call names (graph.h
+/// FreeDeclReach). C++; C keeps its own reach rules (FE-A).
+inline constexpr std::array<Lang, 1> kBareCallNeedsDeclaration = { Lang::Cpp };
+static_assert( std::ranges::find( kBareCallNeedsDeclaration, Lang::Cpp ) != kBareCallNeedsDeclaration.end() && langFacts( Lang::Cpp ).implicitReceiver
+                   && std::ranges::find( kBareCallNeedsDeclaration, Lang::Unknown ) == kBareCallNeedsDeclaration.end(),
+               "CPP-FREE-VS-MEMBER: the declaration rule is read on the implicit-receiver path of the resolve loop" );
 static_assert( !langFacts( Lang::Unknown ).moduleCallReachesFunctionsOnly && !langFacts( Lang::Unknown ).classNameReceiver && !langFacts( Lang::Unknown ).hashComment );
 static_assert( !langFacts( static_cast<Lang>( 99 ) ).implicitReceiver && !langFacts( static_cast<Lang>( 99 ) ).hashComment );
 
@@ -580,5 +589,15 @@ constexpr std::uint8_t langFamilyOf( Lang l ) noexcept
     return i < kLangCount ? static_cast< std::uint8_t >( static_cast< std::size_t >( langFacts( l ).edgeFamily.value_or( l ) ) )
                           : static_cast< std::uint8_t>( i );   // past the enum: its own singleton, like isCodeLang
 }
+
+/// RUST-USE-PRINT-NAMESPACE: the languages whose call site never names a trait. A call names a function, a tuple struct or a tuple
+/// variant; a trait's method is called by the METHOD's name (`Print::print( x )`, `x.print()`), so `Print( x )` over an in-tree
+/// `trait Print` is no call of it (graph.h siteNamespaceCompatible). Rust.
+inline constexpr std::array<Lang, 1> kCallNeverNamesTrait = { Lang::Rust };
+/// GO-KIND-VETO: the languages where a selector reaches a TYPE only through a module alias (`pkg.T( v )`, a conversion the alias
+/// proves), so a name-only member call (`local.Type()`) never names an in-tree type (graph.h, beside memberNeverReachesFreeFunction). Go.
+inline constexpr std::array<Lang, 1> kSelectorTypeOnlyByModule = { Lang::Go };
+static_assert( langFacts( Lang::Go ).memberNeverReachesFreeFunction && langFacts( Lang::Go ).moduleCallReachesFunctionsOnly,
+               "GO-KIND-VETO is read inside the memberNeverReachesFreeFunction erase, on a call no module alias proved" );
 
 }   // namespace rw

@@ -6189,6 +6189,14 @@ inline bool bodylessIsNoContract( std::string_view text, std::uint32_t from ) no
     return word( lead, "friend" ) || word( lead, "template" );
 }
 
+// CPP-PTR-ALIAS: a smart pointer's pointee as a declaration record spells a type — its last name, and its qualified text when it was
+// written qualified ("" otherwise), the pair Rule 2's class identity reads (Binding::typeName / importedName)
+struct WrittenPointeeText
+{
+    std::string type;
+    std::string qualified;
+};
+
 class SmartAliasPeel
 {
 public:
@@ -6218,8 +6226,9 @@ public:
             e.scope  = Scope( r.memberRoot );
             if( !r.memberCtor().empty() )
             {
-                e.kind    = r.memberVia() == "std" ? Kind::Refused : Kind::Pointer;   // `std::shared_ptr<std::string>`: no in-tree pointee
-                e.pointee = FlatRecvType{ r.memberCtor(), !r.memberVia().empty(), true };
+                e.kind       = r.memberVia() == "std" ? Kind::Refused : Kind::Pointer;   // `std::shared_ptr<std::string>`: no in-tree pointee
+                e.pointee    = FlatRecvType{ r.memberCtor(), !r.memberVia().empty(), true };
+                e.pointeeVia = r.memberVia();
                 anyPointer = anyPointer || e.kind == Kind::Pointer;
             }
             else if( !fieldTypeWrittenInStd( r ) && !r.calleeName.empty() )
@@ -6313,12 +6322,47 @@ public:
             return std::nullopt;
         }
         const std::optional<std::vector<const Entry*>> hits = reach( member.calleeName, member.qualifier, member.fileId, Scope( member.memberRoot ) );
-        std::optional<FlatRecvType>                    t    = hits ? agree( *hits, 0 ) : std::nullopt;
-        if( t && bases_.find( t->type ) != bases_.end() && abstract_.find( t->type ) == abstract_.end() )
+        const Entry* const                             end  = hits ? agree( *hits, 0 ) : nullptr;
+        if( end == nullptr || overridablePin( *end ) )
         {
-            return std::nullopt;   // a concrete class with derived classes: a virtual may be overridden, so no single static pin
+            return std::nullopt;
         }
-        return t;
+        return end->pointee;
+    }
+
+    // CPP-PTR-ALIAS: the pointee a LOCAL or PARAMETER written as a smart-pointer alias reaches through `->` — `Event::TimerPtr t`,
+    // `const CodecPtr& c` — spelled as a compose ref spells it: the pointee's last name and, when the alias wrote it qualified, its
+    // qualified text (`Event::Timer`); nullopt keeps the declaration's base reading. A body has no lexical scope this index models
+    // (kLocalScope), so the lookup is stricter than a member's: a QUALIFIED spelling reaches the aliases declared in a scope whose
+    // innermost name is the qualifier (pointeeOf's rule); an UNQUALIFIED one reads the alias only when every visible declaration of
+    // the name sits in ONE scope (two namespaces declaring `XPtr` may name two pointees — which one the body sees is unread) and no
+    // class declares a member alias of the name. The refusals pointeeOf applies hold here too.
+    std::optional<WrittenPointeeText> pointeeOfWritten( std::string_view name, std::string_view qualifier, std::uint32_t fileId ) const
+    {
+        if( byName_.empty() || name.empty() || realClass_.find( std::string( name ) ) != realClass_.end() )
+        {
+            return std::nullopt;
+        }
+        std::optional<std::vector<const Entry*>> hits;
+        if( !qualifier.empty() )
+        {
+            hits = reach( name, qualifier, fileId, Scope() );
+        }
+        else if( classScoped_.find( std::string( name ) ) == classScoped_.end() )
+        {
+            hits = visibleInOneScope( name, fileId );
+        }
+        const Entry* const end = ( hits && !hits->empty() ) ? agree( *hits, 0 ) : nullptr;
+        if( end == nullptr || overridablePin( *end ) )
+        {
+            return std::nullopt;
+        }
+        WrittenPointeeText out{ end->pointee.type, {} };
+        if( !end->pointeeVia.empty() )
+        {
+            out.qualified.assign( end->pointeeVia ).append( "::" ).append( end->pointee.type );
+        }
+        return out;
     }
 
 private:
@@ -6391,6 +6435,7 @@ private:
         Kind          kind   = Kind::Refused;
         std::uint32_t fileId = 0;
         FlatRecvType  pointee;                 // Pointer
+        std::string   pointeeVia;              // Pointer: the namespace the pointee was written in ("" = unqualified)
         std::string   target;                  // Plain: the alias it names, and the namespace it was written in
         std::string   targetQualifier;
         Scope         scope;                   // where the declaration sits
@@ -6443,35 +6488,68 @@ private:
         return hits.size() > kAliasPeelBranch ? std::nullopt : std::optional( std::move( hits ) );
     }
 
-    // the one pointee every declaration in `hits` names; nullopt when none does, or two differ
-    std::optional<FlatRecvType> agree( const std::vector<const Entry*>& hits, int depth ) const
+    // the smart-pointer declaration (a Pointer entry) every declaration in `hits` ends at, by pointee; nullptr when none does, or
+    // two name different pointees (the type, whether it was written qualified, and the namespace it was written in)
+    const Entry* agree( const std::vector<const Entry*>& hits, int depth ) const
     {
-        std::optional<FlatRecvType> out;
+        const Entry* out = nullptr;
         for( const Entry* e : hits )
         {
-            const std::optional<FlatRecvType> t = follow( *e, depth );
-            if( !t || ( out && ( out->type != t->type || out->writtenQualified != t->writtenQualified ) ) )
+            const Entry* const t = follow( *e, depth );
+            if( t == nullptr
+                || ( out != nullptr && ( out->pointee.type != t->pointee.type || out->pointee.writtenQualified != t->pointee.writtenQualified || out->pointeeVia != t->pointeeVia ) ) )
             {
-                return std::nullopt;
+                return nullptr;
             }
             out = t;
         }
         return out;
     }
 
-    // `e` is the (depth + 1)-th alias declaration of its chain
-    std::optional<FlatRecvType> follow( const Entry& e, int depth ) const
+    // `e` is the (depth + 1)-th alias declaration of its chain; the Pointer entry the chain ends at
+    const Entry* follow( const Entry& e, int depth ) const
     {
         if( e.kind == Kind::Pointer )
         {
-            return e.pointee;
+            return &e;
         }
         if( e.kind != Kind::Plain || depth + 2 > kAliasPeelDepth || realClass_.find( e.target ) != realClass_.end() )
         {
-            return std::nullopt;   // a refusal, or past the cap (a loop ends here too)
+            return nullptr;   // a refusal, or past the cap (a loop ends here too)
         }
         const std::optional<std::vector<const Entry*>> next = reach( e.target, e.targetQualifier, e.fileId, e.scope );
-        return next ? agree( *next, depth + 1 ) : std::nullopt;
+        return next ? agree( *next, depth + 1 ) : nullptr;
+    }
+
+    // a concrete pointee with derived classes: a virtual it declares may be overridden, so the static type would pin the base's body
+    bool overridablePin( const Entry& end ) const
+    {
+        return bases_.find( end.pointee.type ) != bases_.end() && abstract_.find( end.pointee.type ) == abstract_.end();
+    }
+
+    // CPP-PTR-ALIAS: every visible declaration of `name` (an anonymous namespace's in its own file only, none inside a body) when they
+    // all sit in one scope; nullopt when two scopes declare it (a body's lookup scope is unread), more than kAliasPeelBranch do, or none
+    std::optional<std::vector<const Entry*>> visibleInOneScope( std::string_view name, std::uint32_t fileId ) const
+    {
+        const auto all = byName_.find( std::string( name ) );
+        if( all == byName_.end() )
+        {
+            return std::nullopt;
+        }
+        std::vector<const Entry*> hits;
+        for( const Entry& e : all->second )
+        {
+            if( e.scope.local || ( e.scope.anon && e.fileId != fileId ) )
+            {
+                continue;
+            }
+            if( !hits.empty() && ( hits.front()->scope.path() != e.scope.path() || hits.front()->scope.anon != e.scope.anon ) )
+            {
+                return std::nullopt;
+            }
+            hits.push_back( &e );
+        }
+        return ( hits.empty() || hits.size() > kAliasPeelBranch ) ? std::nullopt : std::optional( std::move( hits ) );
     }
 
     HashMap<std::string, std::vector<Entry>> byName_;       // alias name → its declarations
@@ -6518,6 +6596,7 @@ struct RecvVarType
     std::string_view name;
     bool             writtenQualified = false;
     const Binding*   declared         = nullptr;
+    const WrittenPointeeText* pointee = nullptr;   // CPP-PTR-ALIAS: `declared` is a smart pointer and `name` its pointee (`->`)
 };
 
 // EDGE-FLAGS (speed audit card 6, mem-audit-fable-1111): what the sites that committed one (from, to) edge said about it, one bit
@@ -6589,6 +6668,9 @@ struct ScopedRecvDecls
     // with at least one ParamType record; every other name keeps the flat varType table, byte-identical.
     HashMap<std::string, rw::SmallVec<ScopedRecvDecl, 1>> byName;
     const std::vector<Binding>*                           bindings = nullptr;
+    // CPP-PTR-ALIAS: binding index → the pointee `->` reaches when the declaration's written type is a std smart pointer or an
+    // alias of one (graph.h smartPointeesOfBindings). Each such Type record's name is in byName too, so it is answered lexically.
+    const HashMap<std::uint32_t, WrittenPointeeText>*     arrowPointee = nullptr;
 };
 
 // ── P2-D Rule 2 PARAMETER receivers: building the lexical declaration table (2026-09-16, test/narrowcheck.sh arms 7-18) ──
@@ -6626,14 +6708,25 @@ inline bool isScopedBindRecord( const Binding& b ) noexcept
     return b.fromSymbol != kNoNode && !b.var.empty();
 }
 
-// the names the table covers: every "<fromSymbol>#<var>" with a ParamType record
+// the names the table covers: every "<fromSymbol>#<var>" with a ParamType record, or (CPP-PTR-ALIAS) a Type record whose written
+// smart-pointer type reaches a pointee (ScopedRecvDecls::arrowPointee: a local is then read at its declaration's scope too)
 inline void addParamTypedNames( const IngestResult& ing, ScopedRecvDecls& table, std::string& key )
 {
-    const auto isParamType = []( const Binding& b ) noexcept { return b.kind == LocalBindKind::ParamType && isScopedBindRecord( b ); };
-    table.byName.reserve( std::size_t( std::ranges::count_if( ing.bindings, isParamType ) ) );
-    for( const Binding& b : ing.bindings )
+    const auto covered = [ & ]( const Binding& b, std::uint32_t index )
     {
-        if( isParamType( b ) )
+        return isScopedBindRecord( b )
+            && ( b.kind == LocalBindKind::ParamType || ( b.kind == LocalBindKind::Type && table.arrowPointee != nullptr && table.arrowPointee->contains( index ) ) );
+    };
+    std::size_t n = 0;
+    for( std::uint32_t index = 0; index < std::uint32_t( ing.bindings.size() ); ++index )
+    {
+        n += covered( ing.bindings[ index ], index ) ? 1 : 0;
+    }
+    table.byName.reserve( n );
+    for( std::uint32_t index = 0; index < std::uint32_t( ing.bindings.size() ); ++index )
+    {
+        const Binding& b = ing.bindings[ index ];
+        if( covered( b, index ) )
         {
             buildShadowKey( key, b.fromSymbol, b.var );
             table.byName.try_emplace( key );
@@ -6690,12 +6783,13 @@ inline void attachRecvDeclTypes( const IngestResult& ing, ScopedRecvDecls& table
     }
 }
 
-inline ScopedRecvDecls buildScopedRecvDecls( const IngestResult& ing )
+inline ScopedRecvDecls buildScopedRecvDecls( const IngestResult& ing, const HashMap<std::uint32_t, WrittenPointeeText>* arrowPointee = nullptr )
 {
     PROFILE_SCOPE_DESCRIBE( "buildGraph/2j: Rule-2 lexical receiver declarations" );
     ASSUME( ing.bindings.size() < kRecvDeclConflicted );   // typeBinding indices stay clear of the two sentinels
     ScopedRecvDecls table;
-    table.bindings = &ing.bindings;
+    table.bindings     = &ing.bindings;
+    table.arrowPointee = ( arrowPointee != nullptr && !arrowPointee->empty() ) ? arrowPointee : nullptr;
     std::string key;
     addParamTypedNames( ing, table, key );
     if( !table.byName.empty() )
@@ -6816,6 +6910,7 @@ struct ClassIdentity
     HashMap<std::string, rw::SmallVec<NodeId, 4>>         realDown;         // base NAME → derived class ids, namesake edges excluded
     HashMap<NodeId, std::vector<std::string_view>>        realUp;           // derived class id → base names (views into ing.references)
     HashMap<std::string, char>                            declared;         // "Scope::name" of a C-family member DECLARATION (no body)
+    HashMap<std::string, char>                            declaredIn;       // "<classId>#<name>" of a bodiless member inside that class's span (bodilessMembersByClass)
     HashMap<std::string, rw::SmallVec<NodeId, 2>>         specializationDefs; // "Template::name" → definitions scoped to a template-id of that class
     HashMap<std::string, char>                            fileNamespaces;   // "<fileId>#<ns>": the file defines a non-member under namespace scope ns
     std::vector<std::vector<std::string_view>>            namespacesOfFile; // the same evidence per file id (views into Symbol::scope)
@@ -7018,7 +7113,8 @@ inline void assignOutOfLineOwner( const IngestResult& ing, const Symbol& s, cons
 // defines no class of its scope's name
 inline void assignOutOfLineOwners( const IngestResult& ing, ClassIdentity& ids )
 {
-    const HashMap<std::string, char> declaresMember = bodilessMembersByClass( ing, ids );
+    ids.declaredIn = bodilessMembersByClass( ing, ids );   // kept: the guarded base walk asks which CLASS declares a member (Narrower::BaseWalkGuard)
+    const HashMap<std::string, char>& declaresMember = ids.declaredIn;
     for( const Symbol& s : ing.symbols )
     {
         if( !extent::inSet( extent::kHeadRuleLangs, s.lang ) || s.scope.empty() || extent::inSet( extent::kExtentClassKinds, s.kind ) || ids.ownerClass[ s.id ] != kNoNode )
@@ -7470,11 +7566,15 @@ struct IdentityNarrower
         // `ns::T` names a namespace-level T; claimed only from a file showing it defines things in `ns` — an
         // `ankerl::unordered_dense::map` must not become amc's `map` (measured on a private corpus)
         std::string nsKey;
-        collectIf( named, [ & ]( NodeId c )
-        {
-            buildShadowKey( nsKey, fileOf( c, ids ), q );
-            return ids.enclosingClass[ c ] == kNoNode && ( !verifiedNamespace || ids.fileNamespaces.find( nsKey ) != ids.fileNamespaces.end() );
-        } );
+        collectIf( named, [ & ]( NodeId c ) { return ids.enclosingClass[ c ] == kNoNode && ( !verifiedNamespace || namespaceLevelIn( c, q, ids, nsKey ) ); } );
+    }
+
+    // a namespace-level class whose FILE shows it defines things in namespace `ns` (ClassIdentity::fileNamespaces): the evidence
+    // a claim through a namespace qualifier stands on. `key` is the caller's scratch.
+    static bool namespaceLevelIn( NodeId c, std::string_view ns, const ClassIdentity& ids, std::string& key )
+    {
+        buildShadowKey( key, fileOf( c, ids ), ns );
+        return ids.enclosingClass[ c ] == kNoNode && ids.fileNamespaces.find( key ) != ids.fileNamespaces.end();
     }
 
     bool nameableFromCallerClass( const rw::SmallVec<NodeId, 2>& named, const Reference& r, const ClassIdentity& ids, const ChaUpNames& chaUp ) const
@@ -7622,21 +7722,29 @@ struct IdentityNarrower
 
     // the definitions under keyScope ("Class::callee") owned by class `cls` — or, when their owner is ambiguous or unknown,
     // plausibly it — appended to hits
-    void appendOwnedDefinitions( NodeId cls, const ClassIdentity& ids ) const
+    // true when `cls` owns a definition under keyScope, whether or not an earlier step of the walk appended it already
+    bool appendOwnedDefinitions( NodeId cls, const ClassIdentity& ids ) const
     {
         const auto it    = canonByName.find( keyScope );
         const auto named = ids.classesByName.find( ( *ids.symbols )[ cls ].name );
         if( it == canonByName.end() )
         {
-            return;
+            return false;
         }
+        bool owns = false;
         for( NodeId d : it->second )
         {
-            if( ownedBy( d, cls, named == ids.classesByName.end() ? nullptr : &named->second, ids ) && markSeen( d ) )
+            if( !ownedBy( d, cls, named == ids.classesByName.end() ? nullptr : &named->second, ids ) )
+            {
+                continue;
+            }
+            owns = true;
+            if( markSeen( d ) )
             {
                 hits.push_back( d );   // a definition plausible for two same-named classes of one walk is appended once
             }
         }
+        return owns;
     }
 
     bool ownedBy( NodeId def, NodeId cls, const rw::SmallVec<NodeId, 2>* sameNamed, const ClassIdentity& ids ) const
@@ -7816,9 +7924,78 @@ struct IdentityNarrower
             {
                 continue;   // d derives from another class of that name, or was reached already
             }
-            keyScope.assign( ( *ids.symbols )[ d ].name ).append( "::" ).append( r.calleeName );
-            appendOwnedDefinitions( d, ids );
+            if( !appendClassDefinitions( r, d, ids ) )
+            {
+                appendInheritedBody( r, d, ids );
+            }
             classNext.push_back( d );
+        }
+    }
+
+    // `cls`'s own definitions of the callee appended; true when it owns one. CPP-PTR-ALIAS (C1): a nested class defined OUT OF
+    // LINE (`class Mgr::RangeTimerImpl : public Timer { bool enabled() … }`) scopes its members by the written name,
+    // "Mgr::RangeTimerImpl", never by the class's own name alone; ownedBy keeps that class's definitions only (an in-class
+    // nested class keys by its own name, and the second key misses, harmlessly)
+    bool appendClassDefinitions( const Reference& r, NodeId cls, const ClassIdentity& ids ) const
+    {
+        const Symbol& c = ( *ids.symbols )[ cls ];
+        keyScope.assign( c.name ).append( "::" ).append( r.calleeName );
+        bool owns = appendOwnedDefinitions( cls, ids );
+        if( !c.scope.empty() )
+        {
+            keyScope.assign( c.scope ).append( "::" ).append( c.name ).append( "::" ).append( r.calleeName );
+            owns = appendOwnedDefinitions( cls, ids ) || owns;
+        }
+        return owns;
+    }
+
+    // the plausible direct bases of `c` (its base clause read from its own file) not in `visited`, appended to it and to `next`
+    void queueUnvisitedBases( NodeId c, const ClassIdentity& ids, std::vector<NodeId>& visited, std::vector<NodeId>& next ) const
+    {
+        const auto up = ids.realUp.find( c );
+        for( std::string_view base : ( up == ids.realUp.end() ) ? std::span<const std::string_view>{} : std::span<const std::string_view>( up->second ) )
+        {
+            const auto bases = ids.classesByName.find( std::string( base ) );
+            if( bases == ids.classesByName.end() )
+            {
+                continue;
+            }
+            plausibleClasses( std::span<const NodeId>( bases->second.data(), bases->second.size() ), fileOf( c, ids ), ids );
+            for( NodeId b : plausible )
+            {
+                if( std::ranges::find( visited, b ) == visited.end() )
+                {
+                    visited.push_back( b );
+                    next.push_back( b );
+                }
+            }
+        }
+    }
+
+    // CPP-PTR-ALIAS (C2): a real subclass `d` of the receiver class that defines no body of the callee runs the one it INHERITS
+    // through another base — `class ConnectionSocketImpl : public SocketImpl, public virtual ConnectionSocket` runs
+    // SocketImpl::isOpen on a ConnectionSocket receiver whose contract Socket declares. The shallowest ancestor level of `d`
+    // whose classes own a definition answers (several at one level: their union, the split lists them all); a level of
+    // declarations alone walks on. Bounded like the ancestor walk; its own visited list, so the subclass walk's state is kept.
+    void appendInheritedBody( const Reference& r, NodeId d, const ClassIdentity& ids ) const
+    {
+        std::vector<NodeId> level{ d };
+        std::vector<NodeId> next;
+        std::vector<NodeId> visited{ d };
+        for( int depth = 0; depth < 16 && !level.empty(); ++depth )
+        {
+            bool found = false;
+            next.clear();
+            for( NodeId c : level )
+            {
+                found = ( depth > 0 && appendClassDefinitions( r, c, ids ) ) || found;
+                queueUnvisitedBases( c, ids, visited, next );
+            }
+            if( found )
+            {
+                return;
+            }
+            level.swap( next );
         }
     }
 };
@@ -7875,6 +8052,70 @@ struct Narrower
     mutable rw::SmallVec<NodeId, 2>       walkUnion;   // Phase 5: the union of a multi-base hit level (super() only) — an honest split
     IdentityNarrower identity;   // Rule 2 through class identity: its scratch, memo and claim flag live there
     mutable rw::SmallVec<NodeId, 2>       reexportUnion;   // what a type's `using Base::m;` declarations reach when it defines no `m` itself
+
+    // CPP-BASE-BY-NAME (edge audit 2026-11-17, class 1; test/fieldnarrowcheck.sh arms (bn1)-(bn6)). The base walk below reads
+    // chaUp, which keys a class by its final-segment NAME, and canonByName, which holds DEFINITIONS only. Two C++ rules were lost
+    // that way, and the answer read as resolved:
+    //   * lookup STOPS at the first class that declares the name. A pure virtual (`virtual State state() const = 0;`) is a
+    //     declaration with no body, so the walk passed it and took a body further up — which the declaration hides;
+    //   * a base name means the class the DERIVING class's scope names. `Net::Connection : public FilterManager` names
+    //     Net::FilterManager; by name the walk also entered Http::FilterManager and returned its `state` (envoy: 36 callers of
+    //     Http::FilterManager::state, the sampled ones all `connection_.state()` on a Network::Connection).
+    // The guard restores both for the C-family walk from facts buildGraph already holds: ClassIdentity::declaredIn (the bodiless
+    // members of each class) and, for a base name two in-tree classes share, the class the DERIVING class names — read in the
+    // order C++ itself decides it (meantBase): the scope the clause is written in (its qualifier's last segment, else the
+    // deriving class's own enclosing scope: Symbol::scope of both classes); then how the implementors map bound the clause
+    // (Graph::implementorBound: a same-file declaration or an included header proves one class and marks the others as the
+    // name collision); then the one candidate the deriving class's file sees through its includes. A base the evidence gives
+    // to another class is not walked and its definitions are no hit; a base name that stays two classes for one deriving
+    // class cannot be bound, and a hit through it is refused (nullptr: the later tiers hedge or decline — never a resolved row).
+    // Absent (nullptr: every other language, a Narrower built without one) the walk is the by-name walk it was.
+    // FLOORS, stated: the walk's ROOT is still the receiver type's final segment (prov="final-segment" discloses that), so a
+    // bodiless declaration in ANY class of the root's name stops the walk (a refusal, never a wrong row); a scope is compared
+    // by its innermost name (`a::detail` and `b::detail` read alike: then the next evidence decides); a walk through a type
+    // ALIAS or a class with no definition in the tree has no deriving class to judge by and stays by name.
+    struct BaseWalkGuard
+    {
+        const ClassIdentity&                          ids;
+        const std::vector<std::vector<NodeId>>&       implementors;   // class id → the classes deriving from it, ascending (Graph::implementors)
+        const std::vector<std::vector<std::uint8_t>>& bound;          // parallel: how each edge was bound (ifacedispatch.h BaseBound)
+        const HashMap<std::string, std::vector<std::string>>& chaUp;  // class name → its direct base names: the graph the cone questions walk
+        HashMap<std::string, std::string_view>        baseQualifier;  // "<derived class id>#<base name>" → the qualifier its base clause wrote (views into ing.references)
+    };
+    // the qualifier each C-family base clause wrote (`Http` for `: public Http::FilterManager`; Reference::memberRoot on an inherit
+    // reference, ingest_relations.h emitBaseRef). Two clauses of one class naming one base keep the first.
+    static HashMap<std::string, std::string_view> baseClauseQualifiers( const IngestResult& ing )
+    {
+        HashMap<std::string, std::string_view> out;
+        std::string                            key;
+        for( const Reference& ir : ing.references )
+        {
+            if( !ir.isInherit || ir.fromSymbol == kNoNode || ir.memberRoot.empty() || ir.calleeName.empty() || !extent::inSet( extent::kHeadRuleLangs, ir.lang ) )
+            {
+                continue;
+            }
+            buildShadowKey( key, ir.fromSymbol, ir.calleeName );
+            out.try_emplace( key, std::string_view( ir.memberRoot ) );
+        }
+        return out;
+    }
+    static constexpr std::uint8_t kBaseBoundOther = 2;   // BaseBound::Other, which ifacedispatch.h defines after this header (graph.h asserts the value)
+    mutable const BaseWalkGuard* baseGuard = nullptr;    // set by buildGraph once the implementors map is built
+    // per fieldWalk entry of a guarded walk: the classes the name means there (empty: by name), and whether one deriving class
+    // left two of them standing
+    struct MeantClasses
+    {
+        rw::SmallVec<NodeId, 2> ids;
+        bool                    unbound = false;
+    };
+    mutable std::vector<MeantClasses> walkMeant;
+    mutable std::vector<NodeId>           standingBases;   // meantBase: one deriving class's bases of a name the evidence leaves standing
+    mutable std::vector<NodeId>           drawnBases;      // meantBase: the classes of a name the map draws one deriving class's clause to
+    mutable std::string                   guardKey;        // reused "<id>#<name>" / class-name lookup key of the guarded walk
+    mutable bool                          coneUnbound = false;   // guardedConeOwns refused a candidate because a base on the way could not be bound
+    mutable std::string                   coneOf;      // guardedConeOwns: the class whose guarded base closure is kept
+    mutable std::vector<std::string_view> coneNames;   // its names (views into chaUp's stored strings and coneOf)
+    mutable std::vector<MeantClasses>     coneMeant;
 
     explicit Narrower( const HashMap<std::string, rw::SmallVec<NodeId, 2>>& canon,
                        const HashMap<std::string, FlatRecvType>&            vt,
@@ -8258,6 +8499,10 @@ struct Narrower
                 return own;
             }
         }
+        if( baseGuard != nullptr && extent::inSet( extent::kHeadRuleLangs, r.lang ) )
+        {
+            return guardedBaseWalk( typeName, r, chaUp, skipSelf, unionOnMulti );   // CPP-BASE-BY-NAME: see BaseWalkGuard
+        }
 
         fieldWalk.clear();
         fieldWalk.push_back( typeName );
@@ -8277,6 +8522,537 @@ struct Narrower
             if( found != nullptr )
             {
                 return found;
+            }
+            lvlBegin = lvlEnd;
+        }
+        return nullptr;
+    }
+
+    // ── CPP-BASE-BY-NAME: methodOnTypeOrBases' walk for the C family, under BaseWalkGuard (the rules are stated there) ──────────
+    // does fieldWalk[ at ] declare `callee` with no body — one of the classes the walk means there, or (by name) any class of
+    // that name? A base the walk could not bind answers false: which class's declaration it would be is not known.
+    bool declaresBodiless( std::size_t at, std::string_view callee ) const
+    {
+        return declaresBodiless( fieldWalk[ at ], walkMeant[ at ], callee );
+    }
+    bool declaresBodiless( std::string_view name, const MeantClasses& meant, std::string_view callee ) const
+    {
+        const ClassIdentity& ids = baseGuard->ids;
+        if( meant.unbound )
+        {
+            return false;
+        }
+        const auto declaredBy = [ & ]( NodeId cls )
+        {
+            buildShadowKey( guardKey, cls, callee );
+            return ids.declaredIn.find( guardKey ) != ids.declaredIn.end();
+        };
+        if( !meant.ids.empty() )
+        {
+            return std::ranges::any_of( meant.ids, declaredBy );
+        }
+        guardKey.assign( name );
+        const auto named = ids.classesByName.find( guardKey );
+        if( named == ids.classesByName.end() )
+        {
+            return false;
+        }
+        return std::ranges::any_of( named->second, declaredBy );   // declaredBy rewrites guardKey: the map entry does not move
+    }
+
+    // the innermost name of a written scope: `Http` for `Envoy::Http`, `Base` for `ns::Base<T>`, "" for none
+    static std::string_view innermostScopeName( std::string_view scope ) noexcept
+    {
+        const std::size_t sep = lastTwoTopLevelSeparators( scope ).second;
+        scope = sep == std::string_view::npos ? scope : scope.substr( sep + 2 );
+        return trimWs( scope.substr( 0, std::min( scope.size(), scope.find( '<' ) ) ) );
+    }
+
+    // how the inherit edge base → derived was bound; nullopt when the implementors map draws no such edge
+    std::optional<std::uint8_t> baseEdgeBound( NodeId base, NodeId derived ) const
+    {
+        if( base >= baseGuard->implementors.size() || base >= baseGuard->bound.size() )
+        {
+            return std::nullopt;
+        }
+        const std::vector<NodeId>& kids = baseGuard->implementors[ base ];
+        const auto                 pos  = std::lower_bound( kids.begin(), kids.end(), derived );
+        if( pos == kids.end() || *pos != derived )
+        {
+            return std::nullopt;
+        }
+        return baseGuard->bound[ base ][ std::size_t( pos - kids.begin() ) ];
+    }
+
+    // (1) of meantBase: the ONE class of drawnBases the base clause of `d` names by its scope, as C++ reads the clause; kNoNode
+    // when the scope evidence names none or several. A class symbol's own scope is its name, so a class's place is read from
+    // class identity: the class it is nested in (byte spans), else the namespaces its FILE shows it defines things in
+    // (ClassIdentity::fileNamespaces, the evidence nameableThroughQualifier claims by).
+    //   * a QUALIFIED clause (`Http::FilterManager`, `AsyncClient::Request`): the qualifier's innermost name is a class — the
+    //     candidate nested in a class of that name; or a namespace — the namespace-level candidate whose file shows it;
+    //   * a BARE clause: lookup starts in the deriving class's own scope — the candidate nested in the same class as `d`,
+    //     else the namespace-level candidate whose file shares a namespace with d's file.
+    NodeId baseInClauseScope( NodeId d, const std::string& base ) const
+    {
+        buildShadowKey( guardKey, d, base );
+        const auto written = baseGuard->baseQualifier.find( guardKey );
+        return written != baseGuard->baseQualifier.end() ? baseInQualifierScope( innermostScopeName( written->second ) ) : baseInDerivingScope( d );
+    }
+
+    // the one class of drawnBases for which `inScope` holds; kNoNode for none or several
+    template <class InScope>
+    NodeId oneDrawnBase( InScope&& inScope ) const
+    {
+        NodeId      found = kNoNode;
+        std::size_t count = 0;
+        for( NodeId b : drawnBases )
+        {
+            if( inScope( b ) )
+            {
+                found = b;
+                ++count;
+            }
+        }
+        return count == 1 ? found : kNoNode;
+    }
+
+    // a QUALIFIED clause: `q` is the qualifier's innermost name — a class the candidate is nested in, else a namespace the
+    // candidate's file shows (IdentityNarrower::namespaceLevelIn, the evidence Rule 2's qualifier claim stands on)
+    NodeId baseInQualifierScope( std::string_view q ) const
+    {
+        const ClassIdentity& ids = baseGuard->ids;
+        guardKey.assign( q );
+        const bool qualifierIsClass = ids.classesByName.find( guardKey ) != ids.classesByName.end();
+        return oneDrawnBase( [ & ]( NodeId b )
+        {
+            return qualifierIsClass ? IdentityNarrower::outerNameOf( b, ids ) == q : IdentityNarrower::namespaceLevelIn( b, q, ids, guardKey );
+        } );
+    }
+
+    // a BARE clause: the deriving class's own scope
+    NodeId baseInDerivingScope( NodeId d ) const
+    {
+        const ClassIdentity& ids   = baseGuard->ids;
+        const NodeId         outer = ids.enclosingClass[ d ];
+        const auto           sibling = [ & ]( NodeId b ) { return outer != kNoNode && ids.enclosingClass[ b ] == outer; };
+        if( std::ranges::any_of( drawnBases, sibling ) )
+        {
+            return oneDrawnBase( sibling );
+        }
+        const std::uint32_t file = IdentityNarrower::fileOf( d, ids );
+        return oneDrawnBase( [ & ]( NodeId b )
+        {
+            return ids.enclosingClass[ b ] == kNoNode && IdentityNarrower::filesShareNamespace( file, IdentityNarrower::fileOf( b, ids ), ids );
+        } );
+    }
+
+    // (2) of meantBase: the classes of this name the map draws d's clause to (drawnBases), and which of them it did not rule
+    // out as the name collision (standingBases; BaseBound::Other)
+    void drawnAndStandingBases( NodeId d, std::span<const NodeId> baseClasses ) const
+    {
+        standingBases.clear();
+        drawnBases.clear();
+        for( NodeId b : baseClasses )
+        {
+            const std::optional<std::uint8_t> how = baseEdgeBound( b, d );
+            if( !how.has_value() )
+            {
+                continue;
+            }
+            drawnBases.push_back( b );
+            if( *how != kBaseBoundOther )
+            {
+                standingBases.push_back( b );
+            }
+        }
+    }
+
+    // (3) of meantBase: the map proved none of standingBases (its include closure is the includer-relative one). The deriving
+    // class's file may still SEE exactly one: its own file or a header it includes directly (an include written against an
+    // include root, `"net/filter.h"`, read as a path suffix), else anywhere in its include closure (class identity's reading
+    // and Rule 3's). One visible class is the base (standingBases is cut to it, true); none or two is unbound (false).
+    bool bindByIncludes( NodeId d ) const
+    {
+        const ClassIdentity& ids  = baseGuard->ids;
+        const std::uint32_t  file = IdentityNarrower::fileOf( d, ids );
+        NodeId               direct = kNoNode, reached = kNoNode;
+        std::size_t          directCount = 0, reachedCount = 0;
+        for( NodeId b : standingBases )
+        {
+            const std::uint32_t baseFile = IdentityNarrower::fileOf( b, ids );
+            if( baseFile == file || IdentityNarrower::includeNamesAsSuffix( { .fromFile = file, .defFile = baseFile }, ids ) )
+            {
+                direct = b;
+                ++directCount;
+            }
+            if( identity.fileVisibleFrom( file, baseFile, ids ) || rule3Includes.contains( file, baseFile ) )
+            {
+                reached = b;
+                ++reachedCount;
+            }
+        }
+        const NodeId one = directCount == 1 ? direct : ( directCount == 0 && reachedCount == 1 ) ? reached : kNoNode;
+        if( one != kNoNode )
+        {
+            standingBases.assign( 1, one );
+        }
+        return one != kNoNode;
+    }
+
+    // one deriving class's reading of the base name, into standingBases (drawnBases: every class the map drew it to). False
+    // when the name stays several classes for it: unbound.
+    bool bindBaseFor( NodeId d, const std::string& base, std::span<const NodeId> baseClasses ) const
+    {
+        drawnAndStandingBases( d, baseClasses );
+        const NodeId inScope = drawnBases.size() > 1 ? baseInClauseScope( d, base ) : kNoNode;   // (1) the clause's own scope decides first, whatever the files say
+        if( inScope != kNoNode )
+        {
+            standingBases.assign( 1, inScope );
+        }
+        return standingBases.size() <= 1 || bindByIncludes( d );
+    }
+
+    // meantBase when no class of the name is left standing for any deriving class: nullopt (not this walk's base) or the
+    // by-name reading
+    std::optional<MeantClasses> unjudgedBase( std::size_t parent, const std::string& base, std::span<const NodeId> from, bool drawn, bool baseDefined ) const
+    {
+        const MeantClasses byName{ {}, walkMeant[ parent ].unbound };
+        if( drawn )
+        {
+            return std::nullopt;   // every edge drawn is the name collision: the evidence names a class the tree does not define here
+        }
+        if( walkMeant[ parent ].ids.empty() )
+        {
+            return byName;   // no edge either way (an alias, a base outside the tree): the name, as before
+        }
+        // a narrowed parent: only a base one of ITS classes writes is walked (a namesake's base clause is not this walk's)
+        const ClassIdentity& ids     = baseGuard->ids;
+        const bool           written = !baseDefined && std::ranges::any_of( from, [ & ]( NodeId d )
+        {
+            const auto up = ids.realUp.find( d );
+            return up != ids.realUp.end() && std::ranges::find( up->second, std::string_view( base ) ) != up->second.end();
+        } );
+        return written ? std::optional<MeantClasses>( byName ) : std::nullopt;
+    }
+
+    // What the base name `base`, written by the class(es) fieldWalk[ parent ] means, is on this walk. nullopt: no class the
+    // walk means derives from it (the clause belongs to a namesake of the parent, or its evidence names another class). An
+    // empty id list is the by-name reading: one class of that name with nothing to judge it by, or no definition to judge from.
+    std::optional<MeantClasses> meantBase( std::size_t parent, const std::string& base ) const
+    {
+        const ClassIdentity& ids       = baseGuard->ids;
+        const auto           named     = ids.classesByName.find( base );
+        guardKey.assign( fieldWalk[ parent ] );
+        const auto           deriving  = ids.classesByName.find( guardKey );
+        const bool           narrowedParent = !walkMeant[ parent ].ids.empty();
+        const std::span<const NodeId> baseClasses = named == ids.classesByName.end() ? std::span<const NodeId>{} : std::span<const NodeId>( named->second.data(), named->second.size() );
+        const std::span<const NodeId> from = narrowedParent                      ? std::span<const NodeId>( walkMeant[ parent ].ids.data(), walkMeant[ parent ].ids.size() )
+                                           : deriving == ids.classesByName.end() ? std::span<const NodeId>{}
+                                                                                 : std::span<const NodeId>( deriving->second.data(), deriving->second.size() );
+        if( from.empty() || ( baseClasses.size() < 2 && !narrowedParent ) )
+        {
+            return MeantClasses{ {}, walkMeant[ parent ].unbound };   // nothing to tell apart, or no deriving definition to judge by: the name, as before
+        }
+        MeantClasses meant;
+        bool         drawn = false;   // the map draws an edge from a deriving class to a class of this name
+        for( NodeId d : from )
+        {
+            meant.unbound = !bindBaseFor( d, base, baseClasses ) || meant.unbound;
+            drawn         = drawn || !drawnBases.empty();
+            for( NodeId b : standingBases )
+            {
+                if( std::ranges::find( meant.ids, b ) == meant.ids.end() )
+                {
+                    meant.ids.push_back( b );
+                }
+            }
+        }
+        if( meant.ids.empty() )
+        {
+            return unjudgedBase( parent, base, from, drawn, !baseClasses.empty() );
+        }
+        meant.unbound = meant.unbound || walkMeant[ parent ].unbound;   // above a base nothing could bind, nothing is bound either
+        std::sort( meant.ids.begin(), meant.ids.end() );
+        if( !narrowedParent && !meant.unbound && meant.ids.size() == baseClasses.size() )
+        {
+            meant.ids.clear();   // every class of the name is some deriving class's own base: the name says the same
+        }
+        return meant;
+    }
+
+    // Where the walk already holds the name `base`, for a new reading `meant` of it. A name is visited once BY NAME; as
+    // classes, once per class: `Http::ActiveClient : ConnectionPool::ActiveClient` reaches the second class of the name the
+    // first entry does not mean, so the classes an earlier entry holds are cut from `meant`. `covered`: nothing new is left
+    // (visited by name — cycles too — or every class already held). Returns the entry of the level being built (from
+    // `lvlEnd` on) that holds the name, else fieldWalk.size().
+    std::size_t placeOfBase( std::string_view base, MeantClasses& meant, std::size_t lvlEnd, bool& covered ) const
+    {
+        std::size_t sameLevel = fieldWalk.size();
+        for( std::size_t at = 0; at < fieldWalk.size() && !covered; ++at )
+        {
+            if( fieldWalk[ at ] != base )
+            {
+                continue;
+            }
+            const MeantClasses& have = walkMeant[ at ];
+            if( have.ids.empty() || meant.ids.empty() )
+            {
+                covered = at < lvlEnd || have.ids.empty();
+            }
+            else
+            {
+                meant.ids.erase( std::remove_if( meant.ids.begin(), meant.ids.end(), [ & ]( NodeId c ) { return std::ranges::find( have.ids, c ) != have.ids.end(); } ),
+                                 meant.ids.end() );
+                covered = meant.ids.empty();
+            }
+            sameLevel = at >= lvlEnd ? at : sameLevel;
+        }
+        return sameLevel;
+    }
+
+    // one entry of the level being built for what two parents mean by the name (by name when either says so)
+    static void mergeIntoLevel( MeantClasses& have, const MeantClasses& meant, bool covered )
+    {
+        have.unbound = have.unbound || meant.unbound;
+        if( covered )
+        {
+            return;
+        }
+        if( meant.ids.empty() )
+        {
+            have.ids.clear();
+            return;
+        }
+        have.ids.insert( have.ids.end(), meant.ids.begin(), meant.ids.end() );
+        std::sort( have.ids.begin(), have.ids.end() );
+    }
+
+    // expandWalkLevel under the guard: the same names in the same order, minus the bases meantBase refuses; walkMeant kept
+    // parallel
+    void expandGuardedLevel( std::size_t lvlBegin, std::size_t lvlEnd, const HashMap<std::string, std::vector<std::string>>& chaUp,
+                             std::size_t nameCap = kFieldWalkCap ) const
+    {
+        for( std::size_t i = lvlBegin; i < lvlEnd; ++i )
+        {
+            guardKey.assign( fieldWalk[ i ] );
+            const auto uit = chaUp.find( guardKey );
+            for( const std::string& base : ( uit == chaUp.end() ? std::span<const std::string>{} : std::span<const std::string>( uit->second ) ) )
+            {
+                std::optional<MeantClasses> meant = meantBase( i, base );
+                if( !meant.has_value() )
+                {
+                    continue;
+                }
+                bool              covered   = false;
+                const std::size_t sameLevel = placeOfBase( base, *meant, lvlEnd, covered );
+                if( sameLevel < fieldWalk.size() )
+                {
+                    mergeIntoLevel( walkMeant[ sameLevel ], *meant, covered );
+                    continue;
+                }
+                if( covered )
+                {
+                    continue;
+                }
+                if( fieldWalk.size() >= nameCap )
+                {
+                    return;
+                }
+                fieldWalk.push_back( base );
+                walkMeant.push_back( std::move( *meant ) );
+            }
+        }
+    }
+
+    // one guarded level's probe: probeWalkLevel, with each hit cut to the definitions a class the walk means owns. `hits`
+    // counts the hitting base names, `unbound` reports a hit through a base name no evidence could bind to one class.
+    struct GuardedProbe
+    {
+        const rw::SmallVec<NodeId, 2>* found   = nullptr;
+        std::size_t                    hits    = 0;
+        bool                           unbound = false;
+    };
+    GuardedProbe probeGuardedLevel( std::size_t lvlEnd, std::string_view callee ) const
+    {
+        const ClassIdentity& ids = baseGuard->ids;
+        GuardedProbe         out;
+        walkUnion.clear();
+        for( std::size_t i = lvlEnd; i < fieldWalk.size(); ++i )
+        {
+            const rw::SmallVec<NodeId, 2>* defs = definitionsIn( fieldWalk[ i ], callee );
+            if( defs == nullptr )
+            {
+                continue;
+            }
+            const MeantClasses& meant  = walkMeant[ i ];
+            const std::size_t   before = walkUnion.size();
+            guardKey.assign( fieldWalk[ i ] );
+            const auto          named  = ids.classesByName.find( guardKey );
+            for( NodeId d : *defs )
+            {
+                const bool owned = meant.ids.empty() || std::ranges::any_of( meant.ids, [ & ]( NodeId cls )
+                {
+                    return identity.ownedBy( d, cls, named == ids.classesByName.end() ? nullptr : &named->second, ids );
+                } );
+                if( owned )
+                {
+                    walkUnion.push_back( d );
+                }
+            }
+            if( walkUnion.size() == before )
+            {
+                continue;   // every definition of that spelling belongs to a namesake the walk does not mean
+            }
+            ++out.hits;
+            out.unbound = out.unbound || meant.unbound;
+            out.found   = ( out.hits == 1 && walkUnion.size() == defs->size() ) ? defs : &walkUnion;
+        }
+        return out;
+    }
+
+    // FE-B's ladder proof (graph.h ladderProves) reads a by-name cone too: a candidate whose owner's NAME is among the caller
+    // class's bases is "what the language's own lookup reaches", and is printed resolved. Under the guard that holds only when
+    // the walk reaches that name as a class the candidate belongs to: `Net::Session : Manager` does not reach Http::Manager's
+    // members. `cls` is the caller's class and `owner` the candidate's (already in cls's by-name cone, and not cls itself).
+    // The whole guarded closure of one class is kept for the next call (calls arrive caller by caller); kConeNameCap is
+    // ReceiverEvidence::kWalkCap, the cone's own bound. A closure the cap cut, or a name it never reached, proves nothing.
+    static constexpr std::size_t kConeNameCap = 64;
+    void keepGuardedCone( std::string_view cls, const HashMap<std::string, std::vector<std::string>>& chaUp ) const
+    {
+        if( coneOf == cls && !coneNames.empty() )
+        {
+            return;
+        }
+        fieldWalk.clear();
+        fieldWalk.push_back( cls );
+        walkMeant.assign( 1, MeantClasses{} );
+        for( std::size_t lvlBegin = 0; lvlBegin < fieldWalk.size(); )
+        {
+            const std::size_t lvlEnd = fieldWalk.size();
+            expandGuardedLevel( lvlBegin, lvlEnd, chaUp, kConeNameCap );
+            lvlBegin = lvlEnd;
+        }
+        coneOf.assign( cls );
+        coneNames.assign( fieldWalk.begin(), fieldWalk.end() );
+        coneNames.front() = coneOf;   // the root's view was the caller's: keep the kept copy's
+        coneMeant = walkMeant;
+    }
+    bool guardedConeOwns( std::string_view cls, std::string_view owner, NodeId def, const HashMap<std::string, std::vector<std::string>>& chaUp ) const
+    {
+        keepGuardedCone( cls, chaUp );
+        const ClassIdentity& ids = baseGuard->ids;
+        guardKey.assign( owner );
+        const auto named   = ids.classesByName.find( guardKey );
+        bool       reached = false;
+        for( std::size_t at = 0; at < coneNames.size(); ++at )
+        {
+            if( coneNames[ at ] != owner )
+            {
+                continue;
+            }
+            reached = true;
+            const MeantClasses& meant = coneMeant[ at ];
+            if( meant.unbound )
+            {
+                coneUnbound = true;
+                continue;
+            }
+            if( meant.ids.empty() || std::ranges::any_of( meant.ids, [ & ]( NodeId c )
+                { return identity.ownedBy( def, c, named == ids.classesByName.end() ? nullptr : &named->second, ids ); } ) )
+            {
+                return true;
+            }
+        }
+        coneUnbound = coneUnbound || ( !reached && coneNames.size() >= kConeNameCap );   // the cap cut the closure: the name may be beyond it
+        return false;
+    }
+
+    // is a symbol's written scope a class's (its innermost name is a class the tree defines), not a namespace's or none?
+    bool scopeNamesClass( std::string_view scope ) const
+    {
+        guardKey.assign( innermostScopeName( scope ) );
+        return !guardKey.empty() && baseGuard->ids.classesByName.find( guardKey ) != baseGuard->ids.classesByName.end();
+    }
+
+    // does class `cls`, or a class its guarded base closure reaches, declare `callee` with no body? Then a bare call of that
+    // name inside the class is the member (a pure virtual its subclasses define), and no free function is what lookup finds.
+    bool guardedConeDeclares( std::string_view cls, std::string_view callee, const HashMap<std::string, std::vector<std::string>>& chaUp ) const
+    {
+        keepGuardedCone( cls, chaUp );
+        std::size_t at = 0;
+        return std::ranges::any_of( coneNames, [ & ]( std::string_view name ) { return declaresBodiless( name, coneMeant[ at++ ], callee ); } );
+    }
+
+    // ladderProves' three questions under the guard, kept here so the resolve loop reads them as one call each.
+    // (a) `byName` is the by-name cone's answer (ReceiverEvidence::inCone: `owner` is `cls` or one of its bases); for the C
+    //     family the guard must also bind candidate `c` to a class the walk from `cls` reaches.
+    bool coneProves( bool byName, Lang lang, std::string_view cls, std::string_view owner, NodeId c ) const
+    {
+        if( !byName || owner == cls || baseGuard == nullptr || !extent::inSet( extent::kHeadRuleLangs, lang ) )
+        {
+            return byName;
+        }
+        return guardedConeOwns( cls, owner, c, baseGuard->chaUp );
+    }
+    // (b) a bare call's candidate with no owning class is a free / top-level function the call reaches — unless the caller's
+    //     class or a base declares the name with no body: C++ finds that member first, and its bodies are the subclasses',
+    //     which no lookup from here proves. `declared` memoises that per call (-1 unread). A member of a class the owner
+    //     table could not name (`struct Outer::Inner { void start(); }`, scope `candScope`) is no free function: as before.
+    bool bareCallReachesFree( std::int8_t& declared, const Reference& ref, std::string_view cls, std::string_view candScope ) const
+    {
+        if( declared < 0 )
+        {
+            declared = !cls.empty() && baseGuard != nullptr && extent::inSet( extent::kHeadRuleLangs, ref.lang ) && guardedConeDeclares( cls, ref.calleeName, baseGuard->chaUp ) ? 1 : 0;
+        }
+        return declared == 0 || scopeNamesClass( candScope );
+    }
+    // (c) a candidate sat behind a base nothing could bind (coneUnbound, set by guardedConeOwns since the caller reset it):
+    //     the call may mean that member, so no other candidate is the proven one — `proved` is emptied and every candidate
+    //     stays, hedged.
+    template <class Proved>
+    void dropProvedIfUnbound( Proved& proved ) const
+    {
+        if( coneUnbound )
+        {
+            proved.clear();
+        }
+    }
+
+    // does a level of the guarded walk (fieldWalk from `lvlEnd` on) declare `callee` with no body?
+    bool levelDeclaresBodiless( std::size_t lvlEnd, std::string_view callee ) const
+    {
+        std::size_t at = lvlEnd;
+        return std::any_of( walkMeant.begin() + std::ptrdiff_t( lvlEnd ), walkMeant.end(),
+                            [ & ]( const MeantClasses& meant ) { return declaresBodiless( fieldWalk[ at++ ], meant, callee ); } );
+    }
+
+    const rw::SmallVec<NodeId, 2>* guardedBaseWalk( std::string_view typeName, const Reference& r, const HashMap<std::string, std::vector<std::string>>& chaUp,
+                                                    bool skipSelf, bool unionOnMulti ) const
+    {
+        fieldWalk.clear();
+        fieldWalk.push_back( typeName );
+        walkMeant.assign( 1, MeantClasses{} );
+        if( !skipSelf && declaresBodiless( 0, r.calleeName ) )
+        {
+            return nullptr;   // the type itself declares the callee with no body: lookup ends here, and no base's body is the call's
+        }
+        std::size_t lvlBegin = 0;
+        while( lvlBegin < fieldWalk.size() )
+        {
+            const std::size_t lvlEnd = fieldWalk.size();
+            expandGuardedLevel( lvlBegin, lvlEnd, chaUp );
+            const GuardedProbe probe = probeGuardedLevel( lvlEnd, r.calleeName );
+            if( probe.unbound )
+            {
+                return nullptr;   // the base that defines it is one of two same-named classes and nothing says which
+            }
+            if( probe.hits > 1 )
+            {
+                return unionOnMulti ? &walkUnion : nullptr;
+            }
+            if( probe.found != nullptr || levelDeclaresBodiless( lvlEnd, r.calleeName ) )
+            {
+                return probe.found;   // the hit — or nullptr: a base declares it with no body (a pure virtual), and the nearest declaration wins
             }
             lvlBegin = lvlEnd;
         }
@@ -8669,17 +9445,7 @@ struct Narrower
         keyBind.append( r.recvVar );
         if( const auto sit = scopedDecls.byName.find( keyBind ); sit != scopedDecls.byName.end() )
         {
-            const ScopedRecvDecl* const innermost = innermostCoveringDecl( sit->second, r.startByte );
-            if( innermost == nullptr || innermost->typeBinding >= kRecvDeclConflicted )
-            {
-                return RecvVarType{};   // no declaration in scope (a field or global of the name), a tie, or untyped/conflicted
-            }
-            const Binding& declared = ( *scopedDecls.bindings )[ innermost->typeBinding ];
-            if( declared.kind == LocalBindKind::ReturnType )   // a call result's class, resolved to the one in-tree class (graph.h)
-            {
-                return RecvVarType{ declared.typeName, false, &declared };
-            }
-            return namesStdType( declared.importedName ) ? RecvVarType{} : RecvVarType{ declared.typeName, !declared.importedName.empty(), &declared };
+            return scopedRecvVarType( r, sit->second );
         }
         const auto vit = varType.find( keyBind );
         if( vit == varType.end() || ( vit->second.arrowOnly && !r.viaArrow ) )
@@ -8689,10 +9455,46 @@ struct Narrower
         return RecvVarType{ vit->second.type, vit->second.writtenQualified, nullptr };
     }
 
+    // recvVarType's lexical answer: the declaration of the name innermost at the site, and the type its record wrote
+    RecvVarType scopedRecvVarType( const Reference& r, std::span<const ScopedRecvDecl> decls ) const
+    {
+        const ScopedRecvDecl* const innermost = innermostCoveringDecl( decls, r.startByte );
+        if( innermost == nullptr || innermost->typeBinding >= kRecvDeclConflicted )
+        {
+            return RecvVarType{};   // no declaration in scope (a field or global of the name), a tie, or untyped/conflicted
+        }
+        const Binding& declared = ( *scopedDecls.bindings )[ innermost->typeBinding ];
+        if( const WrittenPointeeText* const p = arrowPointeeOf( innermost->typeBinding ) )
+        {
+            // CPP-PTR-ALIAS: a smart pointer — `->` reaches the pointee, `.` the pointer's own members (no in-tree class)
+            return r.viaArrow ? RecvVarType{ p->type, !p->qualified.empty(), &declared, p } : RecvVarType{};
+        }
+        if( declared.kind == LocalBindKind::ReturnType )   // a call result's class, resolved to the one in-tree class (graph.h)
+        {
+            return RecvVarType{ declared.typeName, false, &declared };
+        }
+        return namesStdType( declared.importedName ) ? RecvVarType{} : RecvVarType{ declared.typeName, !declared.importedName.empty(), &declared };
+    }
+
+    // CPP-PTR-ALIAS: the pointee a declaration record's smart-pointer type reaches through `->` (ScopedRecvDecls::arrowPointee)
+    const WrittenPointeeText* arrowPointeeOf( std::uint32_t bindIndex ) const
+    {
+        if( scopedDecls.arrowPointee == nullptr )
+        {
+            return nullptr;
+        }
+        const auto p = scopedDecls.arrowPointee->find( bindIndex );
+        return p == scopedDecls.arrowPointee->end() ? nullptr : &p->second;
+    }
+
     // the qualifier the receiver's declaration wrote — the lexical record's own, else the flat table's kept one (read while
     // keyBind still holds this site's key) — and false when the flat table's records disagree: identity then stays out
     std::pair<bool, std::string_view> writtenQualifier( const RecvVarType& bound, const ClassIdentity& ids ) const
     {
+        if( bound.pointee != nullptr )
+        {
+            return { true, std::string_view( bound.pointee->qualified ) };   // CPP-PTR-ALIAS: the pointee's own qualified text
+        }
         if( bound.declared != nullptr )
         {
             // a call result's written qualifier (`ns::T`) was already resolved to its one class: no final-segment question left

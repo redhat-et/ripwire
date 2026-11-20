@@ -3658,6 +3658,9 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     {
         legend += kMapAnchorMissLegend;
     }
+    // K51: history_unread='s definition, the LAST leading clause, so it stands right before the <r> root it marks and inside the
+    // leading block every reader (and legendcoveragecheck's full rows) meets first; absent unless the amp=/churn= walk was unread.
+    legend += renderHistoryUnread( DiscloseAs::LegendComment );
     // C1 DRIFT FIX (Round C lane B, found by re-reading this header's own output). `precise=` means "how many
     // out-edges a SCIP index PINNED", and the emitter's own comment below says it is "emitted ONLY under
     // --scip". Both were true when outProv held only {0, 1}. A4-R5 then added value 2 (an FFI binding edge)
@@ -3875,8 +3878,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
         {
             h += " stem_cut=\"";  h += std::to_string( stemPick.cut );  h += "\"";   // MAP-STEM: absent unless a --max-tokens fit left stem rows out
         }
-        h += ">";
-        h += renderHistoryUnread( DiscloseAs::LegendComment );   // K51: its own definition, right behind the root it marks
+        h += ">";   // K51: history_unread='s definition rides the leading legend above (HISTORY-UNREAD-LEGEND), not behind this tag
         return h;
     };
     const auto buildTail = [ & ]( std::size_t estTokens ) -> std::string

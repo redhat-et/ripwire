@@ -985,7 +985,7 @@ namespace mcpedit
         // qualified target: resolveOneForEdit matches the bare name exactly, so `Alpha.run` is refused "not found" upstream.
         const std::vector<NodeId> overloadNodes = editCheckOverloadSet( ing, g, focus );
         const EditCheckContract   contract      = editCheckContractVsHead( ing, g, root, kDefaultMaxFileBytes, {}, focus, overloadNodes );
-        EditCheckCalleeTest       callee( ing, ing.symbols[ focus ], overloadNodes );
+        EditCheckCalleeTest       callee( ing, ing.symbols[ focus ], overloadNodes, g.provenSites );
         const auto [ callerIds, callerIncompatible ] = editCheckCallers( ing, g, overloadNodes, callee );
         std::size_t incompatibleCount = 0;
         for( NodeId c : callerIds )
