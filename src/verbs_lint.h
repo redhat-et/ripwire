@@ -2004,367 +2004,417 @@ std::vector<rw::AstMatch> collectBuiltInLintFindings( const rw::Config& cfg, con
     return ms;
 }
 
-std::optional<int> runLint( const MainDispatch& d )
+// THE state one --lint / --lint-rules answer is assembled from, filled by runLintVerb's named steps in
+// order — the built-in findings (with the packs' rule names and floors), then the user rules' findings,
+// floors and uncompiled ids — and read whole by the emitting steps after it.
+// LintOut = the unified finding shape so built-in tags and user rule ids emit identically (defined
+// at file scope, above lintSymbolLevelChecks — dedupeLintFindings shares it). sev is empty for
+// built-ins (facts, not severities); user findings carry their declared sev=.
+struct LintFindingSet
+{
+    std::vector<std::string>  allRuleNames = builtInLintRuleNames();
+    std::vector<RuleCap>      saturatedRules;   // see the RuleCap declaration at file scope for why the key is a PAIR
+    std::vector<LintOut>      outs;
+    std::vector<rw::LintRule> userRules;
+    std::vector<std::string>  uncompiledUserRuleIds;   // §L10: main query compiled for NO grammar
+};
+
+// --lint-rules=DIR: load user YAML rules and run them through the SAME astQuery engine. Malformed
+// files alert+skip inside the loader; a bad ts query alert+skips inside astQuery. Refuse (exit 1) ONLY
+// if the flag was given but zero rules loaded (nothing to run = a user mistake worth surfacing), or a
+// #match? predicate could not be decided. false ⇒ refused, the refusal already printed.
+bool appendUserRuleFindings( const rw::Config& cfg, const rw::IngestResult& ing, std::size_t lintMaxPerRule, LintFindingSet& run )
+{
+    using namespace rw;
+    run.userRules = loadLintRules( std::string( cfg.lintRulesDir ) );
+    if( run.userRules.empty() )
+    {
+        lintPrintErr( "ripwire: --lint-rules={}: no rules loaded\n", cfg.lintRulesDir );
+        return false;
+    }
+    const auto [ userFindings, saturatedUserRuleIds, uncompiledIds, regexRefused, regexUndecided ] = runLintRules( ing, run.userRules, lintMaxPerRule );
+    if( refuseUndecidedMatchRegex( "--lint-rules", regexRefused, regexUndecided, undecidedPredicateFirstSite( cfg, ing, regexUndecided ),
+                                   "rules loaded from " + std::string( cfg.lintRulesDir ) + " whose queries carry a #match?/#not-match? predicate: "
+                                       + rulesWithMatchPredicate( run.userRules ) ) )
+    {
+        return false;
+    }
+    for( const LintFinding& f : userFindings )
+    {
+        run.outs.push_back( { f.fileId, f.startByte, f.line, f.id, f.severity, f.message } );
+    }
+    for( const std::string& id : saturatedUserRuleIds )
+    {
+        run.saturatedRules.push_back( { id, true } );
+    }
+    run.uncompiledUserRuleIds = uncompiledIds;
+    return true;
+}
+
+// The one "is this rule in the answer" predicate of --lint-select / --lint-ignore: an inactive selection
+// keeps every rule.
+bool lintRuleSelected( const rw::lintcatalog::LintSelection& sel, std::string_view rule ) noexcept
+{
+    return !sel.active || rw::lintcatalog::lintSelectionKeeps( sel, rule );
+}
+
+// W3-S (2026-08-19): E6 found --lint emitting an UNCAPPED payload on a large corpus — 2,037,645 B /
+// 6,169 findings (~330 B/finding, driven by long single-line minified text=) with no --help promise
+// ("trims to fit") kept and no way for a caller to see it coming; every other verb in the catalog has
+// a display default (--hotspots 40, --grep 100, …), --lint alone had none. Measured HERE before
+// choosing the cap: this repo prints 367,924 B / 3,213 findings (~114 B/finding); a second, larger
+// polyglot fixture (ripwire's pre-cutover ancestor, 1,033 tracked files) prints 254,445 B / 2,312 findings (~110 B/finding).
+// kLintDefaultPayloadBytes=100,000 lands an order of magnitude under E6's pathological case while
+// staying multiples of every other capped verb's default payload on this repo (--hotspots ~5.5 KB,
+// --clones ~17 KB, --grep(100 hits) ~57 KB) — --lint's own facts are individually smaller so it earns
+// a bigger budget. An explicit --limit=N always beats it (effectiveRowCap's existing rule), so a
+// caller who already knew to page past a cap sees no change.
+inline constexpr std::size_t kLintDefaultPayloadBytes = 100000;
+
+// The <f> rows a --lint answer prints: the --limit/--offset page when the caller pages, else the sorted
+// PREFIX that fits kLintDefaultPayloadBytes.
+rw::PageWindow lintFindingsWindow( const rw::Config& cfg, const rw::IngestResult& ing, const EnclosingSymbolIndex& enclosing, const std::vector<LintOut>& outs )
+{
+    const bool paging = cfg.pageLimit > 0 || cfg.pageOffset > 0;
+    if( paging )
+    {
+        return rw::pageWindow( outs.size(), cfg.pageLimit, cfg.pageOffset );
+    }
+    // Byte-budget the default (unpaged) run. Rows are already in final sorted order, so this keeps
+    // the same sorted PREFIX pageWindow() would keep by row count; the stopping rule is bytes here
+    // because a corpus with long text= rows (E6's vendored-bundle case) needs far FEWER rows to reach
+    // the same budget than a corpus of short rows does. text= dominates real row size and is summed
+    // exactly; the flat +80 covers the <f> tag markup, path, rule name and enclosing symbol name,
+    // which are all short in practice — an estimate, not a second full render (that would mean
+    // rendering the very tail this exists to avoid paying for), and one that can only ever be
+    // conservative in the wrong direction (undercounting an unusually long path/rule name by a few
+    // dozen bytes), never by the orders of magnitude that would silently readmit the 2 MB case.
+    std::size_t bytesUsed        = 0;
+    std::size_t lintDefaultShown = 0;
+    for( const LintOut& m : outs )
+    {
+        const rw::Symbol* e        = enclosing( m.fileId, m.startByte );
+        const std::size_t rowBytes = m.text.size() + m.rule.size() + m.sev.size()
+                                    + rw::rootRelPath( ing, m.fileId ).size()   // #228: the row prints p= root-relative, so the cap charges that
+                                    + ( e ? e->name.size() : 0 ) + 80;
+        if( lintDefaultShown > 0 && bytesUsed + rowBytes > kLintDefaultPayloadBytes )
+        {
+            break;   // the sorted prefix already kept at least one row — stop BEFORE the overflow row
+        }
+        bytesUsed += rowBytes;
+        ++lintDefaultShown;
+    }
+    return rw::PageWindow{ 0, lintDefaultShown };
+}
+
+// §P0.2 disclosure: which rules (if any) spent their whole per-rule budget, so their count= is a floor.
+const RuleCap* findRuleCap( const std::vector<RuleCap>& saturatedRules, const std::string& ruleName, bool isUserRule )
+{
+    for( const RuleCap& rc : saturatedRules )
+    {
+        if( rc.rule == ruleName && rc.isUserRule == isUserRule )
+        {
+            return &rc;
+        }
+    }
+    return nullptr;
+}
+
+// The root's floor pair. H8 (capture-audit 2026-09-04, lens 1 F5): OR over the rules this document EMITS,
+// never over every rule that saturated. `--lint-select=cache-` used to inherit findings_capped="1" from the
+// UNSELECTED magic-number rule, so 398 had to be read as a floor when, by the legend's own definition, it
+// was a total. Same predicate as the tally rows and the SARIF twin (lintRuleEmitted).
+// knob-honesty-068: findingsNext is the call that counts the floored rules' rest, over the SAME emitted-rules
+// predicate (H8).
+struct LintFloors { bool anyRuleCapped = false; std::string findingsNext; };
+
+LintFloors lintFloorsOf( const rw::Config& cfg, const std::vector<RuleCap>& saturatedRules, const rw::lintcatalog::LintSelection& lintSel,
+                         std::size_t lintMaxPerRule )
+{
+    const auto lintRuleEmitted = [ & ]( const RuleCap& rc ) -> bool { return lintRuleSelected( lintSel, rc.rule ); };
+    LintFloors floors;
+    floors.anyRuleCapped = std::any_of( saturatedRules.begin(), saturatedRules.end(), lintRuleEmitted );
+    floors.findingsNext  = lintFindingsNext( cfg, saturatedRules, lintRuleEmitted, lintMaxPerRule );
+    ASSUME( floors.findingsNext.empty() != floors.anyRuleCapped, "findings_next= rides exactly the answers findings_capped=\"1\" floors (one predicate)" );
+    return floors;
+}
+
+// §L7 root disclosure: inert_rules= (only when >0 — same "absent = nothing to say" convention as
+// findings_capped=) and, only when --lint-select/--lint-ignore were given, selected="K of N" plus
+// the raw select=/ignore= you passed, so a filtered zero is never confusable with an unfiltered one.
+std::string lintRootExtraAttrs( const rw::Config& cfg, const LintAnswerView& view, std::size_t inertRuleCount, const rw::lintcatalog::LintSelection& lintSel )
+{
+    std::string lintRootExtra;
+    if( inertRuleCount > 0 )
+    {
+        lintRootExtra += std::format( " inert_rules=\"{}\"", inertRuleCount );
+    }
+    if( lintSel.active )
+    {
+        lintRootExtra += std::format( " selected=\"{} of {}\"", lintSel.selectedCount, lintSel.totalCount );
+        if( !cfg.lintSelect.empty() )
+        {
+            lintRootExtra += " select=\"" + view.ex( cfg.lintSelect ) + "\"";
+        }
+        if( !cfg.lintIgnore.empty() )
+        {
+            lintRootExtra += " ignore=\"" + view.ex( cfg.lintIgnore ) + "\"";
+        }
+    }
+    // capture-audit 2026-09-04 (M16): a modifier's effect is stamped on the root the way --lint-select's
+    // selected=/select= is — `--lint --naming-locals` moved the count 3717 -> 4898 on this repo with no
+    // attribute saying why. Absent when the modifier is off (absent = nothing to say, as with inert_rules=).
+    if( cfg.namingLocals )
+    {
+        lintRootExtra += " naming_locals=\"1\"";
+    }
+    // #157 (CodeRabbit on #331): the rule walk is astQueryGrouped, which skips every file ingest's nesting guard
+    // refused — the same skip --match and --pattern disclose as nest_refused=, and the one the --skipped legend
+    // says all three share. Without it here a refused .kt file vanished from every rule's count with no trace.
+    // Absent when 0, like inert_rules=, so every lint answer over a corpus with no refusal is byte-identical.
+    lintRootExtra += nestRefusedAttr( view.ing );
+    return lintRootExtra;
+}
+
+// The --lint answer's legend comments: the main one always, then one per present-only root attribute
+// (findings_next=, nest_refused=, the --with-profile heat columns) that this answer carries.
+void emitLintLegends( const rw::Config& cfg, bool findingsFloored, bool nestRefused )
+{
+    // §P8 collision, documented not renamed — see the --grep legend above for the full reasoning.
+    lintPrintOut( "<!-- ripwire lint: [AST]-only checks (descriptive facts, not gates). rule=the check; sev=user-rule severity; "
+                "in=enclosing symbol NAME (the same spelling is a fan-in COUNT in for/pack-task/exemplar). "
+                "A rule named atom-X is an atom of confusion (Gopstein, FSE 2017): a C-family shape that misleads READERS, C/C++/ObjC/CUDA only. "
+                "Each rule is scanned under its OWN match budget, so no rule is ever starved by a noisier one. "
+                "A rule that spends its whole budget carries count_capped=\"1\" — its count= is then a FLOOR (that rule's raw captures reached the "
+                "per-rule budget; only its own matches can cap it); findings_capped=\"1\" on the root ⇒ at least one PRINTED rule row is a "
+                "floor (never inherited from a rule lint-select/lint-ignore dropped), and the root then also carries counts_floor=\"1\" "
+                "and capped=\"1\": findings= and total= are floors, rows exist that no page holds. "
+                "Absent = nothing was capped and every count= is a total. raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). "
+                "On the root, shown=/capped= are the ROW-COUNT pair (rows printed vs whether the DEFAULT payload byte-cap trimmed "
+                "them, absent an explicit limit=) — a different fact from the per-rule count_capped=\"1\" above, which is a MATCH-BUDGET "
+                "floor on one rule's own count=; findings= is the true total unless findings_capped=\"1\" floors it. "
+                "A rule row's applicable=\"0\" ⇒ NONE of its registered languages (the lint-catalog listing) are present in this "
+                "corpus at all — its count=\"0\" is structural inertness, never a measurement; the root's inert_rules=N tallies "
+                "how many printed rows that is true for. lint-select=/lint-ignore=PREFIX[,...] narrow the printed rows to a "
+                "family (e.g. cache-); the root then carries selected=\"K of N\" plus the raw select=/ignore= you passed. "
+                "naming_locals=\"1\" on the root ⇒ the opt-in naming-locals modifier was on (the naming-* rules also read local "
+                "variables inside already-flagged functions); absent ⇒ off, and the naming-* counts cover declarations only. "
+                "Each rule row's own shown_rows=/rows_capped= is how many of THAT rule's rows fall inside the printed <f> window "
+                "(the root's shown=/capped= trims a SORTED PREFIX of the combined findings, so a rule whose rows all sort past the "
+                "cut carries shown_rows=\"0\" rows_capped=\"1\" while its count= stays the true total — never confuse a capped-away "
+                "rule with one that measured zero); this is a DIFFERENT fact from the row's own count_capped=\"1\" above (that rule's "
+                "own raw-capture stream hit its per-rule match budget) — the two can disagree on the same row. "
+                "A lint-rules row's compiled=\"0\" ⇒ that rule's tree-sitter QUERY failed to compile for every linked grammar (a "
+                "malformed or misspelled pattern) — its count=\"0\" never ran at all, a different claim from applicable=\"0\" above "
+                "(a well-formed query whose declared language just is not in this corpus) and from an ordinary count=\"0\" (a "
+                "well-formed query that ran and found nothing); absent ⇒ the query compiled. -->" );
+    if( findingsFloored )
+    {
+        // present-only (absent ⇒ nothing floored), like the nest_refused= clause below; compactlegend.h restates it
+        lintPrintOut( "<!-- lint findings_next= on the root is the one call that counts the floored rules' rest: only the rules "
+                    "that carry count_capped=\"1\", under a 10x per-rule budget (the lint-max-per-rule flag; the default budget is a "
+                    "runaway guard, not a target); a re-run still floored names its own. -->" );
+    }
+    if( nestRefused )
+    {
+        lintPrintOut( "<!-- lint nest_refused= on the root counts corpus files a pre-parse nesting guard refused before any rule's walk "
+                    "could reach them, so no count= includes them; the count is corpus-wide, not narrowed to a language any rule here "
+                    "declares, so some of it was never going to be read by lint regardless; see the skipped verb's why=\"nest-refused\" "
+                    "rows for which. -->" );
+    }
+    if( !cfg.withProfile.empty() )
+    {
+        lintPrintOut( "<!-- with-profile: heat_* on a finding = MEASURED inclusive totals of the joined #PROF_TSV scope — the nearest "
+                    "PROFILE_SCOPE site at/above the finding inside its own enclosing symbol. Columns are whatever counter tier the "
+                    "profiled run armed; an ABSENT heat column was not measured, never zero. heat_joined= on the root counts annotated "
+                    "findings; 0 is honest (no finding sits inside a profiled scope), never an error. -->" );
+    }
+}
+
+// One <rule> tally row per SELECTED rule — the built-ins (declaration order, only under --lint) then the user
+// rules (declaration order) — so the tally order is deterministic and a deselected rule has no row at all
+// (it can never look like a checked-and-empty rule).
+void emitLintRuleTally( const rw::Config& cfg, const LintAnswerView& view, const LintFindingSet& run, const rw::lintcatalog::LintSelection& lintSel,
+                        rw::PageWindow lintPage, std::uint32_t corpusLangs )
+{
+    if( cfg.lint )
+    {
+        for( const std::string& rn : run.allRuleNames )
+        {
+            if( !lintRuleSelected( lintSel, rn ) )
+            {
+                continue;
+            }
+            const RuleTally rt = tallyLintRule( run.outs, rn, /*wantSevEmpty=*/true, lintPage );
+            const rw::lintcatalog::LintCatalogRow* catRow = rw::lintcatalog::lintCatalogFind( rn );
+            const bool applicable = catRow == nullptr || ( catRow->langMask & corpusLangs ) != 0;
+            printLintRuleTallyRow( rn, nullptr, rt.count, rt.shown, findRuleCap( run.saturatedRules, rn, false ) != nullptr, applicable );
+        }
+    }
+    for( const rw::LintRule& r : run.userRules )
+    {
+        if( !lintRuleSelected( lintSel, r.id ) )
+        {
+            continue;
+        }
+        const RuleTally   rt         = tallyLintRule( run.outs, r.id, /*wantSevEmpty=*/false, lintPage );
+        const bool        applicable = ( rw::langBit( r.lang ) & corpusLangs ) != 0;
+        const bool        compiled   = std::find( run.uncompiledUserRuleIds.begin(), run.uncompiledUserRuleIds.end(), r.id ) == run.uncompiledUserRuleIds.end();
+        const std::string sevEx      = view.ex( r.severity );
+        printLintRuleTallyRow( view.ex( r.id ), &sevEx, rt.count, rt.shown, findRuleCap( run.saturatedRules, r.id, true ) != nullptr, applicable, compiled );
+    }
+}
+
+// The <f> rows inside the window: a built-in finding keeps its bare shape (no sev=), a user finding carries
+// sev=; either one gains the --with-profile heat attributes when they were joined.
+void emitLintFindingRows( const LintAnswerView& view, const std::vector<LintOut>& outs, rw::PageWindow lintPage, const std::vector<std::string>& heatByFinding )
+{
+    for( std::size_t findingIndex = lintPage.begin; findingIndex < lintPage.end; ++findingIndex )
+    {
+        const LintOut&    m    = outs[ findingIndex ];
+        const rw::Symbol* e    = view.enclosing( m.fileId, m.startByte );
+        const std::string heat = heatByFinding.empty() ? std::string() : heatByFinding[ findingIndex ];
+        if( m.sev.empty() )
+        {
+            lintPrintOut( "<f rule=\"{}\" p=\"{}:{}\" in=\"{}\"{}>", view.ex( m.rule ), view.ex( view.rowPath( m.fileId ) ), m.line, e ? view.ex( e->name ) : "", heat );
+        }
+        else
+        {
+            lintPrintOut( "<f rule=\"{}\" sev=\"{}\" p=\"{}:{}\" in=\"{}\"{}>", view.ex( m.rule ), view.ex( m.sev ), view.ex( view.rowPath( m.fileId ) ), m.line,
+                        e ? view.ex( e->name ) : "", heat );
+        }
+        emitEscapedText( m.text );
+        lintPrintOut( "</f>" );
+    }
+}
+
+// --lint (built-in checks) and/or --lint-rules=DIR (user rules): collect, select, order, window, then emit
+// as SARIF or as the native <lint> document.
+int runLintVerb( const MainDispatch& d, const LintAnswerView& view )
 {
     using namespace rw;
     const Config&       cfg = d.cfg;
     const IngestResult& ing = d.ing;
+    // knob-honesty-068: the per-rule budget this run spends (--lint-max-per-rule=N, else kLintMaxPerRule)
+    const std::size_t lintMaxPerRule = rw::lintMaxPerRuleOf( cfg.lintMaxPerRule );
 
-    // --lint-catalog: the built-in rule registry, standalone — needs no corpus at all (lintcatalog.h's
-    // table is static), so it is handled before the match/lint/lint-rules setup below even starts.
+    LintFindingSet run;
+    if( cfg.lint )   // built-in [AST] checks only run with --lint; --lint-rules alone emits user findings only
+    {
+        std::vector<AstMatch> builtIns = collectBuiltInLintFindings( cfg, ing, view.enclosing, lintMaxPerRule, run.saturatedRules, run.allRuleNames );
+        run.outs.reserve( builtIns.size() );
+        for( AstMatch& m : builtIns )
+        {
+            run.outs.push_back( { m.fileId, m.startByte, m.line, std::move( m.tag ), std::string(), std::move( m.text ) } );
+        }
+    }
+    if( !cfg.lintRulesDir.empty() && !appendUserRuleFindings( cfg, ing, lintMaxPerRule, run ) )
+    {
+        return 1;
+    }
+
+    // --lint-select=PREFIX[,...] / --lint-ignore=PREFIX[,...]: resolved HERE, not in validateConfig,
+    // because a PREFIX can legitimately name a user rule id that --lint-rules=DIR has only just
+    // loaded above. See resolveLintSelection's own header for the pool it validates against.
+    const std::optional<rw::lintcatalog::LintSelection> lintSelOpt = resolveLintSelection( cfg, run.userRules );
+    if( !lintSelOpt )
+    {
+        return 1;   // refusal already printed
+    }
+    const rw::lintcatalog::LintSelection& lintSel = *lintSelOpt;
+    std::erase_if( run.outs, [ & ]( const LintOut& o ) { return !lintRuleSelected( lintSel, o.rule ); } );
+
+    // Final deterministic order over the COMBINED set — see sortLintRows for why the key runs all the
+    // way out to the row's own text.
+    sortLintRows( ing, run.outs );
+    // §P6.1: collapse rows that would render byte-identically (see dedupeLintFindings above for why —
+    // two genuinely different AST captures, e.g. the same magic-number value spelled twice on one line,
+    // can share the same rule/file:line/enclosing-symbol/text because the row carries no column).
+    run.outs = dedupeLintFindings( ing, std::move( run.outs ) );
+
+    const PageWindow  lintPage   = lintFindingsWindow( cfg, ing, view.enclosing, run.outs );
+    const std::size_t shownCount = lintPage.end - lintPage.begin;
+    const LintFloors  floors     = lintFloorsOf( cfg, run.saturatedRules, lintSel, lintMaxPerRule );
+
+    // §L7: per-rule LANGUAGE applicability — a rule whose registered languages (lintcatalog.h) never
+    // intersect the corpus' own languages is not "measured zero", it is structurally inert here.
+    // Applicability is per-LANGUAGE granularity (does the corpus contain ANY file of a language this
+    // rule's grammar could ever satisfy), never per-file-content — a rule can be "applicable" and
+    // still find nothing. See computeLintApplicability's own header for why it lives outside this function.
+    const LintApplicability lintApplicability = computeLintApplicability( ing, cfg.lint, run.allRuleNames, run.userRules, lintSel );
+
+    // --sarif: `outs` re-serialized as SARIF instead of the native XML below (emitRunLintSarif above).
+    // validateConfig already refused this alongside --match / --with-profile / paging.
+    if( cfg.sarif )
+    {
+        emitRunLintSarif( d, run.allRuleNames, run.userRules, run.saturatedRules, run.outs, lintSel, lintApplicability.corpusLangs, view.enclosing );
+        return 0;
+    }
+
+    // --with-profile join, lifted into buildHeatAnnotations: per-finding heat_* attribute strings
+    // index-aligned with `outs`, + the root attribute.
+    std::pair<std::vector<std::string>, std::string> heat;   // (heatByFinding, heatJoinedAttr)
+    if( !cfg.withProfile.empty() )
+    {
+        auto joined = buildHeatAnnotations( cfg.withProfile, ing, run.outs, view.enclosing );
+        if( !joined )
+        {
+            return 1;   // refusal already printed — never join nothing silently
+        }
+        heat = std::move( *joined );
+    }
+
+    const std::string lintRootExtra = lintRootExtraAttrs( cfg, view, lintApplicability.inertRuleCount, lintSel );
+    emitLintLegends( cfg, !floors.findingsNext.empty(), ing.crawlSkips.nestRefusedFiles > 0 );
+    // §P8 vocabulary (see src/pageview.h, THE TRUNCATION VOCABULARY, rule 3): --lint ESTABLISHED the
+    // six-attribute paging block that pageDisclosure() now serves to every other paging verb, but its
+    // own hand-rolled copy never grew the capped= bit pageDisclosure emits, so the verb that defined
+    // the shape was the one verb that did not spell it — fixed here by calling the shared helper
+    // instead of hand-rolling a second copy (W3-S: this is also what lets the default byte cap
+    // disclose shown=/capped= on the UNPAGED path, which the old hand-rolled `else` branch could
+    // not do at all). discloseCap=true unconditionally, same as every other default-capped verb
+    // (--impact, --hotspots, …): pageDisclosure only adds the paging half (total=/has_more=/
+    // next_offset=/offset=/limit=) when --limit/--offset was actually given, so an un-paged, un-capped
+    // run (a small corpus under kLintDefaultPayloadBytes) is byte-identical to before this change.
+    // Distinct from findings_capped= below, which is rule 4's FLOOR marker on the total itself.
+    char lintPageBuf[ kPageDisclosureCap ];
+    lintPrintOut( "<lint findings=\"{}\"{}{}{}{}{}>", run.outs.size(),
+                pageDisclosure( lintPageBuf, sizeof( lintPageBuf ), shownCount, run.outs.size(), lintPage.end,
+                               cfg.pageLimit, cfg.pageOffset, /*discloseCap=*/true, kXmlPageSyntax,
+                               /*collectionCapped=*/ floors.anyRuleCapped ),   // H8: a floored rule floors findings=
+                floors.anyRuleCapped ? " findings_capped=\"1\"" + rw::nextAttrXml( floors.findingsNext, "findings_next" ) : std::string(),
+                heat.second, lintRootExtra, view.rootAttr );
+    emitLintRuleTally( cfg, view, run, lintSel, lintPage, lintApplicability.corpusLangs );
+    emitLintFindingRows( view, run.outs, lintPage, heat.first );
+    lintPrintOut( "</lint>" );
+    return 0;
+}
+
+// The lint verb family's dispatcher: --lint-catalog needs no corpus; --match, --pattern and --lint /
+// --lint-rules all ride the shared AST-query pass and annotate each hit with its enclosing symbol, so they
+// share one LintAnswerView and split into their own verbs. nullopt ⇒ none of the family's flags was given.
+std::optional<int> runLint( const MainDispatch& d )
+{
+    const rw::Config& cfg = d.cfg;
     if( cfg.lintCatalog )
     {
         return emitLintCatalog();
     }
-
-    // --match=QUERY (structural search) and --lint (built-in checks) both ride the shared AST-query pass and
-    // annotate each hit with its enclosing symbol — so they share this setup.
-    if( !cfg.match.empty() || !cfg.pattern.empty() || cfg.lint || !cfg.lintRulesDir.empty() )
+    const bool lintFamilyAsked = !cfg.match.empty() || !cfg.pattern.empty() || cfg.lint || !cfg.lintRulesDir.empty();
+    if( !lintFamilyAsked )
     {
-        const LintAnswerView view( cfg, ing );
-        if( !cfg.match.empty() )
-        {
-            return runMatchVerb( cfg, view );
-        }
-        if( !cfg.pattern.empty() )
-        {
-            return runPatternVerb( cfg, view );
-        }
-        const EnclosingSymbolIndex& enclosing = view.enclosing;
-        const auto                  ex        = [ & ]( std::string_view s ) -> std::string { return view.ex( s ); };
-        std::vector<RuleCap> saturatedRules;   // see the RuleCap declaration at file scope for why the key is a PAIR
-        // knob-honesty-068: the per-rule budget this run spends (--lint-max-per-rule=N, else kLintMaxPerRule)
-        const std::size_t    lintMaxPerRule = rw::lintMaxPerRuleOf( cfg.lintMaxPerRule );
-        std::vector<std::string> allRuleNames = builtInLintRuleNames();
-        std::vector<AstMatch> ms;   // combined built-in findings
-        if( cfg.lint )   // built-in [AST] checks only run with --lint; --lint-rules alone emits user findings only
-        {
-            ms = collectBuiltInLintFindings( cfg, ing, enclosing, lintMaxPerRule, saturatedRules, allRuleNames );
-        }
-
-        // LintOut = the unified finding shape so built-in tags and user rule ids emit identically (defined
-        // at file scope, above lintSymbolLevelChecks — dedupeLintFindings shares it). sev is empty for
-        // built-ins (facts, not severities); user findings carry their declared sev=.
-        std::vector<LintOut> outs;  outs.reserve( ms.size() );
-        for( const AstMatch& m : ms )
-        {
-            outs.push_back( { m.fileId, m.startByte, m.line, m.tag, std::string(), m.text } );
-        }
-
-        // --lint-rules=DIR: load user YAML rules and run them through the SAME astQuery engine. Malformed
-        // files alert+skip inside the loader; a bad ts query alert+skips inside astQuery. Exit 1 ONLY if the
-        // flag was given but zero rules loaded (nothing to run = a user mistake worth surfacing).
-        std::vector<LintRule>    userRules;
-        std::vector<std::string> uncompiledUserRuleIds;   // §L10: main query compiled for NO grammar
-        if( !cfg.lintRulesDir.empty() )
-        {
-            userRules = loadLintRules( std::string( cfg.lintRulesDir ) );
-            if( userRules.empty() )
-            {
-                lintPrintErr( "ripwire: --lint-rules={}: no rules loaded\n", cfg.lintRulesDir );
-                return 1;
-            }
-            const auto [ userFindings, saturatedUserRuleIds, uncompiledIds, regexRefused, regexUndecided ] = runLintRules( ing, userRules, lintMaxPerRule );
-            if( refuseUndecidedMatchRegex( "--lint-rules", regexRefused, regexUndecided, undecidedPredicateFirstSite( cfg, ing, regexUndecided ),
-                                           "rules loaded from " + std::string( cfg.lintRulesDir ) + " whose queries carry a #match?/#not-match? predicate: "
-                                               + rulesWithMatchPredicate( userRules ) ) )
-            {
-                return 1;
-            }
-            for( const LintFinding& f : userFindings )
-            {
-                outs.push_back( { f.fileId, f.startByte, f.line, f.id, f.severity, f.message } );
-            }
-            for( const std::string& id : saturatedUserRuleIds )
-            {
-                saturatedRules.push_back( { id, true } );
-            }
-            uncompiledUserRuleIds = uncompiledIds;
-        }
-
-        // --lint-select=PREFIX[,...] / --lint-ignore=PREFIX[,...]: resolved HERE, not in validateConfig,
-        // because a PREFIX can legitimately name a user rule id that --lint-rules=DIR has only just
-        // loaded above. See resolveLintSelection's own header for the pool it validates against.
-        const std::optional<rw::lintcatalog::LintSelection> lintSelOpt = resolveLintSelection( cfg, userRules );
-        if( !lintSelOpt )
-        {
-            return 1;   // refusal already printed
-        }
-        const rw::lintcatalog::LintSelection& lintSel = *lintSelOpt;
-        if( lintSel.active )
-        {
-            outs.erase( std::remove_if( outs.begin(), outs.end(),
-                                        [ & ]( const LintOut& o ) { return !rw::lintcatalog::lintSelectionKeeps( lintSel, o.rule ); } ),
-                       outs.end() );
-        }
-
-        // Final deterministic order over the COMBINED set — see sortLintRows for why the key runs all the
-        // way out to the row's own text.
-        sortLintRows( ing, outs );
-
-        // §P6.1: collapse rows that would render byte-identically (see dedupeLintFindings above for why —
-        // two genuinely different AST captures, e.g. the same magic-number value spelled twice on one line,
-        // can share the same rule/file:line/enclosing-symbol/text because the row carries no column).
-        outs = dedupeLintFindings( ing, std::move( outs ) );
-
-        // W3-S (2026-08-19): E6 found --lint emitting an UNCAPPED payload on a large corpus — 2,037,645 B /
-        // 6,169 findings (~330 B/finding, driven by long single-line minified text=) with no --help promise
-        // ("trims to fit") kept and no way for a caller to see it coming; every other verb in the catalog has
-        // a display default (--hotspots 40, --grep 100, …), --lint alone had none. Measured HERE before
-        // choosing the cap: this repo prints 367,924 B / 3,213 findings (~114 B/finding); a second, larger
-        // polyglot fixture (ripwire's pre-cutover ancestor, 1,033 tracked files) prints 254,445 B / 2,312 findings (~110 B/finding).
-        // kLintDefaultPayloadBytes=100,000 lands an order of magnitude under E6's pathological case while
-        // staying multiples of every other capped verb's default payload on this repo (--hotspots ~5.5 KB,
-        // --clones ~17 KB, --grep(100 hits) ~57 KB) — --lint's own facts are individually smaller so it earns
-        // a bigger budget. An explicit --limit=N always beats it (effectiveRowCap's existing rule), so a
-        // caller who already knew to page past a cap sees no change.
-        static constexpr std::size_t kLintDefaultPayloadBytes = 100000;
-        const bool paging = cfg.pageLimit > 0 || cfg.pageOffset > 0;
-        std::size_t lintDefaultShown = outs.size();
-        if( !paging )
-        {
-            // Byte-budget the default (unpaged) run. Rows are already in final sorted order, so this keeps
-            // the same sorted PREFIX pageWindow() would keep by row count; the stopping rule is bytes here
-            // because a corpus with long text= rows (E6's vendored-bundle case) needs far FEWER rows to reach
-            // the same budget than a corpus of short rows does. text= dominates real row size and is summed
-            // exactly; the flat +80 covers the <f> tag markup, path, rule name and enclosing symbol name,
-            // which are all short in practice — an estimate, not a second full render (that would mean
-            // rendering the very tail this exists to avoid paying for), and one that can only ever be
-            // conservative in the wrong direction (undercounting an unusually long path/rule name by a few
-            // dozen bytes), never by the orders of magnitude that would silently readmit the 2 MB case.
-            std::size_t bytesUsed = 0;
-            lintDefaultShown = 0;
-            for( std::size_t i = 0; i < outs.size(); ++i )
-            {
-                const LintOut& m = outs[i];
-                const Symbol*  e = enclosing( m.fileId, m.startByte );
-                const std::size_t rowBytes = m.text.size() + m.rule.size() + m.sev.size()
-                                            + rootRelPath( ing, m.fileId ).size()   // #228: the row prints p= root-relative, so the cap charges that
-                                            + ( e ? e->name.size() : 0 ) + 80;
-                if( lintDefaultShown > 0 && bytesUsed + rowBytes > kLintDefaultPayloadBytes )
-                {
-                    break;   // the sorted prefix already kept at least one row — stop BEFORE the overflow row
-                }
-                bytesUsed += rowBytes;
-                ++lintDefaultShown;
-            }
-        }
-        const PageWindow lintPage = paging
-                                  ? pageWindow( outs.size(), cfg.pageLimit, cfg.pageOffset )
-                                  : PageWindow{ 0, lintDefaultShown };
-        const std::size_t shownCount = lintPage.end - lintPage.begin;
-
-        // §P0.2 disclosure: which rules (if any) spent their whole per-rule budget, so their count= is a floor.
-        const auto capOf = [ & ]( const std::string& ruleName, bool isUserRule ) -> const RuleCap*
-        {
-            for( const RuleCap& rc : saturatedRules )
-            {
-                if( rc.rule == ruleName && rc.isUserRule == isUserRule )
-                {
-                    return &rc;
-                }
-            }
-            return nullptr;
-        };
-        // H8 (capture-audit 2026-09-04, lens 1 F5): OR over the rules this document EMITS, never over every
-        // rule that saturated. `--lint-select=cache-` used to inherit findings_capped="1" from the UNSELECTED
-        // magic-number rule, so 398 had to be read as a floor when, by the legend's own definition, it was a
-        // total. Same predicate as the tally-row loop below and the SARIF twin (lintRuleEmitted).
-        const auto lintRuleEmitted = [ & ]( const RuleCap& rc ) -> bool
-        {
-            return !lintSel.active || rw::lintcatalog::lintSelectionKeeps( lintSel, rc.rule );
-        };
-        const bool anyRuleCapped = std::any_of( saturatedRules.begin(), saturatedRules.end(), lintRuleEmitted );
-        // knob-honesty-068: the call that counts the floored rules' rest, over the SAME emitted-rules predicate (H8)
-        const std::string findingsNext = lintFindingsNext( cfg, saturatedRules, lintRuleEmitted, lintMaxPerRule );
-        ASSUME( findingsNext.empty() != anyRuleCapped, "findings_next= rides exactly the answers findings_capped=\"1\" floors (one predicate)" );
-
-        // §L7: per-rule LANGUAGE applicability — a rule whose registered languages (lintcatalog.h) never
-        // intersect the corpus' own languages is not "measured zero", it is structurally inert here.
-        // Applicability is per-LANGUAGE granularity (does the corpus contain ANY file of a language this
-        // rule's grammar could ever satisfy), never per-file-content — a rule can be "applicable" and
-        // still find nothing. See computeLintApplicability's own header for why it lives outside this function.
-        const LintApplicability lintApplicability = computeLintApplicability( ing, cfg.lint, allRuleNames, userRules, lintSel );
-        const std::uint32_t     corpusLangs        = lintApplicability.corpusLangs;
-        const std::size_t       inertRuleCount      = lintApplicability.inertRuleCount;
-
-        // --sarif: `outs` re-serialized as SARIF instead of the native XML below (emitRunLintSarif above).
-        // validateConfig already refused this alongside --match / --with-profile / paging.
-        if( cfg.sarif )
-        {
-            emitRunLintSarif( d, allRuleNames, userRules, saturatedRules, outs, lintSel, corpusLangs, enclosing );
-            return 0;
-        }
-
-        // --with-profile join, lifted into buildHeatAnnotations (runLint was already the file's largest
-        // verb): per-finding heat_* attribute strings index-aligned with `outs`, + the root attribute.
-        std::vector<std::string> heatByFinding;
-        std::string              heatJoinedAttr;
-        if( !cfg.withProfile.empty() )
-        {
-            auto heat = buildHeatAnnotations( cfg.withProfile, ing, outs, enclosing );
-            if( !heat )
-            {
-                return 1;   // refusal already printed — never join nothing silently
-            }
-            heatByFinding  = std::move( heat->first );
-            heatJoinedAttr = std::move( heat->second );
-        }
-
-        // §L7 root disclosure: inert_rules= (only when >0 — same "absent = nothing to say" convention as
-        // findings_capped=) and, only when --lint-select/--lint-ignore were given, selected="K of N" plus
-        // the raw select=/ignore= you passed, so a filtered zero is never confusable with an unfiltered one.
-        std::string lintRootExtra;
-        if( inertRuleCount > 0 )
-        {
-            lintRootExtra += std::format( " inert_rules=\"{}\"", inertRuleCount );
-        }
-        if( lintSel.active )
-        {
-            lintRootExtra += std::format( " selected=\"{} of {}\"", lintSel.selectedCount, lintSel.totalCount );
-            if( !cfg.lintSelect.empty() )
-            {
-                lintRootExtra += " select=\"" + ex( cfg.lintSelect ) + "\"";
-            }
-            if( !cfg.lintIgnore.empty() )
-            {
-                lintRootExtra += " ignore=\"" + ex( cfg.lintIgnore ) + "\"";
-            }
-        }
-        // capture-audit 2026-09-04 (M16): a modifier's effect is stamped on the root the way --lint-select's
-        // selected=/select= is — `--lint --naming-locals` moved the count 3717 -> 4898 on this repo with no
-        // attribute saying why. Absent when the modifier is off (absent = nothing to say, as with inert_rules=).
-        if( cfg.namingLocals )
-        {
-            lintRootExtra += " naming_locals=\"1\"";
-        }
-        // #157 (CodeRabbit on #331): the rule walk is astQueryGrouped, which skips every file ingest's nesting guard
-        // refused — the same skip --match and --pattern disclose as nest_refused=, and the one the --skipped legend
-        // says all three share. Without it here a refused .kt file vanished from every rule's count with no trace.
-        // Absent when 0, like inert_rules=, so every lint answer over a corpus with no refusal is byte-identical.
-        const bool lintNestRefused = ing.crawlSkips.nestRefusedFiles > 0;
-        if( lintNestRefused )
-        {
-            lintRootExtra += std::format( " nest_refused=\"{}\"", ing.crawlSkips.nestRefusedFiles );
-        }
-
-        // §P8 collision, documented not renamed — see the --grep legend above for the full reasoning.
-        lintPrintOut( "<!-- ripwire lint: [AST]-only checks (descriptive facts, not gates). rule=the check; sev=user-rule severity; "
-                    "in=enclosing symbol NAME (the same spelling is a fan-in COUNT in for/pack-task/exemplar). "
-                    "A rule named atom-X is an atom of confusion (Gopstein, FSE 2017): a C-family shape that misleads READERS, C/C++/ObjC/CUDA only. "
-                    "Each rule is scanned under its OWN match budget, so no rule is ever starved by a noisier one. "
-                    "A rule that spends its whole budget carries count_capped=\"1\" — its count= is then a FLOOR (that rule's raw captures reached the "
-                    "per-rule budget; only its own matches can cap it); findings_capped=\"1\" on the root ⇒ at least one PRINTED rule row is a "
-                    "floor (never inherited from a rule lint-select/lint-ignore dropped), and the root then also carries counts_floor=\"1\" "
-                    "and capped=\"1\": findings= and total= are floors, rows exist that no page holds. "
-                    "Absent = nothing was capped and every count= is a total. raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). "
-                    "On the root, shown=/capped= are the ROW-COUNT pair (rows printed vs whether the DEFAULT payload byte-cap trimmed "
-                    "them, absent an explicit limit=) — a different fact from the per-rule count_capped=\"1\" above, which is a MATCH-BUDGET "
-                    "floor on one rule's own count=; findings= is the true total unless findings_capped=\"1\" floors it. "
-                    "A rule row's applicable=\"0\" ⇒ NONE of its registered languages (the lint-catalog listing) are present in this "
-                    "corpus at all — its count=\"0\" is structural inertness, never a measurement; the root's inert_rules=N tallies "
-                    "how many printed rows that is true for. lint-select=/lint-ignore=PREFIX[,...] narrow the printed rows to a "
-                    "family (e.g. cache-); the root then carries selected=\"K of N\" plus the raw select=/ignore= you passed. "
-                    "naming_locals=\"1\" on the root ⇒ the opt-in naming-locals modifier was on (the naming-* rules also read local "
-                    "variables inside already-flagged functions); absent ⇒ off, and the naming-* counts cover declarations only. "
-                    "Each rule row's own shown_rows=/rows_capped= is how many of THAT rule's rows fall inside the printed <f> window "
-                    "(the root's shown=/capped= trims a SORTED PREFIX of the combined findings, so a rule whose rows all sort past the "
-                    "cut carries shown_rows=\"0\" rows_capped=\"1\" while its count= stays the true total — never confuse a capped-away "
-                    "rule with one that measured zero); this is a DIFFERENT fact from the row's own count_capped=\"1\" above (that rule's "
-                    "own raw-capture stream hit its per-rule match budget) — the two can disagree on the same row. "
-                    "A lint-rules row's compiled=\"0\" ⇒ that rule's tree-sitter QUERY failed to compile for every linked grammar (a "
-                    "malformed or misspelled pattern) — its count=\"0\" never ran at all, a different claim from applicable=\"0\" above "
-                    "(a well-formed query whose declared language just is not in this corpus) and from an ordinary count=\"0\" (a "
-                    "well-formed query that ran and found nothing); absent ⇒ the query compiled. -->" );
-        if( !findingsNext.empty() )
-        {
-            // present-only (absent ⇒ nothing floored), like the nest_refused= clause below; compactlegend.h restates it
-            lintPrintOut( "<!-- lint findings_next= on the root is the one call that counts the floored rules' rest: only the rules "
-                        "that carry count_capped=\"1\", under a 10x per-rule budget (the lint-max-per-rule flag; the default budget is a "
-                        "runaway guard, not a target); a re-run still floored names its own. -->" );
-        }
-        if( lintNestRefused )
-        {
-            lintPrintOut( "<!-- lint nest_refused= on the root counts corpus files a pre-parse nesting guard refused before any rule's walk "
-                        "could reach them, so no count= includes them; the count is corpus-wide, not narrowed to a language any rule here "
-                        "declares, so some of it was never going to be read by lint regardless; see the skipped verb's why=\"nest-refused\" "
-                        "rows for which. -->" );
-        }
-        if( !cfg.withProfile.empty() )
-        {
-            lintPrintOut( "<!-- with-profile: heat_* on a finding = MEASURED inclusive totals of the joined #PROF_TSV scope — the nearest "
-                        "PROFILE_SCOPE site at/above the finding inside its own enclosing symbol. Columns are whatever counter tier the "
-                        "profiled run armed; an ABSENT heat column was not measured, never zero. heat_joined= on the root counts annotated "
-                        "findings; 0 is honest (no finding sits inside a profiled scope), never an error. -->" );
-        }
-        {
-            // §P8 vocabulary (see src/pageview.h, THE TRUNCATION VOCABULARY, rule 3): --lint ESTABLISHED the
-            // six-attribute paging block that pageDisclosure() now serves to every other paging verb, but its
-            // own hand-rolled copy never grew the capped= bit pageDisclosure emits, so the verb that defined
-            // the shape was the one verb that did not spell it — fixed here by calling the shared helper
-            // instead of hand-rolling a second copy (W3-S: this is also what lets the new default byte cap
-            // above disclose shown=/capped= on the UNPAGED path, which the old hand-rolled `else` branch could
-            // not do at all). discloseCap=true unconditionally, same as every other default-capped verb
-            // (--impact, --hotspots, …): pageDisclosure only adds the paging half (total=/has_more=/
-            // next_offset=/offset=/limit=) when --limit/--offset was actually given, so an un-paged, un-capped
-            // run (a small corpus under kLintDefaultPayloadBytes) is byte-identical to before this change.
-            // Distinct from findings_capped= below, which is rule 4's FLOOR marker on the total itself.
-            char lintPageBuf[ kPageDisclosureCap ];
-            lintPrintOut( "<lint findings=\"{}\"{}{}{}{}{}>", outs.size(),
-                        pageDisclosure( lintPageBuf, sizeof( lintPageBuf ), shownCount, outs.size(), lintPage.end,
-                                       cfg.pageLimit, cfg.pageOffset, /*discloseCap=*/true, kXmlPageSyntax,
-                                       /*collectionCapped=*/ anyRuleCapped ),   // H8: a floored rule floors findings=
-                        anyRuleCapped ? " findings_capped=\"1\"" + rw::nextAttrXml( findingsNext, "findings_next" ) : std::string(),
-                        heatJoinedAttr, lintRootExtra, view.rootAttr );
-        }
-        if( cfg.lint )
-        { // built-in per-rule tally (order → deterministic)
-            for( const std::string& rn : allRuleNames )
-            {
-                if( lintSel.active && !rw::lintcatalog::lintSelectionKeeps( lintSel, rn ) )
-                { // deselected — no row at all, so it can never look like a checked-and-empty rule
-                    continue;
-                }
-                const RuleTally rt = tallyLintRule( outs, rn, /*wantSevEmpty=*/true, lintPage );
-                const rw::lintcatalog::LintCatalogRow* catRow = rw::lintcatalog::lintCatalogFind( rn );
-                const bool applicable = catRow == nullptr || ( catRow->langMask & corpusLangs ) != 0;
-                printLintRuleTallyRow( rn, nullptr, rt.count, rt.shown, capOf( rn, false ) != nullptr, applicable );
-            }
-        }
-        for( const LintRule& r : userRules )                          // user per-rule tally (declaration order → deterministic)
-        {
-            if( lintSel.active && !rw::lintcatalog::lintSelectionKeeps( lintSel, r.id ) )
-            {
-                continue;
-            }
-            const RuleTally rt = tallyLintRule( outs, r.id, /*wantSevEmpty=*/false, lintPage );
-            const bool  applicable = ( rw::langBit( r.lang ) & corpusLangs ) != 0;
-            const bool  compiled   = std::find( uncompiledUserRuleIds.begin(), uncompiledUserRuleIds.end(), r.id ) == uncompiledUserRuleIds.end();
-            const std::string sevEx = ex( r.severity );
-            printLintRuleTallyRow( ex( r.id ), &sevEx, rt.count, rt.shown, capOf( r.id, true ) != nullptr, applicable, compiled );
-        }
-        for( std::size_t findingIndex = lintPage.begin; findingIndex < lintPage.end; ++findingIndex )
-        {
-            const LintOut&          m  = outs[ findingIndex ];
-            const Symbol*           e  = enclosing( m.fileId, m.startByte );
-            const std::string_view  rp = view.rowPath( m.fileId );
-            if( m.sev.empty() )
-            { // built-in finding — unchanged shape (no sev=)
-                lintPrintOut( "<f rule=\"{}\" p=\"{}:{}\" in=\"{}\"{}>", ex( m.rule ), ex( rp ), m.line, e ? ex( e->name ) : "",
-                            heatByFinding.empty() ? std::string() : heatByFinding[ findingIndex ] );
-            }
-            else
-            { // user finding — carries sev=
-                lintPrintOut( "<f rule=\"{}\" sev=\"{}\" p=\"{}:{}\" in=\"{}\"{}>", ex( m.rule ), ex( m.sev ), ex( rp ), m.line, e ? ex( e->name ) : "",
-                            heatByFinding.empty() ? std::string() : heatByFinding[ findingIndex ] );
-            }
-            emitEscapedText( m.text );
-            lintPrintOut( "</f>" );
-        }
-        lintPrintOut( "</lint>" );
-        return 0;
+        return std::nullopt;
     }
-    return std::nullopt;
+    const LintAnswerView view( cfg, d.ing );
+    if( !cfg.match.empty() )
+    {
+        return runMatchVerb( cfg, view );
+    }
+    if( !cfg.pattern.empty() )
+    {
+        return runPatternVerb( cfg, view );
+    }
+    return runLintVerb( d, view );
 }
 
 }   // namespace — verbs_lint.h section of main.cpp
