@@ -39,7 +39,8 @@ PIN="$ROOT/test/qschemetrip.hash"
 #   kIngestParserVerMirror 317/331 -> 332 (rich 333): ONE number above BOTH sides' bumps, so a cache either side's
 #   binary wrote is refused. kCacheVersion and kQSnapCacheScheme unchanged: the extraction key moves, the snapshot
 #   blob shape does not. Both merged sides' entries are kept below, newest first (INT1's 2026-11-19, then main's
-#   2026-11-18 train 1117d1 block). Hash: see test/qschemetrip.hash (neither side's value can be right for 332).
+#   2026-11-18 train 1117d1 block). Hash 0a4ba8ec92…6dc0274, re-pinned from the merged build: neither side's
+#   value (main's c1fefa06b4…f246ff2, INT1's 52505b79f1…2dd4dcbf) can be right once kParserVer moves to 332.
 # 2026-11-19, INT1 (the 0.7.0 candidate, integration/070-candidate: lane/rt2-route + main d65f60c6d + lane BX2 minus FIX 2):
 #   RE-PINNED ONCE with UPDATE_GOLDEN=1 on the merged tree. kParserVer and kIngestParserVerMirror 313 -> 317 (rich 318): ONE
 #   number for BX2's two parser members, above main's 313/314 (TRAIN-1117b, below) and above both BX2 placeholders (313 and
