@@ -93,10 +93,12 @@ inline constexpr bool facetGatesOnAnyOrigin( Facet f ) noexcept
     return f == Facet::FormatArity;
 }
 
-// The facets whose row names its SITE (p= the site's line, plus call= / why=), not the enclosing definition.
+// The facets whose row names its SITE (p= the site's line, plus call= / why=), not the enclosing definition: one bit
+// per facet.
+inline constexpr unsigned kSiteFacetBits = ( 1u << static_cast<unsigned>( Facet::UncheckedStatus ) ) | ( 1u << static_cast<unsigned>( Facet::UnhandledArm ) );
 inline constexpr bool facetNamesSite( Facet f ) noexcept
 {
-    return f == Facet::UncheckedStatus || f == Facet::UnhandledArm;
+    return ( ( kSiteFacetBits >> static_cast<unsigned>( f ) ) & 1u ) != 0;
 }
 
 struct Site

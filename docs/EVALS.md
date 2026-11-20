@@ -6247,7 +6247,16 @@ shell `case` with no `*)` arm that ends its function with `return`/`echo`/`print
 `esac` (not a case over the literal list of the `for` loop it sits in); a Python if/elif chain or `match` that ends a
 value-returning function with no `else` (members of an `Enum` the file defines are checked for coverage). `p=` is the
 switch's line, `why=` names what is left out, and because the site text names the missing enumerators, appending one
-to an enum gives a row on each switch it leaves incomplete. UA_MEASURED
+to an enum gives a row on each switch it leaves incomplete. Measured 2026-11-20 (lane QD-UNHANDLED-ARM) with
+an empty-baseline census, where every site is new, on tmux, envoy/source, textual and this tree. The run found 0, 0, 0 and 9 rows,
+and every other row was byte-identical to the ebf7240f3 binary. All 9 are shell lookup tables in `test/` whose callers loop over
+the listed values: the shape is real in all 9 and none is a live bug. One is worth hardening: `budgetFor` would give an empty
+budget to a verb added to its loop without an arm. C/C++ rows are rare because this tree builds with `-Werror=switch` and
+tmux/envoy switches carry `default:`. The facet's reach is the change that makes a switch incomplete. Recall: mining 1,500
+shell/Python commits of this tree, 4,000 tmux C commits and 3,000 textual commits found no fix commit that added a missing arm
+to a result-giving switch/case/chain. Recall is therefore the synthetic replay in `test/defectshapecheck.sh` (C++, Python and
+shell fixes reversed give 3 of 3 rows, and an appended enumerator gives the row on an untouched switch). A row costs 200-226 B
+(mean 212). The compact legend adds 16 B to every --quality-delta answer (the facet name), and 195 B when a row is present.
 Two format-arity floors (a delta review, 2026-10-08; 0 hits on the three corpora above): the macro skip sees a name this
 file `#define`s and a function-like macro the tree defines, not a lower-case object-like macro defined only in another
 file; and only a literal `#if 0` is skipped, so `#if false`, `#if (0)`, `#if 0 && …` and the `#else` of `#if 1` are
