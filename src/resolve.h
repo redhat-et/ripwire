@@ -5519,20 +5519,26 @@ struct TsImportExtras
     std::uint64_t extendsUnread   = 0;   // configs with an unread base that could have changed an answer (tsconfig_unread=)
 };
 
-// #220 part 2: one bare TS/JS specifier `importerFileId` wrote, through the project's own config (tsimport::ImportResolver,
-// built here on first use over `fileIndex`, whose keys are lexicalNormalize( rootRelPath ) like buildPreciseIncludeAdj's).
+// The project-config resolver of bare TS/JS specifiers (tsimport::ImportResolver), built on the first one that reaches it,
+// so a tree without one reads no config file. `fileIndex` keys are lexicalNormalize( rootRelPath ), as buildPreciseIncludeAdj's.
+struct BareTsResolver
+{
+    const IngestResult&                        ing;
+    const HashMap<std::string, std::uint32_t>& fileIndex;
+    std::optional<tsimport::ImportResolver>    resolver;
+};
+
+// #220 part 2: one bare TS/JS specifier `importerFileId` wrote, through the project's own config.
 // Multi-root: an answer in another root is not evidence (joinNormalizeLookup's rule 1), so it stays unresolved.
 // The ONE resolution of such a specifier: the file edge (resolveBareTsImport) and the named-import binder (#711, graph.h
 // resolveJsImportModule: a tsconfig `paths` alias `@/x` pins the call as a relative import does) both read it.
-inline tsimport::Outcome resolveBareTsSpecifier( const IngestResult& ing, const HashMap<std::string, std::uint32_t>& fileIndex,
-                                                 std::optional<tsimport::ImportResolver>& resolver, const WsIncludeCtx* ws,
-                                                 std::uint32_t importerFileId, std::string_view spec )
+inline tsimport::Outcome resolveBareTsSpecifier( BareTsResolver& bare, const WsIncludeCtx* ws, std::uint32_t importerFileId, std::string_view spec )
 {
-    if( !resolver )
+    if( !bare.resolver )
     {
-        resolver.emplace( ing, fileIndex );
+        bare.resolver.emplace( bare.ing, bare.fileIndex );
     }
-    tsimport::Outcome o = resolver->resolve( lexicalNormalize( rootRelPath( ing, importerFileId ) ), spec );
+    tsimport::Outcome o = bare.resolver->resolve( lexicalNormalize( rootRelPath( bare.ing, importerFileId ) ), spec );
     if( o.file != kNoFile && ws != nullptr && ( *ws->fileRoot )[ o.file ] != ( *ws->fileRoot )[ importerFileId ] )
     {
         o = { kNoFile, tsimport::Verdict::InRepoUnresolved };
@@ -5542,11 +5548,10 @@ inline tsimport::Outcome resolveBareTsSpecifier( const IngestResult& ing, const 
 
 // The file edge of one bare TS/JS specifier the relative branch left unresolved: resolveBareTsSpecifier's target or
 // kNoFile, with its verdict tallied.
-inline std::uint32_t resolveBareTsImport( const IngestResult& ing, const HashMap<std::string, std::uint32_t>& fileIndex,
-                                          std::optional<tsimport::ImportResolver>& resolver, const WsIncludeCtx* ws,
-                                          const Include& inc, std::uint64_t* unresolvedOut, TsImportExtras* extrasOut )
+inline std::uint32_t resolveBareTsImport( BareTsResolver& bare, const WsIncludeCtx* ws, const Include& inc, std::uint64_t* unresolvedOut,
+                                          TsImportExtras* extrasOut )
 {
-    const tsimport::Outcome o = resolveBareTsSpecifier( ing, fileIndex, resolver, ws, inc.fileId, inc.target );
+    const tsimport::Outcome o = resolveBareTsSpecifier( bare, ws, inc.fileId, inc.target );
     if( o.verdict == tsimport::Verdict::InRepoUnresolved && unresolvedOut != nullptr )
     {
         ++*unresolvedOut;
@@ -5690,7 +5695,7 @@ inline std::pair<rw::FileAdjacency, WsIncludeCtx> buildPreciseIncludeAdjWithCont
     const RubyConstantIndex                   rubyConsts    = buildRubyConstantIndex( ing );   // parser version 82; empty unless a symbolic directive exists
     HashMap<std::string, std::pair<std::uint32_t, std::uint32_t>> rubyMemo;
 
-    std::optional<tsimport::ImportResolver> tsResolver;   // #220: built on the first bare TS/JS specifier that missed
+    BareTsResolver tsResolver{ ing, fileIndex, std::nullopt };   // #220: built on the first bare TS/JS specifier that missed
     // #478 gap 1: a from-import member's submodule is a DEPENDENCY of the file and every dependency view keeps it, but it is not
     // import evidence for a bare call — `from pkg import mod` makes no name of mod visible unqualified — so, like an
     // Include::isValueUse record, buildGraph's call narrow (forCallNarrow) leaves it out and the call graph is unchanged.
@@ -5768,7 +5773,7 @@ inline std::pair<rw::FileAdjacency, WsIncludeCtx> buildPreciseIncludeAdjWithCont
         }
         if( to == kNoFile && tsimport::isBareTsSpecifier( includerPath, inc.target ) )
         {
-            to = resolveBareTsImport( ing, fileIndex, tsResolver, ws, inc, importsUnresolvedOut, extrasOut );
+            to = resolveBareTsImport( tsResolver, ws, inc, importsUnresolvedOut, extrasOut );
         }
         if( to != kNoFile && to != inc.fileId )   // unresolved or self-include → contributes nothing
         {
@@ -5798,7 +5803,7 @@ inline std::pair<rw::FileAdjacency, WsIncludeCtx> buildPreciseIncludeAdjWithCont
     }
     if( extrasOut != nullptr )
     {
-        *extrasOut = TsImportExtras{ extrasOut->declarationOnly, tsResolver ? tsResolver->extendsUnread() : 0 };
+        *extrasOut = TsImportExtras{ extrasOut->declarationOnly, tsResolver.resolver ? tsResolver.resolver->extendsUnread() : 0 };
     }
     if( rootNarrowOut != nullptr && !rootFrom.empty() )
     {
