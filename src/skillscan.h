@@ -1169,7 +1169,7 @@ struct SkillLineFence
 };
 
 // GE-SKILLSCAN: the markdown fence tracker scanSkillTextOn walks the body with — which fenced block the scan is inside, changed
-// only by its two named transitions. readLine answers a line's membership as the state BEFORE its own marker toggles anything,
+// only by its two named transitions (enterFence, leaveFence). readLine answers a line's membership as the state BEFORE its own marker toggles anything,
 // so the lines BETWEEN the ``` markers read inFence, the opening marker reads false and the closing one true.
 class SkillFenceTracker
 {
@@ -1189,11 +1189,11 @@ public:
         {
             if( !m_state.inFence )
             {
-                open( line.substr( 3 ) );
+                enterFence( line.substr( 3 ) );
             }
             else
             {
-                close();
+                leaveFence();
             }
         }
         return membership;
@@ -1201,13 +1201,13 @@ public:
 
 private:
     // Opening a new fence: its language tag (the text after the marker) decides example vs live.
-    void open( std::string_view langTag ) noexcept
+    void enterFence( std::string_view langTag ) noexcept
     {
         m_state.inExampleFence = isExampleFenceLang( langTag );
         m_state.inFence        = true;
     }
     // Closing the current fence.
-    void close() noexcept
+    void leaveFence() noexcept
     {
         m_state = SkillLineFence{};
     }
