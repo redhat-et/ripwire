@@ -51,6 +51,9 @@
 #include <vector>
 #include <charconv>
 #include <iterator>
+#include <optional>
+#include <utility>
+#include <span>
 #include <system_error>
 
 #include <cctype>
@@ -4791,13 +4794,7 @@ inline std::vector<detail::EnumDef> cEnumsOf( std::string_view src )
 class EnumTable
 {
 public:
-    void add( std::vector<detail::EnumDef>&& defs )
-    {
-        for( detail::EnumDef& d : defs )
-        {
-            defs_.push_back( std::move( d ) );
-        }
-    }
+    void add( std::vector<detail::EnumDef>&& defs ) { defs_.insert( defs_.end(), std::make_move_iterator( defs.begin() ), std::make_move_iterator( defs.end() ) ); }
     void seal()
     {
         byMember_.clear();
@@ -5051,20 +5048,6 @@ inline std::vector<std::string> missingEnumerators( const SwitchArms& arms, cons
     return missing;
 }
 
-// Does `text` hold `w` as a whole identifier (not inside a longer one)?
-inline bool holdsWord( std::string_view text, std::string_view w ) noexcept
-{
-    for( std::size_t i = text.find( w ); !w.empty() && i != std::string_view::npos; i = text.find( w, i + 1 ) )
-    {
-        const std::size_t e = i + w.size();
-        if( ( i == 0 || !isIdentChar( text[i - 1] ) ) && ( e >= text.size() || !isIdentChar( text[e] ) ) )
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
 // A comment in [b, e) that states the omission: falling through on purpose, not handled, ignored, or an omitted
 // enumerator by name. Raw bytes: the lexer drops comments.
 inline bool commentStatesOmission( std::string_view src, std::size_t b, std::size_t e, const std::vector<std::string>& missing )
@@ -5083,7 +5066,7 @@ inline bool commentStatesOmission( std::string_view src, std::size_t b, std::siz
         std::ranges::transform( lower, lower.begin(), []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
         const bool phrase = std::any_of( kPhrases.begin(), kPhrases.end(), [ & ]( std::string_view p ) { return lower.find( p ) != std::string::npos; } );
         const bool names  = std::any_of( missing.begin(), missing.end(), [ & ]( const std::string& m )
-                                         { return holdsWord( text, std::string_view( m ).substr( m.rfind( ':' ) == std::string::npos ? 0 : m.rfind( ':' ) + 1 ) ); } );
+                                         { return rw::namesplit::containsWordBoundedBy( text, std::string_view( m ).substr( m.rfind( ':' ) == std::string::npos ? 0 : m.rfind( ':' ) + 1 ), isIdentChar ); } );
         if( phrase || names )
         {
             return true;
@@ -5445,9 +5428,17 @@ inline bool pyBodyStatesNone( std::string_view src, const std::vector<Tok>& toks
     return false;
 }
 
-// One function span: its trailing chain, when every arm returns and nothing names the value it leaves out.
-inline void scanUnhandledArmPyFunction( std::string_view src, const std::vector<Tok>& toks, std::size_t from, std::size_t to, const std::vector<Span>& inner,
-                                        const std::vector<PyEnum>& enums, std::vector<Site>& out )
+// The tokens of span `sp`: [first, last) indices into `toks` (sorted by byte).
+inline std::pair<std::size_t, std::size_t> tokRangeOf( const std::vector<Tok>& toks, const Span& sp )
+{
+    const auto first = std::lower_bound( toks.begin(), toks.end(), sp.begin, []( const Tok& t, std::uint32_t b ) { return t.begin < b; } );
+    const auto last  = std::lower_bound( toks.begin(), toks.end(), sp.end, []( const Tok& t, std::uint32_t b ) { return t.begin < b; } );
+    return { static_cast<std::size_t>( first - toks.begin() ), static_cast<std::size_t>( last - toks.begin() ) };
+}
+
+// The body of a value-returning def in [from, to): the token after its header's newline, or `to` when there is no
+// def, it is a one-liner, its return is annotated None/Optional, or its body states None itself.
+inline std::size_t pyValuedBodyOf( std::string_view src, const std::vector<Tok>& toks, std::size_t from, std::size_t to, const std::vector<Span>& inner )
 {
     std::size_t d = from;
     while( d < to && !tokIs( src, toks[d], "def" ) )
@@ -5456,7 +5447,7 @@ inline void scanUnhandledArmPyFunction( std::string_view src, const std::vector<
     }
     if( d + 2 >= to || !tokIs( src, toks[d + 2], "(" ) )
     {
-        return;
+        return to;
     }
     const std::size_t sigClose = matchClose( src, toks, d + 2 );
     const std::size_t colon    = sigClose < to ? pyHeaderColon( src, toks, sigClose + 1, to ) : toks.size();
@@ -5464,14 +5455,16 @@ inline void scanUnhandledArmPyFunction( std::string_view src, const std::vector<
                                                             [ & ]( const Tok& t ) { return tokIs( src, t, "None" ) || tokIs( src, t, "Optional" ); } );
     if( colon + 2 >= to || !tokIs( src, toks[colon + 1], "\n" ) || noneAnnotated || pyBodyStatesNone( src, toks, colon + 2, to, inner ) )
     {
-        return;
+        return to;
     }
-    const PyChain ch = pyTrailingChain( src, toks, colon + 2, to );
-    if( ch.arms.size() < 2 )
-    {
-        return;
-    }
-    std::string          subject = ch.isMatch ? joinTokens( src, toks, ch.head + 1, pyHeaderColon( src, toks, ch.head, to ) - 1 ) : std::string();
+    return colon + 2;
+}
+
+// The constants a chain's arms test, when every arm ends in a return or raise, one at least returns a value, and each
+// test compares `subject` (an if chain fills it from its first test) with a constant of one kind (literals, or one
+// Enum's members); empty otherwise (a guard, a capture or class pattern, a test that is no such comparison).
+inline std::vector<PyConst> pyChainConsts( std::string_view src, const std::vector<Tok>& toks, const PyChain& ch, std::size_t to, std::string& subject )
+{
     std::vector<PyConst> consts;
     bool                 valued = false;
     for( const std::size_t a : ch.arms )
@@ -5479,7 +5472,7 @@ inline void scanUnhandledArmPyFunction( std::string_view src, const std::vector<
         const std::size_t c = pyHeaderColon( src, toks, a, to );
         if( c >= to || c == a + 1 || !pyArmEnds( src, toks, c, to, pyCol( src, toks[a] ), valued ) )
         {
-            return;
+            return {};
         }
         for( const ArgRange& part : pySplitAt( src, toks, a + 1, c - 1, ch.isMatch ? "|" : "or" ) )
         {
@@ -5491,7 +5484,7 @@ inline void scanUnhandledArmPyFunction( std::string_view src, const std::vector<
                                          : pyCompareOf( src, toks, part.first, part.last, subject, consts ) );
             if( !ok )
             {
-                return;   // a guard, a capture or class pattern, a test that is not a comparison with a constant
+                return {};
             }
         }
     }
@@ -5499,8 +5492,16 @@ inline void scanUnhandledArmPyFunction( std::string_view src, const std::vector<
     const bool sameEnum = std::all_of( consts.begin(), consts.end(), [ & ]( const PyConst& c ) { return c.enumName == enumName; } );
     if( !valued || !sameEnum )
     {
-        return;
+        return {};
     }
+    return consts;
+}
+
+// The site text and why= of a chain over `consts` that falls off its function: an Enum's members with no arm, or the
+// constants an unmatched value falls past. Empty text when the arms cover the set (True and False, every member) or
+// the Enum is defined in another file (its members are not known here).
+inline std::pair<std::string, std::string> pyUnhandledOutcome( bool isMatch, std::string_view subject, const std::vector<PyConst>& consts, const std::vector<PyEnum>& enums )
+{
     std::vector<std::string> named;
     for( const PyConst& c : consts )
     {
@@ -5509,45 +5510,66 @@ inline void scanUnhandledArmPyFunction( std::string_view src, const std::vector<
     rw::sortutil::sortUnique( named );
     if( std::binary_search( named.begin(), named.end(), "True", rw::sortutil::svLess ) && std::binary_search( named.begin(), named.end(), "False", rw::sortutil::svLess ) )
     {
-        return;   // True and False: the whole set
+        return {};
     }
-    std::string text = ( ch.isMatch ? "match " : "if " ) + subject + " in";
+    std::string text = ( isMatch ? "match " : "if " ) + std::string( subject ) + " in";
     for( const std::string& n : named )
     {
         text += " " + n;
     }
-    std::string why;
-    if( !enumName.empty() )
+    const std::string_view enumName = consts[0].enumName;
+    if( enumName.empty() )
     {
-        const PyEnum* e = rw::findByField( enums, &PyEnum::name, enumName );
-        if( e == nullptr )
-        {
-            return;   // an enum defined elsewhere: its members are not known here
-        }
-        std::vector<std::string> missing;
-        for( const std::string_view m : e->members )
-        {
-            if( std::none_of( consts.begin(), consts.end(), [ & ]( const PyConst& c ) { return c.member == m; } ) )
-            {
-                missing.push_back( std::string( enumName ) + "." + std::string( m ) );
-            }
-        }
-        if( missing.empty() )
-        {
-            return;   // every member has an arm
-        }
-        text += " missing";
-        for( const std::string& m : missing )
-        {
-            text += " " + m;
-        }
-        why = "no else: returns None for " + capList( missing );
+        return { std::move( text ), "no else: returns None for a value other than " + capList( named ) };
     }
-    else
+    const PyEnum* e = rw::findByField( enums, &PyEnum::name, enumName );
+    if( e == nullptr )
     {
-        why = "no else: returns None for a value other than " + capList( named );
+        return {};
     }
-    out.push_back( { Facet::UnhandledArm, toks[ch.head].begin, std::move( text ), {}, std::move( why ) } );
+    std::vector<std::string> missing;
+    for( const std::string_view m : e->members )
+    {
+        if( std::none_of( consts.begin(), consts.end(), [ & ]( const PyConst& c ) { return c.member == m; } ) )
+        {
+            missing.push_back( std::string( enumName ) + "." + std::string( m ) );
+        }
+    }
+    if( missing.empty() )
+    {
+        return {};
+    }
+    text += " missing";
+    for( const std::string& m : missing )
+    {
+        text += " " + m;
+    }
+    return { std::move( text ), "no else: returns None for " + capList( missing ) };
+}
+
+// One function span: its trailing chain's site, when every arm returns and nothing names the value it leaves out.
+inline std::optional<Site> unhandledArmPyFunction( std::string_view src, const std::vector<Tok>& toks, const Span& fn, const std::vector<Span>& inner,
+                                                   const std::vector<PyEnum>& enums )
+{
+    const auto [ from, to ] = tokRangeOf( toks, fn );
+    const std::size_t body  = pyValuedBodyOf( src, toks, from, to, inner );
+    const PyChain     ch    = body < to ? pyTrailingChain( src, toks, body, to ) : PyChain{};
+    if( ch.arms.size() < 2 )
+    {
+        return std::nullopt;
+    }
+    std::string                subject = ch.isMatch ? joinTokens( src, toks, ch.head + 1, pyHeaderColon( src, toks, ch.head, to ) - 1 ) : std::string();
+    const std::vector<PyConst> consts  = pyChainConsts( src, toks, ch, to, subject );
+    if( consts.empty() )
+    {
+        return std::nullopt;
+    }
+    auto [ text, why ] = pyUnhandledOutcome( ch.isMatch, subject, consts, enums );
+    if( text.empty() )
+    {
+        return std::nullopt;
+    }
+    return Site{ Facet::UnhandledArm, toks[ch.head].begin, std::move( text ), {}, std::move( why ) };
 }
 
 inline void scanUnhandledArmPython( std::string_view src, const std::vector<Tok>& toks, const std::vector<Span>& fnSpans, std::vector<Site>& out )
@@ -5555,11 +5577,12 @@ inline void scanUnhandledArmPython( std::string_view src, const std::vector<Tok>
     const std::vector<PyEnum> enums = pyEnumsOf( src, toks );
     for( const Span& sp : fnSpans )
     {
-        const auto first = std::lower_bound( toks.begin(), toks.end(), sp.begin, []( const Tok& t, std::uint32_t b ) { return t.begin < b; } );
-        const auto last  = std::lower_bound( toks.begin(), toks.end(), sp.end, []( const Tok& t, std::uint32_t b ) { return t.begin < b; } );
         std::vector<Span> inner;
         std::copy_if( fnSpans.begin(), fnSpans.end(), std::back_inserter( inner ), [ & ]( const Span& s ) { return s.begin > sp.begin && s.end <= sp.end; } );
-        scanUnhandledArmPyFunction( src, toks, static_cast<std::size_t>( first - toks.begin() ), static_cast<std::size_t>( last - toks.begin() ), inner, enums, out );
+        if( std::optional<Site> site = unhandledArmPyFunction( src, toks, sp, inner, enums ) )
+        {
+            out.push_back( std::move( *site ) );
+        }
     }
 }
 
@@ -5756,38 +5779,41 @@ inline std::size_t esacAfter( std::string_view src, std::size_t lastArm )
     return src.size();
 }
 
-}   // namespace uash
-
-inline void scanUnhandledArmBash( std::string_view src, const std::vector<Span>& fnSpans, std::vector<Site>& out )
+// How a row names the case's subject.
+inline std::string subjectOf( const sh::Node& c )
 {
-    namespace sh = rw::shstatus;
-    if( src.find( "esac" ) == std::string_view::npos )
-    {
-        return;
-    }
-    const sh::Tree t = sh::parse( src );
-    const auto     subjectOf = []( const sh::Node& c ) { return c.caseSubject.empty() ? std::string( "the subject" ) : c.caseSubject; };
+    return c.caseSubject.empty() ? std::string( "the subject" ) : c.caseSubject;
+}
+
+// Form 1: a function whose last command is a case with no *) arm whose arms give its result (return/echo/printf).
+inline void endingCaseSites( std::string_view src, const sh::Tree& t, std::vector<Site>& out )
+{
     for( const sh::Node& f : t.nodes )
     {
-        const std::uint32_t body = f.kind == sh::NodeKind::Func && !f.bodies.empty() ? uash::lastCommandOf( t, f.bodies[0] ) : sh::kNone;
+        const std::uint32_t body = f.kind == sh::NodeKind::Func && !f.bodies.empty() ? lastCommandOf( t, f.bodies[0] ) : sh::kNone;
         const bool          grouped = body != sh::kNone && ( t.nodes[body].kind == sh::NodeKind::Group || t.nodes[body].kind == sh::NodeKind::Subshell ) && !t.nodes[body].bodies.empty();
-        const std::uint32_t c = grouped ? uash::lastCommandOf( t, t.nodes[body].bodies[0] ) : sh::kNone;
+        const std::uint32_t c = grouped ? lastCommandOf( t, t.nodes[body].bodies[0] ) : sh::kNone;
         if( c == sh::kNone || t.nodes[c].kind != sh::NodeKind::Case )
         {
             continue;
         }
         const sh::Node& cs = t.nodes[c];
-        if( cs.bodies.size() >= 2 && !uash::hasCatchAll( cs ) && uash::resultArms( t, cs ) && !uash::coversForList( src, t, cs ) )
+        if( cs.bodies.size() >= 2 && !hasCatchAll( cs ) && resultArms( t, cs ) && !coversForList( src, t, cs ) )
         {
             out.push_back( { Facet::UnhandledArm, cs.pos, "case " + collapseSpaces( cs.name ) + " ends " + f.name, {},
                              "no *) arm: an unmatched " + subjectOf( cs ) + " returns 0 and prints nothing" } );
         }
     }
+}
+
+// Form 2: a case with no *) arm whose every arm sets one name, read after esac within the enclosing function.
+inline void assignedCaseSites( std::string_view src, const sh::Tree& t, const std::vector<Span>& fnSpans, std::vector<Site>& out )
+{
     for( const sh::Node& cs : t.nodes )
     {
         std::vector<std::uint32_t> at;
-        const std::string          v = cs.kind == sh::NodeKind::Case && cs.bodies.size() >= 2 && !uash::hasCatchAll( cs ) ? uash::assignedName( t, cs, at ) : std::string();
-        if( v.empty() || at.size() != cs.bodies.size() || uash::writtenElsewhere( src, v, at ) || uash::coversForList( src, t, cs ) )
+        const std::string          v = cs.kind == sh::NodeKind::Case && cs.bodies.size() >= 2 && !hasCatchAll( cs ) ? assignedName( t, cs, at ) : std::string();
+        if( v.empty() || at.size() != cs.bodies.size() || writtenElsewhere( src, v, at ) || coversForList( src, t, cs ) )
         {
             continue;
         }
@@ -5796,8 +5822,8 @@ inline void scanUnhandledArmBash( std::string_view src, const std::vector<Span>&
         {
             scopeEnd = ( sp.begin <= cs.pos && cs.pos < sp.end && sp.end < scopeEnd ) ? sp.end : scopeEnd;
         }
-        const std::size_t esac = uash::esacAfter( src, at.back() );
-        if( esac < scopeEnd && uash::readIn( src, v, esac, scopeEnd ) )
+        const std::size_t esac = esacAfter( src, at.back() );
+        if( esac < scopeEnd && readIn( src, v, esac, scopeEnd ) )
         {
             out.push_back( { Facet::UnhandledArm, cs.pos, "case " + collapseSpaces( cs.name ) + " sets " + v, {},
                              "no *) arm: an unmatched " + subjectOf( cs ) + " leaves " + v + " unset" } );
@@ -5805,12 +5831,35 @@ inline void scanUnhandledArmBash( std::string_view src, const std::vector<Span>&
     }
 }
 
-// The C family's scan: format-arity over the whole file and utf8-cut / dedup-first inside each function span when
-// `cppShapes` (C++), unchecked-status inside each span always. A site found in nested spans is reported once (the
-// scan of each span is independent; the caller anchors by byte).
-inline std::vector<Site> scanCFamily( std::string_view src, const std::vector<Span>& fnSpans, const std::vector<std::string>* treeMacros, bool cppShapes,
-                                      const EnumTable* enums )
+}   // namespace uash
+
+// Bash: a case with no *) arm whose result is read, in either form.
+inline void scanUnhandledArmBash( std::string_view src, const std::vector<Span>& fnSpans, std::vector<Site>& out )
 {
+    if( src.find( "esac" ) == std::string_view::npos )
+    {
+        return;
+    }
+    const rw::shstatus::Tree t = rw::shstatus::parse( src );
+    uash::endingCaseSites( src, t, out );
+    uash::assignedCaseSites( src, t, fnSpans, out );
+}
+
+// What a C-family scan reads beside the file: the tree's macro names (format-arity's F1 skip), whether the C++
+// shapes apply, and the tree's enums (unhandled-arm's closed sets; null or empty: no unhandled-arm scan).
+struct CFamilyScan
+{
+    const std::vector<std::string>* treeMacros = nullptr;
+    bool                            cppShapes  = false;
+    const EnumTable*                enums      = nullptr;
+};
+
+// The C family's scan: format-arity over the whole file and utf8-cut / dedup-first inside each function span when
+// `how.cppShapes` (C++), unchecked-status and unhandled-arm inside each span always. A site found in nested spans is
+// reported once (the scan of each span is independent; the caller anchors by byte).
+inline std::vector<Site> scanCFamily( std::string_view src, const std::vector<Span>& fnSpans, const CFamilyScan& how )
+{
+    const auto [ treeMacros, cppShapes, enums ] = how;
     std::vector<Site>      out;
     CppPreproc             pp;
     const std::vector<Tok> toks = lexCpp( src, &pp );
@@ -5820,10 +5869,7 @@ inline std::vector<Site> scanCFamily( std::string_view src, const std::vector<Sp
     }
     for( const Span& sp : fnSpans )
     {
-        const auto first = std::lower_bound( toks.begin(), toks.end(), sp.begin, []( const Tok& t, std::uint32_t b ) { return t.begin < b; } );
-        const auto last  = std::lower_bound( toks.begin(), toks.end(), sp.end, []( const Tok& t, std::uint32_t b ) { return t.begin < b; } );
-        const std::size_t from = static_cast<std::size_t>( first - toks.begin() );
-        const std::size_t to   = static_cast<std::size_t>( last - toks.begin() );
+        const auto [ from, to ] = tokRangeOf( toks, sp );
         if( from >= to )
         {
             continue;
@@ -5845,6 +5891,12 @@ inline std::vector<Site> scanCFamily( std::string_view src, const std::vector<Sp
     return out;
 }
 
+// Does `src` hold any of `needles` (a byte prefilter)?
+inline bool holdsAnyOf( std::string_view src, std::span<const std::string_view> needles ) noexcept
+{
+    return std::any_of( needles.begin(), needles.end(), [ & ]( std::string_view n ) { return src.find( n ) != std::string_view::npos; } );
+}
+
 }   // namespace detail
 
 // ─── the per-language entry points ──────────────────────────────────────────────────────────────────────
@@ -5855,13 +5907,13 @@ inline std::vector<Site> scanCFamily( std::string_view src, const std::vector<Sp
 inline std::vector<Site> scanCpp( std::string_view src, const std::vector<Span>& fnSpans, const std::vector<std::string>* treeMacros = nullptr,
                                   const EnumTable* enums = nullptr )
 {
-    return detail::scanCFamily( src, fnSpans, treeMacros, /*cppShapes=*/true, enums );
+    return detail::scanCFamily( src, fnSpans, { treeMacros, /*cppShapes=*/true, enums } );
 }
 
 // C: unchecked-status and unhandled-arm, inside each function span (the C++ shapes name C++ library calls).
 inline std::vector<Site> scanC( std::string_view src, const std::vector<Span>& fnSpans, const EnumTable* enums = nullptr )
 {
-    return detail::scanCFamily( src, fnSpans, nullptr, /*cppShapes=*/false, enums );
+    return detail::scanCFamily( src, fnSpans, { nullptr, /*cppShapes=*/false, enums } );
 }
 
 // Python: format-arity over the whole file; unchecked-status reads `fnSpans` for the scope a bound name lives in.
@@ -5885,30 +5937,22 @@ inline std::vector<Site> scanPython( std::string_view src, const std::vector<Spa
 }
 
 // Bash, for a test-script path only (the caller decides the path): `fnSpans` are the script's function
-// definitions, the scopes a capture and its guards are matched in. Its unhandled-arm sites ride along.
+// definitions, the scopes a capture and its guards are matched in.
 inline std::vector<Site> scanBashTestScript( std::string_view src, const std::vector<Span>& fnSpans )
 {
-    std::vector<Site> out = detail::scanVacuousAssertBash( src, fnSpans );
-    detail::scanUnhandledArmBash( src, fnSpans, out );
-    return out;
+    return detail::scanVacuousAssertBash( src, fnSpans );
 }
 
-// Bash, any path: unhandled-arm alone (a case with no *) arm whose result is read).
-inline std::vector<Site> scanBash( std::string_view src, const std::vector<Span>& fnSpans )
-{
-    std::vector<Site> out;
-    detail::scanUnhandledArmBash( src, fnSpans, out );
-    return out;
-}
+// Bash, any path: unhandled-arm (a case with no *) arm whose result is read), appended to `out`.
+using detail::scanUnhandledArmBash;
 
 // Generated code (a header marker in its first 2 KB, or a generated-file path): unhandled-arm judges none of it —
 // its switches are the generator's, and the fix is in the generator.
 inline bool looksGenerated( std::string_view rel, std::string_view src ) noexcept
 {
     static constexpr std::array<std::string_view, 6> kMarks = { "DO NOT EDIT", "@generated", "Code generated", "generated by", "Generated by", "auto-generated" };
-    const std::string_view head = src.substr( 0, 2048 );
-    return std::any_of( kMarks.begin(), kMarks.end(), [ & ]( std::string_view m ) { return head.find( m ) != std::string_view::npos; } )
-        || rel.find( "/generated/" ) != std::string_view::npos || rel.starts_with( "generated/" ) || rel.find( ".pb." ) != std::string_view::npos
+    return detail::holdsAnyOf( src.substr( 0, 2048 ), kMarks ) || rel.find( "/generated/" ) != std::string_view::npos || rel.starts_with( "generated/" )
+        || rel.find( ".pb." ) != std::string_view::npos
         || rel.ends_with( "_pb2.py" );
 }
 
@@ -5925,8 +5969,7 @@ inline bool cppMayHoldShapes( std::string_view src ) noexcept
 {
     static constexpr std::array<std::string_view, 7> kNeedles = { "format", "print", "emitTo", "unique", "...", "\xE2\x80\xA6", "u2026" };
     // "format" also covers formatTo; the escaped ellipsis "\xE2\x80\xA6" is found through its "xE2" bytes below
-    return std::any_of( kNeedles.begin(), kNeedles.end(), [ & ]( std::string_view n ) { return src.find( n ) != std::string_view::npos; } )
-        || src.find( "xE2" ) != std::string_view::npos || mayHoldStatusCalls( src ) || src.find( "switch" ) != std::string_view::npos;
+    return detail::holdsAnyOf( src, kNeedles ) || src.find( "xE2" ) != std::string_view::npos || mayHoldStatusCalls( src ) || src.find( "switch" ) != std::string_view::npos;
 }
 
 }   // namespace rw::defectshape

@@ -6765,13 +6765,13 @@ inline std::vector<DefectSiteAt> defectSitesOf( const IngestResult& ing, std::st
         {
             sites = defectshape::scanPython( src, fnSpans );
         }
-        else if( lang == Lang::Bash && isTestScriptPath( rel ) )   // a test script: every assertion form (grep, [ ], cmp, case, rc=$?) is read
-        {
-            sites = defectshape::scanBashTestScript( src, fnSpans );
-        }
         else if( lang == Lang::Bash )
         {
-            sites = defectshape::scanBash( src, fnSpans );
+            if( isTestScriptPath( rel ) )   // a test script: every assertion form (grep, [ ], cmp, case, rc=$?) is read
+            {
+                sites = defectshape::scanBashTestScript( src, fnSpans );
+            }
+            defectshape::scanUnhandledArmBash( src, fnSpans, sites );   // any path: a case with no *) arm whose result is read
         }
         if( defectshape::looksGenerated( rel, src ) )   // unhandled-arm judges no generated switch: the fix is in the generator
         {
