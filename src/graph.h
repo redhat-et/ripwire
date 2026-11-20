@@ -1367,8 +1367,9 @@ inline void keepRustTraitImplementors( ChaConeMemo& chaCones, const IngestResult
 
 // PROVEN-SITE-KEEPS-NAMESAKES: a PROVEN call site's targets, appended to Graph::provenSites in reference order, while the name has
 // more than one definition (`namesakes`) — a name with one cannot be misplaced. rivalledProvenSites prunes the list once every
-// edge exists. A via=name site appends nothing: it counts for every row of its name, as before.
-inline void noteProvenSite( std::vector<ProvenSite>& out, bool proven, std::size_t namesakes, std::uint32_t ref, NodeId from, std::span<const NodeId> tier )
+// edge exists. A via=name site appends nothing: it counts for every row of its name, as before. A recursive call's own target is
+// kept too (it is no graph edge): when `A::f` also calls `B::f`, B::f's site test must still read its `f()` self-call as A::f's.
+inline void noteProvenSite( std::vector<ProvenSite>& out, bool proven, std::size_t namesakes, std::uint32_t ref, std::span<const NodeId> tier )
 {
     if( !proven || namesakes < 2 )
     {
@@ -1376,10 +1377,7 @@ inline void noteProvenSite( std::vector<ProvenSite>& out, bool proven, std::size
     }
     for( const NodeId to : tier )
     {
-        if( to != from )
-        {
-            out.push_back( { ref, to } );
-        }
+        out.push_back( { ref, to } );
     }
 }
 
@@ -14425,7 +14423,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 }
             }
         }
-        noteProvenSite( g.provenSites, !nameOnly, it == byName.end() ? 0u : it->second.size(), std::uint32_t( siteIndex ), r.fromSymbol, tier );
+        noteProvenSite( g.provenSites, !nameOnly, it == byName.end() ? 0u : it->second.size(), std::uint32_t( siteIndex ), tier );
         if( r.forwarded )
         {
             g.keptForwards.push_back( std::uint32_t( siteIndex ) );   // ascending: the loop walks the references in order
