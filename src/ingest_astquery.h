@@ -2124,12 +2124,12 @@ TangleDetailFacts tangleDetailOf( std::string_view fileBytes, std::string_view p
     {
         return out;
     }
-    TSTree* tree = ts_parser_parse_string( pg.p, nullptr, fileBytes.data(), std::uint32_t( fileBytes.size() ) );
-    if( tree == nullptr )
+    const TreeGuard tree( ts_parser_parse_string( pg.p, nullptr, fileBytes.data(), std::uint32_t( fileBytes.size() ) ) );   // freed on every exit
+    if( tree.tree == nullptr )
     {
         return out;
     }
-    TSNode n = ts_node_descendant_for_byte_range( ts_tree_root_node( tree ), startByte, endByte - 1u );
+    TSNode n = ts_node_descendant_for_byte_range( ts_tree_root_node( tree.tree ), startByte, endByte - 1u );
     while( !ts_node_is_null( n ) && ts_node_start_byte( n ) > startByte )
     {
         n = parentOf( n );
@@ -2139,7 +2139,6 @@ TangleDetailFacts tangleDetailOf( std::string_view fileBytes, std::string_view p
         complexityOf( n, fileBytes, le->lang, &out );
         out.ok = true;
     }
-    ts_tree_delete( tree );
     return out;
 }
 

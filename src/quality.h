@@ -11442,14 +11442,14 @@ inline bool tangleCredited( const TangleInputs& was, const TangleInputs& now ) n
 // pass already rowed, the ratchet adds its facet (ratchet="<ref>") and its reading to why=; otherwise it is a row of its own, was= the
 // best score. A key the history never held (created in this working tree) is not judged.
 template<class Stamp>
-inline void appendTangleRatchet( std::vector<Regression>& regs, const IngestResult& ing, const Graph& g, const gtl::btree_map<std::uint64_t, TangleNow>& nowByKey,
-                                 const std::vector<std::uint64_t>& ratchetable, const gtl::btree_map<std::uint64_t, std::size_t>& rowOfKey,
+inline void appendTangleRatchet( std::vector<Regression>& regs, const IngestResult& ing, const Graph& g,
+                                 const std::vector<std::pair<std::uint64_t, const TangleNow*>>& ratchetable, const gtl::btree_map<std::uint64_t, std::size_t>& rowOfKey,
                                  TangleDetailReader& detailOf, Stamp&& stamp, std::string_view root, DeltaExtras& extras )
 {
     std::vector<std::string> paths;
-    for( const std::uint64_t key : ratchetable )
+    for( const auto& [ key, nowOfKey ] : ratchetable )
     {
-        paths.emplace_back( relForHash( ing.files[ ing.symbols[ nowByKey.at( key ).at ].fileId ], root ) );
+        paths.emplace_back( relForHash( ing.files[ ing.symbols[ nowOfKey->at ].fileId ], root ) );
     }
     rw::sortutil::sortUnique( paths );
     const BestSinceStore store = extras.bestSince( paths );
@@ -11460,7 +11460,7 @@ inline void appendTangleRatchet( std::vector<Regression>& regs, const IngestResu
     {
         return;
     }
-    for( const std::uint64_t key : ratchetable )
+    for( const auto& [ key, nowOfKey ] : ratchetable )
     {
         const BestSinceRow* row = store.find( key );
         if( row == nullptr )
@@ -11468,7 +11468,7 @@ inline void appendTangleRatchet( std::vector<Regression>& regs, const IngestResu
             continue;
         }
         ++extras.ratchetJudged;
-        const TangleNow&    now   = nowByKey.at( key );
+        const TangleNow&    now   = *nowOfKey;
         const TangleBest    best  = unpackTangleBest( row->value );
         const std::uint32_t now10 = tangleScore10( now.in );
         const TangleRise    rise  = tangleRise( best.minima, now.in );
@@ -11688,22 +11688,22 @@ inline void appendRepeatedDecisionFixes( std::vector<Regression>& regs, const In
             it->second = i;
         }
     }
-    std::vector<std::size_t> order;   // the rows, file-major, so each file is read once
+    std::vector<std::pair<std::size_t, NodeId>> order;   // (row, its symbol), file-major, so each file is read once
     for( std::size_t k = 0; k < regs.size(); ++k )
     {
         const auto it = atOfKey.find( regs[k].key );
         if( ( regs[k].kind == "complexity" || regs[k].kind == "tangle" ) && it != atOfKey.end() && it->second != NodeId( -1 ) )
         {
-            order.push_back( k );
+            order.emplace_back( k, it->second );
         }
     }
-    std::stable_sort( order.begin(), order.end(), [ & ]( std::size_t a, std::size_t b )
-                      { return ing.symbols[ atOfKey.at( regs[a].key ) ].fileId < ing.symbols[ atOfKey.at( regs[b].key ) ].fileId; } );
+    std::stable_sort( order.begin(), order.end(), [ & ]( const std::pair<std::size_t, NodeId>& a, const std::pair<std::size_t, NodeId>& b )
+                      { return ing.symbols[ a.second ].fileId < ing.symbols[ b.second ].fileId; } );
     std::string   bytes;
     std::uint32_t openFile = UINT32_MAX;
-    for( const std::size_t k : order )
+    for( const auto& [ k, node ] : order )
     {
-        const Symbol& s = ing.symbols[ atOfKey.at( regs[k].key ) ];
+        const Symbol& s = ing.symbols[ node ];
         if( s.fileId != openFile )
         {
             openFile = s.fileId;
@@ -11734,7 +11734,7 @@ inline void appendTangleRows( std::vector<Regression>& regs, const IngestResult&
     const gtl::btree_map<std::uint64_t, TangleNow> nowByKey = tangleNowByKey( ing, g, keyByNode );
     TangleDetailReader                             detailOf{ ing };
     gtl::btree_map<std::uint64_t, std::size_t>     rowOfKey;     // the row this pass emitted for a key (the ratchet adds its facet there)
-    std::vector<std::uint64_t>                     ratchetable;   // over the bar, existed, and the change moved its inputs
+    std::vector<std::pair<std::uint64_t, const TangleNow*>> ratchetable;   // over the bar, existed, and the change moved its inputs (key, its nowByKey entry)
     for( const auto& [ key, best ] : nowByKey )
     {
         const bool          isNew = !existed( key );
@@ -11751,7 +11751,7 @@ inline void appendTangleRows( std::vector<Regression>& regs, const IngestResult&
         }
         if( !isNew && packTangle( was ) != packTangle( best.in ) )
         {
-            ratchetable.push_back( key );
+            ratchetable.emplace_back( key, &best );
         }
         const TangleRise rise = tangleRise( was, best.in );
         if( !isNew && was10 >= kTangleBar10 && !rise.any() )
@@ -11769,7 +11769,7 @@ inline void appendTangleRows( std::vector<Regression>& regs, const IngestResult&
     }
     if( extras != nullptr && extras->bestSince && !ratchetable.empty() )
     {
-        appendTangleRatchet( regs, ing, g, nowByKey, ratchetable, rowOfKey, detailOf, stamp, root, *extras );
+        appendTangleRatchet( regs, ing, g, ratchetable, rowOfKey, detailOf, stamp, root, *extras );
     }
 }
 

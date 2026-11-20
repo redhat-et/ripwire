@@ -5360,7 +5360,7 @@ inline std::vector<PyEnum> pyEnumsOf( std::string_view src, const std::vector<To
                 e.members.push_back( tokText( src, toks[s] ) );
             }
         }
-        rw::sortutil::sortUnique( e.members );
+        rw::sortutil::sortUnique( e.members, rw::sortutil::svLess );
         out.push_back( std::move( e ) );
     }
     return out;
