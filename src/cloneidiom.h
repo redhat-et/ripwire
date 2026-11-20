@@ -135,6 +135,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <iterator>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -1376,14 +1377,10 @@ inline bool sharesDomainValue( const MemberShape& a, const MemberShape& b, const
 // Sorted + unique FNV-1a of every function and method name the index holds (operand path (6)'s exemption).
 inline std::vector<std::uint64_t> functionNameHashes( const IngestResult& ing )
 {
-    std::vector<std::uint64_t> out;
-    for( const Symbol& s : ing.symbols )
-    {
-        if( s.kind == SymKind::Function || s.kind == SymKind::Method )
-        {
-            out.push_back( fnv1a64( s.name ) );
-        }
-    }
+    auto hashes = ing.symbols
+                | std::views::filter( []( const Symbol& s ) { return s.kind == SymKind::Function || s.kind == SymKind::Method; } )
+                | std::views::transform( []( const Symbol& s ) { return fnv1a64( s.name ); } );
+    std::vector<std::uint64_t> out( hashes.begin(), hashes.end() );
     sortutil::sortUnique( out );
     return out;
 }
