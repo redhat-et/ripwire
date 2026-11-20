@@ -1022,32 +1022,11 @@ void sortLintRows( const rw::IngestResult& ing, std::vector<LintOut>& outs )
 // file:line, enclosing symbol, text) — keep the first occurrence in the caller's already-
 // deterministic sort order. This also keeps findings= and each rule's count= truthful: they
 // count distinct VISIBLE findings, not raw captures. Lifted out of the --lint block (same reason
-// as lintSymbolLevelChecks above) so runLint stays under the complexity/verbosity bar.
-std::vector<LintOut> dedupeLintFindings( const rw::IngestResult& ing, std::vector<LintOut> outs )
+// as lintSymbolLevelChecks above) so runLint stays under the complexity/verbosity bar. `enclosing` is
+// the run's own index (the in= every row prints), not a second copy built here.
+std::vector<LintOut> dedupeLintFindings( const rw::IngestResult& ing, const EnclosingSymbolIndex& enclosing, std::vector<LintOut> outs )
 {
     using namespace rw;
-    // model.h::symbolsByFile — same scan order, same comparator as the hand-written loop it replaces.
-    const SymbolsByFile fileSyms = symbolsByFile( ing,
-                                                  []( const Symbol& ) { return true; },
-                                                  [ & ]( NodeId a, NodeId b ) { return ing.symbols[a].sigStartByte < ing.symbols[b].sigStartByte; } );
-    const auto enclosing = [ & ]( std::uint32_t f, std::uint32_t off ) -> const Symbol*
-    {
-        const Symbol* best = nullptr;
-        for( NodeId id : fileSyms[f] )
-        {
-            const Symbol& s = ing.symbols[id];
-            if( s.sigStartByte > off )
-            {
-                break;
-            }
-            if( off < s.endByte && ( !best || s.sigStartByte > best->sigStartByte ) )
-            {
-                best = &s;
-            }
-        }
-        return best;
-    };
-
     HashMap<std::string, char> seenRow;
     std::vector<LintOut>       deduped;  deduped.reserve( outs.size() );
     for( const LintOut& o : outs )
@@ -2330,7 +2309,7 @@ int runLintVerb( const MainDispatch& d, const LintAnswerView& view )
     // §P6.1: collapse rows that would render byte-identically (see dedupeLintFindings above for why —
     // two genuinely different AST captures, e.g. the same magic-number value spelled twice on one line,
     // can share the same rule/file:line/enclosing-symbol/text because the row carries no column).
-    run.outs = dedupeLintFindings( ing, std::move( run.outs ) );
+    run.outs = dedupeLintFindings( ing, view.enclosing, std::move( run.outs ) );
 
     const PageWindow  lintPage   = lintFindingsWindow( cfg, ing, view.enclosing, run.outs );
     const std::size_t shownCount = lintPage.end - lintPage.begin;
