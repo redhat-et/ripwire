@@ -7120,9 +7120,17 @@ inline bool pushRustPayloadBinding( BindCtx& cx, TSNode cond, BindSite site )
     std::uint32_t want = variantName == "Err" ? 1u : 0u;
     for( std::uint32_t i = 0, k = ts_node_is_null( args ) ? 0u : ts_node_named_child_count( args ); i < k && ts_node_is_null( wrapperArg ); ++i )
     {
-        if( const TSNode c = ts_node_named_child( args, i ); !kindIs( ts_node_type( c ), "lifetime" ) && want-- == 0 )
+        if( const TSNode c = ts_node_named_child( args, i ); kindIs( ts_node_type( c ), "lifetime" ) )
+        {
+            continue;
+        }
+        else if( want == 0 )
         {
             wrapperArg = c;
+        }
+        else
+        {
+            --want;   // never past zero: G1's integer sanitizer reports an unsigned wrap (CI on #706, CR 4643868479)
         }
     }
     spine += '<';
