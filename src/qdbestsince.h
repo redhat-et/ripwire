@@ -43,24 +43,25 @@ inline bool rootRelOfGitPath( std::string_view gitPath, std::string_view prefix,
     return true;
 }
 
-// The versions of `relPaths` since `refSha`: each file's blob at the reference first, then every blob a FIRST-PARENT commit in refSha..tip
-// wrote (a merge read against its first parent), newest first; distinct (sha, path) pairs. nullopt when git could not list them. The
-// first-parent line is the history a branch actually stood at: a lane's work-in-progress commits never set a "best" (replay 11-19: 50
-// versions of graph.h since v0.6.10 over every commit, 20 on the first-parent line).
-inline std::optional<std::vector<HistoryBlob>> bestSinceBlobs( const std::string& root, const std::string& refSha, const std::string& tipSha,
-                                                               const std::vector<std::string>& relPaths, std::string_view prefix )
+// The shell pathspec of `relPaths` (each single-quoted, space-led).
+inline std::string blobPathspec( const std::vector<std::string>& relPaths )
 {
     std::string pathspec;
     for( const std::string& p : relPaths )
     {
         pathspec += " " + shSingleQuote( p );
     }
-    std::vector<HistoryBlob> out;
-    std::string              rel;
+    return pathspec;
+}
+
+// Each of `pathspec`'s files as the commit `refSha` holds it, appended to `out`; false when git could not list them.
+inline bool blobsAtRef( const std::string& root, const std::string& refSha, const std::string& pathspec, std::string_view prefix, std::vector<HistoryBlob>& out )
+{
+    std::string                rel;
     const crossref::GitListing atRef = crossref::gitListChecked( root, "--literal-pathspecs ls-tree -r --full-name " + refSha + " --" + pathspec );
     if( !atRef.ok )
     {
-        return std::nullopt;
+        return false;
     }
     for( const std::string& line : atRef.lines )
     {
@@ -71,6 +72,23 @@ inline std::optional<std::vector<HistoryBlob>> bestSinceBlobs( const std::string
         {
             out.push_back( { std::string( fields[2] ), rel } );
         }
+    }
+    return true;
+}
+
+// The versions of `relPaths` since `refSha`: each file's blob at the reference first, then every blob a FIRST-PARENT commit in refSha..tip
+// wrote (a merge read against its first parent), newest first; distinct (sha, path) pairs. nullopt when git could not list them. The
+// first-parent line is the history a branch actually stood at: a lane's work-in-progress commits never set a "best" (replay 11-19: 50
+// versions of graph.h since v0.6.10 over every commit, 20 on the first-parent line).
+inline std::optional<std::vector<HistoryBlob>> bestSinceBlobs( const std::string& root, const std::string& refSha, const std::string& tipSha,
+                                                               const std::vector<std::string>& relPaths, std::string_view prefix )
+{
+    const std::string        pathspec = blobPathspec( relPaths );
+    std::vector<HistoryBlob> out;
+    std::string              rel;
+    if( !blobsAtRef( root, refSha, pathspec, prefix, out ) )
+    {
+        return std::nullopt;
     }
     const crossref::GitListing log = crossref::gitListChecked( root, "--literal-pathspecs log --first-parent -m --format= --raw --no-abbrev --no-renames " + refSha + ".." + tipSha + " --" + pathspec );
     if( !log.ok )
@@ -214,6 +232,78 @@ inline BestSinceStore tangleBestSince( const std::string& root, const std::strin
     for( const auto& [ key, value ] : best )
     {
         store.rows.push_back( { key, value } );   // btree order: sorted by key, as BestSinceStore::find reads it
+    }
+    return store;
+}
+
+// ─── QD-SHRINK-PAIR: the base commit's callable bodies (quality.h BaseBodySource) ─────────────────────────────────────────────────
+// The same reader as the store above at ONE commit: each named file's blob at `ref`, measured by the same extraction
+// (tangleInputsInBlobs, whose defs carry the clone pass's body span), each callable body tokenized by the clone pass's normalizer.
+// A key with two callable bodies (an overload set) is dropped: it has no single base body. Any git or parse failure leaves the
+// file's keys absent, and a clone row whose member has no base body is judged as before (it gates).
+inline BaseBodyStore cloneBodiesAt( const std::string& root, const std::string& ref, const std::vector<std::string>& relPaths )
+{
+    BaseBodyStore     store;
+    const std::string refSha = relPaths.empty() ? std::string() : gitResolveCommitSha( root, ref );
+    std::vector<HistoryBlob> blobs;
+    if( refSha.empty() || !blobsAtRef( root, refSha, blobPathspec( relPaths ), gitOneLine( root, "rev-parse --show-prefix 2>/dev/null" ), blobs ) )
+    {
+        return store;
+    }
+    std::vector<std::string> shas, bytes;
+    for( const HistoryBlob& b : blobs )
+    {
+        shas.push_back( b.sha );
+    }
+    std::vector<BlobText> texts;
+    std::size_t           next = 0;
+    // a refused or cut batch leaves the unread files' keys absent, and their rows judged as before (they gate)
+    (void)crossref::catFileBatch( root, shas, [ & ]( const std::string&, std::string_view type, std::string_view body )
+    {
+        if( type == "blob" )
+        {
+            bytes.emplace_back( body );
+            texts.push_back( { blobs[ next ].relPath, {} } );
+        }
+        ++next;
+        return true;
+    } );
+    for( std::size_t i = 0; i < texts.size(); ++i )
+    {
+        texts[i].bytes = bytes[i];   // after the batch: `bytes` no longer reallocates
+    }
+    std::vector<BlobTangleDefs> measured;
+    {
+        std::lock_guard<std::mutex> ingestLk( headSnapshotIngestMutex() );   // the blob pool installs queries into the process-global cache
+        measured = tangleInputsInBlobs( texts );
+    }
+    gtl::btree_map<std::uint64_t, std::vector<std::string>> bodies;
+    gtl::btree_map<std::uint64_t, std::uint32_t>             count;
+    for( std::size_t i = 0; i < texts.size(); ++i )
+    {
+        if( measured[i].status != BlobDefsStatus::Parsed )
+        {
+            continue;
+        }
+        for( const BlobTangleDef& d : measured[i].defs )
+        {
+            if( d.endByte <= d.bodyStart || d.endByte > bytes[i].size() )
+            {
+                continue;   // bodyless (a prototype): the clone pass never reads it either
+            }
+            const std::uint64_t key = pathQualifiedKey( texts[i].path, d.scope, measured[i].lang == Lang::Elixir ? elixirBaseName( d.name ) : std::string_view( d.name ) );
+            if( ++count[ key ] == 1 )
+            {
+                bodies.emplace( key, normalizeTokens( bytes[i], d.bodyStart, d.endByte, usesHashLineComments( measured[i].lang ) ) );
+            }
+        }
+    }
+    for( auto& [ key, tokens ] : bodies )
+    {
+        if( count[ key ] == 1 )
+        {
+            store.rows.push_back( { key, std::move( tokens ) } );   // btree order: sorted by key, as BaseBodyStore::find reads it
+        }
     }
     return store;
 }

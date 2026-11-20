@@ -1030,6 +1030,7 @@ for _g in \
     shapingflagcheck \
     shellgateindexcheck \
     showcasecapturecheck \
+    shrinkpaircheck \
     sibliftcheck \
     sidecarsymlinkcheck \
     sigredactcheck \

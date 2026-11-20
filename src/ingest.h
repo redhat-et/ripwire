@@ -969,11 +969,15 @@ std::vector<BlobDefinitions> definitionLinesInBlobs( std::span<const BlobText> b
 // QD-TANGLE D4 (quality's best-since store): every callable definition of each blob with its tangle inputs (model.h TangleInputs),
 // by the same extraction as definitionLinesInBlobs plus the callables' cc_walk — so a history blob's inputs are the ones HEAD's
 // index would give the same bytes. `defs` is empty unless `status` is Parsed. Same pool, same single-writer rule.
+// QD-SHRINK-PAIR reads the same defs for their BODY: [bodyStart, endByte) is the span the clone pass tokenizes on a Symbol
+// ([sigEndByte, endByte), ingest_model.h's rule), so a base blob's body is the one HEAD's index would cut from the same bytes.
 struct BlobTangleDef
 {
-    std::string  scope;
-    std::string  name;
-    TangleInputs in;
+    std::string   scope;
+    std::string   name;
+    TangleInputs  in;
+    std::uint32_t bodyStart = 0;   // Symbol::sigEndByte's value: the body field's start, or endByte for a bodyless def
+    std::uint32_t endByte   = 0;
 };
 struct BlobTangleDefs
 {

@@ -8117,6 +8117,26 @@ inline std::uint64_t foldTangleBest( std::uint64_t best, bool seen, const Tangle
 // every symbol in them. Empty = no source (the ref-pair form, a caller that reads no history): no ratchet is judged.
 using BestSinceSource = std::function<BestSinceStore( const std::vector<std::string>& relPaths )>;
 
+// QD-SHRINK-PAIR — the base commit's callable bodies, read on demand by the verb (qdbestsince.h cloneBodiesAt: the same blob reader and
+// extraction as the best-since store, at the one base commit) for the files of the few clone rows that could have crossed the bar by a
+// member shrinking. One row per key that has exactly ONE callable body at the base (an overload set has no single body to compare).
+struct BaseBodyRow
+{
+    std::uint64_t            key = 0;   // qualityKey, spelled on the current path
+    std::vector<std::string> tokens;    // the body's normalized token stream (clones.h normalizeTokens, the clone pass's own)
+};
+struct BaseBodyStore
+{
+    std::vector<BaseBodyRow> rows;      // sorted by key
+    const BaseBodyRow* find( std::uint64_t key ) const noexcept
+    {
+        const auto hit = std::ranges::equal_range( rows, key, {}, &BaseBodyRow::key );
+        return hit.empty() ? nullptr : &hit.front();
+    }
+};
+// Empty = no source (computeDelta's callers that read no git): every clone row is judged as before.
+using BaseBodySource = std::function<BaseBodyStore( const std::vector<std::string>& relPaths )>;
+
 // QD-CREDIT-ROW — one improvement this change made (STAGE0 2.5 "credit"; QD_LESSONS 11-19: a fix's gain was invisible): a symbol that was
 // over a kind's bar at the baseline and is lower now by at least the kind's minor delta. Never a row, never gating; listed in the
 // answer's <improved> section so a refactor lane and the ratchet see the credit.
@@ -8147,6 +8167,7 @@ inline constexpr std::size_t kImprovedShown = 20;   // the section lists at most
 struct DeltaExtras
 {
     BestSinceSource          bestSince;
+    BaseBodySource           baseBodies;   // QD-SHRINK-PAIR (demoteShrinkOnlyClones): the base commit's bodies of the named files
     std::vector<Improvement> improved;
     std::string              ratchetRef;          // the reference point the ratchet read ("" = not consulted: no candidate, or no source)
     std::uint32_t            ratchetJudged = 0;   // symbols judged against their best
@@ -11404,6 +11425,168 @@ inline void appendTangleRatchet( std::vector<Regression>& regs, const IngestResu
     }
 }
 
+// ─── QD-SHRINK-PAIR — a clone row that crossed the bar only because a member SHRANK ───────────────────────────────────────────────
+//
+// A Type-3 pair's similarity is 2·LCS/(|a|+|b|), so it rises when either member LOSES tokens the other does not share. Replay 11-19
+// (lane/sort-unique): cFamilyMacroNames handed its sort+erase pair to a helper, its body fell 135 -> 99 tokens, the LCS with
+// jsExportsOf fell 85 -> 82, and the pair crossed 0.8 as a "new" clone — a duplication row and a new-clone-of-reused-helper row, both
+// gating, about an edit that REMOVED code and copied none. The rule: when every member existed at the base, some member's body
+// shrank, and no pair's shared LCS grew, the row is reported minor with why= saying so. A pair whose LCS grew (code was copied in,
+// even while a member shrank) still gates, and so does a group with a member the base did not hold, an overload on either side, or
+// a body the base commit could not be read for: the rule judges only what both commits show.
+inline constexpr std::size_t kShrinkJudgedMaxMembers = 4;   // up to 6 LCS pairs per side; a larger group is judged as before
+
+// A gating clone row (duplication or new-clone-of-reused-helper) and the group it names: the rule's input.
+struct ShrinkCandidate
+{
+    std::size_t       row   = 0;
+    const CloneGroup* group = nullptr;
+};
+
+// One member's body on both sides, interned for the LCS (clamped to kType3MaxTokensForLcs like the clone pass).
+struct ShrinkMember
+{
+    NodeId                     at = 0;
+    std::vector<std::uint32_t> base, head;
+};
+
+// The token-id stream of `tokens`, interning each text in `ids` (process-local, read only by the LCS compare).
+inline std::vector<std::uint32_t> shrinkInterned( const std::vector<std::string>& tokens, HashMap<std::string, std::uint32_t>& ids )
+{
+    std::vector<std::uint32_t> out;
+    out.reserve( tokens.size() );
+    for( const std::string& t : tokens )
+    {
+        out.push_back( ids.emplace( t, std::uint32_t( ids.size() ) ).first->second );
+    }
+    return out;
+}
+
+// Every member of `cg` with its base and head bodies, or nullopt when one is unjudgeable: no single body at the base (not held, an
+// overload set, an unread file), or not the one callable body under its key now. `headBodies` counts callable bodies per key now.
+inline std::optional<std::vector<ShrinkMember>> shrinkMembersOf( const CloneGroup& cg, const IngestResult& ing, const std::vector<std::uint64_t>& keyByNode,
+                                                                 const BaseBodyStore& store, const gtl::btree_map<std::uint64_t, std::uint32_t>& headBodies,
+                                                                 HashMap<std::string, std::uint32_t>& ids )
+{
+    std::vector<ShrinkMember> out;
+    std::string               bytes;
+    for( const NodeId m : cg.members )
+    {
+        const std::uint64_t key  = m < keyByNode.size() ? keyByNode[m] : 0;
+        const BaseBodyRow*  base = key != 0 ? store.find( key ) : nullptr;
+        const auto          now  = headBodies.find( key );
+        if( base == nullptr || now == headBodies.end() || now->second != 1 || !readCloneSourceFile( ing, ing.symbols[m].fileId, bytes ) )
+        {
+            return std::nullopt;
+        }
+        const Symbol& s = ing.symbols[m];
+        ShrinkMember  sm{ m, shrinkInterned( base->tokens, ids ), shrinkInterned( normalizeTokens( bytes, s.sigEndByte, s.endByte, usesHashLineComments( s.lang ) ), ids ) };
+        out.push_back( std::move( sm ) );
+    }
+    return out;
+}
+
+// The row's why= when the group crossed by shrinking alone, else "": some member has fewer tokens now, and no pair's LCS grew.
+inline std::string shrinkOnlyWhy( const std::vector<ShrinkMember>& members, const IngestResult& ing, const Graph& g )
+{
+    std::vector<std::uint32_t> prev, cur;
+    const auto lcsOf = [ & ]( const std::vector<std::uint32_t>& a, const std::vector<std::uint32_t>& b )
+    {
+        return cloneLcsLen( std::span( a ).first( std::min( a.size(), kType3MaxTokensForLcs ) ), std::span( b ).first( std::min( b.size(), kType3MaxTokensForLcs ) ), prev, cur );
+    };
+    std::size_t baseLcs = 0, headLcs = 0;   // the pair's (a group reads "no pair's LCS rose")
+    for( std::size_t i = 0; i < members.size(); ++i )
+    {
+        for( std::size_t j = i + 1; j < members.size(); ++j )
+        {
+            baseLcs = lcsOf( members[i].base, members[j].base );
+            headLcs = lcsOf( members[i].head, members[j].head );
+            if( headLcs > baseLcs )
+            {
+                return {};   // shared code grew: a copy, whatever else shrank
+            }
+        }
+    }
+    std::vector<const ShrinkMember*> shrunk;
+    for( const ShrinkMember& m : members )
+    {
+        if( m.head.size() < m.base.size() )
+        {
+            shrunk.push_back( &m );
+        }
+    }
+    if( shrunk.empty() )
+    {
+        return {};
+    }
+    std::ranges::sort( shrunk, {}, [ & ]( const ShrinkMember* m ) -> const std::string& { return g.canonId[ m->at ]; } );   // members= order
+    std::string why = members.size() == 2 ? "pair crossed the bar because " : "group crossed the bar because ";
+    for( std::size_t k = 0; k < shrunk.size(); ++k )
+    {
+        why += ( k == 0 ? "" : " and " ) + ing.symbols[ shrunk[k]->at ].name + " shrank " + std::to_string( shrunk[k]->base.size() ) + "->" + std::to_string( shrunk[k]->head.size() ) + " tok";
+    }
+    why += members.size() == 2 ? "; shared code did not grow (LCS " + std::to_string( baseLcs ) + "->" + std::to_string( headLcs ) + ")"
+                               : "; shared code did not grow (no pair's LCS rose)";
+    return why;
+}
+
+// Whether a why= is the shrink rule's (the legend's present-only test; the operand path's whys never say "crossed the bar").
+inline bool isShrinkOnlyWhy( std::string_view why ) noexcept
+{
+    return why.find( " crossed the bar because " ) != std::string_view::npos;
+}
+
+// THE RULE over the gating clone rows `cands`: one read of the base bodies of their members' files (extras.baseBodies), then each
+// group judged once (its duplication and new-clone-of-reused-helper rows share the member-set hash) and every row of a shrink-only
+// group made minor with the why=.
+inline void demoteShrinkOnlyClones( std::vector<Regression>& regs, const std::vector<ShrinkCandidate>& cands, const IngestResult& ing, const Graph& g,
+                                    const std::vector<std::uint64_t>& keyByNode, std::string_view root, const DeltaExtras* extras )
+{
+    if( extras == nullptr || !extras->baseBodies || cands.empty() )
+    {
+        return;
+    }
+    std::vector<std::string>                     paths;
+    gtl::btree_map<std::uint64_t, std::uint32_t> headBodies;   // the members' keys -> callable bodies under them now
+    for( const ShrinkCandidate& c : cands )
+    {
+        for( const NodeId m : c.group->members )
+        {
+            paths.emplace_back( relForHash( ing.files[ ing.symbols[m].fileId ], root ) );
+            headBodies.emplace( m < keyByNode.size() ? keyByNode[m] : 0, 0 );
+        }
+    }
+    rw::sortutil::sortUnique( paths );
+    for( NodeId i = 0; i < ing.symbols.size() && i < keyByNode.size(); ++i )
+    {
+        const Symbol& s = ing.symbols[i];
+        if( const auto it = headBodies.find( keyByNode[i] ); it != headBodies.end() && ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && s.endByte > s.sigEndByte )
+        {
+            ++it->second;
+        }
+    }
+    const BaseBodyStore                          store = extras->baseBodies( paths );
+    gtl::btree_map<std::uint64_t, std::string>   whyOfGroup;   // member-set hash -> the verdict ("" = gates as before)
+    HashMap<std::string, std::uint32_t>          ids;
+    for( const ShrinkCandidate& c : cands )
+    {
+        Regression& r = regs[ c.row ];
+        auto [ it, fresh ] = whyOfGroup.try_emplace( r.key );
+        if( fresh && c.group->members.size() >= 2 && c.group->members.size() <= kShrinkJudgedMaxMembers )
+        {
+            if( const std::optional<std::vector<ShrinkMember>> members = shrinkMembersOf( *c.group, ing, keyByNode, store, headBodies, ids ) )
+            {
+                it->second = shrinkOnlyWhy( *members, ing, g );
+            }
+        }
+        if( !it->second.empty() )
+        {
+            r.isMinor = true;
+            r.why     = it->second;
+        }
+    }
+}
+
 // QD-REPEATED-DECISION (repeateddecision.h) — a FACET on the complexity and tangle rows already built: when the function's
 // body tests one condition twice or repeats a loop body, fix= names it with its lines ("name the decision once"); a tangle
 // row's own fix= keeps its text first. It adds no row and changes no severity. The body read is the key's highest-ccx
@@ -11926,6 +12109,15 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
         return oneId || allVend;
     };
 
+    // QD-SHRINK-PAIR: the gating clone rows both reports push, judged together once both have run (demoteShrinkOnlyClones)
+    std::vector<ShrinkCandidate> shrinkCands;
+    const auto noteShrinkCandidate = [ & ]( const CloneGroup& cg )
+    {
+        if( rowGates( regs.back() ) )
+        {
+            shrinkCands.push_back( { regs.size() - 1, &cg } );
+        }
+    };
     gtl::btree_map<std::uint64_t, std::uint8_t> dupSeen;
     const auto reportNewClones =
         [ & ]( const std::vector<CloneGroup>& cgs, const std::vector<CloneIdiomVerdict>& vx )
@@ -11984,6 +12176,7 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
                               std::string( cloneIdiomName( vd.idiom ) ), cloneGroupIsNew( cg ) } );   // ack identity = the member-set hash; origin = "no member existed"
             regs.back().why = cloneOperandWhy( vd.operands );
             stampCloneLoc( cg );
+            noteShrinkCandidate( cg );
         }
     };
     reportNewClones( exactClones, exactIdioms );
@@ -12422,11 +12615,13 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
                                   std::string( cloneIdiomName( vd.idiom ) ), cloneGroupIsNew( cg ) } );   // now = the eroded helper's fan-in; ack identity = the member-set hash
                 regs.back().why = cloneOperandWhy( vd.operands );   // QD-IDIOM-ELEMTYPE, as on the duplication row
                 stampCloneLoc( cg );
+                noteShrinkCandidate( cg );
             }
         };
         reportReusedClones( exactClones, exactIdioms );
         reportReusedClones( type3Clones, type3Idioms );
     }
+    demoteShrinkOnlyClones( regs, shrinkCands, ing, g, keyByNode, root, extras );   // QD-SHRINK-PAIR
 
     // qd-memory-degrade: only the selected kinds' rows. A pass shared by two kinds (error-masking and placeholder, the
     // two clone kinds) or read by another kind (params, which api-surface's one-fact-one-row rule reads) ran for the

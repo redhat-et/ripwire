@@ -4947,6 +4947,7 @@ inline QualityDeltaOutcome computeQualityDelta( const std::string& root )
 
     rw::quality::HistoryUnread historyUnread;
     oc.extras.bestSince = [ root ]( const std::vector<std::string>& relPaths ) { return rw::quality::tangleBestSince( root, "HEAD", relPaths ); };   // the CLI's source
+    oc.extras.baseBodies = [ root ]( const std::vector<std::string>& relPaths ) { return rw::quality::cloneBodiesAt( root, "HEAD", relPaths ); };   // QD-SHRINK-PAIR, the CLI's source
     oc.regs       = rw::quality::computeDelta( ing, g, baseSel.snapshot, root, {}, rw::kDefaultMaxFileBytes, &oc.registerMacroExcluded, &oc.apiNewSurface,
                                                nullptr, &oc.declinedCallExcluded, &oc.valueRefExcluded, rw::quality::KindScope{}, &historyUnread, &passes, &oc.extras );
     historyUnread.renames = heal.renames.refusedPartial && baseSel.marker == std::string_view( "sidecar" );   // the CLI's own rule

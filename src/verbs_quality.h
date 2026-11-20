@@ -1121,6 +1121,8 @@ void refPairBasis( const rw::Config& cfg, const std::string& root, RefPairDelta&
     out.ackHealingSkipped = refs.degraded && !out.acks.empty();
     out.healing = quality::healIdentity( out.baseSel.snapshot, out.acks, refs.target().ing, refs.target().g,
                                          out.deltaRoot, root, cfg.qualityAck, refs.rangeSpan, /*treeWideRescues=*/!refs.degraded );
+    // QD-SHRINK-PAIR: the base commit's bodies, read from the REAL repo (both trees here are temp dirs) for the clone rows that need them
+    out.extras.baseBodies = [ root, baseSha = refs.baseSha ]( const std::vector<std::string>& relPaths ) { return quality::cloneBodiesAt( root, baseSha, relPaths ); };
     out.regs    = quality::computeDelta( refs.target().ing, refs.target().g, out.baseSel.snapshot,
                                          out.deltaRoot, cfg.excludes, cfg.maxFileBytes, &out.registerMacroExcluded, &out.apiNewSurface,
                                          cfg.qualityAck ? &out.cloneIdioms : nullptr, &out.declinedCallExcluded, &out.valueRefExcluded,
@@ -1231,6 +1233,7 @@ std::optional<int> resolveDeltaBasis( const MainDispatch& d, const std::string& 
                                          std::string( cfg.rootPath ), root, cfg.qualityAck );
     const std::string ratchetRoot( cfg.rootPath );
     out.extras.bestSince = [ ratchetRoot ]( const std::vector<std::string>& relPaths ) { return quality::tangleBestSince( ratchetRoot, "HEAD", relPaths ); };
+    out.extras.baseBodies = [ ratchetRoot ]( const std::vector<std::string>& relPaths ) { return quality::cloneBodiesAt( ratchetRoot, "HEAD", relPaths ); };   // QD-SHRINK-PAIR
     out.regs = quality::computeDelta( d.ing, d.g, out.baseSel.snapshot, cfg.rootPath, cfg.excludes, cfg.maxFileBytes, &out.registerMacroExcluded, &out.apiNewSurface,
                                       &out.cloneIdioms, &out.declinedCallExcluded, &out.valueRefExcluded, quality::KindScope{}, &out.historyUnread, &out.passes, &out.extras );
     out.rustTestExcluded = out.registerMacroExcluded > 0 && quality::anyRustTestScopeDef( d.ing );
@@ -1765,6 +1768,11 @@ inline constexpr const char* kQdOperandLegend =
     "(0 and 1 left out), or the same number of concrete parameters with a different type at some position; under 80 tokens, "
     "in distinct contexts. A type alias reads as a different type. ";
 
+// QD-SHRINK-PAIR — printed only when a clone row's why= says it crossed the bar because a member shrank (quality.h demoteShrinkOnlyClones).
+inline constexpr const char* kQdShrinkLegend =
+    "why=\"... crossed the bar because X shrank N->M tok\" on a clone row: every member existed at the base, a member's body lost "
+    "tokens and no pair's shared LCS grew, so the similarity rose by removal, not by copying; reported minor. ";
+
 // QD-REPEATED-DECISION — printed only when a complexity or tangle row's fix= names a repeated decision (repeateddecision.h).
 inline constexpr const char* kQdRepeatedDecisionLegend =
     "fix= \"name the decision once\" / \"name the loop once\" on a complexity or tangle row: the function tests one condition (6+ "
@@ -1905,8 +1913,16 @@ inline bool qdAnyLegendRow( const QualityDeltaLegendParts& p, Pred pred )
 inline const char* qdOperandLegendFor( const QualityDeltaLegendParts& p )
 {
     const bool any = qdAnyLegendRow( p, []( const rw::quality::Regression& r )
-                                     { return ( r.kind == "duplication" || r.kind == "new-clone-of-reused-helper" ) && !r.why.empty(); } );
+                                     { return ( r.kind == "duplication" || r.kind == "new-clone-of-reused-helper" ) && !r.why.empty() && !rw::quality::isShrinkOnlyWhy( r.why ); } );
     return any ? kQdOperandLegend : "";
+}
+
+// QD-SHRINK-PAIR's sentence when a clone row's why= is the shrink rule's, else "".
+inline const char* qdShrinkLegendFor( const QualityDeltaLegendParts& p )
+{
+    const bool any = qdAnyLegendRow( p, []( const rw::quality::Regression& r )
+                                     { return ( r.kind == "duplication" || r.kind == "new-clone-of-reused-helper" ) && rw::quality::isShrinkOnlyWhy( r.why ); } );
+    return any ? kQdShrinkLegend : "";
 }
 
 // QD-REPEATED-DECISION's sentence when a row's fix= names a repeated decision or loop, else "".
@@ -2064,6 +2080,7 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
                 std::fputs( kQdOneStatementLegend, out );
             }
             rw::emitRaw( out, qdOperandLegendFor( p ) );
+            rw::emitRaw( out, qdShrinkLegendFor( p ) );
         }
         if( anyMinorMaskRow( p.rows ) || anyMinorMaskRow( p.disclosedRows ) )
         {
@@ -2253,9 +2270,12 @@ DirtyPinVerdict inspectDirtyBaselinePin( const MainDispatch& d, const std::strin
     }
     gtl::btree_map<std::string, quality::AckRecord> acks = quality::readAckRecords( acksFile );
     quality::healIdentity( basis.snapshot, acks, d.ing, d.g, std::string( cfg.rootPath ), root, /*wantContentIds=*/false );
+    quality::DeltaExtras pinExtras;   // QD-SHRINK-PAIR: the delta arm's base-body reading, so a pin refuses over exactly the rows the delta gates
+    const std::string    pinRoot( cfg.rootPath );
+    pinExtras.baseBodies = [ pinRoot ]( const std::vector<std::string>& relPaths ) { return quality::cloneBodiesAt( pinRoot, "HEAD", relPaths ); };
     std::vector<quality::Regression> regs =
         quality::computeDelta( d.ing, d.g, basis.snapshot, cfg.rootPath, cfg.excludes, cfg.maxFileBytes, nullptr, nullptr, nullptr, nullptr, nullptr,
-                               quality::KindScope{}, &verdict.historyUnread, &passes );
+                               quality::KindScope{}, &verdict.historyUnread, &passes, &pinExtras );
     quality::applyAckRatchet( regs, acks );
 
     for( const quality::Regression& r : regs )
