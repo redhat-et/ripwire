@@ -16,3 +16,8 @@ void Owned::cref( Other o ) { (void)o; }
 void Owned::pair( Instance& a, View b ) { (void)a; (void)b; }
 void Owned::pair( View a, Instance& b ) { (void)a; (void)b; }
 }
+namespace lib
+{
+void Holder::hold( Box<View> b ) { (void)b; }
+void Holder::hold( Box<const View>& b ) { (void)b; }
+}

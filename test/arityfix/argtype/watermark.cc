@@ -70,3 +70,10 @@ private:
     ext::Real real_;
 };
 }
+
+namespace lib
+{
+// POSITIVE: Box<const View>& is exactly hold( Box<const View>& )'s type; Box<View> by value is another type (the inner const is
+// the type's, not the parameter's)
+void innerConstArg( Holder& h, Box<const View>& b ) { h.hold( b ); }
+}
