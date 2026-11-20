@@ -5,6 +5,7 @@
 #include <system_error> // std::errc — from_chars' result
 #include <cstdio>      // stdout / stderr — the two streams the shims below name
 #include <format>      // std::format_string — the shims' format contract (see test/printffmtparitycheck.sh)
+#include "valuerefs.h"  // VrRender / vrPath — a row's p= spelled as every other verb's
 #include "nextverb.h"   // nextFlag — findings_next='s pasteable spelling (knob-honesty-068)
 #include "infra/emit.h" // rw::emitTo — THE emitter: std::print where the library has <print>, std::format+fputs
                        // where it does not, chosen by feature test and DISCLOSED as emit= on --version. The
@@ -419,39 +420,17 @@ std::vector<rw::AstMatch> lintSymbolLevelChecks( const rw::IngestResult& ing, co
 // (not local to runLint) so dedupeLintFindings below can share it.
 struct LintOut { std::uint32_t fileId, startByte, line; std::string rule, sev, text; };
 
-// THE in= lookup of the lint family: the innermost symbol whose span holds a byte of a file, over model.h's
-// symbolsByFile ordered by sigStartByte (the scan stops at the first symbol that starts past the byte). Built
-// once per --match / --pattern / --lint run; every step that names a row's enclosing symbol reads this one.
+// THE in= lookup of the lint family: the innermost symbol whose span holds a byte of a file — atoms.h's
+// OwnerIndex, the same rule the atoms pack applies, bound to the corpus it indexes. Built once per --match /
+// --pattern / --lint run; every step that names a row's enclosing symbol reads this one.
 struct EnclosingSymbolIndex
 {
-    const rw::IngestResult& ing;
-    const rw::SymbolsByFile fileSyms;
+    const rw::IngestResult&                  ing;
+    const rw::atoms::atomdetail::OwnerIndex owners;
 
-    explicit EnclosingSymbolIndex( const rw::IngestResult& ingest )
-        : ing( ingest ),
-          fileSyms( rw::symbolsByFile( ingest,
-                                       []( const rw::Symbol& ) { return true; },
-                                       [ & ]( rw::NodeId a, rw::NodeId b ) { return ingest.symbols[a].sigStartByte < ingest.symbols[b].sigStartByte; } ) )
-    {
-    }
+    explicit EnclosingSymbolIndex( const rw::IngestResult& ingest ) : ing( ingest ), owners( ingest ) {}
 
-    const rw::Symbol* operator()( std::uint32_t fileId, std::uint32_t byteOffset ) const
-    {
-        const rw::Symbol* best = nullptr;
-        for( rw::NodeId id : fileSyms[fileId] )
-        {
-            const rw::Symbol& s = ing.symbols[id];
-            if( s.sigStartByte > byteOffset )
-            {
-                break;
-            }
-            if( byteOffset < s.endByte && ( !best || s.sigStartByte > best->sigStartByte ) )
-            {
-                best = &s;
-            }
-        }
-        return best;
-    }
+    const rw::Symbol* operator()( std::uint32_t fileId, std::uint32_t byteOffset ) const { return owners.ownerOf( ing, fileId, byteOffset ); }
 };
 
 // One <rule> tally row. The built-in and user-rule tally loops in runLint differ ONLY in whether sev=
@@ -1023,10 +1002,11 @@ void sortLintRows( const rw::IngestResult& ing, std::vector<LintOut>& outs )
 // deterministic sort order. This also keeps findings= and each rule's count= truthful: they
 // count distinct VISIBLE findings, not raw captures. Lifted out of the --lint block (same reason
 // as lintSymbolLevelChecks above) so runLint stays under the complexity/verbosity bar. `enclosing` is
-// the run's own index (the in= every row prints), not a second copy built here.
-std::vector<LintOut> dedupeLintFindings( const rw::IngestResult& ing, const EnclosingSymbolIndex& enclosing, std::vector<LintOut> outs )
+// the run's own index (the in= every row prints, over the corpus it indexes), not a second copy built here.
+std::vector<LintOut> dedupeLintFindings( const EnclosingSymbolIndex& enclosing, std::vector<LintOut> outs )
 {
     using namespace rw;
+    const IngestResult& ing = enclosing.ing;
     HashMap<std::string, char> seenRow;
     std::vector<LintOut>       deduped;  deduped.reserve( outs.size() );
     for( const LintOut& o : outs )
@@ -1497,6 +1477,7 @@ struct LintAnswerView
     const EnclosingSymbolIndex enclosing;
     const bool                 singleRoot;
     const std::string          rootPrefix;
+    const rw::VrRender         render;   // p= spelled as every other verb's row (valuerefs.h vrPath); views rootPrefix above
     const std::string          rootAttr;
 
     LintAnswerView( const rw::Config& cfg, const rw::IngestResult& ingest )
@@ -1504,17 +1485,17 @@ struct LintAnswerView
           enclosing( ingest ),
           singleRoot( ingest.realPaths.empty() && cfg.roots.size() == 1 ),
           rootPrefix( singleRoot ? rw::sarif::rootPrefixOf( cfg.roots[0] ) : std::string() ),
+          render{ singleRoot, rootPrefix },
           rootAttr( singleRoot ? " root=\"" + ex( cfg.roots[0] ) + "\"" : std::string() )
     {
     }
+    LintAnswerView( const LintAnswerView& )            = delete;   // render views this object's own rootPrefix
+    LintAnswerView& operator=( const LintAnswerView& ) = delete;
 
     std::string ex( std::string_view s ) const { return std::string( rw::escapeXml( s, esc ) ); }
 
     // a row's p= path: root-relative under a single root, the indexed path otherwise
-    std::string_view rowPath( std::uint32_t fileId ) const
-    {
-        return singleRoot ? rw::sarif::rootRelativeUri( ing.files[fileId], rootPrefix ) : std::string_view( ing.files[fileId] );
-    }
+    std::string rowPath( std::uint32_t fileId ) const { return rw::vrPath( ing, fileId, render ); }
 };
 
 // A captured node's text as element content: only the three markup characters are escaped (quotes stay as
@@ -2087,16 +2068,10 @@ rw::PageWindow lintFindingsWindow( const rw::Config& cfg, const rw::IngestResult
 }
 
 // §P0.2 disclosure: which rules (if any) spent their whole per-rule budget, so their count= is a floor.
-const RuleCap* findRuleCap( const std::vector<RuleCap>& saturatedRules, const std::string& ruleName, bool isUserRule )
+bool ruleFloored( const std::vector<RuleCap>& saturatedRules, std::string_view ruleName, bool isUserRule )
 {
-    for( const RuleCap& rc : saturatedRules )
-    {
-        if( rc.rule == ruleName && rc.isUserRule == isUserRule )
-        {
-            return &rc;
-        }
-    }
-    return nullptr;
+    return std::any_of( saturatedRules.begin(), saturatedRules.end(),
+                        [ & ]( const RuleCap& rc ) { return rc.rule == ruleName && rc.isUserRule == isUserRule; } );
 }
 
 // The root's floor pair. H8 (capture-audit 2026-09-04, lens 1 F5): OR over the rules this document EMITS,
@@ -2227,7 +2202,7 @@ void emitLintRuleTally( const rw::Config& cfg, const LintAnswerView& view, const
             const RuleTally rt = tallyLintRule( run.outs, rn, /*wantSevEmpty=*/true, lintPage );
             const rw::lintcatalog::LintCatalogRow* catRow = rw::lintcatalog::lintCatalogFind( rn );
             const bool applicable = catRow == nullptr || ( catRow->langMask & corpusLangs ) != 0;
-            printLintRuleTallyRow( rn, nullptr, rt.count, rt.shown, findRuleCap( run.saturatedRules, rn, false ) != nullptr, applicable );
+            printLintRuleTallyRow( rn, nullptr, rt.count, rt.shown, ruleFloored( run.saturatedRules, rn, false ), applicable );
         }
     }
     for( const rw::LintRule& r : run.userRules )
@@ -2240,7 +2215,7 @@ void emitLintRuleTally( const rw::Config& cfg, const LintAnswerView& view, const
         const bool        applicable = ( rw::langBit( r.lang ) & corpusLangs ) != 0;
         const bool        compiled   = std::find( run.uncompiledUserRuleIds.begin(), run.uncompiledUserRuleIds.end(), r.id ) == run.uncompiledUserRuleIds.end();
         const std::string sevEx      = view.ex( r.severity );
-        printLintRuleTallyRow( view.ex( r.id ), &sevEx, rt.count, rt.shown, findRuleCap( run.saturatedRules, r.id, true ) != nullptr, applicable, compiled );
+        printLintRuleTallyRow( view.ex( r.id ), &sevEx, rt.count, rt.shown, ruleFloored( run.saturatedRules, r.id, true ), applicable, compiled );
     }
 }
 
@@ -2309,7 +2284,7 @@ int runLintVerb( const MainDispatch& d, const LintAnswerView& view )
     // §P6.1: collapse rows that would render byte-identically (see dedupeLintFindings above for why —
     // two genuinely different AST captures, e.g. the same magic-number value spelled twice on one line,
     // can share the same rule/file:line/enclosing-symbol/text because the row carries no column).
-    run.outs = dedupeLintFindings( ing, view.enclosing, std::move( run.outs ) );
+    run.outs = dedupeLintFindings( view.enclosing, std::move( run.outs ) );
 
     const PageWindow  lintPage   = lintFindingsWindow( cfg, ing, view.enclosing, run.outs );
     const std::size_t shownCount = lintPage.end - lintPage.begin;
