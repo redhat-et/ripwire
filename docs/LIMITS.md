@@ -1310,6 +1310,8 @@ Discloses: **none**
 | `kMaxFilesPerCommit` | `30` | — | — |
 | `kRenameMaxChain` | `8` | INDEXING | a→b→c… chain depth followed from one current path (disclosed) |
 | `kRenameMaxPairs` | `4000` | INDEXING | hard cap on recorded pairs (disclosed when hit) |
+| `kShrinkJudgedMaxMembers` | `4` | — | up to 6 LCS pairs per side; a larger group is judged as before |
+| `kShrinkMaxCut` | `2` | — | a member cut to under 1/N of its base tokens is a rewrite; the row gates as before |
 
 ### `src/qualitypanel.h`
 
