@@ -394,7 +394,7 @@ constexpr std::uint32_t kCacheVersion = 54;           // 54: lane qd-tangle — 
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
 constexpr std::uint32_t kParserVer    = 335;          // bump on any grammar/.scm/extraction change
-                                                      // 335 = lane qual-ns-call-bind (placeholder above the 333/334 pair; the train renumbers): C++ / ObjC
+                                                      // 335 = 2026-11-20 (train 1118a, lane qual-ns-call-bind; above train 1117d2's 333/334, rich 336): C++ / ObjC
                                                       //   using-declarations and namespace aliases are recorded while the call-result family is off
                                                       //   (ingest_binds.h kCppCallScopeFacts), read by receiverevidence.h CallResultTypes::cppScopeNamedAt.
                                                       // 333 = 2026-11-18 (train 1117d2, stacked on train 1117d1's 331/332; above the members' placeholders): rich file tag 334.
