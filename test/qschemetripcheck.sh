@@ -39,6 +39,10 @@ PIN="$ROOT/test/qschemetrip.hash"
 #   RE-PINNED ONCE with UPDATE_GOLDEN=1 from the rebased build (hash 14b63d9888…d246329). kParserVer 333 (rich 334) replaces the
 #   members' placeholders 315/317/319 (each lane's hash was that lane alone), above main's 331/332 (train 1117d1). kCacheVersion
 #   53 (rust-self-chain's RecvCall, its placeholder kept: no other member moves it; main 52). kQSnapCacheScheme stays 34.
+# 2026-11-20, lane QD-UNHANDLED-ARM (over lane/qd-unchecked-status ebf7240f3): RE-PINNED with UPDATE_GOLDEN=1. kQSnapCacheScheme
+#   37 -> 38: a sixth defect-shape facet (unhandled-arm) adds sites, defectSitesOf builds a tree-wide C/C++ enum table, scans
+#   C files holding a switch and every Bash file (not test scripts only). No blob shape change; kParserVer / kCacheVersion
+#   unchanged. The train may renumber the scheme.
 # 2026-11-19, lane QD-UNCHECKED-STATUS (E3b, over lane/qd-va-forms 7f98c7ab4): RE-PINNED with UPDATE_GOLDEN=1. kQSnapCacheScheme
 #   35 -> 37 (36 is qd-tangle's reservation): a defect-shape site value carries its facet in three low bits, not two (a fifth facet,
 #   unchecked-status), so every stored site value moves; defectSitesOf now scans C files and every Python file. No blob shape
