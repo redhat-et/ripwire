@@ -6,7 +6,9 @@ longer gates, when every pair of members operates on different data. "Different 
 The members share no literal: 0 and 1 are left out, and `true`, `nullptr`, `None` and the like count. Or the members
 take the same number of concrete parameters, with a different type at some position. The row says which with
 `why="different literals"`, `why="different parameter types"` or `why="different literals or parameter types"`.
-A template or generic member, an untyped parameter, or a shared literal keeps the group gating, as before.
+A template or generic member, an untyped parameter, or a shared literal keeps the group gating, as before. So does a
+recognized idiom whose members share a domain value, such as a ladder over the same `Grade::Poor` … with tuned
+thresholds or a pair sharing a named constant. A function passed by value, like `svLess`, does not count.
 `--clones` does not read this verdict and is byte-identical.
 
 Measured on ripwire's own history, gating rows fell from 13 to 3 on the 13 acknowledged VA-FORMS rows. The 3 that
@@ -14,7 +16,7 @@ still gate do so by design: one is past the 80-token ceiling, and two members sh
 - 23 to 21 on the qd-tangle range;
 - 41 to 36 on 40 tmux commits;
 - no change on the last 20 merges, the slip commits, textual or 20 other tmux commits;
-- 1,863 to 1,234 on a synthetic envoy range that adds two whole subtrees.
+- 1,863 to 1,243 on a synthetic envoy range that adds two whole subtrees.
 
 The real duplicates still gate (`writeTangleLines`/`writeHexPairLines`, `steer_find`/`JsonNode::get`). Hand-reading
 24 envoy demotions found 21 idiom collisions over different data and 3 borderline rows, among them the identical

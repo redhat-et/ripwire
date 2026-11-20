@@ -19335,9 +19335,11 @@ script. Ranges:
 | last 20 merges | 8 → 8 | 0 | 14 |
 | tmux 20 / 60 | 37 → 37 / 41 → 36 | 0 / 1 + 4 | 4 / 5 |
 | textual 20 | 18 → 18 | 0 | 2 |
-| envoy synthetic | 1,863 → 1,234 | 345 / 284 (+78 why= on rows already minor or new) | 14 |
+| envoy synthetic | 1,863 → 1,243 | 336 / 284 (+75 why= on rows already minor or new) | 14 |
 
-No other row changed. `regressions=` and the row count are equal on every range.
+No other row changed. `regressions=` and the row count are equal on every range. Rule (6) (an idiom group sharing a
+domain value keeps gating) was added after `cloneidiomcheck` I/O went red. It moved only envoy (9 rows, 1,234 to
+1,243); the hand-check sample below predates it.
 
 **What still gates.**
 - The 3 VA rows still gating are by design. `emptyUnder|picksAlone` is 84 tokens. `isIdent|isWordChar` share the
