@@ -15,11 +15,13 @@
 #   (N1) the collector shrinks AND the other member copies one of its statements in (the LCS grew) -> GATES
 #   (N2) a member the base did not hold (the shrunk old member beside a new copy) -> GATES
 #   (N3) both shrink but one copies a statement in (the LCS grew) -> GATES
+#   (N4) the collector cut to under half its base body -> GATES (a long base body holds most short ones as a subsequence, so its
+#        base LCS saturates and cannot tell removal from a rewrite; census 11-20: textual ColorSystem::generate 1569 -> 22 tok)
 #   (C)  PREMISE COUNT — every arm found both its rows (a missing row would pass a "gates"/"minor" arm vacuously)
 #   (L)  a document with a shrink why= defines it (full legend) and does not print the operand sentence; one without carries neither
 #   (J)  determinism — two runs byte-identical
-# Red-before: on a binary without the rule, P1/P1w/P1m/P2 gate (FAIL). Guard-off (the LCS test removed, a member without a base body
-# skipped instead of refusing the group): N1-N3 FAIL. See docs/EVALS.md "Clone shrink-only pairs".
+# Red-before: on a binary without the rule, P1/P1w/P1m/P2 gate (FAIL). Guard-off (the LCS test removed, a member without a base
+# body skipped instead of refusing the group): N1-N3 FAIL; the cut test removed: N4 FAILS. See docs/EVALS.md "Clone shrink-only pairs".
 #
 # Usage:  bash test/shrinkpaircheck.sh [BIN]
 
@@ -44,6 +46,13 @@ macros(){   # macros <variant>
     printf '#pragma once\n#include <algorithm>\n#include <string>\n#include <vector>\n#include "model.h"\nnamespace macros\n{\n'
     printf 'inline std::vector<std::string> collectMacroNames( const Index& ing )\n{\n    std::vector<std::string> names;\n'
     case $1 in *reserve*) printf '    names.reserve( ing.symbols.size() );\n';; esac
+    case $1 in *huge*)
+        printf '    for( const Binding& b : ing.bindings )\n    {\n        if( b.kind == BindKind::Other && b.fileId > 3 )\n        {\n'
+        printf '            names.push_back( b.var + "_bound" );\n            names.push_back( b.importedName );\n        }\n    }\n'
+        printf '    for( const Symbol& s : ing.symbols )\n    {\n        if( s.kind == Kind::Fn && s.name.size() > 3 && s.lang != Lang::C )\n        {\n'
+        printf '            names.push_back( s.name + "_fn" );\n            names.push_back( std::string( s.name.rbegin(), s.name.rend() ) );\n        }\n    }\n'
+        printf '    if( names.size() > 1000 )\n    {\n        names.resize( 1000 );\n        names.shrink_to_fit();\n    }\n';;
+    esac
     printf '    for( const Symbol& s : ing.symbols )\n    {\n'
     printf '        if( s.kind == Kind::Macro && ( s.lang == Lang::Cpp || s.lang == Lang::C || s.lang == Lang::ObjC ) )\n        {\n'
     printf '            names.push_back( s.name );\n        }\n    }\n'
@@ -161,9 +170,11 @@ mkrepo n2 none importedextra small imported commit || { echo "git fixture setup 
 gates "(N2) a new copy beside a shrunk old member" "$( rows n2 )"
 mkrepo n3 bigreserve importedextra smallreserve importedreserve commit || { echo "git fixture setup failed"; exit 2; }
 gates "(N3) both shrink, one copies a statement in" "$( rows n3 )"
+mkrepo n4 bighuge imported small imported commit || { echo "git fixture setup failed"; exit 2; }
+gates "(N4) the collector cut to under half its body (a rewrite: its base LCS saturates)" "$( rows n4 )"
 
 echo "── (C) premise count"
-if [ "$seen" -eq 12 ]; then ok "(C) all 12 rows of the 6 arms found"; else no "(C) $seen of 12 rows found"; fi
+if [ "$seen" -eq 14 ]; then ok "(C) all 14 rows of the 7 arms found"; else no "(C) $seen of 14 rows found"; fi
 
 echo "── (L) legend"
 FULL="$( "$BIN" "$TMP/p1" --quality-delta=HEAD~1..HEAD --no-cache --legend=full 2>/dev/null )"   # status: exits 0 or 2 by design; the legend text is the verdict
