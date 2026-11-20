@@ -190,7 +190,10 @@ template <class OkAt>
 // `\bcall(s|ed|ers?)?\b`: a \b before "call" and after one of its suffixes (the empty one included).
 [[nodiscard]] inline bool hasCallWord( std::string_view lq )
 {
-    constexpr std::string_view kSuffixes[] = { "s", "ed", "ers", "er", "" };
+    // `static` is load-bearing, not tidiness: this table is odr-used from INSIDE the lambda below, and MSVC (cl) rejects a
+    // lambda's access to an enclosing function's automatic constexpr table with C2326 where clang-cl and gcc accept it.
+    // Static storage duration is never captured, so the divergence cannot arise. Do not drop the `static`.
+    static constexpr std::string_view kSuffixes[] = { "s", "ed", "ers", "er", "" };
     return occursWhere( lq, "call", [ & ]( std::size_t at )
     {
         return isBoundary( lq, at ) && std::ranges::any_of( kSuffixes, [ & ]( std::string_view suf )
@@ -384,7 +387,8 @@ inline constexpr std::string_view kPathNouns[] = { "chains", "chain", "paths", "
 // \b(chain|path)s?\s+(from|between)\b
 [[nodiscard]] inline bool pathNounThenPrep( std::string_view lq )
 {
-    constexpr std::string_view kPreps[] = { "from", "between" };
+    // `static` is load-bearing for the same reason as kSuffixes above: odr-used inside a nested lambda, which trips MSVC C2326.
+    static constexpr std::string_view kPreps[] = { "from", "between" };
     return std::ranges::any_of( kPathNouns, [ & ]( std::string_view noun )
     {
         return occursWhere( lq, noun, [ & ]( std::size_t at )
