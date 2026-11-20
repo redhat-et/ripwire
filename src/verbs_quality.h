@@ -2452,6 +2452,23 @@ inline void emitQdGatingLine( const std::vector<rw::quality::Regression>& regs, 
     }
 }
 
+// A present-only JSON string member of a --quality-delta row: ,"name":"value" when `v` is non-empty, nothing otherwise.
+inline void emitJsonStrIfPresent( std::FILE* out, const char* name, const std::string& v )
+{
+    if( !v.empty() )
+    {
+        rw::emitTo( out, ",\"{}\":\"{}\"", name, rw::jsonStr( v ).c_str() );
+    }
+}
+
+// A present-only XML attribute of a --quality-delta row: ` name="escaped"` when `v` is non-empty, empty otherwise;
+// `esc` is the row's XML escaper.
+template<class Escape>
+inline std::string presentXmlAttr( std::string_view name, const std::string& v, const Escape& esc )
+{
+    return v.empty() ? std::string() : " " + std::string( name ) + "=\"" + esc( v ) + "\"";
+}
+
 std::optional<int> runQualityDelta( const MainDispatch& d )
 {
     using namespace rw;
@@ -2941,14 +2958,8 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                 {
                     rw::emitTo( stdout, ",\"ceiling\":{}", r.ceiling ); // QD-ENTRY-CEILING (mirrors the XML)
                 }
-                if( !r.call.empty() )
-                {
-                    rw::emitTo( stdout, ",\"call\":\"{}\"", jsonStr( r.call ).c_str() ); // QD-UNCHECKED-STATUS (mirrors the XML)
-                }
-                if( !r.why.empty() )
-                {
-                    rw::emitTo( stdout, ",\"why\":\"{}\"", jsonStr( r.why ).c_str() ); // QD-UNHANDLED-ARM (mirrors the XML)
-                }
+                emitJsonStrIfPresent( stdout, "call", r.call );   // QD-UNCHECKED-STATUS (mirrors the XML)
+                emitJsonStrIfPresent( stdout, "why", r.why );     // QD-UNHANDLED-ARM (mirrors the XML)
                 rw::emitRaw( stdout, "}" );
             };
             bool firstR = true;
@@ -3064,9 +3075,9 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             // QD-ENTRY-CEILING: the ceiling a NEW function reached, beside the gating= it causes (present-only)
             const std::string ceilingAttr = r.ceiling != 0 ? " ceiling=\"" + std::to_string( r.ceiling ) + "\"" : std::string();
             // QD-UNCHECKED-STATUS: the call whose status a defect-shape unchecked-status row drops (present-only)
-            const std::string callAttr = r.call.empty() ? std::string() : " call=\"" + ex( r.call ) + "\"";
+            const std::string callAttr = presentXmlAttr( "call", r.call, ex );
             // QD-UNHANDLED-ARM: what a defect-shape unhandled-arm row's classifier leaves without an outcome (present-only)
-            const std::string whyAttr = r.why.empty() ? std::string() : " why=\"" + ex( r.why ) + "\"";
+            const std::string whyAttr = presentXmlAttr( "why", r.why, ex );
             // P8 (L7): the threshold beside the number it judges — bar= on the four numeric kinds (quality.h's
             // kCcxBar/kLocBar/kNestBar/kParamBar), so was=/now= read without the legend.
             const char* barAttr = r.kind == "complexity" ? " bar=\"15\"" : r.kind == "verbosity" ? " bar=\"60\""
