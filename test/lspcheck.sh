@@ -56,13 +56,32 @@
 #   (22) determinism x2 on the new collision dialog (house pattern)
 #   (23) the known gap stays COHERENT: --around's CLI row shows the tower front AND its defs= count, so
 #        edge-vs-display disagreement is visible on the row, never hidden
+#   (27) task D family tier under a CONTEXT anchor: opened widget.cpp — the exact-language Function
+#        fronts the same-family struct (higher rung) and the foreign trait/module; order byte-pinned
+#   (28) task D explicit @lang with NO such def and NO family: the foreign row answers, the fallback
+#        is DISCLOSED ahead of the result, and reflang= keeps saying which language was asked for
+#   (29) EXPLICIT beats CONTEXT: cursor in widget.cpp, 'Shape@rs' answers ONLY the Rust trait (the
+#        suffix RESTRICTS the list) and discloses reflang="rs" — a stated language outranks the document
+#   (30) unknown suffix on the LSP lane: 'Shape@bogus' answers nothing, ONE refusal naming known tags
+#   (32) corpus tie: 5 Python defs beat 1 Ruby and origin="corpus" is named — an absent language never
+#        wins the anchor
+#   (34) Nothing@rs: zero-match name with a valid suffix answers [] and claims NO fallback (nothing was
+#        given up); the suffix itself must not leak into the name
+#   (35) the language tier never rescues a declaration: cpp body, cpp decl, higher-rung C struct in that
+#        byte order — language tier and the same-scope yield compose
+#   (36) suffix case is tolerated, name case is NOT: 'Shape@CPP' = Shape@cpp; 'shape@rs' matches nothing
+#   (47) workspace/symbol probes the WHOLE "::" spelling first: an indexed `notes.md::config::user@py` heading answers as
+#        itself, not its tail-stripped twin `user` (#702 review)
+#   (48) a suffix array with a non-string element installs nothing: `[".h", 123, ".c"]` keeps the default set (#702 review)
+#   (49) the `tsx` languageId maps to TypeScript, the language .tsx files index as (#702 review)
 #   (24) a constructor never outranks its class (maintainer, #432 review): Java `public Shape() {}` inside class Shape
 #        and C++ `Widget::Widget()` beside a header-first class Widget — --lego names the class and its implementor,
 #        --around focuses the class row; a near-miss Java method named like ANOTHER class keeps the Method rung
 #   (25) a C prototype beside its body is counted in the (19) sentence but never described as a resolver split
-#   (26) the tower's tiers in ORDER: kind before language — a Python class (rung 3) sits between a Ruby method (5)
-#        and a Ruby attr (1) although the leading language is Ruby (arms 18-23 are single-language and cannot see a
-#        swap of the two tiers)
+#   (26) the tower's tiers in ORDER (RE-PINNED by task D — was "kind before language", the C2-era shape the
+#        owner's rule replaces): exact language first, the ladder WITHIN each group (Ruby method, Ruby attr,
+#        then the Python class), the edge-family between — arms 18-23 are single-language and cannot see a tier
+#        swap; this arm is the one that can
 #
 # Usage:  RIPWIRE_BIN=build/ripwire bash test/lspcheck.sh   |   bash test/lspcheck.sh path/to/ripwire
 
@@ -73,10 +92,16 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
+# A dialogue that ends on shutdown exits 0. An arm that reads a failed run's frames would compare empty answers, so the
+# task D/E dialogues (27)-(49) test the exit status where they run (LAND-440, the gate-status rule).
+lspRc(){ no "--lsp exited non-zero on dialogue $1: the arm below reads a failed run"; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 
 WORK="$( cd "$( mktemp -d )" && pwd -P )"; trap 'rm -rf "$WORK"' EXIT
+# The language-map loader reads $XDG_CONFIG_HOME/ripwire/ and ~/.config/ripwire/lsp-langmap.toml: a developer's own map
+# (an [overrule] list without .h, say) must not answer any dialogue here, so both point into the work dir.
+mkdir -p "$WORK/noxdg" "$WORK/nohome"; export XDG_CONFIG_HOME="$WORK/noxdg" HOME="$WORK/nohome"
 mkdir -p "$WORK/src"
 
 # C++ fixture — line numbers below are load-bearing (the arms address them):
@@ -212,7 +237,7 @@ printf '%s' "$R8" | grep -q 'int scale( int f )' \
     || { no "(8) didChange content leaked into the answer, or the hover moved"; printf '%s\n' "$R8" | head -c 300; }
 
 # ── (9) protocol shape: 14 dialog messages, exactly 9 responses ──────────────────────────────────────
-NRESP="$( grep -c . "$WORK/resp" 2>/dev/null || echo 0 )"
+NRESP="$( grep -c '"id":' "$WORK/resp" 2>/dev/null || echo 0 )"   # responses carry an id; D4 disclosures ride window/logMessage frames (no id) and must not read as answers
 [ "$NRESP" = 9 ] \
     && ok "(9) exactly 9 responses to the 14-message dialog (notifications answered nothing)" \
     || { no "(9) response count wrong: got $NRESP, expected 9"; cat "$WORK/resp"; }
@@ -344,7 +369,10 @@ done
 [ -z "$f16" ] && ok "(16) framing: missing / non-numeric / negative / over-cap Content-Length and a header flood each exit 1 within 10 s, stdout empty, the refusal named" \
              || no "(16) framing refusal wrong for:$f16"
 
-# ── (17) workspace/symbol discloses its 20-row cap ──────────────────────────────────────────────────────────
+# ── (17) workspace/symbol discloses its 20-row cap ──────────────────────────────────────────────────
+# (#440 re-pin: the anchored-notice half of the TWO notices was task D's corpus anchor speaking on a
+# substring query it decided nothing about — under the adopted rule an unused anchor is silent, so the
+# cap sentence is now the ONLY notice. The cap itself is untouched.)
 W17="$( mktemp -d )"
 for k in $( seq 0 24 ); do printf 'int capfn%02d() { return %d; }\n' "$k" "$k"; done > "$W17/caps.cpp"
 {
@@ -360,12 +388,13 @@ rm -rf "$W17"
 rows30="$( grep '"id":30,' "$WORK/r17" | grep -o '"name":"capfn' | wc -l | tr -d ' ' )"
 rows31="$( grep '"id":31,' "$WORK/r17" | grep -o '"name":"capfn' | wc -l | tr -d ' ' )"
 notices="$( grep -c '"method":"window/logMessage"' "$WORK/r17" )"
-noticeLine="$( grep -n '"method":"window/logMessage"' "$WORK/r17" | cut -d: -f1 )"; resp30Line="$( grep -n '"id":30,' "$WORK/r17" | cut -d: -f1 )"
+noticeLine="$( grep -n '"method":"window/logMessage"' "$WORK/r17" | head -1 | cut -d: -f1 )"; resp30Line="$( grep -n '"id":30,' "$WORK/r17" | head -1 | cut -d: -f1 )"
 [ "$rows30" = 20 ] && [ "$rows31" = 10 ] && [ "$notices" = 1 ] \
     && grep -q 'shows the first 20 of 25 matches for .capfn.' "$WORK/r17" \
     && [ -n "$noticeLine" ] && [ "$noticeLine" -lt "$resp30Line" ] \
-    && ok "(17) workspace/symbol: 25 matches → 20 rows after one window/logMessage 'first 20 of 25'; 10 matches (capfn10-19) → 10 rows, no notice" \
+    && ok "(17) workspace/symbol: 25 matches → 20 rows after the ONE window/logMessage 'first 20 of 25' (an unused corpus anchor says nothing); 10 matches → 10 rows" \
     || { no "(17) cap disclosure wrong: rows30=$rows30 rows31=$rows31 notices=$notices"; head -c 500 "$WORK/r17"; }
+
 # ── (18) picker order: the tower sorts every multi-def answer, byte-pinned on the collision fixture ───
 cp -r "$ROOT/test/rubyschemafix" "$WORK/collide"
 uriColl="file://$WORK/collide"
@@ -614,7 +643,9 @@ grep -q 'splits over' "$WORK/r25" \
     && no "(25) the disclosure says the resolver SPLIT a call it bound to the body alone" \
     || ok "(25) prototype+body: counted as 2 definitions, no split claimed (the call binds to the body)"
 
-# ── (26) kind tier before language tier ──────────────────────────────────────────────────────────────
+# ── (26) the adopted rule's ladder: with NO stated language, kind decides and the majority is SILENT
+# even when it would order differently — #440 re-pin of task D's language-first pin. Mix: js/rb count
+# says ruby, but method(5) beats class(3) beats attr-var(1) across the languages. ─────────────────────
 mkdir -p "$WORK/mixlang"
 printf 'class AllFour\n  attr_reader :name\nend\n' > "$WORK/mixlang/a.rb"
 printf 'class name:\n    pass\n' > "$WORK/mixlang/b.py"
@@ -622,8 +653,8 @@ printf 'class Other\n  def name\n    1\n  end\nend\nOther.new.name\n' > "$WORK/m
 o26="$( cd "$WORK/mixlang" && "$BIN" --impact=name . 2>/dev/null | grep -o '<def ix="[0-9]*" t="[a-z]*"[^>]*p="[^"]*"' | tr '\n' ' ' )"
 case "$o26" in
     *'ix="1" t="method" sc="Other" p="c.rb:2"'*'ix="2" t="cls" sc="name" p="b.py:1"'*'ix="3" t="var" sc="AllFour" p="a.rb:2"'*)
-        ok "(26) kind before language: Ruby method, then the Python class, then the Ruby attr" ;;
-    *)  no "(26) tier order wrong (a language-first comparator puts the Ruby attr ahead of the Python class): $o26" ;;
+        ok "(26) the ladder answers alone: Ruby method → Python class → Ruby attr — kind outranks the majority language, and the root said nothing" ;;
+    *)  no "(26) ladder order wrong (a lifted corpus tier would front the ruby attr before the python class): $o26" ;;
 esac
 
 # ── (22) determinism x2 on the collision dialog (house pattern) ───────────────────────────────────────
@@ -632,6 +663,430 @@ esac
 cmp -s "$WORK/raw22a" "$WORK/raw22b" && [ -s "$WORK/raw22a" ] \
     && ok "(22) collision dialog byte-identical across two runs" \
     || { no "(22) collision dialogs differ"; ls -l "$WORK/raw22a" "$WORK/raw22b"; }
+
+# ── (27) family tier under a context anchor: the ladder must not outrank the language (task D) ──────
+mkdir -p "$WORK/lof"
+for f in widget.c widget.cpp widget.rs; do cp "$ROOT/test/langorderfix/$f" "$WORK/lof/$f"; done
+mkdir -p "$WORK/lof/lib"; cp "$ROOT/test/langorderfix/lib/shape.ex" "$WORK/lof/lib/shape.ex"
+{
+  msg "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":\"file://$WORK/lof\",\"capabilities\":{}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://$WORK/lof/widget.cpp\",\"languageId\":\"cpp\",\"version\":1,\"text\":\"\"}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":60,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://$WORK/lof/widget.cpp\"},\"position\":{\"line\":10,\"character\":12}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\"}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}"
+} > "$WORK/d27"
+"$BIN" --lsp < "$WORK/d27" > "$WORK/raw27" 2>/dev/null || lspRc d27
+decodeFrames "$WORK/raw27" > "$WORK/r27" 2>/dev/null
+R60="$( grep '"id":60,' "$WORK/r27" )"
+d_pp="$( printf '%s' "$R60" | grep -bo 'widget\.cpp","range":{"start":{"line":3' | cut -d: -f1 | head -1 )"
+d_c="$(  printf '%s' "$R60" | grep -bo 'widget\.c","range":{"start":{"line":3'  | cut -d: -f1 | head -1 )"
+d_rs="$( printf '%s' "$R60" | grep -bo 'widget\.rs","range":{"start":{"line":2' | cut -d: -f1 | head -1 )"
+d_ex="$( printf '%s' "$R60" | grep -bo 'shape\.ex","range":{"start":{"line":3' | cut -d: -f1 | head -1 )"
+[ -n "$d_pp" ] && [ -n "$d_c" ] && [ -n "$d_rs" ] && [ -n "$d_ex" ] \
+    && [ "$d_pp" -lt "$d_c" ] && [ "$d_c" -lt "$d_rs" ] && [ "$d_rs" -lt "$d_ex" ] \
+    && ok "(27) context anchor cpp: Function first despite rank 2 — exact < family < foreign-by-rank, order cpp<c<rs<ex" \
+    || { no "(27) family tier wrong: pp=$d_pp c=$d_c rs=$d_rs ex=$d_ex"; printf '%s\n' "$R60" | head -c 320; }
+
+# ── (28) explicit @lang with zero defs and zero family: foreign fallback, disclosed ────────────────
+mkdir -p "$WORK/lofb"; cp "$ROOT/test/langorderfix/widget.cpp" "$WORK/lofb/impl.cpp"
+{
+  msg "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":\"file://$WORK/lofb\",\"capabilities\":{}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":61,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"Shape@ex\"}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\"}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}"
+} > "$WORK/d28"
+"$BIN" --lsp < "$WORK/d28" > "$WORK/raw28" 2>/dev/null || lspRc d28
+decodeFrames "$WORK/raw28" > "$WORK/r28" 2>/dev/null
+n28="$( grep -c 'window/logMessage.*holds no definition' "$WORK/r28" )"
+n28l="$( grep -n 'window/logMessage.*holds no definition' "$WORK/r28" | head -1 | cut -d: -f1 )"
+r28l="$( grep -n '"id":61,' "$WORK/r28" | head -1 | cut -d: -f1 )"
+R61="$( grep '"id":61,' "$WORK/r28" )"
+printf '%s' "$R61" | grep -qF "\"uri\":\"file://$WORK/lofb/impl.cpp\"" \
+    && [ "$n28" = 1 ] && [ -n "$n28l" ] && [ -n "$r28l" ] && [ "$n28l" -lt "$r28l" ] \
+    && grep -q 'window/logMessage.*holds no definition.*reflang=\\"ex\\"' "$WORK/r28" \
+    && ok "(28) Shape@ex with no Elixir anywhere: impl.cpp answers, ONE 'holds no definition' notice precedes it, reflang=ex kept honest" \
+    || { no "(28) fallback wrong: n=$n28 notice=$n28l resp=$r28l"; printf '%s\n' "$R61" | head -c 240; }
+
+# ── (29) EXPLICIT beats CONTEXT and RESTRICTS the list to the stated language ──────────────────────
+mkdir -p "$WORK/loexp"
+for f in widget.c widget.cpp widget.rs; do cp "$ROOT/test/langorderfix/$f" "$WORK/loexp/$f"; done
+mkdir -p "$WORK/loexp/lib"; cp "$ROOT/test/langorderfix/lib/shape.ex" "$WORK/loexp/lib/shape.ex"
+{
+  msg "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":\"file://$WORK/loexp\",\"capabilities\":{}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://$WORK/loexp/widget.cpp\",\"languageId\":\"cpp\",\"version\":1,\"text\":\"\"}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":63,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"Shape@rs\"}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\"}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}"
+} > "$WORK/d29"
+"$BIN" --lsp < "$WORK/d29" > "$WORK/raw29" 2>/dev/null || lspRc d29
+decodeFrames "$WORK/raw29" > "$WORK/r29" 2>/dev/null
+R63="$( grep '"id":63,' "$WORK/r29" )"
+row63="$( printf '%s' "$R63" | grep -o '"name":"Shape"' | wc -l | tr -d ' ' )"
+printf '%s' "$R63" | grep -qF "\"uri\":\"file://$WORK/loexp/widget.rs\"" \
+    && [ "$row63" = 1 ] \
+    && grep -q 'window/logMessage.*reflang=\\"rs\\" origin=\\"explicit\\"' "$WORK/r29" \
+    && ok "(29) Shape@rs answers ONLY the Rust trait with reflang=\"rs\" — a stated language outranks the opened document's" \
+    || { no "(29) explicit-over-context wrong: rows=$row63"; printf '%s\n' "$R63" | head -c 320; }
+
+# ── (30) unknown suffix on the LSP lane: nothing answers, ONE refusal names the known tags ─────────
+{
+  msg "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":\"file://$WORK/loexp\",\"capabilities\":{}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":64,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"Shape@bogus\"}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\"}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}"
+} > "$WORK/d30"
+"$BIN" --lsp < "$WORK/d30" > "$WORK/raw30" 2>/dev/null || lspRc d30
+decodeFrames "$WORK/raw30" > "$WORK/r30" 2>/dev/null
+R64="$( grep '"id":64,' "$WORK/r30" )"
+n64="$( grep -c 'window/logMessage.*unknown language' "$WORK/r30" )"
+printf '%s' "$R64" | grep -q '"result":\(null\|\[\]\)' \
+    && [ "$n64" = 1 ] \
+    && grep -q 'cpp' "$WORK/r30" && grep -q 'kt' "$WORK/r30" \
+    && ok "(30) Shape@bogus: nothing answers, ONE refusal naming the known tags precedes the empty result" \
+    || { no "(30) LSP refusal wrong: notices=$n64"; printf '%s\n' "$R64" | head -c 240; }
+
+# ── (32) adopted-rule pair: kind-first SILENCE for def-vs-class-counts, and the tie-break SPEAKING
+# when same-kind counts decide. First half: 5 python defs (fn rung 2) + 1 ruby def (method rung 5) —
+# the method rung fronts on KIND, the 5-vs-1 majority never speaks (no notice). Second half: python
+# fn vs javascript fn — same rung, js is the majority → js fronts and the tie names itself corpus-side.
+mkdir -p "$WORK/lotie"
+for k in 1 2 3 4; do printf 'def helper_%s():\n    return %s\n' "$k" "$k" > "$WORK/lotie/mod$k.py"; done
+printf 'def helper():\n    return helper_1()\n' > "$WORK/lotie/top.py"
+printf 'def helper\nend\n' > "$WORK/lotie/one.rb"
+{
+  msg "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":\"file://$WORK/lotie\",\"capabilities\":{}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":65,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"helper\"}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\"}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}"
+} > "$WORK/d32"
+"$BIN" --lsp < "$WORK/d32" > "$WORK/raw32" 2>/dev/null || lspRc d32
+decodeFrames "$WORK/raw32" > "$WORK/r32" 2>/dev/null
+R65="$( grep '"id":65,' "$WORK/r32" )"
+t65py="$( printf '%s' "$R65" | grep -bo 'top\.py' | cut -d: -f1 | head -1 )"
+t65rb="$( printf '%s' "$R65" | grep -bo 'one\.rb'  | cut -d: -f1 | head -1 )"
+if [ -n "$t65rb" ] && [ -n "$t65py" ] && [ "$t65rb" -lt "$t65py" ] \
+   && ! grep -q 'reflang' "$WORK/r32"; then
+    ok "(32) kind-first: the Ruby method rung fronts 5-to-1 python defs and the majority says NOTHING (no reflang)"
+else
+    no "(32) kind-first/silence wrong: py=$t65py rb=$t65rb"; printf '%s\n' "$R65" | head -c 260
+fi
+mkdir -p "$WORK/lotie2"
+printf 'function run() {}\nfunction aux1() {}\nfunction aux2() {}\n' > "$WORK/lotie2/z.js"
+printf 'def run():\n    return 1\n' > "$WORK/lotie2/a.py"
+{
+  msg "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":\"file://$WORK/lotie2\",\"capabilities\":{}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":66,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"run\"}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\"}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}"
+} > "$WORK/d32b"
+"$BIN" --lsp < "$WORK/d32b" > "$WORK/raw32b" 2>/dev/null || lspRc d32b
+decodeFrames "$WORK/raw32b" > "$WORK/r32b" 2>/dev/null
+R66="$( grep '"id":66,' "$WORK/r32b" )"
+t66js="$( printf '%s' "$R66" | grep -bo 'z\.js' | cut -d: -f1 | head -1 )"
+t66py="$( printf '%s' "$R66" | grep -bo 'a\.py'  | cut -d: -f1 | head -1 )"
+if grep -q 'reflang=.*origin=.*corpus' "$WORK/r32b" && [ -n "$t66js" ] && [ -n "$t66py" ] && [ "$t66js" -lt "$t66py" ]; then
+    ok "(32b) same-rung tie: the js majority fronts run AND names itself (reflang origin=corpus)"
+else
+    no "(32b) tie-break front/disclosure wrong: js=$t66js py=$t66py"
+fi
+
+# ── (34) a zero-match name with a valid suffix: empty, unclaimed, and the @ never leaks as the name ─
+{
+  msg "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":\"file://$WORK/loexp\",\"capabilities\":{}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":66,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"Nothing@rs\"}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\"}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}"
+} > "$WORK/d34"
+"$BIN" --lsp < "$WORK/d34" > "$WORK/raw34" 2>/dev/null || lspRc d34
+decodeFrames "$WORK/raw34" > "$WORK/r34" 2>/dev/null
+R66s="$( grep '"id":66,' "$WORK/r34" )"
+printf '%s' "$R66s" | grep -q '"result":\[\]' \
+    && ! grep -q 'holds no definition' "$WORK/r34" \
+    && ! grep -q '"name":"Nothing@rs"' "$WORK/r34" \
+    && ok "(34) Nothing@rs: [] with NO fallback claim — a name that matches nothing gives up nothing" \
+    || { no "(34) no-match lane over-discloses or leaked the suffix"; printf '%s\n' "$R66s" | head -c 200; }
+
+# ── (35) the language tier never rescues a declaration: body, its decl, then the higher-rung C struct ─
+mkdir -p "$WORK/lodecl"
+printf '// the decl is the EXACT-language answer the bare name first reaches; the yield below must still\n// pick the body as focus\nint thing( int f );\n' > "$WORK/lodecl/thing.h"
+printf 'int thing( int f )\n{\n    return f + 1;\n}\n\nint call_thing( int k )\n{\n    return thing( k );\n}\n' > "$WORK/lodecl/thing.cpp"
+printf '// a C struct named thing, one family step out and a HIGHER rung\nstruct thing\n{\n    int v;\n};\n' > "$WORK/lodecl/thing.c"
+{
+  msg "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":\"file://$WORK/lodecl\",\"capabilities\":{}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://$WORK/lodecl/thing.cpp\",\"languageId\":\"cpp\",\"version\":1,\"text\":\"\"}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":67,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://$WORK/lodecl/thing.cpp\"},\"position\":{\"line\":7,\"character\":11}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\"}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}"
+} > "$WORK/d35"
+"$BIN" --lsp < "$WORK/d35" > "$WORK/raw35" 2>/dev/null || lspRc d35
+decodeFrames "$WORK/raw35" > "$WORK/r35" 2>/dev/null
+R67d="$( grep '"id":67,' "$WORK/r35" )"
+e_cpp="$( printf '%s' "$R67d" | grep -bo 'thing\.cpp","range":{"start":{"line":0' | cut -d: -f1 | head -1 )"
+e_h="$(   printf '%s' "$R67d" | grep -bo 'thing\.h","range":{"start":{"line":2'  | cut -d: -f1 | head -1 )"
+e_c="$(   printf '%s' "$R67d" | grep -bo 'thing\.c","range":{"start":{"line":1'  | cut -d: -f1 | head -1 )"
+[ -n "$e_cpp" ] && [ -n "$e_h" ] && [ -n "$e_c" ] \
+    && [ "$e_cpp" -lt "$e_h" ] && [ "$e_h" -lt "$e_c" ] \
+    && ok "(35) cpp body first, its decl second, the higher-rung C struct last — tier order and yield compose, ladder never rescues" \
+    || { no "(35) decl/body/struct order wrong: cpp=$e_cpp h=$e_h c=$e_c"; printf '%s\n' "$R67d" | head -c 300; }
+
+# ── (36) suffix case is tolerated, name case is NOT (the two axes stay independently documented) ───
+{
+  msg "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":\"file://$WORK/loexp\",\"capabilities\":{}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":68,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"Shape@CPP\"}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":69,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"shape@rs\"}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\"}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}"
+} > "$WORK/d36"
+"$BIN" --lsp < "$WORK/d36" > "$WORK/raw36" 2>/dev/null || lspRc d36
+decodeFrames "$WORK/raw36" > "$WORK/r36" 2>/dev/null
+R68s="$( grep '"id":68,' "$WORK/r36" )"; R69s="$( grep '"id":69,' "$WORK/r36" )"
+printf '%s' "$R68s" | grep -qF "\"uri\":\"file://$WORK/loexp/widget.cpp\"" \
+    && printf '%s' "$R69s" | grep -q '"result":\[\]' \
+    && ok "(36) Shape@CPP resolves like Shape@cpp; shape@rs matches no symbol — suffix tolerant, names exact" \
+    || { no "(36) case axes conflated"; printf '%s\n' "$R68s" | head -c 200; printf '%s\n' "$R69s" | head -c 200; }
+
+# ── (37)-(41) task E: the client's declared languageId as a validated anchor hint ───────────────────
+# Fixture: shape.h declares `Shape` (indexed Cpp by extension CONVENTION — the exact case where the
+# editor's declaration beats the path), shape.c defines it (indexed C). shape@rb pins explicit-over-client.
+# (37)(38) are behavior arms — RED before E1-E3; (39)(40)(41) are controls that must hold green before
+# AND after: garbage ids change nothing, explicit @lang outranks the declaration, and the document-free
+# workspace/symbol lane never sees it.
+mkdir -p "$WORK/loh"
+printf 'typedef struct Shape Shape;\n' > "$WORK/loh/shape.h"
+printf 'struct Shape { int x; };\n'   > "$WORK/loh/shape.c"
+cp "$ROOT/test/langorderfix/widget.rs" "$WORK/loh/widget.rs"
+lid_init(){ msg "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":\"file://$WORK/loh\",\"capabilities\":{}}}"; msg "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"; }
+lid_open(){ msg "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://$WORK/loh/shape.h\",\"languageId\":\"$1\",\"version\":1,\"text\":\"typedef struct Shape Shape;\\n\"}}}"; }
+lid_def(){ msg "{\"jsonrpc\":\"2.0\",\"id\":71,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://$WORK/loh/shape.h\"},\"position\":{\"line\":0,\"character\":17}}}"; }
+lid_tail(){ msg "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\"}"; msg "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}"; }
+
+{
+  lid_init
+  lid_open "C"
+  lid_def
+  lid_tail
+} > "$WORK/d37"
+"$BIN" --lsp < "$WORK/d37" > "$WORK/raw37" 2>/dev/null || lspRc d37
+decodeFrames "$WORK/raw37" > "$WORK/r37" 2>/dev/null
+R71c="$( grep '"id":71,' "$WORK/r37" )"
+first37="$( printf '%s' "$R71c" | grep -o '"uri":"[^"]*"' | head -1 )"
+printf '%s' "$R71c" | grep -q 'shape.c' && [ "$first37" = "\"uri\":\"file://$WORK/loh/shape.c\"" ] \
+    && ok "(37) languageId C on a .h buffer: shape.c leads the definition list — the declaration replaced the extension convention" \
+    || { no "(37) client hint ignored: first=$first37"; printf '%s\n' "$R71c" | head -c 240; }
+
+# ── (39) CONTROL: an unparseable declaration is NO hint, not a refusal — bytes match the no-hint default ─
+{
+  lid_init
+  lid_open "Cobol"
+  lid_def
+  lid_tail
+} > "$WORK/d39"
+"$BIN" --lsp < "$WORK/d39" > "$WORK/raw39" 2>/dev/null || lspRc d39
+decodeFrames "$WORK/raw39" > "$WORK/r39" 2>/dev/null
+R71x="$( grep '"id":71,' "$WORK/r39" )"
+{
+  lid_init
+  lid_open ""
+  lid_def
+  lid_tail
+} > "$WORK/d39b"
+"$BIN" --lsp < "$WORK/d39b" 2>/dev/null > "$WORK/raw39b" || lspRc d39b
+R71plain="$( decodeFrames "$WORK/raw39b" | grep '"id":71,' )"
+[ "$R71x" = "$R71plain" ] \
+    && ok "(39) languageId Cobol: byte-identical to the empty declaration — an unmappable id is no hint" \
+    || { no "(39) unknown languageId changed the answer"; printf '%s\n' "$R71x" | head -c 200; }
+
+# ── (40) CONTROL: explicit @lang outranks the client declaration (priority pin) ─────────────────────
+{
+  lid_init
+  lid_open "C"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":73,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"Shape@rs\"}}"
+  lid_tail
+} > "$WORK/d40"
+"$BIN" --lsp < "$WORK/d40" > "$WORK/raw40" 2>/dev/null || lspRc d40
+decodeFrames "$WORK/raw40" > "$WORK/r40" 2>/dev/null
+R73="$( grep '"id":73,' "$WORK/r40" )"
+files40="$( printf '%s' "$R73" | grep -o '"uri":"[^"]*"' | sort -u | wc -l | tr -d ' ' )"   # files touched, not rows: the Rust trait alone carries 3 Shape defs
+printf '%s' "$R73" | grep -qF "widget.rs" && [ "$files40" = 1 ] \
+    && grep -q 'window/logMessage.*reflang=\\"rs\\" origin=\\"explicit\\"' "$WORK/r40" \
+    && ok "(40) Shape@rs under a C declaration: Rust-only answer, origin=explicit — the typed selector is not overridden" \
+    || { no "(40) explicit-over-client wrong: files=$files40"; printf '%s\n' "$R73" | head -c 240; }
+
+# ── (41) CONTROL: workspace/symbol is document-free — a declaration on an open buffer must not reach it ─
+{
+  lid_init
+  lid_open "C"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":74,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"Shape\"}}"
+  lid_tail
+} > "$WORK/d41"
+{
+  lid_init
+  msg "{\"jsonrpc\":\"2.0\",\"id\":74,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"Shape\"}}"
+  lid_tail
+} > "$WORK/d41b"
+"$BIN" --lsp < "$WORK/d41" 2>/dev/null > "$WORK/raw41" || lspRc d41; decodeFrames "$WORK/raw41" > "$WORK/r41" 2>/dev/null; A41="$( grep '"id":74,' "$WORK/r41" )"
+"$BIN" --lsp < "$WORK/d41b" 2>/dev/null > "$WORK/raw41b" || lspRc d41b; decodeFrames "$WORK/raw41b" > "$WORK/r41b" 2>/dev/null; B41="$( grep '"id":74,' "$WORK/r41b" )"
+[ -n "$A41" ] && [ "$A41" = "$B41" ] \
+    && ok "(41) Shape (no @lang) with a C-declared buffer open: byte-identical to no buffer — the declaration never reaches the picker" \
+    || { no "(41) client hint leaked into workspace/symbol"; printf '%s\n' "$A41" | head -c 200; }
+
+# ── (38) the config file rewrites the map WITHOUT a recompile: an id defaults refuse, the file maps it ──
+printf 'mycustom-c = "c"\n' > "$WORK/loh-langmap.toml"
+{
+  lid_init
+  lid_open "MyCustom-C"
+  lid_def
+  lid_tail
+} > "$WORK/d38"
+"$BIN" --lsp --lsp-langmap="$WORK/loh-langmap.toml" < "$WORK/d38" > "$WORK/raw38" 2>/dev/null || lspRc d38
+decodeFrames "$WORK/raw38" > "$WORK/r38" 2>/dev/null
+R38="$( grep '"id":71,' "$WORK/r38" )"
+first38="$( printf '%s' "$R38" | grep -o '"uri":"[^"]*"' | head -1 )"
+[ "$first38" = "\"uri\":\"file://$WORK/loh/shape.c\"" ] \
+    && ok "(38) --lsp-langmap maps MyCustom-C to c: shape.c leads — the alias map is config, not compiled vocabulary" \
+    || { no "(38) config map not honored: first=$first38"; printf '%s\n' "$R38" | head -c 240; }
+
+# ── (42) a didOpen BEFORE initialize records nothing (no root exists yet; CR #440) ─────────────────
+{
+  lid_open "C"
+  lid_init
+  lid_def
+  lid_tail
+} > "$WORK/d42"
+"$BIN" --lsp < "$WORK/d42" > "$WORK/raw42" 2>/dev/null || lspRc d42
+decodeFrames "$WORK/raw42" > "$WORK/r42" 2>/dev/null
+R7142="$( grep '"id":71,' "$WORK/r42" )"
+{
+  lid_init
+  lid_def
+  lid_tail
+} > "$WORK/d42b"
+"$BIN" --lsp < "$WORK/d42b" > "$WORK/raw42b" 2>/dev/null || lspRc d42b
+R7142b="$( decodeFrames "$WORK/raw42b" | grep '"id":71,' )"
+[ -n "$R7142" ] && [ "$R7142" = "$R7142b" ] \
+    && ok "(42) didOpen before initialize changes nothing — the record waits for a root, the answer matches the never-opened session" \
+    || { no "(42) pre-initialize didOpen moved the answer"; printf '%s\n' "$R7142" | head -c 200; printf '%s\n' "$R7142b" | head -c 200; }
+
+# ── (43) the LAST declaration owns the buffer: re-open with a new id replaces the record (control) ──
+{
+  lid_init
+  lid_open "C"
+  lid_open "Rust"
+  lid_def
+  lid_tail
+} > "$WORK/d43"
+"$BIN" --lsp < "$WORK/d43" > "$WORK/raw43" 2>/dev/null || lspRc d43
+decodeFrames "$WORK/raw43" > "$WORK/r43" 2>/dev/null
+R7143="$( grep '"id":71,' "$WORK/r43" )"
+first43="$( printf '%s' "$R7143" | grep -o '"uri":"[^"]*"' | head -1 )"
+printf '%s' "$R7143" | grep -q 'widget.rs' && [ "$first43" = "\"uri\":\"file://$WORK/loh/widget.rs\"" ] \
+    && ok "(43) C then Rust on the same buffer: the newest declaration leads (Rust→rs fronts the trait)" \
+    || { no "(43) last declaration did not win: first=$first43"; printf '%s\n' "$R7143" | head -c 240; }
+
+# ── (44) the plan's workspace slot: <root>/.ripwire/lsp-langmap.toml is found when the root rides the ───
+# ────── command line (editors launch `ripwire <root> --lsp`); canonicalKey lowercases both sides ────
+mkdir -p "$WORK/loh/.ripwire"
+printf 'myroot-c = "c"\n' > "$WORK/loh/.ripwire/lsp-langmap.toml"
+{
+  lid_init
+  lid_open "MyRoot-C"
+  lid_def
+  lid_tail
+} > "$WORK/d44"
+mkdir -p "$WORK/noxdg"   # the loader reads $XDG_CONFIG_HOME's map BEFORE the root's: a developer's own map must not answer here
+XDG_CONFIG_HOME="$WORK/noxdg" "$BIN" "$WORK/loh" --lsp < "$WORK/d44" > "$WORK/raw44" 2>/dev/null || lspRc d44
+decodeFrames "$WORK/raw44" > "$WORK/r44" 2>/dev/null
+R7144="$( grep '"id":71,' "$WORK/r44" )"
+first44="$( printf '%s' "$R7144" | grep -o '"uri":"[^"]*"' | head -1 )"
+[ "$first44" = "\"uri\":\"file://$WORK/loh/shape.c\"" ] \
+    && ok "(44) <root>/.ripwire/lsp-langmap.toml maps MyRoot-C to c: the workspace slot from the plan is live" \
+    || { no "(44) root-local map not honored: first=$first44"; printf '%s\n' "$R7144" | head -c 240; }
+
+# ── (45) the same workspace slot when the editor names the root by initialize.rootUri ALONE (`ripwire --lsp`, no ───
+# ────── command-line root): the map loads after the root is known, so <root>/.ripwire/lsp-langmap.toml still rides ─
+XDG_CONFIG_HOME="$WORK/noxdg" "$BIN" --lsp < "$WORK/d44" > "$WORK/raw45" 2>/dev/null || lspRc d45
+decodeFrames "$WORK/raw45" > "$WORK/r45" 2>/dev/null
+first45="$( grep '"id":71,' "$WORK/r45" | grep -o '"uri":"[^"]*"' | head -1 )"
+[ "$first45" = "\"uri\":\"file://$WORK/loh/shape.c\"" ] \
+    && ok "(45) rootUri-only session: <root>/.ripwire/lsp-langmap.toml maps MyRoot-C to c — the map loads after the root resolves" \
+    || no "(45) rootUri-only session skipped the root-local map: first=$first45"
+
+# ── (46) a trailing `# comment` is no part of a value: an alias whose comment holds quotes keeps working, and a ────
+# ────── suffix list's comment installs no suffix (`".c"` in the comment must not let a declaration override shape.c) ─
+printf 'mycomment-c = "c" # "C mode"\nmyrust = "rs"\n[overrule]\nsuffixes = [".h"] # ".c"\n' > "$WORK/loh-comment.toml"
+{
+  lid_init
+  lid_open "MyComment-C"
+  lid_def
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://$WORK/loh/shape.c\",\"languageId\":\"MyRust\",\"version\":1,\"text\":\"struct Shape { int x; };\\n\"}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":72,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://$WORK/loh/shape.c\"},\"position\":{\"line\":0,\"character\":8}}}"
+  lid_tail
+} > "$WORK/d46"
+XDG_CONFIG_HOME="$WORK/noxdg" "$BIN" --lsp --lsp-langmap="$WORK/loh-comment.toml" < "$WORK/d46" > "$WORK/raw46" 2>/dev/null || lspRc d46
+decodeFrames "$WORK/raw46" > "$WORK/r46" 2>/dev/null
+first46a="$( grep '"id":71,' "$WORK/r46" | grep -o '"uri":"[^"]*"' | head -1 )"
+first46b="$( grep '"id":72,' "$WORK/r46" | grep -o '"uri":"[^"]*"' | head -1 )"
+[ "$first46a" = "\"uri\":\"file://$WORK/loh/shape.c\"" ] \
+    && ok "(46a) mycomment-c = \"c\" # \"C mode\": the alias maps — the comment's quotes are not the value's" \
+    || no "(46a) an alias with a quoted comment stopped mapping: first=$first46a"
+[ "$first46b" = "\"uri\":\"file://$WORK/loh/shape.c\"" ] \
+    && ok "(46b) suffixes = [\".h\"] # \".c\": a Rust declaration on shape.c keeps the indexed C anchor — the comment installed no suffix" \
+    || no "(46b) the comment's \".c\" became an override suffix: first=$first46b"
+
+# ── (47) literal first on workspace/symbol's "::" tiers: the heading `user@py` under `# config` answers as itself ────
+mkdir -p "$WORK/lit"
+printf '# config\n\n## user\n\ntext\n\n## user@py\n\nmore\n' > "$WORK/lit/notes.md"
+printf 'def corp_seed():\n    return 4\n' > "$WORK/lit/seed.py"
+{
+  msg "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":\"file://$WORK/lit\",\"capabilities\":{}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":75,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"notes.md::config::user@py\"}}"
+  lid_tail
+} > "$WORK/d47"
+"$BIN" --lsp < "$WORK/d47" > "$WORK/raw47" 2>/dev/null || lspRc d47
+R75="$( decodeFrames "$WORK/raw47" | grep '"id":75,' )"
+printf '%s' "$R75" | grep -q '"name":"user@py"' && ! printf '%s' "$R75" | grep -q '"name":"user"' \
+    && ok "(47) workspace/symbol notes.md::config::user@py answers the heading user@py — the whole spelling is probed before the tail reads as a language" \
+    || { no "(47) the literal id lost to its tail-stripped twin"; printf '%s\n' "$R75" | head -c 240; }
+
+# ── (48) an [overrule] array with a non-string element is an unknown shape: nothing installs, the default set stands ─
+printf 'myrust = "rs"\n[overrule]\nsuffixes = [".h", 123, ".c"]\n' > "$WORK/loh-badarray.toml"
+{
+  lid_init
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://$WORK/loh/shape.c\",\"languageId\":\"MyRust\",\"version\":1,\"text\":\"struct Shape { int x; };\\n\"}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":72,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://$WORK/loh/shape.c\"},\"position\":{\"line\":0,\"character\":8}}}"
+  lid_tail
+} > "$WORK/d48"
+"$BIN" --lsp --lsp-langmap="$WORK/loh-badarray.toml" < "$WORK/d48" > "$WORK/raw48" 2>/dev/null || lspRc d48
+first48="$( decodeFrames "$WORK/raw48" | grep '"id":72,' | grep -o '"uri":"[^"]*"' | head -1 )"
+[ "$first48" = "\"uri\":\"file://$WORK/loh/shape.c\"" ] \
+    && ok "(48) suffixes = [\".h\", 123, \".c\"]: a Rust declaration on shape.c keeps the indexed C anchor — a malformed array installs no suffix" \
+    || no "(48) a malformed suffix array installed its strings: first=$first48"
+
+# ── (49) languageId tsx on a .h buffer anchors TypeScript: shape.ts leads shape.js (both define class Shape) ────────
+mkdir -p "$WORK/lotsx"
+printf 'typedef struct Shape Shape;\n' > "$WORK/lotsx/shape.h"
+printf 'class Shape {}\n' > "$WORK/lotsx/a_shape.js"
+printf 'class Shape {}\n' > "$WORK/lotsx/b_shape.ts"
+{
+  msg "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":\"file://$WORK/lotsx\",\"capabilities\":{}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://$WORK/lotsx/shape.h\",\"languageId\":\"tsx\",\"version\":1,\"text\":\"typedef struct Shape Shape;\\n\"}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":71,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://$WORK/lotsx/shape.h\"},\"position\":{\"line\":0,\"character\":17}}}"
+  lid_tail
+} > "$WORK/d49"
+"$BIN" --lsp < "$WORK/d49" > "$WORK/raw49" 2>/dev/null || lspRc d49
+first49="$( decodeFrames "$WORK/raw49" | grep '"id":71,' | grep -o '"uri":"[^"]*"' | head -1 )"
+[ "$first49" = "\"uri\":\"file://$WORK/lotsx/b_shape.ts\"" ] \
+    && ok "(49) languageId tsx: b_shape.ts leads a_shape.js — tsx names TypeScript, the language .tsx files index as" \
+    || no "(49) tsx anchored another language: first=$first49"
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

@@ -427,7 +427,7 @@ std::optional<int> runChangeViews( const MainDispatch& d )
         // per-root <pr-context> sections are wrapped in ONE <pr-context-workspace> element so the document stays
         // single-rooted (G4: xmllint-clean). Trim ladder under --max-tokens: the budget is split PER ROOT,
         // proportional to each root's changed-file count (integer floor; the remainder goes to the
-        // lexicographically-first label = ws[0], since ws is in canonical label order) — then each root runs the
+        // first root in canonical `<label>/` order = ws[0]) — then each root runs the
         // landed PrTrim ladder against its share. This reuses writePrContext verbatim; it is simpler than forcing
         // one shared global trim level (which would need writePrContext to expose a forced-level render).
         if( multiRoot )

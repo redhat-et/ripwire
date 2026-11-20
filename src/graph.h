@@ -679,20 +679,38 @@ inline bool edgeViaImpl( const Graph& g, NodeId from, NodeId to ) noexcept
 // Narrowing by import or receiver type is still a resolver feature this port does not add.
 inline bool langCompatible( Lang a, Lang b ) noexcept
 {
-    if( a == b )
-    {
-        return true;
-    }
-    const bool aCish = ( a == Lang::Cpp || a == Lang::ObjC || a == Lang::C );
-    const bool bCish = ( b == Lang::Cpp || b == Lang::ObjC || b == Lang::C );
-    if( aCish && bCish )   // short-circuit before the JVM check below: langCompatible runs per candidate
-    {                       // in graph.h's hot reference-resolution loops, and the common C-family-only
-        return true;        // corpus case should not pay for two extra enum comparisons it doesn't need.
-    }
-    const bool aJvm = ( a == Lang::Kotlin || a == Lang::Java );
-    const bool bJvm = ( b == Lang::Kotlin || b == Lang::Java );
-    return aJvm && bJvm;
+    return a == b || langFamilyOf( a ) == langFamilyOf( b );   // a==b stays the hot-loop fast path (same-language pairs dominate the candidate scans); the family rule is model.h's table, proven beside this function
 }
+
+namespace
+{
+// The table IS the decision: for EVERY ordered pair of in-range languages, model.h::langFamilyOf agrees with
+// the original pair-set of this predicate (same | both-C-family | both-JVM). That pins the D1 refactor as
+// behavior-preserving at compile time — the equivalence edges and display tier D builds on can never drift
+// from the rule they mirror, and a new Lang appended on either side trips this rather than silently joining
+// or not joining a family.
+constexpr bool kLangFamilyMatchesBridge = []
+{
+    for( int a = 0; a < static_cast< int >( kLangCount ); ++a )
+    {
+        for( int b = 0; b < static_cast< int >( kLangCount ); ++b )
+        {
+            const auto la = static_cast< Lang >( a ), lb = static_cast< Lang >( b );
+            const bool bridge = langFamilyOf( la ) == langFamilyOf( lb );
+            const bool cishA  = la == Lang::Cpp || la == Lang::ObjC || la == Lang::C;
+            const bool cishB  = lb == Lang::Cpp || lb == Lang::ObjC || lb == Lang::C;
+            const bool jvmA   = la == Lang::Kotlin || la == Lang::Java;
+            const bool jvmB   = lb == Lang::Kotlin || lb == Lang::Java;
+            if( bridge != ( la == lb || ( cishA && cishB ) || ( jvmA && jvmB ) ) )
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}();
+static_assert( kLangFamilyMatchesBridge, "langFamilyOf must agree with the original langCompatible pair-set, pair for pair" );
+} // namespace
 
 // langCompatible's sibling: which definition KINDS a reference of a given ROLE may bind to. One predicate
 // so the rule is stated ONCE — before it, the same idea lived hard-coded in the inherit overlay
@@ -14257,6 +14275,11 @@ inline auto symbolContentKey( const IngestResult& ing, NodeId id )
     return std::tuple<std::string_view, std::uint32_t, std::string_view, std::uint32_t, std::uint32_t>( ing.files[ s.fileId ], s.line, s.name,
                                                                                                         s.sigStartByte, s.endByte );
 }
+// symbolContentKey's order as a strict total one: the content key, then the id only for two symbols the key cannot tell apart.
+inline bool contentKeyBefore( const IngestResult& ing, NodeId a, NodeId b )
+{
+    return std::pair( symbolContentKey( ing, a ), a ) < std::pair( symbolContentKey( ing, b ), b );
+}
 
 // The Scope::name tier: every definition whose name matches and whose scope ends in the scope half, in symbolContentKey order
 // (path, line, name, byte range), never NodeId: the dotted tier hands a `Svc._make` spelling here, and the verbs seed their
@@ -14280,7 +14303,7 @@ inline std::vector<NodeId> resolveAllByScopeQualified( const IngestResult& ing, 
     }
     if( out.size() > 1 )
     {
-        std::ranges::sort( out, [ & ]( NodeId a, NodeId b ) { return std::pair( symbolContentKey( ing, a ), a ) < std::pair( symbolContentKey( ing, b ), b ); } );
+        std::ranges::sort( out, [ & ]( NodeId a, NodeId b ) { return contentKeyBefore( ing, a, b ); } );
     }
     return out;
 }
@@ -14716,101 +14739,391 @@ inline std::vector<int> nameTowerRanks( const IngestResult& ing, std::span<const
     return ranks;
 }
 
-// The tower (RIPWIRE-RUBY task C): ONE total order for every multi-definition NAME answer, applied to the
-// RESULT LIST of the name resolvers below (query-time only — buildGraph's edge candidates are deliberately
-// NOT reordered, so no extraction moved and kParserVer stays; edge-vs-display disagreement is disclosed,
-// not hidden). Key: kindSpecificity DESC (the hoisted dedup ladder — a Method beats a Var beats a Section;
-// a constructor ranks just below its type, nameTowerRanks above), then the language of the most specific
-// symbol first — the tower's own leading symbol defines the reference language, so in a Ruby tree a Ruby def
-// leads a Python one on a same-kind tie — then symbolContentKey (path, line, name, byte range) for the deterministic tail, never
-// NodeId: shortestPathAny seeds in this order, so two Svc._make copies that both reach sink give the --verify witness the
-// content order picks, not the one id assignment happened to pick (CodeRabbit #676 4588520057; on a multi-root workspace ids
-// are label-major, which is not path byte order: roots a and a-b). A list already in tower order
-// comes back untouched. DISTINCT from gitmine.h's §H6 "specificity-ordered mapper", which orders file PATHS on a
-// different axis.
-inline std::vector<NodeId> applyNameTower( const IngestResult& ing, std::vector<NodeId> ids )
+// The name-answer anchor (RIPWIRE-RUBY task D): which language leads the tower, and why it was chosen. The priority
+// is the owner's and it is fixed: an EXPLICIT @lang suffix beats query CONTEXT (the LSP document's INDEXED language,
+// a file:name selector's file, an @FILE:LINE seed — never a client-declared languageId), context beats the CORPUS
+// (the code language with the most extracted definitions), and anything beats no anchor at all. With no anchor the
+// tower keeps task C's order (ladder, id): the anchor tiers only ever ADD a front, they never subtract rows.
+enum class AnchorOrigin : std::uint8_t { None, Corpus, Context, Explicit, Client };
+struct LangAnchor
+{
+    Lang         lang   = Lang::Unknown;
+    AnchorOrigin origin = AnchorOrigin::None;
+    // Disclosures the resolvers fill in (task D4): a caller that passed an out-pointer needs to know when an
+    // EXPLICIT language came back empty and the list was kept anyway (fellBack) and how many foreign defs
+    // answered (others) — the sentence the CLI and the LSP notice carry cannot be re-derived from the ordered
+    // list alone, and re-deriving it downstream risks disagreeing with the resolver that decided it.
+    bool         fellBack = false;
+    bool         tieBroke = false;   // the adopted rule (#440): an INFERRED corpus majority no longer lifts a tier — it
+    std::size_t  others   = 0;       // breaks same-rung ties. tieBroke says the tie-break put a DIFFERENT definition at
+                                     // the front than the anchor-free order would, which is the ONE moment a corpus
+                                     // anchor is allowed to speak: reflang= + the --defs= next step. An anchor that
+                                     // decided nothing stays silent (the maintainer's quiet-reflang case).
+    bool         frontMoved = false; // any origin: the anchor's tier or tie key changed which definition leads. A file
+                                     // lane or an @FILE:LINE seed that names one place moves nothing, and says nothing.
+    constexpr bool active() const noexcept { return origin != AnchorOrigin::None; }
+};
+
+// The disclosure vocabulary for reflang-origin=: one name per origin, shared by the CLI attribute and the
+// LSP notice so the two channels can never spell the same origin differently (gate: arms (29)/(32)/A1/A6).
+// A table in enum order, not a switch — jsLitCtorName's switch shape made the clone detector call the
+// two the same code, and the house rule prefers the table anyway.
+inline const char* anchorOriginName( AnchorOrigin origin ) noexcept
+{
+    static constexpr std::array<const char*, 5> kOriginNames = { "none", "corpus", "context", "explicit", "client" };
+    const std::size_t i = static_cast< std::size_t >( origin );
+    return i < kOriginNames.size() ? kOriginNames[ i ] : "none";   // a value past the enum is disclosed as the
+}   // least-claiming word, never a wrong specific one
+
+// The corpus census: per code language, its def count — recorded INSIDE the symbol walk the name resolvers already
+// perform (increments only; resolveAllByName already touches every symbol, so the per-query census costs no second
+// walk of the model). Data and document formats are barred from ever owning the anchor: a YAML-heavy corpus stays
+// code-anchored, or the disclosure lane the campaign just built would reorder itself.
+struct LangCensus
+{
+    std::array<std::uint32_t, kLangCount> counts{};
+
+    constexpr void record( const Symbol& s ) noexcept
+    {
+        if( isCodeLang( s.lang ) )
+        {
+            ++counts[ static_cast< std::size_t >( s.lang ) ];
+        }
+    }
+
+    // count DESC; an EQUAL top count goes to the tied language whose first definition in symbolContentKey order (path,
+    // line, name, byte range) comes first — a fact about the code, not about how NodeIds were handed out, so renumbering
+    // the same symbols cannot move the anchor. Only a tie pays the walk over the model; the untied path stays walk-free.
+    LangAnchor resolve( const IngestResult& ing ) const
+    {
+        LangAnchor best;
+        bool       tied = false;
+        for( std::size_t i = 0; i < kLangCount; ++i )
+        {
+            const std::uint32_t lead = best.origin == AnchorOrigin::None ? 0 : counts[ static_cast< std::size_t >( best.lang ) ];
+            if( counts[ i ] > lead )
+            {
+                best = { static_cast< Lang >( i ), AnchorOrigin::Corpus };
+                tied = false;
+            }
+            else if( counts[ i ] != 0 && counts[ i ] == lead )
+            {
+                tied = true;
+            }
+        }
+        if( tied )
+        {
+            best.lang = firstTiedLangByContent( ing, counts[ static_cast< std::size_t >( best.lang ) ] );
+        }
+        return best;
+    }
+
+private:
+    Lang firstTiedLangByContent( const IngestResult& ing, std::uint32_t top ) const
+    {
+        NodeId first = kNoNode;
+        for( const Symbol& s : ing.symbols )
+        {
+            const bool contender = isCodeLang( s.lang ) && counts[ static_cast< std::size_t >( s.lang ) ] == top;
+            if( contender && ( first == kNoNode || contentKeyBefore( ing, s.id, first ) ) )
+            {
+                first = s.id;
+            }
+        }
+        return ing.symbols[ first ].lang;   // a tie means two languages counted top > 0 definitions, so `first` was set
+    }
+};
+
+// The fixed priority in one place, so no call site can quietly re-order it. "Memoization" note for the warm index:
+// none is needed — the census is FOLDED into the walk the resolver already does (see resolveAllByName), and a warm
+// cache replay still walks symbols, so the anchor is derived identically cold and warm (lspcheck arm (33)'s class
+// of bug cannot exist by construction here).
+inline LangAnchor makeLangAnchor( const IngestResult& ing, bool hasExplicit, Lang explicitLang, bool hasContext, Lang contextLang,
+                                  const LangCensus& census )
+{
+    if( hasExplicit )
+    {
+        return { explicitLang, AnchorOrigin::Explicit };
+    }
+    if( hasContext )
+    {
+        return { contextLang, AnchorOrigin::Context };
+    }
+    return census.resolve( ing );
+}
+
+// The tower (RIPWIRE-RUBY task C, re-tiered by task D, ordered by the adopted #440 rule): ONE total order
+// for every multi-definition NAME answer, applied to the RESULT LIST of the name resolvers below (query-time
+// only — buildGraph's edge candidates are deliberately NOT reordered, so no extraction moved and kParserVer
+// stays; edge-vs-display disagreement is disclosed, not hidden). A STATED language — the query's @lang tail,
+// the asked-from file, the editor's declared languageId — is evidence about THIS answer, so it lifts tiers:
+// (0) the exact language, (1) its edge-family, (2) the kind ladder — kindSpecificity DESC with the
+// constructor demotion nameTowerRanks adds — then symbolContentKey (path, line, name, byte range; #682), id last. A MERELY INFERRED majority (the corpus census)
+// is population evidence, not name evidence: it lifts NO tier and fronts NOTHING — the ladder answers first
+// and the majority only breaks ties between same-rung definitions, ahead of the content key, with id last on both paths. Levels decide
+// WITHIN a group, never across it (the owner's rule; it replaces task C's reference-language election, which
+// was circular). With no anchor at all the order is the ladder, content key, id — and an inferred majority is exactly
+// that for tier purposes; its tie key is the only addition. DISTINCT from gitmine.h's §H6 "specificity-ordered
+// mapper", which orders file PATHS on a different axis.
+// The tower's language tier — 0 this exact language, 1 its family, 2 foreign; all 0 (a pure ladder) with no
+// anchor, AND all 0 for an inferred corpus anchor, which ties instead of fronting. Its own function because
+// the tier is the RULE, and a rule buried in a comparator body is the one thing a reader cannot see (nor reuse).
+inline std::uint8_t nameTowerLangTier( const IngestResult& ing, NodeId id, const LangAnchor& anchor ) noexcept
+{
+    if( !anchor.active() || anchor.origin == AnchorOrigin::Corpus )
+    {
+        return 0;
+    }
+    const Lang l = ing.symbols[ id ].lang;
+    return l == anchor.lang ? 0 : ( langFamilyOf( l ) == langFamilyOf( anchor.lang ) ? 1 : 2 );
+}
+
+// One row of the tower's sort. Tier 0 exact, 1 family, 2 foreign (all 0 with no anchor, or a corpus one, which ties instead);
+// tie 0 for the majority language under a corpus anchor, else 1; the content key (#682) is the deterministic tail on every
+// path, so the order never reads id assignment while two definitions differ in place.
+struct NameTowerKey
+{
+    std::uint8_t                                                                      langTier;
+    int                                                                               rank;
+    std::uint8_t                                                                      tie;
+    decltype( symbolContentKey( std::declval<const IngestResult&>(), NodeId{} ) ) content;
+    NodeId                                                                            id;
+};
+
+// The anchor-free order: kind rank, content key, id. It is the tower's tail, and the order a list keeps when no language
+// is stated and no majority speaks. id is reached only by two definitions alike in path, line, name and byte range.
+inline bool nameTowerPlainAhead( const NameTowerKey& a, const NameTowerKey& b ) noexcept
+{
+    return std::forward_as_tuple( b.rank, a.content, a.id ) < std::forward_as_tuple( a.rank, b.content, b.id );   // rank DESC: operands swapped
+}
+
+// The tower's order: the stated-language tier, kind rank DESC, the majority tie, then the content key and id.
+inline bool nameTowerAhead( const NameTowerKey& a, const NameTowerKey& b ) noexcept
+{
+    return std::forward_as_tuple( a.langTier, b.rank, a.tie, a.content, a.id ) < std::forward_as_tuple( b.langTier, a.rank, b.tie, b.content, b.id );
+}
+
+inline std::vector<NameTowerKey> nameTowerKeys( const IngestResult& ing, const std::vector<NodeId>& ids, const LangAnchor& anchor )
+{
+    const bool corpusTie = anchor.origin == AnchorOrigin::Corpus;   // the majority BREAKS ties, it never fronts a tier
+    const std::vector<int>    ranks = nameTowerRanks( ing, ids );
+    std::vector<NameTowerKey> keyed;
+    keyed.reserve( ids.size() );
+    for( std::size_t i = 0; i < ids.size(); ++i )
+    {
+        const bool majority = corpusTie && ing.symbols[ ids[ i ] ].lang == anchor.lang;
+        keyed.push_back( { nameTowerLangTier( ing, ids[ i ], anchor ), ranks[ i ], static_cast<std::uint8_t>( majority ? 0 : 1 ),
+                           symbolContentKey( ing, ids[ i ] ), ids[ i ] } );
+    }
+    return keyed;
+}
+
+inline std::vector<NodeId> applyNameTower( const IngestResult& ing, std::vector<NodeId> ids, LangAnchor& anchor )
 {
     if( ids.size() < 2 )
     {
         return ids;
     }
-    const std::vector<int> ranks = nameTowerRanks( ing, ids );
-    using ContentKey = decltype( symbolContentKey( ing, NodeId{} ) );
-    struct Keyed
-    {
-        int        rank;
-        ContentKey content;   // the comparator reads both without a lookup
-        NodeId     id;
-    };
-    std::vector<Keyed> keyed;
-    keyed.reserve( ids.size() );
-    for( std::size_t i = 0; i < ids.size(); ++i )
-    {
-        keyed.push_back( { ranks[ i ], symbolContentKey( ing, ids[ i ] ), ids[ i ] } );
-    }
-    // the reference: the highest rank, content order among equals (the same tail the sort below uses)
-    const Keyed* reference = &keyed.front();
-    for( const Keyed& k : keyed )
-    {
-        if( k.rank > reference->rank || ( k.rank == reference->rank && k.content < reference->content ) )
-        {
-            reference = &k;
-        }
-    }
-    const Lang referenceLang = ing.symbols[ reference->id ].lang;
-    std::sort( keyed.begin(), keyed.end(),
-               [ &ing, referenceLang ]( const Keyed& a, const Keyed& b ) noexcept
-               {
-                   if( a.rank != b.rank )
-                   {
-                       return a.rank > b.rank;
-                   }
-                   const bool refA = ing.symbols[ a.id ].lang == referenceLang, refB = ing.symbols[ b.id ].lang == referenceLang;
-                   if( refA != refB )
-                   {
-                       return refA;
-                   }
-                   if( a.content != b.content )
-                   {
-                       return a.content < b.content;
-                   }
-                   return a.id < b.id;   // reached only by two definitions alike in path, line, name and byte range
-               } );
-    for( std::size_t i = 0; i < ids.size(); ++i )
-    {
-        ids[ i ] = keyed[ i ].id;
-    }
+    std::vector<NameTowerKey> keyed = nameTowerKeys( ing, ids, anchor );
+    std::sort( keyed.begin(), keyed.end(), nameTowerAhead );
+    // Did the anchor DECIDE the front? A front that equals the anchor-free front means the anchor changed nothing a
+    // single-pick verb shows, so the disclosure stays silent (the legend's "moved the front"). Rows moved lower down
+    // are still ordered by the rule; they are not announced.
+    const NodeId plainFront = std::min_element( keyed.begin(), keyed.end(), nameTowerPlainAhead )->id;
+    anchor.frontMoved = anchor.active() && plainFront != keyed.front().id;
+    anchor.tieBroke   = anchor.origin == AnchorOrigin::Corpus && anchor.frontMoved;
+    std::ranges::transform( keyed, ids.begin(), &NameTowerKey::id );
     return ids;
 }
 
-// Bare name, or a canonical id. The "::" probe runs FIRST and only when the spec carries one, then falls
-// back to the name match — no indexed symbol NAME contains "::" in any grammar we parse, so this is purely
-// additive: every previously-working query resolves byte-identically.
-inline std::vector<NodeId> resolveAllByName( const IngestResult& ing, std::string_view name )
+
+// Name@lang (task D): the suffix is read ONLY when the full string resolves to nothing — indexed data keys
+// legitimately carry '@' (measured: user@corp, a@b are <s> rows), so a name that exists wins over a selector
+// that could only be a guess. An '@' tail that is not a langTag then yields the empty resolution (and the
+// disclosure lane refuses with the known tags, D4/D5); it never silently strips the tail off a real name.
+struct NameSuffixSplit { std::string_view base; std::optional<Lang> tag; bool badTag = false; };
+inline NameSuffixSplit nameSuffixSplit( std::string_view name ) noexcept
 {
-    if( name.find( "::" ) != std::string_view::npos )
+    NameSuffixSplit s{ name, {}, false };
+    const std::size_t at = name.rfind( '@' );
+    if( at == std::string_view::npos || at == 0 || at + 1 >= name.size() )
     {
-        std::vector<NodeId> byId = resolveAllByCanonicalId( ing, name );
-        if( !byId.empty() )
+        return s;
+    }
+    Lang parsed = Lang::Unknown;
+    if( langFromTag( name.substr( at + 1 ), parsed ) )
+    {
+        s.base = name.substr( 0, at );
+        s.tag  = parsed;
+    }
+    else
+    {
+        s.badTag = true;   // an '@' tail that could never name a language: no literal match may follow it
+    }
+    return s;
+}
+// The literal-first rule, shared by both name resolvers (task D): a string carrying a valid '@tag' tail resolves
+// as a NAME when that name exists (indexed data keys legitimately carry '@' — measured: user@corp, a@b are <s>
+// rows), and as an EXPLICIT anchor only when it does not. An invalid tail with no literal behind it resolves to
+// nothing (refused-with-tags by the D4/D5 disclosure lane). Keeping the predicate here, not two copies, is what
+// stops the resolvers drifting apart on the one question of what a caller actually asked for.
+inline bool suffixActsAsSelector( const IngestResult& ing, std::string_view raw, const NameSuffixSplit& split ) noexcept
+{
+    // The whole string being a real indexed NAME is what kills the suffix lane (indexed data keys legitimately
+    // carry '@' — measured: user@corp, a@b are <s> rows), so a name that exists wins over a selector that could
+    // only be a guess; the walk is the house any_of shape, one copy, here — quality-delta counted four clone
+    // matches against a standalone wrapper function and said the wrapper WAS the duplication.
+    return ( split.tag.has_value() || split.badTag )
+        && !std::any_of( ing.symbols.begin(), ing.symbols.end(), [ & ]( const Symbol& s ) { return elixirNameMatches( s, raw ); } );
+}
+
+// Bare name, or a canonical id. The suffix lane is settled FIRST (task D), then the "::" probe runs on the
+// surviving base only when the spec carries "::" — no indexed symbol NAME contains "::" in any grammar we parse,
+// so this is purely additive: every previously-working query resolves byte-identically.
+// The refusal vocabulary (arms (30)/A4, task D5): the SAME table the parser scans, rendered in enum order — a
+// hand-copied tag list would drift the moment a Lang is appended, and a refusal naming tags the parser rejects
+// is a lie. Deterministic by construction (constexpr tags, fixed scan).
+inline const std::string& knownLangTags()
+{
+    static const std::string tags = []
+    {
+        std::string out;
+        const std::size_t unknownIdxK = static_cast< std::size_t >( Lang::Unknown );   // index read, not a predicate (langidentity ratchet)
+        for( std::size_t i = 0; i < kLangCount; ++i )
         {
-            return byId;
+            if( i == unknownIdxK )
+            {
+                continue;   // the refusal vocabulary lists what PARSERS accept; "?" (the display fallback) never does
+            }
+            if( i )
+            {
+                out += " ";
+            }
+            out += langTag( static_cast< Lang >( i ) );
         }
-        std::vector<NodeId> byScope = resolveAllByScopeQualified( ing, name );   // Scope::name tier — see its contract
-        if( !byScope.empty() )
+        return out;
+    }();
+    return tags;
+}
+
+// The EXPLICIT scope rule, shared by both name lanes (task D4's contract in ONE copy — quality-delta flagged
+// the twin filters as a real clone before merge, and two copies of "is this language the asked-for one?" is
+// two chances to drift). A stated language narrows the list to that language exactly; the family stays
+// ordering-only for context/corpus anchors (arms A2/A3/(29) pin the lanes that observe lists; a CLI's defs[0]
+// pick must be the stated language's own def or the selector silently answers another language). The
+// zero-row case is NOT filtered — the other languages stay so the fallback can be DISCLOSED (A5, (28))
+// instead of the query going blank; fellBack/others record that service, and only when a foreign answer
+// exists (arm (34): "answering anyway" over nothing is disclosure of a non-event).
+inline void applyExplicitScope( const IngestResult& ing, std::vector<NodeId>& out, LangAnchor& anchor, bool selector )
+{
+    if( anchor.origin != AnchorOrigin::Explicit || !selector )
+    {
+        return;
+    }
+    std::vector<NodeId> scoped;
+    for( const NodeId id : out )
+    {
+        if( ing.symbols[ id ].lang == anchor.lang )
         {
-            return byScope;
+            scoped.push_back( id );
         }
+    }
+    if( !scoped.empty() )
+    {
+        out = std::move( scoped );
+        return;
+    }
+    if( !out.empty() )
+    {
+        anchor.fellBack = true;
+        anchor.others   = out.size();
+    }
+}
+
+// The stated tag applies to EVERY lane's answer, the tiers included (#440 review): the canonical-id and
+// Scope::name tiers used to return "their own answers" ahead of the anchor, so `A::f@rs` in a C++/Rust tree
+// answered on whichever tier row the id order happened to front — the tag decided nothing on the very path
+// its owner wrote it for. One helper, both lanes: a STATED language scopes the tier answer through the ONE
+// scope rule (empty after scoping keeps foreign rows and DISCLOSES the fallback — A5's doctrine), and the
+// resulting anchor leaves through anchorOut so the root's reflang= can say what scoped the answer. No tag:
+// the tiers answer for themselves exactly as they always did, byte-unchanged.
+inline std::vector<NodeId> statedScopeOnTierAnswer( const IngestResult& ing, std::vector<NodeId> ids,
+                                                    const NameSuffixSplit& split, bool selector, LangAnchor* anchorOut )
+{
+    if( !selector || !split.tag.has_value() )
+    {
+        return ids;
+    }
+    LangAnchor anchor{ *split.tag, AnchorOrigin::Explicit };
+    applyExplicitScope( ing, ids, anchor, true );
+    if( anchor.fellBack )
+    {   // a foreign fallback still fronts the stated language's family (#702 review: `A::f@c` answers C++ before Rust); the tier's own order breaks ties
+        std::ranges::stable_sort( ids, {}, [ & ]( NodeId id ) { return nameTowerLangTier( ing, id, anchor ); } );
+    }
+    if( anchorOut ) *anchorOut = anchor;
+    return ids;
+}
+
+// The bare lane's "::" tiers, canonical id then Scope::name. A tail that could be a selector reads as a language only
+// when the WHOLE spelling owns nothing (literal first, as qualifiedColonTierAnswer; #702 review: an indexed
+// `notes.md::config::user@py` heading answers as itself); the tail-free base is then probed and the stated tag scopes
+// its answer. Empty = no tier answered, and the name walk decides.
+inline std::vector<NodeId> bareLaneColonTiers( const IngestResult& ing, std::string_view name, std::string_view base,
+                                               const NameSuffixSplit& split, bool selector, LangAnchor* anchorOut )
+{
+    if( base.find( "::" ) == std::string_view::npos )
+    {
+        return {};
+    }
+    const auto idThenScope = [ &ing ]( std::string_view spec )
+    {
+        std::vector<NodeId> byId = resolveAllByCanonicalId( ing, spec );
+        return byId.empty() ? resolveAllByScopeQualified( ing, spec ) : byId;   // Scope::name tier — see its contract
+    };
+    if( selector )
+    {
+        if( std::vector<NodeId> literal = idThenScope( name ); !literal.empty() )
+        {
+            return literal;
+        }
+    }
+    std::vector<NodeId> tier = idThenScope( base );   // suffixed specs keep the canonical/scope tiers on their base
+    return tier.empty() ? tier : statedScopeOnTierAnswer( ing, std::move( tier ), split, selector, anchorOut );
+}
+
+inline std::vector<NodeId> resolveAllByName( const IngestResult& ing, std::string_view name, const LangAnchor& context = {},
+                                             LangAnchor* anchorOut = nullptr )
+{
+    if( anchorOut ) *anchorOut = {};   // the canonical/scope tiers answer for themselves; the lanes below overwrite
+    const NameSuffixSplit split = nameSuffixSplit( name );
+    const bool selector = suffixActsAsSelector( ing, name, split );
+    if( split.badTag && selector )
+    {
+        return {};   // invalid tail with no literal behind it: empty resolution, refusal disclosure D4/D5
+    }
+    const std::string_view base = selector ? split.base : name;
+
+    if( std::vector<NodeId> tier = bareLaneColonTiers( ing, name, base, split, selector, anchorOut ); !tier.empty() )
+    {
+        return tier;   // a "::" tier answered for itself
     }
 
     std::vector<NodeId> out;
+    LangCensus census;
     for( const Symbol& s : ing.symbols )
     {
-        if( elixirNameMatches( s, name ) && !notNamed( s ) )   // a --recall-only unit is no bare-name target (model.h kRankFlagNotNamed)
+        census.record( s );   // the corpus census rides the walk this resolver already performs — no second model pass exists on this path
+        if( elixirNameMatches( s, base ) && !notNamed( s ) )   // a --recall-only unit is no bare-name target (model.h kRankFlagNotNamed)
         {
             out.push_back( s.id );
         }
     }
-    return applyNameTower( ing, std::move( out ) );   // the tower orders this tier (task C); the early "::" tiers are their own answers
+    LangAnchor anchor = makeLangAnchor( ing, selector && split.tag.has_value(), split.tag.value_or( Lang::Unknown ),
+                                               context.active(), context.lang, census );
+    applyExplicitScope( ing, out, anchor, selector );   // the ONE scope rule (see its contract)
+    out = applyNameTower( ing, std::move( out ), anchor );   // the tower orders this tier; the "::" tiers above are their own answers
+    if( anchorOut ) *anchorOut = anchor;                   // AFTER the tower: tieBroke is written by the comparator, and the
+    return out;                                            // disclosure that must agree with the ORDER leaves on this copy
 }
 
 // The number of definitions the NAME of `focus` has — what a single-pick verb must disclose when it
@@ -15182,8 +15495,8 @@ inline void declToDefFollowThrough( const IngestResult& ing, std::string_view fi
         *unprovenDefCountOut = unprovenCount;
     }
     // NodeId order is the widening's OWN postcondition, not a caller contract. The sole caller feeds this list to
-    // applyNameTower on the very next statement, and that comparator is a TOTAL order (kind, leading language,
-    // symbolContentKey, id last) on distinct ids, so the tower's answer never reads this order - for today's call site the sort is
+    // applyNameTower, and that comparator is a TOTAL order (stated-language tier, kind, majority tie, symbolContentKey,
+    // id last) on distinct ids, so the tower's answer never reads this order - for today's call site the sort is
     // vestigial; it is kept so the widening leaves this function canonical when it runs.
     std::sort( sel.begin(), sel.end() );
 }
@@ -15789,7 +16102,8 @@ inline std::vector<NodeId> resolveAllByWrittenSpelling( const IngestResult& ing,
         out.push_back( m.id );
     }
     out = preferExactFile( ing, w->file, std::move( out ) );
-    return applyNameTower( ing, std::move( out ) );
+    LangAnchor noAnchor;   // no language is stated on this path: the pure ladder (kind, content key, id)
+    return applyNameTower( ing, std::move( out ), noAnchor );
 }
 
 // lane js-def-naming fix 1: every definition of the seed's file whose signature STARTS on the seed line, in index order. More than one
@@ -15905,9 +16219,108 @@ inline bool nameSpecFileAdmits( const IngestResult& ing, const Symbol& s, std::s
     return file.empty() ? !notNamed( s ) : filePathContainsRootRel( ing, s.fileId, file );
 }
 
-inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, std::string_view spec,
-                                                      std::size_t* unprovenDefCountOut = nullptr )
+// The anchor tail of the QUALIFIED name lane (task D): the file-lane context anchor, the one explicit scope, the
+// tower, and the `Class.method` dotted layer over whatever survived. Its own function because the resolver must
+// read as the sequence of TIERS it is — quality-delta measured 26 in a function whose body was two tier lists and
+// this tail, and the tail is a paragraph, not a tier.
+inline std::vector<NodeId> finishAnchoredNameList( const IngestResult& ing, std::string_view spec, std::vector<NodeId> out,
+                                                   const NameSuffixSplit& split, bool selector, std::optional<Lang> fileLaneLang,
+                                                   const LangCensus& census, LangAnchor* anchorOut )
 {
+    LangAnchor anchor = makeLangAnchor( ing, selector && split.tag.has_value(), split.tag.value_or( Lang::Unknown ),
+                                        fileLaneLang.has_value(), fileLaneLang.value_or( Lang::Unknown ), census );
+    applyExplicitScope( ing, out, anchor, selector );   // the ONE scope rule, same contract in both lanes
+    out = applyNameTower( ing, std::move( out ), anchor );   // the tower orders the name/file tier; the early tiers above stay as-is
+    // Written-spelling and def-line (train 39-40 tiers) join the lane's tail: each acts only while the list is
+    // still empty, so the order they held inline — dotted, written, def-line — is kept exactly. A tail read as a
+    // language is no part of any spelling these tiers compare (`Box.run@py` names `Box.run`), so they get the spec
+    // without it, and the stated language then scopes whatever they found by the same one rule as the head.
+    const std::string_view tierSpec = selector && split.tag.has_value() ? spec.substr( 0, spec.rfind( '@' ) ) : spec;
+    out = preferCodeOverDocUnits( ing, tierSpec, std::move( out ) );   // a doc heading spelled like code never hides the code
+    out = resolveAllByDottedScope( ing, tierSpec, std::move( out ) );   // `Class.method` / `Class#method`, only when `out` is empty
+    out = resolveAllByWrittenSpelling( ing, tierSpec, std::move( out ) );   // the source's own spelling, only when still empty
+    out = preferCodeOverDocUnits( ing, tierSpec, std::move( out ) );        // the dotted tier reads the Scope::name tier: same rule
+    out = resolveAllByDefLine( ing, tierSpec, std::move( out ) );            // a printed p= (`file:LINE`), last, only when still empty
+    applyExplicitScope( ing, out, anchor, selector );   // idempotent on the head's answer; scopes a tail tier's
+    if( anchorOut ) *anchorOut = anchor;   // AFTER the tail: the tiers cannot re-anchor, but tieBroke belongs to the anchor that ordered the head
+    return out;
+}
+
+// The "::" probe, shared by both name lanes (task D kept its tiers inlined; quality-delta's pass-2 count said
+// the QUALIFIED owner had grown past its bar carrying them): canonical id first, then the Scope::name tier.
+// answered=false means "no tier owned the spec — keep resolving"; an unanswerable :: string falls through
+// exactly as it did inline. One copy of the tier ORDER is the point: two copies is where the lanes would drift.
+inline std::vector<NodeId> resolveAllByColonTiers( const IngestResult& ing, std::string_view base, bool& answered, bool& scopeTier )
+{
+    answered  = false;
+    scopeTier = false;   // true when the Scope::name tier answered: its caller applies the code-over-doc-units rule to that tier only
+    if( base.find( "::" ) == std::string_view::npos )
+    {
+        return {};
+    }
+    std::vector<NodeId> byId = resolveAllByCanonicalId( ing, base );
+    if( !byId.empty() )
+    {
+        answered = true;   // content order, as the Scope::name tier below: a root-relative id two workspace roots both hold
+        std::ranges::sort( byId, [ & ]( NodeId a, NodeId b ) { return contentKeyBefore( ing, a, b ); } );
+        return byId;       // must not front whichever root was ingested first
+    }
+    std::vector<NodeId> byScope = resolveAllByScopeQualified( ing, base );   // Scope::name tier — see its contract
+    answered  = !byScope.empty();
+    scopeTier = answered;
+    return byScope;
+}
+
+// The name walk with the census ride (the QUALIFIED lane's file-predicate variant): every symbol this resolver
+// touches updates the corpus census — the counts the anchor needs cannot come from a second model pass, so they
+// come from THIS walk.
+inline void collectNameMatchesWithCensus( const IngestResult& ing, std::string_view name, std::string_view file,
+                                          std::vector<NodeId>& out, LangCensus& census )
+{
+    for( const Symbol& s : ing.symbols )
+    {
+        census.record( s );   // the corpus census rides the walk the resolver already performs — no second model pass
+        if( elixirNameMatches( s, name ) && nameSpecFileAdmits( ing, s, file ) )
+        {
+            out.push_back( s.id );
+        }
+    }
+}
+
+// The "::" tiers as the QUALIFIED lane answers them. A stated @lang tail must not blind the canonical/scope tiers: they
+// compare against symbol names, which carry no tail (CodeRabbit #440: `path::scope::name@rs` matched neither its own id nor
+// the scope spelling and fell through to a NAME-only lookup), so the tiers get the tail-free spec; a badTag spec passes
+// through untouched so the shared refusal still fires downstream. The literal-first rule holds here too: the COMPLETE
+// spelling is probed first, so an indexed `notes.md::config::user@py` (a heading that carries '@') answers as itself, and
+// the tail reads as a language only when that spelling owns nothing. On a tier answer, a doc heading spelled like code never
+// hides the code (Scope::name tier only), and then the stated tag scopes the tiers too (#440).
+inline std::vector<NodeId> qualifiedColonTierAnswer( const IngestResult& ing, std::string_view spec, bool& answered, LangAnchor* anchorOut )
+{
+    bool                   scopeTier = false;
+    const NameSuffixSplit  specTail  = nameSuffixSplit( spec );
+    std::vector<NodeId>    tier      = resolveAllByColonTiers( ing, spec, answered, scopeTier );
+    const bool             literal   = answered || !specTail.tag.has_value();
+    const std::string_view tierSpec  = literal ? spec : specTail.base;
+    if( !literal )
+    {
+        tier = resolveAllByColonTiers( ing, tierSpec, answered, scopeTier );
+    }
+    if( !answered )
+    {
+        return {};
+    }
+    if( scopeTier )
+    {
+        tier = preferCodeOverDocUnits( ing, tierSpec, std::move( tier ) );
+    }
+    return statedScopeOnTierAnswer( ing, std::move( tier ), specTail, !literal, anchorOut );
+}
+
+inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, std::string_view spec,
+                                                      std::size_t* unprovenDefCountOut = nullptr,
+                                                      LangAnchor* anchorOut = nullptr )
+{
+    if( anchorOut ) *anchorOut = {};
     if( unprovenDefCountOut != nullptr )
     {
         *unprovenDefCountOut = 0;
@@ -15919,6 +16332,10 @@ inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, s
         const AtSeed seed = resolveAtSeed( ing, spec.substr( 1 ) );
         if( seed.fault == AtFault::None )
         {
+            if( anchorOut )
+            {
+                *anchorOut = LangAnchor{ ing.symbols[ seed.chain.back() ].lang, AnchorOrigin::Context };   // a line names its file's language (D2's context lane)
+            }
             return { seed.chain.back() };
         }
         return {};
@@ -15926,42 +16343,39 @@ inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, s
     // A canonical id first (see resolveAllByName): "path::scope::name" would otherwise be cut at its first
     // ':' by splitQualifiedSpec and refused, which made the id= these very verbs emit unusable as their own
     // input. Falls through to the file:name rule when the spec is not an id, so nothing existing changes.
-    if( spec.find( "::" ) != std::string_view::npos )
+    bool colonAnswered = false;
+    std::vector<NodeId> colon = qualifiedColonTierAnswer( ing, spec, colonAnswered, anchorOut );
+    if( colonAnswered )
     {
-        std::vector<NodeId> byId = resolveAllByCanonicalId( ing, spec );
-        if( !byId.empty() )
-        {
-            return byId;
-        }
-        std::vector<NodeId> byScope = resolveAllByScopeQualified( ing, spec );   // Scope::name tier — see its contract
-        if( !byScope.empty() )
-        {
-            return preferCodeOverDocUnits( ing, spec, std::move( byScope ) );
-        }
+        return colon;
     }
 
-    std::string_view file, name;
-    splitQualifiedSpec( spec, file, name );
+    std::string_view file, rawName;
+    splitQualifiedSpec( spec, file, rawName );
+    const NameSuffixSplit split = nameSuffixSplit( rawName );   // `file:name@lang` — the same literal-first rule as resolveAllByName (task D)
+    const bool selector = suffixActsAsSelector( ing, rawName, split );
+    if( split.badTag && selector )
+    {
+        return {};   // invalid tail, no literal behind it: empty, the refusal disclosure is the D4/D5 lane
+    }
+    const std::string_view name = selector ? split.base : rawName;
 
     std::vector<NodeId> out;
-    for( const Symbol& s : ing.symbols )
-    {
-        if( elixirNameMatches( s, name ) && nameSpecFileAdmits( ing, s, file ) )
-        {
-            out.push_back( s.id );
-        }
-    }
+    LangCensus census;
+    collectNameMatchesWithCensus( ing, name, file, out, census );
     out = preferExactFile( ing, file, std::move( out ) );   // `./lib.cpp` names lib.cpp, not also sub/lib.cpp
+    // A file-qualified query anchors to the NAMED file's language: its first match (id order), read before the widening
+    // below appends definitions from other files that could sort ahead of it (#702 review).
+    std::optional<Lang> fileLaneLang;
+    if( !file.empty() && !out.empty() )
+    {
+        fileLaneLang = ing.symbols[ out.front() ].lang;
+    }
 
     // #63: a header-qualified selector resolves to DECLARATIONS, which carry no call-graph edges.
     // Widen to the definitions they stand for. Full contract and its limits: declToDefFollowThrough above.
-    declToDefFollowThrough( ing, file, name, out, unprovenDefCountOut );
-    out = applyNameTower( ing, std::move( out ) );   // the tower orders the name/file tier (task C); the early tiers above stay as-is
-    out = preferCodeOverDocUnits( ing, spec, std::move( out ) );   // a doc heading spelled like code never hides the code
-    out = resolveAllByDottedScope( ing, spec, std::move( out ) );   // `Class.method` / `Class#method`, only when `out` is empty
-    out = resolveAllByWrittenSpelling( ing, spec, std::move( out ) );   // the source's own spelling, only when still empty
-    out = preferCodeOverDocUnits( ing, spec, std::move( out ) );        // the dotted tier reads the Scope::name tier: same rule
-    return resolveAllByDefLine( ing, spec, std::move( out ) );            // a printed p= (`file:LINE`), last, only when still empty
+    declToDefFollowThrough( ing, file, name, out, unprovenDefCountOut );   // keeps the declarations: a non-empty list stays non-empty
+    return finishAnchoredNameList( ing, spec, std::move( out ), split, selector, fileLaneLang, census, anchorOut );
 }
 
 // lane js-def-naming fix 1: how many definitions a selector that resolved to NOTHING was refused over (0 = it simply matched none). A
@@ -16510,9 +16924,12 @@ inline NodeId focusOfOrderedMatches( const IngestResult& ing, std::vector<NodeId
     return matches.front();
 }
 
-inline NodeId resolveFocus( const IngestResult& ing, std::string_view spec, std::size_t* unprovenDefCountOut = nullptr )
+// resolveFocus: the grammar's projection + the tower's pick; the anchor the answer used lands in anchorOut,
+// and the pick itself lives in focusOfOrderedMatches, shared with --lego's role order.
+inline NodeId resolveFocus( const IngestResult& ing, std::string_view spec, std::size_t* unprovenDefCountOut = nullptr,
+                            LangAnchor* anchorOut = nullptr )
 {
-    return focusOfOrderedMatches( ing, resolveAllByNameQualified( ing, spec, unprovenDefCountOut ) );
+    return focusOfOrderedMatches( ing, resolveAllByNameQualified( ing, spec, unprovenDefCountOut, anchorOut ) );
 }
 
 // PATH-AMBIG-VERDICT (b), lifted here by PATH-AMBIG-VC so every verb that picks no single reading binds through it (--path and MCP
@@ -16542,7 +16959,8 @@ inline std::vector<NodeId> ownerSpellingFittedDefs( const IngestResult& ing, std
     {
         return {};
     }
-    return dropDocUnitsBesideCode( ing, applyNameTower( ing, std::move( fits ) ) );
+    LangAnchor noAnchor;   // no language is stated on this path: the pure ladder (kind, content key, id)
+    return dropDocUnitsBesideCode( ing, applyNameTower( ing, std::move( fits ), noAnchor ) );
 }
 
 // PATH-AMBIG-VC: every definition a verb that picks none binds for `spec`: resolveAllByNameQualified (every tier), else the

@@ -283,29 +283,6 @@ inline int emitCallHierarchyAlt( const rw::Config& cfg, const rw::IngestResult& 
     return 0;
 }
 
-// GV-PATH-BIND: the one-hop rows of `sym`; for a CALLERS selector that binds nothing as typed and that the M1 rule narrows to one source
-// definition (src/forgraphverb.h narrowRefusedSpelling), the rows of that definition's own spelling: `bound` holds it, `sym` is moved
-// onto it and the rows' `narrowed` names the selector as typed. Otherwise the rows as typed (empty matches: the caller refuses as before).
-inline rw::CallHierarchyRows callHierarchyRowsNarrowed( const rw::IngestResult& ing, const rw::Graph& g, std::string_view& sym, bool wantCallers,
-                                                        std::string& bound )
-{
-    rw::CallHierarchyRows rows = rw::callHierarchyRows( ing, g, sym, wantCallers );
-    std::optional<std::string> pick = wantCallers && rows.matches.empty() ? rw::narrowRefusedSpelling( ing, sym, rw::GraphSubjectForm::Callers )
-                                                                          : std::nullopt;
-    if( !pick )
-    {
-        return rows;
-    }
-    rw::CallHierarchyRows narrowedRows = rw::callHierarchyRows( ing, g, *pick, wantCallers );
-    if( narrowedRows.matches.empty() )
-    {
-        return rows;
-    }
-    narrowedRows.narrowed.emplace_back( sym );
-    bound = std::move( *pick );
-    sym   = bound;
-    return narrowedRows;
-}
 
 std::optional<int> runCallHierarchy( const MainDispatch& d )
 {
@@ -330,7 +307,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         // about WHICH rows the question has. GV-PATH-BIND: a callers selector refused over several fitting definitions answers as
         // the ONE source definition's own spelling (sym moves onto it; chRows.narrowed names it as typed).
         std::string               chBound;
-        const CallHierarchyRows   chRows  = callHierarchyRowsNarrowed( ing, g, sym, wantCallers, chBound );
+        const CallHierarchyRows   chRows  = rw::callHierarchyRowsNarrowed( ing, g, sym, wantCallers, chBound );
         // lane ix2-slice (IX-2 P2, src/closures.h): callees only — the functions written inside the matches' bodies, any depth
         const std::vector<NodeId> chClosures = wantCallers ? std::vector<NodeId>{} : rw::ClosureIndex( ing ).closuresOf( chRows.matches );
         const std::vector<NodeId>& matches = chRows.matches;
@@ -1406,6 +1383,7 @@ struct SafeDeleteLegendFlags
     bool        contract      = false;   // BODILESS-SEED: impls= on the root (contractseed.h)
     std::size_t radiusTests   = 0;       // IMPACT-TEST-TIER: radius_tests= on the root (graph.h radiusTiers)
     bool        testsIgnored  = false;   // IMPACT-TEST-TIER: tests_ignored= on the root (ignore-tests dropped them before the walk)
+    bool        emptyRadius   = false;   // impact_reaches=0: no transitive radius, so risk= reads no coverage (CR676-USES-EXIST-EMPTY)
 };
 
 // count-floor (countfloor.h) + CALLSITE-AT: the safe-delete legend's clauses for callers_floor=, uses_floor=, next= and
@@ -1501,12 +1479,21 @@ inline const char* safeDeleteRisk( bool anyEvidence, bool usesFloor, bool declin
     }
     return contract ? "contract" : "none-found";
 }
+// CR676-USES-EXIST-EMPTY: uses-exist over an EMPTY radius (impact_reaches=0, e.g. a value use and no caller) reads no coverage at
+// all, so the table's sentence (part of the radius is test-covered) would claim what radius_tested=0 does not show.
+inline constexpr const char* kUsesExistEmptyRadiusSentence =
+    "uses-exist: callers or uses exist, but the transitive blast radius is empty (impact_reaches=0), so it claims no test coverage. ";
 inline const char* safeDeleteRiskSentence( std::string_view risk ) noexcept
 {
     const auto it  = std::ranges::find( kSafeDeleteRiskReadings, risk, &SafeDeleteRiskReading::risk );
     const auto end = std::end( kSafeDeleteRiskReadings );   // outside the promise: a self-check names values, it calls nothing
     ASSUME( it != end, "safeDeleteRiskSentence: runSafeDelete assigns only the eight values listed" );
     return it != end ? it->sentence : "";
+}
+// The sentence for the risk= value in force, read against the radius it describes: the table's, except uses-exist over an empty one.
+inline const char* safeDeleteRiskReading( std::string_view risk, bool emptyRadius ) noexcept
+{
+    return emptyRadius && risk == "uses-exist" ? kUsesExistEmptyRadiusSentence : safeDeleteRiskSentence( risk );
 }
 
 inline void emitSafeDeleteLegend( std::size_t defCount, std::size_t unprovenDefs, std::size_t ambiguousCallers, std::string_view risk,
@@ -1560,7 +1547,7 @@ inline void emitSafeDeleteLegend( std::size_t defCount, std::size_t unprovenDefs
                     : "",
                 // One risk= value, the one in force. A verdict a reader has to look up in a glossary of three is a
                 // marker string legible only to whoever wrote it.
-                  safeDeleteRiskSentence( risk ),
+                  safeDeleteRiskReading( risk, flags.emptyRadius ),
                 // H1: what risk= did not read, straight after the sentence for the value it qualifies.
                 ( rw::unprovenDefsVerbLegend( rw::UnprovenDefsVerb::SafeDelete, unprovenDefs > 0 ) + declinedClause ).c_str(),
                 rw::modScopeLegend( hasModScope ),   // #60: exactly when a <c n="<file-scope>"> row is on this page
@@ -1813,7 +1800,8 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
                                                  .defTable = sdAttr.groups.multi(), .defTableCut = sdListing.cut, .splitArms = sdHasSplit,
                                                  .linkRows = sdHasLink, .anchorRows = sdHasMiss,
                                                  .declinedSites = rw::declinedSitesLegendFlags( sdDc, /*callersForm=*/true, sdDcCut ),
-                                                 .contract = sdContract.contracts > 0, .radiusTests = radius.tests, .testsIgnored = cfg.ignoreTests } );
+                                                 .contract = sdContract.contracts > 0, .radiusTests = radius.tests, .testsIgnored = cfg.ignoreTests,
+                                                 .emptyRadius = reach.empty() } );
 
     if( sdDeclinedLiteralCalls > 0 )
     {
@@ -3921,6 +3909,53 @@ std::optional<int> runMentions( const MainDispatch& d )
     return std::nullopt;
 }
 
+// D5 (arm A4) — the refusal pair to lsp.h's workspace/symbol notice: ONE sentence, both lanes, rendered
+// from the parser's own vocabulary. True = the caller must return 1; the message was already written.
+// Extracted because runAround was ALREADY over the complexity bar before D touched it — the gate told me
+// so, and growing an over-bar function is how bars stop meaning anything.
+// The literal-first check reads the NAME the resolver reads: an @FILE:LINE seed carries no language tail (`@src/user@corp.cpp:12`
+// is a path), and in `data.json:user@corp` the indexed name `user@corp` is what must exist, not the whole selector.
+inline bool refuseUnknownLangTail( const rw::IngestResult& ing, std::string_view spec, std::string_view verb )
+{
+    if( !spec.empty() && spec.front() == '@' )
+    {
+        return false;
+    }
+    std::string_view file, name;
+    rw::splitQualifiedSpec( spec, file, name );
+    const rw::NameSuffixSplit as = rw::nameSuffixSplit( name );
+    if( !( as.badTag && rw::suffixActsAsSelector( ing, name, as ) ) )
+    {
+        return false;
+    }
+    rw::emitTo( stderr, "ripwire: {}: unknown language after @ in '{}'; nothing answers. known languages (tags): {}\n",
+                std::string( verb ), std::string( spec ), rw::knownLangTags() );
+    return true;
+}
+
+// D4 (arms A1/A5/A6) — the anchor's disclosure pair: the root-row attributes (via the seed annotation) plus
+// the stderr sentence when the STATED language holds nothing and foreign rows answer anyway. rc is never
+// touched by the fallback: disclosure, not refusal. The adopted rule's second half (#440 review): presence
+// must MEAN something — an inferred corpus majority that fronts nothing and ties nothing decided nothing,
+// so it says nothing; when its tie-break really did move the front, the root carries the disagree-here
+// step (next=--defs=NAME: the verb that lists every definition and the spellings that pick one).
+inline void aroundAnchorDisclosure( const rw::LangAnchor& arAnchor, rw::MapAnnotations::SeedDisclosure& seedAnn )
+{
+    const bool decides = arAnchor.active()
+        && ( arAnchor.origin == rw::AnchorOrigin::Explicit || arAnchor.frontMoved || arAnchor.fellBack );   // a typed @lang always shows; a file
+    // lane, an @FILE:LINE seed and the majority show only when they changed which definition leads (LAND-440 Stage 0: file:name grew 1.4 KB)
+    seedAnn.reflang       = decides ? rw::langTag( arAnchor.lang ) : nullptr;
+    seedAnn.reflangOrigin = decides ? rw::anchorOriginName( arAnchor.origin ) : nullptr;
+    if( arAnchor.tieBroke && arAnchor.origin == rw::AnchorOrigin::Corpus && !seedAnn.of.empty() )
+    {
+        seedAnn.nextDefs = seedAnn.of;
+    }
+    if( arAnchor.fellBack )
+    {
+        rw::emitTo( stderr, "ripwire: --around: the matching language holds no definition; {} in others, answering from the other languages\n", arAnchor.others );
+    }
+}
+
 std::optional<int> runAround( const MainDispatch& d )
 {
     using namespace rw;
@@ -3944,7 +3979,12 @@ std::optional<int> runAround( const MainDispatch& d )
         // file it named, so the ego walk below never starts from them. Unreported, a drop reached the reader as the
         // declaration's own row standing for the whole neighbourhood.
         std::size_t  arUnprovenDefs = 0;
-        const NodeId focus          = resolveFocus( ing, cfg.around, &arUnprovenDefs );
+        if( refuseUnknownLangTail( ing, cfg.around, "--around" ) )
+        {
+            return 1;   // A4: a bad @lang tail named no language — the vocabulary went to stderr with the refusal
+        }
+        rw::LangAnchor arAnchor;   // D4: which language the answer anchored to, and whether the stated one came up empty
+        const NodeId focus          = resolveFocus( ing, cfg.around, &arUnprovenDefs, &arAnchor );
         if( focus == kNoNode )
         {
             rw::emitTo( stderr, "{}\n", selectorNotFoundMessage( ing, "ripwire: --around symbol not found: ",
@@ -3997,6 +4037,7 @@ std::optional<int> runAround( const MainDispatch& d )
         rw::MapAnnotations aroundAnn;
         aroundAnn.seed = { ing.symbols[ focus ].name, cfg.aroundDepth, cfg.aroundFanout, definitionCountOfName( ing, focus ), eg.fanoutCut, eg.depthTruncated };
         aroundAnn.seed.unprovenDefs = arUnprovenDefs;   // H1: unproven_defs= beside defs= on the root, its clause in the map legend
+        aroundAnchorDisclosure( arAnchor, aroundAnn.seed );   // D4: reflang= / reflang-origin= on the root + the A5 stderr sentence, in one call
 
         serialize( stdout, ing, rank, g.outOff, g.outTargets, int( eg.nodes.size() ), cfg.mostImportantLast, cfg.metrics, fanInPtr, &g.ambOut, false, g.outProv.empty() ? nullptr : &g.outProv, cboPtr, testedPtr, lcom4Ptr, ampPtr, &g.unresolvedOut, g.bindLabel.empty() ? nullptr : &g.bindLabel, /*autoOrder=*/false, /*outEstTokens=*/nullptr, aroundCompose.tokens + aroundRoutes.tokens + wrap.tokens, aroundAnn, /*statsFirstScreen=*/false, aroundRootArg, &g.locPinOut, g.externalCalls, &g.declinedOut, /*gateDeclinedCalls=*/0, g.outNameOnly.empty() ? nullptr : &g.outNameOnly, /*stdMemberDeclinedCalls=*/0, g.inertDeclinedCalls );
 

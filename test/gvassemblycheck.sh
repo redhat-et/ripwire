@@ -18,6 +18,8 @@
 #       fitting definitions (rc 0, from_defs=4: it lists pairs and picks none, so qualifying never refuses there), and --connect binds
 #       them too (PATH-AMBIG-VC, the same src/graph.h ownerSpellingFittedDefs: rc 0, the tick terminal searched defs="4" and moved onto
 #       the definition that joins, as for any many-definition name)
+#   (d5) CALLERS-TWO-COPY: MCP find_referencing_symbols binds through the same callHierarchyRowsNarrowed: the d3 answer
+#       (narrowed, bootApp), and the d4 fixture still refuses
 #   M3 MET-BRIDGE: an unreached path whose search reached a caller of to= prints the proven prefix and the one crossing.
 #   (b1) onFileEvent -> ConnectionManagerImpl::onData (a virtual `filter->onData( 1 )` the graph declines): <met_bridge reachable="0"
 #        in="onContinueReading" via="declined"> holding the path verb's reachable="1" answer onFileEvent -> onContinueReading (its
@@ -226,6 +228,50 @@ if [ "$( rc d4p )" = 0 ] && [ "$( rc d4c )" = 0 ] && [ "$( rc d4k )" = 1 ] && [ 
    && grep -q 'found="0" refused="4"' "$TMP/d4k.xml" && grep -qE '<t n="tick"[^>]* defs="4"' "$TMP/d4c.xml"; then
     ok "(d4) two source definitions left: --callers still refuses (rc 1, refused=4), --path (from_defs=4) and --connect (t defs=4) bind the 4, no narrowed="
 else no "(d4) rc=$( rc d4p )/$( rc d4c )/$( rc d4k ) narrowed=$d4n"; fi
+
+# (d5) CALLERS-TWO-COPY: MCP find_referencing_symbols / callers bind through the CLI's own binder (forgraphverb.h
+#      callHierarchyRowsNarrowed), so ApplicationRef.tick narrows to the one source definition there too ("narrowed", its
+#      note, bootApp in calledBy), where MCP called callHierarchyRows directly and refused it. NEGATIVE: the two-source
+#      fixture still refuses on MCP, as --callers does (d4). RED on the base binary (MCP answered -32602 / not found).
+mcpq(){ python3 - "$BIN" "$1" "$2" <<'PY'
+import json, subprocess, sys
+binp, root, verb = sys.argv[1], sys.argv[2], sys.argv[3]
+reqs = [ { "jsonrpc": "2.0", "id": 0, "method": "initialize", "params": { "protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": { "name": "g", "version": "1" } } },
+         { "jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": { "name": verb, "arguments": { "path": root, "symbol": "ApplicationRef.tick" } } } ]
+p = subprocess.run( [ binp, "--mcp" ], input = "".join( json.dumps( r ) + "\n" for r in reqs ), capture_output = True, text = True, timeout = 300 )
+for line in p.stdout.splitlines():
+    try:
+        o = json.loads( line )
+    except ValueError:
+        continue
+    if o.get( "id" ) != 1:
+        continue
+    r = o.get( "result", {} )
+    text = "".join( c.get( "text", "" ) for c in r.get( "content", [] ) )
+    try:
+        j = json.loads( text )
+    except ValueError:
+        print( "err", ( json.dumps( o.get( "error" ) ) if "error" in o else text ).replace( "\n", " " )[:300] ); break
+    names = [ e.get( "name" ) for e in j.get( "calledBy", [] ) ]
+    print( "ok", "narrowed=" + str( j.get( "narrowed", "-" ) ), "note=" + ( "1" if "narrowed_note" in j else "0" ),
+           "defs=" + str( j.get( "defs" ) ), "calledBy=" + ",".join( n for n in names if n ) )
+    break
+else:
+    print( "err no response" )
+PY
+}
+d5a="$( mcpq "$F1" find_referencing_symbols )"; d5b="$( mcpq "$F1N" find_referencing_symbols )"
+if [ "$( rc d3 )" = 0 ] && [ "$d5a" = "ok narrowed=ApplicationRef.tick note=1 defs=1 calledBy=bootApp" ]; then
+    ok "(d5) MCP find_referencing_symbols narrows like --callers (d3): $d5a"
+else no "(d5) MCP find_referencing_symbols ApplicationRef.tick: want the CLI's narrowed answer, got [$d5a]"; fi
+# The refusal must be THE refusal: a -32602 symbol-not-found error for the selector. "err no response" (the subprocess died or
+# hung up), a malformed result, or any other error is a FAIL, not a pass by default.
+case "$d5b" in
+    'err {"code": -32602, "message": "symbol not found: '"'ApplicationRef.tick'"*)
+        ok "(d5) negative: two source definitions left, MCP still refuses like --callers: [$d5b]" ;;
+    ok\ *) no "(d5) negative: two source definitions left, MCP must still refuse like --callers (d4): [$d5b]" ;;
+    *)     no "(d5) negative: want the -32602 symbol-not-found refusal for ApplicationRef.tick, got [$d5b]" ;;
+esac
 
 # (b1) met bridge across a declined virtual call
 RIPWIRE_NO_HOP_BODY=1 run "$F3" b1 --for="path from ConnectionImpl::onFileEvent to ConnectionManagerImpl::onData"
