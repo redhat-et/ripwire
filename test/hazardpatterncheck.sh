@@ -499,7 +499,7 @@ REGA
 cat > "$TMP/reg_b1.tsv" <<'REGB1'
 infra/emit.h	emitTo	silent	1	not an answer path: std::print's failed write is made silent to keep fputs's contract, which the header documents
 ingest_astquery.h	astQueryGrouped	silent	1	FINDING: a file whose query walk throws drops out of --match/--lint hits with no disclosure in any build; file held by the regexguard and crash-fixes lanes
-ingest_astquery.h	definitionLinesWorker	alert-only	1	records in every build: the handler is the sink form DISCLOSE( ( BlobDefsSlot{ slot } ), WorkerThrew, … ), whose disclose() clears that blob's lines and marks it Failed, so the blob confirms no definition (its rows read kind="text"); the parenthesized sink is what the RECORDS pattern does not see
+ingest_astquery.h	blobPoolWorker	alert-only	1	records in every build: the handler is the sink form DISCLOSE( ( BlobDefsSlot{ slot } ), WorkerThrew, … ), whose disclose() clears that blob's lines and marks it Failed, so the blob confirms no definition (its rows read kind="text"); the parenthesized sink is what the RECORDS pattern does not see
 ingest_astquery.h	spanTiersOfFiles	alert-only	1	FINDING (disclosure lane): a tier worker that throws leaves its files unclassified for --grep-in, silent in Release
 ingest_docpass.h	runDocPostPass	alert-only	1	FINDING (disclosure lane): a doc post-pass throw skips that document, silent in Release
 mcpindex.h	maybePrefetchHeadSnapshot	silent	1	not an answer path: optional background prefetch of the HEAD snapshot; a request recomputes whatever it did not fill (§2b rule 3)
@@ -546,8 +546,9 @@ ingest_astquery.h	collectGatedLocalNames	ts_parser_new	1	deleted before each of 
 ingest_astquery.h	collectGatedLocalNames	ts_parser_parse_string	1	deleted before the final return
 ingest_astquery.h	compileGrammarQueries	ts_query_new	2	moved into GrammarQueries (or deleted when the combined query does not add up); astQueryGrouped deletes every one by hand after the pass
 ingest_astquery.h	computeGrammarDisclosure	ts_query_new	1	a compile probe, deleted inside the same if
-ingest_astquery.h	definitionLinesWorker	ts_query_cursor_new	1	deleted on both exits of the noexcept worker: the no-parser return (when non-null) and after the claim loop, whose one throwing call sits inside try/catch
+ingest_astquery.h	blobPoolWorker	ts_query_cursor_new	1	deleted on both exits of the noexcept worker: the no-parser return (when non-null) and after the claim loop, whose one throwing call sits inside try/catch
 ingest_astquery.h	spanTiersOfFiles	ts_parser_parse_string	1	the tree is deleted right after the walk
+ingest_astquery.h	tangleDetailOf	ts_parser_parse_string	1	adopted into a TreeGuard at the call, freed on every exit (the qd tangle detail re-parse)
 ingest_crawl.h	compileQueryStandalone	ts_query_new	1	returned into the process-lifetime CompiledQueryCache, whose destructor deletes every query
 ingest_parsepool.h	runParseWorker	ts_query_cursor_new	1	deleted at the end of the worker; the returns in between belong to lambdas
 ingest_sidecap.h	parseTree	ts_parser_parse_string	1	returned to the caller, which adopts it into TreeGuard
