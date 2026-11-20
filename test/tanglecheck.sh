@@ -38,7 +38,7 @@ TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 export TMPDIR="$TMP/cache"; mkdir -p "$TMPDIR"
 export HOME="$TMP/home"; mkdir -p "$HOME"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 echo "tanglecheck: BIN=$BIN"
 G=( git -c user.name=t -c user.email=t@t -c commit.gpgsign=false -c tag.gpgsign=false )
@@ -57,11 +57,13 @@ python3 "$ROOT/test/lib/tanglefixtures.py" wt "$R" || { echo "fixture writer fai
 
 Q="$TMP/qd.xml"
 "$BIN" "$R" --quality-delta --no-cache >"$Q" 2>"$Q.err"; echo $? >"$Q.rc"
-"$BIN" "$R" --quality-delta --no-cache >"$Q.2" 2>/dev/null
-"$BIN" "$R" --quality-delta --json --no-cache >"$TMP/qd.json" 2>/dev/null
-M="$( "$BIN" "$R" --metrics --no-cache 2>/dev/null )"
+"$BIN" "$R" --quality-delta --no-cache >"$Q.2" 2>/dev/null; rc2=$?
+"$BIN" "$R" --quality-delta --json --no-cache >"$TMP/qd.json" 2>/dev/null; rcj=$?
+M="$( "$BIN" "$R" --metrics --no-cache 2>/dev/null )"; rcm=$?
 rc="$( cat "$Q.rc" )"
 case "$rc" in 0|2) ;; *) no "quality-delta exit status $rc (stderr: $( head -c 300 "$Q.err" ))";; esac
+if [ "$rc2" != "$rc" ] || [ "$rcj" != "$rc" ]; then no "quality-delta exit status differs between runs: $rc, again $rc2, --json $rcj"; fi
+if [ "$rcm" != 0 ]; then no "--metrics exit status $rcm"; fi
 
 # tangle row for a symbol (sym= ends in ::NAME or is NAME), or empty
 trow(){ grep -oE "<r kind=\"tangle\" sym=\"[^\"]*$1\"[^>]*>" "$Q" | head -1; }
@@ -98,15 +100,15 @@ else no "(n5) armnest: want no tangle row, got $( trow armnest )"; fi
 mf="$( mrow steerfar )"; mn="$( mrow steernear )"
 if [ -z "$mf" ] || [ -z "$mn" ]; then no "(s) PREMISE: steerfar/steernear missing from --metrics"
 else
-    [ "$( attr "$mf" steer )" = 1 ] && ok "(s1) steerfar: steer=\"1\"" || no "(s1) steerfar: want steer=\"1\", got $mf"
-    [ -z "$( attr "$mn" steer )" ] && ok "(s2) steernear: no steer=" || no "(s2) steernear: want no steer=, got $mn"
+    if [ "$( attr "$mf" steer )" = 1 ]; then ok "(s1) steerfar: steer=\"1\""; else no "(s1) steerfar: want steer=\"1\", got $mf"; fi
+    if [ -z "$( attr "$mn" steer )" ]; then ok "(s2) steernear: no steer="; else no "(s2) steernear: want no steer=, got $mn"; fi
 fi
 mc="$( mrow steercursor )"
 if [ -z "$mc" ] || [ "$( attr "$mc" loc )" -le 50 ]; then no "(s3) PREMISE: steercursor (over 50 lines) missing from --metrics, got '${mc:-none}'"
-else [ -z "$( attr "$mc" steer )" ] && ok "(s3) steercursor: no steer= (bound + index reads)" || no "(s3) steercursor: want no steer=, got $mc"; fi
+else if [ -z "$( attr "$mc" steer )" ]; then ok "(s3) steercursor: no steer= (bound + index reads)"; else no "(s3) steercursor: want no steer=, got $mc"; fi; fi
 ms="$( mrow steerscope )"
 if [ -z "$ms" ] || [ "$( attr "$ms" loc )" -le 50 ]; then no "(s4) PREMISE: steerscope (over 50 lines) missing from --metrics, got '${ms:-none}'"
-else [ -z "$( attr "$ms" steer )" ] && ok "(s4) steerscope: no steer= (closed block's local)" || no "(s4) steerscope: want no steer=, got $ms"; fi
+else if [ -z "$( attr "$ms" steer )" ]; then ok "(s4) steerscope: no steer= (closed block's local)"; else no "(s4) steerscope: want no steer=, got $ms"; fi; fi
 
 # (r1)
 r="$( trow creep )"
@@ -114,10 +116,10 @@ dw="$( attr "$r" why | sed -nE 's/.*best since v1: deep ([0-9]+)-&gt;([0-9]+) li
 if [ -n "$r" ] && [ "$( attr "$r" ratchet )" = v1 ] && [ -n "$dw" ] && [ $(( ${dw#* } - ${dw% *} )) = 6 ]; then
     ok "(r1) creep: ratchet=\"v1\" row: $r"
 else no "(r1) creep: want a tangle row with ratchet=\"v1\" and why=best since v1: deep N->N+6 lines, got '${r:-none}'"; fi
-grep -q 'ratchet_ref="v1"' "$Q" && ok "(r1) root ratchet_ref=\"v1\"" || no "(r1) root: no ratchet_ref=\"v1\""
+if grep -q 'ratchet_ref="v1"' "$Q"; then ok "(r1) root ratchet_ref=\"v1\""; else no "(r1) root: no ratchet_ref=\"v1\""; fi
 # (r2) / (c1)
-grep -qE '<i kind="tangle" sym="[^"]*shrink"' "$Q" && ok "(r2) shrink credited in <improved>" || no "(r2) shrink: no <i kind=\"tangle\"> entry"
-[ -z "$( trow shrink )" ] && ok "(r2) shrink: no tangle row" || no "(r2) shrink: unexpected tangle row $( trow shrink )"
+if grep -qE '<i kind="tangle" sym="[^"]*shrink"' "$Q"; then ok "(r2) shrink credited in <improved>"; else no "(r2) shrink: no <i kind=\"tangle\"> entry"; fi
+if [ -z "$( trow shrink )" ]; then ok "(r2) shrink: no tangle row"; else no "(r2) shrink: unexpected tangle row $( trow shrink )"; fi
 grep -qE '<i kind="complexity" sym="[^"]*simplify" was="2[0-9]" now="1[0-9]"' "$Q" && ok "(c1) simplify credited in <improved> (complexity)" \
     || no "(c1) simplify: no <i kind=\"complexity\"> entry ($( grep -oE '<improved[^>]*>' "$Q" ))"
 # (r4)
@@ -127,7 +129,7 @@ if [ -z "$mg" ] || [ -z "$( attr "$mg" tangle )" ] || [ "$( printf '%s' "$( attr
 elif grep -qE '<i kind="tangle" sym="[^"]*nudge"' "$Q"; then no "(r4) nudge: a 2-line fall credited: $( grep -oE '<i kind="tangle" sym="[^"]*nudge"[^>]*>' "$Q" )"
 else ok "(r4) nudge (tangle=$( attr "$mg" tangle ), 2 deep lines fewer): no <improved> entry"; fi
 # (r3)
-r="$( trow tangled )"; [ -n "$r" ] && [ -z "$( attr "$r" ratchet )" ] && ok "(r3) tangled (new): no ratchet=" || no "(r3) tangled: want a row without ratchet=, got '${r:-none}'"
+if r="$( trow tangled )"; [ -n "$r" ] && [ -z "$( attr "$r" ratchet )" ]; then ok "(r3) tangled (new): no ratchet="; else no "(r3) tangled: want a row without ratchet=, got '${r:-none}'"; fi
 # (g) report-only: no tangle row gates (other kinds' rows on these fixtures may)
 tg="$( grep -oE '<r kind="tangle"[^>]*>' "$Q" | grep -c 'gating="1"' )"; tm="$( grep -oE '<r kind="tangle"[^>]*>' "$Q" | grep -c 'sev="minor"' )"
 if [ "$tangles" -ge 1 ] && [ "$tg" = 0 ] && [ "$tm" = "$tangles" ]; then ok "(g) report-only: $tangles tangle row(s), all sev=\"minor\", none gating"
@@ -137,7 +139,7 @@ jt="$( python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(sum(1 
 if [ "${jt% *}" = "$tangles" ] && [ "${jt#* }" -ge 2 ]; then ok "(j) --json: ${jt% *} tangle row(s) and ${jt#* } improved entries"
 else no "(j) --json: '$jt' (tangle rows, improved) vs XML $tangles rows"; fi
 # (d)
-cmp -s "$Q" "$Q.2" && ok "(d) two runs byte-identical" || no "(d) two runs differ"
+if cmp -s "$Q" "$Q.2"; then ok "(d) two runs byte-identical"; else no "(d) two runs differ"; fi
 
 [ "$fail" = 0 ] && echo "tanglecheck: PASS" || echo "tanglecheck: FAIL"
 exit "$fail"
