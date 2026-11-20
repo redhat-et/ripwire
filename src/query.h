@@ -38,6 +38,7 @@
 #include "arch.h"          // P0-5: builtinLayer() — THE layer taxonomy, the same one the map's layer= attribute carries
 #include "regexguard.h"    // file(): the screen, the compile and the guarded match every user-authored pattern takes
 #include "infra/Diagnostics.h"
+#include "infra/sortutil.h"   // sortUnique — the one sorted-unique step
 
 #include <algorithm>
 #include <cctype>
@@ -259,8 +260,7 @@ struct Eval
 
     static void sortUniq( std::vector<NodeId>& v )
     {
-        std::sort( v.begin(), v.end() );
-        v.erase( std::unique( v.begin(), v.end() ), v.end() );
+        rw::sortutil::sortUnique( v );
     }
 
     // ── sources ───────────────────────────────────────────────────────────────────────────────────────

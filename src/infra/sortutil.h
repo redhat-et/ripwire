@@ -218,9 +218,10 @@ inline void radixSortByFromTo( std::vector<Edge>& values )
     radixSortByFromTo( values, scratch );
 }
 
-// Sort an integer vector and drop its duplicates: the sorted-unique set every hash or id collection here ends with.
-// Integers only — a string_view set goes through the comparator above, never operator<.
-template<std::integral T>
+// Sort a vector and drop its duplicates: the sorted-unique set every hash, id or name collection here ends with.
+// Never a string_view set — that goes through svLess above, never operator<.
+template<class T>
+    requires( !std::same_as<T, std::string_view> )
 inline void sortUnique( std::vector<T>& values )
 {
     std::sort( values.begin(), values.end() );
