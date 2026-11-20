@@ -2088,7 +2088,8 @@ if [ "$QD_OK" = 1 ]; then
                 "n_dispatch:p_echo:tools/s.sh:the arms run commands: no result"; do
         neg="${pair%%:*}"; rest="${pair#*:}"; pos="${rest%%:*}"; rest="${rest#*:}"; path="${rest%%:*}"; why="${rest#*:}"
         pairs=$(( pairs + 1 ))
-        [ -n "$( ua_row "$pos" "${pos_path:-$( [ "$path" = gen.cpp ] && echo a.cpp || echo "$path" )}" )" ] && seen=$(( seen + 1 ))
+        twin_path="$path"; [ "$path" = gen.cpp ] && twin_path=a.cpp   # the generated negative's twin is the hand-written a.cpp
+        [ -n "$( ua_row "$pos" "$twin_path" )" ] && seen=$(( seen + 1 ))
         ua_none "$neg" "$path" "$why"
     done
     if [ "$seen" = "$pairs" ] && [ "$pairs" -gt 0 ]; then ok "$L: every negative's positive twin fired ($seen/$pairs): each silence is read off a shape the scanner sees"

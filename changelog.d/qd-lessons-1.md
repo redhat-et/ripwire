@@ -6,11 +6,12 @@ longer gates, when every pair of members operates on different data. "Different 
 The members share no literal: 0 and 1 are left out, and `true`, `nullptr`, `None` and the like count. Or the members
 take the same number of concrete parameters, with a different type at some position. The row says which with
 `why="different literals"`, `why="different parameter types"` or `why="different literals or parameter types"`.
-A template or generic member, an untyped parameter, or a shared literal keeps the group gating, as before. So does a
-recognized idiom whose members share a domain value, such as a ladder over the same `Grade::Poor` … with tuned
-thresholds, a pair sharing a named constant, or a pair calling the same helper. A function passed by value, like
-`svLess`, does not count. Two bodies that both pass their literal straight to a call keep gating too, because that
-is one function with the literal as a parameter (`rfind( '/' )` beside `rfind( "::" )`, the `afterLast` family).
+A shared literal rules out the literal proof, and a template or generic member or an untyped parameter rules out the
+type proof; a group with neither proof keeps gating, as before. A recognized idiom whose members share a domain
+value, such as a ladder over the same `Grade::Poor` … with tuned thresholds, a pair sharing a named constant, or a
+pair calling the same helper, keeps gating under both proofs. A function passed by value, like `svLess`, does not
+count. Two bodies that both pass their literal straight to a call keep gating too, because that is one function with
+the literal as a parameter (`rfind( '/' )` beside `rfind( "::" )`, the `afterLast` family).
 `--clones` does not read this verdict and is byte-identical.
 
 Measured on ripwire's own history, gating rows fell from 13 to 3 on the 13 acknowledged VA-FORMS rows. The 3 that
