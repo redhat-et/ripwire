@@ -58,14 +58,24 @@
 namespace rw::keybody
 {
 
-// At most this many key bodies on one answer (the question names one or two symbols; a third is a list, not a key).
-inline constexpr std::size_t kKeyBodyMax = 2;   // key bodies one answer carries; past it the block says capped="1" and next= the first not shown
-static_assert( kHopBodyCapBytes == 4000 && kKeyBodyMax == 2, "the key-body legend spells both bounds: re-word it with the knobs" );
+// At most this many key bodies on one answer. CB1 raised this from 2, and the number is DERIVED, not picked:
+// on GA1's DEV half (89 tasks, MEASURED) the gold functions per task run median 1, q75 3, p90 5, max 12, so a
+// cap of 2 could satisfy only 71.9% of tasks while 5 satisfies 94.4%. The guard therefore sits at the
+// distribution's p90, where it is not the binding constraint for 19 tasks in 20, and the BYTE BUDGET is what
+// actually bounds the block (the brief's rule: the budget is the cap, not a count).
+// HONESTY ABOUT THE PREMISE. The case for lifting this cap was "the median task has 3 gold files, so 2 cannot
+// satisfy it". On GA1 that premise does NOT hold: its DEV median is 1 gold file and 1 gold function per task,
+// and only 28.1% of tasks need 3 or more functions. So this raise helps a real minority, not a majority, and
+// CB1's readout says so rather than inheriting the stronger claim.
+inline constexpr std::size_t kKeyBodyMax = 5;   // key bodies one answer carries; past it the block says capped="1" and next= the first not shown
+static_assert( kHopBodyCapBytes == 4000 && kKeyBodyMax == 5 && kCappedBodyLines == 120,
+               "the key-body legend spells all three bounds: re-word it with the knobs" );
 
 // The block's own legend comment (the house convention: it travels with its block, foranswerfirst.h declaredBlock). No "--".
 inline constexpr std::string_view kKeyBodyLegend =
-    "<!-- bodies of=key: the definition body of each symbol the question names in backticks (at most 2), b t= l= p= n= as expand "
-    "prints it, no callee rows, whole up to 4000 B (a longer one is cut: truncated=1 lines= next=); shown= of total= definitions, "
+    "<!-- bodies of=key: the definition body of each symbol the question names in backticks (at most 5), b t= l= p= n= as expand "
+    "prints it, no callee rows, whole up to 120 lines and 4000 B (a longer one is cut: truncated=1 lines= next=, and cap_lines=120 "
+    "when the LINE cap is what cut it); shown= of total= definitions, "
     "capped=1 next= the first not shown; page 1 does not count these bytes -->";
 
 static_assert( kKeyBodyLegend.starts_with( forpages::detail::kKeyBodyLegendLead ), "forpages.h finds the key group by its legend's lead" );
@@ -196,8 +206,30 @@ inline KeyBodies keyBodies( const IngestResult& ing, std::string_view task, std:
     {
         return {};
     }
-    const RouteBodiesXml r = routeBodiesXml( ing, want, "key", {}, kKeyBodyMax, rootArg );
+    // CB1: the "key" group is the ONE routeBodiesXml caller that opts into the monotone line cap. The hops and
+    // route groups keep bodyLineCap=0 and are byte-identical, which is how this change is provable rather than
+    // inspected: a cap wired into the shared printer itself would have moved bytes on three other groups.
+    const RouteBodiesXml r = routeBodiesXml( ing, want, "key", {}, kKeyBodyMax, rootArg, kCappedBodyLines );
     return { r.xml, r.ids.size() };
+}
+
+// PB1: the --pack-task twin's ONE key body — the first definition keyBodies would serve (round robin over the spans takes the first
+// span's first definition first), or kNoNode when no span places one or RIPWIRE_NO_KEY_BODY is set. The bundle (packtask.h) falls
+// back to its top positive-score head; it cannot include this header, so its callers resolve the pick and hand it in.
+inline NodeId keyBodyFor( const IngestResult& ing, std::string_view task, std::string_view rootArg )
+{
+    if( !keyBodyOn() )
+    {
+        return kNoNode;
+    }
+    for( const std::vector<NodeId>& defs : keyCandidates( ing, task, {}, {}, rootArg ) )
+    {
+        if( !defs.empty() )
+        {
+            return defs.front();
+        }
+    }
+    return kNoNode;
 }
 
 // THE UNROUTED ANSWER: insert the key block (its legend comment, then the element) right after the first top-level row block of a

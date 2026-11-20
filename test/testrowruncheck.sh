@@ -217,7 +217,18 @@ rows_disclosed "(3) --test-gate json" "$( json_tests "$( rw --test-gate --json )
 # ── ARM 4 — --pr-context (prcontext.h) ─────────────────────────────────────────────────────────────────
 rows_disclosed "(4) --pr-context" "$( rw --pr-context )" "$XROW" "$XHAS" "$XUNK"
 # ── ARM 5 — --pack-task, both dialects (packtask.h) ────────────────────────────────────────────────────
-rows_disclosed "(5) --pack-task xml"  "$( rw --pack-task="change compute and wrapper" )"        "$XROW" "$XHAS" "$XUNK"
+# PB1 (2026-11-19): the bundle's XML arm reads the <tests> ELEMENT, not the whole document. `<t p="…"/>` is
+# also the shape of a row in --for's file-grain tail, which --pack-task now carries: those three rows carry
+# neither run= nor run_unknown= because they are not test rows at all, and XROW matched them document-wide.
+# The same collision, and the same fix, as test/testrowpaths.py's reader — the short tag is read only inside
+# the element that declares what it means. A document with no <tests> element is passed through whole.
+tests_block(){ python3 -c "
+import sys
+d = sys.stdin.read()
+i, j = d.find( '<tests' ), d.find( '</tests>' )
+sys.stdout.write( d[ i : j + len( '</tests>' ) ] if i != -1 and j > i else d )
+"; }
+rows_disclosed "(5) --pack-task xml"  "$( rw --pack-task="change compute and wrapper" | tests_block )" "$XROW" "$XHAS" "$XUNK"
 rows_disclosed "(5) --pack-task json" "$( json_tests "$( rw --pack-task="change compute and wrapper" --json )" )" "$JROW" "$JHAS" "$JUNK"
 # ── ARM 6 — --handoff (handoff.h) — the row family lens 2 L2 found carrying NO run= at all ─────────────
 rows_disclosed "(6) --handoff" "$( rw --handoff )" "$XROW" "$XHAS" "$XUNK"

@@ -316,9 +316,9 @@ inline PartitionPlan planPartition( const IngestResult& ing, const Graph& g, con
 }
 
 // ── overlap measurement ───────────────────────────────────────────────────────────────────────────────────
-// Measured over each bundle's SURFACE — the ids the bundle actually names: its ranking window (incl. the
-// name-only <far> tier) ∪ its full-body anchors ∪ their 1-hop callers and callees (which is also where the
-// inline <c> callee signatures inside each body come from). Reported by the assembler itself via its
+// Measured over each bundle's SURFACE — the ids the bundle actually names: its SHOWN ranking rows ∪ its body
+// candidates (PB1: the one served key body and the next= pointer rows beside it) ∪ that body's 1-hop callers
+// (which is also where the inline <c> callee signatures inside the body come from). Reported by the assembler itself via its
 // surfaceOut tail, so this is what the emitted XML talks about, not a re-derivation that could disagree with
 // it. HONEST LIMIT: it is the pre-budget-trim surface — a bundle whose tail was trimmed names slightly fewer
 // symbols than this counts, so the figures are a ceiling on the overlap actually paid for.

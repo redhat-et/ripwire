@@ -387,7 +387,14 @@ fi
 python3 - "$TMP" <<'PY'
 import glob, os, sys, xml.etree.ElementTree as ET
 
-ROSTER = {"bodies": "b", "callers": "s", "far": "s", "notes": "target", "tests": "test"}
+# "far" is GONE from the roster (PB1, 2026-11-19): --pack-task's name-only <far> tier went with the distance mask
+# that fed it when the bundle took --for's own 40-row head, and a roster entry that can no longer appear is an
+# entry that checks nothing — which is what the never-appeared arm below says in as many words.
+# <tail> is deliberately NOT added in its place. Its shown= counts FILES and its <t> rows are FOLDED (a same-dir
+# group is one row, tl1-tail-samedir), so the one-row-per-shown rule this roster applies is simply not the
+# contract that section keeps: MEASURED on this sweep, --for's own forbundle tail reads shown="157" over 96 <t>
+# rows. Pinning it here would turn a correct answer red. Its cut is gated by its own arms and by packlocatecheck.
+ROSTER = {"bodies": "b", "callers": "s", "notes": "target", "tests": "test"}
 seen, problems = {k: 0 for k in ROSTER}, []
 
 for path in sorted(glob.glob(os.path.join(sys.argv[1], "sweep_*.xml"))):

@@ -41,6 +41,19 @@
 // move: whole-tail-last took median bytes-to-complete 10,279 -> 11,487. Those two nulls are registered so
 // this file cannot be widened into them without new evidence.
 //
+// R1b (2026-11-20) ADDED A SECOND PROMOTION CLASS BELOW RES, and this is that "new evidence" clause being used, so it says
+// what the evidence is and what it does NOT cover. <tail> still does not move: it stays in place as a block, rows
+// 1..kGuardTailRows never move, and the guard still refuses a promotion that would push tail row 24 past the stop. What
+// changed is that promoteGuarded now has an explicit PRIORITY ORDER instead of a single walk in emitter order:
+// kPromotable (AF2's frozen ten, unchanged) has the first claim on the guard's headroom and kPromotableBody takes only what
+// is left. Lane R1 had instead widened kPromotable itself and MEASURED the defect that motivates this ordering — a body won
+// a promotion slot by its POSITION and silently un-promoted <lit>, turning legendseencheck green->red
+// (results/R1_BODIESFIRST_1119/READOUT.md §8). R1's body rung moved one-directionally on its population (+31 anchors,
+// 12 cells up, 0 down) and its file rung FELL in 9 of 123 cells, of which 8 were displaced deep tail rows and 1 was that
+// crowding-out. **This ordering closes the crowding-out channel only.** The deep-tail-vs-body trade is not a priority
+// question — it is a zero-sum trade between more file pointers and one body, and nothing in this file decides it; see
+// results/R1B_PRIORITY_RULE_1120/READOUT.md §7 before widening further.
+//
 // THE STATED COST, which belongs in the open rather than in a footnote: a truncating consumer previously
 // lost ROWS and now loses DEFINITIONS, so a hedge like `cands="133"` can be read without its reading. That
 // is the strongest argument against this change (registered as band R5).
@@ -51,6 +64,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -272,10 +286,21 @@ inline constexpr std::string_view kNameChars = "abcdefghijklmnopqrstuvwxyzABCDEF
 //        and every section already moved in place. The stop is the DEFAULT PAGE SIZE (kAnswerPageBytesDefault, which forpages.h
 //        kForPageBytesDefault IS), never a separate 12,000 — so it follows the owner if the default page becomes 6 KB. The
 //        unguarded variant is an owner call and is NOT built.
+//   G/R1b — G's walk became TWO CLASS-ORDERED PASSES over the same list against the same headroom: kPromotable first
+//        (unchanged, so pass 1 is AF2's G exactly), then kPromotableBody from the headroom that remains, emitted behind
+//        the promoted RES sections so their byte offsets do not move. Same guard, same stop, same emit order within a class.
 inline constexpr std::size_t      kAnswerPageBytesDefault = 12000;   // the default page size: forpages.h kForPageBytesDefault IS this
 inline constexpr std::size_t      kGuardTailRows          = 24;
 inline constexpr std::string_view kPromotable[] = { "lit", "dotted_strings", "graph_verb", "callers", "selfhooks", "manifest_rows",
                                                     "listed", "ep", "reexports", "exemplar_family" };
+// R1b's SECOND, LOWER-PRIORITY class (results/R1B_PRIORITY_RULE_1120/PREREG_R1B_1120.md §1, frozen before this was written).
+// The BODY-bearing sections. They are what a how-it-works question needs — a `catch`/`instanceof`, a `.bind()`, an `nbf` guard
+// is a STATEMENT INSIDE a body, so no ranking signal surfaces it and no signature row carries it (EB1's diagnosis,
+// results/EB1_ERRORBRANCH_1119/READOUT.md §3; AF2's own cause table names "a <fold> body" as the last-gold carrier in 4 of its
+// 29 design late cells and never tried them). They are NOT members of kPromotable: AF2 froze that set with its measurement, and
+// a body joining it wins a promotion slot by its POSITION in the emitter rather than by its value — measured by lane R1, which
+// un-promoted <lit> on the legendseencheck probe and turned a green gate red (results/R1_BODIESFIRST_1119/READOUT.md §8).
+inline constexpr std::string_view kPromotableBody[] = { "fold", "bodies" };
 
 // AF4 T-C: the <sigs> notes that define their pointer rows by ATTRIBUTE (ptr=), so A may lift them: the first word of each.
 inline constexpr std::string_view kSigsAttributeNotes[] = { "demote", "decl-twin", "one-side" };
@@ -386,6 +411,26 @@ struct Layout
     return l;
 }
 
+// ONE PROMOTION CLASS'S SWEEP over the sections that follow </tail>, in emit order (R1b's priority rule, src/foranswerfirst.h
+// kPromotable / kPromotableBody): the indices this class wins, with `taken` marking them and `used` advanced by their emitted
+// sizes — so a LATER class sees only the headroom this one left. The classes are swept highest priority first, which is what
+// makes crowding-out structurally impossible rather than a matter of emitter position.
+[[nodiscard]] inline std::vector<std::size_t> promoteClassSweep( const std::vector<Block>& blocks, const std::vector<std::size_t>& sized,
+                                                                 const std::vector<std::size_t>& post, std::span<const std::string_view> cls,
+                                                                 std::size_t rowEnd, std::size_t stop, std::vector<char>& taken, std::size_t& used )
+{
+    std::vector<std::size_t> won;
+    for( std::size_t i = 0; i < post.size(); ++i )
+    {
+        if( taken[ i ] != 0 || std::ranges::find( cls, blocks[ post[ i ] ].name ) == std::ranges::end( cls ) ) { continue; }
+        if( rowEnd + used + sized[ post[ i ] ] > stop ) { continue; }
+        taken[ i ] = 1;
+        used += sized[ post[ i ] ];
+        won.push_back( post[ i ] );
+    }
+    return won;
+}
+
 // G, the GUARDED promotion, on the emitted sizes. The bytes ahead of the first row block are the root open tag; the stop is the
 // DEFAULT page size, one constant, so every page size windows the same document. Returns the order with the promoted RES
 // sections directly ahead of <tail>.
@@ -406,18 +451,26 @@ struct Layout
     for( auto it = order.begin(); it != tailIt; ++it ) { before += sized[ *it ]; }
     if( rows.size() <= kGuardTailRows || before + sized[ *tailIt ] <= stop ) { return order; }
     const std::size_t rowEnd = before + ( sized[ *tailIt ] - ( tail.end - tail.begin ) ) + ( rows[ kGuardTailRows - 1 ].end - tail.begin );
-    std::vector<std::size_t> moved, kept;
-    std::size_t used = 0;
-    for( auto it = tailIt + 1; it != order.end(); ++it )
-    {
-        const bool res = std::ranges::find( kPromotable, blocks[ *it ].name ) != std::ranges::end( kPromotable );
-        if( res && rowEnd + used + sized[ *it ] <= stop ) { moved.push_back( *it ); used += sized[ *it ]; }
-        else                                              { kept.push_back( *it ); }
-    }
-    std::vector<std::size_t> out( order.begin(), tailIt );
-    out.insert( out.end(), moved.begin(), moved.end() );
+    // R1b's PRIORITY RULE: two class-ordered passes over the SAME post-tail list, in the SAME emit order, against the SAME
+    // single headroom accumulator. Pass 1 is the parent's own walk over kPromotable with `used` starting at 0, and a section of
+    // no promotable class never consumed headroom in the parent either — so pass 1 promotes exactly what AF2's frozen G
+    // promotes, in that order, and (because pass 2's sections are appended BEHIND pass 1's) at the same byte offsets. Pass 2
+    // then takes only the headroom pass 1 left. Crowding-out is therefore removed BY CONSTRUCTION, not by a threshold: there is
+    // no input for which a body can take a RES section's slot. If pass 1 exhausts the headroom, no body moves and the answer is
+    // the parent's, byte for byte.
+    const std::vector<std::size_t> post( tailIt + 1, order.end() );
+    std::vector<char>              taken( post.size(), 0 );
+    std::size_t                    used     = 0;
+    const std::vector<std::size_t> movedRes = promoteClassSweep( blocks, sized, post, kPromotable, rowEnd, stop, taken, used );       // pass 1
+    const std::vector<std::size_t> movedBody = promoteClassSweep( blocks, sized, post, kPromotableBody, rowEnd, stop, taken, used );  // pass 2
+    std::vector<std::size_t>       out( order.begin(), tailIt );
+    out.insert( out.end(), movedRes.begin(), movedRes.end() );
+    out.insert( out.end(), movedBody.begin(), movedBody.end() );
     out.push_back( *tailIt );
-    out.insert( out.end(), kept.begin(), kept.end() );
+    for( std::size_t i = 0; i < post.size(); ++i )
+    {
+        if( taken[ i ] == 0 ) { out.push_back( post[ i ] ); }
+    }
     return out;
 }
 

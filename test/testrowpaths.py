@@ -149,8 +149,24 @@ def xml_rows( doc ):
     with the same opener. A tests_to_run group is qualified by run_unknown="1" or run_each=, one of which every
     group row carries by construction (a group exists only where no runner is derivable or where every member's
     command is the one template) — the same qualification the compact legend uses to keep the readings apart."""
+    # `<t` IS NOT A tests_to_run ROW OUTSIDE <tests> (PB1, 2026-11-19). --for's file-grain tail — which
+    # --pack-task now carries too — spells its rows `<t p= sym= r=/>`, the same opener this reader took as a
+    # test file: on a pack-task bundle it returned src/mid.cpp and src/leaf.cpp as "test files this fixture
+    # does not have" (testrowruncheck arm 12). The short tag is the ambiguous one, so it is read only inside
+    # the <tests> element that declares what it means; `<test` and a qualified `<g` stay document-wide,
+    # because no other section spells either.
+    body = strip_comments( doc )
+    # The exclusion is scoped to the <tail> ELEMENT, not to an inclusion inside <tests>. Admitting only the
+    # <t> rows inside <tests> looked equivalent and was not: --test-gate spells tests_to_run rows that are not
+    # wrapped in a <tests> element at all, so the inclusive form silently dropped them and turned
+    # selectorchaincheck (d2) red. Excluding exactly the rows inside the one element that spells the other
+    # meaning cannot drop a row from a document that has no tail.
+    tl, tle = body.find( "<tail" ), body.find( "</tail>" )
+    tail    = ( tl, tle + len( "</tail>" ) ) if tl != -1 and tle > tl else ( -1, -1 )
     out = []
-    for m in re.finditer( r'<(?:t|test|g)\b[^>]*?\b(pf?)="([^"]*)"[^>]*/>', strip_comments( doc ) ):
+    for m in re.finditer( r'<(?:t|test|g)\b[^>]*?\b(pf?)="([^"]*)"[^>]*/>', body ):
+        if m.group( 0 ).startswith( "<t " ) and tail[0] <= m.start() < tail[1]:
+            continue          # a file-tail row, not a tests_to_run row — see the note above
         row = m.group( 0 )
         raw = m.group( 2 )
         at  = _attrs( row )

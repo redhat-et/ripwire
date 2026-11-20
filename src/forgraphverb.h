@@ -20,7 +20,7 @@
 #include "handoffwindow.h"   // WINDOW-AWARE HAND-OFF: a windowing callers block is a stub naming the complete call
 #include "lexical.h"     // parseGraphSubject — the subject-only half
 #include "nextverb.h"    // nextFlag / nextAttrXml — verb= is a pasteable invocation
-#include "packtask.h"    // findSectionOpenTag — an element's open tag, comments skipped
+#include "serialize.h"    // findSectionOpenTag — an element's open tag, comments skipped
 #include "pathgaps.h"    // resolvePathEndpoint — the --path resolver
 #include "pathpairs.h"   // pathDefInTests — the --defs class="test" rule (M1)
 #include "defattrib.h"   // endpointDefinitionCount — from= binds one definition (M3)

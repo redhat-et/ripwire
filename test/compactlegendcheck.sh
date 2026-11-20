@@ -1733,7 +1733,29 @@ facts = [ f.strip() for f in m.group( 1 ).split( " | " ) ]
 # answer needed is one the default does not take; (FX4) holds the rung clause of the default ledger to its root instead.
 facts = [ f for f in facts if not f.startswith( ( "task_echo", "over_ceiling:" ) ) ]
 kept  = re.search( r"<!-- ledger: (.*?) -->", dflt )
-missing = [ f for f in facts if not kept or f not in kept.group( 1 ).split( " | " ) ]
+keptf = kept.group( 1 ).split( " | " ) if kept else []
+# PB1 (2026-11-19): the `tail:` fact is compared by SECTION and by whether it still discloses a cut, not verbatim.
+# --pack-task's file tail is the one section filled LAST, from whatever the DELIVERED document leaves, and the compact
+# legend is smaller than the full one — so the same budget legitimately buys the compact answer more tail rows
+# (MEASURED on src/ at --token-budget=3000: "kept 0 of 142" with --legend=full, "kept 6 of 142" by default). That is
+# the budget contract working, not a posture changing the answer behind the reader's back, and holding a count that
+# DEPENDS on the posture to a verbatim match would force the tail to be cut against a fixed legend allowance instead
+# of against the bytes actually delivered — which is what makes the per-answer ceiling hold. What this arm exists for
+# is unchanged and is still asserted: the fact is present, and a cut disclosed in full is still disclosed by default.
+def sect( f ):
+    return f.split( ":", 1 )[ 0 ]
+def discloses_cut( f ):
+    return ( "omitted" in f ) or ( "capped" in f ) or ( "dropped" in f )
+missing = []
+for f in facts:
+    if sect( f ) == "tail":
+        peer = next( ( k for k in keptf if sect( k ) == "tail" ), None )
+        if peer is None:
+            missing.append( f + "   [tail absent by default]" )
+        elif discloses_cut( f ) and not discloses_cut( peer ):
+            missing.append( f + "   [a cut disclosed in full, silent by default: " + peer + "]" )
+    elif f not in keptf:
+        missing.append( f )
 cut = sum( 1 for f in facts if "omitted" in f or "capped" in f or "dropped" in f )
 print( "OK %d %d" % ( len( facts ), cut ) if not missing else "MISSING " + " ; ".join( missing ) )
 PY

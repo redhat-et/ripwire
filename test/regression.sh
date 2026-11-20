@@ -361,7 +361,9 @@ for _g in \
     canoncheck \
     capdisclosemapcheck \
     capdisclosurecheck \
+    cappedbodycheck \
     capsweepcheck \
+    carriedpageboundcheck \
     ccheck \
     ccjsoncheck \
     ceilingverdictcheck \
@@ -844,6 +846,9 @@ for _g in \
     ownerhopcheck \
     ownerscheck \
     packcallersharecheck \
+    packkeybodycheck \
+    packlocatecheck \
+    packtailsharecheck \
     packtaskcheck \
     packtaskmonotoncheck \
     packtaskquotacheck \

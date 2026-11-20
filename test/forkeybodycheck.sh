@@ -19,7 +19,9 @@
 #   (K4)  pages: at the default 12 KB page, every page of ON minus the group == the twin's page (est_tokens= masked), the page count
 #         is the twin's and the group rides page 1: a body pushes no row to a later page
 #   (K5)  ceiling (routed): a body over 4000 B is cut at a line end and says so — truncated="1" lines="1-K/T", next= the --expand of the rest
-#   (K6)  cap (routed): three named symbols -> shown="2" total="3" capped="1", rule E2's symbol first, next= the third's --expand
+#   (K6)  cap (routed): three named symbols -> all three ride at CB1's cap of 5 (shown="3" total="3"), rule E2's symbol first
+#   (K6b) cap OVERFLOW (routed): SIX named symbols -> shown="5" total="6" capped="1", next= the sixth's --expand. This is the
+#         arm that actually exercises kKeyBodyMax; K6 alone would pass on any cap of 3 or more.
 #   (K7)  negative controls, byte-identical with and without the knob: no backticks; a span naming nothing; a namesake flood (13
 #         definitions); a definition only in a test file; --legend=first; --signatures-only; --token-budget
 #   (K8)  a body the page already carries is not repeated (the name-exact anchor body): no key block, and the arm is not vacuous
@@ -124,6 +126,8 @@ done
 srcon >"$DIR/def.on"
 cli 'Who calls `big_function`?' >"$DIR/big.on"
 cli 'Who calls `alpha_one`, `beta_two` or `gamma_three`?' >"$DIR/cap.on"
+# CB1: six names, so the cap of 5 is exercised and not merely outnumbered (K6b)
+cli 'Who calls `alpha_one`, `beta_two`, `gamma_three`, `compute_total`, `big_function` or `run_main`?' >"$DIR/cap6.on"
 n=0
 for q in 'How does compute_total work?' 'How does `no_such_symbol_here` work?' 'How does `flood_fn` work?' 'How does `only_in_test` work?'; do
     n=$(( n + 1 )); cli "$q" >"$DIR/neg$n.on"; off "$q" >"$DIR/neg$n.off"
@@ -230,9 +234,22 @@ say(bool(m) and re.search(r' lines="1-\d+/\d+"', m.group(0)) and re.search(r' ne
 # (K6) cap
 cap = KEY.findall(rd("cap.on"))
 names = re.findall(r'<b [^>]*\bn="(\w+)"', cap[0]) if cap else []
-say(bool(cap) and cap[0].startswith('<bodies of="key" shown="2" total="3" capped="1"') and names == ["gamma_three", "alpha_one"]
-    and re.search(r'^<bodies [^>]*next="--expand=[^"]*beta_two"', cap[0]),
-    "(K6) three named symbols: shown=2 total=3 capped=1, E2's symbol first (%s), next= the third's expand" % names)
+# CB1 re-worded this arm in the commit that moved the knob, as PREREG_CB1_1119_v2.md M5 requires. It used to
+# pin shown="2" total="3" capped="1" against kKeyBodyMax=2 and name the third symbol in next=. The cap is now 5
+# -- DERIVED from GA1 DEV's p90 of gold functions per task (median 1, q75 3, p90 5, max 12; a cap of 2 could
+# satisfy only 71.9% of tasks, 5 satisfies 94.4%) -- so all three ride and there is no third to point at. The
+# arm still pins the SAME two properties it always pinned: every named symbol that fits is served, and rule
+# E2's symbol leads. What it can no longer pin here is the overflow shape; that moves to K6b below, which uses
+# SIX names so the cap of 5 is exercised rather than merely outnumbered.
+say(bool(cap) and cap[0].startswith('<bodies of="key" shown="3" total="3"') and names == ["gamma_three", "alpha_one", "beta_two"],
+    "(K6) three named symbols all ride under the cap of 5: shown=3 total=3, E2's symbol first (%s)" % names)
+# (K6b) the overflow shape the old K6 used to pin, at the new cap: six names -> five bodies, capped=1, next= the sixth
+cap6 = KEY.findall(rd("cap6.on"))
+names6 = re.findall(r'<b [^>]*\bn="(\w+)"', cap6[0]) if cap6 else []
+say(bool(cap6) and cap6[0].startswith('<bodies of="key" shown="5" total="6" capped="1"')
+    and len(names6) == 5 and re.search(r'^<bodies [^>]*next="--expand=', cap6[0]),
+    "(K6b) six named symbols: shown=5 total=6 capped=1, next= the sixth -- the cap of 5 bounds the block (%s; shell %s)"
+    % (names6, cap6[0][:70] if cap6 else None))
 # (K7) negative controls
 labels = ["no backticks", "a span naming nothing", "a namesake flood (13 defs)", "a test-only definition", "--legend=first", "--signatures-only", "--token-budget=3000"]
 for i, lab in enumerate(labels, 1):
@@ -256,7 +273,7 @@ sys.exit(1 if bad else 0)
 PY
 [ $? -eq 0 ] || fail=1
 if command -v xmllint >/dev/null 2>&1; then
-    for f in r.on u.on big.on cap.on pg1.on r.mcp; do
+    for f in r.on u.on big.on cap.on cap6.on pg1.on r.mcp; do
         xmllint --noout "$DIR/$f" 2>/dev/null
         say $? "(K9) $f is well formed" "(K9) xmllint rejects $f"
     done

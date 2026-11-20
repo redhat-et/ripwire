@@ -589,7 +589,7 @@ Discloses: **none**
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
-| `kKeyBodyMax` | `2` | — | key bodies one answer carries; past it the block says capped="1" and next= the first not shown |
+| `kKeyBodyMax` | `5` | — | key bodies one answer carries; past it the block says capped="1" and next= the first not shown |
 
 ### `src/forliteral.h`
 
@@ -1223,7 +1223,9 @@ Discloses: `capped`, `mention_syms_capped`, `ranking_capped`
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kOverCeilingKeyBytes` | `22` | — | `,"over_ceiling":true` + the closing brace |
-| `kPackTaskRankTopN` | `12` | — | ranking = the top-12 head, not the full 40 — leaves budget for the later sections |
+| `kPackTaskFullHeadRows` | `10` | — | — |
+| `kPackTaskHeadFloorRows` | `4` | — | == forbudgetfit.h kForBudgetRowFloor (the rank 1..4 floor) |
+| `kPackTaskRankTopN` | `12` | — | a --partition slice's ranking window (partition.h; lanes.h brief claims) |
 
 ### `src/pageview.h`
 
@@ -1453,6 +1455,7 @@ Discloses: `capped`, `calls_capped`, `dirs_capped`, `entries_capped`, `files_cap
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kCap` | `65536` | — | — |
+| `kCappedBodyLines` | `120` | — | — |
 | `kCycleMemberCap` | `12` | — | — |
 | `kForAnchorBodyBudgetBytes` | `22800` | — | — |
 | `kForAutoBodyBudgetBytes` | `6000` | — | — |

@@ -6193,6 +6193,7 @@ std::optional<int> runPackTask( const MainDispatch& d )
     in.notesDegraded        = d.notesDegraded;   // L3 follow-up (CodeRabbit 4053600616)
     // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
     in.rootArg = ( ing.realPaths.empty() && cfg.roots.size() == 1 ) ? cfg.roots[0] : std::string_view();
+    in.keyBody = rw::keybody::keyBodyFor( ing, task, in.rootArg );   // PB1: KB1's key body, the MCP twin's same call
 
     // ── THE BUDGETED-BUNDLE CANDIDATE PAGE (paging PoC, issue #294): --pack-task under --token-budget
     // with an explicit window pages its ranked candidates, mirroring --for (the shared inline). The cliff

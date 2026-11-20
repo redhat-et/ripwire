@@ -158,6 +158,14 @@ def rows(t):
     return sorted(out, key=lambda x: x[0])
 def bodies(t):
     """every <b …><![CDATA[…]]>…</b>: (attrs, cdata bytes, the whole element)"""
+    # CB1: COMMENTS FIRST. The legend defines `<b …>` rows by printing their own tag text, so a document
+    # carrying that legend holds `<b ` strings that are not rows. Unstripped, the regex matched the LEGEND's
+    # `<b ` and ran `(.*?)</b>` to the real row's close — swallowing the row's open tag into group(2), so the
+    # attributes came back EMPTY and `n` came back None while the CDATA still looked right. The MCP arm then
+    # read "no <b n=render_screen>" on a document that plainly contains it. Same class as the miscount OR1
+    # recorded (a legend's own `<bodies>` read as an answer's); line 185 below already strips comments for the
+    # row parser, so this is the gate's own idiom, applied where it was missing.
+    t = re.sub(r'<!--.*?-->', '', t, flags=re.S)
     out = []
     for m in re.finditer(r'<b ([^>]*)>(.*?)</b>', t, re.S):
         cd = "".join(re.findall(r'<!\[CDATA\[(.*?)\]\]>', m.group(2), re.S))
