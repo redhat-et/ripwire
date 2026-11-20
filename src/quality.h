@@ -6619,7 +6619,10 @@ inline defectshape::EnumTable cFamilyEnumTable( const IngestResult& ing, std::st
         const std::optional<std::string> bytes = docparse::detail::readWholeFile( diskPath( ing, f ) );
         if( bytes )
         {
-            table.add( defectshape::cEnumsOf( *bytes ) );
+            for( auto& d : defectshape::cEnumsOf( *bytes ) )
+            {
+                table.add( std::move( d ) );
+            }
         }
     }
     table.seal();
