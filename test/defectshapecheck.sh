@@ -1814,17 +1814,17 @@ if [ "$QD_OK" = 1 ]; then
     else ok "$L: no unchecked-status row gates ($( ds_rows | grep -c 'defect="unchecked-status"' ) rows)"; fi
 fi
 #   the legend: unchecked-status and call= are defined on an answer that carries the row, and only there
-ULEG="$( cd "$WORK/ucs" && "$BIN" . --quality-delta --no-cache --legend=full 2>/dev/null )"
-if printf '%s' "$ULEG" | grep -q 'unchecked-status: a call whose return' && printf '%s' "$ULEG" | grep -q 'call= the call'; then ok "$L: the full legend defines unchecked-status and call="
+ULEG="$( cd "$WORK/ucs" && "$BIN" . --quality-delta --no-cache --legend=full 2>/dev/null )"; xrc=$?   # 0 or 2: the run completed
+if [ "$xrc" -le 2 ] && printf '%s' "$ULEG" | grep -q 'unchecked-status: a call whose return' && printf '%s' "$ULEG" | grep -q 'call= the call'; then ok "$L: the full legend defines unchecked-status and call="
 else no "$L: the full legend does not define unchecked-status / call="; fi
-UCLEG="$( cd "$WORK/ucs" && "$BIN" . --quality-delta --no-cache --legend=compact 2>/dev/null )"
-if printf '%s' "$UCLEG" | grep -q 'r call=: the call an unchecked-status row'; then ok "$L: the compact legend defines r call="; else no "$L: the compact legend does not define r call="; fi
-FLEG="$( cd "$WORK/fmt_cpp" && "$BIN" . --quality-delta --no-cache --legend=full 2>/dev/null )"
-if printf '%s' "$FLEG" | grep -q '<quality-delta ' && ! printf '%s' "$FLEG" | grep -q 'unchecked-status: a call whose return'; then ok "$L: an answer with no unchecked-status row carries no unchecked-status legend"
+UCLEG="$( cd "$WORK/ucs" && "$BIN" . --quality-delta --no-cache --legend=compact 2>/dev/null )"; xrc=$?
+if [ "$xrc" -le 2 ] && printf '%s' "$UCLEG" | grep -q 'r call=: the call an unchecked-status row'; then ok "$L: the compact legend defines r call="; else no "$L: the compact legend does not define r call="; fi
+FLEG="$( cd "$WORK/fmt_cpp" && "$BIN" . --quality-delta --no-cache --legend=full 2>/dev/null )"; xrc=$?
+if [ "$xrc" -le 2 ] && printf '%s' "$FLEG" | grep -q '<quality-delta ' && ! printf '%s' "$FLEG" | grep -q 'unchecked-status: a call whose return'; then ok "$L: an answer with no unchecked-status row carries no unchecked-status legend"
 else no "$L: the unchecked-status legend rides on an answer without the row (or the run failed)"; fi
 #   the JSON twin carries call= too
-UJ="$( cd "$WORK/ucs" && "$BIN" . --quality-delta --no-cache --json 2>/dev/null )"
-if printf '%s' "$UJ" | grep -q '"defect":"unchecked-status"' && printf '%s' "$UJ" | grep -q '"call":"pclose"'; then ok "$L: --json rows carry defect=unchecked-status and call"
+UJ="$( cd "$WORK/ucs" && "$BIN" . --quality-delta --no-cache --json 2>/dev/null )"; xrc=$?
+if [ "$xrc" -le 2 ] && printf '%s' "$UJ" | grep -q '"defect":"unchecked-status"' && printf '%s' "$UJ" | grep -q '"call":"pclose"'; then ok "$L: --json rows carry defect=unchecked-status and call"
 else no "$L: --json rows do not carry the unchecked-status facet and call"; fi
 #   recall replay, reversed: a fix that checked the status, read backwards (FIX..FIX^), adds the discard back
 fx_init ucfix
