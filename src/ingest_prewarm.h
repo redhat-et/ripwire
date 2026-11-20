@@ -653,16 +653,16 @@ inline void prewarmTagsQueries( const std::vector<std::string>& files, const Cac
 {
     PROFILE_SCOPE_DESCRIBE( "ingest: compile queries (tags.scm prewarm)" );
 
-    PrewarmMissSlots slots( files.size() );
+    PrewarmMissSlots missSlots( files.size() );
     const LangRowSet present = cache.empty() ? markNoCacheGrammars( scan, files.size() )
-                                             : markCacheMissGrammars( PrewarmMissPass{ files, cache, cacheWriteNs, scan, slots } );
+                                             : markCacheMissGrammars( PrewarmMissPass{ files, cache, cacheWriteNs, scan, missSlots } );
     collectGrammarsToCompile( present, prewarm );
 
     // QD-PROJECTION-FIXED: the construct tables, before the tags compiles launch — no other thread of this ingest runs here
     // (the hash pool has joined), so the footprint they add is theirs alone.
     if( scan.wantConstructHits )
     {
-        warmConstructTables( constructRowsNeeded( cache, scan, slots.isMiss, slots.isObjCHeaderMiss ) );
+        warmConstructTables( constructRowsNeeded( cache, scan, missSlots.isMiss, missSlots.isObjCHeaderMiss ) );
     }
     launchQueryCompiles( prewarm );
 }
