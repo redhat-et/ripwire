@@ -79,17 +79,20 @@
 //     (3') no two members share an enclosing context (file + scope), AND
 //     (5) every pair has a PROVED operand difference, one of
 //         literals — the two bodies' literal sets (numbers, strings, characters, true/false/nullptr/None …; 0 and 1
-//                    left out as the index arithmetic every loop spells) have nothing in common, and are not both
-//                    empty; or
+//                    left out as the index arithmetic every loop spells) have nothing in common, are not both
+//                    empty, and not BOTH bodies pass a literal straight to a call (`rfind( '/' )` beside
+//                    `rfind( "::" )` is one cut with the separator as a parameter — the afterLast family dupshortcheck
+//                    pins); or
 //         types    — both signatures have the same number of parameters (one or more), every one spelling a
 //                    concrete type (no template header, no type-parameter group, no auto/impl, no untyped
 //                    parameter), and some position's type differs once the pass-by spelling (const, &, &&, mut)
 //                    and qualifiers (std::, rw::) are dropped, AND
-//     (6) when every member spells the SAME recognized idiom (the vocabulary test above refused it), no pair shares a
-//         VALUE identifier — one of the idiom's identifiers used other than as a call (`f(`) or a qualifier (`ns::`),
-//         parameters left out — unless the index names it a function (a comparator passed by value: svLess). A
-//         shared constant (kOrderSlack) or a shared enum (Grade::Poor …) is the same domain data with a tuned number
-//         or type around it: a copy, and it keeps gating (cloneidiomcheck I and O pin both).
+//     (6) when every member spells the SAME recognized idiom (the vocabulary test above refused it), no pair calls the
+//         same helper (`includeLangOf(` — dupshortcheck's isCQuoteRootProbe | isBareTsSpecifier) and no pair shares a
+//         VALUE identifier — one of the idiom's identifiers used other than as a call or a qualifier (`ns::`),
+//         parameters and members left out — unless the index names it a function (a comparator passed by value:
+//         svLess). A shared constant (kOrderSlack) or a shared enum (Grade::Poor …) is the same domain data with a
+//         tuned number or type around it: a copy, and it keeps gating (cloneidiomcheck I and O pin both).
 // What still gates: a copy that kept any literal (writeTangleLines | writeHexPairLines share ' ' and '\n'), a copy
 // over the same literals (two reverse find-by-key loops, both spelling only 0 and 1 — JsonNode::get | steer_find), a
 // generic helper beside a concrete caller, any pair in one scope, and anything at or over 80 tokens. What it cannot
@@ -1212,6 +1215,8 @@ struct MemberShape
     bool                       read   = false;   // the body was read; an unread member proves no operand difference
     std::vector<std::uint64_t> literals;         // idiomLiteralSet of the body
     std::vector<std::uint64_t> valueIds;         // the subset of `ids` used as a value somewhere (operand path (6))
+    std::vector<std::uint64_t> callIds;          // the subset of `ids` called somewhere, `f(` not after `.`/`->` (operand path (6))
+    bool                       literalArg = false;   // a compared literal is a direct argument of some call (operand path (5))
     std::vector<std::uint64_t> paramTypes;       // IdiomParams::types, in parameter order
     bool                       typed  = false;   // IdiomParams::typed
 };
@@ -1228,27 +1233,60 @@ inline bool idiomSetsDisjoint( const std::vector<std::uint64_t>& a, const std::v
 }
 
 // The shape of one member whose file bytes are `bytes`. A body that cannot be read stays None and unread.
-// The members of `ids` some token of `body` uses as a VALUE: not followed by `(` (a call) or `::` (a qualifier), not a
-// parameter, not a member after `.`/`->` (a name after `::` IS a value: `Grade::Poor`, `tables::svLess`). Sorted + unique, a subset of `ids`.
-inline std::vector<std::uint64_t> idiomValueIds( const std::vector<IdiomTok>& body, const std::vector<std::string_view>& params,
-                                                 const std::vector<std::uint64_t>& ids )
+// The members of `ids` some token of `body` uses as a VALUE (not followed by `(` or `::`) and as a CALL (followed by `(`),
+// leaving out parameters and members after `.`/`->` (a name after `::` IS used: `Grade::Poor`, `tables::svLess`).
+// Both sorted + unique subsets of `ids`.
+struct IdiomUses
 {
-    std::vector<std::uint64_t> used;
+    std::vector<std::uint64_t> values;
+    std::vector<std::uint64_t> calls;
+};
+inline IdiomUses idiomUseIds( const std::vector<IdiomTok>& body, const std::vector<std::string_view>& params, const std::vector<std::uint64_t>& ids )
+{
+    IdiomUses used;
     for( std::size_t k = 0; k < body.size(); ++k )
     {
-        const std::string_view next = k + 1 < body.size() ? body[k + 1].text : std::string_view{};
-        const bool member   = k > 0 && ( body[k - 1].text == "." || body[k - 1].text == "->" );   // `ns::kX` stays a value
-        const bool notValue = next == "(" || next == "::" || member
-                           || std::ranges::contains( params, body[k].text );
-        if( body[k].kind == CodeTokenKind::Identifier && !notValue )
+        const std::string_view next   = k + 1 < body.size() ? body[k + 1].text : std::string_view{};
+        const bool             member = k > 0 && ( body[k - 1].text == "." || body[k - 1].text == "->" );
+        if( body[k].kind != CodeTokenKind::Identifier || member || next == "::" || std::ranges::contains( params, body[k].text ) )
         {
-            used.push_back( fnv1a64( body[k].text ) );
+            continue;
+        }
+        ( next == "(" ? used.calls : used.values ).push_back( fnv1a64( body[k].text ) );
+    }
+    for( std::vector<std::uint64_t>* v : { &used.values, &used.calls } )
+    {
+        sortutil::sortUnique( *v );
+        std::vector<std::uint64_t> kept;
+        std::ranges::set_intersection( *v, ids, std::back_inserter( kept ) );
+        *v = std::move( kept );
+    }
+    return used;
+}
+
+// Whether some call in `body` takes a compared literal as a direct argument (`s.rfind( '/' )`, `find( "::" )`): two bodies
+// that both do are one function with the literal as a parameter (namesplit::afterLast), whatever the literals.
+inline bool idiomLiteralArgument( const std::vector<IdiomTok>& body )
+{
+    for( std::size_t k = 1; k < body.size(); ++k )
+    {
+        if( body[k].text != "(" || body[k - 1].kind != CodeTokenKind::Identifier )
+        {
+            continue;
+        }
+        const std::size_t shut  = idiomCloseOf( body, k, body.size() );
+        std::size_t       depth = 0;
+        for( std::size_t j = k + 1; j < shut && j < body.size(); ++j )
+        {
+            const int step = idiomBracketStep( body[j].text );
+            depth = step > 0 ? depth + 1 : ( step < 0 && depth > 0 ? depth - 1 : depth );
+            if( depth == 0 && idiomComparedLiteral( body[j] ) )
+            {
+                return true;
+            }
         }
     }
-    sortutil::sortUnique( used );
-    std::vector<std::uint64_t> out;
-    std::ranges::set_intersection( used, ids, std::back_inserter( out ) );
-    return out;
+    return false;
 }
 
 inline MemberShape memberShapeOf( const Symbol& s, const std::string& bytes )
@@ -1272,6 +1310,7 @@ inline MemberShape memberShapeOf( const Symbol& s, const std::string& bytes )
     const IdiomParams params = idiomParams( sig, s.name, langInMask( kIdiomNameFirstLangMask, s.lang ) );
     out.read       = true;
     out.literals   = idiomLiteralSet( toks );
+    out.literalArg = idiomLiteralArgument( toks );
     out.paramTypes = params.types;
     out.typed      = params.typed && !idiomTemplateHeaderBefore( bytes, s.sigStartByte, usesHashLineComments( s.lang ) );
     out.idiom      = classifyCloneIdiom( toks );
@@ -1282,13 +1321,17 @@ inline MemberShape memberShapeOf( const Symbol& s, const std::string& bytes )
     if( idiomReadsNarrowVocabulary( out.idiom ) )
     {
         OneStatementFacts f = oneStatementFacts( toks, params.names );
-        out.ids      = std::move( f.ids );
-        out.valueIds = idiomValueIds( toks, params.names, out.ids );
+        out.ids        = std::move( f.ids );
+        IdiomUses uses = idiomUseIds( toks, params.names, out.ids );
+        out.valueIds   = std::move( uses.values );
+        out.callIds    = std::move( uses.calls );
         out.alpha = f.alpha;
         return out;
     }
     out.ids      = idiomTokenHashSet( toks, []( const IdiomTok& t ) { return t.kind == CodeTokenKind::Identifier; } );
-    out.valueIds = idiomValueIds( toks, params.names, out.ids );
+    IdiomUses uses = idiomUseIds( toks, params.names, out.ids );
+    out.valueIds   = std::move( uses.values );
+    out.callIds    = std::move( uses.calls );
     return out;
 }
 
@@ -1358,7 +1401,7 @@ inline CloneOperandDiff pairOperandDiff( const MemberShape& a, const MemberShape
     {
         return CloneOperandDiff::None;
     }
-    if( ( !a.literals.empty() || !b.literals.empty() ) && idiomSetsDisjoint( a.literals, b.literals ) )
+    if( ( !a.literals.empty() || !b.literals.empty() ) && !( a.literalArg && b.literalArg ) && idiomSetsDisjoint( a.literals, b.literals ) )
     {
         return CloneOperandDiff::Literals;
     }
@@ -1366,9 +1409,14 @@ inline CloneOperandDiff pairOperandDiff( const MemberShape& a, const MemberShape
     return comparable && a.paramTypes != b.paramTypes ? CloneOperandDiff::Types : CloneOperandDiff::None;
 }
 
-// Operand path (6): whether the pair shares a value identifier the index does not name a function (`fnNames` sorted).
+// Operand path (6): whether the pair calls one helper, or shares a value identifier the index does not name a function
+// (`fnNames` sorted).
 inline bool sharesDomainValue( const MemberShape& a, const MemberShape& b, const std::vector<std::uint64_t>& fnNames )
 {
+    if( !idiomSetsDisjoint( a.callIds, b.callIds ) )
+    {
+        return true;
+    }
     std::vector<std::uint64_t> shared;
     std::ranges::set_intersection( a.valueIds, b.valueIds, std::back_inserter( shared ) );
     return std::ranges::any_of( shared, [ & ]( std::uint64_t h ) { return !std::ranges::binary_search( fnNames, h ); } );
