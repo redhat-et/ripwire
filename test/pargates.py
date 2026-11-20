@@ -940,6 +940,10 @@ def run(g):
         timed_out.discard(g)
     gtmp = _gate_tmpdir(g)
     env["TMPDIR"] = gtmp
+    # The HEAD comparison binary (test/lib/headbinlib.sh, unstaged mode) is cached per sha under its cache root, which
+    # defaults to $TMPDIR: under a per-gate TMPDIR every caller (crossdirincludecheck, nestedimportcheck, ...) would build
+    # HEAD again and the cleanup would delete it. It keeps the shared temp dir it had before per-gate dirs (CR #703).
+    env.setdefault("RIPWIRE_HEADBIN_CACHE_ROOT", tempfile.gettempdir())
     if os.path.isdir(os.path.join(run_tmp_root, "bin")):
         env["PATH"] = os.path.join(run_tmp_root, "bin") + os.pathsep + env.get("PATH", "")
     try:
