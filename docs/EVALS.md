@@ -6200,8 +6200,8 @@ These are the exact `kind=` strings the binary emits, from `src/quality.h`:
 `error-masking` · `short-horizon-churn` · `new-clone-of-reused-helper` · `placeholder` · `defect-shape`
 
 The first ten each target a failure mode measured in the literature; `placeholder` (added 0.6.7) is an
-honesty check on "done" — a stub or TODO the change added — and never gates. `defect-shape` carries four
-facets in `defect=` (`format-arity`, `utf8-cut`, `dedup-first`, `vacuous-assert`), shapes this project's own
+honesty check on "done" — a stub or TODO the change added — and never gates. `defect-shape` carries five
+facets in `defect=` (`format-arity`, `utf8-cut`, `dedup-first`, `vacuous-assert`, `unchecked-status`), shapes this project's own
 code review kept finding; only `format-arity` gates, and on any origin (new-symbol rows never gate, except
 defect-shape format-arity; since QD-ENTRY-CEILING also a new function at the ceiling). Measured (2026-10-07): recall 7/8 on the eight review findings it was built
 from; with every site treated as new, 0 format-arity false positives on this tree (1,330 literal-format calls),
@@ -6224,6 +6224,20 @@ behind a presence check, a wrapper call whose rc is compared, an rc captured in 
 still reported, every status fact holds while 5 arms still fail on that site's failure (a helper's sentinel, a
 compare against a constant), so the row names a lost status, not a vacuous arm. Floors: a comparison of counts, a
 text read off stderr, and what a helper's failure sentinel feeds.
+QD-UNCHECKED-STATUS (2026-11-19) adds a fifth facet, `unchecked-status` (always `sev=minor`, never gates): a status
+the new code drops — in C/C++ a statement-level `pclose`, `fclose` of a stream the function wrote, `rename`, `write`,
+`waitpid` whose status nothing reads, `system`, `fflush` (not of stdout/stderr) or `close` of a written fd, plain or
+`std::`/`os::`/`rw::os::` qualified, with a `(void)` cast as the stated opt-out and a cleanup inside the branch of a
+failed write skipped; in Python `subprocess.run` without `check=` whose result is dropped or read only for
+`.stdout`/`.stderr`/`.args`, `subprocess.call` and `os.system` (aliases and `from` imports followed). The row's `p=` is
+the dropped call's line and `call=` names it. Go `_ = f()` and Rust `let _ = f()` stay out, as in error-masking (K6E:
+0 of 10 sampled were defects). Replaying three fix commits that added a status check to a `pclose` (reversed range
+`FIX..FIX^`): 3 of 3 give the rows (4 rows; was 0); the fixes add 0. With every site treated as new on nine corpora,
+the facet reports tmux 5 rows, this tree 61 rows over 71 sites (41 of them bench/test `subprocess.run(...).stdout`), code-review-graph 11 rows over 31 sites, and 0 on
+axum, a Go vulnerability scanner, a Go Prometheus client, textual, aislop and hono; a 20-site hand-check found 20 of
+20 drops real and 16 of 20 worth a check (the rest: a debug-log write, two detached reaper `pclose`s, a probe's
+`close`). A Stage-0 regex counted 46 sites (tmux 23, axum 15, Go 4, this tree 4); the gap is the written-stream /
+written-fd premise, the omitted `_ =` forms, and this tree's `os::` shims the regex did not see.
 Two format-arity floors (a delta review, 2026-10-08; 0 hits on the three corpora above): the macro skip sees a name this
 file `#define`s and a function-like macro the tree defines, not a lower-case object-like macro defined only in another
 file; and only a literal `#if 0` is skipped, so `#if false`, `#if (0)`, `#if 0 && …` and the `#else` of `#if 1` are

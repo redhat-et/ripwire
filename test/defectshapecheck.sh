@@ -1769,8 +1769,8 @@ uc_has(){    # SYM PATH LINE CALL — one minor row, p= at the SITE's line, call
     if [ -z "$row" ]; then no "$L: no unchecked-status row on $1 ($2)"; return 1; fi
     [ "$( printf '%s\n' "$row" | wc -l | tr -d ' ' )" = 1 ] || { no "$L: more than one unchecked-status row on $1 ($2): $row"; return 1; }
     ds_judge "$L: $1 ($2)" "$row" minor
-    printf '%s' "$row" | grep -q " p=\"$2:$3\"" && ok "$L: $1 p=$2:$3 (the site's line)" || no "$L: $1 p= should be the site $2:$3: $row"
-    printf '%s' "$row" | grep -q " call=\"$4\"" && ok "$L: $1 call=$4" || no "$L: $1 call= should be $4: $row"
+    if printf '%s' "$row" | grep -q " p=\"$2:$3\""; then ok "$L: $1 p=$2:$3 (the site's line)"; else no "$L: $1 p= should be the site $2:$3: $row"; fi
+    if printf '%s' "$row" | grep -q " call=\"$4\""; then ok "$L: $1 call=$4"; else no "$L: $1 call= should be $4: $row"; fi
     return 0
 }
 uc_none(){   # SYM PATH WHY
@@ -1836,12 +1836,12 @@ fx_commit ucfix
 fx_run_ref ucfix HEAD^..HEAD
 if [ "$QD_OK" = 1 ]; then
     n="$( ds_rows | grep 'defect="unchecked-status"' | grep -c ' sym="run"' )"
-    [ "$n" = 2 ] && ok "$L: the range that dropped both checks prints both rows (C and Python)" || no "$L: the range that dropped both checks printed $n unchecked-status rows, want 2"
+    if [ "$n" = 2 ]; then ok "$L: the range that dropped both checks prints both rows (C and Python)"; else no "$L: the range that dropped both checks printed $n unchecked-status rows, want 2"; fi
 fi
 fx_run_ref ucfix HEAD..HEAD^
 if [ "$QD_OK" = 1 ]; then
     n="$( ds_rows | grep -c 'defect="unchecked-status"' )"
-    [ "$n" = 0 ] && ok "$L: the fixing direction prints no unchecked-status row" || no "$L: the fixing direction printed $n unchecked-status rows"
+    if [ "$n" = 0 ]; then ok "$L: the fixing direction prints no unchecked-status row"; else no "$L: the fixing direction printed $n unchecked-status rows"; fi
 fi
 
 # ── 5) SURFACES: legend, help, MCP, skill and docs; JSON twin; MCP; the ack identity of a facet ───────────
