@@ -37,6 +37,13 @@
 #   (R6)  the default order is reproducible
 #   (R9)  --legend=first is the legend-first order: the legend precedes the rows
 #   (R9d) AF1 (owner decision 2026-11-18): the DEFAULT is answer-first -- its rows precede its legend
+#   (G3)  R1: a BODY-bearing section (<fold kind="bodies">, a non-key <bodies>) precedes <tail>
+#   (G4)  with it there, the guard still holds -- tail row 24 ends inside the page stop
+#   (G5)  the DELIVERED page 1 carries a body AND still carries its first 24 tail rows
+#   (G3n) the non-vacuity control: the fixture must offer a post-tail body section to promote
+#   (G6)  R1b: AF2's RES section <lit> is still promoted and still DELIVERED on page 1, legend and all
+#   (G7)  R1b: no RES section was displaced by a promotion -- the crowding-out prohibition (RED on R1's widening)
+#   (G6n) the non-vacuity control: the probe must offer BOTH classes after </tail>, or G6/G7 arbitrate nothing
 set -u
 # SIGX (src/forsigx.h, TL1 M1) runs AFTER this permutation and is lossless but not a permutation (it adds the <x r=R> envelopes and
 # the <sigx> block). This gate pins the PERMUTATION alone, so SIGX is off here; test/forsigxcheck.sh pins SIGX, and its (S1) rebuilds
@@ -492,7 +499,10 @@ cap "$WORK/l_old.xml" "$TASK_L" $LEGACY
 python3 - "$WORK" <<'PY_AF2'
 import re, sys, os
 W = sys.argv[1]; STOP = 12000; K = 24; bad = 0
+# R1b: RES is AF2's frozen ten and STAYS SO. The body-bearing sections are a SECOND, LOWER-PRIORITY class
+# (src/foranswerfirst.h kPromotableBody) — R1 had put them INTO this tuple, which is the preemption this lane undoes.
 RES = ("lit", "dotted_strings", "graph_verb", "callers", "selfhooks", "manifest_rows", "listed", "ep", "reexports", "exemplar_family")
+BODYCLS = ("fold", "bodies")
 def rd(n): return open(os.path.join(W, n), "rb").read().decode("latin-1")
 def mask(d): return re.sub(r"<!--.*?-->|<!\[CDATA\[.*?\]\]>", lambda m: " " * len(m.group(0)), d, flags=re.S)
 def tops(d):
@@ -549,6 +559,185 @@ for lbl, nn, on in (("conceptual", "a_new.xml", "a_old.xml"), ("routed", "b_new.
 say(fired, "(G0) the literal fixture FIRES G (a late <lit> promoted) -- if not, the tree drifted and G is untested here")
 sys.exit(1 if bad else 0)
 PY_AF2
+[ $? -eq 0 ] || fail=1
+
+# (G3/G4/G5) R1 BODIES-BEFORE-TAIL (lane R1, 2026-11-20; diagnosis results/EB1_ERRORBRANCH_1119/READOUT.md §3, prior art
+# results/AF2_FIRST12K_1118 §1 cause table, where "a <fold> body" is the last-gold carrier in 4 of 29 design late cells).
+# AF2 froze G with RES = ten SIGNATURE-shaped sections and left the BODY-bearing ones (<fold kind="bodies">, a non-key
+# <bodies>) out of it, so on a how-it-works answer the body that carries the mechanism is emitted after a 15-22 KB <tail>
+# and starts at 20-40 KB -- page 1 of such an answer carries ZERO body bytes while 42-66 % of its priced bytes are tail
+# rows that carry no r=. R1 widens RES to the body sections and nothing else: same guard, same stop, same constant.
+# THE GUARD IS THE FILE-RUNG BAR, in code: a body is promoted only while tail row 24 still ends inside the stop, and
+# AF2 measured first-satisfactions per 100 KB inside 12 KB at 13 for tail rows 1-24 but 3.6 for rows 25-40 and 0 for
+# rows 41-80 -- so what a promoted body displaces is the cheapest file-grain bytes in the answer, and rows 1-24 never move.
+# (G3) the body section is emitted ahead of <tail>; (G4) the guard still holds with it there; (G5) the DELIVERED page 1
+# carries a body AND still carries its first 24 tail rows. (G3n) is the non-vacuity arm: the fixture must present a
+# post-tail body section with G's preconditions met in the LEGACY order, or these arms assert nothing and say so.
+TASK_P="how does the page cut decide which sections land on page 1"
+cap "$WORK/p_new.xml" "$TASK_P" $OPTIN $WHOLE
+cap "$WORK/p_old.xml" "$TASK_P" $LEGACY
+cap "$WORK/p_page1.xml" "$TASK_P" $OPTIN
+for f in p_new p_old p_page1; do
+    [ -s "$WORK/$f.xml" ] || { no "(G3n) $f.xml is empty -- the R1 arms assert nothing"; echo "FAILURES"; exit 1; }
+done
+python3 - "$WORK" <<'PY_R1'
+import re, sys, os
+W = sys.argv[1]; STOP = 12000; K = 24; bad = 0
+BODYSEC = ("fold", "bodies")
+def rd(n): return open(os.path.join(W, n), "rb").read().decode("latin-1")
+def mask(d): return re.sub(r"<!--.*?-->|<!\[CDATA\[.*?\]\]>", lambda m: " " * len(m.group(0)), d, flags=re.S)
+def tops(d):
+    """top-level children of <ctx> as (name, begin, end) -- comments and CDATA masked first"""
+    m = mask(d); r = re.search(r"<ctx\b[^>]*>", m)
+    if r is None: return []
+    i = r.end(); end = m.rfind("</ctx>"); out = []; depth = 0; start = 0; name = ""
+    for t in re.finditer(r"<(/?)([A-Za-z_][\w-]*)[^>]*?(/?)>", m[i:end]):
+        a, b = i + t.start(), i + t.end()
+        if t.group(1):
+            depth -= 1
+            if depth == 0: out.append((name, start, b))
+        elif t.group(3):
+            if depth == 0: out.append((t.group(2), a, b))
+        else:
+            if depth == 0: start, name = a, t.group(2)
+            depth += 1
+    return out
+def say(ok, msg):
+    global bad
+    print("  %s  %s" % ("PASS" if ok else "FAIL", msg)); bad += 0 if ok else 1
+def tailrows(d, tb, te): return [q.end() + tb for q in re.finditer(r"<t\b[^>]*/>", mask(d)[tb:te])]
+
+# ── (G3n) NON-VACUITY, read off the LEGACY order: the fixture must carry a post-tail body section and meet G's
+# preconditions there, or (G3)/(G4) would pass on an answer that has nothing to promote.
+old = rd("p_old.xml"); to = tops(old); no_ = [x[0] for x in to]
+if "tail" not in no_:
+    say(False, "(G3n) the fixture's legacy answer has no <tail> -- the R1 arms assert nothing")
+else:
+    oi = no_.index("tail"); otb, ote = to[oi][1], to[oi][2]; orows = tailrows(old, otb, ote)
+    post = [x[0] for x in to[oi + 1:] if x[0] in BODYSEC]
+    say(bool(post) and len(orows) > K and ote > STOP,
+        "(G3n) fixture: legacy order emits %s AFTER </tail>, tail has %d rows (> %d), </tail> at %d (> %d)"
+        % (",".join(post) or "NO BODY SECTION", len(orows), K, ote, STOP))
+
+# ── (G3) the body section is emitted AHEAD of <tail> in the answer-first document.
+new = rd("p_new.xml"); tn = tops(new); nn = [x[0] for x in tn]
+if "tail" not in nn:
+    say(False, "(G3) the answer-first document has no <tail>")
+else:
+    ti = nn.index("tail"); tb, te = tn[ti][1], tn[ti][2]
+    si = nn.index("sigs") if "sigs" in nn else -1
+    ahead = [x[0] for x in tn[si + 1:ti] if x[0] in BODYSEC]
+    behind = [x[0] for x in tn[ti + 1:] if x[0] in BODYSEC]
+    say(bool(ahead), "(G3) a body section is emitted ahead of <tail>: ahead=%s behind=%s"
+        % (",".join(ahead) or "NONE", ",".join(behind) or "none"))
+    # ── (G4) the guard still holds with it there: tail row 24 ends inside the stop (the file rung is not displaced).
+    rows = tailrows(new, tb, te)
+    say(len(rows) > K and rows[K - 1] <= STOP,
+        "(G4) with the body ahead of it, tail row %d still ends at %s <= %d (tail has %d rows)"
+        % (K, rows[K - 1] if len(rows) >= K else "?", STOP, len(rows)))
+
+# ── (G5) THE DELIVERED PAGE. Page 1 of the default paged call must carry a real body element AND its first 24 tail rows.
+# Both halves matter: the first is the gain, the second is the bar it must not buy the gain with.
+p1 = rd("p_page1.xml"); t1 = tops(p1); n1 = [x[0] for x in t1]
+bodies_on_page = [x for x in t1 if x[0] in BODYSEC]
+nbody = sum(len(re.findall(r"<b\b[^>]*>", mask(p1)[x[1]:x[2]])) for x in bodies_on_page)
+say(nbody > 0, "(G5a) page 1 carries %d body element(s) in %s" % (nbody, ",".join(x[0] for x in bodies_on_page) or "no body section"))
+if "tail" in n1:
+    i1 = n1.index("tail"); r1 = tailrows(p1, t1[i1][1], t1[i1][2])
+    say(len(r1) >= K, "(G5b) page 1 still carries its first %d tail rows (%d present)" % (K, len(r1)))
+else:
+    say(False, "(G5b) page 1 carries no <tail> at all -- the file rung was displaced whole")
+sys.exit(1 if bad else 0)
+PY_R1
+[ $? -eq 0 ] || fail=1
+
+# (G6/G7) R1b THE PRIORITY RULE: RES KEEPS ITS SLOTS (lane R1b, 2026-11-20; prereg
+# results/R1B_PRIORITY_RULE_1120/PREREG_R1B_1120.md §1, frozen before the product change was written).
+# WHAT THESE GUARD. promoteGuarded used to walk the post-tail sections ONCE in emit order inside a finite headroom, so once the
+# body sections became promotable a body won a slot by its POSITION, not by its value: lane R1 MEASURED <fold> taking <lit>'s
+# slot on this very probe, which left <lit> deferred to a later page and turned test/legendseencheck.sh (ALL PASS on the parent)
+# red (results/R1_BODIESFIRST_1119/READOUT.md §8). The rule is now two class-ordered passes -- kPromotable first,
+# kPromotableBody from what is left -- so a RES section cannot be displaced by a body for ANY input.
+# (G6n) is the non-vacuity control: this probe must offer BOTH a RES section and a body section after </tail> in the legacy
+# order, or G6/G7 arbitrate a competition that does not exist and say so. (G6) is POSITIVE: the RES section <lit> is ahead of
+# <tail> AND on the delivered page 1, with the block-local legend legendseencheck reads. (G7) is the PROHIBITION, and it is RED
+# on a binary built with R1's one-line widening -- verified in this lane on work/bin/ripwire-R1 against the GENERATED output,
+# with the forbidden behaviour restored on a scratch build rather than reasoned about.
+TASK_R="the --page-bytes flag"
+cap "$WORK/r_new.xml" "$TASK_R" $OPTIN $WHOLE
+cap "$WORK/r_old.xml" "$TASK_R" $LEGACY
+cap "$WORK/r_page1.xml" "$TASK_R" $OPTIN
+for f in r_new r_old r_page1; do
+    [ -s "$WORK/$f.xml" ] || { no "(G6n) $f.xml is empty -- the R1b arms assert nothing"; echo "FAILURES"; exit 1; }
+done
+python3 - "$WORK" <<'PY_R1B'
+import re, sys, os
+W = sys.argv[1]; STOP = 12000; K = 24; bad = 0
+RES     = ("lit", "dotted_strings", "graph_verb", "callers", "selfhooks", "manifest_rows", "listed", "ep", "reexports", "exemplar_family")
+BODYCLS = ("fold", "bodies")
+def rd(n): return open(os.path.join(W, n), "rb").read().decode("latin-1")
+def mask(d): return re.sub(r"<!--.*?-->|<!\[CDATA\[.*?\]\]>", lambda m: " " * len(m.group(0)), d, flags=re.S)
+def tops(d):
+    m = mask(d); r = re.search(r"<ctx\b[^>]*>", m)
+    if r is None: return []
+    i = r.end(); end = m.rfind("</ctx>"); out = []; depth = 0; start = 0; name = ""
+    for t in re.finditer(r"<(/?)([A-Za-z_][\w-]*)[^>]*?(/?)>", m[i:end]):
+        a, b = i + t.start(), i + t.end()
+        if t.group(1):
+            depth -= 1
+            if depth == 0: out.append((name, start, b))
+        elif t.group(3):
+            if depth == 0: out.append((t.group(2), a, b))
+        else:
+            if depth == 0: start, name = a, t.group(2)
+            depth += 1
+    return out
+def say(ok, msg):
+    global bad
+    print("  %s  %s" % ("PASS" if ok else "FAIL", msg)); bad += 0 if ok else 1
+
+# -- (G6n) NON-VACUITY, read off the LEGACY order: both classes must be present after </tail> and the guard's
+# preconditions met, or there is no competition for the priority rule to arbitrate.
+old = rd("r_old.xml"); to = tops(old); no_ = [x[0] for x in to]
+offered_res, offered_body = [], []
+if "tail" not in no_:
+    say(False, "(G6n) the probe's legacy answer has no <tail> -- the R1b arms assert nothing")
+else:
+    oi = no_.index("tail"); ote = to[oi][2]
+    orows = len(re.findall(r"<t\b[^>]*/>", mask(old)[to[oi][1]:ote]))
+    offered_res  = [x[0] for x in to[oi + 1:] if x[0] in RES]
+    offered_body = [x[0] for x in to[oi + 1:] if x[0] in BODYCLS]
+    say(bool(offered_res) and bool(offered_body) and orows > K and ote > STOP,
+        "(G6n) probe: legacy order offers RES=%s and BODY=%s after </tail>, tail has %d rows (> %d), </tail> at %d (> %d)"
+        % (",".join(offered_res) or "NONE", ",".join(offered_body) or "NONE", orows, K, ote, STOP))
+
+# -- (G6) the RES section is promoted and DELIVERED: ahead of <tail> in the document and present on page 1 with its
+# block-local legend (the object test/legendseencheck.sh reads; R1 left it on page 2).
+new = rd("r_new.xml"); tn = tops(new); nn = [x[0] for x in tn]
+p1 = rd("r_page1.xml"); t1 = tops(p1); n1 = [x[0] for x in t1]
+if "tail" not in nn:
+    say(False, "(G6) the answer-first document has no <tail>")
+else:
+    ti = nn.index("tail")
+    res_ahead  = [x[0] for x in tn[:ti] if x[0] in RES]
+    body_ahead = [x[0] for x in tn[:ti] if x[0] in BODYCLS]
+    nlegend = len(re.findall(r"<!-- ripwire for lit", p1))
+    say("lit" in res_ahead and "lit" in n1 and nlegend > 0,
+        "(G6) RES <lit> promoted ahead of <tail> (res_ahead=%s body_ahead=%s) and on page 1 with %d block-local legend(s)"
+        % (",".join(res_ahead) or "NONE", ",".join(body_ahead) or "none", nlegend))
+    # -- (G7) THE PROHIBITION: no RES section the legacy order offered is deferred off page 1, and no body sits
+    # ahead of a promoted RES section. Either would mean a body took a slot by position.
+    deferred = re.search(r'\sdeferred="([^"]*)"', p1[:p1.find(">") + 1])
+    dnames = deferred.group(1).split() if deferred else []
+    res_deferred = [x for x in set(offered_res) if x in dnames]
+    first_body = min([i for i, x in enumerate(nn[:ti]) if x in BODYCLS], default=10**9)
+    last_res = max([i for i, x in enumerate(nn[:ti]) if x in RES], default=-1)
+    say(not res_deferred and first_body > last_res,
+        "(G7) no RES section was displaced by a promotion: res_deferred=%s, first promoted body at %s is behind the last "
+        "promoted RES at %s" % (",".join(res_deferred) or "none",
+                                "none" if first_body == 10**9 else first_body, "none" if last_res < 0 else last_res))
+sys.exit(1 if bad else 0)
+PY_R1B
 [ $? -eq 0 ] || fail=1
 
 # (CL) AF4 T-B -- CALLERS FIRST UNDER A CALLERS CUE (the P1 verb-route spec, section 2 (local results, not shipped), results/AF4_TOPLOAD_1118/PREREG.md).
