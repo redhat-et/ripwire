@@ -185,7 +185,8 @@ itself never writes there. This removes only ripwire's own entries, then the dir
 
 ```bash
 h="${RIPWIRE_HOME:-$HOME/.ripwire}"
-rm -rf "$h/substitution.jsonl" "$h/routing.jsonl" "$h/routing-pending" "$h/meter.conf"
+rm -rf "$h/substitution.jsonl" "$h/routing.jsonl" "$h/routing-pending" "$h/meter.conf" "$h/legend-seen" "$h/legend-seen-codex" "$h/legend-seen-opencode"
+rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/opencode/plugin/ripwire-legend-seen.js"   # the opencode legend-seen loader, if you installed it
 rmdir "$h" 2>/dev/null || true
 ```
 

@@ -250,6 +250,32 @@ inline void wrapPrintSkillsLine( std::FILE* out, const std::string_view agent, c
     rw::emitTo( out, "# skills not found locally — clone https://github.com/redhat-et/ripwire and run skills/install.sh{}\n", codexFlag );
 }
 
+// LS1: the legend-seen hook's install line, for the clients it is ported to. OPT-IN and printed as a COMMENT, never as
+// a command beside the recommended ones: it rewrites the agent's ripwire commands (only to add --legend-seen=FILE), and
+// that is the owner's call to make a default, not this recipe's. A table, so a client gains the line by gaining a row.
+struct LegendSeenHookRow
+{
+    std::string_view agent;
+    std::string_view installerFlags;
+};
+inline constexpr LegendSeenHookRow kLegendSeenHookRows[] = {
+    { "claude",   " --hook-legend-seen" },
+    { "codex",    " --codex --hook-legend-seen" },
+    { "opencode", " --opencode --hook-legend-seen" },
+};
+
+inline void wrapPrintLegendSeenLine( std::FILE* out, const std::string_view agent )
+{
+    const LegendSeenHookRow* row = findByField( kLegendSeenHookRows, &LegendSeenHookRow::agent, agent );
+    if( row == nullptr )
+    {
+        return;
+    }
+    rw::emitTo( out, "# OPTIONAL, rewrites commands: bash skills/install.sh{} — adds --legend-seen=<session file> to each ripwire\n"
+                     "#   call so legend definitions you already received are not re-sent (lossless; forgotten on compaction)\n",
+                std::string_view( row->installerFlags ) );
+}
+
 // agent → the context/rules file its use-when blurb belongs in (declarative table, one row per client)
 // (the per-agent context file is a column in kAgentTargets above)
 
@@ -877,6 +903,7 @@ inline void wrapEmitAgent( const std::string_view agent, const WrapListing& aske
 
     // A4-S2: adoption recipes name a skill install step only for verified agent discovery paths.
     wrapPrintSkillsLine( stdout, agent, executablePath );
+    wrapPrintLegendSeenLine( stdout, agent );
 
     // context wiring: every recipe ends with the pasteable use-when blurb for the client's rules file.
     wrapPrintBlurb( stdout, agent );

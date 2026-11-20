@@ -59,7 +59,7 @@ inline constexpr std::size_t kOwnerNearRows = 4; // (K3): the <d> rows right abo
 inline constexpr std::size_t kCallPathSeeds = 3; // (K4): the first resolved answer rows a call path may reach
 
 inline constexpr std::string_view kSiblingDemoteLegend =
-    "<!-- demote: a <t> in sigs is a lower same-file sibling past answer row 10, a pointer (p= file, sym= name, r= rank), not the answer -->";
+    "<!-- demote: a <t> in sigs with no ptr= is a lower same-file sibling past answer row 10, a pointer (p= file, sym= name, r= rank), not the answer -->";
 
 // Which answer the rule reads: the default (no budget) answer, or a budgeted one, where K8 also keeps a row a task term hits.
 enum class DemoteRegime : bool

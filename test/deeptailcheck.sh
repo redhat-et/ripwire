@@ -379,7 +379,9 @@ esac
 HDR="$( printf '%s' "$XML" | sed 's/-->.*//' )"
 if printf '%s' "$HDR" | grep -q 'tail: file-grain rows, WEAKER evidence' && printf '%s' "$HDR" | grep -q 'sym= its top symbols'; then ok "legend defines the tail (file-grain, weaker evidence; rank rows, then page rows with sym=)"; else no "legend does not define the tail"; fi
 if printf '%s' "$HDR" | grep -q 'cover); sym= its top symbols by lens rank, minus names a sigs row or the syms block shows (a pointer, not the answer); total='; then ok "legend: sym= on either tail row kind is the file's top lens symbols, a pointer, not the answer (tail-sym)"; else no "legend does not say what sym= on a rank row means"; fi
-CL="$( "$BIN" "$CORPUS" --no-cache --for="$Q" --pack-top-n=4 2>/dev/null | sed 's/-->.*//' )"
+# AF1 (2026-11-18): the default --for answer is answer-first, its compact legend AFTER the rows (inside the same answer), so the
+# legend is every comment of the answer, not the text before the first "-->" (the legend-first shape).
+CL="$( "$BIN" "$CORPUS" --no-cache --for="$Q" --pack-top-n=4 2>/dev/null | python3 -c 'import re,sys; d=re.sub(r"<!\[CDATA\[.*?\]\]>","",sys.stdin.read(),flags=re.S); print("".join(re.findall(r"<!--.*?-->",d,re.S)))' )"
 if printf '%s' "$CL" | grep -q 't sym= its top symbols not in sigs/syms (a pointer, not the answer)'; then ok "compact legend: t sym= is the file's top symbols, a pointer (tail-sym)"; else no "compact legend does not define t sym= for every tail row"; fi
 if printf '%s' "$HDR" | grep -q 'r= on a ranked row'; then ok "legend defines r= (true ranker order)"; else no "legend does not define r="; fi
 

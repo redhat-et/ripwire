@@ -68,13 +68,27 @@ printf '# Retries\n\n## Retry policy\n\nThe retry policy backs off exponentially
 TFX="$TMP/twodoc"; cp -R "$OFX" "$TFX"; cp "$DFX/docs/uploads.md" "$TFX/docs/"
 
 TASK="how do the docs describe the retry policy for failed uploads"
-run(){ local fx="$1"; shift; ( cd "$fx" || exit 1; "$BIN" "$fx" --no-cache "$@" 2>/dev/null </dev/null ); }
+# AF1-fix (2026-11-18): the flagless --for answer is served in 12 KB PAGES (src/forpages.h); on docfx the answer is ~20 KB and
+# <doc_body> is continued past page 1's cut. Every arm here is about the WHOLE answer (the block, its price, its additivity), so a
+# --for call the pager would shape reads --page-bytes=0: the whole answer in one call, row-identical to the joined pages
+# (forpagescheck P2). --page-bytes refuses beside a budget, another dialect or a legend-first posture (cli.h pageBytesConflict):
+# those calls are never paged and run as written. (f0p) below holds the DEFAULT page to present-or-disclosed-deferred.
+whole(){ local a; for a in "$@"; do case "$a" in --token-budget=*|--max-tokens=*|--json|--format=*|--legend=first|--legend=full|--legend=dict|--limit=*|--offset=*|--legend-have=*|--page-bytes=*) return 1;; esac; done
+         for a in "$@"; do case "$a" in --for=*) return 0;; esac; done; return 1; }
+run(){ local fx="$1"; shift; if whole "$@"; then set -- "$@" --page-bytes=0; fi; ( cd "$fx" || exit 1; "$BIN" "$fx" --no-cache "$@" 2>/dev/null </dev/null ); }
+runpage(){ local fx="$1"; shift; ( cd "$fx" || exit 1; "$BIN" "$fx" --no-cache "$@" 2>/dev/null </dev/null ); }   # the default PAGE, as an agent receives it
 # an answer: rc 0 and a closed root, else the arm is red (z1)
 ans(){ local out="$1" fx="$2"; shift 2; run "$fx" "$@" >"$out"; local rc=$?; [ "$rc" = 0 ] && [ -s "$out" ] && grep -q '</ctx>$' "$out"; }
 block(){ python3 -c 'import sys; s=open(sys.argv[1],encoding="utf8").read(); i=s.find("<!-- ripwire for doc_body"); j=s.find("</doc_body>",i); print(s[i:j+11].replace("\n"," ") if i>=0 and j>=0 else "")' "$1"; }
 # the FILE tail rows (<t p="FILE"/>, <t p="FILE" sym="NAME"/>); a SIBLING-DEMOTE pointer in <sigs> (<t p= sym= r=/>, forsiblingdemote.h)
 # carries its rank r= — a demoted ranked row, not a tail row
 tailrows(){ python3 -c 'import re,sys; print(" ".join(re.findall(r"<t p=\"([^\"]+)\"(?: sym=\"[^\"]*\")?/>", open(sys.argv[1]).read())[:10]))' "$1"; }
+
+# (f0p) the DEFAULT page: <doc_body> rides it, or its root names doc_body in deferred=/continued= beside next=
+runpage "$DFX" "--for=$TASK" >"$TMP/f0p.xml"
+if python3 -c 'import re,sys; d=open(sys.argv[1]).read(); r=re.match(r"<ctx\b[^>]*>",d); r=r.group(0) if r else ""; n=" ".join(re.findall(r"\s(?:deferred|continued)=\"([^\"]*)\"",r)).split(); sys.exit(0 if "<doc_body " in d and ("doc_body" not in n or " next=" in r) or ("doc_body" in n and " next=" in r) else 1)' "$TMP/f0p.xml"; then
+    ok "(f0p) the default page carries <doc_body> or names it in deferred=/continued= beside next= ($( grep -o ' \(continued\|deferred\)="[^"]*"' "$TMP/f0p.xml" | tr -d '\n' ))"
+else no "(f0p) the default page neither carries <doc_body> whole nor names it in deferred=/continued= (a silent drop)"; fi
 
 # (f1) fires
 if ans "$TMP/f1.xml" "$DFX" "--for=$TASK" && python3 - "$TMP/f1.xml" <<'PY'
@@ -108,14 +122,16 @@ assert a[ :i ] + a[ j: ] == b
 PY
 then ok "(f3) the answer minus the block is byte-identical to the RIPWIRE_NO_FOR_DOC_BODY=1 answer"; else no "(f3) the answer before/after the block moved"; fi
 
+# TL1 M1 (SIGX, src/forsigx.h): the moved sigs bytes (<!-- sigx: --><sigx>) ride after the last row block too, beside the trailing legend
 # (f4) well formed; no double hyphen in the comment; last before </ctx>
 if [ -s "$TMP/f1.xml" ] && python3 - "$TMP/f1.xml" <<'PY' 2>/dev/null
-import sys, xml.dom.minidom as M
+import re, sys, xml.dom.minidom as M
 s = open( sys.argv[1], encoding="utf8" ).read()
 M.parseString( s )
 i = s.index( "<!-- ripwire for doc_body:" )
 assert "--" not in s[ i + 4: s.index( "-->", i ) ]
-assert s.endswith( "</doc_body></ctx>" )
+# AF1 (2026-11-18): answer-first — the block is the last ROW element; only the trailing DOCUMENT legend (comments) may follow it
+assert re.search( r"</doc_body>(?:<!--(?:(?!-->).)*-->|<sigx>.*?</sigx>)*</ctx>$", s, re.S )   # + TL1 SIGX block
 PY
 then ok "(f4) well formed XML; the comment holds no double hyphen; the block closes right before </ctx>"; else no "(f4) well-formedness or placement"; fi
 
@@ -140,7 +156,7 @@ done
 
 # (h1) token budget: held
 if ans "$TMP/h1.xml" "$DFX" "--for=$TASK" --token-budget=4000 \
-   && grep -q '<doc_body match="lexical" est_tokens="[0-9]*" held="budget" files="3" next="--for='\''how do the docs describe the retry policy for failed uploads'\''"><f p="[^"]*"/><f p="[^"]*"/><f p="[^"]*"/></doc_body></ctx>$' "$TMP/h1.xml" \
+   && python3 -c 'import re,sys; sys.exit(0 if re.search(r"<doc_body match=\"lexical\" est_tokens=\"[0-9]*\" held=\"budget\" files=\"3\" next=\"--for=.how do the docs describe the retry policy for failed uploads.\"><f p=\"[^\"]*\"/><f p=\"[^\"]*\"/><f p=\"[^\"]*\"/></doc_body>(?:<!--(?:(?!-->).)*-->)*</ctx>$", open(sys.argv[1]).read(), re.S) else 1)' "$TMP/h1.xml" \
    && ! grep -q '<b t="section"' "$TMP/h1.xml"
 then ok "(h1) --token-budget below the answer holds the block: held=\"budget\", three f p= rows, next= the same call, no section text"; else no "(h1) held: $( grep -o '<doc_body.*' "$TMP/h1.xml" | head -c 300 )"; fi
 
@@ -530,7 +546,8 @@ if [ "$c7ok" = 1 ]; then ok "(c7) --signatures-only: no <doc_body> and no \"doc_
 # (c8) a multi-root run serves the block in XML as it does in JSON: the same passages (root-prefixed p=), in the same order
 MRX="$TMP/multiroot"; mkdir -p "$MRX/a" "$MRX/b"; cp -R "$DFX/src" "$MRX/a/"; cp -R "$DFX/docs" "$DFX/README.md" "$MRX/b/"
 mr(){ ( cd "$MRX" || exit 1; "$BIN" a b --no-cache "$@" 2>/dev/null </dev/null ); }
-mr "--for=$TASK" >"$TMP/c8.xml"; c8x=$?; mr "--for=$TASK" --json >"$TMP/c8.json"; c8j=$?
+# AF1-fix (2026-11-18): the XML side is the WHOLE answer (--page-bytes=0): on the default page the block is continued past the cut
+mr "--for=$TASK" --page-bytes=0 >"$TMP/c8.xml"; c8x=$?; mr "--for=$TASK" --json >"$TMP/c8.json"; c8j=$?
 if [ "$c8x" = 0 ] && [ "$c8j" = 0 ] && python3 - "$TMP/c8.xml" "$TMP/c8.json" <<'PY'
 import html, json, re, sys
 x = open( sys.argv[1], encoding="utf8" ).read(); d = json.load( open( sys.argv[2], encoding="utf8" ) )["doc_body"]
@@ -582,7 +599,8 @@ ok = p.returncode == 0 and out.endswith( "</ctx>" ) and "<doc_body match=\"lexic
 print( "%.1f s rc=%d block=%s" % ( time.time() - t, p.returncode, ok ) ); sys.exit( 0 if ok else 2 )
 PY
 }
-if p1a=$( timed "--for=$TASK" ) && p1b=$( timed "--for=$TASK" --token-budget=7000 ); then ok "(p1) a 1.3 MB one-line section is served in bounded time: $p1a; under --token-budget=7000: $p1b"; else no "(p1) long-line section: ${p1a:-} ${p1b:-}"; fi
+# AF1-fix: the unbudgeted call reads the whole answer (--page-bytes=0): on the default page the block is continued past the cut
+if p1a=$( timed "--for=$TASK" --page-bytes=0 ) && p1b=$( timed "--for=$TASK" --token-budget=7000 ); then ok "(p1) a 1.3 MB one-line section is served in bounded time: $p1a; under --token-budget=7000: $p1b"; else no "(p1) long-line section: ${p1a:-} ${p1b:-}"; fi
 
 [ "$fail" = 0 ] && echo "fordocbodycheck: PASS" || echo "fordocbodycheck: FAIL"
 exit "$fail"

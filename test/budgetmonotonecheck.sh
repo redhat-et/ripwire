@@ -135,7 +135,10 @@ while IFS='	' read -r corpus q; do
     [ -z "$corpus" ] && continue
     i=$(( i + 1 ))
     d="$TMP/q$i"; mkdir -p "$d"; printf '%s\n%s\n' "$corpus" "$q" >"$d/what"
-    ( cd "$corpus" && "$BIN" . --for="$q" ) >"$d/U" 2>"$d/U.err"; echo "$?" >"$d/U.rc"   # status: rc kept in the .rc file; arm (a) compares stdout, stderr and rc with the unbudgeted run byte for byte
+    # AF1 (2026-11-18): the unbudgeted DEFAULT is answer-first and PAGED; a budget sheds the WHOLE answer in the same posture
+    # and is never paged, so the U a fitting budget reproduces byte for byte is --page-bytes=0 (AF1-fix: AF1 had kept the budget
+    # legend-first and pinned U to --legend=first, which re-decided the posture under a budget — this arm's own rule).
+    ( cd "$corpus" && "$BIN" . --for="$q" --page-bytes=0 ) >"$d/U" 2>"$d/U.err"; echo "$?" >"$d/U.rc"   # status: rc kept in the .rc file; arm (a) compares stdout, stderr and rc with the unbudgeted run byte for byte
     E="$( est_of "$d/U" )"
     [ -n "$E" ] || { echo "  INFO  q$i: the unbudgeted answer carries no est_tokens — skipped (counted as not judged)"; continue; }
     echo "$E" >"$d/E"
@@ -144,7 +147,7 @@ while IFS='	' read -r corpus q; do
         ( cd "$corpus" && "$BIN" . --for="$q" --token-budget="$B" ) >"$d/tb.$B" 2>"$d/tb.$B.err"; echo "$?" >"$d/tb.$B.rc"   # status: rc kept in the .rc file; arm (a) compares stdout, stderr and rc with the unbudgeted run byte for byte
     done
     if [ "$i" -le "$DETAIL_ROWS" ]; then
-        ( cd "$corpus" && "$BIN" . --for="$q" --detail=2 ) >"$d/D" 2>"$d/D.err"; echo "$?" >"$d/D.rc"   # status: rc kept in the .rc file; arm (a) compares stdout, stderr and rc with the unbudgeted run byte for byte
+        ( cd "$corpus" && "$BIN" . --for="$q" --detail=2 --page-bytes=0 ) >"$d/D" 2>"$d/D.err"; echo "$?" >"$d/D.rc"   # status: rc kept in the .rc file; arm (a) compares stdout, stderr and rc with the unbudgeted run byte for byte
         ED="$( est_of "$d/D" )"
         if [ -n "$ED" ]; then
             echo "$ED" >"$d/ED"

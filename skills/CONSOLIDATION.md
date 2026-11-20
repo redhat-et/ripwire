@@ -124,3 +124,15 @@ router's four rows point at orient, the corpus's 12 rows carry the mechanical re
 `compact-legend` intent names orient.
 
 Net: 17 skill directories (16 routable + the router; `ripwire-opt-remarks` stays contributor-gated at install).
+
+## 2026-11-18 — short SKILL.md bodies, everything else in on-demand reference files (lane P3; 17 dirs unchanged)
+
+No skill was added, removed or renamed, and every description is byte-identical. Each `SKILL.md` body was cut
+to its skill's core recipe (total 261,872 → 52,931 B, median 9,478 → 3,072 B, max 41,668 → 3,787 B; the router
+4,544 B), and everything else moved VERBATIM into flat reference files beside it (5 → 46 files), each named in a
+"read only the one you need" table at the foot of the body. A conservation check found no old line lost except
+two stale router statements corrected in passing (quality-delta covers 12 kinds, not 10; exit 2 means pre-existing
+code got worse). Blind raters given only the skill text scored 32 of 33 pre-registered tasks with both the old and
+the new bodies (one reference open in 33), so the cut shows no loss, not a gain. A proposal to delist five
+skills from the listing and reach them through the router (arm L) measured in band but is an owner call and was
+NOT landed.

@@ -26,6 +26,7 @@
 #include "forowner.h"   // for-body-slot: the one owner body of an explanatory question — shared with the CLI twin
 #include "packtask.h"      // L4: the shared --pack-task / MCP explore+pack_task bundle assembler (packTaskBundleText)
 #include "partition.h"     // the explore verb's `partition` argument (packTaskPartitionText)
+#include "forkeybody.h"    // PB1: keybody::keyBodyFor — the pack_task bundle's one key body (KB1's pick)
 #include "tracelocus.h"    // L4: the shared --from-trace / MCP from_trace bundle assembler (fromTraceBundleText)
 #include "countfloor.h"     // count-floor: a row's callers=/implementors= floor marker and its follow-up (CLI and MCP share it)
 #include "grepcarrier.h"    // L4: a grep enclosing row's carrier reads/vals (CLI and MCP share it)
@@ -65,6 +66,7 @@
 #include "defslookup.h"    // D2 part 5: pathAltsOf — path_between's inline alternatives, as on the CLI
 
 #include <filesystem>      // §B6 M3: the shared root-path existence/directory check (mcpRootRefusal below)
+#include <functional>
 #include <optional>        // mcpAnswerText / usesText: nullopt is an answer buffer that failed, never an empty answer
 #include <span>            // std::span — connectemit::rebuildFromLegs reads the caller's retained-leg mask
 
@@ -738,7 +740,7 @@ inline std::string calledByCutJson( std::string_view name, std::size_t total, co
 // `callsWindow` is empty (begin == end) on find_referencing_symbols, which marks the calledBy window only.
 inline std::string symbolQueryDefTableJson( const IngestResult& ing, const DefGroups& groups, const RowDefTokens& calledByTokens,
                                             const RowDefTokens& callsTokens, const PageWindow& calledByWindow, const PageWindow& callsWindow,
-                                            std::string_view rootPrefix )
+                                            std::string_view rootPrefix, DefRows when = DefRows::MultiOnly )
 {
     std::vector<char> named;
     defTableMarkNamed( named, groups, calledByTokens, calledByWindow.begin, calledByWindow.end );
@@ -747,10 +749,14 @@ inline std::string symbolQueryDefTableJson( const IngestResult& ing, const DefGr
         defTableMarkNamed( named, groups, callsTokens, callsWindow.begin, callsWindow.end );
     }
     const DefTableListing listing = defTableListing( groups, named );
-    std::string           out     = defTableJson( ing, groups, listing, rootPrefix, /*mcp=*/true );
+    std::string           out     = defTableJson( ing, groups, listing, rootPrefix, /*mcp=*/true, when );
     if( groups.multi() )
     {
-        out += nextFieldJson( defTableLegend( true, listing.cut ), "def_note" );   // its reading, only when the table rides
+        out += nextFieldJson( defTableLegend( { .table = true, .cut = listing.cut } ), "def_note" );   // its reading, only when the table rides
+    }
+    else if( !out.empty() )
+    {
+        out += nextFieldJson( defTableLegend( { .sole = true } ) + untiedDeclLegend( !groups.unattributed.empty() ), "def_note" );   // VERB-DEF-ROWS: the one group's reading; BX1 FIX 7
     }
     return out;
 }
@@ -859,6 +865,7 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
     const OneHopAttribution& callsAttr    = chRows.attr;
     bool anySplit = false;   // a row carried "prov":"split" — the answer then carries split_note, its reading
     bool anyImpl  = false;   // lane L6: a row carried "via":"impl" — the answer then carries impl_note, its reading
+    bool anyMacro = false;   // BX1 FIX 2: a row carried "via":"macro:NAME" — the answer then carries via_macro_note, its reading
     const auto rowArray = [ & ]( const std::vector<NodeId>& ids, const PageWindow& w, bool callersSide ) -> std::string
     {
         const OneHopAttribution& at = callersSide ? calledByAttr : callsAttr;
@@ -871,8 +878,11 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
             linkToward = callersSide;
             // CALLSITE-AT: a calledBy row carries its call sites (the CLI --callers row's sites_at=); a calls row never does.
             anyImpl = anyImpl || at.viaImpl( i );
-            a += withRowSites( symObj( ids[i], at.nameOnly( i ), ofDefKeyJson( at.groups, at.tokens, i ) + splitArmKeyJson( at.splitArm( i ) )
-                                                                 + ( at.viaImpl( i ) ? ",\"via\":\"impl\"" : "" ) ),   // lane L6: the CLI row's via="impl"
+            const bool macroRow = at.viaMacro( i ) != kNoNode;   // BX1 FIX 2: the CLI row's via="macro:NAME", in place of via="name"
+            anyMacro = anyMacro || macroRow;
+            a += withRowSites( symObj( ids[i], at.nameOnly( i ) && !macroRow, ofDefKeyJson( at.groups, at.tokens, i ) + splitArmKeyJson( at.splitArm( i ) )
+                                                                 + ( at.viaImpl( i ) ? ",\"via\":\"impl\"" : "" )   // lane L6: the CLI row's via="impl"
+                                                                 + viaMacroKeyJson( ing, at.viaMacro( i ) ) ),
                                calledBySites, i - w.begin, callersSide );
         }
         a += "]";
@@ -935,6 +945,7 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
          + ",\"hop_tested\":" + std::to_string( chTested.tested )
          + ",\"hop_untested\":" + std::to_string( chTested.untested )
          + countFieldOrEmpty( "hop_tests", chTested.tests, /*json=*/true )   // TIER-FOLLOWUP: the CLI root's hop_tests=, absent at 0
+         + viaMacroCappedKeyJson( ing, { chRows.viaMacroWithheld, chRows.viaMacroNext }, "--callers=" )   // lane bx2-fix2-ceiling: the CLI root's twin
          + declinedCallsKeyJson( chRows.declinedCalls )   // the CLI root's declined_calls=, for the direction count= describes
          + declinedSiteCutKeyJson( sqDcCut )              // the CLI root's shown_dc= / dc_next=, absent when nothing was cut
          + declinedIfaceKeyJson( chRows.declinedIface )   // the CLI root's declined_iface= (callers direction only)
@@ -963,7 +974,8 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
     // attrib-multidef: the CLI root's <def> table, in this surface's row vocabulary (symbolQueryDefTableJson). The `symbol` object
     // above stays the first definition — def_table[0] — and this table rides beside it.
     out += symbolQueryDefTableJson( ing, chRows.attr.groups, calledByAttr.tokens, callsAttr.tokens, referencingOnly ? pwPrimary : pwSecond,
-                                    referencingOnly ? PageWindow{} : pwPrimary, sqRootPrefix );
+                                    referencingOnly ? PageWindow{} : pwPrimary, sqRootPrefix,
+                                    callersDefRows( referencingOnly ) );   // VERB-DEF-ROWS: find_referencing_symbols = --callers
     out += pageDisclosure( pab, sizeof( pab ), pwPrimary.end - pwPrimary.begin, rowTotal, pwPrimary.end,
                            page.limit, page.offset, discloseCap, kJsonPageSyntax );
     if( !referencingOnly )
@@ -979,6 +991,7 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
     out += nextFieldJson( splitArmLegend( anySplit ), "split_note" );   // attrib-multidef Q1: likewise for "prov":"split"
     out += nextFieldJson( viaImplLegend( anyImpl ), "impl_note" );      // lane L6: likewise for "via":"impl"
     out += nextFieldJson( narrowedVerbLegend( !chRows.narrowed.empty() ), "narrowed_note" );   // CALLERS-TWO-COPY: the CLI legend's narrowed= reading, only with the key
+    out += nextFieldJson( std::string( viaMacroLegend( anyMacro ) ) + viaMacroCappedLegend( chRows.viaMacroWithheld > 0 ), "via_macro_note" );   // BX1 FIX 2; + the ceiling
     out += declinedSitesJson( sqDc, referencingOnly, /*mcp=*/true );   // lane declined-sites: the CLI <dc> rows, never in calls/calledBy or count
     out += nextFieldJson( declinedSitesLegend( declinedSitesLegendFlags( sqDc, referencingOnly, sqDcCut ), /*mcp=*/true ), "declined_note" );   // their reading, only when they ride
     out += nextFieldJson( callSitesAtLegend( calledBySites.any, calledBySites.anyCut, kCallSitesPerRowCap ), "sites_note" );   // CALLSITE-AT: its reading, only when a row carries it (nextFieldJson: "" -> no key, JSON-escaped)
@@ -1202,6 +1215,22 @@ inline std::string grepUnindexedKeys( const GrepAuxCollection& aux )
 // surfaces cannot report the same run differently (mcpclidiffcheck's LENS2 fact parity). Lifted out for the
 // same reason grepUnindexedKeys above was: a payload key fragment is a helper's job, not the verb body's.
 // `floorAlreadyEmitted` (N2): the CLI grepTierAttrs twin — tier_budget floors the root unless hits_capped already did.
+// BX2 step 2: the CLI grepHeldAttrs twin (this verb is literal-only): the files whose every hit the tier held back.
+template<class PathFor>
+inline std::string grepHeldKeys( const GrepTierReport& tier, const std::string& pattern, PathFor&& pathFor )
+{
+    if( tier.heldFiles == 0 )
+    {
+        return {};
+    }
+    std::string keys = ",\"held_files\":" + std::to_string( tier.heldFiles ) + ",\"held\":[";
+    for( std::size_t k = 0; k < tier.heldFileIds.size(); ++k )
+    {
+        keys += ( k == 0 ? "\"" : ",\"" ) + mcpdetail::jsonEscape( std::string( pathFor( tier.heldFileIds[k] ) ) ) + "\"";
+    }
+    return keys + "],\"held_next\":\"" + mcpdetail::jsonEscape( nextFlag( "--grep=", pattern ) + " --grep-in=any" ) + "\"";
+}
+
 inline std::string grepTierKeys( const GrepTierReport& tier, bool floorAlreadyEmitted )
 {
     if( !tier.hasDisclosure() )
@@ -1419,7 +1448,7 @@ inline std::string grepHitsJson( const std::string& root, const std::string& pat
     // R-H: the CLI tierAttr twin (helper above) — empty when nothing was held back.
     // N2: hits_capped puts the floor on this root through the disclosure (L4's found-not-fixed MCP twin, closed here);
     // tier_budget adds it when the disclosure did not — never both.
-    const std::string tierKeys = grepTierKeys( tierReport, /*floorAlreadyEmitted=*/collected.isBudgetReached );
+    std::string tierKeys = grepTierKeys( tierReport, /*floorAlreadyEmitted=*/collected.isBudgetReached );
 
     // G1 (2026-08-15 harvest, report-memgraph §F6): `file` is root-relative when this is a single-root
     // index (ing.realPaths empty — the same condition the CLI emitter gates on), reusing sarif.h's strip
@@ -1431,6 +1460,7 @@ inline std::string grepHitsJson( const std::string& root, const std::string& pat
     {
         return singleRootJ ? sarif::rootRelativeUri( ing.files[ fileId ], rootPrefixJ ) : std::string_view( ing.files[ fileId ] );
     };
+    tierKeys += grepHeldKeys( tierReport, pattern, pathForJ );   // BX2 step 2: the CLI held_files= / held= / held_next= twin
 
     std::string out = "{\"pattern\":\"" + mcpdetail::jsonEscape( pattern )
                     // G1: mirrors the CLI <grep root="…"> — same condition (singleRootJ), same fact, right
@@ -2644,6 +2674,15 @@ inline McpManifestRows mcpManifestRowsFitted( const IngestResult& ing, std::stri
     return whole;
 }
 
+// RT2 MCP parity: a `for` task that names its symbol and asks a call-graph question, answered by the CLI's routed answer
+// (verbs_forroute.h defines it, later in this translation unit); `page` serves the ranked answer a warned route carries.
+// nullopt: not routed — serve forTaskText.
+std::optional<std::string> mcpForVerbRoute( const IngestResult& ing, const Graph& g, const std::string& root, const std::string& task,
+                                            const std::function<std::optional<std::string>()>& page );
+// RT3-F1: offset=K on a `for` call that routes — the routed verb's window at K (the CLI's `--for=Q --offset=K`), never a carried
+// page. nullopt: not routed — serve forTaskText's file page.
+std::optional<std::string> mcpForVerbContinue( const IngestResult& ing, const Graph& g, const std::string& root, const std::string& task, int offset );
+
 inline std::optional<std::string> forTaskText( const std::string& root, const std::string& task, RedactCounts* redact = nullptr,
                                 std::size_t budgetTokens = 0, bool noRoute = false,
                                 McpPageArgs page = {},   // L-W: limit/offset select the FILE PAGE (forpage.h), the CLI --for --limit twin
@@ -3213,6 +3252,38 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     return out;
 }
 
+// RT2 MCP parity: a `for` call the CLI would route — no budget and no file page (a shaped call), the default sections, routing not
+// opted out — answered by the CLI's routed answer (verbs_forroute.h mcpForVerbRoute); a warned one carries this verb's own
+// answer as its page. nullopt: serve the ranked answer. ONE test for both MCP surfaces that serve `for`: the live verb
+// (mcp.h) and the batch sub-verb (runBatchSub), so the two cannot disagree about which calls route.
+struct McpForRouteAsk
+{
+    const std::string& path;
+    const std::string& task;
+    const std::string& sections;
+    const std::string& args;              // the call's arguments object: a limit= / offset= file page is a shaped call
+    bool               noRoute       = false;
+    bool               noVerbRoute   = false;
+    bool               budgetPresent = false;
+};
+inline std::optional<std::string> mcpRoutedFor( const McpForRouteAsk& a, RedactCounts* redactPtr )
+{
+    // RT3-F1: offset= alone (no limit=, no budget) continues a routed answer's window, as the CLI's `--for=Q --offset=K` does
+    const McpIntArg offset  = mcpIntArg( a.args, "offset", 0, kMcpPageValueMax );
+    const bool      cont    = offset.isPresent && offset.refusal.empty() && offset.value > 0;
+    const bool      shaped  = a.budgetPresent || mcpdetail::findRawValue( a.args, "limit" ).isPresent || ( offset.isPresent && !cont );
+    if( a.noVerbRoute || shaped || !a.sections.empty() )
+    {
+        return std::nullopt;
+    }
+    const McpIndex& ix = getIndex( a.path );
+    if( cont )
+    {
+        return mcpForVerbContinue( ix.ing, ix.g, a.path, a.task, int( offset.value ) );
+    }
+    return mcpForVerbRoute( ix.ing, ix.g, a.path, a.task, [ & ] { return forTaskText( a.path, a.task, redactPtr, 0, a.noRoute, McpPageArgs{}, a.sections ); } );
+}
+
 // `lego` verb: the TARGETED interface→impls "Lego" view for ONE named interface/base — its signature,
 // method contract (where sound), and EVERY implementor (own-language only), with p= file paths. Mirrors
 // the CLI --lego=TYPE exactly (same packLego + resolveFocus + <lego> schema). `type` may be "file:name"
@@ -3506,7 +3577,7 @@ inline std::optional<std::string> impactText( const std::string& root, const std
         return std::string{}; // symbol not found → caller reports not-found
     }
 
-    // 0.6.5: the CLI --impact's walk, keeping each node's hop depth, and its order (graph.h orderByDepthThenRank).
+    // 0.6.5: the CLI --impact's walk, keeping each node's hop depth, and its order (graph.h orderImpactRows).
     // L7 (typeuse.h): the CLI's type tier, by the same calls — a type seed's walk also starts from the symbols naming it
     const TypeUseTier                typeTier = typeUseTier( ing, seeds );
     ImpactReach                      walk     = impactReachWithTypes( g, seeds, typeTier );
@@ -3516,7 +3587,7 @@ inline std::optional<std::string> impactText( const std::string& root, const std
     const auto [ rank, prIters, prConverged ] = rankGraph( g );
     const RankDisclosure             prD{ prIters, prConverged, true };   // W2-F: CLI --impact discloses this; so does its twin
     std::vector<NodeId>              show  = reach;
-    orderByDepthThenRank( show, depth, rank );   // ranked before the page window cuts, exactly as on the CLI
+    orderImpactRows( ing, show, depth, rank );   // ranked before the page window cuts, exactly as on the CLI
     const std::vector<std::uint32_t> byDepth = depthCounts( reach, depth );
 
     // A6: the identical isTestSymbol-seeded lens the CLI --impact now runs (graph.h::testSymbolForwardReach)
@@ -3557,6 +3628,7 @@ inline std::optional<std::string> impactText( const std::string& root, const std
     sizeImportTier( imports, page.limit, symbol );   // cut-fix C: limit sizes the tier, as on the CLI
     // Reference-as-value round: SYM's binding sites, the CLI --impact's value_refs=/<vrs> by the same call.
     const ValueRefRows  imValueRefs = valueRefCallerRows( ing, valueRefIndexOf( ix ), seeds );
+    orderImportersByEvidence( ing, imports, impactEvidenceFiles( ing, g, reach, imDc, imValueRefs ) );   // IM1: evidence importers first within a tier, as on the CLI
     const BackwardHops  imBackHops( ing, g, valueRefIndexOf( ix ) );                  // HOP1: the CLI --impact's hedged slot ring, by the same calls
     const PageWindow    ipw         = pageWindow( show.size(), effectiveRowCap( page.limit, 40 ), page.offset );
     ImpactRing          imRing      = impactSlotRing( ing, imBackHops, seeds, reach, ImpactRingLens{ &impTestReach, rank } );
@@ -3598,7 +3670,8 @@ inline std::optional<std::string> impactText( const std::string& root, const std
                     + impactRingLegend( imRing, true )                     // HOP1: exactly when reaches_hedged= / <ring> ride, as on the CLI
                     + impactRollupLegend( !imFiles.rows.empty(), imports.umbrella, impactRollupHedged( imFiles ), !imports.next.empty(),
                                           ImpactRollupTypeClauses{ imFiles.typed, imFiles.typeDefs, imFiles.typeCapped } )   // idea #6; FIX1 R1; L7, as on the CLI
-                    + defTableLegend( imAttr.groups.multi(), imListing.cut )                                                         // attrib-multidef, as on the CLI
+                    + defTableLegend( { .table = imAttr.groups.multi(), .cut = imListing.cut, .sole = imAttr.groups.size() == 1 } )                     // attrib-multidef, as on the CLI; IMPACT-SOLE-DEF
+                    + untiedDeclLegend( !imAttr.groups.unattributed.empty() )                                          // BX1 FIX 7, as on the CLI
                     + memberOwnerLegendFor( memberOwnerRows( ing, std::span<const NodeId>( show ).subspan( ipw.begin, ipw.end - ipw.begin ) ) ) ).c_str(),   // QUALNAME-1, as on the CLI
                   graphCountDisclosure( rw::graphGaugeClauses( g ) ).c_str(), renderDisclosure( prD, DiscloseAs::LegendClause ).c_str() );
     // r27-emitters §P2.1: the listing is capped at 40 by rank. Without shown=/capped= a 40-row answer to
@@ -3621,7 +3694,7 @@ inline std::optional<std::string> impactText( const std::string& root, const std
                   graphCountFloorAttrXml( g ).c_str(), renderDisclosure( prD, DiscloseAs::XmlAttrs ).c_str(),   // M15: gauge + marker
                   nextAttrXml( impactRootNext( ing, imRing, VrRender{ imSingleRoot, imRootPrefix }, nextFlag( "--safe-delete=", symbol ) ) )   // P3 (L7): the CLI twin's next=, same rule (mcpclidiffcheck)
                     + nextAttrXml( imAllNext, "all_next" ) );   // BAND DC: the CLI twin's all_next=
-    rw::emitRaw( mem, defTableXml( ing, imAttr.groups, imListing, imSingleRoot ? std::string_view( imRootPrefix ) : std::string_view() ).c_str() );   // attrib-multidef
+    rw::emitRaw( mem, defTableXml( ing, imAttr.groups, imListing, imSingleRoot ? std::string_view( imRootPrefix ) : std::string_view(), DefRows::SoleToo ).c_str() );   // attrib-multidef; IMPACT-SOLE-DEF
     emitImpactFileRollupXml( mem, ing, imFiles, imSingleRoot ? std::string_view( imRootPrefix ) : std::string_view() );   // idea #6, as on the CLI
     const MemberOwners imOwners( ing );   // QUALNAME-1: n="Owner.name" on a member row, as on the CLI (memberowner.h)
     for( std::size_t i = ipw.begin; i < ipw.end; ++i )
@@ -3941,6 +4014,9 @@ inline std::optional<std::string> usesText( const std::string& root, const std::
     const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
     const bool usUnindexed = usesRolesUnindexed( ing, defs );   // B31: the CLI --uses' unindexed_roles=, same predicate
     const bool usDeclCapped = memberDeclScanCapped( ing, sym, external );   // USES-DECL-SCAN-CAPPED: the CLI's decl_scan=, same predicate
+    // VERB-DEF-ROWS: the CLI --uses' <def> rows, the same helper (root-relative exactly when the rows below are)
+    const std::string  usDefPrefix = ing.realPaths.empty() ? sarif::rootPrefixOf( root ) : std::string();
+    const UsesDefTable usDefs      = usesDefTable( ing, defs, usDefPrefix );
 
     rw::MemoryStream stream;
     std::FILE* const mem = stream.open();
@@ -3961,7 +4037,8 @@ inline std::optional<std::string> usesText( const std::string& root, const std::
                     + valueRefsDepthLegend( usDepthCut.files > 0 )
                     + declinedLiteralCallsLegend( declinedLiteralCalls > 0 )
                     + unindexedRolesLegend( usUnindexed )
-                    + memberDeclScanLegend( usDeclCapped ) ).c_str(),   // exactly when the root carries the depth disclosure / unindexed_roles=, as the CLI
+                    + memberDeclScanLegend( usDeclCapped )
+                    + usDefs.legend ).c_str(),   // exactly when the root carries the depth disclosure / unindexed_roles=, as the CLI; VERB-DEF-ROWS
                   capLegendClause( computePageDisclosure( upageRows, sites.size(), upw.end,
                                                           page.limit, page.offset, usDiscloseCap ).active ),
                   graphCountDisclosure( rw::graphGaugeClauses( ix.g ) ).c_str(),
@@ -3973,12 +4050,14 @@ inline std::optional<std::string> usesText( const std::string& root, const std::
     const bool         usSingleRoot = ing.realPaths.empty();
     const std::string  usRootPrefix = usSingleRoot ? sarif::rootPrefixOf( root ) : std::string();
     const std::string  usRootAttr   = usSingleRoot ? ( " root=\"" + ex( root ) + "\"" ) : std::string();
-    rw::emitTo( mem, "<uses of=\"{}\" defs=\"{}\" external=\"{}\" count=\"{}\"{}{}{}{}{}{}>",
+    rw::emitTo( mem, "<uses of=\"{}\" defs=\"{}\" external=\"{}\" count=\"{}\"{}{}{}{}{}{}{}>",
                   ex( symbol ).c_str(), defs.size(), external ? 1 : 0, sites.size(), unindexedRolesAttrXml( usUnindexed ),
                   memberDeclScanAttrXml( usDeclCapped ), usRootAttr.c_str(), upage,
                   graphCountFloorAttrXml( ix.g ).c_str(),
                   ( valueRefsDepthAttrXml( ing, usDepthCut, VrRender{ usSingleRoot, usRootPrefix } )
-                    + declinedLiteralCallsAttrXml( declinedLiteralCalls ) ).c_str() );   // of= echoes the selector as TYPED (an @-seed stays an @-seed)
+                    + declinedLiteralCallsAttrXml( declinedLiteralCalls ) ).c_str(),   // of= echoes the selector as TYPED (an @-seed stays an @-seed)
+                  usDefs.listedAttr );   // VERB-DEF-ROWS: a cut table says so, as on the CLI
+    rw::emitRaw( mem, usDefs.rows.c_str() );   // VERB-DEF-ROWS: the definitions, before the use-site rows, as on the CLI
     for( std::size_t siteIndex = upw.begin; siteIndex < upw.end; ++siteIndex )
     {
         const UseSite& u = sites[ siteIndex ];
@@ -5342,6 +5421,7 @@ inline std::string packTaskText( const std::string& root, const std::string& tas
     // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h) — the
     // CLI twin (main.cpp runPackTask) sets the identical field so the two dialects cannot diverge.
     in.rootArg = ing.realPaths.empty() ? std::string_view( root ) : std::string_view();
+    in.keyBody = keybody::keyBodyFor( ing, task, in.rootArg );   // PB1: KB1's key body, the CLI twin's same call
     if( partitionCount >= packpartition::kMinPartitions && partitionCount <= packpartition::kMaxPartitions )
     {
         return packpartition::packTaskPartitionText( ing, g, task, lr, in, partitionCount );
@@ -6447,7 +6527,20 @@ inline BatchSub runBatchSub( const std::string& root, const std::string& obj, in
         {
             return bad( missingField( "for" ) );
         }
-        std::optional<std::string> forAnswer = forTaskText( root, task, redactPtr, 0, false, pageParse.page );   // L-W: the batch arm pages the file page too
+        // RT2 MCP parity: the batch item routes exactly as the live verb does (mcpRoutedFor: same path, same call-shape test);
+        // a batch item has no budget_tokens / sections / no_route of its own, so those are the defaults here
+        const McpBoolArg noVerbRoute = mcpBoolArg( obj, "no_verb_route" );
+        if( !noVerbRoute.refusal.empty() )
+        {
+            return bad( noVerbRoute.refusal );
+        }
+        const std::string          noSections;   // a batch item carries no sections= (kBatchSubQueryFields)
+        std::optional<std::string> forAnswer = mcpRoutedFor( { .path = root, .task = task, .sections = noSections, .args = obj, .noVerbRoute = noVerbRoute.value },
+                                                             redactPtr );
+        if( !forAnswer )
+        {
+            forAnswer = forTaskText( root, task, redactPtr, 0, false, pageParse.page );   // L-W: the batch arm pages the file page too
+        }
         if( !forAnswer )
         {
             return bad( "internal error: the for answer buffer lost bytes — no answer served" );

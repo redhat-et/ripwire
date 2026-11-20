@@ -96,11 +96,22 @@ def sha(path):
     return h.hexdigest()
 
 
+RUN_TIMEOUT_S = 3600   # one cold --no-cache run over a whole corpus; generous on purpose
+
+
 def timed_run(binp, corpus, extra=None):
-    """One --no-cache run. Returns (seconds, stdout_bytes, stderr_text)."""
+    """One --no-cache run. Returns (seconds, stdout_bytes, stderr_text).
+
+    Bounded; a timeout or a signal-kill (rc < 0, e.g. the OS killing a runaway run) stops the A/B with that
+    state named, so a run that never finished can never be read as a timing sample or as an arm's map."""
     cmd = [binp, corpus, "--no-cache"] + (extra or [])
     t0 = time.perf_counter()
-    p = subprocess.run(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        p = subprocess.run(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=RUN_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        sys.exit(f"TIMEOUT ({RUN_TIMEOUT_S}s): {' '.join(cmd)}")
+    if p.returncode < 0:
+        sys.exit(f"KILLED (signal={-p.returncode}): {' '.join(cmd)}")
     return time.perf_counter() - t0, p.stdout, p.stderr.decode("utf-8", "replace")
 
 

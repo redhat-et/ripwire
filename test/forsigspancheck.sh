@@ -95,6 +95,10 @@
 # Exits non-zero on any failure.
 
 set -u
+# TL1 M1 (SIGX, src/forsigx.h): the default answer-first --for answer moves the attributes and text of sigs rows past r=10 into a
+# <sigx> block after the rows (lossless; test/forsigxcheck.sh pins it, (S1) rebuilds the unmoved answer byte for byte). This gate
+# reads those rows in place for another rule, so SIGX is off here.
+export RIPWIRE_NO_SIGX=1
 # SIBLING-DEMOTE / DECL-TWIN (every dialect since DEMOTE-ALL-DIALECTS, fordemoteall.h) stay OFF here, because this gate's twins
 # legitimately differ under them: (R) compares the docs-after-code reorder with plain score order, and SIBLING-DEMOTE's rank > 10
 # rule reads the SERVED order, so the two orders demote different rows; (N) drops e=, and DECL-TWIN reads a one-line declaration off

@@ -14,7 +14,7 @@
 #   2. DISCLOSURE — `--impact` emits the importer files as their OWN tier: `importers=` on the root
 #      (always, even when 0), `shown_importers=`/`importers_capped=` per pageview.h rule 6 (a SECONDARY
 #      listing discloses through its own noun-prefixed pair, never the paging half), and one
-#      `<f via="import" p="…"/>` row per file. reaches= must NOT move: call reach and import reach are
+#      `<f p="…"/>` row per file (IMPORT-ROW-SHORT, 2026-11-18: it was `<f p="…" lazy="0|1"/>`). reaches= must NOT move: call reach and import reach are
 #      two different measurements over two different units and are never summed into one number
 #      (CLAUDE.md non-negotiable #3).
 #
@@ -102,7 +102,7 @@ grep -qE '^\s*return require\("\./Widget"\);\s*$' "$FIX/lib/barrel.js" \
     || no "fixture guard: barrel.js drifted — the barrel arm below cannot trust its shape"
 
 i(){ perl -e 'alarm 30; exec @ARGV' "$BIN" "$FIX" --impact="$1" --no-cache "${@:2}" 2>/dev/null; }
-# The legend now SPELLS the row shape (`<f via="import" p="…"/>`), so a naive grep for a row matches the
+# The legend now SPELLS the row shape (`<f p="…"/>`), so a naive grep for a row matches the
 # documentation of the row. Every row-level assertion runs against the ELEMENT, not the whole document.
 body(){ printf '%s' "$1" | sed 's/^.*<impact /<impact /'; }
 attr(){ printf '%s' "$2" | grep -oE "(^|[^_a-z])$1=\"[^\"]*\"" | head -1 | grep -oE '"[^"]*"' | tr -d '"'; }
@@ -130,15 +130,15 @@ REACHES="$(   attr reaches   "$OUT_W" )"
     || no "--impact=Widget: reaches='$REACHES', expected 1 (import reach must not leak into it)"
 
 for f in alpha beta gamma user delta; do
-    body "$OUT_W" | grep -qE "<f via=\"import\" p=\"lib/$f\.js\" lazy=\"0\"/>" \
-        && ok "--impact=Widget: import-tier row for lib/$f.js, lazy=\"0\" (top-level require/import)" \
-        || no "--impact=Widget: missing <f via=\"import\" p=\"lib/$f.js\" lazy=\"0\"/>"
+    body "$OUT_W" | grep -qE "<f p=\"lib/$f\.js\"/>" \
+        && ok "--impact=Widget: import-tier row for lib/$f.js, no lazy= (top-level require/import)" \
+        || no "--impact=Widget: missing <f p=\"lib/$f.js\"/>"
 done
 # ── #2b kParserVer 72: the FUNCTION-BODY require gets its own row, marked lazy="1" ──────────────────────
-body "$OUT_W" | grep -qE '<f via="import" p="lib/lazyimporter\.js" lazy="1"/>' \
+body "$OUT_W" | grep -qE '<f p="lib/lazyimporter\.js" lazy="1"/>' \
     && ok "--impact=Widget: import-tier row for lib/lazyimporter.js, lazy=\"1\" (function-body require)" \
-    || no "--impact=Widget: missing <f via=\"import\" p=\"lib/lazyimporter.js\" lazy=\"1\"/> — the lazy require was not captured, or not marked lazy"
-body "$OUT_W" | grep -qE '<f via="import" p="lib/Widget\.js"' \
+    || no "--impact=Widget: missing <f p=\"lib/lazyimporter.js\" lazy=\"1\"/> — the lazy require was not captured, or not marked lazy"
+body "$OUT_W" | grep -qE '<f p="lib/Widget\.js"' \
     && no "--impact=Widget: the DEFINING file is listed as its own importer" \
     || ok "--impact=Widget: the defining file is not listed as an importer of itself"
 # ── #2c barrel-exclusion lane: a def file (defines a getter named Widget) that ALSO genuinely imports a
@@ -149,11 +149,11 @@ DEFS="$( attr defs "$OUT_W" )"
 [ "$DEFS" = 2 ] \
     && ok "--impact=Widget: defs=2 — Widget.js's class AND barrel.js's getter both match the unqualified name" \
     || no "--impact=Widget: defs='$DEFS', expected 2 (barrel.js's getter no longer resolves as a same-named def — fixture drifted)"
-body "$OUT_W" | grep -qE '<f via="import" p="lib/barrel\.js" lazy="1"/>' \
+body "$OUT_W" | grep -qE '<f p="lib/barrel\.js" lazy="1"/>' \
     && ok "--impact=Widget: import-tier row for lib/barrel.js, lazy=\"1\" — a same-named-def file that also imports the OTHER def file" \
-    || no "--impact=Widget: missing <f via=\"import\" p=\"lib/barrel.js\" lazy=\"1\"/> — the barrel-getter-named-after-reexport misfire is back"
+    || no "--impact=Widget: missing <f p=\"lib/barrel.js\" lazy=\"1\"/> — the barrel-getter-named-after-reexport misfire is back"
 # ── #2d no double-count: barrel.js earns exactly ONE row, not two (once as "importer", once for its own def) ─
-BARREL_ROWS="$( body "$OUT_W" | grep -oE '<f via="import" p="lib/barrel\.js"[^/]*/>' | wc -l | tr -d ' ' )"
+BARREL_ROWS="$( body "$OUT_W" | grep -oE '<f p="lib/barrel\.js"[^/]*/>' | wc -l | tr -d ' ' )"
 [ "$BARREL_ROWS" = 1 ] \
     && ok "--impact=Widget: lib/barrel.js appears exactly once in the import tier (no double-count)" \
     || no "--impact=Widget: lib/barrel.js appears $BARREL_ROWS times in the import tier, expected 1"
@@ -185,14 +185,14 @@ OUT_O="$( i lonely --legend=full )"
     && [ "$( attr importers_capped "$OUT_O" )" = 0 ]; } \
     && ok "--impact=lonely: importers=0 shown_importers=0 importers_capped=0 (nobody imports orphan.js)" \
     || no "--impact=lonely: the zero case must still emit all three attributes — got: $( printf '%s' "$OUT_O" | grep -oE '<impact [^>]*>' )"
-body "$OUT_O" | grep -qE '<f via="import"' \
+body "$OUT_O" | grep -qE '<f p="' \
     && no "--impact=lonely: emitted an import row for a file nothing imports" \
     || ok "--impact=lonely: no import rows"
 
 # ── #6 the legend names the tier IN BAND (G4/honesty: the reader must not need --help) ────────────────
-# Asserted on the ZERO-importer output on purpose: that run emits no <f> row at all, so a `via="import"`
+# Asserted on the ZERO-importer output on purpose: that run emits no <f> row at all, so a `<f p="…"/>`
 # anywhere in it can only have come from the legend. A legend check on OUT_W would pass off the rows.
-{ printf '%s' "$OUT_O" | grep -q 'via="import"' \
+{ printf '%s' "$OUT_O" | grep -qF '<f p="…"/> rows after the symbol rows' \
     && printf '%s' "$OUT_O" | grep -q 'not call reach'; } \
     && ok "legend: the import tier is described in band, and says it is not call reach" \
     || no "legend: --impact's doc comment does not describe the import tier as a separate, weaker reach"
@@ -228,7 +228,7 @@ COL="$( perl -e 'alarm 30; exec @ARGV' "$BIN" "$FIX" --impact=Widget --format=co
 printf '%s' "$COL" | grep -q 'import-tier rows are not emitted in this form' \
     && ok "--format=columnar: the legend says the count is there and the rows are not" \
     || no "--format=columnar: nothing in band explains that the import ROWS are absent in this form"
-body "$COL" | grep -q '<f via="import"' \
+body "$COL" | grep -q '<f p="' \
     && no "--format=columnar: emitted <f> rows the columnar legend says are absent" \
     || ok "--format=columnar: no <f> rows, as the legend states"
 
@@ -253,7 +253,7 @@ if [ -n "$CAP_N" ] && [ "$CAP_N" -gt 40 ]; then
     { [ "$CAP_S" = 40 ] && [ "$CAP_C" = 1 ]; } \
         && ok "cap: importers=$CAP_N over 40 → shown_importers=40 importers_capped=1 (default, disclosed)" \
         || no "cap: importers=$CAP_N but shown_importers=$CAP_S importers_capped=$CAP_C (expected 40 / 1)"
-    ROWS_CAP="$( body "$OUT_CAP" | grep -oE '<f via="import"' | wc -l | tr -d ' ' )"
+    ROWS_CAP="$( body "$OUT_CAP" | grep -oE '<f p="' | wc -l | tr -d ' ' )"
     if [ "$ROWS_CAP" = 40 ]; then ok "cap: exactly 40 import rows printed"; else no "cap: printed $ROWS_CAP import rows, expected 40"; fi
 else
     no "cap arm inert: --impact=IngestResult on this repo reported importers='$CAP_N', so the >40 case was never exercised"
@@ -291,18 +291,18 @@ mkhub "$RS" 60
 ri(){ perl -e 'alarm 30; exec @ARGV' "$BIN" "$RS" --impact=importHubFn --no-cache "$@" 2>/dev/null; }
 R_DEF="$( ri )"
 R_ALL="$( ri --limit=100 )"
-zRows(){ body "$1" | grep -oE '<f via="import" p="pkg/z_[0-9]\.py"' | wc -l | tr -d ' '; }
+zRows(){ body "$1" | grep -oE '<f p="pkg/z_[0-9]\.py"' | wc -l | tr -d ' '; }
 { [ "$( attr importers "$R_DEF" )" = 48 ] && [ "$( attr shown_importers "$R_DEF" )" = 40 ] && [ "$( attr importers_capped "$R_DEF" )" = 1 ]; } \
     && ok "rank: presence guard — importers=48 over the 40 cap, shown_importers=40 importers_capped=1" \
     || no "rank: fixture broken — importers=$( attr importers "$R_DEF" ) shown_importers=$( attr shown_importers "$R_DEF" )"
 [ "$( zRows "$R_DEF" )" = 3 ] \
     && ok "rank: the default 40-file page keeps all 3 most-imported importers (they sort LAST by path)" \
     || no "rank: the default page kept $( zRows "$R_DEF" ) of the 3 most-imported importers — the cap cut the head"
-body "$R_DEF" | grep -oE '<f via="import" p="[^"]*"' | head -3 | grep -c 'pkg/z_' | grep -qx 3 \
+body "$R_DEF" | grep -oE '<f p="[^"]*"' | head -3 | grep -c 'pkg/z_' | grep -qx 3 \
     && ok "rank: the most-imported importers lead the tier" \
-    || no "rank: the tier does not lead with the most-imported files: $( body "$R_DEF" | grep -oE '<f via="import" p="[^"]*"' | head -1 )"
+    || no "rank: the tier does not lead with the most-imported files: $( body "$R_DEF" | grep -oE '<f p="[^"]*"' | head -1 )"
 { [ "$( attr shown_importers "$R_ALL" )" = 48 ] && [ "$( attr importers_capped "$R_ALL" )" = 0 ] \
-  && [ "$( body "$R_ALL" | grep -oE '<f via="import"' | wc -l | tr -d ' ' )" = 48 ]; } \
+  && [ "$( body "$R_ALL" | grep -oE '<f p="' | wc -l | tr -d ' ' )" = 48 ]; } \
     && ok "reach: --limit=100 serves the whole 48-file tier (shown_importers=48 importers_capped=0) — the cut is one known call away" \
     || no "reach: --limit=100 left the tier at shown_importers=$( attr shown_importers "$R_ALL" ) — --limit cannot reach it"
 # ── #9e UMBRELLA (lane lean-trio, idea #6): the same hub with no unrelated importers — imported by 48 of the 52 files
@@ -313,10 +313,10 @@ mkhub "$RU" 0
 U_DEF="$( perl -e 'alarm 30; exec @ARGV' "$BIN" "$RU" --impact=importHubFn --no-cache 2>/dev/null )"
 U_ALL="$( perl -e 'alarm 30; exec @ARGV' "$BIN" "$RU" --impact=importHubFn --no-cache --limit=100 2>/dev/null )"
 { [ "$( attr importers "$U_DEF" )" = 48 ] && [ "$( attr shown_importers "$U_DEF" )" = 0 ] && [ "$( attr importers_umbrella "$U_DEF" )" = 1 ] \
-  && [ "$( attr importers_next "$U_DEF" )" = "--impact=importHubFn --limit=48" ] && [ "$( body "$U_DEF" | grep -c '<f via="import"' )" = 0 ]; } \
+  && [ "$( attr importers_next "$U_DEF" )" = "--impact=importHubFn --limit=48" ] && [ "$( body "$U_DEF" | grep -c '<f p="' )" = 0 ]; } \
     && ok "umbrella: importers=48 is a count (shown_importers=0 importers_umbrella=1), importers_next= names the listing call" \
     || no "umbrella: expected a counted tier; got importers=$( attr importers "$U_DEF" ) shown_importers=$( attr shown_importers "$U_DEF" ) umbrella=$( attr importers_umbrella "$U_DEF" )"
-[ "$( body "$U_ALL" | grep -oE '<f via="import"' | wc -l | tr -d ' ' )" = 48 ] \
+[ "$( body "$U_ALL" | grep -oE '<f p="' | wc -l | tr -d ' ' )" = 48 ] \
     && ok "umbrella: an explicit --limit=100 lists all 48 importer rows" \
     || no "umbrella: --limit=100 did not list the 48 rows"
 [ -z "$( attr importers_umbrella "$R_DEF" )" ] \
@@ -569,7 +569,7 @@ pi(){ PO="$( cd "$PH" && perl -e 'alarm 30; exec @ARGV' "$BIN" "$PH" --impact="$
 proot(){ printf '%s' "$PO" | grep -oE '<impact [^>]*>' | head -1; }
 pi lib/core.h; R="$( proot )"
 if [ "$PRC" = 0 ] && printf '%s' "$R" | grep -q 'selector="file" file="lib/core.h" importers="45" shown_importers="40" importers_capped="1" importers_next="--impact=lib/core.h --limit=45" importers_tests="15" importers_dirs="src/a:20,tests/unit:15,src/b:10"' \
-   && [ "$( printf '%s' "$PO" | grep -oE '<f via="import"' | wc -l | tr -d ' ' )" = 40 ]; then
+   && [ "$( printf '%s' "$PO" | grep -oE '<f p="' | wc -l | tr -d ' ' )" = 40 ]; then
     ok "path (a): --impact=lib/core.h lists its importers (45, 40 shown) under selector=file, with the cut rollup tests=15 dirs=src/a:20,tests/unit:15,src/b:10"
 else no "path (a) rc=$PRC: $R"; fi
 if [ "$PRC" = 0 ] && [ -n "$R" ] && ! printf '%s' "$R" | grep -qE ' (reaches|defs|found)='; then ok "path (a): no call reach, no defs=, no found= on a file answer"; else no "path (a) carries symbol attributes: $R"; fi
@@ -634,7 +634,7 @@ printf '#include "inc/proj/reg.h"\nint c2(void) { return reg_fn(); }\n' > "$PH/s
 printf '#include "other/reg.h"\nint c3(void) { return 0; }\n' > "$PH/src/c/c3.c"
 pi inc/proj/reg.h; R="$( proot )"
 if [ "$PRC" = 0 ] && printf '%s' "$R" | grep -q 'selector="file" file="inc/proj/reg.h" importers="1" shown_importers="1" importers_capped="0" unresolved_naming="1"' \
-   && printf '%s' "$PO" | grep -q '<f via="import" p="src/c/c2.c"' && printf '%s' "$PO" | grep -q 'unresolved_naming=:'; then
+   && printf '%s' "$PO" | grep -q '<f p="src/c/c2.c"' && printf '%s' "$PO" | grep -q 'unresolved_naming=:'; then
     ok "path (o): the root-relative include lands (importers=1, src/c/c2.c), the one directive by an unknown root carries unresolved_naming=1 and its legend"
 else no "path (o) rc=$PRC: $R"; fi
 pi inc/proj/reg.h --json

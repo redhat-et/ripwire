@@ -34,6 +34,10 @@
 # Exits non-zero on any failure.
 
 set -u
+# TL1 M1 (SIGX, src/forsigx.h): the default answer-first --for answer moves the attributes and text of sigs rows past r=10 into a
+# <sigx> block after the rows (lossless; test/forsigxcheck.sh pins it, (S1) rebuilds the unmoved answer byte for byte). This gate
+# reads those rows in place for another rule, so SIGX is off here.
+export RIPWIRE_NO_SIGX=1
 # SIBLING-DEMOTE / DECL-TWIN (every dialect since DEMOTE-ALL-DIALECTS, fordemoteall.h) stay OFF here, because this gate's readings
 # legitimately differ under them: <sigs shown= docs_dropped=> count the rows the ladder served BEFORE the rules print some as
 # <t p= sym= r=/> pointers (a pointer carries no <doc>), and (6)/(8) check those counts against the printed <d> rows. The rules are
@@ -500,7 +504,10 @@ nodoc = [ int( r ) for r, inner in rows if "<doc>" not in inner ]
 dd = re.search( r"docs_dropped=\"([0-9]+)\"", m.group( 1 ) )
 got = int( dd.group( 1 ) ) if dd else 0
 if got != len( nodoc ) or ( got == 0 and not budgeted ): print( "FAIL docs_dropped=%d but %d shown rows print no <doc> (r=%s)" % ( got, len( nodoc ), nodoc ) ); sys.exit( 1 )
-if got > 0 and "[docs_dropped=N:" not in s[ : s.find( "<sigs" ) ]: print( "FAIL docs_dropped= rides with no legend clause ahead of <sigs>" ); sys.exit( 1 )
+# AF1 (2026-11-18): the DEFAULT answer is answer-first (its legend after the rows, inside the same page); a budgeted one keeps it
+# ahead of <sigs>. Either way the reading must ride a legend COMMENT of THIS answer, which is what is checked.
+leg = "".join( re.findall( r"<!--.*?-->", s, re.S ) )
+if got > 0 and "[docs_dropped=N:" not in leg: print( "FAIL docs_dropped= rides with no legend clause in this answer" ); sys.exit( 1 )
 sh = re.search( r"shown=\"([0-9]+)\"", m.group( 1 ) ); tt = re.search( r"total=\"([0-9]+)\"", m.group( 1 ) )
 shrunk = bool( sh and tt and sh.group( 1 ) == tt.group( 1 ) )
 if not budgeted and shrunk != ( "[sigs capped=1 with shown=total:" in s ): print( "FAIL the shrunk clause rides %s a shown==total cap" % ( "without" if shrunk else "beside no" ) ); sys.exit( 1 )
@@ -570,11 +577,11 @@ ranks = [ int( r ) for r in re.findall( r"<d [^>]*\br=\"([0-9]+)\"", m.group( 2 
 no_ = re.search( r"\snext_offset=\"([0-9]+)\"", tag ); nb_ = re.search( r"\snext_budget_tokens=\"([0-9]+)\"", tag )
 out = { "capped": "capped=\"1\"" in tag, "shown": int( sh.group( 1 ) ) if sh else len( names ), "total": int( tt.group( 1 ) ) if tt else len( names ),
         "next": nx.group( 1 ).replace( "&apos;", chr( 39 ) ).replace( "&quot;", chr( 34 ) ).replace( "&amp;", "&" ) if nx else "",
-        "clause": "[sigs next=:" in s[ : s.find( "<sigs" ) ], "names": names,
+        "clause": "[sigs next=:" in "".join( re.findall( r"<!--.*?-->", s, re.S ) ), "names": names,
         "next_offset": int( no_.group( 1 ) ) if no_ else None, "max_r": max( ranks ) if ranks else 0,
         "next_budget_tokens": int( nb_.group( 1 ) ) if nb_ else None,
         "past_target": int( re.search( r"past_target=\"([0-9]+)\"", tag ).group( 1 ) ) if re.search( r"past_target=\"([0-9]+)\"", tag ) else 0,
-        "offset_clause": "[sigs next_offset=:" in s[ : s.find( "<sigs" ) ], "budget_clause": "[sigs next_budget_tokens=:" in s[ : s.find( "<sigs" ) ] }
+        "offset_clause": "[sigs next_offset=:" in "".join( re.findall( r"<!--.*?-->", s, re.S ) ), "budget_clause": "[sigs next_budget_tokens=:" in "".join( re.findall( r"<!--.*?-->", s, re.S ) ) }
 root = re.search( r"<ctx[^>]*>", s ); r = root.group( 0 ) if root else ""
 for k in ( "est_tokens", "budget_tokens" ):
     v = re.search( r"\b%s=\"([0-9]+)\"" % k, r ); out[ k ] = int( v.group( 1 ) ) if v else None
@@ -607,7 +614,7 @@ case "$NX1" in
     "--for='gadget assembler' --signatures-only --token-budget="[0-9]*) ok "(9) the capped <sigs> names its call: next=\"$NX1\"" ;;
     *) no "(9) the capped <sigs> carries next='$NX1' (want --for='gadget assembler' --signatures-only --token-budget=N)" ;;
 esac
-if [ "$( cfield "$C1" clause )" = true ]; then ok "(9) the [sigs next=: …] clause defines it ahead of <sigs>"; else no "(9) <sigs next=> rides with no legend clause"; fi
+if [ "$( cfield "$C1" clause )" = true ]; then ok "(9) the [sigs next=: …] clause defines it in this answer's legend"; else no "(9) <sigs next=> rides with no legend clause in this answer"; fi
 # nothing dropped, so no resume index (the explicit cut below carries one)
 if [ "$( cfield "$C1" next_offset )" = null ] && [ "$( cfield "$C1" offset_clause )" = false ]; then
     ok "(9) the default's complete head carries no next_offset= (no row was dropped)"

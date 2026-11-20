@@ -19196,17 +19196,31 @@ inline std::vector<char> provenCallerReach( const Graph& g, std::span<const Node
 // PageRank-only order drops rows of every depth at once, so a capped answer had no clean boundary. Both
 // helpers read transitiveCallersDepth's depthOut; neither walks the graph again.
 //
-// The ORDER: hop depth first (1 = calls a seed directly), then the order the listing always had within a depth
-// (PageRank descending, node id ascending). Ranked BEFORE the page window cuts (docs/METHODOLOGY.md §9.1), so a
+// The ORDER: hop depth first (1 = calls a seed directly), then (IM1) the depth's production rows before its test="1"
+// rows, then PageRank descending, node id ascending. Ranked BEFORE the page window cuts (docs/METHODOLOGY.md §9.1), so a
 // cut drops the deepest rows first and a capped answer is complete through every depth its rows pass.
-inline void orderByDepthThenRank( std::vector<NodeId>& show, const std::vector<std::uint32_t>& depth, const std::vector<float>& rank )
+// IM1 (test/impactfirstwindowcheck.sh; was orderByDepthThenRank): PageRank alone let a test helper many tests call out-rank a production caller at
+// the same depth, so a depth's tests filled the 40-row window ahead of its production rows (django --impact=salted_hmac:
+// two depth-3 production files past row 40). The test key is isTestSymbol, the predicate behind the row's test="1", so a
+// reader sees the order it is told; nothing is dropped. It is read once per reached row, never inside the comparator.
+inline void orderImpactRows( const IngestResult& ing, std::vector<NodeId>& show, const std::vector<std::uint32_t>& depth, const std::vector<float>& rank )
 {
     EXPECTS( depth.size() == rank.size(), "depth and rank are both indexed by node id" );
+    std::vector<char> isTest( depth.size(), 0 );   // indexed by node id; set for the reached rows only
+    for( const NodeId n : show )
+    {
+        EXPECTS( n < isTest.size(), "a reached row is a node of the graph" );
+        isTest[ n ] = char( isTestSymbol( ing, n ) );
+    }
     std::sort( show.begin(), show.end(), [ & ]( NodeId a, NodeId b )
                {
                    if( depth[a] != depth[b] )
                    {
                        return depth[a] < depth[b];
+                   }
+                   if( isTest[a] != isTest[b] )
+                   {
+                       return isTest[a] < isTest[b];
                    }
                    return rank[a] != rank[b] ? rank[a] > rank[b] : a < b;
                } );

@@ -425,6 +425,36 @@ ROSTER += [
     ( "verify-default",           [ SMALL, "--verify=calls(main,escapeXml)" ] ),
     ( "impact-columnar-default",  [ SMALL, "--impact=escapeXml", "--format=columnar" ] ),
 ]
+# A19 (lane s1-small, 2026-11-18; found by lane L1's page-legend census, results/L1_PAGELEGEND_1118): attributes shipped with
+# NO definition in any legend of their answer and on no floor — --for's graph_verb from_span=/to_span= (13 of 154 cells), its
+# shortkey found=/key= (3; q= on the same rung, found here), a struct row's slot_fields_more= (1), and --impact's
+# <rf by_name=> (3 of 19). This gate never saw them because no row above reaches those STATES: a --for spelled as a path
+# question, a --for naming a qualified symbol the index does not hold, a struct with more than four function-holding fields,
+# and a CUT --impact window (the only one that rolls files up) over a multi-definition selector partly reached by name. The
+# gate judges what its roster emits, so a state no row produces is a state it cannot see. Each row below is the smallest
+# corpus reaching one state, judged by arm (G); each was RED before the readings that close it.
+A19 = os.path.join( TMP, "a19" )
+A19_FILES = [
+    ( "path",     "m.py", "def start_job(x):\n    return middle_step(x)\n\ndef middle_step(x):\n    return finish_work(x)\n\ndef finish_work(x):\n    return x\n" ),
+    ( "shortkey", "a.py", "class Router:\n    def call(self, x):\n        return x\n\nclass Other:\n    def call(self, y):\n        return y\n" ),
+    ( "slot",     "ops.c", "struct Ops { int (*open)(int); int (*close)(int); int (*read)(int); int (*write)(int); int (*seek)(int); int (*flush)(int); };\n"
+                           + "".join( f"static int a_{n}(int x){{return x;}}\n" for n in ( "open", "close", "read", "write", "seek", "flush" ) )
+                           + "struct Ops ops = { .open = a_open, .close = a_close, .read = a_read, .write = a_write, .seek = a_seek, .flush = a_flush };\n"
+                           + "int run(struct Ops *o){ return o->open(1) + o->close(2) + o->read(3) + o->write(4) + o->seek(5) + o->flush(6); }\n" ),
+    ( "byname",   "a.py", "def merge(x):\n    return x\n" ),
+    ( "byname",   "c.py", "from a import merge\n\ndef direct(v):\n    return merge(v)\n" ),
+    ( "byname",   "e.ts", "export function merge(a: string) { return a; }\n" ),
+    ( "byname",   "f.ts", "import { merge } from './e';\nexport function tsStrong(v: string) { return merge(v); }\nexport function tsWeak(o: any) { return o.merge('x'); }\n" ),
+]
+for d, f, body in A19_FILES:
+    os.makedirs( os.path.join( A19, d ), exist_ok = True )
+    open( os.path.join( A19, d, f ), "w" ).write( body )
+ROSTER += [
+    ( "for-graph-path-default",     [ os.path.join( A19, "path" ),     "--for=path from start_job to finish_work" ] ),
+    ( "for-shortkey-default",       [ os.path.join( A19, "shortkey" ), "--for=which Handler::call impl runs for an async fn handler" ] ),
+    ( "for-slot-fields-default",    [ os.path.join( A19, "slot" ),     "--for=Ops open slot" ] ),
+    ( "impact-rollup-name-default", [ os.path.join( A19, "byname" ),   "--impact=merge", "--limit=1" ] ),
+]
 
 # LEGEND-G-BLIND (2026-11-11; the Fable answer audit's flag L, 377 cells, confirmed by the Opus audit verify). Arm (G) claimed
 # "every attribute the default posture emits is defined" and could not see four classes of cell. Each block below closes one.
@@ -543,7 +573,19 @@ def legendOf( doc, anyRoot = False ):
     # was recorded with.
     wrap = rb'[\w-]+' if anyRoot else rb'(?:ctx|files)'
     m2   = re.match( rb'\A\s*<' + wrap + rb'\b[^>]*>((?:\s*<!--.*?-->)+)', rest, re.S )
+    # INT1 (2026-11-19, the 0.7.0 candidate): on an answer-first DEFAULT document whose FIRST block is a trailing block
+    # (TRAILING below: <graph_verb> on a --for spelled as a path question), the comment run right after the root's open tag
+    # is THAT BLOCK's legend, standing immediately before its tag — trailingBlocks() reads it for the block's own elements.
+    # It is not the document legend, which is still the trailing run before the root closes (m3). Reading it as the head
+    # legend skipped m3 and reported every attribute the document legend defines as a gap: 63 on for-graph-path-default,
+    # born of the batch's A19 row (S1) meeting AF1-fix's answer-first order. Arm (T9) pins both directions.
+    if m2 and anyRoot and re.match( rb'\s*<(?:' + b"|".join( TRAILING ) + rb')[\s/>]', rest[ m2.end(): ] ):
+        m2 = None
     if m2: lead += m2.group( 1 )
+    # AF1 (2026-11-18): the DEFAULT --for answer is answer-first — its document legend is the trailing run of comments before
+    # the root closes, inside the same answer (page 1 keeps it whole). A comment that cannot span "-->" keeps rows out of it.
+    m3   = re.search( rb'((?:<!--(?:(?!-->).)*-->\s*)+)</[\w-]+>\s*\Z', rest, re.S )
+    if m3 and not m2: lead += m3.group( 1 )
     return lead.decode( 'utf-8', 'replace' )
 
 # TRAILING BLOCKS (K-LEGEND, 2026-11-05). A block a verb appends AFTER its ordinary answer — <syms> (forfilesyms.h), <decl_rows>
@@ -553,9 +595,16 @@ def legendOf( doc, anyRoot = False ):
 # block's OWN elements only (its open tag through its close tag, or its self-closing tag), on top of the head legend: a comment
 # with anything but whitespace between it and the tag does not count, and a block's comment never defines an attribute outside
 # its block. TRAILING lists the tags; the reader below has no tag of its own (arm T pins all three properties).
-TRAILING = ( b"syms", b"decl_rows", b"graph_verb", b"reask" )
-INNER    = re.compile( rb'<(bodies)\b[^>]*(?<!/)>\s*(<!--(?:(?!-->).)*-->)', re.S )
-TRAIL    = re.compile( rb'<!--(?:(?!-->).)*-->\s*(?=<(?:' + b"|".join( TRAILING ) + rb')[\s/>])', re.S )
+# A19 (lane s1-small): <shortkey> (forreexport.h) is such a block too — its legend stands right before it, and a ladder that ran
+# the gen rung or served a compressed body appends ITS clause as a second comment, so the run of adjacent comments before the
+# tag is the block's legend, not only the last one. And <graph_verb> is BOTH: its own comment before it, and the verb it ran
+# answering inside it with that verb's legend right after the open tag (forgraphverb.h "the verb's own legend follows"), so it
+# is in INNER too. An attribute is judged against the head legend plus EVERY block comment whose block contains it (a nested
+# <path> row inside <graph_verb> reads both). Before this the reader saw neither, so it reported shortkey's and the nested
+# verb's defined rows as gaps — and, the hole A19 came through, no roster row reached those states at all (rows above).
+TRAILING = ( b"syms", b"decl_rows", b"graph_verb", b"reask", b"shortkey" )
+INNER    = re.compile( rb'<(bodies|graph_verb)\b[^>]*(?<!/)>\s*(<!--(?:(?!-->).)*-->)', re.S )
+TRAIL    = re.compile( rb'(?:<!--(?:(?!-->).)*-->\s*)+(?=<(?:' + b"|".join( TRAILING ) + rb')[\s/>])', re.S )
 def trailingBlocks( doc ):
     """-> [ ( start, end, comment ) ]: each known trailing block's byte span (open tag through its close) and the comment just before it."""
     out = []
@@ -595,8 +644,9 @@ def gapsOf( doc, isDefault ):
     blank = lambda m: b" " * len( m.group( 0 ) )
     noCdata = re.sub( rb'<!\[CDATA\[.*?\]\]>', blank, doc, flags = re.S ) if isDefault else doc   # offsets kept: a fake block inside a body is no block
     blocks  = trailingBlocks( noCdata )
-    legends = [ legend ] + [ legend + " " + c for _, _, c in blocks ]
-    def legendAt( pos ): return next( ( 1 + b for b, ( lo, hi, _ ) in enumerate( blocks ) if lo <= pos < hi ), 0 )
+    def legendAt( pos ): return tuple( b for b, ( lo, hi, _ ) in enumerate( blocks ) if lo <= pos < hi )   # every block containing pos
+    legends = { () : legend }
+    def legendOfAt( at ): return legends.setdefault( at, " ".join( [ legend ] + [ blocks[ b ][ 2 ] for b in at ] ) )
     scan  = re.sub( rb'<!--.*?-->', blank, noCdata, flags = re.S ) if isDefault else doc
     seen, order, where = {}, [], {}
     for m in ATTR.finditer( scan ):
@@ -609,7 +659,7 @@ def gapsOf( doc, isDefault ):
         seen[ tag ] += [ a for a in attrs if a not in seen[ tag ] ]
         for a in attrs: where.setdefault( ( tag, a ), set() ).add( legendAt( m.start() ) )
     keys = sorted( { f"{tag}@{a}" for tag in order for a in seen[ tag ] if isDefault or a not in CORE } )
-    gapUnder = lambda k, pred: any( not pred( k.split( '@', 1 )[1], legends[ i ] ) for i in where[ tuple( k.split( '@', 1 ) ) ] )
+    gapUnder = lambda k, pred: any( not pred( k.split( '@', 1 )[1], legendOfAt( i ) ) for i in where[ tuple( k.split( '@', 1 ) ) ] )
     return legend, keys, [ k for k in keys if gapUnder( k, mentioned ) ], [ k for k in keys if gapUnder( k, defined ) ]
 
 # The heaviest calls go first (measured 2026-10-13, dev machine: --pr-context=HEAD~30 ±budget 50-105 s, --quality-delta
@@ -654,6 +704,7 @@ zeroRows   = sorted( n for n, c in perRow.items() if c == 0 and n not in failedR
 BASELINE_G = os.path.join( ROOT, "test", "legendcoverage_g_baseline.txt" )
 baseG = { l.strip() for l in open( BASELINE_G, encoding = 'utf-8' ) if l.strip() and not l.startswith( '#' ) } if os.path.exists( BASELINE_G ) else None
 defaultKeys   = sum( 1 for e in emitted if isDefaultRow( e ) )
+emittedAll    = set( emitted )   # before the default rows leave it: (G-A19) reads them
 gapsMentioned = { g for g in gapsMentioned if not isDefaultRow( g ) }
 gapsDefined   = { g for g in gapsDefined if not isDefaultRow( g ) }
 emitted       = { e for e in emitted if not isDefaultRow( e ) }
@@ -677,6 +728,11 @@ if baseG is None:
 writeLines( "defaultgaps", defaultGaps - baseG )                  # (G) fails: a NEW undefined attribute on a default answer
 writeLines( "defaultclosed", baseG - defaultGaps )                # (G) shrink candidates: delete these floor lines
 writeLines( "defaultzero", zeroRows )                             # (G0) fails: a row that judged nothing
+# (G-A19) the premise of the A19 rows: each must still REACH the state it was added for, or it judges a document that no
+# longer carries the attribute and passes for that reason alone (a fixture the tool stops answering that way, say).
+A19_PREMISE = { "for-graph-path-default": "graph_verb@from_span", "for-shortkey-default": "shortkey@found",
+                "for-slot-fields-default": "d@slot_fields_more", "impact-rollup-name-default": "rf@by_name" }
+writeLines( "a19premise", [ f"{r} | {k}" for r, k in A19_PREMISE.items() if f"{r} | {k}" not in emittedAll ] )
 writeLines( "defaultall", defaultGaps )                           # the live red list (LEGENDCOV_LIST=1 prints it)
 with open( os.path.join( TMP, "defaultcount" ), "w" ) as f:
     f.write( f"{len( defaultRows )} {defaultKeys} {len( defaultGaps )} {len( baseG )} {min( perRow.values() ) if perRow else 0}\n" )
@@ -755,6 +811,34 @@ g = gapsOf( tdoc( LB.replace( b'<!--', b'<e/><!--' ).replace( b't="fn"', b'' ) )
 tarm( "c@via" in g, f"(T8b) mutant: an element between the open tag and the comment -> c@via is a gap (gaps {g})" )
 g = gapsOf( tdoc( LB.replace( b't="fn"', b'' ) + b'<z via="1"/>' ), True )[ 3 ]
 tarm( "z@via" in g, f"(T8c) the block's comment defines nothing after the block (gaps {g})" )
+# (T9) A19: a NESTED legend — <graph_verb>'s own comment before it AND the ran verb's legend right after its open tag — both count
+# for a row inside it; without the inner one the nested row's attribute is a gap; the inner one defines nothing after the block.
+GV = b'<!-- gv: a= the verb --><graph_verb a="1"><!-- inner: hops= its hops --><path hops="2"/></graph_verb>'
+g = gapsOf( tdoc( GV ), True )[ 3 ]
+tarm( g == [], f"(T9) a row nested in <graph_verb> reads the block's comment and the ran verb's own legend (gaps {g})" )
+g = gapsOf( tdoc( GV.replace( b'<!-- inner: hops= its hops -->', b'' ) ), True )[ 3 ]
+tarm( g == [ "path@hops" ], f"(T9b) mutant: without the inner legend path@hops is a gap (gaps {g})" )
+g = gapsOf( tdoc( GV + b'<z hops="1"/>' ), True )[ 3 ]
+tarm( g == [ "z@hops" ], f"(T9c) the inner legend defines nothing after the block (gaps {g})" )
+# (T10) A19: a RUN of adjacent comments before a trailing block is its legend (the shortkey ladder's gen/compress clause follows
+# the main one); a non-comment between them cuts the run.
+SK = b'<!-- shortkey: found=0 none --><!-- shortkey gen: key= the leaf --><shortkey found="0"><rung key="x"/></shortkey>'
+g = gapsOf( tdoc( SK ), True )[ 3 ]
+tarm( g == [], f"(T10) two adjacent comments before <shortkey> both count (gaps {g})" )
+g = gapsOf( tdoc( SK.replace( b'--><!-- shortkey gen', b'--><e/><!-- shortkey gen' ) ), True )[ 3 ]
+tarm( g == [ "shortkey@found" ], f"(T10b) mutant: an element between them cuts the run, found= is a gap (gaps {g})" )
+# (T11) INT1: an answer-first DEFAULT document whose FIRST block is a trailing block. The comment right after the root's open tag
+# stands immediately before <graph_verb>, so it is that block's legend; the document legend is the trailing run before </ctx>.
+def fdoc( lead, tail ): return b'<ctx task="x">' + lead + b'<graph_verb a="1"><path hops="2"/></graph_verb><d n="x" q="1"/>' + tail + b'</ctx>'
+GVL, DOCL = b'<!-- gv: a= the verb -->', b'<!-- ripwire for: task= the query, n= its name, q= a head attribute, hops= hops -->'
+g = gapsOf( fdoc( GVL, DOCL ), True )[ 3 ]
+tarm( g == [], f"(T11) a leading <graph_verb> block's comment is its block legend; the trailing run is the document legend (gaps {g})" )
+g = gapsOf( fdoc( GVL, DOCL.replace( b'q= a head attribute, ', b'' ) ), True )[ 3 ]
+tarm( g == [ "d@q" ], f"(T11b) mutant: the trailing document legend loses q= -> d@q is a gap, so the trailing run is what is read (gaps {g})" )
+g = gapsOf( fdoc( GVL.replace( b'a= the verb', b'a= the verb, q= not here' ), DOCL.replace( b'q= a head attribute, ', b'' ) ), True )[ 3 ]
+tarm( g == [ "d@q" ], f"(T11c) the leading block's comment defines nothing outside its block (gaps {g})" )
+g = gapsOf( b'<ctx task="x"><!-- head: task= the query, n= its name, q= a head attribute --><d n="x" q="1"/></ctx>', True )[ 3 ]
+tarm( g == [], f"(T11d) control: a comment after the root's open tag that stands before no trailing block is still the head legend (gaps {g})" )
 # (HU) A CUT HISTORY WALK, FORCED (HISTORY-UNREAD-LEGEND). history_unread="1" rides a --for/--metrics root only when the git walk
 # behind churn=/amp= was cut or failed, which on this tree happens only on a runner slow enough to hit the 20 s clock: the sweep
 # above then flaked red (#688, macos Release shard 2/4) on every row that printed it, since its definition comment opened
@@ -861,6 +945,11 @@ if [ -s "$TMP/defaultzero" ]; then
     no "(G0) $( wc -l < "$TMP/defaultzero" | tr -d ' ' ) default row(s) produced a document but judged ZERO (element, attribute) pairs — they prove nothing: $( tr '\n' ' ' < "$TMP/defaultzero" )"
 else
     ok "(G0) every default row judged at least one (element, attribute) pair (fewest on a row: ${nDefMin:-0})"
+fi
+if [ -s "$TMP/a19premise" ]; then
+    no "(G-A19) an A19 row no longer reaches its state, so (G) proves nothing about it: $( tr '\n' ' ' < "$TMP/a19premise" )"
+else
+    ok "(G-A19) the four A19 rows each carry their attribute (graph_verb from_span=, shortkey found=, d slot_fields_more=, rf by_name=)"
 fi
 if [ "${nDefRows:-0}" -lt 40 ] || [ "${nDefKeys:-0}" -lt 400 ]; then
     no "(G) only ${nDefRows:-0} default rows / ${nDefKeys:-0} attributes were read — the default twins did not run, so (G) proves nothing"
@@ -989,6 +1078,10 @@ def legendOf( doc ):
     rest = doc[ len( lead ): ]
     m2   = re.match( rb'\A\s*<ctx\b[^>]*>((?:\s*<!--.*?-->)+)', rest, re.S )
     if m2: lead += m2.group( 1 )
+    # AF1 (2026-11-18): the DEFAULT --for answer is answer-first — its document legend is the trailing run of comments before
+    # the root closes, inside the same answer (page 1 keeps it whole). A comment that cannot span "-->" keeps rows out of it.
+    m3   = re.search( rb'((?:<!--(?:(?!-->).)*-->\s*)+)</[\w-]+>\s*\Z', rest, re.S )
+    if m3 and not m2: lead += m3.group( 1 )
     return lead.decode( 'utf-8', 'replace' )
 
 def defined( a, legend ): return re.search( r'(?<![\w:.-])' + re.escape( a ) + r'\s*=', legend ) is not None

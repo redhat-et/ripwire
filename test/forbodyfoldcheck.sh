@@ -354,8 +354,16 @@ if r=$( chk skip_then_serve "$TMP/resp" renderResponseBodyPage Application ); th
 else no "(F2) $r"; fi
 # F3
 if r=$( chk c3_skip "$TMP/resp" ); then ok "(F3a) <sigs next=> is the first skip's --expand"; else no "(F3a) $r"; fi
-"$BIN" "$ROOT/src" --no-cache --for="$T_SRC" >"$TMP/src" 2>/dev/null
-RIPWIRE_NO_BODY_FOLD=1 "$BIN" "$ROOT/src" --no-cache --for="$T_SRC" >"$TMP/src.off" 2>/dev/null
+# AF1-fix (2026-11-18): the flagless --for answer is served in 12 KB PAGES (src/forpages.h), and on src the fold starts past page
+# 1's cut. (F3b)/(F5)/(F5n) on src are about the WHOLE answer, so they read --page-bytes=0 — the whole answer in one call,
+# row-identical to the joined pages (forpagescheck P2); (F3p) holds the default PAGE to present-or-disclosed-deferred.
+"$BIN" "$ROOT/src" --no-cache --for="$T_SRC" --page-bytes=0 >"$TMP/src" 2>/dev/null
+RIPWIRE_NO_BODY_FOLD=1 "$BIN" "$ROOT/src" --no-cache --for="$T_SRC" --page-bytes=0 >"$TMP/src.off" 2>/dev/null
+"$BIN" "$ROOT/src" --no-cache --for="$T_SRC" >"$TMP/srcpage" 2>/dev/null
+if grep -q '<fold ' "$TMP/srcpage"; then ok "(F3p) the default src page carries the fold"
+elif python3 -c 'import re,sys; r=re.match(r"<ctx\b[^>]*>",open(sys.argv[1]).read()); r=r.group(0) if r else ""; n=" ".join(re.findall(r"\s(?:deferred|continued)=\"([^\"]*)\"",r)).split(); sys.exit(0 if "fold" in n and " next=" in r else 1)' "$TMP/srcpage"; then
+    ok "(F3p) the default src page does not hold the fold and says so: deferred= names it, next= reaches it"
+else no "(F3p) the default src page neither carries <fold> nor names it in deferred=/continued= (a silent drop)"; fi
 if r=$( chk c3_pair "$TMP/src" "$TMP/src.off" ); then ok "(F3b) the signatures-only re-call moved to sigs_next= with its reading ${r:+($r)}"; else no "(F3b) $r"; fi
 # F4
 for q in router resp; do
@@ -378,7 +386,7 @@ for q in router resp respf slot slice src; do
         respf)  namesoff "$q" "$FIX" "$T_RESP" --legend=full;;
         slot)   namesoff "$q" "$FIX" "$T_SLOT";;
         slice)  namesoff "$q" "$FIXPY" "$T_SLICE";;
-        src)    namesoff "$q" "$ROOT/src" "$T_SRC";;
+        src)    namesoff "$q" "$ROOT/src" "$T_SRC" --page-bytes=0;;
     esac
     if r=$( chk prefix_raw "$TMP/$q.n" "$TMP/$q.n.off" ); then ok "(F5n) $q: names off, the answer before the fold == RIPWIRE_NO_BODY_FOLD=1 unmasked"; else no "(F5n) $q: $r"; fi
 done

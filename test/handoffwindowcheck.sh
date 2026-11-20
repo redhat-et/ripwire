@@ -117,6 +117,10 @@ def handoffs( doc ):
     out = []
     head = re.match( r'\s*(?:<!--.*?-->\s*)*<ctx\b[^>]*>((?:\s*<!--.*?-->)*)', doc, flags = re.S )
     headLegend = ( head.group( 0 ) if head else '' )
+    # AF1 (2026-11-18): the default --for answer is ANSWER-FIRST: its document legend is the trailing run of comments before </ctx>,
+    # inside the same answer. The document legend governs a <callers> hand-off wherever it sits, so both runs are read.
+    tail = re.search( r'((?:<!--(?:(?!-->).)*-->\s*)+)</ctx>\s*\Z', doc, flags = re.S )
+    headLegend += tail.group( 1 ) if tail else ''
     for m in re.finditer( r'(<!--(?:(?!-->).)*-->)?<(graph_verb|reask|callers)\b([^>]*?)(/?)>', doc, flags = re.S ):
         kind, a = m.group( 2 ), attrs( m.group( 3 ) )
         if kind == 'callers' and 'schema' in a: continue                       # a verb answer's root, not the --for hop
@@ -136,7 +140,10 @@ def baseOf( h ):
 cells, answers, problems = [], [], []
 for sym in SYMS:
     for tid, tpl in TASKS:
-        args = [ '--for=' + tpl.format( sym ) ]
+        # --no-verb-route: `who calls \`X\`?` and `Is it safe to change \`X\`? What depends on it?` name a symbol and ask a
+        # call-graph question, which the route answers with --callers / --impact (RT1/RT2, verbs_forroute.h); this gate reads
+        # the --for answer's hand-off to those verbs. (ES, a default page 1 ending early, holds no hand-off here either way.)
+        args = [ '--for=' + tpl.format( sym ), '--no-verb-route' ]
         rc, doc = run( args )
         _, off  = run( args, { 'RIPWIRE_NO_WINDOW_HANDOFF': '1' } )
         text = doc.decode( 'utf8', 'replace' )

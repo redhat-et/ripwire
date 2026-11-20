@@ -340,7 +340,21 @@ tools = json.loads( line )[ "result" ][ "tools" ]
 # train-26c head 4c38d363 vs the merged binary: lego 956 -> 1,140 (+184, lego-transitive's limit/offset) and whereis 1,684 ->
 # 1,774 (+90, whereis-lean's full_text); descriptions unchanged at 22,472 B, every other tool identical. 47,109 + 184 + 90 =
 # 47,383, every byte attributed. Headroom after this line: 37 B, the #214-sized margin.
-CEILING = 47420
+# RATCHETED DOWN 2026-11-18 (lane P2, the 0.7.0 token-efficiency push): 47,420 -> 39,970, measured 39,940 B (from 47,411,
+# 33 tools). PROSE ONLY, in the descriptions AFTER each pinned routing sentence: descriptions 22,498 -> 15,133 B (UTF-8), the
+# 33 first sentences byte-identical (arm 2), and every stanza minus its description, meaning schema, property descriptions
+# and annotations, byte-identical to the base, pinned by test/mcplisttrimcheck.sh against test/mcplist_structure_golden.txt.
+# What went: clauses that repeated a property description, the answer's own legend, the readOnlyHint annotation, or
+# described implementation (the short @FILE:LINE pointer, the JSON key lists, the exemplar ordering rule, which the answer's
+# legend still carries whole). grep keeps "hits_capped means total is a floor": it is the floor disclosure, and
+# docs/limits_build.py credits src/mcp.h's disclosure to that token. Lowered per rule (1) above; mcplisttrimcheck carries
+# the same figure. Headroom: 30 B.
+# RT2 MCP parity (2026-11-19): +90 B, every byte attributed — `for` gains the no_verb_route boolean (the CLI --no-verb-route twin,
+# the opt-out a routed `for` answer's next= names): measured 39,940 -> 40,030 B, descriptions unchanged at 15,133 B, the 33 first
+# sentences unchanged. Ceiling = measured + 30 B, the same margin.
+# RT2 batch parity (2026-11-19): +35 B — the batch item schema gains no_verb_route (the batch `for` item routes like the live
+# verb, so its opt-out rides the item too): measured 40,030 -> 40,065 B, descriptions unchanged. Ceiling = measured + 30 B.
+CEILING = 40095
 manifest = len( json.dumps( { "tools": tools }, separators = ( ",", ":" ) ) )
 descBytes   = sum( len( t[ "description" ] ) for t in tools )
 schemaBytes = sum( len( json.dumps( t[ "inputSchema" ], separators = ( ",", ":" ) ) ) for t in tools )
@@ -351,8 +365,10 @@ check( manifest <= CEILING,
 
 # (1c) TWIN of the ceiling re-anchor (PROCESS rule 4): the growth is the listing field's description and nothing else.
 whereisTool = [ t for t in tools if t[ "name" ] == "whereis" ]
-check( len( whereisTool ) == 1 and len( whereisTool[ 0 ][ "description" ] ) == 701,
-       "(1c) whereis's own description is still 701 B (the re-anchor was spent in the listing field, not in prose)" )
+# P2 2026-11-18: 701 -> 545. The twin's point, that the listing re-anchor bought no prose, holds under a trim; the pin
+# moves to the trimmed length so that a later prose re-growth is still caught here.
+check( len( whereisTool ) == 1 and len( whereisTool[ 0 ][ "description" ] ) == 545,
+       "(1c) whereis's own description is still 545 B (the re-anchor was spent in the listing field, not in prose)" )
 listingDesc = whereisTool[ 0 ][ "inputSchema" ].get( "properties", {} ).get( "listing", {} ).get( "description", "" ) if whereisTool else ""
 check( listingDesc.endswith( "default: more defs listed, else the shorter page" ),
        "(1c) whereis's listing field states the default rule exactly (got: %r)" % listingDesc )

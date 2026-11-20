@@ -1065,9 +1065,9 @@ Full retrieval tables — including the MRR figures behind the router numbers ab
 ## What it answers
 
 <details>
-<summary><b>196 long flags</b> across seven families, plus the MCP server — and <code>--help-task</code> names the ONE command a task wants, or abstains honestly when the evidence is too thin</summary>
+<summary><b>199 long flags</b> across seven families, plus the MCP server — and <code>--help-task</code> names the ONE command a task wants, or abstains honestly when the evidence is too thin</summary>
 
-Around the core sit 196 long flags advertised in `--help`, across seven families — plus an MCP
+Around the core sit 199 long flags advertised in `--help`, across seven families — plus an MCP
 server, so a coding agent can call any of them mid-task instead of grepping and reading whole files.
 `--help` prints one line per flag (~4.5K tokens); `--help=--FLAG` prints that flag's full entry with
 every caveat, `--help=SECTION` one family, and `--help=all` the whole catalog.
@@ -1823,9 +1823,9 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 ### In the tests
 
 <details>
-<summary><b>854 gate scripts</b> (counts snapshot 2026-11-18), five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
+<summary><b>876 gate scripts</b> (counts snapshot 2026-11-19), five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
 
-`test/regression.sh` named **854 gate scripts** at the counts snapshot 2026-11-18 and is the authoritative list; <!-- gatecount -->
+`test/regression.sh` named **876 gate scripts** at the counts snapshot 2026-11-19 and is the authoritative list; <!-- gatecount -->
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a
@@ -1834,7 +1834,7 @@ and requires stdout, stderr and exit code to match on each. The gate count above
 are the dated counts snapshot in `docs/counts.tsv` (`python3 docs/counts_snapshot.py show` prints today's
 numbers beside it), so two open changes that each add a gate or a cap never conflict on a total.
 
-Another gate derives the cap inventory. At the counts snapshot 2026-11-18 the tool had 440 compile-time caps and 10 ranking parameters.
+Another gate derives the cap inventory. At the counts snapshot 2026-11-19 the tool had 447 compile-time caps and 10 ranking parameters.
 [`docs/LIMITS.md`](docs/LIMITS.md) lists each cap, its value, and whether the file discloses a truncation
 when the cap fires, and `python3 docs/limits_build.py --check` proves that list against `src/`.
 [`docs/TUNING.md`](docs/TUNING.md) lists the measured cost of the caps the sweep has measured, and names

@@ -78,6 +78,25 @@
 # EXEMPT FROM binoverridecheck.sh: this gate reads git history (`git show REF:test/regression.sh`) and
 # never invokes the ripwire binary under test — see binoverridecheck.sh's EXEMPT table.
 #
+# ACKED AND STILL RED on integration/070-1120 (2026-11-20, owner ruling 104). Arm (A) reports
+# `2550bfdcd752 (parent e6671f267ae6): 1 entry vanished from the loop with no '# retired:' tombstone:
+# phantomdefcheck`. THE MERGE: 2550bfdcd is "Merge branch 'lane/v1-verbdef' into lane/rt1-route", on the
+# 0.7.0 stack's SHARED history — contained in integration/070-candidate, lane/cb1-code-clean and
+# lane/bx2-fix2-ceiling alike, absent from main, which is exactly why main passes this gate and the
+# integration branch does not. THE GATE IS CORRECT: the name did vanish in that commit with no tombstone
+# of its own, and every mutation control (B..I) is green on the same run, so the walker is live and this
+# red carries information. THE TREE IT GUARDS IS RIGHT TODAY: the retirement is declared at
+# test/regression.sh:290 and test/phantomdefcheck.sh exists on neither main nor this branch, so loop and
+# tombstone set are self-consistent. IT CANNOT BE OTHERWISE: the only two repairs are rewriting that merge
+# out of the stack's history (forbidden), or teaching this walker that a tombstone written in a LATER
+# commit discharges an earlier vanish — a change to the conservation rule itself, which has to be written
+# red-first with an arm of its own and is not an integration branch's edit. Nothing here was relaxed and
+# no arm was removed: the ack records a judgement, it does not suppress a finding.
+# REVISIT: when the tombstone-in-a-later-commit rule is designed (its own arm, red-first), or the moment
+# this branch's history is no longer an ancestor of what ships — whichever comes first. Do NOT discharge
+# it by editing test/regression.sh: the tombstone is already there, and moving it would pin the output
+# instead of fixing the rule.
+#
 # USAGE: test/loopconservationcheck.sh [REF] [BASE]   (defaults: REF=HEAD, BASE derived as above). Both
 # positional arguments exist for exactly one reason — pointing this gate at a specific historical or
 # synthetic commit while testing the gate itself — and are never passed by regression.sh's absorb loop,
@@ -184,7 +203,12 @@ def walk( repo, base, ref, path = "test/regression.sh" ):
             # A NAME still in the child's loop stays red (arm H). For an ordinary commit `inherited` is
             # empty, so the rule is exactly the single-parent one.
             inherited = set().union( *( tombsOf[ q ] for q in parents if q != par ) )
-            unneeded = sorted( t for t in newTombs - vanished if t in childLoop or t not in inherited )
+            # A merge that DROPS a NAME another parent still lists, and declares its tombstone itself, is making the
+            # declaration for that side (integration 2026-11-18: a lane cut before the train retired phantomdefcheck
+            # with no tombstone, merged after it). That tombstone matches a vanish against the other parent, so it
+            # is not stale against this one. A tombstone no parent's loop held stays red (arm G).
+            droppedElsewhere = set().union( *( ( loop_names( loopAt( q ) ) or set() ) - childLoop for q in parents if q != par ) )
+            unneeded = sorted( t for t in newTombs - vanished if t in childLoop or ( t not in inherited and t not in droppedElsewhere ) )
             if unneeded:
                 stale.append( "%s (parent %s): tombstone(s) matching no vanish in that commit: %s" % (
                     child[ :12 ], par[ :12 ], ", ".join( unneeded ) ) )

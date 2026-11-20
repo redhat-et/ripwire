@@ -45,16 +45,16 @@ revived against this residual: it counted line-match attempts BETWEEN engine cal
 answers and still bounded nothing inside one call.)
 
 **Totals are a dated snapshot.** Every total on this page (the table below, the class counts, the
-file count) is the counts snapshot taken 2026-11-18 (`docs/counts.tsv`), so two open changes that each add a
+file count) is the counts snapshot taken 2026-11-19 (`docs/counts.tsv`), so two open changes that each add a
 cap do not both rewrite the same line; the per-file tables are re-read from `src/` on every run.
 `python3 docs/counts_snapshot.py show` prints today's numbers beside these.
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 440 | 149 | 288 | **152** |
+| 447 | 153 | 291 | **156** |
 
 Plus 10 ranking and apportionment parameters, in their own table below: they are not caps, they
-are not counted as caps, and 440 + 10 is the 450 constants this generator parses out of `src/`.
+are not counted as caps, and 447 + 10 is the 457 constants this generator parses out of `src/`.
 
 ## INDEXING, OUTPUT or BOUNDARY — which half of the answer a cap bounds
 
@@ -72,8 +72,8 @@ None of them truncates anything, so none can be judged by `shown=`/`total=` and 
 a disclosure — labelling them OUTPUT would ask for a `capped="1"` that could never honestly fire.
 The distinction was named in review on #108 and the rows below now carry it.
 
-The `class` column below carries that answer where it is known. **143 of 440 caps are classified
-(51 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 297 render `—`, which means NOT YET
+The `class` column below carries that answer where it is known. **144 of 447 caps are classified
+(52 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 303 render `—`, which means NOT YET
 CLASSIFIED — never "neither".** Classifications live in `docs/limits_classes.tsv`, a sidecar with
 a known expiry:
 the tag belongs on the declaration itself, and this file exists only because the round that
@@ -198,11 +198,12 @@ Discloses: **none**
 
 ### `src/callhierarchy.h`
 
-Discloses: `capped`, `closures_capped`
+Discloses: `capped`, `closures_capped`, `via_macro_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kClosureRows` | `8` | — | rows per block; count= is the closure's distinct callees, capped="1" past it |
+| `kMacroSeeThroughFiles` | `16` | — | — |
 
 ### `src/cli.h`
 
@@ -464,6 +465,14 @@ Discloses: `capped`, `depth_capped`
 | --- | --- | --- | --- |
 | `kAliasHopSigBytes` | `240` | — | a declaration's text is cut here (cut="1"); a runaway guard |
 
+### `src/foranswerfirst.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kGuardTailRows` | `24` | — | — |
+
 ### `src/forbudgetfit.h`
 
 Discloses: **none**
@@ -581,6 +590,14 @@ Discloses: **none**
 | --- | --- | --- | --- |
 | `kImportSpecDepth` | `12` | — | statements one walk follows from the entry |
 | `kImportSpecMaxStates` | `256` | — | (file, name) states one walk visits; past it the walk says capped="1" |
+
+### `src/forkeybody.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kKeyBodyMax` | `5` | — | key bodies one answer carries; past it the block says capped="1" and next= the first not shown |
 
 ### `src/forliteral.h`
 
@@ -1198,6 +1215,15 @@ Discloses: `cells_capped`, `decls_capped`
 | `kMaxCells` | `2048` | — | — |
 | `kRowCap` | `40` | — | — |
 
+### `src/notfoundtext.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kNotFoundTextFiles` | `512` | — | hit files read for the whole-word test |
+| `kNotFoundTextRows` | `20` | — | <text> rows printed (text_files= counts every file) |
+
 ### `src/packtask.h`
 
 Discloses: `capped`, `mention_syms_capped`, `ranking_capped`
@@ -1205,7 +1231,9 @@ Discloses: `capped`, `mention_syms_capped`, `ranking_capped`
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kOverCeilingKeyBytes` | `22` | — | `,"over_ceiling":true` + the closing brace |
-| `kPackTaskRankTopN` | `12` | — | ranking = the top-12 head, not the full 40 — leaves budget for the later sections |
+| `kPackTaskFullHeadRows` | `10` | — | — |
+| `kPackTaskHeadFloorRows` | `4` | — | == forbudgetfit.h kForBudgetRowFloor (the rank 1..4 floor) |
+| `kPackTaskRankTopN` | `12` | — | a --partition slice's ranking window (partition.h; lanes.h brief claims) |
 
 ### `src/pageview.h`
 
@@ -1225,6 +1253,14 @@ Discloses: `capped`, `count_capped`, `findings_capped`, `hits_capped`, `importer
 | `kUseSiteRowCap` | `100` | — | — |
 | `kZoomBridgeCap` | `12` | — | cut-fix E: --zoom's <bridge> rows (traffic desc), a secondary listing disclosed by secondaryCutAttrs |
 | `kZoomTopModuleCap` | `40` | — | top-level modules, rank-mass desc then size desc then id (massSizeIdLess; their children ride along: shown_levels=2) |
+
+### `src/partialwarn.h`
+
+Discloses: `hits_capped`
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kFoldCap` | `16` | — | — |
 
 ### `src/partition.h`
 
@@ -1428,6 +1464,7 @@ Discloses: `capped`, `calls_capped`, `dirs_capped`, `entries_capped`, `files_cap
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kCap` | `65536` | — | — |
+| `kCappedBodyLines` | `120` | — | — |
 | `kCycleMemberCap` | `12` | — | — |
 | `kForAnchorBodyBudgetBytes` | `22800` | — | — |
 | `kForAutoBodyBudgetBytes` | `6000` | — | — |

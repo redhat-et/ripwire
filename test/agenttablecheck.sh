@@ -101,7 +101,8 @@ while IFS= read -r row; do
             fi
         fi
     else
-        if grep -q 'install\.sh' "$TMP/out"; then
+        # the legend-seen hook's OPT-IN comment is its own installer flag, ported per client (LS1, legendseenportcheck)
+        if grep -v -- '--hook-legend-seen' "$TMP/out" | grep -q 'install\.sh'; then
             fail "(G) '$name' has NO verified skills root but the recipe still prints an install.sh line"
         fi
     fi
@@ -112,7 +113,7 @@ while IFS= read -r row; do
     if [ "$hook" = "true" ]; then
         grep -q -- '--hook' "$TMP/out" || fail "(H) '$name' has hookSlot=true but the recipe offers no --hook line"
     else
-        if grep -q -- '--hook' "$TMP/out"; then
+        if grep -v -- '--hook-legend-seen' "$TMP/out" | grep -q -- '--hook'; then
             fail "(H) '$name' has hookSlot=false but the recipe offers a --hook line anyway"
         fi
     fi

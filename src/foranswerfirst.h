@@ -41,16 +41,36 @@
 // move: whole-tail-last took median bytes-to-complete 10,279 -> 11,487. Those two nulls are registered so
 // this file cannot be widened into them without new evidence.
 //
+// R1b (2026-11-20) ADDED A SECOND PROMOTION CLASS BELOW RES, and this is that "new evidence" clause being used, so it says
+// what the evidence is and what it does NOT cover. <tail> still does not move: it stays in place as a block, rows
+// 1..kGuardTailRows never move, and the guard still refuses a promotion that would push tail row 24 past the stop. What
+// changed is that promoteGuarded now has an explicit PRIORITY ORDER instead of a single walk in emitter order:
+// kPromotable (AF2's frozen ten, unchanged) has the first claim on the guard's headroom and kPromotableBody takes only what
+// is left. Lane R1 had instead widened kPromotable itself and MEASURED the defect that motivates this ordering — a body won
+// a promotion slot by its POSITION and silently un-promoted <lit>, turning legendseencheck green->red
+// (results/R1_BODIESFIRST_1119/READOUT.md §8). R1's body rung moved one-directionally on its population (+31 anchors,
+// 12 cells up, 0 down) and its file rung FELL in 9 of 123 cells, of which 8 were displaced deep tail rows and 1 was that
+// crowding-out. **This ordering closes the crowding-out channel only.** The deep-tail-vs-body trade is not a priority
+// question — it is a zero-sum trade between more file pointers and one body, and nothing in this file decides it; see
+// results/R1B_PRIORITY_RULE_1120/READOUT.md §7 before widening further.
+//
 // THE STATED COST, which belongs in the open rather than in a footnote: a truncating consumer previously
 // lost ROWS and now loses DEFINITIONS, so a hedge like `cands="133"` can be read without its reading. That
 // is the strongest argument against this change (registered as band R5).
 #pragma once
 
+#include <algorithm>
+#include <charconv>
 #include <cstddef>
+#include <cstdlib>
+#include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "infra/sortutil.h"   // svLess — the one string_view order (portablebuildcheck #6b)
+#include "serialize.h"   // attrOf — the one reader of a printed tag's attribute value
 #include "infra/Diagnostics.h"
 #include "infra/emit.h"
 
@@ -206,12 +226,29 @@ inline constexpr std::string_view kNameChars = "abcdefghijklmnopqrstuvwxyzABCDEF
 // comment a --for answer carries. The DOCUMENT legend opens with the verb or the root (`<!-- ripwire for …`,
 // `<!-- root …`) and documents the answer as a whole; a BLOCK-LOCAL legend NAMES ITS OWN ELEMENT. Measured on
 // a --detail=5 answer: `ripwire`→<sigs> and `root`→<sigs> do not match, `syms`→<syms> does.
+//
+// AF1-fix (2026-11-18): a block-local legend has TWO spellings in src/, and both name their element: `<!-- syms: …` and
+// `<!-- ripwire for X: …` (doc_body, dotted_strings, exemplar_family, lit, manifest_rows, decl_rows, graph_verb, met_bridge,
+// path_gap, reask, syms). Reading only the first word sent every `ripwire for X:` legend to the trailing DOCUMENT legend, away
+// from its block — against the convention below and AF1's registered layout ("block-local legend comments stay in the stream,
+// glued to the block they declare"): fordocbodycheck (f1), forexemplarcheck and formanifestcheck (a1) read the block from its
+// legend and found nothing after it. So `ripwire for X` reads as X, whatever follows X (`ripwire for doc_body held="budget":`,
+// `ripwire for lit callers:` are block legends too); declaredBlock still requires the next block to BE an <X>. The document
+// legend's own `ripwire for schema=…` names no element the answer opens, so it stays where it is.
+[[nodiscard]] inline std::string_view commentWordAt( std::string_view doc, std::size_t from, std::size_t end ) noexcept
+{
+    if( from == std::string_view::npos || from >= end ) { return {}; }
+    const std::size_t stop = doc.find_first_not_of( kNameChars, from );
+    return doc.substr( from, ( stop == std::string_view::npos ? end : std::min( stop, end ) ) - from );
+}
 [[nodiscard]] inline std::string_view commentFirstWord( std::string_view doc, const Block& b ) noexcept
 {
-    const std::size_t from = doc.find_first_of( kNameChars, b.begin + 4 );   // past the "<!--"
-    if( from == std::string_view::npos || from >= b.end ) { return {}; }
-    const std::size_t stop = doc.find_first_not_of( kNameChars, from );
-    return doc.substr( from, ( stop == std::string_view::npos ? b.end : std::min( stop, b.end ) ) - from );
+    const std::string_view first = commentWordAt( doc, doc.find_first_of( kNameChars, b.begin + 4 ), b.end );   // past the "<!--"
+    constexpr std::string_view kVerbLead = "ripwire for ";
+    const std::size_t          at        = first.empty() ? std::string_view::npos : static_cast<std::size_t>( first.data() - doc.data() );
+    if( first != "ripwire" || doc.compare( at, kVerbLead.size(), kVerbLead ) != 0 ) { return first; }
+    const std::string_view named = commentWordAt( doc, at + kVerbLead.size(), b.end );
+    return named.empty() ? first : named;
 }
 
 // Which row block does this comment DECLARE, if any? The house convention is that a block's own legend sits
@@ -234,89 +271,405 @@ inline constexpr std::string_view kNameChars = "abcdefghijklmnopqrstuvwxyzABCDEF
     return std::string_view::npos;   // nothing follows it: the document legend, by position as well as by name
 }
 
-// One row block preceded by its own block-local legend. Its own function because --quality-delta gates a NEW
-// function at the complexity ceiling, and inlining this loop put appendAnswerFirst at 17 against a bar of 15.
-inline void appendBlockWithLegend( std::string_view view, const std::vector<Block>& blocks,
-                                   const std::vector<std::size_t>& ownerOf, std::size_t j, std::string& out )
-{
-    for( std::size_t k = 0; k < blocks.size(); ++k )
-    {
-        if( ownerOf[ k ] == j )
-        {
-            out.append( view.substr( blocks[ k ].begin, blocks[ k ].end - blocks[ k ].begin ) );
-        }
-    }
-    out.append( view.substr( blocks[ j ].begin, blocks[ j ].end - blocks[ j ].begin ) );
-}
+// ── AF2's order spec (results/AF2_FIRST12K_1118/READOUT.md §SPEC, frozen 2026-11-18 after meeting its pre-registered bar:
+// within 12 KB, design 70→75 of 99, held-out 32→33 of 39, 0 flips). Three moves on top of the two above, all of them still
+// a reordering of the same bytes:
+//   A  — every comment that is a DIRECT CHILD of a top-level section (the <graph_verb>/<reexports>/<fold> notes) joins the
+//        document legend, relative order kept; in <sigs>, the demote:/decl-twin:/one-side: notes the spec lists (since AF4 T-C,
+//        which put the pointer kind on the row as ptr=; see blockTextHoisting). Not moved either: a section's own
+//        lead comment (declaredBlock — it travels with its block, R8), the <bodies> section's per-answer body-omitted note,
+//        and comments nested inside a row. A zero-row self-closing <lego/> or <compose/> stub between <sigs> and <tail> goes
+//        directly after </tail>.
+//   E1 — inside <graph_verb>, <met_bridge> ahead of <path_gap> (an emitter swap in verbs_for.h appendSubjectGraphVerbBlock).
+//   G  — GUARDED promotion: a RES section after </tail> moves directly ahead of <tail> ONLY IF the tail has more than
+//        kGuardTailRows rows, </tail> ends past the page stop, and tail row kGuardTailRows still ends within the stop with it
+//        and every section already moved in place. The stop is the DEFAULT PAGE SIZE (kAnswerPageBytesDefault, which forpages.h
+//        kForPageBytesDefault IS), never a separate 12,000 — so it follows the owner if the default page becomes 6 KB. The
+//        unguarded variant is an owner call and is NOT built.
+//   G/R1b — G's walk became TWO CLASS-ORDERED PASSES over the same list against the same headroom: kPromotable first
+//        (unchanged, so pass 1 is AF2's G exactly), then kPromotableBody from the headroom that remains, emitted behind
+//        the promoted RES sections so their byte offsets do not move. Same guard, same stop, same emit order within a class.
+inline constexpr std::size_t      kAnswerPageBytesDefault = 12000;   // the default page size: forpages.h kForPageBytesDefault IS this
+inline constexpr std::size_t      kGuardTailRows          = 24;
+inline constexpr std::string_view kPromotable[] = { "lit", "dotted_strings", "graph_verb", "callers", "selfhooks", "manifest_rows",
+                                                    "listed", "ep", "reexports", "exemplar_family" };
+// R1b's SECOND, LOWER-PRIORITY class (results/R1B_PRIORITY_RULE_1120/PREREG_R1B_1120.md §1, frozen before this was written).
+// The BODY-bearing sections. They are what a how-it-works question needs — a `catch`/`instanceof`, a `.bind()`, an `nbf` guard
+// is a STATEMENT INSIDE a body, so no ranking signal surfaces it and no signature row carries it (EB1's diagnosis,
+// results/EB1_ERRORBRANCH_1119/READOUT.md §3; AF2's own cause table names "a <fold> body" as the last-gold carrier in 4 of its
+// 29 design late cells and never tried them). They are NOT members of kPromotable: AF2 froze that set with its measurement, and
+// a body joining it wins a promotion slot by its POSITION in the emitter rather than by its value — measured by lane R1, which
+// un-promoted <lit> on the legendseencheck probe and turned a green gate red (results/R1_BODIESFIRST_1119/READOUT.md §8).
+inline constexpr std::string_view kPromotableBody[] = { "fold", "bodies" };
 
-// Append the blocks in ANSWER-FIRST order: resolved routed sections, then every other row block, then the
-// DOCUMENT legend — and each row block preceded by its own block-local legend, so the convention's adjacency
-// survives the permutation. Every byte of every block is copied unchanged; only the order moves.
-inline void appendAnswerFirst( std::string_view view, const std::vector<Block>& blocks, std::string& out )
+// AF4 T-C: the <sigs> notes that define their pointer rows by ATTRIBUTE (ptr=), so A may lift them: the first word of each.
+inline constexpr std::string_view kSigsAttributeNotes[] = { "demote", "decl-twin", "one-side" };
+
+// One row block as it will be emitted: its own bytes minus the direct-child comments A hoists, which go to `hoisted`.
+[[nodiscard]] inline std::string blockTextHoisting( std::string_view view, const Block& b, std::vector<std::string_view>& hoisted )
 {
-    // The ownership map, built HERE rather than in a helper of its own. A `legendOwners()` function was the
-    // obvious extraction and --quality-delta rejected it: a 70-token clone of BOTH crossref::normalizeTokens
-    // and query.h::Eval::sourceAll, because "size a vector, fill it from a per-index call, return it" is a
-    // shape this codebase already carries twice. Third clone this week from an extraction that felt harmless.
-    std::vector<std::size_t> ownerOf( blocks.size(), std::string_view::npos );
-    for( std::size_t k = 0; k < blocks.size(); ++k )
+    const std::string_view text = view.substr( b.begin, b.end - b.begin );
+    const std::size_t      open = view.find( '>', b.begin ) + 1;
+    // <sigs> (AF4 T-C, closing AF1's deviation from the frozen spec, results/AF1_ANSWERFIRST_1118/READOUT.md §6): its
+    // demote:/decl-twin:/one-side: notes used to be POSITIONAL — each labelled the <t> pointer rows that followed it, so lifted
+    // they made every <t> read as every kind. The kind is now on the row (forfilesyms.h TailPointerSpan::kind: ptr=twin,
+    // ptr=side, none for demote) and the notes define by attribute, so these three join the legend like any section's readings.
+    // Any OTHER comment in <sigs> stays where it is: only a note known to define by attribute may leave its rows.
+    if( b.comment || b.name == "bodies" || view[ open - 2 ] == '/' ) { return std::string( text ); }
+    const std::size_t        close = view.rfind( "</", b.end - 1 );
+    const std::vector<Block> kids  = close > open ? topLevelBlocks( view, open, close ) : std::vector<Block>{};
+    const auto               lifts = [ & ]( const Block& k )
     {
-        ownerOf[ k ] = declaredBlock( view, blocks, k );
-    }
-    const auto emit = [ & ]( const Block& b ) { out.append( view.substr( b.begin, b.end - b.begin ) ); };
-    const auto isRouted = [ & ]( std::size_t j )
-    {
-        return resolvedRouted( view.substr( blocks[ j ].begin, blocks[ j ].end - blocks[ j ].begin ), blocks[ j ].name );
+        return b.name != "sigs" || std::ranges::find( kSigsAttributeNotes, commentFirstWord( view, k ) ) != std::ranges::end( kSigsAttributeNotes );
     };
-    const auto emitOwned = [ & ]( std::size_t j ) { appendBlockWithLegend( view, blocks, ownerOf, j, out ); };
-
-    for( std::size_t j = 0; j < blocks.size(); ++j )   // 1. resolved routed sections, in their original relative order
+    std::string out;
+    std::size_t copied = b.begin;
+    for( const Block& k : kids )
     {
-        if( !blocks[ j ].comment && isRouted( j ) )
-        {
-            emitOwned( j );
-        }
+        if( !k.comment || !lifts( k ) ) { continue; }
+        out.append( view.substr( copied, k.begin - copied ) );
+        hoisted.push_back( view.substr( k.begin, k.end - k.begin ) );
+        copied = k.end;
     }
-    for( std::size_t j = 0; j < blocks.size(); ++j )   // 2. every other row block, order untouched — <sigs> stays first
-    {
-        if( !blocks[ j ].comment && !isRouted( j ) )
-        {
-            emitOwned( j );
-        }
-    }
-    for( std::size_t k = 0; k < blocks.size(); ++k )   // 3. the DOCUMENT legend, last, relative order kept
-    {
-        if( blocks[ k ].comment && ownerOf[ k ] == std::string_view::npos )
-        {
-            emit( blocks[ k ] );
-        }
-    }
+    out.append( view.substr( copied, b.end - copied ) );
+    return out;
 }
 
-// Permute one finished --for answer in place. Returns whether it was rewritten.
+// ── AF4 T-B, CALLERS FIRST UNDER A CALLERS CUE (the P1 verb-route spec, section 2 (local results, not shipped); pre-registered in
+// results/AF4_TOPLOAD_1118/PREREG.md). A who-calls question ("which functions call `f` directly?") is answered by the
+// <callers by="subject"> block, which the assembly emits after <sigs>; on P1's three such held-out cells, emitted first it moved
+// bytes-to-all-gold 5,387→726, 6,629→935 and 11,112→743 with the same bytes and groups. The CUE is the caller's to read
+// (subjectanchor.h subjectCallersCueLeads, from the task): a change or blast-radius question must NOT lead with the one-hop
+// callers (P1's change-risk cell got worse, 5,965→6,451). Order only: the block, with any lead comment of its own, becomes the
+// first row block; no byte is added (P1's `lead=` disclosure attribute is deliberately not built: it would break the permutation
+// contract answerFirst ENSURES). G runs on the order this produces, so its guard counts the block's bytes.
+inline constexpr std::string_view kSubjectCallersOpen = "<callers by=\"subject\"";
+
+// The top-level <callers by="subject"> block among `blocks`, or npos.
+[[nodiscard]] inline std::size_t subjectCallersBlock( std::string_view view, const std::vector<Block>& blocks ) noexcept
+{
+    for( std::size_t j = 0; j < blocks.size(); ++j )
+    {
+        if( !blocks[ j ].comment && blocks[ j ].name == "callers" && view.substr( blocks[ j ].begin ).starts_with( kSubjectCallersOpen ) ) { return j; }
+    }
+    return std::string_view::npos;
+}
+
+// T-B: `order` with block `lead` moved to the front, every other block's relative order kept (npos: unchanged).
+[[nodiscard]] inline std::vector<std::size_t> leadWith( std::vector<std::size_t> order, std::size_t lead )
+{
+    const auto at = std::ranges::find( order, lead );
+    if( at != order.end() ) { std::rotate( order.begin(), at, at + 1 ); }
+    return order;
+}
+
+// The answer-first order of the row blocks before G: resolved routed sections, then every other row block in place, a
+// zero-row lego/compose stub that sits between <sigs> and <tail> moved to just after </tail>.
+[[nodiscard]] inline std::vector<std::size_t> rowBlockOrder( std::string_view view, const std::vector<Block>& blocks )
+{
+    std::vector<std::size_t> routed, rest, stubs;
+    bool sawSigs = false, sawTail = false;
+    for( std::size_t j = 0; j < blocks.size(); ++j )
+    {
+        const Block& b = blocks[ j ];
+        if( b.comment ) { continue; }
+        const std::string_view text = view.substr( b.begin, b.end - b.begin );
+        const bool isStub = ( b.name == "lego" || b.name == "compose" ) && text.ends_with( "/>" ) && text.find( '>' ) + 1 == text.size();
+        if( resolvedRouted( text, b.name ) )                { routed.push_back( j ); }
+        else if( isStub && sawSigs && !sawTail )            { stubs.push_back( j ); }
+        else                                                { rest.push_back( j ); }
+        if( b.name == "tail" ) { sawTail = true; rest.insert( rest.end(), stubs.begin(), stubs.end() ); stubs.clear(); }
+        sawSigs = sawSigs || b.name == "sigs";
+    }
+    rest.insert( rest.end(), stubs.begin(), stubs.end() );   // no <tail> after them: they stay, in order, at the end
+    routed.insert( routed.end(), rest.begin(), rest.end() );
+    return routed;
+}
+
+// The answer as A will emit it: each block's lead comments (ownerOf), its text with the direct-child comments lifted out, its
+// emitted size with those lead comments (`sized`), and the lifted comments in document order.
+struct Layout
+{
+    std::vector<std::size_t>      ownerOf;
+    std::vector<std::string>      text;
+    std::vector<std::size_t>      sized;
+    std::vector<std::string_view> hoisted;
+};
+[[nodiscard]] inline Layout layoutBlocks( std::string_view view, const std::vector<Block>& blocks )
+{
+    Layout l{ .ownerOf = std::vector<std::size_t>( blocks.size(), std::string_view::npos ), .text = std::vector<std::string>( blocks.size() ),
+              .sized = std::vector<std::size_t>( blocks.size(), 0 ), .hoisted = {} };
+    for( std::size_t k = 0; k < blocks.size(); ++k )
+    {
+        l.ownerOf[ k ] = declaredBlock( view, blocks, k );
+        if( !blocks[ k ].comment ) { l.text[ k ] = blockTextHoisting( view, blocks[ k ], l.hoisted ); l.sized[ k ] += l.text[ k ].size(); }
+    }
+    for( std::size_t k = 0; k < blocks.size(); ++k )
+    {
+        if( l.ownerOf[ k ] != std::string_view::npos ) { l.sized[ l.ownerOf[ k ] ] += blocks[ k ].end - blocks[ k ].begin; }
+    }
+    return l;
+}
+
+// ONE PROMOTION CLASS'S SWEEP over the sections that follow </tail>, in emit order (R1b's priority rule, src/foranswerfirst.h
+// kPromotable / kPromotableBody): the indices this class wins, with `taken` marking them and `used` advanced by their emitted
+// sizes — so a LATER class sees only the headroom this one left. The classes are swept highest priority first, which is what
+// makes crowding-out structurally impossible rather than a matter of emitter position.
+[[nodiscard]] inline std::vector<std::size_t> promoteClassSweep( const std::vector<Block>& blocks, const std::vector<std::size_t>& sized,
+                                                                 const std::vector<std::size_t>& post, std::span<const std::string_view> cls,
+                                                                 std::size_t rowEnd, std::size_t stop, std::vector<char>& taken, std::size_t& used )
+{
+    std::vector<std::size_t> won;
+    for( std::size_t i = 0; i < post.size(); ++i )
+    {
+        if( taken[ i ] != 0 || std::ranges::find( cls, blocks[ post[ i ] ].name ) == std::ranges::end( cls ) ) { continue; }
+        if( rowEnd + used + sized[ post[ i ] ] > stop ) { continue; }
+        taken[ i ] = 1;
+        used += sized[ post[ i ] ];
+        won.push_back( post[ i ] );
+    }
+    return won;
+}
+
+// G, the GUARDED promotion, on the emitted sizes. The bytes ahead of the first row block are the root open tag; the stop is the
+// DEFAULT page size, one constant, so every page size windows the same document. Returns the order with the promoted RES
+// sections directly ahead of <tail>.
+[[nodiscard]] inline std::vector<std::size_t> promoteGuarded( std::string_view view, const std::vector<Block>& blocks, std::vector<std::size_t> order,
+                                                              const Layout& layout )
+{
+    const std::vector<std::size_t>& sized  = layout.sized;
+    const std::size_t               prefix = blocks.empty() ? 0 : blocks.front().begin;
+    const std::size_t               stop   = kAnswerPageBytesDefault;
+    const auto tailIt = std::ranges::find_if( order, [ & ]( std::size_t j ) { return blocks[ j ].name == "tail"; } );
+    if( tailIt == order.end() ) { return order; }
+    const Block&             tail = blocks[ *tailIt ];
+    const std::size_t        open = view.find( '>', tail.begin ) + 1;
+    const std::size_t        close = view.rfind( "</", tail.end - 1 );
+    std::vector<Block> rows = close > open ? topLevelBlocks( view, open, close ) : std::vector<Block>{};
+    std::erase_if( rows, []( const Block& r ) { return r.comment; } );   // ROWS: a comment inside the tail is not one
+    std::size_t before = prefix;
+    for( auto it = order.begin(); it != tailIt; ++it ) { before += sized[ *it ]; }
+    if( rows.size() <= kGuardTailRows || before + sized[ *tailIt ] <= stop ) { return order; }
+    const std::size_t rowEnd = before + ( sized[ *tailIt ] - ( tail.end - tail.begin ) ) + ( rows[ kGuardTailRows - 1 ].end - tail.begin );
+    // R1b's PRIORITY RULE: two class-ordered passes over the SAME post-tail list, in the SAME emit order, against the SAME
+    // single headroom accumulator. Pass 1 is the parent's own walk over kPromotable with `used` starting at 0, and a section of
+    // no promotable class never consumed headroom in the parent either — so pass 1 promotes exactly what AF2's frozen G
+    // promotes, in that order, and (because pass 2's sections are appended BEHIND pass 1's) at the same byte offsets. Pass 2
+    // then takes only the headroom pass 1 left. Crowding-out is therefore removed BY CONSTRUCTION, not by a threshold: there is
+    // no input for which a body can take a RES section's slot. If pass 1 exhausts the headroom, no body moves and the answer is
+    // the parent's, byte for byte.
+    const std::vector<std::size_t> post( tailIt + 1, order.end() );
+    std::vector<char>              taken( post.size(), 0 );
+    std::size_t                    used     = 0;
+    const std::vector<std::size_t> movedRes = promoteClassSweep( blocks, sized, post, kPromotable, rowEnd, stop, taken, used );       // pass 1
+    const std::vector<std::size_t> movedBody = promoteClassSweep( blocks, sized, post, kPromotableBody, rowEnd, stop, taken, used );  // pass 2
+    std::vector<std::size_t>       out( order.begin(), tailIt );
+    out.insert( out.end(), movedRes.begin(), movedRes.end() );
+    out.insert( out.end(), movedBody.begin(), movedBody.end() );
+    out.push_back( *tailIt );
+    for( std::size_t i = 0; i < post.size(); ++i )
+    {
+        if( taken[ i ] == 0 ) { out.push_back( post[ i ] ); }
+    }
+    return out;
+}
+
+// Append the blocks in ANSWER-FIRST order: the row blocks (each preceded by its own block-local legend, so the convention's
+// adjacency survives), then the DOCUMENT legend, then the comments A lifted out of the sections. Every byte of the answer is
+// copied once; only the order moves. `lead` (T-B): the block that goes first, before G reads the order; npos for none.
+inline void appendAnswerFirst( std::string_view view, const std::vector<Block>& blocks, std::string& out, std::size_t lead )
+{
+    const Layout l   = layoutBlocks( view, blocks );
+    const auto   put = [ & ]( std::size_t k ) { out.append( view.substr( blocks[ k ].begin, blocks[ k ].end - blocks[ k ].begin ) ); };
+    for( const std::size_t j : promoteGuarded( view, blocks, leadWith( rowBlockOrder( view, blocks ), lead ), l ) )
+    {
+        for( std::size_t k = 0; k < blocks.size(); ++k )
+        {
+            if( l.ownerOf[ k ] == j ) { put( k ); }
+        }
+        out += l.text[ j ];
+    }
+    for( std::size_t k = 0; k < blocks.size(); ++k )   // the DOCUMENT legend, last, relative order kept
+    {
+        if( blocks[ k ].comment && l.ownerOf[ k ] == std::string_view::npos ) { put( k ); }
+    }
+    for( const std::string_view c : l.hoisted ) { out.append( c ); }
+}
+
+// The root's body: [after the <ctx …> open tag, at </ctx>), or nullopt when the document is not one <ctx> root.
+struct RootBody
+{
+    std::size_t openEnd = 0;   // the open tag's '>'
+    std::size_t closeAt = 0;   // the "</ctx>"
+};
+[[nodiscard]] inline std::optional<RootBody> rootBody( std::string_view view ) noexcept
+{
+    const std::size_t openAt = view.find( "<ctx" );
+    if( openAt == std::string_view::npos ) { return std::nullopt; }
+    const std::size_t openEnd = view.find( '>', openAt );
+    const std::size_t closeAt = view.rfind( "</ctx>" );
+    if( openEnd == std::string_view::npos || closeAt == std::string_view::npos || closeAt <= openEnd ) { return std::nullopt; }
+    return RootBody{ openEnd, closeAt };
+}
+
+// ── TL1 M2, SAME-DIRECTORY TAIL LEAD (results/F1_TAILRANK_1118/READOUT.md §3, the one post-hoc lead with zero flips on both design
+// halves; pre-registered FRESH as lane TL1's PREREG M2, confirmed once on T5e). Inside the top-level <tail>, rows 1..kGuardTailRows
+// keep their place — they are the rows G's guard protects and on F1's design set every in-12 KB tail-only group sat at row <= 27 — and
+// rows past it are stably partitioned: a row whose p= file sits in the DIRECTORY of a top-kSameDirHeadRank <sigs> <d> row first, then
+// every other row, each part in its own order. F1's measure of that signal (P1t): 2.29x the needed-row base rate pooled, covering
+// 36-56 % of the needed tail rows; the broad signals that also reorder rows 1-24 (P1, R1, F1) flipped cells out of 12 KB, which is why
+// the first 24 rows are fixed. Order only: the tail's rows are permuted inside its own text, so its size, G's guard (it reads tail
+// row kGuardTailRows) and the tail's size are unchanged. The tail's own legend says how its rows were collected, so the reorder rides
+// with a clause that states it (kTailSameDirClause, below): the emitter writes it into the answer-first document legend and this pass reorders only where it
+// is, so the legend and the order cannot disagree. RIPWIRE_NO_TAIL_SAMEDIR (any value) turns both off.
+inline constexpr std::size_t kSameDirHeadRank = 5;
+[[nodiscard]] inline bool tailSameDirOn() noexcept { return std::getenv( "RIPWIRE_NO_TAIL_SAMEDIR" ) == nullptr; }
+
+// The directory of a printed path: everything before its last '/', "" for a root-level file; a trailing :line (:line-line,
+// :line:col) suffix is not part of the path.
+[[nodiscard]] inline std::string_view pathDirOf( std::string_view p ) noexcept
+{
+    const std::size_t slash = p.rfind( '/' );
+    const std::size_t colon = p.find( ':', slash == std::string_view::npos ? 0 : slash );
+    if( colon != std::string_view::npos && p.find_first_not_of( "0123456789:-", colon ) == std::string_view::npos ) { p = p.substr( 0, colon ); }
+    const std::size_t cut = p.rfind( '/' );
+    return cut == std::string_view::npos ? std::string_view() : p.substr( 0, cut );
+}
+
+// The direct-child row blocks of block `b` (its open tag to its close tag); empty for a self-closing block.
+[[nodiscard]] inline std::vector<Block> childBlocks( std::string_view text, std::size_t begin, std::size_t end )
+{
+    const std::size_t open  = text.find( '>', begin ) + 1;
+    const std::size_t close = text.rfind( "</", end - 1 );
+    return open >= 2 && text[ open - 2 ] != '/' && close > open && close != std::string_view::npos ? topLevelBlocks( text, open, close ) : std::vector<Block>{};
+}
+
+// The directories of the <sigs> <d> rows ranked r <= kSameDirHeadRank (sorted, unique), read off the block's own rows.
+[[nodiscard]] inline std::vector<std::string_view> headRowDirs( std::string_view view, const Block& sigs )
+{
+    std::vector<std::string_view> dirs;
+    for( const Block& k : childBlocks( view, sigs.begin, sigs.end ) )
+    {
+        const std::string_view tag  = k.comment || k.name != "d" ? std::string_view() : view.substr( k.begin, view.find( '>', k.begin ) + 1 - k.begin );
+        const std::string_view r    = attrOf( tag, "r" );
+        const std::string_view p    = attrOf( tag, "p" );
+        std::size_t            rv   = 0;
+        const auto [ end, ec ]      = std::from_chars( r.data(), r.data() + r.size(), rv );
+        const bool             rank = !r.empty() && ec == std::errc() && end == r.data() + r.size() && rv <= kSameDirHeadRank;
+        if( rank && !p.empty() ) { dirs.push_back( pathDirOf( p ) ); }
+    }
+    std::ranges::sort( dirs, rw::sortutil::svLess );
+    dirs.erase( std::ranges::unique( dirs ).begin(), dirs.end() );
+    return dirs;
+}
+
+// The <tail> block's text with rows past kGuardTailRows partitioned same-directory first (unchanged when nothing qualifies, the tail
+// has kGuardTailRows rows or fewer, or its rows are not one contiguous run of elements).
+[[nodiscard]] inline std::string tailSameDirFirst( const std::string& tail, const std::vector<std::string_view>& dirs )
+{
+    const std::vector<Block> rows = childBlocks( tail, 0, tail.size() );
+    const bool contiguous = std::ranges::adjacent_find( rows, []( const Block& a, const Block& b ) { return a.end != b.begin || a.comment || b.comment; } ) == rows.end();
+    if( dirs.empty() || rows.size() <= kGuardTailRows || !contiguous ) { return tail; }
+    const std::string_view view = tail;
+    const auto near = [ & ]( const Block& r )
+    {
+        const std::string_view p = attrOf( view.substr( r.begin, view.find( '>', r.begin ) + 1 - r.begin ), "p" );
+        return !p.empty() && std::ranges::binary_search( dirs, pathDirOf( p ), rw::sortutil::svLess );
+    };
+    std::string out( view.substr( 0, rows[ kGuardTailRows ].begin ) );
+    for( const bool pass : { true, false } )
+    {
+        for( std::size_t i = kGuardTailRows; i < rows.size(); ++i )
+        {
+            if( near( rows[ i ] ) == pass ) { out.append( view.substr( rows[ i ].begin, rows[ i ].end - rows[ i ].begin ) ); }
+        }
+    }
+    out.append( view.substr( rows.back().end ) );
+    return out;
+}
+
+// M2 on an assembled answer-first document: its top-level <tail> rewritten in place (same bytes, so every offset outside it holds).
+// The clause that states M2's order. The emitter puts it in the answer-first document legend, right after the tail clauses, exactly
+// where this pass will run (verbs_for.h tailSameDirLegend: the answer-first posture, the A/B handle unset, a tail that walks past page
+// 0); this pass reorders a tail ONLY when the document legend carries it, so an order is never served without the sentence that
+// states it, and --legend=first / --json / the MCP twin keep both their rank order and their wording.
+inline constexpr std::string_view kTailSameDirClause =
+    "; t order past row 24: files in the directory of a sigs row with r<=5 first, then the rest, each part in the order above";
+static_assert( !kTailSameDirClause.contains( "--" ), "a legend clause rides inside an XML comment: no double hyphen (G4)" );
+
+// Does the document legend (the comments after the last row block; a CDATA body can spell the same text) state M2's order?
+[[nodiscard]] inline bool legendStatesTailSameDir( std::string_view doc, const std::vector<Block>& bl ) noexcept
+{
+    const auto last = std::ranges::find_if( bl.rbegin(), bl.rend(), []( const Block& b ) { return !b.comment; } );
+    const std::size_t from = last == bl.rend() ? 0 : last->end;
+    return std::any_of( bl.begin(), bl.end(), [ & ]( const Block& b )
+                        { return b.comment && b.begin >= from && doc.substr( b.begin, b.end - b.begin ).contains( kTailSameDirClause ); } );
+}
+
+// Returns whether the tail's order changed (never without the legend clause that states it).
+inline bool tailSameDirInPlace( std::string& doc )
+{
+    const std::optional<RootBody> rb = rootBody( doc );
+    const std::vector<Block>      bl = rb ? topLevelBlocks( doc, rb->openEnd + 1, rb->closeAt ) : std::vector<Block>{};
+    if( !legendStatesTailSameDir( doc, bl ) ) { return false; }
+    const auto named = [ & ]( std::string_view n ) { return std::ranges::find_if( bl, [ & ]( const Block& b ) { return !b.comment && b.name == n; } ); };
+    const auto tail = named( "tail" ), sigs = named( "sigs" );
+    if( tail == bl.end() || sigs == bl.end() ) { return false; }
+    const std::string permuted = tailSameDirFirst( doc.substr( tail->begin, tail->end - tail->begin ), headRowDirs( doc, *sigs ) );
+    ENSURES( permuted.size() == tail->end - tail->begin, "tailSameDirFirst permutes the tail's rows: its size cannot move" );
+    if( doc.compare( tail->begin, permuted.size(), permuted ) == 0 ) { return false; }
+    doc.replace( tail->begin, permuted.size(), permuted );
+    return true;
+}
+
+// The order knobs a caller hands answerFirst (each read from argv or the A/B environment by the caller, never here).
+struct AnswerFirstAsk
+{
+    bool callersLead = false;   // T-B: the task asks who calls the <callers by="subject"> block's subject
+    bool tailSameDir = false;   // TL1 M2 (only where the document legend states it: tailSameDirInPlace)
+};
+
+// T-B: the of= of the answer's top-level <callers by="subject"> block, still XML-escaped as the answer prints it; "" when there is
+// none. Read from the TOP-LEVEL scan, never a text search: a CDATA body can spell the same open tag.
+[[nodiscard]] inline std::string_view subjectCallersOf( std::string_view doc )
+{
+    const std::optional<RootBody> rb = rootBody( doc );
+    if( !rb ) { return {}; }
+    const std::vector<Block> blocks = topLevelBlocks( doc, rb->openEnd + 1, rb->closeAt );
+    const std::size_t        j      = subjectCallersBlock( doc, blocks );
+    if( j == std::string_view::npos ) { return {}; }
+    const std::string_view open = doc.substr( blocks[ j ].begin, doc.find( '>', blocks[ j ].begin ) - blocks[ j ].begin );
+    const std::size_t      at   = open.find( " of=\"" );
+    if( at == std::string_view::npos ) { return {}; }
+    const std::size_t from = at + 5, to = open.find( '"', from );
+    return to == std::string_view::npos ? std::string_view() : open.substr( from, to - from );
+}
+
+// Permute one finished --for answer in place. Returns whether it was rewritten. `ask.callersLead` (T-B): the task asks who calls the
+// subject the <callers by="subject"> block answers, so that block leads; `ask.tailSameDir` (TL1 M2): the tail's same-directory lead.
 //
 // Every byte of every block is copied unchanged; only their order moves. The ENSURES below is the contract:
 // a permutation that changed the document's size would be a different change wearing this one's name.
-inline bool answerFirst( std::string& doc )
+inline bool answerFirst( std::string& doc, const AnswerFirstAsk& ask = {} )
 {
-    const std::string_view view = doc;
-    const std::size_t      openAt = view.find( "<ctx" );
-    if( openAt == std::string_view::npos ) { return false; }
-    const std::size_t openEnd = view.find( '>', openAt );
-    const std::size_t closeAt = view.rfind( "</ctx>" );
-    if( openEnd == std::string_view::npos || closeAt == std::string_view::npos || closeAt <= openEnd ) { return false; }
+    const std::string_view        view = doc;
+    const std::optional<RootBody> rb   = rootBody( view );
+    if( !rb ) { return false; }
+    const std::size_t openEnd = rb->openEnd, closeAt = rb->closeAt;
 
     const std::vector<Block> blocks = topLevelBlocks( view, openEnd + 1, closeAt );
     if( blocks.empty() ) { return false; }   // not a shape this pass understands: served unchanged
 
-    if( !permutationWouldMove( view, blocks ) ) { return false; }
+    const std::size_t lead = ask.callersLead ? subjectCallersBlock( view, blocks ) : std::string_view::npos;
+    if( lead == std::string_view::npos && !ask.tailSameDir && !permutationWouldMove( view, blocks ) ) { return false; }
 
     std::string out;
     out.reserve( doc.size() );
     out.append( view.substr( 0, openEnd + 1 ) );
 
-    appendAnswerFirst( view, blocks, out );
+    appendAnswerFirst( view, blocks, out, lead );
     out.append( view.substr( closeAt ) );
+    if( ask.tailSameDir ) { (void)tailSameDirInPlace( out ); }   // TL1 M2, on the assembled document (its root closed)
 
     // THE PERMUTATION CONTRACT. Not an assertion of taste: if this ever fails, the pass has dropped or
     // duplicated a block, and the band's whole safety argument — no row removed, so no gold lost — is void.
@@ -331,6 +684,7 @@ inline bool answerFirst( std::string& doc )
                   "foranswerfirst: the permuted answer changed size — serving the original, unpermuted" );
         return false;
     }
+    if( out == doc ) { return false; }   // nothing moved (an ask that found nothing to reorder)
     doc.swap( out );
     return true;
 }

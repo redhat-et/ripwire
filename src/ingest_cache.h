@@ -380,7 +380,14 @@ constexpr std::uint32_t kCacheVersion = 52;           // 52: lane failure-defaul
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 331;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 332;          // bump on any grammar/.scm/extraction change
+                                                      // 332 = 2026-11-20 (IN3, ruling 92: the 0.7.0 integration of integration/070-candidate
+                                                      //   + lane/r1b-priority with main ee8d1a50e). ONE number above BOTH sides' bumps — main's
+                                                      //   331 (train 1117d1) and the stack's 317 (INT1) — so neither side's cache can be read by
+                                                      //   the other's binary. Rich file tag 333. kCacheVersion unchanged: no record changes shape.
+                                                      //   Both provenance lists are kept below as HISTORY, main's first; the tags they name are
+                                                      //   the tags of those numbers, not of 332.
+                                                      // --- history: main ee8d1a50e carried 331 ---
                                                       // 331 = 2026-11-18 (train 1117d1; above main's 311/312, #688's 313/314 and the members' placeholders
                                                       //   317/321/323/327/329): rich file tag 332. kCacheVersion unchanged. The members' extraction changes:
                                                       //   go-cpp-edges (placeholder 317): a Go result type written as a generic instantiation (`Set[T]`, `*pkg.Set[string]`) records its
@@ -396,6 +403,14 @@ constexpr std::uint32_t kParserVer    = 331;          // bump on any grammar/.sc
                                                       //   edge-strays-1118 (placeholder 327): a Rust call written through a bracketed type (`<Where as Command>::run( .. )`, `<Where>::f( .. )`) is qualified by
                                                       //   the type it names, or by the trait when the type names none (ingest_names.h rustBracketedQualifier).
                                                       //   Rich file tag 328. kCacheVersion unchanged.
+                                                      // --- history: integration/070-candidate carried 317 ---
+                                                      // 317 = 2026-11-19 (INT1, the 0.7.0 candidate integration/070-candidate: ONE number for lane BX2's two parser members, strictly
+                                                      //   above main d65f60c6d's 313/314 (TRAIN-1117b) and above both BX2 placeholders 313 and 315, so no cache a lane binary wrote
+                                                      //   under a placeholder reads as this tree's). Rich file tag 318. kCacheVersion unchanged.
+                                                      //   - BX2 FIX 5 (its placeholder 313): a Rust `macro_rules!` transcriber's call-shaped `name(` / `.name(` / `a::name(` /
+                                                      //     `$crate::a::name(` is a Call reference of its macro (ingest_names.h scanTranscriberCalls).
+                                                      //   - BX2 FIX 8 (its placeholder 315): a C-family parameter stored into a struct field (`tp->signalcb = signalcb`) records
+                                                      //     the IX1-V2 slot fact Go and Rust record (ingest_valuerefs.h paramSlotFact).
                                                       // 313 = 2026-11-17 (TRAIN-1117b: ONE number for its two parser members, strictly above main c565a3fad's 311/312
                                                       //   (#420, landed by TRAIN-1117a-r #686)). Rich file tag 314. kCacheVersion unchanged.
                                                       //   - #446 round 2, @SeddonShen, landed as lane land-606 (its placeholder 316): Java base clauses read as

@@ -29,6 +29,9 @@
 #   (g)  two sinks with 10 common callers (more than the 8 whose paths were once kept): no caller's middle row is a pointer, byte-identical
 #   (h)  two C++ members named run on ONE line (SameQ::run reaches the left sink only, SameP::run both): SameQ::run is a pointer and
 #        SameP::run a row — each row's scope comes from its own n= qualifier, not from the first `run` at the line
+# A THIRD tree (off.ts):
+#   (u)  a path-walk node calls a function the other side never reaches (hop count kUnreached): the answer comes back (rc 0, well formed,
+#        no sanitizer report) — red under the ASan binary before the addShortestPathNodes overflow fix, both root/sink and two sinks
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
@@ -116,11 +119,12 @@ export function delta_left_only_caller(n: any): number {
 }
 EOF
 
-# check.py OFF ON NAMES -> PASS/FAIL: ON is OFF with every <d>/<s>/<y> row named in NAMES (in <sigs>/<callers>/<syms>) a pointer, the
-# legend before the first, est_tokens= aside; then `ptr`/`rows` lines (the pointer names and the row names of ON, in order).
+# check.py OFF ON NAMES -> PASS/FAIL: ON is OFF with every <d>/<s>/<y> row named in NAMES (in <sigs>/<callers>/<syms>) a pointer
+# <t … ptr="side"/>, est_tokens= aside, comments compared apart (ON's = OFF's + the one-side legend once; AF4 T-C: the kind is on the
+# row, so where the legend sits is the order's business); then `ptr`/`rows` lines (the pointer names and the row names of ON, in order).
 cat >"$TMP/check.py" <<'PY'
 import re, sys
-LEG = ( "<!-- one-side: a <t> among sigs, callers or syms rows is one-sided within 3 calls (it reaches only one of the two named endpoints, or "
+LEG = ( "<!-- one-side: a <t> with ptr=side among sigs, callers or syms rows is one-sided within 3 calls (it reaches only one of the two named endpoints, or "
         "it reaches the sink and the root does not reach it) and is on no shortest path between them, a pointer (p= file, sym= name, r= rank), "
         "not the answer -->" )
 ATTR = re.compile( r'([\w:-]+)="([^"]*)"' )
@@ -139,12 +143,16 @@ exp, at, first = [], 0, True
 for s, e, a in rows( off ):
     if a.get( "n" ) not in names: continue
     p = a.get( "p", "" ); p = p.rsplit( ":", 1 )[0] if ":" in p and p.rsplit( ":", 1 )[1].isdigit() else p
-    exp += [ off[at:s], LEG if first else "", '<t p="%s" sym="%s"%s/>' % ( p, a["n"], ' r="%s"' % a["r"] if "r" in a else "" ) ]; at = e; first = False
+    # AF4 T-C: the pointer carries its kind (ptr="side"); the legend is compared apart from the rows: its PLACE is the order's
+    # (legend-first: before the first pointer; answer-first: lifted into the trailing legend), not the rule's
+    exp += [ off[at:s], '<t p="%s" sym="%s"%s ptr="side"/>' % ( p, a["n"], ' r="%s"' % a["r"] if "r" in a else "" ) ]; at = e; first = False
 exp = "".join( exp ) + off[at:]
 est = lambda s: re.sub( r' est_tokens="\d+"', "", s, count = 1 )
-print( ( "PASS" if not first and est( exp ) == est( on ) else "FAIL" ) + " expected-rewrite" )
+nocom = lambda s: re.sub( r"<!--.*?-->", "", est( s ), flags = re.S )
+coms = lambda s: sorted( re.findall( r"<!--.*?-->", re.sub( r"<!\[CDATA\[.*?\]\]>", "", s, flags = re.S ), re.S ) )
+print( ( "PASS" if not first and nocom( exp ) == nocom( on ) and coms( on ) == sorted( coms( off ) + [ LEG ] ) else "FAIL" ) + " expected-rewrite" )
 t = mask( on )
-print( "ptr " + ",".join( re.findall( r'<t p="[^"]*" sym="([^",]*)"(?: r="\d+")?/>', t ) ) )
+print( "ptr " + ",".join( re.findall( r'<t p="[^"]*" sym="([^",]*)"(?: r="\d+")? ptr="side"/>', t ) ) )
 print( "rows " + ",".join( a.get( "n", "" ) for _, _, a in rows( on ) ) )
 PY
 
@@ -208,7 +216,9 @@ ident d2 'What does alpha_start do?'
 # (t) TOKEN-BUDGET-MONOTONE (2026-11-14): the budget no longer switches the demote off — it was posture under a budget (the
 # old arm wanted "no pointer, no legend" at --token-budget=4000). The budget now trims the answer asked without it, so an
 # answer that fits comes back byte for byte, the pointer and its legend included (test/budgetmonotonecheck.sh (a)).
-run "--for=sink_left_value + sink_right_value" >"$TMP/t.off" || no "(t) the unbudgeted run exited $?"
+# AF1 (2026-11-18): the unbudgeted DEFAULT is answer-first and paged; a budget sheds the WHOLE answer in the same posture and is
+# never paged, so --page-bytes=0 is the one a budget that fits returns byte for byte (the same U as budgetmonotonecheck (a)).
+run "--for=sink_left_value + sink_right_value" --page-bytes=0 >"$TMP/t.off" || no "(t) the unbudgeted run exited $?"
 run "--for=sink_left_value + sink_right_value" --token-budget=100000 >"$TMP/t.on" || no "(t) the budgeted run exited $?"
 if [ -s "$TMP/t.on" ] && grep -q '<!-- one-side:' "$TMP/t.off" && cmp -s "$TMP/t.on" "$TMP/t.off"; then ok "(t) --token-budget=100000: the demoted answer byte for byte ($( wc -c <"$TMP/t.on" | tr -d ' ' ) B)"; else no "(t) the budgeted answer is not the demoted unbudgeted one (or the unbudgeted one has no pointer: vacuous)"; fi
 
@@ -242,6 +252,26 @@ if grep -q 'n="many_mid_10"' "$TMP/g.on"; then ok "(g) many_mid_10 (the 10th com
 twin h 'same_left_value + same_right_value' SameQ::run
 arm h ptr SameQ::run "reaches the left sink only; its scope from its own qualifier"
 arm h row SameP::run "reaches both, on the same line as SameQ::run"
+# (u) A THIRD tree: a node on the path walk calls a function the other side's walk never reaches (hop count kUnreached = UINT32_MAX).
+#     addShortestPathNodes once tested `toSink[v] + 1 == toSink[u]`, which wraps there: an unsigned overflow the ASan build
+#     (-fsanitize=integer, -fno-sanitize-recover=all) aborts on, so the answer came back empty. The plain build answered the same
+#     before the fix (the wrapped 0 never equals a hop count > 0), so this arm is red under the ASan binary only.
+TREE=t3; mkdir -p "$TMP/t3"
+cat >"$TMP/t3/off.ts" <<'EOF'
+export function off_side_log(n: number): number { return n * 7; }
+export function off_sink_end(n: number): number { return n; }
+export function off_mid_step(n: number): number { return off_sink_end(n); }
+export function off_root_go(n: number): number { return off_mid_step(n) + off_side_log(n); }
+export function off_left_value(n: number): number { return n; }
+export function off_right_value(n: number): number { return n + 5; }
+export function off_driver(n: number): number { return off_left_value(n) + off_right_value(n) + off_side_log(n); }
+EOF
+for task in 'off_root_go + off_sink_end' 'off_left_value + off_right_value'; do
+    run "--for=$task" --page-bytes=0 >"$TMP/u.on" 2>"$TMP/u.err"; rc=$?
+    if [ "$rc" = 0 ] && [ -s "$TMP/u.on" ] && xmllint --noout "$TMP/u.on" 2>/dev/null && ! grep -q 'runtime error' "$TMP/u.err"; then
+        ok "(u) '$task': a walk node with an unreached callee answers (rc 0, well formed, no sanitizer report)"
+    else no "(u) '$task': rc=$rc $( grep -m1 'runtime error' "$TMP/u.err" | head -c 300 )"; fi
+done
 TREE=ts
 
 for arm in a a2; do

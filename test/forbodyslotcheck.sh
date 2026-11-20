@@ -158,6 +158,14 @@ def rows(t):
     return sorted(out, key=lambda x: x[0])
 def bodies(t):
     """every <b …><![CDATA[…]]>…</b>: (attrs, cdata bytes, the whole element)"""
+    # CB1: COMMENTS FIRST. The legend defines `<b …>` rows by printing their own tag text, so a document
+    # carrying that legend holds `<b ` strings that are not rows. Unstripped, the regex matched the LEGEND's
+    # `<b ` and ran `(.*?)</b>` to the real row's close — swallowing the row's open tag into group(2), so the
+    # attributes came back EMPTY and `n` came back None while the CDATA still looked right. The MCP arm then
+    # read "no <b n=render_screen>" on a document that plainly contains it. Same class as the miscount OR1
+    # recorded (a legend's own `<bodies>` read as an answer's); line 185 below already strips comments for the
+    # row parser, so this is the gate's own idiom, applied where it was missing.
+    t = re.sub(r'<!--.*?-->', '', t, flags=re.S)
     out = []
     for m in re.finditer(r'<b ([^>]*)>(.*?)</b>', t, re.S):
         cd = "".join(re.findall(r'<!\[CDATA\[(.*?)\]\]>', m.group(2), re.S))
@@ -394,8 +402,17 @@ else:
 PY
 export FIX
 chk(){ python3 "$TMP/chk.py" "$@"; }
-run(){ "$BIN" "$FIX" --cache="$TMP/rw.cache" "$@" 2>/dev/null; }       # a fresh cache per gate run: this binary's own parse
-runoff(){ RIPWIRE_NO_BODY_SLOT=1 "$BIN" "$FIX" --cache="$TMP/rw.cache" "$@" 2>/dev/null; }
+# AF1-fix (2026-11-18): the flagless --for answer is served in 12 KB PAGES (src/forpages.h); on this fixture several answers (big,
+# hyd) span two, the slot's <bodies> starting past page 1's cut. Every arm here is about the WHOLE answer (the slot, its cut, its
+# MCP twin — MCP is not paged), so a --for call the pager would shape reads --page-bytes=0: the whole answer in one call,
+# row-identical to the joined pages (forpagescheck P2). (PG) below holds the DEFAULT page to present-or-disclosed-deferred.
+# --page-bytes refuses beside a budget, another dialect or a legend-first posture (cli.h pageBytesConflict): those calls are
+# never paged and run as written.
+whole(){ local a; for a in "$@"; do case "$a" in --token-budget=*|--max-tokens=*|--json|--format=*|--legend=first|--legend=full|--legend=dict|--limit=*|--offset=*|--legend-have=*|--page-bytes=*) return 1;; esac; done
+         for a in "$@"; do case "$a" in --for=*) return 0;; esac; done; return 1; }
+run(){ if whole "$@"; then set -- "$@" --page-bytes=0; fi; "$BIN" "$FIX" --cache="$TMP/rw.cache" "$@" 2>/dev/null; }       # a fresh cache per gate run: this binary's own parse
+runoff(){ if whole "$@"; then set -- "$@" --page-bytes=0; fi; RIPWIRE_NO_BODY_SLOT=1 "$BIN" "$FIX" --cache="$TMP/rw.cache" "$@" 2>/dev/null; }
+runpage(){ "$BIN" "$FIX" --cache="$TMP/rw.cache" "$@" 2>/dev/null; }   # the default PAGE, as an agent receives it
 strip_at(){ sed -e 's/ at="[^"]*"//g' -e 's/"at":"[^"]*",\{0,1\}//g'; }
 cat > "$TMP/mcptext.py" <<'PY'
 import json, sys
@@ -575,6 +592,15 @@ if r="$( chk body "$TMP/c.xml" cmd_find_target src/c/cmd-find.c "cmd_find_get_se
 if grep -q '<d [^>]*n="cmd_find_target"' "$TMP/sub.xml"; then :; else no "(D9b) premise: cmd_find_target is not a ranked row on T_SUB"; fi
 if r="$( chk nobody "$TMP/sub.xml" )" && cmp -s "$TMP/sub.xml" "$TMP/sub.off.xml"; then ok "(D9b) only a subtoken match (cmd_find_target ~ 'target'): no slot, byte-identical to RIPWIRE_NO_BODY_SLOT=1"; else no "(D9b) only a subtoken match: a body rides or the answer differs from slot-off ${r:-}"; fi
 if grep -q 'pick="subtoken"' "$TMP/sub.xml"; then no "(D9b) pick=\"subtoken\" still rides"; else ok "(D9b) no pick=\"subtoken\""; fi
+# (PG) the default PAGE of the two-page answers: the slot's <bodies> rides it, or its root names <bodies> in deferred=/continued=
+for k in big hyd; do
+    case $k in big) q="$T_BIG";; hyd) q="$T_HYD";; esac
+    runpage --for="$q" >"$TMP/$k.page.xml"
+    if grep -q '<bodies ' "$TMP/$k.page.xml"; then ok "(PG) $k: the default page carries the slot's <bodies>"
+    elif python3 -c 'import re,sys; r=re.match(r"<ctx\b[^>]*>",open(sys.argv[1]).read()); r=r.group(0) if r else ""; n=" ".join(re.findall(r"\s(?:deferred|continued)=\"([^\"]*)\"",r)).split(); sys.exit(0 if "bodies" in n and " next=" in r else 1)' "$TMP/$k.page.xml"; then
+        ok "(PG) $k: the default page does not hold <bodies> and says so: deferred= names it, next= reaches it"
+    else no "(PG) $k: the default page neither carries <bodies> nor names it in deferred=/continued= (a silent drop)"; fi
+done
 if r="$( chk bodyattr "$TMP/big.xml" render_screen truncated '^1$' )"; then ok "(D10) oversized owner: $r"; else no "(D10) oversized: $r"; fi
 if r="$( chk cutatline "$TMP/big.xml" render_screen 6000 )"; then ok "(D10) oversized owner: $r (whole lines, <= 6000 B)"; else no "(D10) oversized: $r"; fi
 if nx="$( chk nextof "$TMP/big.xml" render_screen )" && printf '%s' "$nx" | grep -q '^--expand=src/c/render.c:'; then
@@ -848,8 +874,8 @@ done
 # ── I: optional byte identity against the pre-change binary where the slot must not fire ─────────────────────
 # (FX) [G] body-fold: with the fold on (the default), the slot's <bodies> element is byte-identical to the fold-off answer's and the
 #      owner's body is never repeated inside the <fold>
-( unset RIPWIRE_NO_BODY_FOLD; "$BIN" "$FIX" --no-cache --for="$T_D" ) >"$TMP/fx.on" 2>/dev/null
-"$BIN" "$FIX" --no-cache --for="$T_D" >"$TMP/fx.off" 2>/dev/null
+( unset RIPWIRE_NO_BODY_FOLD; "$BIN" "$FIX" --no-cache --for="$T_D" --page-bytes=0 ) >"$TMP/fx.on" 2>/dev/null
+"$BIN" "$FIX" --no-cache --for="$T_D" --page-bytes=0 >"$TMP/fx.off" 2>/dev/null
 if python3 - "$TMP/fx.on" "$TMP/fx.off" <<'PYFX'
 import re, sys
 on, off = open(sys.argv[1]).read(), open(sys.argv[2]).read()

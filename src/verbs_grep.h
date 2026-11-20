@@ -491,7 +491,7 @@ std::string grepRootNext( const rw::Config& cfg, const std::string& pat, bool is
 // nothing on the root counted. `window` is a slice of THIS list (the caller computes it with the same
 // pageWindow()/rowCap the indexed half uses) — never derived inside the collector, so the §A1 rule holds
 // here too: what was COLLECTED does not move with the page, only what is PRINTED does, which is why
-// count= reads the same on every page of a walk. The shape is --impact's <f via="import"> with
+// count= reads the same on every page of a walk. The shape is --impact's <f p=> importer row with
 // shown_importers=/importers_capped=, restated on an element of this sub-list's own.
 void emitGrepUnindexed( const std::vector<rw::GrepAuxHit>& hits, const rw::PageWindow& window, bool singleRoot,
                         const std::string& rootPrefix, std::vector<char>& esc )
@@ -568,7 +568,7 @@ std::string grepTierLegend( const rw::GrepTierReport& tier )
            "under a fixed budget: tier_parsed= how many were classified, tier_budget= which ceiling stopped it (files or bytes, "
            "present only then, beside tier_files= the hit files it had to cover — and the root then also carries counts_floor=\"1\": "
            "the tier counts are floors while hits= stays exact and every row is served), tier_unclassified= hits in files nothing "
-           "classified — always EMITTED, never suppressed. " ) + liftClause;
+           "classified or parse_degraded — always EMITTED, never suppressed. " ) + liftClause;
 }
 
 // Present only when this answer actually held something back or stopped short — absent-means-nothing-was-
@@ -581,6 +581,28 @@ std::string grepTierLegend( const rw::GrepTierReport& tier )
 // NOT through pageDisclosure's collectionCapped path: every hit row was served, only the classification is partial, so
 // forcing capped="1" there would claim rows no page holds. The caller says whether the disclosure already spelled the
 // floor (hits_capped fired), so the attribute is never spelled twice.
+// BX2 step 2 (test/grepdegradedcheck.sh P3-P5): the files whose EVERY hit the tier held back — no <f> row names them, so the root
+// does: held_files= the count, held= the first rw::kGrepHeldFilesListed paths (collection order), held_next= the call that serves
+// them (every tier). "" when no file was wholly held back. The bytes ride only an answer that already discloses a suppression.
+template<class PathFor>
+std::string grepHeldAttrs( const rw::GrepTierReport& tier, const rw::Config& cfg, const std::string& pat, PathFor&& pathFor, std::vector<char>& esc )
+{
+    if( tier.heldFiles == 0 )
+    {
+        return {};
+    }
+    std::string held;
+    for( const std::uint32_t f : tier.heldFileIds )
+    {
+        held += ( held.empty() ? "" : "," ) + std::string( pathFor( f ) );
+    }
+    const std::string next = rw::nextFlag( cfg.grepRegex ? "--regex=" : "--grep=", pat ) + " --grep-in=any";
+    return " held_files=\"" + std::to_string( tier.heldFiles ) + "\" held=\"" + std::string( rw::escapeXml( held, esc ) ) + "\" held_next=\""
+         + std::string( rw::escapeXml( next, esc ) ) + "\"";
+}
+inline constexpr std::string_view kGrepHeldLegend =
+    "held_files=N: N files whose EVERY hit was held back (no row names them); held= the first 5 paths; held_next= serves every tier. ";
+
 std::string grepTierAttrs( const rw::GrepTierReport& tier, bool floorAlreadyEmitted )
 {
     if( !tier.hasDisclosure() )
@@ -1176,7 +1198,7 @@ int emitGrepReport( const MainDispatch& d )
     // above set the precedent, and legendcoveragecheck's rule is "define what you EMIT"). An answer that
     // held nothing back emits no tier attribute and pays no tier prose — byte-identical to the pre-tier
     // verb, which is the "purely additive" contract. Helper above; empty string when there is nothing to say.
-    rw::emitTo( stdout, "{}", grepTierLegend( tierReport ) );
+    rw::emitTo( stdout, "{}{}", grepTierLegend( tierReport ), tierReport.heldFiles > 0 ? kGrepHeldLegend : std::string_view() );   // BX2 step 2
     // The long-line clause rides only on a regex answer — the only one that can carry the attributes it defines.
     if( cfg.grepRegex )
     {
@@ -1281,7 +1303,8 @@ int emitGrepReport( const MainDispatch& d )
     // was skipped" convention (model.h) — never a re-run hint (--skipped already itemizes the rows).
     const std::string corpusAttr = grepCorpusAttrs( ing );
     // R-H: the tier disclosure (helper above) — empty when nothing was held back.
-    const std::string tierAttr = grepTierAttrs( tierReport, /*floorAlreadyEmitted=*/hitsCapped != 0 );   // N2: tier_budget= floors the root too
+    const std::string tierAttr = grepTierAttrs( tierReport, /*floorAlreadyEmitted=*/hitsCapped != 0 )   // N2: tier_budget= floors the root too
+                               + grepHeldAttrs( tierReport, cfg, pat, pathFor, esc );                      // BX2 step 2: the wholly held-back files
     // §R-J: unindexed_files_scanned=/unindexed_files_skipped=/unindexed_candidates_capped= (helper above).
     const std::string auxAttr = grepUnindexedAttrs( aux ) + renderHistoryUnread( DiscloseAs::XmlAttrs );   // K51: absent unless the amp= walk (--metrics) could not be read
     const std::string regexSkipAttr = grepRegexSkipAttrs( cfg, found, aux, /*floorAlreadyEmitted=*/hitsCapped != 0 || tierReport.budgetHit != nullptr );

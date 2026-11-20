@@ -499,7 +499,7 @@ inline constexpr const char* kImpactLegendOpen =
 // these closure-written directives; lazy="0" means at least one is load-time (an ordinary top-level
 // require/import, a class-body or file-level receiver), so the dependency also holds at load.
 inline constexpr const char* kImpactImportTierLegend =
-    "importers= is a SECOND, weaker reach: the files that directly include/import a file defining SYM, as <f via=\"import\" p=\"…\" lazy=\"0|1\"/> rows after the symbol rows — not call reach, never added to reaches= (different units, files vs symbols; an importer may use a different symbol from that file, or none at all). DIRECT (one hop), never the transitive include cone. lazy=\"1\" means every one of that importer's edges into SYM's file is written INSIDE A CLOSURE (a TS/JS require()/import() in a function body, a Ruby constant receiver or argument in a method/lambda/block, a Ruby autoload or rescue class), firing only if and when it runs; lazy=\"0\" means at least one edge is load-time. shown_importers=/importers_capped= disclose that listing's own truncation (importers= stays the full count); most-imported first; limit= sizes it, offset= windows the symbol rows only. ";
+    "importers= is a SECOND, weaker reach: the files that directly include/import a file defining SYM, as <f p=\"…\"/> rows after the symbol rows — not call reach, never added to reaches= (different units, files vs symbols; an importer may use a different symbol from that file, or none at all). DIRECT (one hop), never the transitive include cone. lazy=\"1\" means every one of that importer's edges into SYM's file is written INSIDE A CLOSURE (a TS/JS require()/import() in a function body, a Ruby constant receiver or argument in a method/lambda/block, a Ruby autoload or rescue class), firing only if and when it runs; no lazy= means at least one edge is load-time. shown_importers=/importers_capped= disclose that listing's own truncation (importers= stays the full count); files holding a reached row, a counted declined call or a SYM binding first, then most-imported; limit= sizes it, offset= windows the symbol rows only. ";
 
 // cut-fix E's importers_next= (graph.h sizeImportTier), present-only: it rides a CUT import listing alone, and the full
 // legend never defined it (legendcoveragecheck (A) found it once SYM's file passed 40 importers on this tree).
@@ -781,6 +781,23 @@ inline constexpr const char* kDeclinedSitesIfaceClauseMcp =
 inline constexpr const char* kViaImplLegend =
     "via=\"impl\" on a row: the receiver's recorded type is an interface, trait or abstract class whose only implementor in this tree owns the called method, so the edge is to it; an implementor outside the tree, or one a macro writes, may exist. ";
 inline const char* viaImplLegend( bool on ) noexcept { return on ? kViaImplLegend : ""; }
+// BX1 FIX 2 (callhierarchy.h macroSeeThroughRows, test/verbfixcheck.sh F2): exactly when a callers row is a see-through row.
+inline constexpr const char* kViaMacroLegend =
+    "via=\"macro:NAME\" on a row: it calls of= only through the C function-like macro NAME (a t=macro row here) whose text calls "
+    "of= (scanned, not expanded); one macro hop; after the direct callers, in count=, with that macro row's of_def. ";
+inline constexpr const char* kViaMacroColumnarClause = "format=columnar carries it as the <via> column (3 = via=\"macro:NAME\", NAME the t=macro row it calls). ";
+inline const char* viaMacroLegend( bool on ) noexcept { return on ? kViaMacroLegend : ""; } // the columnar clause rides at the call site
+// The --uses twin: exactly when the root carries via_macro=.
+inline constexpr const char* kUsesViaMacroLegend =
+    "via=\"macro:NAME\" on a <u> row: the site invokes the C function-like macro NAME, whose replacement text uses of= (one macro "
+    "hop); via_macro=N: N such rows, after the direct and alias ones, counted in count= (the columnar form lists them last, "
+    "with no name). ";
+inline const char* usesViaMacroLegend( bool on ) noexcept { return on ? kUsesViaMacroLegend : ""; }
+// lane bx2-fix2-ceiling (callhierarchy.h macroCeiling): exactly when the root carries via_macro_capped=.
+inline constexpr const char* kViaMacroCappedLegend =
+    "Per macro one row per file, at most 16 files: via_macro_capped=N more are not listed (nor in count=); via_macro_next= lists "
+    "the macro with most whole. ";
+inline const char* viaMacroCappedLegend( bool on ) noexcept { return on ? kViaMacroCappedLegend : ""; }
 inline constexpr const char* kDeclinedSitesOfDefCallees =
     "of_def=K on a <dc>: the definition (ix=K) making the call, a fact. ";
 inline constexpr const char* kDeclinedSitesOfDefCallers =
@@ -1015,11 +1032,11 @@ inline std::string byDepthKeyJson( std::span<const std::uint32_t> counts )
 // Emitted INSIDE an XML comment: no double hyphen.
 inline constexpr const char* kImpactDepthLegend =
     "d=N on <s>: hop depth (1 = calls SYM directly; the shortest call chain), printed on the first row and where it changes "
-    "(a row without d= has the depth above it). Rows run d=1 first, PageRank order within a depth, so a cut drops the deepest "
+    "(a row without d= has the depth above it). Rows run d=1 first, non-tests first within a depth, then PageRank, so a cut drops the deepest "
     "rows first; by_depth=k:n,… counts reaches= per depth and sums to it, so a capped answer states the depth it stopped in. ";
 inline constexpr const char* kImpactDepthColumnarLegend =
     "the depth column: each row's hop depth (1 = calls SYM directly; the shortest call chain). Rows run depth 1 first, "
-    "PageRank order within a depth, so a cut drops the deepest rows first; by_depth=k:n,… counts reaches= per depth and sums "
+    "non-tests first within a depth, then PageRank, so a cut drops the deepest rows first; by_depth=k:n,… counts reaches= per depth and sums "
     "to it, so a capped answer states the depth it stopped in. ";
 // idea #6 (lane lean-trio): the per-file rollup and the umbrella-header count, each said exactly when it rides — the
 // rollup whenever the reach set is non-empty (XML forms only: the JSON form carries it as "files", columnar not at all),
@@ -1308,8 +1325,9 @@ inline std::string crossKindKeyJson( const std::string& value )
 // path legends, CLI and MCP alike. No double hyphen anywhere: every one lands inside an XML comment (checklist 25).
 inline constexpr const char* kDefTableLegend =
     "<def ix= t= sc= p= bodyless=1> rows: the GROUPS the defs= definitions form, a definition with the declarations tied to it "
-    "(C family: the edit-check identity rule; TypeScript: its overload signatures); bodyless=1 a declaration tied to none of them "
-    "(another function, or the tie is unproven). of_def=K... on a row: the groups it belongs to, by ix. K = a resolved edge (the "
+    "(C family: the edit-check identity rule; TypeScript: its overload signatures), each tied declaration a row of its own after its "
+    "definition (same ix, bodyless=1); bodyless=1 on a group's only row: a declaration tied to none of them (another function, or "
+    "the tie is unproven). of_def=K... on a row: the groups it belongs to, by ix. K = a resolved edge (the "
     "resolver's binding, not a type check); K~s = its edge carries prov=split (a call along it was one arm of a call the resolver split "
     "between same-named definitions); K~n = every call along it bound by name alone; K~t = a resolved edge into a primary template "
     "while a specialisation of it is another group (which one the call reaches is unproven). On impact the tie is a chain of calls (a "
@@ -1318,16 +1336,60 @@ inline constexpr const char* kDefsListedLegend =
     "defs_listed=N: above 16 groups the table lists only the N that this page's rows name, and a row enumerates no by-name tie: "
     "it prints its K, K~s and K~t tokens and one bare ~n when it also has ties by name alone; a row tied by name alone prints no "
     "of_def (its via=name is the hedge). ";
-inline std::string defTableLegend( bool table, bool cut )
+// IMPACT-SOLE-DEF: the one-group row's own clause. The multi-group clause above reads of_def tokens no row of a one-group
+// answer carries, so it is not reused.
+// VERB-DEF-ROWS (lane v1-verbdef): the same clause on --callers and --uses, and the tied declarations' own rows.
+// DEF-READING-TRIM (lane s1-small, test/verbdefrowscheck.sh (11)): this clause and kUsesDefTableLegend were shortened with no
+// reading dropped (222 -> 169 B, 193 -> 153 B); the arm pins a byte ceiling AND the terms each must still carry.
+inline constexpr const char* kSoleDefLegend =
+    "<def ix=1 t= sc= p=> alone: the ONE defs= group: the definition measured, at file:line, then its tied declarations "
+    "(same ix); bodyless=1 no body; no row carries of_def. ";
+// VERB-DEF-ROWS: --uses with several groups. Its rows are use-sites, which name no group, so the multi-group clause's of_def reading
+// does not apply; above 16 groups it lists none.
+inline constexpr const char* kUsesDefTableLegend =
+    "<def ix= t= sc= p= bodyless=1> rows: the defs= GROUPS, a definition then tied declarations (same ix; bodyless=1 no body); "
+    "a use-site row names no group. ";
+inline constexpr const char* kUsesDefsListedLegend = "defs_listed=0: above 16 groups no group is listed (a use-site row names none). ";
+enum class DefLegendFor : std::uint8_t
+{
+    Rows, // a verb whose rows carry of_def (callers, callees, safe-delete, impact)
+    UseSites // --uses: rows that name no group
+};
+// One struct rather than four positional parameters (the QualityDeltaLegendParts shape): every field is a property OF THE
+// ANSWER whose <def> rows are being introduced, three of the four are booleans, and a caller that has to remember which
+// bool comes second is the seam where a legend starts describing a table it is not attached to. Defaults make the
+// two-field call sites — `{ .table = true, .cut = listing.cut }` — read as they did.
+struct DefTableLegendParts
+{
+    bool table = false; // several groups: the table is printed, and its rows carry of_def
+    bool cut = false; // above 16 groups: only the groups this page's rows name are listed
+    bool sole = false; // IMPACT-SOLE-DEF: exactly one group, so the one-group clause reads
+    DefLegendFor rows = DefLegendFor::Rows; // whose rows they are — of_def-carrying rows, or --uses' use-sites
+};
+inline std::string defTableLegend( const DefTableLegendParts& p )
 {
     std::string clause;
-    if( table )
+    if( p.rows == DefLegendFor::UseSites && ( p.table || p.cut ) )
+    {
+        clause = p.cut ? kUsesDefsListedLegend : kUsesDefTableLegend;
+    }
+    else if( p.table )
     {
         clause = kDefTableLegend;
-        clause += cut ? kDefsListedLegend : "";
+        clause += p.cut ? kDefsListedLegend : "";
+    }
+    else if( p.sole )
+    {
+        clause = kSoleDefLegend;
     }
     return clause;
 }
+// BX1 FIX 7 (defattrib.h DefGroups::unattributed, test/verbfixcheck.sh F7): exactly when a one-group table lists a declaration the
+// identity rule left untied, which used to be dropped while defs= still counted it.
+inline constexpr const char* kUntiedDeclRowLegend =
+    "<def ix=K bodyless=1> after the group's rows, K past them: a same-named declaration tied to none of the definitions (another "
+    "function, or the tie is unproven); no row is attributed to it, and the rows listed equal defs=. ";
+inline const char* untiedDeclLegend( bool on ) noexcept { return on ? kUntiedDeclRowLegend : ""; }
 inline constexpr const char* kSplitArmRowLegend =
     "prov=\"split\" on a row: its edge to of= (on a path, the hop into it) carries the resolver's split label, a call along it was one "
     "arm of a call split between same-named definitions, so the row may be another arm's; NOT a claim the edge is false. ";

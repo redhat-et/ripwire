@@ -34,6 +34,18 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-20, IN3 (owner ruling 92: the 0.7.0 integration branch integration/070-1120 = integration/070-candidate
+#   + lane/r1b-priority + main ee8d1a50e): RE-PINNED ONCE with UPDATE_GOLDEN=1 on the merged tree. kParserVer and
+#   kIngestParserVerMirror 317/331 -> 332 (rich 333): ONE number above BOTH sides' bumps, so a cache either side's
+#   binary wrote is refused. kCacheVersion and kQSnapCacheScheme unchanged: the extraction key moves, the snapshot
+#   blob shape does not. Both merged sides' entries are kept below, newest first (INT1's 2026-11-19, then main's
+#   2026-11-18 train 1117d1 block). Hash 0a4ba8ec92…6dc0274, re-pinned from the merged build: neither side's
+#   value (main's c1fefa06b4…f246ff2, INT1's 52505b79f1…2dd4dcbf) can be right once kParserVer moves to 332.
+# 2026-11-19, INT1 (the 0.7.0 candidate, integration/070-candidate: lane/rt2-route + main d65f60c6d + lane BX2 minus FIX 2):
+#   RE-PINNED ONCE with UPDATE_GOLDEN=1 on the merged tree. kParserVer and kIngestParserVerMirror 313 -> 317 (rich 318): ONE
+#   number for BX2's two parser members, above main's 313/314 (TRAIN-1117b, below) and above both BX2 placeholders (313 and
+#   315, its own entries below), so a cache a lane binary wrote under a placeholder is refused. kCacheVersion and
+#   kQSnapCacheScheme unchanged: the extraction key moves, the snapshot blob shape does not (hash 52505b79f1…2dd4dcbf).
 # 2026-11-18, train 1117d1-r (the 1117d1 stack rebased onto main 7f461e33b, #687): RE-PINNED ONCE with UPDATE_GOLDEN=1 from the
 #   rebased build (hash c1fefa06b4…f246ff2). kParserVer 331 (rich 332) stays, above main's 313/314 (#688): the 331 note now sits
 #   above main's 313 note in ingest_cache.h and the quality.h mirror. kQSnapCacheScheme stays 34.
@@ -61,6 +73,12 @@ PIN="$ROOT/test/qschemetrip.hash"
 #   - land-606 (#446 round 2, @SeddonShen; its placeholder 316): Java base clauses are read as @reference.base captures.
 #   - land-426 (#355, PR #426 by @conka8; its placeholders 216, then 311): the tags pass evaluates tags.scm's string
 #     predicates, and Elixir's keyword tables move into queries/elixir/tags.scm.
+# 2026-11-18, lane BX2 FIX 8 (C-family parameter slot facts): parser tag 313 -> 315 (rich 316) and mirror move together
+#   (a placeholder the train renumbers). kCacheVersion and kQSnapCacheScheme stay unchanged. Re-derived ONCE with UPDATE_GOLDEN=1
+#   (hash ddac96863e…ed98cff).
+# 2026-11-18, lane BX2 FIX 5 (Rust transcriber calls, base integration/0.6.11-batch 259352fc0): parser tag 311 -> 313 (rich 314)
+#   and mirror move together (a placeholder the train renumbers). kCacheVersion and kQSnapCacheScheme stay unchanged. Re-derived
+#   ONCE with UPDATE_GOLDEN=1 (hash 29a3c7f42e…5c4f976).
 # 2026-11-17, train 1117a-r (rebase-stack on main 9087eb59c: naming-wordy prefix, tidy-681, #420, #473, #540, ROW-MANIFEST): RE-PINNED ONCE
 #   with UPDATE_GOLDEN=1 from the composed build (hash d208bb4995…e892919). It carries the two entries below together: #420's parser tag
 #   311 (rich 312) and tidy-681's codeLocByNode text; each lane's own hash named below was that lane alone. No constant moves; #682 leaves it.

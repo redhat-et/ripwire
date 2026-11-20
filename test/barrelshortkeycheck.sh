@@ -232,7 +232,9 @@ strip = lambda s: re.sub(r' (at|est_tokens)="[^"]*"', '', s)
 # rows are shown files: the answer with the block has a <syms> that the answer without it does not (cpp/fwd.* are shown only through
 # it). The block is a consequence of the shortkey rows, so both sides are read less their <syms>; the positive twin below proves the
 # on side carries one built from the block's rows (a gate that strips a block must show it was there).
-syms = re.compile(r'<!-- (?:ripwire for )?syms:(?:(?!-->).)*--><syms .*?</syms>(?=</ctx>)', re.S)
+# AF1 (2026-11-18): the default --for answer is answer-first, so the last ROW block is followed by the trailing DOCUMENT legend
+# (comments only) before </ctx>; "right before </ctx>" reads "with nothing but that legend after it".
+syms = re.compile(r'<!-- (?:ripwire for )?syms:(?:(?!-->).)*--><syms .*?</syms>(?=(?:<!--(?:(?!-->).)*-->)*</ctx>)', re.S)
 twin = syms.search(on) is not None and 'p="cpp/fwd' in syms.search(on).group(0)
 on, off = syms.sub('', on), syms.sub('', off)
 i = on.find('<!-- shortkey:'); j = on.find('</shortkey>')

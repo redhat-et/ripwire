@@ -218,6 +218,24 @@ inline Check hooksCheck( const std::filesystem::path& hooksPath )
                     "run bash skills/install.sh --codex --hook to refresh all advisory Codex hooks" );
 }
 
+// ---- THE LEGEND-SEEN HOOK (lane LS1). OPT-IN, so absent is a pass: the row says installed="0" and is ok. Installed, it
+//      is working when every event it needs is registered, every registered command resolves to an executable script,
+//      and jq — which the hook needs to read a payload at all, and without which it silently does nothing — is on PATH.
+//      Counts and booleans only, never a command line, as everywhere in this file.
+inline Check legendSeenCheck( const char* name, const std::filesystem::path& configPath, std::string_view needle,
+                              std::initializer_list<const char*> events, const char* hint )
+{
+    const HookSurvey survey = surveyHooks( configPath, needle, "\x01" );   // no router for this hook: an impossible needle
+    const bool installed = !survey.nudge.empty();
+    const bool eventsOk  = namesEvents( survey, events ) && survey.nudge.size() >= events.size();
+    const bool jq        = !resolveExecutable( "jq" ).empty();
+    Check out{ name, !installed || ( eventsOk && survey.nudgeExecutable && jq ),
+               "installed=\"" + std::string( installed ? "1" : "0" ) + "\" refs=\"" + std::to_string( survey.nudge.size() ) + "\" events_ok=\""
+               + ( eventsOk ? "1" : "0" ) + "\" exec=\"" + ( survey.nudgeExecutable ? "1" : "0" ) + "\" jq=\"" + ( jq ? "1" : "0" ) + "\"" };
+    if( !out.ok ) { out.attrs += " hint=\"" + std::string( hint ) + "\""; }
+    return out;
+}
+
 inline std::string tomlString( std::string_view section, std::string_view key )
 {
     const std::size_t at = section.find( key );
@@ -297,7 +315,10 @@ inline std::vector<Check> claudeInspect( const std::string& selfPath )
     Check skills = skillsCheck( claudeHome / "skills" );
     skills.name = "claude-skills";
     retargetHint( skills, "run bash skills/install.sh --claude to restore exact manifest parity" );
-    return { binary, skills, claudeHooksCheck( claudeHome / "settings.json" ) };
+    return { binary, skills, claudeHooksCheck( claudeHome / "settings.json" ),
+             legendSeenCheck( "claude-legend-seen", claudeHome / "settings.json", "ripwire-legend-seen.sh",
+                              { "PreToolUse", "PostToolUse", "SessionStart", "PreCompact" },
+                              "run bash skills/install.sh --hook-legend-seen to repair it (and put jq on PATH)" ) };
 }
 
 inline std::vector<Check> inspect( const std::string& selfPath )
@@ -306,7 +327,10 @@ inline std::vector<Check> inspect( const std::string& selfPath )
     const std::filesystem::path agentHome = envOr( "AGENTS_HOME", home + "/.agents" );
     const std::filesystem::path codexHome = envOr( "CODEX_HOME", home + "/.codex" );
     return { binaryCheck( selfPath ), skillsCheck( agentHome / "skills" ), hooksCheck( codexHome / "hooks.json" ),
-             mcpCheck( codexHome / "config.toml" ) };
+             mcpCheck( codexHome / "config.toml" ),
+             legendSeenCheck( "codex-legend-seen", codexHome / "hooks.json", "ripwire-codex-legend-seen.sh",
+                              { "PreToolUse", "PostToolUse", "SessionStart" },
+                              "run bash skills/install.sh --codex --hook-legend-seen to repair it (and put jq on PATH)" ) };
 }
 
 }   // namespace rw::codexdoctor

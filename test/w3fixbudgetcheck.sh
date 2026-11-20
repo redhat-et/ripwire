@@ -43,6 +43,20 @@
 #   HL    no "(ceiling)" drop and no "task_echo: dropped" in the header; task= verbatim; route= kept when the default has it.
 # The user-text findings (M2/M3 hostile bytes, the M1 charge, the --recall disclosure, determinism) are unchanged:
 # --recall --max-tokens keeps its hard ceiling and its biconditional (arm 5).
+#
+# H2 ACKED AND STILL RED on integration/070-1120 (2026-11-20, owner ruling 105). THE CELL, named so a reader never has
+# to re-derive it: lens --pack-task, task length `mid`, budget 3000 — the top budget step of that series, judged against
+# the 1600 step below it — reporting `the 9 row(s) served do not extend the 4 served at the budget below — RP is not a
+# growing rank prefix`. ONE of the 24 (task length x budget x lens) points; the other 23 hold, the non-vacuity arm is
+# green at 19 of 24 (so RP was judged on blown targets, not assumed), and main passes the whole arm — the behaviour
+# travels with the --pack-task D1 rebuild on the cb1/r1b chain, not with the merge. IT CANNOT BE OTHERWISE HERE: RP is a
+# property of --pack-task's own per-section share assembly, which this gate itself calls a SOFT target; making the
+# 3000-budget page a rank prefix of the 1600-budget one is a product change in that share rule, owned by the lane that
+# rebuilt --pack-task, and no merge resolution on an integration branch can perform it. Nothing in this gate was
+# relaxed, no point was dropped from the grid, and the arm still fails: the ack records the judgement, it does not
+# suppress the finding.
+# REVISIT: with the --pack-task section-share owner as part of 0.7.0's budget work. A fix shows here as
+# `ST/RP/NX/NOLBL/HL hold at all 24 points` with no further bookkeeping, because the message already names the cell.
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"

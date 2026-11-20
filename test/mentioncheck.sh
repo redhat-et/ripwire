@@ -347,7 +347,9 @@ CAP="$( headOf "does hybrid_search call helper() or ranking::rescore to rank sea
 if printf '%s' "$CAP" | grep -q 'mention_syms_capped="1" mention_syms_total="3"' && printf '%s' "$CAP" | grep -q 'mention_anchored="2"'; then
     ok "vii three named identifiers: two lift, the third is disclosed (mention_syms_capped=\"1\" mention_syms_total=\"3\")"
 else no "vii cap: expected mention_anchored=\"2\" with mention_syms_capped=\"1\" mention_syms_total=\"3\""; fi
-ORD="$( headOf 'does helper() call ranking::rescore before `hybrid_search` to rank search results' )"
+# --no-verb-route: a backticked `hybrid_search` plus "call" is a who-calls question the route answers with --callers (RT1/RT2,
+# verbs_forroute.h); this arm reads the ranked --for answer's mention lifts
+ORD="$( headOf 'does helper() call ranking::rescore before `hybrid_search` to rank search results' --no-verb-route )"
 if [ -n "$( servedRank "$ORD" helper )" ] && [ -n "$( servedRank "$ORD" rescore )" ] && [ -z "$( servedRank "$ORD" hybrid_search )" ]; then
     ok "vii cap order is task-text order: helper and rescore lift, the later backticked hybrid_search is the one refused"
 else no "vii cap order: helper r=$( servedRank "$ORD" helper ) rescore r=$( servedRank "$ORD" rescore ) hybrid_search r=$( servedRank "$ORD" hybrid_search ) (want the last absent)"; fi

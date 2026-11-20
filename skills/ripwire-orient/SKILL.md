@@ -11,239 +11,53 @@ allowed-tools: Bash, Read
 
 # Orient with ripwire
 
-> Routing — pick the right door:
-> • Tracing one call graph / locating a literal → **ripwire-navigate**.
-> • Vetting your OWN diff before you push → **ripwire-change-check**.
-> • Risk in code you did NOT write / an unfamiliar subsystem → **ripwire-fresh-eyes**.
-> • Map-before-you-read token discipline (any info need, mid-task) → this skill's companion **[`map-before-you-read.md`](map-before-you-read.md)** (folded in from the former `efficient` skill, 2026-09-07).
-> • Deep architecture-health read (deps metrics, layering rules, --arch gate) → **ripwire-layers**.
-> • Not sure which skill? → **ripwire-router**.
+> Routing: a named symbol → **ripwire-navigate** · vetting your own diff → **ripwire-change-check** · risk in
+> code you did not write → **ripwire-fresh-eyes** · architecture gates → **ripwire-layers** · unsure →
+> **ripwire-router**.
 
-`ripwire` is on your PATH. First call on a tree parses (~1s even at 1500 files); every call after is warm
-(auto-cached, ~instant), so chaining several rungs is nearly free. `<dir>` = the repo root or the specific
-subsystem you're working in — also accepts a remote `ripwire <git-url>` (shallow-clones to a temp cache, so
-you can orient in a dependency before ever cloning it) — or several roots for a split checkout,
-`ripwire dir1 dir2 --report`: ONE merged, root-labeled map instead of two separate mental models.
+`ripwire` is on your PATH. The first call parses (~1s at 1,500 files); every call after is warm. `<dir>` = the
+repo root or the subsystem; a `git-url` or several roots (`ripwire dir1 dir2 --report`) also work.
 
-**Orient ONCE per session, then look up lean.** Plain `ripwire <dir>` is the one-call orient: the ranked map with
-the subsystems, the program entries and every file the ranking left out (`<inv>`). Only that call carries `<inv>`:
-a `--for`, `--expand` or `--max-tokens` map does not, and `--max-tokens` drops the tier (use `--top-k` to keep it).
-After it, `--expand` / `--outline` / `--whereis` / `--callers` answer with no ride-along map. If you skipped the
-orient step, the `map_next=` on an `--expand` root is the call that prints it.
+## The decision: which rung answers your question — stop at the first one that does
 
-## The escalation ladder — climb only until you feel oriented
+| You need | Run |
+|---|---|
+| what past sessions or design docs already say (do this first; a doc may already answer) | `ripwire <dir> --recall="<the task>"` |
+| the one-call orient: ranked map, subsystems, program entries, the files the ranking left out (`<inv>`) | `ripwire <dir>` (once per session) |
+| an architecture summary a human can read: modules, god-files by `afferent`, cycles | `ripwire <dir> --report` |
+| "where is the code for X / how does X work" | `ripwire <dir> --for="<the task in your own words>"` |
+| everything at once under a budget: ranking + top bodies + callers + notes + tests | `ripwire <dir> --pack-task="<task>" --legend=compact` |
+| a file-by-file view, or cohesive modules | `ripwire <dir> --tree --legend=compact` · `ripwire <dir> --communities --legend=compact` |
 
-**0. Recall what you already KNOW** — `ripwire <dir> --recall="<the task>"`
-The most relevant DOCS' FULL bodies (docs only, so code never swamps them — markdown memory notes,
-planning/design docs, skills, READMEs, plus `.ipynb`/`.html`/`.csv`/Office/PDF via the optional
-markitdown bridge). Point it at the **memory dir** for what past sessions learned, or the **repo root** for
-plans/designs — ~47× fewer tokens than loading everything. A design doc may already answer the question; if
-so, stop here. It also works unmodified as a zero-setup knowledge base over a scratch dir of dumped tool
-output (a git log, fetched docs, `--help` text) — not just a source repo. Two conditions are yours to meet
-when you WRITE the dump: dump it as `.md` (`.txt`/`.log`/`.json` are not documents to `--recall`, and a dir
-of them answers `0 relevant of 0 document files`), and keep `##` headings in it, so a deep answer is served
-as a ranked section instead of waiting behind a front-first cut. Raising `--max-tokens` then grows what ONE
-already-served document gets — that per-document guarantee is not global: dump several documents into one
-dir and admitting another one re-divides the shared budget, which can shrink an already-served document's
-own slice (`share_bytes=` in the header discloses it). Full form in
-[`map-before-you-read.md`](map-before-you-read.md); the recorded run is `docs/COMMANDS.md`'s `--recall`
-pattern subsection.
+A `--for` answer comes answer-first in ~12 KB pages; stop once the answer is in hand, else its `next=` (`--page-bytes=N:K`)
+is the next page.
 
-**1. Architecture summary** — `ripwire <dir> --report`
-Plain markdown: file + symbol count, call-graph modules (Louvain clusters with lead symbol), god-files
-ranked by `afferent` (dependents), cycle list, top PageRank symbols. **Read the god-file list carefully** —
-highest-leverage, highest-risk files. For most "orient me" asks this one rung is enough.
+After the orient call, look up lean: `--expand` / `--outline` / `--whereis` / `--callers` answer with no
+ride-along map. Then read only the files ripwire ranks highest (god-files and hotspots first) — not a grep sweep.
 
-**2. Task-relevant code** — `ripwire <dir> --for="<the task in your own words>"`
-Ranked signatures + doc-comments + cx/in metrics by relevance (matches names, docs, AND bodies — not just
-identifiers). This is the rung that answers "where's the code for X".
-**What the bundle serves depends on which way the query routed, and the root says which.**
-*Named a symbol* (`bundle="auto" bodies="N"`): the anchor's FULL body rides inline, CDATA plus callee
-signatures — **read it here instead of opening the file the map named**, that follow-up read is the cost
-this default deletes. `bodies="0" reason="budget"` means it did not fit whole.
-*Conceptual phrase* (`bundle="compact" bodies="0" reason="compact-route"`): no bodies — you get the ranked
-map plus a `<hops>` section, one row per top-ranked symbol with its one-hop callee names. **Read the map,
-pick ONE symbol, then `--expand=path:name`** (paste the row's own `p=` and `n=`; a bare name that is not
-unique serves every definition, still without the map). That is the flow, and it is cheaper than the bodies were: half the bytes
-of the old bundle on conceptual queries, and the edges tell you which symbol is worth the second call.
-`--auto-bodies` restores inline bodies on that route if you want them; `--signatures-only` drops both
-shapes; `--detail=N` picks the body count explicitly.
-**Composing a selector out of a row** (the map's rows and `--for`'s alike): a scoped row carries `sc=`, its
-enclosing scope, instead of repeating its whole id — the canonical id is `p::sc::n`, assembled from the
-row's own `p=` (or the `<f p=>` it sits under), `sc=` and `n=`. Every selector (`--expand`, `--callers`,
-`--impact`, `--uses`) accepts that composed `path::scope::name`, so paste the three parts, not a bare name.
-`--for` **auto-routes** (default, no flag needed): a query that *names a symbol* (`--for="buildGraph"`) gets
-name-exact BM25 (recall@1 ~99% vs ~77% generic) — **know the name, query it verbatim**; a conceptual phrase
-uses subtoken+body BM25 instead. The header prints which ranker fired; `--no-route` forces the plain ranker.
-**Asking in a sentence? Backtick the code.** "Which functions call `pkg.Fn` and must change?" gets `<callers by="subject">`,
-and "the call chain from `A` to `B`" / "what calls both `A` and `B`" get the `<graph_verb>` path or connect block, as the bare
-names do. When a sentence's answer ends with `<reask next="--callers=X"/>` (`--impact=X` for a change question, or `--path=A,B`)
-instead, run that bare call: it is the one that answers the question. A hand-off marked `windows="1"` appended no page because the
-verb's default call would list only the first 40 of `next_total=` rows: run its `next=` as written (`--format=columnar
---limit=<next_total>`), the one call that lists every row, instead of paging.
-It also **anchors query mentions** by default — a file/module/`Type.method` literally named in the task text
-gets lifted near the top (+4.9pp held-out; a task naming nothing indexed is byte-identical); disable with
-`--no-mention-boost`. It also surfaces DOCS: a markdown design/plan doc that `backtick`-names one of the
-query's top-resolved symbols is lifted into the bundle too (strictly below that symbol's own score) — the
-doc explains it even when its own prose shares no words with your query; disable with `--no-doc-mention`.
-**When the answer comes back THIN, widen before you read.** A thin `--for` answer — the head spread over
-fewer than three files, or `coverage=` under 50 — says so on the root: `coverage="N"` is the IDF-weighted
-share (whole percent) of your query's subtokens found in the top-ranked symbol's name, doc or body, and it
-rides the root **only** on a thin answer (a confident one carries neither the attribute nor its clause).
-The step then is not a body, it is a wider net: `ripwire <dir> --for="<task>" --limit=40` serves the
-FILE-GRAIN page — one row per file holding any positive-score symbol, `score=`/`n=`/`sym=` per row,
-`--offset=M` for the next page. A thin answer's own `next=` names that page for you; reach for it on the
-FIRST call when the task is vague enough that one ranked head is unlikely to hold the answer.
-`--adaptive` cuts the result at the relevance cliff instead of a fixed top-k. Same
-routing in the MCP `for` verb. Orienting from a pasted issue/bug-report's own text? `--anchor` beats plain
-`--for` on Loc-Bench (n=560) — a mild win, not a default (`bench/locbench/README.md`). `--cochange-boost` is
-an experimental, off-by-default co-change prior — see `ripwire --help` before reaching for it.
+**Resuming after a compaction** (you know the task, not your last hour): `ripwire . --recall="<the task>"` →
+`ripwire . --situ` (what the working tree already changed + tests to run) → `ripwire . --notes` (gotchas
+already paid for). Cheaper and more accurate than re-reading source.
 
-**3. File-by-file map** — `ripwire <dir> --tree --legend=compact` — each file with its top symbols, a quick "what's where".
+**Learned a gotcha?** Pin it: `ripwire . --note-add="SYM_or_path: the decision, not a description"`. It
+surfaces by itself whenever `--for`/`--expand` later emit that symbol.
 
-**4. Cohesive modules** — `ripwire <dir> --communities --legend=compact` — `<communities modules="N">`, each cluster with its
-dominant directory and lead symbols; `<bridge>` edges show tight coupling between clusters. Use it to decide
-where a new feature belongs. Each row shows only its top five members — to see one module in full,
-`ripwire <dir> --community=ID --legend=compact` (the `id=` from a row, or from `--zoom`): its complete ranked member list
-(`--limit`/`--offset` page it) plus every bridge edge that module has. That is the call to make when a
-cluster looks like the one you'll be working in and five names aren't enough to judge it.
+**A symbol you expected is missing:** a header `skipped_oversize=N` means files were dropped for size —
+`ripwire <dir> --skipped --legend=compact` lists them; if the file is not there, `--doctor` checks the setup.
 
-**5. Maintenance pain** — `ripwire <dir> --hotspots --legend=compact` — files ranked by `score = churn × ccx`; `top=` names
-the gnarliest function. Plan edits around this list.
+## Stop rule and trust
 
-**6. Budget it** if the map is large — `--max-tokens=8000` or `--top-k=50`. Both shape the default map;
-a positive, explicit `--top-k` is inert on plain `--for` (it warns on stderr and emits the full bundle) —
-bound a `--for` call with `--signatures-only`, `--token-budget=N` or `--detail=N` instead.
-When the ranked rows leave files out, the map ends with `<inv>`: the program entries (`<entry>`, by each language's entry convention)
-and every unshown file, named or counted per directory (`<ls>`). Read it before concluding a file or entry point is
-not there; `--no-inventory` drops it (the rows are unchanged), and so does `--max-tokens` — `--top-k` keeps it.
+Stop at the first rung that answers. A thin `--for` answer means widen the query before you read, not read
+everything. A zero means "none found", never "none exists"; a count marked as a floor is not a total; `amb="K"`
+on a symbol means K of its calls hit an ambiguous name — read the source if the target matters.
 
-## Orienting N agents at once, not yourself — `--partition=N`
+## Reference files — read only the one you need
 
-About to fan a single task out to several parallel agents? Do **not** let each one run its own
-`--pack-task` — they will each re-derive the same top symbols, the same bodies, the same tests, and you
-pay for the map N times. Run it **once**:
-
-```bash
-ripwire <dir> --pack-task="<the task in words>" --legend=compact --partition=4
-```
-
-You get one `<ctx-partitions>` document: a **shared common core** (the anchors the task is literally about,
-what every agent needs) plus **N per-agent slices** carved along the call graph's own Louvain communities,
-so a slice is a union of whole modules rather than an arbitrary rank cut (symbols the call graph is silent
-about — edgeless data types — group by *file* instead, so one header's structs stay together). Each `<bundle>` wraps a complete,
-standalone bundle — hand one bundle to one agent verbatim. `--token-budget` here means **one agent's**
-budget (core + its slice), not the document's; `--json` gives the same plan machine-readably. MCP: the same
-thing as a `partition` argument on the `explore` verb.
-
-**Read the wrapper attributes before you trust the split** — the verb reports its own quality:
-`overlap_max` (worst pairwise Jaccard between slices; low = the agents really are reading different code),
-`split="K"` (K>0 means there were fewer modules than agents, so a module was cut at its rank median — the
-slices are less semantically clean), `partitions` < `requested` (the task's surface could not supply N
-separable slices at all — take fewer agents), and `core_overlap` (how much of the core a slice reaches
-anyway). On a task whose whole surface sits inside one module, a partition is a rank cut, not a module
-boundary — one `--pack-task` and one agent is the honest answer there.
-
-## When a flat module list is too coarse (big repos) — zoom out
-
-**7. Nested module hierarchy** — `ripwire <dir> --zoom --legend=compact` (`--zoom=DEPTH` to cap levels; the default prints the top 2
-levels of the 40 largest modules — `shown_levels=`/`shown=` disclose it, `next=` pastes the next page, `--zoom-levels=0`
-prints every level): multi-level Louvain,
-`<module level=N id= size= dir=>`, indent = one level deeper, innermost `level="0"` lists top-ranked members.
-Read top-down; a `dir=` that doesn't match its parent's is a cross-cutting concern in the wrong place.
-Trailing `<bridge …>` entries name the high-traffic integration seams *between* top modules — pair with
-`--seams` to see which ones no test reaches.
-
-**8. Render it** — `ripwire <dir> --zoom --mermaid` (or `--mermaid` for the flat module graph): a
-`flowchart TB`, paste at mermaid.live. For hand-exploring, `ripwire <dir> --html[=FILE]` writes a
-self-contained clickable wiki (module cards → subgraphs → Sourcetrail-style node recentering, no CDN);
-`--color-by=community|cx|churn|tested` sets its initial node-colour lens (a live selector covers the rest).
-Working inside a `--for`/`--pack-task` bundle instead of a whole-repo pass? Add `--with-graph` to that
-same call — it appends a tiny `<graph fmt="mermaid">` block (top-8 ranked anchors + their 1-hop call
-edges) right in the bundle, no second call.
-
-**9. Export it** — `ripwire <dir> --export=cc.json[:FILE]` — per-file metrics (loc, cx, fan-in/out, churn) as
-a CodeCharta `cc.json` for its 3D city view; the ladder's visualization end-point, not a map to read.
-
-## Then read, and trust the honesty signals
-
-**Read the specific files ripwire surfaces** (god-files + hotspots first) — don't grep blindly. A symbol's
-`amb="K"` means K of its calls are ambiguous (the resolver guessed) → read the source if which-target
-matters. A map header showing `skipped_oversize=N` means N otherwise-indexable files were dropped for
-exceeding a size ceiling — they are absent from `files=` and every ranking; `ripwire <dir> --skipped --legend=compact`
-names them (path + bytes + the ceiling that dropped each), so you know what the index cannot show you
-before you trust a "not found". A git root also drops every `.gitignore`d path by default (header `ignored_files=N`, absent when 0; `--skipped` lists them); `ripwire <dir> --no-ignore --legend=compact` restores the full walk when the symbol you want lives in an ignored tree. Caveat: *broad, common-word* questions can still favor plain `rg` —
-ripwire shines on specific technical asks. CI-enforceable module boundaries graduate to
-`--arch=rules.txt` (see **ripwire-layers**).
-
-## Leave a note for next time — the gotcha you just learned (field notes)
-
-The most expensive thing you rebuild across sessions is **gotchas, not structure**. When you learn a
-non-obvious fact about a symbol or file (a race trap, an off-by-one seam, "don't touch this without
-re-running X"), pin it so the *next* orientation surfaces it automatically:
-
-```bash
-ripwire . --note-add="Bar::compute: recompute is NOT idempotent — reset the arena first"
-ripwire . --note-add="src/pool.h: 128-byte cache line on Apple, never hardcode 64"   # a file also works
-```
-
-The TARGET is **a symbol name or a path**. A symbol resolves through the same resolver the read verbs use,
-so every spelling they accept works here — a bare name, `file:name`, `Scope::name`, the canonical id
-`path::scope::name`, `@FILE:LINE` — and is **canonicalised to the canonical id on write** (that is the id
-notes are keyed by; the rewrite is echoed on stderr). A name matching several definitions is refused, naming
-each; a name matching none is refused with a did-you-mean. A path is written even when nothing indexed
-matches it yet — a note on a file you are about to add is legal — with a loud warning that it is dangling.
-Notes live in committed `.ripwire_notes` and **surface on their own** — whenever `--for`/`--expand` emit that
-symbol/file, the note rides along as a `<note d="date">…</note>` child. `ripwire . --notes` lists every note
-(`dangling="1"` = target no longer in the tree). `--recall=TASK` is the doc-level complement.
-`--note-add` nudges (stderr, non-blocking) toward writing the decision, not a description — a note that
-keeps firing on the same symbol has outgrown a comment: graduate it into a `--quality-ack` reason or a
-standing `--arch` deny rule.
-
-## Resuming — a compaction, or a new session on work already in flight
-
-A different moment from a cold start: you are **not** cold on the repo, you are cold on **your own last
-hour**. The task is known; what evaporated is the reasoning, the gotchas already paid for, and what you had
-half-changed. Re-reading source rebuilds the *least* valuable of those. Run the three verbs that rebuild the
-rest, in this order:
-
-```bash
-ripwire . --recall="<the task, in the words you'd use>"   # 1. what past sessions WROTE DOWN
-ripwire . --situ                                          # 2. what the working tree already CHANGED
-ripwire . --notes                                         # 3. gotchas already paid for
-```
-
-1. **`--recall`** returns the *full bodies* of the most relevant markdown only — memory notes,
-   planning/design docs, READMEs — so code can't swamp them. This is the decisions-and-rationale layer that a
-   compaction destroys and that source code never contained in the first place. Point it at your memory dir
-   for past-session memory, or the repo root for the project's plans.
-2. **`--situ`** (defaults to `git diff`) tells you what you had already changed, its blast radius, the tests
-   to run, and the co-change partners you hadn't touched yet — i.e. where you actually stopped, and what you
-   were about to break. This is the step that most often reveals work-in-flight you would otherwise redo.
-3. **`--notes`** lists every pinned gotcha (`dangling="1"` = its target is gone). Anything relevant will also
-   re-surface on its own once `--for`/`--expand` emit that symbol — see the section above.
-
-Then, and only then, escalate the ladder for whatever is still missing. Two honest cautions: `--recall`
-returns what the docs **claim**, not what is still true — a stale plan doc reads exactly as confidently as a
-current one, so trust `--situ`'s working-tree facts over a doc when they disagree. And `--situ` carries **no
-`at=` commit stamp**, so if you are resuming across a rebase or a moved HEAD, record `git rev-parse --short
-HEAD` yourself before you quote anything from it.
-
-**Before the next compaction, spend the note.** The compaction you are recovering from is the argument for
-`--note-add`: a gotcha written to `.ripwire_notes` survives a context reset; one held only in context does
-not. When you are deep in a task and learn something non-obvious, pin it *then* — not at the end.
-
-## Output
-
-Orientation summary: the 3–5 most important files (from god-files + hotspots), the main architectural
-modules (from `--communities` / `--zoom`), any cycles (from `--report`), and one sentence on overall shape.
-Use it to decide where a change belongs and which boundary a refactor should respect.
-
-## Mid-task: about to open several files for one question
-
-The same skill, a different rung: run the cheapest verb that answers the question (`--for`, `--grep`, `--expand`,
-`--pack-task` under a `--token-budget`), then read only the 2-3 files it ranks highest. Less context is measurably
-MORE accurate, not just cheaper. The full discipline — the read ladder, `--pack-task --partition=N` for fan-out,
-whole-symbol edits without a whole-file Read, the portable `--cache=FILE` one-liner — is
-**[`map-before-you-read.md`](map-before-you-read.md)**; the detail/token squeeze once you are reading a body is
-**[`compress-ladder.md`](compress-ladder.md)**. Both load on demand; neither is a separate skill.
+| You need | Read |
+|---|---|
+| every rung in full: `--recall` dump rules, `--for` routing and selectors, thin-answer widening, budgets | `ladder.md` |
+| orienting N agents at once (`--partition=N`, `--plan-lanes`), or a big repo (`--zoom`, `--mermaid`, `--export`) | `partition-zoom.md` |
+| writing a brief for a subagent: the two lines to paste (orient with `--for`; `--quality-delta` then `--test-gate` before done) | `subagent-brief.md` |
+| honesty signals in full, field notes, resuming, mid-task reads | `notes-resume.md` |
+| the map-before-you-read discipline for any read, mid-task (`--expand`, symbol-range reads, edit verbs) | `map-before-you-read.md` |
+| squeezing a body you are already reading (`--compress`, `--outline`, the detail ladder) | `compress-ladder.md` |
