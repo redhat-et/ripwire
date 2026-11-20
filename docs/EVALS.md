@@ -19429,3 +19429,13 @@ base binary: P1, P1w, P1m and P2 gate.
 **Not claimed.** A member cut to under half, an overload under a member's key, and a group of more than four members
 are judged as before, so they still gate. So does a body the base commit could not be read for. `--clones` does not read
 the verdict.
+
+**Verification (built lane head).**
+- Byte identity on stdout, stderr and rc, base binary vs lane: on this repo, 16 of 16 calls match (map ×2, `--clones`,
+  two `--for`, `--callers`/`--impact` on four names, MCP `find_symbol` ×2 and `tools/list`). On tmux, textual and hono,
+  9 of 9 calls match (map, `--clones`, `--for`).
+- Two refactors here are covered by these runs: the keying rule moved into `definitionQualityKey`, and the body-start
+  rule into `rawDefBodyStart`, which the Symbol build reads too.
+- `--quality-delta=e629c8c68..HEAD` gates 0. One one-statement pair is acked as a qd false positive:
+  `pathQualifiedKey(relPath, Symbol) | symbolHasStaticLinkage`.
+- The langidentity ceiling falls from 325 to 324.
