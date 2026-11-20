@@ -841,6 +841,7 @@ for _g in \
     packtaskmonotoncheck \
     packtaskquotacheck \
     padscalecheck \
+    pagenextlegendcheck \
     paginationcheck \
     pagingsweepcheck \
     panellegendcheck \

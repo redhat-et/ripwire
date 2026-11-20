@@ -123,7 +123,9 @@ namespace rw
 // Trailing space-free and punctuation-free so a caller decides whether ". " or " " follows.
 inline constexpr const char* kPageRaiseCapClause =
     "raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a "
-    "paging loop can continue from it); on the root, limit=\"0\" means no explicit limit was given and the verb's "
+    "paging loop can continue from it, and that continuation can be taken with --legend=dict because this answer "
+    "already sent you its prose — it drops no row, only prose); on the root, limit=\"0\" means no explicit limit "
+    "was given and the verb's "
     "own default page size shaped the window — never a zero-row page";
 
 // The window over an ALREADY-SORTED result of `total` rows. Half-open [begin,end). Default (limit<=0) is the
