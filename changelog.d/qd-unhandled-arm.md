@@ -11,4 +11,5 @@ names what is left out (XML, `--json` and MCP). Because the site names the missi
 enum gives a row on every switch it leaves incomplete, even an untouched one. A default/`*)`/`else`, full coverage,
 a comment that states the omission, a void dispatcher, an `#if` in the switch or the enum, and generated code give
 no row. Rust and TypeScript stay out (the compiler checks `match`; TS has no never-check reading yet). The quality
-snapshot scheme moves to 38, so an older snapshot cache is rebuilt once.
+snapshot scheme moves to 38, so an older snapshot cache is rebuilt once; the legend dictionary moves to
+`dictv=eff76dcb3b5cee65 entries=1166`.
