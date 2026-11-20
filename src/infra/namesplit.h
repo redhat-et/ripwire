@@ -168,7 +168,7 @@ inline std::size_t lastTopLevelScopeSep( std::string_view text ) noexcept
     for( std::size_t cursor = text.size(); cursor > 0; --cursor )
     {
         const std::size_t charIndex = cursor - 1;
-        const char        c         = text[ charIndex ];
+        const char c = text[charIndex];
         if( c == '>' )
         {
             ++angleDepth;
@@ -177,9 +177,9 @@ inline std::size_t lastTopLevelScopeSep( std::string_view text ) noexcept
         {
             --angleDepth;
         }
-        else if( c == ':' && angleDepth == 0 && charIndex > 0 && text[ charIndex - 1 ] == ':' )
+        else if( c == ':' && angleDepth == 0 && charIndex > 0 && text[charIndex - 1] == ':' )
         {
-            return charIndex - 1;                                 // index of the FIRST ':' of the pair
+            return charIndex - 1; // index of the FIRST ':' of the pair
         }
     }
     return std::string_view::npos;
