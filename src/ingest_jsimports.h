@@ -572,6 +572,176 @@ inline void recordJsObjectLiterals( TSNode decl, Lang lang, std::uint32_t fileId
     }
 }
 
+// GE-JSIMPORTS: the one way captureJsImportFacts' steps append a RawBind — the file and language every record of one file
+// shares, the node's start byte, the kind and name, and (when given) the scope's span. add() returns the record it appended,
+// for the caller to fill the facts its own form knows (module, imported name); the reference holds only until the next add().
+struct JsBindRecorder
+{
+    std::uint32_t         fileId;
+    Lang                  lang;
+    std::vector<RawBind>& binds;
+
+    RawBind& add( TSNode node, LocalBindKind kind, const std::string& name, TSNode scope ) const
+    {
+        RawBind bind;
+        bind.fileId    = fileId;
+        bind.lang      = lang;
+        bind.startByte = ts_node_start_byte( node );
+        bind.kind      = kind;
+        bind.var       = name;
+        if( !ts_node_is_null( scope ) )
+        {
+            bind.spanStart = ts_node_start_byte( scope );
+            bind.spanEnd   = ts_node_end_byte( scope );
+        }
+        binds.push_back( bind );
+        return binds.back();
+    }
+};
+
+// GE-JSIMPORTS: one ES `import … from 'm'` statement — a JsImport per default or named specifier (its local spelling, the
+// module, and the export spelling it requests unless type-only) and a ModuleAlias per `* as ns`; every local joins
+// `imported`, the names the shadow walk looks for.
+inline void captureJsImportStatement( TSNode stmt, TSNode root, std::string_view src, const JsBindRecorder& recorder, HashMap<std::string, char>& imported )
+{
+    TSNode source = fieldChild( stmt, NodeField::Source );
+    if( ts_node_is_null( source ) ) { return; }
+    const std::string module = importSpecifierText( source, src );
+    struct Item { TSNode node; TSNode parent; };   // JS-CAPTURE-COLD: the parent the walk already knows, not ts_node_parent
+    std::vector<Item> pending{ { stmt, root } };
+    while( !pending.empty() )
+    {
+        const TSNode node   = pending.back().node;
+        const TSNode parent = pending.back().parent;
+        pending.pop_back();
+        const bool isDefault = jsNodeIs( node, "identifier" ) && jsNodeIs( parent, "import_clause" );
+        if( isDefault || jsNodeIs( node, "import_specifier" ) )
+        {
+            TSNode name = isDefault ? node : fieldChild( node, NodeField::Name );
+            TSNode alias = isDefault ? node : fieldChild( node, NodeField::Alias );
+            if( ts_node_is_null( alias ) ) { alias = name; }
+            if( !jsNodeIs( alias, "identifier" ) ) { continue; }
+            std::string local( pattern::nodeText( alias, src ) );
+            imported.try_emplace( local, 1 );
+            RawBind& bind = recorder.add( stmt, LocalBindKind::JsImport, local, {} );
+            bind.typeName = module;
+            if( !jsHasToken( stmt, "type" ) && !jsHasToken( node, "type" ) && jsNodeIs( name, "identifier" ) )
+            {
+                bind.importedName = isDefault ? "default" : std::string( pattern::nodeText( name, src ) );
+            }
+            else if( !isDefault && jsNodeIs( name, "identifier" ) && pattern::nodeText( name, src ) == pattern::nodeText( alias, src ) )
+            {
+                // lane receiver-fixes (TS-FIELD-SELF): a TYPE-only `import type { T }` binds no value (importedName stays "", so no
+                // call pins through it), but its local IS the module's export name: graph.h buildJsImportTables reads it as not
+                // renamed, so an interface T a field or local is typed as finds its module (receiverevidence.h importedTypeClass)
+                bind.isFromAssignment = true;
+            }
+        }
+        else if( jsNodeIs( node, "namespace_import" ) && !jsHasToken( stmt, "type" ) )
+        {
+            // FE-A: `import * as ns from 'm'` binds the MODULE; graph.h FalseEdgeRules reads `ns.f()` through it
+            ChildCursor nsCursor( node );
+            std::vector<TSNode> nsKids;
+            collectChildren( node, nsCursor.cur, nsKids );
+            for( TSNode kid : nsKids )
+            {
+                if( !jsNodeIs( kid, "identifier" ) ) { continue; }
+                std::string local( pattern::nodeText( kid, src ) );
+                imported.try_emplace( local, 1 );
+                RawBind& bind    = recorder.add( stmt, LocalBindKind::ModuleAlias, local, {} );
+                bind.typeName     = module;
+                bind.importedName = "*";
+            }
+        }
+        else if( jsNodeIs( node, "import_statement" ) || jsNodeIs( node, "import_clause" ) || jsNodeIs( node, "named_imports" ) )
+        {
+            ChildCursor childCursor( node );
+            forEachChild( node, childCursor.cur, [ & ]( TSNode child ) { pending.push_back( { child, node } ); return true; } );
+        }
+    }
+}
+
+// GE-JSIMPORTS: `export default …` — one JsExport "default" over the program, naming its local binding when the value is a
+// module identifier bound once, or the declared function/class (its span narrowed to the declaration) when that name is bound once.
+inline void captureJsDefaultExport( TSNode stmt, TSNode root, std::string_view src, const JsBindRecorder& recorder )
+{
+    TSNode decl  = fieldChild( stmt, NodeField::Declaration );
+    TSNode value = fieldChild( stmt, NodeField::Value );
+    TSNode name{};
+    if( !ts_node_is_null( decl ) ) { name = fieldChild( decl, NodeField::Name ); }
+    RawBind& bind = recorder.add( stmt, LocalBindKind::JsExport, "default", root );
+    if( jsNodeIs( value, "identifier" ) && jsModuleBindingCount( root, pattern::nodeText( value, src ), src ) == 1 )
+    {
+        bind.importedName = std::string( pattern::nodeText( value, src ) );
+        return;
+    }
+    const bool declaresFunctionOrClass = jsNodeIs( decl, "function_declaration" ) || jsNodeIs( decl, "generator_function_declaration" )
+                                      || jsNodeIs( decl, "class_declaration" ) || jsNodeIs( decl, "abstract_class_declaration" );
+    if( declaresFunctionOrClass && ( jsNodeIs( name, "identifier" ) || jsNodeIs( name, "type_identifier" ) )
+        && jsModuleBindingCount( root, pattern::nodeText( name, src ), src ) == 1 )
+    {
+        bind.spanStart    = ts_node_start_byte( decl );
+        bind.spanEnd      = ts_node_end_byte( decl );
+        bind.importedName = std::string( pattern::nodeText( name, src ) );
+    }
+}
+
+// GE-JSIMPORTS: one `export …` statement. The default form (captureJsDefaultExport), the clause form, and the declaration form:
+//   clause       `export { f as g }` — the scope is the whole PROGRAM: a clause exports a module-scope binding and the declaration
+//                it names may sit anywhere in the file (hoisted, or simply above). importedName is spelled even when it equals `var` —
+//                it is what buildJsImportTables matches a DEFINITION by, and it is what keeps two specifiers of one clause (which
+//                share this statement's start byte) distinguishable to emitBindings' total order.
+//   declaration  `export function f(){}` / `export const f = () => {}` — one JsExport per function, class, or function-valued
+//                declarator, over the declaration; an exported object literal also gets its JsObjectLiteral (recordJsObjectLiterals).
+inline void captureJsExportStatement( TSNode stmt, TSNode root, std::string_view src, const JsBindRecorder& recorder )
+{
+    if( jsHasToken( stmt, "default" ) )
+    {
+        captureJsDefaultExport( stmt, root, src, recorder );
+        return;
+    }
+    TSNode decl = fieldChild( stmt, NodeField::Declaration );
+    if( ts_node_is_null( decl ) )
+    {
+        for( const auto& [ exportName, localName ] : jsExportClauseNames( stmt, src ) )
+        {
+            RawBind& bind = recorder.add( stmt, LocalBindKind::JsExport, exportName, root );
+            if( exportName != "default" || jsModuleBindingCount( root, localName, src ) == 1 )
+            {
+                bind.importedName = localName;
+            }
+        }
+        return;
+    }
+    if( jsNodeIs( decl, "function_declaration" ) || jsNodeIs( decl, "generator_function_declaration" )
+        || jsNodeIs( decl, "class_declaration" ) || jsNodeIs( decl, "abstract_class_declaration" ) )
+    {
+        recorder.add( stmt, LocalBindKind::JsExport, std::string( pattern::nodeText( fieldChild( decl, NodeField::Name ), src ) ), decl );
+        return;
+    }
+    if( !jsNodeIs( decl, "lexical_declaration" ) && !jsNodeIs( decl, "variable_declaration" ) )
+    {
+        return;
+    }
+    recordJsObjectLiterals( decl, recorder.lang, recorder.fileId, src, recorder.binds );
+    ChildCursor declCursor( decl );
+    std::vector<TSNode> declarators;
+    collectChildren( decl, declCursor.cur, declarators );
+    for( TSNode variable : declarators )
+    {
+        if( !jsNodeIs( variable, "variable_declarator" ) ) { continue; }
+        TSNode value = fieldChild( variable, NodeField::Value );
+        if( !jsNodeIs( value, "arrow_function" ) && !jsNodeIs( value, "function_expression" ) ) { continue; }
+        TSNode binding = fieldChild( variable, NodeField::Name );
+        if( jsNodeIs( binding, "identifier" ) )
+        {
+            recorder.add( stmt, LocalBindKind::JsExport, std::string( pattern::nodeText( binding, src ) ), decl );
+        }
+    }
+}
+
+// The file's module-scope import/export facts in statement order — imports, top-level declarations (object literals and
+// CommonJS module aliases), exports — then the shadows of every imported name (JsShadow).
 inline void captureJsImportFacts( TSNode root, Lang lang, std::uint32_t fileId, std::string_view src, std::vector<RawBind>& binds )
 {
     if( lang != Lang::TypeScript && lang != Lang::JavaScript ) { return; }
@@ -581,80 +751,12 @@ inline void captureJsImportFacts( TSNode root, Lang lang, std::uint32_t fileId, 
     HashMap<std::string, char> imported;
     imported.reserve( children.size() );
     HashSet<std::uint32_t>       aliasDecls;   // FE-A: start bytes of the declarators that ARE a ModuleAlias — never their own shadow
-    const auto record = [ & ]( TSNode node, LocalBindKind kind, const std::string& name, TSNode scope )
-    {
-        RawBind bind;
-        bind.fileId = fileId;
-        bind.lang = lang;
-        bind.startByte = ts_node_start_byte( node );
-        bind.kind = kind;
-        bind.var = name;
-        if( !ts_node_is_null( scope ) )
-        {
-            bind.spanStart = ts_node_start_byte( scope );
-            bind.spanEnd = ts_node_end_byte( scope );
-        }
-        binds.push_back( bind );
-    };
+    const JsBindRecorder recorder{ fileId, lang, binds };
     for( TSNode stmt : children )
     {
         if( jsNodeIs( stmt, "import_statement" ) )
         {
-            TSNode source = fieldChild( stmt, NodeField::Source );
-            if( ts_node_is_null( source ) ) { continue; }
-            const std::string module = importSpecifierText( source, src );
-            struct Item { TSNode node; TSNode parent; };   // JS-CAPTURE-COLD: the parent the walk already knows, not ts_node_parent
-            std::vector<Item> pending{ { stmt, root } };
-            while( !pending.empty() )
-            {
-                const TSNode node   = pending.back().node;
-                const TSNode parent = pending.back().parent;
-                pending.pop_back();
-                const bool isDefault = jsNodeIs( node, "identifier" ) && jsNodeIs( parent, "import_clause" );
-                if( isDefault || jsNodeIs( node, "import_specifier" ) )
-                {
-                    TSNode name = isDefault ? node : fieldChild( node, NodeField::Name );
-                    TSNode alias = isDefault ? node : fieldChild( node, NodeField::Alias );
-                    if( ts_node_is_null( alias ) ) { alias = name; }
-                    if( !jsNodeIs( alias, "identifier" ) ) { continue; }
-                    std::string local( pattern::nodeText( alias, src ) );
-                    imported.try_emplace( local, 1 );
-                    record( stmt, LocalBindKind::JsImport, local, {} );
-                    binds.back().typeName = module;
-                    if( !jsHasToken( stmt, "type" ) && !jsHasToken( node, "type" ) && jsNodeIs( name, "identifier" ) )
-                    {
-                        binds.back().importedName = isDefault ? "default" : std::string( pattern::nodeText( name, src ) );
-                    }
-                    else if( !isDefault && jsNodeIs( name, "identifier" ) && pattern::nodeText( name, src ) == pattern::nodeText( alias, src ) )
-                    {
-                        // lane receiver-fixes (TS-FIELD-SELF): a TYPE-only `import type { T }` binds no value (importedName stays "", so no
-                        // call pins through it), but its local IS the module's export name: graph.h buildJsImportTables reads it as not
-                        // renamed, so an interface T a field or local is typed as finds its module (receiverevidence.h importedTypeClass)
-                        binds.back().isFromAssignment = true;
-                    }
-                }
-                else if( jsNodeIs( node, "namespace_import" ) && !jsHasToken( stmt, "type" ) )
-                {
-                    // FE-A: `import * as ns from 'm'` binds the MODULE; graph.h FalseEdgeRules reads `ns.f()` through it
-                    ChildCursor nsCursor( node );
-                    std::vector<TSNode> nsKids;
-                    collectChildren( node, nsCursor.cur, nsKids );
-                    for( TSNode kid : nsKids )
-                    {
-                        if( !jsNodeIs( kid, "identifier" ) ) { continue; }
-                        std::string local( pattern::nodeText( kid, src ) );
-                        imported.try_emplace( local, 1 );
-                        record( stmt, LocalBindKind::ModuleAlias, local, {} );
-                        binds.back().typeName     = module;
-                        binds.back().importedName = "*";
-                    }
-                }
-                else if( jsNodeIs( node, "import_statement" ) || jsNodeIs( node, "import_clause" ) || jsNodeIs( node, "named_imports" ) )
-                {
-                    ChildCursor childCursor( node );
-                    forEachChild( node, childCursor.cur, [ & ]( TSNode child ) { pending.push_back( { child, node } ); return true; } );
-                }
-            }
+            captureJsImportStatement( stmt, root, src, recorder, imported );
         }
         else if( jsNodeIs( stmt, "lexical_declaration" ) || jsNodeIs( stmt, "variable_declaration" ) )
         {
@@ -662,79 +764,15 @@ inline void captureJsImportFacts( TSNode root, Lang lang, std::uint32_t fileId, 
             captureJsModuleAliases( stmt, src, aliasDecls, [ & ]( TSNode declarator, const std::string& local, const std::string& source, const std::string& member, bool fromIdentifier )
             {
                 imported.try_emplace( local, 1 );
-                record( declarator, LocalBindKind::ModuleAlias, local, {} );
-                binds.back().typeName         = source;
-                binds.back().importedName     = member;
-                binds.back().isFromAssignment = fromIdentifier;
+                RawBind& bind        = recorder.add( declarator, LocalBindKind::ModuleAlias, local, {} );
+                bind.typeName         = source;
+                bind.importedName     = member;
+                bind.isFromAssignment = fromIdentifier;
             } );
         }
         else if( jsNodeIs( stmt, "export_statement" ) )
         {
-            TSNode decl = fieldChild( stmt, NodeField::Declaration );
-            if( jsHasToken( stmt, "default" ) )
-            {
-                TSNode value = fieldChild( stmt, NodeField::Value );
-                TSNode name{};
-                if( !ts_node_is_null( decl ) ) { name = fieldChild( decl, NodeField::Name ); }
-                record( stmt, LocalBindKind::JsExport, "default", root );
-                if( jsNodeIs( value, "identifier" ) && jsModuleBindingCount( root, pattern::nodeText( value, src ), src ) == 1 )
-                {
-                    binds.back().importedName = std::string( pattern::nodeText( value, src ) );
-                }
-                else if( jsNodeIs( decl, "function_declaration" ) || jsNodeIs( decl, "generator_function_declaration" )
-                         || jsNodeIs( decl, "class_declaration" ) || jsNodeIs( decl, "abstract_class_declaration" ) )
-                {
-                    if( ( jsNodeIs( name, "identifier" ) || jsNodeIs( name, "type_identifier" ) )
-                        && jsModuleBindingCount( root, pattern::nodeText( name, src ), src ) == 1 )
-                    {
-                        binds.back().spanStart = ts_node_start_byte( decl );
-                        binds.back().spanEnd = ts_node_end_byte( decl );
-                        binds.back().importedName = std::string( pattern::nodeText( name, src ) );
-                    }
-                }
-                continue;
-            }
-            if( ts_node_is_null( decl ) )
-            {
-                // Clause form. The scope is the whole PROGRAM: a clause exports a module-scope binding and
-                // the declaration it names may sit anywhere in the file (hoisted, or simply above).
-                // importedName is spelled even when it equals `var` — it is what buildJsImportTables matches
-                // a DEFINITION by, and it is what keeps two specifiers of one clause (which share this
-                // statement's start byte) distinguishable to emitBindings' total order.
-                for( const auto& [ exportName, localName ] : jsExportClauseNames( stmt, src ) )
-                {
-                    record( stmt, LocalBindKind::JsExport, exportName, root );
-                    if( exportName != "default" || jsModuleBindingCount( root, localName, src ) == 1 )
-                    {
-                        binds.back().importedName = localName;
-                    }
-                }
-                continue;
-            }
-            TSNode name = fieldChild( decl, NodeField::Name );
-            if( jsNodeIs( decl, "function_declaration" ) || jsNodeIs( decl, "generator_function_declaration" )
-                || jsNodeIs( decl, "class_declaration" ) || jsNodeIs( decl, "abstract_class_declaration" ) )
-            {
-                record( stmt, LocalBindKind::JsExport, std::string( pattern::nodeText( name, src ) ), decl );
-            }
-            else if( jsNodeIs( decl, "lexical_declaration" ) || jsNodeIs( decl, "variable_declaration" ) )
-            {
-                recordJsObjectLiterals( decl, lang, fileId, src, binds );
-                ChildCursor declCursor( decl );
-                std::vector<TSNode> declarators;
-                collectChildren( decl, declCursor.cur, declarators );
-                for( TSNode variable : declarators )
-                {
-                    if( !jsNodeIs( variable, "variable_declarator" ) ) { continue; }
-                    TSNode value = fieldChild( variable, NodeField::Value );
-                    if( !jsNodeIs( value, "arrow_function" ) && !jsNodeIs( value, "function_expression" ) ) { continue; }
-                    TSNode binding = fieldChild( variable, NodeField::Name );
-                    if( jsNodeIs( binding, "identifier" ) )
-                    {
-                        record( stmt, LocalBindKind::JsExport, std::string( pattern::nodeText( binding, src ) ), decl );
-                    }
-                }
-            }
+            captureJsExportStatement( stmt, root, src, recorder );
         }
     }
     // FE-A: a declaration spelled like a JS/TS global (`const JSON = …`, a parameter `fetch`) hides the global the same way
@@ -755,13 +793,13 @@ inline void captureJsImportFacts( TSNode root, Lang lang, std::uint32_t fileId, 
         const JsDecl    d = isAlias ? JsDecl{} : at.declarationOf( node );
         for( std::string name : jsPatternNames( d.binding, src ) )
         {
-            if( imported.find( name ) != imported.end() ) { record( node, LocalBindKind::JsShadow, name, d.scope ); }
+            if( imported.find( name ) != imported.end() ) { recorder.add( node, LocalBindKind::JsShadow, name, d.scope ); }
         }
         // Hoisted local function/class declarations also hide imports, independently of their parameters.
         if( const JsDecl hoisted = at.hoistedDeclOf( node ); !ts_node_is_null( hoisted.binding ) )
         {
             std::string name( pattern::nodeText( hoisted.binding, src ) );
-            if( imported.find( name ) != imported.end() ) { record( node, LocalBindKind::JsShadow, name, hoisted.scope ); }
+            if( imported.find( name ) != imported.end() ) { recorder.add( node, LocalBindKind::JsShadow, name, hoisted.scope ); }
         }
     } );
 }
