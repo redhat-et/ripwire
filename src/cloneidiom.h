@@ -123,6 +123,7 @@
 
 #include "arch.h"      // rw::fnv1a64 — THE whole-string FNV-1a; the identifier set is keyed with it, never a second copy of it
 #include "clones.h"    // scanCodeTokens / CodeTokenKind — THE one code scanner; this is a second projection of it
+#include "infra/sortutil.h"  // sortutil::sortUnique — the one sorted-unique step
 #include "docparse.h"  // docparse::detail::readWholeFile — the canonical whole-file byte read (never re-rolled)
 #include "model.h"
 
@@ -1172,8 +1173,7 @@ inline std::vector<std::uint64_t> idiomTokenHashSet( const std::vector<IdiomTok>
             out.push_back( fnv1a64( t.text ) );
         }
     }
-    std::sort( out.begin(), out.end() );
-    out.erase( std::unique( out.begin(), out.end() ), out.end() );
+    sortutil::sortUnique( out );
     return out;
 }
 
@@ -1397,8 +1397,7 @@ inline std::vector<CloneIdiomVerdict> classifyCloneGroupIdioms( const IngestResu
             }
         }
     }
-    std::sort( want.begin(), want.end() );
-    want.erase( std::unique( want.begin(), want.end() ), want.end() );
+    sortutil::sortUnique( want );
     if( want.empty() )
     {
         return out;

@@ -6,6 +6,7 @@
 #include <bit>
 #include <cmath>
 #include <compare>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
@@ -215,6 +216,15 @@ inline void radixSortByFromTo( std::vector<Edge>& values )
 {
     std::vector<Edge> scratch;
     radixSortByFromTo( values, scratch );
+}
+
+// Sort an integer vector and drop its duplicates: the sorted-unique set every hash or id collection here ends with.
+// Integers only — a string_view set goes through the comparator above, never operator<.
+template<std::integral T>
+inline void sortUnique( std::vector<T>& values )
+{
+    std::sort( values.begin(), values.end() );
+    values.erase( std::unique( values.begin(), values.end() ), values.end() );
 }
 
 }   // namespace rw::sortutil
