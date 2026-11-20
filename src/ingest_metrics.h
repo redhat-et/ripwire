@@ -338,11 +338,11 @@ struct CcAccum
     std::uint32_t deepLoc = 0;   // lines inside those regions        → Symbol::deepLoc  (a FLOOR)
     std::uint32_t deepEnd = 0;   // 1-based end row of the last counted hump — the anti-double-count clamp
     // QD-TANGLE steering locals (model.h Symbol::steer) — the walk's one new fact, filled only when `steerOn` (a function over 50
-    // lines in steerCountedLang). `stmt` is the statement ordinal in document order (the DFS pops left to right), the clock the
+    // lines in a language with a langfacts.h steerDecl). `stmt` is the statement ordinal in document order (the DFS pops left to right), the clock the
     // 10-statement distance is measured on; `slots` are the candidate locals seen so far, searched newest first (a shadowing
     // redeclaration wins). `detail` is null in ingest; tangleDetailOf (--quality-delta time, one function) points it at the names.
     bool                   tangleOn     = false;   // a body over 50 lines: the flat-dispatch tagging below runs (every language)
-    bool                   steerOn      = false;   // ... and in steerCountedLang: the steering locals too
+    bool                   steerOn      = false;   // ... and in a language with a langfacts.h steerDecl: the steering locals too
     bool                   anyRewritten = false;   // some slot was written after its declaration: until then no condition can steer
     std::uint32_t          stmt         = 0;
     std::uint32_t          steered      = 0;       // distinct slots that steered a branch → Symbol::steer (saturated by the caller)
@@ -655,7 +655,7 @@ inline CcAccum::SteerSlot* steer_find( CcAccum& acc, std::string_view name, std:
 // Python scopes by function, so its slots never close.
 inline std::uint32_t steer_scopeEndOf( TSNode n, Lang lang ) noexcept
 {
-    if( lang == Lang::Python )
+    if( langFacts( lang ).steerDecl == SteerDecl::Python )
     {
         return UINT32_MAX;
     }
@@ -793,7 +793,8 @@ inline void steer_pythonAssignment( CcAccum& acc, TSNode n, std::string_view src
 // The declaration shapes, per grammar. True when `n` was a declaration (its children are still walked: an initializer can write).
 inline bool steer_noteDeclaration( CcAccum& acc, TSNode n, const char* t, Lang lang, std::string_view src )
 {
-    if( lang == Lang::Python )
+    const SteerDecl shape = langFacts( lang ).steerDecl;
+    if( shape == SteerDecl::Python )
     {
         if( kindIs( t, "assignment" ) || kindIs( t, "augmented_assignment" ) )
         {
@@ -802,31 +803,30 @@ inline bool steer_noteDeclaration( CcAccum& acc, TSNode n, const char* t, Lang l
         }
         return false;
     }
-    const bool cFamily = lang == Lang::Cpp || lang == Lang::C || lang == Lang::ObjC;
-    if( cFamily && kindIs( t, "declaration" ) )
+    if( shape == SteerDecl::CFamily && kindIs( t, "declaration" ) )
     {
         steer_cDeclaration( acc, n, src, steer_inForHead( n ) );
         return true;
     }
-    if( ( lang == Lang::TypeScript || lang == Lang::JavaScript ) && ( kindIs( t, "lexical_declaration" ) || kindIs( t, "variable_declaration" ) ) )
+    if( shape == SteerDecl::JsLexical && ( kindIs( t, "lexical_declaration" ) || kindIs( t, "variable_declaration" ) ) )
     {
         steer_declaratorList( acc, n, false, src, steer_inForHead( n ) || nodeTextOf( n, src ).starts_with( "const" ) );
         return true;
     }
-    if( lang == Lang::Java && kindIs( t, "local_variable_declaration" ) )
+    if( shape == SteerDecl::Java && kindIs( t, "local_variable_declaration" ) )
     {
         steer_declaratorList( acc, n, steer_isPrimitiveType( fieldChild( n, NodeField::Type ), src ), src,
                               steer_inForHead( n ) || nodeTextOf( n, src ).starts_with( "final" ) );
         return true;
     }
-    if( lang == Lang::CSharp && kindIs( t, "variable_declaration" ) )
+    if( shape == SteerDecl::CSharp && kindIs( t, "variable_declaration" ) )
     {
         const TSNode p = parentOf( n );
         const bool local = !ts_node_is_null( p ) && kindIs( ts_node_type( p ), "local_declaration_statement" );
         steer_declaratorList( acc, n, steer_isPrimitiveType( fieldChild( n, NodeField::Type ), src ), src, !local || nodeTextOf( p, src ).starts_with( "const" ) );
         return true;
     }
-    if( lang == Lang::Go && kindIs( t, "short_var_declaration" ) )
+    if( shape == SteerDecl::Go && kindIs( t, "short_var_declaration" ) )
     {
         const bool          shadow   = steer_inForHead( n );
         const std::uint32_t scopeEnd = steer_scopeEndOf( n, lang );
@@ -840,7 +840,7 @@ inline bool steer_noteDeclaration( CcAccum& acc, TSNode n, const char* t, Lang l
         }
         return true;
     }
-    if( lang == Lang::Go && kindIs( t, "var_spec" ) )
+    if( shape == SteerDecl::Go && kindIs( t, "var_spec" ) )
     {
         const TSNode value = fieldChild( n, NodeField::Value );
         const bool   prim  = steer_isPrimitiveType( fieldChild( n, NodeField::Type ), src )
@@ -848,7 +848,7 @@ inline bool steer_noteDeclaration( CcAccum& acc, TSNode n, const char* t, Lang l
         steer_declare( acc, fieldChild( n, NodeField::Name ), prim, src, steer_scopeEndOf( n, lang ) );
         return true;
     }
-    if( lang == Lang::Rust && kindIs( t, "let_declaration" ) )
+    if( shape == SteerDecl::Rust && kindIs( t, "let_declaration" ) )
     {
         const bool   mut   = !ts_node_is_null( firstChildOfType( n, "mutable_specifier" ) );   // an immutable `let` only shadows
         const TSNode value = fieldChild( n, NodeField::Value );
@@ -1841,14 +1841,14 @@ struct Complexity { std::uint32_t cx; std::uint32_t ccx; std::uint32_t maxNest; 
 // per node and gets locals=0, which the caller (this file, RawDef→Symbol) leaves at 0 and serialize.h
 // never emits (absent, not a bare "0" — see localsCountedLang's own comment).
 // QD-TANGLE: the steering-locals fact is walked only where the tangle score can be non-zero — a body over kTangleAmpLoc lines
-// (S = T × log2(loc/50), so 0 at 50 or fewer) — in steerCountedLang. `detail` (tangleDetailOf only) collects the names and spans.
+// (S = T × log2(loc/50), so 0 at 50 or fewer) — in a language with a langfacts.h steerDecl. `detail` (tangleDetailOf only) collects the names and spans.
 inline constexpr std::uint32_t kSteerMinRows = 51;
 inline Complexity complexityOf( TSNode root, std::string_view src, Lang lang, TangleDetailFacts* detail = nullptr )   // one fused DFS → cx, ccx, maxNest, locals, ppAlt, the nesting profile, ev AND steer
 {
     PROFILE_SCOPE_DESCRIBE( "ingest/metrics: complexityOf one function (fused DFS)" );                                                                     // A4-F25: NOT noexcept — cc_walk (and kids here) allocate
     CcAccum acc;
     acc.tangleOn = ts_node_end_point( root ).row - ts_node_start_point( root ).row + 1u >= kSteerMinRows;
-    acc.steerOn  = acc.tangleOn && steerCountedLang( lang );
+    acc.steerOn  = acc.tangleOn && langFacts( lang ).steerDecl != SteerDecl::None;
     acc.detail  = detail;
     const bool countLocals = localsCountedLang( lang );
     // essential complexity rides the SAME walk (zero new tree-sitter queries). ONE arena/label/pending set

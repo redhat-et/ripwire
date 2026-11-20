@@ -860,7 +860,7 @@ struct Symbol
     // (bool/int/size_t/char/…; never `auto`, never const) are written again after their declaration AND read in a branch condition
     // (if/while/for/switch/elif) 10 or more statements after their last preceding write — a flag or counter set in one place that
     // steers a branch far away. Counted by the SAME fused cc_walk DFS (no new parse), only for functions/methods over 50 lines (the
-    // tangle score is 0 at 50 lines or fewer, so a shorter body is not walked for it) in steerCountedLang's languages. 0 elsewhere,
+    // tangle score is 0 at 50 lines or fewer, so a shorter body is not walked for it) in the languages with a langfacts.h steerDecl. 0 elsewhere,
     // and absent (never a bare 0) on --metrics there. Saturates at 255.
     std::uint8_t  steer        = 0;
     // QD-TANGLE FLAT DISPATCH, two facts in one byte (tangleDispatchShare packs, tangleInputsFrom unpacks): the low 5 bits are the
@@ -1142,14 +1142,6 @@ inline bool evCountedLang( Lang lang ) noexcept
     return    lang == Lang::Cpp  || lang == Lang::C     || lang == Lang::ObjC || lang == Lang::Python
            || lang == Lang::TypeScript || lang == Lang::JavaScript || lang == Lang::Go || lang == Lang::Rust
            || lang == Lang::Swift || lang == Lang::Java || lang == Lang::Ruby || lang == Lang::CSharp;
-}
-
-// QD-TANGLE steering locals (Symbol::steer): the languages whose declaration, assignment and condition shapes the walk reads
-// (ingest_metrics.h steer_*) — the essential-complexity set without Swift and Ruby. Every other language keeps steer 0, and the
-// tangle score there is nesting and deep share alone.
-inline bool steerCountedLang( Lang lang ) noexcept
-{
-    return evCountedLang( lang ) && lang != Lang::Swift && lang != Lang::Ruby;
 }
 
 // local-variable-indexing plan Phase 2 (docs/LOCALS_INDEXING.md): one CAPTURED local-variable NAME,
