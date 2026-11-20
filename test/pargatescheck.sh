@@ -75,6 +75,13 @@ ORPH_GATE_PID=""; ORPH_TOK=""
 cleanup(){
     if [ -n "$ORPH_GATE_PID" ]; then kill -TERM "$ORPH_GATE_PID" 2>/dev/null; fi
     if [ -n "$ORPH_TOK" ]; then pkill -KILL -f "sleep $ORPH_TOK" 2>/dev/null; fi
+    # (S/R) on a stop mid-run: end the background pargates runs first, remove the macOS no-shim control's dir (made
+    # OUTSIDE $TMP on purpose; its path is in its marks file), and open any mode-000 fixture so rm can descend (CR #703)
+    local _j _w
+    _j="$( jobs -p )"; [ -n "$_j" ] && { kill $_j 2>/dev/null; wait $_j 2>/dev/null; }
+    _w="$( sed -n 2p "${SR:-$TMP/none}/ms.ab.mark/akill.where" 2>/dev/null )"
+    case "$_w" in "$TMP"/*|"") ;; *) case "$( basename "$_w" )" in tmp.*) [ -d "$_w" ] && rm -rf "${_w:?}" ;; esac ;; esac
+    chmod -R u+rwx "$TMP" 2>/dev/null
     rm -rf "$TMP"
 }
 TMP="$( mktemp -d )"; trap cleanup EXIT; trap 'exit 143' TERM; trap 'exit 130' INT
