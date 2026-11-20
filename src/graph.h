@@ -1408,7 +1408,10 @@ inline void rivalledProvenSites( const IngestResult& ing, const Graph& g, std::v
         if( rival )
         {
             std::sort( sites.begin() + std::ptrdiff_t( at ), sites.begin() + std::ptrdiff_t( end ) );
-            std::move( sites.begin() + std::ptrdiff_t( at ), sites.begin() + std::ptrdiff_t( end ), sites.begin() + std::ptrdiff_t( kept ) );
+            if( kept != at )   // std::move's destination may not start inside its source range
+            {
+                std::move( sites.begin() + std::ptrdiff_t( at ), sites.begin() + std::ptrdiff_t( end ), sites.begin() + std::ptrdiff_t( kept ) );
+            }
             kept += end - at;
         }
         at = end;
