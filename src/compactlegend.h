@@ -823,9 +823,12 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // three attributes on the <b> (serialize.h kTruncatedBodyLegend is the full reading). ELEMENT-qualified: pr-context's
     // root truncated= and the doctor/naming-calibration truncated= rows below are other elements' attributes.
     // next= is NOT restated here: the generic next= term above rides every document that carries one (review N1).
-    { "truncated",         "<b truncated=1 lines=lo-hi/T>: cut at the byte budget; lines= shown of its T", true, "b" },
+    { "truncated",         "<b truncated=1 lines=lo-hi/T>: cut at the byte budget, or at cap_lines= when that is present; lines= shown of its T", true, "b" },
     // review M1: a body whose FIRST line alone exceeds the budget is served whole, never as a fragment
     { "over_ceiling",      "<b over_ceiling=1>: its first line alone exceeds the budget, served whole", true, "b" },
+    // CB1: the CAUSE of the cut, not its extent. Without this, truncated= alone would read as "cut at the byte
+    // budget" on a row the LINE cap cut -- a registered reading made false by a new code path (non-negotiable 3).
+    { "cap_lines",         "<b cap_lines=N truncated=1 lines=1-N/T>: cut at the N-line body cap, not at the byte budget; absent on a byte cut", true, "b" },
     // lane honesty-cuts-066: --pack-top-n's cut, the <b> rule on raw files (serialize.h kPackSourceCutLegend is the full reading)
     { "truncated",         "<src truncated=1 lines=1-K/T>: cut at a line end at the byte budget; K of its T lines", true, "src" },
     { "budget_bytes",      "<src_cut shown= total= capped=1 budget_bytes=>: files served of the top-N asked, the rest over the byte ceiling; unreadable=N not readable", true, "src_cut" },

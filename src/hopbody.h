@@ -92,7 +92,10 @@ inline bool hopBodiesOn()
 // whole; else a body over it is cut at a line end with truncated="1" lines= next= (packBodies' first-body truncation). nullopt when
 // the buffer failed or the span rendered nothing.
 inline std::optional<std::string> renderBodyElement( const IngestResult& ing, NodeId id, std::size_t capBytes, bool compress, RedactCounts* redact,
-                                                     std::string_view rootArg, const std::vector<float>* rank )
+                                                     std::string_view rootArg, const std::vector<float>* rank,
+                                                     std::uint32_t bodyLineCap = 0 )   // CB1: 0 => INERT, so route/hops/launch
+                                                                                        //   bodies are byte-identical; only the
+                                                                                        //   "key" group opts in.
 {
     static const std::vector<std::uint32_t> kNoOff;
     static const std::vector<NodeId>        kNoTargets;
@@ -100,7 +103,7 @@ inline std::optional<std::string> renderBodyElement( const IngestResult& ing, No
     ChargedSection sec = chargeSection( [ & ]( std::FILE* f )
         { packBodies( f, ing, { id }, capBytes, kNoOff, kNoTargets, CalleeEdgeBytes( kNoNameOnly ), compress, redact,
                       /*ranges=*/nullptr, /*notes=*/nullptr, /*outEmitted=*/nullptr, /*truncateOversizedFirst=*/capBytes > 0,
-                      /*withFileContext=*/false, rootArg, rank, {} ); },
+                      /*withFileContext=*/false, rootArg, rank, {}, bodyLineCap ); },
         kBytesPerTokenBody );
     if( !sec.isRendered )
     {
@@ -408,7 +411,10 @@ struct RouteBodiesXml
     std::vector<NodeId> ids;              // the definitions whose <b> rendered (not the ones asked for): what <alts> must not list again
 };
 inline RouteBodiesXml routeBodiesXml( const IngestResult& ing, std::span<const RouteBody> bodies, std::string_view of, std::string_view rootAttrs,
-                                      std::size_t maxBodies, std::string_view rootArg )
+                                      std::size_t maxBodies, std::string_view rootArg,
+                                      std::uint32_t bodyLineCap = 0 )   // CB1: 0 => INERT. The "hops" and "route" groups keep the
+                                                                         //   default and move no byte; only forkeybody.h's "key"
+                                                                         //   group passes kCappedBodyLines.
 {
     RouteBodiesXml out;
     std::string    children;
@@ -422,7 +428,8 @@ inline RouteBodiesXml routeBodiesXml( const IngestResult& ing, std::span<const R
             next = expandSelectorOf( ing, rb.id, rootArg );
             break;
         }
-        if( std::optional<std::string> b = renderBodyElement( ing, rb.id, kHopBodyCapBytes, /*compress=*/false, /*redact=*/nullptr, rootArg, nullptr ) )
+        if( std::optional<std::string> b = renderBodyElement( ing, rb.id, kHopBodyCapBytes, /*compress=*/false, /*redact=*/nullptr, rootArg, nullptr,
+                                                              bodyLineCap ) )
         {
             if( !rb.hedge.empty() )
             {

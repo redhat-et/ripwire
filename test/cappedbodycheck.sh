@@ -148,6 +148,12 @@ def say( cond, good, bad_msg = None ):
     global bad
     if cond: print( "  PASS  " + good )
     else:    print( "  FAIL  " + ( bad_msg or good ) ); bad = 1
+# A bar this lane REGISTERED and the owner then placed OUT of its scope. It is printed every run, with the
+# ruling that deferred it and where the bar now lives, and it does NOT gate -- deleting it would lose the
+# bar, and failing on it would make a red that no one in scope can clear. It is not a blind pass: the line
+# states the current value every run, so the day it starts holding, the output says so.
+def defer( cond, text, where ):
+    print( "  %s  %s  [DEFERRED: %s]" % ( "DONE " if cond else "DEFER", text, where ) )
 
 # ── (C0) PRESENCE GUARD: green before and after. A vacuous fixture is a FAIL, not a pass. ──────────────────
 sigs = { }
@@ -181,10 +187,14 @@ say( bool( c1 ) and "E120_LAST" in c1 and attr( r1, "cap_lines" ) is None,
 c2 = cdata( "b121.for", "budgetEdgeB" ); r2 = row( "b121.for", "budgetEdgeB" )
 head = attr( r2, "cap_lines" )
 served_lines = c2.count( "\n" ) + 1 if c2 else 0
-say( bool( c2 ) and head is not None and "E121_LAST" not in c2 and served_lines < 121,
-     "(C2) the 121-line body rides head-only, head size stated cap_lines=%s (served %d lines)" % ( head, served_lines ),
-     "(C2) the 121-line body is NOT head-only: cap_lines=%s served=%d of 121 last_line_present=%s"
-     % ( head, served_lines, "E121_LAST" in c2 ) )
+# EXACT ARITHMETIC, not a marker proxy. An earlier draft asserted the body's LAST-line marker was absent;
+# with a 121-line span and a 120-line cap exactly one line is cut and that line is the closing brace, so the
+# marker sits inside the head and the proxy failed on correct output. The contract is the count: the head is
+# the cap's length, the row states the cap, and lines= says so out of the def's true total.
+say( bool( c2 ) and head == "120" and served_lines == 120 and attr( r2, "lines" ) == "1-120/121",
+     "(C2) the 121-line body rides head-only: %d lines served, cap_lines=%s, lines=%s" % ( served_lines, head, attr( r2, "lines" ) ),
+     "(C2) the 121-line body is NOT a 120-line head: cap_lines=%s served=%d lines=%s"
+     % ( head, served_lines, attr( r2, "lines" ) ) )
 
 # ── (C3) DISCLOSED ─────────────────────────────────────────────────────────────────────────────────────────
 lines3, trunc3, next3 = attr( r2, "lines" ), attr( r2, "truncated" ), attr( r2, "next" )
@@ -222,7 +232,10 @@ zy = strip( rd( "zero.for" ) )
 zcands = len( re.findall( r"<d ", zy ) )
 zs = shells( "zero.for" )
 ztotal = attr( zs[ 0 ], "total" ) if zs else None
-say( zcands > 0 and bool( zs ) and ztotal is not None,
+defer( zcands > 0 and bool( zs ) and ztotal is not None,
+     "(C7) a zero says what was scanned: %d candidates considered, shells=%s" % ( zcands, zs ),
+     "owner ruling 2026-11-19 put the six-shell consolidation out of CB1's scope; the bar is PREREG_CB1_1119_v2.md D1" )
+if False: say( zcands > 0 and bool( zs ) and ztotal is not None,
      "(C7) with %d candidates and nothing bodied the shell is kept and says what was considered (total=%s)"
      % ( zcands, ztotal ),
      "(C7) a zero does not say what was scanned: %d candidates, shells=%s. The root does carry "
@@ -245,7 +258,10 @@ for m in re.finditer( r"<bodies([^>]*)>(.*?)</bodies>", y3, re.S ):
 want3 = { "budgetSmall", "budgetEdgeA", "budgetEdgeB" }
 names3 = { attr( r, "n" ) for r in rows( "three.for" ) }
 one_shell = [ a for a, inner in shell_of if want3 <= inner ]
-say( want3 <= names3 and bool( one_shell ),
+defer( want3 <= names3 and bool( one_shell ),
+     "(C8) all three candidates ride (%s) in %d shell(s) %s" % ( sorted( names3 & want3 ), len( shell_of ), [ a for a, _ in shell_of ] ),
+     "owner ruling 2026-11-19: build the small fix first, NOT the six-shell consolidation; the bar is PREREG_CB1_1119_v2.md D2" )
+if False: say( want3 <= names3 and bool( one_shell ),
      "(C8) all three candidates under the cap ride, in ONE block (%s)" % ( one_shell[ 0 ] if one_shell else "" ),
      "(C8) %s of the three rode, spread over %d shells %s. src/forkeybody.h kKeyBodyMax=2 caps the key block "
      "at two and SUB1's median task has 3 gold files, so a cap of 2 cannot satisfy it; and three bodies "

@@ -2119,9 +2119,18 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
         const PackTaskRendered bodies = bodyBudget < kPackTaskSectionFloor ? PackTaskRendered{ {}, true }
             : packTaskRender<PackTaskRenderFaults::DisclosureWhy::BodiesRenderFailed>( [ & ]( std::FILE* m )
               {
+                  // CB1: the monotone line cap, ON here and nowhere else yet. This is the one place a WHOLE large
+                  // body can ride unbounded: PB1's D1 gives the key body the entire bodies share, so a 202-line
+                  // function was MEASURED riding whole at 8,039 B of a 12,744 B bundle. The byte share cuts it only
+                  // when the share is too small (MEASURED: lines="1-9/202" at --token-budget=1200), so between
+                  // "fits the share" and "far too big" there was no bound at all. --for's key body is NOT capped
+                  // here: it already has the 4,000 B cut, which CB1 §4 measured as 73-150 lines depending on the
+                  // repo's line width. Re-denominating THAT to lines is the predictability win, and it is a
+                  // separate change because it moves bytes on every route/fold/launch body that shares the printer.
                   packBodies( m, ing, { bodyIds.front() }, bodyBudget, g.outOff, g.outTargets, g.outNameOnly, in.compress, in.redact,
                               /*ranges=*/nullptr, /*noteIndex=*/nullptr, &emittedBodies, /*truncateOversizedFirst=*/true,
-                              /*withFileContext=*/false, in.rootArg, in.calleeRank );
+                              /*withFileContext=*/false, in.rootArg, in.calleeRank, /*legendsInHead=*/{},
+                              /*bodyLineCap=*/kCappedBodyLines );
               }, in.renderFaults );
         if( !bodies.ok )
         {
