@@ -4045,19 +4045,14 @@ inline bool jsModuleIsForeign( std::string_view module, const HashMap<std::strin
 
 // Everything path resolution needs to answer "where does this specifier land": the corpus file index, the
 // workspace/tsconfig context when there is one, and the module vocabulary the externality probe reads.
-// `bareTs` (#711, optional): the project-config resolver the file edge reads (resolve.h resolveBareTsSpecifier); when set,
-// a bare specifier the path resolver missed (a tsconfig `paths` alias `@/x`, a workspace package) is resolved through it.
-struct JsBareTsResolver
-{
-    const IngestResult&                     ing;
-    std::optional<tsimport::ImportResolver> resolver;   // built on the first bare specifier that reaches it
-};
+// `bareTs` (#711, optional): the project-config resolver the file edge reads (resolve.h resolveBareTsSpecifier), over `files`;
+// when set, a bare specifier the path resolver missed (a tsconfig `paths` alias `@/x`, a workspace package) is resolved through it.
 struct JsModuleCtx
 {
     const HashMap<std::string, std::uint32_t>& files;
     const WsIncludeCtx*                        workspace;
     const HashMap<std::string, char>&          vocabulary;
-    JsBareTsResolver*                          bareTs = nullptr;
+    BareTsResolver*                            bareTs = nullptr;
 };
 
 inline std::pair<std::uint32_t, bool> resolveJsNamedImportFile( std::string_view importer, std::string_view module,
@@ -4096,7 +4091,7 @@ inline std::pair<std::uint32_t, JsImportOutcome> resolveJsImportModule( std::str
     if( fileId == kNoFile && ctx.bareTs != nullptr && tsimport::isBareTsSpecifier( importer, module ) )
     {
         // #711: the file edge's answer for the same specifier (buildPreciseIncludeAdjWithContext), so the two cannot disagree
-        fileId = resolveBareTsSpecifier( ctx.bareTs->ing, ctx.files, ctx.bareTs->resolver, ctx.workspace, importerFileId, module ).file;
+        fileId = resolveBareTsSpecifier( *ctx.bareTs, ctx.workspace, importerFileId, module ).file;
     }
     if( fileId == kNoFile )
     {
@@ -4187,7 +4182,7 @@ inline NodeId jsExportedNode( const JsExportTables& ex, std::uint32_t moduleFile
 // An empty exportName is a TYPE-ONLY import: it binds a type, so a call through the name is not this import's call, and
 // there is no module question to ask.
 inline JsImportTarget pinJsImport( const IngestResult& ing, const JsExportTables& ex, const WsIncludeCtx* workspace, std::uint32_t fileId,
-                                   std::string_view module, std::string_view exportName, JsBareTsResolver* bareTs = nullptr )
+                                   std::string_view module, std::string_view exportName, BareTsResolver* bareTs = nullptr )
 {
     JsImportTarget    target;
     const JsModuleCtx ctx{ ex.files, workspace, ex.vocabulary, bareTs };
@@ -4222,7 +4217,7 @@ inline JsImportTables buildJsImportTables( const IngestResult& ing, const WsIncl
     tables.targets.reserve( bindCounts.allOf( LocalBindKind::JsImport ) );
     tables.importingFiles.assign( ing.files.size(), 0 );
     JsExportTables   ex = buildJsExportTablesSized( ing, bindCounts );
-    JsBareTsResolver bareTs{ ing, std::nullopt };   // #711: over ex.files, which outlives it
+    BareTsResolver   bareTs{ ing, ex.files, std::nullopt };   // #711: the file edge's resolver, over ex.files (which outlives it)
     for( const Binding& b : ing.bindings )
     {
         if( b.kind != LocalBindKind::JsImport || b.fileId >= ing.files.size() ) { continue; }
