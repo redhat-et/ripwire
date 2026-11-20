@@ -1186,25 +1186,28 @@ namespace mcpedit
 
     // The key a post-check that stopped AFTER the write puts on the receipt; the CLI's stderr line reads it.
     inline constexpr std::string_view kPostCheckNotRunKey = ",\"post_check\":\"not run: ";
-    // The key the post-write ceiling suspension puts on the receipt (ruling 101); the CLI's stderr line reads it too.
-    inline constexpr std::string_view kCeilingSuspendedKey = ",\"memory_ceiling\":\"suspended for this check";
+    // The key ruling 101's disclosure puts on the receipt; the CLI's stderr line reads the receipt for it too.
+    inline constexpr std::string_view kCeilingKey = ",\"memory_ceiling\":\"";
 
-    // Ruling 101's disclosure half: the receipt says the allocator line did not apply to the post-check, so no
+    // Ruling 101's disclosure half: the receipt says what the allocator line did about this post-check, so no
     // output can imply a ceiling-checked run. Three states, each true as written:
-    //   * the ceiling is DISARMED (RIPWIRE_MEM_BUDGET_MB=0, a server, a build whose operator new is not
-    //     replaced) -> nothing is said, because there was nothing to suspend, and an unarmed run's receipt
-    //     stays byte-identical to what it was before this change.
-    //   * armed, and the limit was never reached -> one clause naming the limit that did not apply.
-    //   * armed, and the check PASSED the limit -> that clause plus the peak, the count, and the two facts a
-    //     caller acts on: the edit IS applied, and this check ran unbounded.
+    //   * the ceiling is NOT ARMED for this run (RIPWIRE_MEM_BUDGET_MB=0, a server — --mcp and --lsp never arm
+    //     it — or a build whose operator new is not replaced) -> it says so, and nothing was suspended.
+    //   * armed, and the limit was never reached -> the suspension, and the limit that did not apply.
+    //   * armed, and the check PASSED the limit -> that, plus the peak, the count, and the two facts a caller
+    //     acts on: the edit IS applied, and this check ran unbounded.
+    // It is emitted UNCONDITIONALLY, which test/receiptpostcheck.sh (13) is the reason for: that arm requires
+    // the MCP and CLI receipts to carry the SAME keys, and --mcp does not arm the ceiling while the CLI does by
+    // default — so a field that appeared only when armed made one surface's receipt a different shape from the
+    // other's. Always present, never silent, and the same keys on both surfaces.
     inline std::string ceilingSuspensionJson( const rw::memceiling::Suspension& sus )
     {
+        std::string out( kCeilingKey );
         if( !sus.armed() )
         {
-            return {};
+            return out + "not armed for this run, so nothing was suspended and this check ran under the memory guard's own lines alone\"";
         }
-        std::string out( kCeilingSuspendedKey );
-        out += " (the write is committed, so a refusal here could not be reported and a retry could insert twice)";
+        out += "suspended for this check (the write is committed, so a refusal here could not be reported and a retry could insert twice)";
         if( const std::uint64_t crossed = sus.crossings(); crossed != 0 )
         {
             out += "; the check PASSED the " + std::to_string( sus.limitMib() ) + " MiB limit (peak "

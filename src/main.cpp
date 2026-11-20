@@ -3814,10 +3814,10 @@ std::optional<int> runCliEdit( const rw::Config& cfg )
     // refusal: the file is edited, so this exits 0 like any applied edit and says the check did not run
     const bool postCheckStopped = outcome.resultJson.find( rw::mcpedit::kPostCheckNotRunKey ) != std::string::npos;
     // RULING 101: the post-check ran with the allocator ceiling suspended (the write was already committed, so a
-    // refusal there could report nothing). The receipt always carries that when the ceiling is armed; this line
-    // names it only when the check actually PASSED the limit, which is the case a reader has to act on.
-    const bool ceilingPassed = outcome.resultJson.find( "the check PASSED the" ) != std::string::npos
-                            && outcome.resultJson.find( rw::mcpedit::kCeilingSuspendedKey ) != std::string::npos;
+    // refusal there could report nothing). The receipt always carries `memory_ceiling`, in every state; this line
+    // names only the case a reader has to act on — the check actually PASSED the limit and ran unbounded.
+    const bool ceilingPassed = outcome.resultJson.find( rw::mcpedit::kCeilingKey ) != std::string::npos
+                            && outcome.resultJson.find( "the check PASSED the" ) != std::string::npos;
     rw::emitTo( stderr, "ripwire edit: applied atomically; receipt carries region, blob_sha{}{}; next: {}\n",
                   cfg.noPostCheck        ? " (post-check skipped)"
                   : postCheckStopped     ? " (post-check not run: its graph fold stopped, see post_check)"

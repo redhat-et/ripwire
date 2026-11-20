@@ -16,9 +16,9 @@
 #   D  byte-identical when the ceiling is not hit: the default map, --json, and a --for answer print the SAME stdout and stderr
 #      bytes and rc with the line on by default, OFF (=0), and armed far above the need (1000000).
 #   E  the post-write suspension (owner ruling 101): E1 an edit verb is still refused BEFORE it writes (exit 5, not the
-#      exit 1 of a resolved-but-missing symbol), E2 an armed run's receipt discloses that the post-check ran with the
-#      ceiling suspended while a disarmed run says nothing, E3 the suspension is constructible in exactly one file and
-#      no flag or environment path reaches its depth counter.
+#      exit 1 of a resolved-but-missing symbol), E2 every edit receipt names what the ceiling did — suspended when armed,
+#      "not armed" when off, so neither surface's receipt can imply a ceiling-checked post-check — E3 the suspension is
+#      constructible in exactly one file and no flag or environment path reaches its depth counter.
 #   V  a typo is refused, never obeyed or ignored: '12x' and '10' (under the 64 MiB floor) exit 1 with nothing on stdout and a
 #      stderr line naming RIPWIRE_MEM_BUDGET_MB.
 #   M  the server survives: --mcp under RIPWIRE_MEM_BUDGET_MB=64 does not arm (its refusal would end the process), says so
@@ -175,8 +175,9 @@ if [ "$hooked" -eq 1 ]; then
         no "E1: edit under RIPWIRE_MEM_BUDGET_MB=64: rc $rce1 (want 5), $( wc -c < "$TMP/e1.out" | tr -d ' ' ) B stdout, stderr: $( head -c 200 "$TMP/e1.err" )"
     fi
 
-    # E2: armed far above the need, a real edit succeeds AND the receipt discloses that the ceiling did not
-    # apply to the post-check. Disarmed (=0) it must say nothing, because then there was nothing to suspend.
+    # E2: a real edit succeeds and the receipt says what the ceiling did — ALWAYS, in both states, because
+    # receiptpostcheck (13) requires the MCP and CLI receipts to carry the same keys and --mcp never arms the
+    # line. Armed far above the need it reports the suspension; disarmed (=0) it reports "not armed".
     cp -R "$TMP/fix" "$TMP/e2on"
     RIPWIRE_MEM_BUDGET_MB=1000000 "$BIN" "$TMP/e2on" --insert-after-symbol=ceilingAlpha \
         --edit-payload="$TMP/payload" >"$TMP/e2on.out" 2>"$TMP/e2on.err"; rce2=$?
@@ -186,10 +187,10 @@ if [ "$hooked" -eq 1 ]; then
     if [ "$rce2" -eq 0 ] && [ "$rce2off" -eq 0 ] \
        && grep -q '"memory_ceiling":"suspended for this check' "$TMP/e2on.out" \
        && grep -q 'retry could insert twice' "$TMP/e2on.out" \
-       && ! grep -q 'memory_ceiling' "$TMP/e2off.out"; then
-        ok "E2: with the ceiling armed the receipt discloses that the post-check ran suspended; with it off (=0) the receipt says nothing (rc 0/0)"
+       && grep -q '"memory_ceiling":"not armed for this run' "$TMP/e2off.out"; then
+        ok "E2: the receipt names what the ceiling did in BOTH states — suspended when armed, 'not armed' at =0 (rc 0/0), so neither surface's receipt can imply a checked post-check"
     else
-        no "E2: armed rc $rce2 (want 0) disclosed=$( grep -c '\"memory_ceiling\"' "$TMP/e2on.out" ) (want 1); off rc $rce2off disclosed=$( grep -c 'memory_ceiling' "$TMP/e2off.out" ) (want 0)"
+        no "E2: armed rc $rce2 (want 0) suspended-clause=$( grep -c '\"memory_ceiling\":\"suspended' "$TMP/e2on.out" ) (want 1); off rc $rce2off not-armed-clause=$( grep -c '\"memory_ceiling\":\"not armed' "$TMP/e2off.out" ) (want 1)"
     fi
 else
     skip "E1/E2: this build cannot arm the ceiling, so there is nothing to suspend"

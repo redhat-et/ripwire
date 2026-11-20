@@ -25,8 +25,11 @@ caller must discard whatever stdout holds rather than parse it.**
 **One region refuses nothing, on purpose.** An edit verb commits the file with `atomicWrite` and then rebuilds
 the index for its post-check. Ending the process there would leave the edit applied with no receipt, and a
 caller that retried could insert the same text twice — so the line is **suspended for that region and only
-there**: a crossing inside it is recorded rather than fatal, and the receipt says so on a new `memory_ceiling`
-field whenever the ceiling is armed, naming the peak and the count if the check did pass the limit. The
+there**: a crossing inside it is recorded rather than fatal, and every edit receipt now carries a
+`memory_ceiling` field saying which of the three things happened — the ceiling was not armed for this run, or
+it was suspended and the limit was not reached, or it was suspended and the check **passed** the limit, with
+the peak and the count. The field is always present, on both the CLI and MCP receipts, so no receipt can imply
+a ceiling-checked post-check; MCP receipts say "not armed", since a server never arms the line. The
 suspension is reachable from no flag and no environment variable, every pre-write check stays armed, and the
 memory guard's own phase-boundary stop still applies inside the region (it reports `post_check: "not run: …"`
 and exits 0). The accepted cost: growth inside one loop is unbounded again in that one bounded region.
