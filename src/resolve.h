@@ -5519,22 +5519,34 @@ struct TsImportExtras
     std::uint64_t extendsUnread   = 0;   // configs with an unread base that could have changed an answer (tsconfig_unread=)
 };
 
-// #220 part 2: one bare TS/JS specifier the relative branch left unresolved, through the project's own config
-// (tsimport::ImportResolver, built here on first use). Returns the edge's target or kNoFile, and tallies the verdict.
+// #220 part 2: one bare TS/JS specifier `importerFileId` wrote, through the project's own config (tsimport::ImportResolver,
+// built here on first use over `fileIndex`, whose keys are lexicalNormalize( rootRelPath ) like buildPreciseIncludeAdj's).
 // Multi-root: an answer in another root is not evidence (joinNormalizeLookup's rule 1), so it stays unresolved.
-inline std::uint32_t resolveBareTsImport( const IngestResult& ing, const HashMap<std::string, std::uint32_t>& fileIndex,
-                                          std::optional<tsimport::ImportResolver>& resolver, const WsIncludeCtx* ws,
-                                          const Include& inc, std::uint64_t* unresolvedOut, TsImportExtras* extrasOut )
+// The ONE resolution of such a specifier: the file edge (resolveBareTsImport) and the named-import binder (#711, graph.h
+// resolveJsImportModule: a tsconfig `paths` alias `@/x` pins the call as a relative import does) both read it.
+inline tsimport::Outcome resolveBareTsSpecifier( const IngestResult& ing, const HashMap<std::string, std::uint32_t>& fileIndex,
+                                                 std::optional<tsimport::ImportResolver>& resolver, const WsIncludeCtx* ws,
+                                                 std::uint32_t importerFileId, std::string_view spec )
 {
     if( !resolver )
     {
         resolver.emplace( ing, fileIndex );
     }
-    tsimport::Outcome o = resolver->resolve( lexicalNormalize( rootRelPath( ing, inc.fileId ) ), inc.target );
-    if( o.file != kNoFile && ws != nullptr && ( *ws->fileRoot )[ o.file ] != ( *ws->fileRoot )[ inc.fileId ] )
+    tsimport::Outcome o = resolver->resolve( lexicalNormalize( rootRelPath( ing, importerFileId ) ), spec );
+    if( o.file != kNoFile && ws != nullptr && ( *ws->fileRoot )[ o.file ] != ( *ws->fileRoot )[ importerFileId ] )
     {
         o = { kNoFile, tsimport::Verdict::InRepoUnresolved };
     }
+    return o;
+}
+
+// The file edge of one bare TS/JS specifier the relative branch left unresolved: resolveBareTsSpecifier's target or
+// kNoFile, with its verdict tallied.
+inline std::uint32_t resolveBareTsImport( const IngestResult& ing, const HashMap<std::string, std::uint32_t>& fileIndex,
+                                          std::optional<tsimport::ImportResolver>& resolver, const WsIncludeCtx* ws,
+                                          const Include& inc, std::uint64_t* unresolvedOut, TsImportExtras* extrasOut )
+{
+    const tsimport::Outcome o = resolveBareTsSpecifier( ing, fileIndex, resolver, ws, inc.fileId, inc.target );
     if( o.verdict == tsimport::Verdict::InRepoUnresolved && unresolvedOut != nullptr )
     {
         ++*unresolvedOut;
