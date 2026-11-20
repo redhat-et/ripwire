@@ -588,7 +588,7 @@ Discloses: **none**
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
-| `kKeyBodyMax` | `2` | — | key bodies one answer carries; past it the block says capped="1" and next= the first not shown |
+| `kKeyBodyMax` | `5` | — | key bodies one answer carries; past it the block says capped="1" and next= the first not shown |
 
 ### `src/forliteral.h`
 
@@ -1454,6 +1454,7 @@ Discloses: `capped`, `calls_capped`, `dirs_capped`, `entries_capped`, `files_cap
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kCap` | `65536` | — | — |
+| `kCappedBodyLines` | `120` | — | — |
 | `kCycleMemberCap` | `12` | — | — |
 | `kForAnchorBodyBudgetBytes` | `22800` | — | — |
 | `kForAutoBodyBudgetBytes` | `6000` | — | — |
