@@ -129,7 +129,7 @@ inline void foldTangleChunk( const std::vector<HistoryBlob>& chunk, const std::v
         gtl::btree_map<std::uint64_t, TangleInputs> version;   // this version's highest-scoring overload per key (computeSnapshot's rule)
         for( const BlobTangleDef& d : measured[i].defs )
         {
-            const std::uint64_t key = pathQualifiedKey( chunk[i].relPath, d.scope, d.name, measured[i].lang );
+            const std::uint64_t key = pathQualifiedKey( chunk[i].relPath, d.scope, measured[i].lang == Lang::Elixir ? elixirBaseName( d.name ) : std::string_view( d.name ) );
             const auto [ it, fresh ] = version.emplace( key, d.in );
             if( !fresh && tangleOutranks( d.in, it->second ) )
             {
