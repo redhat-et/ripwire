@@ -147,7 +147,7 @@ inline void foldTangleChunk( const std::vector<HistoryBlob>& chunk, const std::v
         gtl::btree_map<std::uint64_t, TangleInputs> version;   // this version's highest-scoring overload per key (computeSnapshot's rule)
         for( const BlobTangleDef& d : measured[i].defs )
         {
-            const std::uint64_t key = pathQualifiedKey( chunk[i].relPath, d.scope, d.name, measured[i].lang );
+            const std::uint64_t key = definitionQualityKey( chunk[i].relPath, d.scope, d.name, measured[i].lang );
             const auto [ it, fresh ] = version.emplace( key, d.in );
             if( !fresh && tangleOutranks( d.in, it->second ) )
             {
@@ -255,7 +255,7 @@ inline BaseBodyStore baseBodiesOf( const std::vector<BlobText>& texts, const std
             {
                 continue;   // bodyless (a prototype): the clone pass never reads it either
             }
-            const std::uint64_t key = pathQualifiedKey( texts[i].path, d.scope, d.name, measured[i].lang );
+            const std::uint64_t key = definitionQualityKey( texts[i].path, d.scope, d.name, measured[i].lang );
             if( ++count[ key ] == 1 )
             {
                 bodies.emplace( key, normalizeTokens( bytes[i], d.bodyStart, d.endByte, usesHashLineComments( measured[i].lang ) ) );
