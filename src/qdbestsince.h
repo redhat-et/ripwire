@@ -237,18 +237,53 @@ inline BestSinceStore tangleBestSince( const std::string& root, const std::strin
 }
 
 // ─── QD-SHRINK-PAIR: the base commit's callable bodies (quality.h BaseBodySource) ─────────────────────────────────────────────────
+// The callable bodies of the measured blobs `texts` (contents `bytes`), tokenized by the clone pass's normalizer: one row per key with exactly ONE callable
+// body (an overload set has no single body to compare). A blob that did not parse adds no key.
+inline BaseBodyStore baseBodiesOf( const std::vector<BlobText>& texts, const std::vector<std::string>& bytes, const std::vector<BlobTangleDefs>& measured )
+{
+    gtl::btree_map<std::uint64_t, std::vector<std::string>> bodies;
+    gtl::btree_map<std::uint64_t, std::uint32_t>             count;
+    for( std::size_t i = 0; i < texts.size(); ++i )
+    {
+        if( measured[i].status != BlobDefsStatus::Parsed )
+        {
+            continue;
+        }
+        for( const BlobTangleDef& d : measured[i].defs )
+        {
+            if( d.endByte <= d.bodyStart || d.endByte > bytes[i].size() )
+            {
+                continue;   // bodyless (a prototype): the clone pass never reads it either
+            }
+            const std::uint64_t key = pathQualifiedKey( texts[i].path, d.scope, measured[i].lang == Lang::Elixir ? elixirBaseName( d.name ) : std::string_view( d.name ) );
+            if( ++count[ key ] == 1 )
+            {
+                bodies.emplace( key, normalizeTokens( bytes[i], d.bodyStart, d.endByte, usesHashLineComments( measured[i].lang ) ) );
+            }
+        }
+    }
+    BaseBodyStore store;
+    for( auto& [ key, tokens ] : bodies )
+    {
+        if( count[ key ] == 1 )
+        {
+            store.rows.push_back( { key, std::move( tokens ) } );   // btree order: sorted by key, as findRowByKey reads it
+        }
+    }
+    return store;
+}
+
 // The same reader as the store above at ONE commit: each named file's blob at `ref`, measured by the same extraction
 // (tangleInputsInBlobs, whose defs carry the clone pass's body span), each callable body tokenized by the clone pass's normalizer.
 // A key with two callable bodies (an overload set) is dropped: it has no single base body. Any git or parse failure leaves the
 // file's keys absent, and a clone row whose member has no base body is judged as before (it gates).
 inline BaseBodyStore cloneBodiesAt( const std::string& root, const std::string& ref, const std::vector<std::string>& relPaths )
 {
-    BaseBodyStore     store;
     const std::string refSha = relPaths.empty() ? std::string() : gitResolveCommitSha( root, ref );
     std::vector<HistoryBlob> blobs;
     if( refSha.empty() || !blobsAtRef( root, refSha, blobPathspec( relPaths ), gitOneLine( root, "rev-parse --show-prefix 2>/dev/null" ), blobs ) )
     {
-        return store;
+        return {};
     }
     std::vector<std::string> shas, bytes;
     for( const HistoryBlob& b : blobs )
@@ -277,35 +312,7 @@ inline BaseBodyStore cloneBodiesAt( const std::string& root, const std::string& 
         std::lock_guard<std::mutex> ingestLk( headSnapshotIngestMutex() );   // the blob pool installs queries into the process-global cache
         measured = tangleInputsInBlobs( texts );
     }
-    gtl::btree_map<std::uint64_t, std::vector<std::string>> bodies;
-    gtl::btree_map<std::uint64_t, std::uint32_t>             count;
-    for( std::size_t i = 0; i < texts.size(); ++i )
-    {
-        if( measured[i].status != BlobDefsStatus::Parsed )
-        {
-            continue;
-        }
-        for( const BlobTangleDef& d : measured[i].defs )
-        {
-            if( d.endByte <= d.bodyStart || d.endByte > bytes[i].size() )
-            {
-                continue;   // bodyless (a prototype): the clone pass never reads it either
-            }
-            const std::uint64_t key = pathQualifiedKey( texts[i].path, d.scope, measured[i].lang == Lang::Elixir ? elixirBaseName( d.name ) : std::string_view( d.name ) );
-            if( ++count[ key ] == 1 )
-            {
-                bodies.emplace( key, normalizeTokens( bytes[i], d.bodyStart, d.endByte, usesHashLineComments( measured[i].lang ) ) );
-            }
-        }
-    }
-    for( auto& [ key, tokens ] : bodies )
-    {
-        if( count[ key ] == 1 )
-        {
-            store.rows.push_back( { key, std::move( tokens ) } );   // btree order: sorted by key, as BaseBodyStore::find reads it
-        }
-    }
-    return store;
+    return baseBodiesOf( texts, bytes, measured );
 }
 
 }   // namespace rw::quality

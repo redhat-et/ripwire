@@ -101,6 +101,13 @@ inline bool rawDefIsAliasRow( const RawDef& d ) noexcept
     return d.kind == SymKind::Alias && d.bodyByte > d.startByte && d.bodyByte < d.endByte;
 }
 
+// A RawDef's body start — its Symbol's sigEndByte: the body field's start, or endByte for a bodyless def and for an alias row (whose
+// bodyByte transports its target's start). QD-SHRINK-PAIR's base bodies (ingest_astquery.h tangleInputsInBlobs) cut the same span.
+inline std::uint32_t rawDefBodyStart( const RawDef& d ) noexcept
+{
+    return ( d.bodyByte > d.startByte && !rawDefIsAliasRow( d ) ) ? d.bodyByte : d.endByte;
+}
+
 inline void collapseObjCDeclDefs( std::vector<RawDef>& rawDefs )
 {
     PROFILE_SCOPE_DESCRIBE( "ingest/build-model: objc decl-def collapse" );
@@ -407,7 +414,7 @@ inline void assignSymbols( IngestResult& result, std::vector<RawDef>& rawDefs, b
         s.fileId = d.fileId;
         s.line   = d.line;
         s.sigStartByte = d.startByte;
-        s.sigEndByte   = ( d.bodyByte > d.startByte ) ? d.bodyByte : d.endByte;
+        s.sigEndByte   = rawDefBodyStart( d );   // an alias row's whole declaration is its signature (no body)
         s.endByte      = d.endByte;
         s.cx           = d.cx;
         s.ccx          = d.ccx;
@@ -450,7 +457,6 @@ inline void assignSymbols( IngestResult& result, std::vector<RawDef>& rawDefs, b
         // whole declaration as its signature and no body, and the target start goes to the side table (model.h AliasTarget)
         if( rawDefIsAliasRow( d ) )
         {
-            s.sigEndByte = d.endByte;
             result.aliasTargets.push_back( AliasTarget{ s.id, d.bodyByte } );
         }
         if( d.kind == SymKind::ModuleScope )

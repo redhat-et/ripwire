@@ -1909,20 +1909,16 @@ inline bool qdAnyLegendRow( const QualityDeltaLegendParts& p, Pred pred )
     return std::ranges::any_of( p.rows, pred ) || std::ranges::any_of( p.disclosedRows, pred );
 }
 
-// QD-IDIOM-ELEMTYPE's sentence when a clone row carries why=, else "" (kept out of emitQualityDeltaLegend's own branches).
-inline const char* qdOperandLegendFor( const QualityDeltaLegendParts& p )
-{
-    const bool any = qdAnyLegendRow( p, []( const rw::quality::Regression& r )
-                                     { return ( r.kind == "duplication" || r.kind == "new-clone-of-reused-helper" ) && !r.why.empty() && !rw::quality::isShrinkOnlyWhy( r.why ); } );
-    return any ? kQdOperandLegend : "";
-}
+// The two readings of a clone row's why=: the operand path's (QD-IDIOM-ELEMTYPE) and the shrink rule's (QD-SHRINK-PAIR).
+enum class CloneWhyReading : std::uint8_t { Operands, Shrink };
 
-// QD-SHRINK-PAIR's sentence when a clone row's why= is the shrink rule's, else "".
-inline const char* qdShrinkLegendFor( const QualityDeltaLegendParts& p )
+// The sentence for `reading` when a clone row's why= is of that reading, else "" (kept out of emitQualityDeltaLegend's own branches).
+inline const char* qdCloneWhyLegendFor( const QualityDeltaLegendParts& p, CloneWhyReading reading )
 {
-    const bool any = qdAnyLegendRow( p, []( const rw::quality::Regression& r )
-                                     { return ( r.kind == "duplication" || r.kind == "new-clone-of-reused-helper" ) && rw::quality::isShrinkOnlyWhy( r.why ); } );
-    return any ? kQdShrinkLegend : "";
+    const bool wantShrink = reading == CloneWhyReading::Shrink;
+    const bool any        = qdAnyLegendRow( p, [ wantShrink ]( const rw::quality::Regression& r )
+                                            { return ( r.kind == "duplication" || r.kind == "new-clone-of-reused-helper" ) && !r.why.empty() && rw::quality::isShrinkOnlyWhy( r.why ) == wantShrink; } );
+    return !any ? "" : wantShrink ? kQdShrinkLegend : kQdOperandLegend;
 }
 
 // QD-REPEATED-DECISION's sentence when a row's fix= names a repeated decision or loop, else "".
@@ -2079,8 +2075,8 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
             {
                 std::fputs( kQdOneStatementLegend, out );
             }
-            rw::emitRaw( out, qdOperandLegendFor( p ) );
-            rw::emitRaw( out, qdShrinkLegendFor( p ) );
+            rw::emitRaw( out, qdCloneWhyLegendFor( p, CloneWhyReading::Operands ) );
+            rw::emitRaw( out, qdCloneWhyLegendFor( p, CloneWhyReading::Shrink ) );
         }
         if( anyMinorMaskRow( p.rows ) || anyMinorMaskRow( p.disclosedRows ) )
         {

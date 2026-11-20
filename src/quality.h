@@ -8064,6 +8064,13 @@ struct BestSinceRow
     std::uint64_t key   = 0;   // qualityKey (pathQualifiedKey of the current path)
     std::uint64_t value = 0;   // the metric's packed best: Tangle = packTangleBest
 };
+// The row under `key` in `rows` (sorted by their `key` member), or nullptr: the best-since store's and the base-body store's lookup.
+template <typename Row>
+inline const Row* findRowByKey( const std::vector<Row>& rows, std::uint64_t key ) noexcept
+{
+    const auto hit = std::ranges::equal_range( rows, key, {}, &Row::key );
+    return hit.empty() ? nullptr : &hit.front();
+}
 struct BestSinceStore
 {
     BestMetric                metric = BestMetric::Tangle;
@@ -8072,11 +8079,7 @@ struct BestSinceStore
     std::uint32_t             blobs  = 0;   // history blobs measured
     std::uint32_t             unread = 0;   // history blobs that could not be measured (a parse degrade, a missing object): their minima are absent
     bool                      cut    = false;   // the blob cap stopped the walk: minima are over the newest blobs only
-    const BestSinceRow* find( std::uint64_t key ) const noexcept
-    {
-        const auto hit = std::ranges::equal_range( rows, key, {}, &BestSinceRow::key );
-        return hit.empty() ? nullptr : &hit.front();
-    }
+    const BestSinceRow* find( std::uint64_t key ) const noexcept { return findRowByKey( rows, key ); }
 };
 // Tangle's best: the per-input minima (nest 8 | deep 16 | steer 8) and the lowest score (tenths, 24 bits) over every version measured.
 inline std::uint64_t packTangleBest( const TangleInputs& minima, std::uint32_t minScore10 ) noexcept
@@ -8127,12 +8130,7 @@ struct BaseBodyRow
 };
 struct BaseBodyStore
 {
-    std::vector<BaseBodyRow> rows;      // sorted by key
-    const BaseBodyRow* find( std::uint64_t key ) const noexcept
-    {
-        const auto hit = std::ranges::equal_range( rows, key, {}, &BaseBodyRow::key );
-        return hit.empty() ? nullptr : &hit.front();
-    }
+    std::vector<BaseBodyRow> rows;      // sorted by key (findRowByKey)
 };
 // Empty = no source (computeDelta's callers that read no git): every clone row is judged as before.
 using BaseBodySource = std::function<BaseBodyStore( const std::vector<std::string>& relPaths )>;
@@ -11478,7 +11476,7 @@ inline std::optional<std::vector<ShrinkMember>> shrinkMembersOf( const CloneGrou
     for( const NodeId m : cg.members )
     {
         const std::uint64_t key  = m < keyByNode.size() ? keyByNode[m] : 0;
-        const BaseBodyRow*  base = key != 0 ? store.find( key ) : nullptr;
+        const BaseBodyRow*  base = key != 0 ? findRowByKey( store.rows, key ) : nullptr;
         const auto          now  = headBodies.find( key );
         if( base == nullptr || now == headBodies.end() || now->second != 1 || !readCloneSourceFile( ing, ing.symbols[m].fileId, bytes ) )
         {
