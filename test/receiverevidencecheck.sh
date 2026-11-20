@@ -1555,6 +1555,9 @@ proven    $CR/go6 callees src/app/app.go:NearPosition "fn FromContext src/pb/ten
 notproven $CR/go6 callees src/app/app.go:NearPosition "String src/pb/tenant.go:6" "String src/pb2/tenant.go:6"   # [N] the second result is a bool, never a GenID
 proven    $CR/go6 callees src/app/app.go:NearLocalDecl "fn Make src/decl/tenant.go:6"             # premise
 notproven $CR/go6 callees src/app/app.go:NearLocalDecl "IsSet src/pb/tenant.go:5" "IsSet src/pb2/tenant.go:5"    # [N] decl's GenID never names another package's
+# go8 (CR #705): the import path lib/x/pb admits pb/, x/pb/ and lib/x/pb/; the first two DECLARE GenID (ambiguous), the third
+# holds only methods. The ambiguous declaration decides: no declaration-less witness stands in (ee8d1a50e proved lib/x/pb's IsSet)
+notproven $CR/go8 callees app/app.go:UseAmbiguous "IsSet lib/x/pb/t.go:5" "IsSet pb/t.go:5" "IsSet x/pb/t.go:5"   # [N]
 # [N] an AMBIGUOUS import: go7 has no go.mod and two directories end in `gen`, each with its own F, G and result types. The
 # call binds no one F, so nothing is typed — a declared result (RA / RB) and a declaration-less one (Less) alike.
 for f in AmbF AmbG AmbParam; do
