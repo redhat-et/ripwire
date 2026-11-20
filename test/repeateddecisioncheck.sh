@@ -265,8 +265,10 @@ FULL="$( "$BIN" "$R" --quality-delta --no-cache --legend=full 2>/dev/null )"   #
 case "$FULL" in *'deciding it once is the cheapest fix'*) ok "(L) a document with the facet defines it";; *) no "(L) a document with the facet never defines it";; esac
 mv "$R/src/groups.h" "$R/src/window.py" "$TMP/"
 printf '#pragma once\ninline int keep() { return 1; }\ninline int more( int a ) { return a + 1; }\n' >"$R/src/keep.h"
-FULL0="$( "$BIN" "$R" --quality-delta --no-cache --legend=full 2>/dev/null )"   # status: exits 0 or 2 by design; the legend text is the verdict
-case "$FULL0" in *'deciding it once is the cheapest fix'*) no "(L) a document without the facet pays for its sentence";; *) ok "(L) a document without the facet carries no such sentence";; esac
+FULL0="$( "$BIN" "$R" --quality-delta --no-cache --legend=full 2>/dev/null )"; rc0=$?   # exits 0 or 2 by design; anything else, or no document, is a failed run
+if [ "$rc0" != 0 ] && [ "$rc0" != 2 ]; then no "(L) the no-facet run failed (rc=$rc0)"
+elif ! printf '%s' "$FULL0" | grep -q '<quality-delta '; then no "(L) the no-facet run printed no quality-delta document"
+else case "$FULL0" in *'deciding it once is the cheapest fix'*) no "(L) a document without the facet pays for its sentence";; *) ok "(L) a document without the facet carries no such sentence";; esac; fi
 
 echo
 [ "$fail" = 0 ] && { echo "ALL PASS"; exit 0; }

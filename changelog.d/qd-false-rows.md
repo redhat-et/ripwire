@@ -10,6 +10,7 @@ are under 80 tokens and are not one body with renamed parameters is now reported
 gating. On this repo, tmux and hono the rule demotes no existing clone group; `test/cloneidiomcheck.sh` arm (P)
 pins both directions.
 
-`--quality-delta=A..B` now carries `stale_tree="1"` (and a one-line stderr note) when the working tree is not B's
-tree — uncommitted edits, untracked files, or HEAD on another commit — so a green range answer is not read as a
+`--quality-delta=A..B` now carries `stale_tree="1"` (and a one-line stderr note) when the files on disk are not B's
+tree — uncommitted edits, untracked files, or a HEAD whose tree differs from B's (another commit with the same tree is
+not stale) — so a green range answer is not read as a
 pass for the files on disk. Never gating; `test/qdrefpaircheck.sh` arm (B2).
