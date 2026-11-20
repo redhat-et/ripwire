@@ -220,9 +220,12 @@ expect callers new 2 "but only 2 CALLERS — external_caller is not one of them"
 # test/rustpathownerfix/src/*.rs. RED on main 9087eb59c: (a)-(j), (o) and (r) bound other_helpers.rs / mypath.rs / errs.rs /
 # procs.rs unhedged.
 PO="test/rustpathownerfix"
-porows(){ run "$PO" "--callees=$1" --no-cache | grep -oE '<s t="[^>]*>' | sed -E 's/ (tested|test|of_def)="[^"]*"//g'; }
-poexpect(){   # $1 caller  $2 the exact rows, one per line  $3 prose
-    local got; got="$( porows "$1" )"
+poexpect(){   # $1 caller  $2 the exact rows, one per line  $3 prose; the run must succeed and answer for that caller (CR 706: a timed-out
+              #   run printed nothing, and an empty expectation matched it)
+    local out got
+    if ! out="$( run "$PO" "--callees=$1" --no-cache )"; then no "§5b $1: --callees exited non-zero (or timed out) — $3"; return; fi
+    case "$out" in *"<callees schema=\"ripwire.callees/v1\" of=\"$1\" defs=\""[1-9]*) ;; *) no "§5b $1: no callees answer for that caller — $3"; return;; esac
+    got="$( printf '%s\n' "$out" | grep -oE '<s t="[^>]*>' | sed -E 's/ (tested|test|of_def)="[^"]*"//g' )"
     if [ "$got" = "$2" ]; then ok "§5b $1: $3"; else no "§5b $1 expected [$2] got [$got] — $3"; fi
 }
 TC='<s t="method" n="TestClient::new" p="src/test_helpers/test_client.rs:3"/>'
@@ -246,6 +249,17 @@ poexpect far_tree_from '<s t="method" n="PathBuf::from" p="src/mypath.rs:7"/>' "
 poexpect tree_new '<s t="method" n="PathBuf::new" p="src/mypath.rs:4"/>' "(p) guard: the in-tree PathBuf::new, proven"
 poexpect bare_from '' "(q) guard: a bare From::from( .. ) keeps the rule it had (main: no row)"
 poexpect std_command '' "(r) \`use std::process::Command; Command::new( .. )\` is std's: procs.rs's inherent impl is for gen.rs's in-tree Command (no indexed class, a \`use\` into the tree names it), never a hedge onto it"
+# (e) (f) (r) read no row; the pin census says why: each `new` site is an `external` C row with no target (a declined or never-indexed
+# call would pass the empty-row arms above). CR 706, review 5994579130.
+POC="$( mktemp )"
+if run "$PO" --no-cache --pin-census="$POC" >/dev/null; then
+    for c in 'src/calls.rs::std_use::std_new#' 'src/calls.rs::std_written#' 'src/calls.rs::std_proc::std_command#'; do
+        if awk -F'\t' -v c="$c" '$1=="C" && $2=="external" && index($6,c)==1 && $7=="new" && $8=="" { f=1 } END { exit !f }' "$POC"; then
+            ok "§5b ${c#src/calls.rs::}: the census rules the \`new\` site external (no target)"
+        else no "§5b ${c#src/calls.rs::}: no external C row for its \`new\` site in the pin census"; fi
+    done
+else no "§5b the --pin-census run failed"; fi
+rm -f "$POC"
 
 # ── §6 AMBIGUITY IS DISCLOSED, never silently resolved (plan §6) ───────────────────────────────────────
 # Canonical keying makes the honest cases precise, so the amb= path is exercised ON PURPOSE: two modules

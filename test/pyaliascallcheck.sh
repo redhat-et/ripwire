@@ -140,6 +140,10 @@ else no "call_same changed"; sed 's/<!--.*-->//; s/^/        | /' "$TMP/call_sam
 targets(){ awk -F'\t' -v c="scope/$1#" -v l="$2" '$1=="C" && index($6,c)==1 && $7=="Spray" && $9==l { print $8 }' "$TMP/census" \
            | tr '|' '\n' | sed 's/#[0-9]*$//' | sort | paste -sd' ' -; }
 flags(){ awk -F'\t' -v c="scope/$1#" -v l="$2" '$1=="C" && index($6,c)==1 && $7=="Spray" && $9==l { print $5 }' "$TMP/census"; }
+# deflines CALLER LINE: the same row's targets as file:LINE of each definition (the census S row of its full id; S rows follow the C rows, so two passes), sorted;
+#   the #N-stripped names above cannot tell two same-named definitions of one file apart (CR 706, review 5994579130)
+deflines(){ awk -F'\t' -v c="scope/$1#" -v l="$2" 'NR==FNR { if( $1=="S" ) at[$2]=$4; next } $1=="C" && index($6,c)==1 && $7=="Spray" && $9==l { n=split($8,t,"|");
+           for(i=1;i<=n;i++){ f=t[i]; sub(/::.*/,"",f); print f ":" ( t[i] in at ? at[t[i]] : "?" ) } }' "$TMP/census" "$TMP/census" | sort | paste -sd' ' -; }
 #   POSITIVE: the definitions the scope binds, and nothing else
 for a in "s_local.py::use_local 5 scope/s_local.py::Spray::Spray" \
          "s_enclosing.py::inner_enclosing 6 scope/s_enclosing.py::Spray::Spray" \
@@ -153,17 +157,15 @@ for a in "s_local.py::use_local 5 scope/s_local.py::Spray::Spray" \
     if [ "$got" = "$3" ]; then ok "$1 (line $2): Spray() binds the one definition its scope chain binds ($3)"
     else no "$1 (line $2): expected exactly $3, got: ${got:-<no row>}"; fi
 done
-#   a default argument runs in the ENCLOSING scope: the module's Spray (line 1), not the def's own (line 6)
-got=$( targets s_default.py::use_default 5 )
-want="scope/s_default.py::Spray::Spray"
-if [ "$got" = "$want" ] && awk -F'\t' '$1=="C" && $7=="Spray" && $9==5 && index($6,"scope/s_default.py::")==1 && $8 ~ /#[0-9]+$/ && $8 !~ /\|/' "$TMP/census" | grep -q . \
-   && [ "$( awk -F'\t' '$1=="C" && $7=="Spray" && index($6,"scope/s_default.py::")==1 { print $9 "=" $8 }' "$TMP/census" | sort | paste -sd' ' - | awk '{ split($1,a,"="); split($2,b,"="); print ( a[2] != b[2] ) }' )" = 1 ]; then
-    ok "s_default.py: the default argument (line 5) and the body call (line 9) bind different Spray definitions"
-else no "s_default.py line 5: expected the module's Spray alone, distinct from the body's, got: ${got:-<no row>}"; fi
+#   a default argument runs in the ENCLOSING scope: the module's Spray (line 1), not the def's own (line 6); the body call is the def's own
+got=$( deflines s_default.py::use_default 5 ); body=$( deflines s_default.py::use_default 9 )
+if [ "$got" = "scope/s_default.py:1" ] && [ "$body" = "scope/s_default.py:6" ]; then
+    ok "s_default.py: the default argument (line 5) binds the module's Spray (line 1), the body call (line 9) the def's own (line 6)"
+else no "s_default.py: expected line 5 -> s_default.py:1 and line 9 -> s_default.py:6, got: ${got:-<no row>} / ${body:-<no row>}"; fi
 #   two def statements in one scope (a conditional rebinding): a split across exactly those two
-got=$( targets s_cond.py::use_cond 8 )
-if [ "$got" = "scope/s_cond.py::Spray::Spray scope/s_cond.py::Spray::Spray" ]; then ok "s_cond.py: a split across the scope's two Spray definitions only"
-else no "s_cond.py: expected the two s_cond.py Spray definitions only, got: ${got:-<no row>}"; fi
+got=$( deflines s_cond.py::use_cond 8 )
+if [ "$got" = "scope/s_cond.py:3 scope/s_cond.py:6" ]; then ok "s_cond.py: a split across the scope's two Spray definitions only (lines 3 and 6)"
+else no "s_cond.py: expected the two s_cond.py Spray definitions (lines 3 and 6) only, got: ${got:-<no row>}"; fi
 callees use_local && if grep -q '<s [^>]*n="Spray" p="scope/s_local.py:2"' "$TMP/use_local" && ! grep -q 'via=' "$TMP/use_local" && [ "$( grep -o 'n="Spray"' "$TMP/use_local" | wc -l )" -eq 1 ]; then
     ok "--callees=use_local: one proven Spray row (s_local.py:2), no via=\"name\" hedge"
 else no "--callees=use_local: expected one proven s_local.py:2 Spray row"; sed 's/<!--.*-->//; s/^/        | /' "$TMP/use_local"; fi

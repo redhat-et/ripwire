@@ -973,7 +973,7 @@ Discloses: **none**
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
-| `kMacroArgNestingDepth` | `16` | — | — |
+| `kMacroArgNestingDepth` | `16` | INDEXING | — |
 
 ### `src/ingest_sidecap.h`
 

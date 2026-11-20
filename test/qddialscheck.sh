@@ -563,7 +563,9 @@ row "$OEM" error-masking lineCommentJs >/dev/null \
 #   (s1) new, three uint32_t                      -> similar="3", minor, origin="new-symbol"
 #   (s2) grew 1 -> 3 const std::string&            -> similar="3", minor, no origin (it existed)
 #   (s3) the params kind's own major row (5 -> 7)  -> the same row gains similar="7", still major, still ONE row
-#   (n1) new ( from, to ), (n2) new bool pair, (n3) new int beside long, (n4) an unchanged ( p, q ): no row
+#   (n1) new ( from, to ), (n2) three new bools, (n3) new int, long, int (no two adjacent share a type), (n4) an unchanged
+#        ( p, q ): no row. (n2) and (n3) have three parameters, so the bool exclusion and the type comparison are what
+#        keep them quiet, not the run minimum ((s1)'s three uint32_t are the positive control; CR 706, review 5994579130)
 #   (n5) new ( index, count ) of one uint32_t, (n6) grew 1 -> 2 const std::string&: no row. A run of two is not reported
 #        (similarargs.h kSimilarRunMin 3, owner 2026-11-18: runs of two were 160 of the 184 rows on the tidy-681 ref pair).
 #        Red before the threshold (lane/qd-similar-default 9f662d600's binary, runs of two reported): 2 FAIL, the rest
@@ -589,13 +591,13 @@ h.append("inline int wide( int a1, int b1, int c1, int d1, int e1%s ){ return a1
 if after:
     h.append("inline std::uint32_t fresh3( std::uint32_t at, std::uint32_t nameAt, std::uint32_t line ){ return at + nameAt + line; }\n")
     h.append("inline std::size_t ranged( std::size_t from, std::size_t to ){ return to - from; }\n")
-    h.append("inline bool flags( bool keep, bool fold ){ return keep && fold; }\n")
-    h.append("inline long mixed( int count, long total ){ return count + total; }\n")
+    h.append("inline bool flags( bool keep, bool fold, bool trim ){ return keep && fold && trim; }\n")
+    h.append("inline long mixed( int count, long total, int limit ){ return count + total + limit; }\n")
     h.append("inline std::uint32_t pair2( std::uint32_t index, std::uint32_t count ){ return index < count ? index : 0; }\n")
 open(os.path.join(d, "sim.hpp"), "w").write("".join(h))
 call = "untouched( 2, 1 ) + int( grew( \"t\"%s ) ) + int( grew2( \"p\"%s ) ) + wide( 1,2,3,4,5%s )" % (", \"a\", \"h\"" if after else "", ", \"n\"" if after else "", ",6,7" if after else "")
 if after:
-    call += " + int( fresh3( 1, 2, 3 ) ) + int( ranged( 1, 2 ) ) + int( flags( true, false ) ) + int( mixed( 1, 2 ) ) + int( pair2( 1, 2 ) )"
+    call += " + int( fresh3( 1, 2, 3 ) ) + int( ranged( 1, 2 ) ) + int( flags( true, false, true ) ) + int( mixed( 1, 2, 3 ) ) + int( pair2( 1, 2 ) )"
 open(os.path.join(d, "m.cpp"), "w").write('#include "sim.hpp"\nint driver(){\n    return %s;\n}\nint main(){ return driver(); }\n' % call)
 PY
 }
@@ -622,7 +624,7 @@ SJUDGED="$( grep -cE '^inline [a-z:_0-9 ]+ (ranged|flags|mixed|untouched|pair2|g
 SQUIET=0
 for f in ranged flags mixed untouched pair2 grew2; do srow "$f" >/dev/null || SQUIET=$(( SQUIET + 1 )); done
 [ "$SJUDGED" = 6 ] && [ "$SQUIET" = 6 ] \
-    && ok "similar (n1-n6): a range pair, a bool pair, two types, an unchanged list, a new pair and a list grown to two get no row (6 judged)" \
+    && ok "similar (n1-n6): a range pair, three bools, int-long-int, an unchanged list, a new pair and a list grown to two get no row (6 judged)" \
     || { no "similar (n1-n6): judged=$SJUDGED (want 6), without a row=$SQUIET (want 6)"; rows "$OSA"; }
 { [ "$SFRC" = "$SARC" ] && printf '%s' "$OSF" | grep -q 'on a params row: the function is new or its parameter list grew'; } \
     && ok "similar: the full legend defines similar= when a row carries it" || no "similar: a row carries similar= and the full legend does not define it"

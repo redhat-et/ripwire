@@ -15,6 +15,8 @@ split across those only. The rule makes no decision, and the call keeps the earl
 binding shares the scope (an assignment, a parameter, an import, a `for`/`with`/`except` target), when a
 `global`/`nonlocal` names it, when a lambda parameter or comprehension target of the name holds the call,
 when the innermost scope is a class body that binds it, and at module scope under a star import, a
-`globals()`/`setattr` write or a conditional def of a builtin's name. A default argument, annotation,
-decorator or base clause runs in the enclosing scope. Python only; `--for` answers on Python trees can change.
+`globals()`/`setattr` write or a conditional def of a builtin's name. A default argument, decorator or
+base clause runs in the enclosing scope. An annotation's names are read there too, an approximation: since
+Python 3.14 an annotation is evaluated lazily, so it can see a later binding of the name. Python only;
+`--for` answers on Python trees can change.
 Gate: `test/pyaliascallcheck.sh` section 5.

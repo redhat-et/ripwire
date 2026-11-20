@@ -1440,14 +1440,19 @@ proven    $R7 callees src/app.rs:chain_other_root   "method route $R7D:4" "metho
 notproven $R7 callees src/app.rs:chain_other_root   "route $R7M:5" "layer $R7M:6"                              # [N]
 proven    $R7 callees src/app.rs:near_other_type    "method route $R7M:20"                                     # [P] a hop to ANOTHER type: the chain follows it
 notproven $R7 callees src/app.rs:near_other_type    "route $R7M:5" "route $R7D:4"                              # [N] never the root's class
+# Each [N] loop below also requires the named call's hedged rows (visible): a call the index dropped would otherwise pass the
+# notproven arm vacuously (CR 706, review 5994579130).
 for f in near_future near_let_future near_try_missing; do   # an un-awaited `async fn` (a future), a Result with no `?`
     notproven $R7 callees "src/app.rs:$f" "layer $R7M:6" "layer $R7D:5"                                    # [N]
+    visible   $R7 callees "src/app.rs:$f" "layer $R7M:6" "layer $R7D:5"                                    # the call is still answered, hedged
 done
 for f in near_dyn near_impl near_trait_obj; do   # `Box<dyn Service>`, `impl Service`, a trait method's `Self` on a trait object
     notproven $R7 callees "src/app.rs:$f" "serve $R7M:29" "serve $R7D:8"                                   # [N]
+    visible   $R7 callees "src/app.rs:$f" "serve $R7M:29" "serve $R7D:8"                                   # the call is still answered, hedged
 done
 for f in near_no_await near_split_hop; do   # IntoFuture's Output needs the `.await`; `twice` is inherent AND a trait's (`-> Done`)
     notproven $R7 callees "src/app.rs:$f" "report $R7M:21" "report $R7D:7"                                 # [N]
+    visible   $R7 callees "src/app.rs:$f" "report $R7M:21" "report $R7D:7"                                 # the call is still answered, hedged
 done
 proven    $R7 callees "$R7M::Router::self_root"     "method route $R7M:5" "method layer $R7M:6"                # [P] a `Self::new()` root
 proven    $R7 callers "$R7M::Router::route"         "fn chain_self src/app.rs" "fn chain_let_after src/app.rs"  # [P] the callers side

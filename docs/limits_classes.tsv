@@ -55,6 +55,7 @@ kIdiomMaxReturnTokens	BOUNDARY
 kInventoryEntryCap	OUTPUT
 kInventoryNameCeiling	OUTPUT
 kLegoClosureRowCap	OUTPUT
+kMacroArgNestingDepth	INDEXING
 kMatchMaxHits	INDEXING
 kMaxAggsModeled	INDEXING
 kMaxAliasDepth	INDEXING
