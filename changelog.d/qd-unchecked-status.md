@@ -9,4 +9,4 @@ row's `p=` is the dropped call's line and its new `call=` attribute names the ca
 three fix commits backwards gives their rows (3 of 3); a 20-site hand-check on tmux, code-review-graph and this tree
 found 20 of 20 drops real and 16 worth a check. Go `_ = f()` and Rust `let _ = f()` stay out, as in error-masking.
 The quality snapshot scheme moves to 37 (qd-unhandled-arm, later in the same release, takes it to 38), so an older snapshot cache is rebuilt once; the legend dictionary moves to
-`dictv=ff6a8ec8438b7fe0 entries=1176` (with the other quality-delta changes in this release).
+`dictv=c40ddf725e4befcb entries=1177` (with the other quality-delta changes in this release).

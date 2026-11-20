@@ -12,4 +12,4 @@ enum gives a row on every switch it leaves incomplete, even an untouched one. A 
 a comment that states the omission, a void dispatcher, an `#if` in the switch or the enum, and generated code give
 no row. Rust and TypeScript stay out (the compiler checks `match`; TS has no never-check reading yet). The quality
 snapshot scheme moves to 38, so an older snapshot cache is rebuilt once; the legend dictionary moves to
-`dictv=ff6a8ec8438b7fe0 entries=1176` (with the other quality-delta changes in this release).
+`dictv=c40ddf725e4befcb entries=1177` (with the other quality-delta changes in this release).
