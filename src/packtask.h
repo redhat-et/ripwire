@@ -270,14 +270,11 @@ inline void appendLiftJsonKeys( std::string& j, const std::string& sibliftNote, 
 // M1: splice the bundle's owed root attributes onto whichever <ctx …> spelling this header ended up with.
 // Both spellings must carry them — the ladder's route-dropped rung rebuilds the root from scratch, and a
 // completeness fact that disappears on the rung where the ceiling bit is the exact shape of dishonesty this
-// tool forbids. A root that is not an open tag is left alone (the degrade path stays byte-identical).
+// tool forbids. A root that is not an open tag is left alone (the degrade path stays byte-identical). Spliced at the
+// root's own '>' (ctxRootOpenAppendAttrs): under a cut history walk the root string ends with a comment.
 inline void appendPackTaskRootExtras( std::string& rootOpen, std::string_view extras )
 {
-    if( extras.empty() || rootOpen.empty() || rootOpen.back() != '>' )
-    {
-        return;
-    }
-    rootOpen.insert( rootOpen.size() - 1, extras );
+    ctxRootOpenAppendAttrs( rootOpen, extras );
 }
 
 inline std::string packTaskHeaderText( const PackTaskHeaderParts& p, bool withRouteAttr, bool withTaskEcho,

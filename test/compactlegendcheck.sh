@@ -339,6 +339,10 @@ echo "=== (A-PIN) --legend=full is BYTE-IDENTICAL to the pre-L1 default (pinned 
 # sites_at= clause says the match is by LEAF name ("its call sites spelled like the called name" -> "its calls of the called
 # LEAF name, any receiver or qualifier"), 3890 -> 3907 B. Checked mechanically: the reverse replacement of that one phrase
 # gives the previous pin byte for byte (at= masked). The six other pins are unchanged.
+# RE-ANCHORED BY HAND 2026-11-18 (lane edge-strays-1118, PROVEN-SITE-KEEPS-NAMESAKES, by design), callers.xml only: a call proven to
+# another definition of the name is no longer one of a row's sites, so the sites_at= clause says so ("any receiver or qualifier"
+# -> "bar ones proven elsewhere", the same 28 B; the compact readings "calls of the leaf name, any receiver" -> "leaf-name calls not
+# proven elsewhere", the same length). Checked mechanically: the reverse replacement gives the previous pin byte for byte.
 # RE-ANCHORED BY HAND 2026-10-18 (lane body-fold FIX1 B2, by design), for.xml only: the default --for answer now ends with
 # <fold kind="bodies" … served="3" total="3"> (the three top ranked bodies), the full legend gains the fold clause (forfold.h
 # kForBodyFoldLegend, 496 B), and est_tokens= prices them, 1802 -> 2143, 4504 -> 5509 B. Checked mechanically: with the <fold>
@@ -699,6 +703,20 @@ probeFor()
 # A name with several definitions now serves lean (no ride-along map), so the whole-file answer this probe reaches carries
 # topk_default="0" (+112 B reading) and map_next= (+56 B reading) on its root, both present-only (compactlegend.h). The
 # (U-twin-expand) arm below keeps the OLD 360 B pin for everything else in that legend.
+# RE-PINNED 2026-10-26 (this review-fix commit, the SAME one that adds the bytes): ripwire.around/v1 1230 -> 1240
+# (measured 1239, the --expand/--around=distance probes unchanged). The CodeRabbit round corrected the defs= READING to
+# the order applyNameTower now implements — anchor's exact language, family, kind, id — replacing the C-era "most-specific
+# kind walked first, its language ahead" (the 2026-10-21 note's 151 B term) with the true 44 B-longer sentence; a legend
+# that misstates the order is the drift class this table exists to price, and the whole +9 B breach localises to that one row.
+# RE-PINNED 2026-10-25 (task D4, the SAME commit that adds these bytes — the table's attribution rule): ripwire.around/v1
+# 830 -> 1230 (measured 1215, the --around=distance probe). D4's disclosure grows this legend in one place, and the
+# placement was MEASURED, not chosen: legendcoveragecheck (A) showed the around first screen renders its VERB-scoped
+# dictionary (the shared-map-dict draft at 1066 never reached the probe and its entries are gone), so the root row
+# carries reflang="…" reflang-origin="…" (35 B when an anchor decided the answer) and the verb dict carries the two
+# readings (~368 B: the language the answer anchored to, and where the anchor came from — explicit/context/corpus,
+# with the foreign-fallback rule stated once). The FULL dialect adds its own clause in the seed stanza (serialize.h,
+# charged only when the row carries the attributes — it is not in this compact number). 812 -> 1215 is the whole of
+# it; no purpose-clause or unrelated reading moved.
 # RE-PINNED 2026-10-21 (this review-fix round, but the BYTES are the reviewed commit's): ripwire.around/v1 770 -> 830
 # (measured 812, the --around=distance probe; the table held 760). e5d39f70 "say tower front where the code now means it"
 # rewrote the compact defs= READING from "lowest-id walked, code first, a C/C++ body in the same scope over its declaration"
@@ -799,7 +817,7 @@ ripwire.grep/v1                  1432  1420
 ripwire.match/v1                  370   355
 ripwire.lego/v1                  290   275
 ripwire.exemplar/v1               440   422
-ripwire.around/v1                830   812
+ripwire.around/v1               1240  1239
 ripwire.callers/v1               450   438
 ripwire.callees/v1                500   484
 ripwire.uses/v1                   510   500
@@ -837,7 +855,7 @@ pinFor()
 sdtCut="$( python3 - "$TMP/sdt.c" "$TMP/sdt.cut" <<'PY'
 import re, sys
 doc = open( sys.argv[1], encoding = "utf-8", errors = "replace" ).read()
-reading = " c sites_at=: its calls of the leaf name, any receiver, as [file:]line (p=: def line, default file); not proof each binds."
+reading = " c sites_at=: its leaf-name calls not proven elsewhere, as [file:]line (p=: def line, default file); not proof each binds."
 body = re.sub( r"<!--.*?-->", "", doc, flags = re.S )
 if not re.search( r'<c [^>]*sites_at="[^"]*[0-9]"', body ):
     print( "NOPREMISE no caller row carries sites_at=" ); sys.exit( 0 )
@@ -875,7 +893,7 @@ fi
 catCut="$( python3 - "$TMP/cat.c" "$TMP/cat.cut" <<'PY'
 import re, sys
 doc = open( sys.argv[1], encoding = "utf-8", errors = "replace" ).read()
-reading = " <s sites_at=>: its calls of the leaf name, any receiver, as [file:]line (p=: def line, default file); not proof each binds."
+reading = " <s sites_at=>: its leaf-name calls not proven elsewhere, as [file:]line (p=: def line, default file); not proof each binds."
 body = re.sub( r"<!--.*?-->", "", doc, flags = re.S )
 if not re.search( r'<s [^>]*sites_at="[^"]*[0-9]"', body ):
     print( "NOPREMISE no caller row carries sites_at=" ); sys.exit( 0 )

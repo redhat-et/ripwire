@@ -10,6 +10,7 @@ SCRATCH = os.environ.get("RIPWIRE_SHOWCASE_SCRATCH") or tempfile.mkdtemp(prefix=
 BIN = "./build/ripwire"
 ABIN = os.path.join(REPO, "build", "ripwire")
 DIRTY = os.path.join(SCRATCH, "dirty")          # throwaway --local clone with ONE deliberate regression
+CLEAN = os.path.join(SCRATCH, "clean")          # throwaway clean clone: seeds the --show-stale contrast pair
 AUX = os.path.join(SCRATCH, "aux")
 
 # The capture is a SHIPPED document, so it goes through the SAME public-export scrub docs/COMMANDS.md
@@ -470,12 +471,12 @@ add(S4, f"{BIN} . --owners", "Bus-factor: recency-weighted author ownership per 
 add(S4, f"{BIN} . --dead-code=src", "Internal functions with no caller found in the index — a name-based graph reading, not a confidence score. NOTE the filter is a path-COMPONENT match: 'src' matches any .../src/... segment; use ./src to pin the root directory.")
 add(S4, f"{BIN} . --exercises=test/regression.sh", "Which symbols a TEST FILE exercises — the reverse direction of --affected.")
 add(S4, f"{BIN} . --community=0", "Drill into ONE call-graph community by id — the drill= the --communities output itself advertises.")
-add(S4, f"{BIN} . --quality-delta", onTree(
-    "On a CLEAN tree: nothing got worse, exit 0. The gating shape is in the sandbox section below.",
-    "Recorded against a DIRTY tree, so any row below is a real regression in the working copy — the recorded exit code says whether anything gated. The sandbox section below shows the same gating shape on a known, deliberate edit."))
-add(S4, f"{BIN} . --quality-delta --show-stale", onTree(
-    "The same clean verdict with what it folded printed back: every stale acknowledgement as an <sa kind= key= why=> row and the full header. The regression-free answer above keeps only stale= and stale_by_kind= (and stale_next= names this call), and folds only when that saves a quarter of the bytes. Refused without --quality-delta.",
-    "The same verdict with every stale acknowledgement printed as an <sa kind= key= why=> row and the full header — recorded against a DIRTY tree, so the rows above it are the working copy's. Refused without --quality-delta."))
+add(S4, f"{ABIN} . --quality-delta",
+    "The regression-free answer on a clone whose ledger holds stale acknowledgements (its HEAD's own history plus one demo row keyed to a finding that no longer measures as worse): the verdict-only document, every stale row collapsed to stale= and stale_by_kind=, with stale_next= naming the call below. Recorded in a throwaway clean clone so the contrast is structural — not a race with the release checkout's drift — and every regeneration on every machine sees the same pair.",
+    cwd=CLEAN)
+add(S4, f"{ABIN} . --quality-delta --show-stale",
+    "The same run, the same clone, the folded rows printed back: each stale acknowledgement as an <sa kind= key= why=> row under the full header — the demo row included, and no quarter of the bytes saved by silence. Refused without --quality-delta.",
+    cwd=CLEAN)
 add(S4, f"{BIN} . --edit-check=rankGraphTeleport", onTree(
     "Fast per-symbol post-edit contract check vs git HEAD (unchanged on a clean tree).",
     "Fast per-symbol post-edit contract check vs git HEAD — recorded against a DIRTY tree, so the verdict describes the working copy, not HEAD alone, and the recorded exit code is the working copy's."))
@@ -597,10 +598,13 @@ _IN_LIMIT_NARROW = 2   # the page size the last-resort pass tries (see chooseInW
 # published command spells --limit=1 and the caption says it was the last resort, so a reader sees which page size was used.
 _IN_LIMIT_LAST = 1
 
+def inSince( n ):
+    """The --since= revision of window n: HEAD~n, or a revision spelled as-is (the lane-merge pass's commit id)."""
+    return f"HEAD~{n}" if isinstance( n, int ) else n
+
 def inCaseCmd( n, limit=_IN_LIMIT ):
     """n: HEAD~n, or a revision spelled as-is (the lane-merge pass's commit, see laneMergeSince)."""
-    since = f"HEAD~{n}" if isinstance( n, int ) else n
-    return f"{BIN} . --rank-by=churn-decay --since={since} {_IN_EXCLUDES} --in={_IN_DIR} --limit={limit}"
+    return f"{BIN} . --rank-by=churn-decay --since={inSince( n )} {_IN_EXCLUDES} --in={_IN_DIR} --limit={limit}"
 
 # The probe runs at MODULE INITIALISATION, before the capture loop below and therefore before the per-case
 # timeout that loop applies. A non-terminating run here would hang the generator with nothing on stderr and no
@@ -680,44 +684,62 @@ def firstWindow( lo, hi, ok ):
     """The smallest N in (lo, hi] with ok( N ), else None."""
     return next( ( n for n in range( lo + 1, hi + 1 ) if ok( n ) ), None )
 
-def chooseInWindow( lo=1, hi=14, unshown=None, mergeHolds=None, laneSince=None ):
-    """Return ( N, page limit ): N is HEAD~N, or the lane-merge pass's commit id (a str)."""
-    unshown = unshown or inCaseUnshown
-    mergeHolds = mergeHolds or ( lambda n: marginHeldByMerge( n, REPO, _IN_DIR ) )
-    laneSince = laneSince or ( lambda: laneMergeSince( REPO, hi ) )
-    both = lambda n, lim: not unshown( n, lim ) and not unshown( n - 1, lim )
-    passes = [
-        ( _IN_LIMIT, lambda n: both( n, _IN_LIMIT ), lambda n: f"margin HEAD~{n-1} holds" ),
-        ( _IN_LIMIT, lambda n: not unshown( n, _IN_LIMIT ) and mergeHolds( n - 1 ),
-          lambda n: f"margin HEAD~{n-1} holds as the merge HEAD~{n-1}: source-free commits behind it, its first-parent diff counted" ),
-        ( _IN_LIMIT_NARROW, lambda n: both( n, _IN_LIMIT_NARROW ),
-          lambda n: f"--limit={_IN_LIMIT_NARROW}, margin HEAD~{n-1} holds; the margin has too few source files for --limit={_IN_LIMIT}" ),
-    ]
+def scanPasses( passes, lo, hi ):
+    """The first pass, in order, that accepts some N in (lo, hi]: ( N, page limit, why ), else None."""
     for lim, ok, why in passes:
         n = firstWindow( lo, hi, ok )
         if n is not None:
-            print( f"showcase_capture: --in= case window derived as HEAD~{n} ({why( n )})", file=sys.stderr )
-            return n, lim
-    rev = laneSince()
-    if rev is not None and not unshown( rev, _IN_LIMIT ):
-        print( f"showcase_capture: --in= case window derived as {rev} (no HEAD~N shows: the newest first-parent merge took in "
-               f"main; the window is this branch's own commits since that main tip)", file=sys.stderr )
-        return rev, _IN_LIMIT
-    last = [
-        ( _IN_LIMIT_LAST, lambda n: both( n, _IN_LIMIT_LAST ),
+            return n, lim, why( n )
+    return None
+
+def windowPasses( unshown, mergeHolds ):
+    """The HEAD~N passes as ( tried before the lane-merge pass, the last resorts after it ); a pass is ( limit, ok( N ), why( N ) ).
+    A window is accepted when it shows and its margin HEAD~(N-1) either shows too or is held by the merge HEAD~(N-1)."""
+    marginShows = lambda n, lim: not unshown( n, lim ) and not unshown( n - 1, lim )
+    marginHeld  = lambda n, lim: not unshown( n, lim ) and mergeHolds( n - 1 )
+    before = [
+        ( _IN_LIMIT, lambda n: marginShows( n, _IN_LIMIT ), lambda n: f"margin HEAD~{n-1} holds" ),
+        ( _IN_LIMIT, lambda n: marginHeld( n, _IN_LIMIT ),
+          lambda n: f"margin HEAD~{n-1} holds as the merge HEAD~{n-1}: source-free commits behind it, its first-parent diff counted" ),
+        ( _IN_LIMIT_NARROW, lambda n: marginShows( n, _IN_LIMIT_NARROW ),
+          lambda n: f"--limit={_IN_LIMIT_NARROW}, margin HEAD~{n-1} holds; the margin has too few source files for --limit={_IN_LIMIT}" ),
+    ]
+    lastResort = [
+        ( _IN_LIMIT_LAST, lambda n: marginShows( n, _IN_LIMIT_LAST ),
           lambda n: f"--limit={_IN_LIMIT_LAST}, LAST RESORT: margin HEAD~{n-1} holds; no larger page cuts in any window" ),
-        ( _IN_LIMIT_LAST, lambda n: not unshown( n, _IN_LIMIT_LAST ) and mergeHolds( n - 1 ),
+        ( _IN_LIMIT_LAST, lambda n: marginHeld( n, _IN_LIMIT_LAST ),
           lambda n: f"--limit={_IN_LIMIT_LAST}, LAST RESORT: margin HEAD~{n-1} holds as the merge HEAD~{n-1}; no larger page cuts in any window" ),
     ]
-    for lim, ok, why in last:
-        n = firstWindow( lo, hi, ok )
-        if n is not None:
-            print( f"showcase_capture: --in= case window derived as HEAD~{n} ({why( n )})", file=sys.stderr )
-            return n, lim
+    return before, lastResort
+
+def laneMergeWindow( laneSince, unshown ):
+    """The lane-merge pass (see laneMergeSince): ( commit id, page limit, why ) when that window shows, else None."""
+    rev = laneSince()
+    if rev is None or unshown( rev, _IN_LIMIT ):
+        return None
+    return rev, _IN_LIMIT, ( "no HEAD~N shows: the newest first-parent merge took in "
+                             "main; the window is this branch's own commits since that main tip" )
+
+def refuseNoWindow( lo, hi, unshown ):
+    """Exit naming, for every N tried, which promise HEAD~N and its margin HEAD~(N-1) broke at the usual page size."""
     tried = [ f"HEAD~{n}: {'; '.join( unshown( n, _IN_LIMIT ) ) or 'shows everything'} (margin HEAD~{n-1}: {'; '.join( unshown( n - 1, _IN_LIMIT ) ) or 'shows everything'})"
               for n in range( lo + 1, hi + 1 ) ]
     sys.exit( "showcase_capture: refusing to write — no --since=HEAD~N in [%d,%d] shows what the --in=%s case promises:\n  %s"
               % ( lo + 1, hi, _IN_DIR, "\n  ".join( tried ) ) )
+
+def chooseInWindow( lo=1, hi=14, unshown=None, mergeHolds=None, laneSince=None ):
+    """Return ( N, page limit ): N is HEAD~N, or the lane-merge pass's commit id (a str). The passes run in order — the
+    HEAD~N scans, the lane-merge window, the --limit=1 last resorts — and the first that finds a window wins; none refuses."""
+    unshown = unshown or inCaseUnshown
+    mergeHolds = mergeHolds or ( lambda n: marginHeldByMerge( n, REPO, _IN_DIR ) )
+    laneSince = laneSince or ( lambda: laneMergeSince( REPO, hi ) )
+    before, lastResort = windowPasses( unshown, mergeHolds )
+    found = scanPasses( before, lo, hi ) or laneMergeWindow( laneSince, unshown ) or scanPasses( lastResort, lo, hi )
+    if found is None:
+        refuseNoWindow( lo, hi, unshown )
+    n, lim, why = found
+    print( f"showcase_capture: --in= case window derived as {inSince( n )} ({why})", file=sys.stderr )
+    return n, lim
 
 _inN, _inLimit = chooseInWindow()
 _inLimitNote = ( "" if _inLimit == _IN_LIMIT else
@@ -911,6 +933,23 @@ def mustReplace( text, old, new, what ):
 if os.path.isdir( DIRTY ):
     shutil.rmtree( DIRTY )
 subprocess.run( [ "git", "clone", "--local", "--quiet", REPO, DIRTY ], check=True )
+# the clean sandbox for the --show-stale contrast pair: HEAD's own ledger + ONE demo ack row whose key
+# no current measurement produces — stale by construction, so the collapsed/restored contrast regenerates
+# identically on every machine instead of depending on whatever drift the release checkout happens to have
+if os.path.isdir( CLEAN ):
+    shutil.rmtree( CLEAN )
+subprocess.run( [ "git", "clone", "--local", "--quiet", REPO, CLEAN ], check=True )
+# the clone carries REPO's own origin/main ref, so --quality-delta measures the SAME range there as here
+# (objects already exist via --local; this is ref metadata, no network, no new objects) — without it the
+# range mis-resolves and every historical ack reads stale, which would demo the flag honestly badly
+_originMain = subprocess.run( [ "git", "-C", REPO, "rev-parse", "--verify", "--quiet", "origin/main^{commit}" ],
+                              capture_output=True, text=True ).stdout.strip()
+if not _originMain:
+    sys.exit( "showcase_capture: " + REPO + " has no origin/main ref (a --single-branch clone of another branch?): "
+              "`git fetch origin main:refs/remotes/origin/main` first, the --quality-delta captures measure that range" )
+subprocess.run( [ "git", "-C", CLEAN, "update-ref", "refs/remotes/origin/main", _originMain ], check=True )
+with open( os.path.join( CLEAN, ".ripwire_quality_acks" ), "a" ) as _ackf:
+    _ackf.write( "ack api-surface 0123456789abcdef 1 showcase demo row: no current finding carries this key, so it folds silently until --show-stale prints it back\n" )
 subprocess.run( "git branch zz-orphan-lane $(git commit-tree 'HEAD^{tree}' -m 'zz-orphan-lane: parentless probe branch for the no-merge-base bucket')",
                 shell=True, cwd=DIRTY, check=True )
 
@@ -1083,7 +1122,7 @@ doc.append(f"- **Sandbox diff** (the last section only): `{sandbox_diffstat}` �
 doc.append("")
 doc.append("**How to read the blocks:** ripwire's real XML output is minified — often ONE long line. For scanability, long minified lines are displayed re-wrapped with a line break at every tag seam (`><`). Header COMMENT lines (the legends) always appear in full — they are exempt from the per-line cut; any OTHER display line over 300 bytes is cut with a `… [line truncated: N more bytes]` marker, which can hit a long root element or row. `--plan-lanes` emits JSON and is re-wrapped at object seams the same way. Long outputs are cut to their first ~30 display lines with a `… [N more display lines; full output is M bytes]` marker giving the true size; an answer that ENDS in its legend (the answer-first `--for` document) keeps those trailing comment lines after the marker, and N counts only the lines between. Exit codes are recorded when non-zero; wall time when >1s.")
 doc.append("")
-doc.append(f"**Not run (and why):** `ripwire <git-url>` (network clone), `--legend-have` (a per-CALLER handshake — the caller names the legend dictionary version it already holds — so a one-shot capture has nothing to hold and nothing to show; gated by `test/legendhavecheck.sh`), `--listen` / `--mcp-token` / `--allow-remote-edits` (the HTTP-server posture; `--mcp` itself IS captured in its own section as a one-shot stdio JSON-RPC exchange, and `wrap claude` shows the wiring), `--arch --baseline[-update]` (state writer against the read-only repo — `--note-add` / `--quality-baseline` / `--quality-ack` / the three edit verbs / `--edit-plan` ARE shown, inside the throwaway sandbox clone; `--index-out` / `--pin-census` write to scratch), `--eval-mined` (needs a `minedpair.jsonl` artifact from `bench/mine_traces.py`; none present in the tree), `--refetch` (git-url only), `--lsp` (the editor transport — its one-shot dialogues are gated by `test/lspcheck.sh`, not by showcase blocks), `--max-memory` (the memory guard is silent on this repo by construction; its stops are gated by `test/memguardcheck.sh`), `--force` (wrap-only modifier), `--deadline-ms` (a timing modifier on `--help-task`: a warm index prints exactly the `--help-task` blocks shown only when it finishes within the deadline (a warm run past it abstains as well), and the cold abstention depends on wall-clock timing; gated by `test/helptaskdeadlinecheck.sh`), `--scan-skills` bare form (would sweep `~/.claude/skills`; the explicit-DIR form is shown instead), `--help` ({help_line_count} lines — read it from the binary).")
+doc.append(f"**Not run (and why):** `ripwire <git-url>` (network clone), `--legend-have` (a per-CALLER handshake — the caller names the legend dictionary version it already holds — so a one-shot capture has nothing to hold and nothing to show; gated by `test/legendhavecheck.sh`), `--listen` / `--mcp-token` / `--allow-remote-edits` (the HTTP-server posture; `--mcp` itself IS captured in its own section as a one-shot stdio JSON-RPC exchange, and `wrap claude` shows the wiring), `--arch --baseline[-update]` (state writer against the read-only repo — `--note-add` / `--quality-baseline` / `--quality-ack` / the three edit verbs / `--edit-plan` ARE shown, inside the throwaway sandbox clone; `--index-out` / `--pin-census` write to scratch), `--eval-mined` (needs a `minedpair.jsonl` artifact from `bench/mine_traces.py`; none present in the tree), `--refetch` (git-url only), `--lsp` / `--lsp-langmap` (the editor transport and its language-map config — their one-shot dialogues, including every map and hint arm, are gated by `test/lspcheck.sh`, not by showcase blocks), `--max-memory` (the memory guard is silent on this repo by construction; its stops are gated by `test/memguardcheck.sh`), `--force` (wrap-only modifier), `--deadline-ms` (a timing modifier on `--help-task`: a warm index prints exactly the `--help-task` blocks shown only when it finishes within the deadline (a warm run past it abstains as well), and the cold abstention depends on wall-clock timing; gated by `test/helptaskdeadlinecheck.sh`), `--scan-skills` bare form (would sweep `~/.claude/skills`; the explicit-DIR form is shown instead), `--help` ({help_line_count} lines — read it from the binary).")
 doc.append("")
 
 cur_section = None

@@ -17,6 +17,7 @@
 #include "workspace.h"             // multi-root workspaces: root hygiene + labels + the id-offset merge
 #include "graph.h"
 #include "warmsnap_graph.h"        // the warm snapshot: the crawl replayed, the resolved graph loaded instead of rebuilt
+#include "lsp_langmap.h"          // task E: the --lsp client languageId→tag alias map — after model.h (langFromTag) and docparse.h (its read helper)
 #include "scip.h"                  // SCIP precision overlay (--scip=index.scip)
 #include "serialize.h"
 #include "pageview.h"              // §P8: the ONE --limit/--offset window + root-element shown=/capped= disclosure
@@ -394,11 +395,7 @@ std::pair<std::string, bool> resolveRemoteRoot( const std::string& urlOrPath, bo
     // cache key = FNV-1a-64 of the URL → <hardened cache dir>/ripwire-remote-<hex>. Reuse if the dir
     // already exists (idempotent: a second run on the same URL is instant, no re-clone) — S4: same
     // $TMPDIR → $XDG_CACHE_HOME/ripwire (0700) → /tmp ladder as defaultCachePath/mcpCachePath.
-    std::uint64_t h = 1469598103934665603ull;
-    for( const char c : urlOrPath )
-    {
-        h = rw::hashutil::fnv1aAbsorb( h, c );
-    }
+    const std::uint64_t h = rw::hashutil::fnv1a64( urlOrPath, rw::hashutil::kFnv1aLegacySeed64 );   // stored: names the clone dir
     char tail[ 48 ];
     rw::formatTo( tail, sizeof( tail ), "/ripwire-remote-{:016x}", static_cast<unsigned long long>( h ) );
     const std::string cacheDir = cacheDirLadder() + tail;
@@ -4967,7 +4964,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
     // refused in validateConfig, so this block's position relative to the --mcp branch below is inert.
     if( cfg.lsp )
     {
-        return lsp::runLsp( std::string( cfg.rootPath ) );
+        return lsp::runLsp( std::string( cfg.rootPath ), cfg.lspLangMap );
     }
 
     if( cfg.mcp )

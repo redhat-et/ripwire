@@ -1,0 +1,15 @@
+# Gates whose red under a LOADED machine is known not to be a defect (test/pargates.py, ALONE RETRY). A red from a
+# gate named here -- TIMEOUT or not -- is rerun once, alone, after the parallel pass, and a pass then is reported as
+# PASS(alone-retry), never as a clean pass. Every TIMEOUT is retried anyway; a name here matters for the gates whose
+# load flake is an ASSERTION (a timing or wall-clock arm), or that time out often enough to be worth naming. Each line
+# names the arm and the runs it was seen in: add a gate only with that evidence (a red that passes alone on the SAME
+# binary, and on main's), and remove it the day its arm stops reading the clock.
+binoverridecheck.sh        # TIMEOUT at 1200 s under 3 builders (train 1117c shard 2 twice, 1117d1 shard 2); alone rc=0 (1222 s)
+fornotesbudgetcheck.sh     # TIMEOUT under load (1117c shard 3 twice, 1117d1 shard 3); alone rc=0
+freshclonecheck.sh         # TIMEOUT (1117c shard 5) and its wall tripwire 2033 s > 900 in a parallel batch (1117d1); alone rc=0 (800 s)
+forsoftbudgetcheck.sh      # TIMEOUT under load (1117c shard 6, 1117d1 shard 6); alone rc=0
+receiverevidencecheck.sh   # TIMEOUT under load (1117d1 shard 6); alone rc=0
+runtracecheck.sh           # arm G2 timing probe (1117c shard 8, 1117d1 shard 1); red on main's bin too under load
+mergescoutcheck.sh         # arm Y1 timing (1117c shard 5, 1117d1 shard 5); red on main's bin too under load
+largeallocpeakcheck.sh     # arm M peak under load (1117c shard 6)
+routehookcheck.sh          # arm A4 --deadline-ms overrun under shard load (1117c shard 1); alone rc=0 twice, main bin rc=0

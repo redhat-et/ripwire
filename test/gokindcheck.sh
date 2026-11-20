@@ -25,6 +25,8 @@
 #   (H) the t=type legend clause is true of EVERY t=type row: `type Wrapped Pair` (a struct underneath) and
 #       `type HF http.HandlerFunc` (a func underneath) are t="type" because the kind follows the WRITTEN form, so the
 #       clause must say WRITTEN and must not claim the bare "not-a-struct" (red on the wording it replaced).
+#   (K) GO-KIND-VETO: K1 [P] `local.Type()` names no in-tree `type Type struct`; K3 [G] a method namesake stays (via="name") beside a type one;
+#       K2 [G] a conversion `types.Name( s )` through the module alias keeps its edge.
 #   (G) cross_kind= on --callers counts the new kinds (a name that is a func in one file and a defined type in another)
 #       without tripping callhierarchy.h's kind bound.
 #
@@ -147,6 +149,47 @@ if [ "$rc" -eq 0 ] && grep -q 'count="1"' "$TMP/callers.xml" && grep -q '<s t="f
     ok "(C) --callers=TestName lists the conversion's caller Convert (count=1)"
 else
     no "(C) --callers=TestName rc=$rc: $( head -c 400 "$TMP/callers.xml" )"
+fi
+
+echo "(K) a selector call on a local never names a TYPE (GO-KIND-VETO)"
+# terraform planDestroy `unmarkedPriorVal.Type()` (a cty.Value method, outside the tree) printed the in-tree `type Type struct`
+# via="name": a selector reaches a type only as `pkg.T( v )`, a conversion through a module alias
+mkdir -p "$TMP/gk/types" "$TMP/gk/wrap" "$TMP/gk/plan"
+printf 'module example.com/gk\n\ngo 1.22\n' > "$TMP/gk/go.mod"
+printf 'package types\n\ntype Type struct{ name string }\n\ntype Name string\n\ntype Kind struct{}\n' > "$TMP/gk/types/types.go"
+printf 'package wrap\n\ntype Wrap struct{}\n\nfunc (Wrap) Kind() int { return 0 }\n' > "$TMP/gk/wrap/wrap.go"
+cat > "$TMP/gk/plan/plan.go" <<'EOF'
+package plan
+
+import "example.com/gk/types"
+
+type Value struct{}
+
+func planDestroy(v Value) int {
+	unmarked := v
+	return unmarked.Type() + unmarked.Kind()
+}
+
+func convert(s string) types.Name {
+	return types.Name(s)
+}
+EOF
+"$BIN" "$TMP/gk" --no-cache --callees=planDestroy > "$TMP/gk1.xml" 2>&1; rc1=$?
+if [ "$rc1" -eq 0 ] && grep -q 'of="planDestroy" defs="1"' "$TMP/gk1.xml" && ! grep -q 'n="Type" p="types/types.go' "$TMP/gk1.xml"; then
+    ok "(K1) unmarked.Type() names no in-tree type Type"
+else
+    no "(K1) rc=$rc1: a selector call bound a type: $( sed 's/^<!--.*-->//' "$TMP/gk1.xml" | head -c 500 )"
+fi
+if grep -q '<s t="method" n="Wrap.Kind" p="wrap/wrap.go:5" via="name"/>' "$TMP/gk1.xml" && ! grep -q 'n="Kind" p="types/types.go' "$TMP/gk1.xml"; then
+    ok "(K3) unmarked.Kind(): the method namesake Wrap.Kind stays, by name, and the type Kind is no row"
+else
+    no "(K3) the method namesake was dropped too: $( sed 's/^<!--.*-->//' "$TMP/gk1.xml" | head -c 500 )"
+fi
+"$BIN" "$TMP/gk" --no-cache --callees=convert > "$TMP/gk2.xml" 2>&1; rc2=$?
+if [ "$rc2" -eq 0 ] && grep -q '<s t="type" n="Name" p="types/types.go:5"' "$TMP/gk2.xml"; then
+    ok "(K2) the conversion types.Name( s ) through the module alias keeps its edge"
+else
+    no "(K2) rc=$rc2: the conversion lost its edge: $( sed 's/^<!--.*-->//' "$TMP/gk2.xml" | head -c 500 )"
 fi
 
 echo "(D) the cache round-trips the new kind bytes"

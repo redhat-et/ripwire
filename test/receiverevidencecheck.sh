@@ -81,6 +81,8 @@
 #            Merger.Get/Length; Bd an outside screen's Size, an outside value's Runes, a field or local named `log`
 #            of an outside type beside the in-repo log.Errorf. Near misses: a pointer-literal local, the method
 #            receiver itself, a real import of the in-repo log package.
+#            A field, parameter or local typed as a generic instantiation (`util.Set[util.Chars]`) keeps its package
+#            qualifier, so Add is util.Set's alone (a decoy coll.Set.Add); an outside package's generic proves neither.
 #   (G2) Go module aliases (gomod/, one tree per directory): an import path proves a package EXACTLY — the nearest
 #            go.mod's module path plus the directory below it, or the path a local `replace L => ./D` gives D. Bm:
 #            `replace github.com/up/lib => ./third/lib` beside an in-repo lib/ drew lib.Mark() to lib/ (a directory
@@ -670,6 +672,12 @@ exactproven go callees src/result.go:merged "method Length src/merger.go"
 exactproven go callees src/merger.go:First "method Get src/merger.go"
 exactproven go callees src/tui/tcell.go:Lines "method Size src/tui/tcell.go"
 exactproven go callees src/cmd/run.go:Run "fn Errorf src/internal/log/log.go"   # guard
+echo "--- (G) a generic instantiation keeps its package qualifier (lane overload-split: terraform's d.suppressedModules.Add, a"
+echo "    field typed addrs.Set[addrs.Module], was split onto collections.Set.Add; RED on main 9087eb59c: both Set.Add rows)"
+exactproven go callees src/generic.go:mark "method Add src/util/set.go"
+exactproven go callees src/generic.go:markParam "method Add src/util/set.go"
+exactproven go callees src/generic.go:markLocal "method Add src/util/set.go"
+notproven go callees src/generic.go:markOutside "Add src/util/set.go" "Add src/coll/set.go"   # guard: an outside package's generic
 
 echo "=== (G2) Go module aliases: an import path proves a package exactly ==="
 mkdir -p "$TMP/gomod"
@@ -1523,6 +1531,35 @@ notproven $CR/rust6 callees src/c51.rs:cell51 "hit51 src/c51.rs:3"              
 notproven $CR/rust6 callees src/c52.rs:cell52 "hit52 src/c52.rs:3"                               # [N] `mk52!();` in a const block in a fn body
 notproven $CR/rust6 callees src/c56.rs:cell56 "hit56 src/c56.rs:3"                               # [N] the const block's `use … as S56` (outside)
 proven    $CR/rust6 callees src/c53.rs:cell53 "method hit53 src/c53.rs:3"                        # [P] # guard: a const block, no macro
+# ── GO-CALLRESULT-LOCAL (lane go-cpp-edges; roots callresult/go6 and callresult/go7) ──
+# (1) A Go result type the tree holds METHODS of and no declaration for — the declaration is in a generated file the tree
+#     leaves out (cockroach's roachpb.TenantID is a proto message; tenant.go holds its hand-written methods). Go declares a
+#     method only in its receiver type's package, so pb's methods with receiver GenID ARE pb.GenID's
+#     (receiverevidence.h CallResultTypes::goDeclLessType). go6 pb/tenant.go: GenID.IsSet :5, GenID.String :6; pb2/tenant.go:
+#     a second package's own declaration-less GenID (IsSet :5, String :6, OnlyHere :7).
+# (2) A result written as a generic instantiation (`Set[T]`, `*Set[T]`) is the instantiated class (ingest_binds.h
+#     goResultClass): terraform's `vars := collections.NewSetCmp[string]()`; `vars.Add( k )` is Set.Add (set.go:8).
+proven    $CR/go6 callees src/app/app.go:UseNamed "method IsSet src/pb/tenant.go:5" "method String src/pb/tenant.go:6"   # [P] `id, _ := pb.FromContext( ctx )`, named results (main declined both)
+notproven $CR/go6 callees src/app/app.go:UseNamed "IsSet src/pb2/tenant.go:5" "String src/pb2/tenant.go:6" "IsSet src/other/other.go:6" "String src/other/other.go:7"   # [N]
+proven    $CR/go6 callees src/app/app.go:UseGroupedSecond "method IsSet src/pb/tenant.go:5"       # [P] grouped named results `(a, b GenID, err error)`: the second name
+notproven $CR/go6 callees src/app/app.go:UseGroupedSecond "IsSet src/pb2/tenant.go:5"              # [N]
+proven    $CR/go6 callees src/app/app.go:UseParam "method IsSet src/pb/tenant.go:5"               # [P] the written twin `id pb.GenID` (main declined)
+notproven $CR/go6 callees src/app/app.go:UseParam "IsSet src/pb2/tenant.go:5"                      # [N]
+for f in UseSet UseSetPtr; do   # `Set[T]` and `*Set[T]` results of a generic constructor called with explicit type arguments
+    proven    $CR/go6 callees "src/app/app.go:$f" "method Add src/collections/set.go:8"            # [P] (main declined)
+    notproven $CR/go6 callees "src/app/app.go:$f" "Add src/other/other.go:5"                       # [N]
+done
+proven    $CR/go6 callees src/app/app.go:NearOtherPkg "fn FromContext src/pb/tenant.go:8"         # premise: the call that types `id` is read
+notproven $CR/go6 callees src/app/app.go:NearOtherPkg "OnlyHere src/pb2/tenant.go:7"               # [N] pb.GenID has no OnlyHere: pb2's is another type's (a via="name" hedge at most)
+proven    $CR/go6 callees src/app/app.go:NearPosition "fn FromContext src/pb/tenant.go:8"         # premise
+notproven $CR/go6 callees src/app/app.go:NearPosition "String src/pb/tenant.go:6" "String src/pb2/tenant.go:6"   # [N] the second result is a bool, never a GenID
+proven    $CR/go6 callees src/app/app.go:NearLocalDecl "fn Make src/decl/tenant.go:6"             # premise
+notproven $CR/go6 callees src/app/app.go:NearLocalDecl "IsSet src/pb/tenant.go:5" "IsSet src/pb2/tenant.go:5"    # [N] decl's GenID never names another package's
+# [N] an AMBIGUOUS import: go7 has no go.mod and two directories end in `gen`, each with its own F, G and result types. The
+# call binds no one F, so nothing is typed — a declared result (RA / RB) and a declaration-less one (Less) alike.
+for f in AmbF AmbG AmbParam; do
+    notproven $CR/go7 callees "use/use.go:$f" "M a/gen/f.go:5" "M b/gen/f.go:5" "M a/gen/f.go:9" "M b/gen/f.go:9"
+done
 # ── the BINDING-FORM MATRIX (fix round 3: close the class, not the shapes) ──
 # callresult_matrix.txt writes one tree per language (mx_rust, mx_cpp, mx_java, mx_kt, mx_ts, mx_go) and lists its cells:
 # language x binding form x scope level x target (header of that file). Each cell is one --callees run on `cell<k>`: a U cell
@@ -1840,7 +1877,7 @@ notproven $QA/js callees aug.js:augJs  "bump aug.js:1"                          
 proven    $QA/js callees aug.js:augNone "method bump aug.js:1"                    # guard
 
 echo "=== (C) conservation: no call silently disappears ==="
-ROOTS="js ts py go java kt cs cpp swift rb qualannot/py qualannot/ts qualannot/js callresult/go callresult/rust callresult/cpp callresult/java callresult/kt callresult/ts callresult/cpp2 callresult/java2 callresult/java3 callresult/kt2 callresult/rust2 callresult/ts2 callresult/kt3 callresult/rust3 callresult/cpp3 callresult/java4 callresult/kt4 callresult/java5 callresult/kt5 callresult/cpp4 callresult/rust4 callresult/cpp5 callresult/rust5 callresult/rust6 callresult/mx_rust callresult/mx_cpp callresult/mx_java callresult/mx_kt callresult/mx_ts callresult/mx_go rsrecv"
+ROOTS="js ts py go java kt cs cpp swift rb qualannot/py qualannot/ts qualannot/js callresult/go callresult/go6 callresult/go7 callresult/rust callresult/cpp callresult/java callresult/kt callresult/ts callresult/cpp2 callresult/java2 callresult/java3 callresult/kt2 callresult/rust2 callresult/ts2 callresult/kt3 callresult/rust3 callresult/cpp3 callresult/java4 callresult/kt4 callresult/java5 callresult/kt5 callresult/cpp4 callresult/rust4 callresult/cpp5 callresult/rust5 callresult/rust6 callresult/mx_rust callresult/mx_cpp callresult/mx_java callresult/mx_kt callresult/mx_ts callresult/mx_go rsrecv"
 for r in $ROOTS; do
     rf="$( printf '%s' "$r" | tr '/' '_' )"   # a nested root (callresult/go) writes a flat file name
     if ! rw "$r" --pin-census="$TMP/$rf.tsv" >"$TMP/$rf.map.xml"; then no "(C) ($r) the census run exited non-zero"; continue; fi

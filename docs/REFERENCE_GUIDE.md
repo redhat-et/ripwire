@@ -342,7 +342,7 @@ identity of the index, and says which one is at fault.
 
 ### 5. Command families
 
-The `--help` output groups 198 long flags advertised in `--help` into seven families. The `--help=`
+The `--help` output groups 199 long flags advertised in `--help` into seven families. The `--help=`
 column below is the argument that prints one family: `ripwire --help=navigate`. `ripwire
 --help=--FLAG` prints one flag's full text — the caveats, the units, what it refuses and why.
 `ripwire --help=all` is the whole catalog, about 46,000 tokens.

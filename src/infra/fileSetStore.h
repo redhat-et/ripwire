@@ -592,7 +592,7 @@ private:
                && std::equal( s_.words_.begin() + oa, s_.words_.begin() + oa + la, s_.words_.begin() + ob );
     }
 
-    static constexpr std::uint64_t kHashSeed = 1469598103934665603ull;
+    static constexpr std::uint64_t kHashSeed = hashutil::kFnv1aOffset64;   // build-only row hash, verified on every match
 
     FileSetStore                                               s_;
     ankerl::unordered_dense::map<std::uint64_t, std::uint32_t> firstRowOfHash_;

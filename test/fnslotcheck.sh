@@ -11,6 +11,8 @@
 #   A4 [P] the callees side lists the slot call and its 3 targets;  A5 [G] count= stays 0 (never a proven call)
 #   B1 [P] a method value `f = b.opPlan` of the receiver, called through f in a closure: called_by=Operation
 #   N1 [G] `f = other.opPlan` (a parameter, not the receiver) makes no row for Remote.opPlan
+#   M1 [P] a METHOD EXPRESSION `fn := (*Replica).executeReadOnlyBatch` is a value row of Replica's method (GO-METHOD-EXPR);  M2 [G] never
+#          of Mirror's same-named method, and `(*p).m` on a parameter p makes no row
 #   N2 [G] a field named like a Go METHOD (`h.Close()` beside `(*File).Close`) is no slot call
 #   N3 [G] a map literal value is no field slot
 #   N4 [G] two same-named registrars in two packages: the bare call `Reg( ambiguous )` binds its OWN package's registrar (fix1 F-1:
@@ -168,6 +170,10 @@ has   "B1 a method value of the receiver, called through the local in a closure"
 hasnt "N1b and no row binds it to the receiver's type either" "$o" 'bind="local/backend.go:19"'
 o="$( run --callers=Remote.opPlan )"
 hasnt "N1 a method value of a non-receiver parameter makes no row" "$o" '<vr '
+o="$( run --callers=Replica.executeReadOnlyBatch )"
+has   "M1 a method expression (*Replica).m stored in a local is a value row of Replica's method (GO-METHOD-EXPR)" "$o" 'in_id="dispatch" bind="local/mexpr.go:15" into="fn"'
+o="$( run --callers=Mirror.executeReadOnlyBatch )"
+hasnt "M2 never a same-named method of another type, nor (*p).m on a parameter p (its type is not read)" "$o" '<vr '
 o="$( run --callers=closeHook )"
 has   "N2a the stored value still prints" "$o" 'into="hooks.Close"'
 hasnt "N2 a field named like a Go method is no slot call" "$o" 'called_by='

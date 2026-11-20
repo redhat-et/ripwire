@@ -71,7 +71,7 @@ struct alignas( 16 ) FixedStr
     {
         std::uint64_t w[ 4 ];
         std::memcpy( w, this, 32 );
-        std::uint64_t h = 1469598103934665603ULL;
+        std::uint64_t h = hashutil::kFnv1aOffset64;
         for( int i = 0; i < 4; ++i ) { h ^= w[i]; h = hashutil::fnv1aMultiply( h ); }
         return h;
     }

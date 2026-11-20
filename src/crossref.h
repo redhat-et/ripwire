@@ -333,7 +333,7 @@ inline std::vector<std::uint64_t> minhashSketch( std::string_view src )
             // so it goes through hashutil::fnv1aMultiply (a widened multiply masked back to 64 bits) rather
             // than a bare `*`: the G1 stack runs -fsanitize=integer -fno-sanitize-recover=all, under which a
             // plain unsigned overflow aborts the process. (Caught by that gate, not by inspection.)
-            std::uint64_t h = 14695981039346656037ull;                       // FNV-1a 64 offset basis
+            std::uint64_t h = hashutil::kFnv1aOffset64;
             for( std::size_t k = 0; k < kShingleTokens; ++k )
             {
                 h ^= fnv1a64( tok[ i + k ] );

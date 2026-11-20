@@ -63,6 +63,9 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 [ -d "$FIX" ] || { echo "no test/impactimportfix dir — fixture missing"; exit 2; }
 cd "$ROOT"
+# every scratch dir below is also removed on an early exit or a stop (each arm still removes its own when it ends)
+RS=""; RU=""; MD=""; SD=""; LS=""; PH=""
+trap 'rm -rf ${RS:+"$RS"} ${RU:+"$RU"} ${MD:+"$MD"} ${SD:+"$SD"} ${LS:+"$LS"} ${PH:+"$PH"}' EXIT
 
 echo "impactimportcheck: BIN=$BIN  CORPUS=test/impactimportfix"
 

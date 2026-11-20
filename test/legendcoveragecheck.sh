@@ -839,6 +839,49 @@ g = gapsOf( fdoc( GVL.replace( b'a= the verb', b'a= the verb, q= not here' ), DO
 tarm( g == [ "d@q" ], f"(T11c) the leading block's comment defines nothing outside its block (gaps {g})" )
 g = gapsOf( b'<ctx task="x"><!-- head: task= the query, n= its name, q= a head attribute --><d n="x" q="1"/></ctx>', True )[ 3 ]
 tarm( g == [], f"(T11d) control: a comment after the root's open tag that stands before no trailing block is still the head legend (gaps {g})" )
+# (HU) A CUT HISTORY WALK, FORCED (HISTORY-UNREAD-LEGEND). history_unread="1" rides a --for/--metrics root only when the git walk
+# behind churn=/amp= was cut or failed, which on this tree happens only on a runner slow enough to hit the 20 s clock: the sweep
+# above then flaked red (#688, macos Release shard 2/4) on every row that printed it, since its definition comment opened
+# `<!--history_unread=`, a spelling the `defined` predicate cannot read, and the map put it behind the root where a full row does
+# not look. RIPWIRE_GIT_WALK_COMMITS=1 (gitmine.h THE BUDGET; the budget is in the walk cache's key, so nothing here is served
+# to another run) cuts the walk on any checkout with two commits in the window, so the property is held on every run instead.
+# Each document must parse, carry the attribute on its root (counted: zero is a FAIL), and define it in its own legend (gapsOf, the
+# sweep's own reader, in the row's posture). Four postures (#687's legend scheme): default (compact), full, dict (the tiered
+# pointer: a definition outside the tier stays inline), and have= holding the core tier (the ref posture, which moves head
+# comments after the rows: judged like legendrefcheck, by any comment the answer itself carries, since the dictionary has no
+# history_unread entry: the comment carries this run's commit count and cause, so it is data the answer must carry).
+HU_ROWS = [ ( "for",      [ SMALL, "--for=rank symbols by pagerank" ] ),
+            ( "for-auto", [ SMALL, "--for=escapeXml" ] ),
+            ( "for-page", [ SMALL, "--for=rank symbols by pagerank", "--limit=10" ] ),
+            ( "metrics",  [ SMALL, "--metrics" ] ) ]
+huEnv, huJudged = dict( os.environ, RIPWIRE_GIT_WALK_COMMITS = "1" ), 0
+import xml.etree.ElementTree as ET
+huHave = re.search( rb'have=([0-9a-f]{16})', subprocess.run( [ BIN, "--legend-dict=core" ], capture_output = True ).stdout.split( b"\n", 1 )[ 0 ] )
+tarm( huHave is not None, "(HU) premise: --legend-dict=core's line 1 names its have=" )
+HU_POSTURES = [ ( "default", [] ), ( "full", [ "--legend=full" ] ), ( "dict", [ "--legend=dict" ] ) ] + \
+              ( [ ( "have", [ "--legend-have=" + huHave.group( 1 ).decode() ] ) ] if huHave else [] )
+for huName, huArgs in HU_ROWS:
+    for huPosture, huExtra in HU_POSTURES:
+        label = f"(HU) {huName} {huPosture}, walk cut at 1 commit"
+        try:
+            huDoc = subprocess.run( [ BIN ] + huArgs + huExtra, capture_output = True, timeout = CALL_TIMEOUT, env = huEnv ).stdout
+        except subprocess.TimeoutExpired:
+            tarm( False, f"{label}: TIMEOUT" );  continue
+        try:
+            ET.fromstring( huDoc )
+            wellFormed = True
+        except ET.ParseError as e:
+            wellFormed, huErr = False, str( e )
+        rootTag = re.match( rb'(?:\s*<!--.*?-->)*\s*<[\w-]+\b[^>]*>', huDoc, re.S )
+        if not rootTag or b' history_unread="1"' not in rootTag.group( 0 ):
+            tarm( False, f"{label}: premise: the root does not carry history_unread=\"1\" (the forced cut did not reach it): {huDoc[ :160 ]!r}" );  continue
+        huJudged += 1
+        if huPosture == "have":
+            undefined = [] if any( defined( "history_unread", c.decode( 'utf-8', 'replace' ) ) for c in re.findall( rb'<!--.*?-->', huDoc, re.S ) ) else [ "history_unread" ]
+        else:
+            undefined = [ k for k in gapsOf( huDoc, huPosture != "full" )[ 3 ] if k.endswith( "@history_unread" ) ]
+        tarm( wellFormed and not undefined, f"{label}: parses ({'yes' if wellFormed else huErr}) and its own legend defines history_unread= (undefined: {undefined or 'none'})" )
+tarm( huJudged == len( HU_POSTURES ) * len( HU_ROWS ), f"(HU) premise: {huJudged} of {len( HU_POSTURES ) * len( HU_ROWS )} cut documents carried history_unread on the root" )
 # (HIST0) see buildHist: the premise counts, then the decoy that a leaking fixture would have written into
 tarm( histCounts[ 0 ] >= 5 and histCounts[ 1 ] == 1, f"(HIST0) premise: the history fixture holds {histCounts[ 0 ]} commits (want 5) and {histCounts[ 1 ]} side branch (want 1)" )
 tarm( decoyBefore[ 0 ] >= 1 and decoyAfter == decoyBefore,

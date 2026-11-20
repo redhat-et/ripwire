@@ -2236,6 +2236,7 @@ struct DeclType
     std::string name;
     std::string qualified;
     bool        isFromAssignment = false;
+    bool        directDeclarator = false;   // CPP-PTR-ALIAS: the variable IS the written type or a reference to it (model.h kDirectDeclaratorBit)
 };
 
 // a type or constructor NAME node's DeclType
@@ -2731,6 +2732,7 @@ inline void pushTypedBind( std::uint32_t fileId, Lang lang, std::string_view var
     b.typeName     = type.name;
     b.importedName = type.qualified;
     b.isFromAssignment = type.isFromAssignment;
+    b.unwrapDepth      = ( type.directDeclarator && lang == Lang::Cpp && ( kind == LocalBindKind::Type || kind == LocalBindKind::ParamType ) ) ? kDirectDeclaratorBit : 0;
     binds.push_back( b );
 }
 
@@ -2903,9 +2905,38 @@ inline void emitShadowVarDecls( std::uint32_t fileId, Lang lang, TSNode decl, st
 // one DECLARATOR → both records: the Rule-2 var→type binding and the r9 VarDecl shadow record(s). The two
 // name reads stay separate on purpose — declaratorVarName descends into a function declarator (harmless
 // for narrowing), emitShadowVarDecls refuses it (load-bearing for suppression).
-inline void emitDeclBinds( std::uint32_t fileId, Lang lang, TSNode declNode, std::string_view src, const DeclType& type,
+// C++: the variable a declarator names under `&` / `&&` — and under `*` too when `throughPointer` (`const auto& c`, `auto* p`);
+// null for anything else (an array, a function declarator, a pointer when not asked for)
+inline TSNode cppDeclaratorName( TSNode d, bool throughPointer )
+{
+    for( int guard = 0; guard < 4 && !ts_node_is_null( d ); ++guard )
+    {
+        const char* t = ts_node_type( d );
+        if( kindIs( t, "identifier" ) )
+        {
+            return d;
+        }
+        if( !kindIs( t, "reference_declarator" ) && !( throughPointer && kindIs( t, "pointer_declarator" ) ) )
+        {
+            return {};
+        }
+        d = ts_node_named_child_count( d ) > 0 ? ts_node_named_child( d, ts_node_named_child_count( d ) - 1 ) : TSNode{};
+    }
+    return {};
+}
+
+// CPP-PTR-ALIAS: true when a C++ declarator names the variable itself or a reference to it (`T x`, `const T& x`, `T&& x`) — so
+// `x->m()` on a smart-pointer type reaches the pointee — and false through a pointer, array or function declarator (`T* x`,
+// `T x[ 4 ]`, `T (*x)()`), where `->` reaches the written type itself. An unreadable shape is false.
+inline bool cppDirectDeclarator( TSNode d )
+{
+    return !ts_node_is_null( cppDeclaratorName( d, /*throughPointer=*/false ) );
+}
+
+inline void emitDeclBinds( std::uint32_t fileId, Lang lang, TSNode declNode, std::string_view src, DeclType type,
                            BindSite site, std::vector<RawBind>& binds )
 {
+    type.directDeclarator = cppDirectDeclarator( declNode );
     const std::string_view var = declaratorVarName( declNode, src );
     if( var.empty() && !type.name.empty() )
     {
@@ -2943,8 +2974,10 @@ inline void emitShadowParamDecls( TSNode params, std::uint32_t fileId, Lang lang
         // member-variable round (card A3): the parameter's WRITTEN type as a ParamType record (`Counter& c` →
         // c:Counter), read by the field use-site index and Rule 2's lexical lookup — see LocalBindKind::ParamType. `auto`, templated
         // and decltype types write nothing (writtenTypeOf's own refusal), and pushRawBind drops the record.
-        pushTypedBind( fileId, lang, paramDeclaratorVarName( declarator, src ), declTypeOfName( fieldChild( p, NodeField::Type ), src ),
-                       BindSite{ ts_node_start_byte( p ), 0u, 0u }, LocalBindKind::ParamType, binds );
+        DeclType written         = declTypeOfName( fieldChild( p, NodeField::Type ), src );
+        written.directDeclarator = cppDirectDeclarator( declarator );
+        pushTypedBind( fileId, lang, paramDeclaratorVarName( declarator, src ), std::move( written ), BindSite{ ts_node_start_byte( p ), 0u, 0u },
+                       LocalBindKind::ParamType, binds );
     }
 }
 
@@ -5110,18 +5143,24 @@ inline TSNode goReceiverTypeArguments( TSNode fn )
     return {};
 }
 
-// Go: the class one written result type names — `T`, `*T`, `pkg.T`, `*pkg.T` (`whole` = "pkg.T" for the qualified one) — or
-// "" for anything else (a slice, map, channel, function, generic instantiation, interface literal) or a type parameter of
+// Go: the class one written result type names — `T`, `*T`, `pkg.T`, `*pkg.T` (`whole` = "pkg.T" for the qualified one), and
+// a generic instantiation's own class (`Set[T]`, `*pkg.Set[string]`: a value of `Set[..]` has Set's methods whatever the
+// arguments are) — or "" for anything else (a slice, map, channel, function, interface literal) or a type parameter of
 // the definition (`fn`'s own `[T any]` or its receiver's `Ref[T]`).
 inline std::string_view goResultClass( TSNode type, TSNode fn, std::string_view src, std::string_view& whole )
 {
     whole = {};
-    for( int guard = 0; guard < 4 && !ts_node_is_null( type ); ++guard )
+    for( int guard = 0; guard < 5 && !ts_node_is_null( type ); ++guard )
     {
         const char* t = ts_node_type( type );
         if( kindIs( t, "pointer_type" ) || kindIs( t, "parenthesized_type" ) )
         {
             type = ts_node_named_child_count( type ) == 1 ? ts_node_named_child( type, 0 ) : TSNode{};
+            continue;
+        }
+        if( kindIs( t, "generic_type" ) )
+        {
+            type = fieldChild( type, NodeField::Type );   // `Set[T]` / `pkg.Set[T]`: the instantiated class, never an argument
             continue;
         }
         if( kindIs( t, "type_identifier" ) )
@@ -5191,15 +5230,22 @@ inline void captureGoReturnTypes( BindCtx& cx, TSNode fn )
 }
 
 // Go: the import qualifier of a written type (`os` in `*os.File`), so graph.h can refuse a class an outside package names
-// (receiverevidence.h ReceiverEvidence::build). "" for an unqualified type.
+// (receiverevidence.h ReceiverEvidence::build). "" for an unqualified type. A generic instantiation keeps its class's
+// qualifier (`addrs.Set[addrs.Module]` → "addrs.Set"): annotatedClass already reads it as `Set`, and without the qualifier
+// every in-tree `Set` was a candidate (terraform's `d.suppressedModules.Add` split onto collections.Set.Add).
 inline std::string_view goQualifiedWhole( TSNode type, std::string_view src )
 {
-    for( int guard = 0; guard < 4 && !ts_node_is_null( type ); ++guard )
+    for( int guard = 0; guard < 5 && !ts_node_is_null( type ); ++guard )
     {
         const char* t = ts_node_type( type );
         if( kindIs( t, "pointer_type" ) || kindIs( t, "parenthesized_type" ) )
         {
             type = ts_node_named_child_count( type ) == 1 ? ts_node_named_child( type, 0 ) : TSNode{};
+            continue;
+        }
+        if( kindIs( t, "generic_type" ) )
+        {
+            type = fieldChild( type, NodeField::Type );   // the instantiated class, never a type argument
             continue;
         }
         return kindIs( t, "qualified_type" ) ? nodeTextOf( type, src ) : std::string_view{};
@@ -5297,20 +5343,7 @@ inline void captureCppReturnType( BindCtx& cx, TSNode fn )
 // C++: the variable a declarator names under `&` / `*` / `&&` (`const auto& c`, `auto* p`); null for anything else
 inline TSNode cppDeclaredName( TSNode d )
 {
-    for( int guard = 0; guard < 4 && !ts_node_is_null( d ); ++guard )
-    {
-        const char* t = ts_node_type( d );
-        if( kindIs( t, "identifier" ) )
-        {
-            return d;
-        }
-        if( !kindIs( t, "pointer_declarator" ) && !kindIs( t, "reference_declarator" ) )
-        {
-            return {};
-        }
-        d = ts_node_named_child_count( d ) > 0 ? ts_node_named_child( d, ts_node_named_child_count( d ) - 1 ) : TSNode{};
-    }
-    return {};
+    return cppDeclaratorName( d, /*throughPointer=*/true );
 }
 
 // (L) Java `var x = m()`: the callee's declared result types x (a written type is Rule-2/FE-B's own record)

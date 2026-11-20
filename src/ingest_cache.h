@@ -380,7 +380,30 @@ constexpr std::uint32_t kCacheVersion = 52;           // 52: lane failure-defaul
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 317;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 332;          // bump on any grammar/.scm/extraction change
+                                                      // 332 = 2026-11-20 (IN3, ruling 92: the 0.7.0 integration of integration/070-candidate
+                                                      //   + lane/r1b-priority with main ee8d1a50e). ONE number above BOTH sides' bumps — main's
+                                                      //   331 (train 1117d1) and the stack's 317 (INT1) — so neither side's cache can be read by
+                                                      //   the other's binary. Rich file tag 333. kCacheVersion unchanged: no record changes shape.
+                                                      //   Both provenance lists are kept below as HISTORY, main's first; the tags they name are
+                                                      //   the tags of those numbers, not of 332.
+                                                      // --- history: main ee8d1a50e carried 331 ---
+                                                      // 331 = 2026-11-18 (train 1117d1; above main's 311/312, #688's 313/314 and the members' placeholders
+                                                      //   317/321/323/327/329): rich file tag 332. kCacheVersion unchanged. The members' extraction changes:
+                                                      //   go-cpp-edges (placeholder 317): a Go result type written as a generic instantiation (`Set[T]`, `*pkg.Set[string]`) records its
+                                                      //   ReturnType as the instantiated class (ingest_binds.h goResultClass); it recorded none.
+                                                      //   kCacheVersion unchanged: no record changes shape.
+                                                      //   cpp-ptr-alias (placeholder 321): a C++ Type / ParamType record whose declarator names the variable or a reference to it
+                                                      //   carries model.h kDirectDeclaratorBit in unwrapDepth (ingest_binds.h cppDirectDeclarator).
+                                                      //   overload-split (placeholder 329): a Go type written as a qualified generic instantiation (`addrs.Set[addrs.Module]`) keeps its
+                                                      //   package qualifier on the field / parameter / local record (ingest_binds.h goQualifiedWhole).
+                                                      //   kCacheVersion unchanged: no record changes shape.
+                                                      //   small-edges-1118 (placeholder 323): a Go method expression `(*T).m` in a value position is a Value row naming m with
+                                                      //   memberRoot T (ingest_valuerefs.h methodValueAt, GO-METHOD-EXPR); it recorded none. kCacheVersion unchanged.
+                                                      //   edge-strays-1118 (placeholder 327): a Rust call written through a bracketed type (`<Where as Command>::run( .. )`, `<Where>::f( .. )`) is qualified by
+                                                      //   the type it names, or by the trait when the type names none (ingest_names.h rustBracketedQualifier).
+                                                      //   Rich file tag 328. kCacheVersion unchanged.
+                                                      // --- history: integration/070-candidate carried 317 ---
                                                       // 317 = 2026-11-19 (INT1, the 0.7.0 candidate integration/070-candidate: ONE number for lane BX2's two parser members, strictly
                                                       //   above main d65f60c6d's 313/314 (TRAIN-1117b) and above both BX2 placeholders 313 and 315, so no cache a lane binary wrote
                                                       //   under a placeholder reads as this tree's). Rich file tag 318. kCacheVersion unchanged.
@@ -1997,15 +2020,10 @@ static_assert( quality::ingestParserVerFor( false ) == parserVerFor( false ) && 
 // T5: renamed from fnv1a64 to contentHash64 to avoid an ODR clash now that this file also includes
 // arch.h (which defines its OWN fnv1a64 for the baseline-hash path, quality.h's canonId hashing, etc.
 // — same FNV-1a family, DIFFERENT offset-basis constant; this is ingest's file-content-hash cache
-// KEY and must not change bit-for-bit, so it keeps its own constant rather than switching to arch.h's).
+// KEY and must not change bit-for-bit, so it keeps the stored seed, hashutil::kFnv1aLegacySeed64, not arch.h's).
 inline std::uint64_t contentHash64( std::string_view s ) noexcept
 {
-    std::uint64_t h = 1469598103934665603ull;
-    for( const char c : s )
-    {
-        h = hashutil::fnv1aAbsorb( h, c );
-    }
-    return h;
+    return hashutil::fnv1a64( s, hashutil::kFnv1aLegacySeed64 );
 }
 
 // BONUS (S): a whole-blob checksum for the cache trailer. The single-lane contentHash64 above is the file-content
@@ -2015,7 +2033,7 @@ inline std::uint64_t contentHash64( std::string_view s ) noexcept
 // FNV-1a). Purpose is integrity detection (fuzzer-found bit-flips inside cached strings), not the cache key.
 inline std::uint64_t blobChecksum( std::string_view s ) noexcept
 {
-    std::uint64_t lane[ 8 ] = { 1469598103934665603ull, 1099511628211ull, 0x100000001b3ull, 0x9e3779b97f4a7c15ull,
+    std::uint64_t lane[ 8 ] = { hashutil::kFnv1aLegacySeed64, 1099511628211ull, 0x100000001b3ull, 0x9e3779b97f4a7c15ull,
                                 0xc2b2ae3d27d4eb4full, 0x165667b19e3779f9ull, 0xff51afd7ed558ccdull, 0xc4ceb9fe1a85ec53ull };
     const unsigned char* p = reinterpret_cast<const unsigned char*>( s.data() );
     const std::size_t    n = s.size();
@@ -2026,7 +2044,7 @@ inline std::uint64_t blobChecksum( std::string_view s ) noexcept
     }
     for( int k = 0; i < n; ++i, ++k ) { lane[ k ] ^= p[ i ]; lane[ k ] = hashutil::fnv1aMultiply( lane[ k ] ); }   // tail (< 8 bytes)
 
-    std::uint64_t h = 1469598103934665603ull;                   // fold the 8 lanes into one 64-bit digest
+    std::uint64_t h = hashutil::kFnv1aLegacySeed64;             // fold the 8 lanes into one 64-bit digest (stored: the trailer)
     for( int k = 0; k < 8; ++k ) { h ^= lane[ k ]; h = hashutil::fnv1aMultiply( h ); }
     return h;
 }

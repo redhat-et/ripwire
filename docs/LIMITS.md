@@ -153,6 +153,14 @@ Discloses: `alias_depth_capped`
 | --- | --- | --- | --- |
 | `kAliasHopDepth` | `4` | — | hops past the asked alias (a runaway guard; real chains are 1-3) |
 
+### `src/argtypepick.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kArgTypeSigCap` | `16384` | — | --edit-check's kEditCheckSigCap: a longer signature is not read |
+
 ### `src/atoms.h`
 
 Discloses: `count_capped`
@@ -1421,6 +1429,7 @@ Discloses: **none**
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kAliasPeelDepth` | `4` | — | — |
+| `kConeNameCap` | `64` | — | — |
 | `kFieldWalkCap` | `16` | INDEXING | total visited names — bounds depth and width together (methodOnTypeOrBases, memberFieldHides and fieldEntryAt) |
 | `kMaxDepth` | `64` | — | — |
 | `kMaxRustUseTreeDepth` | `32` | — | — |

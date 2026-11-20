@@ -387,6 +387,20 @@ inline std::string ctxRootOpen( std::string_view task, std::string_view routeNot
     return out;
 }
 
+// ctxRootOpen's output, split where a caller that RE-TAGS or extends the root needs it: { the attributes between "<ctx" and the
+// open tag's own '>', whatever follows that '>' } — the second is history_unread's definition comment when the walk was cut, ""
+// otherwise. The tag ends at its FIRST '>' (every attribute value above is escapeXml'd, so none holds one); splicing at the
+// string's LAST '>' lands inside that comment. Anything that is not a <ctx …> open tag splits to { "", "" }.
+inline std::pair<std::string_view, std::string_view> ctxRootOpenParts( std::string_view rootOpen ) noexcept
+{
+    const std::size_t tagEnd = rootOpen.starts_with( "<ctx" ) ? rootOpen.find( '>' ) : std::string_view::npos;
+    if( tagEnd == std::string_view::npos )
+    {
+        return {};
+    }
+    return { rootOpen.substr( 4, tagEnd - 4 ), rootOpen.substr( tagEnd + 1 ) };
+}
+
 // ── ctxRootOpen's JSON TWIN, and the reason it is one function rather than a rule ─────────────────────────
 // The header above promises the scrub fact is legible "from either one" of the two dialects. It was not: the
 // tree had ONE emitter of the JSON twin (the body writer's "xml_scrubbed") against THREE XML markers, so for
@@ -413,6 +427,19 @@ inline std::string ctxRootJsonScrubKeys( std::string_view task, std::string_view
     }
     keys += renderHistoryUnread( DiscloseAs::JsonKeys );   // K51: this is the one JSON root writer every ctx-family document shares (--for, --pack-task, --from-trace)
     return keys;
+}
+
+// ROOT-SPLICE-SIZE-1: append `attrs` to a ctxRootOpen-built root at its OWN '>' (ctxRootOpenParts), never at the string's last
+// byte. Under a cut history walk the string ends with history_unread's definition comment, so `insert( size() - 1, … )` put
+// --pack-task's root extras and --from-trace's notes_degraded=/next= inside that comment (`.-- notes_degraded="1">`: ill-formed).
+// `rootOpen` is left untouched when it is not a <ctx …> open tag.
+inline void ctxRootOpenAppendAttrs( std::string& rootOpen, std::string_view attrs )
+{
+    const std::size_t tagEnd = 4 + ctxRootOpenParts( rootOpen ).first.size();   // "<ctx" + its attributes
+    if( rootOpen.starts_with( "<ctx" ) && tagEnd < rootOpen.size() && rootOpen[ tagEnd ] == '>' )
+    {
+        rootOpen.insert( tagEnd, attrs );
+    }
 }
 
 // CDATA-body scrub shared by packSource / packBodies / packOutline: split any "]]>" so the CDATA section
@@ -2001,6 +2028,15 @@ struct MapAnnotations
         // neighbourhood the bounds did not clip is byte-identical to before (presence has to mean something).
         std::uint32_t fanoutCut      = 0;       // symbols the fanout cap dropped that are absent from the whole answer (exact)
         bool          depthTruncated = false;   // ≥1 symbol one hop past the last emitted hop is absent
+        // Task D4: the language the seed answer ANCHORED to, and where that language came from. Null pair on every
+        // map and every un-anchored seed (byte-free); arms A1/A6 pin the row, (28)/A5 pin the fallback sentence.
+        const char*   reflang        = nullptr;   // langTag of the anchor (a static string — never freed, never escaped)
+        const char*   reflangOrigin  = nullptr;   // anchorOriginName: explicit / context / corpus
+        // The adopted rule (#440) has a disclosure half: an anchor that DECIDED NOTHING says nothing — a corpus
+        // majority that never moved a row renders neither attribute above. When its tie-break DID move a row,
+        // the reader deserves the disagree-here step: the pasteable --defs=NAME listing every definition the
+        // name has and the spellings that pick one. Emits ONLY beside a disclosed corpus tie (presence means).
+        std::string   nextDefs;                   // the seed name to quote in next="--defs=NAME"; empty ⇒ absent
         // H1: the decl→def residue of a file:name seed — same-named definitions the selector found and could not tie to the
         // file it named, so the walk never started from them. unproven_defs= beside defs= and its clause in the legend,
         // both absent at zero (graphlegend.h unprovenDefsAttrXml / unprovenDefsVerbComment).
@@ -3524,10 +3560,14 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     {
         legend += "<!-- of= is the resolved SEED this neighbourhood is centred on; depth= call hops walked and fanout= "
                   "neighbours kept per hop are its whole boundary, so a row's absence means outside them, not nonexistent. "
-                  "defs= (only when >1) = that NAME has N definitions and the most specific one was walked (kind first, its language "
-                  "ahead, id last: a CODE definition before a doc heading or config key, and a C/C++ declaration without a body yields to "
+                  "defs= (only when >1) = that NAME has N definitions and the most specific one was walked (a stated language first, else kind, the "
+                  "repo's majority language on a kind tie, then path order: a CODE definition before a doc heading or config key, and a C/C++ declaration without a body yields to "
                   "the first bodied definition of its scope in that order); qualify with "
                   "file:name or @FILE:LINE to pick another. -->";
+        if( ann.seed.reflang != nullptr )   // D4: the FULL dialect's definition for the anchor pair — legendcoveragecheck (A) flags the --legend=full row when the seed stanza is silent,
+            legend += std::string( "<!-- reflang=" ) + ann.seed.reflang + ": the language this answer anchored to; reflang-origin=" + ann.seed.reflangOrigin
+                + ": explicit (the @lang typed), context (the file asked from), client (the editor's languageId) or corpus (the repo's majority language "
+                  "broke a same-kind tie for the front; next= lists every definition). -->";   // charged only when the row carries the attributes (seedBiteLegend's rule); kept short, the verb dict defines the pair in full
         legend += seedBiteLegend( ann.seed );   // C2: charged only on a run whose root carries a bite attribute (the at= rule)
         // H1: charged only on a run whose root carries unproven_defs= — the same rule, and part of the head est_tokens prices.
         legend += unprovenDefsVerbComment( UnprovenDefsVerb::Around, ann.seed.unprovenDefs > 0, "<!-- ripwire around: " );
@@ -3607,6 +3647,9 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     {
         legend += kMapAnchorMissLegend;
     }
+    // K51: history_unread='s definition, the LAST leading clause, so it stands right before the <r> root it marks and inside the
+    // leading block every reader (and legendcoveragecheck's full rows) meets first; absent unless the amp=/churn= walk was unread.
+    legend += renderHistoryUnread( DiscloseAs::LegendComment );
     // C1 DRIFT FIX (Round C lane B, found by re-reading this header's own output). `precise=` means "how many
     // out-edges a SCIP index PINNED", and the emitter's own comment below says it is "emitted ONLY under
     // --scip". Both were true when outProv held only {0, 1}. A4-R5 then added value 2 (an FFI binding edge)
@@ -3774,6 +3817,15 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
             if( ann.seed.defs > 1 ) { h += " defs=\"";  h += std::to_string( ann.seed.defs );  h += "\""; }
             h += unprovenDefsAttrXml( ann.seed.unprovenDefs );   // H1: beside defs=, the rest of what the seed name resolved to
             h += seedBiteAttrs( ann.seed );   // C2: each bound's BITE, right after the bound it qualifies (empty when neither bit)
+            if( ann.seed.reflang != nullptr )   // D4: after the bite pair, same slot logic — the anchor qualifies the whole seed stanza
+            {
+                h += " reflang=\""; h += ann.seed.reflang;
+                h += "\" reflang-origin=\""; h += ann.seed.reflangOrigin; h += "\"";
+                if( !ann.seed.nextDefs.empty() )   // the corpus tie's pasteable follow-up, beside the disclosure it belongs to —
+                {                                   // the ONE next= builder the house keeps (nextverb.h, darkflags/docdrift precedents)
+                    h += nextAttrXml( nextFlag( "--defs=", ann.seed.nextDefs ) );
+                }
+            }
         }
         // §A9.6: after at= (so gitstampcheck's `<r at="<sha>` byte sequence is unmoved) — see MapAnnotations.
         if( churnWindow != nullptr ) { h += " rank_by=\"";  h += ann.churnRankLabel;  h += "\" window=\"";  h += escapeXml( *churnWindow, esc );  h += "\""; }
@@ -3815,8 +3867,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
         {
             h += " stem_cut=\"";  h += std::to_string( stemPick.cut );  h += "\"";   // MAP-STEM: absent unless a --max-tokens fit left stem rows out
         }
-        h += ">";
-        h += renderHistoryUnread( DiscloseAs::LegendComment );   // K51: its own definition, right behind the root it marks
+        h += ">";   // K51: history_unread='s definition rides the leading legend above (HISTORY-UNREAD-LEGEND), not behind this tag
         return h;
     };
     const auto buildTail = [ & ]( std::size_t estTokens ) -> std::string
@@ -9979,7 +10030,8 @@ inline std::string legoTargetedImplementorsAttrs( Lang lang, std::size_t directC
 // no not-extracted caveat, its <m> rows are read; today a C++ / Objective-C definition, decided by the language alone,
 // so it must NOT outrank an implementor: a data-only C++ class would beat a Rust trait that has implementors,
 // rv-pr432-delta B1); then the tower's own key — kind rank (an Interface above a
-// Class), the leading symbol's language, id ASC. Every other rung keeps the tower rank (a Method above the types, a
+// Class), the leading symbol's language (the tower's own front among the tied, CodeRabbit #440), then the tower's incoming
+// order. Every other rung keeps the tower rank (a Method above the types, a
 // constructor just below them). Measured (diagnosis @mpapis, #432): `--lego=Shape` on this repository answered an
 // Elixir `shape.ex` (Interface, methods="0" caveat) over the C++ `Shape` whose contract is extracted
 // (a9disclosurecheck §A9.4); `--lego=Marker` answered the Java `interface Marker` (no implementor) over the Kotlin
@@ -9994,11 +10046,12 @@ inline std::vector<NodeId> legoRoleOrder( const IngestResult& ing, const std::ve
     }
     struct RoleKey
     {
-        int    rung;
-        bool   hasImplementor;
-        bool   isContractExtracted;
-        int    towerRank;
-        NodeId id;
+        int         rung;
+        bool        hasImplementor;
+        bool        isContractExtracted;
+        int         towerRank;
+        std::size_t towerPos;   // the candidate's place in the incoming tower order: the tie reference and the last key (CodeRabbit #440)
+        NodeId      id;
     };
     const std::vector<int> towerRanks = nameTowerRanks( ing, ids );
     const int              typeRung   = 2 * kindSpecificity( SymKind::Interface );
@@ -10010,7 +10063,7 @@ inline std::vector<NodeId> legoRoleOrder( const IngestResult& ing, const std::ve
         const Symbol& s      = ing.symbols[ id ];
         const bool    isType = namespaceCompatible( RefRole::Type, s.kind );   // graph.h's one statement of "a type definition"
         keys.push_back( RoleKey{ isType ? typeRung : towerRanks[ i ], isType && id < implementors.size() && !implementors[ id ].empty(),
-                                 isType && legoMethodContractSound( s.lang ), towerRanks[ i ], id } );
+                                 isType && legoMethodContractSound( s.lang ), towerRanks[ i ], i, id } );
     }
     const auto ahead = []( const RoleKey& a, const RoleKey& b ) noexcept
     {
@@ -10018,7 +10071,7 @@ inline std::vector<NodeId> legoRoleOrder( const IngestResult& ing, const std::ve
              > std::tuple( b.rung, b.hasImplementor, b.isContractExtracted, b.towerRank );
     };
     const RoleKey reference = *std::min_element( keys.begin(), keys.end(), [ & ]( const RoleKey& a, const RoleKey& b )
-                                                 { return ahead( a, b ) || ( !ahead( b, a ) && a.id < b.id ); } );
+                                                 { return ahead( a, b ) || ( !ahead( b, a ) && a.towerPos < b.towerPos ); } );   // the tower's own front among the tied
     const Lang referenceLang = ing.symbols[ reference.id ].lang;
     std::sort( keys.begin(), keys.end(), [ & ]( const RoleKey& a, const RoleKey& b ) noexcept
                {
@@ -10031,7 +10084,7 @@ inline std::vector<NodeId> legoRoleOrder( const IngestResult& ing, const std::ve
                    {
                        return refA;
                    }
-                   return a.id < b.id;
+                   return a.towerPos < b.towerPos;   // the tower already ordered these (stated language, kind, majority tie, content key)
                } );
     for( std::size_t i = 0; i < ids.size(); ++i )
     {

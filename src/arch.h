@@ -150,7 +150,8 @@ inline const char* builtinLayer( std::string_view path ) noexcept
 //   old note claimed here — "std::regex on a BOUNDED corpus terminates" — was false on both standard
 //   libraries: `deny path zz/.* -> (a+)+z` aborted the process on libc++ (an uncaught error_complexity, rc 134)
 //   and backtracks without end on libstdc++. A match the engine still abandons (RegexVerdict::Exhausted — e.g.
-//   the multi-quantifier residual a*a*a*a*a*b, which the screen admits by construction; the overlapping
+//   an admitted pattern whose cost in the subject is super-linear, such as `(a|aa){1,100}b$`; the multi-quantifier
+//   family `a*a*a*a*a*b` it used to name here is refused at admission since #484, and the overlapping
 //   alternation an earlier note named here is refused at admission since M2-c), and a TO pattern that only becomes
 //   invalid once an edge's captures are substituted into it (`a{2,\1}` → `a{2,1}`), are reported by pathRuleForbids
 //   and refused by the verb, never read as "no match".
@@ -681,12 +682,7 @@ inline bool archViolates( const ArchRules& r, int la, int lb )
 
 inline std::uint64_t fnv1a64( std::string_view s ) noexcept
 {
-    std::uint64_t h = 14695981039346656037ull;
-    for( const char c : s )
-    {
-        h = hashutil::fnv1aAbsorb( h, c );
-    }
-    return h;
+    return hashutil::fnv1a64( s );
 }
 
 // The ONE `*`/`?` wildcard match over a whole string (`*` spans any run, '/' included; a failed suffix backtracks one
@@ -784,7 +780,7 @@ inline std::uint64_t archViolHash( std::string_view srcFile,
                                    std::string_view ruleLabel ) noexcept
 {
     // Concatenate with NUL separators so "a/b" + "c" and "a" + "b/c" produce different hashes.
-    std::uint64_t h = 14695981039346656037ull;
+    std::uint64_t h = hashutil::kFnv1aOffset64;
     const auto mix = [ &h ]( std::string_view sv ) noexcept
     {
         for( const char c : sv )

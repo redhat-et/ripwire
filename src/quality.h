@@ -3084,7 +3084,7 @@ constexpr std::uint32_t kHeadSnapCacheScheme = 1;
 // every blob it takes (it has no disclosure line at all — see evictBySizeBudget's note on why only the
 // byte-budget pass speaks), so an orphan is treated exactly as any other aged-out blob, with no special
 // case in either direction.
-inline constexpr std::uint64_t kCacheRootKeySeed = 1469598103934665603ull;
+inline constexpr std::uint64_t kCacheRootKeySeed = rw::hashutil::kFnv1aLegacySeed64;
 
 inline std::string cacheRootKeyHex( const std::string& root )
 {
@@ -3144,7 +3144,17 @@ inline std::string cacheRootKeyHex( const std::string& root )
 // not include this header; it relies on ingest.cpp including quality.h (line 13) before ingest_cache.h, and a reorder
 // that broke that fails the build on the undeclared name rather than passing.
 constexpr std::uint32_t kIngestCacheVersionMirror   = 52;   // MUST equal ingest.cpp's kCacheVersion (gated); 52 = lane failure-default (construct-hit failure-default tag), 51 = lane qd-constructs (FILE record construct-hit family), 50 = lane clones-persist (Function/Method def record clone key), 49 = lane warm-direct (FILE record head family counts), 48 = train 42b (alias-import LocalBindKind ReExport; its placeholder 47), 46 = train 40 (js-def-naming JsObjectLiteral; its placeholder 45), 44 = train 37b (rust-degraded FileHealth::useBoundsBlanked; its placeholder 42), 43 = train 36 (#155 trailingLambda ref byte; above main 40, #438's placeholder 41, rust-degraded's 42), 40 = train 34 (fc3-js-rebind JsRebind; above main 39), 39 = train 33 (above main 36 and l6-iface 38), 38 = train 32 lane l6-iface fix round 1: LocalBindKind ImplBlock (train renumbers), 37 = train 32 lane l6-iface: LocalBindKind DispatchType (train renumbers), 36 = train 30 (above call-result-typing's and fcall-forward's 33, name-template-dispatch's 35, main's 34), 34 = train 29 (above lane arity-min's and call-result-typing's 33), 33 = train 29 lane arity-min: def record paramsMin (the train renumbers), 33 = lane call-result-typing: RawBind resultIndex + unwrapDepth, 33 = lane fcall-forward: ref `forwarded` byte, 35 = lane name-template-dispatch: RefRole Pattern 11, 32 = train 28: RefRole Subscript 9 + Inert 10, 31 = train 27: lego-transitive's inherit-ref baseBind (the lane's 30), 29 = FE-B ref memberPath/memberCtor + 4 bind kinds, 28 = FE-A ref memberCall/memberRoot, 27 = corrected fnScope values, 26 = function-local def scope span (25 = #157 + #150)
-constexpr std::uint32_t kIngestParserVerMirror    = 317;  // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 332;  // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 332 = 2026-11-20 (IN3, ruling 92): the 0.7.0 integration's ONE number, above main's 331
+                                                          //   and the stack's 317. Rich file tag 333. Both histories below, main's first.
+                                                          // --- history: main ee8d1a50e carried 331 ---
+                                                          // 331 = 2026-11-18 (train 1117d1, rich 332; members below, each was a placeholder)
+                                                          //   go-cpp-edges (placeholder 317): a Go generic result type `Set[T]` records its ReturnType as the instantiated class
+                                                          //   cpp-ptr-alias (placeholder 321): a C++ Type / ParamType record whose declarator names the variable carries kDirectDeclaratorBit
+                                                          //   overload-split (placeholder 329): a Go qualified generic instantiation keeps its package qualifier
+                                                          //   small-edges-1118 (placeholder 323): a Go method expression `(*T).m` in a value position is a Value row (GO-METHOD-EXPR)
+                                                          //   edge-strays-1118 (placeholder 327): Rust `<T as Trait>::m` calls are qualified by T, else by Trait
+                                                          // --- history: integration/070-candidate carried 317 ---
                                                           // 317 = 2026-11-19 (INT1 0.7.0 candidate: ONE number for lane BX2 FIX 5 (placeholder 313: Rust macro_rules! transcriber
                                                           //   calls) and FIX 8 (placeholder 315: C-family parameter slot facts), above main 313/314 and both placeholders; rich 318)
                                                           // 313 = 2026-11-17 (TRAIN-1117b, one number for two members, above main 311/312 (#420 via #686); rich 314;

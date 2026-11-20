@@ -279,10 +279,13 @@ esac
 # ── (L) the legend ───────────────────────────────────────────────────────────────────────────────────────────────────
 echo "=== L: the legend reads the form the rows are in ==="
 legend(){ grep -o '<!--.*-->' "$1"; }
-if legend "$TMP/c.callers.xml" | grep -qF "<s sites_at=>: its calls of the leaf name, any receiver, as [file:]line (p=: def line, default file)"; then
+# RE-PINNED 2026-11-18 (train 1117d1, PROVEN-SITE-KEEPS-NAMESAKES over #687): a call proven to another definition of the name is
+#   no longer one of a row's sites, so the two compact readings say "its leaf-name calls not proven elsewhere" where they said
+#   "its calls of the leaf name, any receiver" (the same length); the [file:]line form and p= default file are #687's, unchanged.
+if legend "$TMP/c.callers.xml" | grep -qF "<s sites_at=>: its leaf-name calls not proven elsewhere, as [file:]line (p=: def line, default file)"; then
     ok "(L) the default legend of a callers answer reads sites_at= as [file:]line with p= the default file"
 else no "(L) default callers legend: $( legend "$TMP/c.callers.xml" | grep -o '[^.]*sites_at=[^.]*' | head -1 )"; fi
-if legend "$TMP/c.safedelete.xml" | grep -qF "c sites_at=: its calls of the leaf name, any receiver, as [file:]line (p=: def line, default file)"; then
+if legend "$TMP/c.safedelete.xml" | grep -qF "c sites_at=: its leaf-name calls not proven elsewhere, as [file:]line (p=: def line, default file)"; then
     ok "(L) the safe-delete legend reads it the same way"
 else no "(L) safe-delete legend: $( legend "$TMP/c.safedelete.xml" | grep -o '[^.]*sites_at=[^.]*' | head -1 )"; fi
 if legend "$TMP/c.columnar.xml" | grep -qF "as [file:]line (default: its path), space-separated"; then ok "(L) the columnar legend reads its sites_at column the same way"

@@ -834,7 +834,7 @@ inline std::string defsListedAttrXml( const DefGroups& groups, const DefTableLis
 
 // BX1 FIX 7: one pass over the matches, because a dropped group's member is exactly the declaration a printed table must still
 // list. ofMatch is renumbered into the kept groups (UINT32_MAX = a silent group's member, no row ties to it), and every match
-// that lands on one is appended to kept.unattributed in match order. Its own function so defGroupsDropSilent, which only needs
+// that lands on one is appended to kept.unattributed in match order. Its own function so defGroupsDrop, which only needs
 // the result, does not carry this loop's two decision points on top of its own.
 inline void defGroupsRenumberMatches( const DefGroups& groups, const std::vector<std::uint32_t>& renum, DefGroups& kept )
 {
@@ -849,36 +849,30 @@ inline void defGroupsRenumberMatches( const DefGroups& groups, const std::vector
     }
 }
 
-// An answer's groups once its ties are known: the untied groups (defGroupUntied) no row names are dropped ONLY when that leaves
-// one group — the tmux/ninja prototype + definition answer stays one group with no table. When two or more groups would remain
-// the table is printed anyway, and it claims to list every group defs= forms, so nothing is dropped: each untied declaration
-// is listed (bodyless="1": "another function, or the tie is unproven"), as --edit-check counts it as a contract of its own
-// (final review R1). Dropping: the rest renumbered in order, the tokens rewritten to the new numbers.
-inline void defGroupsDropSilent( DefGroups& groups, RowDefTokens& tokens )
+// The untied groups (defGroupUntied) no row names, 1 per group: the ones a plain answer leaves unsaid.
+inline std::vector<char> defGroupsSilent( const DefGroups& groups, const RowDefTokens& tokens )
 {
-    if( !groups.multi() || std::none_of( groups.untied.begin(), groups.untied.end(), []( char c ) { return c != 0; } ) )
-    {
-        return;
-    }
     std::vector<char> named( groups.size(), 0 );
     for( const std::uint32_t t : tokens.tok )
     {
         named[ t >> 2 ] = 1;
     }
-    std::size_t left = 0;
+    std::vector<char> silent( groups.size(), 0 );
     for( std::size_t k = 0; k < groups.size(); ++k )
     {
-        left += ( groups.untied[k] && !named[k] ) ? 0 : 1;
+        silent[k] = groups.untied[k] && !named[k];
     }
-    if( left >= 2 )
-    {
-        return;   // a table is printed: every group is listed
-    }
+    return silent;
+}
+// Drop the groups marked in `drop`: the rest renumbered in order, the tokens rewritten to the new numbers. No row may name a
+// dropped group.
+inline void defGroupsDrop( DefGroups& groups, RowDefTokens& tokens, const std::vector<char>& drop )
+{
     std::vector<std::uint32_t> renum( groups.size(), UINT32_MAX );
     DefGroups                  kept;
     for( std::size_t k = 0; k < groups.size(); ++k )
     {
-        if( groups.untied[k] && !named[k] )
+        if( drop[k] )
         {
             continue;
         }
@@ -896,6 +890,25 @@ inline void defGroupsDropSilent( DefGroups& groups, RowDefTokens& tokens )
         t = ( renum[ t >> 2 ] << 2 ) | ( t & 3u );
     }
     groups = std::move( kept );
+}
+// An answer's groups once its ties are known: the silent groups (defGroupsSilent) are dropped ONLY when that leaves one
+// group — the tmux/ninja prototype + definition answer stays one group with no table. When two or more groups would remain
+// the table is printed anyway, and it claims to list every group defs= forms, so nothing is dropped: each untied declaration
+// is listed (bodyless="1": "another function, or the tie is unproven"), as --edit-check counts it as a contract of its own
+// (final review R1). With no untied group nothing is silent, so a multi-group answer keeps all of its two or more.
+inline void defGroupsDropSilent( DefGroups& groups, RowDefTokens& tokens )
+{
+    if( !groups.multi() )
+    {
+        return;
+    }
+    const std::vector<char> silent    = defGroupsSilent( groups, tokens );
+    const auto              remaining = std::count( silent.begin(), silent.end(), 0 );
+    if( remaining >= 2 )
+    {
+        return;   // a table is printed: every group is listed
+    }
+    defGroupsDrop( groups, tokens, silent );
 }
 
 // ── one answer's attribution, computed once ──────────────────────────────────────────────────────────────────────────

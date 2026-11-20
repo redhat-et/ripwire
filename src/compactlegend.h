@@ -518,7 +518,9 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // defs= names resolveFocus's pick (graph.h), and the body preference there holds only IN THE DECLARATION'S SCOPE: a pure
     // virtual beside another class's override keeps the focus. Unconditional, this reading described that answer wrongly
     // (test/decltodefcheck.sh E3g, which also holds the full --around and --connect readings to the same condition).
-    { "defs",              "defs=N: of= names N defs; most-specific kind walked first, its language ahead, id last, code first, a C/C++ body in the same scope over its declaration", true, "r" },
+    { "defs",              "defs=N: of= names N defs; a STATED language fronts its own definitions, else most-specific kind leads (stated: its family next) with the repo majority breaking same-kind ties; code first, a C/C++ body in the same scope over its declaration", true, "r" },
+    // reflang/reflang-origin are NOT defined here: the around first screen renders its verb-scoped dict (below,
+    // at the layer= "around" rows), and legendcoveragecheck (A) probes THAT document — MEASURED, not assumed.
     // The map HEADER's absent-at-zero gauges: `<!-- files=` is kept as data while the `<!-- hdr:` clauses that define
     // these fields go (kDeclinedMapLegend, kIgnoredLegend, kExtentSuspectHdrLegend, kMacroBlankedHdrLegend, the absent-if-0
     // half of the always-on legend, kMaxTokensFitLegend). Header-ONLY: several are quoted attributes elsewhere.
@@ -695,7 +697,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "narrowed",          "narrowed=: the spelling as typed fits several definitions (refused as written); the test/fixture-path and bodyless ones dropped, the ONE source definition left answers by its own spelling", false, "callers", MapHeaderRead::No, {}, "callers" },
     // CALLSITE-AT (2026-10-09): a callers row's call sites (editcheck.h rowCallSites); keyed to the callers schema, so the
     // map's own <s> rows never read it. The columnar form names the same list as its sites_at column.
-    { "sites_at",          "<s sites_at=>: its calls of the leaf name, any receiver, as [file:]line (p=: def line, default file); not proof each binds", true, "s", MapHeaderRead::No, {}, "callers" },
+    { "sites_at",          "<s sites_at=>: its leaf-name calls not proven elsewhere, as [file:]line (p=: def line, default file); not proof each binds", true, "s", MapHeaderRead::No, {}, "callers" },
     { "sites_total",       "<s sites_total=N>: N sites, sites_at= lists the first 16; next= (the uses verb) lists all", true, "s", MapHeaderRead::No, {}, "callers" },
     // STRING-IMPORT (fordottedstring.h): the --callers element keeps no comment in the compact layer, so each attribute it prints is defined
     // here, ELEMENT-qualified (<dotted_strings>/<ds>) and keyed to the callers schema; --for keeps the element's own comment.
@@ -714,7 +716,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "loaders",           "<ds loaders=N>: N functions spell the constant that way; over 3 none is named (a generic word)", true, "ds", MapHeaderRead::No, {}, "callers" },
     { "loaders_floor",     "<ds loaders_floor=1>: a sink call in a file that can name the constant traced no names (too many assignments, or none), so loaders= may be short", true, "ds", MapHeaderRead::No, {}, "callers" },
     { "s",                 "<dotted_strings s= next=>: no row is printed: s= is the first string found in a test path (counted in tests=), next= a grep command for it", true, "dotted_strings", MapHeaderRead::No, {}, "callers" },
-    { "fields",            "<sites_at> column: each row's calls of the leaf name, any receiver, as [file:]line (default: its path), space-separated; not proof each binds", true, "cols", MapHeaderRead::No, "sites_at", "callers" },
+    { "fields",            "<sites_at> column: each row's leaf-name calls not proven elsewhere, as [file:]line (default: its path), space-separated; not proof each binds", true, "cols", MapHeaderRead::No, "sites_at", "callers" },
     { "fields",            "<sites_total> column: a row's uncut site count; its sites_at cell lists the first 16, the uses verb all", true, "cols", MapHeaderRead::No, "sites_total", "callers" },
     // FE-B: a map <c> row merging N byte-identical via=name rows (serialize.h writeMapCalleeRows) carries x=N
     { "x",                 "<c x=N>: N same-named via=name rows merged; callees=FILE:SYM lists all", true, "c" },
@@ -1259,7 +1261,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // CALLSITE-AT (2026-10-09): sites_l= became sites_at= (pasteable file:line tokens); the callers verb's s rows carry the same pair.
     // SITES-SHORT (2026-11-17, sitetokens.h): a site in the row's own p= file is the bare line again; only a foreign one is file:line.
     // The reading is `[file:]line` with p= named as the default file: +10 B, inside the 450 / 840 B targets the file:line reading sat under.
-    { "sites_at", "c sites_at=: its calls of the leaf name, any receiver, as [file:]line (p=: def line, default file); not proof each binds", true, "c", MapHeaderRead::No, {}, "safe-delete" },
+    { "sites_at", "c sites_at=: its leaf-name calls not proven elsewhere, as [file:]line (p=: def line, default file); not proof each binds", true, "c", MapHeaderRead::No, {}, "safe-delete" },
     { "sites_total", "c sites_total=N: N sites, sites_at= lists the first 16; the uses verb lists all", true, "c", MapHeaderRead::No, {}, "safe-delete" },
     // count-floor on the targeted lego verb (serialize.h packLego, countfloor.h implementorFloors): present-only.
     { "shown_implementors", "shown_implementors=K: only K impl rows here of implementors=; implementors_capped=1 they are cut; implementors_next= lists all", true, "iface", MapHeaderRead::No, {}, "lego" },
@@ -1860,6 +1862,16 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "layer", "layer=: built-in arch layer (game|infra|render|math|audio|ai|test) from a dir name in p=; absent if none", true, "f", MapHeaderRead::No, {}, "query" },
     // around: src/serialize.h (f layer= via builtinLayer)
     { "layer", "layer=: built-in arch layer (game|infra|render|math|audio|ai|test) from a dir name in p=; absent if none", true, "f", MapHeaderRead::No, {}, "around" },
+    // around: task D4 — the seed answer's LANGUAGE anchor, on the root row whenever an anchor decided the answer.
+    // legendcoveragecheck (A) settled where the definition belongs: the DEFAULT (compact) around doc renders the
+    // VERB-scoped dict below — not the shared map dict (the 466-area entries for reflang were invisible to the
+    // probe), and the full seed stanza is not in the default answer either. First screen, first responsibility.
+    { "reflang", "reflang=X: the language the answer ANCHORED to — a STATED one (the query's @lang, the asked-from file, the editor's declared languageId) fronts its own definitions; reflang-origin= beside it says where X came from; absent when language decided nothing", true, "r", MapHeaderRead::No, {}, "around" },
+    { "reflang-origin", "reflang-origin=: explicit (the query's @lang suffix), context (the file the query asked from), client (the editor's declared languageId) or corpus (the repo's majority language — it fronts NOTHING, it only breaks ties between same-kind definitions, and appears only when one such tie moved the front); under an explicit anchor that language cannot fill, foreign rows are served anyway and stderr says so", true, "r", MapHeaderRead::No, {}, "around" },
+    { "next", "next= beside a corpus tie: the majority broke a same-kind tie for the front; the value carries the defs invocation that lists every definition and the spellings that pick one", true, "r", MapHeaderRead::No, {}, "around" },
+    // D4 reflang/reflang-origin: the FULL legend defines them in the seed stanza itself (serialize.h, charged only
+    // when the row carries them) — the verb table proved NOT to reach around's first screen, and legendcoveragecheck
+    // (A) is what caught that. The COMPACT dialect rides the shared dict entries above.
     // for: src/serialize.h lens rows (d p= layer= via builtinLayer)
     { "layer", "layer=: built-in arch layer (game|infra|render|math|audio|ai|test) from a dir name in p=; absent if none", true, "d", MapHeaderRead::No, {}, "for" },
     // pack-task: src/serialize.h lens rows (d p= layer= via builtinLayer)
