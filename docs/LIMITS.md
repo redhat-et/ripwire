@@ -921,6 +921,15 @@ Discloses: **none**
 | --- | --- | --- | --- |
 | `kMaxEditDistance` | `3` | BOUNDARY | same bandwidth as didYouMean()'s symbol-name cutoff |
 
+### `src/ingest_metrics.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kDispatchArmMaxRows` | `40` | — | — |
+| `kSteerMinRows` | `51` | — | — |
+
 ### `src/ingest_model.h`
 
 Discloses: **none**
@@ -1287,6 +1296,14 @@ Discloses: `capped`
 | --- | --- | --- | --- |
 | `kPrDefaultBudgetTokens` | `8000` | — | — |
 
+### `src/qdbestsince.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kBestSinceMaxBlobs` | `512` | — | history versions measured per call, newest first; more = cut |
+
 ### `src/quality.h`
 
 Discloses: **none**
@@ -1294,6 +1311,7 @@ Discloses: **none**
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kClonePairExpandCap` | `512` | — | — |
+| `kImprovedShown` | `20` | — | the section lists at most this many (largest fall first), then more=N |
 | `kMaxCacheBlobAgeDays` | `30.0` | BOUNDARY | — |
 | `kMaxCacheBlobCount` | `4096` | BOUNDARY | bound every future hygiene scan |
 | `kMaxEditLockAgeDays` | `1.0` | BOUNDARY | — |

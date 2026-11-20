@@ -126,6 +126,11 @@ enum class TestRunnerEntry : std::uint8_t { None, GoTestName, RustTestAttr };
 /// variables are `@ivar`s and the attr_* family is indexed as Var defs), so a class-body `has_many :posts` is a call, not a field.
 enum class MemberDecl : std::uint8_t { NameFirst, NameThenType, TypeFirst, None };
 
+/// QD-TANGLE steering locals (model.h Symbol::steer): the declaration grammar the steer walk reads a local from (ingest_metrics.h
+/// steer_noteDeclaration). None: the walk reads no declaration there, so steer stays 0 and the tangle score is nesting and deep share.
+/// Python's locals live until the function returns (no block closes a slot); every other shape's live until their block closes.
+enum class SteerDecl : std::uint8_t { None, CFamily, Python, JsLexical, Java, CSharp, Go, Rust };
+
 /// What shared code asks about a language. Every optional column is false for a language that says nothing.
 struct LangFacts
 {
@@ -456,6 +461,9 @@ struct LangFacts
     /// alone. langCompatible's edge rule and the display order's family tier both read it, through
     /// langFamilyOf below — one per-Lang row, the single source CONTRIBUTING's language-facts rule asks for.
     std::optional<Lang> edgeFamily = {};
+
+    /// The declaration grammar the QD-TANGLE steering walk reads (SteerDecl above).
+    SteerDecl steerDecl = SteerDecl::None;
 };
 
 /// The Rust prelude's bare-callable items (std::prelude::v1, every edition): the Option and Result variants a call constructs, and
@@ -471,40 +479,40 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::Cpp, .basesAsCaptures = true, .defectShapeNeedsMacroSet = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .aliasTargetDefs = true, .memberSeparator = "::",
       .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain, .staticLinkage = true,
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .signatureRows = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .qualifierNamesScope = true,
-      .typedInstanceRows = true, .xMacroRows = true, .objectMacrosUnindexed = true, .edgeFamily = Lang::C },
+      .typedInstanceRows = true, .xMacroRows = true, .objectMacrosUnindexed = true, .edgeFamily = Lang::C, .steerDecl = SteerDecl::CFamily },
     { .lang = Lang::Python, .frameworkEntryHooks = true, .closureReceiverDispatch = true, .externalVetoBeforeRule3 = true, .rule3NameProof = Rule3NameProof::PythonImport, .baseImportEvidence = BaseImportEvidence::PythonImport,
       .instanceReceiver = "self", .underscorePrivacy = true, .leadingDocstring = true,
-      .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .hashComment = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .tupleParens = true, .armOpeners = ArmOpeners::PythonElif, .singleQuoteStrings = true },
+      .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .hashComment = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .tupleParens = true, .armOpeners = ArmOpeners::PythonElif, .singleQuoteStrings = true, .steerDecl = SteerDecl::Python },
     { .lang = Lang::TypeScript, .overloadSignatures = true, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
       .writtenBindingUndecided = true, .namespaceBodies = true, .objectLiteralMembers = true, .containmentOwners = true,
-      .classNameReceiver = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .localBraceNotData = true, .bracedPropertyRows = true, .singleQuoteStrings = true },
+      .classNameReceiver = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .localBraceNotData = true, .bracedPropertyRows = true, .singleQuoteStrings = true, .steerDecl = SteerDecl::JsLexical },
     { .lang = Lang::Go, .structuralTyping = true, .writtenModule = WrittenModuleRule::PackageDir,
       .memberNeverReachesFreeFunction = true, .moduleCallReachesFunctionsOnly = true, .signatureRows = true,
-      .testRunnerEntry = TestRunnerEntry::GoTestName, .memberDecl = MemberDecl::NameThenType },
+      .testRunnerEntry = TestRunnerEntry::GoTestName, .memberDecl = MemberDecl::NameThenType, .steerDecl = SteerDecl::Go },
     { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .rule3NameProof = Rule3NameProof::RustUse, .preludeCalls = kRustPreludeCalls, .bangMacros = true, .returnTypedDispatchLet = true, .constructorMethod = "new", .memberSeparator = "::", .baseImportEvidence = BaseImportEvidence::RustUse,
       .selectorPathKeywords = true, .instanceReceiver = "self", .memberNeverReachesFreeFunction = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .localBraceNotData = true, .armOpeners = ArmOpeners::FatArrow,
-      .testRunnerEntry = TestRunnerEntry::RustTestAttr, .attributeRegistersTests = true, .dropRunsAtScopeExit = true },
+      .testRunnerEntry = TestRunnerEntry::RustTestAttr, .attributeRegistersTests = true, .dropRunsAtScopeExit = true, .steerDecl = SteerDecl::Rust },
     { .lang = Lang::Swift, .writtenModule = WrittenModuleRule::DirsOnly, .instanceReceiver = "self",
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .implementorEdges = ImplementorEdges::Read, .localBraceNotData = true },
     { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true, .staticLinkage = true, .fileEdges = FileEdges::Resolved,
-      .qualifierNamesScope = true, .objectMacrosUnindexed = true, .edgeFamily = Lang::C },
+      .qualifierNamesScope = true, .objectMacrosUnindexed = true, .edgeFamily = Lang::C, .steerDecl = SteerDecl::CFamily },
     { .lang = Lang::Markdown, .notCode = true, .linkSections = true, .fileEdges = FileEdges::NotApplicable },
     { .lang = Lang::JavaScript, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
       .writtenBindingUndecided = true, .objectLiteralMembers = true, .containmentOwners = true,
-      .classNameReceiver = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .localBraceNotData = true, .bracedPropertyRows = true, .singleQuoteStrings = true },
+      .classNameReceiver = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .localBraceNotData = true, .bracedPropertyRows = true, .singleQuoteStrings = true, .steerDecl = SteerDecl::JsLexical },
     { .lang = Lang::Bash, .hashComment = true, .fileEdges = FileEdges::Resolved, .shellScript = true },
     { .lang = Lang::Java, .basesAsCaptures = true, .samLambdas = true, .samIgnoredMembers = kJavaObjectMethods, .anonymousImplementors = true, .baseImportEvidence = BaseImportEvidence::JvmImport,
       .writtenModule = WrittenModuleRule::DirsOnly,
-      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .implementorEdges = ImplementorEdges::Read, .memberDecl = MemberDecl::TypeFirst },
+      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .implementorEdges = ImplementorEdges::Read, .memberDecl = MemberDecl::TypeFirst, .steerDecl = SteerDecl::Java },
     { .lang = Lang::Ruby, .classObjectLookup = true, .mixinAncestry = true, .keepsUnshapedSubscript = true, .constantPathReceiver = true,
       .memberSeparator = "#", .writtenModule = WrittenModuleRule::ConstantPath, .instanceReceiver = "self",
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .hashComment = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .armOpeners = ArmOpeners::RubyWhen, .memberDecl = MemberDecl::None, .singleQuoteStrings = true },
     { .lang = Lang::Unknown, .notCode = true, .fileEdges = FileEdges::NotApplicable },
     { .lang = Lang::Json, .notCode = true, .fileEdges = FileEdges::NotApplicable, .configFormat = true },
     { .lang = Lang::CSharp, .overloadsWithoutArity = true, .writtenModule = WrittenModuleRule::DirsOnly,
-      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .implementorEdges = ImplementorEdges::Read, .armOpeners = ArmOpeners::FatArrow, .memberDecl = MemberDecl::TypeFirst },
+      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .implementorEdges = ImplementorEdges::Read, .armOpeners = ArmOpeners::FatArrow, .memberDecl = MemberDecl::TypeFirst, .steerDecl = SteerDecl::CSharp },
     { .lang = Lang::C, .noNestedNamedFunctions = true, .memberSeparator = "::", .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain,
-      .staticLinkage = true, .signatureRows = true, .fileEdges = FileEdges::Resolved, .typedInstanceRows = true, .xMacroRows = true },
+      .staticLinkage = true, .signatureRows = true, .fileEdges = FileEdges::Resolved, .typedInstanceRows = true, .xMacroRows = true, .steerDecl = SteerDecl::CFamily },
     { .lang = Lang::Toml, .notCode = true, .hashComment = true, .fileEdges = FileEdges::NotApplicable, .configFormat = true },
     { .lang = Lang::Yaml, .notCode = true, .hashComment = true, .fileEdges = FileEdges::NotApplicable, .configFormat = true },
     { .lang = Lang::Php, .memberSeparator = "::", .implementorEdges = ImplementorEdges::Read, .armOpeners = ArmOpeners::FatArrow, .singleQuoteStrings = true },

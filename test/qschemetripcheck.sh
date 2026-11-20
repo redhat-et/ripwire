@@ -34,6 +34,9 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-19, lane QD-TANGLE (stacked on lane/qd-false-rows): RE-PINNED with UPDATE_GOLDEN=1. kQSnapCacheScheme 34 -> 36 (35 is
+#   lane qd-va-forms'): the snapshot gains the tangle map (tangleBySym) and its known byte; computeSnapshot records it
+#   (recordTangleOf), serialize/deserializeSnapshot carry it, and kCacheVersion 54 carries RawDef::steer/deepDispatch/nestArmCut.
 # 2026-11-18, train 1117d1-r (the 1117d1 stack rebased onto main 7f461e33b, #687): RE-PINNED ONCE with UPDATE_GOLDEN=1 from the
 #   rebased build (hash c1fefa06b4…f246ff2). kParserVer 331 (rich 332) stays, above main's 313/314 (#688): the 331 note now sits
 #   above main's 313 note in ingest_cache.h and the quality.h mirror. kQSnapCacheScheme stays 34.
