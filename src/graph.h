@@ -14314,16 +14314,11 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
 
         // drop self-loops BEFORE the split so the confidence mass is conserved over real targets.
         // A markdown link whose target is the section that contains the link is dropped here on purpose.
-        std::size_t nReal = 0;
-        for( NodeId c : tier )
-        {
-            if( c != r.fromSymbol )
-            {
-                ++nReal;
-            }
-        }
+        const std::size_t nReal = std::size_t( std::ranges::count_if( tier, [ & ]( NodeId c ) { return c != r.fromSymbol; } ) );
         if( nReal == 0 )
         {
+            // a recursion, not an edge — but a PROVEN one is still a site of the caller alone, never of its namesakes
+            noteProvenSite( g.provenSites, !nameOnly, it == byName.end() ? 0u : it->second.size(), std::uint32_t( siteIndex ), tier );
             disposition = CallDisposition::Self;   // the tier held only the caller itself: a recursion, not an edge
             continue;
         }
