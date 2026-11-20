@@ -1595,7 +1595,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "facet", "r facet=failure-default: an error-masking row whose growth includes a read/parse/spawn failure returned as an empty success; it never gates by itself", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "monster", "r monster=1: over 5x the ccx bar and grew by now-was (10+): major at any %; put the new branch in a helper", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "similar", "r similar=N: the params list is new or grew and holds N>=3 adjacent same-typed params (C/C++); a swapped call compiles; pass a named struct; never gates", true, "r", MapHeaderRead::No, {}, "quality-delta" },
-    { "why", "r why=: a tangle row's inputs that rose (nest, deep lines, steer, length), or a minor clone row's differing operands; fix=: the shape the row calls for, with lines", true, "r", MapHeaderRead::No, {}, "quality-delta" },   // also defines fix=
+    { "why", "r why=: a tangle row's risen inputs, a minor clone row's differing operands; fix=: the shape the row calls for, with lines", true, "r", MapHeaderRead::No, {}, "quality-delta" },   // also defines fix=
     { "locals", "r locals=: a tangle row's steering locals (set in one step, read by a branch 10+ statements later)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "ratchet", "r ratchet=TAG: a tangle row above its best since TAG (an input rose over its minimum); why= adds best since TAG", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "n", "improved n= more=: what this change made better, never a row or gating; i kind= sym= was= now= p=: over the kind's bar at baseline, lower now", true, "improved", MapHeaderRead::No, {}, "quality-delta" },
