@@ -976,7 +976,7 @@ struct BlobTangleDef
     std::string   scope;
     std::string   name;
     TangleInputs  in;
-    std::uint32_t bodyStart = 0;   // Symbol::sigEndByte's value: the body field's start, or endByte for a bodyless def
+    std::uint32_t bodyStart = 0;   // ingest_model.h rawDefBodyStart (Symbol::sigEndByte's value)
     std::uint32_t endByte   = 0;
 };
 struct BlobTangleDefs
