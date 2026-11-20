@@ -59,7 +59,27 @@ def trailing_legend_start(lines):
         k -= 1
     return k if any(ln.lstrip().startswith("<!--") for ln in lines[k:]) else len(lines)
 
-def fmt_block(data):
+def keep_from_start( lines, keepFrom ):
+    """Index where a cut block's kept TRAILING ELEMENT starts (len(lines) when there is none to keep).
+
+    SHOWCASE-KEEP-FROM (2026-11-20, IN5). trailing_legend_start keeps a trailing LEGEND after the marker; a block
+    whose caption promises an ELEMENT needs the same for that element. The case that needs it is `--in=DIR`: its
+    promise (a second `<recent scope="DIR">` page that CUTS, and the `<symbols stubbed=>` stub) lives in the LAST
+    display lines, behind a global `<recent>` block whose rows are capped at 40 by the tool. On a MERGE-HEAVY tip
+    every window wide enough for the scoped page to cut also widens the global block past 22 rows, which pushed
+    the scoped page past the 30-line cut; chooseInWindow then found no window and the generator refused to write
+    the whole capture over one case (measured on integration/070-1120: windows of 1 src file at HEAD~2..4 and 53
+    at HEAD~5 and beyond — the merge of main contributes 53 by itself, so no window lands in the 4..22 band).
+    The tool's answer in the wide window is COMPLETE (capped="1" has_more="1" next= and the stub are all there);
+    only the capture's own display cut hid it. So the cut keeps the promised element rather than the window moving.
+    Nothing is hidden: the marker still counts exactly the lines between, and it is the elided MIDDLE of the global
+    block — the preamble says so. Only lines PAST the ordinary 30-line window qualify, so a block that already
+    shows its element is cut exactly as before and no train tip's capture moves."""
+    if keepFrom is None:
+        return len( lines )
+    return next( ( i for i, ln in enumerate( lines ) if i > 30 and ln.lstrip().startswith( keepFrom ) ), len( lines ) )
+
+def fmt_block(data, keepFrom=None):
     text = data.decode("utf-8", "replace").rstrip("\n")
     if not text:
         return "(empty)"
@@ -70,7 +90,7 @@ def fmt_block(data):
     marker = None
     tail = []
     if len(lines) > 40:
-        k = trailing_legend_start(lines)
+        k = min( trailing_legend_start(lines), keep_from_start( lines, keepFrom ) )
         tail = lines[k:]
         shown = lines[:30]
         if exploded:
@@ -104,17 +124,18 @@ def fmt_block(data):
             out.append(ln)
     if marker:
         out.append(marker)
-        out.extend(tail)   # the trailing legend comments of an answer-first document (never cut: they are comment lines)
+        out.extend(tail)   # the trailing legend comments of an answer-first document (never cut: they are comment lines),
+                           # or the element a caption promises (keep_from_start)
     return "\n".join(out)
 
-def publish_block(data):
+def publish_block(data, keepFrom=None):
     """fmt_block, then the project's own rebrand rows withheld (exportscrub.withhold_rebrand_rows).
 
     AFTER the display cut, deliberately: the window and its `… [N more display lines]` marker still describe
     the real output, and the disclosure's count is exactly the rows taken out of what this block shows. So
     rows shown + withheld + past the cut still equals the pairs= the tool reported — the sum
     test/docscommandscheck.sh arm (E) checks on every capture."""
-    lines, _withheld = exportscrub.withhold_rebrand_rows(fmt_block(data).split("\n"))
+    lines, _withheld = exportscrub.withhold_rebrand_rows(fmt_block(data, keepFrom).split("\n"))
     return "\n".join(lines)
 
 # --- helper input files -------------------------------------------------
@@ -582,6 +603,11 @@ add(S7, f"{BIN} . --rank-by=churn --top-k=5", "Rank by git change-frequency prio
 # nothing, and the message says which half broke so the next person re-measures rather than re-guesses.
 _IN_DIR      = "src"
 _IN_LIMIT    = 3
+# The element this case's caption promises, and therefore the one the display cut keeps when it falls past the
+# ordinary 30-line window (keep_from_start). It is the SCOPED page's own opening tag: everything the caption
+# names — its counts, capped=/has_more=/next_offset=/next=, its rows, and the <symbols stubbed=> stub behind it —
+# follows this line, so keeping from here keeps the whole demonstration and elides only the global block's middle.
+_IN_KEEP_FROM = '<recent scope='
 # The corpus flags are not decoration: they narrow the mined window so the GLOBAL block fits the display cut,
 # and they make next= replay real corpus/window flags, which is the fact a hand-spelled next= used to lose.
 # --exclude=skills joined them on 2026-09-14 (18 skills/ files in the window, and 17 of the ~24 bytes of
@@ -613,8 +639,12 @@ def inCaseCmd( n, limit=_IN_LIMIT ):
 # this repo, ~2 s cold) and well under the capture loop's own 600 s cases.
 _IN_PROBE_TIMEOUT_S = 120
 
-def inCaseUnshown( n, limit=_IN_LIMIT ):
-    """Which of the caption's promises the PUBLISHED block for HEAD~n does not keep ([] = keeps them all)."""
+def inCaseUnshown( n, limit=_IN_LIMIT, keepFrom=_IN_KEEP_FROM ):
+    """Which of the caption's promises the PUBLISHED block for HEAD~n does not keep ([] = keeps them all).
+
+    keepFrom is the SAME argument the published block is formatted with, so what this measures is what a reader
+    sees — the invariant the comment above insists on. keepFrom=None measures the block as the plain display cut
+    would render it, which is how the caption learns whether the kept tail was needed (_inKeptNote below)."""
     try:
         p = subprocess.run( inCaseCmd( n, limit ), shell=True, cwd=REPO, capture_output=True,
                             timeout=_IN_PROBE_TIMEOUT_S, stdin=subprocess.DEVNULL )
@@ -625,7 +655,7 @@ def inCaseUnshown( n, limit=_IN_LIMIT ):
                   f"no other diagnostic" )
     if p.returncode != 0:
         return [f"the run exited {p.returncode}"]
-    shown = publish_block( p.stdout )
+    shown = publish_block( p.stdout, keepFrom )
     scoped = re.search( r'<recent scope="[^"]*"[^>]*>', shown )
     gone = []
     if scoped is None:
@@ -742,10 +772,20 @@ def chooseInWindow( lo=1, hi=14, unshown=None, mergeHolds=None, laneSince=None )
     return n, lim
 
 _inN, _inLimit = chooseInWindow()
+# Whether the chosen window needed the kept tail (keep_from_start): measured by re-rendering the SAME window with the
+# plain display cut. A train tip answers False and the caption says nothing; a merge-heavy tip answers True and the
+# caption says which half of the block the reader is looking at, because a marker alone would not say WHY the middle
+# of the global block is the part that went.
+_inKept = bool( inCaseUnshown( _inN, _inLimit, keepFrom=None ) )
+_inKeptNote = ( "" if not _inKept else
+    f" The global block's rows are elided in the MIDDLE here, not at the end: every change window on this branch that is wide "
+    f"enough for the scoped page to cut also fills the global block past the display cut (the tool caps it at 40 rows), so the "
+    f"cut keeps the scoped page and the stub the caption promises and the `… [N more display lines]` marker counts exactly the "
+    f"global rows taken out. The tool's answer is complete either way; only this document's own 30-line window moved." )
 _inLimitNote = ( "" if _inLimit == _IN_LIMIT else
     f" This page holds {_inLimit} row(s), not the usual {_IN_LIMIT}: no change window on this branch held enough src/ files "
     f"for a larger page to cut, so the generator fell back to a smaller one (see chooseInWindow)." )
-add(S7, inCaseCmd( _inN, _inLimit ), "Scope the recent-changes answer to ONE directory. The global <recent> block stays byte-identical, a second <recent scope=\"src\"> page follows it — n=/of= are its counts (of= IS the total, so the paging half carries no total=), capped=\"1\" has_more=\"1\" next_offset= offset= limit= page it, and next= replays THIS run's own corpus flags (--since/--exclude) so the page it names is a page of the same answer. The symbol map collapses to a disclosed <symbols stubbed=\"1\" would_show= next=/> stub — the map was not asked for and was not ranked at all, which is why the header carries no pr_iters=. merge_bombs_skipped= stays on the global block: it counts the window's skipped commits, not the directory's." + _inLimitNote)
+add(S7, inCaseCmd( _inN, _inLimit ), "Scope the recent-changes answer to ONE directory. The global <recent> block stays byte-identical, a second <recent scope=\"src\"> page follows it — n=/of= are its counts (of= IS the total, so the paging half carries no total=), capped=\"1\" has_more=\"1\" next_offset= offset= limit= page it, and next= replays THIS run's own corpus flags (--since/--exclude) so the page it names is a page of the same answer. The symbol map collapses to a disclosed <symbols stubbed=\"1\" would_show= next=/> stub — the map was not asked for and was not ranked at all, which is why the header carries no pr_iters=. merge_bombs_skipped= stays on the global block: it counts the window's skipped commits, not the directory's." + _inLimitNote + _inKeptNote, keep_from=_IN_KEEP_FROM)
 add(S7, f"{BIN} . --rank-by=bogus --top-k=5", "An unknown value REFUSES (exit 1), NAMED, with the supported set listed.")
 add(S7, f"{BIN} . --callers=rankGraphTeleport --format=columnar", "Columnar output: paths table + parallel arrays, ~15-60% fewer tokens on MANY-row lists — small results can be LARGER (the columnar legend is a fixed cost).")
 add(S7, f'{BIN} . --for="cache invalidation" --format=candidates --top-k=5', "Flat top-K export for an external reranker.")
@@ -1120,7 +1160,7 @@ doc.append(f"- **Repo:** the ripwire repo @ `{sha}` — **{dirty_note}**. The di
 doc.append(f"- **Corpus:** the ripwire repo itself (dogfood), via `./build/ripwire`")
 doc.append(f"- **Sandbox diff** (the last section only): `{sandbox_diffstat}` — one preexisting function made deeply nested, one function's arity changed 1 -> 2, one copy-paste duplicate helper, one new 8-parameter public function.")
 doc.append("")
-doc.append("**How to read the blocks:** ripwire's real XML output is minified — often ONE long line. For scanability, long minified lines are displayed re-wrapped with a line break at every tag seam (`><`). Header COMMENT lines (the legends) always appear in full — they are exempt from the per-line cut; any OTHER display line over 300 bytes is cut with a `… [line truncated: N more bytes]` marker, which can hit a long root element or row. `--plan-lanes` emits JSON and is re-wrapped at object seams the same way. Long outputs are cut to their first ~30 display lines with a `… [N more display lines; full output is M bytes]` marker giving the true size; an answer that ENDS in its legend (the answer-first `--for` document) keeps those trailing comment lines after the marker, and N counts only the lines between. Exit codes are recorded when non-zero; wall time when >1s.")
+doc.append("**How to read the blocks:** ripwire's real XML output is minified — often ONE long line. For scanability, long minified lines are displayed re-wrapped with a line break at every tag seam (`><`). Header COMMENT lines (the legends) always appear in full — they are exempt from the per-line cut; any OTHER display line over 300 bytes is cut with a `… [line truncated: N more bytes]` marker, which can hit a long root element or row. `--plan-lanes` emits JSON and is re-wrapped at object seams the same way. Long outputs are cut to their first ~30 display lines with a `… [N more display lines; full output is M bytes]` marker giving the true size; an answer that ENDS in its legend (the answer-first `--for` document) keeps those trailing comment lines after the marker, and N counts only the lines between. One block (`--in=DIR`) keeps a trailing ELEMENT the same way — its caption's whole subject, the scoped `<recent scope=>` page, is the last thing the tool prints — so there the elided lines are the MIDDLE of the preceding global block and the marker counts exactly those; its caption says so when it happens. Exit codes are recorded when non-zero; wall time when >1s.")
 doc.append("")
 doc.append(f"**Not run (and why):** `ripwire <git-url>` (network clone), `--legend-have` (a per-CALLER handshake — the caller names the legend dictionary version it already holds — so a one-shot capture has nothing to hold and nothing to show; gated by `test/legendhavecheck.sh`), `--listen` / `--mcp-token` / `--allow-remote-edits` (the HTTP-server posture; `--mcp` itself IS captured in its own section as a one-shot stdio JSON-RPC exchange, and `wrap claude` shows the wiring), `--arch --baseline[-update]` (state writer against the read-only repo — `--note-add` / `--quality-baseline` / `--quality-ack` / the three edit verbs / `--edit-plan` ARE shown, inside the throwaway sandbox clone; `--index-out` / `--pin-census` write to scratch), `--eval-mined` (needs a `minedpair.jsonl` artifact from `bench/mine_traces.py`; none present in the tree), `--refetch` (git-url only), `--lsp` / `--lsp-langmap` (the editor transport and its language-map config — their one-shot dialogues, including every map and hint arm, are gated by `test/lspcheck.sh`, not by showcase blocks), `--max-memory` (the memory guard is silent on this repo by construction; its stops are gated by `test/memguardcheck.sh`), `--force` (wrap-only modifier), `--deadline-ms` (a timing modifier on `--help-task`: a warm index prints exactly the `--help-task` blocks shown only when it finishes within the deadline (a warm run past it abstains as well), and the cold abstention depends on wall-clock timing; gated by `test/helptaskdeadlinecheck.sh`), `--scan-skills` bare form (would sweep `~/.claude/skills`; the explicit-DIR form is shown instead), `--help` ({help_line_count} lines — read it from the binary).")
 doc.append("")
@@ -1148,12 +1188,12 @@ for r in results:
         doc.append(r["pre"].rstrip())
         doc.append(FENCE + "\n")
     doc.append(FENCE)
-    doc.append(publish_block(r["out"]))
+    doc.append(publish_block(r["out"], c.get("keep_from")))
     doc.append(FENCE + "\n")
     if r["err"].strip():
         doc.append("stderr:\n")
         doc.append(FENCE)
-        doc.append(publish_block(r["err"]))
+        doc.append(publish_block(r["err"], c.get("keep_from")))
         doc.append(FENCE + "\n")
     if r["post"]:
         doc.append(c.get("post_label", "Artifact written:") + "\n")
