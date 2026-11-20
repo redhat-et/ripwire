@@ -461,9 +461,12 @@ nscheck "(N3)" tree payload_shadowed "$SM~ rs/lib.rs:40:make_shelf $RM~"
 nscheck "(N3)" tree box_deref "$SM"
 nscheck "(N3)" tree closure_shadow "$SM~ rs/lib.rs:196:Table::text~ rs/lib.rs:20:Shelf::text~ $RM~"
 nscheck "(N3)" tree generic_named_like_std "rs/lib.rs:20:Shelf::text"
-for sel in Owner::fieldSmart untyped Holder::nested Holder::element nestedLocal transformLocal shadowAuto shadowTyped paramShadowed; do
+for sel in Owner::fieldSmart untyped Holder::nested Holder::element nestedLocal transformLocal shadowAuto paramShadowed; do
     nscheck "(N3)" tree "$sel" "$HG~"
 done
+# shadowTyped's inner `Handle p;` shadows the outer std::unique_ptr p, so `p.get()` IS Handle::get: on main ee8d1a50e (train
+# 1117d1) the block-scoped local types the receiver and the edge is proven. The filter must not remove it (rebased onto #705).
+nscheck "(N2)" tree shadowTyped "$HG"
 # (N4) the way back: a trait's method and an alias's impl stay; the struct's namesake leaves
 nscheck "(N4)" tree ext_call "rs/lib.rs:182:VecExt::source~ rs/lib.rs:187:total~"
 nscheck "(N4)" tree alias_impl_call "rs/lib.rs:196:Table::text~"
