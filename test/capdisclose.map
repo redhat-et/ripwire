@@ -119,7 +119,7 @@ kLitHubFanIn	none:a rank threshold, not a cut (Stage 0 audit)
 kManifestFileRows	sink:capped
 kManifestLineMax	sink:cut
 kManifestRowsPerFile	sink:capped
-kMatchMaxHits	sink:saturatedRules,lintDefaultShown
+kMatchMaxHits	sink:hitsCapped
 kMaxLinesUp	none:shape windows (two locals share the name), not a cut (Stage 0 audit)
 kOneSideMaxEndpointDefs	none:a rule gate deciding whether the one-side rule applies, not a cut (Stage 0 audit)
 kOneSideRootPathMaxHops	none:a classification threshold, not a cut (Stage 0 audit)
