@@ -27,7 +27,7 @@
 #include "clones.h"
 #include "cloneidiom.h"         // idiom-class demotion — the closed 3-idiom shape classifier that turns an idiom-COLLISION clone group into a minor row instead of a gating one
 #include "lintrules.h"          // findQualityConstructs — the built-in error-masking rule table (GitClear +47% kind) + the placeholder shapes
-#include "defectshape.h"        // the defect-shape kind's five scanners (format-arity, utf8-cut, dedup-first, vacuous-assert, unchecked-status)
+#include "defectshape.h"        // the defect-shape kind's six scanners (format-arity, utf8-cut, dedup-first, vacuous-assert, unchecked-status, unhandled-arm)
 #include "arch.h"               // fnv1a64
 #include "pathguard.h"          // CWE-59/367: rw::pathguard::openNoFollowTruncate — writeBaseline truncates, so its open must refuse a link atomically
 #include "gitmine.h"            // shSingleQuote + gitFileCommitCountsInDayWindow — short-horizon-churn window mining
@@ -1297,8 +1297,8 @@ inline std::uint64_t defectFileAnchor( std::string_view relPath )
     return pathQualifiedKey( relPath, "<file>", "" );
 }
 
-// A site value's low three bits are its facet (five facets; QD-UNCHECKED-STATUS widened two bits to three, so
-// every site value moved once: kQSnapCacheScheme 37).
+// A site value's low three bits are its facet (six facets, room for eight; QD-UNCHECKED-STATUS widened two bits to
+// three, so every site value moved once: kQSnapCacheScheme 37).
 inline constexpr std::uint64_t kDefectFacetMask = 7;
 static_assert( defectshape::kFacetCount <= kDefectFacetMask + 1, "every facet fits the site value's facet bits" );
 
@@ -1377,6 +1377,7 @@ struct DefectSiteAt
     std::uint32_t    fileId = 0;
     std::uint32_t    line   = 0;
     std::string_view call;   // unchecked-status: the call whose status is dropped (defectshape's static spelling)
+    std::string      why;    // unhandled-arm: what the classifier leaves without an outcome (defectshape's Site::why)
 };
 
 
@@ -4564,7 +4565,10 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 // v37 (2026-11-19, lane QD-UNCHECKED-STATUS, E3b; 36 is reserved by qd-tangle) — no blob shape change; every defect-shape SITE
 // VALUE moved. The facet takes three low bits, not two (a fifth facet, unchecked-status), so a v35 blob's site values carry the
 // old hash bits and would read every site as added; C files and every Python file are scanned now. Bumped 35 -> 37.
-constexpr std::uint32_t kQSnapCacheScheme = 37;
+// v38 (2026-11-19, lane QD-UNHANDLED-ARM) — no blob shape change; the defect-shape SITE SET grew. A sixth facet, unhandled-arm,
+// adds sites in C/C++ (checked against the tree's enum table), Python and every Bash file (not only test scripts), so a v37 blob
+// holds none of them and a head scan would read every existing one as added. Bumped 37 -> 38.
+constexpr std::uint32_t kQSnapCacheScheme = 38;
 constexpr char          kQSnapMagic[4]    = { 'Q', 'S', 'N', 'P' };
 
 // The qsnap EXCLUDES-config key folds the qsnap SCHEME (independent of the ingest cache's kHeadSnapCacheScheme)
@@ -6574,8 +6578,8 @@ inline bool cloneGroupHeldAcrossRenames( const CloneGroup& cg, const std::vector
 
 // Every defect-shape site in the tree, anchored on the innermost enclosing definition (byte-span containment,
 // the same rule error-masking counts by) or on the file. Languages: C++ (format-arity, utf8-cut,
-// dedup-first, unchecked-status), C (unchecked-status), Python (format-arity, unchecked-status), Bash under a
-// test-script path (vacuous-assert). Each scanned file also
+// dedup-first, unchecked-status, unhandled-arm), C (unchecked-status, unhandled-arm), Python (format-arity,
+// unchecked-status, unhandled-arm), Bash (unhandled-arm; vacuous-assert under a test-script path). Each scanned file also
 // leaves its presence record; a file that does not read leaves the unreadable record instead and contributes
 // no site (a partial read is evidence of nothing, forEachSymbolBody's rule) — the delta then judges no current
 // site in that file against it. Sorted by key; deterministic (files in id order, scanners pure).
@@ -6598,6 +6602,30 @@ inline std::vector<std::string> cFamilyMacroNames( const IngestResult& ing )
     return names;
 }
 
+// unhandled-arm's closed sets: every enum the index's C-family files define with its enumerators written out, tree-wide (a
+// switch in one file decides an enum another file defines). The baseline filter applies: a file outside the baseline
+// contributes no enum. A degraded --quality-delta=A..B holds only the changed files, so it checks switches against their
+// enums alone (an enum it cannot see decides no switch: no site, on both sides).
+inline defectshape::EnumTable cFamilyEnumTable( const IngestResult& ing, std::string_view root, const std::vector<char>* fileInBaseline )
+{
+    defectshape::EnumTable table;
+    for( std::uint32_t f = 0; f < ing.files.size(); ++f )
+    {
+        const Lang lang = langOfPath( relForHash( ing.files[f], root ) );
+        if( !fileIsInBaseline( fileInBaseline, f ) || ( lang != Lang::Cpp && lang != Lang::C ) )
+        {
+            continue;
+        }
+        const std::optional<std::string> bytes = docparse::detail::readWholeFile( diskPath( ing, f ) );
+        if( bytes )
+        {
+            table.add( defectshape::cEnumsOf( *bytes ) );
+        }
+    }
+    table.seal();
+    return table;
+}
+
 // `macroOverride`, when given, is the macro-name set to scan C++ files against instead of this index's own — the whole
 // tree's, when this index holds only some of its files (a degraded --quality-delta=A..B's changed files).
 inline std::vector<DefectSiteAt> defectSitesOf( const IngestResult& ing, std::string_view root, const std::vector<char>* fileInBaseline,
@@ -6607,6 +6635,7 @@ inline std::vector<DefectSiteAt> defectSitesOf( const IngestResult& ing, std::st
     const SymbolsByFile byFile = symbolsByFileInIdOrder( ing, []( const Symbol& s ) { return s.endByte > s.sigStartByte && s.kind != SymKind::ModuleScope; } );
     const std::vector<std::string> ownMacros  = macroOverride == nullptr ? cFamilyMacroNames( ing ) : std::vector<std::string>{};
     const std::vector<std::string>& treeMacros = macroOverride == nullptr ? ownMacros : *macroOverride;
+    const defectshape::EnumTable    enums      = cFamilyEnumTable( ing, root, fileInBaseline );
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
         if( !fileIsInBaseline( fileInBaseline, f ) )
@@ -6615,7 +6644,7 @@ inline std::vector<DefectSiteAt> defectSitesOf( const IngestResult& ing, std::st
         }
         const std::string_view rel  = relForHash( ing.files[f], root );
         const Lang             lang = langOfPath( rel );
-        if( lang != Lang::Cpp && lang != Lang::C && lang != Lang::Python && !( lang == Lang::Bash && isTestScriptPath( rel ) ) )
+        if( lang != Lang::Cpp && lang != Lang::C && lang != Lang::Python && lang != Lang::Bash )
         {
             continue;
         }
@@ -6643,19 +6672,27 @@ inline std::vector<DefectSiteAt> defectSitesOf( const IngestResult& ing, std::st
         std::vector<defectshape::Site> sites;
         if( lang == Lang::Cpp && defectshape::cppMayHoldShapes( src ) )
         {
-            sites = defectshape::scanCpp( src, fnSpans, &treeMacros );
+            sites = defectshape::scanCpp( src, fnSpans, &treeMacros, &enums );
         }
-        else if( lang == Lang::C && defectshape::mayHoldStatusCalls( src ) )
+        else if( lang == Lang::C && ( defectshape::mayHoldStatusCalls( src ) || src.find( "switch" ) != std::string_view::npos ) )
         {
-            sites = defectshape::scanC( src, fnSpans );
+            sites = defectshape::scanC( src, fnSpans, &enums );
         }
         else if( lang == Lang::Python )
         {
             sites = defectshape::scanPython( src, fnSpans );
         }
-        else if( lang == Lang::Bash )   // a test script: every assertion form (grep, [ ], cmp, case, rc=$?) is read
+        else if( lang == Lang::Bash && isTestScriptPath( rel ) )   // a test script: every assertion form (grep, [ ], cmp, case, rc=$?) is read
         {
             sites = defectshape::scanBashTestScript( src, fnSpans );
+        }
+        else if( lang == Lang::Bash )
+        {
+            sites = defectshape::scanBash( src, fnSpans );
+        }
+        if( defectshape::looksGenerated( rel, src ) )   // unhandled-arm judges no generated switch: the fix is in the generator
+        {
+            std::erase_if( sites, []( const defectshape::Site& st ) { return st.facet == defectshape::Facet::UnhandledArm; } );
         }
         for( const defectshape::Site& st : sites )
         {
@@ -6663,7 +6700,7 @@ inline std::vector<DefectSiteAt> defectSitesOf( const IngestResult& ing, std::st
             const NodeId        owner  = enclosingDefOf( ing, byFile, f, st.startByte );
             const std::uint64_t anchor = owner == kNoNode ? fileAnchor : qualityKey( ing, owner, root );
             const std::uint32_t line   = static_cast<std::uint32_t>( 1 + std::count( src.begin(), src.begin() + st.startByte, '\n' ) );
-            out.push_back( { { anchor, defectSiteValue( st.facet, st.text ) }, owner, f, line, st.call } );
+            out.push_back( { { anchor, defectSiteValue( st.facet, st.text ) }, owner, f, line, st.call, st.why } );
         }
     }
     std::stable_sort( out.begin(), out.end(), []( const DefectSiteAt& a, const DefectSiteAt& b ) { return a.key < b.key; } );
@@ -7990,7 +8027,8 @@ struct Regression
     bool          isMinor = false;// materiality tier: true = below the kind's minor-delta bar → reported sev="minor", does not gate exit 2
     std::string   facet;          // B10.2 — optional classification facet (attribute NAME chosen by the kind in main.cpp):
                                   //   short-horizon-churn: "self" | "ambient"; api-surface: "new-symbol" | "contract-change";
-                                  //   defect-shape: "format-arity" | "utf8-cut" | "dedup-first" | "vacuous-assert" | "unchecked-status". Empty = no facet.
+                                  //   defect-shape: "format-arity" | "utf8-cut" | "dedup-first" | "vacuous-assert" | "unchecked-status" |
+                                  //   "unhandled-arm". Empty = no facet.
     bool          isNewSymbol = false;// r26 ORIGIN axis: true = the finding exists ONLY because the code is new (emitted origin="new-symbol",
                                   //   counted in new-symbol=, never gates); false = preexisting-worse. See the ORIGIN block in computeDelta.
     bool          isMoved     = false;// MOVED-BODY: a new-symbol row whose body this diff REMOVED from another name or file (emitted
@@ -7999,6 +8037,8 @@ struct Regression
                                   //   unmoved, non-test complexity/verbosity row reached — emitted ceiling="N", and it GATES. 0 = none.
     std::string   call;           // QD-UNCHECKED-STATUS: a defect-shape unchecked-status row's call whose status is dropped
                                   //   (pclose, subprocess.run, …), emitted call="…". Empty = none (every other row).
+    std::string   why;            // QD-UNHANDLED-ARM: a defect-shape unhandled-arm row's unhandled values (the enumerators a
+                                  //   switch leaves out, a case's unmatched subject), emitted why="…". Empty = none.
     // P2.5 (r27) — the LOCATOR. `sym` is a canonical id whose display tail is often a bare, one-letter local
     // (`sym="cc"`), so the report the agent is told to run at every "done" moment named findings it could not
     // grep for. path is ROOT-RELATIVE (the same relForHash spelling every other sidecar key uses), line is the
@@ -8057,7 +8097,7 @@ inline constexpr FacetAttr kFacetAttrs[] = {
     { "short-horizon-churn",        "churn"   },   // self / ambient
     { "api-surface",                "surface" },   // new-symbol / contract-change
     { "duplication",                "idiom"   },   // the recognized clone-body shape (cloneidiom.h)
-    { "defect-shape",               "defect"  },   // format-arity / utf8-cut / dedup-first / vacuous-assert / unchecked-status
+    { "defect-shape",               "defect"  },   // format-arity / utf8-cut / dedup-first / vacuous-assert / unchecked-status / unhandled-arm
     { "error-masking",              "facet"   },   // failure-default: the growth includes a read failure returned as an empty success
     { "complexity",                 "monster" },   // QD-MONSTER-GROWTH: "1" when isMonsterGrowth made (or would make) the row major
     { "new-clone-of-reused-helper", "idiom"   },   // T13/fix2 gave this kind duplication's idiom demotion (Regression::facet
@@ -10579,7 +10619,7 @@ inline std::pair<std::string, std::string> scopeDisclosure( const Scope& scope, 
 // credited to the anchors that hold more copies of it now than at the baseline, in anchor-key order
 // (deterministic). An anchor credited with a new site of a facet gets ONE row for that facet; was= and now=
 // count the anchor's sites of that facet on each side. format-arity gates on ANY origin — a placeholder /
-// argument mismatch is a defect, not debt; utf8-cut, dedup-first and vacuous-assert are report-only:
+// argument mismatch is a defect, not debt; the other facets are report-only:
 // sev="minor" by facet, not by size. A file the baseline could not read judges none of its sites.
 // Called from computeDelta with its origin oracle (existedAtBaseline) and its locator (stampLoc).
 template<class ExistedFn, class StampFn>
@@ -10680,7 +10720,7 @@ inline void appendDefectShapeRows( std::vector<Regression>& regs, const IngestRe
         {
             credited.push_back( { key.anchor, f, &at } );
         }
-        else if( f == defectshape::Facet::UncheckedStatus && at.line < seen->first->line )
+        else if( defectshape::facetNamesSite( f ) && at.line < seen->first->line )
         {
             seen->first = &at;   // the row names its earliest new site (p= is the site's line); key order is not line order
         }
@@ -10698,9 +10738,10 @@ inline void appendDefectShapeRows( std::vector<Regression>& regs, const IngestRe
         const std::uint64_t rowKey = defectRowKey( c.anchor, c.facet, defectSiteValsOf( nowSites, c.anchor, c.facet, []( const DefectSiteAt& d RW_LIFETIMEBOUND ) -> const DefectSiteKey& { return d.key; } ) );
         regs.push_back( { "defect-shape", sym, was, now, rowKey, !defectshape::facetGatesOnAnyOrigin( c.facet ),
                           std::string( defectshape::facetName( c.facet ) ), isNew } );
-        // unchecked-status names its SITE, not the definition: p= is the first new site's line and call= the call
-        // whose status is dropped, so the row reads without opening the body (a 300-line function holds many calls)
-        const bool atSite = c.facet == defectshape::Facet::UncheckedStatus;
+        // unchecked-status and unhandled-arm name their SITE, not the definition: p= is the first new site's line, and
+        // call= the call whose status is dropped / why= what the classifier leaves out, so the row reads without opening
+        // the body (a 300-line function holds many calls and switches)
+        const bool atSite = defectshape::facetNamesSite( c.facet );
         if( owner != kNoNode && !atSite )
         {
             stampLoc( owner );
@@ -10711,6 +10752,7 @@ inline void appendDefectShapeRows( std::vector<Regression>& regs, const IngestRe
             regs.back().line = c.first->line;
         }
         regs.back().call = atSite ? std::string( c.first->call ) : std::string();
+        regs.back().why  = c.first->why;
     }
 }
 

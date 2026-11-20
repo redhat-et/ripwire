@@ -5096,6 +5096,10 @@ inline std::pair<std::string, std::string> qualityDeltaJson( const std::string& 
         {
             out += ",\"call\":\"" + mcpdetail::jsonEscape( r.call ) + "\""; // QD-UNCHECKED-STATUS (mirrors the XML)
         }
+        if( !r.why.empty() )
+        {
+            out += ",\"why\":\"" + mcpdetail::jsonEscape( r.why ) + "\""; // QD-UNHANDLED-ARM (mirrors the XML)
+        }
         out += "}";
     }
     out += "],";

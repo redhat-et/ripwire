@@ -1,6 +1,6 @@
 #pragma once
 
-// defectshape.h — the scanners behind --quality-delta's defect-shape kind: four shapes of a REAL defect that
+// defectshape.h — the scanners behind --quality-delta's defect-shape kind: six shapes of a REAL defect that
 // review keeps finding by hand and that a deterministic syntactic check finds at write time.
 //
 //   format-arity    C++: a literal std::format / format_to / format_to_n / print / println, fmt::format /
@@ -27,6 +27,10 @@
 //                   nothing ((void) is a stated decision: no site). Python: subprocess.run with no check=,
 //                   subprocess.call and os.system, as a whole statement or bound to a name no later line
 //                   reads, and subprocess.run( ... ).stdout / .stderr (the output read, the status not).
+//   unhandled-arm   a classifier over a closed set that gives a value it does not name no outcome: a C/C++ switch
+//                   with no default: over an in-tree enum that leaves an enumerator out, a shell case with no *) arm
+//                   whose result is read, a Python if/elif chain or match that ends a value-returning function with
+//                   no else (an unmatched value returns None). The site's why= names what is left out.
 //
 // Each scanner returns SITES: a facet, the byte the offending text starts at (the caller anchors it on the
 // innermost enclosing definition, or on the file), and the offending text NORMALIZED (comments dropped,
@@ -46,6 +50,7 @@
 #include <string_view>
 #include <vector>
 #include <charconv>
+#include <iterator>
 #include <system_error>
 
 #include <cctype>
@@ -66,9 +71,11 @@ enum class Facet : std::uint8_t
     DedupFirst      = 2,
     VacuousAssert   = 3,
     UncheckedStatus = 4,
+    UnhandledArm    = 5,
 };
-inline constexpr std::size_t kFacetCount = 5;
-inline constexpr std::array<std::string_view, kFacetCount> kFacetNames = { "format-arity", "utf8-cut", "dedup-first", "vacuous-assert", "unchecked-status" };
+inline constexpr std::size_t kFacetCount = 6;
+inline constexpr std::array<std::string_view, kFacetCount> kFacetNames = { "format-arity", "utf8-cut", "dedup-first", "vacuous-assert", "unchecked-status",
+                                                                           "unhandled-arm" };
 
 inline constexpr std::string_view facetName( Facet f ) noexcept
 {
@@ -77,10 +84,16 @@ inline constexpr std::string_view facetName( Facet f ) noexcept
 
 // The one facet whose rows gate, on ANY origin: a placeholder/argument mismatch on a literal format has no
 // legitimate intent (an argument the format never prints is dropped output; a field with no argument is a
-// compile error or a run-time exception), so it is a defect, not debt. The other four are report-only.
+// compile error or a run-time exception), so it is a defect, not debt. The others are report-only.
 inline constexpr bool facetGatesOnAnyOrigin( Facet f ) noexcept
 {
     return f == Facet::FormatArity;
+}
+
+// The facets whose row names its SITE (p= the site's line, plus call= / why=), not the enclosing definition.
+inline constexpr bool facetNamesSite( Facet f ) noexcept
+{
+    return f == Facet::UncheckedStatus || f == Facet::UnhandledArm;
 }
 
 struct Site
@@ -89,6 +102,7 @@ struct Site
     std::uint32_t    startByte = 0;
     std::string      text;
     std::string_view call;   // unchecked-status: the call whose status is dropped (a static spelling); empty otherwise
+    std::string      why;    // unhandled-arm: the values the classifier leaves without an outcome; empty otherwise
 };
 
 // A definition's byte span [begin, end) in the scanned file — the function bodies the per-function rules
@@ -4564,10 +4578,1238 @@ inline void scanUncheckedStatusPython( std::string_view src, const std::vector<T
     }
 }
 
+// ─── unhandled-arm, C/C++, Python and shell ─────────────────────────────────────────────────────────────
+//
+// A classifier — a switch, a case, an if/elif chain or a match that maps a CLOSED set of values to outcomes — that
+// gives a value it does not name NO outcome: C/C++ falls out of the switch, shell's case takes no arm (status 0,
+// nothing printed, the variable left unset), Python's function falls off its end and returns None. The reader of
+// the outcome cannot tell that value from a decided one. Three forms, each decided from tokens:
+//   C/C++   a switch with no `default:` whose every case label is an enumerator of ONE in-tree enum (the tree-wide
+//           table cEnumsOf builds) and that names fewer than all of its enumerators, when the switch decides a value
+//           (an arm returns one, or every arm assigns the same name). A count sentinel (kFooCount, NUM_X, _Last) and
+//           an alias (Last = C) are owed no arm.
+//   shell   a case with two or more arms and no `*)` arm that is its function's last command, every arm ending in
+//           return / echo / printf / exit; or one whose every arm is one assignment to the same name, read after
+//           esac and written nowhere else in the file.
+//   Python  a function whose last statement is an if/elif chain or a match over ONE subject compared with constants,
+//           every arm ending in a return of a value (or a raise), with no else / `case _:`, and no bare return,
+//           return None, yield or None/Optional return annotation anywhere: a value the chain does not name returns
+//           None. Members of an Enum this file defines are checked for coverage; an enum defined elsewhere is not
+//           decided (no site).
+// Not this shape: a default / `*)` / else; an enum covered in full; a comment in the switch that states the omission
+// (fall through, not handled, ignored, an omitted enumerator's name); a switch that decides nothing (a void
+// dispatcher); a directive inside the switch or the enum; generated code (the caller drops it, looksGenerated).
+
+// One enum whose enumerators are written out in its body (no directive, no macro expansion inside it).
+struct EnumDef
+{
+    std::string              name;    // its own name (a typedef's for `typedef enum { … } T;`); empty when anonymous
+    std::vector<std::string> all;     // every enumerator, sorted, unique: a case label must name one of these
+    std::vector<std::string> owed;    // the ones a switch must decide: count sentinels and aliases left out; sorted
+    std::vector<std::string> scope;   // the named namespaces / classes around it, outermost first
+    bool                     scoped = false;   // enum class / enum struct: a label must spell its name
+};
+
+// A count sentinel or an internal marker: kFooCount, FOO_COUNT, NUM_FOO, kNumFoo, MAX_FOO, FooLast, _Foo.
+inline bool isEnumSentinel( std::string_view m )
+{
+    const std::vector<std::string> t = nameTokens( m );
+    if( m.empty() || m[0] == '_' || t.empty() )
+    {
+        return true;
+    }
+    static constexpr std::array<std::string_view, 7> kLast  = { "count", "max", "last", "num", "end", "sentinel", "total" };
+    static constexpr std::array<std::string_view, 2> kFirst = { "num", "max" };
+    const bool kNum = t.size() >= 2 && t[0] == "k" && t[1] == "num";
+    return rw::inSet( kLast, std::string_view( t.back() ) ) || rw::inSet( kFirst, std::string_view( t.front() ) ) || kNum;
+}
+
+// The '{' that opens the body of the enum declared at token `k` (`enum`), or toks.size() for an opaque declaration,
+// an elaborated type specifier or anything else; `name` receives the enum's name.
+inline std::size_t enumBodyOpen( std::string_view src, const std::vector<Tok>& toks, std::size_t k, std::string& name, bool& scoped )
+{
+    bool sawColon = false;
+    scoped        = k + 1 < toks.size() && ( tokIs( src, toks[k + 1], "class" ) || tokIs( src, toks[k + 1], "struct" ) );
+    for( std::size_t j = k + 1; j < toks.size() && j < k + 40; ++j )
+    {
+        const Tok& t = toks[j];
+        if( tokIs( src, t, "{" ) )
+        {
+            return j;
+        }
+        if( tokIs( src, t, "[" ) || ( tokIs( src, t, "__attribute__" ) && j + 1 < toks.size() ) )
+        {
+            j = matchClose( src, toks, tokIs( src, t, "[" ) ? j : j + 1 );   // [[nodiscard]], __attribute__(( … ))
+            continue;
+        }
+        if( t.kind == TokKind::Punct && !tokIs( src, t, "::" ) && !tokIs( src, t, ":" ) )
+        {
+            return toks.size();   // ; ( ) = , < >: not a definition
+        }
+        sawColon = sawColon || tokIs( src, t, ":" );
+        if( t.kind == TokKind::Ident && !sawColon && !tokIs( src, t, "class" ) && !tokIs( src, t, "struct" ) )
+        {
+            name = std::string( tokText( src, t ) );   // A::B::E: the last component
+        }
+    }
+    return toks.size();
+}
+
+// The enumerators between `open` and `close`; false when the body is not a plain list (a macro, a non-name).
+inline bool enumMembers( std::string_view src, const std::vector<Tok>& toks, std::size_t open, std::size_t close, EnumDef& def )
+{
+    std::vector<std::pair<std::string_view, ArgRange>> members;   // name, its initializer's tokens (empty: none)
+    for( const ArgRange& a : splitArgs( src, toks, open, close ) )
+    {
+        if( a.empty() )
+        {
+            continue;   // a trailing comma
+        }
+        if( toks[a.first].kind != TokKind::Ident || ( a.first < a.last && tokIs( src, toks[a.first + 1], "(" ) ) )
+        {
+            return false;   // X( … ) inside an enum is a macro list: its enumerators are not written here
+        }
+        std::size_t eq = a.first + 1;
+        while( eq <= a.last && !tokIs( src, toks[eq], "=" ) )
+        {
+            ++eq;
+        }
+        members.push_back( { tokText( src, toks[a.first] ), eq < a.last ? ArgRange{ eq + 1, a.last } : ArgRange{ 1, 0 } } );
+    }
+    for( const auto& [ m, init ] : members )
+    {
+        const bool alias = !init.empty() && std::any_of( toks.begin() + static_cast<std::ptrdiff_t>( init.first ), toks.begin() + static_cast<std::ptrdiff_t>( init.last + 1 ),
+                                                         [ & ]( const Tok& t ) { return t.kind == TokKind::Ident && std::any_of( members.begin(), members.end(),
+                                                                                    [ & ]( const auto& o ) { return o.first == tokText( src, t ); } ); } );
+        def.all.emplace_back( m );
+        if( !alias && !isEnumSentinel( m ) )
+        {
+            def.owed.emplace_back( m );
+        }
+    }
+    rw::sortutil::sortUnique( def.all );
+    rw::sortutil::sortUnique( def.owed );
+    return !def.owed.empty();
+}
+
+
+// The names a '{' at `open` opens a scope for: `namespace A::B {` gives A, B; `class C … {` / `struct C … {` / `union C
+// … {` gives C; any other brace (a function body, an initializer, a lambda) gives none.
+inline std::vector<std::string> braceScopeNames( std::string_view src, const std::vector<Tok>& toks, std::size_t open )
+{
+    std::size_t b = open;
+    while( b > 0 && !isStmtBoundary( src, toks[b - 1] ) )
+    {
+        --b;
+    }
+    std::size_t kw = toks.size();
+    for( std::size_t j = b; j < open; ++j )
+    {
+        const bool key = tokIs( src, toks[j], "namespace" ) || tokIs( src, toks[j], "class" ) || tokIs( src, toks[j], "struct" ) || tokIs( src, toks[j], "union" );
+        kw             = key ? j : kw;   // the LAST one: `template <class T> struct S {` is S
+    }
+    std::vector<std::string> names;
+    if( kw == toks.size() )
+    {
+        return names;
+    }
+    const bool ns = tokIs( src, toks[kw], "namespace" );
+    for( std::size_t j = kw + 1; j < open; ++j )
+    {
+        if( tokIs( src, toks[j], "(" ) || ( !ns && ( tokIs( src, toks[j], ":" ) || tokIs( src, toks[j], "<" ) ) ) )
+        {
+            break;   // a function head (`template <class T> void f() {`), or a class's base list
+        }
+        if( toks[j].kind == TokKind::Ident && !tokIs( src, toks[j], "final" ) && !tokIs( src, toks[j], "inline" ) )
+        {
+            if( !ns )
+            {
+                names.clear();   // class [[attr]] EXPORT Name: the last name
+            }
+            names.emplace_back( tokText( src, toks[j] ) );
+        }
+    }
+    const bool fnHead = std::any_of( toks.begin() + static_cast<std::ptrdiff_t>( kw ), toks.begin() + static_cast<std::ptrdiff_t>( open ),
+                                     [ & ]( const Tok& t ) { return tokIs( src, t, "(" ); } );
+    return fnHead ? std::vector<std::string>{} : names;
+}
+
+}   // namespace detail
+
+// Every enum a C/C++ file defines with its enumerators written out — the tree-wide table a switch is checked against —
+// with the named scopes around it, so a label's qualifiers can be held to them.
+inline std::vector<detail::EnumDef> cEnumsOf( std::string_view src )
+{
+    using namespace detail;
+    std::vector<EnumDef> out;
+    if( src.find( "enum" ) == std::string_view::npos )
+    {
+        return out;
+    }
+    CppPreproc                 pp;
+    const std::vector<Tok>     toks = lexCpp( src, &pp );
+    std::vector<std::string>   scope;
+    std::vector<std::size_t>   pushed;   // per open brace: how many names it pushed onto `scope`
+    for( std::size_t k = 0; k + 1 < toks.size(); ++k )
+    {
+        if( tokIs( src, toks[k], "{" ) )
+        {
+            const std::vector<std::string> names = braceScopeNames( src, toks, k );
+            scope.insert( scope.end(), names.begin(), names.end() );
+            pushed.push_back( names.size() );
+            continue;
+        }
+        if( tokIs( src, toks[k], "}" ) )
+        {
+            const std::size_t n = pushed.empty() ? 0 : pushed.back();
+            scope.resize( scope.size() - std::min( n, scope.size() ) );
+            pushed.erase( pushed.end() - ( pushed.empty() ? 0 : 1 ), pushed.end() );
+            continue;
+        }
+        EnumDef           def;
+        const std::size_t open  = tokIs( src, toks[k], "enum" ) ? enumBodyOpen( src, toks, k, def.name, def.scoped ) : toks.size();
+        const std::size_t close = open < toks.size() ? matchClose( src, toks, open ) : toks.size();
+        if( close >= toks.size() || callHoldsDirective( pp.directives, toks[open].begin, toks[close].begin ) )
+        {
+            continue;   // an #if inside the body: which enumerators exist depends on the build
+        }
+        if( def.name.empty() && k > 0 && tokIs( src, toks[k - 1], "typedef" ) && close + 1 < toks.size() && toks[close + 1].kind == TokKind::Ident )
+        {
+            def.name = std::string( tokText( src, toks[close + 1] ) );
+        }
+        def.scope = scope;
+        if( enumMembers( src, toks, open, close, def ) )
+        {
+            out.push_back( std::move( def ) );
+        }
+        k = close;
+    }
+    return out;
+}
+
+// The tree's enums, indexed by enumerator name.
+class EnumTable
+{
+public:
+    void add( std::vector<detail::EnumDef>&& defs )
+    {
+        for( detail::EnumDef& d : defs )
+        {
+            defs_.push_back( std::move( d ) );
+        }
+    }
+    void seal()
+    {
+        byMember_.clear();
+        for( std::uint32_t d = 0; d < defs_.size(); ++d )
+        {
+            for( std::uint32_t m = 0; m < defs_[d].all.size(); ++m )
+            {
+                byMember_.push_back( { d, m } );
+            }
+        }
+        std::sort( byMember_.begin(), byMember_.end(), [ this ]( const Ref& a, const Ref& b ) { return rw::sortutil::svLess( memberOf( a ), memberOf( b ) ); } );
+    }
+    // The enums that hold enumerator `m` (def indices, ascending).
+    std::vector<std::uint32_t> holding( std::string_view m ) const
+    {
+        const auto lo = std::lower_bound( byMember_.begin(), byMember_.end(), m, [ this ]( const Ref& r, std::string_view w ) { return rw::sortutil::svLess( memberOf( r ), w ); } );
+        std::vector<std::uint32_t> out;
+        for( auto it = lo; it != byMember_.end() && memberOf( *it ) == m; ++it )
+        {
+            out.push_back( it->first );
+        }
+        return out;
+    }
+    const detail::EnumDef& def( std::uint32_t d ) const { return defs_[d]; }
+    std::size_t            size() const noexcept { return defs_.size(); }
+
+private:
+    using Ref = std::pair<std::uint32_t, std::uint32_t>;   // def index, index in its `all`
+    std::string_view memberOf( const Ref& r ) const { return defs_[ r.first ].all[ r.second ]; }
+    std::vector<detail::EnumDef> defs_;
+    std::vector<Ref>             byMember_;
+};
+
+namespace detail
+{
+
+// One switch's arms, as far as the check needs them.
+struct SwitchLabel
+{
+    std::vector<std::string_view> quals;   // the qualifiers before the enumerator (`A::E::X` gives A, E)
+    std::string_view              name;
+};
+
+struct SwitchArms
+{
+    std::vector<SwitchLabel>                         labels;
+    std::vector<std::pair<std::size_t, std::size_t>> ranges;    // each arm's statements [first, end): after its last label
+    bool                                             decides   = false;   // every arm returns a value (or does not return), or assigns one name
+    bool                                             undecided = false;   // a default:, a label that is no enumerator, an #if
+};
+
+// The label `case …:` starting at `k` (`case`): its qualifiers and enumerator, `colon` set to its ':'. False for a
+// label that is not a (qualified) name — a number, a character, an expression.
+inline bool enumLabelAt( std::string_view src, const std::vector<Tok>& toks, std::size_t k, std::size_t end, SwitchLabel& label, std::size_t& colon )
+{
+    std::size_t j = k + 1;
+    j += ( j < end && tokIs( src, toks[j], "::" ) ) ? 1 : 0;
+    label = {};
+    while( j < end && toks[j].kind == TokKind::Ident )
+    {
+        if( !label.name.empty() )
+        {
+            label.quals.push_back( label.name );
+        }
+        label.name = tokText( src, toks[j] );
+        if( j + 1 < end && tokIs( src, toks[j + 1], "::" ) )
+        {
+            j += 2;
+            continue;
+        }
+        ++j;
+        break;
+    }
+    colon = j;
+    return !label.name.empty() && j < end && tokIs( src, toks[j], ":" );
+}
+
+enum class ArmEnd : std::uint8_t
+{
+    Value,      // return <expr>;
+    NoReturn,   // throw, [[fallthrough]], abort / exit / unreachable, an ALL_CAPS macro (PANIC, NOT_REACHED)
+    Other,      // break, a call, nothing: control leaves the switch without a decided value
+};
+
+// How the arm [first, end) ends: its last statement (inside the arm's own block when the arm is one `{ … }`).
+inline ArmEnd armEndOf( std::string_view src, const std::vector<Tok>& toks, std::size_t first, std::size_t end )
+{
+    while( end > first + 1 && tokIs( src, toks[first], "{" ) && matchClose( src, toks, first ) == end - 1 )
+    {
+        ++first;
+        --end;
+    }
+    if( end <= first || !tokIs( src, toks[end - 1], ";" ) )
+    {
+        return ArmEnd::Other;
+    }
+    std::size_t b = end - 1;
+    int         depth = 0;
+    while( b > first )
+    {
+        const Tok& t = toks[b - 1];
+        depth += ( tokIs( src, t, ")" ) || tokIs( src, t, "]" ) ) ? 1 : ( tokIs( src, t, "(" ) || tokIs( src, t, "[" ) ) ? -1 : 0;
+        if( depth == 0 && isStmtBoundary( src, t ) )
+        {
+            break;
+        }
+        --b;
+    }
+    const std::string_view w = tokText( src, toks[b] );
+    if( w == "return" )
+    {
+        return b + 1 < end - 1 ? ArmEnd::Value : ArmEnd::Other;
+    }
+    static constexpr std::array<std::string_view, 7> kNoReturn = { "throw", "abort", "exit", "_exit", "unreachable", "__builtin_unreachable", "std" };
+    const bool fallthrough = w == "[" && b + 2 < end && tokIs( src, toks[b + 2], "fallthrough" );
+    const bool macro       = toks[b].kind == TokKind::Ident && isAllCapsIdent( w ) && w.size() > 2;
+    const bool stdNoReturn = w == "std" && b + 2 < end && ( tokIs( src, toks[b + 2], "abort" ) || tokIs( src, toks[b + 2], "unreachable" ) || tokIs( src, toks[b + 2], "terminate" ) );
+    return ( fallthrough || macro || stdNoReturn || ( w != "std" && rw::inSet( kNoReturn, w ) ) ) ? ArmEnd::NoReturn : ArmEnd::Other;
+}
+
+// The arms of the switch whose body is (open, close): labels, whether it decides a value, whether it is undecidable.
+// A nested switch's body is skipped whole (its labels are its own).
+inline SwitchArms switchArmsOf( std::string_view src, const std::vector<Tok>& toks, const CppPreproc& pp, std::size_t open, std::size_t close )
+{
+    SwitchArms                                  arms;
+    std::vector<std::vector<std::string_view>> assigned;   // per arm: the names a statement of it assigns
+    bool                                        atStmt   = true;
+    bool                                        afterLbl = false;
+    arms.undecided = callHoldsDirective( pp.directives, toks[open].begin, toks[close].begin );
+    for( std::size_t j = open + 1; j < close && !arms.undecided; ++j )
+    {
+        const Tok& t = toks[j];
+        if( tokIs( src, t, "switch" ) && j + 1 < close && tokIs( src, toks[j + 1], "(" ) )
+        {
+            const std::size_t c = matchClose( src, toks, j + 1 );
+            j                   = ( c + 1 < close && tokIs( src, toks[c + 1], "{" ) ) ? matchClose( src, toks, c + 1 ) : c;
+            atStmt              = true;
+            continue;
+        }
+        if( tokIs( src, t, "case" ) )
+        {
+            SwitchLabel label;
+            std::size_t colon = j;
+            arms.undecided    = !enumLabelAt( src, toks, j, close, label, colon );
+            arms.labels.push_back( std::move( label ) );
+            if( !afterLbl )
+            {
+                if( !arms.ranges.empty() )
+                {
+                    arms.ranges.back().second = j;
+                }
+                arms.ranges.push_back( { colon + 1, close } );
+                assigned.emplace_back();
+            }
+            arms.ranges.back().first = colon + 1;
+            j        = colon;
+            atStmt   = true;
+            afterLbl = true;
+            continue;
+        }
+        if( tokIs( src, t, "default" ) && j + 1 < close && tokIs( src, toks[j + 1], ":" ) )
+        {
+            arms.undecided = true;
+            break;
+        }
+        if( atStmt && t.kind == TokKind::Ident && j + 1 < close && tokIs( src, toks[j + 1], "=" ) && !assigned.empty() )
+        {
+            assigned.back().push_back( tokText( src, t ) );
+        }
+        atStmt   = isStmtBoundary( src, t );
+        afterLbl = false;
+    }
+    std::vector<ArmEnd> ends;
+    for( const auto& [ first, end ] : arms.ranges )
+    {
+        ends.push_back( armEndOf( src, toks, first, end ) );
+    }
+    const bool returns = !ends.empty() && std::none_of( ends.begin(), ends.end(), []( ArmEnd e ) { return e == ArmEnd::Other; } )
+                      && std::any_of( ends.begin(), ends.end(), []( ArmEnd e ) { return e == ArmEnd::Value; } );
+    const auto everyArm = [ & ]( std::string_view v )
+    {
+        return std::all_of( assigned.begin(), assigned.end(), [ & ]( const std::vector<std::string_view>& a ) { return std::find( a.begin(), a.end(), v ) != a.end(); } );
+    };
+    arms.decides = returns || ( !assigned.empty() && std::any_of( assigned[0].begin(), assigned[0].end(), everyArm ) );
+    return arms;
+}
+
+// Can `label` name an enumerator of `e`? A scoped enum's label spells its name (`E::X`, `ns::E::X`); an unscoped one's
+// may, or may name the scope around it (`C::X`) or nothing. Whatever qualifies past the enum's own name must be the
+// innermost scopes the enum was declared in, so an out-of-tree `Http::CodecType` is not an in-tree class member's
+// `CodecType`.
+inline bool labelFits( const SwitchLabel& label, const EnumDef& e )
+{
+    std::size_t n = label.quals.size();
+    if( n > 0 && label.quals[n - 1] == e.name )
+    {
+        --n;
+    }
+    else if( e.scoped )
+    {
+        return false;
+    }
+    if( n > e.scope.size() )
+    {
+        return false;
+    }
+    for( std::size_t i = 0; i < n; ++i )
+    {
+        if( label.quals[n - 1 - i] != e.scope[ e.scope.size() - 1 - i ] )
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+// The enumerators of the one enum every label names that no label names, displayed as the labels spell them
+// (`E::X` when the labels qualify, `X` when they do not); empty when no single enum holds every label, when two
+// candidate enums disagree on what is missing, or when every owed enumerator has an arm.
+inline std::vector<std::string> missingEnumerators( const SwitchArms& arms, const EnumTable& enums )
+{
+    std::vector<std::uint32_t> cands = enums.holding( arms.labels[0].name );
+    const auto holdsAll = [ & ]( std::uint32_t d )
+    {
+        const EnumDef& e = enums.def( d );
+        return std::all_of( arms.labels.begin(), arms.labels.end(), [ & ]( const SwitchLabel& l )
+                            { return labelFits( l, e ) && std::binary_search( e.all.begin(), e.all.end(), l.name, rw::sortutil::svLess ); } );
+    };
+    std::erase_if( cands, [ & ]( std::uint32_t d ) { return !holdsAll( d ); } );
+    const std::vector<std::string_view>& quals  = arms.labels[0].quals;
+    const std::string                    prefix = quals.empty() ? std::string() : std::string( quals.back() ) + "::";   // E::X, not ns::C::E::X
+    std::vector<std::string> missing;
+    bool                     first = true;
+    for( const std::uint32_t d : cands )
+    {
+        std::vector<std::string> m;
+        for( const std::string& e : enums.def( d ).owed )
+        {
+            if( std::none_of( arms.labels.begin(), arms.labels.end(), [ & ]( const SwitchLabel& l ) { return l.name == e; } ) )
+            {
+                m.push_back( prefix + e );
+            }
+        }
+        if( !first && m != missing )
+        {
+            return {};   // two enums of the same enumerator names disagree: undecided
+        }
+        missing = std::move( m );
+        first   = false;
+    }
+    return missing;
+}
+
+// Does `text` hold `w` as a whole identifier (not inside a longer one)?
+inline bool holdsWord( std::string_view text, std::string_view w ) noexcept
+{
+    for( std::size_t i = text.find( w ); !w.empty() && i != std::string_view::npos; i = text.find( w, i + 1 ) )
+    {
+        const std::size_t e = i + w.size();
+        if( ( i == 0 || !isIdentChar( text[i - 1] ) ) && ( e >= text.size() || !isIdentChar( text[e] ) ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// A comment in [b, e) that states the omission: falling through on purpose, not handled, ignored, or an omitted
+// enumerator by name. Raw bytes: the lexer drops comments.
+inline bool commentStatesOmission( std::string_view src, std::size_t b, std::size_t e, const std::vector<std::string>& missing )
+{
+    static constexpr std::array<std::string_view, 14> kPhrases = { "fall through", "fallthrough", "fall-through", "falls through", "not handled", "unhandled", "ignore",
+                                                                   "intentional", "deliberate", "on purpose", "nothing to do", "no-op", "handled elsewhere", "other" };
+    for( std::size_t i = src.find( '/', b ); i != std::string_view::npos && i + 1 < e; i = src.find( '/', i + 1 ) )
+    {
+        if( src[i + 1] != '/' && src[i + 1] != '*' )
+        {
+            continue;
+        }
+        const std::size_t stop = src[i + 1] == '/' ? src.find( '\n', i ) : src.find( "*/", i + 2 );
+        const std::string_view text = src.substr( i, ( stop == std::string_view::npos ? src.size() : stop ) - i );
+        std::string lower( text );
+        std::ranges::transform( lower, lower.begin(), []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
+        const bool phrase = std::any_of( kPhrases.begin(), kPhrases.end(), [ & ]( std::string_view p ) { return lower.find( p ) != std::string::npos; } );
+        const bool names  = std::any_of( missing.begin(), missing.end(), [ & ]( const std::string& m )
+                                         { return holdsWord( text, std::string_view( m ).substr( m.rfind( ':' ) == std::string::npos ? 0 : m.rfind( ':' ) + 1 ) ); } );
+        if( phrase || names )
+        {
+            return true;
+        }
+        i += text.size();
+    }
+    return false;
+}
+
+// "A, B, C, D +3": the first four names of a why= list and how many more there are.
+inline std::string capList( const std::vector<std::string>& names )
+{
+    std::string out;
+    for( std::size_t i = 0; i < names.size() && i < 4; ++i )
+    {
+        out += ( i == 0 ? "" : ", " ) + names[i];
+    }
+    if( names.size() > 4 )
+    {
+        out += " +" + std::to_string( names.size() - 4 );
+    }
+    return out;
+}
+
+// One function's tokens [from, to): every switch over an in-tree enum that leaves an owed enumerator without an arm.
+inline void scanUnhandledArmCpp( std::string_view src, const std::vector<Tok>& toks, const CppPreproc& pp, std::size_t from, std::size_t to, const EnumTable& enums,
+                                 std::vector<Site>& out )
+{
+    for( std::size_t k = from; k + 1 < to; ++k )
+    {
+        if( !tokIs( src, toks[k], "switch" ) || !tokIs( src, toks[k + 1], "(" ) )
+        {
+            continue;
+        }
+        const std::size_t cond  = matchClose( src, toks, k + 1 );
+        const std::size_t open  = cond + 1;
+        const std::size_t close = ( open < to && tokIs( src, toks[open], "{" ) ) ? matchClose( src, toks, open ) : toks.size();
+        if( close >= to )
+        {
+            continue;
+        }
+        const SwitchArms arms = switchArmsOf( src, toks, pp, open, close );
+        if( arms.undecided || arms.labels.empty() || !arms.decides )
+        {
+            continue;
+        }
+        const std::vector<std::string> missing = missingEnumerators( arms, enums );
+        const std::size_t              lineEnd = src.find( '\n', toks[close].end );
+        if( missing.empty() || commentStatesOmission( src, toks[open].begin, lineEnd == std::string_view::npos ? src.size() : lineEnd, missing ) )
+        {
+            continue;
+        }
+        std::string text = joinTokens( src, toks, k, cond ) + " missing";
+        for( const std::string& m : missing )
+        {
+            text += " " + m;
+        }
+        out.push_back( { Facet::UnhandledArm, toks[k].begin, std::move( text ), {}, "no default: " + capList( missing ) + " not handled" } );
+    }
+}
+
+// ── Python ──
+
+// The column of token `t`: its byte offset from the start of its line.
+inline std::uint32_t pyCol( std::string_view src, const Tok& t ) noexcept
+{
+    const std::size_t nl = src.rfind( '\n', t.begin == 0 ? 0 : t.begin - 1 );
+    return t.begin - ( nl == std::string_view::npos || ( t.begin == 0 ) ? 0 : static_cast<std::uint32_t>( nl + 1 ) );
+}
+
+inline bool pyLineStart( std::string_view src, const std::vector<Tok>& toks, std::size_t k ) noexcept
+{
+    return k == 0 || tokIs( src, toks[k - 1], "\n" );
+}
+
+// The ':' that ends the compound-statement header at `k` (the first one outside brackets), or toks.size().
+inline std::size_t pyHeaderColon( std::string_view src, const std::vector<Tok>& toks, std::size_t k, std::size_t to ) noexcept
+{
+    int depth = 0;
+    for( std::size_t j = k; j < to && !tokIs( src, toks[j], "\n" ); ++j )
+    {
+        const std::string_view w = tokText( src, toks[j] );
+        depth += ( w == "(" || w == "[" || w == "{" ) ? 1 : ( w == ")" || w == "]" || w == "}" ) ? -1 : 0;
+        if( depth == 0 && w == ":" )
+        {
+            return j;
+        }
+    }
+    return toks.size();
+}
+
+// The logical-line starts in [from, to) at column `col`, stopping at the first line that dedents below it.
+inline std::vector<std::size_t> pyStatementsAt( std::string_view src, const std::vector<Tok>& toks, std::size_t from, std::size_t to, std::uint32_t col )
+{
+    std::vector<std::size_t> out;
+    for( std::size_t k = from; k < to; ++k )
+    {
+        if( !pyLineStart( src, toks, k ) || tokIs( src, toks[k], "\n" ) )
+        {
+            continue;
+        }
+        const std::uint32_t c = pyCol( src, toks[k] );
+        if( c < col )
+        {
+            break;
+        }
+        if( c == col )
+        {
+            out.push_back( k );
+        }
+    }
+    return out;
+}
+
+// One constant a chain compares its subject with: its text, and for `E.M` the enum's name and the member.
+struct PyConst
+{
+    std::string      text;
+    std::string_view enumName;
+    std::string_view member;
+};
+
+// The constant [a, b]: a string or number literal, -N, None / True / False, or a dotted name; false otherwise
+// (a bare name in a match is a capture: irrefutable).
+inline bool pyConstOf( std::string_view src, const std::vector<Tok>& toks, std::size_t a, std::size_t b, PyConst& c )
+{
+    c = PyConst{ joinTokens( src, toks, a, b ), {}, {} };
+    if( a == b )
+    {
+        const std::string_view w = tokText( src, toks[a] );
+        return toks[a].kind == TokKind::String || toks[a].kind == TokKind::Number || w == "None" || w == "True" || w == "False";
+    }
+    if( b == a + 1 && tokIs( src, toks[a], "-" ) && toks[b].kind == TokKind::Number )
+    {
+        return true;
+    }
+    for( std::size_t j = a; j <= b; ++j )
+    {
+        const bool want = ( j - a ) % 2 == 0;   // name . name . name
+        if( want ? toks[j].kind != TokKind::Ident : !tokIs( src, toks[j], "." ) )
+        {
+            return false;
+        }
+    }
+    if( ( b - a ) % 2 != 0 )
+    {
+        return false;
+    }
+    c.enumName = tokText( src, toks[b - 2] );
+    c.member   = tokText( src, toks[b] );
+    return true;
+}
+
+// The comparison `subject == C`, `subject is C`, `subject in ( C, … )` at [a, b] (one `or` operand): appends the
+// constants and checks the subject against `subject` (set on the first operand); false for any other test.
+inline bool pyCompareOf( std::string_view src, const std::vector<Tok>& toks, std::size_t a, std::size_t b, std::string& subject, std::vector<PyConst>& consts )
+{
+    std::size_t op = a;
+    int         depth = 0;
+    for( ; op <= b; ++op )
+    {
+        const std::string_view w = tokText( src, toks[op] );
+        depth += ( w == "(" || w == "[" || w == "{" ) ? 1 : ( w == ")" || w == "]" || w == "}" ) ? -1 : 0;
+        if( depth == 0 && ( w == "==" || w == "is" || w == "in" ) )
+        {
+            break;
+        }
+    }
+    if( op <= a || op >= b || tokIs( src, toks[op + 1], "not" ) || tokIs( src, toks[op - 1], "not" ) )
+    {
+        return false;
+    }
+    const std::string subj = joinTokens( src, toks, a, op - 1 );
+    if( !subject.empty() && subj != subject )
+    {
+        return false;
+    }
+    subject = subj;
+    if( !tokIs( src, toks[op], "in" ) )
+    {
+        PyConst c;
+        const bool ok = pyConstOf( src, toks, op + 1, b, c );
+        consts.push_back( std::move( c ) );
+        return ok;
+    }
+    const std::string_view o = tokText( src, toks[op + 1] );
+    if( ( o != "(" && o != "[" && o != "{" ) || matchClose( src, toks, op + 1 ) != b )
+    {
+        return false;
+    }
+    for( const ArgRange& r : splitArgs( src, toks, op + 1, b ) )
+    {
+        PyConst c;
+        if( !r.empty() && !pyConstOf( src, toks, r.first, r.last, c ) )
+        {
+            return false;
+        }
+        if( !r.empty() )
+        {
+            consts.push_back( std::move( c ) );
+        }
+    }
+    return true;
+}
+
+// [a, b] split at the depth-0 tokens spelled `sep` (`or` in a condition, `|` in a match pattern).
+inline std::vector<ArgRange> pySplitAt( std::string_view src, const std::vector<Tok>& toks, std::size_t a, std::size_t b, std::string_view sep )
+{
+    std::vector<ArgRange> out;
+    int                   depth = 0;
+    std::size_t           start = a;
+    for( std::size_t j = a; j <= b; ++j )
+    {
+        const std::string_view w = tokText( src, toks[j] );
+        depth += ( w == "(" || w == "[" || w == "{" ) ? 1 : ( w == ")" || w == "]" || w == "}" ) ? -1 : 0;
+        if( depth == 0 && w == sep )
+        {
+            out.push_back( { start, j - 1 } );
+            start = j + 1;
+        }
+    }
+    out.push_back( { start, b } );
+    return out;
+}
+
+// Does the arm whose header ends at `colon` end in a return of a value or a raise? `armCol` is the header's column.
+// Sets `valued` when it returns a value.
+inline bool pyArmEnds( std::string_view src, const std::vector<Tok>& toks, std::size_t colon, std::size_t to, std::uint32_t armCol, bool& valued )
+{
+    std::size_t last = colon + 1;
+    if( colon + 1 < to && tokIs( src, toks[colon + 1], "\n" ) )
+    {
+        if( colon + 2 >= to || pyCol( src, toks[colon + 2] ) <= armCol )
+        {
+            return false;
+        }
+        const std::vector<std::size_t> body = pyStatementsAt( src, toks, colon + 2, to, pyCol( src, toks[colon + 2] ) );
+        last                                = body.empty() ? to : body.back();
+    }
+    else
+    {
+        for( std::size_t j = colon + 1; j < to && !tokIs( src, toks[j], "\n" ); ++j )
+        {
+            last = tokIs( src, toks[j], ";" ) ? j + 1 : last;   // `if x: f(); return 1`: the last simple statement
+        }
+    }
+    if( last >= to )
+    {
+        return false;
+    }
+    if( tokIs( src, toks[last], "raise" ) )
+    {
+        return true;
+    }
+    const bool ret = tokIs( src, toks[last], "return" ) && last + 1 < to && !pyStatementEndsAt( src, toks, last + 1 ) && !tokIs( src, toks[last + 1], "None" );
+    valued         = valued || ret;
+    return ret;
+}
+
+// The Enum classes this file defines: name and members (sorted), an alias of another member left out.
+struct PyEnum
+{
+    std::string_view              name;
+    std::vector<std::string_view> members;
+};
+
+inline std::vector<PyEnum> pyEnumsOf( std::string_view src, const std::vector<Tok>& toks )
+{
+    std::vector<PyEnum> out;
+    for( std::size_t k = 0; k + 3 < toks.size(); ++k )
+    {
+        if( !pyLineStart( src, toks, k ) || !tokIs( src, toks[k], "class" ) || !tokIs( src, toks[k + 2], "(" ) )
+        {
+            continue;
+        }
+        const std::size_t close = matchClose( src, toks, k + 2 );
+        const bool        isEnum = close < toks.size() && std::any_of( toks.begin() + static_cast<std::ptrdiff_t>( k + 3 ), toks.begin() + static_cast<std::ptrdiff_t>( close ),
+                                                                    [ & ]( const Tok& t ) { const std::string_view w = tokText( src, t ); return w.ends_with( "Enum" ) || w.ends_with( "Flag" ); } );
+        if( !isEnum || close + 3 >= toks.size() || !tokIs( src, toks[close + 1], ":" ) || !tokIs( src, toks[close + 2], "\n" ) )
+        {
+            continue;
+        }
+        PyEnum e{ tokText( src, toks[k + 1] ), {} };
+        for( const std::size_t s : pyStatementsAt( src, toks, close + 3, toks.size(), pyCol( src, toks[close + 3] ) ) )
+        {
+            const bool member = toks[s].kind == TokKind::Ident && s + 1 < toks.size() && tokIs( src, toks[s + 1], "=" ) && tokText( src, toks[s] )[0] != '_';
+            const bool alias  = member && s + 3 < toks.size() && toks[s + 2].kind == TokKind::Ident && pyStatementEndsAt( src, toks, s + 3 )
+                             && std::find( e.members.begin(), e.members.end(), tokText( src, toks[s + 2] ) ) != e.members.end();
+            if( member && !alias )
+            {
+                e.members.push_back( tokText( src, toks[s] ) );
+            }
+        }
+        rw::sortutil::sortUnique( e.members );
+        out.push_back( std::move( e ) );
+    }
+    return out;
+}
+
+// The chain the function body [first, to) ends with, as arm header tokens: an if/elif run (`isMatch` false) or the
+// `case` lines of a match (`isMatch` true, `head` the match). Empty when the body ends some other way.
+struct PyChain
+{
+    std::size_t              head    = 0;
+    bool                     isMatch = false;
+    std::vector<std::size_t> arms;
+};
+
+inline PyChain pyTrailingChain( std::string_view src, const std::vector<Tok>& toks, std::size_t first, std::size_t to )
+{
+    PyChain                        ch;
+    const std::vector<std::size_t> top = pyStatementsAt( src, toks, first, to, pyCol( src, toks[first] ) );
+    if( top.empty() )
+    {
+        return ch;
+    }
+    const std::size_t last = top.back();
+    if( tokIs( src, toks[last], "match" ) )
+    {
+        const std::size_t colon = pyHeaderColon( src, toks, last, to );
+        if( colon + 2 < to && tokIs( src, toks[colon + 1], "\n" ) )
+        {
+            ch.head    = last;
+            ch.isMatch = true;
+            ch.arms    = pyStatementsAt( src, toks, colon + 2, to, pyCol( src, toks[colon + 2] ) );
+            std::erase_if( ch.arms, [ & ]( std::size_t a ) { return !tokIs( src, toks[a], "case" ); } );
+        }
+        return ch;
+    }
+    std::size_t i = top.size() - 1;
+    while( i > 0 && tokIs( src, toks[ top[i] ], "elif" ) )
+    {
+        --i;
+    }
+    if( tokIs( src, toks[ top[i] ], "if" ) )
+    {
+        ch.head = top[i];
+        ch.arms.assign( top.begin() + static_cast<std::ptrdiff_t>( i ), top.end() );
+    }
+    return ch;
+}
+
+// Does the function body [first, to) state None as an outcome anywhere — a bare return, return None, a yield —
+// outside the nested definitions `inner`?
+inline bool pyBodyStatesNone( std::string_view src, const std::vector<Tok>& toks, std::size_t first, std::size_t to, const std::vector<Span>& inner )
+{
+    for( std::size_t k = first; k < to; ++k )
+    {
+        const std::uint32_t at = toks[k].begin;
+        if( std::any_of( inner.begin(), inner.end(), [ & ]( const Span& s ) { return s.begin <= at && at < s.end; } ) )
+        {
+            continue;
+        }
+        if( tokIs( src, toks[k], "yield" ) || ( tokIs( src, toks[k], "return" ) && ( pyStatementEndsAt( src, toks, k + 1 ) || tokIs( src, toks[k + 1], "None" ) ) ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// One function span: its trailing chain, when every arm returns and nothing names the value it leaves out.
+inline void scanUnhandledArmPyFunction( std::string_view src, const std::vector<Tok>& toks, std::size_t from, std::size_t to, const std::vector<Span>& inner,
+                                        const std::vector<PyEnum>& enums, std::vector<Site>& out )
+{
+    std::size_t d = from;
+    while( d < to && !tokIs( src, toks[d], "def" ) )
+    {
+        ++d;
+    }
+    if( d + 2 >= to || !tokIs( src, toks[d + 2], "(" ) )
+    {
+        return;
+    }
+    const std::size_t sigClose = matchClose( src, toks, d + 2 );
+    const std::size_t colon    = sigClose < to ? pyHeaderColon( src, toks, sigClose + 1, to ) : toks.size();
+    const bool noneAnnotated   = colon < to && std::any_of( toks.begin() + static_cast<std::ptrdiff_t>( sigClose ), toks.begin() + static_cast<std::ptrdiff_t>( colon ),
+                                                            [ & ]( const Tok& t ) { return tokIs( src, t, "None" ) || tokIs( src, t, "Optional" ); } );
+    if( colon + 2 >= to || !tokIs( src, toks[colon + 1], "\n" ) || noneAnnotated || pyBodyStatesNone( src, toks, colon + 2, to, inner ) )
+    {
+        return;
+    }
+    const PyChain ch = pyTrailingChain( src, toks, colon + 2, to );
+    if( ch.arms.size() < 2 )
+    {
+        return;
+    }
+    std::string          subject = ch.isMatch ? joinTokens( src, toks, ch.head + 1, pyHeaderColon( src, toks, ch.head, to ) - 1 ) : std::string();
+    std::vector<PyConst> consts;
+    bool                 valued = false;
+    for( const std::size_t a : ch.arms )
+    {
+        const std::size_t c = pyHeaderColon( src, toks, a, to );
+        if( c >= to || c == a + 1 || !pyArmEnds( src, toks, c, to, pyCol( src, toks[a] ), valued ) )
+        {
+            return;
+        }
+        for( const ArgRange& part : pySplitAt( src, toks, a + 1, c - 1, ch.isMatch ? "|" : "or" ) )
+        {
+            PyConst    k;
+            const bool guarded = ch.isMatch && std::any_of( toks.begin() + static_cast<std::ptrdiff_t>( part.first ), toks.begin() + static_cast<std::ptrdiff_t>( part.last + 1 ),
+                                                           [ & ]( const Tok& t ) { return tokIs( src, t, "if" ); } );
+            const bool ok = !part.empty() && !guarded
+                         && ( ch.isMatch ? ( pyConstOf( src, toks, part.first, part.last, k ) && ( consts.push_back( k ), true ) )
+                                         : pyCompareOf( src, toks, part.first, part.last, subject, consts ) );
+            if( !ok )
+            {
+                return;   // a guard, a capture or class pattern, a test that is not a comparison with a constant
+            }
+        }
+    }
+    const std::string_view enumName = consts.empty() ? std::string_view() : consts[0].enumName;
+    const bool sameEnum = std::all_of( consts.begin(), consts.end(), [ & ]( const PyConst& c ) { return c.enumName == enumName; } );
+    if( !valued || !sameEnum )
+    {
+        return;
+    }
+    std::vector<std::string> named;
+    for( const PyConst& c : consts )
+    {
+        named.push_back( c.text );
+    }
+    rw::sortutil::sortUnique( named );
+    if( std::binary_search( named.begin(), named.end(), "True", rw::sortutil::svLess ) && std::binary_search( named.begin(), named.end(), "False", rw::sortutil::svLess ) )
+    {
+        return;   // True and False: the whole set
+    }
+    std::string text = ( ch.isMatch ? "match " : "if " ) + subject + " in";
+    for( const std::string& n : named )
+    {
+        text += " " + n;
+    }
+    std::string why;
+    if( !enumName.empty() )
+    {
+        const PyEnum* e = rw::findByField( enums, &PyEnum::name, enumName );
+        if( e == nullptr )
+        {
+            return;   // an enum defined elsewhere: its members are not known here
+        }
+        std::vector<std::string> missing;
+        for( const std::string_view m : e->members )
+        {
+            if( std::none_of( consts.begin(), consts.end(), [ & ]( const PyConst& c ) { return c.member == m; } ) )
+            {
+                missing.push_back( std::string( enumName ) + "." + std::string( m ) );
+            }
+        }
+        if( missing.empty() )
+        {
+            return;   // every member has an arm
+        }
+        text += " missing";
+        for( const std::string& m : missing )
+        {
+            text += " " + m;
+        }
+        why = "no else: returns None for " + capList( missing );
+    }
+    else
+    {
+        why = "no else: returns None for a value other than " + capList( named );
+    }
+    out.push_back( { Facet::UnhandledArm, toks[ch.head].begin, std::move( text ), {}, std::move( why ) } );
+}
+
+inline void scanUnhandledArmPython( std::string_view src, const std::vector<Tok>& toks, const std::vector<Span>& fnSpans, std::vector<Site>& out )
+{
+    const std::vector<PyEnum> enums = pyEnumsOf( src, toks );
+    for( const Span& sp : fnSpans )
+    {
+        const auto first = std::lower_bound( toks.begin(), toks.end(), sp.begin, []( const Tok& t, std::uint32_t b ) { return t.begin < b; } );
+        const auto last  = std::lower_bound( toks.begin(), toks.end(), sp.end, []( const Tok& t, std::uint32_t b ) { return t.begin < b; } );
+        std::vector<Span> inner;
+        std::copy_if( fnSpans.begin(), fnSpans.end(), std::back_inserter( inner ), [ & ]( const Span& s ) { return s.begin > sp.begin && s.end <= sp.end; } );
+        scanUnhandledArmPyFunction( src, toks, static_cast<std::size_t>( first - toks.begin() ), static_cast<std::size_t>( last - toks.begin() ), inner, enums, out );
+    }
+}
+
+// ── shell ──
+
+namespace uash
+{
+
+namespace sh = rw::shstatus;
+
+// The single command a list ends with (its last and-or, one pipeline of one command), or kNone.
+inline std::uint32_t lastCommandOf( const sh::Tree& t, std::uint32_t list )
+{
+    if( list == sh::kNone || list >= t.lists.size() || t.lists[list].empty() )
+    {
+        return sh::kNone;
+    }
+    const sh::AndOr& ao = t.lists[list].back();
+    return ( ao.size() == 1 && ao[0].cmds.size() == 1 && !ao[0].neg ) ? ao[0].cmds[0] : sh::kNone;
+}
+
+// A `*)` arm (any all-star pattern): every subject reaches it.
+inline bool hasCatchAll( const sh::Node& n )
+{
+    return std::any_of( n.casePats.begin(), n.casePats.end(), []( const std::vector<std::string>& pats )
+                        {
+                            return std::any_of( pats.begin(), pats.end(), []( const std::string& p )
+                                                {
+                                                    const std::string u = sh::detail::unq( p );
+                                                    return !u.empty() && std::all_of( u.begin(), u.end(), []( char c ) { return c == '*'; } );
+                                                } );
+                        } );
+}
+
+// A function whose last command is this case, every arm ending in return / echo / printf / exit (one of them a result).
+inline bool resultArms( const sh::Tree& t, const sh::Node& c )
+{
+    bool result = false;
+    for( const std::uint32_t body : c.bodies )
+    {
+        const std::uint32_t last = lastCommandOf( t, body );
+        if( last == sh::kNone || t.nodes[last].kind != sh::NodeKind::Simple || t.nodes[last].words.empty() )
+        {
+            return false;
+        }
+        const std::string& w = t.nodes[last].words[0].text;
+        if( w != "return" && w != "echo" && w != "printf" && w != "exit" )
+        {
+            return false;
+        }
+        result = result || w != "exit";
+    }
+    return result;
+}
+
+// The one name every arm of the case assigns, each arm being that single assignment; empty otherwise.
+inline std::string assignedName( const sh::Tree& t, const sh::Node& c, std::vector<std::uint32_t>& at )
+{
+    std::string name;
+    for( const std::uint32_t body : c.bodies )
+    {
+        const std::uint32_t only = ( body < t.lists.size() && t.lists[body].size() == 1 ) ? lastCommandOf( t, body ) : sh::kNone;
+        if( only == sh::kNone || t.nodes[only].kind != sh::NodeKind::Simple || !t.nodes[only].words.empty() || t.nodes[only].assigns.size() != 1 )
+        {
+            return {};
+        }
+        const sh::Word&   a  = t.nodes[only].assigns[0];
+        const std::string v  = a.text.substr( 0, a.text.find_first_of( "+=[" ) );
+        if( !name.empty() && v != name )
+        {
+            return {};
+        }
+        name = v;
+        at.push_back( a.pos );
+    }
+    return name;
+}
+
+inline bool isNameByte( char c ) noexcept
+{
+    return isIdentChar( c );
+}
+
+// `name` written anywhere in `src` but at the arm positions `armAt` (an assignment, a read, a for, a ${name:=…});
+// a $name / ${name} read is not a write.
+inline bool writtenElsewhere( std::string_view src, std::string_view name, const std::vector<std::uint32_t>& armAt )
+{
+    for( std::size_t i = src.find( name ); i != std::string_view::npos; i = src.find( name, i + 1 ) )
+    {
+        const std::size_t e = i + name.size();
+        if( ( i > 0 && isNameByte( src[i - 1] ) ) || ( e < src.size() && isNameByte( src[e] ) ) || std::find( armAt.begin(), armAt.end(), i ) != armAt.end() )
+        {
+            continue;
+        }
+        const bool read    = i > 0 && ( src[i - 1] == '$' || ( src[i - 1] == '{' && i > 1 && src[i - 2] == '$' ) );
+        const bool default_ = read && e + 1 < src.size() && ( src.substr( e, 2 ) == ":=" || src[e] == '=' );
+        if( !read || default_ )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Is `name` read ($name, ${name…}) in src[b, e)?
+inline bool readIn( std::string_view src, std::string_view name, std::size_t b, std::size_t e )
+{
+    for( std::size_t i = src.find( name, b ); i != std::string_view::npos && i < e; i = src.find( name, i + 1 ) )
+    {
+        const std::size_t end = i + name.size();
+        const bool        ref = i > 0 && ( src[i - 1] == '$' || ( src[i - 1] == '{' && i > 1 && src[i - 2] == '$' ) );
+        if( ref && ( end >= src.size() || !isNameByte( src[end] ) ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The literal words of the `for` loop at node `f` (`for v in a b c; do`), read off the source; empty when a word is not
+// a plain literal (an expansion, a glob, a substitution) or the loop has no `in` list.
+inline std::vector<std::string> forWords( std::string_view src, const sh::Node& f )
+{
+    std::vector<std::string> words;
+    std::size_t              i = f.pos;
+    const std::size_t        stop = src.find_first_of( ";\n", i );
+    const std::string_view   head = src.substr( i, ( stop == std::string_view::npos ? src.size() : stop ) - i );
+    const std::size_t        in   = head.find( " in " );
+    if( in == std::string_view::npos )
+    {
+        return words;
+    }
+    std::string_view rest = head.substr( in + 4 );
+    while( !rest.empty() )
+    {
+        const std::size_t b = rest.find_first_not_of( " \t" );
+        if( b == std::string_view::npos )
+        {
+            break;
+        }
+        const std::size_t e = rest.find_first_of( " \t", b );
+        const std::string w = sh::detail::unq( rest.substr( b, e == std::string_view::npos ? std::string_view::npos : e - b ) );
+        if( w.empty() || w.find_first_of( "$`*?[(" ) != std::string::npos )
+        {
+            return {};
+        }
+        words.push_back( w );
+        rest = e == std::string_view::npos ? std::string_view() : rest.substr( e );
+    }
+    return words;
+}
+
+// Is the case's subject the variable of a `for` loop before it whose every literal word some arm's pattern matches —
+// a case over the loop's own list, exhaustive by construction?
+inline bool coversForList( std::string_view src, const sh::Tree& t, const sh::Node& c )
+{
+    std::string v = sh::detail::unq( c.caseSubject );
+    v.erase( 0, v.starts_with( '$' ) ? 1 : 0 );
+    if( v.size() > 2 && v.front() == '{' && v.back() == '}' )
+    {
+        v = v.substr( 1, v.size() - 2 );
+    }
+    for( const sh::Node& f : t.nodes )
+    {
+        if( f.kind != sh::NodeKind::For || f.name != v || f.pos >= c.pos )
+        {
+            continue;
+        }
+        const std::vector<std::string> words = forWords( src, f );
+        const bool all = !words.empty() && std::all_of( words.begin(), words.end(), [ & ]( const std::string& w )
+                         {
+                             return std::any_of( c.casePats.begin(), c.casePats.end(), [ & ]( const std::vector<std::string>& pats )
+                                                 { return std::any_of( pats.begin(), pats.end(), [ & ]( const std::string& p ) { return sh::detail::globMatch( w, sh::detail::unq( p ) ); } ); } );
+                         } );
+        if( all )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The byte after the `esac` that closes a case whose last arm starts at `lastArm` (the arms are single commands, so
+// the first esac word after it is the case's own).
+inline std::size_t esacAfter( std::string_view src, std::size_t lastArm )
+{
+    for( std::size_t i = src.find( "esac", lastArm ); i != std::string_view::npos; i = src.find( "esac", i + 1 ) )
+    {
+        if( ( i == 0 || !isNameByte( src[i - 1] ) ) && ( i + 4 >= src.size() || !isNameByte( src[i + 4] ) ) )
+        {
+            return i + 4;
+        }
+    }
+    return src.size();
+}
+
+}   // namespace uash
+
+inline void scanUnhandledArmBash( std::string_view src, const std::vector<Span>& fnSpans, std::vector<Site>& out )
+{
+    namespace sh = rw::shstatus;
+    if( src.find( "esac" ) == std::string_view::npos )
+    {
+        return;
+    }
+    const sh::Tree t = sh::parse( src );
+    const auto     subjectOf = []( const sh::Node& c ) { return c.caseSubject.empty() ? std::string( "the subject" ) : c.caseSubject; };
+    for( const sh::Node& f : t.nodes )
+    {
+        const std::uint32_t body = f.kind == sh::NodeKind::Func && !f.bodies.empty() ? uash::lastCommandOf( t, f.bodies[0] ) : sh::kNone;
+        const bool          grouped = body != sh::kNone && ( t.nodes[body].kind == sh::NodeKind::Group || t.nodes[body].kind == sh::NodeKind::Subshell ) && !t.nodes[body].bodies.empty();
+        const std::uint32_t c = grouped ? uash::lastCommandOf( t, t.nodes[body].bodies[0] ) : sh::kNone;
+        if( c == sh::kNone || t.nodes[c].kind != sh::NodeKind::Case )
+        {
+            continue;
+        }
+        const sh::Node& cs = t.nodes[c];
+        if( cs.bodies.size() >= 2 && !uash::hasCatchAll( cs ) && uash::resultArms( t, cs ) && !uash::coversForList( src, t, cs ) )
+        {
+            out.push_back( { Facet::UnhandledArm, cs.pos, "case " + collapseSpaces( cs.name ) + " ends " + f.name, {},
+                             "no *) arm: an unmatched " + subjectOf( cs ) + " returns 0 and prints nothing" } );
+        }
+    }
+    for( const sh::Node& cs : t.nodes )
+    {
+        std::vector<std::uint32_t> at;
+        const std::string          v = cs.kind == sh::NodeKind::Case && cs.bodies.size() >= 2 && !uash::hasCatchAll( cs ) ? uash::assignedName( t, cs, at ) : std::string();
+        if( v.empty() || at.size() != cs.bodies.size() || uash::writtenElsewhere( src, v, at ) || uash::coversForList( src, t, cs ) )
+        {
+            continue;
+        }
+        std::size_t scopeEnd = src.size();
+        for( const Span& sp : fnSpans )
+        {
+            scopeEnd = ( sp.begin <= cs.pos && cs.pos < sp.end && sp.end < scopeEnd ) ? sp.end : scopeEnd;
+        }
+        const std::size_t esac = uash::esacAfter( src, at.back() );
+        if( esac < scopeEnd && uash::readIn( src, v, esac, scopeEnd ) )
+        {
+            out.push_back( { Facet::UnhandledArm, cs.pos, "case " + collapseSpaces( cs.name ) + " sets " + v, {},
+                             "no *) arm: an unmatched " + subjectOf( cs ) + " leaves " + v + " unset" } );
+        }
+    }
+}
+
 // The C family's scan: format-arity over the whole file and utf8-cut / dedup-first inside each function span when
 // `cppShapes` (C++), unchecked-status inside each span always. A site found in nested spans is reported once (the
 // scan of each span is independent; the caller anchors by byte).
-inline std::vector<Site> scanCFamily( std::string_view src, const std::vector<Span>& fnSpans, const std::vector<std::string>* treeMacros, bool cppShapes )
+inline std::vector<Site> scanCFamily( std::string_view src, const std::vector<Span>& fnSpans, const std::vector<std::string>* treeMacros, bool cppShapes,
+                                      const EnumTable* enums )
 {
     std::vector<Site>      out;
     CppPreproc             pp;
@@ -4592,6 +5834,10 @@ inline std::vector<Site> scanCFamily( std::string_view src, const std::vector<Sp
             scanDedupFirstFunction( src, toks, from, to, out );
         }
         scanUncheckedStatusCpp( src, toks, from, to, out );
+        if( enums != nullptr && enums->size() != 0 )
+        {
+            scanUnhandledArmCpp( src, toks, pp, from, to, *enums, out );
+        }
     }
     std::sort( out.begin(), out.end(), []( const Site& a, const Site& b ) { return a.startByte != b.startByte ? a.startByte < b.startByte : a.text < b.text; } );
     out.erase( std::unique( out.begin(), out.end(), []( const Site& a, const Site& b ) { return a.facet == b.facet && a.startByte == b.startByte && a.text == b.text; } ),
@@ -4603,17 +5849,19 @@ inline std::vector<Site> scanCFamily( std::string_view src, const std::vector<Sp
 
 // ─── the per-language entry points ──────────────────────────────────────────────────────────────────────
 
-// C++: format-arity over the whole file; utf8-cut, dedup-first and unchecked-status inside each function span.
-// `treeMacros`: the macro names the index holds across the tree (sorted, unique), for format-arity's F1 skip.
-inline std::vector<Site> scanCpp( std::string_view src, const std::vector<Span>& fnSpans, const std::vector<std::string>* treeMacros = nullptr )
+// C++: format-arity over the whole file; utf8-cut, dedup-first, unchecked-status and unhandled-arm inside each function
+// span. `treeMacros`: the macro names the index holds across the tree (sorted, unique), for format-arity's F1 skip;
+// `enums`: the tree's enums (cEnumsOf over every C-family file), the closed sets unhandled-arm checks a switch against.
+inline std::vector<Site> scanCpp( std::string_view src, const std::vector<Span>& fnSpans, const std::vector<std::string>* treeMacros = nullptr,
+                                  const EnumTable* enums = nullptr )
 {
-    return detail::scanCFamily( src, fnSpans, treeMacros, /*cppShapes=*/true );
+    return detail::scanCFamily( src, fnSpans, treeMacros, /*cppShapes=*/true, enums );
 }
 
-// C: unchecked-status alone, inside each function span (the C++ shapes name C++ library calls).
-inline std::vector<Site> scanC( std::string_view src, const std::vector<Span>& fnSpans )
+// C: unchecked-status and unhandled-arm, inside each function span (the C++ shapes name C++ library calls).
+inline std::vector<Site> scanC( std::string_view src, const std::vector<Span>& fnSpans, const EnumTable* enums = nullptr )
 {
-    return detail::scanCFamily( src, fnSpans, nullptr, /*cppShapes=*/false );
+    return detail::scanCFamily( src, fnSpans, nullptr, /*cppShapes=*/false, enums );
 }
 
 // Python: format-arity over the whole file; unchecked-status reads `fnSpans` for the scope a bound name lives in.
@@ -4629,14 +5877,39 @@ inline std::vector<Site> scanPython( std::string_view src, const std::vector<Spa
     {
         detail::scanUncheckedStatusPython( src, toks, fnSpans, out );
     }
+    if( src.find( "elif" ) != std::string_view::npos || src.find( "match" ) != std::string_view::npos )
+    {
+        detail::scanUnhandledArmPython( src, toks, fnSpans, out );
+    }
     return out;
 }
 
 // Bash, for a test-script path only (the caller decides the path): `fnSpans` are the script's function
-// definitions, the scopes a capture and its guards are matched in.
+// definitions, the scopes a capture and its guards are matched in. Its unhandled-arm sites ride along.
 inline std::vector<Site> scanBashTestScript( std::string_view src, const std::vector<Span>& fnSpans )
 {
-    return detail::scanVacuousAssertBash( src, fnSpans );
+    std::vector<Site> out = detail::scanVacuousAssertBash( src, fnSpans );
+    detail::scanUnhandledArmBash( src, fnSpans, out );
+    return out;
+}
+
+// Bash, any path: unhandled-arm alone (a case with no *) arm whose result is read).
+inline std::vector<Site> scanBash( std::string_view src, const std::vector<Span>& fnSpans )
+{
+    std::vector<Site> out;
+    detail::scanUnhandledArmBash( src, fnSpans, out );
+    return out;
+}
+
+// Generated code (a header marker in its first 2 KB, or a generated-file path): unhandled-arm judges none of it —
+// its switches are the generator's, and the fix is in the generator.
+inline bool looksGenerated( std::string_view rel, std::string_view src ) noexcept
+{
+    static constexpr std::array<std::string_view, 6> kMarks = { "DO NOT EDIT", "@generated", "Code generated", "generated by", "Generated by", "auto-generated" };
+    const std::string_view head = src.substr( 0, 2048 );
+    return std::any_of( kMarks.begin(), kMarks.end(), [ & ]( std::string_view m ) { return head.find( m ) != std::string_view::npos; } )
+        || rel.find( "/generated/" ) != std::string_view::npos || rel.starts_with( "generated/" ) || rel.find( ".pb." ) != std::string_view::npos
+        || rel.ends_with( "_pb2.py" );
 }
 
 // A cheap byte prefilter for unchecked-status: does the file name any of its calls? ("close" covers fclose and
@@ -4647,13 +5920,13 @@ inline bool mayHoldStatusCalls( std::string_view src ) noexcept
         || src.find( "waitpid" ) != std::string_view::npos || src.find( "system" ) != std::string_view::npos || src.find( "fflush" ) != std::string_view::npos;
 }
 
-// A cheap byte prefilter: can this C++ file hold any of the four C++ shapes at all?
+// A cheap byte prefilter: can this C++ file hold any of the C++ shapes at all?
 inline bool cppMayHoldShapes( std::string_view src ) noexcept
 {
     static constexpr std::array<std::string_view, 7> kNeedles = { "format", "print", "emitTo", "unique", "...", "\xE2\x80\xA6", "u2026" };
     // "format" also covers formatTo; the escaped ellipsis "\xE2\x80\xA6" is found through its "xE2" bytes below
     return std::any_of( kNeedles.begin(), kNeedles.end(), [ & ]( std::string_view n ) { return src.find( n ) != std::string_view::npos; } )
-        || src.find( "xE2" ) != std::string_view::npos || mayHoldStatusCalls( src );
+        || src.find( "xE2" ) != std::string_view::npos || mayHoldStatusCalls( src ) || src.find( "switch" ) != std::string_view::npos;
 }
 
 }   // namespace rw::defectshape
