@@ -10602,58 +10602,71 @@ inline bool scopeHoldsName( const CallScopeLookup& at, std::string_view scope, s
     return at.canon.byScope.contains( at.key ) || at.classIds.declared.contains( at.key );
 }
 
-// C++ unqualified lookup walks outward from the call — the caller's class (with its bases), each enclosing class, then the
-// enclosing namespaces — and stops at the first scope that declares the name, so a using-declaration OUTSIDE the caller's
-// body is found only when none of them does. True when one does, or MAY: the class chain is read (ClassIdentity), but no
-// namespace path is recorded while the C++ family is off (card CPP-HDR-NS-USING), so a caller that may sit in a namespace,
-// beside an in-tree namespace-scope namesake the declaration does not name, keeps the base reading (a hedge, never a guess).
-// A namesake at global scope competes only with a file-scope declaration (one scope: an overload set C++ resolves).
-inline bool callerScopesMayDeclare( const Reference& r, const CallResultTypes::CppNamedScope& named, const CallScopeLookup& at )
+// What the caller's class scopes say about `r.calleeName` (C++ unqualified lookup's first steps): whether the caller's own
+// scope, its class or an enclosing class — each with its bases and bodiless declarations — declares it (or the chain is
+// deeper than read), and whether the caller may sit in a namespace (a non-empty scope, or a class: a class's namespace is
+// not recorded either).
+struct CallerClassChain
+{
+    bool declares         = false;
+    bool mayBeInNamespace = false;
+};
+inline CallerClassChain callerClassChain( const Reference& r, const CallScopeLookup& at )
 {
     const Narrower&        narrower  = at.canon.narrower;
     const bool             hasCaller = r.fromSymbol < at.symbols.size();
     const std::string_view own       = hasCaller ? std::string_view( at.symbols[ r.fromSymbol ].scope ) : std::string_view{};
-    if( !own.empty() && ( narrower.methodOnTypeOrBases( own, r, at.canon.chaUp ) != nullptr || scopeHoldsName( at, own, r.calleeName ) ) )
+    const auto declaredIn = [ & ]( std::string_view scope )
     {
-        return true;   // the caller's own scope: its class or a base, its namespace
-    }
-    const auto ownerOf = [ & ]( NodeId id ) { return id < at.classIds.ownerClass.size() ? at.classIds.ownerClass[ id ] : kNoNode; };
-    NodeId     cls     = hasCaller ? ownerOf( r.fromSymbol ) : kNoNode;
-    const bool member  = cls != kNoNode;
-    for( int depth = 0; cls != kNoNode; ++depth )
+        return narrower.methodOnTypeOrBases( scope, r, at.canon.chaUp ) != nullptr || scopeHoldsName( at, scope, r.calleeName );
+    };
+    NodeId cls = hasCaller && r.fromSymbol < at.classIds.ownerClass.size() ? at.classIds.ownerClass[ r.fromSymbol ] : kNoNode;
+    CallerClassChain out { !own.empty() && declaredIn( own ), cls != kNoNode || !own.empty() };
+    for( int depth = 0; cls != kNoNode && !out.declares; ++depth )
     {
-        const std::string& name = at.symbols[ cls ].name;
-        if( depth == 16 || narrower.methodOnTypeOrBases( name, r, at.canon.chaUp ) != nullptr || scopeHoldsName( at, name, r.calleeName ) )
-        {
-            return true;   // an enclosing class (or its base) declares it — or the chain is deeper than read
-        }
-        cls = cls < at.classIds.enclosingClass.size() ? at.classIds.enclosingClass[ cls ] : kNoNode;
+        out.declares = depth == 16 || declaredIn( at.symbols[ cls ].name );
+        cls          = cls < at.classIds.enclosingClass.size() ? at.classIds.enclosingClass[ cls ] : kNoNode;
     }
-    const bool mayBeInNamespace = member || !own.empty();   // a class's namespace is not recorded either
-    const auto namesakes        = at.byName.find( r.calleeName );
+    return out;
+}
+
+// An in-tree namesake of `r.calleeName` that C++ lookup may find before the declaration `named`: a namespace-scope one when
+// the caller may sit in a namespace — no namespace path is recorded while the C++ family is off (card CPP-HDR-NS-USING), so
+// which namespaces lie between the caller and the declaration is unknown — or a global one beside a file-scope declaration
+// (one scope: an overload set C++ resolves). What the declaration names, a member of a class the chain did not reach and
+// another language's namesake never compete.
+inline bool namesakeMayCompete( const Reference& r, const CallResultTypes::CppNamedScope& named, const CallScopeLookup& at, bool mayBeInNamespace )
+{
+    const auto namesakes = at.byName.find( r.calleeName );
     if( namesakes == at.byName.end() )
     {
         return false;
     }
-    for( NodeId c : namesakes->second )
+    return std::ranges::any_of( namesakes->second, [ & ]( NodeId c )
     {
-        const Symbol& s = at.symbols[ c ];
-        if( !langCompatible( s.lang, r.lang ) || s.kind == SymKind::Method || ownerOf( c ) != kNoNode )
+        const Symbol& s      = at.symbols[ c ];
+        const bool    member = s.kind == SymKind::Method || ( c < at.classIds.ownerClass.size() && at.classIds.ownerClass[ c ] != kNoNode );
+        if( !langCompatible( s.lang, r.lang ) || member )
         {
-            continue;   // another language's, or a member of a class the walk above did not reach: unqualified lookup never finds it
+            return false;
         }
-        const std::size_t      sep  = namesplit::lastTopLevelScopeSep( s.scope );
-        const std::string_view last = sep == std::string_view::npos ? std::string_view( s.scope ) : std::string_view( s.scope ).substr( sep + 2 );
-        if( !s.scope.empty() && last == named.scope )
+        const std::size_t sep = namesplit::lastTopLevelScopeSep( s.scope );
+        if( s.scope.empty() )
         {
-            continue;   // what the declaration names
+            return named.fileScope();
         }
-        if( s.scope.empty() ? named.fileScope() : mayBeInNamespace )
-        {
-            return true;
-        }
-    }
-    return false;
+        return mayBeInNamespace && std::string_view( s.scope ).substr( sep == std::string_view::npos ? 0 : sep + 2 ) != named.scope;
+    } );
+}
+
+// C++ unqualified lookup walks outward from the call — the caller's class (with its bases), each enclosing class, then the
+// enclosing namespaces — and stops at the first scope that declares the name, so a using-declaration OUTSIDE the caller's
+// body is found only when none of them does. True when one does, or MAY (namesakeMayCompete): the base reading then stands,
+// a hedge, never a guess.
+inline bool callerScopesMayDeclare( const Reference& r, const CallResultTypes::CppNamedScope& named, const CallScopeLookup& at )
+{
+    const CallerClassChain chain = callerClassChain( r, at );
+    return chain.declares || namesakeMayCompete( r, named, at, chain.mayBeInNamespace );
 }
 
 // QUAL-NS-CALL-BIND: the qualifier the canonical tier keys call `r` by. A C++ call whose scope a declaration in force names
