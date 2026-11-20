@@ -84,7 +84,12 @@
 //         types    — both signatures have the same number of parameters (one or more), every one spelling a
 //                    concrete type (no template header, no type-parameter group, no auto/impl, no untyped
 //                    parameter), and some position's type differs once the pass-by spelling (const, &, &&, mut)
-//                    and qualifiers (std::, rw::) are dropped.
+//                    and qualifiers (std::, rw::) are dropped, AND
+//     (6) when every member spells the SAME recognized idiom (the vocabulary test above refused it), no pair shares a
+//         VALUE identifier — one of the idiom's identifiers used other than as a call (`f(`) or a qualifier (`ns::`),
+//         parameters left out — unless the index names it a function (a comparator passed by value: svLess). A
+//         shared constant (kOrderSlack) or a shared enum (Grade::Poor …) is the same domain data with a tuned number
+//         or type around it: a copy, and it keeps gating (cloneidiomcheck I and O pin both).
 // What still gates: a copy that kept any literal (writeTangleLines | writeHexPairLines share ' ' and '\n'), a copy
 // over the same literals (two reverse find-by-key loops, both spelling only 0 and 1 — JsonNode::get | steer_find), a
 // generic helper beside a concrete caller, any pair in one scope, and anything at or over 80 tokens. What it cannot
@@ -129,6 +134,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <iterator>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -1204,6 +1210,7 @@ struct MemberShape
     std::string                scope;
     bool                       read   = false;   // the body was read; an unread member proves no operand difference
     std::vector<std::uint64_t> literals;         // idiomLiteralSet of the body
+    std::vector<std::uint64_t> valueIds;         // the subset of `ids` used as a value somewhere (operand path (6))
     std::vector<std::uint64_t> paramTypes;       // IdiomParams::types, in parameter order
     bool                       typed  = false;   // IdiomParams::typed
 };
@@ -1220,6 +1227,29 @@ inline bool idiomSetsDisjoint( const std::vector<std::uint64_t>& a, const std::v
 }
 
 // The shape of one member whose file bytes are `bytes`. A body that cannot be read stays None and unread.
+// The members of `ids` some token of `body` uses as a VALUE: not followed by `(` (a call) or `::` (a qualifier), not a
+// parameter, not a member after `.`/`->` (a name after `::` IS a value: `Grade::Poor`, `tables::svLess`). Sorted + unique, a subset of `ids`.
+inline std::vector<std::uint64_t> idiomValueIds( const std::vector<IdiomTok>& body, const std::vector<std::string_view>& params,
+                                                 const std::vector<std::uint64_t>& ids )
+{
+    std::vector<std::uint64_t> used;
+    for( std::size_t k = 0; k < body.size(); ++k )
+    {
+        const std::string_view next = k + 1 < body.size() ? body[k + 1].text : std::string_view{};
+        const bool member   = k > 0 && ( body[k - 1].text == "." || body[k - 1].text == "->" );   // `ns::kX` stays a value
+        const bool notValue = next == "(" || next == "::" || member
+                           || std::ranges::contains( params, body[k].text );
+        if( body[k].kind == CodeTokenKind::Identifier && !notValue )
+        {
+            used.push_back( fnv1a64( body[k].text ) );
+        }
+    }
+    sortutil::sortUnique( used );
+    std::vector<std::uint64_t> out;
+    std::ranges::set_intersection( used, ids, std::back_inserter( out ) );
+    return out;
+}
+
 inline MemberShape memberShapeOf( const Symbol& s, const std::string& bytes )
 {
     MemberShape out;
@@ -1251,11 +1281,13 @@ inline MemberShape memberShapeOf( const Symbol& s, const std::string& bytes )
     if( idiomReadsNarrowVocabulary( out.idiom ) )
     {
         OneStatementFacts f = oneStatementFacts( toks, params.names );
-        out.ids   = std::move( f.ids );
+        out.ids      = std::move( f.ids );
+        out.valueIds = idiomValueIds( toks, params.names, out.ids );
         out.alpha = f.alpha;
         return out;
     }
-    out.ids = idiomTokenHashSet( toks, []( const IdiomTok& t ) { return t.kind == CodeTokenKind::Identifier; } );
+    out.ids      = idiomTokenHashSet( toks, []( const IdiomTok& t ) { return t.kind == CodeTokenKind::Identifier; } );
+    out.valueIds = idiomValueIds( toks, params.names, out.ids );
     return out;
 }
 
@@ -1333,20 +1365,50 @@ inline CloneOperandDiff pairOperandDiff( const MemberShape& a, const MemberShape
     return comparable && a.paramTypes != b.paramTypes ? CloneOperandDiff::Types : CloneOperandDiff::None;
 }
 
+// Operand path (6): whether the pair shares a value identifier the index does not name a function (`fnNames` sorted).
+inline bool sharesDomainValue( const MemberShape& a, const MemberShape& b, const std::vector<std::uint64_t>& fnNames )
+{
+    std::vector<std::uint64_t> shared;
+    std::ranges::set_intersection( a.valueIds, b.valueIds, std::back_inserter( shared ) );
+    return std::ranges::any_of( shared, [ & ]( std::uint64_t h ) { return !std::ranges::binary_search( fnNames, h ); } );
+}
+
+// Sorted + unique FNV-1a of every function and method name the index holds (operand path (6)'s exemption).
+inline std::vector<std::uint64_t> functionNameHashes( const IngestResult& ing )
+{
+    std::vector<std::uint64_t> out;
+    for( const Symbol& s : ing.symbols )
+    {
+        if( s.kind == SymKind::Function || s.kind == SymKind::Method )
+        {
+            out.push_back( fnv1a64( s.name ) );
+        }
+    }
+    sortutil::sortUnique( out );
+    return out;
+}
+
 // The operand path over a whole group (see the header): under the ceiling, every pair in distinct contexts and with a proved
-// operand difference. The union of the differences that held, or None as soon as one pair proves none.
-inline CloneOperandDiff groupOperandDiff( const CloneGroup& gp, const std::vector<const MemberShape*>& ms )
+// operand difference, and (an idiom group) no shared domain value. The union of the differences that held, or None as
+// soon as one pair proves none. `fnNames` is filled on first need.
+inline CloneOperandDiff groupOperandDiff( const IngestResult& ing, const CloneGroup& gp, const std::vector<const MemberShape*>& ms, CloneIdiom idiom,
+                                          std::vector<std::uint64_t>& fnNames )
 {
     if( gp.tokens >= kIdiomCloneTokenFloor )
     {
         return CloneOperandDiff::None;
+    }
+    if( idiom != CloneIdiom::None && fnNames.empty() )
+    {
+        fnNames = functionNameHashes( ing );
     }
     std::uint8_t held = 0;
     for( std::size_t a = 0; a < ms.size(); ++a )
     {
         for( std::size_t b = a + 1; b < ms.size(); ++b )
         {
-            const CloneOperandDiff d = sameContext( *ms[a], *ms[b] ) ? CloneOperandDiff::None : pairOperandDiff( *ms[a], *ms[b] );
+            const bool             refused = sameContext( *ms[a], *ms[b] ) || ( idiom != CloneIdiom::None && sharesDomainValue( *ms[a], *ms[b], fnNames ) );
+            const CloneOperandDiff d       = refused ? CloneOperandDiff::None : pairOperandDiff( *ms[a], *ms[b] );
             if( d == CloneOperandDiff::None )
             {
                 return CloneOperandDiff::None;
@@ -1403,6 +1465,7 @@ inline std::vector<CloneIdiomVerdict> classifyCloneGroupIdioms( const IngestResu
         return out;
     }
     const std::vector<MemberShape> shapes = cloneidiomdetail::readMemberShapes( ing, want );
+    std::vector<std::uint64_t>     fnNames;   // operand path (6), filled on first need
 
     for( std::size_t g = 0; g < groups.size(); ++g )
     {
@@ -1417,7 +1480,7 @@ inline std::vector<CloneIdiomVerdict> classifyCloneGroupIdioms( const IngestResu
         const bool agree = idiom != CloneIdiom::None && std::all_of( ms.begin(), ms.end(), [ & ]( const MemberShape* m ) { return m->idiom == idiom; } );
         out[g].idiom    = agree ? idiom : CloneIdiom::None;
         out[g].demoted  = agree && cloneidiomdetail::idiomDemotes( gp, ms, idiom );
-        out[g].operands = out[g].demoted ? CloneOperandDiff::None : cloneidiomdetail::groupOperandDiff( gp, ms );
+        out[g].operands = out[g].demoted ? CloneOperandDiff::None : cloneidiomdetail::groupOperandDiff( ing, gp, ms, out[g].idiom, fnNames );
     }
     return out;
 }
