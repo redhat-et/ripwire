@@ -8,7 +8,7 @@
 # (quality.h kCacheRootKeySeed's comment measures why); three build-local hashes had copied it from a neighbour.
 # hashutil.h now names both — kFnv1aOffset64 and kFnv1aLegacySeed64 — and holds the one fnv1a64 loop.
 #
-#   (a) no FNV-1a 64 basis literal, in either spelling, decimal or hex, on a code line of any src/ file except
+#   (a) no FNV-1a 64 basis literal, in either spelling, decimal or hex (both seeds), on a code line of any src/ file except
 #       src/infra/hashutil.h. Red on the base: 24 sites. A comment may quote the digits (quality.h's history does).
 #   (b) hashutil.h's kFnv1aOffset64 is the published basis and kFnv1aLegacySeed64 the 17-digit stored seed, digit for
 #       digit, and the static_assert test vectors in it are the values a reference FNV-1a 64 (computed here) gives.
@@ -36,7 +36,7 @@ cat > "$TMP/scan.py" <<'SCANPY'
 # python3 scan.py TREE → one "path:line: text" row per FNV basis literal on a code line, then "files=N" on stderr.
 import os, re, sys
 tree = sys.argv[1]
-lit = re.compile( r'(?<![0-9A-Za-z_])(?:14695981039346656037|1469598103934665603|0[xX]cbf29ce484222325)(?:[uUlL]*)(?![0-9A-Za-z_])', re.I )
+lit = re.compile( r'(?<![0-9A-Za-z_])(?:14695981039346656037|1469598103934665603|0[xX]cbf29ce484222325|0[xX]14650fb0739d0383)(?:[uUlL]*)(?![0-9A-Za-z_])', re.I )
 files = 0
 for dp, dns, fns in os.walk( tree ):
     dns.sort()
@@ -77,6 +77,7 @@ std::uint64_t a = 14695981039346656037ull;
 std::uint64_t b = 1469598103934665603ULL;
 std::uint64_t c = 0xcbf29ce484222325ull;
     lane = { 1469598103934665603, 1 };
+std::uint64_t d = 0x14650FB0739D0383ULL;
 EOF
 cat > "$TMP/probe/good.h" <<'EOF'
 std::uint64_t a = hashutil::kFnv1aOffset64;            // was 14695981039346656037ull
@@ -87,8 +88,8 @@ EOF
 cp "$SRC/infra/hashutil.h" "$TMP/probe/infra/hashutil.h"
 python3 "$TMP/scan.py" "$TMP/probe" > "$TMP/probe.txt" 2>/dev/null
 pb="$( grep -c '^bad.h:' "$TMP/probe.txt" )"; pg="$( grep -c '^good.h:' "$TMP/probe.txt" )"; ph="$( grep -c '^infra/hashutil.h:' "$TMP/probe.txt" )"
-if [ "$pb" -eq 4 ]; then ok "(n) all 4 spellings in the probe fire (decimal 20- and 17-digit, either suffix case, hex, unsuffixed)"
-else no "(n) the probe's 4 literals gave $pb hits"; cat "$TMP/probe.txt"; fi
+if [ "$pb" -eq 5 ]; then ok "(n) all 5 spellings in the probe fire (decimal 20- and 17-digit, either suffix case, hex of both, unsuffixed)"
+else no "(n) the probe's 5 literals gave $pb hits"; cat "$TMP/probe.txt"; fi
 if [ "$pg" -eq 0 ]; then ok "(n) the named twin, a comment quote and a longer number stay silent"
 else no "(n) the compliant twin fired $pg time(s)"; cat "$TMP/probe.txt"; fi
 if [ "$ph" -eq 0 ]; then ok "(n) infra/hashutil.h — the one home — is exempt"; else no "(n) the home file was scanned"; fi
@@ -134,7 +135,10 @@ else
     printf '#include "infra/hashutil.h"\nint main() { return 0; }\n' > "$TMP/cc/tu.cpp"
     cc(){ "$CXX" -std=c++23 -fsyntax-only -I"$TMP/cc" -I"$SRC/infra" -I"$SRC" -I"$ROOT/third_party" "$TMP/cc/tu.cpp" 2> "$TMP/cc/err.txt"; }
     cp "$H" "$TMP/cc/infra/hashutil.h"
-    if cc; then
+    printf '#include <cstdint>\n#include <print>\nint main() { return 0; }\n' > "$TMP/cc/probe23.cpp"
+    if ! "$CXX" -std=c++23 -fsyntax-only "$TMP/cc/probe23.cpp" 2> "$TMP/cc/probe23.err"; then
+        note "(c) $CXX cannot compile a minimal C++23 unit here — skipped; the build legs compile hashutil.h's static_asserts:"; head -3 "$TMP/cc/probe23.err"
+    elif cc; then
         ok "(c) hashutil.h compiles as shipped ($CXX)"
         sed 's/kFnv1aOffset64 = 14695981039346656037ull/kFnv1aOffset64 = 1469598103934665603ull/' "$H" > "$TMP/cc/infra/hashutil.h"
         if cmp -s "$H" "$TMP/cc/infra/hashutil.h"; then no "(c) could not plant the 17-digit basis (the definition's spelling moved)"
@@ -142,7 +146,7 @@ else
         elif grep -q 'published offset basis' "$TMP/cc/err.txt"; then ok "(c) with the 17-digit basis planted, the static_assert stops the build"
         else no "(c) the planted build failed, but not on the basis static_assert:"; head -5 "$TMP/cc/err.txt"; fi
     else
-        note "(c) $CXX cannot build hashutil.h standalone here (no C++23?) — skipped; the build legs compile its static_asserts:"; head -3 "$TMP/cc/err.txt"
+        no "(c) hashutil.h as shipped does not compile standalone with $CXX (a minimal C++23 unit does):"; head -5 "$TMP/cc/err.txt"
     fi
 fi
 
