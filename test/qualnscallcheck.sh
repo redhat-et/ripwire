@@ -30,10 +30,32 @@
 #             an alias `namespace late = …;` declared AFTER the call                → still the split (not yet in force)
 #             an included header's `namespace q { using rw::hashutil::fnv1a64; }`  → still the split: no C++ Namespace row is
 #                                     recorded, so a header row's namespace path is not read (guard: cppScopeNamedAt fileScope)
-#             mix( v ) — ADL through an argument of class type rw::hashutil::Val    → unchanged (ADL is not modelled; the base row)
 #             Klass::make() — a class-static call, scope is a class                 → Klass's only, unchanged
 #             Holder<int>::make() — a template-qualified call                       → Holder's, unchanged
-#             CALL_FNV( s ) — a macro that expands to ::rw::hashutil::fnv1a64        → the macro row, unchanged
+#     BASE PINS (no change to the new code can turn these red — the name is neither aliased nor using-declared, so
+#     cppScopeNamedAt returns at its gate; or `b.var != name` already rejects a directive row): mix( v ) by ADL (not
+#     modelled), CALL_FNV( s ) (the macro row), the using-directive arm. KNOWN-GAP PIN (fails on an IMPROVEMENT, not a
+#     regression): hashutil::widen with the inline namespace elided (card CPP-INLINE-NS).
+# Fix round 1 (review F1-F5), fixture fx2 (src/a.h alpha::util + beta + gamma::h, src/rw.h rw::g, file-scope `using alpha::util::g;`
+# and `namespace h = alpha::util;`):
+#   POSITIVE  glob() at global scope: g( x ) under the file-scope using → alpha::util::g (base: a split)
+#             Value::typed's dependent Traits<T>::fieldType() → the primary AND both out-of-line specializations (F4: the base
+#             had the primary alone, the first lane head the specializations alone — the S6-C locality tie-break dropped the
+#             primary, whose nested-class scope text shares less with the caller)
+#   NEGATIVE  F1 rw::S::m / rw::inner::c / third::c2 (a namespace-scope DECLARATION third::g): g( x ) under the file-scope using,
+#             but C++ lookup may find rw::g / third::g first → the base split (guard: callerScopesMayDeclare)
+#             F2 gamma::h::f( x ) and T::m's h::k( x ) (a nested class `h`) beside the alias `h` → the base's own scope
+#             (guard: canonicalCallQualifier's scopeHoldsName check)
+#             F3 lam(): `auto g = []( int y ) { … }; g( x );` → no row, as base (guard: the caller's declared-local veto)
+#             w.g( x ) — a member call on a using-declared name → W::g (guard: the isMemberCallRef early return)
+#             both(): `using alpha::util::g; using beta::g;` → the base split (guard: cppScopeNamedAt's agree)
+#             Rust b::Bar::make() / a::inner::Bar::make() → each its own impl's, unchanged (the transitiveIncludes language gate on
+#             the last-segment key: REPORT-ONLY — no Rust scope text holds `::` today, an impl's scope is its last segment, so
+#             the gate is defensive and this arm cannot go red)
+#   KNOWN FLOOR viaAlias(): h::f( x ) at global scope under the alias, beside gamma::h::f → gamma's, as base (truth alpha::util::f;
+#             the one-segment Reference cannot tell `h::f` from `gamma::h::f`, so the base reading stands). The alias's
+#             !bindsWithoutTarget filter has NO arm: while the C++ family is off a target-less TypeAlias row carries no span,
+#             so it is never a scope row (ingest_binds.h captureShadowDecl) — the filter is for the family-on path.
 # The fix keys rows the base left split or bound to the namesake; it never turns a hedged row into a proven one without a
 # declaration that names the scope (an unknown qualifier keeps the base reading).
 # Every negative arm counts the rows it read and the batch fails when they read none (a vacuous arm proves nothing).
@@ -204,10 +226,154 @@ neg fx "$U" fnv1a64 40 "$AF"                             # the caller's own scop
 neg fx src/nsmore.cpp fnv1a64 4 "$AF $HF" split          # a header's namespace-scope using (fileScope guard)
 neg fx "$U" make 17 "$A::Klass::make" qualified          # class-static
 neg fx "$U" make 18 "$A::Holder::make" qualified         # template-qualified
-neg fx "$U" mix 16 "$A::rw::mix"                         # ADL is not modelled: the base row
-neg fx "$U" CALL_FNV 19 "$A::CALL_FNV"                   # the macro call itself
+neg fx "$U" mix 16 "$A::rw::mix"                         # BASE PIN: ADL is not modelled
+neg fx "$U" CALL_FNV 19 "$A::CALL_FNV"                   # BASE PIN: the macro call itself
 
 if [ "$seen" -eq 13 ]; then ok "the 13 negative arms read $seen rows (premise: none vacuous)"; else no "the 13 negative arms read $seen rows (want 13, one each)"; fi
+
+# ── fix round 1 (review F1-F5): fixture fx2 ──
+F2="$TMP/fx2"; mkdir -p "$F2/src"
+cat >"$F2/src/a.h" <<'EOF'
+#pragma once
+namespace alpha::util
+{
+inline int g( int x ) { return x + 2; }
+inline int f( int x ) { return x + 1; }
+inline int k( int x ) { return x + 3; }
+}
+namespace beta
+{
+inline int g( long x ) { return int( x ) + 5; }
+}
+namespace gamma
+{
+namespace h
+{
+inline int f( int x ) { return x + 4; }
+}
+}
+EOF
+cat >"$F2/src/rw.h" <<'EOF'
+#pragma once
+namespace rw
+{
+inline int g( int x ) { return x + 9; }
+}
+EOF
+cat >"$F2/src/users.cpp" <<'EOF'
+#include "a.h"
+#include "rw.h"
+using alpha::util::g;
+namespace h = alpha::util;
+namespace rw
+{
+struct S
+{
+    int m( int x ) { return g( x ); }
+};
+namespace inner
+{
+int c( int x ) { return g( x ); }
+}
+}
+int glob( int x ) { return g( x ); }
+int viaGamma( int x ) { return gamma::h::f( x ); }
+struct T
+{
+    struct h { static int k( int x ) { return x; } };
+    int m( int x ) { return h::k( x ); }
+};
+int lam( int x )
+{
+    auto g = []( int y ) { return y; };
+    return g( x );
+}
+struct W { int g( int x ) { return x; } };
+int viaMember( W& w, int x ) { return w.g( x ); }
+namespace third
+{
+int g( int x );
+int c2( int x ) { return g( x ); }
+}
+int viaAlias( int x ) { return h::f( x ); }
+EOF
+cat >"$F2/src/both.cpp" <<'EOF'
+#include "a.h"
+using alpha::util::g;
+using beta::g;
+int both( int x ) { return g( x ); }
+EOF
+cat >"$F2/src/traits.h" <<'EOF'
+#pragma once
+enum class FieldType { Bool, Str };
+class Value
+{
+public:
+    template <typename T> FieldType typed() const { return Traits<T>::fieldType(); }
+private:
+    template <typename T> class Traits
+    {
+    public:
+        static FieldType fieldType() { return T::fieldType(); }
+    };
+};
+template <> class Value::Traits<bool>
+{
+public:
+    static FieldType fieldType() { return FieldType::Bool; }
+};
+template <> class Value::Traits<char>
+{
+public:
+    static FieldType fieldType() { return FieldType::Str; }
+};
+EOF
+printf '[package]\nname = "fxrs"\nversion = "0.1.0"\n' >"$F2/Cargo.toml"
+cat >"$F2/src/lib.rs" <<'EOF'
+pub mod a {
+    pub mod inner {
+        pub struct Bar;
+    }
+}
+pub mod b {
+    pub struct Bar;
+    impl Bar {
+        pub fn make() -> u32 { 2 }
+    }
+}
+impl a::inner::Bar {
+    pub fn make() -> u32 { 1 }
+}
+pub fn call_b() -> u32 { b::Bar::make() }
+pub fn call_inner() -> u32 { a::inner::Bar::make() }
+EOF
+census "$F2" fx2 || exit 1
+U2=src/users.cpp; AG="src/a.h::alpha::util::g"; BG="src/a.h::beta::g"; RG="src/rw.h::rw::g"
+# none NAME FILE CALLER CALLEE LINE — the caller exists (its S row: the premise) and the site has no C row
+none(){ local s; s=$( awk -F'\t' -v id="$2::$3" '$1=="S" && index($2,id"#")==1' "$TMP/$1.census" | wc -l | tr -d ' ' ); row "$1" "$2" "$4" "$5" >/dev/null
+        local n; n=$( cat "$TMP/rows" )
+        if [ "$s" = 1 ] && [ "$n" = 0 ]; then ok "$1 $2:$5 $4 -> no row (caller $3 seen)"; else no "$1 $2:$5 $4: want no row beside caller $3, got caller rows=$s call rows=$n"; fi
+        seen2=$(( seen2 + s )); }
+seen2=0
+neg2(){ expect "$@"; seen2=$(( seen2 + $( cat "$TMP/rows" ) )); }
+
+echo "── round 1 positive: the using-declaration is the first declaration C++ lookup finds; a template family keeps its primary ──"
+expect fx2 "$U2" g 16 "$AG" qualified                                  # glob(): global caller, file-scope using
+expect fx2 src/traits.h fieldType 6 "src/traits.h::Traits::fieldType src/traits.h::Value::Traits<bool>::fieldType src/traits.h::Value::Traits<char>::fieldType" split   # F4
+
+echo "── round 1 negative: something C++ lookup may find first keeps the base reading ──"
+neg2 fx2 "$U2" g 9 "$AG $BG $RG" split                                 # F1 rw::S::m: the class chain ends in namespace rw
+neg2 fx2 "$U2" g 13 "$AG $BG $RG" split                                # F1 rw::inner::c: the namespace chain is not recorded
+neg2 fx2 "$U2" g 33 "$AG $BG $RG" split                                # F1 third::c2 beside the declaration third::g
+neg2 fx2 "$U2" f 17 "src/a.h::h::f" qualified                          # F2 gamma::h::f beside the alias h
+neg2 fx2 "$U2" k 21 "$U2::h::k" qualified                              # F2 a nested class h beside the alias h
+none fx2 "$U2" lam g 26                                                # F3 a local lambda g
+neg2 fx2 "$U2" g 29 "$U2::W::g" receiver-rule                          # a member call on a using-declared name
+neg2 fx2 src/both.cpp g 4 "$AG $BG" split                              # two using-declarations name different scopes
+neg2 fx2 src/lib.rs make 15 "src/lib.rs::Bar::make"                    # REPORT-ONLY Rust: b::Bar's impl
+neg2 fx2 src/lib.rs make 16 "src/lib.rs::Bar::make"                    # REPORT-ONLY Rust: a::inner::Bar's impl
+neg2 fx2 "$U2" f 35 "src/a.h::h::f" qualified                          # KNOWN FLOOR: h::f under the alias beside gamma::h::f
+if [ "$seen2" -eq 11 ]; then ok "the 11 round-1 negative arms read $seen2 rows (premise: none vacuous)"; else no "the 11 round-1 negative arms read $seen2 rows (want 11, one each)"; fi
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME FAILED"
 exit "$fail"

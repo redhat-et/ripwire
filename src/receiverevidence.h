@@ -254,7 +254,11 @@ struct CallResultTypes
     std::vector<std::string_view>                         filePackage;
     HashMap<std::string, std::vector<std::uint32_t>>      packageFiles;
     HashMap<std::string, std::vector<const Binding*>>     aliasesByName;
-    HashMap<std::string, char>                            cppUsingDeclared;   // QUAL-NS-CALL-BIND: every name a C++ using-declaration binds (cppScopeNamedAt's gate)
+    // QUAL-NS-CALL-BIND: every name a C++ using-declaration (kCppScopeUsingDeclared) or a spanned C++ alias (kCppScopeAliased)
+    // binds — cppScopeNamedAt's gate, so a TS / Rust / Kotlin alias of the same spelling never starts a C++ walk
+    HashMap<std::string, char>                            cppScopeNames;
+    static constexpr char                                 kCppScopeUsingDeclared = 1;
+    static constexpr char                                 kCppScopeAliased       = 2;
     HashMap<std::string, rw::SmallVec<NodeId, 2>>         goReceiverWitness;   // GO-CALLRESULT-LOCAL: Go receiver type name → one method per package directory (goDeclLessType)
     // RULE3-MEMBER-GUARD: the package directory of a Rust source path (`crates/settings/src/file.rs` → `crates/settings`), empty for a path outside src/, tests/, benches/, examples/
     static std::string_view rustPackageDirOf( std::string_view path )
@@ -285,7 +289,31 @@ struct CallResultTypes
     mutable std::string                                   aliasKey;   // importPathOf's / the TS pin lookup's
     mutable std::vector<std::string_view>                 usingPath;  // forEachCppUsing's per-row namespace path
     mutable std::string                                   moduleKey;  // rustModuleKey's buffer
-    mutable std::string                                   scopeKey;   // cppScopeNamedAt's gate lookup buffer
+    mutable std::string                                   scopeKey;   // cppScopeNamedAt's gate and memo lookup buffer
+    // QUAL-NS-CALL-BIND: what the in-tree headers a file includes declare, at file scope, for one name — the header half of
+    // cppScopeNamedAt, which depends on (file, name, alias-or-using) only: "<fileId>#<a|u><name>" → the fold of those rows
+    struct CppScopeFold
+    {
+        std::string_view named;          // the scope the rows name ("" none)
+        bool             agree = true;   // false: two rows name different scopes, or one names none (`using ::f;`)
+        bool             any   = false;
+        void add( std::string_view scope )
+        {
+            agree = agree && !scope.empty() && ( named.empty() || named == scope );
+            named = scope;
+            any   = true;
+        }
+        void join( const CppScopeFold& o )
+        {
+            if( o.any )
+            {
+                agree = agree && o.agree && ( named.empty() || named == o.named );
+                named = o.named;
+                any   = true;
+            }
+        }
+    };
+    mutable HashMap<std::string, CppScopeFold>            cppHeaderScopeMemo;
     mutable bool                                          pathCut = false;   // fc1 fix 3: a rustPathOutside walk hit its depth cap — its false then means "cut", not "stays in the tree"
 
     explicit CallResultTypes( const IngestResult& i ) : ing( i ) {}
@@ -320,8 +348,8 @@ struct CallResultTypes
             noteCppScopeRow( b );
         }
     }
-    // a C++ row that carries its scope's span: its file joins cppUsingFiles (bindings arrive sorted by file), and a
-    // using-declaration's name joins cppUsingDeclared (QUAL-NS-CALL-BIND, cppScopeNamedAt's gate)
+    // a C++ row that carries its scope's span: its file joins cppUsingFiles (bindings arrive sorted by file), and the name a
+    // using-declaration or an alias binds joins cppScopeNames (QUAL-NS-CALL-BIND, cppScopeNamedAt's gate)
     void noteCppScopeRow( const Binding& b )
     {
         if( !isCppScopeRow( b ) )
@@ -332,9 +360,10 @@ struct CallResultTypes
         {
             cppUsingFiles.push_back( b.fileId );
         }
-        if( b.kind == LocalBindKind::TypeImport && b.var != "*" )
+        const char bit = b.kind == LocalBindKind::TypeAlias ? kCppScopeAliased : b.var != "*" ? kCppScopeUsingDeclared : char( 0 );
+        if( bit != 0 )
         {
-            cppUsingDeclared.try_emplace( b.var, char( 1 ) );
+            cppScopeNames[ b.var ] |= bit;
         }
     }
     // a C++ using-directive / using-declaration, or (fix round 3) a C++ alias: the rows that carry their scope's span (model.h)
@@ -2170,6 +2199,12 @@ struct CallResultTypes
             }
         };
         rowsOf( f, true );
+        forEachIncludedCppScopeFile( f, [ & ]( std::uint32_t h ) { rowsOf( h, false ); } );
+    }
+    // every in-tree file `f` includes (transitively) that holds a C++ scope row (cppUsingFiles), walked from the smaller side
+    template <class Fn>
+    void forEachIncludedCppScopeFile( std::uint32_t f, Fn&& fn ) const
+    {
         if( fileIncludes == nullptr )
         {
             return;
@@ -2180,7 +2215,7 @@ struct CallResultTypes
             {
                 if( std::binary_search( cppUsingFiles.begin(), cppUsingFiles.end(), h ) )
                 {
-                    rowsOf( h, false );
+                    fn( h );
                 }
             } );
             return;
@@ -2189,7 +2224,7 @@ struct CallResultTypes
         {
             if( fileIncludes->contains( f, h ) )
             {
-                rowsOf( h, false );
+                fn( h );
             }
         }
     }
@@ -2328,16 +2363,26 @@ struct CallResultTypes
     }
 
     // QUAL-NS-CALL-BIND: the scope a C++ call names through a declaration IN FORCE at its site, spelled as the one segment the
-    // canonical tier keys (a call qualifier's own shape, ingest's H4 re-split) — "" when no declaration says, or two disagree:
+    // canonical tier keys (a call qualifier's own shape, ingest's H4 re-split) — `scope` "" when no declaration says, or two disagree:
     //   * a qualified call `h::f()` under a namespace alias `namespace h = rw::hashutil;` (or a type alias `using h = X;`)
     //     names the alias's target: "hashutil";
     //   * a bare call `f()` under a using-declaration `using rw::hashutil::f;` names the declaration's scope: "hashutil".
     //     A using-directive (`using namespace a;`) names no one scope and is not read here.
-    // In force is forEachCppUsing's rule: the call's own file's rows declared before it in a scope that holds it, and the
-    // namespace- or file-scope rows of an in-tree header it includes whose namespace leads the call's. A name no alias or
-    // using-declaration in the tree binds never walks (the two name sets are built once, in noteImport).
+    // In force: the call's own file's rows declared before it in a scope that holds it (forEachCppUsing's own-file rule), and
+    // the FILE-scope rows of every in-tree header it includes — a header's `namespace a { using x::f; }` is not read, because no
+    // C++ Namespace row is recorded while the family is off, so its namespace path is unknown (card CPP-HDR-NS-USING). The
+    // header half depends on (file, name) only and is memoized (cppHeaderScopeMemo). A name no alias or using-declaration in the
+    // tree binds never walks. `spanStart`/`spanEnd` are the innermost deciding row's span: the scope C++ lookup finds it in, which
+    // the caller (graph.h canonicalCallQualifier) compares with the scopes between it and the call.
     // The view points into the deciding row's importedName (the ingest result's storage), never into a scratch buffer.
-    std::string_view cppScopeNamedAt( const Reference& r ) const
+    struct CppNamedScope
+    {
+        std::string_view scope;
+        std::uint32_t    spanStart = 0;
+        std::uint32_t    spanEnd   = 0xFFFFFFFFu;
+        bool             fileScope() const noexcept { return spanStart == 0 && spanEnd == 0xFFFFFFFFu; }
+    };
+    CppNamedScope cppScopeNamedAt( const Reference& r ) const
     {
         if( !langFacts( r.lang ).qualifierNamesScope )   // C++ / ObjC
         {
@@ -2346,36 +2391,71 @@ struct CallResultTypes
         const bool             qualified = !r.qualifier.empty();
         const std::string_view name      = qualified ? std::string_view( r.qualifier ) : std::string_view( r.calleeName );
         scopeKey.assign( name );
-        if( qualified ? !aliasesByName.contains( scopeKey ) : !cppUsingDeclared.contains( scopeKey ) )
+        const auto gate = cppScopeNames.find( scopeKey );
+        if( gate == cppScopeNames.end() || ( gate->second & ( qualified ? kCppScopeAliased : kCppScopeUsingDeclared ) ) == 0 )
         {
             return {};
         }
-        std::vector<std::string_view> calleePath;
-        namespacePathAt( r.fileId, r.startByte, calleePath );
-        std::string_view named;
-        bool             agree = true;
-        forEachCppUsing( r.fileId, r.startByte, calleePath, [ & ]( const Binding& b )
+        CppScopeFold  fold;
+        CppNamedScope out;
+        for( const Binding* b : r.fileId < importsByFile.size() ? std::span( importsByFile[ r.fileId ] ) : std::span<const Binding* const>{} )
         {
-            const bool fits = qualified ? b.kind == LocalBindKind::TypeAlias && !bindsWithoutTarget( b )
-                                        : b.kind == LocalBindKind::TypeImport && b.var != "*";
-            // an included header's row only at file scope: no C++ Namespace row is recorded while the family is off, so its
-            // namespace path is not read and a header's `namespace a { using x::f; }` might not lead to the call's
-            const bool fileScope = b.fileId == r.fileId || ( b.spanStart == 0 && b.spanEnd == 0xFFFFFFFFu );
-            if( !fits || !fileScope || b.var != name )
+            const std::uint32_t at = r.startByte;
+            if( isCppScopeRow( *b ) && b->startByte < at && b->spanStart <= at && at < b->spanEnd && cppScopeRowFits( *b, qualified, name ) )
             {
-                return;
+                fold.add( cppScopeOfRow( *b, qualified ) );
+                if( b->spanEnd - b->spanStart <= out.spanEnd - out.spanStart )
+                {
+                    out.spanStart = b->spanStart;
+                    out.spanEnd   = b->spanEnd;
+                }
             }
-            // the scope's path: an alias's target (`rw::hashutil`), a using-declaration's name less its last segment
-            // (`rw::hashutil::f` → `rw::hashutil`); keyed by its last top-level segment (`hashutil`, `B<x::y>`)
-            std::string_view path = b.importedName;
-            const std::size_t cut = qualified ? std::string_view::npos : namesplit::lastTopLevelScopeSep( path );
-            path = qualified ? path : cut == std::string_view::npos ? std::string_view{} : path.substr( 0, cut );
-            const std::size_t      sep   = namesplit::lastTopLevelScopeSep( path );
-            const std::string_view scope = sep == std::string_view::npos ? path : path.substr( sep + 2 );
-            agree = agree && !scope.empty() && ( named.empty() || named == scope );
-            named = scope;
+        }
+        fold.join( cppHeaderScopeOf( r.fileId, name, qualified ) );
+        out.scope = fold.agree ? fold.named : std::string_view{};
+        return out;
+    }
+    // a row that binds `name` the way the call reads it: an alias with a target for a qualified call, a using-declaration (not
+    // a directive) for a bare one
+    static bool cppScopeRowFits( const Binding& b, bool qualified, std::string_view name )
+    {
+        const bool fits = qualified ? b.kind == LocalBindKind::TypeAlias && !bindsWithoutTarget( b ) : b.kind == LocalBindKind::TypeImport && b.var != "*";
+        return fits && b.var == name;
+    }
+    // the scope's path: an alias's target (`rw::hashutil`), a using-declaration's name less its last segment
+    // (`rw::hashutil::f` → `rw::hashutil`); keyed by its last top-level segment (`hashutil`, `B<x::y>`)
+    static std::string_view cppScopeOfRow( const Binding& b, bool qualified )
+    {
+        std::string_view  path = b.importedName;
+        const std::size_t cut  = qualified ? std::string_view::npos : namesplit::lastTopLevelScopeSep( path );
+        path                   = qualified ? path : cut == std::string_view::npos ? std::string_view{} : path.substr( 0, cut );
+        const std::size_t sep  = namesplit::lastTopLevelScopeSep( path );
+        return sep == std::string_view::npos ? path : path.substr( sep + 2 );
+    }
+    // the header half of cppScopeNamedAt: the file-scope rows of the in-tree headers `f` includes, memoized per (f, name, kind)
+    CppScopeFold cppHeaderScopeOf( std::uint32_t f, std::string_view name, bool qualified ) const
+    {
+        scopeKey.clear();
+        scopeKey.append( std::to_string( f ) ).push_back( '#' );
+        scopeKey.push_back( qualified ? 'a' : 'u' );
+        scopeKey.append( name );
+        if( const auto hit = cppHeaderScopeMemo.find( scopeKey ); hit != cppHeaderScopeMemo.end() )
+        {
+            return hit->second;
+        }
+        CppScopeFold fold;
+        forEachIncludedCppScopeFile( f, [ & ]( std::uint32_t h )
+        {
+            for( const Binding* b : h < importsByFile.size() ? std::span( importsByFile[ h ] ) : std::span<const Binding* const>{} )
+            {
+                if( isCppScopeRow( *b ) && b->spanStart == 0 && b->spanEnd == 0xFFFFFFFFu && cppScopeRowFits( *b, qualified, name ) )
+                {
+                    fold.add( cppScopeOfRow( *b, qualified ) );
+                }
+            }
         } );
-        return agree ? named : std::string_view{};
+        cppHeaderScopeMemo.emplace( scopeKey, fold );
+        return fold;
     }
 
     // the class a ReturnType record's written type resolves to in its own (the callee's) file — kNoNode for none or several
