@@ -133,8 +133,9 @@ fi
 echo
 echo "=== G: multi-root --situ — one refusal-or-answer per SELECTOR, never a per-root false zero ==="
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════════
-FIX2="$( mktemp -d )/betaroot"; mkdir -p "$FIX2"
-trap 'rm -rf "$( dirname "$FIX2" )"' EXIT
+SCRATCH2="$( mktemp -d )" && [ -d "$SCRATCH2" ] || { echo "fileselectorrefusecheck: mktemp -d failed"; exit 2; }
+trap 'rm -rf "$SCRATCH2"' EXIT
+FIX2="$SCRATCH2/betaroot"; mkdir -p "$FIX2"
 printf 'int beta( int x ) { return x + 1; }\n' >"$FIX2/beta.cpp"
 LBL2="$( basename "$FIX2" )"
 "$BIN" "$FIX" "$FIX2" "--situ=$GOOD" --no-cache >"$FIX2.out" 2>"$FIX2.err"; rc=$?
@@ -162,7 +163,7 @@ grep -q 'changed file(s)' "$FIX2.out" && ok "G root $( basename "$FIX" ) still a
 [ "$rc" -ne 0 ] && grep -qF -- "--situ" "$FIX2.err2" && grep -qF "$BAD" "$FIX2.err2" \
     && ok "G two roots, --situ=$BAD (nowhere) → exit $rc, refusal names the flag and the path" \
     || no "G two roots, --situ=$BAD → exit $rc; the union refusal regressed: $( head -c 200 "$FIX2.err2" )"
-rm -rf "$( dirname "$FIX2" )"
+rm -rf "$SCRATCH2"
 
 echo
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
