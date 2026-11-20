@@ -2338,7 +2338,7 @@ struct CallResultTypes
     // The view points into the deciding row's importedName (the ingest result's storage), never into a scratch buffer.
     std::string_view cppScopeNamedAt( const Reference& r ) const
     {
-        if( r.lang != Lang::Cpp && r.lang != Lang::ObjC )
+        if( !langFacts( r.lang ).qualifierNamesScope )   // C++ / ObjC
         {
             return {};
         }
