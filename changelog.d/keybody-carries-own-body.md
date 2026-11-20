@@ -11,9 +11,13 @@ Measured on 89 `--for` questions over 89 repositories, one binary pair, same cor
 cells and costs **+4,760 bytes in total**, all of it the restored bodies. On **2 of those 3 cells the group
 had been emptied completely** — every backticked definition suppressed, so a question that named symbols got
 no key bodies at all. On the third the group survived but **`total=` was under-reporting**: the suppression ran
-before the count, so an answer disclosed `total="3" capped="0"` for a task with five keyed definitions. Page
-counts, page-1 tail rows and `deferred=` are unchanged on all 89 cells — the group's bytes are not counted
-against the page budget, so nothing is displaced.
+before the count, so an answer disclosed `total="3" capped="0"` for a task with five keyed definitions. On a
+check fixture the same defect produced `<bodies of="key" shown="3" total="3" capped="1">` with no `next=` —
+`capped=` claiming a cut, `shown`=`total` claiming nothing was withheld, and the pointer the legend promises
+for a cut simply absent. Both are fixed, because nothing is removed before the count, and the disclosure
+triple is now gated: `capped="1"` iff `shown` < `total` iff `next=` is present. Page counts, page-1 tail rows
+and `deferred=` are unchanged on all 89 cells — the group's bytes are not counted against the page budget, so
+nothing is displaced.
 
 What it does NOT mean: the restored body is a duplicate of one the page already carries, so this buys no new
 information on a page that already had it — all four retrieval rungs measured flat. It buys the contract, and
