@@ -6200,8 +6200,8 @@ These are the exact `kind=` strings the binary emits, from `src/quality.h`:
 `error-masking` · `short-horizon-churn` · `new-clone-of-reused-helper` · `placeholder` · `defect-shape`
 
 The first ten each target a failure mode measured in the literature; `placeholder` (added 0.6.7) is an
-honesty check on "done" — a stub or TODO the change added — and never gates. `defect-shape` carries five
-facets in `defect=` (`format-arity`, `utf8-cut`, `dedup-first`, `vacuous-assert`, `unchecked-status`), shapes this project's own
+honesty check on "done" — a stub or TODO the change added — and never gates. `defect-shape` carries six
+facets in `defect=` (`format-arity`, `utf8-cut`, `dedup-first`, `vacuous-assert`, `unchecked-status`, `unhandled-arm`), shapes this project's own
 code review kept finding; only `format-arity` gates, and on any origin (new-symbol rows never gate, except
 defect-shape format-arity; since QD-ENTRY-CEILING also a new function at the ceiling). Measured (2026-10-07): recall 7/8 on the eight review findings it was built
 from; with every site treated as new, 0 format-arity false positives on this tree (1,330 literal-format calls),
@@ -6238,6 +6238,16 @@ axum, a Go vulnerability scanner, a Go Prometheus client, textual, aislop and ho
 20 drops real and 16 of 20 worth a check (the rest: a debug-log write, two detached reaper `pclose`s, a probe's
 `close`). A Stage-0 regex counted 46 sites (tmux 23, axum 15, Go 4, this tree 4); the gap is the written-stream /
 written-fd premise, the omitted `_ =` forms, and this tree's `os::` shims the regex did not see.
+QD-UNHANDLED-ARM (2026-11-19) adds a sixth facet, `unhandled-arm` (always `sev=minor`, never gates): a classifier over
+a closed set that gives a value it does not name no outcome — a C/C++ `switch` with no `default:` that decides a value
+(every arm returns one or does not return, or every arm assigns one name) over an enum the indexed tree defines and
+leaves an owed enumerator out (count sentinels and aliases owe nothing; a label's qualifiers must match the enum's own
+name and its enclosing scopes, so an out-of-tree `Http::CodecType` is not an in-tree class member's `CodecType`); a
+shell `case` with no `*)` arm that ends its function with `return`/`echo`/`printf` arms or sets one name read after
+`esac` (not a case over the literal list of the `for` loop it sits in); a Python if/elif chain or `match` that ends a
+value-returning function with no `else` (members of an `Enum` the file defines are checked for coverage). `p=` is the
+switch's line, `why=` names what is left out, and because the site text names the missing enumerators, appending one
+to an enum gives a row on each switch it leaves incomplete. UA_MEASURED
 Two format-arity floors (a delta review, 2026-10-08; 0 hits on the three corpora above): the macro skip sees a name this
 file `#define`s and a function-like macro the tree defines, not a lower-case object-like macro defined only in another
 file; and only a literal `#if 0` is skipped, so `#if false`, `#if (0)`, `#if 0 && …` and the `#else` of `#if 1` are
