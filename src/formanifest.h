@@ -1332,7 +1332,7 @@ inline std::string manifestFileXml( const IngestResult& ing, const ManifestDoc& 
             }
         }
         retargetCfgTouchLines( ing, anchored, touch.rows );
-        out += "<feature_touch n=\"" + std::to_string( fam->members.size() ) + "\">" + touchListXml( ing, touch ) + "</feature_touch>";
+        out += "<feature_touch n=\"" + std::to_string( fam->members.size() ) + "\">" + touchListXml( ing, touch, redact ) + "</feature_touch>";
     }
     return out + "</mf>";
 }

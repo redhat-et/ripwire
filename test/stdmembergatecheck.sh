@@ -47,7 +47,8 @@
 #       (map<string, string>, vector<string>, map<K, vector<EvalString>> — the element's own member), an element class with
 #       no candidate, the container's own member, an in-tree template's own operator[], a local hiding the field; two element accesses, an iterator's ->second and a range-for `auto` are
 #       the stated floor (declined)
-#   (D) controls: a name outside the table (`grow`) keeps the ladder; a bare `size( b )` binds the free function; a C
+#   (D) controls: a name outside the table (`grow`) gates nothing by its name (FLIPPED by lane std-namesake: its receiver is a
+#       written std::vector, so arm N drops Vec::grow); a bare `size( b )` binds the free function; a C
 #       function-pointer call (C has no member functions) and a Go call (Go's row is EMPTY) are unchanged
 #   (R) the Rust row (rsgate/): `v.push()` / `v.iter()` on Vec parameters and a parameter of an undefined type are declined
 #       with their <stdm> line; `self.iter()` inside the defining impl stays proven; a name outside the table and a name with no
@@ -66,6 +67,24 @@
 #       declined_calls="3" with dead_code_candidate="0"
 #   (S) 0 bytes on a tree the gate never declined in: test/builtinbindfix's map and callers legends carry no C++ clause
 #   (K) the predicates can fail: a via="name" row and a missing <stdm> line are both caught
+#   (N) lane std-namesake (STD-RECEIVER-NAMESAKE; test/stdnamesakefix/): the receiver WRITTEN as a standard type, whatever the
+#       call's name — get / map / clone / text / source / value / count are in no name table. A local, parameter or field written
+#       `HashMap<K, V>`, `Vec<T>`, `String`, `&str`, `&[T]`, `Option<T>`, `Arc<Mutex<T>>`, a std path, a field one or two hops off
+#       `self` or a typed local, the payload of `if let Some( x ) = &o` under a written `o: Option<Vec<T>>` (Rust); a local,
+#       parameter or field written `std::unique_ptr<T>`, `std::shared_ptr<T>`, `std::optional<T>`, `std::map<K, V>`,
+#       `std::string` (C++, a `.` call) binds NO in-tree namesake and is not declined either: the call is the standard library's
+#       own (N1, red on a pre-lane binary). NEGATIVES, each unchanged from a pre-lane binary: an in-tree receiver keeps its
+#       proven edge (N2); an untyped receiver, an element, a `?` / `.unwrap()` payload, an `Arc<Shelf>` / `Box<Shelf>` (their
+#       members are Shelf's), a shadowing local or closure parameter, a payload of an in-tree type or of a shadowed scrutinee, a
+#       type parameter named like a std type, `std::vector<T>::value_type`, `std::remove_reference_t<T>`, a redeclared C++ local
+#       keep the name tier (N3); a trait's method and an alias's impl stay candidates of a std receiver while the struct's
+#       namesake leaves (N4); a `HashMap` the file imports from another crate, a prelude name under a foreign glob import and a
+#       name the file does not import prove nothing (N5); a tree that DEFINES `Option` proves nothing for a written `Option<T>`
+#       (N6); the callers side: Shelf::get loses its eight by-name std callers and gains no declined_calls (N7); an import that
+#       takes a std name for another item (CR706-STD-ALIAS-SHADOW, test/stdnamesakefix/alias/): `use std::boxed::Box as Vec;`
+#       for a written `Vec<Widget>`, `use crate::wrapper::Wrap as Box;` for `Box<Vec<u8>>`, `use crate::text::Text as str;` for
+#       `&str` prove nothing and keep the name tier, hedged — red on 764727581, which answered count="0" — while `use
+#       std::vec::Vec;`, a prelude `Box<Vec<u8>>` and `&str` beside `use std::str;` (the module) stay proven (N8)
 #   (L) determinism x2, xmllint on every answer whose new clause rides, no degrade alert on stderr
 #
 # Exits non-zero on any failure.
@@ -264,8 +283,10 @@ check "(X) STATED FLOOR: for( auto& e : v ) e.empty() — a range-for auto, decl
 
 # ── (D) controls ──────────────────────────────────────────────────────────────────────────────────────────────
 echo "=== (D) controls: outside the table, bare calls, C and Go keep the ladder ==="
-check "(D) v.grow() — grow is no standard member name, the ladder is unchanged" \
-                                                               callees notInTable          'lib/vec.h:14:Vec::grow~' '' ''
+# FLIPPED by lane std-namesake (arm N): `v` is WRITTEN `std::vector<int>&`, so the in-tree Vec::grow is no candidate whatever
+# the name; the call is external, neither bound nor declined. Arm (N3) holds the ladder control for unproven receivers.
+check "(D) v.grow() on a written std::vector — grow is in no name table; the receiver's type, not the name, drops Vec::grow" \
+                                                               callees notInTable          '' '' ''
 check "(D) size( b ) — a bare call binds the free size, never gated" \
                                                                callees bareFree            'lib/vec.h:34:size' '' ''
 check "(D) C o->size( o ) — C has no member functions, no gate" callees viaPointer         'c/ops.c:8:size~' '' ''
@@ -405,6 +426,72 @@ else
     echo "  SKIP  (L) xmllint not installed"
 fi
 grep -q -i -e 'DISCLOSE' -e 'buildGraph:' "$TMP/err" && no "(L) a degrade alert on stderr: $( head -c 200 "$TMP/err" )" || ok "(L) no degrade alert on stderr"
+
+# ── (N) lane std-namesake: a receiver WRITTEN as a standard type (test/stdnamesakefix/) ─────────────────────────────────────────
+# nsrows TREE SELECTOR: the callees rows of the ONE definition the selector names, in rows()'s spelling; the arm fails (premise)
+# when the answer has no root tag or the selector did not match exactly one definition — a "no rows" arm must have looked.
+NSFIX="$ROOT/test/stdnamesakefix"
+nsrows(){
+    ( cd "$NSFIX/$1" && "$BIN" . --no-cache --callees="$2" 2>/dev/null ) >"$TMP/ns.xml"   # status: the root tag is the verdict; nscheck FAILs the premise when defs= is not 1
+    local R; R="$( root_tag "$TMP/ns.xml" callees )"
+    NS_DEFS="$( attr "$R" defs )"; NS_DECLINED="$( attr "$R" declined_calls )"; NS_STDM="$( stdm "$TMP/ns.xml" )"
+    NS_ROWS="$( rows "$TMP/ns.xml" )"
+}
+nscheck(){   # label | tree | selector | want rows
+    nsrows "$2" "$3"
+    if [ "$NS_DEFS" != "1" ]; then no "$1 $3 — premise: the selector matched defs=\"$NS_DEFS\", not one definition"
+    elif [ "$NS_ROWS" = "$4" ] && [ -z "$NS_DECLINED" ] && [ -z "$NS_STDM" ]; then ok "$1 $3"
+    else no "$1 $3 — got rows [$NS_ROWS] declined_calls=\"$NS_DECLINED\" stdm=\"$NS_STDM\", want [$4] and neither count"; fi
+}
+[ -d "$NSFIX/tree" ] && [ -d "$NSFIX/shadow" ] || no "(N) fixture missing: $NSFIX"
+SM='rs/lib.rs:14:Shelf::map'; RM='rs/other.rs:23:Rack::map'; HG='cpp/a.cc:11:Handle::get'
+# (N1) the standard library's own member: no in-tree row, no decline
+for sel in local_map param_map param_vec param_string param_slice param_option param_arc_mutex qualified_path \
+           Store::field_opt Store::field_vec Store::field_table Deep::two_hop field_of_local payload_some payload_err \
+           Owner::fieldSmartOfHandle Owner::fieldMap Owner::fieldString Owner::fieldThis localSmart paramSmart localOptional paramMap hopField; do
+    nscheck "(N1)" tree "$sel" ""
+done
+# (N2) an in-tree receiver keeps its proven edge
+for sel in in_repo_param Store::field_inner Deep::two_hop_inner; do nscheck "(N2)" tree "$sel" "$SM"; done
+nscheck "(N2)" tree Owner::fieldHandle "$HG"
+nscheck "(N2)" tree Owner::fieldArrow "$HG"
+nscheck "(N2)" tree inRepo "$HG cpp/a.cc:12:Handle::value"
+# (N3) no declaration in scope proves a standard receiver: the name tier stands, hedged
+for sel in index_elem try_payload unwrap_payload arc_deref arc_field shadow_inner payload_intree payload_ok_of_err; do
+    nscheck "(N3)" tree "$sel" "$SM~ $RM~"
+done
+nscheck "(N3)" tree untyped_local "rs/lib.rs:125:make_untyped $SM~ $RM~"
+nscheck "(N3)" tree payload_shadowed "$SM~ rs/lib.rs:40:make_shelf $RM~"
+nscheck "(N3)" tree box_deref "$SM"
+nscheck "(N3)" tree closure_shadow "$SM~ rs/lib.rs:196:Table::text~ rs/lib.rs:20:Shelf::text~ $RM~"
+nscheck "(N3)" tree generic_named_like_std "rs/lib.rs:20:Shelf::text"
+for sel in Owner::fieldSmart untyped Holder::nested Holder::element nestedLocal transformLocal shadowAuto paramShadowed; do
+    nscheck "(N3)" tree "$sel" "$HG~"
+done
+# shadowTyped's inner `Handle p;` shadows the outer std::unique_ptr p, so `p.get()` IS Handle::get: on main ee8d1a50e (train
+# 1117d1) the block-scoped local types the receiver and the edge is proven. The filter must not remove it (rebased onto #705).
+nscheck "(N2)" tree shadowTyped "$HG"
+# (N4) the way back: a trait's method and an alias's impl stay; the struct's namesake leaves
+nscheck "(N4)" tree ext_call "rs/lib.rs:182:VecExt::source~ rs/lib.rs:187:total~"
+nscheck "(N4)" tree alias_impl_call "rs/lib.rs:196:Table::text~"
+nscheck "(N4)" tree param_str "rs/lib.rs:196:Table::text~"
+# (N5) a spelling the file does not tie to std proves nothing
+nscheck "(N5)" tree foreign_map "rs/lib.rs:11:Shelf::get~ rs/other.rs:20:Rack::get~"
+nscheck "(N5)" tree glob_option "$SM~ $RM~"
+nscheck "(N5)" tree unimported "rs/lib.rs:182:VecExt::source~ rs/lib.rs:23:Shelf::source~ rs/other.rs:26:Rack::source~"
+# (N6) a tree that defines `Option`: a written `Option<T>` may be that one
+nscheck "(N6)" shadow shadowed "lib.rs:12:Other::map~ lib.rs:6:Option::map~"
+nscheck "(N6)" shadow Holder::field "lib.rs:12:Other::map~ lib.rs:6:Option::map~"
+# (N7) the callers side: only foreign_map's unproven `m.get( k )` still names Shelf::get, and nothing was declined to get there
+( cd "$NSFIX/tree" && "$BIN" . --no-cache --callers=rs/lib.rs:Shelf::get 2>/dev/null ) >"$TMP/nsc.xml"   # status: the rows are the verdict; a refusal prints none and the arm FAILs
+NSC="$( root_tag "$TMP/nsc.xml" callers )"
+if [ "$( rows "$TMP/nsc.xml" )" = "rs/other.rs:7:foreign_map~" ] && [ -z "$( attr "$NSC" declined_calls )" ]; then ok "(N7) Shelf::get keeps its one unproven caller, no declined_calls"
+else no "(N7) Shelf::get callers — got rows [$( rows "$TMP/nsc.xml" )] declined_calls=\"$( attr "$NSC" declined_calls )\""; fi
+# (N8) an import that takes a std name for another item proves nothing; importing the item as itself still does
+[ -d "$NSFIX/alias" ] || no "(N8) fixture missing: $NSFIX/alias"
+AT='text.rs:3:Text::touch~ widget.rs:3:Widget::touch~ wrapper.rs:3:Wrap::touch~'
+for sel in boxed_alias.rs:via_box wrap_alias.rs:via_wrap str_alias.rs:via_str; do nscheck "(N8)" alias "$sel" "$AT"; done
+for sel in plain_vec plain_box plain_str; do nscheck "(N8)" alias "plain.rs:$sel" ""; done
 
 if [ "$fail" -ne 0 ]; then echo "SOME FAILED"; exit 1; fi
 echo "ALL PASS"

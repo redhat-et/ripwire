@@ -600,7 +600,7 @@ inline SweepFault sweepFaultOf( bool blobsUnread ) noexcept
 inline std::string whereisText( const std::string& root, const std::string& symbol, const std::string& filter,
                                 std::size_t maxHits, McpPageArgs page = {}, bool* seedFault = nullptr,
                                 crossref::WhereisListing listing = crossref::WhereisListing::ShorterOfDefsAll,
-                                SweepFault* fault = nullptr, bool fullText = false )
+                                SweepFault* fault = nullptr, bool fullText = false, RedactCounts* redact = nullptr )
 {
     std::string sel = symbol;
     std::string seedSpec;
@@ -637,7 +637,7 @@ inline std::string whereisText( const std::string& root, const std::string& symb
     {
         res.nearMiss = didYouMean( getIndex( root ).ing, sel );
     }
-    return captureXml( [ & ]( std::FILE* f ) { crossref::writeWhereisPage( f, res, maxHits, page.limit, page.offset, listing ); } );
+    return captureXml( [ & ]( std::FILE* f ) { crossref::writeWhereisPage( f, res, maxHits, page.limit, page.offset, listing, redact ); } );
 }
 
 // `stray_content` verb: per ref, the content its own divergent work authored that the live line lacks.
@@ -2419,7 +2419,7 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, std::strin
     if( budgetTokens > 0 && demoteRulesOn() )
     {
         const std::string after = mcpSlot.xml;
-        const auto        point = [ & ] { return demoteAndPointBlock( ing, in.g, task, mcpHdrXml, sigsStr, after ); };
+        const auto        point = [ & ] { return demoteAndPointBlock( ing, in.g, task, { .before = mcpHdrXml, .block = sigsStr, .after = after } ); };
         const auto        renderAt = [ & ]( std::size_t rowDrop ) { return mcpForRowsAt( in, renderSigs, mcpRows, &mcpSigsNext, rowDrop ); };
         std::string pointed = refillRowsForDemote( mcpSigsCut.rowDropBudgetBytes, [ & ]() -> const std::string& { return sigsStr; },
                                                    [ & ] { return mcpSigsCut.rowDropCut; }, [ & ] { return mcpShownIds.size(); }, renderAt, point );
@@ -2597,7 +2597,7 @@ inline void insertFileSyms( std::string& out, const IngestResult& ing, const Gra
         args.answerOut = &cut;
         std::string syms = renderForFileSyms( ing, g, args );
         const std::string_view shaped = cut.empty() ? args.answer : std::string_view( cut );
-        OneSideReachEdit edit = args.held ? OneSideReachEdit {} : demoteOneSideRows( ing, g, args.task, shaped, syms );
+        OneSideReachEdit edit = args.held ? OneSideReachEdit {} : demoteOneSideRows( ing, g, { .task = args.task, .answer = shaped, .syms = syms } );
         std::string answer = !edit.answer.empty() ? std::move( edit.answer ) : std::move( cut );
         demoteAndPointRowsInto( ing, g, args.task, args.answer, answer, args.held, DemoteRegime::Default ); // SIBLING-DEMOTE, then DECL-TWIN
         if( !answer.empty() )
@@ -3164,7 +3164,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     if( out.ends_with( "</ctx>" ) )
     {
         out.insert( out.size() - 6, renderForDeclRows( ing, ix.g, task, /*held=*/budgetTokens > 0 ) );
-        out.insert( out.size() - 6, renderForExemplarFamily( ing, ix.g, task, /*held=*/budgetTokens > 0 ) );   // EXEMPLAR-STAIRS, the CLI twin's renderer
+        out.insert( out.size() - 6, renderForExemplarFamily( ing, ix.g, task, redact, /*held=*/budgetTokens > 0 ) );   // EXEMPLAR-STAIRS, the CLI twin's renderer
         const McpManifestRows manifest = mcpManifestRowsFitted( ing, task, redact, out, ForDocBodyBudget{ budgetTokens, answerEstTokens } );   // MANIFEST-ROW
         out.insert( out.size() - 6, manifest.xml );
         manifestTokens = manifest.tokens;

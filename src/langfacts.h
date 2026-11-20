@@ -60,6 +60,15 @@ enum class WrittenModuleRule : std::uint8_t
     DirsOnly,
 };
 
+/// Lane std-namesake (STD-RECEIVER-NAMESAKE): how a receiver WRITTEN as a standard type is proven, so a member call on it binds
+/// no in-tree namesake (graph.h stdWrittenReceiverOf). None: the language records no such proof and its calls keep the name tier.
+enum class WrittenStdReceiver : std::uint8_t
+{
+    None,
+    RustSpine,        // the binding's written type spine, each name proven std's in the file (receiverevidence.h rustStdWrittenReceiver)
+    CppStdTemplate,   // the declaration in scope written `std::NAME< … >` (externalnames.h kCppStdReceiverTypes; graph.h StdWrittenReceiverRule)
+};
+
 /// Lane fc2-lego-extparent: which of the file's own import facts can show that an extends / implements clause names a type
 /// from OUTSIDE the tree (graph.h baseBoundOutsideTree), so no in-tree namesake is listed as its base. None: the language's
 /// imports cannot rule one out here (a C# `using`, a Swift `import`, a C++ include: the clause keeps its by-name edge).
@@ -177,6 +186,10 @@ struct LangFacts
     /// (verbs_quality.h; pinned by test/qddegradecheck.sh (E3)).
     bool defectShapeNeedsMacroSet = false;
 
+    /// C, C++: a parameter is written type first and name last, and defectshape.h's C++ lexer reads the signature. The
+    /// similar-argument-list signal (similarargs.h, quality.h similarRunByNode) reads these two languages only.
+    bool typeFirstParameters = false;
+
     /// Rust: a trait's bodyless method signature is no definition the index keeps (only a bodied default is), so a trait's contract
     /// cannot be read off its members. The dispatch tier (ifacedispatch.h) takes the implementors' methods of the called name without
     /// it, and leaves a standard-member name (`clone`, `iter`: graph.h StdMemberGate) to the name tiers as before.
@@ -268,6 +281,11 @@ struct LangFacts
     /// member written `std::shared_ptr<I>` itself (lane iface-peel; the alias record carries the pointee, graph.h
     /// buildFieldNarrowTables follows a bounded alias chain). A `.` call on such a member reaches the smart pointer, never I.
     bool aliasPeelsSmartPointer = false;
+
+    /// Rust, C++: a `.` call on a local, parameter or field whose declaration is written as a standard type runs the standard
+    /// library's own member, so a candidate an in-tree class owns under another name is dropped (lane std-namesake; the proof per
+    /// language is WrittenStdReceiver's).
+    WrittenStdReceiver writtenStdReceiver = WrittenStdReceiver::None;
 
     /// C++ (and every `.h`, which reads as C++; a `.c` file reads with the C grammar and its own query, untouched here, card
     /// C-FUNCTYPE-QUERY): a `using X = Y;` / `namespace L = lib;` definition (tags @definition.alias) records
@@ -468,7 +486,7 @@ inline constexpr std::array<std::string_view, 3> kJavaObjectMethods = { "equals"
 
 /// The rows, one per Lang in enum order. A language says only the facts it has.
 inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
-    { .lang = Lang::Cpp, .basesAsCaptures = true, .defectShapeNeedsMacroSet = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .aliasTargetDefs = true, .memberSeparator = "::",
+    { .lang = Lang::Cpp, .basesAsCaptures = true, .defectShapeNeedsMacroSet = true, .typeFirstParameters = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .writtenStdReceiver = WrittenStdReceiver::CppStdTemplate, .aliasTargetDefs = true, .memberSeparator = "::",
       .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain, .staticLinkage = true,
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .signatureRows = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .qualifierNamesScope = true,
       .typedInstanceRows = true, .xMacroRows = true, .objectMacrosUnindexed = true, .edgeFamily = Lang::C },
@@ -481,7 +499,7 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::Go, .structuralTyping = true, .writtenModule = WrittenModuleRule::PackageDir,
       .memberNeverReachesFreeFunction = true, .moduleCallReachesFunctionsOnly = true, .signatureRows = true,
       .testRunnerEntry = TestRunnerEntry::GoTestName, .memberDecl = MemberDecl::NameThenType },
-    { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .rule3NameProof = Rule3NameProof::RustUse, .preludeCalls = kRustPreludeCalls, .bangMacros = true, .returnTypedDispatchLet = true, .constructorMethod = "new", .memberSeparator = "::", .baseImportEvidence = BaseImportEvidence::RustUse,
+    { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .rule3NameProof = Rule3NameProof::RustUse, .preludeCalls = kRustPreludeCalls, .bangMacros = true, .writtenStdReceiver = WrittenStdReceiver::RustSpine, .returnTypedDispatchLet = true, .constructorMethod = "new", .memberSeparator = "::", .baseImportEvidence = BaseImportEvidence::RustUse,
       .selectorPathKeywords = true, .instanceReceiver = "self", .memberNeverReachesFreeFunction = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .localBraceNotData = true, .armOpeners = ArmOpeners::FatArrow,
       .testRunnerEntry = TestRunnerEntry::RustTestAttr, .attributeRegistersTests = true, .dropRunsAtScopeExit = true },
     { .lang = Lang::Swift, .writtenModule = WrittenModuleRule::DirsOnly, .instanceReceiver = "self",
@@ -503,7 +521,7 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::Json, .notCode = true, .fileEdges = FileEdges::NotApplicable, .configFormat = true },
     { .lang = Lang::CSharp, .overloadsWithoutArity = true, .writtenModule = WrittenModuleRule::DirsOnly,
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .implementorEdges = ImplementorEdges::Read, .armOpeners = ArmOpeners::FatArrow, .memberDecl = MemberDecl::TypeFirst },
-    { .lang = Lang::C, .noNestedNamedFunctions = true, .memberSeparator = "::", .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain,
+    { .lang = Lang::C, .typeFirstParameters = true, .noNestedNamedFunctions = true, .memberSeparator = "::", .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain,
       .staticLinkage = true, .signatureRows = true, .fileEdges = FileEdges::Resolved, .typedInstanceRows = true, .xMacroRows = true },
     { .lang = Lang::Toml, .notCode = true, .hashComment = true, .fileEdges = FileEdges::NotApplicable, .configFormat = true },
     { .lang = Lang::Yaml, .notCode = true, .hashComment = true, .fileEdges = FileEdges::NotApplicable, .configFormat = true },

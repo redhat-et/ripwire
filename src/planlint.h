@@ -120,6 +120,7 @@
 #include "quality.h"      // quality::gitBlameConfigPins / quality::gitOneLine — the shared git-blame plumbing
 #include "gitstamp.h"     // gitstamp::stampAt — the at="<sha>[+dirty]" anchor
 #include "githarden.h"    // githarden::hardenLateRoot — FILE's repository is probed like a request-named root
+#include "redact.h"       // redactInPlace — an <owed> row is a line of the plan file, printed whole
 #include "serialize.h"    // escapeXml / appendCdataSafe
 
 #include <algorithm>
@@ -760,7 +761,8 @@ inline constexpr const char* kPlanLintLegend =
     "than a guessed-at fix. Exit 2 when dialect=\"1\" and gating is non-zero; exit 0 when clean or "
     "dialect=\"0\"; exit 1 only when FILE could not be read — a usage error, never a finding. -->";
 
-inline void writePlanLint( std::FILE* out, const LintResult& res )
+// `redact`: the run's redaction tally, every <owed> line passes it (nullptr: --no-redact). REDACT-TOUCH: the line is printed whole.
+inline void writePlanLint( std::FILE* out, const LintResult& res, RedactCounts* redact )
 {
     std::vector<char> esc;
     const auto         ex = [ & ]( std::string_view s ) { return std::string( escapeXml( s, esc ) ); };
@@ -820,8 +822,10 @@ inline void writePlanLint( std::FILE* out, const LintResult& res )
     for( const OwedRow& o : res.owed )
     {
         rw::emitTo( out, "<owed line=\"{}\"{}>", o.line, o.discharged ? "" : " gating=\"1\"" );
+        std::string text = o.text;
+        redactInPlace( text, redact );
         std::string safe;
-        appendCdataSafe( o.text, safe );
+        appendCdataSafe( text, safe );
         std::fputs( "<![CDATA[", out );
         std::fwrite( safe.data(), 1, safe.size(), out );
         std::fputs( "]]></owed>", out );

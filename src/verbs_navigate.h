@@ -3088,6 +3088,10 @@ std::optional<int> runPathServed( const MainDispatch& d, std::span<const rw::Nod
                                  }
                                  return *pthValueIdx;
                              } );
+        if( !inForBlock )
+        {
+            rw::reportRedactions( stderr, d.redactCounts );   // REDACT-TOUCH: hop and route bodies, and a hop's call=, are redacting seams; inside --for the --for run reports
+        }
         return 0;
     }
     return std::nullopt;

@@ -116,6 +116,7 @@ kKeep	none:parse-cache eviction count: a work bound, the bytes are unchanged (St
 kLineStartReach	none:the snap window of a line-start search, not a cut (Stage 0 audit)
 kLintDefaultPayloadBytes	sink:saturatedRules,lintDefaultShown
 kLitHubFanIn	none:a rank threshold, not a cut (Stage 0 audit)
+kMacroArgNestingDepth	sink:discloseMacroArgNesting
 kManifestFileRows	sink:capped
 kManifestLineMax	sink:cut
 kManifestRowsPerFile	sink:capped

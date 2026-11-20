@@ -25,6 +25,7 @@
 #include "scipoverlay.h"         // SCIP precision overlay (data struct only; parser lives in scip.h)
 #include "pincensus.h"           // eval-only per-call-site decision census (--pin-census); inert unless armed
 #include "externalnames.h"       // Phase 5: the committed builtin/stdlib tables behind the external-name veto
+#include "pyscopepin.h"          // PY-CLASS-SPRAY: a bare Python call binds through its lexical scope chain (pythonLexicalScopePin)
 #include "infra/sortutil.h"      // radix edge sorting for large integer-key graph edge lists
 #include "clones.h"              // scanCodeTokens / CodeScanOptions — BuiltinMethodGate::namedBeyondDefinition's code-token count
 #include "infra/mdslug.h"        // mdSlugOf — bindMarkdownLinks matches a link slug to a heading
@@ -10232,6 +10233,326 @@ inline bool rustUseOutsideBareCall( const Reference& r, const RustUseSiteFacts& 
     return !ownFileNamesake && !f.falseEdges.isLocalOfCaller( r ) && rustUseLeavesTree( f.types, r );
 }
 
+// ── lane std-namesake (STD-RECEIVER-NAMESAKE, test/stdmembergatecheck.sh N): the receiver WRITTEN as a standard type ──────────
+// StdMemberGate declines by the call's NAME and leaves generic names alone (get, map, clone, reset, value, count:
+// externalnames.h says why). This rule decides by the receiver's own DECLARATION, whatever the name: a `.` call on a local,
+// parameter or field declared `std::unique_ptr<T>` / `std::map<K, V>` (C++), or on one written `HashMap<K, V>` / `Option<T>` /
+// `&str` (Rust, receiverevidence.h rustStdWrittenReceiver), runs the standard library's own member, so an in-tree class's
+// method of that name is no candidate. The receiver's standard type is answered only where the declaration IN SCOPE at the
+// call proves it; every doubt answers nothing and the name tier stands as it was. The rule only ever REMOVES candidates.
+// C++ proofs. A NAMED receiver: its innermost lexical declaration (Rule 2's own table) is written in std; a name outside that
+// table is proven only when EVERY declaration of it in the definition is one (each VarDecl record shares its byte with a
+// std-written Type record: an `auto` or unqualified redeclaration in another block refuses). A name no local declares is the
+// caller's class's FIELD, as C++ looks it up; `this->f_` and one hop off a typed root (`b.f_`) are fields too. A field is
+// proven by its own records: a std smart pointer's pointee (FlatRecvType::arrowOnly: `.` reaches the pointer), a std element
+// container (the "elem" record), a two-segment std type (`std::string name_;`) — and never when a same-named class declares
+// the member any other way. The spelling must be `std::NAME` or `std::NAME< … >` and nothing after it, NAME a row of
+// externalnames.h kCppStdReceiverTypes: `std::vector<T>::value_type` and `std::decay_t<T>` name user types. A `->` call is
+// never read here (its pointee is the receiver; StdMemberGate and the receiver rules answer it).
+// buildGraph's own readers come in as callables: fieldTypeIn( class, member ) (Rule 2b's field table), addNamed( out, ref,
+// scope, viaArrow ) (a root's written classes) and ownerIsClass( candidate ).
+template<class FieldTypeIn, class AddNamed, class OwnerIsClass>
+class StdWrittenReceiverRule
+{
+public:
+    using DeclIndex = HashMap<std::string, rw::SmallVec<std::uint32_t, 1>>;
+    StdWrittenReceiverRule( const IngestResult& ing, const Narrower& narrower, const HashMap<std::string, char>& localNames, const DeclIndex& stdQualifiedDecls,
+                            const ReceiverEvidence& recvEv, const FieldTypeIn& fieldTypeIn, const AddNamed& addNamed, const OwnerIsClass& ownerIsClass, bool anyCpp )
+        : ing_( ing ), narrower_( narrower ), localNames_( localNames ), stdQualifiedDecls_( stdQualifiedDecls ), recvEv_( recvEv ),
+          fieldTypeIn_( fieldTypeIn ), addNamed_( addNamed ), ownerIsClass_( ownerIsClass )
+    {
+        if( anyCpp )
+        {
+            collectCppFields();
+            collectCppVarDecls();
+        }
+    }
+
+    // Per call, where the resolve loop has its name-only candidates: a NAME-ONLY member call the name table does not gate
+    // (`nameGated` false), on a receiver written as a standard type. True when NO candidate (nor Rule 3's) is one it may run:
+    // the call is the standard library's own member — external, like any call the tree does not define (no decline: nothing
+    // was unproven). The receiver's proof stays for this call's declineList / pruneTier.
+    bool runsOnlyStd( const Reference& r, bool nameOnly, bool nameGated, std::span<const NodeId> cand, std::span<const NodeId> rule3 )
+    {
+        head_.reset();
+        ref_ = &r;
+        if( !nameOnly || nameGated || r.role != RefRole::Call || !r.qualifier.empty() || !isMemberCallRef( r )
+            || langFacts( r.lang ).writtenStdReceiver == WrittenStdReceiver::None )
+        {
+            return false;
+        }
+        head_ = writtenHead( r );
+        const auto mayRun = [ this ]( NodeId c ) { return mayRunCandidate( c ); };
+        return head_.has_value() && std::none_of( cand.begin(), cand.end(), mayRun ) && std::none_of( rule3.begin(), rule3.end(), mayRun );
+    }
+    // the candidates of `list` a decline records: with a proven standard receiver, only those it may run (all of them when none may)
+    std::span<const NodeId> declineList( std::span<const NodeId> list )
+    {
+        if( !head_.has_value() )
+        {
+            return list;
+        }
+        kept_.clear();
+        std::copy_if( list.begin(), list.end(), std::back_inserter( kept_ ), [ this ]( NodeId c ) { return mayRunCandidate( c ); } );
+        return kept_.empty() ? list : std::span<const NodeId>( kept_ );
+    }
+    // The tier's half: the candidates a proven standard receiver may not run leave what the ladder bound. True when nothing is
+    // left: the call is declined on the candidates it may still run, which the ladder did not reach (a far trait method).
+    bool pruneTier( std::vector<NodeId>& tier, bool bindingPinned ) const   // `bindingPinned`: a binding pinned the call, the tier stands
+    {
+        const auto mayNot = [ this ]( NodeId c ) { return !mayRunCandidate( c ); };
+        if( bindingPinned || !head_.has_value() || std::none_of( tier.begin(), tier.end(), mayNot ) )
+        {
+            return false;
+        }
+        std::erase_if( tier, mayNot );
+        return tier.empty();
+    }
+
+private:
+    struct CppStdField
+    {
+        std::string_view head;            // the std type every std declaration of the member spells ("" a smart pointer of an unread template)
+        bool             mixed = false;   // a declaration of the member that is not such a type, or two heads
+    };
+
+    // `std::NAME` / `std::NAME< … >` with nothing after it, NAME a kCppStdReceiverTypes row: NAME, else ""
+    static std::string_view cppStdHeadOfText( std::string_view written )
+    {
+        constexpr std::string_view kStd = "std::";
+        if( !written.starts_with( kStd ) )
+        {
+            return {};
+        }
+        written.remove_prefix( kStd.size() );
+        const std::size_t open = written.find( '<' );
+        if( open != std::string_view::npos )
+        {
+            int         depth = 0;
+            std::size_t close = std::string_view::npos;
+            for( std::size_t i = open; i < written.size() && close == std::string_view::npos; ++i )
+            {
+                depth += written[ i ] == '<' ? 1 : written[ i ] == '>' ? -1 : 0;
+                close = depth == 0 ? i : close;
+            }
+            if( close == std::string_view::npos || !trimWs( written.substr( close + 1 ) ).empty() )
+            {
+                return {};   // `std::vector<T>::value_type`, an unbalanced text: not the template itself
+            }
+        }
+        const std::string_view head = trimWs( written.substr( 0, open ) );
+        return externalnames::inSortedTable( externalnames::kCppStdReceiverTypes, head ) ? head : std::string_view{};
+    }
+    static bool isCppStdReceiverName( std::string_view name ) { return externalnames::inSortedTable( externalnames::kCppStdReceiverTypes, name ); }
+
+    // "Class#member", in ReceiverEvidence's own key buffer (typeKey), read before its next call
+    const std::string& keyOf( std::string_view cls, std::string_view member ) const { return recvEv_.typeKey( cls, "#", member ); }
+    const std::string& namedKey( NodeId from, std::string_view var )
+    {
+        key_.clear();
+        Narrower::appendUint( key_, from );
+        key_.push_back( '#' );
+        key_.append( var );
+        return key_;
+    }
+    void noteStdField( std::string_view cls, std::string_view member, std::string_view head )
+    {
+        const auto [ it, fresh ] = cppStdFields_.try_emplace( keyOf( cls, member ), CppStdField{ head, false } );
+        it->second.mixed = it->second.mixed || ( !fresh && it->second.head != head );
+    }
+    // every std-written declaration of a member ("Class#field", the bare class name as Rule 2b keys it); then any other
+    // declaration of the same key refuses it
+    void collectCppFields()
+    {
+        for( const Reference& r : ing_.references )
+        {
+            if( !r.isCompose || langFacts( r.lang ).writtenStdReceiver != WrittenStdReceiver::CppStdTemplate || r.fromSymbol == kNoNode || r.qualifier != "std" )
+            {
+                continue;
+            }
+            const std::string& owner = ing_.symbols[ r.fromSymbol ].name;
+            const bool         plain = !r.fieldName().empty() && !r.calleeName.empty();
+            if( plain && ( r.viaArrow || isCppStdReceiverName( r.calleeName ) ) )
+            {
+                // `std::unique_ptr<std::string> s_;` (a std pointer of a std pointee) / `std::string name_;`
+                noteStdField( owner, r.fieldName(), r.viaArrow ? std::string_view{} : std::string_view( r.calleeName ) );
+            }
+            else if( r.fieldName().empty() && r.composeRel() == "elem" && !r.recvVar.empty() && isCppStdReceiverName( r.calleeName ) )
+            {
+                noteStdField( owner, r.recvVar, r.calleeName );   // `std::map<K, V> items_;`
+            }
+        }
+        for( const Reference& r : ing_.references )
+        {
+            if( cppStdFields_.empty() || !r.isCompose || r.fromSymbol == kNoNode || r.fieldName().empty() || r.calleeName.empty() )
+            {
+                continue;
+            }
+            const bool stdRecord = langFacts( r.lang ).writtenStdReceiver == WrittenStdReceiver::CppStdTemplate && r.qualifier == "std"
+                                && ( r.viaArrow || isCppStdReceiverName( r.calleeName ) );
+            if( const auto it = stdRecord ? cppStdFields_.end() : cppStdFields_.find( keyOf( ing_.symbols[ r.fromSymbol ].name, r.fieldName() ) ); it != cppStdFields_.end() )
+            {
+                it->second.mixed = true;
+            }
+        }
+    }
+    // "<fromSymbol>#var" → the VarDecl bytes of a name with a std-written declaration
+    void collectCppVarDecls()
+    {
+        for( const auto& [ k, decls ] : stdQualifiedDecls_ )
+        {
+            if( std::any_of( decls.begin(), decls.end(), [ & ]( std::uint32_t i ) { return namesStdType( ing_.bindings[ i ].importedName ); } ) )
+            {
+                cppStdVarDecls_.try_emplace( k );
+            }
+        }
+        for( const Binding& b : ing_.bindings )
+        {
+            if( cppStdVarDecls_.empty() || b.kind != LocalBindKind::VarDecl || b.fromSymbol == kNoNode || b.var.empty() )
+            {
+                continue;
+            }
+            if( const auto it = cppStdVarDecls_.find( namedKey( b.fromSymbol, b.var ) ); it != cppStdVarDecls_.end() )
+            {
+                it->second.push_back( b.startByte );
+            }
+        }
+    }
+
+    // a member of `cls` (or of the base that declares it, for a smart pointer) as a std-written field: its std type's name
+    std::optional<std::string_view> cppStdFieldHead( const std::string& cls, std::string_view member )
+    {
+        if( const FlatRecvType* typed = fieldTypeIn_( cls, member ); typed != nullptr && !typed->type.empty() )
+        {
+            return typed->arrowOnly ? std::optional<std::string_view>( std::string_view{} ) : std::nullopt;   // a std smart pointer, else an in-tree type
+        }
+        const std::size_t cut = cls.rfind( "::" );
+        const auto        it  = cppStdFields_.find( keyOf( cut == std::string::npos ? std::string_view( cls ) : std::string_view( cls ).substr( cut + 2 ), member ) );
+        return it == cppStdFields_.end() || it->second.mixed ? std::nullopt : std::optional<std::string_view>( it->second.head );
+    }
+    // a named local or parameter: its innermost declaration in scope, else every qualified declaration of it in the definition
+    std::optional<std::string_view> cppStdLocalHead( const Reference& ref, const std::string& key, bool& declared )
+    {
+        declared = true;
+        if( const auto scoped = narrower_.scopedDecls.byName.find( key ); scoped != narrower_.scopedDecls.byName.end() )
+        {
+            const ScopedRecvDecl* const decl = Narrower::innermostCoveringDecl( scoped->second, ref.startByte );
+            if( decl == nullptr || decl->typeBinding >= kRecvDeclConflicted )
+            {
+                return std::nullopt;   // no declaration in scope or a tie (the table cannot tell which), an untyped or conflicted one
+            }
+            const Binding&         b    = ing_.bindings[ decl->typeBinding ];
+            const std::string_view head = b.kind == LocalBindKind::ReturnType ? std::string_view{} : cppStdHeadOfText( b.importedName );
+            return head.empty() ? std::nullopt : std::optional<std::string_view>( head );
+        }
+        if( const auto decls = cppStdVarDecls_.find( key ); decls != cppStdVarDecls_.end() )
+        {
+            const auto&            typed = stdQualifiedDecls_.find( key )->second;
+            const std::string_view head  = cppStdHeadOfText( ing_.bindings[ typed.front() ].importedName );
+            const bool allStd = !head.empty() && std::all_of( typed.begin(), typed.end(), [ & ]( std::uint32_t i ) { return cppStdHeadOfText( ing_.bindings[ i ].importedName ) == head; } );
+            const bool allDeclared = !decls->second.empty() && std::all_of( decls->second.begin(), decls->second.end(), [ & ]( std::uint32_t byte )
+            {
+                return std::any_of( typed.begin(), typed.end(), [ & ]( std::uint32_t i ) { return ing_.bindings[ i ].startByte == byte; } );
+            } );
+            return allStd && allDeclared && narrower_.recvVarTypeName( ref ).empty() ? std::optional<std::string_view>( head ) : std::nullopt;
+        }
+        const auto lit = localNames_.find( key );
+        declared       = lit != localNames_.end() && ( lit->second & kLocalNameDeclared ) != 0;   // a declared local the tables above do not prove hides the field
+        return std::nullopt;
+    }
+    std::optional<std::string_view> cppReceiverHead( const Reference& ref )
+    {
+        if( ref.viaArrow || ref.fromSymbol == kNoNode )
+        {
+            return std::nullopt;
+        }
+        const std::string& callerScope = ing_.symbols[ ref.fromSymbol ].scope;
+        if( ref.recv == RecvKind::FieldOfThis && !ref.fieldName().empty() )
+        {
+            return cppStdFieldHead( callerScope, ref.fieldName() );
+        }
+        if( ref.recv == RecvKind::FieldOfVar && !ref.recvVar.empty() && !ref.fieldName().empty() && !ref.memberCall )
+        {
+            root_.clear();
+            addNamed_( root_, ref, callerScope, /*viaArrow=*/true );   // the root's written classes, a smart pointer's pointee included
+            const bool oneRoot = root_.types.size() == 1 && !root_.opaqueArrow;
+            return oneRoot ? cppStdFieldHead( std::string( root_.types.front() ), ref.fieldName() ) : std::nullopt;
+        }
+        if( ref.recv != RecvKind::NamedVar || ref.recvVar.empty() )
+        {
+            return std::nullopt;
+        }
+        const std::string                     key = namedKey( ref.fromSymbol, ref.recvVar );
+        bool                                  declared = false;
+        const std::optional<std::string_view> local    = cppStdLocalHead( ref, key, declared );
+        return local.has_value() || declared ? local : cppStdFieldHead( callerScope, std::string_view( ref.recvVar ) );
+    }
+    // The standard type a member call's receiver is written as — its bare name ("unique_ptr", "HashMap", "[]"; "" for a C++ smart
+    // pointer whose template was not read) — or nullopt when no declaration in scope proves one.
+    std::optional<std::string_view> writtenHead( const Reference& ref )
+    {
+        if( langFacts( ref.lang ).writtenStdReceiver == WrittenStdReceiver::CppStdTemplate )
+        {
+            return cppReceiverHead( ref );
+        }
+        const std::string_view head = recvEv_.rustStdWrittenReceiver( ref );
+        return head.empty() ? std::nullopt : std::optional<std::string_view>( head );
+    }
+    // May the proven receiver run candidate `c`? C++: only a member of a class NAMED like the type (the tree's own
+    // specialization, or a standard-library source tree) — the language has no other way in. Rust: not a method an in-tree
+    // struct, enum or union OWNS under another name; a trait's method, an alias's, the type's own name
+    // (rustStdReceiverMayReach) and a method no class owns (`impl Ext for Vec<T>`, a blanket impl, a macro-made one) are kept.
+    bool mayRunCandidate( NodeId c ) const
+    {
+        const std::string_view head = *head_;
+        if( langFacts( ref_->lang ).writtenStdReceiver == WrittenStdReceiver::CppStdTemplate )
+        {
+            // a member of the standard class itself: the candidate's own scope, class or not (an unowned method is no std member)
+            const std::string_view scope = namesplit::afterLast( ing_.symbols[ c ].scope, "::" );
+            const std::string_view bare  = namesplit::afterLast( head, "::" );
+            return bare.empty() ? StdMemberGate::isStdArrowTemplate( scope ) : scope == bare;
+        }
+        const std::string_view owner = ownerIsClass_( c );
+        return owner.empty() || recvEv_.rustStdReceiverMayReach( owner, head );
+    }
+
+    const IngestResult&                                  ing_;
+    const Narrower&                                      narrower_;
+    const HashMap<std::string, char>&                    localNames_;
+    const DeclIndex&                                     stdQualifiedDecls_;
+    const ReceiverEvidence&                              recvEv_;
+    const FieldTypeIn&                                   fieldTypeIn_;
+    const AddNamed&                                      addNamed_;
+    const OwnerIsClass&                                  ownerIsClass_;
+    HashMap<std::string, CppStdField>                    cppStdFields_;     // "Class#field" (bare class name, as Rule 2b keys it)
+    HashMap<std::string, rw::SmallVec<std::uint32_t, 1>> cppStdVarDecls_;   // "<fromSymbol>#var" → VarDecl bytes
+    StdMemberGate::Receiver                              root_;             // reused: a FieldOfVar root's written classes
+    std::string                                          key_;              // reused key buffer
+    std::vector<NodeId>                                  kept_;             // reused: declineList's answer
+    const Reference*                                     ref_ = nullptr;    // the call runsOnlyStd last read
+    std::optional<std::string_view>                      head_;             // …and its receiver's proven standard type
+};
+
+// moved out of buildGraph by train 1117d2 (quality-delta). The inheritance overlay's class-like kinds: Class, Interface, Struct, NamedType..FuncType
+inline bool isClassLikeKind( SymKind k ) noexcept { return CallResultTypes::classKind( k ) || isStructOrNamedType( k ); }
+inline bool sameComposePair( const ComposeEdge& a, const ComposeEdge& b ) noexcept { return a.ownerSym == b.ownerSym && a.fieldName == b.fieldName; }
+inline bool sameRouteEdge( const RouteEdge& a, const RouteEdge& b ) noexcept { return a.fromSym == b.fromSym && a.toSym == b.toSym && a.path == b.path; }
+// the arity rule the dispatch tier shares with B2.2: a known argument count over an exact arity, or under `paramsMin` (its fewest)
+inline bool callArityCannotTake( const Reference& ref, const Symbol& cs, std::uint16_t paramsMin ) noexcept
+{
+    return ref.argCountKnown && ( ( cs.arityExact != 0 && ref.argCount > cs.params ) || ref.argCount < paramsMin );
+}
+inline bool pythonScopePinAt( const PythonLexicalScopes& scopes, const IngestResult& ing, const ExternalVetoTables& veto, const Reference& r, std::vector<NodeId>& cand )
+{
+    const auto moduleUnread = [ & ]
+    {
+        std::string key;
+        return ( r.fileId < veto.pythonScopes.starTargets.size() && !veto.pythonScopes.starTargets[ r.fileId ].empty() )   // a star import
+            || veto.pythonModuleRebind.contains( fileNameKey( key, r.fileId, kPythonDynamicWrite ) );                       // `globals()` / `setattr`
+    };
+    return cand.empty() && !scopes.empty() && isPythonBareCall( r ) && pythonLexicalScopePin( scopes, ing, r, moduleUnread, cand );
+}
+
 inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = nullptr, bool census = false )
 {
     PROFILE_SCOPE_DESCRIBE( "buildGraph: resolve refs + build CSR" );
@@ -10572,6 +10893,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // census row with no target.
     const ExternalVeto externalVeto{ ing, canonByName, fieldNarrow.localNameSet, extVeto };
     const PythonRenamedImports pyRenamedImports = buildPythonRenamedImports( ing );   // PY-IMPORT-ALIAS-CALL (pythonRenamedImportPin)
+    const PythonLexicalScopes  pyScopes         = buildPythonLexicalScopes( ing, byName );   // PY-CLASS-SPRAY (pythonLexicalScopePin)
     // The builtin-method name gate (BuiltinMethodGate above): decides, in Rule 3's place, the calls whose name is a
     // method of the caller language's builtin map/list/set/string type. Inert (active=false) on a corpus with no
     // symbol in a gated language.
@@ -10644,8 +10966,6 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     const RubyBaseScope rubyBases = buildRubyBaseScope( ing );
     g.rubyBasesUnscoped = rubyBases.disclosure.unscoped;   // ruby_bases_unscoped= (absent at zero)
     {
-        const auto isClassLikeK = []( SymKind k ) noexcept
-        { return k == SymKind::Class || isStructOrNamedType( k ) || k == SymKind::Interface; };
         PROFILE_SCOPE_DESCRIBE( "buildGraph/2h: CHA-lite inheritance name graph" );
         for( const Reference& ir : ing.references )
         {
@@ -10666,7 +10986,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             { // Rust impl → derived type name in qualifier
                 derivedName = ir.qualifier;
             }
-            else if( ir.fromSymbol != kNoNode && ( isClassLikeK( ing.symbols[ ir.fromSymbol ].kind )
+            else if( ir.fromSymbol != kNoNode && ( isClassLikeKind( ing.symbols[ ir.fromSymbol ].kind )
                                                    || BuiltinMethodGate::isClassLike( ing.symbols[ ir.fromSymbol ] ) ) )
             {
                 derivedName = ing.symbols[ ir.fromSymbol ].name;          // the derived class header — or a Ruby module's mixin
@@ -10874,21 +11194,19 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 {
                     // lane iface-peel: `-> &dyn T` — the local is SOME implementor of T (the dispatch tier reads it); same
                     // position, no unwrap at the call, and the Rust path qualifier check as for a class result
-                    if( langFacts( cs.lang ).returnTypedDispatchLet && rt.resultIndex == cr.resultIndex && cr.unwrapDepth == 0
-                        && recvEv.rustQualifierTypes( r, cr.importedName, callee, rt.isFromAssignment ) )
+                    if( langFacts( cs.lang ).returnTypedDispatchLet && rt.resultIndex == cr.resultIndex && cr.unwrapDepth == ( rt.unwrapDepth & ~kDispatchResultBit )
+                        && recvEv.rustQualifierTypes( r, cr.importedName, callee, rt.isFromAssignment ) )   // an `async fn`'s only when awaited
                     {
                         recvEv.typeCallResultDispatch( cr, rt );
                         break;
                     }
                     continue;
                 }
-                const bool          match = rt.resultIndex == cr.resultIndex && ( rule2Sink ? rt.unwrapDepth <= 1 : rt.unwrapDepth == cr.unwrapDepth )
-                                            && recvEv.rustQualifierTypes( r, cr.importedName, callee, rt.isFromAssignment );   // Rust T::f(): its T reaches f's class
+                const auto [ match, cls ] = recvEv.matchCallResult( r, cr, rt, callee, rule2Sink );
                 if( !match )
                 {
                     continue;
                 }
-                const NodeId cls = recvEv.types.resultClassOf( rt, cs.lang );
                 if( cls != kNoNode && rule2Sink )
                 {
                     typeRule2CallResult( cr, ri, rt.unwrapDepth == 1 );
@@ -11426,6 +11744,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     {
         return recv.opaqueArrow || std::any_of( recv.types.begin(), recv.types.end(), [ & ]( std::string_view t ) { return writtenTypeReaches( t, from, ids ); } );
     };
+    // lane std-namesake: a member call on a receiver WRITTEN as a standard type binds no in-tree namesake (StdWrittenReceiverRule)
+    StdWrittenReceiverRule stdWritten( ing, narrower, fieldNarrow.localNameSet, stdQualifiedDecls, recvEv, fieldTypeIn, addNamed, ownerIsClass, anyCppDefinition );
     rw::SmallVec<NodeId, 2>  rubyReachable; // reused per-call buffer: the candidates a Ruby call to self can reach (RubySelfReach)
 
     // ---- the resolve loop's dense per-candidate views (cli-perf-068) ---------------------------------------------------
@@ -11805,11 +12125,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // answer committed (outProv=6, rendered via="impl"); the arity rule it shares with the name tiers' B2.2 filter below.
     const IfaceDispatch          ifaceTier( ing, recvEv, g.implementors, g.implementorBound, implementorsOpen );   // reads ing.bindings' ImplBlock spans too
     std::vector<NodeId>          ifaceCand;   // reused: one call's dispatch candidates
-    const auto arityCannotTake = [ & ]( const Reference& ref, NodeId c ) noexcept
-    {
-        const Symbol& cs = ing.symbols[ c ];
-        return ref.argCountKnown && ( ( cs.arityExact != 0 && ref.argCount > cs.params ) || ref.argCount < paramsMinOf[ c ] );
-    };
+    const auto arityCannotTake = [ & ]( const Reference& ref, NodeId c ) noexcept { return callArityCannotTake( ref, ing.symbols[ c ], paramsMinOf[ c ] ); };
 
     // M0 MEM-STATS: the side-table plateau (the headline peak's base), and how full the tables sized at declaration are —
     // size / bucket count, where a bucket is 8 zero-filled bytes the reserve touched whether or not an entry ever lands in it
@@ -12121,6 +12437,22 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                                        [ & ]( NodeId c ) { return langCompatible( symLang[ c ], r.lang ) && sameRoot( c, r.fileId ); } );
             canonical = !cand.empty();
         }
+        // RUST-PATH-OWNER (receiverevidence.h rustPathOwners): the tier matched a Rust path's scope NAME; the type the path resolves to
+        // where it is written decides among same-named types — the one it names, external=, a decline, a hedge over every candidate
+        // (nameOnly below), or the ladder's own split that no locality tie-break narrows
+        const ReceiverEvidence::RustPathOwners rustPath = recvEv.rustPathOwners( r, cand, canonical );
+        if( rustPath == ReceiverEvidence::RustPathOwners::External )
+        {
+            disposition = vetoExternal( r );
+            continue;
+        }
+        if( rustPath == ReceiverEvidence::RustPathOwners::Decline )
+        {
+            recordDecline( r, cand, DeclinedSiteKind::Ladder );
+            disposition = CallDisposition::Declined;
+            continue;
+        }
+        const bool rustPathHedge = rustPath == ReceiverEvidence::RustPathOwners::Hedge;
         // ── L3 fn-pointer/callback binding resolve — BEFORE Rule 1, because a local variable shadows a
         // same-named class member or global in real C++ name lookup. A bare call `fn()` whose name has ANY
         // var→function binding visible at this call site is a call THROUGH THE VARIABLE: it resolves via
@@ -12218,6 +12550,11 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 narrowed     = true;
                 importPinned = true;
             }
+        }
+        // PY-CLASS-SPRAY: a bare Python call binds what the first binding scope of its chain (LEGB) binds by def / class (pythonScopePinAt)
+        if( !scipPinned && !canonical && !narrowed )
+        {
+            narrowed = pythonScopePinAt( pyScopes, ing, extVeto, r, cand );
         }
         if( !scipPinned && r.role == RefRole::Call && r.recv == RecvKind::None && r.qualifier.empty()
             && ( r.lang == Lang::TypeScript || r.lang == Lang::JavaScript ) )
@@ -12629,7 +12966,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         const rw::SmallVec<NodeId, 2>* baseIds = namesakeIds;
         if( !scipPinned && !canonical && !narrowed && baseIds != nullptr && bindingTier.empty() )
         {
-            switch( falseEdges.decide( r, *baseIds, feKept ) )
+            switch( recvEv.types.rustBareNarrow( r, falseEdges.decide( r, *baseIds, feKept ), *baseIds, feKept, [ & ] { return falseEdges.isLocalOfCaller( r ); } ) )   // + a Rust bare call's `use`
             {
                 case FalseEdgeRules::Verdict::External: disposition = vetoExternal( r ); continue;
                 case FalseEdgeRules::Verdict::Local:    ++g.unresolvedOut[ r.fromSymbol ]; disposition = CallDisposition::Unresolved; continue;
@@ -13011,7 +13348,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // with none proven the call is NAME-ONLY: the tier below keeps every same-file and same-directory candidate (and a
         // member call's included-file ones) instead of one locality pick, each edge marked via="name" — D1 holds a single
         // candidate to the same rule, because one candidate is not evidence.
-        bool nameOnly = false;
+        bool nameOnly = rustPathHedge;   // RUST-PATH-OWNER: a hedged path call lists every candidate (the tier below)
         bool nameOnlyAnyFile = false, nameOnlyAnyDir = false;   // which rung the classic ladder would have stopped at (rank weight)
         // TRIAL (#373): the candidates Ruby's own lookup PROVES are the call's answer, like any other proof
         if( hedgeEligible && !narrowed && rubySelf != nullptr && !cand.empty() )
@@ -13132,6 +13469,13 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         {
             stdReceiverOf( r, stdRecv );
         }
+        // std-namesake (StdWrittenReceiverRule): a name-only member call on a receiver WRITTEN as a standard type that no
+        // candidate may run is the standard library's own member — external, not declined
+        if( stdWritten.runsOnlyStd( r, nameOnly, stdIndex != StdMemberGate::kNotStd, cand, memberRule3 ) )
+        {
+            disposition = vetoExternal( r );
+            continue;
+        }
         // ---- tier ladder (the name-based fallback) — SKIPPED when SCIP pinned this site, and for Rule 2's class-identity CLAIM (a type fact, not a locality guess)
         const bool identityClaim = narrowed && narrower.identityClaimFor( r );
         if( !scipPinned && ( r.lang == Lang::Elixir || identityClaim ) ) { tier = cand; }
@@ -13190,8 +13534,9 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                     const bool dir  = fileDir[ ing.symbols[ c ].fileId ] == rdir;
                     const bool rule3File = std::find( memberRule3.begin(), memberRule3.end(), c ) != memberRule3.end();
                     // RULE3-MEMBER-GUARD: a call no written binding reaches names this file's own definition or Rule 3's file (hedged), never a directory
-                    // namesake; through a local or parameter Rule 3's file is no better a guess than the namesakes, so there only this file's own stay
-                    if( rule3NoProof ? ( file || ( rule3File && !rule3Local ) ) : ( file || dir || rule3File ) )
+                    // namesake; through a local or parameter Rule 3's file is no better a guess than the namesakes, so there only this file's own stay.
+                    // A hedged Rust path call (RUST-PATH-OWNER) keeps every candidate: each is a member of a type the path's name may mean
+                    if( rule3NoProof ? ( file || ( rule3File && !rule3Local ) ) : ( file || dir || rule3File || rustPathHedge ) )
                     {
                         tier.push_back( c );
                         anyFile = anyFile || file;
@@ -13216,7 +13561,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                     }
                     else
                     {
-                        recordDecline( r, cand, DeclinedSiteKind::Ladder );
+                        recordDecline( r, stdWritten.declineList( cand ), DeclinedSiteKind::Ladder );
                         if( stdIndex != StdMemberGate::kNotStd && !stdReceiverKeeps( stdRecv, r.fromSymbol, cand ) )
                         {
                             g.stdMemberDeclines.emplace_back( r.fromSymbol, stdIndex );   // the <stdm> line names it too
@@ -13410,7 +13755,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // declaring the member is a genuine split (the shape Rule 2c also keeps whole), not a locality race.
         if( !scipPinned && !bindingPinned && r.lang != Lang::Elixir && tier.size() > 1 && !ing.symbols[ r.fromSymbol ].scope.empty()
          && r.recv != RecvKind::FieldOfThis && r.recv != RecvKind::FieldOfVar && r.recv != RecvKind::SuperObj && !identityClaim
-         && !isJsTsLitRecv( r.recv ) && r.recv != RecvKind::JavaTypeCandidate && !nameOnly )   // FE-B: a name-only call keeps every candidate
+         && !isJsTsLitRecv( r.recv ) && r.recv != RecvKind::JavaTypeCandidate && !nameOnly   // FE-B: a name-only call keeps every candidate
+         && rustPath != ReceiverEvidence::RustPathOwners::Split )   // RUST-PATH-OWNER: same-named types the path cannot tell apart are a genuine split (#74)
         {
             const std::string& callerCanon = g.localityKeyAt( r.fromSymbol );   // == canonId here (the caller is scoped)
             const std::size_t localityCap = receiverLocalityCap( r, receiverTypeNarrowed, ing.files[ ing.symbols[ r.fromSymbol ].fileId ] );
@@ -13584,6 +13930,15 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 disposition = CallDisposition::Declined;
                 continue;
             }
+        }
+
+        // std-namesake, the tier's half: the candidates a proven standard receiver may not run leave what the ladder bound; with
+        // nothing left the call is declined on those it may still run (a far trait method): counted, no row
+        if( stdWritten.pruneTier( tier, bindingPinned ) )
+        {
+            recordDecline( r, stdWritten.declineList( cand ), DeclinedSiteKind::Ladder );
+            disposition = CallDisposition::Declined;
+            continue;
         }
 
         // lane fcall-forward fix 1 (B1, test/fcallforwardcheck.sh N7 N8 N10 N11 H): a FORWARDED call — `f.call( … )` standing
@@ -14105,9 +14460,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                    return a.fieldName < b.fieldName;
                } );
     {
-        const auto samePair = []( const ComposeEdge& a, const ComposeEdge& b ) noexcept
-        { return a.ownerSym == b.ownerSym && a.fieldName == b.fieldName; };
-        g.composeEdges.erase( std::unique( g.composeEdges.begin(), g.composeEdges.end(), samePair ), g.composeEdges.end() );
+        g.composeEdges.erase( std::unique( g.composeEdges.begin(), g.composeEdges.end(), sameComposePair ), g.composeEdges.end() );
     }
 
     // B6.3 HTTP-route USE→DEF edges: match ing.routeUses against ing.routeDefs by (method, path) — see
@@ -14120,8 +14473,6 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // USEs (matching zero) synthesize NO edge — never a guess (mirrors the amb=/unresolved= honesty posture).
     {
         PROFILE_SCOPE_DESCRIBE( "buildGraph/8: HTTP-route edges" );
-        const auto isFunctionLike = []( SymKind k ) noexcept { return k == SymKind::Function || k == SymKind::Method; };
-
         std::vector<NodeId> defHandler( ing.routeDefs.size(), kNoNode );   // per-DEF resolved handler symbol
         for( std::size_t d = 0; d < ing.routeDefs.size(); ++d )
         {
@@ -14137,7 +14488,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             }
             for( NodeId cand : it->second )
             {
-                if( isFunctionLike( ing.symbols[ cand ].kind ) && ing.symbols[ cand ].fileId == rd.fileId )
+                if( ReceiverEvidence::callableKind( ing.symbols[ cand ].kind ) && ing.symbols[ cand ].fileId == rd.fileId )
                 { defHandler[d] = cand; break; }                           // ids ascending → lowest-id match (deterministic)
             }
         }
@@ -14199,8 +14550,6 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                        }
                        return a.path < b.path;
                    } );
-        const auto sameRouteEdge = []( const RouteEdge& a, const RouteEdge& b ) noexcept
-        { return a.fromSym == b.fromSym && a.toSym == b.toSym && a.path == b.path; };
         g.routeEdges.erase( std::unique( g.routeEdges.begin(), g.routeEdges.end(), sameRouteEdge ), g.routeEdges.end() );
     }
 

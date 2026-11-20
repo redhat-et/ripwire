@@ -967,6 +967,14 @@ Discloses: **none**
 | `kMaxRestUnits` | `20000` | — | — |
 | `kMaxRoleBytes` | `400` | — | a role's closing backtick must be this near, on one paragraph |
 
+### `src/ingest_rustmacroargs.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kMacroArgNestingDepth` | `16` | INDEXING | — |
+
 ### `src/ingest_sidecap.h`
 
 Discloses: **none**
@@ -1343,6 +1351,7 @@ Discloses: **none**
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
+| `kChainHopCap` | `64` | INDEXING | hops walked below one call; a longer chain is a floor (no class) |
 | `kWalkCap` | `64` | INDEXING | classes visited per base walk; deterministic (sorted chaUp) |
 
 ### `src/redact.h`
