@@ -119,7 +119,7 @@ mkfx(){
 }
 # target: complexity+nesting (grow), verbosity (chatty), params (wide 5->6), api-surface (api_scale 1->2, a header),
 # error-masking (an emptied catch), dead-code (legacy_used loses its caller), duplication + new-clone-of-reused-helper
-# (helper, fan-in 3, copied), placeholder (a TODO, a NotImplementedError stub), defect-shape (a .format arity miss)
+# (helper, fan-in 3, copied), placeholder (a TODO, a NotImplementedError stub), defect-shape (a .format arity miss); tangle (sweep, new)
 mktarget(){
     local R="$1"
     printf '#pragma once\ninline int api_scale( int a, int b ) { return a * b; }\n' >"$R/src/api.h"
@@ -142,6 +142,12 @@ mktarget(){
         printf 'int drive( int x ) { return use1( x ) + use2( x ) + use3( x ) + wide( 1, 2, 3, 4, 5, 6 ) + grow( x ) + api_scale( x, 2 ) + chatty( x ); }\n'
     } >"$R/src/core.cpp"
     printf 'int helper_copy( int a, int b ) { int s = 0; for( int i = 0; i < a; ++i ) { s += i * b; if( s > 100 ) { s -= b; } } return s + a - b; }\n' >"$R/src/copy.cpp"
+    {   # tangle (a NEW function: a 90-line body whose statements sit at nesting 6 — a new-symbol row, never gating)
+        printf 'int sweep( int n )\n{\n    int r = 0;\n    for( int a = 0; a < n; ++a ) {\n        for( int b = 0; b < a; ++b ) {\n'
+        printf '            if( a %% 2 ) {\n                while( r < b ) {\n                    if( b %% 3 ) {\n                        for( int c = 0; c < 2; ++c ) {\n'
+        for i in $( seq 1 80 ); do printf '                            r += c * %s;\n' "$i"; done
+        printf '                        }\n                    }\n                    ++r;\n                }\n            }\n        }\n    }\n    return r;\n}\n'
+    } >"$R/src/deep.cpp"
     printf 'def other():\n    # TODO: wire this up\n    return 1\n\ndef greet(name):\n    return "hello {} {}".format(name)\n\ndef later():\n    raise NotImplementedError\n' >"$R/py/mod.py"
     g "$R" add -A; g "$R" commit -qm target
 }
