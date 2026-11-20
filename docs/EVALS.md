@@ -19309,3 +19309,62 @@ The unread token names a language, not a symbol: it says the language's value us
 use is known and no slot caller is: it is not a second copy of `slot_by=`, but the two overlap on rows that have both.
 The budget accounting does not charge the two legend comments (written by `packHops` beside the section, the way `via="name"`'s is);
 the section's `est_tokens` charge does include them. `--token-budget` ceilings were not re-measured with them.
+
+## Clone operand path and the repeated-decision facet (QD-LESSONS-1, 2026-11-19)
+
+**Mechanism.** `src/cloneidiom.h` "THE OPERAND PATH" defines the clone operand path, and `src/repeateddecision.h`
+defines the facet. Gates: `test/cloneoperandcheck.sh` and `test/repeateddecisioncheck.sh`.
+
+**Census method.** The whole `--quality-delta` output was taken on the base binary (lane/qd-tangle 2bb05d7dd) and on
+the lane binary, with `--no-cache`, one process at a time. Every changed `<r>`/`<sa>`/`<i>` row was classed by a
+script. Ranges:
+- ripwire VA-FORMS 33f7a1eac..708348e97;
+- qd-tangle 43ea570d1..c9028aad9 / ..bd037e226;
+- the two slip commits fb23cb777 and d04531421;
+- the last 20 first-parent merges;
+- tmux 8d3172f4~20..8d3172f4 and ~60..~20;
+- textual 06dbeef4b~20..06dbeef4b;
+- a synthetic envoy range: base = head with `source/common/router` and `source/extensions/filters/network` removed.
+
+| range | gating base → lane | rows demoted by the operand path (literals / types) | complexity/tangle rows gaining the repeated-decision fix= |
+| --- | --- | --- | --- |
+| VA-FORMS | 13 → 3 | 7 / 3 | 9 |
+| qd-tangle (c9028aad9) | 23 → 21 | 2 / 0 | 8 |
+| qd-tangle (bd037e226) | 4 → 4 | 0 | 3 |
+| slip fb23cb777 / d04531421 | 1 → 1 / 2 → 2 | 0 | 1 / 0 |
+| last 20 merges | 8 → 8 | 0 | 14 |
+| tmux 20 / 60 | 37 → 37 / 41 → 36 | 0 / 1 + 4 | 4 / 5 |
+| textual 20 | 18 → 18 | 0 | 2 |
+| envoy synthetic | 1,863 → 1,234 | 345 / 284 (+78 why= on rows already minor or new) | 14 |
+
+No other row changed. `regressions=` and the row count are equal on every range.
+
+**What still gates.**
+- The 3 VA rows still gating are by design. `emptyUnder|picksAlone` is 84 tokens. `isIdent|isWordChar` share the
+  literal `0x80` and a callee; they print as a duplication row plus a new-clone row.
+- The real duplicates still gate: `writeHexPairLines|writeTangleLines`, `JsonNode::get|steer_find` and
+  `lintCatalogFind|steer_find`.
+
+**Hand-checks.**
+- The tmux demotions are reset-struct and unpack-and-call pairs over different structs.
+- 24 random envoy demotions: 21 are idiom collisions over different data (enum converters, constructors, factory
+  `create`s). 3 are borderline. The worst is `HeaderUtility::matchHeaders | ConfigUtility::matchQueryParams`: the
+  "all matchers match" loop over `HeaderDataPtr` vs `QueryParameterMatcherPtr`, which a generic helper could serve.
+  0 are verbatim copies.
+
+**Repeated-decision precision.** Across the non-synthetic ranges, 42 distinct fix= rows were read:
+- 5 cloned loops, including `chooseInWindow`, the case the facet was built from;
+- about 25 repeated tests of the same state;
+- about 9 repeated predicates over a moving cursor, where naming the predicate is the fix;
+- 3 re-tests of a fact that changes in between (`memguard::overHardLimit()`, `!qsnapGet(…)`, tmux
+  `event_initialized`). For these "decide once" is the wrong advice.
+
+The facet is report-only.
+
+**Recall miss.** `defGroupsDropSilent` (d04531421) has no complexity row: its ccx is under the bar, so the facet has
+no row to ride on. The fixture covers the detector, but this range does not show it.
+
+**Guard-off.** Removing the guards turns the negatives red:
+- operand path: shared literals allowed, generic members comparable, no ceiling, no context test. N1 and N3-N6 go
+  red. N2 stays green: its two reverse find-by-key loops spell the same literal set, and the type half does not fire on them either. It is a recall pin, not a guard pin.
+- facet: minimum length 1, no statement test, no bracket stop, overlap allowed. N2-N5 go red.

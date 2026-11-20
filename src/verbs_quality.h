@@ -1894,6 +1894,29 @@ inline constexpr const char* kQdMemoryPeakLegend =
     "they would be without it (complete, or the changed-files answer ingest_scope= names), but the last stretch of the "
     "comparison ran past the limit the guard holds between phases. ";
 
+// Whether any in-scope or disclosed row satisfies `pred` — the present-only test of a legend sentence.
+template <typename Pred>
+inline bool qdAnyLegendRow( const QualityDeltaLegendParts& p, Pred pred )
+{
+    return std::ranges::any_of( p.rows, pred ) || std::ranges::any_of( p.disclosedRows, pred );
+}
+
+// QD-IDIOM-ELEMTYPE's sentence when a clone row carries why=, else "" (kept out of emitQualityDeltaLegend's own branches).
+inline const char* qdOperandLegendFor( const QualityDeltaLegendParts& p )
+{
+    const bool any = qdAnyLegendRow( p, []( const rw::quality::Regression& r )
+                                     { return ( r.kind == "duplication" || r.kind == "new-clone-of-reused-helper" ) && !r.why.empty(); } );
+    return any ? kQdOperandLegend : "";
+}
+
+// QD-REPEATED-DECISION's sentence when a row's fix= names a repeated decision or loop, else "".
+inline const char* qdRepeatedDecisionLegendFor( const QualityDeltaLegendParts& p )
+{
+    const bool any = qdAnyLegendRow( p, []( const rw::quality::Regression& r )
+                                     { return r.fix.contains( rw::decision::kNameDecisionFix ) || r.fix.contains( rw::decision::kNameLoopFix ); } );
+    return any ? kQdRepeatedDecisionLegend : "";
+}
+
 // A DEFINITION IS EMITTED WHEN THE THING IT DEFINES IS IN THE DOCUMENT. Nothing is dropped and no limit is
 // softened: a reader can never meet an undefined name, because a name and its sentence appear together or
 // not at all. See the constants above for what each section covers and why it is conditional.
@@ -1935,16 +1958,6 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
     const auto anyTangleRow = [] ( const std::vector<rw::quality::Regression>& v )
     {
         return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return r.kind == "tangle"; } );
-    };
-    const auto anyOperandRow = [] ( const std::vector<rw::quality::Regression>& v )
-    {
-        return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r )
-                            { return ( r.kind == "duplication" || r.kind == "new-clone-of-reused-helper" ) && !r.why.empty(); } );
-    };
-    const auto anyRepeatedDecisionRow = [] ( const std::vector<rw::quality::Regression>& v )
-    {
-        return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r )
-                            { return r.fix.find( rw::decision::kNameDecisionFix ) != std::string::npos || r.fix.find( rw::decision::kNameLoopFix ) != std::string::npos; } );
     };
 
     std::fputs( kQdLegendCore, out );
@@ -2050,10 +2063,7 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
             {
                 std::fputs( kQdOneStatementLegend, out );
             }
-            if( anyOperandRow( p.rows ) || anyOperandRow( p.disclosedRows ) )
-            {
-                rw::emitRaw( out, kQdOperandLegend );
-            }
+            rw::emitRaw( out, qdOperandLegendFor( p ) );
         }
         if( anyMinorMaskRow( p.rows ) || anyMinorMaskRow( p.disclosedRows ) )
         {
@@ -2079,10 +2089,7 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
         {
             rw::emitRaw( out, kQdTangleLegend );
         }
-        if( anyRepeatedDecisionRow( p.rows ) || anyRepeatedDecisionRow( p.disclosedRows ) )
-        {
-            rw::emitRaw( out, kQdRepeatedDecisionLegend );
-        }
+        rw::emitRaw( out, qdRepeatedDecisionLegendFor( p ) );
     }
     if( p.ratchetRead )
     {
