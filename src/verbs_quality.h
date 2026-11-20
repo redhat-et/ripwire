@@ -2622,13 +2622,10 @@ inline void emitQdGatingLine( const std::vector<rw::quality::Regression>& regs, 
     }
 }
 
-// A present-only JSON string member of a --quality-delta row: ,"name":"value" when `v` is non-empty, nothing otherwise.
-inline void emitJsonStrIfPresent( std::FILE* out, const char* name, const std::string& v )
+// A present-only JSON string member of a --quality-delta row: `,"name":"value"` when `v` is non-empty, empty otherwise.
+inline std::string presentJsonMember( std::string_view name, const std::string& v )
 {
-    if( !v.empty() )
-    {
-        rw::emitTo( out, ",\"{}\":\"{}\"", name, rw::jsonStr( v ).c_str() );
-    }
+    return v.empty() ? std::string() : ",\"" + std::string( name ) + "\":\"" + rw::jsonStr( v ) + "\"";
 }
 
 // A present-only XML attribute of a --quality-delta row: ` name="escaped"` when `v` is non-empty, empty otherwise;
@@ -3128,7 +3125,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                 {
                     rw::emitTo( stdout, ",\"ceiling\":{}", r.ceiling ); // QD-ENTRY-CEILING (mirrors the XML)
                 }
-                emitJsonStrIfPresent( stdout, "call", r.call );   // QD-UNCHECKED-STATUS (mirrors the XML)
+                rw::emitRaw( stdout, presentJsonMember( "call", r.call ).c_str() );   // QD-UNCHECKED-STATUS (mirrors the XML)
                 std::fputs( quality::tangleRowAttrs( r, /*json=*/true, []( std::string_view s ) { return jsonStr( s ); } ).c_str(), stdout );   // QD-TANGLE (mirrors the XML)
                 rw::emitRaw( stdout, "}" );
             };
