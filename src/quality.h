@@ -11541,9 +11541,14 @@ inline void appendTangleRatchet( std::vector<Regression>& regs, const IngestResu
 // jsExportsOf fell 85 -> 82, and the pair crossed 0.8 as a "new" clone — a duplication row and a new-clone-of-reused-helper row, both
 // gating, about an edit that REMOVED code and copied none. The rule: when every member existed at the base, some member's body
 // shrank, and no pair's shared LCS grew, the row is reported minor with why= saying so. A pair whose LCS grew (code was copied in,
-// even while a member shrank) still gates, and so does a group with a member the base did not hold, an overload on either side, or
-// a body the base commit could not be read for: the rule judges only what both commits show.
+// even while a member shrank) still gates, and so does a group with a member the base did not hold, a member cut to under half its
+// base body (a rewrite), an overload on either side, or a body the base commit could not be read for: the rule judges only what both
+// commits show.
 inline constexpr std::size_t kShrinkJudgedMaxMembers = 4;   // up to 6 LCS pairs per side; a larger group is judged as before
+// A member whose body was CUT to under 1/kShrinkMaxCut of its base tokens is a rewrite the rule cannot judge: a long base body holds
+// most short bodies as a subsequence, so its base LCS saturates and "shared code did not grow" proves nothing (census 11-20: textual's
+// ColorSystem::generate, 1569 -> 22 tok, a new dispatcher whose base LCS with a 26-token validator was already 24). It gates as before.
+inline constexpr std::size_t kShrinkMaxCut = 2;
 
 // A gating clone row (duplication or new-clone-of-reused-helper) and the group it names: the rule's input.
 struct ShrinkCandidate
@@ -11595,7 +11600,8 @@ inline std::optional<std::vector<ShrinkMember>> shrinkMembersOf( const CloneGrou
     return out;
 }
 
-// The row's why= when the group crossed by shrinking alone, else "": some member has fewer tokens now, and no pair's LCS grew.
+// The row's why= when the group crossed by shrinking alone, else "": some member has fewer tokens now, none was cut to under half,
+// and no pair's LCS grew.
 inline std::string shrinkOnlyWhy( const std::vector<ShrinkMember>& members, const IngestResult& ing, const Graph& g )
 {
     std::vector<std::uint32_t> prev, cur;
@@ -11603,6 +11609,10 @@ inline std::string shrinkOnlyWhy( const std::vector<ShrinkMember>& members, cons
     {
         return cloneLcsLen( std::span( a ).first( std::min( a.size(), kType3MaxTokensForLcs ) ), std::span( b ).first( std::min( b.size(), kType3MaxTokensForLcs ) ), prev, cur );
     };
+    if( std::ranges::any_of( members, []( const ShrinkMember& m ) { return m.head.size() * kShrinkMaxCut < m.base.size(); } ) )
+    {
+        return {};   // a body cut to under half: a rewrite, its base LCS saturated
+    }
     std::size_t baseLcs = 0, headLcs = 0;   // the pair's (a group reads "no pair's LCS rose")
     for( std::size_t i = 0; i < members.size(); ++i )
     {
