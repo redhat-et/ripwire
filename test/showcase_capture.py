@@ -32,15 +32,29 @@ os.makedirs(AUX, exist_ok=True)
 # --since window from what the PUBLISHED block shows — see chooseInWindow below — and cannot do that
 # with the formatters defined after the table that needs them) ------------------------------------
 def explode(text):
-    """Re-wrap minified single-line XML/JSON at tag seams for display (real output is one line)."""
+    """Re-wrap minified single-line XML/JSON at tag seams for display (real output is one line).
+
+    A long line is XML to re-wrap when it CONTAINS a tag seam, not only when it STARTS with one
+    (SHOWCASE-TAIL-SEAM, 2026-11-20, IN5). The seam test used to be `startswith("<")`, which cannot see the
+    line that CLOSES an answer whose last payload is a CDATA body: the raw line reads
+    `}]]></b></fold><tail total=…><t …></tail><!-- legend --></ctx>` and begins with the body's own `}`. It
+    was therefore left whole — one 300-byte-truncated display line — so the entire tail of an answer-first
+    `--for` document, its trailing LEGEND included, never became display lines at all and
+    trailing_legend_start had nothing it could keep. MEASURED on this repo's own
+    `--for="tree-sitter parse of a source file" --adaptive`: 91 display lines with the tail glued into the
+    last one, against 164 once the seam test looks inside, where the final six ARE the trailing legend —
+    which is how the `[adaptive: kept N of N]` clause that case's caption names reaches the page. The JSON
+    branch is tested FIRST so an object line keeps its own seams, and a line under the 300-byte cut is
+    untouched either way."""
     lines = []
     exploded = False
     for ln in text.split("\n"):
-        if len(ln) > 300 and ln.lstrip().startswith("<"):
-            lines.extend(ln.replace("><", ">\n<").split("\n"))
-            exploded = True
-        elif len(ln) > 300 and ln.lstrip().startswith("{"):
+        stripped = ln.lstrip()
+        if len(ln) > 300 and stripped.startswith("{"):
             lines.extend(ln.replace("},{", "},\n{").replace('],"', '],\n"').split("\n"))
+            exploded = True
+        elif len(ln) > 300 and ( stripped.startswith("<") or "><" in ln ):
+            lines.extend(ln.replace("><", ">\n<").split("\n"))
             exploded = True
         else:
             lines.append(ln)
