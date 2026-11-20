@@ -12,13 +12,14 @@
 #   (P2) Python: the chooseInWindow shape (two pass loops with one body) names the loop
 #   (N1) a complex function with no repeat carries no fix=
 #   (N2) a 3-token condition (`p == nullptr`) tested twice is not named — a single fact, cheap to re-test
-#   (N3) Python: two comprehensions on one line are not a repeated loop (their `for` opens no statement)
-#   (N4) Python: a conditional expression's `if` repeated is not a repeated decision
+#   (N3) Python: a comprehension whose `for` starts its line is not a loop (the closing `]` ends its header), twice
+#   (N4) Python: a conditional expression's `if` repeated is not a repeated decision (it does not start its line)
+#   (N5) Python: nested identical loop headers — each body's first 12 tokens overlap the next — are not a repeated loop
 #   (S)  the row's severity and gating are what they are without the facet: every row here is origin="new-symbol"
-#   (C)  PREMISE COUNT — all six rows found; a missing row FAILS
+#   (C)  PREMISE COUNT — all seven rows found; a missing row FAILS
 #   (L)  a document with the facet defines it (full legend); one without carries no such sentence
-# Red-before: on a binary without the facet, P1 and P2 FAIL. Guard-off (no minimum condition length, no statement test):
-# N2, N3 and N4 FAIL.
+# Red-before: on a binary without the facet, P1 and P2 FAIL. Guard-off (no minimum condition length, no statement test, no
+# bracket stop, overlapping repeats allowed): N2, N3, N4 and N5 FAIL.
 #
 # Usage:  bash test/repeateddecisioncheck.sh [BIN]
 
@@ -160,17 +161,55 @@ def choose_window(passes, last, lo, hi, probe, first):
 
 
 def comprehensions(rows, lo, hi, mode):
-    """N3: two comprehensions on one line; N4: one conditional expression twice."""
-    a, b = [r for r in rows if r > lo], [r for r in rows if r > lo]
+    """N3: a comprehension whose `for` starts its line, twice."""
+    a = [r
+         for r in rows if r > lo]
+    b = rows[lo:hi]
+    total = sum(b) + len(b) + max(b)
+    c = [r
+         for r in rows if r > lo]
+    b = rows[lo:hi]
+    total = sum(b) + len(b) + max(b)
+    for r in rows:
+        if r > hi and mode:
+            if r > lo:
+                if r > total:
+                    if r < hi * 2:
+                        if a and c:
+                            return r
+    return None
+
+
+def condexpr(rows, lo, hi, mode):
+    """N4: one conditional expression twice, each followed by a loop header's colon."""
     x = hi if mode is not None and mode > lo else lo
+    for r in rows:
+        print(r)
     y = hi if mode is not None and mode > lo else lo
+    for r in rows:
+        print(x, y)
     for r in rows:
         if r > hi and mode:
             if r > lo:
                 if r > x:
                     if r > y:
-                        if a and b:
+                        if x and y:
                             return r
+    return None
+
+
+def nested(xs, f, g):
+    """N5: five nested identical loop headers; each body's first tokens overlap the next, so no body repeats."""
+    for a in xs:
+        for a in xs:
+            for a in xs:
+                for a in xs:
+                    for a in xs:
+                        if f(a) and g(a) or a > 3:
+                            if a < 9 and f(a + 1):
+                                if g(a - 1) or a == 5:
+                                    if f(a) and a != 7:
+                                        return a
     return None
 EOF
 
@@ -199,11 +238,17 @@ N2="$( crow guarded )"
 if need "(N2)" "$N2"; then
     case "$N2" in *'name the decision once'*) no "(N2) a 3-token guard was named (row: $N2)";; *) ok "(N2) a 3-token guard is not named";; esac
 fi
-N34="$( crow comprehensions )"
-if need "(N3/N4)" "$N34"; then
-    seen=$(( seen + 1 ))
-    case "$N34" in *'name the loop once'*) no "(N3) comprehensions read as a repeated loop (row: $N34)";; *) ok "(N3) two comprehensions are not a repeated loop";; esac
-    case "$N34" in *'name the decision once'*) no "(N4) a conditional expression read as a repeated decision (row: $N34)";; *) ok "(N4) a conditional expression is not a decision";; esac
+N3="$( crow comprehensions )"
+if need "(N3)" "$N3"; then
+    case "$N3" in *'fix='*) no "(N3) a comprehension read as a loop or a decision (row: $N3)";; *) ok "(N3) a line-start comprehension is not a loop";; esac
+fi
+N4="$( crow condexpr )"
+if need "(N4)" "$N4"; then
+    case "$N4" in *'name the decision once'*) no "(N4) a conditional expression read as a repeated decision (row: $N4)";; *) ok "(N4) a conditional expression is not a decision";; esac
+fi
+N5="$( crow nested )"
+if need "(N5)" "$N5"; then
+    case "$N5" in *'name the loop once'*) no "(N5) overlapping loop bodies read as a repeat (row: $N5)";; *) ok "(N5) overlapping loop bodies are not a repeat";; esac
 fi
 
 echo "── (S) severity unchanged"
@@ -213,7 +258,7 @@ for r in "$P1" "$P2"; do
 done
 
 echo "── (C) premise count"
-if [ "$seen" -eq 6 ]; then ok "(C) all six rows found"; else no "(C) $seen of 6 rows found"; fi
+if [ "$seen" -eq 7 ]; then ok "(C) all seven rows found"; else no "(C) $seen of 7 rows found"; fi
 
 echo "── (L) legend"
 FULL="$( "$BIN" "$R" --quality-delta --no-cache --legend=full 2>/dev/null )"

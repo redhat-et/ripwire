@@ -1159,22 +1159,35 @@ struct CloneIdiomVerdict
 inline constexpr std::string_view kIdiomIndexLiterals[] = { "0", "1" };
 inline constexpr std::string_view kIdiomValueKeywords[] = { "true", "false", "nullptr", "NULL", "null", "nil", "None", "True", "False" };
 
-// Sorted + unique FNV-1a of a body's literals (kIdiomIndexLiterals left out).
-inline std::vector<std::uint64_t> idiomLiteralSet( const std::vector<IdiomTok>& body )
+// Sorted + unique FNV-1a of the body tokens `keep` accepts: the one set builder the literal set and the
+// whole-body identifier set (condition (2) outside the narrowed idioms) both read.
+template <typename Keep>
+inline std::vector<std::uint64_t> idiomTokenHashSet( const std::vector<IdiomTok>& body, Keep keep )
 {
     std::vector<std::uint64_t> out;
     for( const IdiomTok& t : body )
     {
-        const bool literal = t.kind == CodeTokenKind::Number || t.kind == CodeTokenKind::String;
-        if( literal ? std::ranges::contains( kIdiomIndexLiterals, t.text ) : !std::ranges::contains( kIdiomValueKeywords, t.text ) )
+        if( keep( t ) )
         {
-            continue;
+            out.push_back( fnv1a64( t.text ) );
         }
-        out.push_back( fnv1a64( t.text ) );
     }
     std::sort( out.begin(), out.end() );
     out.erase( std::unique( out.begin(), out.end() ), out.end() );
     return out;
+}
+
+// A literal the operand path compares (kIdiomIndexLiterals left out; the value keywords counted).
+inline bool idiomComparedLiteral( const IdiomTok& t )
+{
+    const bool literal = t.kind == CodeTokenKind::Number || t.kind == CodeTokenKind::String;
+    return literal ? !std::ranges::contains( kIdiomIndexLiterals, t.text ) : std::ranges::contains( kIdiomValueKeywords, t.text );
+}
+
+// Sorted + unique FNV-1a of a body's literals.
+inline std::vector<std::uint64_t> idiomLiteralSet( const std::vector<IdiomTok>& body )
+{
+    return idiomTokenHashSet( body, idiomComparedLiteral );
 }
 
 namespace cloneidiomdetail
@@ -1242,15 +1255,7 @@ inline MemberShape memberShapeOf( const Symbol& s, const std::string& bytes )
         out.alpha = f.alpha;
         return out;
     }
-    for( const IdiomTok& t : toks )
-    {
-        if( t.kind == CodeTokenKind::Identifier )
-        {
-            out.ids.push_back( fnv1a64( t.text ) );
-        }
-    }
-    std::sort( out.ids.begin(), out.ids.end() );
-    out.ids.erase( std::unique( out.ids.begin(), out.ids.end() ), out.ids.end() );
+    out.ids = idiomTokenHashSet( toks, []( const IdiomTok& t ) { return t.kind == CodeTokenKind::Identifier; } );
     return out;
 }
 
