@@ -363,6 +363,7 @@ for _g in \
     capdisclosurecheck \
     cappedbodycheck \
     capsweepcheck \
+    carriedpageboundcheck \
     ccheck \
     ccjsoncheck \
     ceilingverdictcheck \
