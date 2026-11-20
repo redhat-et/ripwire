@@ -269,7 +269,7 @@ Thresholds/definitions are the catalog in [`quality-metrics.md`](quality-metrics
 
 These 13 kinds aren't a generic lint list. Ten target an agent-code degradation mode validated at large N
 (verbosity, structural erosion, smell rate, contract drift; passing tests ≠ clean design); `placeholder` is an
-honesty check on your own "done"; `defect-shape` is four defect shapes code review kept finding by hand. Numbers + why the
+honesty check on your own "done"; `defect-shape` is five defect shapes code review kept finding by hand. Numbers + why the
 loop must be continuous, not a one-time prompt → [`quality-metrics.md`](quality-metrics.md).
 
 **Read the Fix column as DIRECTION, not a computed answer.** None of these 13 kinds has a corpus-derivable
