@@ -34,6 +34,10 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-20, lane QD-UNHANDLED-ARM (over lane/qd-unchecked-status ebf7240f3): RE-PINNED with UPDATE_GOLDEN=1. kQSnapCacheScheme
+#   37 -> 38: a sixth defect-shape facet (unhandled-arm) adds sites, defectSitesOf builds a tree-wide C/C++ enum table, scans
+#   C files holding a switch and every Bash file (not test scripts only). No blob shape change; kParserVer / kCacheVersion
+#   unchanged. The train may renumber the scheme.
 # 2026-11-19, lane QD-UNCHECKED-STATUS (E3b, over lane/qd-va-forms 7f98c7ab4): RE-PINNED with UPDATE_GOLDEN=1. kQSnapCacheScheme
 #   35 -> 37 (36 is qd-tangle's reservation): a defect-shape site value carries its facet in three low bits, not two (a fifth facet,
 #   unchecked-status), so every stored site value moves; defectSitesOf now scans C files and every Python file. No blob shape
