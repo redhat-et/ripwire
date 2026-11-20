@@ -102,8 +102,10 @@ RUN_TIMEOUT_S = 3600   # one cold --no-cache run over a whole corpus; generous o
 def timed_run(binp, corpus, extra=None):
     """One --no-cache run. Returns (seconds, stdout_bytes, stderr_text).
 
-    Bounded; a timeout or a signal-kill (rc < 0, e.g. the OS killing a runaway run) stops the A/B with that
-    state named, so a run that never finished can never be read as a timing sample or as an arm's map."""
+    Bounded; a timeout, a signal-kill (rc < 0, e.g. the OS killing a runaway run) or ANY non-zero exit stops the A/B
+    with that state named, so a run that never finished can never be read as a timing sample or as an arm's map. The
+    equivalence check only covers the preflight run, so a refused REPETITION (the memory ceiling: exit 5, empty stdout)
+    would otherwise enter `samples` as a timing with its output discarded."""
     cmd = [binp, corpus, "--no-cache"] + (extra or [])
     t0 = time.perf_counter()
     try:
@@ -112,6 +114,9 @@ def timed_run(binp, corpus, extra=None):
         sys.exit(f"TIMEOUT ({RUN_TIMEOUT_S}s): {' '.join(cmd)}")
     if p.returncode < 0:
         sys.exit(f"KILLED (signal={-p.returncode}): {' '.join(cmd)}")
+    if p.returncode:
+        err = (p.stderr or b"").decode("utf-8", "replace").strip()[:400]
+        sys.exit(f"FAILED (exit={p.returncode}): {' '.join(cmd)}\n{err}")
     return time.perf_counter() - t0, p.stdout, p.stderr.decode("utf-8", "replace")
 
 

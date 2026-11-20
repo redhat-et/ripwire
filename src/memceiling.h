@@ -30,6 +30,10 @@
 // readers never allocate (a Mach call, a procfs read into a stack buffer, GetProcessMemoryInfo), so they are safe inside
 // operator new. RIPWIRE_STATS prints how many readings a run took (`[mem] ceiling`, memstats.h).
 //
+// A READING THE OS CANNOT GIVE is a degrade path, not a pass: every reader answers 0 when it fails (a failed task_info,
+// an unreadable /proc/self/statm), and that allocation is then admitted UNCHECKED. It is disclosed on stderr the first
+// time it happens and counted in `[mem] ceiling unreadable=`, so it is never a silent zero (noteUnreadable).
+//
 // THE REFUSAL. One stderr line, written with os::write from a stack buffer (no allocation, no stdio lock), then std::_Exit(5).
 // No destructor runs: nothing partial is persisted (the ingest cache is written by rename, so it is the old blob or none), and
 // stdio buffers are NOT flushed, so a map still being assembled prints nothing. A verb that had already flushed part of its
@@ -75,6 +79,8 @@ struct State
     std::atomic<const char*>   phase{ "ingest" };         // the last phase boundary passed (memstats::mark), a literal
     std::atomic<std::uint64_t> readings{ 0 };             // footprint readings taken (RIPWIRE_STATS)
     std::atomic<std::uint64_t> largeReadings{ 0 };        // of which on a large allocation
+    std::atomic<std::uint64_t> unreadable{ 0 };           // of which the OS could not answer: admitted UNCHECKED (noteUnreadable)
+    std::atomic<bool>          saidUnreadable{ false };   // the one-per-run disclosure of that degrade path
     char                       label[ kLabelBytes ]{};    // the limit as the refusal names it, written once by arm()
     std::size_t                labelSize = 0;
 };
@@ -160,6 +166,43 @@ struct LineBuffer
     }
 };
 
+// the one write both lines below use: os::write to fd 2 until the buffer is out, no stdio lock, no allocation
+inline void writeLine( const LineBuffer& line ) noexcept
+{
+    std::size_t done = 0;
+    while( done < line.used )
+    {
+        const auto n = os::write( 2, line.text + done, line.used - done );
+        if( n <= 0 )
+        {
+            break;
+        }
+        done += std::size_t( n );
+    }
+}
+
+// THE SILENT ZERO. os::mem_footprint() answers 0 when the OS cannot say (a failed task_info on macOS, an unreadable
+// /proc/self/statm on Linux). The allocation is then admitted UNCHECKED — refusing every run on a host whose reader is
+// unavailable would be far worse than not checking — and that is a degrade path, so it is DISCLOSED rather than silent:
+// one stderr line the first time, and a count for RIPWIRE_STATS (`[mem] ceiling unreadable=`) so a run that admitted
+// unchecked allocations says how many. The line is written with the same stack buffer and os::write the refusal uses,
+// because DISCLOSE's handler formats and can allocate, and nothing inside operator new may do that.
+inline void noteUnreadable() noexcept
+{
+    g_state.unreadable.fetch_add( 1, std::memory_order_relaxed );
+    if( g_state.saidUnreadable.exchange( true, std::memory_order_acq_rel ) )
+    {
+        return;   // said once per run: the hot path must not write a line per allocation
+    }
+    LineBuffer line;
+    line.put( "ripwire: the memory ceiling (" );
+    line.put( std::string_view( g_state.label, g_state.labelSize ) );
+    line.put( ") cannot read this process's footprint — the OS reading is unavailable, so this allocation is admitted "
+              "UNCHECKED and the ceiling refuses nothing while that lasts (the memory guard's own phase-boundary lines "
+              "still apply). RIPWIRE_STATS counts them as `[mem] ceiling unreadable=`\n" );
+    writeLine( line );
+}
+
 [[noreturn]] inline void refuse( std::uint64_t footprint, std::size_t request ) noexcept
 {
     if( g_state.refusing.exchange( true, std::memory_order_acq_rel ) )
@@ -182,16 +225,7 @@ struct LineBuffer
     line.put( " — the run stopped there and answers nothing (any output already printed above is cut, not complete); exit 5. "
               "Raise the limit (--max-memory, RIPWIRE_MAX_MEMORY, or RIPWIRE_MEM_BUDGET_MB for this line alone), "
               "or set RIPWIRE_MEM_BUDGET_MB=0 to run without the ceiling\n" );
-    std::size_t done = 0;
-    while( done < line.used )
-    {
-        const auto n = os::write( 2, line.text + done, line.used - done );
-        if( n <= 0 )
-        {
-            break;
-        }
-        done += std::size_t( n );
-    }
+    writeLine( line );
     std::_Exit( kRefusalExit );
 }
 
@@ -220,7 +254,12 @@ inline void onAllocate( std::size_t request ) noexcept
         g_state.largeReadings.fetch_add( 1, std::memory_order_relaxed );
     }
     const std::uint64_t footprint = os::mem_footprint();
-    if( footprint != 0 && footprint + request > budget )
+    if( footprint == 0 )
+    {
+        noteUnreadable();   // the OS cannot say: admitted unchecked, disclosed once, counted — never a silent zero
+        return;
+    }
+    if( footprint + request > budget )
     {
         refuse( footprint, request );
     }

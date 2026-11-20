@@ -11,8 +11,11 @@ one limit and one knob, not two: `--max-memory` and `RIPWIRE_MAX_MEMORY` move th
 exits **5**, the memory-refusal code everywhere in ripwire. `RIPWIRE_MEM_BUDGET_MB=<MiB>` sets a ceiling for
 this line alone and `RIPWIRE_MEM_BUDGET_MB=0` turns it off; a value that is neither 0 nor a whole number of at
 least 64 MiB refuses the run (exit 1) rather than being ignored. A refusal is one stderr line naming the limit,
-the footprint, the next request and the phase, written from a stack buffer with no allocation, and it prints
-**nothing** on stdout: the run answers nothing rather than answering from a partial run.
+the footprint, the next request and the phase, written from a stack buffer with no allocation. It does not flush
+pending stdio, so a map still being assembled prints **nothing** — but `_Exit(5)` cannot retract bytes already
+written, so a command that had streamed part of an answer leaves that partial stdout behind, and the refusal line
+says as much ("any output already printed above is cut, not complete"). **Exit 5 means the run answers nothing: a
+caller must discard whatever stdout holds rather than parse it.**
 
 An allocation of 256 KiB or more reads the footprint before the block is taken; smaller ones read once per
 64 MiB per thread. Disarmed the cost is one relaxed atomic load per `operator new`. **It only reads — it never

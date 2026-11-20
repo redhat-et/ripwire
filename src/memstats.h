@@ -55,10 +55,11 @@ inline void mark( std::string_view phase )
         return;
     }
     rw::emitTo( stderr, "[mem] phase={} cur_mib={} peak_mib={}\n", phase, reading( os::mem_footprint() ), reading( os::mem_footprint_peak() ) );
-    if( phase == "graph-end" )   // the allocator line's cost on this run: footprint readings taken, and how many on a large block
-    {
-        rw::emitTo( stderr, "[mem] ceiling armed_mib={} readings={} large_readings={}\n", memceiling::budgetBytes() / memceiling::kMiB,
-                    memceiling::g_state.readings.load( std::memory_order_relaxed ), memceiling::g_state.largeReadings.load( std::memory_order_relaxed ) );
+    if( phase == "graph-end" )   // the allocator line's cost on this run: footprint readings taken, how many on a large block,
+    {                            // and how many the OS could not answer (admitted unchecked — memceiling.h noteUnreadable)
+        rw::emitTo( stderr, "[mem] ceiling armed_mib={} readings={} large_readings={} unreadable={}\n", memceiling::budgetBytes() / memceiling::kMiB,
+                    memceiling::g_state.readings.load( std::memory_order_relaxed ), memceiling::g_state.largeReadings.load( std::memory_order_relaxed ),
+                    memceiling::g_state.unreadable.load( std::memory_order_relaxed ) );
     }
 }
 }   // namespace rw::memstats

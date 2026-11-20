@@ -17,7 +17,9 @@ REQUEST_TIMEOUT_S = 900
 
 def read_reply_bounded(process: subprocess.Popen[str], timeout_s: float, label: str) -> str:
     """One reply line from an MCP server, bounded: a watchdog kills the server when no reply arrives within timeout_s.
-    A timeout or a signal-kill (rc < 0) raises as its own state; plain EOF from a server that exited returns ""."""
+    A timeout or a signal-kill (rc < 0) raises as its own state; plain EOF from a server that exited returns "".
+    A kill mid-line leaves readline() returning the buffered text at EOF with NO trailing newline: that is a partial
+    reply, not a reply, and it raises the TIMEOUT state rather than reaching json.loads as a JSONDecodeError."""
     assert process.stdout is not None
     fired = threading.Event()
     def expire() -> None:
@@ -30,6 +32,9 @@ def read_reply_bounded(process: subprocess.Popen[str], timeout_s: float, label: 
     finally:
         watchdog.cancel()
     if line:
+        if fired.is_set() and not line.endswith("\n"):
+            raise RuntimeError(f"ripwire MCP TIMEOUT: only a partial reply to {label} ({len(line)} B, unterminated) "
+                               f"within {timeout_s}s (server killed)")
         return line
     if fired.is_set():
         raise RuntimeError(f"ripwire MCP TIMEOUT: no reply to {label} within {timeout_s}s (server killed)")

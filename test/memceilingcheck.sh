@@ -20,7 +20,8 @@
 #   M  the server survives: --mcp under RIPWIRE_MEM_BUDGET_MB=64 does not arm (its refusal would end the process), says so
 #      once, and answers initialize + tools/list; under the default it says nothing about the ceiling.
 # A build that does not replace operator new (sanitizer, RIPWIRE_ALLOC_COUNT) cannot arm the line: R, K and S are SKIP there,
-# and R must say "is NOT armed" instead of refusing silently or answering silently.
+# and R must say "is NOT armed" instead of refusing silently or answering silently. D still runs there, with rc and stdout
+# strict and stderr allowed to carry exactly that ONE diagnostic line on its explicitly-armed arm — see D.
 #
 # Usage: bash test/memceilingcheck.sh [BIN]
 set -u
@@ -105,7 +106,21 @@ else
 fi
 
 # ---- D ----
-dsame=0; dtotal=0
+# On a build that CANNOT arm the line, an EXPLICIT RIPWIRE_MEM_BUDGET_MB is answered with the "is NOT armed" diagnostic,
+# by design (R asserts exactly that) — so `=1000000` has one line on stderr the default run does not, and requiring
+# byte-identical stderr there would fail the gate for the product behaving correctly. Hooked builds keep the strict
+# comparison; an unhooked one allows that ONE line and nothing else, by filtering it out and comparing the rest byte for
+# byte. rc and stdout stay strict in both cases.
+derrsame(){ # ON-err ARM-err ARM  ->  "identical" | "diagnostic-only" | "DIFFERS"
+    if cmp -s "$1" "$2"; then printf identical; return 0; fi
+    if [ "$hooked" -eq 0 ] && [ "$3" != 0 ] \
+       && [ "$( grep -c 'RIPWIRE_MEM_BUDGET_MB is NOT armed (this build does not replace operator new' "$2" )" -eq 1 ] \
+       && grep -v 'RIPWIRE_MEM_BUDGET_MB is NOT armed' "$2" | cmp -s - "$1"; then
+        printf diagnostic-only; return 0
+    fi
+    printf DIFFERS
+}
+dsame=0; dtotal=0; ddiag=0
 for form in map json for; do
     case "$form" in
         map)  set -- "$TREE" --no-cache ;;
@@ -116,14 +131,16 @@ for form in map json for; do
     for arm in 0 1000000; do
         dtotal=$(( dtotal + 1 ))
         RIPWIRE_MEM_BUDGET_MB="$arm" "$BIN" "$@" >"$TMP/d.$form.$arm.out" 2>"$TMP/d.$form.$arm.err"; rca=$?
-        if [ "$rca" -eq "$rcon" ] && [ -s "$TMP/d.$form.on.out" ] && cmp -s "$TMP/d.$form.on.out" "$TMP/d.$form.$arm.out" && cmp -s "$TMP/d.$form.on.err" "$TMP/d.$form.$arm.err"; then
+        derr="$( derrsame "$TMP/d.$form.on.err" "$TMP/d.$form.$arm.err" "$arm" )"
+        if [ "$rca" -eq "$rcon" ] && [ -s "$TMP/d.$form.on.out" ] && cmp -s "$TMP/d.$form.on.out" "$TMP/d.$form.$arm.out" && [ "$derr" != DIFFERS ]; then
             dsame=$(( dsame + 1 ))
+            [ "$derr" = diagnostic-only ] && ddiag=$(( ddiag + 1 ))
         else
-            no "D: $form, default vs RIPWIRE_MEM_BUDGET_MB=$arm: rc $rcon/$rca, stdout $( cmp -s "$TMP/d.$form.on.out" "$TMP/d.$form.$arm.out" && echo same || echo DIFFERS ), stderr $( cmp -s "$TMP/d.$form.on.err" "$TMP/d.$form.$arm.err" && echo same || echo DIFFERS )"
+            no "D: $form, default vs RIPWIRE_MEM_BUDGET_MB=$arm: rc $rcon/$rca, stdout $( cmp -s "$TMP/d.$form.on.out" "$TMP/d.$form.$arm.out" && echo same || echo DIFFERS ), stderr $derr"
         fi
     done
 done
-[ "$dsame" -eq "$dtotal" ] && ok "D: map, --json and --for print byte-identical stdout, stderr and rc with the line on by default, off (=0) and armed at 1000000 ($dsame/$dtotal pairs)"
+[ "$dsame" -eq "$dtotal" ] && ok "D: map, --json and --for print byte-identical stdout and rc with the line on by default, off (=0) and armed at 1000000, and byte-identical stderr ($dsame/$dtotal pairs$( [ "$ddiag" -gt 0 ] && printf ', %s of them with only this unarmable build'"'"'s one "is NOT armed" line allowed' "$ddiag" ))"
 
 # ---- V ----
 for bad in 12x 10; do
