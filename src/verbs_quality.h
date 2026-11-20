@@ -1708,6 +1708,19 @@ inline constexpr const char* kQdUncheckedStatusLegend =
     "checked: a call inside a macro or helper argument, a stream written through another spelling, Go's _ = f() and Rust's "
     "let _ = f(): no row there is no verdict. ";
 
+// Emitted only when a defect-shape unhandled-arm row is in the document (beside kQdDefectShapeLegend): the shape, what
+// its p= and why= name, the fix, and the floors.
+inline constexpr const char* kQdUnhandledArmLegend =
+    "unhandled-arm: a classifier over a closed set that gives a value it does not name no outcome - a C/C++ switch with no "
+    "default: over an in-tree enum that decides a value (an arm returns one, or every arm assigns one name) and leaves "
+    "an enumerator out (count sentinels and aliases are owed no arm); a shell case with no *) arm that ends its function with "
+    "every arm a return/echo/printf, or whose arms each set one name read after esac; a Python if/elif chain or match that "
+    "ends a value-returning function with no else, so an unmatched value returns None (an Enum this file defines is checked "
+    "for coverage). p= is the first new site's line and why= what is left without an outcome. Fix: add the arm, or a "
+    "default/else/*) that states the decision. Not checked: an enum defined outside the indexed tree or under #if, a switch "
+    "over an int, a comment in the switch that states the omission, a Python enum from another module, TypeScript (no "
+    "never-check reading) and Rust (the compiler checks match): no row there is no verdict. ";
+
 // Emitted only when a placeholder row is in the document: why every one of them carries origin="new-symbol",
 // including one that landed in a symbol that existed at the baseline.
 inline constexpr const char* kQdPlaceholderLegend =
@@ -1981,6 +1994,10 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
     {
         return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return !r.call.empty(); } );
     };
+    const auto anyUnhandledArmRow = [] ( const std::vector<rw::quality::Regression>& v )
+    {
+        return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return !r.why.empty(); } );
+    };
     const auto anyMonsterRow = [] ( const std::vector<rw::quality::Regression>& v )
     {
         return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return r.kind == "complexity" && !r.facet.empty(); } );
@@ -2115,6 +2132,10 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
         if( anyUncheckedStatusRow( p.rows ) || anyUncheckedStatusRow( p.disclosedRows ) )
         {
             rw::emitRaw( out, kQdUncheckedStatusLegend );
+        }
+        if( anyUnhandledArmRow( p.rows ) || anyUnhandledArmRow( p.disclosedRows ) )
+        {
+            rw::emitRaw( out, kQdUnhandledArmLegend );
         }
         if( anyMonsterRow( p.rows ) || anyMonsterRow( p.disclosedRows ) )
         {
