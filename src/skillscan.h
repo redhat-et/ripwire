@@ -1263,7 +1263,7 @@ struct SkillFindingSink
     std::size_t                stackBytes;
 
     // Add a finding with a clipped excerpt.
-    void add( SkillSeverity sev, int lineNum, const char* rule, std::string_view lineText, const char* why = nullptr ) const
+    void add( SkillSeverity sev, int lineNum, const char* rule, std::string_view lineText, const char* why = nullptr )
     {
         findings.push_back( { sev, lineNum, rule, clipSkillExcerpt( lineText ), why } );
     }
@@ -1273,7 +1273,7 @@ struct SkillFindingSink
     // Exhausted (the engine gave up mid-match) and Skipped (the line was too long to hand the engine at all,
     // F-B3 / owner ruling 3) are both undecided and both fail closed — every line in a skill file IS installable
     // content, so there is no WARN tier here, only CRITICAL or a real answer.
-    bool isHit( RegexVerdict verdict, int lineNum, std::string_view lineText ) const
+    bool isHit( RegexVerdict verdict, int lineNum, std::string_view lineText )
     {
         if( verdict == RegexVerdict::Exhausted )
         {
@@ -1291,7 +1291,7 @@ struct SkillFindingSink
 // `description:` field is precisely the text harnesses inject into the agent's prompt — an injection phrase there is MORE
 // dangerous than one in the body, not exempt. YAML double quotes are value syntax, not a shown-as-data marker, so only
 // backtick spans suppress here.
-inline void scanFrontmatterLine( const SkillFindingSink& sink, const std::vector<FrontmatterPattern>& frontPats, const std::vector<InjectionPattern>& injPats,
+inline void scanFrontmatterLine( SkillFindingSink& sink, const std::vector<FrontmatterPattern>& frontPats, const std::vector<InjectionPattern>& injPats,
                                  int lineNum, const std::string& ln )
 {
     for( const FrontmatterPattern& p : frontPats )
@@ -1318,7 +1318,7 @@ inline void scanFrontmatterLine( const SkillFindingSink& sink, const std::vector
 // tick after pos on the same line, not merely an odd count of preceding ticks/quotes). The first pattern that fires wins.
 // The caller skips lines in an example-tagged fence (```text / ```example); a BARE or executable-language fence suppresses
 // nothing — a phrase like "Ignore previous instructions" inside a bare ``` block is still prose the agent reads and acts on.
-inline void scanBodyInjectionLine( const SkillFindingSink& sink, const std::vector<InjectionPattern>& injPats, int lineNum, const std::string& ln )
+inline void scanBodyInjectionLine( SkillFindingSink& sink, const std::vector<InjectionPattern>& injPats, int lineNum, const std::string& ln )
 {
     for( const InjectionPattern& p : injPats )
     {
@@ -1334,7 +1334,7 @@ inline void scanBodyInjectionLine( const SkillFindingSink& sink, const std::vect
 // GE-SKILLSCAN: one BODY line's first EXFILTRATE finding. requiresCmdContext patterns (api-key, cred paths) fire only with
 // command context — a fenced run-block (`lineInFence`) or a co-occurring transmit verb; a bare prose mention of a credential is
 // documentation. fenceOnly patterns (net-exfil) fire only inside a fenced code block — see buildExfilPatterns().
-inline void scanBodyExfilLine( const SkillFindingSink& sink, const std::vector<ExfilPattern>& exfilPats, int lineNum, const std::string& ln, bool lineInFence )
+inline void scanBodyExfilLine( SkillFindingSink& sink, const std::vector<ExfilPattern>& exfilPats, int lineNum, const std::string& ln, bool lineInFence )
 {
     for( const ExfilPattern& p : exfilPats )
     {
@@ -1367,7 +1367,7 @@ inline void scanBodyExfilLine( const SkillFindingSink& sink, const std::vector<E
 //   1. a fenced ```bash / ```sh / ```shell / ```zsh block header
 //   2. a line starting with $ (interactive-shell style)
 //   3. a line containing curl/wget/nc (network tools — likely a shell instruction)
-inline void scanScopeCreepLine( const SkillFindingSink& sink, int lineNum, const std::string& ln )
+inline void scanScopeCreepLine( SkillFindingSink& sink, int lineNum, const std::string& ln )
 {
     const std::string_view lv = trimRight( ln );
     // ^…$ with a search is the whole-string match the old regex_match asked for: `lv` holds one line, no '\n'.
@@ -1488,7 +1488,7 @@ inline std::vector<SkillFinding> scanSkillTextOn( std::string_view text, std::si
     const bool                      bashAllowed  = toolAllowed( allowedTools, "Bash" );
 
     // Every finding of this call goes through the sink: add() clips the excerpt, isHit() fails CLOSED on an undecided regex match.
-    const SkillFindingSink sink{ findings, stackBytes };
+    SkillFindingSink sink{ findings, stackBytes };
 
     // ── fenced-block injection suppression policy ─────────────────────────────────────────────────
     //
