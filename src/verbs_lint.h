@@ -1602,6 +1602,9 @@ int runMatchVerb( const rw::Config& cfg, const LintAnswerView& view )
     constexpr std::size_t        kMatchMaxHits = 5000;   // astQuery's per-spec budget, named not implied
     const MatchQueryOutcome      mq = runMatchQuery( ing, captured->query, kMatchMaxHits );
     const std::vector<rw::AstMatch>& ms        = mq.matches;
+    // The engine stopped at kMatchMaxHits: hits= is a FLOOR. hits_capped= and the page disclosure's
+    // collectionCapped (counts_floor=/capped= on the root) both say so, from this one fact.
+    const bool                       hitsCapped = ms.size() >= kMatchMaxHits;
     // §P0.4's rule, applied to --match's own engine: a query no grammar compiled measured NOTHING,
     // so a hits="0" here would be a failure wearing a result. Refuse, exactly like an invalid --regex.
     if( !mq.uncompiled.empty() )
@@ -1642,8 +1645,8 @@ int runMatchVerb( const rw::Config& cfg, const LintAnswerView& view )
                 ms.size(),
                 rw::pageDisclosure( mpab, sizeof( mpab ), matchShown, ms.size(), matchPage.end,
                                     cfg.pageLimit, cfg.pageOffset, true, rw::kXmlPageSyntax,
-                                    /*collectionCapped=*/ ms.size() >= kMatchMaxHits ),   // H8: the same cap hits_capped= names
-                ms.size() >= kMatchMaxHits ? 1 : 0,
+                                    /*collectionCapped=*/ hitsCapped ),   // H8: the same cap hits_capped= names
+                hitsCapped ? 1 : 0,
                 captured->autoCaptured ? " auto_captured=\"1\"" : "",
                 view.ex( mq.grammarsAttr ),   // §L3: which grammars the query compiled against
                 mq.eligibleFiles,
