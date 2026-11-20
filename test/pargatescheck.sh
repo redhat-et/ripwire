@@ -1156,7 +1156,7 @@ for _g in expandrangecheck diagnoticecheck; do
 done
 
 # ── (S) SCRATCH + (R) ALONE RETRY (2026-11-19, GATE-TMP-LEAK / PARGATES-ALONE-RETRY) ─────────────────────────────────────
-# (S) every gate runs with TMPDIR=<per-run root>/<gate>.XXXXXX, and pargates removes that dir the moment the gate is over --
+# (S) every gate runs with TMPDIR=<per-run root>/g.XXXXXX, and pargates removes that dir the moment the gate is over --
 #     including a gate KILLed at its budget, whose own EXIT trap never runs -- after making every subdir u+rwx, so a
 #     mode-000 subdir a gate left goes too; the run root itself goes at exit. Measured before the fix: 890 tmp.* dirs
 #     (8.7 GB) in $TMPDIR after ~3 days of train shard runs. Each run below gets a private TMPDIR of its own, so "nothing
@@ -1165,6 +1165,8 @@ done
 #          its mktemp dir was made INSIDE pargates' per-gate dir and existed while it ran
 #       S2 the per-gate dir is gone BEFORE the next gate starts (an observer gate run after it, -j 1, sees no sibling)
 #       S3 a gate whose own `trap 'rm -rf'` cannot remove a non-empty mode-000 subdir (worka/blind) leaves nothing behind
+#       S4 the per-gate dir does not carry the gate's name: paths the binary prints under it reach the gate's output,
+#          and a gate grepping that output for a word in its own name read the path as the binary's words (1119g)
 # (R) after the parallel pass, each TIMEOUT -- and each red gate named in .github/pargates-load-timing.txt -- reruns
 #     once ALONE; a pass then is PASS(alone-retry), counted in alone_retry= and never in pass=, and the last line is not
 #     ALL PASS. A plain red is not retried. Default on for --shard runs; --no-alone-retry turns it off.
@@ -1286,10 +1288,10 @@ srRun mp "$SR/pg-clean-pass.py" probeflaky --shard 1/1 &
 wait
 where="$( sed -n 2p "$SR/real.ab.mark/akill.where" 2>/dev/null )"; gtd="$( sed -n 1p "$SR/real.ab.mark/akill.where" 2>/dev/null )"
 if [ -n "$where" ] && [ -s "$SR/real.ab.mark/akill.existed" ] && grep -q 'TIMEOUT after 3s' "$SR/real.ab.out" \
-   && case "$where" in "$SR/real.ab.tmp/rwpg-"*/probesk1check.*/*) true ;; *) false ;; esac; then
+   && case "$where" in "$SR/real.ab.tmp/rwpg-"*/g.*/*) true ;; *) false ;; esac; then
     ok "(S1) premise: the KILLed gate made its mktemp dir inside pargates' per-gate dir ($( basename "$gtd" )) and was stopped at its 3 s budget"
 else
-    no "(S1) premise: expected a TIMEOUT'd gate whose mktemp dir lay under $SR/real.ab.tmp/rwpg-*/probesk1check.*/ -- where='$where'"; sed 's/^/    /' "$SR/real.ab.out" | head -20
+    no "(S1) premise: expected a TIMEOUT'd gate whose mktemp dir lay under $SR/real.ab.tmp/rwpg-*/g.*/ -- where='$where'"; sed 's/^/    /' "$SR/real.ab.out" | head -20
 fi
 left="$( srLeft real.ab )"
 [ -n "$where" ] && [ -z "$left" ] && [ ! -e "$where" ] \
@@ -1303,6 +1305,11 @@ bw="$( cat "$SR/real.c.mark/blind.where" 2>/dev/null )"; left="$( srLeft real.c 
     && ok "(S3) a gate whose trap cannot remove its mode-000 worka/blind leaves nothing behind (rc 0)" \
     || { no "(S3) the mode-000 subdir survived (or the gate never made it): where='$bw' left='${left}' rc=$( cat "$SR/real.c.rc" )"; sed 's/^/    /' "$SR/real.c.out" | head -12; }
 srOpen real.c
+case "$gtd" in
+    "") no "(S4) premise: the KILLed gate's TMPDIR was not recorded (akill.where line 1 empty)" ;;
+    *probesk*) no "(S4) the per-gate dir carries the gate's name ($( basename "$gtd" )): a gate grepping its own output for a word in its name reads the harness path" ;;
+    *) ok "(S4) the per-gate dir is named without the gate's name ($( basename "$gtd" ))" ;;
+esac
 
 # R1 / R2: the flaky gate, retried and not
 out="$( cat "$SR/r1.out" )"

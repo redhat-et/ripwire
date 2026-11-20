@@ -783,7 +783,7 @@ def run_gate(argv, env, limit):
 # and stalled two of them. A rule for each gate to follow cannot fix that -- the gate is the thing that did not run.
 #
 # So the HARNESS owns the scratch space. pargates makes one per-run root, $TMPDIR/rwpg-<pid>-XXXXXX, and runs each
-# gate with TMPDIR=<root>/<gate>.XXXXXX -- so a bare `mktemp -d`, Python's tempfile, and the binary's cacheDirLadder()
+# gate with TMPDIR=<root>/g.XXXXXX -- so a bare `mktemp -d`, Python's tempfile, and the binary's cacheDirLadder()
 # (which honours $TMPDIR first) all land inside it -- and removes that dir the moment the gate is over: pass, fail,
 # TIMEOUT or stop. Removal makes every directory in the tree u+rwx first (top-down, never through a symlink), so a
 # mode-000 subdir goes too. The root is removed at exit, Ctrl-C included (the stop path leaves through sys.exit);
@@ -888,8 +888,11 @@ def _make_run_root():
     return rr
 
 
+# The per-gate dir is named g.XXXXXX, never after the gate: every path the binary prints under it lands in the gate's
+# stdout/stderr, and a gate that greps its output for a word in its own name (sidecarsymlinkcheck's h2 arm refuses any
+# stderr holding "symlink") then reads the harness's path as the binary's words (train 1119g shard 2).
 def _gate_tmpdir(g):
-    return tempfile.mkdtemp(prefix=(g[:-3] if g.endswith(".sh") else g) + ".", dir=run_tmp_root)
+    return tempfile.mkdtemp(prefix="g.", dir=run_tmp_root)
 
 
 def _drop_gate_tmpdir(path):
