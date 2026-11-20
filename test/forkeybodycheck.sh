@@ -35,6 +35,17 @@
 #         (K12) RETIRES the old (K8), which pinned the opposite — no key block when the page already carried the body. Ruling 87
 #         overturns that clause of KB1's frozen rule (results/KB1_ACTREADY_1119/PREREG.md lines 25-26: "A body the page already
 #         carries (same p= and l= in the first 12,000 B) is not repeated"); K8 was that clause's gate and cannot survive it.
+#   (K13) THE DISCLOSURE TRIPLE IS INTERNALLY CONSISTENT, on every key group this gate produces: capped="1" iff shown< total
+#         iff next= is present, and shown<=total always. An invariant on the TAG ALONE — it needs no knowledge of how many
+#         definitions exist, so it catches any mechanism that filters candidates before counting them, not just the one
+#         ruling 87 removed. The unfixed binary emitted `<bodies of="key" shown="3" total="3" capped="1">` — capped= asserting
+#         a cut, shown==total asserting nothing was withheld, and NO next= — three contradictory claims in one tag.
+#   (K14) total= IS THE KEYED-DEFINITION COUNT, pinned against a count known BY CONSTRUCTION rather than against anything the
+#         tool reports: each of compute_total, alpha_one, beta_two, gamma_three, big_function and run_main has exactly ONE
+#         bodied source definition in this fixture's src/ (lib.h's declaration is bodiless and never counts — see K0), so a
+#         question naming three of them has 3 keyed definitions and one naming six has 6. Non-vacuity FIRST: page 1 must
+#         really serve one of those bodies elsewhere, or a filter-before-count had nothing to remove and the arm proves
+#         nothing. CLAUDE.md non-negotiable 3 — a count that cannot be a total is labelled a floor; total= is not a floor.
 #   (K9)  well formed (xmllint) and deterministic (two runs byte-identical)
 #   (K10) ordering: a Python @overload pair of one-line stubs and the real definition -> the real (multi-line) body takes the first slot
 #   (K11) a warned routed answer (who-calls through a macro: the --for page is carried) holds ONE key block: the carried page's moves up
@@ -138,6 +149,10 @@ cli 'Who calls `big_function`?' >"$DIR/big.on"
 cli 'Who calls `alpha_one`, `beta_two` or `gamma_three`?' >"$DIR/cap.on"
 # CB1: six names, so the cap of 5 is exercised and not merely outnumbered (K6b)
 cli 'Who calls `alpha_one`, `beta_two`, `gamma_three`, `compute_total`, `big_function` or `run_main`?' >"$DIR/cap6.on"
+# (K13)/(K14): the same names UNROUTED, so insertKeyBodies runs and a filter-before-count would show. Three names = 3 keyed
+# definitions by construction, six = 6. The routed cap6.on above is the control: the routed path never consulted the page.
+cli '`compute_total`, `alpha_one` and `beta_two`' >"$DIR/tot3.on"
+cli '`compute_total`, `alpha_one`, `beta_two`, `gamma_three`, `big_function` and `run_main`' >"$DIR/tot6.on"
 n=0
 for q in 'How does compute_total work?' 'How does `no_such_symbol_here` work?' 'How does `flood_fn` work?' 'How does `only_in_test` work?'; do
     n=$(( n + 1 )); cli "$q" >"$DIR/neg$n.on"; off "$q" >"$DIR/neg$n.off"
@@ -307,6 +322,38 @@ say(dup and don != doff and "compute_total" in (krows[0][3] if krows else ""),
 say(dup and served_elsewhere(don, krows[0][1], krows[0][2], 12000),
     "(K12) CONTRACT: and the duplicate is read back out of the DELIVERED answer -- the same (p=,l=) is served by a <b> row outside "
     "the key group on the same page, which is exactly what bodyServed used to veto")
+# (K13) the disclosure triple is internally consistent. An invariant on the TAG ALONE: no count of our own enters it, so it
+# holds whatever the fixture contains and fires on ANY filter-before-count, not only the one ruling 87 removed.
+def triple(block):
+    head = block[:block.find(">") + 1]
+    g = lambda k: re.search(r'\b%s="(\d+)"' % k, head)
+    val = lambda k: int(g(k).group(1)) if g(k) else -1
+    return val("shown"), val("total"), val("capped"), ' next="' in head
+NAMED6 = ("compute_total", "alpha_one", "beta_two", "gamma_three", "big_function", "run_main")
+for tag, name in (("dup.on", "one name, unrouted"), ("tot3.on", "three names, unrouted"),
+                  ("tot6.on", "six names, unrouted"), ("cap6.on", "six names, ROUTED (control: this path never read the page)")):
+    blk = KEY.findall(rd(tag))
+    if not blk:
+        say(False, "(K13) %s: no key group at all, so the disclosure triple cannot be read (%s)" % (name, tag))
+        continue
+    sh, to, ca, nx = triple(blk[0])
+    say(sh >= 0 and to >= 0 and ca >= 0 and sh <= to and (ca == 1) == (sh < to) and (ca == 1) == nx,
+        "(K13) %s: shown=%d total=%d capped=%d next=%s -- capped=1 iff shown<total iff next= present, and shown<=total"
+        % (name, sh, to, ca, nx))
+# (K14) total= is the keyed-definition count known BY CONSTRUCTION (see the ARMS note), never a post-filter residue.
+for tag, truth, want_shown, want_capped in (("tot3.on", 3, 3, 0), ("tot6.on", 6, 5, 1)):
+    d = rd(tag)
+    served = sorted({n for n, _, _, _ in bodyrows(KEY.sub(lambda m: " " * len(m.group(0)), d)[:12000]) if n in NAMED6})
+    say(bool(served),
+        "(K14) NON-VACUITY %s: page 1 serves %s elsewhere, so a filter-before-count had something to remove" % (tag, served))
+    blk = KEY.findall(d)
+    if not blk:
+        say(False, "(K14) %s: no key group at all, so total= cannot be the keyed count (expected total=%d)" % (tag, truth))
+        continue
+    sh, to, ca, _ = triple(blk[0])
+    say(to == truth and sh == want_shown and ca == want_capped,
+        "(K14) %s: total=%d is the %d definitions the question's names place in src/, shown=%d capped=%d (expected total=%d shown=%d capped=%d)"
+        % (tag, to, truth, sh, ca, truth, want_shown, want_capped))
 # (K10) overload ordering
 ov = KEY.findall(rd("ovl.on"))
 bl = re.findall(r'<b [^>]*\bl="(\d+)"', ov[0]) if ov else []
