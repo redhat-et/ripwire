@@ -713,7 +713,8 @@ fi
 cat >"$TMP/j_window.py" <<'PYEOF'
 import ast, subprocess, sys, os, tempfile, shutil
 src = open(sys.argv[1], encoding="utf-8").read()
-want = ("chooseInWindow", "marginHeldByMerge", "firstWindow", "laneMergeSince")
+want = ("chooseInWindow", "marginHeldByMerge", "firstWindow", "laneMergeSince",
+        "scanPasses", "windowPasses", "laneMergeWindow", "refuseNoWindow", "inSince")   # chooseInWindow's named steps
 funcs = [n for n in ast.parse(src).body if isinstance(n, ast.FunctionDef) and n.name in want]
 if len(funcs) != len(want):
     print("EXTRACT_FAIL got %d of %d functions" % (len(funcs), len(want))); sys.exit(0)

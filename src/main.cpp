@@ -394,11 +394,7 @@ std::pair<std::string, bool> resolveRemoteRoot( const std::string& urlOrPath, bo
     // cache key = FNV-1a-64 of the URL → <hardened cache dir>/ripwire-remote-<hex>. Reuse if the dir
     // already exists (idempotent: a second run on the same URL is instant, no re-clone) — S4: same
     // $TMPDIR → $XDG_CACHE_HOME/ripwire (0700) → /tmp ladder as defaultCachePath/mcpCachePath.
-    std::uint64_t h = 1469598103934665603ull;
-    for( const char c : urlOrPath )
-    {
-        h = rw::hashutil::fnv1aAbsorb( h, c );
-    }
+    const std::uint64_t h = rw::hashutil::fnv1a64( urlOrPath, rw::hashutil::kFnv1aLegacySeed64 );   // stored: names the clone dir
     char tail[ 48 ];
     rw::formatTo( tail, sizeof( tail ), "/ripwire-remote-{:016x}", static_cast<unsigned long long>( h ) );
     const std::string cacheDir = cacheDirLadder() + tail;

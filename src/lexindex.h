@@ -238,7 +238,7 @@ inline void forEachLexSubtoken( std::string_view text, EmitFn&& emit )
 // external callers reach with bytes nothing has classified, so it stays general.
 inline std::uint64_t lexSubtokenHash( const char* tok, std::size_t tokLen ) noexcept
 {
-    std::uint64_t h = 1469598103934665603ull;
+    std::uint64_t h = hashutil::kFnv1aLegacySeed64;   // stored: the persisted per-def lexical statistics are keyed by it
     for( std::size_t k = 0; k < tokLen; ++k )
     {
         h = hashutil::fnv1aAbsorb( h, char( lexLowerByte( static_cast<unsigned char>( tok[k] ) ) ) );
@@ -275,7 +275,7 @@ struct RawDefLex
 template<class EmitFn>
 inline void forEachLexSubtokenHashed( std::string_view text, EmitFn&& emit )
 {
-    constexpr std::uint64_t kFnvBasis = 1469598103934665603ull;
+    constexpr std::uint64_t kFnvBasis = hashutil::kFnv1aLegacySeed64;   // == lexSubtokenHash's seed (stored)
     forEachLexTokenSpan( text, [ & ]( std::size_t tokStartByte, std::size_t tokEndByte )
     {
         std::uint64_t h = kFnvBasis;

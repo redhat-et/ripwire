@@ -569,10 +569,13 @@ _IN_LIMIT_NARROW = 2   # the page size the last-resort pass tries (see chooseInW
 # published command spells --limit=1 and the caption says it was the last resort, so a reader sees which page size was used.
 _IN_LIMIT_LAST = 1
 
+def inSince( n ):
+    """The --since= revision of window n: HEAD~n, or a revision spelled as-is (the lane-merge pass's commit id)."""
+    return f"HEAD~{n}" if isinstance( n, int ) else n
+
 def inCaseCmd( n, limit=_IN_LIMIT ):
     """n: HEAD~n, or a revision spelled as-is (the lane-merge pass's commit, see laneMergeSince)."""
-    since = f"HEAD~{n}" if isinstance( n, int ) else n
-    return f"{BIN} . --rank-by=churn-decay --since={since} {_IN_EXCLUDES} --in={_IN_DIR} --limit={limit}"
+    return f"{BIN} . --rank-by=churn-decay --since={inSince( n )} {_IN_EXCLUDES} --in={_IN_DIR} --limit={limit}"
 
 # The probe runs at MODULE INITIALISATION, before the capture loop below and therefore before the per-case
 # timeout that loop applies. A non-terminating run here would hang the generator with nothing on stderr and no
@@ -652,44 +655,62 @@ def firstWindow( lo, hi, ok ):
     """The smallest N in (lo, hi] with ok( N ), else None."""
     return next( ( n for n in range( lo + 1, hi + 1 ) if ok( n ) ), None )
 
-def chooseInWindow( lo=1, hi=14, unshown=None, mergeHolds=None, laneSince=None ):
-    """Return ( N, page limit ): N is HEAD~N, or the lane-merge pass's commit id (a str)."""
-    unshown = unshown or inCaseUnshown
-    mergeHolds = mergeHolds or ( lambda n: marginHeldByMerge( n, REPO, _IN_DIR ) )
-    laneSince = laneSince or ( lambda: laneMergeSince( REPO, hi ) )
-    both = lambda n, lim: not unshown( n, lim ) and not unshown( n - 1, lim )
-    passes = [
-        ( _IN_LIMIT, lambda n: both( n, _IN_LIMIT ), lambda n: f"margin HEAD~{n-1} holds" ),
-        ( _IN_LIMIT, lambda n: not unshown( n, _IN_LIMIT ) and mergeHolds( n - 1 ),
-          lambda n: f"margin HEAD~{n-1} holds as the merge HEAD~{n-1}: source-free commits behind it, its first-parent diff counted" ),
-        ( _IN_LIMIT_NARROW, lambda n: both( n, _IN_LIMIT_NARROW ),
-          lambda n: f"--limit={_IN_LIMIT_NARROW}, margin HEAD~{n-1} holds; the margin has too few source files for --limit={_IN_LIMIT}" ),
-    ]
+def scanPasses( passes, lo, hi ):
+    """The first pass, in order, that accepts some N in (lo, hi]: ( N, page limit, why ), else None."""
     for lim, ok, why in passes:
         n = firstWindow( lo, hi, ok )
         if n is not None:
-            print( f"showcase_capture: --in= case window derived as HEAD~{n} ({why( n )})", file=sys.stderr )
-            return n, lim
-    rev = laneSince()
-    if rev is not None and not unshown( rev, _IN_LIMIT ):
-        print( f"showcase_capture: --in= case window derived as {rev} (no HEAD~N shows: the newest first-parent merge took in "
-               f"main; the window is this branch's own commits since that main tip)", file=sys.stderr )
-        return rev, _IN_LIMIT
-    last = [
-        ( _IN_LIMIT_LAST, lambda n: both( n, _IN_LIMIT_LAST ),
+            return n, lim, why( n )
+    return None
+
+def windowPasses( unshown, mergeHolds ):
+    """The HEAD~N passes as ( tried before the lane-merge pass, the last resorts after it ); a pass is ( limit, ok( N ), why( N ) ).
+    A window is accepted when it shows and its margin HEAD~(N-1) either shows too or is held by the merge HEAD~(N-1)."""
+    marginShows = lambda n, lim: not unshown( n, lim ) and not unshown( n - 1, lim )
+    marginHeld  = lambda n, lim: not unshown( n, lim ) and mergeHolds( n - 1 )
+    before = [
+        ( _IN_LIMIT, lambda n: marginShows( n, _IN_LIMIT ), lambda n: f"margin HEAD~{n-1} holds" ),
+        ( _IN_LIMIT, lambda n: marginHeld( n, _IN_LIMIT ),
+          lambda n: f"margin HEAD~{n-1} holds as the merge HEAD~{n-1}: source-free commits behind it, its first-parent diff counted" ),
+        ( _IN_LIMIT_NARROW, lambda n: marginShows( n, _IN_LIMIT_NARROW ),
+          lambda n: f"--limit={_IN_LIMIT_NARROW}, margin HEAD~{n-1} holds; the margin has too few source files for --limit={_IN_LIMIT}" ),
+    ]
+    lastResort = [
+        ( _IN_LIMIT_LAST, lambda n: marginShows( n, _IN_LIMIT_LAST ),
           lambda n: f"--limit={_IN_LIMIT_LAST}, LAST RESORT: margin HEAD~{n-1} holds; no larger page cuts in any window" ),
-        ( _IN_LIMIT_LAST, lambda n: not unshown( n, _IN_LIMIT_LAST ) and mergeHolds( n - 1 ),
+        ( _IN_LIMIT_LAST, lambda n: marginHeld( n, _IN_LIMIT_LAST ),
           lambda n: f"--limit={_IN_LIMIT_LAST}, LAST RESORT: margin HEAD~{n-1} holds as the merge HEAD~{n-1}; no larger page cuts in any window" ),
     ]
-    for lim, ok, why in last:
-        n = firstWindow( lo, hi, ok )
-        if n is not None:
-            print( f"showcase_capture: --in= case window derived as HEAD~{n} ({why( n )})", file=sys.stderr )
-            return n, lim
+    return before, lastResort
+
+def laneMergeWindow( laneSince, unshown ):
+    """The lane-merge pass (see laneMergeSince): ( commit id, page limit, why ) when that window shows, else None."""
+    rev = laneSince()
+    if rev is None or unshown( rev, _IN_LIMIT ):
+        return None
+    return rev, _IN_LIMIT, ( "no HEAD~N shows: the newest first-parent merge took in "
+                             "main; the window is this branch's own commits since that main tip" )
+
+def refuseNoWindow( lo, hi, unshown ):
+    """Exit naming, for every N tried, which promise HEAD~N and its margin HEAD~(N-1) broke at the usual page size."""
     tried = [ f"HEAD~{n}: {'; '.join( unshown( n, _IN_LIMIT ) ) or 'shows everything'} (margin HEAD~{n-1}: {'; '.join( unshown( n - 1, _IN_LIMIT ) ) or 'shows everything'})"
               for n in range( lo + 1, hi + 1 ) ]
     sys.exit( "showcase_capture: refusing to write — no --since=HEAD~N in [%d,%d] shows what the --in=%s case promises:\n  %s"
               % ( lo + 1, hi, _IN_DIR, "\n  ".join( tried ) ) )
+
+def chooseInWindow( lo=1, hi=14, unshown=None, mergeHolds=None, laneSince=None ):
+    """Return ( N, page limit ): N is HEAD~N, or the lane-merge pass's commit id (a str). The passes run in order — the
+    HEAD~N scans, the lane-merge window, the --limit=1 last resorts — and the first that finds a window wins; none refuses."""
+    unshown = unshown or inCaseUnshown
+    mergeHolds = mergeHolds or ( lambda n: marginHeldByMerge( n, REPO, _IN_DIR ) )
+    laneSince = laneSince or ( lambda: laneMergeSince( REPO, hi ) )
+    before, lastResort = windowPasses( unshown, mergeHolds )
+    found = scanPasses( before, lo, hi ) or laneMergeWindow( laneSince, unshown ) or scanPasses( lastResort, lo, hi )
+    if found is None:
+        refuseNoWindow( lo, hi, unshown )
+    n, lim, why = found
+    print( f"showcase_capture: --in= case window derived as {inSince( n )} ({why})", file=sys.stderr )
+    return n, lim
 
 _inN, _inLimit = chooseInWindow()
 _inLimitNote = ( "" if _inLimit == _IN_LIMIT else

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string_view>
 
 #include "platform.h" // infra::platform::multiplyLow64 — the sanitizer-clean wrapping multiply
 #include "unordered_dense.h" // ankerl::unordered_dense::detail::wyhash::hash — hashMix's body
@@ -9,6 +10,19 @@ namespace rw::hashutil
 {
 
 inline constexpr std::uint64_t kFnv1aPrime64 = 1099511628211ull;
+
+// FNV-1a 64's published offset basis — THE seed for any hash that keys nothing on disk and pins nothing printed.
+inline constexpr std::uint64_t kFnv1aOffset64 = 14695981039346656037ull;
+
+// The SAME digits with the last one dropped (17 digits, not 20): a mistyped basis that shipped and now keys stored
+// formats — the parse-cache blob names and the cache-root key (quality.h kCacheRootKeySeed, whose comment measures
+// why it must not be "corrected": it would orphan every warm parse cache, 1.76 GB on llvm-project alone), file-content
+// hashes and the blob checksum in the ingest cache, the persisted lexical statistics, the clone gram fingerprints
+// the stored minhash sketch is built from, MCP edit-lock names and remote-clone directory names. As a hash it is
+// no weaker: FNV-1a's spread comes from the prime multiply, and any seed gives the same distribution. It is named so
+// it is never retyped, and so a new hash cannot pick it by copying a neighbour: use kFnv1aOffset64 unless the value
+// must equal one already written to disk.
+inline constexpr std::uint64_t kFnv1aLegacySeed64 = 1469598103934665603ull;
 
 // The low 64 bits of lhs * rhs, through the seam in infra/platform.h.
 //
@@ -50,6 +64,24 @@ inline constexpr std::uint64_t fnv1aAbsorb( std::uint64_t hash, char c ) noexcep
 {
     return fnv1aMultiply( hash ^ toByte( c ) );
 }
+
+// FNV-1a 64 of a whole byte range — the ONE spelling of the loop. `seed` is kFnv1aOffset64 unless a stored format
+// pins kFnv1aLegacySeed64. arch.h's rw::fnv1a64 (the standard-seed string hash) is this with the default seed.
+inline constexpr std::uint64_t fnv1a64( std::string_view bytes, std::uint64_t seed = kFnv1aOffset64 ) noexcept
+{
+    std::uint64_t h = seed;
+    for( const char c : bytes )
+    {
+        h = fnv1aAbsorb( h, c );
+    }
+    return h;
+}
+
+// The published FNV-1a 64 test vectors (Fowler/Noll/Vo, "FNV test vectors"): the empty string hashes to the basis
+// itself, "a" and "foobar" to these. A mistyped kFnv1aOffset64 fails to compile here.
+static_assert( fnv1a64( "" ) == 0xcbf29ce484222325ull, "kFnv1aOffset64 must be FNV-1a 64's published offset basis" );
+static_assert( fnv1a64( "a" ) == 0xaf63dc4c8601ec8cull, "FNV-1a 64 of \"a\" must match the published test vector" );
+static_assert( fnv1a64( "foobar" ) == 0x85944171f73967e8ull, "FNV-1a 64 of \"foobar\" must match the published test vector" );
 
 // Pack a (high, low) pair of 32-bit ids into one u64 that sorts by `high`, then `low` — the ONE such key (contextratio.h's fact
 // streams sort these; aliashop.h keys its per-(file, byte) scope chains on them).
