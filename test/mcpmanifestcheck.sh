@@ -340,6 +340,9 @@ tools = json.loads( line )[ "result" ][ "tools" ]
 # train-26c head 4c38d363 vs the merged binary: lego 956 -> 1,140 (+184, lego-transitive's limit/offset) and whereis 1,684 ->
 # 1,774 (+90, whereis-lean's full_text); descriptions unchanged at 22,472 B, every other tool identical. 47,109 + 184 + 90 =
 # 47,383, every byte attributed. Headroom after this line: 37 B, the #214-sized margin.
+# 2026-11-20 (train ge2): quality_delta counts 13 kinds and names the thirteenth ("12 kinds" -> "13 kinds", ", a tangle" +10 B);
+#   prose never moves this ceiling, so the same description gives 3 B back (", or a pinned" -> " or a pinned", "+dirty = " ->
+#   "+dirty: "). Main ee8d1a50e measured 47,411 B; this tree 47,418 B (33 tools). Headroom after this line: 2 B.
 CEILING = 47420
 manifest = len( json.dumps( { "tools": tools }, separators = ( ",", ":" ) ) )
 descBytes   = sum( len( t[ "description" ] ) for t in tools )

@@ -5861,7 +5861,7 @@ four `--quality-delta` shapes, against 2–6 before: this lane closed `sa@key`, 
 shapes by absolute legend size and reports the fraction as INFO. A `legend<=payload` arm is
 unsatisfiable on the case these verbs exist to handle well — a clean tree's payload is near-zero by
 construction — so at 40% of a 572 B payload the whole legend would have to fit in 381 B, shorter than
-the list of the ten measured kinds (twelve kinds now, with placeholder and defect-shape). **A ≤40% relative ceiling for `--quality-delta` and ≤50% for
+the list of the ten measured kinds (thirteen kinds now, with placeholder, defect-shape and tangle). **A ≤40% relative ceiling for `--quality-delta` and ≤50% for
 `--safe-delete`/`--test-gate` were considered and are recorded as UNREACHABLE rather than as missed
 work**: post-fix fractions are 87.0% / 91.4% / 78.8% on the clean cases and 81.4–86.7% wherever
 the payload is real. The same reasoning `test/testgatelegendbudgetcheck.sh` recorded in 2026-08-28.
@@ -6192,12 +6192,15 @@ regenerated file. It skips (exit 0) when no reference binary is given, self-test
 and asserts it left the tree unmodified — an assertion that is itself **controlled**: a stray file is
 created on purpose, must be detected, and must then be gone.
 
-### `--quality-delta`'s twelve kinds: ten measured failure modes, placeholder and defect-shape
+### `--quality-delta`'s thirteen kinds: ten measured failure modes, placeholder, defect-shape and tangle
 
 These are the exact `kind=` strings the binary emits, from `src/quality.h`:
 
 `complexity` · `verbosity` · `nesting` · `params` · `duplication` · `dead-code` · `api-surface` ·
-`error-masking` · `short-horizon-churn` · `new-clone-of-reused-helper` · `placeholder` · `defect-shape`
+`error-masking` · `short-horizon-churn` · `new-clone-of-reused-helper` · `placeholder` · `defect-shape` · `tangle`
+
+`tangle` (QD-TANGLE, 2026-11-19) is report-only: always `sev="minor"`, a long function's nesting past 3, deep share and
+steering locals amplified by length (AUC 0.986 on 44 hand labels; a long orchestrator of named steps scores 0).
 
 The first ten each target a failure mode measured in the literature; `placeholder` (added 0.6.7) is an
 honesty check on "done" — a stub or TODO the change added — and never gates. `defect-shape` carries six

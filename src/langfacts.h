@@ -131,6 +131,10 @@ enum class MemberDecl : std::uint8_t { NameFirst, NameThenType, TypeFirst, None 
 /// Python's locals live until the function returns (no block closes a slot); every other shape's live until their block closes.
 enum class SteerDecl : std::uint8_t { None, CFamily, Python, JsLexical, Java, CSharp, Go, Rust };
 
+/// --quality-delta defect-shape: the scanner a language's files go through (quality.h defectSitesOf; cFamilyEnumTable reads the
+/// two C-family ones for unhandled-arm's enums). None: the language has no defect-shape sites.
+enum class DefectScan : std::uint8_t { None, Cpp, C, Python, Bash };
+
 /// What shared code asks about a language. Every optional column is false for a language that says nothing.
 struct LangFacts
 {
@@ -464,6 +468,9 @@ struct LangFacts
 
     /// The declaration grammar the QD-TANGLE steering walk reads (SteerDecl above).
     SteerDecl steerDecl = SteerDecl::None;
+
+    /// The defect-shape scanner this language's files go through (DefectScan above).
+    DefectScan defectScan = DefectScan::None;
 };
 
 /// The Rust prelude's bare-callable items (std::prelude::v1, every edition): the Option and Result variants a call constructs, and
@@ -479,10 +486,10 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::Cpp, .basesAsCaptures = true, .defectShapeNeedsMacroSet = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .aliasTargetDefs = true, .memberSeparator = "::",
       .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain, .staticLinkage = true,
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .signatureRows = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .qualifierNamesScope = true,
-      .typedInstanceRows = true, .xMacroRows = true, .objectMacrosUnindexed = true, .edgeFamily = Lang::C, .steerDecl = SteerDecl::CFamily },
+      .typedInstanceRows = true, .xMacroRows = true, .objectMacrosUnindexed = true, .edgeFamily = Lang::C, .steerDecl = SteerDecl::CFamily, .defectScan = DefectScan::Cpp },
     { .lang = Lang::Python, .frameworkEntryHooks = true, .closureReceiverDispatch = true, .externalVetoBeforeRule3 = true, .rule3NameProof = Rule3NameProof::PythonImport, .baseImportEvidence = BaseImportEvidence::PythonImport,
       .instanceReceiver = "self", .underscorePrivacy = true, .leadingDocstring = true,
-      .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .hashComment = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .tupleParens = true, .armOpeners = ArmOpeners::PythonElif, .singleQuoteStrings = true, .steerDecl = SteerDecl::Python },
+      .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .hashComment = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .tupleParens = true, .armOpeners = ArmOpeners::PythonElif, .singleQuoteStrings = true, .steerDecl = SteerDecl::Python, .defectScan = DefectScan::Python },
     { .lang = Lang::TypeScript, .overloadSignatures = true, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
       .writtenBindingUndecided = true, .namespaceBodies = true, .objectLiteralMembers = true, .containmentOwners = true,
       .classNameReceiver = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .localBraceNotData = true, .bracedPropertyRows = true, .singleQuoteStrings = true, .steerDecl = SteerDecl::JsLexical },
@@ -500,7 +507,7 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::JavaScript, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
       .writtenBindingUndecided = true, .objectLiteralMembers = true, .containmentOwners = true,
       .classNameReceiver = true, .fileEdges = FileEdges::Resolved, .implementorEdges = ImplementorEdges::Read, .localBraceNotData = true, .bracedPropertyRows = true, .singleQuoteStrings = true, .steerDecl = SteerDecl::JsLexical },
-    { .lang = Lang::Bash, .hashComment = true, .fileEdges = FileEdges::Resolved, .shellScript = true },
+    { .lang = Lang::Bash, .hashComment = true, .fileEdges = FileEdges::Resolved, .shellScript = true, .defectScan = DefectScan::Bash },
     { .lang = Lang::Java, .basesAsCaptures = true, .samLambdas = true, .samIgnoredMembers = kJavaObjectMethods, .anonymousImplementors = true, .baseImportEvidence = BaseImportEvidence::JvmImport,
       .writtenModule = WrittenModuleRule::DirsOnly,
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .implementorEdges = ImplementorEdges::Read, .memberDecl = MemberDecl::TypeFirst, .steerDecl = SteerDecl::Java },
@@ -512,7 +519,7 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::CSharp, .overloadsWithoutArity = true, .writtenModule = WrittenModuleRule::DirsOnly,
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .implementorEdges = ImplementorEdges::Read, .armOpeners = ArmOpeners::FatArrow, .memberDecl = MemberDecl::TypeFirst, .steerDecl = SteerDecl::CSharp },
     { .lang = Lang::C, .noNestedNamedFunctions = true, .memberSeparator = "::", .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain,
-      .staticLinkage = true, .signatureRows = true, .fileEdges = FileEdges::Resolved, .typedInstanceRows = true, .xMacroRows = true, .steerDecl = SteerDecl::CFamily },
+      .staticLinkage = true, .signatureRows = true, .fileEdges = FileEdges::Resolved, .typedInstanceRows = true, .xMacroRows = true, .steerDecl = SteerDecl::CFamily, .defectScan = DefectScan::C },
     { .lang = Lang::Toml, .notCode = true, .hashComment = true, .fileEdges = FileEdges::NotApplicable, .configFormat = true },
     { .lang = Lang::Yaml, .notCode = true, .hashComment = true, .fileEdges = FileEdges::NotApplicable, .configFormat = true },
     { .lang = Lang::Php, .memberSeparator = "::", .implementorEdges = ImplementorEdges::Read, .armOpeners = ArmOpeners::FatArrow, .singleQuoteStrings = true },

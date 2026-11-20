@@ -6685,8 +6685,8 @@ inline defectshape::EnumTable cFamilyEnumTable( const IngestResult& ing, std::st
     defectshape::EnumTable table;
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
-        const Lang lang = langOfPath( relForHash( ing.files[f], root ) );
-        if( !fileIsInBaseline( fileInBaseline, f ) || ( lang != Lang::Cpp && lang != Lang::C ) )
+        const DefectScan scan = langFacts( langOfPath( relForHash( ing.files[f], root ) ) ).defectScan;
+        if( !fileIsInBaseline( fileInBaseline, f ) || ( scan != DefectScan::Cpp && scan != DefectScan::C ) )
         {
             continue;
         }
@@ -6720,8 +6720,8 @@ inline std::vector<DefectSiteAt> defectSitesOf( const IngestResult& ing, std::st
             continue;
         }
         const std::string_view rel  = relForHash( ing.files[f], root );
-        const Lang             lang = langOfPath( rel );
-        if( lang != Lang::Cpp && lang != Lang::C && lang != Lang::Python && lang != Lang::Bash )
+        const DefectScan       scan = langFacts( langOfPath( rel ) ).defectScan;
+        if( scan == DefectScan::None )
         {
             continue;
         }
@@ -6747,19 +6747,19 @@ inline std::vector<DefectSiteAt> defectSitesOf( const IngestResult& ing, std::st
             }
         }
         std::vector<defectshape::Site> sites;
-        if( lang == Lang::Cpp && defectshape::cppMayHoldShapes( src ) )
+        if( scan == DefectScan::Cpp && defectshape::cppMayHoldShapes( src ) )
         {
             sites = defectshape::scanCpp( src, fnSpans, &treeMacros, &enums );
         }
-        else if( lang == Lang::C && ( defectshape::mayHoldStatusCalls( src ) || src.find( "switch" ) != std::string_view::npos ) )
+        else if( scan == DefectScan::C && ( defectshape::mayHoldStatusCalls( src ) || src.find( "switch" ) != std::string_view::npos ) )
         {
             sites = defectshape::scanC( src, fnSpans, &enums );
         }
-        else if( lang == Lang::Python )
+        else if( scan == DefectScan::Python )
         {
             sites = defectshape::scanPython( src, fnSpans );
         }
-        else if( lang == Lang::Bash )
+        else if( scan == DefectScan::Bash )
         {
             if( isTestScriptPath( rel ) )   // a test script: every assertion form (grep, [ ], cmp, case, rc=$?) is read
             {

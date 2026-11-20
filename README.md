@@ -14,7 +14,7 @@
 <p align="center"><a href="https://trendshift.io/repositories/217924?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-217924"><img src="https://trendshift.io/api/badge/trendshift/repositories/217924/weekly?language=C%2B%2B" alt="Trendshift: C++ Repository of the Week badge for redhat-et/ripwire" width="250" height="55"></a></p>
 
 Ranked, deterministic call graph: what to touch, what it breaks, which tests to run. On the edit: blast
-radius, tests that reach it, twelve quality kinds reporting only what got worse, forgotten co-changes, fields
+radius, tests that reach it, thirteen quality kinds reporting only what got worse, forgotten co-changes, fields
 read and written, names that resolve more than one way.
 
 **Just want to use it?** Install it with the one line below, then start each coding session by telling your agent to
