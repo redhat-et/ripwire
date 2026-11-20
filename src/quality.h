@@ -1155,10 +1155,15 @@ inline std::uint64_t pathQualifiedKey( std::string_view relPath, std::string_vie
 // arity-carrying key reported (PR #81 review item 4, test/elixirnamearitycheck.sh arm C). Every language
 // but Elixir keys by the name as indexed. Every call site keys through this overload: a raw
 // (path, scope, name) call beside it would be a second rule that has to be ARGUED equal to this one.
-// kQSnapCacheScheme v11 is this fold — a v10 blob's Elixir keys hash a different byte string.
+// kQSnapCacheScheme v11 is this fold — a v10 blob's Elixir keys hash a different byte string. A history blob's definition (no
+// Symbol: qdbestsince.h) keys through the parts overload, which holds the rule.
+inline std::uint64_t pathQualifiedKey( std::string_view relPath, std::string_view scope, std::string_view name, Lang lang )
+{
+    return pathQualifiedKey( relPath, scope, lang == Lang::Elixir ? elixirBaseName( name ) : name );
+}
 inline std::uint64_t pathQualifiedKey( std::string_view relPath, const Symbol& s )
 {
-    return pathQualifiedKey( relPath, s.scope, s.lang == Lang::Elixir ? elixirBaseName( s.name ) : std::string_view( s.name ) );
+    return pathQualifiedKey( relPath, s.scope, s.name, s.lang );
 }
 
 // §D#4 error-masking and placeholder — attribute each hit (findQualityConstructs) to its ENCLOSING symbol by
