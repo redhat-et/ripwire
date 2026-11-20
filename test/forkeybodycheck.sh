@@ -14,7 +14,11 @@
 #         readings the block's attributes need); the comparison CAN fail (one byte dropped)
 #   (K2)  MCP `for` routes by the same rule and carries the same <bodies of="key"> element, byte for byte (RT2 parity)
 #   (K3)  unrouted (this repo's src/, a conceptual question naming two functions): the group sits directly after the first top-level
-#         row block of the whole answer (--page-bytes=0), legend first, both named bodies in it
+#         row block of the whole answer (--page-bytes=0), legend first, and EVERY name the question backticks rides. The membership
+#         arm reads the expected names FROM THE QUESTION rather than pinning a literal ['streamCuts','pageEnds'], so a change to
+#         the body SELECTOR (SEL1's S1, or any later fold change) cannot turn this arm red by moving which definition page 1
+#         happens to serve — it is red only when a backticked name does not ride. Rule E2 (the last code-shaped span leads) is
+#         pinned the same way, from the question's own span order.
 #   (K3n) unrouted coverage: ON minus the group == the twin (est_tokens= masked); the comparison CAN fail (one byte dropped)
 #   (K4)  pages: at the default 12 KB page, every page of ON minus the group == the twin's page (est_tokens= masked), the page count
 #         is the twin's and the group rides page 1: a body pushes no row to a later page
@@ -24,7 +28,13 @@
 #         arm that actually exercises kKeyBodyMax; K6 alone would pass on any cap of 3 or more.
 #   (K7)  negative controls, byte-identical with and without the knob: no backticks; a span naming nothing; a namesake flood (13
 #         definitions); a definition only in a test file; --legend=first; --signatures-only; --token-budget
-#   (K8)  a body the page already carries is not repeated (the name-exact anchor body): no key block, and the arm is not vacuous
+#   (K12) THE CONTRACT ARM (owner ruling 87, 2026-11-20): the key group carries its OWN body even when the page already serves that
+#         same definition elsewhere. Same p= and same l= in two places on one page is CORRECT — a body served elsewhere does not
+#         satisfy KB1. Non-vacuous by construction and in that order: the arm first proves the knob-off twin's page 1 really does
+#         carry that definition's body, and only then requires the key group to carry it anyway (so the ON answer is NOT the twin).
+#         (K12) RETIRES the old (K8), which pinned the opposite — no key block when the page already carried the body. Ruling 87
+#         overturns that clause of KB1's frozen rule (results/KB1_ACTREADY_1119/PREREG.md lines 25-26: "A body the page already
+#         carries (same p= and l= in the first 12,000 B) is not repeated"); K8 was that clause's gate and cannot survive it.
 #   (K9)  well formed (xmllint) and deterministic (two runs byte-identical)
 #   (K10) ordering: a Python @overload pair of one-line stubs and the real definition -> the real (multi-line) body takes the first slot
 #   (K11) a warned routed answer (who-calls through a macro: the --for page is carried) holds ONE key block: the carried page's moves up
@@ -139,9 +149,13 @@ cli '`compute_total`' >"$DIR/dup.on"; off '`compute_total`' >"$DIR/dup.off"
 ( cd "$P" && "$BIN" . --no-cache --for='Who calls `pick_one`?' 2>/dev/null ) >"$DIR/ovl.on"
 ( cd "$M" && "$BIN" . --no-cache --for='Who calls `compute_total`?' 2>/dev/null ) >"$DIR/mac.on"
 
-python3 - "$DIR" <<'PY'
+python3 - "$DIR" "$QS" <<'PY'
 import os, re, sys
 W = sys.argv[1]; bad = 0
+# The unrouted question's own backtick spans, in question order. K3's membership and K3's E2 ordering are
+# derived from THIS, never from a literal name list: the contract is "every name the question backticks
+# rides", which is what ruling 87 restored, and it must not have to be re-edited when the selector moves.
+QNAMES = re.findall(r'`([A-Za-z_]\w*)`', sys.argv[2])
 def rd(n):
     p = os.path.join(W, n)
     return open(p, "rb").read().decode("latin-1") if os.path.exists(p) else ""
@@ -152,6 +166,18 @@ KEY = re.compile(r'<bodies of="key"[^>]*>.*?</bodies>', re.S)
 LEG = re.compile(r'<!-- bodies of=key:.*?-->', re.S)
 READING = re.compile(r' bodies of=key: [^.]*?\(longer: truncated=1 lines= next=\)\.')
 mask = lambda d: re.sub(r' est_tokens="\d+"', ' est_tokens="#"', d)
+BODYRE = re.compile(r'<b ([^>]*)>(.*?)</b>', re.S)
+def bodyrows(block):
+    """every <b> of a bodies block as (name, path, line, cdata) -- the identity ruling 87 reasons about is (path, line)"""
+    out = []
+    for m in BODYRE.finditer(block):
+        at = lambda k: (re.search(r'\b%s="([^"]*)"' % k, m.group(1)) or [None, ""])[1]
+        out.append((at("n"), at("p"), at("l"), m.group(2)))
+    return out
+def served_elsewhere(doc, path, line, upto):
+    """is this (path, line) carried by a <b> row OUTSIDE any key group, within the first `upto` bytes? (bodyServed's own test)"""
+    stripped = KEY.sub(lambda m: " " * len(m.group(0)), doc)
+    return any(p == path and l == line for _, p, l, _ in bodyrows(stripped[:upto]))
 def blocks(d):
     """top-level children of the root (comments and elements), CDATA-safe, as (kind, name, begin, end)"""
     i = d.find(">", d.find("<ctx")) + 1; close = d.rfind("</ctx>"); out = []; depth = 0; start = None; name = None
@@ -205,8 +231,17 @@ okp = first is not None and idx + 2 < len(B) and B[idx + 1][0] == "c" and uon[B[
       and B[idx + 2][1] == "bodies" and uon[B[idx + 2][2]:].startswith('<bodies of="key"') and B[idx + 1][2] == first[3]
 say(okp, "(K3) unrouted: the key group (legend, then <bodies of=\"key\">) sits directly after the first row block <%s>" % (first[1] if first else "?"))
 ku = KEY.findall(uon)
-say(len(ku) == 1 and re.findall(r'<b [^>]*\bn="(\w+)"', ku[0]) == ["streamCuts", "pageEnds"] and "inline std::vector<std::size_t> pageEnds(" in ku[0],
-    "(K3) unrouted: both named definitions ride, rule E2's symbol (the last code-shaped span) first")
+# MEMBERSHIP, derived from the question and not from a literal list (R1b's fragility finding, endorsed by ruling 87's brief):
+# pin THAT every backticked name rides, each once, not WHICH names they are -- so a selector change (SEL1 S1) cannot redden it.
+urows = bodyrows(ku[0]) if len(ku) == 1 else []
+unames = [n for n, _, _, _ in urows]
+members = len(ku) == 1 and sorted(unames) == sorted(QNAMES) and len(set(unames)) == len(unames)
+# each named body really is that definition (name-derived, replacing a pinned product signature string): its CDATA opens the
+# definition of the name it claims.
+defline = members and all(any(n == q and re.search(r'\b%s\s*\(' % re.escape(q), c) for n, _, _, c in urows) for q in QNAMES)
+say(members and defline and unames == QNAMES[::-1] and len(QNAMES) == 2,
+    "(K3) unrouted: every name the question backticks rides, each once, each carrying its own definition line, rule E2's symbol "
+    "(the last code-shaped span) first -- question names %s, expected %s, got %s" % (QNAMES, QNAMES[::-1], unames))
 ustrip = LEG.sub("", KEY.sub("", uon, count=1), count=1)
 say(mask(ustrip) == mask(uoff) and uoff != "", "(K3n) unrouted ON minus the group == the twin (est_tokens= masked), byte for byte")
 say(mask(ustrip)[:-1] != mask(uoff), "(K3n) negative control: the same comparison fails when one byte is dropped")
@@ -255,10 +290,23 @@ labels = ["no backticks", "a span naming nothing", "a namesake flood (13 defs)",
 for i, lab in enumerate(labels, 1):
     a, b = rd("neg%d.on" % i), rd("neg%d.off" % i)
     say(a != "" and a == b and "bodies of=\"key\"" not in a, "(K7) %s: byte-identical with and without the knob, no key block" % lab)
-# (K8) dedupe
+# (K12) THE CONTRACT ARM (ruling 87). Order matters: PROVE the page already serves the body, THEN require the key group to carry
+# its own copy. A prohibition-shaped arm ("no key block") is free on unfixed code; this one asserts a positive that only the fix
+# can produce, and it names the duplicate it demands so the red says what is missing.
 don, doff = rd("dup.on"), rd("dup.off")
-carried = re.search(r'<b [^>]*n="compute_total"', doff[:12000]) is not None
-say(carried and don == doff, "(K8) the name-exact answer already carries compute_total's body on page 1: no key block (not vacuous: %s)" % carried)
+twinrow = next(((p, l) for n, p, l, _ in bodyrows(doff[:12000]) if n == "compute_total"), None)
+say(twinrow is not None,
+    "(K12) NON-VACUITY: the knob-off twin's page 1 does carry compute_total's body elsewhere, so this arm has something to "
+    "duplicate (p=,l= %s)" % (twinrow,))
+kd = KEY.findall(don)
+krows = bodyrows(kd[0]) if len(kd) == 1 else []
+dup = twinrow is not None and len(krows) == 1 and (krows[0][1], krows[0][2]) == twinrow and krows[0][0] == "compute_total"
+say(dup and don != doff and "compute_total" in (krows[0][3] if krows else ""),
+    "(K12) CONTRACT: the key group carries its own body of the definition page 1 already serves -- same p= and l= in both places, "
+    "and the answer is therefore NOT the knob-off twin (twin row %s, key rows %s)" % (twinrow, [(n, p, l) for n, p, l, _ in krows]))
+say(dup and served_elsewhere(don, krows[0][1], krows[0][2], 12000),
+    "(K12) CONTRACT: and the duplicate is read back out of the DELIVERED answer -- the same (p=,l=) is served by a <b> row outside "
+    "the key group on the same page, which is exactly what bodyServed used to veto")
 # (K10) overload ordering
 ov = KEY.findall(rd("ovl.on"))
 bl = re.findall(r'<b [^>]*\bl="(\d+)"', ov[0]) if ov else []
