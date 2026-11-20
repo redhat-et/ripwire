@@ -819,6 +819,138 @@ sys.exit(1 if bad else 0)
 PY_CL
 [ $? -eq 0 ] || fail=1
 
+# (G8/G9/G10) TL2 -- THE TAIL'S PAGE-1 PRESENCE IS A GUARANTEE OF 24 ROWS, NOT OF THE WHOLE TAIL (lane TL2, owner
+# ruling 112, 2026-11-20; results/TL2_TAIL_CAP_1120/READOUT.md §2-§3).
+# WHAT THIS GUARDS. AF2's G asked TWO questions before promoting anything: has the tail more than kGuardTailRows rows, AND
+# does </tail> itself end past the page stop? The second is not a guard -- it is a precondition on the tail's own SIZE --
+# and it made a tail that FITS page 1 untouchable: the <fold> behind such a tail was never promoted, so page 1 ended on
+# file-grain pointer rows while the body the question was about started after the cut. The guarantee is rows
+# 1..kGuardTailRows and only those; the rows past it carry no rank (MEASURED on GA1 DEV: 0 of 88 page-1 tails carry a
+# single r= row) and are what funds the body. So the SIZE precondition now scopes PASS 1 ALONE.
+# NOTHING IS REMOVED: the tail keeps every row it had, in order, so this is not item K's fixed tail cap (which CUT rows
+# and lost 92 anchors across 63 of 275 cells) -- (R1)/(R4) above still hold byte for byte on the same answers.
+# THE OTHER HALF, and it is what makes this a cap rather than a shove: a tail that fits page 1 is FOLLOWED on page 1 by
+# the sections after it, and a body promoted ahead of the tail shifts every one of them. R1b's priority rule says a RES
+# section cannot lose its place to a body, so on this branch the body's fit test is floored by the end of the last
+# kPromotable section page 1 already delivers. MEASURED without that floor: <callers> left page 1 in ga-jq-05 and
+# ga-jq-08 -- and B-NO-CROWDOUT v2 is structurally blind to it, because all three of its conjuncts read the prefix up to
+# </tail> and that section was BEHIND it.
+#   (G8n) the POPULATION arm, read off the LEGACY order, asserting in BOTH directions: this fixture's tail must FIT the
+#         stop, carry more than kGuardTailRows rows, and offer a body section after </tail>. The fixture is a SUBTREE
+#         (src/infra), because on the whole repo every tail overflows -- the fitting-tail population is empty there, and
+#         an arm aimed at the repo root would have been green while asserting nothing.
+#   (G8)  the body section is emitted AHEAD of <tail> although the whole tail fits the stop. RED on the unfixed binary by
+#         construction -- AF2's size precondition returns before any promotion -- which is the proof this arm's
+#         direction admits (a NEW behaviour, not a relaxed comparison).
+#   (G9)  the CAP's own guarantee, on the DELIVERED page: page 1 carries a body element AND still carries its first
+#         kGuardTailRows tail rows, with row kGuardTailRows inside the stop. This is the FILE rung's bar in code, on the
+#         one fixture where this change is what puts it at risk.
+#   (G10) the RES floor: no kPromotable section the legacy order DELIVERS on page 1 is deferred in the capped answer, and
+#         the RES names ahead of <tail> are the legacy order's. (G10n) states whether this fixture offers a post-tail RES
+#         section at all -- where it does not, the prohibition is recorded as untested HERE rather than counted as a pass.
+TASK_T="how is a path normalised"
+ROOT_T="src/infra"
+capat(){  # capat FILE ROOT TASK [extra-args]
+    local f="$1" r="$2" t="$3"; shift 3
+    "$BIN" "$r" --for="$t" "$@" >"$f" 2>/dev/null
+}
+capat "$WORK/u_new.xml" "$ROOT_T" "$TASK_T" $OPTIN $WHOLE
+capat "$WORK/u_old.xml" "$ROOT_T" "$TASK_T" $LEGACY
+capat "$WORK/u_page1.xml" "$ROOT_T" "$TASK_T" $OPTIN
+capat "$WORK/u_oldpage1.xml" "$ROOT_T" "$TASK_T"
+for f in u_new u_old u_page1 u_oldpage1; do
+    [ -s "$WORK/$f.xml" ] || { no "(G8n) $f.xml is empty -- the TL2 arms assert nothing"; echo "FAILURES"; exit 1; }
+done
+python3 - "$WORK" <<'PY_TL2'
+import re, sys, os
+W = sys.argv[1]; STOP = 12000; K = 24; bad = 0
+RES     = ("lit", "dotted_strings", "graph_verb", "callers", "selfhooks", "manifest_rows", "listed", "ep", "reexports", "exemplar_family")
+BODYCLS = ("fold", "bodies")
+def rd(n): return open(os.path.join(W, n), "rb").read().decode("latin-1")
+def mask(d): return re.sub(r"<!--.*?-->|<!\[CDATA\[.*?\]\]>", lambda m: " " * len(m.group(0)), d, flags=re.S)
+def tops(d):
+    """top-level children of <ctx> as (name, begin, end) -- comments and CDATA masked first (the answers carry C++)"""
+    m = mask(d); r = re.search(r"<ctx\b[^>]*>", m)
+    if r is None: return []
+    i = r.end(); end = m.rfind("</ctx>"); out = []; depth = 0; start = 0; name = ""
+    for t in re.finditer(r"<(/?)([A-Za-z_][\w-]*)[^>]*?(/?)>", m[i:end]):
+        a, b = i + t.start(), i + t.end()
+        if t.group(1):
+            depth -= 1
+            if depth == 0: out.append((name, start, b))
+        elif t.group(3):
+            if depth == 0: out.append((t.group(2), a, b))
+        else:
+            if depth == 0: start, name = a, t.group(2)
+            depth += 1
+    return out
+def say(ok, msg):
+    global bad
+    print("  %s  %s" % ("PASS" if ok else "FAIL", msg)); bad += 0 if ok else 1
+def tailrows(d, tb, te): return [q.end() + tb for q in re.finditer(r"<t\b[^>]*/>", mask(d)[tb:te])]
+def deferred(d):
+    h = re.match(r"<ctx\b[^>]*>", d)
+    m = re.search(r'\sdeferred="([^"]*)"', h.group(0) if h else "")
+    return m.group(1).split() if m else []
+
+# -- (G8n) THE POPULATION, read off the LEGACY order, in both directions.
+old = rd("u_old.xml"); to = tops(old); no_ = [x[0] for x in to]
+if "tail" not in no_:
+    say(False, "(G8n) the fixture's legacy answer has no <tail> -- the TL2 arms assert nothing")
+    sys.exit(1)
+oi = no_.index("tail"); otb, ote = to[oi][1], to[oi][2]; orows = tailrows(old, otb, ote)
+opost_body = [x[0] for x in to[oi + 1:] if x[0] in BODYCLS]
+opost_res  = [x for x in to[oi + 1:] if x[0] in RES]
+say(bool(opost_body) and len(orows) > K and ote <= STOP,
+    "(G8n) fixture %s: legacy order's tail FITS the stop (</tail> at %d <= %d) with %d rows (> %d) and emits %s after it"
+    % ("src/infra", ote, STOP, len(orows), K, ",".join(opost_body) or "NO BODY SECTION"))
+
+# -- (G8) the body section is ahead of <tail> although the whole tail fits. RED on the unfixed binary.
+new = rd("u_new.xml"); tn = tops(new); nn = [x[0] for x in tn]
+if "tail" not in nn:
+    say(False, "(G8) the answer-first document has no <tail>")
+else:
+    ti = nn.index("tail")
+    ahead  = [x[0] for x in tn[:ti] if x[0] in BODYCLS]
+    behind = [x[0] for x in tn[ti + 1:] if x[0] in BODYCLS]
+    say(bool(ahead), "(G8) a body section is ahead of <tail> on a tail that FITS page 1: ahead=%s behind=%s"
+        % (",".join(ahead) or "NONE", ",".join(behind) or "none"))
+    rows = tailrows(new, tn[ti][1], tn[ti][2])
+    say(len(rows) > K and rows[K - 1] <= STOP,
+        "(G9a) tail row %d still ends at %s <= %d with the body ahead of it (tail has %d rows)"
+        % (K, rows[K - 1] if len(rows) >= K else "?", STOP, len(rows)))
+
+# -- (G9) THE DELIVERED PAGE: a body element AND the first 24 tail rows, on the same page 1.
+p1 = rd("u_page1.xml"); t1 = tops(p1); n1 = [x[0] for x in t1]
+onpage = [x for x in t1 if x[0] in BODYCLS]
+nbody = sum(len(re.findall(r"<b\b[^>]*>", mask(p1)[x[1]:x[2]])) for x in onpage)
+say(nbody > 0, "(G9b) page 1 carries %d body element(s) in %s" % (nbody, ",".join(x[0] for x in onpage) or "no body section"))
+if "tail" in n1:
+    i1 = n1.index("tail"); r1 = tailrows(p1, t1[i1][1], t1[i1][2])
+    say(len(r1) >= K, "(G9c) page 1 still carries its first %d tail rows (%d present)" % (K, len(r1)))
+else:
+    say(False, "(G9c) page 1 carries no <tail> at all -- the guarantee was displaced whole")
+
+# -- (G10/G10n) THE RES FLOOR. The legacy page 1 is the baseline for what a promotion may not push off.
+oldp1 = rd("u_oldpage1.xml"); tp = tops(oldp1); delivered_res = [x[0] for x in tp if x[0] in RES]
+res_new_ahead = [x[0] for x in tn[:nn.index("tail")] if x[0] in RES] if "tail" in nn else []
+res_old_ahead = [x[0] for x in to[:oi] if x[0] in RES]
+newly = [n for n in delivered_res if n in deferred(p1)]
+if not opost_res and not delivered_res:
+    say(res_new_ahead == res_old_ahead,
+        "(G10n) this fixture offers NO RES section after </tail> and delivers none on page 1, so the RES floor is UNTESTED here "
+        "(it is measured on GA1 DEV ga-jq-05/ga-jq-08, READOUT §6); the RES order ahead of <tail> is unchanged: %s"
+        % (",".join(res_new_ahead) or "none"))
+else:
+    say(not newly and res_new_ahead == res_old_ahead,
+        "(G10) no RES section the legacy page 1 delivers (%s) is deferred by the promotion (newly deferred: %s), and the RES "
+        "order ahead of <tail> is the legacy order's (%s vs %s)"
+        % (",".join(delivered_res) or "none", ",".join(newly) or "none",
+           ",".join(res_new_ahead) or "none", ",".join(res_old_ahead) or "none"))
+sys.exit(1 if bad else 0)
+PY_TL2
+[ $? -eq 0 ] || fail=1
+
 # (SD) TL1 M2 -- SAME-DIRECTORY TAIL LEAD (foranswerfirst.h tailSameDirFirst; lane TL1 PREREG M2, F1's post-hoc P1t lead). Inside
 # <tail>, rows 1..24 keep their place; rows past 24 are stably partitioned, rows whose p= directory is the directory of a <sigs> <d>
 # row with r <= 5 first. ORDER-ONLY: the answer is a permutation of its RIPWIRE_NO_TAIL_SAMEDIR=1 twin and of --legend=first.
