@@ -15,6 +15,10 @@
 #   C  control: unset (default on, the 65% limit far above this run) the run exits 0 with a non-empty map.
 #   D  byte-identical when the ceiling is not hit: the default map, --json, and a --for answer print the SAME stdout and stderr
 #      bytes and rc with the line on by default, OFF (=0), and armed far above the need (1000000).
+#   E  the post-write suspension (owner ruling 101): E1 an edit verb is still refused BEFORE it writes (exit 5, not the
+#      exit 1 of a resolved-but-missing symbol), E2 an armed run's receipt discloses that the post-check ran with the
+#      ceiling suspended while a disarmed run says nothing, E3 the suspension is constructible in exactly one file and
+#      no flag or environment path reaches its depth counter.
 #   V  a typo is refused, never obeyed or ignored: '12x' and '10' (under the 64 MiB floor) exit 1 with nothing on stdout and a
 #      stderr line naming RIPWIRE_MEM_BUDGET_MB.
 #   M  the server survives: --mcp under RIPWIRE_MEM_BUDGET_MB=64 does not arm (its refusal would end the process), says so
@@ -141,6 +145,66 @@ for form in map json for; do
     done
 done
 [ "$dsame" -eq "$dtotal" ] && ok "D: map, --json and --for print byte-identical stdout and rc with the line on by default, off (=0) and armed at 1000000, and byte-identical stderr ($dsame/$dtotal pairs$( [ "$ddiag" -gt 0 ] && printf ', %s of them with only this unarmable build'"'"'s one "is NOT armed" line allowed' "$ddiag" ))"
+
+# ---- E: the post-write suspension (owner ruling 101) ----
+# The line must NOT refuse after an edit verb has committed a file: the edit would be applied with no receipt and
+# a retry could insert twice. These arms assert the three properties the ruling named, in the order a reader
+# should doubt them: that the suspension cannot be reached from outside, that it did not cost the PRE-write
+# checks their arming, and that the receipt says the check ran without the ceiling.
+#
+# E1 is the one that could silently rot: it asserts the pre-write refusal by its EXIT CODE, against a tree big
+# enough to cross 64 MiB while resolving. The target symbol deliberately does not exist, so even a completely
+# broken ceiling cannot write anything here — and the distinction being asserted is exit 5 (refused before
+# resolution, i.e. before any write) rather than exit 1 (resolved, and not found).
+mkdir -p "$TMP/fix"
+cat >"$TMP/fix/a.cpp" <<'CPP'
+int ceilingAlpha( int x )
+{
+    return x + 1;
+}
+CPP
+printf '// marker' >"$TMP/payload"
+
+if [ "$hooked" -eq 1 ]; then
+    cp -R "$ROOT/src" "$TMP/bigedit"
+    RIPWIRE_MEM_BUDGET_MB=64 "$BIN" "$TMP/bigedit" --insert-after-symbol=noSuchSymbolForThisGate \
+        --edit-payload="$TMP/payload" >"$TMP/e1.out" 2>"$TMP/e1.err"; rce1=$?
+    if [ "$rce1" -eq 5 ] && [ ! -s "$TMP/e1.out" ] && grep -q 'refused by the memory ceiling' "$TMP/e1.err"; then
+        ok "E1: an edit verb is still refused BEFORE it writes (exit 5, nothing on stdout) — the suspension did not disarm the pre-write path"
+    else
+        no "E1: edit under RIPWIRE_MEM_BUDGET_MB=64: rc $rce1 (want 5), $( wc -c < "$TMP/e1.out" | tr -d ' ' ) B stdout, stderr: $( head -c 200 "$TMP/e1.err" )"
+    fi
+
+    # E2: armed far above the need, a real edit succeeds AND the receipt discloses that the ceiling did not
+    # apply to the post-check. Disarmed (=0) it must say nothing, because then there was nothing to suspend.
+    cp -R "$TMP/fix" "$TMP/e2on"
+    RIPWIRE_MEM_BUDGET_MB=1000000 "$BIN" "$TMP/e2on" --insert-after-symbol=ceilingAlpha \
+        --edit-payload="$TMP/payload" >"$TMP/e2on.out" 2>"$TMP/e2on.err"; rce2=$?
+    cp -R "$TMP/fix" "$TMP/e2off"
+    RIPWIRE_MEM_BUDGET_MB=0 "$BIN" "$TMP/e2off" --insert-after-symbol=ceilingAlpha \
+        --edit-payload="$TMP/payload" >"$TMP/e2off.out" 2>"$TMP/e2off.err"; rce2off=$?
+    if [ "$rce2" -eq 0 ] && [ "$rce2off" -eq 0 ] \
+       && grep -q '"memory_ceiling":"suspended for this check' "$TMP/e2on.out" \
+       && grep -q 'retry could insert twice' "$TMP/e2on.out" \
+       && ! grep -q 'memory_ceiling' "$TMP/e2off.out"; then
+        ok "E2: with the ceiling armed the receipt discloses that the post-check ran suspended; with it off (=0) the receipt says nothing (rc 0/0)"
+    else
+        no "E2: armed rc $rce2 (want 0) disclosed=$( grep -c '\"memory_ceiling\"' "$TMP/e2on.out" ) (want 1); off rc $rce2off disclosed=$( grep -c 'memory_ceiling' "$TMP/e2off.out" ) (want 0)"
+    fi
+else
+    skip "E1/E2: this build cannot arm the ceiling, so there is nothing to suspend"
+fi
+
+# E3: STRUCTURAL, and it runs on every build — the ruling's first constraint is that nothing a caller can type
+# switches the ceiling off, so the suspension must be constructible in exactly one place, and that place must be
+# the post-write funnel. A new construction site, or any argument/environment path into the depth counter, fails.
+e3sites="$( grep -rln 'memceiling::Suspension' "$ROOT/src" | LC_ALL=C sort | tr '\n' ' ' )"
+e3knob="$( grep -rl 'suspendDepth' "$ROOT/src" | grep -vE 'memceiling\.h$' | tr '\n' ' ' )"
+if [ "$e3sites" = "$ROOT/src/mcpedit.h " ] && [ -z "$e3knob" ]; then
+    ok "E3: the suspension is constructed in exactly one file (src/mcpedit.h, the post-write funnel) and no flag or environment path reaches its depth counter"
+else
+    no "E3: construction sites={$e3sites} (want src/mcpedit.h alone); files touching suspendDepth outside memceiling.h={$e3knob} (want none)"
+fi
 
 # ---- V ----
 for bad in 12x 10; do

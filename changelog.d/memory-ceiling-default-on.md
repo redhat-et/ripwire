@@ -6,9 +6,14 @@ crawl/parse workers and in the file graph's fold. A run that grows inside one ca
 before the OS killed it, because nothing between the `graph-tables` and `graph-end` readings reads memory.
 
 The guard now has a second reading site at `operator new`, where every growth passes, so it sees inside a loop
-with no call site in it. It is **on by default**, and its ceiling IS the guard's existing hard limit — there is
-one limit and one knob, not two: `--max-memory` and `RIPWIRE_MAX_MEMORY` move this line too, and a refusal
-exits **5**, the memory-refusal code everywhere in ripwire. `RIPWIRE_MEM_BUDGET_MB=<MiB>` sets a ceiling for
+with no call site in it. It is **on by default** at the guard's existing hard limit — one limit and one knob,
+not two: `--max-memory` and `RIPWIRE_MAX_MEMORY` move this line too, and a refusal exits **5**, the
+memory-refusal code everywhere in ripwire. **The limit is shared; the quantity measured against it is not.**
+This line reads **this process's own footprint** and nothing else, while the guard's phase-boundary lines take
+the larger of that and the cgroup v2 leaf's unreclaimable charge. So in a Linux leaf with a finite
+`memory.max`, shared with other processes, the allocator line can admit after the leaf's charge has already
+passed the limit, and that case stays covered at the guard's phase boundaries only. What this line exists to
+catch — one process growing without bound inside a single loop — is exactly what the process footprint shows. `RIPWIRE_MEM_BUDGET_MB=<MiB>` sets a ceiling for
 this line alone and `RIPWIRE_MEM_BUDGET_MB=0` turns it off; a value that is neither 0 nor a whole number of at
 least 64 MiB refuses the run (exit 1) rather than being ignored. A refusal is one stderr line naming the limit,
 the footprint, the next request and the phase, written from a stack buffer with no allocation. It does not flush
@@ -16,6 +21,15 @@ pending stdio, so a map still being assembled prints **nothing** — but `_Exit(
 written, so a command that had streamed part of an answer leaves that partial stdout behind, and the refusal line
 says as much ("any output already printed above is cut, not complete"). **Exit 5 means the run answers nothing: a
 caller must discard whatever stdout holds rather than parse it.**
+
+**One region refuses nothing, on purpose.** An edit verb commits the file with `atomicWrite` and then rebuilds
+the index for its post-check. Ending the process there would leave the edit applied with no receipt, and a
+caller that retried could insert the same text twice — so the line is **suspended for that region and only
+there**: a crossing inside it is recorded rather than fatal, and the receipt says so on a new `memory_ceiling`
+field whenever the ceiling is armed, naming the peak and the count if the check did pass the limit. The
+suspension is reachable from no flag and no environment variable, every pre-write check stays armed, and the
+memory guard's own phase-boundary stop still applies inside the region (it reports `post_check: "not run: …"`
+and exits 0). The accepted cost: growth inside one loop is unbounded again in that one bounded region.
 
 An allocation of 256 KiB or more reads the footprint before the block is taken; smaller ones read once per
 64 MiB per thread. Disarmed the cost is one relaxed atomic load per `operator new`. **It only reads — it never

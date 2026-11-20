@@ -19,6 +19,20 @@
 //   machine memory unknown           off, as memguard's footprint cap is
 // A refusal exits 5, the memory refusal everywhere in ripwire (memguard's hard line, a stopped fold).
 //
+// ONE LIMIT, BUT NOT THE SAME QUANTITY — say this rather than "folded into the guard's limit" (owner ruling 102,
+// 2026-11-20). The LIMIT and the KNOBS are shared, as above. The quantity measured against them is not:
+//   this line            os::mem_footprint()      — THIS PROCESS's footprint, and nothing else
+//   memguard's own lines  measuredFootprint()     — max( that, the cgroup v2 leaf's unreclaimable charge ), memguard.h
+// So on a Linux leaf with a finite memory.max, shared with other processes, this line can admit an allocation
+// after the leaf's charge has already passed the limit; the leaf case is caught at memguard's phase boundaries
+// only. That is a deliberate narrowing of the claim, not an oversight, and the reasoning is: what this line
+// exists to catch is THIS process growing without bound inside one loop (buildGraph's resolve frontier, ~5 GB/s
+// on 2026-11-18), and the quantity that grows there is exactly the process footprint it reads. The leaf term
+// would have to be read from inside operator new, where os::mem_cgroup_unreclaimable() cannot go as written —
+// it allocates two std::strings and does three procfs reads per call — and it is not exercisable on macOS
+// (0 there) nor on a stock CI runner (memguardcheck's (B24) arm already SKIPs for want of such a leaf). It
+// lands only behind a gate that can actually run it.
+//
 // THE OVERSHOOT. memguard used to disclose a run whose transient peak passed the limit and fell back before the next reading
 // (owner 2026-11-01: disclosed, not enforced). An operator-new allocation can no longer do that: the line reads BEFORE the
 // block is taken. What remains is memory this line cannot see — malloc called directly (tree-sitter), mmap, and up to
@@ -39,6 +53,12 @@
 // stdio buffers are NOT flushed, so a map still being assembled prints nothing. A verb that had already flushed part of its
 // answer is said to be cut by the line itself. The first thread to cross writes the line; any other thread that crosses at
 // the same time parks until the process ends.
+//
+// ONE REGION WHERE IT DOES NOT REFUSE. An edit verb commits the file with atomicWrite and THEN rebuilds the index
+// for its post-check. A refusal there would end the process with the edit already on disk and no receipt, and a
+// caller that retries can insert twice — so the line is suspended for exactly that region, a crossing inside it
+// is recorded instead of fatal, and the receipt discloses it (`memory_ceiling`). Suspension, below, holds the
+// mechanism, the three properties it guarantees and the cost (owner ruling 101, 2026-11-20).
 //
 // SERVERS. --mcp and --lsp do not arm it: its refusal ends the process, and a server must survive a refused request (the
 // per-request hard line in memguard.h still applies there). The follow-up — the index built in a child process under this
@@ -81,6 +101,9 @@ struct State
     std::atomic<std::uint64_t> largeReadings{ 0 };        // of which on a large allocation
     std::atomic<std::uint64_t> unreadable{ 0 };           // of which the OS could not answer: admitted UNCHECKED (noteUnreadable)
     std::atomic<bool>          saidUnreadable{ false };   // the one-per-run disclosure of that degrade path
+    std::atomic<std::uint32_t> suspendDepth{ 0 };         // >0 = inside a post-write region: a crossing is RECORDED, never fatal (Suspension)
+    std::atomic<std::uint64_t> admitted{ 0 };             // crossings admitted because the line was suspended (0 = the line never bent)
+    std::atomic<std::uint64_t> admittedPeak{ 0 };         // the largest footprint admitted that way, bytes
     char                       label[ kLabelBytes ]{};    // the limit as the refusal names it, written once by arm()
     std::size_t                labelSize = 0;
 };
@@ -229,6 +252,65 @@ inline void noteUnreadable() noexcept
     std::_Exit( kRefusalExit );
 }
 
+// ── THE POST-WRITE SUSPENSION (owner ruling 101, 2026-11-20) ───────────────────────────────────────────────
+// A refusal ends the process with std::_Exit(5). That is the right answer for a run that has answered nothing
+// — and the WRONG answer once an edit verb has already committed a file to disk: the edit is applied, no
+// receipt is reported, and a caller that retries may apply the same insertion twice. mcpedit.h says it in as
+// many words about the memory guard's own stop: "an agent that believes it inserts twice".
+//
+// So the allocator line is SUSPENDED for the post-write region, and only there. While suspended a crossing is
+// RECORDED instead of being fatal, so the receipt can disclose it. The accepted cost, stated plainly: growth
+// inside one loop is unbounded again in that region. It is bounded work (one index rebuild plus the contract
+// check), the memory guard's own phase-boundary line is still armed inside it and still has a receipt-bearing
+// stop (FileGraphStopped -> post_check "not run: …", exit 0), and the alternative is the double-insert above.
+//
+// THREE PROPERTIES THIS TYPE EXISTS TO GUARANTEE:
+//   * UNREACHABLE FROM OUTSIDE. There is no flag, no environment variable and no setter — the only way to
+//     suspend the line is to construct this object, and the only construction is inside mcpedit.h's
+//     postCheckJson, which runs after a committed write by its own contract. Nothing a caller can type
+//     switches the ceiling off.
+//   * EVERY PRE-WRITE CHECK STAYS ARMED. The scope opens after atomicWrite has succeeded, so resolution, the
+//     freshness re-check, the splice and the write itself are refused exactly as before.
+//   * WHAT HAPPENED IS REPORTABLE. crossings() counts the admissions inside THIS scope (a sampled delta, so
+//     each op of an --edit-plan --apply reports its own), and peakMib() the largest footprint admitted.
+// It nests (depth, not a bool) and it costs the admit path NOTHING: the depth is read only on a crossing,
+// which otherwise ends the process anyway.
+class Suspension
+{
+public:
+    Suspension() noexcept : admittedBefore_( g_state.admitted.load( std::memory_order_relaxed ) )
+    {
+        g_state.suspendDepth.fetch_add( 1, std::memory_order_acq_rel );
+    }
+    ~Suspension() noexcept { g_state.suspendDepth.fetch_sub( 1, std::memory_order_acq_rel ); }
+    Suspension( const Suspension& )            = delete;
+    Suspension& operator=( const Suspension& ) = delete;
+    Suspension( Suspension&& )                 = delete;
+    Suspension& operator=( Suspension&& )      = delete;
+
+    [[nodiscard]] bool          armed() const noexcept { return g_state.budgetBytes.load( std::memory_order_relaxed ) != 0; }
+    [[nodiscard]] std::uint64_t limitMib() const noexcept { return g_state.budgetBytes.load( std::memory_order_relaxed ) / kMiB; }
+    [[nodiscard]] std::uint64_t crossings() const noexcept
+    {
+        return g_state.admitted.load( std::memory_order_relaxed ) - admittedBefore_;
+    }
+    [[nodiscard]] std::uint64_t peakMib() const noexcept { return g_state.admittedPeak.load( std::memory_order_relaxed ) / kMiB; }
+
+private:
+    std::uint64_t admittedBefore_;
+};
+
+// a crossing inside a suspended region: recorded, never fatal. No allocation and no output from here — the
+// receipt does the disclosing, because this runs inside operator new and the caller is mid-edit.
+inline void noteAdmitted( std::uint64_t footprint ) noexcept
+{
+    g_state.admitted.fetch_add( 1, std::memory_order_relaxed );
+    std::uint64_t seen = g_state.admittedPeak.load( std::memory_order_relaxed );
+    while( footprint > seen && !g_state.admittedPeak.compare_exchange_weak( seen, footprint, std::memory_order_relaxed ) )
+    {
+    }
+}
+
 // operator new's hook: called with every request size before the block is taken
 inline void onAllocate( std::size_t request ) noexcept
 {
@@ -261,6 +343,13 @@ inline void onAllocate( std::size_t request ) noexcept
     }
     if( footprint + request > budget )
     {
+        // The depth is read ONLY here, on a crossing that would otherwise end the process, so the admit path
+        // pays nothing for the suspension (ruling 101; Suspension above holds the reasoning).
+        if( g_state.suspendDepth.load( std::memory_order_acquire ) != 0 )
+        {
+            noteAdmitted( footprint );   // a file is already written: record it for the receipt, never _Exit here
+            return;
+        }
         refuse( footprint, request );
     }
 }
