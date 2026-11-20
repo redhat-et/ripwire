@@ -11554,8 +11554,7 @@ inline void appendTangleRatchet( std::vector<Regression>& regs, const IngestResu
     {
         paths.emplace_back( relForHash( ing.files[ ing.symbols[ nowByKey.at( key ).at ].fileId ], root ) );
     }
-    std::sort( paths.begin(), paths.end() );
-    paths.erase( std::unique( paths.begin(), paths.end() ), paths.end() );
+    rw::sortutil::sortUnique( paths );
     const BestSinceStore store = extras.bestSince( paths );
     extras.ratchetRef          = store.ref;
     extras.ratchetUnread       = store.unread;

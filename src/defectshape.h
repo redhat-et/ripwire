@@ -3522,8 +3522,7 @@ private:
         Eval                       col;
         col.collect = &leaves;
         (void)outcomes( j, col );
-        std::sort( leaves.begin(), leaves.end() );
-        leaves.erase( std::unique( leaves.begin(), leaves.end() ), leaves.end() );
+        rw::sortutil::sortUnique( leaves );
         leaves.erase( std::remove_if( leaves.begin(), leaves.end(), [ & ]( std::uint32_t l ) { return !isRun( l ); } ), leaves.end() );
         if( leaves.empty() )
         {
