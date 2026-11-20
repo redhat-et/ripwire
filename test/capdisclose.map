@@ -21,6 +21,7 @@ kCMakeMaxCallLines	pending:#565 a read bound on one CMake call: past 16 lines th
 kCallPathSeeds	none:K4 keep-guard seed window: which seeds the guard tries, no answer row is cut (LARGE-PARTIAL Stage 0 audit)
 kCloneKeyTokenBits	none:a saturating key field width, re-verified: a wider key changes no row (Stage 0 audit)
 kDeadExportedRowsShown	sink:shown,walkSkipped
+kDispatchArmMaxRows	none:a tangle shape test, not a cut: a dispatch arm of at most 40 lines reads alone, so its depth is exempt from the score; no row or answer is cut (QD-TANGLE, train ge2)
 kEvidenceCap	pending:B43 disclosed elsewhere: pageTailOf emits shown= capped= for every pageWindow (verbs_navigate.h); the cap is used through a window, so the lint finds no cap site to tie
 kForBareFlagMaxSites	none:a shape test, not a cut: a bare kebab token with more source sites is prose, so no <lit shape="flag"> is claimed (WHOLE-TOKEN; read by hand at train 1111c)
 kForBodyFoldBudgetBytes	sink:cut,firstCutNext
@@ -144,6 +145,7 @@ kShortKeyBodyBytes	legend
 kShortKeyRows	legend
 kShown	sink:truncated,selfExecutablePath
 kSketchHashes	none:the minhash sketch width, not a cut (Stage 0 audit)
+kSteerStmts	none:the steering-local distance, not a cut: a read 10+ statements after its write counts as steered; it names which locals the tangle row lists in locals=, none dropped (QD-TANGLE, train ge2)
 kSupport	none:a minimum-commits threshold, not a cut (Stage 0 audit)
 kType3MaxBucket	pending:B43 SILENT CUT by design (quadratic bucket), follow-up card: fires on every clones run
 kType3MaxTokensForLcs	pending:B43 SILENT CUT, follow-up card: fired on 6 of 7 large repos; type3 total +0.15% lifted, shown rows unchanged
