@@ -2419,7 +2419,9 @@ std::vector<BlobTangleDefs> tangleInputsInBlobs( std::span<const BlobText> blobs
         {
             if( d.kind == SymKind::Function || d.kind == SymKind::Method )
             {
-                mine.defs.push_back( { d.scope, d.name, tangleInputsFrom( d.loc, d.maxNest, d.deepLoc, d.steer, tangleDispatchShare( d.deepLoc, d.deepDispatch, d.nestArmCut ) ) } );
+                const std::uint32_t bodyStart = ( d.bodyByte > d.startByte && !rawDefIsAliasRow( d ) ) ? d.bodyByte : d.endByte;   // ingest_model.h's sigEndByte
+                mine.defs.push_back( { d.scope, d.name, tangleInputsFrom( d.loc, d.maxNest, d.deepLoc, d.steer, tangleDispatchShare( d.deepLoc, d.deepDispatch, d.nestArmCut ) ),
+                                       bodyStart, d.endByte } );
             }
         }
         slot.status = BlobDefsStatus::Parsed;
