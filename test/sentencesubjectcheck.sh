@@ -87,30 +87,75 @@ func evaluateBatch(r *Replica) int { return r.NewEvalContext(1) }
 X
 
 # ── C: a code-marked sentence naming ONE function and asking who calls it ──
-additive(){ # $1 root $2 task $3 label: the answer minus the block equals the no-hop answer
+#
+# OWNER RULING 109 (2026-11-20). additive() used to compare the hop answer MINUS the <callers by="subject"> block against
+# the no-hop answer byte for byte. That cannot hold once KB1's key group is non-empty, because KB1 places the group right
+# after the FIRST top-level row block — which is <callers by="subject"> in the hop answer and <sigs> in the no-hop one — so
+# stripping the subject block leaves the group where that block had been. Before owner ruling 87 the arm passed because KB1
+# delivered NOTHING on these questions in both answers (measured: 0 key groups either side; see
+# results/K87_CONTRACT_1120/READOUT.md §6.1), so there was no group to misplace. Ruling 109 re-registers it to set the key
+# group aside on BOTH sides, as forkeybodycheck's (K1n)/(K3n)/(K4) already do, and pairs it with the CK arm below, which
+# pins the two groups byte-identical. Every row is still compared byte for byte; only the group's POSITION is set aside.
+additive(){ # $1 root $2 task $3 answer $4 label $5 key group expected on this question (1|0)
     local A="$3"
     local B; B="$( cd "$1" && RIPWIRE_NO_CALLER_HOP=1 "$BIN" "$1" --no-cache "--for=$2" --no-verb-route --page-bytes=12000 2>/dev/null </dev/null )" || no "C $4: the no-hop answer exited $?"
     if python3 - "$A" "$B" <<'X'
 import re,sys
 a,b=sys.argv[1:3]
+K=re.compile(r'<bodies of="key"[^>]*>.*?</bodies>',re.S)   # RULING 109: set aside on BOTH sides (the legend is a comment, stripped below)
 m=lambda s:re.sub(r' est_tokens="\d+"| at="[^"]*"','',s)
 a=re.sub(r'<callers by="subject".*?</callers>','',a,flags=re.S)
+a=K.sub('',a,count=1); b=K.sub('',b,count=1)
 ca=re.sub(r'<!--.*?-->','',m(a),flags=re.S); cb=re.sub(r'<!--.*?-->','',m(b),flags=re.S)
 sys.exit(0 if ca==cb and cb.strip() else 1)
 X
-    then ok "C $4: the rest of the answer is byte-identical"; else no "C $4: the block displaced something (or no answer)"; fi
+    then ok "C $4: the rest of the answer is byte-identical (key group set aside on both sides)"; else no "C $4: the block displaced something (or no answer)"; fi
+    # A RELAXED comparison cannot be proved red on the unfixed binary -- that binary satisfied the stricter bar it
+    # replaces -- so its non-vacuity proof is a mutation. The CK arm below carries the red-on-the-unfixed-binary proof.
+    if python3 - "$A" "$B" <<'X'
+import re,sys
+a,b=sys.argv[1:3]
+K=re.compile(r'<bodies of="key"[^>]*>.*?</bodies>',re.S)
+m=lambda s:re.sub(r' est_tokens="\d+"| at="[^"]*"','',s)
+a=re.sub(r'<callers by="subject".*?</callers>','',a,flags=re.S)
+a=K.sub('',a,count=1); b=K.sub('',b,count=1)
+ca=re.sub(r'<!--.*?-->','',m(a),flags=re.S); cb=re.sub(r'<!--.*?-->','',m(b),flags=re.S)
+sys.exit(0 if ca!=cb[:-1] else 1)
+X
+    then ok "C $4: negative control: the same comparison fails when one byte is dropped"; else no "C $4: the comparison accepts a mutated answer -- it is vacuous"; fi
+    # (CK) RULING 109's new arm. Where the question's backtick span PLACES a definition, KB1's contract says a key group
+    # rides, and ruling 87 says it rides whatever else the page serves -- so the hop and no-hop answers must carry the SAME
+    # group, byte for byte, even though they place it after different first blocks. Where the span places nothing (a call
+    # argument list, a Go receiver spelling: forkeybodycheck (K7)'s "a span naming nothing"), neither answer carries one,
+    # and this arm pins THAT instead -- so it is an assertion in both directions and never a silent pass.
+    if python3 - "$A" "$B" "$5" <<'X'
+import re,sys
+a,b,want=sys.argv[1],sys.argv[2],sys.argv[3]=="1"
+K=re.compile(r'<bodies of="key"[^>]*>.*?</bodies>',re.S)
+ka,kb=K.findall(a),K.findall(b)
+if not want:
+    sys.exit(0 if not ka and not kb else 1)
+sys.exit(0 if len(ka)==1 and len(kb)==1 and ka[0]==kb[0] else 1)
+X
+    then
+        if [ "$5" = 1 ]; then ok "C $4: (CK) the hop and no-hop answers carry the SAME key group, byte for byte"
+        else ok "C $4: (CK) the span places nothing, so neither answer carries a key group"; fi
+    else
+        if [ "$5" = 1 ]; then no "C $4: (CK) the key group is missing from one side, duplicated, or differs between the hop and no-hop answers"
+        else no "C $4: (CK) a key group rode a span that places nothing"; fi
+    fi
 }
-csub(){ # $1 root $2 task $3 caller row $4 label
+csub(){ # $1 root $2 task $3 caller row $4 label $5 key group expected (1|0)
     local A; A="$( ask "$1" "$2" )" || no "C $4: ripwire exited $?"
     has "$A" '<callers by="subject"' "C $4: callers ride by subject"
     has "$( blk "$A" )" "$3" "C $4: the caller row"
-    additive "$1" "$2" "$A" "$4"
+    additive "$1" "$2" "$A" "$4" "$5"
 }
-csub "$R" 'If `prepare_setup_platform` (app/setup.py) gained a new required parameter, exactly which non-test functions call it directly and would have to change? Give each function with its file; functions that merely receive the resulting EvalContext as a parameter do not count.' first_caller "long sentence, a second identifier in passing"
-csub "$R" 'Which functions call `prepare_setup_platform(hass, name)` and must change when it gains a third argument, in production code and in tests? Group them by file.' first_caller "a call's argument list"
-csub "$G" 'If `(*kv.Replica).NewEvalContext` gained a new required parameter, which functions call it directly and would have to change?' evaluateBatch "go receiver spelling"
-csub "$G" 'Which functions call `(*kv.Replica).NewEvalContext`?' evaluateBatch "CG go receiver spelling, no pronoun after the cue"
-csub "$R" 'If `setup.prepare_setup_platform` gained a new required parameter, exactly which non-test functions call it directly and would have to change?' first_caller "CQ twin: the file-stem qualifier places it"
+csub "$R" 'If `prepare_setup_platform` (app/setup.py) gained a new required parameter, exactly which non-test functions call it directly and would have to change? Give each function with its file; functions that merely receive the resulting EvalContext as a parameter do not count.' first_caller "long sentence, a second identifier in passing" 1
+csub "$R" 'Which functions call `prepare_setup_platform(hass, name)` and must change when it gains a third argument, in production code and in tests? Group them by file.' first_caller "a call's argument list" 0
+csub "$G" 'If `(*kv.Replica).NewEvalContext` gained a new required parameter, which functions call it directly and would have to change?' evaluateBatch "go receiver spelling" 0
+csub "$G" 'Which functions call `(*kv.Replica).NewEvalContext`?' evaluateBatch "CG go receiver spelling, no pronoun after the cue" 0
+csub "$R" 'If `setup.prepare_setup_platform` gained a new required parameter, exactly which non-test functions call it directly and would have to change?' first_caller "CQ twin: the file-stem qualifier places it" 1
 A="$( ask "$R" 'If `Missing.setup.prepare_setup_platform` gained a new required parameter, exactly which non-test functions call it directly and would have to change?' )" || no "CQ: ripwire exited $?"
 case "$A" in *'<ctx '*) ok "CQ: an answer printed";; *) no "CQ: no answer printed";; esac
 hasnt "$A" '<callers by="subject"' "CQ: an outer qualifier that places nothing is no name (no callers block)"
