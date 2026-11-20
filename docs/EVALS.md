@@ -19378,3 +19378,54 @@ no row to ride on. The fixture covers the detector, but this range does not show
 - operand path: shared literals allowed, generic members comparable, no ceiling, no context test. N1 and N3-N6 go
   red. N2 stays green: its two reverse find-by-key loops spell the same literal set, and the type half does not fire on them either. It is a recall pin, not a guard pin.
 - facet: minimum length 1, no statement test, no bracket stop, overlap allowed. N2-N5 go red.
+
+## Clone shrink-only pairs (QD-SHRINK-PAIR, 2026-11-20)
+
+**Mechanism.** `src/quality.h` `demoteShrinkOnlyClones` judges the gating duplication and new-clone-of-reused-helper rows.
+The base bodies come from `src/qdbestsince.h` `cloneBodiesAt`, which reads git at the base commit with the best-since
+store's reader and extraction. Gate: `test/shrinkpaircheck.sh`.
+
+A Type-3 pair's similarity is 2·LCS/(|a|+|b|), so it rises when a member loses tokens the other does not share. The row
+is made minor, with `why="pair crossed the bar because X shrank N->M tok; shared code did not grow (LCS a->b)"`, only
+when all of these hold:
+- every member existed at the base, with one callable body under its key on both sides;
+- some member's body has fewer tokens now, and none was cut to under half its base tokens;
+- no pair's LCS grew.
+
+The cut test came from the census. Without it, textual's `ColorSystem::generate` (1569 -> 22 tokens: its body moved to
+`_generate` and `_generate_ansi`) demoted its pair with a 26-token validator. The base LCS was already 24, because a long
+body holds most short ones as a subsequence. Against a body cut that far, "shared code did not grow" proves nothing.
+
+**Replay.** The rows this card exists for are lane/sort-unique's two rows, the qd-false-rows T5 row
+`jsExportsOf | cFamilyMacroNames` (duplication + new-clone-of-reused-helper). Both ranges had them gating:
+406ef0110..17c114ef4 and d65f60c6d..17c114ef4. Both now report minor: `cFamilyMacroNames shrank 135->99 tok; LCS 84->81`.
+Both ranges go from gating 2 to 0, rc 2 to 0.
+
+**Census.** The whole `--quality-delta` output was taken on the base binary (lane/qd-lessons-1) and on the lane binary,
+`--no-cache`, one process at a time, on QD-LESSONS-1's ranges plus the two sort-unique replays.
+
+| range | gating base → lane | rows made minor by the rule |
+| --- | --- | --- |
+| sort-unique su1 / su2 | 2 → 0 / 2 → 0 | 2 / 2 (T5) |
+| tmux 60 | 36 → 31 | 5 |
+| VA-FORMS, qd-tangle ×2, slips ×2, last 20 merges, tmux 20, textual 20, envoy synthetic | unchanged | 0 |
+
+`regressions=` and the row count are equal on every range. The only other change is legend text. The compact `why`
+entry gains " or shrunk member" (+17 B) on documents that carry a why=. On su1/su2 the entry is new (their only why=
+rows are the shrink rows) and `next=` leaves with the last gating row.
+
+**Hand-checks (tmux 60).**
+- `file_create_with_peer | input_init` (duplication + new-clone): `input_init` lost one statement (`ictx->c = c;`, 134 -> 127).
+- `format_cb_session_activity_flag` against `client_control_mode`, `cursor_flag` and `window_end_flag`: a bug fix
+  (`ft->wl->flags` -> `wl->flags`, the `return "0"` moved out of the loop) took 69 -> 66 tokens.
+
+These callbacks are a long-standing family of near-copies. The edit copied nothing in, and the LCS fell or stayed
+(47->46, 47->47, 51->51). No row whose shared code grew, and no row with a new member, stopped gating.
+
+**Guard-off.** One build removed the LCS test and skipped a member without a base body instead of refusing the group.
+N1-N3 go red (12 FAIL), and so does the legend arm (L). N4 is red on the binary without the cut test. Red-before on the
+base binary: P1, P1w, P1m and P2 gate.
+
+**Not claimed.** A member cut to under half, an overload under a member's key, and a group of more than four members
+are judged as before, so they still gate. So does a body the base commit could not be read for. `--clones` does not read
+the verdict.
