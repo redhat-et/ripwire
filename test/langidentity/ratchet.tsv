@@ -20,7 +20,10 @@
 # 333 -> 326 (slice 6c, #447): implicitReceiver, memberNeverReachesFreeFunction, classNameReceiver and hashComment moved to LangFacts.
 # 325 -> 324 (qd-shrink-pair): quality.h definitionQualityKey holds the Elixir key fold; pathQualifiedKey(relPath, Symbol) and
 #   qdbestsince.h's best-since fold call it instead of spelling the compare (the base-body reader added none).
-ceiling	324
+# 324 -> 321 (train ge2, the composed tree): qd-unchecked-status + qd-unhandled-arm added two C-family predicates (the enum table's
+#   Cpp/C filter, the C scanner branch) and the composed tree counted 326; quality.h defectSitesOf and cFamilyEnumTable now read
+#   langfacts.h's DefectScan column, so all six defect-shape language tests (four of them main's) left the count.
+ceiling	321
 perlang	ingest_elixir.h
 perlang	elixir_resolve.h
 perlang	ingest_clojure.h
