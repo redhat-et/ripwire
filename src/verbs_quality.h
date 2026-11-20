@@ -1771,7 +1771,7 @@ inline constexpr const char* kQdOperandLegend =
 // QD-SHRINK-PAIR — printed only when a clone row's why= says it crossed the bar because a member shrank (quality.h demoteShrinkOnlyClones).
 inline constexpr const char* kQdShrinkLegend =
     "why=\"... crossed the bar because X shrank N->M tok\" on a clone row: every member existed at the base, a member's body lost "
-    "tokens and no pair's shared LCS grew, so the similarity rose by removal, not by copying; reported minor. ";
+    "tokens (none was cut to under half) and no pair's shared LCS grew, so the similarity rose by removal, not by copying; reported minor. ";
 
 // QD-REPEATED-DECISION — printed only when a complexity or tangle row's fix= names a repeated decision (repeateddecision.h).
 inline constexpr const char* kQdRepeatedDecisionLegend =
