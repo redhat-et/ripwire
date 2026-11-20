@@ -61,7 +61,7 @@ BIN="${RIPWIRE_BIN:-${1:-$ROOT/build/ripwire}}"
 command -v python3 >/dev/null 2>&1 || { echo "carriedpageboundcheck: python3 required"; exit 2; }
 BASE="${RIPWIRE_BASE_BIN:-}"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; return 0; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 say(){ if [ "$1" = 0 ]; then ok "$2"; else no "$3"; fi; }
 DIR="${KEEP_DIR:-$( mktemp -d )}"; [ -n "${KEEP_DIR:-}" ] || trap 'rm -rf "$DIR"' EXIT; mkdir -p "$DIR"
@@ -122,7 +122,14 @@ def skip( text ):
 # make a red nobody in scope can clear, and deleting it would lose the bar. The line prints the live numbers,
 # so the day the blocker is fixed the output says so.
 def defer( cond, text, where ):
-    print( "  %s  %s  [DEFERRED: %s]" % ( "DONE " if cond else "DEFER", text, where ) )
+    # a lost line must not be silent either (gateexitcheck G1): print() raising on a closed or full stream
+    # would otherwise drop a DEFERRED bar with the gate still exiting 0.
+    global bad
+    try:
+        print( "  %s  %s  [DEFERRED: %s]" % ( "DONE " if cond else "DEFER", text, where ) )
+    except OSError as e:
+        bad = 1
+        sys.stderr.write( "  FAIL  could not write the DEFERRED line for: %s (%s)\n" % ( text, e ) )
 
 BOUND = 8000     # kCarriedPageMaxBytes; see the header for why it is a size bound and not a spec
 x = rd( "routed.xml" )

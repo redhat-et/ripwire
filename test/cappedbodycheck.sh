@@ -68,7 +68,7 @@ BIN="${RIPWIRE_BIN:-${1:-$ROOT/build/ripwire}}"
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN -- build first (cmake --build build -j)"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "cappedbodycheck: python3 required"; exit 2; }
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; return 0; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 say(){ if [ "$1" = 0 ]; then ok "$2"; else no "$3"; fi; }
 DIR="${KEEP_DIR:-$( mktemp -d )}"; [ -n "${KEEP_DIR:-}" ] || trap 'rm -rf "$DIR"' EXIT; mkdir -p "$DIR"
@@ -153,7 +153,14 @@ def say( cond, good, bad_msg = None ):
 # bar, and failing on it would make a red that no one in scope can clear. It is not a blind pass: the line
 # states the current value every run, so the day it starts holding, the output says so.
 def defer( cond, text, where ):
-    print( "  %s  %s  [DEFERRED: %s]" % ( "DONE " if cond else "DEFER", text, where ) )
+    # a lost line must not be silent either (gateexitcheck G1): print() raising on a closed or full stream
+    # would otherwise drop a DEFERRED bar with the gate still exiting 0.
+    global bad
+    try:
+        print( "  %s  %s  [DEFERRED: %s]" % ( "DONE " if cond else "DEFER", text, where ) )
+    except OSError as e:
+        bad = 1
+        sys.stderr.write( "  FAIL  could not write the DEFERRED line for: %s (%s)\n" % ( text, e ) )
 
 # ── (C0) PRESENCE GUARD: green before and after. A vacuous fixture is a FAIL, not a pass. ──────────────────
 sigs = { }
