@@ -4621,7 +4621,7 @@ inline constexpr ScopeFactNode kCppCallScopeFacts[] = {
 };
 inline const ScopeFactNode* cppCallScopeFactRow( Lang lang, const char* t )
 {
-    if( ( lang != Lang::Cpp && lang != Lang::ObjC ) || callResultFamilyOf( lang ) == CallResultFamily::Cpp )
+    if( !langFacts( lang ).qualifierNamesScope || callResultFamilyOf( lang ) == CallResultFamily::Cpp )
     {
         return nullptr;   // not C++, or the family's own rows (kScopeFactNodes) already record them
     }
@@ -4665,7 +4665,7 @@ inline void captureTypeAlias( BindCtx& cx, TSNode n, const char* t )
 {
     std::uint32_t spanStart = 0;
     std::uint32_t spanEnd   = 0;
-    if( cx.lang == Lang::Cpp || cx.lang == Lang::ObjC )   // the family's rows, and kCppCallScopeFacts' while the family is off
+    if( langFacts( cx.lang ).qualifierNamesScope )   // C++ / ObjC: the family's rows, and kCppCallScopeFacts' while the family is off
     {
         std::tie( spanStart, spanEnd ) = cppDeclScope( n, true );
         if( spanEnd == 0 )
