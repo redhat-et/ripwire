@@ -419,6 +419,41 @@ std::vector<rw::AstMatch> lintSymbolLevelChecks( const rw::IngestResult& ing, co
 // (not local to runLint) so dedupeLintFindings below can share it.
 struct LintOut { std::uint32_t fileId, startByte, line; std::string rule, sev, text; };
 
+// THE in= lookup of the lint family: the innermost symbol whose span holds a byte of a file, over model.h's
+// symbolsByFile ordered by sigStartByte (the scan stops at the first symbol that starts past the byte). Built
+// once per --match / --pattern / --lint run; every step that names a row's enclosing symbol reads this one.
+struct EnclosingSymbolIndex
+{
+    const rw::IngestResult& ing;
+    const rw::SymbolsByFile fileSyms;
+
+    explicit EnclosingSymbolIndex( const rw::IngestResult& ingest )
+        : ing( ingest ),
+          fileSyms( rw::symbolsByFile( ingest,
+                                       []( const rw::Symbol& ) { return true; },
+                                       [ & ]( rw::NodeId a, rw::NodeId b ) { return ingest.symbols[a].sigStartByte < ingest.symbols[b].sigStartByte; } ) )
+    {
+    }
+
+    const rw::Symbol* operator()( std::uint32_t fileId, std::uint32_t byteOffset ) const
+    {
+        const rw::Symbol* best = nullptr;
+        for( rw::NodeId id : fileSyms[fileId] )
+        {
+            const rw::Symbol& s = ing.symbols[id];
+            if( s.sigStartByte > byteOffset )
+            {
+                break;
+            }
+            if( byteOffset < s.endByte && ( !best || s.sigStartByte > best->sigStartByte ) )
+            {
+                best = &s;
+            }
+        }
+        return best;
+    }
+};
+
 // One <rule> tally row. The built-in and user-rule tally loops in runLint differ ONLY in whether sev=
 // is present (nullptr ⇒ omitted, a built-in row) — everything else (capped=, and L7's applicable=) is
 // identical branching duplicated twice; this is the one copy. Callers pass already-escaped strings
@@ -1471,18 +1506,254 @@ static std::string matchNearestKindClause( const std::string& kind, const std::s
     return clause;
 }
 
+// The facts every --match / --pattern / --lint answer reads while it EMITS, built once by runLint before the
+// three verbs split: the enclosing-symbol index behind every row's in=, how a row's p= is spelled, the root=
+// attribute, and the XML escaper. R-E (2026-08-17 harvest): same single-root condition every other verb's root=
+// uses (sarif.h) — --lint's OWN --sarif re-serialization (writeSarifResult) already applies it; this brings the
+// native --match/--lint XML forms into parity rather than leaving them the only two still absolute per row.
+struct LintAnswerView
+{
+    mutable std::vector<char>  esc;   // ex()'s scratch, declared first: rootAttr's initializer already escapes
+    const rw::IngestResult&    ing;
+    const EnclosingSymbolIndex enclosing;
+    const bool                 singleRoot;
+    const std::string          rootPrefix;
+    const std::string          rootAttr;
+
+    LintAnswerView( const rw::Config& cfg, const rw::IngestResult& ingest )
+        : ing( ingest ),
+          enclosing( ingest ),
+          singleRoot( ingest.realPaths.empty() && cfg.roots.size() == 1 ),
+          rootPrefix( singleRoot ? rw::sarif::rootPrefixOf( cfg.roots[0] ) : std::string() ),
+          rootAttr( singleRoot ? " root=\"" + ex( cfg.roots[0] ) + "\"" : std::string() )
+    {
+    }
+
+    std::string ex( std::string_view s ) const { return std::string( rw::escapeXml( s, esc ) ); }
+
+    // a row's p= path: root-relative under a single root, the indexed path otherwise
+    std::string_view rowPath( std::uint32_t fileId ) const
+    {
+        return singleRoot ? rw::sarif::rootRelativeUri( ing.files[fileId], rootPrefix ) : std::string_view( ing.files[fileId] );
+    }
+};
+
+// A captured node's text as element content: only the three markup characters are escaped (quotes stay as
+// they are — this is never an attribute value).
+void emitEscapedText( const std::string& s )
+{
+    for( char ch : s )
+    {
+        if( ch == '<' )
+        {
+            std::fputs( "&lt;", stdout );
+        }
+        else if( ch == '>' )
+        {
+            std::fputs( "&gt;", stdout );
+        }
+        else if( ch == '&' )
+        {
+            std::fputs( "&amp;", stdout );
+        }
+        else
+        {
+            std::fputc( ch, stdout );
+        }
+    }
+}
+
+// #157: a file the nesting guard refused is excluded from every walk below, so each answer over a corpus that
+// held one says how many. Absent when 0 (absent = nothing to say), so an answer over a corpus with no refusal
+// is byte-identical to one from before the disclosure existed.
+std::string nestRefusedAttr( const rw::IngestResult& ing )
+{
+    return ing.crawlSkips.nestRefusedFiles > 0 ? " nest_refused=\"" + std::to_string( ing.crawlSkips.nestRefusedFiles ) + "\"" : std::string();
+}
+
+// The row window's default cap for the two structural-search verbs: --pack-top-n, else 100 (§P8 G3).
+int searchRowCap( const rw::Config& cfg )
+{
+    return cfg.packTopN > 0 ? cfg.packTopN : 100;
+}
+
+// The <m> rows --match and --pattern share: one per hit inside the page window, each the hit's file:line, its
+// enclosing symbol, and the captured text.
+void emitSearchHitRows( const LintAnswerView& view, const std::vector<rw::AstMatch>& hits, rw::PageWindow page )
+{
+    for( std::size_t hitIndex = page.begin; hitIndex < page.end; ++hitIndex )
+    {
+        const rw::AstMatch& m = hits[ hitIndex ];
+        const rw::Symbol*   e = view.enclosing( m.fileId, m.startByte );
+        lintPrintOut( "<m p=\"{}:{}\" in=\"{}\">", view.ex( view.rowPath( m.fileId ) ), m.line, e ? view.ex( e->name ) : "" );
+        emitEscapedText( m.text );
+        lintPrintOut( "</m>" );
+    }
+}
+
+// §P0.1: astQuery reports CAPTURES, so a query binding none matches nothing it can report —
+// `--match='(if_statement)'` produced a clean, confident hits="0" next to 5000 for the same
+// query with `@i`. A capture-less bare zero must be unreachable: auto-capture the query when
+// appending a capture is provably what the user would have typed (exactly one top-level
+// pattern), and refuse loudly otherwise. Never scan a query we did not understand.
+// nullopt ⇒ refused, the refusal already printed.
+struct CapturedMatchQuery { std::string query; bool autoCaptured = false; };
+
+std::optional<CapturedMatchQuery> captureMatchQuery( std::string_view rawQuery )
+{
+    CapturedMatchQuery out{ std::string( rawQuery ), false };
+    const rw::AstQueryShape shape = rw::astQueryShape( out.query );
+    if( shape.hasCapture )
+    {
+        return out;
+    }
+    // A `;` comment makes appending unsafe (` @m` on the end of a comment line is itself
+    // commented out), so a capture-less query that carries one is refused, not guessed at.
+    if( !shape.isSingleTopLevel || shape.hasComment )
+    {
+        // Deliberately does NOT assert a cause: this branch catches several top-level
+        // patterns, zero patterns, and a mis-quoted query alike, and naming the wrong one
+        // would be its own small fabrication. Show the query as received and let the
+        // reader see the stray quote / second pattern for themselves.
+        lintPrintErr( "ripwire: --match: this query captures nothing — add @name, e.g. '(if_statement) @m'. "
+                            "ripwire auto-captures only a query that is exactly ONE top-level pattern, and will not guess for this one "
+                            "(query as received: {})\n",
+                    out.query );
+        return std::nullopt;
+    }
+    out.query       += " @m";
+    out.autoCaptured = true;
+    return out;
+}
+
+// --match=QUERY: structural search with the user's tree-sitter query (≥1 @capture).
+// P2.1: the listing stops at `cap` (--pack-top-n, default 100) while hits= counted everything the
+// engine collected — a `hits="5000"` header over 100 rows said nothing about the other 4900.
+// And hits= is itself bounded by astQuery's own maxMatches, so `hits="5000"` is a FLOOR, not a
+// total; hits_capped= says which of the two it is (same contract as --grep's).
+int runMatchVerb( const rw::Config& cfg, const LintAnswerView& view )
+{
+    const rw::IngestResult& ing = view.ing;
+    const std::optional<CapturedMatchQuery> captured = captureMatchQuery( cfg.match );
+    if( !captured )
+    {
+        return 1;
+    }
+    constexpr std::size_t        kMatchMaxHits = 5000;   // astQuery's per-spec budget, named not implied
+    const MatchQueryOutcome      mq = runMatchQuery( ing, captured->query, kMatchMaxHits );
+    const std::vector<rw::AstMatch>& ms        = mq.matches;
+    // §P0.4's rule, applied to --match's own engine: a query no grammar compiled measured NOTHING,
+    // so a hits="0" here would be a failure wearing a result. Refuse, exactly like an invalid --regex.
+    if( !mq.uncompiled.empty() )
+    {
+        lintPrintErr( "ripwire: --match: the query compiled for no grammar — refusing rather than reporting a zero it did not measure "
+                            "(query as received: {}){}\n",
+                    cfg.match, matchNearestKindClause( mq.nearestKind, mq.nearestGrammar ) );
+        return 1;
+    }
+    if( refuseUndecidedMatchRegex( "--match", mq.regexRefused, mq.regexUndecided, undecidedPredicateFirstSite( cfg, ing, mq.regexUndecided ),
+                                   "query as received: " + std::string( cfg.match ) ) )
+    {
+        return 1;
+    }
+    // §P8 G3: --match was missed when its sibling --grep got paging — `--limit=5` still emitted the
+    // full 100-row cap, so the two structurally identical search verbs disagreed about whether
+    // --limit meant anything. Same window, same disclosure, same default cap (--pack-top-n, else
+    // 100): pageDisclosure emits exactly the ` shown= capped=` bytes this tag used to hand-roll, so
+    // an un-paginated --match is byte-identical. See src/pageview.h, THE TRUNCATION VOCABULARY.
+    const rw::PageWindow matchPage  = rw::pageWindow( ms.size(), rw::effectiveRowCap( cfg.pageLimit, searchRowCap( cfg ) ), cfg.pageOffset );
+    const std::size_t    matchShown = matchPage.end - matchPage.begin;
+    char                 mpab[ rw::kPageDisclosureCap ];
+    // §L3: no `attr="value"` spelled out below for grammars=/eligible_files=/of_files= — a naive
+    // whole-line grep (matchcapturecheck.sh's own idiom) would match the WORDED example first.
+    // #157: a file the nesting guard refused is excluded from eligible_files= and never reaches this
+    // walk, so a reader must be told the corpus held one rather than reading a clean match answer as
+    // proof the pattern does not occur there too. Same reused why token the skipped verb's rows carry.
+    lintPrintOut( "<!-- ripwire match: tree-sitter structural query; each hit = a captured node + its enclosing symbol. "
+                "shown=/capped= = rows printed vs found; hits_capped=\"1\" ⇒ hits= is a FLOOR (engine match limit reached) and the "
+                "root then also carries counts_floor=\"1\" and capped=\"1\" — rows exist that NO page holds (the engine cap, not the "
+                "window, dropped them; narrow the query), while has_more= keeps its window meaning so a loop still terminates. "
+                "auto_captured=\"1\" ⇒ the query bound no @capture and ripwire appended `@m` to its single top-level pattern. "
+                "grammars= names every grammar the query compiled against; eligible_files=/of_files= are corpus files in that "
+                "language set vs total indexed files. nest_refused= (absent if 0) counts corpus files a pre-parse nesting guard "
+                "refused before this walk could reach them, excluded from eligible_files=; see the skipped verb's why=\"nest-refused\" "
+                "rows for which. raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it) -->" );
+    lintPrintOut( "<match hits=\"{}\"{} hits_capped=\"{}\"{} grammars=\"{}\" eligible_files=\"{}\" of_files=\"{}\"{}{}>",
+                ms.size(),
+                rw::pageDisclosure( mpab, sizeof( mpab ), matchShown, ms.size(), matchPage.end,
+                                    cfg.pageLimit, cfg.pageOffset, true, rw::kXmlPageSyntax,
+                                    /*collectionCapped=*/ ms.size() >= kMatchMaxHits ),   // H8: the same cap hits_capped= names
+                ms.size() >= kMatchMaxHits ? 1 : 0,
+                captured->autoCaptured ? " auto_captured=\"1\"" : "",
+                view.ex( mq.grammarsAttr ),   // §L3: which grammars the query compiled against
+                mq.eligibleFiles,
+                ing.files.size(),
+                view.rootAttr,
+                nestRefusedAttr( ing ) );
+    emitSearchHitRows( view, ms, matchPage );
+    lintPrintOut( "</match>" );
+    return 0;
+}
+
+// R2 — the PATTERN surface: structural search written in CODE instead of in node kinds.
+// A sibling of --match because it answers the same question through the same walk and must
+// emit through the same conventions (enclosing symbol, page window, grammar applicability). The
+// work BEFORE the walk — compile per grammar, refuse or proceed, assemble the disclosures — is
+// runPatternSearch, extracted for exactly the reason runMatchQuery was.
+int runPatternVerb( const rw::Config& cfg, const LintAnswerView& view )
+{
+    const rw::IngestResult&    ing = view.ing;
+    const PatternSearchOutcome ps  = runPatternSearch( ing, cfg.pattern );
+    if( !ps.refusal.empty() )
+    {
+        lintPrintErr( "{}", ps.refusal );
+        return 1;
+    }
+    const rw::PageWindow patPage  = rw::pageWindow( ps.matches.size(), rw::effectiveRowCap( cfg.pageLimit, searchRowCap( cfg ) ), cfg.pageOffset );
+    const std::size_t    patShown = patPage.end - patPage.begin;
+    char                 ppab[ rw::kPageDisclosureCap ];
+    lintPrintOut( "{}", kPatternLegend );
+    const bool memberNearMiss = ps.memberUnmatched > 0 || ps.memberCapped > 0;
+    if( ps.qualifiedUnmatched > 0 || memberNearMiss )
+    {
+        lintPrintOut( "{}", kPatternQualifiedLegend );
+    }
+    // unresolved_in= is withheld only when it could not mislead: a run that found matches AND read
+    // every file it serves. The moment a served-language file went unscanned (skipped_files>0), the
+    // partial resolution is exactly what explains it, hits>0 or not — V-3's second case, where a
+    // matched .tsx sat beside a silently unread .ts.
+    const bool tellUnresolved = ps.matches.empty() || ps.skippedFiles > 0;
+    // #157: same disclosure as --match, over the same shared walk (AstWalk::Pattern reaches the
+    // identical per-file skip). Absent when nothing was refused.
+    const std::string patNestRefusedAttr = nestRefusedAttr( ing )
+        + ( ps.qualifiedUnmatched > 0 ? " unmatched_qualified=\"" + std::to_string( ps.qualifiedUnmatched ) + "\"" : std::string() )
+        + ( memberNearMiss ? memberNearMissAttrs( ps, cfg.pattern ) : std::string() );
+    lintPrintOut( "<pattern hits=\"{}\"{} hits_capped=\"{}\" q=\"{}\" grammars=\"{}\" shapes=\"{}\" unsupported=\"{}\"{}{} eligible_files=\"{}\" skipped_files=\"{}\" of_files=\"{}\"{}{}>",
+                ps.matches.size(),
+                rw::pageDisclosure( ppab, sizeof( ppab ), patShown, ps.matches.size(), patPage.end, cfg.pageLimit, cfg.pageOffset, true,
+                                    rw::kXmlPageSyntax, /*collectionCapped=*/ ps.matches.size() >= rw::pattern::kMaxHits ),   // H8
+                ps.matches.size() >= rw::pattern::kMaxHits ? 1 : 0,
+                view.ex( cfg.pattern ),
+                view.ex( ps.grammarsAttr ),
+                view.ex( ps.shapesAttr ),
+                rw::pattern::kUnsupportedGrammars,
+                ps.ellipsisAttr,
+                tellUnresolved ? ps.unresolvedAttr : std::string(),
+                ps.eligibleFiles,
+                ps.skippedFiles,
+                ing.files.size(),
+                view.rootAttr,
+                patNestRefusedAttr );
+    emitSearchHitRows( view, ps.matches, patPage );
+    lintPrintOut( "</pattern>" );
+    return 0;
+}
+
 std::optional<int> runLint( const MainDispatch& d )
 {
     using namespace rw;
-    const Config&                     cfg          = d.cfg;
-    const IngestResult&               ing          = d.ing;
-    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h) — --lint's
-    // OWN --sarif re-serialization (writeSarifResult) already applies it; this brings the native --match/
-    // --lint XML forms into parity rather than leaving them the only two still absolute per row.
-    const bool         lintSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
-    const std::string  lintRootPrefix = lintSingleRoot ? rw::sarif::rootPrefixOf( cfg.roots[0] ) : std::string();
-    std::vector<char>  lintRootEsc;
-    const std::string  lintRootAttr   = lintSingleRoot ? ( " root=\"" + std::string( escapeXml( cfg.roots[0], lintRootEsc ) ) + "\"" ) : std::string();
+    const Config&       cfg = d.cfg;
+    const IngestResult& ing = d.ing;
 
     // --lint-catalog: the built-in rule registry, standalone — needs no corpus at all (lintcatalog.h's
     // table is static), so it is handled before the match/lint/lint-rules setup below even starts.
@@ -1495,221 +1766,17 @@ std::optional<int> runLint( const MainDispatch& d )
     // annotate each hit with its enclosing symbol — so they share this setup.
     if( !cfg.match.empty() || !cfg.pattern.empty() || cfg.lint || !cfg.lintRulesDir.empty() )
     {
-        // model.h::symbolsByFile — same scan order, same comparator as the hand-written loop it replaces.
-        const SymbolsByFile fileSyms = symbolsByFile( ing,
-                                                      []( const Symbol& ) { return true; },
-                                                      [ & ]( NodeId a, NodeId b ) { return ing.symbols[a].sigStartByte < ing.symbols[b].sigStartByte; } );
-        const auto enclosing = [ & ]( std::uint32_t f, std::uint32_t off ) -> const Symbol*
+        const LintAnswerView view( cfg, ing );
+        if( !cfg.match.empty() )
         {
-            const Symbol* best = nullptr;
-            for( NodeId id : fileSyms[f] )
-            {
-                const Symbol& s = ing.symbols[id];
-                if( s.sigStartByte > off )
-                {
-                    break;
-                }
-                if( off < s.endByte && ( !best || s.sigStartByte > best->sigStartByte ) )
-                {
-                    best = &s;
-                }
-            }
-            return best;
-        };
-        const auto emitEscaped = []( const std::string& s )
-        {
-            for( char ch : s )
-            {
-                if( ch == '<' )
-                {
-                    std::fputs( "&lt;", stdout );
-                }
-                else if( ch == '>' )
-                {
-                    std::fputs( "&gt;", stdout );
-                }
-                else if( ch == '&' )
-                {
-                    std::fputs( "&amp;", stdout );
-                }
-                else
-                {
-                    std::fputc( ch, stdout );
-                }
-            }
-        };
-        std::vector<char> esc;
-        const auto        ex  = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
-        const int         cap = cfg.packTopN > 0 ? cfg.packTopN : 100;
-
-        if( !cfg.match.empty() )   // structural search: the user's tree-sitter query (≥1 @capture)
-        {
-            // P2.1: the listing stops at `cap` (--pack-top-n, default 100) while hits= counted everything the
-            // engine collected — a `hits="5000"` header over 100 rows said nothing about the other 4900.
-            // And hits= is itself bounded by astQuery's own maxMatches, so `hits="5000"` is a FLOOR, not a
-            // total; hits_capped= says which of the two it is (same contract as --grep's).
-            // §P0.1: astQuery reports CAPTURES, so a query binding none matches nothing it can report —
-            // `--match='(if_statement)'` produced a clean, confident hits="0" next to 5000 for the same
-            // query with `@i`. A capture-less bare zero must be unreachable: auto-capture the query when
-            // appending a capture is provably what the user would have typed (exactly one top-level
-            // pattern), and refuse loudly otherwise. Never scan a query we did not understand.
-            std::string matchQuery( cfg.match );
-            bool        autoCaptured = false;
-            {
-                const AstQueryShape shape = astQueryShape( matchQuery );
-                if( !shape.hasCapture )
-                {
-                    // A `;` comment makes appending unsafe (` @m` on the end of a comment line is itself
-                    // commented out), so a capture-less query that carries one is refused, not guessed at.
-                    if( !shape.isSingleTopLevel || shape.hasComment )
-                    {
-                        // Deliberately does NOT assert a cause: this branch catches several top-level
-                        // patterns, zero patterns, and a mis-quoted query alike, and naming the wrong one
-                        // would be its own small fabrication. Show the query as received and let the
-                        // reader see the stray quote / second pattern for themselves.
-                        lintPrintErr( "ripwire: --match: this query captures nothing — add @name, e.g. '(if_statement) @m'. "
-                                            "ripwire auto-captures only a query that is exactly ONE top-level pattern, and will not guess for this one "
-                                            "(query as received: {})\n",
-                                    matchQuery );
-                        return 1;
-                    }
-                    matchQuery  += " @m";
-                    autoCaptured = true;
-                }
-            }
-            constexpr std::size_t        kMatchMaxHits = 5000;   // astQuery's per-spec budget, named not implied
-            const MatchQueryOutcome      mq = runMatchQuery( ing, matchQuery, kMatchMaxHits );
-            const std::vector<AstMatch>& ms            = mq.matches;
-            const std::string&           grammarsAttr  = mq.grammarsAttr;   // §L3: which grammars the query compiled against
-            const std::size_t&           eligibleFiles = mq.eligibleFiles;
-            // §P0.4's rule, applied to --match's own engine: a query no grammar compiled measured NOTHING,
-            // so a hits="0" here would be a failure wearing a result. Refuse, exactly like an invalid --regex.
-            if( !mq.uncompiled.empty() )
-            {
-                lintPrintErr( "ripwire: --match: the query compiled for no grammar — refusing rather than reporting a zero it did not measure "
-                                    "(query as received: {}){}\n",
-                            cfg.match, matchNearestKindClause( mq.nearestKind, mq.nearestGrammar ) );
-                return 1;
-            }
-            if( refuseUndecidedMatchRegex( "--match", mq.regexRefused, mq.regexUndecided, undecidedPredicateFirstSite( cfg, ing, mq.regexUndecided ),
-                                           "query as received: " + std::string( cfg.match ) ) )
-            {
-                return 1;
-            }
-            // §P8 G3: --match was missed when its sibling --grep got paging — `--limit=5` still emitted the
-            // full 100-row cap, so the two structurally identical search verbs disagreed about whether
-            // --limit meant anything. Same window, same disclosure, same default cap (--pack-top-n, else
-            // 100): pageDisclosure emits exactly the ` shown= capped=` bytes this tag used to hand-roll, so
-            // an un-paginated --match is byte-identical. See src/pageview.h, THE TRUNCATION VOCABULARY.
-            const PageWindow  matchPage  = pageWindow( ms.size(), effectiveRowCap( cfg.pageLimit, cap ), cfg.pageOffset );
-            const std::size_t matchShown = matchPage.end - matchPage.begin;
-            char              mpab[ kPageDisclosureCap ];
-            // §L3: no `attr="value"` spelled out below for grammars=/eligible_files=/of_files= — a naive
-            // whole-line grep (matchcapturecheck.sh's own idiom) would match the WORDED example first.
-            // #157: a file the nesting guard refused is excluded from eligible_files= and never reaches this
-            // walk, so a reader must be told the corpus held one rather than reading a clean match answer as
-            // proof the pattern does not occur there too. Same reused why token the skipped verb's rows carry.
-            const std::string matchNestRefusedAttr = ing.crawlSkips.nestRefusedFiles > 0
-                ? " nest_refused=\"" + std::to_string( ing.crawlSkips.nestRefusedFiles ) + "\""
-                : std::string();
-            lintPrintOut( "<!-- ripwire match: tree-sitter structural query; each hit = a captured node + its enclosing symbol. "
-                        "shown=/capped= = rows printed vs found; hits_capped=\"1\" ⇒ hits= is a FLOOR (engine match limit reached) and the "
-                        "root then also carries counts_floor=\"1\" and capped=\"1\" — rows exist that NO page holds (the engine cap, not the "
-                        "window, dropped them; narrow the query), while has_more= keeps its window meaning so a loop still terminates. "
-                        "auto_captured=\"1\" ⇒ the query bound no @capture and ripwire appended `@m` to its single top-level pattern. "
-                        "grammars= names every grammar the query compiled against; eligible_files=/of_files= are corpus files in that "
-                        "language set vs total indexed files. nest_refused= (absent if 0) counts corpus files a pre-parse nesting guard "
-                        "refused before this walk could reach them, excluded from eligible_files=; see the skipped verb's why=\"nest-refused\" "
-                        "rows for which. raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it) -->" );
-            lintPrintOut( "<match hits=\"{}\"{} hits_capped=\"{}\"{} grammars=\"{}\" eligible_files=\"{}\" of_files=\"{}\"{}{}>",
-                        ms.size(),
-                        pageDisclosure( mpab, sizeof( mpab ), matchShown, ms.size(), matchPage.end,
-                                        cfg.pageLimit, cfg.pageOffset, true, kXmlPageSyntax,
-                                        /*collectionCapped=*/ ms.size() >= kMatchMaxHits ),   // H8: the same cap hits_capped= names
-                        ms.size() >= kMatchMaxHits ? 1 : 0,
-                        autoCaptured ? " auto_captured=\"1\"" : "",
-                        ex( grammarsAttr ),
-                        eligibleFiles,
-                        ing.files.size(),
-                        lintRootAttr,
-                        matchNestRefusedAttr );
-            for( std::size_t hitIndex = matchPage.begin; hitIndex < matchPage.end; ++hitIndex )
-            {
-                const AstMatch&         m  = ms[ hitIndex ];
-                const Symbol*           e  = enclosing( m.fileId, m.startByte );
-                const std::string_view  rp = lintSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ m.fileId ], lintRootPrefix ) : std::string_view( ing.files[ m.fileId ] );
-                lintPrintOut( "<m p=\"{}:{}\" in=\"{}\">", ex( rp ), m.line, e ? ex( e->name ) : "" );
-                emitEscaped( m.text );
-                lintPrintOut( "</m>" );
-            }
-            lintPrintOut( "</match>" );
-            return 0;
+            return runMatchVerb( cfg, view );
         }
-
-        // R2 — the PATTERN surface: structural search written in CODE instead of in node kinds.
-        // Sits here, beside --match, because it answers the same question through the same walk and must
-        // emit through the same conventions (enclosing symbol, page window, grammar applicability). The
-        // work BEFORE the walk — compile per grammar, refuse or proceed, assemble the disclosures — is
-        // runPatternSearch, extracted for exactly the reason runMatchQuery was: runLint's dispatcher body
-        // is already one of the largest in this file and must not grow a verb's worth of plumbing.
         if( !cfg.pattern.empty() )
         {
-            const PatternSearchOutcome ps = runPatternSearch( ing, cfg.pattern );
-            if( !ps.refusal.empty() )
-            {
-                lintPrintErr( "{}", ps.refusal );
-                return 1;
-            }
-            const PageWindow  patPage  = pageWindow( ps.matches.size(), effectiveRowCap( cfg.pageLimit, cap ), cfg.pageOffset );
-            const std::size_t patShown = patPage.end - patPage.begin;
-            char              ppab[ kPageDisclosureCap ];
-            lintPrintOut( "{}", kPatternLegend );
-            const bool memberNearMiss = ps.memberUnmatched > 0 || ps.memberCapped > 0;
-            if( ps.qualifiedUnmatched > 0 || memberNearMiss )
-            {
-                lintPrintOut( "{}", kPatternQualifiedLegend );
-            }
-            // unresolved_in= is withheld only when it could not mislead: a run that found matches AND read
-            // every file it serves. The moment a served-language file went unscanned (skipped_files>0), the
-            // partial resolution is exactly what explains it, hits>0 or not — V-3's second case, where a
-            // matched .tsx sat beside a silently unread .ts.
-            const bool tellUnresolved = ps.matches.empty() || ps.skippedFiles > 0;
-            // #157: same disclosure as --match, over the same shared walk (AstWalk::Pattern reaches the
-            // identical per-file skip). Absent when nothing was refused.
-            const std::string patNestRefusedAttr = ( ing.crawlSkips.nestRefusedFiles > 0
-                ? " nest_refused=\"" + std::to_string( ing.crawlSkips.nestRefusedFiles ) + "\""
-                : std::string() )
-                + ( ps.qualifiedUnmatched > 0 ? " unmatched_qualified=\"" + std::to_string( ps.qualifiedUnmatched ) + "\"" : std::string() )
-                + ( memberNearMiss ? memberNearMissAttrs( ps, cfg.pattern ) : std::string() );
-            lintPrintOut( "<pattern hits=\"{}\"{} hits_capped=\"{}\" q=\"{}\" grammars=\"{}\" shapes=\"{}\" unsupported=\"{}\"{}{} eligible_files=\"{}\" skipped_files=\"{}\" of_files=\"{}\"{}{}>",
-                        ps.matches.size(),
-                        pageDisclosure( ppab, sizeof( ppab ), patShown, ps.matches.size(), patPage.end, cfg.pageLimit, cfg.pageOffset, true,
-                                        kXmlPageSyntax, /*collectionCapped=*/ ps.matches.size() >= rw::pattern::kMaxHits ),   // H8
-                        ps.matches.size() >= rw::pattern::kMaxHits ? 1 : 0,
-                        ex( cfg.pattern ),
-                        ex( ps.grammarsAttr ),
-                        ex( ps.shapesAttr ),
-                        rw::pattern::kUnsupportedGrammars,
-                        ps.ellipsisAttr,
-                        tellUnresolved ? ps.unresolvedAttr : std::string(),
-                        ps.eligibleFiles,
-                        ps.skippedFiles,
-                        ing.files.size(),
-                        lintRootAttr,
-                        patNestRefusedAttr );
-            for( std::size_t hitIndex = patPage.begin; hitIndex < patPage.end; ++hitIndex )
-            {
-                const rw::AstMatch&    m  = ps.matches[ hitIndex ];
-                const Symbol*          e  = enclosing( m.fileId, m.startByte );
-                const std::string_view rp = lintSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ m.fileId ], lintRootPrefix ) : std::string_view( ing.files[ m.fileId ] );
-                lintPrintOut( "<m p=\"{}:{}\" in=\"{}\">", ex( rp ), m.line, e ? ex( e->name ) : "" );
-                emitEscaped( m.text );
-                lintPrintOut( "</m>" );
-            }
-            lintPrintOut( "</pattern>" );
-            return 0;
+            return runPatternVerb( cfg, view );
         }
-
+        const EnclosingSymbolIndex& enclosing = view.enclosing;
+        const auto                  ex        = [ & ]( std::string_view s ) -> std::string { return view.ex( s ); };
         // --lint: built-in single-capture [AST]-only checks (C-family). Descriptive — facts, not gates;
         // never the [FLOW]/[TYPE] checks ripwire can't see soundly.
         //
@@ -2259,7 +2326,7 @@ std::optional<int> runLint( const MainDispatch& d )
                                        cfg.pageLimit, cfg.pageOffset, /*discloseCap=*/true, kXmlPageSyntax,
                                        /*collectionCapped=*/ anyRuleCapped ),   // H8: a floored rule floors findings=
                         anyRuleCapped ? " findings_capped=\"1\"" + rw::nextAttrXml( findingsNext, "findings_next" ) : std::string(),
-                        heatJoinedAttr, lintRootExtra, lintRootAttr );
+                        heatJoinedAttr, lintRootExtra, view.rootAttr );
         }
         if( cfg.lint )
         { // built-in per-rule tally (order → deterministic)
@@ -2291,7 +2358,7 @@ std::optional<int> runLint( const MainDispatch& d )
         {
             const LintOut&          m  = outs[ findingIndex ];
             const Symbol*           e  = enclosing( m.fileId, m.startByte );
-            const std::string_view  rp = lintSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ m.fileId ], lintRootPrefix ) : std::string_view( ing.files[ m.fileId ] );
+            const std::string_view  rp = view.rowPath( m.fileId );
             if( m.sev.empty() )
             { // built-in finding — unchanged shape (no sev=)
                 lintPrintOut( "<f rule=\"{}\" p=\"{}:{}\" in=\"{}\"{}>", ex( m.rule ), ex( rp ), m.line, e ? ex( e->name ) : "",
@@ -2302,7 +2369,7 @@ std::optional<int> runLint( const MainDispatch& d )
                 lintPrintOut( "<f rule=\"{}\" sev=\"{}\" p=\"{}:{}\" in=\"{}\"{}>", ex( m.rule ), ex( m.sev ), ex( rp ), m.line, e ? ex( e->name ) : "",
                             heatByFinding.empty() ? std::string() : heatByFinding[ findingIndex ] );
             }
-            emitEscaped( m.text );
+            emitEscapedText( m.text );
             lintPrintOut( "</f>" );
         }
         lintPrintOut( "</lint>" );
