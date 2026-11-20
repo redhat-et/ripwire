@@ -25,6 +25,7 @@
 #include "graph.h"
 #include "valuerefindex.h"       // reference-as-value round: a function a table/field/argument holds is not dead (dead kind)
 #include "clones.h"
+#include "repeateddecision.h"   // QD-REPEATED-DECISION — the "name the decision once" facet on complexity and tangle rows
 #include "cloneidiom.h"         // idiom-class demotion — the closed 3-idiom shape classifier that turns an idiom-COLLISION clone group into a minor row instead of a gating one
 #include "lintrules.h"          // findQualityConstructs — the built-in error-masking rule table (GitClear +47% kind) + the placeholder shapes
 #include "defectshape.h"        // the defect-shape kind's four scanners (format-arity, utf8-cut, dedup-first, vacuous-assert)
@@ -11409,6 +11410,57 @@ inline void appendTangleRatchet( std::vector<Regression>& regs, const IngestResu
     }
 }
 
+// QD-REPEATED-DECISION (repeateddecision.h) — a FACET on the complexity and tangle rows already built: when the function's
+// body tests one condition twice or repeats a loop body, fix= names it with its lines ("name the decision once"); a tangle
+// row's own fix= keeps its text first. It adds no row and changes no severity. The body read is the key's highest-ccx
+// definition (the symbol the complexity row's now= is), one file read per file.
+inline void appendRepeatedDecisionFixes( std::vector<Regression>& regs, const IngestResult& ing, const std::vector<std::uint64_t>& keyByNode )
+{
+    gtl::btree_map<std::uint64_t, NodeId> atOfKey;   // only the keys of the rows the facet can ride
+    for( const Regression& r : regs )
+    {
+        if( r.kind == "complexity" || r.kind == "tangle" )
+        {
+            atOfKey.emplace( r.key, NodeId( -1 ) );
+        }
+    }
+    for( NodeId i = 0; i < ing.symbols.size() && i < keyByNode.size() && !atOfKey.empty(); ++i )
+    {
+        const auto it = atOfKey.find( keyByNode[i] );
+        if( it != atOfKey.end() && ( it->second == NodeId( -1 ) || ing.symbols[i].ccx > ing.symbols[ it->second ].ccx ) )
+        {
+            it->second = i;
+        }
+    }
+    std::vector<std::size_t> order;   // the rows, file-major, so each file is read once
+    for( std::size_t k = 0; k < regs.size(); ++k )
+    {
+        const auto it = atOfKey.find( regs[k].key );
+        if( ( regs[k].kind == "complexity" || regs[k].kind == "tangle" ) && it != atOfKey.end() && it->second != NodeId( -1 ) )
+        {
+            order.push_back( k );
+        }
+    }
+    std::stable_sort( order.begin(), order.end(), [ & ]( std::size_t a, std::size_t b )
+                      { return ing.symbols[ atOfKey.at( regs[a].key ) ].fileId < ing.symbols[ atOfKey.at( regs[b].key ) ].fileId; } );
+    std::string   bytes;
+    std::uint32_t openFile = UINT32_MAX;
+    for( const std::size_t k : order )
+    {
+        const Symbol& s = ing.symbols[ atOfKey.at( regs[k].key ) ];
+        if( s.fileId != openFile )
+        {
+            openFile = s.fileId;
+            bytes    = docparse::detail::readWholeFile( diskPath( ing, s.fileId ) ).value_or( std::string() );
+        }
+        const std::string fix = decision::repeatedDecisionFix( bytes, s.sigEndByte, s.endByte, s.lang );
+        if( !fix.empty() )
+        {
+            regs[k].fix += regs[k].fix.empty() ? fix : "; " + fix;
+        }
+    }
+}
+
 // The rows, appended to `regs` (stamped by the caller's `stamp( NodeId )`). `existed` and `movedAt` are computeDelta's own origin
 // oracles, so a tangle row's origin= reads exactly as every other per-symbol kind's. With `extras`, also the tangle credits and the
 // D4 ratchet (appendTangleRatchet).
@@ -11765,6 +11817,7 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
     perSymbolKind( kMaterialityBars[2], 0,                           base.nestBySym,   [ & ]( NodeId i ){ return std::uint32_t( ing.symbols[i].maxNest ); } );
     perSymbolKind( kMaterialityBars[3], 0,                           base.paramsBySym, [ & ]( NodeId i ){ return std::uint32_t( ing.symbols[i].params ); } );
     appendTangleRows( regs, ing, g, keyByNode, base, root, scope, existedAtBaseline, [ & ]( NodeId at ) { return moved.isMoved( at ); }, stampLoc, extras );   // QD-TANGLE
+    appendRepeatedDecisionFixes( regs, ing, keyByNode );   // QD-REPEATED-DECISION: fix= on the complexity and tangle rows above
 
     // PERF (P5W2) — the working-tree clone pass is the dominant --quality-delta cost: on a large private C++ corpus the
     // Type-3 pass alone is ~2.7-3.2 s (60 M intra-bucket pair-visits; tokenization is only ~3 %). It is a PURE
@@ -11932,8 +11985,10 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
                 }
             }
             // isMinor = the demotion; facet = the recognized shape, emitted as idiom= (facetAttrName).
-            regs.push_back( { "duplication", joined, 0, cg.tokens, h, vd.demoted,
+            // QD-IDIOM-ELEMTYPE: a group whose members operate on different data (cloneidiom.h's operand path) is minor too, why= naming it.
+            regs.push_back( { "duplication", joined, 0, cg.tokens, h, vd.demoted || vd.operands != CloneOperandDiff::None,
                               std::string( cloneIdiomName( vd.idiom ) ), cloneGroupIsNew( cg ) } );   // ack identity = the member-set hash; origin = "no member existed"
+            regs.back().why = cloneOperandWhy( vd.operands );
             stampCloneLoc( cg );
         }
     };
@@ -12369,8 +12424,9 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
                         joined += " | ";
                     }
                 }
-                regs.push_back( { "new-clone-of-reused-helper", joined, 0, maxFanin, h, vd.demoted,
+                regs.push_back( { "new-clone-of-reused-helper", joined, 0, maxFanin, h, vd.demoted || vd.operands != CloneOperandDiff::None,
                                   std::string( cloneIdiomName( vd.idiom ) ), cloneGroupIsNew( cg ) } );   // now = the eroded helper's fan-in; ack identity = the member-set hash
+                regs.back().why = cloneOperandWhy( vd.operands );   // QD-IDIOM-ELEMTYPE, as on the duplication row
                 stampCloneLoc( cg );
             }
         };

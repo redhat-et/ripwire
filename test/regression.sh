@@ -388,6 +388,7 @@ for _g in \
     clonecachecheck \
     clonededupcheck \
     cloneidiomcheck \
+    cloneoperandcheck \
     clonelexcheck \
     clonepersistcheck \
     clsrecvcheck \
@@ -973,6 +974,7 @@ for _g in \
     regsitecheck \
     relevancefloorcheck \
     relinkcheck \
+    repeateddecisioncheck \
     reportcheck \
     resolvecheck \
     resolverhonestycheck \
