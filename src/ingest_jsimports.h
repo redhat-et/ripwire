@@ -581,7 +581,7 @@ struct JsBindRecorder
     Lang                  lang;
     std::vector<RawBind>& binds;
 
-    RawBind& add( TSNode node, LocalBindKind kind, const std::string& name, TSNode scope ) const
+    RawBind& add( TSNode node, LocalBindKind kind, const std::string& name, TSNode scope )
     {
         RawBind bind;
         bind.fileId    = fileId;
@@ -602,7 +602,7 @@ struct JsBindRecorder
 // GE-JSIMPORTS: one ES `import … from 'm'` statement — a JsImport per default or named specifier (its local spelling, the
 // module, and the export spelling it requests unless type-only) and a ModuleAlias per `* as ns`; every local joins
 // `imported`, the names the shadow walk looks for.
-inline void captureJsImportStatement( TSNode stmt, TSNode root, std::string_view src, const JsBindRecorder& recorder, HashMap<std::string, char>& imported )
+inline void captureJsImportStatement( TSNode stmt, TSNode root, std::string_view src, JsBindRecorder& recorder, HashMap<std::string, char>& imported )
 {
     TSNode source = fieldChild( stmt, NodeField::Source );
     if( ts_node_is_null( source ) ) { return; }
@@ -663,7 +663,7 @@ inline void captureJsImportStatement( TSNode stmt, TSNode root, std::string_view
 
 // GE-JSIMPORTS: `export default …` — one JsExport "default" over the program, naming its local binding when the value is a
 // module identifier bound once, or the declared function/class (its span narrowed to the declaration) when that name is bound once.
-inline void captureJsDefaultExport( TSNode stmt, TSNode root, std::string_view src, const JsBindRecorder& recorder )
+inline void captureJsDefaultExport( TSNode stmt, TSNode root, std::string_view src, JsBindRecorder& recorder )
 {
     TSNode decl  = fieldChild( stmt, NodeField::Declaration );
     TSNode value = fieldChild( stmt, NodeField::Value );
@@ -693,7 +693,7 @@ inline void captureJsDefaultExport( TSNode stmt, TSNode root, std::string_view s
 //                share this statement's start byte) distinguishable to emitBindings' total order.
 //   declaration  `export function f(){}` / `export const f = () => {}` — one JsExport per function, class, or function-valued
 //                declarator, over the declaration; an exported object literal also gets its JsObjectLiteral (recordJsObjectLiterals).
-inline void captureJsExportStatement( TSNode stmt, TSNode root, std::string_view src, const JsBindRecorder& recorder )
+inline void captureJsExportStatement( TSNode stmt, TSNode root, std::string_view src, JsBindRecorder& recorder )
 {
     if( jsHasToken( stmt, "default" ) )
     {
@@ -751,7 +751,7 @@ inline void captureJsImportFacts( TSNode root, Lang lang, std::uint32_t fileId, 
     HashMap<std::string, char> imported;
     imported.reserve( children.size() );
     HashSet<std::uint32_t>       aliasDecls;   // FE-A: start bytes of the declarators that ARE a ModuleAlias — never their own shadow
-    const JsBindRecorder recorder{ fileId, lang, binds };
+    JsBindRecorder recorder{ fileId, lang, binds };
     for( TSNode stmt : children )
     {
         if( jsNodeIs( stmt, "import_statement" ) )
