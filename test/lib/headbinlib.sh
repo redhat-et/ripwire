@@ -33,8 +33,7 @@
 #     for the winner's binary. A waiter that times out (stale lock from a killed builder) builds PRIVATELY into the
 #     caller's $2 — uncached, but the gate still proves what it always proved. NEVER a silent skip because of lock
 #     contention.
-#   - the cache lives under the per-user temp dir ($RIPWIRE_HEADBIN_CACHE_ROOT when set: test/pargates.py points it at
-#     the shared temp dir, since each gate there runs with a private, deleted-at-exit TMPDIR); a reboot or tmp-clean just costs one rebuild. Stale shas are left
+#   - the cache lives under the per-user temp dir; a reboot or tmp-clean just costs one rebuild. Stale shas are left
 #     for the OS tmp cleaner — another session on a different branch may be using its own sha's binary concurrently,
 #     so pruning siblings here would be a race.
 #   - RIPWIRE_HEADBIN_BUILD_LOG, when set, receives the checkout and cmake output that otherwise goes to /dev/null
@@ -59,7 +58,7 @@ ripwire_head_binary()
     local _root="$1" _fb="$2" _sha _dir _bin _lock _t
     _sha="$( cd "$_root" && git rev-parse --verify HEAD 2>/dev/null )" || return 1
     [ -n "${RIPWIRE_HEADBIN+set}" ] && { _headbin_staged "$_sha"; return $?; }      # STAGED: never build, never wait
-    _dir="${RIPWIRE_HEADBIN_CACHE_ROOT:-${TMPDIR:-/tmp}}/ripwire-headbin-$( id -u )/$_sha"
+    _dir="${TMPDIR:-/tmp}/ripwire-headbin-$( id -u )/$_sha"
     _bin="$_dir/ripwire"
     [ -x "$_bin" ] && { printf '%s\n' "$_bin"; return 0; }
 
