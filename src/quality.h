@@ -11551,7 +11551,7 @@ inline constexpr std::size_t kShrinkJudgedMaxMembers = 4;   // up to 6 LCS pairs
 // A member whose body was CUT to under 1/kShrinkMaxCut of its base tokens is a rewrite the rule cannot judge: a long base body holds
 // most short bodies as a subsequence, so its base LCS saturates and "shared code did not grow" proves nothing (census 11-20: textual's
 // ColorSystem::generate, 1569 -> 22 tok, a new dispatcher whose base LCS with a 26-token validator was already 24). It gates as before.
-inline constexpr std::size_t kShrinkMaxCut = 2;
+inline constexpr std::size_t kShrinkMaxCut = 2;   // a member cut to under 1/N of its base tokens is a rewrite; the row gates as before
 
 // A gating clone row (duplication or new-clone-of-reused-helper) and the group it names: the rule's input.
 struct ShrinkCandidate
