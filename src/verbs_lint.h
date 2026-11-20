@@ -1749,6 +1749,261 @@ int runPatternVerb( const rw::Config& cfg, const LintAnswerView& view )
     return 0;
 }
 
+// All BUILT-IN rule names in declaration order — drives the per-rule tally in the XML header.
+// Symbol-level checks are appended after the query-based checks; order matches the conceptual list.
+// The atoms and cache packs append their own names to this list when they merge (mergeAtomsPack /
+// mergeCachePack), so the list a run tallies is this one plus whatever its packs registered.
+std::vector<std::string> builtInLintRuleNames()
+{
+    return {
+        "c-style-cast", "goto", "do-while", "unsafe-c-fn", "weak-crypto", "redundant-parens",
+        "suspicious-semicolon", "typedef-over-using", "magic-number", "empty-catch", "self-assign",
+        "large-function", "deep-nesting", "inconsistent-return", "unreachable-code",
+        "naming-short", "naming-wordy", "naming-series", "naming-underscore", "naming-case",
+        "naming-predicate", "naming-setter", "naming-confusable", "naming-uninformative",
+    };
+}
+
+// --lint: built-in single-capture [AST]-only checks (C-family). Descriptive — facts, not gates;
+// never the [FLOW]/[TYPE] checks ripwire can't see soundly.
+//
+// S6-A: added 4 new AST-query checks + 3 symbol-level checks (large-function, deep-nesting,
+// inconsistent-return) that require body-text analysis beyond what a single tree-sitter capture gives.
+// Checks skipped (too noisy / require real semantics):
+//   missing-const — needs type inference + mutation analysis ([TYPE]) — false positives on out-params
+//   non-virtual-dtor — needs inheritance graph ([TYPE]) — not reliably detectable from the AST alone
+//   implicit-bool-conv — `if(ptr)` is idiomatic C++; flagging it produces near-universal noise
+std::vector<rw::AstQuerySpec> builtInLintQueries()
+{
+    return {
+        { "(cast_expression) @c",                                                                       "c-style-cast" },         // cppcoreguidelines-pro-type-cstyle-cast
+        { "(goto_statement) @c",                                                                        "goto" },                  // cppcoreguidelines-avoid-goto
+        { "(do_statement) @c",                                                                          "do-while" },              // cppcoreguidelines-avoid-do-while
+        { "(call_expression function: (identifier) @c (#match? @c \"^(strcpy|strcat|sprintf|gets)$\"))","unsafe-c-fn" },           // bugprone unbounded C string fns
+        { "(call_expression function: (identifier) @c (#match? @c \"^(MD5|md5|SHA1|sha1|MD4|md4|RC4|rc4)$\"))","weak-crypto" },   // broken hash/cipher (the one [AST] security item; insecure rand() excluded — too noisy)
+        { "(parenthesized_expression (parenthesized_expression) @c)",                                   "redundant-parens" },      // clang-tidy readability-redundant-parentheses
+        { "(if_statement consequence: (expression_statement) @c)",                                      "suspicious-semicolon" },  // clang-tidy bugprone-suspicious-semicolon (post-filtered below)
+        // S6-A new checks:
+        { "(type_definition declarator: (type_identifier) @c)",                                         "typedef-over-using" },    // C-style typedef struct/union in C++ — prefer using T = ...
+        { "(number_literal) @c",                                                                        "magic-number" },          // numeric literal outside const/constexpr init (post-filtered below)
+        { "(catch_clause body: (compound_statement) @c)",                                               "empty-catch" },           // catch block with empty/comment-only body (post-filtered below)
+        { "(assignment_expression left: (_) @lhs right: (_) @rhs (#eq? @lhs @rhs))",                   "self-assign" },           // x = x — predicate rejects unequal pairs before post-filtering
+    };
+}
+
+// §P0.2: kLintMaxPerRule (lintrules.h) is spent PER RULE, not pooled — a rule can only ever be capped
+// by its own matches. A rule that lands exactly on the budget has a count= that is a FLOOR, disclosed in
+// the tally. Saturation is measured on the RAW captures, before the post-filters below thin them.
+void recordSaturatedQueryRules( const std::vector<rw::AstQuerySpec>& checks, const std::vector<rw::AstMatch>& rawCaptures, std::size_t maxPerRule,
+                                std::vector<RuleCap>& saturatedRules )
+{
+    for( const rw::AstQuerySpec& check : checks )
+    {
+        const auto rawForRule = std::size_t( std::count_if( rawCaptures.begin(), rawCaptures.end(), [ & ]( const rw::AstMatch& m ) { return m.tag == check.tag; } ) );
+        if( rawForRule >= maxPerRule )
+        {
+            saturatedRules.push_back( { check.tag, false } );
+        }
+    }
+}
+
+// The whitespace the built-in post-filters trim a captured node's text by, at both ends: space, tab, LF, CR.
+std::string_view trimCaptureSpace( std::string_view t ) noexcept
+{
+    const auto ws = []( char c ) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; };
+    while( !t.empty() && ws( t.front() ) )
+    {
+        t.remove_prefix( 1 );
+    }
+    while( !t.empty() && ws( t.back() ) )
+    {
+        t.remove_suffix( 1 );
+    }
+    return t;
+}
+
+// suspicious-semicolon: the query also matches a normal `if(x) foo();` (the grammar gives both an
+// expression_statement consequence). Keep ONLY an empty body — matched text trims to just ";" — the real bug.
+bool isFilledIfBody( const rw::AstMatch& m )
+{
+    return m.tag == "suspicious-semicolon" && trimCaptureSpace( m.text ) != ";";   // non-empty body → not the bug → drop
+}
+
+// empty-catch: keep ONLY catch bodies whose trimmed text is empty (nothing but whitespace/braces).
+// The captured node is the compound_statement — its text is "{...}"; trim and check for "{}".
+bool isNonEmptyCatchBody( const rw::AstMatch& m )
+{
+    if( m.tag != "empty-catch" )
+    {
+        return false;
+    }
+    const std::string_view t = trimCaptureSpace( m.text );
+    // After trimming, an empty body is "{}" or "{ }" (only whitespace between braces).
+    if( t.size() < 2 || t.front() != '{' || t.back() != '}' )
+    {
+        return true; // malformed — drop
+    }
+    return !trimCaptureSpace( t.substr( 1, t.size() - 2 ) ).empty();   // non-whitespace inside → not empty → drop
+}
+
+// magic-number: drop literals that are:
+//   (a) semantic -2..2 forms (universal idioms) or base-prefixed masks/protocol constants
+//   (b) inside a const/constexpr variable initializer (that's exactly the right place for numbers)
+//   (c) inside an enum body (enumerator values are naturally numeric)
+// Keep only literals inside function/method bodies to limit noise.
+// The enclosing symbol check (Function/Method) is the main guard. A file's text is read on the first
+// literal that survives (a), once.
+void dropUnflaggedMagicNumbers( const rw::IngestResult& ing, const EnclosingSymbolIndex& enclosing, std::vector<rw::AstMatch>& ms )
+{
+    std::vector<std::string> magicFileBytes( ing.files.size() );
+    std::vector<char>        magicFileRead( ing.files.size(), 0 );
+    const auto magicBytes = [ & ]( std::uint32_t fileId ) -> const std::string&
+    {
+        if( !magicFileRead[fileId] )
+        {
+            magicFileBytes[fileId] = rw::darkflags::readWhole( rw::diskPath( ing, fileId ) ).value_or( std::string() );
+            magicFileRead[fileId] = 1;
+        }
+        return magicFileBytes[fileId];
+    };
+    std::erase_if( ms, [ & ]( const rw::AstMatch& m )
+    {
+        if( m.tag != "magic-number" )
+        {
+            return false;
+        }
+        if( isUniversalOrAllowlistedNumber( m.text ) )
+        {
+            return true;
+        }
+        const std::string& src = magicBytes( m.fileId );
+        if( !src.empty() && isConstantInitializerNumber( src, m.startByte ) )
+        {
+            return true;
+        }
+        // must be inside a function/method body to be a magic-number finding
+        const rw::Symbol* e = enclosing( m.fileId, m.startByte );
+        return !e || ( e->kind != rw::SymKind::Function && e->kind != rw::SymKind::Method );
+    } );
+}
+
+// #eq? rejected unequal assignment pairs inside tree-sitter, so the remaining captures arrive as
+// lhs/rhs twins in byte order. Collapse every complete twin pair into one finding; unlike the old
+// (file,line) bucket this cannot cross-wire two independent assignments sharing a source line.
+// The collapsed findings go to the END of ms, sorted by (file, line) for determinism.
+void collapseSelfAssignPairs( const rw::IngestResult& ing, std::vector<rw::AstMatch>& ms )
+{
+    std::vector<rw::AstMatch> saCaptured;
+    for( const rw::AstMatch& m : ms )
+    {
+        if( m.tag == "self-assign" )
+        {
+            saCaptured.push_back( m );
+        }
+    }
+    std::erase_if( ms, []( const rw::AstMatch& m ) { return m.tag == "self-assign"; } );
+    std::vector<rw::AstMatch> saKeep;
+    for( std::size_t i = 0; i + 1 < saCaptured.size(); i += 2 )
+    {
+        const rw::AstMatch& lhs = saCaptured[i];
+        const rw::AstMatch& rhs = saCaptured[i + 1];
+        if( lhs.fileId != rhs.fileId || lhs.text != rhs.text )
+        {
+            continue; // defensive: an incomplete/crossed capture pair is never evidence
+        }
+        const std::string expression( trimCaptureSpace( lhs.text ) );
+        rw::AstMatch hit;
+        hit.fileId    = lhs.fileId;
+        hit.startByte = lhs.startByte;
+        hit.endByte   = lhs.endByte;
+        hit.line      = lhs.line;
+        hit.tag       = "self-assign";
+        hit.text      = expression + " = " + expression;
+        saKeep.push_back( std::move( hit ) );
+    }
+    std::sort( saKeep.begin(), saKeep.end(), [ & ]( const rw::AstMatch& x, const rw::AstMatch& y )
+    {
+        if( ing.files[x.fileId] != ing.files[y.fileId] ) { return ing.files[x.fileId] < ing.files[y.fileId]; }
+        return x.line < y.line;
+    } );
+    for( rw::AstMatch& hit : saKeep )
+    {
+        ms.push_back( std::move( hit ) );
+    }
+}
+
+// Every --lint built-in finding, in its final deterministic order: the one grouped walk's rule captures
+// (saturation recorded, post-filtered, self-assign twins collapsed), then the symbol-level checks, the
+// unreachable-code sketch, and the three packs. Fills saturatedRules with the floors and allRuleNames with
+// the packs' own rule names on the way.
+std::vector<rw::AstMatch> collectBuiltInLintFindings( const rw::Config& cfg, const rw::IngestResult& ing, const EnclosingSymbolIndex& enclosing,
+                                                      std::size_t lintMaxPerRule, std::vector<RuleCap>& saturatedRules,
+                                                      std::vector<std::string>& allRuleNames )
+{
+    using namespace rw;
+    const std::vector<AstQuerySpec> checks = builtInLintQueries();
+    // The corpus text the one grouped walk read, kept alive for the symbol-level passes below so they
+    // do not re-open the same files a second and third time. Lives exactly as long as this collection.
+    std::vector<std::string>           corpusBytes;
+    std::vector<std::vector<AstMatch>> grouped = builtInLintCaptures( ing, checks, corpusBytes, lintMaxPerRule );
+    std::vector<AstMatch>              ms      = std::move( grouped[0] );
+    recordSaturatedQueryRules( checks, ms, lintMaxPerRule, saturatedRules );
+    std::erase_if( ms, isFilledIfBody );
+    std::erase_if( ms, isNonEmptyCatchBody );
+    dropUnflaggedMagicNumbers( ing, enclosing, ms );
+    collapseSelfAssignPairs( ing, ms );
+
+    // Symbol-level checks (S6-A): walk each Function/Method body — checks that need line-counting or
+    // control-flow nesting depth, which a single tree-sitter @capture can't give without reparsing.
+    // These produce AstMatch entries (same format) so they flow into the same XML tally/listing.
+    //
+    //   large-function    — body line-span (newlines in [sigEndByte, endByte)) > 80
+    //   deep-nesting      — curly-brace nesting depth inside [sigEndByte, endByte) > 4
+    //   inconsistent-return — mix of `return;` and `return <expr>;` in the same body
+    //
+    // Note: deep-nesting uses curly-brace depth as a proxy for control-flow depth (fast, no full reparse).
+    // This correctly catches deeply nested if/for/while blocks because each adds a `{` in Allman/K&R style.
+    // It can over-report on struct-initialiser nesting — acceptable, as those are also a complexity signal.
+    { PROFILE_SCOPE_DESCRIBE( "lint: lintSymbolLevelChecks" );
+    for( AstMatch& symHit : lintSymbolLevelChecks( ing, &corpusBytes ) )
+    {
+        ms.push_back( std::move( symHit ) );
+    }
+    }
+
+    // unreachable-code (joern-lite CFG sketch): pure-syntactic intra-block dead-code — a statement
+    // after an unconditional exit (return/break/continue/throw, +Python raise) in the SAME block.
+    // Conservative: no dataflow, goto excluded, jump-target siblings stop the scan (no false positives
+    // on code reached via a label or on `if(x) return; foo();` where foo() is a reachable sibling).
+    // Already collected, sorted and capped: it rode the one grouped walk above as grouped[3] instead of
+    // spending a fourth read + parse of the whole corpus on its own pool.
+    {
+        PROFILE_SCOPE_DESCRIBE( "lint: mergeUnreachable" );
+        for( auto& h : grouped[3] )
+        {
+            ms.push_back( std::move( h ) );
+        }
+    }
+
+    // The packs that live outside this function: the atoms-of-confusion pack (src/atoms.h), the
+    // identifier-naming lens (src/naminglens.h) and the cache-friendliness pack (src/cachelint.h).
+    // Each merges its own findings, its own floor disclosures and — for the packs whose rule list is
+    // owned by the pack — its own rule names. All run here, so the sort below covers every built-in
+    // finding regardless of its source.
+    { PROFILE_SCOPE_DESCRIBE( "lint: mergeAtomsPack" ); mergeAtomsPack( ing, ms, saturatedRules, allRuleNames, std::move( grouped[1] ), lintMaxPerRule ); }
+    { PROFILE_SCOPE_DESCRIBE( "lint: mergeNamingLens" ); mergeNamingLens( ing, ms, saturatedRules, cfg.namingLocals, &corpusBytes, lintMaxPerRule ); }
+    { PROFILE_SCOPE_DESCRIBE( "lint: mergeCachePack" ); mergeCachePack( ing, ms, saturatedRules, allRuleNames, std::move( grouped[2] ), lintMaxPerRule ); }
+
+    // Re-sort the combined findings (AST + symbol-level) for deterministic output.
+    std::sort( ms.begin(), ms.end(), [ & ]( const AstMatch& x, const AstMatch& y )
+    {
+        if( ing.files[x.fileId] != ing.files[y.fileId] ) { return ing.files[x.fileId] < ing.files[y.fileId]; }
+        if( x.startByte != y.startByte ) { return x.startByte < y.startByte; }
+        return x.tag < y.tag;
+    } );
+    return ms;
+}
+
 std::optional<int> runLint( const MainDispatch& d )
 {
     using namespace rw;
@@ -1777,281 +2032,15 @@ std::optional<int> runLint( const MainDispatch& d )
         }
         const EnclosingSymbolIndex& enclosing = view.enclosing;
         const auto                  ex        = [ & ]( std::string_view s ) -> std::string { return view.ex( s ); };
-        // --lint: built-in single-capture [AST]-only checks (C-family). Descriptive — facts, not gates;
-        // never the [FLOW]/[TYPE] checks ripwire can't see soundly.
-        //
-        // S6-A: added 4 new AST-query checks + 3 symbol-level checks (large-function, deep-nesting,
-        // inconsistent-return) that require body-text analysis beyond what a single tree-sitter capture gives.
-        // Checks skipped (too noisy / require real semantics):
-        //   missing-const — needs type inference + mutation analysis ([TYPE]) — false positives on out-params
-        //   non-virtual-dtor — needs inheritance graph ([TYPE]) — not reliably detectable from the AST alone
-        //   implicit-bool-conv — `if(ptr)` is idiomatic C++; flagging it produces near-universal noise
-        std::vector<AstMatch> ms;   // combined findings (built-in tags + user rule ids); shared by both sources
-
         std::vector<RuleCap> saturatedRules;   // see the RuleCap declaration at file scope for why the key is a PAIR
         // knob-honesty-068: the per-rule budget this run spends (--lint-max-per-rule=N, else kLintMaxPerRule)
         const std::size_t    lintMaxPerRule = rw::lintMaxPerRuleOf( cfg.lintMaxPerRule );
-
-        // All BUILT-IN rule names in declaration order — drives the per-rule tally in the XML header.
-        // Symbol-level checks are appended after the query-based checks; order matches the conceptual list.
-        // Declared BEFORE the --lint block so the atoms pack can append its own names from inside it (one
-        // guarded region instead of two, which is also what keeps runLint's branch count from growing per pack).
-        std::vector<std::string> allRuleNames = {
-            "c-style-cast", "goto", "do-while", "unsafe-c-fn", "weak-crypto", "redundant-parens",
-            "suspicious-semicolon", "typedef-over-using", "magic-number", "empty-catch", "self-assign",
-            "large-function", "deep-nesting", "inconsistent-return", "unreachable-code",
-            "naming-short", "naming-wordy", "naming-series", "naming-underscore", "naming-case",
-            "naming-predicate", "naming-setter", "naming-confusable", "naming-uninformative",
-        };
-
+        std::vector<std::string> allRuleNames = builtInLintRuleNames();
+        std::vector<AstMatch> ms;   // combined built-in findings
         if( cfg.lint )   // built-in [AST] checks only run with --lint; --lint-rules alone emits user findings only
         {
-        const std::vector<AstQuerySpec> checks = {
-            { "(cast_expression) @c",                                                                       "c-style-cast" },         // cppcoreguidelines-pro-type-cstyle-cast
-            { "(goto_statement) @c",                                                                        "goto" },                  // cppcoreguidelines-avoid-goto
-            { "(do_statement) @c",                                                                          "do-while" },              // cppcoreguidelines-avoid-do-while
-            { "(call_expression function: (identifier) @c (#match? @c \"^(strcpy|strcat|sprintf|gets)$\"))","unsafe-c-fn" },           // bugprone unbounded C string fns
-            { "(call_expression function: (identifier) @c (#match? @c \"^(MD5|md5|SHA1|sha1|MD4|md4|RC4|rc4)$\"))","weak-crypto" },   // broken hash/cipher (the one [AST] security item; insecure rand() excluded — too noisy)
-            { "(parenthesized_expression (parenthesized_expression) @c)",                                   "redundant-parens" },      // clang-tidy readability-redundant-parentheses
-            { "(if_statement consequence: (expression_statement) @c)",                                      "suspicious-semicolon" },  // clang-tidy bugprone-suspicious-semicolon (post-filtered below)
-            // S6-A new checks:
-            { "(type_definition declarator: (type_identifier) @c)",                                         "typedef-over-using" },    // C-style typedef struct/union in C++ — prefer using T = ...
-            { "(number_literal) @c",                                                                        "magic-number" },          // numeric literal outside const/constexpr init (post-filtered below)
-            { "(catch_clause body: (compound_statement) @c)",                                               "empty-catch" },           // catch block with empty/comment-only body (post-filtered below)
-            { "(assignment_expression left: (_) @lhs right: (_) @rhs (#eq? @lhs @rhs))",                   "self-assign" },           // x = x — predicate rejects unequal pairs before post-filtering
-        };
-        // §P0.2: kLintMaxPerRule (lintrules.h) is spent PER RULE, not pooled — a rule can only ever be capped
-        // by its own matches. A rule that lands exactly on the budget has a count= that is a FLOOR, disclosed below.
-        // The corpus text the one grouped walk read, kept alive for the symbol-level passes below so they
-        // do not re-open the same files a second and third time. Lives exactly as long as this lint block.
-        std::vector<std::string>           corpusBytes;
-        std::vector<std::vector<AstMatch>> grouped = builtInLintCaptures( ing, checks, corpusBytes, lintMaxPerRule );
-        ms = std::move( grouped[0] );
-        for( const AstQuerySpec& check : checks )       // saturation is measured on the RAW captures, before the post-filters below thin them
-        {
-            std::size_t rawForRule = 0;
-            for( const AstMatch& m : ms )
-            {
-                if( m.tag == check.tag )
-                {
-                    ++rawForRule;
-                }
-            }
-            if( rawForRule >= lintMaxPerRule )
-            {
-                saturatedRules.push_back( { check.tag, false } );
-            }
+            ms = collectBuiltInLintFindings( cfg, ing, enclosing, lintMaxPerRule, saturatedRules, allRuleNames );
         }
-
-        // suspicious-semicolon: the query also matches a normal `if(x) foo();` (the grammar gives both an
-        // expression_statement consequence). Keep ONLY an empty body — matched text trims to just ";" — the real bug.
-        ms.erase( std::remove_if( ms.begin(), ms.end(), []( const AstMatch& m )
-                                  {
-                                      if( m.tag != "suspicious-semicolon" )
-                                      {
-                                          return false;
-                                      }
-                                      const auto ws = []( char c )
-                                      { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; };
-                                      std::string_view t  = m.text;
-                                      while( !t.empty() && ws( t.front() ) )
-                                      {
-                                          t.remove_prefix( 1 );
-                                      }
-                                      while( !t.empty() && ws( t.back() ) )
-                                      {
-                                          t.remove_suffix( 1 );
-                                      }
-                                      return t != ";";   // non-empty body → not the bug → drop
-                                  } ),
-                  ms.end() );
-
-        // empty-catch: keep ONLY catch bodies whose trimmed text is empty (nothing but whitespace/braces).
-        // The captured node is the compound_statement — its text is "{...}"; trim and check for "{}".
-        ms.erase( std::remove_if( ms.begin(), ms.end(), []( const AstMatch& m )
-                                  {
-                                      if( m.tag != "empty-catch" )
-                                      {
-                                          return false;
-                                      }
-                                      const auto ws = []( char c )
-                                      { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; };
-                                      std::string_view t = m.text;
-                                      while( !t.empty() && ws( t.front() ) )
-                                      {
-                                          t.remove_prefix( 1 );
-                                      }
-                                      while( !t.empty() && ws( t.back() ) )
-                                      {
-                                          t.remove_suffix( 1 );
-                                      }
-                                      // After trimming, an empty body is "{}" or "{ }" (only whitespace between braces).
-                                      if( t.size() < 2 || t.front() != '{' || t.back() != '}' )
-                                      {
-                                          return true; // malformed — drop
-                                      }
-                                      std::string_view inner = t.substr( 1, t.size() - 2 );
-                                      for( char c : inner )
-                                      {
-                                          if( !ws( c ) )
-                                          {
-                                              return true; // non-whitespace inside → not empty → drop
-                                          }
-                                      }
-                                      return false;   // truly empty catch body → keep the finding
-                                  } ),
-                  ms.end() );
-
-        std::vector<std::string> magicFileBytes( ing.files.size() );
-        std::vector<char>        magicFileRead( ing.files.size(), 0 );
-        const auto magicBytes = [ & ]( std::uint32_t fileId ) -> const std::string&
-        {
-            if( !magicFileRead[fileId] )
-            {
-                magicFileBytes[fileId] = darkflags::readWhole( diskPath( ing, fileId ) ).value_or( std::string() );
-                magicFileRead[fileId] = 1;
-            }
-            return magicFileBytes[fileId];
-        };
-
-        // magic-number: drop literals that are:
-        //   (a) semantic -2..2 forms (universal idioms) or base-prefixed masks/protocol constants
-        //   (b) inside a const/constexpr variable initializer (that's exactly the right place for numbers)
-        //   (c) inside an enum body (enumerator values are naturally numeric)
-        // Keep only literals inside function/method bodies to limit noise.
-        // The enclosing symbol check (Function/Method) is the main guard.
-        ms.erase( std::remove_if( ms.begin(), ms.end(), [ & ]( const AstMatch& m )
-                                  {
-                                      if( m.tag != "magic-number" )
-                                      {
-                                          return false;
-                                      }
-                                      if( isUniversalOrAllowlistedNumber( m.text ) )
-                                      {
-                                          return true;
-                                      }
-                                      const std::string& src = magicBytes( m.fileId );
-                                      if( !src.empty() && isConstantInitializerNumber( src, m.startByte ) )
-                                      {
-                                          return true;
-                                      }
-                                      // must be inside a function/method body to be a magic-number finding
-                                      const Symbol* e = enclosing( m.fileId, m.startByte );
-                                      if( !e || ( e->kind != SymKind::Function && e->kind != SymKind::Method ) )
-                                      {
-                                          return true;
-                                      }
-                                      return false;   // non-trivial literal in a function body → flag it
-                                  } ),
-                  ms.end() );
-
-        // #eq? rejected unequal assignment pairs inside tree-sitter, so the remaining captures arrive as
-        // lhs/rhs twins in byte order. Collapse every complete twin pair into one finding; unlike the old
-        // (file,line) bucket this cannot cross-wire two independent assignments sharing a source line.
-        {
-            std::vector<AstMatch> saKeep;
-            std::vector<AstMatch> saCaptured;
-            for( const AstMatch& m : ms )
-            {
-                if( m.tag == "self-assign" )
-                {
-                    saCaptured.push_back( m );
-                }
-            }
-            ms.erase( std::remove_if( ms.begin(), ms.end(), []( const AstMatch& m ) { return m.tag == "self-assign"; } ), ms.end() );
-            for( std::size_t i = 0; i + 1 < saCaptured.size(); i += 2 )
-            {
-                const AstMatch& lhs = saCaptured[i];
-                const AstMatch& rhs = saCaptured[i + 1];
-                if( lhs.fileId != rhs.fileId || lhs.text != rhs.text )
-                {
-                    continue; // defensive: an incomplete/crossed capture pair is never evidence
-                }
-                const auto trim = []( std::string_view t ) -> std::string
-                {
-                    const auto ws = []( char c ) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; };
-                    while( !t.empty() && ws( t.front() ) )
-                    {
-                        t.remove_prefix( 1 );
-                    }
-                    while( !t.empty() && ws( t.back() ) )
-                    {
-                        t.remove_suffix( 1 );
-                    }
-                    return std::string( t );
-                };
-                const std::string expression = trim( lhs.text );
-                AstMatch hit;
-                hit.fileId    = lhs.fileId;
-                hit.startByte = lhs.startByte;
-                hit.endByte   = lhs.endByte;
-                hit.line      = lhs.line;
-                hit.tag       = "self-assign";
-                hit.text      = expression + " = " + expression;
-                saKeep.push_back( std::move( hit ) );
-            }
-            // Sort saKeep for determinism before appending.
-            std::sort( saKeep.begin(), saKeep.end(), [ & ]( const AstMatch& x, const AstMatch& y )
-                       {
-                if( ing.files[x.fileId] != ing.files[y.fileId] ) { return ing.files[x.fileId] < ing.files[y.fileId];
-}
-                return x.line < y.line; } );
-            for( auto& hit : saKeep )
-            {
-                ms.push_back( std::move( hit ) );
-            }
-        }
-
-        // Symbol-level checks (S6-A): walk each Function/Method body — checks that need line-counting or
-        // control-flow nesting depth, which a single tree-sitter @capture can't give without reparsing.
-        // These produce AstMatch entries (same format) so they flow into the same XML tally/listing.
-        //
-        //   large-function    — body line-span (newlines in [sigEndByte, endByte)) > 80
-        //   deep-nesting      — curly-brace nesting depth inside [sigEndByte, endByte) > 4
-        //   inconsistent-return — mix of `return;` and `return <expr>;` in the same body
-        //
-        // Note: deep-nesting uses curly-brace depth as a proxy for control-flow depth (fast, no full reparse).
-        // This correctly catches deeply nested if/for/while blocks because each adds a `{` in Allman/K&R style.
-        // It can over-report on struct-initialiser nesting — acceptable, as those are also a complexity signal.
-        { PROFILE_SCOPE_DESCRIBE( "lint: lintSymbolLevelChecks" );
-        for( AstMatch& symHit : lintSymbolLevelChecks( ing, &corpusBytes ) )
-        {
-            ms.push_back( std::move( symHit ) );
-        }
-        }
-
-        // unreachable-code (joern-lite CFG sketch): pure-syntactic intra-block dead-code — a statement
-        // after an unconditional exit (return/break/continue/throw, +Python raise) in the SAME block.
-        // Conservative: no dataflow, goto excluded, jump-target siblings stop the scan (no false positives
-        // on code reached via a label or on `if(x) return; foo();` where foo() is a reachable sibling).
-        // Already collected, sorted and capped: it rode the one grouped walk above as grouped[3] instead of
-        // spending a fourth read + parse of the whole corpus on its own pool.
-        {
-            PROFILE_SCOPE_DESCRIBE( "lint: mergeUnreachable" );
-            for( auto& h : grouped[3] )
-            {
-                ms.push_back( std::move( h ) );
-            }
-        }
-
-        // The packs that live outside this function: the atoms-of-confusion pack (src/atoms.h), the
-        // identifier-naming lens (src/naminglens.h) and the cache-friendliness pack (src/cachelint.h).
-        // Each merges its own findings, its own floor disclosures and — for the packs whose rule list is
-        // owned by the pack — its own rule names. All run here, inside the one --lint guard, so the sort
-        // below covers every built-in finding regardless of its source.
-        { PROFILE_SCOPE_DESCRIBE( "lint: mergeAtomsPack" ); mergeAtomsPack( ing, ms, saturatedRules, allRuleNames, std::move( grouped[1] ), lintMaxPerRule ); }
-        { PROFILE_SCOPE_DESCRIBE( "lint: mergeNamingLens" ); mergeNamingLens( ing, ms, saturatedRules, cfg.namingLocals, &corpusBytes, lintMaxPerRule ); }
-        { PROFILE_SCOPE_DESCRIBE( "lint: mergeCachePack" ); mergeCachePack( ing, ms, saturatedRules, allRuleNames, std::move( grouped[2] ), lintMaxPerRule ); }
-
-        // Re-sort the combined findings (AST + symbol-level) for deterministic output.
-        std::sort( ms.begin(), ms.end(), [ & ]( const AstMatch& x, const AstMatch& y )
-                   {
-            if( ing.files[x.fileId] != ing.files[y.fileId] ) { return ing.files[x.fileId] < ing.files[y.fileId];
-}
-            if( x.startByte != y.startByte ) { return x.startByte < y.startByte;
-}
-            return x.tag < y.tag; } );
-        }   // if( cfg.lint ) — built-in checks
 
         // LintOut = the unified finding shape so built-in tags and user rule ids emit identically (defined
         // at file scope, above lintSymbolLevelChecks — dedupeLintFindings shares it). sev is empty for
