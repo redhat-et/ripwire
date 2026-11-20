@@ -1135,6 +1135,253 @@ inline bool toolAllowed( const std::vector<std::string>& tools, std::string_view
     return false;
 }
 
+// Is a fence-opening language tag (the text after ``` / ~~~) a purely EXAMPLE / data marker — not executable? An empty tag
+// is a bare fence, NOT an example: its lines are live prose (see the fenced-block injection policy in scanSkillTextOn).
+inline bool isExampleFenceLang( std::string_view tag ) noexcept
+{
+    // Normalise: strip leading/trailing whitespace.
+    while( !tag.empty() && std::isspace( static_cast<unsigned char>( tag.front() ) ) )
+    {
+        tag.remove_prefix( 1 );
+    }
+    while( !tag.empty() && std::isspace( static_cast<unsigned char>( tag.back() ) ) )
+    {
+        tag.remove_suffix( 1 );
+    }
+    // Empty tag → bare fence → NOT an example fence (treat as live prose → injection may fire).
+    if( tag.empty() )
+    {
+        return false;
+    }
+    // Recognised data/example markers.
+    return tag == "text"    || tag == "example"  || tag == "output"
+        || tag == "none"    || tag == "plain"    || tag == "raw"
+        || tag == "markup"  || tag == "template";
+}
+
+// GE-SKILLSCAN: what the fence tracker says about ONE line, the two facts that steer scanSkillTextOn's body checks.
+//   inFence         command context: relaxes the two exfil context gates (fenceOnly, requiresCmdContext)
+//   inExampleFence  shown-as-data: the one fact that SUPPRESSES (injection, and the joined-body pass) — never set in a script
+struct SkillLineFence
+{
+    bool inFence        = false;
+    bool inExampleFence = false;
+};
+
+// GE-SKILLSCAN: the markdown fence tracker scanSkillTextOn walks the body with — which fenced block the scan is inside, changed
+// only by its two named transitions. readLine answers a line's membership as the state BEFORE its own marker toggles anything,
+// so the lines BETWEEN the ``` markers read inFence, the opening marker reads false and the closing one true.
+class SkillFenceTracker
+{
+public:
+    // A shell script's line (SkillFileKind::ShellScript): code on every line, never an example — a ``` in a heredoc toggles nothing.
+    static constexpr SkillLineFence kScriptLine{ /*inFence=*/true, /*inExampleFence=*/false };
+
+    // The body line's fence membership, then the transition its ``` / ~~~ marker (after leading blanks) makes.
+    SkillLineFence readLine( std::string_view line ) noexcept
+    {
+        const SkillLineFence membership = m_state;
+        while( !line.empty() && ( line.front() == ' ' || line.front() == '\t' ) )
+        {
+            line.remove_prefix( 1 );
+        }
+        if( line.size() >= 3 && ( line.compare( 0, 3, "```" ) == 0 || line.compare( 0, 3, "~~~" ) == 0 ) )
+        {
+            if( !m_state.inFence )
+            {
+                open( line.substr( 3 ) );
+            }
+            else
+            {
+                close();
+            }
+        }
+        return membership;
+    }
+
+private:
+    // Opening a new fence: its language tag (the text after the marker) decides example vs live.
+    void open( std::string_view langTag ) noexcept
+    {
+        m_state.inExampleFence = isExampleFenceLang( langTag );
+        m_state.inFence        = true;
+    }
+    // Closing the current fence.
+    void close() noexcept
+    {
+        m_state = SkillLineFence{};
+    }
+
+    SkillLineFence m_state;
+};
+
+// GE-SKILLSCAN: feed one body line to the whitespace-normalized joined-body INJECTION pass (A4-F12 §3). A phrase split across a
+// newline ("Ignore previous\ninstructions") matches nothing in the per-line scan; the line's content, whitespace runs collapsed
+// to one space and trimmed, joins `joinedBody` (space-separated), and `joinedLineOffsets` records where it starts so a cross-line
+// match can be attributed back to a real line number. A line with no content adds nothing.
+inline void appendJoinedBodyLine( std::string_view line, int lineNum, std::string& joinedBody, std::vector<std::pair<std::size_t, int>>& joinedLineOffsets )
+{
+    std::string normalized;
+    normalized.reserve( line.size() );
+    bool prevWasSpace = false;
+    for( char c : line )
+    {
+        if( std::isspace( static_cast<unsigned char>( c ) ) )
+        {
+            if( !prevWasSpace && !normalized.empty() )
+            {
+                normalized += ' ';
+            }
+            prevWasSpace = true;
+        }
+        else
+        {
+            normalized += c;
+            prevWasSpace = false;
+        }
+    }
+    while( !normalized.empty() && normalized.back() == ' ' )
+    {
+        normalized.pop_back();
+    }
+
+    if( !normalized.empty() )
+    {
+        if( !joinedBody.empty() )
+        {
+            joinedBody += ' ';
+        }
+        joinedLineOffsets.push_back( { joinedBody.size(), lineNum } );
+        joinedBody += normalized;
+    }
+}
+
+// GE-SKILLSCAN: where one scanSkillTextOn call puts its findings, and the stack its regex searches run on.
+struct SkillFindingSink
+{
+    std::vector<SkillFinding>& findings;
+    std::size_t                stackBytes;
+
+    // Add a finding with a clipped excerpt.
+    void add( SkillSeverity sev, int lineNum, const char* rule, std::string_view lineText, const char* why = nullptr ) const
+    {
+        findings.push_back( { sev, lineNum, rule, clipSkillExcerpt( lineText ), why } );
+    }
+
+    // The regex boundary's answer as a plain hit, failing CLOSED on an undecided match — the line gets a CRITICAL
+    // scan-incomplete finding (deduped per line in scanSkillTextOn), so an unscannable skill can never read "clean".
+    // Exhausted (the engine gave up mid-match) and Skipped (the line was too long to hand the engine at all,
+    // F-B3 / owner ruling 3) are both undecided and both fail closed — every line in a skill file IS installable
+    // content, so there is no WARN tier here, only CRITICAL or a real answer.
+    bool isHit( RegexVerdict verdict, int lineNum, std::string_view lineText ) const
+    {
+        if( verdict == RegexVerdict::Exhausted )
+        {
+            add( SkillSeverity::Critical, lineNum, kScanIncompleteRule, lineText );
+        }
+        else if( verdict == RegexVerdict::Skipped )
+        {
+            add( SkillSeverity::Critical, lineNum, kScanIncompleteRuleOversize, lineText );
+        }
+        return verdict == RegexVerdict::Hit;
+    }
+};
+
+// GE-SKILLSCAN: one FRONTMATTER line — the first frontmatter pattern it matches (WARN), then its first INJECTION. The
+// `description:` field is precisely the text harnesses inject into the agent's prompt — an injection phrase there is MORE
+// dangerous than one in the body, not exempt. YAML double quotes are value syntax, not a shown-as-data marker, so only
+// backtick spans suppress here.
+inline void scanFrontmatterLine( const SkillFindingSink& sink, const std::vector<FrontmatterPattern>& frontPats, const std::vector<InjectionPattern>& injPats,
+                                 int lineNum, const std::string& ln )
+{
+    for( const FrontmatterPattern& p : frontPats )
+    {
+        if( sink.isHit( skillSearch( p.re, ln, sink.stackBytes ), lineNum, ln ) )
+        {
+            sink.add( SkillSeverity::Warn, lineNum, p.rule, ln );
+            break;   // one finding per line per category
+        }
+    }
+    for( const InjectionPattern& p : injPats )
+    {
+        RegexCaptures m;
+        if( sink.isHit( skillSearch( p.re, ln, sink.stackBytes, &m ), lineNum, ln ) && !isShownAsData( ln, std::size_t( m.position( 0 ) ), /*quotesCountAsData=*/false ) )
+        {
+            sink.add( p.sev, lineNum, p.rule, ln );
+            break;   // one INJECTION finding per line
+        }
+    }
+}
+
+// GE-SKILLSCAN: one live BODY line's INJECTION (case-insensitive literal) — a bare-prose imperative NOT fully enclosed in a
+// balanced inline-code or double-quote span (isShownAsData requires a BALANCED enclosing span: open tick before pos + close
+// tick after pos on the same line, not merely an odd count of preceding ticks/quotes). The first pattern that fires wins.
+// The caller skips lines in an example-tagged fence (```text / ```example); a BARE or executable-language fence suppresses
+// nothing — a phrase like "Ignore previous instructions" inside a bare ``` block is still prose the agent reads and acts on.
+inline void scanBodyInjectionLine( const SkillFindingSink& sink, const std::vector<InjectionPattern>& injPats, int lineNum, const std::string& ln )
+{
+    for( const InjectionPattern& p : injPats )
+    {
+        RegexCaptures m;
+        if( sink.isHit( skillSearch( p.re, ln, sink.stackBytes, &m ), lineNum, ln ) && !isShownAsData( ln, std::size_t( m.position( 0 ) ) ) )
+        {
+            sink.add( p.sev, lineNum, p.rule, ln );
+            break;   // one INJECTION finding per line (highest-priority match)
+        }
+    }
+}
+
+// GE-SKILLSCAN: one BODY line's first EXFILTRATE finding. requiresCmdContext patterns (api-key, cred paths) fire only with
+// command context — a fenced run-block (`lineInFence`) or a co-occurring transmit verb; a bare prose mention of a credential is
+// documentation. fenceOnly patterns (net-exfil) fire only inside a fenced code block — see buildExfilPatterns().
+inline void scanBodyExfilLine( const SkillFindingSink& sink, const std::vector<ExfilPattern>& exfilPats, int lineNum, const std::string& ln, bool lineInFence )
+{
+    for( const ExfilPattern& p : exfilPats )
+    {
+        // net-exfil: gradeNetExfil decides firing (a destination required, R1; a sensitive read into an upload
+        // fires with or without the var-or-base64 shape, R2) and grade together — see there.
+        const NetExfilGrade netGrade = p.isNetExfilShape ? gradeNetExfil( ln ) : NetExfilGrade{ false, SkillSeverity::Info, nullptr };
+        const bool matched = p.isNetExfilShape ? netGrade.fires : sink.isHit( skillSearch( p.re, ln, sink.stackBytes ), lineNum, ln );
+        if( !matched )
+        {
+            continue;
+        }
+        if( p.fenceOnly && !lineInFence )
+        {
+            continue;
+        }
+        if( p.requiresCmdContext && !( lineInFence || sink.isHit( hasTransmitVerb( ln, sink.stackBytes ), lineNum, ln ) ) )
+        {
+            continue;
+        }
+        // #353: net-exfil's shape is a verb plus ANY var; only a credential-shaped source or a sensitive read into the
+        // upload makes it CRITICAL (gradeNetExfil). Every other pattern here is CRITICAL as matched.
+        sink.add( p.isNetExfilShape ? netGrade.sev : SkillSeverity::Critical, lineNum, p.rule, ln, p.isNetExfilShape ? netGrade.why : nullptr );
+        break;   // one EXFILTRATE finding per line
+    }
+}
+
+// GE-SKILLSCAN: the SCOPE-CREEP check of one BODY line, for a skill whose allowed-tools are listed and leave Bash out (the
+// caller decides that). Conservative: WARN, not CRITICAL, and only when the line looks like an actual shell command
+// instruction — one of:
+//   1. a fenced ```bash / ```sh / ```shell / ```zsh block header
+//   2. a line starting with $ (interactive-shell style)
+//   3. a line containing curl/wget/nc (network tools — likely a shell instruction)
+inline void scanScopeCreepLine( const SkillFindingSink& sink, int lineNum, const std::string& ln )
+{
+    const std::string_view lv = trimRight( ln );
+    // ^…$ with a search is the whole-string match the old regex_match asked for: `lv` holds one line, no '\n'.
+    static const RegexCompile kBashFenceRe = compileGuardedRegex( R"(^```\s*(bash|sh|shell|zsh)\s*$)", kRegexEcmaScript );
+    static const RegexCompile kNetToolRe   = compileGuardedRegex( R"(\b(curl|wget|nc)\b)", kRegexEcmaScript );
+    const bool isShellFence     = sink.isHit( skillSearch( kBashFenceRe, lv, sink.stackBytes ), lineNum, ln );
+    const bool startsWithDollar = !lv.empty() && lv[0] == '$';
+    const bool hasNetTool       = sink.isHit( skillSearch( kNetToolRe, lv, sink.stackBytes ), lineNum, ln );
+    if( isShellFence || startsWithDollar || hasNetTool )
+    {
+        sink.add( SkillSeverity::Warn, lineNum, kScopeCreepRule, ln );
+    }
+}
+
 }   // namespace detail
 
 // F-B3 (owner ruling 3): a directory walk that gave up before every entry under it was visited, over content
@@ -1240,28 +1487,8 @@ inline std::vector<SkillFinding> scanSkillTextOn( std::string_view text, std::si
     const std::vector<std::string> allowedTools = parseAllowedTools( lines, frontmatterEnd );
     const bool                      bashAllowed  = toolAllowed( allowedTools, "Bash" );
 
-    // helper: add a finding with a clipped excerpt
-    const auto addFinding = [ & ]( SkillSeverity sev, int lineNum, const char* rule, std::string_view lineText, const char* why = nullptr )
-    {
-        findings.push_back( { sev, lineNum, rule, clipSkillExcerpt( lineText ), why } );
-    };
-    // helper: the regex boundary's answer as a plain hit, failing CLOSED on an undecided match — the line gets a
-    // CRITICAL scan-incomplete finding (deduped per line below), so an unscannable skill can never read "clean".
-    // Exhausted (the engine gave up mid-match) and Skipped (the line was too long to hand the engine at all,
-    // F-B3 / owner ruling 3) are both undecided and both fail closed — every line in a skill file IS installable
-    // content, so there is no WARN tier here, only CRITICAL or a real answer.
-    const auto isHit = [ & ]( RegexVerdict verdict, int lineNum, std::string_view lineText )
-    {
-        if( verdict == RegexVerdict::Exhausted )
-        {
-            addFinding( SkillSeverity::Critical, lineNum, kScanIncompleteRule, lineText );
-        }
-        else if( verdict == RegexVerdict::Skipped )
-        {
-            addFinding( SkillSeverity::Critical, lineNum, kScanIncompleteRuleOversize, lineText );
-        }
-        return verdict == RegexVerdict::Hit;
-    };
+    // Every finding of this call goes through the sink: add() clips the excerpt, isHit() fails CLOSED on an undecided regex match.
+    const SkillFindingSink sink{ findings, stackBytes };
 
     // ── fenced-block injection suppression policy ─────────────────────────────────────────────────
     //
@@ -1282,29 +1509,7 @@ inline std::vector<SkillFinding> scanSkillTextOn( std::string_view text, std::si
     // The `requiresCmdContext` EXFIL patterns already need the line to be in a fence (command context) to
     // fire — so EXFIL detection keeps its original lineInFence gate (commands in fences are real).
     // INJECTION detection uses `lineInExampleFence` for its suppression (not lineInFence).
-
-    // Returns true if the given fence-opening language tag is a purely-example/data marker (not executable).
-    const auto isExampleFenceLang = []( std::string_view tag ) noexcept -> bool
-    {
-        // Normalise: strip leading/trailing whitespace.
-        while( !tag.empty() && std::isspace( static_cast<unsigned char>( tag.front() ) ) )
-        {
-            tag.remove_prefix( 1 );
-        }
-        while( !tag.empty() && std::isspace( static_cast<unsigned char>( tag.back() ) ) )
-        {
-            tag.remove_suffix( 1 );
-        }
-        // Empty tag → bare fence → NOT an example fence (treat as live prose → injection may fire).
-        if( tag.empty() )
-        {
-            return false;
-        }
-        // Recognised data/example markers.
-        return tag == "text"    || tag == "example"  || tag == "output"
-            || tag == "none"    || tag == "plain"    || tag == "raw"
-            || tag == "markup"  || tag == "template";
-    };
+    // detail::SkillFenceTracker carries the fence state across lines; detail::isExampleFenceLang reads an opening tag.
 
     // Accumulator for the whitespace-normalized joined-body INJECTION pass (A4-F12 §3): the body's
     // non-example-fence lines, whitespace-collapsed and space-joined, plus each line's start offset in the
@@ -1313,8 +1518,7 @@ inline std::vector<SkillFinding> scanSkillTextOn( std::string_view text, std::si
     std::vector<std::pair<std::size_t,int>>  joinedLineOffsets;
 
     // ── scan each line ────────────────────────────────────────────────────────────────────────────
-    bool inFence        = false;   // inside a ``` / ~~~ fenced code block
-    bool inExampleFence = false;   // inside a fence whose lang tag marks it as an EXAMPLE (data, not live)
+    SkillFenceTracker fences;
     for( int i = 0; i < int( lines.size() ); ++i )
     {
         const int          lineNum = i + 1;        // 1-based
@@ -1322,186 +1526,29 @@ inline std::vector<SkillFinding> scanSkillTextOn( std::string_view text, std::si
         const bool         inFront = ( frontmatterEnd > 0 && i > 0 && i < frontmatterEnd );
         const bool         inBody  = !inFront && ( frontmatterEnd == 0 || i >= frontmatterEnd );
 
-        // fenced-code membership of THIS line is the state BEFORE a marker toggles it, so command lines
-        // BETWEEN the ``` markers read lineInFence==true while the markers themselves read false.
-        bool lineInFence        = false;
-        bool lineInExampleFence = false;
-        if( inBody && wholeFileIsCode )
-        {
-            lineInFence = true;   // a shell script is code on every line: a ``` in a heredoc toggles nothing
-        }
-        else if( inBody )
-        {
-            lineInFence        = inFence;
-            lineInExampleFence = inExampleFence;
-            std::string_view lv = ln;
-            while( !lv.empty() && ( lv.front() == ' ' || lv.front() == '\t' ) )
-            {
-                lv.remove_prefix( 1 );
-            }
-            if( lv.size() >= 3 && ( lv.compare( 0, 3, "```" ) == 0 || lv.compare( 0, 3, "~~~" ) == 0 ) )
-            {
-                if( !inFence )
-                {
-                    // Opening a new fence: extract the language tag (text after the marker).
-                    std::string_view marker = lv.compare( 0, 3, "```" ) == 0 ? "```" : "~~~";
-                    std::string_view langTag = lv.substr( marker.size() );
-                    inExampleFence = isExampleFenceLang( langTag );
-                    inFence = true;
-                }
-                else
-                {
-                    // Closing the current fence.
-                    inFence        = false;
-                    inExampleFence = false;
-                }
-            }
-        }
+        // fenced-code membership of THIS line (SkillFenceTracker::readLine): none outside the body
+        const SkillLineFence fence              = !inBody ? SkillLineFence{} : wholeFileIsCode ? SkillFenceTracker::kScriptLine : fences.readLine( ln );
+        const bool           lineInFence        = fence.inFence;
+        const bool           lineInExampleFence = fence.inExampleFence;
 
         if( inFront )
         {
-            // ── FRONTMATTER checks ────────────────────────────────────────────────────────────────
-            for( const FrontmatterPattern& p : frontPats )
-            {
-                if( isHit( skillSearch( p.re, ln, stackBytes ), lineNum, ln ) )
-                {
-                    addFinding( SkillSeverity::Warn, lineNum, p.rule, ln );
-                    break;   // one finding per line per category
-                }
-            }
-
-            // ── INJECTION in frontmatter ──────────────────────────────────────────────────────────
-            // The `description:` field is precisely the text harnesses inject into the agent's prompt —
-            // an injection phrase there is MORE dangerous than one in the body, not exempt. YAML double
-            // quotes are value syntax, not a shown-as-data marker, so only backtick spans suppress here.
-            for( const InjectionPattern& p : injPats )
-            {
-                RegexCaptures m;
-                if( isHit( skillSearch( p.re, ln, stackBytes, &m ), lineNum, ln ) && !isShownAsData( ln, std::size_t( m.position( 0 ) ), /*quotesCountAsData=*/false ) )
-                {
-                    addFinding( p.sev, lineNum, p.rule, ln );
-                    break;   // one INJECTION finding per line
-                }
-            }
+            scanFrontmatterLine( sink, frontPats, injPats, lineNum, ln );   // ── FRONTMATTER checks, INJECTION in frontmatter
         }
 
         if( inBody )
         {
-            // ── INJECTION (case-insensitive literal) ──────────────────────────────────────────────
-            // Flag a bare-prose imperative: NOT inside an example-tagged fence (```text / ```example),
-            // and NOT fully enclosed in a balanced inline-code or double-quote span.
-            //
-            // A BARE fence (no lang tag) or an executable-language fence does NOT suppress injection
-            // detection — a phrase like "Ignore previous instructions" inside a bare ``` block is still
-            // prose the agent reads and acts on.  Only ```text / ```example / similar data-marker fences
-            // represent "shown as data".
-            //
-            // isShownAsData now requires a BALANCED enclosing span (open tick before pos + close tick
-            // after pos on the same line), not merely an odd count of preceding ticks/quotes.
             if( !lineInExampleFence )
             {
-                for( const InjectionPattern& p : injPats )
-                {
-                    RegexCaptures m;
-                    if( isHit( skillSearch( p.re, ln, stackBytes, &m ), lineNum, ln ) && !isShownAsData( ln, std::size_t( m.position( 0 ) ) ) )
-                    {
-                        addFinding( p.sev, lineNum, p.rule, ln );
-                        break;   // one INJECTION finding per line (highest-priority match)
-                    }
-                }
-
-                // ── feed the whitespace-normalized joined-body pass (A4-F12 §3) ──────────────────────
-                // A phrase split across a newline ("Ignore previous\ninstructions") matches nothing in the
-                // per-line scan above. Collect this line's content (whitespace runs collapsed to one space)
-                // into a single joined buffer scanned separately after this loop, recording where each
-                // line's content starts in the buffer so a cross-line match can be attributed back to a
-                // real line number. Lines inside an example fence are excluded here too — same policy as
-                // the per-line scan just above.
-                std::string normalized;
-                normalized.reserve( ln.size() );
-                bool prevWasSpace = false;
-                for( char c : ln )
-                {
-                    if( std::isspace( static_cast<unsigned char>( c ) ) )
-                    {
-                        if( !prevWasSpace && !normalized.empty() )
-                        {
-                            normalized += ' ';
-                        }
-                        prevWasSpace = true;
-                    }
-                    else
-                    {
-                        normalized += c;
-                        prevWasSpace = false;
-                    }
-                }
-                while( !normalized.empty() && normalized.back() == ' ' )
-                {
-                    normalized.pop_back();
-                }
-
-                if( !normalized.empty() )
-                {
-                    if( !joinedBody.empty() )
-                    {
-                        joinedBody += ' ';
-                    }
-                    joinedLineOffsets.push_back( { joinedBody.size(), lineNum } );
-                    joinedBody += normalized;
-                }
+                scanBodyInjectionLine( sink, injPats, lineNum, ln );   // ── INJECTION: suppressed only in an example-tagged fence
+                // ── feed the whitespace-normalized joined-body pass (A4-F12 §3) — lines inside an example fence are
+                // excluded here too, the same policy as the per-line scan just above.
+                appendJoinedBodyLine( ln, lineNum, joinedBody, joinedLineOffsets );
             }
-
-            // ── EXFILTRATE (regex) ────────────────────────────────────────────────────────────────
-            // requiresCmdContext patterns (api-key, cred paths) fire only with command context — a fenced
-            // run-block or a co-occurring transmit verb. A bare prose mention of a credential is documentation.
-            // fenceOnly patterns (net-exfil) fire only inside a fenced code block — see buildExfilPatterns().
-            for( const ExfilPattern& p : exfilPats )
-            {
-                // net-exfil: gradeNetExfil decides firing (a destination required, R1; a sensitive read into an upload
-                // fires with or without the var-or-base64 shape, R2) and grade together — see there.
-                const NetExfilGrade netGrade = p.isNetExfilShape ? gradeNetExfil( ln ) : NetExfilGrade{ false, SkillSeverity::Info, nullptr };
-                const bool matched = p.isNetExfilShape ? netGrade.fires : isHit( skillSearch( p.re, ln, stackBytes ), lineNum, ln );
-                if( !matched )
-                {
-                    continue;
-                }
-                if( p.fenceOnly && !lineInFence )
-                {
-                    continue;
-                }
-                if( p.requiresCmdContext && !( lineInFence || isHit( hasTransmitVerb( ln, stackBytes ), lineNum, ln ) ) )
-                {
-                    continue;
-                }
-                // #353: net-exfil's shape is a verb plus ANY var; only a credential-shaped source or a sensitive read into the
-                // upload makes it CRITICAL (gradeNetExfil). Every other pattern here is CRITICAL as matched.
-                addFinding( p.isNetExfilShape ? netGrade.sev : SkillSeverity::Critical, lineNum, p.rule, ln, p.isNetExfilShape ? netGrade.why : nullptr );
-                break;   // one EXFILTRATE finding per line
-            }
-
-            // ── SCOPE-CREEP check ─────────────────────────────────────────────────────────────────
-            // Conservative: only flag if Bash is definitely not allowed AND the line looks like
-            // an actual shell command instruction (starts after a backtick fence, or literally
-            // starts with $, or contains `curl`/`wget`/`nc` in an imperative-looking context).
-            // We flag WARN, not CRITICAL.
+            scanBodyExfilLine( sink, exfilPats, lineNum, ln, lineInFence );   // ── EXFILTRATE (regex)
             if( !bashAllowed && !allowedTools.empty() )
             {
-                const std::string_view lv = trimRight( ln );
-                // Indicators: a line that starts an executable shell context:
-                //   1. Inside a fenced ```bash / ```sh / ```shell block header
-                //   2. Line starts with $ (interactive-shell style)
-                //   3. Line contains curl/wget/nc (network tools — likely a shell instruction)
-                // ^…$ with a search is the whole-string match the old regex_match asked for: `lv` holds one line, no '\n'.
-                static const RegexCompile kBashFenceRe = compileGuardedRegex( R"(^```\s*(bash|sh|shell|zsh)\s*$)", kRegexEcmaScript );
-                static const RegexCompile kNetToolRe   = compileGuardedRegex( R"(\b(curl|wget|nc)\b)", kRegexEcmaScript );
-                const bool isShellFence     = isHit( skillSearch( kBashFenceRe, lv, stackBytes ), lineNum, ln );
-                const bool startsWithDollar = !lv.empty() && lv[0] == '$';
-                const bool hasNetTool       = isHit( skillSearch( kNetToolRe, lv, stackBytes ), lineNum, ln );
-                if( isShellFence || startsWithDollar || hasNetTool )
-                {
-                    addFinding( SkillSeverity::Warn, lineNum, kScopeCreepRule, ln );
-                }
+                scanScopeCreepLine( sink, lineNum, ln );   // ── SCOPE-CREEP: Bash definitely not allowed
             }
         }
     }
@@ -1569,9 +1616,9 @@ inline std::vector<SkillFinding> scanSkillTextOn( std::string_view text, std::si
         if( verdict == RegexVerdict::Exhausted || verdict == RegexVerdict::Skipped )
         {
             // the joined window has no one line to blame: attribute the unscannable pass to the window's first line
-            addFinding( SkillSeverity::Critical, joinedLineOf( windowBegin ),
-                        verdict == RegexVerdict::Exhausted ? kScanIncompleteRule : kScanIncompleteRuleOversize,
-                        "the whitespace-joined body (cross-line injection pass)" );
+            sink.add( SkillSeverity::Critical, joinedLineOf( windowBegin ),
+                      verdict == RegexVerdict::Exhausted ? kScanIncompleteRule : kScanIncompleteRuleOversize,
+                      "the whitespace-joined body (cross-line injection pass)" );
             continue;
         }
         if( verdict != RegexVerdict::Hit )
@@ -1583,7 +1630,7 @@ inline std::vector<SkillFinding> scanSkillTextOn( std::string_view text, std::si
         {
             continue;
         }
-        addFinding( p.sev, joinedLineOf( pos ), p.rule, m.str( 0 ) );
+        sink.add( p.sev, joinedLineOf( pos ), p.rule, m.str( 0 ) );
     }
 
     // ── sort by (line, rule, worst severity first) for deterministic output, then dedupe on (line, rule) ────────────────
