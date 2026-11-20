@@ -2101,7 +2101,7 @@ ULEG="$( cd "$WORK/uas" && "$BIN" . --quality-delta --no-cache --legend=full 2>/
 if [ "$xrc" -le 2 ] && printf '%s' "$ULEG" | grep -q 'unhandled-arm: a classifier over a closed set' && printf '%s' "$ULEG" | grep -q 'why= what is left without an outcome'; then ok "$L: the full legend defines unhandled-arm and why="
 else no "$L: the full legend does not define unhandled-arm / why="; fi
 UCLEG="$( cd "$WORK/uas" && "$BIN" . --quality-delta --no-cache --legend=compact 2>/dev/null )"; xrc=$?
-if [ "$xrc" -le 2 ] && printf '%s' "$UCLEG" | grep -q 'r why=: what an unhandled-arm row'; then ok "$L: the compact legend defines r why="; else no "$L: the compact legend does not define r why="; fi
+if [ "$xrc" -le 2 ] && printf '%s' "$UCLEG" | grep -q "an unhandled-arm row's values with no outcome"; then ok "$L: the compact legend defines r why="; else no "$L: the compact legend does not define r why="; fi
 FLEG="$( cd "$WORK/fmt_cpp" && "$BIN" . --quality-delta --no-cache --legend=full 2>/dev/null )"; xrc=$?
 if [ "$xrc" -le 2 ] && printf '%s' "$FLEG" | grep -q '<quality-delta ' && ! printf '%s' "$FLEG" | grep -q 'unhandled-arm: a classifier'; then ok "$L: an answer with no unhandled-arm row carries no unhandled-arm legend"
 else no "$L: the unhandled-arm legend rides on an answer without the row (or the run failed)"; fi
