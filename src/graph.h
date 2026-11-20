@@ -10712,25 +10712,112 @@ inline bool pythonScopePinAt( const PythonLexicalScopes& scopes, const IngestRes
     return cand.empty() && !scopes.empty() && isPythonBareCall( r ) && pythonLexicalScopePin( scopes, ing, r, moduleUnread, cand );
 }
 
+// QUAL-NS-CALL-BIND: what canonicalCallQualifier reads beyond the call — built once, before the resolve loop
+struct CallScopeLookup
+{
+    const CallResultTypes&                               types;        // cppScopeNamedAt: the declaration in force at the site
+    const std::vector<Symbol>&                           symbols;
+    const CanonicalScopes&                               canon;        // byScope: what a scope spelled `q` holds; narrower + chaUp: the CHA walk
+    const ClassIdentity&                                 classIds;     // the caller's class chain; a bodiless member's "Scope::name"
+    const FalseEdgeRules&                                falseEdges;   // a local the caller declares
+    const HashMap<std::string, rw::SmallVec<NodeId, 2>>& byName;       // the callee's in-tree namesakes
+    mutable std::string                                  key;          // "Scope::name" buffer
+};
+
+// a scope spelled `scope` holds `name` itself: a definition (byScope) or a bodiless member declaration (ClassIdentity::declared)
+inline bool scopeHoldsName( const CallScopeLookup& at, std::string_view scope, std::string_view name )
+{
+    at.key.assign( scope ).append( "::" ).append( name );
+    return at.canon.byScope.contains( at.key ) || at.classIds.declared.contains( at.key );
+}
+
+// C++ unqualified lookup walks outward from the call — the caller's class (with its bases), each enclosing class, then the
+// enclosing namespaces — and stops at the first scope that declares the name, so a using-declaration OUTSIDE the caller's
+// body is found only when none of them does. True when one does, or MAY: the class chain is read (ClassIdentity), but no
+// namespace path is recorded while the C++ family is off (card CPP-HDR-NS-USING), so a caller that may sit in a namespace,
+// beside an in-tree namespace-scope namesake the declaration does not name, keeps the base reading (a hedge, never a guess).
+// A namesake at global scope competes only with a file-scope declaration (one scope: an overload set C++ resolves).
+inline bool callerScopesMayDeclare( const Reference& r, const CallResultTypes::CppNamedScope& named, const CallScopeLookup& at )
+{
+    const Narrower&        narrower  = at.canon.narrower;
+    const bool             hasCaller = r.fromSymbol < at.symbols.size();
+    const std::string_view own       = hasCaller ? std::string_view( at.symbols[ r.fromSymbol ].scope ) : std::string_view{};
+    if( !own.empty() && ( narrower.methodOnTypeOrBases( own, r, at.canon.chaUp ) != nullptr || scopeHoldsName( at, own, r.calleeName ) ) )
+    {
+        return true;   // the caller's own scope: its class or a base, its namespace
+    }
+    const auto ownerOf = [ & ]( NodeId id ) { return id < at.classIds.ownerClass.size() ? at.classIds.ownerClass[ id ] : kNoNode; };
+    NodeId     cls     = hasCaller ? ownerOf( r.fromSymbol ) : kNoNode;
+    const bool member  = cls != kNoNode;
+    for( int depth = 0; cls != kNoNode; ++depth )
+    {
+        const std::string& name = at.symbols[ cls ].name;
+        if( depth == 16 || narrower.methodOnTypeOrBases( name, r, at.canon.chaUp ) != nullptr || scopeHoldsName( at, name, r.calleeName ) )
+        {
+            return true;   // an enclosing class (or its base) declares it — or the chain is deeper than read
+        }
+        cls = cls < at.classIds.enclosingClass.size() ? at.classIds.enclosingClass[ cls ] : kNoNode;
+    }
+    const bool mayBeInNamespace = member || !own.empty();   // a class's namespace is not recorded either
+    const auto namesakes        = at.byName.find( r.calleeName );
+    if( namesakes == at.byName.end() )
+    {
+        return false;
+    }
+    for( NodeId c : namesakes->second )
+    {
+        const Symbol& s = at.symbols[ c ];
+        if( !langCompatible( s.lang, r.lang ) || s.kind == SymKind::Method || ownerOf( c ) != kNoNode )
+        {
+            continue;   // another language's, or a member of a class the walk above did not reach: unqualified lookup never finds it
+        }
+        const std::size_t      sep  = namesplit::lastTopLevelScopeSep( s.scope );
+        const std::string_view last = sep == std::string_view::npos ? std::string_view( s.scope ) : std::string_view( s.scope ).substr( sep + 2 );
+        if( !s.scope.empty() && last == named.scope )
+        {
+            continue;   // what the declaration names
+        }
+        if( s.scope.empty() ? named.fileScope() : mayBeInNamespace )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 // QUAL-NS-CALL-BIND: the qualifier the canonical tier keys call `r` by. A C++ call whose scope a declaration in force names
-// (CallResultTypes::cppScopeNamedAt) is keyed by that scope: an alias shadows the qualifier it spells (`namespace h = rw::hashutil;`
-// makes `h::f()` hashutil's), and a using-declaration (`using rw::hashutil::f;`) gives a bare `f()` its scope unless the caller's
-// own scope or a base declares the name (C++ lookup finds that one first). No such declaration, two that
-// disagree, a member call or a non-call: the written qualifier, as before.
-inline std::string_view canonicalCallQualifier( const Reference& r, const CallResultTypes& types, const IngestResult& ing, const Narrower& narrower, const ChaUpNames& chaUp )
+// (CallResultTypes::cppScopeNamedAt) is keyed by that scope, unless C++ lookup may find something else first — then the
+// written qualifier, the base reading:
+//   * an alias shadows the qualifier it spells (`namespace h = rw::hashutil;` makes `h::f()` hashutil's), unless a scope
+//     spelled `h` holds an `f` itself: the Reference keeps one segment, so `gamma::h::f()` or a nested class `S::h` may be
+//     the one the call writes;
+//   * a using-declaration (`using rw::hashutil::f;`) gives a bare `f()` its scope, unless the caller declares a local `f`
+//     (a lambda, a parameter), or — for a declaration outside the caller's own body — a scope between them may declare `f`
+//     (callerScopesMayDeclare). A block-scope declaration in the caller's body is found before any class or namespace.
+// No such declaration, two that disagree, a member call or a non-call: the written qualifier, as before.
+inline std::string_view canonicalCallQualifier( const Reference& r, const CallScopeLookup& at )
 {
     if( r.role != RefRole::Call || isMemberCallRef( r ) )
     {
         return r.qualifier;
     }
-    const std::string_view declScope = types.cppScopeNamedAt( r );
-    if( declScope.empty() || !r.qualifier.empty() )
+    const CallResultTypes::CppNamedScope named = at.types.cppScopeNamedAt( r );
+    if( named.scope.empty() )
     {
-        return declScope.empty() ? std::string_view( r.qualifier ) : declScope;
+        return r.qualifier;
     }
-    // the caller's own scope (its class or a base, its namespace) declares the name: C++ lookup finds that one first
-    const std::string_view callerScope = r.fromSymbol < ing.symbols.size() ? std::string_view( ing.symbols[ r.fromSymbol ].scope ) : std::string_view{};
-    return !callerScope.empty() && narrower.methodOnTypeOrBases( callerScope, r, chaUp ) != nullptr ? std::string_view( r.qualifier ) : declScope;
+    if( !r.qualifier.empty() )
+    {
+        return scopeHoldsName( at, r.qualifier, r.calleeName ) ? std::string_view( r.qualifier ) : named.scope;
+    }
+    if( ( at.falseEdges.localEvidenceOfCaller( r ) & kLocalNameDeclared ) != 0 )
+    {
+        return r.qualifier;
+    }
+    const bool hasCaller    = r.fromSymbol < at.symbols.size();
+    const bool inCallerBody = hasCaller && !named.fileScope() && at.symbols[ r.fromSymbol ].sigStartByte <= named.spanStart
+                           && named.spanEnd <= at.symbols[ r.fromSymbol ].endByte;
+    return inCallerBody || !callerScopesMayDeclare( r, named, at ) ? named.scope : std::string_view( r.qualifier );
 }
 
 inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = nullptr, bool census = false )
@@ -12319,6 +12406,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     }
     {
         PROFILE_SCOPE_DESCRIBE( "buildGraph/3: resolve loop (per reference)" );
+    const CanonicalScopes canonScopes { canonByName, canonFamilyByName, specializationsWithBases, narrower, chaUp, ing.symbols };
+    const CallScopeLookup callScopes { recvEv.types, ing.symbols, canonScopes, classIds, falseEdges, byName, {} };   // QUAL-NS-CALL-BIND
     const MdLinkPins                mdLinks    = bindMarkdownLinks( ing );   // empty unless the tree holds a cross-file markdown link
     const std::vector<NodeId>&     mdLinkPin  = mdLinks.pin;
     const std::vector<char>&       mdSlugMiss = mdLinks.slugMiss;
@@ -12612,11 +12701,12 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // No answer leaves `cand` empty, so the bare-name ladder decides exactly as it did before the family fallback,
         // and no family answer ever reaches a same-named definition outside the template.
         // QUAL-NS-CALL-BIND: a C++ declaration in force may name the call's scope (canonicalCallQualifier)
-        const std::string_view canonQualifier = scipPinned ? std::string_view( r.qualifier ) : canonicalCallQualifier( r, recvEv.types, ing, narrower, chaUp );
+        const std::string_view canonQualifier = scipPinned ? std::string_view( r.qualifier ) : canonicalCallQualifier( r, callScopes );
+        bool                   templateFamily = false;   // F4: the tier answered from a template family, its primary included
         if( !scipPinned && r.lang != Lang::Elixir && !canonQualifier.empty() )
         {
-            appendCanonicalCandidates( cand, qkey, canonQualifier, r, CanonicalScopes { canonByName, canonFamilyByName, specializationsWithBases, narrower, chaUp, ing.symbols },
-                                       [ & ]( NodeId c ) { return langCompatible( symLang[ c ], r.lang ) && sameRoot( c, r.fileId ); } );
+            templateFamily = appendCanonicalCandidates( cand, qkey, canonQualifier, r, canonScopes,
+                                                        [ & ]( NodeId c ) { return langCompatible( symLang[ c ], r.lang ) && sameRoot( c, r.fileId ); } );
             canonical = !cand.empty();
         }
         // RUST-PATH-OWNER (receiverevidence.h pathOwners, the Rust arm rustPathOwners): the tier matched a Rust path's scope NAME; the type the path resolves to
@@ -13941,7 +14031,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         if( !scipPinned && !bindingPinned && r.lang != Lang::Elixir && tier.size() > 1 && !ing.symbols[ r.fromSymbol ].scope.empty()
          && r.recv != RecvKind::FieldOfThis && r.recv != RecvKind::FieldOfVar && r.recv != RecvKind::SuperObj && !identityClaim
          && !isJsTsLitRecv( r.recv ) && r.recv != RecvKind::JavaTypeCandidate && !nameOnly   // FE-B: a name-only call keeps every candidate
-         && rustPath != ReceiverEvidence::PathOwners::Split )   // RUST-PATH-OWNER: same-named types the path cannot tell apart are a genuine split (#74)
+         && rustPath != ReceiverEvidence::PathOwners::Split   // RUST-PATH-OWNER: same-named types the path cannot tell apart are a genuine split (#74)
+         && !templateFamily )   // QUAL-NS-CALL-BIND F4: which member of a template family a dependent `Traits<T>::f()` reaches is T's to say, not locality's
         {
             const std::string& callerCanon = g.localityKeyAt( r.fromSymbol );   // == canonId here (the caller is scoped)
             const std::size_t localityCap = receiverLocalityCap( r, receiverTypeNarrowed, ing.files[ ing.symbols[ r.fromSymbol ].fileId ] );

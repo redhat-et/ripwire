@@ -9823,8 +9823,11 @@ inline void widenToTemplateFamilies( CandidateSink<Admit>& sink, std::string& ke
 // same-named definition outside the template. `key` is the caller's reused buffer.
 // `qualifier` is the call's written one, or the scope a declaration in force names for it (QUAL-NS-CALL-BIND: graph.h, from
 // CallResultTypes::cppScopeNamedAt).
+// Returns true when the answer is a template family's with its primary among the candidates (QUAL-NS-CALL-BIND F4): the
+// caller keeps that split whole — the S6-C locality tie-break must not drop the primary, whose nested-class scope text
+// (`Traits`) shares less with the caller than an out-of-line specialization's (`ThriftValue::Traits<bool>`) does.
 template< class Admit >
-inline void appendCanonicalCandidates( std::vector<NodeId>& cand, std::string& key, std::string_view qualifier, const Reference& r, const CanonicalScopes& scopes,
+inline bool appendCanonicalCandidates( std::vector<NodeId>& cand, std::string& key, std::string_view qualifier, const Reference& r, const CanonicalScopes& scopes,
                                        Admit&& admit )
 {
     CandidateSink<Admit> sink { cand, cand.size(), admit };
@@ -9836,16 +9839,18 @@ inline void appendCanonicalCandidates( std::vector<NodeId>& cand, std::string& k
     }
     if( cand.size() != sink.before || !appendTemplateFamilyKey( key, qualifier, r.calleeName ) )
     {
-        return;
+        return false;
     }
     key.assign( 1, '\x01' ).append( qualifier );
-    const bool existingSpecialization = scopes.byFamily.find( key ) != scopes.byFamily.end() || scopes.chaUp.find( std::string( qualifier ) ) != scopes.chaUp.end();
+    bool existingSpecialization = scopes.byFamily.find( key ) != scopes.byFamily.end();
+    key.assign( qualifier );   // chaUp is not a transparent map: the reused buffer, not a per-call std::string
+    existingSpecialization = existingSpecialization || scopes.chaUp.find( key ) != scopes.chaUp.end();
     const std::string_view family = existingSpecialization ? qualifier : namesplit::stripTemplateArgs( qualifier );
     sink.add( scopes.narrower.methodOnTypeOrBases( family, r, scopes.chaUp, /*skipSelf=*/existingSpecialization, /*unionOnMulti=*/true ) );
     const bool primarySupplies = cand.size() != sink.before;
     if( existingSpecialization && !primarySupplies )
     {
-        return;
+        return false;
     }
     if( !existingSpecialization )
     {
@@ -9854,9 +9859,10 @@ inline void appendCanonicalCandidates( std::vector<NodeId>& cand, std::string& k
     if( !primarySupplies && cand.size() < sink.before + 2 )
     {
         cand.resize( sink.before );   // a lone specialization with no visible primary member is no answer (see above)
-        return;
+        return false;
     }
     widenToTemplateFamilies( sink, key, r, scopes );
+    return primarySupplies && cand.size() > sink.before + 1;
 }
 
 }   // namespace rw
