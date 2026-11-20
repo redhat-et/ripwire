@@ -361,6 +361,7 @@ for _g in \
     canoncheck \
     capdisclosemapcheck \
     capdisclosurecheck \
+    cappedbodycheck \
     capsweepcheck \
     ccheck \
     ccjsoncheck \
