@@ -980,9 +980,9 @@ struct CallResultTypes
         {
             return kNoNode;
         }
-        const std::string_view dir = dirOf( ing.symbols[ witness ].fileId );
-        NodeId                 declared = kNoNode;
-        return classesNamed( cls, CallResultFamily::Go, [ & ]( NodeId c ) { return dirOf( ing.symbols[ c ].fileId ) == dir; }, declared ) == 0 ? witness : kNoNode;
+        // any kept directory that DECLARES the name decides (an ambiguous declaration stays ambiguous), not just the witness's
+        NodeId declared = kNoNode;
+        return classesNamed( cls, CallResultFamily::Go, [ & ]( NodeId c ) { return keep( ing.symbols[ c ].fileId ); }, declared ) == 0 ? witness : kNoNode;
     }
     // the build, after every noteClass: `method` has the Go receiver type `recvType` — kept once per package directory (binding
     // order), and only where that directory declares no class of the name, so a tree that holds its declarations keeps no row
