@@ -1396,6 +1396,14 @@ Discloses: **none**
 | `kMaxLineLen` | `2000` | BOUNDARY | a line this long is generated/vendored, not a rename site |
 | `kMinIdentLen` | `2` | BOUNDARY | — |
 
+### `src/repeateddecision.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kFixConditionMaxBytes` | `60` | — | the condition as quoted in fix=, whitespace collapsed |
+
 ### `src/resolve.h`
 
 Discloses: **none**

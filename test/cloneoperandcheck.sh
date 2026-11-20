@@ -38,7 +38,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home" TMPDIR="$TMP"; mkdir -p "$HOME"
 fail=0; seen=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -433,7 +433,7 @@ mkrepo()
 }
 qd(){ "$BIN" "$TMP/$1" --quality-delta --no-cache 2>/dev/null; }   # status: exits 0 or 2 (gating) by design; the row is the verdict
 # row <repo> <member substring>: the duplication row naming it, one line, or empty
-row(){ qd "$1" | tr '<' '\n' | grep '^r kind="duplication"' | grep -- "$2" | head -1; }
+row(){ qd "$1" | tr '<' '\n' | grep '^r kind="duplication"' | grep -- "$2" | head -1; }   # status: qd exits 0 or 2 by design; an empty row FAILs the arm that reads it
 
 # demotes <label> <row> <why>: the row exists, is minor, does not gate, and names the difference
 demotes()
@@ -483,13 +483,13 @@ echo "── (C) premise count"
 if [ "$seen" -eq 9 ]; then ok "(C) all 9 arms found their row"; else no "(C) $seen of 9 arms found their row"; fi
 
 echo "── (L) legend"
-FULL="$( "$BIN" "$TMP/p2" --quality-delta --no-cache --legend=full 2>/dev/null )"
+FULL="$( "$BIN" "$TMP/p2" --quality-delta --no-cache --legend=full 2>/dev/null )"   # status: exits 0 or 2 by design; the legend text is the verdict
 case "$FULL" in *'operate on DIFFERENT DATA'*) ok "(L) a why= clone row's document defines it";; *) no "(L) a why= clone row's document never defines it";; esac
-FULL1="$( "$BIN" "$TMP/n1" --quality-delta --no-cache --legend=full 2>/dev/null )"
+FULL1="$( "$BIN" "$TMP/n1" --quality-delta --no-cache --legend=full 2>/dev/null )"   # status: exits 0 or 2 by design; the legend text is the verdict
 case "$FULL1" in *'operate on DIFFERENT DATA'*) no "(L) a document without a why= clone row pays for the sentence";; *) ok "(L) a document without a why= clone row carries no operand sentence";; esac
 
 echo "── (V) the clones verb"
-CL="$( "$BIN" "$TMP/p2" --clones --no-cache 2>/dev/null | tr '<' '\n' | grep -E 'unq' | head -3 )"
+CL="$( "$BIN" "$TMP/p2" --clones --no-cache 2>/dev/null | tr '<' '\n' | grep -E 'unq' | head -3 )"   # status: an empty CL FAILs (V) below
 case "$CL" in
     '')              no "(V) --clones shows no unq group — the arm is vacuous";;
     *'demoted="1"'*) no "(V) --clones reads the operand verdict: demoted=1 on the P2 group";;
@@ -497,7 +497,7 @@ case "$CL" in
 esac
 
 echo "── (J) determinism"
-qd p1 >"$TMP/a"; qd p1 >"$TMP/b"
+qd p1 >"$TMP/a"; qd p1 >"$TMP/b"   # status: exits 0 or 2 by design; the byte compare below is the verdict
 if cmp -s "$TMP/a" "$TMP/b"; then ok "(J) two runs byte-identical"; else no "(J) two runs differ"; fi
 
 echo

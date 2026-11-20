@@ -31,7 +31,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home" TMPDIR="$TMP"; mkdir -p "$HOME"
 fail=0; seen=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -261,11 +261,11 @@ echo "── (C) premise count"
 if [ "$seen" -eq 7 ]; then ok "(C) all seven rows found"; else no "(C) $seen of 7 rows found"; fi
 
 echo "── (L) legend"
-FULL="$( "$BIN" "$R" --quality-delta --no-cache --legend=full 2>/dev/null )"
+FULL="$( "$BIN" "$R" --quality-delta --no-cache --legend=full 2>/dev/null )"   # status: exits 0 or 2 by design; the legend text is the verdict
 case "$FULL" in *'deciding it once is the cheapest fix'*) ok "(L) a document with the facet defines it";; *) no "(L) a document with the facet never defines it";; esac
 mv "$R/src/groups.h" "$R/src/window.py" "$TMP/"
 printf '#pragma once\ninline int keep() { return 1; }\ninline int more( int a ) { return a + 1; }\n' >"$R/src/keep.h"
-FULL0="$( "$BIN" "$R" --quality-delta --no-cache --legend=full 2>/dev/null )"
+FULL0="$( "$BIN" "$R" --quality-delta --no-cache --legend=full 2>/dev/null )"   # status: exits 0 or 2 by design; the legend text is the verdict
 case "$FULL0" in *'deciding it once is the cheapest fix'*) no "(L) a document without the facet pays for its sentence";; *) ok "(L) a document without the facet carries no such sentence";; esac
 
 echo

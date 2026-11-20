@@ -379,8 +379,8 @@ for _g in \
     clonecachecheck \
     clonededupcheck \
     cloneidiomcheck \
-    cloneoperandcheck \
     clonelexcheck \
+    cloneoperandcheck \
     clonepersistcheck \
     clsrecvcheck \
     cochangeboostcheck \
