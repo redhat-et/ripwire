@@ -66,6 +66,33 @@
 // keeps its callees, still gates; (3) and (4) are unchanged. A run that calls a reused helper is not a clone of
 // that helper, and this is the shape in which that reads as one.
 //
+// THE OPERAND PATH (QD-IDIOM-ELEMTYPE, 2026-11-19), --quality-delta only. A port of a 700-line shell matcher needed
+// 13 reasoned acks for short loops and one-liners that matched unrelated code by SHAPE alone: an svLess binary search
+// over a runtime std::vector<std::string> beside one over a constexpr span of string_view tables (the same body once
+// the parameters are renamed, so the alpha refusal above kept it gating); a quote strip beside a whitespace squeeze
+// (one copy-filter loop over a different character class); `trim( s ) == "true" || … == ":"` beside an extension
+// test; a bounded peek beside another parser's bounded peek; a ' ; ' join of computed texts beside a comma join of a
+// string vector. None of them is a recognized idiom, or the vocabulary test refused it on a shared std-adjacent
+// word. What they share is that the members operate on DIFFERENT DATA, and that is checkable without a parse tree.
+// A group the idiom conjunction did not demote is reported minor (why= names which difference held) when:
+//     (4') it is under the same kIdiomCloneTokenFloor ceiling, AND
+//     (3') no two members share an enclosing context (file + scope), AND
+//     (5) every pair has a PROVED operand difference, one of
+//         literals — the two bodies' literal sets (numbers, strings, characters, true/false/nullptr/None …; 0 and 1
+//                    left out as the index arithmetic every loop spells) have nothing in common, and are not both
+//                    empty; or
+//         types    — both signatures have the same number of parameters (one or more), every one spelling a
+//                    concrete type (no template header, no type-parameter group, no auto/impl, no untyped
+//                    parameter), and some position's type differs once the pass-by spelling (const, &, &&, mut)
+//                    and qualifiers (std::, rw::) are dropped.
+// What still gates: a copy that kept any literal (writeTangleLines | writeHexPairLines share ' ' and '\n'), a copy
+// over the same literals (two reverse find-by-key loops, both spelling only 0 and 1 — JsonNode::get | steer_find), a
+// generic helper beside a concrete caller, any pair in one scope, and anything at or over 80 tokens. What it cannot
+// see: a type ALIAS reads as a different type (NodeId vs std::uint32_t), and a named constant is not a literal, so
+// two bodies that differ only in which named constant they test prove nothing here. The rows still print — the
+// house rule is demotion, never deletion — and the --clones verb, which reports groups rather than changes, does
+// not read this verdict at all.
+//
 // ON (4), AND WHY IT IS A CEILING RATHER THAN A DROP. The design note that prompted this asked for a
 // "higher token floor (e.g. 2x the normal one) before it can group at all". Implemented literally that
 // DELETES rows — a 47-token ladder pair would simply stop being reported — and the house rule is demotion,
@@ -837,41 +864,125 @@ inline bool idiomDefaultAngleOpens( const std::vector<IdiomTok>& sig, std::size_
     return false;
 }
 
-// The parameter NAMES of one signature's parameter list, read off its tokens: the `(` that opens the
-// symbol's own parameter list (idiomParamListOpen: after its name, and after a generic signature's type
-// parameters), split at depth-1 commas (template angles counted, so `std::map<K, V> m` is one parameter),
-// the default after a depth-1 `=` ignored (a template comma inside it, `= pick<T, U>()`, ends no parameter:
-// idiomDefaultAngleOpens). A signature that spells no parameter list yields none. That is
-// safe for condition (2), since every name returned here LEAVES the identifier set, but NOT for the
-// alpha-rename refusal, which then sees two parameter-renamed copies as different bodies: so the list is
-// found through type parameters too (CodeRabbit #629, `function first<T>( value: T )`).
-inline std::vector<std::string_view> idiomParamNames( const std::vector<IdiomTok>& sig, std::string_view name, bool nameFirst )
+// The parameters of one signature, read off its tokens: the `(` that opens the symbol's own parameter list
+// (idiomParamListOpen: after its name, and after a generic signature's type parameters), split at depth-1 commas
+// (template angles counted, so `std::map<K, V> m` is one parameter), the default after a depth-1 `=` ignored (a
+// template comma inside it, `= pick<T, U>()`, ends no parameter: idiomDefaultAngleOpens). A signature that spells
+// no parameter list yields none. That is safe for condition (2), since every name returned here LEAVES the
+// identifier set, but NOT for the alpha-rename refusal, which then sees two parameter-renamed copies as different
+// bodies: so the list is found through type parameters too (CodeRabbit #629, `function first<T>( value: T )`).
+//
+// Each parameter also carries its TYPE as the operand path reads it (QD-IDIOM-ELEMTYPE, see the header): every
+// token of the parameter but its name, the default, the pass-by spelling (`const`, `volatile`, `&`, `&&`, `mut`,
+// a name-first `:`) and qualifiers (`std::`, `rw::`), FNV-1a keyed; 0 when the parameter spells no type.
+// `typed` is false unless EVERY parameter spells a concrete one: a template header, a type-parameter group after
+// the name, or an `auto`/`impl` parameter makes the types generic, and an untyped parameter (Python's `self`)
+// says nothing, so the operand path cannot claim a difference there. A C++ `template < … >` header usually sits before
+// the signature range: memberShapeOf asks idiomTemplateHeaderBefore for it.
+struct IdiomParams
 {
-    std::vector<std::string_view> out;
+    std::vector<std::string_view> names;
+    std::vector<std::uint64_t>    types;
+    bool                          typed = false;
+};
+
+inline constexpr std::string_view kIdiomPassBySpellings[] = { "const", "volatile", "&", "&&", "mut", ":" };
+inline constexpr std::string_view kIdiomGenericTypeWords[] = { "auto", "impl", "template" };
+
+// One parameter's type key: its tokens without the name at `nameAt`, the pass-by spellings and the qualifiers.
+inline std::uint64_t idiomParamTypeKey( const std::vector<std::string_view>& part, std::size_t nameAt, bool& generic )
+{
+    std::string spelled;
+    for( std::size_t k = 0; k < part.size(); ++k )
+    {
+        const std::string_view w = part[k];
+        const bool qualifier = w == "::" || ( k + 1 < part.size() && part[k + 1] == "::" );
+        if( k == nameAt || qualifier || std::ranges::contains( kIdiomPassBySpellings, w ) )
+        {
+            continue;
+        }
+        generic = generic || std::ranges::contains( kIdiomGenericTypeWords, w );
+        spelled += w;
+        spelled += '\x02';
+    }
+    return spelled.empty() ? 0 : fnv1a64( spelled );
+}
+
+// The bytes of a C++ template header the symbol's signature range leaves out: whether the tokens right before
+// `sigStart` (within kIdiomTemplateLookback bytes) end in `template < … >`. A member of a class template is not seen —
+// its parameter type may still be the class's own type parameter, and then reads as concrete (stated in the header).
+constexpr std::size_t kIdiomTemplateLookback = 256;
+inline bool idiomTemplateHeaderBefore( const std::string& bytes, std::size_t sigStart, bool hashComments )
+{
+    std::vector<IdiomTok> t;
+    scanCodeTokens( bytes, sigStart > kIdiomTemplateLookback ? sigStart - kIdiomTemplateLookback : 0, sigStart, hashComments, true,
+                    [ & ]( std::string_view w, CodeTokenKind kind ) { t.push_back( { w, kind } ); } );
+    std::size_t angle = 0;
+    for( std::size_t k = t.size(); k > 0; --k )
+    {
+        const std::string_view w = t[k - 1].text;
+        if( k == t.size() && w != ">" && w != ">>" )
+        {
+            return false;
+        }
+        angle += w == ">" ? 1 : ( w == ">>" ? 2 : 0 );
+        if( w == "<" && --angle == 0 )
+        {
+            return k >= 2 && t[k - 2].text == "template";
+        }
+    }
+    return false;
+}
+
+inline IdiomParams idiomParams( const std::vector<IdiomTok>& sig, std::string_view name, bool nameFirst )
+{
+    IdiomParams out;
     std::size_t i = idiomParamListOpen( sig, name );
     if( i >= sig.size() )
     {
         return out;
     }
+    // A template header, or a type-parameter group between the name and the list: every parameter type may be generic.
+    bool generic = sig[i - 1].text != name
+                || std::any_of( sig.begin(), sig.begin() + std::ptrdiff_t( i ), []( const IdiomTok& t ) { return t.text == "template"; } );
+    bool untyped = false;
     i += 1;
-    std::size_t      depth = 1, angle = 0;
-    bool             inDefault = false;
-    std::string_view firstId, lastId;
+    std::size_t                   depth = 1, angle = 0;
+    bool                          inDefault = false;
+    std::string_view              firstId, lastId;
+    std::size_t                   firstAt = 0, lastAt = 0;
+    std::vector<std::string_view> part;   // the parameter's tokens before any default, its closing `,` or `)` included
     const auto flush = [ & ]
     {
         const std::string_view pick = nameFirst ? firstId : lastId;
         if( !pick.empty() )
         {
-            out.push_back( pick );
+            out.names.push_back( pick );
+            if( !part.empty() && ( part.back() == "," || part.back() == ")" ) )
+            {
+                part.pop_back();
+            }
+            if( !part.empty() && part.back() == "=" )
+            {
+                part.pop_back();
+            }
+            const std::uint64_t type = idiomParamTypeKey( part, nameFirst ? firstAt : lastAt, generic );
+            untyped = untyped || type == 0;
+            out.types.push_back( type );
         }
         firstId = lastId = {};
         inDefault = false;
         angle = 0;
+        part.clear();
     };
     for( ; i < sig.size(); ++i )
     {
         const std::string_view w    = sig[i].text;
         const int              step = idiomBracketStep( w );
+        if( !inDefault )
+        {
+            part.push_back( w );
+        }
         if( step > 0 )
         {
             ++depth;
@@ -923,10 +1034,13 @@ inline std::vector<std::string_view> idiomParamNames( const std::vector<IdiomTok
             if( firstId.empty() )
             {
                 firstId = w;
+                firstAt = part.size() - 1;
             }
             lastId = w;
+            lastAt = part.size() - 1;
         }
     }
+    out.typed = !generic && !untyped;
     return out;
 }
 
@@ -1021,12 +1135,47 @@ inline CloneIdiom classifyCloneIdiom( const std::vector<IdiomTok>& t )
 
 // ── group verdicts ────────────────────────────────────────────────────────────────────────────────────
 
+// The operand path's verdict (QD-IDIOM-ELEMTYPE, see the header): which proved difference held for every pair of a
+// group. A bit each, so a group whose pairs differ in different ways is both.
+enum class CloneOperandDiff : std::uint8_t { None = 0, Literals = 1, Types = 2, LiteralsOrTypes = 3 };
+
+inline constexpr std::string_view kCloneOperandWhy[] = { "", "different literals", "different parameter types", "different literals or parameter types" };
+static_assert( std::size( kCloneOperandWhy ) == std::size_t( CloneOperandDiff::LiteralsOrTypes ) + 1,
+               "kCloneOperandWhy must carry exactly one row per CloneOperandDiff, in declaration order" );
+
+// The why= text a clone row carries when the operand path demoted it; "" otherwise.
+inline std::string_view cloneOperandWhy( CloneOperandDiff d ) noexcept { return kCloneOperandWhy[ std::size_t( d ) ]; }
+
 // What one clone group's members turned out to be.
 struct CloneIdiomVerdict
 {
-    CloneIdiom idiom   = CloneIdiom::None;   // the idiom EVERY member classifies to (None = no agreement, or none recognized)
-    bool       demoted = false;              // the full conjunction held: annotated AND no longer gating
+    CloneIdiom       idiom    = CloneIdiom::None;         // the idiom EVERY member classifies to (None = no agreement, or none recognized)
+    bool             demoted  = false;                    // the full conjunction held: annotated AND no longer gating
+    CloneOperandDiff operands = CloneOperandDiff::None;   // quality-delta only: not demoted above, but every pair's operands differ (the --clones verb never reads it)
 };
+
+// The literals the operand path compares: numbers, strings and characters, plus the value keywords (`true`,
+// `nullptr`, `None` …) — but not 0 and 1, the index arithmetic every loop spells (`i = 0`, `> 0`, `- 1`).
+inline constexpr std::string_view kIdiomIndexLiterals[] = { "0", "1" };
+inline constexpr std::string_view kIdiomValueKeywords[] = { "true", "false", "nullptr", "NULL", "null", "nil", "None", "True", "False" };
+
+// Sorted + unique FNV-1a of a body's literals (kIdiomIndexLiterals left out).
+inline std::vector<std::uint64_t> idiomLiteralSet( const std::vector<IdiomTok>& body )
+{
+    std::vector<std::uint64_t> out;
+    for( const IdiomTok& t : body )
+    {
+        const bool literal = t.kind == CodeTokenKind::Number || t.kind == CodeTokenKind::String;
+        if( literal ? std::ranges::contains( kIdiomIndexLiterals, t.text ) : !std::ranges::contains( kIdiomValueKeywords, t.text ) )
+        {
+            continue;
+        }
+        out.push_back( fnv1a64( t.text ) );
+    }
+    std::sort( out.begin(), out.end() );
+    out.erase( std::unique( out.begin(), out.end() ), out.end() );
+    return out;
+}
 
 namespace cloneidiomdetail
 {
@@ -1040,6 +1189,10 @@ struct MemberShape
     std::uint64_t              alpha  = 0;   // one-statement and call-sequence only: the parameter-renamed body hash (OneStatementFacts::alpha)
     std::uint32_t              fileId = 0;
     std::string                scope;
+    bool                       read   = false;   // the body was read; an unread member proves no operand difference
+    std::vector<std::uint64_t> literals;         // idiomLiteralSet of the body
+    std::vector<std::uint64_t> paramTypes;       // IdiomParams::types, in parameter order
+    bool                       typed  = false;   // IdiomParams::typed
 };
 
 // Both sides are sorted+unique, so probing the SMALLER set into the larger settles disjointness in
@@ -1051,6 +1204,169 @@ inline bool idiomSetsDisjoint( const std::vector<std::uint64_t>& a, const std::v
     const std::vector<std::uint64_t>& many = a.size() <= b.size() ? b : a;
     return std::none_of( few.begin(), few.end(),
                          [ & ]( std::uint64_t h ) { return std::binary_search( many.begin(), many.end(), h ); } );
+}
+
+// The shape of one member whose file bytes are `bytes`. A body that cannot be read stays None and unread.
+inline MemberShape memberShapeOf( const Symbol& s, const std::string& bytes )
+{
+    MemberShape out;
+    out.fileId = s.fileId;
+    out.scope  = s.scope;
+    if( bytes.empty() || s.endByte <= s.sigEndByte || s.endByte > bytes.size() )
+    {
+        return out;   // degrade: an unreadable member classifies as None and proves nothing, so its group keeps gating
+    }
+    std::vector<IdiomTok> toks;
+    scanCodeTokens( bytes, s.sigEndByte, s.endByte, usesHashLineComments( s.lang ), true,
+                    [ & ]( std::string_view w, CodeTokenKind kind ) { toks.push_back( { w, kind } ); } );
+    std::vector<IdiomTok> sig;
+    if( s.sigStartByte < s.sigEndByte )
+    {
+        scanCodeTokens( bytes, s.sigStartByte, s.sigEndByte, usesHashLineComments( s.lang ), true,
+                        [ & ]( std::string_view w, CodeTokenKind kind ) { sig.push_back( { w, kind } ); } );
+    }
+    const IdiomParams params = idiomParams( sig, s.name, langInMask( kIdiomNameFirstLangMask, s.lang ) );
+    out.read       = true;
+    out.literals   = idiomLiteralSet( toks );
+    out.paramTypes = params.types;
+    out.typed      = params.typed && !idiomTemplateHeaderBefore( bytes, s.sigStartByte, usesHashLineComments( s.lang ) );
+    out.idiom      = classifyCloneIdiom( toks );
+    if( out.idiom == CloneIdiom::None )
+    {
+        return out;
+    }
+    if( idiomReadsNarrowVocabulary( out.idiom ) )
+    {
+        OneStatementFacts f = oneStatementFacts( toks, params.names );
+        out.ids   = std::move( f.ids );
+        out.alpha = f.alpha;
+        return out;
+    }
+    for( const IdiomTok& t : toks )
+    {
+        if( t.kind == CodeTokenKind::Identifier )
+        {
+            out.ids.push_back( fnv1a64( t.text ) );
+        }
+    }
+    std::sort( out.ids.begin(), out.ids.end() );
+    out.ids.erase( std::unique( out.ids.begin(), out.ids.end() ), out.ids.end() );
+    return out;
+}
+
+// Every wanted member's shape, `want` sorted by NodeId. File-major walk, so each file's bytes are read exactly once:
+// `order` is sorted by (fileId, id), a pure function of the input, so the read order is deterministic.
+inline std::vector<MemberShape> readMemberShapes( const IngestResult& ing, const std::vector<NodeId>& want )
+{
+    std::vector<MemberShape>   shapes( want.size() );
+    std::vector<std::uint32_t> order( want.size() );
+    for( std::uint32_t k = 0; k < order.size(); ++k )
+    {
+        order[k] = k;
+    }
+    std::sort( order.begin(), order.end(), [ & ]( std::uint32_t x, std::uint32_t y )
+    {
+        const std::uint32_t fx = ing.symbols[ want[x] ].fileId, fy = ing.symbols[ want[y] ].fileId;
+        return fx != fy ? fx < fy : want[x] < want[y];
+    } );
+    std::string   bytes;
+    std::uint32_t openFile = UINT32_MAX;
+    for( const std::uint32_t k : order )
+    {
+        const Symbol& s = ing.symbols[ want[k] ];
+        if( s.fileId != openFile )
+        {
+            openFile = s.fileId;
+            bytes    = docparse::detail::readWholeFile( diskPath( ing, s.fileId ) ).value_or( std::string() );
+        }
+        shapes[k] = memberShapeOf( s, bytes );
+    }
+    return shapes;
+}
+
+inline bool sameContext( const MemberShape& a, const MemberShape& b ) noexcept { return a.fileId == b.fileId && a.scope == b.scope; }
+
+// The idiom conjunction for a group whose members all spell `idiom`: (4) the size ceiling, then (3) no shared context and
+// (2) no shared vocabulary — pairwise, because a 3-member group in which only two members collide is still two members that collide.
+inline bool idiomDemotes( const CloneGroup& gp, const std::vector<const MemberShape*>& ms, CloneIdiom idiom )
+{
+    bool demote = gp.tokens < kIdiomCloneTokenFloor;
+    for( std::size_t a = 0; demote && a < ms.size(); ++a )
+    {
+        for( std::size_t b = a + 1; demote && b < ms.size(); ++b )
+        {
+            if( sameContext( *ms[a], *ms[b] ) )
+            {
+                demote = false;
+            }
+            else if( idiomReadsNarrowVocabulary( idiom ) && ms[a]->alpha == ms[b]->alpha )
+            {
+                demote = false;   // a Type-1 copy after renaming parameters — a copy whatever its vocabulary
+            }
+            else if( !idiomSetsDisjoint( ms[a]->ids, ms[b]->ids ) )
+            {
+                demote = false;
+            }
+        }
+    }
+    return demote;
+}
+
+// The difference the operand path proves for one pair, or None: no literal in common (and at least one literal), else
+// the same number of parameters, all concrete, with a different type at some position.
+inline CloneOperandDiff pairOperandDiff( const MemberShape& a, const MemberShape& b ) noexcept
+{
+    if( !a.read || !b.read )
+    {
+        return CloneOperandDiff::None;
+    }
+    if( ( !a.literals.empty() || !b.literals.empty() ) && idiomSetsDisjoint( a.literals, b.literals ) )
+    {
+        return CloneOperandDiff::Literals;
+    }
+    const bool comparable = a.typed && b.typed && !a.paramTypes.empty() && a.paramTypes.size() == b.paramTypes.size();
+    return comparable && a.paramTypes != b.paramTypes ? CloneOperandDiff::Types : CloneOperandDiff::None;
+}
+
+// The operand path over a whole group (see the header): under the ceiling, every pair in distinct contexts and with a proved
+// operand difference. The union of the differences that held, or None as soon as one pair proves none.
+inline CloneOperandDiff groupOperandDiff( const CloneGroup& gp, const std::vector<const MemberShape*>& ms )
+{
+    if( gp.tokens >= kIdiomCloneTokenFloor )
+    {
+        return CloneOperandDiff::None;
+    }
+    std::uint8_t held = 0;
+    for( std::size_t a = 0; a < ms.size(); ++a )
+    {
+        for( std::size_t b = a + 1; b < ms.size(); ++b )
+        {
+            const CloneOperandDiff d = sameContext( *ms[a], *ms[b] ) ? CloneOperandDiff::None : pairOperandDiff( *ms[a], *ms[b] );
+            if( d == CloneOperandDiff::None )
+            {
+                return CloneOperandDiff::None;
+            }
+            held |= std::uint8_t( d );
+        }
+    }
+    return CloneOperandDiff( held );
+}
+
+// The shapes of one group's members, or empty when a member is not among `want`.
+inline std::vector<const MemberShape*> groupShapes( const CloneGroup& gp, const std::vector<NodeId>& want, const std::vector<MemberShape>& shapes )
+{
+    std::vector<const MemberShape*> ms;
+    ms.reserve( gp.members.size() );
+    for( NodeId m : gp.members )
+    {
+        const auto it = std::lower_bound( want.begin(), want.end(), m );
+        if( it == want.end() || *it != m )
+        {
+            return {};
+        }
+        ms.push_back( &shapes[ std::size_t( it - want.begin() ) ] );
+    }
+    return ms;
 }
 
 }   // namespace cloneidiomdetail
@@ -1082,136 +1398,22 @@ inline std::vector<CloneIdiomVerdict> classifyCloneGroupIdioms( const IngestResu
     {
         return out;
     }
-
-    // File-major walk over the members, so each file's bytes are read exactly once. `order` is sorted by
-    // (fileId, id) — a pure function of the input, so the read order is deterministic.
-    std::vector<MemberShape>   shapes( want.size() );
-    std::vector<std::uint32_t> order( want.size() );
-    for( std::uint32_t k = 0; k < order.size(); ++k )
-    {
-        order[k] = k;
-    }
-    std::sort( order.begin(), order.end(), [ & ]( std::uint32_t x, std::uint32_t y )
-    {
-        const std::uint32_t fx = ing.symbols[ want[x] ].fileId, fy = ing.symbols[ want[y] ].fileId;
-        return fx != fy ? fx < fy : want[x] < want[y];
-    } );
-
-    std::string           bytes;
-    std::uint32_t         openFile = UINT32_MAX;
-    bool                  readOk   = false;
-    std::vector<std::uint64_t> ids;
-    for( const std::uint32_t k : order )
-    {
-        const Symbol& s = ing.symbols[ want[k] ];
-        shapes[k].fileId = s.fileId;
-        shapes[k].scope  = s.scope;
-        if( s.fileId != openFile )
-        {
-            openFile = s.fileId;
-            bytes    = docparse::detail::readWholeFile( diskPath( ing, s.fileId ) ).value_or( std::string() );
-            readOk   = !bytes.empty();
-        }
-        if( !readOk || s.endByte <= s.sigEndByte || s.endByte > bytes.size() )
-        {
-            continue;   // degrade: an unreadable member simply classifies as None, so its group keeps gating
-        }
-        std::vector<IdiomTok> toks;
-        scanCodeTokens( bytes, s.sigEndByte, s.endByte, usesHashLineComments( s.lang ), true,
-                        [ & ]( std::string_view w, CodeTokenKind kind ) { toks.push_back( { w, kind } ); } );
-        shapes[k].idiom = classifyCloneIdiom( toks );
-        if( shapes[k].idiom == CloneIdiom::None )
-        {
-            continue;
-        }
-        if( idiomReadsNarrowVocabulary( shapes[k].idiom ) )
-        {
-            std::vector<IdiomTok> sig;
-            if( s.sigStartByte < s.sigEndByte )
-            {
-                scanCodeTokens( bytes, s.sigStartByte, s.sigEndByte, usesHashLineComments( s.lang ), true,
-                                [ & ]( std::string_view w, CodeTokenKind kind ) { sig.push_back( { w, kind } ); } );
-            }
-            OneStatementFacts f = oneStatementFacts( toks, idiomParamNames( sig, s.name, langInMask( kIdiomNameFirstLangMask, s.lang ) ) );
-            shapes[k].ids   = std::move( f.ids );
-            shapes[k].alpha = f.alpha;
-            continue;
-        }
-        ids.clear();
-        for( const IdiomTok& t : toks )
-        {
-            if( t.kind == CodeTokenKind::Identifier )
-            {
-                ids.push_back( fnv1a64( t.text ) );
-            }
-        }
-        std::sort( ids.begin(), ids.end() );
-        ids.erase( std::unique( ids.begin(), ids.end() ), ids.end() );
-        shapes[k].ids = ids;
-    }
+    const std::vector<MemberShape> shapes = cloneidiomdetail::readMemberShapes( ing, want );
 
     for( std::size_t g = 0; g < groups.size(); ++g )
     {
         const CloneGroup& gp = groups[g];
-        if( gp.members.size() < 2 )
-        {
-            continue;
-        }
-        std::vector<const MemberShape*> ms;
-        ms.reserve( gp.members.size() );
-        for( NodeId m : gp.members )
-        {
-            const auto it = std::lower_bound( want.begin(), want.end(), m );
-            if( it == want.end() || *it != m )
-            {
-                ms.clear();
-                break;
-            }
-            ms.push_back( &shapes[ std::size_t( it - want.begin() ) ] );
-        }
+        const std::vector<const MemberShape*> ms = gp.members.size() < 2 ? std::vector<const MemberShape*>() : cloneidiomdetail::groupShapes( gp, want, shapes );
         if( ms.empty() )
         {
             continue;
         }
         // (1) every member the SAME recognized idiom.
         const CloneIdiom idiom = ms[0]->idiom;
-        if( idiom == CloneIdiom::None )
-        {
-            continue;
-        }
-        bool agree = true;
-        for( const MemberShape* m : ms )
-        {
-            agree = agree && m->idiom == idiom;
-        }
-        if( !agree )
-        {
-            continue;
-        }
-        out[g].idiom = idiom;
-
-        // (4) size ceiling, then (2) no shared vocabulary and (3) no shared context — pairwise, because a
-        // 3-member group in which only two members collide is still two members that collide.
-        bool demote = gp.tokens < kIdiomCloneTokenFloor;
-        for( std::size_t a = 0; demote && a < ms.size(); ++a )
-        {
-            for( std::size_t b = a + 1; demote && b < ms.size(); ++b )
-            {
-                if( ms[a]->fileId == ms[b]->fileId && ms[a]->scope == ms[b]->scope )
-                {
-                    demote = false;
-                }
-                else if( idiomReadsNarrowVocabulary( idiom ) && ms[a]->alpha == ms[b]->alpha )
-                {
-                    demote = false;   // a Type-1 copy after renaming parameters — a copy whatever its vocabulary
-                }
-                else if( !cloneidiomdetail::idiomSetsDisjoint( ms[a]->ids, ms[b]->ids ) )
-                {
-                    demote = false;
-                }
-            }
-        }
-        out[g].demoted = demote;
+        const bool agree = idiom != CloneIdiom::None && std::all_of( ms.begin(), ms.end(), [ & ]( const MemberShape* m ) { return m->idiom == idiom; } );
+        out[g].idiom    = agree ? idiom : CloneIdiom::None;
+        out[g].demoted  = agree && cloneidiomdetail::idiomDemotes( gp, ms, idiom );
+        out[g].operands = out[g].demoted ? CloneOperandDiff::None : cloneidiomdetail::groupOperandDiff( gp, ms );
     }
     return out;
 }

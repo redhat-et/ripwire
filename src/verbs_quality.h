@@ -1770,6 +1770,17 @@ inline constexpr const char* kQdCloneLegend =
     "tree, so a macro-assembled body classifies as whatever its raw tokens spell — the name is printed so "
     "a reader can overrule it. ";
 
+// QD-IDIOM-ELEMTYPE — printed only when a clone row carries why= (cloneidiom.h's operand path demoted it).
+inline constexpr const char* kQdOperandLegend =
+    "why= on a clone row: its members operate on DIFFERENT DATA, so the shared shape is reported minor: no literal in common "
+    "(0 and 1 left out), or the same number of concrete parameters with a different type at some position; under 80 tokens, "
+    "in distinct contexts. A type alias reads as a different type. ";
+
+// QD-REPEATED-DECISION — printed only when a complexity or tangle row's fix= names a repeated decision (repeateddecision.h).
+inline constexpr const char* kQdRepeatedDecisionLegend =
+    "fix= \"name the decision once\" / \"name the loop once\" on a complexity or tangle row: the function tests one condition (6+ "
+    "tokens, verbatim) twice, or repeats a loop body, at the lines named; deciding it once is the cheapest fix. Report-only. ";
+
 // The one-statement / call-sequence half of the clone paragraph, printed only when a row carries one of those two
 // idioms: their narrowed shared-identifier test is the one rule a reader of THAT row needs, and a ladder-only
 // document should not pay for it (the same G4 rule as every conditional section here).
@@ -1940,6 +1951,16 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
     {
         return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return r.kind == "tangle"; } );
     };
+    const auto anyOperandRow = [] ( const std::vector<rw::quality::Regression>& v )
+    {
+        return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r )
+                            { return ( r.kind == "duplication" || r.kind == "new-clone-of-reused-helper" ) && !r.why.empty(); } );
+    };
+    const auto anyRepeatedDecisionRow = [] ( const std::vector<rw::quality::Regression>& v )
+    {
+        return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r )
+                            { return r.fix.find( rw::decision::kNameDecisionFix ) != std::string::npos || r.fix.find( rw::decision::kNameLoopFix ) != std::string::npos; } );
+    };
 
     std::fputs( kQdLegendCore, out );
 
@@ -2044,6 +2065,10 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
             {
                 std::fputs( kQdOneStatementLegend, out );
             }
+            if( anyOperandRow( p.rows ) || anyOperandRow( p.disclosedRows ) )
+            {
+                rw::emitRaw( out, kQdOperandLegend );
+            }
         }
         if( anyMinorMaskRow( p.rows ) || anyMinorMaskRow( p.disclosedRows ) )
         {
@@ -2072,6 +2097,10 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
         if( anyTangleRow( p.rows ) || anyTangleRow( p.disclosedRows ) )
         {
             rw::emitRaw( out, kQdTangleLegend );
+        }
+        if( anyRepeatedDecisionRow( p.rows ) || anyRepeatedDecisionRow( p.disclosedRows ) )
+        {
+            rw::emitRaw( out, kQdRepeatedDecisionLegend );
         }
     }
     if( p.ratchetRead )
@@ -3149,7 +3178,8 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             }
             if( r.kind == "duplication" )
             {
-                rw::emitTo( out, "<r kind=\"duplication\" members=\"{}\" tokens=\"{}\"{}{}{}{}{}/>", ex( quality::displaySym( r.sym, deltaRoot ) ).c_str(), r.now, sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr );
+                rw::emitTo( out, "<r kind=\"duplication\" members=\"{}\" tokens=\"{}\"{}{}{}{}{}{}/>", ex( quality::displaySym( r.sym, deltaRoot ) ).c_str(), r.now, sev, facetAttr.c_str(), origin, locAttr.c_str(), gatingAttr,
+                            tangleAttrs );   // QD-IDIOM-ELEMTYPE: why= when the operand path demoted it
             }
             else if( r.kind == "dead-code" )
             {
