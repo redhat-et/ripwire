@@ -205,12 +205,13 @@ argtype(){   # argtype SYM "p= set" split|bound "why" — the callee p= set exac
     got="$( printf '%s' "$out" | grep -oE '<s [^>]*p="buf\.cc:[0-9]+"[^>]*>' | grep -oE 'p="[^"]*"' | sed 's/^p="//; s/"$//' | sort | tr '\n' ' ' )"
     want="$( printf '%s\n' $2 | sort | tr '\n' ' ' )"
     split="$( printf '%s' "$out" | grep -oE '<s [^>]*p="buf\.cc:[0-9]+"[^>]*>' | grep -c 'prov="split"' )"
+    splitAt="$( printf '%s' "$out" | grep -oE '<s [^>]*p="buf\.cc:[0-9]+"[^>]*>' | grep 'prov="split"' | grep -oE 'p="[^"]*"' | sed 's/^p="//; s/"$//' | sort | tr '\n' ' ' )"
     if [ "$got" != "$want" ]; then
         no "argtype --callees=$1 = { $got} want { $want} — $4"
     elif [ "$3" = bound ] && [ "$split" != 0 ]; then
         no "argtype --callees=$1 = { $got} but still prov=\"split\" — $4"
-    elif [ "$3" = split ] && [ "$split" = 0 ]; then
-        no "argtype --callees=$1 = { $got} lost its prov=\"split\" (a negative must keep the split) — $4"
+    elif [ "$3" = split ] && [ "$splitAt" != "$want" ]; then
+        no "argtype --callees=$1 = { $got} but prov=\"split\" only on { $splitAt} (a negative keeps the split on every overload row) — $4"
     else
         ok "argtype --callees=$1 = { $got} $3 — $4"
     fi
@@ -231,7 +232,11 @@ argtype farCaller                  "buf.cc:4 buf.cc:5"   split "[N] far::View sp
 # NAME-ONLY call through a field of an unindexed type (real_.relay) keep exactly today's edge onto the namesake sibling — the pick
 # never runs on a tier no lookup tied to the call (the envoy hand check found both shapes: context.h Buffer::set, FailingSignUtility)
 while read -r rgSite rgWant rgSym; do
-    RG="$( callees "$FIX/argtype" "@$rgSite" | grep -oE '<s [^>]*p="watermark\.cc:[0-9]+"[^>]*>' | grep -oE 'p="[^"]*"' | tr '\n' ' ' )"   # status: the exact p= set is the verdict; a failed run prints no row and FAILs the arm
+    if ! RGOUT="$( callees "$FIX/argtype" "@$rgSite" )"; then
+        no "argtype --callees=@$rgSite ($rgSym) exited non-zero (receiver guard)"
+        continue
+    fi
+    RG="$( printf '%s' "$RGOUT" | grep -oE '<s [^>]*p="watermark\.cc:[0-9]+"[^>]*>' | grep -oE 'p="[^"]*"' | tr '\n' ' ' )"   # the exact p= set is the verdict
     if [ "$RG" = "p=\"$rgWant\" " ]; then
         ok "argtype --callees=@$rgSite ($rgSym) = { $rgWant } unchanged (receiver guard)"
     else

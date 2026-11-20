@@ -285,9 +285,11 @@ fi
 # Before, the bracketed path left the qualifier empty and the call bound by name to every `run` in reach (main ac4ce4f6a: cast_call
 # count=5, all via=name, Runner::run among them). Literals read off test/rustufcsfix/src/*.rs; red on main for (a) (b) (c) (f).
 UF="test/rustufcsfix"
-ufrows(){ run "$UF" "--callees=src/calls.rs:$1" --no-cache | grep -oE '<s [^>]*>' | grep -v 't= n=' | sed -E 's/ tested="[0-9]"//'; }
-ufexpect(){   # $1 caller  $2 the exact rows, one per line  $3 prose
-    local got; got="$( ufrows "$1" )"
+ufexpect(){   # $1 caller  $2 the exact rows, one per line  $3 prose; the run must succeed and answer for that one caller
+    local out got
+    if ! out="$( run "$UF" "--callees=src/calls.rs:$1" --no-cache )"; then no "§10 $1: --callees exited non-zero (or timed out) — $3"; return; fi
+    case "$out" in *"<callees schema=\"ripwire.callees/v1\" of=\"src/calls.rs:$1\" defs=\"1\" "*) ;; *) no "§10 $1: no callees answer for the one caller — $3"; return;; esac
+    got="$( printf '%s\n' "$out" | grep -oE '<s [^>]*>' | grep -v 't= n=' | sed -E 's/ tested="[0-9]"//' )"
     if [ "$got" = "$2" ]; then ok "§10 $1: $3"; else no "§10 $1 expected [$2] got [$got] — $3"; fi
 }
 ufexpect cast_call '<s t="method" n="Where::run" p="src/impls.rs:4"/>' "(a) <Where as Command>::run is Where's impl, one proven row"
