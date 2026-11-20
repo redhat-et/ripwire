@@ -80,7 +80,11 @@
 #       keep the name tier (N3); a trait's method and an alias's impl stay candidates of a std receiver while the struct's
 #       namesake leaves (N4); a `HashMap` the file imports from another crate, a prelude name under a foreign glob import and a
 #       name the file does not import prove nothing (N5); a tree that DEFINES `Option` proves nothing for a written `Option<T>`
-#       (N6); the callers side: Shelf::get loses its eight by-name std callers and gains no declined_calls (N7)
+#       (N6); the callers side: Shelf::get loses its eight by-name std callers and gains no declined_calls (N7); an import that
+#       takes a std name for another item (CR706-STD-ALIAS-SHADOW, test/stdnamesakefix/alias/): `use std::boxed::Box as Vec;`
+#       for a written `Vec<Widget>`, `use crate::wrapper::Wrap as Box;` for `Box<Vec<u8>>`, `use crate::text::Text as str;` for
+#       `&str` prove nothing and keep the name tier, hedged — red on 764727581, which answered count="0" — while `use
+#       std::vec::Vec;`, a prelude `Box<Vec<u8>>` and `&str` beside `use std::str;` (the module) stay proven (N8)
 #   (L) determinism x2, xmllint on every answer whose new clause rides, no degrade alert on stderr
 #
 # Exits non-zero on any failure.
@@ -483,6 +487,11 @@ nscheck "(N6)" shadow Holder::field "lib.rs:12:Other::map~ lib.rs:6:Option::map~
 NSC="$( root_tag "$TMP/nsc.xml" callers )"
 if [ "$( rows "$TMP/nsc.xml" )" = "rs/other.rs:7:foreign_map~" ] && [ -z "$( attr "$NSC" declined_calls )" ]; then ok "(N7) Shelf::get keeps its one unproven caller, no declined_calls"
 else no "(N7) Shelf::get callers — got rows [$( rows "$TMP/nsc.xml" )] declined_calls=\"$( attr "$NSC" declined_calls )\""; fi
+# (N8) an import that takes a std name for another item proves nothing; importing the item as itself still does
+[ -d "$NSFIX/alias" ] || no "(N8) fixture missing: $NSFIX/alias"
+AT='text.rs:3:Text::touch~ widget.rs:3:Widget::touch~ wrapper.rs:3:Wrap::touch~'
+for sel in boxed_alias.rs:via_box wrap_alias.rs:via_wrap str_alias.rs:via_str; do nscheck "(N8)" alias "$sel" "$AT"; done
+for sel in plain_vec plain_box plain_str; do nscheck "(N8)" alias "plain.rs:$sel" ""; done
 
 if [ "$fail" -ne 0 ]; then echo "SOME FAILED"; exit 1; fi
 echo "ALL PASS"

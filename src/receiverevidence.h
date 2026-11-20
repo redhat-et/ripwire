@@ -2996,23 +2996,44 @@ struct ReceiverEvidence
         }
         return rustForeignGlob[ f ] == 2;
     }
+    // Does file `f` import `name` as anything but the standard item of that name? `use crate::wrapper::Wrap as Box;`, `use
+    // crate::Text as str;` and `use std::boxed::Box as Vec;` (for `Vec`) do; `use std::str;` and `use alloc::boxed::Box;` do not.
+    // A written `name` there is that other item, never the standard type (CR706-STD-ALIAS-SHADOW).
+    bool rustNameRebound( std::uint32_t f, std::string_view name ) const
+    {
+        bool rebound = false;
+        types.forEachImport( f, name, [ & ]( const Binding& b )
+        {
+            const std::string_view path = std::string_view( b.importedName );
+            rebound = rebound || ( b.kind == LocalBindKind::TypeImport
+                                   && !( b.typeName == name && rustPathRootedInStd( path ) && !types.rustRootNamesTreePackage( f, b.startByte, path ) ) );
+        } );
+        return rebound;
+    }
     // Is `written` — one name of a spine, as the source spells it (`Option`, `HashMap`, `std::sync::Mutex`, `io::Result`) — provably
-    // the STANDARD type in file `f`? `str` and "[]" always (no declaration can shadow a primitive). Otherwise the tree must define
-    // no namesake but an alias of the standard type itself (rustNamesakesAreStd), and the spelling must reach std: a path rooted
-    // in std / core / alloc; a path whose first segment the file imports from there (`use std::io;` … `io::Result`); a bare name
-    // the file imports from there, or from `crate` / `self` / `super` where the tree aliases the standard type under that name; or a bare PRELUDE name the
-    // file neither imports from elsewhere nor may receive from a foreign glob. A renamed or outside import of the name, and a
-    // non-prelude name the file does not import (it came through a glob or a macro), prove nothing.
+    // the STANDARD type in file `f`? "[]" always (no declaration can shadow the slice type); `str` unless the tree defines a type
+    // named `str` or the file imports something else under that name (a declared item shadows a primitive). Otherwise the tree
+    // must define no namesake but an alias of the standard type itself (rustNamesakesAreStd), and the spelling must reach std: a
+    // path rooted in std / core / alloc; a path whose first segment the file imports from there (`use std::io;` … `io::Result`);
+    // a bare name the file imports from there AS ITSELF (`use std::boxed::Box as Vec;` binds a box, not a `Vec`), or from `crate`
+    // / `self` / `super` where the tree aliases the standard type under that name; or a bare PRELUDE name the file neither imports
+    // from elsewhere nor may receive from a foreign glob. A renamed or outside import of the name, and a non-prelude name the file
+    // does not import (it came through a glob or a macro), prove nothing. A typed record's `Box<Vec<T>>` was read through its
+    // `Box` unseen, so a tree type or an import that takes the name `Box` proves nothing in the file either.
     bool rustStdNameProven( std::uint32_t f, std::string_view written ) const
     {
-        if( written == "str" || written == "[]" )
+        if( written == "[]" )
         {
             return true;
+        }
+        if( written == "str" )
+        {
+            return rustNamesakesOf( "str" ) != RustNamesakes::Foreign && !rustNameRebound( f, "str" );
         }
         const std::size_t      sep  = written.find( "::" );
         const std::string_view name = namesplit::afterLast( written, "::" );
         if( !( externalnames::inSortedTable( externalnames::kRustStdReceiverTypes, name ) || externalnames::inSortedTable( externalnames::kRustStdDerefTypes, name ) )
-            || name == "str" || name == "[]" || rustNamesakesOf( "Box" ) == RustNamesakes::Foreign )   // Box: a typed record's `Box<Vec<T>>` was read through unseen
+            || name == "str" || name == "[]" || rustNamesakesOf( "Box" ) == RustNamesakes::Foreign || rustNameRebound( f, "Box" ) )
         {
             return false;
         }
@@ -3031,7 +3052,8 @@ struct ReceiverEvidence
             }
             const std::string_view path = std::string_view( b.importedName );
             const std::string_view root = path.substr( 0, path.find( "::" ) );
-            const bool fromStd  = rustPathRootedInStd( path ) && !types.rustRootNamesTreePackage( f, b.startByte, path );
+            const bool fromStd  = rustPathRootedInStd( path ) && !types.rustRootNamesTreePackage( f, b.startByte, path )
+                               && ( sep != std::string_view::npos || b.typeName == probe );   // a bare name: the item it imports is itself
             const bool fromTree = sep == std::string_view::npos && namesakes == RustNamesakes::StdAliases && b.typeName == probe
                                && ( root == "crate" || root == "self" || root == "super" );
             ( fromStd || fromTree ? good : bad ) = true;
