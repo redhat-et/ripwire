@@ -19329,17 +19329,25 @@ script. Ranges:
 | range | gating base → lane | rows demoted by the operand path (literals / types) | complexity/tangle rows gaining the repeated-decision fix= |
 | --- | --- | --- | --- |
 | VA-FORMS | 13 → 3 | 7 / 3 | 9 |
-| qd-tangle (c9028aad9) | 23 → 21 | 2 / 0 | 8 |
+| qd-tangle (c9028aad9) | 23 → 23 | 0 | 8 |
 | qd-tangle (bd037e226) | 4 → 4 | 0 | 3 |
 | slip fb23cb777 / d04531421 | 1 → 1 / 2 → 2 | 0 | 1 / 0 |
-| last 20 merges | 8 → 8 | 0 | 14 |
+| last 20 merges (to e71db700c) | 7 → 7 | 0 | 14 |
 | tmux 20 / 60 | 37 → 37 / 41 → 36 | 0 / 1 + 4 | 4 / 5 |
 | textual 20 | 18 → 18 | 0 | 2 |
-| envoy synthetic | 1,863 → 1,243 | 336 / 284 (+75 why= on rows already minor or new) | 14 |
+| envoy synthetic | 1,863 → 1,327 | 224 / 312 (+63 why= on rows already minor or new) | 14 |
 
-No other row changed. `regressions=` and the row count are equal on every range. Rule (6) (an idiom group sharing a
-domain value keeps gating) was added after `cloneidiomcheck` I/O went red. It moved only envoy (9 rows, 1,234 to
-1,243); the hand-check sample below predates it.
+No other row changed. `regressions=` and the row count are equal on every range.
+
+Two refusals came from the sibling gates going red on the first cut:
+- Rule (6), from `cloneidiomcheck` I and O: an idiom group sharing a domain value or calling one helper keeps gating.
+- The literal-argument refusal, from `dupshortcheck`: the `afterLast` family, `rfind( '/' )` beside `rfind( "::" )`.
+
+They took envoy from 1,234 to 1,327 and qd-tangle back from 21 to 23. `dupshortcheck` 1a009c9f7 now expects 4 gating
+rows, not 6: `baseOf | gitstamp::atAttr` is an empty-else shape over different data.
+
+A second sample of 14 envoy demotions, taken after both refusals: 12 are idiom collisions over different data. The 2
+borderline rows are dynamic-module ABI shims and two `generateStats` stat-macro bodies.
 
 **What still gates.**
 - The 3 VA rows still gating are by design. `emptyUnder|picksAlone` is 84 tokens. `isIdent|isWordChar` share the

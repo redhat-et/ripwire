@@ -8,15 +8,16 @@ take the same number of concrete parameters, with a different type at some posit
 `why="different literals"`, `why="different parameter types"` or `why="different literals or parameter types"`.
 A template or generic member, an untyped parameter, or a shared literal keeps the group gating, as before. So does a
 recognized idiom whose members share a domain value, such as a ladder over the same `Grade::Poor` … with tuned
-thresholds or a pair sharing a named constant. A function passed by value, like `svLess`, does not count.
+thresholds, a pair sharing a named constant, or a pair calling the same helper. A function passed by value, like
+`svLess`, does not count. Two bodies that both pass their literal straight to a call keep gating too, because that
+is one function with the literal as a parameter (`rfind( '/' )` beside `rfind( "::" )`, the `afterLast` family).
 `--clones` does not read this verdict and is byte-identical.
 
 Measured on ripwire's own history, gating rows fell from 13 to 3 on the 13 acknowledged VA-FORMS rows. The 3 that
 still gate do so by design: one is past the 80-token ceiling, and two members share the literal `0x80`. Other ranges:
-- 23 to 21 on the qd-tangle range;
 - 41 to 36 on 40 tmux commits;
-- no change on the last 20 merges, the slip commits, textual or 20 other tmux commits;
-- 1,863 to 1,243 on a synthetic envoy range that adds two whole subtrees.
+- no change on the qd-tangle range, the last 20 merges, the slip commits, textual or 20 other tmux commits;
+- 1,863 to 1,327 on a synthetic envoy range that adds two whole subtrees.
 
 The real duplicates still gate (`writeTangleLines`/`writeHexPairLines`, `steer_find`/`JsonNode::get`). Hand-reading
 24 envoy demotions found 21 idiom collisions over different data and 3 borderline rows, among them the identical
