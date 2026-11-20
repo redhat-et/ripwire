@@ -96,6 +96,17 @@ struct ArgTypeShape
     bool                     known    = false;
 };
 
+// Erase the parameter's OWN const tokens: only a const outside every template argument list is the parameter's;
+// `Box<const T>` keeps its inner const in the core, so it never compares equal to `Box<T>` (a `>>` is two `>` tokens).
+inline bool eraseTopLevelConst( std::vector<std::string>& toks )
+{
+    int depth = 0;
+    return std::erase_if( toks, [ &depth ]( const std::string& t ) {
+        depth += t == "<" ? 1 : t == ">" ? -1 : 0;
+        return depth == 0 && t == "const";
+    } ) != 0;
+}
+
 // `toks`: one parameter's type tokens (editCheckTypeTokens: the declarator name already dropped)
 inline ArgTypeShape argTypeShapeOf( std::vector<std::string> toks )
 {
@@ -126,13 +137,7 @@ inline ArgTypeShape argTypeShapeOf( std::vector<std::string> toks )
     }
     else
     {
-        // `const T` / `T const`: one type, either order. Only a const outside every template argument list is the
-        // parameter's own; `Box<const T>` keeps its inner const in the core, so it never compares equal to `Box<T>`.
-        int depth = 0;
-        shape.topConst = std::erase_if( toks, [ &depth ]( const std::string& t ) {
-            depth += t == "<" ? 1 : t == ">" ? -1 : 0;
-            return depth == 0 && t == "const";
-        } ) != 0;
+        shape.topConst = eraseTopLevelConst( toks );   // `const T` / `T const`: one type, either order
     }
     if( toks.empty() || std::ranges::find( toks, std::string( "&" ) ) != toks.end() )
     {
