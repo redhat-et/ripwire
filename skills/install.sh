@@ -10,9 +10,9 @@
 # Add --hook explicitly to install the advisory PreToolUse + SessionStart hook for the selected client:
 # skills/install.sh --hook (Claude) or skills/install.sh --codex --hook (Codex). --openclaw installs to
 # that same cross-agent root (openclaw's own "compatibility skill root"); it has no hook slot.
-# The legend-seen hook REWRITES ripwire commands (it adds --legend-seen=<session file>). It is ON BY DEFAULT
-# wherever this installer registers hooks (owner ruling 111, 2026-11-20) — a plain skills install still touches no
-# settings.json. --no-hook-legend-seen installs the advisory entries without it, RIPWIRE_LEGEND_SEEN=0 turns it off at
+# The legend-seen hook REWRITES ripwire commands (it adds --legend-seen=<session file>). It is ON BY DEFAULT with a
+# --hook install, and with --opencode, whose only hook it is (owner ruling 111, 2026-11-20) — a plain skills install
+# still touches no settings.json, and --hook-subagent-primer alone still installs only its own hook. --no-hook-legend-seen installs the advisory entries without it, RIPWIRE_LEGEND_SEEN=0 turns it off at
 # run time, and it keeps its own flag for a hook-only install:
 # skills/install.sh --hook-legend-seen (Claude), --codex --hook-legend-seen, or --opencode --hook-legend-seen.
 # The subagent primer (a SubagentStart hook: the two-line ripwire brief in every subagent's context) is its own opt-in
@@ -476,7 +476,7 @@ install_claude_hook()
     install_claude_route "$settings"
 }
 
-# ── the legend-seen hook, ON BY DEFAULT wherever this installer registers hooks (owner ruling 111, 2026-11-20) ──────
+# ── the legend-seen hook, ON BY DEFAULT with a --hook install (owner ruling 111, 2026-11-20) ───────────────────────
 # It is the one hook here that REWRITES a tool call (it inserts --legend-seen=FILE after the binary word of a ripwire
 # command). That is why it was opt-in until 111: lane LG1 then MEASURED what it saves (~3,184 B/call, a ~19 % cut in
 # total answer bytes from call 2, results/LG1_LEGEND_1120/READOUT.md §1.3) and the ruling turned the default over. What
@@ -650,8 +650,9 @@ if [ "$legendSeenOnly" -eq 1 ] && [ "$wantLegendSeen" -eq 0 ]; then
     exit 2
 fi
 
-# ── RULING 111: the default, applied where this installer registers hooks. Called from every --hook path and from
-#    --opencode (whose only hook IS this one); never from a plain skills install, which touches no settings file.
+# ── RULING 111: the default, applied where this installer registers the --hook entries. Called from every --hook
+#    path and from --opencode (whose only hook IS this one). NOT from a plain skills install, which touches no
+#    settings file, and NOT from --hook-subagent-primer alone, which is its own narrow single-hook installer.
 install_legend_seen_default()
 {
     [ "$wantLegendSeen" -eq 1 ] || return 0
@@ -666,8 +667,15 @@ install_legend_seen_default()
 # It composes with --hook and --hook-legend-seen in one run.
 if [ "$wantSubagentPrimer" -eq 1 ]; then
     case "$mode" in
-        claude) [ "$wantHook" -eq 0 ] || install_claude_hook
-                [ "$wantLegendSeen" -eq 0 ] || install_claude_legend_seen_hook
+        # RULING 111 applies to a --hook install, so it reaches here only WITH --hook: this flag is its own narrow
+        # single-hook installer and subagentprimercheck (N) asserts that footprint ("registers no other event").
+        # --hook-legend-seen beside it still installs that hook alone, exactly as it did before the default.
+        claude) if [ "$wantHook" -eq 1 ]; then
+                    install_claude_hook
+                    install_legend_seen_default claude
+                elif [ "$legendSeenOnly" -eq 1 ]; then
+                    install_claude_legend_seen_hook
+                fi
                 install_claude_subagent_primer_hook ;;
         *) echo "skills/install.sh: --hook-subagent-primer is a Claude Code hook (SubagentStart); it takes --claude (the default) only" >&2; exit 2 ;;
     esac
