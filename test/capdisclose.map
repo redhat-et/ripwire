@@ -182,6 +182,7 @@ kMaxQualifierHops	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened t
 kMaxRefs	pending:B43 disclosed elsewhere: refs_omitted= (refsOmittedAttr, which the lint cannot tie to the cap) and a stderr warning (LARGE-PARTIAL-1)
 kMaxRenameProbeFiles	none:a rename hint is never a claim (Stage 0 class d)
 kMaxRestDepth	sink:noteCapped
+kMaxShellNest	sink:cut
 kMaxRestName	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it
 kMaxRestUnits	sink:noteCapped
 kMaxRoleBytes	pending:B43 ingest extraction bound (LARGE-PARTIAL-1 widened the lint to ingest*.h); the sibling lane NO-SKIP-INGEST owns the ingest limits and audits it

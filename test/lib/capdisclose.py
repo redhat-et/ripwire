@@ -6,7 +6,7 @@ usage: capdisclose.py ROOT MAP            check; prints PASS/FAIL/INFO rows, the
 
 Scope: a constant `constexpr <integer type> kName = <integer literal>` defined in an answer-path file (src/for*.h,
 src/verbs_*.h, src/pathroute.h, src/clones.h; LARGE-PARTIAL-1 added the size and git-sweep caps' files src/crossref.h,
-src/ingest*.h, src/search.h, src/binstale.h) that some line of src/ compares as a bound (a CAP SITE, below), or whose
+src/ingest*.h, src/search.h, src/binstale.h; CR712-SHSTATUS-DEPTH the shell parser's nesting budget, src/shstatus.h) that some line of src/ compares as a bound (a CAP SITE, below), or whose
 name says it bounds something (Max, Limit, Cap, Ceiling, Depth, Pairs), or that a `static_assert( kName == N, ... )`
 ties to legend text. The name alone is not the scope: #613's reader cap was kReaderCallerReaders. A name with `Min`
 is a threshold (a row needs at least N), not a cut, and is out of scope. A CAP SITE is a line that compares the
@@ -47,7 +47,7 @@ CONTAINER = re.compile( r'\b(?:namespace|struct|class|union|enum)\b[^;{}()]*$|ex
 def answer_path( root ):
     out = []
     for f in sorted( os.listdir( os.path.join( root, "src" ) ) ):
-        if ( f.startswith( ( "for", "verbs_", "ingest" ) ) and f.endswith( ".h" ) ) or f in ( "pathroute.h", "clones.h", "crossref.h", "search.h", "binstale.h" ):
+        if ( f.startswith( ( "for", "verbs_", "ingest" ) ) and f.endswith( ".h" ) ) or f in ( "pathroute.h", "clones.h", "crossref.h", "search.h", "binstale.h", "shstatus.h" ):
             out.append( "src/" + f )
     return out
 
