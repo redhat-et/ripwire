@@ -250,9 +250,13 @@ inline void wrapPrintSkillsLine( std::FILE* out, const std::string_view agent, c
     rw::emitTo( out, "# skills not found locally — clone https://github.com/redhat-et/ripwire and run skills/install.sh{}\n", codexFlag );
 }
 
-// LS1: the legend-seen hook's install line, for the clients it is ported to. OPT-IN and printed as a COMMENT, never as
-// a command beside the recommended ones: it rewrites the agent's ripwire commands (only to add --legend-seen=FILE), and
-// that is the owner's call to make a default, not this recipe's. A table, so a client gains the line by gaining a row.
+// LS1: the legend-seen hook's line, for the clients it is ported to. ON BY DEFAULT since owner ruling 111 (2026-11-20):
+// the --hook install above registers it, so this line DISCLOSES a default rather than offering an option — it rewrites
+// the agent's ripwire commands (only to add --legend-seen=FILE), which is a bigger commitment than changing output, so
+// the recipe says so in place and names both ways off. Still printed as a COMMENT, never as a command beside the
+// recommended ones: the install line that brings it is the --hook one. A table, so a client gains the line by gaining a
+// row. EVERY printed line that names install.sh or --hook also carries the literal `--hook-legend-seen`, which is how
+// agenttablecheck's (G)/(H) arms tell this line apart from a skills/hook install line for a client that has neither.
 struct LegendSeenHookRow
 {
     std::string_view agent;
@@ -271,8 +275,10 @@ inline void wrapPrintLegendSeenLine( std::FILE* out, const std::string_view agen
     {
         return;
     }
-    rw::emitTo( out, "# OPTIONAL, rewrites commands: bash skills/install.sh{} — adds --legend-seen=<session file> to each ripwire\n"
-                     "#   call so legend definitions you already received are not re-sent (lossless; forgotten on compaction)\n",
+    rw::emitTo( out, "# ON BY DEFAULT with the hook install above, and it REWRITES your ripwire commands: bash skills/install.sh{}\n"
+                     "#   installs it alone. It adds --legend-seen=<session file> to each ripwire call so legend definitions you\n"
+                     "#   already received are not re-sent (lossless: rows and bodies unchanged; forgotten on compaction). Off with\n"
+                     "#   --no-hook-legend-seen at install time, or RIPWIRE_LEGEND_SEEN=0 at run time.\n",
                 std::string_view( row->installerFlags ) );
 }
 

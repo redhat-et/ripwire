@@ -10,7 +10,10 @@
 # Add --hook explicitly to install the advisory PreToolUse + SessionStart hook for the selected client:
 # skills/install.sh --hook (Claude) or skills/install.sh --codex --hook (Codex). --openclaw installs to
 # that same cross-agent root (openclaw's own "compatibility skill root"); it has no hook slot.
-# The legend-seen hook REWRITES ripwire commands (it adds --legend-seen=<session file>), so it is its own opt-in:
+# The legend-seen hook REWRITES ripwire commands (it adds --legend-seen=<session file>). It is ON BY DEFAULT
+# wherever this installer registers hooks (owner ruling 111, 2026-11-20) — a plain skills install still touches no
+# settings.json. --no-hook-legend-seen installs the advisory entries without it, RIPWIRE_LEGEND_SEEN=0 turns it off at
+# run time, and it keeps its own flag for a hook-only install:
 # skills/install.sh --hook-legend-seen (Claude), --codex --hook-legend-seen, or --opencode --hook-legend-seen.
 # The subagent primer (a SubagentStart hook: the two-line ripwire brief in every subagent's context) is its own opt-in
 # too, Claude only: skills/install.sh --hook-subagent-primer.
@@ -311,7 +314,7 @@ install_claude_legend_seen()
         seenWas="already registered in $1 — command refreshed to $seenCmd."
     else
         seenWas="registered in $1."
-        echo "skills/install.sh --hook will add the legend-seen entries to $1:"
+        echo "skills/install.sh will add the legend-seen entries to $1 (ON BY DEFAULT, ruling 111; --no-hook-legend-seen skips it):"
         echo "  hooks.PreToolUse / PostToolUse += [{ matcher: \"Bash\", hooks: [{ type: \"command\", command: \"$seenCmd\" }] }]"
         echo "  hooks.SessionStart / PreCompact += [{ matcher: \"*\", hooks: [{ type: \"command\", command: \"$seenCmd\" }] }]"
         echo "  behavior: REWRITES a ripwire Bash command, only by inserting --legend-seen=<session file> after the binary"
@@ -450,6 +453,11 @@ install_claude_hook()
     echo "            limit and grows for as long as counting stays on. RIPWIRE_METER=0 opts out of counting"
     echo "            (the nudge itself keeps working). Details: docs/SUBSTITUTION_METER.md."
     echo "  remove:   delete those two entries from $settings (or re-run with the entries already absent)."
+    if [ "${wantLegendSeen:-0}" -eq 1 ]; then
+        echo "  also:     --hook registers the legend-seen hook too (ON BY DEFAULT, owner ruling 111). That one DOES"
+        echo "            REWRITE a ripwire Bash command — it announces itself below, before it writes. Pass"
+        echo "            --no-hook-legend-seen for the advisory entries alone."
+    fi
 
     mk_tmp "$settings"
     if "$jqBin" --arg cmd "$hookCmd" --arg scmd "$hookCmd --session-start" --arg m "$hookMatcher" '
@@ -468,9 +476,13 @@ install_claude_hook()
     install_claude_route "$settings"
 }
 
-# ── --hook-legend-seen: the legend-seen hook, OPT-IN on its own (lane LS1, until the owner rules on a default) ──────
+# ── the legend-seen hook, ON BY DEFAULT wherever this installer registers hooks (owner ruling 111, 2026-11-20) ──────
 # It is the one hook here that REWRITES a tool call (it inserts --legend-seen=FILE after the binary word of a ripwire
-# command), so plain --hook — advisory-only by its own promise — never installs it. One function per client.
+# command). That is why it was opt-in until 111: lane LG1 then MEASURED what it saves (~3,184 B/call, a ~19 % cut in
+# total answer bytes from call 2, results/LG1_LEGEND_1120/READOUT.md §1.3) and the ruling turned the default over. What
+# the default does NOT change: the hook's behaviour, the disclosure printed before anything is written, and the two
+# ways off (--no-hook-legend-seen here, RIPWIRE_LEGEND_SEEN=0 at run time). A plain skills install still never touches
+# settings.json — the default rides on a hook install, not on every run. One function per client.
 install_claude_legend_seen_hook()
 {
     settings="$( abs_root "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "${CLAUDE_CONFIG_DIR:-}" )/settings.json" || exit 2
@@ -609,14 +621,16 @@ install_codex_hook()
 mode="claude"
 explicitMode=0
 wantHook=0
-wantLegendSeen=0
+wantLegendSeen=1          # owner ruling 111 (2026-11-20): the legend-seen hook is ON BY DEFAULT with a hook install
+legendSeenOnly=0          # --hook-legend-seen: install THAT hook and nothing else (the pre-111 invocation, kept)
 wantSubagentPrimer=0
 wantContributor=0
 explicitPath=""
 for arg in "$@"; do
     case "$arg" in
         --hook) wantHook=1 ;;
-        --hook-legend-seen) wantLegendSeen=1 ;;
+        --hook-legend-seen) legendSeenOnly=1; wantLegendSeen=1 ;;
+        --no-hook-legend-seen) wantLegendSeen=0 ;;
         --hook-subagent-primer) wantSubagentPrimer=1 ;;
         --opencode) mode="opencode"; explicitMode=1 ;;
         --contributor) wantContributor=1 ;;
@@ -631,6 +645,23 @@ for arg in "$@"; do
     esac
 done
 
+if [ "$legendSeenOnly" -eq 1 ] && [ "$wantLegendSeen" -eq 0 ]; then
+    echo "skills/install.sh: --hook-legend-seen and --no-hook-legend-seen contradict each other; pass one" >&2
+    exit 2
+fi
+
+# ── RULING 111: the default, applied where this installer registers hooks. Called from every --hook path and from
+#    --opencode (whose only hook IS this one); never from a plain skills install, which touches no settings file.
+install_legend_seen_default()
+{
+    [ "$wantLegendSeen" -eq 1 ] || return 0
+    case "$1" in
+        claude)             install_claude_legend_seen_hook ;;
+        codex|codex-legacy) install_codex_legend_seen_hook ;;
+        opencode)           install_opencode_legend_seen_hook ;;
+    esac
+}
+
 # --hook-subagent-primer is hook-only and Claude-only (SubagentStart is a Claude Code event): it never installs skills.
 # It composes with --hook and --hook-legend-seen in one run.
 if [ "$wantSubagentPrimer" -eq 1 ]; then
@@ -643,7 +674,7 @@ if [ "$wantSubagentPrimer" -eq 1 ]; then
     exit 0
 fi
 # --hook-legend-seen is hook-only too, for the client named (Claude by default): it never installs skills.
-if [ "$wantLegendSeen" -eq 1 ]; then
+if [ "$legendSeenOnly" -eq 1 ]; then
     case "$mode" in
         claude)              [ "$wantHook" -eq 0 ] || install_claude_hook; install_claude_legend_seen_hook ;;
         codex|codex-legacy)  [ "$wantHook" -eq 0 ] || install_codex_hook; install_codex_legend_seen_hook ;;
@@ -653,13 +684,20 @@ if [ "$wantLegendSeen" -eq 1 ]; then
     exit 0
 fi
 if [ "$mode" = "opencode" ]; then
-    echo "skills/install.sh: --opencode installs only the legend-seen plugin (pass --hook-legend-seen); opencode reads ripwire's skills through AGENTS.md (ripwire wrap opencode)" >&2
+    # opencode has no advisory hook slot: the legend-seen plugin is the ONLY thing this installer has for it, and
+    # ruling 111 makes it the default — so --opencode alone now installs it instead of refusing and naming the flag.
+    if [ "$wantLegendSeen" -eq 1 ]; then
+        install_opencode_legend_seen_hook
+        exit 0
+    fi
+    echo "skills/install.sh: --opencode --no-hook-legend-seen leaves nothing to install (the legend-seen plugin is the only thing this installer has for opencode); opencode reads ripwire's skills through AGENTS.md (ripwire wrap opencode)" >&2
     exit 2
 fi
 
 # Preserve the established hook-only invocation: `--hook` changes settings but does not also install skills.
 if [ "$wantHook" -eq 1 ] && [ "$explicitMode" -eq 0 ]; then
     install_claude_hook
+    install_legend_seen_default claude
     exit 0
 fi
 
@@ -941,8 +979,8 @@ fi
 
 if [ "$wantHook" -eq 1 ]; then
     case "$mode" in
-        codex|codex-legacy) install_codex_hook ;;
-        claude) install_claude_hook ;;
+        codex|codex-legacy) install_codex_hook; install_legend_seen_default codex ;;
+        claude) install_claude_hook; install_legend_seen_default claude ;;
                 hermes) echo "skills/install.sh: --hook is not ported to the Hermes target yet (Hermes exposes hooks: pre_tool_call in config.yaml, but hooks/ripwire-nudge.sh still switches on Claude tool names); ripwire works via the CLI/MCP server there." >&2; exit 2 ;;
         openclaw) echo "skills/install.sh: --hook is not supported for the openclaw target (openclaw's before_tool_call is a plugin API, not a shell hook slot); ripwire works via the CLI/MCP server there." >&2; exit 2 ;;
         path) echo "skills/install.sh: --hook needs --claude or --codex, not an explicit skill path" >&2; exit 2 ;;
