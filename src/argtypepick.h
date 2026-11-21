@@ -114,14 +114,6 @@ inline bool eraseTopLevelConst( std::vector<std::string>& toks )
     return std::erase_if( toks, topLevelTokenIs( "const", depth ) ) != 0;
 }
 
-// A `*` outside every template argument list: `Box<View*> const&` is a const Box, not a pointer, so it takes the same
-// path as `const Box<View*>&` (CR #716; a `*` anywhere in the tokens chose the pointer branch, which kept the leading const)
-inline bool hasTopLevelPointer( const std::vector<std::string>& toks )
-{
-    int depth = 0;
-    return std::ranges::any_of( toks, topLevelTokenIs( "*", depth ) );
-}
-
 // `toks`: one parameter's type tokens (editCheckTypeTokens: the declarator name already dropped)
 inline ArgTypeShape argTypeShapeOf( std::vector<std::string> toks )
 {
@@ -142,7 +134,10 @@ inline ArgTypeShape argTypeShapeOf( std::vector<std::string> toks )
     {
         return shape;
     }
-    if( hasTopLevelPointer( toks ) )
+    // only a `*` outside every template argument list makes the parameter a pointer: `Box<View*> const&` is a const Box and takes
+    // the same path as `const Box<View*>&` (CR #716; a `*` anywhere chose this branch, which kept the leading const)
+    int pointerDepth = 0;
+    if( std::ranges::any_of( toks, topLevelTokenIs( "*", pointerDepth ) ) )
     {
         while( !toks.empty() && toks.back() == "const" )   // `T* const`: the pointer itself is const
         {
