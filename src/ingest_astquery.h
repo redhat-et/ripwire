@@ -834,8 +834,7 @@ static void collectPredicateRegexRefusals( const HashMap<const TSLanguage*, Gram
     {
         if( group.regexRefusedOut != nullptr )
         {
-            std::sort( group.regexRefusedOut->begin(), group.regexRefusedOut->end() );
-            group.regexRefusedOut->erase( std::unique( group.regexRefusedOut->begin(), group.regexRefusedOut->end() ), group.regexRefusedOut->end() );
+            rw::sortutil::sortUnique( *group.regexRefusedOut );
         }
     }
 }
@@ -2104,6 +2103,45 @@ std::vector<LocalNameFact> collectGatedLocalNames( std::string_view defBytes, st
     return out;
 }
 
+// QD-TANGLE detail (ingest.h tangleDetailOf): ONE function's steering locals and deep regions, by re-parsing its file and re-running
+// the same fused walk with a detail sink. The node is the smallest one that starts at the definition's first byte and ends at its last
+// — the def node complexityOf measured at ingest (a body-sibling or literal-bound def measures a different node, and gets no detail).
+TangleDetailFacts tangleDetailOf( std::string_view fileBytes, std::string_view path, std::uint32_t startByte, std::uint32_t endByte )
+{
+    TangleDetailFacts out;
+    const LangEntry* le = lookupLang( lowerExtensionOf( path ) );
+    if( le != nullptr && le->grammar != nullptr && lowerExtensionOf( path ) == ".h" && looksObjC( fileBytes ) )
+    {
+        le = lookupLang( ".m" );   // the SAME reroute the crawl applies
+    }
+    if( le == nullptr || le->grammar == nullptr || startByte >= endByte || endByte > fileBytes.size() )
+    {
+        return out;
+    }
+    ParserGuard pg;
+    const TSLanguage* g = le->grammar();
+    if( pg.p == nullptr || g == nullptr || !ts_parser_set_language( pg.p, g ) || !grammarAbiOk( g ) )
+    {
+        return out;
+    }
+    const TreeGuard tree( ts_parser_parse_string( pg.p, nullptr, fileBytes.data(), std::uint32_t( fileBytes.size() ) ) );   // freed on every exit
+    if( tree.tree == nullptr )
+    {
+        return out;
+    }
+    TSNode n = ts_node_descendant_for_byte_range( ts_tree_root_node( tree.tree ), startByte, endByte - 1u );
+    while( !ts_node_is_null( n ) && ts_node_start_byte( n ) > startByte )
+    {
+        n = parentOf( n );
+    }
+    if( !ts_node_is_null( n ) && ts_node_start_byte( n ) == startByte && ts_node_end_byte( n ) == endByte )
+    {
+        complexityOf( n, fileBytes, le->lang, &out );
+        out.ok = true;
+    }
+    return out;
+}
+
 // ---- definitionLinesInBlobs (ingest.h): the tags path over blobs from other git refs ----
 //
 // The DISCLOSE sink of one blob: a degrade sets its slot's status, which is exactly what the caller reads (a blob
@@ -2130,7 +2168,7 @@ struct BlobDefsSlot
 // member-macro re-parse when the first parse holds errors, the `#if 0` ranges, the definitions-only tags pass. False when
 // the slot is already final (a template-only .astro, or a degrade it discloses).
 inline bool tagsDefinitionsOfBlob( std::string_view bytes, const LangEntry& le, TSParser* parser, TSQueryCursor* cursor, MemberMacroReparse& macroWork,
-                                   std::vector<RawDef>& defs, BlobDefinitions& slot, std::string_view fileStem )
+                                   std::vector<RawDef>& defs, BlobDefinitions& slot, std::string_view fileStem, TagsCapture mode )
 {
     IncludedRangeGuard     rangeGuard;
     const AstroFrontmatter astro = restrictAstroToFrontmatter( parser, le, bytes, rangeGuard );
@@ -2160,7 +2198,7 @@ inline bool tagsDefinitionsOfBlob( std::string_view bytes, const LangEntry& le, 
     std::vector<RawBind>                binds;
     std::vector<Include>                incs;
     ExtractShortfall                    shortfall;
-    captureTagsFacts( cursor, le, 0, bytes, root, defs, refs, binds, incs, ppDead, shortfall, TagsCapture::DefinitionsOnly, fileStem );
+    captureTagsFacts( cursor, le, 0, bytes, root, defs, refs, binds, incs, ppDead, shortfall, mode, fileStem );
     if( shortfall.isShort )
     {
         DISCLOSE( ( BlobDefsSlot{ slot } ), BlobDefsSlot::DisclosureWhy::ExtractPartial, "whereis: the tags pass over a blob was partial — its rows confirm no definition" );
@@ -2169,23 +2207,24 @@ inline bool tagsDefinitionsOfBlob( std::string_view bytes, const LangEntry& le, 
     return true;
 }
 
-// One blob through the crawl's language rule and the parse-pool worker's extraction steps, in the worker's order.
-// `scan` is a one-slot scan the nesting refusal records into (its --skipped bookkeeping has no reader here: the
-// slot's Unread status is this blob's disclosure).
-inline void definitionLinesOfOneBlob( const BlobText& blob, std::string_view name, TSParser* parser, TSQueryCursor* cursor,
-                                      MemberMacroReparse& macroWork, IngestFileScan& scan, BlobDefinitions& slot )
+// One blob through the crawl's language rule and the parse-pool worker's extraction steps, in the worker's order, into
+// the definitions HEAD's index would make SYMBOLS of. `scan` is a one-slot scan the nesting refusal records into (its
+// --skipped bookkeeping has no reader here: the slot's Unread status is this blob's disclosure). Null when the slot is
+// already final (no grammar, unread, a degrade it discloses, a template-only .astro); else the language the blob read as.
+inline const LangEntry* rawDefsOfOneBlob( const BlobText& blob, TSParser* parser, TSQueryCursor* cursor, MemberMacroReparse& macroWork,
+                                          IngestFileScan& scan, BlobDefinitions& slot, TagsCapture mode, std::vector<RawDef>& defs )
 {
     const std::string ext = lowerExtensionOf( blob.path );
     const LangEntry*  le  = lookupLang( ext );
     if( le == nullptr )
     {
         slot.status = BlobDefsStatus::NoGrammar;
-        return;
+        return nullptr;
     }
     if( blob.bytes.size() > kDefaultMaxFileBytes || looksBinary( blob.bytes ) )
     {
         slot.status = BlobDefsStatus::Unread;   // the crawl's own ceiling and binary sniff: the index skips these too
-        return;
+        return nullptr;
     }
     if( le->ext == ".h" && looksObjC( blob.bytes ) )
     {
@@ -2199,28 +2238,27 @@ inline void definitionLinesOfOneBlob( const BlobText& blob, std::string_view nam
     if( refuseNesting( *le, blob.bytes, pathText.c_str(), 0, scan ) )
     {
         slot.status = BlobDefsStatus::Unread;
-        return;
+        return nullptr;
     }
     if( !prepareParserFor( parser, *le ) )
     {
         DISCLOSE( ( BlobDefsSlot{ slot } ), BlobDefsSlot::DisclosureWhy::GrammarRejected, "whereis: a blob's grammar could not be set — its rows confirm no definition" );
-        return;
+        return nullptr;
     }
-    std::vector<RawDef> defs;
     if( le->lang == Lang::Markdown )
     {
         TreeGuard mdTree( parseTree( parser, blob.bytes ) );
         if( mdTree.get() == nullptr )
         {
             DISCLOSE( ( BlobDefsSlot{ slot } ), BlobDefsSlot::DisclosureWhy::ParseNull, "whereis: a markdown blob did not parse — its rows confirm no definition" );
-            return;
+            return nullptr;
         }
         std::vector<RawRef> refs;
         extractMarkdown( 0, blob.bytes, fs::path( pathText ).stem().string(), ts_tree_root_node( mdTree.get() ), defs, refs );
     }
-    else if( !tagsDefinitionsOfBlob( blob.bytes, *le, parser, cursor, macroWork, defs, slot, cjsExportStem( le->lang, pathText ) ) )
+    else if( !tagsDefinitionsOfBlob( blob.bytes, *le, parser, cursor, macroWork, defs, slot, cjsExportStem( le->lang, pathText ), mode ) )
     {
-        return;   // the slot says why (template-only .astro: Parsed with nothing; a degrade: Failed)
+        return nullptr;   // the slot says why (template-only .astro: Parsed with nothing; a degrade: Failed)
     }
     // The model build's steps that decide which captured definitions become SYMBOLS (ingest.cpp 3a..3a-ter), so a
     // blob answers what HEAD's index answers for the same bytes: overlapping patterns collapse to one definition, an
@@ -2229,6 +2267,17 @@ inline void definitionLinesOfOneBlob( const BlobText& blob, std::string_view nam
     dedupRawDefs( defs );
     collapseObjCDeclDefs( defs );
     (void)partitionFieldDefs( defs );
+    return le;
+}
+
+inline void definitionLinesOfOneBlob( const BlobText& blob, std::string_view name, TSParser* parser, TSQueryCursor* cursor,
+                                      MemberMacroReparse& macroWork, IngestFileScan& scan, BlobDefinitions& slot )
+{
+    std::vector<RawDef> defs;
+    if( rawDefsOfOneBlob( blob, parser, cursor, macroWork, scan, slot, TagsCapture::DefinitionsOnly, defs ) == nullptr )
+    {
+        return;
+    }
     for( const RawDef& d : defs )
     {
         if( d.name == name )
@@ -2276,9 +2325,10 @@ inline void installBlobQueries( std::span<const BlobText> blobs )
 }
 
 // One parse worker: its own parser, query cursor and scratch, claiming blobs in `walkOrder` until none is left. Each blob
-// writes only its own slot of `out`.
-inline void definitionLinesWorker( std::span<const BlobText> blobs, std::string_view name, std::span<const std::uint32_t> walkOrder,
-                                   std::atomic<std::size_t>& nextSlot, std::span<BlobDefinitions> out ) noexcept
+// writes only its own slot of `out` (and whatever `oneBlob` writes at that blob's index).
+template<class OneBlob>
+inline void blobPoolWorker( std::span<const BlobText> blobs, std::span<const std::uint32_t> walkOrder, std::atomic<std::size_t>& nextSlot,
+                            std::span<BlobDefinitions> out, const OneBlob& oneBlob ) noexcept
 {
     ParserGuard    pg;
     TSQueryCursor* cursor = ts_query_cursor_new();
@@ -2301,7 +2351,7 @@ inline void definitionLinesWorker( std::span<const BlobText> blobs, std::string_
         BlobDefinitions& slot = out[ walkOrder[ s ] ];
         try
         {
-            definitionLinesOfOneBlob( blobs[ walkOrder[ s ] ], name, pg.p, cursor, macroWork, scan, slot );
+            oneBlob( walkOrder[ s ], pg.p, cursor, macroWork, scan, slot );
         }
         catch( ... )   // a throw escaping a worker thread is std::terminate: the blob degrades instead
         {
@@ -2311,7 +2361,9 @@ inline void definitionLinesWorker( std::span<const BlobText> blobs, std::string_
     ts_query_cursor_delete( cursor );
 }
 
-std::vector<BlobDefinitions> definitionLinesInBlobs( std::span<const BlobText> blobs, std::string_view name )
+// The blob pool: queries installed single-threaded first, then hardware_concurrency() workers, biggest blob first.
+template<class OneBlob>
+inline std::vector<BlobDefinitions> runBlobPool( std::span<const BlobText> blobs, const OneBlob& oneBlob )
 {
     std::vector<BlobDefinitions> out( blobs.size() );
     if( blobs.empty() )
@@ -2331,11 +2383,53 @@ std::vector<BlobDefinitions> definitionLinesInBlobs( std::span<const BlobText> b
     pool.reserve( threadCount );
     for( unsigned t = 0; t < threadCount; ++t )
     {
-        pool.emplace_back( [ & ]() noexcept { definitionLinesWorker( blobs, name, walkOrder, nextSlot, out ); } );
+        pool.emplace_back( [ & ]() noexcept { blobPoolWorker( blobs, walkOrder, nextSlot, out, oneBlob ); } );
     }
     for( std::thread& w : pool )
     {
         w.join();
+    }
+    return out;
+}
+
+std::vector<BlobDefinitions> definitionLinesInBlobs( std::span<const BlobText> blobs, std::string_view name )
+{
+    return runBlobPool( blobs, [ & ]( std::uint32_t at, TSParser* parser, TSQueryCursor* cursor, MemberMacroReparse& macroWork, IngestFileScan& scan, BlobDefinitions& slot )
+                        { definitionLinesOfOneBlob( blobs[ at ], name, parser, cursor, macroWork, scan, slot ); } );
+}
+
+// QD-TANGLE D4 (ingest.h): every callable's tangle inputs in each blob, by the index's own extraction and cc_walk.
+std::vector<BlobTangleDefs> tangleInputsInBlobs( std::span<const BlobText> blobs )
+{
+    std::vector<BlobTangleDefs>        out( blobs.size() );
+    const std::vector<BlobDefinitions> status = runBlobPool( blobs, [ & ]( std::uint32_t at, TSParser* parser, TSQueryCursor* cursor, MemberMacroReparse& macroWork,
+                                                                           IngestFileScan& scan, BlobDefinitions& slot )
+    {
+        std::vector<RawDef> defs;
+        const LangEntry*    le = rawDefsOfOneBlob( blobs[ at ], parser, cursor, macroWork, scan, slot, TagsCapture::DefinitionsAndShape, defs );
+        if( le == nullptr )
+        {
+            return;
+        }
+        BlobTangleDefs& mine = out[ at ];
+        mine.lang            = le->lang;
+        for( const RawDef& d : defs )
+        {
+            if( d.kind == SymKind::Function || d.kind == SymKind::Method )
+            {
+                mine.defs.push_back( { d.scope, d.name, tangleInputsFrom( d.loc, d.maxNest, d.deepLoc, d.steer, tangleDispatchShare( d.deepLoc, d.deepDispatch, d.nestArmCut ) ),
+                                       rawDefBodyStart( d ), d.endByte } );
+            }
+        }
+        slot.status = BlobDefsStatus::Parsed;
+    } );
+    for( std::size_t i = 0; i < out.size(); ++i )
+    {
+        out[ i ].status = status[ i ].status;
+        if( status[ i ].status != BlobDefsStatus::Parsed )
+        {
+            out[ i ].defs.clear();
+        }
     }
     return out;
 }

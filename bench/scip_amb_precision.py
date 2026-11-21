@@ -38,14 +38,17 @@ RUN_TIMEOUT_S = 3600   # one cold whole-repo map; generous on purpose
 
 def run(binp, repo, extra):
     cmd = [binp, repo, "--top-k=100000", "--no-cache"] + extra
-    # Bounded, and a timeout or signal-kill (rc < 0, e.g. the OS killing a runaway run) is its own state:
-    # the script stops naming it, instead of parsing a partial or empty map as the answer.
+    # Bounded, and a timeout, a signal-kill (rc < 0, e.g. the OS killing a runaway run) or ANY non-zero exit is its own
+    # state: the script stops naming it, instead of parsing a partial or empty map as the answer. The memory ceiling's
+    # refusal is a positive status (exit 5) with empty stdout, which parses as an empty map and prints precision=nan.
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=RUN_TIMEOUT_S)
     except subprocess.TimeoutExpired:
         sys.exit("TIMEOUT (%ds): %s" % (RUN_TIMEOUT_S, " ".join(cmd)))
     if p.returncode < 0:
         sys.exit("KILLED (signal=%d): %s" % (-p.returncode, " ".join(cmd)))
+    if p.returncode:
+        sys.exit("FAILED (exit=%d): %s\n%s" % (p.returncode, " ".join(cmd), (p.stderr or "").strip()[:400]))
     return p.stdout
 
 def parse(xml):

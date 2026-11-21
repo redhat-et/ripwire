@@ -729,9 +729,28 @@ PY
 #   H0  the PREMISE: every gate in which a grep sees the binary variable ("$" + "BIN") in command position yields at least one call to the
 #       matcher (a blind parser would pass H1/H2 on nothing), and the planted controls below are classified as
 #       the CodeRabbit shapes they reproduce.
-python3 - "$ROOT" <<'PY' || fail=1
-import glob, os, re, sys
+#   H4  ONE MATCHER, TWO HOSTS: src/shstatus.h is this matcher's C++ port, the one the --quality-delta defect-shape
+#       vacuous-assert facet reads inside the binary. test/shstatus_harness.cpp prints the port's calls in this
+#       matcher's CLI format; every gate's rows must be identical (line, verdict, how, command), and the arm counts the
+#       rows it compared and fails on zero. A change to either copy lands with the other, or this arm reds. With no C++
+#       front end on the runner the arm SKIPs, saying so (it compiles the header alone, no CMake flags).
+SHH=""
+SHHDIR="$( mktemp -d )"
+. "$ROOT/scripts/cxxstd.sh"
+SHCXX="${CXX:-c++}"
+if command -v "$SHCXX" >/dev/null 2>&1; then
+    if "$SHCXX" "$( ripwire_cxx_std_flag "$SHCXX" )" -O1 -I"$ROOT/src" "$ROOT/test/shstatus_harness.cpp" -o "$SHHDIR/shh" 2>"$SHHDIR/cc.log"; then
+        SHH="$SHHDIR/shh"
+    else
+        no "(H4) test/shstatus_harness.cpp did not compile with $SHCXX: $( head -c 600 "$SHHDIR/cc.log" )"
+    fi
+else
+    echo "  SKIP  (H4) no C++ front end ($SHCXX): the src/shstatus.h port is not compared with this matcher on this runner"
+fi
+python3 - "$ROOT" "$SHH" <<'PY' || fail=1
+import glob, os, re, subprocess, sys
 ROOT = sys.argv[1]
+SHH = sys.argv[2] if len( sys.argv ) > 2 else ""
 sys.path.insert( 0, os.path.join( ROOT, "test", "lib" ) )
 import exitstatus as es
 
@@ -802,6 +821,11 @@ PLANT = {
     "h3_twin":      ( 'run(){ ( cd "$T" && @BIN@ . "$@" ); }\nrunoff(){ ( cd "$T" && "${OFF[@]}" @BIN@ . "$@" ); }\n'
                       'run --token-budget=9 > b.xml; runoff --token-budget=9 > b.off\n[ "$( rk b.xml )" -ge "$( rk b.off )" ] && ok b || no b\n',
                       [ ( 3, "unchecked" ), ( 3, "unchecked" ) ] ),
+    # (QD-VA-FORMS) a single quote inside "$( … )" is a live quote: '<r ' stays one word, so the next statement's
+    # rc=$? is read and compared (jsverbscheck:42 read as unchecked while the quotes were blanked), and a quoted
+    # `./build/ripwire` pattern word is no call (argvdiffcheck:258)
+    "h2_dq_quote":  ( 'G="$( @BIN@ . --x=\'callees(name("a"),2)\' )"\nRC=$?\n[ $RC -eq 0 ] || no rc\n'
+                      'R="$( grep -oE \'^## `\\./build/ripwire [^`]*\' f )"\n', [ ( 1, "checked" ) ] ),
 }
 BINVAR = "$" + "BIN"
 PLANT = { k: ( src.replace( "@BIN@", '"%s"' % BINVAR ), want ) for k, ( src, want ) in PLANT.items() }
@@ -812,7 +836,7 @@ for name, ( src, want ) in PLANT.items():
         ctl_bad += 1
         no( "(H0 control) planted %s: the matcher says %s, the shape is %s -- H1/H2 below cannot be trusted" % ( name, got, want ) )
 if not ctl_bad:
-    ok( "(H0 control) %d planted gates classified as their CodeRabbit shapes: an unchecked harness and a never-compared rc are found, the six checked forms are not, the #616 twin is seen, errexit is read per call, a printed $? is not a test" % len( PLANT ) )
+    ok( "(H0 control) %d planted gates classified as their CodeRabbit shapes: an unchecked harness and a never-compared rc are found, the seven checked forms are not, the #616 twin is seen, errexit is read per call, a printed $? is not a test" % len( PLANT ) )
 
 gates = sorted( glob.glob( os.path.join( ROOT, "test", "*.sh" ) ) )
 CMDPOS = re.compile( r'(?:^\s*|[;&|(]\s*|\$\(\s*|\bthen\s+|\bdo\s+|\belse\s+)(?:[A-Z_]+=\S*\s+)*"\$' r'BIN"\s' )
@@ -881,8 +905,39 @@ unch = [ ( n, c ) for n, c in bin_calls if c.verdict == "unchecked" ]
 print( "  INFO  (H3) census, not gated: %d of %d ripwire / wrapper calls in %d gates test no status (%d gates test none); the rule for these is diff-scoped"
        % ( len( unch ), len( bin_calls ), len( { n for n, _c in unch } ),
            sum( 1 for n, v in calls.items() if v and not any( c.verdict == "checked" for c in v ) ) ) )
+
+# H4: the C++ port classifies every call of every gate exactly as this matcher does
+if SHH:
+    want = []
+    for p in gates:
+        for c in calls[os.path.basename( p )]:
+            want.append( "%s:%d\t%s\t%s\t%s" % ( p, c.line, c.verdict, c.how, c.cmd ) )
+    for name, ( src, _w ) in sorted( PLANT.items() ):   # the planted shapes, through the same CLI format
+        path = os.path.join( os.environ.get( "TMPDIR", "/tmp" ), "gateexit_h4_%d_%s.sh" % ( os.getpid(), name ) )
+        open( path, "w" ).write( src )
+        for c in es.scan( src ):
+            want.append( "%s:%d\t%s\t%s\t%s" % ( path, c.line, c.verdict, c.how, c.cmd ) )
+    planted = sorted( os.path.join( os.environ.get( "TMPDIR", "/tmp" ), "gateexit_h4_%d_%s.sh" % ( os.getpid(), n ) ) for n in PLANT )
+    r = subprocess.run( [ SHH ] + gates + planted, capture_output=True, text=True, errors="surrogateescape" )
+    for p in planted:
+        try: os.remove( p )
+        except OSError: pass
+    got = r.stdout.splitlines()
+    if r.returncode != 0:
+        no( "(H4) the src/shstatus.h harness exited %d: %s" % ( r.returncode, r.stderr[:300] ) )
+    elif not want:
+        no( "(H4) premise: this matcher reported no call on %d gates -- nothing to compare" % len( gates ) )
+    elif got != want:
+        ws, gs = set( want ), set( got )
+        only_py = [ x for x in want if x not in gs ]; only_cc = [ x for x in got if x not in ws ]
+        for x in only_py[:6]: no( "(H4) exitstatus.py only: %s" % x )
+        for x in only_cc[:6]: no( "(H4) src/shstatus.h only: %s" % x )
+        if not only_py and not only_cc: no( "(H4) same rows, different order (%d rows)" % len( want ) )
+    else:
+        ok( "(H4) src/shstatus.h and test/lib/exitstatus.py agree on all %d calls in %d gates and %d planted shapes" % ( len( want ), len( gates ), len( PLANT ) ) )
 sys.exit( bad )
 PY
+rm -rf "$SHHDIR"
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit "$fail"

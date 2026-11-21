@@ -49,6 +49,8 @@ echo "staleackcheck: BIN=$BIN"
 
 # `knotty` breaches kCcxBar (15) reliably — the same fixture shape test/qackorigincheck.sh uses to pin a
 # real complexity finding, reused here so this gate does not have to re-derive a bar-breaching shape.
+# `long b` keeps the list free of a run of three same-typed parameters, so --quality-delta's report-only similar= params row
+# (on by default since QD-SIMILAR-DEFAULT) adds no params ack beside the complexity one this gate is about (CI on #706).
 # Committed WITHOUT knotty first, so appending it makes an UNCOMMITTED (ackable) new-symbol finding —
 # exactly test/qackorigincheck.sh's own setup.
 mkdir -p "$REPO/src"
@@ -60,7 +62,7 @@ git -C "$REPO" add -A; git -C "$REPO" commit -qm init >/dev/null
 
 cat > "$REPO/src/lib.cpp" <<'EOF'
 int stable( int a ) { return a + 1; }
-int knotty( int a, int b, int c ) {
+int knotty( int a, long b, int c ) {
     int r = 0;
     for( int i = 0; i < a; ++i ) {
         if( i % 2 == 0 ) { if( i > b ) { r += i; } else { r -= 1; } }
@@ -185,7 +187,7 @@ run --show-stale >/dev/null 2>&1 && no "(2c) --show-stale alone was accepted" ||
 # ── (3) FINDING-GONE: knotty() survives (same canonId) but is simplified back under the complexity bar ──
 cat > "$REPO/src/lib.cpp" <<'EOF'
 int stable( int a ) { return a + 1; }
-int knotty( int a, int b, int c ) { return a + b + c; }
+int knotty( int a, long b, int c ) { return a + b + c; }
 EOF
 run --quality-delta --show-stale >"$TMP/findinggone" 2>/dev/null; rcFG=$?
 if grep -q 'stale="[1-9]' "$TMP/findinggone" && grep -q '<sa kind="complexity"[^>]*why="finding-gone"' "$TMP/findinggone"; then
@@ -275,7 +277,7 @@ git -C "$REPO2" init -q; git -C "$REPO2" config user.email x@y; git -C "$REPO2" 
 git -C "$REPO2" add -A; git -C "$REPO2" commit -qm init >/dev/null
 cat > "$REPO2/src/other.cpp" <<'EOF'
 int stable2( int a ) { return a + 1; }
-int knotty2( int a, int b, int c ) {
+int knotty2( int a, long b, int c ) {
     int r = 0;
     for( int i = 0; i < a; ++i ) {
         if( i % 2 == 0 ) { if( i > b ) { r += i; } else { r -= 1; } }

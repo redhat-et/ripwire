@@ -2,7 +2,7 @@
 name: ripwire-quality-bar
 description: >
   Code QUALITY of what YOU just wrote, before commit/'done' or a cleanup: --quality-delta
-  lists what got WORSE in 12 kinds; exit 2 if old code did (new-symbol rows never gate,
+  lists what got WORSE in 13 kinds; exit 2 if old code did (new-symbol rows never gate,
   except defect-shape format-arity and a new function at the ceiling); the fix each shape calls for.
   Merge safety → change-check. Even a single-line leaf fix runs it.
 allowed-tools: Bash, Read
@@ -24,8 +24,8 @@ ripwire <dir> --quality-delta --legend=compact
 ```
 
 In a git repo it compares the working tree against `git HEAD` (`baseline="git-HEAD"` in the header) — no setup.
-It lists only what YOUR change made worse, across 12 kinds (complexity, verbosity, nesting, params, duplication,
-dead-code, api-surface, error-masking, short-horizon-churn, new-clone-of-reused-helper, placeholder, defect-shape). **Watch `verbosity` hardest** — LOC growth is the most-measured agent failure mode.
+It lists only what YOUR change made worse, across 13 kinds (complexity, verbosity, nesting, params, duplication,
+dead-code, api-surface, error-masking, short-horizon-churn, new-clone-of-reused-helper, placeholder, defect-shape, tangle). **Watch `verbosity` hardest** — LOC growth is the most-measured agent failure mode.
 
 Long multi-commit change? Run `ripwire <dir> --quality-baseline` FIRST, on a clean tree, so every later run
 deltas against where you started instead of the last commit (on a dirty tree it refuses; `--allow-dirty` pins

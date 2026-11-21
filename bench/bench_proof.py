@@ -23,14 +23,17 @@ def run(argv):
     except Exception as e: return f"[err {e}]"
     # a signal-kill (rc<0, e.g. the OS killing a runaway run) is named like the timeout above, never a partial answer
     return f"[err killed(signal={-p.returncode})]" if p.returncode<0 else p.stdout
-# Whole-repo map runs are bounded too, and a timeout or signal-kill is its OWN state: it raises RunAbnormal so the
-# row prints that state instead of a timing taken from a run that never finished.
+# Whole-repo map runs are bounded too, and a timeout, a signal-kill or ANY non-zero exit is its OWN state: it raises
+# RunAbnormal so the row prints that state instead of a timing taken from a run that never finished. A positive status
+# is as fatal to a timing as a kill is: the memory ceiling's refusal (exit 5, empty stdout) costs the time of the run
+# it refused, and recorded as a timing it would read as a completed map.
 MAP_TIMEOUT_S=3600
 class RunAbnormal(Exception): pass
 def map_run(argv):
     try: p=subprocess.run(argv, capture_output=True, timeout=MAP_TIMEOUT_S)
     except subprocess.TimeoutExpired: raise RunAbnormal(f"timeout({MAP_TIMEOUT_S}s)")
     if p.returncode<0: raise RunAbnormal(f"killed(signal={-p.returncode})")
+    if p.returncode: raise RunAbnormal(f"exit({p.returncode}): {(p.stderr or b'').decode('utf-8','replace').strip()[:400]}")
     return p
 def grep_dump(term,d):
     return run(["grep","-rn"]+[f"--include=*{e}" for e in EXTS]+[term,d])

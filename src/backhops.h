@@ -226,8 +226,7 @@ private:
         }
         std::ranges::stable_sort( m_classes, {}, &ClassSpan::fileId );
         std::ranges::stable_sort( m_classIds, sortutil::svLess, &ClassName::name );
-        std::ranges::sort( m_classNames, sortutil::svLess );
-        m_classNames.erase( std::ranges::unique( m_classNames ).begin(), m_classNames.end() );
+        sortutil::sortUnique( m_classNames, sortutil::svLess );
         for( const Binding& b : m_ing.bindings )
         {
             if( ( b.kind != LocalBindKind::MemberType && b.kind != LocalBindKind::RecvType ) || b.var.empty() || b.typeName.empty() || !b.importedName.empty()
@@ -345,8 +344,7 @@ inline std::vector<NodeId> containerHolds( const ValueRefIndex& values, std::uin
         const std::vector<NodeId> t = values.targetsOf( v );
         fns.insert( fns.end(), t.begin(), t.end() );
     }
-    std::ranges::sort( fns );
-    fns.erase( std::ranges::unique( fns ).begin(), fns.end() );
+    sortutil::sortUnique( fns );
     return fns;
 }
 
@@ -1571,8 +1569,7 @@ inline ConnectResult connectDeclinedJoints( const IngestResult& ing, const Graph
     {
         std::ranges::transform( v, std::back_inserter( fns ), &DeclinedWay::fn );
     }
-    std::ranges::sort( fns );
-    fns.erase( std::ranges::unique( fns ).begin(), fns.end() );
+    sortutil::sortUnique( fns );
     std::vector<ConnectResult::DeclinedJoint> found;
     for( const NodeId fn : fns )
     {

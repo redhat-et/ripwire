@@ -49,7 +49,7 @@ e4bd12b94 0
 1d604ab41 3
 bae4d12f6 1
 c5b45f163 1
-1a009c9f7 6
+1a009c9f7 4
 dd29aa8c2 1
 760a433c7 2
 3b7931830 14"
@@ -118,6 +118,10 @@ gates c5b45f163 isCQuoteRootProbe    isBareTsSpecifier
 # (ContentMoves, TRAIN-1111h) a body that left its key for one new key is the same function, so the pre-existing
 # clone group is held, not reported as new duplication: the pathDirOf rows (2 duplication + 2 new-clone) are gone,
 # 10 -> 6 gating. Premise: the baseline's dirOf really holds the moved body; without it this arm would pass blind.
+# QD-IDIOM-ELEMTYPE (lane qd-lessons-1) takes it 6 -> 4: decltwin_detail::baseOf | gitstamp::atAttr (duplication and
+# new-clone) is an "empty, else cut / else wrap" shape over different data. baseOf spells no literal, and atAttr's
+# ` at="` / `"` is not a call argument, so the operand path reports it minor with why="different literals". The
+# afterLast family below (every body passes its separator straight to rfind/find_last_of) keeps gating.
 if git -C "$REPO" show 1a009c9f7:src/siblift.h | grep -A3 'inline std::string_view dirOf' | grep -q "rfind( '/' )"; then
     ok "1a009c9f7 premise: the baseline's siblift dirOf holds the body fbe6d9b82 moved into pathDirOf"
     if [ -z "$( rows 1a009c9f7 | grep -F '::pathDirOf' )" ]; then ok "1a009c9f7: pathDirOf's moved clone group is held as pre-existing (ContentMoves), no row"

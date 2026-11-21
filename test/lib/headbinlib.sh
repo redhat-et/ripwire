@@ -203,7 +203,9 @@ headbin_jobs()
     if [ "${GITHUB_ACTIONS:-}" = "true" ]; then printf '%s\n' "$_ncpu"; return 0; fi
     _mem="$( sysctl -n hw.memsize 2>/dev/null )"
     case "$_mem" in
-        ""|*[!0-9]*) _mem="$( awk '/^MemTotal:/ { printf "%d", $2 * 1024 }' /proc/meminfo 2>/dev/null )" ;;
+        # %.0f, never %d: mawk's %d goes through a C int and CLAMPS at 2147483647, so a 32 GiB host would read as
+        # 2 GiB, _gib=1 and the build would take -j 1 instead of -j 4. %.0f is exact for every byte count under 2^53.
+        ""|*[!0-9]*) _mem="$( awk '/^MemTotal:/ { printf "%.0f", $2 * 1024 }' /proc/meminfo 2>/dev/null )" ;;
     esac
     case "$_mem" in ""|*[!0-9]*) _gib=8 ;; *) _gib=$(( _mem / 1073741824 )) ;; esac
     _j=$(( _ncpu / 2 )); [ $(( _gib / 8 )) -lt "$_j" ] && _j=$(( _gib / 8 ))

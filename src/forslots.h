@@ -465,8 +465,7 @@ inline std::size_t spliceSlotJoinRows( std::string& sigs, const IngestResult& in
                         }
                     }
                 }
-                std::ranges::sort( fns );
-                fns.erase( std::ranges::unique( fns ).begin(), fns.end() );
+                rw::sortutil::sortUnique( fns );
                 if( fns.empty() || caller.find_first_of( ",=@" ) != std::string::npos )
                 {
                     ++more;

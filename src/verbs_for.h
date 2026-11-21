@@ -4,6 +4,7 @@
 #endif
 
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/sortutil.h"   // sortUnique
 #include "forliteral.h" // MF1-LIT: a task naming a literal gets its byte-exact sites and owner bodies, appended
 #include "forpage.h"    // L-W: the --for --limit=N file page, coverage=, the thin rule and the widening next=
 #include "foranswerfirst.h" // ITEM R: a finished --for answer serves its ANSWER first (a permutation)
@@ -2606,8 +2607,7 @@ inline rw::HopValueRefs forHopValueRefs( const rw::IngestResult& ing, const std:
             names.push_back( ing.symbols[ id ].name );
         }
     }
-    std::ranges::sort( names, rw::sortutil::svLess );
-    names.erase( std::ranges::unique( names ).begin(), names.end() );
+    rw::sortutil::sortUnique( names, rw::sortutil::svLess );
     const auto namesAValue = [ & ]( const rw::Reference& r )
     { return r.role == rw::RefRole::Value && std::ranges::binary_search( names, std::string_view( r.calleeName ), rw::sortutil::svLess ); };
     if( names.empty() || !std::ranges::any_of( ing.references, namesAValue ) )   // COST: no value use of any hop name, no index and no byte
@@ -2627,8 +2627,7 @@ inline rw::HopValueRefs forHopValueRefs( const rw::IngestResult& ing, const std:
             out.counts.emplace_back( id, std::uint32_t( n ) );
         }
     }
-    std::ranges::sort( out.counts );
-    out.counts.erase( std::ranges::unique( out.counts ).begin(), out.counts.end() );
+    rw::sortutil::sortUnique( out.counts );
     return out;
 }
 // the hops cut's continuation (` next="--for=TASK"`) — one spelling for the marker and the partial-cut splice
@@ -3060,7 +3059,7 @@ inline void appendForTaskRowBlocks( const MainDispatch& d )
         return;
     }
     rw::emitRaw( stdout, rw::renderForDeclRows( d.ing, d.g, cfg.forTask, /*held=*/forHeldBlocksBudget( cfg ) > 0 ).c_str() );
-    rw::emitRaw( stdout, rw::renderForExemplarFamily( d.ing, d.g, cfg.forTask, /*held=*/forHeldBlocksBudget( cfg ) > 0, /*compactLegend=*/cfg.legend == "compact" ).c_str() );   // EXEMPLAR-STAIRS: "" unless the task adds one more X
+    rw::emitRaw( stdout, rw::renderForExemplarFamily( d.ing, d.g, cfg.forTask, d.redactPtr, /*held=*/forHeldBlocksBudget( cfg ) > 0, /*compactLegend=*/cfg.legend == "compact" ).c_str() );   // EXEMPLAR-STAIRS: "" unless the task adds one more X
     rw::emitRaw( stdout, rw::renderForManifestRows( d.ing, cfg.forTask, d.redactPtr, /*held=*/forHeldBlocksBudget( cfg ) > 0, /*compactLegend=*/cfg.legend == "compact" ).c_str() );   // MANIFEST-ROW: "" unless the task names a manifest entry
 }
 
@@ -3313,7 +3312,7 @@ inline std::string forHeldNextFlags( const rw::Config& cfg )
 // The caller skips it under a budget, which leaves both as shaped.
 inline std::string oneSideReachAnswer( const MainDispatch& d, const std::string& answer, std::string& syms, const std::optional<rw::PricedRootInputs>& price )
 {
-    rw::OneSideReachEdit edit = rw::demoteOneSideRows( d.ing, d.g, d.cfg.forTask, answer, syms );
+    rw::OneSideReachEdit edit = rw::demoteOneSideRows( d.ing, d.g, { .task = d.cfg.forTask, .answer = answer, .syms = syms } );
     if( !edit.answer.empty() && price )
     {
         rw::repriceRootAfterCut( edit.answer, *price, answer.size() );   // signed: the pointers and legend may outweigh the rows they replace
@@ -4182,6 +4181,8 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         std::vector<rw::NodeId> epHead;   // the ranked head the clause was priced for; narrowed to the rows <sigs> emits once it renders
         // manifest-noncode (listedin.h): the manifest lines listing a file of that same ranked head, same regime, same re-pick
         rw::ListedRender listedIn;
+        std::optional<RedactCounts> listedRedactBefore;   // the tally around the first <listed> render: a re-render below takes its count back
+        std::optional<RedactCounts> listedRedactAfter;
         const bool       peerManifestRegime = autoBundleMode && !cfg.json && cfg.tokenBudget <= 0;
         if( peerManifestRegime && ( rw::forEpManifestOn() || rw::forListedInOn() ) )
         {
@@ -4198,7 +4199,9 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             }
             if( rw::forListedInOn() )
             {
-                listedIn = rw::renderForListedIn( ing, epHead, cfg.forTask );
+                listedRedactBefore = redactPtr != nullptr ? std::optional<RedactCounts>( *redactPtr ) : std::nullopt;
+                listedIn           = rw::renderForListedIn( ing, epHead, cfg.forTask, redactPtr );
+                listedRedactAfter  = redactPtr != nullptr ? std::optional<RedactCounts>( *redactPtr ) : std::nullopt;
             }
         }
         headerParts.epPresent     = !epManifest.xml.empty();
@@ -5113,6 +5116,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         if( headerParts.listedPresent && ( !sigsPreRendered || enrich.surfaceOff ) )   // manifest-noncode: same rule as <ep>
         {
             listedIn.xml.clear();
+            rw::redactTakeBack( redactPtr, listedRedactBefore, listedRedactAfter );   // its lines are not printed: their count comes back out
             headerParts.listedPresent = false;
             headerStr = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, enrich.surfaceOff ? std::string_view() : kForDegradedBundleNote );
         }
@@ -5230,7 +5234,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         {
             const std::string before = forHdrXml + filePageXml + unusedXml;
             const std::string after  = autoSection.xml + slot.xml;
-            const auto        point  = [ & ] { return rw::demoteAndPointBlock( ing, g, cfg.forTask, before, sigsStr, after ); };
+            const auto        point  = [ & ] { return rw::demoteAndPointBlock( ing, g, cfg.forTask, { .before = before, .block = sigsStr, .after = after } ); };
             std::string pointed = rw::refillRowsForDemote( forSigsCut.rowDropBudgetBytes, [ & ]() -> const std::string& { return sigsStr; },
                                                            [ & ] { return forSigsCut.rowDropCut; }, [ & ] { return shownSigIds.size(); }, renderRowsAt, point );
             if( !pointed.empty() )
@@ -5264,7 +5268,8 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             }
             if( epEmitted.size() != epHead.size() && headerParts.listedPresent )   // manifest-noncode: "lists a shown file" holds the same way
             {
-                listedIn = rw::renderForListedIn( ing, epEmitted, cfg.forTask );
+                rw::redactTakeBack( redactPtr, listedRedactBefore, listedRedactAfter );   // the first render is replaced: its lines are not printed
+                listedIn = rw::renderForListedIn( ing, epEmitted, cfg.forTask, redactPtr );
                 if( listedIn.xml.empty() )
                 {
                     headerParts.listedPresent = false;
@@ -5881,7 +5886,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             if( !d.cfg.signaturesOnly && rw::keybody::keyBodyOn() )
             {
                 const std::string_view keyRoot = d.ing.realPaths.empty() && d.cfg.roots.size() == 1 ? d.cfg.roots[0] : std::string_view();
-                (void)rw::keybody::insertKeyBodies( doc, d.ing, d.cfg.forTask, keyRoot, &r.ledger );
+                (void)rw::keybody::insertKeyBodies( doc, d.ing, d.cfg.forTask, keyRoot, d.redactPtr, &r.ledger );
             }
             if( const std::optional<std::string> early = forEarlyStopPage( d, doc ) )   // RT2 ES: a proven leading block ends page 1
             {

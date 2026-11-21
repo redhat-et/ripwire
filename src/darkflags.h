@@ -40,6 +40,7 @@
 #include "infra/Diagnostics.h"  // DISCLOSE
 #include "infra/sortutil.h"     // svLess — the portable string_view order (portablebuildcheck #6b)
 #include "infra/tablelookup.h"  // findByField — the shell keyword table
+#include "infra/shellword.h"   // trimView / shellIsRedirect — shared with shstatus.h (one copy)
 
 #include "btree.hpp"      // gtl::btree_map — sorted iteration (house rule: never std::map)
 
@@ -327,19 +328,7 @@ inline std::uint32_t forEachLine( std::string_view bytes, PerLine&& perLine )
     return lineCount;
 }
 
-inline std::string_view trimView( std::string_view s )
-{
-    std::size_t a = 0, b = s.size();
-    while( a < b && std::isspace( (unsigned char)s[a] ) )
-    {
-        ++a;
-    }
-    while( b > a && std::isspace( (unsigned char)s[b - 1] ) )
-    {
-        --b;
-    }
-    return s.substr( a, b - a );
-}
+using shellword::trimView;   // infra/shellword.h: the one trim shstatus.h shares
 
 // The identifier starting at `i` (empty if src[i] does not open one), advancing `i` past it.
 inline std::string_view takeIdent( std::string_view src, std::size_t& i )
@@ -1447,12 +1436,7 @@ inline ShellWord shellWordShape( std::string_view line, std::size_t at, std::uin
 }
 
 // `<f`, `>f`, `2>f`, `<`: a redirection, which ends a keyword's name list (`read -r line < VERSION` writes `line`).
-inline bool shellIsRedirect( std::string_view word ) noexcept
-{
-    std::size_t k = 0;
-    while( k < word.size() && std::isdigit( (unsigned char)word[k] ) ) { ++k; }
-    return k < word.size() && ( word[k] == '<' || word[k] == '>' );
-}
+using shellword::shellIsRedirect;   // infra/shellword.h, shared with shstatus.h
 
 // One option word of local / declare / typeset / readonly. -p, -f and -F print a variable or name functions:
 // nothing after them is written. -g makes an in-function declare global; -g and -x leave a bare NAME's inherited

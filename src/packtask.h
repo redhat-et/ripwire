@@ -1,5 +1,6 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/sortutil.h"   // sortUnique
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
 
@@ -2439,8 +2440,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
         surfaceOut->insert( surfaceOut->end(), head.shownIds.begin(), head.shownIds.end() );
         surfaceOut->insert( surfaceOut->end(), bodyIds.begin(),    bodyIds.end() );
         surfaceOut->insert( surfaceOut->end(), d1.ids.begin(),     d1.ids.end() );
-        std::sort( surfaceOut->begin(), surfaceOut->end() );
-        surfaceOut->erase( std::unique( surfaceOut->begin(), surfaceOut->end() ), surfaceOut->end() );
+        sortutil::sortUnique( *surfaceOut );
     }
     return whole;
 }

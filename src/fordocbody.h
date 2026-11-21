@@ -692,10 +692,17 @@ inline ForDocPrep prepareForDocBody( const ForDocBodyInputs& in )
 
 namespace fordocbody_detail
 {
-// one unit of a loaded file as a passage, whole or cut to the best window within `maxBytes`
-inline ForDocPassage loadedUnitPassage( const IngestResult& ing, const ForDocPrep& prep, const ForDocPrep::Loaded& l, std::uint32_t u, std::uint32_t rank,
-                                        std::size_t maxBytes )
+// One section unit of a loaded file and the rank it is served at (two uint32_t, named at the call).
+struct RankedUnit
 {
+    std::uint32_t u    = 0;
+    std::uint32_t rank = 0;
+};
+// one unit of a loaded file as a passage, whole or cut to the best window within `maxBytes`
+inline ForDocPassage loadedUnitPassage( const IngestResult& ing, const ForDocPrep& prep, const ForDocPrep::Loaded& l, RankedUnit ranked, std::size_t maxBytes )
+{
+    const std::uint32_t u    = ranked.u;
+    const std::uint32_t rank = ranked.rank;
     const DocCut cut { prep.queryToks, maxBytes };
     if( !l.sections )
     {
@@ -730,7 +737,7 @@ inline FileServe admitFileSections( const IngestResult& ing, const ForDocPrep& p
         {
             return false;
         }
-        fs.passages.push_back( loadedUnitPassage( ing, prep, l, u, rank, cap ) );
+        fs.passages.push_back( loadedUnitPassage( ing, prep, l, { .u = u, .rank = rank }, cap ) );
         fs.spent += fs.passages.back().text.size();
         return true;
     };
@@ -802,7 +809,7 @@ inline void admitFromPool( const IngestResult& ing, const ForDocPrep& prep, std:
                 stillMissed.emplace_back( rank, u );
                 continue;
             }
-            fs.passages.push_back( loadedUnitPassage( ing, prep, l, u, rank, room ) );
+            fs.passages.push_back( loadedUnitPassage( ing, prep, l, { .u = u, .rank = rank }, room ) );
             const bool isFit = cost <= room;
             const std::size_t used = std::min( room, isFit ? cost : fs.passages.back().text.size() );
             room -= used;

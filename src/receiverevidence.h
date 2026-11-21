@@ -20,6 +20,8 @@
 // What it does NOT do: infer a function's return type (`s = self.get_screen(); s.refresh()`), follow a property, or type
 // a value that crossed a call boundary. Those receivers stay name-only — the honest answer, not a guess.
 
+#include "externalnames.h"   // kRustStdReceiverTypes / kRustStdDerefTypes / kRustPreludeTypes (lane std-namesake)
+#include "infra/hashutil.h"     // packPair: the chain tables' ( file, byte ) keys
 #include "infra/idkeyedmap.h"   // IdKeyedCsr: localType's packed ( scope, name ) → facts table (K1a LOCALTYPE-PACK)
 #include "infra/sortutil.h"   // svLess: the explicit byte order the operatorResult sort takes (portablebuildcheck #6)
 #include "langfacts.h"   // langFacts(l).overloadsWithoutArity — overloadedAbove's language column
@@ -29,6 +31,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -338,8 +341,7 @@ struct CallResultTypes
         {
             return a->fileId != b->fileId ? a->fileId < b->fileId : a->startByte < b->startByte;
         } );
-        std::sort( cppUsingFiles.begin(), cppUsingFiles.end() );
-        cppUsingFiles.erase( std::unique( cppUsingFiles.begin(), cppUsingFiles.end() ), cppUsingFiles.end() );
+        sortutil::sortUnique( cppUsingFiles );
     }
     // the import path the file-scope name `name` binds in file `fileId` ("" when none, or rebound)
     std::string_view importPathOf( std::uint32_t fileId, std::string_view name ) const
@@ -710,8 +712,8 @@ struct CallResultTypes
             {
                 return kNoNode;
             }
-            supplies = false;   // rust-receivers: rustItemAt sets it when the module has the item, re-exports it or may glob it in
-            return rustItemAt( crate, module, name, 0, supplies );
+            RustItemWalk walk;
+            return rustModuleItem( crate, module, name, walk, supplies );   // rust-receivers: `supplies` when the module has the item, re-exports it or globs it in
         }
         nameKey.assign( b.importedName );
         const auto files = packageFiles.find( nameKey );
@@ -1231,9 +1233,18 @@ struct CallResultTypes
             return found;
         } );
     }
+    // RUST-PATH-OWNER: the crate (RustLayout) file `f` belongs to, kNoCrate when the layout places it in none
+    std::uint32_t rustCrateOfFile( std::uint32_t f ) const
+    {
+        if( !rust.built )
+        {
+            buildRustLayout();
+        }
+        return f < rust.crateOf.size() ? rust.crateOf[ f ] : kNoCrate;
+    }
     // the (crate, module) `modPath` (`crate::model`, `super::x`, `mdbook_core::book`, a `use`d `model`) names at byte `at` of
     // file `f` — relative to the module `at` sits in, an inline `mod` included (fix round 3: `super::` inside `mod m` is the
-    // file's module, `self::` is m)
+    // file's module, `self::` is m); a segment that is a `use`d module, not a child one, is followed (rustAliasedModuleOf)
     bool rustModuleOf( std::uint32_t f, std::uint32_t at, std::string_view modPath, std::uint32_t& crate, std::string& module, int depth ) const
     {
         if( !rust.built )
@@ -1312,59 +1323,225 @@ struct CallResultTypes
                 return false;   // `std`, an outside crate, an unknown name
             }
         }
-        for( ; i < segs.size(); ++i )
+        const std::string from = module;
+        for( std::size_t s = i; s < segs.size(); ++s )
         {
-            module = joinModule( module, segs[ i ] );
+            module = joinModule( module, segs[ s ] );
         }
-        return rustModuleExists( crate, module );
+        if( rustModuleExists( crate, module ) )
+        {
+            return true;
+        }
+        module = from;
+        return rustAliasedModuleOf( crate, module, std::span<const std::string_view>( segs ).subspan( i ), depth );
+    }
+    // RUST-MODALIAS-GLOB: rustModuleOf's tail when the path names no module of the layout as written: each segment that is no
+    // child module of the module reached so far is followed through the ONE `use` binding that name at that module's own level
+    // (axum-extra lib.rs `pub(crate) use axum::test_helpers;` makes `crate::test_helpers` axum's module, and a glob of it the
+    // items that module declares and re-exports). The `use` path reads from where it is written (rustModuleOf, one hop deeper:
+    // a chain of aliases and a cycle stop at its depth cap). A segment no module and no `use` (or two `use`s) binds, or a `use`
+    // that leads outside the tree, names nothing. A module only a glob brings in is not followed (stated floor).
+    bool rustAliasedModuleOf( std::uint32_t& crate, std::string& module, std::span<const std::string_view> segs, int depth ) const
+    {
+        for( const std::string_view seg : segs )
+        {
+            if( std::string child = joinModule( module, seg ); rustModuleExists( crate, child ) )
+            {
+                module = std::move( child );
+                continue;
+            }
+            NodeId         inlineMod = kNoNode;
+            std::uint32_t  ownFile   = 0;
+            const auto     mfs       = rustModuleFiles( crate, module, inlineMod, ownFile );
+            const Level    level     = rustModuleLevel( inlineMod );
+            const Binding* alias     = nullptr;
+            std::size_t    uses      = 0;
+            for( const std::uint32_t mf : mfs )
+            {
+                forEachImport( mf, seg, [ & ]( const Binding& b )
+                {
+                    if( b.kind == LocalBindKind::TypeImport && levelAt( mf, b.startByte ) == level )
+                    {
+                        ++uses;
+                        alias = &b;
+                    }
+                } );
+            }
+            if( uses != 1 || !rustModuleOf( alias->fileId, alias->startByte, alias->importedName, crate, module, depth + 1 ) )
+            {
+                return false;
+            }
+        }
+        return true;
     }
     // the ONE Rust class `cls` module `modPath` (seen from byte `at` of `f`) defines — or re-exports: a `use` of the name at
-    // the module's own level (`pub use mdbook::MDBook;` in lib.rs) is followed to the module it names (depth-bounded)
-    NodeId rustClassAt( std::uint32_t f, std::uint32_t at, std::string_view modPath, std::string_view cls, int depth = 0 ) const
+    // the module's own level (`pub use mdbook::MDBook;` in lib.rs) is followed to the module it names (depth-bounded), and
+    // (RUST-PARAM-GLOB-REEXPORT) so is a glob there (`pub use engine_state::*;` in engine/mod.rs)
+    NodeId rustClassAt( std::uint32_t f, std::uint32_t at, std::string_view modPath, std::string_view cls ) const
+    {
+        RustItemWalk walk;
+        return rustItemOfPath( { f, at }, modPath, cls, walk ).id;
+    }
+    // One walk from a written path to the item it names: which kind of item is asked for, how deep the walk is, and the
+    // questions it already asked.
+    struct RustItemWalk
+    {
+        int                      depth = 0;   // re-export hops taken so far (capped at 4: a cut walk names nothing)
+        std::span<const NodeId>  fns;         // empty: a class-like item; else the Rust free functions of the name asked for (graph.h's candidates)
+        std::vector<std::string> seen;        // the "<crate>#<module>#<item>" questions already asked: asked again (a cycle, a diamond), one brings nothing new
+        std::uint32_t            reasked = 0; // how often that happened: a step that found nothing below a re-asked question says nothing either way
+    };
+    // What a module answers for an item name: the ONE in-tree item (kNoNode: outside the tree, ambiguous, an alias), and
+    // whether the module has the name at all (`found` false: it declares, re-exports and globs in no such item).
+    struct RustItem
+    {
+        NodeId id    = kNoNode;
+        bool   found = false;
+    };
+    mutable HashMap<std::string, RustItem> rustClassMemo;   // rustModuleItem: "<crate>#<module>#<name>" → what the module answers for a class name
+    // where a path is written: a byte of a file
+    struct RustSite
+    {
+        std::uint32_t file = 0;
+        std::uint32_t at   = 0;
+    };
+    // a module's own level: the file level of its files, or an inline mod's body
+    struct RustModuleRef
+    {
+        std::uint32_t      crate     = kNoCrate;
+        const std::string& module;
+        NodeId             inlineMod = kNoNode;
+        Level              level;
+    };
+    // is byte `pos` of `file` at module `m`'s own level (never inside a mod or fn it holds)?
+    bool rustAtModuleLevel( const RustModuleRef& m, std::uint32_t file, std::uint32_t pos ) const
+    {
+        return m.inlineMod == kNoNode ? file < rust.crateOf.size() && rust.crateOf[ file ] == m.crate && rust.moduleOf[ file ] == m.module && levelAt( file, pos ).wholeFile()
+                                      : file == ing.symbols[ m.inlineMod ].fileId && levelAt( file, pos ) == m.level;
+    }
+    // is symbol `c` an item of module `m`'s own level, never of a mod or fn in it?
+    bool rustOwnsItem( const RustModuleRef& m, NodeId c ) const
+    {
+        const std::uint32_t cf = ing.symbols[ c ].fileId;
+        return m.inlineMod == kNoNode ? cf < rust.crateOf.size() && rust.crateOf[ cf ] == m.crate && rust.moduleOf[ cf ] == m.module && enclosingSymbol( c ) == kNoNode
+                                      : enclosingSymbol( c ) == m.inlineMod;
+    }
+    // the item `item` of the module `modPath` names at `site`, under a walk already begun (a re-export hop, a function lookup)
+    RustItem rustItemOfPath( RustSite site, std::string_view modPath, std::string_view item, RustItemWalk& walk ) const
     {
         std::uint32_t crate = kNoCrate;
         std::string   module;
-        bool          found = false;
-        if( depth > 4 || !rustModuleOf( f, at, modPath, crate, module, 0 ) )
+        RustItem      hit;
+        if( walk.depth <= 4 && rustModuleOf( site.file, site.at, modPath, crate, module, 0 ) )
+        {
+            hit.id = rustModuleItem( crate, module, item, walk, hit.found );
+        }
+        return hit;
+    }
+    // RUST-PARAM-GLOB-REEXPORT: the ONE in-tree free function the `use` bindings of a bare call's name, in force at the call, reach
+    // through the module tree and its re-exports (`use nu_engine::redirect_env;` over lib.rs's `pub use eval::{redirect_env};`), out
+    // of `fns` (the Rust free functions of that name). kNoNode when no `use` binds the name there, one leads outside or nowhere,
+    // two disagree, or a function nested in a fn body of the caller's file may shadow the binding: the call then resolves as before.
+    NodeId rustUseBoundFn( const Reference& r, std::span<const NodeId> fns ) const
+    {
+        const bool nestedNamesake = std::ranges::any_of( fns, [ & ]( NodeId c )
+        {
+            const NodeId outer = ing.symbols[ c ].fileId == r.fileId ? enclosingSymbol( c ) : kNoNode;
+            return outer != kNoNode && ing.symbols[ outer ].kind != SymKind::Other;   // an item of a fn body: in scope there, over any `use`
+        } );
+        Ballot bound;
+        if( fns.empty() || nestedNamesake )
         {
             return kNoNode;
         }
-        return rustItemAt( crate, module, cls, depth, found );
+        forEachRustUseAt( r.fileId, r.startByte, r.calleeName, [ & ]( const Binding& b )
+        {
+            const auto [ modPath, item ] = splitLast( b.importedName, "::" );
+            RustItemWalk walk{ 0, fns, {}, 0 };
+            bound.vote( modPath.empty() ? kNoNode : rustItemOfPath( { r.fileId, b.startByte }, modPath, item, walk ).id );
+        } );
+        return bound.verdict();
     }
-    // the item `cls` of module (crate, module): a class declared at the module's own level (a file module's file level, an
-    // inline mod's body), else a re-export there; an alias there names nothing. `found` false when the module has none.
-    NodeId rustItemAt( std::uint32_t crate, const std::string& module, std::string_view cls, int depth, bool& found ) const
+    // RUST-PARAM-GLOB-REEXPORT, on top of FE-A's verdict `kinds` for the call (graph.h FalseEdgeRules::decide, whose kindDecide has
+    // already dropped what a bare call cannot name: a bare Rust path call never names a method). Where a `use` in force binds the
+    // name, the ONE free function that `use` reaches is the only candidate left (`kept`, Narrow): `use nu_engine::redirect_env;`
+    // over lib.rs's `pub use eval::{redirect_env};` is eval.rs's, never a private `eval_ir::redirect_env` of the same crate, which
+    // Rule 3's included-file closure cannot tell apart. Any other call, a verdict that is no Keep / Narrow, a name a local of the
+    // caller hides (`localOfCaller`, asked only for a bare Rust call), a `use` that decides nothing: `kinds`, unchanged.
+    template <class Verdict, class LocalOfCaller>
+    Verdict rustBareNarrow( const Reference& r, Verdict kinds, std::span<const NodeId> ids, rw::SmallVec<NodeId, 2>& kept, LocalOfCaller&& localOfCaller ) const
     {
-        const auto   inl       = rust.inlineMods.find( rustModuleKey( crate, module ) );
-        const NodeId inlineMod = inl == rust.inlineMods.end() ? kNoNode : inl->second;
-        const Level  level     = rustModuleLevel( inlineMod );
-        const auto   atLevel   = [ & ]( std::uint32_t file, std::uint32_t pos )
+        const bool bare = callResultFamilyOf( r.lang ) == CallResultFamily::Rust && r.role == RefRole::Call && r.qualifier.empty() && r.recv == RecvKind::None
+                          && !r.memberCall && r.fromSymbol < ing.symbols.size();
+        if( !bare || ( kinds != Verdict::Keep && kinds != Verdict::Narrow ) || localOfCaller() )
         {
-            return inlineMod == kNoNode ? file < rust.crateOf.size() && rust.crateOf[ file ] == crate && rust.moduleOf[ file ] == module && levelAt( file, pos ).wholeFile()
-                                        : file == ing.symbols[ inlineMod ].fileId && levelAt( file, pos ) == level;
-        };
-        NodeId            one = kNoNode;
-        const std::size_t n   = classesNamed( cls, CallResultFamily::Rust, [ & ]( NodeId c )
-        {
-            const std::uint32_t cf = ing.symbols[ c ].fileId;   // an item of the module's own level, never of a mod or fn in it
-            return inlineMod == kNoNode ? cf < rust.crateOf.size() && rust.crateOf[ cf ] == crate && rust.moduleOf[ cf ] == module && enclosingSymbol( c ) == kNoNode
-                                        : enclosingSymbol( c ) == inlineMod;
-        }, one );
-        bool aliased = false;
-        nameKey.assign( cls );
-        if( const auto aliases = aliasesByName.find( nameKey ); aliases != aliasesByName.end() )
-        {
-            aliased = std::ranges::any_of( aliases->second, [ & ]( const Binding* b ) { return atLevel( b->fileId, b->startByte ); } );   // a Rust file's (atLevel)
+            return kinds;
         }
-        if( n > 0 || aliased )
+        rw::SmallVec<NodeId, 2> freeFns;
+        for( const NodeId c : kinds == Verdict::Narrow ? std::span<const NodeId>( kept.begin(), kept.end() ) : ids )
+        {
+            if( ing.symbols[ c ].kind == SymKind::Function && ing.symbols[ c ].lang == r.lang )
+            {
+                freeFns.push_back( c );
+            }
+        }
+        const NodeId bound = rustUseBoundFn( r, std::span<const NodeId>( freeFns.begin(), freeFns.end() ) );
+        if( bound == kNoNode )
+        {
+            return kinds;
+        }
+        kept.clear();
+        kept.push_back( bound );
+        return Verdict::Narrow;
+    }
+    // rustItemAt, asked once: a class asked from outside any walk (a `use` row, a glob row, a written path) is a function of
+    // the layout alone, so each (module, name) is walked once (rustClassMemo: engine/mod.rs's twenty globs, asked per typed
+    // parameter); and inside one walk a question asked again brings nothing new — a module's private `use` of the name often
+    // leads back to the module that globs it (closure.rs `use crate::engine::EngineState;` under engine/mod.rs `pub use closure::*;`).
+    NodeId rustModuleItem( std::uint32_t crate, const std::string& module, std::string_view cls, RustItemWalk& walk, bool& found ) const
+    {
+        const bool  outermost = walk.seen.empty() && walk.fns.empty();
+        std::string asked     = rustModuleKey( crate, module );
+        asked.append( 1, '#' ).append( cls );
+        if( const auto memo = rustClassMemo.find( asked ); outermost && memo != rustClassMemo.end() )
+        {
+            found = memo->second.found;
+            return memo->second.id;
+        }
+        found = false;
+        if( std::ranges::find( walk.seen, asked ) != walk.seen.end() )
+        {
+            ++walk.reasked;
+            return kNoNode;
+        }
+        walk.seen.push_back( asked );
+        const NodeId item = rustItemAt( crate, module, cls, walk, found );
+        if( outermost )
+        {
+            rustClassMemo.try_emplace( std::move( asked ), RustItem{ item, found } );
+        }
+        return item;
+    }
+    // the item `cls` of module (crate, module): a class (or, on a function walk, a free function) declared at the module's own
+    // level (a file module's file level, an inline mod's body), else a re-export there, else (RUST-PARAM-GLOB-REEXPORT) what the
+    // globs there supply; an alias there names nothing. `found` false when the module has none.
+    NodeId rustItemAt( std::uint32_t crate, const std::string& module, std::string_view cls, RustItemWalk& walk, bool& found ) const
+    {
+        const auto          inl       = rust.inlineMods.find( rustModuleKey( crate, module ) );
+        const NodeId        inlineMod = inl == rust.inlineMods.end() ? kNoNode : inl->second;
+        const RustModuleRef m{ crate, module, inlineMod, rustModuleLevel( inlineMod ) };
+        const auto          atLevel   = [ & ]( std::uint32_t file, std::uint32_t pos ) { return rustAtModuleLevel( m, file, pos ); };
+        const int           depth     = walk.depth;
+        if( const RustItem own = rustDeclaredItem( m, cls, walk ); own.found )
         {
             found = true;
-            return n == 1 && !aliased ? one : kNoNode;
+            return own.id;
         }
         const auto files = rust.filesOf.find( rustModuleKey( crate, module ) );
         const std::vector<std::uint32_t> none;
         const std::vector<std::uint32_t>& of = inlineMod != kNoNode ? none : files == rust.filesOf.end() ? none : files->second;
         ReexportPick pick;
+        pick.walk = &walk;
         for( std::uint32_t mf : of )   // by reference: the layout's own list, never a copy
         {
             rustFollowReexports( mf, atLevel, cls, depth, pick );
@@ -1373,8 +1550,33 @@ struct CallResultTypes
         {
             rustFollowReexports( ing.symbols[ inlineMod ].fileId, atLevel, cls, depth, pick );
         }
+        if( !pick.bound )   // a named `use` of the name shadows every glob of its level
+        {
+            rustGlobsSupply( pick, cls );
+        }
         found = found || pick.bound || pick.globbed;
         return pick.clash ? kNoNode : pick.one;
+    }
+    // rustItemAt's first step: the item module `m` declares at its own level under the name. On a function walk, the module's
+    // own free functions of the name; a class of the name declared there (a tuple struct's constructor is a value too) decides
+    // nothing when no function does. On a class walk, an alias of the name there names nothing.
+    RustItem rustDeclaredItem( const RustModuleRef& m, std::string_view cls, const RustItemWalk& walk ) const
+    {
+        const auto        owned   = [ & ]( NodeId c ) { return rustOwnsItem( m, c ); };
+        NodeId            one     = kNoNode;
+        const std::size_t classes = classesNamed( cls, CallResultFamily::Rust, owned, one );
+        if( !walk.fns.empty() )
+        {
+            const std::size_t fns = static_cast<std::size_t>( std::ranges::count_if( walk.fns, owned ) );
+            return { fns == 1 ? *std::ranges::find_if( walk.fns, owned ) : kNoNode, fns + classes > 0 };
+        }
+        bool aliased = false;
+        nameKey.assign( cls );
+        if( const auto aliases = aliasesByName.find( nameKey ); aliases != aliasesByName.end() )
+        {
+            aliased = std::ranges::any_of( aliases->second, [ & ]( const Binding* b ) { return rustAtModuleLevel( m, b->fileId, b->startByte ); } );   // a Rust file's
+        }
+        return { classes == 1 && !aliased ? one : kNoNode, classes > 0 || aliased };
     }
     // What the module-level `use … cls` bindings rustFollowReexports read name, across the module's files and its inline mod.
     struct ReexportPick
@@ -1383,6 +1585,10 @@ struct CallResultTypes
         bool   bound   = false;     // some binding spells the name (it may resolve outside the tree)
         bool   clash   = false;     // two bindings resolve to DIFFERENT in-tree classes: ambiguous, no class
         bool   globbed = false;     // rust-receivers: a glob at the module's level may bring the name in unseen (not followed)
+        // RUST-PARAM-GLOB-REEXPORT: the walk these bindings are read under, and the globs at the module's level, which
+        // rustGlobsSupply follows when no binding spells the name (`globbed` is then a glob it could not follow)
+        RustItemWalk*               walk = nullptr;
+        std::vector<const Binding*> globs;
         // one binding that spells the name, resolving to `c` (kNoNode: outside the tree, which carries no class)
         void take( NodeId c )
         {
@@ -1395,6 +1601,8 @@ struct CallResultTypes
     // the class its path reaches, and a glob there sets `globbed`. #610 (@soarkit): a binding that resolves to no in-tree class
     // (`#[cfg(feature = "x")] pub use external_crate::Config;`) carries no class, and two cfg-exclusive re-exports of ONE class
     // agree; only two bindings resolving to different in-tree classes are ambiguous.
+    // RUST-PARAM-GLOB-REEXPORT: a glob there is kept in `pick.globs` (rustGlobsSupply follows it, and sets `globbed` only for one
+    // it cannot follow); a binding whose path only leads back into this walk is a binding of what is being asked and says nothing.
     template <class AtLevel>
     void rustFollowReexports( std::uint32_t mf, const AtLevel& atLevel, std::string_view cls, int depth, ReexportPick& pick ) const
     {
@@ -1410,12 +1618,50 @@ struct CallResultTypes
             }
             if( b->var == "*" )
             {
-                pick.globbed = true;
+                pick.globs.push_back( b );
                 continue;
             }
             const auto [ modPath, item ] = splitLast( b->importedName, "::" );
-            pick.take( modPath.empty() ? kNoNode : rustClassAt( mf, b->startByte, modPath, item, depth + 1 ) );
+            RustItemWalk&       walk          = *pick.walk;
+            const std::uint32_t reaskedBefore = walk.reasked;
+            walk.depth = depth + 1;
+            const RustItem hit = modPath.empty() ? RustItem{} : rustItemOfPath( { mf, b->startByte }, modPath, item, walk );
+            walk.depth = depth;
+            if( hit.found || walk.reasked == reaskedBefore )
+            {
+                pick.take( hit.id );
+            }
         }
+    }
+    // RUST-PARAM-GLOB-REEXPORT: what the globs at a module's level supply for the item `cls` (`pub use engine_state::*;` in
+    // engine/mod.rs), read into the pick when no binding spells the name. A glob of an in-tree module supplies what that module
+    // declares or re-exports under the name (rustModuleItem, one hop deeper), and nothing when the module has no such item. A glob
+    // the layout cannot place (an outside crate, an enum's variants, a cut walk) MAY supply the name unseen: `globbed`. So ONE
+    // item is named only when every glob that can supply the name agrees on it; two same-named types behind two globs, an
+    // ambiguous module below, or an in-tree glob beside one that cannot be followed, name nothing (`clash`).
+    void rustGlobsSupply( ReexportPick& pick, std::string_view cls ) const
+    {
+        RustItemWalk& walk = *pick.walk;
+        std::uint32_t gc   = kNoCrate;
+        std::string   gm;
+        for( const Binding* g : pick.globs )
+        {
+            if( walk.depth >= 4 || !rustModuleOf( g->fileId, g->startByte, g->importedName, gc, gm, 0 ) )
+            {
+                pick.globbed = true;
+                continue;
+            }
+            bool supplies = false;
+            ++walk.depth;
+            const NodeId c = rustModuleItem( gc, gm, cls, walk, supplies );
+            --walk.depth;
+            if( supplies )
+            {
+                pick.take( c );
+                pick.clash = pick.clash || c == kNoNode;
+            }
+        }
+        pick.clash = pick.clash || ( pick.globbed && pick.bound );
     }
     // (L) a qualified Rust call whose qualifier is a module path reaching `target`'s own module (`model::load()`,
     // `crate::nest::holder()`, a `use`d `nest::holder()`): the evidence the canonical tier, keyed by type scopes, lacks
@@ -2123,6 +2369,20 @@ struct ReceiverEvidence
     HashMap<std::string, NodeId>                          memberClass;     // rust-receivers: "<class id>#field" → the ONE class its written type resolved to (kNoNode = unknown)
     HashMap<std::string, NodeId>                          memberIface;     // lane L6: "<class id>#field" → the trait a `Box<dyn T>` field dispatches through (kNoNode = disagree)
     HashMap<std::string, std::vector<std::string>>        embeds;          // "Class" → its other bases: Go embedded classes (promotion)
+    // lane std-namesake: a Rust struct field WRITTEN as a standard type — "<class id>#field" → the type's spine (ingest_binds.h
+    // rustStdSpine) and the file that declares it (the spine's names are proven there). Only a field with ONE declaration: build()
+    // drops an entry a second declaration of the field shares (a `#[cfg]` twin may be written as an in-tree type).
+    struct RustStdField
+    {
+        rw::InternedText spine;
+        std::uint32_t    fileId = 0;
+        std::uint32_t    decls  = 0;   // the MemberType records of this key, counted once every record is in
+    };
+    HashMap<std::string, RustStdField>                    memberStd;
+    mutable HashMap<std::string, std::string_view>        rustStdSpineMemo;      // "<fileId>#spine" → the proven final type name ("" unproven)
+    mutable HashMap<std::string, char>                    rustStdNamesakeMemo;   // type name → are its in-tree namesakes all std aliases
+    mutable HashMap<std::string, char>                    rustStdOwnerMemo;      // owner name → may a std receiver reach its methods
+    mutable std::vector<std::int8_t>                      rustForeignGlob;       // fileId → 0 unread, 1 no foreign glob import, 2 one
     HashMap<std::string, std::string>                     nameAlias;       // "<fileId>#local" → the class name it imports
     // FE-B (review B4): one binding of a local name — the class it names ("" = unknown: it hides an outer binding of the
     // name and proves nothing) and the bytes it is visible in. end == 0: a record with no span (a Python name, a reassignment,
@@ -2135,7 +2395,9 @@ struct ReceiverEvidence
         rw::InternedText type;              // "" = a tombstone
         NodeId           cls   = kNoNode;   // (L) fix round 1: the ONE in-tree class `type` resolved to (kNoNode: the name alone); Go: or the witness of a type the tree declares no class for (CallResultTypes::goDeclLessType)
         NodeId           iface = kNoNode;   // lane L6: a binding typed only as SOME implementor of this trait (type stays "")
-        rw::InternedText bound;             // lane L6: a generic bound's text (`R: Renderer`), "" otherwise
+        rw::InternedText bound;             // lane L6: a generic bound's text (`R: Renderer`), "" otherwise. Lane std-namesake: on a
+                                            //   TOMBSTONE with no iface (type "", cls and iface kNoNode) the SPINE of the standard type
+                                            //   the binding is written as (ingest_binds.h rustStdSpine; rustStdWrittenReceiver reads it)
         bool operator==( const LocalFact& ) const = default;
     };
     static_assert( sizeof( LocalFact ) == 24, "K1a: a local fact is six 4 B fields" );
@@ -2381,6 +2643,11 @@ struct ReceiverEvidence
             {
                 written.push_back( &b );   // rust-receivers: a written Rust type resolves like a declared result, once imports are known
             }
+            else if( ( b.kind == LocalBindKind::RecvType || b.kind == LocalBindKind::MemberType ) && !b.var.empty() && !b.importedName.empty()
+                     && callResultFamilyOf( ing.symbols[ b.fromSymbol ].lang ) == CallResultFamily::Rust )
+            {
+                noteRustStdWritten( from, b, b.importedName, false );   // std-namesake: a tombstone carrying a standard type's spine
+            }
             else if( ( b.kind == LocalBindKind::RecvType || b.kind == LocalBindKind::MemberType ) && !b.var.empty() && !b.importedName.empty() )
             {
                 qualified.push_back( &b );
@@ -2423,6 +2690,7 @@ struct ReceiverEvidence
         {
             noteDispatchWritten( *d );
         }
+        sealRustStdFields();
         std::ranges::sort( operatorResult, []( const std::pair<NodeId, std::string_view>& a, const std::pair<NodeId, std::string_view>& b )
                            { return a.first != b.first ? a.first < b.first : sortutil::svLess( a.second, b.second ); } );
         localType.seal();   // every fact but the AugAssign drops below: their reads see the sealed table
@@ -2551,6 +2819,13 @@ struct ReceiverEvidence
     void noteResolvedWritten( const Binding& w )
     {
         NodeId cls = types.resultClassOf( w, ing.symbols[ w.fromSymbol ].lang );
+        // std-namesake: a spelling that resolved to nothing in the tree and names a standard receiver type (`Vec<T>`, `String`,
+        // `std::collections::HashMap<K, V>`) keeps its tombstone, carrying the spelling as a one-name spine
+        if( cls == kNoNode && externalnames::inSortedTable( externalnames::kRustStdReceiverTypes, std::string_view( w.typeName ) ) )
+        {
+            noteRustStdWritten( factScope( w ), w, w.importedName.empty() ? std::string_view( w.typeName ) : std::string_view( w.importedName ), true );
+            return;
+        }
         if( cls != kNoNode && ing.symbols[ cls ].kind == SymKind::Interface )
         {
             cls = kNoNode;
@@ -2604,6 +2879,295 @@ struct ReceiverEvidence
         f.bound.assign( bound );
         localType.addUnique( factScope( d ), d.var, f );
     }
+    // ── lane std-namesake (STD-RECEIVER-NAMESAKE): a Rust receiver WRITTEN as a standard type ──────────────────────────────────
+    // A local, parameter or field whose written type spells a standard type (`m: &HashMap<K, V>`, `opt: Option<T>`, `s: &str`,
+    // the payload of `if let Some( x ) = v`) is the tombstone it was — it names no in-tree class — carrying the type's SPINE
+    // (ingest_binds.h rustStdSpine). A field is a memberClass tombstone with its spine in memberStd.
+    // `typedRecord`: the binding came through noteResolvedWritten (a spelling with a class NAME that resolved to nothing), which
+    // records a field's memberClass tombstone; a record that never named a class records what it did before the lane.
+    void noteRustStdWritten( NodeId scope, const Binding& b, std::string_view spine, bool typedRecord )
+    {
+        if( b.kind == LocalBindKind::MemberType )
+        {
+            if( !typedRecord )
+            {
+                noteMemberType( b, {} );   // the name tables' tombstone, as for any field that names no class
+            }
+            if( classLike( ing.symbols[ b.fromSymbol ].kind ) )
+            {
+                if( typedRecord )
+                {
+                    const auto [ it, fresh ] = memberClass.try_emplace( keyOf( b.fromSymbol, '#', b.var ), kNoNode );
+                    if( !fresh )
+                    {
+                        it->second = kNoNode;   // two declarations of the field disagree: decide nothing (noteResolvedWritten's rule)
+                    }
+                }
+                RustStdField field;
+                field.spine.assign( spine );
+                field.fileId = b.fileId;
+                memberStd.try_emplace( keyOf( b.fromSymbol, '#', b.var ), field );
+            }
+            return;
+        }
+        LocalFact f = factOf( b, kNoNode );
+        f.bound.assign( spine );
+        localType.addUnique( scope, b.var, f );
+    }
+    // a std field is read only when its struct declares the field ONCE: count every MemberType record of each kept key
+    void sealRustStdFields()
+    {
+        if( memberStd.empty() )
+        {
+            return;
+        }
+        for( const Binding& b : ing.bindings )
+        {
+            if( b.kind == LocalBindKind::MemberType && !b.var.empty() && b.fromSymbol < ing.symbols.size() && classLike( ing.symbols[ b.fromSymbol ].kind ) )
+            {
+                if( const auto it = memberStd.find( keyOf( b.fromSymbol, '#', b.var ) ); it != memberStd.end() )
+                {
+                    ++it->second.decls;
+                }
+            }
+        }
+        std::erase_if( memberStd, []( const auto& kv ) { return kv.second.decls != 1; } );
+    }
+    static bool rustPathRootedInStd( std::string_view path ) noexcept
+    {
+        const std::string_view root = path.substr( 0, path.find( "::" ) );
+        return root == "std" || root == "core" || root == "alloc";
+    }
+    // The tree's own Rust types named `name`: None; StdAliases when every one is an ALIAS of the standard type of that name (`pub
+    // type Result<T> = std::result::Result<T, Error>;`); Foreign when one is a struct, enum, union or trait, or an alias of
+    // anything else (or of a path not rooted in std / core / alloc) — an in-tree namesake a written `name` may mean.
+    enum class RustNamesakes : char { Foreign, None, StdAliases };
+    RustNamesakes rustNamesakesOf( std::string_view name ) const
+    {
+        const auto [ memo, fresh ] = rustStdNamesakeMemo.try_emplace( std::string( name ), char( 0 ) );
+        if( !fresh )
+        {
+            return RustNamesakes( memo->second );
+        }
+        NodeId            one     = kNoNode;
+        const std::size_t classes = types.classesNamed( name, CallResultFamily::Rust, []( NodeId ) { return true; }, one );
+        std::size_t       stdAliases = 0;
+        if( classes != 0 )
+        {
+            if( const auto rows = types.aliasesByName.find( std::string( name ) ); rows != types.aliasesByName.end() )
+            {
+                for( const Binding* b : rows->second )
+                {
+                    const std::string_view target = std::string_view( b->importedName );
+                    const std::string_view head   = target.substr( 0, target.find( '<' ) );
+                    const bool rustFile = b->fileId < ing.files.size() && std::string_view( ing.files[ b->fileId ] ).ends_with( ".rs" );
+                    stdAliases += rustFile && rustPathRootedInStd( head ) && head.find( "::" ) != std::string_view::npos && namesplit::afterLast( head, "::" ) == name ? 1u : 0u;
+                }
+            }
+        }
+        const RustNamesakes verdict = classes != stdAliases ? RustNamesakes::Foreign : classes == 0 ? RustNamesakes::None : RustNamesakes::StdAliases;
+        rustStdNamesakeMemo.find( std::string( name ) )->second = char( verdict );
+        return verdict;
+    }
+    // Does file `f` glob-import a module that is neither the standard library's nor the tree's (`use rayon::prelude::*`)? Such a
+    // glob may bring in a type that hides a prelude name, which no record shows: a bare prelude spelling proves nothing there.
+    bool rustHasForeignGlob( std::uint32_t f ) const
+    {
+        if( rustForeignGlob.size() < ing.files.size() )
+        {
+            rustForeignGlob.resize( ing.files.size(), 0 );
+        }
+        if( f >= rustForeignGlob.size() )
+        {
+            return true;
+        }
+        if( rustForeignGlob[ f ] == 0 )
+        {
+            bool foreign = false;
+            types.forEachImport( f, "*", [ & ]( const Binding& b )
+            {
+                const std::string_view path = std::string_view( b.importedName );
+                const std::string_view root = path.substr( 0, path.find( "::" ) );
+                const bool ours = root == "crate" || root == "self" || root == "super" || types.rustRootNamesTreePackage( f, b.startByte, path );
+                foreign = foreign || ( b.kind == LocalBindKind::TypeImport && !ours && !rustPathRootedInStd( path ) );
+            } );
+            rustForeignGlob[ f ] = foreign ? 2 : 1;
+        }
+        return rustForeignGlob[ f ] == 2;
+    }
+    // Does file `f` import `name` as anything but the standard item of that name? `use crate::wrapper::Wrap as Box;`, `use
+    // crate::Text as str;` and `use std::boxed::Box as Vec;` (for `Vec`) do; `use std::str;` and `use alloc::boxed::Box;` do not.
+    // A written `name` there is that other item, never the standard type (CR706-STD-ALIAS-SHADOW).
+    bool rustNameRebound( std::uint32_t f, std::string_view name ) const
+    {
+        bool rebound = false;
+        types.forEachImport( f, name, [ & ]( const Binding& b )
+        {
+            const std::string_view path = std::string_view( b.importedName );
+            rebound = rebound || ( b.kind == LocalBindKind::TypeImport
+                                   && !( b.typeName == name && rustPathRootedInStd( path ) && !types.rustRootNamesTreePackage( f, b.startByte, path ) ) );
+        } );
+        return rebound;
+    }
+    // Is `written` — one name of a spine, as the source spells it (`Option`, `HashMap`, `std::sync::Mutex`, `io::Result`) — provably
+    // the STANDARD type in file `f`? "[]" always (no declaration can shadow the slice type); `str` unless the tree defines a type
+    // named `str` or the file imports something else under that name (a declared item shadows a primitive). Otherwise the tree
+    // must define no namesake but an alias of the standard type itself (rustNamesakesAreStd), and the spelling must reach std: a
+    // path rooted in std / core / alloc; a path whose first segment the file imports from there (`use std::io;` … `io::Result`);
+    // a bare name the file imports from there AS ITSELF (`use std::boxed::Box as Vec;` binds a box, not a `Vec`), or from `crate`
+    // / `self` / `super` where the tree aliases the standard type under that name; or a bare PRELUDE name the file neither imports
+    // from elsewhere nor may receive from a foreign glob. A renamed or outside import of the name, and a non-prelude name the file
+    // does not import (it came through a glob or a macro), prove nothing. A typed record's `Box<Vec<T>>` was read through its
+    // `Box` unseen, so a tree type or an import that takes the name `Box` proves nothing in the file either.
+    bool rustStdNameProven( std::uint32_t f, std::string_view written ) const
+    {
+        if( written == "[]" )
+        {
+            return true;
+        }
+        if( written == "str" )
+        {
+            return rustNamesakesOf( "str" ) != RustNamesakes::Foreign && !rustNameRebound( f, "str" );
+        }
+        const std::size_t      sep  = written.find( "::" );
+        const std::string_view name = namesplit::afterLast( written, "::" );
+        if( !( externalnames::inSortedTable( externalnames::kRustStdReceiverTypes, name ) || externalnames::inSortedTable( externalnames::kRustStdDerefTypes, name ) )
+            || name == "str" || name == "[]" || rustNamesakesOf( "Box" ) == RustNamesakes::Foreign || rustNameRebound( f, "Box" ) )
+        {
+            return false;
+        }
+        const RustNamesakes namesakes = rustNamesakesOf( name );
+        if( namesakes == RustNamesakes::Foreign )
+        {
+            return false;
+        }
+        const std::string_view probe = sep == std::string_view::npos ? name : written.substr( 0, sep );   // the name the file must bind
+        bool good = false, bad = false;
+        types.forEachImport( f, probe, [ & ]( const Binding& b )
+        {
+            if( b.kind != LocalBindKind::TypeImport )
+            {
+                return;   // the file's own alias of the name: rustNamesakesAreStd answered for it
+            }
+            const std::string_view path = std::string_view( b.importedName );
+            const std::string_view root = path.substr( 0, path.find( "::" ) );
+            const bool fromStd  = rustPathRootedInStd( path ) && !types.rustRootNamesTreePackage( f, b.startByte, path )
+                               && ( sep != std::string_view::npos || b.typeName == probe );   // a bare name: the item it imports is itself
+            const bool fromTree = sep == std::string_view::npos && namesakes == RustNamesakes::StdAliases && b.typeName == probe
+                               && ( root == "crate" || root == "self" || root == "super" );
+            ( fromStd || fromTree ? good : bad ) = true;
+        } );
+        if( bad )
+        {
+            return false;
+        }
+        if( sep != std::string_view::npos )
+        {
+            return good || ( rustPathRootedInStd( written ) && !types.rustRootNamesTreePackage( f, 0, written ) );
+        }
+        return good || ( externalnames::inSortedTable( externalnames::kRustPreludeTypes, name ) && !rustHasForeignGlob( f ) );
+    }
+    // The final type name a spine proves its binding to be — "Vec", "Mutex", "[]" — when EVERY name on it is the standard type in
+    // file `f` (rustStdNameProven), else "". Memoised per ( file, spine ).
+    std::string_view rustStdSpineHead( std::uint32_t f, std::string_view spine ) const
+    {
+        const auto [ memo, fresh ] = rustStdSpineMemo.try_emplace( std::string( keyOf( f, '#', spine ) ), std::string_view{} );
+        if( !fresh )
+        {
+            return memo->second;
+        }
+        std::string_view head;
+        for( std::string_view rest = spine; ; )
+        {
+            const std::size_t      cut = rest.find( '<' );
+            const std::string_view seg = rest.substr( 0, cut );
+            if( seg.empty() || !rustStdNameProven( f, seg ) )
+            {
+                head = {};
+                break;
+            }
+            head = namesplit::afterLast( seg, "::" );
+            if( cut == std::string_view::npos )
+            {
+                break;
+            }
+            rest.remove_prefix( cut + 1 );
+        }
+        if( !externalnames::inSortedTable( externalnames::kRustStdReceiverTypes, head ) )
+        {
+            head = {};   // a spine must END in a receiver type (a bare `Arc` proves nothing)
+        }
+        rustStdSpineMemo.find( std::string( keyOf( f, '#', spine ) ) )->second = head;
+        return head;
+    }
+    // The standard type a Rust member call's receiver is WRITTEN as, proven (rustStdSpineHead), else "": a local or parameter
+    // (`m.get( k )`), a field of `self` or of a local typed as an in-tree class, each field above the last by its resolved class
+    // (`self.opt.map( .. )`, `s.inner.names.get( 0 )`). The receiver is the ROOT or the last FIELD itself — never a call result,
+    // an index, a `?` or an `.await` on it (chainOf reads none of those as a path). A local is read lexically (localSeenAt): a
+    // shadowing binding of the name, typed or not, hides the standard one.
+    std::string_view rustStdWrittenReceiver( const Reference& r ) const
+    {
+        if( !active || langFacts( r.lang ).writtenStdReceiver != WrittenStdReceiver::RustSpine || r.fromSymbol >= ing.symbols.size() || !r.qualifier.empty() || !isMemberCallRef( r ) )
+        {
+            return {};
+        }
+        const Chain ch = chainOf( r );
+        if( !ch.valid || !ch.ctor.empty() || ch.root.empty() )
+        {
+            return {};
+        }
+        NodeId cls = kNoNode;
+        if( ch.root == "self" )
+        {
+            cls = ch.path.empty() ? kNoNode : selfClass( r.fromSymbol );
+        }
+        else if( const std::optional<SeenLocal> t = localSeenAt( r.fromSymbol, ch.root, r.startByte ); t.has_value() )
+        {
+            if( ch.path.empty() )
+            {
+                const bool stdTombstone = t->type.empty() && t->cls == kNoNode && t->iface == kNoNode && !t->bound.empty();
+                return stdTombstone ? rustStdSpineHead( r.fileId, t->bound ) : std::string_view{};
+            }
+            cls = t->cls;
+        }
+        for( std::string_view rest = ch.path; cls != kNoNode; )
+        {
+            const std::size_t      dot   = rest.find( '.' );
+            const std::string_view field = rest.substr( 0, dot );
+            if( dot == std::string_view::npos )   // the last field: the receiver itself
+            {
+                const auto it = memberStd.find( keyOf( cls, '#', field ) );
+                return it == memberStd.end() ? std::string_view{} : rustStdSpineHead( it->second.fileId, std::string_view( it->second.spine ) );
+            }
+            rest.remove_prefix( dot + 1 );
+            const auto it = memberClass.find( keyOf( cls, '#', field ) );
+            cls = it == memberClass.end() ? kNoNode : it->second;
+        }
+        return {};
+    }
+    // May a receiver proven to be the standard type `head` run a method OWNED by the in-tree type-like name `owner`? Only through
+    // a trait: `owner` is a trait (its default method, or the declaration an `impl Trait for Vec<T>` answers), an alias (`impl Ext
+    // for Table` under `type Table = HashMap<..>` is an impl for the standard type), or the type's own name. A struct, enum or
+    // union of another name never: std's types deref to no user type and take no inherent impl outside std.
+    bool rustStdReceiverMayReach( std::string_view owner, std::string_view head ) const
+    {
+        if( owner == head )
+        {
+            return true;
+        }
+        const auto [ memo, fresh ] = rustStdOwnerMemo.try_emplace( std::string( owner ), char( 0 ) );
+        if( fresh )
+        {
+            NodeId     one    = kNoNode;
+            const bool trait  = types.classesNamed( owner, CallResultFamily::Rust, [ & ]( NodeId c ) { return ing.symbols[ c ].kind == SymKind::Interface; }, one ) != 0;
+            const bool known  = types.classesNamed( owner, CallResultFamily::Rust, []( NodeId ) { return true; }, one ) != 0;
+            const bool reach  = trait || !known || types.aliasesByName.contains( std::string( owner ) );
+            rustStdOwnerMemo.find( std::string( owner ) )->second = char( reach ? 1 : 0 );
+            return reach;
+        }
+        return memo->second != 0;
+    }
+
     // is the result of the operator Python calls on a `cls` receiver (`inPlace`, else `binary`) provably `cls` (augDropsClass)
     bool operatorKeepsClass( std::string_view cls, NodeId id, std::string_view inPlace, std::string_view binary ) const
     {
@@ -3314,17 +3878,26 @@ struct ReceiverEvidence
             return false;
         }
         const Chain ch = chainOf( r );
-        if( !ch.valid || !ch.ctor.empty() || ch.root.empty() )
+        if( !ch.valid && callResultFamilyOf( r.lang ) == CallResultFamily::Rust )
         {
-            return false;
+            const NodeId cls = rustChainReceiverClass( r );   // lane rust-self-chain: the receiver is another call's result
+            return cls != kNoNode && methodOf( ing.symbols[ cls ].name, r.calleeName, false, cls );
         }
-        NodeId cls = kNoNode;
-        if( ch.root == "self" )   // Rust's receiver keyword: `this` / `Self` are ordinary names here, read by their own binding below
+        if( !ch.valid || !ch.ctor.empty() || ch.root.empty() || ( ch.root == "self" && ch.path.empty() ) )
         {
-            if( ch.path.empty() )
-            {
-                return false;   // `self.m()`: the language's own rule (Rule 1) answers it
-            }
+            return false;   // `self.m()`: the language's own rule (Rule 1) answers it
+        }
+        const NodeId cls = typedReceiverClass( r, ch );
+        return cls != kNoNode && methodOf( ing.symbols[ cls ].name, r.calleeName, false, cls );
+    }
+    // the ONE class a Rust member call's NAMED receiver holds (narrowTypedLocal's reading): `self` (Rust's receiver keyword: `this` /
+    // `Self` are ordinary names, read by their own binding), a typed local or parameter, and the stated fields below either, each by
+    // the ONE class its written type resolved to (memberClass); kNoNode when unknown
+    NodeId typedReceiverClass( const Reference& r, const Chain& ch ) const
+    {
+        NodeId cls = kNoNode;
+        if( ch.root == "self" )
+        {
             cls = selfClass( r.fromSymbol );
         }
         else if( const std::optional<SeenLocal> t = localSeenAt( r.fromSymbol, ch.root, r.startByte ); t.has_value() && !t->type.empty() )
@@ -3339,7 +3912,376 @@ struct ReceiverEvidence
             const auto it = memberClass.find( keyOf( cls, '#', field ) );
             cls = it == memberClass.end() ? kNoNode : it->second;
         }
-        return cls != kNoNode && methodOf( ing.symbols[ cls ].name, r.calleeName, false, cls );
+        return cls;
+    }
+
+    // ── lane rust-self-chain (test/receiverevidencecheck.sh RUST-SELF-CHAIN): a member call on another call's result ────────────
+    // `Router::new().route( a ).layer( b )`: each hop's receiver is the value the call below it returns. The value is walked from
+    // the chain's ROOT — a path call `T::f()` whose written qualifier resolves to the class owning f (rustQualifierClass, as a
+    // call-result local's `T::f()` is read), or a member call on a named receiver (typedReceiverClass; `self` itself included) —
+    // through each hop's ONE callee (methodOf on the class the hop's receiver holds: the same lookup that proves that hop's own
+    // edge, so a hop the resolve loop leaves hedged or split stops the walk) and that callee's declared whole result
+    // (CallResultTypes::resultClassOf in its file; `Self` must name the very class the callee was found on). `?` / `.unwrap()` /
+    // `.expect( … )` strip one Result / Option layer each; `.await` takes an `async fn`'s declared result, or the `Output` an
+    // in-tree `impl IntoFuture` / `impl Future` states for the class (rustAwaitOutput). Anything else — a trait object or `impl
+    // Trait` result, a generic `-> T`, a future used without its `.await`, a layer left unstripped, two records of one call that
+    // disagree — is no class, and the call keeps its base reading.
+    struct ChainValue
+    {
+        NodeId       cls    = kNoNode;
+        std::uint8_t layers = 0;       // Result / Option layers still to strip
+        bool         future = false;   // an `async fn`'s call: the value is its future until `.await`
+        bool operator==( const ChainValue& ) const = default;
+    };
+    static constexpr int kChainHopCap = 64;   // hops walked below one call; a longer chain is a floor (no class)
+    struct KeyedRecord
+    {
+        std::uint64_t  key = 0;   // fileId << 32 | startByte
+        const Binding* b   = nullptr;
+    };
+    mutable std::vector<KeyedRecord>                  chainRecvCalls;    // RecvCall records by the call's start
+    mutable std::vector<KeyedRecord>                  chainReturnTypes;  // Rust ReturnType records by their def's start
+    mutable std::vector<std::pair<NodeId, ChainValue>> chainAwaitOutputs; // class → its `.await` value (cls kNoNode: two impls disagree)
+    mutable std::vector<std::pair<std::uint64_t, std::uint32_t>> chainRootRefs;  // the references at a chain root's start: ( key, index )
+    mutable bool                                      chainTablesBuilt = false;
+    static std::uint64_t chainKey( std::uint32_t fileId, std::uint32_t at ) noexcept { return hashutil::packPair( fileId, at ); }
+    static std::span<const KeyedRecord> recordsAt( const std::vector<KeyedRecord>& list, std::uint64_t key )
+    {
+        const auto lo = std::ranges::lower_bound( list, key, {}, &KeyedRecord::key );
+        const auto hi = std::upper_bound( lo, list.end(), key, []( std::uint64_t k, const KeyedRecord& e ) { return k < e.key; } );
+        return { lo, hi };
+    }
+    // the records a chain walk reads, in one pass over the bindings: RecvCall, Rust whole-result ReturnType, and the
+    // `impl IntoFuture / Future for C` blocks with their `type Output = U;` items
+    void collectChainRecords( std::vector<const Binding*>& impls, std::vector<const Binding*>& outputs ) const
+    {
+        for( const Binding& b : ing.bindings )
+        {
+            const std::string_view var = b.var;
+            if( b.kind == LocalBindKind::RecvCall )   // Rust records it alone (ingest_binds.h captureRustRecvCall)
+            {
+                chainRecvCalls.push_back( { chainKey( b.fileId, b.startByte ), &b } );
+            }
+            else if( b.kind == LocalBindKind::ReturnType && b.resultIndex == kWholeResult && !b.typeName.empty() && b.fromSymbol < ing.symbols.size()
+                     && callResultFamilyOf( ing.symbols[ b.fromSymbol ].lang ) == CallResultFamily::Rust )
+            {
+                chainReturnTypes.push_back( { chainKey( b.fileId, b.startByte ), &b } );
+            }
+            else if( b.kind == LocalBindKind::ImplBlock && ( var == "IntoFuture" || var == "Future" ) && !b.typeName.empty() )
+            {
+                impls.push_back( &b );
+            }
+            else if( b.kind == LocalBindKind::TypeAlias && var == "Output" && !b.importedName.empty() )
+            {
+                outputs.push_back( &b );
+            }
+        }
+        const auto byKey = []( const KeyedRecord& a, const KeyedRecord& b ) { return a.key < b.key; };
+        std::stable_sort( chainRecvCalls.begin(), chainRecvCalls.end(), byKey );
+        std::stable_sort( chainReturnTypes.begin(), chainReturnTypes.end(), byKey );
+    }
+    // the references at a chain ROOT's start (where a depth-1 record's inner call starts), by key
+    void indexChainRoots() const
+    {
+        std::vector<std::uint64_t> rootKeys;
+        for( const KeyedRecord& e : chainRecvCalls )
+        {
+            if( e.b->resultIndex == 1 )
+            {
+                rootKeys.push_back( chainKey( e.b->fileId, e.b->spanStart ) );
+            }
+        }
+        std::ranges::sort( rootKeys );
+        for( std::uint32_t i = 0; i < ing.references.size() && !rootKeys.empty(); ++i )
+        {
+            const std::uint64_t k = chainKey( ing.references[ i ].fileId, ing.references[ i ].startByte );
+            if( std::ranges::binary_search( rootKeys, k ) )
+            {
+                chainRootRefs.emplace_back( k, i );
+            }
+        }
+        std::ranges::sort( chainRootRefs );
+    }
+    // an IntoFuture / Future impl's own `type Output` (the item its span holds), resolved like a written result type when it is a
+    // plain path; no class for anything else (a generic, a reference, a tuple)
+    ChainValue implAwaitOutput( const Binding& impl, std::span<const Binding* const> outputs ) const
+    {
+        const auto inImpl = [ & ]( const Binding* o ) { return o->fileId == impl.fileId && o->startByte >= impl.spanStart && o->startByte < impl.spanEnd; };
+        const auto it     = std::ranges::find_if( outputs, inImpl );
+        if( it == outputs.end() )
+        {
+            return {};
+        }
+        const Binding&         o         = **it;
+        const std::string_view text      = o.importedName;
+        const bool             plainPath = std::ranges::all_of( text, []( char c ) { return std::isalnum( static_cast<unsigned char>( c ) ) || c == '_' || c == ':'; } );
+        const auto [ path, last ]        = CallResultTypes::splitLast( text, "::" );
+        return { plainPath ? types.rustResultClass( o.fileId, o.startByte, path.empty() ? std::string_view{} : text, last ) : kNoNode, 0, false };
+    }
+    // class → its `.await` value; a class with two impls whose outputs disagree awaits to nothing known (cls kNoNode)
+    void buildAwaitOutputs( std::span<const Binding* const> impls, std::span<const Binding* const> outputs ) const
+    {
+        for( const Binding* impl : impls )
+        {
+            const NodeId cls = types.rustResultClass( impl->fileId, impl->spanStart, {}, impl->typeName );
+            if( cls != kNoNode )
+            {
+                chainAwaitOutputs.emplace_back( cls, implAwaitOutput( *impl, outputs ) );
+            }
+        }
+        std::ranges::sort( chainAwaitOutputs, {}, &std::pair<NodeId, ChainValue>::first );
+        std::size_t kept = 0;
+        for( std::size_t i = 0; i < chainAwaitOutputs.size(); ++i )
+        {
+            const bool sameClass = kept > 0 && chainAwaitOutputs[ kept - 1 ].first == chainAwaitOutputs[ i ].first;
+            if( sameClass && chainAwaitOutputs[ kept - 1 ].second != chainAwaitOutputs[ i ].second )
+            {
+                chainAwaitOutputs[ kept - 1 ].second = ChainValue{};
+            }
+            if( !sameClass )
+            {
+                chainAwaitOutputs[ kept++ ] = chainAwaitOutputs[ i ];
+            }
+        }
+        chainAwaitOutputs.resize( kept );
+    }
+    void buildChainTables() const
+    {
+        chainTablesBuilt = true;
+        std::vector<const Binding*> impls;
+        std::vector<const Binding*> outputs;
+        collectChainRecords( impls, outputs );
+        indexChainRoots();
+        // `.await` reads std's IntoFuture: an in-tree TRAIT of either name makes every such impl unknown (an impl's own associated
+        // `type IntoFuture = …` is no trait)
+        NodeId     one     = kNoNode;
+        const auto isTrait = [ & ]( NodeId c ) { return ing.symbols[ c ].kind == SymKind::Interface; };
+        if( types.classesNamed( "IntoFuture", CallResultFamily::Rust, isTrait, one ) == 0 && types.classesNamed( "Future", CallResultFamily::Rust, isTrait, one ) == 0 )
+        {
+            buildAwaitOutputs( impls, outputs );
+        }
+    }
+    // the value `.await` yields on a `cls` (no layer, not a future): its in-tree IntoFuture / Future impl's `Output`
+    std::optional<ChainValue> rustAwaitOutput( NodeId cls ) const
+    {
+        if( !chainTablesBuilt )
+        {
+            buildChainTables();
+        }
+        const auto it = std::ranges::lower_bound( chainAwaitOutputs, cls, {}, &std::pair<NodeId, ChainValue>::first );
+        if( it == chainAwaitOutputs.end() || it->first != cls || it->second.cls == kNoNode )
+        {
+            return std::nullopt;
+        }
+        return it->second;
+    }
+    // the value a call to `callee` returns, by its declared WHOLE result (`owner`: the class it was found on, which a written `Self` must be)
+    std::optional<ChainValue> declaredResult( NodeId callee, NodeId owner ) const
+    {
+        const Symbol&  cs  = ing.symbols[ callee ];
+        const Binding* one = nullptr;
+        for( const KeyedRecord& e : recordsAt( chainReturnTypes, chainKey( cs.fileId, cs.sigStartByte ) ) )
+        {
+            if( one != nullptr )
+            {
+                return std::nullopt;
+            }
+            one = e.b;
+        }
+        if( one == nullptr || ( one->unwrapDepth & kDispatchResultBit ) != 0 )
+        {
+            return std::nullopt;   // no declared class: a unit, a generic `-> T`, a trait object / `impl Trait`
+        }
+        const NodeId cls = types.resultClassOf( *one, cs.lang );
+        if( cls == kNoNode || ( one->isFromAssignment && cls != owner ) )
+        {
+            return std::nullopt;
+        }
+        return ChainValue{ cls, std::uint8_t( one->unwrapDepth & kUnwrapLayersMask ), ( one->unwrapDepth & kAwaitResultBit ) != 0 };
+    }
+    // the operators a RecvCall record states between its inner call's value `v` and the receiver: `.await` first, then each `?`
+    std::optional<ChainValue> afterOperators( ChainValue v, const Binding& rec ) const
+    {
+        if( rec.isFromAssignment )
+        {
+            if( v.future )
+            {
+                v.future = false;
+            }
+            else if( v.layers == 0 )
+            {
+                const std::optional<ChainValue> out = rustAwaitOutput( v.cls );
+                if( !out.has_value() )
+                {
+                    return std::nullopt;
+                }
+                v = *out;
+            }
+            else
+            {
+                return std::nullopt;
+            }
+        }
+        if( v.future || rec.unwrapDepth > v.layers )
+        {
+            return std::nullopt;   // a method on a future, or more `?` than layers
+        }
+        v.layers = std::uint8_t( v.layers - rec.unwrapDepth );
+        return v;
+    }
+    // the ONE member `name` class `cls` itself owns (rustQualifiedTypeOwns' reading of `T::f`), kNoNode when none or several
+    NodeId ownedMember( NodeId cls, std::string_view name ) const
+    {
+        const auto m = methodsByType.find( typeKey( ing.symbols[ cls ].name, "::", name ) );
+        if( m == methodsByType.end() )
+        {
+            return kNoNode;
+        }
+        NodeId      one   = kNoNode;
+        std::size_t count = 0;
+        for( NodeId c : m->second )
+        {
+            if( ownedBy( c, cls ) )
+            {
+                one = c;
+                ++count;
+            }
+        }
+        return count == 1 ? one : kNoNode;
+    }
+    // the ONE callee of member `name` on `cls` (methodOf's lookup), kNoNode when none or several
+    NodeId uniqueMember( NodeId cls, std::string_view name ) const
+    {
+        return methodOf( ing.symbols[ cls ].name, name, false, cls ) && found.size() == 1 ? found[ 0 ] : kNoNode;
+    }
+    // the value the chain's ROOT call (`name` at byte `at`: a path call or a member call on a named receiver) returns. Every
+    // Reference of that (file, byte, name) in that shape must agree.
+    std::optional<ChainValue> chainRootValue( const Reference& r, std::uint32_t at, std::string_view name ) const
+    {
+        const std::uint64_t key = chainKey( r.fileId, at );
+        std::optional<ChainValue> agreed;
+        for( auto it = std::ranges::lower_bound( chainRootRefs, std::pair{ key, 0u } ); it != chainRootRefs.end() && it->first == key; ++it )
+        {
+            const Reference& root = ing.references[ it->second ];
+            if( root.role != RefRole::Call || std::string_view( root.calleeName ) != name || root.lang != r.lang )
+            {
+                continue;
+            }
+            NodeId cls    = kNoNode;
+            NodeId callee = kNoNode;
+            if( !root.qualifier.empty() )   // `T::f()`: the class the written qualifier names owns f (a path call: no member receiver)
+            {
+                cls = rustQualifierClass( root, rustWrittenQualifierOf( root ) );
+                callee = cls == kNoNode ? kNoNode : ownedMember( cls, name );
+            }
+            else if( root.memberCall && !root.memberRoot.empty() )   // `x.f()` / `self.f()` / `self.a.f()`
+            {
+                const Chain ch = chainOf( root );
+                cls    = ch.ctor.empty() ? typedReceiverClass( root, ch ) : kNoNode;
+                callee = cls == kNoNode ? kNoNode : uniqueMember( cls, name );
+            }
+            else
+            {
+                continue;   // a hop (its own receiver is a call) or a bare call: no root
+            }
+            const std::optional<ChainValue> v = callee == kNoNode ? std::nullopt : declaredResult( callee, cls );
+            if( !v.has_value() || ( agreed.has_value() && *agreed != *v ) )
+            {
+                return std::nullopt;
+            }
+            agreed = v;
+        }
+        return agreed;
+    }
+    // the value the RECEIVER of the call `name` at byte `at` holds: its RecvCall records at hop `depth` (0: any — a Reference cannot
+    // tell which of two same-named hops sharing a start byte it is, so all of them must agree), each read through its inner call
+    std::optional<ChainValue> rustChainReceiver( const Reference& r, std::uint32_t at, std::string_view name, std::uint8_t depth, int budget ) const
+    {
+        if( budget <= 0 )
+        {
+            return std::nullopt;
+        }
+        if( !chainTablesBuilt )
+        {
+            buildChainTables();
+        }
+        std::optional<ChainValue> agreed;
+        for( const KeyedRecord& e : recordsAt( chainRecvCalls, chainKey( r.fileId, at ) ) )
+        {
+            const Binding& rec = *e.b;
+            if( std::string_view( rec.typeName ) != name || ( depth != 0 && rec.resultIndex != depth ) )
+            {
+                continue;
+            }
+            std::optional<ChainValue> v;
+            if( rec.resultIndex <= 1 )
+            {
+                v = chainRootValue( r, rec.spanStart, rec.var );
+            }
+            else if( const std::optional<ChainValue> recv = rustChainReceiver( r, rec.spanStart, rec.var, std::uint8_t( rec.resultIndex - 1 ), budget - 1 ); recv.has_value() )
+            {
+                const bool unwrapCall = std::string_view( rec.var ) == "unwrap" || std::string_view( rec.var ) == "expect";
+                if( unwrapCall && recv->layers > 0 && !recv->future )
+                {
+                    v = ChainValue{ recv->cls, std::uint8_t( recv->layers - 1 ), false };   // `.unwrap()` strips a layer, as `?` does
+                }
+                else if( recv->layers == 0 && !recv->future )
+                {
+                    const NodeId callee = uniqueMember( recv->cls, rec.var );
+                    v = callee == kNoNode ? std::nullopt : declaredResult( callee, recv->cls );
+                }
+            }
+            v = v.has_value() ? afterOperators( *v, rec ) : std::nullopt;
+            if( !v.has_value() || ( agreed.has_value() && *agreed != *v ) )
+            {
+                return std::nullopt;
+            }
+            agreed = v;
+        }
+        return agreed;
+    }
+    // the ONE class a Rust member call's receiver holds when that receiver is another call's result; kNoNode otherwise
+    NodeId rustChainReceiverClass( const Reference& r ) const
+    {
+        const std::optional<ChainValue> v = rustChainReceiver( r, r.startByte, r.calleeName, 0, kChainHopCap );
+        return v.has_value() && v->layers == 0 && !v->future ? v->cls : kNoNode;
+    }
+    // graph.h typeCallResults: a `let x = f().await` whose callee `f` is no `async fn` (`rt` states no await) awaits the class its
+    // result names through that class's in-tree IntoFuture / Future impl (rustAwaitOutput); the class x then holds, kNoNode for none
+    NodeId rustAwaitedCallResult( const Binding& cr, const Binding& rt, Lang lang ) const
+    {
+        if( ( cr.unwrapDepth & kAwaitResultBit ) == 0 || rt.unwrapDepth != 0 || callResultFamilyOf( lang ) != CallResultFamily::Rust )
+        {
+            return kNoNode;
+        }
+        const NodeId cls = types.resultClassOf( rt, lang );
+        const std::optional<ChainValue> out = cls == kNoNode ? std::nullopt : rustAwaitOutput( cls );
+        return out.has_value() && out->layers == ( cr.unwrapDepth & kUnwrapLayersMask ) ? out->cls : kNoNode;
+    }
+    // graph.h typeCallResults, per ReturnType record `rt` of the ONE proven callee: does it describe what the call result `cr`
+    // binds — the same position, the unwrap depth the binding applies (a C++ rule-2 sink: the value or one pointer), and for a
+    // Rust `T::f()` a T that reaches the callee's class (rustQualifierTypes) — and the class the local then holds (kNoNode: matched,
+    // nothing to type). lane rust-self-chain: a Rust `let x = f().await` on a callee that is no `async fn` matches through the
+    // class's IntoFuture / Future `Output` (rustAwaitedCallResult).
+    struct CallResultMatch
+    {
+        bool   matched = false;
+        NodeId cls     = kNoNode;
+    };
+    CallResultMatch matchCallResult( const Reference& r, const Binding& cr, const Binding& rt, NodeId callee, bool rule2Sink ) const
+    {
+        if( rt.resultIndex != cr.resultIndex )
+        {
+            return {};
+        }
+        const Lang   lang    = ing.symbols[ callee ].lang;
+        const bool   direct  = rule2Sink ? rt.unwrapDepth <= 1 : rt.unwrapDepth == cr.unwrapDepth;
+        const NodeId awaited = direct ? kNoNode : rustAwaitedCallResult( cr, rt, lang );
+        if( ( !direct && awaited == kNoNode ) || !rustQualifierTypes( r, cr.importedName, callee, rt.isFromAssignment ) )
+        {
+            return {};
+        }
+        return { true, direct ? types.resultClassOf( rt, lang ) : awaited };
     }
     // lane L6 (interface-typed dispatch): the TYPE a member call's receiver is recorded as — the one class or interface the
     // dispatch tier (ifacedispatch.h) asks about — and, for a Rust generic, the bound that typed it. `type` kNoNode: nothing
@@ -3568,6 +4510,224 @@ struct ReceiverEvidence
         types.pathCut = false;   // the top-level walk's own cut: a cut walk is no proof that the path stays in the tree
         const bool out = types.rustPathOutside( r.fileId, r.startByte, written );
         return !out && !types.pathCut;
+    }
+    // RUST-PATH-OWNER: does the Rust path `path` written at byte `at` of `f` name an item outside the tree by what the file writes? Its
+    // root bound by a `use` in force there, every one leading out (rustPathProvablyOutside, its root no package directory: a bare call's
+    // reading of its `use`), else by such a `use` at the own level of a placed module a glob in force there names (`mod tests { use
+    // super::*; }` over the file's `use std::path::PathBuf;`). A path of two or more segments may also start at an outside root no
+    // `use` binds (`std::`, an extern crate) when no glob in force there is one the walk cannot place. A one-segment path no `use`
+    // binds — a generic parameter `T::f()`, a name only a glob the walk cannot follow brings — is not.
+    bool rustPathHeadLeavesTree( std::uint32_t f, std::uint32_t at, std::string_view path ) const
+    {
+        const auto leadsOut = [ & ]( std::uint32_t file, std::uint32_t pos, std::string_view p )
+        {
+            return types.rustPathProvablyOutside( file, pos, p ) && !types.rustRootNamesTreePackage( file, pos, p );
+        };
+        const std::string_view head = path.substr( 0, path.find( "::" ) );
+        bool any = false;
+        bool out = true;
+        types.forEachRustUseAt( f, at, head, [ & ]( const Binding& b )
+        {
+            any = true;
+            out = out && leadsOut( f, b.startByte, b.importedName );
+        } );
+        if( any )
+        {
+            return out && leadsOut( f, at, path );
+        }
+        bool unplaced = false;   // a glob in force the walk cannot place (`use crate::alias::*;` through a module re-exported by a `use`)
+        bool viaGlob  = false;
+        types.forEachRustScopeAt( f, at, [ & ]( const CallResultTypes::Level& lv )
+        {
+            types.forEachImport( f, "*", [ & ]( const Binding& g )
+            {
+                if( g.kind != LocalBindKind::TypeImport || types.levelAt( f, g.startByte ) != lv || leadsOut( f, g.startByte, g.importedName ) )
+                {
+                    return;
+                }
+                std::uint32_t crate = CallResultTypes::kNoCrate;
+                std::string   module;
+                if( !types.rustModuleOf( f, g.startByte, g.importedName, crate, module, 0 ) )
+                {
+                    unplaced = true;
+                    return;
+                }
+                NodeId          inlineMod = kNoNode;
+                std::uint32_t   ownFile   = 0;
+                const auto      mfs       = types.rustModuleFiles( crate, module, inlineMod, ownFile );
+                const auto      level     = types.rustModuleLevel( inlineMod );
+                for( const std::uint32_t mf : mfs )
+                {
+                    types.forEachImport( mf, head, [ & ]( const Binding& b )
+                    {
+                        if( b.kind == LocalBindKind::TypeImport && types.levelAt( mf, b.startByte ) == level )
+                        {
+                            any     = true;
+                            viaGlob = true;
+                            out     = out && leadsOut( mf, b.startByte, b.importedName );
+                        }
+                    } );
+                }
+            } );
+            return any || unplaced;
+        } );
+        if( unplaced )
+        {
+            return false;
+        }
+        if( viaGlob )
+        {
+            return out && leadsOut( f, at, path );
+        }
+        return head.size() != path.size() && leadsOut( f, at, path );
+    }
+    // RUST-PATH-OWNER: is the Rust path `path`'s head, at byte `at` of `f`, bound by a `use` in force there whose every path starts
+    // in the tree (`crate::` / `self::` / `super::`, an in-tree crate's name): `pub use crate::wit::process::Command; impl Command {}`
+    bool rustPathHeadUsedInTree( std::uint32_t f, std::uint32_t at, std::string_view path ) const
+    {
+        const std::string_view head = path.substr( 0, path.find( "::" ) );
+        bool any    = false;
+        bool inTree = true;
+        types.forEachRustUseAt( f, at, head, [ & ]( const Binding& b )
+        {
+            const std::string_view root = std::string_view( b.importedName ).substr( 0, std::string_view( b.importedName ).find( "::" ) );
+            any    = true;
+            inTree = inTree && ( root == "crate" || root == "self" || root == "super" || types.rustRootNamesTreePackage( f, b.startByte, b.importedName ) );
+        } );
+        return any && inTree;
+    }
+    // RUST-PATH-OWNER: what the canonical tier's answer to a Rust path call `T::m( .. )` proves. The tier holds every in-tree `m`
+    // whose impl scope is NAMED T; the path names the ONE type T resolves to where it is written (the file's `use`s, its module
+    // path), resolved like a written `x: T` (rustQualifierClass), and each candidate's owner is the in-tree class its impl is for
+    // (selfClass). The invariant: two types, one name, never one `m`.
+    // A candidate whose impl writes a type name that leads out of the tree where the impl is written (`use std::path::PathBuf;
+    // impl From<X> for PathBuf`, read like a call's path: rustPathHeadLeavesTree) is owned by that outside type, whatever in-tree
+    // class shares the name.
+    //   * T names an in-tree class: its own candidates are the answer. With none of them placed, a candidate another class owns
+    //     (in the tree or outside it) leaves and one the walk cannot place stays; nothing left (the class's `m` is no indexed
+    //     definition) is declined, `cand` untouched so the decline lists the namesakes.
+    //   * T provably leads out of the tree, its root no package directory (`use std::path::PathBuf; PathBuf::from( s )`, the same
+    //     reading a bare call's `use` gets): an in-tree type's namesake is never it (one with no indexed class too, its impl's type
+    //     name a `use` into the tree). A candidate the outside type owns is a trait impl FOR it (`impl From<X> for PathBuf`),
+    //     reached only when the argument is an X, which is not read: hedged. Nothing left: external=.
+    //   * T names no class the walk can place (two globs bring it, a glob it cannot follow): two owners among the candidates in the
+    //     caller's own crate, or a member there it cannot place beside another, split: every candidate stays (rustLadderSplit:
+    //     the ladder's own split when locality would keep them all, else hedged) — never a locality pick. One there, a crate the layout cannot
+    //     place, or a module's item among the candidates (`util::tool()`: the module path decides it) keeps the tier as before.
+    enum class RustPathOwners : std::uint8_t { Keep, Hedge, Split, External, Decline };
+    static constexpr NodeId kRustOwnerUnread  = kNoNode - 1;   // rustPathOwnerMemo: not read yet
+    static constexpr NodeId kRustOwnerOutside = kNoNode - 2;   // an owner: the impl's own type name leads out of the tree where the impl is written
+    static constexpr NodeId kRustOwnerInTree  = kNoNode - 3;   // an owner: no indexed class, but the impl's type name is a `use` into the tree
+    mutable std::vector<NodeId> rustPathOwnerMemo;              // per symbol: its owner as rustPathOwners reads it (sized on first use)
+    RustPathOwners rustPathOwners( const Reference& r, std::vector<NodeId>& cand, bool canonical ) const
+    {
+        if( !canonical || callResultFamilyOf( r.lang ) != CallResultFamily::Rust || r.qualifier.empty() || cand.empty() )
+        {
+            return RustPathOwners::Keep;
+        }
+        const std::string_view written = rustWrittenQualifierOf( r );
+        const NodeId           cls     = rustQualifierClass( r, written );
+        rw::SmallVec<NodeId, 4> owners;   // per candidate, in cand's order: its impl's in-tree class, kRustOwnerOutside, kRustOwnerInTree, or kNoNode (unplaced)
+        if( rustPathOwnerMemo.size() != ing.symbols.size() )
+        {
+            rustPathOwnerMemo.assign( ing.symbols.size(), kRustOwnerUnread );
+        }
+        for( const NodeId c : cand )
+        {
+            NodeId& owner = rustPathOwnerMemo[ c ];   // a candidate's owner is the candidate's own fact: read once per run
+            if( owner == kRustOwnerUnread )
+            {
+                const Symbol& cs = ing.symbols[ c ];
+                owner = rustPathHeadLeavesTree( cs.fileId, cs.sigStartByte, ownerClass[ c ] ) ? kRustOwnerOutside : selfClass( c );
+                owner = owner == kNoNode && rustPathHeadUsedInTree( cs.fileId, cs.sigStartByte, ownerClass[ c ] ) ? kRustOwnerInTree : owner;
+            }
+            owners.push_back( owner );
+        }
+        const auto keepWhere = [ & ]( auto&& keep )   // cand narrowed to the candidates `keep( index )` holds, in order
+        {
+            std::size_t kept = 0;
+            for( std::size_t i = 0; i < cand.size(); ++i )
+            {
+                if( keep( i ) )
+                {
+                    cand[ kept++ ] = cand[ i ];
+                }
+            }
+            cand.resize( kept );
+        };
+        if( cls != kNoNode )
+        {
+            const bool own  = std::ranges::find( owners, cls ) != owners.end();
+            const auto mine = [ & ]( std::size_t i ) { return own ? owners[ i ] == cls : owners[ i ] == kNoNode || owners[ i ] == kRustOwnerInTree; };
+            bool any = false;
+            for( std::size_t i = 0; i < cand.size() && !any; ++i )
+            {
+                any = mine( i );
+            }
+            if( !any )
+            {
+                return RustPathOwners::Decline;   // cand untouched: the declined site lists the namesakes it refused
+            }
+            keepWhere( mine );
+            return RustPathOwners::Keep;
+        }
+        if( rustPathHeadLeavesTree( r.fileId, r.startByte, written ) )
+        {
+            // an in-tree class's member stays only as a trait's the path may name: `http_body::Body::size_hint( &s )` runs s's impl of
+            // the trait Body. The inheritance names keep a base by its last segment, so `impl std::error::Error for Error` stays under
+            // `std::io::Error::from( e )` too: hedged, a floor, never bound
+            const std::string_view tail = CallResultTypes::splitLast( written, "::" ).second;
+            keepWhere( [ & ]( std::size_t i )
+            {
+                bool implementsTail = false;
+                forEachBase( ownerClass[ cand[ i ] ], [ & ]( std::string_view b ) { implementsTail = implementsTail || CallResultTypes::splitLast( b, "::" ).second == tail; } );
+                return owners[ i ] == kRustOwnerOutside || owners[ i ] == kNoNode || implementsTail;
+            } );
+            return cand.empty() ? RustPathOwners::External : RustPathOwners::Hedge;
+        }
+        // a module's item among them (`util::tool()`, an inline mod's fn) is the module path's question, not a type's: the tier as before
+        if( cand.size() < 2 || std::ranges::any_of( cand, [ & ]( NodeId c ) { return ownerClass[ c ].empty(); } ) )
+        {
+            return RustPathOwners::Keep;
+        }
+        // the types a path no `use` chooses may mean are the caller's own crate's (another crate's needs a `use` or its name); a crate the
+        // layout cannot place, or one of them in it, leaves the tier as before
+        const std::uint32_t crate = types.rustCrateOfFile( r.fileId );
+        if( crate == CallResultTypes::kNoCrate )
+        {
+            return RustPathOwners::Keep;
+        }
+        std::size_t inCrate = 0;
+        NodeId      first   = kNoNode;
+        bool        differ  = false;
+        for( std::size_t i = 0; i < cand.size(); ++i )
+        {
+            if( types.rustCrateOfFile( ing.symbols[ cand[ i ] ].fileId ) != crate )
+            {
+                continue;
+            }
+            first  = inCrate == 0 ? owners[ i ] : first;
+            differ = differ || owners[ i ] != first || owners[ i ] == kNoNode || owners[ i ] == kRustOwnerOutside || owners[ i ] == kRustOwnerInTree;
+            ++inCrate;
+        }
+        return inCrate >= 2 && differ ? rustLadderSplit( r, cand ) : RustPathOwners::Keep;
+    }
+    // RUST-PATH-OWNER: how the ladder keeps a Split's candidates. Tier 1 or 2 holding all of them or none (tier 3's canonical rescue)
+    // is its own split (Split: no locality tie-break narrows it); a strict subset there would be a locality pick among types the path
+    // cannot tell apart, so every candidate is hedged instead (Hedge)
+    RustPathOwners rustLadderSplit( const Reference& r, const std::vector<NodeId>& cand ) const
+    {
+        const std::string_view dir    = includerDir( ing.files[ r.fileId ] );
+        std::size_t            inFile = 0;
+        std::size_t            inDir  = 0;
+        for( const NodeId c : cand )
+        {
+            const std::uint32_t f = ing.symbols[ c ].fileId;
+            inFile += f == r.fileId ? 1u : 0u;
+            inDir  += includerDir( ing.files[ f ] ) == dir ? 1u : 0u;
+        }
+        const bool subset = inFile != 0 ? inFile < cand.size() : inDir != 0 && inDir < cand.size();
+        return subset ? RustPathOwners::Hedge : RustPathOwners::Split;
     }
     // rust-receivers: the ONE class `self` names inside `from` (or the method enclosing it): the in-tree class of the method's
     // owner name that owns the method (memberOwnerRuleOf — Rust: its own file and item scope, or the only class of the name);

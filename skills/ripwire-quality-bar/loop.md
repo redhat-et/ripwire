@@ -14,7 +14,7 @@
 2. **Make your change.**
 3. **Measure the delta** — `ripwire <dir> --quality-delta --legend=compact` → only the regressions you
    introduced, across the
-   12 kinds in the table below. Each emits `<r kind="…" sym=… was=… now=…>` (`members=` for duplication).
+   13 kinds in the table below. Each emits `<r kind="…" sym=… was=… now=…>` (`members=` for duplication).
    Test-fixture dirs are exempt from `dead-code`; `short-horizon-churn` ignores your own current edit and
    exempts brand-new symbols/markdown/fixtures. Two exemptions are DISCLOSED on the report rather than
    silent, and both change how you read a zero: a symbol defined by a self-registering test/benchmark

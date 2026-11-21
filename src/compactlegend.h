@@ -1080,6 +1080,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // idea #11 (lane lean-trio): present-only, on a regression-free answer whose stale sa rows were collapsed to counts
     { "stale_by_kind", "stale_by_kind=: stale= split by ack kind (kind:N,...); the sa rows are collapsed", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "stale_next", "stale_next=: the call printing the sa rows and the full header", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
+    // D4 (src/quality.h ratchetAttrsXml): present when the tangle ratchet read its reference point
+    { "ratchet_ref", "ratchet_ref=TAG ratchet_judged=N: the ratchet compared N touched over-bar functions with their best since TAG; ratchet_unread= / ratchet_cut=1: versions not measured", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "preexisting-worse", "preexisting-worse=N: regressions on symbols that existed at baseline; they gate when major", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "new-symbol", "new-symbol=N: NEW code; new-symbol rows never gate, except defect-shape format-arity or a ceiling= row", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "register-macro-excluded", "register-macro-excluded=N: symbols skipped: self-registering test/bench macros or Rust #[test]; a floor", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
@@ -1638,7 +1640,13 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "idiom", "r idiom=: the recognized clone-body shape of a duplication row", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "facet", "r facet=failure-default: an error-masking row whose growth includes a read/parse/spawn failure returned as an empty success; it never gates by itself", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "monster", "r monster=1: over 5x the ccx bar and grew by now-was (10+): major at any %; put the new branch in a helper", true, "r", MapHeaderRead::No, {}, "quality-delta" },
-    { "defect", "r defect=: a defect-shape row's shape: format-arity (gates, any origin) or utf8-cut / dedup-first / vacuous-assert (always sev=minor)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
+    { "similar", "r similar=N: the params list is new or grew and holds N>=3 adjacent same-typed params (C/C++); a swapped call compiles; pass a named struct; never gates", true, "r", MapHeaderRead::No, {}, "quality-delta" },
+    { "why", "r why=: a tangle row's risen inputs, a minor clone row's differing operands or shrunk member, an unhandled-arm row's values with no outcome (add the arm or a default); fix=: the shape the row calls for, with lines", true, "r", MapHeaderRead::No, {}, "quality-delta" },   // also defines fix=
+    { "locals", "r locals=: a tangle row's steering locals (set in one step, read by a branch 10+ statements later)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
+    { "ratchet", "r ratchet=TAG: a tangle row above its best since TAG (an input rose over its minimum); why= adds best since TAG", true, "r", MapHeaderRead::No, {}, "quality-delta" },
+    { "n", "improved n= more=: what this change made better, never a row or gating; i kind= sym= was= now= p=: over the kind's bar at baseline, lower now", true, "improved", MapHeaderRead::No, {}, "quality-delta" },
+    { "defect", "r defect=: a defect-shape row's shape: format-arity (gates, any origin) or utf8-cut / dedup-first / vacuous-assert / unchecked-status / unhandled-arm (always sev=minor)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
+    { "call", "r call=: the call an unchecked-status row drops the status of; its p= is that site's line. Fix: check it (check=True) or (void) it with a reason", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     // --expand's bundle (src/main.cpp runDefaultMap): the ride-along note and the map it carries inside the <ctx>.
     { "note", "note=: the ranked map rides along with the payload; top-k=0 serves the payload alone", false, "ctx", MapHeaderRead::No, {}, "expand" },
     { "pr_iters", "r root= pr_iters=: the ride-along map; root= its p= base, pr_iters= PageRank iterations", true, "r", MapHeaderRead::No, {}, "expand" },   // also defines root= on <r>
@@ -1852,6 +1860,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // metrics: src/serialize.h (s row metrics, f layer= via builtinLayer in src/arch.h)
     { "humps", "humps=/deep=: regions reaching the nesting bar / lines inside them; absent when nest= is under the bar", true, "s", MapHeaderRead::No, {}, "metrics" },   // also defines deep=
     { "deep_floor", "deep_floor=1: deep= is a FLOOR; a line two humps share is billed once, so deep below humps is legal", true, "s", MapHeaderRead::No, {}, "metrics" },
+    { "steer", "steer=N: primitive locals rewritten, then read in a branch condition 10+ statements later; absent at 0", true, "s", MapHeaderRead::No, {}, "metrics" },
+    { "tangle", "tangle=S: quality-delta's tangle score, (nest past 3 + deep%/5 + steer/100 lines) x log2(loc/50); bar 6", true, "s", MapHeaderRead::No, {}, "metrics" },
     { "ev", "ev=/ev_why=: essential complexity (2+: jumps block extract-method; absent: 1) / the jumps behind it, tag:count", true, "s", MapHeaderRead::No, {}, "metrics" },   // also defines ev_why=
     { "ev_floor", "ev_floor=1: ev= is a FLOOR; noreturn calls, macro-hidden exits and unresolved gotos are unseen", true, "s", MapHeaderRead::No, {}, "metrics" },
     { "ppalt", "ppalt=N: #else/#elif branches in the body; metrics sum ALL branches, no one build compiles them all", true, "s", MapHeaderRead::No, {}, "metrics" },
@@ -1878,8 +1888,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "layer", "layer=: built-in arch layer (game|infra|render|math|audio|ai|test) from a dir name in p=; absent if none", true, "d", MapHeaderRead::No, {}, "pack-task" },
     // clones: src/verbs_report.h emitClonesReport (groupExemptKind, cloneIdiomAttrs)
     { "exempt", "group exempt=fixture|shell-runner: every member is on such a path; quality-delta duplication ignores it", true, "group", MapHeaderRead::No, {}, "clones" },
-    { "idiom", "group idiom=: the recognized shape every member spells: threshold-ladder, switch-name-table, builder-chain, one-statement", true, "group", MapHeaderRead::No, {}, "clones" },
-    { "demoted", "group demoted=1: idiom collision (no shared identifier or context, under 80 tokens, where one-statement leaves out parameter names, std:: chains and container words and never demotes a parameter-renamed copy); quality-delta: minor", true, "group", MapHeaderRead::No, {}, "clones" },
+    { "idiom", "group idiom=: the recognized shape every member spells: threshold-ladder, switch-name-table, builder-chain, one-statement, call-sequence", true, "group", MapHeaderRead::No, {}, "clones" },
+    { "demoted", "group demoted=1: idiom collision (no shared identifier or context, under 80 tokens, where one-statement and call-sequence leave out parameter names, std:: chains and container words and never demote a parameter-renamed copy); quality-delta: minor", true, "group", MapHeaderRead::No, {}, "clones" },
     // quality-delta: src/verbs_quality.h (range attrs, duplication r row); staleAcksXml in src/quality.h
     { "key", "sa key=/why=: the stale ack's ledger hash / target-gone (names nothing now) or finding-gone (no longer fires)", true, "sa", MapHeaderRead::No, {}, "quality-delta" },   // also defines why=
     { "members", "r members=/tokens=: a duplication row's clone group (member ids) / their shared normalized-token count", true, "r", MapHeaderRead::No, {}, "quality-delta" },   // also defines tokens=
@@ -1888,6 +1898,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "head_basis", "head_basis=identity: the floor is this tree's own snapshot; archived-index-hidden: refused, a tracked path is skip-worktree/assume-unchanged; absent: the archived HEAD tree", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "base_ref", "base_ref=/target_ref=: the two resolved full shas a range compared (committed trees; at= omitted)", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },   // also defines target_ref=
     { "churn", "churn=unavailable: range form; short-horizon-churn cannot be measured, so its silence is not no churn", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
+    { "stale_tree", "stale_tree=1: the working tree is not target_ref's tree (uncommitted edits or HEAD elsewhere): this answers for target_ref, not the files on disk; never gating", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     // from-trace: src/tracelocus.h (frame and skipped rows)
     { "line", "skipped line=: that frame's line; p= is its path, outside every root, so never ranked", true, "skipped", MapHeaderRead::No, {}, "from-trace" },
     { "line_encloses", "frame line_encloses=: the other def today's line sits in; STALE trace, the name binding was kept", true, "frame", MapHeaderRead::No, {}, "from-trace" },

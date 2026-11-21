@@ -29,6 +29,7 @@
 // consulted, so the two surfaces cannot disagree about a floor.
 
 #include "graph.h"           // Graph, declinedCallsNaming — the declined evidence and the in-edge CSR
+#include "infra/sortutil.h"   // sortUnique
 #include "langfacts.h"       // LangFacts::transitiveIncludes — usesRolesUnindexed's includer-language test
 #include "model.h"
 #include "nextverb.h"        // nextFlag — the follow-up's shell-safe spelling
@@ -217,8 +218,7 @@ inline IdsOfName relatedByName( const IngestResult& ing, const RowsOfName& rowsO
     }
     for( auto& [ name, ids ] : out )
     {
-        std::sort( ids.begin(), ids.end() );
-        ids.erase( std::unique( ids.begin(), ids.end() ), ids.end() );
+        rw::sortutil::sortUnique( ids );
     }
     return out;
 }

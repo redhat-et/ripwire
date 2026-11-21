@@ -187,7 +187,12 @@ inline std::vector<RouteBody> roundRobin( const std::vector<std::vector<NodeId>>
 
 // The key-body element for `task`. `first`: the routed spelling ("" on an unrouted answer). `rootArg`: the single root the answer's
 // paths are relative to ("" otherwise), as every --for body. What the rest of the page serves is not an input (ruling 87).
-inline KeyBodies keyBodies( const IngestResult& ing, std::string_view task, std::string_view first, std::string_view rootArg )
+// `redact`: the run's redaction tally (nullptr: --no-redact), as every served body takes it (hopbody.h REDACT-TOUCH). The key group
+// was written on a line that predates that rule and passed none, so its bodies would have been the one unredacted body path left.
+// The 0.7.0 / main merge (2026-11-21) threads it. UNTESTED at the merge: both callers insert the group into a FINISHED document,
+// so whether a redaction made here is inside the run's reportRedactions tally depends on where that report ran — the body is
+// redacted either way, the count may be short.
+inline KeyBodies keyBodies( const IngestResult& ing, std::string_view task, std::string_view first, std::string_view rootArg, RedactCounts* redact )
 {
     const std::vector<RouteBody> want = roundRobin( keyCandidates( ing, task, first ) );
     if( want.empty() )
@@ -197,7 +202,7 @@ inline KeyBodies keyBodies( const IngestResult& ing, std::string_view task, std:
     // CB1: the "key" group is the ONE routeBodiesXml caller that opts into the monotone line cap. The hops and
     // route groups keep bodyLineCap=0 and are byte-identical, which is how this change is provable rather than
     // inspected: a cap wired into the shared printer itself would have moved bytes on three other groups.
-    const RouteBodiesXml r = routeBodiesXml( ing, want, "key", {}, kKeyBodyMax, rootArg, kCappedBodyLines );
+    const RouteBodiesXml r = routeBodiesXml( ing, want, "key", {}, kKeyBodyMax, rootArg, redact, kCappedBodyLines );
     return { r.xml, r.ids.size() };
 }
 
@@ -227,7 +232,8 @@ inline NodeId keyBodyFor( const IngestResult& ing, std::string_view task, [[mayb
 // finished answer-first --for document, when that block ends inside the default page. est_tokens= is re-priced: the element at the body
 // rate and the legend as markup, exactly through `ledger` when it converged, else at the densest markup rate (an upper bound). Returns
 // whether the document changed.
-inline bool insertKeyBodies( std::string& doc, const IngestResult& ing, std::string_view task, std::string_view rootArg, const ForAnswerLedger* ledger )
+inline bool insertKeyBodies( std::string& doc, const IngestResult& ing, std::string_view task, std::string_view rootArg, RedactCounts* redact,
+                             const ForAnswerLedger* ledger )
 {
     const std::string_view                       view = doc;
     const std::optional<answerfirst::RootBody>   rb   = answerfirst::rootBody( view );
@@ -245,7 +251,7 @@ inline bool insertKeyBodies( std::string& doc, const IngestResult& ing, std::str
     // this document as `served`, and keyCandidates dropped every definition whose <b> was already in there — so a fold or row
     // section promoted onto page 1 silently took the key group's own copy away, and which definition it took depended on what the
     // body selector happened to promote. The key group does not consult the page any more: it carries its own body.
-    const KeyBodies kb = keyBodies( ing, task, {}, rootArg );
+    const KeyBodies kb = keyBodies( ing, task, {}, rootArg, redact );
     if( kb.xml.empty() )
     {
         return false;

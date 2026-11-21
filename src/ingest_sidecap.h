@@ -1739,6 +1739,7 @@ void captureSideFacts( const LangEntry& le, std::uint32_t fileId, std::string_vi
             bindsFinalize( bindCtx );   // L3 noise gates + clobber sweep — the tail of the old captureBindings
             if( callResultFamilyOf( le.lang ) == CallResultFamily::Rust )
             {
+                dropUnreadRustSpines( binds, firstBindOfFile, bindCtx.rustReceiverRoots );   // std-namesake: a spine no member access reads
                 pruneRustTombstones( binds, firstBindOfFile );   // (L) only a typed name's tombstones hide anything
             }
         }
@@ -1889,7 +1890,9 @@ inline void applyAnnotationRename( RawDef& d, const AnnotationRename& renamed, T
 // complexityOf, the function-scope span, the def arm's IS-A / HAS-A / macro-body reference minting and Ruby's
 // reference and bind passes. Measured on 104 C++ header blobs: those were ~60% of this function's samples (cc_walk alone
 // ~30%, the reference arm's qualifier / receiver parent walks ~30%).
-enum class TagsCapture : std::uint8_t { Full, DefinitionsOnly };
+// DefinitionsAndShape (QD-TANGLE D4): DefinitionsOnly plus each callable's cc_walk facts (ccx, nesting, deep lines, steering locals) —
+// the best-since store's reading of a history blob (ingest.h tangleInputsOfBlob).
+enum class TagsCapture : std::uint8_t { Full, DefinitionsOnly, DefinitionsAndShape };
 
 /// Append definitions and references captured by the language query, with language-specific filtering.
 /// Captured spans refer to src and root; a null cursor appends nothing. Existing output rows are retained.
@@ -1901,7 +1904,8 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                        const std::vector<PreprocDeadRange>& ppDead, ExtractShortfall& shortfall, TagsCapture mode = TagsCapture::Full,
                        std::string_view fileStem = {} )   // the file's stem: the name of a bare `module.exports = <anonymous fn>` (JS)
 {
-    const bool full = mode == TagsCapture::Full;
+    const bool full  = mode == TagsCapture::Full;
+    const bool shape = mode != TagsCapture::DefinitionsOnly;   // the callables' cc_walk facts (Full or DefinitionsAndShape)
     if( cursor == nullptr )
     {
         return;
@@ -2405,7 +2409,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             // A literal-bound name measures its LITERAL; every other def measures defNode, as before.
             const bool   literalBound = !ts_node_is_null( own.literal );
             const TSNode metricNode   = literalBound ? own.literal : defNode;
-            const auto [ cxVal, ccxVal, nestVal, localsVal, ppAltVal, humpsVal, deepVal, evVal, evWhyVal ] = fnOrMethod && full ? complexityOf( spanThroughBody ? body : metricNode, src, le.lang ) : Complexity{ 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, {} };
+            const auto [ cxVal, ccxVal, nestVal, localsVal, ppAltVal, humpsVal, deepVal, evVal, evWhyVal, steerVal, dispatchVal, nestCutVal ] = fnOrMethod && shape ? complexityOf( spanThroughBody ? body : metricNode, src, le.lang ) : Complexity{ 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, {}, 0u, 0u, 0u };
             d.cx        = cxVal;
             d.ccx       = ccxVal;
             d.locals    = localsVal;   // Phase 1: floor count, C/C++ only (model.h localsCountedLang) — 0 elsewhere, never emitted there
@@ -2436,6 +2440,10 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             // answer than either). Runs on defNode, whose ancestors are the enclosing scopes.
             d.testScope = isTestMacroBlock ? std::uint8_t( 1 ) : std::uint8_t( inFileTestScope( defNode, src, le.lang ) );   // LB-E: a test macro IS the in-file convention
             d.maxNest   = fnOrMethod ? std::uint8_t( nestVal > 255u ? 255u : nestVal ) : std::uint8_t( 0 );
+            // QD-TANGLE (model.h Symbol::steer, ::dispatchShare): 0 off a callable, where complexityOf did not run
+            d.steer        = saturatedTo<std::uint8_t>( steerVal );
+            d.deepDispatch = saturatedTo<std::uint16_t>( dispatchVal );
+            d.nestArmCut   = saturatedTo<std::uint8_t>( nestCutVal );
             // The nesting profile (model.h Symbol::humps/deepLoc). Saturating at 65535 on purpose: a def past
             // either bound is beyond every triage threshold, and deepLoc is a floor already, so a clamp there
             // stays honest in the direction the attribute already claims.

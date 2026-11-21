@@ -21,6 +21,7 @@
 // record no target yet; they join by recording one (aliasdef.h aliasShapeOf arm), with no change here.
 
 #include "cppscopechain.h" // EditCheckBraceLexer — the namespaces and classes around a declaration (C++ records no namespace body)
+#include "infra/sortutil.h"   // sortUnique
 #include "defslookup.h"    // aliasTargetText / aliasTargetRow — the written target, as --defs to= prints it
 #include "graph.h"         // resolveAllByNameQualified
 #include "infra/hashutil.h" // packPair — the (file, byte) chain key
@@ -258,8 +259,7 @@ struct BindCache
 inline void primeChains( const IngestResult& ing, std::vector<std::pair<std::uint32_t, std::uint32_t>> want, BindCache& cache )
 {
     std::erase_if( want, [ & ]( const auto& fa ) { return cache.chains.find( hashutil::packPair( fa.first, fa.second ) ) != cache.chains.end(); } );
-    std::ranges::sort( want );
-    want.erase( std::unique( want.begin(), want.end() ), want.end() );
+    rw::sortutil::sortUnique( want );
     std::string scratch;
     for( std::size_t from = 0; from < want.size(); )
     {

@@ -31,7 +31,12 @@
 # 335 -> 333 (train 36, recount on the composed tree #431 + #438 + #437 over train 35): train 35's head counted 335; the
 #   composed tree counts 333 (net two fewer shared-file predicates from the merged branches).
 # 333 -> 326 (slice 6c, #447): implicitReceiver, memberNeverReachesFreeFunction, classNameReceiver and hashComment moved to LangFacts.
-ceiling	325
+# 325 -> 324 (qd-shrink-pair): quality.h definitionQualityKey holds the Elixir key fold; pathQualifiedKey(relPath, Symbol) and
+#   qdbestsince.h's best-since fold call it instead of spelling the compare (the base-body reader added none).
+# 324 -> 321 (train ge2, the composed tree): qd-unchecked-status + qd-unhandled-arm added two C-family predicates (the enum table's
+#   Cpp/C filter, the C scanner branch) and the composed tree counted 326; quality.h defectSitesOf and cFamilyEnumTable now read
+#   langfacts.h's DefectScan column, so all six defect-shape language tests (four of them main's) left the count.
+ceiling	321
 perlang	ingest_elixir.h
 perlang	elixir_resolve.h
 perlang	ingest_clojure.h
@@ -39,3 +44,4 @@ perlang	ingest_jsimports.h
 perlang	ingest_ruby.h
 # argtypepick.h (lane overload-split): the C++ argument-type overload pick (graph.h B2.3), C++ overload resolution only.
 perlang	argtypepick.h
+perlang	pyscopepin.h

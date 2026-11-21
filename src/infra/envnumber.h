@@ -1,8 +1,10 @@
 #pragma once
 
-// envnumber.h — one environment variable read as a whole decimal number. The knob readers (forpage.h's tail-width
-// knob, memceiling.h's budget knob) share it, so each states only its own range and its
-// own reply to a bad value: whether a malformed value is refused or read as the default is the caller's decision.
+// envnumber.h — one environment variable read as a whole decimal number. Every knob reader in the host tree shares it,
+// so this file decides nothing about any one knob: the range a value must fall in, and the reply to a bad one — refuse
+// the run, or fall back to the default — belong to the caller. That is why the result carries `set` and `parsed` as
+// separate bits rather than one bool: "absent" and "present but malformed" are different answers, and only the caller
+// knows which of them is an error.
 
 #include <charconv>
 #include <cstdint>

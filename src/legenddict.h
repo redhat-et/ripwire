@@ -52,6 +52,7 @@
 // `--legend-dict=roster`). Gate: test/legendrefcheck.sh.
 
 #include "compactlegend.h"
+#include "infra/sortutil.h"   // sortUnique
 #include "forpage.h"            // kForCoverageLegend (and, through lexical.h, kForConfidenceNote)
 #include "graphlegend.h"        // the named MCP `for` clauses, kForIdRouteLegend, kForRouteCodeLegend, the root-rel prose
 #include "serialize.h"          // kForFileTailLegend, kForFileTailFoldedLegend, kForSameAsLegend
@@ -426,8 +427,7 @@ inline PackTier packTier( std::string_view key )
             }
         }
     }
-    std::sort( ids.begin(), ids.end() );
-    ids.erase( std::unique( ids.begin(), ids.end() ), ids.end() );
+    rw::sortutil::sortUnique( ids );
     // ONE LINE, ONCE. Two reading rows can spell the same definition (the same attribute on two elements); a handle then
     // resolves to both, and the tier's text would print — and charge — the line twice. The first id stands for the line;
     // serveTier serves by line, so the other row counts as held all the same.

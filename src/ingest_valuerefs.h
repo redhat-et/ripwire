@@ -166,8 +166,7 @@ inline std::string vrClean( std::string_view s )
 // A `fed` list (VrScope::fed, m_fileFed) as a sorted set: the Through filters then binary-search it.
 inline void vrSortUnique( std::vector<std::string>& v )
 {
-    std::ranges::sort( v );
-    v.erase( std::ranges::unique( v ).begin(), v.end() );
+    rw::sortutil::sortUnique( v );
 }
 
 // IX-3 name-template dispatch: the dynamic-lookup FORMS per value-ref family, as data (one row per form; no Lang compare in
@@ -1417,7 +1416,7 @@ private:
     };
     static bool isDeclaratorWrapper( const char* t ) noexcept
     {
-        return std::ranges::find( kDeclaratorWrappers, std::string_view( t ) ) != std::ranges::end( kDeclaratorWrappers );
+        return isOneOf( t, kDeclaratorWrappers );
     }
 
     // Is node kind `t` (about to be entered; its parent is m_anc.back()) a parameter list, or a parameter of one, that
@@ -1742,13 +1741,9 @@ private:
         {
             return;
         }
-        const auto sortUnique = []( std::vector<std::string_view>& v )
-        {
-            std::ranges::sort( v, rw::sortutil::svLess );   // never the default: libstdc++ debug aborts on string_view operator< (portablebuildcheck #6b)
-            v.erase( std::ranges::unique( v ).begin(), v.end() );
-        };
-        sortUnique( m_fnDeclNames );
-        sortUnique( m_relImportNames );
+        // never the default comparator: libstdc++ debug aborts on string_view operator< (portablebuildcheck #6b)
+        rw::sortutil::sortUnique( m_fnDeclNames, rw::sortutil::svLess );
+        rw::sortutil::sortUnique( m_relImportNames, rw::sortutil::svLess );
         const std::vector<std::string_view>& fileDecls = m_scopes.front().decls;
         for( RawRef& r : m_fwdSites )
         {

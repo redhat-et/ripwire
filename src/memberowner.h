@@ -79,8 +79,7 @@ public:
                 defined_.emplace_back( t.lang, std::string_view( t.name ) );
             }
         }
-        std::sort( defined_.begin(), defined_.end(), keyLess );
-        defined_.erase( std::unique( defined_.begin(), defined_.end() ), defined_.end() );
+        sortutil::sortUnique( defined_, keyLess );
     }
     // The owner a member row prints ("" = bare): the symbol's full stored scope, when the rule above holds. An extent-suspect symbol's
     // scope was inferred from a recovered parse (extentsuspect.h), so it is no claim: bare.

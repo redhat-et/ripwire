@@ -354,7 +354,10 @@ tools = json.loads( line )[ "result" ][ "tools" ]
 # sentences unchanged. Ceiling = measured + 30 B, the same margin.
 # RT2 batch parity (2026-11-19): +35 B — the batch item schema gains no_verb_route (the batch `for` item routes like the live
 # verb, so its opt-out rides the item too): measured 40,030 -> 40,065 B, descriptions unchanged. Ceiling = measured + 30 B.
-CEILING = 40095
+# 2026-11-21 (0.7.0 / main merge, main 8861b0d4d): main's train ge2 made quality_delta count 13 kinds and name the thirteenth.
+#   Carried into P2's trimmed description as "12 kinds" -> "13 kinds" and ", tangle" (+8 B); main's own 47,420 ceiling is NOT
+#   taken — the P2 ratchet stands. Measured 40,065 -> 40,073 B; ceiling = measured + 30 B, the same margin.
+CEILING = 40103
 manifest = len( json.dumps( { "tools": tools }, separators = ( ",", ":" ) ) )
 descBytes   = sum( len( t[ "description" ] ) for t in tools )
 schemaBytes = sum( len( json.dumps( t[ "inputSchema" ], separators = ( ",", ":" ) ) ) for t in tools )

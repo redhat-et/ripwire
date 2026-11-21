@@ -83,6 +83,7 @@ static_assert( rw::kTestGateCcxBarMirror == rw::quality::kCcxBar, "situ.h kTestG
 #include "binstale.h"              // --doctor's tracked-binary-staleness check (git-order, not mtime)
 #include "codexdoctor.h"           // --doctor --agent=codex: live binary/skills/hooks/MCP surface parity
 #include "crossref.h"              // --stray-content / --whereis — the cross-branch content index
+#include "qdbestsince.h"           // D4: quality::tangleBestSince — the --quality-delta ratchet's history reader
 #include "darkflags.h"             // --flags — the dark-content (compile/cmake/env gate) dashboard
 #include "flipimpact.h"            // --flags --flip=NAME: the blast radius of turning ONE of those gates ON
 #include "layout.h"                // --layout=STRUCT — computed field offsets + tripwires + mirror drift
@@ -3651,8 +3652,7 @@ std::string renderHelpTask( const rw::Config& cfg, const rw::taskroute::TaskRout
         // Keyed off the INTENT, and spelled by forpage.h's own forWidenNext — the same quoting, and (as of
         // 2026-09-25) emitted in full whatever its length: nextAttrXml carries no ceiling on next=, so a
         // long task is pasted in full rather than truncated or dropped.
-        const bool widens = rw::taskroute::isOneOf( choice.id, std::begin( rw::taskroute::kForShapedIntents ),
-                                                   std::size( rw::taskroute::kForShapedIntents ) );
+        const bool widens = rw::isOneOf( choice.id, rw::taskroute::kForShapedIntents );
         out += rw::nextAttrXml( widens ? rw::forWidenNext( cfg.helpTask ) : std::string() );
         out += "><run>" + ex( choice.command ) + "</run></choice>";
     }
@@ -3816,10 +3816,16 @@ std::optional<int> runCliEdit( const rw::Config& cfg )
     // F-W1: a post-check whose fold stopped AFTER the write is a gap on the receipt (post_check "not run: ..."), never a
     // refusal: the file is edited, so this exits 0 like any applied edit and says the check did not run
     const bool postCheckStopped = outcome.resultJson.find( rw::mcpedit::kPostCheckNotRunKey ) != std::string::npos;
-    rw::emitTo( stderr, "ripwire edit: applied atomically; receipt carries region, blob_sha{}; next: {}\n",
+    // RULING 101: the post-check ran with the allocator ceiling suspended (the write was already committed, so a
+    // refusal there could report nothing). The receipt always carries `memory_ceiling`, in every state; this line
+    // names only the case a reader has to act on — the check actually PASSED the limit and ran unbounded.
+    const bool ceilingPassed = outcome.resultJson.find( rw::mcpedit::kCeilingKey ) != std::string::npos
+                            && outcome.resultJson.find( "the check PASSED the" ) != std::string::npos;
+    rw::emitTo( stderr, "ripwire edit: applied atomically; receipt carries region, blob_sha{}{}; next: {}\n",
                   cfg.noPostCheck        ? " (post-check skipped)"
                   : postCheckStopped     ? " (post-check not run: its graph fold stopped, see post_check)"
                                          : ", edit_check, tests_to_run",
+                  ceilingPassed ? " — the post-check passed the memory ceiling and ran unbounded, see memory_ceiling" : "",
                   outcome.next.c_str() );
     return 0;
 }

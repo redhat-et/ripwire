@@ -10,7 +10,7 @@
 >   delta) → the panel below, or **ripwire-fresh-eyes** for the full six-family breakdown.
 > • **You have the measurement and need the FIX** — for your own diff or for a subsystem **ripwire-fresh-eyes**
 >   just measured → the shape → refactor playbook, the closed fix loop and the debt fix loop are all on this page, below.
-> • **The regression is a MEMORY-layout hypothesis, not one of the 12 quality kinds** — `--lint`'s built-in
+> • **The regression is a MEMORY-layout hypothesis, not one of the 13 quality kinds** — `--lint`'s built-in
 >   cache-\* pack (8 static data-layout checks) is a normal part of a lint pass; `--field-affinity[=STRUCT]`
 >   is the deeper struct-level lens once a profile implicates a specific aggregate → **ripwire-perf-target**.
 > • Not sure which skill? → **ripwire-router**.

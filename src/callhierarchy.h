@@ -149,8 +149,7 @@ inline std::vector<NodeId> closureCalleeRows( const IngestResult& ing, const Gra
             rows.push_back( c );
         }
     }
-    std::ranges::sort( rows );
-    rows.erase( std::ranges::unique( rows ).begin(), rows.end() );
+    sortutil::sortUnique( rows );
     const std::vector<std::uint8_t> tierOfFile = pathTierIndexOver( ing, rows, [ & ]( NodeId r ) { return ing.symbols[r].fileId; } );
     std::sort( rows.begin(), rows.end(), [ & ]( NodeId a, NodeId b )
     {
@@ -367,8 +366,7 @@ inline std::size_t declinedIfaceCallsNaming( const IngestResult& ing, const Grap
             targetSigNames.push_back( ing.symbols[id].name );
         }
     }
-    std::sort( sigNames.begin(), sigNames.end(), sortutil::svLess );
-    sigNames.erase( std::unique( sigNames.begin(), sigNames.end() ), sigNames.end() );
+    sortutil::sortUnique( sigNames, sortutil::svLess );
     std::sort( targetSigNames.begin(), targetSigNames.end(), sortutil::svLess );
     std::size_t callCount = 0;
     for( std::size_t listIndex = 0; listIndex < g.declinedListCallCount.size(); ++listIndex )

@@ -1,5 +1,6 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/sortutil.h"   // sortUnique
 #include "infra/os.h"   // rw::os::open_memstream — the verb response buffers
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
@@ -34,6 +35,7 @@
 #include "callhierarchy.h"  // H14/M13: the shared 1-hop call-hierarchy computation — find_symbol / find_referencing_symbols
 #include "graphlegend.h"   // §H4 §3.4: the ONE counts_floor= marker + shared graph-count legend wording (CLI ≡ MCP)
 #include "crossref.h"      // the shared cross-branch content index (whereis / stray_content)
+#include "qdbestsince.h"   // D4: quality::tangleBestSince — quality_delta's ratchet (CLI parity)
 #include "darkflags.h"     // the shared dark-content gate harvest (flags)
 #include "flipimpact.h"    // the flags verb's `symbol` argument: one gate's flip blast radius
 #include "typeuse.h"       // L7: the impact verb's type tier (CLI ≡ MCP)
@@ -602,7 +604,7 @@ inline SweepFault sweepFaultOf( bool blobsUnread ) noexcept
 inline std::string whereisText( const std::string& root, const std::string& symbol, const std::string& filter,
                                 std::size_t maxHits, McpPageArgs page = {}, bool* seedFault = nullptr,
                                 crossref::WhereisListing listing = crossref::WhereisListing::ShorterOfDefsAll,
-                                SweepFault* fault = nullptr, bool fullText = false )
+                                SweepFault* fault = nullptr, bool fullText = false, RedactCounts* redact = nullptr )
 {
     std::string sel = symbol;
     std::string seedSpec;
@@ -639,7 +641,7 @@ inline std::string whereisText( const std::string& root, const std::string& symb
     {
         res.nearMiss = didYouMean( getIndex( root ).ing, sel );
     }
-    return captureXml( [ & ]( std::FILE* f ) { crossref::writeWhereisPage( f, res, maxHits, page.limit, page.offset, listing ); } );
+    return captureXml( [ & ]( std::FILE* f ) { crossref::writeWhereisPage( f, res, maxHits, page.limit, page.offset, listing, redact ); } );
 }
 
 // `stray_content` verb: per ref, the content its own divergent work authored that the live line lacks.
@@ -1994,7 +1996,7 @@ inline std::string mentionsJson( const std::string& root, const std::string& sym
             }
         }
     }
-    std::sort( docs.begin(), docs.end() );  docs.erase( std::unique( docs.begin(), docs.end() ), docs.end() );
+    rw::sortutil::sortUnique( docs );
 
     // §A8.4 (same fix as CLI --mentions): one entry per FILE via the shared collapse — the old payload
     // emitted one entry per markdown SECTION, duplicating "file" values up to 3x. docs=/sections= mirror
@@ -2449,7 +2451,7 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, std::strin
     if( budgetTokens > 0 && demoteRulesOn() )
     {
         const std::string after = mcpSlot.xml;
-        const auto        point = [ & ] { return demoteAndPointBlock( ing, in.g, task, mcpHdrXml, sigsStr, after ); };
+        const auto        point = [ & ] { return demoteAndPointBlock( ing, in.g, task, { .before = mcpHdrXml, .block = sigsStr, .after = after } ); };
         const auto        renderAt = [ & ]( std::size_t rowDrop ) { return mcpForRowsAt( in, renderSigs, mcpRows, &mcpSigsNext, rowDrop ); };
         std::string pointed = refillRowsForDemote( mcpSigsCut.rowDropBudgetBytes, [ & ]() -> const std::string& { return sigsStr; },
                                                    [ & ] { return mcpSigsCut.rowDropCut; }, [ & ] { return mcpShownIds.size(); }, renderAt, point );
@@ -2627,7 +2629,7 @@ inline void insertFileSyms( std::string& out, const IngestResult& ing, const Gra
         args.answerOut = &cut;
         std::string syms = renderForFileSyms( ing, g, args );
         const std::string_view shaped = cut.empty() ? args.answer : std::string_view( cut );
-        OneSideReachEdit edit = args.held ? OneSideReachEdit {} : demoteOneSideRows( ing, g, args.task, shaped, syms );
+        OneSideReachEdit edit = args.held ? OneSideReachEdit {} : demoteOneSideRows( ing, g, { .task = args.task, .answer = shaped, .syms = syms } );
         std::string answer = !edit.answer.empty() ? std::move( edit.answer ) : std::move( cut );
         demoteAndPointRowsInto( ing, g, args.task, args.answer, answer, args.held, DemoteRegime::Default ); // SIBLING-DEMOTE, then DECL-TWIN
         if( !answer.empty() )
@@ -3203,7 +3205,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     if( out.ends_with( "</ctx>" ) )
     {
         out.insert( out.size() - 6, renderForDeclRows( ing, ix.g, task, /*held=*/budgetTokens > 0 ) );
-        out.insert( out.size() - 6, renderForExemplarFamily( ing, ix.g, task, /*held=*/budgetTokens > 0 ) );   // EXEMPLAR-STAIRS, the CLI twin's renderer
+        out.insert( out.size() - 6, renderForExemplarFamily( ing, ix.g, task, redact, /*held=*/budgetTokens > 0 ) );   // EXEMPLAR-STAIRS, the CLI twin's renderer
         const McpManifestRows manifest = mcpManifestRowsFitted( ing, task, redact, out, ForDocBodyBudget{ budgetTokens, answerEstTokens } );   // MANIFEST-ROW
         out.insert( out.size() - 6, manifest.xml );
         manifestTokens = manifest.tokens;
@@ -4310,8 +4312,7 @@ namespace connectemit
         { return a.from != b.from ? a.from < b.from : a.to < b.to; };
         const auto edgeEq   = []( const ConnectEdge& a, const ConnectEdge& b ) noexcept
         { return a.from == b.from && a.to == b.to; };
-        std::sort( u.nodes.begin(), u.nodes.end() );
-        u.nodes.erase( std::unique( u.nodes.begin(), u.nodes.end() ), u.nodes.end() );
+        rw::sortutil::sortUnique( u.nodes );
         std::sort( u.edges.begin(), u.edges.end(), edgeLess );
         u.edges.erase( std::unique( u.edges.begin(), u.edges.end(), edgeEq ), u.edges.end() );
         return u;
@@ -4845,7 +4846,7 @@ inline std::string connectText( const std::string& root, const std::vector<std::
 //
 // quality_baseline WRITES the `.ripwire_quality_baseline` sidecar (a side-effect verb, like the edit verbs),
 // stamping the current HEAD sha. quality_delta is READ-ONLY: it reports ONLY what the working tree made WORSE
-// vs the baseline (12 kinds), honoring the exact precedence the CLI --quality-delta uses:
+// vs the baseline (13 kinds), honoring the exact precedence the CLI --quality-delta uses:
 //   (1) an explicit sidecar (from quality_baseline) wins — UNLESS it is STALE (pinned at a different HEAD),
 //   (2) else auto-compare vs git HEAD (computeHeadSnapshot), (3) else degrade with a clear message.
 // Both reuse quality::computeSnapshot / writeBaseline / selectBaseline / computeHeadSnapshot / gitHeadSha /
@@ -4904,6 +4905,7 @@ struct QualityDeltaOutcome
     // hwh-fix4 (N1): the CLI root's unread_history= twin (quality::historyUnreadDisclosure), present-only. An MCP client has no exit
     // code, so this field is the only way it learns that "gating":0 is a floor over history that could not be read.
     std::string                       historyJson;
+    rw::quality::DeltaExtras          extras;   // D4 ratchet source + disclosure, QD-CREDIT-ROW improvements (the CLI's DeltaBasis::extras)
 };
 
 // §B6 M10 — a CORRUPT sidecar used to read as "no sidecar". readBaseline reports a file that yields no header,
@@ -5030,8 +5032,10 @@ inline QualityDeltaOutcome computeQualityDelta( const std::string& root )
     const auto heal = rw::quality::healIdentity( baseSel.snapshot, acks, ing, g, root, root, /*wantContentIds=*/false );
 
     rw::quality::HistoryUnread historyUnread;
+    oc.extras.bestSince = [ root ]( const std::vector<std::string>& relPaths ) { return rw::quality::tangleBestSince( root, "HEAD", relPaths ); };   // the CLI's source
+    oc.extras.baseBodies = [ root ]( const std::vector<std::string>& relPaths ) { return rw::quality::cloneBodiesAt( root, "HEAD", relPaths ); };   // QD-SHRINK-PAIR, the CLI's source
     oc.regs       = rw::quality::computeDelta( ing, g, baseSel.snapshot, root, {}, rw::kDefaultMaxFileBytes, &oc.registerMacroExcluded, &oc.apiNewSurface,
-                                               nullptr, &oc.declinedCallExcluded, &oc.valueRefExcluded, rw::quality::KindScope{}, &historyUnread, &passes );
+                                               nullptr, &oc.declinedCallExcluded, &oc.valueRefExcluded, rw::quality::KindScope{}, &historyUnread, &passes, &oc.extras );
     historyUnread.renames = heal.renames.refusedPartial && baseSel.marker == std::string_view( "sidecar" );   // the CLI's own rule
     oc.historyJson = rw::quality::historyUnreadDisclosure( historyUnread ).second;
 
@@ -5125,6 +5129,7 @@ inline std::pair<std::string, std::string> qualityDeltaJson( const std::string& 
                     // #228 — the CLI root's head_basis= twin, present-only: absent means the archived HEAD tree.
                     + ( oc.headBasis == nullptr ? std::string() : std::string( ",\"head_basis\":\"" ) + mcpdetail::jsonEscape( oc.headBasis ) + "\"" )
                     + oc.historyJson
+                    + rw::quality::ratchetAttrsJson( oc.extras )
                     + ",\"at\":" + atJson + ",\"r\":[";
     bool first = true;
     for( const rw::quality::Regression& r : oc.regs )
@@ -5147,7 +5152,7 @@ inline std::pair<std::string, std::string> qualityDeltaJson( const std::string& 
             out += ",\"sym\":\"" + mcpdetail::jsonEscape( rw::quality::displaySym( r.sym, root ) ) + "\"";
             if( !( r.kind == "dead-code" ) && !( r.kind == "api-surface" && r.was == r.now ) )
             {
-                out += ",\"was\":" + std::to_string( r.was ) + ",\"now\":" + std::to_string( r.now );
+                out += ",\"was\":" + rw::quality::rowValueText( r, r.was ) + ",\"now\":" + rw::quality::rowValueText( r, r.now );
             }
         }
         if( !r.path.empty() )
@@ -5178,6 +5183,17 @@ inline std::pair<std::string, std::string> qualityDeltaJson( const std::string& 
         {
             out += ",\"ceiling\":" + std::to_string( r.ceiling ); // QD-ENTRY-CEILING (mirrors the XML)
         }
+        if( !r.call.empty() )
+        {
+            out += ",\"call\":\"" + mcpdetail::jsonEscape( r.call ) + "\""; // QD-UNCHECKED-STATUS (mirrors the XML)
+        }
+        for( const auto& [ name, text ] : { std::pair<const char*, const std::string*>{ "why", &r.why }, { "fix", &r.fix }, { "locals", &r.locals } } )
+        {
+            if( !text->empty() )
+            {
+                out += ",\"" + std::string( name ) + "\":\"" + mcpdetail::jsonEscape( *text ) + "\"";   // QD-TANGLE (mirrors the XML)
+            }
+        }
         out += "}";
     }
     out += "],";
@@ -5186,9 +5202,10 @@ inline std::pair<std::string, std::string> qualityDeltaJson( const std::string& 
     if( !showStale && oc.regs.empty() && !oc.staleAcks.empty() )
     {
         folded = out + "\"stale_by_kind\":\"" + mcpdetail::jsonEscape( rw::quality::staleByKindValue( oc.staleAcks ) )
-               + "\",\"stale_next\":\"" + mcpdetail::jsonEscape( rw::nextFlag( "show_stale=", "true" ) ) + "\"}";
+               + "\",\"stale_next\":\"" + mcpdetail::jsonEscape( rw::nextFlag( "show_stale=", "true" ) ) + "\"" + rw::quality::improvedJson( oc.extras.improved, root ) + "}";
     }
     out += rw::quality::staleAcksJsonArray( oc.staleAcks );   // L2 — "sa":[...], same taxonomy the CLI's <sa kind= key= why=/> rows carry
+    out += rw::quality::improvedJson( oc.extras.improved, root );   // QD-CREDIT-ROW (the CLI's own renderer; absent when none)
     out += "}";
     if( !folded.empty() && rw::foldPays( folded, out ) )
     {

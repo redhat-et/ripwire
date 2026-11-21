@@ -23,6 +23,7 @@
 // exact self-deception the PREREG forbids.
 
 #include "model.h"
+#include "infra/sortutil.h"   // sortUnique
 #include "resolve.h"   // buildPreciseIncludeAdj — resolved file->file edges, not basename guesses
 #include "mention.h"   // kMentionTopGapStep / kMentionMaxSymbolsPerFile — the ONE slot-ladder vocabulary
 #include "infra/emit.h"          // rw::emitTo — a malformed/out-of-range RIPWIRE_EXPAND is REPORTED on stderr in every build flavour: a rejected user value is config feedback, not a degrade path (DISCLOSE compiles out under NDEBUG, so a Release binary would have gone silent again)
@@ -142,8 +143,7 @@ inline bool applyStructuralExpansion( const IngestResult& ing, std::vector<float
         std::vector<std::uint32_t> cand;
         if( seed < adj.size() ) { cand.insert( cand.end(), adj[seed].begin(), adj[seed].end() ); }
         cand.insert( cand.end(), rev[seed].begin(), rev[seed].end() );
-        std::sort( cand.begin(), cand.end() );
-        cand.erase( std::unique( cand.begin(), cand.end() ), cand.end() );
+        rw::sortutil::sortUnique( cand );
 
         // Anti-noise guard, the one part of siblift NOT implicated in its failure: a neighbour with no
         // positive lexical score is never lifted. A structural edge alone is not evidence of relevance.

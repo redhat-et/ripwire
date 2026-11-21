@@ -5906,7 +5906,7 @@ four `--quality-delta` shapes, against 2–6 before: this lane closed `sa@key`, 
 shapes by absolute legend size and reports the fraction as INFO. A `legend<=payload` arm is
 unsatisfiable on the case these verbs exist to handle well — a clean tree's payload is near-zero by
 construction — so at 40% of a 572 B payload the whole legend would have to fit in 381 B, shorter than
-the list of the ten measured kinds (twelve kinds now, with placeholder and defect-shape). **A ≤40% relative ceiling for `--quality-delta` and ≤50% for
+the list of the ten measured kinds (thirteen kinds now, with placeholder, defect-shape and tangle). **A ≤40% relative ceiling for `--quality-delta` and ≤50% for
 `--safe-delete`/`--test-gate` were considered and are recorded as UNREACHABLE rather than as missed
 work**: post-fix fractions are 87.0% / 91.4% / 78.8% on the clean cases and 81.4–86.7% wherever
 the payload is real. The same reasoning `test/testgatelegendbudgetcheck.sh` recorded in 2026-08-28.
@@ -6237,16 +6237,19 @@ regenerated file. It skips (exit 0) when no reference binary is given, self-test
 and asserts it left the tree unmodified — an assertion that is itself **controlled**: a stray file is
 created on purpose, must be detected, and must then be gone.
 
-### `--quality-delta`'s twelve kinds: ten measured failure modes, placeholder and defect-shape
+### `--quality-delta`'s thirteen kinds: ten measured failure modes, placeholder, defect-shape and tangle
 
 These are the exact `kind=` strings the binary emits, from `src/quality.h`:
 
 `complexity` · `verbosity` · `nesting` · `params` · `duplication` · `dead-code` · `api-surface` ·
-`error-masking` · `short-horizon-churn` · `new-clone-of-reused-helper` · `placeholder` · `defect-shape`
+`error-masking` · `short-horizon-churn` · `new-clone-of-reused-helper` · `placeholder` · `defect-shape` · `tangle`
+
+`tangle` (QD-TANGLE, 2026-11-19) is report-only: always `sev="minor"`, a long function's nesting past 3, deep share and
+steering locals amplified by length (AUC 0.986 on 44 hand labels; a long orchestrator of named steps scores 0).
 
 The first ten each target a failure mode measured in the literature; `placeholder` (added 0.6.7) is an
-honesty check on "done" — a stub or TODO the change added — and never gates. `defect-shape` carries four
-facets in `defect=` (`format-arity`, `utf8-cut`, `dedup-first`, `vacuous-assert`), shapes this project's own
+honesty check on "done" — a stub or TODO the change added — and never gates. `defect-shape` carries six
+facets in `defect=` (`format-arity`, `utf8-cut`, `dedup-first`, `vacuous-assert`, `unchecked-status`, `unhandled-arm`), shapes this project's own
 code review kept finding; only `format-arity` gates, and on any origin (new-symbol rows never gate, except
 defect-shape format-arity; since QD-ENTRY-CEILING also a new function at the ceiling). Measured (2026-10-07): recall 7/8 on the eight review findings it was built
 from; with every site treated as new, 0 format-arity false positives on this tree (1,330 literal-format calls),
@@ -6254,8 +6257,54 @@ on the Python 3.13 standard library (405 calls) and on libc++'s std::format test
 deliberately ill-formed `.verify.cpp` calls); vacuous-assert sample precision 30/30 on this tree's gates
 (46 rows, Wilson 95% lower bound 0.89) after fix round 1 (2026-10-08) taught the guard the positive on the same
 capture spelled as an `if`/`elif` `&&` condition or through a script-defined function — before it, 3 of 49 rows were
-such false positives and the seeded sample read 28/30 (lower bound 0.79), not the 30/30 first published. Floor: an
-absence read off a file a run redirected into is not judged (`redactcheck.sh:81`, `namingcalibrationcheck.sh:292`).
+such false positives and the seeded sample read 28/30 (lower bound 0.79), not the 30/30 first published.
+QD-VA-FORMS (2026-11-19) rebuilt vacuous-assert as a status-dataflow walk on the B43 exit-status matcher
+(`src/shstatus.h`, the C++ port of `test/lib/exitstatus.py`, held equal by `gateexitcheck` H4): an assertion that
+passes on an empty text (absence grep, `[ -z ]`, a `cmp`/`diff`/`=` parity) read off a run whose status nothing reads,
+through a capture, a pipe without pipefail, a file the run redirected into or a wrapper whose status is dropped; plus
+a FAIL reporter inside `$( )`, an `rc=$?` no test reads, and `| head || fallback`. Replaying the 11 fix commits of
+the review threads it was built from (reversed range `FIX..FIX^`): 8 of 11 give rows (was 0); the fixes themselves
+add 0. Misses: a comparison of counts (`fordemoteallcheck`, a failed twin counts 0 rows), a premise loop that skipped
+one mark (`edgemarkcheck`, content, not status) and an any-of loop (`fordocbodycheck`). On this tree's `test/*.sh`
+the facet reports 963 sites (was 61), most of them determinism parities and absences of unchecked runs; 60 rows
+hand-checked in three seeded samples: 4 false positives fixed in the lane (a conditional `|| rc=1`, a text kept only
+behind a presence check, a wrapper call whose rc is compared, an rc captured in both arms of an if), and of the 56
+still reported, every status fact holds while 5 arms still fail on that site's failure (a helper's sentinel, a
+compare against a constant), so the row names a lost status, not a vacuous arm. Floors: a comparison of counts, a
+text read off stderr, and what a helper's failure sentinel feeds.
+QD-UNCHECKED-STATUS (2026-11-19) adds a fifth facet, `unchecked-status` (always `sev=minor`, never gates): a status
+the new code drops — in C/C++ a statement-level `pclose`, `fclose` of a stream the function wrote, `rename`, `write`,
+`waitpid` whose status nothing reads, `system`, `fflush` (not of stdout/stderr) or `close` of a written fd, plain or
+`std::`/`os::`/`rw::os::` qualified, with a `(void)` cast as the stated opt-out and a cleanup inside the branch of a
+failed write skipped; in Python `subprocess.run` without `check=` whose result is dropped or read only for
+`.stdout`/`.stderr`/`.args`, `subprocess.call` and `os.system` (aliases and `from` imports followed). The row's `p=` is
+the dropped call's line and `call=` names it. Go `_ = f()` and Rust `let _ = f()` stay out, as in error-masking (K6E:
+0 of 10 sampled were defects). Replaying three fix commits that added a status check to a `pclose` (reversed range
+`FIX..FIX^`): 3 of 3 give the rows (4 rows; was 0); the fixes add 0. With every site treated as new on nine corpora,
+the facet reports tmux 5 rows, this tree 61 rows over 71 sites (41 of them bench/test `subprocess.run(...).stdout`), code-review-graph 11 rows over 31 sites, and 0 on
+axum, a Go vulnerability scanner, a Go Prometheus client, textual, aislop and hono; a 20-site hand-check found 20 of
+20 drops real and 16 of 20 worth a check (the rest: a debug-log write, two detached reaper `pclose`s, a probe's
+`close`). A Stage-0 regex counted 46 sites (tmux 23, axum 15, Go 4, this tree 4); the gap is the written-stream /
+written-fd premise, the omitted `_ =` forms, and this tree's `os::` shims the regex did not see.
+QD-UNHANDLED-ARM (2026-11-19) adds a sixth facet, `unhandled-arm` (always `sev=minor`, never gates): a classifier over
+a closed set that gives a value it does not name no outcome — a C/C++ `switch` with no `default:` that decides a value
+(every arm returns one or does not return, or every arm assigns one name) over an enum the indexed tree defines and
+leaves an owed enumerator out (count sentinels and aliases owe nothing; a label's qualifiers must match the enum's own
+name and its enclosing scopes, so an out-of-tree `Http::CodecType` is not an in-tree class member's `CodecType`); a
+shell `case` with no `*)` arm that ends its function with `return`/`echo`/`printf` arms or sets one name read after
+`esac` (not a case over the literal list of the `for` loop it sits in); a Python if/elif chain or `match` that ends a
+value-returning function with no `else` (members of an `Enum` the file defines are checked for coverage). `p=` is the
+switch's line, `why=` names what is left out, and because the site text names the missing enumerators, appending one
+to an enum gives a row on each switch it leaves incomplete. Measured 2026-11-20 (lane QD-UNHANDLED-ARM) with
+an empty-baseline census, where every site is new, on tmux, envoy/source, textual and this tree. The run found 0, 0, 0 and 9 rows,
+and every other row was byte-identical to the ebf7240f3 binary. All 9 are shell lookup tables in `test/` whose callers loop over
+the listed values: the shape is real in all 9 and none is a live bug. One is worth hardening: `budgetFor` would give an empty
+budget to a verb added to its loop without an arm. C/C++ rows are rare because this tree builds with `-Werror=switch` and
+tmux/envoy switches carry `default:`. The facet's reach is the change that makes a switch incomplete. Recall: mining 1,500
+shell/Python commits of this tree, 4,000 tmux C commits and 3,000 textual commits found no fix commit that added a missing arm
+to a result-giving switch/case/chain. Recall is therefore the synthetic replay in `test/defectshapecheck.sh` (C++, Python and
+shell fixes reversed give 3 of 3 rows, and an appended enumerator gives the row on an untouched switch). A row costs 200-226 B
+(mean 212). The compact legend adds 16 B to every --quality-delta answer (the facet name), and 195 B when a row is present.
 Two format-arity floors (a delta review, 2026-10-08; 0 hits on the three corpora above): the macro skip sees a name this
 file `#define`s and a function-like macro the tree defines, not a lower-case object-like macro defined only in another
 file; and only a literal `#if 0` is skipped, so `#if false`, `#if (0)`, `#if 0 && …` and the `#else` of `#if 1` are
@@ -19354,3 +19403,133 @@ The unread token names a language, not a symbol: it says the language's value us
 use is known and no slot caller is: it is not a second copy of `slot_by=`, but the two overlap on rows that have both.
 The budget accounting does not charge the two legend comments (written by `packHops` beside the section, the way `via="name"`'s is);
 the section's `est_tokens` charge does include them. `--token-budget` ceilings were not re-measured with them.
+
+## Clone operand path and the repeated-decision facet (QD-LESSONS-1, 2026-11-19)
+
+**Mechanism.** `src/cloneidiom.h` "THE OPERAND PATH" defines the clone operand path, and `src/repeateddecision.h`
+defines the facet. Gates: `test/cloneoperandcheck.sh` and `test/repeateddecisioncheck.sh`.
+
+**Census method.** The whole `--quality-delta` output was taken on the base binary (lane/qd-tangle 2bb05d7dd) and on
+the lane binary, with `--no-cache`, one process at a time. Every changed `<r>`/`<sa>`/`<i>` row was classed by a
+script. Ranges:
+- ripwire VA-FORMS 33f7a1eac..708348e97;
+- qd-tangle 43ea570d1..c9028aad9 / ..bd037e226;
+- the two slip commits fb23cb777 and d04531421;
+- the last 20 first-parent merges;
+- tmux 8d3172f4~20..8d3172f4 and ~60..~20;
+- textual 06dbeef4b~20..06dbeef4b;
+- a synthetic envoy range: base = head with `source/common/router` and `source/extensions/filters/network` removed.
+
+| range | gating base → lane | rows demoted by the operand path (literals / types) | complexity/tangle rows gaining the repeated-decision fix= |
+| --- | --- | --- | --- |
+| VA-FORMS | 13 → 3 | 7 / 3 | 9 |
+| qd-tangle (c9028aad9) | 23 → 23 | 0 | 8 |
+| qd-tangle (bd037e226) | 4 → 4 | 0 | 3 |
+| slip fb23cb777 / d04531421 | 1 → 1 / 2 → 2 | 0 | 1 / 0 |
+| last 20 merges (to e71db700c) | 7 → 7 | 0 | 14 |
+| tmux 20 / 60 | 37 → 37 / 41 → 36 | 0 / 1 + 4 | 4 / 5 |
+| textual 20 | 18 → 18 | 0 | 2 |
+| envoy synthetic | 1,863 → 1,327 | 224 / 312 (+63 why= on rows already minor or new) | 14 |
+
+No other row changed. `regressions=` and the row count are equal on every range.
+
+Two refusals came from the sibling gates going red on the first cut:
+- Rule (6), from `cloneidiomcheck` I and O: an idiom group sharing a domain value or calling one helper keeps gating.
+- The literal-argument refusal, from `dupshortcheck`: the `afterLast` family, `rfind( '/' )` beside `rfind( "::" )`.
+
+They took envoy from 1,234 to 1,327 and qd-tangle back from 21 to 23. `dupshortcheck` 1a009c9f7 now expects 4 gating
+rows, not 6: `baseOf | gitstamp::atAttr` is an empty-else shape over different data.
+
+A second sample of 14 envoy demotions, taken after both refusals: 12 are idiom collisions over different data. The 2
+borderline rows are dynamic-module ABI shims and two `generateStats` stat-macro bodies.
+
+**What still gates.**
+- The 3 VA rows still gating are by design. `emptyUnder|picksAlone` is 84 tokens. `isIdent|isWordChar` share the
+  literal `0x80` and a callee; they print as a duplication row plus a new-clone row.
+- The real duplicates still gate: `writeHexPairLines|writeTangleLines`, `JsonNode::get|steer_find` and
+  `lintCatalogFind|steer_find`.
+
+**Hand-checks.**
+- The tmux demotions are reset-struct and unpack-and-call pairs over different structs.
+- 24 random envoy demotions: 21 are idiom collisions over different data (enum converters, constructors, factory
+  `create`s). 3 are borderline. The worst is `HeaderUtility::matchHeaders | ConfigUtility::matchQueryParams`: the
+  "all matchers match" loop over `HeaderDataPtr` vs `QueryParameterMatcherPtr`, which a generic helper could serve.
+  0 are verbatim copies.
+
+**Repeated-decision precision.** Across the non-synthetic ranges, 42 distinct fix= rows were read:
+- 5 cloned loops, including `chooseInWindow`, the case the facet was built from;
+- about 25 repeated tests of the same state;
+- about 9 repeated predicates over a moving cursor, where naming the predicate is the fix;
+- 3 re-tests of a fact that changes in between (`memguard::overHardLimit()`, `!qsnapGet(…)`, tmux
+  `event_initialized`). For these "decide once" is the wrong advice.
+
+The facet is report-only.
+
+**Recall miss.** `defGroupsDropSilent` (d04531421) has no complexity row: its ccx is under the bar, so the facet has
+no row to ride on. The fixture covers the detector, but this range does not show it.
+
+**Guard-off.** Removing the guards turns the negatives red:
+- operand path: shared literals allowed, generic members comparable, no ceiling, no context test. N1 and N3-N6 go
+  red. N2 stays green: its two reverse find-by-key loops spell the same literal set, and the type half does not fire on them either. It is a recall pin, not a guard pin.
+- facet: minimum length 1, no statement test, no bracket stop, overlap allowed. N2-N5 go red.
+
+## Clone shrink-only pairs (QD-SHRINK-PAIR, 2026-11-20)
+
+**Mechanism.** `src/quality.h` `demoteShrinkOnlyClones` judges the gating duplication and new-clone-of-reused-helper rows.
+The base bodies come from `src/qdbestsince.h` `cloneBodiesAt`, which reads git at the base commit with the best-since
+store's reader and extraction. Gate: `test/shrinkpaircheck.sh`.
+
+A Type-3 pair's similarity is 2·LCS/(|a|+|b|), so it rises when a member loses tokens the other does not share. The row
+is made minor, with `why="pair crossed the bar because X shrank N->M tok; shared code did not grow (LCS a->b)"`, only
+when all of these hold:
+- every member existed at the base, with one callable body under its key on both sides;
+- some member's body has fewer tokens now, and none was cut to under half its base tokens;
+- no pair's LCS grew.
+
+The cut test came from the census. Without it, textual's `ColorSystem::generate` (1569 -> 22 tokens: its body moved to
+`_generate` and `_generate_ansi`) demoted its pair with a 26-token validator. The base LCS was already 24, because a long
+body holds most short ones as a subsequence. Against a body cut that far, "shared code did not grow" proves nothing.
+
+**Replay.** The rows this card exists for are lane/sort-unique's two rows, the qd-false-rows T5 row
+`jsExportsOf | cFamilyMacroNames` (duplication + new-clone-of-reused-helper). Both ranges had them gating:
+406ef0110..17c114ef4 and d65f60c6d..17c114ef4. Both now report minor: `cFamilyMacroNames shrank 135->99 tok; LCS 84->81`.
+Both ranges go from gating 2 to 0, rc 2 to 0.
+
+**Census.** The whole `--quality-delta` output was taken on the base binary (lane/qd-lessons-1) and on the lane binary,
+`--no-cache`, one process at a time, on QD-LESSONS-1's ranges plus the two sort-unique replays.
+
+| range | gating base → lane | rows made minor by the rule |
+| --- | --- | --- |
+| sort-unique su1 / su2 | 2 → 0 / 2 → 0 | 2 / 2 (T5) |
+| tmux 60 | 36 → 31 | 5 |
+| VA-FORMS, qd-tangle ×2, slips ×2, last 20 merges, tmux 20, textual 20, envoy synthetic | unchanged | 0 |
+
+`regressions=` and the row count are equal on every range. The only other change is legend text. The compact `why`
+entry gains " or shrunk member" (+17 B) on documents that carry a why=. On su1/su2 the entry is new (their only why=
+rows are the shrink rows) and `next=` leaves with the last gating row.
+
+**Hand-checks (tmux 60).**
+- `file_create_with_peer | input_init` (duplication + new-clone): `input_init` lost one statement (`ictx->c = c;`, 134 -> 127).
+- `format_cb_session_activity_flag` against `client_control_mode`, `cursor_flag` and `window_end_flag`: a bug fix
+  (`ft->wl->flags` -> `wl->flags`, the `return "0"` moved out of the loop) took 69 -> 66 tokens.
+
+These callbacks are a long-standing family of near-copies. The edit copied nothing in, and the LCS fell or stayed
+(47->46, 47->47, 51->51). No row whose shared code grew, and no row with a new member, stopped gating.
+
+**Guard-off.** One build removed the LCS test and skipped a member without a base body instead of refusing the group.
+N1-N3 go red (12 FAIL), and so does the legend arm (L). N4 is red on the binary without the cut test. Red-before on the
+base binary: P1, P1w, P1m and P2 gate.
+
+**Not claimed.** A member cut to under half, an overload under a member's key, and a group of more than four members
+are judged as before, so they still gate. So does a body the base commit could not be read for. `--clones` does not read
+the verdict.
+
+**Verification (built lane head).**
+- Byte identity on stdout, stderr and rc, base binary vs lane: on this repo, 16 of 16 calls match (map ×2, `--clones`,
+  two `--for`, `--callers`/`--impact` on four names, MCP `find_symbol` ×2 and `tools/list`). On tmux, textual and hono,
+  9 of 9 calls match (map, `--clones`, `--for`).
+- Two refactors here are covered by these runs: the keying rule moved into `definitionQualityKey`, and the body-start
+  rule into `rawDefBodyStart`, which the Symbol build reads too.
+- `--quality-delta=e629c8c68..HEAD` gates 0. One one-statement pair is acked as a qd false positive:
+  `pathQualifiedKey(relPath, Symbol) | symbolHasStaticLinkage`.
+- The langidentity ceiling falls from 325 to 324.

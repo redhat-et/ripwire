@@ -37,6 +37,7 @@
 // RIPWIRE_NO_REEXPORT_HOPS (any value) turns it off.
 
 #include "defslookup.h"          // aliasTargetRow — an alias row (model.h AliasTarget) is another name, not the definition a sentence asks for
+#include "infra/sortutil.h"   // sortUnique
 #include "depdialect.h"          // dependencyDialect — the Web dialect is the unit the ReExport records are written per
 #include "docparse.h"            // detail::readWholeFile — the `pub` check and the row's line read the statement's file
 #include "fordottedstring.h"     // dotteddetail::displayName — a <shortkey> definition row names the symbol as <dotted> rows do
@@ -780,8 +781,7 @@ inline std::vector<const Binding*> reexportCandidates( const Walk& w, bool rust,
     {
         take( m );
     }
-    std::ranges::sort( cand );
-    cand.erase( std::unique( cand.begin(), cand.end() ), cand.end() );
+    rw::sortutil::sortUnique( cand );
     return cand;
 }
 

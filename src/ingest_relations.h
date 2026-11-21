@@ -2468,16 +2468,9 @@ inline std::vector<std::string> elixirAliasGroup( TSNode n, std::string_view src
 // one pass, and a grammar bump that renames a node kind is a one-line edit here.
 inline constexpr std::array<std::string_view, 5> kPreprocConditionalNodes = { "preproc_if", "preproc_ifdef", "preproc_else", "preproc_elif", "preproc_elifdef" };
 
-// One membership test for every node-kind table below — a single shape rather than one hand-rolled scan
-// per table (the repo already spells this `std::find( … ) != end` elsewhere; see graph.h / flipimpact.h).
-inline bool namesNode( std::span<const std::string_view> table, const char* type ) noexcept
-{
-    return std::find( table.begin(), table.end(), std::string_view( type ) ) != table.end();
-}
-
 inline bool isPreprocConditional( const char* type ) noexcept
 {
-    return namesNode( kPreprocConditionalNodes, type );
+    return isOneOf( type, kPreprocConditionalNodes );
 }
 
 // ─── Non-preprocessor import containers, keyed by language ───────────────────────────────────────────
@@ -2629,11 +2622,11 @@ inline bool isFunctionLike( Lang lang, const char* type ) noexcept
 {
     if( lang == Lang::TypeScript || lang == Lang::JavaScript )
     {
-        return namesNode( kJsFunctionContainers, type );
+        return isOneOf( type, kJsFunctionContainers );
     }
     if( lang == Lang::Ruby )
     {
-        return namesNode( kRubyClosureContainers, type );
+        return isOneOf( type, kRubyClosureContainers );
     }
     return false;
 }
@@ -2723,7 +2716,7 @@ inline bool isImportContainer( Lang lang, const char* type ) noexcept
     {
         if( e.lang == lang )
         {
-            return namesNode( e.nodes, type );
+            return isOneOf( type, e.nodes );
         }
     }
     return false;
@@ -2935,6 +2928,7 @@ struct ExtractShortfall
         ImportNestingTooDeep,     // imports nested past kMaxImportContainerDepth containers: the deeper ones not captured
         AstroFrontmatterUnterminated,   // an .astro opened a `---` fence and never closed it: its frontmatter is not extracted
         RestUnitsCapped,          // a reST file past kMaxRestUnits or kMaxRestDepth: later units stay in the whole-file node
+        MacroArgsNestedTooDeep,   // Rust macro arguments nested past kMacroArgNestingDepth: the deeper calls are not captured
     };
     bool isShort = false;
     void disclose( DisclosureWhy ) noexcept   // every reason records the same fact

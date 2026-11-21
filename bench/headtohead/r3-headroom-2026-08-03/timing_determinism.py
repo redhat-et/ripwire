@@ -43,14 +43,18 @@ MAP_TIMEOUT_S = 3600  # one whole-repo map; generous on purpose
 
 
 def map_stdout(argv):
-    """Bounded; a timeout or a signal-kill (rc < 0) stops the run with that state named, so two killed runs'
-    (equal, empty) outputs can never be recorded as ripwire_deterministic=true."""
+    """Bounded; a timeout, a signal-kill (rc < 0) or ANY non-zero exit stops the run with that state named, so two
+    failed runs' (equal, empty) outputs can never be recorded as ripwire_deterministic=true. A positive status matters
+    as much as a kill here: two memory-ceiling refusals (exit 5, empty stdout) compare EQUAL."""
     try:
         p = subprocess.run(argv, capture_output=True, timeout=MAP_TIMEOUT_S)
     except subprocess.TimeoutExpired:
         raise SystemExit(f"TIMEOUT ({MAP_TIMEOUT_S}s): {' '.join(argv)}")
     if p.returncode < 0:
         raise SystemExit(f"KILLED (signal={-p.returncode}): {' '.join(argv)}")
+    if p.returncode:
+        err = (p.stderr or b"").decode("utf-8", "replace").strip()[:400]
+        raise SystemExit(f"FAILED (exit={p.returncode}): {' '.join(argv)}\n{err}")
     return p.stdout
 
 

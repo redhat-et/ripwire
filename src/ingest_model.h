@@ -101,6 +101,13 @@ inline bool rawDefIsAliasRow( const RawDef& d ) noexcept
     return d.kind == SymKind::Alias && d.bodyByte > d.startByte && d.bodyByte < d.endByte;
 }
 
+// A RawDef's body start — its Symbol's sigEndByte: the body field's start, or endByte for a bodyless def and for an alias row (whose
+// bodyByte transports its target's start). QD-SHRINK-PAIR's base bodies (ingest_astquery.h tangleInputsInBlobs) cut the same span.
+inline std::uint32_t rawDefBodyStart( const RawDef& d ) noexcept
+{
+    return ( d.bodyByte > d.startByte && !rawDefIsAliasRow( d ) ) ? d.bodyByte : d.endByte;
+}
+
 inline void collapseObjCDeclDefs( std::vector<RawDef>& rawDefs )
 {
     PROFILE_SCOPE_DESCRIBE( "ingest/build-model: objc decl-def collapse" );
@@ -407,12 +414,14 @@ inline void assignSymbols( IngestResult& result, std::vector<RawDef>& rawDefs, b
         s.fileId = d.fileId;
         s.line   = d.line;
         s.sigStartByte = d.startByte;
-        s.sigEndByte   = ( d.bodyByte > d.startByte ) ? d.bodyByte : d.endByte;
+        s.sigEndByte   = rawDefBodyStart( d );   // an alias row's whole declaration is its signature (no body)
         s.endByte      = d.endByte;
         s.cx           = d.cx;
         s.ccx          = d.ccx;
         s.loc          = d.loc;      // Q4: physical line span
-        s.locals       = d.locals;   // Phase 1: local-decl floor count (C/C++ only; model.h localsCountedLang)
+        s.locals       = std::uint16_t( d.locals > 65535u ? 65535u : d.locals );   // Phase 1: local-decl floor count (C/C++ only; model.h localsCountedLang); u16 saturating (model.h)
+        s.steer        = d.steer;    // QD-TANGLE steering locals (model.h Symbol::steer; 0 where langfacts.h steerDecl is None and at 50 lines or fewer)
+        s.dispatchShare = tangleDispatchShare( d.deepLoc, d.deepDispatch, d.nestArmCut );   // QD-TANGLE (model.h)
         s.ppAlt        = d.ppAlt;    // ppalt disclosure: preproc alternative branches in the body (model.h)
         s.params       = d.params;   // Q4: parameter count (fns/methods)
         s.paramsMin    = std::uint8_t( d.paramsMin < 15 ? d.paramsMin : 15 );   // B2.2: fewest arguments a call can pass (0 = no bound); a 4-bit field — saturating LOWERS it, which only keeps candidates
@@ -448,7 +457,6 @@ inline void assignSymbols( IngestResult& result, std::vector<RawDef>& rawDefs, b
         // whole declaration as its signature and no body, and the target start goes to the side table (model.h AliasTarget)
         if( rawDefIsAliasRow( d ) )
         {
-            s.sigEndByte = d.endByte;
             result.aliasTargets.push_back( AliasTarget{ s.id, d.bodyByte } );
         }
         if( d.kind == SymKind::ModuleScope )
@@ -1076,8 +1084,7 @@ inline void keepMacroNamespaceRenames( const IngestResult& result, std::vector<s
         asked.push_back( result.bindings[ i ].typeName );
         asked.push_back( result.bindings[ i ].var );
     }
-    std::ranges::sort( asked, sortutil::svLess );   // a byte order (portablebuildcheck #6: libstdc++'s default string_view order aborts the G1 leg)
-    asked.erase( std::ranges::unique( asked ).begin(), asked.end() );
+    sortutil::sortUnique( asked, sortutil::svLess );   // a byte order (portablebuildcheck #6: libstdc++'s default string_view order aborts the G1 leg)
     std::vector<std::uint8_t> macroNamed( asked.size(), 0 ), itemNamed( asked.size(), 0 );
     using FileMacro = std::pair<std::uint32_t, std::string_view>;   // (fileId, name) of an asked-about Rust macro
     std::vector<FileMacro> fileMacros;

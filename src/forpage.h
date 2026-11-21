@@ -41,6 +41,7 @@
 
 #include "infra/envnumber.h"   // readEnvNumber: RIPWIRE_TAIL_SYM_WIDE_ROWS
 #include "mention.h"     // ForNamedHeaderRow — forHdrRowsXml below renders the resolver's rows
+#include "infra/sortutil.h"   // sortUnique
 #include "infra/enumcount.h" // enumCountIsExact — TailPageRowFate's count beside the enum
 #include "exemplarfamily.h" // exemplarTasksOf — the add-a-new-X reading keeps a tail's docs and config listed
 #include "fortailterms.h" // tailTaskTerms / tailTermMask — TAIL-SYM-TERMS' task words and name/path evidence
@@ -1019,8 +1020,18 @@ struct TailOldWalk
 {
     bool code = false, doc = false, open = false;
 };
-inline TailOldWalk tailOldWalkAt( bool codeFirst, std::size_t r, std::size_t codeSeen, std::size_t windowSeen ) noexcept
+// The page walk's three counters at one row (named at the call): the row's page index, the CODE rows met before it, the window rows met.
+struct TailWalkAt
 {
+    std::size_t r          = 0;
+    std::size_t codeSeen   = 0;
+    std::size_t windowSeen = 0;
+};
+inline TailOldWalk tailOldWalkAt( bool codeFirst, TailWalkAt at ) noexcept
+{
+    const std::size_t r          = at.r;
+    const std::size_t codeSeen   = at.codeSeen;
+    const std::size_t windowSeen = at.windowSeen;
     const bool open = ( codeFirst ? codeSeen : r ) < kForFileTailPageRows;
     return { open, windowSeen < kForFileTailPageRows, open };
 }
@@ -1118,8 +1129,7 @@ inline TailHeadFileSyms tailHeadFileSyms( const IngestResult& ing, const std::ve
             out.files.push_back( ing.symbols[id].fileId );
         }
     }
-    std::ranges::sort( out.files );
-    out.files.erase( std::unique( out.files.begin(), out.files.end() ), out.files.end() );
+    rw::sortutil::sortUnique( out.files );
     out.syms.assign( out.files.size(), std::string() );
     out.slotOfFile.assign( ing.files.size(), std::uint32_t( out.files.size() ) );
     for( std::size_t k = 0; k < out.files.size(); ++k )
@@ -1215,7 +1225,7 @@ inline void fileTailPageRows( FileTail& out, std::vector<char>& listed, const Ta
     {
         const ForFileRow&  row = page.rows[r];
         // the old cut (page 0): the row the 40-row walk listed (a Sphinx .txt page's own cap is in a.inWindow either way)
-        const TailOldWalk  old = tailOldWalkAt( docs != nullptr, r, codeSeen, windowSeen );
+        const TailOldWalk  old = tailOldWalkAt( docs != nullptr, { .r = r, .codeSeen = codeSeen, .windowSeen = windowSeen } );
         const TailRowAdmit a      = admitTailRow( ing, row.lead, docs, windowSeen, kForFileTailPageWalk );
         const bool         symRow = a.isDoc ? old.doc : old.code;
         codeSeen += std::size_t( !a.isDoc );

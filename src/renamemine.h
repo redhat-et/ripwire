@@ -1,5 +1,6 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/sortutil.h"   // sortUnique
 #include "gitcmd.h"         // rw::gitCmd — every git child starts with --no-optional-locks -c core.fsmonitor=false
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
@@ -665,8 +666,7 @@ inline CalibrationReport scoreRenamePairs( const IngestResult& ing, RenameHarves
             eligible.push_back( &s );
         }
     }
-    std::sort( allNames.begin(), allNames.end() );
-    allNames.erase( std::unique( allNames.begin(), allNames.end() ), allNames.end() );
+    rw::sortutil::sortUnique( allNames );
     // ing.symbols is already in deterministic (file, line, name) order, so a STABLE sort by name leaves the
     // first entry for a name at its first definition site — the representative this report cites.
     std::stable_sort( eligible.begin(), eligible.end(), []( const Symbol* a, const Symbol* b ) { return a->name < b->name; } );

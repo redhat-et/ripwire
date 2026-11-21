@@ -552,7 +552,8 @@ TWO_RANGE = {'includes', 'lexicographical_compare', 'merge', 'set_union', 'set_i
              'set_symmetric_difference'}
 NOT_A_TYPE = {'return', 'co_return', 'co_yield', 'throw', 'case', 'else', 'delete', 'new', 'sizeof', 'alignof',
               'typename', 'goto', 'using', 'operator', 'do', 'not', 'and', 'or', 'template', 'class', 'struct'}
-CALL = re.compile(r'\bstd::(ranges::)?(' + '|'.join(ALGS) + r')\s*\(')
+# sortutil::sortUnique( range[, less] ) sorts the way ranges::sort( range[, less] ) does, so it is read as one
+CALL = re.compile(r'\b(?:std::(ranges::)?(' + '|'.join(ALGS) + r')|(?:rw::)?sortutil::(sortUnique))\s*\(')
 # comments and literal contents are blanked (newlines kept, so offsets and lines stay true); a pp-number is matched
 # first so a digit separator (1'000) is never read as a character literal
 TOKEN = re.compile(r'//[^\n]*|/\*.*?\*/'
@@ -673,7 +674,7 @@ def scan_file(path, rel):
     cache, findings = {}, []
     line_starts = [0] + [m.end() for m in re.finditer('\n', text)]
     for m in CALL.finditer(text):
-        is_ranges, alg = m.group(1) is not None, m.group(2)
+        is_ranges, alg = m.group(1) is not None or m.group(3) is not None, m.group(2) or 'sort'
         args = split_args(text, m.end() - 1)
         if args is None:
             continue
@@ -697,7 +698,7 @@ def scan_file(path, rel):
             continue
         line = bisect.bisect_right(line_starts, m.start())
         decl_line = bisect.bisect_right(line_starts, rows[-1][0])
-        findings.append(f'{rel}:{line}: std::{"ranges::" if is_ranges else ""}{alg} over `{ident}` '
+        findings.append(f'{rel}:{line}: {m.group(0)[:-1].rstrip()} over `{ident}` '
                         f'(declared line {decl_line}: {rows[-1][1]}) with the default comparator')
     return findings
 
@@ -748,6 +749,10 @@ inline void ranges( std::vector<std::string_view>& v )
 {
     std::ranges::sort( v );   // PLANT
 }
+inline void helper( std::vector<std::string_view>& v )
+{
+    rw::sortutil::sortUnique( v );   // PLANT
+}
 EOF
     # none of these may be found: byte comparators, a std::string collision, constant evaluation,
     # ranges::sort( range, svLess ) — the (range, comp) overload, #6c's case — and text that only spells a call
@@ -760,6 +765,7 @@ struct Scratch2
 inline void reset2( Scratch2& scratch )
 {
     std::sort( scratch.names.begin(), scratch.names.end(), rw::sortutil::svLess );
+    rw::sortutil::sortUnique( scratch.names, rw::sortutil::svLess );
 }
 inline bool has2( std::span<const std::string_view> names, std::string_view s )
 {
@@ -788,7 +794,7 @@ EOF
     wantPlanted="$( grep -n 'PLANT' "$TMP/svctl/planted/planted.h" | cut -d: -f1 | sed 's#^#planted/planted.h:#' )"
     gotPlanted="$( python3 "$SVSCAN" "$TMP/svctl/planted" | cut -d: -f1,2 )"
     if [ -n "$wantPlanted" ] && [ "$gotPlanted" = "$wantPlanted" ]; then
-        ok "#6b control: the declaration pass finds exactly the $( printf '%s\n' "$wantPlanted" | wc -l | tr -d ' ' ) planted calls (member, span parameter, pair element, C array, ranges::)"
+        ok "#6b control: the declaration pass finds exactly the $( printf '%s\n' "$wantPlanted" | wc -l | tr -d ' ' ) planted calls (member, span parameter, pair element, C array, ranges::, sortutil::sortUnique)"
     else
         no "#6b control: planted default-comparator calls not found exactly — want [$( printf '%s ' $wantPlanted )] got [$( printf '%s ' $gotPlanted )]"
     fi
@@ -850,7 +856,8 @@ ALGS = {
 }
 TWO_RANGE = {'includes', 'lexicographical_compare', 'merge', 'set_union', 'set_intersection', 'set_difference',
              'set_symmetric_difference'}
-CALL = re.compile(r'\bstd::(ranges::)?(' + '|'.join(ALGS) + r')\s*\(')
+# sortutil::sortUnique( range[, less] ) sorts the way ranges::sort( range[, less] ) does, so it is read as one
+CALL = re.compile(r'\b(?:std::(ranges::)?(' + '|'.join(ALGS) + r')|(?:rw::)?sortutil::(sortUnique))\s*\(')
 TOKEN = re.compile(r'//[^\n]*|/\*.*?\*/'
                    r'|(?<![\w])(?:u8|u|U|L)?R"(?P<delim>[^()\\\s]{0,16})\(.*?\)(?P=delim)"'
                    r"|(?<![\w])\d[\w']*"
@@ -1046,7 +1053,7 @@ def scan_file(text, path, rel, structmap, localmap):
             named[m.group(1)] = lam
 
     for m in CALL.finditer(text):
-        is_ranges, alg = m.group(1) is not None, m.group(2)
+        is_ranges, alg = m.group(1) is not None or m.group(3) is not None, m.group(2) or 'sort'
         args = split_args_off(text, m.end() - 1)
         if args is None:
             continue
@@ -1168,6 +1175,10 @@ inline void rangesLambda6c( std::vector<std::string_view>& v )
 {
     std::ranges::sort( v, []( std::string_view a, std::string_view b ) { return a < b; } );   // PLANT
 }
+inline void helperLambda6c( std::vector<std::string_view>& v )
+{
+    rw::sortutil::sortUnique( v, []( std::string_view a, std::string_view b ) { return a < b; } );   // PLANT
+}
 EOF
     # none of these may be found: svLess, numeric and std::string members, a hand-rolled memcmp comparator,
     # constant evaluation, numeric tie-breaks beside svLess calls (both the ternary-chain and the
@@ -1226,7 +1237,7 @@ EOF
     wantPlanted="$( grep -n 'PLANT' "$TMP/svlctl/planted/planted.h" | cut -d: -f1 | sed 's#^#planted/planted.h:#' )"
     gotPlanted="$( python3 "$SVLC" "$TMP/svlctl/planted" | cut -d: -f1,2 )"
     if [ -n "$wantPlanted" ] && [ "$gotPlanted" = "$wantPlanted" ]; then
-        ok "#6c control: the lambda pass finds exactly the $( printf '%s\n' "$wantPlanted" | wc -l | tr -d ' ' ) planted comparator lambdas (sv parameters by value and const reference, sv struct members incl. brace-initialized, lower_bound against an sv probe, a named comparator variable, a mixed svLess/raw comparator, ranges (range, comp))"
+        ok "#6c control: the lambda pass finds exactly the $( printf '%s\n' "$wantPlanted" | wc -l | tr -d ' ' ) planted comparator lambdas (sv parameters by value and const reference, sv struct members incl. brace-initialized, lower_bound against an sv probe, a named comparator variable, a mixed svLess/raw comparator, ranges (range, comp), sortUnique (range, comp))"
     else
         no "#6c control: planted comparator lambdas not found exactly — want [$( printf '%s ' $wantPlanted )] got [$( printf '%s ' $gotPlanted )]"
     fi

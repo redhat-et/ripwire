@@ -393,6 +393,7 @@ for _g in \
     clonededupcheck \
     cloneidiomcheck \
     clonelexcheck \
+    cloneoperandcheck \
     clonepersistcheck \
     clsrecvcheck \
     cochangeboostcheck \
@@ -996,6 +997,7 @@ for _g in \
     regsitecheck \
     relevancefloorcheck \
     relinkcheck \
+    repeateddecisioncheck \
     reportcheck \
     resolvecheck \
     resolverhonestycheck \
@@ -1063,6 +1065,7 @@ for _g in \
     shapingflagcheck \
     shellgateindexcheck \
     showcasecapturecheck \
+    shrinkpaircheck \
     sibliftcheck \
     sidecarsymlinkcheck \
     sigredactcheck \
@@ -1109,6 +1112,7 @@ for _g in \
     swiftshapecheck \
     tagspredicatecheck \
     tailsymtermscheck \
+    tanglecheck \
     taskechocheck \
     tempfilesymlinkcheck \
     termmargincheck \

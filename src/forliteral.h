@@ -1115,13 +1115,11 @@ inline AnchorSet anchorSetOf( const IngestResult& ing, std::span<const NodeId> i
     }
     const auto dedup = []( auto& v )
     {
-        std::ranges::sort( v );
-        v.erase( std::ranges::unique( v ).begin(), v.end() );
+        sortutil::sortUnique( v );
     };
     dedup( a.syms );
     dedup( a.files );
-    std::ranges::sort( a.dirs, sortutil::svLess );   // portablebuildcheck #6b: never the default sv comparator
-    a.dirs.erase( std::ranges::unique( a.dirs ).begin(), a.dirs.end() );
+    sortutil::sortUnique( a.dirs, sortutil::svLess );   // portablebuildcheck #6b: never the default sv comparator
     const auto* ro = g != nullptr ? g->inEdges.rowOffsets() : nullptr;
     for( const NodeId s : a.syms )
     {
@@ -4040,10 +4038,18 @@ struct TableReaders
     bool        floor = false;  // a file could not be read, or callers past kForTableReaderFiles were not read: readers= is a floor
 };
 
+// A subscript row's function and the row's own file (a NodeId and a file id, one underlying type, named at the call).
+struct ReaderRowAt
+{
+    NodeId        owner   = kNoNode;
+    std::uint32_t rowFile = 0;
+};
 // REG-READER (b): the files a subscript row's table may be read in: the row's own, then the files of its function's callers by path, at most
 // kForTableReaderFiles of them (`floor` when more were left)
-inline std::vector<std::uint32_t> readerFilesOf( const IngestResult& ing, const Graph* g, NodeId owner, std::uint32_t rowFile, bool& floor )
+inline std::vector<std::uint32_t> readerFilesOf( const IngestResult& ing, const Graph* g, ReaderRowAt at, bool& floor )
 {
+    const NodeId        owner   = at.owner;
+    const std::uint32_t rowFile = at.rowFile;
     std::vector<std::uint32_t> files{ rowFile };
     if( g == nullptr || std::size_t( owner ) >= g->inEdges.rows() )
     {
@@ -4057,8 +4063,7 @@ inline std::vector<std::uint32_t> readerFilesOf( const IngestResult& ing, const 
     {
         callerFiles.push_back( ing.symbols[ci[e]].fileId );
     }
-    std::sort( callerFiles.begin(), callerFiles.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return std::tie( ing.files[a], a ) < std::tie( ing.files[b], b ); } );
-    callerFiles.erase( std::unique( callerFiles.begin(), callerFiles.end() ), callerFiles.end() );
+    sortutil::sortUnique( callerFiles, [ & ]( std::uint32_t a, std::uint32_t b ) { return std::tie( ing.files[a], a ) < std::tie( ing.files[b], b ); } );
     callerFiles.erase( std::remove( callerFiles.begin(), callerFiles.end(), rowFile ), callerFiles.end() );
     floor = callerFiles.size() > kForTableReaderFiles;
     files.insert( files.end(), callerFiles.begin(), callerFiles.begin() + std::ptrdiff_t( std::min( callerFiles.size(), kForTableReaderFiles ) ) );
@@ -4183,7 +4188,7 @@ inline TableReaders tableReadersOf( const IngestResult& ing, const Graph* g, con
     const std::string&                  name  = ing.symbols[hits[pick].enclosingId].name;
     const std::size_t                   dot   = name.find_last_of( ".:" );   // npos + 1 would wrap (-fsanitize=integer)
     const std::string_view              fn    = std::string_view( name ).substr( dot == std::string::npos ? 0 : dot + 1 );
-    const std::vector<std::uint32_t>    files = readerFilesOf( ing, g, hits[pick].enclosingId, row.raw.fileId, out.floor );
+    const std::vector<std::uint32_t>    files = readerFilesOf( ing, g, { .owner = hits[pick].enclosingId, .rowFile = row.raw.fileId }, out.floor );
     const std::vector<std::string_view> parts = quotedPartsOf( std::string_view( row.tbl ).substr( row.table.size() ) );
     std::vector<std::pair<int, GrepRawHit>> found = tableReadsInFiles( ing, files, useMemo, fn, row.table, parts, out );
     std::stable_sort( found.begin(), found.end(), []( const auto& a, const auto& b ) { return a.first < b.first; } );

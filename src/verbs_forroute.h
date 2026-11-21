@@ -424,7 +424,7 @@ inline std::string assembleRouted( const MainDispatch& d, RoutedAnswer& ra, std:
     if( rw::keybody::keyBodyOn() )
     {
         const std::string_view          keyRoot = d.ing.realPaths.empty() && d.cfg.roots.size() == 1 ? d.cfg.roots[0] : std::string_view();
-        const rw::keybody::KeyBodies    kb      = rw::keybody::keyBodies( d.ing, d.cfg.forTask, ra.spelling, keyRoot );
+        const rw::keybody::KeyBodies    kb      = rw::keybody::keyBodies( d.ing, d.cfg.forTask, ra.spelling, keyRoot, d.redactPtr );
         doc.insert( doc.rfind( "</" ), kb.xml );
         if( !kb.xml.empty() )
         {

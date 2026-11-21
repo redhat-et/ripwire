@@ -3,6 +3,8 @@
 #error "ingest_binds.h is a SECTION of src/ingest.cpp's translation unit - include it only from ingest.cpp (see the ingest-family split note there)"
 #endif
 
+#include "infra/sortutil.h"   // svLess: the byte order pruneRustTombstones sorts and searches its receiver roots in
+
 // ingest_binds.h — local binding capture, moved VERBATIM from ingest.cpp in the 2026-08-29 split:
 // receiver classification (the member-access vocabulary, classifyReceiver/receiverOf), the P2-D
 // local-variable TYPE binding capture (declarator/ctor/written-type readers), the L3
@@ -3943,6 +3945,9 @@ struct BindCtx
     std::vector<FnBindClobber> fnUnk;
     FnBindGateState            fnGate;      // value-assignment noise-gate evidence — filled by the stream, spent at the end
     bool                       cFamilyFn = false;
+    // lane std-namesake: every name this Rust file writes a member access on (`m` in `m.get( k )`, in code and in a macro's
+    // token tree) — views into src. pruneRustTombstones keeps a standard-type tombstone only for one of these.
+    std::vector<std::string_view> rustReceiverRoots;
 };
 
 // ── FE-B receiver-evidence capture (model.h LocalBindKind::RecvType / MemberType / MethodAlias) ──────────────────────────
@@ -5041,19 +5046,21 @@ inline void captureRustUseTree( BindCtx& cx, std::uint32_t at, TSNode node, cons
 }
 
 // Is `name` one of the type parameters the identifiers under `node` declare (Go `[T any]`, a generic receiver's `Ref[T]`)?
-inline bool declaresTypeName( TSNode node, std::string_view name, std::string_view src )
+// does the subtree `node` hold an identifier (or, with `typeNames`, a type_identifier) spelled `name`? A subtree of more than
+// `budget` nodes answers `pastBudget` — false where a miss is the safe answer, true where a hit is (lane std-namesake)
+inline bool subtreeHoldsName( TSNode node, std::string_view name, std::string_view src, bool typeNames, int budget, bool pastBudget )
 {
     std::vector<TSNode> pending;
     if( !ts_node_is_null( node ) )
     {
         pending.push_back( node );
     }
-    for( int guard = 0; guard < 256 && !pending.empty(); ++guard )
+    for( int guard = 0; guard < budget && !pending.empty(); ++guard )
     {
         const TSNode n = pending.back();
         pending.pop_back();
         const char* t = ts_node_type( n );
-        if( ( kindIs( t, "identifier" ) || kindIs( t, "type_identifier" ) ) && nodeTextOf( n, src ) == name )
+        if( ( kindIs( t, "identifier" ) || ( typeNames && kindIs( t, "type_identifier" ) ) ) && nodeTextOf( n, src ) == name )
         {
             return true;
         }
@@ -5062,7 +5069,11 @@ inline bool declaresTypeName( TSNode node, std::string_view name, std::string_vi
             pending.push_back( ts_node_named_child( n, i ) );
         }
     }
-    return false;
+    return !pending.empty() && pastBudget;
+}
+inline bool declaresTypeName( TSNode node, std::string_view name, std::string_view src )
+{
+    return subtreeHoldsName( node, name, src, /*typeNames=*/true, 256, /*pastBudget=*/false );
 }
 
 // The declarations whose type parameters scope their members (data row: grammar node kinds; a C++ class template's are its
@@ -6434,6 +6445,27 @@ inline std::string_view rustDispatchTrait( TSNode type, TSNode owner, std::strin
 
 // Rust: one ReturnType per declared result of a fn — the whole value (kWholeResult) or, for a tuple at the core
 // (`Result<(Book, Ctx)>`), one per element by position; each element is read through the transparent wrappers only.
+// lane rust-self-chain: is `fn` written `async fn` (its call yields a future of the declared result: kAwaitResultBit)
+inline bool rustFnIsAsync( TSNode fn )
+{
+    for( std::uint32_t i = 0, k = ts_node_child_count( fn ); i < k; ++i )
+    {
+        const TSNode c = ts_node_child( fn, i );
+        if( !kindIs( ts_node_type( c ), "function_modifiers" ) )
+        {
+            continue;
+        }
+        for( std::uint32_t j = 0, m = ts_node_child_count( c ); j < m; ++j )
+        {
+            if( kindIs( ts_node_type( ts_node_child( c, j ) ), "async" ) )
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 inline void captureRustReturnTypes( BindCtx& cx, TSNode fn )
 {
     const TSNode ret = fieldChild( fn, NodeField::ReturnType );
@@ -6442,6 +6474,7 @@ inline void captureRustReturnTypes( BindCtx& cx, TSNode fn )
         return;
     }
     const std::uint32_t defStart = ts_node_start_byte( fn );
+    const std::uint8_t  awaitBit = rustFnIsAsync( fn ) ? kAwaitResultBit : 0;   // the declared result is the awaited future's
     std::uint8_t        depth    = 0;
     std::string_view    whole;
     TSNode              tuple{};
@@ -6458,11 +6491,11 @@ inline void captureRustReturnTypes( BindCtx& cx, TSNode fn )
             const std::string_view trait = rustDispatchTrait( ret, fn, cx.src, traitWhole, generic );
             if( !trait.empty() && generic.empty() )
             {
-                pushReturnType( cx, defStart, kWholeResult, trait, traitWhole, kDispatchResultBit );
+                pushReturnType( cx, defStart, kWholeResult, trait, traitWhole, kDispatchResultBit | awaitBit );
             }
             return;
         }
-        pushReturnType( cx, defStart, kWholeResult, cls, whole, depth, spelledSelf );
+        pushReturnType( cx, defStart, kWholeResult, cls, whole, depth | awaitBit, spelledSelf );
         return;
     }
     for( std::uint32_t i = 0, k = ts_node_named_child_count( tuple ); i < k && i < kWholeResult; ++i )
@@ -6472,7 +6505,7 @@ inline void captureRustReturnTypes( BindCtx& cx, TSNode fn )
         const std::string_view elem      = rustResultClass( ts_node_named_child( tuple, i ), fn, cx.src, inner, whole, nullptr, elemSelf );
         if( inner == 0 )   // an element that is itself a Result/Option layer needs an operator the tuple pattern cannot apply
         {
-            pushReturnType( cx, defStart, std::uint8_t( i ), elem, whole, depth, elemSelf );
+            pushReturnType( cx, defStart, std::uint8_t( i ), elem, whole, depth | awaitBit, elemSelf );
         }
     }
 }
@@ -6488,40 +6521,134 @@ inline std::string rustCallQualifier( TSNode call, std::string_view src )
     return ts_node_is_null( path ) ? std::string{} : withoutBlanks( std::string( nodeTextOf( path, src ) ) );
 }
 
+// `x.unwrap()` / `x.expect( … )`: the `x` it strips one layer from; null for any other call.
+inline TSNode rustUnwrapMethodReceiver( TSNode call, std::string_view src )
+{
+    const TSNode fn = fieldChild( call, NodeField::Function );
+    if( ts_node_is_null( fn ) || !kindIs( ts_node_type( fn ), "field_expression" ) )
+    {
+        return {};
+    }
+    const TSNode           field = fieldChild( fn, NodeField::Field );
+    const std::string_view name  = ts_node_is_null( field ) ? std::string_view{} : nodeTextOf( field, src );
+    return name == "unwrap" || name == "expect" ? fieldChild( fn, NodeField::Value ) : TSNode{};
+}
+
 // Rust: the call a `let` value binds, through the unwrap operators applied to it — each `?` and each `.unwrap()` /
 // `.expect( … )` counts one into `depth`; any other method on the result (`.into_other()`, `.iter()`) is not stripped, so
 // that call is the one recorded (its own result: one level further, a floor). Null when the value is no call.
+// lane rust-self-chain: an `.await` applied to the call FIRST (`f().await`, `f().await?`) sets kAwaitResultBit in `depth`; an
+// await anywhere else (`f()?.await`, two awaits) records nothing.
 inline TSNode rustUnwrappedCall( TSNode value, std::uint8_t& depth, std::string_view src )
 {
     depth = 0;
     for( int guard = 0; guard < 8 && !ts_node_is_null( value ); ++guard )
     {
-        const char* t = ts_node_type( value );
-        if( kindIs( t, "try_expression" ) && ts_node_named_child_count( value ) == 1 )
+        const char* t        = ts_node_type( value );
+        const bool  oneChild = ts_node_named_child_count( value ) == 1;
+        if( oneChild && kindIs( t, "await_expression" ) )
+        {
+            // the await is the innermost operator this reads: the awaited value itself must be the call (an unwrap there is
+            // that call, not a layer)
+            depth |= kAwaitResultBit;
+            const TSNode awaitedValue = ts_node_named_child( value, 0 );
+            return kindIs( ts_node_type( awaitedValue ), "call_expression" ) ? awaitedValue : TSNode{};
+        }
+        if( oneChild && kindIs( t, "try_expression" ) )
         {
             ++depth;
             value = ts_node_named_child( value, 0 );
             continue;
         }
-        if( kindIs( t, "call_expression" ) )
+        if( !kindIs( t, "call_expression" ) )
         {
-            const TSNode fn = fieldChild( value, NodeField::Function );
-            if( !ts_node_is_null( fn ) && kindIs( ts_node_type( fn ), "field_expression" ) )
-            {
-                const TSNode           field = fieldChild( fn, NodeField::Field );
-                const std::string_view name  = ts_node_is_null( field ) ? std::string_view{} : nodeTextOf( field, src );
-                if( name == "unwrap" || name == "expect" )
-                {
-                    ++depth;
-                    value = fieldChild( fn, NodeField::Value );
-                    continue;
-                }
-            }
+            return {};
+        }
+        const TSNode unwrapped = rustUnwrapMethodReceiver( value, src );
+        if( ts_node_is_null( unwrapped ) )
+        {
             return value;
         }
-        return {};
+        ++depth;
+        value = unwrapped;
     }
     return {};
+}
+
+// ── lane rust-self-chain: a member call on another call's result (model.h LocalBindKind::RecvCall) ────────────────────────────
+// The call a Rust member call's receiver evaluates, through parentheses, the `?` operators (`tries`) and an `.await` applied to it
+// first (`awaited`: `x.f().await?.g()`); null when the receiver is no call (a name, a field, a literal, a macro) or an operator was
+// applied before the await (`x.f()?.await.g()`), and for a call that is no member call (`f( x )`, a path call: its receiver is no
+// value).
+inline TSNode rustReceiverCall( TSNode call, std::uint8_t& tries, bool& awaited )
+{
+    tries   = 0;
+    awaited = false;
+    const TSNode fn = fieldChild( call, NodeField::Function );
+    if( ts_node_is_null( fn ) || !kindIs( ts_node_type( fn ), "field_expression" ) )
+    {
+        return {};
+    }
+    TSNode value = fieldChild( fn, NodeField::Value );
+    for( int guard = 0; guard < 16 && !ts_node_is_null( value ); ++guard )
+    {
+        const char* t = ts_node_type( value );
+        if( kindIs( t, "call_expression" ) )
+        {
+            return value;
+        }
+        if( ts_node_named_child_count( value ) != 1 || awaited )
+        {
+            return {};   // two awaits, or a `?` applied before the await
+        }
+        if( kindIs( t, "try_expression" ) && tries < kUnwrapLayersMask )
+        {
+            ++tries;
+        }
+        else if( kindIs( t, "await_expression" ) )
+        {
+            awaited = true;
+        }
+        else if( !kindIs( t, "parenthesized_expression" ) )
+        {
+            return {};
+        }
+        value = ts_node_named_child( value, 0 );
+    }
+    return {};
+}
+// Rust: one RecvCall per member call whose receiver is another call — `.route( a )` and `.layer( b )` in
+// `Router::new().route( a ).layer( b )`. Its hop depth counts the calls below it down to the chain's root (rustReceiverCall
+// walked again from the inner call: the depth the inner call's own record carries, plus one); a chain deeper than a u8 holds,
+// or an inner call with no name node (a generic instantiation `x.f::<T>()`, a closure call), records nothing.
+inline void captureRustRecvCall( BindCtx& cx, TSNode call )
+{
+    std::uint8_t tries   = 0;
+    bool         awaited = false;
+    const TSNode inner   = rustReceiverCall( call, tries, awaited );
+    const TSNode outerName = ts_node_is_null( inner ) ? TSNode{} : calleeNameNode( call );
+    const TSNode innerName = ts_node_is_null( inner ) ? TSNode{} : calleeNameNode( inner );
+    if( ts_node_is_null( outerName ) || ts_node_is_null( innerName ) )
+    {
+        return;
+    }
+    std::uint32_t depth = 1;
+    std::uint8_t  ignoredTries   = 0;
+    bool          ignoredAwaited = false;
+    for( TSNode below = rustReceiverCall( inner, ignoredTries, ignoredAwaited ); !ts_node_is_null( below ) && depth < kWholeResult;
+         below = rustReceiverCall( below, ignoredTries, ignoredAwaited ) )
+    {
+        ++depth;
+    }
+    if( depth >= kWholeResult )
+    {
+        return;
+    }
+    const std::uint32_t innerStart = ts_node_start_byte( inner );
+    cx.binds->push_back( RawBind{ .fileId = cx.fileId, .startByte = ts_node_start_byte( call ), .lang = cx.lang, .kind = LocalBindKind::RecvCall,
+                                  .isFromAssignment = awaited, .resultIndex = std::uint8_t( depth ), .unwrapDepth = tries,
+                                  .spanStart = innerStart, .spanEnd = innerStart,
+                                  .var = rw::InternedText( nodeTextOf( innerName, cx.src ) ), .typeName = rw::InternedText( nodeTextOf( outerName, cx.src ) ) } );
 }
 
 // Rust: where a `let` name is visible — from the end of its statement (`let c = c.f();` reads the OUTER c) to its block's end
@@ -6742,6 +6869,274 @@ inline std::string_view rustConstructedClass( TSNode value, TSNode owner, std::s
     return {};
 }
 
+// ── lane std-namesake (STD-RECEIVER-NAMESAKE): a written Rust type that spells a STANDARD type ───────────────────────────────
+// The SPINE of a written type whose members are the standard library's own (externalnames.h kRustStdReceiverTypes): each type
+// name the spelling passes, as written, joined by '<' — `Option<T>` -> "Option", `&mut std::sync::Mutex<T>` -> "std::sync::Mutex",
+// `Arc<Mutex<T>>` -> "Arc<Mutex" (a deref wrapper, then what it derefs to), `&str` -> "str", `&[T]` / `[T; 4]` -> "[]". "" for
+// every other type: a name outside the tables, a type parameter of `owner` or of a generic enclosing it, a wrapper whose
+// argument is no std receiver (`Arc<Shelf>`), a tuple, a pointer, a `dyn` / `impl`. The spine is a SPELLING, never a proof:
+// graph.h proves each name is the standard type at the binding's file (receiverevidence.h rustStdSpineHead) before it reads one.
+inline bool rustStdSpineInto( TSNode type, TSNode owner, std::string_view src, std::string& spine )
+{
+    for( int guard = 0; guard < 8 && !ts_node_is_null( type ); ++guard )
+    {
+        const char* t = ts_node_type( type );
+        if( kindIs( t, "reference_type" ) )
+        {
+            type = fieldChild( type, NodeField::Type );
+            continue;
+        }
+        if( kindIs( t, "array_type" ) )
+        {
+            spine += "[]";   // `[T]` and `[T; N]`: a slice's or an array's own members
+            return true;
+        }
+        if( kindIs( t, "primitive_type" ) )
+        {
+            if( nodeTextOf( type, src ) != "str" )
+            {
+                return false;
+            }
+            spine += "str";
+            return true;
+        }
+        const bool   generic = kindIs( t, "generic_type" );
+        const TSNode head    = generic ? fieldChild( type, NodeField::Type ) : type;
+        if( ts_node_is_null( head ) || !( kindIs( ts_node_type( head ), "type_identifier" ) || kindIs( ts_node_type( head ), "scoped_type_identifier" ) ) )
+        {
+            return false;
+        }
+        const std::string_view written = nodeTextOf( head, src );
+        const std::size_t      sep     = written.rfind( "::" );
+        const std::string_view name    = sep == std::string_view::npos ? written : written.substr( sep + 2 );
+        if( written.find_first_of( " \t\r\n<" ) != std::string_view::npos )
+        {
+            return false;   // `<T as Tr>::Out`, a path the grammar spread over lines: not a plain path to a type
+        }
+        if( sep == std::string_view::npos
+            && ( declaresTypeName( ts_node_is_null( owner ) ? TSNode{} : fieldChild( owner, NodeField::TypeParameters ), name, src ) || enclosingGenericDeclares( owner, name, src ) ) )
+        {
+            return false;   // a type parameter spelled like a std type
+        }
+        if( externalnames::inSortedTable( externalnames::kRustStdReceiverTypes, name ) )
+        {
+            spine += written;
+            return true;
+        }
+        const TSNode args = generic ? namedChildOfKind( type, { "type_arguments" } ) : TSNode{};
+        TSNode       arg{};
+        for( std::uint32_t i = 0, k = ts_node_is_null( args ) ? 0u : ts_node_named_child_count( args ); i < k && ts_node_is_null( arg ); ++i )
+        {
+            if( const TSNode c = ts_node_named_child( args, i ); !kindIs( ts_node_type( c ), "lifetime" ) )
+            {
+                arg = c;
+            }
+        }
+        if( !externalnames::inSortedTable( externalnames::kRustStdDerefTypes, name ) || ts_node_is_null( arg ) )
+        {
+            return false;
+        }
+        spine += written;
+        spine += '<';
+        type = arg;
+    }
+    return false;
+}
+inline std::string rustStdSpine( TSNode type, TSNode owner, std::string_view src )
+{
+    std::string spine;
+    return rustStdSpineInto( type, owner, src, spine ) ? spine : std::string{};
+}
+
+// std-namesake: one Rust local or parameter NAME written as a standard type — the tombstone it always was (it names no in-tree
+// class) carrying the spine as its importedName; false (nothing recorded) for a pattern that is no plain name or a type with no spine
+inline bool pushRustStdBinding( BindCtx& cx, TSNode pattern, const std::string& spine, BindSite site )
+{
+    if( spine.empty() || ts_node_is_null( pattern ) || !kindIs( ts_node_type( pattern ), "identifier" ) )
+    {
+        return false;
+    }
+    pushSiteEvidence( cx, LocalBindKind::RecvType, nodeTextOf( pattern, cx.src ), {}, site, false, spine );
+    return true;
+}
+
+// does the pattern (or condition) subtree `node` hold the identifier `name` — a name it may bind? (a subtree past the budget may)
+inline bool rustSubtreeNames( TSNode node, std::string_view name, std::string_view src )
+{
+    return subtreeHoldsName( node, name, src, /*typeNames=*/false, 512, /*pastBudget=*/true );
+}
+
+// What one binder around a use says about the plain name: undecided (look further out), or decided, with the name's WRITTEN
+// type — null for every doubt (a binder with no written type, a pattern that binds the name another way).
+struct RustBinderLook
+{
+    bool   decided = false;
+    TSNode type{};
+};
+inline RustBinderLook rustBinderDecided( TSNode type ) { return RustBinderLook{ true, type }; }
+
+// a statement before the use, in a block or a let chain: `let name: T` / `let name` / `let name = ..` decide; a pattern that holds
+// the name, or a statement macro that names it (`tokio::pin!( name )` rebinds it), decides null
+inline RustBinderLook rustStatementBinds( TSNode prev, std::string_view name, std::string_view src )
+{
+    const char* pt = ts_node_type( prev );
+    if( kindIs( pt, "let_declaration" ) || kindIs( pt, "let_condition" ) )
+    {
+        const TSNode pattern = fieldChild( prev, NodeField::Pattern );
+        if( !ts_node_is_null( pattern ) && kindIs( ts_node_type( pattern ), "identifier" ) && nodeTextOf( pattern, src ) == name )
+        {
+            return rustBinderDecided( kindIs( pt, "let_declaration" ) ? fieldChild( prev, NodeField::Type ) : TSNode{} );
+        }
+        return rustSubtreeNames( pattern, name, src ) ? rustBinderDecided( {} ) : RustBinderLook{};
+    }
+    // an expression statement holds the macro
+    const TSNode inner      = kindIs( pt, "expression_statement" ) && ts_node_named_child_count( prev ) > 0 ? ts_node_named_child( prev, 0 ) : prev;
+    const bool   macroNames = kindIs( ts_node_type( inner ), "macro_invocation" ) && nodeTextOf( inner, src ).find( name ) != std::string_view::npos;
+    return macroNames ? rustBinderDecided( {} ) : RustBinderLook{};
+}
+
+// the parameters of a closure or fn `up`: a typed `name: T` decides T, a pattern holding the name null; an fn item sees no outer
+// local, so it decides null when no parameter is the name
+inline RustBinderLook rustParamsBind( TSNode up, std::string_view name, std::string_view src )
+{
+    const TSNode params = fieldChild( up, NodeField::Parameters );
+    for( std::uint32_t i = 0, k = ts_node_is_null( params ) ? 0u : ts_node_named_child_count( params ); i < k; ++i )
+    {
+        const TSNode p       = ts_node_named_child( params, i );
+        const bool   typed   = kindIs( ts_node_type( p ), "parameter" );
+        const TSNode pattern = typed ? fieldChild( p, NodeField::Pattern ) : p;
+        if( typed && !ts_node_is_null( pattern ) && kindIs( ts_node_type( pattern ), "identifier" ) && nodeTextOf( pattern, src ) == name )
+        {
+            return rustBinderDecided( fieldChild( p, NodeField::Type ) );
+        }
+        if( rustSubtreeNames( pattern, name, src ) )
+        {
+            return rustBinderDecided( {} );
+        }
+    }
+    return kindIs( ts_node_type( up ), "function_item" ) ? rustBinderDecided( {} ) : RustBinderLook{};
+}
+
+// what the ancestor `up` of a use (`cur` its child on the way up) binds of the name: a block's or let chain's earlier statements
+// (`budget` statements over the whole walk), a `for` / `match` pattern, an `if let` / `while let` condition over the body, a
+// closure's or fn's parameters
+inline RustBinderLook rustAncestorBinds( TSNode up, TSNode cur, std::string_view name, std::string_view src, int& budget )
+{
+    const char* ut = ts_node_type( up );
+    if( kindIs( ut, "block" ) || kindIs( ut, "let_chain" ) )
+    {
+        for( TSNode prev = ts_node_prev_named_sibling( cur ); !ts_node_is_null( prev ); prev = ts_node_prev_named_sibling( prev ) )
+        {
+            if( --budget < 0 )
+            {
+                return rustBinderDecided( {} );
+            }
+            if( const RustBinderLook look = rustStatementBinds( prev, name, src ); look.decided )
+            {
+                return look;
+            }
+        }
+        return {};
+    }
+    if( kindIs( ut, "for_expression" ) || kindIs( ut, "match_arm" ) )
+    {
+        return rustSubtreeNames( fieldChild( up, NodeField::Pattern ), name, src ) ? rustBinderDecided( {} ) : RustBinderLook{};
+    }
+    if( kindIs( ut, "if_expression" ) || kindIs( ut, "while_expression" ) )
+    {
+        const TSNode cond  = fieldChild( up, NodeField::Condition );
+        const bool   binds = !ts_node_is_null( cond ) && !ts_node_eq( cond, cur )
+                          && ( kindIs( ts_node_type( cond ), "let_condition" ) || kindIs( ts_node_type( cond ), "let_chain" ) ) && rustSubtreeNames( cond, name, src );
+        return binds ? rustBinderDecided( {} ) : RustBinderLook{};   // a pattern of the condition binds the name over the body the use is in
+    }
+    if( kindIs( ut, "closure_expression" ) || kindIs( ut, "function_item" ) )
+    {
+        return rustParamsBind( up, name, src );
+    }
+    return {};
+}
+
+// The WRITTEN type of the plain name `name` as Rust's lexical scoping finds it at `use`: the nearest enclosing binder, innermost
+// first — an earlier `let name: T` of an enclosing block, a typed closure or fn parameter. Null for every doubt: a binder with no
+// written type, a pattern that binds the name another way (a destructuring `let`, a `for` / `match` / `if let` pattern around the
+// use, an earlier condition of the same let chain), a statement macro before the use that names it (`tokio::pin!( name )`
+// rebinds it), a name no enclosing fn binds (a static, a const), or a walk past its budget.
+inline TSNode rustWrittenTypeOfName( TSNode use, std::string_view name, std::string_view src )
+{
+    int budget = 256;   // sibling statements read, over the whole walk (each step back is a walk from the parent)
+    for( TSNode cur = use, up = parentOf( use ); !ts_node_is_null( up ); cur = up, up = parentOf( up ) )
+    {
+        if( const RustBinderLook look = rustAncestorBinds( up, cur, name, src, budget ); look.decided )
+        {
+            return look.type;
+        }
+    }
+    return {};
+}
+
+// std-namesake: the payload name of `if let Some( x ) = v` / `while let Ok( x ) = &v` (a let_condition `cond`), where `v` is a
+// plain name whose WRITTEN type (rustWrittenTypeOfName) is `Option<P>` / `Result<P, E>` and P (E for `Err`) spells a standard
+// type: x records the spine "Option<" + P's — the wrapper's name rides it so graph.h proves `Option` is std's too (an in-tree
+// `enum Option` with its own `Some` proves nothing). false (nothing recorded) for every other shape; the caller's tombstones stand.
+inline bool pushRustPayloadBinding( BindCtx& cx, TSNode cond, BindSite site )
+{
+    const std::string_view src     = cx.src;
+    const TSNode           pattern = fieldChild( cond, NodeField::Pattern );
+    TSNode                 value   = fieldChild( cond, NodeField::Value );
+    if( ts_node_is_null( pattern ) || !kindIs( ts_node_type( pattern ), "tuple_struct_pattern" ) || ts_node_named_child_count( pattern ) != 2 )
+    {
+        return false;
+    }
+    const TSNode variant = fieldChild( pattern, NodeField::Type );
+    const TSNode payload = ts_node_named_child( pattern, 1 );
+    if( !ts_node_is_null( value ) && kindIs( ts_node_type( value ), "reference_expression" ) )
+    {
+        value = fieldChild( value, NodeField::Value );   // `= &v` / `= &mut v`: the payload is a reference to the same type
+    }
+    if( ts_node_is_null( variant ) || ts_node_is_null( value ) || !kindIs( ts_node_type( variant ), "identifier" ) || !kindIs( ts_node_type( payload ), "identifier" )
+        || !kindIs( ts_node_type( value ), "identifier" ) )
+    {
+        return false;
+    }
+    const std::string_view variantName = nodeTextOf( variant, src );
+    const std::string_view wrapper     = variantName == "Some" ? "Option" : ( variantName == "Ok" || variantName == "Err" ) ? "Result" : std::string_view{};
+    TSNode                 type        = wrapper.empty() ? TSNode{} : rustWrittenTypeOfName( cond, nodeTextOf( value, src ), src );
+    while( !ts_node_is_null( type ) && kindIs( ts_node_type( type ), "reference_type" ) )
+    {
+        type = fieldChild( type, NodeField::Type );
+    }
+    if( ts_node_is_null( type ) || !kindIs( ts_node_type( type ), "generic_type" ) )
+    {
+        return false;
+    }
+    const TSNode owner = rustGenericsOwner( cond, { "function_item" } );
+    std::string  spine;
+    TSNode       wrapperArg{};
+    if( !rustStdSpineInto( type, owner, src, spine ) || namesplit::afterLast( spine, "::" ) != wrapper )
+    {
+        return false;   // the scrutinee's own type must spell the wrapper the variant belongs to
+    }
+    const TSNode args = namedChildOfKind( type, { "type_arguments" } );
+    std::uint32_t want = variantName == "Err" ? 1u : 0u;
+    for( std::uint32_t i = 0, k = ts_node_is_null( args ) ? 0u : ts_node_named_child_count( args ); i < k && ts_node_is_null( wrapperArg ); ++i )
+    {
+        if( const TSNode c = ts_node_named_child( args, i ); kindIs( ts_node_type( c ), "lifetime" ) )
+        {
+            continue;
+        }
+        else if( want == 0 )
+        {
+            wrapperArg = c;
+        }
+        else
+        {
+            --want;   // never past zero: G1's integer sanitizer reports an unsigned wrap (CI on #706, CR 4643868479)
+        }
+    }
+    spine += '<';
+    return !ts_node_is_null( wrapperArg ) && rustStdSpineInto( wrapperArg, owner, src, spine ) && pushRustStdBinding( cx, payload, spine, site );
+}
+
 // rust-receivers: one name a Rust binding declares — typed (`cls`, `whole` its qualified spelling) or, when no class is
 // named, the tombstones of every name `pattern` holds
 inline void pushRustBinding( BindCtx& cx, TSNode pattern, std::string_view cls, std::string_view whole, BindSite site )
@@ -6778,7 +7173,12 @@ inline void pushRustWrittenBinding( BindCtx& cx, TSNode pattern, TSNode type, TS
 {
     std::string_view       whole;
     const std::string_view cls = rustWrittenClass( type, owner, cx.src, whole );
-    if( !pushRustDispatchBinding( cx, pattern, cls, type, owner, site ) )
+    if( pushRustDispatchBinding( cx, pattern, cls, type, owner, site ) )
+    {
+        return;
+    }
+    // std-namesake: a type that names no class (`Option<T>`, `&str`, `Arc<Mutex<T>>`) may still spell a standard one
+    if( !cls.empty() || !pushRustStdBinding( cx, pattern, rustStdSpine( type, owner, cx.src ), site ) )
     {
         pushRustBinding( cx, pattern, cls, whole, site );
     }
@@ -6858,6 +7258,10 @@ inline void captureRustField( BindCtx& cx, TSNode n, std::uint32_t at )
     else if( cls.empty() )
     {
         pushMemberTombstone( cx, nodeTextOf( name, cx.src ), at );
+        if( const std::string spine = rustStdSpine( fieldChild( n, NodeField::Type ), item, cx.src ); !spine.empty() )
+        {
+            cx.binds->back().importedName.assign( spine );   // std-namesake: the field's tombstone carries the standard type it spells
+        }
     }
     else
     {
@@ -6869,11 +7273,71 @@ inline void captureRustField( BindCtx& cx, TSNode n, std::uint32_t at )
 // parameters, `for` / `if let` / `while let` / `match` patterns — so a typed binding never leaks to a shadowing one; a `let`
 // whose value is a call (through `?` / `.unwrap()` / `.expect()`) records one CallResult per bound name (a tuple pattern by
 // position), which graph.h's resolve loop types from the callee's declared result; each fn records its ReturnTypes.
+// std-namesake: `if let Some( x ) = v` under a written `v: Option<Vec<T>>` records x's spine (pushRustPayloadBinding); any other
+// let condition's names are tombstones
+inline void captureRustLetCondition( BindCtx& cx, TSNode n, std::uint32_t at )
+{
+    const BindSite site = siteIn( at, ancestorOfKind( n, { "if_expression", "while_expression", "let_chain" } ) );
+    if( !pushRustPayloadBinding( cx, n, site ) )
+    {
+        pushPatternTombstones( cx, fieldChild( n, NodeField::Pattern ), site );
+    }
+}
+
+// std-namesake: the name a member access is written on (BindCtx::rustReceiverRoots) — `m` in `m.get( k )` / `m.len`, and the
+// same inside a macro's arguments (`assert!( m.get( k ).is_some() )`), where the grammar keeps tokens: NAME then `.`
+inline void noteRustReceiverRoots( BindCtx& cx, TSNode n, const char* t )
+{
+    if( kindIs( t, "field_expression" ) )
+    {
+        if( const TSNode value = fieldChild( n, NodeField::Value ); !ts_node_is_null( value ) && kindIs( ts_node_type( value ), "identifier" ) )
+        {
+            cx.rustReceiverRoots.push_back( nodeTextOf( value, cx.src ) );
+        }
+        return;
+    }
+    if( !kindIs( t, "token_tree" ) )
+    {
+        return;
+    }
+    // O(children): one cursor pass, the previous token carried (an indexed ts_node_child walk is quadratic on a long tree)
+    std::string_view before;   // the identifier just before this token, "" when the previous token was none
+    ChildCursor      tokens( n );
+    forEachChild( n, tokens.cur, [ & ]( TSNode c )
+    {
+        const char* ct = ts_node_type( c );
+        if( !before.empty() && kindIs( ct, "." ) )
+        {
+            cx.rustReceiverRoots.push_back( before );
+        }
+        before = kindIs( ct, "identifier" ) ? nodeTextOf( c, cx.src ) : std::string_view{};
+        return true;
+    } );
+}
+
+// `|a, (b, c)|`: each pattern's names are tombstones; a typed `|b: &Book|` is a `parameter`, recorded by its own arm.
+// Moved out of captureRustEvidence by train 1117d2 (the composed std-namesake and rust-self-chain arms took it past qd's bar).
+inline void captureRustClosureParameters( BindCtx& cx, TSNode n, std::uint32_t at )
+{
+    const BindSite site = siteIn( at, parentOf( n ) );
+    for( std::uint32_t i = 0, k = ts_node_named_child_count( n ); i < k; ++i )
+    {
+        if( const TSNode c = ts_node_named_child( n, i ); !kindIs( ts_node_type( c ), "parameter" ) )
+        {
+            pushPatternTombstones( cx, c, site );
+        }
+    }
+}
+
 inline void captureRustEvidence( BindCtx& cx, TSNode n, const char* t, std::uint32_t at )
 {
     if( kindIs( t, "function_item" ) )
     {
         captureRustReturnTypes( cx, n );
+    }
+    else if( kindIs( t, "call_expression" ) )
+    {
+        captureRustRecvCall( cx, n );   // lane rust-self-chain: a member call on another call's result
     }
     else if( kindIs( t, "use_declaration" ) )
     {
@@ -6893,15 +7357,7 @@ inline void captureRustEvidence( BindCtx& cx, TSNode n, const char* t, std::uint
     }
     else if( kindIs( t, "closure_parameters" ) )
     {
-        // `|a, (b, c)|`: each pattern's names are tombstones; a typed `|b: &Book|` is a `parameter`, recorded by its own arm
-        const BindSite site = siteIn( at, parentOf( n ) );
-        for( std::uint32_t i = 0, k = ts_node_named_child_count( n ); i < k; ++i )
-        {
-            if( const TSNode c = ts_node_named_child( n, i ); !kindIs( ts_node_type( c ), "parameter" ) )
-            {
-                pushPatternTombstones( cx, c, site );
-            }
-        }
+        captureRustClosureParameters( cx, n, at );
     }
     else if( kindIs( t, "for_expression" ) )
     {
@@ -6909,11 +7365,32 @@ inline void captureRustEvidence( BindCtx& cx, TSNode n, const char* t, std::uint
     }
     else if( kindIs( t, "let_condition" ) )
     {
-        pushPatternTombstones( cx, fieldChild( n, NodeField::Pattern ), siteIn( at, ancestorOfKind( n, { "if_expression", "while_expression", "let_chain" } ) ) );
+        captureRustLetCondition( cx, n, at );
     }
     else if( kindIs( t, "match_arm" ) )
     {
         pushPatternTombstones( cx, fieldChild( n, NodeField::Pattern ), siteIn( at, n ) );
+    }
+    else
+    {
+        noteRustReceiverRoots( cx, n, t );   // std-namesake
+    }
+}
+
+// std-namesake: a tombstone that carries a standard type's spine (pushRustStdBinding) is read only where its name is written as a
+// member access's root in this file (`roots`: BindCtx::rustReceiverRoots); any other becomes the plain tombstone it was before the
+// lane, which pruneRustTombstones then prunes like any other. Run before it.
+inline void dropUnreadRustSpines( std::vector<RawBind>& binds, std::size_t first, std::vector<std::string_view>& roots )
+{
+    std::sort( roots.begin(), roots.end(), rw::sortutil::svLess );   // an explicit byte order (portablebuildcheck #6)
+    for( std::size_t i = first; i < binds.size(); ++i )
+    {
+        RawBind& b = binds[ i ];
+        if( b.kind == LocalBindKind::RecvType && b.typeName.empty() && !b.importedName.empty()
+            && !std::binary_search( roots.begin(), roots.end(), std::string_view( b.var ), rw::sortutil::svLess ) )
+        {
+            b.importedName.assign( std::string_view{} );   // not `= {}`: that picks the `const char*` assignment with a null pointer
+        }
     }
 }
 
@@ -6935,7 +7412,9 @@ inline void pruneRustTombstones( std::vector<RawBind>& binds, std::size_t first 
     std::vector<Typed> typed;
     for( std::size_t i = first; i < binds.size(); ++i )
     {
-        if( binds[ i ].kind == LocalBindKind::CallResult || ( binds[ i ].kind == LocalBindKind::RecvType && !binds[ i ].typeName.empty() ) )
+        // a kept std tombstone is a fact a shadowing tombstone must hide, as a typed record is
+        if( binds[ i ].kind == LocalBindKind::CallResult
+            || ( binds[ i ].kind == LocalBindKind::RecvType && ( !binds[ i ].typeName.empty() || !binds[ i ].importedName.empty() ) ) )
         {
             typed.push_back( { binds[ i ].var, binds[ i ].spanStart, binds[ i ].spanEnd } );
         }
@@ -6943,7 +7422,7 @@ inline void pruneRustTombstones( std::vector<RawBind>& binds, std::size_t first 
     std::sort( typed.begin(), typed.end() );
     const auto hidesNothing = [ & ]( const RawBind& b )
     {
-        if( b.kind != LocalBindKind::RecvType || !b.typeName.empty() )
+        if( b.kind != LocalBindKind::RecvType || !b.typeName.empty() || !b.importedName.empty() )
         {
             return false;
         }

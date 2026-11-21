@@ -98,8 +98,7 @@ inline std::vector<std::string> ownerQuestionWords( std::string_view task )
             words.push_back( std::move( w ) );
         }
     }
-    std::sort( words.begin(), words.end() );
-    words.erase( std::unique( words.begin(), words.end() ), words.end() );
+    rw::sortutil::sortUnique( words );
     return words;
 }
 

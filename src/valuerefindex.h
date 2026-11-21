@@ -1160,8 +1160,7 @@ public:
                 }
             }
         }
-        std::ranges::sort( out );
-        out.erase( std::ranges::unique( out ).begin(), out.end() );
+        rw::sortutil::sortUnique( out );
         return out;
     }
 
@@ -1245,13 +1244,12 @@ public:
                 out.push_back( f );
             }
         }
-        std::sort( out.begin(), out.end(), [ & ]( NodeId a, NodeId b )
+        rw::sortutil::sortUnique( out, [ & ]( NodeId a, NodeId b )
         {
             const Symbol& sa = m_ing.symbols[a];
             const Symbol& sb = m_ing.symbols[b];
             return sa.name != sb.name ? sa.name < sb.name : a < b;
         } );
-        out.erase( std::unique( out.begin(), out.end() ), out.end() );
         return out;
     }
 
@@ -1297,8 +1295,7 @@ public:
                 }
             }
         }
-        std::ranges::sort( out );
-        out.erase( std::ranges::unique( out ).begin(), out.end() );
+        rw::sortutil::sortUnique( out );
         return out;
     }
 
@@ -1344,8 +1341,7 @@ public:
                 }
             }
         }
-        std::ranges::sort( out );
-        out.erase( std::ranges::unique( out ).begin(), out.end() );
+        rw::sortutil::sortUnique( out );
         return out;
     }
 
@@ -2098,8 +2094,7 @@ private:
             }
             case VrLangFamily::None: break;
         }
-        std::sort( out.begin(), out.end() );
-        out.erase( std::unique( out.begin(), out.end() ), out.end() );
+        rw::sortutil::sortUnique( out );
         return out.empty() ? declsHere : out;
     }
 
@@ -2661,7 +2656,7 @@ inline SlotSiteRow slotSiteOf( const IngestResult& ing, const ValueRefIndex& idx
         std::ranges::copy( idx.targetsOf( h.ref ), std::back_inserter( site.targets ) );
         site.anyDesignated = site.anyDesignated || ing.references[h.ref].composeRel().starts_with( '.' );
     }
-    std::ranges::sort( site.targets, [ & ]( NodeId a, NodeId b )
+    rw::sortutil::sortUnique( site.targets, [ & ]( NodeId a, NodeId b )
     {
         const Symbol& sa = ing.symbols[a];
         const Symbol& sb = ing.symbols[b];
@@ -2671,9 +2666,7 @@ inline SlotSiteRow slotSiteOf( const IngestResult& ing, const ValueRefIndex& idx
         }
         return ing.files[sa.fileId] != ing.files[sb.fileId] ? ing.files[sa.fileId] < ing.files[sb.fileId] : a < b;
     } );
-    site.targets.erase( std::ranges::unique( site.targets ).begin(), site.targets.end() );
-    std::ranges::sort( hidden );
-    hidden.erase( std::ranges::unique( hidden ).begin(), hidden.end() );
+    rw::sortutil::sortUnique( hidden );
     site.nameAlso = static_cast<std::uint32_t>( std::ranges::count_if( hidden, [ & ]( NodeId f ) { return std::ranges::find( site.targets, f ) == site.targets.end(); } ) );
     return site;
 }

@@ -210,8 +210,7 @@ inline std::vector<std::string> matchWords( std::string_view text )
             out.push_back( suffixStem( std::move( w ), kLightStemSuffixes ) );
         }
     }
-    std::ranges::sort( out );
-    out.erase( std::unique( out.begin(), out.end() ), out.end() );
+    rw::sortutil::sortUnique( out );
     return out;
 }
 
@@ -260,8 +259,7 @@ inline std::vector<std::string_view> answerTokens( std::string_view text )
         }
         pushRunVariants( out, text, i, j );
     }
-    std::ranges::sort( out, rw::sortutil::svLess );
-    out.erase( std::unique( out.begin(), out.end() ), out.end() );
+    rw::sortutil::sortUnique( out, rw::sortutil::svLess );
     return out;
 }
 
@@ -635,10 +633,18 @@ inline ShownFiles shownFiles( const IngestResult& ing, const std::vector<ShownRo
     return out;
 }
 
+// The two texts a candidate is judged against (two string_views, named at the call): the answer it must not repeat, the task it is scored on.
+struct CandTexts
+{
+    std::string_view answer;
+    std::string_view task;
+};
 // The candidates in id order: definitions of the shown files whose name is no word of the answer and which no shown row stands on,
 // each with its task-word score.
-inline std::vector<Cand> collectCands( const IngestResult& ing, const ShownFiles& sf, std::string_view answer, std::string_view task )
+inline std::vector<Cand> collectCands( const IngestResult& ing, const ShownFiles& sf, CandTexts texts )
 {
+    const std::string_view answer = texts.answer;
+    const std::string_view task   = texts.task;
     const std::vector<std::string_view> tokens = answerTokens( answer );
     const std::vector<std::string> taskWords = matchWords( task );
     std::vector<Cand> cands;
@@ -1762,7 +1768,7 @@ inline std::string renderForFileSyms( const IngestResult& ing, const Graph& g, c
     const std::string termMask = fd::termsMasked( a.answer, rows ); // TAIL-SYM-TERMS: the block reads the answer as if tsym= were not there
     const std::string_view seen = termMask.empty() ? a.answer : std::string_view( termMask );
     const std::string masked = headTail.empty() ? std::string() : fd::headTailMasked( seen, rows, headTail );
-    std::vector<fd::Cand> cands = fd::collectCands( ing, sf, headTail.empty() ? seen : std::string_view( masked ), a.task );
+    std::vector<fd::Cand> cands = fd::collectCands( ing, sf, { .answer = headTail.empty() ? seen : std::string_view( masked ), .task = a.task } );
     fd::creditCallees( ing, g, head, cands );
     fd::dedupeCands( ing, cands );
     fd::DeclHome home( ing, g );
