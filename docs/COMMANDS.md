@@ -50,7 +50,7 @@ Two limits apply to nearly everything here and are not repeated in every section
 
 **security — scan skill files for injection / exfiltration patterns (exit 2 = CRITICAL, 1 = WARN,** — [`--scan-skill`](#--scan-skillfile) · [`--scan-skills`](#--scan-skillsdir) · [`--force`](#--force)
 
-**knobs / modes** — [`--rank-by`](#--rank-bypagerankauthorityhubrrfchurnchurn-decay) · [`--in`](#--indir) · [`--format`](#--formatxmlcolumnarrows) · [`--format`](#--formatcandidates) · [`--legend`](#--legendfullcompactdictlastfirst) · [`--page-bytes`](#--page-bytesnk) · [`--rows`](#--rowslineselements) · [`--no-verb-route`](#--no-verb-route) · [`--legend-dict`](#--legend-dictcorekey) · [`--legend-have`](#--legend-havehavehave) · [`--legend-seen`](#--legend-seenfile) · [`--json`](#--json) · [`--limit`](#--limitn---offsetm) · [`--exclude`](#--excludesubstr) · [`--map-diff`](#--map-diff) · [`--cache`](#--cachepath) · [`--index-out`](#--index-outbase) · [`--no-cache`](#--no-cache) · [`--no-ignore`](#--no-ignore) · [`--max-file-size`](#--max-file-sizenkmg) · [`--max-memory`](#--max-memorynkmg) · [`--refetch`](#--refetch) · [`--scip`](#--scipindexscip) · [`--pin-census`](#--pin-censusfile) · [`--mcp`](#--mcp) · [`--mcp-legend`](#--mcp-legendwhen) · [`--mcp-tools`](#--mcp-toolslist) · [`--lsp`](#--lsp) · [`--lsp-langmap`](#--lsp-langmapfile) · [`--listen`](#--listenhostport) · [`--mcp-token`](#--mcp-tokent) · [`--allow-remote-edits`](#--allow-remote-edits) · [`--eval-stray`](#--eval-strayfile) · [`--eval`](#--eval) · [`--eval-retrieval`](#--eval-retrieval) · [`--eval-mined`](#--eval-minedfile) · [`--eval-skills`](#--eval-skillsfile) · [`-h`](#-h---help) · [`-v`](#-v---version)
+**knobs / modes** — [`--rank-by`](#--rank-bypagerankauthorityhubrrfchurnchurn-decay) · [`--in`](#--indir) · [`--format`](#--formatxmlcolumnarrows) · [`--format`](#--formatcandidates) · [`--legend`](#--legendfullcompactdictlastfirst) · [`--page-bytes`](#--page-bytesnk) · [`--rows`](#--rowslineselements) · [`--bodies`](#--bodiesinlinepointer) · [`--no-verb-route`](#--no-verb-route) · [`--legend-dict`](#--legend-dictcorekey) · [`--legend-have`](#--legend-havehavehave) · [`--legend-seen`](#--legend-seenfile) · [`--json`](#--json) · [`--limit`](#--limitn---offsetm) · [`--exclude`](#--excludesubstr) · [`--map-diff`](#--map-diff) · [`--cache`](#--cachepath) · [`--index-out`](#--index-outbase) · [`--no-cache`](#--no-cache) · [`--no-ignore`](#--no-ignore) · [`--max-file-size`](#--max-file-sizenkmg) · [`--max-memory`](#--max-memorynkmg) · [`--refetch`](#--refetch) · [`--scip`](#--scipindexscip) · [`--pin-census`](#--pin-censusfile) · [`--mcp`](#--mcp) · [`--mcp-legend`](#--mcp-legendwhen) · [`--mcp-tools`](#--mcp-toolslist) · [`--lsp`](#--lsp) · [`--lsp-langmap`](#--lsp-langmapfile) · [`--listen`](#--listenhostport) · [`--mcp-token`](#--mcp-tokent) · [`--allow-remote-edits`](#--allow-remote-edits) · [`--eval-stray`](#--eval-strayfile) · [`--eval`](#--eval) · [`--eval-retrieval`](#--eval-retrieval) · [`--eval-mined`](#--eval-minedfile) · [`--eval-skills`](#--eval-skillsfile) · [`-h`](#-h---help) · [`-v`](#-v---version)
 
 ---
 
@@ -4697,6 +4697,17 @@ $ ./build/ripwire . --for="rankGraphTeleport" --rows=elements
 
 **Caveats (stated by the binary):**
 
+- any other value, or the flag without --for, is refused.
+
+### `--bodies=inline|pointer`
+
+**Answers:** (with --for) the form of the bodies on the answer's FIRST page: inline, the default, serves each body's text;
+
+pointer serves each one (fold, key, slice member, follow) as the skip row that names it, <skip p= n= l= e= bytes= next=>, l..e its source lines, next= the --expand that serves it, and the page ends at the row it ended at with the bodies (no later row moves up). Its root says body_form="pointer". Later pages, routed answers, --token-budget, --expand, --pack-task and MCP keep their bodies. The flag decides over RIPWIRE_BODY_POINTERS in both directions; any other value, or the flag without --for, is refused.
+
+**Caveats (stated by the binary):**
+
+- pointer serves each one (fold, key, slice member, follow) as the skip row that names it, <skip p= n= l= e= bytes= next=>, l..e its source lines, next= the --expand that serves it, and the page ends at the row it ended at with the bodies (no later row moves up).
 - any other value, or the flag without --for, is refused.
 
 ### `--no-verb-route`

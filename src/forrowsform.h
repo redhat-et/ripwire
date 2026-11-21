@@ -11,7 +11,7 @@ namespace rw::rowlines
 
 // THE SWITCH (owner ruling 153: lines by default, both forms reachable). `rows` is --rows= as typed: "lines" or "elements" decide,
 // whatever the environment says (the flag is the more specific ask, so FLAG OVER ENV, both ways); empty — the flag was not typed —
-// leaves it to RIPWIRE_NO_ROWLINES (any value = elements), else lines. cli.h validateRows refuses any other value before a run.
+// leaves it to RIPWIRE_NO_ROWLINES (any value = elements), else lines. cli.h validateForClosedModifiers refuses any other value before a run.
 inline constexpr std::string_view kRowsLines    = "lines";
 inline constexpr std::string_view kRowsElements = "elements";
 [[nodiscard]] inline bool rowLinesOn( std::string_view rows = {} ) noexcept

@@ -348,6 +348,7 @@ for _g in \
     bodilessseedcheck \
     bodycalleefilecheck \
     bodydialectcheck \
+    bodypointercheck \
     budgetmonotonecheck \
     budgetpolicycheck \
     buildtypestampcheck \

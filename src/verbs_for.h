@@ -10,6 +10,7 @@
 #include "foranswerfirst.h" // ITEM R: a finished --for answer serves its ANSWER first (a permutation)
 #include "forsigx.h"        // SIGX (TL1 M1): the sigs rows past rank 10 keep l e n p r on page 1; the rest follows the rows
 #include "forrowlines.h"    // ROWLINES + RANKSEQ (FMT2): the sigs/tail rows of the bytes written are lines in one CDATA
+#include "forbodyptr.h"     // NB1 --bodies=pointer: the first page's bodies are skip rows (l= e= next=), the page ending where it ended
 #include "forkeybody.h"     // KB1: the key-symbol body right after the answer block, on page 1 (page 1 does not count it)
 #include "forpages.h"       // AF1: the answer-first --for answer, served in pages (page= pages= withheld_bytes= next=)
 #include "forbudgetfit.h" // TOKEN-BUDGET-MONOTONE: a budget sheds the unbudgeted answer, it never re-decides its posture
@@ -5821,6 +5822,15 @@ inline bool forPagingApplies( const rw::Config& cfg ) noexcept
 {
     return cfg.forPageBytes > 0 && rw::pageBytesConflict( cfg ) == nullptr;
 }
+// NB1 (forbodyptr.h, ruling 162): under --bodies=pointer (or RIPWIRE_BODY_POINTERS) the first page served is rewritten to the pointer
+// form, AFTER paging cut it with its bodies in — so it ends at the row it ended at — and before the row lines encode it.
+inline void forBodyPointers( const MainDispatch& d, std::string& page )
+{
+    if( d.cfg.forPage == 1 && rw::bodyptr::bodyPointersOn( d.cfg.bodiesSpec ) )
+    {
+        (void)rw::bodyptr::pointBodies( page, d.ing, d.ing.realPaths.empty() && d.cfg.roots.size() == 1 ? d.cfg.roots[0] : std::string_view() );
+    }
+}
 inline bool serveForPage( const rw::Config& cfg, std::string& doc )
 {
     if( !forPagingApplies( cfg ) )
@@ -5892,6 +5902,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             }
             if( std::optional<std::string> early = forEarlyStopPage( d, doc ) )   // RT2 ES: a proven leading block ends page 1
             {
+                forBodyPointers( d, *early );
                 (void)rw::rowlines::encodeRows( *early, d.cfg.rowsSpec );
                 std::fwrite( early->data(), 1, early->size(), stdout );
                 return r.rc;
@@ -5900,6 +5911,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             {
                 return 1;
             }
+            forBodyPointers( d, doc );
             (void)rw::rowlines::encodeRows( doc, d.cfg.rowsSpec );   // FMT2 (forrowlines.h): after paging, so each page holds the rows it held
             std::fwrite( doc.data(), 1, doc.size(), stdout );
             return r.rc;
