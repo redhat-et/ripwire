@@ -122,6 +122,10 @@ COLD_FILES = (
       "Ruby's Rails/DSL capture lane (schema columns, Jbuilder typing, the factory and class-side DSL walks): per node, but behind "
       "the contains-\"attr\" / contains-\"create_table\" per-file early-outs and one grammar family's corpus share. Same argument as "
       "ingest_jsimports.h and ingest_elixir.h above; the general per-node walk shapes it was carved from stay covered by ingest_binds.h." ),
+    ( "src/ingest_declwrap.h",
+      "rw::wrappedDeclStart, the wrapper-prefix lookup (declwrap.h). It is not on the crawl or parse path at all: its only callers are the body serializer "
+      "(serialize.h) and the edit verbs (mcpedit.h, editpreview.h), once per SERVED body, behind a one-entry per-thread tree memo. A plain `ripwire <dir>` never "
+      "enters it. Stated from the call sites, not from a profile: REVISIT with a measurement if a body-heavy verb's profile shows it." ),
     ( "src/ingest_inert.h",
       "The shared inert-boundary walk currently runs only for Elixir quote captures and context. Like ingest_elixir.h, its remarks cover one grammar, not the general corpus." ),
     # ── per-DIRECTIVE, where every hot ingest section above is per-node or per-file ────────────────────
