@@ -34,6 +34,11 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-21, #548 arm 1 (Clojure metadata-prefixed calls; merged above main f79a94e21 / train 1117d2-s): RE-PINNED with
+#   UPDATE_GOLDEN=1 from the merged tree. Watched text: kParserVer 333 -> 335 (rich file tag 336): queries/clojure/tags.scm
+#   accepts a meta_lit before a list head and src/ingest_clojure.h's head filter skips it. quality.h's kIngestParserVerMirror
+#   moves with it. kCacheVersion (53) and kQSnapCacheScheme (34) stay: no record changes shape and no watched quality.h
+#   function moved.
 # 2026-11-20, train 1117d2-s (std-namesake, rust-reexport, rust-modalias-glob, rust-self-chain, rust-macro-args,
 #   rust-path-unhedged, redact-touch, qd-swap, qd-similar-default, py-class-spray; rebased onto main ee8d1a50e, #705 = train 1117d1):
 #   RE-PINNED ONCE with UPDATE_GOLDEN=1 from the rebased build (hash 14b63d9888…d246329). kParserVer 333 (rich 334) replaces the

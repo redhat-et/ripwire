@@ -9,5 +9,5 @@
 ; Only symbolic list heads can be direct calls. Special forms and declaration
 ; heads are excluded by the Clojure capture filter.
 (list_lit
-  [(comment) (dis_expr)]* .
+  [(comment) (dis_expr) (meta_lit)]* .
   value: (sym_lit name: (sym_name) @name)) @reference.call

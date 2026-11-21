@@ -382,7 +382,11 @@ constexpr std::uint32_t kCacheVersion = 53;           // 53: lane rust-self-chai
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 333;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 335;          // bump on any grammar/.scm/extraction change
+                                                      // 335 = 2026-11-21 (#548 arm 1): a Clojure call whose list head carries metadata
+                                                      //   (`^{:doc "tagged"} (square 4)`, `^String (square 5)`) is captured, and the C++
+                                                      //   head filter skips meta_lit before reading the head. Rich file tag 336.
+                                                      //   kCacheVersion unchanged.
                                                       // 333 = 2026-11-18 (train 1117d2, stacked on train 1117d1's 331/332; above the members' placeholders): rich file tag 334.
                                                       //   The members' extraction changes (each lane's number was a placeholder):
                                                       //   std-namesake (placeholder 317): a Rust local, parameter or field written as a standard type that names no class (`Option<T>`,
