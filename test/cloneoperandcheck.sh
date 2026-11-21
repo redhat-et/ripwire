@@ -489,7 +489,7 @@ FULL1="$( "$BIN" "$TMP/n1" --quality-delta --no-cache --legend=full 2>/dev/null 
 case "$FULL1" in *'operate on DIFFERENT DATA'*) no "(L) a document without a why= clone row pays for the sentence";; *) ok "(L) a document without a why= clone row carries no operand sentence";; esac
 
 echo "── (V) the clones verb"
-CL="$( "$BIN" "$TMP/p2" --clones --no-cache 2>/dev/null | grep -oE '<group [^>]*>(<f [^>]*/>)*</group>' | grep -E 'unq' | head -3 )"   # the whole group (its tag carries demoted=); an empty CL FAILs (V) below
+CL="$( "$BIN" "$TMP/p2" --clones --no-cache 2>/dev/null | grep -oE '<group [^>]*>(<f [^>]*/>)*</group>' | grep -E 'unq' | head -3 )"   # status: a failed --clones prints no group, and an empty CL FAILs (V) below; the whole group is read because its tag carries demoted=
 case "$CL" in
     '')              no "(V) --clones shows no unq group — the arm is vacuous";;
     *'demoted="1"'*) no "(V) --clones reads the operand verdict: demoted=1 on the P2 group";;
