@@ -5744,7 +5744,7 @@ inline std::string fittedAnswerFirst( const MainDispatch& d, const ForPostureRen
             (void)rw::sigx::compactSigsWithin( out, ask.targetTokens > 0 && ask.ceilingTokens > 0 ? std::min( ask.targetTokens, ask.ceilingTokens )
                                                                                                  : std::max( ask.targetTokens, ask.ceilingTokens ), &u.ledger );
         }
-        (void)rw::rowlines::encodeRows( out );   // FMT2 (forrowlines.h): last, on the bytes written; est_tokens= stays the fitted element form's
+        (void)rw::rowlines::encodeRows( out, d.cfg.rowsSpec );   // FMT2 (forrowlines.h): last, on the bytes written; est_tokens= stays the fitted element form's
     }
     return out;
 }
@@ -5887,7 +5887,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             }
             if( std::optional<std::string> early = forEarlyStopPage( d, doc ) )   // RT2 ES: a proven leading block ends page 1
             {
-                (void)rw::rowlines::encodeRows( *early );
+                (void)rw::rowlines::encodeRows( *early, d.cfg.rowsSpec );
                 std::fwrite( early->data(), 1, early->size(), stdout );
                 return r.rc;
             }
@@ -5895,7 +5895,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             {
                 return 1;
             }
-            (void)rw::rowlines::encodeRows( doc );   // FMT2 (forrowlines.h): after paging, so each page holds the rows it held
+            (void)rw::rowlines::encodeRows( doc, d.cfg.rowsSpec );   // FMT2 (forrowlines.h): after paging, so each page holds the rows it held
             std::fwrite( doc.data(), 1, doc.size(), stdout );
             return r.rc;
         }
