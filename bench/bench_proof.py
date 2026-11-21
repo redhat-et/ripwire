@@ -19,8 +19,22 @@ CANYON, STEER = ROOT+"/canyon", ROOT+"/steer"
 EXTS = (".cpp",".h",".hpp",".mm",".cc",".c")
 
 def run(argv):
-    try: return subprocess.run(argv, capture_output=True, text=True, timeout=180).stdout
+    try: p=subprocess.run(argv, capture_output=True, text=True, timeout=180)
     except Exception as e: return f"[err {e}]"
+    # a signal-kill (rc<0, e.g. the OS killing a runaway run) is named like the timeout above, never a partial answer
+    return f"[err killed(signal={-p.returncode})]" if p.returncode<0 else p.stdout
+# Whole-repo map runs are bounded too, and a timeout, a signal-kill or ANY non-zero exit is its OWN state: it raises
+# RunAbnormal so the row prints that state instead of a timing taken from a run that never finished. A positive status
+# is as fatal to a timing as a kill is: the memory ceiling's refusal (exit 5, empty stdout) costs the time of the run
+# it refused, and recorded as a timing it would read as a completed map.
+MAP_TIMEOUT_S=3600
+class RunAbnormal(Exception): pass
+def map_run(argv):
+    try: p=subprocess.run(argv, capture_output=True, timeout=MAP_TIMEOUT_S)
+    except subprocess.TimeoutExpired: raise RunAbnormal(f"timeout({MAP_TIMEOUT_S}s)")
+    if p.returncode<0: raise RunAbnormal(f"killed(signal={-p.returncode})")
+    if p.returncode: raise RunAbnormal(f"exit({p.returncode}): {(p.stderr or b'').decode('utf-8','replace').strip()[:400]}")
+    return p
 def grep_dump(term,d):
     return run(["grep","-rn"]+[f"--include=*{e}" for e in EXTS]+[term,d])
 def files_in(out): return sorted(set(re.findall(r'p="([^":]+)', out)))
@@ -71,7 +85,7 @@ for name,term in [("--grep frantic","frantic"),("--grep FirePolicy","FirePolicy"
 def best_ms(fn,reps):
     return min(fn() for _ in range(reps))*1000
 def ctx_cold(d):
-    return best_ms(lambda:(_t(lambda:subprocess.run([CTX,d,"--no-cache"],capture_output=True))),3)
+    return best_ms(lambda:(_t(lambda:map_run([CTX,d,"--no-cache"]))),3)
 def _t(f): t=time.perf_counter(); f(); return time.perf_counter()-t
 def files_n(d):
     m=re.search(r'files=(\d+)', run([CTX,d,"--no-cache"])); return int(m.group(1)) if m else 0
@@ -92,9 +106,12 @@ print("="*94)
 print(f"{'repo':16} {'files':>6} {'ripwire cold':>13} {'ripwire warm':>13} {'aider cold':>11} {'speedup':>8}")
 for nm,d,reps in [("infrastucture",ROOT+"/infrastucture",3),("steer",STEER,3),("sound",ROOT+"/sound",3),("canyon",CANYON,3),("whole repo",ROOT,1)]:
     nf=files_n(d)
-    cold=best_ms(lambda:_t(lambda:subprocess.run([CTX,d,"--no-cache"],capture_output=True)),reps)
-    subprocess.run([CTX,d],capture_output=True)
-    warm=best_ms(lambda:_t(lambda:subprocess.run([CTX,d],capture_output=True)),reps)
+    try:
+        cold=best_ms(lambda:_t(lambda:map_run([CTX,d,"--no-cache"])),reps)
+        map_run([CTX,d])
+        warm=best_ms(lambda:_t(lambda:map_run([CTX,d])),reps)
+    except RunAbnormal as e:
+        print(f"{nm:16} {nf:>6} ripwire run did not finish: {e}"); continue
     try:    ac=aider_cold_ms(d,reps); sp=f"{ac/cold:>6.1f}x"
     except Exception as e: ac=float('nan'); sp=f"(aider err)"
     acs = f"{ac:>11.0f}" if ac==ac else f"{'n/a':>11}"

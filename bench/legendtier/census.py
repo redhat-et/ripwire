@@ -22,7 +22,13 @@ OPEN = re.compile(r"<!-- ripwire ([\w.-]+) schema=ripwire\.([\w.-]+)/v1: ")
 CMT  = re.compile(r"<!--.*?-->", re.S)
 
 def out_of(binary, *args):
-    p = subprocess.run([binary, *args], capture_output=True)
+    # bounded: these are --legend-dict / --version dumps; a hang or a signal-kill is named, never parsed
+    try:
+        p = subprocess.run([binary, *args], capture_output=True, timeout=600)
+    except subprocess.TimeoutExpired:
+        sys.exit("census: %s %s TIMEOUT (600s)" % (binary, " ".join(args)))
+    if p.returncode < 0:
+        sys.exit("census: %s %s KILLED (signal=%d)" % (binary, " ".join(args), -p.returncode))
     if p.returncode != 0:
         sys.exit("census: %s %s exited %d: %s" % (binary, " ".join(args), p.returncode, p.stderr.decode()[:200]))
     return p.stdout.decode("utf-8")

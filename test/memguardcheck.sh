@@ -612,8 +612,11 @@ for f in range( 160 ):
     open( os.path.join( root, "z", "big%03d.c" % f ), "w" ).write(
         "".join( "int z%d_%d(int x){ return x>0 ? z%d_%d(x-1)+%d : %d; }\n" % ( f, k, f, ( k + 1 ) % 1500, k, k ) for k in range( 1500 ) ) )
 PY2
-b8real(){ # rc out err: a real line fired. A hard line, or on a slow host the time-gated parse stop, which discloses itself
-    { [ "$1" = 5 ] && grep -Eq '^ripwire: memory limit reached during the (ingest|graph build)' "$3" && [ ! -s "$2" ]; } \
+# Since the allocator line (memceiling.h, lane M2, on by default at the same limit) a real line includes its refusal: it reads
+# inside the ingest, so on this fixture it usually fires before the phase line. B8s/B8bs below turn it off
+# (RIPWIRE_MEM_BUDGET_MB=0) so the phase line itself is still asserted exactly.
+b8real(){ # rc out err: a real line fired. A hard line, the allocator line, or on a slow host the time-gated parse stop, which discloses itself
+    { [ "$1" = 5 ] && grep -Eq '^ripwire: (memory limit reached during the (ingest|graph build)|refused by the memory ceiling \(--max-memory=64M\))' "$3" && [ ! -s "$2" ]; } \
         || { [ "$1" = 0 ] && grep -q 'memory_stop=' "$2"; }
 }
 b8why(){ printf 'rc=%s memory_stop=%s stdout=%sB stderr: %s' "$1" "$( grep -oE 'memory_stop=[a-z]+' "$2" | head -1 | cut -d= -f2 )" "$( wc -c < "$2" | tr -d ' ' )" "$( grep '^ripwire:' "$3" | head -c 200 )"; }
@@ -636,17 +639,18 @@ fi
 # (B8s, B8bs) the STRICT twins of the two arms above (PROCESS rule 4: a loosened arm keeps its old form). The macOS route
 #      (largealloc.cpp) is what made B8/B8b accept a time-gated soft stop; with RIPWIRE_TEST_LARGEALLOC=off the allocator is
 #      the base one on every OS (the variable is read only by that file), so the old assertion must hold exactly: exit 5,
-#      the ingest line, an empty stdout. A hard line that stopped working would fail here even on a slow host.
+#      the ingest line, an empty stdout. A hard line that stopped working would fail here even on a slow host. The allocator
+#      line is off here (RIPWIRE_MEM_BUDGET_MB=0): with it on, it fires first and the phase line would go unasserted.
 b8strict(){ # rc out err
     [ "$1" = 5 ] && grep -q '^ripwire: memory limit reached during the ingest' "$3" && [ ! -s "$2" ]
 }
-RIPWIRE_TEST_LARGEALLOC=off "$BIN" "$EG" --no-cache --max-memory=64M >"$TMP/b8s.out" 2>"$TMP/b8s.err"; rc=$?
+RIPWIRE_MEM_BUDGET_MB=0 RIPWIRE_TEST_LARGEALLOC=off "$BIN" "$EG" --no-cache --max-memory=64M >"$TMP/b8s.out" 2>"$TMP/b8s.err"; rc=$?
 if b8strict "$rc" "$TMP/b8s.out" "$TMP/b8s.err"; then
     ok "(B8s) with the large-block route off: a real footprint over --max-memory=64M exits 5 with the ingest line"
 else
     no "(B8s) $( b8why "$rc" "$TMP/b8s.out" "$TMP/b8s.err" )"
 fi
-RIPWIRE_TEST_LARGEALLOC=off RIPWIRE_TEST_MEMGUARD=crawl:999999999 "$BIN" "$EG" --no-cache --max-memory=64M >"$TMP/b8bs.out" 2>"$TMP/b8bs.err"; rc=$?
+RIPWIRE_MEM_BUDGET_MB=0 RIPWIRE_TEST_LARGEALLOC=off RIPWIRE_TEST_MEMGUARD=crawl:999999999 "$BIN" "$EG" --no-cache --max-memory=64M >"$TMP/b8bs.out" 2>"$TMP/b8bs.err"; rc=$?
 if b8strict "$rc" "$TMP/b8bs.out" "$TMP/b8bs.err"; then
     ok "(B8bs) with the route off, crawl:999999999 still exits 5 with the ingest line"
 else
@@ -1162,7 +1166,9 @@ b12="" b12env="" b12lad=( 2500 4000 6000 9000 14000 ) b12i=3 b12lo=0 b12hi=4 b12
 LC_ALL=C grep -q -a '__asan_init' "$BIN" 2>/dev/null && b12lad=( 5000 8000 12000 18000 28000 )
 for attempt in 1 2 3 4 5 6 7 8; do
     mkeg12 "${b12lad[$b12i]}"
-    ASAN_OPTIONS="${ASAN_OPTIONS:+$ASAN_OPTIONS:}quarantine_size_mb=0" RIPWIRE_TEST_MEMGUARD=eager:1 "$BIN" "$EG12" --no-cache --max-memory=$B12LIM --top-k=3 >"$TMP/b12.out" 2>"$TMP/b12.err"; rc=$?
+    # RIPWIRE_MEM_BUDGET_MB=0: this arm is the parse line's cut rule. The allocator line (memceiling.h, on by default at the same
+    # limit) refuses the moment the trees in flight pass the limit, before any file completes, so it would decide the run instead.
+    ASAN_OPTIONS="${ASAN_OPTIONS:+$ASAN_OPTIONS:}quarantine_size_mb=0" RIPWIRE_MEM_BUDGET_MB=0 RIPWIRE_TEST_MEMGUARD=eager:1 "$BIN" "$EG12" --no-cache --max-memory=$B12LIM --top-k=3 >"$TMP/b12.out" 2>"$TMP/b12.err"; rc=$?
     hdr="$( grep -oE '<!-- files=[^>]*-->' "$TMP/b12.out" | head -1 )"
     parsed="$( printf '%s' "$hdr" | grep -oE 'memory_parsed=[0-9]+' | grep -oE '[0-9]+' )"
     b12trail="$b12trail [${b12lad[$b12i]} elems: rc=$rc parsed=${parsed:--}]"

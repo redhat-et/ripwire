@@ -22,6 +22,7 @@
 #include "redact.h"           // R1 (V3): kRedactRules — the marker table the write gate's predicate is derived FROM
 #include "pathguard.h"        // A4-F14: rw::pathguard::isSymlink — THE symlink predicate, shared with the sidecar writers
 #include "memguard.h"         // #350: an edit refuses an index the memory guard cut (verbRefusalLine)
+#include "memceiling.h"       // ruling 101: the allocator line is suspended for the post-write region (Suspension)
 
 #include <climits>            // PATH_MAX — the AbsHintFrame realpath/getcwd buffers (A2)
 
@@ -1185,26 +1186,70 @@ namespace mcpedit
 
     // The key a post-check that stopped AFTER the write puts on the receipt; the CLI's stderr line reads it.
     inline constexpr std::string_view kPostCheckNotRunKey = ",\"post_check\":\"not run: ";
+    // The key ruling 101's disclosure puts on the receipt; the CLI's stderr line reads the receipt for it too.
+    inline constexpr std::string_view kCeilingKey = ",\"memory_ceiling\":\"";
+
+    // Ruling 101's disclosure half: the receipt says what the allocator line did about this post-check, so no
+    // output can imply a ceiling-checked run. Three states, each true as written:
+    //   * the ceiling is NOT ARMED for this run (RIPWIRE_MEM_BUDGET_MB=0, a server — --mcp and --lsp never arm
+    //     it — or a build whose operator new is not replaced) -> it says so, and nothing was suspended.
+    //   * armed, and the limit was never reached -> the suspension, and the limit that did not apply.
+    //   * armed, and the check PASSED the limit -> that, plus the peak, the count, and the two facts a caller
+    //     acts on: the edit IS applied, and this check ran unbounded.
+    // It is emitted UNCONDITIONALLY, which test/receiptpostcheck.sh (13) is the reason for: that arm requires
+    // the MCP and CLI receipts to carry the SAME keys, and --mcp does not arm the ceiling while the CLI does by
+    // default — so a field that appeared only when armed made one surface's receipt a different shape from the
+    // other's. Always present, never silent, and the same keys on both surfaces.
+    inline std::string ceilingSuspensionJson( const rw::memceiling::Suspension& sus )
+    {
+        std::string out( kCeilingKey );
+        if( !sus.armed() )
+        {
+            return out + "not armed for this run, so nothing was suspended and this check ran under the memory guard's own lines alone\"";
+        }
+        out += "suspended for this check (the write is committed, so a refusal here could not be reported and a retry could insert twice)";
+        if( const std::uint64_t crossed = sus.crossings(); crossed != 0 )
+        {
+            out += "; the check PASSED the " + std::to_string( sus.limitMib() ) + " MiB limit (peak "
+                 + std::to_string( sus.peakMib() ) + " MiB over " + std::to_string( crossed )
+                 + " admitted allocation(s)) and ran unbounded — the edit IS applied, and a fresh --edit-check runs under the ceiling";
+        }
+        else
+        {
+            out += "; the " + std::to_string( sus.limitMib() ) + " MiB limit was not reached";
+        }
+        return out + "\"";
+    }
 
     // F-W1: the post-check runs AFTER the write is committed, and its index rebuild (or the contract check's fold) can stop at
     // the memory limit. That stop refuses nothing: the write stands, so the receipt stands and says the check did not run.
     // Letting FileGraphStopped reach a surface's catch would answer "refused" for a file already edited, and an agent that
     // believes it inserts twice. Every write path's post-check goes through here: the MCP and CLI edit verbs (runEditVerb)
     // and each op of an --edit-plan --apply (editplan.h). `nextOut` keeps the caller's --edit-check= (set before the call).
+    //
+    // RULING 101: this is also where the allocator-level ceiling is SUSPENDED, and it is the only place that
+    // constructs the suspension — because this function IS the post-write region, for every write path, by the
+    // contract above. The memory guard's own stop keeps working inside it (the catch below); what the
+    // suspension removes is memceiling.h's std::_Exit(5), which cannot report a receipt for a file that is
+    // already on disk. The scope ends before this function returns, so nothing downstream runs unguarded, and
+    // the disclosure rides out on the same receipt fragment — see ceilingSuspensionJson.
     inline std::string postCheckJson( const std::string& root, const std::string& fileIdentity, const std::string& symbolName,
                                       bool withTests = true, std::string* nextOut = nullptr )
     {
+        const rw::memceiling::Suspension sus;   // RAII: every return path below closes it, including the catch
+        std::string                      out;
         try
         {
-            return postCheckJsonBuilt( root, fileIdentity, symbolName, withTests, nextOut );
+            out = postCheckJsonBuilt( root, fileIdentity, symbolName, withTests, nextOut );
         }
         catch( const FileGraphStopped& stopped )
         {
             releaseMcpIndexMemory();     // getIndex released a half-built slot already; a stop in the check's own fold leaves a whole one
             memguard::answerStops();     // this receipt answers for the stop: no backstop line, no exit 5
-            return std::string( kPostCheckNotRunKey )
-                 + mcpdetail::jsonEscape( memguard::afterAnswerStopLine( "post-edit check", "the write", stopped.why() ) ) + "\"";
+            out = std::string( kPostCheckNotRunKey )
+                + mcpdetail::jsonEscape( memguard::afterAnswerStopLine( "post-edit check", "the write", stopped.why() ) ) + "\"";
         }
+        return out + ceilingSuspensionJson( sus );
     }
 
 }   // namespace mcpedit
