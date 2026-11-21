@@ -1966,61 +1966,67 @@ inline const char* qdRepeatedDecisionLegendFor( const QualityDeltaLegendParts& p
     return any ? kQdRepeatedDecisionLegend : "";
 }
 
+// The row dictionary's reading sentences, one per row reading a document can carry: a sentence is emitted only when a row
+// (gating or disclosed) carries that reading, and kQdRowReadings' order is the legend's byte order.
+using QdRowReadingTest = bool ( * )( const rw::quality::Regression& );
+struct QdRowReadingLegend
+{
+    QdRowReadingTest carries;
+    const char*      legend;
+};
+inline constexpr QdRowReadingLegend kQdRowReadings[] = {
+    { []( const rw::quality::Regression& r ) { return r.kind == "error-masking" && r.isMinor; },      kQdMaskReportOnlyLegend },
+    { []( const rw::quality::Regression& r ) { return r.kind == "error-masking" && !r.facet.empty(); }, kQdFailureDefaultLegend },
+    { []( const rw::quality::Regression& r ) { return r.kind == "placeholder"; },                       kQdPlaceholderLegend },
+    { []( const rw::quality::Regression& r ) { return r.kind == "defect-shape"; },                      kQdDefectShapeLegend },
+    { []( const rw::quality::Regression& r ) { return !r.call.empty(); },                               kQdUncheckedStatusLegend },
+    { []( const rw::quality::Regression& r ) { return !r.why.empty(); },                                kQdUnhandledArmLegend },
+    { []( const rw::quality::Regression& r ) { return r.kind == "complexity" && !r.facet.empty(); },    kQdMonsterLegend },
+    { []( const rw::quality::Regression& r ) { return r.kind == "params" && !r.facet.empty(); },        kQdSimilarArgsLegend },
+    { []( const rw::quality::Regression& r ) { return r.kind == "tangle"; },                            kQdTangleLegend },
+};
+
+// Section (5) of emitQualityDeltaLegend: the row dictionary, and its clone-family half. Called only when the document has a row.
+inline void emitQualityDeltaRowLegend( const QualityDeltaLegendParts& p, std::FILE* out )
+{
+    std::fputs( kQdRowLegend, out );
+    // QD-ENTRY-CEILING: the two NEW-code readings are defined only on an answer that carries them (present-only), so every
+    // other answer keeps its legend bytes.
+    if( std::any_of( p.rows.begin(), p.rows.end(), []( const rw::quality::Regression& r ) { return r.isNewSymbol && r.isMoved; } ) )
+    {
+        rw::emitRaw( out, "origin=\"moved\": the same or a nearly identical body (a clone-sketch match) left another name or file in this diff; it never gates. " );
+    }
+    if( std::any_of( p.rows.begin(), p.rows.end(), []( const rw::quality::Regression& r ) { return r.ceiling != 0; } ) )
+    {
+        rw::emitRaw( out, "ceiling= on a NEW complexity or verbosity row: it reached 4x the bar (ccx 60 or 240 lines; not a moved body, not test "
+                          "code), so it gates. " );
+    }
+    if( qdAnyLegendRow( p, []( const rw::quality::Regression& r ) { return r.kind == "duplication" || r.kind == "new-clone-of-reused-helper"; } ) )
+    {
+        std::fputs( kQdCloneLegend, out );
+        if( qdAnyLegendRow( p, []( const rw::quality::Regression& r )
+                            { return r.facet == rw::cloneIdiomName( rw::CloneIdiom::OneStatement ) || r.facet == rw::cloneIdiomName( rw::CloneIdiom::CallSequence ); } ) )
+        {
+            std::fputs( kQdOneStatementLegend, out );
+        }
+        rw::emitRaw( out, qdCloneWhyLegendFor( p, CloneWhyReading::Operands ) );
+        rw::emitRaw( out, qdCloneWhyLegendFor( p, CloneWhyReading::Shrink ) );
+    }
+    for( const QdRowReadingLegend& reading : kQdRowReadings )
+    {
+        if( qdAnyLegendRow( p, reading.carries ) )
+        {
+            rw::emitRaw( out, reading.legend );
+        }
+    }
+    rw::emitRaw( out, qdRepeatedDecisionLegendFor( p ) );
+}
+
 // A DEFINITION IS EMITTED WHEN THE THING IT DEFINES IS IN THE DOCUMENT. Nothing is dropped and no limit is
 // softened: a reader can never meet an undefined name, because a name and its sentence appear together or
 // not at all. See the constants above for what each section covers and why it is conditional.
 inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE* out = stdout )
 {
-    const auto anyCloneRow = [] ( const std::vector<rw::quality::Regression>& v )
-    {
-        for( const rw::quality::Regression& r : v )
-        {
-            if( r.kind == "duplication" || r.kind == "new-clone-of-reused-helper" ) { return true; }
-        }
-        return false;
-    };
-    const auto anyNarrowIdiomRow = [] ( const std::vector<rw::quality::Regression>& v )
-    {
-        return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r )
-                            { return r.facet == rw::cloneIdiomName( rw::CloneIdiom::OneStatement ) || r.facet == rw::cloneIdiomName( rw::CloneIdiom::CallSequence ); } );
-    };
-    const auto anyMinorMaskRow = [] ( const std::vector<rw::quality::Regression>& v )
-    {
-        return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return r.kind == "error-masking" && r.isMinor; } );
-    };
-    const auto anyFailureDefaultRow = [] ( const std::vector<rw::quality::Regression>& v )
-    {
-        return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return r.kind == "error-masking" && !r.facet.empty(); } );
-    };
-    const auto anyPlaceholderRow = [] ( const std::vector<rw::quality::Regression>& v )
-    {
-        return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return r.kind == "placeholder"; } );
-    };
-    const auto anyDefectShapeRow = [] ( const std::vector<rw::quality::Regression>& v )
-    {
-        return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return r.kind == "defect-shape"; } );
-    };
-    const auto anySimilarArgsRow = [] ( const std::vector<rw::quality::Regression>& v )
-    {
-        return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return r.kind == "params" && !r.facet.empty(); } );
-    };
-    const auto anyUncheckedStatusRow = [] ( const std::vector<rw::quality::Regression>& v )
-    {
-        return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return !r.call.empty(); } );
-    };
-    const auto anyUnhandledArmRow = [] ( const std::vector<rw::quality::Regression>& v )
-    {
-        return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return !r.why.empty(); } );
-    };
-    const auto anyMonsterRow = [] ( const std::vector<rw::quality::Regression>& v )
-    {
-        return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return r.kind == "complexity" && !r.facet.empty(); } );
-    };
-    const auto anyTangleRow = [] ( const std::vector<rw::quality::Regression>& v )
-    {
-        return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return r.kind == "tangle"; } );
-    };
-
     std::fputs( kQdLegendCore, out );
 
     // (1) the ONE floor in force. Keyed off the same pointer the element prints, so the sentence cannot
@@ -2105,65 +2111,7 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
     // "done" checkpoint an agent actually makes, the reader pays for neither.
     if( !p.rows.empty() || !p.disclosedRows.empty() )
     {
-        std::fputs( kQdRowLegend, out );
-        // QD-ENTRY-CEILING: the two NEW-code readings are defined only on an answer that carries them (present-only), so every
-        // other answer keeps its legend bytes.
-        if( std::any_of( p.rows.begin(), p.rows.end(), []( const rw::quality::Regression& r ) { return r.isNewSymbol && r.isMoved; } ) )
-        {
-            rw::emitRaw( out, "origin=\"moved\": the same or a nearly identical body (a clone-sketch match) left another name or file in this diff; it never gates. " );
-        }
-        if( std::any_of( p.rows.begin(), p.rows.end(), []( const rw::quality::Regression& r ) { return r.ceiling != 0; } ) )
-        {
-            rw::emitRaw( out, "ceiling= on a NEW complexity or verbosity row: it reached 4x the bar (ccx 60 or 240 lines; not a moved body, not test "
-                              "code), so it gates. " );
-        }
-        if( anyCloneRow( p.rows ) || anyCloneRow( p.disclosedRows ) )
-        {
-            std::fputs( kQdCloneLegend, out );
-            if( anyNarrowIdiomRow( p.rows ) || anyNarrowIdiomRow( p.disclosedRows ) )
-            {
-                std::fputs( kQdOneStatementLegend, out );
-            }
-            rw::emitRaw( out, qdCloneWhyLegendFor( p, CloneWhyReading::Operands ) );
-            rw::emitRaw( out, qdCloneWhyLegendFor( p, CloneWhyReading::Shrink ) );
-        }
-        if( anyMinorMaskRow( p.rows ) || anyMinorMaskRow( p.disclosedRows ) )
-        {
-            rw::emitRaw( out, kQdMaskReportOnlyLegend );
-        }
-        if( anyFailureDefaultRow( p.rows ) || anyFailureDefaultRow( p.disclosedRows ) )
-        {
-            rw::emitRaw( out, kQdFailureDefaultLegend );
-        }
-        if( anyPlaceholderRow( p.rows ) || anyPlaceholderRow( p.disclosedRows ) )
-        {
-            rw::emitRaw( out, kQdPlaceholderLegend );
-        }
-        if( anyDefectShapeRow( p.rows ) || anyDefectShapeRow( p.disclosedRows ) )
-        {
-            rw::emitRaw( out, kQdDefectShapeLegend );
-        }
-        if( anyUncheckedStatusRow( p.rows ) || anyUncheckedStatusRow( p.disclosedRows ) )
-        {
-            rw::emitRaw( out, kQdUncheckedStatusLegend );
-        }
-        if( anyUnhandledArmRow( p.rows ) || anyUnhandledArmRow( p.disclosedRows ) )
-        {
-            rw::emitRaw( out, kQdUnhandledArmLegend );
-        }
-        if( anyMonsterRow( p.rows ) || anyMonsterRow( p.disclosedRows ) )
-        {
-            rw::emitRaw( out, kQdMonsterLegend );
-        }
-        if( anySimilarArgsRow( p.rows ) || anySimilarArgsRow( p.disclosedRows ) )
-        {
-            rw::emitRaw( out, kQdSimilarArgsLegend );
-        }
-        if( anyTangleRow( p.rows ) || anyTangleRow( p.disclosedRows ) )
-        {
-            rw::emitRaw( out, kQdTangleLegend );
-        }
-        rw::emitRaw( out, qdRepeatedDecisionLegendFor( p ) );
+        emitQualityDeltaRowLegend( p, out );
     }
     if( p.ratchetRead )
     {
