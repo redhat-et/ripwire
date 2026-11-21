@@ -29,7 +29,7 @@
 #     vanished = loop(P) - loop(C) - tombstones_new(C)
 #
 # Any name present in a parent's loop, absent from the child's, and not declared retired IN THAT SAME
-# COMMIT is named and fails.
+# COMMIT is named — and fails unless REF itself accounts for it (DISCHARGED AT REF, below).
 #
 # THE WINDOW. BASE is the merge-base of REF with the first of: its upstream tracking ref, origin/main,
 # origin/HEAD that is NOT already at or ahead of REF. A candidate whose merge-base IS REF is skipped, not
@@ -56,7 +56,7 @@
 # parent carrying it, arm G, and a merge that keeps NAME in its loop under an inherited tombstone, arm H,
 # stay red). The vanish side is unchanged: still per parent, against tombstones that parent lacks.
 #
-# THE MUTATION CONTROLS (arms B..I) — this gate spent months green while inert, so it now proves on
+# THE MUTATION CONTROLS (arms B..N) — this gate spent months green while inert, so it now proves on
 # every run that its walker can still go red. Each arm builds a throwaway git repository under a temp
 # directory (NOT this one: no object, ref, index or working-tree state of the repo under test is
 # touched) with a known history and requires arm A's own walker to name the violation (or stay green):
@@ -68,6 +68,11 @@
 #   (G) the same merge, tombstone carried by NO parent → must be RED
 #   (H) merge keeping NAME in its loop under a tombstone one parent carries → must be RED
 #   (I) window derivation on a branch tracking its own pushed copy reaches origin/main → RED on a drop
+#   (J) a tombstone-less drop a LATER commit declares → GREEN and reported   (Jn) same, tombstone never written → RED
+#   (K) a tombstone-less drop a later commit RESTORES → GREEN and reported   (Kn) restored, dropped again     → RED
+#   (L) the late tombstone's drop lies below the window → GREEN (not a stale tombstone)
+#   (M) the tip's tombstone predates the drop (it sat beside the live name) → RED
+#   (N) the 2550bfdcd shape, a merge drop a later merge declares → GREEN and reported   (Nn) never declared → RED
 #
 # WHY docs/EVALS.md's gate-count pins do NOT get this same treatment (deliberately, not an oversight):
 # manifestcheck.sh already ties every "N gate scripts" / "loop ... names N" claim in EVALS.md to the
@@ -78,24 +83,35 @@
 # EXEMPT FROM binoverridecheck.sh: this gate reads git history (`git show REF:test/regression.sh`) and
 # never invokes the ripwire binary under test — see binoverridecheck.sh's EXEMPT table.
 #
-# ACKED AND STILL RED on integration/070-1120 (2026-11-20, owner ruling 104). Arm (A) reports
+# DISCHARGED AT REF (2026-11-21, closing the red owner ruling 104 acked on integration/070-1120). Arm (A) reported
 # `2550bfdcd752 (parent e6671f267ae6): 1 entry vanished from the loop with no '# retired:' tombstone:
-# phantomdefcheck`. THE MERGE: 2550bfdcd is "Merge branch 'lane/v1-verbdef' into lane/rt1-route", on the
-# 0.7.0 stack's SHARED history — contained in integration/070-candidate, lane/cb1-code-clean and
-# lane/bx2-fix2-ceiling alike, absent from main, which is exactly why main passes this gate and the
-# integration branch does not. THE GATE IS CORRECT: the name did vanish in that commit with no tombstone
-# of its own, and every mutation control (B..I) is green on the same run, so the walker is live and this
-# red carries information. THE TREE IT GUARDS IS RIGHT TODAY: the retirement is declared at
-# test/regression.sh:290 and test/phantomdefcheck.sh exists on neither main nor this branch, so loop and
-# tombstone set are self-consistent. IT CANNOT BE OTHERWISE: the only two repairs are rewriting that merge
-# out of the stack's history (forbidden), or teaching this walker that a tombstone written in a LATER
-# commit discharges an earlier vanish — a change to the conservation rule itself, which has to be written
-# red-first with an arm of its own and is not an integration branch's edit. Nothing here was relaxed and
-# no arm was removed: the ack records a judgement, it does not suppress a finding.
-# REVISIT: when the tombstone-in-a-later-commit rule is designed (its own arm, red-first), or the moment
-# this branch's history is no longer an ancestor of what ships — whichever comes first. Do NOT discharge
-# it by editing test/regression.sh: the tombstone is already there, and moving it would pin the output
-# instead of fixing the rule.
+# phantomdefcheck`. THE FINDING WAS TRUE: 2550bfdcd is "Merge branch 'lane/v1-verbdef' into lane/rt1-route", it did
+# drop the name against the parent that still listed it, and it declared nothing; the retirement was declared by a
+# LATER merge (the tombstone in test/regression.sh). THE RULE WAS UNSATISFIABLE: "the tombstone rides the dropping
+# commit" can only be met by rewriting that commit, so once such a commit is in a branch's history the gate is red
+# for as long as the commit stays inside the window — whatever the tip does, and whichever tip is right.
+# AND THE VERDICT WAS A PROPERTY OF THE CHECKOUT'S REFS, NOT OF THE TREE (measured on one commit, 5000f06af):
+#     origin/main = the pushed main (window 55 commits)                 → RED, 1 violation
+#     fresh `git clone --no-local`, origin/main = an older main          → RED, 2 violations (82ed4c8bf too), and
+#                                                                          1079 of 1379 window commits not examined
+#     no origin/main (single-branch clone, detached HEAD)                → GREEN over a 2-commit window
+# THE RULE NOW. A drop with no tombstone of its own is still FOUND in every window and still PRINTED; it stops being a
+# violation only when REF — the one thing a later commit can make true — accounts for the name by an explicit act:
+#     restored   NAME is back in REF's loop, or
+#     declared   NAME is absent from REF's loop and REF carries `# retired: NAME`, a tombstone the dropped-against
+#                parent did not already carry.
+# A name missing from REF's loop with no such tombstone is the silent hole this gate exists for and is red in every
+# window. So the three checkouts above now agree (GREEN, with the drop(s) each window can see NOTEd), and they agree
+# for the tree's reason, not the refs': removing only the tombstone line at the tip turns arm (A) red on 2550bfdcd
+# again, and a tip that silently drops a live entry is red beside the discharged NOTE (both run against the real
+# history when this rule was written). The window is still derived from refs — how FAR back arm (A) looks varies by
+# checkout and says so in its PASS line; what no longer varies is the verdict on a tip that accounts for every drop.
+# WHAT THIS RELAXES, stated plainly: the tombstone may now be written after the drop instead of in it. What it does not
+# relax: an undeclared, unrestored drop. Arms (J)..(N) carry the proof in the form a relaxation admits — each green arm
+# has a mutation control that removes the one discharging fact and must go red — and every arm that predates the rule
+# (B..I) must report ZERO discharges, so none of them can pass by way of it.
+# A late tombstone is also not "stale" (arm D): written for a name an ANCESTOR dropped silently, it is that drop's
+# declaration, wherever the window starts (arm L). A tombstone for a name no ancestor's loop ever held stays red.
 #
 # USAGE: test/loopconservationcheck.sh [REF] [BASE]   (defaults: REF=HEAD, BASE derived as above). Both
 # positional arguments exist for exactly one reason — pointing this gate at a specific historical or
@@ -157,15 +173,45 @@ def parents_of( repo, sha ):
     out = git( repo, [ "rev-list", "--parents", "-n1", sha ] )
     return out.split()[ 1: ] if out else []
 
+# ── LATE DECLARATION: where did NAME silently leave the loop in `commit`'s OWN ancestry? ──────────────
+# A tombstone written in a commit AFTER the one that dropped NAME matches no vanish "in that commit", so the
+# stale-tombstone rule (arm D) would call it unneeded. It is the declaration the earlier drop owed. The
+# vanish may lie BELOW the window (a pushed tip's window is one commit), so this reads the file's history
+# from `commit` down, not the window: the newest ancestor X whose loop lost NAME against a parent without
+# X declaring it. Returns X's sha, or None — a NAME no ancestor's loop ever held stays stale (arm D).
+def silent_vanish_ancestor( repo, commit, name, loopAt, path ):
+    # -S: only commits that changed how often NAME occurs in the file; -m: a merge is diffed against EACH parent (the
+    # acked drop was a merge resolution), so it prints once per parent — hence `seen`.
+    revs = git( repo, [ "log", "--full-history", "-m", "-S" + name, "--format=%H", commit, "--", path ] )
+    seen = { commit }
+    for x in ( revs.split() if revs else [] ):
+        if x in seen:
+            continue
+        seen.add( x )
+        xText = loopAt( x )
+        xLoop = loop_names( xText )
+        if xLoop is None or name in xLoop:
+            continue
+        for par in parents_of( repo, x ):
+            parLoop = loop_names( loopAt( par ) )
+            if parLoop is not None and name in parLoop and name not in tombstones( xText ) - tombstones( loopAt( par ) ):
+                return x
+    return None
+
 # ── the walker: every commit in base..ref that touched the loop file, against each of ITS parents ─────
-# Returns ( violations, staleTombstones, commitCount, pairCount, skipped ). Pure — it reports, the arms
-# below decide whether a report is expected. Arms B/C/D call this on synthetic repositories.
+# Returns ( violations, staleTombstones, commitCount, pairCount, skipped, truncated, discharged ). Pure — it
+# reports, the arms below decide whether a report is expected. Arms B..N call this on synthetic repositories.
 def walk( repo, base, ref, path = "test/regression.sh" ):
     cache = {}
     def loopAt( sha ):
         if sha not in cache:
             cache[ sha ] = blob( repo, sha, path )
         return cache[ sha ]
+    refSha   = ( git( repo, [ "rev-parse", "--verify", "%s^{commit}" % ref ] ) or "" ).strip()
+    tipText  = loopAt( refSha ) if refSha else None
+    tipLoop  = loop_names( tipText ) or set()
+    tipTombs = tombstones( tipText )
+    refName  = ref[ :12 ] if re.fullmatch( r'[0-9a-f]{40}', ref ) else ref
 
     revs = git( repo, [ "rev-list", "--reverse", "--full-history", "%s..%s" % ( base, ref ), "--", path ] )
     revs = revs.split() if revs else []
@@ -174,7 +220,7 @@ def walk( repo, base, ref, path = "test/regression.sh" ):
         truncated = len( revs ) - WINDOW_CAP
         revs = revs[ -WINDOW_CAP: ]
 
-    violations, stale, skipped, pairs = [], [], [], 0
+    violations, stale, skipped, pairs, discharged = [], [], [], 0, []
     for child in revs:
         childText = loopAt( child )
         childLoop = loop_names( childText )
@@ -193,7 +239,25 @@ def walk( repo, base, ref, path = "test/regression.sh" ):
             pairs += 1
             newTombs = childTombs - tombsOf[ par ]
             vanished = parLoop - childLoop
-            silent = sorted( vanished - newTombs )
+            undeclared = sorted( vanished - newTombs )
+            # DISCHARGED AT REF (2026-11-21). A commit is immutable, so a drop that carried no tombstone of its own
+            # cannot be repaired where it happened; what CAN be made true is the tip. A vanish stops being a
+            # violation only when REF itself accounts for the name, by an explicit act either way:
+            #   restored  — NAME is back in REF's loop (nothing is missing);
+            #   declared  — NAME is absent from REF's loop AND REF carries a `# retired: NAME` tombstone that this
+            #               parent did NOT carry (written at or after the drop: a tombstone that already sat beside a
+            #               live NAME declared nothing about this drop — arm M).
+            # A name absent from REF's loop with no such tombstone is exactly the silent hole this gate exists for and
+            # stays red in every window (arms B, E, I, Jn, Kn). Every discharge is printed — never a silent pass.
+            silent = []
+            for name in undeclared:
+                if name in tipLoop:
+                    discharged.append( "%s (parent %s) dropped %s with no tombstone — RESTORED: it is in %s's loop" % ( child[ :12 ], par[ :12 ], name, refName ) )
+                elif name in tipTombs - tombsOf[ par ]:
+                    discharged.append( "%s (parent %s) dropped %s with no tombstone — DECLARED LATER: %s carries `# retired: %s` and its loop does not list it" % (
+                        child[ :12 ], par[ :12 ], name, refName, name ) )
+                else:
+                    silent.append( name )
             if silent:
                 violations.append( "%s (parent %s): %d entr%s vanished from the loop with no `# retired:` tombstone: %s" % (
                     child[ :12 ], par[ :12 ], len( silent ), "y" if len( silent ) == 1 else "ies", ", ".join( silent ) ) )
@@ -209,10 +273,13 @@ def walk( repo, base, ref, path = "test/regression.sh" ):
             # is not stale against this one. A tombstone no parent's loop held stays red (arm G).
             droppedElsewhere = set().union( *( ( loop_names( loopAt( q ) ) or set() ) - childLoop for q in parents if q != par ) )
             unneeded = sorted( t for t in newTombs - vanished if t in childLoop or ( t not in inherited and t not in droppedElsewhere ) )
+            # a tombstone for a NAME this commit did not drop, and no parent carried: stale — UNLESS an ancestor dropped
+            # NAME silently, in which case this is that drop's late declaration (silent_vanish_ancestor; arms J, L).
+            unneeded = [ t for t in unneeded if t in childLoop or silent_vanish_ancestor( repo, child, t, loopAt, path ) is None ]
             if unneeded:
                 stale.append( "%s (parent %s): tombstone(s) matching no vanish in that commit: %s" % (
                     child[ :12 ], par[ :12 ], ", ".join( unneeded ) ) )
-    return violations, stale, len( revs ), pairs, skipped, truncated
+    return violations, stale, len( revs ), pairs, skipped, truncated, discharged
 
 # ── BASE derivation ───────────────────────────────────────────────────────────────────────────────────
 def derive_base( repo, ref ):
@@ -242,17 +309,19 @@ base, why = ( BASE_ARG, "explicit BASE argument" ) if BASE_ARG else derive_base(
 if base is None:
     ok( "(A) %s is a root commit with no parents — nothing to conserve against" % REF )
 else:
-    violations, stale, nCommits, nPairs, skipped, truncated = walk( ROOT, base, REF )
+    violations, stale, nCommits, nPairs, skipped, truncated, discharged = walk( ROOT, base, REF )
     if truncated:
         note( "(A) window longer than %d commits — the %d OLDEST were not examined (disclosed truncation, not a pass)" % ( WINDOW_CAP, truncated ) )
     for s in skipped:
         note( "(A) skipped %s" % s )
+    for d in discharged:
+        note( "(A) discharged at %s, not unseen: %s" % ( REF, d ) )
     if violations:
         for v in violations:
             no( "(A) %s" % v )
     else:
-        ok( "(A) no undeclared vanish across %s..%s (%s): %d commit(s) touched the loop, %d child/parent pair(s) compared" % (
-            base[ :12 ], REF, why, nCommits, nPairs ) )
+        ok( "(A) no vanish is left unaccounted at %s across %s..%s (%s): %d commit(s) touched the loop, %d child/parent pair(s) compared, %d tombstone-less drop(s) discharged at %s (each a NOTE above)" % (
+            REF, base[ :12 ], REF, why, nCommits, nPairs, len( discharged ), REF ) )
     if stale:
         for s in stale:
             no( "(A) %s" % s )
@@ -287,18 +356,25 @@ def commitLoop( repo, names, parents, tombs = (), perLine = False ):
 
 BASE_NAMES = [ "acheck", "bcheck", "ccheck" ]
 
-def arm( label, build, expectViolation ):
-    """build(repo) -> (base, ref); expectViolation is a name that must be reported, or None for green."""
+def arm( label, build, expectViolation, expectDischarged = 0 ):
+    """build(repo) -> (base, ref); expectViolation is a name that must be reported, or None for green.
+    expectDischarged is the EXACT number of tombstone-less drops the walker must report as discharged at REF:
+    0 for every arm that predates the rule (so none of them can pass by way of it), 1 for arms J/K."""
     repo = mkrepo()
     try:
         b, r = build( repo )
-        violations, stale, _n, pairs, _sk, _tr = walk( repo, b, r )
+        violations, stale, _n, pairs, _sk, _tr, discharged = walk( repo, b, r )
         blob_ = " | ".join( violations + stale ) or "(no finding)"
         if pairs == 0:
             no( "%s the walker compared 0 child/parent pairs on the fixture — it cannot have judged anything" % label )
+        elif len( discharged ) != expectDischarged:
+            no( "%s the walker discharged %d tombstone-less drop(s) at the tip, expected exactly %d: %s" % (
+                label, len( discharged ), expectDischarged, " | ".join( discharged ) or "(none)" ) )
         elif expectViolation is None:
             if violations or stale:
                 no( "%s a legitimate, tombstoned retirement was reported as a violation: %s" % ( label, blob_ ) )
+            elif expectDischarged:
+                ok( "%s green, and SAID so: %s (%d pair(s) compared)" % ( label, " | ".join( discharged ), pairs ) )
             else:
                 ok( "%s a retirement declared with a `# retired:` tombstone is accepted (%d pair(s) compared)" % ( label, pairs ) )
         elif any( expectViolation in v for v in violations + stale ):
@@ -410,6 +486,56 @@ def buildTrackedBranch( repo ):
     b_, _why = derive_base( repo, "feature" )
     return ( b_ or c ), "feature"
 arm( "(I) mutation control, WINDOW on a branch tracking its own pushed copy —", buildTrackedBranch, "victimcheck" )
+
+# ── (J..N) DISCHARGED AT REF — the 2026-11-21 rule, a RELAXATION of "the tombstone rides the dropping commit", so its
+# proof is a MUTATION NEGATIVE CONTROL per green arm (a relaxed comparison cannot be shown red on the old walker's
+# strictness; what must be shown is that the relaxed one still goes red when the one discharging fact is removed).
+# Each green arm also requires the walker to REPORT the discharge (expectDischarged = 1): green-and-silent fails.
+def linear( steps ):
+    """steps: [ ( names, tombs ) ... ] as a first-parent chain; window = first..last."""
+    def build( repo ):
+        shas = []
+        for names, tombs in steps:
+            shas.append( commitLoop( repo, names, shas[ -1: ], tombs = tombs ) )
+        return shas[ 0 ], shas[ -1 ]
+    return build
+V = BASE_NAMES + [ "victimcheck" ]
+# (J) a silent drop, then a LATER commit writes the tombstone → green, discharge reported, and the late tombstone is not "stale"
+arm( "(J) DECLARED LATER, linear: a tombstone-less drop whose tombstone a later commit writes —",
+     linear( [ ( V, () ), ( BASE_NAMES, () ), ( BASE_NAMES, [ "victimcheck" ] ) ] ), None, expectDischarged = 1 )
+# (Jn) the same history minus that one tombstone line (the tip still touches the loop) → RED on the drop
+arm( "(Jn) mutation control for (J), the same history with the late tombstone never written —",
+     linear( [ ( V, () ), ( BASE_NAMES, () ), ( BASE_NAMES + [ "newcheck" ], () ) ] ), "victimcheck" )
+# (K) a silent drop, then a later commit puts the name back → green, discharge reported
+arm( "(K) RESTORED, linear: a tombstone-less drop a later commit puts back in the loop —",
+     linear( [ ( V, () ), ( BASE_NAMES, () ), ( V, () ) ] ), None, expectDischarged = 1 )
+# (Kn) restored, then silently dropped AGAIN → RED: the tip is what is judged, and the tip has the hole
+arm( "(Kn) mutation control for (K), restored and then dropped again with no tombstone —",
+     linear( [ ( V, () ), ( BASE_NAMES, () ), ( V, () ), ( BASE_NAMES, () ) ] ), "victimcheck" )
+# (L) the late tombstone's drop lies BELOW the window (a pushed tip judges one commit): found in the ancestry, not stale
+def buildLateBelowWindow( repo ):
+    a = commitLoop( repo, V, [] )
+    b = commitLoop( repo, BASE_NAMES, [ a ] )                               # the silent drop — outside the window
+    c = commitLoop( repo, BASE_NAMES, [ b ], tombs = [ "victimcheck" ] )   # its late declaration — the whole window
+    return b, c
+arm( "(L) DECLARED LATER with the drop below the window: the lone tombstone commit is that drop's declaration, not a stale tombstone —", buildLateBelowWindow, None )
+# (M) a tombstone that ALREADY sat beside the live name declares nothing about a later drop → RED
+arm( "(M) mutation control, the tip's tombstone PREDATES the drop (it sat beside the live name) —",
+     linear( [ ( V, [ "victimcheck" ] ), ( BASE_NAMES, [ "victimcheck" ] ) ] ), "victimcheck" )
+# (N) the acked 2026-11-18 shape itself: a MERGE drops a name one parent still lists, no tombstone; a later merge declares it
+def buildMergeDropDeclaredLater( withTombstone ):
+    def build( repo ):
+        a  = commitLoop( repo, V, [] )
+        l  = commitLoop( repo, BASE_NAMES, [ a ], tombs = () )                     # the train: dropped it (below the window's interest)
+        r  = commitLoop( repo, V + [ "othercheck" ], [ a ] )                        # a lane cut before that, still listing it
+        m  = commitLoop( repo, BASE_NAMES + [ "othercheck" ], [ l, r ] )            # the merge: drops it against r, declares nothing
+        r2 = commitLoop( repo, V + [ "thirdcheck" ], [ a ] )                        # a second such lane
+        m2 = commitLoop( repo, BASE_NAMES + [ "othercheck", "thirdcheck" ], [ m, r2 ],
+                         tombs = [ "victimcheck" ] if withTombstone else () )       # the batch merge that declares the retirement
+        return l, m2
+    return build
+arm( "(N) DECLARED LATER, the 2550bfdcd shape: a merge drops a name one parent lists, a later merge declares it —", buildMergeDropDeclaredLater( True ), None, expectDischarged = 1 )
+arm( "(Nn) mutation control for (N), the same two merges with the tombstone never written —", buildMergeDropDeclaredLater( False ), "victimcheck" )
 
 sys.exit( bad )
 PY

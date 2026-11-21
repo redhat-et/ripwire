@@ -394,7 +394,7 @@ printf 'export function fresh(a: number) { return a; }\n' > "$FX/src/fresh.ts"
 A="$( ask "$FX" 'SoloThing fresh parameter' )"; R="$( route "$A" )"
 has "$R" 'name-exact(SoloThing)' "F6 one function, body fits: the declined route flips to the symbol"
 has "$R" 'dropped:' "F6 flip: dropped words named"
-has "$A" 'n="SoloThing"><![CDATA[function SoloThing' "F6 flip: the body is printed"
+has "$A" 'n="SoloThing"><![CDATA[export function SoloThing' "F6 flip: the body is printed"
 has "$( blk "$A" )" 'soloUser' "F6 flip: the callers are printed"
 hasnt "$A" 'body omitted' "F6 flip: no body omitted for budget"
 # F2: the class, not a path list. A namesake under ANY directory makes the name two functions: the map stays.
@@ -574,7 +574,7 @@ WC="$( wfx ctl )"; printf 'export function SoloThing(a: number) { return a + 41;
 for q in "${WQ[@]}"; do
     A="$( ask "$WC" "$q" )"
     has "$( route "$A" )" 'name-exact(SoloThing)' "W control [$q]: flips to the symbol"
-    has "$A" 'n="SoloThing"><![CDATA[function SoloThing' "W control [$q]: the body prints"
+    has "$A" 'n="SoloThing"><![CDATA[export function SoloThing' "W control [$q]: the body prints"
     has "$( blk "$A" )" 'soloUser' "W control [$q]: the callers print"
 done
 # MF2: the outcome, not a flag list. Every mode that prints no body, or no callers, keeps the map; the same call in the default mode flips.

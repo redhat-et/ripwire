@@ -96,7 +96,9 @@ HOT_FILES = (
 # translation unit that has hot members, the name-family siblings of a hot file, and every TU in src/.
 # Each states why it is out, because an exclusion nobody can argue with is an exclusion nobody
 # reviewed. Argue with these — that is what they are for.
-COLD_FILES = (
+# Two tuples, one list: the ingest sections, then everything else. COLD_FILES below is their concatenation and is the
+# only name any reader uses (test/optremarkshotcheck.sh imports it).
+COLD_INGEST_FILES = (
     # ── ingest sections that are not on the per-file / per-symbol default path ────────────────────
     ( "src/ingest_astquery.h",
       "the --match / --lint AST-query engine. It does not run at all on a plain `ripwire <dir>`, so a remark here cannot move the number every other verb pays." ),
@@ -123,6 +125,10 @@ COLD_FILES = (
       "Ruby's Rails/DSL capture lane (schema columns, Jbuilder typing, the factory and class-side DSL walks): per node, but behind "
       "the contains-\"attr\" / contains-\"create_table\" per-file early-outs and one grammar family's corpus share. Same argument as "
       "ingest_jsimports.h and ingest_elixir.h above; the general per-node walk shapes it was carved from stay covered by ingest_binds.h." ),
+    ( "src/ingest_declwrap.h",
+      "rw::wrappedDeclStart, the wrapper-prefix lookup (declwrap.h). It is not on the crawl or parse path at all: its only callers are the body serializer "
+      "(serialize.h) and the edit verbs (mcpedit.h, editpreview.h), once per SERVED body, behind a one-entry per-thread tree memo. A plain `ripwire <dir>` never "
+      "enters it. Stated from the call sites, not from a profile: REVISIT with a measurement if a body-heavy verb's profile shows it." ),
     ( "src/ingest_inert.h",
       "The shared inert-boundary walk currently runs only for Elixir quote captures and context. Like ingest_elixir.h, its remarks cover one grammar, not the general corpus." ),
     # ── per-DIRECTIVE, where every hot ingest section above is per-node or per-file ────────────────────
@@ -137,7 +143,9 @@ COLD_FILES = (
     ( "src/handlershape.h",
       "--quality-delta's handler and placeholder shape walk (AstWalk::HandlerShapes). The AST-query engine in ingest_astquery.h drives it, so like that "
       "engine it does not run at all on a plain `ripwire <dir>`, and a remark here cannot move the number every other verb pays." ),
+)
 
+COLD_FILES = COLD_INGEST_FILES + (
     # ── the other translation units under src/ ────────────────────────────────────────────────────
     ( "src/main.cpp",
       "argument parsing and verb dispatch: one-shot per run. It is also the largest opt-record in the tree by an order of magnitude (1.5 GB even narrowed) precisely "

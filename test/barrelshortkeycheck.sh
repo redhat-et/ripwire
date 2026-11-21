@@ -376,7 +376,7 @@ c9e=1; run "$L" "$TMP/c9e.xml" "--for=capKey" && { c9e=0;
 skhas "$TMP/c9e.xml" "C9 row cap: total=8 shown=6" '<rung n="literal" key="capKey" total="8" shown="6" exact="0">'
 n=$( sk "$TMP/c9e.xml" | grep -o '<ld ' | wc -l | tr -d ' ' ); if [ "$n" = 6 ]; then ok "C9 row cap: 6 ld rows"; else no "C9 row cap: $n ld rows (want 6)"; fi
 }
-run "$L" "$TMP/c9f.xml" "--for=Big.hugeFn" && skhas "$TMP/c9f.xml" "C9 the exact leaf's body is cut past 8192 bytes" 'n="hugeFn" lines="1-518/804" truncated="1" next="--expand=ts/ts.Big.ts:1:hugeFn:519-804">'
+run "$L" "$TMP/c9f.xml" "--for=Big.hugeFn" && skhas "$TMP/c9f.xml" "C9 the exact leaf's body is cut past 8192 bytes" 'n="hugeFn" lines="1-517/804" truncated="1" next="--expand=ts/ts.Big.ts:1:hugeFn:518-804">'
 ( cd "$L" || exit 1; HOME="$TMP" "$BIN" "$L" --cache="$TMP/litcache" "--for=capKey" </dev/null >"$TMP/c9g0.xml" 2>/dev/null ) || no "C9 floor: the cache-priming run failed"
 chmod 000 "$L/src/f3.ts"
 if [ -r "$L/src/f3.ts" ]; then
