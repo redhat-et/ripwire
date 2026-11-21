@@ -36,6 +36,10 @@
 
 set -u
 export PYTHONDONTWRITEBYTECODE=1
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here (added at the 0.7.0 cut: DA1 was written before ROWLINES).
+export RIPWIRE_NO_ROWLINES=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
@@ -44,7 +48,7 @@ CORPUS="$ROOT/test/forcompletefix/ts"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 export TMPDIR="$TMP/cache"; mkdir -p "$TMPDIR"   # a private warm cache (forsigspancheck: a shared one is a stderr flake)
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first (cmake --build build -j)"; exit 2; }
@@ -231,7 +235,7 @@ for b in "" 1900; do
     f="$TMP/s.json${b:-none}"; run "$f" X=1 -- "--for=$Q" --json ${b:+"--token-budget=$b"}
     if ran_ok "$f" "(S) json ${b:-no budget}"; then scheck "$f" "(S) --for --json ${b:+--token-budget=$b}"; wcheck "$f" "(S) json ${b:-none}"; fi
 done
-[ "$sawMoved" = 1 ] && ok "(S) premise: an MCP answer carries docs_after_code= (the arm checks a printed count)" || no "(S) premise: no MCP answer carried docs_after_code="
+if [ "$sawMoved" = 1 ]; then ok "(S) premise: an MCP answer carries docs_after_code= (the arm checks a printed count)"; else no "(S) premise: no MCP answer carried docs_after_code="; fi
 
 echo "(N) negative controls: the checker must FAIL three mutated answers"
 python3 - "$TMP/dac.py" "$TMP" <<'PY'
