@@ -647,6 +647,7 @@ for _g in \
     hashsetcheck \
     hazardpatterncheck \
     headbinstagecheck \
+    headerstaticadjcheck \
     headleakcheck \
     headsnapcachecheck \
     helpbudgetcheck \
