@@ -81,5 +81,7 @@ included — and says so where it left them (`[legend-seen: N held]`) and once w
 dictionary that holds them all. Rows are byte-identical. A missing or corrupt file serves the whole answer
 (stderr says so); it never refuses. `skills/install.sh --hook-legend-seen` (Claude Code; add `--codex` or
 `--opencode` for those clients) installs a hook that keeps this file per session and forgets it on compaction. It is
-its OWN opt-in, not part of `--hook`: it rewrites your ripwire commands (only to add `--legend-seen=`). Pass only what you received whole: an
+ON BY DEFAULT with `--hook` (owner ruling 111): it rewrites your ripwire commands (only to add
+`--legend-seen=`), so the installer discloses that before it writes, `--no-hook-legend-seen` installs the advisory
+entries without it, and `RIPWIRE_LEGEND_SEEN=0` turns it off at run time. Pass only what you received whole: an
 answer you cut with `| head` should be scanned as cut.

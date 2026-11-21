@@ -6,8 +6,9 @@
 #   (A) Codex: hooks/ripwire-codex-legend-seen.sh records what a Codex PostToolUse received (tool_response as a string
 #       or as {output}), names the FILE on the next PreToolUse, never returns a permissionDecision, forgets on
 #       SessionStart compact, keeps its state apart from Claude Code's, and honours RIPWIRE_LEGEND_SEEN=0
-#   (B) the installers: plain --hook / --codex --hook install NO rewriting hook; --hook-legend-seen (Claude),
-#       --codex --hook-legend-seen and --opencode --hook-legend-seen do, once each however often they run
+#   (B) the installers, DEFAULT-ON since owner ruling 111 (2026-11-20): --hook / --codex --hook REGISTER it, as do
+#       --hook-legend-seen (Claude), --codex --hook-legend-seen and --opencode --hook-legend-seen, once each however
+#       often they run — and --no-hook-legend-seen installs the advisory entries without it, for both clients
 #   (C) opencode: the plugin, loaded through the loader the installer writes, rewrites output.args.command of a bash
 #       call once the session holds definitions, leaves other tools alone, records nothing from a truncated output,
 #       and forgets on session.compacted
@@ -79,13 +80,33 @@ if [ ! -e "$SEEN" ]; then ok "(A) Codex SessionStart compact forgets the FILE"; 
 rm -rf "$H/.ripwire"; cxpost "$C1" "$TMP/plain" object | cx RIPWIRE_LEGEND_SEEN=0 >/dev/null
 if [ ! -e "$H/.ripwire" ]; then ok "(A) RIPWIRE_LEGEND_SEEN=0: no state"; else no "(A) opt-out wrote state"; fi
 
-# ═══ (B) installers: opt-in only ═════════════════════════════════════════════════════════════════════════════════
+# ═══ (B) installers: DEFAULT-ON (ruling 111), and overridable off in both directions ═════════════════════════════
+#     PROOF DIRECTION (§17): the first arm is TIGHTENED (it requires a registration the pre-111 tree does not make),
+#     so it carries the red-on-the-unfixed-TREE proof — measured 0/0 on 21d4b66b7. The --no- arm pairs its "no
+#     legend-seen entry" with "the advisory entries ARE registered, rc 0", because on a tree that rejects the flag
+#     the prohibition half alone would pass having installed nothing.
 count(){ jq '[.. | objects | select(has("command")) | .command | select(test("legend-seen"))] | length' "$1" 2>/dev/null || echo x; }
+acount(){ jq '[.. | objects | select(has("command")) | .command | select(test("ripwire-nudge|ripwire-codex-nudge"))] | length' "$1" 2>/dev/null || echo x; }
+# A HOME OF ITS OWN, and that is load-bearing: the banner below prints on FIRST registration only, so a default
+# arm sharing the explicit flags' home would silence the "every installer discloses the rewrite" arm and read as a
+# disclosure regression. Measured — it did, once, before this split.
+DF="$TMP/idefault"; mkdir -p "$DF"
+HOME="$DF" PATH="$HPATH" bash "$ROOT/skills/install.sh" --hook >"$TMP/i.dc" 2>&1; rdc=$?
+HOME="$DF" PATH="$HPATH" bash "$ROOT/skills/install.sh" --codex --hook >"$TMP/i.dx" 2>&1; rdx=$?
+if [ "$rdc" -eq 0 ] && [ "$rdx" -eq 0 ] && [ "$( count "$DF/.claude/settings.json" )" = 4 ] && [ "$( count "$DF/.codex/hooks.json" )" = 3 ]; then
+    ok "(B) --hook and --codex --hook register the legend-seen hook BY DEFAULT: Claude 4 entries, Codex 3 (ruling 111)"
+else no "(B) default-on: rc=$rdc/$rdx claude=$( count "$DF/.claude/settings.json" ) codex=$( count "$DF/.codex/hooks.json" ) (want 4 and 3)"; fi
 IH="$TMP/ih"; mkdir -p "$IH"
-HOME="$IH" PATH="$HPATH" bash "$ROOT/skills/install.sh" --hook >/dev/null 2>&1
-HOME="$IH" PATH="$HPATH" bash "$ROOT/skills/install.sh" --codex --hook >/dev/null 2>&1
-if [ "$( count "$IH/.claude/settings.json" )" = 0 ] && [ "$( count "$IH/.codex/hooks.json" )" = 0 ]; then ok "(B) plain --hook and --codex --hook install no rewriting hook"
-else no "(B) a plain --hook installed the legend-seen hook"; fi
+if grep -q "REWRITES a ripwire" "$TMP/i.dc" && grep -q "REWRITES a ripwire" "$TMP/i.dx"; then
+    ok "(B) both default installs disclose the rewrite before they write"
+else no "(B) a default install registered a rewriting hook silently"; fi
+NH="$TMP/nh"; mkdir -p "$NH"
+HOME="$NH" PATH="$HPATH" bash "$ROOT/skills/install.sh" --hook --no-hook-legend-seen >"$TMP/i.nc" 2>&1; rnc=$?
+HOME="$NH" PATH="$HPATH" bash "$ROOT/skills/install.sh" --codex --hook --no-hook-legend-seen >"$TMP/i.nx" 2>&1; rnx=$?
+if [ "$rnc" -eq 0 ] && [ "$rnx" -eq 0 ] && [ "$( count "$NH/.claude/settings.json" )" = 0 ] && [ "$( count "$NH/.codex/hooks.json" )" = 0 ] \
+   && [ "$( acount "$NH/.claude/settings.json" )" -gt 0 ] && [ "$( acount "$NH/.codex/hooks.json" )" -gt 0 ]; then
+    ok "(B) --no-hook-legend-seen: both clients get the advisory entries and NO rewriting hook"
+else no "(B) --no-hook-legend-seen: rc=$rnc/$rnx seen=$( count "$NH/.claude/settings.json" )/$( count "$NH/.codex/hooks.json" ) advisory=$( acount "$NH/.claude/settings.json" )/$( acount "$NH/.codex/hooks.json" )"; fi
 for i in 1 2; do
     HOME="$IH" PATH="$HPATH" bash "$ROOT/skills/install.sh" --hook-legend-seen >"$TMP/i.c$i" 2>&1 || no "(B) --hook-legend-seen run $i failed"
     HOME="$IH" PATH="$HPATH" bash "$ROOT/skills/install.sh" --codex --hook-legend-seen >"$TMP/i.x$i" 2>&1 || no "(B) --codex --hook-legend-seen run $i failed"
@@ -96,8 +117,21 @@ if [ "$( count "$IH/.claude/settings.json" )" = 4 ] && [ "$( count "$IH/.codex/h
 else no "(B) counts after two runs: claude=$( count "$IH/.claude/settings.json" ) codex=$( count "$IH/.codex/hooks.json" )"; fi
 if grep -q "REWRITES a ripwire" "$TMP/i.c1" && grep -q "REWRITES a ripwire" "$TMP/i.x1" && grep -q "REWRITES a ripwire" "$TMP/i.o1"; then ok "(B) every installer says it rewrites a command before it does"
 else no "(B) an installer did not disclose the rewrite"; fi
-HOME="$IH" bash "$ROOT/skills/install.sh" --opencode >/dev/null 2>&1; rc=$?
-if [ "$rc" -eq 2 ]; then ok "(B) --opencode alone refuses (it installs only the plugin)"; else no "(B) --opencode alone rc=$rc"; fi
+# --opencode alone: the legend-seen plugin is the ONLY thing this installer has for opencode, so ruling 111's
+# default makes it install rather than refuse and name the flag. TIGHTENED arm (it requires the loader to exist):
+# red on the unfixed tree, which exits 2 and writes nothing. The refusal is kept for --no-hook-legend-seen, where
+# there is genuinely nothing left to do, and that half is asserted too — by its MESSAGE, because a bare "exits 2"
+# passes on the unfixed tree as well (it refuses with "unknown option --no-hook-legend-seen"), which is a pass that
+# carries no information. Measured red on 21d4b66b7 once the message is part of the arm.
+OA="$TMP/oa"; mkdir -p "$OA"
+HOME="$OA" PATH="$HPATH" bash "$ROOT/skills/install.sh" --opencode >"$TMP/i.oa" 2>&1; rc=$?
+if [ "$rc" -eq 0 ] && [ -f "$OA/.config/opencode/plugin/ripwire-legend-seen.js" ] && grep -q "REWRITES a ripwire" "$TMP/i.oa"; then
+    ok "(B) --opencode alone installs the legend-seen plugin BY DEFAULT, disclosing the rewrite (ruling 111)"
+else no "(B) --opencode alone: rc=$rc loader=$( [ -f "$OA/.config/opencode/plugin/ripwire-legend-seen.js" ] && echo yes || echo no )"; fi
+HOME="$TMP/ob" PATH="$HPATH" bash "$ROOT/skills/install.sh" --opencode --no-hook-legend-seen >"$TMP/i.ob" 2>&1; rc=$?
+if [ "$rc" -eq 2 ] && [ ! -e "$TMP/ob/.config/opencode/plugin/ripwire-legend-seen.js" ] && grep -q 'leaves nothing to install' "$TMP/i.ob"; then
+    ok "(B) --opencode --no-hook-legend-seen refuses: nothing is left for this installer to do"
+else no "(B) --opencode --no-hook-legend-seen rc=$rc"; fi
 
 # ═══ (C) opencode, through the loader the installer wrote ════════════════════════════════════════════════════════
 if [ -z "$NODE" ]; then
@@ -143,7 +177,7 @@ fi
 row(){ ( cd "$REPO" && env HOME="$1" PATH="$HPATH" ripwire . --doctor --agent="$2" 2>/dev/null ) | grep -o "<c n=\"$2-legend-seen\"[^>]*>"; }
 DH="$TMP/dh"; mkdir -p "$DH"
 r="$( row "$DH" claude )"
-if printf '%s' "$r" | grep -q 'ok="1"' && printf '%s' "$r" | grep -q 'installed="0"'; then ok "(D) claude-legend-seen absent: ok, installed=\"0\" (it is opt-in)"; else no "(D) claude row absent-case: [$r]"; fi
+if printf '%s' "$r" | grep -q 'ok="1"' && printf '%s' "$r" | grep -q 'installed="0"'; then ok "(D) claude-legend-seen absent: ok, installed=\"0\" (a home that ran no installer)"; else no "(D) claude row absent-case: [$r]"; fi
 r="$( row "$IH" claude )"
 if printf '%s' "$r" | grep -q 'ok="1"' && printf '%s' "$r" | grep -q 'installed="1"'; then ok "(D) claude-legend-seen installed: ok, installed=\"1\""; else no "(D) claude row installed-case: [$r]"; fi
 r="$( row "$IH" codex )"

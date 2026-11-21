@@ -3,6 +3,8 @@
 # --legend-seen=FILE: PostToolUse adds the entry hashes of the stdout the agent RECEIVED, PreToolUse names the file.
 #
 # What it must never do, and the arms that hold it:
+#   (i) and the DEFAULT, owner ruling 111 (2026-11-20): a hook install REGISTERS it, --no-hook-legend-seen does not,
+#       and a plain skills install still touches no settings file at all
 #   (a) touch the session's first ripwire call (it holds nothing), or record output the agent did not receive whole
 #       (over the display limit, interrupted, or cut by a pipe — a cut is harvested AFTER the pipe)
 #   (b) rewrite anything but the binary word's tail: ` --legend-seen=FILE` right after it, every other byte and every
@@ -180,18 +182,46 @@ SP="$TMP/sp ace"; mkdir -p "$SP/S5/main"; cp "$TMP/want.seen" "$SP/S5/main/seen"
 PRE="$( printf '%s' "$( prejson S5 "" "$C1" )" | env HOME="$TMP/home" PATH="$HPATH" RIPWIRE_LEGEND_STATE="$SP" bash "$HOOK" )"
 if [ -z "$PRE" ]; then ok "(b) a state path holding a space is never spliced into a command"; else no "(b) spliced an unquotable path: $PRE"; fi
 
-# ═══ (i) the hook is its OWN opt-in: plain --hook never installs it; --hook-legend-seen registers it on the four
-#     events, once, and a second run does not double it ═════════════════════════════════════════════════════════════
+# ═══ (i) THE DEFAULT (owner ruling 111, 2026-11-20): a --hook install registers this hook, --no-hook-legend-seen
+#     does not, and --hook-legend-seen still registers it alone on the four events, once, twice run ════════════════
+#     PROOF DIRECTION (LANE_CONSTRAINTS §17): both of the first two arms are TIGHTENED — each requires an
+#     installation the pre-111 tree does not make — so each carries the red-on-the-unfixed-TREE proof, measured:
+#     on 21d4b66b7's install.sh the default arm reads 0 entries (it was opt-in) and the --no- arm exits 2 with
+#     "unknown option --no-hook-legend-seen" and registers no advisory entries either. The --no- arm asserts the
+#     ADVISORY entries ARE there as well as the legend-seen ones are not: a bare "installs nothing" prohibition
+#     would pass on a tree that rejects the flag outright, which is the vacuous-prohibition shape, not a gate.
+ID="$TMP/idefault"; mkdir -p "$ID"
+HOME="$ID" PATH="$HPATH" bash "$ROOT/skills/install.sh" --hook >"$TMP/i0" 2>&1; r0=$?
+seencount(){ jq '[.. | objects | select(has("command")) | .command | select(test("ripwire-legend-seen"))] | length' "$1" 2>/dev/null || echo NOFILE; }
+nudgecount(){ jq '[.. | objects | select(has("command")) | .command | select(test("ripwire-nudge"))] | length' "$1" 2>/dev/null || echo NOFILE; }
+n0="$( seencount "$ID/.claude/settings.json" )"
+if [ "$r0" -eq 0 ] && [ "$n0" = 4 ]; then ok "(i) --hook registers the legend-seen hook BY DEFAULT: 4 entries (ruling 111)"
+else no "(i) --hook default: rc=$r0, legend-seen entries=$n0 (want rc 0 and 4)"; fi
+if grep -q "REWRITES a ripwire Bash command" "$TMP/i0" && grep -q -- '--no-hook-legend-seen' "$TMP/i0"; then
+    ok "(i) the --hook banner discloses the rewrite and names --no-hook-legend-seen before it writes"
+else no "(i) --hook installed a command-rewriting hook without disclosing it: $( grep -c . "$TMP/i0" ) lines, no REWRITES/off-switch line"; fi
+IN="$TMP/inoseen"; mkdir -p "$IN"
+HOME="$IN" PATH="$HPATH" bash "$ROOT/skills/install.sh" --hook --no-hook-legend-seen >"$TMP/in0" 2>&1; rn=$?
+nn="$( seencount "$IN/.claude/settings.json" )"; na="$( nudgecount "$IN/.claude/settings.json" )"
+if [ "$rn" -eq 0 ] && [ "$nn" = 0 ] && [ "$na" = 2 ]; then ok "(i) --no-hook-legend-seen: the advisory entries alone (2 nudge, 0 legend-seen)"
+else no "(i) --no-hook-legend-seen: rc=$rn legend-seen=$nn nudge=$na (want rc 0, 0 legend-seen, 2 nudge)"; fi
+IP="$TMP/iplain"; mkdir -p "$IP"
+HOME="$IP" PATH="$HPATH" bash "$ROOT/skills/install.sh" >/dev/null 2>&1
+if [ ! -e "$IP/.claude/settings.json" ]; then ok "(i) a plain skills install still writes no settings.json at all — the default rides on a hook install"
+else no "(i) a plain skills install touched settings.json: $( seencount "$IP/.claude/settings.json" ) legend-seen entries"; fi
 IH="$TMP/ihome"; mkdir -p "$IH"
-HOME="$IH" PATH="$HPATH" bash "$ROOT/skills/install.sh" --hook >/dev/null 2>&1
-n0="$( jq '[.. | objects | select(has("command")) | .command | select(test("ripwire-legend-seen"))] | length' "$IH/.claude/settings.json" 2>/dev/null )"
-if [ "$n0" = 0 ]; then ok "(i) plain --hook (advisory-only) installs no legend-seen entry"; else no "(i) plain --hook installed $n0 legend-seen entries"; fi
 HOME="$IH" PATH="$HPATH" bash "$ROOT/skills/install.sh" --hook-legend-seen >"$TMP/i1" 2>&1; r1=$?
 HOME="$IH" PATH="$HPATH" bash "$ROOT/skills/install.sh" --hook-legend-seen >"$TMP/i2" 2>&1; r2=$?
 iset="$IH/.claude/settings.json"
 counts="$( jq -r '[("PreToolUse","PostToolUse","SessionStart","PreCompact") as $k | [(.hooks[$k] // [])[] | .hooks[]? | select(.command | test("ripwire-legend-seen[.]sh"))] | length] | map(tostring) | join(" ")' "$iset" 2>/dev/null )"
 if [ "$r1" -eq 0 ] && [ "$r2" -eq 0 ] && [ "$counts" = "1 1 1 1" ]; then ok "(i) --hook-legend-seen registers PreToolUse/PostToolUse/SessionStart/PreCompact once each, twice run"
 else no "(i) --hook-legend-seen registration: rc=$r1/$r2 counts=[$counts]"; fi
+nh="$( nudgecount "$IH/.claude/settings.json" )"
+if [ "$nh" = 0 ]; then ok "(i) --hook-legend-seen is still hook-ONLY: it registers no advisory entry"
+else no "(i) --hook-legend-seen also registered $nh advisory entries"; fi
+HOME="$IH" PATH="$HPATH" bash "$ROOT/skills/install.sh" --hook-legend-seen --no-hook-legend-seen >"$TMP/ix" 2>&1; rx=$?
+if [ "$rx" -eq 2 ] && grep -q 'contradict' "$TMP/ix"; then ok "(i) --hook-legend-seen with --no-hook-legend-seen refuses (exit 2), it does not pick one silently"
+else no "(i) contradicting flags: rc=$rx out=[$( head -c 160 "$TMP/ix" )]"; fi
 if jq -e '([.hooks.PreToolUse[] | select(any(.hooks[]?; .command | test("ripwire-legend-seen"))) | .matcher] == ["Bash"]) and ([.hooks.PreCompact[] | select(any(.hooks[]?; .command | test("ripwire-legend-seen"))) | .matcher] == ["*"])' "$iset" >/dev/null 2>&1 \
    && grep -q "REWRITES a ripwire Bash command" "$TMP/i1"; then
     ok "(i) matchers Bash / *, and the installer says it rewrites a command before it does"
