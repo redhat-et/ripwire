@@ -1477,7 +1477,7 @@ inline constexpr const char* kQdLegendCore =
     "score). THIRTEEN KINDS, and kind= on every row names which one: complexity over the ccx bar, verbosity "
     "(LOC), nesting, params, duplication, dead-code, api-surface (new public contract drift), "
     "error-masking, short-horizon-churn, new-clone-of-reused-helper, placeholder (added stub/TODO), "
-    "defect-shape (defect= names it), tangle (a long function's nesting, deep share and steering locals; a new or crossing one gates). "
+    "defect-shape (defect= names it), tangle (a long function's nesting, deep share and steering locals; a new, crossing or growing one gates). "
     "THREE independent axes, in this "
     "order: (1) acked findings are suppressed entirely (acked= counts them); (2) ORIGIN — a finding on a "
     "symbol that EXISTED at the baseline is preexisting-worse (no origin attribute), one that exists only "
@@ -1495,7 +1495,11 @@ inline constexpr const char* kQdLegendCore =
     // P3 (L7): next= on gating rows, defined where the reader meets it
     "A gating row's next= is the one pasteable follow-up: expand on FILE:NAME, the body to fix (a duplication row names a SET and carries none). "
     // P8 (L7): the threshold beside the number
-    "bar= on a complexity/verbosity/nesting/params row is the threshold now= is judged against (ccx 15, loc 60, nest 4, params 5). ";
+    "bar= on a complexity/verbosity/nesting/params row is the threshold now= is judged against (ccx 15, loc 60, nest 4, params 5). "
+    // CR712-SHSTATUS-DEPTH: present only when not 0
+    "shell_cut=N: shell files whose defect-shape scan stopped at nesting depth 64; what lies deeper was not judged. ";
+
+static_assert( rw::shstatus::kMaxShellNest == 64, "kQdLegendCore's and compactlegend.h's shell_cut= sentences say depth 64" );
 
 // The macro FAMILIES, and why a member of one cannot be judged dead — printed only when the run actually
 // excluded something, because on a repo with no such macro the roster explains an empty set.
