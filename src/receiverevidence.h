@@ -2399,11 +2399,7 @@ struct CallResultTypes
         }
         const std::span<const Binding* const> rows
             = r.fileId < importsByFile.size() ? std::span( importsByFile[ r.fileId ] ) : std::span<const Binding* const>{};
-        const auto inForce = [ & ]( const Binding& b )
-        {
-            const std::uint32_t at = r.startByte;
-            return isCppScopeRow( b ) && b.startByte < at && b.spanStart <= at && at < b.spanEnd && cppScopeRowFits( b, qualified, name );
-        };
+        const auto inForce = [ & ]( const Binding& b ) { return cppScopeRowInForce( b, r.startByte, qualified, name ); };
         CppNamedScope out;
         for( const Binding* b : rows )   // the innermost scope holding a row in force: enclosing spans nest, so the narrowest
         {
@@ -2427,6 +2423,12 @@ struct CallResultTypes
         }
         out.scope = fold.agree ? fold.named : std::string_view{};
         return out;
+    }
+    // an own-file scope row in force at byte `at` that binds `name` the way the call reads it (cppScopeRowFits): declared
+    // before `at`, in a span that holds it
+    static bool cppScopeRowInForce( const Binding& b, std::uint32_t at, bool qualified, std::string_view name )
+    {
+        return isCppScopeRow( b ) && b.startByte < at && b.spanStart <= at && at < b.spanEnd && cppScopeRowFits( b, qualified, name );
     }
     // a row that binds `name` the way the call reads it: an alias with a target for a qualified call, a using-declaration (not
     // a directive) for a bare one
