@@ -480,10 +480,10 @@ struct Layout
 //     start stays strictly inside the stop). Presence is exactly what the product's own deferred= reports (forpages.h
 //     sectionAttrs: a section is deferred iff it STARTS at or after the cut) and exactly what B-NO-CROWDOUT v3 grades.
 //     Without it, MEASURED, <hops> left page 1 in ga-jq-01 and ga-jq-09 — TL2 reported that and declined to narrow the bar.
-// Reading presence as a START and RES completeness as an END is what keeps the gain: in ga-bash-it-06 the parent's own page 1
-// already cuts <fold> mid-section, so an END-based floor over all sections would refuse the one promotion that cell is the
-// +1 BODY cell of. `at` is where </tail> ends; when the tail OVERFLOWS the stop every post-tail section starts past it, so
-// every floor is `rowEnd` and the walk is provably a no-op — which is why pass 1 can share this list unchanged.
+// Presence is read as a START and RES completeness as an END. That does NOT admit the promotion this note once credited it with: in ga-bash-it-06
+// this floor REFUSES the <fold> by 200 B (MEASURED, lane TD1, results/TD1_TL3DEBTS_1121/READOUT.md §5.3: 9,518 + 2,682 = 12,200 against 12,000) —
+// a matter of which document is measured, not of START versus END; see promoteGuarded. `at` is where </tail> ends; when the tail OVERFLOWS the stop
+// every post-tail section starts past it, so every floor is `rowEnd` and the walk is provably a no-op — which is why pass 1 can share this list unchanged.
 [[nodiscard]] inline std::vector<std::size_t> postPageOneFloors( const std::vector<Block>& blocks, const std::vector<std::size_t>& sized,
                                                                  const std::vector<std::size_t>& post, std::size_t at, std::size_t stop,
                                                                  std::size_t rowEnd )
@@ -501,9 +501,9 @@ struct Layout
     return floors;
 }
 
-// G, the GUARDED promotion, on the emitted sizes. The bytes ahead of the first row block are the root open tag; the stop is the
-// DEFAULT page size, one constant, so every page size windows the same document. Returns the order with the promoted RES
-// sections directly ahead of <tail>.
+// G, the GUARDED promotion, on the sizes of the document AS IT STANDS WHEN answerFirst RUNS — NOT the document that is paged: verbs_for.h runs answerFirst, THEN
+// sigx::compactSigs, THEN keybody::insertKeyBodies, so <sigs> here is pre-SIGX and nothing KB1 adds is here (lanes TD1, BD1, BD2). The bytes ahead of the first row
+// block are the root open tag; the stop is the DEFAULT page size, one constant, so every page size windows the same document. Returns the order, promoted RES sections ahead of <tail>.
 [[nodiscard]] inline std::vector<std::size_t> promoteGuarded( std::string_view view, const std::vector<Block>& blocks, std::vector<std::size_t> order,
                                                               const Layout& layout )
 {
@@ -518,12 +518,12 @@ struct Layout
     for( auto it = order.begin(); it != tailIt; ++it ) { before += sized[ *it ]; }
     // THE SAME ROWS IN THE EMITTED TEXT. `rows` are read out of `view`, where the tail still carries the direct-child
     // comments A hoists into the document legend, so a row's `view` offset is NOT its offset in the answer. AF2's guard
-    // corrected for that by subtracting EVERY hoisted byte, which is exact only while all of them precede row k — and
-    // MEASURED on GA1 DEV they do not: in ga-bash-it-06 the tail's hoisted clauses run past row 12, so AF2's
-    // `sized - elemLen` is a NEGATIVE std::size_t, the floor WRAPPED to an astronomical value and the promotion ruling 120
-    // priced was refused in silence. At 24 rows the wrap does not fire on this population, which is why it has never been
-    // seen. `layout.text` is the tail exactly as it will be emitted, so rows read out of it need no correction at all and
-    // the only subtraction left is the tail's own owned-comment bytes, which cannot be negative.
+    // corrected for that by subtracting EVERY hoisted byte, which is exact only while all of them precede row k. No GA1 DEV
+    // cell tests that: lane TD1 MEASURED 0 hoisted bytes in ga-bash-it-06's tail, and emitted size == `view` size in 88 of 88
+    // tails (TD1 §5.3) — an earlier note here said its clauses ran past row 12 and the floor wrapped; they do not. What refuses
+    // that cell's <fold> is the stop being tested on the pre-SIGX document: 9,518 + 2,682 = 12,200 > 12,000, over by 200 B; as
+    // served, <sigs> is 1,049 B shorter and the same test admits with 849 B to spare. `layout.text` is the tail as emitted here,
+    // so its rows need no correction and the only subtraction left is the tail's own owned-comment bytes, which cannot be negative.
     const std::string&       emitted = layout.text[ *tailIt ];
     const std::vector<Block> erows   = rowChildren( emitted, 0, emitted.size() );
     if( rows.size() <= kGuardTailRowsBody || erows.size() <= kGuardTailRowsBody ) { return order; }
