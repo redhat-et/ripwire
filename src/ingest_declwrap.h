@@ -70,43 +70,31 @@ struct ParsedMemo
     const ::TSLanguage* grammar = nullptr;
     std::size_t         size    = 0;
     std::uint64_t       hash    = 0;
-    TSTree*             tree    = nullptr;
+    TreeGuard           tree;   // the house owner (ingest_sidecap.h): freed when the memo is replaced, and at thread exit
 
     ParsedMemo() = default;
     ParsedMemo( const ParsedMemo& )            = delete;
     ParsedMemo& operator=( const ParsedMemo& ) = delete;
-    ~ParsedMemo()
-    {
-        drop();
-    }
-    void drop() noexcept
-    {
-        if( tree != nullptr )
-        {
-            ts_tree_delete( tree );
-            tree = nullptr;
-        }
-    }
+
     // The tree of `src` under `g`, or nullptr when the parse gave none.
     const TSTree* treeOf( const ::TSLanguage* g, std::string_view src )
     {
         const std::uint64_t contentHash = hashutil::fnv1a64( src );
-        if( tree != nullptr && grammar == g && size == src.size() && hash == contentHash )
+        if( tree.get() != nullptr && grammar == g && size == src.size() && hash == contentHash )
         {
-            return tree;
+            return tree.get();
         }
-        drop();
-        TSParser* parser = ts_parser_new();
-        ASSUME( parser != nullptr, "ts_parser_new: the default tree-sitter allocator aborts on failure" );
-        if( ts_parser_set_language( parser, g ) )
+        tree = TreeGuard{};   // the old tree goes BEFORE the new parse, so two are never alive at once
+        ParserGuard pg;
+        ASSUME( pg.p != nullptr, "ts_parser_new: the default tree-sitter allocator aborts on failure" );
+        if( ts_parser_set_language( pg.p, g ) )
         {
-            tree = ts_parser_parse_string( parser, nullptr, src.data(), std::uint32_t( src.size() ) );
+            tree = TreeGuard( parseTree( pg.p, src ) );
         }
-        ts_parser_delete( parser );
         grammar = g;
         size    = src.size();
         hash    = contentHash;
-        return tree;
+        return tree.get();
     }
 };
 
