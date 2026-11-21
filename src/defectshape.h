@@ -4060,13 +4060,17 @@ inline std::vector<Site> Script::sites() const
 
 }   // namespace va
 
-inline std::vector<Site> scanVacuousAssertBash( std::string_view src, const std::vector<Span>& /*spans*/ )
+inline std::vector<Site> scanVacuousAssertBash( std::string_view src, const std::vector<Span>& /*spans*/, bool* cut = nullptr )
 {
     if( src.empty() )
     {
         return {};
     }
     const rw::shstatus::Tree     tree = rw::shstatus::parse( src );
+    if( cut != nullptr )
+    {
+        *cut = *cut || tree.cut;   // the nesting budget stopped the parse: sites past it were not judged
+    }
     const rw::shstatus::Analysis an   = rw::shstatus::analyze( tree, src );
     const va::Script             script( src, tree, an );
     return script.sites();
@@ -5842,13 +5846,17 @@ inline void assignedCaseSites( std::string_view src, const sh::Tree& t, const st
 }   // namespace uash
 
 // Bash: a case with no *) arm whose result is read, in either form.
-inline void scanUnhandledArmBash( std::string_view src, const std::vector<Span>& fnSpans, std::vector<Site>& out )
+inline void scanUnhandledArmBash( std::string_view src, const std::vector<Span>& fnSpans, std::vector<Site>& out, bool* cut = nullptr )
 {
     if( src.find( "esac" ) == std::string_view::npos )
     {
         return;
     }
     const rw::shstatus::Tree t = rw::shstatus::parse( src );
+    if( cut != nullptr )
+    {
+        *cut = *cut || t.cut;
+    }
     uash::endingCaseSites( src, t, out );
     uash::assignedCaseSites( src, t, fnSpans, out );
 }
@@ -5945,10 +5953,11 @@ inline std::vector<Site> scanPython( std::string_view src, const std::vector<Spa
 }
 
 // Bash, for a test-script path only (the caller decides the path): `fnSpans` are the script's function
-// definitions, the scopes a capture and its guards are matched in.
-inline std::vector<Site> scanBashTestScript( std::string_view src, const std::vector<Span>& fnSpans )
+// definitions, the scopes a capture and its guards are matched in. `cut` (optional) is set when the shell nesting budget
+// (shstatus kMaxShellNest) stopped the parse.
+inline std::vector<Site> scanBashTestScript( std::string_view src, const std::vector<Span>& fnSpans, bool* cut = nullptr )
 {
-    return detail::scanVacuousAssertBash( src, fnSpans );
+    return detail::scanVacuousAssertBash( src, fnSpans, cut );
 }
 
 // Bash, any path: unhandled-arm (a case with no *) arm whose result is read), appended to `out`.

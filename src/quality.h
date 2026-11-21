@@ -6739,8 +6739,9 @@ inline defectshape::EnumTable cFamilyEnumTable( const IngestResult& ing, std::st
 
 // `macroOverride`, when given, is the macro-name set to scan C++ files against instead of this index's own — the whole
 // tree's, when this index holds only some of its files (a degraded --quality-delta=A..B's changed files).
+// `shellCut`, when given, counts the shell files whose scan the nesting budget cut (shstatus kMaxShellNest): the answer's shell_cut=.
 inline std::vector<DefectSiteAt> defectSitesOf( const IngestResult& ing, std::string_view root, const std::vector<char>* fileInBaseline,
-                                                const std::vector<std::string>* macroOverride = nullptr )
+                                                const std::vector<std::string>* macroOverride = nullptr, std::uint32_t* shellCut = nullptr )
 {
     std::vector<DefectSiteAt> out;
     const SymbolsByFile byFile = symbolsByFileInIdOrder( ing, []( const Symbol& s ) { return s.endByte > s.sigStartByte && s.kind != SymKind::ModuleScope; } );
@@ -6795,11 +6796,16 @@ inline std::vector<DefectSiteAt> defectSitesOf( const IngestResult& ing, std::st
         }
         else if( scan == DefectScan::Bash )
         {
+            bool cut = false;   // the shell nesting budget stopped a parse: the file's sites past it are not judged (shell_cut=)
             if( isTestScriptPath( rel ) )   // a test script: every assertion form (grep, [ ], cmp, case, rc=$?) is read
             {
-                sites = defectshape::scanBashTestScript( src, fnSpans );
+                sites = defectshape::scanBashTestScript( src, fnSpans, &cut );
             }
-            defectshape::scanUnhandledArmBash( src, fnSpans, sites );   // any path: a case with no *) arm whose result is read
+            defectshape::scanUnhandledArmBash( src, fnSpans, sites, &cut );   // any path: a case with no *) arm whose result is read
+            if( cut && shellCut != nullptr )
+            {
+                ++*shellCut;
+            }
         }
         if( defectshape::looksGenerated( rel, src ) )   // unhandled-arm judges no generated switch: the fix is in the generator
         {
@@ -8261,6 +8267,7 @@ struct DeltaExtras
     BestSinceSource          bestSince;
     BaseBodySource           baseBodies;   // QD-SHRINK-PAIR (demoteShrinkOnlyClones): the base commit's bodies of the named files
     std::vector<Improvement> improved;
+    std::uint32_t            shellCut = 0;        // shell files whose defect-shape scan the nesting budget cut (shell_cut=)
     std::string              ratchetRef;          // the reference point the ratchet read ("" = not consulted: no candidate, or no source)
     std::uint32_t            ratchetJudged = 0;   // symbols judged against their best
     std::uint32_t            ratchetUnread = 0;   // history blobs that could not be measured
@@ -10947,28 +10954,31 @@ inline std::string tangleRowAttrs( const Regression& r, bool json, Escape&& esc 
     return out;
 }
 
-// D4 — the ratchet's disclosure on the root: the reference point it read, and what it could not read. "" when it was not consulted.
+// D4 — the ratchet's disclosure on the root: the reference point it read, and what it could not read ("" when it was not
+// consulted); then CR712-SHSTATUS-DEPTH's shell_cut= (the shell files whose defect-shape scan the nesting budget cut; absent at 0).
 template<class Escape>
 inline std::string ratchetAttrsXml( const DeltaExtras& x, Escape&& ex )
 {
-    if( x.ratchetRef.empty() )
+    std::string out;
+    if( !x.ratchetRef.empty() )
     {
-        return {};
+        out = " ratchet_ref=\"" + ex( x.ratchetRef ) + "\" ratchet_judged=\"" + std::to_string( x.ratchetJudged ) + "\"";
+        out += x.ratchetUnread > 0 ? " ratchet_unread=\"" + std::to_string( x.ratchetUnread ) + "\"" : std::string();
+        out += x.ratchetCut ? " ratchet_cut=\"1\"" : "";
     }
-    std::string out = " ratchet_ref=\"" + ex( x.ratchetRef ) + "\" ratchet_judged=\"" + std::to_string( x.ratchetJudged ) + "\"";
-    out += x.ratchetUnread > 0 ? " ratchet_unread=\"" + std::to_string( x.ratchetUnread ) + "\"" : std::string();
-    out += x.ratchetCut ? " ratchet_cut=\"1\"" : "";
+    out += x.shellCut > 0 ? " shell_cut=\"" + std::to_string( x.shellCut ) + "\"" : std::string();
     return out;
 }
 inline std::string ratchetAttrsJson( const DeltaExtras& x )
 {
-    if( x.ratchetRef.empty() )
+    std::string out;
+    if( !x.ratchetRef.empty() )
     {
-        return {};
+        out = ",\"ratchet_ref\":\"" + rw::jsonesc::escapeMcp( x.ratchetRef ) + "\",\"ratchet_judged\":" + std::to_string( x.ratchetJudged );
+        out += x.ratchetUnread > 0 ? ",\"ratchet_unread\":" + std::to_string( x.ratchetUnread ) : std::string();
+        out += x.ratchetCut ? ",\"ratchet_cut\":1" : "";
     }
-    std::string out = ",\"ratchet_ref\":\"" + rw::jsonesc::escapeMcp( x.ratchetRef ) + "\",\"ratchet_judged\":" + std::to_string( x.ratchetJudged );
-    out += x.ratchetUnread > 0 ? ",\"ratchet_unread\":" + std::to_string( x.ratchetUnread ) : std::string();
-    out += x.ratchetCut ? ",\"ratchet_cut\":1" : "";
+    out += x.shellCut > 0 ? ",\"shell_cut\":" + std::to_string( x.shellCut ) : std::string();
     return out;
 }
 
@@ -11135,9 +11145,9 @@ inline void appendSimilarArgsRows( std::vector<Regression>& regs, const SimilarR
 template<class ExistedFn, class StampFn>
 inline void appendDefectShapeRows( std::vector<Regression>& regs, const IngestResult& ing, const Graph& g, const Snapshot& base,
                                    std::string_view root, ExistedFn&& existedAtBaseline, StampFn&& stampLoc,
-                                   const std::vector<std::string>* macroOverride = nullptr )
+                                   const std::vector<std::string>* macroOverride = nullptr, std::uint32_t* shellCut = nullptr )
 {
-    const std::vector<DefectSiteAt> nowSites = defectSitesOf( ing, root, nullptr, macroOverride );
+    const std::vector<DefectSiteAt> nowSites = defectSitesOf( ing, root, nullptr, macroOverride, shellCut );
     const auto isRealSite = []( std::uint64_t v ) { return v != kDefectFilePresent && v != kDefectFileUnreadable; };
     std::vector<std::uint64_t> baseVals, nowVals, baseUnreadable;
     for( const DefectSiteKey& d : base.defectSites )
@@ -12622,7 +12632,7 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
 
     if( kindSelected( scope.kinds, "defect-shape" ) )
     {
-        appendDefectShapeRows( regs, ing, g, base, root, existedAtBaseline, stampLoc, scope.macroOverride );   // the twelfth kind (see its doc)
+        appendDefectShapeRows( regs, ing, g, base, root, existedAtBaseline, stampLoc, scope.macroOverride, extras != nullptr ? &extras->shellCut : nullptr );   // the twelfth kind (see its doc)
     }
     if( kindSelected( scope.kinds, "params" ) )   // QD-SWAP-1117 similar=: on by default, report-only (never gating)
     {
