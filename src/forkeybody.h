@@ -17,8 +17,10 @@
 // THE BLOCK. ONE <bodies of="key" shown= total= capped= [next=]> through the ONE route-body printer (hopbody.h routeBodiesXml: each
 // <b t= l= p= n=> is the --expand body element, no callee rows, no file context, whole up to kHopBodyCapBytes; a longer one is cut at a
 // line end and says so on the element: truncated="1" lines="1-K/T" next= the --expand of the lines not shown). total= counts every keyed
-// definition; capped="1" with next= the first one not shown when more than kKeyBodyMax were keyed. A body the page already carries is
-// not repeated.
+// definition; capped="1" with next= the first one not shown when more than kKeyBodyMax were keyed. THE GROUP CARRIES ITS OWN BODY:
+// a body served elsewhere on the same page does not satisfy this contract, so the same (p=, l=) appearing both here and in a row
+// section or the fold is correct and is pinned by forkeybodycheck K12 (owner ruling 87, 2026-11-20). It replaces the earlier rule
+// that a body the page already carried was not repeated — see the note on the removal of the `served` argument below.
 //
 // WHERE IT GOES.
 //   * a ROUTED answer (verbs_forroute.h assembleRouted — the CLI's and MCP `for`'s, so both surfaces carry it): the root's child
@@ -128,21 +130,15 @@ inline std::vector<NodeId> keyDefs( const IngestResult& ing, std::string_view sp
     return out.size() <= kSubjectMaxDefs ? out : std::vector<NodeId>{};
 }
 
-// Does `served` (bytes of the answer) already hold a <b> of this definition: same p= and l=?
-inline bool bodyServed( std::string_view served, std::string_view path, std::size_t line )
-{
-    const std::string p = " p=\"" + std::string( path ) + "\"";
-    const std::string l = " l=\"" + std::to_string( line ) + "\"";
-    for( std::size_t at = served.find( "<b " ); at != std::string_view::npos; at = served.find( "<b ", at + 3 ) )
-    {
-        const std::string_view tag = served.substr( at, served.find( '>', at ) - at );
-        if( tag.find( p ) != std::string_view::npos && tag.find( l ) != std::string_view::npos )
-        {
-            return true;
-        }
-    }
-    return false;
-}
+// OWNER RULING 87 (2026-11-20) removed `bodyServed( served, path, line )` and the `served` argument that fed it from here.
+// It answered "does the answer's first page already hold a <b> of this definition, same p= and l=?", and keyCandidates dropped
+// every definition for which it said yes. The ruling is that the key group must carry its OWN body and that a body served
+// elsewhere on the same page does not satisfy the contract, so that question has no remaining customer: a definition the question
+// names in backticks rides whatever else the page serves. The suppression was one argument wide and only ONE of the three call
+// sites ever supplied it (insertKeyBodies, the unrouted path) — the routed path and the --pack-task twin always passed {}, so the
+// contract was already honoured there and the two paths now agree. Keeping the parameter unused would have left a dead predicate
+// that a later call site could re-arm by accident; it is gone instead, which makes the contract structural.
+// What this costs is a deliberate duplicate on one page, measured in results/K87_CONTRACT_1120/READOUT.md §5.
 
 struct KeyBodies
 {
@@ -150,25 +146,17 @@ struct KeyBodies
     std::size_t shown = 0;
 };
 
-// Per key span: its definitions not already in `served`, a multi-line body ahead of a one-line one (a Python @overload stub `...`, a
-// declaration-shaped one-liner), NodeId order within each — so the slot goes to the body that does the work.
-inline std::vector<std::vector<NodeId>> keyCandidates( const IngestResult& ing, std::string_view task, std::string_view first, std::string_view served,
-                                                       std::string_view rootArg )
+// Per key span: EVERY definition it places (ruling 87 — what the rest of the page serves is not consulted), a multi-line body ahead
+// of a one-line one (a Python @overload stub `...`, a declaration-shaped one-liner), NodeId order within each — so the slot goes to
+// the body that does the work.
+// `rootArg` went with `served`: the root-relative path was built here only to ask bodyServed about it. The printer still needs it
+// and keyBodies still passes it there.
+inline std::vector<std::vector<NodeId>> keyCandidates( const IngestResult& ing, std::string_view task, std::string_view first )
 {
     std::vector<std::vector<NodeId>> perSpan;
     for( const std::string& span : keySpans( task, first ) )
     {
-        std::vector<NodeId> defs;
-        for( const NodeId id : keyDefs( ing, span ) )
-        {
-            const Symbol&     s    = ing.symbols[ id ];
-            const std::string path = rootArg.empty() ? std::string( ing.files[ s.fileId ] )
-                                                     : std::string( sarif::rootRelativeUri( ing.files[ s.fileId ], sarif::rootPrefixOf( rootArg ) ) );
-            if( !bodyServed( served, path, s.line ) )
-            {
-                defs.push_back( id );
-            }
-        }
+        std::vector<NodeId> defs = keyDefs( ing, span );
         std::ranges::stable_partition( defs, [ & ]( NodeId id ) { return ing.symbols[ id ].loc > 1; } );
         perSpan.push_back( std::move( defs ) );
     }
@@ -197,11 +185,11 @@ inline std::vector<RouteBody> roundRobin( const std::vector<std::vector<NodeId>>
     return want;
 }
 
-// The key-body element for `task`. `first`: the routed spelling ("" on an unrouted answer). `served`: bytes the page already carries
-// (a body there is not repeated). `rootArg`: the single root the answer's paths are relative to ("" otherwise), as every --for body.
-inline KeyBodies keyBodies( const IngestResult& ing, std::string_view task, std::string_view first, std::string_view served, std::string_view rootArg )
+// The key-body element for `task`. `first`: the routed spelling ("" on an unrouted answer). `rootArg`: the single root the answer's
+// paths are relative to ("" otherwise), as every --for body. What the rest of the page serves is not an input (ruling 87).
+inline KeyBodies keyBodies( const IngestResult& ing, std::string_view task, std::string_view first, std::string_view rootArg )
 {
-    const std::vector<RouteBody> want = roundRobin( keyCandidates( ing, task, first, served, rootArg ) );
+    const std::vector<RouteBody> want = roundRobin( keyCandidates( ing, task, first ) );
     if( want.empty() )
     {
         return {};
@@ -216,13 +204,16 @@ inline KeyBodies keyBodies( const IngestResult& ing, std::string_view task, std:
 // PB1: the --pack-task twin's ONE key body — the first definition keyBodies would serve (round robin over the spans takes the first
 // span's first definition first), or kNoNode when no span places one or RIPWIRE_NO_KEY_BODY is set. The bundle (packtask.h) falls
 // back to its top positive-score head; it cannot include this header, so its callers resolve the pick and hand it in.
-inline NodeId keyBodyFor( const IngestResult& ing, std::string_view task, std::string_view rootArg )
+// `rootArg` went unused when ruling 87 took the path/`served` comparison out of keyCandidates. The signature is kept so the two
+// callers (verbs_for.h, mcpverbs.h) stay the one identical call, and because this pick is root-relative the moment anything here
+// needs a path again; it is marked rather than silently dead.
+inline NodeId keyBodyFor( const IngestResult& ing, std::string_view task, [[maybe_unused]] std::string_view rootArg )
 {
     if( !keyBodyOn() )
     {
         return kNoNode;
     }
-    for( const std::vector<NodeId>& defs : keyCandidates( ing, task, {}, {}, rootArg ) )
+    for( const std::vector<NodeId>& defs : keyCandidates( ing, task, {} ) )
     {
         if( !defs.empty() )
         {
@@ -250,7 +241,11 @@ inline bool insertKeyBodies( std::string& doc, const IngestResult& ing, std::str
     {
         return false;
     }
-    const KeyBodies kb = keyBodies( ing, task, {}, view.substr( 0, std::min( view.size(), answerfirst::kAnswerPageBytesDefault ) ), rootArg );
+    // RULING 87, and this is the line the ruling is about. It used to hand keyBodies the first kAnswerPageBytesDefault bytes of
+    // this document as `served`, and keyCandidates dropped every definition whose <b> was already in there — so a fold or row
+    // section promoted onto page 1 silently took the key group's own copy away, and which definition it took depended on what the
+    // body selector happened to promote. The key group does not consult the page any more: it carries its own body.
+    const KeyBodies kb = keyBodies( ing, task, {}, rootArg );
     if( kb.xml.empty() )
     {
         return false;
