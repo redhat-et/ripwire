@@ -31,6 +31,17 @@
 // calls. For the pattern macros (kPatternArgMacros) only the first argument is an expression; the pattern after it
 // (`Some( x )`, `Foo::Bar( _ )`) is spelled like a call and is not one.
 //
+// A MATCHER'S LITERAL WORDS ARE NOT CALLS (test/rustmacrocallcheck.sh [N] matcher_fn, [K1]). A `macro_rules!` matcher may spell
+// a word as a literal token: `( matcher_fn ( $x:expr ), $f:ident ) => …` matches `wrap!( matcher_fn( 3 ), drop )`, whose tokens
+// parse clean as a tuple holding the call `matcher_fn( 3 )`. That word is consumed by the matcher, never called. So when the
+// invoked macro is a `macro_rules!` THIS FILE defines, a bare call (no qualifier, no receiver) whose name one of its matchers
+// spells as a literal word before a `( … )` group is dropped from that invocation's own fragment (a nested invocation of
+// another macro reads its own matchers). Scope, stated: the matchers are read from this file's own definitions only — the
+// re-read is a per-file pass (one parse worker, no other file's tree), and a re-read reference does not record its
+// invocation, so a macro defined in another file (a `#[macro_use] mod` sibling, an exported macro) is not consulted and its
+// literal words stay calls. The cost of the rule is the opposite miss: an `$x:expr` argument that calls a function spelled
+// like one of the macro's literal words is not read either.
+//
 // HONESTY. A re-read reference is an ordinary Call or Macro reference: the resolver proves it, declines it or binds it
 // by name exactly as it would outside a macro. No definition, binding or import is taken from a fragment, so a `let`
 // inside a macro block types no receiver and such a call stays declined rather than guessed. A macro can do anything
@@ -107,6 +118,14 @@ struct MacroArgScratch
     std::vector<Include> includes;
 };
 
+// A `macro_rules!` this file defines: its name, and the words its matchers spell as literal tokens before a `( … )` group
+// (views into the file's bytes and its definition rows, both alive for the whole pass).
+struct MacroMatcherWords
+{
+    std::string_view              name;
+    std::vector<std::string_view> words;
+};
+
 // One file's re-read.
 struct MacroArgPass
 {
@@ -117,6 +136,8 @@ struct MacroArgPass
     std::string_view     src;
     std::vector<RawRef>& refs;
     ExtractShortfall&    shortfall;
+    std::span<const MacroMatcherWords>        matchers{};       // this file's `macro_rules!` matcher words (fileMacroMatcherWords)
+    std::span<const std::string_view>         matcherWords{};   // the invocation being re-read: its macro's literal call-shaped words
 };
 
 // The fragment's document: the source up to `endByte`, where the statement's `;` stands in for whatever the source
@@ -207,6 +228,106 @@ inline bool macroArgFragmentIsCode( TSNode root, const MacroArgSpan& span, Macro
 inline bool isRelationRow( const RawRef& r ) noexcept
 {
     return r.isInherit || r.isCompose;
+}
+
+// A bare call the invoked macro's matcher spells as a literal word: the matcher consumes the word, nothing calls it.
+inline bool isMatcherLiteralCall( const RawRef& r, std::span<const std::string_view> matcherWords ) noexcept
+{
+    return r.role == RefRole::Call && !r.memberCall && r.qualifier.empty() && std::ranges::contains( matcherWords, std::string_view( r.name ) );
+}
+
+// The words one matcher token tree [begin, end) spells as literal tokens right before a `( … )` group. A metavariable
+// (`$x`), a fragment specifier or path segment after `:`, a number and anything in a literal or comment is not one.
+inline void appendMatcherLiteralCallWords( std::string_view src, std::uint32_t begin, std::uint32_t end, std::vector<std::string_view>& words )
+{
+    using namespace rust_transcriber_scan;
+    std::uint32_t line = 0;   // skipLiteralOrComment counts newlines; no line is read here
+    std::uint32_t at   = begin;
+    while( at < end )
+    {
+        if( skipLiteralOrComment( src, at, end, line ) )
+        {
+            continue;
+        }
+        if( !namesplit::isIdentChar( src[ at ] ) || ( at > begin && namesplit::isIdentChar( src[ at - 1 ] ) ) )
+        {
+            ++at;
+            continue;
+        }
+        std::uint32_t wordEnd = at;
+        while( wordEnd < end && namesplit::isIdentChar( src[ wordEnd ] ) )
+        {
+            ++wordEnd;
+        }
+        std::uint32_t before = 0;
+        const char    prev   = prevNonBlank( src, begin, at, before );
+        const auto    next   = skipBlanks( src, wordEnd, end );
+        const bool    digit  = src[ at ] >= '0' && src[ at ] <= '9';
+        if( !digit && prev != '$' && prev != ':' && next < end && src[ next ] == '(' )
+        {
+            words.push_back( src.substr( at, wordEnd - at ) );
+        }
+        at = wordEnd;
+    }
+}
+
+// Each rule's matcher (`macro_rule`'s left:) of `macroDef`: its literal call-shaped words.
+inline void appendMacroMatcherWords( TSNode macroDef, std::string_view src, std::vector<std::string_view>& words )
+{
+    ChildCursor cursor( macroDef );
+    forEachChild( macroDef, cursor.cur, [ & ]( TSNode rule )
+    {
+        const TSNode left = kindIs( ts_node_type( rule ), "macro_rule" ) ? fieldChild( rule, NodeField::Left ) : TSNode{};
+        if( !ts_node_is_null( left ) && ts_node_end_byte( left ) <= src.size() )
+        {
+            appendMatcherLiteralCallWords( src, ts_node_start_byte( left ), ts_node_end_byte( left ), words );
+        }
+        return true;
+    } );
+}
+
+// This file's `macro_rules!` definitions (its Macro rows `defs`, each spanning exactly its `macro_definition` node) and the
+// literal call-shaped words each one's matchers spell. A definition whose matchers spell none is left out.
+inline std::vector<MacroMatcherWords> fileMacroMatcherWords( TSNode root, std::string_view src, std::span<const RawDef> defs )
+{
+    std::vector<MacroMatcherWords> matchers;
+    for( const RawDef& def : defs )
+    {
+        const TSNode node = def.kind == SymKind::Macro ? ts_node_descendant_for_byte_range( root, def.startByte, def.endByte ) : TSNode{};
+        if( ts_node_is_null( node ) || !kindIs( ts_node_type( node ), "macro_definition" ) )
+        {
+            continue;
+        }
+        MacroMatcherWords entry{ def.name, {} };
+        appendMacroMatcherWords( node, src, entry.words );
+        if( !entry.words.empty() )
+        {
+            matchers.push_back( std::move( entry ) );
+        }
+    }
+    return matchers;
+}
+
+// The literal call-shaped words of the macro an invocation names (its last path segment: `wrap` in `crate::wrap!( … )`)
+// among this file's definitions; empty when the file defines none. A name defined twice (a fn-local macro beside a module
+// one) reads the first definition's words: which scope wins at the invocation is not resolved here.
+inline std::span<const std::string_view> invokedMacroMatcherWords( std::span<const MacroMatcherWords> matchers, TSNode invocation,
+                                                                   std::string_view src ) noexcept
+{
+    TSNode path = ts_node_named_child( invocation, 0 );
+    if( !ts_node_is_null( path ) && kindIs( ts_node_type( path ), "scoped_identifier" ) )
+    {
+        path = fieldChild( path, NodeField::Name );
+    }
+    const std::string_view name = ts_node_is_null( path ) ? std::string_view{} : nodeTextOf( path, src );
+    for( const MacroMatcherWords& macro : matchers )
+    {
+        if( !name.empty() && macro.name == name )
+        {
+            return macro.words;
+        }
+    }
+    return {};
 }
 
 // The macro invocations among refs[ first, end ), ordered by position. A `Never` macro is not a site at all.
@@ -318,6 +439,9 @@ inline bool rereadMacroArgSpan( MacroArgPass& pass, const MacroArgSpan& span, Ma
     captureTagsFacts( pass.cursor, pass.le, pass.fileId, pass.src, root, pass.work.defs, pass.refs, pass.work.binds, pass.work.includes, noDeadRanges,
                       fragmentShortfall );
     pass.refs.erase( std::remove_if( pass.refs.begin() + std::ptrdiff_t( firstRef ), pass.refs.end(), isRelationRow ), pass.refs.end() );
+    pass.refs.erase( std::remove_if( pass.refs.begin() + std::ptrdiff_t( firstRef ), pass.refs.end(),
+                                     [ & ]( const RawRef& r ) { return isMatcherLiteralCall( r, pass.matcherWords ); } ),
+                     pass.refs.end() );
     const std::vector<MacroArgSite> nested = macroArgSitesIn( pass.refs, firstRef );
     forEachMacroInvocationAt( root, nested, [ & ]( TSNode invocation, const MacroArgSite& site )
     {
@@ -459,6 +583,8 @@ void rereadMacroInvocation( MacroArgPass& pass, TSNode invocation, MacroArgPolic
     {
         return;
     }
+    const std::span<const std::string_view> outer = pass.matcherWords;   // a nested invocation reads its own macro's matchers
+    pass.matcherWords = invokedMacroMatcherWords( pass.matchers, invocation, pass.src );
     if( policy == MacroArgPolicy::FirstArgument )
     {
         rereadMacroFirstArgument( pass, tokenTree, depth );
@@ -467,6 +593,7 @@ void rereadMacroInvocation( MacroArgPass& pass, TSNode invocation, MacroArgPolic
     {
         rereadMacroArgGroup( pass, tokenTree, depth );
     }
+    pass.matcherWords = outer;
 }
 
 // The file a tags pass just read: `root` is the tree it read, `src` its bytes.
@@ -476,6 +603,7 @@ struct MacroArgFile
     std::uint32_t    fileId;
     std::string_view src;
     TSNode           root;
+    std::span<const RawDef> defs;   // the definition rows the tags pass added for this file (its `macro_rules!` matchers)
 };
 
 /// RUST-MACRO-ARGS, right after one file's tags pass: append the calls written inside the arguments of the macro
@@ -498,6 +626,8 @@ inline void rereadMacroArguments( MacroArgScratch& work, TSQueryCursor* cursor, 
         return;
     }
     MacroArgPass pass{ work, cursor, file.le, file.fileId, file.src, refs, shortfall };
+    const std::vector<MacroMatcherWords> matchers = fileMacroMatcherWords( file.root, file.src, file.defs );
+    pass.matchers                                 = matchers;
     forEachMacroInvocationAt( file.root, sites, [ & ]( TSNode invocation, const MacroArgSite& site )
     {
         rereadMacroInvocation( pass, invocation, site.policy, 0 );

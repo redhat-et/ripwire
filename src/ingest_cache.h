@@ -393,7 +393,11 @@ constexpr std::uint32_t kCacheVersion = 54;           // 54: lane qd-tangle — 
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 336;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 338;          // bump on any grammar/.scm/extraction change
+                                                      // 338 = 2026-11-21 (lane fx1-two-reds, above the train's 336 and its rich 337; rich file tag 339): a Rust
+                                                      //   macro invocation's re-read (ingest_rustmacroargs.h) drops a bare call its own file's `macro_rules!`
+                                                      //   matcher spells as a literal word (`wrap!( matcher_fn( 3 ) )`). kCacheVersion stays 54.
+                                                      // --- history: 336 ---
                                                       // 336 = 2026-11-21 (IN8, ruling 135: train 1118a — #717, the rebase of #716 — folded into the 0.7.0 train). ONE number above
                                                       //   BOTH sides' bumps past their merge base 5df5a26be (333): the train's 334 and train 1118a's 335. Rich file tag 337.
                                                       //   kCacheVersion stays 54. Both notes are kept below as HISTORY; the tags they name are the tags of those numbers, not of 336.

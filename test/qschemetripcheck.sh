@@ -34,6 +34,10 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-21, lane fx1-two-reds (on integration/070-1120 64b85a6b5): RE-PINNED with UPDATE_GOLDEN=1. kParserVer and
+#   kIngestParserVerMirror 336 -> 338 (rich 339, above the train's rich 337): a Rust macro invocation's re-read drops a bare call
+#   its own file's macro_rules! matcher spells as a literal word (ingest_rustmacroargs.h). kCacheVersion 54 and kQSnapCacheScheme
+#   38 unchanged: the extraction key moves, the snapshot blob shape does not. Hash abdd393688…5a5182b.
 # 2026-11-21, IN8 (owner ruling 135: train 1118a, #717 = the rebase of #716 onto main 5df5a26be, folded into the 0.7.0 train at
 #   4b1f4516e): RE-PINNED ONCE with UPDATE_GOLDEN=1 on the merged sources. kParserVer and kIngestParserVerMirror 334/335 -> 336
 #   (rich 337): ONE number above BOTH sides' bumps. kCacheVersion 54 and kQSnapCacheScheme 38 unchanged. Both sides' entries are

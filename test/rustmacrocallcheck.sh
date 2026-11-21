@@ -10,7 +10,12 @@
 # `name(`, `.name(`, `a::name(` and `$crate::a::name(` are Call references of the macro, so its span owns them.
 #
 # Arm classes: [P] positive — RED on the parent binary (integration/0.6.11-batch 259352fc0); [N] near miss — a shape the scan
-# must not read as a call; [C] control — holds on every binary.
+# must not read as a call; [C] control — holds on every binary; [K] kept — a call the matcher-literal rule must not drop.
+#
+# The INVOCATION side (RUST-MACRO-ARGS, ingest_rustmacroargs.h: a macro invocation's tokens are re-read as one expression):
+# `wrap!( matcher_fn( arg_fn( 3 ) ), drop )` parses clean as a tuple, but `matcher_fn` is a literal word of wrap's matcher,
+# consumed, never called — [N] matcher_fn was RED on 64b85a6b5 (row `user`, top.rs:13) from a9ed1df1d on. The expression the
+# matcher binds to `$x:expr` stays a call ([K1]: RED on any binary that does not read macro arguments, e.g. 0081dc847).
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
@@ -45,6 +50,7 @@ pub fn decoy_fn() {}
 pub fn string_fn() {}
 pub fn matcher_fn() {}
 pub fn shadow_fn() {}
+pub fn arg_fn(x: u32) -> u32 { x }
 R
 cat >"$DIR/src/method.rs" <<'R'
 use crate::route::Route;
@@ -76,7 +82,7 @@ macro_rules! wrap {
         }
     };
 }
-pub fn user() -> u32 { wrap!(matcher_fn(3), drop) }
+pub fn user() -> u32 { wrap!(matcher_fn(arg_fn(3)), drop) }
 R
 printf 'mod route;\nmod method;\nmod top;\n' >"$DIR/src/lib.rs"
 cd "$DIR" || exit 1
@@ -99,6 +105,8 @@ for f in decoy_fn string_fn matcher_fn shadow_fn; do
     a="$( rw . --callers=$f )"
     hasnt "$a" 'p="src/top.rs' "[N] --callers=$f lists nothing in top.rs (comment, string, matcher, fn definition)"
 done
+a="$( rw . --callers=arg_fn )"
+has "$a" 'n="user" p="src/top.rs:13"' "[K1] the call the matcher binds to \$x:expr (arg_fn( 3 ) inside matcher_fn( … )) stays a call of user"
 a="$( rw . --callers=drop )"
 hasnt "$a" '<s t="' "[N5] a metavariable call \$f( is no call of anything named f (no caller row; a found=0 answer may name the text)"
 
