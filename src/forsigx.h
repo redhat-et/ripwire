@@ -1,8 +1,8 @@
 // forsigx.h — SIGX (lane TL1, M1; AF3's frozen C2(10)): page 1 of an answer-first --for answer carries the SHORT form of the
 // sigs rows past rank 10, and their signature, doc and lens ride after the rows.
 //
-// THE MOVE. Every direct-child <d> row of the top-level <sigs> whose r= is above kSigxKeepRank keeps only l= n= p= r= (in their own
-// order) and is emitted self-closing; every other attribute (in its own order) and the element text (the <doc> excerpt and the
+// THE MOVE. Every direct-child <d> row of the top-level <sigs> whose r= is above kSigxKeepRank keeps only l= e= n= p= r= (in their
+// own order) and is emitted self-closing; every other attribute (in its own order) and the element text (the <doc> excerpt and the
 // signature) are re-emitted VERBATIM as <x r="R" …>text</x> (<x r="R" …/> when there is no text) in ONE <sigx> block placed after the
 // last top-level row block, before the trailing legend comments, rows in sigs order. A row with nothing to move is unchanged and gets
 // no <x>. Rows r <= 10, <t> pointer rows and every other block are untouched. A block-local legend comment (kSigxLegend) is glued in
@@ -45,9 +45,14 @@ namespace rw::sigx
 {
 
 inline constexpr std::size_t kSigxKeepRank = 10;   // AF3 C2(K): rows r <= K stay whole; K = 10 is the frozen value
-inline constexpr std::string_view kSigxKeptAttrs[] = { "l", "n", "p", "r" };
+// e= STAYS ON THE ROW (lane ER1, 2026-11-21; AF3's C2(10) moved it with the lens). A short row is a place to read next, and a start
+// line without its end is a place to search from: on GA1 DEV (n=89, page 1) the gold functions page 1 names with a usable l=..e=
+// range were 80 of 123 while --signatures-only, whose rows keep e=, reached 96 (results NA1_NEXT_ACTION_1121 §5.2). Cost: the
+// ` e="N"` run per short row that has one, on page 1 instead of in <sigx>; the whole answer's bytes do not move (the attribute
+// changes element, not count). A row with no e= (extent unknown: serialize.h defEndLine) still has none. Gate: test/forendlinecheck.sh.
+inline constexpr std::string_view kSigxKeptAttrs[] = { "l", "e", "n", "p", "r" };
 inline constexpr std::string_view kSigxLegend =
-    "<!-- sigx: a sigs row d with r above 10 keeps l= n= p= r= on the first page; its other attributes (the same names as on d) and "
+    "<!-- sigx: a sigs row d with r above 10 keeps l= e= n= p= r= on the first page; its other attributes (the same names as on d) and "
     "its doc and signature follow the rows, verbatim, as x r=R -->";
 
 inline bool sigxOn() noexcept { return std::getenv( "RIPWIRE_NO_SIGX" ) == nullptr; }

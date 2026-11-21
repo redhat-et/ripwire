@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # forsigxcheck.sh — SIGX (src/forsigx.h; lane TL1 M1, AF3's frozen C2(10)): on the unbudgeted answer-first --for answer, every
-# direct-child <d> row of <sigs> with r above 10 keeps l= n= p= r= on the page, and its other attributes and its text ride after the
+# direct-child <d> row of <sigs> with r above 10 keeps l= e= n= p= r= on the page, and its other attributes and its text ride after the
 # rows, verbatim, in ONE <sigx> block as <x r="R" …>text</x>.
 #
 # The contract is LOSSLESS: put every <x>'s attributes and text back on its <d r=R>, delete the block and its legend, and the answer
@@ -9,7 +9,7 @@
 #   (S0)  presence: the answer carries <sigx>, the twin does not, and the twin has a <d> row with r > 10 (else every arm is vacuous)
 #   (S1)  rebuild: the moved bytes put back reproduce the twin byte for byte (est_tokens= masked)
 #   (S1n) the rebuild CAN fail: drop one moved attribute and S1's comparison differs
-#   (S2)  every <d> with r > 10 in <sigs> is self-closing and carries only l n p r
+#   (S2)  every <d> with r > 10 in <sigs> is self-closing and carries only l e n p r
 #   (S3)  every <d> with r <= 10 is byte-identical to the twin's
 #   (S4)  one <x> per row that had something to move, in sigs order; <sigx> follows the last row block, its legend comment right
 #         before it, and only comments after it
@@ -17,7 +17,7 @@
 #   (S6)  not applied: --legend=first, --signatures-only and a budget that sheds (--token-budget=4000) are byte-identical with and
 #         without the knob; (S6b) a budget the compacted answer fits returns it byte for byte (TOKEN-BUDGET-MONOTONE rule 4)
 #   (S7)  est_tokens= rises by the added bytes at the emitter's markup rate (the render's ledger, serialize.h repriceRootAfterCut)
-#   (S8)  the default PAGE 1 carries the short rows: its first r > 10 <d> is self-closing with l n p r only
+#   (S8)  the default PAGE 1 carries the short rows: its first r > 10 <d> is self-closing with l e n p r only
 set -u
 # FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
 # one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
@@ -102,10 +102,10 @@ for i, (r, attrs, tail, text) in enumerate(xs_bad):
         m = ATTR.search(attrs); xs_bad[i] = (r, attrs[:m.start()] + attrs[m.end():], tail, text); break
 rbn = rebuild_doc(xs_bad)
 say(rbn is None or mask(rbn) != mask(off), "(S1n) dropping one moved attribute breaks the rebuild -- S1 can fail")
-bad2 = [r for r in on_rows if rank(r) > 10 and (not r.endswith("/>") or sorted(k for k, _ in ATTR.findall(r)) != sorted(set(k for k, _ in ATTR.findall(r)) & {"l", "n", "p", "r"}))]
-say(not bad2 and any(rank(r) > 10 for r in on_rows), "(S2) every <d> with r > 10 is self-closing with l n p r only (%d rows; offenders %d)" % (sum(rank(r) > 10 for r in on_rows), len(bad2)))
+bad2 = [r for r in on_rows if rank(r) > 10 and (not r.endswith("/>") or sorted(k for k, _ in ATTR.findall(r)) != sorted(set(k for k, _ in ATTR.findall(r)) & {"l", "e", "n", "p", "r"}))]
+say(not bad2 and any(rank(r) > 10 for r in on_rows), "(S2) every <d> with r > 10 is self-closing with l e n p r only (%d rows; offenders %d)" % (sum(rank(r) > 10 for r in on_rows), len(bad2)))
 say([r for r in on_rows if 0 < rank(r) <= 10] == [r for r in off_rows if 0 < rank(r) <= 10], "(S3) the <d> rows with r <= 10 are byte-identical to the twin's")
-moved = [rank(r) for r in off_rows if rank(r) > 10 and (r.endswith("</d>") or set(k for k, _ in ATTR.findall(r)) - {"l", "n", "p", "r"})]
+moved = [rank(r) for r in off_rows if rank(r) > 10 and (r.endswith("</d>") or set(k for k, _ in ATTR.findall(r)) - {"l", "e", "n", "p", "r"})]
 xi = on.find("<sigx>"); after = on[on.find("</sigx>") + 7:on.rfind("</ctx>")]
 say([int(x[0]) for x in xs] == moved, "(S4) one <x> per row that had something to move, in sigs order (%d)" % len(moved))
 say(on[:xi].endswith("-->") and on.rfind("<!-- sigx:", 0, xi) > on.rfind("</tail>") and re.fullmatch(r"(?:<!--.*?-->)*", after, re.S) is not None,
@@ -115,7 +115,7 @@ added = len(on) - len(off)
 say(est(on) > est(off) and abs(est(on) - est(off) - round(added / 2.50)) <= 1,
     "(S7) est_tokens %d -> %d for %d added markup bytes (the emitter's own markup rate: %d / 2.50 = %d, +-1 for the fixpoint's rounding)" % (est(off), est(on), added, added, round(added / 2.50)))
 p1rows = [r for r in drows(sigs(p1) if "</sigs>" in p1 else p1[p1.find("<sigs"):]) if rank(r) > 10]
-say(bool(p1rows) and p1rows[0].endswith("/>") and set(k for k, _ in ATTR.findall(p1rows[0])) <= {"l", "n", "p", "r"},
+say(bool(p1rows) and p1rows[0].endswith("/>") and set(k for k, _ in ATTR.findall(p1rows[0])) <= {"l", "e", "n", "p", "r"},
     "(S8) the default page 1's first r > 10 <d> row is the short form: %s" % (p1rows[0][:120] if p1rows else "none"))
 sys.exit(1 if bad else 0)
 PY

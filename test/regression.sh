@@ -568,6 +568,7 @@ for _g in \
     fordisclosurecheck \
     fordispatchhopcheck \
     fordocbodycheck \
+    forendlinecheck \
     forexemplarcheck \
     forfileanchorcheck \
     forfilesymscheck \
