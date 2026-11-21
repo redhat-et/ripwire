@@ -1651,7 +1651,10 @@ inline constexpr const char* kQdSchemeLegend =
     "written back under the new rule, which is the normal steady state rather than a failure. "
     "scheme_ambiguous= counts rows it REFUSED to move: the old key of a name that folded across N files "
     "maps to N new keys, so which symbol the ack was written for is unknowable from the ledger; those rows "
-    "keep their old key and surface under stale= rather than being fanned out to all N or guessed. ";
+    "keep their old key and surface under stale= rather than being fanned out to all N or guessed. "
+    "The same replay re-files a defect-shape ack written while a site value carried two facet bits "
+    "(v0.6.10 and earlier; three since the unchecked-status facet): the row's sites are re-hashed under the "
+    "two-bit rule and an ack at that key moves to the current one, counted in acks_rekeyed_by_scheme= too. ";
 
 // The sa ROW dictionary — emitted only when there are sa rows. The stale= axis itself is defined in the
 // core paragraph, because the counter is on the root of every report whether or not any row follows it.
