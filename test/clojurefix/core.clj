@@ -4,6 +4,9 @@
 (defonce cached 1)
 (defn square [x] (* x x))
 (defn cube [x] (* x x x))
+; Shadows a special-form name so a metadata-prefixed `(doto …)` that leaked past the special-form gate
+; would resolve here and show as a call (an unresolved `if` never shows, so it alone cannot fail).
+(defn doto [x] x)
 (defn join [xs] xs)
 (defn qualified-join [] (str/join "," ["a" "b"]))
 (defn- secret [x] (square x))
@@ -45,14 +48,18 @@
 (defn tag-call []
   ^String (square 5))
 
+(defn stacked-meta-call []
+  ^:a ^{:b 1} (square 6))
+
 (defn quoted-meta []
   '(^{:doc "inert"} (cube 6)))
 
 (defn special-form-metadata []
-  ^{:doc "special"} (if true 1 2))
+  ^{:doc "special"} (if true 1 2)
+  ^{:doc "special"} (doto 1))
 
 (defn metadata-not-call []
-  ^:private foo)
+  ^:private square)
 
 (defn nested-quote [] ''(square 1) (secret 1))
 (defn nested-discard [] #_(do #_(square 1) (square 2)) (secret 1))
