@@ -54,14 +54,14 @@ signatures — **read it here instead of opening the file the map named**, that 
 this default deletes. `bodies="0" reason="budget"` means it did not fit whole.
 *Conceptual phrase* (`bundle="compact" bodies="0" reason="compact-route"`): no bodies — you get the ranked
 map plus a `<hops>` section, one row per top-ranked symbol with its one-hop callee names. **Read the map,
-pick ONE symbol, then `--expand=path:name`** (paste the row's own `p=` and `n=`; a bare name that is not
+pick ONE symbol, then `--expand=path:name`** (paste the row's own path and name — `path:L-E name` on a line row, `p=` and `n=` on an XML row; a bare name that is not
 unique serves every definition, still without the map). That is the flow, and it is cheaper than the bodies were: half the bytes
 of the old bundle on conceptual queries, and the edges tell you which symbol is worth the second call.
 `--auto-bodies` restores inline bodies on that route if you want them; `--signatures-only` drops both
 shapes; `--detail=N` picks the body count explicitly.
 **Composing a selector out of a row** (the map's rows and `--for`'s alike): a scoped row carries `sc=`, its
 enclosing scope, instead of repeating its whole id — the canonical id is `p::sc::n`, assembled from the
-row's own `p=` (or the `<f p=>` it sits under), `sc=` and `n=`. Every selector (`--expand`, `--callers`,
+row's own `p=` (or the `<f p=>` it sits under), `sc=` and `n=` (a `--for` line row spells them `path:L-E name sc=scope`). Every selector (`--expand`, `--callers`,
 `--impact`, `--uses`) accepts that composed `path::scope::name`, so paste the three parts, not a bare name.
 `--for` **auto-routes** (default, no flag needed): a query that *names a symbol* (`--for="buildGraph"`) gets
 name-exact BM25 (recall@1 ~99% vs ~77% generic) — **know the name, query it verbatim**; a conceptual phrase

@@ -164,7 +164,7 @@ struct McpToolProfile
 inline constexpr McpToolProfile kMcpToolProfiles[] = {
     { "core", "explore,batch,from_trace,impact,uses,fetch_body,edit_check,quality_delta" },
     // `no-edit` = everything but the three span-addressed edit twins. What `ripwire wrap claude` registers: Claude Code
-    // refuses a native Edit on a file it has not Read, so the edit twins cannot spare it the Read, and in our own usage
+    // can refuse a native Edit on a file it has not Read (outside its working directory only: wrap.h readBeforeEdit), and in our own usage
     // they were never called there (their schemas, about 4 KB of tools/list, were paid every session). Listed in full
     // rather than derived, to stay a plain table row like `core`; mcpNoEditProfileIsAllButEditGroup below holds it to
     // the table, so a tool added later cannot silently fall out of it.

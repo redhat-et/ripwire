@@ -8,6 +8,8 @@
 # but hooks/ripwire-nudge.sh still switches on Claude tool names, so the port has not landed). An explicit path remains supported for CI and other clients:
 # skills/install.sh PATH.
 # Add --hook explicitly to install the advisory PreToolUse + SessionStart hook for the selected client:
+# (for Claude, --hook also registers the SubagentStart routing note: `ripwire-nudge.sh --subagent-start`, a short
+# factual note for the Explore and Plan subagents, which do not load CLAUDE.md; RIPWIRE_SUBAGENT_ROUTE=0 turns it off)
 # skills/install.sh --hook (Claude) or skills/install.sh --codex --hook (Codex). --openclaw installs to
 # that same cross-agent root (openclaw's own "compatibility skill root"); it has no hook slot.
 # The legend-seen hook REWRITES ripwire commands (it adds --legend-seen=<session file>). It is ON BY DEFAULT with a
@@ -291,6 +293,66 @@ install_claude_route()
     fi
 }
 
+# ── The two SubagentStart registrations (the routing note below, the opt-in primer further down) share one test and
+# one merge. subagent_start_names SETTINGS SCRIPT: is an entry naming SCRIPT, from any copy, registered under
+# SubagentStart? merge_subagent_start SETTINGS SCRIPT CMD WHAT WAS: refresh that entry's command in place, or add
+# exactly one (matcher "*", timeout 5); print "ripwire WHAT WAS" only once the file is really written (the D1 lesson
+# at install_claude_route). Neither touches another event or another script's entry.
+subagent_start_names()
+{
+    "$jqBin" -e --arg n "$2" "$jqIsScript"'
+        any((.hooks.SubagentStart // [])[]?.hooks[]?; isScript($n))' "$1" >/dev/null 2>&1
+}
+
+merge_subagent_start()
+{
+    mk_tmp "$1"
+    if "$jqBin" --arg n "$2" --arg cmd "$3" "$jqIsScript"'
+        .hooks //= {} |
+        if any((.hooks.SubagentStart // [])[]?.hooks[]?; isScript($n))
+        then .hooks.SubagentStart |= map( .hooks |= map( if isScript($n) then .command = $cmd else . end ) )
+        else .hooks.SubagentStart = ((.hooks.SubagentStart // []) + [{ matcher: "*", hooks: [{ type: "command", command: $cmd, timeout: 5 }] }])
+        end
+    ' "$1" >"$tmp" && [ -s "$tmp" ] && mv "$tmp" "$1"; then
+        echo "ripwire $4 $5"
+    else
+        rm -f "$tmp"
+        echo "skills/install.sh: could not merge the $4 into $1 (is it valid JSON?); nothing changed." >&2
+        return 1
+    fi
+}
+
+# ── install_claude_subagent_route SETTINGS HOOKCMD — register `ripwire-nudge.sh --subagent-start` as a SubagentStart
+# hook (lane HK2, 2026-11-21). Claude Code's Explore and Plan subagents do not load CLAUDE.md, so the routing a user
+# pasted there never reaches the agent that searches the codebase; this entry puts a short factual note into those two
+# (and only those two: the script decides by agent_type, so the matcher stays "*" and the decision stays in one place).
+# SEPARATE FROM the PreToolUse merge and called from BOTH of its paths, for install_claude_route's reason: a machine
+# that ran --hook before this mode existed has the nudge entry already, and would otherwise never gain this one.
+# Idempotent the same way: an entry that names the nudge script under SubagentStart, from any copy, has its command
+# refreshed in place; otherwise exactly one is added. It never touches another SubagentStart entry — not a user's own,
+# not the opt-in primer's (hooks/ripwire-subagent-primer.sh, --hook-subagent-primer).
+install_claude_subagent_route()
+{
+    subRouteCmd="$2 --subagent-start"
+    if subagent_start_names "$1" "ripwire-nudge.sh"; then
+        subRouteWas="already registered in $1 — command refreshed to $subRouteCmd."
+    else
+        subRouteWas="registered in $1."
+        echo "skills/install.sh --hook will add this OPT-IN, advisory-only entry to $1:"
+        echo "  hooks.SubagentStart += [{ matcher: \"*\", hooks: [{ type: \"command\", command: \"$subRouteCmd\" }] }]"
+        echo "  behavior: adds a routing note of under 400 B to the context of each new Explore or Plan subagent, the two"
+        echo "            built-in types that do not load CLAUDE.md (which call ranks files for a task, which prints one"
+        echo "            symbol, which names the tests). Every other subagent type gets nothing. Cannot block a subagent;"
+        echo "            silent outside a git work tree and without ripwire or jq on PATH. It does not follow the meter's"
+        echo "            arm: a control-arm session's subagents get it too."
+        echo "  switch:   RIPWIRE_SUBAGENT_ROUTE=0 turns it off; =all sends it to every subagent type."
+        echo "  counting: none. It writes no row and no file unless RIPWIRE_SUBAGENT_ROUTE_LOG names one."
+        echo "  remove:   delete the SubagentStart entry whose command ends in \"ripwire-nudge.sh --subagent-start\" from $1."
+    fi
+
+    merge_subagent_start "$1" "ripwire-nudge.sh" "$subRouteCmd" "SubagentStart routing note" "$subRouteWas"
+}
+
 # ── install_claude_legend_seen SETTINGS — register hooks/ripwire-legend-seen.sh (lane LS1, 2026-11-18).
 # The one hook this installer registers that REWRITES a tool call: before a `ripwire` Bash command it inserts
 # --legend-seen=<this session's file>, so the answer leaves out legend definitions the agent already received; after
@@ -357,8 +419,7 @@ install_claude_subagent_primer()
     chmod +x "$primerScript" 2>/dev/null || true
     primerCmd="$( hook_cmd "$primerScript" )" || return 1
 
-    if "$jqBin" -e --arg n "ripwire-subagent-primer.sh" "$jqIsScript"'
-        any((.hooks.SubagentStart // [])[]?.hooks[]?; isScript($n))' "$1" >/dev/null 2>&1; then
+    if subagent_start_names "$1" "ripwire-subagent-primer.sh"; then
         primerWas="already registered in $1 — command refreshed to $primerCmd."
     else
         primerWas="registered in $1."
@@ -372,20 +433,7 @@ install_claude_subagent_primer()
         echo "            arm, delivered) — never the brief or any text. RIPWIRE_SUBAGENT_METER=0 opts out of counting."
     fi
 
-    mk_tmp "$1"
-    if "$jqBin" --arg n "ripwire-subagent-primer.sh" --arg cmd "$primerCmd" "$jqIsScript"'
-        .hooks //= {} |
-        if any((.hooks.SubagentStart // [])[]?.hooks[]?; isScript($n))
-        then .hooks.SubagentStart |= map( .hooks |= map( if isScript($n) then .command = $cmd else . end ) )
-        else .hooks.SubagentStart = ((.hooks.SubagentStart // []) + [{ matcher: "*", hooks: [{ type: "command", command: $cmd, timeout: 5 }] }])
-        end
-    ' "$1" >"$tmp" && [ -s "$tmp" ] && mv "$tmp" "$1"; then
-        echo "ripwire subagent primer hook $primerWas"
-    else
-        rm -f "$tmp"
-        echo "skills/install.sh: could not merge the subagent primer hook into $1 (is it valid JSON?); nothing changed." >&2
-        return 1
-    fi
+    merge_subagent_start "$1" "ripwire-subagent-primer.sh" "$primerCmd" "subagent primer hook" "$primerWas"
 }
 
 install_claude_subagent_primer_hook()
@@ -415,6 +463,7 @@ install_claude_hook()
         echo "Add these by hand instead:" >&2
         echo "  hooks.PreToolUse  += [{\"matcher\":\"$hookMatcher\",\"hooks\":[{\"type\":\"command\",\"command\":\"$hookCmd\"}]}]" >&2
         echo "  hooks.SessionStart += [{\"matcher\":\"startup|resume|clear\",\"hooks\":[{\"type\":\"command\",\"command\":\"$hookCmd --session-start\"}]}]" >&2
+        echo "  hooks.SubagentStart += [{\"matcher\":\"*\",\"hooks\":[{\"type\":\"command\",\"command\":\"$hookCmd --subagent-start\",\"timeout\":5}]}]" >&2
         exit 1
     fi
 
@@ -426,7 +475,8 @@ install_claude_hook()
         any((.hooks.PreToolUse // [])[]?.hooks[]?; isScript($n))' \
         "$settings" >/dev/null 2>&1; then
         refresh_hook_matcher "$settings" "$hookCmd" "$hookMatcher" || return $?
-        install_claude_route "$settings"
+        install_claude_route "$settings" || return $?
+        install_claude_subagent_route "$settings" "$hookCmd"
         return $?
     fi
 
@@ -473,7 +523,8 @@ install_claude_hook()
         echo "skills/install.sh: could not merge $settings (is it valid JSON?); nothing changed." >&2
         exit 1
     fi
-    install_claude_route "$settings"
+    install_claude_route "$settings" || return $?
+    install_claude_subagent_route "$settings" "$hookCmd"
 }
 
 # ── the legend-seen hook, ON BY DEFAULT with a --hook install (owner ruling 111, 2026-11-20) ───────────────────────

@@ -162,6 +162,9 @@ const std::string_view kForDocList[] =
     kForEstTokensCeilingNote,
     // forpages.h — the page clause, at the default page size
     commentBody( kForDocPageClause ),
+    // forrowlines.h (FMT2) — the two clauses of the row-line form; appended, so no earlier entry id moves
+    commentBody( rw::rowlines::kRankSeqClause ),
+    commentBody( rw::rowlines::kRowLinesClause ),
 };
 
 }   // namespace — forlegendentries.h section of main.cpp

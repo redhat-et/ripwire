@@ -169,8 +169,8 @@ done
 
 A skill you copied by hand carries no marker, so this keeps it; delete that copy yourself.
 
-**3. Hooks** (only if you ran `--hook`). This removes ripwire's entries from Claude Code's `settings.json` and
-Codex's `hooks.json`, keeps every other hook, and saves a `.bak` copy of each file first.
+**3. Hooks** (only if you ran `--hook`). This removes ripwire's entries (the SubagentStart routing note among them)
+from Claude Code's `settings.json` and Codex's `hooks.json`, keeps every other hook, and saves a `.bak` copy of each file first.
 
 ```bash
 strip='def ripwire: (.command // "") | (if startswith("\u0027") then (.[1:] | split("\u0027")[0]) else split(" ")[0] end) | test("/hooks/ripwire-[a-z-]+\\.sh$");

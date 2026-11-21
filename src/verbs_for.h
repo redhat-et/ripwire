@@ -9,6 +9,7 @@
 #include "forpage.h"    // L-W: the --for --limit=N file page, coverage=, the thin rule and the widening next=
 #include "foranswerfirst.h" // ITEM R: a finished --for answer serves its ANSWER first (a permutation)
 #include "forsigx.h"        // SIGX (TL1 M1): the sigs rows past rank 10 keep l n p r on page 1; the rest follows the rows
+#include "forrowlines.h"    // ROWLINES + RANKSEQ (FMT2): the sigs/tail rows of the bytes written are lines in one CDATA
 #include "forkeybody.h"     // KB1: the key-symbol body right after the answer block, on page 1 (page 1 does not count it)
 #include "forpages.h"       // AF1: the answer-first --for answer, served in pages (page= pages= withheld_bytes= next=)
 #include "forbudgetfit.h" // TOKEN-BUDGET-MONOTONE: a budget sheds the unbudgeted answer, it never re-decides its posture
@@ -5748,6 +5749,7 @@ inline std::string fittedAnswerFirst( const MainDispatch& d, const ForPostureRen
             (void)rw::sigx::compactSigsWithin( out, ask.targetTokens > 0 && ask.ceilingTokens > 0 ? std::min( ask.targetTokens, ask.ceilingTokens )
                                                                                                  : std::max( ask.targetTokens, ask.ceilingTokens ), &u.ledger );
         }
+        (void)rw::rowlines::encodeRows( out );   // FMT2 (forrowlines.h): last, on the bytes written; est_tokens= stays the fitted element form's
     }
     return out;
 }
@@ -5888,8 +5890,9 @@ std::optional<int> runForLens( const MainDispatch& d )
                 const std::string_view keyRoot = d.ing.realPaths.empty() && d.cfg.roots.size() == 1 ? d.cfg.roots[0] : std::string_view();
                 (void)rw::keybody::insertKeyBodies( doc, d.ing, d.cfg.forTask, keyRoot, d.redactPtr, &r.ledger );
             }
-            if( const std::optional<std::string> early = forEarlyStopPage( d, doc ) )   // RT2 ES: a proven leading block ends page 1
+            if( std::optional<std::string> early = forEarlyStopPage( d, doc ) )   // RT2 ES: a proven leading block ends page 1
             {
+                (void)rw::rowlines::encodeRows( *early );
                 std::fwrite( early->data(), 1, early->size(), stdout );
                 return r.rc;
             }
@@ -5897,6 +5900,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             {
                 return 1;
             }
+            (void)rw::rowlines::encodeRows( doc );   // FMT2 (forrowlines.h): after paging, so each page holds the rows it held
             std::fwrite( doc.data(), 1, doc.size(), stdout );
             return r.rc;
         }

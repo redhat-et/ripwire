@@ -1017,6 +1017,7 @@ for _g in \
     routehookcheck \
     routeoncecheck \
     routingreportcheck \
+    rowlinescheck \
     rubyargcheck \
     rubyattrscheck \
     rubybarecallcheck \
@@ -1104,6 +1105,7 @@ for _g in \
     strkerncheck \
     structlayoutcheck \
     subagentprimercheck \
+    subagentroutecheck \
     subjectanchorcheck \
     sublistcountcheck \
     subscriptopcheck \

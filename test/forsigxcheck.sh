@@ -19,6 +19,10 @@
 #   (S7)  est_tokens= rises by the added bytes at the emitter's markup rate (the render's ledger, serialize.h repriceRootAfterCut)
 #   (S8)  the default PAGE 1 carries the short rows: its first r > 10 <d> is self-closing with l n p r only
 set -u
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${RIPWIRE_BIN:-${1:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"

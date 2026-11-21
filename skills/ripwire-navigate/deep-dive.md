@@ -16,7 +16,7 @@ When you need to understand a specific function/class/concept in full (its body,
    About to Edit what you just expanded? If your edit tool needs a fresh native Read of the file first
    (true of Claude Code's Edit; other harnesses may differ), the served body doesn't satisfy that — but the
    read doesn't need to start at line 1: Read at `l=`, not the whole file. Same for a `--for` hit before
-   you've expanded it — its `<d>` row carries `l=` too. Over MCP, skip the Read requirement altogether —
+   you've expanded it — its row carries the line too (`path:L-E name`, or `l=` on a row printed as XML). Over MCP, skip the Read requirement altogether —
    see ripwire-mcp's edit verbs.
 2. **Who calls it** — `ripwire <dir> --callers=SYM --legend=compact` → `<callers of="SYM" count="N">` with type, name,
    file:line. Callers reveal SYM's contract from the outside — expected preconditions.

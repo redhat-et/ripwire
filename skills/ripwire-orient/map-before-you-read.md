@@ -43,7 +43,7 @@ the table below is what you reach for *instead*.
 - **Do NOT read a whole file to understand one symbol.** `--expand=SYM` returns the body plus its callees'
   signatures; the file it happens to live in is not the unit of an answer.
 - **Do NOT Read whole-file just because you're about to Edit.** In Claude Code (it refuses a native Edit on a file
-  it has not Read), get the symbol's line range from ripwire (`l=`..`e=` of a `--for` row; `--expand=SYM` prints the body from its `l=`; `--defs` gives only the start), Read only
+  it has not Read), get the symbol's line range from ripwire (a `--for` row gives it as `path:L-E name`, or as `l=`..`e=` when the row is printed as XML; `--expand=SYM` prints the body from its `l=`; `--defs` gives only the start), Read only
   that range (`offset`/`limit`), then use the native Edit. For agents without a read-before-edit rule the CLI is
   the default write path: pipe or
   name the complete definition with `ripwire ROOT --replace-symbol-body=SYM --edit-payload=FILE|-` (or

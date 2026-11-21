@@ -264,6 +264,11 @@ inline Check mcpCheck( const std::filesystem::path& configPath )
     return out;
 }
 
+// The argument that makes hooks/ripwire-nudge.sh the SubagentStart routing note (lane HK2). It is the needle for that
+// registration rather than the script name: the script is also the PreToolUse and SessionStart entry, and a path that
+// needed quoting ends its quote BEFORE the argument, so "ripwire-nudge.sh --subagent-start" would miss it.
+inline constexpr std::string_view kSubagentRouteArg = "--subagent-start";
+
 // ---- THE CLAUDE SURFACE. It lives in this header rather than a claudedoctor.h of its own because it
 //      reuses `commandValuesContaining`, `everyCommandExecutable`, `readSmallFile` and `skillsCheck`
 //      verbatim: a second header would either duplicate those four or export them, and the file is
@@ -282,7 +287,11 @@ inline Check claudeHooksCheck( const std::filesystem::path& settingsPath )
     // `route_hook` is a BOOLEAN here where the Codex row prints a count, and that is the one place the
     // two rows deliberately differ: the Claude router is registered exactly once or not at all, and the
     // pre-registered readout's first question is "is the instrument wired up", not "how many times".
-    const HookSurvey survey = surveyHooks( settingsPath, "ripwire-nudge.sh", "ripwire-claude-route.sh" );
+    HookSurvey survey = surveyHooks( settingsPath, "ripwire-nudge.sh", "ripwire-claude-route.sh" );
+    // The SubagentStart routing note is the same script under a third event, and it has its own row
+    // (claude-subagent-route below). Counted here it would let PreToolUse + SubagentStart read as the
+    // two refs of a finished install with no SessionStart primer registered at all.
+    std::erase_if( survey.nudge, []( const std::string& command ) { return command.find( kSubagentRouteArg ) != std::string::npos; } );
     const bool routeOk = !survey.route.empty() && namesEvents( survey, { "UserPromptSubmit" } ) && survey.routeExecutable;
     const bool ok = survey.read && namesEvents( survey, { "PreToolUse", "SessionStart" } )
                  && survey.nudge.size() >= 2 && survey.nudgeExecutable && routeOk;
@@ -318,7 +327,12 @@ inline std::vector<Check> claudeInspect( const std::string& selfPath )
     return { binary, skills, claudeHooksCheck( claudeHome / "settings.json" ),
              legendSeenCheck( "claude-legend-seen", claudeHome / "settings.json", "ripwire-legend-seen.sh",
                               { "PreToolUse", "PostToolUse", "SessionStart", "PreCompact" },
-                              "run bash skills/install.sh --hook-legend-seen to repair it (and put jq on PATH)" ) };
+                              "run bash skills/install.sh --hook-legend-seen to repair it (and put jq on PATH)" ),
+             // The SubagentStart routing note: the same row shape, because the same four facts decide it (registered,
+             // under its event, by a command that resolves, with the jq its payload parse needs). Absent is a pass, as
+             // for legend-seen: a home that ran no installer, or ran one before the mode existed, is not broken.
+             legendSeenCheck( "claude-subagent-route", claudeHome / "settings.json", kSubagentRouteArg, { "SubagentStart" },
+                              "run bash skills/install.sh --hook to repair it (and put jq on PATH)" ) };
 }
 
 inline std::vector<Check> inspect( const std::string& selfPath )

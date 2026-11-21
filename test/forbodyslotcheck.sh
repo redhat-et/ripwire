@@ -104,6 +104,10 @@
 # Exits non-zero on any failure.
 
 set -u
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
 # SIBLING-DEMOTE / DECL-TWIN (every dialect since DEMOTE-ALL-DIALECTS, fordemoteall.h) stay OFF here, because this gate's twins
 # legitimately differ under them: its premises read the owner's one-line in-class declaration as the r1 ROW (Builder::Build in
 # build.h, PoolDispatcher::Dispatch, …), which DECL-TWIN prints as a pointer to its bodied twin, and its E arms compare the budget

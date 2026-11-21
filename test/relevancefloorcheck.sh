@@ -55,6 +55,10 @@
 #   RIPWIRE_BIN=asan/ripwire bash test/relevancefloorcheck.sh
 
 set -u
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
 # SIBLING-DEMOTE / DECL-TWIN (forsiblingdemote.h, fordecltwin.h; every dialect since DEMOTE-ALL-DIALECTS, fordemoteall.h) print some
 # ranked rows as <t p= sym= r=/> pointers in their place. The floor's row quota counts RANKED ENTRIES — a <d> row or such a pointer
 # (XML), a row object or a pointer object (--json) — so the gate reads the answer as shipped; the rules are pinned in their own gates.

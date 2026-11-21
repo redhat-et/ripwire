@@ -496,22 +496,24 @@ and the three controls below it.
 ```xml
 <ctx task="incremental cache invalidation" confidence="high" margin_pct="20"
      bundle="compact" bodies="0" reason="compact-route" est_tokens="3995">
-  <sigs shown="23" total="40" capped="1">
+  <sigs shown="23" total="40" capped="1" rseq="1"><![CDATA[
     <d l="106" n="kCacheMagic" p="src/ingest_cache.h" cx="0" in="0" churn="11" amp="71" pure="1" r="1"
        next="--expand=src/ingest_cache.h:kCacheMagic">
       <doc>incremental cache (--cache): per-file content hash + raw facts so a
            re-run re-parses ONLY …</doc>constexpr std::uint32_t kCacheMagic = …</d>
-    <d l="1307" n="spanTierMemoPath" p="src/ingest_astquery.h" cx="1" in="2" churn="5" amp="44" r="2"> … </d>
-    <d l="247" n="ingestCommitTree" p="src/dmm.h" cx="6" in="1" churn="6" amp="27" r="3"> … </d>
+    src/ingest_astquery.h:1307 spanTierMemoPath cx=1 in=2 churn=5 amp=44 | …
+    src/dmm.h:247 ingestCommitTree cx=6 in=1 churn=6 amp=27 | …
     …
-    <d l="191" n="ingest" p="src/ingest.cpp" cx="4" in="14" churn="128" amp="266" tested="1" r="13"> … </d>
-    … </sigs>
+    src/ingest.cpp:191 ingest cx=4 in=14 churn=128 amp=266 tested=1 | …
+    … ]]></sigs>
   <hops shown="2" total="6" capped="1" noedge="2">
     <h l="1307" p="src/ingest_astquery.h" n="spanTierMemoPath">
       <calls total="3"><c n="shaKeyedCachePath" l="1621"/> … </calls></h> … </hops>
 </ctx>
 ```
 
+The ranked rows are text lines in one CDATA, `path:line name attributes | signature`, in rank order (a row
+that quotes a doc comment stays XML, and `r=` is spelled only where the rank is not the previous row's + 1).
 `cx=` complexity, `churn=` git edit frequency, `amp=` change amplification, `r=` rank; `<hops>` rows
 carry the one-hop call context, caps disclosed. The one legend at the top of the real output defines
 them — tersely by default, every reading in full with `--legend=full` — and the root self-reports the
