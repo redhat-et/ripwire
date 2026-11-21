@@ -96,15 +96,22 @@ struct ArgTypeShape
     bool                     known    = false;
 };
 
+// A predicate over one type's tokens in order: true for `tok` outside every template argument list (a `>>` is two `>`
+// tokens). `depth` is the caller's, so a predicate the algorithm copies still walks one nesting count.
+inline auto topLevelTokenIs( std::string_view tok, int& depth )
+{
+    return [ tok, &depth ]( const std::string& t ) {
+        depth += t == "<" ? 1 : t == ">" ? -1 : 0;
+        return depth == 0 && t == tok;
+    };
+}
+
 // Erase the parameter's OWN const tokens: only a const outside every template argument list is the parameter's;
-// `Box<const T>` keeps its inner const in the core, so it never compares equal to `Box<T>` (a `>>` is two `>` tokens).
+// `Box<const T>` keeps its inner const in the core, so it never compares equal to `Box<T>`.
 inline bool eraseTopLevelConst( std::vector<std::string>& toks )
 {
     int depth = 0;
-    return std::erase_if( toks, [ &depth ]( const std::string& t ) {
-        depth += t == "<" ? 1 : t == ">" ? -1 : 0;
-        return depth == 0 && t == "const";
-    } ) != 0;
+    return std::erase_if( toks, topLevelTokenIs( "const", depth ) ) != 0;
 }
 
 // A `*` outside every template argument list: `Box<View*> const&` is a const Box, not a pointer, so it takes the same
@@ -112,10 +119,7 @@ inline bool eraseTopLevelConst( std::vector<std::string>& toks )
 inline bool hasTopLevelPointer( const std::vector<std::string>& toks )
 {
     int depth = 0;
-    return std::ranges::any_of( toks, [ &depth ]( const std::string& t ) {
-        depth += t == "<" ? 1 : t == ">" ? -1 : 0;
-        return depth == 0 && t == "*";
-    } );
+    return std::ranges::any_of( toks, topLevelTokenIs( "*", depth ) );
 }
 
 // `toks`: one parameter's type tokens (editCheckTypeTokens: the declarator name already dropped)
