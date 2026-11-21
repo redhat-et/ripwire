@@ -1744,8 +1744,8 @@ inline constexpr const char* kQdFailureDefaultLegend =
 
 // QD-TANGLE — emitted only when a tangle row is in the document.
 inline constexpr const char* kQdTangleLegend =
-    "a tangle row GATES when the function is new or crossed the bar (not a moved body, not test code); a row an input rose on is "
-    "sev=\"minor\". was= and now= are the score S = T x log2(loc/50), "
+    "a tangle row GATES when the function is new, crossed the bar or its score grew while over it (not a moved body, not test "
+    "code); a row an input rose on while the score did not grow is sev=\"minor\". was= and now= are the score S = T x log2(loc/50), "
     "T = nesting levels past 3 + deep%/5 + steering locals per 100 lines (deep%: the share of lines inside regions at nesting 4+, "
     "short arms of a flat switch or else-if chain of 4+ arms left out); bar= 6. Length only AMPLIFIES: a function of 50 lines or "
     "fewer, a long flat body and an orchestrator of named steps all score 0. A row means the change made it so: the function is "
