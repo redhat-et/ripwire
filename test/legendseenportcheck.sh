@@ -87,12 +87,16 @@ if [ ! -e "$H/.ripwire" ]; then ok "(A) RIPWIRE_LEGEND_SEEN=0: no state"; else n
 #     the prohibition half alone would pass having installed nothing.
 count(){ jq '[.. | objects | select(has("command")) | .command | select(test("legend-seen"))] | length' "$1" 2>/dev/null || echo x; }
 acount(){ jq '[.. | objects | select(has("command")) | .command | select(test("ripwire-nudge|ripwire-codex-nudge"))] | length' "$1" 2>/dev/null || echo x; }
-IH="$TMP/ih"; mkdir -p "$IH"
-HOME="$IH" PATH="$HPATH" bash "$ROOT/skills/install.sh" --hook >"$TMP/i.dc" 2>&1; rdc=$?
-HOME="$IH" PATH="$HPATH" bash "$ROOT/skills/install.sh" --codex --hook >"$TMP/i.dx" 2>&1; rdx=$?
-if [ "$rdc" -eq 0 ] && [ "$rdx" -eq 0 ] && [ "$( count "$IH/.claude/settings.json" )" = 4 ] && [ "$( count "$IH/.codex/hooks.json" )" = 3 ]; then
+# A HOME OF ITS OWN, and that is load-bearing: the banner below prints on FIRST registration only, so a default
+# arm sharing the explicit flags' home would silence the "every installer discloses the rewrite" arm and read as a
+# disclosure regression. Measured — it did, once, before this split.
+DF="$TMP/idefault"; mkdir -p "$DF"
+HOME="$DF" PATH="$HPATH" bash "$ROOT/skills/install.sh" --hook >"$TMP/i.dc" 2>&1; rdc=$?
+HOME="$DF" PATH="$HPATH" bash "$ROOT/skills/install.sh" --codex --hook >"$TMP/i.dx" 2>&1; rdx=$?
+if [ "$rdc" -eq 0 ] && [ "$rdx" -eq 0 ] && [ "$( count "$DF/.claude/settings.json" )" = 4 ] && [ "$( count "$DF/.codex/hooks.json" )" = 3 ]; then
     ok "(B) --hook and --codex --hook register the legend-seen hook BY DEFAULT: Claude 4 entries, Codex 3 (ruling 111)"
-else no "(B) default-on: rc=$rdc/$rdx claude=$( count "$IH/.claude/settings.json" ) codex=$( count "$IH/.codex/hooks.json" ) (want 4 and 3)"; fi
+else no "(B) default-on: rc=$rdc/$rdx claude=$( count "$DF/.claude/settings.json" ) codex=$( count "$DF/.codex/hooks.json" ) (want 4 and 3)"; fi
+IH="$TMP/ih"; mkdir -p "$IH"
 if grep -q "REWRITES a ripwire" "$TMP/i.dc" && grep -q "REWRITES a ripwire" "$TMP/i.dx"; then
     ok "(B) both default installs disclose the rewrite before they write"
 else no "(B) a default install registered a rewriting hook silently"; fi

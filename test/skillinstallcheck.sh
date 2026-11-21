@@ -937,9 +937,14 @@ if [ -z "$STRIP" ]; then
 else
     for _h in home home2; do ( cd "$S" && env HOME="$S/$_h" sh -c "$STRIP" ) >"$S/strip-$_h.out" 2>&1; done
     cntAfter="$( countRw "$S/home/.claude/settings.json" ),$( countRw "$S/home/.codex/hooks.json" ),$( countRw "$S/home2/.claude/settings.json" ),$( countRw "$S/home2/.codex/hooks.json" )"
-    { [ "$cntBefore" = "3,3,3,3" ] && [ "$cntAfter" = "0,0,0,0" ]; } \
+    # The "before" snapshot is a PRECONDITION, not the claim: 7 Claude entries (PreToolUse nudge + SessionStart
+    # primer + UserPromptSubmit router, plus the legend-seen hook's four) and 6 Codex ones (its three advisory
+    # entries plus three legend-seen). It was 3,3,3,3 until owner ruling 111 (2026-11-20) made the legend-seen
+    # hook part of a --hook install. The CLAIM is "after", and it is unchanged: INSTALL.md's documented strip is a
+    # regex over /hooks/ripwire-*.sh, so it already removes the new hook's entries too, quoted space path included.
+    { [ "$cntBefore" = "7,6,7,6" ] && [ "$cntAfter" = "0,0,0,0" ]; } \
         && ok "(R) the documented hook strip removes ripwire's entries from Claude and Codex configs, space path and ordinary path alike" \
-        || no "(R) hook strip: ripwire entries before $cntBefore, after $cntAfter (settings, hooks.json for the space-path home, then the ordinary home; want 3,3,3,3 then 0,0,0,0)"
+        || no "(R) hook strip: ripwire entries before $cntBefore, after $cntAfter (settings, hooks.json for the space-path home, then the ordinary home; want 7,6,7,6 then 0,0,0,0)"
     otherKept="$( jq --arg c "$mine" '[.. | objects | select(.command? == $c)] | length' "$S/home/.claude/settings.json" 2>/dev/null ),$( jq --arg c "$mine" '[.. | objects | select(.command? == $c)] | length' "$S/home/.codex/hooks.json" 2>/dev/null )"
     [ "$otherKept" = "1,1" ] \
         && ok "(R) the same strip keeps a user's own hook (quoted, with spaces) in both files" \
