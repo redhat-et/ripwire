@@ -21,6 +21,13 @@ Each function lives in its own file so a row's p= names it alone. Shapes (C++):
   shrink — tangled at v1/c2; wt removes its deep region: credited in <improved> (tangle), no row.
   simplify — ccx 21 at v1/c2, ccx 11 in wt: credited in <improved> (complexity).
   nudge — tangled at v1/c2 (40 deep lines); wt drops 2 of them: under the rise step, so no <improved> entry (and no row).
+  crossing — 100 flat lines at v1/c2 (score 0); wt gives it tangled's body: it crossed the bar, a GATING row (rule (b), 11-21).
+  harnessmain — new in wt under test/: tangled's body, a row that stays sev="minor" (test code never gates by tangle).
+  The RATCHET against the range base (QD-RATCHET-BASE, replay 11-21), three over-bar functions (v1 40 deep lines):
+  grow1 — 40 at c2, 42 in wt: the score grew a little, under the rise step and under its best since v1's rise: a ratchet row.
+  reflow — 46 at c2 (+6 over v1), wt adds one flat line: its inputs moved but the score is the same tenth: no row (the replay's
+          buildGraph in #706, +28 lines at 56.9 -> 56.9, that the tag-best compare flagged).
+  settle — 48 at c2 (+8 over v1), 47 in wt: the score fell: no row (the replay's captureTagsFacts 29.2 -> 29.1 in #714).
   The wip stage cuts creep to 5 deep lines on the side branch, whose next commit (c2) grows it back: a version the first-parent
   line never stood at, so it must not become creep's best (r1 would read deep 8->49).
 """
@@ -40,15 +47,7 @@ def deep_block(n, depth_indent):
 
 def creep(extra):
     # depth: for(1) if(2) for(3) if(4) -> the deep region is the body of the 4th level
-    body = deep_block(40 + extra, 20)
-    tail = "".join(f"    total = total * 3 + {k};\n" for k in range(70))
-    return ("int creep( const std::vector<int>& xs )\n{\n    int total = 0;\n"
-            "    for( int x : xs )\n    {\n        if( x > 0 )\n        {\n"
-            "            for( int y = 0; y < x; ++y )\n            {\n"
-            "                if( y % 2 )\n                {\n"
-            + body +
-            "                }\n            }\n        }\n    }\n"
-            + tail + "    return total;\n}\n")
+    return overbar("creep", 40 + extra, mult=3, gt=0, mod=2)
 
 
 def shrink(deep):
@@ -72,19 +71,24 @@ def simplify(branches):
 
 
 def nudge(deep):
+    return overbar("nudge", deep, mult=11)
+
+
+def overbar(name, deep, extra=0, mult=13, gt=2, mod=5):
+    # nudge's shape under another name: for(1) if(2) for(3) if(4), `deep` lines at depth 4, a flat tail of 70 + extra lines
     inner = deep_block(deep, 20)
-    tail = "".join(f"    total = total * 11 + {k};\n" for k in range(70))
-    return ("int nudge( const std::vector<int>& xs )\n{\n    int total = 0;\n"
-            "    for( int x : xs )\n    {\n        if( x > 2 )\n        {\n"
+    tail = "".join(f"    total = total * {mult} + {k};\n" for k in range(70 + extra))
+    return (f"int {name}( const std::vector<int>& xs )\n{{\n    int total = 0;\n"
+            f"    for( int x : xs )\n    {{\n        if( x > {gt} )\n        {{\n"
             "            for( int y = 0; y < x; ++y )\n            {\n"
-            "                if( y % 5 )\n                {\n" + inner +
+            f"                if( y % {mod} )\n                {{\n" + inner +
             "                }\n            }\n        }\n    }\n" + tail + "    return total;\n}\n")
 
 
-def tangled():
+def tangled(name="tangled"):
     deep = deep_block(25, 28)
     seq = "".join(f"    total = total + {k};\n" for k in range(60))
-    return ("int tangled( const std::vector<int>& xs )\n{\n    int total = 0;\n    bool found = false;\n"
+    return (f"int {name}( const std::vector<int>& xs )\n{{\n    int total = 0;\n    bool found = false;\n"
             "    for( int x : xs )\n    {\n        if( x > 0 )\n        {\n"
             "            for( int y = 0; y < x; ++y )\n            {\n"
             "                if( y % 2 )\n                {\n"
@@ -96,9 +100,9 @@ def tangled():
             + seq + "    if( found )\n    {\n        total *= 2;\n    }\n    return total;\n}\n")
 
 
-def sequential():
-    return ("int sequential( int x )\n{\n    int total = x;\n"
-            + "".join(f"    total = total * 7 + {k};\n" for k in range(150)) + "    return total;\n}\n")
+def sequential(name="sequential", n=150):
+    return (f"int {name}( int x )\n{{\n    int total = x;\n"
+            + "".join(f"    total = total * 7 + {k};\n" for k in range(n)) + "    return total;\n}\n")
 
 
 def orchestrator():
@@ -189,7 +193,16 @@ def main():
     write(d, "shrink.cpp", hdr + shrink(stage != "wt"))
     write(d, "simplify.cpp", simplify(20 if stage != "wt" else 10))
     write(d, "nudge.cpp", hdr + nudge(40 if stage != "wt" else 38))
+    if stage != "wt":
+        write(d, "crossing.cpp", sequential("crossing", 100))
+    write(d, "grow1.cpp", hdr + overbar("grow1", 42 if stage == "wt" else 40, mult=17))
+    write(d, "reflow.cpp", hdr + overbar("reflow", 40 if stage == "v1" else 46, extra=1 if stage == "wt" else 0, mult=19))
+    write(d, "settle.cpp", hdr + overbar("settle", {"v1": 40, "wt": 47}.get(stage, 48), mult=23))
     if stage == "wt":
+        write(d, "crossing.cpp", hdr + tangled("crossing"))
+        os.makedirs(os.path.join(d, "test"), exist_ok=True)
+        with open(os.path.join(d, "test", "harness.cpp"), "w") as f:
+            f.write(hdr + tangled("harnessmain"))
         write(d, "tangled.cpp", hdr + tangled())
         write(d, "sequential.cpp", sequential())
         write(d, "orchestrator.cpp", orchestrator())

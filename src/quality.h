@@ -8350,9 +8350,12 @@ inline std::string rowValueText( const Regression& r, std::uint32_t v )
     return metricValueText( r.kind, v );
 }
 
+// A new-symbol tangle row is major only under rule (b) (tangleCauseGates: a new function at or over the bar, not moved, not
+// test code), so a major one gates like a ceiling row (QD-LESSONS-2, owner 11-21).
 inline bool rowGates( const Regression& r ) noexcept
 {
-    return !r.isMinor && ( !r.isNewSymbol || r.ceiling != 0 || ( r.kind == "defect-shape" && r.facet == defectshape::facetName( defectshape::Facet::FormatArity ) ) );
+    return !r.isMinor
+        && ( !r.isNewSymbol || r.ceiling != 0 || r.kind == "tangle" || ( r.kind == "defect-shape" && r.facet == defectshape::facetName( defectshape::Facet::FormatArity ) ) );
 }
 
 // B10.2 — kind → the ATTRIBUTE NAME its facet value is emitted under. `Regression::facet` carries only the
@@ -11406,14 +11409,15 @@ inline std::uint32_t newSymbolCeilingGate( const Regression& r, SymKind measured
     return gates ? ceilingAt : 0;
 }
 
-// ─── QD-TANGLE — the thirteenth kind, REPORT-ONLY (STAGE0 2; owner 11-19: length amplifies tangle, never stands alone) ───────────
+// ─── QD-TANGLE — the thirteenth kind (STAGE0 2; owner 11-19: length amplifies tangle, never stands alone; 11-21: rule (b) gates) ─
 //
 // A row when a function's tangle score (model.h tangleScore10) is at or over the bar (S >= 6) AND the change made it so: the function
-// is new, it crossed the bar, or an input rose — nesting +1, deep lines +kTangleDeepRise, or a new steering local. The trigger reads
-// the INPUTS, not the score, on purpose: the score is a share, so 12 deep lines added to a 4000-line function move it a tenth, and a
-// score trigger would let a monster grow forever (QD-MONSTER-GROWTH's lesson). Every row is sev="minor" and never gates in this
-// stage; why= names the inputs that rose, fix= the shape the rise calls for (with its lines, from a re-walk of the ONE function:
-// tangleDetailOf), locals= the steering locals. A long orchestrator of named steps or a long flat body scores 0 and never rows.
+// is new, it crossed the bar, its score grew against the range base while over the bar (the RATCHET, QD-RATCHET-BASE), or an input
+// rose — nesting +1, deep lines +kTangleDeepRise, or a new steering local. Rows on the score's growth catch a monster growing by a
+// tenth per change (12 deep lines in a 4000-line function), which a size floor would let grow forever (QD-MONSTER-GROWTH's lesson).
+// A new function or a crossing GATES (rule (b), owner 11-21: tangleCauseGates); every other row is sev="minor". why= names the
+// inputs that changed, fix= the shape the rise calls for (with its lines, from a re-walk of the ONE function: tangleDetailOf),
+// locals= the steering locals. A long orchestrator of named steps or a long flat body scores 0 and never rows.
 inline constexpr std::uint32_t kTangleDeepRise = 5;   // deep lines that count as a rise (STAGE0 2.5's "worse" tier)
 
 struct TangleRise
@@ -11559,6 +11563,48 @@ struct TangleDetailReader
     }
 };
 
+// What made a row over the bar (QD-LESSONS-2, owner 11-21): the function is new or crossed the bar (rule (b)); already over it,
+// its score grew against the range base (the RATCHET, QD-RATCHET-BASE); or an input rose by the rise rule while the score did
+// not grow. The caller has already left out a function under the bar now.
+enum class TangleCause : std::uint8_t
+{
+    None,      // over the bar before and after, the score did not grow and nothing rose: no row
+    New,       // a new function at or over the bar
+    Crossed,   // under the bar at the baseline, at or over it now
+    Grew,      // over the bar at the baseline and the score is higher now (a tenth is enough: log-length scaling keeps steps small)
+    Rose,      // over the bar at the baseline, the score not higher, an input rose (nest +1, deep +kTangleDeepRise, a steering local)
+};
+inline TangleCause tangleCauseOf( bool isNew, std::uint32_t was10, std::uint32_t now10, const TangleRise& rise ) noexcept
+{
+    if( isNew )
+    {
+        return TangleCause::New;
+    }
+    if( was10 < kTangleBar10 )
+    {
+        return TangleCause::Crossed;
+    }
+    if( now10 > was10 )
+    {
+        return TangleCause::Grew;
+    }
+    return rise.any() ? TangleCause::Rose : TangleCause::None;
+}
+
+// The inputs that grew at all (the fix= reading of a ratchet row, whose growth can be under the rise rule's steps).
+inline TangleRise tangleGrowth( const TangleInputs& was, const TangleInputs& now ) noexcept
+{
+    return { now.nest > was.nest, now.deep > was.deep, now.steer > was.steer };
+}
+
+// Rule (b): a new function at or over the bar, or one that crossed it, GATES — except a moved body (its code is not new; the
+// re-census found no such row) and test code (the census's test-harness mains were its false class, and QD-ENTRY-CEILING exempts
+// test drivers the same way). A ratchet row or a row of a rising input stays sev="minor". `rel` = the root-relative path.
+inline bool tangleCauseGates( TangleCause cause, bool moved, std::string_view rel ) noexcept
+{
+    return ( cause == TangleCause::New || cause == TangleCause::Crossed ) && !moved && !isTestPath( rel );
+}
+
 // QD-CREDIT-ROW for tangle (STAGE0 2.5): over the bar at the baseline, an input fell by the rise rule (tangleRise read backwards) and none rose, and the score is lower.
 inline bool tangleCredited( const TangleInputs& was, const TangleInputs& now ) noexcept
 {
@@ -11567,20 +11613,19 @@ inline bool tangleCredited( const TangleInputs& was, const TangleInputs& now ) n
     return tangleScore10( was ) >= kTangleBar10 && tangleRise( now, was ).any() && !tangleRise( was, now ).any() && tangleScore10( now ) < tangleScore10( was );
 }
 
-// D4 RATCHET (report-only): each `ratchetable` key — over the bar now, existing at the baseline, inputs moved by this change — against its
-// best since the reference point (extras.bestSince over those keys' files only). It fires when the score is above its best AND an input
-// rose over its minimum by the same rise rule the baseline row uses (nest +1 past the free levels, deep +kTangleDeepRise, a new steering
-// local): a function that crept up across merges, each step under the rise rule, is named once it has crept that far. On a key this
-// pass already rowed, the ratchet adds its facet (ratchet="<ref>") and its reading to why=; otherwise it is a row of its own, was= the
-// best score. A key the history never held (created in this working tree) is not judged.
-template<class Stamp>
-inline void appendTangleRatchet( std::vector<Regression>& regs, const IngestResult& ing, const Graph& g,
-                                 const std::vector<std::pair<std::uint64_t, const TangleNow*>>& ratchetable, const gtl::btree_map<std::uint64_t, std::size_t>& rowOfKey,
-                                 TangleDetailReader& detailOf, Stamp&& stamp, std::string_view root, DeltaExtras& extras )
+// D4 (QD-RATCHET-BASE: a facet, never a row of its own): each tangle row on a function that existed at the baseline, against its best
+// since the reference point (extras.bestSince over those rows' files only). When the score is above that best AND an input rose over
+// its minimum by the rise rule, the row gets ratchet="<ref>" and why= adds "best since <ref>: ...": the context of a function that
+// crept up across merges. Whether a function is judged at all is the range base's question (tangleCauseOf); replay 11-21: four of the
+// nine rows the tag-best compare made on its own were functions this change did not grow (buildGraph twice, serialize, and a
+// captureTagsFacts that fell 29.2 -> 29.1). A key the history never held (created after the tag) is not judged.
+inline void appendTangleRatchet( std::vector<Regression>& regs, const IngestResult& ing,
+                                 const std::vector<std::pair<std::uint64_t, const TangleNow*>>& rowed, const gtl::btree_map<std::uint64_t, std::size_t>& rowOfKey,
+                                 std::string_view root, DeltaExtras& extras )
 {
     std::vector<std::string> paths;
-    paths.reserve( ratchetable.size() );
-    for( const auto& [ key, nowOfKey ] : ratchetable )
+    paths.reserve( rowed.size() );
+    for( const auto& [ key, nowOfKey ] : rowed )
     {
         paths.emplace_back( relForHash( ing.files[ ing.symbols[ nowOfKey->at ].fileId ], root ) );
     }
@@ -11593,37 +11638,23 @@ inline void appendTangleRatchet( std::vector<Regression>& regs, const IngestResu
     {
         return;
     }
-    for( const auto& [ key, nowOfKey ] : ratchetable )
+    for( const auto& [ key, nowOfKey ] : rowed )
     {
         const BestSinceRow* row = store.find( key );
-        if( row == nullptr )
+        const auto          at  = rowOfKey.find( key );
+        if( row == nullptr || at == rowOfKey.end() )
         {
             continue;
         }
         ++extras.ratchetJudged;
-        const TangleNow&    now   = *nowOfKey;
-        const TangleBest    best  = unpackTangleBest( row->value );
-        const std::uint32_t now10 = tangleScore10( now.in );
-        const TangleRise    rise  = tangleRise( best.minima, now.in );
-        if( now10 <= best.score10 || !rise.any() )
+        const TangleBest best = unpackTangleBest( row->value );
+        if( tangleScore10( nowOfKey->in ) <= best.score10 || !tangleRise( best.minima, nowOfKey->in ).any() )
         {
             continue;
         }
-        const std::string since = "best since " + store.ref + ": " + tangleWhy( best.minima, now.in, /*isNew=*/false );
-        if( const auto it = rowOfKey.find( key ); it != rowOfKey.end() )
-        {
-            Regression& r = regs[ it->second ];
-            r.facet       = store.ref;
-            r.why        += "; " + since;
-            continue;
-        }
-        const TangleDetailFacts detail = detailOf.of( ing.symbols[ now.at ] );
-        Regression r{ "tangle", g.canonId[ now.at ], best.score10, now10, key, /*isMinor=*/true, store.ref, /*isNewSymbol=*/false, /*isMoved=*/false };
-        r.why    = since;
-        r.fix    = tangleFix( rise, /*isNew=*/false, now.in, detail );
-        r.locals = tangleLocals( detail );
-        regs.push_back( std::move( r ) );
-        stamp( now.at );
+        Regression& r = regs[ at->second ];
+        r.facet       = store.ref;
+        r.why        += "; best since " + store.ref + ": " + tangleWhy( best.minima, nowOfKey->in, /*isNew=*/false );
     }
 }
 
@@ -11852,7 +11883,7 @@ inline void appendRepeatedDecisionFixes( std::vector<Regression>& regs, const In
 
 // The rows, appended to `regs` (stamped by the caller's `stamp( NodeId )`). `existed` and `movedAt` are computeDelta's own origin
 // oracles, so a tangle row's origin= reads exactly as every other per-symbol kind's. With `extras`, also the tangle credits and the
-// D4 ratchet (appendTangleRatchet).
+// D4 facet on the rows (appendTangleRatchet).
 // Judged only when the kind is selected and against a floor that recorded the tangle inputs — an older sidecar or blob has none, and
 // reading every function as new would bury the answer in rows that are not about this change.
 template<class Existed, class MovedAt, class Stamp>
@@ -11867,7 +11898,7 @@ inline void appendTangleRows( std::vector<Regression>& regs, const IngestResult&
     const gtl::btree_map<std::uint64_t, TangleNow> nowByKey = tangleNowByKey( ing, g, keyByNode );
     TangleDetailReader                             detailOf{ ing };
     gtl::btree_map<std::uint64_t, std::size_t>     rowOfKey;     // the row this pass emitted for a key (the ratchet adds its facet there)
-    std::vector<std::pair<std::uint64_t, const TangleNow*>> ratchetable;   // over the bar, existed, and the change moved its inputs (key, its nowByKey entry)
+    std::vector<std::pair<std::uint64_t, const TangleNow*>> rowed;   // the rows on functions that existed at the baseline (D4 reads their history)
     for( const auto& [ key, best ] : nowByKey )
     {
         const bool          isNew = !existed( key );
@@ -11882,27 +11913,30 @@ inline void appendTangleRows( std::vector<Regression>& regs, const IngestResult&
         {
             continue;   // under the bar now: no row, whatever it was
         }
-        if( !isNew && packTangle( was ) != packTangle( best.in ) )
-        {
-            ratchetable.emplace_back( key, &best );
-        }
-        const TangleRise rise = tangleRise( was, best.in );
-        if( !isNew && was10 >= kTangleBar10 && !rise.any() )
+        const TangleRise  rise  = tangleRise( was, best.in );
+        const TangleCause cause = tangleCauseOf( isNew, was10, now10, rise );
+        if( cause == TangleCause::None )
         {
             continue;   // already over the bar and nothing rose: the change did not make it so
         }
+        const bool              moved  = isNew && movedAt( best.at );
+        const bool              gates  = tangleCauseGates( cause, moved, relForHash( ing.files[ ing.symbols[ best.at ].fileId ], root ) );
         const TangleDetailFacts detail = detailOf.of( ing.symbols[ best.at ] );
-        Regression r{ "tangle", g.canonId[ best.at ], isNew ? 0u : was10, now10, key, /*isMinor=*/true, {}, isNew, isNew && movedAt( best.at ) };
+        Regression r{ "tangle", g.canonId[ best.at ], isNew ? 0u : was10, now10, key, /*isMinor=*/!gates, {}, isNew, moved };
         r.why    = tangleWhy( was, best.in, isNew );
-        r.fix    = tangleFix( rise, isNew, best.in, detail );
+        r.fix    = tangleFix( cause == TangleCause::Grew ? tangleGrowth( was, best.in ) : rise, isNew, best.in, detail );
         r.locals = tangleLocals( detail );
         rowOfKey[ key ] = regs.size();
         regs.push_back( std::move( r ) );
         stamp( best.at );
+        if( !isNew )
+        {
+            rowed.emplace_back( key, &best );
+        }
     }
-    if( extras != nullptr && extras->bestSince && !ratchetable.empty() )
+    if( extras != nullptr && extras->bestSince && !rowed.empty() )
     {
-        appendTangleRatchet( regs, ing, g, ratchetable, rowOfKey, detailOf, stamp, root, *extras );
+        appendTangleRatchet( regs, ing, rowed, rowOfKey, root, *extras );
     }
 }
 
