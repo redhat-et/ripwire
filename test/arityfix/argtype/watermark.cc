@@ -70,3 +70,13 @@ private:
     ext::Real real_;
 };
 }
+
+namespace lib
+{
+// POSITIVE: Box<const View>& is exactly hold( Box<const View>& )'s type; Box<View> by value is another type (the inner const is
+// the type's, not the parameter's)
+void innerConstArg( Holder& h, Box<const View>& b ) { h.hold( b ); }
+// POSITIVE: `const Box<View*>&` and `Box<View*> const&` are one type: the `*` inside <...> is not the parameter's own pointer
+// (CR #716; split before: the nested `*` chose the pointer branch, which kept the leading const in the core)
+void ptrInTemplateArg( Holder& h, const Box<View*>& b ) { h.wrapPtr( b ); }
+}

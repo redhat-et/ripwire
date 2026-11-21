@@ -34,6 +34,13 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-20, train 1118a (import-proved-splits, qual-ns-call-bind, cr705-edges; rebased onto main f79a94e21, #706 = train 1117d2):
+#   RE-DERIVED ONCE with UPDATE_GOLDEN=1 from the composed build (hash 10d4e73d09…2d22b70, the same as qual-ns-call-bind's lane pin).
+#   kParserVer 335 (rich 336) is the train's number for qual-ns-call-bind, above main's 333/334 (train 1117d2); import-proved-splits
+#   and cr705-edges change no extraction. kCacheVersion 53 and kQSnapCacheScheme stay main's.
+# 2026-11-19, lane qual-ns-call-bind (stacked on lane/import-proved-splits 4787d1ed0): RE-PINNED with UPDATE_GOLDEN=1. kParserVer
+#   335 PLACEHOLDER (C++ using-declarations + namespace aliases recorded, ingest_binds.h kCppCallScopeFacts; mirrored in quality.h);
+#   the train renumbers and re-pins. kCacheVersion and kQSnapCacheScheme unchanged.
 # 2026-11-20, train 1117d2-s (std-namesake, rust-reexport, rust-modalias-glob, rust-self-chain, rust-macro-args,
 #   rust-path-unhedged, redact-touch, qd-swap, qd-similar-default, py-class-spray; rebased onto main ee8d1a50e, #705 = train 1117d1):
 #   RE-PINNED ONCE with UPDATE_GOLDEN=1 from the rebased build (hash 14b63d9888…d246329). kParserVer 333 (rich 334) replaces the

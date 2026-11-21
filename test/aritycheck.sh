@@ -228,6 +228,8 @@ argtype ptrArg                     "buf.cc:12 buf.cc:13" split "[N] an Instance*
 argtype constArg                   "buf.cc:14 buf.cc:15" split "[N] a const Instance& cannot bind cref( Instance& )"
 argtype Watermark::shadowed        "buf.cc:4 buf.cc:5"   split "[N] the View parameter is hidden by a block-scope Instance& of the same name"
 argtype farCaller                  "buf.cc:4 buf.cc:5"   split "[N] far::View spelled View in another namespace is not lib::View"
+argtype innerConstArg              "buf.cc:22"           bound "[P] Box<const View>& → Holder::hold( Box<const View>& ) alone: a const inside <...> is the type's (CR #705; split on ee8d1a50e)"
+argtype ptrInTemplateArg           "buf.cc:23"           bound "[P] const Box<View*>& → Holder::wrapPtr( Box<View*> const& ) alone: a * inside <...> is the type's (CR #716; split on b239be9b6)"
 # receiver guards (regression arms, green on main too): a qualified call naming a class outside the tree (ext::Base::wrap) and a
 # NAME-ONLY call through a field of an unindexed type (real_.relay) keep exactly today's edge onto the namesake sibling — the pick
 # never runs on a tier no lookup tied to the call (the envoy hand check found both shapes: context.h Buffer::set, FailingSignUtility)

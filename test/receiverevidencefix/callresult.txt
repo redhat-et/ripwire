@@ -2768,3 +2768,28 @@ func AmbG() int {
 func AmbParam(p gen.Less) int {
 	return p.M()
 }
+@@@ go8/pb/t.go
+package pb
+
+type GenID struct{ v int }
+
+func (t GenID) IsSet() bool { return t.v != 0 }
+@@@ go8/x/pb/t.go
+package pb
+
+type GenID struct{ v int }
+
+func (t GenID) IsSet() bool { return t.v == 1 }
+@@@ go8/lib/x/pb/t.go
+package pb
+
+// GenID is declared in a generated file the tree leaves out; only its methods are here
+
+func (t GenID) IsSet() bool { return false }
+@@@ go8/app/app.go
+package app
+
+import "lib/x/pb"
+
+// the import path admits three directories: pb/ and x/pb/ DECLARE GenID (ambiguous), lib/x/pb/ only has its methods
+func UseAmbiguous(id pb.GenID) bool { return id.IsSet() }

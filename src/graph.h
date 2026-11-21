@@ -1369,8 +1369,9 @@ inline void keepRustTraitImplementors( ChaConeMemo& chaCones, const IngestResult
 
 // PROVEN-SITE-KEEPS-NAMESAKES: a PROVEN call site's targets, appended to Graph::provenSites in reference order, while the name has
 // more than one definition (`namesakes`) — a name with one cannot be misplaced. rivalledProvenSites prunes the list once every
-// edge exists. A via=name site appends nothing: it counts for every row of its name, as before.
-inline void noteProvenSite( std::vector<ProvenSite>& out, bool proven, std::size_t namesakes, std::uint32_t ref, NodeId from, std::span<const NodeId> tier )
+// edge exists. A via=name site appends nothing: it counts for every row of its name, as before. A recursive call's own target is
+// kept too (it is no graph edge): when `A::f` also calls `B::f`, B::f's site test must still read its `f()` self-call as A::f's.
+inline void noteProvenSite( std::vector<ProvenSite>& out, bool proven, std::size_t namesakes, std::uint32_t ref, std::span<const NodeId> tier )
 {
     if( !proven || namesakes < 2 )
     {
@@ -1378,10 +1379,7 @@ inline void noteProvenSite( std::vector<ProvenSite>& out, bool proven, std::size
     }
     for( const NodeId to : tier )
     {
-        if( to != from )
-        {
-            out.push_back( { ref, to } );
-        }
+        out.push_back( { ref, to } );
     }
 }
 
@@ -1410,7 +1408,10 @@ inline void rivalledProvenSites( const IngestResult& ing, const Graph& g, std::v
         if( rival )
         {
             std::sort( sites.begin() + std::ptrdiff_t( at ), sites.begin() + std::ptrdiff_t( end ) );
-            std::move( sites.begin() + std::ptrdiff_t( at ), sites.begin() + std::ptrdiff_t( end ), sites.begin() + std::ptrdiff_t( kept ) );
+            if( kept != at )   // std::move's destination may not start inside its source range
+            {
+                std::move( sites.begin() + std::ptrdiff_t( at ), sites.begin() + std::ptrdiff_t( end ), sites.begin() + std::ptrdiff_t( kept ) );
+            }
             kept += end - at;
         }
         at = end;
@@ -2826,6 +2827,7 @@ struct ExternalVetoTables
     HashMap<std::string, std::uint32_t> scopedImportBindFile;
     HashMap<std::string, std::uint32_t> scopedSubmoduleBindFile;
     HashMap<std::string, char>          scopedImportNames;   // "<fileId>#y": some def or class in the file imports y (pythonEnclosingDefBinds' pre-test)
+    HashMap<std::string, char>          pythonMultiFileClasses;   // IMPORT-PROVED-SPLITS: pythonMultiFileClassNames, built once per run
 };
 
 // the ONE module file `import X [as y]` binds y to (Step-A's `resolved`, else the root-scoped suffix match of an absolute spec), kNoFile when
@@ -2940,6 +2942,30 @@ inline HashMap<std::string, char> buildPythonModuleRebindVetoes( const IngestRes
     return pythonModuleRebind;
 }
 
+// IMPORT-PROVED-SPLITS: every name Python classes carry in two or more files — the names a plain `from m import C` may tell apart
+inline HashMap<std::string, char> pythonMultiFileClassNames( const IngestResult& ing )
+{
+    HashMap<std::string, std::uint32_t> firstFile;   // name → the first file defining a class of it; UINT32_MAX once a second file does
+    for( const Symbol& s : ing.symbols )
+    {
+        if( langFacts( s.lang ).baseImportEvidence != BaseImportEvidence::PythonImport || s.kind != SymKind::Class )   // Python's import grammar
+        {
+            continue;
+        }
+        const auto [ it, fresh ] = firstFile.try_emplace( s.name, s.fileId );
+        it->second = !fresh && it->second != s.fileId ? UINT32_MAX : it->second;
+    }
+    HashMap<std::string, char> multi;
+    for( const auto& [ name, file ] : firstFile )
+    {
+        if( file == UINT32_MAX )
+        {
+            multi.try_emplace( name, '\0' );
+        }
+    }
+    return multi;
+}
+
 // is `path` a Python source file (.py / .pyi)?
 inline bool isPythonSourcePath( std::string_view path ) noexcept
 {
@@ -3016,6 +3042,20 @@ inline void addPythonLookupNames( const IngestResult& ing, HashMap<std::string, 
     }
 }
 
+// IMPORT-PROVED-SPLITS: the name of every plain `from m import C` in a Python file whose C names Python classes in two or more files
+// (`multi`: pythonMultiFileClassNames) — buildPythonNameBinds reads its bindings, so pythonRenamedImportPin can ask m's own bindings of it
+inline void addPythonMultiFileImportNames( const IngestResult& ing, const HashMap<std::string, char>& multi, HashMap<std::string, char>& names )
+{
+    for( const Binding& b : ing.bindings )
+    {
+        if( b.kind == LocalBindKind::Import && b.importedName.empty() && multi.contains( b.var ) && b.fileId < ing.files.size()
+            && isPythonSourcePath( rootRelPath( ing, b.fileId ) ) )   // a Python file's import (another language's names no Python binding)
+        {
+            names.try_emplace( b.var, '\0' );
+        }
+    }
+}
+
 // the scope a Python binding sits in: its enclosing def or class, kNoNode for module scope (including every binding at byte 0 —
 // pythonBindAtFileStart: a `global Base` rebinding inside a def that starts the file, and that def's own name).
 inline NodeId pythonBindScope( const IngestResult& ing, const Binding& b ) noexcept
@@ -3082,6 +3122,7 @@ struct PythonImportVetoes
     HashMap<std::string, std::uint32_t>     memberImportFile;
     std::vector<std::vector<std::uint32_t>> importFiles;
     PythonScopeFacts                        scopes;
+    HashMap<std::string, char>              multiFileClasses;   // pythonMultiFileClassNames (ExternalVetoTables::pythonMultiFileClasses)
 };
 
 // FE-A: resolvePythonModuleSuffix scans every indexed path, and FE-A asks it about every UNRESOLVED absolute import (the
@@ -3581,6 +3622,8 @@ inline PythonImportVetoes buildPythonImportVetoes( const IngestResult& ing, cons
     t.scopes             = buildPythonStarTargets( ing, fileIndex, memo );
     HashMap<std::string, char> callees = pythonSubmoduleCalleeNames( ing, t.submodules );
     addScopedSubmoduleCalleeNames( ing, t.scopedSubmodules, callees );
+    t.multiFileClasses   = pythonMultiFileClassNames( ing );
+    addPythonMultiFileImportNames( ing, t.multiFileClasses, callees );
     t.scopes.nameBinds   = buildPythonNameBinds( ing, std::move( callees ) );
     return t;
 }
@@ -3653,6 +3696,7 @@ inline ExternalVetoTables buildExternalVetoTables( const IngestResult& ing )
         t.memberImportFile    = std::move( iv.memberImportFile );
         t.importFiles         = std::move( iv.importFiles );
         t.pythonScopes        = std::move( iv.scopes );
+        t.pythonMultiFileClasses = std::move( iv.multiFileClasses );
         finalizePythonSubmoduleBinds( iv.submodules, t );
         finalizePythonScopedBinds( ing, iv, t );
     }
@@ -3892,16 +3936,35 @@ struct JsImportTables
     HashMap<std::string, std::vector<VarSpan>> shadows;
     HashMap<std::string, std::vector<VarSpan>> rebinds;   // FC3: "<fileId>#name" → JsRebind spans (model.h): a call there is undecided
     HashMap<std::string, std::vector<VarSpan>> pinnedRebinds;   // FC3: the rebinds whose declaration already bound a value: a MEMBER call through the name has no receiver at all there (jsMemberRootWritten)
+    std::vector<char>                          importingFiles;  // per fileId: 1 when the file has an ES import binding (a `targets` key)
+    // can `targets` hold a key of file `f`? (no "<fileId>#name" key is built for a file with no ES import)
+    [[nodiscard]] bool importsIn( std::uint32_t f ) const noexcept { return f < importingFiles.size() && importingFiles[ f ] != 0; }
 };
+
+// does a "<fileId>#name"-keyed span table hold a span of `key` that covers byte `at`? (JsImportTables' shadows / rebinds / pinnedRebinds)
+inline bool spanCoversAt( const HashMap<std::string, std::vector<VarSpan>>& spans, const std::string& key, std::uint32_t at )
+{
+    const auto it = spans.find( key );
+    if( it == spans.end() )
+    {
+        return false;
+    }
+    for( const VarSpan& s : it->second )
+    {
+        if( at >= s.startByte && at < s.endByte )
+        {
+            return true;
+        }
+    }
+    return false;
+}
 
 // FC3: is this BARE call made through a name WRITTEN after its declaration, at a byte that declaration's scope holds
 // (`Eng = Foo; new Eng()`)? Such a call is undecided: the name no longer names what it was declared as.
 inline bool jsCallThroughWrittenBinding( const JsImportTables& tables, const Reference& r )
 {
     if( r.role != RefRole::Call || r.memberCall || r.recv != RecvKind::None || !r.qualifier.empty() ) { return false; }
-    const auto spans = tables.rebinds.find( jsImportKey( r.fileId, r.calleeName ) );
-    return spans != tables.rebinds.end()
-        && std::any_of( spans->second.begin(), spans->second.end(), [ & ]( const VarSpan& span ) { return r.startByte >= span.startByte && r.startByte < span.endByte; } );
+    return spanCoversAt( tables.rebinds, jsImportKey( r.fileId, r.calleeName ), r.startByte );
 }
 
 // FC3: what a MEMBER call's ROOT name (`tank` of `tank.spill()`, `Eng` of `Eng.make()`) holds at the call's byte. A root WRITTEN
@@ -3915,13 +3978,9 @@ enum class JsWrittenRoot : std::uint8_t { None, Unpinned, Pinned };
 inline JsWrittenRoot jsMemberRootWritten( const JsImportTables& tables, const Reference& r )
 {
     if( r.role != RefRole::Call || !r.memberCall || r.memberRoot.empty() ) { return JsWrittenRoot::None; }
-    const auto holds = [ & ]( const HashMap<std::string, std::vector<VarSpan>>& byName )
-    {
-        const auto spans = byName.find( jsImportKey( r.fileId, r.memberRoot ) );
-        return spans != byName.end()
-            && std::any_of( spans->second.begin(), spans->second.end(), [ & ]( const VarSpan& span ) { return r.startByte >= span.startByte && r.startByte < span.endByte; } );
-    };
-    return holds( tables.pinnedRebinds ) ? JsWrittenRoot::Pinned : holds( tables.rebinds ) ? JsWrittenRoot::Unpinned : JsWrittenRoot::None;
+    const std::string key = jsImportKey( r.fileId, r.memberRoot );
+    return spanCoversAt( tables.pinnedRebinds, key, r.startByte ) ? JsWrittenRoot::Pinned
+         : spanCoversAt( tables.rebinds, key, r.startByte )       ? JsWrittenRoot::Unpinned : JsWrittenRoot::None;
 }
 
 // `utils.ts` and `utils` name the same module, so the vocabulary probe below has to compare stems.
@@ -3989,11 +4048,14 @@ inline bool jsModuleIsForeign( std::string_view module, const HashMap<std::strin
 
 // Everything path resolution needs to answer "where does this specifier land": the corpus file index, the
 // workspace/tsconfig context when there is one, and the module vocabulary the externality probe reads.
+// `bareTs` (#711, optional): the project-config resolver the file edge reads (resolve.h resolveBareTsSpecifier), over `files`;
+// when set, a bare specifier the path resolver missed (a tsconfig `paths` alias `@/x`, a workspace package) is resolved through it.
 struct JsModuleCtx
 {
     const HashMap<std::string, std::uint32_t>& files;
     const WsIncludeCtx*                        workspace;
     const HashMap<std::string, char>&          vocabulary;
+    BareTsResolver*                            bareTs = nullptr;
 };
 
 inline std::pair<std::uint32_t, bool> resolveJsNamedImportFile( std::string_view importer, std::string_view module,
@@ -4024,10 +4086,15 @@ inline std::pair<std::uint32_t, bool> resolveJsNamedImportFile( std::string_view
 inline std::pair<std::uint32_t, JsImportOutcome> resolveJsImportModule( std::string_view importer, std::string_view module,
                                                                        std::uint32_t importerFileId, const JsModuleCtx& ctx )
 {
-    const auto [ fileId, ambiguous ] = resolveJsNamedImportFile( importer, module, ctx.files, ctx.workspace, importerFileId );
+    auto [ fileId, ambiguous ] = resolveJsNamedImportFile( importer, module, ctx.files, ctx.workspace, importerFileId );
     if( ambiguous )
     {
         return { kNoFile, JsImportOutcome::Refused };   // an emitted file and its source both answer the specifier
+    }
+    if( fileId == kNoFile && ctx.bareTs != nullptr && tsimport::isBareTsSpecifier( importer, module ) )
+    {
+        // #711: the file edge's answer for the same specifier (buildPreciseIncludeAdjWithContext), so the two cannot disagree
+        fileId = resolveBareTsSpecifier( *ctx.bareTs, ctx.workspace, importerFileId, module ).file;
     }
     if( fileId == kNoFile )
     {
@@ -4119,10 +4186,10 @@ inline NodeId jsExportedNode( const JsExportTables& ex, std::uint32_t moduleFile
 // An empty exportName is a TYPE-ONLY import: it binds a type, so a call through the name is not this import's call, and
 // there is no module question to ask.
 inline JsImportTarget pinJsImport( const IngestResult& ing, const JsExportTables& ex, const WsIncludeCtx* workspace, std::uint32_t fileId,
-                                   std::string_view module, std::string_view exportName )
+                                   std::string_view module, std::string_view exportName, BareTsResolver* bareTs = nullptr )
 {
     JsImportTarget    target;
-    const JsModuleCtx ctx{ ex.files, workspace, ex.vocabulary };
+    const JsModuleCtx ctx{ ex.files, workspace, ex.vocabulary, bareTs };
     const auto [ moduleFile, moduleOutcome ] = exportName.empty()
         ? std::pair<std::uint32_t, JsImportOutcome>{ kNoFile, JsImportOutcome::Refused }
         : resolveJsImportModule( rootRelPath( ing, fileId ), module, fileId, ctx );
@@ -4152,14 +4219,17 @@ inline JsImportTables buildJsImportTables( const IngestResult& ing, const WsIncl
         return tables;
     }
     tables.targets.reserve( bindCounts.allOf( LocalBindKind::JsImport ) );
-    JsExportTables ex = buildJsExportTablesSized( ing, bindCounts );
+    tables.importingFiles.assign( ing.files.size(), 0 );
+    JsExportTables   ex = buildJsExportTablesSized( ing, bindCounts );
+    BareTsResolver   bareTs{ ing, ex.files, std::nullopt };   // #711: the file edge's resolver, over ex.files (which outlives it)
     for( const Binding& b : ing.bindings )
     {
         if( b.kind != LocalBindKind::JsImport || b.fileId >= ing.files.size() ) { continue; }
         // isFromAssignment (lane receiver-fixes): a type-only `import type { T }` under its export name — its module is resolved, and
         // the name it binds is T's, so a field or local written `T` finds T's module (an interface's: receiverevidence.h importedTypeClass)
-        JsImportTarget target = pinJsImport( ing, ex, workspace, b.fileId, b.typeName, b.isFromAssignment ? std::string_view( b.var ) : std::string_view( b.importedName ) );
+        JsImportTarget target = pinJsImport( ing, ex, workspace, b.fileId, b.typeName, b.isFromAssignment ? std::string_view( b.var ) : std::string_view( b.importedName ), &bareTs );
         target.renamed        = b.importedName != b.var && !b.isFromAssignment;
+        tables.importingFiles[ b.fileId ] = 1;
         const auto [ found, inserted ] = tables.targets.try_emplace( jsImportKey( b.fileId, b.var ), target );
         if( !inserted )
         {
@@ -6940,9 +7010,7 @@ struct FalseEdgeRules
     }
     bool shadowedAt( const Reference& r, std::string_view name ) const
     {
-        const auto it = shadows.find( fileNameKey( key, r.fileId, name ) );
-        return it != shadows.end()
-            && std::any_of( it->second.begin(), it->second.end(), [ & ]( const VarSpan& s ) { return r.startByte >= s.startByte && r.startByte < s.endByte; } );
+        return spanCoversAt( shadows, fileNameKey( key, r.fileId, name ), r.startByte );
     }
     // the file binds `name` at this site: an import or alias of it, or a declaration whose scope holds the site
     bool jsFileBinds( const Reference& r, std::string_view name ) const
@@ -9307,45 +9375,116 @@ struct PythonAliasShadow
     VarSpan     span;   // [startByte, endByte): where the name is the comprehension target or lambda parameter
 };
 
-struct PythonRenamedImports
+// the module-scope member imports pythonRenamedImportPin may pin through, per "<fileId>#name". `renamed`: `from m import x as y` (PY-IMPORT-
+// ALIAS-CALL: y → x). IMPORT-PROVED-SPLITS `plainClasses`: "<fileId>#C" for every Python file where EVERY import of C is one module-scope
+// plain `from m import C` and C names Python classes in two or more files (pythonMultiFileClassNames): pythonRenamedImportPin pins such a
+// C only to a class.
+struct PythonImportPins
 {
     HashMap<std::string, std::string> renamed;
+    HashMap<std::string, char>        plainClasses;
     std::vector<PythonAliasShadow>    shadows;
-    [[nodiscard]] bool                empty() const noexcept { return renamed.empty(); }
+    std::vector<char>                 importingFiles;   // per fileId: 1 when some module-scope import there named a member (a superset of the keyed files)
+    [[nodiscard]] bool                empty() const noexcept { return renamed.empty() && plainClasses.empty(); }
+    // can `renamed` / `plainClasses` hold a key of file `f`? (no "<fileId>#name" key is built for a file with none)
+    [[nodiscard]] bool importsIn( std::uint32_t f ) const noexcept { return f < importingFiles.size() && importingFiles[ f ] != 0; }
+    [[nodiscard]] bool                binds( const std::string& key ) const { return renamed.contains( key ) || plainClasses.contains( key ); }
+    // the member `key` ("<fileId>#name") imports and whether it is a plain import of a class (the member is the name itself); "" for none
+    struct Member
+    {
+        std::string_view name;
+        bool             plain = false;
+    };
+    [[nodiscard]] Member memberOf( const std::string& key, std::string_view name ) const
+    {
+        if( const auto it = renamed.find( key ); it != renamed.end() )
+        {
+            return { it->second, false };
+        }
+        return plainClasses.contains( key ) ? Member{ name, true } : Member{};
+    }
+    // moves every entry whose member is its own local name (a plain import) from `renamed` to `plainClasses`, and drops the poisoned ones
+    void splitPlain()
+    {
+        std::erase_if( renamed, [ & ]( const auto& kv )
+        {
+            const bool plain = !kv.second.empty() && std::string_view( kv.first ).substr( kv.first.find( '#' ) + 1 ) == kv.second;
+            if( plain )
+            {
+                plainClasses.try_emplace( kv.first, '\0' );
+            }
+            return kv.second.empty() || plain;
+        } );
+    }
 };
 
-inline PythonRenamedImports buildPythonRenamedImports( const IngestResult& ing )
+// the member a Python import binding names under its local name, at module scope only: x for `from m import x as y`, and for a plain
+// `from m import x` when x names classes in two or more files (`multi`: IMPORT-PROVED-SPLITS); "" for any other import (it poisons the name)
+inline std::string pythonImportMember( const IngestResult& ing, const Binding& b, const HashMap<std::string, char>& multi )
 {
-    PythonRenamedImports out;
-    std::string          key;
+    if( pythonBindScope( ing, b ) != kNoNode )
+    {
+        return {};
+    }
+    if( b.importedName.str().starts_with( kPythonFromMemberMark ) )
+    {
+        return b.importedName.substr( kPythonFromMemberMark.size() );
+    }
+    return b.importedName.empty() && multi.contains( b.var ) ? std::string( b.var ) : std::string{};
+}
+
+// `multi`: ExternalVetoTables::pythonMultiFileClasses (pythonMultiFileClassNames)
+inline PythonImportPins buildPythonImportPins( const IngestResult& ing, const HashMap<std::string, char>& multi )
+{
+    PythonImportPins out;
+    std::string      key;
+    out.importingFiles.assign( ing.files.size(), 0 );
     for( const Binding& b : ing.bindings )
     {
         if( b.kind != LocalBindKind::Import || b.var.empty() || b.fileId >= ing.files.size() || !isPythonSourcePath( rootRelPath( ing, b.fileId ) ) )
         {
             continue;
         }
-        const bool renamed = b.importedName.str().starts_with( kPythonFromMemberMark ) && pythonBindScope( ing, b ) == kNoNode;
-        const std::string member = renamed ? b.importedName.substr( kPythonFromMemberMark.size() ) : std::string{};
+        const std::string member = pythonImportMember( ing, b, multi );
+        out.importingFiles[ b.fileId ] = member.empty() ? out.importingFiles[ b.fileId ] : char( 1 );
         const auto [ it, fresh ] = out.renamed.try_emplace( fileNameKey( key, b.fileId, b.var ), member );
         if( !fresh && it->second != member )
         {
             it->second.clear();   // two imports of one name that disagree: never decided
         }
     }
-    std::erase_if( out.renamed, []( const auto& kv ) { return kv.second.empty(); } );
-    if( out.renamed.empty() )
+    out.splitPlain();
+    if( out.empty() )
     {
         return out;
     }
     for( const Binding& b : ing.bindings )
     {
         if( b.kind == LocalBindKind::RecvType && b.fromSymbol != kNoNode && !b.var.empty() && b.fileId < ing.files.size()
-            && out.renamed.contains( fileNameKey( key, b.fileId, b.var ) ) )
+            && out.binds( fileNameKey( key, b.fileId, b.var ) ) )
         {
             out.shadows.push_back( PythonAliasShadow{ b.fromSymbol, b.var, VarSpan{ b.spanStart, b.spanEnd } } );
         }
     }
     return out;
+}
+
+// PY-IMPORT-ALIAS-CALL: is `name` bound where `r` runs by something other than the file's module-scope import of it — a local or parameter
+// of the caller (localNameSet, which also holds a def-scoped import), of a def enclosing it (a closure reads that), or a comprehension
+// target / lambda parameter whose span covers the call (PythonImportPins::shadows: the site-spanned records localNameSet skips)
+inline bool pythonNameBoundLocally( const IngestResult& ing, const PythonImportPins& imports, const ExternalVeto& veto, const Reference& r, std::string_view name )
+{
+    if( veto.hasLocal( r, name ) || std::ranges::any_of( imports.shadows, [ &r, name ]( const PythonAliasShadow& s )
+                                                          { return s.sym == r.fromSymbol && s.var == name && r.startByte >= s.span.startByte && r.startByte < s.span.endByte; } ) )
+    {
+        return true;
+    }
+    return std::ranges::any_of( pythonClassScopeChain( ing, r.fromSymbol ), [ & ]( NodeId outer )
+    {
+        Reference at = r;
+        at.fromSymbol = outer;
+        return veto.hasLocal( at, name );
+    } );
 }
 
 // PY-IMPORT-ALIAS-CALL: the ONE definition a bare Python call `y()` reaches through `from m import x as y`, else kNoNode. Decided only
@@ -9354,31 +9493,28 @@ inline PythonRenamedImports buildPythonRenamedImports( const IngestResult& ing )
 // namespace write: pythonModuleRebind; the caller file's own `__getattr__` is never consulted for a name it binds), and no star import in the file (it may bind y after the rename); and only when m resolves to ONE
 // indexed file (memberImportFile) whose module scope binds x ONLY by that one function or class (pythonEndpointBindsOnlyByClass). A package that
 // re-exports x defines none there: no decision, the call falls to the unchanged ladder (a floor, not a guess). A comprehension target or lambda parameter
-// named y that covers the call byte is a binding too (PythonRenamedImports::shadows: the site-spanned records localNameSet skips).
-inline NodeId pythonRenamedImportPin( const IngestResult& ing, const PythonRenamedImports& imports, const ExternalVetoTables& v,
-                                      const ExternalVeto& veto, const HashMap<std::string, rw::SmallVec<NodeId, 2>>& byName, const Reference& r )
+// named y that covers the call byte is a binding too (PythonImportPins::shadows: the site-spanned records localNameSet skips).
+// `name` is the local name the call is written through: r.calleeName for the bare call `y()`, or, for IMPORT-PROVED-SPLITS
+// (ImportProvedClass), the receiver root C of a member call `C.m()` / the class of `C()`; there a plain `from m import C` (PythonImportPins::
+// plainClasses) pins too, but only to a class.
+inline NodeId pythonRenamedImportPin( const IngestResult& ing, const PythonImportPins& imports, const ExternalVetoTables& v,
+                                      const ExternalVeto& veto, const HashMap<std::string, rw::SmallVec<NodeId, 2>>& byName, const Reference& r,
+                                      std::string_view name )
 {
+    if( !imports.importsIn( r.fileId ) )
+    {
+        return kNoNode;   // no module-scope member import in r's file: no key to build
+    }
     std::string key;
-    const auto  rit = imports.renamed.find( fileNameKey( key, r.fileId, r.calleeName ) );
-    if( rit == imports.renamed.end() || r.fromSymbol == kNoNode || r.fromSymbol >= ing.symbols.size()
+    const auto [ member, plain ] = imports.memberOf( fileNameKey( key, r.fileId, name ), name );   // plain: IMPORT-PROVED-SPLITS' `from m import C`
+    if( member.empty() || r.fromSymbol == kNoNode || r.fromSymbol >= ing.symbols.size()
         || v.pythonModuleRebind.contains( key ) || v.pythonModuleRebind.contains( fileNameKey( key, r.fileId, kPythonDynamicWrite ) )
-        || ( r.fileId < v.pythonScopes.starTargets.size() && !v.pythonScopes.starTargets[ r.fileId ].empty() ) || veto.hasLocal( r, r.calleeName )
-        || std::ranges::any_of( imports.shadows, [ &r ]( const PythonAliasShadow& s )
-                                 { return s.sym == r.fromSymbol && s.var == r.calleeName && r.startByte >= s.span.startByte && r.startByte < s.span.endByte; } ) )
+        || ( r.fileId < v.pythonScopes.starTargets.size() && !v.pythonScopes.starTargets[ r.fileId ].empty() ) || pythonNameBoundLocally( ing, imports, veto, r, name ) )
     {
         return kNoNode;
     }
-    for( NodeId outer : pythonClassScopeChain( ing, r.fromSymbol ) )
-    {
-        Reference at = r;
-        at.fromSymbol = outer;
-        if( veto.hasLocal( at, r.calleeName ) )
-        {
-            return kNoNode;   // an enclosing def binds the name: a closure reads that, not the import
-        }
-    }
-    const auto mf = v.memberImportFile.find( fileNameKey( key, r.fileId, r.calleeName ) );
-    const auto dit = byName.find( rit->second );
+    const auto mf = v.memberImportFile.find( fileNameKey( key, r.fileId, name ) );
+    const auto dit = byName.find( std::string( member ) );
     if( mf == v.memberImportFile.end() || mf->second == kNoFile || dit == byName.end() )
     {
         return kNoNode;
@@ -9388,7 +9524,7 @@ inline NodeId pythonRenamedImportPin( const IngestResult& ing, const PythonRenam
     {
         const Symbol& s = ing.symbols[ c ];
         // module scope = no enclosing def or class by span (a Python class's Symbol::scope is its own name, so scope.empty() cannot say it)
-        if( s.fileId == mf->second && s.lang == Lang::Python && ( s.kind == SymKind::Function || s.kind == SymKind::Class )
+        if( s.fileId == mf->second && s.lang == Lang::Python && ( s.kind == SymKind::Class || ( s.kind == SymKind::Function && !plain ) )   // a plain import pins only a class
             && pythonClassScopeChain( ing, c ).empty() )
         {
             if( only != kNoNode )
@@ -9404,9 +9540,9 @@ inline NodeId pythonRenamedImportPin( const IngestResult& ing, const PythonRenam
     // namespace write (`globals()[...]`, `setattr(...)`) may bind it too. A module `__getattr__` (PEP 562) answers only a name m does not
     // bind, so it withholds only when x's def sits inside an `if`/`try`/`with`/loop at module scope (kPythonCondDefPrefix: it may not run)
     if( only != kNoNode
-        && ( !pythonEndpointBindsOnlyByClass( v, mf->second, rit->second ) || v.pythonModuleRebind.contains( fileNameKey( key, mf->second, kPythonDynamicWrite ) )
+        && ( !pythonEndpointBindsOnlyByClass( v, mf->second, member ) || v.pythonModuleRebind.contains( fileNameKey( key, mf->second, kPythonDynamicWrite ) )
              || ( v.pythonModuleRebind.contains( fileNameKey( key, mf->second, kPythonDynamicBind ) )
-                  && v.pythonModuleRebind.contains( fileNameKey( key, mf->second, std::string{ kPythonCondDefPrefix }.append( rit->second ) ) ) ) ) )
+                  && v.pythonModuleRebind.contains( fileNameKey( key, mf->second, std::string{ kPythonCondDefPrefix }.append( member ) ) ) ) ) )
     {
         return kNoNode;
     }
@@ -10542,6 +10678,46 @@ inline bool callArityCannotTake( const Reference& ref, const Symbol& cs, std::ui
 {
     return ref.argCountKnown && ( ( cs.arityExact != 0 && ref.argCount > cs.params ) || ref.argCount < paramsMin );
 }
+// IMPORT-PROVED-SPLITS: ReceiverEvidence::pathOwners' per-language resolver — the ONE in-tree class `name` names where `r` is
+// written, through the caller file's own import of the name; kNoNode for none, several, or a language with no resolver here.
+struct ImportProvedClass
+{
+    const JsImportTables&                                 jsImports;
+    const IngestResult&                                   ing;
+    const PythonImportPins&                              pyImports;
+    const ExternalVetoTables&                             extVeto;
+    const ExternalVeto&                                   externalVeto;
+    const HashMap<std::string, rw::SmallVec<NodeId, 2>>& byName;
+
+    NodeId operator()( const Reference& r, std::string_view name ) const
+    {
+        const BaseImportEvidence grammar = langFacts( r.lang ).baseImportEvidence;   // which import tables can name the class
+        if( grammar == BaseImportEvidence::PythonImport )
+        {
+            const NodeId pin = pythonRenamedImportPin( ing, pyImports, extVeto, externalVeto, byName, r, name );
+            return pin != kNoNode && ing.symbols[ pin ].kind == SymKind::Class ? pin : kNoNode;   // Python: a plain or renamed member import of a class
+        }
+        return grammar == BaseImportEvidence::JsImport ? jsClass( r, name ) : kNoNode;
+    }
+    // TS/JS: the class an ES named import of `name` (renamed or not) pins in r's file (buildJsImportTables: Pinned, the module's export
+    // table names it) — not where a local declaration shadows the import or a write rebinds the name (FC3) at r's byte
+    NodeId jsClass( const Reference& r, std::string_view name ) const
+    {
+        if( !jsImports.importsIn( r.fileId ) )
+        {
+            return kNoNode;   // no ES import in r's file: no key to build
+        }
+        const std::string key = jsImportKey( r.fileId, name );
+        const auto        pin = jsImports.targets.find( key );
+        if( pin == jsImports.targets.end() || pin->second.outcome != JsImportOutcome::Pinned || pin->second.node == kNoNode
+            || !ReceiverEvidence::classLike( ing.symbols[ pin->second.node ].kind ) )
+        {
+            return kNoNode;
+        }
+        return spanCoversAt( jsImports.shadows, key, r.startByte ) || spanCoversAt( jsImports.rebinds, key, r.startByte ) ? kNoNode : pin->second.node;
+    }
+};
+
 inline bool pythonScopePinAt( const PythonLexicalScopes& scopes, const IngestResult& ing, const ExternalVetoTables& veto, const Reference& r, std::vector<NodeId>& cand )
 {
     const auto moduleUnread = [ & ]
@@ -10551,6 +10727,127 @@ inline bool pythonScopePinAt( const PythonLexicalScopes& scopes, const IngestRes
             || veto.pythonModuleRebind.contains( fileNameKey( key, r.fileId, kPythonDynamicWrite ) );                       // `globals()` / `setattr`
     };
     return cand.empty() && !scopes.empty() && isPythonBareCall( r ) && pythonLexicalScopePin( scopes, ing, r, moduleUnread, cand );
+}
+
+// QUAL-NS-CALL-BIND: what canonicalCallQualifier reads beyond the call — built once, before the resolve loop
+struct CallScopeLookup
+{
+    const CallResultTypes&                               types;        // cppScopeNamedAt: the declaration in force at the site
+    const std::vector<Symbol>&                           symbols;
+    const CanonicalScopes&                               canon;        // byScope: what a scope spelled `q` holds; narrower + chaUp: the CHA walk
+    const ClassIdentity&                                 classIds;     // the caller's class chain; a bodiless member's "Scope::name"
+    const FalseEdgeRules&                                falseEdges;   // a local the caller declares
+    const HashMap<std::string, rw::SmallVec<NodeId, 2>>& byName;       // the callee's in-tree namesakes
+    mutable std::string                                  key;          // "Scope::name" buffer
+};
+
+// a scope spelled `scope` holds `name` itself: a definition (byScope) or a bodiless member declaration (ClassIdentity::declared)
+inline bool scopeHoldsName( const CallScopeLookup& at, std::string_view scope, std::string_view name )
+{
+    at.key.assign( scope ).append( "::" ).append( name );
+    return at.canon.byScope.contains( at.key ) || at.classIds.declared.contains( at.key );
+}
+
+// What the caller's class scopes say about `r.calleeName` (C++ unqualified lookup's first steps): whether the caller's own
+// scope, its class or an enclosing class — each with its bases and bodiless declarations — declares it (or the chain is
+// deeper than read), and whether the caller may sit in a namespace (a non-empty scope, or a class: a class's namespace is
+// not recorded either).
+struct CallerClassChain
+{
+    bool declares         = false;
+    bool mayBeInNamespace = false;
+};
+inline CallerClassChain callerClassChain( const Reference& r, const CallScopeLookup& at )
+{
+    const Narrower&        narrower  = at.canon.narrower;
+    const bool             hasCaller = r.fromSymbol < at.symbols.size();
+    const std::string_view own       = hasCaller ? std::string_view( at.symbols[ r.fromSymbol ].scope ) : std::string_view{};
+    const auto declaredIn = [ & ]( std::string_view scope )
+    {
+        return narrower.methodOnTypeOrBases( scope, r, at.canon.chaUp ) != nullptr || scopeHoldsName( at, scope, r.calleeName );
+    };
+    NodeId cls = hasCaller && r.fromSymbol < at.classIds.ownerClass.size() ? at.classIds.ownerClass[ r.fromSymbol ] : kNoNode;
+    CallerClassChain out { !own.empty() && declaredIn( own ), cls != kNoNode || !own.empty() };
+    for( int depth = 0; cls != kNoNode && !out.declares; ++depth )
+    {
+        out.declares = depth == 16 || declaredIn( at.symbols[ cls ].name );
+        cls          = cls < at.classIds.enclosingClass.size() ? at.classIds.enclosingClass[ cls ] : kNoNode;
+    }
+    return out;
+}
+
+// An in-tree namesake of `r.calleeName` that C++ lookup may find before the declaration `named`: a namespace-scope one when
+// the caller may sit in a namespace — no namespace path is recorded while the C++ family is off (card CPP-HDR-NS-USING), so
+// which namespaces lie between the caller and the declaration is unknown — or a global one beside a file-scope declaration
+// (one scope: an overload set C++ resolves). What the declaration names, a member of a class the chain did not reach and
+// another language's namesake never compete.
+inline bool namesakeMayCompete( const Reference& r, const CallResultTypes::CppNamedScope& named, const CallScopeLookup& at, bool mayBeInNamespace )
+{
+    const auto namesakes = at.byName.find( r.calleeName );
+    if( namesakes == at.byName.end() )
+    {
+        return false;
+    }
+    return std::ranges::any_of( namesakes->second, [ & ]( NodeId c )
+    {
+        const Symbol& s      = at.symbols[ c ];
+        const bool    member = s.kind == SymKind::Method || ( c < at.classIds.ownerClass.size() && at.classIds.ownerClass[ c ] != kNoNode );
+        if( !langCompatible( s.lang, r.lang ) || member )
+        {
+            return false;
+        }
+        const std::size_t sep = namesplit::lastTopLevelScopeSep( s.scope );
+        if( s.scope.empty() )
+        {
+            return named.fileScope();
+        }
+        return mayBeInNamespace && std::string_view( s.scope ).substr( sep == std::string_view::npos ? 0 : sep + 2 ) != named.scope;
+    } );
+}
+
+// C++ unqualified lookup walks outward from the call — the caller's class (with its bases), each enclosing class, then the
+// enclosing namespaces — and stops at the first scope that declares the name, so a using-declaration OUTSIDE the caller's
+// body is found only when none of them does. True when one does, or MAY (namesakeMayCompete): the base reading then stands,
+// a hedge, never a guess.
+inline bool callerScopesMayDeclare( const Reference& r, const CallResultTypes::CppNamedScope& named, const CallScopeLookup& at )
+{
+    const CallerClassChain chain = callerClassChain( r, at );
+    return chain.declares || namesakeMayCompete( r, named, at, chain.mayBeInNamespace );
+}
+
+// QUAL-NS-CALL-BIND: the qualifier the canonical tier keys call `r` by. A C++ call whose scope a declaration in force names
+// (CallResultTypes::cppScopeNamedAt) is keyed by that scope, unless C++ lookup may find something else first — then the
+// written qualifier, the base reading:
+//   * an alias shadows the qualifier it spells (`namespace h = rw::hashutil;` makes `h::f()` hashutil's), unless a scope
+//     spelled `h` holds an `f` itself: the Reference keeps one segment, so `gamma::h::f()` or a nested class `S::h` may be
+//     the one the call writes;
+//   * a using-declaration (`using rw::hashutil::f;`) gives a bare `f()` its scope, unless the caller declares a local `f`
+//     (a lambda, a parameter), or — for a declaration outside the caller's own body — a scope between them may declare `f`
+//     (callerScopesMayDeclare). A block-scope declaration in the caller's body is found before any class or namespace.
+// No such declaration, two that disagree, a member call or a non-call: the written qualifier, as before.
+inline std::string_view canonicalCallQualifier( const Reference& r, const CallScopeLookup& at )
+{
+    if( r.role != RefRole::Call || isMemberCallRef( r ) )
+    {
+        return r.qualifier;
+    }
+    const CallResultTypes::CppNamedScope named = at.types.cppScopeNamedAt( r );
+    if( named.scope.empty() )
+    {
+        return r.qualifier;
+    }
+    if( !r.qualifier.empty() )
+    {
+        return scopeHoldsName( at, r.qualifier, r.calleeName ) ? std::string_view( r.qualifier ) : named.scope;
+    }
+    if( ( at.falseEdges.localEvidenceOfCaller( r ) & kLocalNameDeclared ) != 0 )
+    {
+        return r.qualifier;
+    }
+    const bool hasCaller    = r.fromSymbol < at.symbols.size();
+    const bool inCallerBody = hasCaller && !named.fileScope() && at.symbols[ r.fromSymbol ].sigStartByte <= named.spanStart
+                           && named.spanEnd <= at.symbols[ r.fromSymbol ].endByte;
+    return inCallerBody || !callerScopesMayDeclare( r, named, at ) ? named.scope : std::string_view( r.qualifier );
 }
 
 inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = nullptr, bool census = false )
@@ -10892,7 +11189,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // ExternalVeto above buildGraph; `vetoExternal` is the refusal: no edge, one header count, one `C external`
     // census row with no target.
     const ExternalVeto externalVeto{ ing, canonByName, fieldNarrow.localNameSet, extVeto };
-    const PythonRenamedImports pyRenamedImports = buildPythonRenamedImports( ing );   // PY-IMPORT-ALIAS-CALL (pythonRenamedImportPin)
+    const PythonImportPins pyImportPins = buildPythonImportPins( ing, extVeto.pythonMultiFileClasses );   // PY-IMPORT-ALIAS-CALL (pythonRenamedImportPin)
     const PythonLexicalScopes  pyScopes         = buildPythonLexicalScopes( ing, byName );   // PY-CLASS-SPRAY (pythonLexicalScopePin)
     // The builtin-method name gate (BuiltinMethodGate above): decides, in Rule 3's place, the calls whose name is a
     // method of the caller language's builtin map/list/set/string type. Inert (active=false) on a corpus with no
@@ -11036,6 +11333,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         }
     }
     ReceiverEvidence         recvEv( ing, chaUp, classNames );
+    const ImportProvedClass  importClass{ jsImports, ing, pyImportPins, extVeto, externalVeto, byName };   // IMPORT-PROVED-SPLITS: recvEv.pathOwners' per-language resolver
     HashMap<std::string, char> qualifierVerdicts = buildQualifierVerdicts( ing, extVeto, falseEdges );   // h1-annot
     {
         PROFILE_SCOPE_DESCRIBE( "buildGraph/2i: receiver-evidence tables" );
@@ -12139,6 +12437,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     }
     {
         PROFILE_SCOPE_DESCRIBE( "buildGraph/3: resolve loop (per reference)" );
+    const CanonicalScopes canonScopes { canonByName, canonFamilyByName, specializationsWithBases, narrower, chaUp, ing.symbols };
+    const CallScopeLookup callScopes { recvEv.types, ing.symbols, canonScopes, classIds, falseEdges, byName, {} };   // QUAL-NS-CALL-BIND
     const MdLinkPins                mdLinks    = bindMarkdownLinks( ing );   // empty unless the tree holds a cross-file markdown link
     const std::vector<NodeId>&     mdLinkPin  = mdLinks.pin;
     const std::vector<char>&       mdSlugMiss = mdLinks.slugMiss;
@@ -12431,28 +12731,31 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         //   * with nothing visible from the primary, only a split of two or more specializations answers.
         // No answer leaves `cand` empty, so the bare-name ladder decides exactly as it did before the family fallback,
         // and no family answer ever reaches a same-named definition outside the template.
-        if( !scipPinned && r.lang != Lang::Elixir && !r.qualifier.empty() )
+        // QUAL-NS-CALL-BIND: a C++ declaration in force may name the call's scope (canonicalCallQualifier)
+        const std::string_view canonQualifier = scipPinned ? std::string_view( r.qualifier ) : canonicalCallQualifier( r, callScopes );
+        bool                   templateFamily = false;   // F4: the tier answered from a template family, its primary included
+        if( !scipPinned && r.lang != Lang::Elixir && !canonQualifier.empty() )
         {
-            appendCanonicalCandidates( cand, qkey, r, CanonicalScopes { canonByName, canonFamilyByName, specializationsWithBases, narrower, chaUp, ing.symbols },
-                                       [ & ]( NodeId c ) { return langCompatible( symLang[ c ], r.lang ) && sameRoot( c, r.fileId ); } );
+            templateFamily = appendCanonicalCandidates( cand, qkey, canonQualifier, r, canonScopes,
+                                                        [ & ]( NodeId c ) { return langCompatible( symLang[ c ], r.lang ) && sameRoot( c, r.fileId ); } );
             canonical = !cand.empty();
         }
-        // RUST-PATH-OWNER (receiverevidence.h rustPathOwners): the tier matched a Rust path's scope NAME; the type the path resolves to
+        // RUST-PATH-OWNER (receiverevidence.h pathOwners, the Rust arm rustPathOwners): the tier matched a Rust path's scope NAME; the type the path resolves to
         // where it is written decides among same-named types — the one it names, external=, a decline, a hedge over every candidate
         // (nameOnly below), or the ladder's own split that no locality tie-break narrows
-        const ReceiverEvidence::RustPathOwners rustPath = recvEv.rustPathOwners( r, cand, canonical );
-        if( rustPath == ReceiverEvidence::RustPathOwners::External )
+        const ReceiverEvidence::PathOwners rustPath = recvEv.pathOwners( r, cand, canonical, importClass );
+        if( rustPath == ReceiverEvidence::PathOwners::External )
         {
             disposition = vetoExternal( r );
             continue;
         }
-        if( rustPath == ReceiverEvidence::RustPathOwners::Decline )
+        if( rustPath == ReceiverEvidence::PathOwners::Decline )
         {
             recordDecline( r, cand, DeclinedSiteKind::Ladder );
             disposition = CallDisposition::Declined;
             continue;
         }
-        const bool rustPathHedge = rustPath == ReceiverEvidence::RustPathOwners::Hedge;
+        const bool rustPathHedge = rustPath == ReceiverEvidence::PathOwners::Hedge;
         // ── L3 fn-pointer/callback binding resolve — BEFORE Rule 1, because a local variable shadows a
         // same-named class member or global in real C++ name lookup. A bare call `fn()` whose name has ANY
         // var→function binding visible at this call site is a call THROUGH THE VARIABLE: it resolves via
@@ -12540,11 +12843,12 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         const JsWrittenRoot writtenRoot = !scipPinned && !jsImports.rebinds.empty() && langFacts( r.lang ).writtenBindingUndecided
                                               ? jsMemberRootWritten( jsImports, r ) : JsWrittenRoot::None;
         // PY-IMPORT-ALIAS-CALL: `from m import x as y; y()` — the Python twin for a RENAMED member import (pythonRenamedImportPin
-        // states when it decides). A plain `from m import x` keeps the ladder: the call's own spelling already names x.
-        if( !scipPinned && !canonical && !narrowed && !pyRenamedImports.empty() && r.role == RefRole::Call && r.recv == RecvKind::None
+        // states when it decides). A plain `from m import x` keeps the ladder (the call's own spelling already names x), unless x is a
+        // class other files define too (IMPORT-PROVED-SPLITS: `Timer( .. )` binds the imported Timer, not every Timer).
+        if( !scipPinned && !canonical && !narrowed && !pyImportPins.empty() && r.role == RefRole::Call && r.recv == RecvKind::None
             && r.qualifier.empty() && !r.memberCall && r.lang == Lang::Python )
         {
-            if( const NodeId pin = pythonRenamedImportPin( ing, pyRenamedImports, extVeto, externalVeto, byName, r ); pin != kNoNode )
+            if( const NodeId pin = pythonRenamedImportPin( ing, pyImportPins, extVeto, externalVeto, byName, r, r.calleeName ); pin != kNoNode )
             {
                 cand.push_back( pin );
                 narrowed     = true;
@@ -12766,6 +13070,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                   && recvEv.types.jvmHides( r.fileId, r.startByte, std::string_view( r.recvVar ).substr( 0, std::min( r.recvVar.str().find( '.' ), r.recvVar.size() ) ) ) ) )
         {
             narrowed = narrowTo( narrower.rule2cClassNameRecv( r, ing.symbols[ r.fromSymbol ].scope, { classNames, fieldNarrow.localNameSet, memberFields }, chaUp ), r, cand );
+            recvEv.pathOwners( r, cand, canonical, importClass );   // IMPORT-PROVED-SPLITS: `C.m()` over same-named classes keeps the one C's import proves
         }
         // P2-D Rule 2b (receiver-FIELD type, W1-P1-12): a named-receiver call `f.m()` / `f->m()` whose receiver names a FIELD of the caller's
         // enclosing class — or of the one base declaring it, when the class declares none — resolves to the method on the field's DECLARED
@@ -12794,6 +13099,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                     cand.push_back( c );
                 }
             }
+            recvEv.pathOwners( r, cand, canonical, importClass );   // IMPORT-PROVED-SPLITS, as after Rule 2c
             narrowed = !cand.empty() && !kotlinScopeUndo();
         }
         // lane L6 (ifacedispatch.h): the receiver's recorded type is an interface, a trait or a class declaring the callee with
@@ -13756,7 +14062,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         if( !scipPinned && !bindingPinned && r.lang != Lang::Elixir && tier.size() > 1 && !ing.symbols[ r.fromSymbol ].scope.empty()
          && r.recv != RecvKind::FieldOfThis && r.recv != RecvKind::FieldOfVar && r.recv != RecvKind::SuperObj && !identityClaim
          && !isJsTsLitRecv( r.recv ) && r.recv != RecvKind::JavaTypeCandidate && !nameOnly   // FE-B: a name-only call keeps every candidate
-         && rustPath != ReceiverEvidence::RustPathOwners::Split )   // RUST-PATH-OWNER: same-named types the path cannot tell apart are a genuine split (#74)
+         && rustPath != ReceiverEvidence::PathOwners::Split   // RUST-PATH-OWNER: same-named types the path cannot tell apart are a genuine split (#74)
+         && !templateFamily )   // QUAL-NS-CALL-BIND F4: which member of a template family a dependent `Traits<T>::f()` reaches is T's to say, not locality's
         {
             const std::string& callerCanon = g.localityKeyAt( r.fromSymbol );   // == canonId here (the caller is scoped)
             const std::size_t localityCap = receiverLocalityCap( r, receiverTypeNarrowed, ing.files[ ing.symbols[ r.fromSymbol ].fileId ] );
@@ -14024,16 +14331,11 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
 
         // drop self-loops BEFORE the split so the confidence mass is conserved over real targets.
         // A markdown link whose target is the section that contains the link is dropped here on purpose.
-        std::size_t nReal = 0;
-        for( NodeId c : tier )
-        {
-            if( c != r.fromSymbol )
-            {
-                ++nReal;
-            }
-        }
+        const std::size_t nReal = std::size_t( std::ranges::count_if( tier, [ & ]( NodeId c ) { return c != r.fromSymbol; } ) );
         if( nReal == 0 )
         {
+            // a recursion, not an edge — but a PROVEN one is still a site of the caller alone, never of its namesakes
+            noteProvenSite( g.provenSites, !nameOnly, it == byName.end() ? 0u : it->second.size(), std::uint32_t( siteIndex ), tier );
             disposition = CallDisposition::Self;   // the tier held only the caller itself: a recursion, not an edge
             continue;
         }
@@ -14136,7 +14438,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 }
             }
         }
-        noteProvenSite( g.provenSites, !nameOnly, it == byName.end() ? 0u : it->second.size(), std::uint32_t( siteIndex ), r.fromSymbol, tier );
+        noteProvenSite( g.provenSites, !nameOnly, it == byName.end() ? 0u : it->second.size(), std::uint32_t( siteIndex ), tier );
         if( r.forwarded )
         {
             g.keptForwards.push_back( std::uint32_t( siteIndex ) );   // ascending: the loop walks the references in order

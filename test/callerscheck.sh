@@ -404,5 +404,15 @@ SP_AON="$( row "$SP_A" Mgr::onClose )"
 { ! printf '%s' "$SP_AON" | grep -q 'via=' && sat "$SP_AON" | tr ' ' '\n' | grep -qx '10' && sat "$SP_AON" | tr ' ' '\n' | grep -qx '16'; } \
     && ok "SP4: NEGATIVE: the proven Action::closeSocket row keeps both proven lines (10, 16)" \
     || no "SP4: onClose row under Action::closeSocket: $SP_AON"
+# SP5 (CR #705): a RECURSIVE call is proven to the caller itself (no graph edge). When that caller also calls a namesake, the
+#   namesake's row must not list the self-call's line: Node::walk calls walk(d - 1) (line 4, itself) and l.walk(d) (line 7, Leaf).
+#   RED on ee8d1a50e: sites_at="4 7".
+mkdir -p "$SA/sp/rec"
+printf '#pragma once\nstruct Leaf {\n  void walk(int d) {}\n};\nstruct Node {\n  void walk(int d);\n};\n' > "$SA/sp/rec/tree.h"
+printf '#include "sp/rec/tree.h"\nvoid Node::walk(int d) {\n  if (d) {\n    walk(d - 1);\n  }\n  Leaf l;\n  l.walk(d);\n}\n' > "$SA/sp/rec/tree.cc"
+SP_R="$( row "$( sa --callers=sp/rec/tree.h:Leaf::walk )" Node::walk )"
+{ printf '%s' "$SP_R" | grep -q ' p="sp/rec/tree.cc:2"' && [ "$( sat "$SP_R" )" = "7" ]; } \
+    && ok "SP5: the Leaf::walk row lists l.walk(d) only (line 7), never Node::walk's own recursive walk(d - 1)" \
+    || no "SP5: Node::walk row under Leaf::walk: $SP_R"
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail
