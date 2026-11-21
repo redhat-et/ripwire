@@ -8,6 +8,10 @@
 # an import inside a def binds y for that def's own calls only (graph.h finalizePythonScopedBinds), never at module scope or in a sibling.
 # Fixtures are built at runtime. usage: bash test/pymodcallsitescheck.sh [BIN]   (BIN falls back to RIPWIRE_BIN, then build/ripwire)
 set -u
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
 HERE=$(cd "$(dirname "$0")" && pwd)
 . "$HERE/lib/clean-env.sh"   # a gate that builds a repo must not inherit GIT_DIR/GIT_WORK_TREE (gitenvhermeticcheck D)
 BIN=${1:-${RIPWIRE_BIN:-$HERE/../build/ripwire}}

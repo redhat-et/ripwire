@@ -4626,7 +4626,7 @@ $ ./build/ripwire . --quality-delta --legend=full
 
 **Answers:** (with --for) the page size of the answer-first --for answer: 12000 by default, 0 = the whole answer in one call.
 
-The answer is rendered whole and cut at row boundaries into pages of about N bytes; the root says page= pages= withheld_bytes= and next=, which is this flag with :K, the next page. Page 1 keeps the whole legend after its rows; a later page re-sends none and ends <about legend="ref" have="page1"/>. Every page's rows, joined, are the whole answer's rows byte for byte. --legend=first (legend-first, unpaged) and --token-budget= (a shed, not a page) do not page.
+The answer is rendered whole and cut at row boundaries into pages of about N bytes; the root says page= pages= withheld_bytes= and next=, which is this flag with :K, the next page. Page 1 keeps the whole legend after its rows; a later page re-sends none and ends <about legend="ref" have="page1"/>. Every page's rows, joined, are the whole answer's rows byte for byte. --legend=first (legend-first, unpaged) and --token-budget= (a shed, not a page) do not page. ROWS AS LINES: the answer-first answer serves the rows of <sigs> and <tail> as text lines in one CDATA per section, defined by its own legend: 'P:L-E N k=v.. | SIG' is a <d> row (path, first-last line, name, its other attributes, signature), 'P SYMS' a <t> row, and a line starting with < is the row verbatim; a sigs row whose rank is the previous row's + 1 spells no r= (<sigs rseq="1">). Lossless, applied to each page after it is cut (the page size and est_tokens= count the element form, an upper bound). RIPWIRE_NO_ROWLINES=1 serves the elements (the A/B handle); --legend=first, --json and MCP for are not in this form.
 
 **Try it**
 
@@ -4783,7 +4783,7 @@ $ ./build/ripwire . --hotspots --json
 (empty)
 ```
 
-**Shaped by:** `--max-tokens`, `--token-budget`, `--for`, `--flags`, `--in`, `--legend`
+**Shaped by:** `--max-tokens`, `--token-budget`, `--for`, `--flags`, `--in`, `--legend`, `--page-bytes`
 
 **Caveats (stated by the binary):**
 

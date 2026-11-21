@@ -33,6 +33,10 @@
 #   (u)  a path-walk node calls a function the other side never reaches (hop count kUnreached): the answer comes back (rc 0, well formed,
 #        no sanitizer report) — red under the ASan binary before the addShortestPathNodes overflow fix, both root/sink and two sinks
 set -u
+# FMT2 (ROWLINES + RANKSEQ, src/forrowlines.h): the default answer-first --for answer serves its <sigs>/<tail> rows as text lines in
+# one CDATA (lossless; test/rowlinescheck.sh pins it: (L1) decodes the answer back to this element form byte for byte). This gate
+# reads those rows as elements for another rule, so the line form is off here.
+export RIPWIRE_NO_ROWLINES=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 # SIBLING-DEMOTE (forsiblingdemote.h) runs after this pass and demotes deep same-file <d> rows past <d> rank 10; the pointers this

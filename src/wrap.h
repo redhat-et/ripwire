@@ -126,9 +126,13 @@ struct AgentTarget
     std::string_view mcpAddPre;    // McpForm::CliAdd only: the command up to where the path goes
     std::string_view mcpAddPost;   //                     ... and the remainder after it
     std::string_view caveat;
-    bool             readBeforeEdit;   // the agent REFUSES a native Edit on a file it has not Read (Claude Code: enforced; codex, opencode,
-                                       // Gemini CLI: not, checked in their sources 2026-09-28). true = route an edit through "line range from
-                                       // ripwire -> ranged Read -> native Edit" and register the MCP server WITHOUT the three edit twins
+    bool             readBeforeEdit;   // the agent can REFUSE a native Edit on a file it has not Read (codex, opencode, Gemini CLI: never,
+                                       // checked in their sources 2026-09-28. Claude Code: ONLY for a path OUTSIDE its working directory —
+                                       // corrected 2026-11-21, ruling 143: lane GR1 §4 found 4 "File has not been read yet" refusals in 283
+                                       // Edits, all outside the session cwd, and 7 unread in-cwd Edits all accepted, on 2.1.209; the
+                                       // programme's own probes agree, LANE_CONSTRAINTS §13.2-13.4). true = route an edit through "a body
+                                       // ripwire delivered -> native Edit; a ranged Read only for what was not delivered, and always outside
+                                       // the working directory" and register the MCP server WITHOUT the three edit twins
                                        // (kReadBeforeEditToolsProfile); false = the whole-symbol edit verbs skip a Read, so keep them. A COLUMN,
                                        // so a new agent row decides it and no code names the agent. test/agenttablecheck.sh (L) holds both ways.
 };
@@ -286,16 +290,18 @@ inline void wrapPrintLegendSeenLine( std::FILE* out, const std::string_view agen
 // (the per-agent context file is a column in kAgentTargets above)
 
 // THE EDIT-ROUTING PAIR is the one place the blurb is per-agent, and the table decides which (AgentTarget::readBeforeEdit):
-// Claude Code refuses a native Edit on a file it has not Read in this session, so "no whole-file Read" is a promise the
-// whole-symbol edit verbs cannot keep for it — and in our own usage they were never called there. For it the pair names the
-// route that does keep it (a line range from ripwire, a ranged Read, the native Edit); every other agent keeps the verbs.
+// Claude Code refuses a native Edit on a file it has not Read in this session ONLY when the file is outside its working directory
+// (GR1 §4, 2026-11-21: 4 refusals in 283 Edits, every one outside the session cwd; 7 unread in-cwd Edits, all accepted), and in our
+// own usage the whole-symbol edit verbs were never called there. For it the pair names the route that needs the fewest reads: a body
+// ripwire delivered is the verbatim text of its lines, so inside the working directory it is edited directly; a ranged Read is for
+// what was not delivered, and always for a file outside the working directory. Every other agent keeps the verbs.
 inline constexpr std::string_view kEditLinesSkipRead[ 2 ] = {
     "- Apply a whole-symbol edit without a whole-file Read: `--replace-symbol-body=SYM` plus `--edit-payload=FILE|-`",
     "  (or insert-before/after); the receipt carries region, blob_sha, edit_check, tests_to_run + ONE next= — no re-read after it; `--edit-check=SYM --legend=compact` is for a contract question WITHOUT an edit in hand.",
 };
 inline constexpr std::string_view kEditLinesRangedRead[ 2 ] = {
-    "- To edit a symbol: take its range from ripwire (`--for` row `l=`..`e=`; `--expand=SYM --legend=compact` body from `l=`), Read only that range (offset/limit), then use your native Edit —",
-    "  not a whole-file Read. `--edit-check=SYM --legend=compact` before a contract change, and after the edit.",
+    "- To edit a symbol: a body ripwire delivered (`--expand=SYM --legend=compact`, or a fold/key body in a `--for` answer) is the verbatim text of its lines `l`..`e` — inside your working directory, use your native Edit on it directly.",
+    "  Read (offset/limit) only a range that was not delivered (a `--for` row gives it: `path:L-E name`, or `l=`..`e=` on an XML row), and always for a file outside the working directory — never a whole-file Read. `--edit-check=SYM --legend=compact` before a contract change, and after the edit.",
 };
 
 // The ONE shared use-when blurb — single source of truth for every agent recipe (the gate diffs the

@@ -48,7 +48,7 @@ ripwire <git-url>                 # orient in a remote repo (shallow-clones into
 ```
 
 Read the map, then open only the files it surfaces (god-files and hotspots first). For a body of one
-ranked symbol: `ripwire <dir> --for="..." --expand=path:name` (paste `p=`/`n=` off the row).
+ranked symbol: `ripwire <dir> --for="..." --expand=path:name` (paste the path and name off the row: `path:L-E name`, or `p=`/`n=` on an XML row).
 
 ## Honesty signals — read them before trusting a result
 

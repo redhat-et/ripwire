@@ -40,7 +40,7 @@ candidates remain plausible, or the change's blast radius is itself part of the 
 
 ## Branch B — "I suspect a subsystem — narrow it"
 
-1. **Symptom-to-code** — `ripwire <dir> --for="<symptom>"` → note the `p=` (file paths) of the top 5. Which
+1. **Symptom-to-code** — `ripwire <dir> --for="<symptom>"` → note the file paths of the top 5 (each row starts with its path; `p=` on an XML row). Which
    directories recur? That's your first narrowing.
 2. **Hotspots in those directories** — `ripwire <dir> --hotspots --legend=compact` → files that are relevant to the symptom
    AND high churn+complexity are the most likely bug homes.

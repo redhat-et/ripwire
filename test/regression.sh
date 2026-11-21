@@ -1012,6 +1012,7 @@ for _g in \
     routehookcheck \
     routeoncecheck \
     routingreportcheck \
+    rowlinescheck \
     rubyargcheck \
     rubyattrscheck \
     rubybarecallcheck \
