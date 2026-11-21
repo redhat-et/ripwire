@@ -52,6 +52,25 @@ void computeDirModules( const rw::IngestResult& ing, std::vector<std::uint32_t>&
     }
 }
 
+// Each module's directory as --arch prints it: relative to the crawl root (rootPrefix empty ⇒ the stored spelling, the
+// multi-root case, untouched). rootRelativeUri strips the prefix only from a path that runs on PAST it, so the root's own
+// directory comes back whole and is spelled "." here: the directory every other path= is relative to, and the spelling
+// `ripwire .` always gave it. Applied once, after computeModuleMetrics sorted the rows by their stored path, so the order
+// the rows print in does not move.
+void relativizeModulePaths( std::vector<rw::ModuleMetric>& mods, std::string_view rootPrefix )
+{
+    if( rootPrefix.empty() )
+    {
+        return;
+    }
+    const std::string_view rootItself = rw::sarif::rootRelativeUri( rootPrefix, {} );
+    for( rw::ModuleMetric& mm : mods )
+    {
+        const std::string_view rel = rw::sarif::rootRelativeUri( mm.path, rootPrefix );
+        mm.path = std::string( rel == rootItself ? std::string_view( "." ) : rel );   // a temporary first: rel views mm.path
+    }
+}
+
 // The <metrics> block of --arch (every exit path of runArchViews). propCost is empty when no measured file stands behind it, and
 // masked is the count of no-edge files left out of its denominator (arch-honest).
 void emitArchMetrics( const std::vector<rw::ModuleMetric>& mods, std::optional<double> propCost, std::size_t masked, std::vector<char>& ae )
@@ -59,8 +78,9 @@ void emitArchMetrics( const std::vector<rw::ModuleMetric>& mods, std::optional<d
     // zone summary: pure counts over `mods` (already deterministic: sorted by path, computed once
     // above) — a one-line at-a-glance rollup next to the per-module detail. Zone itself is FOLKLORE
     // (Martin main-sequence heuristic, no independent outcome-based validation — see the EVIDENCE
-    // NOTE above computeModuleMetrics in arch.h); the summary
-    // carries the same "heuristic, not proof" caveat as the rest of the note= text below.
+    // NOTE above computeModuleMetrics in arch.h); the legend (graphlegend.h archMetricsLegend, and the compact rows in
+    // compactlegend.h) carries that "heuristic, not proof" caveat. It rode every answer as a note= ATTRIBUTE until 2026-11-17:
+    // 574 B of definitions repeated as data in each one, 764 B with the zone_unknown clause.
     // §P6.5: zone="n/a" (arch.h: totalTypes==0, cannot carry an abstractness score) is counted
     // separately, never folded into zone_pain/zone_useless — typed_modules is the honest
     // denominator for those two counts (modules= stays the raw total, facts unchanged on <m> rows).
@@ -94,15 +114,12 @@ void emitArchMetrics( const std::vector<rw::ModuleMetric>& mods, std::optional<d
             ++zoneOk;
         }
     }
-    // Present-only: zone_unknown= rides beside its note clause; propagation_cost is empty when no measured file is left (its 1/N would
+    // Present-only: zone_unknown= rides beside its legend clause; propagation_cost is empty when no measured file is left (its 1/N would
     // read as a measurement of files no edge was ever seen in); masked_files= says how many no-edge files its denominator left out.
     const std::string unknownAttr = zoneUnknown != 0 ? std::format( " zone_unknown=\"{}\"", zoneUnknown ) : std::string();
     const std::string propAttr    = ( propCost ? std::format( " propagation_cost=\"{:.3f}\"", *propCost ) : std::string() ) + rw::countAttrXmlOrEmpty( "masked_files", masked );
-    const char* const unknownNote = zoneUnknown != 0
-        ? "; zone_unknown = modules holding a file in a language this build draws no file edges for (no_file_edges=): zone and coupling unknown, not zero, and part of the partition"
-        : "";
-    rw::emitTo( stdout, "<metrics modules=\"{}\" typed_modules=\"{}\" zone_pain=\"{}\" zone_useless=\"{}\" zone_ok=\"{}\" zone_na=\"{}\"{}{} note=\"Martin Ca/Ce/I/A/D + zone (main-sequence heuristic, no independent outcome-based validation — folklore, not proof) + reachability — directory-level estimate from name-based deps; zone_na = types=0 modules excluded from zone_pain/zone_useless (no meaningful abstractness score); zone_ok = typed modules in neither corner (the main-sequence middle); zone_pain+zone_useless+zone_ok+zone_na{} = modules, the full partition; propagation_cost = density of the file-dep transitive closure (MacCormack, validated coupling form) — fraction of files reachable from an average file{}\">",
-                 mods.size(), typedModules, zonePain, zoneUseless, zoneOk, zoneNa, unknownAttr, propAttr, zoneUnknown != 0 ? "+zone_unknown" : "", unknownNote );
+    rw::emitTo( stdout, "<metrics modules=\"{}\" typed_modules=\"{}\" zone_pain=\"{}\" zone_useless=\"{}\" zone_ok=\"{}\" zone_na=\"{}\"{}{}>",
+                 mods.size(), typedModules, zonePain, zoneUseless, zoneOk, zoneNa, unknownAttr, propAttr );
     for( const rw::ModuleMetric& mm : mods )
     {
         const std::string ep = std::string( rw::escapeXml( mm.path, ae ) );
@@ -701,7 +718,7 @@ std::optional<int> runArchViews( const MainDispatch& d )
         // the same file→file graph. Directory-level approximation from name-based edges (see arch.h) — an
         // additive, descriptive block appended inside <arch>; it never changes the exit code (the regex/
         // layer violations above own that). Emitted in every --arch path (baseline / update / normal).
-        const std::vector<ModuleMetric> mods = computeModuleMetrics( ing, adj );
+        std::vector<ModuleMetric> mods = computeModuleMetrics( ing, adj );   // not const: their paths are made root-relative below
 
         // Q5b: DSM propagation cost — density of the transitive closure of the file→file dep graph
         // (MacCormack). A single SYSTEM-level number on <metrics> (fixed 3dp → byte-identical). Reported,
@@ -717,12 +734,23 @@ std::optional<int> runArchViews( const MainDispatch& d )
 
         // ── shared emitters (one definition → the three return paths can't drift) ──────────────────────
         std::vector<char> ae;   // escapeXml scratch (cleared per call); captured by the lambdas below
+        // root= and the paths under it, the convention every other verb's root follows (--clones, --cochange, --deps above): a
+        // single-root run names the crawl root once and prints from=/to=/path= relative to it. Until 2026-11-17 this verb alone
+        // printed the stored spelling, so `ripwire "$PWD" --arch=…` repeated the checkout path in every row — 45,837 B of a
+        // 235,411 B answer on this repo (1,389 path attributes). Multi-root has no single root to name: the spelling is unchanged.
+        const std::string avRootPrefix = avSingleRoot ? rw::sarif::rootPrefixOf( avRootArg ) : std::string();
+        const std::string avRootAttr   = avSingleRoot ? ( " root=\"" + std::string( rw::escapeXml( avRootArg, ae ) ) + "\"" ) : std::string();
+        relativizeModulePaths( mods, avRootPrefix );
+        const auto shownFile = [ & ]( std::uint32_t f ) -> std::string_view
+        {
+            return avSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ f ], avRootPrefix ) : std::string_view( ing.files[ f ] );
+        };
         const auto emitViol = [ & ]( const Viol& v, bool showBaselined )
         {
             // escapeXml reuses a single buffer (clears on each call), so capture to strings.
-            const std::string ef  = std::string( rw::escapeXml( ing.files[ v.from ], ae ) );
+            const std::string ef  = std::string( rw::escapeXml( shownFile( v.from ), ae ) );
             const std::string efl = std::string( rw::escapeXml( v.fromLayer, ae ) );
-            const std::string et  = std::string( rw::escapeXml( ing.files[ v.to ], ae ) );
+            const std::string et  = std::string( rw::escapeXml( shownFile( v.to ), ae ) );
             const std::string etl = std::string( rw::escapeXml( v.toLayer, ae ) );
             rw::emitTo( stdout, "<v from=\"{}\" fromLayer=\"{}\" to=\"{}\" toLayer=\"{}\"{}/>",
                          ef.c_str(), efl.c_str(), et.c_str(), etl.c_str(), showBaselined ? " baselined=\"1\"" : "" );
@@ -738,10 +766,18 @@ std::optional<int> runArchViews( const MainDispatch& d )
         // The match domain, said ONCE and appended to all three emit paths (normal / baseline /
         // baseline-update). It is a property of the VERB, not of the mode it ran in, and three hand-written
         // copies of one sentence is how two of them end up saying different things.
+        // 2026-11-17: from=/to= ARE that root-relative spelling now (root= names what they are relative to), so the sentence no
+        // longer has to warn that the rule and the row disagree. The <metrics> definitions that rode every answer as a note=
+        // attribute read here too (archMetricsLegend), and the three <arch> roots lost new_violations=: it was the count of <v>
+        // rows without baselined="1" in every mode — emitViol's flag and the newViols split read ONE predicate in a normal run,
+        // and both baseline modes print every row baselined="1" beside a literal 0 — so the legend says how to read it instead.
         static constexpr const char* kArchMatchDomain =
             " Rules — layer substrings and regex path-rules alike — are matched against each file's"
-            " ROOT-RELATIVE path (src/core/x.cpp), never the absolute or ./-prefixed spelling shown in from=/to=,"
-            " so a rule means the same thing whatever directory the tree was checked out into.";
+            " ROOT-RELATIVE path (src/core/x.cpp), never an absolute or ./-prefixed spelling,"
+            " so a rule means the same thing whatever directory the tree was checked out into."
+            " root= is the crawl root and from=/to=/path= are RELATIVE to it (single-root only; absent => they keep ingest's own spelling)."
+            " A NEW violation is a <v> row without baselined=1; their count is what exit=2 answers to.";
+        const std::string archMetricsNote = rw::archMetricsLegend( std::ranges::any_of( mods, &rw::ModuleMetric::couplingUnknown ) );
 
         // --baseline: write the sidecar with ALL current violations (accept as baseline); exit 0.
         if( cfg.baseline )
@@ -759,10 +795,10 @@ std::optional<int> runArchViews( const MainDispatch& d )
             rw::emitTo( stderr, "ripwire arch: baseline written ({} violation(s) accepted) → {}\n",
                           viols.size(), sidecarPath.c_str() );
             // Still emit the arch XML for reference (shows what was baselined), then exit 0.
-            rw::emitTo( stdout, "<!-- ripwire arch: baseline mode — all {} violation(s) accepted as baseline. exit=0.{}{}{} -->", viols.size(), kArchMatchDomain,
-                         rw::archImportsUnresolvedLegend( importsUnresolved > 0 ), archExtrasLegend );
-            rw::emitTo( stdout, "<arch layers=\"{}\" rules=\"{}\" pathRules=\"{}\" violations=\"{}\" baselined=\"{}\" new_violations=\"0\"{}>",
-                         ar.layerNames.size(), ar.rules.size(), ar.pathRules.size(), viols.size(), viols.size(), archPartialAttr );
+            rw::emitTo( stdout, "<!-- ripwire arch: baseline mode — all {} violation(s) accepted as baseline. exit=0.{}{}{}{} -->", viols.size(), kArchMatchDomain,
+                         archMetricsNote, rw::archImportsUnresolvedLegend( importsUnresolved > 0 ), archExtrasLegend );
+            rw::emitTo( stdout, "<arch layers=\"{}\" rules=\"{}\" pathRules=\"{}\" violations=\"{}\" baselined=\"{}\"{}{}>",
+                         ar.layerNames.size(), ar.rules.size(), ar.pathRules.size(), viols.size(), viols.size(), archPartialAttr, avRootAttr );
             for( const Viol& v : viols )
             {
                 emitViol( v, true );
@@ -787,10 +823,10 @@ std::optional<int> runArchViews( const MainDispatch& d )
             }
             rw::emitTo( stderr, "ripwire arch: baseline updated ({} hash(es) total) → {}\n",
                           hashes.size(), sidecarPath.c_str() );
-            rw::emitTo( stdout, "<!-- ripwire arch: baseline-update mode — {} violation(s) merged into baseline. exit=0.{}{}{} -->", viols.size(), kArchMatchDomain,
-                         rw::archImportsUnresolvedLegend( importsUnresolved > 0 ), archExtrasLegend );
-            rw::emitTo( stdout, "<arch layers=\"{}\" rules=\"{}\" pathRules=\"{}\" violations=\"{}\" baselined=\"{}\" new_violations=\"0\"{}>",
-                         ar.layerNames.size(), ar.rules.size(), ar.pathRules.size(), viols.size(), hashes.size(), archPartialAttr );
+            rw::emitTo( stdout, "<!-- ripwire arch: baseline-update mode — {} violation(s) merged into baseline; baselined= is every hash the sidecar now holds. exit=0.{}{}{}{} -->", viols.size(), kArchMatchDomain,
+                         archMetricsNote, rw::archImportsUnresolvedLegend( importsUnresolved > 0 ), archExtrasLegend );
+            rw::emitTo( stdout, "<arch layers=\"{}\" rules=\"{}\" pathRules=\"{}\" violations=\"{}\" baselined=\"{}\"{}{}>",
+                         ar.layerNames.size(), ar.rules.size(), ar.pathRules.size(), viols.size(), hashes.size(), archPartialAttr, avRootAttr );
             for( const Viol& v : viols )
             {
                 emitViol( v, true );
@@ -831,11 +867,11 @@ std::optional<int> runArchViews( const MainDispatch& d )
         static constexpr const char* kArchBaselineRefused =
             " baseline=\"symlink-refused\": the baseline sidecar is a SYMLINK, refused unopened — no violation was"
             " suppressed, so every one below counts as new; this is not the same answer as having no baseline.";
-        rw::emitTo( stdout, "<!-- ripwire arch: layering fitness function — edges that violate your declared rules (layer rules and regex path-rules). exit=2 if any NEW (un-baselined) violation. <metrics> = descriptive Martin Ca/Ce/I/A/D + reachability, never gates.{}{}{}{} -->",
-                     kArchMatchDomain, baselineRead.symlinkRefused ? kArchBaselineRefused : "", rw::archImportsUnresolvedLegend( importsUnresolved > 0 ), archExtrasLegend );
-        rw::emitTo( stdout, "<arch layers=\"{}\" rules=\"{}\" pathRules=\"{}\" violations=\"{}\" baselined=\"{}\" new_violations=\"{}\"{}{}>",
-                     ar.layerNames.size(), ar.rules.size(), ar.pathRules.size(), viols.size(), basedViols.size(), newViols.size(),
-                     baselineRead.symlinkRefused ? " baseline=\"symlink-refused\"" : "", archPartialAttr );
+        rw::emitTo( stdout, "<!-- ripwire arch: layering fitness function — edges that violate your declared rules (layer rules and regex path-rules). exit=2 if any NEW (un-baselined) violation. <metrics> = descriptive Martin Ca/Ce/I/A/D + reachability, never gates.{}{}{}{}{} -->",
+                     kArchMatchDomain, archMetricsNote, baselineRead.symlinkRefused ? kArchBaselineRefused : "", rw::archImportsUnresolvedLegend( importsUnresolved > 0 ), archExtrasLegend );
+        rw::emitTo( stdout, "<arch layers=\"{}\" rules=\"{}\" pathRules=\"{}\" violations=\"{}\" baselined=\"{}\"{}{}{}>",
+                     ar.layerNames.size(), ar.rules.size(), ar.pathRules.size(), viols.size(), basedViols.size(),
+                     baselineRead.symlinkRefused ? " baseline=\"symlink-refused\"" : "", archPartialAttr, avRootAttr );
         for( const Viol& v : viols )
         {
             emitViol( v, hasBaseline && baseline.count( v.hash ) );
@@ -1940,7 +1976,7 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
                      "files= means two different things by DEPTH here and is deliberately not renamed: on the ROOT it is how "
                      "many files were ANALYSED; on the <uniform/> fold it is how many of them collapsed into that one row. "
                      "With a SYM, of= echoes it and defs= is how many DEFINITIONS that name has: this report covers the file "
-                     "holding the TOWER FRONT of them (most specific kind, leading language, then lowest node id), so defs= above 1 means "
+                     "holding the TOWER FRONT of them (most specific kind, leading language, then path, line, name), so defs= above 1 means "
                      "the other definitions' files were NOT analysed. Qualify with file:name to choose one. An @FILE:LINE "
                      "seed rebinds to the innermost definition enclosing that line (sym= names it) and covers exactly that "
                      "definition's file -->{}{}{}{}",
@@ -2620,9 +2656,10 @@ std::optional<int> runLayout( const MainDispatch& d )
     // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
     const std::string_view layoutRootArg = ( d.ing.realPaths.empty() && cfg.roots.size() == 1 ) ? cfg.roots[0] : std::string_view();
     layout::writeLayout( stdout, result, layoutRootArg );
-    // exit 2 = mirror drift or a contradicted tripwire (a break it SAW); exit 3 = a definition it could not read, so the
-    // contract was not fully verified (unreadable="N" on the root says which); 0 = verified, no break
-    return layout::layoutContractBroken( result ) ? 2 : ( result.unreadableDefs > 0 ? 3 : 0 );
+    // exit 2 = mirror drift or a contradicted tripwire (a break it SAW); exit 3 = a definition, or a file the assertion
+    // scan reads, it could not read, so the contract was not fully verified (unreadable= / asserts_unreadable= on the
+    // root say which); 0 = verified, no break
+    return layout::layoutContractBroken( result ) ? 2 : ( result.isIncomplete() ? 3 : 0 );
 }
 
 // --field-affinity[=STRUCT]: the CACHE-LOCALITY lens. src/fieldaffinity.h owns the whole computation (the
@@ -3191,7 +3228,7 @@ std::optional<int> runZoom( const MainDispatch& d )
                      "On a level-0 module size= is its true member count and shown=/capped= describe the member list printed here, which is fixed at the 5 top-ranked members and is not widened by limit=/offset= (those page the TOP-LEVEL modules); "
                      "the community drill verb pages one module's full member list by its level-0 id. A module above level 0 lists every child module, so it carries no shown=/capped= pair. "
                      // P4 (L7): the two default ceilings, defined where the reader meets them
-                     "levels_shown= is how many of the levels= this document prints from the top (default 2; the zoom-levels flag sets it, 0 = all): a module AT the cut "
+                     "shown_levels= is how many of the levels= this document prints from the top (default 2; the zoom-levels flag sets it, 0 = all), levels_capped=1 when deeper ones are unprinted: a module AT the cut "
                      "carries children= (its child modules, none printed) instead of nesting. The top-level module rows are a WINDOW (shown=/capped=/total=/next_offset=, "
                      "default 40 by rank mass; limit=/offset= page it) and next= pastes the next page. {}{}-->",
                      bridge.size() > kZoomBridgeCap ? ", the 12 heaviest (shown_bridges=/bridges_capped=/bridges= of all pairs)" : "",
@@ -3203,7 +3240,7 @@ std::optional<int> runZoom( const MainDispatch& d )
         // a fixed-shape diagram, not a row list (its own hard-coded top-10/top-8/top-5 caps are unaffected —
         // honorsPaging() excludes the --zoom --mermaid combination for the same reason plain --mermaid refuses).
         // P4 (L7): the default window over the top modules (kZoomTopModuleCap; --limit raises it) and the printed
-        // depth (levels_shown=, default 2; --zoom-levels=N sets it, 0 = every level). Both cuts are disclosed on the
+        // depth (shown_levels=, default 2; --zoom-levels=N sets it, 0 = every level). Both cuts are disclosed on the
         // root and next= pastes the next page; a module AT the depth cut carries children= instead of nesting.
         const PageWindow  zoomPw = pageWindow( topOrder.size(), effectiveRowCap( cfg.pageLimit, kZoomTopModuleCap ), cfg.pageOffset );
         const std::size_t levelsShown = cfg.zoomLevelsSet ? ( cfg.zoomLevels > 0 ? std::min<std::size_t>( L, std::size_t( cfg.zoomLevels ) ) : L )
@@ -3220,7 +3257,7 @@ std::optional<int> runZoom( const MainDispatch& d )
         // the lightest pairs), and the cut was silent: no total, no flag. secondaryCutAttrs is the pair plus the
         // total, present only on a cut (an uncut answer is byte-identical); no call pages it, so there is no next=.
         const std::size_t zoomBridgesShown = std::min<std::size_t>( kZoomBridgeCap, bridge.size() );
-        rw::emitTo( stdout, "<zoom levels=\"{}\" levels_shown=\"{}\" top_modules=\"{}\" symbols=\"{}\" isolated=\"{}\"{}{}{}{}>", L, levelsShown, topOrder.size(), N, isolatedCount,
+        rw::emitTo( stdout, "<zoom levels=\"{}\" shown_levels=\"{}\" levels_capped=\"{}\" top_modules=\"{}\" symbols=\"{}\" isolated=\"{}\"{}{}{}{}>", L, levelsShown, ( levelsShown < L ? 1 : 0 ), topOrder.size(), N, isolatedCount,
                      ( pageDisclosure( zoomAb, sizeof( zoomAb ), zoomPw.end - zoomPw.begin, topOrder.size(), zoomPw.end,
                                        cfg.pageLimit, cfg.pageOffset, zoomCut )
                        + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str(),
@@ -3250,7 +3287,7 @@ std::optional<int> runZoom( const MainDispatch& d )
             rw::emitTo( stdout, ">" );
             if( atCut )
             {
-                // the depth ceiling: nothing below this row is printed (levels_shown= on the root says so)
+                // the depth ceiling: nothing below this row is printed (shown_levels= on the root says so)
             }
             else if( l == 0 )   // finest community → list its top-ranked symbols
             {

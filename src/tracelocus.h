@@ -1090,13 +1090,13 @@ inline FromTraceResult fromTraceBundleText( const IngestResult& ing, const Graph
         // L3 follow-up (CodeRabbit 4053600616): notes.h's ONE marker — absent on a clean read. Measured
         // directly from `h`/`whole`'s own bytes downstream (no separate reserve to keep in sync), the same
         // way this root's own est_tokens is priced (spliceRootAttrs on the FINISHED document, below).
-        if( in.notesDegraded && h.size() > 1 && h.back() == '>' )
+        if( in.notesDegraded )
         {
-            h.insert( h.size() - 1, notes::kNotesDegradedAttr );
+            ctxRootOpenAppendAttrs( h, notes::kNotesDegradedAttr );   // at the root's own '>' (a cut walk's comment follows it)
         }
         // P3 (L7, nextverb.h): the one follow-up — the def-use slice AT the innermost in-corpus frame's line
         // (--slice=@FILE:LINE, FILE as the index spells it); absent when no frame landed in the corpus.
-        if( !part.suspects.empty() && h.size() > 1 && h.back() == '>' )
+        if( !part.suspects.empty() )
         {
             const TraceSuspect& top    = part.suspects[ 0 ];
             const Symbol&       topSym = ing.symbols[ top.symbolId ];
@@ -1107,11 +1107,11 @@ inline FromTraceResult fromTraceBundleText( const IngestResult& ing, const Graph
                 // 0.6.6 D2: the frame's NAME bound to a def in ANOTHER file, so its line numbers that other file — splicing
                 // it onto the def's file (`--slice=@src/serialize.h:304` for a frame at verbs_doctor.h:304) named a line
                 // the frame never meant. Hand over the def's handle, no line, and say the line was not carried.
-                h.insert( h.size() - 1, nextAttrXml( nextFlag( "--expand=", rel + ":" + topSym.name ) ) + " line_mismatch=\"1\"" );
+                ctxRootOpenAppendAttrs( h, nextAttrXml( nextFlag( "--expand=", rel + ":" + topSym.name ) ) + " line_mismatch=\"1\"" );
             }
             else
             {
-                h.insert( h.size() - 1, nextAttrXml( nextFlag( "--slice=@", rel + ":" + std::to_string( top.frame->line ) ) ) );
+                ctxRootOpenAppendAttrs( h, nextAttrXml( nextFlag( "--slice=@", rel + ":" + std::to_string( top.frame->line ) ) ) );
             }
         }
         h += "<!-- ripwire trace-to-locus for ";

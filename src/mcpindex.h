@@ -356,9 +356,7 @@ namespace mcpdetail
     // FNV-1a 64 over a byte range — the per-file content fingerprint the EDIT verbs verify against.
     inline std::uint64_t byteHash( const char* data, std::size_t n ) noexcept
     {
-        std::uint64_t h = 14695981039346656037ull;
-        for( std::size_t i = 0; i < n; ++i ) { h ^= static_cast<unsigned char>( data[i] ); h = hashutil::fnv1aMultiply( h ); }
-        return h;
+        return hashutil::fnv1a64( std::string_view( data, n ) );
     }
 
     // FNV-1a 64 over a std::string — the same hash the handle system uses for the STABLE identity part.
@@ -467,7 +465,7 @@ namespace mcpdetail
                                            const std::vector<long long>&      fileMtime,
                                            const std::vector<std::uint64_t>&  fileByteHash )
     {
-        std::uint64_t h = 14695981039346656037ull;
+        std::uint64_t h = hashutil::kFnv1aOffset64;
         const auto mix = [ &h ]( const void* data, std::size_t n ) noexcept
         {
             const unsigned char* b = static_cast<const unsigned char*>( data );
@@ -609,7 +607,7 @@ inline std::string mcpCachePath( const std::string& root )
 // requires: a clean tree's stamp/rank must equal a non-git root's.
 inline std::uint64_t workingSetHashOf( const std::vector<char>& changed )
 {
-    std::uint64_t          h = 14695981039346656037ull;
+    std::uint64_t          h = hashutil::kFnv1aOffset64;
     std::vector<std::uint32_t> ids;
     for( std::uint32_t f = 0; f < changed.size(); ++f )
     {
@@ -1086,7 +1084,7 @@ inline std::uint64_t gitHeadMoveToken( const std::string& root )
         gitDir = gd;
     }
 
-    std::uint64_t h = 14695981039346656037ull;
+    std::uint64_t h = hashutil::kFnv1aOffset64;
     const auto fold = [ &h ]( const std::string& path )
     {
         // (mtime, size) only, and ctime DELIBERATELY not folded: this is a "did git move HEAD" stamp, not a

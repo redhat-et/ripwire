@@ -89,3 +89,45 @@
 (import_declaration
   (scoped_identifier
     name: (identifier) @name)) @reference.import
+
+; #446 round 2 (Java): base-clause types as @reference.base captures — the
+; superclass (extends) and super_interfaces (implements) clauses under a named
+; class declaration, and an enum's super_interfaces (`enum E implements I`).
+; LangFacts::basesAsCaptures turns the captureBases walk off for Java, so these
+; patterns take every type kind the walk took (isBaseTypeNode): a plain
+; type_identifier, a scoped_type_identifier (`Outer.Nested`, `p.Iface`) and a
+; generic_type over either (`Base<T>`, `Map.Entry<K, V>`). The WHOLE type node is
+; @name, as the walk passed it to emitBaseRef: finalSegment/baseSegments strip the
+; type arguments and keep the qualifier in memberRoot. @reference.base sits on the
+; clause, so its parent is the class (emitBaseRef's `self`), the pairing the walk
+; used. Anonymous classes are no class_declaration and do not match. An
+; interface's extends_interfaces and a record's implements are not read by the
+; walk either, so they stay out (a faithful port, not a silent fix).
+(class_declaration
+  name: (identifier)
+  (superclass
+    [ (type_identifier) (scoped_type_identifier) (generic_type) ] @name) @reference.base)
+
+; A TYPE-ANNOTATED superclass (`class Child extends @Mark Base {}`): the grammar wraps the type in
+; annotated_type, and the walk's one-level descent into that wrapper reached the type beside the
+; annotation, so this pattern takes the same type kinds one level down (#688 review, CodeRabbit
+; 4614203119). @reference.base stays on the clause so the class is still the owner. An annotated
+; `implements @Mark I` sits a level deeper (type_list → annotated_type), which the walk never read,
+; so it stays out like the shapes above.
+(class_declaration
+  name: (identifier)
+  (superclass
+    (annotated_type
+      [ (type_identifier) (scoped_type_identifier) (generic_type) ] @name)) @reference.base)
+
+(class_declaration
+  name: (identifier)
+  (super_interfaces
+    (type_list
+      [ (type_identifier) (scoped_type_identifier) (generic_type) ] @name)) @reference.base)
+
+(enum_declaration
+  name: (identifier)
+  (super_interfaces
+    (type_list
+      [ (type_identifier) (scoped_type_identifier) (generic_type) ] @name)) @reference.base)

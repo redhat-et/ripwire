@@ -631,8 +631,9 @@ namespace mcpedit
     // had 45,765 of these before that; a possibly-live (held, or fresh) lock inode is still never removed.
     inline std::string editLockPath( const std::string& targetPath )
     {
-        std::uint64_t h = 1469598103934665603ULL;      // FNV-1a-64 of the target path → a stable per-file lock name
-        for( char c : targetPath ) { h ^= static_cast<unsigned char>( c ); h = hashutil::fnv1aMultiply( h ); }
+        // FNV-1a-64 of the target path → a stable per-file lock name. The stored seed: an older ripwire editing the same
+        // file must open the same lock file, or flock no longer serializes the two.
+        const std::uint64_t h = hashutil::fnv1a64( targetPath, hashutil::kFnv1aLegacySeed64 );
         char name[ 64 ];
         rw::formatTo( name, sizeof( name ), "ripwire-edit-{:016x}.lock", (unsigned long long)h );
         const std::string lockDir = quality::cacheDirLadder() + "/locks";
@@ -984,7 +985,7 @@ namespace mcpedit
         // qualified target: resolveOneForEdit matches the bare name exactly, so `Alpha.run` is refused "not found" upstream.
         const std::vector<NodeId> overloadNodes = editCheckOverloadSet( ing, g, focus );
         const EditCheckContract   contract      = editCheckContractVsHead( ing, g, root, kDefaultMaxFileBytes, {}, focus, overloadNodes );
-        EditCheckCalleeTest       callee( ing, ing.symbols[ focus ], overloadNodes );
+        EditCheckCalleeTest       callee( ing, ing.symbols[ focus ], overloadNodes, g.provenSites );
         const auto [ callerIds, callerIncompatible ] = editCheckCallers( ing, g, overloadNodes, callee );
         std::size_t incompatibleCount = 0;
         for( NodeId c : callerIds )

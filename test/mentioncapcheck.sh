@@ -291,10 +291,22 @@ cWide="$( run "$TMP/c10" --for="$C_Q" )"
 cNarrow="$( run "$TMP/c2" --for="$C_Q" )"
 C_SEEN="$( anchorSyms "$cWide" )"
 C_HAVE="$( ls "$TMP/c10" | wc -l | tr -d ' ' )"
-if [ -n "$C_SEEN" ] && [ "$C_HAVE" -gt "$C_SEEN" ]; then
-    ok "C1 crossing: $C_HAVE definitions of the named Scope.name exist, the anchor lifted $C_SEEN"
+# C1 RE-PINNED, and the new contract is STRONGER than the one it replaces.
+#
+# This arm used to assert a PARTIAL lift: some symbols lifted, fewer than defined. That is what the code
+# did, and it was wrong — the overflow took the first 8 matches in SYMBOL-ID (path) ORDER, which is
+# arbitrary. Measured on django: it lifted eight look-alikes above the correct migrate.py definition, and
+# the full slot list then refused the unique execute_from_command_line entirely. An arbitrary pick is not a
+# smaller answer, it is a wrong one.
+#
+# So at a crossing the anchor now lifts NOTHING, and this arm pins that: ANY lift here is the old
+# path-order pick and must go red. C2 still pins that the cut is DISCLOSED (mention_syms_capped=1 with the
+# real total), and C3 is the control — an UNCROSSED fixture must still lift every definition and pay no
+# attribute — so "lift nothing" cannot be satisfied by lifting nothing everywhere.
+if [ -z "$C_SEEN" ]; then
+    ok "C1 crossing: $C_HAVE definitions of the named Scope.name exceed the slots, so the anchor lifts NONE — no arbitrary path-order pick"
 else
-    no "C1 crossing: no cut (defined=$C_HAVE lifted=${C_SEEN:-<none>}) — probe broken"
+    no "C1 crossing: the anchor lifted $C_SEEN of $C_HAVE at a cap crossing — that is the path-order pick this rule removed"
 fi
 C_WANT="mention_syms_capped=\"1\" mention_syms_total=\"$C_HAVE\""
 if has "$C_WANT" "$cWide"; then

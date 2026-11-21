@@ -63,11 +63,22 @@ for target in ( 600, 700, 756, 900, 1000 ):
     d = root
     os.makedirs( d, exist_ok = True )
     comp = "d" * 60
-    while len( d ) < target - 20:
+    # grow to EXACTLY target - 20 bytes: whole 60-byte components while they fit, then one shorter one. Overshooting
+    # by up to a component (the old `while len < target - 20`) put the ~1000 doc past macOS PATH_MAX (1024) whenever
+    # the temp prefix's length moved (train 1119g: pargates' per-gate TMPDIR), and the doc could not be created.
+    while len( os.path.join( d, comp ) ) <= target - 20:
         nd = os.path.join( d, comp )
         try:                os.makedirs( nd, exist_ok = True )
         except OSError:     break
         d = nd
+    rest = target - 20 - len( d ) - 1
+    if rest > 0:
+        nd = os.path.join( d, "e" * rest )
+        try:
+            os.makedirs( nd, exist_ok = True )
+            d = nd
+        except OSError:
+            pass
     doc = os.path.join( d, "kafka.md" )
     with open( doc, "w" ) as f:
         f.write( "# Kafka consumer rebalancing\n\n"

@@ -328,6 +328,100 @@ inline constexpr bool isCodeLang( Lang l ) noexcept
     return false;   // a byte past the enum (a corrupt cache value) is not a language
 }
 
+// The edge-bridging families are ONE column of the LangFacts row now (langfacts.h::edgeFamily, surfaced
+// by langFamilyOf there) — task D kept a second per-Lang table beside kLangFacts until #440's review
+// folded it in; the equivalence guard lives in graph.h beside langCompatible, where it always did.
+
+// langTag inverted (task D): the @lang selector's vocabulary is exactly the tags the emitter prints — a linear
+// scan over the 25 languages, called once per suffixed query, so the only cost is never a second tag list to drift
+// (the htmlexport langColor lesson again: 9 hand keys against 19 tags). The pair of asserts below makes the parser
+// and the emitter ONE source: an appended Lang without a distinct tag, or a tag that does not parse back, is a
+// build error, not a selector that silently never matches.
+//
+// tagEq compares the tags BYTE BY BYTE, never through string_view::operator==: that operator may short-circuit on
+// data-pointer equality, and comparing the addresses of two distinct literals has unspecified value — an OK answer
+// for runtime code, but it takes the constexpr verifier below out of constant-expression land on every compiler
+// that keeps the shortcut (CI's clang/gcc-13; newer libstdc++ alone made the container builds lie).
+constexpr bool tagEq( std::string_view a, std::string_view b ) noexcept
+{
+    if( a.size() != b.size() )
+    {
+        return false;
+    }
+    for( std::size_t i = 0; i < a.size(); ++i )
+    {
+        if( a[ i ] != b[ i ] )
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+constexpr bool langFromTag( std::string_view tag, Lang& out ) noexcept
+{
+    // Case-tolerance is PARSE-only (arm (36), task D5): @CPP and @C resolve to the same languages @cpp and @c do.
+    // The emitted tag keeps one canonical spelling everywhere (langTag), so a disclosure lane never grows variants —
+    // leniency where a human types, exactness where a machine reads.
+    char low[ 16 ];
+    if( tag.empty() || tag.size() > sizeof( low ) )
+    {
+        return false;   // no tag is 16+ bytes; oversized tails are not languages
+    }
+    for( std::size_t i = 0; i < tag.size(); ++i )
+    {
+        low[ i ] = ( tag[ i ] >= 'A' && tag[ i ] <= 'Z' ) ? static_cast< char >( tag[ i ] + 32 ) : tag[ i ];
+    }
+    const std::string_view v( low, tag.size() );
+    const std::size_t unknownIdx = static_cast< std::size_t >( Lang::Unknown );   // ONE index read, zero predicates (langidentity ratchet)
+    for( std::size_t i = 0; i < kLangCount; ++i )
+    {
+        if( i == unknownIdx )
+        {
+            continue;   // "?" is langTag's DISPLAY fallback, not vocabulary: no selector may ask for Unknown
+        }
+        if( tagEq( v, langTag( static_cast< Lang >( i ) ) ) )
+        {
+            out = static_cast< Lang >( i );
+            return true;
+        }
+    }
+    return false;
+}
+namespace
+{
+constexpr bool kLangTagsUniqueAndRoundTrip = []
+{
+    const std::size_t unknownIdxA = static_cast< std::size_t >( Lang::Unknown );   // index reads, not predicates
+    Lang probe = Lang::Unknown;
+    if( langFromTag( "?", probe ) )
+    {
+        return false;   // "?" must NOT parse as a selector — the display fallback is not vocabulary
+    }
+    for( std::size_t a = 0; a < kLangCount; ++a )
+    {
+        for( std::size_t b = a + 1; b < kLangCount; ++b )
+        {
+            if( tagEq( langTag( static_cast< Lang >( a ) ), langTag( static_cast< Lang >( b ) ) ) )
+            {
+                return false;   // two languages, one tag: a selector could not address them apart
+            }
+        }
+        if( a == unknownIdxA )
+        {
+            continue;           // Unknown's tag is the display fallback; its refusal is pinned above
+        }
+        Lang back = Lang::Unknown;
+        if( !langFromTag( langTag( static_cast< Lang >( a ) ), back ) || back != static_cast< Lang >( a ) )
+        {
+            return false;   // an emitted tag the parser cannot route home
+        }
+    }
+    return true;
+}();
+static_assert( kLangTagsUniqueAndRoundTrip, "every Lang has a unique short tag and langFromTag(langTag(l)) == l" );
+} // namespace
+
 // Call-site RECEIVER classification (P2-D one-hop type narrowing). Captured at ingest from the AST shape
 // of `recv.method()` / `recv->method()` so resolve.h can narrow BEFORE the ambiguous §2a name spray:
 //   None    — a bare call `f()` or a qualified `A::f()` (no receiver expr) → §2a ladder, unchanged.
@@ -1792,6 +1886,15 @@ enum class LocalBindKind : std::uint8_t
     // ONLY (the --for re-export hop rows): it is never a call edge and no resolver table reads it (every other binding reader
     // filters by kind). APPENDED (cache u8).
     ReExport,
+    // Lane rust-self-chain (test/receiverevidencecheck.sh RUST-SELF-CHAIN, root rust7): a Rust MEMBER call written on another
+    // call's result — each hop after the first of `Router::new().route( a ).layer( b )`, `T::open()?.read()`, `x.get().await.text()`.
+    // One record per such call: startByte = the call's own start (its Reference's; with typeName it names the call, as a CallResult's
+    // does), typeName = its callee name, var = the INNER call's callee name, spanStart = the inner call's start byte (spanEnd the
+    // same: no span), resultIndex = the call's hop depth (1: the inner call is the chain's ROOT — a path call `T::f()` or a member
+    // call on a named receiver, read through its own Reference; k: the inner call is itself the depth k-1 record's call),
+    // unwrapDepth = the `?` operators between the two, isFromAssignment = an `.await` applied to the inner result first.
+    // Read by receiverevidence.h ReceiverEvidence::rustChainReceiver ONLY. APPENDED (cache u8).
+    RecvCall,
 };
 // fix round 4: the TypeAlias rows that bind a spelling with no alias target (model.h LocalBindKind::TypeAlias, typeName)
 inline constexpr std::string_view kTypeBindForward  = "forward";
@@ -1799,7 +1902,7 @@ inline constexpr std::string_view kTypeBindShadow   = "shadow";
 inline constexpr std::string_view kTypeBindUnparsed = "unparsed";
 inline constexpr std::string_view kTypeBindUnrecorded = "unrecorded";
 // The number of LocalBindKind enumerators — the bound readBind validates a cached kind byte against (see kSymKindCount).
-inline constexpr std::size_t kLocalBindKindCount = static_cast<std::size_t>( LocalBindKind::ReExport ) + 1;
+inline constexpr std::size_t kLocalBindKindCount = static_cast<std::size_t>( LocalBindKind::RecvCall ) + 1;
 // FE-B: the kinds only graph.h ReceiverEvidence (and, for the two call-result kinds, its resolve loop) reads (see RecvType above).
 // L6's ImplBlock is in the set for the same reason: its var is the TRAIT / interface being implemented, never a name bound in the
 // enclosing function, so the generic binding readers (localNameSet, the fn-pointer tables, nonlocalstate) must skip it (its two
@@ -1811,7 +1914,8 @@ inline bool isReceiverEvidenceKind( LocalBindKind k ) noexcept
     // those: one run CallResult .. ImplBlock
     static_assert( std::uint8_t( LocalBindKind::StaticMember ) - std::uint8_t( LocalBindKind::RecvType ) == 4, "FE-B's five receiver-evidence kinds stay one run" );
     static_assert( std::uint8_t( LocalBindKind::ImplBlock ) - std::uint8_t( LocalBindKind::CallResult ) == 8, "the call-result, in-place, dispatch and impl-block kinds stay one run" );
-    return ( k >= LocalBindKind::RecvType && k <= LocalBindKind::StaticMember ) || ( k >= LocalBindKind::CallResult && k <= LocalBindKind::ImplBlock );
+    return ( k >= LocalBindKind::RecvType && k <= LocalBindKind::StaticMember ) || ( k >= LocalBindKind::CallResult && k <= LocalBindKind::ImplBlock )
+        || k == LocalBindKind::RecvCall;   // lane rust-self-chain: its var is the INNER callee's name, never a local
 }
 // The language family whose call results take a callee's declared result type (train 29 call-result typing), ONE row read
 // by ingest (which records CallResult / ReturnType / TypeImport) and by graph.h (where the type resolves, and which
@@ -1874,6 +1978,16 @@ inline constexpr std::uint8_t kWholeResult = 0xFF;
 // bit); graph.h typeCallResults alone reads it, and types the local as SOME implementor of the trait (ReceiverEvidence::LocalFact
 // iface). The low bits stay the Result/Option layers (always 0 today: a layered trait object is not read).
 inline constexpr std::uint8_t kDispatchResultBit = 0x80;
+// CPP-PTR-ALIAS: the unwrapDepth of a C++ Type / ParamType record whose declarator names the variable itself or a reference to
+// it (ingest_binds.h cppDirectDeclarator: `CodecPtr c`, `const CodecPtr& c`, never `CodecPtr* c`), so a smart-pointer type's `->`
+// reaches its pointee. 0 on every other record: a record that does not say so is never read through a smart pointer.
+inline constexpr std::uint8_t kDirectDeclaratorBit = 0x01;
+// lane rust-self-chain: the `.await` bit of a Rust call-result record's unwrapDepth. A ReturnType of an `async fn` carries it (its
+// declared result is what the call's FUTURE yields: a call that is not awaited holds no T), and so does a CallResult whose value is
+// `f().await` — the await applied to the call first, before any `?` (`f().await?`; `f()?.await` records nothing). The low bits stay
+// the Result/Option layers, so a plain depth compare matches an awaited `async fn` call and nothing else (graph.h typeCallResults).
+inline constexpr std::uint8_t kAwaitResultBit = 0x40;
+inline constexpr std::uint8_t kUnwrapLayersMask = 0x3F;   // the Result/Option layers below both bits
 // lane iface-peel fix 1 (B1): the memberVia of a C++ MEMBER record (isCompose, a field name) whose written type is a TEMPLATE
 // PARAMETER of an enclosing `template <…>` (`template <class Handle> class S { Handle h_; }`): the name is the parameter, never
 // the smart-pointer alias of that spelling in some namespace. resolve.h SmartAliasPeel::pointeeOf alone reads it, to keep the
@@ -1935,7 +2049,7 @@ struct Binding
                                               //   that name exists (resolve.h assignmentNamesNoClass). Rides the padding after `kind`.
                                               // kind==ReturnType (Rust): the result is written `Self` (LocalBindKind::ReturnType).
     std::uint8_t  resultIndex = kWholeResult; // kind==CallResult/ReturnType: the result position (see LocalBindKind). Rides the padding.
-    std::uint8_t  unwrapDepth = 0;            // kind==CallResult/ReturnType: unwrap operators / layers (see LocalBindKind). Rides the padding.
+    std::uint8_t  unwrapDepth = 0;            // kind==CallResult/ReturnType: unwrap operators / layers (see LocalBindKind); C++ Type/ParamType: kDirectDeclaratorBit. Rides the padding.
     std::uint32_t startByte  = 0;         // the record's own position (RawBind::startByte). ONE declaration's
                                           //   VarDecl and its typed record (Type or ParamType) carry the SAME
                                           //   value — that shared byte is how Rule 2's lexical receiver lookup
@@ -2391,7 +2505,7 @@ struct IngestResult
     //    the LABELED spelling `<label>/<root-relative-path>` (the identity every surface emits) and
     //    realPaths hold the on-disk crawl spelling (what any fopen/stat must use — see diskPath below).
     std::vector<std::string>   realPaths;    // fileId → on-disk path (empty ⇒ ing.files ARE the disk paths)
-    std::vector<std::uint32_t> fileRoot;     // fileId → root index (canonical label order)
+    std::vector<std::uint32_t> fileRoot;     // fileId → root index (canonical `<label>/` order)
     std::vector<std::string>   rootLabels;   // root index → label (shortest unique whole-segment suffix)
     std::vector<std::string>   rootPaths;    // root index → the root path as passed (post-dedupe)
     std::vector<std::string>   rootReals;    // root index → realpath (cross-root include probes, git -C)

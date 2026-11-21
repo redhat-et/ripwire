@@ -1,5 +1,14 @@
 #!/usr/bin/env bash
-# readmeexamplecheck.sh — README's advertised callers example must match the current binary's paths.
+# readmeexamplecheck.sh — the advertised callers example must match the current binary's paths.
+#
+# README-RESTRUCTURE (2026-11-17): the example used to live in README.md twice — once under "Real runs"
+# and once in the reference guide's output-format section. The 0.7.0 front-page restructure moved both
+# copies out, to docs/REAL_RUNS.md and docs/REFERENCE_GUIDE.md. The claim this gate holds is unchanged
+# (WHICH callers exist and WHICH FILE each lives in); only the file publishing it moved, so the subject
+# is now the SET of surfaces that publish it. Concatenating them, rather than re-pointing at one, is
+# the widening: a stale row cannot escape by being the copy this gate was not aimed at. The presence
+# guard below refuses a surface carrying no rows at all, so a rewrite that deletes the example fails
+# loudly instead of passing vacuously.
 set -u
 
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -8,9 +17,14 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 
 [ -x "$BIN" ] || { echo "readmeexamplecheck: no binary at $BIN — build first"; exit 2; }
+SURFACES=( "$ROOT/README.md" "$ROOT/docs/REAL_RUNS.md" "$ROOT/docs/REFERENCE_GUIDE.md" )
+for _s in "${SURFACES[@]}"; do
+    [ -f "$_s" ] || { echo "readmeexamplecheck: missing published surface $_s"; exit 2; }
+done
+cat "${SURFACES[@]}" >"$TMP/surface.md"
 ( cd "$ROOT" && "$BIN" . --callers=rankGraphTeleport --no-cache ) >"$TMP/live"
 
-python3 - "$ROOT/README.md" "$TMP/live" <<'PY'
+python3 - "$TMP/surface.md" "$TMP/live" <<'PY'
 import re
 import sys
 
@@ -34,10 +48,13 @@ rows = re.findall(r'<s t="[^"]+" n="([^"]+)" p="([^"]+)"[^>]*/>', live)
 assert rows, "live callers command returned no rows"
 readme_rows = { ( n, LINE_SUFFIX.sub( "", p ) )
                 for n, p in re.findall(r'<s t="[^"]+" n="([^"]+)" p="([^"]+)"[^>]*/>', readme) }
+# PRESENCE GUARD: an empty surface would make the comparison below vacuously true, so a deleted
+# example is a red, not a pass.
+assert readme_rows, "the published surfaces carry no <s ... n= p= /> rows at all — the callers example was deleted or reworded"
 missing = []
 for name, path in rows:
     if ( name, LINE_SUFFIX.sub( "", path ) ) not in readme_rows:
         missing.append(f'<s t="fn" n="{name}" p="{path}"/>')
-assert not missing, "README callers example has stale/missing rows (name+file compared, line ignored):\n" + "\n".join(missing)
+assert not missing, "the advertised callers example has stale/missing rows (name+file compared, line ignored):\n" + "\n".join(missing)
 print("readmeexamplecheck: ALL PASS")
 PY

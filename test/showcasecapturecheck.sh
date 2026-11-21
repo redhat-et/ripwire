@@ -713,11 +713,12 @@ fi
 cat >"$TMP/j_window.py" <<'PYEOF'
 import ast, subprocess, sys, os, tempfile, shutil
 src = open(sys.argv[1], encoding="utf-8").read()
-want = ("chooseInWindow", "marginHeldByMerge", "firstWindow", "laneMergeSince")
+want = ("chooseInWindow", "marginHeldByMerge", "firstWindow", "laneMergeSince",
+        "scanPasses", "windowPasses", "laneMergeWindow", "refuseNoWindow", "inSince")   # chooseInWindow's named steps
 funcs = [n for n in ast.parse(src).body if isinstance(n, ast.FunctionDef) and n.name in want]
 if len(funcs) != len(want):
     print("EXTRACT_FAIL got %d of %d functions" % (len(funcs), len(want))); sys.exit(0)
-ns = {"subprocess": subprocess, "sys": sys, "REPO": ".", "_IN_DIR": "src", "_IN_LIMIT": 3, "_IN_LIMIT_NARROW": 2}
+ns = {"subprocess": subprocess, "sys": sys, "REPO": ".", "_IN_DIR": "src", "_IN_LIMIT": 3, "_IN_LIMIT_NARROW": 2, "_IN_LIMIT_LAST": 1}
 exec(compile(ast.Module(body=funcs, type_ignores=[]), "<extract>", "exec"), ns)
 choose, held, laneMerge = ns["chooseInWindow"], ns["marginHeldByMerge"], ns["laneMergeSince"]
 res = []
@@ -741,6 +742,14 @@ chk("N never accepted when its own window does not show", pick(lambda n, lim=3: 
 few = lambda n, lim=3: [] if lim == 2 and n >= 2 else GONE
 chk("few post-merge source files: the last resort derives N=3 with --limit=2", pick(few, lambda m: False) == (3, 2))
 chk("the narrower page is never tried while --limit=3 works", pick(lambda n, lim=3: [] if n >= 3 else GONE, lambda m: False) == (4, 3))
+# SHOWCASE-LIMIT-1: a lane whose window holds only two src/ files (M1, #693) — only --limit=1 cuts, at N=6, and its margin HEAD~5
+# is the lane's merge with nothing in src/ after it. Before this pass the generator refused here (and on main after #687).
+two = lambda n, lim=3: [] if lim == 1 and n == 6 else GONE   # the margin HEAD~5 holds no src/ file, so it never cuts
+chk("two source files: the last resort derives N=6 with --limit=1, margin held by the merge", pick(two, lambda m: m == 5) == (6, 1))
+chk("two source files, no merge holds the margin and the margin does not cut: still refused", pick(two, lambda m: False) == "refused")
+chk("--limit=1 is never tried while --limit=2 works", pick(lambda n, lim=3: [] if lim <= 2 and n >= 3 else GONE, lambda m: False) == (4, 2))
+chk("--limit=1 is never tried while the lane-merge window works",
+    pick(lambda n, lim=3: [] if ( lim == 1 or n == "0123456789ab" ) else GONE, lambda m: True, lambda: "0123456789ab") == ("0123456789ab", 3))
 # the real git predicate on throwaway repos
 def mk(steps):
     d = tempfile.mkdtemp(prefix="rw_j_")
@@ -798,10 +807,10 @@ if printf '%s\n' "$jOut" | grep -q '^EXTRACT_FAIL\|Traceback'; then
     no "(J) could not run the window arms: $( printf '%s' "$jOut" | tail -2 | tr '\n' '|' )"
 else
     jBad="$( printf '%s\n' "$jOut" | grep '^BAD ' || true )"; jOk="$( printf '%s\n' "$jOut" | grep -c '^OK ' || true )"
-    if [ -z "$jBad" ] && [ "$jOk" -eq 17 ]; then
+    if [ -z "$jBad" ] && [ "$jOk" -eq 21 ]; then
         ok "(J) --in= window: a one-merge train derives N=2 from the merge's first-parent diff; multi-merge N unchanged; fallback off refuses; a lane with main merged at HEAD~2 windows at main's tip ($jOk arms)"
     else
-        no "(J) --in= window arms: ok=$jOk of 17 $( printf '%s' "$jBad" | tr '\n' '|' )"
+        no "(J) --in= window arms: ok=$jOk of 21 $( printf '%s' "$jBad" | tr '\n' '|' )"
     fi
 fi
 if grep -q 'chooseInWindow()' "$SCRIPT"; then

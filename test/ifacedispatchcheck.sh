@@ -238,8 +238,12 @@ say( af.ok and cs == { "src/fmt/impls.ts:4", "src/fmt/impls.ts:10" }, "[P] f_ts_
 # ── (G) callers form ───────────────────────────────────────────────────────────────────────────────────────────────
 print( "=== (G) the callers form ===" )
 a = ask( RS, "callers", "src/render/impls.rs::Html::render" )
-say( a.ok and len( a.dc ) == 8 and all( d.get( "gate" ) == "iface" and d.get( "cands" ) == "6" for d in a.dc ) and a.a( "count" ) == "0",
-     "[P] g_callers", "--callers=Html::render: 8 <dc> sites, each gate=\"iface\" cands=\"6\"; count=\"0\"", a.why() )
+# RUST-MACRO-ARGS (train 1117d2): the test's `assert_eq!(FakeRenderer.render(1), 1)` is now read, and a unit-struct value
+# receiver is not typed, so it is ONE hedged row (via="name", test="1") — never a proven caller. The 8 iface-declined sites are unchanged.
+hedged = [ ( r.get( "n" ), r.get( "via" ), r.get( "test" ) ) for r in a.rows ]
+say( a.ok and len( a.dc ) == 8 and all( d.get( "gate" ) == "iface" and d.get( "cands" ) == "6" for d in a.dc ) and a.a( "count" ) == "1"
+     and hedged == [ ( "fake_renders", "name", "1" ) ],
+     "[P] g_callers", "--callers=Html::render: 8 <dc> sites, each gate=\"iface\" cands=\"6\"; count=\"1\", the one hedged test row fake_renders", a.why() )
 a = ask( RS, "callers", "src/other/mod.rs::Foreign::render" )
 say( a.ok and not a.dc and a.a( "declined_calls" ) is None, "[P] g_foreign",
      "--callers=other::Foreign::render: no declined site of drive.rs (they dispatch through render::Renderer)", a.why() )

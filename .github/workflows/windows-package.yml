@@ -70,6 +70,10 @@ jobs:
 
       # One cmd step: vcvars64.bat exports INCLUDE/LIB/PATH into its own process only (as ci.yml's windows job).
       # dumpbin is read here, inside the VC environment, and judged in the next step.
+      # clang-cl is Visual Studio's bundled one, the standalone C:\Program Files\LLVM only a fallback: the MSVC STL
+      # static_asserts a minimum clang (STL1000) and only the bundled clang ships in lockstep with it. 2026-11-18,
+      # run 44390371541: image win25-vs2026/20261116.315 paired MSVC 14.52.37025 (requires Clang >= 22) with a
+      # standalone LLVM 20.1.8, and every TU failed. Same reasoning as ci.yml's windows job.
       - name: Build (clang-cl, Ninja, Release = LTO, static CRT /MT, portable x86-64-v3)
         shell: cmd
         run: |
@@ -77,8 +81,8 @@ jobs:
           for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSINSTALL=%%i"
           if not defined VSINSTALL ( echo windows-package: no Visual Studio install with the x64 C++ tools & exit /b 1 )
           call "%VSINSTALL%\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
-          set "RW_LLVM=%VSINSTALL%\VC\Tools\Llvm\x64\bin"
-          if exist "C:\Program Files\LLVM\bin\clang-cl.exe" set "RW_LLVM=C:\Program Files\LLVM\bin"
+          set "RW_LLVM=C:\Program Files\LLVM\bin"
+          if exist "%VSINSTALL%\VC\Tools\Llvm\x64\bin\clang-cl.exe" set "RW_LLVM=%VSINSTALL%\VC\Tools\Llvm\x64\bin"
           set "PATH=%RW_LLVM%;%PATH%"
           clang-cl --version || exit /b 1
           cmake --version || exit /b 1
@@ -203,7 +207,7 @@ jobs:
           repo="$( cygpath -w "$GITHUB_WORKSPACE" )"
           cd "$cwd"
           "$exe" --version | tee version.txt
-          grep -qE '^ripwire [0-9]+\.[0-9]+\.[0-9]+ \(' version.txt
+          grep -qE '^ripwire [0-9]+\.[0-9]+\.[0-9]+(\+dirty|-dev(\.[0-9]+)?(\+g[0-9a-f]{7,40}(\.dirty)?)?)? \(' version.txt   # the label shapes cmake/version_stamp.cmake stamps (tag, +dirty, -dev.N+g<sha>, -dev+g<sha>, -dev)
           grep -q 'emit=std::print' version.txt
           test "$( "$exe" --help | wc -c )" -gt 1000
           start=$SECONDS

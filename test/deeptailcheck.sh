@@ -38,6 +38,11 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
+# TAIL-SYM-TERMS (2026-11-14): this gate pins the tail's ROWS and their sym= (rank, page, fold, R-DEDUP, JSON, MCP), so it reads
+# the tail without the task-word names a row may add after sym= (tsym=; this fixture's task names every file's symbols).
+# test/tailsymtermscheck.sh arm (b) proves the default tail IS this one plus tsym= on each row (same attributes, same order), so the
+# pins here hold for the default answer too.
+export RIPWIRE_NO_TAIL_SYM_TERMS=1
 fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }

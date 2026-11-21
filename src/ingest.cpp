@@ -21,6 +21,7 @@
 #include "infra/namesplit.h"   // H4: stripTemplateArgs for the C++ qualified-call re-split (shared with tracelocus.h)
 #include "infra/jsonesc.h"     // rw::shSingleQuote - the git ignore probe quotes its root the same way every other git popen does
 #include "infra/fixedStr.h"    // rw::findByte — the NEON/SSE2 byte scan buildNewlineOffsets rides
+#include "infra/tspredicates.h" // rw::passesStringPredicates — the tags pass evaluates #eq?/#any-of?/#not-any-of? (#355); --match/--lint share the walk
 #include "infra/ownedfile.h"   // rw::OwnedFile — readFile/readFilePrefix own their stream, so no return path skips the close
 #include "infra/statclock.h"   // rw::saturatingNanoseconds — statSizeTimes' stat timestamps without signed overflow past 2262
 #include "lexindex.h"          // B0.1/B0.2: shared subtoken state machine + per-def lexical statistics builder
@@ -212,6 +213,7 @@ extern "C"
 #include "ingest_valuerefs.h"
 #include "ingest_rustslots.h"   // FN-SLOT part 2: Rust's slot-join records (callSide ParenFieldCall)
 #include "ingest_sidecap.h"
+#include "ingest_rustmacroargs.h"   // RUST-MACRO-ARGS: the calls written inside a Rust macro invocation's arguments
 #include "ingest_prewarm.h"
 #include "ingest_parsepool.h"
 #include "ingest_docpass.h"

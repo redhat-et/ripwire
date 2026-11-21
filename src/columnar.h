@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -54,6 +55,22 @@ inline void writeCommaEscaped( std::FILE* out, std::string_view alreadyXmlEscape
         else
         {
             std::fputc( c, out );
+        }
+    }
+}
+
+// The same escape into a string: a column built as one value before it is written (declinedsites.h's <dcols> arrays).
+inline void appendCommaEscaped( std::string& out, std::string_view alreadyXmlEscaped )
+{
+    for( const char c : alreadyXmlEscaped )
+    {
+        if( c == ',' )
+        {
+            out += "&#44;";
+        }
+        else
+        {
+            out += c;
         }
     }
 }
@@ -102,6 +119,25 @@ inline void buildPathTable( const std::vector<std::uint32_t>& rowFileIds,
         if( !found ) { idx = std::uint32_t( outUniqueFiles.size() ); outUniqueFiles.push_back( fid ); }
         outRowPathIdx.push_back( idx );
     }
+}
+
+// BAND DC (docs/EVALS.md, 2026-11-17 amendment 10): ONE <paths> table for an answer whose tail block's rows are files too (the
+// <dcols> block's declined call sites). The symbol rows' files come first, so their indexes are what they were without a tail;
+// the tail rows' new files follow, first-seen. rowPathIdx holds one index per symbol row, then one per tail row.
+struct ColumnarPaths
+{
+    std::vector<std::uint32_t> uniqueFiles;
+    std::vector<std::uint32_t> rowPathIdx;
+};
+inline ColumnarPaths columnarPathsWithTail( const IngestResult& ing, const std::vector<NodeId>& rows, std::span<const std::uint32_t> tailFiles )
+{
+    ColumnarPaths              out;
+    std::vector<std::uint32_t> files( rows.size() + tailFiles.size() );
+    std::ranges::transform( rows, files.begin(), [ & ]( NodeId id ) { return ing.symbols[id].fileId; } );
+    std::ranges::copy( tailFiles, files.begin() + std::ptrdiff_t( rows.size() ) );
+    buildPathTable( files, out.uniqueFiles, out.rowPathIdx );
+    ENSURES( out.rowPathIdx.size() == rows.size() + tailFiles.size(), "one path index per symbol row, then one per tail row" );
+    return out;
 }
 
 // emit the <paths> table (index=path, space-separated), XML-escaped. `rootPrefix` empty ⇒ paths stay the
@@ -259,8 +295,10 @@ struct ColumnarRowExtras
     const std::vector<std::string>*              ofDef    = nullptr;
     const std::string*                           defRows  = nullptr;
     const std::vector<char>*                     splitArm = nullptr;
-    const std::string*                           tailRows = nullptr;   // XML rows kept verbatim after </cols> (lane declined-sites: <dc>)
+    const std::string*                           tailRows = nullptr;   // elements written after </cols>: the declined sites (<dc> rows, or BAND DC's <dcols> block), <in> blocks
     const std::vector<char>*                     byType   = nullptr;   // L7 --impact: the dense 0/1 `<by_type>` column (reached only through a type mention), present-only
+    const std::vector<char>*                     testRow  = nullptr;   // TIER-FOLLOWUP: the dense 0/1 `<test>` column (a test definition row), present-only
+    const ColumnarPaths*                         paths    = nullptr;   // BAND DC: the table built WITH the tail block's files (columnarPathsWithTail), so tailRows may index it
 };
 inline std::string columnarExtraFields( const ColumnarRowExtras& extras )
 {
@@ -272,6 +310,7 @@ inline std::string columnarExtraFields( const ColumnarRowExtras& extras )
     fields += extras.ofDef != nullptr ? ",of_def" : "";
     fields += columnarViaPresent( extras.splitArm ) ? ",split" : "";
     fields += columnarViaPresent( extras.byType ) ? ",by_type" : "";
+    fields += columnarViaPresent( extras.testRow ) ? ",test" : "";
     return fields;
 }
 // the of_def column: each row's tokens, comma-separated rows (a token holds no comma)
@@ -326,6 +365,10 @@ inline void emitColumnarOptionalColumns( std::FILE* out, const IngestResult& ing
     {
         emitColumnarFlagColumn( out, "by_type", rows.size(), [ & ]( std::size_t i ) { return i < extras.byType->size() && ( *extras.byType )[ i ] != 0; } );
     }
+    if( columnarViaPresent( extras.testRow ) )
+    {
+        emitColumnarFlagColumn( out, "test", rows.size(), [ & ]( std::size_t i ) { return i < extras.testRow->size() && ( *extras.testRow )[ i ] != 0; } );
+    }
 }
 
 // The `<name>` column: XML-escaped names (most identifiers never contain a comma, but markdown SECTION symbols and canonical ids
@@ -372,13 +415,12 @@ inline void emitColumnarSymbolRows( std::FILE* out, const IngestResult& ing,
 {
     std::vector<char> esc;
 
-    std::vector<std::uint32_t> rowFiles;  rowFiles.reserve( rows.size() );
-    for( NodeId id : rows )
-    {
-        rowFiles.push_back( ing.symbols[id].fileId );
-    }
-    std::vector<std::uint32_t> uniqueFiles, rowPathIdx;
-    buildPathTable( rowFiles, uniqueFiles, rowPathIdx );
+    // BAND DC: a caller whose tail block indexes the table built it already (its files after the rows'); otherwise the rows' alone
+    const ColumnarPaths               ownPaths    = extras.paths == nullptr ? columnarPathsWithTail( ing, rows, {} ) : ColumnarPaths{};
+    const ColumnarPaths&              paths       = extras.paths != nullptr ? *extras.paths : ownPaths;
+    const std::vector<std::uint32_t>& uniqueFiles = paths.uniqueFiles;
+    EXPECTS( paths.rowPathIdx.size() >= rows.size(), "a path index per symbol row" );
+    const std::span<const std::uint32_t> rowPathIdx = std::span<const std::uint32_t>( paths.rowPathIdx ).first( rows.size() );
 
     std::fputs( kColumnarLegend, out );   // §B1.5: once per output, before the element it describes
     rw::emitTo( out, "<{} {} format=\"columnar\">", wrapperTag, wrapperAttrs.c_str() );

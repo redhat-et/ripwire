@@ -123,7 +123,16 @@ raw  = open( path, 'rb' ).read()
 # The <shortkey> fallback ladder (forreexport.h, gate barrelshortkeycheck) is an out-of-band block whose legend says it is not in
 # est_tokens (like <lit>, <decl_rows>): the accounting below prices the charged answer, so ONE trailing block that DECLARES itself
 # outside est_tokens is cut before pricing. A <shortkey> with no such declaration stays in and fails (C) like any uncharged byte.
-raw  = re.sub( rb'<!-- shortkey[^>]*?not in est_tokens[^>]*?-->(?:<shortkey [^>]*/>|<shortkey [^>]*>.*?</shortkey>)(?=</ctx>\s*$)', b'', raw, count = 1, flags = re.S )
+# GATE CORRECTION (item R): the criterion is the block's SELF-DECLARATION, not its position. This pattern
+# also required the block to sit immediately before </ctx>, which was incidentally true while every legend
+# comment lived at the document head. Answer-first moves the DOCUMENT legend to the tail, so a self-declaring
+# block is no longer last, the strip stopped firing, and 1,447 B began to be priced that the block itself says
+# are not in est_tokens — est_tokens then looked as though it under-charged by exactly 579 tokens. Dropping the
+# position lookahead restores the rule this gate's own comment states ("ONE trailing block that DECLARES itself
+# outside est_tokens is cut before pricing"); the DECLARATION plus the comment-to-block adjacency still carry
+# the whole assertion, and a <shortkey> with no such declaration still stays in and fails (C). The adjacency
+# this now leans on is pinned independently by test/foranswerfirstcheck.sh (R8).
+raw  = re.sub( rb'<!-- shortkey[^>]*?not in est_tokens[^>]*?-->(?:<shortkey [^>]*/>|<shortkey [^>]*>.*?</shortkey>)', b'', raw, count = 1, flags = re.S )
 bad  = []
 
 try:

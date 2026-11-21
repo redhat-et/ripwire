@@ -402,7 +402,7 @@ inline constexpr std::uint64_t kBaseChildMinIndexBytes = std::uint64_t( 1 ) << 2
 std::string gitDirAt( const std::string& dir, const rw::os::stat_t& dotGit )
 {
     using namespace rw;
-    const std::string gitDir = dir + "/.git";
+    std::string gitDir = dir + "/.git";   // not const: the early return below moves it out
     if( !S_ISREG( dotGit.st_mode ) )
     {
         return gitDir;
@@ -694,7 +694,7 @@ BaseChildResult tryBaseChild( const std::string& root, const rw::Config& cfg, co
     {
         constexpr std::string_view kOutcome[] = { "child", "failed", "fallback" };
         rw::emitTo( stderr, "ripwire: stats qbase-child outcome={} why={} child_peak_mib={} blob={}\n", kOutcome[ std::size_t( child.outcome ) ],
-                    child.why.empty() ? std::string_view( "-" ) : child.why, refs.childPeak / ( 1024 * 1024 ), child.blob.empty() ? std::string_view( "-" ) : child.blob );
+                    child.why.empty() ? std::string_view( "-" ) : child.why, refs.childPeak / ( std::uint64_t( 1024 ) * 1024 ), child.blob.empty() ? std::string_view( "-" ) : child.blob );
     }
     if( child.outcome == BaseChildOutcome::Fallback )
     {
@@ -911,7 +911,8 @@ std::optional<int> loadFullTrees( const std::string& root, const rw::Config& cfg
             return out.stop.stopped ? std::nullopt : loadTargetCommit( root, out.targetSha, cfg, out );
         }
         const auto [ baseBefore, basePeak, after, fixed ] = baseReadings( out, before, fixedBefore );
-        const memguard::TargetProjection proj             = memguard::projectTargetPhase( baseBefore, out.ingestPeak, basePeak, after, fixed );
+        const memguard::TargetProjection proj             = memguard::projectTargetPhase(
+            { .before = baseBefore, .ingestPeak = out.ingestPeak, .basePeak = basePeak, .after = after, .fixedBytes = fixed } );
         out.needBytes       = proj.needBytes;
         out.ingestNeedBytes = proj.ingestNeedBytes;
         projectedNoFit = !proj.fits;
@@ -1671,6 +1672,16 @@ inline constexpr const char* kQdMonsterLegend =
     "(10 or more) in this change: major whatever the percentage, since tangle in a giant function is a small share of it "
     "forever. Put the new branch in a helper. ";
 
+// QD-SWAP-1117 — emitted only when a params row carries similar=. The compact dialect's reading is compactlegend.h's
+// "similar" row (it is in the session dictionary, --legend-dict).
+inline constexpr const char* kQdSimilarArgsLegend =
+    "similar=\"N\" on a params row: the function is new or its parameter list grew, and it now holds N (3 or more) adjacent "
+    "parameters of one written type with different names, so a call that swaps two of them compiles. similar= never gates "
+    "and never changes a row's sev= or the exit status; a row it adds is sev=\"minor\": was= and now= are still parameter "
+    "counts, and now= may be under bar=. C and C++ only, read off the signature text: a run of two, unnamed parameters, and bool "
+    "and iterator types are not counted, and two spellings of one type are two types. "
+    "Pass a small named struct, so the call names each field. ";
+
 // Emitted only when a clone-family row (duplication / new-clone-of-reused-helper) is in the document,
 // which is what puts members=, tokens= and idiom= on a first screen. A clean tree has none.
 inline constexpr const char* kQdCloneLegend =
@@ -1838,6 +1849,10 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
     {
         return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return r.kind == "defect-shape"; } );
     };
+    const auto anySimilarArgsRow = [] ( const std::vector<rw::quality::Regression>& v )
+    {
+        return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return r.kind == "params" && !r.facet.empty(); } );
+    };
     const auto anyMonsterRow = [] ( const std::vector<rw::quality::Regression>& v )
     {
         return std::any_of( v.begin(), v.end(), []( const rw::quality::Regression& r ) { return r.kind == "complexity" && !r.facet.empty(); } );
@@ -1962,6 +1977,10 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
         if( anyMonsterRow( p.rows ) || anyMonsterRow( p.disclosedRows ) )
         {
             rw::emitRaw( out, kQdMonsterLegend );
+        }
+        if( anySimilarArgsRow( p.rows ) || anySimilarArgsRow( p.disclosedRows ) )
+        {
+            rw::emitRaw( out, kQdSimilarArgsLegend );
         }
     }
 
@@ -3946,7 +3965,7 @@ std::optional<int> runQualityViews( const MainDispatch& d )
             // UNUSED-IN-FILE (forunused.h): this verb answers for internal linkage; a filter that names a path is often asking about public defs, so it names the verb that does
             if( rw::forUnusedOn() && cfg.deadCodeDir.find_first_of( "./" ) != std::string_view::npos )
             {
-                dcFilterAttr += " next=\"" + std::string( escapeXml( rw::nextFlag( "--for=", std::string( "unused functions in " ) + std::string( cfg.deadCodeDir ) ), dcFiltEsc ) ) + "\"";
+                dcFilterAttr += rw::nextAttrXml( rw::nextFlag( "--for=", std::string( "unused functions in " ) + std::string( cfg.deadCodeDir ) ) );
             }
         }
         // 0.6.6 D4: runner-root-excluded= is absent at 0, so a tree with no Python test/decorated root is byte-identical

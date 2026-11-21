@@ -24,3 +24,6 @@ perlang	elixir_resolve.h
 perlang	ingest_clojure.h
 perlang	ingest_jsimports.h
 perlang	ingest_ruby.h
+# argtypepick.h (lane overload-split): the C++ argument-type overload pick (graph.h B2.3), C++ overload resolution only.
+perlang	argtypepick.h
+perlang	pyscopepin.h

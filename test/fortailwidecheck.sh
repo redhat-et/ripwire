@@ -170,7 +170,7 @@ def load(name):
 def tail_of(txt):
     m = re.search(r'<tail total="(\d+)" shown="(\d+)" capped="(\d)"( next="[^"]*")?(?: p_only="(\d+)")?>(.*?)</tail>', txt, re.S)
     if not m: return None
-    rows = [(html.unescape(p), None if not s else html.unescape(s)) for p, s in re.findall(r'<t p="([^"]*)"(?: sym="([^"]*)")?/>', m.group(6))]
+    rows = [(html.unescape(p), None if not s else html.unescape(s)) for p, s in re.findall(r'<t p="([^"]*)"(?: sym="([^"]*)")?(?: tsym="[^"]*")?/>', m.group(6))]
     return dict(total=int(m.group(1)), shown=int(m.group(2)), capped=m.group(3), next=html.unescape(m.group(4) or ""), rows=rows, raw=m.group(0),
                 p_only=None if m.group(5) is None else int(m.group(5)))
 def head_files(txt):

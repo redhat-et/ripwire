@@ -387,7 +387,7 @@ inline void rubyNoteSymbolArguments( TSNode args, const RawBind& like, std::stri
             RawBind b   = like;
             b.startByte = ts_node_start_byte( a );
             b.var       = std::string( pattern::nodeText( a, src ).substr( 1 ) );
-            binds.push_back( std::move( b ) );
+            binds.push_back( b );
         }
         return true;
     } );
@@ -893,7 +893,7 @@ inline void RubyFactoryWalk::emit( TSNode call, std::string_view name, const std
     b.kind      = LocalBindKind::RubyFactory;
     b.var       = std::string( name );
     b.typeName  = cls;
-    binds_.push_back( std::move( b ) );
+    binds_.push_back( b );
 }
 
 // One file's FactoryBot factories, into `binds` — a file with no `FactoryBot.define` / `FactoryGirl.define` is not walked.

@@ -37,7 +37,7 @@
 #   I  (negative) grep <enc> on a C function with only direct, bound calls: callers="2", no marker.
 #   J  (negative) grep <enc> on a markdown heading: callers="0" stays plain (nothing calls or reads a heading).
 #   K  --for bundle <lego>: implementors= is the lego verb's own count (6) even when fewer rows are listed, with
-#      implementors_shown= + implementors_next=; (negative) all rows listed => no shown/next attribute.
+#      shown_implementors= + implementors_next=; (negative) all rows listed => no shown/next attribute.
 #   L  <lego> implementors_floor: an inherit clause naming the interface that bound nowhere (a cross-language base)
 #      floors the count on the bundle AND the targeted verb; (negative) without it, no marker.
 #   L2 (negatives) a bound Rust `impl Trait for T` and a twice-opened Ruby class do not floor (the graph re-keys
@@ -231,8 +231,8 @@ OUT_C="$( run c --safe-delete=width_of )"
 ROW_PAD="$( printf '%s' "$OUT_C" | grep -oE '<c n="pad"[^>]*/>' | head -1 )"
 ROW_USER="$( printf '%s' "$OUT_C" | grep -oE '<c n="user"[^>]*/>' | head -1 )"
 if [ "$( attr "$ROW_PAD" p )" = "a.c:9" ]; then ok "(C) p= still names the caller's definition line (a.c:9)"; else no "(C) p= changed on the pad row: $ROW_PAD"; fi
-if [ "$( attr "$ROW_PAD" sites_at )" = "a.c:11 a.c:12 a.c:13" ]; then ok "(C) three calls on three lines: sites_at=\"a.c:11 a.c:12 a.c:13\""; else no "(C) pad row: $ROW_PAD"; fi
-if [ "$( attr "$ROW_USER" sites_at )" = "a.c:22" ]; then ok "(C) a call continued onto its own line: sites_at=\"a.c:22\""; else no "(C) user row: $ROW_USER"; fi
+if [ "$( attr "$ROW_PAD" sites_at )" = "11 12 13" ]; then ok "(C) three calls on three lines: sites_at=\"11 12 13\" (SITES-SHORT: bare lines of the p= file asserted just above)"; else no "(C) pad row: $ROW_PAD"; fi
+if [ "$( attr "$ROW_USER" sites_at )" = "22" ] && [ "$( attr "$ROW_USER" p )" = "a.c:17" ]; then ok "(C) a call continued onto its own line: p=\"a.c:17\" sites_at=\"22\""; else no "(C) user row: $ROW_USER"; fi
 if [ -z "$ROW_PAD" ] || [ -z "$ROW_USER" ]; then
     no "(C-twin) premise: the safe-delete answer printed no caller rows"
 elif printf '%s' "$OUT_C" | grep -q '<c [^>]*sites_l='; then
@@ -241,7 +241,7 @@ else
     ok "(C-twin) safe-delete rows carry sites_at= only (the bare-line sites_l= stays on edit-check)"
 fi
 ROW_TW="$( printf '%s' "$( run c --safe-delete=twice )" | grep -oE '<c n="user"[^>]*/>' | head -1 )"
-if [ "$( attr "$ROW_TW" sites_at )" = "a.c:20" ]; then ok "(D) a single-definition callee called once still prints its call site (a.c:20)"; else no "(D) twice row: $ROW_TW"; fi
+if [ "$( attr "$ROW_TW" sites_at )" = "20" ] && [ "$( attr "$ROW_TW" p )" = "a.c:17" ]; then ok "(D) a single-definition callee called once still prints its call site (a.c:20)"; else no "(D) twice row: $ROW_TW"; fi
 R_C="$( root_tag "$OUT_C" safe-delete )"
 case "$R_C" in *callers_floor=*) no "(C) bound direct calls only, yet callers is floored: $R_C" ;; *) ok "(C) callers=\"2\" with no floor (every call bound)" ;; esac
 
@@ -300,7 +300,7 @@ TOTAL_K="$( attr "$( first_iface "$( run ts --lego=Router )" )" implementors )"
 [ "$TOTAL_K" = 6 ] || no "(K) premise: --lego=Router implementors=\"$TOTAL_K\", expected 6"
 LEGO_ALL="$( run ts '--for=which router classes implement the Router interface' | grep -oE '<iface n="Router"[^>]*>' | head -1 )"
 if [ "$( attr "$LEGO_ALL" implementors )" = 6 ]; then ok "(K) all six listed: implementors=\"6\""; else no "(K) $LEGO_ALL"; fi
-case "$LEGO_ALL" in *implementors_shown=*|*implementors_next=*) no "(K) every row listed, yet a short-list marker: $LEGO_ALL" ;; *) ok "(K) no implementors_shown= when every row is listed" ;; esac
+case "$LEGO_ALL" in *shown_implementors=*|*implementors_next=*) no "(K) every row listed, yet a short-list marker: $LEGO_ALL" ;; *) ok "(K) no shown_implementors= when every row is listed" ;; esac
 # the narrowed shape, built by construction: a task that reaches ONE implementor's file and the interface's
 # file, so the bundle's rows are narrowed to the files its own sigs render (legobundlecheck rule 2) — one row of six
 mkdir -p "$W/tsn"; cp "$W/ts/"[A-Z]*.ts "$W/ts/router.ts" "$W/tsn/"
@@ -317,14 +317,14 @@ LEGO_N="$( run tsn '--for=delta dispatch' | grep -oE '<iface n="Router"[^>]*>' |
 if [ -z "$LEGO_N" ]; then
     no "(K) premise: no Router iface row in the narrowed bundle"
 else
-    IMPL_N="$( attr "$LEGO_N" implementors )"; SHOWN_N="$( attr "$LEGO_N" implementors_shown )"
+    IMPL_N="$( attr "$LEGO_N" implementors )"; SHOWN_N="$( attr "$LEGO_N" shown_implementors )"
     if [ "$IMPL_N" = 6 ]; then ok "(K) narrowed bundle still says implementors=\"6\""; else no "(K) narrowed bundle: $LEGO_N"; fi
     if [ -n "$SHOWN_N" ]; then
         [ "$SHOWN_N" -lt 6 ] && [ "$( attr "$LEGO_N" implementors_next )" = "--lego=router.ts:Router" ] \
-            && ok "(K) implementors_shown=\"$SHOWN_N\" implementors_next=\"--lego=router.ts:Router\"" || no "(K) short-list marker: $LEGO_N"
+            && ok "(K) shown_implementors=\"$SHOWN_N\" implementors_next=\"--lego=router.ts:Router\"" || no "(K) short-list marker: $LEGO_N"
         if run tsn --lego=router.ts:Router | grep -q 'implementors="6"'; then ok "(K) the clue lists all six"; else no "(K) implementors_next did not list six"; fi
     else
-        no "(K) premise: the bundle was not narrowed (no implementors_shown=): $LEGO_N"
+        no "(K) premise: the bundle was not narrowed (no shown_implementors=): $LEGO_N"
     fi
 fi
 
@@ -594,7 +594,7 @@ for dialect in compact full; do
     L_K="$( run tsl '--for=which router classes implement the Router interface' --legend=$dialect )"
     L_P="$( run pc --grep=PC_TABLE_MARK --legend=$dialect )"; L_PN="$( run pc --grep=PC_NAMED_MARK --legend=$dialect )"
     for pair in "L_A:callers_floor=" "L_A:uses_floor=" "L_A:unmodelled" "L_C:sites_at=" "L_E:callers_floor=" "L_E:floor_next=" \
-                "L_K:implementors_floor=" "L_K:implementors_shown=" "L_K:floor_next=" "L_P:vals=" "L_P:p= beside vals=" "L_PN:reads=" "L_PN:reads_at="; do
+                "L_K:implementors_floor=" "L_K:shown_implementors=" "L_K:floor_next=" "L_P:vals=" "L_P:p= beside vals=" "L_PN:reads=" "L_PN:reads_at="; do
         var="${pair%%:*}"; term="${pair#*:}"
         comments "${!var}" | grep -qF -- "$term" \
             && ok "(N/$dialect) $term defined in the legend of the $var answer" || no "(N/$dialect) $term is not defined in the $var legend"

@@ -427,7 +427,7 @@ std::optional<int> runChangeViews( const MainDispatch& d )
         // per-root <pr-context> sections are wrapped in ONE <pr-context-workspace> element so the document stays
         // single-rooted (G4: xmllint-clean). Trim ladder under --max-tokens: the budget is split PER ROOT,
         // proportional to each root's changed-file count (integer floor; the remainder goes to the
-        // lexicographically-first label = ws[0], since ws is in canonical label order) — then each root runs the
+        // first root in canonical `<label>/` order = ws[0]) — then each root runs the
         // landed PrTrim ladder against its share. This reuses writePrContext verbatim; it is simpler than forcing
         // one shared global trim level (which would need writePrContext to expose a forced-level render).
         if( multiRoot )
@@ -1673,7 +1673,8 @@ std::optional<int> runCrossRef( const MainDispatch& d )
             result.nearMiss = didYouMean( d.ing, whereisSel );
         }
         crossref::writeWhereisPage( stdout, result, cfg.detail ? SIZE_MAX : crossref::kWhereisHits, cfg.pageLimit, cfg.pageOffset,
-                                    crossref::whereisListingOf( cfg.whereisListing ) );
+                                    crossref::whereisListingOf( cfg.whereisListing ), d.redactPtr );
+        reportRedactions( stderr, d.redactCounts );   // REDACT-TOUCH: t= is a redacting seam
         return 0;
     }
     return std::nullopt;
@@ -1743,7 +1744,8 @@ std::optional<int> runPlanLint( const MainDispatch& d )
         }
         return 1;
     }
-    planlint::writePlanLint( stdout, res );
+    planlint::writePlanLint( stdout, res, d.redactPtr );
+    reportRedactions( stderr, d.redactCounts );   // REDACT-TOUCH: an <owed> line is a redacting seam
     return ( res.dialectDetected && planlint::gatingCount( res ) > 0 ) ? 2 : 0;
 }
 

@@ -9,8 +9,9 @@
 //   * root set hygiene   — realpath dedupe (stderr note), NESTED roots = hard error (§2.1);
 //   * root identity      — label = shortest unique whole-segment suffix of the root's REAL path
 //                          (basename when unique; leftward whole-segment extension on collision) (§2);
-//   * canonical order    — roots sorted by LABEL (byte order), NEVER argv order: `ripwire a b` and
-//                          `ripwire b a` are byte-identical (§2.1);
+//   * canonical order    — roots sorted by LABEL as a path prefix (`<label>/`, byte order), NEVER argv order:
+//                          `ripwire a b` and `ripwire b a` are byte-identical (§2.1), and the merged files keep
+//                          the byte order one root over their parent gives (`a-b/` before `a/`);
 //   * merge              — per-root IngestResults concatenated with fileId/NodeId offsets into one
 //                          IngestResult whose ing.files carry the LABELED spelling `<label>/<rel>`;
 //                          the on-disk path per file survives in ing.realPaths (§4).
@@ -84,11 +85,22 @@ namespace wsdetail
         }
         return out;
     }
+
+    // WORKSPACE-LABEL-SORT: the canonical root order. Every merged path is `<label>/<rel>` and each root's files arrive
+    // byte-sorted, so the concatenation is byte-sorted only when the roots sort by `<label>/`, not by the bare label:
+    // '-' and '.' sort below '/', so `a` < `a-b` as labels while `a-b/y.c` < `a/x.c` as paths. Sorting by the bare
+    // label put `a/x.c` (fileId 0) before `a-b/y.c`, so every fileId/NodeId tie-break in a workspace read in crawl
+    // order rather than the path order one root over the parent gives. Labels are distinct, so this is a strict
+    // total order. (A label that is another's whole-segment prefix, `a` and `a/b`, interleaves under any root order.)
+    inline bool labelPathOrderLess( const std::string& a, const std::string& b )
+    {
+        return a + '/' < b + '/';
+    }
 }   // namespace wsdetail
 
 // Build the canonical workspace root set from the raw (post-URL-resolution) root args.
 // Returns false ⇒ hard error (nested roots), message already printed to stderr.
-// On success `out` holds ≥1 root in canonical (label byte-order) order, deduped.
+// On success `out` holds ≥1 root in canonical (`<label>/` byte-order) order, deduped.
 inline bool buildWorkspaceRoots( const std::vector<std::string>& args, std::vector<WorkspaceRoot>& out )
 {
     out.clear();
@@ -162,9 +174,11 @@ inline bool buildWorkspaceRoots( const std::vector<std::string>& args, std::vect
         }
     }
 
-    // 4) canonical order: sort by label (byte order) — argv order can never leak into output (§2.1).
+    // 4) canonical order: sort by `<label>/` (byte order) — argv order can never leak into output (§2.1), and the
+    //    merged files stay byte-sorted unless one label is another's whole-segment prefix (`a` and `a/b`: their files
+    //    interleave under any root order — wsdetail::labelPathOrderLess states that exception).
     std::sort( out.begin(), out.end(),
-               []( const WorkspaceRoot& a, const WorkspaceRoot& b ) noexcept { return a.label < b.label; } );
+               []( const WorkspaceRoot& a, const WorkspaceRoot& b ) { return wsdetail::labelPathOrderLess( a.label, b.label ); } );
     return true;
 }
 
@@ -473,7 +487,7 @@ inline IngestResult mergeWorkspaceIngests( const std::vector<WorkspaceRoot>& roo
                 b.fromSymbol += symOff;
             }
             b.fileId += fileOff;
-            m.bindings.push_back( std::move( b ) );
+            m.bindings.push_back( b );
         }
         for( BindingAlias& a : p.bindingAliases )
         {

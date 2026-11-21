@@ -80,7 +80,7 @@ struct ForBudgetAsk
 
 // The blocks printed outside est_tokens that a budget holds (each renders its own held="budget" stub and next= under
 // Config::forHoldBudget). <doc_body> prices itself (its est_tokens=); the others are priced at the markup rate.
-inline constexpr std::string_view kForHeldBlocks[] = { "syms", "doc_body", "decl_rows", "exemplar_family", "graph_verb", "reexports", "shortkey", "aliases" };
+inline constexpr std::string_view kForHeldBlocks[] = { "syms", "doc_body", "decl_rows", "exemplar_family", "manifest_rows", "graph_verb", "reexports", "shortkey", "aliases" };
 
 // The budget's legend clauses. The fixed shed order is named once; only the units this answer took are defined (an untouched unit
 // costs no bytes: the whole list was ~940 B of every shed answer's header, six sigs rows at --token-budget=2160 on forrankordercheck's
@@ -308,16 +308,24 @@ struct ShedState
 };
 
 // Where held block `c` starts with its own legend: the XML comment right before it that names it (`<!-- syms: …-->`,
-// `<!-- reexports held="budget": …-->`), printed with the block and outside est_tokens like it; c.at when there is none.
-// childrenOf skips comments, so the block alone was charged (CodeRabbit #665: <syms>' 265 B legend rode free).
+// `<!-- reexports held="budget": …-->`, `<!-- ripwire for manifest_rows: …-->`), printed with the block and outside est_tokens
+// like it; c.at when there is none. childrenOf skips comments, so the block alone was charged (CodeRabbit #665: <syms>' 265 B
+// legend rode free; CodeRabbit #686: every `<!-- ripwire for NAME` legend did, syms, decl_rows, manifest_rows and the rest).
 inline std::size_t heldLegendAt( std::string_view answer, const Child& c )
 {
-    const std::size_t open = answer.substr( 0, c.at ).ends_with( "-->" ) ? answer.rfind( "<!-- ", c.at ) : std::string_view::npos;
-    if( open == std::string_view::npos || !answer.substr( open + 5 ).starts_with( c.name ) )
+    constexpr std::string_view kOpen = "<!-- ", kForPrefix = "ripwire for ";
+    const std::size_t open = answer.substr( 0, c.at ).ends_with( "-->" ) ? answer.rfind( kOpen, c.at ) : std::string_view::npos;
+    if( open == std::string_view::npos )
     {
         return c.at;
     }
-    const char after = answer[ open + 5 + c.name.size() ];
+    const std::string_view named = answer.substr( open + kOpen.size() );
+    const std::string_view name  = named.starts_with( kForPrefix ) ? named.substr( kForPrefix.size() ) : named;
+    if( name.size() <= c.name.size() || !name.starts_with( c.name ) )
+    {
+        return c.at;
+    }
+    const char after = name[c.name.size()];
     return after == ':' || after == ' ' ? open : c.at;
 }
 
@@ -526,7 +534,7 @@ private:
         }
     }
 
-    std::string withNext( std::string open ) const { return nextVal_.empty() ? open : withAttr( open, "next", nextVal_ ); }
+    std::string withNext( std::string open ) const { return nextVal_.empty() ? std::move( open ) : withAttr( open, "next", nextVal_ ); }
 
     // U's own <sigs next=> when it is the signatures-only re-call (it serves every row unshrunk: the call without the budget would
     // serve U's head, itself shrunk past its target — forrankordercheck (9)); else the call without the budget
@@ -887,6 +895,17 @@ private:
     std::size_t            splitClauseAt_ = 0, splitClauseLen_ = 0, splitRowsU_ = 0;   // U's split reading in its legend, and its prov="split" rows
 };
 }   // namespace budgetfit_detail
+
+// The price of a --for answer's held blocks (kForHeldBlocks children of its <ctx> root, each with its legend), as the fit charges
+// them: est_tokens= plus this is what a budget must hold (ForBudgetFitter::fitsWhole). The MCP `for` holds <manifest_rows> from it
+// (mcpverbs.h forTaskText). 0 when no root closes.
+inline std::size_t forHeldBlocksPrice( std::string_view answer )
+{
+    const std::size_t rootAt = answer.find( "<ctx " );
+    std::size_t       close  = std::string_view::npos;
+    const std::vector<budgetfit_detail::Child> top = rootAt == std::string_view::npos ? std::vector<budgetfit_detail::Child>{} : budgetfit_detail::childrenOf( answer, rootAt, close );
+    return close == std::string_view::npos ? 0 : budgetfit_detail::heldBlocksPrice( answer, top );
+}
 
 // What fitting U to a budget came to: the answer to print, or the call for the re-render that holds kForHeldBlocks.
 struct ForBudgetFitResult

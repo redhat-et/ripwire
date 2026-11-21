@@ -27,6 +27,7 @@
 #include "clones.h"
 #include "cloneidiom.h"         // idiom-class demotion — the closed 3-idiom shape classifier that turns an idiom-COLLISION clone group into a minor row instead of a gating one
 #include "lintrules.h"          // findQualityConstructs — the built-in error-masking rule table (GitClear +47% kind) + the placeholder shapes
+#include "similarargs.h"        // the similar-argument-list scanner (the params kind's report-only similar= facet)
 #include "defectshape.h"        // the defect-shape kind's four scanners (format-arity, utf8-cut, dedup-first, vacuous-assert)
 #include "arch.h"               // fnv1a64
 #include "pathguard.h"          // CWE-59/367: rw::pathguard::openNoFollowTruncate — writeBaseline truncates, so its open must refuse a link atomically
@@ -1804,7 +1805,12 @@ inline std::vector<std::uint32_t> codeLocByNode( const IngestResult& ing, MoveId
                       // same reason ("doc sections churn by design").
         }
         out[i] = codeLinesInBody( body, s.lang );
-        if( moveOut == nullptr || ( moveOut->body[i] = moveCidOf( s, body ) ) == 0 )
+        if( moveOut == nullptr )
+        {
+            return;
+        }
+        moveOut->body[i] = moveCidOf( s, body );
+        if( moveOut->body[i] == 0 )
         {
             return;
         }
@@ -3079,7 +3085,7 @@ constexpr std::uint32_t kHeadSnapCacheScheme = 1;
 // every blob it takes (it has no disclosure line at all — see evictBySizeBudget's note on why only the
 // byte-budget pass speaks), so an orphan is treated exactly as any other aged-out blob, with no special
 // case in either direction.
-inline constexpr std::uint64_t kCacheRootKeySeed = 1469598103934665603ull;
+inline constexpr std::uint64_t kCacheRootKeySeed = rw::hashutil::kFnv1aLegacySeed64;
 
 inline std::string cacheRootKeyHex( const std::string& root )
 {
@@ -3138,8 +3144,24 @@ inline std::string cacheRootKeyHex( const std::string& root )
 // `static_assert( quality::kIngestParserVerMirror == kParserVer && … )`, so a missed mirror now fails the build. It does
 // not include this header; it relies on ingest.cpp including quality.h (line 13) before ingest_cache.h, and a reorder
 // that broke that fails the build on the undeclared name rather than passing.
-constexpr std::uint32_t kIngestCacheVersionMirror   = 52;   // MUST equal ingest.cpp's kCacheVersion (gated); 52 = lane failure-default (construct-hit failure-default tag), 51 = lane qd-constructs (FILE record construct-hit family), 50 = lane clones-persist (Function/Method def record clone key), 49 = lane warm-direct (FILE record head family counts), 48 = train 42b (alias-import LocalBindKind ReExport; its placeholder 47), 46 = train 40 (js-def-naming JsObjectLiteral; its placeholder 45), 44 = train 37b (rust-degraded FileHealth::useBoundsBlanked; its placeholder 42), 43 = train 36 (#155 trailingLambda ref byte; above main 40, #438's placeholder 41, rust-degraded's 42), 40 = train 34 (fc3-js-rebind JsRebind; above main 39), 39 = train 33 (above main 36 and l6-iface 38), 38 = train 32 lane l6-iface fix round 1: LocalBindKind ImplBlock (train renumbers), 37 = train 32 lane l6-iface: LocalBindKind DispatchType (train renumbers), 36 = train 30 (above call-result-typing's and fcall-forward's 33, name-template-dispatch's 35, main's 34), 34 = train 29 (above lane arity-min's and call-result-typing's 33), 33 = train 29 lane arity-min: def record paramsMin (the train renumbers), 33 = lane call-result-typing: RawBind resultIndex + unwrapDepth, 33 = lane fcall-forward: ref `forwarded` byte, 35 = lane name-template-dispatch: RefRole Pattern 11, 32 = train 28: RefRole Subscript 9 + Inert 10, 31 = train 27: lego-transitive's inherit-ref baseBind (the lane's 30), 29 = FE-B ref memberPath/memberCtor + 4 bind kinds, 28 = FE-A ref memberCall/memberRoot, 27 = corrected fnScope values, 26 = function-local def scope span (25 = #157 + #150)
-constexpr std::uint32_t kIngestParserVerMirror    = 311;  // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestCacheVersionMirror   = 53;   // MUST equal ingest.cpp's kCacheVersion (gated); 53 = lane rust-self-chain placeholder (LocalBindKind RecvCall), 52 = lane failure-default (construct-hit failure-default tag), 51 = lane qd-constructs (FILE record construct-hit family), 50 = lane clones-persist (Function/Method def record clone key), 49 = lane warm-direct (FILE record head family counts), 48 = train 42b (alias-import LocalBindKind ReExport; its placeholder 47), 46 = train 40 (js-def-naming JsObjectLiteral; its placeholder 45), 44 = train 37b (rust-degraded FileHealth::useBoundsBlanked; its placeholder 42), 43 = train 36 (#155 trailingLambda ref byte; above main 40, #438's placeholder 41, rust-degraded's 42), 40 = train 34 (fc3-js-rebind JsRebind; above main 39), 39 = train 33 (above main 36 and l6-iface 38), 38 = train 32 lane l6-iface fix round 1: LocalBindKind ImplBlock (train renumbers), 37 = train 32 lane l6-iface: LocalBindKind DispatchType (train renumbers), 36 = train 30 (above call-result-typing's and fcall-forward's 33, name-template-dispatch's 35, main's 34), 34 = train 29 (above lane arity-min's and call-result-typing's 33), 33 = train 29 lane arity-min: def record paramsMin (the train renumbers), 33 = lane call-result-typing: RawBind resultIndex + unwrapDepth, 33 = lane fcall-forward: ref `forwarded` byte, 35 = lane name-template-dispatch: RefRole Pattern 11, 32 = train 28: RefRole Subscript 9 + Inert 10, 31 = train 27: lego-transitive's inherit-ref baseBind (the lane's 30), 29 = FE-B ref memberPath/memberCtor + 4 bind kinds, 28 = FE-A ref memberCall/memberRoot, 27 = corrected fnScope values, 26 = function-local def scope span (25 = #157 + #150)
+constexpr std::uint32_t kIngestParserVerMirror    = 335;  // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 335 = 2026-11-21 (#548 arm 1: Clojure metadata-prefixed calls; rich 336; above train 1117d2-s's 333)
+                                                          // 333 = 2026-11-18 (train 1117d2 on train 1117d1, rich 334; members below, each was a placeholder)
+                                                          //   std-namesake (placeholder 317): a Rust binding written as a standard type keeps its spine on the tombstone
+                                                          //   rust-self-chain (placeholder 319; kCacheVersion 53): Rust RecvCall records for member calls on a call's result, async ReturnType bit
+                                                          //   rust-macro-args (placeholder 315): calls inside Rust macro arguments are references
+                                                          // 331 = 2026-11-18 (train 1117d1, rich 332; members below, each was a placeholder)
+                                                          //   go-cpp-edges (placeholder 317): a Go generic result type `Set[T]` records its ReturnType as the instantiated class
+                                                          //   cpp-ptr-alias (placeholder 321): a C++ Type / ParamType record whose declarator names the variable carries kDirectDeclaratorBit
+                                                          //   overload-split (placeholder 329): a Go qualified generic instantiation keeps its package qualifier
+                                                          //   small-edges-1118 (placeholder 323): a Go method expression `(*T).m` in a value position is a Value row (GO-METHOD-EXPR)
+                                                          //   edge-strays-1118 (placeholder 327): Rust `<T as Trait>::m` calls are qualified by T, else by Trait
+                                                          // 313 = 2026-11-17 (TRAIN-1117b, one number for two members, above main 311/312 (#420 via #686); rich 314;
+                                                          //   see the kParserVer note): #446 round 2 (@SeddonShen, lane land-606, its placeholder 316): Java base clauses as
+                                                          //   @reference.base captures; #355 (PR #426 by @conka8, its placeholders 216 then 311): tags-pass string predicates +
+                                                          //   Elixir keyword tables in tags.scm
+                                                          // 311 = 2026-11-17 (#358 C# 1a, @LaimaWu, lands #420: using directives as shared @import.path captures; rich 312)
                                                           // 309 = 2026-11-13 (lane macro-p0 placeholder: C-family macro invocations read as typeless declarators are uses, not defs; + macro-p1 trailing annotation macros; rich 310)
                                                           // 307 = 2026-11-11 (lane rust-macro-path placeholder: Rust path macro sites + `$crate::m!` in transcribers; rich 308)
                                                           // 305 = 2026-11-10 (#446 round 1: C++ base clauses as @reference.base captures; above main 303 and PR head 304; rich 306)
@@ -8028,6 +8050,7 @@ inline constexpr FacetAttr kFacetAttrs[] = {
     { "duplication",                "idiom"   },   // the recognized clone-body shape (cloneidiom.h)
     { "defect-shape",               "defect"  },   // format-arity / utf8-cut / dedup-first / vacuous-assert
     { "error-masking",              "facet"   },   // failure-default: the growth includes a read failure returned as an empty success
+    { "params",                     "similar" },   // QD-SWAP-1117: the longest run of adjacent same-typed parameters (similarargs.h)
     { "complexity",                 "monster" },   // QD-MONSTER-GROWTH: "1" when isMonsterGrowth made (or would make) the row major
     { "new-clone-of-reused-helper", "idiom"   },   // T13/fix2 gave this kind duplication's idiom demotion (Regression::facet
                                                     // is populated the same way, from the same CloneIdiomVerdict); this row was
@@ -9619,15 +9642,16 @@ struct ContentMoves
         return out;
     }
 
-    // The baseline the delta reads: `baseline` itself when nothing matched, else the healed copy kept in `store`.
-    const Snapshot& baseFor( const Snapshot& baseline, std::optional<Snapshot>& store ) const
+    // The baseline the delta reads: `baseline` itself when nothing matched, else the healed copy kept in `store`. Pointers
+    // in and out, not a const& handed back from a const& parameter: that one binds a temporary baseline and returns a
+    // reference that dangles past the caller's full expression, while &temporary does not compile.
+    const Snapshot* baseFor( const Snapshot* baseline, std::optional<Snapshot>& store ) const
     {
         if( empty() )
         {
             return baseline;
         }
-        store.emplace( healed( baseline ) );
-        return *store;
+        return &store.emplace( healed( *baseline ) );
     }
 
     // Dead-code rows from `from` on: a matched symbol dead now stays non-gating (origin="moved") — a body does not decide reachability.
@@ -10540,6 +10564,103 @@ inline std::pair<std::string, std::string> scopeDisclosure( const Scope& scope, 
     return out;
 }
 
+// ── similar-argument lists (QD-SWAP-1117, report-only: similarargs.h) ─────────────────────────────────
+// The longest run of adjacent same-typed parameters of each C or C++ function or method definition, read off its own
+// signature bytes ([sigStartByte, sigEndByte), the span trailingDefaultByNode reads); 0 where there is none.
+inline std::vector<std::uint8_t> similarRunByNode( const IngestResult& ing )
+{
+    std::vector<std::uint8_t> out( ing.symbols.size(), 0 );
+    forEachSymbolBody( ing, [ & ]( NodeId i, const Symbol& s, std::string_view body )
+    {
+        const std::size_t sigLen     = s.sigEndByte > s.sigStartByte ? std::size_t( s.sigEndByte - s.sigStartByte ) : 0;
+        const bool        isCallable = s.kind == SymKind::Function || s.kind == SymKind::Method;
+        if( sigLen == 0 || sigLen > body.size() || !isCallable || !langFacts( s.lang ).typeFirstParameters )
+        {
+            return;
+        }
+        out[i] = std::uint8_t( std::min<std::uint32_t>( similarargs::longestSimilarRun( { .text = body.substr( 0, sigLen ), .name = s.name } ), UINT8_MAX ) );
+    } );
+    return out;
+}
+
+// One qualityKey's longest run: `at` the definition that holds it (the first, in id order), `maxParams` the key's
+// parameter count as paramsBySym aggregates it (the MAX over every definition of the key).
+struct SimilarKeyRun
+{
+    std::uint64_t key       = 0;
+    NodeId        at        = kNoNode;
+    std::uint32_t run       = 0;
+    std::uint32_t maxParams = 0;
+};
+// Every key that holds a run of similarargs::kSimilarRunMin or more, ascending by key.
+inline std::vector<SimilarKeyRun> similarRunsByKey( const IngestResult& ing, const Graph& g, const std::vector<std::uint64_t>& keyByNode )
+{
+    const std::vector<std::uint8_t> runByNode = similarRunByNode( ing );
+    std::vector<SimilarKeyRun>      perNode;
+    for( NodeId i = 0; i < ing.symbols.size() && i < keyByNode.size(); ++i )
+    {
+        if( i < g.canonId.size() && !g.canonId[i].empty() )
+        {
+            perNode.push_back( { keyByNode[i], i, runByNode[i], std::uint32_t( ing.symbols[i].params ) } );
+        }
+    }
+    std::ranges::stable_sort( perNode, {}, &SimilarKeyRun::key );
+    std::vector<SimilarKeyRun> out;
+    for( const SimilarKeyRun& n : perNode )
+    {
+        if( out.empty() || out.back().key != n.key )
+        {
+            out.push_back( n );
+            continue;
+        }
+        SimilarKeyRun& best = out.back();
+        best.maxParams      = std::max( best.maxParams, n.maxParams );
+        if( n.run > best.run )
+        {
+            best.run = n.run;
+            best.at  = n.at;
+        }
+    }
+    std::erase_if( out, []( const SimilarKeyRun& r ) { return r.run < similarargs::kSimilarRunMin; } );
+    return out;
+}
+
+// The rows: a definition whose parameter list holds such a run AND is new or grew since the baseline (the baseline
+// holds parameter counts only, paramsBySym, so a run made by retyping a parameter at the same count is a stated miss).
+// A symbol the params kind already reported keeps its row and gains similar="N"; any other gets a params row with
+// sev="minor": was= and now= are its parameter counts, similar= the run. Report-only, never gating.
+// What the rows are judged against: the graph (row names), the baseline (parameter counts) and this change's moved bodies.
+struct SimilarRowContext
+{
+    const Graph&       g;
+    const Snapshot&    base;
+    const MovedBodies& moved;
+};
+template<class ExistedFn, class StampFn>
+inline void appendSimilarArgsRows( std::vector<Regression>& regs, const SimilarRowContext& cx, const std::vector<SimilarKeyRun>& runs,
+                                   ExistedFn&& existedAtBaseline, StampFn&& stampLoc )
+{
+    for( const SimilarKeyRun& r : runs )
+    {
+        const auto          baseIt = cx.base.paramsBySym.find( r.key );
+        const std::uint32_t was    = baseIt == cx.base.paramsBySym.end() ? 0u : baseIt->second;
+        const bool          isNew  = !existedAtBaseline( r.key );
+        if( !isNew && r.maxParams <= was )
+        {
+            continue;
+        }
+        const std::string similar = std::to_string( r.run );
+        const auto        row     = std::ranges::find_if( regs, [ & ]( const Regression& have ) { return have.kind == "params" && have.key == r.key; } );
+        if( row != regs.end() )
+        {
+            row->facet = similar;
+            continue;
+        }
+        regs.push_back( { "params", cx.g.canonId[ r.at ], was, r.maxParams, r.key, /*isMinor=*/true, similar, isNew, isNew && cx.moved.isMoved( r.at ) } );
+        stampLoc( r.at );
+    }
+}
+
 // ── defect-shape (the twelfth kind) ───────────────────────────────────────────────────────────────────
 // A site is NEW when its identity (facet + normalized text) occurs more often in the current tree than in
 // the baseline, REPO-WIDE: an untouched, moved or renamed defect is not new, an edited one is, and a swap
@@ -10884,7 +11005,7 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
     // keys first (a copy, only when something matched; see ContentMoves).
     const ContentMoves      contentMoves( baseline, keyByNode, nowMove.body );
     std::optional<Snapshot> healedBase;
-    const Snapshot&         base = contentMoves.baseFor( baseline, healedBase );
+    const Snapshot&         base = *contentMoves.baseFor( &baseline, healedBase );
 
     // ─── r26 ORIGIN AXIS: preexisting-worse vs new-symbol ──────────────────────────────────────────────
     // The exit code used to fire on ANY major unacked finding, which meant every large-but-fine NEW symbol
@@ -11481,6 +11602,10 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
     if( kindSelected( scope.kinds, "defect-shape" ) )
     {
         appendDefectShapeRows( regs, ing, g, base, root, existedAtBaseline, stampLoc, scope.macroOverride );   // the twelfth kind (see its doc)
+    }
+    if( kindSelected( scope.kinds, "params" ) )   // QD-SWAP-1117 similar=: on by default, report-only (never gating)
+    {
+        appendSimilarArgsRows( regs, { g, base, moved }, similarRunsByKey( ing, g, keyByNode ), existedAtBaseline, stampLoc );
     }
 
     // ── §D#4-2 short-horizon churn (GitClear +15% "new code rewritten within two weeks") ───────────────────

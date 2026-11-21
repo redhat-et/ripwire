@@ -86,8 +86,8 @@ inline std::string immediateScope( std::string_view full )
 // explicit-template-argument call — so the template_function reference pattern matches every cast in the
 // tree (171 sites in this repo's src/ alone). A cast is not a call and must not mint a reference: it is
 // VALID INPUT, not a corrupt invariant, so the capture loop simply skips it (never ASSUME, never
-// DISCLOSE — nothing degraded). Query predicates cannot do this: passesPredicates is wired into
-// --match/--lint only, not the tags pass (measured — a `#not-eq?` left --uses=static_cast at 165).
+// DISCLOSE — nothing degraded). Query predicates could not do this before #355: the tags pass ran
+// none (measured — a `#not-eq?` left --uses=static_cast at 165). It runs the string ones now, so this can move into the query.
 inline bool isCppCastKeyword( std::string_view name ) noexcept
 {
     return name == "static_cast" || name == "reinterpret_cast" || name == "const_cast" || name == "dynamic_cast";
@@ -99,8 +99,8 @@ inline bool isCppCastKeyword( std::string_view name ) noexcept
 // grammar carries no case distinction, so an intrinsic tag would otherwise mint a phantom call edge
 // to a symbol that is never defined. react.dev's own rule is the filter: a user component's tag name
 // MUST start with an uppercase letter for JSX to treat it as one rather than an HTML tag, so a
-// lower-case-first-letter name at this shape is never a component. Query predicates cannot do this:
-// passesPredicates is wired into --match/--lint only, not the tags pass (same measured fact
+// lower-case-first-letter name at this shape is never a component. Query predicates could not do this before
+// #355, when the tags pass ran none (the same measured fact
 // isCppCastKeyword's note above relies on) — so, exactly like that cast filter, this is VALID INPUT,
 // skipped at capture time, never ASSUME/DISCLOSE.
 //
@@ -136,7 +136,7 @@ inline bool isJsxIntrinsicTagIdentifier( TSNode roleNode, TSNode nameNode, std::
 // `using enum E;` (C++20; re-exports the ENUMERATORS, not the named type, so an import row for the type
 // would over-claim). Both are VALID INPUT, skipped at capture time exactly like the cast keywords above:
 // the grammar puts the keyword in an anonymous child with no field name, which a tags-query pattern
-// cannot negate (passesPredicates is wired into --match/--lint only, never the tags pass).
+// cannot negate (and before #355 the tags pass ran no predicate that could test its text).
 inline bool usingDeclarationIsDirective( TSNode n ) noexcept
 {
     return !ts_node_is_null( firstChildOfType( n, "namespace" ) ) || !ts_node_is_null( firstChildOfType( n, "enum" ) );
@@ -977,9 +977,93 @@ inline std::string rustEnclosingScopeOf( TSNode node, std::string_view src, bool
     return {};
 }
 
+// RUST-UFCS-QUALIFIED: is `name` a type parameter of an item enclosing `node` — `fn f<T>`, `impl<T> … for T`, `trait Tr<T>`? Each
+// parameter's own name is its first identifier (`T` in `T: Bound`), never a bound. A path written through one names no type.
+inline bool rustEnclosingTypeParam( TSNode node, std::string_view name, std::string_view src )
+{
+    for( TSNode p = parentOf( node ); !ts_node_is_null( p ); p = parentOf( p ) )
+    {
+        const char* t = ts_node_type( p );
+        if( !kindIs( t, "function_item" ) && !kindIs( t, "impl_item" ) && !kindIs( t, "trait_item" ) )
+        {
+            continue;
+        }
+        const TSNode params = fieldChild( p, NodeField::TypeParameters );
+        for( std::uint32_t i = 0, k = ts_node_is_null( params ) ? 0u : ts_node_named_child_count( params ); i < k; ++i )
+        {
+            TSNode id = ts_node_named_child( params, i );
+            if( !kindIs( ts_node_type( id ), "type_identifier" ) )
+            {
+                const TSNode named = fieldChild( id, NodeField::Name );
+                id = !ts_node_is_null( named ) ? named : ts_node_named_child_count( id ) > 0 ? ts_node_named_child( id, 0 ) : TSNode{};
+            }
+            if( !ts_node_is_null( id ) && kindIs( ts_node_type( id ), "type_identifier" ) && nodeTextOf( id, src ) == name )
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// RUST-UFCS-QUALIFIED: the ONE type a bracketed path's written type names — `Where`, `a::Where` and `Where<T>` → "Where", a
+// primitive `u8` → "u8", `Self` → the enclosing impl's type. "" when it names no one type: a type parameter, `Self` of an impl
+// for one, an associated type reached through either (`B::Owned`, `Self::Item`), and every shape that is not a path (`&T`,
+// `dyn Tr`, `[T]`, a tuple).
+inline std::string rustBracketedTypeName( TSNode type, TSNode at, std::string_view src )
+{
+    const TSNode base = kindIs( ts_node_type( type ), "generic_type" ) ? fieldChild( type, NodeField::Type ) : type;
+    if( ts_node_is_null( base ) )
+    {
+        return {};
+    }
+    const char*            kind = ts_node_type( base );
+    const std::string_view text = nodeTextOf( base, src );
+    if( kindIs( kind, "primitive_type" ) )
+    {
+        return std::string( text );
+    }
+    if( !kindIs( kind, "type_identifier" ) && !kindIs( kind, "scoped_type_identifier" ) )
+    {
+        return {};
+    }
+    const std::size_t      sep  = text.find( "::" );
+    const std::string_view root = sep == std::string_view::npos ? text : text.substr( 0, sep );
+    if( root == "Self" )
+    {
+        const std::string self = rustEnclosingScopeOf( at, src, /*includeModules=*/false );
+        return sep != std::string_view::npos || self.empty() || rustEnclosingTypeParam( at, self, src ) ? std::string{} : self;
+    }
+    return rustEnclosingTypeParam( at, root, src ) ? std::string{} : rustPathSegment( text );
+}
+
+// RUST-UFCS-QUALIFIED: the qualifier of a call whose path is a bracketed type. `<Where as Command>::run( .. )` names Where's impl of
+// Command::run and `<Where>::helper( .. )` Where's own helper, so the qualifier is the type's name, which keepRustQualifiedCandidates
+// (graph.h) holds the call to — a type the tree does not define declines it, never every same-named method. A written type that
+// names no one type (rustBracketedTypeName "") qualifies by the trait it is cast to or is (`<T as Tr>::m`, `<dyn Tr>::m`): the
+// call dispatches to Tr's implementors. "" for any other shape (`<&T>::m`), which keeps the bare-name resolution.
+inline std::string rustBracketedQualifier( TSNode bracketed, TSNode at, std::string_view src )
+{
+    const TSNode inner = ts_node_named_child_count( bracketed ) == 1 ? ts_node_named_child( bracketed, 0 ) : TSNode{};
+    if( ts_node_is_null( inner ) )
+    {
+        return {};
+    }
+    const bool   cast  = kindIs( ts_node_type( inner ), "qualified_type" );
+    const TSNode type  = cast ? fieldChild( inner, NodeField::Type ) : inner;
+    std::string  named = ts_node_is_null( type ) ? std::string{} : rustBracketedTypeName( type, at, src );
+    if( !named.empty() )
+    {
+        return named;
+    }
+    const TSNode trait = cast ? fieldChild( inner, NodeField::Alias )
+                       : kindIs( ts_node_type( inner ), "dynamic_type" ) ? fieldChild( inner, NodeField::Trait ) : TSNode{};
+    return ts_node_is_null( trait ) ? std::string{} : rustPathSegment( nodeTextOf( trait, src ) );
+}
+
 // Qualifier of a Rust CALL reference whose @name is the final segment of a `scoped_identifier`:
-// `Widget::new()` → "Widget", `util::deep::deepfn()` → "deep", `Vec::<u32>::new()` → "Vec".
-// Returns "" for every other shape (bare `free()`, `w.bump()`, `generic::<u32>()`, and the crate-root `::f()`
+// `Widget::new()` → "Widget", `util::deep::deepfn()` → "deep", `Vec::<u32>::new()` → "Vec", `<Where as Command>::run()` → "Where"
+// (rustBracketedQualifier). Returns "" for every other shape (bare `free()`, `w.bump()`, `generic::<u32>()`, and the crate-root `::f()`
 // spelling, which has no `path:` child) → those keep the pre-existing bare-name resolution untouched.
 // This is a CALL ref (isInherit=false). graph.h's Rust `impl Trait for T` CHA path reads `qualifier` too, but
 // only behind `if( !ir.isInherit ) continue;`, so the two uses of the field cannot collide — gated by
@@ -990,6 +1074,10 @@ inline std::string rustQualifierOf( TSNode nameNode, std::string_view src )
     if( ts_node_is_null( parent ) || !kindIs( ts_node_type( parent ), "scoped_identifier" ) )
     {
         return {};
+    }
+    if( const TSNode path = fieldChild( parent, NodeField::Path ); !ts_node_is_null( path ) && kindIs( ts_node_type( path ), "bracketed_type" ) )
+    {
+        return rustBracketedQualifier( path, nameNode, src );
     }
 
     std::string qualifier = rustPathSegment( nodeTextOf( fieldChild( parent, NodeField::Path ), src ) );
@@ -1206,9 +1294,24 @@ inline bool cratePathMacroAt( std::string_view src, std::uint32_t at, std::uint3
     j = skipBlanks( src, j, end );
     return nameEnd > nameAt && j < end && src[ j ] == '!' && ( j + 1 >= end || src[ j + 1 ] != '=' );
 }
-// The Macro reference for `$crate::a::name!` at `at`, its written path read by rustMacroPathOf (`$crate` as `crate`).
-inline RawRef cratePathMacroRef( std::string_view src, std::uint32_t at, std::uint32_t nameAt, std::uint32_t nameEnd, std::uint32_t fileId, std::uint32_t line )
+// Where one `$crate::a::name!` sits: `$crate` at byte `at`, the macro name at [nameAt, nameEnd), in file `fileId` on 1-based `line`
+// (five uint32_t, named at the call).
+struct CrateMacroSite
 {
+    std::uint32_t at      = 0;
+    std::uint32_t nameAt  = 0;
+    std::uint32_t nameEnd = 0;
+    std::uint32_t fileId  = 0;
+    std::uint32_t line    = 0;
+};
+// The Macro reference for `$crate::a::name!` at `site.at`, its written path read by rustMacroPathOf (`$crate` as `crate`).
+inline RawRef cratePathMacroRef( std::string_view src, CrateMacroSite site )
+{
+    const std::uint32_t at      = site.at;
+    const std::uint32_t nameAt  = site.nameAt;
+    const std::uint32_t nameEnd = site.nameEnd;
+    const std::uint32_t fileId  = site.fileId;
+    const std::uint32_t line    = site.line;
     std::string_view path = src.substr( at, nameAt - at );   // `$crate::a::` — its trailing `::` dropped
     while( !path.empty() && ( rw::isJsonWs( path.back() ) || path.back() == ':' ) )
     {
@@ -1224,7 +1327,7 @@ inline RawRef cratePathMacroRef( std::string_view src, std::uint32_t at, std::ui
     std::string qualifier;
     std::string written;
     rustMacroPathOf( path, qualifier, written );
-    r.qualifier = std::move( qualifier );
+    r.qualifier = qualifier;
     if( !written.empty() )
     {
         r.setFieldName( std::move( written ) );
@@ -1261,7 +1364,7 @@ inline void captureRustTranscriberMacroCalls( TSNode macroDef, std::uint32_t fil
         std::uint32_t nameEnd = 0;
         if( cratePathMacroAt( src, i, end, nameAt, nameEnd ) )
         {
-            refs.push_back( cratePathMacroRef( src, i, nameAt, nameEnd, fileId, line ) );
+            refs.push_back( cratePathMacroRef( src, { .at = i, .nameAt = nameAt, .nameEnd = nameEnd, .fileId = fileId, .line = line } ) );
         }
         i += 6;   // resume past `$crate` so a newline inside the path is still counted
     }
@@ -2231,7 +2334,7 @@ inline bool isScreamingSnakeName( std::string_view name ) noexcept
 // Which languages' @definition.constant captures are gated on SCREAMING_SNAKE. These grammars' new
 // constant patterns (queries/*/tags.scm, r3 q10) structurally capture EVERY module-level binding of the
 // right shape — the name gate is what scopes extraction to settings modules / feature-flag tables
-// instead of every literal. Enforced HERE because tags-pass predicates never run (#match? is wired into
+// instead of every literal. Enforced HERE because tags-pass predicates did not run before #355 (#match? is wired into
 // --match/--lint only — measured; see the note in queries/cpp/tags.scm). Deliberately NOT gated:
 // Python (vendored upstream pattern, case-blind since import — existing behavior pinned by constcheck),
 // Go (const/var patterns predate this and Go constants are conventionally CamelCase), Rust (const_item/
@@ -2315,7 +2418,7 @@ inline std::string_view childTokenAmong( TSNode node, std::string_view src, cons
 // CUDA memory-space qualifier of a module-scope declaration ("" = none). The uninitialized-declaration
 // patterns in queries/cpp/tags.scm are STRUCTURAL and unconstrained on purpose — that query also
 // compiles against tree-sitter-cpp (.cpp/.h/.metal), which has no `__constant__` token, so naming it
-// there would make ts_query_new reject the whole query; tags-pass predicates never run (measured; see
+// there would make ts_query_new reject the whole query; tags-pass predicates did not run before #355 (measured; see
 // the cast-keyword note in tags.scm); and a `(type_qualifier)` child constraint cannot see `__device__`
 // anyway — tree-sitter-cuda parses `__constant__`/`__managed__` as NAMED type_qualifier nodes but
 // `__device__` as an ANONYMOUS token child of the declaration. The qualifier test therefore lives here,
@@ -2352,7 +2455,7 @@ inline bool declarationCarriesConstQualifier( TSNode declNode, std::string_view 
 
 // The keep decision for the class-static-constant field_declaration captures (queries/cpp/tags.scm,
 // module-constant round). The pattern is deliberately loose — it matches EVERY default-member-
-// initializer, because tags-pass predicates never run and static/constexpr child order is free — so
+// initializer, because tags-pass predicates did not run before #355 and static/constexpr child order is free — so
 // this is where the real contract lives: keep iff the field carries BOTH a `static`
 // storage_class_specifier AND a const/constexpr/constinit type_qualifier. That keeps
 // `static constexpr int kMaxDepth = 3;` case-blind (one per-class constant, the census target) and
@@ -2366,7 +2469,7 @@ inline bool fieldConstantCaptureKept( TSNode fieldDeclNode, std::string_view src
 }
 
 // The keep decision for the @definition.field captures (member-variable round, card A3; queries/cpp,
-// queries/c, queries/python tags.scm). The patterns are LOOSE on purpose — tags-pass predicates never run
+// queries/c, queries/python tags.scm). The patterns are LOOSE on purpose — tags-pass predicates did not run before #355
 // — so the contract lives here, per language:
 //   C/C++ : keep iff the field_declaration carries NO `static` storage_class_specifier. A class-static
 //           CONSTANT keeps its own @definition.constant row (t="var", fieldConstantCaptureKept); a mutable
@@ -3239,7 +3342,7 @@ inline bool dropConstantCapture( Lang lang, std::string_view name, TSNode nameNo
 
 // YAML's @definition.yamlkey gate — the yaml tier's one in-C++ predicate (see queries/yaml/tags.scm's
 // header for why the depth cut cannot live in the query: sequence nesting between a pair and its
-// document is unbounded, so no finite pattern set expresses it, and tags-pass predicates never run).
+// document is unbounded, so no finite pattern set expresses it, and tags-pass predicates did not run before #355).
 // A mapping key is a symbol iff its MAPPING depth is <= 2 — block and flow mappings counted alike
 // (flow is a presentation style of the same mapping node), sequences counted NOT AT ALL (sequence
 // transparency: 25.3% of real keys sit directly inside a sequence element — the steps:/containers:/
@@ -3278,7 +3381,7 @@ inline bool yamlKeyCaptureDropped( std::string_view name, TSNode roleNode ) noex
 // test/pyshapecheck.sh) drops when the enclosing class's base NAME is not an enum family;
 // @definition.cjsexport / @definition.protomethod (the JS shape round, test/jsshapecheck.sh) drop when
 // the LEFT side is not really exports/module.exports/.prototype. — the query captures every `a.b = fn`
-// shape and cannot text-test, because tags-pass predicates never run (see constCaptureNeedsScreamingGate
+// shape and cannot text-test, because tags-pass predicates did not run before #355 (see constCaptureNeedsScreamingGate
 // above).
 inline bool dropGatedCapture( std::string_view defCapSv, Lang lang, std::string_view name, TSNode nameNode, TSNode roleNode, std::string_view src )   // NOT noexcept: the class-factory gate's scope lookup allocates
 {

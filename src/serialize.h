@@ -388,6 +388,20 @@ inline std::string ctxRootOpen( std::string_view task, std::string_view routeNot
     return out;
 }
 
+// ctxRootOpen's output, split where a caller that RE-TAGS or extends the root needs it: { the attributes between "<ctx" and the
+// open tag's own '>', whatever follows that '>' } — the second is history_unread's definition comment when the walk was cut, ""
+// otherwise. The tag ends at its FIRST '>' (every attribute value above is escapeXml'd, so none holds one); splicing at the
+// string's LAST '>' lands inside that comment. Anything that is not a <ctx …> open tag splits to { "", "" }.
+inline std::pair<std::string_view, std::string_view> ctxRootOpenParts( std::string_view rootOpen ) noexcept
+{
+    const std::size_t tagEnd = rootOpen.starts_with( "<ctx" ) ? rootOpen.find( '>' ) : std::string_view::npos;
+    if( tagEnd == std::string_view::npos )
+    {
+        return {};
+    }
+    return { rootOpen.substr( 4, tagEnd - 4 ), rootOpen.substr( tagEnd + 1 ) };
+}
+
 // ── ctxRootOpen's JSON TWIN, and the reason it is one function rather than a rule ─────────────────────────
 // The header above promises the scrub fact is legible "from either one" of the two dialects. It was not: the
 // tree had ONE emitter of the JSON twin (the body writer's "xml_scrubbed") against THREE XML markers, so for
@@ -414,6 +428,19 @@ inline std::string ctxRootJsonScrubKeys( std::string_view task, std::string_view
     }
     keys += renderHistoryUnread( DiscloseAs::JsonKeys );   // K51: this is the one JSON root writer every ctx-family document shares (--for, --pack-task, --from-trace)
     return keys;
+}
+
+// ROOT-SPLICE-SIZE-1: append `attrs` to a ctxRootOpen-built root at its OWN '>' (ctxRootOpenParts), never at the string's last
+// byte. Under a cut history walk the string ends with history_unread's definition comment, so `insert( size() - 1, … )` put
+// --pack-task's root extras and --from-trace's notes_degraded=/next= inside that comment (`.-- notes_degraded="1">`: ill-formed).
+// `rootOpen` is left untouched when it is not a <ctx …> open tag.
+inline void ctxRootOpenAppendAttrs( std::string& rootOpen, std::string_view attrs )
+{
+    const std::size_t tagEnd = 4 + ctxRootOpenParts( rootOpen ).first.size();   // "<ctx" + its attributes
+    if( rootOpen.starts_with( "<ctx" ) && tagEnd < rootOpen.size() && rootOpen[ tagEnd ] == '>' )
+    {
+        rootOpen.insert( tagEnd, attrs );
+    }
 }
 
 // CDATA-body scrub shared by packSource / packBodies / packOutline: split any "]]>" so the CDATA section
@@ -2012,6 +2039,15 @@ struct MapAnnotations
         // neighbourhood the bounds did not clip is byte-identical to before (presence has to mean something).
         std::uint32_t fanoutCut      = 0;       // symbols the fanout cap dropped that are absent from the whole answer (exact)
         bool          depthTruncated = false;   // ≥1 symbol one hop past the last emitted hop is absent
+        // Task D4: the language the seed answer ANCHORED to, and where that language came from. Null pair on every
+        // map and every un-anchored seed (byte-free); arms A1/A6 pin the row, (28)/A5 pin the fallback sentence.
+        const char*   reflang        = nullptr;   // langTag of the anchor (a static string — never freed, never escaped)
+        const char*   reflangOrigin  = nullptr;   // anchorOriginName: explicit / context / corpus
+        // The adopted rule (#440) has a disclosure half: an anchor that DECIDED NOTHING says nothing — a corpus
+        // majority that never moved a row renders neither attribute above. When its tie-break DID move a row,
+        // the reader deserves the disagree-here step: the pasteable --defs=NAME listing every definition the
+        // name has and the spellings that pick one. Emits ONLY beside a disclosed corpus tie (presence means).
+        std::string   nextDefs;                   // the seed name to quote in next="--defs=NAME"; empty ⇒ absent
         // H1: the decl→def residue of a file:name seed — same-named definitions the selector found and could not tie to the
         // file it named, so the walk never started from them. unproven_defs= beside defs= and its clause in the legend,
         // both absent at zero (graphlegend.h unprovenDefsAttrXml / unprovenDefsVerbComment).
@@ -3535,10 +3571,14 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     {
         legend += "<!-- of= is the resolved SEED this neighbourhood is centred on; depth= call hops walked and fanout= "
                   "neighbours kept per hop are its whole boundary, so a row's absence means outside them, not nonexistent. "
-                  "defs= (only when >1) = that NAME has N definitions and the most specific one was walked (kind first, its language "
-                  "ahead, id last: a CODE definition before a doc heading or config key, and a C/C++ declaration without a body yields to "
+                  "defs= (only when >1) = that NAME has N definitions and the most specific one was walked (a stated language first, else kind, the "
+                  "repo's majority language on a kind tie, then path order: a CODE definition before a doc heading or config key, and a C/C++ declaration without a body yields to "
                   "the first bodied definition of its scope in that order); qualify with "
                   "file:name or @FILE:LINE to pick another. -->";
+        if( ann.seed.reflang != nullptr )   // D4: the FULL dialect's definition for the anchor pair — legendcoveragecheck (A) flags the --legend=full row when the seed stanza is silent,
+            legend += std::string( "<!-- reflang=" ) + ann.seed.reflang + ": the language this answer anchored to; reflang-origin=" + ann.seed.reflangOrigin
+                + ": explicit (the @lang typed), context (the file asked from), client (the editor's languageId) or corpus (the repo's majority language "
+                  "broke a same-kind tie for the front; next= lists every definition). -->";   // charged only when the row carries the attributes (seedBiteLegend's rule); kept short, the verb dict defines the pair in full
         legend += seedBiteLegend( ann.seed );   // C2: charged only on a run whose root carries a bite attribute (the at= rule)
         // H1: charged only on a run whose root carries unproven_defs= — the same rule, and part of the head est_tokens prices.
         legend += unprovenDefsVerbComment( UnprovenDefsVerb::Around, ann.seed.unprovenDefs > 0, "<!-- ripwire around: " );
@@ -3618,6 +3658,9 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     {
         legend += kMapAnchorMissLegend;
     }
+    // K51: history_unread='s definition, the LAST leading clause, so it stands right before the <r> root it marks and inside the
+    // leading block every reader (and legendcoveragecheck's full rows) meets first; absent unless the amp=/churn= walk was unread.
+    legend += renderHistoryUnread( DiscloseAs::LegendComment );
     // C1 DRIFT FIX (Round C lane B, found by re-reading this header's own output). `precise=` means "how many
     // out-edges a SCIP index PINNED", and the emitter's own comment below says it is "emitted ONLY under
     // --scip". Both were true when outProv held only {0, 1}. A4-R5 then added value 2 (an FFI binding edge)
@@ -3785,6 +3828,15 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
             if( ann.seed.defs > 1 ) { h += " defs=\"";  h += std::to_string( ann.seed.defs );  h += "\""; }
             h += unprovenDefsAttrXml( ann.seed.unprovenDefs );   // H1: beside defs=, the rest of what the seed name resolved to
             h += seedBiteAttrs( ann.seed );   // C2: each bound's BITE, right after the bound it qualifies (empty when neither bit)
+            if( ann.seed.reflang != nullptr )   // D4: after the bite pair, same slot logic — the anchor qualifies the whole seed stanza
+            {
+                h += " reflang=\""; h += ann.seed.reflang;
+                h += "\" reflang-origin=\""; h += ann.seed.reflangOrigin; h += "\"";
+                if( !ann.seed.nextDefs.empty() )   // the corpus tie's pasteable follow-up, beside the disclosure it belongs to —
+                {                                   // the ONE next= builder the house keeps (nextverb.h, darkflags/docdrift precedents)
+                    h += nextAttrXml( nextFlag( "--defs=", ann.seed.nextDefs ) );
+                }
+            }
         }
         // §A9.6: after at= (so gitstampcheck's `<r at="<sha>` byte sequence is unmoved) — see MapAnnotations.
         if( churnWindow != nullptr ) { h += " rank_by=\"";  h += ann.churnRankLabel;  h += "\" window=\"";  h += escapeXml( *churnWindow, esc );  h += "\""; }
@@ -3826,8 +3878,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
         {
             h += " stem_cut=\"";  h += std::to_string( stemPick.cut );  h += "\"";   // MAP-STEM: absent unless a --max-tokens fit left stem rows out
         }
-        h += ">";
-        h += renderHistoryUnread( DiscloseAs::LegendComment );   // K51: its own definition, right behind the root it marks
+        h += ">";   // K51: history_unread='s definition rides the leading legend above (HISTORY-UNREAD-LEGEND), not behind this tag
         return h;
     };
     const auto buildTail = [ & ]( std::size_t estTokens ) -> std::string
@@ -7229,6 +7280,9 @@ struct CalleeCallsSink
     bool*                            splitLegendCharged = nullptr;
     const std::vector<std::uint8_t>* link = nullptr;   // Graph::outLink: via="link" on a callee row. nullptr ⇒ none
     const std::vector<std::uint8_t>* anchor = nullptr;   // Graph::outAnchorMiss: anchor="missing" on that row. nullptr ⇒ none
+    // BAND CF: the root prefix a names-only row's p= is made relative to (the <h> row's own pathRel rule); nullptr ⇒ the
+    // indexed path as it stands. Read by the names-only rendering alone.
+    const std::string*               rootPrefix = nullptr;
 };
 
 // The <calls> wrapper, written in front of the rows it describes (they have to be walked before `shown`
@@ -7368,10 +7422,24 @@ inline std::vector<float> calleeNameSpecificity( const IngestResult& ing )
 // same fact in two spellings, from a document that promises determinism. Line numbers have a natural order and
 // it is not the ranker's; they are sorted ascending, so a row's content depends on the row and not on how the
 // walk reached it. Row ORDER is unchanged: a merged row still sits where its first callee sat.
+//
+// THE ROW NAMES ITS FILE (BAND CF, docs/EVALS.md amendment 11b). `l=` is a definition line, and a line with no file cannot
+// be opened: 15 required gold items of the 2026-11-17 retrieval-gap partition were present in an answer as exactly this row,
+// line exact, and lost. The row now prints p= when the callee is NOT in the file of the <h> row it sits under; a row with
+// no p= is in that <h> row's file, and the legend says so. The path is the callee SYMBOL's own indexed file — the same
+// record l= is read from — never one derived from a name, an import or the owner, so a via="name" row's p= is exactly as
+// hedged as its l= already was and no more.
+//
+// THE FILE IS PART OF THE MERGE KEY, and that is the half that was already wrong. Same-named callees used to merge by name
+// alone, so `h.render()` (html.ts:3) and `t.render()` (text.ts:9) came out as `<c n="render" l="3,9"/>`: two files' lines
+// under one row. Printing one file beside that list would turn an unlocatable row into a FALSE one (gate
+// test/calleerowfilecheck.sh arm (W), whose first mutation is that naive fix). Every line of one l= is now a line of one file.
 struct MergedCalleeNameRow
 {
     std::string_view           name;    // a view into ing.symbols — stable for the emitter's lifetime
-    std::vector<std::uint32_t> lines;   // every definition line of that name; joined ascending at append time
+    std::uint32_t              fileId = 0;   // the file every line below is in: part of the merge key
+    std::string_view           path;    // p=: that file, when it is not the <h> row's own; empty ⇒ none printed (a view into ing.files)
+    std::vector<std::uint32_t> lines;   // every definition line of that name IN THAT FILE; joined ascending at append time
     bool                       via = false;   // FE-B: these edges are name-only — merged only with rows of the same bit
     bool                       split = false;   // attrib-multidef Q1: these edges are split arms — likewise
     bool                       link = false;    // a markdown link — merged only with other link rows of the same name
@@ -7384,7 +7452,20 @@ struct CalleeRowMarks
     bool split = false;
     bool link  = false;
     bool miss  = false;
+    std::string_view path;   // BAND CF: the callee's file when it is not its <h> row's own (calleeRowPath); empty ⇒ the row prints no p=
 };
+// The path a names-only row prints for the callee `cs` of the symbol `owner`: empty when both are in one file (the row then
+// reads as "in the <h> row's file"), else the callee's own indexed file, root-relative under the caller's root= as the <h>
+// row's p= is. Never derived from anything but the callee symbol's own record.
+inline std::string_view calleeRowPath( const IngestResult& ing, const CalleeCallsSink& sink, const Symbol& owner, const Symbol& cs )
+{
+    if( cs.fileId == owner.fileId || cs.fileId >= ing.files.size() )
+    {
+        return {};
+    }
+    return sink.rootPrefix == nullptr ? std::string_view( ing.files[ cs.fileId ] ) : rw::sarif::rootRelativeUri( ing.files[ cs.fileId ], *sink.rootPrefix );
+}
+
 inline void collectCalleeNameRow( std::vector<MergedCalleeNameRow>& rows, const Symbol& cs,
                                   std::size_t& used, const CalleeCallsSink& sink, CalleeRowMarks mark = {} )
 {
@@ -7397,7 +7478,7 @@ inline void collectCalleeNameRow( std::vector<MergedCalleeNameRow>& rows, const 
     bool merged = false;
     for( MergedCalleeNameRow& r : rows )
     {
-        if( r.name == cs.name && r.via == via && r.split == split && r.link == link && r.miss == miss )
+        if( r.name == cs.name && r.fileId == cs.fileId && r.via == via && r.split == split && r.link == link && r.miss == miss )
         {
             r.lines.push_back( cs.line );  merged = true;
             break;
@@ -7405,15 +7486,28 @@ inline void collectCalleeNameRow( std::vector<MergedCalleeNameRow>& rows, const 
     }
     if( !merged )
     {
-        rows.push_back( MergedCalleeNameRow { cs.name, { cs.line }, via, split, link, miss } );
+        rows.push_back( MergedCalleeNameRow { cs.name, cs.fileId, mark.path, { cs.line }, via, split, link, miss } );
     }
     // the comma and the digits a merge appends, or the whole row it opens (FE-B: plus its 11-byte via="name"; Q1: its 13-byte
-    // prov="split"; a link row's via="link" is the same 11 bytes)
-    used += merged ? std::strlen( lb ) + 1 : cs.name.size() + 16 + ( ( via || link ) ? 11u : 0u ) + ( split ? 13u : 0u ) + ( miss ? 17u : 0u );
+    // prov="split"; a link row's via="link" is the same 11 bytes; BAND CF: plus ` p=""` and the path, on a row that prints one)
+    const std::size_t pathBytes = mark.path.empty() ? 0u : mark.path.size() + 5u;
+    used += merged ? std::strlen( lb ) + 1 : cs.name.size() + 16 + pathBytes + ( ( via || link ) ? 11u : 0u ) + ( split ? 13u : 0u ) + ( miss ? 17u : 0u );
     if( sink.recorded )
     {
         sink.recorded->push_back( EmittedBodyCall { cs.name, cs.line, std::string() } );   // §H5: no sig to record
     }
+}
+
+// ` p="<file>"` after a callee row's l=, when calleeRowPath named one (BAND CF's hop row and BAND BC's body row print it alike).
+inline void appendCalleePathAttr( std::string& out, std::string_view path, std::vector<char>& esc )
+{
+    if( path.empty() )
+    {
+        return;
+    }
+    out += " p=\"";
+    out += escapeXml( path, esc );
+    out += "\"";
 }
 
 // …and the rows written out, once the block's walk is complete.
@@ -7436,6 +7530,7 @@ inline void appendMergedCalleeNameRows( std::string& callsBody, std::vector<Merg
             callsBody += lb;
         }
         callsBody += "\"";
+        appendCalleePathAttr( callsBody, r.path, esc );   // after l=, so a reader keyed on `<c n= l=` still finds both
         callsBody += viaEdgeAttr( r.via, r.link );
         callsBody += anchorMissAttr( r.miss );
         callsBody += r.split ? " prov=\"split\"" : "";   // attrib-multidef Q1
@@ -7498,6 +7593,18 @@ inline CalleeCallsSink withLinkBits( CalleeCallsSink sink, const std::vector<std
     sink.link   = link;
     sink.anchor = anchor;
     return sink;
+}
+
+// BAND CF: the sink a hop section passes, with the root prefix its rows' p= is relative to. No root= ⇒ the indexed path as it
+// stands, exactly the choice the section's own pathRel makes for its <h> rows.
+inline CalleeCallsSink withRowRoot( CalleeCallsSink sink, std::string_view rootArg, const std::string& rootPrefix ) noexcept
+{
+    sink.rootPrefix = rootArg.empty() ? nullptr : &rootPrefix;
+    return sink;
+}
+inline std::string calleeRowRootPrefix( std::string_view rootArg )
+{
+    return rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
 }
 
 // attrib-multidef Q1: is the <calls> row id → cid a split arm (and not by name alone: that row says via="name")? The first
@@ -7581,7 +7688,7 @@ inline bool appendOneCalleeCall( std::string& callsBody, std::vector<MergedCalle
     const std::string_view splitAttr = calleeRowSplitAttr( outOff, outTargets, id, cid, !viaAttr.empty(), used, sink );
     if( sink.namesOnly )
     {
-        collectCalleeNameRow( nameRows, cs, used, sink, CalleeRowMarks{ nameRow, !splitAttr.empty(), linkRow, missRow } );
+        collectCalleeNameRow( nameRows, cs, used, sink, CalleeRowMarks{ nameRow, !splitAttr.empty(), linkRow, missRow, calleeRowPath( ing, sink, ing.symbols[ id ], cs ) } );
         return true;
     }
     const std::string& csrc = contentOf( cs.fileId );
@@ -7594,15 +7701,22 @@ inline bool appendOneCalleeCall( std::string& callsBody, std::vector<MergedCalle
     {
         return false;
     }
+    // BAND BC: a body's callee row names its file exactly as a hop row does — the helper, the rule and the "no p= = the owner's
+    // file" reading are BAND CF's (calleeRowPath); a signature row never merges, so each row's one l= is one file's line.
+    const std::string_view calleePath = calleeRowPath( ing, sink, ing.symbols[ id ], cs );
     char hb[ 64 ];
-    rw::formatTo( hb, sizeof( hb ), "\" l=\"{}\"{}{}>", cs.line, viaAttr, splitAttr );
+    rw::formatTo( hb, sizeof( hb ), "\" l=\"{}\"", cs.line );
     callsBody += "<c n=\"";
     callsBody += escapeXml( cs.name, esc );
     callsBody += hb;
+    appendCalleePathAttr( callsBody, calleePath, esc );   // after l=, as the hop row's is
+    callsBody += viaAttr;
+    callsBody += splitAttr;
+    callsBody += ">";
     applyCalleeAnchorMiss( sink, outOff, outTargets, id, cid, anchorLegendCharged, used, &callsBody );
     callsBody += escapeXml( sig, esc );
     callsBody += "</c>";
-    used += sig.size() + 24 + viaAttr.size() + splitAttr.size();
+    used += sig.size() + 24 + viaAttr.size() + splitAttr.size() + ( calleePath.empty() ? 0u : calleePath.size() + 5u );
     if( sink.recorded )
     {
         sink.recorded->push_back( EmittedBodyCall { cs.name, cs.line, sig } );
@@ -8281,7 +8395,7 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
         if( truncated )
         {
             // OUTSIDE the CDATA, where every other cut is stated: the body is cut, and next= serves the rest.
-            piece += " truncated=\"1\" next=\"";  piece += escapeXml( nextCall, esc );  piece += "\"";
+            piece += " truncated=\"1\" next=\"";  appendNextValueXml( piece, nextCall );  piece += "\"";
         }
         if( overCeiling )
         {
@@ -8325,8 +8439,9 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
         // total=/shown=/capped= block — see emitCalleeCallsBlock above; `calleeRank` decides which
         // rows survive when it CUTS one, which is far from rare here (CalleeCallsSink::rank).
         emitCalleeCallsBlock( piece, id, outOff, outTargets, ing, contentOf, esc, used, budgetBytes,
-                              withLinkBits( withSplitArms( CalleeCallsSink{ redact, record ? &record->calls : nullptr, /*namesOnly=*/false, calleeRank, &outNameOnly,
-                                                              &viaLegendCharged }, outEdges.prov, &splitLegendCharged ), outEdges.link, outEdges.anchor ) );
+                              withRowRoot( withLinkBits( withSplitArms( CalleeCallsSink{ redact, record ? &record->calls : nullptr, /*namesOnly=*/false, calleeRank, &outNameOnly,
+                                                              &viaLegendCharged }, outEdges.prov, &splitLegendCharged ), outEdges.link, outEdges.anchor ),
+                                           rootArg, rootPrefix ) );
         const std::string bodyNotes = renderNoteChildren( noteIndex, symbolNoteTarget( noteIndex, ing, s ), esc );   // L3/D5
         piece += bodyNotes;
         used += bodyNotes.size();                                                                   // W3-N2: same charge-never-trim rule
@@ -8439,11 +8554,71 @@ struct HopOwners
 
 // The continuation that lists one owner's callees: the canonical id when the symbol has a scope (two same-named methods
 // of one file are two entities, and FILE:NAME would merge them), else FILE:NAME. Escaped for an attribute value.
-inline std::string ownerCalleesNext( const IngestResult& ing, const Symbol& s, std::string_view pathRel, std::string_view rootArg,
-                                     std::vector<char>& esc )
+inline std::string ownerCalleesNext( const IngestResult& ing, const Symbol& s, std::string_view pathRel, std::string_view rootArg )
 {
     std::string target = s.scope.empty() ? std::string( pathRel ) + ":" + std::string( s.name ) : canonicalIdForEmit( ing, s, rootArg );
-    return std::string( escapeXml( nextFlag( "--callees=", target ), esc ) );   // quoted only where a shell would split it (checklist 34)
+    std::string next;
+    appendNextValueXml( next, nextFlag( "--callees=", target ) );   // quoted only where a shell would split it (checklist 34); the one next= escaper
+    return next;
+}
+
+// A hop row's value-use fact. `counts` is the caller's (verbs_for.h): the function-valued symbols among the hop nodes with at
+// least one value use, sorted by id, each with the number of uses (what --callers prints as value_refs=). A row writer adds
+// ` value_refs="N"` to a row whose symbol is in it, and, once the row is PRINTED, notes into `unread` its language when that
+// language reads no value use at all (model.h valueRefFamily): there the absence of value_refs= is unknown, not zero.
+struct HopValueRefs
+{
+    std::vector<std::pair<NodeId, std::uint32_t>> counts;
+    std::vector<std::string_view>                 unread;   // language tags of printed rows, sorted unique at read time
+    bool                                          anyRow = false;   // a printed row carried value_refs=
+};
+inline bool hopRowIsFunction( const IngestResult& ing, NodeId id )
+{
+    // a value use targets a function or a method only (valuerefs.h): nothing is said of a class row
+    return id < ing.symbols.size() && ( ing.symbols[ id ].kind == SymKind::Function || ing.symbols[ id ].kind == SymKind::Method );
+}
+inline std::string hopValueRefsAttr( const HopValueRefs* vals, const IngestResult& ing, NodeId id )
+{
+    if( vals == nullptr || !hopRowIsFunction( ing, id ) )
+    {
+        return {};
+    }
+    const auto at = std::ranges::lower_bound( vals->counts, id, {}, &std::pair<NodeId, std::uint32_t>::first );
+    if( at == vals->counts.end() || at->first != id || at->second == 0 )
+    {
+        return {};
+    }
+    return " value_refs=\"" + std::to_string( at->second ) + "\"";
+}
+// A row has been printed: record what it makes the section say.
+inline void hopRowPrinted( HopValueRefs* vals, const IngestResult& ing, NodeId id, bool carriedAttr )
+{
+    if( vals == nullptr || !hopRowIsFunction( ing, id ) )
+    {
+        return;
+    }
+    vals->anyRow = vals->anyRow || carriedAttr;
+    if( valueRefFamily( ing.symbols[ id ].lang ) == ValueRefFamily::None )
+    {
+        vals->unread.push_back( langTag( ing.symbols[ id ].lang ) );
+    }
+}
+// ` value_refs_unread_for_lang="a,b"` (sorted unique), or nothing when every printed function row is in a language that reads value uses.
+inline std::string hopUnreadAttr( HopValueRefs* vals )
+{
+    if( vals == nullptr || vals->unread.empty() )
+    {
+        return {};
+    }
+    std::ranges::sort( vals->unread, rw::sortutil::svLess );
+    vals->unread.erase( std::ranges::unique( vals->unread ).begin(), vals->unread.end() );
+    std::string out = " value_refs_unread_for_lang=\"";
+    for( std::size_t i = 0; i < vals->unread.size(); ++i )
+    {
+        out += i == 0 ? "" : ",";
+        out += vals->unread[ i ];
+    }
+    return out + "\"";
 }
 
 // What the owner walk hands back to packHops: the rows, how many nodes they consumed, and the budget and via-legend charge
@@ -8468,7 +8643,7 @@ inline OwnerHopRows packOwnerHopRows( const IngestResult& ing, const std::vector
                                       const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets,
                                       const CalleeEdgeBytes& outEdges, RedactCounts* redact, const std::vector<float>* rank,
                                       std::string_view rootArg, std::size_t rankedBudget, bool rankedVia,
-                                      PathRelFn&& pathRel, ContentOfFn&& contentOf, std::vector<char>& esc )
+                                      PathRelFn&& pathRel, ContentOfFn&& contentOf, std::vector<char>& esc, HopValueRefs* vals = nullptr )
 {
     const std::vector<std::uint8_t>& outNameOnly = outEdges.nameOnly;
     OwnerHopRows out;
@@ -8478,6 +8653,7 @@ inline OwnerHopRows packOwnerHopRows( const IngestResult& ing, const std::vector
     {
         return out;
     }
+    const std::string rowRootPrefix = calleeRowRootPrefix( rootArg );   // BAND CF: the <c p=> rows' root
     EXPECTS( owners->words.size() == owners->rows, "one question word per owner row" );
     out.rows = std::min( owners->rows, nodes.size() );
     out.cut  = owners->capCut;
@@ -8491,14 +8667,17 @@ inline OwnerHopRows packOwnerHopRows( const IngestResult& ing, const std::vector
         // forOwnerHopPlan seats only indexed symbols, each with a proven callee edge (hopSlotHasProvenEdge, read there)
         ASSUME( id < ing.symbols.size(), "the owner plan seats only indexed symbols (forOwnerHopPlan)" );
         const Symbol&     s    = ing.symbols[ id ];
-        const std::string next = ownerCalleesNext( ing, s, pathRel( s.fileId ), rootArg, esc );
+        const std::string next = ownerCalleesNext( ing, s, pathRel( s.fileId ), rootArg );
         std::string       row  = "<h l=\"" + std::to_string( s.line ) + "\" p=\"";   // composed on std::string: no fixed buffer
         row += escapeXml( pathRel( s.fileId ), esc );
         row += "\" n=\"";
         row += escapeXml( s.name, esc );
         row += "\" qword=\"";
         row += escapeXml( owners->words[ i ], esc );
-        row += "\">";
+        row += "\"";
+        const std::string valueAttr = hopValueRefsAttr( vals, ing, id );
+        row += valueAttr;   // charged with the row's identity, like qword=
+        row += ">";
         const std::size_t rowFixed = row.size() + next.size() + 8 + 16;   // + ' next=""' + '</calls></h>'
         if( used + rowFixed >= budget )
         {
@@ -8508,11 +8687,13 @@ inline OwnerHopRows packOwnerHopRows( const IngestResult& ing, const std::vector
         }
         used += rowFixed;
         emitCalleeCallsBlock( row, id, outOff, outTargets, ing, contentOf, esc, used, budget,
-                              withLinkBits( withSplitArms( CalleeCallsSink{ redact, /*recorded=*/nullptr, /*namesOnly=*/true, rank, &outNameOnly, &via,
-                                                              kForOwnerHopNameGuard, next }, outEdges.prov, outEdges.splitLegendCharged ), outEdges.link, outEdges.anchor ) );
+                              withRowRoot( withLinkBits( withSplitArms( CalleeCallsSink{ redact, /*recorded=*/nullptr, /*namesOnly=*/true, rank, &outNameOnly, &via,
+                                                              kForOwnerHopNameGuard, next }, outEdges.prov, outEdges.splitLegendCharged ), outEdges.link, outEdges.anchor ),
+                                           rootArg, rowRootPrefix ) );
         out.xml += row;
         out.xml += "</h>";
         ++out.shown;
+        hopRowPrinted( vals, ing, id, !valueAttr.empty() );
     }
     if( owners->fundFirst )
     {
@@ -8523,13 +8704,13 @@ inline OwnerHopRows packOwnerHopRows( const IngestResult& ing, const std::vector
     if( out.cut > 0 )
     {
         ASSUME( first < ing.symbols.size(), "a counted owner cut names an indexed symbol (forOwnerHopPlan / the walk above)" );
-        out.cutNext = ownerCalleesNext( ing, ing.symbols[ first ], pathRel( ing.symbols[ first ].fileId ), rootArg, esc );
+        out.cutNext = ownerCalleesNext( ing, ing.symbols[ first ], pathRel( ing.symbols[ first ].fileId ), rootArg );
     }
     return out;
 }
 
 // The <hops> open tag: the truncation triple, noedge= when non-zero, and the owner cut disclosure when there is one.
-inline std::string hopsOpenTag( std::size_t shown, std::size_t requested, std::size_t noEdge, const OwnerHopRows& own )
+inline std::string hopsOpenTag( std::size_t shown, std::size_t requested, std::size_t noEdge, const OwnerHopRows& own, std::string_view unreadAttr = {} )
 {
     char open[ 128 ];
     if( noEdge > 0 )
@@ -8543,6 +8724,7 @@ inline std::string hopsOpenTag( std::size_t shown, std::size_t requested, std::s
                        shown, requested, shown < requested ? 1 : 0 );
     }
     std::string tag( open );
+    tag += unreadAttr;   // value_refs_unread_for_lang=: the languages of printed rows whose value uses this build does not read
     if( own.cut > 0 )
     {
         tag += " qword_cut=\"" + std::to_string( own.cut ) + "\" next=\"" + own.cutNext + "\"";   // DISCLOSE the owners not served
@@ -8584,7 +8766,8 @@ inline void packHops( std::FILE* out, const IngestResult& ing, const std::vector
                       const std::vector<float>* rank = nullptr, // query relevance, for ordering a CUT callee listing
                       std::string_view rootArg = {},            // R-E: same single-root-only root= every verb takes
                       CalleeLegendsInHead legendsInHead = {},   // FE-B (+ Q1): packBodies' parameter of the same name
-                      const HopOwners* owners = nullptr )       // owner-hop: the leading owner rows; nullptr ⇒ none (byte-identical)
+                      const HopOwners* owners = nullptr,       // owner-hop: the leading owner rows; nullptr ⇒ none (byte-identical)
+                      HopValueRefs* vals = nullptr )        // value_refs= on a row, value_refs_unread_for_lang= on the section; nullptr ⇒ none (byte-identical)
 {
     const std::vector<std::uint8_t>& outNameOnly     = outEdges.nameOnly;
     const bool                       viaLegendInHead = legendsInHead.via;
@@ -8634,7 +8817,7 @@ inline void packHops( std::FILE* out, const IngestResult& ing, const std::vector
     // owner-hop: the leading owner rows first (THE QUESTION'S OWNER ROWS above; nothing when `owners` is null), then the
     // ranked rows exactly as before, from the node the owners end at, on the budget and via charge the owners leave them
     const OwnerHopRows own = packOwnerHopRows( ing, nodes, owners, outOff, outTargets, withAnchorEdge( CalleeEdgeBytes( outNameOnly, outEdges.prov, &splitLegendCharged ), outEdges.anchor ),
-                                               redact, rank, rootArg, budgetBytes, viaLegendCharged, pathRel, contentOf, esc );
+                                               redact, rank, rootArg, budgetBytes, viaLegendCharged, pathRel, contentOf, esc, vals );
     std::string children       = own.xml;
     std::size_t requestedCount = own.shown;
     std::size_t shownCount     = own.shown;
@@ -8675,7 +8858,7 @@ inline void packHops( std::FILE* out, const IngestResult& ing, const std::vector
         const Symbol& s = ing.symbols[ id ];
         // body-fold rider (forbudget-soft N3, rule 5): a cut listing names the call that lists every callee, as an owner row's does —
         // written only beside capped="1", and outside the budget walk (a disclosure never costs a callee row)
-        const std::string next = ownerCalleesNext( ing, s, pathRel( s.fileId ), rootArg, esc );
+        const std::string next = ownerCalleesNext( ing, s, pathRel( s.fileId ), rootArg );
         std::string   row;
         char          hdr[ 64 ];
         rw::formatTo( hdr, sizeof( hdr ), "<h l=\"{}\" p=\"", s.line );
@@ -8683,17 +8866,22 @@ inline void packHops( std::FILE* out, const IngestResult& ing, const std::vector
         row += escapeXml( pathRel( s.fileId ), esc );
         row += "\" n=\"";
         row += escapeXml( s.name, esc );
-        row += "\">";
+        row += "\"";
+        const std::string valueAttr = hopValueRefsAttr( vals, ing, id );
+        row += valueAttr;
+        row += ">";
         used += row.size();
         // the 1-hop callee signatures — the identical block a body carries, charged against the same
         // running `used` so the row identity bytes and the edge bytes share one budget.
         emitCalleeCallsBlock( row, id, outOff, outTargets, ing, contentOf, esc, used, budgetBytes,
-                              withLinkBits( withSplitArms( CalleeCallsSink{ redact, /*recorded=*/nullptr, /*namesOnly=*/true, rank, &outNameOnly, &viaLegendCharged,
-                                                                              CalleeCallsSink{}.rowCap, next },
-                                             outEdges.prov, &splitLegendCharged ), outEdges.link, outEdges.anchor ) );
+                              withRowRoot( withLinkBits( withSplitArms( CalleeCallsSink{ redact, /*recorded=*/nullptr, /*namesOnly=*/true, rank, &outNameOnly, &viaLegendCharged,
+                                                                                           CalleeCallsSink{}.rowCap, next },
+                                                          outEdges.prov, &splitLegendCharged ), outEdges.link, outEdges.anchor ),
+                                           rootArg, rootPrefix ) );
         row += "</h>";
         children += row;
         ++shownCount;
+        hopRowPrinted( vals, ing, id, !valueAttr.empty() );
     }
 
     // pageview.h THE TRUNCATION VOCABULARY rules 1+2+3, the same triple <bodies> carries: shown= rows
@@ -8701,7 +8889,8 @@ inline void packHops( std::FILE* out, const IngestResult& ing, const std::vector
     // capped= is the BUDGET bit only: the candidates neither printed nor accounted by noedge=. Emitted
     // as the 0|1 boolean the vocabulary requires either way; noedge= follows the house silence rule and
     // appears only when it is non-zero.
-    const std::string openTag = hopsOpenTag( shownCount, requestedCount, noEdgeCount, own );
+    const std::string unreadAttr = hopUnreadAttr( vals );
+    const std::string openTag    = hopsOpenTag( shownCount, requestedCount, noEdgeCount, own, unreadAttr );
     if( !viaLegendInHead && children.find( " via=\"name\"" ) != std::string::npos )
     {
         w.write( viaNameLegendComment() );   // FE-B: exactly when a hop's <calls> row carries via="name"
@@ -8717,6 +8906,14 @@ inline void packHops( std::FILE* out, const IngestResult& ing, const std::vector
     if( !legendsInHead.split && children.find( " prov=\"split\"" ) != std::string::npos )
     {
         w.write( splitArmCallsLegendComment() );   // attrib-multidef Q1: exactly when a hop's <calls> row carries prov="split"
+    }
+    if( vals != nullptr && vals->anyRow )
+    {
+        w.write( hopValueRefsLegendComment() );
+    }
+    if( !unreadAttr.empty() )
+    {
+        w.write( hopValueRefsUnreadLegendComment() );
     }
     w.write( openTag );
     w.write( children );
@@ -9278,10 +9475,10 @@ inline constexpr std::string_view kForSectionStubLegend =
 // same post-render splice as the stub clause above, in both --for dialects and the MCP twin. No "--" (G4).
 inline constexpr std::string_view kForLegoCountLegend =
     "; iface implementors=N counts every type an extends/implements clause binds to it (the lego verb's count), never the rows "
-    "listed: implementors_shown=K only K impl rows here, implementors_next= lists all; implementors_floor=1 an extends clause "
+    "listed: shown_implementors=K only K impl rows here (implementors_capped=1), implementors_next= lists all; implementors_floor=1 an extends clause "
     "spelled like it bound nowhere, so N may be short (not proof of another), floor_next= lists every extends site";
 
-// The prefix every attribute kForLegoCountLegend defines starts with (implementors_shown=/_next=/_floor=): a rendered
+// The prefix every attribute kForLegoCountLegend defines starts with (shown_implementors=/_next=/_floor=): a rendered
 // ranked <lego> block holding it needs the clause. Attribute values are escaped, so ` implementors_` can only open one.
 inline constexpr std::string_view kLegoCountAttrPrefix = " implementors_";
 
@@ -9651,13 +9848,55 @@ inline const char* legoContractCaveat( bool isContractExtracted, bool isTargeted
     return ( isTargeted && !isContractExtracted ) ? "\" methods=\"0\" caveat=\"not-extracted-for-lang" : "";
 }
 
+// lane lego-unread-for-lang — the SIBLING of the caveat above, for the other half of the answer. The method
+// contract is "not extracted for this language"; the implementor relation can be NOT READ AT ALL for it, and the
+// two are independent facts about one row (a Go interface has both; an ObjC one has only this).
+//
+// WHY. `implementors=` is built from the derived → base extends/implements edges captureBases reads
+// (src/ingest_relations.h), and the clause it walks does not exist in every language: Go states conformance
+// structurally and writes no clause at all, and ObjC / GDScript / Clojure / C write theirs in a shape that chain
+// does not read (LangFacts::implementorEdges, src/langfacts.h — measured per language by
+// test/legounreadlangcheck.sh (D), not asserted here). The targeted verb printed that as `implementors="0"`, so
+// `--lego=Packager` on nfpm answered a confident zero about an interface six packagers implement: the reader was
+// told to write from scratch with the template it asked for sitting in the tree. This repository's rule is that a
+// zero means "none found", never "none exists", and a count that cannot be a total is labelled a floor — and
+// neither reading is available here, because nothing was measured to be short OF.
+//
+// So the count is OMITTED and this attribute rides instead: unknown, not zero. That is exactly the shape the
+// arch-honest lane already uses for the same class of gap (`no_file_edges=LANGS`, src/graphlegend.h: "A <f> row
+// with no_file_edges= and no edge observed has no afferent=/instab=/transitive=: unknown, not zero"), and the
+// value names the language for the same reason that one does — the reader of a mixed tree needs to know WHICH
+// row's silence is unmeasured. RANKED (--for) mode cannot reach this: it selects interfaces by having a non-empty
+// implementor list, so it never prints a zero for a reader to misread (packLego's ranked branch below).
+//
+// A count that exists ANYWAY keeps its number beside the disclosure (the caller's own count, a floor over whatever
+// evidence did reach the graph) rather than being hidden — the same decision archhonestcheck's arm (K) pins for a
+// no-edge language that does have an observed edge.
+/// Whether this language's implementor relation is read at all — the ONE spelling of the question, so the emitter and
+/// anything that later reasons about an <iface> row cannot drift apart.
+inline bool legoImplementorEdgesUnread( Lang lang ) noexcept
+{
+    return langFacts( lang ).implementorEdges == ImplementorEdges::Unread;
+}
+
+/// The TARGETED <iface> row's count attributes: ` implementors="N"` where the relation is read, the disclosure alone
+/// where it is not and nothing was found (absent is the only honest reading), and BOTH where it is not read and an
+/// edge reached the graph anyway — the count is then a floor over that evidence, which hiding it would lose.
+inline std::string legoTargetedImplementorsAttrs( Lang lang, std::size_t directCount )
+{
+    const bool  unread = legoImplementorEdgesUnread( lang );
+    std::string out    = unread && directCount == 0 ? std::string() : " implementors=\"" + std::to_string( directCount ) + "\"";
+    return unread ? out + " implementors_unread_for_lang=\"" + langTag( lang ) + "\"" : out;
+}
+
 // --lego's ROLE order over the tower (graph.h applyNameTower), view-local: the answer to "--lego=NAME" is a TYPE with
 // something to show, so every type kind (Class/Struct/Interface/named type) shares ONE rung, and on it the keys are,
 // in order: at least one implementor (the <impl> rows); a method contract that is extracted (legoMethodContractSound —
 // no not-extracted caveat, its <m> rows are read; today a C++ / Objective-C definition, decided by the language alone,
 // so it must NOT outrank an implementor: a data-only C++ class would beat a Rust trait that has implementors,
 // rv-pr432-delta B1); then the tower's own key — kind rank (an Interface above a
-// Class), the leading symbol's language, id ASC. Every other rung keeps the tower rank (a Method above the types, a
+// Class), the leading symbol's language (the tower's own front among the tied, CodeRabbit #440), then the tower's incoming
+// order. Every other rung keeps the tower rank (a Method above the types, a
 // constructor just below them). Measured (diagnosis @mpapis, #432): `--lego=Shape` on this repository answered an
 // Elixir `shape.ex` (Interface, methods="0" caveat) over the C++ `Shape` whose contract is extracted
 // (a9disclosurecheck §A9.4); `--lego=Marker` answered the Java `interface Marker` (no implementor) over the Kotlin
@@ -9672,11 +9911,12 @@ inline std::vector<NodeId> legoRoleOrder( const IngestResult& ing, const std::ve
     }
     struct RoleKey
     {
-        int    rung;
-        bool   hasImplementor;
-        bool   isContractExtracted;
-        int    towerRank;
-        NodeId id;
+        int         rung;
+        bool        hasImplementor;
+        bool        isContractExtracted;
+        int         towerRank;
+        std::size_t towerPos;   // the candidate's place in the incoming tower order: the tie reference and the last key (CodeRabbit #440)
+        NodeId      id;
     };
     const std::vector<int> towerRanks = nameTowerRanks( ing, ids );
     const int              typeRung   = 2 * kindSpecificity( SymKind::Interface );
@@ -9688,7 +9928,7 @@ inline std::vector<NodeId> legoRoleOrder( const IngestResult& ing, const std::ve
         const Symbol& s      = ing.symbols[ id ];
         const bool    isType = namespaceCompatible( RefRole::Type, s.kind );   // graph.h's one statement of "a type definition"
         keys.push_back( RoleKey{ isType ? typeRung : towerRanks[ i ], isType && id < implementors.size() && !implementors[ id ].empty(),
-                                 isType && legoMethodContractSound( s.lang ), towerRanks[ i ], id } );
+                                 isType && legoMethodContractSound( s.lang ), towerRanks[ i ], i, id } );
     }
     const auto ahead = []( const RoleKey& a, const RoleKey& b ) noexcept
     {
@@ -9696,7 +9936,7 @@ inline std::vector<NodeId> legoRoleOrder( const IngestResult& ing, const std::ve
              > std::tuple( b.rung, b.hasImplementor, b.isContractExtracted, b.towerRank );
     };
     const RoleKey reference = *std::min_element( keys.begin(), keys.end(), [ & ]( const RoleKey& a, const RoleKey& b )
-                                                 { return ahead( a, b ) || ( !ahead( b, a ) && a.id < b.id ); } );
+                                                 { return ahead( a, b ) || ( !ahead( b, a ) && a.towerPos < b.towerPos ); } );   // the tower's own front among the tied
     const Lang referenceLang = ing.symbols[ reference.id ].lang;
     std::sort( keys.begin(), keys.end(), [ & ]( const RoleKey& a, const RoleKey& b ) noexcept
                {
@@ -9709,7 +9949,7 @@ inline std::vector<NodeId> legoRoleOrder( const IngestResult& ing, const std::ve
                    {
                        return refA;
                    }
-                   return a.id < b.id;
+                   return a.towerPos < b.towerPos;   // the tower already ordered these (stated language, kind, majority tie, content key)
                } );
     for( std::size_t i = 0; i < ids.size(); ++i )
     {
@@ -9900,7 +10140,7 @@ inline bool narrowLegoToRenderedSigs( const IngestResult& ing, std::vector<std::
 // closure) and depth= (hops below the interface; the direct rows are depth 1 and carry neither). The direct rows stay
 // uncapped as before; the deeper rows are one page of at most kLegoClosureRowCap, a RUNAWAY guard: the measured
 // closures of a library base class are 1-78 rows, while a framework root (a UI toolkit's node or widget class, 1.4-1.6 K
-// classes below it) would print ~170-190 KB, so it pages. A cut discloses transitive_shown= + has_more="1" + a next= that replays
+// classes below it) would print ~170-190 KB, so it pages. A cut discloses shown_transitive= + has_more="1" + a next= that replays
 // the verb with --offset.
 // --limit/--offset (MCP limit/offset) window these deeper rows; the direct rows repeat on every page.
 inline constexpr std::size_t kLegoClosureRowCap = 200;
@@ -9956,7 +10196,7 @@ inline std::string legoClosureAttrs( const LegoClosurePage& page, std::string_vi
     const std::size_t shown = page.window.end - page.window.begin;
     if( shown < total )
     {
-        out += " transitive_shown=\"" + std::to_string( shown ) + "\"";
+        out += " shown_transitive=\"" + std::to_string( shown ) + "\" transitive_capped=\"1\"";
     }
     if( page.window.begin > 0 )
     {
@@ -10076,7 +10316,7 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
                                                         // is what is LISTED, not how many there are: `<iface n="Router"
                                                         // implementors="1">` answered a tree with six. With this map the count is
                                                         // the targeted --lego=TYPE's own and a short list says so
-                                                        // (implementors_shown= + implementors_next=). Null keeps the old shape.
+                                                        // (shown_implementors= + implementors_next=). Null keeps the old shape.
 {
     EXPECTS( graphImplementors == nullptr || focusId == kNoNode );   // the targeted verb's map IS the graph's
     EXPECTS( focusId != kNoNode || ( targeted.pageLimit == 0 && targeted.pageOffset == 0 ) );   // the ranked bundle has no page to window
@@ -10166,7 +10406,11 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
         const LegoClosurePage deep = focusId != kNoNode ? legoClosurePage( implementors, targeted.implementorBound != nullptr ? *targeted.implementorBound : kNoImplementorBound, id, targeted.pageLimit, targeted.pageOffset ) : LegoClosurePage{};
         if( focusId != kNoNode )
         {
-            hdr = "\" defs=\"" + std::to_string( definitionCountOfName( ing, id ) ) + "\" implementors=\"" + std::to_string( impls.size() + ( mainRows.empty() ? 0u : 1u ) ) + "\""
+            // lane lego-unread-for-lang: the count attributes are one decision, taken in legoTargetedImplementorsAttrs —
+            // a language whose implementor relation is not read at all prints NO count, because a zero there would be a
+            // claim about evidence that was never looked at.
+            hdr = "\" defs=\"" + std::to_string( definitionCountOfName( ing, id ) ) + "\""
+                + legoTargetedImplementorsAttrs( isym.lang, impls.size() + ( mainRows.empty() ? 0u : 1u ) )
                 + legoClosureAttrs( deep, std::string( pathRel( isym.fileId ) ) + ":" + isym.name,
                                     deep.unwalked.empty() ? std::string() : std::string( pathRel( ing.symbols[ deep.unwalked.front() ].fileId ) ) + ":" + ing.symbols[ deep.unwalked.front() ].name,
                                     targeted.pageLimit );
@@ -10178,7 +10422,7 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
             {
                 // a cut, not a floor: the rest exist and the named verb lists every one of them
                 const std::string selector = std::string( pathRel( isym.fileId ) ) + ":" + isym.name;
-                hdr += " implementors_shown=\"" + std::to_string( cap ) + "\"";
+                hdr += " shown_implementors=\"" + std::to_string( cap ) + "\" implementors_capped=\"1\"";
                 hdr += rw::nextAttrXml( nextFlag( "--lego=", selector ), "implementors_next" );
             }
         }

@@ -234,7 +234,7 @@ inline std::string graphUnindexedTextClause( std::size_t unindexedFiles )
 // --lego shipped with NO legend at all (a bare <ctx root=><lego>…); one literal for the CLI verb and its MCP
 // twin, so the two dialects cannot describe implementors= differently.
 inline constexpr const char* kLegoLegend =
-    "<!-- ripwire lego: ONE interface/base type — its method contract (<m>, where the language captures it soundly) and every implementor (<impl>) the extends/implements edges reach, own-language only; implementors= counts them. counts_floor=\"1\": every graph-derived count here is a FLOOR, never a total. Call edges are extracted from source text by NAME, so dynamic dispatch, callbacks, macros and cross-language calls can be missing; read a zero as \"none found\", never as \"none exists\". graph_ambiguous=/graph_unresolved= are the whole graph's resolver gauge (calls split over several defs / calls whose in-repo defs were all language-filtered), the map header's ambiguous=/unresolved=. On a NAMED target only, methods=\"0\" caveat=\"not-extracted-for-lang\" means the method contract itself is not read soundly for this interface's language (currently C++/ObjC only) — implementors= still stands, this caveat is about <m> rows alone. -->";
+    "<!-- ripwire lego: ONE interface/base type — its method contract (<m>, where the language captures it soundly) and every implementor (<impl>) the extends/implements edges reach, own-language only; implementors= counts them. counts_floor=\"1\": every graph-derived count here is a FLOOR, never a total. Call edges are extracted from source text by NAME, so dynamic dispatch, callbacks, macros and cross-language calls can be missing; read a zero as \"none found\", never as \"none exists\". graph_ambiguous=/graph_unresolved= are the whole graph's resolver gauge (calls split over several defs / calls whose in-repo defs were all language-filtered), the map header's ambiguous=/unresolved=. On a NAMED target only, methods=\"0\" caveat=\"not-extracted-for-lang\" means the method contract itself is not read soundly for this interface's language (currently C++/ObjC only) — that caveat is about <m> rows alone. Also on a NAMED target only, implementors_unread_for_lang=LANG is the SEPARATE and stronger fact about the count: this build reads no extends/implements edge for LANG at all (a language that states conformance structurally, such as Go, or writes its clause in a shape the extractor does not read), so implementors= is ABSENT rather than zero — unread-for-lang is unknown, not \"none found\"; a count printed beside it is a floor over whatever evidence did reach the graph. Without that attribute, implementors= stands. -->";
 
 // The COUNTING-UNIT clause (the L-CS routing item).
 //
@@ -544,6 +544,22 @@ inline constexpr const char* kTestsIgnoredLegend =
     "radius_tested= is 0 by construction (not measured, not a finding) and radius_untested= is every production row reached; "
     "importers_tests= still counts test files. ";
 
+// TIER-FOLLOWUP: the columnar forms' per-row half of the same tier (columnar.h ColumnarRowExtras::testRow), said exactly when the
+// column rides, i.e. when a shown row is a test definition. G4: no double hyphen.
+inline constexpr const char* kTestColumnLegend =
+    "the test column (present when a shown row is one): 1 = that row is a test or fixture definition, counted apart from production; 0 = a production row. ";
+inline const char* testColumnLegend( bool present ) noexcept
+{
+    return present ? kTestColumnLegend : "";
+}
+
+// TIER-FOLLOWUP (callhierarchy.h computeHopTestedPartition): the callers/callees answer's test tier, said exactly when hop_tests=
+// rides; then the row's test="1" (XML) or the test column (columnar, only when a shown row carries it). 0 bytes when inert.
+// hopTestTierLegend, which composes them, sits below clausesForCounts (which it reuses).
+inline constexpr const char* kHopTestTierLegend =
+    "hop_tests= (absent at 0) counts the TEST definitions among these rows: listed, but counted apart, so hop_tested=/hop_untested= "
+    "cover production rows only and the three sum to count=. ";
+
 // --impact's partition reading for this answer: the two-tier sentence always (so an answer with no test in its reach is
 // byte-identical to before), then the test tier and its row label when radius_tests= rides, and the ignore-tests disclosure.
 // One function for the CLI and the MCP twin, so the two cannot drift. The columnar form has no per-row attribute (its
@@ -745,6 +761,11 @@ inline constexpr const char* kDeclinedSitesCalleesForm =
     "<dc n= l= via=\"declined\">: the called name and the line of the call, in the body of one of these definitions. ";
 inline constexpr const char* kDeclinedSitesCallersForm =
     "<dc in= p= via=\"declined\">: the definition making the call and the call's file:line, listed because its candidates include a definition of this selector. ";
+// BAND DC (declinedsites.h declinedSitesColumnsXml): the same two readings where the rows ride as the columnar <dcols> block
+inline constexpr const char* kDeclinedSitesCalleesColumns =
+    "<dcols n= via=\"declined\" fields=>: the <dc> sites as parallel arrays in one row order (an empty cell: no value): name, line the called name and the line of the call, in the body of one of these definitions. ";
+inline constexpr const char* kDeclinedSitesCallersColumns =
+    "<dcols n= via=\"declined\" fields=>: the <dc> sites as parallel arrays in one row order (path indexes <paths>; an empty cell: no value): in, path:line the definition making the call and the call's file:line, listed because its candidates include a definition of this selector. ";
 inline constexpr const char* kDeclinedSitesSideClause =
     "gate=side: a Ruby call whose in-reach definitions answer on the other side of self. ";
 inline constexpr const char* kDeclinedSitesNameGateClause =
@@ -765,7 +786,7 @@ inline constexpr const char* kDeclinedSitesOfDefCallees =
 inline constexpr const char* kDeclinedSitesOfDefCallers =
     "of_def=K~d on a <dc>: its candidates include definition group K; never a claim it calls K. ";
 inline constexpr const char* kDeclinedSitesCutClause =
-    "dc_shown=N: the <dc> rows printed (the callers form cuts file-first: each file's first site before any file's second); dc_next= is the call that lists every site. ";
+    "shown_dc=N: the <dc> rows printed (the callers form cuts file-first: each file's first site before any file's second), dc_capped=1 the rest are cut; dc_next= is the call that lists every site. ";
 inline constexpr const char* kDeclinedSitesCandClause =
     "cand= (legend full only): the candidate definitions as file:line, cand_more= how many more. ";
 // The impact answer printed no <dc> row (gates review Q4) and pointed at the callers verb instead; since lane ix2-slice (IX-4) it
@@ -778,10 +799,11 @@ struct DeclinedSitesLegendFlags
     bool side = false; // a row says gate="side"
     bool nameGate = false; // a row says gate="builtin" or gate="std"
     bool ofDef = false; // a row carries of_def=
-    bool cut = false; // the root carries dc_shown= / dc_next=
+    bool cut = false; // the root carries shown_dc= / dc_next=
     bool cand = false; // a row carries cand= (legend full)
     bool iface = false; // a row says gate="iface" (lane L6)
     bool bound = false; // a row carries bound= (lane L6)
+    bool columns = false; // BAND DC: the rows ride as the columnar form's <dcols> arrays (declinedsites.h)
 };
 // train 28 (declined-sites review N3): the MCP twins carry the same sites as "declined_sites" entries with their own keys, so
 // their declined_note names those keys ({name, line, cands, via} / {in, file, line, cands}) instead of the XML attributes.
@@ -794,11 +816,24 @@ inline constexpr const char* kDeclinedSitesOfDefCalleesMcp =
 inline constexpr const char* kDeclinedSitesOfDefCallersMcp =
     "of_def [K~d] on an entry: its candidates include definition group K; never a claim it calls K. ";
 inline constexpr const char* kDeclinedSitesCutClauseMcp =
-    "dc_shown: the entries listed (the callers form cuts file-first: each file's first site before any file's second); dc_next: the call that lists every site. ";
+    "shown_dc: the entries listed (the callers form cuts file-first: each file's first site before any file's second), dc_capped: 1 when cut; dc_next: the call that lists every site. ";
 inline constexpr const char* kDeclinedSitesCandClauseMcp =
     "candidates (legend full only): the candidate definitions as file:line, cand_more how many more. ";
 inline constexpr const char* kDeclinedSitesCallersFormMcp =
     "{in, file, line, via=declined}: the definition making the call and the call's file and line, listed because its candidates include a definition of this selector. ";
+// The clause that says what one site's fields are: the columnar block's (never on an MCP twin: its entries are JSON), else the row's
+inline const char* declinedSitesFormClause( const DeclinedSitesLegendFlags& f, bool mcp ) noexcept
+{
+    if( f.columns )
+    {
+        return f.callersForm ? kDeclinedSitesCallersColumns : kDeclinedSitesCalleesColumns;
+    }
+    if( f.callersForm )
+    {
+        return mcp ? kDeclinedSitesCallersFormMcp : kDeclinedSitesCallersForm;
+    }
+    return mcp ? kDeclinedSitesCalleesFormMcp : kDeclinedSitesCalleesForm;
+}
 inline std::string declinedSitesLegend( const DeclinedSitesLegendFlags& f, bool mcp = false )
 {
     if( !f.any )
@@ -806,7 +841,7 @@ inline std::string declinedSitesLegend( const DeclinedSitesLegendFlags& f, bool 
         return {};
     }
     std::string out( mcp ? kDeclinedSitesMcpLead : kDeclinedSitesLegend );
-    out += f.callersForm ? ( mcp ? kDeclinedSitesCallersFormMcp : kDeclinedSitesCallersForm ) : ( mcp ? kDeclinedSitesCalleesFormMcp : kDeclinedSitesCalleesForm );
+    out += declinedSitesFormClause( f, mcp );
     out += f.side ? kDeclinedSitesSideClause : "";
     out += f.nameGate ? kDeclinedSitesNameGateClause : "";
     out += f.iface ? ( mcp ? kDeclinedSitesIfaceClauseMcp : kDeclinedSitesIfaceClause ) : "";
@@ -1144,6 +1179,23 @@ inline constexpr const char* kDepsMaskedFilesLegend =
     "masked_files=N (<health>, absent at 0): N no_file_edges= files are left out of dep_files= and of ccd/acd/nccd/shape, an edgeless one would sit there as a cone of one and pull the verdict toward horizontal and one with an edge has a cone that is only a floor; the numbers cover the other dep_files= files. ";
 inline constexpr const char* kArchMaskedFilesLegend =
     " masked_files=N (<metrics>, absent at 0): N no_file_edges= files are left out of the propagation_cost denominator, an edgeless one would add a cone of one and one with an edge has a cone that is only a floor; the number covers the other dependency-capable files.";
+// --arch's <metrics> definitions. They rode every answer as a note= ATTRIBUTE on <metrics> until 2026-11-17 (574 B of prose
+// as data, 764 B with the zone_unknown clause); a definition belongs in the legend, so the same words read here in the full
+// dialect and as rows in compactlegend.h. The zone_unknown clause and its term in the partition sum ride exactly when
+// zone_unknown= does (verbs_report.h emitArchMetrics), as they did in the attribute.
+inline std::string archMetricsLegend( bool zoneUnknown )
+{
+    std::string s = " <metrics>: Martin Ca/Ce/I/A/D + zone (main-sequence heuristic, no independent outcome-based validation — folklore, not proof)"
+                    " + reachability — directory-level estimate from name-based deps; zone_na = types=0 modules excluded from zone_pain/zone_useless"
+                    " (no meaningful abstractness score); zone_ok = typed modules in neither corner (the main-sequence middle); zone_pain+zone_useless+zone_ok+zone_na";
+    s += zoneUnknown ? "+zone_unknown" : "";
+    s += " = modules, the full partition; propagation_cost = density of the file-dep transitive closure (MacCormack, validated coupling form)"
+         " — fraction of files reachable from an average file";
+    s += zoneUnknown ? "; zone_unknown = modules holding a file in a language this build draws no file edges for (no_file_edges=): zone and coupling unknown,"
+                       " not zero, and part of the partition."
+                     : ".";
+    return s;
+}
 inline const char* depsNoFileEdgesLegend( bool on ) noexcept { return on ? kDepsNoFileEdgesLegend : ""; }
 inline const char* archNoFileEdgesLegend( bool on ) noexcept { return on ? kArchNoFileEdgesLegend : ""; }
 inline const char* depsMaskedFilesLegend( bool on ) noexcept { return on ? kDepsMaskedFilesLegend : ""; }
@@ -1182,6 +1234,12 @@ inline std::string prunedPackagesLegend( bool on, bool leadingSpace )
 inline std::string clausesForCounts( std::uint64_t countA, const char* clauseA, std::uint64_t countB, const char* clauseB )
 {
     return std::string( countA > 0 ? clauseA : "" ) + ( countB > 0 ? clauseB : "" );
+}
+// TIER-FOLLOWUP: the callers/callees test-tier clause and its row reading (constants above), both exactly when
+// hop_tests= rides: the row's test="1" in XML, the test column in the columnar form only when a shown row carries it.
+inline std::string hopTestTierLegend( std::size_t hopTests, bool columnar, bool testColumn )
+{
+    return clausesForCounts( hopTests, kHopTestTierLegend, hopTests, columnar ? testColumnLegend( testColumn ) : kTestRowLegend );
 }
 // IMPACT-TEST-TIER: --safe-delete's test-tier clauses. It lists callers, not the reach, so no row label; the same two
 // clauses as --impact (kRadiusTestTierLegend, kTestsIgnoredLegend above), each exactly when its attribute rides the root.
@@ -1308,8 +1366,8 @@ inline const char* modScopeLegend( bool on ) noexcept { return on ? kModScopeLeg
 // condition and `cut` its "a row carries sites_total=" condition, so an answer without them pays 0 bytes. `cap` is
 // pageview.h kCallSitesPerRowCap, passed in (this header sits below pageview.h). No double hyphen: inside an XML comment.
 inline constexpr const char* kCallSitesAtLegend =
-    "sites_at= on a caller row: its calls of the called LEAF name, any receiver or qualifier, as file:line tokens "
-    "(space-separated, ascending; two calls on one line are one site); p= stays where the caller is DEFINED. Matched by name like "
+    "sites_at= on a caller row: its calls of the called LEAF name, bar ones proven elsewhere, as [file:]line "
+    "(space-separated, ascending; two calls on a line are one site; no file: p='s); p= stays where the caller is DEFINED. Matched by name like "
     "the uses verb's call rows, so not proof each binds here; absent when no call there is spelled like it (an aliased import). ";
 inline std::string callSitesAtLegend( bool on, bool cut, std::size_t cap )
 {
@@ -1399,6 +1457,22 @@ inline constexpr std::string_view kForSplitClause =
 inline std::string splitArmCallsLegendComment()
 {
     return "<!--" + std::string( kForSplitClause ) + " -->";
+}
+// A --for hop row's value use (serialize.h HopValueRefs): the two attributes' readings, each its own comment beside the section
+// that carries it. No `--` inside an XML comment: the flag is named callers.
+inline constexpr std::string_view kForHopValueRefsClause =
+    " h value_refs=N: the function is used as a VALUE N times (stored or passed, matched by name), so a call through that slot is not an edge "
+    "and callers does not list it; no value_refs= means none found, never none exists.";
+inline constexpr std::string_view kForHopValueRefsUnreadClause =
+    " hops value_refs_unread_for_lang=L: a printed h row is in a language whose value uses this build does not read at all, so its missing "
+    "value_refs= is unknown, not zero.";
+inline std::string hopValueRefsLegendComment()
+{
+    return "<!--" + std::string( kForHopValueRefsClause ) + " -->";
+}
+inline std::string hopValueRefsUnreadLegendComment()
+{
+    return "<!--" + std::string( kForHopValueRefsUnreadClause ) + " -->";
 }
 // …as its own comment node, for the surfaces whose legend is written beside the rows (a <bodies>/<hops> block's <calls>)
 inline std::string viaNameLegendComment()

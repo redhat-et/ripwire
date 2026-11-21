@@ -27,8 +27,26 @@ echo "knownitemcheck: BIN=$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 OUT="$TMP/out.txt"; OUT2="$TMP/out2.txt"
 
+# #663: EVERY BINARY RUN STATES ITS WALL TIME, the gate's running total and the load beside it. The 2026-11-15 nightly killed
+# this gate at its 1200 s budget inside `--doctor` with no other number to go on; --doctor takes ~3 s, the src/ evals
+# take the rest, and on the macOS Release leg this gate had already measured 866-1148 s on 11-11..11-14. A timeout now names
+# the step that ate the budget (its INFO start line has no INFO time line after it). fd 3 is the gate's own stdout, so the
+# line survives the step's redirection.
+exec 3>&1
+GATE_T0=$SECONDS
+timed(){
+    local label="$1" t0=$SECONDS rc; shift
+    # CR676: the start line goes out BEFORE the step, so a step the runner kills still names itself (the completion line
+    # below never prints then); the last "start" line with no matching "time" line is the step that ate the budget.
+    printf '  INFO  start %s (gate %ss)\n' "$label" "$(( SECONDS - GATE_T0 ))" >&3
+    "$@"; rc=$?
+    printf '  INFO  time %s: %ss (gate %ss, load %s)\n' "$label" "$(( SECONDS - t0 ))" "$(( SECONDS - GATE_T0 ))" \
+        "$( uptime | sed 's/.*load average[s]*: *//' )" >&3
+    return "$rc"
+}
+
 # run on src/ (rich in doc-commented symbols)
-"$BIN" src --eval-retrieval --no-cache >"$OUT" 2>/dev/null
+timed "eval src (1)" "$BIN" src --eval-retrieval --no-cache >"$OUT" 2>/dev/null
 
 # ── #1: the eval ran and emitted the header + all 8 (ranker × mode) rows ───────────────────────────────
 { grep -q 'known-item' "$OUT" \
@@ -54,7 +72,7 @@ done < <( grep -E '^  (subtoken|name-exact|anchored|routed) +(name|doc-phrase) '
     || no "some MRR/recall out of range or non-monotone"
 
 # ── #3: DETERMINISM — two runs byte-identical (no threading in the reported numbers) ───────────────────
-"$BIN" src --eval-retrieval --no-cache >"$OUT2" 2>/dev/null
+timed "eval src (2, determinism)" "$BIN" src --eval-retrieval --no-cache >"$OUT2" 2>/dev/null
 diff -q "$OUT" "$OUT2" >/dev/null \
     && ok "deterministic: two runs byte-identical" \
     || no "NON-deterministic: two runs differ"
@@ -137,9 +155,9 @@ scoredof(){ grep -oE 'scored=[0-9]+' "$1" | head -1 | grep -oE '[0-9]+'; }
 mkcorpus "$TMP/early" "aaa_probe"
 mkcorpus "$TMP/late"  "zzz_probe"
 mkcorpus "$TMP/plain" ""
-"$BIN" "$TMP/early" --eval-retrieval --no-cache >"$TMP/early.txt" 2>/dev/null
-"$BIN" "$TMP/late"  --eval-retrieval --no-cache >"$TMP/late.txt"  2>/dev/null
-"$BIN" "$TMP/plain" --eval-retrieval --no-cache >"$TMP/plain.txt" 2>/dev/null
+timed "eval early" "$BIN" "$TMP/early" --eval-retrieval --no-cache >"$TMP/early.txt" 2>/dev/null
+timed "eval late"  "$BIN" "$TMP/late"  --eval-retrieval --no-cache >"$TMP/late.txt"  2>/dev/null
+timed "eval plain" "$BIN" "$TMP/plain" --eval-retrieval --no-cache >"$TMP/plain.txt" 2>/dev/null
 
 # ── #8: ORDER-INDEPENDENCE. Two corpora with byte-identical content differing ONLY in where the probe
 #    file sorts must produce identical numbers. This is the defect, reproduced as a test. ───────────────
@@ -180,8 +198,9 @@ fi
 #    So the regime states itself now, the same way the sampler's own rule had to (#9): lex= on the eval's
 #    disclosure line, lex_stats= on doctor's index-cache row.
 
-LEXOUT="$TMP/lex.txt"
-"$BIN" src --eval-retrieval --no-cache >"$LEXOUT" 2>/dev/null
+# The lex= line is read from run (1): #3 already proved a second identical run byte-identical, so a third one printed the same
+# bytes and cost a third of this gate's wall time (#663: ~100 s idle local, ~300 s on the macOS Release leg).
+LEXOUT="$OUT"
 LEXPATH="$( grep -oE 'lex=[a-z-]+' "$LEXOUT" | head -1 | cut -d= -f2 )"
 { [ -n "$LEXPATH" ] && [ "$LEXPATH" = "rich" ]; } \
     && ok "eval discloses its lexical path and it is RICH (lex=$LEXPATH) — persisted stats, no per-query corpus re-tokenize" \
@@ -194,7 +213,7 @@ LEXPATH="$( grep -oE 'lex=[a-z-]+' "$LEXOUT" | head -1 | cut -d= -f2 )"
 #    drift from the behaviour the way a second hand-written copy would. cachesplitcheck already proves the
 #    lean/rich MECHANISM; nothing proved its MEMBERSHIP, which is the gap the eval fell through.
 DOCOUT="$TMP/doc.txt"
-"$BIN" src --doctor >"$DOCOUT" 2>/dev/null
+timed "doctor src" "$BIN" src --doctor >"$DOCOUT" 2>/dev/null
 ROSTER="$( grep -oE 'rich_verbs="[^"]*"' "$DOCOUT" | head -1 | cut -d'"' -f2 )"
 if [ -z "$ROSTER" ]; then
     no "--doctor does not disclose rich_verbs= — which verbs get the persisted-stats path is unanswerable from any output, which is exactly how the eval sat on the scan path unnoticed"

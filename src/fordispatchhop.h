@@ -573,7 +573,10 @@ inline std::vector<HeldAsRow> dispatchHeldAs( const IngestResult& ing, std::span
                 continue;
             }
             const Symbol*& first = ownerDef[k];
-            ambiguous[k] |= first != nullptr && ( first->fileId != s.fileId || first->line != s.line );
+            if( first != nullptr && ( first->fileId != s.fileId || first->line != s.line ) )
+            {
+                ambiguous[k] = 1;
+            }
             first = first == nullptr ? &s : first;
         }
     }

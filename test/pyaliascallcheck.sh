@@ -66,7 +66,7 @@ callees(){ ( cd "$FIX" || exit 1; "$BIN" "$FIX" --no-cache --callees="$1" --lege
 # ── 0. presence: every fixture file parses (a fixture that fails to parse would pass the near misses inert) ──
 ( cd "$FIX" || exit 1; "$BIN" "$FIX" --no-cache --skipped --legend=compact ) >"$TMP/skipped" 2>/dev/null
 perl -pe 's/<!--.*?-->//g' "$TMP/skipped" >"$TMP/skipped.body"
-if ! grep -q 'degraded_parse="0"' "$TMP/skipped.body" || ! grep -q 'indexed="43"' "$TMP/skipped.body" || grep -q '<f \|<h ' "$TMP/skipped.body"; then no "a fixture file was skipped or degraded"; sed 's/^/        | /' "$TMP/skipped" | head -5
+if ! grep -q 'degraded_parse="0"' "$TMP/skipped.body" || ! grep -q 'indexed="61"' "$TMP/skipped.body" || grep -q '<f \|<h ' "$TMP/skipped.body"; then no "a fixture file was skipped or degraded"; sed 's/^/        | /' "$TMP/skipped" | head -5
 else ok "every fixture file indexed with no parse degrade"; fi
 
 # ── 1. positive arms ──
@@ -128,6 +128,70 @@ done
 callees call_same || :
 if grep -q '<s t="fn" n="h" p="m.py:5"/>' "$TMP/call_same"; then ok "call_same: the same ladder edge to m.py:5 h as before"
 else no "call_same changed"; sed 's/<!--.*-->//; s/^/        | /' "$TMP/call_same"; fi
+
+# ── 5. PY-CLASS-SPRAY: a bare call binds through its lexical scope chain (graph.h pythonLexicalScopePin) ──
+# Fixture scope/ (one directory, so the name-only ladder's same-directory hedge is what the rule replaces): seven files define a
+# `Spray` inside a function, three at module scope (decoy_a.py, decoy_b.py, s_module.py), and every caller below calls `Spray()`.
+# Read from the eval-only pin census (one row per decided call site: caller, callee, every target), so each arm checks the EXACT
+# target set. Before the rule every positive arm split across all 19 same-directory `Spray` definitions (pydantic: one `Model(...)`
+# in a test reached 965 classes).
+( cd "$FIX" || exit 1; "$BIN" "$FIX" --no-cache --pin-census="$TMP/census" >/dev/null 2>&1 ) || no "the pin-census run failed"
+# targets CALLER LINE: the sorted `file::scope::name` targets (ids without their #N) of the C row of caller CALLER's Spray call on LINE
+targets(){ awk -F'\t' -v c="scope/$1#" -v l="$2" '$1=="C" && index($6,c)==1 && $7=="Spray" && $9==l { print $8 }' "$TMP/census" \
+           | tr '|' '\n' | sed 's/#[0-9]*$//' | sort | paste -sd' ' -; }
+flags(){ awk -F'\t' -v c="scope/$1#" -v l="$2" '$1=="C" && index($6,c)==1 && $7=="Spray" && $9==l { print $5 }' "$TMP/census"; }
+# deflines CALLER LINE: the same row's targets as file:LINE of each definition (the census S row of its full id; S rows follow the C rows, so two passes), sorted;
+#   the #N-stripped names above cannot tell two same-named definitions of one file apart (CR 706, review 5994579130)
+deflines(){ awk -F'\t' -v c="scope/$1#" -v l="$2" 'NR==FNR { if( $1=="S" ) at[$2]=$4; next } $1=="C" && index($6,c)==1 && $7=="Spray" && $9==l { n=split($8,t,"|");
+           for(i=1;i<=n;i++){ f=t[i]; sub(/::.*/,"",f); print f ":" ( t[i] in at ? at[t[i]] : "?" ) } }' "$TMP/census" "$TMP/census" | sort | paste -sd' ' -; }
+#   POSITIVE: the definitions the scope binds, and nothing else
+for a in "s_local.py::use_local 5 scope/s_local.py::Spray::Spray" \
+         "s_enclosing.py::inner_enclosing 6 scope/s_enclosing.py::Spray::Spray" \
+         "s_classbody.py::Outer::Outer 6 scope/s_classbody.py::Spray::Spray" \
+         "s_decorated.py::use_decorated 9 scope/s_decorated.py::Spray::Spray" \
+         "s_default.py::use_default 9 scope/s_default.py::Spray::Spray" \
+         "s_module.py::use_module 6 scope/s_module.py::Spray::Spray" \
+         "s_imported.py::use_imported 5 scope/decoy_a.py::Spray::Spray"; do
+    set -- $a
+    got=$( targets "$1" "$2" )
+    if [ "$got" = "$3" ]; then ok "$1 (line $2): Spray() binds the one definition its scope chain binds ($3)"
+    else no "$1 (line $2): expected exactly $3, got: ${got:-<no row>}"; fi
+done
+#   a default argument runs in the ENCLOSING scope: the module's Spray (line 1), not the def's own (line 6); the body call is the def's own
+got=$( deflines s_default.py::use_default 5 ); body=$( deflines s_default.py::use_default 9 )
+if [ "$got" = "scope/s_default.py:1" ] && [ "$body" = "scope/s_default.py:6" ]; then
+    ok "s_default.py: the default argument (line 5) binds the module's Spray (line 1), the body call (line 9) the def's own (line 6)"
+else no "s_default.py: expected line 5 -> s_default.py:1 and line 9 -> s_default.py:6, got: ${got:-<no row>} / ${body:-<no row>}"; fi
+#   two def statements in one scope (a conditional rebinding): a split across exactly those two
+got=$( deflines s_cond.py::use_cond 8 )
+if [ "$got" = "scope/s_cond.py:3 scope/s_cond.py:6" ]; then ok "s_cond.py: a split across the scope's two Spray definitions only (lines 3 and 6)"
+else no "s_cond.py: expected the two s_cond.py Spray definitions (lines 3 and 6) only, got: ${got:-<no row>}"; fi
+callees use_local && if grep -q '<s [^>]*n="Spray" p="scope/s_local.py:2"' "$TMP/use_local" && ! grep -q 'via=' "$TMP/use_local" && [ "$( grep -o 'n="Spray"' "$TMP/use_local" | wc -l )" -eq 1 ]; then
+    ok "--callees=use_local: one proven Spray row (s_local.py:2), no via=\"name\" hedge"
+else no "--callees=use_local: expected one proven s_local.py:2 Spray row"; sed 's/<!--.*-->//; s/^/        | /' "$TMP/use_local"; fi
+#   NEAR MISSES: the binding is not read, so the rule makes no claim (each arm counts the row it judges; a missing row fails)
+for a in "s_condassign.py::use_condassign 7 assignment beside the def" "s_nonlocal.py::outer_nonlocal 10 a nonlocal rebinding" \
+         "s_classscope.py::Box::Box 5 a class body that binds the name" "s_param.py::use_param 5 a parameter"; do
+    set -- $a; caller=$1; line=$2; shift 2
+    got=$( targets "$caller" "$line" )
+    if [ -n "$got" ] && [ "$( printf '%s\n' $got | sort -u | sed 's/::.*//' | sort -u | wc -l )" -gt 1 ]; then ok "$caller: $* keeps the unchanged ladder (not pinned to its own file)"
+    else no "$caller: $* must stay undecided (the unchanged split), got: ${got:-<no row>}"; fi
+done
+#   a star import: the scope rule claims no local (the row carries no narrowing flag `r`). STATED FLOOR, not this rule's: the ladder's
+#   same-file tier still binds s_star.py's own Spray (decoy_b's star import rebinds it after the def) and, in s_staronly.py, another
+#   function's local Spray (a name bound only by a star import) — both as on main.
+for a in "s_star.py::use_star 9 a star import after the module's def" "s_staronly.py::use_staronly 12 a name bound only by a star import"; do
+    set -- $a; caller=$1; line=$2; shift 2
+    got=$( flags "$caller" "$line" )
+    if [ -n "$got" ] && [ "${got#*r}" = "$got" ]; then ok "$caller: $*: the scope rule claims no local (row flags '$got')"
+    else no "$caller: $*: the scope rule must not decide it (flags: '${got:-<no row>}')"; fi
+done
+got=$( awk -F'\t' '$1=="C" && index($6,"scope/s_method.py::Holder::go_method#")==1 && $7=="Spray" { print $8 }' "$TMP/census" | sed 's/#[0-9]*$//' )
+if [ "$got" = "scope/s_method.py::Holder::Spray" ]; then ok "s_method.py: self.Spray() is a member call, still the method (unchanged)"
+else no "s_method.py: expected Holder.Spray, got: ${got:-<no row>}"; fi
+if callees use_unbound && ! awk -F'\t' '$1=="C" && index($6,"scope/s_unbound.py::")==1' "$TMP/census" | grep -q .; then
+    ok "s_unbound.py: a name no scope binds keeps today's answer (no edge: unresolved)"
+else no "s_unbound.py: expected no decided row"; fi
 
 # ── 4. hygiene: determinism and warm == cold ──
 # every run's status is read (CR 4396503889): two empty outputs from two failed runs are "equal"

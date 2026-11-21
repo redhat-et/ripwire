@@ -61,7 +61,7 @@
 namespace rw::helpdeadline
 {
 
-inline constexpr std::int64_t kStaleRunningSec = 2 * 3600;   // a `running` record older than this is not trusted
+inline constexpr std::int64_t kStaleRunningSec = std::int64_t( 2 ) * 3600;   // a `running` record older than this is not trusted
 inline constexpr int          kLockPollMs      = 10;
 inline constexpr int          kStartedWaitMs   = 1000;       // the longest the parent waits, past N, for the child's setsid
 

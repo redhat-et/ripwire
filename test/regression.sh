@@ -268,6 +268,15 @@ else
     RIPWIRE_BIN="$BIN" bash "$ROOT/test/lspcheck.sh" 2>&1 | grep -E 'FAIL|SOME' | head -8
 fi
 
+# task D (language-first name answers): its CLI-lane gate is a dedicated standalone gate beside the
+# LSP-lane arms (27)-(36) that ride lspcheck above; the fixtures are read in place, no build needed.
+if RIPWIRE_BIN="$BIN" bash "$ROOT/test/langordercheck.sh" >/dev/null 2>&1; then
+    ok "language-first name-answer gate (test/langordercheck.sh)"
+else
+    no "language-first name-answer gate (test/langordercheck.sh failed)"
+    RIPWIRE_BIN="$BIN" bash "$ROOT/test/langordercheck.sh" 2>&1 | grep -E 'FAIL|ABOVE' | head -8
+fi
+
 # 3n) absorb gates (P3-B arch layer(), S6-A lint completion, S6-B swift purity, S5-C owners) — each a
 #     dedicated standalone gate; run with the binary under test (a listed gate with no file FAILS).
 if RIPWIRE_BIN="$BIN" bash "$ROOT/test/codexdoctorcheck.sh" >/dev/null 2>&1; then
@@ -286,12 +295,14 @@ fi
 _absorb_listed=0; _absorb_ran=0
 for _g in \
     a9disclosurecheck \
+    abiarchretirecheck \
     abicheck \
     accessshapecheck \
     ackonlycheck \
     adaptivecheck \
     adaptivecutshapecheck \
     affectedcheck \
+    affectedgroupcheck \
     agentloopclaudecheck \
     agentloopcodexcheck \
     agentloopeditsuitecheck \
@@ -333,6 +344,7 @@ for _g in \
     bm25check \
     bodiesshowncheck \
     bodilessseedcheck \
+    bodycalleefilecheck \
     bodydialectcheck \
     budgetmonotonecheck \
     budgetpolicycheck \
@@ -347,6 +359,7 @@ for _g in \
     cacheoffsetcheck \
     cachereservecheck \
     cachesplitcheck \
+    calleerowfilecheck \
     callerscheck \
     callformcheck \
     callsrankordercheck \
@@ -423,6 +436,8 @@ for _g in \
     cyclecutcheck \
     danglingwarncheck \
     dartcheck \
+    dccolumnarcheck \
+    dctiercutcheck \
     deadcheck \
     deadcodescopecheck \
     deadfiltercheck \
@@ -530,7 +545,9 @@ for _g in \
     fnliteralcheck \
     fnptrcheck \
     fnslotcheck \
+    fnvbasischeck \
     foranchornscheck \
+    foranswerfirstcheck \
     forautobodycheck \
     forblowupcheck \
     forbodyfoldcheck \
@@ -554,6 +571,7 @@ for _g in \
     forinitslotscheck \
     forlenscheck \
     forliteralcheck \
+    formanifestcheck \
     formatgatecheck \
     formaxtokenscheck \
     formembernamescheck \
@@ -614,10 +632,12 @@ for _g in \
     guardmsgcheck \
     gvassemblycheck \
     handlerrulecheck \
+    handoffwindowcheck \
     hasacheck \
     hashsetcheck \
     hazardpatterncheck \
     headbinstagecheck \
+    headleakcheck \
     headsnapcachecheck \
     helpbudgetcheck \
     helptaskdeadlinecheck \
@@ -629,6 +649,7 @@ for _g in \
     hop1check \
     hopbodycheck \
     hopcontextcheck \
+    hopvaluerefscheck \
     hostilecheck \
     hotspotsincecheck \
     htmlcolorcheck \
@@ -678,11 +699,15 @@ for _g in \
     lcsidentitycheck \
     legendcostcheck \
     legendcoveragecheck \
+    legenddefaultcheck \
     legenddriftcheck \
+    legendhavecheck \
     legendrefcheck \
+    legendtiercheck \
     legobundlecheck \
     legocheck \
     legotransitivecheck \
+    legounreadlangcheck \
     lexicalnoskipcheck \
     liftdisclosurecheck \
     limitstablecheck \
@@ -776,6 +801,7 @@ for _g in \
     namedfileinputcheck \
     nameinfocheck \
     namekeyhopcheck \
+    namewalkcheck \
     namingcalibrationcheck \
     namingconsistencycheck \
     naminglenscheck \
@@ -786,6 +812,7 @@ for _g in \
     nestedimportcheck \
     nestedqualcheck \
     nestprofilecheck \
+    nextaposcheck \
     nextverbcheck \
     noaliascheck \
     nodekindcheck \
@@ -875,6 +902,7 @@ for _g in \
     qdentryceilingcheck \
     qdgitrenamehealcheck \
     qdmonstercheck \
+    qdrangecheck \
     qdrefpaircheck \
     qdrenameidentitycheck \
     qdtestdeadcheck \
@@ -933,11 +961,13 @@ for _g in \
     redactcheck \
     redactfixcheck \
     reexportcheck \
+    refdisclosurecheck \
     refusaltailcheck \
     refwindowcheck \
     regexbombcheck \
     regexcheck \
     regexguardcheck \
+    regexmultiquantcheck \
     regexrefusecheck \
     registermacrocheck \
     regsitecheck \
@@ -953,6 +983,7 @@ for _g in \
     rootrelcheck \
     rootrelemitcheck \
     rootspellingcheck \
+    roundcderivecheck \
     routecheck \
     routeedgecheck \
     routehookcheck \
@@ -1015,6 +1046,7 @@ for _g in \
     sincecochangecheck \
     sincewindowcheck \
     singledefcheck \
+    sitesatshortcheck \
     situdiffcheck \
     situhunkcheck \
     situshapecheck \
@@ -1050,6 +1082,8 @@ for _g in \
     swiftcheck \
     swiftmemberscheck \
     swiftshapecheck \
+    tagspredicatecheck \
+    tailsymtermscheck \
     taskechocheck \
     tempfilesymlinkcheck \
     termmargincheck \
@@ -1066,6 +1100,8 @@ for _g in \
     testscopecheck \
     textdocscheck \
     textpoolcheck \
+    tiebreakcontentcheck \
+    tiercallerscheck \
     timsortcheck \
     tokenbudgetcheck \
     tomllangcheck \
@@ -1096,6 +1132,7 @@ for _g in \
     vendorpatchcheck \
     verifycheck \
     versioncheck \
+    versionlabelcheck \
     w2verbscheck \
     w3fixbudgetcheck \
     w3fixlegendcheck \

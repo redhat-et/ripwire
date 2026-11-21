@@ -104,6 +104,15 @@ PY
 "$BIN" docdemotefix --for="$BUGQ" --no-route --format=candidates --no-cache >"$TMP/noroute.xml" 2>/dev/null
 "$BIN" docdemotefix --for="$BUGQ"     --no-cache >"$TMP/bugfor.xml"    2>/dev/null
 "$BIN" docdemotefix --for="$TRACEQ"   --no-cache >"$TMP/tracefor.xml"  2>/dev/null
+# RE-PIN 2026-11-17 (BAND BC, lane body-callee-file; rule 4): docdemotegolden_noroute.xml 9514 -> 9558 B (est_tokens "3369" -> "3387"). The whole diff,
+# read mechanically: est_tokens= and 44 B of the auto-bundle legend, whose bodies clause now reads "callee signatures (c p= their file when it
+# is not the body's)". No row, rank or route byte moved: a fixture whose <c> rows are all same-file prints no p=.
+# RE-PIN 2026-11-17 (BAND CF, lane callee-row-file; rule 4): docdemotegolden_for.xml 5985 -> 6040 B (est_tokens "2396" -> "2418").
+# The whole diff, read mechanically: est_tokens= and 55 B of the bundle legend, whose callee clause now reads "same-named callees
+# of one file, c p= that file when it is not the h row's". The golden's <hops> is shown="0" and prints no <c> row, so no row moved.
+# RE-PIN 2026-11-15 (lane NEXT-APOS-RAW; rule 4): docdemotegolden_for.xml 5999 -> 5989 B (est_tokens "2400" -> "2396") and
+# docdemotegolden_noroute.xml 9524 -> 9514 B ("3373" -> "3369"): nextAttrXml leaves ' raw inside the double-quoted next=
+# (2 entities each). Verified mechanically: &apos; -> ' inside next-family values, est_tokens= masked, gives each capture exactly.
 # RE-PIN 2026-11-08 (lane SIBLING-DEMOTE, stacked on R-DEDUP-B; rule 4): docdemotegolden_for.xml 6431 -> 5999 B and
 # docdemotegolden_noroute.xml 9939 -> 9524 B, diffed by hand: only est_tokens and the deep same-file sibling <d> rows past answer row 10
 # (for: CHANGELOG r=11/12, Contributing r=14, both tier_probe rows r=16/18; noroute: PageCache.flush_cache/request_page/__init__ r=12/13/19,

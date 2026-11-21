@@ -36,6 +36,7 @@
 #include "memberowner.h" // TOUCH-SYM: MemberOwners / qualifiedMemberName — a <touch> row's n= as every member row spells it
 #include "model.h"
 #include "resolve.h" // trimWs, includerDir
+#include "redact.h" // redactInPlace — a <touch> row's text is a source or config line
 #include "serialize.h" // escapeXml
 
 #include <algorithm>
@@ -437,6 +438,7 @@ inline bool inScope( std::string_view dir, std::string_view scope ) noexcept
 inline std::string scopeMembers( const IngestResult& ing, std::vector<ExemplarMember>& ms )
 {
     std::vector<std::string_view> dirs;
+    dirs.reserve( ms.size() );
     for( const ExemplarMember& m : ms )
     {
         dirs.push_back( includerDir( rootRelPath( ing, m.fileId ) ) );
@@ -549,6 +551,7 @@ inline bool memberEligible( const IngestResult& ing, const Symbol& s ) noexcept
 inline void orderTypical( const IngestResult& ing, std::vector<ExemplarMember>& ms )
 {
     std::vector<std::uint32_t> locs;
+    locs.reserve( ms.size() );
     for( const ExemplarMember& m : ms )
     {
         locs.push_back( m.loc );
@@ -619,6 +622,7 @@ inline std::string_view keyExpr( std::string_view k ) noexcept
 inline void nameRegistryEntries( std::vector<ExemplarMember>& ms )
 {
     std::vector<std::string_view> last;
+    last.reserve( ms.size() );
     for( const ExemplarMember& m : ms )
     {
         last.push_back( lastIdent( m.name ) );
@@ -1501,9 +1505,17 @@ inline int structuralBraces( std::string_view line, bool& inComment )
     return depth;
 }
 
-// The `name: type;` / `name?: type;` / `readonly name: type;` lines at the top brace depth of a holder's body (a TS interface).
-inline void propertyLineRows( std::string_view body, std::uint32_t fileId, std::uint32_t firstLine, ExemplarInto& into )
+// Where a holder's body starts: its file and the 1-based line of its first byte (two uint32_t, named at the call).
+struct HolderBodyAt
 {
+    std::uint32_t fileId    = 0;
+    std::uint32_t firstLine = 0;
+};
+// The `name: type;` / `name?: type;` / `readonly name: type;` lines at the top brace depth of a holder's body (a TS interface).
+inline void propertyLineRows( std::string_view body, HolderBodyAt holderAt, ExemplarInto& into )
+{
+    const std::uint32_t fileId    = holderAt.fileId;
+    const std::uint32_t firstLine = holderAt.firstLine;
     int depth = 0;
     bool inComment = false;
     std::uint32_t ln = firstLine;
@@ -1560,7 +1572,7 @@ inline void holderRows( const IngestResult& ing, const ExemplarMember& holder, E
         if( open != std::string_view::npos )
         {
             const std::uint32_t first = h.line + std::uint32_t( std::ranges::count( span.substr( 0, open ), '\n' ) );
-            propertyLineRows( span.substr( open ), h.fileId, first, into );
+            propertyLineRows( span.substr( open ), { .fileId = h.fileId, .firstLine = first }, into );
         }
     }
 }
@@ -1636,9 +1648,9 @@ namespace exemplar_detail
 {
 inline std::uint64_t foldHashStep( std::uint64_t h, char c ) noexcept
 {
-    return ( h ^ std::uint64_t( lexLowerByte( static_cast<unsigned char>( c ) ) ) ) * 1099511628211ull;
+    return hashutil::fnv1aMultiply( h ^ std::uint64_t( lexLowerByte( static_cast<unsigned char>( c ) ) ) );
 }
-inline constexpr std::uint64_t kFoldHashSeed = 14695981039346656037ull;
+inline constexpr std::uint64_t kFoldHashSeed = hashutil::kFnv1aOffset64;
 
 // The folded hash of a spelling and its folded length: `_` and `-` dropped, letters lowercased.
 inline std::pair<std::uint64_t, std::size_t> foldHash( std::string_view s ) noexcept
@@ -1695,12 +1707,13 @@ inline std::string_view memberStem( const IngestResult& ing, const ExemplarMembe
 }
 
 // The dense unit id of each member for the keys given (the sorted distinct keys are the units, in key order).
-inline std::vector<std::uint32_t> unitIdsOf( std::vector<std::uint64_t> keys, std::vector<std::uint64_t>& distinct )
+inline std::vector<std::uint32_t> unitIdsOf( const std::vector<std::uint64_t>& keys, std::vector<std::uint64_t>& distinct )
 {
     distinct = keys;
     std::ranges::sort( distinct );
     distinct.erase( std::unique( distinct.begin(), distinct.end() ), distinct.end() );
     std::vector<std::uint32_t> ids;
+    ids.reserve( keys.size() );
     for( const std::uint64_t k : keys )
     {
         ids.push_back( std::uint32_t( std::ranges::lower_bound( distinct, k ) - distinct.begin() ) );
@@ -1961,12 +1974,20 @@ inline std::vector<ExemplarMember> typicalDirMembers( const IngestResult& ing, c
     std::vector<ExemplarMember> out;
     for( const ExemplarMember& m : fam.members )
     {
-        if( includerDir( rootRelPath( ing, m.fileId ) ) == dir )
+        if( m.fileId < ing.files.size() && includerDir( rootRelPath( ing, m.fileId ) ) == dir )   // an unindexed member (a manifest's feature) has no directory here
         {
             out.push_back( m ); // members[0] is in `dir` by construction, so it stays first: the typical member of the subset too
         }
     }
     return out.size() >= kExemplarFamilyMin && out.size() < fam.members.size() ? out : std::vector<ExemplarMember> {};
+}
+
+// The typical member's directory. MANIFEST-ROW: a family read off an UNINDEXED manifest (formanifest.h featureFamily: fileId
+// UINT32_MAX) has none: "", and typicalDirMembers skips its members, so no dir-local rows; the family-wide share still runs.
+inline std::string_view typicalMemberDir( const IngestResult& ing, const ExemplarFamily& fam )
+{
+    const std::uint32_t typicalFile = fam.members.front().fileId;
+    return typicalFile < ing.files.size() ? includerDir( rootRelPath( ing, typicalFile ) ) : std::string_view {};
 }
 
 // Larger share first (cross-multiplied), then the larger count, then the path.
@@ -2001,7 +2022,7 @@ inline ExemplarTouchList exemplarTouchList( const IngestResult& ing, const Exemp
     {
         return list; // too few distinct names and stems to call a mention a pattern
     }
-    const std::string_view typicalDir = includerDir( rootRelPath( ing, fam.members.front().fileId ) );
+    const std::string_view typicalDir = typicalMemberDir( ing, fam );
     ExemplarFamily dirFam { .rule = fam.rule };
     dirFam.members = typicalDirMembers( ing, fam, typicalDir );
     const TouchForms dirForms( dirFam.members.empty() ? TouchUnits {} : touchUnits( ing, dirFam ) );
@@ -2188,7 +2209,9 @@ inline std::string touchShareAttrs( const ExemplarTouch& r )
 }
 
 // The <touch_list> element of a family: total=, the cap, and one <touch> row per listing file (see the legend).
-inline std::string touchListXml( const IngestResult& ing, const ExemplarTouchList& list )
+// `redact`: the run's tally (nullptr: --no-redact). REDACT-TOUCH: a row's text is a source or config line, so it is redacted
+// whole BEFORE the kExemplarTouchLineMax cut and the XML escape (a token crossing the cut reaches the redactor whole).
+inline std::string touchListXml( const IngestResult& ing, const ExemplarTouchList& list, RedactCounts* redact )
 {
     const std::vector<ExemplarTouch>& touch = list.rows;
     const std::span<const ExemplarTouch> shown( touch.data(), std::min( touch.size(), kExemplarTouchRows ) );
@@ -2209,14 +2232,16 @@ inline std::string touchListXml( const IngestResult& ing, const ExemplarTouchLis
     for( std::size_t i = 0; i < shown.size(); ++i )
     {
         const ExemplarTouch& r = shown[i];
-        std::size_t keep = std::min( r.text.size(), kExemplarTouchLineMax );
-        while( keep > 0 && keep < r.text.size() && ( static_cast<unsigned char>( r.text[keep] ) & 0xC0 ) == 0x80 )
+        std::string text = r.text;
+        redactInPlace( text, redact ); // BEFORE the cut
+        std::size_t keep = std::min( text.size(), kExemplarTouchLineMax );
+        while( keep > 0 && keep < text.size() && ( static_cast<unsigned char>( text[keep] ) & 0xC0 ) == 0x80 )
         {
             --keep; // never split a UTF-8 sequence
         }
         out += "<touch p=\"" + e( rootRelPath( ing, r.fileId ) ) + ":" + std::to_string( r.line ) + "\"" + ( holderName[i].empty() ? "" : " n=\"" + e( holderName[i] ) + "\"" );
         out += touchShareAttrs( r );
-        out += ( keep < r.text.size() ? " cut=\"1\">" : ">" ) + e( std::string_view( r.text ).substr( 0, keep ) ) + "</touch>";
+        out += ( keep < text.size() ? " cut=\"1\">" : ">" ) + e( std::string_view( text ).substr( 0, keep ) ) + "</touch>";
     }
     out += touch.empty() ? "" : "</touch_list>";
     return out;
@@ -2466,7 +2491,7 @@ inline void addIntoLegend( std::string& out, const ExemplarFamily& fam, bool com
 }
 
 // The rest of an into= family's open tag and its body: the one holder picked, its <rows> and the touch list over the rows.
-inline std::string intoFamilyXml( const IngestResult& ing, const ExemplarFamily& fam, const auto& e, const auto& loc, std::string out )
+inline std::string intoFamilyXml( const IngestResult& ing, const ExemplarFamily& fam, const auto& e, const auto& loc, std::string out, RedactCounts* redact )
 {
     if( fam.rule == ExemplarRule::Affix )
     {
@@ -2492,12 +2517,12 @@ inline std::string intoFamilyXml( const IngestResult& ing, const ExemplarFamily&
     }
     ExemplarFamily rowFam { .rule = ExemplarRule::Registry, .key = fam.key }; // rows have no file stem of their own (all in the holder's file)
     rowFam.members = into.rows;
-    out += "</rows>" + touchListXml( ing, exemplarTouchList( ing, rowFam ) );
+    out += "</rows>" + touchListXml( ing, exemplarTouchList( ing, rowFam ), redact );
     return out + "</exemplar_family>";
 }
 } // namespace exemplar_detail
 
-inline std::string forExemplarFamilyXml( const IngestResult& ing, const ExemplarTask& t, const ExemplarFamily& fam, bool compactLegend )
+inline std::string forExemplarFamilyXml( const IngestResult& ing, const ExemplarTask& t, const ExemplarFamily& fam, bool compactLegend, RedactCounts* redact )
 {
     std::vector<char> esc;
     const auto e = [&]( std::string_view s )
@@ -2522,7 +2547,7 @@ inline std::string forExemplarFamilyXml( const IngestResult& ing, const Exemplar
     out += " matched=\"" + e( fam.matched ) + "\" scope=\"" + e( fam.scope ) + "\" n=\"" + std::to_string( fam.members.size() ) + "\"" + scanSkipAttrs( fam.unread, fam.oversized );
     if( holders )
     {
-        return exemplar_detail::intoFamilyXml( ing, fam, e, loc, std::move( out ) ); // into= prints no member rows, so no shown=/capped=
+        return exemplar_detail::intoFamilyXml( ing, fam, e, loc, std::move( out ), redact ); // into= prints no member rows, so no shown=/capped=
     }
     if( fam.members.size() > kExemplarMemberRows )
     {
@@ -2539,14 +2564,15 @@ inline std::string forExemplarFamilyXml( const IngestResult& ing, const Exemplar
         out += "<m n=\"" + e( m.name ) + "\" p=\"" + loc( m.fileId, m.line ) + "\"";
         out += fam.rule != ExemplarRule::Registry ? " loc=\"" + std::to_string( m.loc ) + "\"/>" : std::string( "/>" );
     }
-    out += touchListXml( ing, touch ) + contractXml( ing, contract );
+    out += touchListXml( ing, touch, redact ) + contractXml( ing, contract );
     return out + "</exemplar_family>";
 }
 
 // The <exemplar_family> block of this task, or "" (see WHEN above). `held`: a token budget is set; the block is named, not printed.
 // `compactLegend`: the --legend=compact posture (the CLI default) prints the short legend; the MCP tool and --legend=full the long one.
+// `redact`: the run's redaction tally, every <touch> line passes it (nullptr: --no-redact).
 // HOISTING: the readings share one scan of the files (scanExemplarFiles), not one per reading.
-inline std::string renderForExemplarFamily( const IngestResult& ing, const Graph& g, std::string_view task, bool held = false, bool compactLegend = false )
+inline std::string renderForExemplarFamily( const IngestResult& ing, const Graph& g, std::string_view task, RedactCounts* redact, bool held = false, bool compactLegend = false )
 {
     const std::vector<ExemplarTask> readings = exemplarTasksOf( task );
     const ExemplarTask* t = nullptr;
@@ -2587,8 +2613,9 @@ inline std::string renderForExemplarFamily( const IngestResult& ing, const Graph
                "<exemplar_family of=\"" +
                std::string( escapeXml( t->phrase, esc ) ) + "\" held=\"budget\"/>";
     }
+    ASSUME( fam.has_value(), "t and fam are set together (the reading loop) and reset together (settleInto)" );
     fam->unread = scan.unread;
     fam->oversized = scan.oversized;
-    return forExemplarFamilyXml( ing, *t, *fam, compactLegend );
+    return forExemplarFamilyXml( ing, *t, *fam, compactLegend, redact );
 }
 } // namespace rw

@@ -25,6 +25,7 @@
 # from the silent cut this register was built to find.
 kBaseScopeScanCap	INDEXING
 kChaConeCap	INDEXING
+kChainHopCap	INDEXING
 kChurnMergeBombMaxFiles	INDEXING
 kCoBoostMaxFilesPerCommit	INDEXING
 kCoBoostMaxPartnerFiles	INDEXING
@@ -54,6 +55,7 @@ kIdiomMaxReturnTokens	BOUNDARY
 kInventoryEntryCap	OUTPUT
 kInventoryNameCeiling	OUTPUT
 kLegoClosureRowCap	OUTPUT
+kMacroArgNestingDepth	INDEXING
 kMatchMaxHits	INDEXING
 kMaxAggsModeled	INDEXING
 kMaxAliasDepth	INDEXING

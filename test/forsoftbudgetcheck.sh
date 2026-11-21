@@ -167,14 +167,16 @@ PRESENT_ONLY = re.compile( r'dropped_positive|docs_dropped|capped=[#1] with show
                            # count-floor) is present-only by design — verbs_for.h splices it only when the served <lego>
                            # carries an implementors_ attribute, and the lego is narrowed to the rendered rows' files. Measured:
                            # #572's Symbol::rankFlags pulls model.h rows into this query's wide head, where MEM-REF-SHRINK's
-                           # RefColdFields renders implementors="2" implementors_shown="1"; at N<=3000 those rows are past
+                           # RefColdFields renders implementors="2" shown_implementors="1"; at N<=3000 those rows are past
                            # the cut, the lego narrows away and the clause is rightly absent. Its two segments, below.
-                           r'implementors_shown=K only K impl rows|implementors_floor=# an extends clause|'
+                           r'shown_implementors=K only K impl rows|implementors_floor=# an extends clause|'
                            # the <c> row readings ride only with a row that carries them: a spent target's hops cut marker
                            # leaves none (via="name" since forbudget-soft, attrib-multidef's prov="split" since train 28)
                            r'on a <c> row|c prov=split|another arm|NOT mean the edge is false|NOT a claim the edge is false|'
                            # SIZE-1/2/3 (size-trim): judged on the FINAL rows, so fewer rows can legitimately not carry them
-                           r'field name= type= owner|d layer=|iface implementors=|slice members= of=|folded=class|same_as=', re.I )
+                           r'field name= type= owner|d layer=|iface implementors=|slice members= of=|folded=class|same_as=|'
+                           # TAIL-SYM-TERMS (2026-11-14): the tsym= clause rides only when a SHOWN tail row added a task-word name
+                           r'tsym=|question words such as which, function, file are ignored', re.I )
 def clauses( path ):
     s = open( path ).read()
     head = s.split( '<sigs', 1 )[ 0 ]
@@ -719,7 +721,7 @@ s = open( sys.argv[ 1 ] ).read()
 m = re.search( r'<tail\b([^>]*)>(.*?)</tail>', s, re.S )
 if not m: sys.exit( 3 )
 a = dict( re.findall( r'(\w+)="([^"]*)"', m.group( 1 ) ) )
-rows = [ ( html.unescape( p ), html.unescape( y ), bool( h ) ) for p, h, y in re.findall( r'<t p="([^"]*)"( sym="([^"]*)")?/>', m.group( 2 ) ) ]
+rows = [ ( html.unescape( p ), html.unescape( y ), bool( h ) ) for p, h, y in re.findall( r'<t p="([^"]*)"( sym="([^"]*)")?(?: tsym="[^"]*")?/>', m.group( 2 ) ) ]
 mode = sys.argv[ 2 ]
 if mode == "attrs": print( a.get( "total", "" ), a.get( "shown", "" ), a.get( "capped", "" ), html.unescape( a.get( "next", "" ) ) )
 k = 0
@@ -833,7 +835,7 @@ C4="$( python3 - "$TMP/def.json" "$TMP/def.xml" <<'PY'
 import json, re, sys, html
 t = json.load( open( sys.argv[ 1 ] ) ).get( "tail", {} ); x = open( sys.argv[ 2 ] ).read()
 xa = dict( re.findall( r'(\w+)="([^"]*)"', re.search( r'<tail\b([^>]*)>', x ).group( 1 ) ) )
-xr = [ ( html.unescape( p ), html.unescape( y ) ) for p, _, y in re.findall( r'<t p="([^"]*)"( sym="([^"]*)")?/>', x ) ]
+xr = [ ( html.unescape( p ), html.unescape( y ) ) for p, _, y in re.findall( r'<t p="([^"]*)"( sym="([^"]*)")?(?: tsym="[^"]*")?/>', x ) ]
 heads = { html.unescape( p ) for p in re.findall( r'<d [^>]*?\bp="([^"]*)"', x ) }
 ys = { html.unescape( n ) for n in re.findall( r'<y [^>]*?\bn="([^"]*)"', x ) }; ys |= { re.split( r'::|\.', n )[ -1 ] for n in ys }
 jr = [ ( p, ",".join( n for n in y.split( "," ) if n and n not in ys ) if p in heads else y ) for p, y in zip( t.get( "files", [] ), t.get( "sym", [] ) ) ]

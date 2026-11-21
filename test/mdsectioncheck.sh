@@ -473,13 +473,14 @@ if printf '%s' "$NG" | grep -q '<near_sink' && ! printf '%s' "$NG" | grep -q 'wi
 
 # names-only <calls> rows (--for hops) merge only rows of the same anchor state: Hub links a.md#b (a real heading named B, l=3)
 # and b.md#nope (missing, so the file node B, l=1). The merged row used to read l="1,3" anchor="missing", marking the good link.
+# BAND CF (2026-11-17): each row names its file, the two B rows being in two files (a.md, b.md), which is a second reason they are two rows.
 mkdir -p "$TMP/nmerge"
 printf '%s\n' '# Hub' '' '## Hub Section' '' 'zqhubtoken [first](b.md#nope) and [second](a.md#b) and [third](e.md#zzz)' > "$TMP/nmerge/x.md"
 printf '%s\n' '# A' '' '## B' '' 'text' > "$TMP/nmerge/a.md"
 printf '%s\n' '# B' > "$TMP/nmerge/b.md"
 printf '%s\n' '# E' '' '## Other' > "$TMP/nmerge/e.md"
 NM="$( $BIN "$TMP/nmerge" --no-cache --for=zqhubtoken --legend=compact 2>/dev/null | grep -o '<calls total="3">.*</calls>' )"
-if printf '%s' "$NM" | grep -q '<c n="B" l="3" via="link"/>' && printf '%s' "$NM" | grep -q '<c n="B" l="1" via="link" anchor="missing"/>' && ! printf '%s' "$NM" | grep -q 'l="1,3"'; then ok "--for hops: the good B link and the missing-anchor B link stay two rows"; else no "--for hops merged a good link into a missing-anchor row: [$NM]"; fi
+if printf '%s' "$NM" | grep -q '<c n="B" l="3" p="a.md" via="link"/>' && printf '%s' "$NM" | grep -q '<c n="B" l="1" p="b.md" via="link" anchor="missing"/>' && ! printf '%s' "$NM" | grep -q 'l="1,3"'; then ok "--for hops: the good B link and the missing-anchor B link stay two rows"; else no "--for hops merged a good link into a missing-anchor row: [$NM]"; fi
 
 # A --for head that already defines via="name" must still define via="link" when a hop row carries it (run has a proven and a
 # by-name callee; Hub Section links): the link reading rides on its own presence, not on the name legend's.

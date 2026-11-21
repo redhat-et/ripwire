@@ -175,7 +175,7 @@ LCALL="$( grep -n 'handleRequest.call(' "$CORPUS/js/route.js" | head -1 | cut -d
 LBIND="$( grep -n 'onlyBound.bind(' "$CORPUS/js/route.js" | head -1 | cut -d: -f1 )"
 D="$( run js --callers=handleRequest )"; C="$( root_tag "$D" callers )"
 SITES="$( printf '%s' "$D" | grep -oE 'sites_at="[^"]*"' | head -1 )"
-if [ -n "$C" ] && [ "$( attr "$C" count )" = 1 ] && [ "$SITES" = "sites_at=\"route.js:$LCALL\"" ]; then ok "(V1) handleRequest's one caller site is the .call line, not the .bind line"; else no "(V1) handleRequest callers should be count=1 sites_at=route.js:$LCALL: ${C:-$D} $SITES"; fi
+if [ -n "$C" ] && [ "$( attr "$C" count )" = 1 ] && [ "$SITES" = "sites_at=\"$LCALL\"" ] && printf '%s' "$D" | grep -qE "<s [^>]*p=\"route\.js:[0-9]+\"[^>]* sites_at=\"$LCALL\""; then ok "(V1) handleRequest's one caller site is the .call line, not the .bind line"; else no "(V1) handleRequest callers should be count=1 with sites_at=$LCALL on a p=route.js row: ${C:-$D} $SITES"; fi
 
 D="$( run js --callers=onlyBound )"; C="$( root_tag "$D" callers )"
 if [ -n "$C" ] && [ "$( attr "$C" count )" = 0 ] && printf '%s' "$D" | grep -qF "<vr in_id=\"binder\" bind=\"route.js:$LBIND\" into=\"emitter.on#arg1\"/>"; then ok "(V2) onlyBound.bind( this ) is a value row into emitter.on#arg1, not a caller"; else no "(V2) onlyBound should have count=0 and a value row into emitter.on#arg1: ${D:0:400}"; fi
@@ -204,8 +204,8 @@ else no "(M4) --safe-delete=lib.ts:typeOnlyFn should carry graph_unresolved=\"0\
 for v in callers safe-delete; do
     D="$( run sites --$v=nested.js:fwdNested )"; C="$( root_tag "$D" "$v" )"
     S="$( printf '%s' "$D" | grep -oE 'sites_at="[^"]*"' | head -1 )"
-    if [ -n "$C" ] && [ "$S" = 'sites_at="caller.js:3"' ]; then ok "(S1) --$v: the dropped fwdNested.call is no call site ($S)"
-    else no "(S1) --$v=nested.js:fwdNested should say sites_at=\"caller.js:3\" only: ${S:-no sites_at} ${C:-$D}"; fi
+    if [ -n "$C" ] && [ "$S" = 'sites_at="3"' ] && printf '%s' "$D" | grep -qE '<[sc] [^>]*p="caller\.js:[0-9]+"[^>]* sites_at="3"'; then ok "(S1) --$v: the dropped fwdNested.call is no call site ($S)"
+    else no "(S1) --$v=nested.js:fwdNested should say sites_at=\"3\" only, on a p=caller.js row: ${S:-no sites_at} ${C:-$D}"; fi
 done
 D="$( run sites --uses=fwdNested )"
 if has_root "$D" uses && [ "$( printf '%s' "$D" | grep -oE '<u role="call" p="[^"]*"' | tr '\n' ' ' )" = '<u role="call" p="caller.js:3" ' ]; then ok "(S1) --uses agrees: the one call site is caller.js:3"
@@ -238,6 +238,7 @@ else no "(S4) MCP uses should answer 3 calls and list no dropped forward: ${MU:0
 #     (no graph reached the references provider, so every forwarded reference stayed out). Near miss: the --uses answer agrees.
 #     The LSP index runs on a copy (it may cache under its root; the fixture stays untouched).
 LW="$( cd "$( mktemp -d )" && pwd -P )"; cp -R "$CORPUS/js" "$LW/js"   # pwd -P: the uri must name the path the server indexes
+trap 'rm -rf ${LW:+"$LW"}' EXIT
 LDEF="$( grep -n '^function localDecl ' "$LW/js/route.js" | head -1 | cut -d: -f1 )"
 LR="$( python3 - "$BIN" "$LW/js" "$(( LDEF - 1 ))" <<'PY'
 import json, subprocess, sys

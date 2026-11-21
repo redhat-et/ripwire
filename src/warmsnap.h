@@ -78,7 +78,8 @@ namespace rw::warmsnap
 {
 
 inline constexpr std::uint64_t kMagic   = 0x0150'414e'5357'52ull;   // "RWSNAP\x01"
-inline constexpr std::uint32_t kVersion = 2;                        // bump on ANY layout change in the three sections
+inline constexpr std::uint32_t kVersion = 3;                        // bump on ANY layout change in the three sections
+                                                                    // 3: the GRAPH section carries Graph::provenSites (PROVEN-SITE-KEEPS-NAMESAKES)
                                                                     // 2: the MODEL section dropped its stored stat signature of the blob — the
                                                                     //    blob's identity is in this file's NAME, so that binding is structural
                                                                     //    and there is no field left to be wrong about it (see the note above).
@@ -493,7 +494,8 @@ inline GitInputs collectGitInputs( const std::string& rootReal )
             std::string path( origin.substr( 5 ) );
             if( path.empty() || path.front() != '/' )
             {
-                path = rootReal + "/" + path;
+                path.insert( 0, 1, '/' );   // rootReal + "/" + path, built in place
+                path.insert( 0, rootReal );
             }
             if( std::ranges::none_of( g.files, [ & ]( const depwatch::Dep& d ) { return d.seam == depwatch::Seam::WholeFile && d.path == path; } ) )
             {
@@ -769,7 +771,7 @@ inline void openSnapshot( Session& s )
         return;
     }
     std::string_view* const sections[] = { &s.treeSection, &s.modelSection, &s.graphSection };
-    for( int i = 0; i < 3; ++i )
+    for( std::size_t i = 0; i < 3; ++i )
     {
         const std::uint64_t off = span[ 2 * i ], len = span[ 2 * i + 1 ];
         if( !VALIDATE( off <= s.file.size() && len <= s.file.size() - off, "warmsnap: a section lies outside the file" ) )

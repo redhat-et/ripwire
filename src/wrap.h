@@ -299,7 +299,17 @@ inline std::vector<std::string_view> wrapUseWhenBlurbLines( const bool readBefor
         "- Before writing a new fn/class/helper: `--exemplar=\"<what you're writing>\" --legend=compact` — duplicates are born on small tasks.",
         "- Before calling work done: `--quality-delta --legend=compact` (what you made worse), then `--test-gate --legend=compact`.",
         "- Trust notes: counts marked counts_floor are floors, not totals; a zero means \"none found\", never \"none exists\".",
-        "- The commands above ask for the compact legend (terse definitions of only the attributes present); add `--legend=full` when a definition's reasoning is needed: a term you do not recognise, a floor or cap you need explained, a map a human will read.",
+        "- Legend posture: the commands above ask for the compact legend (terse definitions of only the attributes present); add `--legend=full` when a definition's reasoning is needed — a term you do not recognise, a floor or cap you need explained, a map a human will read. On a session of about 10 or more ripwire calls, `ripwire --legend-dict=core` read in FULL (13 definitions, about 1.5 KB; its line 1 carries `have=`) lets `--legend-have=<that have>` leave those definitions out of every answer, nothing lost: a definition you do not hold stays in the answer that needs it. `ripwire --legend-dict=KEY` (callers, impact, grep…) is the core plus one verb's pack and repays within 3 calls of that verb. The flag asserts you read the lines, and a value you merely looked up backs nothing — so on a shorter session pass none.",
+        // HONEST COST (2026-11-17, lane dict-core-packs): this line first taught a first-line cut of the dictionary (78 B
+        // read, 130 KB asserted), then the whole dictionary (about 131 calls to repay). It now teaches the core TIER:
+        // 1,512 B, repaid in 11 calls over 453 measured answers (9 over the 388 that are not --for), and a verb's pack
+        // within 3 calls of that verb. The two comment lines below describe the legend's share, which is unchanged.
+        // THE ONE-OFF THAT PAYS ON EVERY LATER CALL -- on a session long enough to repay it. The legend is a near-fixed per-answer cost (531-4,305 B,
+        // median 1,796), so its SHARE grows as answers shrink: 14 % of a --for bundle, 62 % of a --whereis
+        // answer. Measured -30 % over 80 recorded answers, and -31 % over the nine non-for verbs together.
+        // Two lines, because the primer is already the largest thing the SessionStart hook says and the
+        // detail belongs in skills/ripwire-router. "Read it once" is not padding: --legend-have= ASSERTS that
+        // you hold the definitions, and passing it unread points you at definitions you never received.
         "Defaults to break (less context is measurably MORE accurate, not just cheaper — code-repair",
         "accuracy fell 29% -> 3% as context grew 32K -> 256K tokens, LongCodeBench):",
         "- Do NOT open a file you have not located first: rank with `--for`/`--grep`, then read what it names.",

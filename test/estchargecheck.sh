@@ -56,6 +56,13 @@ skip(){ printf '  SKIP  %s\n' "$*"; }
 cd "$ROOT"
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
+# A PRIVATE WARM CACHE. This gate compares stderr, and the warm snapshot in a SHARED $TMPDIR carries the
+# writing build's source identity: a binary whose identity differs refuses it, says so on stderr
+# ("warmsnap: written by another build", warmsnap.h:760/762), runs cold and overwrites it, then is silent on
+# its next run. So a foreign build touching this corpus first turns a stderr comparison red for reasons that
+# have nothing to do with the code, and it self-heals on re-run — which is what makes it read as a flake.
+# Diagnosed on budgetmonotonecheck 2026-11-17; these are its siblings by the same shared-root exposure.
+export TMPDIR="$TMP/cache"; mkdir -p "$TMPDIR"
 
 # ── CALL HARNESS (speed + honesty; changes no assertion) ───────────────────────────────────────────────
 # rwcall ARGS… runs ONE ripwire call under a per-call budget (ESTCHARGE_CALL_TIMEOUT seconds, default 300; a cold
@@ -1279,6 +1286,8 @@ est_11_a7d(){
 # answer) serves every one of the same total= hop rows.
 # round C (reserve first; rule 4): the hops are funded from the rows at the cut, so 1500 now serves the whole set — re-anchored
 # to 600 (the marker) and 800 (the partial cut), measured on the round C build: 600 shown=0, 800 shown=3 of 6, 900+ whole
+# RE-PIN (NEXT-APOS-RAW, 2026-11-15): next= pins --for='Q' — it was --for=&apos;Q&apos;; a raw ' is legal in this
+# "-delimited attribute, and the entity did not paste into a shell (nextverb.h appendNextValueXml). Here and A7D-2 below.
 a7r_out --token-budget=600 >"$A7R/h.xml"
 h_tag="$( grep -aoE '<hops [^>]*>' "$A7R/h.xml" | head -1 )"
 h_root="$( ctx_root "$A7R/h.xml" )"
@@ -1287,7 +1296,7 @@ hd_tag="$( grep -aoE '<hops [^>]*>' "$A7R/n0.xml" | head -1 )"
 hd_shown="$( printf '%s' "$hd_tag" | sed -nE 's/<hops shown="([0-9]+)".*/\1/p' )"; hd_tot="$( printf '%s' "$hd_tag" | sed -nE 's/.* total="([0-9]+)".*/\1/p' )"
 # TOKEN-BUDGET-MONOTONE (rule 4): the marker is the budget's hops:N shed of the unbudgeted <hops> (src/forbudgetfit.h), so it keeps
 # U's other attributes (noedge=) and is defined by the budget's one clause (hops:N) instead of the old hops-only clause
-h_hasnext=0; [ "${h_tag#* next=\"--for=&apos;$A7R_Q&apos;\"}" != "$h_tag" ] && h_hasnext=1
+h_hasnext=0; printf '%s' "$h_tag" | grep -qF " next=\"--for='$A7R_Q'\"" && h_hasnext=1   # grep -F: bash strips the ' inside a ${x#pattern}
 { [ "${h_tag#<hops shown=\"0\" total=\"$h_tot\"}" != "$h_tag" ] && [ "${h_tag#* capped=\"1\"}" != "$h_tag" ] && [ "$h_hasnext" = 1 ] && [ "${h_tag%/>}" != "$h_tag" ] && [ "${h_tot:-0}" -ge 1 ] 2>/dev/null \
   && grep -aqF 'hops:N (the last N hops rows)' "$A7R/h.xml" && [ "${h_root#* over_ceiling=}" = "$h_root" ] \
   && [ -n "$h_root" ] && [ -n "$hd_shown" ] && [ "$hd_shown" = "$h_tot" ] && [ "$hd_tot" = "$h_tot" ]; } \
@@ -1310,7 +1319,7 @@ a7r_out --token-budget=4150 >"$A7R/hp.xml"
 hp_tag="$( grep -aoE '<hops [^>]*>' "$A7R/hp.xml" | head -1 )"
 hp_sh="$( printf '%s' "$hp_tag" | sed -nE 's/<hops shown="([0-9]+)".*/\1/p' )"; hp_tot="$( printf '%s' "$hp_tag" | sed -nE 's/.* total="([0-9]+)".*/\1/p' )"
 { [ -n "$hp_sh" ] && [ -n "$hp_tot" ] && [ "$hp_sh" -ge 1 ] && [ "$hp_sh" -lt "$hp_tot" ] && [ "${hp_tag#* capped=\"1\"}" != "$hp_tag" ] \
-  && [ "${hp_tag#* next=\"--for=&apos;$A7R_Q&apos;\"}" != "$hp_tag" ]; } 2>/dev/null \
+  && printf '%s' "$hp_tag" | grep -qF " next=\"--for='$A7R_Q'\""; } 2>/dev/null \
     && ok "#11 A7D partial hops cut at 4150 tokens carries next= ($hp_tag)" \
     || no "#11 A7D partial hops cut at 4150 tokens: not a partial cut with next= (got '${hp_tag:-none}')"
 # A7D-W (forbudget-soft, replaces the old 5000-token partial cut): a target wide enough for the rows AND the hop rows serves the

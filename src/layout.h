@@ -1085,15 +1085,22 @@ struct LayoutResult
     // are absent from defs=/mirror=, so the root says so with unreadable="N" — a mirror="single" beside it is one
     // definition READ, not one definition that exists. This struct is the DISCLOSE sink for that degrade.
     std::size_t             unreadableDefs = 0;
+    // C-family files the static_assert scan could not read whole (unreadable, a read error part-way, or past the size
+    // cap): a tripwire in them is unchecked, so asserts= is a floor and the root says asserts_unreadable="N" (#688
+    // review, CodeRabbit 4614203156). Partial bytes are never scanned (darkflags::readWhole).
+    std::size_t             unreadableAssertFiles = 0;
     bool                    stdTableUsed   = false;   // a std:: row of the table sized something: std_abi= on the root
     enum class DisclosureWhy : std::uint8_t
     {
-        UnreadableFile,
+        UnreadableFile,         // a definition's file
+        UnreadableAssertFile,   // a file the assertion scan reads
     };
-    void disclose( DisclosureWhy ) noexcept   // every reason records the same fact
+    void disclose( DisclosureWhy why ) noexcept
     {
-        ++unreadableDefs;
+        ( why == DisclosureWhy::UnreadableFile ? unreadableDefs : unreadableAssertFiles ) += 1;
     }
+    // Something this run could not read: the contract is not verified (exit 3), whatever else it saw.
+    bool isIncomplete() const noexcept { return unreadableDefs + unreadableAssertFiles > 0; }
 };
 
 // The verb's own verdict. A definition that could NOT be modelled is not a break — there is no number to
@@ -3091,7 +3098,7 @@ inline void finalizeLayout( BodyWalk& w )
 // `spellShape` minus the field NAMES: same positional slots, same types, whatever they are called.
 inline void computeShapes( LayoutDef& def )
 {
-    std::uint64_t byteHash = 14695981039346656037ull, spellHash = byteHash, slotHash = byteHash;   // FNV-1a 64 offset basis
+    std::uint64_t byteHash = hashutil::kFnv1aOffset64, spellHash = byteHash, slotHash = byteHash;
     const auto    fold = []( std::uint64_t& h, std::uint64_t part )
     {
         h ^= part;
@@ -3336,7 +3343,9 @@ inline void scanFileForAsserts( std::string_view src, const std::string& path, s
     }
 }
 
-inline std::vector<AssertRow> collectAsserts( const IngestResult& ing, std::string_view name, std::size_t& filesScanned )
+// Every assert row naming `name` across the indexed C-family files; result.filesScanned counts the files read, and a
+// file that cannot be read whole is DISCLOSED into result (asserts_unreadable=), never skipped as if it held nothing.
+inline std::vector<AssertRow> collectAsserts( const IngestResult& ing, std::string_view name, LayoutResult& result )
 {
     std::vector<AssertRow> rows;
     for( std::uint32_t fileId = 0; fileId < ing.files.size(); ++fileId )
@@ -3348,9 +3357,10 @@ inline std::vector<AssertRow> collectAsserts( const IngestResult& ing, std::stri
         const std::optional<std::string> bytes = darkflags::readWhole( diskPath( ing, fileId ) );
         if( !bytes )
         {
+            DISCLOSE( result, LayoutResult::DisclosureWhy::UnreadableAssertFile, "layout: cannot read a C-family file whole — its static_asserts are unchecked" );
             continue;
         }
-        ++filesScanned;
+        ++result.filesScanned;
         if( bytes->find( name ) == std::string::npos )
         {
             continue; // cheap reject before the keyword walk
@@ -3588,7 +3598,7 @@ inline LayoutResult computeLayout( const IngestResult& ing, std::string_view spe
         result.mirrors.push_back( diffDefs( a, b ) );
     }
 
-    result.asserts = collectAsserts( ing, name, result.filesScanned );
+    result.asserts = collectAsserts( ing, name, result );
     scoreAsserts( result );
     return result;
 }
@@ -3736,16 +3746,19 @@ inline void writeLayout( std::FILE* out, const LayoutResult& res, std::string_vi
                        "exits non-zero); kind=\"stub\" is an empty placeholder aggregate and kind=\"spelling\" is the two "
                        "arms of one ifdef block naming the same bytes differently (simd::float4 vs float4) — both reported, "
                        "neither a break. agree=\"0\" on an assert row means a sizeof tripwire contradicts the computed size. "
-                       "Definitions and asserts come from the INDEXED files.{} -->{}",
+                       "Definitions and asserts come from the INDEXED files.{}{} -->{}",
                  res.unreadableDefs != 0 ? " unreadable=\"N\": N same-name definitions whose file could not be read when this ran —"
                                            " absent from defs= and from the mirror comparison, so mirror= compares only what was read (exit 3: not verified)." : "",
+                 res.unreadableAssertFiles != 0 ? " asserts_unreadable=\"N\": N C-family files the static_assert scan could not read whole"
+                                                  " (unreadable, or past the size cap) — asserts= counts only the files read (exit 3: not verified)." : "",
                  rw::rootRelPathsLegend( !rootArg.empty() )  );   // R-E fix (2026-08-19): defines root= (graphlegend.h)
     const std::string layoutRootAttr = rootArg.empty() ? std::string() : ( " root=\"" + ex( rootArg ) + "\"" );
     const std::string unreadableAttr = res.unreadableDefs != 0 ? ( " unreadable=\"" + std::to_string( res.unreadableDefs ) + "\"" ) : std::string();
+    const std::string assertsUnreadableAttr = res.unreadableAssertFiles != 0 ? ( " asserts_unreadable=\"" + std::to_string( res.unreadableAssertFiles ) + "\"" ) : std::string();
     const std::string stdAbiAttr = res.stdTableUsed ? ( " std_abi=\"" + std::string( kStdAbi ) + "\"" ) : std::string();
-    rw::emitTo( out, "<layout sym=\"{}\" found=\"{}\" defs=\"{}\" mirror=\"{}\" asserts=\"{}\" conflicts=\"{}\" scanned=\"{}\"{}{}{}>",
+    rw::emitTo( out, "<layout sym=\"{}\" found=\"{}\" defs=\"{}\" mirror=\"{}\" asserts=\"{}\" conflicts=\"{}\" scanned=\"{}\"{}{}{}{}>",
                   ex( res.sym ).c_str(), res.found ? 1 : 0, res.defsFound, mirror, res.asserts.size(),
-                  res.assertConflicts, res.filesScanned, unreadableAttr.c_str(), stdAbiAttr.c_str(), layoutRootAttr.c_str() );
+                  res.assertConflicts, res.filesScanned, unreadableAttr.c_str(), assertsUnreadableAttr.c_str(), stdAbiAttr.c_str(), layoutRootAttr.c_str() );
 
     for( const LayoutDef& d : res.defs )
     {

@@ -589,6 +589,7 @@ inline std::vector<CodeName> sentenceCodeNames( const IngestResult& ing, std::st
         }
     }
     std::vector<Spelling> parsed;
+    parsed.reserve( spellings.size() );
     for( const std::string& sp : spellings )
     {
         parsed.push_back( parseSpelling( sp ) );
@@ -637,10 +638,19 @@ inline SentenceWordText sentenceWordText( const std::vector<std::string_view>& w
 // prerequisites") asks nothing about the name.
 inline constexpr std::size_t      kCueObjectWords = 3;
 inline constexpr std::string_view kCuePronouns[]  = { "it", "them", "its" };
-inline bool asksDependentsOf( const std::vector<std::string_view>& words, std::string_view spelling )
+// REASK-GRAIN: a dependents cue that asks what a CHANGE to the function reaches (change, add, affect, break, depend, update, modify,
+// rename, in any listed inflection) asks for the transitive radius; the others (call, caller, used, invoke, reference, exercise) ask
+// who calls it, one hop. The verb follows the question's grain, never the cheaper answer: a re-ask that sent a change question to the
+// one-hop callers verb named a smaller answer to a different question (15 of 39 change-impact sentences, m5 ROUTING_TOKEN_SAVINGS_1117 4.3).
+inline constexpr std::string_view kChangeCueStems[] = { "chang", "add", "affect", "break", "broke", "depend", "updat", "modif", "renam" };
+inline bool isChangeCue( std::string_view w )
 {
-    const SentenceWordText        read = sentenceWordText( words );
-    const std::vector<std::string_view>& text = read.text;
+    const std::string lw = routeLower( detail::graphSubjectTrimWord( w ).text );
+    return std::ranges::any_of( kChangeCueStems, [ & ]( std::string_view stem ) { return lw.starts_with( stem ); } );
+}
+// Does the sentence read the name as the CALLER of something (a call auxiliary before it, an agent cue after it: "does `f` call g")?
+inline bool nameReadsAsCallee( const std::vector<std::string_view>& text, std::string_view spelling )
+{
     bool callee = false;
     for( std::size_t k = 0; k < text.size(); ++k )
     {
@@ -649,25 +659,46 @@ inline bool asksDependentsOf( const std::vector<std::string_view>& words, std::s
             callee = callee || ( k > 0 && wordIn( text[k - 1], kCalleeAux ) ) || ( k + 1 < text.size() && wordIn( text[k + 1], kAgentCues ) );
         }
     }
-    const auto objectAfter = [ & ]( std::size_t k )
+    return callee;
+}
+// Is the cue at text[k] about the name: the name, or a pronoun for it, within kCueObjectWords words after the cue?
+inline bool cueObjectIsName( const std::vector<std::string_view>& text, std::size_t k, std::string_view spelling )
+{
+    for( std::size_t j = k + 1; j < text.size() && j <= k + kCueObjectWords; ++j )
     {
-        for( std::size_t j = k + 1; j < text.size() && j <= k + kCueObjectWords; ++j )
-        {
-            if( text[j].find( spelling ) != std::string_view::npos || wordIn( text[j], kCuePronouns ) )
-            {
-                return true;
-            }
-        }
-        return false;
-    };
-    for( std::size_t k = 0; k < text.size(); ++k )
-    {
-        if( cueInDependentsSense( text, k, callee ) && objectAfter( k ) )
+        if( text[j].find( spelling ) != std::string_view::npos || wordIn( text[j], kCuePronouns ) )
         {
             return true;
         }
     }
     return false;
+}
+// What the sentence asks about `spelling`: `asks` = a dependents cue in that sense governs the name; `change` = one such cue is a
+// change cue (isChangeCue), whatever other cue fires beside it.
+struct DependentsAsk
+{
+    bool asks   = false;
+    bool change = false;
+};
+inline DependentsAsk dependentsAskOf( const std::vector<std::string_view>& words, std::string_view spelling )
+{
+    const SentenceWordText               read   = sentenceWordText( words );
+    const std::vector<std::string_view>& text   = read.text;
+    const bool                           callee = nameReadsAsCallee( text, spelling );
+    DependentsAsk                        ask;
+    for( std::size_t k = 0; k < text.size(); ++k )
+    {
+        if( cueInDependentsSense( text, k, callee ) && cueObjectIsName( text, k, spelling ) )
+        {
+            ask.asks   = true;
+            ask.change = ask.change || isChangeCue( text[k] );
+        }
+    }
+    return ask;
+}
+inline bool asksDependentsOf( const std::vector<std::string_view>& words, std::string_view spelling )
+{
+    return dependentsAskOf( words, spelling ).asks;
 }
 }   // namespace subject_detail
 
@@ -1173,11 +1204,9 @@ inline std::string sentenceReaskInvocation( const IngestResult& ing, std::string
         const bool swap = from0 == 1 || from1 == -1;
         return "--path=" + names[ swap ? 1 : 0 ].spelling + "," + names[ swap ? 0 : 1 ].spelling;
     }
-    if( names.size() == 1 && asksDependentsOf( words, names.front().spelling ) )
-    {
-        return "--callers=" + names.front().spelling;
-    }
-    return {};
+    // REASK-GRAIN: a change question's bare form is the transitive radius; a who-calls question's is the one-hop callers
+    const DependentsAsk ask = names.size() == 1 ? dependentsAskOf( words, names.front().spelling ) : DependentsAsk{};
+    return ask.asks ? ( ask.change ? "--impact=" : "--callers=" ) + names.front().spelling : std::string();
 }
 
 // ANCHOR-TEST-ONLY: does a name-exact route with no source-backed anchor stay committed to it? It does when the anchors name ONE
