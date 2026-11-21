@@ -23,7 +23,7 @@
 #        "best since v1: ..."; root ratchet_ref="v1".
 #        The wip side branch's 5-deep-line creep is not its best: the ratchet reads the first-parent line (replay 11-19).
 #   (k1) RATCHET VS THE BASE: grow1 (over the bar) gained 2 deep lines: under the rise step and under its best-since-v1 rise, yet
-#        its score grew against HEAD: a tangle row was= HEAD's score, now= higher, sev="minor", no ratchet= facet.
+#        its score grew against HEAD: a GATING tangle row was= HEAD's score, now= higher, no ratchet= facet (QD-RATCHET-BASE gate).
 #   (k2) MOVED, NOT GROWN: reflow's inputs moved (one flat line) but its score is HEAD's tenth: no row. Against its best since v1
 #        it is 6 deep lines up, which made the tag-best compare row it (replay 11-21: buildGraph in #706).
 #   (k3) FELL: settle's score fell against HEAD (48 -> 47 deep lines), still 7 over v1: no row and no <improved> entry (under the
@@ -33,7 +33,7 @@
 #        (premise: nudge over the bar in --metrics). Replay 11-19: buildGraph 56.9 -> 56.8 was credited for one deep line.
 #   (r3) NEW FN: the tangled new function's row carries no ratchet= (a symbol created after the tag has no history here).
 #   (c1) CREDIT: simplify ccx 21 -> 11: listed in <improved> as kind="complexity".
-#   (g)  only rule (b) gates: every gating tangle row is a new or crossing one (tangled, crossing); every other tangle row is sev="minor".
+#   (g)  only rule (b) and the ratchet gate: the gating tangle rows are exactly creep crossing grow1 tangled; the rest are sev="minor".
 #   (j)  --json carries the same tangle rows (count) and "improved".
 #   (d)  determinism: the working-tree run twice is byte-identical.
 # Red before QD-LESSONS-2 (main 8861b0d4d): t1 b1 b3 (every tangle row minor), k1 (no row: no rise), k2 k3 (the tag-best rows); b2
@@ -150,9 +150,9 @@ if grep -q 'ratchet_ref="v1"' "$Q"; then ok "(r1) root ratchet_ref=\"v1\""; else
 # (k1)-(k3): the ratchet against the range base; premise from HEAD's and the working tree's --metrics
 read -r ht wt hl wl <<<"$( kpre grow1 )"; r="$( trow grow1 )"
 if [ -z "$ht" ] || [ -z "$wt" ] || [ "${ht%.*}" -lt 6 ] || [ "${ht/./}" -ge "${wt/./}" ]; then no "(k1) PREMISE: grow1 over the bar and higher in wt, got HEAD=$ht wt=$wt"
-elif [ -n "$r" ] && [ "$( attr "$r" was )" = "$ht" ] && [ "$( attr "$r" now )" = "$wt" ] && [ "$( attr "$r" sev )" = minor ] && [ -z "$( attr "$r" ratchet )" ]; then
-    ok "(k1) grow1 $ht -> $wt: a minor ratchet row, no ratchet= facet: $r"
-else no "(k1) grow1 $ht -> $wt: want a minor tangle row was=\"$ht\" now=\"$wt\" without ratchet=, got '${r:-none}'"; fi
+elif [ -n "$r" ] && [ "$( attr "$r" was )" = "$ht" ] && [ "$( attr "$r" now )" = "$wt" ] && [ "$( attr "$r" gating )" = 1 ] && [ -z "$( attr "$r" ratchet )" ]; then
+    ok "(k1) grow1 $ht -> $wt: a gating ratchet row, no ratchet= facet: $r"
+else no "(k1) grow1 $ht -> $wt: want a gating tangle row was=\"$ht\" now=\"$wt\" without ratchet=, got '${r:-none}'"; fi
 read -r ht wt hl wl <<<"$( kpre reflow )"
 if [ -z "$ht" ] || [ "$ht" != "$wt" ] || [ "$hl" = "$wl" ] || [ "${ht%.*}" -lt 6 ]; then no "(k2) PREMISE: reflow over the bar, same score, lines moved; got $ht/$wt, $hl/$wl lines"
 elif [ -z "$( trow reflow )" ]; then ok "(k2) reflow (S $ht, $hl -> $wl lines): no tangle row"
@@ -177,8 +177,8 @@ if r="$( trow tangled )"; [ -n "$r" ] && [ -z "$( attr "$r" ratchet )" ]; then o
 # (g) only rule (b) gates: the gating tangle rows are exactly the new and crossing ones; every other tangle row is minor
 gsyms="$( grep -oE '<r kind="tangle"[^>]*gating="1"[^>]*>' "$Q" | grep -oE ' sym="[^"]*"' | sed -E 's/.*(::|")([A-Za-z0-9_]+)"$/\2/' | sort | tr '\n' ' ' )"
 tg="$( grep -oE '<r kind="tangle"[^>]*>' "$Q" | grep -c 'gating="1"' )"; tm="$( grep -oE '<r kind="tangle"[^>]*>' "$Q" | grep -c 'sev="minor"' )"
-if [ "$tangles" -ge 3 ] && [ "$gsyms" = "crossing tangled " ] && [ $(( tg + tm )) = "$tangles" ]; then ok "(g) $tangles tangle row(s): gating $gsyms, the other $tm sev=\"minor\""
-else no "(g) tangle rows $tangles: want gating exactly 'crossing tangled ', got '$gsyms' (gating $tg, minor $tm)"; fi
+if [ "$tangles" -ge 3 ] && [ "$gsyms" = "creep crossing grow1 tangled " ] && [ $(( tg + tm )) = "$tangles" ]; then ok "(g) $tangles tangle row(s): gating $gsyms, the other $tm sev=\"minor\""
+else no "(g) tangle rows $tangles: want gating exactly 'creep crossing grow1 tangled ', got '$gsyms' (gating $tg, minor $tm)"; fi
 # (j) the JSON twin: the same tangle rows in "r" and an "improved" list
 jt="$( python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(sum(1 for r in d["r"] if r.get("kind")=="tangle"), len(d.get("improved",[])))' "$TMP/qd.json" 2>/dev/null )"
 if [ "${jt% *}" = "$tangles" ] && [ "${jt#* }" -ge 2 ]; then ok "(j) --json: ${jt% *} tangle row(s) and ${jt#* } improved entries"
