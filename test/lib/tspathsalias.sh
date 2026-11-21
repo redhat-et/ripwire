@@ -34,7 +34,10 @@ mkroot(){  # $1 root  $2 tsconfig json (empty: none)  $3 the specifier route.ts 
   printf 'export class Repo {\n  async listItems(a: number) { return a; }\n}\n' >"$r/src/repo.ts"
   printf "import { listItems } from \"%s\";\n${repo}export async function GET(${param}) { return listItems(1); }\n" "$3" >"$r/src/app/route.ts"
 }
-callers(){ "$BIN" "$@" --no-cache 2>/dev/null | grep -o '<callers .*'; }
+callers(){  # the <callers> element, or nothing when ripwire exits non-zero (the arm reading it then FAILs)
+  "$BIN" "$@" --no-cache >"$TMP/callers.out" 2>/dev/null || return 1
+  grep -o '<callers .*' "$TMP/callers.out"
+}
 pinned(){  # $1 arm  $2 root  $3 module file: GET is the one caller, nothing declined
   local out; out="$( callers "$2" --callers="$3:listItems" )"
   case "$out" in
