@@ -1477,13 +1477,13 @@ inline constexpr const char* kQdLegendCore =
     "score). THIRTEEN KINDS, and kind= on every row names which one: complexity over the ccx bar, verbosity "
     "(LOC), nesting, params, duplication, dead-code, api-surface (new public contract drift), "
     "error-masking, short-horizon-churn, new-clone-of-reused-helper, placeholder (added stub/TODO), "
-    "defect-shape (defect= names it), tangle (a long function's nesting, deep share and steering locals; report-only). "
+    "defect-shape (defect= names it), tangle (a long function's nesting, deep share and steering locals; a new or crossing one gates). "
     "THREE independent axes, in this "
     "order: (1) acked findings are suppressed entirely (acked= counts them); (2) ORIGIN — a finding on a "
     "symbol that EXISTED at the baseline is preexisting-worse (no origin attribute), one that exists only "
     "because the code is NEW carries origin=\"new-symbol\"; (3) MATERIALITY — a small numeric delta is "
     "sev=\"minor\", and minor= counts them. EXIT 2 fires only on preexisting-worse AND major, the gating= count; "
-    "new-symbol rows never gate, except defect-shape format-arity and a new function at the ceiling, so exit 0 "
+    "new-symbol rows never gate, except defect-shape format-arity, a new function at the ceiling and a tangled new function, so exit 0 "
     "is NOT a verdict on them — nothing that existed got worse, but the new debt is yours: read them. Clone kinds are new-symbol only when EVERY member is new; short-horizon-churn is "
     "preexisting by construction. preexisting-worse= and new-symbol= partition regressions=. stale= is a "
     "FOURTH axis, never gating and never counted in regressions=: rows in the .ripwire_quality_acks ledger "
@@ -1744,23 +1744,25 @@ inline constexpr const char* kQdFailureDefaultLegend =
 
 // QD-TANGLE — emitted only when a tangle row is in the document.
 inline constexpr const char* kQdTangleLegend =
-    "tangle rows are REPORT-ONLY (always sev=\"minor\", never gating). was= and now= are the score S = T x log2(loc/50), "
+    "a tangle row GATES when the function is new or crossed the bar (not a moved body, not test code); a row an input rose on is "
+    "sev=\"minor\". was= and now= are the score S = T x log2(loc/50), "
     "T = nesting levels past 3 + deep%/5 + steering locals per 100 lines (deep%: the share of lines inside regions at nesting 4+, "
     "short arms of a flat switch or else-if chain of 4+ arms left out); bar= 6. Length only AMPLIFIES: a function of 50 lines or "
     "fewer, a long flat body and an orchestrator of named steps all score 0. A row means the change made it so: the function is "
-    "new, crossed the bar, or an input rose (nesting +1, deep lines +5, a new steering local); why= names those inputs, fix= the "
+    "new, crossed the bar, its score grew against the baseline while over the bar (the ratchet: a tenth counts), or an input rose "
+    "(nesting +1, deep lines +5, a new steering local); why= names the inputs that changed, fix= the "
     "shape the rise calls for with its lines, locals= the steering locals: a primitive local written again after its "
     "declaration and read by a branch condition 10 or more statements after that write. ";
 
 // D4 — present when the ratchet read its reference point (ratchet_ref= on the root). A ratchet= facet needs that read, so this one
 // sentence defines both.
 inline constexpr const char* kQdRatchetLegend =
-    "ratchet_ref= is the reference point the tangle ratchet read, the last tag reachable from HEAD: each function over the tangle bar "
-    "whose inputs this change moved is compared with its BEST since that tag (the lowest of each input and of the score over every first-parent "
+    "ratchet_ref= is the reference point the tangle rows' history read, the last tag reachable from HEAD: each tangle row on a function "
+    "that existed at the baseline is compared with its BEST since that tag (the lowest of each input and of the score over every first-parent "
     "version since it, or since the function's creation); ratchet_judged= counts those that had history, ratchet_unread= versions "
     "that could not be measured, ratchet_cut=\"1\" that only the 512 newest versions were read. ratchet=\"TAG\" on a tangle row: "
     "the score is above its best since TAG and an input rose over its minimum by the rise rule, so a function that crept up across "
-    "changes is named; why= then adds \"best since TAG: ...\", and on a row of its own was= is that best score. Report-only. ";
+    "changes says so; why= then adds \"best since TAG: ...\". A facet only: it makes no row and changes no severity. ";
 
 // QD-CREDIT-ROW — present when the document carries an <improved> section.
 inline constexpr const char* kQdImprovedLegend =
@@ -2549,27 +2551,39 @@ inline void emitQdGatingLine( const std::vector<rw::quality::Regression>& regs, 
     // M12: displaySym, not first->sym raw — the XML/JSON rows both normalize sym's path segment
     // for display (quality::displaySym); this stderr line was the one caller that skipped it,
     // so it named "./src/…::rw::…" beside a row that named the same finding "src/…::rw::…".
-    // a gating row on NEW code is defect-shape format-arity or a new function at the ceiling (rowGates); the line names
+    // a gating row on NEW code is defect-shape format-arity, a new function at the ceiling or a tangled new function (rowGates); the line names
     // either part only when there is one, so every run without them keeps its bytes.
     const std::size_t newGating = static_cast<std::size_t>( std::count_if( regs.begin(), regs.end(), []( const quality::Regression& r )
                                                                            { return r.isNewSymbol && quality::rowGates( r ); } ) );
     const std::size_t ceilingGating = static_cast<std::size_t>( std::count_if( regs.begin(), regs.end(), []( const quality::Regression& r )
                                                                                { return r.ceiling != 0 && quality::rowGates( r ); } ) );
+    // a new-symbol tangle row gates under rule (b) (QD-LESSONS-2); was=/now= read as every surface prints them (a tangle score's tenths)
+    const std::size_t newTangleGating = static_cast<std::size_t>( std::count_if( regs.begin(), regs.end(), []( const quality::Regression& r )
+                                                                                 { return r.isNewSymbol && r.kind == "tangle" && quality::rowGates( r ); } ) );
+    const std::string was = quality::rowValueText( *first, first->was ), now = quality::rowValueText( *first, first->now );
     if( ceilingGating != 0 )
     {
-        rw::emitTo( stderr, "ripwire: --quality-delta gating: {} gating finding(s), {} of them a new function at the ceiling (ccx {} / {} lines); first: {} {}{} (was={} now={})\n",
-                      gatingCount, ceilingGating, quality::newSymbolCeiling( quality::kCcxBar ), quality::newSymbolCeiling( quality::kLocBar ),
-                      first->kind.c_str(), quality::displaySym( first->sym, deltaRoot ).c_str(), at.c_str(), first->was, first->now );
+        const std::string tangled = newTangleGating == 0 ? std::string()
+                                                         : std::format( ", {} a tangled new function (tangle {} or more)", newTangleGating, quality::metricValueText( "tangle", rw::kTangleBar10 ) );
+        rw::emitTo( stderr, "ripwire: --quality-delta gating: {} gating finding(s), {} of them a new function at the ceiling (ccx {} / {} lines){}; first: {} {}{} (was={} now={})\n",
+                      gatingCount, ceilingGating, quality::newSymbolCeiling( quality::kCcxBar ), quality::newSymbolCeiling( quality::kLocBar ), tangled,
+                      first->kind.c_str(), quality::displaySym( first->sym, deltaRoot ).c_str(), at.c_str(), was, now );
     }
     else if( newGating == 0 )
     {
         rw::emitTo( stderr, "ripwire: --quality-delta gating: {} preexisting-worse major finding(s); first: {} {}{} (was={} now={})\n",
-                      gatingCount, first->kind.c_str(), quality::displaySym( first->sym, deltaRoot ).c_str(), at.c_str(), first->was, first->now );
+                      gatingCount, first->kind.c_str(), quality::displaySym( first->sym, deltaRoot ).c_str(), at.c_str(), was, now );
+    }
+    else if( newTangleGating != 0 )
+    {
+        rw::emitTo( stderr, "ripwire: --quality-delta gating: {} gating finding(s), {} of them a tangled new function (tangle {} or more); first: {} {}{} (was={} now={})\n",
+                      gatingCount, newTangleGating, quality::metricValueText( "tangle", rw::kTangleBar10 ), first->kind.c_str(),
+                      quality::displaySym( first->sym, deltaRoot ).c_str(), at.c_str(), was, now );
     }
     else
     {
         rw::emitTo( stderr, "ripwire: --quality-delta gating: {} gating finding(s), {} of them defect-shape format-arity on new code; first: {} {}{} (was={} now={})\n",
-                      gatingCount, newGating, first->kind.c_str(), quality::displaySym( first->sym, deltaRoot ).c_str(), at.c_str(), first->was, first->now );
+                      gatingCount, newGating, first->kind.c_str(), quality::displaySym( first->sym, deltaRoot ).c_str(), at.c_str(), was, now );
     }
 }
 
