@@ -46,6 +46,7 @@
 //            because it operates on the resolved file→file include graph, not on any language's name-lookup.
 
 #include "model.h"
+#include "infra/sortutil.h"   // sortUnique
 #include "depdialect.h"    // dependencyDialect — rustInlineMods keeps the Rust dialect's module symbols
 #include "langfacts.h"   // langFacts(l).aliasPeelsSmartPointer — SmartAliasPeel (lane iface-peel)
 #include "pythonstdlib.h"  // isPythonStdlibModule — the stdlib-name guard on the Python layout-root fallback
@@ -2786,8 +2787,7 @@ inline RubyConstantIndex rubyConstantIndexOf( const IngestResult& ing )
     }
 
     // The SoA span table: one flat, sorted list of definer fileIds; each constant owns a contiguous run.
-    std::sort( definers.begin(), definers.end() );
-    definers.erase( std::unique( definers.begin(), definers.end() ), definers.end() );
+    rw::sortutil::sortUnique( definers );
     ix.files.reserve( definers.size() );
     for( std::size_t i = 0; i < definers.size(); )
     {
@@ -4429,8 +4429,7 @@ public:
         {
             out.scopes.push_back( c );
         }
-        std::sort( out.scopes.begin(), out.scopes.end() );
-        out.scopes.erase( std::unique( out.scopes.begin(), out.scopes.end() ), out.scopes.end() );
+        rw::sortutil::sortUnique( out.scopes );
         ENSURES( !out.scopes.empty() );
         owners_.emplace( std::move( key ), out );
         return out;
@@ -6834,8 +6833,7 @@ inline HashMap<std::string, std::vector<std::string>> buildUsingReexports( const
     }
     for( auto& [ k, bases ] : reexports )
     {
-        std::sort( bases.begin(), bases.end() );
-        bases.erase( std::unique( bases.begin(), bases.end() ), bases.end() );
+        rw::sortutil::sortUnique( bases );
     }
     return reexports;
 }
@@ -8474,8 +8472,7 @@ struct Narrower
                 reexportUnion.insert( reexportUnion.end(), baseDefs->begin(), baseDefs->end() );
             }
         }
-        std::sort( reexportUnion.begin(), reexportUnion.end() );
-        reexportUnion.erase( std::unique( reexportUnion.begin(), reexportUnion.end() ), reexportUnion.end() );
+        rw::sortutil::sortUnique( reexportUnion );
         return reexportUnion.empty() ? nullptr : &reexportUnion;
     }
 

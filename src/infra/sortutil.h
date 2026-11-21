@@ -8,6 +8,7 @@
 #include <compare>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string_view>
 #include <vector>
 
@@ -47,6 +48,15 @@ constexpr std::strong_ordering svCompare( std::string_view a, std::string_view b
     return a.size() <=> b.size();
 }
 constexpr bool svLess( std::string_view a, std::string_view b ) noexcept { return svCompare( a, b ) < 0; }
+
+// Sort `values` and drop repeats: the sort-then-erase(unique) pair, spelled once. The de-dup is operator==, so
+// `less` must group exactly the elements == calls equal (operator<, or svLess for text, per the note above).
+template< class Container, class Less = std::less<> >
+inline void sortUnique( Container& values, Less less = {} )
+{
+    std::sort( values.begin(), values.end(), less );
+    values.erase( std::unique( values.begin(), values.end() ), values.end() );
+}
 
 
 inline bool lessByScoreDescId( const std::vector<float>& scores, std::uint32_t a, std::uint32_t b ) noexcept

@@ -56,7 +56,7 @@
 #include "model.h"
 #include "quality.h" // pythonDecoratedDef, pythonRunnerRoot, languageInvokedSymbol, symbolHasStaticLinkage, isHeaderPath
 #include "serialize.h" // escapeXml
-#include "taskroute.h" // taskroute::isOneOf
+#include "infra/tablelookup.h" // isOneOf
 #include "valuerefindex.h" // ValueRefIndex::isValueReferenced
 
 #include <algorithm>
@@ -148,7 +148,7 @@ inline bool isTableNoun( std::string_view w ) noexcept
                                                    "classes", "def", "defs", "definition", "definitions", "symbol", "symbols", "helper", "helpers", "api", "apis", "code", "name", "names",
                                                    "type", "types", "constant", "constants", "const", "consts", "utility", "utilities", "util", "utils", "member", "members", "routine",
                                                    "routines", "procedure", "procedures", "item", "items", "thing", "things", "entry", "entries", "struct", "structs", "macro", "macros", "enum", "enums", "interface", "interfaces", "trait", "traits", "global", "globals", "hook", "hooks", "component", "components" };
-    return taskroute::isOneOf( w, kNouns, std::size( kNouns ) );
+    return isOneOf( w, kNouns );
 }
 
 // May an unused/dead word's object be the table's rows? The next word is a row noun, a linking word, a file token or the end of the subject:
@@ -161,7 +161,7 @@ inline bool cueObjectFits( std::span<const std::string> words, std::size_t next 
     }
     const std::string_view w = words[next];
     static constexpr std::string_view kLinks[] = { "in", "from", "of", "inside", "within", "here", "at", "or", "and" };
-    return isTableNoun( w ) || taskroute::isOneOf( w, kLinks, std::size( kLinks ) ) || w.find_first_of( "./" ) != std::string_view::npos;
+    return isTableNoun( w ) || isOneOf( w, kLinks ) || w.find_first_of( "./" ) != std::string_view::npos;
 }
 
 // `safely delete` / `can be removed` ask for the table only when what goes is the rows (`the functions`, `unused code`, `from pkg/x.py`, nothing at all),
@@ -186,8 +186,6 @@ inline bool deleteObjectFits( std::span<const std::string> words, std::size_t ne
     return !afterLink && std::ranges::contains( kLinks, w ) && deleteObjectFits( words, next + 1, true );
 }
 
-inline constexpr auto wordIn = []( std::string_view w, std::initializer_list<std::string_view> set ) noexcept
-{ return taskroute::isOneOf( w, set.begin(), set.size() ); };
 
 // The cue vocabulary, one table per role; membership is one helper.
 inline constexpr std::array<std::string_view, 14> kGapWords = { "being", "get", "gets", "getting", "ever", "even", "actually", "currently", "be", "been", "really", "yet", "directly", "anywhere" }; // `never get called`, `not being used`
@@ -220,7 +218,7 @@ inline bool subjectAsksUnused( std::string_view task )
     // `no one`, `nobody`, `nothing`, `noone` at k: the index after them, or 0
     const auto nobodyEnd = [&]( std::size_t k ) -> std::size_t
     {
-        if( wordIn( at( k ), { "nobody", "nothing", "noone" } ) )
+        if( isOneOf( at( k ), { "nobody", "nothing", "noone" } ) )
         {
             return k + 1;
         }
@@ -229,20 +227,20 @@ inline bool subjectAsksUnused( std::string_view task )
     for( std::size_t k = 0; k < words.size(); ++k )
     {
         const std::string_view w = words[k];
-        if( wordIn( w, { "unused", "uncalled", "unreferenced", "unexercised-by-code", "orphaned", "orphan", "unreachable", "stale" } ) && cueObjectFits( words, k + 1 ) )
+        if( isOneOf( w, { "unused", "uncalled", "unreferenced", "unexercised-by-code", "orphaned", "orphan", "unreachable", "stale" } ) && cueObjectFits( words, k + 1 ) )
         {
             return true;
         }
         if( w == "dead" )
         {
             // `dead code elimination` / `dead store` are other subjects; `dead code in f`, `dead functions`, `are any dead` fire
-            const bool analysis = at( k + 1 ) == "code" && wordIn( at( k + 2 ), { "elimination", "removal", "detection", "analysis", "pass", "analyzer", "stripping" } );
+            const bool analysis = at( k + 1 ) == "code" && isOneOf( at( k + 2 ), { "elimination", "removal", "detection", "analysis", "pass", "analyzer", "stripping" } );
             if( !analysis && cueObjectFits( words, k + 1 ) )
             {
                 return true;
             }
         }
-        if( wordIn( w, { "never", "not", "isn't", "aren't", "isnt", "arent" } ) )
+        if( isOneOf( w, { "never", "not", "isn't", "aren't", "isnt", "arent" } ) )
         {
             std::size_t j = k + 1;
             for( int gap = 0; gap < 2 && isGapWord( at( j ) ); ++gap )
@@ -258,20 +256,20 @@ inline bool subjectAsksUnused( std::string_view task )
         {
             return true;
         }
-        if( wordIn( w, { "no", "without", "zero" } ) )
+        if( isOneOf( w, { "no", "without", "zero" } ) )
         {
             std::size_t j = k + 1;
-            if( wordIn( at( j ), { "a", "an", "any", "the" } ) )
+            if( isOneOf( at( j ), { "a", "an", "any", "the" } ) )
             {
                 ++j;
             }
-            const bool callSites = at( j ) == "call" && wordIn( at( j + 1 ), { "site", "sites" } );
-            if( isCallerNoun( at( j ) ) || callSites || ( wordIn( at( j ), { "non-test", "production", "library", "external", "outside" } ) && isCallerNoun( at( j + 1 ) ) ) )
+            const bool callSites = at( j ) == "call" && isOneOf( at( j + 1 ), { "site", "sites" } );
+            if( isCallerNoun( at( j ) ) || callSites || ( isOneOf( at( j ), { "non-test", "production", "library", "external", "outside" } ) && isCallerNoun( at( j + 1 ) ) ) )
             {
                 return true;
             }
         }
-        if( w == "by" && wordIn( at( k - 1 ), { "used", "called", "referenced", "imported", "invoked" } ) && nobodyEnd( k + 1 ) != 0 )
+        if( w == "by" && isOneOf( at( k - 1 ), { "used", "called", "referenced", "imported", "invoked" } ) && nobodyEnd( k + 1 ) != 0 )
         {
             return true; // `used by nothing`, `called by no one`
         }
@@ -279,24 +277,24 @@ inline bool subjectAsksUnused( std::string_view task )
         {
             return true;
         }
-        if( w == "only" && isUseVerb( at( k + 1 ) ) && wordIn( at( k + 2 ), { "by", "from", "in" } ) && wordIn( at( k + 3 ), { "test", "tests" } ) )
+        if( w == "only" && isUseVerb( at( k + 1 ) ) && isOneOf( at( k + 2 ), { "by", "from", "in" } ) && isOneOf( at( k + 3 ), { "test", "tests" } ) )
         {
             return true;
         }
-        if( w == "only" && wordIn( at( k + 1 ), { "test", "tests" } ) && isCallVerb( at( k + 2 ) ) )
+        if( w == "only" && isOneOf( at( k + 1 ), { "test", "tests" } ) && isCallVerb( at( k + 2 ) ) )
         {
             return true; // `only tests use`
         }
         // delete intent: the question is whether code can go
-        if( wordIn( w, { "safe", "safely" } ) && wordIn( at( k + 1 ), { "delete", "remove", "drop", "deleted", "removed", "dropped" } ) && deleteObjectFits( words, k + 2 ) )
+        if( isOneOf( w, { "safe", "safely" } ) && isOneOf( at( k + 1 ), { "delete", "remove", "drop", "deleted", "removed", "dropped" } ) && deleteObjectFits( words, k + 2 ) )
         {
             return true;
         }
-        if( w == "can" && at( k + 1 ) == "be" && wordIn( at( k + 2 ), { "removed", "deleted", "dropped" } ) && deleteObjectFits( words, k + 3 ) )
+        if( w == "can" && at( k + 1 ) == "be" && isOneOf( at( k + 2 ), { "removed", "deleted", "dropped" } ) && deleteObjectFits( words, k + 3 ) )
         {
             return true;
         }
-        if( wordIn( w, { "removable", "deletable" } ) )
+        if( isOneOf( w, { "removable", "deletable" } ) )
         {
             return true;
         }

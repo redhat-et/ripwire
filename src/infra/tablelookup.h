@@ -17,8 +17,10 @@
 // "optimize" this into a hash without a measurement showing one of these tables grew enough to matter.
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdlib>
+#include <initializer_list>
 #include <iterator>
 #include <span>
 #include <string_view>
@@ -72,6 +74,21 @@ inline const Row* findSortedByField( const Table& rows, Key Row::*field, const W
 {
     const auto it = std::lower_bound( std::begin( rows ), std::end( rows ), wanted, [field]( const Row& r, const Wanted& w ) { return r.*field < w; } );
     return it != std::end( rows ) && ( *it ).*field == wanted ? &*it : nullptr;
+}
+
+// Membership in a small constexpr table of values (enum kinds, languages, names). Moved here from extentsuspect.h when
+// defectshape.h's unchecked-status needed the same lookup (--quality-delta named the second copy a clone of a reused helper).
+template<class T, std::size_t N>
+constexpr bool inSet( const std::array<T, N>& set, T value ) noexcept
+{
+    return std::find( set.begin(), set.end(), value ) != set.end();
+}
+
+// Is `word` one of `set`? `set` is a table (C array, std::array, span) or a braced list: isOneOf( w, { "a", "b" } ).
+template< typename Set = std::initializer_list<std::string_view> >
+constexpr bool isOneOf( std::string_view word, const Set& set ) noexcept
+{
+    return std::ranges::find( set, word ) != std::ranges::end( set );
 }
 
 // A test hook's one-of-N switch: the 1-based position of environment variable `var`'s value in `names`, 0 when it is unset or

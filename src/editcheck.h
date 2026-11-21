@@ -1,5 +1,6 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/sortutil.h"   // sortUnique
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
 
@@ -882,8 +883,7 @@ editCheckCallSites( const IngestResult& ing, CallSiteCalleeTest& callee, std::sp
 {
     std::vector<std::pair<NodeId, std::uint32_t>> sites;
     forEachCallSite( ing, callee, callerIncompatible, keptForwards, [ & ]( const Reference& r ) { sites.emplace_back( r.fromSymbol, r.line ); } );
-    std::sort( sites.begin(), sites.end() );
-    sites.erase( std::unique( sites.begin(), sites.end() ), sites.end() );
+    rw::sortutil::sortUnique( sites );
     return sites;
 }
 
@@ -932,8 +932,7 @@ inline std::vector<CallSiteAt> callSitesAt( const IngestResult& ing, std::span<c
         CallSiteCalleeTest callee( ing, ing.symbols[ defs[i] ], sameName, g.provenSites );
         forEachCallSite( ing, callee, onPage, g.keptForwards, [ & ]( const Reference& r ) { sites.push_back( CallSiteAt{ r.fromSymbol, r.fileId, r.line } ); } );
     }
-    std::sort( sites.begin(), sites.end() );
-    sites.erase( std::unique( sites.begin(), sites.end() ), sites.end() );
+    rw::sortutil::sortUnique( sites );
     return sites;
 }
 

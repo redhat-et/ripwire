@@ -1,5 +1,6 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/sortutil.h"   // sortUnique
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
 
@@ -117,8 +118,7 @@ inline void toTermSet( std::vector<std::string>& words )
     words.erase( std::remove_if( words.begin(), words.end(),
                                   []( const std::string& w ) { return w.empty() || isCommentStopword( w ); } ),
                  words.end() );
-    std::sort( words.begin(), words.end() );
-    words.erase( std::unique( words.begin(), words.end() ), words.end() );
+    rw::sortutil::sortUnique( words );
 }
 
 // |A ∩ B| and |A ∪ B| over two SORTED, deduplicated term sets — one merge walk, no container beyond the

@@ -1,5 +1,6 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/sortutil.h"   // sortUnique
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
 
@@ -2796,8 +2797,7 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
                 neigh.push_back( moduleRank[ms] );
             }
         }
-        std::sort( neigh.begin(), neigh.end() );
-        neigh.erase( std::unique( neigh.begin(), neigh.end() ), neigh.end() );
+        rw::sortutil::sortUnique( neigh );
 
         rw::emitTo( out, "  {{\"id\":{},\"name\":\"{}\",\"symCount\":{},\"fileCount\":{},\"files\":[",
                       disp, jsonEscape( m.name ).c_str(), m.members.size(), m.files.size() );

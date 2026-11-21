@@ -15,6 +15,7 @@
 // that group alone; the sel= it prints then names the group's file and owner and may bind more than it.
 
 #include "defattrib.h"     // DefGroups, defGroupsOf — the ONE definition-group rule
+#include "infra/sortutil.h"   // sortUnique
 #include "filter.h"        // isTestSymbol, pathTierOf (via pathDefInTests)
 #include "graph.h"         // resolveAllByNameQualified — the shared resolver
 #include "lexical.h"       // lexicalScanText — an alias row's written target (to=) is read from its file
@@ -125,8 +126,7 @@ inline DefLookup lookupDefs( const IngestResult& ing, const Graph& g, std::strin
         {
             defslookup_detail::collectCallers( ing, g, m, callers );
         }
-        std::sort( callers.begin(), callers.end() );
-        callers.erase( std::unique( callers.begin(), callers.end() ), callers.end() );
+        rw::sortutil::sortUnique( callers );
         // a member calling itself (recursion) is no outside caller
         r.callers = std::size_t( std::count_if( callers.begin(), callers.end(), [ & ]( NodeId c )
                                                 { return std::find( members[k].begin(), members[k].end(), c ) == members[k].end(); } ) );

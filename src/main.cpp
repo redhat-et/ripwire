@@ -82,6 +82,7 @@ static_assert( rw::kTestGateCcxBarMirror == rw::quality::kCcxBar, "situ.h kTestG
 #include "binstale.h"              // --doctor's tracked-binary-staleness check (git-order, not mtime)
 #include "codexdoctor.h"           // --doctor --agent=codex: live binary/skills/hooks/MCP surface parity
 #include "crossref.h"              // --stray-content / --whereis — the cross-branch content index
+#include "qdbestsince.h"           // D4: quality::tangleBestSince — the --quality-delta ratchet's history reader
 #include "darkflags.h"             // --flags — the dark-content (compile/cmake/env gate) dashboard
 #include "flipimpact.h"            // --flags --flip=NAME: the blast radius of turning ONE of those gates ON
 #include "layout.h"                // --layout=STRUCT — computed field offsets + tripwires + mirror drift
@@ -3647,8 +3648,7 @@ std::string renderHelpTask( const rw::Config& cfg, const rw::taskroute::TaskRout
         // Keyed off the INTENT, and spelled by forpage.h's own forWidenNext — the same quoting, and (as of
         // 2026-09-25) emitted in full whatever its length: nextAttrXml carries no ceiling on next=, so a
         // long task is pasted in full rather than truncated or dropped.
-        const bool widens = rw::taskroute::isOneOf( choice.id, std::begin( rw::taskroute::kForShapedIntents ),
-                                                   std::size( rw::taskroute::kForShapedIntents ) );
+        const bool widens = rw::isOneOf( choice.id, rw::taskroute::kForShapedIntents );
         out += rw::nextAttrXml( widens ? rw::forWidenNext( cfg.helpTask ) : std::string() );
         out += "><run>" + ex( choice.command ) + "</run></choice>";
     }

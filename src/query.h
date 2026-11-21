@@ -34,6 +34,7 @@
 // cyclic call graph (a `seen` set caps every node at one visit).
 
 #include "model.h"
+#include "infra/sortutil.h"   // sortUnique
 #include "graph.h"
 #include "arch.h"          // P0-5: builtinLayer() — THE layer taxonomy, the same one the map's layer= attribute carries
 #include "regexguard.h"    // file(): the screen, the compile and the guarded match every user-authored pattern takes
@@ -257,12 +258,6 @@ struct Eval
         return v;
     }
 
-    static void sortUniq( std::vector<NodeId>& v )
-    {
-        std::sort( v.begin(), v.end() );
-        v.erase( std::unique( v.begin(), v.end() ), v.end() );
-    }
-
     // ── sources ───────────────────────────────────────────────────────────────────────────────────────
     std::vector<NodeId> sourceAll()
     {
@@ -277,7 +272,7 @@ struct Eval
     std::vector<NodeId> sourceName( const std::string& nm )
     {
         std::vector<NodeId> r = resolveAllByName( ing, nm );
-        sortUniq( r );
+        rw::sortutil::sortUnique( r );
         if( r.empty() )
         {
             unresolvedNames.push_back( nm ); // §P0.5b — a typo, not a measurement; refused at the CLI seam
@@ -442,14 +437,15 @@ struct Eval
             }
             frontier = std::move( next );
         }
-        sortUniq( out );
+        rw::sortutil::sortUnique( out );
         return out;
     }
 
     // ── 2-relation joins ──────────────────────────────────────────────────────────────────────────────
     std::vector<NodeId> join( std::string_view op, std::vector<NodeId> a, std::vector<NodeId> b )
     {
-        sortUniq( a ); sortUniq( b );
+        rw::sortutil::sortUnique( a );
+        rw::sortutil::sortUnique( b );
         std::vector<NodeId> r;
         if( op == "and" )
         {

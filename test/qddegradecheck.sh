@@ -6,8 +6,8 @@
 #
 # THE CONTRACT these arms pin. Why a kind is LOCAL: every per-symbol baseline key is path-qualified (quality.h qualityKey)
 # and so is the canonical id, so an UNCHANGED file yields the same keys and metrics in both trees and no row of such a kind:
-#   * The 12 kinds split by input scope. LOCAL kinds (api-surface, complexity, error-masking, nesting, params,
-#     placeholder, verbosity) need only the changed files' trees. defect-shape is LOCAL when the changed files define
+#   * The 13 kinds split by input scope. LOCAL kinds (api-surface, complexity, error-masking, nesting, params,
+#     placeholder, tangle, verbosity) need only the changed files' trees. defect-shape is LOCAL when the changed files define
 #     the same C-family macro names on both sides and either the base's whole macro set was read (P1) or no changed
 #     file is C++ (P0); otherwise it is skipped. WHOLE-TREE kinds (dead-code, duplication, new-clone-of-reused-helper)
 #     need every file. short-horizon-churn is unavailable in the range form.
@@ -84,10 +84,10 @@ WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/tmp"
 echo "qddegradecheck: BIN=$BIN"
 
-LOCAL_KINDS="api-surface complexity defect-shape error-masking nesting params placeholder verbosity"
+LOCAL_KINDS="api-surface complexity defect-shape error-masking nesting params placeholder tangle verbosity"
 LOCAL_CSV="$( echo "$LOCAL_KINDS" | tr ' ' ',' )"
 WHOLE_KINDS="dead-code,duplication,new-clone-of-reused-helper"
-ALL12="api-surface,complexity,dead-code,defect-shape,duplication,error-masking,nesting,new-clone-of-reused-helper,params,placeholder,short-horizon-churn,verbosity"
+ALL13="api-surface,complexity,dead-code,defect-shape,duplication,error-masking,nesting,new-clone-of-reused-helper,params,placeholder,short-horizon-churn,tangle,verbosity"
 
 g(){ git -C "$1" -c user.name=t -c user.email=t@example.com "${@:2}"; }
 
@@ -119,7 +119,7 @@ mkfx(){
 }
 # target: complexity+nesting (grow), verbosity (chatty), params (wide 5->6), api-surface (api_scale 1->2, a header),
 # error-masking (an emptied catch), dead-code (legacy_used loses its caller), duplication + new-clone-of-reused-helper
-# (helper, fan-in 3, copied), placeholder (a TODO, a NotImplementedError stub), defect-shape (a .format arity miss)
+# (helper, fan-in 3, copied), placeholder (a TODO, a NotImplementedError stub), defect-shape (a .format arity miss); tangle (sweep, new)
 mktarget(){
     local R="$1"
     printf '#pragma once\ninline int api_scale( int a, int b ) { return a * b; }\n' >"$R/src/api.h"
@@ -142,6 +142,12 @@ mktarget(){
         printf 'int drive( int x ) { return use1( x ) + use2( x ) + use3( x ) + wide( 1, 2, 3, 4, 5, 6 ) + grow( x ) + api_scale( x, 2 ) + chatty( x ); }\n'
     } >"$R/src/core.cpp"
     printf 'int helper_copy( int a, int b ) { int s = 0; for( int i = 0; i < a; ++i ) { s += i * b; if( s > 100 ) { s -= b; } } return s + a - b; }\n' >"$R/src/copy.cpp"
+    {   # tangle (a NEW function: a 90-line body whose statements sit at nesting 6 — a new-symbol row, never gating)
+        printf 'int sweep( int n )\n{\n    int r = 0;\n    for( int a = 0; a < n; ++a ) {\n        for( int b = 0; b < a; ++b ) {\n'
+        printf '            if( a %% 2 ) {\n                while( r < b ) {\n                    if( b %% 3 ) {\n                        for( int c = 0; c < 2; ++c ) {\n'
+        for i in $( seq 1 80 ); do printf '                            r += c * %s;\n' "$i"; done
+        printf '                        }\n                    }\n                    ++r;\n                }\n            }\n        }\n    }\n    return r;\n}\n'
+    } >"$R/src/deep.cpp"
     printf 'def other():\n    # TODO: wire this up\n    return 1\n\ndef greet(name):\n    return "hello {} {}".format(name)\n\ndef later():\n    raise NotImplementedError\n' >"$R/py/mod.py"
     g "$R" add -A; g "$R" commit -qm target
 }
@@ -341,7 +347,7 @@ else no "(G) A..A: rc $r1 vs $r2 or the answers differ"; fi
 # ── (H) --quality-kinds ───────────────────────────────────────────────────────────────────────────────────────
 qd "$BIN" . --quality-delta=HEAD~1..HEAD --quality-kinds=complexity,dupe --no-cache
 if [ "$RC" = 1 ] && [ ! -s "$WORK/o" ] && grep -q "dupe" "$WORK/e" && grep -q "new-clone-of-reused-helper" "$WORK/e" && grep -q "short-horizon-churn" "$WORK/e"; then
-    ok "(H) an unknown kind is refused (exit 1) naming it and the 12 kinds"
+    ok "(H) an unknown kind is refused (exit 1) naming it and the 13 kinds"
 else no "(H) unknown kind: rc=$RC stderr: $( head -c 300 "$WORK/e" )"; fi
 qd "$BIN" . --quality-delta=HEAD~1..HEAD --quality-kinds=complexity --quality-ack --no-cache
 if [ "$RC" = 1 ] && [ ! -e "$FX/.ripwire_quality_acks" ] && grep -q -- '--quality-kinds.*--quality-ack\|--quality-ack.*--quality-kinds' "$WORK/e" && ! grep -q 'unknown flag' "$WORK/e"; then
@@ -357,7 +363,7 @@ for k in api-surface complexity dead-code defect-shape duplication error-masking
     if [ "$( rows "$WORK/o" )" = "$( rows "$WORK/A.xml" "$k" )" ] && [ -n "$( rows "$WORK/o" )" ] && [ "$( attr "$WORK/o" skipped_why )" = selector ]; then ok "(H) --quality-kinds=$k: exactly (A)'s $k rows"
     else no "(H) --quality-kinds=$k: rc=$RC rows=$( rows "$WORK/o" | grep -c . ) want $( rows "$WORK/A.xml" "$k" | grep -c . ) why=$( attr "$WORK/o" skipped_why )"; fi
 done
-qd "$BIN" . --quality-delta=HEAD~1..HEAD "--quality-kinds=$ALL12" --no-cache
+qd "$BIN" . --quality-delta=HEAD~1..HEAD "--quality-kinds=$ALL13" --no-cache
 if [ "$RC" = "$ARC" ] && cmp -s "$WORK/o" "$WORK/A.xml"; then ok "(H) all 12 named: byte-identical to no selector"; else no "(H) all 12 named: rc=$RC or output differs from (A)"; fi
 
 # ── (I) --quality-ack: the projection never pre-empts it (C2); a real stop refuses it ───────────────────────────
@@ -701,7 +707,7 @@ if [ "$RC" = 6 ] && [ "$( attr "$WORK/o" gating )" = 0 ] && [ -n "$( rows "$WORK
 else no "(V) rc=$RC gating=$( attr "$WORK/o" gating ) rows=$( rows "$WORK/o" | grep -c . )"; fi
 
 # ── (W) C1: a selector's exclusions are not memory cuts ─────────────────────────────────────────────────────────
-others(){ echo "$ALL12" | tr ',' '\n' | grep -vx -e "$1" -e "${2:-}" | paste -sd, -; }   # the 12 kinds without $1 (and $2)
+others(){ echo "$ALL13" | tr ',' '\n' | grep -vx -e "$1" -e "${2:-}" | paste -sd, -; }   # the 13 kinds without $1 (and $2)
 emptyskip(){ grep -q 'skipped *$' "$WORK/e"; }
 qd RIPWIRE_TEST_MEMGUARD=project:1 "$BIN" . --quality-delta=HEAD~1..HEAD --quality-kinds=complexity --no-cache
 if [ "$( attr "$WORK/o" ingest_scope )" = changed-files ] && [ "$( attr "$WORK/o" kinds_skipped )" = "$( others complexity )" ] \

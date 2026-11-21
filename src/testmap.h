@@ -109,8 +109,7 @@ inline void partitionAffectedSeedsByTestPath( const IngestResult& ing, AffectedS
             sel.walkSeeds.push_back( n );
         }
     }
-    std::sort( sel.seedTestFiles.begin(), sel.seedTestFiles.end() );
-    sel.seedTestFiles.erase( std::unique( sel.seedTestFiles.begin(), sel.seedTestFiles.end() ), sel.seedTestFiles.end() );
+    rw::sortutil::sortUnique( sel.seedTestFiles );
 }
 
 inline AffectedSeeds resolveAffectedSeeds( const IngestResult& ing, std::string_view spec )
@@ -170,8 +169,7 @@ inline AffectedSeeds resolveAffectedSeeds( const IngestResult& ing, std::string_
         sel.unprovenDefs += itemUnprovenDefs;
         sel.seeds.insert( sel.seeds.end(), defs.begin(), defs.end() );
     }
-    std::sort( sel.seeds.begin(), sel.seeds.end() );
-    sel.seeds.erase( std::unique( sel.seeds.begin(), sel.seeds.end() ), sel.seeds.end() );
+    rw::sortutil::sortUnique( sel.seeds );
     partitionAffectedSeedsByTestPath( ing, sel );
     return sel;
 }

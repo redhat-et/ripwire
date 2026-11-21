@@ -2789,9 +2789,29 @@ inline void appendExtentSuspectAttr( std::string& row, const Symbol& s )
     }
 }
 
+// QD-TANGLE (model.h tangleScore10): steer= the steering locals and tangle= the score --quality-delta's tangle kind judges (bar 6),
+// each ABSENT at 0 — both are 0 at 50 lines or fewer, where the score has no length to amplify. XML attributes, or JSON members.
+inline std::string tangleMetricAttrs( const Symbol& s, bool json )
+{
+    std::string         out;
+    const std::uint32_t tangle10 = tangleScore10( tangleInputsOf( s ) );
+    if( s.steer > 0 )
+    {
+        out += json ? std::format( ",\"steer\":{}", unsigned( s.steer ) ) : std::format( " steer=\"{}\"", unsigned( s.steer ) );
+    }
+    if( tangle10 > 0 )
+    {
+        out += json ? std::format( ",\"tangle\":{}.{}", tangle10 / 10u, tangle10 % 10u ) : std::format( " tangle=\"{}.{}\"", tangle10 / 10u, tangle10 % 10u );
+    }
+    return out;
+}
+
 inline constexpr const char* kMetricsLegend =
     "<!-- metrics: in=fan-in out=fan-out cx=cyclomatic ccx=cognitive loc=lines params=count nest=MAX-depth "
     "humps=regions-reaching-the-nesting-bar deep=lines-inside-them(floor,see deep_floor) "
+    "steer=steering-locals(a primitive local rewritten, then read in a branch condition 10+ statements later) "
+    "tangle=S, the quality-delta tangle score (bar 6): (nest past 3 + deep%/5 + steer per 100 lines) x log2(loc/50), short "
+    "flat-dispatch arms' depth left out; steer and tangle are absent at 0 and 0 at 50 lines or fewer "
     "(humps/deep are the PROFILE nest= cannot give: nest= is a max, so one deep line and a body that is deep "
     "throughout report the same number; deep/loc is the fraction. Both absent exactly when nest<bar — "
     "not-deep, never a hidden 0. deep counts LINES and humps counts REGIONS, and two regions can share a "
@@ -4123,6 +4143,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
                         {
                             appendf( " humps=\"{}\" deep=\"{}\" deep_floor=\"1\"", unsigned( s.humps ), unsigned( s.deepLoc ) );
                         }
+                        appendf( "{}", tangleMetricAttrs( s, /*json=*/false ) );   // QD-TANGLE: steer= / tangle=, each absent at 0
                         // Phase 1 (local-variable-indexing, docs/LOCALS_INDEXING.md): locals= is ABSENT — never
                         // a bare "0" — for every def outside model.h's localsCountedLang (MVP: C/C++ only), so a
                         // reader never mistakes "not counted for this language" for "counted, and there are none".
@@ -8610,8 +8631,7 @@ inline std::string hopUnreadAttr( HopValueRefs* vals )
     {
         return {};
     }
-    std::ranges::sort( vals->unread, rw::sortutil::svLess );
-    vals->unread.erase( std::ranges::unique( vals->unread ).begin(), vals->unread.end() );
+    sortutil::sortUnique( vals->unread, sortutil::svLess );
     std::string out = " value_refs_unread_for_lang=\"";
     for( std::size_t i = 0; i < vals->unread.size(); ++i )
     {
@@ -11189,6 +11209,7 @@ inline void writeJsonQMetrics( JsonWriter& w, const JsonQMetrics& q )
             rw::formatTo( num, sizeof( num ), ",\"humps\":{},\"deep\":{},\"deep_floor\":true", unsigned( s.humps ), unsigned( s.deepLoc ) );
             w.write( num );
         }
+        w.write( tangleMetricAttrs( s, /*json=*/true ) );   // QD-TANGLE: the JSON siblings of the XML steer= / tangle= (same omission rule)
         // The JSON sibling of the XML ev=/ev_floor=/ev_why= triple — same omission rule (absent means
         // exactly 1 on a cx row; evCountedLang keeps an uncovered language absent, never a fabricated
         // number), floor spelled as JSON true like deep_floor/locals_floor. Composed on std::string via

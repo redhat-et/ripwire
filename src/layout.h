@@ -1,5 +1,6 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
+#include "infra/sortutil.h"   // sortUnique
 #include "infra/platform.h" // infra::platform::{add,sub,mul}Overflow — the checked constant-expression arithmetic
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
@@ -1877,8 +1878,7 @@ inline std::optional<std::vector<std::string>> zeroOffsetChain( const ModelCtx& 
     {
         return std::nullopt;
     }
-    std::ranges::sort( at0 );
-    at0.erase( std::ranges::unique( at0 ).begin(), at0.end() );
+    rw::sortutil::sortUnique( at0 );
     return at0;
 }
 

@@ -7,6 +7,7 @@
 // it, don't reimplement" (and "if you fix this, fix its twins"). Type-3 (gapped) clones are a later upgrade.
 
 #include "model.h"
+#include "infra/sortutil.h"   // sortUnique
 #include "infra/Diagnostics.h"  // DISCLOSE — graceful-degrade on the Type-3 pair-cap guard (never throw)
 #include "infra/hashutil.h"     // sanitizer-clean modulo-2^64 FNV multiplication
 
@@ -881,8 +882,7 @@ inline std::vector<std::uint64_t> cloneGramFingerprints( const std::vector<std::
             }
             fp.push_back( g );
         }
-        std::sort( fp.begin(), fp.end() );
-        fp.erase( std::unique( fp.begin(), fp.end() ), fp.end() );
+        rw::sortutil::sortUnique( fp );
     }
     return fp;
 }

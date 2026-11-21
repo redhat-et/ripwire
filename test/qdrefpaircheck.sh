@@ -155,6 +155,33 @@ if [ "$sameRc" = 0 ]; then ok "(B) A==B exits 0"; else no "(B) A==B exit was $sa
 [ "$( attr "$TMP/same.xml" base_ref )" = "$( attr "$TMP/same.xml" target_ref )" ] \
     && ok "(B) A==B still discloses both refs" || no "(B) A==B ref disclosure inconsistent"
 
+# ── (B2) D3 QD-STALE-HEADER: stale_tree= says when the files on disk are not the tree the range judged ─────────
+# A range answer is about target_ref as COMMITTED. Run before the last edit (or on a commit HEAD has left), its green
+# exit cannot pass for the current files, and the root now says so: stale_tree="1", present only when true.
+# Premise: (A) ran A..B with B = HEAD on a clean tree, which is the one case it must be ABSENT.
+hdr "$TMP/syn.xml" | grep -q ' stale_tree=' \
+    && no "(B2) a clean tree whose HEAD is target_ref carries stale_tree= (it is present only when true)" \
+    || ok "(B2) clean tree at target_ref: no stale_tree="
+"$BIN" . "--quality-delta=$A_SHA..$A_SHA" >"$TMP/stale_head.xml" 2>"$TMP/stale_head.err"; staleHeadRc=$?
+[ "$( attr "$TMP/stale_head.xml" stale_tree )" = "1" ] \
+    && ok "(B2) target_ref is not HEAD's tree: stale_tree=\"1\"" \
+    || { no "(B2) target_ref A is not HEAD (B), yet stale_tree= is '$( attr "$TMP/stale_head.xml" stale_tree )'"; hdr "$TMP/stale_head.xml"; }
+if [ "$staleHeadRc" = 0 ]; then ok "(B2) stale_tree= never gates (A..A still exits 0)"; else no "(B2) A..A exit was $staleHeadRc, expected 0"; fi
+if grep -q 'stale_tree=1' "$TMP/stale_head.err"; then ok "(B2) the stale note is on stderr"; else no "(B2) no stale_tree note on stderr: $( head -c 300 "$TMP/stale_head.err" )"; fi
+printf '// an edit after the commit\n' >> lib.h
+"$BIN" . "--quality-delta=$A_SHA..$B_SHA" >"$TMP/stale_dirty.xml" 2>/dev/null; staleDirtyRc=$?
+"$BIN" . "--quality-delta=$A_SHA..$B_SHA" --legend=full >"$TMP/stale_dirty_full.xml" 2>/dev/null   # status: exits 2 like the run above (same rows); only its legend is read
+git checkout -q -- lib.h
+[ "$( attr "$TMP/stale_dirty.xml" stale_tree )" = "1" ] \
+    && ok "(B2) an uncommitted edit after target_ref: stale_tree=\"1\"" \
+    || { no "(B2) a dirty working tree, yet stale_tree= is '$( attr "$TMP/stale_dirty.xml" stale_tree )'"; hdr "$TMP/stale_dirty.xml"; }
+[ "$staleDirtyRc" = "$synRc" ] && [ "$( attr "$TMP/stale_dirty.xml" gating )" = "$( attr "$TMP/syn.xml" gating )" ] \
+    && ok "(B2) the same rows and exit ($staleDirtyRc) with and without stale_tree= (a disclosure, never a gate)" \
+    || no "(B2) stale_tree= moved the answer: exit $staleDirtyRc vs $synRc, gating $( attr "$TMP/stale_dirty.xml" gating ) vs $( attr "$TMP/syn.xml" gating )"
+if grep -q 'stale_tree=1:' "$TMP/stale_dirty.xml"; then ok "(B2) the compact legend defines stale_tree="; else no "(B2) the compact legend never defines stale_tree="; fi
+if grep -qF 'stale_tree="1" means' "$TMP/stale_dirty_full.xml"; then ok "(B2) the full legend defines stale_tree="; else no "(B2) the full legend never defines stale_tree="; fi
+grep -q 'stale_tree' "$TMP/syn.xml" && no "(B2) a document without stale_tree= pays for its legend" || ok "(B2) no stale_tree legend without the attribute"
+
 # ── (C) refusals: a bad ref, the three-dot form, and a half-typed value ───────────────────────────────────
 "$BIN" . --quality-delta=nosuchref..HEAD >/dev/null 2>"$TMP/badrev.err"; badRc=$?
 if [ "$badRc" = 1 ]; then ok "(C) an unresolvable ref exits 1"; else no "(C) unresolvable ref exit was $badRc, expected 1"; fi
@@ -205,9 +232,16 @@ grep -q '^\[stats\]' "$TMP/g3.err" && grep -q '^ripwire: cache-stats .* files=2 
     && ok "(G) control: the bare form still indexes the 2-file working tree, and both observables see it" \
     || no "(G) control: the bare form showed no working-tree ingest — the two observables above prove nothing"
 "$BIN" . "--quality-delta=$A_SHA..$B_SHA" >"$TMP/g4.xml" 2>/dev/null
-cmp -s "$TMP/syn.xml" "$TMP/g4.xml" \
-    && ok "(G) an untracked working-tree file does not change the A..B answer" \
-    || { no "(G) an untracked working-tree file changed the A..B answer"; diff "$TMP/syn.xml" "$TMP/g4.xml" | head -4; }
+# D3 (QD-STALE-HEADER): the untracked file makes the tree on disk differ from B's, which the root now DISCLOSES —
+# stale_tree="1" and its one compact-legend reading. Everything else (rows, counts, the rest of the legend) must be
+# byte-identical: the range form still never reads the working tree's CONTENT.
+[ "$( attr "$TMP/g4.xml" stale_tree )" = "1" ] \
+    && ok "(G) the untracked file is disclosed as stale_tree=\"1\"" \
+    || no "(G) an untracked working-tree file, yet no stale_tree=\"1\" on the root"
+sed -e 's/ stale_tree="1"//' -e 's/ stale_tree=1: [^.]*; never gating\.//' "$TMP/g4.xml" >"$TMP/g4.nostale.xml"
+cmp -s "$TMP/syn.xml" "$TMP/g4.nostale.xml" \
+    && ok "(G) an untracked working-tree file does not change the A..B answer (stale_tree= and its legend aside)" \
+    || { no "(G) an untracked working-tree file changed the A..B answer"; diff "$TMP/syn.xml" "$TMP/g4.nostale.xml" | head -4; }
 "$BIN" "$R" "--for=tangle" "--quality-delta=$A_SHA..$B_SHA" >/dev/null 2>"$TMP/g5.err"; g5Rc=$?
 [ "$g5Rc" = 0 ] && grep -q 'IGNORED this run: --quality-delta' "$TMP/g5.err" \
     && ok "(G) a verb that outranks --quality-delta still answers from the working tree (--for wins, the range is disclosed as ignored)" \
