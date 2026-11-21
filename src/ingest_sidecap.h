@@ -2068,6 +2068,7 @@ struct DefIdentity
     AnnotationRename renamed {};      // MACRO-P1: the real function's name and start when a macro annotation hid it; null otherwise
     bool             macroUse = false;   // MACRO-P0: the declarator is a macro invocation — a call site of the macro (emitMacroInvocationCall)
     bool             exUnitTest = false; // an ExUnit `test "title"` block: indexed as `test <title>`, in the file's test scope
+    TSNode           testMacroBody {};   // LB-E: a test macro block's sibling block (its title is `name`); null otherwise
     CaptureFate      fate = CaptureFate::Keep;   // Drop: mints no definition — a macro use with no function behind it, a test macro
                                                  // block without its parts (dropGatedCapture's own veto, guarded here, not asserted)
 };
@@ -2110,7 +2111,8 @@ inline DefIdentity definitionIdentityOf( const TagsFile& file, const TagsMatch& 
             id.fate = CaptureFate::Drop;
             return id;
         }
-        id.name = nameFactsAt( parts.title, testMacroTitleOf( parts.title, file.src ) );
+        id.name          = nameFactsAt( parts.title, testMacroTitleOf( parts.title, file.src ) );
+        id.testMacroBody = parts.body;
     }
     else if( lang == Lang::Clojure )
     {
@@ -2249,15 +2251,30 @@ inline CaptureFate inertQuoteFate( const TagsFile& file, TagsSinks& sinks, const
     return CaptureFate::Emitted;
 }
 
+// A callable definition kind: what complexity, parameters and Ruby's class-side binds are read for.
+inline bool isCallable( SymKind kind ) noexcept
+{
+    switch( kind )
+    {
+        case SymKind::Function:
+        case SymKind::Method:
+        return true;
+
+        default:
+        return false;
+    }
+}
+
 // Where a definition's code lives: the node its span covers, its body (null: a declaration), the function literal a name is bound
 // to (kFnLiteralBinding: params/cx/nest read from it), and whether the body is a SIBLING the span runs through.
 struct DefCodeNodes
 {
-    TSNode defNode {};
-    TSNode body {};
-    TSNode literal {};
-    bool   testMacroBlock  = false;   // LB-E: the def is TWO SIBLING nodes (testMacroBlockPartsOf): the macro statement and its block
-    bool   spanThroughBody = false;   // the code this symbol owns lives in a SIBLING node: byte/row extents and complexity run through it
+    TSNode      defNode {};
+    TSNode      body {};
+    TSNode      literal {};
+    bool        testMacroBlock  = false;   // LB-E: the def is TWO SIBLING nodes (testMacroBlockPartsOf): the macro statement and its block
+    bool        spanThroughBody = false;   // the code this symbol owns lives in a SIBLING node: byte/row extents and complexity run through it
+    CaptureFate fate            = CaptureFate::Keep;   // Drop: no definition — a body-less C/C++ specifier in a function's signature is a type use
 };
 
 // The declarator climb's STOP set: a type/namespace/file scope — a function's body never lives above one of these, so reaching
@@ -2400,10 +2417,13 @@ inline TSNode positionalBodyOf( Lang lang, TSNode defNode )
 // climb would hand the constant THE WHOLE CLASS — the exact Rust-method span bug the H4 W3 note describes). No-op for every
 // pre-existing Var capture (Swift/C#/Go/Python parents hit a scope-stop or the file root before any "body"-owning ancestor —
 // verified byte-identical on the gate corpora). A Field's span is its own field_declaration / defining assignment — the Var rule,
-// same reason. std::nullopt: no definition — a body-less C/C++ specifier in a function's signature is a type use.
-inline std::optional<DefCodeNodes> definitionCodeOf( const TagsFile& file, const TagsMatch& m, const DefIdentity& id )
+// same reason. Drop (DefCodeNodes::fate): a body-less C/C++ specifier in a function's signature is a type use.
+inline DefCodeNodes definitionCodeOf( const TagsFile& file, const TagsMatch& m, const DefIdentity& id )
 {
     const Lang         lang = file.le.lang;
+    // defBodyNodeOf reads the name node only to find a literal a name is bound to (fnLiteralBoundTo); a test macro block, whose name
+    // node is its title, comes from queries/cpp/tags.scm alone, a language outside that walk.
+    DASSERT( m.defCap != "definition.testmacroblock" || !extent::inSet( kFnLiteralBinding.langs, lang ), "a test macro block is never literal-bound" );
     const DefBodyNodes own  = lang == Lang::Elixir ? DefBodyNodes{ elixirBody( m.roleNode, file.src ), {}, m.roleNode }
                                                    : defBodyNodeOf( m.roleNode, id.name.node, id.kind, lang );
     DefCodeNodes code;
@@ -2413,14 +2433,14 @@ inline std::optional<DefCodeNodes> definitionCodeOf( const TagsFile& file, const
     code.testMacroBlock = m.defCap == "definition.testmacroblock";
     if( code.testMacroBlock )
     {
-        code.body = testMacroBlockPartsOf( m.roleNode, file.src ).body;   // its parts were read whole: definitionIdentityOf
+        code.body = id.testMacroBody;   // its parts were read once, by definitionIdentityOf
     }
     if( ts_node_is_null( code.body ) && id.kind != SymKind::Var && id.kind != SymKind::Field && lang != Lang::Elixir )
     {
         const DeclaratorClimb climb = climbDeclaratorToDefinition( m.roleNode, isCFamilyTypeSpecifier( lang, m.roleNode ) );
         if( climb.typeUseInSignature )
         {
-            return std::nullopt;
+            return DefCodeNodes{ .fate = CaptureFate::Drop };
         }
         code.defNode = ts_node_is_null( climb.span ) ? code.defNode : climb.span;
         code.body    = climb.body;
@@ -2486,8 +2506,7 @@ inline void fillDefinitionExtent( RawDef& d, const DefCodeNodes& code, const Def
 inline void fillDefinitionComplexity( RawDef& d, const TagsFile& file, const DefIdentity& id, const DefCodeNodes& code )
 {
     const TSNode     measured = code.spanThroughBody ? code.body : ( ts_node_is_null( code.literal ) ? code.defNode : code.literal );
-    const bool       callable = id.kind == SymKind::Function || id.kind == SymKind::Method;
-    const Complexity c        = callable && file.shape ? complexityOf( measured, file.src, file.le.lang )
+    const Complexity c        = isCallable( id.kind ) && file.shape ? complexityOf( measured, file.src, file.le.lang )
                                                        : Complexity{ 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, {}, 0u, 0u, 0u };
     d.cx           = c.cx;
     d.ccx          = c.ccx;
@@ -2531,13 +2550,14 @@ inline void fillDefinitionParameters( RawDef& d, const TagsFile& file, const Tag
         return;
     }
     const Lang       lang         = file.le.lang;
-    const bool       callable     = id.kind == SymKind::Function || id.kind == SymKind::Method;
+    const bool       callable     = isCallable( id.kind );
     const bool       literalBound = !ts_node_is_null( code.literal );
     const TSNode     metricNode   = literalBound ? code.literal : code.defNode;
     const auto       counted      = callable ? definitionParamCount( lang, code.defNode, metricNode, literalBound, file.src ) : std::uint16_t( 0 );
     const ParamShape paramShape   = ( callable && !code.testMacroBlock && lang != Lang::Clojure ) ? cc_paramShape( metricNode, lang, id.kind, file.src ) : ParamShape{};
     d.params     = counted;
     d.paramsMin  = paramShape.minimum <= counted ? paramShape.minimum : std::uint16_t( 0 );
+    // m.keywordHead is an Elixir def head: @_keyword is captured by queries/elixir/tags.scm alone (TagsMatch::keywordHead)
     d.arityExact = ( m.keywordHead ? elixirHeadDefaultCount( m.roleNode, file.src ) == 0 : paramShape.exact ) ? std::uint8_t( 1 ) : std::uint8_t( 0 );
 }
 
@@ -2729,7 +2749,7 @@ inline void emitLanguageDefinitionFacts( const TagsFile& file, TagsSinks& sinks,
     {
         case Lang::Ruby:
         {
-            if( id.kind == SymKind::Function || id.kind == SymKind::Method )
+            if( isCallable( id.kind ) )
             { // a method defined on the class object (`def self.m`, `class << self`): its bind (test/rubyclassrecvcheck.sh)
                 rubyNoteClassSideDef( defNode, file.fileId, d.name, file.src, sinks.binds );
             }
@@ -2779,44 +2799,43 @@ inline void captureDefinitionEdges( const TagsFile& file, TagsSinks& sinks, cons
 
 // The definition arm: one RawDef, each field written by exactly one step — extent, complexity, parameters, name and kind, test scope,
 // linkage, enclosing function, scope, parse-recovery bits — then its own binds and calls, the row, and (Full) the edges it mints.
-// `aliasTargetStart`: INDEX-ALIAS-CONST's written target (aliasTargetStartOf).
-inline void captureDefinition( const TagsFile& file, TagsSinks& sinks, const TagsMatch& m, const DefIdentity& id, std::uint32_t aliasTargetStart )
+inline void captureDefinition( const TagsFile& file, TagsSinks& sinks, const TagsMatch& m, const DefIdentity& id )
 {
-    const std::optional<DefCodeNodes> code = definitionCodeOf( file, m, id );
-    if( !code )
+    const DefCodeNodes code = definitionCodeOf( file, m, id );
+    if( code.fate != CaptureFate::Keep )
     {
-        return;   // a body-less C/C++ specifier in a function's signature: a type use, never a definition
+        return;
     }
     RawDef d;
     d.fileId = file.fileId;
     d.lang   = file.le.lang;
     d.line   = id.name.row + 1;   // the identifier's line — most accurate, dedup-stable (a test macro block's: its title's)
-    fillDefinitionExtent( d, *code, id, aliasTargetStart );
-    fillDefinitionComplexity( d, file, id, *code );
-    fillDefinitionParameters( d, file, m, id, *code );
-    IndexedName indexed = indexedNameOf( file, m, id, *code, d.params );
+    fillDefinitionExtent( d, code, id, aliasTargetStartOf( file, m ) );
+    fillDefinitionComplexity( d, file, id, code );
+    fillDefinitionParameters( d, file, m, id, code );
+    IndexedName indexed = indexedNameOf( file, m, id, code, d.params );
     if( indexed.fate != CaptureFate::Keep )
     {
         return;
     }
     d.name      = std::move( indexed.name );
     d.kind      = indexed.kind;
-    d.testScope = definitionTestScope( file, id, *code );
+    d.testScope = definitionTestScope( file, id, code );
     // Internal linkage (model.h Symbol::internalLinkage): C and C++ only, read off defNode — the node that owns
     // the storage class and whose ancestors are the enclosing namespaces (ingest_names.h::cppInternalLinkage).
-    d.internalLinkage = internalLinkageBit( file.le.lang, code->defNode, file.src );
-    noteEnclosingFunctionScope( d, file, m, id, code->defNode );
+    d.internalLinkage = internalLinkageBit( file.le.lang, code.defNode, file.src );
+    noteEnclosingFunctionScope( d, file, m, id, code.defNode );
     DefScope scope  = definitionScopeOf( file, m, id );
     d.scope         = std::move( scope.name );
     d.scopeRootsStd = scope.rootsStd ? std::uint8_t( 1 ) : std::uint8_t( 0 );
     // extent honesty: did the parse RECOVER this def's container or kind? Only asked in a file whose root
     // holds an error (fileHasError, one O(1) flag test per file) — see parseRecoveredBits.
-    d.recovered = file.fileHasError ? parseRecoveredBits( code->defNode, id.kind, file.le.lang, d.scope.empty() ) : std::uint8_t( 0 );
-    emitLanguageDefinitionFacts( file, sinks, d, m, id, code->defNode );
+    d.recovered = file.fileHasError ? parseRecoveredBits( code.defNode, id.kind, file.le.lang, d.scope.empty() ) : std::uint8_t( 0 );
+    emitLanguageDefinitionFacts( file, sinks, d, m, id, code.defNode );
     sinks.defs.push_back( std::move( d ) );
     if( file.full )   // TagsCapture::DefinitionsOnly: the reference edges feed no definition
     {
-        captureDefinitionEdges( file, sinks, m, id, code->defNode );
+        captureDefinitionEdges( file, sinks, m, id, code.defNode );
     }
 }
 
@@ -3065,6 +3084,9 @@ inline void captureTagsMatch( const TagsFile& file, TagsSinks& sinks, const Tags
     // uninitialized C++ shape, which needs the captured declaration node), JS export/prototype
     // assignments — in one drop decision (see dropGatedCapture for the per-class rationale and why
     // none of this can live in the query as a #match?/#eq? predicate).
+    // It judges the name AS DECLARED. Where identity re-named the definition (MACRO-P1) the capture is a function or method, whose
+    // gate reads the role node only (dropGatedCapture: definition.function's arm; definition.method has none).
+    ASSUME( !id.macroUse || m.defCap == "definition.function" || m.defCap == "definition.method", "cFamilyMacroInvocationCapture admits these two only" );
     if( m.isDef && dropGatedCapture( m.defCap, lang, id.declarator.text, id.declarator.node, m.roleNode, file.src ) )
     {
         return;
@@ -3076,7 +3098,7 @@ inline void captureTagsMatch( const TagsFile& file, TagsSinks& sinks, const Tags
 
     if( m.isDef )
     {
-        captureDefinition( file, sinks, m, id, aliasTargetStartOf( file, m ) );
+        captureDefinition( file, sinks, m, id );
     }
     else if( m.isRef && file.full )
     {
