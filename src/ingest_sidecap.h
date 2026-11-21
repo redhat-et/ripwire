@@ -1922,7 +1922,8 @@ struct TagsMatch
     std::string_view refCap;      // the @reference capture's name — "reference.import" routes the using-declaration role (r9 loss bucket 1)
     TSNode           roleNode {};
     DefNameFacts     name {};     // the @name identifier as captured: its node, text, start byte and 0-based row
-    bool             keywordHead = false;   // #355: the pattern carried @_keyword, a head its tags.scm predicates accepted
+    bool             keywordHead = false;   // #355: the pattern carried @_keyword, a head its tags.scm predicates accepted — Elixir's
+                                            // def heads: queries/elixir/tags.scm is its only pattern, so the capture IS the language gate
 
     bool hasRole() const noexcept { return isDef || isRef; }
     bool hasName() const noexcept { return !ts_node_is_null( name.node ); }
@@ -2066,6 +2067,7 @@ struct DefIdentity
                                               // only the index row of an Elixir defimpl/defprotocol module shows another (elixirIndexedName)
     AnnotationRename renamed {};      // MACRO-P1: the real function's name and start when a macro annotation hid it; null otherwise
     bool             macroUse = false;   // MACRO-P0: the declarator is a macro invocation — a call site of the macro (emitMacroInvocationCall)
+    bool             exUnitTest = false; // an ExUnit `test "title"` block: indexed as `test <title>`, in the file's test scope
     CaptureFate      fate = CaptureFate::Keep;   // Drop: mints no definition — a macro use with no function behind it, a test macro
                                                  // block without its parts (dropGatedCapture's own veto, guarded here, not asserted)
 };
@@ -2077,7 +2079,8 @@ struct DefIdentity
 //     read the real function's own `f()` as a variable (annotationRenamedName), this definition is the only one f gets — it carries
 //     f's name and kind (renamedAnnotationKind), from f's own start.
 //   - LB-E testmacroblock: the def is TWO SIBLING nodes (testMacroBlockPartsOf); its name is the title literal (a display string).
-//   - Clojure: the kind is the head's shape (`defn`, `defmacro`, `defprotocol` …); Elixir: a module attribute (`@doc`, `@type`) is a Var.
+//   - Clojure: the kind is the head's shape (`defn`, `defmacro`, `defprotocol` …); Elixir: a module attribute (`@doc`, `@type`) is a
+//     Var, and an ExUnit `test` block is a test.
 // Pure: what a later step drops, it drops on these facts.
 inline DefIdentity definitionIdentityOf( const TagsFile& file, const TagsMatch& m )
 {
@@ -2113,9 +2116,10 @@ inline DefIdentity definitionIdentityOf( const TagsFile& file, const TagsMatch& 
     {
         id.kind = clojureDefinitionShape( m.roleNode, file.src ).kind;
     }
-    else if( lang == Lang::Elixir && m.defCap == "definition.attribute" )
+    else if( lang == Lang::Elixir )
     {
-        id.kind = SymKind::Var;
+        id.kind       = m.defCap == "definition.attribute" ? SymKind::Var : m.kind;
+        id.exUnitTest = elixirTarget( m.roleNode, file.src ) == "test";
     }
     return id;
 }
@@ -2204,15 +2208,17 @@ inline CaptureFate elixirFilterFate( const TagsFile& file, const TagsMatch& m )
 // The per-language capture filters: Elixir's, and Clojure's (a definition needs a defining head, a reference must not be a special form).
 inline CaptureFate languageFilterFate( const TagsFile& file, const TagsMatch& m )
 {
-    if( file.le.lang == Lang::Elixir )
+    switch( file.le.lang )
     {
+        case Lang::Elixir:
         return elixirFilterFate( file, m );
+
+        case Lang::Clojure:
+        return clojureKeepCapture( m.roleNode, m.isDef, file.src ) ? CaptureFate::Keep : CaptureFate::Drop;
+
+        default:
+        return CaptureFate::Keep;
     }
-    if( file.le.lang == Lang::Clojure && !clojureKeepCapture( m.roleNode, m.isDef, file.src ) )
-    {
-        return CaptureFate::Drop;
-    }
-    return CaptureFate::Keep;
 }
 
 // A capture inside an inert quote region ends here: call/operator/named-capture candidates are kept as declined facts, never edges
@@ -2530,10 +2536,9 @@ inline void fillDefinitionParameters( RawDef& d, const TagsFile& file, const Tag
     const TSNode     metricNode   = literalBound ? code.literal : code.defNode;
     const auto       counted      = callable ? definitionParamCount( lang, code.defNode, metricNode, literalBound, file.src ) : std::uint16_t( 0 );
     const ParamShape paramShape   = ( callable && !code.testMacroBlock && lang != Lang::Clojure ) ? cc_paramShape( metricNode, lang, id.kind, file.src ) : ParamShape{};
-    const bool       elixirHead   = lang == Lang::Elixir && m.keywordHead;
     d.params     = counted;
     d.paramsMin  = paramShape.minimum <= counted ? paramShape.minimum : std::uint16_t( 0 );
-    d.arityExact = ( elixirHead ? elixirHeadDefaultCount( m.roleNode, file.src ) == 0 : paramShape.exact ) ? std::uint8_t( 1 ) : std::uint8_t( 0 );
+    d.arityExact = ( m.keywordHead ? elixirHeadDefaultCount( m.roleNode, file.src ) == 0 : paramShape.exact ) ? std::uint8_t( 1 ) : std::uint8_t( 0 );
 }
 
 // An Elixir module attribute's definition name: a typed attribute (@type/@callback and kin) is named with its arity, any other
@@ -2569,11 +2574,6 @@ inline SymKind elixirModuleKind( const TagsFile& file, TSNode roleNode, const st
     return kind;
 }
 
-inline bool isExUnitTest( const TagsFile& file, const TagsMatch& m )
-{
-    return file.le.lang == Lang::Elixir && elixirTarget( m.roleNode, file.src ) == "test";
-}
-
 // The name a definition is indexed under, and its kind there. Drop: the capture mints no row.
 struct IndexedName
 {
@@ -2589,9 +2589,8 @@ struct IndexedName
 // elixirModuleKind's kind; Drop when it has no name). Anything else keeps the capture's name.
 inline IndexedName elixirIndexedName( const TagsFile& file, const TagsMatch& m, const DefIdentity& id, std::uint16_t params )
 {
-    const bool             exUnitTest      = isExUnitTest( file, m );
-    const std::string_view attribute       = exUnitTest ? std::string_view{} : elixirAttribute( m.roleNode, file.src );
-    const bool             generatedModule = !exUnitTest && attribute.empty() && id.kind == SymKind::Other;
+    const std::string_view attribute       = id.exUnitTest ? std::string_view{} : elixirAttribute( m.roleNode, file.src );
+    const bool             generatedModule = !id.exUnitTest && attribute.empty() && id.kind == SymKind::Other;
     std::string            module          = generatedModule ? file.elixir.moduleName( m.roleNode ) : std::string{};
     if( generatedModule && module.empty() )
     {
@@ -2602,7 +2601,7 @@ inline IndexedName elixirIndexedName( const TagsFile& file, const TagsMatch& m, 
     {
         return IndexedName{ elixirFunctionName( id.name.text, params ), kind };
     }
-    if( exUnitTest )
+    if( id.exUnitTest )
     {
         return IndexedName{ "test " + std::string( id.name.text.substr( 1, id.name.text.size() - 2 ) ), kind };
     }
@@ -2632,9 +2631,9 @@ inline IndexedName indexedNameOf( const TagsFile& file, const TagsMatch& m, cons
 // L8: the in-file test-scope bit, for EVERY kind (a `#[cfg(test)] mod` and a `class TestFoo` are themselves symbols, and dropping
 // the members while keeping the shell would be a worse answer than either). Read on defNode, whose ancestors are the enclosing
 // scopes. LB-E: a test macro IS the in-file convention; so is an ExUnit `test`.
-inline std::uint8_t definitionTestScope( const TagsFile& file, const TagsMatch& m, const DefCodeNodes& code )
+inline std::uint8_t definitionTestScope( const TagsFile& file, const DefIdentity& id, const DefCodeNodes& code )
 {
-    if( code.testMacroBlock || isExUnitTest( file, m ) )
+    if( code.testMacroBlock || id.exUnitTest )
     {
         return 1;
     }
@@ -2658,34 +2657,42 @@ inline void noteEnclosingFunctionScope( RawDef& d, const TagsFile& file, const T
     d.fnScopeEnd   = fnScope.end;
 }
 
-// The definition's scope, per language ("" where the language records none).
-inline std::string definitionScopeOf( const TagsFile& file, const TagsMatch& m, const DefIdentity& id )
+// A definition's enclosing scope as the index records it, and (#150, C++ only) whether that scope chain roots at namespace std.
+struct DefScope
+{
+    std::string name;             // "" where the language records none
+    bool        rootsStd = false; // genuinely INSIDE namespace std at ANY nesting depth — not just a scope whose immediate segment
+                                  // happens to spell one std also uses (model.h Symbol::scopeRootsStd)
+};
+
+// The definition's scope, per language.
+inline DefScope definitionScopeOf( const TagsFile& file, const TagsMatch& m, const DefIdentity& id )
 {
     const Lang lang = file.le.lang;
     if( lang == Lang::Cpp )
     { // E#4: out-of-line `A::b` → "A" (`Box<T>::grow` (primary) → "Box"; a specialization keeps its id), else the enclosing class/namespace
         std::string qualifier = qualifierOfDefinition( id.name.node, file.src );
-        return qualifier.empty() ? enclosingScopeOf( id.name.node, file.src ) : qualifier;
+        return DefScope{ qualifier.empty() ? enclosingScopeOf( id.name.node, file.src ) : std::move( qualifier ), cppDefinitionRootsStd( id.name.node, file.src ) };
     }
     if( enumTableAt( kDefScopeWalkerOfLang, lang, DefScopeWalker::None ) != DefScopeWalker::None )
     { // Python, Go, Rust, Kotlin: the language's row in ingest_names.h kDefScopeWalkerOfLang
-        return defScopeOf( lang, id.name.node, file.src );
+        return DefScope{ defScopeOf( lang, id.name.node, file.src ) };
     }
     if( lang == Lang::Elixir )
     {
-        return id.kind == SymKind::Other ? std::string{} : file.elixir.scopeOf( m.roleNode );
+        return DefScope{ id.kind == SymKind::Other ? std::string{} : file.elixir.scopeOf( m.roleNode ) };
     }
     if( lang == Lang::Ruby )
     { // enclosing class/module → id= addressability, per-class overload sets, editCheckImplicitReceiver
-        return rubyEnclosingScopeOf( id.name.node, file.src );   // (test/rubyscopecheck.sh)
+        return DefScope{ rubyEnclosingScopeOf( id.name.node, file.src ) };   // (test/rubyscopecheck.sh)
     }
     if( ( lang == Lang::JavaScript || lang == Lang::TypeScript ) && m.defCap == "definition.protomethod" )
     { // only the five built-in ctors: every Foo.prototype.bar gaining sc= would mint a new
       // canonical id and move quality baselines (node lib/ has ~163 anonymous protomethods)
         const std::string_view ctor = prototypeCtorName( id.name.node, file.src );
-        return isJsTsBuiltinCtor( ctor ) ? std::string( ctor ) : std::string{};
+        return DefScope{ isJsTsBuiltinCtor( ctor ) ? std::string( ctor ) : std::string{} };
     }
-    return std::string{};
+    return DefScope{};
 }
 
 // `defdelegate f(x), to: M, as: g`: the delegating clause calls M.g with its own arity.
@@ -2704,7 +2711,7 @@ inline void emitElixirDelegate( const TagsFile& file, TagsSinks& sinks, const Ra
 // An Elixir def head's own facts, read off the finished definition: its callable (and default-arity) binds, and a defdelegate's call.
 inline void emitElixirHeadFacts( const TagsFile& file, TagsSinks& sinks, const RawDef& d, const TagsMatch& m, const DefIdentity& id )
 {
-    if( file.le.lang != Lang::Elixir || !m.keywordHead )
+    if( !m.keywordHead )
     {
         return;
     }
@@ -2718,9 +2725,31 @@ inline void emitElixirHeadFacts( const TagsFile& file, TagsSinks& sinks, const R
 // A Ruby method defined on the class object (`def self.m`, `class << self`): its bind (test/rubyclassrecvcheck.sh).
 inline void emitRubyClassSideBind( const TagsFile& file, TagsSinks& sinks, const RawDef& d, const DefIdentity& id, TSNode defNode )
 {
-    if( file.le.lang == Lang::Ruby && ( id.kind == SymKind::Function || id.kind == SymKind::Method ) )
+    if( id.kind == SymKind::Function || id.kind == SymKind::Method )
     {
         rubyNoteClassSideDef( defNode, file.fileId, d.name, file.src, sinks.binds );
+    }
+}
+
+// A definition's language-specific binds and calls, read off the finished row (Ruby's class-side methods, Elixir's def heads).
+inline void emitLanguageDefinitionFacts( const TagsFile& file, TagsSinks& sinks, const RawDef& d, const TagsMatch& m, const DefIdentity& id, TSNode defNode )
+{
+    switch( file.le.lang )
+    {
+        case Lang::Ruby:
+        {
+            emitRubyClassSideBind( file, sinks, d, id, defNode );
+        }
+        break;
+
+        case Lang::Elixir:
+        {
+            emitElixirHeadFacts( file, sinks, d, m, id );
+        }
+        break;
+
+        default:
+        break;
     }
 }
 
@@ -2778,20 +2807,18 @@ inline void captureDefinition( const TagsFile& file, TagsSinks& sinks, const Tag
     }
     d.name      = std::move( indexed.name );
     d.kind      = indexed.kind;
-    d.testScope = definitionTestScope( file, m, *code );
+    d.testScope = definitionTestScope( file, id, *code );
     // Internal linkage (model.h Symbol::internalLinkage): C and C++ only, read off defNode — the node that owns
     // the storage class and whose ancestors are the enclosing namespaces (ingest_names.h::cppInternalLinkage).
     d.internalLinkage = internalLinkageBit( file.le.lang, code->defNode, file.src );
     noteEnclosingFunctionScope( d, file, m, id, code->defNode );
-    d.scope = definitionScopeOf( file, m, id );
-    // #150: is this def genuinely INSIDE namespace std, at ANY nesting depth — not just a def
-    // whose immediate scope happens to spell a segment std also uses? See Symbol::scopeRootsStd.
-    d.scopeRootsStd = file.le.lang == Lang::Cpp && cppDefinitionRootsStd( id.name.node, file.src ) ? std::uint8_t( 1 ) : std::uint8_t( 0 );
+    DefScope scope  = definitionScopeOf( file, m, id );
+    d.scope         = std::move( scope.name );
+    d.scopeRootsStd = scope.rootsStd ? std::uint8_t( 1 ) : std::uint8_t( 0 );
     // extent honesty: did the parse RECOVER this def's container or kind? Only asked in a file whose root
     // holds an error (fileHasError, one O(1) flag test per file) — see parseRecoveredBits.
     d.recovered = file.fileHasError ? parseRecoveredBits( code->defNode, id.kind, file.le.lang, d.scope.empty() ) : std::uint8_t( 0 );
-    emitRubyClassSideBind( file, sinks, d, id, code->defNode );
-    emitElixirHeadFacts( file, sinks, d, m, id );
+    emitLanguageDefinitionFacts( file, sinks, d, m, id, code->defNode );
     sinks.defs.push_back( std::move( d ) );
     if( file.full )   // TagsCapture::DefinitionsOnly: the reference edges feed no definition
     {
