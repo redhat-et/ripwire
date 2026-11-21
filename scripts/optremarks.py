@@ -146,6 +146,9 @@ COLD_FILES = (
       "the ripwire_probe binary. Not linked into ripwire at all, so nothing in it runs when the tool runs." ),
     ( "src/largealloc.cpp",
       "macOS operator new and delete; a block under 256 KiB pays one compare, and the mmap route is called a few thousand times a run" ),
+    ( "src/memceiling_new.cpp", "operator new/delete where largealloc.cpp does not reach (non-Apple, RIPWIRE_LARGE_ALLOC=OFF), and CMake never links both: the macOS "
+      "build this script runs against holds no remark in it at all — the os_win32.cpp argument. Linked, it is the thin half of the pair above: one relaxed atomic load, "
+      "then malloc, no loop of its own. REVISIT if memceiling.h's footprint reading ever goes per-block." ),
     ( "src/alloccount.cpp",
       "the RIPWIRE_ALLOC_COUNT operator new/delete replacement: absent from every shipped build and from every gate by construction — see the honesty note at the "
       "top of the file." ),

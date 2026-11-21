@@ -106,8 +106,24 @@ def mine( repo, cap, subject_filter, ref ):
             break
     return picked
 
+RUN_TIMEOUT_S = 900   # one --slice / --expand over a whole worktree; generous on purpose
+MEMORY_REFUSAL_RC = 5   # the memory-refusal exit everywhere in ripwire (memguard.h's hard line, memceiling.h's allocator line)
+
 def run_ripwire( bin_, tree, args ):
-    return subprocess.run( [ bin_, str( tree ) ] + args, capture_output=True, text=True, errors="replace" )
+    # Bounded, and a timeout, a signal-kill (rc < 0, e.g. the OS killing a runaway run) or a MEMORY REFUSAL stops the
+    # eval with that state named: as a plain non-zero rc it would be counted as `selector_unserved` and leave the
+    # denominator. Only those three — every OTHER non-zero rc is a legitimate selector answer (ambiguous, not found,
+    # unserved), which the caller counts as `selector_unserved` on purpose, so it is returned as before.
+    argv = [ bin_, str( tree ) ] + args
+    try:
+        r = subprocess.run( argv, capture_output=True, text=True, errors="replace", timeout=RUN_TIMEOUT_S )
+    except subprocess.TimeoutExpired:
+        sys.exit( f"TIMEOUT ({RUN_TIMEOUT_S}s): {' '.join( argv )}" )
+    if r.returncode < 0:
+        sys.exit( f"KILLED (signal={-r.returncode}): {' '.join( argv )}" )
+    if r.returncode == MEMORY_REFUSAL_RC:
+        sys.exit( f"REFUSED BY THE MEMORY LIMIT (exit={r.returncode}): {' '.join( argv )}\n{( r.stderr or '' ).strip()[:400]}" )
+    return r
 
 def main():
     ap = argparse.ArgumentParser()

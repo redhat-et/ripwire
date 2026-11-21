@@ -39,6 +39,7 @@
 // keeps `--expand=FILE:NAME`. The thresholds are a registered hypothesis (PLAN_OUTPUT_ROUTING_LOOP §1.5 L-N),
 // not a tuned number: the routing-loop ladder measures them, and a later round moves them with a measured reason.
 
+#include "infra/envnumber.h"   // readEnvNumber: RIPWIRE_TAIL_SYM_WIDE_ROWS
 #include "mention.h"     // ForNamedHeaderRow — forHdrRowsXml below renders the resolver's rows
 #include "infra/sortutil.h"   // sortUnique
 #include "infra/enumcount.h" // enumCountIsExact — TailPageRowFate's count beside the enum
@@ -1180,20 +1181,17 @@ struct TailPageWalkInputs
 // the measurement / ablation arm of test/fortailwidecheck.sh: 0 is the pre-card tail, 40 is arm A). Anything else reads the default.
 inline std::size_t tailSymWideRows()
 {
-    const char* v = std::getenv( "RIPWIRE_TAIL_SYM_WIDE_ROWS" );
-    if( v == nullptr )
+    const EnvNumber n = readEnvNumber( "RIPWIRE_TAIL_SYM_WIDE_ROWS" );
+    if( !n.set )
     {
         return kForFileTailSymWideRows;
     }
-    const std::string_view text( v );
-    std::size_t n = 0;
-    const auto [end, ec] = std::from_chars( text.data(), text.data() + text.size(), n );
-    if( ec != std::errc() || end != text.data() + text.size() || text.empty() || n > kForFileTailSymWideRows )
+    if( !n.parsed || n.value > kForFileTailSymWideRows )
     {
         rw::emitTo( stderr, "ripwire: RIPWIRE_TAIL_SYM_WIDE_ROWS is set but not a count 0-{} — default tail\n", kForFileTailSymWideRows );
         return kForFileTailSymWideRows;
     }
-    return n;
+    return std::size_t( n.value );
 }
 // SIZE-2: a widened row (p= only) of a non-code class the task did not name is counted, not listed, and next= pages from the
 // first one (pageSkip). True when the row folded.

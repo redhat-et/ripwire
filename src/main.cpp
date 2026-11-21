@@ -551,6 +551,7 @@ struct MainDispatch
 #include "verbs_change.h"
 #include "verbs_report.h"
 #include "verbs_grep.h"
+#include "memceiling.h"          // the memory guard's allocator line (on by default; RIPWIRE_MEM_BUDGET_MB overrides it)
 #include "memguard.h"            // #350 layer 3: the memory guard's limit (installed in main) and its verdicts after ingest
 #include "lsp.h"                 // the --lsp navigation-server section (Phase 1 PoC — docs/LSP.md); after the verb families so it can reuse the shared use-site scan
 
@@ -3812,10 +3813,16 @@ std::optional<int> runCliEdit( const rw::Config& cfg )
     // F-W1: a post-check whose fold stopped AFTER the write is a gap on the receipt (post_check "not run: ..."), never a
     // refusal: the file is edited, so this exits 0 like any applied edit and says the check did not run
     const bool postCheckStopped = outcome.resultJson.find( rw::mcpedit::kPostCheckNotRunKey ) != std::string::npos;
-    rw::emitTo( stderr, "ripwire edit: applied atomically; receipt carries region, blob_sha{}; next: {}\n",
+    // RULING 101: the post-check ran with the allocator ceiling suspended (the write was already committed, so a
+    // refusal there could report nothing). The receipt always carries `memory_ceiling`, in every state; this line
+    // names only the case a reader has to act on — the check actually PASSED the limit and ran unbounded.
+    const bool ceilingPassed = outcome.resultJson.find( rw::mcpedit::kCeilingKey ) != std::string::npos
+                            && outcome.resultJson.find( "the check PASSED the" ) != std::string::npos;
+    rw::emitTo( stderr, "ripwire edit: applied atomically; receipt carries region, blob_sha{}{}; next: {}\n",
                   cfg.noPostCheck        ? " (post-check skipped)"
                   : postCheckStopped     ? " (post-check not run: its graph fold stopped, see post_check)"
                                          : ", edit_check, tests_to_run",
+                  ceilingPassed ? " — the post-check passed the memory ceiling and ran unbounded, see memory_ceiling" : "",
                   outcome.next.c_str() );
     return 0;
 }
@@ -4449,6 +4456,53 @@ static bool installMemoryGuard( const rw::Config& cfg )
     return true;
 }
 
+// The memory guard's allocator line (memceiling.h, on by default): installed straight after the guard, before any thread. Its
+// ceiling is the guard's hard limit (65% of RAM, --max-memory, RIPWIRE_MAX_MEMORY) unless RIPWIRE_MEM_BUDGET_MB names one for
+// this line alone (0 = off). A value that is not a whole MiB count of 0 or at least 64 refuses the run (exit 1), as
+// RIPWIRE_MAX_MEMORY does. Servers do not arm it (its refusal ends the process); nor can a build whose operator new is not
+// replaced. Either is said on stderr only when RIPWIRE_MEM_BUDGET_MB asked for the line explicitly.
+static bool installMemoryCeiling( const rw::Config& cfg )
+{
+    const rw::memceiling::Setting s = rw::memceiling::readSetting();
+    if( !VALIDATE( s.parse != rw::memceiling::Parse::Invalid, "RIPWIRE_MEM_BUDGET_MB is 0 or a whole number of MiB, at least 64" ) )
+    {
+        DISCLOSE( Diagnostics::answerRefused, "main: an unparseable RIPWIRE_MEM_BUDGET_MB refuses the run (exit 1, stderr names it)" );
+        rw::emitTo( stderr, "ripwire: RIPWIRE_MEM_BUDGET_MB needs 0 (off) or a whole number of MiB, at least {} — got '{}', e.g. RIPWIRE_MEM_BUDGET_MB=8000\n",
+                    rw::memceiling::kFloorMiB, std::getenv( "RIPWIRE_MEM_BUDGET_MB" ) );
+        return false;
+    }
+    if( s.parse == rw::memceiling::Parse::Off )
+    {
+        return true;
+    }
+#if defined( RIPWIRE_MEM_CEILING_HOOK )
+    constexpr bool kHookLinked = true;
+#else
+    constexpr bool kHookLinked = false;
+#endif
+    if( cfg.mcp || cfg.lsp || !kHookLinked )
+    {
+        if( s.parse == rw::memceiling::Parse::Armed )
+        {
+            rw::emitTo( stderr, "ripwire: RIPWIRE_MEM_BUDGET_MB is NOT armed ({}); only the memory guard's own limits apply to this run\n",
+                        !kHookLinked ? "this build does not replace operator new (a sanitizer or RIPWIRE_ALLOC_COUNT build)"
+                                     : "a server must survive a refused request, and the ceiling's refusal ends the process" );
+        }
+        return true;
+    }
+    if( s.parse == rw::memceiling::Parse::Armed )
+    {
+        rw::memceiling::arm( s.mib * rw::memceiling::kMiB, "RIPWIRE_MEM_BUDGET_MB=" + std::to_string( s.mib ) );
+        return true;
+    }
+    const rw::memguard::Limits& l = rw::memguard::limits();   // 0 = the machine's memory is unknown: no footprint cap, so none here
+    const std::string spelled = rw::memguard::limitSpelling( l.hardBytes );
+    rw::memceiling::arm( l.hardBytes, l.source == rw::memguard::Source::Flag  ? "--max-memory=" + spelled
+                                    : l.source == rw::memguard::Source::Env   ? "RIPWIRE_MAX_MEMORY=" + spelled
+                                                                              : "the default 65% of RAM, " + spelled );
+    return true;
+}
+
 // r2-LO: the session legend dictionary for a human (or a harness that holds a session of its own) — the text
 // ripwire://legend-dict/full serves, one TIER of it, or a view (legenddict.h). Like --version, answered wherever it
 // stands and nothing else runs. Returns the exit code, or -1 when no --legend-dict was asked.
@@ -4532,6 +4586,10 @@ int main( int argc, char** argv )
         return 1;   // the refusal is on stderr, and it names both dictionary versions
     }
     if( !installMemoryGuard( cfg ) )
+    {
+        return 1;   // the refusal is on stderr
+    }
+    if( !installMemoryCeiling( cfg ) )
     {
         return 1;   // the refusal is on stderr
     }

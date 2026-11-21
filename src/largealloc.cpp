@@ -21,6 +21,7 @@
 // direct caller, infra/sparseCsr.h, pairs it with the aligned delete, and those frees stay retained); malloc itself (tree-sitter's own, about 2 % of the large bytes).
 // RIPWIRE_TEST_LARGEALLOC=off turns the route off for one run, so the gate can compare the same binary with and without.
 #include "largealloc.h"
+#include "memceiling.h"   // the memory guard's allocator line: onAllocate before every block
 #include <cstdlib>
 #include <new>
 
@@ -31,6 +32,7 @@ constinit rw::largealloc::BlockTable<std::size_t( 1 ) << 16, 4096> g_blocks;
 
 void* allocOrNull( std::size_t n ) noexcept
 {
+    rw::memceiling::onAllocate( n );   // disarmed: one relaxed load; armed: may refuse the run before the block is taken
     if( n >= rw::largealloc::kMinBytes )
     {
         // the variable's name is also the route's mark: test/largeallocpeakcheck.sh finds it in the binary to tell a build
