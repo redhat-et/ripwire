@@ -428,6 +428,24 @@ struct Layout
     return l;
 }
 
+// The direct-child row blocks of block `b` (its open tag to its close tag); empty for a self-closing block.
+[[nodiscard]] inline std::vector<Block> childBlocks( std::string_view text, std::size_t begin, std::size_t end )
+{
+    const std::size_t open  = text.find( '>', begin ) + 1;
+    const std::size_t close = text.rfind( "</", end - 1 );
+    return open >= 2 && text[ open - 2 ] != '/' && close > open && close != std::string_view::npos ? topLevelBlocks( text, open, close ) : std::vector<Block>{};
+}
+
+// ONE SECTION'S ROW BLOCKS: its direct children with the comment blocks dropped — a comment inside <tail> is not a row.
+// childBlocks (below) already owns the open/close arithmetic and the self-closing guard; this adds only the comment drop,
+// so promoteGuarded reads the rows out of `view` and out of the EMITTED text through the same two lines.
+[[nodiscard]] inline std::vector<Block> rowChildren( std::string_view text, std::size_t begin, std::size_t end )
+{
+    std::vector<Block> rows = childBlocks( text, begin, end );
+    std::erase_if( rows, []( const Block& r ) { return r.comment; } );
+    return rows;
+}
+
 // ONE PROMOTION CLASS'S SWEEP over the sections that follow </tail>, in emit order (R1b's priority rule, src/foranswerfirst.h
 // kPromotable / kPromotableBody): the indices this class wins, with `taken` marking them and `used` advanced by their emitted
 // sizes — so a LATER class sees only the headroom this one left. The classes are swept highest priority first, which is what
@@ -495,10 +513,7 @@ struct Layout
     const auto tailIt = std::ranges::find_if( order, [ & ]( std::size_t j ) { return blocks[ j ].name == "tail"; } );
     if( tailIt == order.end() ) { return order; }
     const Block&             tail = blocks[ *tailIt ];
-    const std::size_t        open = view.find( '>', tail.begin ) + 1;
-    const std::size_t        close = view.rfind( "</", tail.end - 1 );
-    std::vector<Block> rows = close > open ? topLevelBlocks( view, open, close ) : std::vector<Block>{};
-    std::erase_if( rows, []( const Block& r ) { return r.comment; } );   // ROWS: a comment inside the tail is not one
+    const std::vector<Block> rows = rowChildren( view, tail.begin, tail.end );
     std::size_t before = prefix;
     for( auto it = order.begin(); it != tailIt; ++it ) { before += sized[ *it ]; }
     // THE SAME ROWS IN THE EMITTED TEXT. `rows` are read out of `view`, where the tail still carries the direct-child
@@ -509,11 +524,8 @@ struct Layout
     // priced was refused in silence. At 24 rows the wrap does not fire on this population, which is why it has never been
     // seen. `layout.text` is the tail exactly as it will be emitted, so rows read out of it need no correction at all and
     // the only subtraction left is the tail's own owned-comment bytes, which cannot be negative.
-    const std::string& emitted = layout.text[ *tailIt ];
-    const std::size_t  eOpen   = emitted.find( '>' ) + 1;
-    const std::size_t  eClose  = emitted.rfind( "</" );
-    std::vector<Block> erows   = eClose > eOpen ? topLevelBlocks( emitted, eOpen, eClose ) : std::vector<Block>{};
-    std::erase_if( erows, []( const Block& r ) { return r.comment; } );
+    const std::string&       emitted = layout.text[ *tailIt ];
+    const std::vector<Block> erows   = rowChildren( emitted, 0, emitted.size() );
     if( rows.size() <= kGuardTailRowsBody || erows.size() <= kGuardTailRowsBody ) { return order; }
     // TL2's CAP (owner ruling 112, results/TL2_TAIL_CAP_1120/READOUT.md §3): the tail's page-1 presence is a GUARANTEE of its
     // first kGuardTailRows rows, not of the whole tail. AF2's G asked a second question before promoting anything — does
@@ -631,14 +643,6 @@ inline constexpr std::size_t kSameDirHeadRank = 5;
     if( colon != std::string_view::npos && p.find_first_not_of( "0123456789:-", colon ) == std::string_view::npos ) { p = p.substr( 0, colon ); }
     const std::size_t cut = p.rfind( '/' );
     return cut == std::string_view::npos ? std::string_view() : p.substr( 0, cut );
-}
-
-// The direct-child row blocks of block `b` (its open tag to its close tag); empty for a self-closing block.
-[[nodiscard]] inline std::vector<Block> childBlocks( std::string_view text, std::size_t begin, std::size_t end )
-{
-    const std::size_t open  = text.find( '>', begin ) + 1;
-    const std::size_t close = text.rfind( "</", end - 1 );
-    return open >= 2 && text[ open - 2 ] != '/' && close > open && close != std::string_view::npos ? topLevelBlocks( text, open, close ) : std::vector<Block>{};
 }
 
 // The directories of the <sigs> <d> rows ranked r <= kSameDirHeadRank (sorted, unique), read off the block's own rows.
