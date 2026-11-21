@@ -34,6 +34,10 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-21, IN8 (owner ruling 135: train 1118a, #717 = the rebase of #716 onto main 5df5a26be, folded into the 0.7.0 train at
+#   4b1f4516e): RE-PINNED ONCE with UPDATE_GOLDEN=1 on the merged sources. kParserVer and kIngestParserVerMirror 334/335 -> 336
+#   (rich 337): ONE number above BOTH sides' bumps. kCacheVersion 54 and kQSnapCacheScheme 38 unchanged. Both sides' entries are
+#   kept below, the 0.7.0 train's first, then train 1118a's. Hash 8ac0bab2fe…a32b9bd.
 # 2026-11-21, IN8 (owner rulings 129/135: the 0.7.0 train integration/070-1121-local merged with main 8861b0d4d, which carries
 #   #709): RE-PINNED ONCE with UPDATE_GOLDEN=1 on the merged build. kParserVer and kIngestParserVerMirror 332/333 -> 334 (rich
 #   335): ONE number above BOTH sides' bumps. kCacheVersion 54 and kQSnapCacheScheme 38 are main's (the 0.7.0 line moved
@@ -51,6 +55,13 @@ PIN="$ROOT/test/qschemetrip.hash"
 #   number for BX2's two parser members, above main's 313/314 (TRAIN-1117b, below) and above both BX2 placeholders (313 and
 #   315, its own entries below), so a cache a lane binary wrote under a placeholder is refused. kCacheVersion and
 #   kQSnapCacheScheme unchanged: the extraction key moves, the snapshot blob shape does not (hash 52505b79f1…2dd4dcbf).
+# 2026-11-21, train 1118a (import-proved-splits, qual-ns-call-bind, cr705-edges, #711 ts paths alias; rebased onto main 5df5a26be,
+#   #714 = train ge2): RE-PINNED ONCE with UPDATE_GOLDEN=1 from the rebased build (hash ffa77d0632…ae8d5cc3). kParserVer 335
+#   (rich 336) is the train's number for qual-ns-call-bind, above main's 333/334; the other members change no extraction.
+#   kCacheVersion 54 and kQSnapCacheScheme 38 stay main's (train ge2).
+# 2026-11-19, lane qual-ns-call-bind (stacked on lane/import-proved-splits 4787d1ed0): RE-PINNED with UPDATE_GOLDEN=1. kParserVer
+#   335 PLACEHOLDER (C++ using-declarations + namespace aliases recorded, ingest_binds.h kCppCallScopeFacts; mirrored in quality.h);
+#   the train renumbers and re-pins. kCacheVersion and kQSnapCacheScheme unchanged.
 # 2026-11-20, train 1117d2-s (std-namesake, rust-reexport, rust-modalias-glob, rust-self-chain, rust-macro-args,
 #   rust-path-unhedged, redact-touch, qd-swap, qd-similar-default, py-class-spray; rebased onto main ee8d1a50e, #705 = train 1117d1):
 #   RE-PINNED ONCE with UPDATE_GOLDEN=1 from the rebased build (hash 14b63d9888…d246329). kParserVer 333 (rich 334) replaces the

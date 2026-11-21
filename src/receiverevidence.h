@@ -254,6 +254,11 @@ struct CallResultTypes
     std::vector<std::string_view>                         filePackage;
     HashMap<std::string, std::vector<std::uint32_t>>      packageFiles;
     HashMap<std::string, std::vector<const Binding*>>     aliasesByName;
+    // QUAL-NS-CALL-BIND: every name a C++ using-declaration (kCppScopeUsingDeclared) or a spanned C++ alias (kCppScopeAliased)
+    // binds — cppScopeNamedAt's gate, so a TS / Rust / Kotlin alias of the same spelling never starts a C++ walk
+    HashMap<std::string, char>                            cppScopeNames;
+    static constexpr char                                 kCppScopeUsingDeclared = 1;
+    static constexpr char                                 kCppScopeAliased       = 2;
     HashMap<std::string, rw::SmallVec<NodeId, 2>>         goReceiverWitness;   // GO-CALLRESULT-LOCAL: Go receiver type name → one method per package directory (goDeclLessType)
     // RULE3-MEMBER-GUARD: the package directory of a Rust source path (`crates/settings/src/file.rs` → `crates/settings`), empty for a path outside src/, tests/, benches/, examples/
     static std::string_view rustPackageDirOf( std::string_view path )
@@ -284,6 +289,31 @@ struct CallResultTypes
     mutable std::string                                   aliasKey;   // importPathOf's / the TS pin lookup's
     mutable std::vector<std::string_view>                 usingPath;  // forEachCppUsing's per-row namespace path
     mutable std::string                                   moduleKey;  // rustModuleKey's buffer
+    mutable std::string                                   scopeKey;   // cppScopeNamedAt's gate and memo lookup buffer
+    // QUAL-NS-CALL-BIND: what the in-tree headers a file includes declare, at file scope, for one name — the header half of
+    // cppScopeNamedAt, which depends on (file, name, alias-or-using) only: "<fileId>#<a|u><name>" → the fold of those rows
+    struct CppScopeFold
+    {
+        std::string_view named;          // the scope the rows name ("" none)
+        bool             agree = true;   // false: two rows name different scopes, or one names none (`using ::f;`)
+        bool             any   = false;
+        void add( std::string_view scope )
+        {
+            agree = agree && !scope.empty() && ( named.empty() || named == scope );
+            named = scope;
+            any   = true;
+        }
+        void join( const CppScopeFold& o )
+        {
+            if( o.any )
+            {
+                agree = agree && o.agree && ( named.empty() || named == o.named );
+                named = o.named;
+                any   = true;
+            }
+        }
+    };
+    mutable HashMap<std::string, CppScopeFold>            cppHeaderScopeMemo;
     mutable bool                                          pathCut = false;   // fc1 fix 3: a rustPathOutside walk hit its depth cap — its false then means "cut", not "stays in the tree"
 
     explicit CallResultTypes( const IngestResult& i ) : ing( i ) {}
@@ -315,10 +345,25 @@ struct CallResultTypes
             {
                 aliasesByName[ b.var ].push_back( &b );
             }
-            if( isCppScopeRow( b ) && ( cppUsingFiles.empty() || cppUsingFiles.back() != b.fileId ) )
-            {
-                cppUsingFiles.push_back( b.fileId );
-            }
+            noteCppScopeRow( b );
+        }
+    }
+    // a C++ row that carries its scope's span: its file joins cppUsingFiles (bindings arrive sorted by file), and the name a
+    // using-declaration or an alias binds joins cppScopeNames (QUAL-NS-CALL-BIND, cppScopeNamedAt's gate)
+    void noteCppScopeRow( const Binding& b )
+    {
+        if( !isCppScopeRow( b ) )
+        {
+            return;
+        }
+        if( cppUsingFiles.empty() || cppUsingFiles.back() != b.fileId )
+        {
+            cppUsingFiles.push_back( b.fileId );
+        }
+        const char bit = b.kind == LocalBindKind::TypeAlias ? kCppScopeAliased : b.var != "*" ? kCppScopeUsingDeclared : char( 0 );
+        if( bit != 0 )
+        {
+            cppScopeNames[ b.var ] |= bit;
         }
     }
     // a C++ using-directive / using-declaration, or (fix round 3) a C++ alias: the rows that carry their scope's span (model.h)
@@ -935,9 +980,9 @@ struct CallResultTypes
         {
             return kNoNode;
         }
-        const std::string_view dir = dirOf( ing.symbols[ witness ].fileId );
-        NodeId                 declared = kNoNode;
-        return classesNamed( cls, CallResultFamily::Go, [ & ]( NodeId c ) { return dirOf( ing.symbols[ c ].fileId ) == dir; }, declared ) == 0 ? witness : kNoNode;
+        // any kept directory that DECLARES the name decides (an ambiguous declaration stays ambiguous), not just the witness's
+        NodeId declared = kNoNode;
+        return classesNamed( cls, CallResultFamily::Go, [ & ]( NodeId c ) { return keep( ing.symbols[ c ].fileId ); }, declared ) == 0 ? witness : kNoNode;
     }
     // the build, after every noteClass: `method` has the Go receiver type `recvType` — kept once per package directory (binding
     // order), and only where that directory declares no class of the name, so a tree that holds its declarations keeps no row
@@ -2153,6 +2198,12 @@ struct CallResultTypes
             }
         };
         rowsOf( f, true );
+        forEachIncludedCppScopeFile( f, [ & ]( std::uint32_t h ) { rowsOf( h, false ); } );
+    }
+    // every in-tree file `f` includes (transitively) that holds a C++ scope row (cppUsingFiles), walked from the smaller side
+    template <class Fn>
+    void forEachIncludedCppScopeFile( std::uint32_t f, Fn&& fn ) const
+    {
         if( fileIncludes == nullptr )
         {
             return;
@@ -2163,7 +2214,7 @@ struct CallResultTypes
             {
                 if( std::binary_search( cppUsingFiles.begin(), cppUsingFiles.end(), h ) )
                 {
-                    rowsOf( h, false );
+                    fn( h );
                 }
             } );
             return;
@@ -2172,7 +2223,7 @@ struct CallResultTypes
         {
             if( fileIncludes->contains( f, h ) )
             {
-                rowsOf( h, false );
+                fn( h );
             }
         }
     }
@@ -2308,6 +2359,102 @@ struct CallResultTypes
         bool aliased = false;
         forEachCppUsing( f, at, calleePath, [ & ]( const Binding& b ) { aliased = aliased || ( b.kind == LocalBindKind::TypeAlias && b.var == head ); } );
         return aliased;
+    }
+
+    // QUAL-NS-CALL-BIND: the scope a C++ call names through a declaration IN FORCE at its site, spelled as the one segment the
+    // canonical tier keys (a call qualifier's own shape, ingest's H4 re-split) — `scope` "" when no declaration says, or two disagree:
+    //   * a qualified call `h::f()` under a namespace alias `namespace h = rw::hashutil;` (or a type alias `using h = X;`)
+    //     names the alias's target: "hashutil";
+    //   * a bare call `f()` under a using-declaration `using rw::hashutil::f;` names the declaration's scope: "hashutil".
+    //     A using-directive (`using namespace a;`) names no one scope and is not read here.
+    // In force: the call's own file's rows declared before it in a scope that holds it (forEachCppUsing's own-file rule), and
+    // the FILE-scope rows of every in-tree header it includes — a header's `namespace a { using x::f; }` is not read, because no
+    // C++ Namespace row is recorded while the family is off, so its namespace path is unknown (card CPP-HDR-NS-USING). The
+    // header half depends on (file, name) only and is memoized (cppHeaderScopeMemo). A name no alias or using-declaration in the
+    // tree binds never walks. `spanStart`/`spanEnd` are the innermost deciding row's span: the scope C++ lookup finds it in, which
+    // the caller (graph.h canonicalCallQualifier) compares with the scopes between it and the call.
+    // The view points into the deciding row's importedName (the ingest result's storage), never into a scratch buffer.
+    struct CppNamedScope
+    {
+        std::string_view scope;
+        std::uint32_t    spanStart = 0;
+        std::uint32_t    spanEnd   = 0xFFFFFFFFu;
+        bool             fileScope() const noexcept { return spanStart == 0 && spanEnd == 0xFFFFFFFFu; }
+    };
+    CppNamedScope cppScopeNamedAt( const Reference& r ) const
+    {
+        if( !langFacts( r.lang ).qualifierNamesScope )   // C++ / ObjC
+        {
+            return {};
+        }
+        const bool             qualified = !r.qualifier.empty();
+        const std::string_view name      = qualified ? std::string_view( r.qualifier ) : std::string_view( r.calleeName );
+        scopeKey.assign( name );
+        const auto gate = cppScopeNames.find( scopeKey );
+        if( gate == cppScopeNames.end() || ( gate->second & ( qualified ? kCppScopeAliased : kCppScopeUsingDeclared ) ) == 0 )
+        {
+            return {};
+        }
+        CppScopeFold  fold;
+        CppNamedScope out;
+        for( const Binding* b : r.fileId < importsByFile.size() ? std::span( importsByFile[ r.fileId ] ) : std::span<const Binding* const>{} )
+        {
+            const std::uint32_t at = r.startByte;
+            if( isCppScopeRow( *b ) && b->startByte < at && b->spanStart <= at && at < b->spanEnd && cppScopeRowFits( *b, qualified, name ) )
+            {
+                fold.add( cppScopeOfRow( *b, qualified ) );
+                if( b->spanEnd - b->spanStart <= out.spanEnd - out.spanStart )
+                {
+                    out.spanStart = b->spanStart;
+                    out.spanEnd   = b->spanEnd;
+                }
+            }
+        }
+        fold.join( cppHeaderScopeOf( r.fileId, name, qualified ) );
+        out.scope = fold.agree ? fold.named : std::string_view{};
+        return out;
+    }
+    // a row that binds `name` the way the call reads it: an alias with a target for a qualified call, a using-declaration (not
+    // a directive) for a bare one
+    static bool cppScopeRowFits( const Binding& b, bool qualified, std::string_view name )
+    {
+        const bool fits = qualified ? b.kind == LocalBindKind::TypeAlias && !bindsWithoutTarget( b ) : b.kind == LocalBindKind::TypeImport && b.var != "*";
+        return fits && b.var == name;
+    }
+    // the scope's path: an alias's target (`rw::hashutil`), a using-declaration's name less its last segment
+    // (`rw::hashutil::f` → `rw::hashutil`); keyed by its last top-level segment (`hashutil`, `B<x::y>`)
+    static std::string_view cppScopeOfRow( const Binding& b, bool qualified )
+    {
+        std::string_view  path = b.importedName;
+        const std::size_t cut  = qualified ? std::string_view::npos : namesplit::lastTopLevelScopeSep( path );
+        path                   = qualified ? path : cut == std::string_view::npos ? std::string_view{} : path.substr( 0, cut );
+        const std::size_t sep  = namesplit::lastTopLevelScopeSep( path );
+        return sep == std::string_view::npos ? path : path.substr( sep + 2 );
+    }
+    // the header half of cppScopeNamedAt: the file-scope rows of the in-tree headers `f` includes, memoized per (f, name, kind)
+    CppScopeFold cppHeaderScopeOf( std::uint32_t f, std::string_view name, bool qualified ) const
+    {
+        scopeKey.clear();
+        scopeKey.append( std::to_string( f ) ).push_back( '#' );
+        scopeKey.push_back( qualified ? 'a' : 'u' );
+        scopeKey.append( name );
+        if( const auto hit = cppHeaderScopeMemo.find( scopeKey ); hit != cppHeaderScopeMemo.end() )
+        {
+            return hit->second;
+        }
+        CppScopeFold fold;
+        forEachIncludedCppScopeFile( f, [ & ]( std::uint32_t h )
+        {
+            for( const Binding* b : h < importsByFile.size() ? std::span( importsByFile[ h ] ) : std::span<const Binding* const>{} )
+            {
+                if( isCppScopeRow( *b ) && b->spanStart == 0 && b->spanEnd == 0xFFFFFFFFu && cppScopeRowFits( *b, qualified, name ) )
+                {
+                    fold.add( cppScopeOfRow( *b, qualified ) );
+                }
+            }
+        } );
+        cppHeaderScopeMemo.emplace( scopeKey, fold );
+        return fold;
     }
 
     // the class a ReturnType record's written type resolves to in its own (the callee's) file — kNoNode for none or several
@@ -4614,16 +4761,16 @@ struct ReceiverEvidence
     //     caller's own crate, or a member there it cannot place beside another, split: every candidate stays (rustLadderSplit:
     //     the ladder's own split when locality would keep them all, else hedged) — never a locality pick. One there, a crate the layout cannot
     //     place, or a module's item among the candidates (`util::tool()`: the module path decides it) keeps the tier as before.
-    enum class RustPathOwners : std::uint8_t { Keep, Hedge, Split, External, Decline };
+    enum class PathOwners : std::uint8_t { Keep, Hedge, Split, External, Decline };
     static constexpr NodeId kRustOwnerUnread  = kNoNode - 1;   // rustPathOwnerMemo: not read yet
     static constexpr NodeId kRustOwnerOutside = kNoNode - 2;   // an owner: the impl's own type name leads out of the tree where the impl is written
     static constexpr NodeId kRustOwnerInTree  = kNoNode - 3;   // an owner: no indexed class, but the impl's type name is a `use` into the tree
     mutable std::vector<NodeId> rustPathOwnerMemo;              // per symbol: its owner as rustPathOwners reads it (sized on first use)
-    RustPathOwners rustPathOwners( const Reference& r, std::vector<NodeId>& cand, bool canonical ) const
+    PathOwners rustPathOwners( const Reference& r, std::vector<NodeId>& cand, bool canonical ) const
     {
         if( !canonical || callResultFamilyOf( r.lang ) != CallResultFamily::Rust || r.qualifier.empty() || cand.empty() )
         {
-            return RustPathOwners::Keep;
+            return PathOwners::Keep;
         }
         const std::string_view written = rustWrittenQualifierOf( r );
         const NodeId           cls     = rustQualifierClass( r, written );
@@ -4666,10 +4813,10 @@ struct ReceiverEvidence
             }
             if( !any )
             {
-                return RustPathOwners::Decline;   // cand untouched: the declined site lists the namesakes it refused
+                return PathOwners::Decline;   // cand untouched: the declined site lists the namesakes it refused
             }
             keepWhere( mine );
-            return RustPathOwners::Keep;
+            return PathOwners::Keep;
         }
         if( rustPathHeadLeavesTree( r.fileId, r.startByte, written ) )
         {
@@ -4683,19 +4830,19 @@ struct ReceiverEvidence
                 forEachBase( ownerClass[ cand[ i ] ], [ & ]( std::string_view b ) { implementsTail = implementsTail || CallResultTypes::splitLast( b, "::" ).second == tail; } );
                 return owners[ i ] == kRustOwnerOutside || owners[ i ] == kNoNode || implementsTail;
             } );
-            return cand.empty() ? RustPathOwners::External : RustPathOwners::Hedge;
+            return cand.empty() ? PathOwners::External : PathOwners::Hedge;
         }
         // a module's item among them (`util::tool()`, an inline mod's fn) is the module path's question, not a type's: the tier as before
         if( cand.size() < 2 || std::ranges::any_of( cand, [ & ]( NodeId c ) { return ownerClass[ c ].empty(); } ) )
         {
-            return RustPathOwners::Keep;
+            return PathOwners::Keep;
         }
         // the types a path no `use` chooses may mean are the caller's own crate's (another crate's needs a `use` or its name); a crate the
         // layout cannot place, or one of them in it, leaves the tier as before
         const std::uint32_t crate = types.rustCrateOfFile( r.fileId );
         if( crate == CallResultTypes::kNoCrate )
         {
-            return RustPathOwners::Keep;
+            return PathOwners::Keep;
         }
         std::size_t inCrate = 0;
         NodeId      first   = kNoNode;
@@ -4710,12 +4857,12 @@ struct ReceiverEvidence
             differ = differ || owners[ i ] != first || owners[ i ] == kNoNode || owners[ i ] == kRustOwnerOutside || owners[ i ] == kRustOwnerInTree;
             ++inCrate;
         }
-        return inCrate >= 2 && differ ? rustLadderSplit( r, cand ) : RustPathOwners::Keep;
+        return inCrate >= 2 && differ ? rustLadderSplit( r, cand ) : PathOwners::Keep;
     }
     // RUST-PATH-OWNER: how the ladder keeps a Split's candidates. Tier 1 or 2 holding all of them or none (tier 3's canonical rescue)
     // is its own split (Split: no locality tie-break narrows it); a strict subset there would be a locality pick among types the path
     // cannot tell apart, so every candidate is hedged instead (Hedge)
-    RustPathOwners rustLadderSplit( const Reference& r, const std::vector<NodeId>& cand ) const
+    PathOwners rustLadderSplit( const Reference& r, const std::vector<NodeId>& cand ) const
     {
         const std::string_view dir    = includerDir( ing.files[ r.fileId ] );
         std::size_t            inFile = 0;
@@ -4727,7 +4874,52 @@ struct ReceiverEvidence
             inDir  += includerDir( ing.files[ f ] ) == dir ? 1u : 0u;
         }
         const bool subset = inFile != 0 ? inFile < cand.size() : inDir != 0 && inDir < cand.size();
-        return subset ? RustPathOwners::Hedge : RustPathOwners::Split;
+        return subset ? PathOwners::Hedge : PathOwners::Split;
+    }
+    // IMPORT-PROVED-SPLITS: the shared hook. Same-named classes in two or more files give a call one candidate per class, and what
+    // the call WRITES may name one of them: a Rust path's type (rustPathOwners, when the canonical tier answered), or a receiver
+    // spelled as the class, `C.m()`, whose C the caller file's import binds (narrowImportProved, when a receiver rule answered: Keep).
+    // `classOf( r, name )` is the per-language resolver: the ONE in-tree class `name` names where `r` is written, through the
+    // caller file's own import of it; kNoNode for none, several, an outside class or a name something else binds there
+    // (graph.h ImportProvedClass). Rust reads its own (rustQualifierClass).
+    template <class ClassOf>
+    PathOwners pathOwners( const Reference& r, std::vector<NodeId>& cand, bool canonical, const ClassOf& classOf ) const
+    {
+        if( callResultFamilyOf( r.lang ) == CallResultFamily::Rust )
+        {
+            return rustPathOwners( r, cand, canonical );
+        }
+        narrowImportProved( r, cand, canonical, classOf );
+        return PathOwners::Keep;
+    }
+    // IMPORT-PROVED-SPLITS: a receiver rule's answer for `C.m()` (the receiver chain is the one name C: not `this`/`self`/`cls`/
+    // `super`, no field path, no construction) that holds members of two or more classes keeps the members of the ONE class the
+    // file's import of C proves (`classOf`). Only ever narrows, and only to a non-empty strict subset: a class the import names
+    // that owns none of them (an inherited member, a re-export the resolver cannot follow), a class of the caller's own file (its
+    // scoping is not an import's), or no proof at all leaves `cand` as the rule left it.
+    template <class ClassOf>
+    void narrowImportProved( const Reference& r, std::vector<NodeId>& cand, bool canonical, const ClassOf& classOf ) const
+    {
+        if( canonical || cand.size() < 2 || !r.qualifier.empty() )   // the cheap tests first: chainOf below reads the receiver chain
+        {
+            return;
+        }
+        const Chain ch = chainOf( r );
+        if( !ch.valid || ch.root.empty() || !ch.path.empty() || !ch.ctor.empty() || isThisRoot( ch.root ) || isSuperRoot( r, ch.root ) || ch.root == "cls" )
+        {
+            return;
+        }
+        const NodeId cls = classOf( r, ch.root );
+        if( cls == kNoNode || ing.symbols[ cls ].fileId == r.fileId )
+        {
+            return;
+        }
+        const auto owned = [ & ]( NodeId c ) { return ing.symbols[ c ].fileId == ing.symbols[ cls ].fileId && types.classHolding( ing.symbols[ c ].fileId, ing.symbols[ c ].sigStartByte ) == cls; };
+        const std::size_t kept = std::size_t( std::ranges::count_if( cand, owned ) );
+        if( kept != 0 && kept != cand.size() )
+        {
+            std::erase_if( cand, [ & ]( NodeId c ) { return !owned( c ); } );
+        }
     }
     // rust-receivers: the ONE class `self` names inside `from` (or the method enclosing it): the in-tree class of the method's
     // owner name that owns the method (memberOwnerRuleOf — Rust: its own file and item scope, or the only class of the name);

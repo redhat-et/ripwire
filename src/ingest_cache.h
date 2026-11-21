@@ -393,7 +393,15 @@ constexpr std::uint32_t kCacheVersion = 54;           // 54: lane qd-tangle — 
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 334;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 336;          // bump on any grammar/.scm/extraction change
+                                                      // 336 = 2026-11-21 (IN8, ruling 135: train 1118a — #717, the rebase of #716 — folded into the 0.7.0 train). ONE number above
+                                                      //   BOTH sides' bumps past their merge base 5df5a26be (333): the train's 334 and train 1118a's 335. Rich file tag 337.
+                                                      //   kCacheVersion stays 54. Both notes are kept below as HISTORY; the tags they name are the tags of those numbers, not of 336.
+                                                      // --- history: train 1118a (4b1f4516e) carried 335 ---
+                                                      // 335 = 2026-11-20 (train 1118a, lane qual-ns-call-bind; above train 1117d2's 333/334, rich 336): C++ / ObjC
+                                                      //   using-declarations and namespace aliases are recorded while the call-result family is off
+                                                      //   (ingest_binds.h kCppCallScopeFacts), read by receiverevidence.h CallResultTypes::cppScopeNamedAt.
+                                                      // --- history: the 0.7.0 train after main 8861b0d4d (823276f30) carried 334 ---
                                                       // 334 = 2026-11-21 (IN8, rulings 129/135: the 0.7.0 train merged with main 8861b0d4d, which carries #709). ONE number
                                                       //   above BOTH sides' bumps past their merge base ee8d1a50e (331) — main's 333 (train 1117d2) and the 0.7.0 line's 332 (IN3) —
                                                       //   so neither side's cache can be read by the other's binary. Rich file tag 335. kCacheVersion 54 is main's (qd-tangle); the

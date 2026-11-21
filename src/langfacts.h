@@ -428,7 +428,9 @@ struct LangFacts
     bool localBraceNotData = false;
 
     /// C++, Objective-C: a call's `Q::` qualifier names a namespace or class some definition holds, so an included file's namesake
-    /// proves nothing about `Q::f()` when the tree defines no Q (graph.h CppQualifierScopes, CPP-EXTQUAL-VETO).
+    /// proves nothing about `Q::f()` when the tree defines no Q (graph.h CppQualifierScopes, CPP-EXTQUAL-VETO). The same scope can
+    /// be named by a declaration in force instead — a namespace alias (`namespace h = a::b;`) or a using-declaration (`using a::b::f;`):
+    /// ingest records both (ingest_binds.h kCppCallScopeFacts) and graph.h keys the call by it (CallResultTypes::cppScopeNamedAt).
     bool qualifierNamesScope = false;
 
     /// C, C++: a file-scope const object of a struct type is how a family registers its members (htop `const MeterClass

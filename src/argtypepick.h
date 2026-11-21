@@ -96,6 +96,24 @@ struct ArgTypeShape
     bool                     known    = false;
 };
 
+// A predicate over one type's tokens in order: true for `tok` outside every template argument list (a `>>` is two `>`
+// tokens). `depth` is the caller's, so a predicate the algorithm copies still walks one nesting count.
+inline auto topLevelTokenIs( std::string_view tok, int& depth )
+{
+    return [ tok, &depth ]( const std::string& t ) {
+        depth += t == "<" ? 1 : t == ">" ? -1 : 0;
+        return depth == 0 && t == tok;
+    };
+}
+
+// Erase the parameter's OWN const tokens: only a const outside every template argument list is the parameter's;
+// `Box<const T>` keeps its inner const in the core, so it never compares equal to `Box<T>`.
+inline bool eraseTopLevelConst( std::vector<std::string>& toks )
+{
+    int depth = 0;
+    return std::erase_if( toks, topLevelTokenIs( "const", depth ) ) != 0;
+}
+
 // `toks`: one parameter's type tokens (editCheckTypeTokens: the declarator name already dropped)
 inline ArgTypeShape argTypeShapeOf( std::vector<std::string> toks )
 {
@@ -116,7 +134,10 @@ inline ArgTypeShape argTypeShapeOf( std::vector<std::string> toks )
     {
         return shape;
     }
-    if( std::ranges::find( toks, std::string( "*" ) ) != toks.end() )
+    // only a `*` outside every template argument list makes the parameter a pointer: `Box<View*> const&` is a const Box and takes
+    // the same path as `const Box<View*>&` (CR #716; a `*` anywhere chose this branch, which kept the leading const)
+    int pointerDepth = 0;
+    if( std::ranges::any_of( toks, topLevelTokenIs( "*", pointerDepth ) ) )
     {
         while( !toks.empty() && toks.back() == "const" )   // `T* const`: the pointer itself is const
         {
@@ -126,7 +147,7 @@ inline ArgTypeShape argTypeShapeOf( std::vector<std::string> toks )
     }
     else
     {
-        shape.topConst = std::erase( toks, std::string( "const" ) ) != 0;   // `const T` / `T const`: one type, either order
+        shape.topConst = eraseTopLevelConst( toks );   // `const T` / `T const`: one type, either order
     }
     if( toks.empty() || std::ranges::find( toks, std::string( "&" ) ) != toks.end() )
     {

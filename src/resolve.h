@@ -5539,22 +5539,39 @@ struct TsImportExtras
     std::uint64_t extendsUnread   = 0;   // configs with an unread base that could have changed an answer (tsconfig_unread=)
 };
 
-// #220 part 2: one bare TS/JS specifier the relative branch left unresolved, through the project's own config
-// (tsimport::ImportResolver, built here on first use). Returns the edge's target or kNoFile, and tallies the verdict.
-// Multi-root: an answer in another root is not evidence (joinNormalizeLookup's rule 1), so it stays unresolved.
-inline std::uint32_t resolveBareTsImport( const IngestResult& ing, const HashMap<std::string, std::uint32_t>& fileIndex,
-                                          std::optional<tsimport::ImportResolver>& resolver, const WsIncludeCtx* ws,
-                                          const Include& inc, std::uint64_t* unresolvedOut, TsImportExtras* extrasOut )
+// The project-config resolver of bare TS/JS specifiers (tsimport::ImportResolver), built on the first one that reaches it,
+// so a tree without one reads no config file. `fileIndex` keys are lexicalNormalize( rootRelPath ), as buildPreciseIncludeAdj's.
+struct BareTsResolver
 {
-    if( !resolver )
+    const IngestResult&                        ing;
+    const HashMap<std::string, std::uint32_t>& fileIndex;
+    std::optional<tsimport::ImportResolver>    resolver;
+};
+
+// #220 part 2: one bare TS/JS specifier `importerFileId` wrote, through the project's own config.
+// Multi-root: an answer in another root is not evidence (joinNormalizeLookup's rule 1), so it stays unresolved.
+// The ONE resolution of such a specifier: the file edge (resolveBareTsImport) and the named-import binder (#711, graph.h
+// resolveJsImportModule: a tsconfig `paths` alias `@/x` pins the call as a relative import does) both read it.
+inline tsimport::Outcome resolveBareTsSpecifier( BareTsResolver& bare, const WsIncludeCtx* ws, std::uint32_t importerFileId, std::string_view spec )
+{
+    if( !bare.resolver )
     {
-        resolver.emplace( ing, fileIndex );
+        bare.resolver.emplace( bare.ing, bare.fileIndex );
     }
-    tsimport::Outcome o = resolver->resolve( lexicalNormalize( rootRelPath( ing, inc.fileId ) ), inc.target );
-    if( o.file != kNoFile && ws != nullptr && ( *ws->fileRoot )[ o.file ] != ( *ws->fileRoot )[ inc.fileId ] )
+    tsimport::Outcome o = bare.resolver->resolve( lexicalNormalize( rootRelPath( bare.ing, importerFileId ) ), spec );
+    if( o.file != kNoFile && ws != nullptr && ( *ws->fileRoot )[ o.file ] != ( *ws->fileRoot )[ importerFileId ] )
     {
         o = { kNoFile, tsimport::Verdict::InRepoUnresolved };
     }
+    return o;
+}
+
+// The file edge of one bare TS/JS specifier the relative branch left unresolved: resolveBareTsSpecifier's target or
+// kNoFile, with its verdict tallied.
+inline std::uint32_t resolveBareTsImport( BareTsResolver& bare, const WsIncludeCtx* ws, const Include& inc, std::uint64_t* unresolvedOut,
+                                          TsImportExtras* extrasOut )
+{
+    const tsimport::Outcome o = resolveBareTsSpecifier( bare, ws, inc.fileId, inc.target );
     if( o.verdict == tsimport::Verdict::InRepoUnresolved && unresolvedOut != nullptr )
     {
         ++*unresolvedOut;
@@ -5698,7 +5715,7 @@ inline std::pair<rw::FileAdjacency, WsIncludeCtx> buildPreciseIncludeAdjWithCont
     const RubyConstantIndex                   rubyConsts    = buildRubyConstantIndex( ing );   // parser version 82; empty unless a symbolic directive exists
     HashMap<std::string, std::pair<std::uint32_t, std::uint32_t>> rubyMemo;
 
-    std::optional<tsimport::ImportResolver> tsResolver;   // #220: built on the first bare TS/JS specifier that missed
+    BareTsResolver tsResolver{ ing, fileIndex, std::nullopt };   // #220: built on the first bare TS/JS specifier that missed
     // #478 gap 1: a from-import member's submodule is a DEPENDENCY of the file and every dependency view keeps it, but it is not
     // import evidence for a bare call — `from pkg import mod` makes no name of mod visible unqualified — so, like an
     // Include::isValueUse record, buildGraph's call narrow (forCallNarrow) leaves it out and the call graph is unchanged.
@@ -5776,7 +5793,7 @@ inline std::pair<rw::FileAdjacency, WsIncludeCtx> buildPreciseIncludeAdjWithCont
         }
         if( to == kNoFile && tsimport::isBareTsSpecifier( includerPath, inc.target ) )
         {
-            to = resolveBareTsImport( ing, fileIndex, tsResolver, ws, inc, importsUnresolvedOut, extrasOut );
+            to = resolveBareTsImport( tsResolver, ws, inc, importsUnresolvedOut, extrasOut );
         }
         if( to != kNoFile && to != inc.fileId )   // unresolved or self-include → contributes nothing
         {
@@ -5806,7 +5823,7 @@ inline std::pair<rw::FileAdjacency, WsIncludeCtx> buildPreciseIncludeAdjWithCont
     }
     if( extrasOut != nullptr )
     {
-        *extrasOut = TsImportExtras{ extrasOut->declarationOnly, tsResolver ? tsResolver->extendsUnread() : 0 };
+        *extrasOut = TsImportExtras{ extrasOut->declarationOnly, tsResolver.resolver ? tsResolver.resolver->extendsUnread() : 0 };
     }
     if( rootNarrowOut != nullptr && !rootFrom.empty() )
     {
@@ -6156,7 +6173,7 @@ struct FlatRecvType
 //     as a member alias when the member sits in a class (a base class may supply it).
 // FLOORS (the base reading is kept, never a wrong row): a using-directive is not followed (`using namespace sc;`); a using-declaration
 // (`using extlib::Socket;`), a forward declaration or an enum of the alias's name in a NEARER scope than the alias is not seen
-// (the C++ call-result bindings that record them are off, model.h callResultFamilyOf), so an in-tree alias further out would be
+// (no binding row is read here: the C++ call-result bindings are off, model.h callResultFamilyOf), so an in-tree alias further out would be
 // read there; the same-named class-like symbol guard below is the one global check.
 // NO READING (the member keeps its base reading) when: the reachable aliases disagree (two same-scope aliases of one name with
 // different pointees: a tie is refused, never picked); the pointee was written in `std` (`std::shared_ptr<std::string>`); the chain
@@ -9698,6 +9715,35 @@ struct Rule3FileMemo
 // a declaration too — also marks that specialization as EXISTING, under the scope text prefixed with '\x01' (a byte
 // no scope or family key can hold): a call through an existing specialization that does not itself define the name
 // must never fall back to its siblings.
+// QUAL-NS-CALL-BIND: a C-family scope WRITTEN with `::` — the C++17 nested namespace `namespace rw::hashutil { … }`, an
+// out-of-line nested class `struct Tree<T>::Leaf { … }` — is indexed under its LAST segment as well, because that is the
+// one segment a call's qualifier keeps (ingest's H4 re-split): `hashutil::fnv1a64( s )`, `rw::hashutil::fnv1a64( s )` and
+// `::rw::hashutil::fnv1a64( s )` all arrive with qualifier "hashutil", which the whole-scope key "rw::hashutil::fnv1a64"
+// never matched — the call fell to the bare-name ladder and bound arch.h's same-named `rw::fnv1a64` (QUAL-NS-CALL-BIND
+// Stage 0, test/qualnscallcheck.sh). The classic nesting `namespace rw { namespace hashutil { … } }` already scopes its
+// members "hashutil", so both spellings of one namespace now key alike. Only the C family: another language's scope text
+// is not a `::` path a qualifier re-splits.
+inline void indexCanonicalScopeText( HashMap<std::string, rw::SmallVec<NodeId, 2>>& byScope, HashMap<std::string, rw::SmallVec<NodeId, 2>>& byFamily,
+                                     std::string& key, std::string_view scope, const Symbol& s, bool definition )
+{
+    if( scope.back() == '>' )
+    {
+        key.assign( 1, '\x01' ).append( scope );
+        byFamily[ key ];
+    }
+    if( !definition )
+    {
+        return;
+    }
+    key.clear();
+    key.append( scope ).append( "::" ).append( s.name );
+    byScope[ key ].push_back( s.id );
+    if( appendTemplateFamilyKey( key, scope, s.name ) )
+    {
+        byFamily[ key ].push_back( s.id );
+    }
+}
+
 inline void indexCanonicalScope( HashMap<std::string, rw::SmallVec<NodeId, 2>>& byScope, HashMap<std::string, rw::SmallVec<NodeId, 2>>& byFamily,
                                  std::string& key, const Symbol& s )
 {
@@ -9705,21 +9751,12 @@ inline void indexCanonicalScope( HashMap<std::string, rw::SmallVec<NodeId, 2>>& 
     {
         return;
     }
-    if( s.scope.back() == '>' )
+    const bool definition = isDefinitionNotDeclaration( s );
+    indexCanonicalScopeText( byScope, byFamily, key, s.scope, s, definition );
+    const std::size_t sep = langFacts( s.lang ).transitiveIncludes ? namesplit::lastTopLevelScopeSep( s.scope ) : std::string_view::npos;
+    if( sep != std::string_view::npos && sep + 2 < s.scope.size() )
     {
-        key.assign( 1, '\x01' ).append( s.scope );
-        byFamily[ key ];
-    }
-    if( !isDefinitionNotDeclaration( s ) )
-    {
-        return;
-    }
-    key.clear();
-    key.append( s.scope ).append( "::" ).append( s.name );
-    byScope[ key ].push_back( s.id );
-    if( appendTemplateFamilyKey( key, s.scope, s.name ) )
-    {
-        byFamily[ key ].push_back( s.id );
+        indexCanonicalScopeText( byScope, byFamily, key, std::string_view( s.scope ).substr( sep + 2 ), s, definition );
     }
 }
 
@@ -9822,28 +9859,36 @@ inline void widenToTemplateFamilies( CandidateSink<Admit>& sink, std::string& ke
 // "No answer" leaves `cand` untouched, so the bare-name ladder decides exactly as it did before this fallback existed.
 // More than one candidate is a split the caller discloses with amb=; a call through a template-id never lands on a
 // same-named definition outside the template. `key` is the caller's reused buffer.
+// `qualifier` is the call's written one, or the scope a declaration in force names for it (QUAL-NS-CALL-BIND: graph.h, from
+// CallResultTypes::cppScopeNamedAt).
+// Returns true when the answer is a template family's with its primary among the candidates (QUAL-NS-CALL-BIND F4): the
+// caller keeps that split whole — the S6-C locality tie-break must not drop the primary, whose nested-class scope text
+// (`Traits`) shares less with the caller than an out-of-line specialization's (`ThriftValue::Traits<bool>`) does.
 template< class Admit >
-inline void appendCanonicalCandidates( std::vector<NodeId>& cand, std::string& key, const Reference& r, const CanonicalScopes& scopes, Admit&& admit )
+inline bool appendCanonicalCandidates( std::vector<NodeId>& cand, std::string& key, std::string_view qualifier, const Reference& r, const CanonicalScopes& scopes,
+                                       Admit&& admit )
 {
     CandidateSink<Admit> sink { cand, cand.size(), admit };
     key.clear();
-    key.append( r.qualifier ).append( "::" ).append( r.calleeName );
+    key.append( qualifier ).append( "::" ).append( r.calleeName );
     if( const auto it = scopes.byScope.find( key ); it != scopes.byScope.end() )
     {
         sink.add( &it->second );
     }
-    if( cand.size() != sink.before || !appendTemplateFamilyKey( key, r.qualifier, r.calleeName ) )
+    if( cand.size() != sink.before || !appendTemplateFamilyKey( key, qualifier, r.calleeName ) )
     {
-        return;
+        return false;
     }
-    key.assign( 1, '\x01' ).append( r.qualifier );
-    const bool existingSpecialization = scopes.byFamily.find( key ) != scopes.byFamily.end() || scopes.chaUp.find( r.qualifier ) != scopes.chaUp.end();
-    const std::string_view family = existingSpecialization ? std::string_view( r.qualifier ) : namesplit::stripTemplateArgs( r.qualifier );
+    key.assign( 1, '\x01' ).append( qualifier );
+    bool existingSpecialization = scopes.byFamily.find( key ) != scopes.byFamily.end();
+    key.assign( qualifier );   // chaUp is not a transparent map: the reused buffer, not a per-call std::string
+    existingSpecialization = existingSpecialization || scopes.chaUp.find( key ) != scopes.chaUp.end();
+    const std::string_view family = existingSpecialization ? qualifier : namesplit::stripTemplateArgs( qualifier );
     sink.add( scopes.narrower.methodOnTypeOrBases( family, r, scopes.chaUp, /*skipSelf=*/existingSpecialization, /*unionOnMulti=*/true ) );
     const bool primarySupplies = cand.size() != sink.before;
     if( existingSpecialization && !primarySupplies )
     {
-        return;
+        return false;
     }
     if( !existingSpecialization )
     {
@@ -9852,9 +9897,10 @@ inline void appendCanonicalCandidates( std::vector<NodeId>& cand, std::string& k
     if( !primarySupplies && cand.size() < sink.before + 2 )
     {
         cand.resize( sink.before );   // a lone specialization with no visible primary member is no answer (see above)
-        return;
+        return false;
     }
     widenToTemplateFamilies( sink, key, r, scopes );
+    return primarySupplies && cand.size() > sink.before + 1;
 }
 
 }   // namespace rw
