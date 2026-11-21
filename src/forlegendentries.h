@@ -162,6 +162,16 @@ const std::string_view kForDocList[] =
     kForEstTokensCeilingNote,
     // forpages.h — the page clause, at the default page size
     commentBody( kForDocPageClause ),
+    // SM1 (2026-11-21): three block-local notes written AFTER this table was, so no FILE could leave one out and a session
+    // with the legend-seen hook ON re-received each whole. MEASURED on GA1 DEV's 89 as 11 one-repo sessions, 229 non-first
+    // calls: the sigx note 77 verbatim repeats (14,476 B), the unread-language hops note 18 (3,150 B), the key-body note 5
+    // (1,940 B) — 19,566 of the 23,807 B of non-disclosure comment bytes still repeating verbatim. Each is ONE constant printed whole
+    // (no eraseAbsentClause cuts it), so one row each. NOT added, and why: the reexports and shortkey legends are cut per
+    // answer by present-only clauses (7 and 4 of them), so they need the piece() split kForFileSymsLegendCompact has, for
+    // 3,564 B on the same population. Gate: test/legendseenblockcheck.sh. Appended: no existing entry id moves.
+    commentBody( rw::sigx::kSigxLegend ),
+    commentBody( rw::kForHopValueRefsUnreadClause ),
+    commentBody( rw::keybody::kKeyBodyLegend ),
 };
 
 }   // namespace — forlegendentries.h section of main.cpp
