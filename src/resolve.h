@@ -259,6 +259,13 @@ inline IncludeLang includeLangOf( std::string_view path ) noexcept
     return IncludeLang::Other;
 }
 
+// `path` is of `dialect`, or of no include dialect at all (IncludeLang::Other: a file no row above claims).
+inline bool dialectOrUnclaimed( std::string_view path, IncludeLang dialect ) noexcept
+{
+    const IncludeLang lang = includeLangOf( path );
+    return lang == dialect || lang == IncludeLang::Other;
+}
+
 // The includer's directory (everything before the last '/'; empty when the file sits at the crawl root).
 inline std::string_view includerDir( std::string_view includerPath ) noexcept
 {
@@ -5522,8 +5529,7 @@ private:
 // --impact asks this of its def files, so a C++ symbol's import tier never pays for a TS alias elsewhere in the tree.
 inline bool couldBeTsImportTarget( std::string_view path ) noexcept
 {
-    const IncludeLang l = includeLangOf( path );
-    return l == IncludeLang::Ts || l == IncludeLang::Other;
+    return dialectOrUnclaimed( path, IncludeLang::Ts );
 }
 
 // Is this include a counting candidate at all: a TS/JS importer's bare specifier (not `.`-relative, not absolute).
@@ -5532,6 +5538,14 @@ inline bool isBareTsSpecifier( std::string_view includerPath, std::string_view t
     return !target.empty() && target.front() != '.' && target.front() != '/' && includeLangOf( includerPath ) == IncludeLang::Ts;
 }
 } // namespace tsimport
+
+// A file whose directives can carry a C #include chain: a C-family file, or one no include dialect claims (an `.inc`, a
+// `.def`: whatever the crawl made of it, its directives are not another dialect's imports). Every other dialect's directive
+// names a module of its own language, so a chain of #includes passes through such a file only if some #include names one.
+inline bool cChainIncluder( std::string_view path ) noexcept
+{
+    return dialectOrUnclaimed( path, IncludeLang::CFamily );
+}
 
 // #220 part 2: the two disclosures the resolver adds beside imports_unresolved= (see buildPreciseIncludeAdjWithContext).
 struct TsImportExtras
@@ -5586,6 +5600,10 @@ inline std::uint32_t resolveBareTsImport( const IngestResult& ing, const HashMap
 // InRepoUnresolved verdict), plus the C/C++ quote includes two include roots both hold (resolveCIncludeRoots: no edge,
 // never a guess by probe order). Counted in DIRECTIVES, lazy ones included, so the dedup=true and dedup=false builds
 // agree on it.
+// `cChainOnly` (lane PF1, test/headerstaticadjcheck.sh): true ⇒ only the directives of a cChainIncluder file are resolved —
+// the adjacency a C #include chain is read from (valuerefindex.h headerStaticVisibleFrom), without resolving every Python
+// import, TS specifier, Rust use tree and Ruby constant of the tree to get it. Each directive resolves on its own, so the
+// edges it keeps are the whole-corpus build's edges for those includers; the caller owns the one case they do not suffice.
 // #220 part 2: every caller now gets the EDGES — a bare TS/JS specifier the relative branch left unresolved is handed
 // to tsimport::ImportResolver (built on the first such specifier, so a tree without one reads no config file), and
 // what it resolves is an edge exactly like a relative import's. `extrasOut` (optional) receives its two disclosures:
@@ -5595,7 +5613,8 @@ inline std::pair<rw::FileAdjacency, WsIncludeCtx> buildPreciseIncludeAdjWithCont
                                                                        bool forCallNarrow = false,
                                                                        std::uint64_t* importsUnresolvedOut = nullptr,
                                                                        TsImportExtras* extrasOut = nullptr,
-                                                                       rw::FileAdjacency* rootNarrowOut = nullptr )
+                                                                       rw::FileAdjacency* rootNarrowOut = nullptr,
+                                                                       bool cChainOnly = false )
 {
     PROFILE_SCOPE_DESCRIBE( "buildGraph/2a: precise include adjacency (resolve.h)" );
     const std::uint32_t F = std::uint32_t( ing.files.size() );
@@ -5703,12 +5722,12 @@ inline std::pair<rw::FileAdjacency, WsIncludeCtx> buildPreciseIncludeAdjWithCont
     // #478 gap 1: a from-import member's submodule is a DEPENDENCY of the file and every dependency view keeps it, but it is not
     // import evidence for a bare call — `from pkg import mod` makes no name of mod visible unqualified — so, like an
     // Include::isValueUse record, buildGraph's call narrow (forCallNarrow) leaves it out and the call graph is unchanged.
-    const std::vector<PythonMemberSite> memberSites = forCallNarrow ? std::vector<PythonMemberSite>{} : pythonFromImportMembers( ing );
+    const std::vector<PythonMemberSite> memberSites = forCallNarrow || cChainOnly ? std::vector<PythonMemberSite>{} : pythonFromImportMembers( ing );
     std::vector<std::uint32_t>          memberFiles;
     TsImportMemo tsMemo( F );                              // PATH-NORM: this build's (dir, specifier) → answer
     for( const Include& inc : ing.includes )
     {
-        if( inc.fileId >= F )
+        if( inc.fileId >= F || ( cChainOnly && !cChainIncluder( rootRelPath( ing, inc.fileId ) ) ) )
         {
             continue;
         }

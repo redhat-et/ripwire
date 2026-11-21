@@ -1952,6 +1952,32 @@ private:
         const NodeId one = m_paths.nearestOf( cands, r.fileId, at );
         return one == kNoNode ? std::vector<NodeId>{} : std::vector<NodeId>{ one };
     }
+    // The #include adjacency a header-static question walks (lane PF1). Built from the directives of cChainIncluder files alone
+    // (resolve.h): a chain ref.c -> ... -> header.h leaves that set only through an edge INTO a file of another include dialect
+    // (`#include "gen.py"`), since the chain starts in it and each step is one resolved directive of the file before. So when
+    // the narrowed build draws no such edge, every chain of the whole-corpus adjacency is in it and the answer is the same;
+    // when it draws one, the whole-corpus adjacency is built instead. RIPWIRE_STATS prints which, and the directives resolved.
+    static FileAdjacency includeChainAdj( const IngestResult& ing )
+    {
+        FileAdjacency adj = buildPreciseIncludeAdjWithContext( ing, /*dedup=*/true, nullptr, /*forCallNarrow=*/false, nullptr, nullptr, nullptr, /*cChainOnly=*/true ).first;
+        bool          escapes = false;
+        for( std::uint32_t f = 0; f < adj.size() && !escapes; ++f )
+        {
+            escapes = std::ranges::any_of( adj[f], [ & ]( std::uint32_t t ) { return !cChainIncluder( rootRelPath( ing, t ) ); } );
+        }
+        if( escapes )
+        {
+            adj = buildPreciseIncludeAdj( ing, /*dedup=*/true );
+        }
+        if( memstats::enabled() )
+        {
+            const auto resolved = escapes ? std::ptrdiff_t( ing.includes.size() )
+                                          : std::ranges::count_if( ing.includes, [ & ]( const Include& inc )
+                                            { return inc.fileId < ing.files.size() && cChainIncluder( rootRelPath( ing, inc.fileId ) ); } );
+            rw::emitTo( stderr, "[stats] header_static_adj scope={} directives={} of={}\n", escapes ? "all" : "cfamily", resolved, ing.includes.size() );
+        }
+        return adj;
+    }
     // BX1 FIX 3 (test/verbfixcheck.sh F3): internal linkage is per TRANSLATION UNIT, not per file. A C-family `static` defined in a
     // file that is not a translation-unit source (a header: resolve.h cxxSourceFile is false) is in every unit that #includes it,
     // directly or through another header — htop's `static inline Row_idEqualCompare` (Row.h) passed as a comparator from Table.c,
@@ -1959,6 +1985,8 @@ private:
     // reaches `defFile` over resolved #include edges (resolve.h buildPreciseIncludeAdj, the call graph's own resolver). A static in
     // a source file stays private (false), and an unresolved #include proves nothing (false: the bind is not made, a floor).
     // The adjacency is built on the first such question and the includers of each header once, then reused for the index's life.
+    // COST (lane PF1, test/headerstaticadjcheck.sh): it is includeChainAdj's, the C-family includers' edges — the whole-corpus
+    // build resolved every Python import of cpython to answer 54 of these (911M of a warm --for's 16.5G instructions).
     bool headerStaticVisibleFrom( std::uint32_t defFile, std::uint32_t refFile ) const
     {
         if( defFile >= m_ing.files.size() || refFile >= m_ing.files.size() || cxxSourceFile( m_ing.files[ defFile ] ) )
@@ -1967,7 +1995,7 @@ private:
         }
         if( m_includers.empty() )
         {
-            const FileAdjacency        fwd = buildPreciseIncludeAdj( m_ing, /*dedup=*/true );
+            const FileAdjacency        fwd = includeChainAdj( m_ing );
             std::vector<std::uint32_t> from, to;
             for( std::uint32_t f = 0; f < fwd.size(); ++f )
             {

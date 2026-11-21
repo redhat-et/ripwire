@@ -1,0 +1,3 @@
+### Performance — the header-`static` question no longer resolves every import in the tree
+
+A C `static` in a header is still matched to the files that include it, but the include graph that question reads is now built from the C-family files' `#include` directives alone, instead of resolving every Python import, TypeScript specifier, Rust `use` and Ruby constant in the tree first. On a mixed C and Python tree (cpython, 4,663 files) a warm `--for` runs 5.9% fewer instructions; answers are unchanged, and a tree where a C file includes a file of another language falls back to the whole graph. `RIPWIRE_STATS=1` prints the work as one `[stats] header_static_adj` line (gate: `test/headerstaticadjcheck.sh`).
