@@ -43,7 +43,8 @@
 //
 // R1b (2026-11-20) ADDED A SECOND PROMOTION CLASS BELOW RES, and this is that "new evidence" clause being used, so it says
 // what the evidence is and what it does NOT cover. <tail> still does not move: it stays in place as a block, rows
-// 1..kGuardTailRows never move, and the guard still refuses a promotion that would push tail row 24 past the stop. What
+// 1..kGuardTailRows never move, and the guard still refuses a promotion that would push tail row 24 past the stop (for the
+// BODY class that bar is tail row kGuardTailRowsBody since ruling 120 — see the G/TL3 clause in the order spec below). What
 // changed is that promoteGuarded now has an explicit PRIORITY ORDER instead of a single walk in emitter order:
 // kPromotable (AF2's frozen ten, unchanged) has the first claim on the guard's headroom and kPromotableBody takes only what
 // is left. Lane R1 had instead widened kPromotable itself and MEASURED the defect that motivates this ordering — a body won
@@ -289,8 +290,24 @@ inline constexpr std::string_view kNameChars = "abcdefghijklmnopqrstuvwxyzABCDEF
 //   G/R1b — G's walk became TWO CLASS-ORDERED PASSES over the same list against the same headroom: kPromotable first
 //        (unchanged, so pass 1 is AF2's G exactly), then kPromotableBody from the headroom that remains, emitted behind
 //        the promoted RES sections so their byte offsets do not move. Same guard, same stop, same emit order within a class.
+//   G/TL2 — the SIZE precondition ("</tail> ends past the stop") scopes PASS 1 alone: it was never a guard, only a test on the
+//        tail's own size, and it made a tail that FITS page 1 untouchable (owner ruling 112).
+//   G/TL3 — the two classes carry TWO guarantees (owner ruling 120). PASS 1 is AF2's G on every input, unchanged, including its
+//        eligibility test: more than kGuardTailRows rows and an overflowing tail. PASS 2's guarantee is kGuardTailRowsBody, and
+//        its fit test is floored PER CANDIDATE by postPageOneFloors so that no section page 1 already delivers behind </tail>
+//        loses its place (a RES section keeps every delivered byte; any section keeps its page-1 presence). A tail of
+//        kGuardTailRowsBody+1..kGuardTailRows rows, which AF2's G refused outright, is a body candidate from here on.
 inline constexpr std::size_t      kAnswerPageBytesDefault = 12000;   // the default page size: forpages.h kForPageBytesDefault IS this
 inline constexpr std::size_t      kGuardTailRows          = 24;
+// RULING 120 (2026-11-20): the BODY class's OWN guarantee. Lane TL2 measured the guarantee, not its cap, as the lever that
+// funds page-1 bodies (results/TL2_TAIL_CAP_1120/READOUT.md §6b/§12.4) and handed the default back for the owner's word, which
+// ruling 120 gave. It lands as a SECOND constant rather than as a lower kGuardTailRows, and the reason is MEASURED, not
+// stylistic: lowering the one constant to 12 raises PASS 1's headroom as well, which promotes a kPromotable section ahead of
+// <tail> in four GA1 DEV cells AF2's frozen G left alone and DEFERS the <fold> the parent's page 1 delivered in a fifth
+// (ga-libzmq-08) — 7 of 89 cells fail B-NO-CROWDOUT v3 there, five of them on v2's own frozen conjuncts
+// (results/TL3_GUARD12_1120/READOUT.md §3). So AF2's RES guarantee stays at 24 — pass 1 is unchanged, and with it
+// tailSameDirFirst's partition point and the legend clause that discloses it — and only R1b's BODY class is funded from row 12.
+inline constexpr std::size_t      kGuardTailRowsBody      = 12;
 inline constexpr std::string_view kPromotable[] = { "lit", "dotted_strings", "graph_verb", "callers", "selfhooks", "manifest_rows",
                                                     "listed", "ep", "reexports", "exemplar_family" };
 // R1b's SECOND, LOWER-PRIORITY class (results/R1B_PRIORITY_RULE_1120/PREREG_R1B_1120.md §1, frozen before this was written).
@@ -415,15 +432,19 @@ struct Layout
 // kPromotable / kPromotableBody): the indices this class wins, with `taken` marking them and `used` advanced by their emitted
 // sizes — so a LATER class sees only the headroom this one left. The classes are swept highest priority first, which is what
 // makes crowding-out structurally impossible rather than a matter of emitter position.
+// `floor` is PER CANDIDATE — floor[i] is the byte page 1 must still reach if post[i] is the section that moves — because
+// promoting post[i] shifts only the sections AHEAD of it in emit order (the ones behind it keep their offsets: the promoted
+// section leaves its own slot by exactly its own size). A class with one guarantee for every candidate passes the same value
+// in every element; postPageOneFloors builds the body class's.
 [[nodiscard]] inline std::vector<std::size_t> promoteClassSweep( const std::vector<Block>& blocks, const std::vector<std::size_t>& sized,
                                                                  const std::vector<std::size_t>& post, std::span<const std::string_view> cls,
-                                                                 std::size_t rowEnd, std::size_t stop, std::vector<char>& taken, std::size_t& used )
+                                                                 std::span<const std::size_t> floor, std::size_t stop, std::vector<char>& taken, std::size_t& used )
 {
     std::vector<std::size_t> won;
     for( std::size_t i = 0; i < post.size(); ++i )
     {
         if( taken[ i ] != 0 || std::ranges::find( cls, blocks[ post[ i ] ].name ) == std::ranges::end( cls ) ) { continue; }
-        if( rowEnd + used + sized[ post[ i ] ] > stop ) { continue; }
+        if( floor[ i ] + used + sized[ post[ i ] ] > stop ) { continue; }
         taken[ i ] = 1;
         used += sized[ post[ i ] ];
         won.push_back( post[ i ] );
@@ -431,22 +452,35 @@ struct Layout
     return won;
 }
 
-// THE RES FLOOR TL2's cap owes R1b's priority rule: the furthest byte a kPromotable section BEHIND </tail> already reaches
-// inside the page stop. On a tail that FITS the page, pass 1 does not run (AF2's frozen precondition), so the RES sections
-// stay where they are and a body promoted ahead of the tail shifts every one of them by its own size. Flooring the body's fit
-// test here keeps a RES section page 1 already delivers on page 1 — without it, MEASURED on GA1 DEV, <callers> left page 1 in
-// ga-jq-05 and ga-jq-08 (results/TL2_TAIL_CAP_1120/READOUT.md §6), which is a displacement B-NO-CROWDOUT v2 cannot see:
-// all three of its conjuncts read the prefix up to </tail>, and that section sat behind it. `at` is where </tail> ends.
-[[nodiscard]] inline std::size_t postResReach( const std::vector<Block>& blocks, const std::vector<std::size_t>& sized,
-                                               const std::vector<std::size_t>& post, std::size_t at, std::size_t stop )
+// THE PAGE-1 FLOOR the body class owes everything already BEHIND </tail>, per candidate: floors[i] is the byte page 1 must
+// still reach if post[i] moves ahead of <tail>, read off the sections AHEAD of post[i] alone, since those are the only ones its
+// promotion shifts. Two things are owed, at two different granularities, and the difference between them is not cosmetic:
+//   * R1b's PRIORITY RULE — a kPromotable RES section keeps EVERY byte page 1 delivered, so it contributes its END. This is
+//     TL2's own postResReach, which this generalises; without it, MEASURED on GA1 DEV, <callers> left page 1 in ga-jq-05 and
+//     ga-jq-08 (results/TL2_TAIL_CAP_1120/READOUT.md §6).
+//   * RULING 115's conjunct (iv) — ANY section keeps its page-1 PRESENCE, so every section contributes its START (+1, so the
+//     start stays strictly inside the stop). Presence is exactly what the product's own deferred= reports (forpages.h
+//     sectionAttrs: a section is deferred iff it STARTS at or after the cut) and exactly what B-NO-CROWDOUT v3 grades.
+//     Without it, MEASURED, <hops> left page 1 in ga-jq-01 and ga-jq-09 — TL2 reported that and declined to narrow the bar.
+// Reading presence as a START and RES completeness as an END is what keeps the gain: in ga-bash-it-06 the parent's own page 1
+// already cuts <fold> mid-section, so an END-based floor over all sections would refuse the one promotion that cell is the
+// +1 BODY cell of. `at` is where </tail> ends; when the tail OVERFLOWS the stop every post-tail section starts past it, so
+// every floor is `rowEnd` and the walk is provably a no-op — which is why pass 1 can share this list unchanged.
+[[nodiscard]] inline std::vector<std::size_t> postPageOneFloors( const std::vector<Block>& blocks, const std::vector<std::size_t>& sized,
+                                                                 const std::vector<std::size_t>& post, std::size_t at, std::size_t stop,
+                                                                 std::size_t rowEnd )
 {
-    std::size_t reach = 0;
-    for( const std::size_t j : post )
+    std::vector<std::size_t> floors( post.size(), rowEnd );
+    std::size_t              reach = rowEnd;
+    for( std::size_t i = 0; i < post.size(); ++i )
     {
-        at += sized[ j ];
-        if( at <= stop && std::ranges::find( kPromotable, blocks[ j ].name ) != std::ranges::end( kPromotable ) ) { reach = at; }
+        floors[ i ]              = reach;   // the sections ahead of post[ i ], never post[ i ] itself nor anything behind it
+        const std::size_t begins = at;
+        at += sized[ post[ i ] ];
+        if( begins < stop ) { reach = std::max( reach, begins + 1 ); }
+        if( at <= stop && std::ranges::find( kPromotable, blocks[ post[ i ] ].name ) != std::ranges::end( kPromotable ) ) { reach = std::max( reach, at ); }
     }
-    return reach;
+    return floors;
 }
 
 // G, the GUARDED promotion, on the emitted sizes. The bytes ahead of the first row block are the root open tag; the stop is the
@@ -467,7 +501,20 @@ struct Layout
     std::erase_if( rows, []( const Block& r ) { return r.comment; } );   // ROWS: a comment inside the tail is not one
     std::size_t before = prefix;
     for( auto it = order.begin(); it != tailIt; ++it ) { before += sized[ *it ]; }
-    if( rows.size() <= kGuardTailRows ) { return order; }
+    // THE SAME ROWS IN THE EMITTED TEXT. `rows` are read out of `view`, where the tail still carries the direct-child
+    // comments A hoists into the document legend, so a row's `view` offset is NOT its offset in the answer. AF2's guard
+    // corrected for that by subtracting EVERY hoisted byte, which is exact only while all of them precede row k — and
+    // MEASURED on GA1 DEV they do not: in ga-bash-it-06 the tail's hoisted clauses run past row 12, so AF2's
+    // `sized - elemLen` is a NEGATIVE std::size_t, the floor WRAPPED to an astronomical value and the promotion ruling 120
+    // priced was refused in silence. At 24 rows the wrap does not fire on this population, which is why it has never been
+    // seen. `layout.text` is the tail exactly as it will be emitted, so rows read out of it need no correction at all and
+    // the only subtraction left is the tail's own owned-comment bytes, which cannot be negative.
+    const std::string& emitted = layout.text[ *tailIt ];
+    const std::size_t  eOpen   = emitted.find( '>' ) + 1;
+    const std::size_t  eClose  = emitted.rfind( "</" );
+    std::vector<Block> erows   = eClose > eOpen ? topLevelBlocks( emitted, eOpen, eClose ) : std::vector<Block>{};
+    std::erase_if( erows, []( const Block& r ) { return r.comment; } );
+    if( rows.size() <= kGuardTailRowsBody || erows.size() <= kGuardTailRowsBody ) { return order; }
     // TL2's CAP (owner ruling 112, results/TL2_TAIL_CAP_1120/READOUT.md §3): the tail's page-1 presence is a GUARANTEE of its
     // first kGuardTailRows rows, not of the whole tail. AF2's G asked a second question before promoting anything — does
     // </tail> itself end past the stop — and that is a precondition on the tail's own SIZE, not a guard: it made a tail that
@@ -476,10 +523,27 @@ struct Layout
     // 88 GA1 DEV page-1 tails carry a single r= row) and are what funds the body. Nothing is removed — the tail keeps every
     // row, in order — so this is still the permutation test/foranswerfirstcheck.sh (R1)/(R4) pin, not item K's tail cut.
     // The size precondition therefore scopes PASS 1 ALONE: on a fitting tail the RES class is AF2's frozen behaviour byte for
-    // byte (no RES section moves), and the BODY class may be funded from the unguaranteed rows, floored by postResReach so a
-    // RES section page 1 already delivers keeps its place. (G8)/(G9)/(G10) pin all three halves.
+    // byte (no RES section moves), and the BODY class may be funded from the unguaranteed rows, floored by postPageOneFloors so
+    // that nothing page 1 already delivers behind </tail> loses it. (G8)/(G9)/(G10) pin all three halves.
+    // RULING 120: the two classes now carry TWO guarantees. Pass 1 keeps AF2's 24 rows AND AF2's own eligibility test
+    // (more than kGuardTailRows rows, and an overflowing tail), so it promotes exactly what the parent promotes on every
+    // input — by construction, not by measurement. Pass 2 is guaranteed kGuardTailRowsBody rows, which is what funds the
+    // bodies ruling 120 priced; a tail of 13..24 rows, which the parent refused outright, is now a body candidate too.
     const bool        overflows = before + sized[ *tailIt ] > stop;
-    const std::size_t rowEnd    = before + ( sized[ *tailIt ] - ( tail.end - tail.begin ) ) + ( rows[ kGuardTailRows - 1 ].end - tail.begin );
+    // TWO expressions for "where the guaranteed row ends", deliberately. PASS 1's must be AF2's arithmetic VALUE for value,
+    // because pass 1 being the parent's on every input is what makes B-NO-CROWDOUT v2's frozen conjuncts pass by
+    // construction rather than by measurement; `resRowEnd` is therefore AF2's expression with the wrap above replaced by an
+    // explicit refusal, which changes no decision — a wrapped floor exceeded the stop and could only ever refuse — and
+    // leaves no unsigned overflow for -fsanitize=integer to find. PASS 2's is new code and is simply correct.
+    const std::size_t elemLen = tail.end - tail.begin;
+    const std::size_t hoisted = elemLen > sized[ *tailIt ] ? elemLen - sized[ *tailIt ] : 0;
+    const std::size_t owned   = sized[ *tailIt ] > elemLen ? sized[ *tailIt ] - elemLen : 0;
+    const auto        resRowEnd = [ & ]( std::size_t k )
+    {
+        const std::size_t off = ( rows[ k - 1 ].end - tail.begin ) + owned;
+        return off >= hoisted ? before + off - hoisted : stop + 1;
+    };
+    const auto bodyRowEnd = [ & ]( std::size_t k ) { return before + ( sized[ *tailIt ] - emitted.size() ) + erows[ k - 1 ].end; };
     // R1b's PRIORITY RULE: two class-ordered passes over the SAME post-tail list, in the SAME emit order, against the SAME
     // single headroom accumulator. Pass 1 is the parent's own walk over kPromotable with `used` starting at 0, and a section of
     // no promotable class never consumed headroom in the parent either — so pass 1 promotes exactly what AF2's frozen G
@@ -489,10 +553,12 @@ struct Layout
     // the parent's, byte for byte.
     const std::vector<std::size_t> post( tailIt + 1, order.end() );
     std::vector<char>              taken( post.size(), 0 );
-    std::size_t                    used = 0;
-    const std::vector<std::size_t> movedRes = overflows ? promoteClassSweep( blocks, sized, post, kPromotable, rowEnd, stop, taken, used )
-                                                        : std::vector<std::size_t>{};                                              // pass 1
-    const std::size_t bodyFloor = overflows ? rowEnd : std::max( rowEnd, postResReach( blocks, sized, post, before + sized[ *tailIt ], stop ) );
+    std::size_t                    used    = 0;
+    const bool                     resPass = overflows && rows.size() > kGuardTailRows;   // AF2's eligibility test, verbatim
+    const std::vector<std::size_t> resFloor( post.size(), resPass ? resRowEnd( kGuardTailRows ) : 0 );
+    const std::vector<std::size_t> movedRes = resPass ? promoteClassSweep( blocks, sized, post, kPromotable, resFloor, stop, taken, used )
+                                                      : std::vector<std::size_t>{};                                                // pass 1
+    const std::vector<std::size_t> bodyFloor = postPageOneFloors( blocks, sized, post, before + sized[ *tailIt ], stop, bodyRowEnd( kGuardTailRowsBody ) );
     const std::vector<std::size_t> movedBody = promoteClassSweep( blocks, sized, post, kPromotableBody, bodyFloor, stop, taken, used );   // pass 2
     std::vector<std::size_t>       out( order.begin(), tailIt );
     out.insert( out.end(), movedRes.begin(), movedRes.end() );

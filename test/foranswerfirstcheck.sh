@@ -47,8 +47,13 @@
 #   (G8n) TL2: the POPULATION -- the fixture's tail must FIT the stop, carry > 24 rows and offer a body section after </tail>
 #   (G8)  TL2: a body section is emitted ahead of <tail> ALTHOUGH the whole tail fits page 1 (RED on the pre-TL2 binary)
 #   (G9)  TL2: the delivered page 1 keeps a body AND its first 24 tail rows, with row 24 inside the stop
-#   (G10) TL2: no kPromotable section the legacy page 1 DELIVERS is deferred by that promotion -- the RES floor
-#   (G10n) the vacuity disclosure: where the fixture offers no post-tail RES section, G10 is recorded UNTESTED, not passed
+#   (G10) TL3: no section AT ALL the legacy page 1 DELIVERS is deferred by that promotion -- the page-1 floor (ruling 115's
+#         conjunct (iv) in code), with the kPromotable subset reported beside it so a RES displacement is never merely implied
+#   (G10n) the vacuity disclosure: the fixture's own population for G10, in both directions, including whether it offers a
+#         post-tail RES section at all -- where it does not, the RES half is recorded UNTESTED rather than passed
+#   (G11) TL3: the two guarantees are the ruling's -- kGuardTailRows 24 (AF2, frozen) and kGuardTailRowsBody 12 (ruling 120).
+#         A VALUE PIN, read out of src/foranswerfirst.h: either default moving reddens this arm and forces a decision, which
+#         is the opposite of a gate that follows its own constant wherever it goes
 set -u
 # SIGX (src/forsigx.h, TL1 M1) runs AFTER this permutation and is lossless but not a permutation (it adds the <x r=R> envelopes and
 # the <sigx> block). This gate pins the PERMUTATION alone, so SIGX is off here; test/forsigxcheck.sh pins SIGX, and its (S1) rebuilds
@@ -840,6 +845,11 @@ PY_CL
 # kPromotable section page 1 already delivers. MEASURED without that floor: <callers> left page 1 in ga-jq-05 and
 # ga-jq-08 -- and B-NO-CROWDOUT v2 is structurally blind to it, because all three of its conjuncts read the prefix up to
 # </tail> and that section was BEHIND it.
+# TL3 (owner rulings 120/121) WIDENED that floor, because the RES-only reading was not enough for the bar that grades it:
+# src/foranswerfirst.h postPageOneFloors keeps a RES section's every delivered byte AND every section's page-1 PRESENCE, per
+# candidate, since promoting a section shifts only what is ahead of it. MEASURED without the presence half: <hops> left
+# page 1 in ga-jq-01 and ga-jq-09. (G10) below is that prohibition over ALL sections, which is also what made it stop being
+# vacuous on this fixture.
 #   (G8n) the POPULATION arm, read off the LEGACY order, asserting in BOTH directions: this fixture's tail must FIT the
 #         stop, carry more than kGuardTailRows rows, and offer a body section after </tail>. The fixture is a SUBTREE
 #         (src/infra), because on the whole repo every tail overflows -- the fitting-tail population is empty there, and
@@ -866,7 +876,7 @@ capat "$WORK/u_oldpage1.xml" "$ROOT_T" "$TASK_T"
 for f in u_new u_old u_page1 u_oldpage1; do
     [ -s "$WORK/$f.xml" ] || { no "(G8n) $f.xml is empty -- the TL2 arms assert nothing"; echo "FAILURES"; exit 1; }
 done
-python3 - "$WORK" <<'PY_TL2'
+python3 - "$WORK" "$ROOT" <<'PY_TL2'
 import re, sys, os
 W = sys.argv[1]; STOP = 12000; K = 24; bad = 0
 RES     = ("lit", "dotted_strings", "graph_verb", "callers", "selfhooks", "manifest_rows", "listed", "ep", "reexports", "exemplar_family")
@@ -936,22 +946,42 @@ if "tail" in n1:
 else:
     say(False, "(G9c) page 1 carries no <tail> at all -- the guarantee was displaced whole")
 
-# -- (G10/G10n) THE RES FLOOR. The legacy page 1 is the baseline for what a promotion may not push off.
-oldp1 = rd("u_oldpage1.xml"); tp = tops(oldp1); delivered_res = [x[0] for x in tp if x[0] in RES]
+# -- (G10/G10n) THE PAGE-1 FLOOR. The legacy page 1 is the baseline for what a promotion may not push off. TL2 scoped this
+# arm to the kPromotable class and it was VACUOUS on this fixture, which offers no post-tail RES section. Ruling 115's
+# conjunct (iv) is wider -- "no section the parent's page 1 delivered is deferred" -- and ruling 121 kept that wording
+# against the lane whose own mechanism it failed. Widening the arm to every section can only reject more inputs than the
+# RES-only arm did (LANE_CONSTRAINTS §4b: check the direction), and it is what makes the arm LIVE here: the fixture
+# delivers sections on page 1 even though none of them is RES. The RES subset is still reported, so a RES displacement is
+# never merely implied by a wider pass.
+oldp1 = rd("u_oldpage1.xml"); tp = tops(oldp1); delivered_all = [x[0] for x in tp]
+delivered_res = [n for n in delivered_all if n in RES]
 res_new_ahead = [x[0] for x in tn[:nn.index("tail")] if x[0] in RES] if "tail" in nn else []
 res_old_ahead = [x[0] for x in to[:oi] if x[0] in RES]
-newly = [n for n in delivered_res if n in deferred(p1)]
-if not opost_res and not delivered_res:
-    say(res_new_ahead == res_old_ahead,
-        "(G10n) this fixture offers NO RES section after </tail> and delivers none on page 1, so the RES floor is UNTESTED here "
-        "(it is measured on GA1 DEV ga-jq-05/ga-jq-08, READOUT §6); the RES order ahead of <tail> is unchanged: %s"
-        % (",".join(res_new_ahead) or "none"))
-else:
-    say(not newly and res_new_ahead == res_old_ahead,
-        "(G10) no RES section the legacy page 1 delivers (%s) is deferred by the promotion (newly deferred: %s), and the RES "
-        "order ahead of <tail> is the legacy order's (%s vs %s)"
-        % (",".join(delivered_res) or "none", ",".join(newly) or "none",
-           ",".join(res_new_ahead) or "none", ",".join(res_old_ahead) or "none"))
+newly_all = [n for n in delivered_all if n in deferred(p1)]
+newly_res = [n for n in newly_all if n in RES]
+say(bool(delivered_all) and (bool(opost_res) or not delivered_res),
+    "(G10n) G10's population on this fixture: the legacy page 1 delivers %d section(s) (%s), so the ALL-sections floor is LIVE "
+    "here; post-tail RES sections: %s -- where that is none, the RES HALF is UNTESTED here and is measured on GA1 DEV "
+    "ga-jq-05/ga-jq-08 (TL2 READOUT §6). G10 has NO CONTRAST on this fixture either way: MEASURED, the pre-TL2 parent binary "
+    "and TL2's own both PASS it here, so its red is the GA1 DEV pair ga-jq-01/ga-jq-09, not this arm (TL3 READOUT §4)"
+    % (len(delivered_all), ",".join(delivered_all) or "none", ",".join(x[0] for x in opost_res) or "none"))
+say(not newly_all and res_new_ahead == res_old_ahead,
+    "(G10) no section the legacy page 1 delivers (%s) is deferred by the promotion (newly deferred: all=%s res=%s), and the RES "
+    "order ahead of <tail> is the legacy order's (%s vs %s)"
+    % (",".join(delivered_all) or "none", ",".join(newly_all) or "none", ",".join(newly_res) or "none",
+       ",".join(res_new_ahead) or "none", ",".join(res_old_ahead) or "none"))
+
+# -- (G11) THE TWO GUARANTEES ARE THE RULING'S. A value pin, read out of the source, asserted in both directions: AF2's RES
+# guard stays at 24 (so pass 1, tailSameDirFirst's partition point and the legend clause that discloses it are untouched) and
+# ruling 120's BODY guarantee is 12. This is deliberately NOT "the gate reads whatever the constant says": a default that
+# moves must redden a gate and force a decision, which is the trap TL2 named when it declined to edit (G4)/(G5b) to match a
+# constant it had just lowered. The semantic arms above ((G4)/(G9a)/(G9c)) still assert 24 rows on the DELIVERED page and
+# still pass -- the body guarantee is a floor on what may be promoted, not a promise that fewer rows will be served.
+src = open(os.path.join(sys.argv[2], "src/foranswerfirst.h"), encoding="utf8").read()
+got = dict(re.findall(r"inline constexpr std::size_t\s+(kGuardTailRows\w*)\s*=\s*(\d+)", src))
+say(got.get("kGuardTailRows") == "24" and got.get("kGuardTailRowsBody") == "12",
+    "(G11) src/foranswerfirst.h pins both guarantees: kGuardTailRows=%s (AF2, frozen, expected 24) and kGuardTailRowsBody=%s "
+    "(owner ruling 120, expected 12)" % (got.get("kGuardTailRows", "MISSING"), got.get("kGuardTailRowsBody", "MISSING")))
 sys.exit(1 if bad else 0)
 PY_TL2
 [ $? -eq 0 ] || fail=1

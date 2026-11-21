@@ -472,6 +472,7 @@ Discloses: **none**
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kGuardTailRows` | `24` | — | — |
+| `kGuardTailRowsBody` | `12` | — | — |
 
 ### `src/forbudgetfit.h`
 
