@@ -37,5 +37,7 @@ class Holder
 public:
     void hold( Box<View> b );
     void hold( Box<const View>& b );
+    void wrapPtr( Box<View*> const& b );
+    void wrapPtr( Box<View>& b );
 };
 }

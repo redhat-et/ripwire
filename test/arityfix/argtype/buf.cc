@@ -20,4 +20,6 @@ namespace lib
 {
 void Holder::hold( Box<View> b ) { (void)b; }
 void Holder::hold( Box<const View>& b ) { (void)b; }
+void Holder::wrapPtr( Box<View*> const& b ) { (void)b; }
+void Holder::wrapPtr( Box<View>& b ) { (void)b; }
 }
