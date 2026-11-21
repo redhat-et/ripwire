@@ -59,6 +59,7 @@
 #include <cctype>
 
 #include "infra/Diagnostics.h"
+#include "infra/enumcount.h"    // enumCountIsExact — kPyStatusDisplay has one row per PyStatus value
 #include "infra/namesplit.h"   // the ONE ASCII identifier-character pair and the quote-pair strip
 #include "infra/sortutil.h"    // svLess: the string_view order a comparator lambda may use (portablebuildcheck #6c)
 #include "infra/tablelookup.h"  // findByField: an assignment by its node
@@ -4371,7 +4372,11 @@ struct PyStatusName
     PyStatus         call;
 };
 
-inline constexpr std::array<std::string_view, 4> kPyStatusDisplay = { "", "subprocess.run", "subprocess.call", "os.system" };
+inline constexpr std::size_t kPyStatusCount = 4;
+static_assert( enumCountIsExact<PyStatus, kPyStatusCount>(), "kPyStatusCount must equal the PyStatus count — raise it with the append" );
+inline constexpr std::array kPyStatusDisplay = { std::string_view{}, std::string_view{ "subprocess.run" }, std::string_view{ "subprocess.call" },
+                                                 std::string_view{ "os.system" } };   // indexed by PyStatus
+static_assert( kPyStatusDisplay.size() == kPyStatusCount, "one kPyStatusDisplay row per PyStatus value (the extent is deduced from the rows)" );
 
 // The spellings this file reaches the three calls by: the modules (`subprocess`, `os`, or an `import … as X`
 // alias) and the bare names a `from subprocess import run [as r]` / `from os import system` binds.
