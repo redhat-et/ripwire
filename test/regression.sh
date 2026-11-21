@@ -1169,6 +1169,7 @@ for _g in \
     withgraphcheck \
     withprofilecheck \
     worktreeleakcheck \
+    wrapperprefixcheck \
     wrapverbscheck \
     writetargetcheck \
     writtenspellingcheck \

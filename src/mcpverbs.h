@@ -6071,9 +6071,10 @@ inline FetchOutcome fetchBody( const std::string& root, const std::string& handl
         return oc;
     }
 
-    // 4. the def span is [sigStartByte, endByte) — the exact span --expand/replace_symbol_body use. Degrade,
+    // 4. the def span is [declStartByte, endByte) — the exact span --expand/replace_symbol_body use: the declaration
+    //    from its wrapper prefix (declwrap.h), not from the inner node the symbol starts at. Degrade,
     //    never assert: an insane span refuses rather than slicing out of bounds.
-    const std::size_t a = s.sigStartByte, b = s.endByte;
+    const std::size_t a = declStartByte( ing, s, src ), b = s.endByte;
     if( !( a < b && b <= src.size() ) )
     {
         oc.ok = false; oc.errCode = -32603;

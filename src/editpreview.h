@@ -7,7 +7,7 @@
 //
 // THE DESIGN RULE, and it is the whole reason this file is small: the preview does not re-derive the
 // answer. It re-derives the TREE and hands it to the SAME editCheckBundleText() the post-hoc verb calls.
-// Two things follow. (1) The payload is spliced by mcpedit::applyEdit over the SAME [sigStartByte,
+// Two things follow. (1) The payload is spliced by mcpedit::applyEdit over the SAME [declStartByte,
 // endByte) span, with the SAME CRLF harmonisation the write path applies, so "what the preview measured"
 // and "what an apply would write" are one function. (2) Every fact downstream — the HEAD baseline, the
 // root spelling, the at= commit anchor, the note children, the legend — is the real tree's, because the
@@ -366,7 +366,7 @@ inline Outcome run( const IngestResult& ing, const Graph& g, const std::string& 
     {
         return refuse( "cannot read '" + path + "' to preview the edit" );
     }
-    const std::size_t a = fsym.sigStartByte, b = fsym.endByte;
+    const std::size_t a = declStartByte( ing, fsym, src ), b = fsym.endByte;   // the span mcpedit splices (declwrap.h)
     if( !( a < b && b <= src.size() ) )
     {
         return refuse( "the definition span for '" + std::string( selector ) + "' does not fit '" + path

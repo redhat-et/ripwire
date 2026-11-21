@@ -12,6 +12,7 @@
 // included by mcp.h (runMcp dispatches here).
 
 #include "mcpindex.h"
+#include "declwrap.h"         // declStartByte — the edit span starts where the served body does (wrapper prefix included)
 #include "editcheck.h"        // P9: the SAME four computations --edit-check renders as XML — folded into the receipt as JSON
 #include "testmap.h"          // P9: affectedAnswerForFile + testRowEvidence + runFieldJsonDisclosed — the SAME rows --affected=FILE emits
 #include "didyoumean.h"       // M9: boundedEditDistance / nearestIndexedFileClause — ONE near-miss policy for read and edit
@@ -489,11 +490,12 @@ namespace mcpedit
 
     // apply the edit. Pure over (span, op, text, srcBytes) → the new file bytes, plus the applied [a,b) span
     // and what the seam rules did (`seam`). The rules, documented in --help and the MCP schemas:
-    //   ReplaceBody   — the new bytes are new_body; every byte outside [sigStartByte, endByte) is preserved
+    //   ReplaceBody   — the new bytes are new_body; every byte outside [declStartByte, endByte) (declwrap.h: the
+    //                   declaration from its wrapper prefix, the span --expand prints) is preserved
     //                   verbatim. ONE trailing newline on new_body is FOLDED into the newline already at
     //                   endByte (a heredoc / echo / editor always appends one the span never contained), and the
     //                   receipt says trailing_newline_folded:true; a second one — a deliberate blank line — stays.
-    //   InsertBefore  — text is inserted at sigStartByte, then PADDED with trailing newlines until it is
+    //   InsertBefore  — text is inserted at declStartByte, then PADDED with trailing newlines until it is
     //                   separated from the existing definition by the same blank-line run the file has right
     //                   before that definition (at least one newline, so the two never share a line). Padding
     //                   only ever ADDS; a payload already carrying the separator is left alone. separator_padded=N.
@@ -1329,9 +1331,11 @@ inline mcpedit::Outcome runEditVerb( const std::string& root, mcpedit::Op op, co
     // committed write in the [read..rename] window is DETECTED and REFUSED, never silently clobbered.
     const std::uint64_t baseHash = freshHash;
 
-    // 3. span sanity — the FULL def span is [sigStartByte, endByte) (same span --expand slices). Degrade,
+    // 3. span sanity — the FULL def span is [declStartByte, endByte) (same span --expand slices: the declaration from
+    //    its wrapper prefix, declwrap.h — so a replace covers the `export` / decorator / template<…> the served body
+    //    carried, and an insert-before lands above a decorator, never between it and its function). Degrade,
     //    never assert: an out-of-range span refuses rather than splicing out of bounds.
-    const std::size_t a = s.sigStartByte, b = s.endByte;
+    const std::size_t a = declStartByte( ing, s, src ), b = s.endByte;
     if( !( a < b && b <= src.size() ) )
     {
         oc.ok = false; oc.errCode = -32603;

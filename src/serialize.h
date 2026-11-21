@@ -7,6 +7,7 @@
 #include "infra/os.h"   // rw::os::open_memstream — the est_tokens charge buffers
 #include <format>          // std::format_to_n — the appendf lambdas append through it directly
 #include "model.h"
+#include "declwrap.h"   // declStartByte — a served body starts at its declaration, wrapper prefix included
 #include "memguard.h"   // #350: memguard::limitSpelling — memory_limit= is spelled as the --max-memory value that raises it
 #include "extentsuspect.h"   // extent honesty: extent_suspect= reason spellings (extent::extentSuspectReasons)
 #include "nextverb.h"   // P3 (L7): next= on the top-ranked <d> row
@@ -6997,6 +6998,13 @@ inline const std::string* extractedTextOfUnit( const IngestResult& ing, const Sy
     return doc != ing.docText.end() ? &doc->second : nullptr;
 }
 
+// Where the body a verb serves for `s` starts in `src`, the text extractedTextOfUnit chose: the declaration's first byte
+// (declwrap.h) in a file's own bytes, the unit's own start in an extracted doc unit (no grammar parses that text).
+inline std::size_t servedBodyStart( const IngestResult& ing, const Symbol& s, std::string_view src, bool srcIsDocUnit )
+{
+    return srcIsDocUnit ? std::size_t( s.sigStartByte ) : declStartByte( ing, s, src );
+}
+
 inline void packCandidates( std::FILE* out, const IngestResult& ing, const std::vector<float>& rank, int cap,
                             RedactCounts* redact,                 // §B0/W3-N1: REQUIRED — <sig> is emitted text (nullptr = --no-redact)
                             CandidateProvenance prov = {},
@@ -8366,7 +8374,9 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
         // table and dangle any reference held across it — never cache `src` past an insert.
         const std::string* unitText = extractedTextOfUnit( ing, s );
         const std::string& src      = unitText ? *unitText : contentOf( f );
-        const std::size_t  a = s.sigStartByte, b = s.endByte;
+        // WRAPPER PREFIX (declwrap.h): the body starts at the declaration — `export`, a decorator, `template<…>`, an
+        // attribute run — not at the inner node the symbol's span starts at. An extracted doc unit keeps its own start.
+        const std::size_t  a = servedBodyStart( ing, s, src, unitText != nullptr ), b = s.endByte;
         if( src.empty() || a >= b || b > src.size() )
         {
             continue; // graceful: file gone / empty, or an unreadable span — covered by total=/capped=
@@ -9272,7 +9282,7 @@ inline std::size_t estimateExpandBodyTokens( const IngestResult& ing, const std:
         const Symbol&      s        = ing.symbols[id];
         const std::string* unitText = extractedTextOfUnit( ing, s );   // packBodies' own choice of text
         const std::string& src      = unitText ? *unitText : contentOf( s.fileId );
-        const std::size_t  a = s.sigStartByte, b = s.endByte;
+        const std::size_t  a = servedBodyStart( ing, s, src, unitText != nullptr ), b = s.endByte;   // packBodies' own start
         if( a >= b || b > src.size() )
         {
             continue;
