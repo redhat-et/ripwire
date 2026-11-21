@@ -551,8 +551,6 @@ ingest_astquery.h	computeGrammarDisclosure	ts_query_new	1	a compile probe, delet
 ingest_astquery.h	definitionLinesWorker	ts_query_cursor_new	1	deleted on both exits of the noexcept worker: the no-parser return (when non-null) and after the claim loop, whose one throwing call sits inside try/catch
 ingest_astquery.h	spanTiersOfFiles	ts_parser_parse_string	1	the tree is deleted right after the walk
 ingest_crawl.h	compileQueryStandalone	ts_query_new	1	returned into the process-lifetime CompiledQueryCache, whose destructor deletes every query
-ingest_declwrap.h	treeOf	ts_parser_new	1	deleted right after the one parse, on the only path out of the block (no return or throwing call between)
-ingest_declwrap.h	treeOf	ts_parser_parse_string	1	stored in ParsedMemo::tree, which ParsedMemo::drop() deletes on the next miss and in the destructor
 ingest_parsepool.h	runParseWorker	ts_query_cursor_new	1	deleted at the end of the worker; the returns in between belong to lambdas
 ingest_sidecap.h	parseTree	ts_parser_parse_string	1	returned to the caller, which adopts it into TreeGuard
 jsrunner.h	scanModule	ts_parser_new	1	deleted right after the parse, before the null-tree return
