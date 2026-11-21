@@ -10098,6 +10098,18 @@ struct AliasNameWalk
 
     static constexpr int kMaxAliasDepth = 8;
 
+    // The DISCLOSE sink for elementTexts' one degrade: the depth bound reached with an alias still queued whose own records
+    // were never read, so an element type behind it is not collected (a member gate may then decline a call that type
+    // would have kept). Counted per elementTexts call as depth_cut= on the RIPWIRE_STATS alias_walk line; a queued name
+    // with no alias records is no cut (nothing was left unread).
+    struct DepthCut
+    {
+        enum class DisclosureWhy : std::uint8_t { AliasDepthCap };
+        std::size_t walks = 0;
+        void disclose( DisclosureWhy ) noexcept { ++walks; }
+    };
+    DepthCut depthCut;
+
     // `name`'s alias records; empty when it is no alias (a name the table holds has at least one)
     std::span<const std::uint32_t> recordsOf( std::string_view name )
     {
@@ -10144,12 +10156,19 @@ struct AliasNameWalk
             }
             level.swap( nextLevel );
         }
+        if( std::ranges::any_of( level, [ & ]( std::string_view name ) { return !recordsOf( name ).empty(); } ) )
+        {
+            DISCLOSE( depthCut, DepthCut::DisclosureWhy::AliasDepthCap,
+                      "elementTexts: kMaxAliasDepth (8 alias steps) reached with a queued alias unread — an element type behind it is not collected" );
+        }
     }
 
     // a `->` through `type`: opaque when one of its alias records targets a std smart pointer or optional, or when
     // `nameOpaque( name, aliased )` holds for a name reached in d alias steps, d = 0..kMaxAliasDepth (one SET of names per
     // level: a name's own test depends only on whether its level is under the bound — at the bound an alias reads as
-    // unaliased — so one test per (name, level) is the OR the per-path recursion computed)
+    // unaliased — so one test per (name, level) is the OR the per-path recursion computed). A level is tested WHOLE before
+    // the walk stops on it: a level is a SET of names, so the visits= count is the sizes of the levels up to the first opaque
+    // one, whatever order the alias records (file order) list a level in. Stopping mid-level made it order-dependent.
     template<class NameOpaque>
     bool anyOpaque( std::string_view type, const NameOpaque& nameOpaque )
     {
@@ -10159,14 +10178,16 @@ struct AliasNameWalk
         {
             nextLevel.clear();
             seen.clear();
+            bool opaque = false;
             for( const std::string_view name : level )
             {
                 ++arrowVisits;
                 const std::span<const std::uint32_t> records = depth < kMaxAliasDepth ? recordsOf( name ) : std::span<const std::uint32_t>{};
-                if( queueTargets( name, records ) || nameOpaque( name, !records.empty() ) )
-                {
-                    return true;
-                }
+                opaque = ( queueTargets( name, records ) || nameOpaque( name, !records.empty() ) ) || opaque;
+            }
+            if( opaque )
+            {
+                return true;
             }
             level.swap( nextLevel );
         }
@@ -11519,7 +11540,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             return;
         }
         out.types.push_back( typeName );
-        out.opaqueArrow = out.opaqueArrow || ( viaArrow && arrowIsOpaque( typeName ) );
+        const bool opaque = viaArrow && arrowIsOpaque( typeName );   // every admitted declaration tested: arrow_walk counts the set, not its order
+        out.opaqueArrow   = out.opaqueArrow || opaque;
     };
     // a field's recorded type: a std smart pointer's pointee is reached through `->` alone (`w_.reset()` on
     // `std::unique_ptr<W> w_;` is the pointer's own member), and a pointee is the class itself, never a wrapper of it
@@ -11530,7 +11552,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             return;
         }
         out.types.push_back( t->type );
-        out.opaqueArrow = out.opaqueArrow || ( viaArrow && !t->arrowOnly && arrowIsOpaque( t->type ) );
+        const bool opaque = viaArrow && !t->arrowOnly && arrowIsOpaque( t->type );   // as addWritten: tested per declaration
+        out.opaqueArrow   = out.opaqueArrow || opaque;
     };
     const auto namedKey = [ & ]( NodeId from, std::string_view var ) -> const std::string&
     {
@@ -14137,7 +14160,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     }
     if( memstats::enabled() )
     {
-        rw::emitTo( stderr, "[mem] alias_walk calls={} pushes={} elements={}\n", aliasWalk.elementCalls, aliasWalk.elementPushes, aliasWalk.elements );
+        rw::emitTo( stderr, "[mem] alias_walk calls={} pushes={} elements={} depth_cut={}\n", aliasWalk.elementCalls, aliasWalk.elementPushes, aliasWalk.elements,
+                    aliasWalk.depthCut.walks );
         rw::emitTo( stderr, "[mem] arrow_walk calls={} visits={}\n", aliasWalk.arrowCalls, aliasWalk.arrowVisits );
     }
     std::sort( g.stdMemberDeclines.begin(), g.stdMemberDeclines.end() );   // grouped by caller: stdMemberCallsMadeBy's equal_range
