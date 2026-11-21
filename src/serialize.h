@@ -224,29 +224,6 @@ inline std::string_view escapeXml( std::string_view s, std::vector<char>& out )
     return std::string_view( out.data(), out.size() );
 }
 
-// M12 (capture-audit-2026-09-04, lane L9): under multi-root, every one of the graph-count verbs
-// (--callers/--callees/--uses) drops root= (correctly — there IS no single root=) but discloses NOTHING in
-// its place, so a reader of `ripwire src test --callers=SYM` has no way to learn what the `<label>/` prefix
-// on every p=/id= MEANS. The default map's own prologue already prints exactly this table for exactly this
-// reason (below, in serialize()); this is that same shape, factored out so the read verbs can reuse it
-// instead of re-deriving it. Lives here (not graphlegend.h, which is included from ABOVE this point in this
-// very file) because it needs escapeXml, and emits nothing at all under single-root (rootLabels.size() < 2)
-// — this must never move a single byte of single-root output.
-inline void writeMultiRootTable( std::FILE* out, const IngestResult& ing )
-{
-    if( ing.rootLabels.size() < 2 )
-    {
-        return;
-    }
-    std::vector<char> esc;
-    for( std::size_t r = 0; r < ing.rootLabels.size(); ++r )
-    {
-        rw::emitTo( out, "<root label=\"{}\" p=\"{}\"/>",
-                      std::string( escapeXml( ing.rootLabels[r], esc ) ).c_str(),
-                      std::string( escapeXml( r < ing.rootPaths.size() ? ing.rootPaths[r] : std::string(), esc ) ).c_str() );
-    }
-}
-
 // The legend clause defining the table above — appended ONLY when it actually rides (multiRoot), the same
 // presence-matches-emission discipline every other conditional clause in this file follows (and the same
 // SEPARATE-comment shape kRootRelPathsLegend uses — graphlegend.h — so a caller just concatenates it).
@@ -517,6 +494,39 @@ private:
     bool        m_writeError = false;
     char        m_buf[ kCap ];
 };
+
+// The multi-root label → root path table, canonical order: `<root label= p=/>` per root, nothing under single-root. §P8
+// collision: this prologue spelled its LABEL `l=`, the two characters 22 other sites use for a LINE NUMBER — including the
+// map's <f p= …> rows. Renamed to label=.
+inline void writeRootLabelRows( XmlWriter& w, const IngestResult& ing, std::vector<char>& esc )
+{
+    if( ing.rootLabels.size() < 2 )
+    {
+        return;
+    }
+    for( std::size_t r = 0; r < ing.rootLabels.size(); ++r )
+    {
+        w.write( "<root label=\"" );  w.write( escapeXml( ing.rootLabels[r], esc ) );
+        w.write( "\" p=\"" );     w.write( escapeXml( r < ing.rootPaths.size() ? ing.rootPaths[r] : std::string(), esc ) );
+        w.write( "\"/>" );
+    }
+}
+
+// M12 (capture-audit-2026-09-04, lane L9): under multi-root, every one of the graph-count verbs
+// (--callers/--callees/--uses) drops root= (correctly — there IS no single root=) but discloses NOTHING in
+// its place, so a reader of `ripwire src test --callers=SYM` has no way to learn what the `<label>/` prefix
+// on every p=/id= MEANS. The default map's own prologue prints exactly this table for exactly this reason
+// (serialize()'s writeMapChildren), and both write it with writeRootLabelRows. Lives here (not graphlegend.h,
+// which is included from ABOVE this point in this very file) because it needs escapeXml and XmlWriter, and
+// emits nothing at all under single-root (rootLabels.size() < 2) — this must never move a single byte of
+// single-root output.
+inline void writeMultiRootTable( std::FILE* out, const IngestResult& ing )
+{
+    std::vector<char> esc;
+    XmlWriter         w( out );
+    writeRootLabelRows( w, ing, esc );
+    w.flush();
+}
 
 // L3 field-notes surfacing: attach `<note d="ISO-date"><![CDATA[text]]></note>` children for a symbol or file
 // `target` (a canonical id, or a path). INERT when `ni == nullptr` (no/empty notes file) → it writes ZERO
@@ -3396,18 +3406,25 @@ inline MapEmitOrder decideMapEmitOrder( bool stable, bool mostImportantLast, boo
     return ( autoOrder && mapEstTokens > kFillOrderThreshold ) ? MapEmitOrder::ImportantLastAuto : MapEmitOrder::ImportantFirst;
 }
 
-inline bool isImportantLast( MapEmitOrder emitOrder ) noexcept
-{
-    return emitOrder == MapEmitOrder::ImportantLast || emitOrder == MapEmitOrder::ImportantLastAuto;
-}
-
+// What each emit order means downstream, as data: its order= spelling and whether the rank order is REVERSED (important-last).
 // order= marker: T3's auto-flip must be OBSERVABLE, not a silent behaviour change — "important-last(auto:fill)" is distinct
 // from the explicit "important-last" so a reader (or a diff) can tell the ordering was the fill-aware heuristic, not a
 // requested flag.
-inline const char* mapOrderAttr( MapEmitOrder emitOrder ) noexcept
+struct MapEmitOrderTraits
 {
-    static constexpr const char* kNames[] = { "important-first", "stable", "important-last", "important-last(auto:fill)" };
-    return kNames[ std::size_t( emitOrder ) ];
+    const char* orderAttr;
+    bool        importantLast;
+};
+inline constexpr MapEmitOrderTraits kMapEmitOrderTraits[] = {
+    { "important-first", false },             // ImportantFirst
+    { "stable", false },                      // Stable
+    { "important-last", true },               // ImportantLast
+    { "important-last(auto:fill)", true },    // ImportantLastAuto
+};
+
+inline const MapEmitOrderTraits& traitsOf( MapEmitOrder emitOrder ) noexcept
+{
+    return kMapEmitOrderTraits[ std::size_t( emitOrder ) ];
 }
 
 // Puts the rank-ordered file groups in the emit order: --stable sorts files by path and rows by symbol id (== file+line
@@ -3423,7 +3440,7 @@ inline void putMapGroupsInEmitOrder( const IngestResult& ing, MapEmitOrder emitO
             std::sort( b.begin(), b.end() );
         }
     }
-    else if( isImportantLast( emitOrder ) )
+    else if( traitsOf( emitOrder ).importantLast )
     {
         std::reverse( fileOrder.begin(), fileOrder.end() );
         for( std::vector<NodeId>& b : buckets )
@@ -3567,13 +3584,19 @@ inline std::string mapOpeningLegend( bool withProv )
         : "<!-- ripwire v1 t=fn|method|cls|struct|iface|var|sec|macro(#define;degraded:body-is-replacement-text,edges-cross-expansion) p=path layer=arch-layer(opt) n=name sc=enclosing-scope(absent-if-unscoped;the-full-id-is-p::sc::n-with-p=-from-the-enclosing-f,and-expand/callers/impact/uses-accept-it) k=rank c=call amb=ambiguous-calls(read-source) lpin=calls-pinned-by-locality-prior-alone(a-disclosed-guess;read-source;absent-if-0) overloads=N-same-name-defs-merged-into-this-row(absent-if-1;shown=counts-them-individually,so-rows+sum(overloads-1)=shown) hdr:unresolved=calls-with-no-edge-and-no-proof-of-an-outside-target(every-same-named-def-lang-incompatible-or-out-of-the-language-lookup) (edges heuristic) hdr:locality_pinned=sum-of-lpin(absent-if-0) hdr:external=calls-refused-as-bound-outside-the-tree-ON-PROOF(builtin/global/predeclared/C-library-name-without-in-repo-evidence,outside-import/use,super-past-the-tree;no-edge;absent-if-0) r:est_tokens=hdr-copy(none-if-stable) -->";
 }
 
+// Whether any symbol of the corpus satisfies `pred` — the presence test behind every corpus-kind legend clause.
+template <class Pred>
+inline bool corpusHasSymbol( const IngestResult& ing, const Pred& pred )
+{
+    return std::any_of( ing.symbols.begin(), ing.symbols.end(), pred );
+}
+
 // MODULE-SCOPE OWNERS (issue #60): the t="modscope" kind's reading, ONLY when the corpus actually has one — a corpus with no
 // file-scope call keeps every byte of this legend, which is what kept test/printf_parity.manifest's --pack-signatures and
 // --around hashes and every est_tokens ceiling where they were.
 inline std::string moduleScopeLegend( const IngestResult& ing )
 {
-    const bool hasModuleScope = std::any_of( ing.symbols.begin(), ing.symbols.end(), []( const Symbol& sym ) { return sym.kind == SymKind::ModuleScope; } );
-    return hasModuleScope ? std::string( kModScopeMapLegend ) : std::string();
+    return corpusHasSymbol( ing, []( const Symbol& sym ) { return sym.kind == SymKind::ModuleScope; } ) ? std::string( kModScopeMapLegend ) : std::string();
 }
 
 // lane L6: a <c via="impl"> edge's reading, over the rows WRITTEN (fix round 1, N1): only when a kept row or an inventory entry
@@ -3599,37 +3622,53 @@ inline std::string typeKindLegend( const IngestResult& ing )
 {
     const auto namedTypeKind = []( const Symbol& sym ) { return sym.kind == SymKind::NamedType || sym.kind == SymKind::Alias || sym.kind == SymKind::FuncType; };
     std::string clauses;
-    if( std::any_of( ing.symbols.begin(), ing.symbols.end(), [ & ]( const Symbol& sym ) { return namedTypeKind( sym ) && !langFacts( sym.lang ).aliasTargetDefs; } ) )
+    if( corpusHasSymbol( ing, [ & ]( const Symbol& sym ) { return namedTypeKind( sym ) && !langFacts( sym.lang ).aliasTargetDefs; } ) )
     {
         clauses += kNamedTypeMapLegend;
     }
-    if( std::any_of( ing.symbols.begin(), ing.symbols.end(), [ & ]( const Symbol& sym ) { return namedTypeKind( sym ) && langFacts( sym.lang ).aliasTargetDefs; } ) )
+    if( corpusHasSymbol( ing, [ & ]( const Symbol& sym ) { return namedTypeKind( sym ) && langFacts( sym.lang ).aliasTargetDefs; } ) )
     {
         clauses += kCppAliasMapLegend;
     }
     return clauses;
 }
 
-// The parse-honesty gauges' clauses, each charged only to the map whose header carries the gauge: EXTENT HONESTY
-// (src/extentsuspect.h; the row and the header reading), MEMBER-MACRO RE-PARSE (src/macroreparse.h) and #157's nest_refused=.
-inline std::string parseHonestyLegend( const MapHonestyGauges& gauges )
+// Which legend clause defines which gauge, as data: a clause is charged only to the map whose header carries its gauge (> 0).
+struct GaugeClause
+{
+    std::size_t MapHonestyGauges::* gauge;
+    std::string_view                clause;
+};
+
+inline std::string gaugeLegend( const MapHonestyGauges& gauges, std::span<const GaugeClause> table )
 {
     std::string clauses;
-    if( gauges.extentSuspectSyms > 0 )
+    for( const GaugeClause& row : table )
     {
-        clauses += kExtentSuspectRowLegend;
-        clauses += kExtentSuspectHdrLegend;
-    }
-    if( gauges.macroBlankedFiles > 0 )
-    {
-        clauses += kMacroBlankedHdrLegend;
-    }
-    if( gauges.nestRefusedFiles > 0 )
-    {
-        clauses += kNestRefusedMapLegend;
+        if( gauges.*row.gauge > 0 )
+        {
+            clauses += row.clause;
+        }
     }
     return clauses;
 }
+
+// The parse-honesty gauges' clauses: EXTENT HONESTY (src/extentsuspect.h; the row and the header reading), MEMBER-MACRO
+// RE-PARSE (src/macroreparse.h) and #157's nest_refused=.
+inline constexpr GaugeClause kParseHonestyClauses[] = {
+    { &MapHonestyGauges::extentSuspectSyms, kExtentSuspectRowLegend },
+    { &MapHonestyGauges::extentSuspectSyms, kExtentSuspectHdrLegend },
+    { &MapHonestyGauges::macroBlankedFiles, kMacroBlankedHdrLegend },
+    { &MapHonestyGauges::nestRefusedFiles, kNestRefusedMapLegend },
+};
+
+// The tier-3 decline clauses: declined=, then the builtin-method gate's, the standard-member gate's and the Elixir quote's share.
+inline constexpr GaugeClause kDeclineClauses[] = {
+    { &MapHonestyGauges::declined, kDeclinedMapLegend },
+    { &MapHonestyGauges::declinedByGate, kDeclinedGateMapLegend },
+    { &MapHonestyGauges::declinedByStdMember, kDeclinedStdMapLegend },
+    { &MapHonestyGauges::declinedInert, kInertDeclinedMapLegend },
+};
 
 // M20: the seeded-verb clause, emitted only on a seeded map (see MapAnnotations::SeedDisclosure).
 inline std::string seedLegend( const MapAnnotations::SeedDisclosure& seed )
@@ -3739,29 +3778,6 @@ inline std::string rowSelectionLegend( const DataSectionsCut& dataSecCut, const 
     if( groups.inventory.active )
     {
         clauses += kMapInventoryLegend;
-    }
-    return clauses;
-}
-
-// The tier-3 decline clauses, each charged to the map that carries the count it explains.
-inline std::string declineLegend( const MapHonestyGauges& gauges )
-{
-    std::string clauses;
-    if( gauges.declined > 0 )
-    {
-        clauses += kDeclinedMapLegend;        // the map carries declined=
-    }
-    if( gauges.declinedByGate > 0 )
-    {
-        clauses += kDeclinedGateMapLegend;    // the builtin-method gate declined a call
-    }
-    if( gauges.declinedByStdMember > 0 )
-    {
-        clauses += kDeclinedStdMapLegend;     // the standard-member gate declined a call
-    }
-    if( gauges.declinedInert > 0 )
-    {
-        clauses += kInertDeclinedMapLegend;   // an Elixir quote declined a call candidate
     }
     return clauses;
 }
@@ -4244,22 +4260,6 @@ inline void writeMapFileGroup( XmlWriter& w, const IngestResult& ing, std::uint3
     w.write( "</f>" );
 }
 
-// A13 prologue, multi-root only: label → root path, canonical order. §P8 collision: this prologue spelled its LABEL `l=`, the
-// two characters 22 other sites use for a LINE NUMBER — including the <f p= …> rows. Renamed to label=.
-inline void writeRootLabelPrologue( XmlWriter& w, const IngestResult& ing, std::vector<char>& esc )
-{
-    if( ing.rootLabels.size() < 2 )
-    {
-        return;
-    }
-    for( std::size_t r = 0; r < ing.rootLabels.size(); ++r )
-    {
-        w.write( "<root label=\"" );  w.write( escapeXml( ing.rootLabels[r], esc ) );
-        w.write( "\" p=\"" );     w.write( escapeXml( r < ing.rootPaths.size() ? ing.rootPaths[r] : std::string(), esc ) );
-        w.write( "\"/>" );
-    }
-}
-
 // C1-b: under in=DIR the symbol map is a DISCLOSED stub (docs/METHODOLOGY.md §9.3) — the caller asked for DIR's recent files,
 // not the map.
 //
@@ -4303,7 +4303,7 @@ inline void writeMapChildren( XmlWriter& w, const IngestResult& ing, const MapAn
                               MapEmitOrder emitOrder, const MapRowSources& src, const PathRel& pathRel, std::vector<char>& esc,
                               std::vector<std::uint32_t>& scratch )
 {
-    writeRootLabelPrologue( w, ing, esc );
+    writeRootLabelRows( w, ing, esc );   // A13: the multi-root prologue
     writeRecentRows( w, ann, pathRel, esc );
     if( ann.stubSymbols )
     {
@@ -4316,7 +4316,7 @@ inline void writeMapChildren( XmlWriter& w, const IngestResult& ing, const MapAn
             writeMapInventoryXml( w, ing, groups.inventory, pathRel, src.outOff, src.outTargets, src.outProv, src.outNameOnly, esc, scratch );
         }
     };
-    const bool inventoryFirst = isImportantLast( emitOrder );   // --stable's path order wins, as it does for the rows
+    const bool inventoryFirst = traitsOf( emitOrder ).importantLast;   // --stable's path order wins, as it does for the rows
     if( inventoryFirst )
     {
         writeInventory();
@@ -4471,13 +4471,13 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     legend += moduleScopeLegend( ing );
     legend += keptImplEdgeLegend( outOff, outProv, kept, groups.inventory.entries );
     legend += typeKindLegend( ing );
-    legend += parseHonestyLegend( gauges );
+    legend += gaugeLegend( gauges, kParseHonestyClauses );
     legend += runAnnotationLegend( ing, ann, rootArg, metrics );
     legend += rowSelectionLegend( ranked.dataSecCut, groups );
     // W2-F: the pr_iters= / pr_converged= definition, charged to the maps that carry the attributes — empty for a lexical or
     // HITS ordering, and the prose half only on the map whose iteration stopped short.
     legend += renderDisclosure( ann.prDisclosure, DiscloseAs::LegendComment );
-    legend += declineLegend( gauges );
+    legend += gaugeLegend( gauges, kDeclineClauses );
     legend += keptNameEdgeLegend( outOff, outNameOnly, kept, ann.viaLegendStripped );
     // K51: history_unread='s definition, the LAST leading clause, so it stands right before the <r> root it marks and inside the
     // leading block every reader (and legendcoveragecheck's full rows) meets first; absent unless the amp=/churn= walk was unread.
@@ -4493,7 +4493,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     const std::string   coverageAttrs = mapCoverageAttrs( ing, outProv, ann );
     const MapStatsFacts statsFacts{ .files = ing.files.size(), .symbols = mapSymbolCount( ing ), .edges = outTargets.size(),
                                     .shown = stubbed ? std::size_t( 0 ) : keep + groups.stemPick.rows.size(),
-                                    .gauges = gauges, .coverageAttrs = coverageAttrs, .orderAttr = mapOrderAttr( emitOrder ) };
+                                    .gauges = gauges, .coverageAttrs = coverageAttrs, .orderAttr = traitsOf( emitOrder ).orderAttr };
     const MapRootFacts  rootFacts{ .ann = ann, .rootArg = rootArg, .stable = stable, .dataSecCut = ranked.dataSecCut, .stemCut = groups.stemPick.cut };
     MapEstimate         estimate{ ann.payloadUncharged };   // the est_tokens measurement's DISCLOSE sink — read by the builders
     const auto buildHead = [ & ]( std::size_t estTokens ) -> std::string
@@ -5103,12 +5103,6 @@ inline std::string stripCommentsKeepLiterals( std::string_view src )
     return out;
 }
 
-// A line whose content is only spaces, tabs and carriage returns.
-inline bool isBlankLine( std::string_view line ) noexcept
-{
-    return std::all_of( line.begin(), line.end(), []( char ch ) { return ch == ' ' || ch == '\t' || ch == '\r'; } );
-}
-
 // Phase 2: the comment-stripped text's line layout. Lines that are now whitespace-only and come before the first content line
 // are dropped (an artifact of stripping the opening comment of a body); after it, at most two consecutive blank lines are
 // kept and the rest of a run is dropped. Every line with ANY non-whitespace content is kept, so intentional blank lines between
@@ -5123,7 +5117,7 @@ inline std::string collapseBlankLineRuns( std::string_view text )
     {
         const std::size_t      eol  = std::min( text.find( '\n', pos ), text.size() );
         const std::string_view line = text.substr( pos, eol - pos );
-        if( !isBlankLine( line ) )
+        if( line.find_first_not_of( " \t\r" ) != std::string_view::npos )   // the line has content
         {
             blanks = 0;
             result.append( line );
@@ -12234,7 +12228,7 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
     {
         JsonWriter hw( dst );
         writeJsonMapHeader( hw, esc, JsonMapHeader{ ing, mapSymbolCount( ing ), outTargets.size(), keep + groups.stemPick.rows.size(), estTokens, gauges.ambiguous,
-                                                    gauges.unresolved, mapOrderAttr( emitOrder ), outProv, &ann, rootArg, gauges.localityPinned, gauges.external,
+                                                    gauges.unresolved, traitsOf( emitOrder ).orderAttr, outProv, &ann, rootArg, gauges.localityPinned, gauges.external,
                                                     gauges.declined, gauges.extentSuspectSyms, gauges.macroBlankedFiles, gauges.nestRefusedFiles,
                                                     estimate.isModelled, ranked.dataSecCut, groups.stemPick.cut, memoryPeakJson } );
         hw.write( ",\"r\":[" );
