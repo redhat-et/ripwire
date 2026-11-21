@@ -2722,15 +2722,6 @@ inline void emitElixirHeadFacts( const TagsFile& file, TagsSinks& sinks, const R
     }
 }
 
-// A Ruby method defined on the class object (`def self.m`, `class << self`): its bind (test/rubyclassrecvcheck.sh).
-inline void emitRubyClassSideBind( const TagsFile& file, TagsSinks& sinks, const RawDef& d, const DefIdentity& id, TSNode defNode )
-{
-    if( id.kind == SymKind::Function || id.kind == SymKind::Method )
-    {
-        rubyNoteClassSideDef( defNode, file.fileId, d.name, file.src, sinks.binds );
-    }
-}
-
 // A definition's language-specific binds and calls, read off the finished row (Ruby's class-side methods, Elixir's def heads).
 inline void emitLanguageDefinitionFacts( const TagsFile& file, TagsSinks& sinks, const RawDef& d, const TagsMatch& m, const DefIdentity& id, TSNode defNode )
 {
@@ -2738,7 +2729,10 @@ inline void emitLanguageDefinitionFacts( const TagsFile& file, TagsSinks& sinks,
     {
         case Lang::Ruby:
         {
-            emitRubyClassSideBind( file, sinks, d, id, defNode );
+            if( id.kind == SymKind::Function || id.kind == SymKind::Method )
+            { // a method defined on the class object (`def self.m`, `class << self`): its bind (test/rubyclassrecvcheck.sh)
+                rubyNoteClassSideDef( defNode, file.fileId, d.name, file.src, sinks.binds );
+            }
         }
         break;
 
