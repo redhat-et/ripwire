@@ -589,6 +589,7 @@ for _g in \
     forregrowcheck \
     forrootlegendcheck \
     forroutecheck \
+    forroutepagecheck \
     forrowfeaturescheck \
     forsectioncollapsecheck \
     forselfhookcheck \
