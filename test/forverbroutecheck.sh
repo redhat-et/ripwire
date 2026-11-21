@@ -553,18 +553,28 @@ for i in $( seq -w 1 120 ); do printf 'int target_fn( int a );\nint caller_%s( v
 rootNext(){ python3 -c 'import html,re,sys; d=re.sub(r"<!--.*?-->","",open(sys.argv[1]).read(),flags=re.S); m=re.search(r"<[A-Za-z][^>]*>",d); n=re.search(r"\snext=\"([^\"]*)\"",m.group(0)) if m else None; sys.stdout.write(html.unescape(n.group(1)) if n else "")' "$1"; }
 # the verb's rows: the answer from the root on, the <route> element, KB1's key group and the root's own open tag set aside
 verbRows(){ python3 -c 'import re,sys; d=re.sub(r"<!--.*?-->","",open(sys.argv[1]).read(),flags=re.S); d=re.sub(r"<route [^>]*/>","",d); d=re.sub(r"<bodies of=\"key\".*?</bodies>","",d,flags=re.S); m=re.search(r"<[A-Za-z][^>]*>",d); sys.stdout.write(d[m.end():] if m else "")' "$1"; }
-contArm(){ # $1 id $2 question $3 verb flag (--uses / --impact) $4 kind $5 window K
-    local q="$2" want
-    want="$( python3 -c 'import shlex,sys; print("--for=" + shlex.quote(sys.argv[1]) + " --offset=" + sys.argv[2])' "$q" "$5" )"
+# RL1 (2026-11-21, results/RL1_ROUTED_PAGING_1121): the routed answer is held to the page (test/forroutepagecheck.sh), so its
+# first window may be SHORTER than the verb's default one: on this fixture the where-used answer counted about 300 B over the
+# 12,000 B page with its carried page, and now windows at K=86 where --uses alone windows at 100. $5 is therefore the verb's
+# default window, an UPPER bound; K is read from the root's own next_offset= and every check below uses that K. This RELAXES
+# "K is exactly $5" to "K <= $5 and next= names the root's own K", so it carries a mutation control (LANE_CONSTRAINTS §17): the
+# same comparison fails against K+1.
+contArm(){ # $1 id $2 question $3 verb flag (--uses / --impact) $4 kind $5 the verb's default window (K <= it)
+    local q="$2" want off k
     run "$1" wide --for="$q"
-    [ "$( rootNext "$DIR/$1.out" )" = "$want" ]
-    say $? "($1) [P] windowed $4 answer: root next= continues it ($want)" "($1) [P] root next= is '$( rootNext "$DIR/$1.out" )', want '$want'"
-    run "$1c" wide --for="$q" --offset="$5"; run "$1v" wide "$3=target_fn" --offset="$5"
+    k="$( attr "$( rootOpen "$DIR/$1.out" )" next_offset )"
+    want="$( python3 -c 'import shlex,sys; print("--for=" + shlex.quote(sys.argv[1]) + " --offset=" + sys.argv[2])' "$q" "$k" )"
+    off="$( python3 -c 'import shlex,sys; print("--for=" + shlex.quote(sys.argv[1]) + " --offset=" + str(int(sys.argv[2] or 0) + 1))' "$q" "$k" )"
+    [ -n "$k" ] && [ "$k" -ge 1 ] && [ "$k" -le "$5" ] && [ "$( rootNext "$DIR/$1.out" )" = "$want" ]
+    say $? "($1) [P] windowed $4 answer: root next= continues it at its own next_offset=$k, at most the verb's window of $5 ($want)" "($1) [P] root next= is '$( rootNext "$DIR/$1.out" )', want '$want' with K=$k in 1..$5"
+    [ "$( rootNext "$DIR/$1.out" )" != "$off" ]
+    say $? "($1) [M] the same comparison fails against K+1" "($1) [M] root next= also equals the K+1 spelling: the comparison is vacuous"
+    run "$1c" wide --for="$q" --offset="$k"; run "$1v" wide "$3=target_fn" --offset="$k"
     F="$( firstChild "$DIR/$1c.out" )"
-    [ "$( attr "$F" kind )" = "$4" ] && [ "$( attr "$F" verb )" = "$3=target_fn --offset=$5" ]
-    say $? "($1) [P] --for=Q --offset=$5 routes to the verb's window: <route kind=$4 verb=\"$3=target_fn --offset=$5\">" "($1) [P] continuation route reads '$F'"
+    [ "$( attr "$F" kind )" = "$4" ] && [ "$( attr "$F" verb )" = "$3=target_fn --offset=$k" ]
+    say $? "($1) [P] --for=Q --offset=$k routes to the verb's window: <route kind=$4 verb=\"$3=target_fn --offset=$k\">" "($1) [P] continuation route reads '$F'"
     [ -n "$( verbRows "$DIR/$1v.out" )" ] && [ "$( verbRows "$DIR/$1c.out" )" = "$( verbRows "$DIR/$1v.out" )" ]
-    say $? "($1) [P] the continuation's rows are $3=target_fn --offset=$5's rows, byte for byte" "($1) [P] continuation rows differ from the verb's window"
+    say $? "($1) [P] the continuation's rows are $3=target_fn --offset=$k's rows, byte for byte" "($1) [P] continuation rows differ from the verb's window"
     if grep -q '<ctx task=\|<text_only' "$DIR/$1c.out"; then no "($1) [P] a continuation carries a --for page or a fold"; else ok "($1) [P] a continuation carries no --for page and no fold"; fi
 }
 contArm f36 'Where is `target_fn` used?' --uses where-used 100

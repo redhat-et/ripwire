@@ -36,9 +36,41 @@
 // a text gap at a whole page (~16 KB) where its rows cost ~40 B each; on RT1's confirmation set the fold kept every text-gap
 // cell's gold (results/RT2_ROUTE_1118/DEV.md).
 // Gate: test/forverbroutecheck.sh.
+//
+// RL1 (2026-11-21, results/RL1_ROUTED_PAGING_1121): A ROUTED ANSWER IS HELD TO THE PAGE, the way forpages.h counts one. Until RL1 a
+// routed answer was "one call, never paged": the verb printed its own window (--uses 100 rows, --callers a 16 KB band) and a warned
+// answer carried a FULL 12,000 B --for page on top of it. MEASURED: GA1 DEV ga-zod-12 printed 30,325 B (21,779 B counted as a page
+// counts) against 17,735 B for the same question unrouted, and in a live session the client persisted that answer to a file and
+// showed the agent a 2 KB preview. Now, with P the page size (cfg.forPageBytes, 12,000 by default):
+//   * the verb's part — root, <route>, fold, <def> and its rows; comments and KB1's key group are not counted, as on a --for page —
+//     must count <= P. Alone (no page carried) it is re-rendered with a row limit until it does. The cut is the verb's own window
+//     (has_more="1" next_offset=K), so RT3-F1's root next= `--for=Q --offset=K` continues it, and each of THOSE windows is fitted
+//     to P the same way. W2's evidence is still read from the verb's default window.
+//   * the carried --for page is given what the verb's part left of P. A --for answer that fits there is carried WHOLE, as before.
+//     Otherwise it is cut at S = P - (the verb's part) by forpages.h's own stop rule: its root says page="1" pages=N
+//     continued=/deferred= and next= `--for=Q --page-bytes=S:2`, a page of the same --for answer (a spelled --page-bytes never
+//     routes). The page is RESERVED kRoutedCarriedPageFloorBytes (or the whole answer's own size, when that is less): the verb's
+//     part is windowed down to P less that reserve first, so a cut page is not shorter than the floor — except where the part of
+//     the verb's answer no limit shortens (<route>, the fold, many <def> rows) leaves no room for it: rows and page then share
+//     what that part leaves, half each.
+//   * a verb part that cannot be cut to fit even at one row (a task text of several KB echoed in task= and next=, or <def> rows
+//     that fill the page by themselves) is NOT ROUTED: the --for answer, byte for byte.
+// WHY THE FLOOR AND NOT "the verb first, the page gets the rest": on ga-zod-12 the verb's 86 rows leave the page 1.7 KB, and the
+// verb's rows alone name 0 of the 2 gold files where the carried page names 2 of 2 (the page is the safety net a warn="1" exists
+// to deliver: RT2 measured routed rows alone complete 10 of 16 warned answers against 15 of 16 with the page). 6,000 is the
+// page size pre-registered beside 12,000 (forpages.h) and the knee of BL1's sweep on GA1 DEV: page 1 names every gold file on 74 /
+// 81 / 82 / 84 of 89 at 4,000 / 6,000 / 8,000 / 12,000 B. WHY NOT "do not route when it does not fit": every warned answer in a
+// repository of any size carries a page near P, so that rule switches the route off exactly where RT1/RT2 measured it gaining.
+// An answer that already fitted is byte-identical. MCP `for` is unchanged (AF1 left it unpaged). Gate: test/forroutepagecheck.sh.
 
 namespace
 {
+
+// RL1: the least a carried --for page is given of the page (see the header: a dated default with its measurement, METHODOLOGY §9).
+inline constexpr std::size_t kRoutedCarriedPageFloorBytes = 6000;
+// RL1: how many times the verb is re-rendered with a smaller row limit before the route is given up (each step at least halves the
+// excess or drops a row; 12 steps take 4,096 rows to 1).
+inline constexpr int kRoutedFitTries = 12;
 
 // The route applies to this run's --for answer at all (before reading its text).
 inline bool forVerbRouteApplies( const MainDispatch& d )
@@ -82,10 +114,12 @@ inline MainDispatch routeDispatch( const MainDispatch& d, const rw::Config& c )
 }
 
 // The bare verb call for `kind` on `spelling`, rendered as its own run would (full dialect: compacted by the caller).
-inline RouteRender renderRoutedVerb( const MainDispatch& d, rw::forroute::RouteKind kind, const std::string& spelling )
+// RL1: `limit` > 0 is the verb's own --limit (its window: has_more= / next_offset=); 0 is the bare call.
+inline RouteRender renderRoutedVerb( const MainDispatch& d, rw::forroute::RouteKind kind, const std::string& spelling, int limit = 0 )
 {
     rw::Config c = d.cfg;
     c.forTask    = {};
+    c.pageLimit  = limit > 0 ? limit : c.pageLimit;
     switch( kind )
     {
         case rw::forroute::RouteKind::WhoCalls:     c.callers   = spelling; break;
@@ -406,6 +440,83 @@ inline int routeContinueOffset( const MainDispatch& d )
     return forVerbRouteApplies( routeDispatch( d, bare ) ) ? d.cfg.pageOffset : 0;
 }
 
+// RL1: what a routed document counts toward the page, the way forpages.h counts a --for page: every byte from the root's open tag
+// on that is not a comment (the legends) and not KB1's key-body group; and how its window's rows are spread (the root's children
+// that are neither <route>, the fold, a <def>, the key group nor a comment), which the fit below scales the limit by.
+struct RoutedCount
+{
+    std::size_t stream = 0, rows = 0, rowBytes = 0;
+};
+inline RoutedCount routedCount( std::string_view doc )
+{
+    while( !doc.empty() && doc.back() == '\n' )
+    {
+        doc.remove_suffix( 1 );
+    }
+    const rw::CompactRootInfo root    = rw::findCompactRoot( doc );
+    const std::size_t         closeAt = doc.rfind( "</" );
+    if( root.tag.empty() || closeAt == std::string_view::npos || closeAt < root.openEnd )
+    {
+        return { doc.size(), 0, 0 };
+    }
+    RoutedCount c{ doc.size() - root.openBegin, 0, 0 };
+    for( const rw::answerfirst::Block& b : rw::answerfirst::topLevelBlocks( doc, root.openEnd, closeAt ) )
+    {
+        const std::string_view open = doc.substr( b.begin, doc.find( '>', b.begin ) + 1 - b.begin );
+        if( b.comment || ( b.name == "bodies" && open.find( " of=\"key\"" ) != std::string_view::npos ) )
+        {
+            c.stream -= b.end - b.begin;
+        }
+        else if( b.name != "route" && b.name != "text_only" && b.name != "def" )
+        {
+            ++c.rows;
+            c.rowBytes += b.end - b.begin;
+        }
+    }
+    return c;
+}
+
+// The routed document WITHOUT a carried page: the verb's answer with <route> (page1="1" when a page will be carried) and the fold
+// as the root's first children, KB1's key bodies after the verb's rows, compacted as the bare call is. `keyMoved`: a key group was
+// placed, so a carried page gives its own up (appendCarriedPage).
+inline std::string assembleRoutedHead( const MainDispatch& d, RoutedAnswer& ra, bool page1, bool& keyMoved )
+{
+    std::string doc = std::move( ra.verb.out );
+    continueRootNext( doc, d.cfg.forTask );
+    const rw::CompactRootInfo root = rw::findCompactRoot( doc );
+    doc.insert( root.openEnd, routeElementXml( d.cfg, ra.rd.kind, ra.spelling, ra.w, page1 ) + ( ra.w ? foldElementXml( *ra.w ) : std::string() ) );
+    // KB1 (forkeybody.h): the routed symbol's definition body (and a second named symbol's) after the verb's rows, before a carried page.
+    // A carried --for page carries its own key group (the same spans, the same printer); it moves up here, so the answer holds it once.
+    keyMoved = false;
+    if( rw::keybody::keyBodyOn() )
+    {
+        const std::string_view          keyRoot = d.ing.realPaths.empty() && d.cfg.roots.size() == 1 ? d.cfg.roots[0] : std::string_view();
+        const rw::keybody::KeyBodies    kb      = rw::keybody::keyBodies( d.ing, d.cfg.forTask, ra.spelling, keyRoot, d.redactPtr );
+        doc.insert( doc.rfind( "</" ), kb.xml );
+        keyMoved = !kb.xml.empty();
+    }
+    (void)rw::applyCompactDialect( doc, ::compactLegendHint( d.cfg, doc ) );   // the bare call's dialect: main.cpp's layer skips --for
+    return doc;
+}
+
+// `page` (a ranked --for answer) as the routed root's last child, its key group dropped when the head holds it.
+inline void appendCarriedPage( std::string& doc, std::string_view page, bool keyMoved )
+{
+    while( !page.empty() && page.back() == '\n' )
+    {
+        page.remove_suffix( 1 );
+    }
+    std::string carried( page );
+    if( keyMoved )
+    {
+        dropKeyGroup( carried );
+    }
+    if( !carried.empty() )
+    {
+        doc.insert( doc.rfind( "</" ), carried );
+    }
+}
+
 // The routed document: the verb's answer with <route> (page1="1" when `page` is carried) and the fold as the root's first
 // children, compacted as the bare call is, and `page` (a ranked --for answer, "" = none) as the root's last child.
 inline std::string assembleRouted( const MainDispatch& d, RoutedAnswer& ra, std::string_view page )
@@ -414,29 +525,52 @@ inline std::string assembleRouted( const MainDispatch& d, RoutedAnswer& ra, std:
     {
         page.remove_suffix( 1 );
     }
-    std::string doc = std::move( ra.verb.out );
-    continueRootNext( doc, d.cfg.forTask );
-    const rw::CompactRootInfo root = rw::findCompactRoot( doc );
-    doc.insert( root.openEnd, routeElementXml( d.cfg, ra.rd.kind, ra.spelling, ra.w, !page.empty() ) + ( ra.w ? foldElementXml( *ra.w ) : std::string() ) );
-    // KB1 (forkeybody.h): the routed symbol's definition body (and a second named symbol's) after the verb's rows, before a carried page.
-    // A carried --for page carries its own key group (the same spans, the same printer); it moves up here, so the answer holds it once.
-    std::string carried( page );
-    if( rw::keybody::keyBodyOn() )
-    {
-        const std::string_view          keyRoot = d.ing.realPaths.empty() && d.cfg.roots.size() == 1 ? d.cfg.roots[0] : std::string_view();
-        const rw::keybody::KeyBodies    kb      = rw::keybody::keyBodies( d.ing, d.cfg.forTask, ra.spelling, keyRoot, d.redactPtr );
-        doc.insert( doc.rfind( "</" ), kb.xml );
-        if( !kb.xml.empty() )
-        {
-            dropKeyGroup( carried );
-        }
-    }
-    (void)rw::applyCompactDialect( doc, ::compactLegendHint( d.cfg, doc ) );   // the bare call's dialect: main.cpp's layer skips --for
-    if( !carried.empty() )
-    {
-        doc.insert( doc.rfind( "</" ), carried );
-    }
+    bool        keyMoved = false;
+    std::string doc      = assembleRoutedHead( d, ra, !page.empty(), keyMoved );
+    appendCarriedPage( doc, page, keyMoved );
     return doc;
+}
+
+// RL1: the next row limit to try for a document that counts `c` against `room`: the limit scaled by the share of the row bytes
+// that fit, and always at least one row fewer. 0: nothing smaller is left to try.
+inline int routedNextLimit( const RoutedCount& c, std::size_t room, int limit )
+{
+    const std::size_t have  = limit > 0 ? std::size_t( limit ) : c.rows;
+    const std::size_t fixed = c.stream - c.rowBytes;
+    if( have <= 1 || c.rowBytes == 0 )
+    {
+        return 0;
+    }
+    const std::size_t fit = room > fixed ? have * ( room - fixed ) / c.rowBytes : 0;
+    return int( std::clamp<std::size_t>( fit, 1, have - 1 ) );
+}
+
+// RL1: `doc` (assembled by `assemble` from `verb`) fitted to `room` counted bytes by re-rendering the verb with a smaller row limit.
+// False: it does not fit even at one row, or a limited render was refused — the caller does not route.
+template <class Render, class Assemble>
+bool fitRoutedVerb( std::string& doc, std::size_t room, Render&& render, Assemble&& assemble )
+{
+    int limit = 0;
+    for( int tries = 0; tries < kRoutedFitTries; ++tries )
+    {
+        const RoutedCount c = routedCount( doc );
+        if( c.stream <= room )
+        {
+            return true;
+        }
+        limit = routedNextLimit( c, room, limit );
+        if( limit == 0 )
+        {
+            return false;
+        }
+        RouteRender v = render( limit );
+        if( routedVerbRefused( v ) )
+        {
+            return false;
+        }
+        doc = assemble( v );
+    }
+    return routedCount( doc ).stream <= room;
 }
 
 // RT3-F1: the routed verb's window at `offset` — <route> (its verb= spells the offset) and the verb's rows, compacted as the
@@ -460,14 +594,139 @@ inline std::optional<std::string> routedContinuation( const MainDispatch& d, int
     {
         return std::nullopt;
     }
-    std::string doc = std::move( verbOut.out );
-    continueRootNext( doc, d.cfg.forTask );
-    const rw::CompactRootInfo root = rw::findCompactRoot( doc );
-    std::string route = routeElementXml( d.cfg, rd.kind, spelling, rw::partialwarn::RouteEvidence{}, false );
-    route.insert( route.find( '"', route.find( " verb=\"" ) + 7 ), " --offset=" + std::to_string( offset ) );   // verb= spells the window
-    doc.insert( root.openEnd, route );
-    (void)rw::applyCompactDialect( doc, ::compactLegendHint( d.cfg, doc ) );
+    const auto assemble = [ & ]( RouteRender& v )
+    {
+        std::string doc = std::move( v.out );
+        continueRootNext( doc, d.cfg.forTask );
+        const rw::CompactRootInfo root = rw::findCompactRoot( doc );
+        std::string route = routeElementXml( d.cfg, rd.kind, spelling, rw::partialwarn::RouteEvidence{}, false );
+        route.insert( route.find( '"', route.find( " verb=\"" ) + 7 ), " --offset=" + std::to_string( offset ) );   // verb= spells the window
+        doc.insert( root.openEnd, route );
+        (void)rw::applyCompactDialect( doc, ::compactLegendHint( d.cfg, doc ) );
+        v.out.clear();
+        return doc;
+    };
+    std::string doc = assemble( verbOut );
+    // RL1: a continuation window is held to the page too (CLI only: forPagingApplies; MCP `for` is unpaged). A window that cannot be
+    // cut to fit is served as the verb windows it — it is the only call that reaches these rows.
+    if( forPagingApplies( d.cfg ) )
+    {
+        std::string fitted = doc;
+        RouteRender last;
+        const bool  fits = fitRoutedVerb( fitted, d.cfg.forPageBytes, [ & ]( int limit ) { return renderRoutedVerb( d, rd.kind, spelling, limit ); },
+                                          [ & ]( RouteRender& v ) { last = v; return assemble( v ); } );
+        if( fits && fitted != doc )
+        {
+            doc         = std::move( fitted );
+            verbOut.rc  = last.rc;
+            verbOut.err = std::move( last.err );
+        }
+    }
     return doc;
+}
+
+// RL1: what a carried --for page rendered at the default size needs of the page. An answer served WHOLE needs what the pager
+// counts of it (forpages.h: from byte 0 to the end of its row stream, the key group free); a page that was cut, or could not be
+// rendered, needs all of it (`pageBytes`); a whole answer the pager does not read is counted byte for byte.
+inline std::size_t carriedPageNeed( const RouteRender& page, std::size_t pageBytes )
+{
+    const rw::CompactRootInfo root = rw::findCompactRoot( page.out );
+    if( !page.captured || page.rc != 0 || root.tag != "ctx" )
+    {
+        return pageBytes;
+    }
+    if( !rw::forpages::detail::rootAttr( std::string_view( page.out ).substr( root.openBegin, root.openEnd - root.openBegin ), "pages" ).empty() )
+    {
+        return pageBytes;
+    }
+    const std::optional<rw::forpages::detail::Stream> st = rw::forpages::detail::readStream( page.out );
+    return st ? st->cuts.back().at - st->cuts.back().free : page.out.size();
+}
+
+// RL1: the routed document without its carried page (assembleRoutedHead), and whether KB1's key group was placed in it.
+struct RoutedHead
+{
+    std::string doc;
+    bool        keyMoved = false;
+};
+
+// RL1: the head windowed down to `room` counted bytes (fitRoutedVerb). ra.verb becomes the render served: its stderr and exit
+// code are the ones written; assembleRoutedHead consumes its stdout only.
+inline bool fitRoutedHead( const MainDispatch& d, RoutedAnswer& ra, RoutedHead& h, std::size_t room )
+{
+    return fitRoutedVerb( h.doc, room, [ & ]( int limit ) { return renderRoutedVerb( d, ra.rd.kind, ra.spelling, limit ); }, [ & ]( RouteRender& v )
+    {
+        ra.verb = std::move( v );
+        return assembleRoutedHead( d, ra, ra.wantPage, h.keyMoved );
+    } );
+}
+
+// The --for answer as a SPELLED page of `bytes` serves it: a spelled page never ends early (ES is page 1 of an UNROUTED answer),
+// and its next= is page 2 at that size.
+inline RouteRender renderCarriedPage( const MainDispatch& d, std::size_t bytes )
+{
+    const std::string spec = std::to_string( bytes );
+    rw::Config pc    = d.cfg;
+    pc.pageBytesSpec = spec;
+    pc.forPageBytes  = bytes;
+    const MainDispatch pd = routeDispatch( d, pc );
+    return renderRouteCaptured( [ & ] { return runForLens( pd ).value_or( 1 ); } );
+}
+
+// RL1: what of the page is kept for a carried page that needs `need`: the floor, or the answer's own need when that is less; and
+// where the part of `head` no limit shortens (root, <route>, the fold, the <def> rows) leaves no room for that beside one row,
+// half of what that part leaves — rows and page share it.
+inline std::size_t carriedPageReserve( const MainDispatch& d, std::string_view head, std::size_t need )
+{
+    const std::size_t pageBytes = d.cfg.forPageBytes;
+    const RoutedCount natural   = routedCount( head );
+    const std::size_t fixed     = natural.stream - natural.rowBytes;
+    const std::size_t oneRow    = ( natural.rows > 0 ? natural.rowBytes / natural.rows : 0 ) + d.cfg.forTask.size() + 128;   // + a window's root attributes and next=
+    const std::size_t reserve   = std::min( need, std::min( kRoutedCarriedPageFloorBytes, pageBytes ) );
+    return fixed + oneRow + reserve > pageBytes && fixed < pageBytes ? std::min( reserve, ( pageBytes - fixed ) / 2 ) : reserve;
+}
+
+// RL1: the page a warned routed answer carries, the head windowed first to leave it its reserve. The page is rendered at the
+// default size: a --for answer that came back WHOLE and fits what the head left is carried as it is — so an answer that fitted
+// is assembled exactly as before RL1 — and anything else is re-cut at what is left. nullopt: the head cannot leave the page
+// its reserve, or leaves it nothing (a spelled size of 0 would be the WHOLE answer) — the caller does not route.
+inline std::optional<RouteRender> carryRoutedPage( const MainDispatch& d, RoutedAnswer& ra, RoutedHead& h )
+{
+    const std::size_t pageBytes = d.cfg.forPageBytes;
+    RouteRender       page      = renderCarriedPage( d, pageBytes );
+    const std::size_t need      = carriedPageNeed( page, pageBytes );
+    if( !fitRoutedHead( d, ra, h, pageBytes - carriedPageReserve( d, h.doc, need ) ) )
+    {
+        return std::nullopt;
+    }
+    const std::size_t left = pageBytes - routedCount( h.doc ).stream;
+    if( need <= left )
+    {
+        return page;
+    }
+    return left == 0 ? std::nullopt : std::optional<RouteRender>( renderCarriedPage( d, left ) );
+}
+
+// Write the routed answer: the head, `page` as its last child when it rendered as a --for answer (else the route stops claiming
+// one: page1= is dropped), then the stderr of what was served. Returns the verb's exit code.
+inline int writeRouted( const RoutedAnswer& ra, RoutedHead& h, const RouteRender* page )
+{
+    const bool hasPage = page != nullptr && page->captured && page->rc == 0 && rw::findCompactRoot( page->out ).tag == "ctx";
+    if( hasPage )
+    {
+        appendCarriedPage( h.doc, page->out, h.keyMoved );
+    }
+    else if( const std::size_t at = h.doc.find( " page1=\"1\"" ); ra.wantPage && at != std::string::npos && at < h.doc.find( "/>", h.doc.find( "<route " ) ) )
+    {
+        h.doc.erase( at, std::string_view( " page1=\"1\"" ).size() );
+    }
+    std::fwrite( h.doc.data(), 1, h.doc.size(), stdout );
+    std::fwrite( ra.verb.err.data(), 1, ra.verb.err.size(), stderr );
+    if( hasPage )
+    {
+        std::fwrite( page->err.data(), 1, page->err.size(), stderr );
+    }
+    return ra.verb.rc;
 }
 
 std::optional<int> runForVerbRoute( const MainDispatch& d )
@@ -493,26 +752,15 @@ std::optional<int> runForVerbRoute( const MainDispatch& d )
     {
         return std::nullopt;   // the --for answer, byte for byte
     }
-    // the first --for page, rendered as the opted-out call would serve it
-    RouteRender page;
-    if( ra->wantPage )
+    // RL1: the answer is held to the page (the header). W2's evidence (ra->w) stays the one read from the verb's default window.
+    RoutedHead h;
+    h.doc = assembleRoutedHead( d, *ra, ra->wantPage, h.keyMoved );
+    if( !ra->wantPage )
     {
-        // the FULL page 1, as the spelled default page serves it: the carried page never ends early (ES is page 1 of an UNROUTED answer)
-        static_assert( rw::answerfirst::kAnswerPageBytesDefault == 12000, "the spelled default page below is the default page size" );
-        rw::Config pc    = d.cfg;
-        pc.pageBytesSpec = "12000";
-        const MainDispatch pd = routeDispatch( d, pc );
-        page = renderRouteCaptured( [ & ] { return runForLens( pd ).value_or( 1 ); } );
+        return fitRoutedHead( d, *ra, h, d.cfg.forPageBytes ) ? std::optional<int>( writeRouted( *ra, h, nullptr ) ) : std::nullopt;
     }
-    const bool        hasPage = ra->wantPage && page.captured && page.rc == 0 && rw::findCompactRoot( page.out ).tag == "ctx";
-    const std::string doc     = assembleRouted( d, *ra, hasPage ? std::string_view( page.out ) : std::string_view{} );
-    std::fwrite( doc.data(), 1, doc.size(), stdout );
-    std::fwrite( ra->verb.err.data(), 1, ra->verb.err.size(), stderr );
-    if( hasPage )
-    {
-        std::fwrite( page.err.data(), 1, page.err.size(), stderr );
-    }
-    return ra->verb.rc;
+    const std::optional<RouteRender> page = carryRoutedPage( d, *ra, h );
+    return page ? std::optional<int>( writeRouted( *ra, h, &*page ) ) : std::nullopt;   // nullopt: the --for answer, its own page 1
 }
 
 }   // namespace — verbs_forroute.h section of main.cpp
