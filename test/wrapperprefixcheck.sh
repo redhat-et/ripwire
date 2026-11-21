@@ -749,11 +749,17 @@ import re, sys
 m = re.search(r"<b [^>]*\bn=\"" + re.escape(sys.argv[1]) + r"\"[^>]*><!\[CDATA\[([^\n]*)", sys.stdin.read())
 print(m.group(1).split("]]>")[0] if m else "(no body)")' "$1"; }
 got="$( "$BIN" "$FX" --for="py_stacked_deco" --legend=compact 2>/dev/null | first_line py_stacked_deco )"
-[ "$got" = "@first_deco" ] && ok "(F) --for serves py_stacked_deco from @first_deco" || no "(F) --for body of py_stacked_deco starts \`$got\`, want \`@first_deco\`"
+[ "$got" = "@first_deco" ] \
+    && ok "(F) --for serves py_stacked_deco from @first_deco" \
+    || no "(F) --for body of py_stacked_deco starts \`$got\`, want \`@first_deco\`"
 got="$( "$BIN" "$FX" --for="how does rs_stacked_attr_fn add four" --legend=compact 2>/dev/null | first_line rs_stacked_attr_fn )"
-[ "$got" = "#[inline]" ] && ok "(F) --for serves rs_stacked_attr_fn from #[inline]" || no "(F) --for body of rs_stacked_attr_fn starts \`$got\`, want \`#[inline]\`"
+[ "$got" = "#[inline]" ] \
+    && ok "(F) --for serves rs_stacked_attr_fn from #[inline]" \
+    || no "(F) --for body of rs_stacked_attr_fn starts \`$got\`, want \`#[inline]\`"
 got="$( "$BIN" "$FX" --pack-task="change py_stacked_deco to add three" 2>/dev/null | first_line py_stacked_deco )"
-[ "$got" = "@first_deco" ] && ok "(F) --pack-task serves py_stacked_deco from @first_deco" || no "(F) --pack-task body of py_stacked_deco starts \`$got\`, want \`@first_deco\`"
+[ "$got" = "@first_deco" ] \
+    && ok "(F) --pack-task serves py_stacked_deco from @first_deco" \
+    || no "(F) --pack-task body of py_stacked_deco starts \`$got\`, want \`@first_deco\`"
 
 # ── (E) the edit verbs splice the span --expand prints ────────────────────────────────────────────────
 ED="$DIR/ed"; mkdir -p "$ED"
@@ -778,9 +784,13 @@ else no "(E) --insert-before-symbol on a decorated def: payload at line ${mark:-
 
 # ── (D) deterministic and well formed ─────────────────────────────────────────────────────────────────
 "$BIN" "$FX" --expand=d_py.py:py_stacked_deco --top-k=1 > "$DIR/d1.xml" 2>/dev/null; "$BIN" "$FX" --expand=d_py.py:py_stacked_deco --top-k=1 > "$DIR/d2.xml" 2>/dev/null
-[ -s "$DIR/d1.xml" ] && cmp -s "$DIR/d1.xml" "$DIR/d2.xml" && ok "(D) two runs byte-identical" || no "(D) two runs differ, or the answer is empty"
+[ -s "$DIR/d1.xml" ] && cmp -s "$DIR/d1.xml" "$DIR/d2.xml" \
+    && ok "(D) two runs byte-identical" \
+    || no "(D) two runs differ, or the answer is empty"
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$DIR/d1.xml" 2>/dev/null && ok "(D) well formed (xmllint)" || no "(D) xmllint rejects the --expand answer"
+    xmllint --noout "$DIR/d1.xml" 2>/dev/null \
+        && ok "(D) well formed (xmllint)" \
+        || no "(D) xmllint rejects the --expand answer"
 else
     echo "  SKIP  (D) xmllint not installed"
 fi
