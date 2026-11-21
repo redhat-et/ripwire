@@ -433,6 +433,7 @@ for _g in \
     crossrefdegradecheck \
     csharpcheck \
     csharpcondcheck \
+    csrpagerankcheck \
     cudacheck \
     cyclecutcheck \
     danglingwarncheck \

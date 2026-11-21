@@ -126,6 +126,7 @@ EXEMPT = {
     "qschemetripcheck.sh":       "greps src/quality.h's tripwire comment against the test/*.sh manifest; pure file check",
     "radixsimdcheck.sh":         "builds its OWN standalone harness binaries per SIMD arm, independent of build/ripwire",
     "strkerncheck.sh":           "drives the CMake target ripwire_test_strkern (test/verify_strkern.cpp) and two direct-compiled SIMD arms (mutated, x86_64 cross) — never invokes build/ripwire",
+    "csrpagerankcheck.sh":       "drives CMake targets ripwire_test_csr and ripwire_test_pagerank — never invokes build/ripwire",
     "releaseinstallcheck.sh":    "tests install.sh against a FABRICATED release asset/stub server; independent of build/ripwire",
     "reusefirstworkflowcheck.sh":"checks skills/ripwire-reuse-first/SKILL.md content; pure file check",
     "roundcderivecheck.sh":      "gates bench/roundc-h2h/derive_questions.py (#492, #540): it runs a COPY of that python harness against a stub git it writes itself and reads only the harness's exit code, stderr and questions.json; no ripwire binary is bound or executed -- the file contains neither RIPWIRE_BIN nor $BIN (verified by reading it), so a broken binary cannot turn it red",
