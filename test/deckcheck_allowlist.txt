@@ -23,6 +23,7 @@
 --all	real flag of the `wrap` subcommand (src/wrap.h:254, "ripwire wrap --all" auto-detects every installed agent) — wrap's own flags are not enumerated in the top-level --help catalog
 --no-prefilter	real flag (src/cli.h:120, 2997) — modifies --grep=STR/--regex=PAT to force a full scan instead of the trigram prefilter; the (debug) soundness oracle test/regexcheck.sh compares --regex against, deliberately left out of --help's public catalog
 --noout	xmllint's own flag ("xmllint --noout -") quoted in the G4 well-formedness example, not a ripwire flag
+--xpath	xmllint's own flag ("xmllint --xpath") named in changelog.d/fmt2-rowlines.md as a consumer that parses rows as elements, not a ripwire flag
 --read	aider's own flag ("aider --read FILE") quoted in the wrap-aider recipe, not a ripwire flag
 --short	git's own flag ("git rev-parse --short HEAD") quoted where a skill tells you to record the commit you measured at, not a ripwire flag
 --build	cmake's own flag ("cmake --build build -j") quoted in every build recipe (AGENTS.md, CLAUDE.md, CONTRIBUTING.md, docs/EVALS.md), not a ripwire flag
