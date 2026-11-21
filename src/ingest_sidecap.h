@@ -2468,11 +2468,6 @@ inline void fillDefinitionExtent( RawDef& d, const DefCodeNodes& code, const Def
     d.loc       = ( endRow >= startRow ) ? ( endRow - startRow + 1u ) : 1u;
 }
 
-inline bool isCallableKind( SymKind kind ) noexcept
-{
-    return kind == SymKind::Function || kind == SymKind::Method;
-}
-
 // A callable's cc_walk facts (complexityOf) onto its definition. complexityOf runs on a callable only (and only with `shape`); off a
 // callable every fact is 0 — the zero Complexity below, which is what keeps ppAlt, maxNest, the nesting profile and ev absent on a
 // type. LB-E: a test macro block's body SIBLING is where the code lives — complexityOf walks INSIDE its root node, so handing it
@@ -2485,8 +2480,9 @@ inline bool isCallableKind( SymKind kind ) noexcept
 inline void fillDefinitionComplexity( RawDef& d, const TagsFile& file, const DefIdentity& id, const DefCodeNodes& code )
 {
     const TSNode     measured = code.spanThroughBody ? code.body : ( ts_node_is_null( code.literal ) ? code.defNode : code.literal );
-    const Complexity c        = isCallableKind( id.kind ) && file.shape ? complexityOf( measured, file.src, file.le.lang )
-                                                                        : Complexity{ 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, {}, 0u, 0u, 0u };
+    const bool       callable = id.kind == SymKind::Function || id.kind == SymKind::Method;
+    const Complexity c        = callable && file.shape ? complexityOf( measured, file.src, file.le.lang )
+                                                       : Complexity{ 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, {}, 0u, 0u, 0u };
     d.cx           = c.cx;
     d.ccx          = c.ccx;
     d.locals       = c.locals;   // Phase 1: floor count, C/C++ only (model.h localsCountedLang) — 0 elsewhere, never emitted there
@@ -2529,7 +2525,7 @@ inline void fillDefinitionParameters( RawDef& d, const TagsFile& file, const Tag
         return;
     }
     const Lang       lang         = file.le.lang;
-    const bool       callable     = isCallableKind( id.kind );
+    const bool       callable     = id.kind == SymKind::Function || id.kind == SymKind::Method;
     const bool       literalBound = !ts_node_is_null( code.literal );
     const TSNode     metricNode   = literalBound ? code.literal : code.defNode;
     const auto       counted      = callable ? definitionParamCount( lang, code.defNode, metricNode, literalBound, file.src ) : std::uint16_t( 0 );
@@ -2662,21 +2658,14 @@ inline void noteEnclosingFunctionScope( RawDef& d, const TagsFile& file, const T
     d.fnScopeEnd   = fnScope.end;
 }
 
-// A C++ definition's canonical scope (E#4): out-of-line `A::b` → "A" (`Box<T>::grow` (primary) → "Box"; a specialization keeps
-// its id), else the enclosing class/namespace.
-inline std::string cppDefinitionScope( TSNode nameNode, std::string_view src )
-{
-    std::string scope = qualifierOfDefinition( nameNode, src );
-    return scope.empty() ? enclosingScopeOf( nameNode, src ) : scope;
-}
-
 // The definition's scope, per language ("" where the language records none).
 inline std::string definitionScopeOf( const TagsFile& file, const TagsMatch& m, const DefIdentity& id )
 {
     const Lang lang = file.le.lang;
     if( lang == Lang::Cpp )
-    {
-        return cppDefinitionScope( id.name.node, file.src );
+    { // E#4: out-of-line `A::b` → "A" (`Box<T>::grow` (primary) → "Box"; a specialization keeps its id), else the enclosing class/namespace
+        std::string qualifier = qualifierOfDefinition( id.name.node, file.src );
+        return qualifier.empty() ? enclosingScopeOf( id.name.node, file.src ) : qualifier;
     }
     if( enumTableAt( kDefScopeWalkerOfLang, lang, DefScopeWalker::None ) != DefScopeWalker::None )
     { // Python, Go, Rust, Kotlin: the language's row in ingest_names.h kDefScopeWalkerOfLang
@@ -2729,7 +2718,7 @@ inline void emitElixirHeadFacts( const TagsFile& file, TagsSinks& sinks, const R
 // A Ruby method defined on the class object (`def self.m`, `class << self`): its bind (test/rubyclassrecvcheck.sh).
 inline void emitRubyClassSideBind( const TagsFile& file, TagsSinks& sinks, const RawDef& d, const DefIdentity& id, TSNode defNode )
 {
-    if( file.le.lang == Lang::Ruby && isCallableKind( id.kind ) )
+    if( file.le.lang == Lang::Ruby && ( id.kind == SymKind::Function || id.kind == SymKind::Method ) )
     {
         rubyNoteClassSideDef( defNode, file.fileId, d.name, file.src, sinks.binds );
     }
