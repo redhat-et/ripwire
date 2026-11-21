@@ -1385,6 +1385,29 @@ inline std::uint64_t defectSiteValue( defectshape::Facet f, std::string_view tex
     return v;
 }
 
+// CR712-ACK-KEY-MASK — the site value as the two-bit facet scheme spelled it (v0.6.10 and before: four facets, `& ~3`).
+// QD-UNCHECKED-STATUS widened the facet bits to three, which moved every site value whose hash had bit 2 set, and with it the
+// defectRowKey of every row holding such a site: a released ack of a format-arity row stopped matching and the row gated
+// again. addDefectFacetSchemeAliases re-files such an ack to the current key; this is the old value it needs. A facet the
+// two-bit scheme never had (unchecked-status, unhandled-arm) has none (0).
+inline std::uint64_t defectLegacySiteValue( defectshape::Facet f, std::string_view text )
+{
+    constexpr std::uint64_t kLegacyMask = 3;
+    if( static_cast<std::uint64_t>( f ) > kLegacyMask )
+    {
+        return 0;
+    }
+    std::string id( defectshape::facetName( f ) );
+    id.push_back( '\0' );
+    id.append( text );
+    std::uint64_t h = fnv1a64( id ) & ~kLegacyMask;
+    if( h == 0 )
+    {
+        h = kLegacyMask + 1;
+    }
+    return h | static_cast<std::uint64_t>( f );
+}
+
 // A defect-shape ROW's identity — the ack key: the anchor, the facet AND the identities of the anchor's sites of
 // that facet (each a defectSiteValue: facet + normalized offending text), so an ack covers exactly the defects it
 // named (checklist 16). A format-arity ack and a utf8-cut ack on one definition are two acks; and an ack of
@@ -1439,6 +1462,7 @@ struct DefectSiteAt
     std::uint32_t    line   = 0;
     std::string_view call;   // unchecked-status: the call whose status is dropped (defectshape's static spelling)
     std::string      why;    // unhandled-arm: what the classifier leaves without an outcome (defectshape's Site::why)
+    std::uint64_t    legacySite = 0;   // CR712-ACK-KEY-MASK: the site's value in the two-bit scheme (defectLegacySiteValue), 0 = none
 };
 
 
@@ -6817,7 +6841,7 @@ inline std::vector<DefectSiteAt> defectSitesOf( const IngestResult& ing, std::st
             const NodeId        owner  = enclosingDefOf( ing, byFile, f, st.startByte );
             const std::uint64_t anchor = owner == kNoNode ? fileAnchor : qualityKey( ing, owner, root );
             const std::uint32_t line   = static_cast<std::uint32_t>( 1 + std::count( src.begin(), src.begin() + st.startByte, '\n' ) );
-            out.push_back( { { anchor, defectSiteValue( st.facet, st.text ) }, owner, f, line, st.call, st.why } );
+            out.push_back( { { anchor, defectSiteValue( st.facet, st.text ) }, owner, f, line, st.call, st.why, defectLegacySiteValue( st.facet, st.text ) } );
         }
     }
     std::stable_sort( out.begin(), out.end(), []( const DefectSiteAt& a, const DefectSiteAt& b ) { return a.key < b.key; } );
@@ -9751,6 +9775,52 @@ inline void addSchemeAliases( IdentityAliases& al, const IngestResult& ing, cons
     std::sort( al.schemeAmbiguousKeys.begin(), al.schemeAmbiguousKeys.end() );
 }
 
+// CR712-ACK-KEY-MASK — the defect-shape half of the SCHEME migration: for every current (anchor, facet) row whose key under the
+// two-bit site values (defectLegacySiteValue) differs from its key now, legacy key -> current key, fed into the same toCurrent
+// map addSchemeAliases fills, so remapAckIdentity re-files a released ack (acks_rekeyed_by_scheme=), computeStaleAcks reads it at
+// its current key, and --quality-ack writes it back healed. It scans the tree's defect sites once, and only when the ledger
+// holds a defect-shape ack. Add, never overwrite (a rename alias keeps precedence).
+inline void addDefectFacetSchemeAliases( IdentityAliases& al, const gtl::btree_map<std::string, AckRecord>& acks, const IngestResult& ing,
+                                         std::string_view root )
+{
+    if( std::none_of( acks.begin(), acks.end(), []( const auto& kv ) { return kv.second.kind.starts_with( "defect-shape" ); } ) )
+    {
+        return;
+    }
+    const std::vector<DefectSiteAt> sites = defectSitesOf( ing, root, nullptr );   // sorted by (anchor, site)
+    for( auto it = sites.begin(); it != sites.end(); )
+    {
+        const auto end = std::find_if( it, sites.end(), [ & ]( const DefectSiteAt& d ) { return d.key.anchor != it->key.anchor; } );
+        for( std::size_t f = 0; f < defectshape::kFacetCount; ++f )
+        {
+            std::vector<std::uint64_t> now, old;
+            for( auto d = it; d != end; ++d )
+            {
+                if( d->legacySite != 0 && d->key.site != kDefectFilePresent && d->key.site != kDefectFileUnreadable
+                    && defectFacetOf( d->key.site ) == static_cast<defectshape::Facet>( f ) )
+                {
+                    now.push_back( d->key.site );
+                    old.push_back( d->legacySite );
+                }
+            }
+            if( now.empty() )
+            {
+                continue;
+            }
+            std::sort( now.begin(), now.end() );
+            std::sort( old.begin(), old.end() );
+            const auto          facet  = static_cast<defectshape::Facet>( f );
+            const std::uint64_t oldKey = defectRowKey( it->key.anchor, facet, old ), newKey = defectRowKey( it->key.anchor, facet, now );
+            if( oldKey != newKey && al.toCurrent.emplace( oldKey, newKey ).second )
+            {
+                al.schemeKeys.push_back( oldKey );
+            }
+        }
+        it = end;
+    }
+    std::sort( al.schemeKeys.begin(), al.schemeKeys.end() );
+}
+
 // The two transient rename facts the delta reads (Snapshot::renamedFrom, Snapshot::renamedKeys), from the RENAME aliases only and
 // BEFORE remapSnapshotIdentity: a key counts as re-filed only when the alias fills a hole (its source is in the baseline and its
 // target is not), so a file renamed long before the baseline (the ledger's 400-commit window) marks nothing.
@@ -10307,6 +10377,7 @@ inline IdentityHealing healIdentity( Snapshot& base, gtl::btree_map<std::string,
     if( treeWideRescues )
     {
         addSchemeAliases( h.aliases, ing, g, corpusRoot );
+        addDefectFacetSchemeAliases( h.aliases, acks, ing, corpusRoot );   // CR712-ACK-KEY-MASK: two-bit-era defect-shape acks
     }
     h.baselineKeysMoved = remapSnapshotIdentity( base, h.aliases );
 
