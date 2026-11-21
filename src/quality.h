@@ -11415,7 +11415,7 @@ inline std::uint32_t newSymbolCeilingGate( const Regression& r, SymKind measured
 // is new, it crossed the bar, its score grew against the range base while over the bar (the RATCHET, QD-RATCHET-BASE), or an input
 // rose — nesting +1, deep lines +kTangleDeepRise, or a new steering local. Rows on the score's growth catch a monster growing by a
 // tenth per change (12 deep lines in a 4000-line function), which a size floor would let grow forever (QD-MONSTER-GROWTH's lesson).
-// A new function or a crossing GATES (rule (b), owner 11-21: tangleCauseGates); every other row is sev="minor". why= names the
+// A new function, a crossing and a ratchet row GATE (owner 11-21: tangleCauseGates); every other row is sev="minor". why= names the
 // inputs that changed, fix= the shape the rise calls for (with its lines, from a re-walk of the ONE function: tangleDetailOf),
 // locals= the steering locals. A long orchestrator of named steps or a long flat body scores 0 and never rows.
 inline constexpr std::uint32_t kTangleDeepRise = 5;   // deep lines that count as a rise (STAGE0 2.5's "worse" tier)
@@ -11597,12 +11597,14 @@ inline TangleRise tangleGrowth( const TangleInputs& was, const TangleInputs& now
     return { now.nest > was.nest, now.deep > was.deep, now.steer > was.steer };
 }
 
-// Rule (b): a new function at or over the bar, or one that crossed it, GATES — except a moved body (its code is not new; the
-// re-census found no such row) and test code (the census's test-harness mains were its false class, and QD-ENTRY-CEILING exempts
-// test drivers the same way). A ratchet row or a row of a rising input stays sev="minor". `rel` = the root-relative path.
+// What gates (owner 11-21): rule (b), a new function at or over the bar or one that crossed it, and the ratchet, a function over the
+// bar whose score grew against the range base — except a moved body (its code is not new; the re-census found no such row) and test
+// code (the census's test-harness mains were its false class, and QD-ENTRY-CEILING exempts test drivers the same way). A row of a
+// rising input whose score did not grow stays sev="minor". `rel` = the root-relative path. Expected effect (replay 11-21): a change
+// that grows buildGraph, serialize or captureTagsFacts by a tenth blocks until it is acked or the function is split.
 inline bool tangleCauseGates( TangleCause cause, bool moved, std::string_view rel ) noexcept
 {
-    return ( cause == TangleCause::New || cause == TangleCause::Crossed ) && !moved && !isTestPath( rel );
+    return ( cause == TangleCause::New || cause == TangleCause::Crossed || cause == TangleCause::Grew ) && !moved && !isTestPath( rel );
 }
 
 // QD-CREDIT-ROW for tangle (STAGE0 2.5): over the bar at the baseline, an input fell by the rise rule (tangleRise read backwards) and none rose, and the score is lower.
