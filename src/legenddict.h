@@ -151,7 +151,7 @@ inline constexpr std::string_view kCliCoreEntries[] =
 // constants themselves (forlegendentries.h). LAST in the id space, after the CLI core entries: no existing id moves,
 // so no tier hash and no pack moves; dictv= does.
 // A span of STATIC extent: main.cpp's table must hold exactly kForDocCount clauses or it does not compile.
-inline constexpr std::size_t kForDocCount = 101;   // +2 FMT2: the row-line and rank-sequence clauses (forrowlines.h)
+inline constexpr std::size_t kForDocCount = 104;   // +2 FMT2: the row-line and rank-sequence clauses (forrowlines.h); +3 SM1 (2026-11-21): the sigx, unread-language hops and key-body notes (forlegendentries.h)
 extern const std::span<const std::string_view, kForDocCount> kForDocEntries;
 
 inline constexpr std::size_t kCoreCount     = std::size( kCoreEntries );

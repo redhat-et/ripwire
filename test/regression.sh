@@ -718,6 +718,7 @@ for _g in \
     legenddriftcheck \
     legendhavecheck \
     legendrefcheck \
+    legendseenblockcheck \
     legendseencheck \
     legendseenhookcheck \
     legendseenportcheck \
