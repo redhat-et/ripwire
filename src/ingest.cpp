@@ -714,3 +714,6 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
 // The --match/--lint tail: rw-level query services, a SECTION of this same TU (see the split note
 // at the top). Included last, exactly where its content sat before the 2026-08-29 split.
 #include "ingest_astquery.h"
+// rw::wrappedDeclStart (declwrap.h): where a declaration starts, wrapper prefix included. After ingest_astquery.h: it asks
+// sliceGrammarForFile for the grammar.
+#include "ingest_declwrap.h"
