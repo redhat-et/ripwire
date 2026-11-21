@@ -44,6 +44,11 @@
 #   (G6)  R1b: AF2's RES section <lit> is still promoted and still DELIVERED on page 1, legend and all
 #   (G7)  R1b: no RES section was displaced by a promotion -- the crowding-out prohibition (RED on R1's widening)
 #   (G6n) the non-vacuity control: the probe must offer BOTH classes after </tail>, or G6/G7 arbitrate nothing
+#   (G8n) TL2: the POPULATION -- the fixture's tail must FIT the stop, carry > 24 rows and offer a body section after </tail>
+#   (G8)  TL2: a body section is emitted ahead of <tail> ALTHOUGH the whole tail fits page 1 (RED on the pre-TL2 binary)
+#   (G9)  TL2: the delivered page 1 keeps a body AND its first 24 tail rows, with row 24 inside the stop
+#   (G10) TL2: no kPromotable section the legacy page 1 DELIVERS is deferred by that promotion -- the RES floor
+#   (G10n) the vacuity disclosure: where the fixture offers no post-tail RES section, G10 is recorded UNTESTED, not passed
 set -u
 # SIGX (src/forsigx.h, TL1 M1) runs AFTER this permutation and is lossless but not a permutation (it adds the <x r=R> envelopes and
 # the <sigx> block). This gate pins the PERMUTATION alone, so SIGX is off here; test/forsigxcheck.sh pins SIGX, and its (S1) rebuilds
