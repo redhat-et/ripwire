@@ -9,8 +9,21 @@
 # (rule E2: the symbol, rule R2: the kind — RT2's rules2.py, transcribed) and src/partialwarn.h (lane W1's frozen F1 plus RT2's
 # W2 clauses). A text gap is FOLDED into the answer as <text_only> rows; the first --for page rides along only when a reason a
 # fold cannot answer remains (warn="1"). The route fires only on a BARE
-# `--for=Q` (no flag that shapes the --for answer); --no-verb-route is the opt-out and is the unrouted answer byte for byte.
+# `--for=Q` (no flag that shapes the --for answer); --no-verb-route is the opt-out and is the unrouted answer byte for byte,
+# EXCEPT for the key group's position — see arm (4) and OWNER RULING 109 below.
 # Not to be confused with test/forroutecheck.sh (FOR-ROUTE-DECLINED: the <graph_verb> block APPENDED inside a --for answer).
+#
+# OWNER RULING 109 (2026-11-20), arm (4) and the new arm (4k). Arm (4) used to require the carried <ctx> page to equal the
+# --no-verb-route answer BYTE FOR BYTE. That is unsatisfiable once KB1's key group is non-empty on a carried page, because
+# forkeybodycheck (K11) requires the carried page's key block to MOVE UP to the routed root: the standalone answer therefore
+# holds the block inside it and the carried page does not. The two bars never collided before owner ruling 87, because the
+# body was already served on page 1 and the key group was suppressed to nothing, so there was no block to move (measured:
+# results/K87_CONTRACT_1120/READOUT.md §6.1). Ruling 109 re-registers the comparison in the style forkeybodycheck's (K1n),
+# (K3n) and (K4) already use for exactly this reason — "ON minus the key group == the twin" — and pairs it with (4k), which
+# pins that the moved block is byte-identical to the one the standalone answer carried. Net effect on strictness: every row
+# is still compared byte for byte AND the block's survival across the move is now pinned, where before it was only ever
+# compared while it was empty. Looser on exactly one thing: the group's POSITION, which (K11) deliberately changes.
+# Changing (K11) instead was on the table and was declined — that is a KB1 design question, not a ruling-87 one.
 #
 # Arm classes: [P] positive — RED on the base binary (lane/af1-answerfirst + lane/v1-verbdef, which has no route): that is
 # the control; [N] the route must NOT fire — the answer is the unrouted --for byte for byte; [C] holds on every binary.
@@ -158,13 +171,48 @@ if run a4 hop --for="$Q_HOP"; then
     [ "$( attr "$F" warn )" = 1 ] && [ "$( attr "$F" why )" = "value-hop:1:handle_failure" ] && [ "$( attr "$F" page1 )" = 1 ]
     say $? "(4) [P] callback hop: warn=1 why=value-hop:1:handle_failure page1=1" "(4) [P] route reads '$F'"
     if run a4o hop --for="$Q_HOP" --no-verb-route; then
-        python3 -c '
-import sys
+        # RULING 109: "ON minus the key group == the twin". Every row still byte-compared; only the group is set aside.
+        python3 - "$DIR/a4.out" "$DIR/a4o.out" <<'X'
+import re, sys
+KEY = re.compile(r'<bodies of="key"[^>]*>.*?</bodies>', re.S)
+LEG = re.compile(r'<!-- bodies of=key:.*?-->', re.S)
+d, o = open(sys.argv[1]).read(), open(sys.argv[2]).read().rstrip("\n")
+i, j = d.find("<ctx task="), d.rfind("</ctx>")
+nokey = lambda s: LEG.sub("", KEY.sub("", s, count=1), count=1)
+sys.exit(0 if i > 0 and j > i and d[i:j + 6] == nokey(o) and d.rstrip("\n").endswith("</ctx></impact>") else 1)
+X
+        say $? "(4) [P] the carried <ctx> is the opted-out --for answer MINUS its key group, byte for byte, the impact root's last child" \
+                "(4) [P] the carried page is not the --no-verb-route answer minus its key group"
+        # A RELAXED comparison cannot be proved red on the unfixed binary -- that binary satisfied the STRICTER bar it
+        # replaces -- so its non-vacuity proof is a mutation, exactly as (K1n)/(K3n) prove theirs. (4k) below is the arm
+        # that carries ruling 109's red-on-the-unfixed-binary proof.
+        python3 - "$DIR/a4.out" "$DIR/a4o.out" <<'X'
+import re, sys
+KEY = re.compile(r'<bodies of="key"[^>]*>.*?</bodies>', re.S)
+LEG = re.compile(r'<!-- bodies of=key:.*?-->', re.S)
+d, o = open(sys.argv[1]).read(), open(sys.argv[2]).read().rstrip("\n")
+i, j = d.find("<ctx task="), d.rfind("</ctx>")
+nokey = lambda s: LEG.sub("", KEY.sub("", s, count=1), count=1)
+sys.exit(0 if i > 0 and j > i and d[i:j + 6] != nokey(o)[:-1] else 1)
+X
+        say $? "(4) [P] negative control: the same comparison fails when one byte is dropped" \
+                "(4) [P] the comparison accepts a mutated answer -- it is vacuous"
+        # (4k) RULING 109's new arm: the block MOVED to the root, it did not vanish or change. Non-vacuity FIRST --
+        # the standalone answer must really carry a key group, or there is no move to pin and this arm says so.
+        python3 - "$DIR/a4.out" "$DIR/a4o.out" <<'X'
+import re, sys
+KEY = re.compile(r'<bodies of="key"[^>]*>.*?</bodies>', re.S)
 d, o = open(sys.argv[1]).read(), open(sys.argv[2]).read()
-i = d.find("<ctx task=")
-j = d.rfind("</ctx>")
-sys.exit(0 if i > 0 and j > i and d[i:j + 6] == o.rstrip("\n") and d.rstrip("\n").endswith("</ctx></impact>") else 1)' "$DIR/a4.out" "$DIR/a4o.out"
-        say $? "(4) [P] the carried <ctx> is the opted-out --for answer byte for byte, the impact root's last child" "(4) [P] the carried page is not the --no-verb-route answer"
+i, j = d.find("<ctx task="), d.rfind("</ctx>")
+carried = d[i:j + 6] if i > 0 and j > i else ""
+kd, ko = KEY.findall(d), KEY.findall(o)
+if len(ko) != 1:
+    sys.stderr.write("vacuous: the --no-verb-route answer carries %d key groups, expected 1\n" % len(ko))
+    sys.exit(1)
+sys.exit(0 if len(kd) == 1 and KEY.search(carried) is None and kd[0] == ko[0] else 1)
+X
+        say $? "(4k) [P] KB1's key block moved, it did not vanish: ONE block in the routed answer, OUTSIDE the carried page, byte-identical to the one the --no-verb-route answer carries" \
+                "(4k) [P] the moved key block is missing, duplicated, inside the carried page, or not byte-identical to the standalone answer's (or the standalone answer carries none, which makes the arm vacuous)"
     fi
 fi
 
