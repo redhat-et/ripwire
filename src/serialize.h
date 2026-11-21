@@ -5260,6 +5260,9 @@ inline constexpr bool explicitCeilingTighterThanDefault( std::size_t budgetToken
 // (a disclosure never costs a row), so under a tight explicit ceiling — where the answer promises est_tokens <= the ceiling
 // and every row — neither the reorder nor its note applies: the answer is the one it was before the reorder existed. At or
 // above the default share, or with no explicit ceiling, it applies. Independent of RIPWIRE_FOR_ENDLINES (that switch moves e= only).
+// The CLI XML --for no longer reaches this with its budget: TOKEN-BUDGET-MONOTONE renders the unbudgeted answer (budget 0, so
+// the reorder applies) and sheds it (forbudgetfit.h, which recounts docs_after_code= over the rows it keeps). JSON and MCP `for`
+// still decide here (forsigspancheck (T)).
 inline constexpr bool docsAfterCodeFitsCeiling( std::size_t budgetTokens, bool bodyCeiling ) noexcept
 {
     return !explicitCeilingTighterThanDefault( budgetTokens, bodyCeiling );
@@ -5362,8 +5365,11 @@ inline bool isDocsAfterCodeRow( const IngestResult& ing, NodeId id )
     return ing.symbols[ id ].lang == Lang::Markdown;
 }
 
+// `movedRanks` (optional, OUT): the r= each MOVED doc row is shown with after the reorder, ascending — the rows docs_after_code=
+// counts. A later shed of the rendered answer (forbudgetfit.h, rows:N) recounts the attribute over the rows it keeps by these
+// ranks: the shed cuts the worst r= first, and the reorder hands the doc rows the worst r= of the shown set (lane DA1).
 template< class EntryT, class IsDoc, class Rehead >
-inline std::size_t reorderDocsAfterCode( std::vector<EntryT>& entries, IsDoc&& isDoc, Rehead&& rehead )
+inline std::size_t reorderDocsAfterCode( std::vector<EntryT>& entries, IsDoc&& isDoc, Rehead&& rehead, std::vector<std::uint32_t>* movedRanks = nullptr )
 {
     const auto [ live, moved ] = shownDocsAboveCode( entries, isDoc );
     if( moved == 0 )
@@ -5372,7 +5378,18 @@ inline std::size_t reorderDocsAfterCode( std::vector<EntryT>& entries, IsDoc&& i
     }
     std::vector<std::size_t> newOrder;
     std::copy_if( live.begin(), live.end(), std::back_inserter( newOrder ), [ & ]( std::size_t i ) { return !isDoc( entries[i] ); } );
+    const std::size_t codeRows = newOrder.size();
     std::copy_if( live.begin(), live.end(), std::back_inserter( newOrder ), [ & ]( std::size_t i ) { return isDoc( entries[i] ); } );
+    if( movedRanks != nullptr )
+    {
+        // the moved rows are the first `moved` doc rows of `live` (shownDocsAboveCode), so they follow the code rows in newOrder,
+        // and the k-th row of newOrder takes the k-th shown r= (applyShownOrder: `live` is in display order)
+        movedRanks->clear();
+        for( std::size_t k = codeRows; k < codeRows + moved; ++k )
+        {
+            movedRanks->push_back( entries[ live[k] ].displayRank );
+        }
+    }
     applyShownOrder( entries, live, newOrder, rehead );
     ENSURES( moved > 0, "a moved count is only returned when the order changed" );
     return moved;
@@ -5802,6 +5819,8 @@ struct SigsCutReport
     std::size_t docsDropped = 0;
     bool        isCapped    = false;
     std::size_t docsAfterCode = 0;     // reorderDocsAfterCode's moved count: docs_after_code= (0 ⇒ absent)
+    std::vector<std::uint32_t> docsAfterCodeRanks;   // OUT: the r= those moved doc rows are shown with, ascending (the --for budget
+                                                     //   fitter recounts docs_after_code= over the rows it keeps: forbudgetfit.h)
     std::size_t filesFirst    = 0;     // reorderHeadRoundRobin's moved count: files_first= (0 ⇒ absent)
     std::string next;                  // knob-honesty-068: the cut's continuation (sigsCutNextInvocation), set only on a capped
                                        //   block whose caller asked for a PASTEABLE one; the tag's next= / the JSON "sigs_next"
@@ -6677,7 +6696,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
         }
         if( hasSigLensRule( lensRules, SigLensRules::DocsAfterCode ) )
         {
-            cut.docsAfterCode = reorderDocsAfterCode( entries, isDocRow, reheadXml );   // lean-answers' zero elision included
+            cut.docsAfterCode = reorderDocsAfterCode( entries, isDocRow, reheadXml, &cut.docsAfterCodeRanks );   // lean-answers' zero elision included
         }
         cut.continuationRequest = cutNext;
         sigsCutRecordLadder( cut, ladder, totalAfterLadder, rowDropBudgetIn, pastTargetDisclosed );   // forbudget-soft
@@ -12576,7 +12595,7 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
         }
         if( lens.docsAfterCode )
         {
-            cut.docsAfterCode = reorderDocsAfterCode( entries, isDocRow, reheadJson );
+            cut.docsAfterCode = reorderDocsAfterCode( entries, isDocRow, reheadJson, &cut.docsAfterCodeRanks );
         }
         cut.continuationRequest = cutNext;
         sigsCutRecordLadder( cut, ladder, totalAfterLadder, rowDropBudgetIn, pastTargetDisclosed );   // forbudget-soft
