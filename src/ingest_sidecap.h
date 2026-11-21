@@ -1865,25 +1865,6 @@ inline SymKind renamedAnnotationKind( TSNode name ) noexcept
     return member ? SymKind::Method : SymKind::Function;
 }
 
-// MACRO-P1: a renamed annotation definition's facts that are the real function's, not the macro's: the parameter list in it is
-// the ANNOTATION's (`( mu_ )`), the real one was the empty `()` emptyCallInitName requires, and its span and rows start at
-// the real function's own declaration. No-op when nothing was renamed.
-inline void applyAnnotationRename( RawDef& d, const AnnotationRename& renamed, TSNode defNode ) noexcept
-{
-    if( ts_node_is_null( renamed.name ) )
-    {
-        return;
-    }
-    d.params     = 0;
-    d.paramsMin  = 0;
-    d.arityExact = 1;
-    if( !ts_node_is_null( renamed.start ) )
-    {
-        d.startByte = ts_node_start_byte( renamed.start );
-        d.loc       = ts_node_end_point( defNode ).row - ts_node_start_point( renamed.start ).row + 1u;
-    }
-}
-
 // The two postures of one tags pass. Full: every fact the index keeps. DefinitionsOnly (definitionLinesInBlobs, --whereis on
 // other refs): the SAME definitions — every step that decides a definition's existence, name, line, kind or scope runs
 // unchanged — without the work only references, imports and metrics read: the @reference arm, @import emission,
@@ -1895,50 +1876,63 @@ inline void applyAnnotationRename( RawDef& d, const AnnotationRename& renamed, T
 enum class TagsCapture : std::uint8_t { Full, DefinitionsOnly, DefinitionsAndShape };
 
 // ── captureTagsFacts, as named steps (GE-CAPTURETAGS) ────────────────────────────────────────────────────────────────────────
-// One file's pass state (TagsPass), one match's captures read once into a TagsMatch (readTagsMatch), then the capture-time drop
-// decisions in order (captureTagsMatch) and the definition or reference arm (captureDefinition / captureReference), each a
-// sequence of named steps. Every step runs in the order the single loop body ran it; the outputs are byte-identical.
+// One file's facts (TagsFile, read-only) and its output sinks (TagsSinks: a step whose signature takes them emits; one that does
+// not is a pure reader). readTagsMatch reads one match's captures ONCE into an immutable TagsMatch; definitionIdentityOf decides a
+// definition's name and kind ONCE into an immutable DefIdentity; captureTagsMatch runs the capture-time drop rules in their
+// load-bearing order (its own comment lists it); then the definition arm writes each RawDef field in exactly one step, and the
+// reference arm qualifies one RawRef. Every fact is decided as the single loop body this replaced decided it: byte-identical output.
 
-// One file's tags pass: the facts every match reads and the sinks it appends to. Built once per file by captureTagsFacts.
-struct TagsPass
+// One file's facts, read by every step. Nothing here is written during the pass.
+struct TagsFile
 {
-    const LangEntry&      le;
-    std::uint32_t         fileId;
-    std::string_view      src;
-    TSNode                root;
+    const LangEntry&     le;
+    std::uint32_t        fileId;
+    std::string_view     src;
+    TSNode               root;
+    const ElixirContext& elixir;         // Elixir's per-file module/alias/keyword tables (prepared before the match loop)
+    std::string_view     fileStem;       // the name of a bare `module.exports = <anonymous fn>` (JS)
+    bool                 full;           // TagsCapture::Full: references, imports and the def arm's IS-A / HAS-A / macro-body edges too
+    bool                 shape;          // the callables' cc_walk facts (Full or DefinitionsAndShape)
+    bool                 fileHasError;   // extent honesty: the recovered-bit walk (parseRecoveredBits) only exists in a file the parser had to recover
+};
+
+// Where the pass writes. A step that takes a TagsSinks& may append to these; no other step can.
+struct TagsSinks
+{
     std::vector<RawDef>&  defs;
     std::vector<RawRef>&  refs;
     std::vector<RawBind>& binds;
     std::vector<Include>& includes;
-    ExtractShortfall&     shortfall;
-    ElixirContext&        elixir;
-    std::string_view      fileStem;       // the name of a bare `module.exports = <anonymous fn>` (JS)
-    bool                  full;           // TagsCapture::Full: references, imports and the def arm's IS-A / HAS-A / macro-body edges too
-    bool                  shape;          // the callables' cc_walk facts (Full or DefinitionsAndShape)
-    bool                  fileHasError;   // extent honesty: the recovered-bit walk (parseRecoveredBits) only exists in a file the parser had to recover
+    ExtractShortfall&     shortfall;   // a capture the pass could not read whole says so here
 };
 
-// What one tags match captured. A tags pattern yields one @definition/@reference node plus a child @name: the role capture sets
-// kind, the capture's name and roleNode; the @name capture sets the four name facts, and every later re-seat (C++ declarator,
-// macro annotation, test-macro title) moves all four at once.
+// What a step decided about the match — the ONE drop protocol of this pass. Every step that can end a match returns a fate, and
+// its caller stops at the first one that is not Keep. Drop: the match writes nothing more. Emitted: the step wrote the match's own
+// fact, and nothing more follows.
+enum class CaptureFate : std::uint8_t { Keep, Drop, Emitted };
+
+// What one tags match captured, read once by readTagsMatch and never written after. A tags pattern yields one
+// @definition/@reference node plus a child @name.
 struct TagsMatch
 {
-    SymKind          kind  = SymKind::Other;
+    SymKind          kind  = SymKind::Other;   // the role capture's kind, as the query spelled it (a definition's final kind: DefIdentity)
     bool             isDef = false;
     bool             isRef = false;
     std::string_view defCap;      // the @definition capture's name — dropGatedCapture keys the constant/cjsexport/protomethod gates on it
     std::string_view refCap;      // the @reference capture's name — "reference.import" routes the using-declaration role (r9 loss bucket 1)
     TSNode           roleNode {};
-    DefNameFacts     name {};     // the @name identifier: its node (for C++ scope/qualifier, E#4), text, start byte and 0-based row
+    DefNameFacts     name {};     // the @name identifier as captured: its node, text, start byte and 0-based row
     bool             keywordHead = false;   // #355: the pattern carried @_keyword, a head its tags.scm predicates accepted
 
     bool hasRole() const noexcept { return isDef || isRef; }
     bool hasName() const noexcept { return !ts_node_is_null( name.node ); }
-    void reseatName( TSNode node, std::string_view text ) noexcept
-    {
-        name = DefNameFacts{ node, text, ts_node_start_byte( node ), ts_node_start_point( node ).row };
-    }
 };
+
+// The four name facts of `node`, spelled `text`.
+inline DefNameFacts nameFactsAt( TSNode node, std::string_view text ) noexcept
+{
+    return DefNameFacts{ node, text, ts_node_start_byte( node ), ts_node_start_point( node ).row };
+}
 
 // A C++ conversion operator's declarator is an `operator_cast` node whose text spans the WHOLE `operator <type>() const` (the
 // tags query captures the declarator itself — there is no sub-node spanning just `operator bool`). Its name ends at the end of
@@ -1976,15 +1970,15 @@ inline DefNameFacts capturedNameOf( TSNode node, std::string_view src ) noexcept
 // #358: an `@import.*` capture, emitted here in capture order, not in a second pass. Matches arrive by start byte and captures
 // within a match in query order, so a staging vector would produce the identical order while costing an allocation and a drain
 // block. `import.names` / `import.alias` are one clause's target and its optional alias, paired once the match is read.
-inline void noteImportCapture( const TagsPass& pass, std::string_view capSv, TSNode node, TSNode& importNames, TSNode& importAlias )
+inline void noteImportCapture( const TagsFile& file, TagsSinks& sinks, std::string_view capSv, TSNode node, TSNode& importNames, TSNode& importAlias )
 {
-    if( !pass.full )
+    if( !file.full )
     {
         return;
     }
     if( capSv == "import.path" )
     {
-        emitCapturedImport( node, pass.fileId, pass.le.lang, pass.src, pass.includes, pass.refs, pass.shortfall );
+        emitCapturedImport( node, file.fileId, file.le.lang, file.src, sinks.includes, sinks.refs, sinks.shortfall );
     }
     else if( capSv == "import.names" )
     {
@@ -1998,7 +1992,7 @@ inline void noteImportCapture( const TagsPass& pass, std::string_view capSv, TSN
 
 // Walk one match's captures into a TagsMatch: the role node and its capture, the name, the keyword head. The match's imports are
 // emitted on the way (noteImportCapture), and its import clause's bind (emitCapturedImportBind) after the walk.
-inline TagsMatch readTagsMatch( const TagsPass& pass, TSQuery* query, const TSQueryMatch& match )
+inline TagsMatch readTagsMatch( const TagsFile& file, TagsSinks& sinks, TSQuery* query, const TSQueryMatch& match )
 {
     TagsMatch m;
     TSNode    importNames {};
@@ -2037,7 +2031,7 @@ inline TagsMatch readTagsMatch( const TagsPass& pass, TSQuery* query, const TSQu
 
             case CapRole::NameOnly:
             {
-                if( const DefNameFacts name = capturedNameOf( cap.node, pass.src ); !ts_node_is_null( name.node ) )
+                if( const DefNameFacts name = capturedNameOf( cap.node, file.src ); !ts_node_is_null( name.node ) )
                 {
                     m.name = name;
                 }
@@ -2049,73 +2043,126 @@ inline TagsMatch readTagsMatch( const TagsPass& pass, TSQuery* query, const TSQu
 
             case CapRole::Import:
             {
-                noteImportCapture( pass, capSv, cap.node, importNames, importAlias );
+                noteImportCapture( file, sinks, capSv, cap.node, importNames, importAlias );
             }
             break;
         }
     }
     if( !ts_node_is_null( importNames ) )
     {
-        emitCapturedImportBind( importNames, importAlias, pass.fileId, pass.le.lang, pass.src, pass.binds );
+        emitCapturedImportBind( importNames, importAlias, file.fileId, file.le.lang, file.src, sinks.binds );
     }
     return m;
 }
 
-// MACRO-P0 (ingest_names.h): a macro invocation read as a typeless declarator mints no definition of its own; the site is a
-// call-shaped use of the macro (model.h retagMacroCallReferences makes it role="macro" when the #define is indexed and its name
-// is uniquely a macro). No argument count: the "parameters" are macro arguments. MACRO-P1: when the grammar read the real
-// function's own `f()` as a variable (ingest_names.h annotationRenamedName), this definition is the only one f gets — it
-// carries f's name, from f's own start (`renamed`). false: the capture ends here (a macro use and nothing renamed behind it).
-inline bool keepAfterMacroInvocation( const TagsPass& pass, TagsMatch& m, AnnotationRename& renamed )
+// A definition's identity: the name it is indexed under and its kind, decided once (definitionIdentityOf) and never written after.
+struct DefIdentity
 {
-    if( !cFamilyMacroInvocationCapture( m.defCap, pass.le.lang, m.name.text, m.roleNode, pass.src ) )   // defCap: set by a @definition capture only
+    DefNameFacts     declarator {};   // the @name as declared — C++: the innermost name of a qualified out-of-line declarator (C1)
+    DefNameFacts     name {};         // the name the definition is indexed under: the declarator, the real function behind a macro
+                                      // annotation (MACRO-P1) or a test macro block's title (LB-E)
+    SymKind          kind = SymKind::Other;   // the definition's kind: the capture's, or the renamed function's, Clojure's head shape,
+                                              // Var for an Elixir module attribute. Spans, metrics, scopes and edges read THIS kind;
+                                              // only the index row of an Elixir defimpl/defprotocol module shows another (elixirIndexedName)
+    AnnotationRename renamed {};      // MACRO-P1: the real function's name and start when a macro annotation hid it; null otherwise
+    bool             macroUse = false;   // MACRO-P0: the declarator is a macro invocation — a call site of the macro (emitMacroInvocationCall)
+    CaptureFate      fate = CaptureFate::Keep;   // Drop: mints no definition — a macro use with no function behind it, a test macro
+                                                 // block without its parts (dropGatedCapture's own veto, guarded here, not asserted)
+};
+
+// Decide a definition's name and kind, in one place:
+//   - C1 (memgraph F1, ingest_names.h cppDefNameReseat): a C++ out-of-line definition is named by the innermost name of its
+//     qualified declarator.
+//   - MACRO-P0/P1 (ingest_names.h): a macro invocation read as a typeless declarator mints no definition of its own; when the grammar
+//     read the real function's own `f()` as a variable (annotationRenamedName), this definition is the only one f gets — it carries
+//     f's name and kind (renamedAnnotationKind), from f's own start.
+//   - LB-E testmacroblock: the def is TWO SIBLING nodes (testMacroBlockPartsOf); its name is the title literal (a display string).
+//   - Clojure: the kind is the head's shape (`defn`, `defmacro`, `defprotocol` …); Elixir: a module attribute (`@doc`, `@type`) is a Var.
+// Pure: what a later step drops, it drops on these facts.
+inline DefIdentity definitionIdentityOf( const TagsFile& file, const TagsMatch& m )
+{
+    const Lang lang = file.le.lang;
+    DefIdentity id;
+    id.kind = m.kind;
+    const DefNameFacts reseated = cppDefNameReseat( lang == Lang::Cpp, m.name.node, file.src );   // a null node: nothing to re-seat
+    id.declarator = ts_node_is_null( reseated.node ) ? m.name : reseated;
+    id.name       = id.declarator;
+    id.macroUse   = cFamilyMacroInvocationCapture( m.defCap, lang, id.declarator.text, m.roleNode, file.src );
+    if( id.macroUse )
     {
-        return true;
+        id.renamed = annotationRenamedName( m.roleNode, file.src );
+        if( ts_node_is_null( id.renamed.name ) )
+        {
+            id.fate = CaptureFate::Drop;
+            return id;
+        }
+        id.name = nameFactsAt( id.renamed.name, nodeTextOf( id.renamed.name, file.src ) );
+        id.kind = renamedAnnotationKind( id.renamed.name );
+    }
+    else if( m.defCap == "definition.testmacroblock" )
+    {
+        const TestMacroBlockParts parts = testMacroBlockPartsOf( m.roleNode, file.src );
+        if( !parts.ok )
+        {
+            id.fate = CaptureFate::Drop;
+            return id;
+        }
+        id.name = nameFactsAt( parts.title, testMacroTitleOf( parts.title, file.src ) );
+    }
+    else if( lang == Lang::Clojure )
+    {
+        id.kind = clojureDefinitionShape( m.roleNode, file.src ).kind;
+    }
+    else if( lang == Lang::Elixir && m.defCap == "definition.attribute" )
+    {
+        id.kind = SymKind::Var;
+    }
+    return id;
+}
+
+// MACRO-P0: a macro invocation's site is a call-shaped use of the macro (model.h retagMacroCallReferences makes it role="macro" when
+// the #define is indexed and its name is uniquely a macro). No argument count: the "parameters" are macro arguments.
+inline void emitMacroInvocationCall( const TagsFile& file, TagsSinks& sinks, const TagsMatch& m, const DefIdentity& id )
+{
+    if( !id.macroUse )
+    {
+        return;
     }
     RawRef r;
-    r.fileId    = pass.fileId;
+    r.fileId    = file.fileId;
     r.startByte = ts_node_start_byte( m.roleNode );
     r.line      = ts_node_start_point( m.roleNode ).row + 1;
-    r.lang      = pass.le.lang;
+    r.lang      = file.le.lang;
     r.role      = RefRole::Call;
-    r.name      = m.name.text;
-    pass.refs.push_back( std::move( r ) );
-    renamed = annotationRenamedName( m.roleNode, pass.src );
-    if( ts_node_is_null( renamed.name ) )
-    {
-        return false;
-    }
-    m.reseatName( renamed.name, nodeTextOf( renamed.name, pass.src ) );
-    m.kind = renamedAnnotationKind( renamed.name );
-    return true;
+    r.name      = id.declarator.text;
+    sinks.refs.push_back( std::move( r ) );
 }
 
-// INDEX-ALIAS-CONST (src/aliasdef.h, the one alias reader): a C++ alias form is a definition unless it is function-local
-// (ingest_relations.h insideFunctionBody: a function-local alias is a local name, the local-const rule). std::nullopt: the capture
-// is dropped; form None: not an alias definition.
-inline std::optional<AliasShape> aliasShapeOfCapture( Lang lang, const TagsMatch& m )
+// INDEX-ALIAS-CONST (src/aliasdef.h, the one alias reader): a C++ alias form (`using X = Y;`, a namespace alias) is a definition.
+inline bool isAliasDefinition( Lang lang, const TagsMatch& m ) noexcept
 {
-    if( !m.isDef || !langFacts( lang ).aliasTargetDefs || m.defCap != "definition.alias" )
-    {
-        return AliasShape{};
-    }
-    if( insideFunctionBody( m.roleNode ) )
-    {
-        return std::nullopt;
-    }
-    return aliasShapeOf( Lang::Cpp, m.roleNode );
+    return m.isDef && langFacts( lang ).aliasTargetDefs && m.defCap == "definition.alias";
 }
 
-// INDEX-ALIAS-CONST: where an alias's written target starts when it ENDS the declaration (--defs to=), else 0 (a typedef). The
-// target is a suffix when every child after it is the `;` or a comment (`using X = Y /* c */ ;` keeps its target; the printer
-// drops the comment, defslookup.h aliasTargetText); one cursor walk (infra/tschildren.h). Only `using`/namespace alias rows
-// reach here (a typedef capture is never definition.alias).
-inline std::uint32_t aliasTargetStartOf( TSNode roleNode, const AliasShape& aliasShape )
+// INDEX-ALIAS-CONST: where an alias definition's written target starts when it ENDS the declaration (--defs to=), else 0 (a typedef,
+// or no alias). The target is a suffix when every child after it is the `;` or a comment (`using X = Y /* c */ ;` keeps its target;
+// the printer drops the comment, defslookup.h aliasTargetText); one cursor walk (infra/tschildren.h). Only `using`/namespace alias
+// rows reach the walk (a typedef capture is never definition.alias).
+inline std::uint32_t aliasTargetStartOf( const TagsFile& file, const TagsMatch& m )
 {
+    if( !isAliasDefinition( file.le.lang, m ) )
+    {
+        return 0u;
+    }
+    const AliasShape aliasShape = aliasShapeOf( Lang::Cpp, m.roleNode );
+    if( aliasShape.form == AliasForm::None )
+    {
+        return 0u;
+    }
     const std::uint32_t tEnd   = ts_node_end_byte( aliasShape.target );
     bool                suffix = true;
-    ChildCursor         cursor( roleNode );
-    forEachChild( roleNode, cursor.cur, [ & ]( TSNode c )
+    ChildCursor         cursor( m.roleNode );
+    forEachChild( m.roleNode, cursor.cur, [ & ]( TSNode c )
                   {
                       const char* k = ts_node_type( c );
                       suffix = ts_node_start_byte( c ) < tEnd || kindIs( k, ";" ) || kindIs( k, "comment" );
@@ -2124,82 +2171,76 @@ inline std::uint32_t aliasTargetStartOf( TSNode roleNode, const AliasShape& alia
     return suffix ? ts_node_start_byte( aliasShape.target ) : 0u;
 }
 
-// Elixir's capture filters a tags pattern cannot state: elixirKeepCapture's syntax filters; a bare name is a call only off a pipe
-// (bare pipe targets have their own capture) and past lexical variable exclusion; the special-form operators are no calls.
-inline bool keepElixirCapture( const TagsPass& pass, const TagsMatch& m )
+// Elixir's capture filters a tags pattern cannot state, on the capture AS CAPTURED (its query kind): elixirKeepCapture's syntax
+// filters; a bare name is a call only off a pipe (bare pipe targets have their own capture) and past lexical variable exclusion;
+// the special-form operators are no calls.
+inline CaptureFate elixirFilterFate( const TagsFile& file, const TagsMatch& m )
 {
-    if( !elixirKeepCapture( m.roleNode, m.name.node, ElixirCaptureRole{ m.isDef, m.kind, m.keywordHead }, pass.src, pass.elixir.keywords ) )
+    if( !elixirKeepCapture( m.roleNode, m.name.node, ElixirCaptureRole{ m.isDef, m.kind, m.keywordHead }, file.src, file.elixir.keywords ) )
     {
-        return false;
+        return CaptureFate::Drop;
     }
     if( m.refCap == "reference.bare" )
     {
         const TSNode parent     = parentOf( m.name.node );
-        const bool   pipeTarget = elixirNodeIs( parent, "binary_operator" ) && nodeFieldText( parent, NodeField::Operator, pass.src ) == "|>"
+        const bool   pipeTarget = elixirNodeIs( parent, "binary_operator" ) && nodeFieldText( parent, NodeField::Operator, file.src ) == "|>"
                                   && ts_node_eq( fieldChild( parent, NodeField::Right ), m.name.node );
-        return !pipeTarget && pass.elixir.bareCall( m.name.node );
+        return !pipeTarget && file.elixir.bareCall( m.name.node ) ? CaptureFate::Keep : CaptureFate::Drop;
     }
     if( m.refCap == "reference.operator" )
     {
         constexpr std::string_view special[] = { "=", "<-", "\\\\", "::", "|>", "when", "|", "^", "&", "@" };
         if( std::find( std::begin( special ), std::end( special ), m.name.text ) != std::end( special ) )
         {
-            return false;
+            return CaptureFate::Drop;
         }
-        const TSNode parent = parentOf( m.roleNode );
-        return !( m.name.text == "/" && elixirNodeIs( parent, "unary_operator" ) && nodeFieldText( parent, NodeField::Operator, pass.src ) == "&" );
+        const TSNode parent  = parentOf( m.roleNode );
+        const bool   capture = m.name.text == "/" && elixirNodeIs( parent, "unary_operator" ) && nodeFieldText( parent, NodeField::Operator, file.src ) == "&";
+        return capture ? CaptureFate::Drop : CaptureFate::Keep;
     }
-    return true;
+    return CaptureFate::Keep;
 }
 
-// The per-language capture filters (Elixir's, Clojure's); a Clojure definition's kind is its head's shape.
-inline bool keepLanguageCapture( const TagsPass& pass, TagsMatch& m )
+// The per-language capture filters: Elixir's, and Clojure's (a definition needs a defining head, a reference must not be a special form).
+inline CaptureFate languageFilterFate( const TagsFile& file, const TagsMatch& m )
 {
-    if( pass.le.lang == Lang::Elixir )
+    if( file.le.lang == Lang::Elixir )
     {
-        return keepElixirCapture( pass, m );
+        return elixirFilterFate( file, m );
     }
-    if( pass.le.lang != Lang::Clojure )
+    if( file.le.lang == Lang::Clojure && !clojureKeepCapture( m.roleNode, m.isDef, file.src ) )
     {
-        return true;
+        return CaptureFate::Drop;
     }
-    if( !clojureKeepCapture( m.roleNode, m.isDef, pass.src ) )
-    {
-        return false;
-    }
-    if( m.isDef )
-    {
-        m.kind = clojureDefinitionShape( m.roleNode, pass.src ).kind;
-    }
-    return true;
+    return CaptureFate::Keep;
 }
 
-// A capture inside an inert quote region: call/operator/named-capture candidates are kept as declined facts, never edges. Heads,
-// special forms and non-call operators already failed their syntax filters. Bare AST names remain variable-shaped syntax unless
-// they explicitly name a function capture. true: the capture was in such a region (consumed here).
-inline bool consumeInertQuoteCapture( const TagsPass& pass, const TagsMatch& m )
+// A capture inside an inert quote region ends here: call/operator/named-capture candidates are kept as declined facts, never edges
+// (Emitted); every other capture is dropped. Heads, special forms and non-call operators already failed their syntax filters. Bare
+// AST names remain variable-shaped syntax unless they explicitly name a function capture.
+inline CaptureFate inertQuoteFate( const TagsFile& file, TagsSinks& sinks, const TagsMatch& m )
 {
-    if( !langFacts( pass.le.lang ).hasInertQuoteRegions || !elixirInert( m.roleNode, pass.src ) )
+    if( !langFacts( file.le.lang ).hasInertQuoteRegions || !elixirInert( m.roleNode, file.src ) )
     {
-        return false;
+        return CaptureFate::Keep;
     }
     const bool candidate = m.isRef && ( m.refCap == "reference.call" || m.refCap == "reference.operator"
-                                        || ( m.refCap == "reference.bare" && pass.elixir.namedCapture( m.name.node ) ) );
+                                        || ( m.refCap == "reference.bare" && file.elixir.namedCapture( m.name.node ) ) );
     if( !candidate )
     {
-        return true;
+        return CaptureFate::Drop;
     }
     RawRef r;
-    r.fileId    = pass.fileId;
+    r.fileId    = file.fileId;
     r.startByte = ts_node_start_byte( m.roleNode );
     r.line      = m.name.row + 1;
     r.lang      = Lang::Elixir;
     r.role      = RefRole::Inert;
-    auto [ count, known ] = elixirCallArity( m.roleNode, m.name.node, pass.src );
+    auto [ count, known ] = elixirCallArity( m.roleNode, m.name.node, file.src );
     if( m.refCap == "reference.operator" ) { count = elixirNodeIs( m.roleNode, "binary_operator" ) ? 2 : 1; known = true; }
     r.name = known ? elixirFunctionName( m.name.text, count ) : std::string( m.name.text );
-    pass.refs.push_back( std::move( r ) );
-    return true;
+    sinks.refs.push_back( std::move( r ) );
+    return CaptureFate::Emitted;
 }
 
 // Where a definition's code lives: the node its span covers, its body (null: a declaration), the function literal a name is bound
@@ -2209,24 +2250,9 @@ struct DefCodeNodes
     TSNode defNode {};
     TSNode body {};
     TSNode literal {};
-    bool   testMacroBlock  = false;   // LB-E: the def is TWO SIBLING nodes (testMacroBlockPartsOf)
+    bool   testMacroBlock  = false;   // LB-E: the def is TWO SIBLING nodes (testMacroBlockPartsOf): the macro statement and its block
     bool   spanThroughBody = false;   // the code this symbol owns lives in a SIBLING node: byte/row extents and complexity run through it
 };
-
-// LB-E testmacroblock: adopt the sibling compound_statement as the body and the title literal as the name BEFORE the shared
-// span/complexity steps. The span's endByte and the loc row window run past defNode's own end (no single node covers both
-// siblings). false: not a test macro block after all (dropGatedCapture already vetoed non-candidates — guard, don't assert).
-inline bool adoptTestMacroBlock( const TagsPass& pass, TagsMatch& m, DefCodeNodes& span )
-{
-    const TestMacroBlockParts parts = testMacroBlockPartsOf( m.roleNode, pass.src );
-    if( !parts.ok )
-    {
-        return false;
-    }
-    span.body = parts.body;
-    m.reseatName( parts.title, testMacroTitleOf( parts.title, pass.src ) );
-    return true;
-}
 
 // The declarator climb's STOP set: a type/namespace/file scope — a function's body never lives above one of these, so reaching
 // one means the role node is a prototype/declaration with no body (without this, an in-class method declaration would climb into
@@ -2262,7 +2288,7 @@ inline TSNode declarationWrapperOrNull( TSNode child ) noexcept
 
 // At the first ancestor owning a body: adopt it when the role node is its signature (outside the body) and not a body-less type
 // specifier; a body-less type specifier outside the body is a type use in the signature.
-inline DeclaratorClimb bodyOwnerClimb( TSNode owner, TSNode ownerBody, TSNode roleNode, bool bodylessTypeSpec )
+inline DeclaratorClimb adoptBodyOwnerOrTypeUse( TSNode owner, TSNode ownerBody, TSNode roleNode, bool bodylessTypeSpec )
 {
     const bool outsideBody = !spanContains( ownerBody, roleNode );
     if( outsideBody && !bodylessTypeSpec )
@@ -2307,7 +2333,7 @@ inline DeclaratorClimb climbDeclaratorToDefinition( TSNode roleNode, bool bodyle
         }
         if( const TSNode pb = fieldChild( p, NodeField::Body ); !ts_node_is_null( pb ) )
         {
-            return bodyOwnerClimb( p, pb, roleNode, bodylessTypeSpec );
+            return adoptBodyOwnerOrTypeUse( p, pb, roleNode, bodylessTypeSpec );
         }
         child = p;
         p     = parentOf( p );
@@ -2357,84 +2383,110 @@ inline TSNode positionalBodyOf( Lang lang, TSNode defNode )
     return body;
 }
 
-// A definition's span and body. defBodyNodeOf = the `body:` field, PLUS the macro-edges round's one addition: a #define's
-// replacement text (`value:` field) is adopted as a macro symbol's body, set before the climb so the climb is skipped for macros
-// — PLUS a name bound to a function literal (kFnLiteralBinding): the literal's body, with `literal` the node params/cx/nest read
-// from. Grammars whose @definition node already owns the body (class/struct/enum) don't climb.
+// A definition's code nodes. defBodyNodeOf = the `body:` field, PLUS the macro-edges round's one addition: a #define's replacement
+// text (`value:` field) is adopted as a macro symbol's body, set before the climb so the climb is skipped for macros — PLUS a name
+// bound to a function literal (kFnLiteralBinding): the literal's body, with `literal` the node params/cx/nest read from. Grammars
+// whose @definition node already owns the body (class/struct/enum) don't climb. LB-E: a test macro block's body is its sibling
+// block, so it never climbs either.
 //
 // A Var's span is its own declaration — never climb. The climb exists to find a FUNCTION's body; for a var it can only steal a
 // container's span (a Ruby class-level constant's parent chain is body_statement → class, and class owns a "body" field, so the
 // climb would hand the constant THE WHOLE CLASS — the exact Rust-method span bug the H4 W3 note describes). No-op for every
 // pre-existing Var capture (Swift/C#/Go/Python parents hit a scope-stop or the file root before any "body"-owning ancestor —
 // verified byte-identical on the gate corpora). A Field's span is its own field_declaration / defining assignment — the Var rule,
-// same reason. std::nullopt: the capture mints no definition (a test macro block without its parts, a type use in a signature).
-inline std::optional<DefCodeNodes> definitionSpanOf( const TagsPass& pass, TagsMatch& m )
+// same reason. std::nullopt: no definition — a body-less C/C++ specifier in a function's signature is a type use.
+inline std::optional<DefCodeNodes> definitionCodeOf( const TagsFile& file, const TagsMatch& m, const DefIdentity& id )
 {
-    const Lang         lang = pass.le.lang;
-    const DefBodyNodes own  = lang == Lang::Elixir ? DefBodyNodes{ elixirBody( m.roleNode, pass.src ), {}, m.roleNode }
-                                                   : defBodyNodeOf( m.roleNode, m.name.node, m.kind, lang );
-    DefCodeNodes span;
-    span.defNode        = own.span;
-    span.body           = own.body;
-    span.literal        = own.literal;
-    span.testMacroBlock = m.defCap == "definition.testmacroblock";
-    if( span.testMacroBlock && !adoptTestMacroBlock( pass, m, span ) )
+    const Lang         lang = file.le.lang;
+    const DefBodyNodes own  = lang == Lang::Elixir ? DefBodyNodes{ elixirBody( m.roleNode, file.src ), {}, m.roleNode }
+                                                   : defBodyNodeOf( m.roleNode, id.name.node, id.kind, lang );
+    DefCodeNodes code;
+    code.defNode        = own.span;
+    code.body           = own.body;
+    code.literal        = own.literal;
+    code.testMacroBlock = m.defCap == "definition.testmacroblock";
+    if( code.testMacroBlock )
     {
-        return std::nullopt;
+        code.body = testMacroBlockPartsOf( m.roleNode, file.src ).body;   // its parts were read whole: definitionIdentityOf
     }
-    if( ts_node_is_null( span.body ) && m.kind != SymKind::Var && m.kind != SymKind::Field && lang != Lang::Elixir )
+    if( ts_node_is_null( code.body ) && id.kind != SymKind::Var && id.kind != SymKind::Field && lang != Lang::Elixir )
     {
         const DeclaratorClimb climb = climbDeclaratorToDefinition( m.roleNode, isCFamilyTypeSpecifier( lang, m.roleNode ) );
         if( climb.typeUseInSignature )
         {
-            return std::nullopt;   // a body-less C/C++ specifier in a function's signature: a type use, never a definition
+            return std::nullopt;
         }
-        span.defNode = ts_node_is_null( climb.span ) ? span.defNode : climb.span;
-        span.body    = climb.body;
+        code.defNode = ts_node_is_null( climb.span ) ? code.defNode : climb.span;
+        code.body    = climb.body;
     }
 
     // MACRO-P1: a prototype adopts its trailing annotation's definition body, its span running THROUGH that sibling
-    const TSNode ownBody = span.body;
-    span.body            = annotatedSiblingBody( span.body, lang, m.kind, m.roleNode, pass.src );
-    bool siblingBody     = !ts_node_eq( span.body, ownBody );
-    if( ts_node_is_null( span.body ) )
+    const TSNode ownBody = code.body;
+    code.body            = annotatedSiblingBody( code.body, lang, id.kind, m.roleNode, file.src );
+    bool siblingBody     = !ts_node_eq( code.body, ownBody );
+    if( ts_node_is_null( code.body ) )
     {
-        span.body = positionalBodyOf( lang, span.defNode );
+        code.body = positionalBodyOf( lang, code.defNode );
     }
     // Dart's body is a SIBLING of the signature, so neither defBodyNodeOf nor the climb can find it and the span would stop at the
     // signature — see dartFollowingBody (ingest_relations.h) for the measurement and for why an abstract member still comes back null.
-    if( ts_node_is_null( span.body ) && lang == Lang::Dart )
+    if( ts_node_is_null( code.body ) && lang == Lang::Dart )
     {
-        span.body   = dartFollowingBody( span.defNode );
-        siblingBody = !ts_node_is_null( span.body );
+        code.body   = dartFollowingBody( code.defNode );
+        siblingBody = !ts_node_is_null( code.body );
     }
-    span.spanThroughBody = span.testMacroBlock || siblingBody;
-    return span;
+    code.spanThroughBody = code.testMacroBlock || siblingBody;
+    return code;
 }
 
-// The byte extents: the span (LB-E: through the sibling block), the name, the body. INDEX-ALIAS-CONST: a body-less alias row's
-// target start rides bodyByte to the model, which moves it to IngestResult::aliasTargets and keeps the whole declaration as the
-// signature (ingest_model.h rawDefIsAliasRow); 0 when the target is not a suffix.
-inline void fillDefinitionExtent( RawDef& d, const DefCodeNodes& span, std::uint32_t nameByte, std::uint32_t aliasTargetStart ) noexcept
+// The definition's extent — its byte span (LB-E: through the sibling block), name byte, body byte and line count (Q4 size smell:
+// physical LOC = span line count). MACRO-P1: a renamed annotation definition's span and rows start at the real function's own
+// declaration. INDEX-ALIAS-CONST: a body-less alias row's target start rides bodyByte to the model, which moves it to
+// IngestResult::aliasTargets and keeps the whole declaration as the signature (ingest_model.h rawDefIsAliasRow); 0 when the target
+// is not a suffix.
+inline void fillDefinitionExtent( RawDef& d, const DefCodeNodes& code, const DefIdentity& id, std::uint32_t aliasTargetStart ) noexcept
 {
-    d.startByte = ts_node_start_byte( span.defNode );
-    d.endByte   = span.spanThroughBody ? ts_node_end_byte( span.body ) : ts_node_end_byte( span.defNode );
-    d.nameByte  = nameByte;
-    d.bodyByte  = ts_node_is_null( span.body ) ? 0u : ts_node_start_byte( span.body );
-    if( d.bodyByte == 0 && aliasTargetStart > d.startByte && aliasTargetStart < d.endByte )
+    const std::uint32_t spanStart = ts_node_start_byte( code.defNode );
+    const TSNode        spanEnd   = code.spanThroughBody ? code.body : code.defNode;
+    const TSNode        realStart = ts_node_is_null( id.renamed.name ) ? TSNode{} : id.renamed.start;
+    d.endByte  = ts_node_end_byte( spanEnd );
+    d.nameByte = id.name.byte;
+    d.bodyByte = ts_node_is_null( code.body ) ? 0u : ts_node_start_byte( code.body );
+    if( d.bodyByte == 0 && aliasTargetStart > spanStart && aliasTargetStart < d.endByte )
     {
         d.bodyByte = aliasTargetStart;   // INDEX-ALIAS-CONST: the transport only (ingest_model.h rawDefIsAliasRow)
     }
+    if( !ts_node_is_null( realStart ) )
+    {
+        d.startByte = ts_node_start_byte( realStart );
+        d.loc       = ts_node_end_point( code.defNode ).row - ts_node_start_point( realStart ).row + 1u;
+        return;
+    }
+    const std::uint32_t startRow = ts_node_start_point( code.defNode ).row;
+    const std::uint32_t endRow   = ts_node_end_point( spanEnd ).row;
+    d.startByte = spanStart;
+    d.loc       = ( endRow >= startRow ) ? ( endRow - startRow + 1u ) : 1u;
 }
 
-// A callable's cc_walk facts (complexityOf) onto its definition: all 0 off a callable, where complexityOf did not run. The narrower
-// fields saturate on purpose — ppalt (model.h Symbol::ppAlt): a def past 65535 is beyond every triage threshold, and the attribute's
-// claim ("the body carries alternatives") is already made at 1; the nesting profile (model.h Symbol::humps/deepLoc): deepLoc is a
-// floor already, so a clamp there stays honest in the direction the attribute already claims; essential complexity (model.h
-// Symbol::ev) is already saturated inside ev_finalize, 0 for non-function kinds and outside evCountedLang, matching the emitters'
-// omission rule; QD-TANGLE's steering locals and dispatch share (model.h Symbol::steer, ::dispatchShare).
-inline void fillDefinitionComplexity( RawDef& d, const Complexity& c ) noexcept
+inline bool isCallableKind( SymKind kind ) noexcept
 {
+    return kind == SymKind::Function || kind == SymKind::Method;
+}
+
+// A callable's cc_walk facts (complexityOf) onto its definition. complexityOf runs on a callable only (and only with `shape`); off a
+// callable every fact is 0 — the zero Complexity below, which is what keeps ppAlt, maxNest, the nesting profile and ev absent on a
+// type. LB-E: a test macro block's body SIBLING is where the code lives — complexityOf walks INSIDE its root node, so handing it
+// defNode, the bare macro statement, would count nothing; a literal-bound name measures its LITERAL; every other def measures defNode.
+// The narrower fields saturate on purpose — ppalt (model.h Symbol::ppAlt): a def past 65535 is beyond every triage threshold, and the
+// attribute's claim ("the body carries alternatives") is already made at 1; the nesting profile (model.h Symbol::humps/deepLoc):
+// deepLoc is a floor already, so a clamp there stays honest in the direction the attribute already claims; essential complexity
+// (model.h Symbol::ev) is already saturated inside ev_finalize, 0 outside evCountedLang, matching the emitters' omission rule;
+// QD-TANGLE's steering locals and dispatch share (model.h Symbol::steer, ::dispatchShare).
+inline void fillDefinitionComplexity( RawDef& d, const TagsFile& file, const DefIdentity& id, const DefCodeNodes& code )
+{
+    const TSNode     measured = code.spanThroughBody ? code.body : ( ts_node_is_null( code.literal ) ? code.defNode : code.literal );
+    const Complexity c        = isCallableKind( id.kind ) && file.shape ? complexityOf( measured, file.src, file.le.lang )
+                                                                        : Complexity{ 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, {}, 0u, 0u, 0u };
     d.cx           = c.cx;
     d.ccx          = c.ccx;
     d.locals       = c.locals;   // Phase 1: floor count, C/C++ only (model.h localsCountedLang) — 0 elsewhere, never emitted there
@@ -2459,64 +2511,61 @@ inline std::uint16_t definitionParamCount( Lang lang, TSNode defNode, TSNode met
     return lang == Lang::Clojure ? clojureParams( defNode, src ) : paramCountOf( metricNode, literalBound );
 }
 
-// The definition's shape: complexity (LB-E: a testmacroblock's body SIBLING is where the code lives — complexityOf walks INSIDE its
-// root node, so handing it defNode, the bare macro statement, would count nothing; a literal-bound name measures its LITERAL; every
-// other def measures defNode), Q4 size smells (SIZE = master variable: physical LOC = span line count; param count + max nesting
-// for functions/methods only, 0 otherwise, absent in emit — all descriptive), the parameter shape, the in-file test-scope bit.
-inline void fillDefinitionShape( const TagsPass& pass, RawDef& d, const TagsMatch& m, const DefCodeNodes& span, const AnnotationRename& renamed )
+// The definition's parameter surface: how many (functions/methods only, 0 otherwise, absent in emit), the fewest a call can pass
+// and whether the count is exact (B2.2: one scan of the list). A minimum above the counted params (a literal-bound bare parameter
+// countParams cannot see) is not trusted. LB-E: a test macro block's parameter surface is the MACRO's business, not visible here —
+// claimed inexact so the resolver's arity narrowing never trusts params=0 on a test-title symbol. MACRO-P1: a renamed annotation
+// definition's list is the ANNOTATION's (`( mu_ )`); the real one was the empty `()` emptyCallInitName requires. B2.2 for an Elixir
+// def head: a clause's arity IS its parameter count (no variadic form), so `params` is call-comparable unless a `\\` default widens
+// the callable to more than one arity; cc_paramShape's language gate leaves it at 0, which made every Elixir caller unflaggable by
+// --edit-check (test/elixirnamearitycheck.sh arm C: run(x) -> run(x, y) must flag run(x) callers; run(x, y \\ 1) must flag none).
+inline void fillDefinitionParameters( RawDef& d, const TagsFile& file, const TagsMatch& m, const DefIdentity& id, const DefCodeNodes& code )
 {
-    const Lang   lang         = pass.le.lang;
-    const bool   fnOrMethod   = ( m.kind == SymKind::Function || m.kind == SymKind::Method );
-    const bool   literalBound = !ts_node_is_null( span.literal );
-    const TSNode metricNode   = literalBound ? span.literal : span.defNode;
-    fillDefinitionComplexity( d,
-                              fnOrMethod && pass.shape ? complexityOf( span.spanThroughBody ? span.body : metricNode, pass.src, lang )
-                                                       : Complexity{ 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, {}, 0u, 0u, 0u } );
-    const std::uint32_t startRow = ts_node_start_point( span.defNode ).row;
-    const std::uint32_t endRow   = ts_node_end_point( span.spanThroughBody ? span.body : span.defNode ).row;   // LB-E: rows through the sibling block
-    d.loc    = ( endRow >= startRow ) ? ( endRow - startRow + 1u ) : 1u;
-    d.params = fnOrMethod ? definitionParamCount( lang, span.defNode, metricNode, literalBound, pass.src ) : std::uint16_t( 0 );
-    // LB-E: a testmacroblock's parameter surface is the MACRO's business, not visible here — claim inexact so the resolver's arity
-    // narrowing never trusts params=0 on a test-title symbol. B2.2: the fixed-arity bit and the minimum (fewest arguments a call can
-    // pass) come from ONE scan of the list. A minimum above the counted params (a literal-bound bare parameter countParams cannot
-    // see) is not trusted.
-    const ParamShape paramShape = ( fnOrMethod && !span.testMacroBlock && lang != Lang::Clojure ) ? cc_paramShape( metricNode, lang, m.kind, pass.src ) : ParamShape{};
-    d.arityExact = paramShape.exact ? std::uint8_t( 1 ) : std::uint8_t( 0 );
-    d.paramsMin  = paramShape.minimum <= d.params ? paramShape.minimum : std::uint16_t( 0 );
-    applyAnnotationRename( d, renamed, span.defNode );   // MACRO-P1: the real function's parameters and start, not the annotation's
-    // L8: the in-file test-scope bit, for EVERY kind (a `#[cfg(test)] mod` and a `class TestFoo` are themselves symbols, and dropping
-    // the members while keeping the shell would be a worse answer than either). Runs on defNode, whose ancestors are the enclosing scopes.
-    d.testScope = span.testMacroBlock ? std::uint8_t( 1 ) : std::uint8_t( inFileTestScope( span.defNode, pass.src, lang ) );   // LB-E: a test macro IS the in-file convention
-    d.kind      = m.kind;
-    d.lang      = lang;
+    if( !ts_node_is_null( id.renamed.name ) )
+    {
+        d.params     = 0;
+        d.paramsMin  = 0;
+        d.arityExact = 1;
+        return;
+    }
+    const Lang       lang         = file.le.lang;
+    const bool       callable     = isCallableKind( id.kind );
+    const bool       literalBound = !ts_node_is_null( code.literal );
+    const TSNode     metricNode   = literalBound ? code.literal : code.defNode;
+    const auto       counted      = callable ? definitionParamCount( lang, code.defNode, metricNode, literalBound, file.src ) : std::uint16_t( 0 );
+    const ParamShape paramShape   = ( callable && !code.testMacroBlock && lang != Lang::Clojure ) ? cc_paramShape( metricNode, lang, id.kind, file.src ) : ParamShape{};
+    const bool       elixirHead   = lang == Lang::Elixir && m.keywordHead;
+    d.params     = counted;
+    d.paramsMin  = paramShape.minimum <= counted ? paramShape.minimum : std::uint16_t( 0 );
+    d.arityExact = ( elixirHead ? elixirHeadDefaultCount( m.roleNode, file.src ) == 0 : paramShape.exact ) ? std::uint8_t( 1 ) : std::uint8_t( 0 );
 }
 
 // An Elixir module attribute's definition name: a typed attribute (@type/@callback and kin) is named with its arity, any other
 // attribute is `@name`.
-inline std::string elixirAttributeDefName( std::string_view attribute, const TagsMatch& m )
+inline std::string elixirAttributeDefName( std::string_view attribute, const DefNameFacts& name )
 {
     if( !elixirTypedAttribute( attribute ) )
     {
-        return "@" + std::string( m.name.text );
+        return "@" + std::string( name.text );
     }
-    const TSNode  args  = elixirArguments( parentOf( m.name.node ) );
+    const TSNode  args  = elixirArguments( parentOf( name.node ) );
     std::uint32_t arity = 0;
     for( std::uint32_t i = 0; !ts_node_is_null( args ) && i < ts_node_named_child_count( args ); ++i )
     {
         arity += elixirNodeIs( ts_node_named_child( args, i ), "comment" ) ? 0u : 1u;
     }
-    return ( attribute == "callback" || attribute == "macrocallback" ? "@callback " : "@type " ) + elixirFunctionName( m.name.text, arity );
+    return ( attribute == "callback" || attribute == "macrocallback" ? "@callback " : "@type " ) + elixirFunctionName( name.text, arity );
 }
 
-// `defimpl P, for: T` — the @name capture is just the protocol alias, but the module Elixir generates is `P.T`, which is what the
-// impl's own defs carry as their scope. A protocol is an Interface, a module that defines a struct (or exception) a Struct.
-inline SymKind elixirModuleKind( const TagsPass& pass, TSNode roleNode, const std::string& module )
+// The kind an Elixir defimpl/defprotocol module is INDEXED as: a protocol is an Interface, a module that defines a struct (or
+// exception) a Struct, any other a Class.
+inline SymKind elixirModuleKind( const TagsFile& file, TSNode roleNode, const std::string& module )
 {
-    const SymKind kind = elixirTarget( roleNode, pass.src ) == "defprotocol" ? SymKind::Interface : SymKind::Class;
-    for( TSNode call : pass.elixir.calls )
+    const SymKind kind = elixirTarget( roleNode, file.src ) == "defprotocol" ? SymKind::Interface : SymKind::Class;
+    for( TSNode call : file.elixir.calls )
     {
-        const auto keyword = elixirTarget( call, pass.src );
-        if( ( keyword == "defstruct" || keyword == "defexception" ) && pass.elixir.scopeOf( call ) == module )
+        const auto keyword = elixirTarget( call, file.src );
+        if( ( keyword == "defstruct" || keyword == "defexception" ) && file.elixir.scopeOf( call ) == module )
         {
             return SymKind::Struct;
         }
@@ -2524,49 +2573,76 @@ inline SymKind elixirModuleKind( const TagsPass& pass, TSNode roleNode, const st
     return kind;
 }
 
-// Elixir's definition names: a static ExUnit title (interpolation was rejected by elixirKeepCapture), a module attribute, a
-// generated module. false: a module with no name to give it.
-inline bool nameElixirDefinition( const TagsPass& pass, RawDef& d, const TagsMatch& m )
+inline bool isExUnitTest( const TagsFile& file, const TagsMatch& m )
 {
-    if( elixirTarget( m.roleNode, pass.src ) == "test" )
-    {
-        d.name      = "test " + std::string( m.name.text.substr( 1, m.name.text.size() - 2 ) );
-        d.testScope = 1;
-        return true;
-    }
-    if( const std::string_view attribute = elixirAttribute( m.roleNode, pass.src ); !attribute.empty() )
-    {
-        d.name = elixirAttributeDefName( attribute, m );
-        return true;
-    }
-    if( m.kind != SymKind::Other )
-    {
-        return true;
-    }
-    d.name = pass.elixir.moduleName( m.roleNode );
-    if( d.name.empty() )
-    {
-        return false;
-    }
-    d.kind = elixirModuleKind( pass, m.roleNode, d.name );
-    return true;
+    return file.le.lang == Lang::Elixir && elixirTarget( m.roleNode, file.src ) == "test";
 }
 
-// The definition's name: the capture's (LB-E: a test title is a display string — see testMacroTitleOf), the file's stem for the
-// module's own CommonJS export function (lane js-def-naming, ingest_names.h isCjsModuleExportsItself), Elixir's own. false: the
-// capture mints no row (no stem to name an anonymous export by, as before; an unnamed Elixir module).
-inline bool nameDefinition( const TagsPass& pass, RawDef& d, const TagsMatch& m, bool testMacroBlock )
+// The name a definition is indexed under, and its kind there. Drop: the capture mints no row.
+struct IndexedName
 {
-    d.name = testMacroBlock ? std::string( m.name.text ) : defNameFromCapture( pass.le.lang, m.name.text );
-    if( m.defCap == "definition.cjsexport" && isCjsModuleExportsItself( m.name.node, pass.src ) )
+    std::string name;
+    SymKind     kind = SymKind::Other;
+    CaptureFate fate = CaptureFate::Keep;
+};
+
+// An Elixir definition's index name and kind. A def head (#355: the match's own @_keyword capture, decided by tags.scm, not a C++
+// keyword list) is named with its arity (`f/2`, `params`); a static ExUnit title (interpolation was rejected by elixirKeepCapture) is
+// `test <title>`; a module attribute is elixirAttributeDefName's; a `defimpl P, for: T` — whose @name capture is just the protocol
+// alias — is the module Elixir generates, `P.T`, which is what the impl's own defs carry as their scope (indexed as
+// elixirModuleKind's kind; Drop when it has no name). Anything else keeps the capture's name.
+inline IndexedName elixirIndexedName( const TagsFile& file, const TagsMatch& m, const DefIdentity& id, std::uint16_t params )
+{
+    const bool             exUnitTest      = isExUnitTest( file, m );
+    const std::string_view attribute       = exUnitTest ? std::string_view{} : elixirAttribute( m.roleNode, file.src );
+    const bool             generatedModule = !exUnitTest && attribute.empty() && id.kind == SymKind::Other;
+    std::string            module          = generatedModule ? file.elixir.moduleName( m.roleNode ) : std::string{};
+    if( generatedModule && module.empty() )
     {
-        if( pass.fileStem.empty() )
-        {
-            return false;
-        }
-        d.name = std::string( pass.fileStem );
+        return IndexedName{ .fate = CaptureFate::Drop };
     }
-    return pass.le.lang != Lang::Elixir || nameElixirDefinition( pass, d, m );
+    const SymKind kind = generatedModule ? elixirModuleKind( file, m.roleNode, module ) : id.kind;
+    if( m.keywordHead )
+    {
+        return IndexedName{ elixirFunctionName( id.name.text, params ), kind };
+    }
+    if( exUnitTest )
+    {
+        return IndexedName{ "test " + std::string( id.name.text.substr( 1, id.name.text.size() - 2 ) ), kind };
+    }
+    if( !attribute.empty() )
+    {
+        return IndexedName{ elixirAttributeDefName( attribute, id.name ), kind };
+    }
+    return IndexedName{ generatedModule ? std::move( module ) : defNameFromCapture( Lang::Elixir, id.name.text ), kind };
+}
+
+// The definition's index name and kind: the identity's name (LB-E: a test title is a display string — see testMacroTitleOf), the
+// file's stem for the module's own CommonJS export function (lane js-def-naming, ingest_names.h isCjsModuleExportsItself; Drop when
+// there is no stem to name it by, as before), Elixir's own (elixirIndexedName).
+inline IndexedName indexedNameOf( const TagsFile& file, const TagsMatch& m, const DefIdentity& id, const DefCodeNodes& code, std::uint16_t params )
+{
+    if( file.le.lang == Lang::Elixir )
+    {
+        return elixirIndexedName( file, m, id, params );
+    }
+    if( m.defCap == "definition.cjsexport" && isCjsModuleExportsItself( id.name.node, file.src ) )
+    {
+        return file.fileStem.empty() ? IndexedName{ .fate = CaptureFate::Drop } : IndexedName{ std::string( file.fileStem ), id.kind };
+    }
+    return IndexedName{ code.testMacroBlock ? std::string( id.name.text ) : defNameFromCapture( file.le.lang, id.name.text ), id.kind };
+}
+
+// L8: the in-file test-scope bit, for EVERY kind (a `#[cfg(test)] mod` and a `class TestFoo` are themselves symbols, and dropping
+// the members while keeping the shell would be a worse answer than either). Read on defNode, whose ancestors are the enclosing
+// scopes. LB-E: a test macro IS the in-file convention; so is an ExUnit `test`.
+inline std::uint8_t definitionTestScope( const TagsFile& file, const TagsMatch& m, const DefCodeNodes& code )
+{
+    if( code.testMacroBlock || isExUnitTest( file, m ) )
+    {
+        return 1;
+    }
+    return std::uint8_t( inFileTestScope( code.defNode, file.src, file.le.lang ) );
 }
 
 // A FUNCTION bound inside another function's body records that function's span (ingest_names.h enclosingFunctionScope): graph.h
@@ -2574,197 +2650,198 @@ inline bool nameDefinition( const TagsPass& pass, RawDef& d, const TagsMatch& m,
 // defNode climbed from its declarator (the role node) to the function_definition, which must not read as the function enclosing
 // itself; a multi-name binding's defNode narrowed to one declarator, whose declaration (the role node) holds no scope node and is
 // not a 20k-child list to rescan per name.
-inline void noteEnclosingFunctionScope( const TagsPass& pass, RawDef& d, const TagsMatch& m, TSNode defNode )
+inline void noteEnclosingFunctionScope( RawDef& d, const TagsFile& file, const TagsMatch& m, const DefIdentity& id, TSNode defNode )
 {
-    if( !pass.full || m.kind != SymKind::Function || bindsOutsideItsFunction( m.roleNode, pass.le.lang ) )
+    if( !file.full || id.kind != SymKind::Function || bindsOutsideItsFunction( m.roleNode, file.le.lang ) )
     {
         return;
     }
     const bool    defIsOuter = ts_node_start_byte( defNode ) <= ts_node_start_byte( m.roleNode ) && ts_node_end_byte( defNode ) >= ts_node_end_byte( m.roleNode );
-    const FnScope fnScope    = enclosingFunctionScope( pass.root, defIsOuter ? defNode : m.roleNode );
+    const FnScope fnScope    = enclosingFunctionScope( file.root, defIsOuter ? defNode : m.roleNode );
     d.fnScopeStart = fnScope.start;
     d.fnScopeEnd   = fnScope.end;
 }
 
-// `defdelegate f(x), to: M, as: g`: the delegating clause calls M.g with its own arity.
-inline void emitElixirDelegate( const TagsPass& pass, const RawDef& d, const TagsMatch& m )
+// A C++ definition's canonical scope (E#4): out-of-line `A::b` → "A" (`Box<T>::grow` (primary) → "Box"; a specialization keeps
+// its id), else the enclosing class/namespace.
+inline std::string cppDefinitionScope( TSNode nameNode, std::string_view src )
 {
-    RawRef delegated;
-    delegated.fileId = pass.fileId; delegated.startByte = d.startByte; delegated.line = d.line;
-    delegated.lang = pass.le.lang; delegated.recv = RecvKind::ElixirModule;
-    delegated.qualifier = pass.elixir.moduleOf( elixirKeywordValue( m.roleNode, "to:", pass.src ), m.roleNode );
-    const auto as = nodeTextOf( elixirKeywordValue( m.roleNode, "as:", pass.src ), pass.src );
-    delegated.name = elixirFunctionName( as.starts_with( ":" ) ? as.substr( 1 ) : m.name.text, d.params );
-    delegated.argCount = d.params; delegated.argCountKnown = true;
-    if( !delegated.qualifier.empty() ) { pass.refs.push_back( std::move( delegated ) ); }
+    std::string scope = qualifierOfDefinition( nameNode, src );
+    return scope.empty() ? enclosingScopeOf( nameNode, src ) : scope;
 }
 
-// An Elixir definition's scope, and for a def head (#355: the match's own @_keyword capture, decided by tags.scm, not a C++ keyword
-// list) its arity-qualified name. B2.2 for Elixir: a clause's arity IS its parameter count (no variadic form), so `params` is
-// call-comparable unless a `\\` default widens the callable to more than one arity. cc_paramShape's language gate leaves this at 0,
-// which made every Elixir caller unflaggable by --edit-check (test/elixirnamearitycheck.sh arm C: run(x) -> run(x, y) must flag
-// run(x) callers; run(x, y \\ 1) must flag none).
-inline void scopeElixirDefinition( const TagsPass& pass, RawDef& d, const TagsMatch& m )
+// The definition's scope, per language ("" where the language records none).
+inline std::string definitionScopeOf( const TagsFile& file, const TagsMatch& m, const DefIdentity& id )
 {
-    d.scope = m.kind == SymKind::Other ? std::string{} : pass.elixir.scopeOf( m.roleNode );
-    if( !m.keywordHead )
+    const Lang lang = file.le.lang;
+    if( lang == Lang::Cpp )
+    {
+        return cppDefinitionScope( id.name.node, file.src );
+    }
+    if( enumTableAt( kDefScopeWalkerOfLang, lang, DefScopeWalker::None ) != DefScopeWalker::None )
+    { // Python, Go, Rust, Kotlin: the language's row in ingest_names.h kDefScopeWalkerOfLang
+        return defScopeOf( lang, id.name.node, file.src );
+    }
+    if( lang == Lang::Elixir )
+    {
+        return id.kind == SymKind::Other ? std::string{} : file.elixir.scopeOf( m.roleNode );
+    }
+    if( lang == Lang::Ruby )
+    { // enclosing class/module → id= addressability, per-class overload sets, editCheckImplicitReceiver
+        return rubyEnclosingScopeOf( id.name.node, file.src );   // (test/rubyscopecheck.sh)
+    }
+    if( ( lang == Lang::JavaScript || lang == Lang::TypeScript ) && m.defCap == "definition.protomethod" )
+    { // only the five built-in ctors: every Foo.prototype.bar gaining sc= would mint a new
+      // canonical id and move quality baselines (node lib/ has ~163 anonymous protomethods)
+        const std::string_view ctor = prototypeCtorName( id.name.node, file.src );
+        return isJsTsBuiltinCtor( ctor ) ? std::string( ctor ) : std::string{};
+    }
+    return std::string{};
+}
+
+// `defdelegate f(x), to: M, as: g`: the delegating clause calls M.g with its own arity.
+inline void emitElixirDelegate( const TagsFile& file, TagsSinks& sinks, const RawDef& d, const TagsMatch& m, const DefIdentity& id )
+{
+    RawRef delegated;
+    delegated.fileId = file.fileId; delegated.startByte = d.startByte; delegated.line = d.line;
+    delegated.lang = file.le.lang; delegated.recv = RecvKind::ElixirModule;
+    delegated.qualifier = file.elixir.moduleOf( elixirKeywordValue( m.roleNode, "to:", file.src ), m.roleNode );
+    const auto as = nodeTextOf( elixirKeywordValue( m.roleNode, "as:", file.src ), file.src );
+    delegated.name = elixirFunctionName( as.starts_with( ":" ) ? as.substr( 1 ) : id.name.text, d.params );
+    delegated.argCount = d.params; delegated.argCountKnown = true;
+    if( !delegated.qualifier.empty() ) { sinks.refs.push_back( std::move( delegated ) ); }
+}
+
+// An Elixir def head's own facts, read off the finished definition: its callable (and default-arity) binds, and a defdelegate's call.
+inline void emitElixirHeadFacts( const TagsFile& file, TagsSinks& sinks, const RawDef& d, const TagsMatch& m, const DefIdentity& id )
+{
+    if( file.le.lang != Lang::Elixir || !m.keywordHead )
     {
         return;
     }
-    d.name       = elixirFunctionName( m.name.text, d.params );
-    d.arityExact = elixirHeadDefaultCount( m.roleNode, pass.src ) == 0 ? std::uint8_t( 1 ) : std::uint8_t( 0 );
-    elixirDefinitionFacts( d, m.roleNode, pass.src, pass.binds, pass.elixir.keywords );
-    if( elixirTarget( m.roleNode, pass.src ) == "defdelegate" )
+    elixirDefinitionFacts( d, m.roleNode, file.src, sinks.binds, file.elixir.keywords );
+    if( elixirTarget( m.roleNode, file.src ) == "defdelegate" )
     {
-        emitElixirDelegate( pass, d, m );
+        emitElixirDelegate( file, sinks, d, m, id );
     }
 }
 
-// A C++ definition's canonical scope (E#4): out-of-line `A::b` → "A", else the enclosing class/namespace.
-inline void scopeCppDefinition( RawDef& d, TSNode nameNode, std::string_view src )
+// A Ruby method defined on the class object (`def self.m`, `class << self`): its bind (test/rubyclassrecvcheck.sh).
+inline void emitRubyClassSideBind( const TagsFile& file, TagsSinks& sinks, const RawDef& d, const DefIdentity& id, TSNode defNode )
 {
-    d.scope = qualifierOfDefinition( nameNode, src );   // `Box<T>::grow` (primary) → "Box"; a specialization keeps its id
-    if( d.scope.empty() )
+    if( file.le.lang == Lang::Ruby && isCallableKind( id.kind ) )
     {
-        d.scope = enclosingScopeOf( nameNode, src );
-    }
-    // #150: is this def genuinely INSIDE namespace std, at ANY nesting depth — not just a def
-    // whose immediate scope happens to spell a segment std also uses? See Symbol::scopeRootsStd.
-    d.scopeRootsStd = cppDefinitionRootsStd( nameNode, src ) ? std::uint8_t( 1 ) : std::uint8_t( 0 );
-}
-
-// The definition's scope, per language.
-inline void scopeDefinition( const TagsPass& pass, RawDef& d, const TagsMatch& m, TSNode defNode )
-{
-    const Lang lang = pass.le.lang;
-    if( lang == Lang::Cpp )
-    {
-        scopeCppDefinition( d, m.name.node, pass.src );
-    }
-    else if( enumTableAt( kDefScopeWalkerOfLang, lang, DefScopeWalker::None ) != DefScopeWalker::None )
-    { // Python, Go, Rust, Kotlin: the language's row in ingest_names.h kDefScopeWalkerOfLang
-        d.scope = defScopeOf( lang, m.name.node, pass.src );
-    }
-    else if( lang == Lang::Elixir )
-    {
-        scopeElixirDefinition( pass, d, m );
-    }
-    else if( lang == Lang::Ruby )
-    { // enclosing class/module → id= addressability, per-class overload sets, editCheckImplicitReceiver
-        d.scope = rubyEnclosingScopeOf( m.name.node, pass.src );   // (test/rubyscopecheck.sh)
-        if( m.kind == SymKind::Method || m.kind == SymKind::Function )
-        {
-            rubyNoteClassSideDef( defNode, pass.fileId, d.name, pass.src, pass.binds );   // a class object's method (test/rubyclassrecvcheck.sh)
-        }
-    }
-    else if( ( lang == Lang::JavaScript || lang == Lang::TypeScript ) && m.defCap == "definition.protomethod" )
-    { // only the five built-in ctors: every Foo.prototype.bar gaining sc= would mint a new
-      // canonical id and move quality baselines (node lib/ has ~163 anonymous protomethods)
-        const std::string_view ctor = prototypeCtorName( m.name.node, pass.src );
-        if( isJsTsBuiltinCtor( ctor ) )
-        {
-            d.scope = std::string( ctor );
-        }
+        rubyNoteClassSideDef( defNode, file.fileId, d.name, file.src, sinks.binds );
     }
 }
 
-// The reference edges a definition mints (TagsCapture::Full only): a type's IS-A and HAS-A edges, a macro's body calls.
-inline void captureDefinitionEdges( const TagsPass& pass, const TagsMatch& m, TSNode defNode )
+// The reference edges a definition mints (TagsCapture::Full only): a type's IS-A and HAS-A edges, a macro's body calls. On the
+// identity's kind — an Elixir module indexed as a Class/Struct/Interface is an Other capture here and mints none.
+inline void captureDefinitionEdges( const TagsFile& file, TagsSinks& sinks, const TagsMatch& m, const DefIdentity& id, TSNode defNode )
 {
-    const Lang lang = pass.le.lang;
-    if( m.kind == SymKind::Class || isStructOrNamedType( m.kind ) || m.kind == SymKind::Interface )
+    const Lang lang = file.le.lang;
+    if( id.kind == SymKind::Class || isStructOrNamedType( id.kind ) || id.kind == SymKind::Interface )
     {
         // #446: a language on the bases-as-captures port reads its bases through the
         // @reference.base reader (LangFacts::basesAsCaptures; C++ is the first). The
         // others keep the walk; C++'s own walk survives for captureSpecializationHeader.
         if( !langFacts( lang ).basesAsCaptures )
         {
-            captureBases( defNode, pass.fileId, lang, pass.src, pass.refs );    // IS-A: inheritance edges (derived → base)
+            captureBases( defNode, file.fileId, lang, file.src, sinks.refs );    // IS-A: inheritance edges (derived → base)
         }
         if( m.defCap == "definition.classfactory" )               // lane lego-transitive (M2): the factory's receiver is the base
         {
-            emitBaseRef( jsClassFactoryReceiver( m.name.node, pass.src ), pass.fileId, lang, pass.src, pass.refs, defNode );
+            emitBaseRef( jsClassFactoryReceiver( id.name.node, file.src ), file.fileId, lang, file.src, sinks.refs, defNode );
         }
-        captureFields( defNode, pass.fileId, lang, pass.src, pass.refs );   // HAS-A: member-variable type edges (S5-E)
+        captureFields( defNode, file.fileId, lang, file.src, sinks.refs );   // HAS-A: member-variable type edges (S5-E)
     }
-    else if( m.kind == SymKind::Macro )
+    else if( id.kind == SymKind::Macro )
     {
-        captureMacroBodyCalls( m.roleNode, pass.fileId, lang, pass.src, pass.refs );   // macro-edges: the graph connects THROUGH the macro
+        captureMacroBodyCalls( m.roleNode, file.fileId, lang, file.src, sinks.refs );   // macro-edges: the graph connects THROUGH the macro
         if( langFacts( lang ).bangMacros )   // Rust: `$crate` exists only where `name!` macros do
         {
-            captureRustTranscriberMacroCalls( m.roleNode, pass.fileId, pass.src, pass.refs );   // RUST-MACRO-PATH: `$crate::m!` in a transcriber
+            captureRustTranscriberMacroCalls( m.roleNode, file.fileId, file.src, sinks.refs );   // RUST-MACRO-PATH: `$crate::m!` in a transcriber
         }
     }
 }
 
-// The definition arm: span, extents, shape, name, linkage, function scope, scope and parse-recovery bits into one RawDef, then
-// (Full) the edges it mints. `renamed`: MACRO-P1's annotation rename; `aliasTargetStart`: INDEX-ALIAS-CONST's written target.
-void captureDefinition( const TagsPass& pass, TagsMatch& m, const AnnotationRename& renamed, std::uint32_t aliasTargetStart )
+// The definition arm: one RawDef, each field written by exactly one step — extent, complexity, parameters, name and kind, test scope,
+// linkage, enclosing function, scope, parse-recovery bits — then its own binds and calls, the row, and (Full) the edges it mints.
+// `aliasTargetStart`: INDEX-ALIAS-CONST's written target (aliasTargetStartOf).
+inline void captureDefinition( const TagsFile& file, TagsSinks& sinks, const TagsMatch& m, const DefIdentity& id, std::uint32_t aliasTargetStart )
 {
-    if( pass.le.lang == Lang::Elixir && m.defCap == "definition.attribute" ) { m.kind = SymKind::Var; }
-    const std::optional<DefCodeNodes> span = definitionSpanOf( pass, m );
-    if( !span )
+    const std::optional<DefCodeNodes> code = definitionCodeOf( file, m, id );
+    if( !code )
     {
-        return;
+        return;   // a body-less C/C++ specifier in a function's signature: a type use, never a definition
     }
     RawDef d;
-    d.fileId = pass.fileId;
-    d.line   = m.name.row + 1;   // the identifier's line — most accurate, dedup-stable (a test macro block's: its title's, re-seated above)
-    fillDefinitionExtent( d, *span, m.name.byte, aliasTargetStart );
-    fillDefinitionShape( pass, d, m, *span, renamed );
-    if( !nameDefinition( pass, d, m, span->testMacroBlock ) )
+    d.fileId = file.fileId;
+    d.lang   = file.le.lang;
+    d.line   = id.name.row + 1;   // the identifier's line — most accurate, dedup-stable (a test macro block's: its title's)
+    fillDefinitionExtent( d, *code, id, aliasTargetStart );
+    fillDefinitionComplexity( d, file, id, *code );
+    fillDefinitionParameters( d, file, m, id, *code );
+    IndexedName indexed = indexedNameOf( file, m, id, *code, d.params );
+    if( indexed.fate != CaptureFate::Keep )
     {
         return;
     }
+    d.name      = std::move( indexed.name );
+    d.kind      = indexed.kind;
+    d.testScope = definitionTestScope( file, m, *code );
     // Internal linkage (model.h Symbol::internalLinkage): C and C++ only, read off defNode — the node that owns
     // the storage class and whose ancestors are the enclosing namespaces (ingest_names.h::cppInternalLinkage).
-    d.internalLinkage = internalLinkageBit( pass.le.lang, span->defNode, pass.src );
-    noteEnclosingFunctionScope( pass, d, m, span->defNode );
-    scopeDefinition( pass, d, m, span->defNode );
+    d.internalLinkage = internalLinkageBit( file.le.lang, code->defNode, file.src );
+    noteEnclosingFunctionScope( d, file, m, id, code->defNode );
+    d.scope = definitionScopeOf( file, m, id );
+    // #150: is this def genuinely INSIDE namespace std, at ANY nesting depth — not just a def
+    // whose immediate scope happens to spell a segment std also uses? See Symbol::scopeRootsStd.
+    d.scopeRootsStd = file.le.lang == Lang::Cpp && cppDefinitionRootsStd( id.name.node, file.src ) ? std::uint8_t( 1 ) : std::uint8_t( 0 );
     // extent honesty: did the parse RECOVER this def's container or kind? Only asked in a file whose root
     // holds an error (fileHasError, one O(1) flag test per file) — see parseRecoveredBits.
-    d.recovered = pass.fileHasError ? parseRecoveredBits( span->defNode, m.kind, pass.le.lang, d.scope.empty() ) : std::uint8_t( 0 );
-    pass.defs.push_back( std::move( d ) );
-    if( pass.full )   // TagsCapture::DefinitionsOnly: the reference edges feed no definition
+    d.recovered = file.fileHasError ? parseRecoveredBits( code->defNode, id.kind, file.le.lang, d.scope.empty() ) : std::uint8_t( 0 );
+    emitRubyClassSideBind( file, sinks, d, id, code->defNode );
+    emitElixirHeadFacts( file, sinks, d, m, id );
+    sinks.defs.push_back( std::move( d ) );
+    if( file.full )   // TagsCapture::DefinitionsOnly: the reference edges feed no definition
     {
-        captureDefinitionEdges( pass, m, span->defNode );
+        captureDefinitionEdges( file, sinks, m, id, code->defNode );
     }
 }
 
-// The reference captures that are not a plain use-site. true: consumed here — emitted as their own fact, or dropped.
-inline bool consumeSpecialReference( const TagsPass& pass, const TagsMatch& m )
+// The reference captures that are not a plain use-site, each ending the match: an element access names its receiver class's
+// subscript operator, a Ruby mixin and a base-clause type are base edges (Emitted); a C++ cast keyword, an intrinsic JSX tag and a
+// using-DIRECTIVE are no reference at all (Drop). Keep: a plain use-site.
+inline CaptureFate specialReferenceFate( const TagsFile& file, TagsSinks& sinks, const TagsMatch& m )
 {
-    const Lang lang = pass.le.lang;
+    const Lang lang = file.le.lang;
     // An element access: @name is its RECEIVER, and the site names the receiver class's subscript operator
     // method (ingest_binds.h subscriptOperatorRef) — never a call by itself (RefRole::Subscript).
     if( m.refCap == "reference.subscript" )
     {
-        if( std::optional<RawRef> sub = subscriptOperatorRef( m.roleNode, m.name.node, pass.fileId, lang, pass.src ) )
+        std::optional<RawRef> sub = subscriptOperatorRef( m.roleNode, m.name.node, file.fileId, lang, file.src );
+        if( !sub )
         {
-            pass.refs.push_back( std::move( *sub ) );
+            return CaptureFate::Drop;
         }
-        return true;
+        sinks.refs.push_back( std::move( *sub ) );
+        return CaptureFate::Emitted;
     }
     // H4: a C++ cast keyword is not a call — see isCppCastKeyword. Valid input, skipped, no alert.
-    if( lang == Lang::Cpp && isCppCastKeyword( m.name.text ) )
-    {
-        return true;
-    }
     // #285: an intrinsic JSX tag (`<div>`, `<h1>`) is not a call — see isJsxIntrinsicTagIdentifier.
     // Valid input, skipped, no alert; a qualified (`<Foo.Bar />`) or namespaced (`<svg:rect />`)
     // tag never reaches this test (see that function's note for why).
-    if( ( lang == Lang::TypeScript || lang == Lang::JavaScript ) && isJsxIntrinsicTagIdentifier( m.roleNode, m.name.node, m.name.text ) )
-    {
-        return true;
-    }
     // using-declaration re-exports (r9 loss bucket 1): @reference.import marks the C++
     // `using ns::name;` tags pattern. The site becomes a role="import" use-site of the target
     // (never a call edge — graph.h admits Call+Macro only), and the grammar KEYWORD forms
     // (`using namespace ns;` / `using enum E;`) are dropped here at capture time, where the
     // query predicate a tags pattern cannot express IS enforceable (see the helper's note).
-    if( m.refCap == "reference.import" && usingDeclarationIsDirective( m.roleNode ) )
+    if( ( lang == Lang::Cpp && isCppCastKeyword( m.name.text ) )
+        || ( ( lang == Lang::TypeScript || lang == Lang::JavaScript ) && isJsxIntrinsicTagIdentifier( m.roleNode, m.name.node, m.name.text ) )
+        || ( m.refCap == "reference.import" && usingDeclarationIsDirective( m.roleNode ) ) )
     {
-        return true;
+        return CaptureFate::Drop;
     }
     // family 4 / slice 4a: a @reference.mixin capture is Ruby's `include`/`extend`/`prepend` — the shape
     // lives in queries/ruby/tags.scm, so the capture IS the language gate and no Lang:: branch is spent
@@ -2775,8 +2852,8 @@ inline bool consumeSpecialReference( const TagsPass& pass, const TagsMatch& m )
     // separate match.
     if( m.refCap == "reference.mixin" )
     {
-        emitCapturedRubyMixinBase( m.roleNode, m.name.node, pass.fileId, lang, pass.src, pass.refs );
-        return true;
+        emitCapturedRubyMixinBase( m.roleNode, m.name.node, file.fileId, lang, file.src, sinks.refs );
+        return CaptureFate::Emitted;
     }
     // #446: a @reference.base capture is a base-clause type on the class-def path —
     // queries/<lang>/tags.scm names the clause's type node, so the capture IS the language
@@ -2784,55 +2861,55 @@ inline bool consumeSpecialReference( const TagsPass& pass, const TagsMatch& m )
     // the captureBases walk passed; C++ is the first language on this capture.
     if( m.refCap == "reference.base" )
     {
-        emitBaseRef( m.name.node, pass.fileId, lang, pass.src, pass.refs, parentOf( m.roleNode ) );
-        return true;
+        emitBaseRef( m.name.node, file.fileId, lang, file.src, sinks.refs, parentOf( m.roleNode ) );
+        return CaptureFate::Emitted;
     }
-    return false;
+    return CaptureFate::Keep;
 }
 
-// An Elixir reference's module, role and arity-qualified name. false: `r` is finished here — an attribute read pushed as its own
-// fact, or a call whose module or arity is unknown (dropped).
-inline bool qualifyElixirReference( const TagsPass& pass, const TagsMatch& m, RawRef& r )
+// An Elixir reference's module, role and arity-qualified name. Emitted: an attribute read, pushed as its own fact. Drop: a call
+// whose module or arity is unknown. Keep: `r` is qualified and goes on.
+inline CaptureFate qualifyElixirReference( const TagsFile& file, TagsSinks& sinks, const TagsMatch& m, RawRef& r )
 {
-    r.qualifier = pass.elixir.scopeOf( m.roleNode );
+    r.qualifier = file.elixir.scopeOf( m.roleNode );
     if( m.refCap == "reference.attribute" )
     {
         r.role = RefRole::Read; r.name = "@" + std::string( m.name.text );
-        pass.refs.push_back( std::move( r ) );
-        return false;
+        sinks.refs.push_back( std::move( r ) );
+        return CaptureFate::Emitted;
     }
     const TSNode target = fieldChild( m.roleNode, NodeField::Target );
     if( !ts_node_is_null( target ) && kindIs( ts_node_type( target ), "dot" ) )
     {
         const TSNode receiver = fieldChild( target, NodeField::Left );
-        r.qualifier = pass.elixir.moduleOf( receiver, m.roleNode );
-        if( r.qualifier.empty() ) { return false; }
+        r.qualifier = file.elixir.moduleOf( receiver, m.roleNode );
+        if( r.qualifier.empty() ) { return CaptureFate::Drop; }
         // `__MODULE__` spelled, or an alias of it (`alias __MODULE__, as: Current`): the receiver names the
         // enclosing module, and the reference is re-attributed per implementation of a multi-target defimpl
-        r.recv = nodeTextOf( receiver, pass.src ).starts_with( "__MODULE__" ) || pass.elixir.selfRelativeAlias( receiver, m.roleNode )
+        r.recv = nodeTextOf( receiver, file.src ).starts_with( "__MODULE__" ) || file.elixir.selfRelativeAlias( receiver, m.roleNode )
                ? RecvKind::ElixirSelfModule : RecvKind::ElixirModule;
     }
-    auto [ count, known ] = elixirCallArity( m.roleNode, m.name.node, pass.src );
+    auto [ count, known ] = elixirCallArity( m.roleNode, m.name.node, file.src );
     if( m.refCap == "reference.operator" ) { count = elixirNodeIs( m.roleNode, "binary_operator" ) ? 2 : 1; known = true; }
-    if( !known ) { return false; }
+    if( !known ) { return CaptureFate::Drop; }
     r.argCount = count; r.argCountKnown = true;
     r.name = elixirFunctionName( m.name.text, count );
-    return true;
+    return CaptureFate::Keep;
 }
 
 // A C++ or Rust reference's qualifier as written. Returns RULE3-MEMBER-GUARD fix 4's Rust path-call qualifier as written, when
 // longer than one segment ("" otherwise) — set by readReceiverFacts once the receiver fields are.
-inline std::string qualifyPathReference( const TagsPass& pass, const TagsMatch& m, RawRef& r )
+inline std::string qualifyPathReference( const TagsFile& file, const TagsMatch& m, RawRef& r )
 {
-    const Lang  lang = pass.le.lang;
+    const Lang  lang = file.le.lang;
     std::string rustWritten;
     if( lang == Lang::Cpp )
     {
-        r.qualifier = qualifierOf( m.name.node, pass.src ); // `A::b()` → "A" (E#4 canonical resolve)
+        r.qualifier = qualifierOf( m.name.node, file.src ); // `A::b()` → "A" (E#4 canonical resolve)
         // #150: the FULL written chain's root, BEFORE the H4 re-split below overwrites r.qualifier
         // with the immediate segment only (`std::ranges::move` loses "std", keeps "ranges") — see
         // Reference::qualifierRootsStd and graph.h::keepStdQualifiedCandidates.
-        r.qualifierRootsStd = cppQualifiedChainRootsStd( m.name.node, pass.src );
+        r.qualifierRootsStd = cppQualifiedChainRootsStd( m.name.node, file.src );
         cppResplitRefName( r, m.name.text );            // H4 RE-SPLIT at 3+ segments, operator tails, `template` disambiguator
     }
     else if( langFacts( lang ).bangMacros && r.role == RefRole::Macro )
@@ -2842,16 +2919,16 @@ inline std::string qualifyPathReference( const TagsPass& pass, const TagsMatch& 
         if( !ts_node_is_null( parent ) && kindIs( ts_node_type( parent ), "scoped_identifier" ) )
         {
             std::string qualifier;
-            rustMacroPathOf( nodeTextOf( fieldChild( parent, NodeField::Path ), pass.src ), qualifier, rustWritten );
+            rustMacroPathOf( nodeTextOf( fieldChild( parent, NodeField::Path ), file.src ), qualifier, rustWritten );
             r.qualifier = qualifier;
         }
     }
     else if( lang == Lang::Rust )
     {
-        r.qualifier = rustQualifierOf( m.name.node, pass.src ); // H4: `Widget::new()` → "Widget"
+        r.qualifier = rustQualifierOf( m.name.node, file.src ); // H4: `Widget::new()` → "Widget"
         if( r.role == RefRole::Call )
         {
-            rustWritten = rustWrittenQualifier( m.name.node, pass.src );
+            rustWritten = rustWrittenQualifier( m.name.node, file.src );
         }
     }
     return rustWritten;
@@ -2859,15 +2936,15 @@ inline std::string qualifyPathReference( const TagsPass& pass, const TagsMatch& 
 
 // A call site's receiver and argument facts (an import site has no receiver and no argument list — the defaults,
 // RecvKind::None and argCountKnown=false, are the truth there; Elixir's were read by qualifyElixirReference).
-inline void readReceiverFacts( const TagsPass& pass, const TagsMatch& m, RawRef& r, std::string rustWritten )
+inline void readReceiverFacts( const TagsFile& file, const TagsMatch& m, RawRef& r, std::string rustWritten )
 {
-    const Lang lang = pass.le.lang;
+    const Lang lang = file.le.lang;
     // FE-B: a Java method INVOCATION reads its receiver like every other language (a member call or a bare
     // implicit-this call); only a method REFERENCE (`T::m`) keeps issue #74's type-candidate shape.
     const bool javaMethodRef = lang == Lang::Java && !ts_node_is_null( m.roleNode ) && kindIs( ts_node_type( m.roleNode ), "method_reference" );
     RecvShape rs = javaMethodRef
-                 ? javaMethodReferenceReceiver( m.roleNode, pass.src )
-                 : receiverOf( m.name.node, lang, pass.src );              // P2-D: `this`/`self`/`x`/`base.field` shape
+                 ? javaMethodReferenceReceiver( m.roleNode, file.src )
+                 : receiverOf( m.name.node, lang, file.src );              // P2-D: `this`/`self`/`x`/`base.field` shape
     r.recv = rs.kind;  r.recvVar = rs.var;                                  //   → one-hop narrowing in resolve.h
     r.setFieldName( std::move( rs.field ) );                                //   depth-2 intermediate field; "" otherwise
     r.viaArrow  = rs.viaArrow;                                              //   `p->m()`: Rule 2b's smart-pointer pointee needs it
@@ -2875,9 +2952,9 @@ inline void readReceiverFacts( const TagsPass& pass, const TagsMatch& m, RawRef&
     r.setMemberPath( std::move( rs.path ) );  r.setMemberCtor( std::move( rs.ctor ) );   //   FE-B: the rest of that receiver chain
     if( lang == Lang::Ruby && r.recv == RecvKind::NamedVar )
     {
-        r.setFieldName( rubyReceiverWrittenPath( m.name.node, r.recvVar, pass.src ) );   // parser version 137: a constant's path as written
+        r.setFieldName( rubyReceiverWrittenPath( m.name.node, r.recvVar, file.src ) );   // parser version 137: a constant's path as written
     }
-    auto [ ac, ak ] = callArity( m.name.node, lang, pass.src );             // B2.2: call-site positional arg count
+    auto [ ac, ak ] = callArity( m.name.node, lang, file.src );             // B2.2: call-site positional arg count
     r.argCount = ac;  r.argCountKnown = ak;                                 //   → arity filter in graph.h
     if( langFacts( lang ).trailingLambdaScopeFns )
     {
@@ -2889,7 +2966,7 @@ inline void readReceiverFacts( const TagsPass& pass, const TagsMatch& m, RawRef&
     }
     if( isQueueLang( lang ) && isQueueCallName( r.name ) )
     {
-        if( const std::uint8_t kw = callKeywords( m.name.node, pass.src ); kw != 0 )
+        if( const std::uint8_t kw = callKeywords( m.name.node, file.src ); kw != 0 )
         {
             r.setComposeRel( pyKwTag( kw ) );                                // a queue call's keywords, for QueueHops (model.h pyKwTag)
         }
@@ -2897,16 +2974,16 @@ inline void readReceiverFacts( const TagsPass& pass, const TagsMatch& m, RawRef&
 }
 
 // The reference arm (TagsCapture::Full only): a use-site's role, name, qualifier and receiver facts into one RawRef.
-void captureReference( const TagsPass& pass, const TagsMatch& m )
+inline void captureReference( const TagsFile& file, TagsSinks& sinks, const TagsMatch& m )
 {
-    if( consumeSpecialReference( pass, m ) )
+    if( specialReferenceFate( file, sinks, m ) != CaptureFate::Keep )
     {
         return;
     }
-    const Lang lang        = pass.le.lang;
+    const Lang lang        = file.le.lang;
     const bool isImportRef = ( m.refCap == "reference.import" );
     RawRef     r;
-    r.fileId    = pass.fileId;
+    r.fileId    = file.fileId;
     r.startByte = ts_node_start_byte( m.roleNode );
     r.line      = ts_node_start_point( m.roleNode ).row + 1;   // ABS-3: 1-based use-site line for --uses
     r.lang      = lang;
@@ -2916,11 +2993,11 @@ void captureReference( const TagsPass& pass, const TagsMatch& m )
     r.name      = finalSegment( m.name.text );
     if( lang == Lang::Clojure )
     {
-        r.qualifier = nodeFieldText( parentOf( m.name.node ), NodeField::Namespace, pass.src );
+        r.qualifier = nodeFieldText( parentOf( m.name.node ), NodeField::Namespace, file.src );
     }
     if( lang == Lang::Elixir )
     {
-        if( !qualifyElixirReference( pass, m, r ) )
+        if( qualifyElixirReference( file, sinks, m, r ) != CaptureFate::Keep )
         {
             return;
         }
@@ -2929,30 +3006,31 @@ void captureReference( const TagsPass& pass, const TagsMatch& m )
     {
         r.name.push_back( '=' );   // `obj.name = v` calls `name=`, never the getter `name` (test/rubysettercheck.sh)
     }
-    std::string rustWritten = qualifyPathReference( pass, m, r );
+    std::string rustWritten = qualifyPathReference( file, m, r );
     if( !isImportRef && lang != Lang::Elixir )
     {
-        readReceiverFacts( pass, m, r, std::move( rustWritten ) );
+        readReceiverFacts( file, m, r, std::move( rustWritten ) );
     }
-    pass.refs.push_back( std::move( r ) );
+    sinks.refs.push_back( std::move( r ) );
 }
 
-// One match with a role and a name, through the capture-time drop decisions in their order, then into the definition or the
-// reference arm.
-void captureTagsMatch( const TagsPass& pass, TagsMatch& m )
+// One match with a role and a name, through the capture-time rules, then into the definition or the reference arm. The ORDER is
+// load-bearing — each rule reads only facts decided before it, and an emitting step must stay on the same side of every drop:
+//   1. a C++ specialization header emits its base clause and ends the match; it reads the @name AS CAPTURED (before the C1 re-seat);
+//   2. drops that need no identity: a Swift function-local `let`/`var`, a function-local C++ alias;
+//   3. a macro invocation's call site is emitted — AFTER (2), whose drops would otherwise leak it — then a definition that mints
+//      nothing (DefIdentity::fate) ends the match;
+//   4. the gated capture classes (dropGatedCapture), on the name as declared;
+//   5. the language filters (Elixir, Clojure), on the kind AS CAPTURED (Elixir's attribute→Var is the identity's, for the arm);
+//   6. a capture in an inert quote region keeps its call candidates as declined facts and ends the match;
+//   7. the definition arm, or (Full only) the reference arm.
+inline void captureTagsMatch( const TagsFile& file, TagsSinks& sinks, const TagsMatch& m )
 {
-    const Lang lang = pass.le.lang;
-    if( captureSpecializationHeader( m.isDef, lang, m.defCap, m.roleNode, m.name.node, pass.fileId, pass.src, pass.refs ) )
+    const Lang lang = file.le.lang;
+    if( captureSpecializationHeader( m.isDef, lang, m.defCap, m.roleNode, m.name.node, file.fileId, file.src, sinks.refs ) )
     {
         return;   // a C++ specialization header: its base clause only, never a symbol
     }
-
-    // C1 (memgraph F1) — see cppDefNameReseat. A null node is "nothing to re-seat".
-    if( const DefNameFacts reseated = cppDefNameReseat( m.isDef && lang == Lang::Cpp, m.name.node, pass.src ); !ts_node_is_null( reseated.node ) )
-    {
-        m.name = reseated;
-    }
-
     // F5: drop Swift function-local `let`/`var` bindings — they are not module symbols and, left in,
     // they steal the enclosing function's call edges (the last local binding above the call sites
     // becomes the nearest enclosing symbol). roleNode is the `property_declaration`; a `statements`
@@ -2961,14 +3039,15 @@ void captureTagsMatch( const TagsPass& pass, TagsMatch& m )
     {
         return;
     }
-
-    const std::optional<AliasShape> aliasShape = aliasShapeOfCapture( lang, m );
-    if( !aliasShape )
+    // INDEX-ALIAS-CONST: a function-local alias is a local name (ingest_relations.h insideFunctionBody, the local-const rule)
+    if( isAliasDefinition( lang, m ) && insideFunctionBody( m.roleNode ) )
     {
         return;
     }
-    AnnotationRename renamed {};
-    if( !keepAfterMacroInvocation( pass, m, renamed ) )
+
+    const DefIdentity id = m.isDef ? definitionIdentityOf( file, m ) : DefIdentity{};   // a reference keeps its @name as captured
+    emitMacroInvocationCall( file, sinks, m, id );
+    if( id.fate != CaptureFate::Keep )
     {
         return;
     }
@@ -2976,28 +3055,22 @@ void captureTagsMatch( const TagsPass& pass, TagsMatch& m )
     // uninitialized C++ shape, which needs the captured declaration node), JS export/prototype
     // assignments — in one drop decision (see dropGatedCapture for the per-class rationale and why
     // none of this can live in the query as a #match?/#eq? predicate).
-    if( m.isDef && dropGatedCapture( m.defCap, lang, m.name.text, m.name.node, m.roleNode, pass.src ) )
+    if( m.isDef && dropGatedCapture( m.defCap, lang, id.declarator.text, id.declarator.node, m.roleNode, file.src ) )
     {
         return;
     }
-    const std::uint32_t aliasTargetStart = aliasShape->form != AliasForm::None ? aliasTargetStartOf( m.roleNode, *aliasShape ) : 0u;
-
-    if( !keepLanguageCapture( pass, m ) )
-    {
-        return;
-    }
-    if( consumeInertQuoteCapture( pass, m ) )
+    if( languageFilterFate( file, m ) != CaptureFate::Keep || inertQuoteFate( file, sinks, m ) != CaptureFate::Keep )
     {
         return;
     }
 
     if( m.isDef )
     {
-        captureDefinition( pass, m, renamed, aliasTargetStart );
+        captureDefinition( file, sinks, m, id, aliasTargetStartOf( file, m ) );
     }
-    else if( m.isRef && pass.full )
+    else if( m.isRef && file.full )
     {
-        captureReference( pass, m );
+        captureReference( file, sinks, m );
     }
 }
 
@@ -3014,22 +3087,22 @@ void captureTagsMatch( const TagsPass& pass, TagsMatch& m )
 // methods — beside each singleton def, which the def capture notes.
 // Parser version 145 (test/rubyclassrecvcheck.sh): the mixins the class object's lookup reaches — an `extend`, an
 // `include` in `class << self` — into binds, beside the inherit reference each mixin already is.
-inline void captureRubyFilePasses( const TagsPass& pass )
+inline void captureRubyFilePasses( const TagsFile& file, TagsSinks& sinks )
 {
-    captureRubyDefs( pass.root, pass.fileId, pass.src, pass.defs );   // #339: the Definitions-only walker (attr defs + rendered db/schema.rb columns)
-    if( !pass.full )
+    captureRubyDefs( file.root, file.fileId, file.src, sinks.defs );   // #339: the Definitions-only walker (attr defs + rendered db/schema.rb columns)
+    if( !file.full )
     {
         return;   // TagsCapture::DefinitionsOnly: the passes below write references and binds only
     }
-    captureRubyBareCalls( pass.root, pass.fileId, pass.src, pass.refs );
-    captureRubyFactories( pass.root, pass.fileId, pass.src, pass.binds );
-    captureRubyHelperMethods( pass.root, pass.fileId, pass.src, pass.binds );
-    captureRubySingletonAccessors( pass.root, pass.fileId, pass.src, pass.binds );
-    captureRubyClassMixins( pass.root, pass.fileId, pass.src, pass.binds );
-    captureRubyMainMixins( pass.root, pass.fileId, pass.src, pass.binds );
-    if( pass.le.ext == kJbuilderExt )
+    captureRubyBareCalls( file.root, file.fileId, file.src, sinks.refs );
+    captureRubyFactories( file.root, file.fileId, file.src, sinks.binds );
+    captureRubyHelperMethods( file.root, file.fileId, file.src, sinks.binds );
+    captureRubySingletonAccessors( file.root, file.fileId, file.src, sinks.binds );
+    captureRubyClassMixins( file.root, file.fileId, file.src, sinks.binds );
+    captureRubyMainMixins( file.root, file.fileId, file.src, sinks.binds );
+    if( file.le.ext == kJbuilderExt )
     {
-        typeRubyJbuilderLocal( pass.fileId, pass.refs );
+        typeRubyJbuilderLocal( file.fileId, sinks.refs );
     }
 }
 
@@ -3073,9 +3146,9 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
     elixir.shortfall = &shortfall;
     if( le.lang == Lang::Elixir ) { elixir.prepare( cursor, query, root, src, fileId, binds, includes, refs ); }
 
-    const TagsPass pass{ .le = le, .fileId = fileId, .src = src, .root = root, .defs = defs, .refs = refs, .binds = binds, .includes = includes,
-                         .shortfall = shortfall, .elixir = elixir, .fileStem = fileStem, .full = mode == TagsCapture::Full, .shape = mode != TagsCapture::DefinitionsOnly,
-                         .fileHasError = ts_node_has_error( root ) };
+    const TagsFile file{ .le = le, .fileId = fileId, .src = src, .root = root, .elixir = elixir, .fileStem = fileStem,
+                         .full = mode == TagsCapture::Full, .shape = mode != TagsCapture::DefinitionsOnly, .fileHasError = ts_node_has_error( root ) };
+    TagsSinks      sinks{ .defs = defs, .refs = refs, .binds = binds, .includes = includes, .shortfall = shortfall };
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/extractFile: tags query exec+captures" );
         ts_query_cursor_exec( cursor, query, root );
@@ -3090,12 +3163,12 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             {
                 continue;
             }
-            TagsMatch m = readTagsMatch( pass, query, match );
+            const TagsMatch m = readTagsMatch( file, sinks, query, match );
             // Some patterns (e.g. a bare (identifier) @name) carry no @definition/@reference wrapper: a name without a role is
             // skipped (avoids turning every identifier into an edge), and so is a role without a name.
             if( m.hasName() && m.hasRole() )
             {
-                captureTagsMatch( pass, m );
+                captureTagsMatch( file, sinks, m );
             }
         }
     }
@@ -3138,7 +3211,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
 
     if( le.lang == Lang::Ruby )
     {
-        captureRubyFilePasses( pass );
+        captureRubyFilePasses( file, sinks );
     }
 }
 
