@@ -18,7 +18,8 @@
 #   (N4) the collector cut to under half its base body -> GATES (a long base body holds most short ones as a subsequence, so its
 #        base LCS saturates and cannot tell removal from a rewrite; census 11-20: textual ColorSystem::generate 1569 -> 22 tok)
 #   (C)  PREMISE COUNT — every arm found both its rows (a missing row would pass a "gates"/"minor" arm vacuously)
-#   (L)  a document with a shrink why= defines it (full legend) and does not print the operand sentence; one without carries neither
+#   (L)  a document with a shrink why= defines it (full legend) and does not print the operand or unhandled-arm sentence; one
+#        without carries neither
 #   (J)  determinism — two runs byte-identical
 # Red-before: on a binary without the rule, P1/P1w/P1m/P2 gate (FAIL). Guard-off (the LCS test removed, a member without a base
 # body skipped instead of refusing the group): N1-N3 FAIL; the cut test removed: N4 FAILS. See docs/EVALS.md "Clone shrink-only pairs".
@@ -180,6 +181,13 @@ echo "── (L) legend"
 FULL="$( "$BIN" "$TMP/p1" --quality-delta=HEAD~1..HEAD --no-cache --legend=full 2>/dev/null )"   # status: exits 0 or 2 by design; the legend text is the verdict
 case "$FULL" in *'crossed the bar because X shrank'*) ok "(L) a shrink why= document defines it";; *) no "(L) a shrink why= document never defines it";; esac
 case "$FULL" in *'operate on DIFFERENT DATA'*) no "(L) a shrink why= document prints the operand sentence";; *) ok "(L) a shrink why= document carries no operand sentence";; esac
+# why= is one Regression field shared by clone, tangle and unhandled-arm rows (train ge2 compose): a clone why= must not pull in
+# the unhandled-arm sentence (CodeRabbit #714 verbs_quality.h:1983; red on fdce7c59e, whose test was "any row has why=")
+UA_ROWS="$( printf '%s' "$FULL" | grep -c 'unhandled-arm"' )"   # status: grep -c counts; 0 is the premise, not a failure
+case "$FULL" in
+    *'unhandled-arm: a classifier'*) no "(L) a shrink why= document with $UA_ROWS unhandled-arm rows prints the unhandled-arm sentence";;
+    *)                               if [ "$UA_ROWS" -eq 0 ] && printf '%s' "$FULL" | grep -q ' why="'; then ok "(L) a clone why= document carries no unhandled-arm sentence"; else no "(L) premise: want a why= row and 0 unhandled-arm rows (got $UA_ROWS)"; fi;;
+esac
 FULL1="$( "$BIN" "$TMP/n1" --quality-delta=HEAD~1..HEAD --no-cache --legend=full 2>/dev/null )"   # status: exits 0 or 2 by design; the legend text is the verdict
 case "$FULL1" in *'crossed the bar because X shrank'*) no "(L) a document without a shrink why= pays for the sentence";; *) ok "(L) a document without a shrink why= carries no shrink sentence";; esac
 

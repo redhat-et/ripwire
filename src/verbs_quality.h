@@ -1980,7 +1980,8 @@ inline constexpr QdRowReadingLegend kQdRowReadings[] = {
     { []( const rw::quality::Regression& r ) { return r.kind == "placeholder"; },                       kQdPlaceholderLegend },
     { []( const rw::quality::Regression& r ) { return r.kind == "defect-shape"; },                      kQdDefectShapeLegend },
     { []( const rw::quality::Regression& r ) { return !r.call.empty(); },                               kQdUncheckedStatusLegend },
-    { []( const rw::quality::Regression& r ) { return !r.why.empty(); },                                kQdUnhandledArmLegend },
+    { []( const rw::quality::Regression& r )
+      { return r.kind == "defect-shape" && r.facet == rw::defectshape::facetName( rw::defectshape::Facet::UnhandledArm ); }, kQdUnhandledArmLegend },
     { []( const rw::quality::Regression& r ) { return r.kind == "complexity" && !r.facet.empty(); },    kQdMonsterLegend },
     { []( const rw::quality::Regression& r ) { return r.kind == "params" && !r.facet.empty(); },        kQdSimilarArgsLegend },
     { []( const rw::quality::Regression& r ) { return r.kind == "tangle"; },                            kQdTangleLegend },
