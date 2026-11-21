@@ -19,12 +19,12 @@ assert files == {'core.clj', 'browser.cljs', 'shared.cljc', 'tasks.bb'}, files
 rows = list(t.iter('s'))
 names = {s.get('n').split('/')[0] for s in rows}
 expected = {'sample.core', 'sample.browser', 'sample.shared', 'sample.tasks', 'answer', 'cached',
-            'square', 'cube', 'secret', 'unless', 'area', 'Greeter', 'Person', 'Counter', 'quoted', 'interop',
+            'square', 'cube', 'doto', 'secret', 'unless', 'area', 'Greeter', 'Person', 'Counter', 'quoted', 'interop',
             'run', 'render', 'shared', 'task', 'quoted-holder', 'route', 'spaced', 'commented',
             'gap-call', 'comment-call', 'comment-holder', 'join', 'qualified-join', 'documented',
             'nested-quote', 'nested-discard', 'nested-comment', 'comment-not-head', 'comment-x',
             'comment-x-holder', 'before-discard', 'after-discard', 'quoted-macro', 'a', 'b',
-            'syntax-quote-hole', 'live-hole-control', 'plain-call', 'meta-call', 'tag-call',
+            'syntax-quote-hole', 'live-hole-control', 'plain-call', 'meta-call', 'tag-call', 'stacked-meta-call',
             'quoted-meta', 'special-form-metadata', 'metadata-not-call'}
 assert names == expected, (names, expected)
 by = {s.get('n').split('/')[0]: s for s in rows}
@@ -50,7 +50,9 @@ assert 'square' not in calls('quoted-holder'), calls('quoted-holder')
 assert 'square' not in calls('comment-holder'), calls('comment-holder')
 # Arm 1 (#548): metadata before a list head does not hide the call; a quoted metadata call stays
 # inert, metadata on a non-call records nothing, and a metadata-prefixed special form stays excluded.
-for name in ('plain-call', 'meta-call', 'tag-call'):
+# `doto` has an in-tree def (core.clj), so a special form leaking past the gate would resolve and fail here;
+# mutant check 2026-11-21 (lane land-715): with the specialForms test removed this arm goes red on ('doto').
+for name in ('plain-call', 'meta-call', 'tag-call', 'stacked-meta-call'):
     assert calls(name) == {'square'}, (name, calls(name))
 assert calls('quoted-meta') == set(), calls('quoted-meta')
 assert calls('special-form-metadata') == set(), calls('special-form-metadata')
@@ -87,7 +89,7 @@ PY
 python3 - "$TMP/callers-square.xml" <<'PY'
 import sys, xml.etree.ElementTree as ET
 names = {s.get('n').split('/')[0] for s in ET.parse(sys.argv[1]).iter('s')}
-for name in ('plain-call', 'meta-call', 'tag-call'):
+for name in ('plain-call', 'meta-call', 'tag-call', 'stacked-meta-call'):
     assert name in names, (name, names)
 for name in ('quoted-meta', 'special-form-metadata'):
     assert name not in names, (name, names)
