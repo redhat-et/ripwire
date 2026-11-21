@@ -34,6 +34,11 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-21, lane land-715 (#715 by @himanchalkaushale, #548 arm 1: Clojure calls whose list head carries metadata; stacked on
+#   train 1118a 4b1f4516e): RE-PINNED with UPDATE_GOLDEN=1 (hash a57b75c512…5350ee08a9). Watched text: kParserVer 335 -> 337
+#   (rich file tag 338; the PR's 311/312 renumbered above the train's 335/336): queries/clojure/tags.scm accepts a meta_lit before a
+#   list head and src/ingest_clojure.h clojureListHead skips it. quality.h's kIngestParserVerMirror moves with it. kCacheVersion 54
+#   and kQSnapCacheScheme 38 stay: no record changes shape and no watched quality.h function moved.
 # 2026-11-21, train 1118a (import-proved-splits, qual-ns-call-bind, cr705-edges, #711 ts paths alias; rebased onto main 5df5a26be,
 #   #714 = train ge2): RE-PINNED ONCE with UPDATE_GOLDEN=1 from the rebased build (hash ffa77d0632…ae8d5cc3). kParserVer 335
 #   (rich 336) is the train's number for qual-ns-call-bind, above main's 333/334; the other members change no extraction.
