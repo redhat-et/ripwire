@@ -15,7 +15,8 @@ in CLAUDE.md and a silent brief. No token saving is shown by any of it.
   adds a 348 B factual note (which call ranks files for a task, which prints one symbol, which names the tests) to
   each new Explore or Plan subagent. Every other subagent type loads CLAUDE.md and gets nothing.
   `RIPWIRE_SUBAGENT_ROUTE=0` turns it off and `=all` sends it to every type. It is silent without ripwire or jq on
-  PATH, outside a git work tree, and in the meter's control arm. It writes no row and no file unless
+  PATH and outside a git work tree. It does not follow the meter's arm: the subagents of a control-arm session get it
+  too (the SessionStart primer's control-arm silence is unchanged). It writes no row and no file unless
   `RIPWIRE_SUBAGENT_ROUTE_LOG` names one. A machine that ran `--hook` before gains the entry on a re-run; a second run
   does not add a second entry. This note is ambient context, the kind RO1 measured at 6%: a floor for the two agent
   types that get nothing today, not the lever. Whether Claude Code delivers it into the subagent's own context has not
@@ -27,7 +28,8 @@ in CLAUDE.md and a silent brief. No token saving is shown by any of it.
   tool that returns `updatedInput` with the same block appended to the spawn prompt. Whether Claude Code applies
   `updatedInput` to an Agent call is not documented and has not been run live.
 
-The opt-in subagent primer (`--hook-subagent-primer`, lane AR1) is unchanged. With both hooks registered, an Explore or
+`skills/ripwire-orient/subagent-brief.md` now carries the same three-moment block, byte for byte, in place of its
+two lines. The opt-in subagent primer (`--hook-subagent-primer`, lane AR1) is unchanged and still has two steps. With both hooks registered, an Explore or
 Plan subagent receives both texts.
 
 Gate: `test/subagentroutecheck.sh`.

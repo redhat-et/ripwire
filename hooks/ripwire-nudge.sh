@@ -1168,8 +1168,10 @@ meter_family()
 # is under 400 B, and speaks only where CLAUDE.md does not. With BOTH registered, an Explore or Plan subagent receives
 # both texts.
 #
-# THE CONTROL ARM IS NOT SPOKEN TO, for the reason given at the SessionStart primer below: this is a nudge. A subagent
-# carries its parent's session_id, so the arm is the parent session's.
+# EVERY ELIGIBLE SUBAGENT GETS IT, WHATEVER THE METER ARM (owner ruling 155, 2026-11-21: "note for all"). The
+# SessionStart primer below is silent in the meter's control arm, and an unconfigured install hashes about half of
+# all sessions into that arm; applied here, that rule left about half of Explore and Plan subagents with no routing at
+# all. This mode therefore never reads the arm. The primer's own rule is unchanged.
 #
 # WRITES NOTHING BY DEFAULT: no meter row (a new row class would change the session counts every existing readout is
 # built on), no marker file. RIPWIRE_SUBAGENT_ROUTE_LOG=FILE appends one row per decision — agent_type, decision,
@@ -1186,9 +1188,7 @@ then
     [ "$( printf '%s' "$input" | jq -r '.hook_event_name // empty' 2>/dev/null )" = "SubagentStart" ] || exit 0
     agentType="$( printf '%s' "$input" | jq -r '.agent_type // empty' 2>/dev/null )"
     dir="$( printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null )"
-    session="$( printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null )"
     [ -n "$dir" ] || dir="$PWD"
-    [ -n "$session" ] || session="ppid$PPID"
 
     # routeLog DECISION BYTES — one row, only where the operator named a file. The agent type is the one payload field
     # that is written anywhere, and only here: control characters removed, 64 B at most.
@@ -1212,9 +1212,7 @@ then
         esac
     fi
 
-    meter_set_repo "$dir"
-    meter_init
-    [ "$meter_arm" = "control" ] && { routeLog skip-control 0; exit 0; }
+    meter_set_repo "$dir"     # for what it clears: git's inherited repository-selection variables. The arm is not read.
 
     command -v ripwire >/dev/null 2>&1 || { routeLog skip-no-ripwire 0; exit 0; }
     # `true`, not only exit 0 — the #327 shape, as in the SessionStart mode below. meter_set_repo cleared git's
@@ -1247,7 +1245,8 @@ fi
 # SILENT when the prompt already names ripwire (the orchestrator briefed it, or a re-run): the block is added once.
 # The block is a constant, the same bytes `ripwire wrap claude` prints for an orchestrator to paste by hand
 # (kSubagentBriefBlock in src/wrap.h; test/subagentroutecheck.sh (M) compares the two). Same gates as the mode above:
-# jq, ripwire on PATH, a git work tree, not the control arm. Every path exits 0, so it can never block a spawn.
+# jq, ripwire on PATH, a git work tree; like it, it does not read the meter arm (ruling 155). Every path exits 0, so
+# it can never block a spawn.
 if [ "${1:-}" = "--agent-brief" ]
 then
     command -v jq >/dev/null 2>&1 || exit 0
@@ -1255,13 +1254,9 @@ then
     printf '%s' "$input" | jq -e '.hook_event_name == "PreToolUse" and (.tool_name == "Agent" or .tool_name == "Task")
         and (.tool_input.prompt | type == "string") and (.tool_input.prompt | test("ripwire") | not)' >/dev/null 2>&1 || exit 0
     dir="$( printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null )"
-    session="$( printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null )"
     [ -n "$dir" ] || dir="$PWD"
-    [ -n "$session" ] || session="ppid$PPID"
 
     meter_set_repo "$dir"
-    meter_init
-    [ "$meter_arm" = "control" ] && exit 0
     command -v ripwire >/dev/null 2>&1 || exit 0
     insideWorkTree="$( git -C "$dir" rev-parse --is-inside-work-tree 2>/dev/null )" || exit 0
     [ "$insideWorkTree" = true ] || exit 0

@@ -16,7 +16,8 @@
 #       and --test-gate in that order
 #   (B) every other agent_type gets nothing; RIPWIRE_SUBAGENT_ROUTE=all widens to them; =0|off and an unknown value
 #       silence everything
-#   (C) the meter's control arm is not spoken to
+#   (C) the note prints in BOTH meter arms and in an unconfigured (auto) install, same bytes (owner ruling 155, "note
+#       for all"): the control-arm silence of the SessionStart primer does not apply to it
 #   (D) no ripwire on PATH, no jq, outside a git work tree, inside .git: nothing, rc 0
 #   (E) malformed input, empty input, another event: nothing, rc 0
 #   (F) the byte cap: additionalContext <= 400 B (every chosen subagent pays it on every turn)
@@ -29,12 +30,13 @@
 #       install, ok="0" with a hint once the script is gone; claude-hooks still counts 2 nudge refs
 #   (K) `ripwire wrap claude` carries the three-moment brief block (--for before reading source; --expand/--callers/
 #       --impact before the first edit; --quality-delta then --test-gate before done; not for a lane that reads no
-#       source) on one line of the paste block, inside the 20-line band and a 350 B cap; no other agent's recipe has it
+#       source) on one line of the paste block, inside the 20-line band and a 350 B cap; no other agent's recipe has it;
+#       skills/ripwire-orient/subagent-brief.md carries the same block byte for byte
 #   (L) every command the note and the block name runs on a fixture repo with the real binary
 #   (M) `--agent-brief`, the PROBE-ONLY PreToolUse mode: for an Agent or Task call it returns updatedInput whose prompt
 #       is the original plus the block, byte-equal to wrap's, every other input field kept, no permissionDecision
-#       unless asked; silent for other tools, a prompt that already names ripwire, the control arm and the no-op
-#       cases; and skills/install.sh --hook does NOT register it
+#       unless asked; silent for other tools, a prompt that already names ripwire and the no-op cases; not silenced
+#       by the meter's control arm either; and skills/install.sh --hook does NOT register it
 #   (N) uninstall: INSTALL.md's documented hook strip ("**3. Hooks**"), run as written, removes the SubagentStart entry
 #       and keeps a user's own SubagentStart hook
 #
@@ -84,12 +86,13 @@ payload()
     "$JQ" -cn --arg c "$1" --arg t "$2" --arg e "${3:-SubagentStart}" --arg a "${4:-agent-a1}" --arg s "${5:-sess-fixture}" \
         '{session_id:$s, transcript_path:("/x/" + $s + ".jsonl"), cwd:$c, hook_event_name:$e, agent_id:$a, agent_type:$t}'
 }
-# hook JSON [ENV...] — run the mode with a sandboxed HOME, in the treatment arm; HOUT = stdout, HRC = status.
+# hook JSON [ENV...] — run the mode with a sandboxed HOME and NO meter arm set (an unconfigured install, which the meter
+# hashes into treatment or control by session id); HOUT = stdout, HRC = status.
 HRC=0
 hook()
 {
     _j="$1"; shift
-    HOUT="$( printf '%s' "$_j" | env HOME="$FHOME" PATH="$HPATH" RIPWIRE_METER_ARM=treatment "$@" bash "$HOOK" --subagent-start )"
+    HOUT="$( printf '%s' "$_j" | env HOME="$FHOME" PATH="$HPATH" "$@" bash "$HOOK" --subagent-start )"
     HRC=$?
     [ "$HRC" -eq 0 ] || no "exit status $HRC (every path must exit 0) for: $*"
 }
@@ -146,9 +149,28 @@ done
 hook "$( payload "$REPO" Explore )" RIPWIRE_SUBAGENT_ROUTE=al; silent "an unknown switch value reads as off (a typo must not widen or keep it)"
 hook "$( payload "$REPO" Explore )"; speaks "positive control: the same Explore payload with no switch speaks"
 
-echo "(C) the meter's control arm is not spoken to"
-hook "$( payload "$REPO" Explore )" RIPWIRE_METER_ARM=control; silent "RIPWIRE_METER_ARM=control: nothing"
-hook "$( payload "$REPO" Explore )" RIPWIRE_METER_ARM=treatment; speaks "positive control: RIPWIRE_METER_ARM=treatment speaks"
+echo "(C) the note prints in both meter arms (ruling 155)"
+# RED PROOF: at 80ec317ec the mode exited silently when the meter arm was control, so the control case below, and
+# about half of the unconfigured session ids, printed nothing there.
+for armv in control treatment auto; do
+    hook "$( payload "$REPO" Explore )" RIPWIRE_METER_ARM="$armv"
+    [ -n "$HOUT" ] && [ "$HOUT" = "$EXPLORE_OUT" ] \
+        && ok "RIPWIRE_METER_ARM=$armv: the note, same bytes" \
+        || no "RIPWIRE_METER_ARM=$armv: expected the note, got: '$( printf '%s' "$HOUT" | head -c 80 )'"
+done
+mkdir -p "$TMP/chome/.ripwire"; printf 'arm=control\n' >"$TMP/chome/.ripwire/meter.conf"
+hook "$( payload "$REPO" Plan )" HOME="$TMP/chome"
+[ -n "$HOUT" ] && [ "$HOUT" = "$EXPLORE_OUT" ] \
+    && ok "arm=control in meter.conf: the note, same bytes" \
+    || no "arm=control in meter.conf silenced the note"
+spoke=0
+for sid in s01 s02 s03 s04 s05 s06 s07 s08 s09 s10 s11 s12 s13 s14 s15 s16; do
+    hook "$( payload "$REPO" Explore SubagentStart agent-a1 "$sid" )"
+    if [ "$HOUT" = "$EXPLORE_OUT" ]; then spoke=$(( spoke + 1 )); fi
+done
+[ "$spoke" = 16 ] \
+    && ok "unconfigured install: 16 of 16 session ids get the note (the session-hash split does not apply)" \
+    || no "unconfigured install: only $spoke of 16 session ids got the note"
 
 echo "(D) no-op where the commands could not run"
 hook "$( payload "$REPO" Explore )" PATH="$NORW"; silent "no ripwire on PATH: nothing"
@@ -254,7 +276,7 @@ c1="$( "$JQ" -r '[.hooks.SubagentStart[].hooks[].command | select(test("ripwire-
     || no "refresh left: $c1"
 # the registered command, run the way Claude Code runs it (through a shell), speaks.
 regCmd="$( "$JQ" -r '[.hooks.SubagentStart[].hooks[].command | select(test("ripwire-nudge"))][0]' "$CFG/settings.json" )"
-out="$( payload "$REPO" Explore | env HOME="$FHOME" PATH="$HPATH" RIPWIRE_METER_ARM=treatment sh -c "$regCmd" )"
+out="$( payload "$REPO" Explore | env HOME="$FHOME" PATH="$HPATH" sh -c "$regCmd" )"
 [ -n "$out" ] && [ "$out" = "$EXPLORE_OUT" ] \
     && ok "the registered command, run through a shell, emits the note" \
     || no "the registered command printed: '$( printf '%s' "$out" | head -c 120 )'"
@@ -332,6 +354,10 @@ grep -F -- '- One task:' "$TMP/blurb_gemini" >"$TMP/l_gemini"
 [ -s "$TMP/l_gemini" ] && cmp -s "$TMP/l_claude" "$TMP/l_gemini" \
     && ok "with the block removed, claude's line is the shared line byte for byte" \
     || no "claude's parallel-agents line differs from the shared one beyond the block"
+BRIEFMD="$ROOT/skills/ripwire-orient/subagent-brief.md"
+[ -n "$BLOCK" ] && grep -qxF -- "$BLOCK" "$BRIEFMD" \
+    && ok "skills/ripwire-orient/subagent-brief.md carries the same block as its own line, byte for byte" \
+    || no "skills/ripwire-orient/subagent-brief.md does not carry wrap's block verbatim on one line"
 "$BIN" wrap claude --force 2>/dev/null | grep -v '^# --- ' | grep '^#' | grep -q 'SubagentStart' \
     && ok "the recipe discloses that the hook install registers a SubagentStart note" \
     || no "wrap claude does not disclose the SubagentStart registration"
@@ -372,7 +398,7 @@ agentCall()
 brief()
 {
     _j="$1"; shift
-    HOUT="$( printf '%s' "$_j" | env HOME="$FHOME" PATH="$HPATH" RIPWIRE_METER_ARM=treatment "$@" bash "$HOOK" --agent-brief )"
+    HOUT="$( printf '%s' "$_j" | env HOME="$FHOME" PATH="$HPATH" "$@" bash "$HOOK" --agent-brief )"
     HRC=$?
     [ "$HRC" -eq 0 ] || no "exit status $HRC (every path must exit 0) for: $*"
 }
@@ -404,7 +430,10 @@ brief "$( agentCall Agent 'Locate the function helper.' )"
     || no "two runs differ"
 brief "$( agentCall Bash 'Locate the function helper.' )"; silent "another tool (Bash): nothing"
 brief "$( agentCall Agent 'Orient with ripwire, then locate helper.' )"; silent "a prompt that already names ripwire: nothing (the block is added once)"
-brief "$( agentCall Agent 'x' )" RIPWIRE_METER_ARM=control; silent "the control arm: nothing"
+brief "$( agentCall Agent 'Locate the function helper.' )" RIPWIRE_METER_ARM=control
+[ -n "$HOUT" ] && [ "$HOUT" = "$AGENT_OUT" ] \
+    && ok "the meter's control arm does not silence it: same bytes" \
+    || no "RIPWIRE_METER_ARM=control changed or silenced the rewrite"
 brief "$( agentCall Agent 'x' )" PATH="$NORW"; silent "no ripwire on PATH: nothing"
 brief "$( agentCall Agent 'x' )" PATH="$NOJQ"; silent "no jq: nothing"
 brief "$( agentCall Agent 'x' "$PLAIN" )"; silent "outside a git work tree: nothing"

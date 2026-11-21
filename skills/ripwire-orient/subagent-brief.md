@@ -1,19 +1,30 @@
-# Briefing a subagent: the two lines to paste
+# Briefing a subagent: the three moments to paste
 
 A subagent starts with an empty context and your brief. It gets no SessionStart primer and no prompt router of its
 own, and the generic guidance it does inherit (CLAUDE.md, the MCP server's instructions, deferred ripwire tools)
 was in 81 of 83 subagent contexts in one measured orchestrator session. Those subagents still oriented with reads
 (69% of orientation tokens) and grep. A median of one ripwire navigation call came before the first edit, and 12 of
 25 implementers made none (lane SUB1, 2026-11-19). What changes behaviour is a short, specific instruction in the
-brief itself.
+brief itself: in stored sessions an implementer's first source action was ripwire in 5% of lanes whose brief said
+nothing (n=369) and in 34-39% of lanes whose brief carried the routing (n=38, n=66), and a verification verb the
+brief NAMED was run in 90% of lanes against 47% unnamed (lane RO1, 2026-11-21, observational; no token saving shown).
 
-**Put these two lines in every brief that will read or change code.** Fill in `<dir>`. Leave the task text to the
-subagent:
+**Put this block in every brief that reads source.** It is the block `ripwire wrap claude` prints, byte for byte.
+Fill in `<dir>`. Leave the task text to the subagent. A lane that reads no source (prose, counting stored results)
+does not get it:
 
 ```text
-Orient first: run `ripwire <dir> --for="<your task in words; paste paths and symbols from this brief verbatim>"` and read only the files it ranks, before any grep or whole-file read.
-Before you report, after your LAST edit: commit, then run `ripwire <dir> --quality-delta=BASE..HEAD --legend=compact` (BASE = where your branch started; the range catches a regression made in two steps) and then `ripwire <dir> --test-gate --legend=compact`, and run the gates it names. A check followed by another edit proves nothing about that edit.
+ripwire is on PATH — before reading source, `ripwire <dir> --for="<task>"`; before the first edit, `--expand=SYM --legend=compact`, `--callers=SYM --legend=compact` or `--impact=SYM --legend=compact`; before reporting done, commit, then `--quality-delta=BASE..HEAD --legend=compact` and `--test-gate --legend=compact`.
 ```
+
+The three moments, each with its call:
+
+1. **Before reading source:** `ripwire <dir> --for="<task>"`. Paste paths and symbols from the brief verbatim into
+   the task; read only the files it ranks.
+2. **Before the first edit:** `--expand=SYM --legend=compact` for the body, `--callers=SYM --legend=compact` for who
+   calls it, or `--impact=SYM --legend=compact` for everything a change reaches.
+3. **Before reporting done:** commit, then `--quality-delta=BASE..HEAD --legend=compact` and
+   `--test-gate --legend=compact`, and run the gates it names. BASE is where the branch started.
 
 - `<dir>` is the tree the subagent will change. For a worktree lane, that is the worktree, not the main checkout.
 - `--for` page 1 named every file a commit later changed in 39 of 52 pilot tasks (SUB1). `--pack-task` did so in
@@ -22,10 +33,12 @@ Before you report, after your LAST edit: commit, then run `ripwire <dir> --quali
   that a working-tree diff against the last commit misses. A check followed by another edit proves nothing about
   that edit. Run `--quality-delta` before `--test-gate`: clean code that runs the wrong tests still regresses.
 - Splitting one task across N subagents? Run `--pack-task="<task>" --partition=N` once and hand each subagent its
-  slice (`partition-zoom.md`). Keep the two lines in each brief too.
+  slice (`partition-zoom.md`). Keep the block in each brief too.
 
-**Not briefing by hand?** `skills/install.sh --hook-subagent-primer` registers an opt-in Claude Code `SubagentStart`
-hook (`hooks/ripwire-subagent-primer.sh`). It injects the same two steps into every subagent's context at spawn.
-`RIPWIRE_SUBAGENT_PRIMER=0` turns it off. `auto` randomizes per subagent for the registered A/B. Whether the hook's
-context works as well as the same lines in the brief is the question that A/B answers. Until it reports, write the
-lines into the brief too.
+**Not briefing by hand?** Two Claude Code `SubagentStart` hooks exist, and neither replaces the brief. Both add
+context beside it, and context beside the brief is what the stored sessions show subagents not acting on.
+`skills/install.sh --hook` registers a short routing note for the Explore and Plan subagents, the two built-in types
+that do not load CLAUDE.md (`RIPWIRE_SUBAGENT_ROUTE=0` turns it off). `skills/install.sh --hook-subagent-primer`
+registers the opt-in primer (`hooks/ripwire-subagent-primer.sh`): two steps, orient and check, for every subagent
+type; `RIPWIRE_SUBAGENT_PRIMER=0` turns it off and `auto` randomizes per subagent for its registered A/B. Write the
+block into the brief either way.
