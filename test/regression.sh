@@ -1041,6 +1041,7 @@ for _g in \
     shallowhistorycheck \
     shapingflagcheck \
     shellgateindexcheck \
+    shellnestcheck \
     showcasecapturecheck \
     shrinkpaircheck \
     sibliftcheck \
