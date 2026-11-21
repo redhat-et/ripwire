@@ -1962,7 +1962,7 @@ it points at the installer's staged copy of the skills when the cwd is not a che
 
 ## Improve it with your agent
 
-[`prompts/`](prompts/) holds thirteen **self-contained orchestrator prompts**: the loops this project is
+[`prompts/`](prompts/) holds fourteen **self-contained orchestrator prompts**: the loops this project is
 built with, written so a coding agent can run them. They encode the workflow rather than describing
 it.
 

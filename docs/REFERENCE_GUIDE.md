@@ -725,7 +725,7 @@ files under `bench/`.
 
 ### 16. Improvement
 
-`prompts/` holds thirteen **self-contained orchestrator prompts**. Each prompt is a workflow that a
+`prompts/` holds fourteen **self-contained orchestrator prompts**. Each prompt is a workflow that a
 coding agent can run against this repository. Each prompt writes a plan and stops for your approval
 before it runs a command. Build the binary first. The prompts measure against the binary.
 
