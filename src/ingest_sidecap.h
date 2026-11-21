@@ -2233,18 +2233,17 @@ inline bool adoptTestMacroBlock( const TagsPass& pass, TagsMatch& m, DefCodeNode
 // class_specifier and wrongly grab the whole CLASS body as its span — corrupting spans + ref attribution) — and a C-family
 // function BODY: a block-scope `Type v(args);` (most-vexing-parse) must not climb up and steal its enclosing function's span. A
 // real function definition's declarator parents directly to function_definition (found at hop 1), so that never fires for it.
-inline bool isDeclaratorClimbStop( const char* pt ) noexcept
-{
-    return    kindIs( pt, "class_specifier" )        || kindIs( pt, "struct_specifier" )
-           || kindIs( pt, "field_declaration_list" ) || kindIs( pt, "declaration_list" )
-           || kindIs( pt, "namespace_definition" )   || kindIs( pt, "enum_specifier" )
-           || kindIs( pt, "translation_unit" )       || kindIs( pt, "source_file" )       // Swift top
-           || kindIs( pt, "class_body" )             || kindIs( pt, "protocol_body" )     // Swift type bodies
-           || kindIs( pt, "enum_class_body" )
-           || kindIs( pt, "class_interface" )        || kindIs( pt, "class_implementation" )   // ObjC
-           || kindIs( pt, "implementation_definition" ) || kindIs( pt, "protocol_declaration" )
-           || kindIs( pt, "compound_statement" )     || kindIs( pt, "block" );
-}
+inline constexpr std::string_view kDeclaratorClimbStops[] = {
+    "class_specifier",        "struct_specifier",
+    "field_declaration_list", "declaration_list",
+    "namespace_definition",   "enum_specifier",
+    "translation_unit",       "source_file",            // Swift top
+    "class_body",             "protocol_body",          // Swift type bodies
+    "enum_class_body",
+    "class_interface",        "class_implementation",   // ObjC
+    "implementation_definition", "protocol_declaration",
+    "compound_statement",     "block",
+};
 
 // What the declarator climb found: the span to adopt (null: keep the capture's own), the body it owns, and whether the role node
 // is a body-less C/C++ type specifier in a function's signature (a type use, never a definition).
@@ -2258,8 +2257,7 @@ struct DeclaratorClimb
 // At a scope stop: the member/decl wrapper the climb came up through (a prototype's span, so the RETURN TYPE is included), else null.
 inline TSNode declarationWrapperOrNull( TSNode child ) noexcept
 {
-    const char* ct = ts_node_type( child );
-    return kindIs( ct, "field_declaration" ) || kindIs( ct, "declaration" ) ? child : TSNode{};
+    return isOneOf( ts_node_type( child ), { "field_declaration", "declaration" } ) ? child : TSNode{};
 }
 
 // At the first ancestor owning a body: adopt it when the role node is its signature (outside the body) and not a body-less type
@@ -2303,7 +2301,7 @@ inline DeclaratorClimb climbDeclaratorToDefinition( TSNode roleNode, bool bodyle
     TSNode p     = parentOf( roleNode );
     for( int guard = 0; !ts_node_is_null( p ) && guard < 4; ++guard )
     {
-        if( isDeclaratorClimbStop( ts_node_type( p ) ) )
+        if( isOneOf( ts_node_type( p ), kDeclaratorClimbStops ) )
         {
             return DeclaratorClimb{ .span = declarationWrapperOrNull( child ) };
         }
