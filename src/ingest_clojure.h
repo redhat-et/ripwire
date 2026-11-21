@@ -21,21 +21,20 @@ std::string_view clojureListHead( TSNode list, std::string_view src ) noexcept
     {
         return {};
     }
+    // The head is the first named child that is not a comment, a `#_` discard or reader metadata (`^:tag`, `^{…}`):
+    // the same leading slot queries/clojure/tags.scm's call pattern skips.
     const std::uint32_t childCount = ts_node_named_child_count( list );
-    std::uint32_t       headIndex  = 0;
-    while( headIndex < childCount
-           && ( kindIs( ts_node_type( ts_node_named_child( list, headIndex ) ), "comment" )
-                || kindIs( ts_node_type( ts_node_named_child( list, headIndex ) ), "dis_expr" )
-                || kindIs( ts_node_type( ts_node_named_child( list, headIndex ) ), "meta_lit" ) ) )
+    for( std::uint32_t childIndex = 0; childIndex < childCount; ++childIndex )
     {
-        ++headIndex;
+        const TSNode child = ts_node_named_child( list, childIndex );
+        const char*  kind  = ts_node_type( child );
+        if( kindIs( kind, "comment" ) || kindIs( kind, "dis_expr" ) || kindIs( kind, "meta_lit" ) )
+        {
+            continue;
+        }
+        return kindIs( kind, "sym_lit" ) ? nodeTextOf( child, src ) : std::string_view{};
     }
-    if( headIndex == childCount )
-    {
-        return {};
-    }
-    const TSNode head = ts_node_named_child( list, headIndex );
-    return kindIs( ts_node_type( head ), "sym_lit" ) ? nodeTextOf( head, src ) : std::string_view{};
+    return {};
 }
 
 // Temporary keyword-head table: CONTRIBUTING slice 5a moves these decisions into tags-pass predicates.
