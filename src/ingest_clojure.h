@@ -25,7 +25,8 @@ std::string_view clojureListHead( TSNode list, std::string_view src ) noexcept
     std::uint32_t       headIndex  = 0;
     while( headIndex < childCount
            && ( kindIs( ts_node_type( ts_node_named_child( list, headIndex ) ), "comment" )
-                || kindIs( ts_node_type( ts_node_named_child( list, headIndex ) ), "dis_expr" ) ) )
+                || kindIs( ts_node_type( ts_node_named_child( list, headIndex ) ), "dis_expr" )
+                || kindIs( ts_node_type( ts_node_named_child( list, headIndex ) ), "meta_lit" ) ) )
     {
         ++headIndex;
     }

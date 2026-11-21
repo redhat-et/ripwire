@@ -393,7 +393,11 @@ constexpr std::uint32_t kCacheVersion = 54;           // 54: lane qd-tangle — 
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 335;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 337;          // bump on any grammar/.scm/extraction change
+                                                      // 337 = 2026-11-21 (#548 arm 1, @himanchalkaushale, PR #715, landed as lane land-715; was 311 on the PR, above train
+                                                      //   1118a's 335/336): a Clojure call whose list head carries metadata (`^{:doc "tagged"} (square 4)`, `^String (square 5)`)
+                                                      //   is captured, and the C++ head filter (ingest_clojure.h clojureListHead) skips meta_lit before reading the head.
+                                                      //   Rich file tag 338. kCacheVersion unchanged.
                                                       // 335 = 2026-11-20 (train 1118a, lane qual-ns-call-bind; above train 1117d2's 333/334, rich 336): C++ / ObjC
                                                       //   using-declarations and namespace aliases are recorded while the call-result family is off
                                                       //   (ingest_binds.h kCppCallScopeFacts), read by receiverevidence.h CallResultTypes::cppScopeNamedAt.
