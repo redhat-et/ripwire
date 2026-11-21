@@ -126,6 +126,12 @@ struct AgentTarget
     std::string_view mcpAddPre;    // McpForm::CliAdd only: the command up to where the path goes
     std::string_view mcpAddPost;   //                     ... and the remainder after it
     std::string_view caveat;
+    std::string_view subagentBrief;    // "" = the agent has no subagents this repo routes. Otherwise the paste-ready block its use-when blurb adds to
+                                       // the parallel-agents line (after kSubagentBriefLead), for an orchestrator to copy into each subagent's brief
+                                       // (lane HK2, 2026-11-21, rulings 145/148: a subagent sees its brief; Claude Code's Explore and Plan
+                                       // subagents do not load CLAUDE.md at all, and the ones that do were measured not to act on it unless
+                                       // the brief says so). A string COLUMN, placed before the bool, because test/agenttablecheck.sh (L)
+                                       // reads readBeforeEdit as the LAST true/false on a row. test/subagentroutecheck.sh (K) holds it.
     bool             readBeforeEdit;   // the agent can REFUSE a native Edit on a file it has not Read (codex, opencode, Gemini CLI: never,
                                        // checked in their sources 2026-09-28. Claude Code: ONLY for a path OUTSIDE its working directory —
                                        // corrected 2026-11-21, ruling 143: lane GR1 §4 found 4 "File has not been read yet" refusals in 283
@@ -137,19 +143,34 @@ struct AgentTarget
                                        // so a new agent row decides it and no code names the agent. test/agenttablecheck.sh (L) holds both ways.
 };
 
+// THE THREE-MOMENT BRIEF BLOCK (lane HK2, 2026-11-21): what an orchestrator pastes into a subagent's brief. Three moments,
+// each with its call, because lane RO1 measured (observational, stored sessions) that an implementer subagent's first source
+// action was ripwire in 5% of lanes whose brief said nothing (n=369) and 34-39% of lanes whose brief carried the routing
+// (n=38, n=66), that the same protocol sitting in CLAUDE.md moved it to 6% (13 of 215), and that a NAMED verification verb
+// was run in 90% of lanes against 47% unnamed. So the brief is the lever and each moment is named. No token saving is shown.
+// Every verb but --for carries --legend=compact, the blurb's own posture (test/wrapverbscheck.sh arm 7 holds every command the
+// blurb spells to it). One line, no newline: it rides on a blurb line, and hooks/ripwire-nudge.sh --agent-brief appends the same bytes to a
+// spawn prompt (test/subagentroutecheck.sh (M) holds the two byte-equal).
+inline constexpr std::string_view kSubagentBriefBlock =
+    "ripwire is on PATH — before reading source, `ripwire <dir> --for=\"<task>\"`; before the first edit, `--expand=SYM --legend=compact`, `--callers=SYM --legend=compact` or `--impact=SYM --legend=compact`; "
+    "before reporting done, commit, then `--quality-delta=BASE..HEAD --legend=compact` and `--test-gate --legend=compact`.";
+// What introduces the block on the blurb line. "that reads source": a lane that only edits prose or counts stored results has
+// nothing to orient on, and a block it cannot follow teaches it to skip the next one.
+inline constexpr std::string_view kSubagentBriefLead = " When you delegate to subagents, paste this into every brief that reads source: ";
+
 inline constexpr AgentTarget kAgentTargets[] = {
     { "claude",   "Claude Code",  "CLAUDE.md",                   "",
-      "~/.claude",           "${CLAUDE_CONFIG_DIR:-~/.claude}/skills", "",       true,  WrapPrimary::Cli,     McpForm::CliAdd,     "claude mcp add ripwire -- ",          " --mcp\n",            "", true },
+      "~/.claude",           "${CLAUDE_CONFIG_DIR:-~/.claude}/skills", "",       true,  WrapPrimary::Cli,     McpForm::CliAdd,     "claude mcp add ripwire -- ",          " --mcp\n",            "", kSubagentBriefBlock, true },
     { "codex",    "OpenAI Codex", "AGENTS.md",                   "",
-      "~/.codex",            "${AGENTS_HOME:-~/.agents}/skills", " --codex",    true,  WrapPrimary::Cli,     McpForm::Toml,       "",                                    "",                    "", false },
+      "~/.codex",            "${AGENTS_HOME:-~/.agents}/skills", " --codex",    true,  WrapPrimary::Cli,     McpForm::Toml,       "",                                    "",                    "", "", false },
     { "cursor",   "Cursor",       ".cursor/rules (a .mdc file)", "",
-      "~/.cursor",           "",                                 "",            false, WrapPrimary::Mcp,     McpForm::Json,       "",                                    "",                    "", false },
+      "~/.cursor",           "",                                 "",            false, WrapPrimary::Mcp,     McpForm::Json,       "",                                    "",                    "", "", false },
     { "windsurf", "Windsurf",     ".windsurfrules",              "",
-      "~/.codeium/windsurf", "",                                 "",            false, WrapPrimary::Mcp,     McpForm::Json,       "",                                    "",                    "", false },
+      "~/.codeium/windsurf", "",                                 "",            false, WrapPrimary::Mcp,     McpForm::Json,       "",                                    "",                    "", "", false },
     { "gemini",   "Gemini CLI",   "GEMINI.md",                   "",
-      "~/.gemini",           "",                                 "",            false, WrapPrimary::Mcp,     McpForm::Json,       "",                                    "",                    "", false },
+      "~/.gemini",           "",                                 "",            false, WrapPrimary::Mcp,     McpForm::Json,       "",                                    "",                    "", "", false },
     { "opencode", "opencode",     "AGENTS.md",                   "also read globally from ~/.config/opencode/AGENTS.md",
-      "~/.config/opencode",  "",                                 "",            false, WrapPrimary::Cli,     McpForm::JsonMcpKey, "",                                    "",                    "", false },
+      "~/.config/opencode",  "",                                 "",            false, WrapPrimary::Cli,     McpForm::JsonMcpKey, "",                                    "",                    "", "", false },
     // openclaw, corrected 2026-09-08 after review. THE CONTEXT FILE WAS WRONG and it mattered: the first
     // version of this row said "AGENTS.md", and the CLI-first prose then told a coding user to paste the
     // wiring into their REPO's AGENTS.md. openclaw never reads that. Its AGENTS.md is the operator's
@@ -160,16 +181,16 @@ inline constexpr AgentTarget kAgentTargets[] = {
     // such env var, so a Codex user who has relocated AGENTS_HOME would otherwise be told to install
     // exactly where openclaw will not look.
     { "openclaw", "openclaw",     "~/.openclaw/workspace/AGENTS.md", "openclaw's own workspace bootstrap file — NOT your repository's AGENTS.md",
-      "~/.openclaw",         "~/.agents/skills",                 " --openclaw", false, WrapPrimary::Cli,     McpForm::CliAdd,     "openclaw mcp add ripwire --command ", " --arg --mcp\n",      "skills are read from ~/.agents/skills ONLY when OPENCLAW_STATE_DIR is the default ~/.openclaw; openclaw honours no AGENTS_HOME, and its before_tool_call is a plugin API, not a shell hook slot", false },
+      "~/.openclaw",         "~/.agents/skills",                 " --openclaw", false, WrapPrimary::Cli,     McpForm::CliAdd,     "openclaw mcp add ripwire --command ", " --arg --mcp\n",      "skills are read from ~/.agents/skills ONLY when OPENCLAW_STATE_DIR is the default ~/.openclaw; openclaw honours no AGENTS_HOME, and its before_tool_call is a plugin API, not a shell hook slot", "", false },
     // Hermes. Authored in PR #51 (AnkitArya); the maintainer's kAgentTargets consolidation (2026-09-08)
     // folded the six hand-edited Hermes branches here into one row. HERMES_HOME honours the same
     // relocation the installer's --hermes target does. The pre_tool_call hook slot EXISTS (config.yaml)
     // but hooks/ripwire-nudge.sh is not ported yet, so hookSlot stays false until that port lands -
     // emitting a --hook line today would print a command the installer honestly refuses.
     { "hermes",   "Hermes",       "AGENTS.md",                   "",
-      "~/.hermes",           "${HERMES_HOME:-~/.hermes}/skills", " --hermes",   false, WrapPrimary::Cli,     McpForm::CliAdd,     "hermes mcp add ripwire --command ",   " --args --mcp\n# verify: hermes mcp test ripwire\n",    "hermes exposes hooks:pre_tool_call in config.yaml (PreToolUse-shaped) but ripwire's nudge hook is not ported yet: the hook install line stays off until that port lands", false },
+      "~/.hermes",           "${HERMES_HOME:-~/.hermes}/skills", " --hermes",   false, WrapPrimary::Cli,     McpForm::CliAdd,     "hermes mcp add ripwire --command ",   " --args --mcp\n# verify: hermes mcp test ripwire\n",    "hermes exposes hooks:pre_tool_call in config.yaml (PreToolUse-shaped) but ripwire's nudge hook is not ported yet: the hook install line stays off until that port lands", "", false },
     { "aider",    "aider",        "CONVENTIONS.md",              "",
-      "",                    "",                                 "",            false, WrapPrimary::RepoMap, McpForm::None,       "",                                    "",                    "", false },
+      "",                    "",                                 "",            false, WrapPrimary::RepoMap, McpForm::None,       "",                                    "",                    "", "", false },
 };
 
 inline constexpr const AgentTarget* agentTarget( const std::string_view name ) noexcept
@@ -286,6 +307,21 @@ inline void wrapPrintLegendSeenLine( std::FILE* out, const std::string_view agen
                 std::string_view( row->installerFlags ) );
 }
 
+// HK2: the hook install's SubagentStart registration, DISCLOSED in the recipe for the agent that has one (the row with a
+// subagentBrief; SubagentStart is a Claude Code event). A comment, never a command, and it names neither the installer nor its
+// flag: agenttablecheck's (G)/(H) arms read any line naming those as an install line.
+inline void wrapPrintSubagentRouteLine( std::FILE* out, const std::string_view agent )
+{
+    const AgentTarget* row = agentTarget( agent );
+    if( row == nullptr || row->subagentBrief.empty() || !row->hookSlot )
+    {
+        return;
+    }
+    rw::emitRaw( out, "# The hook install above also registers a SubagentStart note: under 400 B of routing context for each new Explore\n"
+                      "#   or Plan subagent, the two built-in types that do not load CLAUDE.md. It is a floor, not the lever: what a subagent\n"
+                      "#   acts on is its BRIEF, so paste the block the CLAUDE.md text below gives. RIPWIRE_SUBAGENT_ROUTE=0 turns the note off.\n" );
+}
+
 // agent → the context/rules file its use-when blurb belongs in (declarative table, one row per client)
 // (the per-agent context file is a column in kAgentTargets above)
 
@@ -303,6 +339,11 @@ inline constexpr std::string_view kEditLinesRangedRead[ 2 ] = {
     "- To edit a symbol: a body ripwire delivered (`--expand=SYM --legend=compact`, or a fold/key body in a `--for` answer) is the verbatim text of its lines `l`..`e` — inside your working directory, use your native Edit on it directly.",
     "  Read (offset/limit) only a range that was not delivered (a `--for` row gives it: `path:L-E name`, or `l=`..`e=` on an XML row), and always for a file outside the working directory — never a whole-file Read. `--edit-check=SYM --legend=compact` before a contract change, and after the edit.",
 };
+
+// The parallel-agents line of the blurb, named because wrapPrintBlurb appends AgentTarget::subagentBrief to exactly this line (a
+// sentence on an existing line, not a 21st line: the body sits at the ceiling of its size band, see below).
+inline constexpr std::string_view kPlanLanesLine =
+    "- One task: `--pack-task=\"<task>\" --legend=compact`; before parallel agents: `--plan-lanes=N --task=\"<goal>\"`, then read `lanes[].execution`.";
 
 // The ONE shared use-when blurb — single source of truth for every agent recipe (the gate diffs the
 // body across agents, so a per-agent fork of this text is a red gate, not a variant — the one exception is the
@@ -327,7 +368,7 @@ inline std::vector<std::string_view> wrapUseWhenBlurbLines( const bool readBefor
         "Reach for it BEFORE blind grep + whole-file reads. First call ~1s cold; after that warm, ~0.1s.",
         "- Orient on a task: `ripwire <dir> --for=\"<task in words>\"` — ranked, quality-annotated",
         "  signatures. Paste symbol/file names from the issue verbatim; named mentions get anchored.",
-        "- One task: `--pack-task=\"<task>\" --legend=compact`; before parallel agents: `--plan-lanes=N --task=\"<goal>\"`, then read `lanes[].execution`.",
+        kPlanLanesLine,
         "- Have a stack trace / build error: `ripwire <dir> --from-trace=FILE --legend=compact` (`-` = stdin) —",
         "  paste the error, don't paraphrase it into a query.",
         "- Who calls X: `--callers=SYM --legend=compact`. \"Is it safe to change X?\" needs the full blast radius:",
@@ -373,7 +414,10 @@ inline void wrapPrintBlurb( std::FILE* out, const std::string_view agent )
     rw::emitTo( out, "# --- paste into {} ---\n", std::string_view( targetFile.data(), targetFile.size() ) );
     for( const std::string_view line : wrapUseWhenBlurbLines( blurbRow->readBeforeEdit ) )
     {
-        rw::emitTo( out, "{}\n", std::string_view( line.data(), line.size() ) );
+        const bool             briefHere = line == kPlanLanesLine && !blurbRow->subagentBrief.empty();
+        const std::string_view lead      = briefHere ? kSubagentBriefLead : std::string_view{};
+        const std::string_view brief     = briefHere ? blurbRow->subagentBrief : std::string_view{};
+        rw::emitTo( out, "{}{}{}\n", line, lead, brief );
     }
     rw::emitRaw( out, "# --- end paste ---\n" );
 }
@@ -916,6 +960,7 @@ inline void wrapEmitAgent( const std::string_view agent, const WrapListing& aske
     // A4-S2: adoption recipes name a skill install step only for verified agent discovery paths.
     wrapPrintSkillsLine( stdout, agent, executablePath );
     wrapPrintLegendSeenLine( stdout, agent );
+    wrapPrintSubagentRouteLine( stdout, agent );
 
     // context wiring: every recipe ends with the pasteable use-when blurb for the client's rules file.
     wrapPrintBlurb( stdout, agent );

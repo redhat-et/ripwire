@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# hooks/ripwire-nudge.sh — OPT-IN Claude Code PreToolUse + SessionStart hook.
+# hooks/ripwire-nudge.sh — OPT-IN Claude Code PreToolUse + SessionStart hook, and (mode `--subagent-start`) the
+# SubagentStart routing note for the Explore and Plan subagents; that mode is documented where it is defined, as is
+# `--agent-brief`, a probe arm no installer registers.
 #
 # READ §RETIRED FIRST. As of 2026-09-02 the PreToolUse path SAYS NOTHING: a randomized A/B measured
 # both nudge tiers inert and the registered consequence was applied. What survives on that path is the
@@ -1134,6 +1136,144 @@ meter_family()
         *)                              printf 'other' ;;
     esac
 }
+
+# ---- SubagentStart mode (`--subagent-start`): a routing note for the subagents that never see CLAUDE.md ----
+# (lane HK2, 2026-11-21, owner rulings 145 and 148.) Claude Code's built-in Explore and Plan subagents do not load
+# CLAUDE.md (code.claude.com/docs/en/sub-agents), so the use-when block a user pasted there — and the SessionStart
+# primer below, which fires for the main session only — never reaches the agent that does the codebase search. This
+# mode puts three commands into that subagent's context at spawn: which call ranks files for a task, which prints one
+# symbol, which names the tests for a change.
+#
+# WHO GETS IT, AND WHY NOT EVERYONE. Only agent_type Explore and Plan. Every other type (general-purpose, a custom
+# agent) loads CLAUDE.md, so for it the note repeats routing the context already holds: the paste block (about 3.2 KB)
+# states these three commands, and AR1 counted that block present in 81 of 83 subagent transcripts of one session.
+# A note there is a pure duplicate, paid on every turn of every subagent. RIPWIRE_SUBAGENT_ROUTE=all widens it to every
+# type (an operator whose CLAUDE.md does not carry the block); =0|off silences it; any other value reads as off, so a
+# typo neither widens the note nor keeps it. The web-fetch agent also skips CLAUDE.md and is left out on purpose: it
+# has no codebase question to route.
+#
+# A FLOOR, NOT THE LEVER. This is ambient context, and lane RO1's stored analogue says ambient context moves little:
+# with the CLAUDE.md protocol in context and a silent brief, 13 of 215 implementer lanes (6%) made ripwire their first
+# source action, against 34-39% when the brief itself carried the routing. It is built because Explore and Plan get
+# nothing at all today. What an orchestrator can do about it is in `ripwire wrap claude`: paste the brief block.
+#
+# THE TEXT IS STATEMENTS, NOT ORDERS. The hooks reference asks for additionalContext written as facts; the note says
+# what each command answers and when it comes ("before opening files"), and leaves the choice to the subagent. It is a
+# constant: nothing from the payload reaches it (not the cwd, not the agent type), and no ripwire process is spawned
+# to produce it, so the same input gives the same bytes. test/subagentroutecheck.sh (L) runs the three commands it
+# names against the real binary, which is what keeps a constant from drifting off the verb catalog.
+#
+# HOW THIS DIFFERS FROM hooks/ripwire-subagent-primer.sh (lane AR1). That hook is the opt-in instrument of a registered
+# A/B: ~660 B, two numbered steps, every agent type, its own log. This one is registered by the plain --hook install,
+# is under 400 B, and speaks only where CLAUDE.md does not. With BOTH registered, an Explore or Plan subagent receives
+# both texts.
+#
+# THE CONTROL ARM IS NOT SPOKEN TO, for the reason given at the SessionStart primer below: this is a nudge. A subagent
+# carries its parent's session_id, so the arm is the parent session's.
+#
+# WRITES NOTHING BY DEFAULT: no meter row (a new row class would change the session counts every existing readout is
+# built on), no marker file. RIPWIRE_SUBAGENT_ROUTE_LOG=FILE appends one row per decision — agent_type, decision,
+# bytes — and never the text; it is how a probe proves the hook fired.
+#
+# Contract (code.claude.com/docs/en/hooks, read 2026-11-21): SubagentStart JSON on stdin carries the common fields plus
+# {agent_id, agent_type}; context = exit 0 plus {"hookSpecificOutput":{"hookEventName":"SubagentStart",
+# "additionalContext":"..."}}. Every path exits 0. Whether that context reaches the SUBAGENT's own context on a given
+# client version is what scripts/hk2_probe.sh in the lane's results measures; it is not asserted here.
+if [ "${1:-}" = "--subagent-start" ]
+then
+    command -v jq >/dev/null 2>&1 || exit 0
+    input="$( cat )" || exit 0
+    [ "$( printf '%s' "$input" | jq -r '.hook_event_name // empty' 2>/dev/null )" = "SubagentStart" ] || exit 0
+    agentType="$( printf '%s' "$input" | jq -r '.agent_type // empty' 2>/dev/null )"
+    dir="$( printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null )"
+    session="$( printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null )"
+    [ -n "$dir" ] || dir="$PWD"
+    [ -n "$session" ] || session="ppid$PPID"
+
+    # routeLog DECISION BYTES — one row, only where the operator named a file. The agent type is the one payload field
+    # that is written anywhere, and only here: control characters removed, 64 B at most.
+    routeLog()
+    {
+        [ -n "${RIPWIRE_SUBAGENT_ROUTE_LOG:-}" ] || return 0
+        printf '%s\t%s\t%s\n' "$( printf '%s' "$agentType" | tr -d '\000-\037' | cut -c1-64 )" "$1" "$2" \
+            >>"$RIPWIRE_SUBAGENT_ROUTE_LOG" 2>/dev/null || true
+    }
+
+    case "${RIPWIRE_SUBAGENT_ROUTE-default}" in
+        default|'') routeAll=0 ;;
+        all)        routeAll=1 ;;
+        *)          routeLog skip-off 0; exit 0 ;;
+    esac
+    if [ "$routeAll" -eq 0 ]
+    then
+        case "$agentType" in
+            Explore|Plan) ;;
+            *) routeLog skip-agent-type 0; exit 0 ;;
+        esac
+    fi
+
+    meter_set_repo "$dir"
+    meter_init
+    [ "$meter_arm" = "control" ] && { routeLog skip-control 0; exit 0; }
+
+    command -v ripwire >/dev/null 2>&1 || { routeLog skip-no-ripwire 0; exit 0; }
+    # `true`, not only exit 0 — the #327 shape, as in the SessionStart mode below. meter_set_repo cleared git's
+    # inherited repository-selection variables, so this answers for the payload's cwd.
+    insideWorkTree="$( git -C "$dir" rev-parse --is-inside-work-tree 2>/dev/null )" || { routeLog skip-not-git 0; exit 0; }
+    [ "$insideWorkTree" = true ] || { routeLog skip-not-git 0; exit 0; }
+
+    note='ripwire is on PATH and maps this codebase. `ripwire <dir> --for="<task>"` ranks the files and symbols a task touches: it is the call that comes before opening files. `ripwire <dir> --expand=SYM --legend=compact` prints one symbol'"'"'s body with its callees'"'"' signatures. `ripwire <dir> --test-gate --legend=compact` names the tests to run for a change.'
+    out="$( jq -cn --arg m "$note" '{hookSpecificOutput:{hookEventName:"SubagentStart",additionalContext:$m}}' 2>/dev/null )" \
+        || { routeLog skip-jq-failed 0; exit 0; }
+    [ -n "$out" ] || { routeLog skip-jq-failed 0; exit 0; }
+    routeLog delivered "$( printf '%s' "$note" | wc -c | tr -d ' ' )"
+    printf '%s\n' "$out"
+    exit 0
+fi
+
+# ---- Agent-brief mode (`--agent-brief`): NOT INSTALLED BY ANYTHING. A probe arm, opt-in by hand (lane HK2) ----
+# A PreToolUse hook on the Agent/Task tool that returns `updatedInput` with the three-moment brief block appended to
+# the spawn prompt. Lane RO1 measured that routing in the BRIEF is what a subagent acts on (first source action
+# ripwire in 34-39% of routed lanes against 5% unrouted) and that ambient context is not (6% with CLAUDE.md alone),
+# so a hook that writes into the brief would make the working lever automatic. The hooks reference documents
+# `updatedInput` for PreToolUse as modifying "the tool's input parameters"; it does not say it applies to an Agent
+# call, and that is UNVERIFIED. skills/install.sh does not register this mode and must not until
+# scripts/hk2_probe.sh (in the lane's results) shows the appended block in the subagent's first user message.
+#
+# WHAT IT RETURNS. The whole tool_input, with `prompt` = the original prompt, a blank line, the block. `updatedInput`
+# REPLACES the input, so every other field is passed through unchanged. No permissionDecision by default: a hook that
+# answers "allow" approves every subagent launch, which no ripwire hook does. RIPWIRE_AGENT_BRIEF_DECISION=allow adds
+# it, for the probe to learn whether a client applies the rewrite only with a decision.
+# SILENT when the prompt already names ripwire (the orchestrator briefed it, or a re-run): the block is added once.
+# The block is a constant, the same bytes `ripwire wrap claude` prints for an orchestrator to paste by hand
+# (kSubagentBriefBlock in src/wrap.h; test/subagentroutecheck.sh (M) compares the two). Same gates as the mode above:
+# jq, ripwire on PATH, a git work tree, not the control arm. Every path exits 0, so it can never block a spawn.
+if [ "${1:-}" = "--agent-brief" ]
+then
+    command -v jq >/dev/null 2>&1 || exit 0
+    input="$( cat )" || exit 0
+    printf '%s' "$input" | jq -e '.hook_event_name == "PreToolUse" and (.tool_name == "Agent" or .tool_name == "Task")
+        and (.tool_input.prompt | type == "string") and (.tool_input.prompt | test("ripwire") | not)' >/dev/null 2>&1 || exit 0
+    dir="$( printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null )"
+    session="$( printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null )"
+    [ -n "$dir" ] || dir="$PWD"
+    [ -n "$session" ] || session="ppid$PPID"
+
+    meter_set_repo "$dir"
+    meter_init
+    [ "$meter_arm" = "control" ] && exit 0
+    command -v ripwire >/dev/null 2>&1 || exit 0
+    insideWorkTree="$( git -C "$dir" rev-parse --is-inside-work-tree 2>/dev/null )" || exit 0
+    [ "$insideWorkTree" = true ] || exit 0
+
+    brief='ripwire is on PATH — before reading source, `ripwire <dir> --for="<task>"`; before the first edit, `--expand=SYM --legend=compact`, `--callers=SYM --legend=compact` or `--impact=SYM --legend=compact`; before reporting done, commit, then `--quality-delta=BASE..HEAD --legend=compact` and `--test-gate --legend=compact`.'
+    decision=""
+    [ "${RIPWIRE_AGENT_BRIEF_DECISION:-}" = "allow" ] && decision="allow"
+    printf '%s' "$input" | jq -c --arg b "$brief" --arg d "$decision" \
+        '{hookSpecificOutput:( {hookEventName:"PreToolUse", updatedInput:(.tool_input | .prompt += "\n\n" + $b)}
+            + (if $d == "" then {} else {permissionDecision:$d} end) )}' 2>/dev/null || true
+    exit 0
+fi
 
 # ---- SessionStart mode (`--session-start`): inject the use-when blurb ONCE at session start ----
 # The PreToolUse nudges above are reactive — they only speak after the agent has already reached for a

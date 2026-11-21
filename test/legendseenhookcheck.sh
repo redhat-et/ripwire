@@ -203,8 +203,8 @@ else no "(i) --hook installed a command-rewriting hook without disclosing it: $(
 IN="$TMP/inoseen"; mkdir -p "$IN"
 HOME="$IN" PATH="$HPATH" bash "$ROOT/skills/install.sh" --hook --no-hook-legend-seen >"$TMP/in0" 2>&1; rn=$?
 nn="$( seencount "$IN/.claude/settings.json" )"; na="$( nudgecount "$IN/.claude/settings.json" )"
-if [ "$rn" -eq 0 ] && [ "$nn" = 0 ] && [ "$na" = 2 ]; then ok "(i) --no-hook-legend-seen: the advisory entries alone (2 nudge, 0 legend-seen)"
-else no "(i) --no-hook-legend-seen: rc=$rn legend-seen=$nn nudge=$na (want rc 0, 0 legend-seen, 2 nudge)"; fi
+if [ "$rn" -eq 0 ] && [ "$nn" = 0 ] && [ "$na" = 3 ]; then ok "(i) --no-hook-legend-seen: the advisory entries alone (3 nudge: PreToolUse, SessionStart, SubagentStart; 0 legend-seen)"
+else no "(i) --no-hook-legend-seen: rc=$rn legend-seen=$nn nudge=$na (want rc 0, 0 legend-seen, 3 nudge)"; fi
 IP="$TMP/iplain"; mkdir -p "$IP"
 HOME="$IP" PATH="$HPATH" bash "$ROOT/skills/install.sh" >/dev/null 2>&1
 if [ ! -e "$IP/.claude/settings.json" ]; then ok "(i) a plain skills install still writes no settings.json at all — the default rides on a hook install"
