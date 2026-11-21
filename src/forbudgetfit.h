@@ -22,6 +22,9 @@
 //              kForBudgetRowFloor: the kept rows are the best-ranked, in U's order — against --token-budget only: a --max-tokens
 //              ceiling never cuts a ranked row (METHODOLOGY §9 #2: exceed it with over_ceiling="1" rather than drop the row
 //              that would have terminated the search; formaxtokenscheck (E): the body ceiling moves no row)
+//              The doc rows the docs reorder moved hold the worst r= of U's shown set, so rows:N cuts them first: <sigs
+//              docs_after_code=> is recounted over the rows kept (absent at 0, its reading with it) — lane DA1, gate
+//              test/fordocsaftercodecheck.sh; the walk still prices U's count, so the rows kept are the ones kept before it
 // answer(B) = U with the SHORTEST prefix of that sequence removed whose est_tokens (plus the held blocks' price) is <= B; the whole sequence when none
 // is (the root then prices more than it names; a --max-tokens ceiling also says over_ceiling="1"). Three consequences the
 // gate (test/budgetmonotonecheck.sh) holds: B >= est(U) + its held blocks' price returns U byte for byte (a budget that fits cuts nothing, so it
@@ -67,6 +70,7 @@ struct ForAnswerLedger
     std::size_t detailXmlBytes  = 0;     // the --detail section as charged (legend comments + <bodies>; 0: none)
     std::size_t detailTokens    = 0;     // its tokens (inside bodyTokens), tokensForEmittedBytes( detailXmlBytes, body rate )
     bool        autoBodies      = false; // that section is the auto bundle's <bodies> (no --detail): the root's bodies= counts it
+    std::vector<std::uint32_t> docsAfterCodeRanks;   // the r= of the <sigs> doc rows the docs reorder moved (docs_after_code=; lane DA1)
 };
 
 // The budget asked: a soft target (--token-budget) and/or a ceiling (--max-tokens under --detail). 0 = not asked.
@@ -381,6 +385,7 @@ public:
         sigRows_    = sigs_.found() ? countRows( sigs_, isSigRow ) : 0;
         rowCutPos_  = rowCutOrder();
         docCutPos_  = docCutOrder();
+        findDocsAfterCode();
         tailRows_   = tail_.found() ? countRows( tail_, []( std::string_view name ) { return name == "t"; } ) : 0;
         hopRows_    = hops_.found() ? countRows( hops_, []( std::string_view name ) { return name == "h"; } ) : 0;
         detailRows_ = detailShed ? countRows( detail_, []( std::string_view name ) { return name == "b"; } ) : 0;
@@ -411,13 +416,13 @@ public:
     ShedState walk() const
     {
         ShedState  st;
-        bool       fits = !trusted_ || priceOf( st, false ) <= walkTarget_;   // the held re-render may fit with nothing more shed
+        bool       fits = !trusted_ || walkPriceOf( st ) <= walkTarget_;   // the held re-render may fit with nothing more shed
         const auto step = [ & ]( auto&& apply, std::size_t times )
         {
             for( std::size_t k = 0; k < times && !fits; ++k )
             {
                 apply();
-                fits = priceOf( st, false ) <= walkTarget_;
+                fits = walkPriceOf( st ) <= walkTarget_;
             }
         };
         const bool attrsShed = sigs_.found() && sigRows_ > 0 && sigsXml( ShedState{ .attrs = true } ).size() != sigs_.end - sigs_.at;
@@ -446,15 +451,9 @@ public:
         std::vector<Swap> swaps = swapsFor( st );
         std::string       out   = root;
         std::size_t       at    = rootEnd_;
-        if( legendEnd_ != std::string_view::npos && ( swaps.empty() || legendEnd_ < swaps.front().at ) )
+        if( legendKept( swaps ) )
         {
-            const std::size_t legendAt = out.size();
-            out.append( answer_.substr( rootEnd_, legendEnd_ - rootEnd_ ) );
-            if( splitReadingShed( swaps ) )
-            {
-                out.erase( legendAt + ( splitClauseAt_ - rootEnd_ ), splitClauseLen_ );
-            }
-            out += clausesFor( st, over );
+            out += legendFor( st, swaps, over );
             at = legendEnd_;
         }
         for( const Swap& s : swaps )
@@ -570,6 +569,10 @@ private:
         const std::size_t past = attrNumber( out, "past_target" );   // the rows past the 7.5 KB target are the last ones: the cut ones leave it
         out = past > st.rowCut ? withAttr( out, "past_target", std::to_string( past - st.rowCut ) ) : withoutAttr( out, "past_target" );
         out = attrNumber( out, "files_first" ) > keep ? withAttr( out, "files_first", std::to_string( keep ) ) : out;
+        // lane DA1: docs_after_code= reads "N doc rows of the SHOWN set moved": the moved doc rows hold the worst r= the reorder
+        // handed out, so rows:N cuts them first — count the ones still shown (absent at 0, its reading with it: docsClauseShed)
+        const std::size_t docsMoved = keptMovedDocs( st );
+        out = docsMoved > 0 ? withAttr( out, "docs_after_code", std::to_string( docsMoved ) ) : withoutAttr( out, "docs_after_code" );
         return sigsWithNext( std::move( out ) );   // the r=1 row keeps its own --expand next=; the block's names the shed rows' call
     }
     std::string sigsXml( const ShedState& st ) const
@@ -792,10 +795,25 @@ private:
         std::ptrdiff_t bytes = std::ptrdiff_t( rootFor( st, over ).size() ) - std::ptrdiff_t( rootTag_.size() );
         bytes += legendEnd_ != std::string_view::npos ? std::ptrdiff_t( clausesFor( st, over ).size() ) : 0;
         bytes -= splitClauseLen_ > 0 && splitReadingShed( swapsFor( st ) ) ? std::ptrdiff_t( splitClauseLen_ ) : 0;
+        bytes -= docsClauseErased( st ) ? std::ptrdiff_t( dacClauseLen_ ) : 0;
         bytes += droppedValAt_ != 0 && st.rowCut > 0 ? std::ptrdiff_t( droppedValueFor( st ).size() ) - std::ptrdiff_t( droppedValEnd_ - droppedValAt_ ) : 0;
         return bytes;
     }
     std::size_t priceOf( const ShedState& st, bool over ) const { return estOf( st, disclosureBytes( st, over ) ); }
+    // lane DA1: the bytes the docs_after_code= recount takes off a state (the attribute's value or the attribute, and its reading).
+    // The WALK prices them back in, so the shed chooses exactly the rows it chose before the recount existed (selection is not this
+    // lane's to move); render() prices the document it prints, so est_tokens= stays that document's price.
+    std::ptrdiff_t docsRecountBytes( const ShedState& st ) const
+    {
+        if( dacU_ == 0 || st.rowCut == 0 )
+        {
+            return 0;
+        }
+        const auto           attrBytes = []( std::size_t n ) { return n == 0 ? std::ptrdiff_t( 0 ) : std::ssize( std::string_view( " docs_after_code=\"\"" ) ) + std::ssize( std::to_string( n ) ); };
+        const std::ptrdiff_t clause    = docsClauseErased( st ) ? std::ptrdiff_t( dacClauseLen_ ) : 0;
+        return attrBytes( dacU_ ) - attrBytes( keptMovedDocs( st ) ) + clause;
+    }
+    std::size_t walkPriceOf( const ShedState& st ) const { return estOf( st, disclosureBytes( st, false ) + docsRecountBytes( st ) ); }
     // the price the token target cuts rows against: the ceiling's own disclosure (max_tokens= and its clause, beside a target) is
     // not the target's to pay, so a ceiling never moves a ranked row (formaxtokenscheck (E): the same rows with or without it)
     std::size_t rowsPriceOf( const ShedState& st ) const
@@ -804,7 +822,7 @@ private:
         const std::size_t ceiling = !both ? 0
                                   : std::string_view( " max_tokens=\"\"" ).size() + std::to_string( ask_.ceilingTokens ).size()
                                         + ( legendEnd_ != std::string_view::npos ? kForBudgetCeilingBesideTarget.size() : 0 );
-        return estOf( st, disclosureBytes( st, false ) - std::ptrdiff_t( ceiling ) );
+        return estOf( st, disclosureBytes( st, false ) + docsRecountBytes( st ) - std::ptrdiff_t( ceiling ) );
     }
 
     std::vector<Swap> swapsFor( const ShedState& st ) const
@@ -826,8 +844,84 @@ private:
         {
             swaps.push_back( { droppedValAt_, droppedValEnd_, droppedValueFor( st ) } );
         }
+        if( docsClauseShed( st ) && !docsClauseInLegend() )   // the reading rides the comment before <sigs> (sigsCeilingNote's splice)
+        {
+            swaps.push_back( { dacClauseAt_, dacClauseAt_ + dacClauseLen_, std::string() } );
+        }
         std::sort( swaps.begin(), swaps.end(), []( const Swap& a, const Swap& b ) { return a.at < b.at; } );
         return swaps;
+    }
+
+    // U's first legend comment as the state prints it: the present-only readings the shed leaves without their rows erased
+    // (last-first, so each offset still holds), the state's clauses appended
+    std::string legendFor( const ShedState& st, const std::vector<Swap>& swaps, bool over ) const
+    {
+        std::string legend( answer_.substr( rootEnd_, legendEnd_ - rootEnd_ ) );
+        std::vector<std::pair<std::size_t, std::size_t>> erase;   // (offset in U, length)
+        if( splitReadingShed( swaps ) )
+        {
+            erase.emplace_back( splitClauseAt_, splitClauseLen_ );
+        }
+        if( docsClauseShed( st ) && docsClauseInLegend() )
+        {
+            erase.emplace_back( dacClauseAt_, dacClauseLen_ );
+        }
+        std::sort( erase.begin(), erase.end(), []( const auto& a, const auto& b ) { return a.first > b.first; } );
+        for( const auto& [ at, len ] : erase )
+        {
+            legend.erase( at - rootEnd_, len );
+        }
+        return legend + clausesFor( st, over );
+    }
+
+    // ── docs_after_code= over the kept rows (lane DA1) ───────────────────────────────────────────────────────────────────────
+    // U's <sigs docs_after_code="M"> counts the doc rows the reorder moved; the ledger names them by the r= they are shown with
+    // (serialize.h reorderDocsAfterCode). The count and its reading (kForDocsAfterCodeNote, present-only: it rides the comment
+    // spliced before <sigs>, or the first legend) are U's until rows:N cuts one of them.
+    void findDocsAfterCode()
+    {
+        dacU_ = sigs_.found() ? attrNumber( answer_.substr( sigs_.at, sigs_.openEnd - sigs_.at ), "docs_after_code" ) : 0;
+        movedDocRow_.assign( sigRows_, 0 );
+        if( dacU_ == 0 )
+        {
+            return;
+        }
+        std::size_t seen = 0, flagged = 0;
+        for( const Child& c : sigs_.kids )
+        {
+            if( isSigRow( c.name ) )
+            {
+                const std::size_t r = attrNumber( answer_.substr( c.at, tagSpan( answer_, c.at ).end - c.at ), "r" );
+                movedDocRow_[seen] = r > 0 && std::ranges::binary_search( ledger_.docsAfterCodeRanks, std::uint32_t( r ) ) ? 1 : 0;
+                flagged += movedDocRow_[seen];
+                ++seen;
+            }
+        }
+        // the ledger is the render's own: every moved rank names one printed row (a priced U only — an unpriced one sheds nothing)
+        EXPECTS( !trusted_ || flagged == dacU_, "ForBudgetFitter: docs_after_code= does not match the moved ranks the render recorded" );
+        const std::string_view head = answer_.substr( rootEnd_, sigs_.at - rootEnd_ );
+        if( const std::size_t at = head.rfind( kForDocsAfterCodeNote ); at != std::string_view::npos )
+        {
+            dacClauseAt_  = rootEnd_ + at;
+            dacClauseLen_ = kForDocsAfterCodeNote.size();
+        }
+    }
+    std::size_t keptMovedDocs( const ShedState& st ) const
+    {
+        std::size_t kept = 0;
+        for( std::size_t i = 0; i < movedDocRow_.size(); ++i )
+        {
+            kept += movedDocRow_[i] != 0 && rowCutPos_[i] >= st.rowCut ? 1 : 0;
+        }
+        return kept;
+    }
+    bool docsClauseShed( const ShedState& st ) const { return dacClauseLen_ > 0 && st.rowCut > 0 && keptMovedDocs( st ) == 0; }
+    bool docsClauseInLegend() const noexcept { return legendEnd_ != std::string_view::npos && dacClauseAt_ < legendEnd_; }
+    // the reading leaves the printed document: by its swap before <sigs>, or by render()'s legend edit when the legend is kept
+    bool docsClauseErased( const ShedState& st ) const { return docsClauseShed( st ) && ( !docsClauseInLegend() || legendKept( swapsFor( st ) ) ); }
+    bool legendKept( const std::vector<Swap>& swaps ) const noexcept
+    {
+        return legendEnd_ != std::string_view::npos && ( swaps.empty() || legendEnd_ < swaps.front().at );
     }
 
     // The split reading (attrib-multidef Q1, kForCompactSplitClause / kForSplitClause) is present-only: U's legend carries it
@@ -893,6 +987,8 @@ private:
     std::size_t            sigRows_ = 0, tailRows_ = 0, hopRows_ = 0, detailRows_ = 0;
     std::size_t            droppedValAt_ = 0, droppedValEnd_ = 0, droppedHad_ = 0;   // U's own dropped_positive= value (0: none)
     std::size_t            splitClauseAt_ = 0, splitClauseLen_ = 0, splitRowsU_ = 0;   // U's split reading in its legend, and its prov="split" rows
+    std::size_t            dacU_ = 0, dacClauseAt_ = 0, dacClauseLen_ = 0;   // U's docs_after_code= and its reading's place (lane DA1)
+    std::vector<char>      movedDocRow_;   // per <sigs> row in document order: a doc row the reorder moved (its r= is in the ledger's)
 };
 }   // namespace budgetfit_detail
 

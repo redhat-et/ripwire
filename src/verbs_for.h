@@ -5436,6 +5436,10 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         // TOKEN-BUDGET-MONOTONE: the shares a budget may shed, priced as the root priced them
         fillForAnswerLedger( mode.ledger, cfg, pricedHeader.inputs, fold,
                              ForLedgerSections{ .detail = detailSection, .autoBundle = autoSection, .slot = slot, .hopsCutMarker = enrich.hopsCutMarker } );
+        if( mode.ledger != nullptr )
+        {
+            mode.ledger->docsAfterCodeRanks = forSigsCut.docsAfterCodeRanks;   // lane DA1: a rows:N shed recounts docs_after_code= by them
+        }
 
         StdoutCapture forAnswerBytes( forFileSymsWanted( d ) );   // K-WRONGSYM: the bytes below are read back by appendForFileSyms
         std::fwrite( headerStr.data(), 1, headerStr.size(), stdout );
