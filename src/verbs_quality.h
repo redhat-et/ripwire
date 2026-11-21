@@ -2919,15 +2919,10 @@ struct QdRootField
     const std::string& in( QdFormat format ) const noexcept { return format == QdFormat::Xml ? xml : json; }
 };
 
-// A count as a root disclosure: ` name="N"` / `,"name":N` when `present`, else absent.
+// A count as a root disclosure: ` name="N"` / `,"name":N` (rw::countField) when `present`, else absent.
 QdRootField qdCountField( std::string_view name, std::size_t count, bool present )
 {
-    if( !present )
-    {
-        return {};
-    }
-    const std::string n = std::to_string( count );
-    return { " " + std::string( name ) + "=\"" + n + "\"", ",\"" + std::string( name ) + "\":" + n };
+    return present ? QdRootField{ rw::countField( name, count, /*json=*/false ), rw::countField( name, count, /*json=*/true ) } : QdRootField{};
 }
 
 // Every root disclosure, each built once (qdRootFieldsOf). `stale` and `registerMacroExcluded` sit between the fixed
