@@ -2367,8 +2367,10 @@ struct CallResultTypes
     //     names the alias's target: "hashutil";
     //   * a bare call `f()` under a using-declaration `using rw::hashutil::f;` names the declaration's scope: "hashutil".
     //     A using-directive (`using namespace a;`) names no one scope and is not read here.
-    // In force: the call's own file's rows declared before it in a scope that holds it (forEachCppUsing's own-file rule), and
-    // the FILE-scope rows of every in-tree header it includes — a header's `namespace a { using x::f; }` is not read, because no
+    // In force: the call's own file's rows declared before it in the INNERMOST scope that holds it and holds such a row (a
+    // block-scope row hides an outer one, as C++ lookup stops at the first scope that declares the name; rows of that one
+    // scope that disagree still give ""), and — when that scope is the file's own — the FILE-scope rows of every in-tree
+    // header it includes — a header's `namespace a { using x::f; }` is not read, because no
     // C++ Namespace row is recorded while the family is off, so its namespace path is unknown (card CPP-HDR-NS-USING). The
     // header half depends on (file, name) only and is memoized (cppHeaderScopeMemo). A name no alias or using-declaration in the
     // tree binds never walks. `spanStart`/`spanEnd` are the innermost deciding row's span: the scope C++ lookup finds it in, which
@@ -2395,24 +2397,38 @@ struct CallResultTypes
         {
             return {};
         }
-        CppScopeFold  fold;
+        const std::span<const Binding* const> rows
+            = r.fileId < importsByFile.size() ? std::span( importsByFile[ r.fileId ] ) : std::span<const Binding* const>{};
+        const auto inForce = [ & ]( const Binding& b ) { return cppScopeRowInForce( b, r.startByte, qualified, name ); };
         CppNamedScope out;
-        for( const Binding* b : r.fileId < importsByFile.size() ? std::span( importsByFile[ r.fileId ] ) : std::span<const Binding* const>{} )
+        for( const Binding* b : rows )   // the innermost scope holding a row in force: enclosing spans nest, so the narrowest
         {
-            const std::uint32_t at = r.startByte;
-            if( isCppScopeRow( *b ) && b->startByte < at && b->spanStart <= at && at < b->spanEnd && cppScopeRowFits( *b, qualified, name ) )
+            if( inForce( *b ) && b->spanEnd - b->spanStart < out.spanEnd - out.spanStart )
             {
-                fold.add( cppScopeOfRow( *b, qualified ) );
-                if( b->spanEnd - b->spanStart <= out.spanEnd - out.spanStart )
-                {
-                    out.spanStart = b->spanStart;
-                    out.spanEnd   = b->spanEnd;
-                }
+                out.spanStart = b->spanStart;
+                out.spanEnd   = b->spanEnd;
             }
         }
-        fold.join( cppHeaderScopeOf( r.fileId, name, qualified ) );
+        CppScopeFold fold;
+        for( const Binding* b : rows )   // a row there hides every outer one (`namespace h = b;` in a body over a file-scope `h = a`)
+        {
+            if( inForce( *b ) && b->spanStart == out.spanStart && b->spanEnd == out.spanEnd )
+            {
+                fold.add( cppScopeOfRow( *b, qualified ) );
+            }
+        }
+        if( out.fileScope() )   // an included header's file-scope rows sit at the same level as the file's own
+        {
+            fold.join( cppHeaderScopeOf( r.fileId, name, qualified ) );
+        }
         out.scope = fold.agree ? fold.named : std::string_view{};
         return out;
+    }
+    // an own-file scope row in force at byte `at` that binds `name` the way the call reads it (cppScopeRowFits): declared
+    // before `at`, in a span that holds it
+    static bool cppScopeRowInForce( const Binding& b, std::uint32_t at, bool qualified, std::string_view name )
+    {
+        return isCppScopeRow( b ) && b.startByte < at && b.spanStart <= at && at < b.spanEnd && cppScopeRowFits( b, qualified, name );
     }
     // a row that binds `name` the way the call reads it: an alias with a target for a qualified call, a using-declaration (not
     // a directive) for a bare one

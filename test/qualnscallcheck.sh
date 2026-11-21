@@ -56,6 +56,20 @@
 #             the one-segment Reference cannot tell `h::f` from `gamma::h::f`, so the base reading stands). The alias's
 #             !bindsWithoutTarget filter has NO arm: while the C++ family is off a target-less TypeAlias row carries no span,
 #             so it is never a scope row (ingest_binds.h captureShadowDecl) — the filter is for the family-on path.
+# Fix round 2 (CodeRabbit on #717), fixture fx3 (src/a.h aa/bb/cc/other + C++17 `namespace real2::h`, src/hdr.h a file-scope
+# `namespace hh = cc;`, src/u.cpp a file-scope `namespace h = aa;` + `using aa::g;`, src/v.cpp a file-scope `namespace h = other;`):
+#   POSITIVE  (red on 4b1f4516e: each was the split, cppScopeNamedAt folded every enclosing row and the disagreement hedged)
+#             a block-scope `namespace h = bb;` over the file-scope `h = aa`              → bb::f (the innermost alias hides the outer)
+#             a nested block's `namespace h = cc;` inside a block's `h = bb`              → cc::f
+#             a block-scope `namespace hh = bb;` over an included header's `hh = cc`      → bb::g (a header row joins only file scope)
+#             a block-scope `using bb::g;` over the file-scope `using aa::g;`             → bb::g
+#   NEGATIVE  h::f( x ) beside those bodies, under the file-scope alias alone             → aa::f (base bin 5df5a26be: the split)
+#             hh::g( x ) under the header's file-scope alias alone                         → cc::g (base bin 5df5a26be: the split)
+#             `using aa::f; using bb::f;` in ONE block (an overload set)                   → the split (guard: rows of the innermost
+#                                     scope still fold, a disagreement hedges; a last-row-wins build turns it red)
+#             CodeRabbit thread 1: real2::h::k( x ) under `namespace h = other;`, real2::h a C++17 nested namespace → real2's
+#                                     (guard: scopeHoldsName on the last-segment key; base bin 5df5a26be: the split with other::k)
+#             h::g( x ) under `namespace h = other;`, no scope spelled h holding g         → other::g (base bin 5df5a26be: the split)
 # The fix keys rows the base left split or bound to the namesake; it never turns a hedged row into a proven one without a
 # declaration that names the scope (an unknown qualifier keeps the base reading).
 # Every negative arm counts the rows it read and the batch fails when they read none (a vacuous arm proves nothing).
@@ -374,6 +388,101 @@ neg2 fx2 src/lib.rs make 15 "src/lib.rs::Bar::make"                    # REPORT-
 neg2 fx2 src/lib.rs make 16 "src/lib.rs::Bar::make"                    # REPORT-ONLY Rust: a::inner::Bar's impl
 neg2 fx2 "$U2" f 35 "src/a.h::h::f" qualified                          # KNOWN FLOOR: h::f under the alias beside gamma::h::f
 if [ "$seen2" -eq 11 ]; then ok "the 11 round-1 negative arms read $seen2 rows (premise: none vacuous)"; else no "the 11 round-1 negative arms read $seen2 rows (want 11, one each)"; fi
+
+# ── fix round 2 (CodeRabbit on #717): fixture fx3 ──
+F3="$TMP/fx3"; mkdir -p "$F3/src"
+cat >"$F3/src/a.h" <<'EOF'
+#pragma once
+namespace aa
+{
+inline int f( int x ) { return x + 1; }
+inline int g( int x ) { return x + 2; }
+}
+namespace bb
+{
+inline int f( int x ) { return x + 3; }
+inline int g( int x ) { return x + 4; }
+}
+namespace cc
+{
+inline int f( int x ) { return x + 5; }
+inline int g( int x ) { return x + 6; }
+}
+namespace other
+{
+inline int g( int x ) { return x + 7; }
+inline int k( int x ) { return x + 8; }
+}
+namespace real2::h
+{
+inline int k( int x ) { return x + 9; }
+}
+EOF
+cat >"$F3/src/hdr.h" <<'EOF'
+#pragma once
+#include "a.h"
+namespace hh = cc;
+EOF
+cat >"$F3/src/u.cpp" <<'EOF'
+#include "hdr.h"
+namespace h = aa;
+int blockAlias( int x )
+{
+    namespace h = bb;
+    return h::f( x );
+}
+int fileAlias( int x ) { return h::f( x ); }
+int nestedBlock( int x )
+{
+    namespace h = bb;
+    {
+        namespace h = cc;
+        return h::f( x );
+    }
+}
+int overHeader( int x )
+{
+    namespace hh = bb;
+    return hh::g( x );
+}
+int viaHeader( int x ) { return hh::g( x ); }
+using aa::g;
+int blockUsing( int x )
+{
+    using bb::g;
+    return g( x );
+}
+int sameBlock( int x )
+{
+    using aa::f;
+    using bb::f;
+    return f( x );
+}
+EOF
+cat >"$F3/src/v.cpp" <<'EOF'
+#include "a.h"
+namespace h = other;
+int nested17( int x ) { return real2::h::k( x ); }
+int plain( int x ) { return h::g( x ); }
+EOF
+census "$F3" fx3 || exit 1
+U3=src/u.cpp; X3=src/a.h
+seen3=0
+neg3(){ expect "$@"; seen3=$(( seen3 + $( cat "$TMP/rows" ) )); }
+
+echo "── round 2 positive: the innermost scope holding an alias or using-declaration decides ──"
+expect fx3 "$U3" f 6 "$X3::bb::f" qualified                            # block-scope h = bb over the file-scope h = aa
+expect fx3 "$U3" f 14 "$X3::cc::f" qualified                           # a nested block's h = cc inside a block's h = bb
+expect fx3 "$U3" g 20 "$X3::bb::g" qualified                           # block-scope hh = bb over the header's hh = cc
+expect fx3 "$U3" g 27 "$X3::bb::g" qualified                           # block-scope using bb::g over the file-scope using aa::g
+
+echo "── round 2 negative: an outer row alone still decides; one scope's disagreeing rows still hedge ──"
+neg3 fx3 "$U3" f 8 "$X3::aa::f" qualified                              # the file-scope alias alone
+neg3 fx3 "$U3" g 22 "$X3::cc::g" qualified                             # the header's file-scope alias alone
+neg3 fx3 "$U3" f 33 "$X3::aa::f $X3::bb::f $X3::cc::f" split           # two using-declarations in one block
+neg3 fx3 src/v.cpp k 3 "$X3::real2::h::k" qualified                    # thread 1: real2::h::k beside the alias h = other
+neg3 fx3 src/v.cpp g 4 "$X3::other::g" qualified                       # thread 1: h::g, no scope spelled h holds g
+if [ "$seen3" -eq 5 ]; then ok "the 5 round-2 negative arms read $seen3 rows (premise: none vacuous)"; else no "the 5 round-2 negative arms read $seen3 rows (want 5, one each)"; fi
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME FAILED"
 exit "$fail"
