@@ -50,7 +50,7 @@ Two limits apply to nearly everything here and are not repeated in every section
 
 **security — scan skill files for injection / exfiltration patterns (exit 2 = CRITICAL, 1 = WARN,** — [`--scan-skill`](#--scan-skillfile) · [`--scan-skills`](#--scan-skillsdir) · [`--force`](#--force)
 
-**knobs / modes** — [`--rank-by`](#--rank-bypagerankauthorityhubrrfchurnchurn-decay) · [`--in`](#--indir) · [`--format`](#--formatxmlcolumnarrows) · [`--format`](#--formatcandidates) · [`--legend`](#--legendfullcompactdictlastfirst) · [`--page-bytes`](#--page-bytesnk) · [`--no-verb-route`](#--no-verb-route) · [`--legend-dict`](#--legend-dictcorekey) · [`--legend-have`](#--legend-havehavehave) · [`--legend-seen`](#--legend-seenfile) · [`--json`](#--json) · [`--limit`](#--limitn---offsetm) · [`--exclude`](#--excludesubstr) · [`--map-diff`](#--map-diff) · [`--cache`](#--cachepath) · [`--index-out`](#--index-outbase) · [`--no-cache`](#--no-cache) · [`--no-ignore`](#--no-ignore) · [`--max-file-size`](#--max-file-sizenkmg) · [`--max-memory`](#--max-memorynkmg) · [`--refetch`](#--refetch) · [`--scip`](#--scipindexscip) · [`--pin-census`](#--pin-censusfile) · [`--mcp`](#--mcp) · [`--mcp-legend`](#--mcp-legendwhen) · [`--mcp-tools`](#--mcp-toolslist) · [`--lsp`](#--lsp) · [`--lsp-langmap`](#--lsp-langmapfile) · [`--listen`](#--listenhostport) · [`--mcp-token`](#--mcp-tokent) · [`--allow-remote-edits`](#--allow-remote-edits) · [`--eval-stray`](#--eval-strayfile) · [`--eval`](#--eval) · [`--eval-retrieval`](#--eval-retrieval) · [`--eval-mined`](#--eval-minedfile) · [`--eval-skills`](#--eval-skillsfile) · [`-h`](#-h---help) · [`-v`](#-v---version)
+**knobs / modes** — [`--rank-by`](#--rank-bypagerankauthorityhubrrfchurnchurn-decay) · [`--in`](#--indir) · [`--format`](#--formatxmlcolumnarrows) · [`--format`](#--formatcandidates) · [`--legend`](#--legendfullcompactdictlastfirst) · [`--page-bytes`](#--page-bytesnk) · [`--rows`](#--rowslineselements) · [`--no-verb-route`](#--no-verb-route) · [`--legend-dict`](#--legend-dictcorekey) · [`--legend-have`](#--legend-havehavehave) · [`--legend-seen`](#--legend-seenfile) · [`--json`](#--json) · [`--limit`](#--limitn---offsetm) · [`--exclude`](#--excludesubstr) · [`--map-diff`](#--map-diff) · [`--cache`](#--cachepath) · [`--index-out`](#--index-outbase) · [`--no-cache`](#--no-cache) · [`--no-ignore`](#--no-ignore) · [`--max-file-size`](#--max-file-sizenkmg) · [`--max-memory`](#--max-memorynkmg) · [`--refetch`](#--refetch) · [`--scip`](#--scipindexscip) · [`--pin-census`](#--pin-censusfile) · [`--mcp`](#--mcp) · [`--mcp-legend`](#--mcp-legendwhen) · [`--mcp-tools`](#--mcp-toolslist) · [`--lsp`](#--lsp) · [`--lsp-langmap`](#--lsp-langmapfile) · [`--listen`](#--listenhostport) · [`--mcp-token`](#--mcp-tokent) · [`--allow-remote-edits`](#--allow-remote-edits) · [`--eval-stray`](#--eval-strayfile) · [`--eval`](#--eval) · [`--eval-retrieval`](#--eval-retrieval) · [`--eval-mined`](#--eval-minedfile) · [`--eval-skills`](#--eval-skillsfile) · [`-h`](#-h---help) · [`-v`](#-v---version)
 
 ---
 
@@ -4698,6 +4698,16 @@ $ ./build/ripwire . --for="rankGraphTeleport" --page-bytes=4000:2
 **Caveats (stated by the binary):**
 
 - --legend=first (legend-first, unpaged) and --token-budget= (a shed, not a page) do not page.
+
+### `--rows=lines|elements`
+
+**Answers:** (with --for) the form of the <sigs> and <tail> rows: lines, the default, is ROWS AS LINES above;
+
+elements is one XML element per row as 0.6.x served them, byte for byte the answer lines decodes to. The flag decides over RIPWIRE_NO_ROWLINES in both directions; any other value, or the flag without --for, is refused. ripwire --version says which form this binary serves by default in this environment (rows=).
+
+**Caveats (stated by the binary):**
+
+- any other value, or the flag without --for, is refused.
 
 ### `--no-verb-route`
 

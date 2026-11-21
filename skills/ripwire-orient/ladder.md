@@ -54,7 +54,7 @@ signatures — **read it here instead of opening the file the map named**, that 
 this default deletes. `bodies="0" reason="budget"` means it did not fit whole.
 *Conceptual phrase* (`bundle="compact" bodies="0" reason="compact-route"`): no bodies — you get the ranked
 map plus a `<hops>` section, one row per top-ranked symbol with its one-hop callee names. **Read the map,
-pick ONE symbol, then `--expand=path:name`** (paste the row's own path and name — `path:L-E name` on a line row, `p=` and `n=` on an XML row; a bare name that is not
+pick ONE symbol, then `--expand=path:name`** (paste the row's own path and name — `path:L-E name` on a line row, `p=` and `n=` on an XML row; `--rows=elements` serves every row as XML; a bare name that is not
 unique serves every definition, still without the map). That is the flow, and it is cheaper than the bodies were: half the bytes
 of the old bundle on conceptual queries, and the edges tell you which symbol is worth the second call.
 `--auto-bodies` restores inline bodies on that route if you want them; `--signatures-only` drops both

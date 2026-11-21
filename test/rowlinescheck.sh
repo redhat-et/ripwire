@@ -27,6 +27,17 @@
 #   (L10) the form's whole LEGEND cost is its two clauses: the answer's comment bytes exceed the twin's by exactly their sizes
 #         (compactlegendcheck's size targets read the element form, so this arm is where that cost is pinned; a third clause, or a
 #         longer one, fails here)
+#   (R1)  --rows= (owner ruling 153: lines by default, both forms reachable): --rows=elements is the RIPWIRE_NO_ROWLINES=1 twin
+#         byte for byte (the element form, which (L1) ties to the answer and the lane's 89-question run ties to the pre-FMT2
+#         binary), and --rows=lines is the default answer byte for byte — whole answer and page 1
+#   (R1n) the arm can fail: the two forms differ, so (R1)'s comparison crossed over (elements against the default) is unequal
+#   (R2)  FLAG OVER ENV, both directions: RIPWIRE_NO_ROWLINES=1 --rows=lines serves lines; --rows=elements serves elements
+#         with the variable unset and set
+#   (R3)  refused in the house shape (exit 1, empty stdout, one stderr sentence naming the flag and the accepted values): an
+#         unknown value, an empty value, and the flag without --for
+#   (R4)  --version discloses the default form in this environment: rows=lines, and rows=elements under RIPWIRE_NO_ROWLINES=1
+#         (zero answer bytes: the answer root is unchanged)
+#   Every (R) arm is NEW: red on a binary without the flag (it refuses --rows= as unknown, so every file below is empty).
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${RIPWIRE_BIN:-${1:-$ROOT/build/ripwire}}"
@@ -59,6 +70,36 @@ for arm in "--legend=first" "--json"; do
     if [ -s "$WORK/n_$tag.on" ] && cmp -s "$WORK/n_$tag.on" "$WORK/n_$tag.off"; then ok "(L7) $arm: byte-identical with and without RIPWIRE_NO_ROWLINES"
     else no "(L7) $arm: the answer changed with the knob (or is empty)"; fi
 done
+# (R) the --rows= flag
+rw --page-bytes=0 --rows=elements                          >"$WORK/r_whole.el"
+rw --page-bytes=0 --rows=lines                             >"$WORK/r_whole.li"
+rw --rows=elements                                         >"$WORK/r_page1.el"
+rw --rows=lines                                            >"$WORK/r_page1.li"
+RIPWIRE_NO_ROWLINES=1 rw --page-bytes=0 --rows=lines       >"$WORK/r_env_li"
+RIPWIRE_NO_ROWLINES=1 rw --page-bytes=0 --rows=elements    >"$WORK/r_env_el"
+same(){ [ -s "$1" ] && cmp -s "$1" "$2"; }
+if same "$WORK/r_whole.el" "$WORK/whole.off" && same "$WORK/r_page1.el" "$WORK/page1.off"; then ok "(R1) --rows=elements is the RIPWIRE_NO_ROWLINES=1 twin byte for byte (whole answer, page 1)"
+else no "(R1) --rows=elements is not the element-form twin (or is empty)"; fi
+if same "$WORK/r_whole.li" "$WORK/whole.on" && same "$WORK/r_page1.li" "$WORK/page1.on"; then ok "(R1) --rows=lines is the default answer byte for byte (whole answer, page 1)"
+else no "(R1) --rows=lines is not the default answer (or is empty)"; fi
+if [ -s "$WORK/r_whole.el" ] && ! cmp -s "$WORK/r_whole.el" "$WORK/whole.on" && ! cmp -s "$WORK/r_whole.li" "$WORK/whole.off"; then ok "(R1n) [negative control] crossed over, (R1)'s comparison is unequal: the two forms differ"
+else no "(R1n) the two forms are byte-identical (or empty): (R1) could not tell them apart"; fi
+if same "$WORK/r_env_li" "$WORK/whole.on"; then ok "(R2) RIPWIRE_NO_ROWLINES=1 --rows=lines serves the line form: the flag decides over the variable"
+else no "(R2) with the variable set, --rows=lines did not serve the line form"; fi
+if same "$WORK/r_env_el" "$WORK/whole.off" && same "$WORK/r_whole.el" "$WORK/whole.off"; then ok "(R2) --rows=elements serves the element form with the variable unset and set"
+else no "(R2) --rows=elements did not serve the element form in both environments"; fi
+refused(){   # label, the stderr text required, then the argv
+    label="$1"; want="$2"; shift 2
+    "$BIN" src --no-cache "$@" >"$WORK/ref.out" 2>"$WORK/ref.err"; rc=$?
+    if [ "$rc" -eq 1 ] && [ ! -s "$WORK/ref.out" ] && grep -qF -- "$want" "$WORK/ref.err" && [ "$( grep -c . "$WORK/ref.err" )" -eq 1 ]; then ok "(R3) $label: refused (exit 1, no answer, one sentence: $want)"
+    else no "(R3) $label: rc=$rc, stdout $( wc -c <"$WORK/ref.out" | tr -d ' ' ) B, stderr: $( head -c 200 "$WORK/ref.err" )"; fi
+}
+refused "an unknown value"        "ripwire: --rows needs lines or elements — got 'xml'"  --for="$TASK" --rows=xml
+refused "an empty value"          "ripwire: --rows= is empty — it needs lines or elements" --for="$TASK" --rows=
+refused "the flag without --for"  "ripwire: --rows shapes the rows of a --for answer only" --rows=elements
+v_def="$( "$BIN" --version 2>/dev/null )"; v_env="$( RIPWIRE_NO_ROWLINES=1 "$BIN" --version 2>/dev/null )"
+case "$v_def" in *", rows=lines, built_from="*) case "$v_env" in *", rows=elements, built_from="*) ok "(R4) --version says rows=lines, and rows=elements under RIPWIRE_NO_ROWLINES=1" ;; *) no "(R4) --version under the variable: $v_env" ;; esac ;;
+    *) no "(R4) --version does not disclose rows=lines: $v_def" ;; esac
 # (L4) fixture: a Python signature whose text holds the CDATA terminator
 mkdir -p "$WORK/fx"
 cat >"$WORK/fx/terminator.py" <<'PY'

@@ -33,7 +33,7 @@
 // after the permutation, SIGX, the key body, the early stop, the budget fit and PAGING — so every stage before it reads rows as
 // elements exactly as it did, a page holds the same rows it held, and each page is encoded on its own (a continuation page's first
 // sigs row keeps its r=). Not on --legend=first's straight-through write, --json, or the MCP twin. RIPWIRE_NO_ROWLINES (any value)
-// turns both off — the A/B handle, the RIPWIRE_NO_SIGX precedent.
+// turns both off — the A/B handle, the RIPWIRE_NO_SIGX precedent — and --rows=lines|elements decides over it (rowLinesOn below).
 #pragma once
 
 #include <algorithm>
@@ -46,6 +46,7 @@
 #include <vector>
 
 #include "foranswerfirst.h"   // topLevelBlocks / rootBody — the one CDATA-safe scanner of a --for answer's blocks
+#include "forrowsform.h"      // rowLinesOn — the switch: --rows= over RIPWIRE_NO_ROWLINES (cli.h reads the same header)
 
 namespace rw::rowlines
 {
@@ -55,8 +56,6 @@ inline constexpr std::string_view kRowLinesClause =
     "<!-- sigs/tail rows are lines: 'P SYMS' is <t p=P sym=SYMS/> (a space between), then tab-separated k=v are its other attributes; "
     "'P:L-E N k=v.. | SIG' is <d p=P l=L e=E n=N k=v..>SIG</d>; values are unescaped; a line starting with &lt; is the row verbatim; "
     "est_tokens= may price the element form: an upper bound -->";
-
-[[nodiscard]] inline bool rowLinesOn() noexcept { return std::getenv( "RIPWIRE_NO_ROWLINES" ) == nullptr; }
 
 // ── the row reader: one open tag, strictly ` name="value"` attributes (values are escaped by the emitter, so they hold no raw '"').
 struct Attr
@@ -452,11 +451,12 @@ inline void encodeSection( std::string_view doc, const answerfirst::Block& b, st
 }
 
 // Rewrite `doc` (the bytes of a finished answer-first --for answer or of one page of it) in place. Returns whether it changed.
-inline bool encodeRows( std::string& doc )
+// `rows`: --rows= as typed (Config::rowsSpec; empty = not typed), read by rowLinesOn.
+inline bool encodeRows( std::string& doc, std::string_view rows = {} )
 {
     const std::string_view                     view = doc;
     // an answer-first document OPENS with its root; anything else (a legend-first answer, JSON, a refusal) is served as it is
-    const std::optional<answerfirst::RootBody> rb   = rowLinesOn() && view.starts_with( "<ctx" ) ? answerfirst::rootBody( view ) : std::nullopt;
+    const std::optional<answerfirst::RootBody> rb   = rowLinesOn( rows ) && view.starts_with( "<ctx" ) ? answerfirst::rootBody( view ) : std::nullopt;
     if( !rb ) { return false; }
     Applied     applied;
     std::string out;
