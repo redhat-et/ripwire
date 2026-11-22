@@ -453,7 +453,8 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
         snap->startNs    = wallClockNs();
         snap->rootKey    = quality::cacheRootKeyHex( rootDir );   // the field the cache-dir sweep pins a root's whole family by
         snap->optionsKey = warmsnap::optionsKeyOf( rootDir, excludeSubstr, maxFileBytes, captureValueUses, excludeLabel, respectGitignore,
-                                                   kCacheVersion * 100000u + parserVerFor( captureValueUses ), tlIngestWantsConstructHits );
+                                                   kCacheVersion * 100000u + parserVerFor( captureValueUses ), tlIngestWantsConstructHits,
+                                                   tlCrawlTreeAllTracked );
         if( const std::optional<std::uint64_t> blobId = cacheBlobIdentity( snap->blobPath, captureValueUses ) )
         {
             snap->path = warmsnap::snapshotPath( snap->rootKey, snap->optionsKey, *blobId );

@@ -267,6 +267,38 @@ inline bool isSkippedCrawlDir( std::string_view dirName ) noexcept
     return dirName.size() > 5 && dirName.compare( dirName.size() - 5, 5, ".dSYM" ) == 0;
 }
 
+// M1 (tracked build-output dirs): the four kCrawlSkipDirs names that GUESS a directory is build output from its name
+// alone. A guess git can falsify: bat's `build/` holds the Cargo build script's real source (tracked), and the name prune
+// removed it from every answer while a peer indexed it. So a directory with one of these names that git TRACKS files
+// under is crawled (ingest_crawl.h TrackedBuildDirs); untracked, it stays pruned — generated output is what the prune is
+// for. Deliberately NOT here: vendor/, third_party/, node_modules/ (tracked vendored code is the noise those names exist
+// to drop, tracked or not), and captures/ (this repository tracks docs/captures/ and prunes it on purpose).
+inline constexpr std::string_view kTrackedBuildOutputDirs[] = { "build", "dist", "out", "target" };
+
+inline bool isTrackedBuildOutputName( std::string_view dirName ) noexcept
+{
+    return isOneOf( dirName, kTrackedBuildOutputDirs );
+}
+
+// The crawl of a MATERIALIZED COMMIT TREE (quality.h materializeCommitTree: a `git archive` of a commit extracted into a
+// temp directory with no `.git`) cannot ask git what it tracks — but every file in it IS tracked, by construction. Without
+// this the working tree indexes a tracked build/ while the HEAD snapshot of the same commit prunes it, so --quality-delta
+// reads every symbol under it as new (and merge-scout, the churn window and --dmm see none of them). Scoped on the
+// thread, as WantConstructHits below is: each materialized-tree ingest holds one for the duration of its ingest() call.
+inline thread_local bool tlCrawlTreeAllTracked = false;
+
+class CrawlTreeAllTracked
+{
+public:
+    CrawlTreeAllTracked() noexcept : prev_( tlCrawlTreeAllTracked ) { tlCrawlTreeAllTracked = true; }
+    ~CrawlTreeAllTracked() { tlCrawlTreeAllTracked = prev_; }
+    CrawlTreeAllTracked( const CrawlTreeAllTracked& )            = delete;
+    CrawlTreeAllTracked& operator=( const CrawlTreeAllTracked& ) = delete;
+
+private:
+    bool prev_;
+};
+
 // ── §SEC1: THE CRAWL BOUNDARY ────────────────────────────────────────────────────────────────────────────
 //
 // ONE RULE, STATED ONCE, FOR EVERY WALK THIS BINARY OWNS: a path a crawl collected must resolve, AFTER LINK
@@ -410,6 +442,16 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                      std::string_view cacheFile = {}, std::size_t maxFileBytes = kDefaultMaxFileBytes,
                      bool captureValueUses = true, std::string_view excludeLabel = {},
                      bool respectGitignore = true, IngestLayout = {} );
+
+// M1: ingest() of a tree whose every file is vouched for — a materialized commit tree (all tracked, by construction), or
+// edit-preview's one file that came out of the main index — so a build-output-named directory in it is crawled, not
+// pruned by name (CrawlTreeAllTracked above). Every materialized-tree ingest goes through here, so none can forget it.
+inline IngestResult ingestTrackedTree( const char* rootDir, const std::vector<std::string>& excludeSubstr, std::string_view cacheFile,
+                                       std::size_t maxFileBytes, bool captureValueUses = true )
+{
+    const CrawlTreeAllTracked tracked;
+    return ingest( rootDir, excludeSubstr, cacheFile, maxFileBytes, captureValueUses );
+}
 
 // ---- index-identity disclosure (the two functions behind --doctor's index-cache row) ----
 //

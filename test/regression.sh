@@ -1156,6 +1156,7 @@ for _g in \
     tracehandoffcapcheck \
     tracehopcheck \
     traceminecheck \
+    trackedbuilddircheck \
     treecheck \
     truncvocabcheck \
     tsimportprecisecheck \

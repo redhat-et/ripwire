@@ -1436,16 +1436,14 @@ struct GitIgnoreProbeRaw
     bool operator==( const GitIgnoreProbeRaw& ) const = default;
 };
 
-GitIgnoreProbeRaw runGitIgnoreProbe( const char* rootDir )
+// One `git -C <root> -c core.quotepath=false ls-files <args>` listing, read whole under kMaxIgnoreProbeBytes and
+// classified — the process half both crawl probes share (the ignore probe below, and TrackedBuildDirs' tracked probe).
+// The caller has already established that the root is under a `.git` (underGitRoot), so `NotGit` never comes from here.
+GitIgnoreProbeRaw runGitLsFiles( const char* rootDir, std::string_view lsFilesArgs )
 {
-    PROFILE_SCOPE_DESCRIBE( "ingest: git ignore probe (the git process; off the main thread when speculated)" );
     GitIgnoreProbeRaw raw;
-    if( !underGitRoot( rootDir ) )
-    {
-        return raw;
-    }
     const std::string cmd = gitCmd( " -C " ) + shSingleQuote( rootDir == nullptr ? std::string( "." ) : std::string( rootDir ) )
-                          + " -c core.quotepath=false ls-files --others --ignored --exclude-standard --directory -z 2>/dev/null";
+                          + " -c core.quotepath=false ls-files " + std::string( lsFilesArgs ) + " 2>/dev/null";
     std::FILE* pipe = os::popen( cmd.c_str(), "r" );
     if( pipe == nullptr )
     {
@@ -1471,6 +1469,16 @@ GitIgnoreProbeRaw runGitIgnoreProbe( const char* rootDir )
     }
     ENSURES( raw.state == GitIgnoreProbeRaw::State::Answered || raw.bytes.empty(), "a probe that did not answer carries no bytes" );
     return raw;
+}
+
+GitIgnoreProbeRaw runGitIgnoreProbe( const char* rootDir )
+{
+    PROFILE_SCOPE_DESCRIBE( "ingest: git ignore probe (the git process; off the main thread when speculated)" );
+    if( !underGitRoot( rootDir ) )
+    {
+        return {};
+    }
+    return runGitLsFiles( rootDir, "--others --ignored --exclude-standard --directory -z" );
 }
 
 // The probe's PARSE half: every degrade disclosed exactly where collectGitIgnored disclosed it, then the -z entries.
@@ -1704,6 +1712,143 @@ GitIgnoreSet probeIgnoreSet( const char* rootDir, bool respectGitignore, IgnoreM
     modeOut = set.available ? IgnoreMode::Git : set.rootIgnored ? IgnoreMode::RootIgnored : IgnoreMode::Unavailable;
     return set;
 }
+
+// ── M1: TRACKED BUILD-OUTPUT DIRECTORIES ARE SOURCE ───────────────────────────────────────────────────────
+//
+// kCrawlSkipDirs prunes build/ dist/ out/ target/ by NAME, a guess that they hold generated output. git can falsify it:
+// a directory under one of those names whose files git TRACKS is committed source (bat's build/ is its Cargo build
+// script; LP1 measured all 5 gold functions of one DEV task under it, missed by the name prune, on page 1 once it was
+// renamed). So the walk crawls such a directory when git tracks files under it, and keeps pruning it otherwise.
+//
+// ONE git child per root, never one per directory, and only when it can matter: the walk meets a directory with one of
+// the four names that git's ignore answer did not already collapse whole (an ignored directory holds nothing tracked —
+// `--directory` never collapses a directory with a tracked path in it). This repository's own build/ is ignored, so it
+// never asks. The answer is every tracked path under any such directory (`:(glob)**/NAME/**`, relative to the root as
+// the walk's own paths are), folded to the directories it proves: each ancestor of a tracked path named by
+// kTrackedBuildOutputDirs. Nested ones too: a tracked `web/dist/a.js` admits `web/dist`.
+//
+// Bound to the ignore answer on purpose (asked only when git answered it): that is what makes the walk's dependence on
+// the INDEX visible to the warm snapshot, which watches the index's signature exactly when the ignore probe ran
+// (warmsnap.h GitInputs). So a non-git root, --no-ignore and a git that could not answer all keep the name prune, which
+// is also the pre-change corpus each of those already promised. A materialized commit tree is the one case decided
+// without git (ingest.h CrawlTreeAllTracked).
+struct TrackedBuildDirs
+{
+    bool                     asked     = false;   // the probe has run for this walk (its answer, good or bad, stands)
+    bool                     available = false;   // git answered; `dirs` is authoritative
+    std::vector<std::string> dirs;                // root-relative, NO trailing '/', sorted, unique
+    enum class DisclosureWhy : std::uint8_t
+    {
+        GitNotRunnable,
+        ProbeFailed,
+        ProbeOverCeiling,
+    };
+    void disclose( DisclosureWhy ) noexcept
+    {
+        available = false;   // the name prune stands: never index a directory git was not heard to vouch for
+    }
+};
+
+// The -z listing → the directories it proves tracked. Each entry is one tracked file; every '/'-terminated prefix whose
+// LAST component is one of the four names is a directory the walk will crawl.
+inline std::vector<std::string> trackedBuildDirsOf( std::string_view listing )
+{
+    std::vector<std::string> dirs;
+    for( std::size_t i = 0; i < listing.size(); )
+    {
+        const std::size_t nul = std::min( listing.find( '\0', i ), listing.size() );
+        const std::string_view ent = listing.substr( i, nul - i );
+        i = nul + 1;
+        for( std::size_t from = 0, slash = ent.find( '/' ); slash != std::string_view::npos; from = slash + 1, slash = ent.find( '/', from ) )
+        {
+            if( isTrackedBuildOutputName( ent.substr( from, slash - from ) ) )
+            {
+                dirs.emplace_back( ent.substr( 0, slash ) );
+            }
+        }
+    }
+    std::sort( dirs.begin(), dirs.end() );
+    dirs.erase( std::unique( dirs.begin(), dirs.end() ), dirs.end() );
+    return dirs;
+}
+
+inline TrackedBuildDirs collectTrackedBuildDirs( const char* rootDir )
+{
+    PROFILE_SCOPE_DESCRIBE( "ingest: crawl (git tracked-build-dir probe, one per root, only when a build-output name is met)" );
+    TrackedBuildDirs out;
+    out.asked = true;
+    std::string args = "-z --";
+    for( const std::string_view name : kTrackedBuildOutputDirs )
+    {
+        args += " " + shSingleQuote( ":(glob)**/" + std::string( name ) + "/**" );
+    }
+    const GitIgnoreProbeRaw raw = runGitLsFiles( rootDir, args );
+    switch( raw.state )
+    {
+        case GitIgnoreProbeRaw::State::NotGit:        // not produced by runGitLsFiles; the name prune stands
+        case GitIgnoreProbeRaw::State::NotRunnable:
+        {
+            DISCLOSE( out, TrackedBuildDirs::DisclosureWhy::GitNotRunnable, "ingest: cannot run git for the tracked-build-dir probe — build-output names stay pruned" );
+            return out;
+        }
+        case GitIgnoreProbeRaw::State::Failed:
+        {
+            DISCLOSE( out, TrackedBuildDirs::DisclosureWhy::ProbeFailed, "ingest: the tracked-build-dir probe exited non-zero — build-output names stay pruned" );
+            return out;
+        }
+        case GitIgnoreProbeRaw::State::OverCeiling:
+        {
+            DISCLOSE( out, TrackedBuildDirs::DisclosureWhy::ProbeOverCeiling, "ingest: the tracked-build-dir probe exceeded its byte ceiling — build-output names stay pruned" );
+            return out;
+        }
+        case GitIgnoreProbeRaw::State::Answered:
+        {
+            break;
+        }
+    }
+    out.dirs      = trackedBuildDirsOf( raw.bytes );
+    out.available = true;
+    return out;
+}
+
+// The walk's one question about a directory NAME, with M1's exception folded in: is `name` pruned by the built-in
+// denylist? A build-output name git tracks files under is not (TrackedBuildDirs' header). `rel` is the walk's LAZY
+// root-relative spelling, stringified only for one of the four names; the probe runs at most once per walk.
+class CrawlNamePrune
+{
+public:
+    CrawlNamePrune( const char* rootDir, const GitIgnoreSet& ignoreSet, bool allTracked ) noexcept
+        : rootDir_( rootDir ), ignoreSet_( ignoreSet ), allTracked_( allTracked ) {}
+
+    template< typename RelFn >
+    bool prunes( std::string_view name, RelFn&& rel )
+    {
+        return isSkippedCrawlDir( name ) && !( isTrackedBuildOutputName( name ) && tracked( rel() ) );
+    }
+
+private:
+    bool tracked( std::string_view rel )
+    {
+        if( allTracked_ )
+        {
+            return true;   // a materialized commit tree: every file is tracked (ingest.h CrawlTreeAllTracked)
+        }
+        if( !ignoreSet_.available || pathInIgnoreSet( ignoreSet_.dirs, rel ) )
+        {
+            return false;  // git did not answer (the name prune stands), or ignored this directory whole (nothing tracked)
+        }
+        if( !probe_.asked )
+        {
+            probe_ = collectTrackedBuildDirs( rootDir_ );
+        }
+        return probe_.available && pathInIgnoreSet( probe_.dirs, rel );
+    }
+
+    const char*         rootDir_;
+    const GitIgnoreSet& ignoreSet_;
+    bool                allTracked_;
+    TrackedBuildDirs    probe_;
+};
 
 // §L1/§N6-C — WHY the walk stopped at this directory, recorded. Contents are UNKNOWN past here whichever
 // rule stopped us, but WHICH rule is itself the disclosure, so the three classes carry three counters
@@ -1994,6 +2139,7 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
     const GitIgnoreSet ignoreSet = probeIgnoreSet( rootDir, respectGitignore, skips.ignoreMode, ignoreSpeculation, rootReal );   // §N6-C
     SphinxTxtRoots     sphinxTxtRoots( os::program_path( root ) );
     seen.root( os::program_path( root ) );
+    CrawlNamePrune     namePrune( rootDir, ignoreSet, tlCrawlTreeAllTracked );   // M1; the scope is read on the calling thread
 
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/crawl: directory walk (stat + classify)" );
@@ -2055,7 +2201,8 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
                 bool skip = excluded;
                 if( !skip )
                 {
-                    skip = isSkippedCrawlDir( p.filename().string() );
+                    // M1: a build-output NAME is a guess; git tracking files under it falsifies the guess (CrawlNamePrune).
+                    skip = namePrune.prunes( p.filename().string(), [ & ] { return relForHash( fullPath(), rootDir ); } );
                 }
                 // skip any dir that contains a CMakeCache.txt — it's a build output tree
                 if( !skip )
