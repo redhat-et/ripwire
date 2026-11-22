@@ -173,3 +173,69 @@ def resent(pages):
         own = comments(d)
         out += [(k, lead.decode()) for lead, _ in CLAUSES if holds(lead, own) and holds(lead, l1)]
     return out
+
+
+# ── (LD8) a travelling clause held: priced against src/legendseen.h's never-larger rule ─────────────────────────────────────────
+# "An answer the reduction would not shorten is served unchanged." So holding a page's travelling clauses leaves them out exactly
+# when that shortens the page: saved = the clauses' dictionary text; cost = the in-place " [legend-seen: K held]" the reduced
+# comment gains plus the answer's ONE marker (`<!-- legend-seen: K definitions … -->`, its length read off a served reduction, so a
+# reworded marker re-prices itself). SEEN_BAND absorbs the page re-pricing its own est_tokens= (a digit or two); inside it either
+# outcome is right, outside it exactly one is.
+SEEN_BAND = 8
+MARKER = re.compile(rb"<!-- legend-seen: (\d+) definitions.*?-->", re.S)
+EST = re.compile(rb' est_tokens="\d+"')
+
+
+def travelling_bodies(travel, bodies):
+    """(lead, dictionary text) of each clause the travelling comment carries — the longest of the lead's spellings found in it"""
+    out = []
+    for lead, _ in CLAUSES:
+        found = [b for b in bodies.get(lead, []) if b in travel]
+        if found:
+            out.append((lead, max(found, key=len)))
+    return out
+
+
+def seen_margin(travel, bodies, marker):
+    """saved - cost, in bytes, of leaving `travel`'s clauses out (positive: the omission shortens the page)"""
+    cl = travelling_bodies(travel, bodies)
+    k = len(cl)
+    m = MARKER.match(marker)
+    mlen = len(marker) - len(m.group(1)) + len(str(k))
+    return sum(len(b) for _, b in cl) - mlen - len(b" [legend-seen: %d held]" % k)
+
+
+def seen_verdict(page, served, travel, bodies, marker):
+    """(ok, why, margin): `served` is `page` asked again with its travelling clauses held"""
+    margin, band = seen_margin(travel, bodies, marker), SEEN_BAND
+    cl = travelling_bodies(travel, bodies)
+    if served == page:
+        return (margin <= band, ("served whole, as it must: omitting would cost %d B more than it saves" % -margin) if margin < -band else
+                ("served whole inside the band (margin %+d B)" % margin) if margin <= band else
+                ("served WHOLE though leaving the clauses out saves %d B — the omission was not made" % margin), margin)
+    left = [lead.decode() for lead, _ in cl if holds(lead, comments(served))]
+    whys = []
+    if len(served) >= len(page):
+        whys.append("the reduced page is not shorter (%d B against %d B)" % (len(served), len(page)))
+    if left:
+        whys.append("still carries %s" % left)
+    if (b"[legend-seen: %d held]" % len(cl)) not in served:
+        whys.append("its travelling comment does not refer to the %d held" % len(cl))
+    if EST.sub(b"", MASK.sub(b"", served)) != EST.sub(b"", MASK.sub(b"", page)):
+        whys.append("rows differ from the page served whole")
+    if margin < -band:
+        whys.append("reduced though omitting costs %d B more than it saves" % -margin)
+    return (not whys, ("left out (%d B saved net, priced at %+d B)" % (len(page) - len(served), margin)) if not whys else "; ".join(whys), margin)
+
+
+def seen_grown(page, travel, bodies, marker):
+    """(LD8m) the reduction a never-larger rule must refuse, built by hand: the clauses cut, the in-place reference and the marker
+    added — what a product without the rule would serve"""
+    cl = travelling_bodies(travel, bodies)
+    t = travel
+    for _, b in cl:
+        t = t.replace(b, b"", 1)
+    t = t[:-len(b" -->")] + b" [legend-seen: %d held] -->" % len(cl)
+    m = MARKER.match(marker)
+    mk = marker[:m.start(1)] + str(len(cl)).encode() + marker[m.end(1):]
+    return page.replace(travel, mk + t, 1)
