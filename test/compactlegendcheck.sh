@@ -3234,7 +3234,9 @@ fx7bad=""
 for sym in pageWindow emitTo; do
     for lg in "" "--legend=full"; do
         # shellcheck disable=SC2086
-        "$BIN" "$ROOT/src" --no-cache --expand=$sym $lg >"$FXT/x7" 2>/dev/null
+        # CL1: src/ files are over a bare --expand's output-ceiling budget, where reason= says "whole-file NB over pack-budget MB"
+        # (no comparison was priced); this arm reads the priced comparison, so it runs at the historic budget, explicitly
+        "$BIN" "$ROOT/src" --no-cache --expand=$sym $lg --pack-budget-bytes=65536 >"$FXT/x7" 2>/dev/null
         n="$( wc -c < "$FXT/x7" | tr -d ' ' )"
         said="$( grep -oE 'reason="(file|bundle) [0-9]+B' "$FXT/x7" | head -1 | grep -oE '[0-9]+' )"
         [ "$said" = "$n" ] || fx7bad="$fx7bad [$sym ${lg:-default}: reason says ${said:-none}B, delivered ${n}B]"
