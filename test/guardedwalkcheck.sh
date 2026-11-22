@@ -37,7 +37,7 @@
 #       per class, CONE-MEMO — the one-entry keep it replaced re-expanded a cone at every Impl/Peer switch, 24 times),
 #       meant_asks=52 — per root 13 for the walk's two levels (`Base`, then Base's 12 `RootK`) plus 13 for its cone (the
 #       same two levels under kConeNameCap) — of which meant=14 are computed: MEANT-MEMO keeps meantBase per (parent name,
-#       parent's reading, base), and the four expansions meet Impl->Base, Peer->Base and Base->RootK x 12 only; asks=1164 (one per bK() call: the first class it asks about owns it), reads=1 (the
+#       parent's reading, base), and the four expansions meet Impl->Base, Peer->Base and Base->RootK x 12 only; asks=24 (one per Impl-root bK() callee and Peer-root bK, the answers kept — GUARDED-ANSWER-MEMO; per call it was 1164: the first class it asks about owns it), reads=1 (the
 #       one file all 12 out-of-line definitions sit in, against the one name `Base`: OWNED-MEMO keeps plausibleClasses per
 #       (file, name); kept per (definition, class) it was 12). Unmemoised the walk alone re-ran 1 or 13 meantBase per call.
 # meantBase's pairing (drawnAndStandingBases) asked, for every class of the deriving name, whether the map drew an edge
@@ -70,7 +70,38 @@
 #   walks=8` (INHERITED-MEMO; walked per ask: walks=16). Its `[mem] plausible reads=`
 #   (plausibleOfName answers computed: Shape's ancestor level, each subclass's clause, each Square's bases) is the same
 #   at M=2 and M=8 (PLAUSIBLE-MEMO; recomputed per ask it is 18 and 24).
-#   (D) CONTROL (RIPWIRE_GUARDEDWALK_CONTROL_BIN=<a binary without the memos>) — the default maps of GW(K, 8), SW(4, 8), BE(8), AT(8) and RC(16, 8) are
+# The receiver-evidence method lookup (ReceiverEvidence::methodOf: `x = Impl(); x.m()` — Impl's own m, else the shallowest base
+# level defining it) walked the type's base levels on EVERY call, de-duplicating each push by a linear scan, and looked every
+# class of every level up by "Class::m". METHOD-MEMO (lane PF3) keeps the answer per ( type, name, superOnly, cls ).
+# RM(K, M): K Python files with RootK / Base(RootK) / Impl(Base), Base defining b and RootK defining r; use() binds x = Impl()
+#   and calls x.r() and x.b() M times each. `[mem] recv_method asks=2M walks=2` (one walk per (Impl, name) question; walked
+#   per ask: walks = asks).
+# A call to a name some function-local definitions share (reachableByName: a local out of the call's reach yields to the
+# name's other definitions) stamped every local of the name and then filtered the name's whole list — per call, though a
+# call no local holds always gets the same answer: the list minus all its locals. REACH-OUTSIDE-MEMO (lane PF3) keeps that
+# list per name and answers such a call with it, after one search of the name's locals by (file, start).
+# RN(K, M): K Python files each nesting `def helper()` in outerK() (which calls it), h.py defining a top-level helper, and use()
+#   calling helper() M times; and a.js, where wrap() and wrap2() nest `function helper()`, wrap() and deep() (in wrap2) call
+#   it — a local HOLDS those three calls, so they still walk — and use() calls the top-level helper() twice.
+#   `[mem] reach_by_name asks=M+5 kept=M+2`: 7/4 at M=2, 13/10 at M=8 (the per-call walk keeps none: kept=0).
+# Each call still replayed its root's kept levels and probed them (ownedBy per definition per meant class) though the answer
+# reads only the kept levels, the callee and two flags. GUARDED-ANSWER-MEMO (lane PF3) keeps it per (root, callee, flags) with
+# the scratch the walk left (fieldWalk / walkMeant to the level it stopped at, walkUnion), restored on a replay.
+# `[mem] guarded_answer asks=C kept=K`: GW(12, M) has 26 (root, callee) pairs (Impl and Peer x b0..b11, r), so asks - kept = 26
+# at M=2 (336/310) and M=8 (1272/1246), and the probe's owned_asks fall to 24 at both M (1164 at M=8 per call).
+# Step (3) and the inherited-body walk ask canonByName for "Class::callee" (and "Scope::Class::callee") at every class they
+# visit — every real subclass, for every (class, callee) — building the key text and hashing it into the whole definitions
+# table each time. CANON-SPLIT (lane PF3) splits the table's keys once at their last "::" into (scope, name) ids, keeps a
+# scope id per class symbol and the last callee's id, and probes by the pair. `[mem] canon_split asks=A keyed=K`: K of the A
+# class visits answered by ids (a callee with a ':' keeps the text lookup; with the ids compiled out keyed=0). SW(4, 8)
+# pins asks=keyed=128 (every callee is a plain name); NS(4) — the same shape inside namespace ns, so every class visit also asks
+# the "ns::Class::callee" key — pins asks=keyed=32 and joins the (D) arm.
+# The external-veto tables resolve an absolute Python import Step-A cannot place by a suffix match over EVERY indexed path
+# (resolvePythonModuleSuffix). FE-A's own asks were memoized per module spelling (PythonSuffixMemo), but the module-form file
+# of `import X [as y]` (pythonModuleFormFile) scanned per import. PY-SUFFIX-MEMO (lane PF3) routes it through the same memo.
+# PS(K): K Python files, each `import os` (outside the tree) and `import util` (pkg/util.py, a suffix hit): `[mem] py_suffix
+# asks=4K scans=2` (one scan per module spelling; 2 + 2K with the form-file asks unmemoized).
+#   (D) CONTROL (RIPWIRE_GUARDEDWALK_CONTROL_BIN=<a binary without the memos>) — the default maps of GW(K, 8), SW(4, 8), BE(8), AT(8), RC(16, 8), RM(4, 8), RN(4, 8), NS(4) and PS(16) are
 #       byte-identical between the control and this binary: the memos change cost, never an edge. Without the variable
 #       the control arm is reported as not run; (A)-(C) still gate on their own.
 #
@@ -184,6 +215,59 @@ genrc(){
     done
 }
 
+# genrm DIR K M — the receiver-evidence method lookup (see header): K Python files RootK / Base(RootK) / Impl(Base), and use()
+# calling x.r() and x.b() M times each on x = Impl()
+genrm(){
+    local dir="$1" k="$2" m="$3" f i
+    mkdir -p "$dir"
+    for f in $( seq 0 $(( k - 1 )) ); do
+        printf 'class Root%d:\n    def r(self):\n        pass\n\nclass Base(Root%d):\n    def b(self):\n        pass\n\nclass Impl(Base):\n    pass\n' "$f" "$f" >"$dir/m$f.py"
+    done
+    {
+        printf 'from m0 import Impl\n\ndef use():\n    x = Impl()\n'
+        for i in $( seq 1 "$m" ); do printf '    x.r()\n    x.b()\n'; done
+    } >"$dir/use.py"
+}
+
+# genrn DIR K M — the by-name reach of function-local definitions (see header)
+genrn(){
+    local dir="$1" k="$2" m="$3" f i
+    mkdir -p "$dir"
+    for f in $( seq 0 $(( k - 1 )) ); do
+        printf 'def outer%d():\n    def helper():\n        return %d\n    return helper()\n' "$f" "$f" >"$dir/f$f.py"
+    done
+    printf 'def helper():\n    return 9\n' >"$dir/h.py"
+    # and JS, whose calls inside a local's span DO reach the walk (a local holds them): wrap's and deep's helper()
+    printf 'function wrap() {\n  function helper() { return 1; }\n  return helper();\n}\nfunction helper() { return 2; }\nfunction use() { helper(); helper(); }\nfunction wrap2() {\n  function helper() { return 3; }\n  function deep() { return helper(); }\n  return deep();\n}\n' >"$dir/a.js"
+    {
+        printf 'from h import helper\n\ndef use():\n'
+        for i in $( seq 1 "$m" ); do printf '    helper()\n'; done
+    } >"$dir/use.py"
+}
+
+# genns DIR N — CANON-SPLIT's nested key (see header): in namespace ns, Shape (deriving from Root) declares f0, f1 bodiless; N
+# Circles define them in class (scope "ns": the "ns::CircleK::fJ" key too); N Squares inherit Painter's; ns::use( Shape* s ) calls both
+genns(){
+    local dir="$1" n="$2" c
+    mkdir -p "$dir"
+    printf 'namespace ns\n{\nstruct Root { };\nstruct Shape : Root\n{\n    virtual void f0() = 0;\n    virtual void f1() = 0;\n};\nstruct Painter\n{\n    void f0() { }\n    void f1() { }\n};\n}\n' >"$dir/shape.h"
+    for c in $( seq 0 $(( n - 1 )) ); do
+        printf '#include "shape.h"\nnamespace ns\n{\nstruct Circle%d : Shape\n{\n    void f0() override { }\n    void f1() override { }\n};\nstruct Square%d : Shape, Painter { };\n}\n' "$c" "$c" >"$dir/c$c.cpp"
+    done
+    printf '#include "shape.h"\nnamespace ns\n{\nvoid use( Shape* s )\n{\n    s->f0();\n    s->f1();\n}\n}\n' >"$dir/use.cpp"
+}
+
+# genps DIR K — the Python suffix scan (see header)
+genps(){
+    local dir="$1" k="$2" f
+    mkdir -p "$dir/pkg"
+    : >"$dir/pkg/__init__.py"
+    printf 'def helper():\n    return 1\n' >"$dir/pkg/util.py"
+    for f in $( seq 0 $(( k - 1 )) ); do
+        printf 'import os\nimport util\n\ndef f%d():\n    return util.helper() + len(os.sep)\n' "$f" >"$dir/m$f.py"
+    done
+}
+
 # stats NAME DIR — run with RIPWIRE_STATS, set LINE / CALLS / WALKS / MEANT
 stats(){
     local name="$1" dir="$2"
@@ -200,6 +284,11 @@ stats(){
     RLINE="$( grep -F '[mem] recv_cone ' "$TMP/$name.err" )"
     SLINE="$( grep -F '[mem] subclass_walk ' "$TMP/$name.err" )"
     ILINE="$( grep -F '[mem] inherited ' "$TMP/$name.err" )"
+    MLINE="$( grep -F '[mem] recv_method ' "$TMP/$name.err" )"
+    GALINE="$( grep -F '[mem] guarded_answer ' "$TMP/$name.err" )"
+    NLINE="$( grep -F '[mem] reach_by_name ' "$TMP/$name.err" )"
+    CSLINE="$( grep -F '[mem] canon_split ' "$TMP/$name.err" )"
+    PSLINE="$( grep -F '[mem] py_suffix ' "$TMP/$name.err" )"
     CASKS="$( printf '%s' "$SLINE" | sed -n 's/.* clause_asks=\([0-9]*\).*/\1/p' )"
     CREADS="$( printf '%s' "$SLINE" | sed -n 's/.* clause_reads=\([0-9]*\).*/\1/p' )"
     LEVELS="$( printf '%s' "$SLINE" | sed -n 's/.* levels=\([0-9]*\).*/\1/p' )"
@@ -213,19 +302,33 @@ RC2="$TMP/rc2"; genrc "$RC2" 16 2
 RC8="$TMP/rc8"; genrc "$RC8" 16 8
 AT2="$TMP/at2"; genat "$AT2" 2
 AT8="$TMP/at8"; genat "$AT8" 8
+RM2="$TMP/rm2"; genrm "$RM2" 4 2
+RM8="$TMP/rm8"; genrm "$RM8" 4 8
+RN2="$TMP/rn2"; genrn "$RN2" 4 2
+RN8="$TMP/rn8"; genrn "$RN8" 4 8
+NS4="$TMP/ns4"; genns "$NS4" 4
+PS4="$TMP/ps4"; genps "$PS4" 4
+PS16="$TMP/ps16"; genps "$PS16" 16
 SW2="$TMP/sw2"; gensw "$SW2" 4 2
 SW8="$TMP/sw8"; gensw "$SW8" 4 8
 
-stats GW2 "$GW2"; c2="$CALLS" w2="$WALKS" m2="$MEANT" rc2=$RC a2="$ASKS" r2="$READS"
-stats GW8 "$GW8"; c8="$CALLS" w8="$WALKS" m8="$MEANT" rc8=$RC line8="$LINE" a8="$ASKS" r8="$READS" oline8="$OLINE" bline8="$BLINE"
+stats GW2 "$GW2"; c2="$CALLS" w2="$WALKS" m2="$MEANT" rc2=$RC a2="$ASKS" r2="$READS" galine2="$GALINE"
+stats GW8 "$GW8"; c8="$CALLS" w8="$WALKS" m8="$MEANT" rc8=$RC line8="$LINE" a8="$ASKS" r8="$READS" oline8="$OLINE" bline8="$BLINE" galine8="$GALINE"
 
 stats BE8 "$BE8"; beline8="$BLINE" berc=$RC
 stats RC2 "$RC2"; rcline2="$RLINE"
 stats RC8 "$RC8"; rcline8="$RLINE" rcrc=$RC
 stats AT2 "$AT2"; atline2="$ALINE"
 stats AT8 "$AT8"; atline8="$ALINE" atrc=$RC
+stats RM2 "$RM2"; rmline2="$MLINE"
+stats RM8 "$RM8"; rmline8="$MLINE" rmrc=$RC
+stats RN2 "$RN2"; rnline2="$NLINE"
+stats RN8 "$RN8"; rnline8="$NLINE" rnrc=$RC
+stats NS4 "$NS4"; nsline="$CSLINE" nsrc=$RC
+stats PS4 "$PS4"; psline4="$PSLINE"
+stats PS16 "$PS16"; psline16="$PSLINE" psrc=$RC
 stats SW2 "$SW2"; sa2="$CASKS" sr2="$CREADS" sl2="$LEVELS" src2=$RC sp2="$READS"
-stats SW8 "$SW8"; sa8="$CASKS" sr8="$CREADS" sl8="$LEVELS" src8=$RC sline8="$SLINE" sp8="$READS" spline8="$OLINE" iline8="$ILINE"
+stats SW8 "$SW8"; sa8="$CASKS" sr8="$CREADS" sl8="$LEVELS" src8=$RC sline8="$SLINE" sp8="$READS" spline8="$OLINE" iline8="$ILINE" swcs8="$CSLINE"
 
 # ── (A) REACHED ────────────────────────────────────────────────────────────────────────────────────────────────
 if [ "$rc2$rc8" = "00" ] && [ -n "$c2" ] && [ -n "$c8" ] && [ "$c2" -gt 0 ] && [ "$c8" -gt "$c2" ]; then
@@ -252,10 +355,17 @@ else
     no "(B) the walk's cost grows with the call count: M=2 walks=${w2:-?} meant=${m2:-?}, M=8 walks=${w8:-?} meant=${m8:-?}"
 fi
 
-if [ -n "$a2" ] && [ -n "$r2" ] && [ "$a8" -gt "$a2" ] && [ "$r2" -gt 0 ] && [ "$r2" = "$r8" ]; then
-    ok "(B) an out-of-line owner is read once per (definition, class): reads=$r8 at both M, asks $a2 -> $a8"
+# GUARDED-ANSWER-MEMO (lane PF3) keeps each (root, callee) answer, so the probe — and its ownedBy asks — runs once per pair:
+# asks no longer grow with M (they did, 1164 at M=8, before it; the arm then read "asks grow, reads stay")
+if [ -n "$a2" ] && [ -n "$r2" ] && [ "$a2" -gt 0 ] && [ "$a2" = "$a8" ] && [ "$r2" -gt 0 ] && [ "$r2" = "$r8" ]; then
+    ok "(B) an out-of-line owner is read once per (file, name), and asked once per (root, callee): reads=$r8 asks=$a8 at both M"
 else
-    no "(B) out-of-line owner reads grow with the call count, or are never reached: M=2 asks=${a2:-?} reads=${r2:-?}, M=8 asks=${a8:-?} reads=${r8:-?}"
+    no "(B) out-of-line owner asks or reads grow with the call count, or are never reached: M=2 asks=${a2:-?} reads=${r2:-?}, M=8 asks=${a8:-?} reads=${r8:-?}"
+fi
+if [ "$galine2" = '[mem] guarded_answer asks=336 kept=310' ] && [ "$galine8" = '[mem] guarded_answer asks=1272 kept=1246' ]; then
+    ok "(B)(C) GW: the guarded walk answers each (root, callee) once, every later call replays it (26 walked at both M): $galine2 / $galine8"
+else
+    no "(B)(C) GW guarded_answer: want 'asks=336 kept=310' at M=2 and 'asks=1272 kept=1246' at M=8, got '${galine2:-<none>}' / '${galine8:-<none>}'"
 fi
 
 if [ -n "$sr2" ] && [ "$sr2" -gt 0 ] && [ "$sr2" = "$sr8" ] && [ -n "$sl2" ] && [ "$sl2" -gt 0 ] && [ "$sl2" = "$sl8" ]; then
@@ -277,7 +387,7 @@ if [ "$line8" = "$want" ]; then
 else
     no "(C) GW counter: want '$want', got '${line8:-<no guarded_walk line>}'"
 fi
-want='[mem] plausible owned_asks=1164 reads=1'
+want='[mem] plausible owned_asks=24 reads=1'
 if [ "$oline8" = "$want" ]; then
     ok "(C) GW counter is exact: $oline8"
 else
@@ -308,6 +418,36 @@ if [ "$rcrc" = 0 ] && [ "$rcline8" = "$want" ] && [ "$rcline2" = '[mem] recv_con
 else
     no "(B)(C) RC counter: want 'asks=512 builds=1' at M=2 and '$want' at M=8, got '${rcline2:-<none>}' / '${rcline8:-<none>}' (rc=$rcrc)"
 fi
+want='[mem] recv_method asks=16 walks=2 kept=2'
+if [ "$rmrc" = 0 ] && [ "$rmline8" = "$want" ] && [ "$rmline2" = '[mem] recv_method asks=4 walks=2 kept=2' ]; then
+    ok "(B)(C) RM: one base-level walk per (type, name) however many calls ask: $rmline2 at M=2, $rmline8 at M=8"
+else
+    no "(B)(C) RM counter: want 'asks=4 walks=2 kept=2' at M=2 and '$want' at M=8, got '${rmline2:-<none>}' / '${rmline8:-<none>}' (rc=$rmrc)"
+fi
+want='[mem] reach_by_name asks=13 kept=10'
+if [ "$rnrc" = 0 ] && [ "$rnline8" = "$want" ] && [ "$rnline2" = '[mem] reach_by_name asks=7 kept=4' ]; then
+    ok "(C) RN: every call no local holds is answered from the name's kept list, the three a local holds walk: $rnline2 at M=2, $rnline8 at M=8"
+else
+    no "(C) RN counter: want 'asks=7 kept=4' at M=2 and '$want' at M=8, got '${rnline2:-<none>}' / '${rnline8:-<none>}' (rc=$rnrc)"
+fi
+want='[mem] canon_split asks=128 keyed=128'
+if [ "$swcs8" = "$want" ]; then
+    ok "(C) SW: every class visit of step (3) is answered by CANON-SPLIT's ids: $swcs8"
+else
+    no "(C) SW canon_split counter: want '$want', got '${swcs8:-<no canon_split line>}'"
+fi
+want='[mem] canon_split asks=32 keyed=32'
+if [ "$nsrc" = 0 ] && [ "$nsline" = "$want" ]; then
+    ok "(C) NS: the nested \"Scope::Class::callee\" key is answered by ids too: $nsline"
+else
+    no "(C) NS canon_split counter: want '$want', got '${nsline:-<no canon_split line>}' (rc=$nsrc)"
+fi
+want='[mem] py_suffix asks=64 scans=2'
+if [ "$psrc" = 0 ] && [ "$psline16" = "$want" ] && [ "$psline4" = '[mem] py_suffix asks=16 scans=2' ]; then
+    ok "(B)(C) PS: one suffix scan per module spelling however many imports ask: $psline4 at K=4, $psline16 at K=16"
+else
+    no "(B)(C) PS counter: want 'asks=16 scans=2' at K=4 and '$want' at K=16, got '${psline4:-<none>}' / '${psline16:-<none>}' (rc=$psrc)"
+fi
 want='[mem] inherited asks=16 walks=8'
 if [ "$iline8" = "$want" ]; then
     ok "(C) SW: step (2)'s ancestor walk runs once per (class, callee) though two callers ask: $iline8"
@@ -323,7 +463,7 @@ fi
 
 # ── (D) CONTROL ────────────────────────────────────────────────────────────────────────────────────────────────
 if [ -n "$CONTROL" ]; then
-    for pair in "GW:$GW8" "SW:$SW8" "BE:$BE8" "AT:$AT8" "RC:$RC8"; do
+    for pair in "GW:$GW8" "SW:$SW8" "BE:$BE8" "AT:$AT8" "RC:$RC8" "RM:$RM8" "RN:$RN8" "NS:$NS4" "PS:$PS16"; do
         name="${pair%%:*}"; dir="${pair#*:}"
         if [ -x "$CONTROL" ] && "$CONTROL" "$dir" --no-cache >"$TMP/ctl$name.xml" 2>/dev/null && "$BIN" "$dir" --no-cache >"$TMP/bin$name.xml" 2>/dev/null \
             && [ -s "$TMP/bin$name.xml" ] && cmp -s "$TMP/ctl$name.xml" "$TMP/bin$name.xml"; then

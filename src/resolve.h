@@ -7815,14 +7815,23 @@ struct IdentityNarrower
     // true when `cls` owns a definition under keyScope, whether or not an earlier step of the walk appended it already
     bool appendOwnedDefinitions( NodeId cls, const ClassIdentity& ids ) const
     {
-        const auto it    = canonByName.find( keyScope );
-        const auto named = ids.classesByName.find( ( *ids.symbols )[ cls ].name );
+        const auto it = canonByName.find( keyScope );   // the text lookup: visitAncestor's, and a callee CANON-SPLIT cannot key
         if( it == canonByName.end() )
         {
             return false;
         }
+        return appendOwnedOf( &it->second, cls, ids );
+    }
+    // appendOwnedDefinitions for canonByName's entry `defs` (found by its key text or by CANON-SPLIT's ids; null: no entry)
+    bool appendOwnedOf( const rw::SmallVec<NodeId, 2>* defs, NodeId cls, const ClassIdentity& ids ) const
+    {
+        if( defs == nullptr )
+        {
+            return false;
+        }
+        const auto named = ids.classesByName.find( ( *ids.symbols )[ cls ].name );
         bool owns = false;
-        for( NodeId d : it->second )
+        for( NodeId d : *defs )
         {
             if( !ownedBy( d, cls, named == ids.classesByName.end() ? nullptr : &named->second, ids ) )
             {
@@ -8106,6 +8115,21 @@ struct IdentityNarrower
     bool appendClassDefinitions( const Reference& r, NodeId cls, const ClassIdentity& ids ) const
     {
         const Symbol& c = ( *ids.symbols )[ cls ];
+        ++canonSplit.asks;
+        if( const std::optional<std::uint32_t> callee = canonSplitName( r.calleeName, ids ); callee.has_value() )
+        {
+            ++canonSplit.keyed;
+            if( *callee == CanonSplit::kNone )
+            {
+                return false;   // no key of canonByName ends in "::callee": neither lookup below can hit
+            }
+            bool owns = appendOwnedOf( canonSplitEntry( canonSplitScope( cls, false, ids ), *callee ), cls, ids );
+            if( !c.scope.empty() )
+            {
+                owns = appendOwnedOf( canonSplitEntry( canonSplitScope( cls, true, ids ), *callee ), cls, ids ) || owns;
+            }
+            return owns;
+        }
         keyScope.assign( c.name ).append( "::" ).append( r.calleeName );
         bool owns = appendOwnedDefinitions( cls, ids );
         if( !c.scope.empty() )
@@ -8114,6 +8138,97 @@ struct IdentityNarrower
             owns = appendOwnedDefinitions( cls, ids ) || owns;
         }
         return owns;
+    }
+
+    // CANON-SPLIT (lane PF3, 2026-11-21; test/guardedwalkcheck.sh CS). appendClassDefinitions asks canonByName for
+    // "Class::callee" (and "Scope::Class::callee") once per class step (3) and the inherited-body walk visit — every real
+    // subclass of the receiver class, for every (class, callee) — building each key text and hashing it into the whole
+    // definitions table: on llvm-project's cold map the largest frame of the resolve loop at df8a5dfd4 (string building,
+    // memmove and that table's find under appendClassDefinitions). canonByName is fixed for the loop, so its keys are split
+    // once at their LAST "::" into (scope, name) ids: a callee with no ':' in it matches a key exactly when the key splits
+    // into (the class's key text, the callee) — the callee holds no "::" and cannot extend one — so the lookup becomes a
+    // per-symbol scope id (kept), the callee's id (kept for the last callee asked) and one integer-keyed probe. A callee with
+    // a ':' (or none) keeps the text lookup.
+    struct CanonSplit
+    {
+        static constexpr std::uint32_t kUnread = 0xFFFFFFFFu, kNone = 0xFFFFFFFEu;
+        HashMap<std::string_view, std::uint32_t>                  scopeIds;   // a key's text before its last "::" -> id
+        HashMap<std::string_view, std::uint32_t>                  nameIds;    // a key's text after it -> id
+        HashMap<std::uint64_t, const rw::SmallVec<NodeId, 2>*>    byIds;      // packPair( scope id, name id ) -> canonByName's entry
+        std::vector<std::uint32_t>                                ownScope;     // per symbol: the scope id of its name (kUnread / kNone)
+        std::vector<std::uint32_t>                                nestedScope;  // per symbol: the scope id of "scope::name"
+        std::string                                               lastCallee;   // the callee text the last name id was read for
+        std::uint32_t                                             lastCalleeId = kNone;
+        std::string                                               text;         // "scope::name" scratch
+        bool                                                      built = false, lastRead = false;
+        std::size_t                                               asks = 0, keyed = 0;   // RIPWIRE_STATS `[mem] canon_split`
+    };
+    mutable CanonSplit canonSplit;
+    void buildCanonSplit( std::size_t symbolCount ) const
+    {
+        canonSplit.built = true;
+        canonSplit.ownScope.assign( symbolCount, CanonSplit::kUnread );
+        canonSplit.nestedScope.assign( symbolCount, CanonSplit::kUnread );
+        canonSplit.byIds.reserve( canonByName.size() );
+        for( const auto& [ key, defs ] : canonByName )
+        {
+            const std::size_t sep = key.rfind( "::" );
+            if( sep == std::string::npos )
+            {
+                continue;   // no "::": no "Class::callee" lookup can name it
+            }
+            const std::string_view whole( key );
+            const std::uint32_t scope = canonSplit.scopeIds.try_emplace( whole.substr( 0, sep ), std::uint32_t( canonSplit.scopeIds.size() ) ).first->second;
+            const std::uint32_t name  = canonSplit.nameIds.try_emplace( whole.substr( sep + 2 ), std::uint32_t( canonSplit.nameIds.size() ) ).first->second;
+            canonSplit.byIds.emplace( hashutil::packPair( scope, name ), &defs );   // a key splits one way: one entry per pair
+        }
+    }
+    // the callee's name id (kNone: no key ends in it), or nullopt when the text lookup must answer (a ':' in the callee, or none)
+    std::optional<std::uint32_t> canonSplitName( std::string_view callee, const ClassIdentity& ids ) const
+    {
+        if( callee.empty() || callee.find( ':' ) != std::string_view::npos )
+        {
+            return std::nullopt;
+        }
+        if( !canonSplit.built )
+        {
+            buildCanonSplit( ids.symbols->size() );
+        }
+        if( !canonSplit.lastRead || callee != canonSplit.lastCallee )
+        {
+            const auto it              = canonSplit.nameIds.find( callee );
+            canonSplit.lastRead        = true;
+            canonSplit.lastCallee.assign( callee );
+            canonSplit.lastCalleeId    = it == canonSplit.nameIds.end() ? CanonSplit::kNone : it->second;
+        }
+        return canonSplit.lastCalleeId;
+    }
+    // the scope id of class `cls`'s key text — its name, or (nested) "scope::name" — kept per symbol; kNone: no key has it
+    std::uint32_t canonSplitScope( NodeId cls, bool nested, const ClassIdentity& ids ) const
+    {
+        std::uint32_t& kept = ( nested ? canonSplit.nestedScope : canonSplit.ownScope )[ cls ];
+        if( kept == CanonSplit::kUnread )
+        {
+            const Symbol& c = ( *ids.symbols )[ cls ];
+            std::string_view text = c.name;
+            if( nested )
+            {
+                canonSplit.text.assign( c.scope ).append( "::" ).append( c.name );
+                text = canonSplit.text;
+            }
+            const auto it = canonSplit.scopeIds.find( text );
+            kept          = it == canonSplit.scopeIds.end() ? CanonSplit::kNone : it->second;
+        }
+        return kept;
+    }
+    const rw::SmallVec<NodeId, 2>* canonSplitEntry( std::uint32_t scope, std::uint32_t name ) const
+    {
+        if( scope == CanonSplit::kNone )
+        {
+            return nullptr;
+        }
+        const auto it = canonSplit.byIds.find( hashutil::packPair( scope, name ) );
+        return it == canonSplit.byIds.end() ? nullptr : it->second;
     }
 
     // the plausible direct bases of `c` (its base clause read from its own file) not in `visited`, appended to it and to `next`
@@ -8346,6 +8461,7 @@ struct Narrower
     struct GuardedWalkStats
     {
         std::size_t calls = 0, walks = 0, cones = 0, meant = 0;
+        std::size_t answered = 0;   // GUARDED-ANSWER-MEMO: calls replayed from a kept answer (RIPWIRE_STATS `[mem] guarded_answer`)
     };
     mutable GuardedWalkStats guardedWalkStats;
 
@@ -9397,12 +9513,32 @@ struct Narrower
     // level no earlier call reached. fieldWalk / walkMeant therefore hold exactly what the per-call expansion left at every
     // probe, so every answer is unchanged byte for byte, and no level is expanded twice. Only a walk over baseGuard->chaUp is
     // kept; a walk over any other table expands per call, as before.
+    //
+    // GUARDED-ANSWER-MEMO (lane PF3, 2026-11-21; test/guardedwalkcheck.sh GW). With the levels kept, each call still replayed
+    // them and probed every level it reached (probeGuardedLevel: every definition of the callee on a level against every
+    // class the walk means there, ownedBy) and the bodiless-declaration tests — per CALL, while the answer reads only the
+    // root's kept levels (fixed), the callee and the two flags: 746,173 calls over 32,084 roots on llvm-project, ~7% of its
+    // resolve loop at 8f06b3398. So the answer is kept on the root's walk per ( callee, skipSelf, unionOnMulti ): what it
+    // returned (nullptr, a canonByName list, or the level union) and the scratch it left — fieldWalk / walkMeant up to the
+    // level it stopped at (the kept levels themselves) and walkUnion as the last probe left it — which a replay restores, so
+    // a caller sees exactly what the walk would have left.
+    struct GuardedAnswer
+    {
+        enum class Kind : std::uint8_t { Null, Defs, Union };
+        Kind                           kind    = Kind::Null;
+        const rw::SmallVec<NodeId, 2>* defs    = nullptr;   // Kind::Defs: canonByName's list
+        std::uint32_t                  walkEnd = 1;         // fieldWalk.size() at the return
+        bool                           probed  = false;     // a probe ran (walkUnion is its result); false: walkUnion untouched
+        rw::SmallVec<NodeId, 2>        unionLeft;           // walkUnion as the last probe left it
+    };
     struct GuardedWalk
     {
         std::vector<std::string_view> names{ std::string_view{} };   // the kept levels' fieldWalk (views into chaUp's strings; [0], the root, is each call's own)
         std::vector<MeantClasses>     meant{ MeantClasses{} };       // walkMeant, parallel
         std::vector<std::uint32_t>    levelEnds{ 1 };                // fieldWalk.size() before the first expansion and after each kept one
+        HashMap<std::string, GuardedAnswer> answers;                 // GUARDED-ANSWER-MEMO: "<s><u>callee" -> the call's answer
     };
+    mutable std::string guardedAnswerKey;
     mutable HashMap<std::string, GuardedWalk> guardedWalks;              // root name -> its kept levels
     mutable const BaseWalkGuard*              guardedWalksFor = nullptr;   // the guard the kept levels were expanded under
     mutable std::string                       guardedWalkKey;
@@ -9458,10 +9594,58 @@ struct Narrower
     {
         ++guardedWalkStats.calls;
         GuardedWalk* const memo = keptWalkFor( typeName, chaUp );
+        if( memo == nullptr )
+        {
+            return guardedBaseWalked( typeName, r.calleeName, chaUp, skipSelf, unionOnMulti, nullptr );
+        }
+        guardedAnswerKey.assign( 1, skipSelf ? 's' : '-' ).append( 1, unionOnMulti ? 'u' : '-' ).append( r.calleeName );
+        if( const auto kept = memo->answers.find( guardedAnswerKey ); kept != memo->answers.end() )
+        {
+            ++guardedWalkStats.answered;
+            return replayGuardedAnswer( kept->second, *memo, typeName );
+        }
+        const rw::SmallVec<NodeId, 2>* found = guardedBaseWalked( typeName, r.calleeName, chaUp, skipSelf, unionOnMulti, memo );
+        GuardedAnswer answer;
+        answer.kind    = found == nullptr ? GuardedAnswer::Kind::Null : found == &walkUnion ? GuardedAnswer::Kind::Union : GuardedAnswer::Kind::Defs;
+        answer.defs    = answer.kind == GuardedAnswer::Kind::Defs ? found : nullptr;
+        answer.walkEnd = std::uint32_t( fieldWalk.size() );
+        answer.probed  = guardedProbed;
+        if( guardedProbed )
+        {
+            answer.unionLeft = walkUnion;
+        }
+        memo->answers.emplace( guardedAnswerKey, std::move( answer ) );
+        return found;
+    }
+    // a kept answer's return and the scratch the walk left: fieldWalk / walkMeant through the level it stopped at, walkUnion
+    const rw::SmallVec<NodeId, 2>* replayGuardedAnswer( const GuardedAnswer& answer, const GuardedWalk& memo, std::string_view typeName ) const
+    {
+        ENSURES( answer.walkEnd <= memo.names.size() && answer.walkEnd <= memo.meant.size(), "a kept answer stops inside its root's kept levels" );
+        fieldWalk.assign( memo.names.begin(), memo.names.begin() + std::ptrdiff_t( answer.walkEnd ) );
+        fieldWalk[ 0 ] = typeName;
+        walkMeant.assign( memo.meant.begin(), memo.meant.begin() + std::ptrdiff_t( answer.walkEnd ) );
+        if( answer.probed )
+        {
+            walkUnion = answer.unionLeft;
+        }
+        switch( answer.kind )
+        {
+            case GuardedAnswer::Kind::Defs:  return answer.defs;
+            case GuardedAnswer::Kind::Union: return &walkUnion;
+            case GuardedAnswer::Kind::Null:  break;
+        }
+        return nullptr;
+    }
+    mutable bool guardedProbed = false;   // guardedBaseWalked: did a level probe run (and so set walkUnion)
+    // the guarded walk itself (unkept answer); `memo`: the root's kept levels, or null (a walk over another table)
+    const rw::SmallVec<NodeId, 2>* guardedBaseWalked( std::string_view typeName, std::string_view callee, const HashMap<std::string, std::vector<std::string>>& chaUp,
+                                                      bool skipSelf, bool unionOnMulti, GuardedWalk* const memo ) const
+    {
+        guardedProbed = false;
         fieldWalk.clear();
         fieldWalk.push_back( typeName );
         walkMeant.assign( 1, MeantClasses{} );
-        if( !skipSelf && declaresBodiless( 0, r.calleeName ) )
+        if( !skipSelf && declaresBodiless( 0, callee ) )
         {
             return nullptr;   // the type itself declares the callee with no body: lookup ends here, and no base's body is the call's
         }
@@ -9470,7 +9654,8 @@ struct Narrower
         {
             const std::size_t lvlEnd = fieldWalk.size();
             guardedLevel( memo, ++level, lvlBegin, lvlEnd, chaUp );
-            const GuardedProbe probe = probeGuardedLevel( lvlEnd, r.calleeName );
+            const GuardedProbe probe = probeGuardedLevel( lvlEnd, callee );
+            guardedProbed            = true;
             if( probe.unbound )
             {
                 return nullptr;   // the base that defines it is one of two same-named classes and nothing says which
@@ -9479,7 +9664,7 @@ struct Narrower
             {
                 return unionOnMulti ? &walkUnion : nullptr;
             }
-            if( probe.found != nullptr || levelDeclaresBodiless( lvlEnd, r.calleeName ) )
+            if( probe.found != nullptr || levelDeclaresBodiless( lvlEnd, callee ) )
             {
                 return probe.found;   // the hit — or nullptr: a base declares it with no body (a pure virtual), and the nearest declaration wins
             }

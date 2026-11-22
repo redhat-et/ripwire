@@ -2576,6 +2576,15 @@ struct ReceiverEvidence
     mutable HashMap<std::string, std::vector<std::string_view>> conesAbove;   // inCone: type -> coneAbove (RECV-CONE-MEMO)
     mutable std::string                                   coneKey;
     mutable std::size_t                                   coneAsks = 0, coneBuilds = 0;   // RIPWIRE_STATS `[mem] recv_cone`
+    // METHOD-MEMO (lane PF3): methodOf's answer per ( type, name, superOnly, cls ) — the bool and the `found` it leaves
+    struct MethodAnswer
+    {
+        rw::SmallVec<NodeId, 2> found;
+        bool                    hit = false;
+    };
+    mutable HashMap<std::string, MethodAnswer>            methodAnswers;
+    mutable std::string                                   methodKey;
+    mutable std::size_t                                   methodAsks = 0, methodWalks = 0;   // RIPWIRE_STATS `[mem] recv_method`
     mutable rw::SmallVec<NodeId, 2>                       found;
     bool                                                  active = false;
     const HashMap<std::string, char>*                     localNames = nullptr;   // graph.h FieldNarrowTables::localNameSet
@@ -3746,6 +3755,13 @@ struct ReceiverEvidence
     // `cls` (fix round 1): the ONE definition `type` resolved to — its own level keeps only the members that class owns
     // (memberOwnerRuleOf), and its bases, which are known by NAME only, are walked only when no other in-tree class of its
     // language shares that name.
+    //
+    // METHOD-MEMO (lane PF3, 2026-11-21; test/guardedwalkcheck.sh RM). The answer reads only tables build() fills before the
+    // resolve loop (chaUp, embeds, methodsByType, abstractByType, abstractNames, the ownership rule) — so it is a function of
+    // its four arguments, and it is KEPT per ( type, name, superOnly, cls ): a repeated question copies the kept `found` back.
+    // Each ask walked the type's base levels (walkBaseLevels: a linear de-duplication per push) and looked every class of
+    // every level up by "Class::name" — on llvm-project, where chaUp merges every base of a shared class name (`Impl`,
+    // `Base`), the per-call walk was ~9% of the resolve loop at PF2's tip.
     bool methodOf( std::string_view type, std::string_view name, bool superOnly, NodeId cls = kNoNode ) const
     {
         EXPECTS( active, "methodOf reads the tables build() fills" );
@@ -3754,6 +3770,23 @@ struct ReceiverEvidence
         {
             return false;
         }
+        ++methodAsks;
+        methodKey.assign( type ).push_back( '\0' );
+        methodKey.append( name ).push_back( superOnly ? '1' : '0' );
+        methodKey.append( reinterpret_cast<const char*>( &cls ), sizeof( cls ) );
+        if( const auto kept = methodAnswers.find( methodKey ); kept != methodAnswers.end() )
+        {
+            found = kept->second.found;
+            return kept->second.hit;
+        }
+        ++methodWalks;
+        const bool hit = methodOfWalked( type, name, superOnly, cls );
+        methodAnswers.emplace( methodKey, MethodAnswer{ found, hit } );
+        return hit;
+    }
+    // methodOf's walk itself (unkept)
+    bool methodOfWalked( std::string_view type, std::string_view name, bool superOnly, NodeId cls ) const
+    {
         const bool basesByName = cls == kNoNode || types.sameNamedClasses( cls ) == 1;
         bool        redeclared = false;   // a nearer level declared the name WITHOUT a body: the nearest declaration wins, no ancestor body runs
         std::size_t foundDepth = 0;
