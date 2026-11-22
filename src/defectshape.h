@@ -4060,17 +4060,25 @@ inline std::vector<Site> Script::sites() const
 
 }   // namespace va
 
+// One shell parse for a Bash facet scan; `cut` (optional) is set when the nesting budget (shstatus kMaxShellNest) stopped it,
+// so the sites past that point were not judged.
+inline rw::shstatus::Tree parseShellScan( std::string_view src, bool* cut )
+{
+    rw::shstatus::Tree tree = rw::shstatus::parse( src );
+    if( cut != nullptr )
+    {
+        *cut = *cut || tree.cut;
+    }
+    return tree;
+}
+
 inline std::vector<Site> scanVacuousAssertBash( std::string_view src, const std::vector<Span>& /*spans*/, bool* cut = nullptr )
 {
     if( src.empty() )
     {
         return {};
     }
-    const rw::shstatus::Tree     tree = rw::shstatus::parse( src );
-    if( cut != nullptr )
-    {
-        *cut = *cut || tree.cut;   // the nesting budget stopped the parse: sites past it were not judged
-    }
+    const rw::shstatus::Tree     tree = parseShellScan( src, cut );
     const rw::shstatus::Analysis an   = rw::shstatus::analyze( tree, src );
     const va::Script             script( src, tree, an );
     return script.sites();
@@ -5852,11 +5860,7 @@ inline void scanUnhandledArmBash( std::string_view src, const std::vector<Span>&
     {
         return;
     }
-    const rw::shstatus::Tree t = rw::shstatus::parse( src );
-    if( cut != nullptr )
-    {
-        *cut = *cut || t.cut;
-    }
+    const rw::shstatus::Tree t = parseShellScan( src, cut );
     uash::endingCaseSites( src, t, out );
     uash::assignedCaseSites( src, t, fnSpans, out );
 }

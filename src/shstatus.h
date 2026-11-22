@@ -492,6 +492,13 @@ inline bool isRedirOp( std::string_view o ) noexcept
     return o == "<" || o == ">" || o == ">>" || o == "&>" || o == "&>>" || o == ">&" || o == "<&" || o == "<>" || o == ">|" || o == "<<<" || o == "<<";
 }
 
+// s[i] is an opening backquote: the index past its closing one, or the end when it never closes.
+inline std::size_t pastBacktick( std::string_view s, std::size_t i ) noexcept
+{
+    const std::size_t j = s.find( '`', i + 1 );
+    return j == std::string_view::npos ? s.size() : j + 1;
+}
+
 std::size_t skipParen( std::string_view s, std::size_t i, NestBudget& nb );
 inline std::size_t skipQuote( std::string_view s, std::size_t i, char q, NestBudget& nb )   // s[i] is the opening quote
 {
@@ -516,8 +523,7 @@ inline std::size_t skipQuote( std::string_view s, std::size_t i, char q, NestBud
         }
         if( q == '"' && c == '`' )
         {
-            const std::size_t j = s.find( '`', i + 1 );
-            i = j == std::string_view::npos ? s.size() : j + 1;
+            i = pastBacktick( s, i );
             continue;
         }
         if( c == q )
@@ -631,8 +637,7 @@ inline std::string dqLiteralQuotes( std::string_view s, NestBudget& nb )
         }
         if( c == '`' )
         {
-            const std::size_t j = s.find( '`', i + 1 );
-            i                   = j == std::string_view::npos ? s.size() : j + 1;
+            i = pastBacktick( s, i );
             continue;
         }
         if( c == '\'' )
@@ -988,8 +993,7 @@ private:
         }
         if( d == '`' )
         {
-            const std::size_t j = src_.find( '`', i + 1 );
-            return j == std::string_view::npos ? n_ : j + 1;
+            return pastBacktick( src_, i );   // n_ == src_.size()
         }
         if( startsAt( src_, i, "$(" ) )
         {
