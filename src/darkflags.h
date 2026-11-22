@@ -2967,14 +2967,16 @@ inline void finishGate( Gate& g )
                && std::any_of( g.reads.begin(), g.reads.end(), []( const Site& r ) { return r.sh.form != ShellForm::None; } );
 }
 
-// The files the crawl dropped over a size ceiling (--max-file-size, or the .json lane's own) that this scan would have
-// read — every one that is not prose (harvestFile reads no prose file): their gates are missing too (#699).
+// The files the crawl dropped over a size ceiling (--max-file-size, or a data lane's own) whose gates are missing too
+// (#699): every one this scan would have read, except JSON. harvestFile reads no prose file, and a .json file is data
+// with no code in it — no #if, option() or env read can be live there — so the crawl's 256 KB JSON data ceiling,
+// which fires on fixtures and dumps in most repositories, hides no gate.
 inline FlagsResult::OversizeFiles crawlOversize( const IngestResult& ing )
 {
     FlagsResult::OversizeFiles oversize;
     for( const SkippedOversize& s : ing.skippedOversize )
     {
-        if( !lineSyntaxFor( s.path ).isProse )
+        if( !lineSyntaxFor( s.path ).isProse && docparse::lowerExtOf( s.path ) != ".json" )
         {
             DISCLOSE( oversize, FlagsResult::OversizeFiles::DisclosureWhy::CrawlCeiling,
                       "flags: the crawl dropped a file over its size ceiling — its gates are missing (oversize=)" );
