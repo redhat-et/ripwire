@@ -241,4 +241,83 @@ else
     echo "  SKIP  gitignore coverage (not a git checkout)"
 fi
 
+# ── (4) the PGO TRAINING WORKLOAD — scripts/pgobuild.sh's train_workload + scripts/pgocorpus.py ───────────
+# A profile only covers what the training runs execute, and every way that coverage shrinks is silent: a
+# renamed symbol or a mistyped flag makes one run exit 2 and train nothing, a generator that drifts changes
+# what the shipped binary was trained on between two builds of one commit, and a benchmark corpus slipped
+# into the list makes every published PGO number train-on-test. Each gets a behavioural check, not a grep
+# of the script's text, and each check has an arm that proves it can fail.
+GENPY="$ROOT/scripts/pgocorpus.py"
+PGOSH="$ROOT/scripts/pgobuild.sh"
+BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+python3 "$GENPY" "$TMP/syn1" >/dev/null && python3 "$GENPY" "$TMP/syn2" >/dev/null && python3 "$GENPY" "$TMP/syn3" --seed 7 >/dev/null \
+    || no "scripts/pgocorpus.py exited non-zero"
+diff -r "$TMP/syn1" "$TMP/syn2" >/dev/null \
+    && ok "pgocorpus: the same arguments write the same bytes twice (a drifting corpus trains a different binary per build)" \
+    || no "pgocorpus: two runs with the same seed differ — the training corpus is not deterministic"
+diff -r "$TMP/syn1" "$TMP/syn3" >/dev/null \
+    && no "pgocorpus: --seed 7 wrote the same bytes as the default seed — the identity check above cannot fail" \
+    || ok "pgocorpus: a different seed writes different bytes (the identity check is not vacuous)"
+synFiles=$( find "$TMP/syn1" -type f | wc -l | tr -d ' ' )
+implNs=$( grep -l '^class Impl : public Base$' "$TMP"/syn1/cpp/mod*/Base.h 2>&1 | wc -l | tr -d ' ' )
+flatImpl=$( grep -l '^struct Impl : Base$' "$TMP"/syn1/cpp/flat/*.cpp 2>&1 | wc -l | tr -d ' ' )
+polyLangs=$( ls "$TMP/syn1/poly" | wc -l | tr -d ' ' )
+[ "$synFiles" -ge 150 ] && [ "$implNs" -ge 16 ] && [ "$flatImpl" -ge 16 ] && [ "$polyLangs" -ge 12 ] \
+    && ok "pgocorpus carries the namesake shapes ($synFiles files; Impl : Base in $implNs namespaces + $flatImpl global files; $polyLangs language slices)" \
+    || no "pgocorpus lost a shape: files=$synFiles namespaced-Impl=$implNs flat-Impl=$flatImpl languages=$polyLangs"
+
+# No benchmark repo is named in the training workload or its generator. The list is the measured corpora
+# (docs/EVALS.md's head-to-head and perf rungs); the planted arm proves the matcher fires.
+BENCH='envoy|vscode|cpython|nushell|terraform|koa|llvm-project|django|angular|cockroach|pydantic|restic|tmux|htop|libzmq|eslint|fastify|kysely|nunjucks|starlette|textual|sinatra|axum|gson|Newtonsoft'
+benchHits=$( grep -n -E -w "$BENCH" "$PGOSH" "$GENPY" 2>&1 )
+[ -z "$benchHits" ] \
+    && ok "no benchmark corpus is named in scripts/pgobuild.sh or scripts/pgocorpus.py" \
+    || { no "a benchmark corpus is named in the PGO training files (train-on-test):"; printf '%s\n' "$benchHits" | sed -n '1,5p'; }
+printf 'run /repos/envoy --no-cache\n' >"$TMP/planted.sh"
+grep -q -E -w "$BENCH" "$TMP/planted.sh" \
+    && ok "the benchmark-name matcher fires on a planted 'envoy' (the absence check above is not vacuous)" \
+    || no "the benchmark-name matcher missed a planted 'envoy' — the absence check above proves nothing"
+
+# Every listed verb runs, on BOTH corpora, and exits 0. A logging shim in front of the real binary records each
+# run's tree and flags; the assertion reads the log, so a verb that is in the script's text but never reached
+# (a corpus-guarded branch, an early return) fails here.
+if [ ! -x "$BIN" ]; then
+    no "no ripwire at $BIN — the training-workload arms need a built binary (set RIPWIRE_BIN)"
+else
+    SHIM="$TMP/shim/ripwire"; mkdir -p "$TMP/shim"
+    printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >>"%s"\nfor a in "$@"; do [ "$a" = "$PGO_SHIM_FAIL" ] && exit 3; done\nexec "%s" "$@"\n' "$TMP/runs.log" "$BIN" >"$SHIM"
+    chmod +x "$SHIM"
+    PGO_SHIM_FAIL="" bash "$PGOSH" --check-training "$SHIM" >"$TMP/train.out" 2>&1; trainRc=$?
+    [ "$trainRc" -eq 0 ] \
+        && ok "every training run exits 0 with the current binary ($( grep -o '[0-9]* runs, [0-9]* failed, [0-9]* s' "$TMP/train.out" ))" \
+        || { no "the training workload has failing runs (rc=$trainRc) — each trains nothing:"; grep 'training run exited' "$TMP/train.out" | sed -n '1,8p'; }
+    # verbs_missing LOG: the listed verbs LOG lacks on either corpus (empty = all present).
+    verbs_missing(){
+        local log="$1" missing="" corpus verb n
+        for corpus in "^$ROOT " "^[^ ]*/synthetic "; do
+            for verb in '--no-cache' '--page-bytes=' '--for=' '--pack-task=' '--lint' '--clones' '--expand=' '--grep=' '--callers=' '--impact='; do
+                grep -E "$corpus" "$log" | grep -q -F -- "$verb" || missing="$missing [${corpus//[\^ ]/} $verb]"
+            done
+            n=$( grep -E "$corpus" "$log" | grep -c -F -- '--for=' )
+            [ "$n" -ge 3 ] || missing="$missing [${corpus//[\^ ]/} --for x$n, want 3 shapes]"
+            n=$( grep -c -E -- "${corpus}--cache=[^ ]*\$" "$log" )
+            [ "$n" -ge 2 ] || missing="$missing [${corpus//[\^ ]/} cold+warm map x$n]"
+        done
+        printf '%s' "$missing"
+    }
+    missing=$( verbs_missing "$TMP/runs.log" )
+    [ -z "$missing" ] \
+        && ok "the training workload runs every listed verb on both corpora (this checkout + the synthetic tree; $( wc -l <"$TMP/runs.log" | tr -d ' ' ) runs)" \
+        || no "the training workload skipped:$missing"
+    grep -v -E '/synthetic .*--clones' "$TMP/runs.log" >"$TMP/runs.planted.log"
+    [ -n "$( verbs_missing "$TMP/runs.planted.log" )" ] \
+        && ok "the verb-coverage check fires on a log with the synthetic --clones run removed (it is not vacuous)" \
+        || no "the verb-coverage check passed a log missing the synthetic --clones run — it proves nothing"
+    : >"$TMP/runs.log"
+    PGO_SHIM_FAIL="--clones" bash "$PGOSH" --check-training "$SHIM" >"$TMP/trainfail.out" 2>&1; failRc=$?
+    [ "$failRc" -ne 0 ] && grep -q 'training run exited 3: .*--clones' "$TMP/trainfail.out" \
+        && ok "a training run that fails FAILS the workload and is named (a profile with a hole is not shipped quietly)" \
+        || { no "a failing --clones training run did not fail the workload (rc=$failRc)"; sed -n '1,4p' "$TMP/trainfail.out"; }
+fi
+
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "FAILURES ABOVE"; exit 1; }

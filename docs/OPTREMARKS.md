@@ -181,7 +181,8 @@ optimizer *chose* not to optimize — and two of the biggest dismissal piles in 
 model guessing at hotness with no data. A profile replaces the guess with counts.
 
 `scripts/pgobuild.sh` runs the whole thing as one command: instrument (`-DRIPWIRE_PGO=generate`),
-train on a mixed workload, `llvm-profdata merge`, rebuild (`-DRIPWIRE_PGO=use`), always in
+train on a mixed workload (this checkout plus a generated, namesake-heavy multi-language corpus from
+`scripts/pgocorpus.py`, every verb listed in the script's header), `llvm-profdata merge`, rebuild (`-DRIPWIRE_PGO=use`), always in
 `build_pgogen/` and `build_pgo/` — CMake refuses PGO in `build/` and `asan/` by name.
 
 ```bash
