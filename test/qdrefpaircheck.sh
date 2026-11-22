@@ -277,6 +277,12 @@ printf 'register_macros = NOPE_NEVER_USED\n' >"$RC/.ripwire_config"
 
 # ── (E) DECISIVE: ripwire's own recorded harvest wave, against the live-recomputed overlay oracle ─────────
 # RE-PIN LOG for the recorded literal below (it is a bare number, so its justification has to live here).
+# 2026-11-21, lane QD-LESSONS-2a (TANGLE-GATE-B / QD-RATCHET-BASE): 8 → 10 gating rows on this wave. Both new rows are
+#   tangle rows the kind now gates by design (it was report-only):
+#     <r kind="tangle" sym="src/serialize.h::rw::packBodies" was="14.8" now="15.5" .../>   (over the bar and grew: deep 45->49, 257->277 lines)
+#     <r kind="tangle" sym="collectSources" was="5.8" now="7.4" .../>                        (crossed the bar: deep 14->22, 182->213 lines)
+#   The eight rows before are unchanged, and (E)'s row-for-row oracle comparison stays green (7 rows = the 5 before + these 2),
+#   so 7 + 3 churn = 10.
 # 2026-09-20, integration/train-13 (lane/t13-honesty-fixes fix 2): 9 → 8 gating rows on this wave, and the
 #   row that left is EXACTLY the row train 12 added below. Fix 2 gives `reuse-decline`
 #   (new-clone-of-reused-helper) the two demotions its sibling `duplication` already had, one of which is
@@ -342,9 +348,9 @@ else
 
         # the two RECORDED literals from the round record — a cross-check that these shas still name that wave
         overlayTotal=$(( oracleN + overlayChurn ))
-        [ "$overlayTotal" = 8 ] \
-            && ok "(E) the overlay reproduces the pinned 8 gating rows (= $oracleN + $overlayChurn churn; 9 between #60 and reuse-decline's test-script skip, 8 before #60, 18 pre-dial)" \
-            || no "(E) the overlay gave $overlayTotal gating rows; this binary is pinned at 8 (9 between #60's file-scope callers and reuse-decline's all-test-script skip, 8 before #60, 18 before the 2026-09-10 dial round) — the shas, the corpus, a kind's tier or a kind's EVIDENCE moved; the RE-PIN LOG above arm (E) records how the last move was justified"
+        [ "$overlayTotal" = 10 ] \
+            && ok "(E) the overlay reproduces the pinned 10 gating rows (= $oracleN + $overlayChurn churn; 8 before tangle gated, 9 between #60 and reuse-decline's test-script skip, 8 before #60, 18 pre-dial)" \
+            || no "(E) the overlay gave $overlayTotal gating rows; this binary is pinned at 10 (8 before tangle gated (QD-LESSONS-2a), 9 between #60's file-scope callers and reuse-decline's all-test-script skip, 8 before #60, 18 before the 2026-09-10 dial round) — the shas, the corpus, a kind's tier or a kind's EVIDENCE moved; the RE-PIN LOG above arm (E) records how the last move was justified"
         dmmVal="$( "$BIN" "$ROOT" "--dmm=$WAVE_A..$WAVE_B" 2>/dev/null | grep -o ' dmm="[0-9.]*"' | head -1 | sed -E 's/.*"([0-9.]*)".*/\1/' )"
         # tolerance band, not equality: dmm is a float printed to 3 places (house float rule).
         if [ -n "$dmmVal" ] && awk -v v="$dmmVal" 'BEGIN{ exit !(v > 0.525 && v < 0.535) }'; then
