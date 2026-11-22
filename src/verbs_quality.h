@@ -3122,8 +3122,8 @@ struct QdRowModel
     // and a param-count contract-change (was/now = the real counts). was/now print whenever they differ from each other,
     // so the contract-change case's was=/now= is visible while the new-symbol case's meaningless was="0" now="0" is
     // omitted, matching its old sym-only shape.
-    enum class Shape : std::uint8_t { Members, SymOnly, WasNow };
-    Shape       shape     = Shape::WasNow;
+    enum class RowShape : std::uint8_t { Members, SymOnly, WasNow };
+    RowShape    shape     = RowShape::WasNow;
     std::string sym;                   // quality::displaySym, unescaped: members= for Members, sym= otherwise
     bool        gating    = false;     // P2.5: the exit predicate (quality::rowGates), stated per row; never on a disclosed row
     // B10.2 — the optional classification facet: its attribute NAME is chosen by kind (quality::facetAttrName, the ONE
@@ -3137,9 +3137,9 @@ QdRowModel qdRowModel( const rw::quality::Regression& r, bool gatingAllowed, std
 {
     using namespace rw;
     QdRowModel m;
-    m.shape     = r.kind == "duplication" ? QdRowModel::Shape::Members
-                : ( r.kind == "dead-code" || ( r.kind == "api-surface" && r.was == r.now ) ) ? QdRowModel::Shape::SymOnly
-                                                                                               : QdRowModel::Shape::WasNow;
+    m.shape     = r.kind == "duplication" ? QdRowModel::RowShape::Members
+                : ( r.kind == "dead-code" || ( r.kind == "api-surface" && r.was == r.now ) ) ? QdRowModel::RowShape::SymOnly
+                                                                                               : QdRowModel::RowShape::WasNow;
     m.sym       = quality::displaySym( r.sym, deltaRoot );
     m.gating    = gatingAllowed && quality::rowGates( r );
     m.facetName = r.facet.empty() ? nullptr : quality::facetAttrName( r.kind );
@@ -3189,14 +3189,14 @@ void emitQdXmlRow( std::FILE* out, const rw::quality::Regression& r, const QdRow
     common += m.gating ? " gating=\"1\"" : "";
     switch( m.shape )
     {
-        case QdRowModel::Shape::Members:
+        case QdRowModel::RowShape::Members:
             rw::emitTo( out, "<r kind=\"duplication\" members=\"{}\" tokens=\"{}\"{}{}/>", ex( m.sym ), r.now, common,
                         quality::tangleRowAttrs( r, /*json=*/false, ex ) );   // QD-IDIOM-ELEMTYPE: why= when the operand path demoted it
             return;
-        case QdRowModel::Shape::SymOnly:
+        case QdRowModel::RowShape::SymOnly:
             rw::emitTo( out, "<r kind=\"{}\" sym=\"{}\"{}{}/>", r.kind, ex( m.sym ), common, qdExpandNextAttr( r, m ) );
             return;
-        case QdRowModel::Shape::WasNow:
+        case QdRowModel::RowShape::WasNow:
             // P8 (L7): bar= is the threshold beside the number it judges, on the four numeric kinds (quality.h's
             // kCcxBar/kLocBar/kNestBar/kParamBar), so was=/now= read without the legend. QD-ENTRY-CEILING: ceiling= is the
             // ceiling a NEW function reached, beside the gating= it causes; QD-UNCHECKED-STATUS: call= is the call whose
@@ -3214,7 +3214,7 @@ void emitQdJsonRow( std::FILE* out, const rw::quality::Regression& r, const QdRo
 {
     using namespace rw;
     rw::emitTo( out, "{{\"kind\":\"{}\"", jsonStr( r.kind ) );
-    if( m.shape == QdRowModel::Shape::Members )
+    if( m.shape == QdRowModel::RowShape::Members )
     {
         rw::emitTo( out, ",\"members\":\"{}\",\"tokens\":{}", jsonStr( m.sym ), r.now );
     }
@@ -3222,7 +3222,7 @@ void emitQdJsonRow( std::FILE* out, const rw::quality::Regression& r, const QdRo
     {
         rw::emitTo( out, ",\"sym\":\"{}\"", jsonStr( m.sym ) );
     }
-    if( m.shape == QdRowModel::Shape::WasNow )
+    if( m.shape == QdRowModel::RowShape::WasNow )
     {
         rw::emitTo( out, ",\"was\":{},\"now\":{}", quality::rowValueText( r, r.was ), quality::rowValueText( r, r.now ) );
     }
