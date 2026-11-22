@@ -1416,8 +1416,8 @@ inline std::string bracketedHost( std::string_view authority )
 // The host a URL or bare `host[:port][/path]` sends to, as written, or empty when the text does not prove one: an
 // expansion, backtick, backslash or %-escape anywhere in the authority (userinfo included: `${X}@api.github.com` may
 // hold a `/`), two `@`, a port that is not digits, an upper-case or trailing-dot spelling, a byte no host name holds.
-// The authority runs to the first `/ ? #`, and the host follows its one `@` — `https://api.github.com@evil.example/`
-// goes to evil.example.
+// The authority runs to the first `/ ? #`, and the host follows its one `@`: a URL whose userinfo reads
+// `api.github.com` goes to the host after the `@`.
 inline std::string hostOfUrl( std::string_view text )
 {
     std::string_view  rest   = text;
@@ -1472,7 +1472,12 @@ inline bool parseIpv4( std::string_view host, unsigned octets[4] ) noexcept
         {
             return false;
         }
-        octets[part] = unsigned( std::stoul( std::string( piece ) ) );
+        unsigned value = 0;
+        for( const char digit : piece )
+        {
+            value = value * 10 + unsigned( digit - '0' );   // at most three digits: cannot overflow
+        }
+        octets[part] = value;
         if( octets[part] > 255 )
         {
             return false;
