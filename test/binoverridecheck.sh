@@ -73,6 +73,7 @@ gates = [ g for g in gates if g not in ( "regression.sh", SELF ) ]
 EXEMPT = {
     "codexinstallhonestycheck.sh": "exercises skills/install.sh's jq/mv merge honesty inside hermetic temp HOMEs; the subject is the shell installer, so BIN is bound for interface uniformity and never executed (verified by reading the gate)",
     "meterdisclosurecheck.sh":   "runs skills/install.sh's --hook banner and asserts what it discloses about the substitution meter; the subject is banner TEXT, so BIN is bound for interface uniformity and never executed (verified by reading the gate)",
+    "benchxmlpathcheck.sh":      "drives bench/*.py readers (run_arb, tgrep-h2h arms, tokenaudit sweep) against a FAKE ripwire script it writes itself, so the ripwire binary under test is never bound or executed -- the file contains neither RIPWIRE_BIN nor $BIN (verified by reading it), so (2b)'s static tell needs no exemption row for it beyond this one, the same shape as skipclassifycheck below (#719)",
     "adaptivecutshapecheck.sh":  "compiles an isolated $CXX probe .cpp; never invokes build/ripwire",
     "aiderbytescheck.sh":        "pure-python test of bench/headtohead/r4-2026-08-06/r4_worker.py's aider byte-count wiring; no ripwire binary invocation",
     "argvdiffcheck.sh":          "sanctioned skip fires BEFORE the RIPWIRE_BIN guard, gated on a second env var (RIPWIRE_BASE) neither pargates.py nor regression.sh ever sets; independent of RIPWIRE_BIN/broken-binary state, and already asserted intentional by gateexitcheck.sh arm (D)",

@@ -36,6 +36,7 @@
 
 import argparse
 import glob
+import html
 import json
 import os
 import re
@@ -165,7 +166,7 @@ def run_session(binpath, repo, writable):
         ex = _text(srv.tool("exemplar", {"path": repo, "kind": "fn"}, 3))
         plan.append(("orient", "exemplar"))
         m = re.search(r'\bn="([^"]+)"', ex)
-        seed = m.group(1) if m else "main"
+        seed = html.unescape(m.group(1)) if m else "main"   # XML-decoded: the seed is sent back as a symbol (#719)
 
         fs = srv.tool("find_symbol", {"path": repo, "symbol": seed}, 4)
         plan.append(("read", "find_symbol"))

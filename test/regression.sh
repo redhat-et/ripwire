@@ -342,6 +342,7 @@ for _g in \
     bashenvcheck \
     bashsourcecheck \
     batchcheck \
+    benchxmlpathcheck \
     binoverridecheck \
     blindspotcheck \
     bm25boundcheck \

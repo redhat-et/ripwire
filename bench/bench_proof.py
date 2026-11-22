@@ -8,7 +8,7 @@
 # Set RIPWIRE_BIN / RIPWIRE_BENCH_ROOT to point at your own built binary and a large private C++ corpus
 # (the historical numbers in bench/PROFILE.md and bench/ANSWERQUALITY.md were measured against one such
 # corpus and are not reproducible publicly; re-run this script against your own to reproduce the shape).
-import subprocess, time, os, re, glob, shutil, statistics
+import subprocess, time, os, re, html, glob, shutil, statistics
 import tiktoken
 ENC = tiktoken.get_encoding("cl100k_base")
 def toks(s): return len(ENC.encode(s, disallowed_special=()))
@@ -37,7 +37,7 @@ def map_run(argv):
     return p
 def grep_dump(term,d):
     return run(["grep","-rn"]+[f"--include=*{e}" for e in EXTS]+[term,d])
-def files_in(out): return sorted(set(re.findall(r'p="([^":]+)', out)))
+def files_in(out): return sorted(set(html.unescape(p) for p in re.findall(r'p="([^":]+)', out)))   # XML-decoded: the path is opened (#719)
 def read_whole(paths):
     s=[]
     for p in paths:
