@@ -13127,7 +13127,7 @@ inline std::vector<std::string_view> pythonGlobImportTails( std::string_view tex
         }
         std::string_view module = line.substr( 5, imp - 5 );
         module.remove_prefix( std::min( module.find_first_not_of( " \t" ), module.size() ) );
-        module.remove_suffix( module.size() - std::min( module.find_last_not_of( " \t" ) + 1, module.size() ) );
+        module = namesplit::trimTrailing( module, " \t" );
         const std::size_t dot = module.rfind( '.' );
         const std::string_view tail = dot == std::string_view::npos ? module : module.substr( dot + 1 );
         if( !tail.empty() )

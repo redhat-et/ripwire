@@ -37,6 +37,7 @@
 #include "filter.h"          // isTestSymbol
 #include "graph.h"           // readTextIfPresent, the renamed-import tables, pythonClassScopeChain
 #include "infra/fieldid.h"   // fieldChild
+#include "infra/namesplit.h" // trimTrailing
 #include "infra/sortutil.h"    // sortutil::svLess: the explicit byte order for a string_view key (portablebuildcheck #6)
 #include "infra/tschildren.h"
 #include "memberowner.h"
@@ -227,7 +228,7 @@ inline bool decoratedWith( const ParsedFile& f, TSNode fn, std::string_view name
         std::string_view t = f.text( d );
         t.remove_prefix( std::min<std::size_t>( 1, t.size() ) );   // the @
         t.remove_prefix( std::min( t.find_first_not_of( " \t" ), t.size() ) );
-        t.remove_suffix( t.size() - std::min( t.find_last_not_of( " \t\r\n" ) + 1, t.size() ) );
+        t = rw::namesplit::trimTrailing( t, " \t\r\n" );
         if( t == name || ( qualified && t.size() > name.size() && t.ends_with( name ) && t[ t.size() - name.size() - 1 ] == '.' ) )
         {
             return true;
