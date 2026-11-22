@@ -8,4 +8,4 @@ Only `build/` changed. `dist/`, `out/` and `target/` stay skipped even when trac
 
 The commands that index a commit's tree (`--quality-delta`'s HEAD side, `--merge-scout`, the churn window, `--dmm`) index the same directories, so an edit inside a tracked `build/` is reported as a change to existing code rather than as new code. The MCP server also notices a file added there.
 
-On the 89 GA1 DEV questions, one question goes from missed to complete and none loses ground. On the 99 GA3 DEV questions no answer changes. The parse cache and warm snapshot versions move, so the first run after upgrading reparses. Gate: `test/trackedbuilddircheck.sh`.
+On the 89 development questions from 11 open-source repositories, one question goes from missed to complete and none loses ground. On the 99 questions of a second development set no answer changes. The parse cache and warm snapshot versions move, so the first run after upgrading reparses. Gate: `test/trackedbuilddircheck.sh`.
