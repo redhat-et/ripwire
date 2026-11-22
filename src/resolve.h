@@ -8213,11 +8213,12 @@ struct Narrower
     mutable std::string                   coneOf;      // guardedConeOwns: the class whose guarded base closure is kept
     mutable std::vector<std::string_view> coneNames;   // its names (views into chaUp's stored strings and coneOf)
     mutable std::vector<MeantClasses>     coneMeant;
-    // RIPWIRE_STATS `[mem] guarded_walk` (test/guardedwalkcheck.sh): guardedBaseWalk calls, the full level expansions they
-    // ran, and meantBase evaluations — deterministic counts, never output
+    // RIPWIRE_STATS `[mem] guarded_walk` (test/guardedwalkcheck.sh): guardedBaseWalk calls, the walks it began (roots kept,
+    // plus walks over another table), the cone closures expanded (keepGuardedCone), and meantBase evaluations — deterministic
+    // counts, never output
     struct GuardedWalkStats
     {
-        std::size_t calls = 0, walks = 0, meant = 0;
+        std::size_t calls = 0, walks = 0, cones = 0, meant = 0;
     };
     mutable GuardedWalkStats guardedWalkStats;
 
@@ -9021,12 +9022,47 @@ struct Narrower
     // The whole guarded closure of one class is kept for the next call (calls arrive caller by caller); kConeNameCap is
     // ReceiverEvidence::kWalkCap, the cone's own bound. A closure the cap cut, or a name it never reached, proves nothing.
     static constexpr std::size_t kConeNameCap = 64;
+    // CONE-MEMO (lane PF2, 2026-11-21): calls arrive caller by caller, but a bare call asks its caller's class cone
+    // (bareCallReachesFree) and the ladder proof the candidate's caller's — on llvm-project/clang the kept closure switched
+    // class often enough that re-expanding it (meantBase's class x class pairing, up to kConeNameCap names) was the next
+    // hotspot after GUARDED-WALK-MEMO. Every closure is kept per class name (the same fixed inputs as guardedWalks), and a
+    // switch copies the kept one into coneNames / coneMeant, which hold exactly what the expansion left.
+    struct KeptCone
+    {
+        std::vector<std::string_view> names;   // [0], the class itself, is coneOf on every switch
+        std::vector<MeantClasses>     meant;
+    };
+    mutable HashMap<std::string, KeptCone> keptCones;
+    mutable const BaseWalkGuard*           keptConesFor = nullptr;
+
     void keepGuardedCone( std::string_view cls, const HashMap<std::string, std::vector<std::string>>& chaUp ) const
     {
         if( coneOf == cls && !coneNames.empty() )
         {
             return;
         }
+        if( keptConesFor != baseGuard )
+        {
+            keptCones.clear();
+            keptConesFor = baseGuard;
+        }
+        coneOf.assign( cls );
+        const auto [ kept, inserted ] = keptCones.try_emplace( coneOf );
+        if( !inserted )
+        {
+            coneNames.assign( kept->second.names.begin(), kept->second.names.end() );
+            coneNames.front() = coneOf;
+            coneMeant = kept->second.meant;
+            return;
+        }
+        expandGuardedCone( cls, chaUp );
+        kept->second.names.assign( coneNames.begin(), coneNames.end() );
+        kept->second.names.front() = std::string_view{};
+        kept->second.meant = coneMeant;
+    }
+    void expandGuardedCone( std::string_view cls, const HashMap<std::string, std::vector<std::string>>& chaUp ) const
+    {
+        ++guardedWalkStats.cones;
         fieldWalk.clear();
         fieldWalk.push_back( cls );
         walkMeant.assign( 1, MeantClasses{} );
@@ -9036,7 +9072,6 @@ struct Narrower
             expandGuardedLevel( lvlBegin, lvlEnd, chaUp, kConeNameCap );
             lvlBegin = lvlEnd;
         }
-        coneOf.assign( cls );
         coneNames.assign( fieldWalk.begin(), fieldWalk.end() );
         coneNames.front() = coneOf;   // the root's view was the caller's: keep the kept copy's
         coneMeant = walkMeant;

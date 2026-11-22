@@ -15,22 +15,23 @@
 # every class of the name (plausibleClasses: a visibility test per class) — again on every call. It is memoised per
 # (definition, class) (OWNED-MEMO).
 #
-# GW(K, M): K files, each defining `struct RootK`, `struct Base : RootK` and `struct Impl : Base` whose one method repeats
-# M times the bare calls `b0()` .. `b(K-1)()` and `r()`; K more files define `void Base::bK() { }` out of line, and one
+# GW(K, M): K files, each defining `struct RootK`, `struct Base : RootK`, `struct Impl : Base` whose one method repeats
+# M times the bare calls `b0()` .. `b(K-1)()` and `r()`, and `struct Peer : Base` calling `bK()` and `r()` once; K more files define `void Base::bK() { }` out of line, and one
 # more a namesake `struct Base` no Impl derives from (so the walk's `Base` is narrowed to the K the Impls name, and the
 # probe asks ownedBy). Every Impl's bare calls walk Impl's guarded bases; `Base` names K+1 classes and `Impl` K, so one
 # walk's meantBase pairs K x (K+1) classes.
 #
-#   (A) REACHED — the RIPWIRE_STATS lines `[mem] guarded_walk calls=C walks=W meant=N` and `[mem] owned_by asks=A reads=R`
+#   (A) REACHED — the RIPWIRE_STATS lines `[mem] guarded_walk calls=C walks=W cones=X meant=N` and `[mem] owned_by asks=A reads=R`
 #       are printed and C > 0, so the arms below cannot pass on a walk the fixture never enters.
 #   (B) PER-ROOT — `walks` (roots kept) and `meant` (meantBase evaluations) are the same at M=2 and at M=8 while `calls`
 #       grows: the walk's cost is paid per distinct root name, not per call. Likewise `reads` (out-of-line owner answers
 #       computed) is the same while `asks` grows. Unmemoised, `meant` and `reads` grow with M and this arm is red.
-#   (C) EXACT — at M=8: calls=1248 (12 Impl bodies x 8 x 13 calls), walks=1 (one root name, `Impl`), meant=26 — 13 for
-#       the walk's two levels (`Base`, then Base's 12 `RootK`), kept on the first `r()` that needs both, plus 13 for the
-#       ladder proof's cone of `Impl` (keepGuardedCone, the same two levels under kConeNameCap); asks=1152 (one per bK()
-#       call: the first class it asks about owns it), reads=12 (one per out-of-line definition). Unmemoised the walk alone
-#       re-ran 1 or 13 meantBase per call.
+#   (C) EXACT — at M=8: calls=1272 (12 Impl bodies x 8 x 13 calls, plus 12 Peer bodies x 2), walks=2 (two root names,
+#       `Impl` and `Peer`), cones=2 (the two caller classes whose cones the ladder proof and the bare-call test read: kept
+#       per class, CONE-MEMO — the one-entry keep it replaced re-expanded a cone at every Impl/Peer switch, 24 times),
+#       meant=52 — per root 13 for the walk's two levels (`Base`, then Base's 12 `RootK`) plus 13 for its cone (the same
+#       two levels under kConeNameCap); asks=1164 (one per bK() call: the first class it asks about owns it), reads=12 (one
+#       per out-of-line definition). Unmemoised the walk alone re-ran 1 or 13 meantBase per call.
 #   (D) CONTROL (RIPWIRE_GUARDEDWALK_CONTROL_BIN=<a binary without the memos>) — the default map of GW(K, 8) is
 #       byte-identical between the control and this binary: the memos change cost, never an edge. Without the variable
 #       the control arm is reported as not run; (A)-(C) still gate on their own.
@@ -70,6 +71,7 @@ gen(){
                 printf '        r();\n'
             done
             printf '    }\n};\n'
+            printf 'struct Peer : Base\n{\n    void go%d() { b%d(); r(); }\n};\n' "$f" "$f"   # a second caller class, after each Impl
         } >"$dir/f$f.cpp"
         printf 'void Base::b%d() { }\n' "$f" >"$dir/impl$f.cpp"   # out of line, in a file with no Base: owner unknown
     done
@@ -121,13 +123,13 @@ else
 fi
 
 # ── (C) EXACT ──────────────────────────────────────────────────────────────────────────────────────────────────
-want='[mem] guarded_walk calls=1248 walks=1 meant=26'
+want='[mem] guarded_walk calls=1272 walks=2 cones=2 meant=52'
 if [ "$line8" = "$want" ]; then
     ok "(C) GW counter is exact: $line8"
 else
     no "(C) GW counter: want '$want', got '${line8:-<no guarded_walk line>}'"
 fi
-want='[mem] owned_by asks=1152 reads=12'
+want='[mem] owned_by asks=1164 reads=12'
 if [ "$oline8" = "$want" ]; then
     ok "(C) GW counter is exact: $oline8"
 else
