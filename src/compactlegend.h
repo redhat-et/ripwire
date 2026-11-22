@@ -1088,7 +1088,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "stale_next", "stale_next=: the call printing the sa rows and the full header", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     // D4 (src/quality.h ratchetAttrsXml): present when the tangle ratchet read its reference point
     { "ratchet_ref", "ratchet_ref=TAG ratchet_judged=N: N tangle rows' functions compared with their best since TAG; ratchet_unread= / ratchet_cut=1: versions not measured", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
-    // CR712-SHSTATUS-DEPTH (src/quality.h ratchetAttrsXml): present when not 0
+    // CR712-SHSTATUS-DEPTH (src/verbs_quality.h QdRootFields::shellCut): present when not 0
     { "shell_cut", "shell_cut=N: shell files whose defect-shape scan stopped at nesting depth 64; deeper code not judged", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "preexisting-worse", "preexisting-worse=N: regressions on symbols that existed at baseline; they gate when major", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "new-symbol", "new-symbol=N: NEW code; new-symbol rows never gate, except defect-shape format-arity, ceiling=, tangle", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },

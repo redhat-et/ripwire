@@ -11032,31 +11032,28 @@ inline std::string tangleRowAttrs( const Regression& r, bool json, Escape&& esc 
     return out;
 }
 
-// D4 — the ratchet's disclosure on the root: the reference point it read, and what it could not read ("" when it was not
-// consulted); then CR712-SHSTATUS-DEPTH's shell_cut= (the shell files whose defect-shape scan the nesting budget cut; absent at 0).
+// D4 — the ratchet's disclosure on the root: the reference point it read, and what it could not read. "" when it was not consulted.
 template<class Escape>
 inline std::string ratchetAttrsXml( const DeltaExtras& x, Escape&& ex )
 {
-    std::string out;
-    if( !x.ratchetRef.empty() )
+    if( x.ratchetRef.empty() )
     {
-        out = " ratchet_ref=\"" + ex( x.ratchetRef ) + "\" ratchet_judged=\"" + std::to_string( x.ratchetJudged ) + "\"";
-        out += x.ratchetUnread > 0 ? " ratchet_unread=\"" + std::to_string( x.ratchetUnread ) + "\"" : std::string();
-        out += x.ratchetCut ? " ratchet_cut=\"1\"" : "";
+        return {};
     }
-    out += x.shellCut > 0 ? " shell_cut=\"" + std::to_string( x.shellCut ) + "\"" : std::string();
+    std::string out = " ratchet_ref=\"" + ex( x.ratchetRef ) + "\" ratchet_judged=\"" + std::to_string( x.ratchetJudged ) + "\"";
+    out += x.ratchetUnread > 0 ? " ratchet_unread=\"" + std::to_string( x.ratchetUnread ) + "\"" : std::string();
+    out += x.ratchetCut ? " ratchet_cut=\"1\"" : "";
     return out;
 }
 inline std::string ratchetAttrsJson( const DeltaExtras& x )
 {
-    std::string out;
-    if( !x.ratchetRef.empty() )
+    if( x.ratchetRef.empty() )
     {
-        out = ",\"ratchet_ref\":\"" + rw::jsonesc::escapeMcp( x.ratchetRef ) + "\",\"ratchet_judged\":" + std::to_string( x.ratchetJudged );
-        out += x.ratchetUnread > 0 ? ",\"ratchet_unread\":" + std::to_string( x.ratchetUnread ) : std::string();
-        out += x.ratchetCut ? ",\"ratchet_cut\":1" : "";
+        return {};
     }
-    out += x.shellCut > 0 ? ",\"shell_cut\":" + std::to_string( x.shellCut ) : std::string();
+    std::string out = ",\"ratchet_ref\":\"" + rw::jsonesc::escapeMcp( x.ratchetRef ) + "\",\"ratchet_judged\":" + std::to_string( x.ratchetJudged );
+    out += x.ratchetUnread > 0 ? ",\"ratchet_unread\":" + std::to_string( x.ratchetUnread ) : std::string();
+    out += x.ratchetCut ? ",\"ratchet_cut\":1" : "";
     return out;
 }
 

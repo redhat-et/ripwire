@@ -1495,11 +1495,13 @@ inline constexpr const char* kQdLegendCore =
     // P3 (L7): next= on gating rows, defined where the reader meets it
     "A gating row's next= is the one pasteable follow-up: expand on FILE:NAME, the body to fix (a duplication row names a SET and carries none). "
     // P8 (L7): the threshold beside the number
-    "bar= on a complexity/verbosity/nesting/params row is the threshold now= is judged against (ccx 15, loc 60, nest 4, params 5). "
-    // CR712-SHSTATUS-DEPTH: present only when not 0
+    "bar= on a complexity/verbosity/nesting/params row is the threshold now= is judged against (ccx 15, loc 60, nest 4, params 5). ";
+
+// CR712-SHSTATUS-DEPTH — present-only: rides with shell_cut= on the root (QdRootFields::shellCut), absent at 0.
+inline constexpr const char* kQdShellCutLegend =
     "shell_cut=N: shell files whose defect-shape scan stopped at nesting depth 64; what lies deeper was not judged. ";
 
-static_assert( rw::shstatus::kMaxShellNest == 64, "kQdLegendCore's and compactlegend.h's shell_cut= sentences say depth 64" );
+static_assert( rw::shstatus::kMaxShellNest == 64, "kQdShellCutLegend's and compactlegend.h's shell_cut= sentences say depth 64" );
 
 // The macro FAMILIES, and why a member of one cannot be judged dead — printed only when the run actually
 // excluded something, because on a repo with no such macro the roster explains an empty set.
@@ -1904,6 +1906,7 @@ struct QualityDeltaLegendParts
     bool                                          staleTree               = false;   // D3 QD-STALE-HEADER: stale_tree= is on the root
     bool                                          ratchetRead             = false;   // D4: ratchet_ref= is on the root
     bool                                          anyImproved             = false;   // QD-CREDIT-ROW: the <improved> section is in the document
+    bool                                          shellCut                = false;   // CR712-SHSTATUS-DEPTH: shell_cut= is on the root
 };
 
 // qd-memory-degrade — present-only: each rides only with the attributes it defines. No double dash anywhere in them
@@ -2130,6 +2133,10 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
     if( p.anyImproved )
     {
         rw::emitRaw( out, kQdImprovedLegend );   // QD-CREDIT-ROW
+    }
+    if( p.shellCut )
+    {
+        rw::emitRaw( out, kQdShellCutLegend );   // CR712-SHSTATUS-DEPTH
     }
 
     if( p.scoped )
@@ -2964,6 +2971,7 @@ struct QdRootFields
     QdRootField kinds;                   // qd-memory-degrade: kinds not run, why, the replay, the peak (kindsDisclosure)
     QdRootField history;                 // hwh-fix4 (N1): history a gating kind could not read (unread_history=)
     QdRootField ratchet;                 // D4: the ratchet's reference point and what it could not read
+    QdRootField shellCut;                // CR712-SHSTATUS-DEPTH: shell files whose defect-shape scan the nesting budget cut
 };
 
 // The root's tail in one order for both formats. `foldAttrs` (XML only) is the stale fold's stale_by_kind=/stale_next=,
@@ -2977,7 +2985,7 @@ std::string qdRootTail( const QdRootFields& f, QdFormat format, std::string_view
         out += field->in( format );
     }
     out += foldAttrs;
-    for( const QdRootField* field : { &f.kinds, &f.history, &f.ratchet } )
+    for( const QdRootField* field : { &f.kinds, &f.history, &f.ratchet, &f.shellCut } )
     {
         out += field->in( format );
     }
@@ -3036,6 +3044,7 @@ QdRootFields qdRootFieldsOf( const QdReport& rep )
     f.history               = fromPair( quality::historyUnreadDisclosure( basis.historyUnread ) );
     f.ratchet               = { quality::ratchetAttrsXml( basis.extras, [ & ]( std::string_view s ) { return std::string( escapeXml( s, esc ) ); } ),
                                 quality::ratchetAttrsJson( basis.extras ) };
+    f.shellCut              = qdCountField( "shell_cut", basis.extras.shellCut, basis.extras.shellCut != 0 );
     return f;
 }
 
@@ -3345,7 +3354,8 @@ void emitQdXmlDocument( std::FILE* out, const QdReport& rep, const QdStaleFold* 
                               basis.headBasis, basis.declinedCallExcluded > 0, basis.valueRefExcluded > 0, fold != nullptr,
                               refs.kinds != quality::kAllKinds, refs.degraded, !refs.memoryStop.empty(), rep.kd.peakOver != 0,
                               rep.kd.memorySkipped != 0 && refs.selected != quality::kAllKinds, basis.historyUnread.any(),
-                              basis.rustTestExcluded, refs.staleTree, !basis.extras.ratchetRef.empty(), !basis.extras.improved.empty() }, out );
+                              basis.rustTestExcluded, refs.staleTree, !basis.extras.ratchetRef.empty(), !basis.extras.improved.empty(),
+                              basis.extras.shellCut > 0 }, out );
     // at= anchors this regression list to the commit (+dirty state) it was computed against (QdRootFields::at). R-I: the range
     // form's base_ref= and target_ref= carry FULL shas because a wave measurement gets quoted into handoffs where a 9-char
     // prefix is one collision from unverifiable.
