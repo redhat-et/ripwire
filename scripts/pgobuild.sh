@@ -19,13 +19,6 @@
 # TRAINING (train_workload below — the one list both the build and --check-training run). On this checkout:
 # cold map, a src/ and a test/ cold crawl (the C++, Bash and Python extractors), cold+cache-write, warm map,
 # a --for query, a --pack-task bundle, --callers and --impact.
-# Then the paths those runs never reach: page 2 of a paged map, --lint, --clones, --expand, --grep.
-# Last, ONE cold map of a small synthetic tree scripts/pgocorpus.py writes at build time (seeded, deterministic,
-# no network): namespaces sharing the class names Base/Impl/A/B, deep namesake inheritance, overloads,
-# call-result chains, one slice of every other language family. Ripwire's own source has few namesakes, so
-# it reaches the class-identity / guarded-walk / memo paths an llvm-sized run spends its time in. It is ONE
-# run on purpose: a fuller synthetic workload (30 runs, two corpora) measured ~2% MORE instructions on four
-# held-out benchmark corpora than the checkout-only list — its counts diluted the general paths.
 # On this checkout every run must exit 0 — a run that fails trains nothing for its verb, so the build FAILS
 # rather than ship a profile with a hole in it (on a --corpus tree, where ripwire's own symbol names may not
 # exist, a failed run is reported and the build goes on).
@@ -36,8 +29,7 @@
 # G3 NOTE. This is two configures and a training run, against a guardrail that asks for one build step.
 # The .profdata is deliberately NOT committed: a stale committed profile is a warning, not an error,
 # which trades a visible two-step build for an invisible wrong one. llvm-profdata is not a new
-# dependency — it ships inside the Clang the build already requires; python3 (the corpus generator,
-# standard library only) is already on every runner the release workflow uses.
+# dependency — it ships inside the Clang the build already requires.
 
 set -u
 
@@ -60,13 +52,12 @@ while [ $# -gt 0 ]; do
         --reuse-profile)  reuse=1; shift ;;
         --check-training) check_bin="${2:-}"; shift 2 ;;
         --clean)          rm -rf "$GEN" "$OPT"; echo "removed $GEN and $OPT"; exit 0 ;;
-        -h|--help)        sed -n '2,40p' "$0"; exit 0 ;;
+        -h|--help)        sed -n '2,32p' "$0"; exit 0 ;;
         *)                echo "unknown argument: $1 (see --help)" >&2; exit 2 ;;
     esac
 done
 
 [ -d "$CORPUS" ] || { echo "training corpus not found: $CORPUS" >&2; exit 2; }
-command -v python3 >/dev/null || { echo "python3 required (scripts/pgocorpus.py writes the synthetic training corpus)" >&2; exit 2; }
 
 # ── the training workload ──────────────────────────────────────────────────────────────────────────────
 # train_workload BIN: every training run, with BIN. Returns non-zero when a run failed on this checkout (each is named).
@@ -94,13 +85,6 @@ train_workload(){
     run "$CORPUS" --callers=ingest --cache="$TRAIN/c.bin"
     run "$CORPUS" --impact=buildGraph --cache="$TRAIN/c.bin"
     run "$CORPUS/test" --no-cache
-    run "$CORPUS" --page-bytes=6000:2 --cache="$TRAIN/c.bin"     # a paged bare map, page 2
-    run "$CORPUS" --lint --cache="$TRAIN/c.bin"
-    run "$CORPUS" --clones --cache="$TRAIN/c.bin"
-    run "$CORPUS" --expand=buildGraph --cache="$TRAIN/c.bin"
-    run "$CORPUS" --grep=DEGRADED_PATH_ALERT --cache="$TRAIN/c.bin"
-    python3 "$ROOT/scripts/pgocorpus.py" "$TRAIN/synthetic" --scale 1 >/dev/null || { echo "pgobuild: scripts/pgocorpus.py failed" >&2; fails=$(( fails + 1 )); }
-    run "$TRAIN/synthetic" --no-cache                          # ONE cold map of the namesake-heavy tree (see TRAINING)
     rm -rf "$TRAIN"
     echo "pgobuild: training workload — $runs runs, $fails failed, $(( SECONDS - t0 )) s"
     [ "$fails" -eq 0 ]
@@ -136,7 +120,7 @@ if [ "$reuse" -eq 0 ]; then
         echo "instrumented build failed — see $GEN/build.log" >&2; tail -20 "$GEN/build.log" >&2; exit 1; }
 
     # ── phase 2: train ─────────────────────────────────────────────────────────────────────────────
-    echo "pgobuild: [3/4] training on $CORPUS (+ one cold map of the scripts/pgocorpus.py tree)"
+    echo "pgobuild: [3/4] training on $CORPUS"
     train_workload "$GEN/ripwire" || exit 1
 
     raw=$( ls "$GEN"/prof/*.profraw 2>/dev/null | wc -l | tr -d ' ' )

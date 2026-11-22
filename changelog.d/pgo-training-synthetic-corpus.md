@@ -1,14 +1,7 @@
-### Changed — the PGO training workload reaches the paged map, --lint, --clones, --expand and --grep
+### Changed — a PGO training run that fails now fails the build, and the training list is gated
 
-`scripts/pgobuild.sh` trained with six verbs on this checkout, and its comment spoke of two corpora it did not use.
-It now also runs page 2 of a paged map, `--lint`, `--clones`, `--expand` and `--grep`, the comment says exactly what is
-trained, and a training run that exits non-zero on this checkout fails the build instead of shipping a profile with a
-hole in it. `scripts/pgobuild.sh --check-training BIN` runs the same list without building; `optremarkscheck` uses it
-to prove every listed verb runs and exits 0, and that no benchmark corpus is named. Output bytes are unchanged: PGO
-changes speed, never an answer.
-
-The training also runs ONE cold map of a small synthetic tree that `scripts/pgocorpus.py` writes at build time (seeded,
-deterministic, standard library only): namespaces sharing the class names `Base`/`Impl`/`A`/`B`, deep namesake
-inheritance, overloads and call-result chains, plus one slice of each other language family, so the class-identity
-paths an llvm-sized run spends its time in are not profiled as cold. `optremarkscheck` asserts the generator writes the
-same bytes twice.
+`scripts/pgobuild.sh` carried on past a training run that exited non-zero, so a renamed symbol or a mistyped flag
+silently trained nothing for its verb; on this checkout such a run now fails the build. Its comment spoke of two
+corpora it never used and now says exactly what is trained (the list itself is unchanged).
+`scripts/pgobuild.sh --check-training BIN` runs the training list without building; `optremarkscheck` uses it to prove
+every listed verb runs and exits 0, and that no benchmark corpus is named. Output bytes are unchanged.

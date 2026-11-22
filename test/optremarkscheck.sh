@@ -241,35 +241,18 @@ else
     echo "  SKIP  gitignore coverage (not a git checkout)"
 fi
 
-# ── (4) the PGO TRAINING WORKLOAD — scripts/pgobuild.sh's train_workload + scripts/pgocorpus.py ───────────
+# ── (4) the PGO TRAINING WORKLOAD — scripts/pgobuild.sh's train_workload ───────────
 # A profile only covers what the training runs execute, and every way that coverage shrinks is silent: a
-# renamed symbol or a mistyped flag makes one run exit 2 and train nothing, a generator that drifts changes what the shipped
-# binary was trained on between two builds of one commit, and a benchmark corpus slipped
+# renamed symbol or a mistyped flag makes one run exit 2 and train nothing, and a benchmark corpus slipped
 # into the list makes every published PGO number train-on-test. Each gets a behavioural check, not a grep
 # of the script's text, and each check has an arm that proves it can fail.
 PGOSH="$ROOT/scripts/pgobuild.sh"
 BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
-GENPY="$ROOT/scripts/pgocorpus.py"
-python3 "$GENPY" "$TMP/syn1" >/dev/null && python3 "$GENPY" "$TMP/syn2" >/dev/null && python3 "$GENPY" "$TMP/syn3" --seed 7 >/dev/null \
-    || no "scripts/pgocorpus.py exited non-zero"
-diff -r "$TMP/syn1" "$TMP/syn2" >/dev/null \
-    && ok "pgocorpus: the same arguments write the same bytes twice (a drifting corpus trains a different binary per build)" \
-    || no "pgocorpus: two runs with the same seed differ — the training corpus is not deterministic"
-diff -r "$TMP/syn1" "$TMP/syn3" >/dev/null \
-    && no "pgocorpus: --seed 7 wrote the same bytes as the default seed — the identity check above cannot fail" \
-    || ok "pgocorpus: a different seed writes different bytes (the identity check is not vacuous)"
-synFiles=$( find "$TMP/syn1" -type f | wc -l | tr -d ' ' )
-implNs=$( grep -l '^class Impl : public Base$' "$TMP"/syn1/cpp/mod*/Base.h 2>&1 | wc -l | tr -d ' ' )
-flatImpl=$( grep -l '^struct Impl : Base$' "$TMP"/syn1/cpp/flat/*.cpp 2>&1 | wc -l | tr -d ' ' )
-polyLangs=$( ls "$TMP/syn1/poly" | wc -l | tr -d ' ' )
-[ "$synFiles" -ge 150 ] && [ "$implNs" -ge 16 ] && [ "$flatImpl" -ge 16 ] && [ "$polyLangs" -ge 12 ] \
-    && ok "pgocorpus carries the namesake shapes ($synFiles files; Impl : Base in $implNs namespaces + $flatImpl global files; $polyLangs language slices)" \
-    || no "pgocorpus lost a shape: files=$synFiles namespaced-Impl=$implNs flat-Impl=$flatImpl languages=$polyLangs"
 
 # No benchmark repo is named in the training workload. The list is the measured corpora (docs/EVALS.md's
 # head-to-head and perf rungs); the planted arm proves the matcher fires.
 BENCH='envoy|vscode|cpython|nushell|terraform|koa|llvm-project|django|angular|cockroach|pydantic|restic|tmux|htop|libzmq|eslint|fastify|kysely|nunjucks|starlette|textual|sinatra|axum|gson|Newtonsoft'
-benchHits=$( grep -n -E -w "$BENCH" "$PGOSH" "$GENPY" 2>&1 )
+benchHits=$( grep -n -E -w "$BENCH" "$PGOSH" 2>&1 )
 [ -z "$benchHits" ] \
     && ok "no benchmark corpus is named in the PGO training files" \
     || { no "a benchmark corpus is named in the PGO training files (train-on-test):"; printf '%s\n' "$benchHits" | sed -n '1,5p'; }
@@ -293,13 +276,11 @@ else
     # verbs_missing LOG: the listed verbs LOG lacks on this checkout (empty = all present).
     verbs_missing(){
         local log="$1" missing="" verb n
-        for verb in '--no-cache' '--for=' '--pack-task=' '--callers=' '--impact=' '--page-bytes=' '--lint' '--clones' '--expand=' '--grep='; do
+        for verb in '--no-cache' '--for=' '--pack-task=' '--callers=' '--impact='; do
             grep -E "^$ROOT " "$log" | grep -q -F -- "$verb" || missing="$missing [$verb]"
         done
         n=$( grep -c -E -- "^$ROOT --cache=[^ ]*\$" "$log" )
         [ "$n" -ge 2 ] || missing="$missing [cold+warm map x$n]"
-        n=$( grep -c -E -- "^[^ ]*/synthetic --no-cache\$" "$log" )
-        [ "$n" -eq 1 ] || missing="$missing [synthetic cold map x$n, want exactly 1]"
         printf '%s' "$missing"
     }
     missing=$( verbs_missing "$TMP/runs.log" )
