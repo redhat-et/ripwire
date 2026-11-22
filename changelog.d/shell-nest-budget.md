@@ -1,0 +1,3 @@
+### Fixed — a deeply nested shell script no longer crashes `--quality-delta`
+
+The shell lexer and parser behind the Bash defect-shape facets recursed without a bound on subshells, brace groups, `if` and quote/substitution nesting; a test script 5,000 levels deep ended the run on SIGSEGV. One nesting budget (64 levels) now covers the lexer and the parser; a script that reaches it is cut there, and the run says so with `shell_cut=N` on the `<quality-delta>` root (and `"shell_cut"` in `--json`): N shell files whose scan stopped, what lies deeper was not judged. The old silent 40-level substitution cap is gone. New gate `test/shellnestcheck.sh` (generated scripts, never committed).
