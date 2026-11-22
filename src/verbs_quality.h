@@ -1477,7 +1477,7 @@ inline constexpr const char* kQdLegendCore =
     "score). THIRTEEN KINDS, and kind= on every row names which one: complexity over the ccx bar, verbosity "
     "(LOC), nesting, params, duplication, dead-code, api-surface (new public contract drift), "
     "error-masking, short-horizon-churn, new-clone-of-reused-helper, placeholder (added stub/TODO), "
-    "defect-shape (defect= names it), tangle (a long function's nesting, deep share and steering locals; a new, crossing or growing one gates). "
+    "defect-shape (defect= names it), tangle (a long function's nesting, deep share and steering locals). "
     "THREE independent axes, in this "
     "order: (1) acked findings are suppressed entirely (acked= counts them); (2) ORIGIN — a finding on a "
     "symbol that EXISTED at the baseline is preexisting-worse (no origin attribute), one that exists only "

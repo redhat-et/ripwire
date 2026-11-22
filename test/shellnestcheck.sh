@@ -61,12 +61,14 @@ for k in subshell group if quote subst; do
     else no "($k) 5000 deep: want rc 0/2 within 60 s and shell_cut=\"1\"; got rc=$rc in ${t}s, shell_cut='${c:-none}' ($( tail -c 160 "$TMP/$k.err" | tr '\n' ' ' ))"; fi
 done
 R="$TMP/r-subshell-5000"
-j="$( "$BIN" "$R" --quality-delta --json --no-cache 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("shell_cut","absent"))' 2>/dev/null || echo unparseable )"
-if [ "$j" = 1 ]; then ok "(j) --json: \"shell_cut\":1"; else no "(j) --json: want \"shell_cut\":1, got '$j'"; fi
+"$BIN" "$R" --quality-delta --json --no-cache >"$TMP/j.json" 2>/dev/null; jrc=$?
+j="$( python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("shell_cut","absent"))' "$TMP/j.json" 2>/dev/null || echo unparseable )"
+if { [ "$jrc" = 0 ] || [ "$jrc" = 2 ]; } && [ "$j" = 1 ]; then ok "(j) --json: \"shell_cut\":1"; else no "(j) --json: want rc 0/2 and \"shell_cut\":1, got rc=$jrc '$j'"; fi
 
 for n in 40 1; do
     R="$( repo case "$n" )"
-    "$BIN" "$R" --quality-delta --no-cache >"$TMP/case$n.xml" 2>/dev/null
+    "$BIN" "$R" --quality-delta --no-cache >"$TMP/case$n.xml" 2>/dev/null; crc=$?
+    case "$crc" in 0|2) ;; *) no "(case $n) --quality-delta exited $crc";; esac
     row="$( grep -oE '<r kind="defect-shape"[^>]*defect="unhandled-arm"[^>]*>' "$TMP/case$n.xml" | grep 'deep_check.sh' | head -1 )"
     c="$( cutof "$TMP/case$n.xml" )"
     label=n1; [ "$n" = 1 ] && label=n2
