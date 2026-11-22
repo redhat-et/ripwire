@@ -43,6 +43,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -65,6 +66,7 @@ struct SkillFinding
     const char*   rule;       // stable rule name — points into the static pattern table
     std::string   excerpt;    // the offending line, trimmed to ≤120 chars
     const char*   why = nullptr;   // why a rule graded below its usual severity (the row's why=); null = not downgraded
+    std::string   dest = {};       // #353 flow: the hosts a net-exfil line was proved to send to (the row's dest=); empty = unproved
 };
 
 inline const char* skillSeverityStr( SkillSeverity s ) noexcept
@@ -839,6 +841,856 @@ inline NetFlow netFlow( std::string_view line, std::string_view lowered ) noexce
     return scan.flow;
 }
 
+// ── #353 flow: what a `$VAR` holds, where a curl line sends, and whose credential it carries ─────────────────────────
+// gradeNetExfil reads one line, so `BASE_URL=https://api.cloudflare.com/…` three lines up was invisible: a token on its
+// way to its own service and a token on its way out read alike, both CRITICAL. Three facts now refine a CREDENTIAL row,
+// and each is a PROOF that may only move it from CRITICAL to WARN, never the other way and never on a guess. The idea is
+// NVIDIA SkillSpector's taint tracking (follow a value through an intermediate variable; keep the finding whenever an
+// operand, a flag or a command lies outside what the proof models); none of its code is used.
+//   resolution   `$VAR` / `${VAR}` stands for a literal when the document binds VAR at exactly ONE site, that site is a
+//                plain assignment (`VAR=…`, `export VAR=…`) or a `for VAR in` list of literal words, and it comes before
+//                the use (ShellBindings). Any other binding form is a site too, and leaves the variable unresolved.
+//   destination  the hosts the line's curl commands send to, when every one is proved (curlLineHosts); dest= names them.
+//   owner        the credential variable's name names the destination's owner (kCredentialOwners).
+// A credential sent to a loopback, private-LAN or link-local host is WARN why="local-dest"; one sent only to the hosts
+// of the service its name names is WARN why="cred-to-owner". Everything else that carried a credential stays CRITICAL.
+inline constexpr const char* kNetExfilLocalWhy = "local-dest";
+inline constexpr const char* kNetExfilOwnerWhy = "cred-to-owner";
+
+// One shell word: quotes removed and backslash escapes resolved (case kept), and where its first byte sits in the line.
+struct ShellWord
+{
+    std::string text;
+    std::size_t begin = 0;
+};
+
+// What joins a simple command to its neighbour. Nested marks the edge of a `(`, `$(`, backtick or `<(` context.
+enum class ShellJoin : char { LineEnd, Sequence, And, Or, Pipe, Background, Nested };
+
+struct ShellCommand
+{
+    std::vector<ShellWord> words;
+    ShellJoin              lead  = ShellJoin::LineEnd;   // before it (LineEnd = the line starts here)
+    ShellJoin              trail = ShellJoin::LineEnd;   // after it (LineEnd = the line ends here)
+};
+
+// A line cut into simple commands. modelled=false when the cut is not the whole story: a command substitution, a
+// subshell or process substitution, an unterminated quote, or a trailing `\` that continues the command on the next line.
+struct ShellLine
+{
+    std::vector<ShellCommand> commands;
+    bool                      modelled = true;
+};
+
+// cutShellLine's state. Quotes are joined into the word they sit in (`"https://a"@b` is ONE word, as the shell passes
+// it), a redirect's target is dropped, and a `#` that starts a word ends the line.
+struct ShellCutter
+{
+    ShellLine    cut;
+    ShellCommand command;
+    std::string  word;
+    std::size_t  wordBegin    = 0;
+    bool         inWord       = false;
+    bool         dropNextWord = false;   // the word after a redirect operator is its target, not an argument
+
+    void startWord( std::size_t at ) noexcept
+    {
+        if( !inWord )
+        {
+            inWord    = true;
+            wordBegin = at;
+        }
+    }
+    void endWord()
+    {
+        if( inWord && !dropNextWord )
+        {
+            command.words.push_back( { std::move( word ), wordBegin } );
+        }
+        dropNextWord = dropNextWord && !inWord;
+        word.clear();
+        inWord = false;
+    }
+    void endCommand( ShellJoin join )
+    {
+        endWord();
+        dropNextWord = false;
+        if( !command.words.empty() )
+        {
+            command.trail = join;
+            cut.commands.push_back( std::move( command ) );
+        }
+        command      = ShellCommand{};
+        command.lead = join;
+    }
+    // A redirect operator at line[i]: an fd number written against it (`2>`) is not a word, and its target is dropped.
+    std::size_t redirect( std::string_view line, std::size_t i )
+    {
+        if( inWord && !word.empty() && isAllDigits( word ) )
+        {
+            word.clear();
+            inWord = false;
+        }
+        endWord();
+        dropNextWord  = true;
+        std::size_t n = 1;
+        while( i + n < line.size() && n < 3 && ( line[ i + n ] == '<' || line[ i + n ] == '>' || line[ i + n ] == '&' || line[ i + n ] == '|' ) )
+        {
+            ++n;
+        }
+        return n;
+    }
+    // `&`, `<`, `>` and `$(` at line[i]: a join, a redirect, a nested context, or 0 for an ordinary word byte.
+    std::size_t ampersandOrAngleAt( std::string_view line, std::size_t i )
+    {
+        const char c    = line[i];
+        const char next = i + 1 < line.size() ? line[ i + 1 ] : '\0';
+        if( c == '&' && next != '>' )
+        {
+            endCommand( next == '&' ? ShellJoin::And : ShellJoin::Background );
+            return next == '&' ? 2 : 1;
+        }
+        if( ( ( c == '<' || c == '>' ) && next == '(' ) || ( c == '$' && next == '(' ) )
+        {
+            cut.modelled = false;
+            endCommand( ShellJoin::Nested );
+            return 2;
+        }
+        return ( c == '<' || c == '>' || c == '&' ) ? redirect( line, i ) : 0;
+    }
+    // The bytes an unquoted separator, quote or join at line[i] consumes, or 0 for an ordinary word byte.
+    std::size_t operatorAt( std::string_view line, std::size_t i, char& quote )
+    {
+        const char c    = line[i];
+        const char next = i + 1 < line.size() ? line[ i + 1 ] : '\0';
+        switch( c )
+        {
+            case ' ': case '\t': case '\r': endWord(); return 1;
+            case '\'': case '"': startWord( i ); quote = c; return 1;
+            case ';': endCommand( ShellJoin::Sequence ); return 1;
+            case '|': endCommand( next == '|' ? ShellJoin::Or : ShellJoin::Pipe ); return ( next == '|' || next == '&' ) ? 2 : 1;
+            case '(': case ')': case '`': cut.modelled = false; endCommand( ShellJoin::Nested ); return 1;
+            default: return ampersandOrAngleAt( line, i );
+        }
+    }
+    // Inside a quote: the bytes line[i] consumes. A `$(` or backtick in double quotes still runs a command.
+    std::size_t quotedAt( std::string_view line, std::size_t i, char& quote )
+    {
+        const char c = line[i];
+        if( c == quote )
+        {
+            quote = 0;
+            return 1;
+        }
+        if( quote == '"' && c == '\\' && i + 1 < line.size() && std::string_view( "$`\"\\" ).find( line[ i + 1 ] ) != std::string_view::npos )
+        {
+            word += line[ i + 1 ];
+            return 2;
+        }
+        cut.modelled = cut.modelled && !( quote == '"' && ( c == '`' || ( c == '$' && i + 1 < line.size() && line[ i + 1 ] == '(' ) ) );
+        word += c;
+        return 1;
+    }
+};
+
+inline ShellLine cutShellLine( std::string_view line )
+{
+    ShellCutter cutter;
+    char        quote = 0;
+    for( std::size_t i = 0; i < line.size(); )
+    {
+        if( quote != 0 )
+        {
+            i += cutter.quotedAt( line, i, quote );
+            continue;
+        }
+        if( line[i] == '#' && !cutter.inWord )
+        {
+            break;   // a comment runs to the end of the line
+        }
+        if( line[i] == '\\' )
+        {
+            cutter.cut.modelled = cutter.cut.modelled && i + 1 < line.size();   // a trailing `\` continues the command
+            if( i + 1 < line.size() )
+            {
+                cutter.startWord( i );
+                cutter.word += line[ i + 1 ];
+            }
+            i += 2;
+            continue;
+        }
+        if( const std::size_t consumed = cutter.operatorAt( line, i, quote ); consumed > 0 )
+        {
+            i += consumed;
+            continue;
+        }
+        cutter.startWord( i );
+        cutter.word += line[i];
+        ++i;
+    }
+    cutter.cut.modelled = cutter.cut.modelled && quote == 0;
+    cutter.endCommand( ShellJoin::LineEnd );
+    return std::move( cutter.cut );
+}
+
+inline bool isShellIdent( std::string_view s ) noexcept
+{
+    return !s.empty() && namesplit::isIdentStart( s[0] ) && std::all_of( s.begin(), s.end(), []( char c ) noexcept { return namesplit::isIdentChar( c ); } );
+}
+
+// The NAME of a `NAME=value` word, or empty.
+inline std::string_view assignedName( std::string_view word ) noexcept
+{
+    const std::size_t eq = word.find( '=' );
+    return ( eq != std::string_view::npos && isShellIdent( word.substr( 0, eq ) ) ) ? word.substr( 0, eq ) : std::string_view{};
+}
+
+// One place the document binds a variable. Only a literal site carries values: the one value of a plain assignment, or
+// the words of a `for NAME in …` list.
+struct ShellBindingSite
+{
+    std::string              name;
+    int                      line = 0;
+    std::size_t              col  = 0;
+    bool                     literal = false;
+    std::vector<std::string> values;
+};
+
+// Every binding site in one document, sorted by name and then position.
+struct ShellBindings
+{
+    std::vector<ShellBindingSite> sites;
+
+    // The ONE literal site binding `name` before (line, col), or null: no site, two or more sites, a site that binds
+    // from a command, a variable or a read, or a site at or after the use.
+    const ShellBindingSite* resolve( std::string_view name, int line, std::size_t col ) const noexcept
+    {
+        const auto byName = []( const ShellBindingSite& s, std::string_view n ) noexcept { return std::string_view( s.name ) < n; };
+        const auto first  = std::lower_bound( sites.begin(), sites.end(), name, byName );
+        if( first == sites.end() || first->name != name || ( first + 1 != sites.end() && ( first + 1 )->name == name ) )
+        {
+            return nullptr;
+        }
+        const bool before = first->line < line || ( first->line == line && first->col < col );
+        return ( first->literal && before ) ? &*first : nullptr;
+    }
+};
+
+// Commands whose later identifier words a run may (re)bind: `read URL`, `unset URL`, `local URL`, `getopts o URL`.
+inline constexpr std::string_view kShellBindingCommands = "read readarray mapfile getopts unset local declare typeset";
+// Words that leave the next word in command position for a plain assignment or a `for` (`then URL=…`, `do for …`).
+inline constexpr std::string_view kShellLeadWords = "then do else elif if while until ! { $";
+
+// Every `NAME=`, `NAME+=`, `NAME:=` (`${NAME:=x}`) and `NAME[` (an array element) on the line, wherever it sits — in a
+// quote, a URL query or prose too: a site the proof cannot read only makes the variable unresolved. Each starts
+// non-literal; noteLiteralAssignment upgrades the plain assignments.
+inline void noteAssignmentSites( std::string_view ln, int lineNum, std::vector<ShellBindingSite>& sites )
+{
+    for( std::size_t i = 0; i < ln.size(); )
+    {
+        if( !namesplit::isIdentStart( ln[i] ) || ( i > 0 && ( namesplit::isIdentChar( ln[ i - 1 ] ) || ln[ i - 1 ] == '$' ) ) )
+        {
+            ++i;
+            continue;
+        }
+        std::size_t end = i;
+        while( end < ln.size() && namesplit::isIdentChar( ln[end] ) )
+        {
+            ++end;
+        }
+        const char after = end < ln.size() ? ln[end] : '\0';
+        const bool binds = after == '=' || after == '[' || ( ( after == '+' || after == ':' ) && end + 1 < ln.size() && ln[ end + 1 ] == '=' );
+        if( binds )
+        {
+            sites.push_back( { std::string( ln.substr( i, end - i ) ), lineNum, i, false, {} } );
+        }
+        i = end;
+    }
+}
+
+// The first word of a command that is not a lead word (`then`, `do`, a `$ ` prompt, …).
+inline std::size_t firstCommandWord( const std::vector<ShellWord>& w ) noexcept
+{
+    std::size_t k = 0;
+    while( k < w.size() && namesplit::hasField( kShellLeadWords, " ", w[k].text, /*visitTrailingEmpty=*/false ) )
+    {
+        ++k;
+    }
+    return k;
+}
+
+// `for NAME in w…` / `select NAME in w…` at word k: a site, literal when the line is modelled and no word expands (no
+// `$`, backtick, glob or brace), its values the words. False when word k starts no such loop.
+inline bool noteLoopSite( const std::vector<ShellWord>& w, std::size_t k, bool modelled, int lineNum, std::vector<ShellBindingSite>& sites )
+{
+    if( k + 1 >= w.size() || ( w[k].text != "for" && w[k].text != "select" ) || !isShellIdent( w[ k + 1 ].text ) )
+    {
+        return false;
+    }
+    const auto expands = []( const ShellWord& x ) noexcept { return x.text.find_first_of( "$`*?[{" ) != std::string::npos; };
+    ShellBindingSite site{ w[ k + 1 ].text, lineNum, w[ k + 1 ].begin, false, {} };
+    site.literal = modelled && k + 3 < w.size() && w[ k + 2 ].text == "in" && std::none_of( w.begin() + std::ptrdiff_t( k + 3 ), w.end(), expands );
+    for( std::size_t v = k + 3; site.literal && v < w.size(); ++v )
+    {
+        site.values.push_back( w[v].text );
+    }
+    sites.push_back( std::move( site ) );
+    return true;
+}
+
+// The identifier words a binding command (`read`, `unset`, `local`, …) or `printf -v` may set: never literal.
+inline void noteBindingWordSites( const std::vector<ShellWord>& w, std::size_t k, int lineNum, std::vector<ShellBindingSite>& sites )
+{
+    const bool bindsWords = k < w.size() && namesplit::hasField( kShellBindingCommands, " ", w[k].text, false );
+    const bool printfV    = k < w.size() && w[k].text == "printf";
+    for( std::size_t v = k + 1; v < w.size(); ++v )
+    {
+        if( isShellIdent( w[v].text ) && ( bindsWords || ( printfV && w[ v - 1 ].text == "-v" ) ) )
+        {
+            sites.push_back( { w[v].text, lineNum, w[v].begin, false, {} } );
+        }
+    }
+}
+
+// `;`, `&&` or a line end: the joins across which a plain assignment stays in the current shell.
+inline bool joinsInShell( ShellJoin join ) noexcept
+{
+    return join == ShellJoin::LineEnd || join == ShellJoin::Sequence || join == ShellJoin::And;
+}
+
+// `[export|readonly [-flags]] NAME=value` standing alone between in-shell joins, in a fully modelled line: the one
+// assignment form whose value is known. It upgrades the site noteAssignmentSites found at the word's first byte (the
+// NAME is unquoted, so it starts the word); that pass appended the line's sites in column order, so a binary search
+// finds it and a line of 50,000 assignments stays linear.
+inline void noteLiteralAssignment( const ShellCommand& cmd, std::size_t k, bool modelled, std::vector<ShellBindingSite>& sites, std::size_t lineFirstSite )
+{
+    const std::vector<ShellWord>& w = cmd.words;
+    std::size_t a = k + ( k < w.size() && ( w[k].text == "export" || w[k].text == "readonly" ) ? 1 : 0 );
+    while( a < w.size() && a > k && w[a].text.starts_with( '-' ) )
+    {
+        ++a;
+    }
+    const std::string_view name = a + 1 == w.size() ? assignedName( w[a].text ) : std::string_view{};
+    if( !modelled || name.empty() || !joinsInShell( cmd.lead ) || !joinsInShell( cmd.trail ) )
+    {
+        return;
+    }
+    const auto site = std::lower_bound( sites.begin() + std::ptrdiff_t( lineFirstSite ), sites.end(), w[a].begin,
+                                        []( const ShellBindingSite& x, std::size_t col ) noexcept { return x.col < col; } );
+    if( site != sites.end() && site->col == w[a].begin && site->name == name )
+    {
+        site->literal = true;
+        site->values  = { w[a].text.substr( name.size() + 1 ) };
+    }
+}
+
+// The command-level binding sites of one cut command (the `NAME=` sites are noteAssignmentSites').
+inline void noteCommandSites( const ShellCommand& cmd, bool modelled, int lineNum, std::vector<ShellBindingSite>& sites, std::size_t lineFirstSite )
+{
+    const std::size_t k = firstCommandWord( cmd.words );
+    if( noteLoopSite( cmd.words, k, modelled, lineNum, sites ) )
+    {
+        return;
+    }
+    noteBindingWordSites( cmd.words, k, lineNum, sites );
+    noteLiteralAssignment( cmd, k, modelled, sites, lineFirstSite );
+}
+
+inline ShellBindings collectShellBindings( const std::vector<std::string>& lines )
+{
+    ShellBindings bindings;
+    for( std::size_t i = 0; i < lines.size(); ++i )
+    {
+        const int         lineNum = int( i ) + 1;
+        const std::size_t first   = bindings.sites.size();
+        noteAssignmentSites( lines[i], lineNum, bindings.sites );
+        const ShellLine cut = cutShellLine( lines[i] );
+        for( const ShellCommand& cmd : cut.commands )
+        {
+            noteCommandSites( cmd, cut.modelled, lineNum, bindings.sites, first );
+        }
+    }
+    std::stable_sort( bindings.sites.begin(), bindings.sites.end(), []( const ShellBindingSite& a, const ShellBindingSite& b ) noexcept
+    {
+        return std::tie( a.name, a.line, a.col ) < std::tie( b.name, b.line, b.col );
+    } );
+    return bindings;
+}
+
+// What the destination step may cost: a line naming more hosts, or a host text longer once expanded, proves nothing.
+inline constexpr std::size_t kFlowMaxDestinations = 16;
+inline constexpr std::size_t kFlowMaxExpandedBytes = 4096;
+
+// The variable a `$` at text[at] names: `name` for `$NAME` or a closed `${NAME}` (empty for `${NAME:-x}`, `$(`, `$1`, a
+// lone `$`), `rawName` for the identifier after `$` / `${` however it ends, and `end`, the byte past the reference.
+struct ShellVarRef
+{
+    std::string_view name;
+    std::string_view rawName;
+    std::size_t      end = 0;
+};
+
+inline ShellVarRef shellVarRefAt( std::string_view text, std::size_t at ) noexcept
+{
+    const bool        braced = at + 1 < text.size() && text[ at + 1 ] == '{';
+    const std::size_t begin  = at + ( braced ? 2 : 1 );
+    std::size_t       end    = begin;
+    while( end < text.size() && namesplit::isIdentChar( text[end] ) )
+    {
+        ++end;
+    }
+    const std::string_view raw    = text.substr( std::min( begin, text.size() ), end - std::min( begin, text.size() ) );
+    const bool             closed = !braced || ( end < text.size() && text[end] == '}' );
+    const bool             named  = !raw.empty() && namesplit::isIdentStart( raw[0] ) && closed;
+    return { named ? raw : std::string_view{}, raw, named ? end + ( braced ? 1 : 0 ) : at + 1 };
+}
+
+// Every expansion so far, each extended by each of `values`; false past the bounds (one multi-valued variable per word,
+// kFlowMaxExpandedBytes per expansion).
+inline bool substituteValues( std::vector<std::string>& out, const std::vector<std::string>& values )
+{
+    if( values.size() != 1 && out.size() != 1 )
+    {
+        return false;
+    }
+    std::vector<std::string> next;
+    for( const std::string& o : out )
+    {
+        for( const std::string& v : values )
+        {
+            next.push_back( o + v );
+        }
+    }
+    out = std::move( next );
+    return std::none_of( out.begin(), out.end(), []( const std::string& o ) noexcept { return o.size() > kFlowMaxExpandedBytes; } );
+}
+
+// A destination word with every resolvable `$NAME` / `${NAME}` replaced by what it holds; an unresolved one stays as
+// written, so hostOfUrl refuses it wherever it reaches the host. A `for` variable expands to each of its words.
+inline bool expandDestination( std::string_view text, int line, std::size_t col, const ShellBindings* bindings, std::vector<std::string>& out )
+{
+    out.assign( 1, std::string{} );
+    for( std::size_t i = 0; i < text.size(); )
+    {
+        const ShellVarRef       ref  = text[i] == '$' ? shellVarRefAt( text, i ) : ShellVarRef{};
+        const ShellBindingSite* site = ( !ref.name.empty() && bindings != nullptr ) ? bindings->resolve( ref.name, line, col ) : nullptr;
+        if( site == nullptr )
+        {
+            for( std::string& o : out )
+            {
+                o += text[i];
+            }
+            ++i;
+            continue;
+        }
+        if( !substituteValues( out, site->values ) )
+        {
+            return false;
+        }
+        i = ref.end;
+    }
+    return true;
+}
+
+// The bracketed IPv6 host `[…]` at the start of `authority` and its optional `:port`, or empty.
+inline std::string bracketedHost( std::string_view authority )
+{
+    const std::size_t      close = authority.find( ']' );
+    const std::string_view inner = close == std::string_view::npos ? std::string_view{} : authority.substr( 1, close - 1 );
+    const std::string_view tail  = close == std::string_view::npos ? std::string_view{} : authority.substr( close + 1 );
+    const bool hexColon = !inner.empty() && inner.find_first_not_of( "0123456789abcdef:" ) == std::string_view::npos;
+    const bool portOk   = tail.empty() || ( tail[0] == ':' && isAllDigits( tail.substr( 1 ) ) );
+    return ( hexColon && portOk ) ? "[" + std::string( inner ) + "]" : std::string{};
+}
+
+// The LOWERCASED host a URL or bare `host[:port][/path]` sends to, or empty when the text does not prove one: an
+// expansion, glob or escape anywhere in the authority, two `@`, a port that is not digits, a byte no host name holds.
+// The authority runs to the first `/ ? #`, and the host follows its one `@` — `https://api.github.com@evil.example/`
+// goes to evil.example.
+inline std::string hostOfUrl( std::string_view text )
+{
+    std::string low( text );
+    std::transform( low.begin(), low.end(), low.begin(), []( char c ) noexcept { return char( std::tolower( static_cast<unsigned char>( c ) ) ); } );
+    std::string_view rest   = low;
+    const std::size_t scheme = rest.find( "://" );
+    if( scheme != std::string_view::npos )
+    {
+        const std::string_view name = rest.substr( 0, scheme );
+        if( name.empty() || !namesplit::isIdentStart( name[0] ) || name.find_first_not_of( "abcdefghijklmnopqrstuvwxyz0123456789+.-" ) != std::string_view::npos )
+        {
+            return {};
+        }
+        rest = rest.substr( scheme + 3 );
+    }
+    std::string_view  authority = rest.substr( 0, rest.find_first_of( "/?#" ) );
+    const std::size_t at        = authority.find( '@' );
+    if( at != std::string_view::npos )
+    {
+        authority = authority.find( '@', at + 1 ) == std::string_view::npos ? authority.substr( at + 1 ) : std::string_view{};
+    }
+    if( authority.empty() )
+    {
+        return {};
+    }
+    if( authority[0] == '[' )
+    {
+        return bracketedHost( authority );
+    }
+    const std::size_t colon = authority.find( ':' );
+    std::string_view  host  = authority.substr( 0, colon );
+    if( colon != std::string_view::npos && !isAllDigits( authority.substr( colon + 1 ) ) )
+    {
+        return {};
+    }
+    if( host.ends_with( '.' ) )
+    {
+        host.remove_suffix( 1 );
+    }
+    const bool nameBytes = !host.empty() && std::isalnum( static_cast<unsigned char>( host[0] ) ) != 0
+                        && host.find_first_not_of( "abcdefghijklmnopqrstuvwxyz0123456789.-" ) == std::string_view::npos && host.find( ".." ) == std::string_view::npos;
+    return nameBytes ? std::string( host ) : std::string{};
+}
+
+// A dotted-quad IPv4 literal as four octets, or false. A leading zero is refused: curl reads `010` as octal 8, so
+// `010.0.0.1` is 8.0.0.1, and a decimal reading of it would call a public host private.
+inline bool parseIpv4( std::string_view host, unsigned octets[4] ) noexcept
+{
+    for( int part = 0; part < 4; ++part )
+    {
+        const std::size_t      dot   = host.find( '.' );
+        const std::string_view piece = host.substr( 0, dot );
+        if( piece.empty() || piece.size() > 3 || !isAllDigits( piece ) || ( piece.size() > 1 && piece[0] == '0' ) || ( ( dot == std::string_view::npos ) != ( part == 3 ) ) )
+        {
+            return false;
+        }
+        octets[part] = unsigned( std::stoul( std::string( piece ) ) );
+        if( octets[part] > 255 )
+        {
+            return false;
+        }
+        host = dot == std::string_view::npos ? std::string_view{} : host.substr( dot + 1 );
+    }
+    return true;
+}
+
+// localhost, 127.0.0.0/8, ::1, RFC 1918 (10/8, 172.16/12, 192.168/16) and link-local (169.254/16, fe80::/10). Spelled
+// any other way (`0x7f.1`, `[::ffff:127.0.0.1]`, `*.localhost`) the host is not called local: the downgrade needs the
+// plain spelling.
+inline bool isLocalHost( std::string_view host ) noexcept
+{
+    if( host == "localhost" || host == "[::1]" )
+    {
+        return true;
+    }
+    if( host.starts_with( '[' ) )
+    {
+        const std::string_view group = host.substr( 1, host.find( ':' ) - 1 );
+        return group.size() == 4 && group.starts_with( "fe" ) && group[2] >= '8' && group[2] <= 'b';
+    }
+    unsigned o[4] = {};
+    if( !parseIpv4( host, o ) )
+    {
+        return false;
+    }
+    return o[0] == 127 || o[0] == 10 || ( o[0] == 172 && o[1] >= 16 && o[1] <= 31 ) || ( o[0] == 192 && o[1] == 168 ) || ( o[0] == 169 && o[1] == 254 );
+}
+
+// A credential's name names its owner: the name's first `_` component equals the stem (or its alias), and the owner's
+// registrable domain is that stem's `.com` — the exact-label rule, fixed to one public suffix so no suffix list is
+// needed: under `.com` a host's registrable domain is its last two labels. A small, explicit table on purpose: a
+// vendor whose domain is not stem.com, or whose subdomains a customer can claim (Azure's *.services.ai.azure.com, a
+// *.github.io page), is not here, and its credential stays CRITICAL.
+struct CredentialOwner
+{
+    std::string_view stem;
+    std::string_view alias;   // empty = none
+    std::string_view domain;
+};
+inline constexpr CredentialOwner kCredentialOwners[] = {
+    { "cloudflare", "cf", "cloudflare.com" }, { "github", "gh", "github.com" }, { "airtable", "", "airtable.com" } };
+static_assert( std::all_of( std::begin( kCredentialOwners ), std::end( kCredentialOwners ), []( const CredentialOwner& o )
+               { return o.domain.size() == o.stem.size() + 4 && o.domain.starts_with( o.stem ) && o.domain.ends_with( ".com" ); } ),
+               "each owner's domain is its stem's .com: the stem must equal the registrable domain's label" );
+
+// The owner a LOWERCASED credential name names, or null.
+inline const CredentialOwner* credentialOwner( std::string_view lowered ) noexcept
+{
+    const std::string_view stem = lowered.substr( 0, lowered.find( '_' ) );
+    for( const CredentialOwner& o : kCredentialOwners )
+    {
+        if( !stem.empty() && ( stem == o.stem || stem == o.alias ) )
+        {
+            return &o;
+        }
+    }
+    return nullptr;
+}
+
+inline bool hostOwnedBy( std::string_view host, std::string_view domain ) noexcept
+{
+    return host == domain || ( host.size() > domain.size() && host.ends_with( domain ) && host[ host.size() - domain.size() - 1 ] == '.' );
+}
+
+// Every credential-named `$NAME` / `${NAME…` on the LOWERCASED line names the owner of every host, and there is one.
+inline bool credentialVarsOwned( std::string_view lowered, const std::vector<std::string>& hosts )
+{
+    bool any = false;
+    for( std::size_t dollar = lowered.find( '$' ); dollar != std::string_view::npos; dollar = lowered.find( '$', dollar + 1 ) )
+    {
+        const std::string_view name = shellVarRefAt( lowered, dollar ).rawName;
+        if( name.empty() || !isCredentialName( name ) )
+        {
+            continue;
+        }
+        const CredentialOwner* owner = credentialOwner( name );
+        if( owner == nullptr || !std::all_of( hosts.begin(), hosts.end(), [ & ]( const std::string& h ) noexcept { return hostOwnedBy( h, owner->domain ); } ) )
+        {
+            return false;
+        }
+        any = true;
+    }
+    return any;
+}
+
+// In one LOWERCASED shell word, every `$` after an `authorization:` starts a credential-named variable.
+inline bool headerVarsNamed( std::string_view low ) noexcept
+{
+    const std::size_t header = low.find( "authorization:" );
+    for( std::size_t d = header == std::string_view::npos ? std::string_view::npos : low.find( '$', header ); d != std::string_view::npos; d = low.find( '$', d + 1 ) )
+    {
+        const std::string_view name = shellVarRefAt( low, d ).name;
+        if( name.empty() || !isCredentialName( name ) )
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Every `$` in an Authorization header word starts a credential-named variable (`Bearer $X`, `Bearer $(cat t)` do not),
+// so the owner check above has seen everything the header sends.
+inline bool authorizationVarsNamed( const ShellLine& cut )
+{
+    for( const ShellCommand& cmd : cut.commands )
+    {
+        for( const ShellWord& w : cmd.words )
+        {
+            std::string low( w.text );
+            std::transform( low.begin(), low.end(), low.begin(), []( char c ) noexcept { return char( std::tolower( static_cast<unsigned char>( c ) ) ); } );
+            if( !headerVarsNamed( low ) )
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+// curl's options, as far as this proof models them: those whose value is the NEXT word, those that take none, and the
+// short letters of each. Any other option — a proxy (-x), --resolve / --connect-to, a config file (-K), --next, an
+// --expand-* variable, an option this table does not know — leaves the destination unproved.
+inline constexpr std::string_view kCurlValueShort = "AbcCdDeEFHmoPQrTtuUwXyYz";
+inline constexpr std::string_view kCurlFlagShort  = "0123456aBfgGiIjJklLMnNOpqRsSvZ#";
+inline constexpr std::string_view kCurlValueLong  =
+    "--header --data --data-raw --data-binary --data-urlencode --data-ascii --json --request --user --output --user-agent --referer --form "
+    "--form-string --upload-file --cookie --cookie-jar --max-time --connect-timeout --retry --retry-delay --retry-max-time --write-out --cacert "
+    "--capath --cert --cert-type --key --key-type --oauth2-bearer --aws-sigv4 --limit-rate --range --dump-header --stderr --trace --trace-ascii "
+    "--max-filesize --speed-limit --speed-time --expect100-timeout --keepalive-time --output-dir --url-query --max-redirs --proto --proto-redir "
+    "--continue-at --time-cond --netrc-file";
+inline constexpr std::string_view kCurlFlagLong   =
+    "--silent --show-error --fail --fail-with-body --fail-early --location --include --verbose --insecure --compressed --get --head --globoff "
+    "--http1.0 --http1.1 --http2 --http2-prior-knowledge --http3 --no-progress-meter --progress-bar --remote-name --remote-name-all "
+    "--remote-header-name --ipv4 --ipv6 --tlsv1.2 --tlsv1.3 --ssl --ssl-reqd --create-dirs --no-buffer --raw --list-only --append --disable "
+    "--netrc --netrc-optional --anyauth --basic --digest --ntlm --negotiate --path-as-is --tcp-nodelay --no-keepalive --no-sessionid "
+    "--retry-all-errors --retry-connrefused --show-headers --tr-encoding";
+
+enum class CurlArg : char { Unknown, Flag, NextIsValue, NextIsUrl, Positional };
+
+inline CurlArg curlLongOptionKind( std::string_view w ) noexcept
+{
+    return w == "--url"                                         ? CurlArg::NextIsUrl
+         : namesplit::hasField( kCurlValueLong, " ", w, false ) ? CurlArg::NextIsValue
+         : namesplit::hasField( kCurlFlagLong, " ", w, false )  ? CurlArg::Flag
+                                                                 : CurlArg::Unknown;
+}
+
+// A short-option bundle: flags, then at most one value letter, whose value is the rest of the word or the next word.
+inline CurlArg curlShortBundleKind( std::string_view w ) noexcept
+{
+    for( std::size_t j = 1; j < w.size(); ++j )
+    {
+        if( kCurlValueShort.find( w[j] ) != std::string_view::npos )
+        {
+            return j + 1 < w.size() ? CurlArg::Flag : CurlArg::NextIsValue;
+        }
+        if( kCurlFlagShort.find( w[j] ) == std::string_view::npos )
+        {
+            return CurlArg::Unknown;
+        }
+    }
+    return CurlArg::Flag;
+}
+
+inline CurlArg curlArgKind( std::string_view w ) noexcept
+{
+    if( w.size() < 2 || w[0] != '-' )
+    {
+        return CurlArg::Positional;
+    }
+    return w.starts_with( "--" ) ? curlLongOptionKind( w ) : curlShortBundleKind( w );
+}
+
+// The words a curl command sends to (every positional argument, and --url's value), appended to `out`; false when an
+// argument is outside the model above.
+inline bool curlCommandDestinations( const std::vector<ShellWord>& words, std::size_t first, std::vector<const ShellWord*>& out )
+{
+    bool positionalOnly = false;
+    for( std::size_t k = first; k < words.size(); ++k )
+    {
+        const CurlArg kind = positionalOnly ? CurlArg::Positional : curlArgKind( words[k].text );
+        positionalOnly     = positionalOnly || words[k].text == "--";
+        if( kind == CurlArg::Unknown && words[k].text != "--" )
+        {
+            return false;
+        }
+        if( kind == CurlArg::NextIsValue || kind == CurlArg::NextIsUrl )
+        {
+            if( ++k == words.size() )
+            {
+                return false;
+            }
+        }
+        if( kind == CurlArg::Positional || kind == CurlArg::NextIsUrl )
+        {
+            out.push_back( &words[k] );
+        }
+    }
+    return true;
+}
+
+// Words that leave curl the command: control words, runners that take no option here, and `VAR=x` prefixes.
+inline constexpr std::string_view kCurlRunnerWords = "then do else elif if while until ! { time nohup exec command env sudo $";
+
+// Network-verb words anywhere on the line (the same word runs hasNetExfilShape reads): each must be a curl command the
+// cut parsed, or the line holds a sink — an eval'd string, a `sh -c`, a wget — the proof did not read.
+inline std::size_t netVerbWords( std::string_view line ) noexcept
+{
+    std::size_t count = 0;
+    for( std::size_t i = 0; i < line.size(); )
+    {
+        std::size_t end = i;
+        while( end < line.size() && namesplit::isIdentChar( line[end] ) )
+        {
+            ++end;
+        }
+        const std::string_view word = line.substr( i, end - i );
+        count += std::find( std::begin( kNetVerbs ), std::end( kNetVerbs ), word ) != std::end( kNetVerbs ) ? 1 : 0;
+        i = end > i ? end : i + 1;
+    }
+    return count;
+}
+
+// The hosts a line sends to, when every one is proved; known=false otherwise (an empty answer proves nothing).
+struct LineHosts
+{
+    bool                     known = false;
+    std::vector<std::string> hosts;   // distinct, in line order
+};
+
+// The destination words of every curl command on a fully modelled line, or false when a command is not one the proof
+// reads (a curl the cut did not parse as a command, another network verb, an argument outside the option model).
+inline bool lineDestinationWords( std::string_view line, const ShellLine& cut, std::vector<const ShellWord*>& words )
+{
+    if( !cut.modelled || line.find( "/dev/tcp/" ) != std::string_view::npos || line.find( "/dev/udp/" ) != std::string_view::npos )
+    {
+        return false;
+    }
+    std::size_t curls = 0;
+    for( const ShellCommand& cmd : cut.commands )
+    {
+        std::size_t k = 0;
+        while( k < cmd.words.size() && ( namesplit::hasField( kCurlRunnerWords, " ", cmd.words[k].text, false ) || !assignedName( cmd.words[k].text ).empty() ) )
+        {
+            ++k;
+        }
+        const std::string_view verb = k < cmd.words.size() ? namesplit::afterLast( cmd.words[k].text, "/" ) : std::string_view{};
+        if( verb == "curl" )
+        {
+            ++curls;
+            if( !curlCommandDestinations( cmd.words, k + 1, words ) )
+            {
+                return false;
+            }
+        }
+    }
+    return curls > 0 && curls == netVerbWords( line ) && !words.empty() && words.size() <= kFlowMaxDestinations;
+}
+
+inline LineHosts curlLineHosts( std::string_view line, const ShellLine& cut, int lineNum, const ShellBindings* bindings )
+{
+    LineHosts                     answer;
+    std::vector<const ShellWord*> words;
+    if( !lineDestinationWords( line, cut, words ) )
+    {
+        return answer;
+    }
+    std::vector<std::string> expanded;
+    for( const ShellWord* w : words )
+    {
+        if( !expandDestination( w->text, lineNum, w->begin, bindings, expanded ) )
+        {
+            return LineHosts{};
+        }
+        for( const std::string& text : expanded )
+        {
+            std::string host = hostOfUrl( text );
+            if( host.empty() )
+            {
+                return LineHosts{};
+            }
+            if( std::find( answer.hosts.begin(), answer.hosts.end(), host ) == answer.hosts.end() )
+            {
+                answer.hosts.push_back( std::move( host ) );
+            }
+        }
+    }
+    answer.known = answer.hosts.size() <= kFlowMaxDestinations;
+    return answer.known ? answer : LineHosts{};
+}
+
+// The WARN a credential row has proved, or null for CRITICAL. Only a credential VARIABLE may be downgraded (an env dump,
+// a key file or a credential-file read stays CRITICAL wherever it goes), and only when every host is proved.
+inline const char* credentialDowngrade( bool credentialVarOnly, const LineHosts& hosts, const ShellLine& cut, std::string_view lowered )
+{
+    if( !credentialVarOnly || !hosts.known )
+    {
+        return nullptr;
+    }
+    if( std::all_of( hosts.hosts.begin(), hosts.hosts.end(), []( const std::string& h ) noexcept { return isLocalHost( h ); } ) )
+    {
+        return kNetExfilLocalWhy;
+    }
+    return ( authorizationVarsNamed( cut ) && credentialVarsOwned( lowered, hosts.hosts ) ) ? kNetExfilOwnerWhy : nullptr;
+}
+
+// dest=: the proved hosts, space-separated in line order; empty when any host is unproved.
+inline std::string destAttr( const LineHosts& hosts )
+{
+    std::string out;
+    for( const std::string& h : hosts.hosts )
+    {
+        out += ( out.empty() ? "" : " " ) + h;
+    }
+    return hosts.known ? out : std::string{};
+}
+
+// The document context gradeNetExfil reads past its line: the binding sites, and which line this is.
+struct NetExfilContext
+{
+    const ShellBindings* bindings = nullptr;   // null = line-local: no `$VAR` resolves
+    int                  line     = 0;
+};
+
 // The net-exfil decision for one line: whether the rule fires, and at which severity and why. A credential-shaped
 // source is hasCredentialVar (a credential-named var, an Authorization: header with a var), hasCredentialToken (an env
 // dump, a key file), or a read of a sensitive or credential-named file (netFlow). One case fold, then each test is linear
@@ -847,33 +1699,42 @@ inline NetFlow netFlow( std::string_view line, std::string_view lowered ) noexce
 // judged BEFORE R1 may silence the line for want of a destination.
 struct NetExfilGrade
 {
-    bool          fires;
-    SkillSeverity sev;
-    const char*   why;   // null = CRITICAL by a credential-shaped source, the rule's plain reading
+    bool          fires = false;
+    SkillSeverity sev   = SkillSeverity::Info;
+    const char*   why   = nullptr;   // null = CRITICAL by a credential-shaped source, the rule's plain reading
+    std::string   dest;              // the proved hosts (dest=), empty when any is unproved
 };
 
-inline NetExfilGrade gradeNetExfil( std::string_view line )
+// #353 flow: a credential row that has proved a local or owner destination (credentialDowngrade) is WARN; every row
+// carries the hosts it proved. `ctx` brings the document's bindings; without it `$VAR` never resolves.
+inline NetExfilGrade gradeNetExfil( std::string_view line, const NetExfilContext& ctx = {} )
 {
     std::string lowered( line );
     std::transform( lowered.begin(), lowered.end(), lowered.begin(), []( char c ) noexcept { return char( std::tolower( static_cast<unsigned char>( c ) ) ); } );
     const NetFlow flow = netFlow( line, lowered );
+    const auto    hostsOf = [ & ]( const ShellLine& cut ) { return curlLineHosts( line, cut, ctx.line, ctx.bindings ); };
     if( flow.sensitiveUpload )
     {
-        return { true, SkillSeverity::Critical, kNetExfilSensitiveWhy };
+        return { true, SkillSeverity::Critical, kNetExfilSensitiveWhy, destAttr( hostsOf( cutShellLine( line ) ) ) };
     }
     if( !hasNetExfilShape( line ) )
     {
-        return { false, SkillSeverity::Info, nullptr };
+        return {};
     }
-    if( hasCredentialVar( lowered ) || hasCredentialToken( lowered ) || flow.credentialRead || flow.sensitiveRead )
+    const bool credentialVar   = hasCredentialVar( lowered );
+    const bool otherCredential = hasCredentialToken( lowered ) || flow.credentialRead || flow.sensitiveRead;
+    if( !credentialVar && !otherCredential && !flow.hasDestination )
     {
-        return { true, SkillSeverity::Critical, nullptr };
+        return {};
     }
-    if( !flow.hasDestination )
+    const ShellLine cut   = cutShellLine( line );
+    const LineHosts hosts = hostsOf( cut );
+    if( !credentialVar && !otherCredential )
     {
-        return { false, SkillSeverity::Info, nullptr };
+        return { true, SkillSeverity::Warn, kNetExfilNoCredWhy, destAttr( hosts ) };
     }
-    return { true, SkillSeverity::Warn, kNetExfilNoCredWhy };
+    const char* downgrade = credentialDowngrade( !otherCredential, hosts, cut, lowered );
+    return { true, downgrade != nullptr ? SkillSeverity::Warn : SkillSeverity::Critical, downgrade, destAttr( hosts ) };
 }
 
 inline std::vector<ExfilPattern> buildExfilPatterns()
@@ -1263,9 +2124,9 @@ struct SkillFindingSink
     std::size_t                stackBytes;
 
     // Add a finding with a clipped excerpt.
-    void add( SkillSeverity sev, int lineNum, const char* rule, std::string_view lineText, const char* why = nullptr )
+    void add( SkillSeverity sev, int lineNum, const char* rule, std::string_view lineText, const char* why = nullptr, std::string dest = {} )
     {
-        findings.push_back( { sev, lineNum, rule, clipSkillExcerpt( lineText ), why } );
+        findings.push_back( { sev, lineNum, rule, clipSkillExcerpt( lineText ), why, std::move( dest ) } );
     }
 
     // The regex boundary's answer as a plain hit, failing CLOSED on an undecided match — the line gets a CRITICAL
@@ -1334,13 +2195,16 @@ inline void scanBodyInjectionLine( SkillFindingSink& sink, const std::vector<Inj
 // GE-SKILLSCAN: one BODY line's first EXFILTRATE finding. requiresCmdContext patterns (api-key, cred paths) fire only with
 // command context — a fenced run-block (`lineInFence`) or a co-occurring transmit verb; a bare prose mention of a credential is
 // documentation. fenceOnly patterns (net-exfil) fire only inside a fenced code block — see buildExfilPatterns().
-inline void scanBodyExfilLine( SkillFindingSink& sink, const std::vector<ExfilPattern>& exfilPats, int lineNum, const std::string& ln, bool lineInFence )
+inline void scanBodyExfilLine( SkillFindingSink& sink, const std::vector<ExfilPattern>& exfilPats, const NetExfilContext& netCtx, const std::string& ln, bool lineInFence )
 {
+    const int lineNum = netCtx.line;
     for( const ExfilPattern& p : exfilPats )
     {
         // net-exfil: gradeNetExfil decides firing (a destination required, R1; a sensitive read into an upload
-        // fires with or without the var-or-base64 shape, R2) and grade together — see there.
-        const NetExfilGrade netGrade = p.isNetExfilShape ? gradeNetExfil( ln ) : NetExfilGrade{ false, SkillSeverity::Info, nullptr };
+        // fires with or without the var-or-base64 shape, R2) and grade together — see there. A fence-only line outside a
+        // fence is not graded at all: the row could not be kept.
+        const bool          gradeIt  = p.isNetExfilShape && ( lineInFence || !p.fenceOnly );
+        NetExfilGrade       netGrade = gradeIt ? gradeNetExfil( ln, netCtx ) : NetExfilGrade{};
         const bool matched = p.isNetExfilShape ? netGrade.fires : sink.isHit( skillSearch( p.re, ln, sink.stackBytes ), lineNum, ln );
         if( !matched )
         {
@@ -1356,7 +2220,7 @@ inline void scanBodyExfilLine( SkillFindingSink& sink, const std::vector<ExfilPa
         }
         // #353: net-exfil's shape is a verb plus ANY var; only a credential-shaped source or a sensitive read into the
         // upload makes it CRITICAL (gradeNetExfil). Every other pattern here is CRITICAL as matched.
-        sink.add( p.isNetExfilShape ? netGrade.sev : SkillSeverity::Critical, lineNum, p.rule, ln, p.isNetExfilShape ? netGrade.why : nullptr );
+        sink.add( p.isNetExfilShape ? netGrade.sev : SkillSeverity::Critical, lineNum, p.rule, ln, p.isNetExfilShape ? netGrade.why : nullptr, std::move( netGrade.dest ) );
         break;   // one EXFILTRATE finding per line
     }
 }
@@ -1489,6 +2353,9 @@ inline std::vector<SkillFinding> scanSkillTextOn( std::string_view text, std::si
 
     // Every finding of this call goes through the sink: add() clips the excerpt, isHit() fails CLOSED on an undecided regex match.
     SkillFindingSink sink{ findings, stackBytes };
+    // #353 flow: where the document binds each variable, read once. Only a curl line's destination consults it
+    // (curlLineHosts), so a document without one skips the pass.
+    const ShellBindings bindings = text.find( "curl" ) != std::string_view::npos ? collectShellBindings( lines ) : ShellBindings{};
 
     // ── fenced-block injection suppression policy ─────────────────────────────────────────────────
     //
@@ -1545,7 +2412,7 @@ inline std::vector<SkillFinding> scanSkillTextOn( std::string_view text, std::si
                 // excluded here too, the same policy as the per-line scan just above.
                 appendJoinedBodyLine( ln, lineNum, joinedBody, joinedLineOffsets );
             }
-            scanBodyExfilLine( sink, exfilPats, lineNum, ln, lineInFence );   // ── EXFILTRATE (regex)
+            scanBodyExfilLine( sink, exfilPats, NetExfilContext{ &bindings, lineNum }, ln, lineInFence );   // ── EXFILTRATE (regex)
             if( !bashAllowed && !allowedTools.empty() )
             {
                 scanScopeCreepLine( sink, lineNum, ln );   // ── SCOPE-CREEP: Bash definitely not allowed
@@ -1962,12 +2829,13 @@ struct SkillScanTally
 // the answer carries the attribute, so a scan without them prints the legend it always printed.
 inline void printSkillScanFullLegend( std::FILE* out, const std::vector<SkillScanRow>& rows, const SkillScanTally& tally ) noexcept
 {
-    const bool anyWhy = std::any_of( rows.begin(), rows.end(), []( const SkillScanRow& r ) noexcept { return r.finding.why != nullptr; } );
+    const bool anyWhy  = std::any_of( rows.begin(), rows.end(), []( const SkillScanRow& r ) noexcept { return r.finding.why != nullptr; } );
+    const bool anyDest = std::any_of( rows.begin(), rows.end(), []( const SkillScanRow& r ) noexcept { return !r.finding.dest.empty(); } );
     rw::emitTo( out, "<!-- ripwire scan-skills: injection/exfiltration/path-traversal scan of skill files. "
                       "files=N files scanned; skipped=N of them unreadable (absent = none, each also carries "
                       "its own CRITICAL SCAN-INCOMPLETE:file-unreadable finding row). findings=N pattern hits; "
                       "rows print up to {} (shown=/capped=\"1\" past that). verdict=clean|warn|critical is the "
-                      "worst finding's severity, the same read as the exit code (0/1/2).{}{}{}{}{} -->", kSkillScanFindingCap,
+                      "worst finding's severity, the same read as the exit code (0/1/2).{}{}{}{}{}{} -->", kSkillScanFindingCap,
                       tally.dirs.empty() ? "" : " dirs= (a bare scan only) lists the directories it walked, separated by ';': .agents/skills under "
                                                 "the current directory, then the Claude and Codex skill homes (a missing one holds nothing); "
                                                 "the positional root is never read.",
@@ -1984,7 +2852,15 @@ inline void printSkillScanFullLegend( std::FILE* out, const std::vector<SkillSca
                       anyWhy ? " An f row's why= says why EXFILTRATE:net-exfil graded as it did: why=no-cred-source, a network "
                                "verb plus a $VAR or base64 but no credential-shaped source on the line, so WARN, not CRITICAL; "
                                "why=sensitive-read-upload, a sensitive file read (a key, /etc/passwd, .netrc, .env, a credential "
-                               "or cookie store) piped, redirected or passed into an upload, CRITICAL." : "" );
+                               "or cookie store) piped, redirected or passed into an upload, CRITICAL; why=local-dest, a credential "
+                               "variable sent only to localhost, 127/8, ::1, a private-LAN (10/8, 172.16/12, 192.168/16) or link-local "
+                               "host, WARN; why=cred-to-owner, a credential variable whose name names the owner of every host it is "
+                               "sent to (CLOUDFLARE/CF to cloudflare.com, GITHUB/GH to github.com, AIRTABLE to airtable.com), WARN. "
+                               "Any other credential row is CRITICAL." : "",
+                      anyDest ? " dest= (net-exfil rows, present only then) lists the hosts the line's curl commands send to, "
+                                "space-separated, when every one is proved: a literal URL, or a $VAR this document assigns exactly once, "
+                                "to a literal, before the line. Absent = a host could not be proved (an unresolved $VAR, a proxy, "
+                                "another network verb), and no WARN above was granted on it." : "" );
 }
 
 // The <f> rows an answer shows, in order: every row in scan order, except past the row cap, where the worst severity comes
@@ -2013,6 +2889,22 @@ inline void forEachShownSkillRow( const std::vector<SkillScanRow>& rows, std::si
             }
         }
     }
+}
+
+// One <f p= rule= sev= [why=] [dest=]/> row.
+inline void printSkillScanRow( std::FILE* out, const SkillScanRow& r ) noexcept
+{
+    rw::emitTo( out, "<f p=\"{}:{}\" rule=\"{}\" sev=\"{}\"",
+                 escapeXmlAttr( r.path ).c_str(), r.finding.line, r.finding.rule, skillSeverityAttr( r.finding.sev ).c_str() );
+    if( r.finding.why != nullptr )
+    {
+        rw::emitTo( out, " why=\"{}\"", r.finding.why );
+    }
+    if( !r.finding.dest.empty() )
+    {
+        rw::emitTo( out, " dest=\"{}\"", escapeXmlAttr( r.finding.dest ) );
+    }
+    rw::emitRaw( out, "/>" );
 }
 
 inline void printSkillScanArtifact( std::FILE* out, const std::vector<SkillScanRow>& rows, const SkillScanTally& tally, bool fullLegend ) noexcept
@@ -2054,16 +2946,7 @@ inline void printSkillScanArtifact( std::FILE* out, const std::vector<SkillScanR
         rw::emitTo( out, " dirs=\"{}\"", escapeXmlAttr( tally.dirs ) );
     }
     rw::emitTo( out, " verdict=\"{}\">", verdict );
-    forEachShownSkillRow( rows, shown, capped, [ & ]( const SkillScanRow& r )
-    {
-        rw::emitTo( out, "<f p=\"{}:{}\" rule=\"{}\" sev=\"{}\"",
-                     escapeXmlAttr( r.path ).c_str(), r.finding.line, r.finding.rule, skillSeverityAttr( r.finding.sev ).c_str() );
-        if( r.finding.why != nullptr )
-        {
-            rw::emitTo( out, " why=\"{}\"", r.finding.why );
-        }
-        rw::emitRaw( out, "/>" );
-    } );
+    forEachShownSkillRow( rows, shown, capped, [ & ]( const SkillScanRow& r ) { printSkillScanRow( out, r ); } );
     rw::emitRaw( out, "</skillscan>\n" );
 }
 
