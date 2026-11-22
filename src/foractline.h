@@ -140,8 +140,10 @@ namespace detail
 // the old price held beyond its markup is kept as it was (the bodies, or a block the whole answer prices outside), so only the added
 // bytes move it — never the ceil-at-the-densest-rate over-read a later "est_tokens= equals the delivered price" arm would catch.
 // The span is pricePage's own reader (forpages.h rootPriceSpan), so the two cannot disagree about where the price and the bodies are.
-// KNOWN GAP (lane BR1C, MEASURED on MCP `for`): when the old price held LESS than its markup (blocks spliced after the price), the
-// clamp below sets the rest to 0 and the line's reprice charges those blocks too — actlinecheck (M) prints the excess.
+// The fallback for a caller with no priced ledger: every caller that serves a priced root passes one (the CLI its render's, MCP `for`
+// priceForTaskRoot's), so this runs on no served path today. Its limit, kept in view: when the old price held LESS than its markup
+// (blocks spliced after the price, e.g. a <syms> "not in est_tokens"), the clamp below sets the rest to 0 and the line's reprice
+// charges those blocks too — MCP `for` did exactly that before it passed its ledger (MEASURED: +490 for 264 B; actlinecheck (M)(F)).
 inline void repriceAdded( std::string& doc, std::size_t added )
 {
     const std::optional<forpages::detail::RootPriceSpan> s   = forpages::detail::rootPriceSpan( doc );
@@ -158,7 +160,7 @@ inline void repriceAdded( std::string& doc, std::size_t added )
 // open tag; under a budget, one it fits whole), before the answer-first permutation, KB1 and paging. The clause joins that leading legend
 // run (the permutation then moves it with the rest of the document legend); the line goes right after <sigs> (KB1 later puts its key
 // group directly after the first row block, so between them). `maxEstTokens` > 0 (a CLI budget's limit, MCP budget_tokens): write it
-// only if the answer's est_tokens= stays within it. `ledger`: the render's priced ledger (CLI), re-priced through and kept current. Returns whether
+// only if the answer's est_tokens= stays within it. `ledger`: the render's priced ledger (CLI; MCP `for`: what priceForTaskRoot converged), re-priced through and kept current. Returns whether
 // it wrote it.
 inline bool insertActLine( std::string& doc, std::size_t maxEstTokens = 0, ForAnswerLedger* ledger = nullptr )
 {

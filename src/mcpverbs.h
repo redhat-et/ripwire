@@ -2625,8 +2625,9 @@ inline std::string batchCdata( const std::string& s );   // the callers twin's J
 // inputs, null: no re-price); held under budget_tokens. R-DEDUP's <syms> cut (forfilesyms.h tailRowsWithoutPicks) lands first, the
 // demote pass reads the cut answer; SIBLING-DEMOTE (src/forsiblingdemote.h) then reads that one, DECL-TWIN (src/fordecltwin.h) reads
 // its result, and the root is re-priced once on the final bytes. Under budget_tokens those two already ran on <sigs> before its rows
-// settled (DEMOTE-ALL-DIALECTS, assembleMcpFor), so they are held here.
-inline void insertFileSyms( std::string& out, const IngestResult& ing, const Graph& g, FileSymsArgs args, const rw::PricedRootInputs* price = nullptr )
+// settled (DEMOTE-ALL-DIALECTS, assembleMcpFor), so they are held here. `price` FOLLOWS the re-price (the CLI ledger's rule), so a later
+// stage that prices through it (the act line, forTaskText) charges these edits and none of the unpriced blocks around them.
+inline void insertFileSyms( std::string& out, const IngestResult& ing, const Graph& g, FileSymsArgs args, rw::PricedRootInputs* price = nullptr )
 {
     if( out.ends_with( "</ctx>" ) )
     {
@@ -2644,7 +2645,9 @@ inline void insertFileSyms( std::string& out, const IngestResult& ing, const Gra
             {
                 // once, on the final bytes: the <syms> cut and the demote rewrites are all priced markup (signed: the pointers and
                 // legend may outweigh the rows they replace)
+                const std::size_t editedBytes = answer.size();   // the same est_tokens= digits as args.answer: the attribute cancels
                 repriceRootAfterCut( answer, *price, args.answer.size() );
+                price->markupBytes = price->markupBytes + editedBytes - args.answer.size();
             }
             out = std::move( answer ) + "</ctx>";
         }
@@ -3214,7 +3217,15 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
             out.insert( out.size() - 6, "<!-- ripwire for" + std::string( kForSelfHookLegend ) + " -->" + hooks );   // the clause beside it, as <dispatch>: the header's are fixed
         }
     }
-    const auto [answerEstTokens, answerPrice] = priceForTaskRoot( out, chosen.cut.rowDropCut && budgetTokens == 0 ); // R1: est_tokens=; over_ceiling="1" only past the runaway guard
+    auto [answerEstTokens, answerPrice] = priceForTaskRoot( out, chosen.cut.rowDropCut && budgetTokens == 0 ); // R1: est_tokens=; over_ceiling="1" only past the runaway guard
+    // BR1D: the act line re-prices through what this root was converged from (answerPrice, kept current by insertFileSyms), as the CLI's
+    // does through its render's ledger — so it charges its own bytes only, never the blocks spliced after the price (<syms>, whose clause
+    // says "not in est_tokens"). Re-pricing from the number alone charged those too: MEASURED +490 for 264 B on src/ (ceiling 106).
+    const auto insertActLineMcp = [&out, &answerPrice]( std::size_t limit )
+    {
+        rw::ForAnswerLedger ledger{ .priced = true, .markupBytes = answerPrice.markupBytes, .bodyTokens = answerPrice.bodyTokens };
+        (void)rw::actline::insertActLine( out, limit, &ledger );
+    };
     // K-WRONGSYM (src/forfilesyms.h): the CLI --for's <syms> goes LAST before </ctx> (after the row blocks and the graph verb below, as on the CLI)
     // DECL-ROW (src/fordeclrow.h): the CLI --for's task-read row blocks, one renderer, before </ctx>, not priced; under a budget the tag is held="budget", as there
     std::size_t manifestTokens = 0;   // the <manifest_rows> a budget prints whole: <doc_body> is served into the budget left after it
@@ -3240,7 +3251,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
             // budget_tokens is a request the block must obey (S2): the verb does not run, the tag names it (held="budget", verb= is the call)
             out.insert( out.size() - 6, graphSubjectOpenXml( *gsa, GraphSubjectOpen{ .held = true } ) );
             insertFileSyms( out, ing, ix.g, FileSymsArgs { .task = task, .held = budgetTokens > 0, .heldFlags = mcpPageRankFlags( noRoute ) }, &answerPrice );
-            (void)rw::actline::insertActLine( out, std::size_t( budgetTokens ) );   // BR1b: as below
+            insertActLineMcp( std::size_t( budgetTokens ) );   // BR1b: as below
             rw::rowlines::encodeRows( out, rows, rw::rowlines::SectionComments::AsLines );   // MR1: last, as on the CLI (below)
             return out;
         }
@@ -3279,7 +3290,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     // BR1 (foractline.h): the act line, as on the CLI — before ROWLINES, so its clauses stay last; the clause joins the leading
     // legend (this bundle is legend-first). Under budget_tokens only while the bundle still fits it with the line (BR1b: as the CLI's
     // budget path). Gate: test/actlinecheck.sh (M).
-    (void)rw::actline::insertActLine( out, budgetTokens > 0 ? std::size_t( budgetTokens ) : 0u );
+    insertActLineMcp( budgetTokens > 0 ? std::size_t( budgetTokens ) : 0u );
     rw::rowlines::encodeRows( out, rows, rw::rowlines::SectionComments::AsLines );
     return out;
 }
