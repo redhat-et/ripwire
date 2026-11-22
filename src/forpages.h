@@ -18,13 +18,15 @@
 //
 // WHERE THE LEGEND SITS, and why. 5ee3ddb38 made answer-first opt-in because, as a default, it moved the READINGS of the
 // cuts and floors out of the prefix (measured for AF1: a bare 12 KB answer-first prefix shows a marker with no definition
-// inside it on 137 of 154 design cells; legend-first, 0). A PAGE is not a truncated prefix: page 1 keeps the WHOLE
-// document legend after its rows and before </ctx>, so every attribute the page carries is defined inside the page —
-// and since that legend is the whole answer's, it defines every later page's attributes too. The page's OWN disclosure
+// inside it on 137 of 154 design cells; legend-first, 0). A PAGE is not a truncated prefix: page 1 keeps the document
+// legend after its rows and before </ctx>, so every attribute the page carries is defined inside the page — and it defines
+// every later page's attributes too, except the clauses only a later page's rows use (LD1, forpagelegend.h: those travel
+// with the page whose rows carry them; THE RULE: what page N carries is defined on page N or page 1). The page's OWN disclosure
 // (page= pages= withheld_bytes= next=) rides the ROOT, in the first bytes, so the cut is the first thing a reader meets:
 // root, then rows, then the dictionary — the collapse condition 5ee3ddb38 wrote beside kLegendPostures.
 //
-// A CONTINUATION PAGE RE-SENDS NO LEGEND. It is the ref posture (legenddict.h): rows first, a slim root, and a closing
+// A CONTINUATION PAGE RE-SENDS NO LEGEND page 1 holds — only the clauses page 1 shed that its own rows carry, in one comment
+// before its pointer (LD1). It is the ref posture (legenddict.h): rows first, a slim root, and a closing
 // <about legend="ref" have="page1" …/> naming what the reader holds — page 1's legend — and the dictionary that holds
 // every definition. The measured cost this has to beat: a windowed verb's continuation page costs 1.01x a whole answer,
 // 26.4 % of it re-sent legend.
@@ -44,6 +46,7 @@
 #include "serialize.h"       // pricedRootAttrTokens / tokensForEmittedBytes — est_tokens= prices the page as delivered
 #include "foranswerfirst.h"  // topLevelBlocks / declaredBlock — the one CDATA-safe scanner of a --for answer's blocks
 #include "legenddict.h"      // detail::aboutPointer — the ref posture's closing pointer
+#include "forpagelegend.h"   // LD1: a clause only a later page uses travels with that page
 #include "nextverb.h"        // nextAttrXml — the ONE next= spelling
 
 namespace rw::forpages
@@ -195,7 +198,8 @@ struct PageAt
            " sections that start on a later page, each named once (absent: none); est_tokens= prices this page, every byte of it;"
            " every other root attribute, and the open tag of a continued or re-opened section, counts the WHOLE answer; root next="
            " is the next page: the same rows in the same"
-           " order, no legend (this one defines them), ending <about legend=\"ref\" have=\"page1\"/>; the page-bytes=0 flag is the"
+           " order, no legend but what only its rows use (this one defines the rest), ending"
+           " <about legend=\"ref\" have=\"page1\"/>; the page-bytes=0 flag is the"
            " whole answer in one call -->";
 }
 // est_tokens= PRICES THE PAGE AS DELIVERED, in the emitter's own two rates: markup at kBytesPerTokenDefault, the <bodies>
@@ -234,6 +238,7 @@ struct Stream
     std::size_t                     streamBlocks = 0;   // blocks [0, streamBlocks) are rows; the rest is the document legend
     std::vector<Cut>                cuts;
     std::size_t                     keyBegin = 0, keyEnd = 0;   // KB1: the key-body group (legend comment + <bodies of="key">), or empty
+    std::vector<std::size_t>        gone;   // LD1: the document-legend clauses page 1 sheds to the later pages that use them (scope::shed)
 };
 
 // KB1: find the key-body group (its legend comment, then <bodies of="key">) among the stream's blocks and mark every cut with the group
@@ -306,8 +311,8 @@ inline void markKeyGroup( Stream& st )
     return a;
 }
 
-// Page 1: the whole root plus the page disclosure, rows [0, end), the close of a section left open, the whole document legend
-// and the page clause.
+// Page 1: the whole root plus the page disclosure, rows [0, end), the close of a section left open, the document legend less the
+// clauses that travel with a later page (LD1, forpagelegend.h: `gone`), and the page clause.
 [[nodiscard]] inline std::string firstPage( const Stream& st, const PageAsk& ask, const Cut& end, std::size_t pages )
 {
     const std::string_view v = st.view;
@@ -320,14 +325,15 @@ inline void markKeyGroup( Stream& st )
     out += '>';
     out.append( v.substr( st.openEnd + 1, end.at - ( st.openEnd + 1 ) ) );
     if( end.openSec != std::string_view::npos ) { out += closeTagOf( st.blocks[ end.openSec ] ); }
-    out.append( v.substr( legendAt, st.closeAt - legendAt ) );   // the document legend, whole
+    out += scope::firstPageLegend( v.substr( legendAt, st.closeAt - legendAt ), st.gone );   // the document legend, less what travels
     out += pageClause( ask.pageBytes );
     out.append( v.substr( st.closeAt ) );
     return out;
 }
 
 // Page k >= 2: a slim root (task= at= schema= est_tokens= + the disclosure), the re-opened section the page starts inside,
-// rows [start, end), the close of a section left open, and the ref posture's pointer — no legend.
+// rows [start, end), the close of a section left open, the clauses page 1 shed that THESE rows carry (LD1, forpagelegend.h), and
+// the ref posture's pointer — no other legend.
 [[nodiscard]] inline std::string continuationPage( const Stream& st, const PageAsk& ask, const Cut& start, const Cut& end, std::size_t pages )
 {
     const std::string_view v        = st.view;
@@ -340,9 +346,28 @@ inline void markKeyGroup( Stream& st )
     if( start.openSec != std::string_view::npos ) { out.append( openTagOf( v, st.blocks[ start.openSec ] ) ); }
     out.append( v.substr( start.at, end.at - start.at ) );
     if( end.openSec != std::string_view::npos ) { out += closeTagOf( st.blocks[ end.openSec ] ); }
+    out += scope::laterPageComment( st.gone, out );   // the slim root's task= is escaped: it spells no element or ` attr="`
     out += legenddict::detail::aboutPointer( "page1" );
     out += "</ctx>";
     return out;
+}
+// LD1 (forpagelegend.h): which document-legend clauses page 1 sheds, decided on every page's rows as that page serves them (page 1
+// with its root, page k with the section it re-opens), comments and CDATA blanked — so each page of one answer asks the same.
+[[nodiscard]] inline std::vector<std::size_t> shedFor( const Stream& st, const std::vector<std::size_t>& ends )
+{
+    std::vector<std::string>      rows;
+    std::vector<std::string_view> views;
+    for( std::size_t k = 0; k < ends.size(); ++k )
+    {
+        const Cut&             to   = st.cuts[ ends[ k ] ];
+        const Cut*             from = k == 0 ? nullptr : &st.cuts[ ends[ k - 1 ] ];
+        const std::string_view head = from == nullptr || from->openSec == std::string_view::npos ? std::string_view() : openTagOf( st.view, st.blocks[ from->openSec ] );
+        const std::size_t      at   = from == nullptr ? 0 : from->at;
+        rows.push_back( scope::rowsOnly( std::string( head ) + std::string( st.view.substr( at, to.at - at ) ) ) );
+    }
+    for( const std::string& r : rows ) { views.push_back( r ); }
+    const std::size_t legendAt = st.blocks[ st.streamBlocks - 1 ].end;
+    return scope::shed( st.view.substr( legendAt, st.closeAt - legendAt ), views );
 }
 } // namespace detail
 
@@ -389,13 +414,14 @@ inline void markKeyGroup( Stream& st )
 // Cut one finished answer-first --for document to the asked page, in place. See the header.
 inline PageResult pageAnswer( std::string& doc, const PageAsk& ask )
 {
-    const std::optional<detail::Stream> st = ask.pageBytes == 0 ? std::nullopt : detail::readStream( doc );
+    std::optional<detail::Stream> st = ask.pageBytes == 0 ? std::nullopt : detail::readStream( doc );
     if( !st ) { return {}; }
     const std::vector<std::size_t> ends  = detail::pageEnds( st->cuts, ask.pageBytes );
     const std::size_t              pages = ends.size();
     if( ask.page == 0 || ask.page > pages || ( pages == 1 && ask.page != 1 ) ) { return { PageResult::Outcome::PastLast, pages }; }
     if( pages == 1 ) { return { PageResult::Outcome::Whole, 1 }; }
     const detail::Cut& end = st->cuts[ ends[ ask.page - 1 ] ];
+    st->gone = detail::shedFor( *st, ends );   // LD1
     std::string out = ask.page == 1 ? detail::firstPage( *st, ask, end, pages )
                                     : detail::continuationPage( *st, ask, st->cuts[ ends[ ask.page - 2 ] ], end, pages );
     if( ask.page == 1 && out.size() >= doc.size() ) { return { PageResult::Outcome::Whole, pages }; }   // paging saves nothing on page 1

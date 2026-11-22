@@ -870,6 +870,7 @@ for _g in \
     packtaskmonotoncheck \
     packtaskquotacheck \
     padscalecheck \
+    pagelegendcheck \
     paginationcheck \
     pagingsweepcheck \
     panellegendcheck \
