@@ -19,6 +19,7 @@
 //   --lint      findings (<f> rows): a byte-budgeted sorted prefix, continued by next="--lint … --offset=K" (verbs_lint.h)
 //   --expand    body lines: the default --pack-budget-bytes leaves the answer under the ceiling; a cut body says lines="lo-hi/T"
 //               and next= names the slice that continues it (serialize.h)
+//   --for --page-bytes=0   the whole answer by request: printed whole, plus ONE stderr line when it is over the ceiling
 #include <cstddef>
 
 namespace rw

@@ -13,6 +13,7 @@
 # THE RULE. A default call prints <= 24,000 characters; a cut is disclosed on the root and continued by its own unit:
 #   --lint     findings: shown= total= has_more= next_offset= and next="--lint … --offset=K"; the pages chain to the whole set
 #   --expand   bodies: unserved_next= names the definitions that did not fit; a cut body says lines="lo-hi/T" and next= the slice
+#   --for --page-bytes=0   the whole answer BY REQUEST: printed whole, plus one stderr line naming its size when over the ceiling
 #
 # Arm classes (LANE_CONSTRAINTS §17): [P] a NEW bar — RED on the parent 36a95d732, its control; [C] holds on every binary;
 # [N] must NOT change (needs BASE_BIN); [M] a mutation control: the same check FAILS on a doctored chain.
@@ -154,6 +155,19 @@ say(served + unserved == 40 and unserved > 0 and root_attr(many, "ctx", "unserve
     "(E5) [P] nothing silently dropped: %d served + unserved_total=%d == 40, and unserved_next= names the rest" % (served, unserved))
 say(well_formed(giant) and well_formed(many), "(E6) [C] both --expand answers are well-formed XML")
 
+# ── (W) --for --page-bytes=0: the whole answer, by request ───────────────────────────────────────────────────────────
+# The fixture's --for answers are small (its own budget bounds them), so the over-ceiling case runs on this repository's own
+# source: 25,430 B on 36a95d732. If the repo's answer ever drops under the ceiling the arm still checks the "no line" half.
+WQ = ["--for=paging continuation next_offset has_more truncation", "--page-bytes=0"]
+rc, out, err = run(BIN, REPO, WQ)
+over = len(out.encode()) > CEILING
+warned = "ripwire: --page-bytes=0" in err and str(len(out.encode())) in err
+say(rc == 0 and warned == over, "(W1) [P] --page-bytes=0 printed %d B; a size line on stderr iff over the ceiling (over=%s warned=%s)" % (len(out.encode()), over, warned))
+if not over:
+    print("  INFO  (W1) the over-ceiling half was not exercised: the repo's whole answer is under %d B" % CEILING)
+rc, out2, err2 = run(BIN, SMALL, ["--for=small_fn helper", "--page-bytes=0"])
+say(rc == 0 and "ripwire: --page-bytes=0" not in err2, "(W2) [C] a whole answer under the ceiling prints no size line")
+
 # ── (N) answers that fit are unchanged ───────────────────────────────────────────────────────────────────────────────
 if BASE:
     for args in (["--lint"], ["--expand=small_fn"], ["--expand=helper,small_fn"], ["--expand=giant_body", "--pack-budget-bytes=65536"]):
@@ -167,6 +181,9 @@ if BASE:
         nxt = root_attr(a, "lint", "next")
         say(nxt == " ".join(args[:2]) + " --offset=%d" % (50 * len(args) - 50) and re.sub(r'\snext="[^"]*"', "", rows_of(a), count=1) == rows_of(b),
             "(N) [N] %s: an explicit page is the parent's byte for byte plus the root's next=\"%s\"" % (" ".join(args), nxt))
+    _, a, _ = run(BIN, REPO, WQ)
+    _, b, _ = run(BASE, REPO, WQ)
+    say(a == b, "(N-W) [N] --page-bytes=0's stdout is byte-identical to the parent (the size line is stderr only)")
 else:
     print("  SKIP  (N) arms need BASE_BIN=<parent binary>")
 
