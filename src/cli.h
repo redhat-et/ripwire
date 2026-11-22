@@ -252,6 +252,8 @@ struct Config
     // page M+N is the exact continuation of page M — no dropped/duplicated item across the seam.
     int              pageLimit         = 0;                // --limit=N: max items in this response (0 = unbounded)
     int              pageOffset        = 0;                // --offset=M: skip the first M items (0 = from the start)
+    std::size_t      pageRowBytes      = 0;                // PG1, internal (no flag): the row bytes main.cpp's output-ceiling fit gives a
+                                                           //   --clones page (runMaintenanceViewsServed); 0 = the verb's own default page
     bool             metrics           = false;            // --metrics: annotate symbols with fan-in/out + role (descriptive)
     bool             deps              = false;            // --deps: file→file dependency view (#include/import counts)
     bool             hotspots          = false;            // --hotspots: complexity × recent git churn (maintenance-pain map)
@@ -1514,8 +1516,9 @@ inline constexpr char kHelpHead[] =
         "                               tokens) and EVERY one is served: the bodies carry p= l= t= for each, the root adds map_next=\n"
         "                               (the shell call that prints the map you did not get — orient once per session, then look up\n"
         "                               lean). If a byte budget cut some, the root adds unserved_total=N (the true count) and\n"
-        "                               unserved_next=\"--expand=FILE:LINE:NAME,…\" (the call serving them; past 16 it serves the first\n"
-        "                               16 and unserved_listed=\"16\" says so — a larger --pack-budget-bytes serves the rest) — never the\n"
+        "                               unserved_next=\"--expand=FILE:LINE:NAME,…\" (the call serving them, each selector naming the one\n"
+        "                               definition that starts on LINE; past 16 the page serves the request's first K and it is the\n"
+        "                               same call with --offset=K, so following it serves every definition once) — never the\n"
         "                               generic map. map_next= and unserved_next= are quoted for the shell; map_next= names every root\n"
         "                               plus the crawl-scope flags (--exclude, --max-file-size, --no-ignore, --ignore-tests). --outline\n"
         "                               follows the same rule for its one token (several --outline tokens keep the ordinary map). An\n"
@@ -2907,7 +2910,7 @@ inline constexpr char kHelpTail[] =
         "                               resource ripwire://legend-dict, answers list rows first, carry each definition once\n"
         "                               per session and end with <about legend=\"ref\" dict= dictv=/>. A CLI run has no\n"
         "                               session to hold a definition, so --legend=ref refuses; --legend-dict prints them all.\n"
-        "    --page-bytes=N[:K]         (with --for or the bare map, and 0 with --lint or --expand too) the page size of the answer-first\n"
+        "    --page-bytes=N[:K]         (--for or the bare map; 0 with --lint/--expand/--grep/--clones) the page size of the answer-first\n"
         "                               --for answer: 12000 by default, 0 = the whole answer in one call. The answer is rendered\n"
         "                               whole and cut at row boundaries into pages of about N bytes; the root says page= pages=\n"
         "                               withheld_bytes= and next=,\n"
@@ -2928,9 +2931,11 @@ inline constexpr char kHelpTail[] =
         "                               inventory rows into 24,000 B pages (page= pages= withheld_bytes= has_more= next=|page_next=);\n"
         "                               --page-bytes=N sets that size, :K a page, 0 the whole map. Beside a report verb, refused.\n"
         "                               --page-bytes=0 IS THE WHOLE ANSWER on every verb that pages: --for, the bare map, --lint\n"
-        "                               (every finding; with --offset=K, every one from K) and --expand (every body uncut). --lint\n"
-        "                               and --expand page by their own unit (next=), so beside them it takes 0 only, and not with\n"
-        "                               their own size (--limit=N, --pack-budget-bytes=N). Over the ceiling: the one stderr line.\n"
+        "                               (every finding; with --offset=K, every one from K), --expand (every body uncut), --grep\n"
+        "                               (every match) and --clones (every clone group). Those four page by their own unit (next=;\n"
+        "                               --expand's unserved_next=, which past 16 definitions is --offset=K, the first K skipped), so\n"
+        "                               beside them it takes 0 only, and not with their own size (--limit=N, --pack-budget-bytes=N).\n"
+        "                               Over the ceiling: the one stderr line.\n"
         "    --rows=lines|elements      (with --for) the form of the <sigs> and <tail> rows: lines, the default, is ROWS AS LINES\n"
         "                               above; elements is one XML element per row as 0.6.x served them, byte for byte the\n"
         "                               answer lines decodes to. The flag decides over RIPWIRE_NO_ROWLINES in both directions;\n"
@@ -4272,6 +4277,13 @@ inline void validatePagingHonored( Config& c ) noexcept
     {
         return;
     }
+    // PG1: `--expand=… --offset=K` continues a many-definition --expand (main.cpp's unserved_next=): it skips the first K
+    // definitions its selectors resolve to. Not a kPagingHonoringVerbs row for the --in reason above (a row would refuse the
+    // budgets the map beside it honours); --limit stays refused, since the body budget is --expand's page size.
+    if( c.forTask.empty() && !c.expand.empty() && c.pageLimit <= 0 && !c.lint && c.lintRulesDir.empty() )
+    {
+        return;
+    }
 
     // §B11.6: name the MODE first when one is what disabled paging — the honoring list below is otherwise
     // read as self-contradicting, and the remedy ("drop the mode flag") is not derivable from it.
@@ -5233,6 +5245,28 @@ inline bool expandPagedVerbAsked( const Config& c ) noexcept
 {
     return c.forTask.empty() && !c.expand.empty() && !lintPagedVerbAsked( c );
 }
+// PG1: --grep/--regex (matches, continued by --offset=K) and --clones (clone groups, continued by --offset=K) join the family: a
+// default page is byte-budgeted under the output ceiling, and --page-bytes=0 is the whole answer, as on --lint.
+inline bool rowPagedVerbAsked( const Config& c ) noexcept
+{
+    return c.forTask.empty() && c.expand.empty() && !lintPagedVerbAsked( c ) && ( !c.grep.empty() || c.clones );
+}
+
+// PG1: wholeOnlyConflict's --grep / --clones arm — N == 0 alone, and not beside --limit=N (their own page size).
+[[nodiscard]] inline const char* rowPagedWholeConflict( const Config& c, std::size_t bytes ) noexcept
+{
+    if( bytes != 0 )
+    {
+        return c.clones ? "takes 0 only beside --clones (the whole answer): --clones pages by clone groups — follow the root's next= (--offset=K), or --limit=N"
+                        : "takes 0 only beside --grep (the whole answer): --grep pages by matches — follow the root's next= (--offset=K), or --limit=N";
+    }
+    if( c.pageLimit > 0 )
+    {
+        return c.clones ? "=0 (the whole answer) does not combine with --limit=N, --clones' own page size — pass one"
+                        : "=0 (the whole answer) does not combine with --limit=N, --grep's own page size — pass one";
+    }
+    return nullptr;
+}
 
 // Why --page-bytes=N cannot shape a --lint / --expand run, or nullptr when it can (N == 0 alone, without the verb's own size).
 [[nodiscard]] inline const char* wholeOnlyConflict( const Config& c, std::size_t bytes ) noexcept
@@ -5243,6 +5277,10 @@ inline bool expandPagedVerbAsked( const Config& c ) noexcept
         if( c.sarif )            { return "=0 does not combine with --sarif, which is never paged"; }
         if( c.pageLimit > 0 )    { return "=0 (the whole answer) does not combine with --limit=N, --lint's own page size — pass one"; }
         return nullptr;
+    }
+    if( rowPagedVerbAsked( c ) )
+    {
+        return rowPagedWholeConflict( c, bytes );
     }
     if( bytes != 0 )             { return "takes 0 only beside --expand (the whole answer): --expand pages by body lines — follow a body's next= or unserved_next=, or --pack-budget-bytes=N"; }
     if( c.packBudgetExplicit )   { return "=0 (the whole answer) does not combine with --pack-budget-bytes=N, --expand's own size — pass one"; }
@@ -5275,7 +5313,7 @@ inline void validatePageBytes( Config& c ) noexcept
         c.ok = false;
         return;
     }
-    const char* why = lintPagedVerbAsked( c ) || expandPagedVerbAsked( c ) ? wholeOnlyConflict( c, bytes ) : pageBytesConflict( c );
+    const char* why = lintPagedVerbAsked( c ) || expandPagedVerbAsked( c ) || rowPagedVerbAsked( c ) ? wholeOnlyConflict( c, bytes ) : pageBytesConflict( c );
     if( why != nullptr )
     {
         rw::emitTo( stderr, "ripwire: --page-bytes{}{}\n", why[0] == '=' ? "" : " ", why );

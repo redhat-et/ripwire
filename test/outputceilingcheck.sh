@@ -14,6 +14,9 @@
 #   --lint     findings: shown= total= has_more= next_offset= and next="--lint … --offset=K"; the pages chain to the whole set
 #   --expand   bodies: unserved_next= names the definitions that did not fit; a cut body says lines="lo-hi/T" and next= the slice
 #   --for --page-bytes=0   the whole answer BY REQUEST: printed whole, plus one stderr line naming its size when over the ceiling
+#   --grep     matches (PG1): shown= has_more= next_offset= and next="--grep=… --offset=K"; the pages chain to both lists whole
+#   --clones   clone groups (PG1): the same window and next="--clones --offset=K"; the pages chain to every group once
+#   --expand=<many definitions> (PG1): unserved_next= (selectors, or past 16 of them --offset=K) serves each definition once
 #   the map   file groups (and, inside a large inventory, its ls rows): page= pages= withheld_bytes= has_more= and
 #              next="--page-bytes=24000:K" (page_next= when the root already has a next=); the pages rebuild --page-bytes=0's map
 #
@@ -234,10 +237,185 @@ say(rc != 0 and "page" in err, "(M8) [C] a page past the last refuses (exit %d)"
 rc, _, err = run(BIN, BIG, ["--hotspots", "--page-bytes=24000"])
 say(rc != 0, "(M9) [C] --page-bytes beside a report verb refuses rather than being read by nothing (exit %d)" % rc)
 
+# ── (G) --grep: matches, paged under the ceiling (PG1) ──────────────────────────────────────────────────────────────
+# grepw/  30 C modules x 5 code lines holding needle_marker, each ~330 characters, plus its extern (180 in-index hits, ~45 KB at the parent's
+#         100-row page), plus 6 .txt notes x 40 lines (240 UNINDEXED hits, more than the in-index list, so the chain must
+#         continue past the in-index list's end — on the parent next= stopped there and 90 unindexed rows had no page).
+for m in range(30):
+    lines = "".join("int gfn_%02d_%d(int a) { return needle_marker + %s; }\n" % (m, k, " + ".join("a * %d" % (j + k) for j in range(48)))
+                    for k in range(5))
+    w(os.path.join(W, "grepw", "src", "gmod%02d.c" % m), "extern int needle_marker;\n" + lines)
+for n in range(6):
+    w(os.path.join(W, "grepw", "notes", "note%d.txt" % n), "".join("note %d line %d mentions needle_marker in passing, with some padding text after it\n" % (n, k) for k in range(40)))
+GREPW = os.path.join(W, "grepw")
+
+
+def grep_rows(doc):
+    """(list, path, line) for every hit row of one answer: the in-index list (<hit> and its folded <at> sites) and <unindexed>."""
+    body = rows_of(doc)
+    m = re.search(r"<grep\b[^>]*>", body)
+    body = body[m.end():] if m else ""
+    cut = [i for i in (body.find("<unindexed"), body.find("<enc")) if i >= 0]
+    idx, rest = (body[:min(cut)], body[min(cut):]) if cut else (body, "")
+    aux = rest[rest.find("<unindexed"):rest.find("</unindexed>")] if "<unindexed" in rest else ""
+    out = []
+    for name, part in (("idx", idx), ("aux", aux)):
+        for f in re.finditer(r'<f p="([^"]*)"[^>]*>(.*?)</f>', part, re.S):
+            out += [(name, f.group(1), int(l)) for l in re.findall(r'<(?:hit|at) l="(\d+)"', f.group(2))]
+    return out
+
+
+def grep_chain(binary, root, first_args):
+    pages, rows, args = [], [], first_args
+    for _ in range(60):
+        rc, out, _ = run(binary, root, args)
+        pages.append(out)
+        rows += grep_rows(out)
+        nxt = root_attr(out, "grep", "next")
+        if rc != 0 or not nxt or "--offset=" not in nxt:
+            break   # a cut page's next= is the next page; an uncut one's is a follow-up verb (--at=, --for=)
+        args = shlex.split(nxt)
+    return pages, rows
+
+
+rc, gwhole, gerr = run(BIN, GREPW, ["--grep=needle_marker", "--page-bytes=0"])
+gwhole_rows = grep_rows(gwhole)
+say(rc == 0 and len([r for r in gwhole_rows if r[0] == "idx"]) == 180 and len([r for r in gwhole_rows if r[0] == "aux"]) == 240,
+    "(G0) [P] --grep --page-bytes=0 (refused on the parent) is the whole answer: %d in-index + %d unindexed rows (180 + 240)"
+    % (len([r for r in gwhole_rows if r[0] == "idx"]), len([r for r in gwhole_rows if r[0] == "aux"])))
+say(len(gwhole) > CEILING and "ripwire: --page-bytes=0" in gerr, "(G0b) [P] the whole answer is %d chars, over the ceiling, and stderr names its size" % len(gwhole))
+gpages, grows = grep_chain(BIN, GREPW, ["--grep=needle_marker"])
+say(len(gpages[0]) <= CEILING, "(G1) [P] a default --grep answer prints %d chars <= %d" % (len(gpages[0]), CEILING))
+say(len(gpages) > 1 and ceiling_ok(gpages), "(G2) [P] every page of the next= chain is <= %d chars (%d pages, max %d)" % (CEILING, len(gpages), max(map(len, gpages))))
+say(sorted(grows) == sorted(gwhole_rows) and len(set(grows)) == len(grows),
+    "(G3) [P] the chain's rows are the whole answer's rows, each once, both lists (%d vs %d rows, %d distinct)" % (len(grows), len(gwhole_rows), len(set(grows))))
+say(all(well_formed(p) for p in gpages) and all("\n" not in p.rstrip("\n") for p in gpages), "(G4) [C] every page is well-formed XML with no newline (G4)")
+say(not (sorted(grows[:7] + grows[8:]) == sorted(gwhole_rows)), "(G5) [M] mutation: the rebuild check FAILS when one row of the chain is dropped")
+rc, gagain, _ = run(BIN, GREPW, ["--grep=needle_marker"])
+say(gagain == gpages[0], "(G6) [C] determinism: the default page is byte-identical across two runs")
+rc, glim, _ = run(BIN, GREPW, ["--grep=needle_marker", "--limit=100"])
+say(len(grep_rows(glim)) >= 200 and root_attr(glim, "grep", "shown") == "100", "(G7) [C] an explicit --limit=100 is the caller's page, not cut by the ceiling (%d chars)" % len(glim))
+# (G9-G11) owner ruling 192: the root's has_more=/next_offset= describe the WHOLE chain (in-index AND unindexed rows). On the
+# lane before the ruling (aa305d201) the pages past the in-index list's end said has_more="0" while next= still served rows.
+def window_agrees(doc):
+    nxt = root_attr(doc, "grep", "next") or ""
+    paging = "--offset=" in nxt
+    hm, no = root_attr(doc, "grep", "has_more"), root_attr(doc, "grep", "next_offset")
+    m = re.search(r"--offset=(\d+)", nxt)
+    return (hm == "1") == paging and (not paging or (m and no == m.group(1)))
+bad_pages = [i + 1 for i, p in enumerate(gpages) if not window_agrees(p)]
+say(not bad_pages, "(G9) [P] every page's has_more= is 1 exactly when next= pages on, and next_offset= is the offset next= continues from (disagree: %s)" % bad_pages)
+hm_rows, args = [], ["--grep=needle_marker"]
+for _ in range(60):
+    rc, out, _ = run(BIN, GREPW, args)
+    hm_rows += grep_rows(out)
+    if root_attr(out, "grep", "has_more") != "1":
+        break
+    args = ["--grep=needle_marker", "--offset=" + root_attr(out, "grep", "next_offset"), "--legend=compact"]
+say(sorted(hm_rows) == sorted(gwhole_rows) and len(set(hm_rows)) == len(hm_rows),
+    "(G10) [P] a loop that reads ONLY has_more=/next_offset= rebuilds the whole answer, both lists, each row once (%d vs %d rows)" % (len(hm_rows), len(gwhole_rows)))
+flipped = gpages[-2].replace('has_more="1"', 'has_more="0"', 1) if len(gpages) > 1 else ""
+say(len(gpages) > 1 and not window_agrees(flipped), "(G11) [M] mutation: a page whose has_more= is flipped to 0 while next= pages on IS caught")
+rc, _, err = run(BIN, GREPW, ["--grep=needle_marker", "--page-bytes=6000"])
+say(rc != 0 and "--grep pages by matches" in err, "(G8) [P] --page-bytes=N>0 beside --grep refuses, naming its unit (exit %d)" % rc)
+
+# ── (K) --clones: clone groups, paged under the ceiling (PG1) ───────────────────────────────────────────────────────
+# clonew/  45 distinct function shapes x 8 copies, each copy in its own deep path: 45 groups of 8 members, ~1 KB a row, so the
+#          parent's 40-row head printed ~40 KB; its --offset=K alone printed every row from K, and its root named no next=.
+OPS = ["+", "-", "*", "/", "%", "^", "&", "|"]
+for k in range(45):
+    stmts = "".join("  v = v %s w%d;\n  w%d = w%d %s %d;\n" % (OPS[(k >> (j % 6)) % 8 if j < 6 else (k * 7 + j) % 8], j % 3, j % 3, j % 3, OPS[(k + j) % 8], j + 1)
+                    for j in range(12 + k % 5))
+    for c in range(8):
+        w(os.path.join(W, "clonew", "component_area_%02d" % c, "subsystem_handlers", "shape_%02d_copy_%d.c" % (k, c)),
+          "int shape_%02d_impl_%d(int v, int w0, int w1, int w2) {\n%s  return v;\n}\n" % (k, c, stmts))
+CLONEW = os.path.join(W, "clonew")
+GROUP = re.compile(r"<group\b.*?</group>", re.S)
+
+
+def clone_chain(binary, root, first_args):
+    pages, rows, args = [], [], first_args
+    for _ in range(60):
+        rc, out, _ = run(binary, root, args)
+        pages.append(out)
+        rows += GROUP.findall(rows_of(out))
+        nxt = root_attr(out, "clones", "next")
+        if rc != 0 or not nxt:
+            break
+        args = shlex.split(nxt)
+    return pages, rows
+
+
+rc, cwhole, cerr = run(BIN, CLONEW, ["--clones", "--page-bytes=0"])
+cwhole_rows = GROUP.findall(rows_of(cwhole))
+ctotal = int(root_attr(cwhole, "clones", "total") or -1)
+say(rc == 0 and len(cwhole_rows) == ctotal and ctotal >= 45, "(K0) [P] --clones --page-bytes=0 (refused on the parent) holds every group: %d rows, total=%d" % (len(cwhole_rows), ctotal))
+say(len(cwhole) > CEILING and "ripwire: --page-bytes=0" in cerr, "(K0b) [P] the whole answer is %d chars, over the ceiling, and stderr names its size" % len(cwhole))
+cpages, crows = clone_chain(BIN, CLONEW, ["--clones"])
+say(len(cpages[0]) <= CEILING, "(K1) [P] a default --clones answer prints %d chars <= %d" % (len(cpages[0]), CEILING))
+say(len(cpages) > 1 and ceiling_ok(cpages), "(K2) [P] every page of the next= chain is <= %d chars (%d pages, max %d)" % (CEILING, len(cpages), max(map(len, cpages))))
+say(sorted(crows) == sorted(cwhole_rows) and len(set(crows)) == len(crows) == ctotal,
+    "(K3) [P] the chain's groups are the whole answer's groups, each once (%d vs %d rows)" % (len(crows), len(cwhole_rows)))
+say(crows[:len(GROUP.findall(rows_of(cpages[0])))] == cwhole_rows[:len(GROUP.findall(rows_of(cpages[0])))],
+    "(K4) [P] page 1 is the head of the verb's own order (biggest first), not a re-sort")
+say(all(well_formed(p) for p in cpages) and all("\n" not in p.rstrip("\n") for p in cpages), "(K5) [C] every page is well-formed XML with no newline (G4)")
+say(not (sorted(crows[1:]) == sorted(cwhole_rows)), "(K6) [M] mutation: the rebuild check FAILS when one group of the chain is dropped")
+rc, cagain, _ = run(BIN, CLONEW, ["--clones"])
+say(cagain == cpages[0], "(K7) [C] determinism: the default page is byte-identical across two runs")
+rc, _, err = run(BIN, CLONEW, ["--clones", "--page-bytes=0", "--limit=5"])
+say(rc != 0 and "--clones' own page size" in err, "(K8) [P] --page-bytes=0 with --limit=N refuses: two sizes (exit %d)" % rc)
+
+# ── (X) --expand=<a name with > 16 definitions, several per file>: the unserved chain reaches every one, once (PG1) ──
+# multi/  8 files x 5 structs, each with str_of() of 40 lines: 40 definitions, five per file — so a FILE:LINE:NAME selector
+#         that ignored LINE matched five, and the 16-selector list left the rest unnamed (gson toString: 19 of 33, CL1 §18).
+for f in range(8):
+    structs = "".join("struct Shape%d_%d {\n  int str_of(int x) {\n%s    return x;\n  }\n};\n"
+                      % (f, s_, "".join("    x += %d * x + %d;\n" % (k + s_, k + f) for k in range(40))) for s_ in range(5))
+    w(os.path.join(W, "multi", "src", "shapes%d.cpp" % f), structs)
+MULTI = os.path.join(W, "multi")
+BTAG = re.compile(r"<b\s[^>]*>")
+
+
+def served_defs(doc):
+    """(path, line) of every definition an --expand answer serves: a <b> body, or a whole-file <src p= sym="name:line,…"> entry."""
+    body = rows_of(doc)
+    out = [(re.search(r'\sp="([^"]*)"', t).group(1), int(re.search(r'\sl="(\d+)"', t).group(1))) for t in BTAG.findall(body)]
+    for p_, syms in re.findall(r'<src p="([^"]*)" sym="([^"]*)"', body):
+        out += [(p_, int(x.rsplit(":", 1)[1])) for x in syms.split(",") if x]
+    return out
+
+
+rc, xwhole, _ = run(BIN, MULTI, ["--expand=str_of", "--page-bytes=0"])
+xall = served_defs(xwhole)
+say(rc == 0 and len(set(xall)) == 40, "(X0) [C] --expand=str_of --page-bytes=0 serves all %d definitions (40)" % len(set(xall)))
+xpages, xserved, args = [], [], ["--expand=str_of"]
+for _ in range(40):
+    rc, out, _ = run(BIN, MULTI, args)
+    xpages.append(out)
+    xserved += served_defs(out)
+    nxt = root_attr(out, "ctx", "unserved_next")
+    if rc != 0 or not nxt:
+        break
+    args = shlex.split(nxt)
+say(ceiling_ok(xpages) and len(xpages) > 1, "(X1) [C] every page of the unserved_next= chain is <= %d chars (%d pages, max %d)" % (CEILING, len(xpages), max(map(len, xpages))))
+say(sorted(xserved) == sorted(set(xall)), "(X2) [P] following unserved_next= serves every definition exactly once (%d served, %d distinct, of %d)"
+    % (len(xserved), len(set(xserved)), len(set(xall))))
+say(root_attr(xpages[-1], "ctx", "unserved_total") is None, "(X3) [C] the chain ends: the last page names nothing unserved")
+one = sorted(set(xall))[7]
+rc, xone, _ = run(BIN, MULTI, ["--expand=%s:%d:str_of" % one])
+say(served_defs(xone) == [one], "(X4) [P] a FILE:LINE:NAME selector serves that one definition, not its %d same-file namesakes (%s)" % (len(served_defs(xone)) - 1, "%s:%d" % one))
+say(not (sorted(xserved + xserved[:1]) == sorted(set(xall))), "(X5) [M] mutation: the exactly-once check FAILS when a definition is served twice")
+say(all(well_formed(p) for p in xpages), "(X6) [C] every page is well-formed XML")
+rc, xagain, _ = run(BIN, MULTI, ["--expand=str_of"])
+say(xagain == xpages[0], "(X7) [C] determinism: the first page is byte-identical across two runs")
+rc, _, err = run(BIN, MULTI, ["--expand=str_of", "--offset=40"])
+say(rc != 0 and "past the 40 definitions" in err, "(X8) [P] an --offset past the last definition refuses (exit %d)" % rc)
+
 # ── (N) answers that fit are unchanged ───────────────────────────────────────────────────────────────────────────────
 if BASE:
     for root, args in ((SMALL, ["--lint"]), (SMALL, ["--expand=small_fn"]), (SMALL, ["--expand=helper,small_fn"]), (BIG, ["--expand=giant_body", "--pack-budget-bytes=65536"]),
-                       (SMALL, []), (BIG, []), (WIDE, ["--page-bytes=0"])):
+                       (SMALL, []), (BIG, []), (WIDE, ["--page-bytes=0"]), (SMALL, ["--grep=helper"]), (BIG, ["--grep=hub_total"]), (SMALL, ["--clones"]),
+                       (BIG, ["--clones"]), (GREPW, ["--grep=needle_marker", "--limit=100"]), (MULTI, ["--expand=str_of", "--pack-budget-bytes=65536"])):
         _, a, _ = run(BIN, root, args)
         _, b, _ = run(BASE, root, [x for x in args if x != "--page-bytes=0"])   # the parent has no map --page-bytes: its bare map IS the whole one
         say(a == b, "(N) [N] %s on %s is byte-identical to the parent (%d B)" % (" ".join(args) or "(flagless map)", os.path.basename(root), len(a)))
@@ -253,8 +431,8 @@ if BASE:
 else:
     print("  SKIP  (N) arms need BASE_BIN=<parent binary>")
 
-# ── (O) OPEN: default calls this gate measures but CL1 did not page (reported, not asserted) ────────────────────────
-for args in (["--grep=hub_total"], ["--for=hub_total callers", "--signatures-only"], ["--clones"]):
+# ── (O) OPEN: default calls this gate measures but does not page (reported, not asserted) ─────────────────────────
+for args in (["--for=hub_total callers", "--signatures-only"],):
     _, out, _ = run(BIN, BIG, args)
     print("  INFO  (O) %s prints %d chars%s" % (" ".join(args) or "(flagless map)", len(out), "  OVER the ceiling" if len(out) > CEILING else ""))
 
