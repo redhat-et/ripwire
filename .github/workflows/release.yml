@@ -206,6 +206,8 @@ jobs:
           mkdir -p "dist/${asset}/skills"
           cp -R skills/ripwire-* "dist/${asset}/skills/"
           cp skills/install.sh "dist/${asset}/skills/"
+          # the Claude Code locator subagent: skills/install.sh installs skills/agents/ripwire-locator.md beside the skills
+          cp -R skills/agents "dist/${asset}/skills/"
           # The opt-in agent hooks are a sibling of skills/ because skills/install.sh resolves them via
           # ../hooks. Package both the shared nudge and the Codex output adapter; omitting this subtree
           # leaves every prebuilt user's advertised --hook command pointing at a nonexistent file.

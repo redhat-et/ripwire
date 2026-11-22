@@ -751,6 +751,7 @@ for _g in \
     localdeclcheck \
     localitycheck \
     localscountcheck \
+    locatoragentcheck \
     loopconservationcheck \
     lpincheck \
     lstiercapcheck \

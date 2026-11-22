@@ -1036,6 +1036,50 @@ else
     echo "done. $count ripwire skills active in every session (${copied} copied, ${pruned} pruned, ${skipped} contributor-only skipped, ${kept} kept as yours) — every ripwire-* installed above."
 fi
 
+# ── THE LOCATOR SUBAGENT (lane LC1, 2026-11-22, owner ruling 185). A Claude Code subagent file installed beside the skills, for
+#    Claude only: skills/agents/ripwire-locator.md -> ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/agents/ (the user scope of
+#    code.claude.com/docs/en/sub-agents). It runs ripwire in its own context and hands the main thread back only edit ranges,
+#    so a ~7K-token --for answer does not ride every later main-thread request. Ownership as for a skill: a symlink into this
+#    checkout, verified by its result, a copy when a link does not take; a dangling link, a link into this checkout, or a
+#    byte-identical file is ours and refreshed; anything else there is the user's and is kept. A checkout or staged release
+#    without the file installs its skills exactly as before. Never fails the run. test/locatoragentcheck.sh (D) drives it.
+install_claude_locator_agent()
+{
+    agentSrc="$src/agents/ripwire-locator.md"
+    [ -f "$agentSrc" ] || return 0
+    agentDir="$( dirname "$dst" )/agents"
+    agentDst="$agentDir/ripwire-locator.md"
+    if [ -L "$agentDst" ]; then
+        if [ -e "$agentDst" ] && ! cmp -s "$agentDst" "$agentSrc"; then
+            agentLink="$( readlink "$agentDst" 2>/dev/null )" || agentLink=""
+            case "$agentLink" in
+                "$src"/*) ;;
+                *) echo "kept ripwire-locator: $agentDst is a symlink ripwire did not create (yours)"; return 0 ;;
+            esac
+        fi
+        rm -f "$agentDst"
+    elif [ -e "$agentDst" ]; then
+        if [ ! -f "$agentDst" ] || ! cmp -s "$agentDst" "$agentSrc"; then
+            echo "kept ripwire-locator: $agentDst is not ripwire's (your own file); the locator subagent was not installed"
+            return 0
+        fi
+        rm -f "$agentDst"
+    fi
+    mkdir -p "$agentDir"
+    if ln -s "$agentSrc" "$agentDst" 2>/dev/null && [ -L "$agentDst" ] && cmp -s "$agentDst" "$agentSrc"; then
+        echo "installed subagent ripwire-locator -> $agentDst (Claude Code: delegate a code lookup to it; it returns edit ranges)"
+    elif rm -f "$agentDst" && cp "$agentSrc" "$agentDst" 2>/dev/null && cmp -s "$agentDst" "$agentSrc"; then
+        echo "copied subagent ripwire-locator -> $agentDst (a symlink did not take here; re-run after updating ripwire to refresh it)"
+    else
+        rm -f "$agentDst"
+        echo "skills/install.sh: could not install the ripwire-locator subagent at $agentDst; the skills are unaffected." >&2
+    fi
+    return 0
+}
+if [ "$mode" = "claude" ]; then
+    install_claude_locator_agent
+fi
+
 if [ "$wantHook" -eq 1 ]; then
     case "$mode" in
         codex|codex-legacy) install_codex_hook; install_legend_seen_default codex ;;

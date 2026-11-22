@@ -345,6 +345,20 @@ inline constexpr std::string_view kEditLinesRangedRead[ 2 ] = {
 inline constexpr std::string_view kPlanLanesLine =
     "- One task: `--pack-task=\"<task>\" --legend=compact`; before parallel agents: `--plan-lanes=N --task=\"<goal>\"`, then read `lanes[].execution`.";
 
+// THE LOCATOR ROUTE (lane LC1, 2026-11-22, owner ruling 185). In Claude Code every tool result stays in the main conversation and
+// is re-sent with each later request, so a ~7K-token --for answer read there rides every request after it; the ripwire-locator
+// subagent (skills/agents/ripwire-locator.md, installed by skills/install.sh) runs ripwire in its own context and hands back only
+// ranges. This sentence tells the MAIN thread to delegate. It rides on the orient line (named, as kPlanLanesLine is) because the
+// body sits at its 20-line ceiling, and only on the row whose subagents this repo routes (the subagentBrief column: the locator
+// is a Claude Code subagent). It is NOT in the brief block or the SubagentStart note: those address subagents, and a subagent
+// told to delegate would nest a locator. No token saving is shown here; that is the R5 arm's measurement.
+// RIPWIRE_NO_LOCATOR_ROUTE (any value) drops it, leaving the previous bytes exactly: the A/B handle (the RIPWIRE_NO_ACTLINE
+// precedent). The SessionStart primer re-prints this block, so the switch reaches it too. test/locatoragentcheck.sh (E)-(G).
+inline constexpr std::string_view kOrientAnchorLine = "  signatures. Paste symbol/file names from the issue verbatim; named mentions get anchored.";
+inline constexpr std::string_view kLocatorRouteSentence =
+    " Main thread: for a code lookup, delegate to the `ripwire-locator` subagent (when installed) and ask it for edit ranges; run a full `--for` here only when you need the whole map.";
+[[nodiscard]] inline bool locatorRouteOn() noexcept { return std::getenv( "RIPWIRE_NO_LOCATOR_ROUTE" ) == nullptr; }
+
 // The ONE shared use-when blurb — single source of truth for every agent recipe (the gate diffs the
 // body across agents, so a per-agent fork of this text is a red gate, not a variant — the one exception is the
 // edit-routing pair, a table column). A binary on
@@ -367,7 +381,7 @@ inline std::vector<std::string_view> wrapUseWhenBlurbLines( const bool readBefor
         "## ripwire — deterministic codebase maps (on PATH as `ripwire`)",
         "Reach for it BEFORE blind grep + whole-file reads. First call ~1s cold; after that warm, ~0.1s.",
         "- Orient on a task: `ripwire <dir> --for=\"<task in words>\"` — ranked, quality-annotated",
-        "  signatures. Paste symbol/file names from the issue verbatim; named mentions get anchored.",
+        kOrientAnchorLine,
         kPlanLanesLine,
         "- Have a stack trace / build error: `ripwire <dir> --from-trace=FILE --legend=compact` (`-` = stdin) —",
         "  paste the error, don't paraphrase it into a query.",
@@ -412,12 +426,15 @@ inline void wrapPrintBlurb( std::FILE* out, const std::string_view agent )
     rw::emitTo( out, "#\n# context wiring — a binary on PATH is invisible to an agent until its rules file says when\n"
                        "# to reach for it. Paste the block below into {}:\n", std::string_view( targetFile.data(), targetFile.size() ) );
     rw::emitTo( out, "# --- paste into {} ---\n", std::string_view( targetFile.data(), targetFile.size() ) );
+    const bool routesSubagents = !blurbRow->subagentBrief.empty();
+    const bool locatorRoute    = routesSubagents && locatorRouteOn();
     for( const std::string_view line : wrapUseWhenBlurbLines( blurbRow->readBeforeEdit ) )
     {
-        const bool             briefHere = line == kPlanLanesLine && !blurbRow->subagentBrief.empty();
+        const bool             briefHere = line == kPlanLanesLine && routesSubagents;
         const std::string_view lead      = briefHere ? kSubagentBriefLead : std::string_view{};
         const std::string_view brief     = briefHere ? blurbRow->subagentBrief : std::string_view{};
-        rw::emitTo( out, "{}{}{}\n", line, lead, brief );
+        const std::string_view locator   = ( line == kOrientAnchorLine && locatorRoute ) ? kLocatorRouteSentence : std::string_view{};
+        rw::emitTo( out, "{}{}{}{}\n", line, locator, lead, brief );
     }
     rw::emitRaw( out, "# --- end paste ---\n" );
 }

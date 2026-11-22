@@ -32,6 +32,10 @@ repo root or the subsystem; a `git-url` or several roots (`ripwire dir1 dir2 --r
 A `--for` answer comes answer-first in ~12 KB pages; stop once the answer is in hand, else its `next=` (`--page-bytes=N:K`)
 is the next page.
 
+**In Claude Code's main conversation**, delegate a code lookup to the `ripwire-locator` subagent (installed beside these
+skills) and ask it for edit ranges: it runs the `--for` in its own context and returns only `path:start-end` lines, so the
+whole answer does not ride every later request. Run a full `--for` in the main thread only when you need the whole map.
+
 After the orient call, look up lean: `--expand` / `--outline` / `--whereis` / `--callers` answer with no
 ride-along map. Then read only the files ripwire ranks highest (god-files and hotspots first) — not a grep sweep.
 Read every range it lists (`path:L-E`; a page's `<act read=>` names its top ones) in ONE turn of parallel ranged

@@ -136,7 +136,9 @@ legacyFound=$( find -L "$CODEX_ROOT/skills" -mindepth 2 -maxdepth 2 -name SKILL.
 
 # ---- 3) ROUTE INTEGRITY: every ripwire-<name> a skill references must be a shipped skill ----
 # Catches a routing header / body that points at a deleted or misspelled skill (the phantom-route bug).
-have_dir(){ [ -d "$SK/$1" ]; }
+# A shipped Claude Code subagent (skills/agents/<name>.md, lane LC1: ripwire-locator) is a real route target too; a
+# misspelled or deleted one still has no file and still reds here.
+have_dir(){ [ -d "$SK/$1" ] || [ -f "$SK/agents/$1.md" ]; }
 badrefs=0; seen=""
 while IFS= read -r ref; do
     case " $seen " in *" $ref "*) continue;; esac
