@@ -56,6 +56,10 @@ export RIPWIRE_NO_ROWLINES=1
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 unset RIPWIRE_NO_MEMBER_NAMES RIPWIRE_NO_BODY_FOLD RIPWIRE_NO_BODY_SLOT RIPWIRE_NO_OWNER_HOP
+# The fixtures' owners sit in files whose BASENAMES carry the question's words (compiler.js, scheduler.py, …), so with the code
+# lens's default basename field (lexical.h kForBasenameFieldW, LP1) every member ranks as a row and the mem= arms go vacuous
+# (A1/A4/C1/C2/E1/G1/L1 report "every member is shown as a row"). This gate pins mem= mechanics, not ranking: field off.
+export RIPWIRE_BASENAME_W=0
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 echo "formembernamescheck: BIN=$BIN"

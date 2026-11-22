@@ -516,6 +516,19 @@ inline const std::string* lexicalScanText( const IngestResult& ing, std::size_t 
     return &scratch;
 }
 
+// LP1 (2026-11-21): the CODE lens's default weight for pass 1.6's basename-only field — what the --for ranking
+// (verbs_for.h computeLensRanking, which --pack-task and the change lanes share) and its MCP twins (mcpverbs.h forTaskText,
+// packTaskText) pass as basenameFieldDefaultW on every subtoken call of the route, so CLI and MCP rank alike. A question
+// names a FILE or a package more often than a function ("lib/theme.githelpers: remove dead code", "restorer: reject …"),
+// and a symbol's own text rarely repeats its file's name. Two peers win GA1 DEV cells on exactly this signal:
+// codebase-memory-mcp indexes each node's file path and qualified name at the SAME BM25 weight as its name, graphify seeds
+// from the file node a query word names. 2 sits under the name field (×3) and over the body (×1). MEASURED on GA1 DEV n=89
+// (in-sample; LP1): w=2 completes 1 more task and takes 0 tasks down at any rung; the FULL-path field (RIPWIRE_PATHTOK_W=1)
+// took 2 tasks down — r3_pathtok's held-out finding again, the reason this is the basename and not the path.
+// NOT YET the LB-3 acceptance verdict pass 1.6 asks for (a never-tuned set: GA3 DEV, held-out LocBench) — an owner call.
+// RIPWIRE_BASENAME_W still overrides it (0 = the historical ranking). test/forbasenamedefaultcheck.sh pins it.
+inline constexpr int kForBasenameFieldW = 2;
+
 // The kRankFlagNotLexRanked units (model.h) as a per-symbol mask, 1 = left out; EMPTY when the index holds none, so a corpus
 // without such units runs the historical pass byte-for-byte. One pass over the symbols per ranking call.
 inline std::vector<char> notLexRankedMask( const IngestResult& ing )
@@ -872,7 +885,8 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     // per FILE (each basename tokenized once, its row added per symbol) honoring r3's "amortize
     // first". Needs no file text → runs before the pass-2 branch split; parity and the cache format
     // untouched. RIPWIRE_BASENAME_W (0..8) overrides basenameFieldDefaultW; a nonzero shipped default
-    // requires the LB-3 acceptance verdict (gate: test/lb3namecheck.sh).
+    // requires the LB-3 acceptance verdict (gate: test/lb3namecheck.sh). The code lens now passes
+    // kForBasenameFieldW (above) on GA1 DEV evidence only — the acceptance verdict is still owed.
     //
     // R-R: takes the same root-relative view as pass 1.5. PROVABLY a no-op here — the basename is whatever
     // follows the last '/', which the root prefix cannot change — and applied anyway so the two path passes
