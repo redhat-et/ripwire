@@ -34,6 +34,10 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-22, train ge3 (ge-runqd, qd-lessons-2-r, ge-capturetags, ge-serialize, ge-lextiers; composed on main b576a95e3):
+#   RE-PINNED ONCE with UPDATE_GOLDEN=1 from the composed build (hash 8b4885839d…ab3727cf). Watched text moved only by the
+#   qd-lessons-2 members (defectSitesOf's shell-cut counter + legacySite, logged below) on top of #715's kParserVer 337/338.
+#   No member bumps kParserVer, kCacheVersion (54) or kQSnapCacheScheme (38).
 # 2026-11-21, lane land-715 (#715 by @himanchalkaushale, #548 arm 1: Clojure calls whose list head carries metadata; stacked on
 #   train 1118a 4b1f4516e): RE-PINNED with UPDATE_GOLDEN=1 (hash a57b75c512…5350ee08a9). Watched text: kParserVer 335 -> 337
 #   (rich file tag 338; the PR's 311/312 renumbered above the train's 335/336): queries/clojure/tags.scm accepts a meta_lit before a
