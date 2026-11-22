@@ -387,10 +387,10 @@ inline const char* pageDisclosure( char* buf, std::size_t bufCap, std::size_t ro
 }
 
 // PG1 (owner ruling 192): a root whose ONE window also cuts a secondary listing (--grep's <unindexed> list obeys the in-index
-// list's --limit/--offset). shown=/total= stay the primary list's; but has_more=/next_offset= describe the WHOLE chain: while the
-// secondary list still has rows past `chainEnd` (the window's end over both lists), the page is cut — capped="1", has_more="1",
-// next_offset=chainEnd — so a loop that reads has_more= never stops while next= would still serve rows. `secondaryMore` false:
-// byte-identical to pageDisclosure.
+// list's --limit/--offset). shown=/capped=/total= stay the primary list's (the secondary element carries its own capped=); but
+// has_more=/next_offset= describe the WHOLE chain: while the secondary list still has rows past `chainEnd` (the window's end over
+// both lists), the paging half rides with has_more="1" next_offset=chainEnd, so a loop that reads has_more= never stops while
+// next= would still serve rows. `secondaryMore` false: byte-identical to pageDisclosure.
 inline const char* pageDisclosureChained( char* buf, std::size_t bufCap, std::size_t rowsShown, std::size_t rowTotal, std::size_t windowEnd,
                                           int limit, int offset, bool collectionCapped, bool secondaryMore, std::size_t chainEnd ) noexcept
 {
@@ -399,7 +399,6 @@ inline const char* pageDisclosureChained( char* buf, std::size_t bufCap, std::si
     {
         v.active      = true;
         v.paging      = true;
-        v.capped      = 1u;
         v.hasMore     = 1u;
         v.nextOrTotal = chainEnd;
     }
