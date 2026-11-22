@@ -1269,7 +1269,8 @@ int emitGrepReport( const MainDispatch& d )
                  "THE TWO POPULATIONS: every count above — files, hits, shown, capped, total, complete — is the IN-INDEX search "
                  "ALONE. unindexed_hits= sizes the second one, always stated (a zero included); the trailing unindexed element "
                  "carries that same number as its own count= beside shown=/capped= and obeys the SAME window limit/offset set here "
-                 "(dashes omitted), so a one-row page is one row on BOTH lists and a page past its end is empty, not repeated. "
+                 "(dashes omitted), so a one-row page is one row on BOTH lists and a page past its end is empty, not repeated; the root's "
+                 "has_more= and next_offset= cover BOTH lists (has_more stays 1 while either has rows past this page). "
                  "unindexed_files_skipped= (present only when nonzero) counts "
                  "candidates this scan saw but did not read: sniffed binary, or unreadable (no size ceiling applies to this text scan). "
                  "unindexed_candidates_capped=\"1\" (present only when true) means the CANDIDATE list itself (the skipped verb's own "
@@ -1341,9 +1342,10 @@ int emitGrepReport( const MainDispatch& d )
                                                [ & ] { return hits.empty() ? std::string() : std::string( pathFor( hits[ 0 ].fileId ) ) + ":" + std::to_string( hits[ 0 ].line ); } );
     rw::emitTo( stdout, "<grep pattern=\"{}\"{}{}{} files=\"{}\" hits=\"{}\"{} hits_capped=\"{}\"{}{}{}{}{}{}{}>",
                  ex( pat ).c_str(), schemaAttr, rootAttr.c_str(), termsAttr.c_str(), filesMatched, hitCount,
-                 pageDisclosure( grab, sizeof( grab ), grepPage.end - grepPage.begin, hitCount, grepPage.end,
-                                 cfg.pageLimit, cfg.pageOffset, true, kXmlPageSyntax,
-                                 /*collectionCapped=*/ hitsCapped != 0 ),   // H8: the cap hits_capped= names floors the root
+                 pageDisclosureChained( grab, sizeof( grab ), grepPage.end - grepPage.begin, hitCount, grepPage.end,
+                                        cfg.pageLimit, cfg.pageOffset,
+                                        /*collectionCapped=*/ hitsCapped != 0,   // H8: the cap hits_capped= names floors the root
+                                        auxPage.end < aux.hits.size(), pageEnd ),   // ruling 192: has_more= spans the unindexed list too
                  hitsCapped, completeAttr, tierAttr.c_str(), corpusAttr.c_str(), auxAttr.c_str(), regexSkipAttr.c_str(),
                  scanShortAttr.c_str(), rw::nextAttrXml( grepNext ).c_str() );
     rw::emitTo( stdout, "{}", renderHistoryUnread( DiscloseAs::LegendComment ) );   // K51: its own definition, behind the root it marks

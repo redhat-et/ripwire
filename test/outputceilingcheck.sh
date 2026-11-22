@@ -295,6 +295,27 @@ rc, gagain, _ = run(BIN, GREPW, ["--grep=needle_marker"])
 say(gagain == gpages[0], "(G6) [C] determinism: the default page is byte-identical across two runs")
 rc, glim, _ = run(BIN, GREPW, ["--grep=needle_marker", "--limit=100"])
 say(len(grep_rows(glim)) >= 200 and root_attr(glim, "grep", "shown") == "100", "(G7) [C] an explicit --limit=100 is the caller's page, not cut by the ceiling (%d chars)" % len(glim))
+# (G9-G11) owner ruling 192: the root's has_more=/next_offset= describe the WHOLE chain (in-index AND unindexed rows). On the
+# lane before the ruling (aa305d201) the pages past the in-index list's end said has_more="0" while next= still served rows.
+def window_agrees(doc):
+    nxt = root_attr(doc, "grep", "next") or ""
+    paging = "--offset=" in nxt
+    hm, no = root_attr(doc, "grep", "has_more"), root_attr(doc, "grep", "next_offset")
+    m = re.search(r"--offset=(\d+)", nxt)
+    return (hm == "1") == paging and (not paging or (m and no == m.group(1)))
+bad_pages = [i + 1 for i, p in enumerate(gpages) if not window_agrees(p)]
+say(not bad_pages, "(G9) [P] every page's has_more= is 1 exactly when next= pages on, and next_offset= is the offset next= continues from (disagree: %s)" % bad_pages)
+hm_rows, args = [], ["--grep=needle_marker"]
+for _ in range(60):
+    rc, out, _ = run(BIN, GREPW, args)
+    hm_rows += grep_rows(out)
+    if root_attr(out, "grep", "has_more") != "1":
+        break
+    args = ["--grep=needle_marker", "--offset=" + root_attr(out, "grep", "next_offset"), "--legend=compact"]
+say(sorted(hm_rows) == sorted(gwhole_rows) and len(set(hm_rows)) == len(hm_rows),
+    "(G10) [P] a loop that reads ONLY has_more=/next_offset= rebuilds the whole answer, both lists, each row once (%d vs %d rows)" % (len(hm_rows), len(gwhole_rows)))
+flipped = gpages[-2].replace('has_more="1"', 'has_more="0"', 1) if len(gpages) > 1 else ""
+say(len(gpages) > 1 and not window_agrees(flipped), "(G11) [M] mutation: a page whose has_more= is flipped to 0 while next= pages on IS caught")
 rc, _, err = run(BIN, GREPW, ["--grep=needle_marker", "--page-bytes=6000"])
 say(rc != 0 and "--grep pages by matches" in err, "(G8) [P] --page-bytes=N>0 beside --grep refuses, naming its unit (exit %d)" % rc)
 
