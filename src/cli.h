@@ -2906,9 +2906,10 @@ inline constexpr char kHelpTail[] =
         "                               resource ripwire://legend-dict, answers list rows first, carry each definition once\n"
         "                               per session and end with <about legend=\"ref\" dict= dictv=/>. A CLI run has no\n"
         "                               session to hold a definition, so --legend=ref refuses; --legend-dict prints them all.\n"
-        "    --page-bytes=N[:K]         (with --for, or the bare map) the page size of the answer-first --for answer: 12000 by\n"
-        "                               default, 0 = the whole answer in one call. The answer is rendered whole and cut at row boundaries\n"
-        "                               into pages of about N bytes; the root says page= pages= withheld_bytes= and next=,\n"
+        "    --page-bytes=N[:K]         (with --for or the bare map, and 0 with --lint or --expand too) the page size of the answer-first\n"
+        "                               --for answer: 12000 by default, 0 = the whole answer in one call. The answer is rendered\n"
+        "                               whole and cut at row boundaries into pages of about N bytes; the root says page= pages=\n"
+        "                               withheld_bytes= and next=,\n"
         "                               which is this flag with :K, the next page. Page 1 keeps the whole legend after its\n"
         "                               rows; a later page re-sends none and ends <about legend=\"ref\" have=\"page1\"/>.\n"
         "                               Every page's rows, joined, are the whole answer's rows byte for byte. --legend=first\n"
@@ -2925,6 +2926,10 @@ inline constexpr char kHelpTail[] =
         "                               THE BARE MAP pages the same way: over the ceiling it is cut between its file groups and\n"
         "                               inventory rows into 24,000 B pages (page= pages= withheld_bytes= has_more= next=|page_next=);\n"
         "                               --page-bytes=N sets that size, :K a page, 0 the whole map. Beside a report verb, refused.\n"
+        "                               --page-bytes=0 IS THE WHOLE ANSWER on every verb that pages: --for, the bare map, --lint\n"
+        "                               (every finding; with --offset=K, every one from K) and --expand (every body uncut). --lint\n"
+        "                               and --expand page by their own unit (next=), so beside them it takes 0 only, and not with\n"
+        "                               their own size (--limit=N, --pack-budget-bytes=N). Over the ceiling: the one stderr line.\n"
         "    --rows=lines|elements      (with --for) the form of the <sigs> and <tail> rows: lines, the default, is ROWS AS LINES\n"
         "                               above; elements is one XML element per row as 0.6.x served them, byte for byte the\n"
         "                               answer lines decodes to. The flag decides over RIPWIRE_NO_ROWLINES in both directions;\n"
@@ -5216,6 +5221,33 @@ inline bool mapPageEligible( const Config& c ) noexcept
         && !c.mcp && !c.lsp && c.listen.empty() && c.batchFile.empty() && c.roots.size() == 1 && !honorsPaging( c );
 }
 
+// LT1: the verbs the output ceiling pages by their OWN unit, not by bytes — --lint (findings, continued by --offset=K) and a bare
+// --expand (bodies and body lines, continued by unserved_next= / lines= next=). --page-bytes takes only 0 there: one switch, the
+// same on every paged verb, for "the whole answer"; a page size in bytes would be a second paging grammar beside the verb's own.
+inline bool lintPagedVerbAsked( const Config& c ) noexcept
+{
+    return c.forTask.empty() && ( c.lint || !c.lintRulesDir.empty() ) && c.match.empty() && c.pattern.empty();
+}
+inline bool expandPagedVerbAsked( const Config& c ) noexcept
+{
+    return c.forTask.empty() && !c.expand.empty() && !lintPagedVerbAsked( c );
+}
+
+// Why --page-bytes=N cannot shape a --lint / --expand run, or nullptr when it can (N == 0 alone, without the verb's own size).
+[[nodiscard]] inline const char* wholeOnlyConflict( const Config& c, std::size_t bytes ) noexcept
+{
+    if( lintPagedVerbAsked( c ) )
+    {
+        if( bytes != 0 )         { return "takes 0 only beside --lint (the whole answer): --lint pages by findings — follow the root's next= (--offset=K), or --limit=N"; }
+        if( c.sarif )            { return "=0 does not combine with --sarif, which is never paged"; }
+        if( c.pageLimit > 0 )    { return "=0 (the whole answer) does not combine with --limit=N, --lint's own page size — pass one"; }
+        return nullptr;
+    }
+    if( bytes != 0 )             { return "takes 0 only beside --expand (the whole answer): --expand pages by body lines — follow a body's next= or unserved_next=, or --pack-budget-bytes=N"; }
+    if( c.packBudgetExplicit )   { return "=0 (the whole answer) does not combine with --pack-budget-bytes=N, --expand's own size — pass one"; }
+    return nullptr;
+}
+
 // Why --page-bytes cannot shape this run, or nullptr when it can.
 [[nodiscard]] inline const char* pageBytesConflict( const Config& c ) noexcept
 {
@@ -5242,14 +5274,22 @@ inline void validatePageBytes( Config& c ) noexcept
         c.ok = false;
         return;
     }
-    if( const char* why = pageBytesConflict( c ) )
+    const char* why = lintPagedVerbAsked( c ) || expandPagedVerbAsked( c ) ? wholeOnlyConflict( c, bytes ) : pageBytesConflict( c );
+    if( why != nullptr )
     {
-        rw::emitTo( stderr, "ripwire: --page-bytes {}\n", why );
+        rw::emitTo( stderr, "ripwire: --page-bytes{}{}\n", why[0] == '=' ? "" : " ", why );
         c.ok = false;
         return;
     }
     c.forPageBytes = bytes;
     c.forPage      = page;
+}
+
+// LT1: --page-bytes=0 was given and accepted — the caller's explicit "whole answer", on any verb that pages (--for, the bare map,
+// --lint, --expand). Read after validatePageBytes; every paged verb asks this one predicate.
+inline bool wholeAnswerAsked( const Config& c ) noexcept
+{
+    return !c.pageBytesSpec.empty() && c.forPageBytes == 0;
 }
 
 // CL1 (outputceiling.h): the body budget of a bare --expand. The historic 64 KB default let one call print 51,406 characters
@@ -5265,7 +5305,7 @@ inline constexpr std::size_t kExpandCeilingBodiesBytes = 20000;
 inline constexpr std::size_t kExpandCeilingFloorBytes  = 2000;
 inline void applyExpandCeiling( Config& c ) noexcept
 {
-    if( c.ok && !c.expand.empty() && c.forTask.empty() && !c.packBudgetExplicit )
+    if( c.ok && !c.expand.empty() && c.forTask.empty() && !c.packBudgetExplicit && !wholeAnswerAsked( c ) )
     {
         c.packBudgetBytes = std::min( c.packBudgetBytes, kExpandCeilingBodyBytes );
     }

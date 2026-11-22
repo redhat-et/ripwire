@@ -8,6 +8,7 @@
 #include "valuerefs.h"  // VrRender / vrPath — a row's p= spelled as every other verb's
 #include "outputceiling.h"   // kOutputCeilingChars — the default page's byte ceiling (CL1)
 #include "nextverb.h"   // nextFlag — findings_next='s pasteable spelling (knob-honesty-068)
+#include "subjectanchor.h"   // isToolOrVendoredPath — the shipped-not-authored path tier --lint's order sorts last (LT1)
 #include "infra/emit.h" // rw::emitTo — THE emitter: std::print where the library has <print>, std::format+fputs
                        // where it does not, chosen by feature test and DISCLOSED as emit= on --version. The
                        // pilot conversion used to spell the fallback here; the choice now lives in one header.
@@ -973,7 +974,8 @@ LintApplicability computeLintApplicability( const rw::IngestResult& ing, bool bu
     return out;
 }
 
-// THE emitted order of --lint's rows: (file path, startByte, rule, sev, text). sev and text are part of
+// THE emitted order of --lint's rows: (file path, startByte, rule, sev, text) — the TIE-BREAK since LT1 (rankLintRowsByImportance
+// below sorts the most important rows first and keeps this order inside each of its groups). sev and text are part of
 // the KEY, not decoration. (file, startByte, rule) alone is NOT a total order — one rule can emit two
 // findings at the same byte (naming-confusable pairs `rbegin` with both `begin` and `cbegin`, both
 // anchored at the symbol's own offset) — and std::sort is unstable, so tied rows came out in whatever
@@ -992,6 +994,95 @@ void sortLintRows( const rw::IngestResult& ing, std::vector<LintOut>& outs )
         if( x.sev != y.sev )                             { return x.sev < y.sev; }
         return x.text < y.text;
     } );
+}
+
+// LT1 (2026-11-21): THE IMPORTANCE ORDER, applied over sortLintRows' total order by a STABLE sort, so the emitted order is
+//   (1) the file's TIER — a shipped-not-authored file (lintShippedFiles below) sorts after every authored one: its findings are
+//       its upstream's to fix, not the reader's;
+//   (2) the rule's SEVERITY, error > warn > info: the lint catalog's sev for a built-in rule, a user rule's own sev=;
+//   (3) the file's CENTRALITY: first the house's path tier (source before a test / bench / fixture file, filter.h pathTierOf —
+//       the same down-weight every ranking lens prices), then its place in the map's PageRank file order (filter.h fileRanks
+//       over the map's default rank) — a file with no ranked symbol after every ranked one;
+//   (4) sortLintRows' (file path, startByte, rule, sev, text), whole, as the tie-break — so the order stays TOTAL.
+// WHY: the output ceiling (outputceiling.h) made a default answer a byte-budgeted PREFIX of these rows, so the order decides what
+// page 1 shows. MEASURED on GA1 DEV ga-eslint-01 (parent dfc8d95fd, 571 findings, 99 on page 1): path order opened with a
+// do-while in Makefile.js and then ten rows of a vendored ponyfill. The path tier inside (3) is MEASURED too (results LT1 §4):
+// without it 382 of 1,248 page-1 rows across GA1 DEV's 11 trees were test/fixture rows (bat's page 1 opened on syntax-test
+// fixtures, black's on formatter test cases), because raw PageRank ranks such files high. Nothing is dropped: the order is
+// total, so --offset pages chain without a gap or a repeat, and --page-bytes=0 prints every row in it. Keys (1)-(3) are
+// constant within one file and one rule, so they never split a group dedupeLintFindings would merge.
+struct LintRowOrder
+{
+    std::vector<char>          shipped;   // per file: 1 = shipped, not authored (lintShippedFiles)
+    std::vector<char>          testTier;  // per file: 1 = a test / bench / fixture path (filter.h pathTierOf TestOrBench)
+    std::vector<std::uint32_t> place;     // per file: 1-based place in the map's PageRank file order; 0 = no ranked symbol
+};
+
+// The files nobody here authors, by the house's OWN verdicts — no new heuristic: a tool / vendored / generated path
+// (subjectanchor.h subject_detail::isToolOrVendoredPath, which already holds filter.h's demo/generated table), a minified file
+// (--skipped's minified-suspect, ingest.h isMinifiedHealth), and a bundle (filter.h's evidence tier, vendoredBundleFiles).
+std::vector<char> lintShippedFiles( const rw::IngestResult& ing )
+{
+    std::vector<char> shipped = rw::vendoredBundleFiles( ing );
+    for( std::uint32_t f = 0; f < shipped.size(); ++f )
+    {
+        const bool minified = f < ing.fileHealth.size() && rw::isMinifiedHealth( ing.fileHealth[f] );
+        shipped[f] = char( shipped[f] != 0 || minified || rw::subject_detail::isToolOrVendoredPath( rw::rootRelPath( ing, f ) ) );
+    }
+    return shipped;
+}
+
+LintRowOrder lintRowOrder( const rw::IngestResult& ing, const rw::Graph& g )
+{
+    std::vector<char> testTier( ing.files.size(), 0 );
+    for( std::uint32_t f = 0; f < testTier.size(); ++f )
+    {
+        testTier[f] = char( rw::pathTierOf( rw::rootRelPath( ing, f ) ) == rw::PathTier::TestOrBench );
+    }
+    return LintRowOrder{ .shipped = lintShippedFiles( ing ), .testTier = std::move( testTier ),
+                         .place = rw::fileRanks( ing, rw::warmsnap::defaultRank( g ).rank ) };
+}
+
+// error 0, warn 1, info 2 (kLintSeverities lists them info-first); 3 for a rule the catalog does not name.
+std::uint8_t lintSeverityRank( const LintOut& o ) noexcept
+{
+    std::string_view sev = o.sev;
+    if( sev.empty() )
+    {
+        const rw::lintcatalog::LintCatalogRow* row = rw::lintcatalog::lintCatalogFind( o.rule );
+        sev = row != nullptr ? row->severity : std::string_view();
+    }
+    const auto at = std::ranges::find( rw::kLintSeverities, sev );
+    return at == rw::kLintSeverities.end() ? std::uint8_t( 3 ) : std::uint8_t( rw::kLintSeverities.size() - 1 - std::size_t( at - rw::kLintSeverities.begin() ) );
+}
+
+// One row's importance key, packed most-significant first: shipped (1 bit), severity (2 bits), test tier (1 bit), then the
+// file's PageRank place (32 bits; 0 = unranked → last). A smaller key is more important.
+std::uint64_t lintImportanceKey( const LintRowOrder& order, const LintOut& o ) noexcept
+{
+    const std::uint32_t f       = o.fileId;
+    const std::uint64_t shipped = f < order.shipped.size() && order.shipped[f] != 0 ? 1u : 0u;
+    const std::uint64_t test    = f < order.testTier.size() && order.testTier[f] != 0 ? 1u : 0u;
+    const std::uint32_t place   = f < order.place.size() ? order.place[f] : 0;
+    return ( shipped << 35 ) | ( std::uint64_t( lintSeverityRank( o ) ) << 33 ) | ( test << 32 ) | ( place == 0 ? UINT32_MAX : place );
+}
+
+// Reorders sortLintRows' output most important first; std::stable_sort keeps its total order inside each importance group.
+void rankLintRowsByImportance( const LintRowOrder& order, std::vector<LintOut>& outs )
+{
+    std::vector<std::pair<std::uint64_t, std::uint32_t>> keyed( outs.size() );
+    for( std::uint32_t i = 0; i < outs.size(); ++i )
+    {
+        keyed[i] = { lintImportanceKey( order, outs[i] ), i };
+    }
+    std::stable_sort( keyed.begin(), keyed.end(), []( const auto& a, const auto& b ) { return a.first < b.first; } );
+    std::vector<LintOut> ranked;
+    ranked.reserve( outs.size() );
+    for( const auto& [ key, i ] : keyed )
+    {
+        ranked.push_back( std::move( outs[i] ) );
+    }
+    outs.swap( ranked );
 }
 
 // §P6.1: two DIFFERENT AST captures (different startByte — e.g. the same magic-number value
@@ -2079,8 +2170,8 @@ inline std::size_t lintTallyRowsBound( const std::vector<LintOut>& outs )
     return builtInLintRuleNames().size() + std::size( rw::atoms::kAtomRuleNames ) + std::size( rw::cachelint::kCacheRuleNames ) + userRules.size();
 }
 
-// The <f> rows a --lint answer prints: the --limit page when the caller sized one, else the sorted run from --offset (0 on a
-// bare call) that fits the page budget (lintPagePayloadBytes). CL1: --offset alone is a CONTINUATION of the default page, so
+// The <f> rows a --lint answer prints: the --limit page when the caller sized one, every row from --offset under --page-bytes=0
+// (the whole answer, LT1), else the sorted run from --offset (0 on a bare call) that fits the page budget (lintPagePayloadBytes). CL1: --offset alone is a CONTINUATION of the default page, so
 // it is byte-budgeted too — before, `--lint --offset=K` printed every row from K on, so the page after a capped default answer
 // was larger than the answer it continued. Rows keep their final sorted order, so pages chain without a gap or a repeat.
 rw::PageWindow lintFindingsWindow( const rw::Config& cfg, const rw::IngestResult& ing, const EnclosingSymbolIndex& enclosing, const std::vector<LintOut>& outs )
@@ -2089,9 +2180,13 @@ rw::PageWindow lintFindingsWindow( const rw::Config& cfg, const rw::IngestResult
     {
         return rw::pageWindow( outs.size(), cfg.pageLimit, cfg.pageOffset );
     }
+    const std::size_t begin = std::min<std::size_t>( cfg.pageOffset > 0 ? std::size_t( cfg.pageOffset ) : 0, outs.size() );
+    if( rw::wholeAnswerAsked( cfg ) )
+    {
+        return rw::PageWindow{ begin, outs.size() };   // LT1: --page-bytes=0, the whole answer (from --offset=K when one was given)
+    }
     // Byte-budget the default run. The stopping rule is bytes because a corpus with long text= rows (E6's vendored-bundle
     // case: 2,037,645 B / 6,169 findings) needs far FEWER rows to reach the same budget than a corpus of short rows does.
-    const std::size_t begin            = std::min<std::size_t>( cfg.pageOffset > 0 ? std::size_t( cfg.pageOffset ) : 0, outs.size() );
     const std::size_t budget           = std::min( lintPagePayloadBytes( lintTallyRowsBound( outs ) ), kLintDefaultPayloadBytes );   // the historic cap stays the upper bound
     std::size_t       bytesUsed        = 0;
     std::size_t       lintDefaultShown = 0;
@@ -2223,7 +2318,13 @@ void emitLintLegends( const rw::Config& cfg, bool findingsFloored, bool nestRefu
                 "A lint-rules row's compiled=\"0\" ⇒ that rule's tree-sitter QUERY failed to compile for every linked grammar (a "
                 "malformed or misspelled pattern) — its count=\"0\" never ran at all, a different claim from applicable=\"0\" above "
                 "(a well-formed query whose declared language just is not in this corpus) and from an ordinary count=\"0\" (a "
-                "well-formed query that ran and found nothing); absent ⇒ the query compiled. -->" );
+                "well-formed query that ran and found nothing); absent ⇒ the query compiled. "
+                "The rules that found nothing print no rule row: ONE <zero_rules> row after the counted rows names them all — n= how many, "
+                "ran= those that ran on a language this corpus holds and matched nothing (a measured zero), inert= those none of whose "
+                "languages are here (applicable=\"0\": structural, never a clean bill); every selected rule is named once, on its row or there. "
+                "<f> rows run most important first: files nobody here authors (a tool, vendored or generated path, a minified file, a "
+                "bundle) last; then rule severity, error before warn before info; then source files before test, bench and fixture files; "
+                "then the file's place in the map's PageRank order; then path and line. page-bytes=0 prints every row in one answer. -->" );
     if( findingsFloored )
     {
         // present-only (absent ⇒ nothing floored), like the nest_refused= clause below; compactlegend.h restates it
@@ -2247,12 +2348,71 @@ void emitLintLegends( const rw::Config& cfg, bool findingsFloored, bool nestRefu
     }
 }
 
-// One <rule> tally row per SELECTED rule — the built-ins (declaration order, only under --lint) then the user
-// rules (declaration order) — so the tally order is deterministic and a deselected rule has no row at all
-// (it can never look like a checked-and-empty rule).
+// LT1: the rules that found nothing, folded into ONE row after the counted ones — <zero_rules n= ran= inert=/>. The honesty rule
+// still holds (what was checked and found nothing is SAID, never omitted): every selected rule is named exactly once, either on
+// its own <rule> row or here. ran= names the rules that ran on a language this corpus holds and matched nothing (a measured
+// zero); inert= the rules none of whose languages are here (what a row's applicable="0" said: structural, never a clean bill).
+// MEASURED on GA1 DEV ga-eslint-01 (parent dfc8d95fd): 31 of 39 <rule> rows were count="0". A user rule whose query compiled for
+// no grammar keeps its own row (compiled="0" — it never ran, a different claim from either list).
+struct ZeroRuleFold
+{
+    std::size_t n = 0;
+    std::string ran, inert;
+    void add( std::string_view name, bool applicable )
+    {
+        std::string& to = applicable ? ran : inert;
+        to += to.empty() ? "" : ",";
+        to += name;
+        ++n;
+    }
+    // true (and the name folded) when the rule found nothing; false: the caller prints its row
+    bool foldIfZero( std::string_view name, std::uint32_t count, bool applicable )
+    {
+        if( count == 0 )
+        {
+            add( name, applicable );
+        }
+        return count == 0;
+    }
+    void emit() const
+    {
+        if( n > 0 )
+        {
+            lintPrintOut( "<zero_rules n=\"{}\"{}{}/>", n, ran.empty() ? std::string() : " ran=\"" + ran + "\"", inert.empty() ? std::string() : " inert=\"" + inert + "\"" );
+        }
+    }
+};
+
+// The user rules' half of emitLintRuleTally (declaration order): a row per selected rule that found something or whose query
+// compiled for no grammar (compiled="0" — it never ran, so it is never folded as a zero); the rest fold into `zeros`.
+void emitUserRuleTally( const LintAnswerView& view, const LintFindingSet& run, const rw::lintcatalog::LintSelection& lintSel, rw::PageWindow lintPage,
+                        std::uint32_t corpusLangs, ZeroRuleFold& zeros )
+{
+    for( const rw::LintRule& r : run.userRules )
+    {
+        if( !lintRuleSelected( lintSel, r.id ) )
+        {
+            continue;
+        }
+        const RuleTally   rt         = tallyLintRule( run.outs, r.id, /*wantSevEmpty=*/false, lintPage );
+        const bool        applicable = ( rw::langBit( r.lang ) & corpusLangs ) != 0;
+        const bool        compiled   = std::find( run.uncompiledUserRuleIds.begin(), run.uncompiledUserRuleIds.end(), r.id ) == run.uncompiledUserRuleIds.end();
+        if( compiled && zeros.foldIfZero( view.ex( r.id ), rt.count, applicable ) )
+        {
+            continue;
+        }
+        const std::string sevEx      = view.ex( r.severity );
+        printLintRuleTallyRow( view.ex( r.id ), &sevEx, rt.count, rt.shown, ruleFloored( run.saturatedRules, r.id, true ), applicable, compiled );
+    }
+}
+
+// One <rule> tally row per SELECTED rule that found something — the built-ins (declaration order, only under --lint) then the
+// user rules (emitUserRuleTally) — then ONE <zero_rules> row naming every selected rule that found nothing, so the tally order
+// is deterministic and a deselected rule has no row and no name at all (it can never look like a checked-and-empty rule).
 void emitLintRuleTally( const rw::Config& cfg, const LintAnswerView& view, const LintFindingSet& run, const rw::lintcatalog::LintSelection& lintSel,
                         rw::PageWindow lintPage, std::uint32_t corpusLangs )
 {
+    ZeroRuleFold zeros;
     if( cfg.lint )
     {
         for( const std::string& rn : run.allRuleNames )
@@ -2264,21 +2424,15 @@ void emitLintRuleTally( const rw::Config& cfg, const LintAnswerView& view, const
             const RuleTally rt = tallyLintRule( run.outs, rn, /*wantSevEmpty=*/true, lintPage );
             const rw::lintcatalog::LintCatalogRow* catRow = rw::lintcatalog::lintCatalogFind( rn );
             const bool applicable = catRow == nullptr || ( catRow->langMask & corpusLangs ) != 0;
+            if( zeros.foldIfZero( rn, rt.count, applicable ) )
+            {
+                continue;
+            }
             printLintRuleTallyRow( rn, nullptr, rt.count, rt.shown, ruleFloored( run.saturatedRules, rn, false ), applicable );
         }
     }
-    for( const rw::LintRule& r : run.userRules )
-    {
-        if( !lintRuleSelected( lintSel, r.id ) )
-        {
-            continue;
-        }
-        const RuleTally   rt         = tallyLintRule( run.outs, r.id, /*wantSevEmpty=*/false, lintPage );
-        const bool        applicable = ( rw::langBit( r.lang ) & corpusLangs ) != 0;
-        const bool        compiled   = std::find( run.uncompiledUserRuleIds.begin(), run.uncompiledUserRuleIds.end(), r.id ) == run.uncompiledUserRuleIds.end();
-        const std::string sevEx      = view.ex( r.severity );
-        printLintRuleTallyRow( view.ex( r.id ), &sevEx, rt.count, rt.shown, ruleFloored( run.saturatedRules, r.id, true ), applicable, compiled );
-    }
+    emitUserRuleTally( view, run, lintSel, lintPage, corpusLangs, zeros );
+    zeros.emit();
 }
 
 // The <f> rows inside the window: a built-in finding keeps its bare shape (no sev=), a user finding carries
@@ -2340,13 +2494,14 @@ int runLintVerb( const MainDispatch& d, const LintAnswerView& view )
     const rw::lintcatalog::LintSelection& lintSel = *lintSelOpt;
     std::erase_if( run.outs, [ & ]( const LintOut& o ) { return !lintRuleSelected( lintSel, o.rule ); } );
 
-    // Final deterministic order over the COMBINED set — see sortLintRows for why the key runs all the
-    // way out to the row's own text.
+    // Final deterministic order over the COMBINED set: most important first (LT1), then the old total order — see
+    // sortLintRows for the keys and why the tie-break runs all the way out to the row's own text.
     sortLintRows( ing, run.outs );
     // §P6.1: collapse rows that would render byte-identically (see dedupeLintFindings above for why —
     // two genuinely different AST captures, e.g. the same magic-number value spelled twice on one line,
     // can share the same rule/file:line/enclosing-symbol/text because the row carries no column).
     run.outs = dedupeLintFindings( view.enclosing, std::move( run.outs ) );
+    rankLintRowsByImportance( lintRowOrder( ing, d.g ), run.outs );   // LT1: most important first, the order above kept inside each group
 
     const PageWindow  lintPage   = lintFindingsWindow( cfg, ing, view.enclosing, run.outs );
     const std::size_t shownCount = lintPage.end - lintPage.begin;

@@ -73,7 +73,9 @@ diff -q "$TMP/out1" "$TMP/out2" >/dev/null \
 
 # ── 6) real-world proof: the whole repo's --lint output (the originally reported corpus) has
 #      zero byte-identical <f> rows, including the exact reported bench_convergence.cpp:47 case ──
-( cd "$ROOT" && "$BIN" . --lint --no-cache >"$TMP/repo_out" 2>/dev/null )
+# LT1: the WHOLE answer (--page-bytes=0), not page 1 — the default answer is a byte-budgeted page whose order is most important
+# first, so the reported bench/ row (info, a bench path) is no longer on page 1; every row is checked, which is the stronger claim.
+( cd "$ROOT" && "$BIN" . --lint --no-cache --page-bytes=0 >"$TMP/repo_out" 2>/dev/null )
 REPO_DUPES=$( grep -oE '<f [^>]*>[^<]*</f>' "$TMP/repo_out" | sort | uniq -d | wc -l | tr -d ' ' )
 [ "$REPO_DUPES" = "0" ] \
     && ok "whole-repo --lint output has zero byte-identical <f> rows" \

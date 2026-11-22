@@ -740,6 +740,7 @@ for _g in \
     lintcatalogcheck \
     lintcheck \
     lintdedupcheck \
+    lintordercheck \
     lintpayloadcapcheck \
     lintprecisioncheck \
     lintrulescheck \

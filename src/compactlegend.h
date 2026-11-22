@@ -1995,7 +1995,11 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // and may join the trailing legend instead of labelling the rows after them by position.
     { "ptr", "t ptr=: a pointer's kind, twin = decl-twin, side = one-side; a sigs <t> with no ptr= is a demote pointer", true, "t", MapHeaderRead::No, {}, "for" },
     { "h", "enc h=: the edit handle, sym#<16hex>@<16hex> (identity, file content hash); stale after any change to that file", true, "enc", MapHeaderRead::No, {}, "grep" },
-    { "inert_rules", "inert_rules=N: rules none of whose languages this corpus holds; their rule rows say applicable=0 (count=0 is structural, never a clean bill)", false, "lint", MapHeaderRead::No, {}, "lint" },   // also defines applicable=
+    { "inert_rules", "inert_rules=N: rules none of whose languages this corpus holds; zero_rules inert= names them (applicable=0: count=0 is structural, never a clean bill)", false, "lint", MapHeaderRead::No, {}, "lint" },   // also defines applicable=
+    // LT1 (verbs_lint.h ZeroRuleFold): the rules that found nothing, one row instead of a count="0" row each.
+    { "n", "zero_rules n= ran= inert=: the n rules that found nothing; ran= matched none here, inert= no language here", true, "zero_rules", MapHeaderRead::No, {}, "lint" },
+    // LT1 (verbs_lint.h rankLintRowsByImportance): the <f> rows' order, read only where a finding row is printed.
+    { "rule", "f rows run most important first: authored, then tool/vendored/generated/minified files; error, warn, info; source, then tests; PageRank place; path:line", true, "f", MapHeaderRead::No, {}, "lint" },
     { "unavailable", "unavailable=/unavailable_why=: families that could not be measured here, and why; s unavail=: those for that row (absent from fired= is then no evidence)", false, "ensemble", MapHeaderRead::No, {}, "ensemble" },
     // merge-scout (mergescout.h writeSymRows): the <sym p= id=/> rows an arm's changed symbols print; seen only when an arm
     // changed code (the working-tree arm on a dirty tree), so the floor could not pin it stably.

@@ -321,29 +321,6 @@ inline std::vector<std::uint32_t> lensPositions( const std::vector<float>& rank 
     }
     return pos;
 }
-inline std::vector<std::uint32_t> fileRanks( const IngestResult& ing, const std::vector<float>& rank )
-{
-    std::vector<float> best( ing.files.size(), 0.0f );
-    for( std::size_t i = 0; i < ing.symbols.size() && i < rank.size(); ++i )
-    {
-        if( const std::uint32_t f = ing.symbols[i].fileId; f < best.size() )   // a file id past the table has no rank, and no slot
-        {
-            best[f] = std::max( best[f], rank[i] );
-        }
-    }
-    std::vector<std::uint32_t> files( best.size() );
-    for( std::uint32_t f = 0; f < files.size(); ++f )
-    {
-        files[f] = f;
-    }
-    rw::sortutil::radixSortByScoreDescId( files, best );
-    std::vector<std::uint32_t> out( best.size(), 0 );
-    for( std::size_t k = 0; k < files.size() && best[files[k]] > 0.0f; ++k )
-    {
-        out[files[k]] = std::uint32_t( k + 1 );
-    }
-    return out;
-}
 // The anchors a name-exact route resolved, as nodes: each one's first definition of that name in its file.
 inline std::vector<NodeId> anchorNodes( const IngestResult& ing, const std::vector<RouteAnchorDef>& anchors )
 {
