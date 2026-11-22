@@ -1220,7 +1220,7 @@ then
     insideWorkTree="$( git -C "$dir" rev-parse --is-inside-work-tree 2>/dev/null )" || { routeLog skip-not-git 0; exit 0; }
     [ "$insideWorkTree" = true ] || { routeLog skip-not-git 0; exit 0; }
 
-    note='ripwire is on PATH and maps this codebase. `ripwire <dir> --for="<task>"` ranks the files and symbols a task touches: it is the call that comes before opening files. `ripwire <dir> --expand=SYM --legend=compact` prints one symbol'"'"'s body with its callees'"'"' signatures. `ripwire <dir> --test-gate --legend=compact` names the tests to run for a change.'
+    note='ripwire is on PATH and maps this codebase. `ripwire <dir> --for="<task>"` ranks the files and symbols a task touches: it is the call that comes before opening files. Read all its ranges in one turn of parallel Reads. `ripwire <dir> --expand=SYM --legend=compact` prints one symbol'"'"'s body with its callees'"'"' signatures. `ripwire <dir> --test-gate --legend=compact` names the tests to run for a change.'
     out="$( jq -cn --arg m "$note" '{hookSpecificOutput:{hookEventName:"SubagentStart",additionalContext:$m}}' 2>/dev/null )" \
         || { routeLog skip-jq-failed 0; exit 0; }
     [ -n "$out" ] || { routeLog skip-jq-failed 0; exit 0; }
@@ -1261,7 +1261,7 @@ then
     insideWorkTree="$( git -C "$dir" rev-parse --is-inside-work-tree 2>/dev/null )" || exit 0
     [ "$insideWorkTree" = true ] || exit 0
 
-    brief='ripwire is on PATH — before reading source, `ripwire <dir> --for="<task>"`; before the first edit, `--expand=SYM --legend=compact`, `--callers=SYM --legend=compact` or `--impact=SYM --legend=compact`; before reporting done, commit, then `--quality-delta=BASE..HEAD --legend=compact` and `--test-gate --legend=compact`.'
+    brief='ripwire is on PATH — before reading source, `ripwire <dir> --for="<task>"`, Read its ranges in one turn; before the first edit, `--expand=SYM --legend=compact`, `--callers=SYM --legend=compact` or `--impact=SYM --legend=compact`; before reporting done, commit, then `--quality-delta=BASE..HEAD --legend=compact` and `--test-gate --legend=compact`.'
     decision=""
     [ "${RIPWIRE_AGENT_BRIEF_DECISION:-}" = "allow" ] && decision="allow"
     printf '%s' "$input" | jq -c --arg b "$brief" --arg d "$decision" \

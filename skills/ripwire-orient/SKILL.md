@@ -34,6 +34,8 @@ is the next page.
 
 After the orient call, look up lean: `--expand` / `--outline` / `--whereis` / `--callers` answer with no
 ride-along map. Then read only the files ripwire ranks highest (god-files and hotspots first) — not a grep sweep.
+Read every range it lists (`path:L-E`; a page's `<act read=>` names its top ones) in ONE turn of parallel ranged
+Reads, not one per turn and not whole files; don't re-search what ripwire listed, search only for what it marks missing.
 
 **Resuming after a compaction** (you know the task, not your last hour): `ripwire . --recall="<the task>"` →
 `ripwire . --situ` (what the working tree already changed + tests to run) → `ripwire . --notes` (gotchas

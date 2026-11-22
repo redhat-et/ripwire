@@ -14,13 +14,14 @@ Fill in `<dir>`. Leave the task text to the subagent. A lane that reads no sourc
 does not get it:
 
 ```text
-ripwire is on PATH — before reading source, `ripwire <dir> --for="<task>"`; before the first edit, `--expand=SYM --legend=compact`, `--callers=SYM --legend=compact` or `--impact=SYM --legend=compact`; before reporting done, commit, then `--quality-delta=BASE..HEAD --legend=compact` and `--test-gate --legend=compact`.
+ripwire is on PATH — before reading source, `ripwire <dir> --for="<task>"`, Read its ranges in one turn; before the first edit, `--expand=SYM --legend=compact`, `--callers=SYM --legend=compact` or `--impact=SYM --legend=compact`; before reporting done, commit, then `--quality-delta=BASE..HEAD --legend=compact` and `--test-gate --legend=compact`.
 ```
 
 The three moments, each with its call:
 
 1. **Before reading source:** `ripwire <dir> --for="<task>"`. Paste paths and symbols from the brief verbatim into
-   the task; read only the files it ranks.
+   the task; then read every range it lists (`path:L-E`, and the page's `<act read=>`) in ONE turn of parallel
+   ranged Reads, not one per turn and not whole files, and search only for what it marks missing.
 2. **Before the first edit:** `--expand=SYM --legend=compact` for the body, `--callers=SYM --legend=compact` for who
    calls it, or `--impact=SYM --legend=compact` for everything a change reaches.
 3. **Before reporting done:** commit, then `--quality-delta=BASE..HEAD --legend=compact` and
