@@ -1057,6 +1057,7 @@ for _g in \
     runhintcheck \
     runtracecheck \
     rustanccheck \
+    rustglobscalecheck \
     rustimportprecisecheck \
     rustmacrocallcheck \
     rustmacropathcheck \

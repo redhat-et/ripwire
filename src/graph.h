@@ -836,10 +836,13 @@ inline bool rustUseLeavesTree( const CallResultTypes& types, const Reference& r 
 // globs supplying one used name do not compile (E0659): the ladder then answers as before.
 inline bool rustOutsideGlobMaySupply( const CallResultTypes& types, const Reference& r )
 {
+    ++types.rustGlobAsks;
+    const std::size_t readsBefore = types.importReads;
     bool named = false;
     types.forEachRustUseAt( r.fileId, r.startByte, r.calleeName, [ & ]( const Binding& ) { named = true; } );
     if( named )
     {
+        types.rustGlobReads += types.importReads - readsBefore;
         return false;
     }
     bool outside = false;
@@ -850,6 +853,7 @@ inline bool rustOutsideGlobMaySupply( const CallResultTypes& types, const Refere
         {
             if( b.kind == LocalBindKind::TypeImport && types.levelAt( r.fileId, b.startByte ) == lv )
             {
+                ++types.rustGlobVerdicts;
                 const bool out = types.rustPathProvablyOutside( r.fileId, b.startByte, b.importedName )
                               && !types.rustRootNamesTreePackage( r.fileId, b.startByte, b.importedName );
                 ( out ? outside : other ) = true;
@@ -857,6 +861,7 @@ inline bool rustOutsideGlobMaySupply( const CallResultTypes& types, const Refere
         } );
         return other;   // an in-tree glob at an inner level already decides: no outer level is read
     } );
+    types.rustGlobReads += types.importReads - readsBefore;
     return outside && !other;
 }
 
@@ -14560,6 +14565,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         rw::emitTo( stderr, "[mem] arg_type_chain asks={} passes={}\n", argTypePick.chainAsks, argTypePick.chainPasses );
         rw::emitTo( stderr, "[mem] recv_cone asks={} builds={}\n", recvEv.coneAsks, recvEv.coneBuilds );
         rw::emitTo( stderr, "[mem] recv_method asks={} walks={} kept={}\n", recvEv.methodAsks, recvEv.methodWalks, recvEv.methodAnswers.size() );
+        rw::emitTo( stderr, "[mem] rust_glob asks={} reads={} verdicts={}\n", recvEv.types.rustGlobAsks, recvEv.types.rustGlobReads, recvEv.types.rustGlobVerdicts );
         rw::emitTo( stderr, "[mem] reach_by_name asks={} kept={}\n", reachOutside.asks, reachOutside.kept );
         rw::emitTo( stderr, "[mem] canon_split asks={} keyed={}\n", narrower.identity.canonSplit.asks, narrower.identity.canonSplit.keyed );
         rw::emitTo( stderr, "[mem] inherited asks={} walks={}\n", narrower.identity.inheritedAsks, narrower.identity.inheritedWalks );

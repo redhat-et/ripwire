@@ -290,6 +290,10 @@ struct CallResultTypes
     mutable std::vector<std::string_view>                 usingPath;  // forEachCppUsing's per-row namespace path
     mutable std::string                                   moduleKey;  // rustModuleKey's buffer
     mutable std::string                                   scopeKey;   // cppScopeNamedAt's gate and memo lookup buffer
+    // RIPWIRE_STATS `[mem] rust_glob asks= reads= verdicts=` (test/rustglobscalecheck.sh): graph.h rustOutsideGlobMaySupply's
+    // calls, the import records forEachImport read for them, and the glob verdicts (levelAt + rustPathProvablyOutside) they ran
+    mutable std::size_t                                   importReads = 0;
+    mutable std::size_t                                   rustGlobAsks = 0, rustGlobReads = 0, rustGlobVerdicts = 0;
     // QUAL-NS-CALL-BIND: what the in-tree headers a file includes declare, at file scope, for one name — the header half of
     // cppScopeNamedAt, which depends on (file, name, alias-or-using) only: "<fileId>#<a|u><name>" → the fold of those rows
     struct CppScopeFold
@@ -440,6 +444,7 @@ struct CallResultTypes
     {
         if( fileId < importsByFile.size() )
         {
+            importReads += importsByFile[ fileId ].size();
             for( const Binding* b : importsByFile[ fileId ] )
             {
                 if( b->var == var )
