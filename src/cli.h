@@ -2896,8 +2896,8 @@ inline constexpr char kHelpTail[] =
         "                               resource ripwire://legend-dict, answers list rows first, carry each definition once\n"
         "                               per session and end with <about legend=\"ref\" dict= dictv=/>. A CLI run has no\n"
         "                               session to hold a definition, so --legend=ref refuses; --legend-dict prints them all.\n"
-        "    --page-bytes=N[:K]         (with --for) the page size of the answer-first --for answer: 12000 by default, 0 =\n"
-        "                               the whole answer in one call. The answer is rendered whole and cut at row boundaries\n"
+        "    --page-bytes=N[:K]         (with --for, or the bare map) the page size of the answer-first --for answer: 12000 by\n"
+        "                               default, 0 = the whole answer in one call. The answer is rendered whole and cut at row boundaries\n"
         "                               into pages of about N bytes; the root says page= pages= withheld_bytes= and next=,\n"
         "                               which is this flag with :K, the next page. Page 1 keeps the whole legend after its\n"
         "                               rows; a later page re-sends none and ends <about legend=\"ref\" have=\"page1\"/>.\n"
@@ -2910,6 +2910,11 @@ inline constexpr char kHelpTail[] =
         "                               no r= (<sigs rseq=\"1\">). Lossless, applied to each page after it is cut (the page size and\n"
         "                               est_tokens= count the element form, an upper bound). RIPWIRE_NO_ROWLINES=1 serves the\n"
         "                               elements (the A/B handle); --legend=first, --json and MCP for are not in this form.\n"
+        "                               --page-bytes=0 on an answer over the 24,000-character OUTPUT CEILING (the agent harness's\n"
+        "                               ~30,000-character inline limit less a fifth) prints one stderr line naming its size first.\n"
+        "                               THE BARE MAP pages the same way: over the ceiling it is cut between its file groups and\n"
+        "                               inventory rows into 24,000 B pages (page= pages= withheld_bytes= has_more= next=|page_next=);\n"
+        "                               --page-bytes=N sets that size, :K a page, 0 the whole map. Beside a report verb, refused.\n"
         "    --rows=lines|elements      (with --for) the form of the <sigs> and <tail> rows: lines, the default, is ROWS AS LINES\n"
         "                               above; elements is one XML element per row as 0.6.x served them, byte for byte the\n"
         "                               answer lines decodes to. The flag decides over RIPWIRE_NO_ROWLINES in both directions;\n"
@@ -5181,10 +5186,22 @@ inline bool activeSinceHostNeedsBaseline( const Config& c ) noexcept
     return bytes > 0 || page == 1;
 }
 
+// CL1 (mappages.h): the runs whose map main.cpp pages under the output ceiling — the bare default map, one root, every shaping
+// knob at its default (an explicit --top-k / --max-tokens / --token-budget is the caller's size), XML at the default legend,
+// PageRank order. main.cpp also refuses --page-bytes when a report verb answers instead (§B11.4's winner): this predicate
+// reads flags, not the dispatch table, so it cannot see every verb.
+inline bool mapPageEligible( const Config& c ) noexcept
+{
+    return c.forTask.empty() && c.query.empty() && c.expand.empty() && c.outline.empty() && !c.packSignatures && c.packTopN <= 0
+        && !c.json && !c.html && !c.mermaid && !c.columnar && !c.candidates && !c.topKExplicit && c.maxTokens <= 0 && c.tokenBudget == 0
+        && !c.mapDiff && c.rankBy == RankBy::PageRank && c.inDir.empty() && c.pageLimit == 0 && c.pageOffset == 0 && c.legendDefaulted
+        && !c.mcp && !c.lsp && c.listen.empty() && c.batchFile.empty() && c.roots.size() == 1 && !honorsPaging( c );
+}
+
 // Why --page-bytes cannot shape this run, or nullptr when it can.
 [[nodiscard]] inline const char* pageBytesConflict( const Config& c ) noexcept
 {
-    if( c.forTask.empty() )                                     { return "pages a --for answer only"; }
+    if( c.forTask.empty() )                                     { return mapPageEligible( c ) ? nullptr : "pages a --for answer or the bare map only"; }
     if( !c.legendAnswerFirst )                                  { return "pages the answer-first order only (not --legend=first, full or dict)"; }
     if( c.tokenBudget > 0 || ( c.maxTokens > 0 && c.detail > 0 ) ) { return "does not combine with a token budget, which sheds the answer instead"; }
     if( c.json || c.columnar || c.candidates )                  { return "pages the XML answer only"; }

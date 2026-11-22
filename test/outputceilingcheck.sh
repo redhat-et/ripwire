@@ -14,6 +14,8 @@
 #   --lint     findings: shown= total= has_more= next_offset= and next="--lint … --offset=K"; the pages chain to the whole set
 #   --expand   bodies: unserved_next= names the definitions that did not fit; a cut body says lines="lo-hi/T" and next= the slice
 #   --for --page-bytes=0   the whole answer BY REQUEST: printed whole, plus one stderr line naming its size when over the ceiling
+#   the map   file groups (and, inside a large inventory, its ls rows): page= pages= withheld_bytes= has_more= and
+#              next="--page-bytes=24000:K" (page_next= when the root already has a next=); the pages rebuild --page-bytes=0's map
 #
 # Arm classes (LANE_CONSTRAINTS §17): [P] a NEW bar — RED on the parent 36a95d732, its control; [C] holds on every binary;
 # [N] must NOT change (needs BASE_BIN); [M] a mutation control: the same check FAILS on a doctored chain.
@@ -60,8 +62,15 @@ w(os.path.join(W, "big", "src", "hub.cpp"), "int hub_total(int a, int b) { retur
 for r in range(40):
     rows = "".join("  out += cell_%d_%d;\n" % (r, k) for k in range(60))
     w(os.path.join(W, "big", "rows", "row%02d.cpp" % r), "int render_row(int out) {\n" + rows + "  return out;\n}\n")
+# wide/   30 directories x 25 files, two functions each: a 40,655 B flagless map on 36a95d732 (rows plus a large <inv>).
+for dd in range(30):
+    for f in range(25):
+        nxt = "process_record_%02d_%02d" % (dd, (f + 1) % 25)
+        w(os.path.join(W, "wide", "pkg_component_%02d" % dd, "module_handler_%02d_%02d.c" % (dd, f)),
+          "int %s(int x);\nint process_record_%02d_%02d(int x) { return x > 3 ? %s(x - 1) : x; }\n"
+          "int validate_entry_%02d_%02d(int y) { return process_record_%02d_%02d(y) + 1; }\n" % (nxt, dd, f, nxt, dd, f, dd, f))
 w(os.path.join(W, "small", "a.cpp"), "int helper(int x) { return (int)(x * 2.0); }\nint small_fn(int x) { return helper(x) + 1; }\n")
-BIG, SMALL = os.path.join(W, "big"), os.path.join(W, "small")
+BIG, SMALL, WIDE = os.path.join(W, "big"), os.path.join(W, "small"), os.path.join(W, "wide")
 
 
 def run(binary, root, args):
@@ -168,13 +177,52 @@ if not over:
 rc, out2, err2 = run(BIN, SMALL, ["--for=small_fn helper", "--page-bytes=0"])
 say(rc == 0 and "ripwire: --page-bytes=0" not in err2, "(W2) [C] a whole answer under the ceiling prints no size line")
 
+# ── (M) the flagless map ─────────────────────────────────────────────────────────────────────────────────────────────
+def map_content(doc):
+    """The root's content, legend comments removed."""
+    body = rows_of(doc)
+    m = re.search(r"<r\b[^>]*>", body)
+    return body[m.end():body.rindex("</r>")] if m else ""
+
+
+rc, whole_map, _ = run(BIN, WIDE, ["--page-bytes=0"])
+say(rc == 0 and len(whole_map) > CEILING, "(M0) [P] the fixture's whole map (--page-bytes=0, refused on the parent) is %d B, over the ceiling" % len(whole_map))
+mpages, args = [], []
+for _ in range(50):
+    rc, out, _ = run(BIN, WIDE, args)
+    mpages.append(out)
+    # the page's continuation is next=, or page_next= when the map's root already carries a next= of its own
+    nxt = root_attr(out, "r", "page_next") or (root_attr(out, "r", "next") if root_attr(out, "r", "has_more") == "1" else None)
+    if rc != 0 or not nxt:
+        break
+    args = shlex.split(nxt)
+say(len(mpages[0]) <= CEILING, "(M1) [P] the bare map prints %d chars <= %d" % (len(mpages[0]), CEILING))
+say(len(mpages) > 1 and ceiling_ok(mpages), "(M2) [P] every page of the map's next= chain is <= %d chars (%d pages, max %d)" % (CEILING, len(mpages), max(map(len, mpages))))
+joined = "".join(map_content(p) for p in mpages)
+whole_content = map_content(whole_map)
+for tag in set(re.findall(r"<\w+\b[^>]*>", joined)):
+    if joined.count(tag) > whole_content.count(tag):   # a container re-opened across a page seam: close-then-reopen is the seam
+        joined = joined.replace("</%s>%s" % (re.match(r"<(\w+)", tag).group(1), tag), "")
+say(joined == map_content(whole_map), "(M3) [P] the pages' rows rebuild the whole map's rows (%d vs %d B)" % (len(joined), len(map_content(whole_map))))
+say(root_attr(mpages[-1], "r", "has_more") == "0" and root_attr(mpages[-1], "r", "page_next") is None and root_attr(mpages[0], "r", "pages") == str(len(mpages)),
+    "(M4) [P] the chain ends where pages= says (%s pages): has_more=\"0\", no page continuation" % root_attr(mpages[0], "r", "pages"))
+say(all(well_formed(p) for p in mpages) and all("\n" not in p.rstrip("\n") for p in mpages), "(M5) [C] every map page is well-formed XML with no newline (G4)")
+mut = joined.replace("<ls ", "<!-- -->", 1) if "<ls " in joined else joined[:-10]
+say(mut != map_content(whole_map), "(M6) [M] mutation: the rebuild check FAILS when one row is dropped")
+rc, again, _ = run(BIN, WIDE, [])
+say(again == mpages[0], "(M7) [C] determinism: the first map page is byte-identical across two runs")
+rc, _, err = run(BIN, WIDE, ["--page-bytes=24000:99"])
+say(rc != 0 and "page" in err, "(M8) [C] a page past the last refuses (exit %d)" % rc)
+rc, _, err = run(BIN, BIG, ["--hotspots", "--page-bytes=24000"])
+say(rc != 0, "(M9) [C] --page-bytes beside a report verb refuses rather than being read by nothing (exit %d)" % rc)
+
 # ── (N) answers that fit are unchanged ───────────────────────────────────────────────────────────────────────────────
 if BASE:
-    for args in (["--lint"], ["--expand=small_fn"], ["--expand=helper,small_fn"], ["--expand=giant_body", "--pack-budget-bytes=65536"]):
-        root = BIG if "giant_body" in args[0] else SMALL
+    for root, args in ((SMALL, ["--lint"]), (SMALL, ["--expand=small_fn"]), (SMALL, ["--expand=helper,small_fn"]), (BIG, ["--expand=giant_body", "--pack-budget-bytes=65536"]),
+                       (SMALL, []), (BIG, []), (WIDE, ["--page-bytes=0"])):
         _, a, _ = run(BIN, root, args)
-        _, b, _ = run(BASE, root, args)
-        say(a == b, "(N) [N] %s on %s is byte-identical to the parent (%d B)" % (" ".join(args), os.path.basename(root), len(a)))
+        _, b, _ = run(BASE, root, [x for x in args if x != "--page-bytes=0"])   # the parent has no map --page-bytes: its bare map IS the whole one
+        say(a == b, "(N) [N] %s on %s is byte-identical to the parent (%d B)" % (" ".join(args) or "(flagless map)", os.path.basename(root), len(a)))
     for args in (["--lint", "--limit=50"], ["--lint", "--limit=50", "--offset=50"]):
         _, a, _ = run(BIN, BIG, args)
         _, b, _ = run(BASE, BIG, args)
@@ -188,7 +236,7 @@ else:
     print("  SKIP  (N) arms need BASE_BIN=<parent binary>")
 
 # ── (O) OPEN: default calls this gate measures but CL1 did not page (reported, not asserted) ────────────────────────
-for args in ([], ["--grep=hub_total"], ["--for=hub_total callers", "--signatures-only"], ["--clones"]):
+for args in (["--grep=hub_total"], ["--for=hub_total callers", "--signatures-only"], ["--clones"]):
     _, out, _ = run(BIN, BIG, args)
     print("  INFO  (O) %s prints %d chars%s" % (" ".join(args) or "(flagless map)", len(out), "  OVER the ceiling" if len(out) > CEILING else ""))
 

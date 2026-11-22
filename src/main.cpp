@@ -547,6 +547,7 @@ struct MainDispatch
 #include "verbs_doctor.h"
 #include "verbs_lint.h"
 #include "verbs_for.h"
+#include "mappages.h"   // CL1: the flagless map, paged under the output ceiling (runDefaultMapPaged)
 #include "forlegendentries.h"   // LS1: verbs_for.h's --for legend clauses as legend-dictionary entries (legenddict::kForDocEntries)
 #include "verbs_navigate.h"
 #include "verbs_quality.h"
@@ -4816,6 +4817,48 @@ static int memoryStopExit( const rw::IngestResult& ing, const rw::Config& cfg, c
     return 0;
 }
 
+// CL1 (mappages.h, outputceiling.h): the bare map, served in pages when it is over the output ceiling. The map is rendered whole
+// into a capture and cut there, so a map that fits is byte-identical and every page windows one document. --page-bytes=N sets
+// the page size (0: the whole map, one call); --page-bytes=N:K asks for page K. A capture that cannot be taken serves the map
+// straight through, whole — the pre-ceiling behaviour, never a short answer.
+static int runDefaultMapPaged( const MainDispatch& d )
+{
+    const rw::Config& cfg = d.cfg;
+    const std::size_t pageBytes = cfg.pageBytesSpec.empty() ? rw::kOutputCeilingChars : cfg.forPageBytes;
+    if( !rw::mapPageEligible( cfg ) || pageBytes == 0 )
+    {
+        return runDefaultMap( d );
+    }
+    std::optional<StdoutCaptured> cap;
+    int                           rc = 0;
+    {
+        StdoutCapture out( true );
+        if( !out.active() )
+        {
+            return runDefaultMap( d );
+        }
+        rc  = runDefaultMap( d );
+        cap = out.finish();
+    }
+    if( !cap || !cap->restored )
+    {
+        return rc;   // a failed restore already wrote the bytes to the saved descriptor (StreamCapture::finish)
+    }
+    std::string doc = std::move( cap->bytes );
+    const rw::mappages::PageResult res = cap->failed || rc != 0 ? rw::mappages::PageResult{}
+                                                                 : rw::mappages::pageMap( doc, pageBytes, cfg.forPage, crawlScopeFlags( cfg ).substr( crawlScopeFlags( cfg ).empty() ? 0 : 1 ),
+                                                                                          cfg.legend == "compact" ? rw::compactDeliveredBytesOrWritten( doc, compactLegendHint( cfg, doc ) )
+                                                                                                                  : doc.size() );
+    if( res.outcome == rw::mappages::Outcome::PastLast || ( res.outcome == rw::mappages::Outcome::Whole && cfg.forPage > 1 ) )
+    {
+        rw::emitTo( stderr, "ripwire: --page-bytes={}:{}: this map has {} page{} at that size — the root's next= names each one\n",
+                    pageBytes, cfg.forPage, res.pages, res.pages == 1 ? "" : "s" );
+        return 1;
+    }
+    std::fwrite( doc.data(), 1, doc.size(), stdout );
+    return rc;
+}
+
 static int dispatchMainBody( const rw::Config& cfg, char** argv )
 {
     using namespace rw;
@@ -4921,6 +4964,13 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
     // §B11.4's table is SCANNED here and printed further down, because X9(c) below needs the winner too. The
     // scan is pure; nothing is emitted by this line.
     const VerbPrecedence verbPrec = scanReportVerbPrecedence( cfg );
+    // CL1: cli.h accepts --page-bytes without --for only on a flag set that can be the bare map; a report verb that wins the
+    // dispatch would answer instead and the flag would be read by nothing, so that run refuses rather than ignoring it.
+    if( !cfg.pageBytesSpec.empty() && cfg.forTask.empty() && verbPrec.winner != nullptr )
+    {
+        rw::emitTo( stderr, "ripwire: --page-bytes pages a --for answer or the bare map only — {} answers this run\n", verbPrec.winner );
+        return 1;
+    }
 
     // X9(c): mode flags have a hidden precedence when more than one is given at once — the earlier-checked
     // one silently wins and the rest are ignored outright, with no signal to the caller that anything was
@@ -6430,7 +6480,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
         return *handled;
     }
 
-    return runDefaultMap( dsp );
+    return runDefaultMapPaged( dsp );
 }
 
 // A stopped file-graph fold, or an adjacency past its edge limit, FAILED a build (fileGraphStop.h): no store was returned,
