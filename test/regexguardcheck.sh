@@ -48,8 +48,8 @@
 #       fenced `curl curl …` line scans in bounded time (the regex was quadratic: >60 s); (f3) an abandoned match
 #       fails CLOSED — a CRITICAL SCAN-INCOMPLETE:regex-abandoned finding at exit 2, never a clean exit 0 and never an
 #       abort inside wrap's noexcept scan.
-#       (f4) #353 flow: the document binding pass and the curl destination proof stay linear on hostile shapes (50,000
-#       assignments, 40,000 destination words, a 3,000-fold expansion) and never downgrade what they cannot prove.
+#       (f4) #353 flow: the document binding pass and the curl destination proof finish inside a 20 s time limit on
+#       hostile shapes (50,000 assignments, 40,000 destination words, a 3,000-fold expansion) and prove no host there.
 #   (g) THE STACK BOUND — std::regex compiles by recursion, and a 20,000-byte literal --regex died with SIGBUS in a
 #       512 KiB grep worker. A pattern over kRegexMaxPatternBytes (2,048) or nesting groups deeper than
 #       kRegexMaxGroupDepth (64) is refused by name; exactly at each limit it still compiles.
@@ -702,8 +702,8 @@ else no "(f2) the 200,000-byte curl-run line: exit $rc (TIMEOUT means the scan i
 rc="$( capRun 20 "$TMP/f2h.out" "$TMP/f2h.err" --scan-skill="$SK/dos_hit.md" )"
 if [ "$rc" = 2 ] && grep -q 'rule="EXFILTRATE:net-exfil"' "$TMP/f2h.out"; then ok "(f2) the same line ending in \$SECRET is still caught as net-exfil (exit 2), bounded"
 else no "(f2) the long net-exfil line: exit $rc, finding $( grep -o 'rule="[^"]*"' "$TMP/f2h.out" | head -1 )"; fi
-# (f4) #353 flow: the binding pass and the curl destination proof are linear too. Three hostile shapes, each CRITICAL and
-# bounded: 50,000 assignments of one variable on one line (the doc-wide binding pass, then a resolve that must refuse
+# (f4) #353 flow: the binding pass and the curl destination proof finish inside a 20 s time limit (a limit, not a proof of
+# linear scaling). Three hostile shapes, each a bare CRITICAL row (no dest=, owner= or why=: nothing is proved): 50,000 assignments of one variable on one line (the doc-wide binding pass, then a resolve that must refuse
 # the twice-bound host), a curl line with 40,000 `$V` destination words (past the destination cap: unproved), and a
 # 4,000-byte value referenced 3,000 times in one word (past the expansion cap: unproved). None may grade WARN.
 python3 - "$SK" <<'PY2'
@@ -716,9 +716,10 @@ open(f"{sk}/flow_expand.md", "w").write(fence("W=" + "a" * 4000 + '\ncurl -H "Au
 PY2
 for flowCase in flow_sites flow_dests flow_expand; do
     rc="$( capRun 20 "$TMP/$flowCase.out" "$TMP/$flowCase.err" --scan-skill="$SK/$flowCase.md" )"
-    if [ "$rc" = 2 ] && grep -q 'rule="EXFILTRATE:net-exfil" sev="critical"' "$TMP/$flowCase.out" && ! grep -q 'why="cred-to-owner"' "$TMP/$flowCase.out"; then
-        ok "(f4) #353 flow, $flowCase: CRITICAL within 20 s, not downgraded"
-    else no "(f4) #353 flow, $flowCase: exit $rc (TIMEOUT = not linear), $( grep -o '<f [^>]*>' "$TMP/$flowCase.out" | head -1 | cut -c1-200 )"; fi
+    if [ "$rc" = 2 ] && grep -qE '<f p="[^"]*:[0-9]+" rule="EXFILTRATE:net-exfil" sev="critical"/>' "$TMP/$flowCase.out" \
+       && ! grep -qE 'rule="EXFILTRATE:net-exfil" [^>]*(dest|owner|why)=' "$TMP/$flowCase.out"; then
+        ok "(f4) #353 flow, $flowCase: a bare CRITICAL row (no dest=, owner=, why=) inside the 20 s limit"
+    else no "(f4) #353 flow, $flowCase: exit $rc (TIMEOUT = over the 20 s limit), $( grep -o '<f [^>]*>' "$TMP/$flowCase.out" | head -1 | cut -c1-200 )"; fi
 done
 printf '# probe\n\nplain prose line\n' >"$SK/clean.md"
 if [ "$FAULTS" -eq 1 ]; then
