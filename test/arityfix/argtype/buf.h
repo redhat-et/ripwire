@@ -27,3 +27,17 @@ public:
     void pair( View a, Instance& b );
 };
 }
+
+// CR #705 (argtypepick): a const INSIDE a template argument list is part of the type, never the parameter's own const
+namespace lib
+{
+template <class T> class Box { public: T value; };
+class Holder
+{
+public:
+    void hold( Box<View> b );
+    void hold( Box<const View>& b );
+    void wrapPtr( Box<View*> const& b );
+    void wrapPtr( Box<View>& b );
+};
+}

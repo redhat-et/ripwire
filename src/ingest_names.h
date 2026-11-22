@@ -210,39 +210,7 @@ inline std::size_t operatorNameStart( std::string_view text ) noexcept
     return punctEnd == text.size() ? op : std::string_view::npos;
 }
 
-// Index of the last `::` in `text` that sits at TEMPLATE-ARGUMENT DEPTH ZERO, or npos when there is none.
-// Scanned in reverse (the LAST top-level separator is the one that splits name from scope), tracking `<`/`>`
-// nesting so a `::` inside template arguments never splits: `tmplFn<a::B>` has NO top-level separator, while
-// `numeric_limits<std::size_t>::max` has exactly one — at the `::` before `max`.
-// PRECONDITION: `text` carries no trailing operator name. Depth is clamped at zero, which makes an
-// operator spelling merely IGNORED rather than balanced — that is enough for `operator<<` and NOT enough for
-// the `>` family, whose unmatched `>` would leave the depth pinned above zero and hide every separator. The
-// caller checks operatorNameStart() first; do not weaken that ordering.
-// The loop counts a 1-based CURSOR down to zero rather than the classic `for( i = n; i-- > 0; )`: that idiom
-// wraps `i` to SIZE_MAX on its final test, which `-fsanitize=integer` reports as an unsigned-integer
-// overflow (observed on this very function before this shape — the G1 build caught it on the fixture).
-inline std::size_t lastTopLevelScopeSep( std::string_view text ) noexcept
-{
-    std::size_t angleDepth = 0;
-    for( std::size_t cursor = text.size(); cursor > 0; --cursor )
-    {
-        const std::size_t charIndex = cursor - 1;
-        const char        c         = text[ charIndex ];
-        if( c == '>' )
-        {
-            ++angleDepth;
-        }
-        else if( c == '<' && angleDepth > 0 )
-        {
-            --angleDepth;
-        }
-        else if( c == ':' && angleDepth == 0 && charIndex > 0 && text[ charIndex - 1 ] == ':' )
-        {
-            return charIndex - 1;                                 // index of the FIRST ':' of the pair
-        }
-    }
-    return std::string_view::npos;
-}
+// lastTopLevelScopeSep: infra/namesplit.h (moved there so graph-side readers split a scope by the same rule).
 
 // True when a qualified_identifier's `::` separator is a MISSING node — a zero-width token tree-sitter
 // INSERTED during error recovery, not one that is written in the source. Recovery reaches for this shape
@@ -838,7 +806,7 @@ inline bool cppDefinitionRootsStd( TSNode nameNode, std::string_view src )
 // part BEFORE the name's separator, and an operator never names a scope.
 inline std::string cppRefQualifierText( std::string_view scopeText )
 {
-    const std::size_t      sep  = lastTopLevelScopeSep( scopeText );
+    const std::size_t      sep  = namesplit::lastTopLevelScopeSep( scopeText );
     const std::string_view last = skipTemplateDisambiguator( sep == std::string_view::npos ? scopeText : scopeText.substr( sep + 2 ) );
     return last.ends_with( '>' ) ? canonicalTemplateIdText( last ) : immediateScope( last );
 }
@@ -875,7 +843,7 @@ inline void cppResplitRefName( RawRef& r, std::string_view nameTxt )
     {
         return;
     }
-    const std::size_t      sep    = lastTopLevelScopeSep( nameTxt );
+    const std::size_t      sep    = namesplit::lastTopLevelScopeSep( nameTxt );
     const bool             hasSep = sep != std::string_view::npos;
     const std::string_view tail   = hasSep ? nameTxt.substr( sep + 2 ) : nameTxt;
     const std::string_view bare   = skipTemplateDisambiguator( tail );
@@ -935,7 +903,7 @@ inline std::string rustPathSegment( std::string_view pathText ) noexcept
     { // the turbofish `::<` separator
         text.remove_suffix( 2 );
     }
-    const std::size_t sep = lastTopLevelScopeSep( text );
+    const std::size_t sep = namesplit::lastTopLevelScopeSep( text );
     const std::string_view seg = ( sep == std::string_view::npos ) ? text : text.substr( sep + 2 );
     return isRustIdentifier( seg ) ? std::string( seg ) : std::string{};
 }

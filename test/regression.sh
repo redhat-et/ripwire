@@ -666,6 +666,7 @@ for _g in \
     impacttypecheck \
     importcapcheck \
     importnarrowcheck \
+    importprovedsplitscheck \
     importspellingcheck \
     includeanglecheck \
     includeprecisecheck \
@@ -932,6 +933,7 @@ for _g in \
     qualitysymcheck \
     qualnamecheck \
     qualnewcheck \
+    qualnscallcheck \
     querycheck \
     queryfilescancheck \
     queuehopcheck \

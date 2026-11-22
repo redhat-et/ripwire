@@ -269,5 +269,6 @@ fi
 bash "$ROOT/test/lib/jsimportalias.sh" "$BIN" || fail=1
 bash "$ROOT/test/lib/jsimportfacts.sh" "$BIN" || fail=1
 bash "$ROOT/test/lib/jsdefaultimport.sh" "$BIN" || fail=1
+bash "$ROOT/test/lib/tspathsalias.sh" "$BIN" || fail=1   # #711: a tsconfig `paths` alias pins the named import
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }
