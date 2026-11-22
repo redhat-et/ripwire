@@ -39,6 +39,7 @@ struct Config
     bool             topKExplicit    = false;    // did the user actually pass --top-k=? (gates the "ride-along map" stderr hint)
     int              packTopN        = 0;        // 0 = disabled
     std::size_t      packBudgetBytes = 65536;    // 64 KB ≈ 16K tokens
+    bool             packBudgetExplicit = false; // CL1: --pack-budget-bytes= was typed (a bare --expand then keeps its own ceiling budget)
     bool             ignoreTests     = false;
     bool             mapDiff         = false;
     bool             mcp             = false;
@@ -5216,6 +5217,25 @@ inline void validatePageBytes( Config& c ) noexcept
     c.forPage      = page;
 }
 
+// CL1 (outputceiling.h): the body budget of a bare --expand. The historic 64 KB default let one call print 51,406 characters
+// (GA1 DEV gson, --expand=toString: 33 definitions) — past the agent harness's 30,000-character inline limit, so the answer
+// reached the agent as a 2 KB preview. The default now leaves room under kOutputCeilingChars for the root, the legend and
+// the <calls> rows; packBodies' existing cut vocabulary carries the rest: a cut body says truncated="1" lines="lo-hi/T" and
+// next= (the slice that continues it), unserved definitions are named by the root's unserved_next=. An explicit
+// --pack-budget-bytes=N is the caller's size and is left alone. --for keeps its own budgets (it is paged by forpages.h).
+inline constexpr std::size_t kExpandCeilingBodyBytes = 16000;
+// The <bodies> section a bare --expand's render must fit (main.cpp refits the budget when <b> tag attributes push it over), and
+// the smallest budget a refit may reach. kOutputCeilingChars less the root (with unserved_next=, up to ~1.5 KB) and the legend.
+inline constexpr std::size_t kExpandCeilingBodiesBytes = 20000;
+inline constexpr std::size_t kExpandCeilingFloorBytes  = 2000;
+inline void applyExpandCeiling( Config& c ) noexcept
+{
+    if( c.ok && !c.expand.empty() && c.forTask.empty() && !c.packBudgetExplicit )
+    {
+        c.packBudgetBytes = std::min( c.packBudgetBytes, kExpandCeilingBodyBytes );
+    }
+}
+
 // FMT2 --rows=lines|elements (forrowlines.h): the form of a --for answer's <sigs>/<tail> rows. A closed set, and a modifier of --for
 // only: any other value, or the flag on another verb, REFUSES rather than being accepted and ignored.
 inline void validateRows( Config& c ) noexcept
@@ -5248,6 +5268,7 @@ inline void validateModifierGuards( Config& c ) noexcept
 
     validateLegendModifier( c );
     validatePageBytes( c );          // AF1: after the posture, which decides whether the answer is answer-first at all
+    applyExpandCeiling( c );         // CL1: a bare --expand's body budget keeps the whole answer under the output ceiling
     validateRows( c );               // FMT2: --rows= is lines|elements, with --for
     validateSectionsModifier( c );   // L2 (round-1 lever B1): --sections= modifies --for only, closed set
     validateGrepHandleModifier( c );
@@ -6076,6 +6097,7 @@ inline Config parseArgs( int argc, char** argv ) noexcept
             {
                 if( !parsePosU64( a.data() + 20, c.packBudgetBytes ) )
                 { refuseFlagValue( "--pack-budget-bytes", "a positive integer", a.data() + 20, "--pack-budget-bytes=32768" );  c.ok = false;  return c; }
+                c.packBudgetExplicit = true;
                 rw::emitRaw( stderr, "ripwire: --pack-budget-bytes is deprecated — use --pack-task/--detail instead (unchanged behavior for now)\n" );
             }
             // §B8.2 verifier finding N4 (W2FIX-CLI): same std::size_t-byte-count reasoning as --token-budget

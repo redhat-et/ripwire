@@ -12,6 +12,7 @@
 #
 # THE RULE. A default call prints <= 24,000 characters; a cut is disclosed on the root and continued by its own unit:
 #   --lint     findings: shown= total= has_more= next_offset= and next="--lint … --offset=K"; the pages chain to the whole set
+#   --expand   bodies: unserved_next= names the definitions that did not fit; a cut body says lines="lo-hi/T" and next= the slice
 #
 # Arm classes (LANE_CONSTRAINTS §17): [P] a NEW bar — RED on the parent 36a95d732, its control; [C] holds on every binary;
 # [N] must NOT change (needs BASE_BIN); [M] a mutation control: the same check FAILS on a doctored chain.
@@ -126,10 +127,37 @@ say(not ceiling_ok(pages[:1] + [pages[0] + "x" * CEILING]), "(L8) [M] mutation: 
 rc2, again, _ = run(BIN, BIG, ["--lint"])
 say(again == pages[0], "(L9) [C] determinism: the default page is byte-identical across two runs")
 
+# ── (E) --expand ─────────────────────────────────────────────────────────────────────────────────────────────────────
+CDATA = re.compile(r"<!\[CDATA\[(.*?)\]\]>", re.S)
+rc, giant, _ = run(BIN, BIG, ["--expand=giant_body"])
+say(len(giant) <= CEILING, "(E1) [P] --expand=<a 1,400-line body> prints %d chars <= %d" % (len(giant), CEILING))
+# a range slice turns off the whole-FILE serving (it would add the file's other lines), so this is the whole BODY
+rc, giant_whole, _ = run(BIN, BIG, ["--expand=giant_body:1-100000", "--pack-budget-bytes=10000000"])
+whole_body = "".join(CDATA.findall(rows_of(giant_whole)))
+got, doc, hops = "", giant, 0
+while hops < 40:
+    got += "".join(CDATA.findall(rows_of(doc)))
+    b = re.search(r"<b\b[^>]*\struncated=\"1\"[^>]*>", rows_of(doc))
+    nx = b and re.search(r'\snext="([^"]*)"', b.group(0))
+    if not nx:
+        break
+    hops += 1
+    rc, doc, _ = run(BIN, BIG, shlex.split(html.unescape(nx.group(1))))
+    say(len(doc) <= CEILING, "(E2.%d) [P] the body's continuation slice prints %d chars <= %d" % (hops, len(doc), CEILING))
+say(hops > 0 and got.replace("\n", "") == whole_body.replace("\n", ""),
+    "(E3) [P] the cut body plus its next= slices reproduce the whole body (%d hops, %d of %d body chars)" % (hops, len(got), len(whole_body)))
+rc, many, _ = run(BIN, BIG, ["--expand=render_row"])
+say(len(many) <= CEILING, "(E4) [P] --expand=<a name with 40 definitions> prints %d chars <= %d" % (len(many), CEILING))
+served = len(re.findall(r"<b\s", rows_of(many)))
+unserved = int(root_attr(many, "ctx", "unserved_total") or 0)
+say(served + unserved == 40 and unserved > 0 and root_attr(many, "ctx", "unserved_next"),
+    "(E5) [P] nothing silently dropped: %d served + unserved_total=%d == 40, and unserved_next= names the rest" % (served, unserved))
+say(well_formed(giant) and well_formed(many), "(E6) [C] both --expand answers are well-formed XML")
+
 # ── (N) answers that fit are unchanged ───────────────────────────────────────────────────────────────────────────────
 if BASE:
-    for args in (["--lint"],):
-        root = SMALL
+    for args in (["--lint"], ["--expand=small_fn"], ["--expand=helper,small_fn"], ["--expand=giant_body", "--pack-budget-bytes=65536"]):
+        root = BIG if "giant_body" in args[0] else SMALL
         _, a, _ = run(BIN, root, args)
         _, b, _ = run(BASE, root, args)
         say(a == b, "(N) [N] %s on %s is byte-identical to the parent (%d B)" % (" ".join(args), os.path.basename(root), len(a)))
@@ -143,7 +171,7 @@ else:
     print("  SKIP  (N) arms need BASE_BIN=<parent binary>")
 
 # ── (O) OPEN: default calls this gate measures but CL1 did not page (reported, not asserted) ────────────────────────
-for args in ([], ["--grep=hub_total"], ["--for=hub_total callers", "--signatures-only"], ["--clones"], ["--expand=giant_body"]):
+for args in ([], ["--grep=hub_total"], ["--for=hub_total callers", "--signatures-only"], ["--clones"]):
     _, out, _ = run(BIN, BIG, args)
     print("  INFO  (O) %s prints %d chars%s" % (" ".join(args) or "(flagless map)", len(out), "  OVER the ceiling" if len(out) > CEILING else ""))
 

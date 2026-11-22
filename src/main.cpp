@@ -2451,14 +2451,30 @@ int runDefaultMap( const MainDispatch& d )
     // charged render and the emitted one cannot differ.
     const std::vector<float> calleeOrder = expandNodes.empty() ? std::vector<float>{} : rw::calleeNameSpecificity( ing );
     EmittedBodies            expandRecord;   // expand-lean-k64: which requested bodies the render above actually emitted
+    // CL1 (outputceiling.h): packBodies charges only body TEXT against the budget, so 33 short bodies whose <b> tags carry
+    // ~1.3 KB of sibs=/inc= each printed 51,406 characters under a 16,000 B budget (GA1 DEV gson, --expand=toString). On a
+    // bare --expand the render is re-run at a proportionally smaller budget until the <bodies> section fits
+    // kExpandCeilingBodiesBytes; what no longer fits is named by the root's unserved_next= (or a body's lines=/next=), so
+    // nothing is dropped silently. An explicit --pack-budget-bytes is the caller's size and is rendered as asked.
+    std::size_t expandBudget = cfg.packBudgetBytes;
     if( !expandNodes.empty() )
     {
-        bodiesSection = rw::chargeSection( [ & ]( std::FILE* f )
+        const auto renderBodies = [ & ]
+        {
+            bodiesSection = rw::chargeSection( [ & ]( std::FILE* f )
             { expandRecord = EmittedBodies{};   // a re-render starts from empty: the record is what THIS render emitted
-              packBodies( f, ing, expandNodes, cfg.packBudgetBytes, g.outOff, g.outTargets, rw::withAnchorEdge( rw::CalleeEdgeBytes( g.outNameOnly, nullptr, nullptr ), &g.outAnchorMiss ), cfg.compress, redactPtr,
+              packBodies( f, ing, expandNodes, expandBudget, g.outOff, g.outTargets, rw::withAnchorEdge( rw::CalleeEdgeBytes( g.outNameOnly, nullptr, nullptr ), &g.outAnchorMiss ), cfg.compress, redactPtr,
                           expandRanges.empty() ? nullptr : &expandRanges, d.notesPtr, /*outEmitted=*/&expandRecord,
                           /*truncateOversizedFirst=*/true, /*withFileContext=*/true, mapRootArg, &calleeOrder ); },   // V1: octocode F2 sibs=/inc=
             rw::kBytesPerTokenBody );
+        };
+        renderBodies();
+        const bool fitsCeiling = cfg.packBudgetExplicit || !cfg.forTask.empty();
+        for( int refit = 0; !fitsCeiling && refit < 6 && bodiesSection.xml.size() > kExpandCeilingBodiesBytes && expandBudget > kExpandCeilingFloorBytes; ++refit )
+        {
+            expandBudget = std::max( kExpandCeilingFloorBytes, expandBudget * kExpandCeilingBodiesBytes / bodiesSection.xml.size() * 9 / 10 );
+            renderBodies();
+        }
     }
     std::vector<NodeId> outlineShown;   // expand-lean-k64: the outlines the render below emitted
     if( !outlineNodes.empty() )
@@ -2513,7 +2529,7 @@ int runDefaultMap( const MainDispatch& d )
     // charge entirely, which is the defect this whole item is about.
     const std::size_t payloadTokens = sigsSection.tokens + srcSection.tokens + outlineSection.tokens
         + ( ( !expandNodes.empty() && !bodiesSection.isRendered )
-                ? estimateExpandBodyTokens( ing, expandNodes, cfg.packBudgetBytes, g.outOff, g.outTargets, cfg.compress,
+                ? estimateExpandBodyTokens( ing, expandNodes, expandBudget, g.outOff, g.outTargets, cfg.compress,
                                             expandRanges.empty() ? nullptr : &expandRanges )
                 : bodiesSection.tokens )
         + ( ctxUnprovenBytes > 0 ? rw::tokensForEmittedBytes( ctxUnprovenBytes, rw::kBytesPerTokenDefault ) : 0 );   // H1: charged at the markup rate
@@ -2641,7 +2657,7 @@ int runDefaultMap( const MainDispatch& d )
         // the full dialect's own comparison would serve the file, the default's bundle root carries next= naming the call
         // that serves it; its bytes are priced into the bundle before the choice (it rides only if the bundle wins).
         std::string wholeFileNext;
-        if( cfg.legend == "compact" && !cfg.json && chooseExpandServe( bundleDoc, fileDoc, ctxUnprovenBytes, wholeFile, cfg.packBudgetBytes ).serveWholeFile )
+        if( cfg.legend == "compact" && !cfg.json && chooseExpandServe( bundleDoc, fileDoc, ctxUnprovenBytes, wholeFile, expandBudget ).serveWholeFile )
         {
             std::string expandArg;
             for( const std::string& e : cfg.expand )
@@ -2671,7 +2687,7 @@ int runDefaultMap( const MainDispatch& d )
             bundleDoc.compactDeltaBytes = deltaOf( bundleRoot + ctxUnprovenLegend + bodiesSection.xml + mapText + "</ctx>" );
             fileDoc.compactDeltaBytes   = deltaOf( fileRoot + ctxUnprovenLegend + std::string( kExpandWholeFileLegend ) + wholeFile.xml + "</ctx>" );
         }
-        ExpandServeChoice choice = chooseExpandServe( bundleDoc, fileDoc, ctxUnprovenBytes, wholeFile, cfg.packBudgetBytes );
+        ExpandServeChoice choice = chooseExpandServe( bundleDoc, fileDoc, ctxUnprovenBytes, wholeFile, expandBudget );
         serveWholeFile = choice.serveWholeFile;
         ctxOpenStr     = std::move( choice.ctxOpen );
         if( !serveWholeFile && !wholeFileNext.empty() )
@@ -2837,7 +2853,7 @@ int runDefaultMap( const MainDispatch& d )
         // not as the literal source token, for that same reason (the count is a naive grep over this file).
         if( !expandNodes.empty() && noteAppliesToBundle )   // !serveWholeFile is this whole branch's precondition (see the if above)
         {
-            emitSection( bodiesSection, [ & ]{ packBodies( out, ing, expandNodes, cfg.packBudgetBytes, g.outOff, g.outTargets, rw::withAnchorEdge( rw::CalleeEdgeBytes( g.outNameOnly, nullptr, nullptr ), &g.outAnchorMiss ), cfg.compress, redactPtr,
+            emitSection( bodiesSection, [ & ]{ packBodies( out, ing, expandNodes, expandBudget, g.outOff, g.outTargets, rw::withAnchorEdge( rw::CalleeEdgeBytes( g.outNameOnly, nullptr, nullptr ), &g.outAnchorMiss ), cfg.compress, redactPtr,
                                                            expandRanges.empty() ? nullptr : &expandRanges, d.notesPtr, /*outEmitted=*/nullptr,
                                                            /*truncateOversizedFirst=*/true, /*withFileContext=*/true, mapRootArg, &calleeOrder ); } );
             bodiesEmittedEarly = true;
@@ -2911,7 +2927,7 @@ int runDefaultMap( const MainDispatch& d )
     }
     if( !expandNodes.empty() && !serveWholeFile && !bodiesEmittedEarly )   // #289: already served ahead of the map below
     {
-        emitSection( bodiesSection, [ & ]{ packBodies( out, ing, expandNodes, cfg.packBudgetBytes, g.outOff, g.outTargets, rw::withAnchorEdge( rw::CalleeEdgeBytes( g.outNameOnly, nullptr, nullptr ), &g.outAnchorMiss ), cfg.compress, redactPtr,
+        emitSection( bodiesSection, [ & ]{ packBodies( out, ing, expandNodes, expandBudget, g.outOff, g.outTargets, rw::withAnchorEdge( rw::CalleeEdgeBytes( g.outNameOnly, nullptr, nullptr ), &g.outAnchorMiss ), cfg.compress, redactPtr,
                                                        expandRanges.empty() ? nullptr : &expandRanges, d.notesPtr, /*outEmitted=*/nullptr,
                                                        /*truncateOversizedFirst=*/true, /*withFileContext=*/true, mapRootArg, &calleeOrder ); } );   // L3: --expand bodies surface notes; V1: sibs=/inc=
     }

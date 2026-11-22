@@ -17,6 +17,8 @@
 //
 // The verbs that read it (each cuts its OWN unit; test/outputceilingcheck.sh pins every one):
 //   --lint      findings (<f> rows): a byte-budgeted sorted prefix, continued by next="--lint … --offset=K" (verbs_lint.h)
+//   --expand    body lines: the default --pack-budget-bytes leaves the answer under the ceiling; a cut body says lines="lo-hi/T"
+//               and next= names the slice that continues it (serialize.h)
 #include <cstddef>
 
 namespace rw
