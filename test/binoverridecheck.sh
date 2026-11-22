@@ -112,7 +112,6 @@ EXEMPT = {
     "infraportcheck.sh":         "greps source files for the literal string 'ripwire'; no binary invocation",
     "loopconservationcheck.sh":  "reads test/regression.sh's absorb loop via `git show REF:...` across HEAD and its merge parents (a pure git-history check); never invokes build/ripwire",
     "manifestcheck.sh":          "checks that every test/*check.sh is listed in test/regression.sh; pure file check",
-    "optremarkscheck.sh":        "checks -DRIPWIRE_OPT_REMARKS/-DRIPWIRE_PGO CMake config text; no binary invocation",
     "osswitchcheck.sh":          "scans src/ and the CMake files for OS preprocessor tests, POSIX/Windows system headers, force-includes, libc-renaming macros, raw POSIX calls and platform facts outside src/infra/os.h; its subject is the source text, so no ripwire binary is bound at all (the file contains neither RIPWIRE_BIN nor $BIN), the same shape as infraportcheck",
     "oswin32logiccheck.sh":      "drives the CMake target ripwire_test_oswin32logic (test/verify_os_win32_logic.cpp) plus a sanitizer and a mutant compile of the same file; its subject is src/infra/os_win32_logic.h, so build/ripwire is never bound or executed",
     "optremarkshotcheck.sh":     "audits scripts/optremarks.py's HOT_FILES/COLD_FILES against the SOURCE TREE (os.walk over src/, plus each file's own RIPWIRE_<X>_TU guard); the subject is a triage list versus the files it claims to cover, so no ripwire binary is bound or executed at all",
