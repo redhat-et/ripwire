@@ -924,6 +924,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "reached", "reached=N: symbols the transitive caller walk reached from the seeds (seeds excluded)", false, "affected", MapHeaderRead::No, {}, "affected" },
     { "script_gates_unmodelled", "script_gates_unmodelled=N: test/*.sh runners; their subprocess reach is unmodelled, never in tests=/reached=", false, "affected", MapHeaderRead::No, {}, "affected" },
     { "run_first", "run_first=N: the first N test files have the most direct evidence (changed/partner/hops=1, else nearest hops=); not a skip list", false, "affected", MapHeaderRead::No, {}, "affected" },
+    // AF5 (testmap.h affectedUnusedRowsXml / kAffectedUnusedLegend): present only when a list item could not be used
+    { "unused", "unused=N: list items not used, an <unused item= reason=not_indexed|not_found near=> row each; counts answer for the rest", false, "affected", MapHeaderRead::No, {}, "affected" },
     // IX-5 (testmap.h classNewTestRows / kClassNewLegend): present only when the hedged group renders
     { "via", "<g via=class-new total= shown= capped= next=>: tests not listed above that construct a class owning a reached method (or the changed class); <new p= l= class=>: the test file, the construction line if exact, the class. The dispatch is not proven, so never in tests=/reached=; nearest class first; a floor (Go T{}, C++ T x;, Ruby T.new are not read)", true, "g", MapHeaderRead::No, "class-new", "affected" },
     // callees: src/callhierarchy.h computeHopTestedPartition, spliced in src/verbs_navigate.h
@@ -1127,6 +1129,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "script_gates_unmodelled", "script_gates_unmodelled=N: test/*.sh runners in the corpus, a path count; not call-graph modelled", false, "test-gate", MapHeaderRead::No, {}, "test-gate" },
     { "run_first", "run_first=N: the first N t rows have the most direct evidence (changed/partner/hops=1, else nearest hops=); not a skip list", false, "test-gate", MapHeaderRead::No, {}, "test-gate" },
     { "script_gates_registered", "script_gates_registered=N: shell gates test/regression.sh registers as suite members", false, "test-gate", MapHeaderRead::No, {}, "test-gate" },
+    // AF5 (situ.h kTestGateUnusedLegend): present only when a --test-gate=FILES item could not be used
+    { "unused", "unused=N: list items not used, an <unused item= reason=not_indexed|not_found near=> row each; counts answer for the rest; exit never 0 (4 if gating, else 6)", false, "test-gate", MapHeaderRead::No, {}, "test-gate" },
     { "script_gates_mapped", "script_gates_mapped=N: registered gates with exact dependency evidence (literal paths or RIPWIRE_TEST_DEPS)", false, "test-gate", MapHeaderRead::No, {}, "test-gate" },
     { "script_gates_unresolved_dynamic", "script_gates_unresolved_dynamic=N: registered gates with no mappable deps; they may cover the change unlisted", false, "test-gate", MapHeaderRead::No, {}, "test-gate" },
     { "evidence", "t evidence=script_literal|manifest_declared: why a shell gate joins tests=, its text names the changed path or its RIPWIRE_TEST_DEPS does", true, "t", MapHeaderRead::No, {}, "test-gate" },

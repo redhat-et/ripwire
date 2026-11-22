@@ -2625,7 +2625,8 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                         const std::string   afNearPath = nearestIndexedFileClause( afIng, r.badItem );
                         resp = errResultMsg( -32602, "affected: '" + r.badItem + "' matches no indexed file path (as a path pattern) and no indexed "
                                               "symbol (as a symbol name; file:name and path::scope::name also accepted)" + afNearPath
-                                              + ( afNearPath.empty() ? selectorFaultClause( afIng, r.badItem, "--affected=" ) : std::string() ) );
+                                              + ( afNearPath.empty() ? selectorFaultClause( afIng, r.badItem, "--affected=" ) : std::string() )
+                                              + affectedNoneResolvedClause( r.unusedCount ) );   // AF5: as the CLI
                     }
                     else if( r.noSeeds )
                     {

@@ -1702,11 +1702,14 @@ inline std::string situationDiffJson( const std::string& root, const std::string
     const McpIndex&     ix  = getIndex( root );
     const IngestResult& ing = ix.ing;
 
-    std::vector<char> changed;
+    std::vector<char>       changed;
+    std::vector<UnusedItem> unused;   // AF5: `files` items that resolved to nothing — the "unused" array, absent when none
     bool isCleanTree = false;
     if( !diffOrEmpty.empty() )
     {
-        changed = changedMaskFromList( ing, diffOrEmpty );
+        ChangedList list = changedMaskFromListChecked( ing, diffOrEmpty );
+        unused           = changedListUnused( ing, root, list );
+        changed          = std::move( list.mask );
     }
     else
     {
@@ -1775,6 +1778,7 @@ inline std::string situationDiffJson( const std::string& root, const std::string
     {
         out += ",\"hunk_evidence\":false";
     }
+    out += unusedItemsJsonField( unused, []( std::string_view v ) { return mcpdetail::jsonEscape( std::string( v ) ); } );   // AF5: as --situ's block
     out += ",\"changed_files\":[";
     {
         bool first = true;
@@ -4087,6 +4091,7 @@ struct McpAffectedResult
     bool                        badSelector = false;   // `spec`'s bad item matched neither an indexed path nor a symbol
     std::string                 badItem;
     bool                        noSeeds     = false;   // resolved, but zero seed symbols — spec named nothing to seed from
+    std::size_t                 unusedCount = 0;       // AF5: items resolved under neither reading (all of them on a refusal)
 };
 
 inline McpAffectedResult affectedText( const std::string& root, std::string_view spec )
@@ -4107,7 +4112,7 @@ inline McpAffectedResult affectedText( const std::string& root, std::string_view
     {
         // Nothing was written to `mem` on this path (writeAffectedReport's own contract) — the stream closes
         // unfinished in MemoryStream's destructor, exactly the "unfinished: nobody to tell" case it documents.
-        return { std::string{}, r.badSelector, r.badItem, r.noSeeds };
+        return { std::string{}, r.badSelector, r.badItem, r.noSeeds, r.unusedCount };
     }
     return { mcpAnswerText( stream ), false, {}, false };
 }

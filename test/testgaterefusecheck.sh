@@ -14,7 +14,10 @@
 #   (c) the half-typed --test-gate= (EmptyValue::Refuse, same ruling as --dmm=/--quality-delta=: a
 #       half-typed value — usually an unset shell variable — must not silently run the bare git-diff form)
 #   (d) a token matching no indexed file → refused; token named; probe points at --skipped
-#   (e) a MIXED list: one good file must not mask a bad token (the silent-drop variant of the same zero)
+#   (e) a MIXED list: one good file must not mask a bad token (the silent-drop variant of the same zero).
+#       Since AF5 (owner ruling 2026-11-21, "answer, never pass") the list ANSWERS for the good file and names
+#       the bad token in an <unused> row, and the exit is never 0 (4 here: the good file's test obligation);
+#       the full matrix (exit 6 beside green items, --json, nothing-usable) is test/affectedpathcheck.sh arm T.
 #   (f) a comma-only list (names no files) → refused, not run as an all-zero mask
 #   (g) control: a valid FILES list is untouched — the report and its exit-4 obligation contract hold
 #   (h) the refusal is identical under --json, and never emits a report body to stdout
@@ -81,9 +84,9 @@ grep -qF -- '--skipped' "$TMP/err" && ok "(d) the refusal offers the adjacent pr
 
 # ── (e) a MIXED list: the good file must not mask the bad token ───────────────────────────────────────
 RC="$( run --test-gate=src/covered.cpp,zz_no_such_file_xyz.zzz )"
-[ "$RC" = 1 ] && grep -qF 'zz_no_such_file_xyz.zzz' "$TMP/err" \
-    && ok "(e) a mixed list refuses and names the BAD token (good files cannot mask it)" \
-    || { no "(e) mixed list not refused (rc=$RC) — a silently dropped token is the same silent zero"; head -2 "$TMP/err"; }
+[ "$RC" != 0 ] && grep -qF '<unused item="zz_no_such_file_xyz.zzz" reason="not_found"' "$TMP/out" \
+    && ok "(e) a mixed list names the BAD token in an <unused> row and does not exit 0 (rc=$RC; good files cannot mask it)" \
+    || { no "(e) mixed list rc=$RC, bad token not named on the answer — a silently dropped token is the same silent zero"; head -c 300 "$TMP/out"; }
 
 # ── (f) a comma-only list names no files: refused, never an all-zero mask ─────────────────────────────
 RC="$( run --test-gate=, )"
