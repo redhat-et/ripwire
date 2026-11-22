@@ -1515,6 +1515,19 @@ struct TestGateResult
     std::vector<UnusedItem>    unused;
 };
 
+// --test-gate's exit code. AF5 (owner ruling 2026-11-21, "answer, never pass"): a list with an unusable item
+// answers for the rest but NEVER exits 0 — the gate did not see the whole change. Exit 4 keeps its one meaning
+// (an obligation gates; the report names the unused items beside it); otherwise 6, the --quality-delta code for
+// a partial verdict ("partial, never 0"), so a script never reads a partial gate as green.
+inline int testGateExitCode( const TestGateResult& r ) noexcept
+{
+    if( r.hasObligations )
+    {
+        return 4;
+    }
+    return r.unused.empty() ? 0 : 6;
+}
+
 // The lane-independent half of computeTestGate: what the test files transitively call. A pure function of
 // (ing, g), so a caller running the gate N times over N different change sets (--plan-lanes, N up to 16 on
 // this repo's 5763 symbols) computes it ONCE and hands it in, instead of paying N redundant full forward

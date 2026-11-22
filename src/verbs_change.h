@@ -416,15 +416,7 @@ std::optional<int> runChangeViews( const MainDispatch& d )
         {
             rw::writeTestGateReport( stdout, ing, g, tg, root, cfg.pageLimit, cfg.pageOffset );
         }
-        // AF5 (owner ruling 2026-11-21, "answer, never pass"): a list with an unusable item answers for the rest
-        // but NEVER exits 0 — the gate did not see the whole change. Exit 4 keeps its one meaning (an obligation
-        // gates; the report names the unused items beside it); otherwise 6, the --quality-delta code for a
-        // partial verdict ("partial, never 0"), so a script never reads a partial gate as green.
-        if( tg.hasObligations )
-        {
-            return 4;
-        }
-        return tg.unused.empty() ? 0 : 6;
+        return rw::testGateExitCode( tg );   // AF5: 4 obligation, else 6 when a listed item was unusable, else 0
     }
 
     // --pr-context[=BASEREF]: Wave-4 no-LLM review-evidence bundle. Default change set = the working-tree
