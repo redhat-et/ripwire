@@ -70,7 +70,13 @@
 #   walks=8` (INHERITED-MEMO; walked per ask: walks=16). Its `[mem] plausible reads=`
 #   (plausibleOfName answers computed: Shape's ancestor level, each subclass's clause, each Square's bases) is the same
 #   at M=2 and M=8 (PLAUSIBLE-MEMO; recomputed per ask it is 18 and 24).
-#   (D) CONTROL (RIPWIRE_GUARDEDWALK_CONTROL_BIN=<a binary without the memos>) — the default maps of GW(K, 8), SW(4, 8), BE(8), AT(8) and RC(16, 8) are
+# The receiver-evidence method lookup (ReceiverEvidence::methodOf: `x = Impl(); x.m()` — Impl's own m, else the shallowest base
+# level defining it) walked the type's base levels on EVERY call, de-duplicating each push by a linear scan, and looked every
+# class of every level up by "Class::m". METHOD-MEMO (lane PF3) keeps the answer per ( type, name, superOnly, cls ).
+# RM(K, M): K Python files with RootK / Base(RootK) / Impl(Base), Base defining b and RootK defining r; use() binds x = Impl()
+#   and calls x.r() and x.b() M times each. `[mem] recv_method asks=2M walks=2` (one walk per (Impl, name) question; walked
+#   per ask: walks = asks).
+#   (D) CONTROL (RIPWIRE_GUARDEDWALK_CONTROL_BIN=<a binary without the memos>) — the default maps of GW(K, 8), SW(4, 8), BE(8), AT(8), RC(16, 8) and RM(4, 8) are
 #       byte-identical between the control and this binary: the memos change cost, never an edge. Without the variable
 #       the control arm is reported as not run; (A)-(C) still gate on their own.
 #
@@ -184,6 +190,20 @@ genrc(){
     done
 }
 
+# genrm DIR K M — the receiver-evidence method lookup (see header): K Python files RootK / Base(RootK) / Impl(Base), and use()
+# calling x.r() and x.b() M times each on x = Impl()
+genrm(){
+    local dir="$1" k="$2" m="$3" f i
+    mkdir -p "$dir"
+    for f in $( seq 0 $(( k - 1 )) ); do
+        printf 'class Root%d:\n    def r(self):\n        pass\n\nclass Base(Root%d):\n    def b(self):\n        pass\n\nclass Impl(Base):\n    pass\n' "$f" "$f" >"$dir/m$f.py"
+    done
+    {
+        printf 'from m0 import Impl\n\ndef use():\n    x = Impl()\n'
+        for i in $( seq 1 "$m" ); do printf '    x.r()\n    x.b()\n'; done
+    } >"$dir/use.py"
+}
+
 # stats NAME DIR — run with RIPWIRE_STATS, set LINE / CALLS / WALKS / MEANT
 stats(){
     local name="$1" dir="$2"
@@ -200,6 +220,7 @@ stats(){
     RLINE="$( grep -F '[mem] recv_cone ' "$TMP/$name.err" )"
     SLINE="$( grep -F '[mem] subclass_walk ' "$TMP/$name.err" )"
     ILINE="$( grep -F '[mem] inherited ' "$TMP/$name.err" )"
+    MLINE="$( grep -F '[mem] recv_method ' "$TMP/$name.err" )"
     CASKS="$( printf '%s' "$SLINE" | sed -n 's/.* clause_asks=\([0-9]*\).*/\1/p' )"
     CREADS="$( printf '%s' "$SLINE" | sed -n 's/.* clause_reads=\([0-9]*\).*/\1/p' )"
     LEVELS="$( printf '%s' "$SLINE" | sed -n 's/.* levels=\([0-9]*\).*/\1/p' )"
@@ -213,6 +234,8 @@ RC2="$TMP/rc2"; genrc "$RC2" 16 2
 RC8="$TMP/rc8"; genrc "$RC8" 16 8
 AT2="$TMP/at2"; genat "$AT2" 2
 AT8="$TMP/at8"; genat "$AT8" 8
+RM2="$TMP/rm2"; genrm "$RM2" 4 2
+RM8="$TMP/rm8"; genrm "$RM8" 4 8
 SW2="$TMP/sw2"; gensw "$SW2" 4 2
 SW8="$TMP/sw8"; gensw "$SW8" 4 8
 
@@ -224,6 +247,8 @@ stats RC2 "$RC2"; rcline2="$RLINE"
 stats RC8 "$RC8"; rcline8="$RLINE" rcrc=$RC
 stats AT2 "$AT2"; atline2="$ALINE"
 stats AT8 "$AT8"; atline8="$ALINE" atrc=$RC
+stats RM2 "$RM2"; rmline2="$MLINE"
+stats RM8 "$RM8"; rmline8="$MLINE" rmrc=$RC
 stats SW2 "$SW2"; sa2="$CASKS" sr2="$CREADS" sl2="$LEVELS" src2=$RC sp2="$READS"
 stats SW8 "$SW8"; sa8="$CASKS" sr8="$CREADS" sl8="$LEVELS" src8=$RC sline8="$SLINE" sp8="$READS" spline8="$OLINE" iline8="$ILINE"
 
@@ -308,6 +333,12 @@ if [ "$rcrc" = 0 ] && [ "$rcline8" = "$want" ] && [ "$rcline2" = '[mem] recv_con
 else
     no "(B)(C) RC counter: want 'asks=512 builds=1' at M=2 and '$want' at M=8, got '${rcline2:-<none>}' / '${rcline8:-<none>}' (rc=$rcrc)"
 fi
+want='[mem] recv_method asks=16 walks=2 kept=2'
+if [ "$rmrc" = 0 ] && [ "$rmline8" = "$want" ] && [ "$rmline2" = '[mem] recv_method asks=4 walks=2 kept=2' ]; then
+    ok "(B)(C) RM: one base-level walk per (type, name) however many calls ask: $rmline2 at M=2, $rmline8 at M=8"
+else
+    no "(B)(C) RM counter: want 'asks=4 walks=2 kept=2' at M=2 and '$want' at M=8, got '${rmline2:-<none>}' / '${rmline8:-<none>}' (rc=$rmrc)"
+fi
 want='[mem] inherited asks=16 walks=8'
 if [ "$iline8" = "$want" ]; then
     ok "(C) SW: step (2)'s ancestor walk runs once per (class, callee) though two callers ask: $iline8"
@@ -323,7 +354,7 @@ fi
 
 # ── (D) CONTROL ────────────────────────────────────────────────────────────────────────────────────────────────
 if [ -n "$CONTROL" ]; then
-    for pair in "GW:$GW8" "SW:$SW8" "BE:$BE8" "AT:$AT8" "RC:$RC8"; do
+    for pair in "GW:$GW8" "SW:$SW8" "BE:$BE8" "AT:$AT8" "RC:$RC8" "RM:$RM8"; do
         name="${pair%%:*}"; dir="${pair#*:}"
         if [ -x "$CONTROL" ] && "$CONTROL" "$dir" --no-cache >"$TMP/ctl$name.xml" 2>/dev/null && "$BIN" "$dir" --no-cache >"$TMP/bin$name.xml" 2>/dev/null \
             && [ -s "$TMP/bin$name.xml" ] && cmp -s "$TMP/ctl$name.xml" "$TMP/bin$name.xml"; then
