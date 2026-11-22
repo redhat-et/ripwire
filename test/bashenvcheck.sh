@@ -51,7 +51,8 @@
 # Generated in $TMP: a mode-000 shell file must be disclosed as unreadable="1" (root, legend, JSON), never skipped.
 # Generated in $TMP (#699, reported by jflowers): a shell file over the crawl's 4 MB ceiling and a .cmake file over
 # --flags' own 64 MiB read cap are disclosed as oversize="1" with oversize_limit= that ceiling (root, legend, JSON); a
-# file at the cap and one the crawl ceiling admits are read; prose over the ceiling is not counted (--flags reads none).
+# file at the cap and one the crawl ceiling admits are read; prose and JSON over a ceiling are not counted (--flags reads
+# no prose, and JSON is data: no gate can be live in it).
 # Generated in $TMP: a 100,000-level ${X:-${X:-…}} line (the review's crash input) must finish, exit 0 and disclose
 # nesting_cut="1". 160,000 `(X=1)` lines then 160,000 `: "$X"` (2.1 MB) must finish under a 20 s cap (about 0.3 s
 # linear; the quadratic lookup it guards took about 56 s).
@@ -276,10 +277,11 @@ has_in(){ grep -q "<gate name=\"$2\" " "$1"; }   # has_in FILE NAME: the answer 
 pad(){ python3 -c 'import sys; n=int(sys.argv[2]); f=open(sys.argv[1],"ab"); line=b"#"+b"-"*98+b"\n"; f.write(line*(n//100)); f.write(b"#"*(n%100))' "$1" "$2"; }
 mkdir -p "$TMP/big" && printf '#!/bin/bash\n: "${OV_SMALL:?}"\n' >"$TMP/big/small.sh" && printf '#!/bin/bash\n: "${OV_BIG:?}"\n' >"$TMP/big/big.sh" \
     && pad "$TMP/big/big.sh" 5000000 && printf '# Big prose\n' >"$TMP/big/notes.md" && pad "$TMP/big/notes.md" 5000000 \
+    && python3 -c 'import sys; open( sys.argv[1], "w" ).write( "[" + ",".join( ["\"process.env.OV_JSON\""] * 20000 ) + "]" )' "$TMP/big/data.json" \
     || no "could not write the oversize fixture"
 "$BIN" "$TMP/big" --flags --no-cache --legend=full >"$TMP/bigx" 2>/dev/null || no "--flags over a 5 MB shell file exited non-zero"
 "$BIN" "$TMP/big" --flags --no-cache --json >"$TMP/bigj" 2>/dev/null || no "--flags --json over a 5 MB shell file exited non-zero"
-if grep -q '<flags [^>]* files="1" [^>]*oversize="1" oversize_limit="4194304"' "$TMP/bigx"; then ok 'oversize: a 5 MB shell file over the crawl ceiling -> files="1" oversize="1" oversize_limit="4194304" (the .md is not counted)'; else no "oversize: crawl-ceiling root wrong: $( grep -oE '<flags [^>]*>' "$TMP/bigx" )"; fi
+if grep -q '<flags [^>]* files="1" [^>]*oversize="1" oversize_limit="4194304"' "$TMP/bigx"; then ok 'oversize: a 5 MB shell file over the crawl ceiling -> files="1" oversize="1" oversize_limit="4194304" (the .md and the 400 KB .json are not counted)'; else no "oversize: crawl-ceiling root wrong: $( grep -oE '<flags [^>]*>' "$TMP/bigx" )"; fi
 if grep -q '<!-- oversize=N on the root' "$TMP/bigx"; then ok 'oversize: the legend defines oversize= and oversize_limit='; else no 'oversize: the legend does not define oversize='; fi
 if python3 -c 'import json,sys; d=json.load( open( sys.argv[1] ) ); sys.exit( 0 if ( d.get( "oversize" ), d.get( "oversize_limit" ) ) == ( 1, 4194304 ) else 1 )' "$TMP/bigj"; then ok 'oversize: JSON "oversize": 1, "oversize_limit": 4194304'; else no "oversize: JSON wrong: $( head -c 300 "$TMP/bigj" )"; fi
 # Raised past the file, the crawl admits it and --flags reads it (the old 4 MB read cap dropped it unseen).
