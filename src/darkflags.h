@@ -65,7 +65,7 @@ namespace darkflags
 
 // 64 MiB — past this a "source" file is generated data. A runaway guard, not a filter: GitHub warns at 50 MB and refuses
 // 100 MB, and the crawl's own default ceiling (--max-file-size, 4 MB) drops a file long before this one does. A file
-// either ceiling drops is counted in oversize= on the root (#699), so the counts beside it read as floors.
+// either ceiling drops is counted in oversize= on the root (#699): gates= is then a floor, the other counts incomplete.
 constexpr std::size_t kMaxFlagFileBytes = 67108864;   // 64 MiB read cap; a file past it counts in oversize= (#699)
 // Every OTHER readWhole caller (--doc-drift, subject anchors, lint, layout, field uses, ...) keeps the 4 MiB read cap its
 // legend names ("unreadable or over 4 MiB"): #699 raised the --flags cap only, so computeFlags passes kMaxFlagFileBytes.
@@ -3291,15 +3291,18 @@ inline void writeMissingFilesLegend( std::FILE* out, const FlagsResult& res )
     if( res.unreadable.files != 0 )
     {
         rw::emitRaw( out, "<!-- unreadable=N on the root: files this scan could not open or read to their end. Their gates "
-                           "are missing, so gates=, dark_gates= and every count beside them are floors for this run. -->" );
+                           "are missing, so gates= is a floor for this run, and dark_gates= and the per-kind counts are "
+                           "incomplete in either direction (a declaration in a missing file can reclassify a gate). -->" );
     }
     if( res.oversize.files != 0 )
     {
         rw::emitTo( out, "<!-- oversize=N on the root: files this scan did not read because they are too big — over the crawl's "
-                         "size ceiling (max-file-size, default 4 MB; skipped lists each one) or over this scan's own {} MB read cap. "
-                         "Their gates are missing, so gates=, dark_gates= and every count beside them are floors for this run; "
-                         "files= does not count them. oversize_limit=B: the smallest of those ceilings that dropped one, in bytes. -->",
-                    kMaxFlagFileBytes >> 20 );
+                         "size ceiling (max-file-size, default 4 MB; skipped lists each one), a data lane's own ceiling (YAML {} KB), "
+                         "or this scan's own {} MB read cap. JSON over its {} KB ceiling is not counted: no gate is live in a .json "
+                         "file. Their gates are missing, so gates= is a floor for this run, and dark_gates= and the per-kind counts "
+                         "are incomplete in either direction (a declaration in a missing file can reclassify a gate); files= does "
+                         "not count them. oversize_limit=B: the smallest of those ceilings that dropped one, in bytes. -->",
+                    kMaxYamlConfigBytes >> 10, kMaxFlagFileBytes >> 20, kMaxJsonConfigBytes >> 10 );
     }
 }
 

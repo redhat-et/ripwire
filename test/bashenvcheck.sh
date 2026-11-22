@@ -303,6 +303,41 @@ HELP_CAP="$( tr '\n' ' ' <"$TMP/help" | tr -s ' ' | grep -oE "own [0-9]+ MB cap"
 if [ -n "$LEG_CAP" ] && [ "$LEG_CAP" = "$HELP_CAP" ] && [ "$(( CAP >> 20 ))" = "$LEG_CAP" ]; then ok "oversize: --help, the legend and this gate all say $LEG_CAP MB"; else no "oversize: --help says '${HELP_CAP}', the legend '${LEG_CAP}', this gate $(( CAP >> 20 ))"; fi
 rm -rf "$TMP/cm" "$TMP/big"
 if grep -q 'oversize' "$TMP/x"; then no "oversize: the fixture (nothing too big) carries oversize="; else ok 'oversize: absent when every file was read'; fi
+# A data lane's own ceiling (CR #720 thread 4657932801): a .yaml over the crawl's 512 KB YAML ceiling is counted, and
+# the legend and --help name that ceiling (the JSON exclusion stays explicit) and say what the counts beside it mean.
+FLOOR_WORDS='gates= is a floor for this run, and dark_gates= and the per-kind counts are incomplete in either direction'
+HELP_FLAT="$( tr '\n' ' ' <"$TMP/help" | tr -s ' ' )"
+mkdir -p "$TMP/yml" && printf '#!/bin/bash\n: "${OV_YSMALL:?}"\n' >"$TMP/yml/run.sh" && printf 'k: v\n' >"$TMP/yml/big.yaml" \
+    && pad "$TMP/yml/big.yaml" 614400 || no "could not write the YAML-ceiling fixture"
+"$BIN" "$TMP/yml" --flags --no-cache --legend=full >"$TMP/ymlx" 2>/dev/null || no "--flags over a 600 KB .yaml exited non-zero"
+if grep -q '<flags [^>]* oversize="1" oversize_limit="524288"' "$TMP/ymlx"; then ok 'oversize: a 600 KB .yaml over the YAML data ceiling -> oversize="1" oversize_limit="524288"'; else no "oversize: YAML-ceiling root wrong: $( grep -oE '<flags [^>]*>' "$TMP/ymlx" )"; fi
+if grep -q "a data lane's own ceiling (YAML 512 KB)" "$TMP/ymlx" && grep -q 'JSON over its 256 KB ceiling is not counted' "$TMP/ymlx"; then ok 'oversize: the legend names the YAML 512 KB ceiling and the uncounted JSON 256 KB one'; else no 'oversize: the legend does not name the YAML ceiling / the JSON exclusion'; fi
+if grep -qF "$FLOOR_WORDS" "$TMP/ymlx"; then ok 'oversize: the legend says gates= is a floor and the other counts are incomplete either way'; else no 'oversize: the legend still calls every count a floor'; fi
+if printf '%s' "$HELP_FLAT" | grep -q "a data lane's own ceiling (YAML 512 KB)" && printf '%s' "$HELP_FLAT" | grep -q 'JSON over its 256 KB ceiling is not counted' \
+    && printf '%s' "$HELP_FLAT" | grep -q 'gates= is a floor, and dark_gates= and the per-kind counts are incomplete in either direction'; then
+    ok '--help names the YAML ceiling, the JSON exclusion and what gates= / dark_gates= mean beside oversize= / unreadable='
+else no '--help: YAML ceiling, JSON exclusion or floor/incomplete wording missing'; fi
+rm -rf "$TMP/yml"
+# gates= is a floor, dark_gates= and the per-kind counts are not (CR #720 thread 4657932806): an unreadable CMakeLists
+# holding option(FEATURE ON) beside a.cpp's #ifndef FEATURE / #define FEATURE 0 turns a live cmake gate into a dark
+# compile one — dark_gates= and compile= go UP, cmake= DOWN, gates= holds.
+if [ "$( id -u )" -eq 0 ]; then
+    ok "floor: skipped (running as root reads a mode-000 file)"
+else
+    mkdir -p "$TMP/flr" && printf 'cmake_minimum_required(VERSION 3.10)\nproject(p)\noption(FEATURE "feature" ON)\nadd_executable(a a.cpp)\n' >"$TMP/flr/CMakeLists.txt" \
+        && printf '#ifndef FEATURE\n#define FEATURE 0\n#endif\n#if FEATURE\nint g(){return 1;}\n#endif\nint main(){return 0;}\n' >"$TMP/flr/a.cpp" \
+        || no "could not write the floor fixture"
+    "$BIN" "$TMP/flr" --flags --no-cache >"$TMP/flrr" 2>/dev/null || no "--flags on the readable floor fixture exited non-zero"
+    chmod 000 "$TMP/flr/CMakeLists.txt"
+    "$BIN" "$TMP/flr" --flags --no-cache --legend=full >"$TMP/flru" 2>/dev/null || no "--flags on the unreadable floor fixture exited non-zero"
+    chmod 644 "$TMP/flr/CMakeLists.txt"
+    if grep -q '<flags [^>]*gates="1" dark_gates="0" compile="0" cmake="1"' "$TMP/flrr" \
+        && grep -q '<flags [^>]*gates="1" dark_gates="1" compile="1" cmake="0"[^>]* unreadable="1"' "$TMP/flru"; then
+        ok 'floor: unreadable CMakeLists -> gates= holds at 1, dark_gates= 0->1, compile= 0->1, cmake= 1->0'
+    else no "floor: readable $( grep -oE '<flags [^>]*>' "$TMP/flrr" ) / unreadable $( grep -oE '<flags [^>]*>' "$TMP/flru" )"; fi
+    if grep -qF "$FLOOR_WORDS" "$TMP/flru"; then ok 'floor: the unreadable= legend says gates= is a floor and the other counts are incomplete either way'; else no 'floor: the unreadable= legend still calls every count a floor'; fi
+    rm -rf "$TMP/flr"
+fi
 
 # ── 6. OTHER LANES KEEP THEIR BYTES ──────────────────────────────────────────────────────────────────────
 row PY_SWITCH '<read p="probe.py" l="4"/></gate>'
