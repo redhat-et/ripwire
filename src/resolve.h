@@ -8003,6 +8003,25 @@ struct IdentityNarrower
         return !hits.empty();
     }
 
+    // does `d`'s base clause, read from d's own file, plausibly mean `c` among the classes of c's name (`named`)? Memoised per
+    // (d, c) (SUBCLASS-CLAUSE-MEMO, lane PF2): the answer is the callee's business not at all, and step (3) asked it again
+    // for every (receiver class, callee) — a visibility test per class of the name each time, the hotspot on
+    // llvm-project/clang after INHERITED-LEVELS-MEMO.
+    mutable HashMap<std::uint64_t, bool> clauseMeansMemo;
+    mutable std::size_t                  clauseAsks = 0, clauseReads = 0, levelsQueued = 0;   // RIPWIRE_STATS `[mem] subclass_walk`
+    bool clauseMeans( NodeId d, NodeId c, const rw::SmallVec<NodeId, 2>& named, const ClassIdentity& ids ) const
+    {
+        ++clauseAsks;
+        const auto [ memo, inserted ] = clauseMeansMemo.try_emplace( hashutil::packPair( d, c ), false );
+        if( inserted )
+        {
+            ++clauseReads;
+            plausibleClasses( std::span<const NodeId>( named.data(), named.size() ), fileOf( d, ids ), ids );
+            memo->second = std::ranges::find( plausible, c ) != plausible.end();
+        }
+        return memo->second;
+    }
+
     // the real subclasses of `c` whose base clause, read from their own file, plausibly means `c`: their definitions of the
     // callee appended, each queued once
     void visitSubclassesOf( const Reference& r, NodeId c, const ClassIdentity& ids ) const
@@ -8016,8 +8035,7 @@ struct IdentityNarrower
         }
         for( NodeId d : down->second )
         {
-            plausibleClasses( std::span<const NodeId>( named->second.data(), named->second.size() ), fileOf( d, ids ), ids );
-            if( std::ranges::find( plausible, c ) == plausible.end() || !markSeen( d ) )
+            if( !clauseMeans( d, c, named->second, ids ) || !markSeen( d ) )
             {
                 continue;   // d derives from another class of that name, or was reached already
             }
@@ -8074,25 +8092,69 @@ struct IdentityNarrower
     // SocketImpl::isOpen on a ConnectionSocket receiver whose contract Socket declares. The shallowest ancestor level of `d`
     // whose classes own a definition answers (several at one level: their union, the split lists them all); a level of
     // declarations alone walks on. Bounded like the ancestor walk; its own visited list, so the subclass walk's state is kept.
+    // INHERITED-LEVELS-MEMO (lane PF2, 2026-11-21): the levels are the callee's business only in which one answers — the
+    // classes on each level are read from base clauses and files alone (queueUnvisitedBases: plausibleClasses per base name,
+    // a visibility test per class of it). On llvm-project/clang the walk re-read them for every (receiver class, callee),
+    // and it was the hotspot after CONE-MEMO. So each subclass's levels are kept as first reached — level k+1 queued from
+    // level k with the same `visited` list, in the same order — and a later callee reads the kept levels.
+    struct InheritedLevels
+    {
+        std::vector<NodeId>        classes;          // the levels, flattened
+        std::vector<std::uint32_t> ends{ 1 };        // classes.size() after each level; level 0 is { d }
+        std::vector<NodeId>        visited;          // queueUnvisitedBases' visited list after the last kept level was queued
+    };
+    mutable HashMap<NodeId, InheritedLevels> inheritedLevels;
+    mutable std::vector<NodeId>              inheritedNext;
+
+    // `d`'s level `depth` of the inherited-body walk (empty past the last), keeping it when no earlier walk reached it
+    std::span<const NodeId> inheritedLevel( NodeId d, std::size_t depth, const ClassIdentity& ids ) const
+    {
+        const auto [ it, inserted ] = inheritedLevels.try_emplace( d );
+        InheritedLevels& lv = it->second;
+        if( inserted )
+        {
+            lv.classes.assign( 1, d );
+            lv.visited.assign( 1, d );
+        }
+        while( lv.ends.size() <= depth && lv.ends.back() > ( lv.ends.size() >= 2 ? lv.ends[ lv.ends.size() - 2 ] : 0u ) )
+        {
+            const std::size_t from = lv.ends.size() >= 2 ? lv.ends[ lv.ends.size() - 2 ] : 0u;
+            const std::size_t to   = lv.ends.back();
+            ++levelsQueued;
+            inheritedNext.clear();
+            for( std::size_t at = from; at < to; ++at )
+            {
+                queueUnvisitedBases( lv.classes[ at ], ids, lv.visited, inheritedNext );
+            }
+            lv.classes.insert( lv.classes.end(), inheritedNext.begin(), inheritedNext.end() );
+            lv.ends.push_back( std::uint32_t( lv.classes.size() ) );
+        }
+        if( depth >= lv.ends.size() )
+        {
+            return {};
+        }
+        const std::size_t from = depth == 0 ? 0u : lv.ends[ depth - 1 ];
+        return std::span<const NodeId>( lv.classes.data() + from, lv.ends[ depth ] - from );
+    }
+
     void appendInheritedBody( const Reference& r, NodeId d, const ClassIdentity& ids ) const
     {
-        std::vector<NodeId> level{ d };
-        std::vector<NodeId> next;
-        std::vector<NodeId> visited{ d };
-        for( int depth = 0; depth < 16 && !level.empty(); ++depth )
+        for( std::size_t depth = 0; depth < 16; ++depth )
         {
+            const std::span<const NodeId> level = inheritedLevel( d, depth, ids );
+            if( level.empty() )
+            {
+                return;
+            }
             bool found = false;
-            next.clear();
             for( NodeId c : level )
             {
                 found = ( depth > 0 && appendClassDefinitions( r, c, ids ) ) || found;
-                queueUnvisitedBases( c, ids, visited, next );
             }
             if( found )
             {
                 return;
             }
-            level.swap( next );
         }
     }
 };

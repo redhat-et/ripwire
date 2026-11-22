@@ -15,6 +15,12 @@
 # every class of the name (plausibleClasses: a visibility test per class) — again on every call. It is memoised per
 # (definition, class) (OWNED-MEMO).
 #
+# Class identity's step (3) (a virtual call on a type whose ancestry declares the callee and defines it nowhere: the
+# callee's definitions in the real subclasses) re-read, for every (receiver class, callee), two facts no callee changes:
+# whether each subclass's base clause means the receiver class (plausibleClasses per subclass), and the base levels of a
+# subclass that inherits its body (queueUnvisitedBases). Both are now kept: per (subclass, class) (SUBCLASS-CLAUSE-MEMO)
+# and per subclass, level by level (INHERITED-LEVELS-MEMO).
+#
 # GW(K, M): K files, each defining `struct RootK`, `struct Base : RootK`, `struct Impl : Base` whose one method repeats
 # M times the bare calls `b0()` .. `b(K-1)()` and `r()`, and `struct Peer : Base` calling `bK()` and `r()` once; K more files define `void Base::bK() { }` out of line, and one
 # more a namesake `struct Base` no Impl derives from (so the walk's `Base` is narrowed to the K the Impls name, and the
@@ -32,7 +38,11 @@
 #       meant=52 — per root 13 for the walk's two levels (`Base`, then Base's 12 `RootK`) plus 13 for its cone (the same
 #       two levels under kConeNameCap); asks=1164 (one per bK() call: the first class it asks about owns it), reads=12 (one
 #       per out-of-line definition). Unmemoised the walk alone re-ran 1 or 13 meantBase per call.
-#   (D) CONTROL (RIPWIRE_GUARDEDWALK_CONTROL_BIN=<a binary without the memos>) — the default map of GW(K, 8) is
+# SW(4, M): Shape declares f0..f(M-1) with no body; 4 Circles define them all; 4 Squares define none and inherit them
+#   through Painter; use( Shape* s ) calls each once. (A) clause_asks > 0 and grows with M; (B) clause_reads and levels
+#   are the same at M=2 and M=8; (C) at M=8 clause_asks=64 (8 callees x 8 subclasses of Shape), clause_reads=8 (one per
+#   subclass), levels=4 (each Square's level 1, where Painter answers; never queued again).
+#   (D) CONTROL (RIPWIRE_GUARDEDWALK_CONTROL_BIN=<a binary without the memos>) — the default maps of GW(K, 8) and SW(4, 8) are
 #       byte-identical between the control and this binary: the memos change cost, never an edge. Without the variable
 #       the control arm is reported as not run; (A)-(C) still gate on their own.
 #
@@ -78,6 +88,32 @@ gen(){
     printf 'struct Base { void z(); };\n' >"$dir/other.cpp"         # a namesake no Impl derives from: the walk's Base is narrowed
 }
 
+# gensw DIR K M — step (3) of class identity (see header): Shape declares f0..f(M-1) with no body, K Circles define them,
+# K Squares inherit them through Painter, and use() calls each through a Shape*
+gensw(){
+    local dir="$1" k="$2" m="$3" c i
+    mkdir -p "$dir"
+    {
+        printf 'struct Shape\n{\n'
+        for i in $( seq 0 $(( m - 1 )) ); do printf '    virtual void f%d() = 0;\n' "$i"; done
+        printf '};\nstruct Painter\n{\n'
+        for i in $( seq 0 $(( m - 1 )) ); do printf '    void f%d() { }\n' "$i"; done
+        printf '};\n'
+    } >"$dir/shape.h"
+    for c in $( seq 0 $(( k - 1 )) ); do
+        {
+            printf '#include "shape.h"\nstruct Circle%d : Shape\n{\n' "$c"
+            for i in $( seq 0 $(( m - 1 )) ); do printf '    void f%d() override { }\n' "$i"; done
+            printf '};\nstruct Square%d : Shape, Painter { };\n' "$c"
+        } >"$dir/c$c.cpp"
+    done
+    {
+        printf '#include "shape.h"\nvoid use( Shape* s )\n{\n'
+        for i in $( seq 0 $(( m - 1 )) ); do printf '    s->f%d();\n' "$i"; done
+        printf '}\n'
+    } >"$dir/use.cpp"
+}
+
 # stats NAME DIR — run with RIPWIRE_STATS, set LINE / CALLS / WALKS / MEANT
 stats(){
     local name="$1" dir="$2"
@@ -89,13 +125,24 @@ stats(){
     OLINE="$( grep -F '[mem] owned_by ' "$TMP/$name.err" )"
     ASKS="$( printf '%s' "$OLINE" | sed -n 's/.* asks=\([0-9]*\).*/\1/p' )"
     READS="$( printf '%s' "$OLINE" | sed -n 's/.* reads=\([0-9]*\).*/\1/p' )"
+    BLINE="$( grep -F '[mem] base_edges ' "$TMP/$name.err" )"
+    SLINE="$( grep -F '[mem] subclass_walk ' "$TMP/$name.err" )"
+    CASKS="$( printf '%s' "$SLINE" | sed -n 's/.* clause_asks=\([0-9]*\).*/\1/p' )"
+    CREADS="$( printf '%s' "$SLINE" | sed -n 's/.* clause_reads=\([0-9]*\).*/\1/p' )"
+    LEVELS="$( printf '%s' "$SLINE" | sed -n 's/.* levels=\([0-9]*\).*/\1/p' )"
 }
 
 GW2="$TMP/gw2"; gen "$GW2" "$K" 2
 GW8="$TMP/gw8"; gen "$GW8" "$K" 8
 
+SW2="$TMP/sw2"; gensw "$SW2" 4 2
+SW8="$TMP/sw8"; gensw "$SW8" 4 8
+
 stats GW2 "$GW2"; c2="$CALLS" w2="$WALKS" m2="$MEANT" rc2=$RC a2="$ASKS" r2="$READS"
-stats GW8 "$GW8"; c8="$CALLS" w8="$WALKS" m8="$MEANT" rc8=$RC line8="$LINE" a8="$ASKS" r8="$READS" oline8="$OLINE"
+stats GW8 "$GW8"; c8="$CALLS" w8="$WALKS" m8="$MEANT" rc8=$RC line8="$LINE" a8="$ASKS" r8="$READS" oline8="$OLINE" bline8="$BLINE"
+
+stats SW2 "$SW2"; sa2="$CASKS" sr2="$CREADS" sl2="$LEVELS" src2=$RC
+stats SW8 "$SW8"; sa8="$CASKS" sr8="$CREADS" sl8="$LEVELS" src8=$RC sline8="$SLINE"
 
 # ── (A) REACHED ────────────────────────────────────────────────────────────────────────────────────────────────
 if [ "$rc2$rc8" = "00" ] && [ -n "$c2" ] && [ -n "$c8" ] && [ "$c2" -gt 0 ] && [ "$c8" -gt "$c2" ]; then
@@ -109,6 +156,12 @@ else
     no "(A) the GW map is empty or malformed ($( head -c 200 "$TMP/GW8.xml" ))"
 fi
 
+if [ "$src2$src8" = "00" ] && [ -n "$sa2" ] && [ -n "$sa8" ] && [ "$sa2" -gt 0 ] && [ "$sa8" -gt "$sa2" ]; then
+    ok "(A) step (3)'s subclass walk is reached: clause_asks=$sa2 at M=2, $sa8 at M=8"
+else
+    no "(A) step (3)'s subclass walk not reached (rc=$src2/$src8, M=2 '${sa2:-<no line>}', M=8 '${sa8:-<no line>}')"
+fi
+
 # ── (B) PER-ROOT ───────────────────────────────────────────────────────────────────────────────────────────────
 if [ -n "$m2" ] && [ "$w2" = "$w8" ] && [ "$m2" = "$m8" ]; then
     ok "(B) the walk is paid per root, not per call: walks=$w8 meant=$m8 at both M=2 and M=8"
@@ -120,6 +173,12 @@ if [ -n "$a2" ] && [ -n "$r2" ] && [ "$a8" -gt "$a2" ] && [ "$r2" -gt 0 ] && [ "
     ok "(B) an out-of-line owner is read once per (definition, class): reads=$r8 at both M, asks $a2 -> $a8"
 else
     no "(B) out-of-line owner reads grow with the call count, or are never reached: M=2 asks=${a2:-?} reads=${r2:-?}, M=8 asks=${a8:-?} reads=${r8:-?}"
+fi
+
+if [ -n "$sr2" ] && [ "$sr2" -gt 0 ] && [ "$sr2" = "$sr8" ] && [ -n "$sl2" ] && [ "$sl2" -gt 0 ] && [ "$sl2" = "$sl8" ]; then
+    ok "(B) step (3) reads each subclass clause and queues each inherited level once: clause_reads=$sr8 levels=$sl8 at both M"
+else
+    no "(B) step (3) re-reads per callee: M=2 clause_reads=${sr2:-?} levels=${sl2:-?}, M=8 clause_reads=${sr8:-?} levels=${sl8:-?}"
 fi
 
 # ── (C) EXACT ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -136,14 +195,24 @@ else
     no "(C) GW counter: want '$want', got '${oline8:-<no owned_by line>}'"
 fi
 
+want='[mem] subclass_walk clause_asks=64 clause_reads=8 levels=4'
+if [ "$sline8" = "$want" ]; then
+    ok "(C) SW counter is exact: $sline8"
+else
+    no "(C) SW counter: want '$want', got '${sline8:-<no subclass_walk line>}'"
+fi
+
 # ── (D) CONTROL ────────────────────────────────────────────────────────────────────────────────────────────────
 if [ -n "$CONTROL" ]; then
-    if [ -x "$CONTROL" ] && "$CONTROL" "$GW8" --no-cache >"$TMP/ctl.xml" 2>/dev/null && "$BIN" "$GW8" --no-cache >"$TMP/bin.xml" 2>/dev/null \
-        && [ -s "$TMP/bin.xml" ] && cmp -s "$TMP/ctl.xml" "$TMP/bin.xml"; then
-        ok "(D) GW default map is byte-identical between the control and this binary ($( wc -c <"$TMP/bin.xml" | tr -d ' ' ) B)"
-    else
-        no "(D) GW maps differ, or a run failed (control=$CONTROL)"
-    fi
+    for pair in "GW:$GW8" "SW:$SW8"; do
+        name="${pair%%:*}"; dir="${pair#*:}"
+        if [ -x "$CONTROL" ] && "$CONTROL" "$dir" --no-cache >"$TMP/ctl$name.xml" 2>/dev/null && "$BIN" "$dir" --no-cache >"$TMP/bin$name.xml" 2>/dev/null \
+            && [ -s "$TMP/bin$name.xml" ] && cmp -s "$TMP/ctl$name.xml" "$TMP/bin$name.xml"; then
+            ok "(D) $name default map is byte-identical between the control and this binary ($( wc -c <"$TMP/bin$name.xml" | tr -d ' ' ) B)"
+        else
+            no "(D) $name maps differ, or a run failed (control=$CONTROL)"
+        fi
+    done
 else
     echo "  NOTE  (D) control arm not run: set RIPWIRE_GUARDEDWALK_CONTROL_BIN to a binary without the memo"
 fi
