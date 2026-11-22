@@ -7,6 +7,7 @@
 #include <format>      // std::format_string — the shims' format contract (see test/printffmtparitycheck.sh)
 #include "valuerefs.h"  // VrRender / vrPath — a row's p= spelled as every other verb's
 #include "outputceiling.h"   // kOutputCeilingChars — the default page's byte ceiling (CL1)
+#include "infra/sortutil.h"   // sortUnique — the user rules a tally can print (CL1)
 #include "nextverb.h"   // nextFlag — findings_next='s pasteable spelling (knob-honesty-068)
 #include "infra/emit.h" // rw::emitTo — THE emitter: std::print where the library has <print>, std::format+fputs
                        // where it does not, chosen by feature test and DISCLOSED as emit= on --version. The
@@ -2063,12 +2064,28 @@ inline std::size_t lintRowBytes( const rw::IngestResult& ing, const EnclosingSym
          + ( e ? e->name.size() : 0 ) + 40;
 }
 
+// The tally rows a --lint answer can print: every built-in rule, plus each user rule that found something (a user finding
+// carries sev=). A user rule that found nothing also prints a row and is not counted here; the row estimate's margin (+40
+// markup per finding, ~10 B over) covers a handful of them.
+inline std::size_t lintTallyRowsBound( const std::vector<LintOut>& outs )
+{
+    std::vector<std::string_view> userRules;
+    for( const LintOut& o : outs )
+    {
+        if( !o.sev.empty() )
+        {
+            userRules.push_back( o.rule );
+        }
+    }
+    rw::sortutil::sortUnique( userRules, rw::sortutil::svLess );
+    return builtInLintRuleNames().size() + userRules.size();
+}
+
 // The <f> rows a --lint answer prints: the --limit page when the caller sized one, else the sorted run from --offset (0 on a
-// bare call) that fits `payloadBytes`. CL1: --offset alone is a CONTINUATION of the default page, so it is byte-budgeted
-// too — before, `--lint --offset=K` printed every row from K on, so the page after a capped default answer was larger
-// than the answer it continued. Rows keep their final sorted order, so pages chain without a gap or a repeat.
-rw::PageWindow lintFindingsWindow( const rw::Config& cfg, const rw::IngestResult& ing, const EnclosingSymbolIndex& enclosing, const std::vector<LintOut>& outs,
-                                   std::size_t payloadBytes )
+// bare call) that fits the page budget (lintPagePayloadBytes). CL1: --offset alone is a CONTINUATION of the default page, so
+// it is byte-budgeted too — before, `--lint --offset=K` printed every row from K on, so the page after a capped default answer
+// was larger than the answer it continued. Rows keep their final sorted order, so pages chain without a gap or a repeat.
+rw::PageWindow lintFindingsWindow( const rw::Config& cfg, const rw::IngestResult& ing, const EnclosingSymbolIndex& enclosing, const std::vector<LintOut>& outs )
 {
     if( cfg.pageLimit > 0 )
     {
@@ -2077,7 +2094,7 @@ rw::PageWindow lintFindingsWindow( const rw::Config& cfg, const rw::IngestResult
     // Byte-budget the default run. The stopping rule is bytes because a corpus with long text= rows (E6's vendored-bundle
     // case: 2,037,645 B / 6,169 findings) needs far FEWER rows to reach the same budget than a corpus of short rows does.
     const std::size_t begin            = std::min<std::size_t>( cfg.pageOffset > 0 ? std::size_t( cfg.pageOffset ) : 0, outs.size() );
-    const std::size_t budget           = std::min( payloadBytes, kLintDefaultPayloadBytes );   // the historic cap stays the upper bound
+    const std::size_t budget           = std::min( lintPagePayloadBytes( lintTallyRowsBound( outs ) ), kLintDefaultPayloadBytes );   // the historic cap stays the upper bound
     std::size_t       bytesUsed        = 0;
     std::size_t       lintDefaultShown = 0;
     for( std::size_t i = begin; i < outs.size(); ++i )
@@ -2332,7 +2349,7 @@ int runLintVerb( const MainDispatch& d, const LintAnswerView& view )
     // can share the same rule/file:line/enclosing-symbol/text because the row carries no column).
     run.outs = dedupeLintFindings( view.enclosing, std::move( run.outs ) );
 
-    const PageWindow  lintPage   = lintFindingsWindow( cfg, ing, view.enclosing, run.outs, lintPagePayloadBytes( run.allRuleNames.size() + run.userRules.size() ) );
+    const PageWindow  lintPage   = lintFindingsWindow( cfg, ing, view.enclosing, run.outs );
     const std::size_t shownCount = lintPage.end - lintPage.begin;
     const LintFloors  floors     = lintFloorsOf( cfg, run.saturatedRules, lintSel, lintMaxPerRule );
 
