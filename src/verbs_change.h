@@ -107,10 +107,13 @@ std::optional<int> runAffected( const MainDispatch& d )
             // pre-fix arm offered only selectorFaultClause's symbol suggestion and answered `--affected=tow.c`
             // with "did you mean 'TOOLS'?" while `two.c` sat in the file list.
             const std::string affectedNearPath = rw::nearestIndexedFileClause( ing, r.badItem );
+            // AF5: reached only when NO item resolved (a partially usable list answers and names the rest), so a
+            // longer list says that none of its items did.
             rw::emitTo( stderr, "ripwire: --affected: '{}' matches no indexed file path (as a path pattern) and no indexed "
-                                  "symbol (as a symbol name; file:name and path::scope::name also accepted){}{}\n",
+                                  "symbol (as a symbol name; file:name and path::scope::name also accepted){}{}{}\n",
                           r.badItem.c_str(), affectedNearPath.c_str(),
-                          affectedNearPath.empty() ? rw::selectorFaultClause( ing, r.badItem, "--affected=" ).c_str() : "" );
+                          affectedNearPath.empty() ? rw::selectorFaultClause( ing, r.badItem, "--affected=" ).c_str() : "",
+                          rw::affectedNoneResolvedClause( r.unusedCount ).c_str() );
             return 1;
         }
         if( r.noSeeds )

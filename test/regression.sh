@@ -305,6 +305,7 @@ for _g in \
     affectedcheck \
     affectedfoldcheck \
     affectedgroupcheck \
+    affectedpathcheck \
     agentloopclaudecheck \
     agentloopcodexcheck \
     agentloopeditsuitecheck \

@@ -924,6 +924,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "reached", "reached=N: symbols the transitive caller walk reached from the seeds (seeds excluded)", false, "affected", MapHeaderRead::No, {}, "affected" },
     { "script_gates_unmodelled", "script_gates_unmodelled=N: test/*.sh runners; their subprocess reach is unmodelled, never in tests=/reached=", false, "affected", MapHeaderRead::No, {}, "affected" },
     { "run_first", "run_first=N: the first N test files have the most direct evidence (changed/partner/hops=1, else nearest hops=); not a skip list", false, "affected", MapHeaderRead::No, {}, "affected" },
+    // AF5 (testmap.h affectedUnusedRowsXml / kAffectedUnusedLegend): present only when a list item could not be used
+    { "unused", "unused=N: list items not used, an <unused item= reason=not_indexed|not_found near=> row each; counts answer for the rest", false, "affected", MapHeaderRead::No, {}, "affected" },
     // IX-5 (testmap.h classNewTestRows / kClassNewLegend): present only when the hedged group renders
     { "via", "<g via=class-new total= shown= capped= next=>: tests not listed above that construct a class owning a reached method (or the changed class); <new p= l= class=>: the test file, the construction line if exact, the class. The dispatch is not proven, so never in tests=/reached=; nearest class first; a floor (Go T{}, C++ T x;, Ruby T.new are not read)", true, "g", MapHeaderRead::No, "class-new", "affected" },
     // callees: src/callhierarchy.h computeHopTestedPartition, spliced in src/verbs_navigate.h

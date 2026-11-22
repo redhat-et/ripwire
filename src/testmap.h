@@ -32,6 +32,7 @@
 #include "pythonrunner.h" // main-guard / pytest evidence; a .py extension alone is not a runner
 #include "jsrunner.h"     // #323: nearest package.json evidence (vitest/jest/node --test); a .ts/.js extension alone is not a runner
 #include "serialize.h"    // lane/t10-mcp-coverage: escapeXml — writeAffectedReport's ONE escaper (CLI ≡ MCP)
+#include "didyoumean.h"   // AF5: nearestIndexedFile — the ONE path near-miss suggester, for an <unused> row's near=
 #include "langfacts.h"    // constructorMethod — the class-new backstop's per-language construction row
 #include "graphlegend.h"  // lane/t10-mcp-coverage: unprovenDefsVerbLegend/unprovenDefsAttrXml/graphCountFloorBrief/
                           // rootRelPathsLegend — writeAffectedReport's shared legend vocabulary
@@ -55,8 +56,9 @@ namespace rw
 // indexed path is offered to the symbol resolver. `file:NAME` and `path::scope::name` reach the symbol
 // reading explicitly — the same two spellings --callers/--impact/--around already accept.
 //
-// A refusal is per-ITEM, not "the whole list resolved to nothing": before this, `--affected=src/x.cpp,typo`
-// silently dropped the typo and answered confidently for the half it understood (§P0's class exactly).
+// A bad item is never DROPPED SILENTLY: before §P0, `--affected=src/x.cpp,typo` dropped the typo and answered
+// confidently for the half it understood. Since AF5 the answer names each such item (unused= / <unused>), and
+// only a list with no usable item at all is refused.
 // F3 (terminality round A 2026-09-05) — the TEST PARTITION of the seed set, and why it is not optional.
 // The path reading is a substring PATTERN, so one item can match several files: `geo.py` also matches
 // `test/check_geo.py`. Every matched file's symbols used to become seeds, and transitiveCallers returns
@@ -77,8 +79,9 @@ struct AffectedSeeds
     std::size_t                unprovenDefs  = 0;      // H1: the decl→def residue, summed over the SYMBOL items (a path item adds 0)
     bool                       sawFileItem   = false;  // at least one item read as a path pattern
     bool                       sawSymbolItem = false;  // at least one item read as a symbol
-    bool                       ok            = true;   // false ⇒ badItem resolved under NEITHER reading
+    bool                       ok            = true;   // false ⇒ NO item resolved; badItem is the first of them
     std::string                badItem;                // the offending item, for the caller's did-you-mean refusal
+    std::vector<std::string>   unusedItems;            // AF5: items resolved under NEITHER reading, list order
 };
 
 // seeded_by= — which reading fired. A fact about the measurement (the two readings return different test
@@ -164,10 +167,21 @@ inline AffectedSeeds resolveAffectedSeeds( const IngestResult& ing, std::string_
         // the answer, --path's rule for its two endpoints: a path item never reaches this line, a bare NAME never widens.
         std::size_t               itemUnprovenDefs = 0;
         const std::vector<NodeId> defs             = resolveAllByNameQualified( ing, item, &itemUnprovenDefs );
-        if( defs.empty() ) { sel.ok = false;  sel.badItem.assign( item );  return sel; }
+        if( defs.empty() ) { sel.unusedItems.emplace_back( item );  continue; }
         sel.sawSymbolItem = true;
         sel.unprovenDefs += itemUnprovenDefs;
         sel.seeds.insert( sel.seeds.end(), defs.begin(), defs.end() );
+    }
+    // AF5 (lane SW0, 2026-11-21): the refusal is for a list with NOTHING usable in it. A list built from
+    // `git diff --name-only` routinely names a deleted, generated, vendored or non-source file (SW0 hit a
+    // `ChangeLog`), and refusing the whole call over it left the agent with no tests to run for the files it
+    // DID change. A partially usable list now answers for its usable items and names every other one on the
+    // answer (writeAffectedReport's unused= and <unused> rows) — disclosed, never the silent drop the
+    // per-item refusal above was written against.
+    if( !sel.sawFileItem && !sel.sawSymbolItem && !sel.unusedItems.empty() )
+    {
+        sel.ok = false;
+        sel.badItem = sel.unusedItems.front();
     }
     rw::sortutil::sortUnique( sel.seeds );
     partitionAffectedSeedsByTestPath( ing, sel );
@@ -2381,12 +2395,71 @@ inline std::string classNewGroupXml( const IngestResult& ing, std::span<const Cl
     return out + "</g>";
 }
 
+// ── AF5 (lane SW0 plan item 3c, 2026-11-21) — the list items an --affected answer could not use ─────────
+// resolveAffectedSeeds answers for every usable item and keeps the rest (AffectedSeeds::unusedItems); these
+// three name them. The REASON is read off the disk, never guessed: a file by that path under the root that
+// the index does not hold is `not_indexed` (non-source, excluded, ignored, vendored, generated or oversize —
+// --skipped says which), and anything else is `not_found` — no indexed path, no indexed symbol, no file (a
+// deleted or renamed file, or a typo; the two cannot be told apart without history, so near= names the
+// closest indexed path and the reader decides). Gate: test/affectedpathcheck.sh.
+// Multi-root: every surviving root is asked (ing.rootPaths, empty on a single root), so a file in the second
+// root is not called not_found because the first root lacks it.
+inline const char* affectedUnusedReason( const IngestResult& ing, const std::string& root, std::string_view item )
+{
+    const std::filesystem::path typed( stripLineLocator( item ) );
+    const auto onDiskUnder = [ & ]( const std::string& base ) -> bool
+    {
+        std::error_code existsEc;
+        const bool      exists = std::filesystem::exists( typed.is_absolute() ? typed : std::filesystem::path( base ) / typed, existsEc );
+        return exists && !existsEc;
+    };
+    const bool onDisk = ing.rootPaths.empty() ? onDiskUnder( root ) : std::ranges::any_of( ing.rootPaths, onDiskUnder );
+    return onDisk ? "not_indexed" : "not_found";
+}
+
+// The refusal's own clause for a list with NO usable item: the first item's sentence names one of them, so a
+// longer list says plainly that the rest failed too. Empty for a one-item list (its refusal text is unchanged).
+inline std::string affectedNoneResolvedClause( std::size_t itemCount )
+{
+    return itemCount < 2 ? std::string()
+                         : std::format( " — none of the {} items in the list resolved, so there is no answer to give", itemCount );
+}
+
+inline constexpr std::string_view kAffectedUnusedLegend =
+    "unused=N: list items this answer could not use, each an <unused item= reason=> row in list order; tests=/reached=/seeds= answer for "
+    "the other items only. reason=\"not_indexed\": a file by that path exists under the root but is not indexed (non-source, excluded, "
+    "ignored, vendored or oversize; --skipped says which), so the graph holds nothing to reach from it. reason=\"not_found\": no indexed "
+    "path, no indexed symbol and no file match it (deleted, renamed or misspelled); near= names the closest indexed path when one exists. ";
+
+template<class EscapeFn>
+inline std::string affectedUnusedRowsXml( const IngestResult& ing, const std::string& root, const AffectedSeeds& sel,
+                                          std::string_view rootPrefix, EscapeFn ex )
+{
+    std::string rows;
+    for( const std::string& item : sel.unusedItems )
+    {
+        const char* const reason = affectedUnusedReason( ing, root, item );
+        std::string       near;
+        if( std::string_view( reason ) == "not_found" )   // a path near-miss is a suggestion; for not_indexed the path is already right
+        {
+            const std::string_view best = nearestIndexedFile( ing, stripLineLocator( item ) );
+            if( !best.empty() )
+            {
+                near = " near=\"" + ex( sarif::rootRelativeUri( best, rootPrefix ) ) + "\"";
+            }
+        }
+        rows += "<unused item=\"" + ex( item ) + "\" reason=\"" + reason + "\"" + near + "/>";
+    }
+    return rows;
+}
+
 struct AffectedReportResult
 {
     bool        ok           = false;   // true ⇒ `out` now holds a complete <affected>…</affected> document
     bool        badSelector  = false;   // sel.ok == false: `badItem` matched neither an indexed path nor a symbol
     std::string badItem;                // populated only when badSelector
     bool        noSeeds      = false;   // sel.ok, but the matched item(s) resolved to zero seed symbols
+    std::size_t unusedCount  = 0;       // AF5: items resolved under neither reading (all of them when badSelector)
 };
 
 inline AffectedReportResult writeAffectedReport( std::FILE* out, const IngestResult& ing, const Graph& g,
@@ -2401,12 +2474,12 @@ inline AffectedReportResult writeAffectedReport( std::FILE* out, const IngestRes
     const AffectedSeeds sel = resolveAffectedSeeds( ing, spec );
     if( !sel.ok )
     {
-        return { false, true, sel.badItem, false };
+        return { false, true, sel.badItem, false, sel.unusedItems.size() };
     }
     const std::vector<NodeId>& seeds = sel.seeds;
     if( seeds.empty() )
     {
-        return { false, false, {}, true };
+        return { false, false, {}, true, sel.unusedItems.size() };
     }
     // F3: the caller walk and the matched-test rows are assembled in affectedAnswer, next to the seeding
     // whose test partition constrains them (lane-L8 found-not-fixed #1: seeding the walk with a matched
@@ -2446,6 +2519,7 @@ inline AffectedReportResult writeAffectedReport( std::FILE* out, const IngestRes
     const std::string    afRunFirst = runFirstField( answer.rows, answer.rows.size(), /*json=*/false );   // hono-20: the run-first head
     // IX-5 (hono-20): the class-new backstop, rendered apart from the proven rows above and counted in none of the root's counts
     const std::string    afClassNew = classNewGroupXml( ing, classNewTestRows( ing, g, sel, answer ), afRootPrefix, ex );
+    const std::string    afUnused   = affectedUnusedRowsXml( ing, root, sel, afRootPrefix, ex );   // AF5: empty when every item resolved
     // seeded_by= is the honesty half of the file-first rule: the two readings answer DIFFERENT questions
     // over the same argument string and return different counts, so which one fired is a fact about the
     // measurement, not a detail. seeds= is the resolved seed-symbol count (1 for a lone function, ~84
@@ -2462,19 +2536,22 @@ inline AffectedReportResult writeAffectedReport( std::FILE* out, const IngestRes
                  // so the sentence is decided by the very object that spelled the commands it describes.
                  "{}"     // hono-20/textual-20: the run-first clause, exactly when the root carries run_first=
                  "{}"     // IX-5: the class-new group's clause, exactly when the group renders
+                 "{}"     // AF5: the unused= clause, exactly when the root carries it
                  "{}{}-->{}", kTestRowEvidenceLegend, runHintClauseFor( afRowsXml, runners.rootRelative() ),
                  // H1: the decl→def residue resolveAffectedSeeds summed over the symbol items. A file:name item whose
                  // definitions were dropped seeded the walk with declarations alone, which reached the reader as a bare
                  // tests="0" — on the verb whose answer is the list of tests to run. Exactly when the root carries it.
                  runFirstLegend( !afRunFirst.empty() ),
                  afClassNew.empty() ? std::string_view() : kClassNewLegend,
+                 afUnused.empty() ? std::string_view() : kAffectedUnusedLegend,
                  unprovenDefsVerbLegend( UnprovenDefsVerb::Affected, sel.unprovenDefs > 0 ).c_str(),
                  graphCountFloorBrief( rw::graphGaugeClauses( g ) ).c_str(), rootRelPathsLegend( singleRoot ) );
-    rw::emitTo( out, "<affected changed=\"{}\" seeded_by=\"{}\" seeds=\"{}\" seed_test_files=\"{}\" tests=\"{}\" reached=\"{}\"{} script_gates_unmodelled=\"{}\""
+    rw::emitTo( out, "<affected changed=\"{}\" seeded_by=\"{}\" seeds=\"{}\" seed_test_files=\"{}\" tests=\"{}\" reached=\"{}\"{}{} script_gates_unmodelled=\"{}\""
                  "{}"   // hono-20: run_first=, where the run-first head ends; absent unless it splits
                  " order=\"evidence\" partners=\"{}\"{}{}>",
                  ex( spec ).c_str(), affectedSeededBy( sel ), seeds.size(), sel.seedTestFiles.size(), testFiles.size(), reach.size(),
                  unprovenDefsAttrXml( sel.unprovenDefs ).c_str(),   // H1: beside the zero it qualifies; absent at zero
+                 afUnused.empty() ? std::string() : std::format( " unused=\"{}\"", sel.unusedItems.size() ),   // AF5: absent at zero
                  scriptGatesUnmodelledCount( ing ),
                  afRunFirst.c_str(),
                  testRowPartnerCount( answer.rows ),      // F1: how many rows stand on the name convention alone or as well
@@ -2482,6 +2559,7 @@ inline AffectedReportResult writeAffectedReport( std::FILE* out, const IngestRes
                  graphCountFloorAttrXml( g ).c_str()  );   // H5/M15: gauge + marker; tests=/reached= are a transitive-caller walk over the name-based CSR
     rw::emitRaw( out, afRowsXml.text.c_str() );   // E1: the rows rendered above — runner-less rows with equal evidence as ONE <g> row, the multiset unchanged
     rw::emitRaw( out, afClassNew.c_str() );       // IX-5: the hedged class-new group, after every proven row (empty when none)
+    rw::emitRaw( out, afUnused.c_str() );         // AF5: the items this answer could not use, list order (empty when none)
     rw::emitRaw( out, "</affected>" );
     return { true, false, {}, false };
 }

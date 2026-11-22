@@ -4087,6 +4087,7 @@ struct McpAffectedResult
     bool                        badSelector = false;   // `spec`'s bad item matched neither an indexed path nor a symbol
     std::string                 badItem;
     bool                        noSeeds     = false;   // resolved, but zero seed symbols — spec named nothing to seed from
+    std::size_t                 unusedCount = 0;       // AF5: items resolved under neither reading (all of them on a refusal)
 };
 
 inline McpAffectedResult affectedText( const std::string& root, std::string_view spec )
@@ -4107,7 +4108,7 @@ inline McpAffectedResult affectedText( const std::string& root, std::string_view
     {
         // Nothing was written to `mem` on this path (writeAffectedReport's own contract) — the stream closes
         // unfinished in MemoryStream's destructor, exactly the "unfinished: nobody to tell" case it documents.
-        return { std::string{}, r.badSelector, r.badItem, r.noSeeds };
+        return { std::string{}, r.badSelector, r.badItem, r.noSeeds, r.unusedCount };
     }
     return { mcpAnswerText( stream ), false, {}, false };
 }
