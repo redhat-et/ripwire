@@ -16,6 +16,8 @@ has been measured; a live A/B arm is specified separately and has not run.
   checkout, or as a copy where a link does not take. A file already at that path that is not ripwire's is kept and
   reported. `--codex`, `--hermes`, `--openclaw` and an explicit path install no agent. A checkout or release without the
   file installs its skills as before. The release and Windows packages now carry `skills/agents/`.
+  `--no-locator-agent`, or `RIPWIRE_NO_LOCATOR_AGENT=1` in the environment, leaves it out; the curl installers pass the
+  variable through when they activate the Claude skills. A copy installed earlier is left in place.
 - `ripwire wrap claude`: the orient line of the paste block (and so the SessionStart primer, which re-prints it) ends
   with one 177 B sentence: "Main thread: for a code lookup, delegate to the `ripwire-locator` subagent (when installed)
   and ask it for edit ranges; run a full `--for` here only when you need the whole map." The block stays 20 lines; no

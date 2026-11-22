@@ -1123,7 +1123,9 @@ seventeen are for using the tool; the one about compiling ripwire itself (`ripwi
 `audience: contributor` in its front matter) stays staged unless you pass `--contributor` to
 `skills/install.sh`. An agent that is not
 installed is never given a skills directory, hooks are never registered without an explicit `--hook`,
-and `RIPWIRE_NO_ACTIVATE=1` stages without activating for image builds. When no agent is detected the
+and `RIPWIRE_NO_ACTIVATE=1` stages without activating for image builds. For Claude Code the activation also installs
+the `ripwire-locator` subagent (`~/.claude/agents/`); `RIPWIRE_NO_LOCATOR_AGENT=1`, or `--no-locator-agent` to
+`skills/install.sh`, leaves it out. When no agent is detected the
 activation one-liner is printed instead:
 
 ```bash

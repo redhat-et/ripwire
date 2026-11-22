@@ -26,12 +26,16 @@
 #   (G) the subagent-facing texts do NOT carry it (the SubagentStart note, the three-moment brief block): a subagent told to
 #       delegate to the locator would nest one
 #   (H) skills/ripwire-orient/SKILL.md tells the main thread the same route
+#   (I) the opt-out (owner ruling 189): --no-locator-agent and RIPWIRE_NO_LOCATOR_AGENT=1 each install the skills and write
+#       no agent file, and say so; the opt-out leaves a user's own file at that path untouched; the default (D) still writes
+#       it; the flag is documented in INSTALL.md and README.md, and both curl installers name the variable they pass through
+#       (test/releaseinstallcheck.sh (E8)/(E9) drive the one-liner itself)
 #
 # Usage: test/locatoragentcheck.sh [PATH_TO_RIPWIRE]. Never touches the real ~/.claude, ~/.agents or ~/.ripwire.
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
-unset RIPWIRE_NO_LOCATOR_ROUTE RIPWIRE_SUBAGENT_ROUTE RIPWIRE_METER_ARM RIPWIRE_METER RIPWIRE_METER_FILE RIPWIRE_METER_AGENT
+unset RIPWIRE_NO_LOCATOR_ROUTE RIPWIRE_NO_LOCATOR_AGENT RIPWIRE_SUBAGENT_ROUTE RIPWIRE_METER_ARM RIPWIRE_METER RIPWIRE_METER_FILE RIPWIRE_METER_AGENT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
@@ -202,6 +206,34 @@ if grep -q 'ripwire-locator' "$ROOT/skills/ripwire-orient/SKILL.md" && grep -q '
 else
     no "skills/ripwire-orient/SKILL.md does not name the locator route"
 fi
+
+echo "(I) the opt-out"
+optout()
+{
+    # optout LABEL HOME [installer args...] -> the agent path must not exist, the skills must, rc 0, and the run says so
+    _l="$1"; _h="$2"; shift 2
+    mkdir -p "$_h"
+    HOME="$_h" bash "$INST" "$@" >"$TMP/o_$_l" 2>&1; _r=$?
+    if [ "$_r" = 0 ] && [ -e "$_h/.claude/skills/ripwire-orient" ] && [ ! -e "$_h/.claude/agents/ripwire-locator.md" ] \
+       && grep -q 'skipped subagent ripwire-locator' "$TMP/o_$_l"; then
+        ok "$_l: skills installed, no agent file written, the run says it skipped it"
+    else
+        no "$_l: rc $_r, or skills missing, or the agent was written: $( grep -m1 ripwire-locator "$TMP/o_$_l" )"
+    fi
+}
+optout "--no-locator-agent" "$TMP/o1" --no-locator-agent
+mkdir -p "$TMP/o2"
+RIPWIRE_NO_LOCATOR_AGENT=1 optout "RIPWIRE_NO_LOCATOR_AGENT=1" "$TMP/o2"
+O3="$TMP/o3"; mkdir -p "$O3/.claude/agents"; cp "$TMP/mine" "$O3/.claude/agents/ripwire-locator.md"
+HOME="$O3" bash "$INST" --no-locator-agent >"$TMP/o_3" 2>&1; r=$?
+if [ "$r" = 0 ] && cmp -s "$O3/.claude/agents/ripwire-locator.md" "$TMP/mine"; then ok "the opt-out leaves a user's own file at that path untouched"; else no "the opt-out changed a user's own file (rc $r)"; fi
+if [ -f "$H1/.claude/agents/ripwire-locator.md" ]; then ok "the default (no flag, no variable) wrote it: arm (D)"; else no "the default install wrote no agent file"; fi
+for d in INSTALL.md README.md; do
+    if grep -q -- '--no-locator-agent' "$ROOT/$d" && grep -q 'RIPWIRE_NO_LOCATOR_AGENT=1' "$ROOT/$d"; then ok "$d documents --no-locator-agent and RIPWIRE_NO_LOCATOR_AGENT=1"; else no "$d does not document the opt-out"; fi
+done
+for d in scripts/install.sh install.sh; do
+    if grep -q 'RIPWIRE_NO_LOCATOR_AGENT' "$ROOT/$d" && ! grep -q 'env -i\|-u RIPWIRE_NO_LOCATOR_AGENT' "$ROOT/$d"; then ok "$d names the variable and does not scrub it"; else no "$d does not name RIPWIRE_NO_LOCATOR_AGENT, or scrubs the environment"; fi
+done
 
 if [ "$fail" -eq 0 ]; then echo "locatoragentcheck: all arms PASS"; else echo "locatoragentcheck: FAILED"; fi
 exit "$fail"

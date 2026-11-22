@@ -19,6 +19,9 @@
 # skills/install.sh --hook-legend-seen (Claude), --codex --hook-legend-seen, or --opencode --hook-legend-seen.
 # The subagent primer (a SubagentStart hook: the two-line ripwire brief in every subagent's context) is its own opt-in
 # too, Claude only: skills/install.sh --hook-subagent-primer.
+# A Claude skills install also installs the ripwire-locator subagent into ${CLAUDE_CONFIG_DIR:-~/.claude}/agents/ (lane LC1,
+# owner rulings 185/189): --no-locator-agent, or RIPWIRE_NO_LOCATOR_AGENT=1 in the environment (which the curl installers
+# pass through when they activate the skills), skips it; a copy installed earlier is left where it is.
 set -eu
 src="$( cd "$( dirname "$0" )" && pwd )"
 
@@ -676,6 +679,8 @@ wantLegendSeen=1          # owner ruling 111 (2026-11-20): the legend-seen hook 
 legendSeenOnly=0          # --hook-legend-seen: install THAT hook and nothing else (the pre-111 invocation, kept)
 wantSubagentPrimer=0
 wantContributor=0
+wantLocatorAgent=1        # owner ruling 189 (2026-11-22): ON BY DEFAULT for Claude; --no-locator-agent / RIPWIRE_NO_LOCATOR_AGENT opt out
+[ -z "${RIPWIRE_NO_LOCATOR_AGENT:-}" ] || wantLocatorAgent=0
 explicitPath=""
 for arg in "$@"; do
     case "$arg" in
@@ -685,6 +690,7 @@ for arg in "$@"; do
         --hook-subagent-primer) wantSubagentPrimer=1 ;;
         --opencode) mode="opencode"; explicitMode=1 ;;
         --contributor) wantContributor=1 ;;
+        --no-locator-agent) wantLocatorAgent=0 ;;
         --codex) mode="codex"; explicitMode=1 ;;
         --openclaw) mode="openclaw"; explicitMode=1 ;;
         --codex-legacy) mode="codex-legacy"; explicitMode=1 ;;
@@ -1077,7 +1083,11 @@ install_claude_locator_agent()
     return 0
 }
 if [ "$mode" = "claude" ]; then
-    install_claude_locator_agent
+    if [ "$wantLocatorAgent" -eq 1 ]; then
+        install_claude_locator_agent
+    else
+        echo "skipped subagent ripwire-locator (--no-locator-agent / RIPWIRE_NO_LOCATOR_AGENT); a copy installed earlier is left as it is"
+    fi
 fi
 
 if [ "$wantHook" -eq 1 ]; then
