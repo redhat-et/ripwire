@@ -677,7 +677,14 @@ PY_R1
 # <tail> AND on the delivered page 1, with the block-local legend legendseencheck reads. (G7) is the PROHIBITION, and it is RED
 # on a binary built with R1's one-line widening -- verified in this lane on work/bin/ripwire-R1 against the GENERATED output,
 # with the forbidden behaviour restored on a scratch build rather than reasoned about.
-TASK_R="the --page-bytes flag"
+# RE-PINNED 2026-11-22 (lane CL1b). The probe ran on THIS tree and was "the --page-bytes flag": its premise (the <lit> section
+# fits page 1 when no body competes) held by an accident of the corpus. CL1 and the 0.7.0 train added definition sites and
+# mentions of that literal (src=2 -> 3, mention 24 -> 41), the legacy <lit> grew 1,632 B -> 2,838 B, and the RES pass refused it
+# under its OWN floor -- with the body pass not yet run, so nothing displaced it (MEASURED: the parent binary on CL1's tree is red
+# the same way; any binary on the parent's tree is green). The probe now names a literal whose <lit> fits with room on this tree
+# AND loses its slot under a bodies-first sweep (the forbidden behaviour, rebuilt as a scratch binary: G6/G7 red on it, green on
+# the product, results/CL1B_REDS_1122). If this arm reddens again with G6n green, first ask whether the literal grew.
+TASK_R="the --sections flag"
 cap "$WORK/r_new.xml" "$TASK_R" $OPTIN $WHOLE
 cap "$WORK/r_old.xml" "$TASK_R" $LEGACY
 cap "$WORK/r_page1.xml" "$TASK_R" $OPTIN
