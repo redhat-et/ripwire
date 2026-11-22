@@ -187,7 +187,6 @@ TABLE = {
     ( "src/packtask.h", "bodylessAttr" ): ( 1, "safe", "bodylessAttr[40], ONE call site (PB1, 2026-11-19: it was two). The surviving site is the <bodies> open-tag restate (issue #60, integration/train-12). The second site, the bare-wrapper placeholder branch (t14-cleanup #6), is gone: PB1 emits that no-candidate tag as a fixed literal with no bodyless= at all, because a bundle with no body CANDIDATE has no bodyless owner to count. It formats ' bodyless=\"{}\"' — 12 B of literal (' bodyless=\"' 11 + '\"' 1) and ONE interpoland, a std::size_t: 20 digits at absolute most, so 32 B against 39 usable + NUL, 7 B of margin. No string interpolation at all — the count is a count, never caller text — so no escaper can sit on either side of the buffer. It is a TABLE row and not NUMERIC_ONLY for arch.h hex[17]'s reason: a buffer that never existed before the std::print conversion has no pre-conversion format to derive a class from. THE ORIGINAL BUFFER WAS DECLARED [32] WHEN IT ARRIVED, which is 1 B short of its own worst case (32 B of text needs 33 with the NUL); formatTo truncates rather than overruns, so the failure mode was a dropped closing quote and a document that stops being well-formed, not a memory breach. Widened to 40 in the same commit as that row; the second site was declared [160]/[40] correctly from the start." ),
     # ── src/serialize.h ──────────────────────────────────────────────────────────────────────────────────
     ( "src/serialize.h", "bodylessAttr" ): ( 1, "safe", "bodylessAttr[40] in packBodies (issue #60, integration/train-12): the exact twin of the packtask.h row above — same format, same 12 B of literal, one std::size_t (bodylessCount), 32 B against 39 usable + NUL, 7 B of margin, no string interpoland. Same [32]-on-arrival correction, widened in the same commit." ),
-    ( "src/serialize.h", "fitAttr" ):  ( 1, "safe",       "fitAttr[96]: two %zu plus the literal ' over_ceiling=1'." ),
     ( "src/serialize.h", "attr" ):     ( 2, "safe",       "attr[352] x2: the per-symbol metric attrs. Widest 26 lit + 4x10 digits + 11 role + qbuf(<=95) + ambs(<=35: amb= + lpin=) + kbuf(<=23) = 230 B." ),
     ( "src/serialize.h", "tail" ):     ( 3, "safe",       "tail[192] x3: the <d> row tail. Widest 34 lit+digits + inAttr(<=23) + lens(qbuf, <=79) + pure(9) = 145 B. The third (lane/lean-answers-068, sigRowTail's zero-elision branch) prints cxAttr/ccxAttr/inAttr pre-formatted, each omitted at 0 — never wider than the second." ),
     ( "src/serialize.h", "hdr" ): ( 15, "safe",       "hdr[64] x2 (packBodies/packOutline) (15: the tracked-build crawl fix — writeJsonMapHeader's `\"untracked_build\":{},` formatTo into the EXISTING hdr[256], one unsigned long long and no string argument, 19 B of literal + 20 digits + NUL = 40 B, the `\"escaped_root\":{},` twin beside it; 14: arch-honest — packDeps' <f> row for a no-edge file writes includes= and a language tag, hdr[144], one integer + a label of at most 8 B: far under the buffer; 13: train 26b — count-floor-068 replaced the <lego> implementors= header writes, two hdr sites, with string appends): '<b t=\"%s\" l=\"%u\" p=\"' — symTag's fixed vocabulary + a line number. THE ESCAPED PATH IS APPENDED AFTER, on std::string. snprintf-then-append: textbook safe." ),
@@ -218,7 +217,7 @@ TABLE = {
 # A NEW row here still fails the gate until someone adds it, which is the point. When you add one, say which
 # set it belongs in and why: a string argument makes it a TABLE row, with real prose.
 NUMERIC_ONLY = {
-    ( "src/serialize.h", "p" ): 2,
+    ( "src/serialize.h", "p" ): 1,   # GE-SERIALIZE (2026-11-21): the map row's copy of the snprintf( p, S, ... ) comment became BoundedAttrRun's; one comment mention left (the --for lens qbuf)
     ( "src/degradedscan.h", "hit.errRatio" ): 1,
     ( "src/dmm.h", "value" ): 1,
     ( "src/editcheck.h", "callersOpen" ): 1,
@@ -260,7 +259,6 @@ NUMERIC_ONLY = {
     ( "src/serialize.h", "callsHdr" ): 2,
     ( "src/serialize.h", "cb" ): 1,
     ( "src/serialize.h", "ccxAttr" ): 1,   # lane/lean-answers-068: sigRowTail's zero elision, " ccx=\"{}\"" of one count (<= 17 B of 23)
-    ( "src/serialize.h", "changedAttr" ): 1,
     ( "src/serialize.h", "eAttr" ): 1,  # lane/for-spine-span-068 (2026-10-04): writeSigHeadWithEnd's ' e="{}"' — 5 B literal + one
                                         #   std::uint32_t (10 digits) = 15 B against 23 usable + NUL. A count, no %s, nothing escaped.
     ( "src/serialize.h", "cxAttr" ): 1,    # lane/lean-answers-068: the same, " cx=\"{}\"" (<= 16 B of 23)
@@ -291,12 +289,9 @@ NUMERIC_ONLY = {
                                       #   digits = 35 B). A count, no %s, nothing escaped.
                                       #   lane/hrr (2026-10-18): +1 in the same nb[96] — ' files_first="{}"' (15 B + 20
                                       #   digits = 35 B), the head round-robin's moved count. A count, no %s, nothing escaped.
-    ( "src/serialize.h", "precAttr" ): 1,
     ( "src/serialize.h", "rankAttr" ): 1,
     ( "src/serialize.h", "rc" ): 1,
-    ( "src/serialize.h", "rootsAttr" ): 1,
     ( "src/serialize.h", "sh" ): 1,
-    ( "src/serialize.h", "skippedAttr" ): 1,
     ( "src/serialize.h", "vb" ): 1,
     ( "src/testmap.h", "buf" ): 6,
     ( "src/verbs_report.h", "buf" ): 2,
@@ -626,6 +621,8 @@ if not bad:
 #            2026-10-18 (lane/hrr): +1 call/+1 mention/+1 site, rows unchanged (363/248/248/109 -> 364/249/249/109): sigsOpenTag's
 #            nb[96] ' files_first="{}"' (35 B worst case, one size_t, nothing escaped) — re-read and sized before this pin.
 EXPECTED = { "mentions": 366, "calls": 251, "sites": 251, "rows": 109, "widthforms": 0 }   # lane/hrr: +1 nb site (files_first=); arch-honest: +2 (packDeps hb, hdr)
+#            2026-11-21 (GE-SERIALIZE): -5 calls/-5 sites/-5 rows (precAttr, rootsAttr, changedAttr, skippedAttr, fitAttr): the map
+#            header's coverage attributes are composed on std::string in mapCoverageAttrs (serialize.h), no fixed buffer left.
 #            2026-11-12 (B43 PINNED-SELF-COUNTS): EXPECTED above is now HISTORY, not a pin -- it drifted on #619 (and on every
 #            lane that added one site) while (S1)/(S2) already held the member set both ways: every derived site is a TABLE
 #            row with its multiplicity, and no row is stale. An exact count on top of that only re-pins arithmetic. What (S1)/(S2)

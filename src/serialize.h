@@ -3830,18 +3830,15 @@ inline std::size_t scipPinnedEdgeCount( const std::vector<std::uint8_t>* outProv
 inline std::string mapCoverageAttrs( const IngestResult& ing, const std::vector<std::uint8_t>* outProv, const MapAnnotations& ann )
 {
     std::string attrs;
-    char        buf[ 96 ];
     if( const std::size_t precise = scipPinnedEdgeCount( outProv ); precise > 0 )
     {
-        rw::formatTo( buf, sizeof( buf ), " precise={}", precise );   // only when a SCIP overlay pinned something
-        attrs += buf;
+        attrs += " precise=" + std::to_string( precise );   // only when a SCIP overlay pinned something
     }
     // Multi-root workspace (A13): `roots=N` joins the header gauges and a `<root label= p=/>` prologue opens <r> — ONLY when
     // N≥2 (single-root output byte-unchanged).
     if( ing.rootLabels.size() >= 2 )
     {
-        rw::formatTo( buf, sizeof( buf ), " roots={}", ing.rootLabels.size() );
-        attrs += buf;
+        attrs += " roots=" + std::to_string( ing.rootLabels.size() );
     }
     // D6: --map-diff's teleport-seed file count, ONLY when the caller passes changedCount (nullptr for every non-map-diff
     // caller ⇒ zero token cost, byte-identical golden map). A clean tree reports "changed=0" so the caller can see the
@@ -3849,16 +3846,14 @@ inline std::string mapCoverageAttrs( const IngestResult& ing, const std::vector<
     // plain default map.
     if( ann.changedCount )
     {
-        rw::formatTo( buf, sizeof( buf ), " changed={}", *ann.changedCount );
-        attrs += buf;
+        attrs += " changed=" + std::to_string( *ann.changedCount );
     }
     // §P0.5d: how many otherwise-indexable files the crawl dropped for exceeding a per-file size ceiling — --max-file-size, or
     // (§B13.1) the .json lane's fixed 256 KB config ceiling that --max-file-size does not raise. `--max-file-size=8K` dropped
     // ~296 of ~759 files on this repo and files= reported the survivors as if they WERE the corpus.
     if( !ing.skippedOversize.empty() )
     {
-        rw::formatTo( buf, sizeof( buf ), " skipped_oversize={}", ing.skippedOversize.size() );
-        attrs += buf;
+        attrs += " skipped_oversize=" + std::to_string( ing.skippedOversize.size() );
     }
     attrs += buildMemoryStopAttr( ing, false ) + buildMemoryPeakAttr( ing, false );   // #350, empty unless the memory guard stopped the ingest or the peak passed the limit
     attrs += buildUnindexedAttr( ing.crawlSkips );    // §L1: the LANGUAGES this build could not read at all
@@ -3872,13 +3867,17 @@ inline std::string mapCoverageAttrs( const IngestResult& ing, const std::vector<
     // attr — a cap that can be overshot is not a cap, so where the map's fixed floor cannot fit inside fit_bytes the map states
     // that instead of quietly exceeding it. See MapAnnotations::MaxTokensFit for the four ways the cap was breached and why
     // the label is monotone.
-    if( ann.maxTokensFit != nullptr )
+    if( const MapAnnotations::MaxTokensFit* fit = ann.maxTokensFit )
     {
-        rw::formatTo( buf, sizeof( buf ), " max_tokens={} fit_bytes={}{}{}",
-                      ann.maxTokensFit->askedTokens, ann.maxTokensFit->ceilingBytes,
-                      ann.maxTokensFit->isOverCeiling || ann.maxTokensFit->isUnmeasured ? " over_ceiling=1" : "",
-                      ann.maxTokensFit->isUnmeasured ? " fit_unmeasured=1" : "" );
-        attrs += buf;
+        attrs += " max_tokens=" + std::to_string( fit->askedTokens ) + " fit_bytes=" + std::to_string( fit->ceilingBytes );
+        if( fit->isOverCeiling || fit->isUnmeasured )
+        {
+            attrs += " over_ceiling=1";
+        }
+        if( fit->isUnmeasured )
+        {
+            attrs += " fit_unmeasured=1";
+        }
     }
     return attrs;
 }
