@@ -2237,10 +2237,8 @@ SkipHealthReport classifySkipHealth( const rw::IngestResult& ing )
         // fileBytes == 0 is the NOT-MEASURED sentinel: counted as unmeasured and never degraded/minified (both predicates
         // below are false at 0 bytes), so such a file is rowed only if it still holds a flagged definition — never hidden.
         out.unmeasured += h.fileBytes == 0 ? 1u : 0u;
-        const std::size_t   sample   = h.fileBytes < kHealthWsSampleBytes ? h.fileBytes : kHealthWsSampleBytes;
-        const std::uint32_t wsPerMil = sample == 0 ? 1000u : std::uint32_t( ( std::uint64_t( h.wsBytes ) * 1000ull ) / sample );
         const bool          degraded = rw::fileParseDegraded( ing, f );   // the ONE predicate (model.h) — grep + refusals route through it too
-        const bool          minified = h.fileBytes >= kMinifiedMinBytes && wsPerMil < kMinifiedWsPerMille;
+        const bool          minified = rw::isMinifiedHealth( h );            // likewise the one minified verdict (ingest.h) --lint's order reads
         const bool          blanked  = rw::isMacroBlankedHealth( h );   // member-macro re-parse: rowed even when the adopted parse is clean
         const bool          useBlank = rw::isUseBoundsBlankedHealth( h );   // its Rust layer: the same rule
         out.degraded += degraded ? 1u : 0u;

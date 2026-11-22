@@ -152,6 +152,17 @@ constexpr std::uint32_t kMinifiedWsPerMille    = 70;    // ws_freq < 0.070 ⇒ m
 // flagged, and the floor is disclosed in the verb's legend.
 constexpr std::size_t   kMinifiedMinBytes      = 256;
 
+// THE minified-suspect verdict on one file's recorded health: the leading sample's whitespace share under kMinifiedWsPerMille,
+// once the file holds kMinifiedMinBytes. --skipped's why="minified-suspect" (verbs_report.h classifySkipHealth) and --lint's
+// order (verbs_lint.h lintShippedFiles) both read it here, so the two can never disagree about which file is minified.
+// fileBytes == 0 (not measured) is never minified: the size floor is false at 0.
+inline bool isMinifiedHealth( const FileHealth& h ) noexcept
+{
+    const std::size_t   sample   = h.fileBytes < kHealthWsSampleBytes ? h.fileBytes : kHealthWsSampleBytes;
+    const std::uint32_t wsPerMil = sample == 0 ? 1000u : std::uint32_t( ( std::uint64_t( h.wsBytes ) * 1000ull ) / sample );
+    return h.fileBytes >= kMinifiedMinBytes && wsPerMil < kMinifiedWsPerMille;
+}
+
 // Extensions that are NOT source or text, so their absence from the index is not a disclosure the reader
 // needs: an unindexed .png is a picture, not a language ripwire failed to read. This is the rule the
 // `unindexed=` header and the unsupported-extension rows apply, stated once here and named in the legend

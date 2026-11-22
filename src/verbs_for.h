@@ -5844,7 +5844,8 @@ inline bool serveForPage( const rw::Config& cfg, std::string& doc )
     return exists;
 }
 
-// CL1 (outputceiling.h): --page-bytes=0 is the caller's explicit request for the WHOLE answer, so the answer is printed whole and
+// CL1 (outputceiling.h): --page-bytes=0 is the caller's explicit request for the WHOLE answer (LT1: on every paged verb — --for here,
+// the bare map, --expand and --lint through main.cpp serveWholeAnswer), so the answer is printed whole and
 // byte-identical — but when it is over kOutputCeilingChars ONE stderr line says so, BEFORE the answer, so it lands inside the 2 KB
 // preview an agent harness shows when it persists a large result to a file. Why a line and not a cut: the size override is the
 // caller's choice (a cut would make --page-bytes=0 mean something other than "whole"); why a line and not silence: an agent that
@@ -5852,7 +5853,7 @@ inline bool serveForPage( const rw::Config& cfg, std::string& doc )
 // (base 36a95d732, one tree per repo): 5 of 11 whole answers were over 24,000 characters, 2 over 30,000 (max 43,403).
 inline void noteWholeAnswerOverCeiling( const rw::Config& cfg, std::size_t answerBytes )
 {
-    if( !cfg.pageBytesSpec.empty() && cfg.forPageBytes == 0 && answerBytes > rw::kOutputCeilingChars )
+    if( rw::wholeAnswerAsked( cfg ) && answerBytes > rw::kOutputCeilingChars )
     {
         rw::emitTo( stderr, "ripwire: --page-bytes=0: this whole answer is {} B, over the {} B output ceiling (an agent harness may show "
                             "only a preview of it); drop --page-bytes=0 to receive it in pages\n", answerBytes, rw::kOutputCeilingChars );

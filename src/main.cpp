@@ -2457,7 +2457,9 @@ int runDefaultMap( const MainDispatch& d )
     // bare --expand the render is re-run at a proportionally smaller budget until the <bodies> section fits
     // kExpandCeilingBodiesBytes; what no longer fits is named by the root's unserved_next= (or a body's lines=/next=), so
     // nothing is dropped silently. An explicit --pack-budget-bytes is the caller's size and is rendered as asked.
-    std::size_t expandBudget = cfg.packBudgetBytes;
+    // LT1: --page-bytes=0 is the whole answer — no body budget at all (SIZE_MAX: the unlimited budget packBodies already maps 0 to),
+    // and no refit below.
+    std::size_t expandBudget = rw::wholeAnswerAsked( cfg ) ? SIZE_MAX : cfg.packBudgetBytes;
     if( !expandNodes.empty() )
     {
         const auto renderBodies = [ & ]
@@ -2470,7 +2472,7 @@ int runDefaultMap( const MainDispatch& d )
             rw::kBytesPerTokenBody );
         };
         renderBodies();
-        const bool fitsCeiling = cfg.packBudgetExplicit || !cfg.forTask.empty();
+        const bool fitsCeiling = cfg.packBudgetExplicit || !cfg.forTask.empty() || rw::wholeAnswerAsked( cfg );
         for( int refit = 0; !fitsCeiling && refit < 6 && bodiesSection.xml.size() > kExpandCeilingBodiesBytes && expandBudget > kExpandCeilingFloorBytes; ++refit )
         {
             expandBudget = std::max( kExpandCeilingFloorBytes, expandBudget * kExpandCeilingBodiesBytes / bodiesSection.xml.size() * 9 / 10 );
@@ -4817,6 +4819,49 @@ static int memoryStopExit( const rw::IngestResult& ing, const rw::Config& cfg, c
     return 0;
 }
 
+// LT1: --page-bytes=0 (cli.h wholeAnswerAsked) on a verb that writes its answer straight to stdout — the bare map, --expand,
+// --lint. The answer is captured whole, --for's own over-ceiling stderr line (verbs_for.h noteWholeAnswerOverCeiling) is printed
+// BEFORE it, at the size the posture delivers, then the bytes are written unchanged. A capture that cannot be taken serves the
+// answer straight through, with no line: the answer is never cut or withheld for the sake of the line.
+template <class Run>
+static int serveWholeAnswer( const rw::Config& cfg, Run&& run )
+{
+    std::optional<StdoutCaptured> cap;
+    int                           rc = 0;
+    {
+        StdoutCapture out( true );
+        if( !out.active() )
+        {
+            return run();
+        }
+        rc  = run();
+        cap = out.finish();
+    }
+    if( !cap || !cap->restored )
+    {
+        return rc;   // a failed restore already wrote the bytes to the saved descriptor (StreamCapture::finish)
+    }
+    if( !cap->failed )
+    {
+        noteWholeAnswerOverCeiling( cfg, cfg.legend == "compact" ? rw::compactDeliveredBytesOrWritten( cap->bytes, compactLegendHint( cfg, cap->bytes ) )
+                                                                 : cap->bytes.size() );
+    }
+    std::fwrite( cap->bytes.data(), 1, cap->bytes.size(), stdout );
+    return rc;
+}
+
+// --lint under --page-bytes=0: the whole answer through serveWholeAnswer; every other lint-family run as runLint serves it.
+static std::optional<int> runLintServed( const MainDispatch& d )
+{
+    if( !rw::wholeAnswerAsked( d.cfg ) || !rw::lintPagedVerbAsked( d.cfg ) )
+    {
+        return runLint( d );
+    }
+    std::optional<int> handled;
+    const int           rc = serveWholeAnswer( d.cfg, [ & ] { handled = runLint( d ); return handled.value_or( 0 ); } );
+    return handled ? std::optional<int>( rc ) : std::nullopt;
+}
+
 // CL1 (mappages.h, outputceiling.h): the bare map, served in pages when it is over the output ceiling. The map is rendered whole
 // into a capture and cut there, so a map that fits is byte-identical and every page windows one document. --page-bytes=N sets
 // the page size (0: the whole map, one call); --page-bytes=N:K asks for page K. A capture that cannot be taken serves the map
@@ -4824,6 +4869,10 @@ static int memoryStopExit( const rw::IngestResult& ing, const rw::Config& cfg, c
 static int runDefaultMapPaged( const MainDispatch& d )
 {
     const rw::Config& cfg = d.cfg;
+    if( rw::wholeAnswerAsked( cfg ) )
+    {
+        return serveWholeAnswer( cfg, [ & ] { return runDefaultMap( d ); } );   // LT1: the whole map / --expand, one line when over the ceiling
+    }
     const std::size_t pageBytes = cfg.pageBytesSpec.empty() ? rw::kOutputCeilingChars : cfg.forPageBytes;
     if( !rw::mapPageEligible( cfg ) || pageBytes == 0 )
     {
@@ -4966,9 +5015,11 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
     const VerbPrecedence verbPrec = scanReportVerbPrecedence( cfg );
     // CL1: cli.h accepts --page-bytes without --for only on a flag set that can be the bare map; a report verb that wins the
     // dispatch would answer instead and the flag would be read by nothing, so that run refuses rather than ignoring it.
-    if( !cfg.pageBytesSpec.empty() && cfg.forTask.empty() && verbPrec.winner != nullptr )
+    // LT1: --lint is the one report verb it shapes (--page-bytes=0, the whole answer; cli.h wholeOnlyConflict refuses the rest).
+    const bool lintAnswers = verbPrec.winner != nullptr && std::strcmp( verbPrec.winner, "--lint" ) == 0 && rw::lintPagedVerbAsked( cfg );
+    if( !cfg.pageBytesSpec.empty() && cfg.forTask.empty() && verbPrec.winner != nullptr && !lintAnswers )
     {
-        rw::emitTo( stderr, "ripwire: --page-bytes pages a --for answer or the bare map only — {} answers this run\n", verbPrec.winner );
+        rw::emitTo( stderr, "ripwire: --page-bytes pages a --for answer, the bare map, --lint or --expand only — {} answers this run\n", verbPrec.winner );
         return 1;
     }
 
@@ -6470,7 +6521,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
         return *handled;
     }
 
-    if( std::optional<int> handled = runLint( dsp ) )
+    if( std::optional<int> handled = runLintServed( dsp ) )
     {
         return *handled;
     }

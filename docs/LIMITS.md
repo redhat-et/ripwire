@@ -212,6 +212,9 @@ Discloses: `capped`, `bridges_capped`, `count_capped`, `files_capped`, `inc_capp
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kConnectRadiusMax` | `12` | — | == connectcfg::kMaxRadius (static_assert at the seam in main.cpp) |
+| `kExpandCeilingBodiesBytes` | `20000` | — | — |
+| `kExpandCeilingBodyBytes` | `16000` | — | — |
+| `kExpandCeilingFloorBytes` | `2000` | — | — |
 | `kIntFlagMax` | `1000000000` | — | parsePosInt/parseNonNegInt's own overflow ceiling |
 | `kPageValueMax` | `1000000000` | — | — |
 
