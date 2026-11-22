@@ -958,10 +958,11 @@ AI-authored commits, a function rewritten again inside two weeks **+15%** more l
 `--quality-delta`'s 13 kinds each target one measured mode like those (the eleventh, `placeholder`,
 lists the stubs and TODOs a change adds, and never gates; the twelfth, `defect-shape`, catches four
 defect shapes review kept finding by hand —
-new-symbol rows never gate, except defect-shape format-arity and a new function at the ceiling,
+new-symbol rows never gate, except defect-shape format-arity, a new function at the ceiling and a tangled new function,
 because a format/argument mismatch is a defect, not debt, and a new function at 4x the bar — ccx 60 or 240 lines —
-is how a 1,000-line function starts; the thirteenth, `tangle`, is report-only: a long function's nesting, deep share and
-steering locals, with length only amplifying them, so a long orchestrator of named steps stays quiet), and it reports **only what your
+is how a 1,000-line function starts; the thirteenth, `tangle`, scores a long function's nesting, deep share and
+steering locals, with length only amplifying them, so a long orchestrator of named steps stays quiet, and gates a function
+that is new at tangle 6 or more, crossed 6, or grew while over it), and it reports **only what your
 change made worse** — then `--exemplar` shows the pattern in your own repo to copy, and `--test-gate`
 names the tests that must run before "done."
 

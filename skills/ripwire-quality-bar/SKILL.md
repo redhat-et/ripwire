@@ -3,7 +3,7 @@ name: ripwire-quality-bar
 description: >
   Code QUALITY of what YOU just wrote, before commit/'done' or a cleanup: --quality-delta
   lists what got WORSE in 13 kinds; exit 2 if old code did (new-symbol rows never gate,
-  except defect-shape format-arity and a new function at the ceiling); the fix each shape calls for.
+  except defect-shape format-arity, a new function at the ceiling and a tangled new one); the fix each shape calls for.
   Merge safety → change-check. Even a single-line leaf fix runs it.
 allowed-tools: Bash, Read
 ---
@@ -34,7 +34,7 @@ anyway and stamps `baseline_absorbed="N"`).
 ## Read the exit code — it is narrower than it looks
 
 Exit 2 ONLY on a finding that is major AND unacked AND on code that already existed (`preexisting-worse`) —
-exactly the header's `gating="N"`. Read `gating=`, not `regressions=`. The new-symbol rows never gate, except defect-shape format-arity and a new function at the ceiling
+exactly the header's `gating="N"`. Read `gating=`, not `regressions=`. The new-symbol rows never gate, except defect-shape format-arity, a new function at the ceiling and a tangled new function
 (a format/argument mismatch is a defect, so it gates on new code too). **Exit 0 means "nothing that already existed got worse", NOT "clean"**: open the
 `origin="new-symbol"` rows — they are the debt you are adding. A renamed or moved symbol reads as new
 (`origin="moved"` never gates), so on a diff that moves code the exit code is weak evidence. Before an extract-method fix, read `ev=`

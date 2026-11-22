@@ -6282,14 +6282,24 @@ These are the exact `kind=` strings the binary emits, from `src/quality.h`:
 `complexity` · `verbosity` · `nesting` · `params` · `duplication` · `dead-code` · `api-surface` ·
 `error-masking` · `short-horizon-churn` · `new-clone-of-reused-helper` · `placeholder` · `defect-shape` · `tangle`
 
-`tangle` (QD-TANGLE, 2026-11-19) is report-only: always `sev="minor"`, a long function's nesting past 3, deep share and
-steering locals amplified by length (AUC 0.986 on 44 hand labels; a long orchestrator of named steps scores 0).
+`tangle` (QD-TANGLE, 2026-11-19) scores a long function's nesting past 3, deep share and steering locals amplified by
+length (AUC 0.986 on 44 hand labels; a long orchestrator of named steps scores 0). It was report-only until
+TANGLE-GATE-B / QD-RATCHET-BASE (2026-11-21): a row now gates when the function is new at 6.0 or more, crossed 6.0, or
+its score grew against the range base while over 6.0 (not a moved body, not test code); a row an input rose on while the
+score held stays `sev="minor"`, and the best-since-tag ratchet is a facet (`ratchet=`) on those rows, never a row of its
+own. Replayed on the 20 merges before 8861b0d4d (range form, tangle kind only): main printed 3 minor rows and gated 0;
+the lane gates 9 rows over 5 PRs — #702 `runLsp` 2.1→11.0 (crossed) and the 8 growth rows the re-census found
+(#714 `serialize` 25.4→25.5 and `cc_walk` 9.1→9.7, #706 `runForLensPass` 16.4→16.5, #705 `buildGraph` 56.8→56.9,
+#702 `serialize` 25.2→25.4, #688 `ElixirContext::prepare` 12.2→12.3 and `captureTagsFacts` 28.8→29.2); the four
+tag-best rows on functions that did not grow in their PR (`buildGraph` #706/#714, `serialize` #705, `captureTagsFacts`
+#714 29.2→29.1) print nothing. Expected effect: a PR that adds even a tenth to an over-bar function gates until it
+leaves the function no worse (or acks it).
 
 The first ten each target a failure mode measured in the literature; `placeholder` (added 0.6.7) is an
 honesty check on "done" — a stub or TODO the change added — and never gates. `defect-shape` carries six
 facets in `defect=` (`format-arity`, `utf8-cut`, `dedup-first`, `vacuous-assert`, `unchecked-status`, `unhandled-arm`), shapes this project's own
 code review kept finding; only `format-arity` gates, and on any origin (new-symbol rows never gate, except
-defect-shape format-arity; since QD-ENTRY-CEILING also a new function at the ceiling). Measured (2026-10-07): recall 7/8 on the eight review findings it was built
+defect-shape format-arity, a new function at the ceiling (QD-ENTRY-CEILING) and a tangled new function (TANGLE-GATE-B)). Measured (2026-10-07): recall 7/8 on the eight review findings it was built
 from; with every site treated as new, 0 format-arity false positives on this tree (1,330 literal-format calls),
 on the Python 3.13 standard library (405 calls) and on libc++'s std::format tests (80 calls; the 24 hits are its
 deliberately ill-formed `.verify.cpp` calls); vacuous-assert sample precision 30/30 on this tree's gates
