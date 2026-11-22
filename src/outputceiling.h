@@ -11,7 +11,9 @@
 //   * MCP: a result is saved to a file past MAX_MCP_OUTPUT_TOKENS (default 25,000 tokens) or past 50,000 characters.
 // MEASURED once (TR1, ga-zod-12): a 30,849 B answer reached the agent as a 2,295-char preview — the answer never arrived.
 // So the ceiling is the 30,000-character inline limit less 20 %: kOutputCeilingChars. It is a CONSTRAINT, not a target
-// (docs/METHODOLOGY.md §9): an answer under it is byte-identical to before, and every cut it causes is disclosed on the root.
+// (docs/METHODOLOGY.md §9): an answer under it is byte-identical to before — one disclosed exception: a bare --expand whose
+// symbol's file is 16-64 KB now says reason="whole-file NB over pack-budget 16000B" (that file is no longer a candidate) —
+// and every cut it causes is disclosed on the root.
 //
 // It counts BYTES, which is never fewer than characters, so a byte-bounded answer is character-bounded too.
 //
